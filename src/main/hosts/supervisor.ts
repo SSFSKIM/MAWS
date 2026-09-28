@@ -22,7 +22,7 @@ export interface HostSupervisorOptions {
 
 export interface HostSupervisor {
   start(): Promise<void>; // idempotent: forks once; resolves when each host's first launch is ready or has given up
-  stop(): void; // terminal: kills both hosts, fails what is pending, never restarts
+  stop(): void; // terminal: kills both hosts, fails what is pending, never restarts; a later start() forks nothing
   dispatch: HostDispatch;
   snapshot(owner: HostOwner): HostState;
   onState(owner: HostOwner, listener: (state: HostState) => void): () => void;
@@ -209,6 +209,8 @@ export function createHostSupervisor({ hosts: specs, emit }: HostSupervisorOptio
 
   return {
     start() {
+      // Stop is final: a start that comes after it (will-quit racing activate) must not fork past the only cleanup.
+      if (stopped) started ??= Promise.resolve();
       started ??= Promise.all(
         Object.values(hosts).map(
           (host) =>

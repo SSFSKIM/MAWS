@@ -96,6 +96,27 @@ describe('host runtime speaks the host protocol', () => {
     expect(log).toHaveBeenCalledWith(expect.stringContaining('pty.data'), expect.anything());
   });
 
+  it('refuses a command owned by the other host, in either order', () => {
+    expect(() =>
+      createHostRuntime((on) => {
+        on('pty.ping', async () => PING);
+        on('engine.ping', async () => PING);
+      }),
+    ).toThrow(/engine\.ping is owned by engine-host, but this host serves pty-host/);
+    expect(() =>
+      createHostRuntime((on) => {
+        on('engine.ping', async () => PING);
+        on('pty.write', async () => undefined);
+      }),
+    ).toThrow(/pty\.write is owned by pty-host, but this host serves engine-host/);
+    expect(() =>
+      createHostRuntime((on) => {
+        on('pty.ping', async () => PING);
+        on('pty.write', async () => undefined);
+      }),
+    ).not.toThrow();
+  });
+
   it('refuses to register a main-owned command or the same command twice', () => {
     expect(() => createHostRuntime((on) => on('settings.get', async () => ({}) as never))).toThrow(/main/);
     expect(() =>

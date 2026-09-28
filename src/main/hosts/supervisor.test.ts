@@ -151,6 +151,16 @@ describe('host supervisor', () => {
     expect(electron.forks).toHaveLength(2);
   });
 
+  it('forks nothing when start() follows stop(), and settles at once (will-quit racing activate)', async () => {
+    supervisor.stop();
+    await expect(supervisor.start()).resolves.toBeUndefined();
+    expect(electron.forks).toHaveLength(0);
+    await expect(supervisor.dispatch('engine-host', 'engine.ping', undefined)).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'host_unavailable' },
+    });
+  });
+
   it('hands each host its port with the hello', () => {
     void supervisor.start();
     for (const child of electron.forks) {

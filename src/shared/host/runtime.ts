@@ -14,6 +14,7 @@ import {
   type EventName,
   type EventPayload,
   type HostPing,
+  type Owner,
 } from '../ipc/schema';
 import { isCommandName, validateCommandInput, validateCommandOutput, validateEventPayload } from '../ipc/validate';
 
@@ -34,10 +35,18 @@ export interface HostRuntime {
 export function createHostRuntime(register: HostRegister): HostRuntime {
   const handlers = new Map<CommandName, (input: unknown) => Promise<unknown>>();
   let port: HostPort | null = null;
+  // Which host this is. `runHost`'s signature does not name it, so the first registration fixes it and every later
+  // one must match: a handler registered in the wrong host fails at load instead of sitting unreachable, since main
+  // routes each command to its registry owner.
+  let servedOwner: Owner | null = null;
 
   const on: HostOn = (name, handler) => {
     const { owner } = commands[name];
     if (owner === 'main') throw new Error(`${name} is owned by main; a host cannot serve it`);
+    if (servedOwner !== null && owner !== servedOwner) {
+      throw new Error(`${name} is owned by ${owner}, but this host serves ${servedOwner}`);
+    }
+    servedOwner = owner;
     if (handlers.has(name)) throw new Error(`a handler for ${name} is already registered`);
     handlers.set(name, handler as (input: unknown) => Promise<unknown>);
   };
