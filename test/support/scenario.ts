@@ -8,7 +8,7 @@ import { readFileSync } from 'node:fs';
 import * as z from 'zod';
 import { AttentionItemSchema } from '../../src/shared/graph/attention';
 import { SessionEventSchema, type SessionEvent } from '../../src/shared/graph/events';
-import { AppSessionIdSchema, type AppSessionId } from '../../src/shared/graph/ids';
+import { AppSessionIdSchema, EventIdSchema, type AppSessionId } from '../../src/shared/graph/ids';
 import { SessionRecordSchema, type SessionRecord } from '../../src/shared/graph/session';
 import { EffortSchema } from '../../src/shared/engine/launch-spec';
 import { EngineSessionStatusSchema, type EngineSessionStatus } from '../../src/shared/engine/status';
@@ -20,8 +20,9 @@ import type { AttentionItem } from '../../src/shared/graph/attention';
 export const RELAY_URL = 'http://127.0.0.1:8641';
 
 const StatusShape = EngineSessionStatusSchema.shape;
-// The compact turn may leave out `acceptedAt`; the expansion fills it with `startedAt` (a mid-turn session was accepted).
-const CompactTurnSchema = StatusShape.turn.unwrap().extend({ acceptedAt: z.string().nullable().optional() }).nullable();
+// The compact turn carries no `id` (the expansion mints the turn's `turn.started` event id) and may leave out
+// `acceptedAt`; the expansion fills it with `startedAt` (a mid-turn session was accepted).
+const CompactTurnSchema = StatusShape.turn.unwrap().omit({ id: true }).extend({ acceptedAt: z.string().nullable().optional() }).nullable();
 export const CompactEngineSchema = z.strictObject({
   appSessionId: AppSessionIdSchema,
   process: StatusShape.process,
@@ -96,8 +97,8 @@ function gatewayOf(record: SessionRecord): EngineSessionStatus['gateway'] {
   const extended = record.gateway as { routed: boolean; autoModeServer?: EngineSessionStatus['gateway']['autoModeServer'] };
   const autoModeServer = extended.autoModeServer ?? 'unknown';
   return record.gateway.routed
-    ? { mode: 'gateway', baseUrl: RELAY_URL, verified: 'routed', autoModeServer, localLaneObserved: false }
-    : { mode: 'direct', baseUrl: null, verified: 'direct', autoModeServer, localLaneObserved: false };
+    ? { mode: 'gateway', baseUrl: RELAY_URL, verified: 'routed', autoModeServer, localLane: null }
+    : { mode: 'direct', baseUrl: null, verified: 'direct', autoModeServer, localLane: null };
 }
 
 export function expandEngine(compact: CompactEngine, record: SessionRecord, times: { launchedAt: string; playedAt: string }, where: string): EngineSessionStatus {
@@ -109,11 +110,21 @@ export function expandEngine(compact: CompactEngine, record: SessionRecord, time
     pid: null,
     launchId: 'scenario',
     launchedAt: times.launchedAt,
+    cwd: record.directory,
+    pendingPlan: null,
     process: compact.process,
     exit: compact.exit ? { code: null, signal: null, reason: compact.exit.reason, at: times.playedAt } : null,
     engineState: compact.engineState,
     activity: null,
-    turn: compact.turn === null ? null : { ...compact.turn, acceptedAt: compact.turn.acceptedAt === undefined ? compact.turn.startedAt : compact.turn.acceptedAt },
+    turn:
+      compact.turn === null
+        ? null
+        : {
+            ...compact.turn,
+            // X1's EventId form `${appSessionId}:${launchId}:${seq}:${i}`: the turn.started event of the scenario launch
+            id: EventIdSchema.parse(`${compact.appSessionId}:scenario:1:0`),
+            acceptedAt: compact.turn.acceptedAt === undefined ? compact.turn.startedAt : compact.turn.acceptedAt,
+          },
     model: record.model,
     effort: effort.data,
     permissionMode: record.permissionMode,
@@ -123,6 +134,10 @@ export function expandEngine(compact: CompactEngine, record: SessionRecord, time
     modelOverrides: {},
     engineVersion: record.engineVersion,
     fileCheckpointing: true, // C3 sets CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING on every launch
+    fastMode: { state: null, disabledReason: null },
+    plugins: [],
+    pluginErrors: [],
+    pluginWarnings: [],
     backgroundTasks: [],
     grants: [],
     mcpServers: [],

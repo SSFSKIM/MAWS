@@ -34,12 +34,34 @@ describe('scenario loader', () => {
     }
   });
 
+  it('expands the standard scenario and an engine timeline replacement to C3’s landed shape (ninth ask)', () => {
+    const scenario = loadScenario(join(TEST_FIXTURE_DIR, 'shell/nine-sessions.json'), NOW);
+    const charter = scenario.sessions.find((s) => s.title.text === 'Charter + research')!;
+    const atLoad = scenario.engine.find((s) => s.appSessionId === charter.appId)!;
+    const replaced = scenario.timeline.find((op) => op.op === 'engine' && op.appSessionId === charter.appId);
+    if (replaced?.op !== 'engine' || !replaced.engine) throw new Error('the 3 s entry replaces Charter + research’s status');
+    for (const status of [atLoad, replaced.engine]) {
+      expect(EngineSessionStatusSchema.parse(status)).toEqual(status);
+      expect(status).toMatchObject({
+        cwd: charter.directory,
+        pendingPlan: null,
+        fastMode: { state: null, disabledReason: null },
+        plugins: [],
+        pluginErrors: [],
+        pluginWarnings: [],
+        gateway: { localLane: null },
+        turn: { id: `${charter.appId}:scenario:1:0` },
+      });
+    }
+  });
+
   it('expands compact engine entries into C3’s full status', () => {
     const scenario = parseScenario(file(), NOW);
     for (const status of scenario.engine) expect(EngineSessionStatusSchema.safeParse(status).success).toBe(true);
     const [a, b] = scenario.engine;
     expect(a).toMatchObject({ launchId: 'scenario', launchedAt: '2026-09-28T10:00:00.000Z', pid: null, exit: null, keepAlive: ['turn'], fileCheckpointing: true });
-    expect(a.turn).toEqual({ ...turn, acceptedAt: turn.startedAt });
+    expect(a.turn).toEqual({ ...turn, id: 'a:scenario:1:0', acceptedAt: turn.startedAt });
+    expect(a).toMatchObject({ cwd: '/tmp/x', pendingPlan: null, fastMode: { state: null, disabledReason: null }, plugins: [], pluginErrors: [], pluginWarnings: [] });
     expect(b).toMatchObject({ keepAlive: [], turn: null, effort: 'high' });
   });
 
@@ -50,8 +72,8 @@ describe('scenario loader', () => {
 
   it('converts the record’s gateway, never copies it', () => {
     const [a, b] = parseScenario(file(), NOW).engine;
-    expect(a.gateway).toEqual({ mode: 'gateway', baseUrl: 'http://127.0.0.1:8641', verified: 'routed', autoModeServer: 'unknown', localLaneObserved: false });
-    expect(b.gateway).toEqual({ mode: 'direct', baseUrl: null, verified: 'direct', autoModeServer: 'unknown', localLaneObserved: false });
+    expect(a.gateway).toEqual({ mode: 'gateway', baseUrl: 'http://127.0.0.1:8641', verified: 'routed', autoModeServer: 'unknown', localLane: null });
+    expect(b.gateway).toEqual({ mode: 'direct', baseUrl: null, verified: 'direct', autoModeServer: 'unknown', localLane: null });
   });
 
   it('fails the load naming the entry whose session has an effort that is not an effort level', () => {
