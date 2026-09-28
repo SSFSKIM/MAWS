@@ -70,9 +70,9 @@ describe('rewind sends last_seen and derives the boundary from the response', ()
     const sent: MessageUuid[] = [];
     const outcomes: unknown[] = [];
     let rewinds = 0;
-    const run = await replayedSession('pass2', 'rewind', (row, { session, transport }) => {
+    const run = await replayedSession('pass2', 'rewind', (row, { session, transport, ready }) => {
       const frame = row.frame as { type: string; message?: { content: string }; request?: { subtype: string } };
-      if (frame.type === 'user') void session.send(frame.message!.content).then((r) => sent.push(r.messageUuid!));
+      if (frame.type === 'user') void ready().then(() => session.send(frame.message!.content)).then((r) => sent.push(r.messageUuid!));
       else if (frame.request?.subtype === 'rewind_files') void rewindFiles(session, { userMessageUuid: sent[1]!, dryRun: true }).then((o) => outcomes.push(o));
       else if (frame.request?.subtype === 'rewind_conversation') {
         rewinds += 1;

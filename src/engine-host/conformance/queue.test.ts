@@ -1,0 +1,231 @@
+// The app queue, the stores and the exit paths replayed through whole EngineSessions (C3 M4): the probe's fixtures
+// drive the engine side, the session API drives ours, and the replay fails on any write the probe never recorded, so a
+// queue release that should not happen shows up as a `replay_mismatch` row, not as a silently advanced graph.
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { SessionEvent } from '@shared/graph/events';
+import type { AppSessionId, MessageUuid, RequestId } from '@shared/graph/ids';
+import type { QueueEntry, QueueState } from '@shared/engine/session-state-store';
+import type { JournalRow } from '@shared/wire/journal';
+import { loadJournal } from '../../../test/support/fixtures';
+import { listPermissionRules } from '../controls';
+import { FileSessionStateStore } from '../store/file-session-state-store';
+import { MemorySessionStateStore } from '../store/memory-session-state-store';
+import { handshakeResponder, replayedSession, scriptedSession } from './session-harness';
+
+const ofKind = <K extends SessionEvent['kind']>(events: SessionEvent[], kind: K) => events.filter((e): e is Extract<SessionEvent, { kind: K }> => e.kind === kind);
+const metaRows = (rows: JournalRow[], event: string) => rows.filter((r) => r.direction === 'meta' && (r.frame as { event?: string }).event === event).map((r) => r.frame as Record<string, unknown>);
+const userOuts = (rows: JournalRow[]) => rows.filter((r) => r.direction === 'out' && (r.frame as { type: string }).type === 'user').map((r) => r.frame as { uuid: MessageUuid; message: { content: unknown }; priority?: string });
+const flush = () => new Promise((r) => setImmediate(r));
+const contentOf = (fixture: JournalRow[], seq: number) => (fixture.find((r) => r.seq === seq)!.frame as { message: { content: string } }).message.content;
+
+let userData: string;
+beforeEach(async () => {
+  userData = await mkdtemp(join(tmpdir(), 'maws-queue-'));
+});
+afterEach(async () => {
+  await rm(userData, { recursive: true, force: true });
+});
+
+describe('queue release never follows an engine-initiated turn', () => {
+  for (const [pass, name, prompt] of [['pass2', 'workflow', 5], ['pass1', 'subagent', 4]] as const) {
+    it(`${pass}/${name}: a message typed during the engine-initiated turn stays queued through its task-notification result`, async () => {
+      const run = await replayedSession(pass, name, (row, { session, transport, ready, fixture }) => {
+        if (row.seq === prompt) void ready().then(() => session.send(contentOf(fixture, prompt)));
+        else transport.kill('SIGTERM');
+      }, {
+        beforeStart: ({ session }) => {
+          let queued = false;
+          session.on('events', (batch) => {
+            if (!queued && batch.some((e) => e.kind === 'turn.started' && e.origin === 'engine')) {
+              queued = true;
+              void session.send('typed while the workflow reported back');
+            }
+          });
+        },
+      });
+      expect(metaRows(run.journal.rows, 'replay_mismatch')).toEqual([]);
+      const ended = ofKind(run.events, 'turn.ended');
+      expect(ended.map((e) => e.origin).filter((o) => o !== 'human').length).toBeGreaterThan(0);
+      expect(ended.filter((e) => e.origin === 'task-notification').length).toBe(name === 'subagent' ? 2 : 1);
+      // one user frame (the fixture's prompt); the entry typed during the engine turn was never released
+      expect(userOuts(run.journal.rows)).toHaveLength(1);
+      expect(metaRows(run.journal.rows, 'queue').filter((r) => r.action === 'release').map((r) => r.trigger)).toEqual(['send']);
+      expect(run.session.queue.state.entries).toMatchObject([{ content: 'typed while the workflow reported back', state: 'queued', messageUuid: null }]);
+      expect(run.rebuilt()).toEqual(run.events);
+    });
+  }
+
+  it('pass2/dialogs: the submission is released at the command_lifecycle naming it (seq 6 against seq 5) and leaves the list at the turn.ended naming it (seq 55)', async () => {
+    const seen: QueueState[] = [];
+    let uuid: MessageUuid | null = null;
+    const run = await replayedSession('pass2', 'dialogs', (row, { session, transport, ready, fixture }) => {
+      const frame = row.frame as { type: string };
+      if (frame.type === 'user') void ready().then(() => session.send(contentOf(fixture, 5))).then((r) => (uuid = r.messageUuid));
+      else if (frame.type === 'control_response') return; // answered below
+      else transport.kill('SIGTERM');
+    }, {
+      beforeStart: ({ session }) => {
+        session.on('queue', (q) => seen.push(q));
+        session.on('brokerItems', (items) => {
+          const pending = items.find((i) => i.state === 'pending');
+          if (pending) void session.answer(pending.request.requestId as RequestId, { kind: 'elicitation', action: 'accept', content: { color: 'teal' } });
+        });
+      },
+    });
+    expect(metaRows(run.journal.rows, 'replay_mismatch')).toEqual([]);
+    const states = seen.map((q) => q.entries.map((e) => e.state).join(','));
+    expect(states.filter((s, i) => s !== states[i - 1])).toEqual(['', 'submitting', 'released', '']);
+    const releasedAt = run.journal.rows.find((r) => (r.frame as { type?: string; command_uuid?: string }).type === 'command_lifecycle' && (r.frame as { command_uuid: string }).command_uuid === uuid);
+    expect(releasedAt).toMatchObject({ direction: 'in', frame: { state: 'queued' } });
+    expect(ofKind(run.events, 'turn.ended').filter((e) => !e.isEchoReceipt).map((e) => e.userMessageUuids)).toEqual([[uuid]]);
+  });
+
+  it('interrupt pauses the queue before writing interrupt { reason: user-cancel, cancel_queued }; the turn.ended it causes releases nothing until setPaused(false)', async () => {
+    const interrupted = loadJournal('pass1', 'queue-and-interrupt').find((r) => r.seq === 192)!.frame as { response: { response: unknown } };
+    const s = scriptedSession({ responder: handshakeResponder({ interrupt: () => ({ response: interrupted.response.response }) }) });
+    await s.session.start();
+    const first = await s.session.send('Count to 30 slowly.');
+    expect((await s.session.send('After counting, reply exactly QUEUED.')).disposition).toBe('queued');
+    const result = await s.session.interrupt({ cancelEngineQueued: true });
+    expect(result).toEqual({ stillQueued: [], cancelled: ['99662785-5122-45a7-a68f-d734959a0c52'] });
+    expect(s.transport.requestsOf('interrupt')[0]!.request).toEqual({ subtype: 'interrupt', reason: 'user-cancel', cancel_queued: true });
+    const pauseRow = s.journal.rows.findIndex((r) => (r.frame as { event?: string; action?: string }).action === 'pause');
+    const interruptRow = s.journal.rows.findIndex((r) => (r.frame as { request?: { subtype: string } }).request?.subtype === 'interrupt');
+    expect(pauseRow).toBeLessThan(interruptRow);
+    expect(s.session.status().queue).toEqual({ length: 1, paused: true });
+
+    s.transport.push({ type: 'result', subtype: 'error_during_execution', session_id: 's', is_error: false, duration_ms: 1, num_turns: 6, total_cost_usd: 0, usage: {}, permission_denials: [], terminal_reason: 'aborted_streaming', user_message_uuids: [first.messageUuid], origin: { kind: 'human' } });
+    await flush();
+    expect(userOuts(s.journal.rows)).toHaveLength(1);
+    await s.session.queue.setPaused(false);
+    expect(userOuts(s.journal.rows).map((f) => f.message.content)).toEqual(['Count to 30 slowly.', 'After counting, reply exactly QUEUED.']);
+  });
+
+  it('steer writes priority now at once with an entry still queued, and never enters the app queue', async () => {
+    const s = scriptedSession();
+    await s.session.start();
+    await s.session.send('first');
+    await s.session.send('queued');
+    const { messageUuid } = await s.session.steer('Stop counting and reply STEERED');
+    expect(userOuts(s.journal.rows).at(-1)).toEqual({ type: 'user', uuid: messageUuid, message: { role: 'user', content: 'Stop counting and reply STEERED' }, parent_tool_use_id: null, origin: { kind: 'human' }, priority: 'now' });
+    expect(s.session.queue.state.entries.map((e) => [e.content, e.state])).toEqual([['first', 'submitting'], ['queued', 'queued']]);
+    expect(s.session.status().turn?.userMessageUuids).toContain(messageUuid); // folded into the open turn, which opened nothing new
+  });
+});
+
+describe('queue submission survives a crash around delivery', () => {
+  it('pass2/dialogs killed after the engine acknowledged the send: the entry retires interrupted at the exit, nothing is re-sent, and the resumed session sends at once', async () => {
+    const store = new FileSessionStateStore(userData);
+    const id = 'replay-dialogs' as AppSessionId;
+    let replay: { kill(signal: 'SIGKILL' | 'SIGTERM'): void } | null = null;
+    const run = await replayedSession('pass2', 'dialogs', (row, { session, transport, ready, fixture }) => {
+      replay = transport;
+      if ((row.frame as { type: string }).type === 'user') void ready().then(() => session.send(contentOf(fixture, 5)));
+      else transport.kill('SIGTERM');
+    }, {
+      session: { store },
+      beforeStart: ({ session }) => {
+        session.on('events', (batch) => {
+          if (batch.some((e) => e.kind === 'command.lifecycle' && e.state === 'queued')) replay?.kill('SIGKILL'); // the process dies right after seq 6, before any result
+        });
+      },
+    });
+    expect(run.session.status().exit).toMatchObject({ reason: 'crash', signal: 'SIGKILL' });
+    expect(ofKind(run.events, 'turn.ended')).toEqual([]);
+    const [sent] = userOuts(run.journal.rows);
+    expect(userOuts(run.journal.rows)).toHaveLength(1);
+    const notices = ofKind(run.events, 'notice.posted').map((e) => e.key);
+    expect(notices).toEqual([expect.stringMatching(/^queue:interrupted:/)]);
+    const noticeRow = run.journal.rows.findIndex((r) => (r.frame as { key?: string }).key?.startsWith('queue:interrupted:'));
+    expect(noticeRow).toBeLessThan(run.journal.rows.findIndex((r) => (r.frame as { event?: string }).event === 'exit'));
+    expect(run.session.queue.busy).toBe(false);
+    await flush();
+    expect(await store.loadQueue(id)).toEqual({ entries: [], paused: false });
+    expect(sent).toBeDefined();
+
+    const resumed = scriptedSession({ spec: { appSessionId: id, resume: { sessionId: '44444444-4444-4444-8444-444444444444' as never, fork: false }, sessionId: null }, session: { store } });
+    await resumed.session.start();
+    expect((await resumed.session.send('Reply OK')).disposition).toBe('sent');
+  });
+
+  it('a stored submitting entry comes back at ready as the uncertain head of a paused queue with its notice; Resume writes it exactly once', async () => {
+    const store = new MemorySessionStateStore();
+    const entry: QueueEntry = { queueId: 'q-1', appSessionId: 'app-s' as AppSessionId, content: 'did it arrive?', createdAt: '2026-09-28T10:00:00.000Z', state: 'submitting', messageUuid: '55555555-5555-4555-8555-555555555555' as MessageUuid, submittedAt: '2026-09-28T10:00:01.000Z', uncertain: false };
+    await store.saveQueue('app-s' as AppSessionId, { entries: [entry], paused: false });
+    const s = scriptedSession({ session: { store } });
+    await s.session.start();
+    expect(s.session.status()).toMatchObject({ process: 'ready', queue: { length: 1, paused: true } });
+    expect(s.session.queue.state.entries).toMatchObject([{ queueId: 'q-1', state: 'queued', uncertain: true, messageUuid: null }]);
+    expect(ofKind(s.events, 'notice.posted')).toMatchObject([{ level: 'warning', key: 'queue:uncertain:q-1' }]);
+    await s.session.queue.setPaused(false);
+    await s.session.queue.setPaused(false);
+    expect(userOuts(s.journal.rows).map((f) => f.message.content)).toEqual(['did it arrive?']);
+  });
+});
+
+describe('grant snapshot re-applies through apply_flag_settings', () => {
+  it('pass2/grant-reapply-start then -resume through the file store: the session grant and a queued message survive stop and resume; the grant is re-applied as seq 7 before the first user frame', async () => {
+    const store = new FileSessionStateStore(userData);
+    const id = 'app-grants' as AppSessionId;
+    const resumeFixture = loadJournal('pass2', 'grant-reapply-resume');
+    const nextPrompt = contentOf(resumeFixture, 11);
+
+    // the start: allow with scope session; a message queued (and held) during the turn; stop at the post-turn read
+    const start = await replayedSession('pass2', 'grant-reapply-start', (row, { session, transport, ready, fixture }) => {
+      const frame = row.frame as { type: string; request?: { subtype: string } };
+      if (frame.type === 'user') void ready().then(() => session.send(contentOf(fixture, 5)));
+      else if (frame.type === 'control_response') return;
+      else if (frame.request?.subtype === 'list_permission_rules') void session.stop('stop');
+      else transport.kill('SIGTERM');
+    }, {
+      spec: { appSessionId: id, permissionMode: 'default' },
+      session: { store },
+      beforeStart: ({ session }) => {
+        session.on('brokerItems', (items) => {
+          const pending = items.find((i) => i.state === 'pending');
+          if (!pending) return;
+          void session.queue.pause('user'); // held back, so the turn's end does not release it into the fixture
+          void session.send(nextPrompt);
+          void session.answer(pending.request.requestId as RequestId, { kind: 'permission', decision: 'allow', scope: 'session' });
+        });
+      },
+    });
+    expect(metaRows(start.journal.rows, 'replay_mismatch')).toEqual([]);
+    expect(start.session.status()).toMatchObject({ process: 'exited', exit: { reason: 'stop' }, grants: ['Bash(touch granted.txt)'] });
+    expect(ofKind(start.events, 'process.exited')).toMatchObject([{ reason: 'stop', code: 0 }]);
+    await store.loadGrants(id); // the store runs one session's operations in order: every save issued before this one has landed
+    const file = JSON.parse(await readFile(join(userData, 'engine-host', 'state', `${id}.json`), 'utf8')) as { grants: unknown; queue: QueueState; launchSpec: { appSessionId: string } };
+    expect(file.grants).toEqual({ allow: ['Bash(touch granted.txt)'] });
+    expect(file.queue).toMatchObject({ paused: true, entries: [{ content: nextPrompt, state: 'queued' }] });
+    expect(file.launchSpec.appSessionId).toBe(id);
+
+    // the resume: grants and queue from the store; the fixture's reads issued as it recorded them; Resume releases the entry
+    let atReady: QueueState | null = null;
+    const resumed = await replayedSession('pass2', 'grant-reapply-resume', (row, { session, transport, ready }) => {
+      const frame = row.frame as { type: string; request?: { subtype: string } };
+      if (frame.request?.subtype === 'apply_flag_settings') return; // the session's own re-application (seq 7)
+      if (frame.request?.subtype === 'list_permission_rules') void listPermissionRules(session.control!, {});
+      else if (frame.type === 'user') void ready().then(() => ((atReady = session.queue.state), session.queue.setPaused(false)));
+      else transport.kill('SIGTERM');
+    }, {
+      spec: { appSessionId: id, permissionMode: 'default', resume: { sessionId: 'f9bc61f8-7e18-466f-a860-8bb0781e2216' as never, fork: false } },
+      session: { store },
+    });
+    expect(metaRows(resumed.journal.rows, 'replay_mismatch')).toEqual([]);
+    expect(atReady).toMatchObject({ paused: true, entries: [{ content: nextPrompt, state: 'queued' }] });
+    const outs = resumed.journal.rows.filter((r) => r.direction === 'out').map((r) => r.frame as { type: string; request?: { subtype: string } });
+    const apply = outs.findIndex((f) => f.request?.subtype === 'apply_flag_settings');
+    expect(outs[apply]!.request).toEqual((resumeFixture.find((r) => r.seq === 7)!.frame as { request: unknown }).request);
+    expect(apply).toBeLessThan(outs.findIndex((f) => f.type === 'user'));
+    expect(ofKind(resumed.events, 'session.reconnect').map((e) => e.phase)).toEqual(['attempting', 'reconnected']);
+    expect(ofKind(resumed.events, 'permission.requested')).toEqual([]);
+    expect(resumed.session.status().grants).toEqual(['Bash(touch granted.txt)']);
+    expect(userOuts(resumed.journal.rows).map((f) => f.message.content)).toEqual([nextPrompt]);
+    await flush();
+    expect((await store.loadQueue(id)).entries).toEqual([]); // named by the seq 43 result
+    expect(resumed.rebuilt()).toEqual(resumed.events);
+  });
+});

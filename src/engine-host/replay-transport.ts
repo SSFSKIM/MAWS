@@ -3,8 +3,9 @@
 // fixture recorded there. Recorded request ids and user uuids are mapped onto the ones the adapter minted and the map
 // is applied to every following `in` row, so correlation and deduplication see the host's own ids. The host's own
 // `initialize` and `get_status` are answered from the handshake prelude when the fixture's next `out` row is not that
-// request; any other unrecorded write is a replay mismatch that ends the stream (`exited` `{ null, null }`), so a test
-// cannot pass by advancing past a frame the probe never saw. `stderr` rows replay; `meta exit` ends the stream with
+// request; an unrecorded `end_session` ends the replay as the engine does, with exit 0 (M4); any other unrecorded write
+// is a replay mismatch that ends the stream (`exited` `{ null, null }`), so a test cannot pass by advancing past a
+// frame the probe never saw. `stderr` rows replay; `meta exit` ends the stream with
 // the row's code and signal; `kill` ends a journal that has no exit row. Nothing here journals (the harness does).
 import type { StdinFrame } from '@shared/wire/frames';
 import type { JournalRow } from '@shared/wire/journal';
@@ -238,6 +239,16 @@ export function replayEngine(journal: JournalRow[], opts: { prelude: JournalRow[
     write(frame) {
       if (ended) return Promise.reject(new TransportClosed('the replay ended'));
       const f = frame as unknown as Frame;
+      if (f.type === 'control_request' && (f as ControlRequest).request.subtype === 'end_session') {
+        const upcoming = nextOut();
+        if (!upcoming || !matches(upcoming.frame as Frame, f)) {
+          // The engine's answer to end_session is to exit (Decision Log, controller for M4 and M5): the write reaches
+          // the pipe, then the replay ends with exit 0 and no mismatch. A macrotask later, so the writer's continuation
+          // journals the out row before the stream ends.
+          setTimeout(() => finish({ code: 0, signal: null }), 0);
+          return Promise.resolve();
+        }
+      }
       if (f.type === 'control_request' && PRELUDE_SUBTYPES.has((f as ControlRequest).request.subtype)) {
         const upcoming = nextOut();
         if (!upcoming || !matches(upcoming.frame as Frame, f)) {

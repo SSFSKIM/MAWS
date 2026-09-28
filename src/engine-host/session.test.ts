@@ -3,7 +3,7 @@ import type { AttentionItem } from '@shared/graph/attention';
 import { SessionEventSchema, type SessionEvent } from '@shared/graph/events';
 import type { RequestId } from '@shared/graph/ids';
 import { LaunchSpecSchema, type LaunchSpec } from '@shared/engine/launch-spec';
-import { EngineSessionStatusSchema } from '@shared/engine/status';
+import { EngineSessionStatusSchema, type EngineSessionStatus } from '@shared/engine/status';
 import type { StdinFrame } from '@shared/wire/frames';
 import { loadEngineJournal } from '../../test/support/fixtures';
 import { buildLaunch, ENGINE_VERSION, RELAY_URL } from './launch';
@@ -12,6 +12,7 @@ import { getUsage, rewindConversation } from './controls';
 import { ProcessTable } from './process-table';
 import { EngineSession, HostHookRegistry, type EngineSessionOptions } from './session';
 import { MemoryJournal, scriptedTransport, type ScriptedTransport } from './conformance/scripted-transport';
+import { replayedSession } from './conformance/session-harness';
 
 const prelude = loadEngineJournal('replay-handshake');
 const responseOf = (seq: number) => (prelude.find((r) => r.seq === seq)!.frame as { response: { response: Record<string, unknown> } }).response.response;
@@ -585,5 +586,139 @@ describe('plan outcomes map to the wire', () => {
     transport.push({ type: 'system', subtype: 'init', cwd: '/w', session_id: 's', model: 'm', permissionMode: 'plan', tools: [], slash_commands: [], mcp_servers: [], claude_code_version: '2.1.283' });
     await flush();
     expect(session.status().prePlanMode).toBe('acceptEdits');
+  });
+});
+
+describe('EngineSession (M4): the termination ladder, stdout EOF, held frames, the local lane and C11\'s fields', () => {
+  it('stop with a process that never exits: end_session, then stdin closed and SIGTERM at 3 s, SIGKILL at 6 s, exited: false at 7 s; exiting from the first rung', async () => {
+    vi.useFakeTimers();
+    const { session, transport } = setup({ responder: defaultResponder({ end_session: () => null }) });
+    await session.start();
+    let answer: unknown = null;
+    void session.stop('stop').then((r) => (answer = r));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(transport.requestsOf('end_session')[0]!.request).toEqual({ subtype: 'end_session', reason: 'stop' });
+    expect(session.status().process).toBe('exiting');
+    await vi.advanceTimersByTimeAsync(2_999);
+    expect(transport.calls).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(transport.calls).toEqual(['endInput', 'kill:SIGTERM']);
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(transport.calls).toEqual(['endInput', 'kill:SIGTERM', 'kill:SIGKILL']);
+    expect(answer).toBeNull();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(answer).toEqual({ exited: false, code: null, signal: null });
+    expect(session.status().process).toBe('exiting'); // exited only when the OS reports it
+    expect(session.forcedKill).toBe(true);
+    transport.exit(null, 'SIGKILL');
+    await session.exited;
+    expect(session.status()).toMatchObject({ process: 'exited', exit: { reason: 'stop', signal: 'SIGKILL' } });
+  });
+
+  it('stop with a process that exits on end_session answers exited: true at once, with no signal sent', async () => {
+    vi.useFakeTimers();
+    const { session, transport } = setup({ responder: defaultResponder({ end_session: () => null }) });
+    await session.start();
+    const stopping = session.stop('archive');
+    await vi.advanceTimersByTimeAsync(0);
+    transport.exit(0);
+    expect(await stopping).toEqual({ exited: true, code: 0, signal: null });
+    expect(transport.calls).toEqual([]);
+    expect(session.status().exit).toMatchObject({ reason: 'archive' });
+  });
+
+  it('a stop over a replay ends it as the engine would: end_session journaled, exit 0, reason stop, no mismatch', async () => {
+    const run = await replayedSession('pass2', 'rewind', (row, { session, ready, fixture }) => {
+      if (row.seq === 5) void ready().then(() => session.send((fixture.find((r) => r.seq === 5)!.frame as { message: { content: string } }).message.content));
+      else void session.stop('stop');
+    });
+    expect(run.journal.rows.filter((r) => (r.frame as { event?: string }).event === 'replay_mismatch')).toEqual([]);
+    const rows = run.journal.rows.map((r) => `${r.direction}:${(r.frame as { request?: { subtype: string }; event?: string; type?: string }).request?.subtype ?? (r.frame as { event?: string }).event ?? (r.frame as { type?: string }).type}`);
+    const endSession = rows.indexOf('out:end_session');
+    expect(endSession).toBeGreaterThan(0);
+    expect(rows.at(-1)).toBe('meta:exit');
+    expect(rows.slice(endSession + 1).filter((r) => r.startsWith('out:'))).toEqual([]);
+    expect(run.session.status().exit).toMatchObject({ reason: 'stop', code: 0 });
+  });
+
+  it('stdout EOF with a write that never settles: after 3 s the write fails, the held frames follow its write_failed row, and the child is ended through the ladder', async () => {
+    vi.useFakeTimers();
+    let requestId = '';
+    const never = new Promise<void>(() => {});
+    const hold = (f: StdinFrame) => (f.type === 'control_request' && f.request.subtype === 'get_usage' ? ((requestId = f.request_id), never) : null);
+    const { session, transport, journal } = setup({ transport: { holdWrite: hold } });
+    await session.start();
+    const usage = getUsage(session.control!, {}).catch((e: unknown) => e);
+    await vi.advanceTimersByTimeAsync(0);
+    transport.push({ type: 'control_response', response: { subtype: 'error', request_id: requestId, error: 'late' } });
+    transport.endStdout(); // stdout closed, the process still alive and wedged
+    await vi.advanceTimersByTimeAsync(2_999);
+    expect(journal.rows.some((r) => (r.frame as { event?: string }).event === 'write_failed')).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(((await usage) as { code: string }).code).toBe('write_failed');
+    expect(shape(journal).slice(-2)).toEqual(['meta:write_failed', 'in:control_response']);
+    expect(transport.calls).toEqual(['endInput', 'kill:SIGTERM']);
+    expect(session.status().process).toBe('exiting');
+    transport.exit(null, 'SIGTERM');
+    await session.exited;
+    expect(session.status().exit).toMatchObject({ reason: 'crash', signal: 'SIGTERM' });
+  });
+
+  it('while an out write is in flight the read loop keeps consuming stdout into memory, and everything drains in order after the write settles', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const { session, transport, journal } = setup({ transport: { holdWrite: (f) => (f.type === 'control_request' && f.request.subtype === 'get_usage' ? gate : null) } });
+    await session.start();
+    void getUsage(session.control!, {}).catch(() => {});
+    await flush();
+    for (let i = 1; i <= 3; i += 1) transport.push({ type: 'system', subtype: 'status', status: null, uuid: `st-${i}`, session_id: 's' });
+    await flush();
+    const held = (session as unknown as { held: unknown[] }).held;
+    expect(held).toHaveLength(3); // consumed from the transport (never left in the pipe), not yet journaled
+    expect(journal.rows.some((r) => (r.frame as { uuid?: string }).uuid === 'st-1')).toBe(false);
+    release();
+    await flush();
+    expect(held).toHaveLength(0);
+    const tail = journal.rows.slice(-4).map((r) => (r.frame as { uuid?: string; request?: { subtype: string } }).uuid ?? (r.frame as { request: { subtype: string } }).request.subtype);
+    expect(tail).toEqual(['get_usage', 'st-1', 'st-2', 'st-3']);
+  });
+
+  it('the local lane belongs to the turn it was observed in: set during turn A, null once turn B starts', async () => {
+    const { session, transport, events } = setup();
+    await session.start();
+    const a = await session.send('turn A');
+    const turnA = events.find((e) => e.kind === 'turn.started')!;
+    transport.push({ type: 'stream_event', event: { type: 'message_delta', delta: { stop_reason: 'end_turn', safeguard_results: [{ type: 'dangerous_tool_use', status: { type: 'unavailable', reason: 'provider_not_anthropic' } }] } }, session_id: 's', parent_tool_use_id: null, uuid: 'se-9', timestamp: '2026-09-28T10:00:05.000Z' });
+    await flush();
+    expect(session.status().gateway.localLane).toEqual({ observedInTurn: turnA.id, at: '2026-09-28T10:00:05.000Z' });
+    transport.push({ type: 'result', subtype: 'success', session_id: 's', is_error: false, duration_ms: 1, num_turns: 1, total_cost_usd: 0, usage: {}, permission_denials: [], terminal_reason: 'completed', origin: { kind: 'human' }, user_message_uuids: [a.messageUuid] });
+    await flush();
+    expect(session.status().gateway.localLane).toMatchObject({ observedInTurn: turnA.id }); // still turn A's until the next turn starts
+    await session.send('turn B');
+    expect(session.status().gateway.localLane).toBeNull();
+    const turnB = events.filter((e) => e.kind === 'turn.started')[1]!;
+    transport.push({ type: 'system', subtype: 'informational', content: 'Auto mode is using the local classifier for this model; classifier requests are charged as usage.', level: 'warning', uuid: 'inf-1', session_id: 's' });
+    await flush();
+    expect(session.status().gateway.localLane).toMatchObject({ observedInTurn: turnB.id });
+  });
+
+  it('pass2/real-settings: fast mode from initialize and system/init, the eleven plugins, empty plugin errors and warnings', async () => {
+    const seen: EngineSessionStatus[] = [];
+    const run = await replayedSession('pass2', 'real-settings', (row, { session, transport, ready, fixture }) => {
+      if (row.seq === 12) {
+        void ready().then(() => {
+          seen.push(session.status());
+          return session.send((fixture.find((r) => r.seq === 12)!.frame as { message: { content: string } }).message.content);
+        });
+      } else transport.kill('SIGTERM');
+    });
+    expect(seen[0]).toMatchObject({ fastMode: { state: 'off', disabledReason: 'sdk_opt_in_required' }, plugins: [] }); // from the initialize response (seq 10)
+    const status = run.session.status();
+    expect(status.fastMode).toEqual({ state: 'off', disabledReason: 'sdk_opt_in_required' });
+    expect(status.plugins).toHaveLength(11);
+    expect(status.plugins[0]).toEqual({ name: 'designer', path: '/Users/new/.claude/plugins/cache/designer/designer/2.1.0', source: 'designer@designer', version: '2.1.0' });
+    expect(status.pluginErrors).toEqual([]);
+    expect(status.pluginWarnings).toEqual([]);
+    EngineSessionStatusSchema.parse(status);
   });
 });

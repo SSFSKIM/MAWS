@@ -180,6 +180,20 @@ describe('replay transport plays a fixture and advances on the adapter\'s writes
     expect(frameOf((await it2.next()).value as TransportItem)).toMatchObject({ command_uuid: 'MINT-B' });
   });
 
+  it('an unrecorded end_session ends the replay as the engine would, by exiting 0: the write resolves and no mismatch is reported', async () => {
+    for (const tail of [[row(3, 'out', { type: 'user', uuid: 'rec-u', message: { role: 'user', content: 'next' }, parent_tool_use_id: null })], [], [row(3, 'meta', { event: 'exit', code: 0, signal: null })]]) {
+      const journal = [row(1, 'in', { type: 'system', subtype: 'status', status: null }), row(2, 'in', { type: 'system', subtype: 'status', status: null }), ...tail];
+      const transport = replayEngine(journal, { prelude });
+      const it = transport.frames[Symbol.asyncIterator]();
+      await it.next();
+      await expect(transport.write({ type: 'control_request', request_id: 'MINT-9', request: { subtype: 'end_session', reason: 'stop' } })).resolves.toBeUndefined();
+      const rest: TransportItem[] = [];
+      for (let next = await it.next(); !next.done; next = await it.next()) rest.push(next.value);
+      expect(rest.filter((i) => i.error)).toEqual([]);
+      await expect(transport.exited).resolves.toEqual({ code: 0, signal: null });
+    }
+  });
+
   it('onHold fires once per held out row, after every earlier row was consumed, so adjacent out rows drive themselves', async () => {
     const journal = [
       row(1, 'in', { type: 'system', subtype: 'status', status: null }),

@@ -66,11 +66,12 @@ export function scriptedSession(opts: { spec?: Partial<LaunchSpec>; responder?: 
 
 // Replays `pass/name` through an EngineSession. `drive(row, ctx)` runs once per held `out` row the session does not
 // author itself (its own `initialize` and prelude-answered `get_status` never reach it); it issues the row's frame
-// through the session, or kills the replay to end it there.
+// through the session (after `ctx.ready()` for anything that needs a ready session; a row held during the handshake,
+// such as `grant-reapply-resume`'s `list_permission_rules`, is issued at once), or kills the replay to end it there.
 export async function replayedSession(
   pass: FixturePass,
   name: string,
-  drive: (row: JournalRow, ctx: { session: EngineSession; transport: ReplayTransport; fixture: JournalRow[] }) => void,
+  drive: (row: JournalRow, ctx: { session: EngineSession; transport: ReplayTransport; fixture: JournalRow[]; ready: () => Promise<void> }) => void,
   opts: { spec?: Partial<LaunchSpec>; session?: Partial<EngineSessionOptions>; beforeStart?: (o: Observed) => void } = {},
 ): Promise<Observed & { fixture: JournalRow[]; transport: () => ReplayTransport }> {
   const fixture = loadJournal(pass, name);
@@ -86,7 +87,7 @@ export async function replayedSession(
         onHold: (row) => {
           const frame = row.frame as { type: string; request?: { subtype?: string } };
           if (frame.type === 'control_request' && frame.request?.subtype === 'initialize') return; // the session's own
-          void session.start().then(() => drive(row, { session, transport, fixture }));
+          drive(row, { session, transport, fixture, ready: () => session.start() });
         },
       });
       return transport;

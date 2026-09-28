@@ -162,7 +162,7 @@ export class EngineSession {
       write: writeFrame,
       meta: (frame) => this.record('meta', frame),
       // a host sequence that writes its own prompts (clear and implement) holds the queue like an open turn
-      turnOpen: () => this.normalizer.state.currentTurn !== null || this.clear !== null,
+      turnOpen: () => this.processState !== 'exited' && (this.normalizer.state.currentTurn !== null || this.clear !== null),
       canWrite: () => this.processState === 'ready',
       onChange: (queue) => {
         this.emit('queue', queue);

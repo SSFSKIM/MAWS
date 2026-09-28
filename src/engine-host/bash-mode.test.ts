@@ -15,9 +15,9 @@ describe('bash mode echo and receipt', () => {
   it('pass2/bash-context-echoed through a session: answered at the bash_command write, the echo written from the replayed output, its receipt no turn and no release', async () => {
     const answered: { commandUuid: MessageUuid }[] = [];
     let prompt: MessageUuid | null = null;
-    const run = await replayedSession('pass2', 'bash-context-echoed', (row, { session, transport }) => {
+    const run = await replayedSession('pass2', 'bash-context-echoed', (row, { session, transport, ready }) => {
       const frame = row.frame as { type: string; shouldQuery?: boolean; message?: { content: string } };
-      if (frame.type === 'bash_command') void bashCommand(session, 'printf MAWS_BASH_8823').then((r) => answered.push(r));
+      if (frame.type === 'bash_command') void ready().then(() => bashCommand(session, 'printf MAWS_BASH_8823')).then((r) => answered.push(r));
       else if (frame.type === 'user' && frame.shouldQuery === false) return; // the session writes the echo itself
       else if (frame.type === 'user') void session.send(frame.message!.content).then((r) => (prompt = r.messageUuid));
       else transport.kill('SIGTERM');
