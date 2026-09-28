@@ -276,7 +276,7 @@ Level name for every child: "child", dispatched in the waves of §14. Ledgers: a
 - **Contracts:** owns X1, X2, X7; delivers the schema code that X3, X4, X5, X6 extend.
 - **Design inheritance:** §4.1 [binding], §4.7 [advisory], §6 [advisory values, binding token names per X7], `mockups/tokens.css` and `tokens-light.css` as the starting token set.
 - **Required:** required.
-- **Status:** not-dispatched, dispatchable now.
+- **Status:** in-flight since 2026-09-28 (execution document being authored; parent pin 32b75d61).
 
 ### C2: Protocol probe, second pass — spike
 
@@ -286,7 +286,7 @@ Level name for every child: "child", dispatched in the waves of §14. Ledgers: a
 - **Contracts:** delivers X8 fixtures.
 - **Design inheritance:** §4.2 [binding as verified], §7.1 [binding list], `spikes/protocol-probe/harness.mjs` [advisory, extend it].
 - **Required:** required.
-- **Status:** not-dispatched, dispatchable now.
+- **Status:** in-flight since 2026-09-28 (parent pin 32b75d61).
 
 ### C3: Engine host — plan
 
@@ -428,8 +428,8 @@ Explicitly out of scope for P0: bundle patches (D-1); Windows and Linux (D-11); 
 
 | Child | Grain | Status | Ledger / artifact |
 |---|---|---|---|
-| C1 Foundations | plan | not-dispatched | `docs/doperpowers/execplans/` (to be written at dispatch) |
-| C2 Probe, second pass | spike | not-dispatched | `spikes/protocol-probe/` findings |
+| C1 Foundations | plan | in-flight (2026-09-28, pin 32b75d61) | `docs/doperpowers/execplans/2026-09-28-c1-foundations.md` (authoring) |
+| C2 Probe, second pass | spike | in-flight (2026-09-28, pin 32b75d61) | `spikes/protocol-probe/findings-pass2.md`, `fixtures/pass2/` |
 | C3 Engine host | plan | blocked-by C1, C2 | |
 | C4 Filesystem state, index, replay | plan | blocked-by C1 | |
 | C5 Shell | plan | blocked-by C1 | |
