@@ -124,6 +124,7 @@ Owner process vocabulary is C1's `Owner`: `main`, `engine-host`, `pty-host`. "De
 | `layout.list` | command | main | C5 | C5 renderer, C5 acceptance | void → `{ keys: string[] }` | conflict-resolved: as `layout.get` |
 | `layout.openExternal` | command | main | C5 | C6 markdown links, C5; C9's `pty.openLink` shares its helper | `{ url }` → void; `http`, `https`, `mailto` only | agreed (ruling 4) |
 | `layout.action` | event | main | C5 | C5 renderer | `{ action: ActionId, arg: number | null }` | agreed |
+| `layout.setEnabledActions` | command | main | C5 | C5 renderer (action registry) | `{ actions: ActionId[] }` → void; the renderer's registered-handler set, main rebuilds the menu with the rest disabled | added-for-consumer (C5 M2, 2026-09-28): the document asked for a menu rebuild on registry change without a carrier |
 | `pty.hostState` | command + event | main | C1 | C9 registry | `HostState` | agreed |
 | `pty.ping` | command | pty-host | C1 | C1 smoke | void → `HostPing` | agreed |
 | `pty.spawn` | command | pty-host | C9 (replaces C1's) | C9 registry, C1 smoke (migrated by C9 M2) | `{ appSessionId, label, cwd, cols, rows, shell?, args?, command? }` → `{ ptyId, pid }`; `env` removed | agreed (C1 handed `pty.*` to C9); migration stated in C9 M2 (ruling 9) |
