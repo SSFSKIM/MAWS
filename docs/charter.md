@@ -2,7 +2,7 @@
 
 MAWS is a codename. This document is the chartering design for the project: what it is for, what was decided and why, what ships first, and how the pieces fit. It is the input to the execution spec and to the decomposition into milestones. Research behind every claim lives in `research/`.
 
-Status: draft for approval, 2026-09-28. Decisions marked **D-n** were made with the project owner in the brainstorming rounds; decisions marked **S-n** are technical calls made by the design and can be overridden.
+Status: approved by the owner on 2026-09-28 after one critique round and the protocol probe; routed to decomposition into milestone specs. Decisions marked **D-n** were made with the project owner in the brainstorming rounds; decisions marked **S-n** are technical calls made by the design and can be overridden.
 
 ## 1. Purpose
 
@@ -24,7 +24,7 @@ Status: draft for approval, 2026-09-28. Decisions marked **D-n** were made with 
 | D-1 | Engine integration is a strict SDK-wire client plus an on-disk sidecar. No bundle patches. | The raw 2.1.283 control protocol exposes 85 control request types including structured reads for status, settings, hooks, permission rules, memory, skills, sandbox, workspace diff, export, usage and context usage, rename and title generation, fork and rewind, and a runtime workflow-progress field. The remaining gaps are narrow (per-message held-peer approval, native workflow pause/skip/retry, full auto-mode classifier traces, exact statusLine ledger). Patching a Bun standalone binary is not a dependable source-only edit; Claude Code ships roughly weekly. See `research/sdk-wire-gap.md` §3. |
 | D-2 | Left panel is a collapsible project tree with sessions inside, plus a pinned "Needs you" section on top listing every session blocked on the human across all projects. | Cross-project attention is the point of Scene A; drill-down hides it. Codex's own sidebar already offers "Priority: needs input and unread first". |
 | D-3 | Real engine from day one. A replay mode plays any Claude Code JSONL transcript into the UI for design iteration and tests. Static HTML mockups only for taste-heavy surfaces. | Fake data produces generic UX that the real wire then breaks. |
-| D-4 | Visual identity: Codex-density chrome (dark-first, dense lists and panels) with Claude-style transcript typography (generous measure and line height for reading long prose). Own token set, structured like Claude's CDS. | Supervising many things wants density; reading agent prose wants comfort. |
+| D-4 | Visual identity: Codex-density chrome (dense lists and panels) with Claude-style transcript typography (generous measure and line height for reading long prose), in Claude's bright, light-first style with a dark theme as the alternate. Own token set, structured like Claude's CDS. | Supervising many things wants density; reading agent prose wants comfort; the owner prefers Claude's bright look over Codex's dark one (mockups were reviewed dark and judged excellent in structure). |
 | D-5 | Daily driver with a general base; owner-specific workflow as later plugins. | See purpose. |
 | D-6 | Both scenes equal from day one. | See purpose. |
 | D-7 | Claude-native engine with one adapter boundary. Only the Claude Code adapter is built. GPT models arrive through the owner's model gateway (ClaudeUsage's loopback relay: base URL, auth marker, gateway model discovery). The Codex agent is reachable only through bash. | Keeps workflows, skills, plugins and teams first-class while leaving a second engine possible without touching the UI. |
@@ -36,6 +36,8 @@ Status: draft for approval, 2026-09-28. Decisions marked **D-n** were made with 
 | D-13 | Terminal power features are P0 enhancements: queued messages, steer, `!` bash mode, `#` memory, prompt history, slash palette, keybindings. | Owner's stated wish list. |
 | D-14 | Benchmark weighting: Codex for interaction, Claude Desktop for engine wiring. | Owner's note. |
 | D-15 | `CC-to-SDK` and its packages are not references and are not reused. | Owner's call: below the quality bar. |
+| D-16 | Sessions do not survive an app restart or crash in P0; the engine host runs in a utility process and quitting with turns in flight asks first. A detachable supervisor is P1. | Same trade-off Codex and Claude Desktop make; resume from disk covers the rest. |
+| D-17 | Account-wide usage windows stay in every session's status line, backed by one shared ClaudeUsage read. | Owner's stated design; the cost objection is moot with a single source. |
 
 ## 3. Scope
 
@@ -206,7 +208,7 @@ An item enters Needs-you when a permission, question, plan approval, dialog or e
 
 ## 6. Visual identity
 
-Dark-first with a light theme. Chrome follows Codex density: 13px UI text, 4px spacing base, 6 to 12px radii, muted metadata at 60 percent foreground promoted on hover, thin separators, no heavy cards. Transcript follows Claude's reading comfort: 15 to 16px prose, 1.6 line height, 68 to 72 character measure, headings with clear rhythm, code at 13px monospace. Colors are semantic tokens (surface, surface-raised, foreground, foreground-muted, accent, success, warning, danger, diff-added, diff-removed) so the whole look can be re-skinned. Fonts are tokens too; the mockups use system fonts and the owner chooses.
+Light-first, in Claude's bright style, with a dark theme as the alternate; the mockups under `mockups/` were built dark and approved for structure, so their light rendering is the reference for tokens. Chrome follows Codex density: 13px UI text, 4px spacing base, 6 to 12px radii, muted metadata at 60 percent foreground promoted on hover, thin separators, no heavy cards. Transcript follows Claude's reading comfort: 15 to 16px prose, 1.6 line height, 68 to 72 character measure, headings with clear rhythm, code at 13px monospace. Colors are semantic tokens (surface, surface-raised, foreground, foreground-muted, accent, success, warning, danger, diff-added, diff-removed) so the whole look can be re-skinned. Fonts are tokens too; the mockups use system fonts and the owner chooses.
 
 ## 7. Delegated unknowns
 

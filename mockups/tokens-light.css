@@ -1,0 +1,9 @@
+/* MAWS light theme tokens: Claude's bright style. Overrides tokens.css variables only. */
+:root {
+  --bg: #faf9f6; --bg-raised: #ffffff; --bg-overlay: #ffffff; --bg-hover: rgba(20,18,14,0.05); --bg-active: rgba(20,18,14,0.08);
+  --border: rgba(20,18,14,0.10); --border-strong: rgba(20,18,14,0.18);
+  --fg: #1f1e1b; --fg-muted: rgba(31,30,27,0.62); --fg-faint: rgba(31,30,27,0.42);
+  --accent: #c9663f; --accent-soft: rgba(201,102,63,0.14);
+  --success: #1f8f55; --warning: #b86a1a; --danger: #c93b3b; --info: #3b6fd1;
+  --diff-add-bg: rgba(31,143,85,0.14); --diff-del-bg: rgba(201,59,59,0.12);
+}

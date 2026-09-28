@@ -1,0 +1,264 @@
+- generic [active] [ref=f4e1]:
+  - generic [ref=f4e2]:
+    - banner [ref=f4e3]:
+      - generic [ref=f4e8]:
+        - generic [ref=f4e9]: MAWS
+        - button "Sidebar" [ref=f4e10] [cursor=pointer]
+      - generic [ref=f4e13]:
+        - text: Charter + research
+        - generic [ref=f4e14]: ⎇ charter
+      - generic [ref=f4e15]:
+        - button "Share session" [ref=f4e16] [cursor=pointer]
+        - button "More session actions" [ref=f4e19] [cursor=pointer]: •••
+        - button "Toggle bottom panel" [ref=f4e21] [cursor=pointer]
+        - button "Toggle right panel" [pressed] [ref=f4e24] [cursor=pointer]
+    - complementary "Projects and sessions" [ref=f4e27]:
+      - generic [ref=f4e28]:
+        - generic [ref=f4e29]:
+          - textbox "Search sessions" [ref=f4e32]
+          - generic [ref=f4e33]: ⌘ K
+        - heading "NEEDS YOU · 3" [level=2] [ref=f4e34]
+        - button "MAWS · Fix sidebar drag ◐ Bash approval 8m" [expanded] [ref=f4e35] [cursor=pointer]:
+          - generic [ref=f4e36]:
+            - generic [ref=f4e37]: MAWS ·
+            - generic [ref=f4e38]: Fix sidebar drag
+          - generic [ref=f4e39]:
+            - generic [ref=f4e40]: ◐ Bash approval
+            - generic [ref=f4e41]: 8m
+        - button "MAWS · Sidebar interaction pass ? Which sidebar layout? 4m" [ref=f4e42] [cursor=pointer]:
+          - generic [ref=f4e43]:
+            - generic [ref=f4e44]: MAWS ·
+            - generic [ref=f4e45]: Sidebar interaction pass
+          - generic [ref=f4e46]:
+            - generic [ref=f4e47]: "? Which sidebar layout?"
+            - generic [ref=f4e48]: 4m
+        - button "codex_somersault · Quota reset recovery ◇ Plan review 2m" [ref=f4e49] [cursor=pointer]:
+          - generic [ref=f4e50]:
+            - generic [ref=f4e51]: codex_somersault ·
+            - generic [ref=f4e52]: Quota reset recovery
+          - generic [ref=f4e53]:
+            - generic [ref=f4e54]: ◇ Plan review
+            - generic [ref=f4e55]: 2m
+        - heading "PINNED" [level=2] [ref=f4e56]
+        - generic [ref=f4e57]:
+          - generic "Idle, read" [ref=f4e58]: ○
+          - button "Workstation north star Two scenes. One strong foundation." [ref=f4e59] [cursor=pointer]:
+            - generic [ref=f4e60]: Workstation north star
+            - generic [ref=f4e61]: Two scenes. One strong foundation.
+          - generic [ref=f4e62]: 1d
+        - heading [level=2] [ref=f4e63]:
+          - text: PROJECTS
+          - button "Add project" [ref=f4e64] [cursor=pointer]: +
+        - generic [ref=f4e65]:
+          - button "MAWS" [expanded] [ref=f4e66] [cursor=pointer]
+          - button "New session in MAWS" [ref=f4e71] [cursor=pointer]: +
+        - generic [ref=f4e72]:
+          - generic [ref=f4e73]:
+            - generic "Working" [ref=f4e74]: ●
+            - button "Charter + research Running bun test" [ref=f4e75] [cursor=pointer]:
+              - generic [ref=f4e76]: Charter + research
+              - generic [ref=f4e77]: Running bun test
+            - generic [ref=f4e78]: now
+          - generic [ref=f4e79]:
+            - generic "Needs approval" [ref=f4e80]: ◐
+            - button "Fix sidebar drag Waiting to push feat/sidebar" [ref=f4e81] [cursor=pointer]:
+              - generic [ref=f4e82]: Fix sidebar drag
+              - generic [ref=f4e83]: Waiting to push feat/sidebar
+            - generic [ref=f4e84]:
+              - text: 8m
+              - generic "Unread" [ref=f4e85]
+          - generic [ref=f4e86]:
+            - generic "Question" [ref=f4e87]: "?"
+            - button "Sidebar interaction pass Which sidebar layout?" [ref=f4e88] [cursor=pointer]:
+              - generic [ref=f4e89]: Sidebar interaction pass
+              - generic [ref=f4e90]: Which sidebar layout?
+            - generic [ref=f4e91]: 4m
+        - generic [ref=f4e92]:
+          - button "codex_somersault" [expanded] [ref=f4e93] [cursor=pointer]
+          - button "New session in codex_somersault" [ref=f4e98] [cursor=pointer]: +
+        - generic [ref=f4e99]:
+          - generic [ref=f4e100]:
+            - generic "Plan review" [ref=f4e101]: ◇
+            - button "Quota reset recovery Recovery plan is ready for review." [ref=f4e102] [cursor=pointer]:
+              - generic [ref=f4e103]: Quota reset recovery
+              - generic [ref=f4e104]: Recovery plan is ready for review.
+            - generic [ref=f4e105]:
+              - text: 2m
+              - generic "Unread" [ref=f4e106]
+          - generic [ref=f4e107]:
+            - generic "Done" [ref=f4e108]: ✓
+            - button "Trace stream reconnects Reconnects preserve the cursor now." [ref=f4e109] [cursor=pointer]:
+              - generic [ref=f4e110]: Trace stream reconnects
+              - generic [ref=f4e111]: Reconnects preserve the cursor now.
+            - generic [ref=f4e112]: 23m
+            - generic [ref=f4e113]:
+              - button "Pin Trace stream reconnects" [ref=f4e114] [cursor=pointer]
+              - button "Archive Trace stream reconnects" [ref=f4e117] [cursor=pointer]
+        - generic [ref=f4e120]:
+          - button "claude-usage-menubar" [ref=f4e121] [cursor=pointer]
+          - generic "1 working session" [ref=f4e126]: ●1
+          - button "New session in claude-usage-menubar" [ref=f4e127] [cursor=pointer]: +
+        - generic [ref=f4e128]:
+          - button "claude-code-bundle" [ref=f4e129] [cursor=pointer]
+          - button "New session in claude-code-bundle" [ref=f4e134] [cursor=pointer]: +
+        - heading "OTHER SESSIONS" [level=2] [ref=f4e135]
+        - generic [ref=f4e136]:
+          - generic "Idle, unread" [ref=f4e137]: ●
+          - button "Terminal workflow notes Saved the keyboard shortcuts to compare." [ref=f4e138] [cursor=pointer]:
+            - generic [ref=f4e139]: Terminal workflow notes
+            - generic [ref=f4e140]: Saved the keyboard shortcuts to compare.
+          - generic [ref=f4e141]:
+            - text: 2h
+            - generic "Unread" [ref=f4e142]
+      - generic [ref=f4e143]:
+        - generic [ref=f4e146]: Local workspace
+        - button "Workspace settings" [ref=f4e147] [cursor=pointer]: ⚙
+    - main "Charter and research session" [ref=f4e148]:
+      - navigation "Open tabs" [ref=f4e149]:
+        - button "● Charter + research MAWS" [ref=f4e150] [cursor=pointer]:
+          - generic [ref=f4e151]: ●
+          - text: Charter + research
+          - generic [ref=f4e152]: MAWS
+        - button "TSX sidebar.tsx" [ref=f4e153] [cursor=pointer]:
+          - generic [ref=f4e154]: TSX
+          - text: sidebar.tsx
+        - button "◐ Fix sidebar drag MAWS" [ref=f4e155] [cursor=pointer]:
+          - generic [ref=f4e156]: ◐
+          - text: Fix sidebar drag
+          - generic [ref=f4e157]: MAWS
+        - button "? Quota reset recovery codex_somersault" [ref=f4e158] [cursor=pointer]:
+          - generic [ref=f4e159]: "?"
+          - text: Quota reset recovery
+          - generic [ref=f4e160]: codex_somersault
+        - button "New tab" [ref=f4e161] [cursor=pointer]: +
+      - generic [ref=f4e163]:
+        - generic [ref=f4e164]: Let’s make MAWS a workstation for supervising agents,not another chat window with a file tree.
+        - article [ref=f4e165]:
+          - generic [ref=f4e166]:
+            - generic [ref=f4e167]: ✳
+            - text: Claude
+          - generic [ref=f4e168]:
+            - paragraph [ref=f4e169]:
+              - strong [ref=f4e170]: "The shell should make one thing obvious: where you’re needed."
+              - text: Keep approvals and questions visible across projects, without pulling you out of the session you’re reading.
+            - paragraph [ref=f4e171]: "I’ll anchor the charter in two equally important scenes: supervising many sessions, and going deep in one. Codex is the interaction benchmark; Claude Code remains the engine."
+          - group [ref=f4e172]:
+            - generic "Worked for 1m 42s · 9 tool calls" [ref=f4e173] [cursor=pointer]
+        - generic [ref=f4e176]: launch the research agents and start the charter
+        - generic [ref=f4e177]:
+          - generic "Three research agents" [ref=f4e178]
+          - generic [ref=f4e185]:
+            - strong [ref=f4e186]: Codex shell study
+            - text: ","
+            - strong [ref=f4e187]: Codex thread study
+            - text: and
+            - strong [ref=f4e188]: Wire gap analysis
+            - text: started working
+        - group [ref=f4e189]:
+          - generic [ref=f4e192] [cursor=pointer]:
+            - text: Running
+            - code [ref=f4e193]: bun test
+            - text: for 12s
+      - generic [ref=f4e196]:
+        - generic [ref=f4e197]:
+          - generic [ref=f4e198]: 1 queued
+          - generic [ref=f4e199]: also add the keyboard map
+          - generic [ref=f4e200]:
+            - button "Edit" [ref=f4e201] [cursor=pointer]
+            - button "Delete" [ref=f4e202] [cursor=pointer]
+            - button "Steer ↗" [ref=f4e203] [cursor=pointer]
+        - generic "Session context" [ref=f4e204]:
+          - button "MAWS" [ref=f4e205] [cursor=pointer]
+          - button ".claude/worktrees/charter" [ref=f4e206] [cursor=pointer]
+          - button "⎇ charter" [ref=f4e207] [cursor=pointer]
+          - button "Opus 5.5 · High" [ref=f4e208] [cursor=pointer]
+          - button "auto" [ref=f4e209] [cursor=pointer]
+          - button "+ dir" [ref=f4e210] [cursor=pointer]
+        - generic [ref=f4e211]:
+          - textbox "Message Claude" [ref=f4e212]:
+            - /placeholder: Do anything
+          - generic [ref=f4e213]:
+            - button "Add attachments or commands" [ref=f4e214] [cursor=pointer]: +
+            - button "Mention context" [ref=f4e215] [cursor=pointer]: "@"
+            - button "Dictate message" [ref=f4e216] [cursor=pointer]
+            - button "Queue ↵" [ref=f4e219] [cursor=pointer]:
+              - text: Queue
+              - generic [ref=f4e220]: ↵
+        - generic "Session status" [ref=f4e221]:
+          - generic [ref=f4e222]: ~/Developer/GitHub/MAWS/.claude/worktrees/charter
+          - generic [ref=f4e223]: ctx 41% of 1M
+          - generic [ref=f4e224]: ·
+          - generic [ref=f4e225]: 5h 74% ↻2h37m
+          - generic [ref=f4e226]: ·
+          - generic [ref=f4e227]: 7d 82%
+          - generic [ref=f4e228]: ·
+          - generic [ref=f4e229]: $3.41
+          - generic [ref=f4e230]: ·
+          - generic [ref=f4e231]: auto
+    - complementary "Session summary" [ref=f4e232]:
+      - generic [ref=f4e233]:
+        - button "Add tool tab" [ref=f4e234] [cursor=pointer]: +
+        - button "Pin summary across sessions" [pressed] [ref=f4e235] [cursor=pointer]
+      - generic [ref=f4e238]:
+        - heading "Session overview Charter + research" [level=2] [ref=f4e239]:
+          - text: Session overview
+          - generic [ref=f4e240]: Charter + research
+        - group [ref=f4e241]:
+          - generic "Environment" [ref=f4e242] [cursor=pointer]
+          - generic [ref=f4e245]:
+            - generic [ref=f4e246]:
+              - generic [ref=f4e247]: ⎇ charter
+              - button "Review" [ref=f4e248] [cursor=pointer]
+            - generic [ref=f4e249]:
+              - generic [ref=f4e250]: +2,559
+              - generic [ref=f4e251]: −321
+              - generic [ref=f4e252]: across 8 files
+        - group [ref=f4e253]:
+          - generic "Pull request" [ref=f4e254] [cursor=pointer]
+          - generic [ref=f4e257]:
+            - generic [ref=f4e258]: No pull request yet
+            - button "Create PR" [ref=f4e259] [cursor=pointer]
+        - group [ref=f4e260]:
+          - generic "Subagents" [ref=f4e261] [cursor=pointer]
+          - generic [ref=f4e264]:
+            - generic [ref=f4e265]:
+              - generic "Research and review agents" [ref=f4e266]
+              - button "Open" [ref=f4e275] [cursor=pointer]
+            - generic [ref=f4e276]: 3 working · 2 done
+        - group [ref=f4e277]:
+          - generic "Background work" [ref=f4e278] [cursor=pointer]
+          - generic [ref=f4e281]:
+            - generic [ref=f4e282]: 1 shell · 1 workflow
+            - button "Open" [ref=f4e283] [cursor=pointer]
+        - group [ref=f4e284]:
+          - generic "Sent files" [ref=f4e285] [cursor=pointer]
+          - generic [ref=f4e288]:
+            - generic [ref=f4e289]: charter.md, research/…
+            - button "Open" [ref=f4e290] [cursor=pointer]
+        - group [ref=f4e291]:
+          - generic "Sources" [ref=f4e292] [cursor=pointer]
+          - generic [ref=f4e295]:
+            - button "docs/charter.md MD" [ref=f4e296] [cursor=pointer]:
+              - text: docs/charter.md
+              - generic [ref=f4e299]: MD
+            - button "research/codex-shell-ux.md MD" [ref=f4e300] [cursor=pointer]:
+              - text: research/codex-shell-ux.md
+              - generic [ref=f4e303]: MD
+            - button "research/sdk-wire-gap.md MD" [ref=f4e304] [cursor=pointer]:
+              - text: research/sdk-wire-gap.md
+              - generic [ref=f4e307]: MD
+        - paragraph [ref=f4e308]: Tools stay with this session. Pin a tab to keep itwith you as you switch.
+  - region "Bash approval preview" [ref=f4e309]:
+    - generic [ref=f4e310]:
+      - generic [ref=f4e311]: ◐
+      - text: Approval needed
+      - button "Close approval preview" [ref=f4e312] [cursor=pointer]: ×
+    - heading "Push the sidebar fix" [level=2] [ref=f4e313]
+    - paragraph [ref=f4e314]: MAWS · Fix sidebar drag · waiting 8m
+    - generic [ref=f4e315]: git push origin feat/sidebar
+    - paragraph [ref=f4e316]: Publish the branch to origin. This sends local commits to the remote repository.
+    - generic [ref=f4e317]:
+      - generic [ref=f4e318]: This command only
+      - generic [ref=f4e319]:
+        - button "Deny" [ref=f4e320] [cursor=pointer]
+        - button "Approve" [ref=f4e321] [cursor=pointer]
