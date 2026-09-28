@@ -2,8 +2,11 @@
 // process, one row per line `{seq, direction, at, frame}`, one file per process launch under
 // `<userData>/engine-host/journal/<appSessionId>/<launchId>.jsonl`. The journal is the source of `EventBase.seq`,
 // the input to the replay transport, and what `session.events` reads when its ring no longer holds a range, so a row
-// is on disk (a synchronous append) before the host normalises it. Rotation at `maxBytes` continues in
-// `<launchId>.<n>.jsonl` with `seq` continuing; redaction is the probe's; pruning keeps the recent launches.
+// is on disk (a synchronous append) before the host normalises it and `row()` returns exactly the row the file holds:
+// the production journal is a faithful record (Reload survival, binding), never redacted; secrets never enter it
+// (the spawn row lists env key names only). The probe's redaction is applied only when a journal is exported as a
+// fixture (`redactJournal`, test/live/support/live.ts); the writer's `redact` option serves that path and tests.
+// Rotation at `maxBytes` continues in `<launchId>.<n>.jsonl` with `seq` continuing; pruning keeps recent launches.
 import { closeSync, createReadStream, existsSync, mkdirSync, openSync, readdirSync, readSync, rmdirSync, statSync, unlinkSync, writeSync } from 'node:fs';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
@@ -13,21 +16,7 @@ export const JOURNAL_MAX_BYTES = 128 * 1024 * 1024;
 export const JOURNAL_KEEP_PER_SESSION = 20;
 export const JOURNAL_MAX_AGE_DAYS = 30;
 
-// The probe's `redact`: values of environment keys that look secret (8+ characters, longest first so a value that
-// contains another is replaced whole), then `sk-ant-…` keys, then e-mail addresses other than local placeholders.
-export function createRedactor(env: Record<string, string>): (s: string) => string {
-  const secrets = Object.entries(env)
-    .filter(([key, value]) => /TOKEN|KEY|SECRET|PASSWORD/i.test(key) && value.length >= 8)
-    .map(([, value]) => value)
-    .sort((a, b) => b.length - a.length);
-  return (text) => {
-    let out = text;
-    for (const secret of secrets) out = out.split(secret).join('[REDACTED]');
-    return out
-      .replace(/sk-ant-[A-Za-z0-9_-]+/g, 'sk-ant-[REDACTED]')
-      .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+\.[A-Za-z.]{2,}/g, (m) => (/@(localhost|redacted\.invalid)$/.test(m) ? m : 'owner@redacted.invalid'));
-  };
-}
+const identity = (line: string) => line;
 
 export class JournalWriter {
   readonly path: string; // the launch's first file
@@ -37,11 +26,16 @@ export class JournalWriter {
   private bytes = 0;
   private seq = 0;
 
+  private readonly redact: (line: string) => string;
+
+  // `redact` transforms each serialised line before it is written; production passes none (identity). A writer given
+  // a redactor no longer returns what the file holds, which is why only the fixture-export path and tests use one.
   constructor(
     readonly dir: string,
     readonly launchId: string,
-    private readonly opts: { maxBytes: number; redact: (s: string) => string },
+    private readonly opts: { maxBytes: number; redact?: (line: string) => string },
   ) {
+    this.redact = opts.redact ?? identity;
     mkdirSync(dir, { recursive: true });
     this.path = join(dir, `${launchId}.jsonl`);
     this.current = this.path;
@@ -57,12 +51,11 @@ export class JournalWriter {
     return this.seq;
   }
 
-  // Appends the row synchronously and returns it unredacted (the live normaliser reads the row; the file is what a
-  // replay reads). Throws after close.
+  // Appends the row synchronously and returns it; with no redactor the file holds exactly this row. Throws after close.
   row(direction: JournalDirection, frame: unknown): JournalRow {
     if (this.fd === null) throw new Error(`journal ${this.path} is closed`);
     const row: JournalRow = { seq: this.seq + 1, direction, at: new Date().toISOString(), frame };
-    const line = this.opts.redact(JSON.stringify(row)) + '\n';
+    const line = this.redact(JSON.stringify(row)) + '\n';
     const length = Buffer.byteLength(line);
     if (this.bytes > 0 && this.bytes + length > this.opts.maxBytes) this.rotate();
     writeSync(this.fd, line);

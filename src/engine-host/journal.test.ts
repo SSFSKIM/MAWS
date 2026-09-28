@@ -3,15 +3,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { parseJournalRow, type JournalRow } from '@shared/wire/journal';
-import { createRedactor, JOURNAL_MAX_BYTES, JournalReader, JournalWriter, pruneJournals } from './journal';
+import { createRedactor, redactJournal } from '../../test/live/support/live';
+import { JOURNAL_MAX_BYTES, JournalReader, JournalWriter, pruneJournals } from './journal';
 
 let root: string;
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'maws-journal-'));
 });
 afterEach(() => rmSync(root, { recursive: true, force: true }));
-
-const identity = (s: string) => s;
 
 function readRows(path: string): JournalRow[] {
   return readFileSync(path, 'utf8')
@@ -41,7 +40,7 @@ describe('transport frames and journals', () => {
   describe('JournalWriter', () => {
     it('writes X8 rows with consecutive seq under <dir>/<launchId>.jsonl and creates the directory', () => {
       const dir = join(root, 'app-1');
-      const writer = new JournalWriter(dir, 'abcdefgh', { maxBytes: JOURNAL_MAX_BYTES, redact: identity });
+      const writer = new JournalWriter(dir, 'abcdefgh', { maxBytes: JOURNAL_MAX_BYTES });
       expect(writer.path).toBe(join(dir, 'abcdefgh.jsonl'));
       const spawn = writer.row('meta', { event: 'spawn' });
       const out = writer.row('out', { type: 'keep_alive' });
@@ -55,27 +54,46 @@ describe('transport frames and journals', () => {
       expect(rows[1]).toEqual(out);
     });
 
-    it('redacts a sk-ant token inside an out frame and e-mail addresses, through the given redactor', () => {
-      const writer = new JournalWriter(join(root, 'app-1'), 'abcdefgh', {
-        maxBytes: JOURNAL_MAX_BYTES,
-        redact: createRedactor({ ANTHROPIC_AUTH_TOKEN: 'claudeusage-local-gateway', MY_API_KEY: 'super-secret-value', SHORT_KEY: 'abc' }),
-      });
+    it('is a faithful record in production: a frame with an e-mail address and a sk-ant token round-trips byte-identical', () => {
+      const writer = new JournalWriter(join(root, 'app-1'), 'abcdefgh', { maxBytes: JOURNAL_MAX_BYTES });
+      const frame = { type: 'user', message: { role: 'user', content: 'mail owner@example.com the key sk-ant-api03-abcDEF_123 and super-secret-value' } };
+      const row = writer.row('out', frame);
+      const text = readFileSync(writer.path, 'utf8');
+      expect(text).toBe(JSON.stringify(row) + '\n');
+      expect(parseJournalRow(JSON.parse(text.trimEnd()))).toEqual(row);
+      expect(text).toContain('owner@example.com');
+      expect(text).toContain('sk-ant-api03-abcDEF_123');
+    });
+
+    it('applies a redactor only when given one (the fixture-export path), and redactJournal rewrites both', () => {
+      const env = { ANTHROPIC_AUTH_TOKEN: 'claudeusage-local-gateway', MY_API_KEY: 'super-secret-value', SHORT_KEY: 'abc' };
+      const writer = new JournalWriter(join(root, 'app-1'), 'abcdefgh', { maxBytes: JOURNAL_MAX_BYTES, redact: createRedactor(env) });
       writer.row('out', { type: 'user', message: { content: 'use sk-ant-api03-abcDEF_123 and super-secret-value for owner@example.com, abc stays' } });
       const text = readFileSync(writer.path, 'utf8');
       expect(text).not.toContain('sk-ant-api03-abcDEF_123');
       expect(text).toContain('sk-ant-[REDACTED]');
       expect(text).not.toContain('super-secret-value');
-      expect(text).toContain('[REDACTED]');
       expect(text).not.toContain('owner@example.com');
       expect(text).toContain('owner@redacted.invalid');
       expect(text).toContain('abc stays');
       expect(text).not.toContain('claudeusage-local-gateway'); // a TOKEN-named value is redacted even when it is the public marker
+
+      const faithful = new JournalWriter(join(root, 'app-2'), 'abcdefgh', { maxBytes: JOURNAL_MAX_BYTES });
+      faithful.row('out', { type: 'user', message: { content: 'owner@example.com sk-ant-api03-abcDEF_123' } });
+      faithful.row('meta', { event: 'exit', by: 'probe@localhost' });
+      const redacted = redactJournal(readFileSync(faithful.path, 'utf8'), env);
+      expect(redacted).not.toContain('owner@example.com');
+      expect(redacted).not.toContain('sk-ant-api03-abcDEF_123');
+      expect(redacted).toContain('owner@redacted.invalid');
+      expect(redacted).toContain('sk-ant-[REDACTED]');
+      expect(redacted).toContain('probe@localhost');
+      expect(redacted.split('\n').filter((l) => l.length > 0).map((l) => parseJournalRow(JSON.parse(l)).seq)).toEqual([1, 2]);
     });
 
     it('rolls a 128 MiB file to <launchId>.1.jsonl with seq continuing', async () => {
       expect(JOURNAL_MAX_BYTES).toBe(128 * 1024 * 1024);
       const dir = join(root, 'app-1');
-      const writer = new JournalWriter(dir, 'abcdefgh', { maxBytes: JOURNAL_MAX_BYTES, redact: identity });
+      const writer = new JournalWriter(dir, 'abcdefgh', { maxBytes: JOURNAL_MAX_BYTES });
       const payload = 'x'.repeat(1024 * 1024); // ~1 MiB per row
       let last: JournalRow | null = null;
       for (let i = 0; i < 130; i += 1) last = writer.row('in', { type: 'assistant', payload });
@@ -94,7 +112,7 @@ describe('transport frames and journals', () => {
     });
 
     it('refuses rows after close', async () => {
-      const writer = new JournalWriter(join(root, 'app-1'), 'abcdefgh', { maxBytes: JOURNAL_MAX_BYTES, redact: identity });
+      const writer = new JournalWriter(join(root, 'app-1'), 'abcdefgh', { maxBytes: JOURNAL_MAX_BYTES });
       await writer.close();
       expect(() => writer.row('meta', { event: 'exit' })).toThrow(/closed/);
     });
@@ -103,7 +121,7 @@ describe('transport frames and journals', () => {
   describe('JournalReader', () => {
     it('streams parsed rows back and lists a session\'s launch files in launch order with their rotations', async () => {
       const dir = join(root, 'app-1');
-      const writer = new JournalWriter(dir, 'launch2b', { maxBytes: 200, redact: identity });
+      const writer = new JournalWriter(dir, 'launch2b', { maxBytes: 200 });
       writer.row('meta', { event: 'spawn', pad: 'x'.repeat(120) });
       writer.row('in', { type: 'system', pad: 'x'.repeat(120) });
       writer.row('meta', { event: 'exit' });

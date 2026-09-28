@@ -45,7 +45,9 @@ export class TransportClosed extends Error {
 }
 
 export class LineBudgetExceeded extends Error {
-  constructor(readonly length: number, readonly maxLineChars: number) {
+  // `lines`: the complete lines the same chunk closed before the remainder passed the budget; they are valid and
+  // must be delivered before the error, in order.
+  constructor(readonly length: number, readonly maxLineChars: number, readonly lines: string[]) {
     super(`line budget exceeded: an unterminated stdout line reached ${length} characters (budget ${maxLineChars})`);
     this.name = 'LineBudgetExceeded';
   }
@@ -67,7 +69,8 @@ export class LineSplitter {
   }
 
   // Returns the complete lines the chunk closed, cleaned; throws LineBudgetExceeded once the unterminated remainder
-  // passes the budget (the remainder is dropped so a caller that continues does not throw again on the same bytes).
+  // passes the budget, carrying the lines this chunk completed first (the remainder is dropped so a caller that
+  // continues does not throw again on the same bytes).
   push(chunk: Buffer | string): string[] {
     const text = typeof chunk === 'string' ? chunk : this.decoder.write(chunk);
     const lines: string[] = [];
@@ -93,7 +96,7 @@ export class LineSplitter {
         const length = this.pendingChars;
         this.parts = [];
         this.pendingChars = 0;
-        throw new LineBudgetExceeded(length, this.maxLineChars);
+        throw new LineBudgetExceeded(length, this.maxLineChars, lines);
       }
       this.parts.push(rest);
     }
@@ -200,6 +203,7 @@ export function spawnEngine(plan: LaunchPlan, opts: { maxLineChars: number }): E
       lines = stdoutLines.push(chunk);
     } catch (error) {
       const budget = error as LineBudgetExceeded;
+      for (const line of budget.lines) frames.push(parseLine(line)); // what the chunk completed before the overflow, in order
       frames.push({ frame: null, raw: '', error: { kind: 'line_budget', message: budget.message, length: budget.length, typeGuess: null } });
       child.stdout.destroy();
       child.kill('SIGKILL');

@@ -13,13 +13,46 @@ import type { LaunchSpec } from '@shared/engine/launch-spec';
 import { LaunchSpecSchema } from '@shared/engine/launch-spec';
 import { captureShellEnvironment } from '@shared/host/shell-env';
 import type { JournalRow } from '@shared/wire/journal';
-import { createRedactor, JOURNAL_MAX_BYTES, JournalWriter } from '../../../src/engine-host/journal';
+import { JOURNAL_MAX_BYTES, JournalWriter } from '../../../src/engine-host/journal';
 import { buildLaunch, ENGINE_BIN, ENGINE_VERSION, RELAY_URL, spawnMeta, type LaunchPlan } from '../../../src/engine-host/launch';
 import { checkRelay } from '../../../src/engine-host/relay-health';
 import { MAX_LINE_CHARS, spawnEngine, type EngineTransport } from '../../../src/engine-host/transport';
 
 export const LIVE_MAX_BUDGET_USD = 0.5;
 export const LIVE_APP_VERSION = '0.0.0-live';
+
+// The probe's `redact`, applied when a live run's journal is exported as a pass-3 fixture (M6), never by the
+// production writer (the journal is a faithful record; Interfaces, Journal): values of environment keys that look
+// secret (8+ characters, longest first so a value containing another is replaced whole), then `sk-ant-…` keys, then
+// e-mail addresses other than local placeholders.
+export function createRedactor(env: Record<string, string>): (text: string) => string {
+  const secrets = Object.entries(env)
+    .filter(([key, value]) => /TOKEN|KEY|SECRET|PASSWORD/i.test(key) && value.length >= 8)
+    .map(([, value]) => value)
+    .sort((a, b) => b.length - a.length);
+  return (text) => {
+    let out = text;
+    for (const secret of secrets) out = out.split(secret).join('[REDACTED]');
+    return out
+      .replace(/sk-ant-[A-Za-z0-9_-]+/g, 'sk-ant-[REDACTED]')
+      .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+\.[A-Za-z.]{2,}/g, (m) => (/@(localhost|redacted\.invalid)$/.test(m) ? m : 'owner@redacted.invalid'));
+  };
+}
+
+// Redacts a journal file's text line by line; `env` defaults to the process environment (the exporter's shell).
+export function redactJournal(text: string, env: Record<string, string> = stringEnv(process.env)): string {
+  const redact = createRedactor(env);
+  return text
+    .split('\n')
+    .map((line) => redact(line))
+    .join('\n');
+}
+
+function stringEnv(env: NodeJS.ProcessEnv): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(env)) if (typeof value === 'string') out[key] = value;
+  return out;
+}
 
 export interface LiveContext {
   userData: string; // the test's temp userData; journals live under <userData>/engine-host/journal
@@ -91,10 +124,7 @@ export interface RawProcess {
 export async function withRawProcess(ctx: LiveContext, spec: LaunchSpec, fn: (p: RawProcess) => Promise<void>): Promise<{ journalPath: string; rows: JournalRow[] }> {
   const captured = await captureShellEnvironment();
   const plan = buildLaunch(spec, captured, { relayUrl: RELAY_URL, engineVersion: ENGINE_VERSION });
-  const journal = new JournalWriter(join(ctx.userData, 'engine-host', 'journal', spec.appSessionId), plan.launchId, {
-    maxBytes: JOURNAL_MAX_BYTES,
-    redact: createRedactor(captured),
-  });
+  const journal = new JournalWriter(join(ctx.userData, 'engine-host', 'journal', spec.appSessionId), plan.launchId, { maxBytes: JOURNAL_MAX_BYTES });
   const rows: JournalRow[] = [];
   const stderr: string[] = [];
   const pending = new Map<string, (response: ControlResponse) => void>();

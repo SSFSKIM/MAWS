@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { LaunchPlan } from './launch';
-import { LineSplitter, MAX_LINE_CHARS, spawnEngine, type EngineTransport, type TransportItem } from './transport';
+import { LineBudgetExceeded, LineSplitter, MAX_LINE_CHARS, spawnEngine, type EngineTransport, type TransportItem } from './transport';
 
 // A fake engine is `node -e <script>` run through the real transport: the plan is the X6 shape with the bin swapped.
 function fakeEngine(script: string): LaunchPlan {
@@ -74,6 +74,20 @@ describe('transport frames and journals', () => {
       expect(splitter.push(Buffer.from('12345678\n'))).toEqual(['12345678']);
       expect(() => splitter.push(Buffer.from('123456789'))).toThrow(/line budget/);
     });
+
+    it('hands over the lines a chunk completed before its remainder passed the budget', () => {
+      const splitter = new LineSplitter(8);
+      let caught: unknown;
+      try {
+        splitter.push(Buffer.from('{"a":1}\n{"b":2}\n123456789'));
+      } catch (error) {
+        caught = error;
+      }
+      expect(caught).toBeInstanceOf(LineBudgetExceeded);
+      expect((caught as LineBudgetExceeded).lines).toEqual(['{"a":1}', '{"b":2}']);
+      expect((caught as LineBudgetExceeded).length).toBe(9);
+      expect(splitter.pending).toBe(0);
+    });
   });
 
   describe('spawnEngine', () => {
@@ -127,6 +141,17 @@ describe('transport frames and journals', () => {
       expect((items[0]!.error as { message: string }).message).toMatch(/line budget/);
       const exit = await withTimeout(transport.exited, 10_000, 'exit');
       expect(exit.signal).toBe('SIGKILL');
+    });
+
+    it('delivers a frame completed in the same chunk before the line-budget error that follows it', async () => {
+      // One valid frame, then 40 unterminated characters, in one write; budget 32.
+      const script = `process.stdout.write('{"ok":1}\\n' + 'x'.repeat(40)); setInterval(() => {}, 1000);`;
+      const transport = spawnEngine(fakeEngine(script), { maxLineChars: 32 });
+      const items = await withTimeout(collect(transport.frames), 10_000, 'frames');
+      expect(items).toHaveLength(2);
+      expect(items[0]).toEqual({ frame: { ok: 1 }, raw: '{"ok":1}', error: null });
+      expect(items[1]).toMatchObject({ frame: null, error: { kind: 'line_budget', length: 40 } });
+      expect((await withTimeout(transport.exited, 10_000, 'exit')).signal).toBe('SIGKILL');
     });
 
     it('kill() ends the process and exited reports the signal', async () => {
