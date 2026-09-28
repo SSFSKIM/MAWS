@@ -14,7 +14,7 @@ What nobody can do yet, and C1 does not attempt: talk to a real engine (C3), rea
 - [x] M2 — X1 shared types and validators against the probe fixtures (2026-09-28 06:40, commits 08cf082, 610acda, fix 677b4f3; task review clean)
 - [x] M3 — X2 IPC schema, transport and theme switching end to end (2026-09-28 06:50, commit c6c3e61, fix 41c9ea6; task review clean)
 - [x] M4 — Utility processes: engine host and PTY host (2026-09-28 07:20, commit c0ef53b, fix a9f4332; task review clean)
-- [ ] M5 — End-to-end smoke, packaging, `pnpm verify`, acceptance run
+- [x] M5 — End-to-end smoke, packaging, `pnpm verify`, acceptance run (2026-09-28 08:05, commits 51dd2c4, 5969bd7, fix f8cc643; task review clean; acceptance items 1 to 7 observed in order from a clean checkout on the owner's Mac, evidence in the M5 report and in Outcomes below)
 
 ## Terms
 
