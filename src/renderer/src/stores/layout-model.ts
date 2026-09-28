@@ -46,9 +46,13 @@ function without(pane: PaneState, id: string): PaneState {
   return { tabs, activeTabId: (tabs[index] ?? tabs[index - 1]).id };
 }
 
+// Index 0 belongs to Overview wherever it is (§5.2: first and permanent), Overview itself included when it moves;
+// then the pinned tabs, then the rest. `index` is clamped into the tab's own region.
 function insertAt(pane: PaneState, tab: TabRef, index: number, activate: boolean): PaneState {
-  const pinnedCount = pane.tabs.filter((t) => t.pinned).length;
-  const at = tab.pinned ? Math.min(index, pinnedCount) : Math.max(Math.min(index, pane.tabs.length), pinnedCount);
+  const floor = tab.kind === 'overview' ? 0 : pane.tabs[0]?.kind === 'overview' ? 1 : 0;
+  const pinnedEnd = pane.tabs.filter((t) => t.pinned).length; // Overview is pinned and first, so this is the pinned region's end
+  const clamp = (lo: number, hi: number) => Math.max(lo, Math.min(index, hi));
+  const at = tab.kind === 'overview' ? 0 : tab.pinned ? clamp(floor, pinnedEnd) : clamp(pinnedEnd, pane.tabs.length);
   const tabs = [...pane.tabs.slice(0, at), tab, ...pane.tabs.slice(at)];
   return { tabs, activeTabId: activate ? tab.id : pane.activeTabId };
 }
@@ -185,13 +189,16 @@ export function setSplitRatio(main: LayoutMain, ratio: number): LayoutMain {
   return { ...main, splitRatio: Math.min(0.75, Math.max(0.25, ratio)) };
 }
 
-// Hydration: a session or agent tab whose record no longer exists is dropped silently, Overview exists exactly once,
-// every pane's active tab is one of its tabs, and an empty result falls back to the default.
+// Hydration: a session or agent tab whose record no longer exists is dropped silently; Overview exists exactly once
+// and leads its pane, pinned tabs precede the rest, every pane's active tab is one of its tabs, and an empty result
+// falls back to the default.
 export function repairMain(main: LayoutMain, known: (appSessionId: AppSessionId) => boolean): LayoutMain {
   const keep = (t: TabRef) => (t.kind !== 'session' && t.kind !== 'agent') || known(t.appSessionId);
   const seen = new Set<string>();
   const panes = main.panes.map((p): PaneState => {
-    const tabs = p.tabs.filter((t) => keep(t) && !seen.has(t.id) && seen.add(t.id));
+    const tabs = pinnedFirst(p.tabs.filter((t) => keep(t) && !seen.has(t.id) && seen.add(t.id)));
+    const overview = tabs.findIndex((t) => t.kind === 'overview');
+    if (overview > 0) tabs.unshift(...tabs.splice(overview, 1)); // a hand-edited file cannot move Overview off index 0
     return { tabs, activeTabId: tabs.some((t) => t.id === p.activeTabId) ? p.activeTabId : (tabs[0]?.id ?? '') };
   });
   if (!seen.has('overview')) {

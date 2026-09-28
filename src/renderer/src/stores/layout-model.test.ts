@@ -10,6 +10,7 @@ const S = (id: string) => ({ kind: 'session' as const, appSessionId: id as AppSe
 const ids = (main: LayoutMain) => main.panes.map((p) => p.tabs.map((t) => t.id));
 const active = (main: LayoutMain) => main.panes.map((p) => p.activeTabId);
 const base = LAYOUT_DEFAULTS.main;
+const A_ID = 'a' as AppSessionId;
 // Overview, a, b, c in pane 0 with c active.
 const abc = () => [S('a'), S('b'), S('c')].reduce((m, t) => openTab(m, t), base);
 const split = () => openSession(abc(), 'd' as AppSessionId, { split: true }); // pane 1: [d]
@@ -139,6 +140,27 @@ describe('layout store transitions', () => {
     expect(m).toMatchObject({ focusedPane: 1, splitRatio: 0.5 });
   });
 
+  it('keeps Overview first: a pinned tab reordered to index 0 lands after it', () => {
+    const pinnedA = togglePinned(openTab(base, S('a')), 'session:a'); // [overview, pinned a]
+    expect(ids(moveTab(pinnedA, 'session:a', 0, 0))).toEqual([['overview', 'session:a']]);
+    const unpinned = moveTab(abc(), 'session:c', 0, 0);
+    expect(ids(unpinned)).toEqual([['overview', 'session:c', 'session:a', 'session:b']]);
+  });
+
+  it('keeps Overview first when Overview itself is moved, into a pane with a pinned tab or within its own', () => {
+    const withPinned = togglePinned(split(), 'session:d'); // pane 1: [pinned d]
+    const moved = moveTab(withPinned, 'overview', 1, 1);
+    expect(ids(moved)).toEqual([['session:a', 'session:b', 'session:c'], ['overview', 'session:d']]);
+    expect(ids(moveTab(abc(), 'overview', 0, 3))).toEqual([['overview', 'session:a', 'session:b', 'session:c']]);
+  });
+
+  it('keeps Overview first when a pinned tab crosses into its pane', () => {
+    const overviewRight = moveTab(split(), 'overview', 1, 0); // pane 0: [a, b, c], pane 1: [overview, d]
+    const pinnedB = togglePinned(overviewRight, 'session:b');
+    const crossed = moveTab(pinnedB, 'session:b', 1, 0);
+    expect(ids(crossed)).toEqual([['session:a', 'session:c'], ['overview', 'session:b', 'session:d']]);
+  });
+
   it('clamps the split ratio to 0.25–0.75', () => {
     expect(setSplitRatio(split(), 0.9).splitRatio).toBe(0.75);
     expect(setSplitRatio(split(), 0.1).splitRatio).toBe(0.25);
@@ -153,5 +175,7 @@ describe('layout store transitions', () => {
     expect(repairMain(noOverview, known)).toEqual(base);
     const lostOverview: LayoutMain = { ...base, panes: [{ tabs: [{ id: 'session:a', kind: 'session', appSessionId: 'a' as AppSessionId, pinned: false }], activeTabId: 'session:a' }] };
     expect(ids(repairMain(lostOverview, known))).toEqual([['overview', 'session:a']]);
+    const misplaced: LayoutMain = { ...base, panes: [{ tabs: [{ id: 'session:a', kind: 'session', appSessionId: A_ID, pinned: true }, base.panes[0].tabs[0]], activeTabId: 'session:a' }] };
+    expect(ids(repairMain(misplaced, known))).toEqual([['overview', 'session:a']]);
   });
 });

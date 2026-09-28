@@ -6,7 +6,6 @@
 // annotations (which probe journal a value was copied from, what was invented) and are dropped before validation.
 import { readFileSync } from 'node:fs';
 import * as z from 'zod';
-import { RELAY_URL } from '../../src/engine-host/launch';
 import { AttentionItemSchema } from '../../src/shared/graph/attention';
 import { SessionEventSchema, type SessionEvent } from '../../src/shared/graph/events';
 import { AppSessionIdSchema, type AppSessionId } from '../../src/shared/graph/ids';
@@ -15,6 +14,10 @@ import { EffortSchema } from '../../src/shared/engine/launch-spec';
 import { EngineSessionStatusSchema, type EngineSessionStatus } from '../../src/shared/engine/status';
 import { ProjectRecordSchema, SessionDigestSchema, type ProjectRecord } from '../../src/shared/ipc/schema/session';
 import type { AttentionItem } from '../../src/shared/graph/attention';
+
+// The gateway relay's URL, the value of C3's `RELAY_URL` in `src/engine-host/launch.ts`. Held here rather than imported:
+// this loader ships in the main bundle through the stub source, and C3's launch module is engine-host code.
+export const RELAY_URL = 'http://127.0.0.1:8641';
 
 const StatusShape = EngineSessionStatusSchema.shape;
 // The compact turn may leave out `acceptedAt`; the expansion fills it with `startedAt` (a mid-turn session was accepted).

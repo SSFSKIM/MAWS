@@ -6,8 +6,10 @@ describe('session read side and the entries C5 consumes', () => {
   it('accepts the hover card’s two answers and nothing with a null message', () => {
     const answer = (a: unknown) => validateCommandInput('session.answer', { appSessionId: 's1', requestId: 'r1', answer: a }).ok;
     expect(answer({ kind: 'permission', decision: 'allow', scope: 'once' })).toBe(true);
-    expect(answer({ kind: 'permission', decision: 'deny', scope: 'once' })).toBe(true);
-    expect(answer({ kind: 'permission', decision: 'deny', scope: 'once', message: null })).toBe(false);
+    expect(answer({ kind: 'permission', decision: 'deny' })).toBe(true);
+    expect(answer({ kind: 'permission', decision: 'deny', message: null })).toBe(false);
+    expect(answer({ kind: 'permission', decision: 'deny', scope: 'once' })).toBe(false); // a denial has no scope
+    expect(answer({ kind: 'permission', decision: 'allow' })).toBe(false); // an allowance needs one
   });
 
   it('requires a session patch to set at least one field', () => {
