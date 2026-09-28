@@ -88,6 +88,34 @@ describe('turn boundaries', () => {
     expect(state.turns.get(turnId.ofMessage(uuid('u1')))!.state).toBe('closed');
   });
 
+  it('a late cancel for a steer the closing turn.ended did not name still marks it dropped (consumption, not timing)', () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('t1', 'Bash', { command: 'a' });
+    b.emit('user.message', { messageUuid: uuid('u2'), content: 'steer text', isReplay: false, isSynthetic: false, origin: 'human', bash: null });
+    b.result('t1', 'ok');
+    b.text('m1', 0, 'Done');
+    b.end(['u1']); // the result names the opener only: the steer was never consumed
+    let state = reduce(b.events);
+    expect(find(rowsOf(state), 'user', 1)).toMatchObject({ steer: true, dropped: false });
+    state = applyEvents(state, [b.emit('command.lifecycle', { commandUuid: uuid('u2'), state: 'cancelled' })]);
+    expect(find(rowsOf(state), 'user', 1)).toMatchObject({ id: rowId.user(uuid('u2')), steer: true, dropped: true });
+    expect(state.turns.get(turnId.ofMessage(uuid('u1')))!.state).toBe('closed');
+  });
+
+  it('a late cancel for a steer the closing turn.ended did name cannot un-send it', () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('t1', 'Bash', { command: 'a' });
+    b.emit('user.message', { messageUuid: uuid('u2'), content: 'steer text', isReplay: false, isSynthetic: false, origin: 'human', bash: null });
+    b.result('t1', 'ok');
+    b.text('m1', 0, 'Done');
+    b.end(['u1', 'u2']); // the engine consumed the steer in this turn
+    let state = reduce(b.events);
+    state = applyEvents(state, [b.emit('command.lifecycle', { commandUuid: uuid('u2'), state: 'cancelled' })]);
+    expect(find(rowsOf(state), 'user', 1)).toMatchObject({ id: rowId.user(uuid('u2')), steer: true, dropped: false });
+  });
+
   it('an idle prompt dropped before its init closes on the cancelled turn.ended, its user row dropped, no divider', () => {
     const b = builder();
     b.turn('u1');

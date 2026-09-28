@@ -160,9 +160,11 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): { rows: Row
   }
   const dropped = (messageUuid: string | null) => messageUuid !== null && (retracted.has(messageUuid) || superseded.has(messageUuid));
   const openerDropped = turn.ended?.terminalReason === 'cancelled'; // an idle prompt dropped before its init
+  // A steer the closing result named was consumed: a late lifecycle cannot un-send it (consumption, not timing).
+  const consumed = new Set<string>(turn.ended?.userMessageUuids ?? []);
   const userRow = (event: Event<'user.message'>, id: RowId, editable: boolean, steer: boolean): RowOf<'user'> => {
     const text = userTextOf(event.content);
-    const isDropped = steer ? event.messageUuid !== null && cancelled.has(event.messageUuid) : openerDropped;
+    const isDropped = steer ? event.messageUuid !== null && cancelled.has(event.messageUuid) && !consumed.has(event.messageUuid) : openerDropped;
     return { id, turnId: turn.id, at: event.at, kind: 'user', messageUuid: event.messageUuid, text: text.text, attachments: text.attachments, lines: text.lines, editable, steer, dropped: isDropped };
   };
 

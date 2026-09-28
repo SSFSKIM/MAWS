@@ -238,9 +238,10 @@ function apply(batch: Batch, event: SessionEvent): void {
       return;
     }
     case 'command.lifecycle': {
-      // *Steers and dropped prompts*: a cancel naming a steer marks that steer's row dropped and nothing else. One naming
-      // a turn's opening prompt is a no-op here (an idle drop arrives as `turn.ended { terminalReason: 'cancelled' }`
-      // from the wire; after a result it changes nothing). The reducer never closes a turn on a lifecycle event.
+      // *Steers and dropped prompts*: a cancel naming a steer marks that steer's row dropped and nothing else, before or
+      // after the turn's result (derive.ts skips a steer the closing `turn.ended.userMessageUuids` named: consumed). One
+      // naming a turn's opening prompt is a no-op here (an idle drop arrives as `turn.ended { terminalReason:
+      // 'cancelled' }` from the wire; after a result it changes nothing). The reducer never closes a turn on a lifecycle.
       if (event.state !== 'cancelled' && event.state !== 'discarded' && event.state !== 'refused') return;
       const owner = index.messages.get(event.commandUuid);
       if (owner === undefined || turnIdOf.ofMessage(event.commandUuid) === owner) return;
