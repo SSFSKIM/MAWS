@@ -12,6 +12,7 @@ import type { StdinFrame } from '@shared/wire/frames';
 import type { JournalRow } from '@shared/wire/journal';
 import { loadJournal, type FixturePass } from '../../../test/support/fixtures';
 import { buildLaunch, ENGINE_VERSION, RELAY_URL } from '../launch';
+import { Normalizer } from '../normalizer';
 import { replayEngine, type ReplayTransport } from '../replay-transport';
 import { EngineSession } from '../session';
 import { handshakePrelude } from './harness';
@@ -23,6 +24,7 @@ interface Replayed {
   events: SessionEvent[];
   states: Map<string, string[]>; // request id → the states its attention item showed, in order, 'gone' once it left the list
   fixture: JournalRow[];
+  rebuilt: () => SessionEvent[]; // the journal re-read through a fresh normaliser
 }
 
 // Replays `pass/name` through an EngineSession. `human(item)` answers each new pending item (or null to leave it);
@@ -78,7 +80,11 @@ async function replaySession(pass: FixturePass, name: string, opts: { human?: (i
   });
   await session.start();
   await session.exited;
-  return { session, journal, events, states, fixture };
+  const rebuilt = () => {
+    const normalizer = new Normalizer({ appSessionId: spec.appSessionId, launchId: plan.launchId, sessionId: plan.sessionId });
+    return journal.rows.flatMap((row) => normalizer.push(row));
+  };
+  return { session, journal, events, states, fixture, rebuilt };
 }
 
 const metaRows = (journal: MemoryJournal, event: string) => journal.rows.filter((r) => r.direction === 'meta' && (r.frame as { event?: string }).event === event);
@@ -109,6 +115,8 @@ describe('permission broker states and the approvals-lost rule', () => {
     expect(ofKind(run.events, 'tool.result').find((r) => r.toolUseId === 'toolu_01WfZTvMV6147Psn1MBSesXw')).toMatchObject({ denial: 'permission-rule' });
     expect(run.session.status()).toMatchObject({ grants: [], gateway: { verified: 'routed' }, process: 'exited', pendingRequests: 0 });
     expect(ofKind(run.events, 'process.exited')).toMatchObject([{ lostAttentionCount: 0 }]);
+    // every event derived from a journal row the session wrote first: the journal rebuilds the live graph exactly
+    expect(run.rebuilt()).toEqual(run.events);
   });
 
   it('pass2/grant-reapply-start: an allow with scope session sends seq 32\'s updatedPermissions and the snapshot records the rule', async () => {
@@ -167,5 +175,6 @@ describe('id-less requests retire at the turn\'s end', () => {
     expect(ofKind(run.events, 'turn.ended').filter((e) => !e.isEchoReceipt)).toEqual([]);
     expect(ofKind(run.events, 'process.exited')).toMatchObject([{ lostAttentionCount: 1, reason: 'crash', signal: 'SIGKILL' }]);
     expect(metaRows(run.journal, 'exit').map((r) => (r.frame as { lostAttentionCount: number }).lostAttentionCount)).toEqual([1]);
+    expect(run.rebuilt()).toEqual(run.events);
   });
 });

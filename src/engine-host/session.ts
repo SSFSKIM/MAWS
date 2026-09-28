@@ -229,7 +229,7 @@ export class EngineSession {
     if (this.journalClosed) throw new Error(`journal closed: ${direction} row not recorded after the exit`);
     const row = this.journal.row(direction, frame);
     const events = this.normalizer.push(row);
-    for (const w of this.pendingWarnings.splice(0)) this.journal.row('meta', { event: w.event, rowSeq: w.seq, detail: w.detail }); // no events derive from these
+    for (const w of this.pendingWarnings.splice(0)) this.record('meta', { event: w.event, rowSeq: w.seq, detail: w.detail }); // journaled and normalised like any row; they yield no events
     if (events.length > 0) {
       this.lastEventSeq = row.seq;
       this.eventLog.push(...events);
@@ -261,7 +261,8 @@ export class EngineSession {
     const draining = this.stderrLoop(transport);
     void Promise.all([reading, draining])
       .then(() => transport.exited)
-      .then((exit) => this.handleExit(exit));
+      .then((exit) => this.handleExit(exit))
+      .catch((error: unknown) => this.log(`exit not handled: ${messageOf(error)}`));
     this.setProcess('initializing');
     this.touch();
 
