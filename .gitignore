@@ -5,3 +5,6 @@ out/
 *.log
 spikes/**/fixtures/private/
 .env
+.doperpowers/sde/
+test-results/
+playwright-report/
