@@ -1,11 +1,11 @@
 // The shell's frame (C5 execution document, M2): the toolbar across the top and the three regions on a CSS grid whose
 // columns are the layout store's widths (`regions.ts`). A collapsed region keeps its column at 0 and stays mounted but
 // inert; a maximized panel takes the main column's place while the main region keeps its state offscreen. The sidebar
-// is M3's; the main region's contents arrive with M4, and until then it holds C1's diagnostics strip.
+// is M3's, the main region's panes M4's (C1's diagnostics strip is now the content of the Diagnostics tab).
+import { MainArea } from '../main/MainArea';
 import { PanelRegion } from '../panel/PanelRegion';
 import { Sidebar } from '../sidebar/Sidebar';
 import { useLayout } from '../stores/layout';
-import { Diagnostics } from './Diagnostics';
 import { COLLAPSE_THRESHOLD_PX, gridColumns, SIDEBAR_BOUNDS, sidebarWidth } from './regions';
 import { Resizer } from './Resizer';
 import { Toolbar } from './Toolbar';
@@ -28,7 +28,7 @@ export function Shell() {
         inert={mainHidden}
         className="col-start-2 row-start-2 flex min-h-0 min-w-0 flex-col overflow-hidden"
       >
-        <Diagnostics />
+        <MainArea />
       </section>
       <PanelRegion />
     </div>

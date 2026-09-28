@@ -71,7 +71,7 @@ describe('shell frame', () => {
     act(() => useLayout.getState().setPanel({ maximized: true }));
     expect(grid().style.gridTemplateColumns).toBe('300px 0px minmax(0, 1fr)');
     expect(region('main').inert).toBe(true);
-    expect(within(region('main')).getByLabelText('Diagnostics')).toBeTruthy();
+    expect(within(region('main')).getByRole('tablist', { name: 'Open tabs' })).toBeTruthy();
     expect(screen.getAllByRole('separator').map((s) => s.getAttribute('aria-controls'))).toEqual([region('sidebar').id]);
   });
 

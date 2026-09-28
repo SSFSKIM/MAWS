@@ -78,6 +78,7 @@ function fakeMain(initial: SettingsState['settings']['theme']) {
         return { value: null };
       case 'layout.set':
       case 'layout.setEnabledActions':
+      case 'session.setVisible':
         return undefined;
       // C5 end
       case 'pty.spawn':
@@ -100,13 +101,19 @@ function fakeMain(initial: SettingsState['settings']['theme']) {
       return () => listeners.get(name)!.delete(listener);
     }),
   } as unknown as MawsBridge;
+  current = { send };
   return { send };
 }
 
+let current: { send(name: string, payload: unknown): void } | null = null;
+
+// The strip lives in the Diagnostics tab (C5 M4): the app opens, then Help › Diagnostics arrives from the menu.
 async function renderApp() {
   vi.resetModules(); // a fresh settings store per test
   const { App } = await import('./App');
   await act(async () => void render(<App />));
+  await act(async () => current!.send('layout.action', { action: 'diagnostics.open', arg: null }));
+  await act(async () => void (await new Promise((resolve) => setTimeout(resolve, 0))));
 }
 
 describe('theme in the page', () => {

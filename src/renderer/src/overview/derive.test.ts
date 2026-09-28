@@ -6,7 +6,7 @@ import { digest, item, project, record } from '../../../../test/support/builders
 import { TEST_FIXTURE_DIR } from '../../../../test/support/fixtures';
 import { loadScenario } from '../../../../test/support/scenario';
 import { needsYou } from '../attention/derive';
-import { orderProjects, overviewCards, overviewGroups, sortSessions } from './derive';
+import { cardActivity, cardFooter, orderProjects, overviewCards, overviewGroups, sortSessions } from './derive';
 
 const scenario = loadScenario(join(TEST_FIXTURE_DIR, 'shell/nine-sessions.json'));
 const records = new Map(scenario.sessions.map((r) => [r.appId, r]));
@@ -98,5 +98,38 @@ describe('sidebar sort', () => {
     expect(sortSessions([...recs.values()], 'recency', { digests: ds, rows: waiting }).map((r) => r.appId)).toEqual([
       'needs', 'unread', 'working', 'idle-new', 'idle-old',
     ]);
+  });
+});
+
+describe('overview card lines', () => {
+  const pendingOf = (id: AppSessionId) => bySession.get(id) ?? [];
+  const byTitle = (title: string) => [...records.values()].find((r) => r.title.text === title)!;
+  const activity = (title: string) => {
+    const r = byTitle(title);
+    return cardActivity(r, digests.get(r.appId) ?? null, pendingOf(r.appId));
+  };
+
+  it('reads the activity while working, the wait in words while waiting, and the state otherwise', () => {
+    expect(activity('Charter + research')).toBe('Running bun test');
+    expect(activity('Fix sidebar drag')).toBe('Waiting for approval');
+    expect(activity('Sidebar interaction pass')).toBe('Question');
+    expect(activity('Quota reset recovery')).toBe('Plan review');
+    expect(activity('Settings idle probe')).toBe('Idle');
+    expect(activity('Trace stream reconnects')).toBe('Done');
+    expect(activity('Somersault terminal run')).toBe('Terminal · pid 7135');
+  });
+
+  it('a working session with no activity yet reads Working; a failed one Failed', () => {
+    expect(cardActivity(record('w'), digest('w', { phase: 'working' }), [])).toBe('Working');
+    expect(cardActivity(record('f'), digest('f', { phase: 'failed' }), [])).toBe('Failed');
+    expect(cardActivity(record('n'), null, [])).toBe('Idle');
+  });
+
+  it('the footer carries context, cost since seen and active child agents, each only when known', () => {
+    const r = byTitle('Charter + research');
+    expect(cardFooter(digests.get(r.appId)!)).toEqual(['ctx 41%', '$0.00 since seen', '2 agents']);
+    expect(cardFooter(digest('x', { childAgents: { active: 1, done: 3 } }))).toEqual(['1 agent']);
+    expect(cardFooter(digest('x', { cost: { totalUsd: 1.5, sinceSeenUsd: 0.237 } }))).toEqual(['$0.24 since seen']);
+    expect(cardFooter(null)).toEqual([]);
   });
 });

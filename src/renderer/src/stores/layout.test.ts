@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { LAYOUT_DEFAULTS, type LayoutMain } from '@shared/ipc/schema/layout';
 import { fakeClient } from '../../../../test/support/fake-client';
-import { createLayoutStore } from './layout';
+import { createLayoutStore, whenHydrated } from './layout';
 
 const A = 'app-a' as AppSessionId;
 const session = (id: string) => ({ id: `session:${id}`, kind: 'session', appSessionId: id, pinned: false });
@@ -82,5 +82,22 @@ describe('layout store actions', () => {
     store.getState().setPanel({ collapsed: true });
     expect(store.getState().regions.sidebar.width).toBe(240);
     expect(store.getState().regions.panel).toEqual({ ...LAYOUT_DEFAULTS.regions.panel, collapsed: true });
+  });
+});
+
+describe('whenHydrated', () => {
+  it('runs a tab action after hydration, so the persisted tabs do not replace its result', async () => {
+    const fake = fakeClient({
+      'layout.list': { keys: ['main.tabs'] },
+      'layout.get': ({ key }: { key: string }) => ({ value: key === 'main.tabs' ? persistedMain : null }),
+    });
+    const store = createLayoutStore();
+    whenHydrated(() => store.getState().openTab({ kind: 'diagnostics' }), store);
+    expect(store.getState().main.panes[0].tabs.map((t) => t.id)).toEqual(['overview']);
+    await store.getState().hydrate(fake.client, (id) => id === A);
+    expect(store.getState().main.panes[0].tabs.map((t) => t.id)).toEqual(['overview', 'diagnostics', 'session:app-a']); // opened after the active Overview
+    const ran = vi.fn();
+    whenHydrated(ran, store);
+    expect(ran).toHaveBeenCalledOnce();
   });
 });

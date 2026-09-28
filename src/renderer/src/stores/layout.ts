@@ -222,6 +222,20 @@ export function createLayoutStore() {
 
 export const useLayout = createLayoutStore();
 
+// Runs `run` now if the persisted layout has been read, else once it has: a tab opened before hydration would be
+// replaced by the hydrated tabs.
+export function whenHydrated(run: () => void, store = useLayout): void {
+  if (store.getState().hydrated) {
+    run();
+    return;
+  }
+  const off = store.subscribe((state) => {
+    if (!state.hydrated) return;
+    off();
+    run();
+  });
+}
+
 // ---- persistence ------------------------------------------------------------------------------------------------------
 
 export const LAYOUT_WRITE_DELAY_MS = 250;

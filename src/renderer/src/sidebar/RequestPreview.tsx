@@ -145,13 +145,15 @@ export const RequestPreview: Slots['requestCard'] = ({ item, request, placement 
       )}
       {canAnswer && <p className="m-0 text-fg-muted">Approve applies to this request only.</p>}
       <div className="flex items-center gap-2">
-        <button
-          type="button"
-          onClick={() => useLayout.getState().openSession(item.appSessionId)}
-          className="rounded-sm border border-border-strong px-2.5 py-1 whitespace-nowrap text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2"
-        >
-          Open session
-        </button>
+        {placement !== 'docked' && ( // docked, it is already in its session
+          <button
+            type="button"
+            onClick={() => useLayout.getState().openSession(item.appSessionId)}
+            className="rounded-sm border border-border-strong px-2.5 py-1 whitespace-nowrap text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2"
+          >
+            Open session
+          </button>
+        )}
         {delivery === 'not_delivered' && <span className="text-danger">Not delivered</span>}
         {canAnswer && (
           <div className="ml-auto flex items-center gap-1.5">

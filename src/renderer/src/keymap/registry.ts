@@ -11,6 +11,7 @@ export interface HandlerRegistry<K extends string, A extends unknown[]> {
   ids(): K[];
   subscribe(listener: () => void): () => void;
   useEnabled(id: K): boolean;
+  useHandler(id: K): ((...args: A) => unknown) | undefined; // the handler itself, re-rendering when it changes
 }
 
 export function createHandlerRegistry<K extends string, A extends unknown[]>(label: string): HandlerRegistry<K, A> {
@@ -45,5 +46,6 @@ export function createHandlerRegistry<K extends string, A extends unknown[]>(lab
     ids: () => [...store.getState().handlers.keys()],
     subscribe: (listener) => store.subscribe(listener),
     useEnabled: (id) => store((s) => s.handlers.has(id)),
+    useHandler: (id) => store((s) => s.handlers.get(id)),
   };
 }

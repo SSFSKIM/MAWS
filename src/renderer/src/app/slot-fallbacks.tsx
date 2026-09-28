@@ -30,20 +30,9 @@ const PanelHost: Slots['panelHost'] = () => <Placeholder className="h-full">No t
 
 const FileTab: Slots['fileTab'] = ({ tab }) => <Placeholder className="font-mono">{tab.path}</Placeholder>;
 const DiffTab: Slots['diffTab'] = ({ tab }) => <Placeholder className="font-mono">{tab.ref}</Placeholder>;
-// The setup surface of an unstarted session, rendered in its pane where the transcript will be (owner design
-// 2026-09-28: no modal sheet); C10 fills it.
-const NewSession: Slots['newSession'] = ({ appSessionId }) => {
-  const project = useSessions((s) => {
-    const projectId = s.unstarted.get(appSessionId)?.projectId;
-    return projectId ? (s.projects.get(projectId)?.name ?? null) : null;
-  });
-  return (
-    <Placeholder className="h-full flex-col gap-2">
-      <p className="text-ui text-fg-muted">{project ?? 'No project'}</p>
-      <p>Session setup arrives with C10</p>
-    </Placeholder>
-  );
-};
+// An unstarted session's setup (C10's heading and setup, from its intent store) renders nothing until C10 registers it:
+// the pane shows the composer frame alone (C10's ask of C5, 2026-09-28).
+const NewSession: Slots['newSession'] = () => null;
 
 export const FALLBACKS: Slots = {
   transcript: Transcript,

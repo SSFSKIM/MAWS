@@ -7,6 +7,7 @@ import { ipc } from './ipc/client';
 import { connectShell } from './ipc/events';
 import { queryClient } from './ipc/query';
 import { connectActions } from './keymap/dispatcher';
+import { connectVisibility } from './session/visibility';
 import { persistLayout } from './stores/layout';
 import { useSettings } from './stores/settings';
 
@@ -19,6 +20,7 @@ export function App() {
   useEffect(() => registerShellActions(), []); // C5: the frame's action handlers
   useEffect(() => connectActions(), []); // C5: menu actions in, the enabled set out
   useEffect(() => connectScenarioSessionCreator(), []); // C5: the stub's session creator in launch mode scenario
+  useEffect(() => connectVisibility(), []); // C5: which sessions are on screen, for the unread rule
 
   // index.html ships data-theme="light" for the first paint; from then on main's resolved theme decides.
   useEffect(() => {

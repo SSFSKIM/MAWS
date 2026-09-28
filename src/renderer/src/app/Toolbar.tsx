@@ -6,7 +6,7 @@ import { DropdownMenu } from 'radix-ui';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { TabRef } from '@shared/ipc/schema/layout';
-import { runAction } from '../keymap/actions-runtime';
+import { runAction, useUnstartedTitle } from '../keymap/actions-runtime';
 import { useLayout } from '../stores/layout';
 import { activeTab } from '../stores/layout-model';
 import { useSessions } from '../stores/sessions';
@@ -24,7 +24,7 @@ export function toolbarTitle(tab: TabRef | null, records: ReadonlyMap<AppSession
     case 'session':
     case 'agent': {
       const record = records.get(tab.appSessionId);
-      const title = record?.title.text ?? 'Session';
+      const title = record?.title.text ?? 'New session'; // no record yet: an unstarted session
       return { title: tab.kind === 'agent' ? `${title} · agent` : title, branch: record?.branch ?? record?.worktree?.branch ?? null };
     }
     case 'file':
@@ -42,8 +42,11 @@ export function Toolbar() {
   const width = useLayout((s) => sidebarWidth(s.regions));
   const tab = useLayout((s) => activeTab(s.main));
   const records = useSessions((s) => s.records);
-  const { title, branch } = toolbarTitle(tab, records);
   const appSessionId = tab?.kind === 'session' ? tab.appSessionId : null;
+  const unstarted = useUnstartedTitle(appSessionId ?? ('' as AppSessionId));
+  const titled = toolbarTitle(tab, records);
+  // An unstarted session is titled like its tab.
+  const { title, branch } = appSessionId && !records.has(appSessionId) ? { title: unstarted.title, branch: null } : titled;
 
   return (
     <header className="col-span-full row-start-1 flex h-(--toolbar-h) min-w-0 items-center border-b border-border bg-bg-raised select-none [-webkit-app-region:drag]">

@@ -1,9 +1,11 @@
 // Overview grouping and the sidebar's session order (C5 execution document, Derivations; residue *Overview card* and
 // *Needs-you ordering and grouping*). Pure functions over the stores' maps.
+import type { AttentionItem } from '@shared/graph/attention';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { ProjectRecord, SessionDigest, SessionPhase } from '@shared/ipc/schema';
-import type { NeedsYouRow } from '../attention/derive';
+import { holderLine, isActionable, waitingItem, type NeedsYouRow } from '../attention/derive';
+import { glyphFor } from '../attention/glyph';
 
 const LIVE = new Set<SessionPhase>(['starting', 'working', 'waiting', 'idle', 'failed', 'foreign']);
 
@@ -59,6 +61,42 @@ export function overviewGroups({ records, digests, projects, rows }: OverviewInp
 
 export function overviewCards(input: OverviewInput): AppSessionId[] {
   return overviewGroups(input).flatMap((group) => group.sessions);
+}
+
+// A card's activity line (residue *Overview card*): the holder of a foreign-live session; what a waiting session waits
+// for, in words; what a working session is doing; else its state. The last answer is a separate line, so a working
+// session shows both.
+export function cardActivity(record: SessionRecord, digest: SessionDigest | null, pending: AttentionItem[]): string {
+  const holder = holderLine(record);
+  if (holder) return holder;
+  const waiting = waitingItem(pending);
+  if (waiting && isActionable(waiting.oldest)) {
+    return waiting.oldest.kind === 'permission' ? 'Waiting for approval' : glyphFor(record, digest, pending).label;
+  }
+  switch (digest?.phase) {
+    case 'working':
+    case 'starting':
+      return digest.activity ?? 'Working';
+    case 'waiting':
+      return 'Waiting';
+    case 'failed':
+      return 'Failed';
+    case 'exited':
+      return 'Done';
+  }
+  return 'Idle';
+}
+
+const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`;
+
+// A card's footer (§5.2): context, cost since the human last looked, running child agents; each only when known.
+export function cardFooter(digest: SessionDigest | null): string[] {
+  if (!digest) return [];
+  const parts: string[] = [];
+  if (digest.context) parts.push(`ctx ${Math.round(digest.context.percent)}%`);
+  if (digest.cost) parts.push(`$${digest.cost.sinceSeenUsd.toFixed(2)} since seen`);
+  if (digest.childAgents.active > 0) parts.push(plural(digest.childAgents.active, 'agent'));
+  return parts;
 }
 
 export type SidebarSort = 'priority' | 'recency';

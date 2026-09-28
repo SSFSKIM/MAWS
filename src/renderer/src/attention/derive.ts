@@ -54,3 +54,11 @@ export function needsYou(bySession: Map<AppSessionId, AttentionItem[]>, records:
 export function nextNeedsYou(rows: NeedsYouRow[], currentAppId: AppSessionId | null): NeedsYouRow | null {
   return rows.find((row) => row.appSessionId !== currentAppId) ?? rows[0] ?? null;
 }
+
+// Who holds a foreign-live session (D-12), as a row or card names it; null for any other holder.
+export function holderLine(record: SessionRecord): string | null {
+  const { holder } = record;
+  if (holder.kind === 'terminal') return `Terminal · pid ${holder.pid}`;
+  if (holder.kind === 'background_job') return holder.pid === null ? 'Background job' : `Background job · pid ${holder.pid}`;
+  return null;
+}
