@@ -6,14 +6,9 @@
 import { request } from 'node:http';
 import { RELAY_URL } from './launch';
 
-export interface RelayHealth {
-  url: string;
-  ok: boolean;
-  status: number | null;
-  latencyMs: number | null;
-  checkedAt: string;
-  error: string | null;
-}
+import type { RelayHealth } from '@shared/engine/relay-health';
+
+export type { RelayHealth } from '@shared/engine/relay-health'; // the X2 shape (M5); the check is here
 
 export const RELAY_HEALTH_TIMEOUT_MS = 1_500;
 export const RELAY_HEALTH_CACHE_MS = 5_000;
