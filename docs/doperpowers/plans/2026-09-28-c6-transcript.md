@@ -12,7 +12,7 @@ What C6 does not do: talk to an engine (C3), read `~/.claude` (C4), own the comp
 
 ## Progress
 
-- [ ] M1 — Anchoring spike (G1)
+- [x] M1 — Anchoring spike (G1) — 2026-09-28, verdict promote (Surprises & Discoveries), review clean after one fix (mermaid per-fence completeness gate, eec9430)
 - [ ] M2 — Presentation model, replay stub and the snapshot suite
 - [ ] M3 — Transcript view: virtualised list, follow mode, markdown stack, text rows
 - [ ] M4 — Work area: divider, groups, cells, detail, receipts, subagent rows, bash rows
@@ -753,6 +753,9 @@ If `pnpm dev:harness` shows fixtures missing: the renderer's `server.fs.allow` m
 - Decision: Two additive asks from C7's execution document (`docs/doperpowers/plans/2026-09-28-c7-composer-requests.md`, relayed by the coordinator on 2026-09-28, under adversarial review at the time) absorbed before M2: (1) the public surface exports `Markdown` so C7's request card and queued rows render through the same sanitising pipeline (landed in `index.ts` at M5; the component exists from M1); (2) `<pasted_content id="…">…</pasted_content>` segments in a user message become collapsed text attachments of the user row (`Attachment.text` added; derivation rule *Pasted content* under Derivation, implemented in M2's reducer and rendered by M3's user row). If the coordinator corrects either after C7's review, the correction is folded here with a dated line.
   Rationale: one markdown renderer keeps §4.1's sanitisation posture in one place; a pasted blob rendered as prose would dominate the bubble and defeat the 20-line collapse.
   Date/Author: 2026-09-28, C6 controller (from the coordinator).
+- Decision: M1 fix round 1 (review finding): the mermaid module loads once, globally, when any surface's text holds a closed `mermaid` fence (live or not), and drawing is decided per fence: after the load every `mermaid` fence goes through a custom code renderer (`MermaidFence.tsx`; Streamdown consults custom renderers before its built-in mermaid branch and passes `isIncomplete`) that renders the fence through a nested Streamdown with the mermaid plugin only when the fence is complete (the block is not flagged incomplete and the fence is not the text's trailing unclosed one), otherwise without it, so an unterminated fence stays code while streaming even after another diagram loaded. The shared Streamdown props live in `view/markdown/options.ts`, so the nested render keeps the same sanitisation pipeline and `urlTransform`. Deferred (Minor, ledger): the fence scanner is not a full CommonMark recogniser (blockquote-prefixed and indented fences, identical open and closed fences); to be resolved with parser-derived per-fence identity if it ever matters.
+  Rationale: the residue *Mermaid* says fences render as code until their closing fence and while streaming; Streamdown's own renderer checks only that the plugin exists.
+  Date/Author: 2026-09-28, M1 executor / C6 controller.
 
 ## Outcomes & Retrospective
 
