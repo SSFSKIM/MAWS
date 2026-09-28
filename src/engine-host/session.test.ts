@@ -8,7 +8,7 @@ import type { StdinFrame } from '@shared/wire/frames';
 import { loadEngineJournal } from '../../test/support/fixtures';
 import { buildLaunch, ENGINE_VERSION, RELAY_URL } from './launch';
 import { Normalizer } from './normalizer';
-import { rewindConversation } from './controls';
+import { getUsage, rewindConversation } from './controls';
 import { ProcessTable } from './process-table';
 import { EngineSession, HostHookRegistry, type EngineSessionOptions } from './session';
 import { MemoryJournal, scriptedTransport, type ScriptedTransport } from './conformance/scripted-transport';
@@ -261,6 +261,60 @@ describe('EngineSession: inbound requests, host hooks and exit', () => {
     expect(events.filter((e) => e.kind === 'boundary.rewind')).toMatchObject([{ targetMessageUuid: 'u-2', prefillText: 'Also BANANA', precedingAssistantUuid: 'a-1', seq: rows[1]!.seq }]);
     const rebuilt = new Normalizer({ appSessionId: spec().appSessionId, launchId: plan.launchId, sessionId: plan.sessionId });
     expect(journal.rows.flatMap((row) => rebuilt.push(row))).toEqual(session.events());
+  });
+
+  it('at stdout EOF a held request write settles before the response that arrived during it is journaled; the exit row comes last', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    let requestId = '';
+    const hold = (f: StdinFrame) => (f.type === 'control_request' && f.request.subtype === 'get_usage' ? ((requestId = f.request_id), gate) : null);
+    const { session, transport, journal } = setup({ transport: { holdWrite: hold } });
+    await session.start();
+    const usage = getUsage(session.control!, {}).catch((e: unknown) => e);
+    await flush();
+    transport.push({ type: 'control_response', response: { subtype: 'error', request_id: requestId, error: 'no usage here' } });
+    transport.endStdout();
+    await flush();
+    expect(journal.rows.some((r) => r.direction === 'in' && (r.frame as { response?: { request_id?: string } }).response?.request_id === requestId)).toBe(false);
+    release();
+    await usage;
+    await flush();
+    transport.exit(0);
+    await session.exited;
+    expect(shape(journal).slice(-3)).toEqual(['out:control_request/get_usage', 'in:control_response', 'meta:exit']);
+  });
+
+  it('at EOF and exit with a write that never settled: write_failed precedes the held response and nothing follows the exit row', async () => {
+    let requestId = '';
+    const never = new Promise<void>(() => {});
+    const hold = (f: StdinFrame) => (f.type === 'control_request' && f.request.subtype === 'get_usage' ? ((requestId = f.request_id), never) : null);
+    const { session, transport, journal } = setup({ transport: { holdWrite: hold } });
+    await session.start();
+    const usage = getUsage(session.control!, {}).catch((e: unknown) => e);
+    await flush();
+    transport.push({ type: 'control_response', response: { subtype: 'error', request_id: requestId, error: 'no usage here' } });
+    transport.exit(0);
+    await session.exited;
+    expect(((await usage) as { code: string }).code).toBe('write_failed');
+    await flush();
+    expect(shape(journal).slice(-3)).toEqual(['meta:write_failed', 'in:control_response', 'meta:exit']);
+    expect(journal.rows.at(-1)!.frame).toMatchObject({ event: 'exit' });
+  });
+
+  it('a journal write that fails while live surfaces: journal_failed row, the answer is write_failed, and the process is ended through the ladder', async () => {
+    const { session, transport, journal, events } = setup();
+    await session.start();
+    transport.push({ type: 'control_request', request_id: 'r1', request: { subtype: 'can_use_tool', tool_name: 'Bash', input: { command: 'ls' }, tool_use_id: 'toolu_1' } });
+    await flush();
+    journal.failOnce = (direction, frame) => direction === 'out' && (frame as { type: string }).type === 'control_response';
+    expect(await session.answer('r1' as RequestId, { kind: 'permission', decision: 'allow', scope: 'once' })).toBe('write_failed');
+    expect(journal.rows.at(-1)!.frame).toEqual({ event: 'transport_error', code: 'journal_failed', message: 'journal write failed: ENOSPC: no space left on device' });
+    expect(events.at(-1)).toMatchObject({ kind: 'error.raised', scope: 'transport', code: 'journal_failed' });
+    expect(events.some((e) => e.kind === 'permission.resolved')).toBe(false);
+    expect(session.status().process).toBe('exiting');
+    expect(transport.calls).toEqual(['endInput', 'kill:SIGTERM']);
+    transport.exit(null, 'SIGTERM');
+    expect((await session.exited).reason).toBe('crash');
   });
 
   it('a failed session-scope allow on an ask-rule prompt leaves no note behind: the retried deny resolves without it', async () => {

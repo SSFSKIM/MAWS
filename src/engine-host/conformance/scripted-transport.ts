@@ -37,6 +37,7 @@ export interface ScriptedTransport extends EngineTransport {
   push(frame: unknown): void;
   pushProblem(problem: TransportItem['error']): void;
   pushStderr(line: string): void;
+  endStdout(): void; // stdout and stderr close; the process has not exited yet
   exit(code: number | null, signal?: NodeJS.Signals | null): void;
   // Answers the latest written control_request of `subtype` with a success payload (or an error).
   answer(subtype: string, response?: unknown, error?: string): void;
@@ -82,6 +83,10 @@ export function scriptedTransport(
     pushStderr(line) {
       stderr.push(line);
     },
+    endStdout() {
+      frames.end();
+      stderr.end();
+    },
     exit(code, signal = null) {
       if (exited) return;
       exited = true;
@@ -105,8 +110,13 @@ export class MemoryJournal implements SessionJournal {
   readonly rows: JournalRow[] = [];
   readonly path = '/memory/journal.jsonl';
   closed = false;
+  failOnce: ((direction: JournalDirection, frame: unknown) => boolean) | null = null; // a live write failure (disk full)
   row(direction: JournalDirection, frame: unknown): JournalRow {
     if (this.closed) throw new Error('journal is closed');
+    if (this.failOnce?.(direction, frame)) {
+      this.failOnce = null;
+      throw new Error('ENOSPC: no space left on device');
+    }
     const row: JournalRow = { seq: this.rows.length + 1, direction, at: new Date().toISOString(), frame };
     this.rows.push(row);
     return row;

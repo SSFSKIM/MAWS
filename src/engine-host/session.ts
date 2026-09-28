@@ -23,7 +23,7 @@ import { EMPTY_GRANTS, reapply, recordFromResponse, type GrantSnapshot } from '.
 import { HostHookRegistry } from './host-hooks';
 import { RELAY_URL, spawnMeta, type LaunchPlan } from './launch';
 import { Normalizer, type NormalizerWarning } from './normalizer';
-import { OutboundWriter } from './outbound-writer';
+import { JournalClosed, OutboundWriter } from './outbound-writer';
 import { ControlClient, ControlError } from './rpc';
 import type { EngineTransport, TransportItem, TransportProblem } from './transport';
 
@@ -252,7 +252,7 @@ export class EngineSession {
   // The one path rows take: journal, then normalise, then deliver
 
   private record(direction: JournalDirection, frame: unknown): JournalRow {
-    if (this.journalClosed) throw new Error(`journal closed: ${direction} row not recorded after the exit`);
+    if (this.journalClosed) throw new JournalClosed(`${direction} row`);
     const row = this.journal.row(direction, frame);
     const events = this.normalizer.push(row);
     for (const w of this.pendingWarnings.splice(0)) this.record('meta', { event: w.event, rowSeq: w.seq, detail: w.detail }); // journaled and normalised like any row; they yield no events
@@ -282,6 +282,11 @@ export class EngineSession {
     const writer = new OutboundWriter(transport, { row: (direction, frame) => this.record(direction, frame) });
     this.writer = writer;
     writer.onIdle(() => this.drainHeld());
+    writer.onJournalFailure((error) => {
+      // the journal no longer records what was sent: end the process as for a transport error
+      this.log(`journal write failed: ${error.message}; ending the process`);
+      void this.terminate(false);
+    });
     const client = new ControlClient(transport, { row: (direction, frame) => this.record(direction, frame) }, this.plan.launchId, { warn: this.log, writer });
     this.client = client;
     client.onInbound((req) => this.inbound(req));
@@ -334,6 +339,14 @@ export class EngineSession {
     for await (const item of transport.frames) {
       if (this.writer?.busy || this.held.length > 0) this.held.push(item);
       else this.processItem(item);
+    }
+    // Stdout EOF and a write's callback are independent (M3 re-review 2): wait for outstanding writes to settle
+    // before releasing what they hold; once the process has exited, settle the rest as write_failed, so no response
+    // row precedes its request row and no out row can follow the exit row.
+    const writer = this.writer;
+    if (writer?.busy) {
+      const exited = await Promise.race([writer.whenIdle().then(() => false), transport.exited.then(() => true)]);
+      if (exited) writer.failPending('the process exited before the write settled');
     }
     this.drainHeld(true);
   }
