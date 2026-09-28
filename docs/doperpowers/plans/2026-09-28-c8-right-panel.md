@@ -1,0 +1,370 @@
+# C8 — Right panel tools (2026-09-28)
+
+> **Parent:** `docs/charter.md`, child id **C8** (§12 "Right panel tools — decomposing at dispatch"), parent pin `9db37df7c30e1a5b4d14d001398433bade72edc7e7aafd1a9d0786e2071a3f47` (SHA-256 of `docs/charter.md` at master `3f4738e`, the commit carrying the owner's P1 addendum and C11's closure; the same file's git blob, the form the sibling documents cite, is `157935035dbf523ee7abec9264418bedde52d452`). **Level name:** child of the charter, itself composite; its children C8a, C8b and C8c are plan children at the charter's grain "child". **Consumes:** the grounding `docs/doperpowers/plans/2026-09-28-c8-decomposing-grounding.md` (7cf8957; its evidence citations are carried here where they bear a claim), the wave-2 interface ledger `docs/doperpowers/plans/2026-09-28-wave2-interface-ledger.md`, `mockups/01-shell.html` (the resting summary, approved at eb480c2) and `mockups/03-right-panel.html`, `research/codex-shell-ux.md` §3, `research/claude-desktop-ux-and-engine.md`, the probe fixtures under `spikes/protocol-probe/fixtures/`. C3, C4, C5, C6, C7, C9, C10 and C11 are the charter's children, not this document's; they appear here as edges and contracts. Each child's execution document opens by citing this document, its child id and this document's pin (SHA-256 of this file at the commit it reads), and lives under `docs/doperpowers/plans/`. This document is born landed: the owner's rulings and the architect's decisions of 2026-09-28 (Decision Log) are made; nothing below awaits approval.
+
+## Purpose
+
+The right panel is where a session's supervision tools live: what its agents are doing, what is running in the background, what changed, and the files it works in. Codex desktop has this panel and MAWS follows its shape (D-20); Claude Desktop does not, which is one reason the owner wants MAWS. Without C8, C5's region shows "No tools open · Tools arrive with C8", C9's Terminal has only a development harness to live in, C11's Session info has nowhere to register, C10's "attach in a terminal tab" has no host, and the transcript's "Review changes", subagent rows and "Open full log" go nowhere.
+
+After C8, in one deep session (Scene B): the panel rests on a summary card that names the branch, the uncommitted change, the push state, the agents and the background work, and every row opens its tool; "+" offers Subagents, Review, Terminal, Files, Background work and Session info; a subagent row in the transcript opens that agent's transcript in the panel with a composer that relays through the parent; a workflow shows its phases and agents and can be stopped; the change receipt's "Review changes" opens the diff at the turn's files and "Open file" lands a viewer tab on the changed line; a pinned Terminal follows the owner from session to session and survives a relaunch. Everything renders from live sessions and, with the wire-only facts marked unavailable, from sessions that exist only on disk (D-12).
+
+## Parent-Level Acceptance
+
+C8 closes when, on the owner's Mac with C3, C4, C5, C6, C7, C9 and C10 on master and C11's `sessionInfoTool` registered, every item below is observed in one sitting. This is the whole, not the sum of the children's gates; it is re-run at recomposition after the last child merges.
+
+1. Every state of mockup 03 that survives the rulings renders from live sessions: Subagents Active and Done lists with a nested child under its parent and a waiting agent marked; the drill-in with the child transcript, model and effort, the relay composer and Back; Background work with a running workflow card (phases, the per-agent table, Stop workflow), a shell, a monitor and the task checklist; Review with the file list, a hunk, the scope chips and the footer naming branch and scope. The composer's "To this agent only" line reads `Relay via <session>` instead; the Sent files state is gone.
+2. Pinned tabs persist across sessions and a relaunch: a Terminal pinned in session A shows first in the strip when session B is selected, its shell intact; after quitting and relaunching MAWS, the tab is back with the same shell (C9's re-adoption by label) and the unpinned tabs of session A return when A is selected.
+3. Each summary row opens its tool: branch and diff stats open Review on Uncommitted; the push-state row's "Open on GitHub" opens the remote's page in the browser; Subagents opens Subagents; Background work opens Background work; the Session info row opens C11's tool; a Sources row opens the file in a viewer tab.
+4. A relayed message reaches a child within one parent tool round: with an agent running under a live session, a message typed in its drill-in produces a `SendMessage` `tool.use` row in the parent transcript whose `to` is that agent and a matching message row at the head of the child transcript before the child's next assistant record.
+5. Review opens a file tab at the changed line: with Review on Uncommitted over a dirty scratch repository, "Open file ↗" on a hunk opens `file:<path>` in the main area with the hunk's first changed line highlighted and scrolled into view; the same action on a hunk further down the same file moves the already-open tab's line instead of opening a second tab.
+6. A workflow shows its phases and agents and stops: a session running a `local_workflow` shows the run's card with phase rows and a per-agent Model, Tokens and Time table that updates as `workflow.progress` arrives; "Stop workflow" ends it and the card reads stopped after the engine's `task.updated` and `task.notification`.
+7. Sent files is absent from "+", the summary, the tools and the copy; a `SendUserFile` cell in the transcript (C6) names the file and offers nothing.
+8. Disk-only: opening a session that is live in a terminal (foreign-live) or finished shows the same Subagents and Background work lists from `fs.subagents`, `fs.workflows` and `fs.tasks`, with status, elapsed and shells marked unavailable rather than guessed; Review and Files work unchanged because they read git and the tree, not the wire.
+
+## Grounding Baseline
+
+Measured on 2026-09-28 against the executors' worktrees and the documents on master (grounding §1). The children's acceptances are relative to this state, and the edges in Ordering follow from it.
+
+| Input | State | What C8 relies on |
+|---|---|---|
+| C5 shell | M1 to M4 ticked, M5 committed unreviewed | `PanelHostProps` and the `panelHost` slot (`src/renderer/src/panel/host-slot.ts`), `PanelTabRef` with the pin split over `panel.pinned` and `panel.<appSessionId>` in `layout.json`, `PanelRegion.tsx` with header strip only, `PANEL_BOUNDS { min: 280, max: 640 }`, `--panel-w: 380px`, `file` and `diff` tab kinds with the `fileTab` and `diffTab` slots, `openTab`, `registerCloseGuard`, the `agent` tab kind, `useSessions` (records, digests, engine status), `layout.openExternal` (`http`, `https`, `mailto`). Two C8 asks relayed on 2026-09-28: the panel's `appSessionId` also from `file`, `diff` and `agent` tabs; `openTab` on an already-open `file` tab updates its `line`. |
+| C9 terminal | M1 to M3 landed, M4 not started | `terminals.open/adopt/mount/unmount/close/foreground/subscribe`; re-adoption after a reload by `(appSessionId, label)`. `src/renderer/src/panel/tool.ts`, `src/tools/`, the `#panel` harness and `fakeSessions.ts` do not exist; C9's X5 draft is text in its document (lines 268 to 291). |
+| C6 transcript | M1 to M3 ticked, M4 in progress, M5 not started | `Transcript` with `variant: 'child'`, `TranscriptSource`, `TranscriptActions` (`openSubagent`, `openFullLog`, `reviewChanges` are C8's; `openFile` is C5's `openTab`), `useTranscriptStore.attach(key, source, { agentId })`, `SubagentRef`, the `subagent` row (status, agents, sentence; a workflow row carries the current phase), the change receipt with `structuredPatch`. `ipcSource(appSessionId, agentId?)` is M5. `Markdown` export asked by C7, relayed to the executor. |
+| C4 filesystem and git | M1 to M2 ticked, M3 landed, M4 and M6 not started | `fs.subagents`, `fs.agentEvents`, `fs.workflows`, `fs.tasks`, `fs.readSpill` (roots `projects/`, `tasks/`, `jobs/` and, landed in M3 per the architect's correction of 2026-09-28, `realpath($CLAUDE_CODE_TMPDIR ?? /tmp)/claude-<uid>`, the engine's own rule from SPEC 20, so background task `output_file`s are readable), `fs.subagentsChanged`, `fs.workflowChanged`, `fs.tasksChanged`, `fs.followState`. `git.*` (M6) is described only: `git.status`, `git.diff { directory, scope, base?, path?, context? }`, `git.watch`/`git.unwatch`, `git.changed`. Ask of C4 sent 2026-09-28, not yet in its document: `git.status` gains `remoteUrl` (the upstream remote's URL, one `git remote get-url`). |
+| C3 engine host | M1 to M3 ticked, M4 committed, M5 not started | `EngineSessionStatus` (`backgroundTasks[{ taskId, taskType, description, ambient }]`, `turn` nullable, `cwd`, memory, gateway); X1 `subagent.*`, `task.*`, `workflow.progress`; `session.steer { appSessionId, content }`; `session.stopTask { appSessionId, taskId }` and the rest of `session.*` are M5. No outbound path to a child: `UserInputFrameSchema` pins `parent_tool_use_id: null`. |
+| C7 composer | document closed, not executing | `renderInlineRequest(appSessionId)` for a child's `request_slot` (C7 line 242); adapter lines in `src/renderer/src/App.tsx` as the pattern for supplying `TranscriptActions`. |
+| C10 sessions | document closed, not executing | `git.worktree.branch { repoRoot, branch } → BranchStatus { base, ahead, merged, … }`, `base` the main worktree's branch; `openTerminal({ appSessionId, cwd, command })` for attach (item 12). |
+| C11 palette and settings | document closed at abd84cb, residue in §12 C11 at 3f4738e, not executing | `sessionInfoTool: PanelTool<SessionInfoState>` registered through `registerPanelTool`; `DiffWidget`'s "Open in Review" through `panelHost.addTool('review', …)`. |
+
+## Design
+
+The design is the grounding's, matured under the owner's rulings 1 to 5 and the architect's decisions of 2026-09-28. Grades: **[binding — reason]** marks what only the joint view could settle; everything unmarked is advisory and a child may overturn it with evidence in a dated Decision Log entry here.
+
+### Terms
+
+- **Panel host** — the React component C8a registers into C5's `panelHost` slot. It renders the tab strip, the home glyph, "+", the pin toggle and close per tab, and the selected tool's body inside C5's region (`src/renderer/src/panel/PanelRegion.tsx`), which keeps the header strip (maximize, hide), the width, collapse and the persistence of tab refs.
+- **Tool** — a `PanelTool` declaration (X5): id, title, icon, a state factory and a render component. Six ship in P0: Subagents and Background work (C8b), Review and Files (C8c), Terminal (C9), Session info (C11). A seventh, Log, is C8b's destination for "Open full log" and is not offered from "+".
+- **Tab** — one open instance of a tool. C5 persists `PanelTabRef { id, toolId, pinned }`; the host keeps the instance's live state in a registry keyed by tab id, outside React.
+- **Pin** — D-10: a pinned tab is shown for every session, first in the strip, and its context follows the session the panel shows.
+- **Summary** — the resting card rendered when no tab is selected (`activeTabId: null`), mockup 01's "Session overview".
+- **Drill-in** — the Subagents tool's view of one child agent, inside the panel; distinct from C5's `agent` main-area tab, which renders the same child transcript without a composer.
+- **Relay** — the drill-in's way of messaging a child: one steer-priority message to the parent asking it to `SendMessage` the child. The engine offers no host path to a running child (grounding §1.6).
+- **Scope** (Review) — which set of changes the diff shows: Uncommitted, This branch, Last turn, Staged.
+- **Live session** — a session with an engine process in this app: `useSessions().engine` holds its `EngineSessionStatus`. **Disk-only session** — a record from C4's index with no process here: foreign-live, finished, or resumed-but-not-launched. **Live child** — a child agent whose events arrived in this launch's stream (C3 attributed them by `agentId`); **disk child** — a child known only from its `agent-<id>.jsonl` and sidecar under `subagents/`.
+- **Allowlist** (Files) — the set of directory roots a `files.*` command may read for a session: the realpaths of `directory`, each of `additionalDirectories` and `worktree.path` from the X1 session record.
+- **Harness** — `pnpm dev:harness`, `src/renderer/src/harness/` (C6's page at `#transcript`, C9's at `#probe` and `#panel`). C8a's `#panel` page replaces C9's stand-in as the product host over fake sessions.
+
+### The host
+
+C5 landed the region, the persistence and the slot; C8a fills the slot. What the host draws, from left to right in the strip: a **home glyph** that shows the summary without closing tabs (`onChange({ tabs, activeTabId: null })`; C5 already keeps `panelActiveNoSession` for the no-session case), then the tabs in `PanelHostProps.tabs` order (pins first, per C5's `effectivePanelTabs`), each with its icon, title with the tool's `setTitle` suffix, a pin glyph and a close glyph, then "+" listing every registered tool that may open another instance. Maximize stays in C5's header strip through `panel.maximize`. The summary also shows when the last tab closes. Reason for the glyph over Codex's summary toggle in a menu: with Terminal and Review pinned the owner still needs branch, agents and background work at one click, and `activeTabId: null` is a state C5 already persists.
+
+**State outside React** [binding — C9's terminal already survives this rule and every tool lands in a different wave against it]: `createState` runs once per tab and the result lives in the host's registry map keyed by `PanelTabRef.id`; it survives visibility changes, panel collapse, session switches under a pin and re-renders; unselected tools are unmounted. `dispose` runs when the tab closes or its tool is unregistered. The host writes the persisted refs only through `onChange` and never touches `layout.*` itself.
+
+**Tab ids** are minted as `<toolId>:<random suffix>` so a tab id is unique across pins and sessions; C9's terminal re-adopts by `label = instanceId` and needs no origin session persisted. No per-tab payload is persisted in P0: every tool re-derives its state from the shown session, and the one tool with external state (Terminal) re-adopts from the PTY host. If a tool later needs persisted params, C8a asks C5 for an optional `params` on the ref rather than a second store.
+
+**Which session the panel shows**: `PanelHostProps.appSessionId`, set by C5 from the focused pane's active tab. C5's landed rule yields `null` for `file`, `diff` and `agent` tabs, which would empty the panel of the session's tools when the owner clicks a file the Files tool opened; the ask of C5 (relayed 2026-09-28) derives it from those tabs' refs too. Until it lands, the host shows pins only in that case, as C5 does today. `visible` for a tool is "its tab is selected and `regions.panel.collapsed` is false", read from the layout store because the props carry no collapsed flag. `focusRequest` increments on tab selection and on the collapsed-to-open transition of `panel.toggle` (⌘⇧B), which C8a derives from the transition since C5's action only flips `collapsed`.
+
+**Single-instance re-targeting**: `panelHost.addTool` for a tool with `multiInstance: false` that already has a tab selects that tab and calls the tool's `open(state, params)`; Subagents selects an agent, Review jumps to a scope or path, Background work selects a run. A tool without `open` is simply selected.
+
+**"+" and `beforeClose`**: "+" is a menu of registered tools (Codex offers Files, Side chat, Browser, Review, Terminal; MAWS offers its six). Closing runs `beforeClose(state)`; `false` keeps the tab and the tool shows its own inline confirmation (C9's busy shell), calling `ctx.close()` later. Unregistering a tool closes its tabs without asking.
+
+**Harness**: C8a's `#panel` page hosts the real `PanelHost` over `fakeSessions.ts` (records with `directory`, `worktree`, `holder`; a status with `backgroundTasks`; a switcher; a theme toggle) inside the real region at 280, 380 and 640 px and maximized, and mounts C6's `Transcript` `variant: 'child'` over `pass1/subagent` inside it (R7). C9's M4 targets this page once it exists; until then C9's stand-in stays.
+
+### X5, final [binding — tools land in four different waves against one host, and C9 and C11 have already written to these names]
+
+Canonical at `src/renderer/src/panel/tool.ts` and `src/renderer/src/panel/host.ts` once C8a lands; until then this section. C9's draft (its document lines 268 to 291) amended in four places: nullable session, typed `params`, `open` re-targeting, the optional `summary` section; plus `status`, `openTool` on the context and the `menu` flag for the Log tool. C9 adapts `src/renderer/src/tools/terminal/index.ts` and C11 adapts `sessionInfoTool` at their refresh passes; nothing in code depends on the draft yet (grounding §1.2).
+
+```ts
+// src/renderer/src/panel/tool.ts
+export interface PanelToolInit<P = void> {
+  appSessionId: AppSessionId | null;   // null when opened with no session shown (pinned tools only)
+  session: SessionRecord | null;       // C5's X1 record: directory, additionalDirectories, worktree, holder
+  instanceId: string;                  // the PanelTabRef.id; C9 uses it as the terminal label
+  params: P;                           // tool-specific open parameters, see the table below
+}
+export interface PanelToolContext {
+  appSessionId: AppSessionId | null;   // the session the panel shows; changes under a pinned tab; null on Overview, Diagnostics, Settings
+  session: SessionRecord | null;
+  status: EngineSessionStatus | null;  // C3's status when the session is live in this app; null for a disk-only session
+  pinned: boolean;
+  visible: boolean;                    // selected and the panel is not collapsed
+  focusRequest: number;                // increments on tab selection and on the collapsed → open transition of panel.toggle
+  setTitle(suffix: string | null): void;
+  close(): void;                       // runs beforeClose, then dispose
+  openTool: typeof panelHost.addTool;  // a tool opening another; Review → viewer is openFile (a main-area tab), not this
+}
+export interface PanelTool<S, P = void> {
+  id: string; title: string; icon: ComponentType<{ className?: string }>;
+  pinnable: boolean; multiInstance: boolean;
+  menu?: boolean;                             // offered from "+"; default true; false for Log
+  createState(init: PanelToolInit<P>): S;     // once per tab; kept across visibility, panel close and session switches under a pin
+  open?(state: S, params: P): void;           // addTool on an existing single-instance tab re-targets it
+  beforeClose(state: S): Promise<boolean>;    // false vetoes; the tool shows its own inline confirmation and calls ctx.close() later
+  dispose(state: S): void;
+  render: ComponentType<{ state: S; ctx: PanelToolContext }>;
+  summary?: ComponentType<{ appSessionId: AppSessionId; open(params?: P): void }>;   // a section for the resting summary
+}
+
+// src/renderer/src/panel/host.ts
+export function registerPanelTool<S, P>(tool: PanelTool<S, P>): () => void;   // C11's name; last registration wins; unregistering closes its tabs
+export const panelHost: {
+  addTool<P>(toolId: string, opts: { appSessionId: AppSessionId | null; params?: P; pin?: boolean; activate?: boolean }): string;   // C9's and C11's name; returns the tab id
+  selectTab(tabId: string): void;
+  closeTab(tabId: string): Promise<boolean>;
+  showSummary(): void;                         // activeTabId null
+  tools(): PanelTool<unknown, unknown>[];
+};
+```
+
+| Tool | id | pinnable | multiInstance | params `P` | summary section |
+|---|---|---|---|---|---|
+| Subagents (C8b) | `subagents` | yes | no | `{ agentId?: AgentId }` | Subagents |
+| Background work (C8b) | `background` | yes | no | `{ taskId?: string }` | Background work |
+| Log (C8b) | `log` | no | yes | `{ path: string; title: string }` (`menu: false`) | none |
+| Review (C8c) | `review` | yes | no | `{ scope?: ReviewScope; path?: string; turnId?: TurnId }` | Environment's diff stats |
+| Files (C8c) | `files` | yes | no | `{ path?: string; line?: number }` | none (Sources is host-owned) |
+| Terminal (C9) | `terminal` | yes | yes | `{ cwd?: string; command?: string }` | none |
+| Session info (C11) | `session-info` | yes | no | `void` | none (one host-owned row) |
+
+Rules the host enforces once C8a lands, binding on every tool: the registry map and unmounting of unselected tools (above); a pinned tab's `ctx.appSessionId` follows the shown session; `onChange` is the only writer of the persisted refs; "+" lists every registered tool with `menu !== false` whose `multiInstance` allows another instance; the summary is the host's composition of fixed sections whose data reads are the host's and whose "Open" calls `addTool`, a registered tool's `summary` component filling its section.
+
+Elements marked for the record: `PanelHostProps`, `PanelTabRef`, `panel.pinned`, `panel.<id>`, `effectivePanelTabs`, `setPanelTabs`, `setPanelTabPinned`, `fileTab` and `diffTab` slots are C5's, landed. `PanelTool`, `PanelToolInit`, `PanelToolContext`, `registerPanelTool`, `panelHost` are C8a's. `terminalTool` and `openTerminal` are C9's; `sessionInfoTool` is C11's.
+
+### The summary
+
+Mockup 01's card under the rulings, host-owned (C8a), collapsible sections with sticky muted headings whose expansion persists under `layout` keys (Codex §3; the key names are C8a's). Sections and their sources, top to bottom:
+
+- **Environment**: branch (`⎇ <branch>`, from `git.status` through `git.watch` on `session.worktree?.path ?? session.directory`), the uncommitted change (`+N −M across K files` from `git.status.files`, or "Clean"), a "Review" button opening Review on its default scope; a model row (`<model> · <effort>` from the session record) opening Session info. One Session info row, not the four C11's ask assumed (context, usage, model, cost): §5.6's resting summary has no such rows, and Session info is one click from "+" anyway.
+- **Push state** (ruling 5): `N ahead of <upstream>` or `Not pushed` from `git.status.ahead`/`upstream`; "Open on GitHub" through `layout.openExternal` on the HTTPS form of `git.status.remoteUrl` when it names a GitHub host; hidden while `remoteUrl` is absent (C4's ask not yet landed) or not GitHub. Pull-request status and checks are P1 with source control.
+- **Subagents**: up to four seeded glyphs (C6's seeding rule, a hash of the task id into eight marks, imported if C6 exports it and otherwise duplicated in one line so the panel and the transcript agree), `N working · M done` from `SessionDigest.childAgents`, "Open".
+- **Background work**: `N running` by kind (`1 shell · 1 workflow`) from `status.backgroundTasks` for a live session and `fs.workflows` for a disk-only one, "Open".
+- **Sources**: files and tools the session used, most recent first, bounded to Codex's ten, from C6's `useTranscriptStore` for the shown session (cells classified as file changes, exploration, MCP sources and web); a file row opens the viewer through `openFile`, a tool row opens nothing and says so. Advisory: C8a may drop tool rows if the classification does not yield a useful list.
+- Footer: mockup 01's "Tools stay with this session. Pin a tab to keep it with you as you switch."
+
+A row whose tool is not yet registered (C9 or C11 not merged) renders disabled with "Arrives with <child>". With `appSessionId === null` (Overview, Diagnostics, Settings tabs) the summary shows only the footer and the pinned tabs stay available.
+
+### Subagents (C8b)
+
+**Lists.** `Active · N` and `Done · N` (Codex: four and ten rows initially, "Show N more"), each row glyph, name (the sidecar's `description` or the task description), objective or status sentence, elapsed ticking for a running agent; a `waiting` badge and `Approval needed` when a pending X1 attention item for the session (C5's attention store) carries the agent's id (`agentId` from `agent_id`, C7's ask of C3); nested children indented under their parent from the sidecar's `parentAgentId` [binding — §5.6 nests children under parents; the sidecar is the only lineage source on disk]. Footer "Live activity · includes nested agents". Sources, merged by `taskId == agentId`: `fs.subagents` (agentType, description, model, parentAgentId, spawnDepth, mtime; no status) with X1 `subagent.started/progress/finished` and `task.*` from the live stream for status, usage and elapsed. `parentAgentId` is present in the loose `SubagentMeta` but untyped (grounding §1.4); C8b reads it through a narrow parse and asks C4 for the optional typed field (additive). For a disk-only session status reads "unavailable" rather than a guess; a child whose transcript stopped growing is not called finished.
+
+**Drill-in.** `‹ Subagents`, the name, `<model> · <effort> · <elapsed> · <tokens>` from the sidecar and `subagent.progress.usage`, `Dispatched by <session>`, then C6's `Transcript` with `variant: 'child'`, `renderRequest: renderInlineRequest(appSessionId)` (C7) so a child's permission request is answerable in place, and `actions.openFile` for path chips. The source follows the child-event rule (K2). Selection from the transcript: C6's `openSubagent(ref)` is wired in C8b's `App.tsx` block as `panelHost.addTool('subagents', { appSessionId, params: { agentId: ref.taskId } })` for `kind: 'agent'` and `addTool('background', { params: { taskId: ref.taskId } })` for `kind: 'workflow'`; `ref.taskId` is the agent id once `subagent.started` arrived and the tool-use id before (grounding §1.3), so the tool tolerates a selection it cannot resolve yet and resolves it on the next `fs.subagentsChanged` or `subagent.started`.
+
+**Relay composer** [binding — owner ruling 1]. The drill-in's composer sends one message through `session.steer { appSessionId, content }` to the parent asking it to `SendMessage` the child; the composer is labelled `Relay via <session title>`; the sent text appears in the drill-in as "Asked <session> to relay…" until a `SendMessage` `tool.use` with `to` equal to the child's agent id appears in the parent's rows and the message appears in the child's transcript, after which the pending line is replaced by the row; it is disabled, with the reason as its placeholder, while `status.turn === null` (the parent's turn is not running) and for a finished child. The relayed text's wording ("Relay to agent <id> (<name>): <text>" or what R1 shows the model routes reliably) is C8b's, settled by the probe. The engine's own `SendMessage` reply reads "Message queued for delivery to <name> at its next tool round" (SPEC 18 §18.26.2), which bounds the latency acceptance item 4 names. Rejected alternative: a read-only drill-in with the owner typing the agent's name into the main composer; it keeps the §10 line and puts the cost (one parent tool round, a few lines of parent context) where the owner sees it.
+
+**Not in P0**: the topology view (§16), messaging a disk child, per-agent pause.
+
+### Background work (C8b)
+
+Exactly four kinds, stop only [binding — §5.6; pause, skip and retry are React-only in the engine (`cli.pretty.js:494849-494885`), confirmed absent from the wire]:
+
+- **Workflows**: one card per run: title, description, `workflow · <elapsed> · <agents> agents · <tokens>`, phase rows (`Solve 3/3`, `Verify 2/3`, `Judge · Queued`) each with an Agent, Model, Tokens, Time table from `workflow_progress` rows of kind `workflow_agent` (`label, model, state, tokens, durationMs, agentId`), and "Stop workflow". Live source: `task.started { taskType: 'local_workflow' }`, `workflow.progress { taskId, progress }` (C3 for the live stream; C4 emits the same event per snapshot change for a followed session), `task.updated`, `task.notification`. Disk source: `fs.workflows { appSessionId } → runs[{ runId, snapshot, journal }]` with `snapshot.workflowProgress`. A per-agent row opens that agent's drill-in (`openTool('subagents', …)`).
+- **Shells**: `<command> · running <elapsed>` with "Output"; **Monitors**: `<description> · every <interval>`; both from `status.backgroundTasks` (`taskType` `local_bash`, `monitor_ws`, …; `description`) and `task.started/updated/notification`. No start time or output file is on the status (grounding §1.5); elapsed counts from the `task.started` event and "Output" is enabled once a `task.notification.outputFile` is known. Wire-only: a disk-only session marks the section unavailable.
+- **Tasks**: the read-only TaskCreate checklist `Tasks · 4/7` with "N earlier tasks completed", from `fs.tasks { listId }` and `fs.tasksChanged`; `listId` is the engine session id sanitised `[^A-Za-z0-9_-] → -` (SPEC 20 §20.2.2), since no sibling supplies it. Editing is the P1 Tasks panel.
+- **Stop**: `session.stopTask { appSessionId, taskId }` for any kind; the card shows stopping until `task.updated { patch: { status } }` and `task.notification { status: 'stopped' }` arrive (R6 records the exact sequence). The engine answers success for a missing task; the card removes itself on the next snapshot.
+
+**Output and full logs**: "Output" and C6's "Open full log" open the **Log** tool (`log`, `menu: false`, one tab per path) over `fs.readSpill { path, offset, length }`, paged (8 MiB read cap is C4's; the tool pages by offset and keeps a bounded DOM like C6's 64 KB detail cap), with the path and size in its header and "Load more" at the end. `openFullLog(cell)` is wired in C8b's `App.tsx` block. Task output paths under `<tmpdir>/claude-<uid>/` read through the root C4 landed in M3; a path `fs.readSpill` refuses shows the refusal and the path.
+
+### Review (C8c)
+
+**Scopes** [binding — owner ruling 3, D-20; the engine records no session-start commit and none is invented]:
+
+| Scope | Files and hunks from | Default when |
+|---|---|---|
+| Uncommitted | `git.diff { directory, scope: 'all' }` (working tree against `HEAD`; untracked files listed from `git.status.files[].untracked`) | the tree is dirty |
+| This branch | `git.diff { directory, scope: 'all', base }` (three-dot), `base` = C10's `git.worktree.branch { repoRoot, branch }.base`, the main worktree's branch | the tree is clean |
+| Last turn | the change receipt's files: `Edit`/`Write` results' `structuredPatch` and `filePath` from the turn's X1 `tool.result` events (C6's receipt reads the same), not git | opened from `reviewChanges(turnId, path?)` |
+| Staged | `git.diff { directory, scope: 'staged' }` | shown as a chip only while `git.status.files[].index` differs |
+
+`directory` is `session.worktree?.path ?? session.directory`. This branch is unavailable, and says why on its chip, when `base` equals the current branch (the session runs in the main worktree) or when C10's command is not yet on master; the default then falls to Uncommitted. `git.changed` (through `git.watch`, ref-counted with C7 and the summary) refreshes the file list without losing the selected file or scroll.
+
+**View**: `<N> files changed · +A −R · <scope>` header, file rows with counts and viewed markers, a file header (`<path> · Modified`), `Unified | Split | Wrap`, hunk navigation (`Showing hunk 1 of 3`), prev and next file, a footer naming the branch and scope, "Open file ↗" on a hunk, and "Diff too large to display. Open the file" past a size cap (advisory numbers, C8c's). Library: `@git-diff-view/react` over C4's multi-file unified patch (§4.7, advisory; R8 verifies it takes the patch and renders split mode). Fallback if R8 fails: C6's own hunk renderer, which already draws edit details.
+
+**Open file ↗** opens `openTab({ kind: 'file', path, line, appSessionId })` at the hunk's first changed line in the new file; a second Open on an already-open tab moves its line (C5's ask, relayed 2026-09-28). The `diffTab` slot renders the same Review view over a `ref` in the main area for the Scene B "diff beside the transcript" case; the `ref` grammar (`<scope>` with an optional `@<path>`, or `turn:<turnId>`) is C8c's. Entry points: the summary's "Review", the receipt's "Review changes" (`reviewChanges(turnId, path?)` → `addTool('review', { params: { scope: 'turn', turnId, path } })`, wired in C8c's `App.tsx` block), C11's `DiffWidget` "Open in Review" (`addTool('review', { appSessionId })`, one adapter line C11 owns). The `/diff` widget itself shows `get_workspace_diff`; Review never reads it (R4 concerns only the hand-off, which passes a path).
+
+**Not in P0**: staging, discard, commits and push (P1 source control); a session-start scope.
+
+### Files and the viewer (C8c)
+
+**Tree**: rooted at the allowlist roots, one root per top-level node (`directory`, each additional directory, the worktree when it differs), lazily listed with `files.list`, refreshed by `files.changed`, `.git` hidden, dotfiles shown; click opens the viewer tab; the selected file survives a refresh; `openFile(path, line)` exported for C6's adapter and for C9's `file:` links (P1). A path chip or a Sources row opens the same way.
+
+**Viewer** [binding — owner ruling 4]: the `fileTab` slot renders `{ tab: { path, line, appSessionId } }` read-only: code in CodeMirror 6 (`EditorState.readOnly`, non-editable view, language by extension, the P1 editor's base so nothing is rewritten) with a line jump on `tab.line`; images inline from `files.read`'s bytes as a `data:` URL (the CSP already admits `data:` images for C6); markdown through C6's `Markdown` export with a Source toggle; PDF, HTML, audio and video as an "Open externally" row (`files.openExternal`; the sandboxed frame is P1); any other text within the cap as plain text; a file past the cap opens as a bounded head with "Showing the first N KB" and "Open externally"; a binary that is not an image is an "Open externally" row. A file tab whose `appSessionId` is null or unknown renders the path and "No session grants access to this file" (the allowlist is per session); the ask of C5 and C6 is that the `openFile` adapter sets the transcript's `appSessionId` on the ref.
+
+**`files.*` read service** (K1) [binding — §4.1's sandbox: the renderer never receives a path it was not handed by a validated command, a receipt or a transcript chip, and never a handle]: owner main, defined by C8c additively in X2 as `src/shared/ipc/schema/files.ts`. Main resolves the session's record from C4's index, computes the allowlist by realpath, and refuses any path whose realpath is not under a root at a segment boundary (`IpcError.code: 'internal'`, message `path outside the session's directories`), symlinks resolved before the check. Negative tests as C4's: a symlink inside a root pointing out, `..` segments, a root that is itself a symlink, a path that is a prefix but not a child (`/repo2` under `/repo`). `files.watch` is ref-counted per directory like `git.watch`. Chunking, caps and watch debounce are C8c's numbers.
+
+### Data paths
+
+| Surface | Live session | Disk-only session | Owner |
+|---|---|---|---|
+| Summary: branch, change, push state | `git.watch` → `git.status`, `git.changed` | same | C4 main |
+| Summary: Subagents, Background work counts | `SessionDigest.childAgents`, `status.backgroundTasks` | digest; `fs.workflows` | C5 store, C3, C4 |
+| Summary: Sources | C6's transcript store for the session | same (C6's store over C4's backfill) | C6 |
+| Subagents lists | `fs.subagents` merged with X1 `subagent.*`/`task.*` | `fs.subagents` only; status unavailable | C4, C3 |
+| Drill-in transcript | K2: `session.events { afterSeq }` + `session.eventBatch` filtered by `agentId` for a live child | `fs.agentEvents` + `session.eventBatch` with `agentId` for a disk child | C3, C4 |
+| Relay | `session.steer`; `SendMessage` `tool.use` rows in both transcripts | disabled | C3 |
+| Workflows | `task.*`, `workflow.progress`; `fs.workflows` for history | `fs.workflows` | C3, C4 |
+| Shells, monitors | `status.backgroundTasks`, `task.*` | unavailable | C3 |
+| Tasks | `fs.tasks { listId }`, `fs.tasksChanged` | same | C4 |
+| Stop | `session.stopTask` | none | C3 |
+| Output, full log | `fs.readSpill` (roots include the engine's temp root) | same | C4 |
+| Review | `git.status`, `git.diff`, `git.worktree.branch`; receipts from X1 `tool.result` | same | C4, C10, C6 |
+| Files, viewer | `files.list/read/watch/openExternal` | same | main (C8c) |
+
+### Failure semantics
+
+A fact the source cannot give is marked unavailable in words, never inferred: a disk child's status, a disk-only session's shells, elapsed without a start event. A tool not yet registered renders its summary row disabled with the child that brings it. A refused path (`files.*`, `fs.readSpill`) shows the refusal and the path. A diff past the cap says so and offers the file. The relay composer explains its disabled state (parent idle, child finished, session disk-only). A `beforeClose` veto is the tool's own inline confirmation, never a modal. A `session.stopTask` for a task the engine no longer knows succeeds and the card disappears on the next snapshot. Every state renders in both themes with X7 tokens only.
+
+### Delegated unknowns
+
+Empirical questions the design could not settle, each assigned to the child whose first gate answers it (Risks carries the mitigations):
+
+- **R1** relay to a child — C8b, pass-3 scenario `spikes/protocol-probe/scenarios/pass3/relay-to-child.mjs`.
+- **R5** nested live agents keep their own `parent_tool_use_id` (SPEC-only today) and **R6** `stop_task` sequence for a shell, an agent and a workflow — C8b, the same pass-3 run.
+- **R4** `get_workspace_diff` on a dirty tree (types `perFileStats` and `hunks`, shared with C11's `/diff`) and **R8** `@git-diff-view/react` over C4's patch, split mode, a 5,000-line file, plus CodeMirror 6 read-only bundle weight — C8c.
+- **R7** C6's renderer inside the real region at 280, 380 and 640 px and maximized, with a child's `request_slot` — C8a's harness milestone.
+
+## Children
+
+Each child's execution document is a standalone file under `docs/doperpowers/plans/` headed by this document's path, the child id and this document's pin; it carries constraints, milestones and the record, and none of the design, which lives above.
+
+### C8a: Panel host, tool registry and pinned summary — plan (owns X5)
+
+- **Purpose:** fill C5's `panelHost` slot with the product host: the tab strip with the home glyph, pin and close, "+" over the registered tools, maximize through C5's action, the resting summary when no tab is selected, the registry (`registerPanelTool`, `panelHost`) that C9, C11, C8b and C8c register into, per-tab state kept outside React across visibility, session switches and pins, `beforeClose` vetoes, single-instance re-targeting, and the `#panel` harness as the product host replacing C9's stand-in. Three siblings wait on it and nothing else.
+- **Acceptance:** with C5 on master and C9's `terminalTool` registered (a stub tool in the harness stands in until C9 M4 adapts): "+" lists Terminal and opens it; the tab pins, survives switching to another session and back with its shell intact, and unpins into the session's list; `panel.pinned` and `panel.<id>` in `layout.json` round-trip a relaunch; the home glyph shows the summary with the tabs kept and a second click on a tab returns with its scroll intact; the summary shows when the last tab closes; `panelActiveNoSession` survives an Overview tab; a `beforeClose` veto keeps the tab; C11's `sessionInfoTool` registers through `registerPanelTool` and opens from "+" and from the summary's model row (a stub in the harness until C11 lands); `openTerminal` (C10's attach path) lands a Terminal tab through `addTool` with its command in `params`; the resting summary renders Environment, Push state, Subagents, Background work and Sources from C5's store, C3's status, C6's store and C4's `git.watch`, every row opens its tool and a row whose tool is unregistered says which child brings it; section expansion persists; `Shell.test.tsx` passes with the slot registered; R7 passes at 280, 380, 640 px and maximized; every state renders in both themes with tokens only.
+- **Edges:** blocked-by C5 (on master; the document may be authored against C5's reviewed document and worktree). Advisory blocked-by C9 M4 for the acceptance line that uses the real Terminal tool. Blocks C8b, C8c, C10's attach item 12, C9 M4's X5 refresh, C11 M4's registration.
+- **Contracts:** owns X5 (content final above); K3, K4; consumes X1 (session record, status, digest), X2 (`layout.*`, `git.watch`/`git.changed`/`git.status`, `session.status`), X3 (Sources from the store), X7.
+- **Design inheritance:** The host, X5, The summary, Failure semantics, R7 [binding as graded]; D-10 pin split (C5's, binding); §5.6 layout and copy, Codex §3 bounds (advisory).
+- **Required:** required.
+- **Status:** not-dispatched, blocked-by C5's merge; document authorable now.
+- **Grain hint:** plan; four milestones suggested (host and registry with the harness and R7; summary; persistence and pins under reload; end-to-end against C9's and C11's tools or their stubs). Whole-branch review at reviewer-medium.
+
+### C8b: Agent work tools — Subagents, Background work, Log — plan
+
+- **Purpose:** the Subagents tool (Active and Done lists with nesting, the waiting badge and elapsed; the drill-in over C6's `Transcript` `variant: 'child'` with C7's inline request card, Back, model and effort from the sidecar; the relay composer), the Background work tool (workflow cards with phases and the per-agent table, shells and monitors, the task checklist, Stop through `session.stopTask`), the Log tool over `fs.readSpill`, and the `openSubagent` and `openFullLog` adapter lines in `App.tsx`.
+- **Acceptance:** gate **G1 (required, first)**: the pass-3 probe records a relay reaching a child (R1), the nested-agent wire behaviour (R5) and the stop sequences (R6) under `spikes/protocol-probe/fixtures/pass3/`, with the verdicts in Surprises here. Gate **G2 (required)**: replaying `pass1/subagent` and `pass2/workflow` in the harness and then live: a session that dispatches two agents shows both under Active with elapsed ticking and a finished one moves to Done with its outcome; a child of a child nests under its parent (live if R5 allows, from the sidecar otherwise); clicking a subagent row in the transcript opens the tool with that agent selected and its transcript hydrated once with no duplicate rows (K2's unit test over one child with both sources available); a child's permission request renders inline in the drill-in and is answerable; the relay composer produces a `SendMessage` row in both transcripts within one tool round and is disabled with its reason when the parent is idle; a workflow shows its phases and agent table updating per progress frame and Stop workflow ends it with the R6 sequence; a shell's Output opens the Log tool on its output file; the checklist reflects `fs.tasks` for the session's list id; a disk-only session shows the same lists from `fs.subagents` and `fs.workflows` with wire-only facts marked unavailable.
+- **Edges:** blocked-by C8a; C3 M5 (`session.stopTask`, `session.status`); C4 M3 (landed, including the `fs.readSpill` temp root); C6 M5 (`ipcSource`, the callback call sites, `Markdown`); C7 (`renderInlineRequest`). Blocks C12.
+- **Contracts:** K2 (owner), K3; consumes X1, X2 (`fs.*`, `session.steer`, `session.stopTask`, `session.events`/`session.eventBatch`), X3 (`SubagentRef`, rows), X4 (the inline card through C7), X5.
+- **Design inheritance:** Subagents, Background work, Failure semantics, Data paths [binding as graded: nesting, four kinds and stop only, the relay, K2]; list bounds, copy, the relay's wording, the Log tool's paging (advisory).
+- **Required:** required.
+- **Status:** not-dispatched, blocked-by C8a, C3 M5, C6 M5, C7.
+- **Grain hint:** plan; the document is written after the C3 and C6 documents' milestones it depends on are closed (both documents are closed; the code is in flight), the executor dispatches after C8a, C3, C6 and C7 merge; G1 is its first milestone. Whole-branch review at reviewer-medium.
+
+### C8c: Code tools — Review, Files and the `files.*` service — plan
+
+- **Purpose:** the Review tool (four scopes over C4's `git.diff` and the receipt, file list with counts, unified and split, hunk navigation, viewed markers, Open file at the hunk's line, the `diffTab` slot), the Files tool (tree over the allowlist roots, `openFile`), the read-only viewer in the `fileTab` slot, the main-owned `files.*` service with its allowlist, and the `reviewChanges` adapter line.
+- **Acceptance:** gate **G1 (required, first)**: R8's scratch check of `@git-diff-view/react` over a three-file patch in unified and split mode and a 5,000-line file, CodeMirror 6 read-only bundle weight measured, and R4's dirty-tree `get_workspace_diff` fixture typed (shared with C11), verdicts in Surprises here. Gate **G2 (required)**: on a scratch repository driven by a live session: the receipt's "Review changes" opens the tool on the turn's files; Uncommitted shows the working tree against `HEAD` with counts equal to `git diff --numstat` plus the untracked files; Staged appears only when the index differs; "Open file ↗" opens a viewer tab at the hunk's first changed line and a second Open moves the open tab's line; Files lists the tree with one node per root, refuses a path outside the roots in unit tests (symlink out, `..`, prefix-not-child, symlinked root), opens a markdown file rendered with a Source toggle, a `.ts` file highlighted with a line jump, an image inline, and a PDF as an Open externally row; a 20 MB file opens as a bounded head with a notice; a diff past the cap is stated, not hung; `git.changed` refreshes the list without losing the selection. Gate **G3 (conditional on C10's `git.worktree.branch` being on master; until then the chip reads unavailable and G3 is re-run when it lands)**: This branch shows the three-dot diff against the main worktree's branch for a session in a worktree and reads unavailable for a session on the main branch.
+- **Edges:** blocked-by C8a; C4 M6 (`git.*`); C6 M4 and M5 (`reviewChanges` call site, `Markdown`, the `openFile` adapter). Conditional-on C10's `git.worktree.branch` for G3. Blocks C12; unblocks C9's `file:` links (P1) by exporting `openFile`.
+- **Contracts:** K1 (owner), K3, K4; consumes X1, X2 (`git.*`, `layout.openExternal`), X3 (receipt rows), X5, X7. Records `files.*` in the ledger as a C8 block.
+- **Design inheritance:** Review, Files and the viewer, Failure semantics, Data paths [binding as graded: the scopes, the read-only viewer's kinds, K1's boundary]; the diff library and fallback, caps, chunking, watch cadence, the `ref` grammar, tree filtering (advisory).
+- **Required:** required (G1, G2); G3 conditional as stated.
+- **Status:** not-dispatched, blocked-by C8a, C4 M6, C6 M4/M5.
+- **Grain hint:** plan; the document is written now against the closed C4 and C6 documents, the executor dispatches after C8a, C4 and C6 merge; G1 is its first milestone. Whole-branch review at reviewer-high, because `files.*` is a new privileged read surface at the sandbox's edge (the charter's rung for C3 and C4).
+
+## Cross-Child Contracts
+
+- **X5 Panel host and tool registry** (charter §13; owner C8a; C8b, C8c, C9, C11 implement tools). Content final in Design "X5, final"; canonical at `src/renderer/src/panel/tool.ts` and `host.ts` once C8a lands. Written to outlive this unit: promoting the final text into §13 is a closing-time action (Outcomes), and a Parent-impact line below asks for it now so C9 and C11 refresh against one source.
+- **K1 `files.*` read service** (owner main; C8c defines in `src/shared/ipc/schema/files.ts`, additive to X2). `files.list { appSessionId, path? } → { root, entries[{ name, path, kind: 'file' | 'dir' | 'symlink', size, mtimeMs }] }` (no `path`: the roots); `files.read { appSessionId, path, offset?, length? } → { encoding: 'utf8' | 'base64', content, bytes, offset, truncated, mime }`; `files.watch { appSessionId, path } → void` and `files.unwatch` (ref-counted); `files.openExternal { appSessionId, path } → { opened }` (`shell.openPath` behind the same allowlist; `layout.openExternal` refuses `file:` and C11's `settings.reveal` reveals rather than opens); event `files.changed { appSessionId, path, kind: 'created' | 'changed' | 'removed' }`. Every command validates against the allowlist as Design states; `openExternal` is the one addition beyond the architect's three names, needed by ruling 4's "open externally" rows. Binds C8a (Sources rows), C8b (path chips in the drill-in) and later C9 (`file:` links) to open files only through `openFile`, never by reading a path themselves. Recorded in the ledger as a C8 block when C8c's document is written.
+- **K2 Child-event source** (owner C8b; C6's `TranscriptSource` is the shape). One source per child, never both, chosen by where the child was observed: a live child (its `agentId` appears in this launch's stream) snapshots from `session.events { appSessionId, afterSeq }` filtered by `agentId` and subscribes to `session.eventBatch` filtered the same way; a disk child reads `fs.agentEvents { appSessionId, agentId }` and then `session.eventBatch` with that `agentId` (C4 follows). Per child rather than per session because a live resumed session's earlier children exist only on disk (`--resume` never replays history, §4.2) while its new children exist only on the wire. C8b supplies this source itself (`childSource(appSessionId, agentId)`) rather than asking C6 to change `ipcSource`; advisory alternative, if C6's hydration makes it cheaper: one merged source deduplicated by `messageUuid` (disk ids are `<uuid>#<n>`, live ids `<app>:<launch>:<seq>:<n>`, so id deduplication alone would double every row; grounding R2). Pinned by a unit test over one child with both sources available.
+- **K3 Transcript callbacks** (owner C6's `TranscriptActions`; C8b and C8c supply). Each C8 callback is one adapter line in the child's delimited block of `src/renderer/src/App.tsx` (C7's pattern): C8b wires `openSubagent` and `openFullLog`; C8c wires `reviewChanges`. `openFile` stays C5's adapter, with the ask that it carries the transcript's `appSessionId`. Binds the three children to register nothing else into C6 and to tolerate absence (C6's `NO_ACTIONS` no-ops).
+- **K4 Open-file seam** (owner C5's `openTab` and tab kinds; C8c fills the slots). Any surface that opens a file calls `openTab({ kind: 'file', path, line, appSessionId })` or C8c's `openFile(path, line)`, and the `fileTab` slot is the only reader of file bytes in the renderer; the `diffTab` slot renders Review's view for a `ref`. Binds C8a (Sources), C8b (drill-in chips), C8c, and C9 later.
+
+## Ordering & Dependency Map
+
+- **Now**: C8a's execution document, against this spec, C5's reviewed document and its worktree. C8c's document can be written in the same pass (its blockers' documents are closed). C8b's document waits for nothing either (C3, C6, C7 documents are closed) but benefits from C6 M5's landed `ipcSource` shape; write it when C8a's executor starts.
+- **C8a executes** when C5 is on master (first of the wave-2 merges after C3 and C4 in the ledger's order). It unblocks C9 M4's refresh, C10's item 12 and C11 M4's registration at once, which is the reason the host is a child of its own (grounding §2).
+- **C8b and C8c execute in parallel** after C8a merges and their blockers are on master: C8b after C3 M5, C6 M5 and C7; C8c after C4 M6 and C6 M4/M5, with G3 re-run when C10 lands. Neither touches the other's files; both add one block to `App.tsx`, one to `package.json`, and C8c one X2 module.
+- **C12** waits for C8b and C8c (and the charter's C10, C11); the C8 recomposition (Parent-Level Acceptance) runs once after both, before C12's own recomposition against §10.
+- Forced sequence: C5 → C8a → {C8b, C8c} → recomposition. Everything else is parallel by construction because X5 and K1 to K4 are fixed here.
+- Re-check at C8a's dispatch (grounding §3.3): if C3 M5, C4 M6 and C6 M5 are all on master by then, the timing seam is gone and the architect may fold C8b and C8c into one plan child with the host as M1; the state-owner and verification seams then become milestone boundaries inside one document. Not the expected case.
+
+## Risks & Mitigations
+
+- **R1 relay unverified** (no fixture has a `SendMessage`): C8b G1 runs the pass-3 relay scenario before any relay code; if the model does not route a steer reliably, the composer's wording changes, not the design; if it never does, ruling 1 is revisited with the owner (a Decision Log entry, C8b flagged).
+- **R2 duplicate rows in a live drill-in**: K2's one-source rule and its unit test.
+- **R3 task output unreadable**: resolved; C4 M3 landed the engine's temp root in `fs.readSpill`.
+- **R4 `get_workspace_diff` untyped on a dirty tree**: C8c G1 records the fixture and types both arrays; affects only C11's hand-off, which passes a path.
+- **R5 nested live agents unverified on the wire**: C8b G1; the sidecar's `parentAgentId` nests after the fact either way.
+- **R6 `stop_task` unfixtured**: C8b G1 records the `task.updated`/`task.notification` sequence the card keys on.
+- **R7 renderer inside a 380 px panel** (C6's virtualiser wants a known-height scroll container; C5's slot is `overflow-auto`, not a flex column): C8a's harness milestone; a failing anchor is a container fix.
+- **R8 diff and viewer libraries**: C8c G1; fallback to C6's hunk renderer for the diff, and the viewer's text mode for anything CodeMirror cannot load.
+- **R9 file-read boundary**: K1's realpath allowlist with negative-control tests, reviewer-high on C8c.
+- **R10 the two C5 asks** (panel follows `file`/`diff`/`agent` tabs; `openTab` refreshes `line`): relayed 2026-09-28 to the C5 executor for M6; if they miss, C8a lands with pins-only on file tabs and C8c's acceptance line for the moved line waits for C5's retrofit.
+- **Sibling refresh drift**: C9 and C11 wrote to a draft X5; their refresh passes read the canonical files after C8a lands, and C8a's harness registers stubs with their ids so the host is tested against the real names before they merge.
+
+## Deferred / Out of Scope
+
+**Deferred (may return):**
+- Sent files as a **MAWS-integrated SendUserFile** — MAWS's own path for an agent to deliver a file to the panel, in place of the engine tool that is disabled under the SDK entrypoint and uploads to claude.ai when enabled — **P1** (owner ruling 2 with the addendum of 2026-09-28); with it the per-type renderer for delivered files, which the viewer's kinds already cover in part.
+- The sandboxed frame for PDF and HTML in the viewer — **P1** (same addendum); P0 opens them externally.
+- Pull-request status and checks on the push-state row; staging, discard, commits and push in Review — **P1** source control (ruling 5, ruling 3).
+- The editor (CodeMirror 6 editing, merge view) — **P1**; the read-only viewer is its base.
+- The topology view for subagents (§16); a session-start scope for Review (the engine records none; a MAWS-recorded start commit would serve only sessions started in MAWS); the standalone, editable Tasks panel (**P1**); `file:` links from the terminal (C9, P1, through `openFile`); find-in-log for the Log tool; a `layout.changed` event if a second writer of `layout.*` appears (ledger (d) 8).
+
+**Explicitly out of scope:** messaging a running child by any host path (none exists; the relay is the design, K2 and ruling 1); reading a file the renderer was not handed through a validated command, a receipt or a chip (K1, §4.1); pause, skip and retry for workflows (wire-absent); a fourth data store for panel state (C5's `layout.*` is the store, D-10); patching the engine (D-1).
+
+## Tracking Map
+
+| Child | Grain | Status | Ledger / artifact |
+|---|---|---|---|
+| C8a Panel host, registry, summary | plan | not-dispatched; document authorable now against C5's reviewed document and worktree; executor when C5 is on master | `docs/doperpowers/plans/<date>-c8a-panel-host.md` (to be written) + its SDE ledger |
+| C8b Subagents, Background work, Log | plan | not-dispatched; blocked-by C8a, C3 M5, C6 M5, C7 | `docs/doperpowers/plans/<date>-c8b-agent-work-tools.md` (to be written) + its SDE ledger; pass-3 fixtures under `spikes/protocol-probe/fixtures/pass3/` |
+| C8c Review, Files, `files.*` | plan | not-dispatched; blocked-by C8a, C4 M6, C6 M4/M5; G3 conditional on C10 | `docs/doperpowers/plans/<date>-c8c-code-tools.md` (to be written) + its SDE ledger; a C8 block in the wave-2 interface ledger for `files.*` |
+| C8 recomposition | — | after C8b and C8c merge | Outcomes & Retrospective here |
+
+## Surprises & Discoveries
+
+From the grounding (7cf8957) and the rulings; each is an assumption a sibling or the charter carried about C8 that C8 could not satisfy as written, with its resolution.
+
+- Observation: the charter's "message a subagent" (§5.6, §10 item 4) has no host path; the only route is a main-lane message the parent model relays.
+  Evidence: `UserInputFrameSchema` pins `parent_tool_use_id: z.null()` (C3 `src/shared/wire/frames.ts:411-419`); none of the 73 control subtypes addresses an agent (SPEC 45 §45.17); the spawn result tells the model "Use SendMessage with to: 'ad286…' to continue this agent" (`pass1/subagent.jsonl` #174). Resolution: owner ruling 1, the relay composer; §5.6, §10 item 4 and §12 C8 amended by the architect.
+- Observation: Sent files has no producer under MAWS's launch.
+  Evidence: `SendUserFile` is enabled only under `CLAUDE_CODE_ENTRYPOINT` ∈ `claude-desktop`, `claude-desktop-3p`, `local-agent` or a Remote Control child (SPEC 23 §23.4.2; `cli.pretty.js:262249, 262400-262404`); MAWS launches as `sdk-ts`; no fixture's `system/init.tools` lists it; when enabled the bytes go to claude.ai. Resolution: owner ruling 2 with the addendum, P1 as a MAWS-integrated SendUserFile, no P0 stand-in; C6's "the file renders in C8's Sent files" (its tool table and *Images and attachments*) becomes a cell that names the file and offers nothing.
+- Observation: C11's ask assumed four summary rows (context, usage, model, cost) opening Session info, and C3's residue and §12 C3 call it "C8's Session info".
+  Evidence: C11 lines 309 to 311; C3 line 714; charter line 334. Resolution: Session info is C11's tool hosted by C8a, offered from "+" and one summary row (the model row); the C3 lines are stale and read C11.
+- Observation: background task output could not be read through the landed `fs.readSpill`.
+  Evidence: every pass-2 fixture reports `output_file` under `/private/tmp/claude-501/<cwd-slug>/<session>/tasks/<id>.output` (`pass2/per-task-stop-on.jsonl`; SPEC A3:1141), contradicting SPEC 18:3858; C4's document line 236 named three roots under the config home. Resolution: C4 landed a fourth root in M3, `realpath($CLAUDE_CODE_TMPDIR ?? /tmp)/claude-<uid>` (the engine's rule, SPEC 20; `os.tmpdir()` would be `/var/folders/…` on macOS and match nothing). R3 closed.
+- Observation: the summary's pull-request row had no source; C4 provides branch, upstream, ahead and behind and nothing about remotes or PRs.
+  Evidence: C4 lines 284 to 296. Resolution: owner ruling 5, a push-state row with "Open on GitHub"; ask of C4 for `git.status.remoteUrl` sent 2026-09-28.
+- Observation: mockup 03's Review names two bases ("against main" and "since session base") and the engine records no session-start commit.
+  Evidence: `get_workspace_diff` scopes by mtime against the session start time and answers `source.kind: 'working-tree' | 'branch'` (`reads.jsonl` #81; `cli.pretty.js:423645-423770`); C4's `git.diff` takes a three-dot `base`. Resolution: owner ruling 3, Codex's scopes with `BranchStatus.base`, nothing invented.
+- Observation: C9's X5 draft does not fit the landed host: `PanelToolContext.appSessionId` is non-null while `PanelHostProps.appSessionId` is nullable; `PanelToolInit` has no place for `openTerminal`'s `cwd` and `command`; `focusRequest` on ⌘⇧B has no C5 counterpart.
+  Evidence: C9 lines 268 to 295; C5 `host-slot.ts:8-16`; `panel.toggle` only flips `collapsed`. Resolution: X5 final adds the nullable session, typed `params`, and derives `focusRequest` from the collapse transition; C9 adapts at its refresh as it planned.
+- Observation: C5's panel follows only `session` tabs, and re-opening an open `file` tab does not refresh its line.
+  Evidence: `PanelRegion.tsx:70-71`; `layout-model.ts:84-93` refreshes `line` for `settings` only. Resolution: two asks relayed to the C5 executor on 2026-09-28 (charter §19); C8a and C8c code against the asked behaviour with the landed behaviour as the degraded case.
+- Observation: `agent_message` rows have no producer: X1 `subagent.message` is defined and never emitted, and `from`/`to` are always null.
+  Evidence: C6 `model/rows.ts`; C3 `normalizer-system.ts:97-143`. Resolution: the relay's confirmation keys on the `SendMessage` `tool.use` row in the parent (its `to` input) and on the message's arrival in the child's transcript, not on `agent_message`.
+- Observation: a live child's events and its on-disk events carry different ids, so a source that snapshots from disk and subscribes live would double every row under C6's id deduplication.
+  Evidence: C4 ids `<uuid>`, `<uuid>#<n>`; C3 ids `<app>:<launch>:<seq>:<n>`; `source/hydrate.ts:20-50`. Resolution: K2, one source per child.
+
+## Parent-impact
+
+Lines for the architect to record in the charter; C8 does not edit it.
+
+1. §12 C8: replace "decomposing at dispatch" with the cut: C8a (panel host, tool registry, pinned summary; owns X5), C8b (Subagents, Background work, Log), C8c (Review, Files, `files.*`), composite spec at `docs/doperpowers/plans/2026-09-28-c8-right-panel.md`; Edges: C8a blocked-by C5, blocks C8b, C8c, C10 item 12, C9 M4's X5 refresh, C11 M4's registration; C8b blocked-by C8a, C3 M5, C6 M5, C7; C8c blocked-by C8a, C4 M6, C6 M4/M5, conditional on C10's `git.worktree.branch` for This branch; C8b and C8c block C12. Contracts: owns X5; consumes X1, X2, X3, X4, X7; adds `files.*` to X2.
+2. §13 X5: the contract as this document's "X5, final" reads it (nullable session, typed `params`, `open` re-targeting, optional `summary`, `menu`, state outside React, `beforeClose`), names `registerPanelTool(tool)` and `panelHost.addTool(id, opts)`, canonical at `src/renderer/src/panel/tool.ts` and `host.ts` once C8a lands; "C9 implements" reads "C8a implements the host; C8b, C8c, C9, C11 implement tools".
+3. §13 X2 additive: `files.*` (owner main, `files.list`, `files.read`, `files.watch`, `files.unwatch`, `files.openExternal`, event `files.changed`) from C8c; `git.status.remoteUrl` from C4 (asked); `fs.readSpill`'s temp root (landed, C4 M3); C5's two layout asks (panel `appSessionId` from `file`/`diff`/`agent` tabs; `openTab` refreshes an open file tab's `line`); the `openFile` adapter carries the transcript's `appSessionId` (ask of C5/C6).
+4. §3 P0 "Right panel" line still reads "message a subagent" and lists "Sent files (renderer for images, video, audio, HTML, markdown, PDF)"; amend to "relay a message through the parent" and remove Sent files. §3 P1 gains: Sent files as a MAWS-integrated SendUserFile; the sandboxed frame for PDF and HTML in the viewer; pull-request status and checks on the push-state row.
+5. §12 C3 *Process table* ("C8's Session info and C12's budget read them") and C3's residue: "C11's Session info (hosted by C8a)".
+6. §12 C6 *Images and attachments* ("files the agent sends belong to C8's Sent files") and C6's tool table row for `SendUserFile`: the cell names the file and offers nothing in P0; Sent files is P1.
+7. §5.6 first paragraph: the resting summary is also reached from a home glyph at the left of the tab strip without closing tabs (recorded in §19 on 2026-09-28; not yet in §5.6's text). Optional.
+8. §14: Wave 3 reads "C7 (after C3, C6) and C8a (after C5) in parallel; C8b (after C8a, C3, C6, C7) and C8c (after C8a, C4, C6) with wave 4".
+9. §17: the C8 row points at this document; three child rows as the Tracking Map above.
+
+## Decision Log
+
+- 2026-09-28 (owner, rulings 1 to 5, verbatim from the architect's brief; binding):
+  1. The subagent drill-in keeps its composer as a relay through the parent: one steer-priority message asking the parent to `SendMessage`, labelled `Relay via <session>`, shown as "Asked <session> to relay…" until the `SendMessage` row appears in both transcripts, disabled while the parent's turn is not running. (No host path reaches a running child.)
+  2. Sent files leaves P0 entirely, with no Outputs stand-in; it returns in the extension phase with the in-process "show a file" tool. Remove it from every list; note the reason (`SendUserFile` disabled under the SDK entrypoint; uploads to claude.ai when enabled).
+  3. Review uses Codex's scopes: Uncommitted (working tree against `HEAD`, default on a dirty tree), This branch (three-dot against the main worktree's branch via C10's `BranchStatus.base`, default on a clean tree), Last turn (the change receipt's files), Staged when the index differs. No invented session base.
+  4. The P0 file viewer is read-only: CodeMirror 6 with syntax highlighting and line jump, images inline, markdown rendered through C6's `Markdown` with a Source toggle; PDF, HTML and media are "open externally" rows.
+  5. The summary's pull-request row becomes a push-state row (`N ahead of <upstream>`, `Not pushed`) with "Open on GitHub" from the remote URL (Ask of C4: `git.status` gains `remoteUrl`, already sent); pull-request status and checks are P1.
+- 2026-09-28 (owner, addendum to ruling 2, relayed by the coordinator; binding): the sandboxed frame for PDF and HTML in the viewer, and a MAWS-integrated SendUserFile (MAWS's own path for an agent to deliver a file, in place of the engine tool that is disabled under the SDK entrypoint), both belong to the next phase, P1, not the extension phase. Ruling 2's "extension phase … show-a-file tool" reads P1 as a MAWS-integrated SendUserFile everywhere in this document; the charter's §5.6 already says so.
+- 2026-09-28 (architect; binding unless marked advisory): the cut is the grounding's §3.1 with the edges as stated in Children; X5 as the grounding's §4 reads it, canonical at `panel/tool.ts` and `host.ts` once C8a lands, C9 and C11 adapting at their refresh passes; a home glyph shows the summary without closing tabs and the summary shows when the last tab closes; the read-only TaskCreate checklist is in Background work in P0; live-versus-disk child events use one source, never both (advisory: a `messageUuid` deduplication if C6's hydration makes it cheaper); probes ride as first gates inside the children that need them (R1, R5, R6 in C8b; R4, R8 in C8c; R7 in C8a's harness milestone); `files.*` (owner main) is C8c's additive X2 entry, allowlisted by realpath to the session's directories, the renderer never constructing a path it was not handed; the acceptance at recomposition as Parent-Level Acceptance states it; the deferred list as Deferred states it. Alternatives rejected at the grounding (§3.3): one plan child with the host as M1 (loses on timing while three siblings block on the host; re-checked at C8a's dispatch), one child per tool (six orientation costs and two duplicated reducers), two children (loses only on timing).
+- 2026-09-28 (architect, correction relayed by the coordinator): C4 landed the `fs.readSpill` root as `realpath($CLAUDE_CODE_TMPDIR ?? /tmp)/claude-<uid>` (SPEC 20), not `os.tmpdir()`; the grounding's R3 and the "readSpill root ask" edge on C8b are resolved; stated as landed in C4 M3 throughout.
+- 2026-09-28 (author, sharpening of the child-source rule; flagged for the architect): K2 chooses the source per child rather than per session state. Rationale: a live session resumed from disk has children that exist only in `agent-*.jsonl` (the engine never replays history over the wire) and children spawned since that exist only in C3's stream; a per-session choice would leave one set empty. The architect's intent, one source and never both, is unchanged. Alternative kept advisory: a merged source deduplicated by `messageUuid`.
+- 2026-09-28 (author, placement): "Open full log" and a shell's "Output" open a **Log** tool in the panel (C8b; `menu: false`) over `fs.readSpill`, rather than a main-area file tab, because §5.3 says "Open full log sends the cell to the right panel" and the engine store is outside K1's allowlist; the one addition this makes to X5 beyond the grounding's §4 is the optional `menu` flag. Alternative rejected: routing engine-store paths through C8c's viewer, which would put a second read path behind the `fileTab` slot and move the destination out of the panel.
+- 2026-09-28 (author, `files.openExternal`): added to K1 beyond the architect's three names because ruling 4's "open externally" rows need a path-opening command behind the same allowlist; `layout.openExternal` refuses `file:` by design and C11's `settings.reveal` reveals in Finder rather than opening. Alternative rejected: extending `layout.openExternal` with `file:`, which would widen C5's scheme check without an allowlist.
+- 2026-09-28 (author, verification call): each child ends with an independent whole-branch review at the astra rung: reviewer-medium for C8a and C8b, reviewer-high for C8c because `files.*` is a new privileged read surface at the sandbox's edge (the charter's rung for C3 and C4); per-task reviews under subagent-driven execution on the plugin's task-reviewer; C8 closes by the recomposition check in Parent-Level Acceptance, run once after C8b and C8c merge. Alternative rejected: reviewer-medium for all three, which would review the allowlist at the same rung as a tab strip.
+
+## Outcomes & Retrospective
+
+Pending — written when the unit closes. Closing is a recomposition check: verify Parent-Level Acceptance as written after C8b and C8c merge — all three children landed is not the same event — promote X5's final text into the charter's §13 and the `files.*` block into the ledger, then retrospect.
