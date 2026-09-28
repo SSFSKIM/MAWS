@@ -9,11 +9,13 @@
   {
     "at": "2026-09-28T10:00:00.045Z",
     "attachments": [],
+    "dropped": false,
     "editable": true,
     "id": "user:u-edit-and-receipt-002",
     "kind": "user",
     "lines": 1,
     "messageUuid": "u-edit-and-receipt-002",
+    "steer": false,
     "text": "Rename `measure` to `measureRows` in src/app.ts and src/store.ts, add a helper in src/util/rows.ts, then run the tests and show me the diff summary.",
     "turnId": "turn:u-edit-and-receipt-002"
   },

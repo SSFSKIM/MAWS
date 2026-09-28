@@ -9,11 +9,13 @@
   {
     "at": "2026-09-28T09:21:49.996Z",
     "attachments": [],
+    "dropped": false,
     "editable": true,
     "id": "user:6ffe2781-e332-43ac-b218-09fb29e670de",
     "kind": "user",
     "lines": 1,
     "messageUuid": "6ffe2781-e332-43ac-b218-09fb29e670de",
+    "steer": false,
     "text": "Use Bash to run exactly git log --oneline. Then say DONE.",
     "turnId": "turn:6ffe2781-e332-43ac-b218-09fb29e670de"
   },
@@ -137,11 +139,13 @@
   {
     "at": "2026-09-28T09:21:53.436Z",
     "attachments": [],
+    "dropped": false,
     "editable": true,
     "id": "user:bfb5b35a-a854-4ee2-84e6-4da03b4d8442",
     "kind": "user",
     "lines": 1,
     "messageUuid": "bfb5b35a-a854-4ee2-84e6-4da03b4d8442",
+    "steer": false,
     "text": "Use Bash to run exactly git branch --show-current. If denied, stop.",
     "turnId": "turn:bfb5b35a-a854-4ee2-84e6-4da03b4d8442"
   },
@@ -277,11 +281,13 @@
   {
     "at": "2026-09-28T09:21:56.005Z",
     "attachments": [],
+    "dropped": false,
     "editable": true,
     "id": "user:7c9e7143-c066-41a4-bef7-e28aee59c6eb",
     "kind": "user",
     "lines": 1,
     "messageUuid": "7c9e7143-c066-41a4-bef7-e28aee59c6eb",
+    "steer": false,
     "text": "Use Bash to run exactly git status --short. Then say DONE.",
     "turnId": "turn:7c9e7143-c066-41a4-bef7-e28aee59c6eb"
   },

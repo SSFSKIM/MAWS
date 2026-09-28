@@ -9,11 +9,13 @@
   {
     "at": "2026-09-28T10:00:55.770Z",
     "attachments": [],
+    "dropped": false,
     "editable": true,
     "id": "user:b39196e7-b323-49c9-9cab-5b313f49bc83",
     "kind": "user",
     "lines": 1,
     "messageUuid": "b39196e7-b323-49c9-9cab-5b313f49bc83",
+    "steer": false,
     "text": "Use Bash to run exactly: git status --short. Then reply OK.",
     "turnId": "turn:b39196e7-b323-49c9-9cab-5b313f49bc83"
   },

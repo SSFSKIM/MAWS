@@ -9,11 +9,13 @@
   {
     "at": "2026-09-28T12:00:00.010Z",
     "attachments": [],
+    "dropped": false,
     "editable": true,
     "id": "user:u-stream-1",
     "kind": "user",
     "lines": 1,
     "messageUuid": "u-stream-1",
+    "steer": false,
     "text": "Explain, briefly, how the list stays anchored.",
     "turnId": "turn:u-stream-1"
   },

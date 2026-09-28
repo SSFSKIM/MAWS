@@ -9,11 +9,13 @@
   {
     "at": "2026-09-28T10:07:18.591Z",
     "attachments": [],
+    "dropped": false,
     "editable": true,
     "id": "user:f7132c82-9888-47e6-9278-bdf1dd986608",
     "kind": "user",
     "lines": 1,
     "messageUuid": "f7132c82-9888-47e6-9278-bdf1dd986608",
+    "steer": false,
     "text": "Remember the word KIWI. Reply OK.",
     "turnId": "turn:f7132c82-9888-47e6-9278-bdf1dd986608"
   },
@@ -32,11 +34,13 @@
   {
     "at": "2026-09-28T10:07:21.441Z",
     "attachments": [],
+    "dropped": false,
     "editable": true,
     "id": "user:f1ac3ca4-19bd-43dd-9d0b-223ce01e84b8",
     "kind": "user",
     "lines": 1,
     "messageUuid": "f1ac3ca4-19bd-43dd-9d0b-223ce01e84b8",
+    "steer": false,
     "text": "Reply exactly: HOLDER-AGAIN",
     "turnId": "turn:f1ac3ca4-19bd-43dd-9d0b-223ce01e84b8"
   },

@@ -9,11 +9,13 @@
   {
     "at": "2026-09-28T09:22:25.274Z",
     "attachments": [],
+    "dropped": false,
     "editable": true,
     "id": "user:49f5aef7-fe2c-4ee3-aad7-8a75d08ed50b",
     "kind": "user",
     "lines": 1,
     "messageUuid": "49f5aef7-fe2c-4ee3-aad7-8a75d08ed50b",
+    "steer": false,
     "text": "Remember the word ZEBRA. Reply OK.",
     "turnId": "turn:49f5aef7-fe2c-4ee3-aad7-8a75d08ed50b"
   },

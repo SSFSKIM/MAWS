@@ -9,11 +9,13 @@
   {
     "at": "2026-09-28T10:07:20.284Z",
     "attachments": [],
+    "dropped": false,
     "editable": true,
     "id": "user:2d681dda-7cc9-4980-9f06-9adb2ba4597d",
     "kind": "user",
     "lines": 1,
     "messageUuid": "2d681dda-7cc9-4980-9f06-9adb2ba4597d",
+    "steer": false,
     "text": "What word did I ask you to remember? Reply with just that word, then the word SECOND.",
     "turnId": "turn:2d681dda-7cc9-4980-9f06-9adb2ba4597d"
   },

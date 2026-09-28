@@ -9,11 +9,13 @@
   {
     "at": "2026-09-28T12:00:00.010Z",
     "attachments": [],
+    "dropped": false,
     "editable": true,
     "id": "user:u-spill-1",
     "kind": "user",
     "lines": 1,
     "messageUuid": "u-spill-1",
+    "steer": false,
     "text": "Dump the whole build log.",
     "turnId": "turn:u-spill-1"
   },

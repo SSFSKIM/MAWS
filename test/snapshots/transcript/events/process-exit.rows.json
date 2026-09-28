@@ -9,11 +9,13 @@
   {
     "at": "2026-09-28T12:00:00.010Z",
     "attachments": [],
+    "dropped": false,
     "editable": true,
     "id": "user:u-exit-1",
     "kind": "user",
     "lines": 1,
     "messageUuid": "u-exit-1",
+    "steer": false,
     "text": "Run the release script.",
     "turnId": "turn:u-exit-1"
   },

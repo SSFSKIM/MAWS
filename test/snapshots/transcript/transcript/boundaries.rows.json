@@ -9,11 +9,13 @@
   {
     "at": "2026-09-28T08:00:00.045Z",
     "attachments": [],
+    "dropped": false,
     "editable": true,
     "id": "user:u-boundaries-002",
     "kind": "user",
     "lines": 1,
     "messageUuid": "u-boundaries-002",
+    "steer": false,
     "text": "Remember the word APPLE. Reply OK.",
     "turnId": "turn:u-boundaries-002"
   },
@@ -39,11 +41,13 @@
   {
     "at": "2026-09-28T10:00:00.253Z",
     "attachments": [],
+    "dropped": false,
     "editable": true,
     "id": "user:u-boundaries-016",
     "kind": "user",
     "lines": 1,
     "messageUuid": "u-boundaries-016",
+    "steer": false,
     "text": "Write a limerick about the word.",
     "turnId": "turn:u-boundaries-016"
   },
@@ -155,11 +159,13 @@
   {
     "at": "2026-09-28T10:01:32.140Z",
     "attachments": [],
+    "dropped": false,
     "editable": true,
     "id": "user:u-boundaries-050",
     "kind": "user",
     "lines": 1,
     "messageUuid": "u-boundaries-050",
+    "steer": false,
     "text": "What word did I ask you to remember?",
     "turnId": "turn:u-boundaries-050"
   },

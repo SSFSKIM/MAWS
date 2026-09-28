@@ -9,11 +9,13 @@
   {
     "at": "2026-09-28T10:40:00.045Z",
     "attachments": [],
+    "dropped": false,
     "editable": true,
     "id": "user:u-denials-002",
     "kind": "user",
     "lines": 1,
     "messageUuid": "u-denials-002",
+    "steer": false,
     "text": "Run git push --force, then rm -rf build, then curl the deploy hook. Report what happened.",
     "turnId": "turn:u-denials-002"
   },
@@ -239,11 +241,13 @@
   {
     "at": "2026-09-28T10:40:03.759Z",
     "attachments": [],
+    "dropped": false,
     "editable": true,
     "id": "user:u-denials-059",
     "kind": "user",
     "lines": 1,
     "messageUuid": "u-denials-059",
+    "steer": false,
     "text": "Count to 100 slowly with one Bash call per number.",
     "turnId": "turn:u-denials-059"
   },
@@ -347,11 +351,13 @@
   {
     "at": "2026-09-28T10:40:04.040Z",
     "attachments": [],
+    "dropped": false,
     "editable": true,
     "id": "user:u-denials-077",
     "kind": "user",
     "lines": 1,
     "messageUuid": "u-denials-077",
+    "steer": false,
     "text": "Try the three deploy steps again.",
     "turnId": "turn:u-denials-077"
   },

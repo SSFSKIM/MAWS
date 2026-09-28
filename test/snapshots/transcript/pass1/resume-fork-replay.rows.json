@@ -9,11 +9,13 @@
   {
     "at": "2026-09-28T09:22:34.610Z",
     "attachments": [],
+    "dropped": false,
     "editable": true,
     "id": "user:1ac41aac-0ebe-496e-999e-b5cd2873aa65",
     "kind": "user",
     "lines": 1,
     "messageUuid": "1ac41aac-0ebe-496e-999e-b5cd2873aa65",
+    "steer": false,
     "text": "What word did I ask you to remember? Reply with just that word.",
     "turnId": "turn:1ac41aac-0ebe-496e-999e-b5cd2873aa65"
   },

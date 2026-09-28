@@ -9,11 +9,13 @@
   {
     "at": "2026-09-28T12:00:00.010Z",
     "attachments": [],
+    "dropped": false,
     "editable": true,
     "id": "user:u-rc-1",
     "kind": "user",
     "lines": 1,
     "messageUuid": "u-rc-1",
+    "steer": false,
     "text": "Reply OK.",
     "turnId": "turn:u-rc-1"
   },
@@ -35,7 +37,7 @@
       "max": 3,
       "n": 2
     },
-    "id": "reconnect:synthetic-reconnect",
+    "id": "reconnect:r4",
     "kind": "error",
     "lostAttentionCount": null,
     "scope": "reconnect",
@@ -46,11 +48,13 @@
   {
     "at": "2026-09-28T12:01:00.010Z",
     "attachments": [],
+    "dropped": false,
     "editable": true,
     "id": "user:u-rc-2",
     "kind": "user",
     "lines": 1,
     "messageUuid": "u-rc-2",
+    "steer": false,
     "text": "Still there?",
     "turnId": "turn:u-rc-2"
   },
@@ -72,7 +76,7 @@
       "max": 3,
       "n": 3
     },
-    "id": "reconnect:synthetic-reconnect",
+    "id": "reconnect:r11",
     "kind": "error",
     "lostAttentionCount": null,
     "scope": "reconnect",

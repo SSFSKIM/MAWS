@@ -9,11 +9,13 @@
   {
     "at": "2026-09-28T10:01:37.168Z",
     "attachments": [],
+    "dropped": false,
     "editable": true,
     "id": "user:cba09f87-9767-4699-879f-f2a7560dc79b",
     "kind": "user",
     "lines": 3,
     "messageUuid": "cba09f87-9767-4699-879f-f2a7560dc79b",
+    "steer": false,
     "text": "Step 1: use Bash with run_in_background true to run exactly: sleep 30 && echo BG_DONE > bg.txt\nStep 2: then use Bash in the foreground to run exactly: sleep 20\nStep 3: reply DONE.",
     "turnId": "turn:cba09f87-9767-4699-879f-f2a7560dc79b"
   },
@@ -161,6 +163,19 @@
     "status": "stopped",
     "toolName": "Bash",
     "toolUseId": "toolu_011A76mf8b7vDVv6QLxyPQU8",
+    "turnId": "turn:cba09f87-9767-4699-879f-f2a7560dc79b"
+  },
+  {
+    "at": "2026-09-28T10:01:46.014Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:2dd8ab02-9206-4cdb-a266-680982d8c4fc",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "2dd8ab02-9206-4cdb-a266-680982d8c4fc",
+    "steer": true,
+    "text": "[Request interrupted by user for tool use]",
     "turnId": "turn:cba09f87-9767-4699-879f-f2a7560dc79b"
   },
   {

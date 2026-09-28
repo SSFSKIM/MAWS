@@ -9,11 +9,13 @@
   {
     "at": "2026-09-28T11:10:00.045Z",
     "attachments": [],
+    "dropped": false,
     "editable": true,
     "id": "user:u-math-and-diagrams-002",
     "kind": "user",
     "lines": 1,
     "messageUuid": "u-math-and-diagrams-002",
+    "steer": false,
     "text": "Show the frame budget as a formula and the batch path as a diagram.",
     "turnId": "turn:u-math-and-diagrams-002"
   },

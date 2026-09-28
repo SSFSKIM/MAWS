@@ -9,11 +9,13 @@
   {
     "at": "2026-09-28T09:59:23.181Z",
     "attachments": [],
+    "dropped": false,
     "editable": true,
     "id": "user:a73c314a-b4c1-4d20-9392-aa124d10675c",
     "kind": "user",
     "lines": 6,
     "messageUuid": "a73c314a-b4c1-4d20-9392-aa124d10675c",
+    "steer": false,
     "text": "Call the Workflow tool once with this exact script as the script parameter, then reply STARTED:\n\nexport const meta = { name: 'maws-probe', description: 'Two echo agents in one phase', phases: [{ title: 'Echo' }] }\nphase('Echo')\nconst out = await parallel([() => agent('Reply with exactly ALPHA and nothing else.', {label: 'alpha', effort: 'low'}), () => agent('Reply with exactly BETA and nothing else.', {label: 'beta', effort: 'low'})])\nreturn out",
     "turnId": "turn:a73c314a-b4c1-4d20-9392-aa124d10675c"
   },

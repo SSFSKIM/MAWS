@@ -9,11 +9,13 @@
   {
     "at": "2026-09-28T09:21:20.978Z",
     "attachments": [],
+    "dropped": false,
     "editable": true,
     "id": "user:2b29cb4f-86d5-4f09-94c7-2f44d3a43f83",
     "kind": "user",
     "lines": 1,
     "messageUuid": "2b29cb4f-86d5-4f09-94c7-2f44d3a43f83",
+    "steer": false,
     "text": "Reply with exactly OK",
     "turnId": "turn:2b29cb4f-86d5-4f09-94c7-2f44d3a43f83"
   },

@@ -9,11 +9,13 @@
   {
     "at": "2026-09-28T10:06:33.116Z",
     "attachments": [],
+    "dropped": false,
     "editable": true,
     "id": "user:c5a56eaa-ab54-4a18-8e89-9664bc4143d5",
     "kind": "user",
     "lines": 2,
     "messageUuid": "c5a56eaa-ab54-4a18-8e89-9664bc4143d5",
+    "steer": false,
     "text": "Use Bash to run exactly: git log --oneline\nThen reply DONE.",
     "turnId": "turn:c5a56eaa-ab54-4a18-8e89-9664bc4143d5"
   },

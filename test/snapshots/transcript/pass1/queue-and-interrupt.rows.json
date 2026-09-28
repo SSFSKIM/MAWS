@@ -9,11 +9,13 @@
   {
     "at": "2026-09-28T09:22:18.973Z",
     "attachments": [],
+    "dropped": false,
     "editable": true,
     "id": "user:a5bf8381-f5c0-4394-88a8-4b04c12e4911",
     "kind": "user",
     "lines": 1,
     "messageUuid": "a5bf8381-f5c0-4394-88a8-4b04c12e4911",
+    "steer": false,
     "text": "Count to 30 slowly. For each number use a separate Bash call sleep 1; echo NUMBER. Start now.",
     "turnId": "turn:a5bf8381-f5c0-4394-88a8-4b04c12e4911"
   },
@@ -277,22 +279,26 @@
   {
     "at": "2026-09-28T09:22:21.810Z",
     "attachments": [],
+    "dropped": true,
     "editable": true,
     "id": "user:99662785-5122-45a7-a68f-d734959a0c52",
     "kind": "user",
     "lines": 1,
     "messageUuid": "99662785-5122-45a7-a68f-d734959a0c52",
+    "steer": true,
     "text": "After counting, reply exactly QUEUED.",
-    "turnId": "turn:99662785-5122-45a7-a68f-d734959a0c52"
+    "turnId": "turn:a5bf8381-f5c0-4394-88a8-4b04c12e4911"
   },
   {
     "at": "2026-09-28T09:22:23.032Z",
     "attachments": [],
+    "dropped": false,
     "editable": true,
     "id": "user:e88214f8-3ba3-4b4c-8e64-3be1595fcac0",
     "kind": "user",
     "lines": 1,
     "messageUuid": "e88214f8-3ba3-4b4c-8e64-3be1595fcac0",
+    "steer": false,
     "text": "Counting is cancelled. Reply exactly RESUMED.",
     "turnId": "turn:e88214f8-3ba3-4b4c-8e64-3be1595fcac0"
   },

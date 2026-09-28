@@ -9,11 +9,13 @@
   {
     "at": "2026-09-28T10:00:16.184Z",
     "attachments": [],
+    "dropped": false,
     "editable": true,
     "id": "user:e3b48834-657d-49b3-8245-02a9a5912f9f",
     "kind": "user",
     "lines": 1,
     "messageUuid": "e3b48834-657d-49b3-8245-02a9a5912f9f",
+    "steer": false,
     "text": "Remember the word APPLE. Reply OK.",
     "turnId": "turn:e3b48834-657d-49b3-8245-02a9a5912f9f"
   },
@@ -43,11 +45,13 @@
   {
     "at": "2026-09-28T10:00:18.588Z",
     "attachments": [],
+    "dropped": false,
     "editable": true,
     "id": "user:36a2aa44-9ae9-455e-b52b-e70b27eecde5",
     "kind": "user",
     "lines": 1,
     "messageUuid": "36a2aa44-9ae9-455e-b52b-e70b27eecde5",
+    "steer": false,
     "text": "Also remember the word BANANA. Reply OK.",
     "turnId": "turn:36a2aa44-9ae9-455e-b52b-e70b27eecde5"
   },
@@ -66,11 +70,13 @@
   {
     "at": "2026-09-28T10:00:20.646Z",
     "attachments": [],
+    "dropped": false,
     "editable": true,
     "id": "user:a4d68c72-bdde-4afa-bc32-408c9dac42e6",
     "kind": "user",
     "lines": 1,
     "messageUuid": "a4d68c72-bdde-4afa-bc32-408c9dac42e6",
+    "steer": false,
     "text": "List every word I asked you to remember, comma separated, nothing else.",
     "turnId": "turn:a4d68c72-bdde-4afa-bc32-408c9dac42e6"
   },

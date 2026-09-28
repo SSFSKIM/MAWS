@@ -18,11 +18,13 @@
         "text": null
       }
     ],
+    "dropped": false,
     "editable": true,
     "id": "user:u-attachments-and-images-002",
     "kind": "user",
     "lines": 1,
     "messageUuid": "u-attachments-and-images-002",
+    "steer": false,
     "text": "Here is the failing screenshot. Read shot.png from the repo too and compare.",
     "turnId": "turn:u-attachments-and-images-002"
   },

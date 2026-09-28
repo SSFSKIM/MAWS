@@ -9,11 +9,13 @@
   {
     "at": "2026-09-28T10:10:00.045Z",
     "attachments": [],
+    "dropped": false,
     "editable": true,
     "id": "user:u-plan-outcomes-002",
     "kind": "user",
     "lines": 1,
     "messageUuid": "u-plan-outcomes-002",
+    "steer": false,
     "text": "Plan how to add retraction to the reducer, then implement it.",
     "turnId": "turn:u-plan-outcomes-002"
   },
@@ -98,11 +100,13 @@
   {
     "at": "2026-09-28T10:10:03.655Z",
     "attachments": [],
+    "dropped": false,
     "editable": true,
     "id": "user:u-plan-outcomes-035",
     "kind": "user",
     "lines": 1,
     "messageUuid": "u-plan-outcomes-035",
+    "steer": false,
     "text": "Plan the snapshot suite; when I approve, start from a clean context.",
     "turnId": "turn:u-plan-outcomes-035"
   },
@@ -186,11 +190,13 @@
   {
     "at": "2026-09-28T10:10:07.194Z",
     "attachments": [],
+    "dropped": false,
     "editable": true,
     "id": "user:u-plan-outcomes-060",
     "kind": "user",
     "lines": 1,
     "messageUuid": "u-plan-outcomes-060",
+    "steer": false,
     "text": "Plan the perf test.",
     "turnId": "turn:u-plan-outcomes-060"
   },

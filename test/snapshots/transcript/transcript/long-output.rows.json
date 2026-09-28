@@ -9,11 +9,13 @@
   {
     "at": "2026-09-28T11:00:00.045Z",
     "attachments": [],
+    "dropped": false,
     "editable": true,
     "id": "user:u-long-output-002",
     "kind": "user",
     "lines": 1,
     "messageUuid": "u-long-output-002",
+    "steer": false,
     "text": "Print the whole dependency tree, then the build log.",
     "turnId": "turn:u-long-output-002"
   },

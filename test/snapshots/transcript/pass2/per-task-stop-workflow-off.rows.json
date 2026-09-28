@@ -9,11 +9,13 @@
   {
     "at": "2026-09-28T10:03:22.463Z",
     "attachments": [],
+    "dropped": false,
     "editable": true,
     "id": "user:504399e2-3e09-4d3f-b266-6e7d8bfddc35",
     "kind": "user",
     "lines": 8,
     "messageUuid": "504399e2-3e09-4d3f-b266-6e7d8bfddc35",
+    "steer": false,
     "text": "Step 1: call the Workflow tool with this exact script:\n\nexport const meta = { name: 'maws-stop-probe', description: 'One slow agent', phases: [{ title: 'Wait' }] }\nphase('Wait')\nreturn await agent('Use Bash to run exactly: sleep 25 && echo WF_DONE > wf.txt . Then reply DONE.', {label: 'sleeper', effort: 'low'})\n\nStep 2: then use Bash in the foreground to run exactly: sleep 20\nStep 3: reply DONE.",
     "turnId": "turn:504399e2-3e09-4d3f-b266-6e7d8bfddc35"
   },

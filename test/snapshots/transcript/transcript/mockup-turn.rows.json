@@ -9,11 +9,13 @@
   {
     "at": "2026-09-28T11:20:00.045Z",
     "attachments": [],
+    "dropped": false,
     "editable": true,
     "id": "user:u-mockup-turn-002",
     "kind": "user",
     "lines": 1,
     "messageUuid": "u-mockup-turn-002",
+    "steer": false,
     "text": "The sidebar drag handle jitters when the window is narrow. Find the cause, fix it, and run the checks.",
     "turnId": "turn:u-mockup-turn-002"
   },

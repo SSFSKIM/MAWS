@@ -9,11 +9,13 @@
   {
     "at": "2026-09-27T09:00:00.000Z",
     "attachments": [],
+    "dropped": false,
     "editable": true,
     "id": "user:u-disk-1",
     "kind": "user",
     "lines": 1,
     "messageUuid": "u-disk-1",
+    "steer": false,
     "text": "Dispatch an agent to read one.txt and report its content.",
     "turnId": "turn:u-disk-1"
   },
@@ -108,11 +110,13 @@
   {
     "at": "2026-09-27T09:05:00.000Z",
     "attachments": [],
+    "dropped": false,
     "editable": true,
     "id": "user:u-disk-2",
     "kind": "user",
     "lines": 1,
     "messageUuid": "u-disk-2",
+    "steer": false,
     "text": "Thanks. Now say DONE.",
     "turnId": "turn:u-disk-2"
   },

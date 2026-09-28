@@ -20,11 +20,13 @@
   {
     "at": "2026-09-28T10:09:06.717Z",
     "attachments": [],
+    "dropped": false,
     "editable": true,
     "id": "user:a37362a6-a117-4985-b0f9-cae7bfad6114",
     "kind": "user",
     "lines": 1,
     "messageUuid": "a37362a6-a117-4985-b0f9-cae7bfad6114",
+    "steer": false,
     "text": "I just ran a shell command with the ! prefix. What exactly did it print? Reply with only the printed text, or NONE if you cannot see it.",
     "turnId": "turn:a37362a6-a117-4985-b0f9-cae7bfad6114"
   },

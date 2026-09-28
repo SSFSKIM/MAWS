@@ -1,0 +1,33 @@
+[
+  {
+    "at": "2026-09-28T11:30:00.045Z",
+    "id": "time:turn:u-idle-drop-002",
+    "kind": "time",
+    "label": "Yesterday 11:30 AM",
+    "turnId": "turn:u-idle-drop-002"
+  },
+  {
+    "at": "2026-09-28T11:30:00.045Z",
+    "attachments": [],
+    "dropped": true,
+    "editable": true,
+    "id": "user:u-idle-drop-002",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "u-idle-drop-002",
+    "steer": false,
+    "text": "Summarise the last release notes.",
+    "turnId": "turn:u-idle-drop-002"
+  },
+  {
+    "at": "2026-09-28T11:30:00.930Z",
+    "attempt": null,
+    "id": "error:j9#0",
+    "kind": "error",
+    "lostAttentionCount": 0,
+    "scope": "exit",
+    "severity": "notice",
+    "text": "Session process exited (quit)",
+    "turnId": null
+  }
+]
