@@ -4,6 +4,9 @@ import { defineConfig } from '@playwright/test';
 // no browser is installed. One worker: every test launches its own app, and the app owns real processes on this Mac.
 export default defineConfig({
   testDir: 'e2e',
+  // C6: the transcript spec drives the harness build, so it runs only under `pnpm e2e:transcript` (MAWS_HARNESS=1).
+  testIgnore: process.env.MAWS_HARNESS === '1' ? [] : ['transcript.spec.ts'],
+  // end C6
   workers: 1,
   retries: 0,
   timeout: 60_000,
