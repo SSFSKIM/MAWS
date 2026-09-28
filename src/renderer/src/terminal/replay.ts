@@ -51,17 +51,20 @@ export interface StreamState {
   readonly modes: Readonly<TrackedModes>;
 }
 
-// xterm's CharsetService as far as a boundary needs it: what G0 to G3 designate (a charset's final byte; `B`, US
-// ASCII, is the default), the shift level, the set in force (normally the level's designation; DECRC puts back the
-// set DECSC saved) and that saved set. xterm keeps the saved set per buffer; programs pair DECSC and DECRC within
-// one, so one slot is enough here.
+// xterm's CharsetService and saved cursor as far as a boundary needs them: what G0 to G3 designate (a charset's final
+// byte; `B`, US ASCII, is the default), the shift level, the set in force (normally the level's designation; DECRC
+// puts back the set DECSC saved), that saved set, and whether an explicit DECSC (`ESC 7`, `CSI s`, `?1048h`) holds
+// a position and pen the serializer does not write. The alternate screen's own save (`?1049h`) is rebuilt by the
+// `?1049h` the serializer writes, except for its charset. A restore consumes the saved state (xterm keeps it for a
+// second DECRC, which programs do not send); xterm keeps it per buffer, and programs pair DECSC and DECRC within one.
 interface Charsets {
   readonly g: string; // four designations, G0 to G3
   readonly level: number;
   readonly active: string;
   readonly saved: string;
+  readonly cursorSaved: boolean;
 }
-const DEFAULT_CHARSETS: Charsets = { g: 'BBBB', level: 0, active: 'B', saved: 'B' };
+const DEFAULT_CHARSETS: Charsets = { g: 'BBBB', level: 0, active: 'B', saved: 'B', cursorSaved: false };
 const CHARSET_FINALS = '0AB4C5RQKYE6ZH7='; // xterm's `CHARSETS` keys; other finals have no handler
 const DESIGNATOR_LEVEL: Record<string, number> = { '(': 0, ')': 1, '*': 2, '+': 3, '-': 1, '.': 2 };
 
@@ -91,8 +94,9 @@ export const INITIAL_STREAM: StreamState = {
 };
 
 export function atBoundary(state: StreamState): boolean {
-  const { g, level, active } = state.charsets;
-  return state.parser === GROUND && state.utf8Need === 0 && !state.hyperlink && g === 'BBBB' && level === 0 && active === 'B';
+  const { g, level, active, saved, cursorSaved } = state.charsets;
+  const charsetsDefault = g === 'BBBB' && level === 0 && active === 'B' && saved === 'B';
+  return state.parser === GROUND && state.utf8Need === 0 && !state.hyperlink && charsetsDefault && !cursorSaved;
 }
 
 const encoder = new TextEncoder();
@@ -124,11 +128,11 @@ export function trackStream(state: StreamState, chunk: Uint8Array | string): Str
     const g = charsets.g.slice(0, level) + final + charsets.g.slice(level + 1);
     charsets = { ...charsets, g, active: charsets.level === level ? final : charsets.active };
   };
-  const saveCursor = () => {
-    charsets = { ...charsets, saved: charsets.active };
+  const saveCursor = (explicit: boolean) => {
+    charsets = { ...charsets, saved: charsets.active, cursorSaved: explicit || charsets.cursorSaved };
   };
   const restoreCursor = () => {
-    charsets = { ...charsets, active: charsets.saved };
+    charsets = { ...charsets, active: charsets.saved, saved: 'B', cursorSaved: false };
   };
   const execute = (c: number) => {
     if (c === 0x0e) shift(1); // SO
@@ -144,17 +148,19 @@ export function trackStream(state: StreamState, chunk: Uint8Array | string): Str
         else if (mode === 1006 || mode === 1016) setModes({ mouseEncoding: set ? mode : 0 });
         else if (mode === 1004) setModes({ focusReporting: set });
         else if (mode === 25) setModes({ cursorHidden: !set });
-        else if (mode === 1048 || (mode === 1049 && set)) (set ? saveCursor : restoreCursor)();
-        else if (mode === 1049) restoreCursor();
+        else if (mode === 1048 && set) saveCursor(true);
+        else if (mode === 1049 && set) saveCursor(false);
+        else if (mode === 1048 || mode === 1049) restoreCursor();
       }
     } else if (final === 0x70 && collected === '!') {
-      // DECSTR: xterm resets the DEC private modes, the pen (so any open hyperlink) and shows the cursor; its mouse
-      // service is untouched.
+      // DECSTR: xterm resets the DEC private modes, the pen (so any open hyperlink), the charsets and the saved cursor,
+      // and shows the cursor; its mouse service is untouched.
       setModes({ focusReporting: false, cursorHidden: false });
       hyperlink = false;
       charsets = DEFAULT_CHARSETS;
     } else if (collected === '' && (final === 0x73 || final === 0x75)) {
-      (final === 0x73 ? saveCursor : restoreCursor)(); // SCOSC `CSI s`, SCORC `CSI u`
+      if (final === 0x73) saveCursor(true); // SCOSC `CSI s`
+      else restoreCursor(); // SCORC `CSI u`
     }
   };
 
@@ -162,11 +168,11 @@ export function trackStream(state: StreamState, chunk: Uint8Array | string): Str
     const ch = String.fromCharCode(final);
     if (collected === '') {
       if (ch === 'c') {
-        // RIS: xterm's full reset clears every tracked mode, the pen and the charsets
+        // RIS: xterm's full reset clears every tracked mode, the pen, the charsets and the saved cursor
         modes = DEFAULT_MODES;
         hyperlink = false;
         charsets = DEFAULT_CHARSETS;
-      } else if (ch === '7') saveCursor();
+      } else if (ch === '7') saveCursor(true);
       else if (ch === '8') restoreCursor();
       else if (ch === 'n' || ch === '}') shift(2); // LS2, LS2R
       else if (ch === 'o' || ch === '|') shift(3); // LS3, LS3R

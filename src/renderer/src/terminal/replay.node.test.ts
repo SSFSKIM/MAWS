@@ -108,6 +108,20 @@ describe('terminal stream tracker', () => {
     expect(atBoundary(after('\x1b(0\x1b[!p'))).toBe(true);
     expect(atBoundary(after('\x1b(0\x1b%G'))).toBe(true);
     expect(atBoundary(after('\x1b(1'))).toBe(true); // not a charset xterm knows: ignored
+    // DECSC saves a cursor position, pen and charset the serializer does not write: not a boundary until the matching
+    // DECRC (or a reset) consumes it.
+    expect(atBoundary(after('\x1b7'))).toBe(false);
+    expect(atBoundary(after('\x1b7', 'text', '\x1b8'))).toBe(true);
+    expect(atBoundary(after('\x1b[s'))).toBe(false);
+    expect(atBoundary(after('\x1b[s\x1b[u'))).toBe(true);
+    expect(atBoundary(after('\x1b[?1048h'))).toBe(false);
+    expect(atBoundary(after('\x1b[?1048h\x1b[?1048l'))).toBe(true);
+    expect(atBoundary(after('\x1b7\x1bc'))).toBe(true);
+    expect(atBoundary(after('\x1b7\x1b[!p'))).toBe(true);
+    // The alternate screen's own save is rebuilt by the serializer's `?1049h`, except for a non-default charset.
+    expect(atBoundary(after('\x1b[?1049h'))).toBe(true);
+    expect(atBoundary(after('\x1b(0\x1b[?1049h\x1b(B'))).toBe(false);
+    expect(atBoundary(after('\x1b(0\x1b[?1049h\x1b(B\x1b[?1049l\x1b(B'))).toBe(true);
     expect(atBoundary(after(new Uint8Array([0xc2, 0x9b])))).toBe(false); // C1 CSI, UTF-8 encoded
   });
 
@@ -225,6 +239,22 @@ describe('terminal checkpoint restores modes and the alternate screen', () => {
     }
   });
 
+  it('takes no checkpoint while DECSC holds state, so a saved line-drawing set restores as ┌─┐, never lqk', async () => {
+    const chunks = [utf8('start\r\n'), utf8('\x1b(0\x1b7\x1b(B'), utf8('\x1b8lqk\x1b(B\r\n')];
+    const { checkpoints, stream } = await checkpointedRun(chunks);
+    expect(checkpoints.map((c) => c.offset)).toEqual([7, stream.byteLength]); // none after `ESC(0 ESC7 ESC(B`
+    for (const checkpoint of checkpoints) {
+      const target = await restore(checkpoint, stream);
+      expect(target.line(1)).toBe('┌─┐');
+    }
+    // The counterfactual the reviewer reproduced: a checkpoint after the DECSC, replayed from there.
+    const naive = emulator();
+    await naive.write(stream.subarray(0, 15));
+    const broken = await restore({ offset: 15, state: naive.serializer.serialize() }, stream);
+    // Both saved parts are lost: the position (DECRC lands at the origin, over `start`) and the charset (ASCII).
+    expect([broken.line(0), broken.line(1)]).toEqual(['lqkrt', '']);
+  });
+
   it('keeps SGR mouse encoding, focus reporting and a hidden cursor, which the serializer alone drops', async () => {
     const { checkpoints } = await checkpointedRun([utf8('\x1b[?1000h\x1b[?1006h'), utf8('\x1b[?1004h\x1b[?25l')]);
     const target = emulator();
@@ -257,6 +287,7 @@ describe('terminal checkpoint restores modes and the alternate screen', () => {
         'plain \x1b[1;31mbold red\x1b[0m 한글 👍🏽\r\n',
         '\x1b]0;a title\x07\x1b]8;;https://example.com\x1b\\link\x1b]8;;\x1b\\\r\n',
         '\x1bP>|ignored\x1b\\\x1b(0lqk\x1b(B\x1b[?1002;1006h\x1b[?25l',
+        '\x1b[31m\x1b(0\x1b7\x1b(B\x1b[0m\x1b[2;30Hsaved\x1b8x\x1b(B\x1b[0m\r\n',
         '\x1b[?1049h\x1b[Hframe 日本語\x1b[2;3H\x1b[7mcell\x1b[27m',
       ].join(''),
     );
