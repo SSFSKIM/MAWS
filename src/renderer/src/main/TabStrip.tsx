@@ -116,35 +116,37 @@ export function TabStrip({ pane, split, idPrefix }: { pane: Pane; split: boolean
   const stop = tabs.some((t) => t.id === state.activeTabId) ? state.activeTabId : tabs[0]?.id;
 
   return (
-    <div
-      ref={strip}
-      role="tablist"
-      aria-label={label}
-      aria-orientation="horizontal"
-      data-focused={split && focused ? 'true' : undefined}
-      onDragOver={onDragOver}
-      onDragLeave={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setMarker(null);
-      }}
-      onDrop={onDrop}
-      className={`relative flex h-10 shrink-0 items-stretch overflow-x-auto border-b border-border [scrollbar-width:none] ${
-        split && focused ? 'shadow-[inset_0_2px_0_0_var(--accent)]' : ''
-      }`}
-    >
-      {tabs.map((tab, index) => (
-        <Tab
-          key={tab.id}
-          tab={tab}
-          pane={pane}
-          domId={`${idPrefix}-tab-${index}`}
-          active={tab.id === state.activeTabId}
-          stop={tab.id === stop}
-          onKeyDown={onTabKeyDown(index)}
-        />
-      ))}
-      {marker !== null && (
-        <span aria-hidden className="pointer-events-none absolute inset-y-1 w-0.5 -translate-x-1/2 bg-accent" style={{ left: marker }} />
-      )}
+    <div className="relative shrink-0">
+      <div
+        ref={strip}
+        role="tablist"
+        aria-label={label}
+        aria-orientation="horizontal"
+        data-focused={split && focused ? 'true' : undefined}
+        onDragOver={onDragOver}
+        onDragLeave={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setMarker(null);
+        }}
+        onDrop={onDrop}
+        className="relative flex h-10 items-stretch overflow-x-auto border-b border-border [scrollbar-width:none]"
+      >
+        {tabs.map((tab, index) => (
+          <Tab
+            key={tab.id}
+            tab={tab}
+            pane={pane}
+            domId={`${idPrefix}-tab-${index}`}
+            active={tab.id === state.activeTabId}
+            stop={tab.id === stop}
+            onKeyDown={onTabKeyDown(index)}
+          />
+        ))}
+        {marker !== null && (
+          <span aria-hidden className="pointer-events-none absolute inset-y-1 w-0.5 -translate-x-1/2 bg-accent" style={{ left: marker }} />
+        )}
+      </div>
+      {/* The focused pane's mark under a split, drawn over the tabs rather than under their backgrounds. */}
+      {split && focused && <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 z-10 h-0.5 bg-accent" />}
     </div>
   );
 }
