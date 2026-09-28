@@ -187,6 +187,23 @@ describe('group state machine', () => {
     expect(find(list, 'cell').detail).toMatchObject({ kind: 'image', images: [{ dataUrl: 'data:image/png;base64,AAAA', mediaType: 'image/png' }] });
   });
 
+  it('two Agent calls of one message merge only when consecutive: a tool call between them makes two subagent rows', () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('a1', 'Agent', { description: 'A', prompt: 'p' }, 'm1', 0);
+    b.emit('subagent.started', { taskId: task('k1'), toolUseId: tool('a1'), description: 'A', subagentType: null, isBackground: true, spawnDepth: 1, prompt: null });
+    b.toolUse('t1', 'Bash', { command: 'x' }, 'm1', 1);
+    b.result('t1', 'ok');
+    b.toolUse('a2', 'Agent', { description: 'B', prompt: 'p' }, 'm1', 2);
+    b.emit('subagent.started', { taskId: task('k2'), toolUseId: tool('a2'), description: 'B', subagentType: null, isBackground: true, spawnDepth: 1, prompt: null });
+    b.toolUse('a3', 'Agent', { description: 'C', prompt: 'p' }, 'm1', 3);
+    b.emit('subagent.started', { taskId: task('k3'), toolUseId: tool('a3'), description: 'C', subagentType: null, isBackground: true, spawnDepth: 1, prompt: null });
+    b.end(['u1']);
+    const list = rows(b.events);
+    expect(kinds(list)).toEqual(['time', 'user', 'divider', 'subagent', 'cell', 'subagent']);
+    expect(list.filter((row) => row.kind === 'subagent').map((row) => (row as Extract<Row, { kind: 'subagent' }>).agents.map((a) => a.name))).toEqual([['A'], ['B', 'C']]);
+  });
+
   it('a work area collapses to nothing when the turn is collapsed; the answer stays', () => {
     const b = builder();
     b.turn('u1');
@@ -228,6 +245,21 @@ describe('receipt counts', () => {
     expect(g.cells[0]).toMatchObject({ label: 'Edited /p/a.ts +2 −1' });
     expect(g.cells[0].detail).toMatchObject({ kind: 'edit', hunks: [hunk], added: 2, removed: 1 });
     expect(g.cells[1]).toMatchObject({ label: 'Created /p/new.ts' });
+  });
+});
+
+describe('receipts aggregate successful edits only', () => {
+  it('a failed edit cell contributes no receipt entry', () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('t1', 'Edit', { file_path: '/p/a.ts', old_string: 'x', new_string: 'y' });
+    b.result('t1', 'String to replace not found in file.', { isError: true });
+    b.end(['u1']);
+    expect(kinds(rows(b.events))).toEqual(['time', 'user', 'divider', 'cell']);
+    b.toolUse('t2', 'Edit', { file_path: '/p/b.ts', old_string: 'x', new_string: 'y' });
+    b.result('t2', 'ok');
+    const list = rows(b.events);
+    expect(find(list, 'receipt').files.map((f) => f.path)).toEqual(['/p/b.ts']);
   });
 });
 

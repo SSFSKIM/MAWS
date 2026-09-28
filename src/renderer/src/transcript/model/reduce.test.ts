@@ -63,26 +63,71 @@ describe('turn boundaries', () => {
     expect(state.turns.get(state.order[0])!.origin).toBe('human');
   });
 
-  it('a turn.started while a turn is open is a queued turn: the open turn keeps receiving events, and a cancelled queue entry closes', () => {
+  it('a prompt sent while a turn runs is a steer: a user row of that turn outside the work area; a cancel names it dropped; a lifecycle never closes a turn', () => {
     const b = builder();
     b.turn('u1');
     b.toolUse('t1', 'Bash', { command: 'sleep 1' });
-    b.turn('u2', 'queued prompt');
+    b.emit('user.message', { messageUuid: uuid('u2'), content: 'steer text', isReplay: false, isSynthetic: false, origin: 'human', bash: null });
     b.result('t1', 'ok');
     b.emit('command.lifecycle', { commandUuid: uuid('u2'), state: 'cancelled' });
     b.text('m1', 0, 'Done');
+    let state = reduce(b.events);
+    expect(state.order).toEqual([turnId.ofMessage(uuid('u1'))]);
+    expect(state.turns.get(turnId.ofMessage(uuid('u1')))!.state).toBe('open');
+    let list = rowsOf(state); // an open turn is expanded
+    expect(kinds(list)).toEqual(['time', 'user', 'divider', 'group', 'user', 'assistant_text']);
+    expect(find(list, 'user', 0)).toMatchObject({ steer: false, dropped: false });
+    expect(find(list, 'user', 1)).toMatchObject({ id: rowId.user(uuid('u2')), turnId: turnId.ofMessage(uuid('u1')), text: 'steer text', steer: true, dropped: true });
     b.end(['u1']);
-    b.turn('u3');
-    b.text('m3', 0, 'Third');
-    b.end(['u3']);
+    state = applyEvents(state, [b.events.at(-1)!]);
+    list = rowsOf(state); // closed: collapsed, the steer stays
+    expect(kinds(list)).toEqual(['time', 'user', 'divider', 'user', 'assistant_text']);
+    const before = rowsOf(state);
+    state = applyEvents(state, [b.emit('command.lifecycle', { commandUuid: uuid('u1'), state: 'cancelled' })]); // after the result: a no-op
+    expect(rowsOf(state)).toEqual(before);
+    expect(state.turns.get(turnId.ofMessage(uuid('u1')))!.state).toBe('closed');
+  });
+
+  it('an idle prompt dropped before its init closes on the cancelled turn.ended, its user row dropped, no divider', () => {
+    const b = builder();
+    b.turn('u1');
+    b.end(['u1'], { result: 'cancelled', terminalReason: 'cancelled', numTurns: 0, costUsd: 0, durationMs: 0, resultIndex: null });
     const state = reduce(b.events);
-    expect(state.order).toEqual([turnId.ofMessage(uuid('u1')), turnId.ofMessage(uuid('u2')), turnId.ofMessage(uuid('u3'))]);
-    const first = state.turns.get(turnId.ofMessage(uuid('u1')))!;
-    expect(first.events.some((e) => e.kind === 'tool.result')).toBe(true);
-    expect(first.events.some((e) => e.kind === 'assistant.block.complete' && e.apiMessageId === 'm1')).toBe(true);
-    expect(state.turns.get(turnId.ofMessage(uuid('u2')))!.state).toBe('closed');
-    const third = state.turns.get(turnId.ofMessage(uuid('u3')))!;
-    expect(third.events.some((e) => e.kind === 'assistant.block.complete' && e.apiMessageId === 'm3')).toBe(true);
+    expect(state.turns.get(turnId.ofMessage(uuid('u1')))!.state).toBe('closed');
+    const list = rowsOf(state);
+    expect(kinds(list)).toEqual(['time', 'user']);
+    expect(find(list, 'user')).toMatchObject({ dropped: true, steer: false });
+  });
+
+  it('states form one lineage: an older state still derives its own rows, and applying to a superseded state throws', () => {
+    const b = builder();
+    b.turn('u1');
+    b.text('m1', 0, 'One');
+    b.end(['u1']);
+    const first = reduce(b.events);
+    const before = rowsOf(first);
+    const b2 = builder();
+    b2.at = b.at;
+    b2.turn('u2');
+    b2.text('m2', 0, 'Two');
+    b2.end(['u2']);
+    const more = b2.events.map((event, i) => ({ ...event, id: `x${i}`, seq: b.events.length + i }) as SessionEvent);
+    const second = applyEvents(first, more);
+    expect(kinds(rowsOf(second))).toEqual(['time', 'user', 'assistant_text', 'user', 'assistant_text']);
+    expect(rowsOf(first)).toEqual(before);
+    expect(kinds(rowsOf(first))).toEqual(['time', 'user', 'assistant_text']);
+    expect(() => applyEvents(first, more)).toThrow(/lineage/);
+    expect(() => applyEvents(second, [])).not.toThrow();
+  });
+
+  it('the untagged interrupt fallback matches the complete marker only', () => {
+    const b = builder();
+    b.emit('user.message', { messageUuid: uuid('m0'), content: '[Request interrupted by user]', isReplay: false, isSynthetic: false, origin: null, bash: null });
+    expect(reduce(b.events).order).toEqual([]);
+    b.emit('user.message', { messageUuid: uuid('m1'), content: '[Request interrupted by user] please continue anyway', isReplay: false, isSynthetic: false, origin: null, bash: null });
+    const state = reduce(b.events);
+    expect(state.order).toEqual([turnId.ofMessage(uuid('m1'))]);
+    expect(find(rowsOf(state), 'user').text).toBe('[Request interrupted by user] please continue anyway');
   });
 
   it('a local-command echo never opens a turn and renders as a local_command row, tags stripped, loose outside a turn and in the work area inside one', () => {

@@ -272,4 +272,5 @@ export const processExitCopy = (reason: string, lostAttentionCount: number) =>
   `Session process exited (${reason})${lostAttentionCount > 0 ? ` · ${plural(lostAttentionCount, 'approval')} lost` : ''}`;
 export const bashHeader = (command: string) => `! ${command}`;
 export const LOCAL_COMMAND_HEADER = 'Command output';
+export const NOT_SENT = 'Not sent'; // a dropped user row: a steer the engine cancelled, or an idle prompt dropped before its init
 export const bashFooter = (exitCode: number | null) => (exitCode === null ? '' : `exit ${exitCode}`);

@@ -1,7 +1,7 @@
 // rows → markdown, for "Copy turn as markdown" and the copy actions (C6 execution document, residue *Copy and export*).
 // One part per row (a group is one part with its cells as a nested list), joined by blank lines; user text is emitted
 // untagged (pasted bodies in place of their placeholders); answer markdown is emitted verbatim.
-import { bashFooter, bashHeader, dividerCopy, LOCAL_COMMAND_HEADER, planBadge, plural, requestSlotPlaceholder } from './copy';
+import { bashFooter, bashHeader, dividerCopy, LOCAL_COMMAND_HEADER, NOT_SENT, planBadge, plural, requestSlotPlaceholder } from './copy';
 import type { Cell, Row } from './rows';
 import { untaggedUserText } from './user-text';
 
@@ -21,7 +21,7 @@ function cellLines(cell: Cell, by: string): string[] {
 function partOf(row: Row): string | null {
   switch (row.kind) {
     case 'time': return `### ${row.label}`;
-    case 'user': return `**You**\n\n${untaggedUserText(row.text, row.attachments)}`;
+    case 'user': return `**You**\n\n${untaggedUserText(row.text, row.attachments)}${row.dropped ? `\n\n*${NOT_SENT}*` : ''}`;
     case 'assistant_text': return row.markdown;
     case 'divider': return `*${dividerCopy({ ...row, durationMs: row.summary.durationMs ?? Date.parse(row.endedAt ?? row.startedAt) - Date.parse(row.startedAt) })}*`;
     case 'group': return [`- ${row.summary}`, ...row.cells.flatMap((cell) => cellLines(cell, '  '))].join('\n');

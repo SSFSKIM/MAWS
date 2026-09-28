@@ -168,6 +168,24 @@ describe('synthetic journals', () => {
     expect(cells[1].detail).toMatchObject({ kind: 'shell', truncated: null });
   });
 
+  it('transcript/idle-drop: a prompt dropped before its init closes on the cancelled turn.ended derived from its lifecycle row', () => {
+    const events = journal('idle-drop');
+    const ended = events.find((e) => e.kind === 'turn.ended') as Extract<SessionEvent, { kind: 'turn.ended' }>;
+    const lifecycle = loadSyntheticJournal('idle-drop').find((row) => (row.frame as { type?: string; state?: string }).type === 'command_lifecycle' && (row.frame as { state?: string }).state === 'cancelled')!;
+    expect(ended).toMatchObject({
+      seq: lifecycle.seq, at: lifecycle.at, result: 'cancelled', isError: false, terminalReason: 'cancelled', resultText: null, durationMs: 0, numTurns: 0, costUsd: 0,
+      usage: { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, thinkingTokens: null }, permissionDenials: [], errors: [], origin: 'human', resultIndex: null, isEchoReceipt: false,
+    });
+    expect(ended.userMessageUuids).toHaveLength(1);
+    expect(events.some((e) => e.kind === 'command.lifecycle' && e.state === 'cancelled')).toBe(false);
+    const state = stateOf(events);
+    expect(state.order).toHaveLength(1);
+    expect(state.turns.get(state.order[0])!.state).toBe('closed');
+    const rows = rowsOf(withAllExpanded(state));
+    expect(rows.map((r) => r.kind)).toEqual(['time', 'user', 'error']); // the exit row follows
+    expect(ofKind(rows, 'user')[0]).toMatchObject({ dropped: true, steer: false });
+  });
+
   it('transcript/math-and-diagrams: the answer carries the math and the mermaid fence verbatim', () => {
     const answer = ofKind(rowsFor(journal('math-and-diagrams')), 'assistant_text')[0].markdown;
     expect(answer).toContain('$$\n\\frac{1}{60}');
@@ -219,7 +237,8 @@ describe('event fixtures', () => {
     const rows = rowsFor(loadEventFixture('reconnect'));
     const reconnects = ofKind(rows, 'error').filter((e) => e.scope === 'reconnect');
     expect(reconnects.map((r) => r.text)).toEqual(['Reconnected', 'Could not reconnect · engine binary missing']);
-    expect(reconnects.map((r) => r.id)).toEqual(['reconnect:synthetic-reconnect', 'reconnect:synthetic-reconnect']);
+    expect(reconnects.map((r) => r.id)).toEqual(['reconnect:r4', 'reconnect:r11']); // one key per episode: its first attempting event
+    expect(new Set(rows.map((r) => r.id)).size).toBe(rows.length);
     expect(rows.map((r) => r.kind)).toEqual(['time', 'user', 'assistant_text', 'error', 'user', 'assistant_text', 'error']);
   });
 

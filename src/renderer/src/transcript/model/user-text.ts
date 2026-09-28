@@ -87,5 +87,5 @@ export const INTERRUPT_MARKER = '[Request interrupted by user]';
 export function isInterruptionMarker(origin: string | null, content: string | ContentBlock[]): boolean {
   if (origin === 'interrupt-marker') return true;
   const text = typeof content === 'string' ? content : content.length === 1 && content[0].type === 'text' ? String(content[0].text ?? '') : '';
-  return text.trim().startsWith(INTERRUPT_MARKER);
+  return text.trim() === INTERRUPT_MARKER; // the complete marker only: a prompt that begins with it and continues is a bubble
 }

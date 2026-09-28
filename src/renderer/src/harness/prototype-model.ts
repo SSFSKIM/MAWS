@@ -140,7 +140,7 @@ export class PrototypeTranscript {
         if (!turn || typeof event.content !== 'string') return false;
         turn.user = {
           id: rowId.user(event.messageUuid!), turnId: turn.id, at: event.at, kind: 'user', messageUuid: event.messageUuid, text: event.content,
-          attachments: [], lines: event.content.split('\n').length, editable: true,
+          attachments: [], lines: event.content.split('\n').length, editable: true, steer: false, dropped: false,
         };
         return this.bump(turn);
       case 'assistant.block.delta':

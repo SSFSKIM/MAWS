@@ -1,7 +1,7 @@
 // X3 identifiers (C6 execution document, "X3 — identifiers and classification"): every row and cell id is a
 // deterministic function of X1 identifiers, never a position, so a re-derived turn yields the same ids and the
 // virtualiser keeps its anchor and the reader's expansion state.
-import type { ApiMessageId, EventId, MessageUuid, RequestId, SessionId, TaskId, ToolUseId } from '@shared/graph/ids';
+import type { ApiMessageId, EventId, MessageUuid, RequestId, TaskId, ToolUseId } from '@shared/graph/ids';
 import type { CellId, RowId, TurnId } from './rows';
 
 const row = (id: string) => id as RowId;
@@ -33,7 +33,7 @@ export const rowId = {
   slot: (request: RequestId) => row(`slot:${request}`),
   error: (id: EventId) => row(`error:${id}`),
   retry: (turn: TurnId) => row(`retry:${turn}`),
-  reconnect: (session: SessionId) => row(`reconnect:${session}`),
+  reconnect: (firstAttempt: EventId) => row(`reconnect:${firstAttempt}`), // one row per episode, keyed by its first 'attempting' event, updated in place
   boundary: (id: EventId) => row(`boundary:${id}`),
   bash: (inputMessage: MessageUuid) => row(`bash:${inputMessage}`),
   bashOfEvent: (id: EventId) => row(`bash:${id}`),

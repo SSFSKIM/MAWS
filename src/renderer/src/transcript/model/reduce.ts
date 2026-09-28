@@ -63,13 +63,15 @@ export interface TranscriptState {
   seen: Set<EventId>; // every applied event id
   echoUuids: Set<MessageUuid>; // uuids of bash_echo messages, so a turn.started naming one is dropped
   ui: TranscriptUi;
-  // Additive internals. `current` is the turn receiving unrouted events (the earliest open turn: a queued prompt's
-  // turn waits behind it). `placement` puts each loose event after a turn. The registries below are append-only and
-  // shared by successive states, like `seen`.
+  // Additive internals. `current` is the open turn receiving unrouted events. `placement` puts each loose event after
+  // a turn. The registries below are append-only and shared along the lineage, like `seen`: states form one lineage
+  // (every returned state stays a valid, readable snapshot; applying events to a state that is not the lineage's
+  // latest throws, since a fork would read registries its predecessor never filled; M2 review ruling).
   current: TurnId | null;
   placement: Map<EventId, TurnId | null>;
   index: { toolUses: Map<ToolUseId, TurnId>; tasks: Map<TaskId, TurnId>; requests: Map<RequestId, TurnId>; hooks: Map<string, TurnId>; messages: Map<MessageUuid, TurnId> };
   memo: Map<TurnId, MemoEntry>;
+  lineage: { latest: TranscriptState | null };
 }
 
 export function createState(sessionId: SessionId | null, agentId: AgentId | null): TranscriptState {
@@ -79,6 +81,7 @@ export function createState(sessionId: SessionId | null, agentId: AgentId | null
     current: null, placement: new Map(),
     index: { toolUses: new Map(), tasks: new Map(), requests: new Map(), hooks: new Map(), messages: new Map() },
     memo: new Map(),
+    lineage: { latest: null },
   };
 }
 
@@ -100,7 +103,11 @@ class Batch {
   private owned = { order: false, loose: false, pending: false };
 
   constructor(previous: TranscriptState) {
+    if (previous.lineage.latest !== null && previous.lineage.latest !== previous) {
+      throw new Error('applyEvents: this state is not its lineage’s latest; states form one lineage and forking is unsupported');
+    }
     this.state = { ...previous, turns: new Map(previous.turns) };
+    previous.lineage.latest = this.state;
   }
 
   order(): TurnId[] {
@@ -223,23 +230,21 @@ function apply(batch: Batch, event: SessionEvent): void {
     }
     case 'turn.ended': {
       if (event.isEchoReceipt) return batch.loose(event, false);
-      const named = event.userMessageUuids.map((uuid) => state.turns.get(turnIdOf.ofMessage(uuid))).find((turn) => turn?.state === 'open');
+      const turnOf = (uuid: MessageUuid) => state.turns.get(turnIdOf.ofMessage(uuid)) ?? (index.messages.has(uuid) ? state.turns.get(index.messages.get(uuid)!) : undefined);
+      const named = event.userMessageUuids.map(turnOf).find((turn) => turn?.state === 'open');
       const turn = named ? batch.touch(named.id) : batch.current();
       if (!turn) return batch.loose(event, false);
       batch.close(turn, event);
       return;
     }
     case 'command.lifecycle': {
-      // A queued prompt the engine cancelled or refused: its turn closes without work. The current turn's own cancel
-      // rides on its result.
+      // *Steers and dropped prompts*: a cancel naming a steer marks that steer's row dropped and nothing else. One naming
+      // a turn's opening prompt is a no-op here (an idle drop arrives as `turn.ended { terminalReason: 'cancelled' }`
+      // from the wire; after a result it changes nothing). The reducer never closes a turn on a lifecycle event.
       if (event.state !== 'cancelled' && event.state !== 'discarded' && event.state !== 'refused') return;
-      const id = turnIdOf.ofMessage(event.commandUuid);
-      const turn = state.turns.get(id);
-      if (!turn || turn.state !== 'open' || state.current === id) return;
-      const touched = batch.touch(id);
-      touched.state = 'closed';
-      touched.endedAt = event.at;
-      touched.version += 1;
+      const owner = index.messages.get(event.commandUuid);
+      if (owner === undefined || turnIdOf.ofMessage(event.commandUuid) === owner) return;
+      pushRouted(owner);
       return;
     }
     case 'user.message': {
@@ -263,7 +268,11 @@ function apply(batch: Batch, event: SessionEvent): void {
         return;
       }
       const current = batch.current();
-      if (current) return batch.push(current, event);
+      if (current) {
+        // A steer: a prompt sent while this turn runs joins it (its uuid belongs to the turn; no turn of its own).
+        if (event.messageUuid !== null) index.messages.set(event.messageUuid, current.id);
+        return batch.push(current, event);
+      }
       const id = event.messageUuid === null ? turnIdOf.ofEvent(event.id) : turnIdOf.ofMessage(event.messageUuid);
       const turn = batch.open(id, 'human', event.at);
       if (event.messageUuid !== null) index.messages.set(event.messageUuid, id);

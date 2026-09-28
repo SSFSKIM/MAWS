@@ -34,7 +34,7 @@ export interface RowBase {
 export type Row = RowBase &
   (
     | { kind: 'time'; label: string } // "Today 1:12 AM"
-    | { kind: 'user'; messageUuid: MessageUuid | null; text: string; attachments: Attachment[]; lines: number; editable: boolean }
+    | { kind: 'user'; messageUuid: MessageUuid | null; text: string; attachments: Attachment[]; lines: number; editable: boolean; steer: boolean; dropped: boolean } // steer: sent while its turn was running (joins that turn, no turn of its own); dropped: the engine never ran it
     | { kind: 'assistant_text'; messageUuid: MessageUuid | null; blockIndex: number; markdown: string; live: boolean; phase: 'answer' | 'commentary'; model: string | null }
     | {
         kind: 'divider'; state: 'working' | 'completed' | 'stopped' | 'failed'; origin: 'human' | 'engine'; startedAt: string; endedAt: string | null;

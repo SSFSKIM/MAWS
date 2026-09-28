@@ -54,6 +54,10 @@ describe('replay stub: the querying-user mapping', () => {
     const list = events('pass1', 'queue-and-interrupt');
     const users = list.filter((e): e is Extract<SessionEvent, { kind: 'user.message' }> => e.kind === 'user.message');
     expect(users.filter((e) => e.messageUuid === 'a5bf8381-f5c0-4394-88a8-4b04c12e4911')).toHaveLength(1);
+    // The steer at seq 146 is a user.message with no turn.started of its own; the two turns start at seq 4 and 199.
+    expect(list.filter((e) => e.kind === 'turn.started').map((e) => e.seq)).toEqual([4, 199]);
+    expect(list.filter((e) => e.seq === 146).map((e) => e.kind)).toEqual(['user.message']);
+    expect(list.find((e) => e.seq === 191)).toMatchObject({ kind: 'command.lifecycle', state: 'cancelled', commandUuid: '99662785-5122-45a7-a68f-d734959a0c52' });
     expect(users.find((e) => e.seq === 235)).toMatchObject({ bash: { part: 'input', command: 'printf BASH_MODE_OK' }, isReplay: true });
     expect(users.find((e) => e.seq === 236)).toMatchObject({ bash: { part: 'output', stdout: 'BASH_MODE_OK', stderr: '', exitCode: 0 } });
     const denials = list.filter((e): e is Extract<SessionEvent, { kind: 'tool.result' }> => e.kind === 'tool.result' && e.denial !== null);
@@ -180,7 +184,10 @@ describe('fixture gates through the model', () => {
     expect(ofKind(rowsFor('pass1', 'question-roundtrip'), 'request_slot')).toHaveLength(0);
   });
 
-  it('pass1/queue-and-interrupt: one bash row with exit 0, a stopped divider, four stopped cells', () => {
+  it('pass1/queue-and-interrupt: one bash row with exit 0, a stopped divider, four stopped cells, two human turns and the dropped steer', () => {
+    const state = stateOf('pass1', 'queue-and-interrupt');
+    expect(state.order).toEqual(['turn:a5bf8381-f5c0-4394-88a8-4b04c12e4911', 'turn:e88214f8-3ba3-4b4c-8e64-3be1595fcac0']);
+    expect(state.order.map((id) => state.turns.get(id)!.origin)).toEqual(['human', 'human']);
     const rows = rowsFor('pass1', 'queue-and-interrupt');
     const bash = ofKind(rows, 'bash');
     expect(bash).toHaveLength(1);
@@ -188,7 +195,13 @@ describe('fixture gates through the model', () => {
     const dividers = ofKind(rows, 'divider');
     expect(dividers[0]).toMatchObject({ state: 'stopped', denied: 0, autoDenied: 0, firstDeniedCell: null });
     expect(cellsOf(rows).filter((cell) => cell.status === 'stopped')).toHaveLength(4);
-    expect(ofKind(rows, 'user').map((row) => row.text.slice(0, 8))).toEqual(['Count to', 'After co', 'Counting']);
+    const users = ofKind(rows, 'user');
+    expect(users.map((row) => row.text.slice(0, 8))).toEqual(['Count to', 'After co', 'Counting']);
+    expect(users[1]).toMatchObject({ id: 'user:99662785-5122-45a7-a68f-d734959a0c52', turnId: state.order[0], steer: true, dropped: true });
+    expect(users[0]).toMatchObject({ steer: false, dropped: false });
+    expect(users[2]).toMatchObject({ turnId: state.order[1], steer: false, dropped: false });
+    // The steer sits outside the work area: still there with the turn collapsed.
+    expect(ofKind(rowsOf(state), 'user')).toHaveLength(3);
   });
 
   it('pass2/workflow: a workflow subagent row and an engine turn', () => {
@@ -253,6 +266,12 @@ describe('fixture gates through the model', () => {
     expect(ofKind(rows, 'user').some((row) => row.text.includes('local-command') || row.text.startsWith('Set model'))).toBe(false);
     const state = stateOf('pass2', 'auto-routed');
     expect(state.order.every((id) => !state.turns.get(id)!.events.some((e) => e.kind === 'turn.started' && e.userMessageUuid && e.userMessageUuid.startsWith('local')))).toBe(true);
+    const unrouted = rowsFor('pass2', 'auto-unrouted');
+    const unroutedLocals = ofKind(unrouted, 'local_command');
+    expect(unroutedLocals).toHaveLength(3);
+    expect(events('pass2', 'auto-unrouted').filter((e) => e.kind === 'user.message' && e.origin === 'local-command').map((e) => e.seq)).toEqual([43, 52, 65]);
+    expect(ofKind(unrouted, 'user').some((row) => row.text.startsWith('Set model'))).toBe(false);
+    expect(ofKind(unrouted, 'user')).toHaveLength(3);
     for (const [pass, name, seq] of [['pass1', 'queue-and-interrupt', 197], ['pass2', 'per-task-stop-on', 65]] as const) {
       const marker = events(pass, name).find((e) => e.seq === seq) as Extract<SessionEvent, { kind: 'user.message' }>;
       const all = rowsFor(pass, name);

@@ -12,7 +12,7 @@ import type { LiveBlock, TranscriptState, TranscriptUi, TurnState } from './redu
 import { isEngineOrigin } from './reduce';
 import { TOOL_CATEGORIES, type Cell, type ChangedFile, type Row, type RowId, type SubagentRef, type SubagentStatus, type ToolCategory, type TurnId, type TurnSummary } from './rows';
 import { needsSeparator, separatorLabel } from './time';
-import { isLocalCommand, localCommandOutput, userTextOf } from './user-text';
+import { isInterruptionMarker, isLocalCommand, localCommandOutput, userTextOf } from './user-text';
 
 type Event<K extends SessionEvent['kind']> = Extract<SessionEvent, { kind: K }>;
 type RowOf<K extends Row['kind']> = Extract<Row, { kind: K }>;
@@ -107,6 +107,7 @@ function rowsOfTurn(state: TranscriptState, turn: TurnState): Row[] {
 type Item =
   | { kind: 'text'; row: RowOf<'assistant_text'> }
   | { kind: 'thinking'; row: RowOf<'thinking'> }
+  | { kind: 'steer'; row: RowOf<'user'> } // outside the work area, in event order with the answer
   | { kind: 'cell'; cell: Cell }
   | { kind: 'row'; row: Row }
   // Placeholders the walk leaves and the resolution pass fills, once every event of the turn has been seen.
@@ -151,11 +152,19 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): { rows: Row
   let retryAt: string | null = null; // the first api.retry's time: the in-place row keeps its position
   const agentIds = new Map<ToolUseId, AgentId>();
 
+  const cancelled = new Set<string>(); // steers a `command.lifecycle` cancelled, discarded or refused
   for (const event of turn.events) {
     if (event.kind === 'boundary.retraction') for (const uuid of event.retractedMessageUuids) retracted.add(uuid);
     if (event.kind === 'assistant.block.complete' && event.supersedes) superseded.add(event.supersedes);
+    if (event.kind === 'command.lifecycle') cancelled.add(event.commandUuid);
   }
   const dropped = (messageUuid: string | null) => messageUuid !== null && (retracted.has(messageUuid) || superseded.has(messageUuid));
+  const openerDropped = turn.ended?.terminalReason === 'cancelled'; // an idle prompt dropped before its init
+  const userRow = (event: Event<'user.message'>, id: RowId, editable: boolean, steer: boolean): RowOf<'user'> => {
+    const text = userTextOf(event.content);
+    const isDropped = steer ? event.messageUuid !== null && cancelled.has(event.messageUuid) : openerDropped;
+    return { id, turnId: turn.id, at: event.at, kind: 'user', messageUuid: event.messageUuid, text: text.text, attachments: text.attachments, lines: text.lines, editable, steer, dropped: isDropped };
+  };
 
   const blockRow = (block: LiveBlock, at: string): Item | null => {
     const live = !block.completed;
@@ -167,8 +176,11 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): { rows: Row
     }
     return null;
   };
+  // Consecutive Agent calls from the same assistant message share one row: the immediately preceding item must be
+  // that group (a tool call or commentary between two calls makes two rows).
   const subagentGroupFor = (apiMessageId: string | null, at: string, key: RowId): SubagentGroup => {
-    const last = subagents.at(-1);
+    const previous = items.at(-1);
+    const last = previous?.kind === 'subagents' ? previous.group : null;
     if (last && apiMessageId !== null && last.apiMessageId === apiMessageId) return last;
     const group: SubagentGroup = { id: key, at, apiMessageId, refs: [], statuses: new Map(), lastTool: new Map(), phase: null };
     subagents.push(group);
@@ -194,11 +206,11 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): { rows: Row
         } else if (isLocalCommand(event.origin, event.content)) {
           items.push({ kind: 'row', row: localCommandRow(event, turn.id) });
         } else if (event.messageUuid !== null && turnIdOf.ofMessage(event.messageUuid) === turn.id && user === null && !dropped(event.messageUuid)) {
-          const text = userTextOf(event.content);
-          user = { id: rowId.user(event.messageUuid), turnId: turn.id, at: event.at, kind: 'user', messageUuid: event.messageUuid, text: text.text, attachments: text.attachments, lines: text.lines, editable: true };
+          user = userRow(event, rowId.user(event.messageUuid), true, false);
         } else if (turn.id === turnIdOf.ofEvent(event.id) && user === null && !event.isSynthetic) {
-          const text = userTextOf(event.content);
-          user = { id: rowId.userOfEvent(event.id), turnId: turn.id, at: event.at, kind: 'user', messageUuid: event.messageUuid, text: text.text, attachments: text.attachments, lines: text.lines, editable: false };
+          user = userRow(event, rowId.userOfEvent(event.id), false, false);
+        } else if (!event.isSynthetic && !isInterruptionMarker(event.origin, event.content) && !dropped(event.messageUuid)) {
+          items.push({ kind: 'steer', row: userRow(event, event.messageUuid === null ? rowId.userOfEvent(event.id) : rowId.user(event.messageUuid), true, true) });
         }
         break;
       }
@@ -423,7 +435,8 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): { rows: Row
   const answer: Row[] = [];
   const workItems: Item[] = [];
   resolved.forEach((item, i) => {
-    if (item.kind === 'text' && i > lastWork) answer.push({ ...item.row, phase: 'answer' });
+    if (item.kind === 'steer') answer.push(item.row); // steers and answer in event order, outside the work area
+    else if (item.kind === 'text' && i > lastWork) answer.push({ ...item.row, phase: 'answer' });
     else if (item.kind === 'text') workItems.push({ kind: 'text', row: { ...item.row, phase: 'commentary' } });
     else if (item.kind === 'thinking' && i > lastWork) workItems.push({ kind: 'row', row: item.row }); // after the last tool use: a row, not a cell of the last group
     else workItems.push(item);
@@ -568,7 +581,8 @@ const collectCells = (rows: Row[]): Cell[] => rows.flatMap((row) => (row.kind ==
 
 function changedFiles(cells: Cell[], turn: TurnState): ChangedFile[] {
   const files: ChangedFile[] = [];
-  for (const cell of cells) if (cell.detail.kind === 'edit' && cell.status !== 'denied' && cell.status !== 'stopped' && cell.status !== 'running') files.push({ path: cell.detail.filePath, change: cell.detail.change, added: cell.detail.added, removed: cell.detail.removed, cellId: cell.id });
+  // Successful `files` results only: a failed, denied, stopped or still-running edit changed nothing to receipt.
+  for (const cell of cells) if (cell.detail.kind === 'edit' && cell.status === 'done') files.push({ path: cell.detail.filePath, change: cell.detail.change, added: cell.detail.added, removed: cell.detail.removed, cellId: cell.id });
   // Child-agent edits are attributed to the turn (the receipt names them; no cell is rendered for them).
   for (const events of turn.children.values()) {
     const uses = new Map(events.filter((e): e is Event<'tool.use'> => e.kind === 'tool.use' && tableRowOf(e.toolName).category === 'files').map((e) => [e.toolUseId, e]));
@@ -673,7 +687,7 @@ function withBashOutput(row: RowOf<'bash'>, output: Event<'user.message'>): RowO
 // Rows for the events outside any turn, placed after the turn they followed.
 function looseRows(state: TranscriptState, events: SessionEvent[]): Row[] {
   const rows: Row[] = [];
-  let reconnect: RowOf<'error'> | null = null;
+  let episode: { index: number; id: RowId } | null = null; // the open reconnect episode: its row updates in place until it ends
   for (const event of events) {
     switch (event.kind) {
       case 'user.message': {
@@ -706,10 +720,14 @@ function looseRows(state: TranscriptState, events: SessionEvent[]): Row[] {
         rows.push(noticeRow(event, event.text, null));
         break;
       case 'session.reconnect': {
-        const row: RowOf<'error'> = { id: rowId.reconnect(event.sessionId), turnId: null, at: event.at, kind: 'error', severity: event.phase === 'failed' ? 'error' : 'transient', text: reconnectCopy(event.phase, event.attempt, event.maxAttempts, event.reason), attempt: { n: event.attempt, max: event.maxAttempts }, scope: 'reconnect', lostAttentionCount: null };
-        if (reconnect) rows[rows.indexOf(reconnect)] = row;
-        else rows.push(row);
-        reconnect = row;
+        const id: RowId = episode?.id ?? rowId.reconnect(event.id);
+        const row: RowOf<'error'> = { id, turnId: null, at: event.at, kind: 'error', severity: event.phase === 'failed' ? 'error' : 'transient', text: reconnectCopy(event.phase, event.attempt, event.maxAttempts, event.reason), attempt: { n: event.attempt, max: event.maxAttempts }, scope: 'reconnect', lostAttentionCount: null };
+        if (episode) rows[episode.index] = row;
+        else {
+          rows.push(row);
+          episode = { index: rows.length - 1, id };
+        }
+        if (event.phase !== 'attempting') episode = null; // reconnected or failed: the episode is over
         break;
       }
       case 'process.exited':
