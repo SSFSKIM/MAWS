@@ -1,4 +1,5 @@
 import { readFileSync, statSync } from 'node:fs';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { SessionEvent } from '@shared/graph/events';
@@ -8,7 +9,7 @@ import { validateEventPayload } from '@shared/ipc/validate';
 import { FIXTURE_DIR, TRANSCRIPT_FIXTURE_DIR } from '../../../test/support/fixtures';
 import type { ReadRange } from '../../../test/support/memory-reader';
 import { StoreFixture } from '../../../test/support/store-fixture';
-import type { FileReader } from './chain-follower';
+import { ChainFollower, type FileReader } from './chain-follower';
 import { FsFileReader } from './follow';
 import { FsService } from './service';
 import { DEBOUNCE_MS, SETTLE_MS } from './watcher';
@@ -44,6 +45,44 @@ describe('the fs FileReader opens the file per read', () => {
     const second = await reader.stat();
     expect(second?.ino).not.toBe(first?.ino);
     expect(second?.size).toBe(8);
+  });
+
+  it('answers a read after a rename-over with no bytes (a reload), never the new file\'s bytes under the old inode', async () => {
+    const path = await fixture.addTranscript('/work/a', S1, ['{"a":1}', '{"b":2}']);
+    const reader = new FsFileReader(() => path);
+    const before = await reader.stat();
+    await fixture.rewriteFile(path, ['{"replaced":true}', '{"x":0}']);
+    expect(await reader.read(0, 16)).toEqual(Buffer.alloc(0)); // the handle's inode is not the one the follower stat'ed
+    const after = await reader.stat();
+    expect(after?.ino).not.toBe(before?.ino);
+    expect((await reader.read(0, 18)).toString()).toBe('{"replaced":true}\n');
+  });
+
+  it('a follower over the fs reader reloads onto a file replaced between its stat and its read', async () => {
+    const record = (uuid: string, parentUuid: string | null, content: string) => JSON.stringify({ type: 'user', uuid, parentUuid, cwd: '/w', message: { role: 'user', content } });
+    const path = await fixture.addTranscript('/work/a', S1, [record('u1', null, 'the old file, whose size covers the whole first record of the new one')]);
+    const inner = new FsFileReader(() => path);
+    let replaceOnce = true;
+    // The replacement lands after the follower's stat and before its read: the rename-over race.
+    const reader: FileReader = {
+      path,
+      stat: () => inner.stat(),
+      read: async (offset, length) => {
+        if (replaceOnce) {
+          replaceOnce = false;
+          await fixture.rewriteFile(path, [record('n0', null, 'new'), record('n1', 'n0', 'new file, second record, past the old size')]);
+        }
+        return inner.read(offset, length);
+      },
+    };
+    const events: SessionEvent[] = [];
+    const follower = new ChainFollower(reader, S1 as SessionId, null, (e) => e.t === 'events' && events.push(...e.events));
+    await follower.start();
+    expect(events).toEqual([]); // nothing read under the old inode
+    await follower.poke();
+    expect(follower.snapshot().chain).toEqual(['n0', 'n1']);
+    expect(events.flatMap((e) => (e.kind === 'user.message' ? [e.content] : []))).toEqual(['new', 'new file, second record, past the old size']);
+    expect(events.filter((e) => e.kind === 'boundary.retraction')).toEqual([]);
   });
 });
 
@@ -234,6 +273,44 @@ describe('a followed session backfills, then tails its transcript', () => {
     expect(emitted.slice(count).filter((e) => e.name === 'session.eventBatch' || e.name === 'fs.followState')).toEqual([]);
   });
 
+  it.each(['new path first, then the old one deleted', 'old path deleted first, then the new one written'])(
+    'follows a relocated transcript to the surviving file whatever order the notifications arrive in (%s)',
+    async (order) => {
+      const oldPath = await fixture.addTranscript(REWIND_DIR, REWIND, rewindLines);
+      const fs = await start();
+      fs.bind([{ sessionId: REWIND, appSessionId: APP }]);
+      await fs.eventsSnapshot(APP, null);
+      expect(lastState()?.leafUuid).toMatch(/^7c05f769/);
+
+      const moved = join(fixture.paths.projects, '-private-tmp-moved', `${REWIND}.jsonl`);
+      const extra = JSON.stringify({ type: 'user', uuid: 'after-move', parentUuid: lastState()!.leafUuid, message: { role: 'user', content: 'after the move' } });
+      const writeNew = async () => {
+        await mkdir(dirname(moved), { recursive: true });
+        await writeFile(moved, [...rewindLines, extra].map((line) => `${line}\n`).join(''));
+      };
+      if (order.startsWith('new')) {
+        await writeNew();
+        await settled();
+        await rm(oldPath);
+      } else {
+        await rm(oldPath);
+        await settled();
+        await writeNew();
+      }
+      await expect.poll(() => lastState()?.leafUuid, { timeout: 3000 }).toBe('after-move');
+      // Once both notifications have been handled, the follower's location is the surviving file (what the 30 s
+      // reconcile stats), not whichever path was notified last.
+      await settled();
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(readers[0].path).toBe(moved);
+
+      // The follower stays on the surviving file: a later append there arrives.
+      await settled();
+      await fixture.appendLines(moved, [JSON.stringify({ type: 'user', uuid: 'later', parentUuid: 'after-move', message: { role: 'user', content: 'later' } })]);
+      await expect.poll(() => lastState()?.leafUuid, { timeout: 3000 }).toBe('later');
+    },
+  );
+
   it('follows an app session whose transcript does not exist yet, and picks it up when it appears', async () => {
     const fs = await start();
     fs.bind([{ sessionId: REWIND, appSessionId: APP }]);
@@ -262,11 +339,28 @@ describe('a followed session backfills, then tails its transcript', () => {
     fs.bind([{ sessionId: PARENT, appSessionId: app }]);
     const agentId = 'ad286defbc77bc090' as AgentId;
 
-    await fixture.addSidecar(PARENT, `subagents/agent-${agentId}.jsonl`, readFileSync(join(SIDECARS, `agent-${agentId}.jsonl`), 'utf8'));
+    const agentLines = readFileSync(join(SIDECARS, `agent-${agentId}.jsonl`), 'utf8').split('\n').filter(Boolean);
+    const agentPath = await fixture.addSidecar(PARENT, `subagents/agent-${agentId}.jsonl`, agentLines.slice(0, 3).map((line) => `${line}\n`).join(''));
     await expect.poll(() => events('fs.subagentsChanged').at(-1)?.agents.map((a) => a.agentId)).toEqual([agentId]);
+    const listed = events('fs.subagentsChanged').length;
+
+    // Follow before the meta is read: refused, not attributed to no parent tool use for the rest of the follow.
+    await expect(fs.agentEvents(app, agentId)).rejects.toThrow(`agent meta not yet available: ${agentId}`);
+    expect(fs.state().followed).toEqual([]);
+
+    // The child's transcript grows: its size and mtime change, the agent set and its meta do not, so nothing is emitted.
+    await fixture.appendLines(agentPath, agentLines.slice(3));
+    await settled();
     await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(events('fs.subagentsChanged')).toHaveLength(listed);
+
+    // The meta lands: exactly one fs.subagentsChanged, which is the consumer's cue to retry.
     await fixture.addSidecar(PARENT, `subagents/agent-${agentId}.meta.json`, readFileSync(join(SIDECARS, `agent-${agentId}.meta.json`), 'utf8'));
     await expect.poll(() => events('fs.subagentsChanged').at(-1)?.agents[0].meta?.toolUseId).toBe('toolu_01CYiK6ncgQLFUQ2iqC1b4oB');
+    await settled();
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(events('fs.subagentsChanged')).toHaveLength(listed + 1);
+    expect(events('fs.subagentsChanged').at(-1)?.agents[0].size).toBe(statSync(agentPath).size); // the payload keeps size
     expect(events('fs.subagentsChanged').at(-1)).toMatchObject({
       appSessionId: app,
       agents: [{ agentId, runId: null, transcriptPath: join(dirname(parent), PARENT, 'subagents', `agent-${agentId}.jsonl`) }],
@@ -287,6 +381,30 @@ describe('a followed session backfills, then tails its transcript', () => {
     expect(fs.state().followed).toEqual(expect.arrayContaining([{ appSessionId: app, agentId }, { appSessionId: app, agentId: null }]));
     await fs.unfollow(app, null); // the session and its agents
     expect(fs.state().followed).toEqual([]);
+  });
+
+  it('follows a workflow agent at once, with no parent tool use, though its meta names none', async () => {
+    const session = 'bac6130b-8eb8-499e-aeb1-89e7624a52cd' as SessionId;
+    const app = 'app-workflow' as AppSessionId;
+    await fixture.addTranscript('/private/tmp/maws-probe2-1RzDNs', session, [
+      JSON.stringify({ type: 'user', uuid: 'w1', parentUuid: null, cwd: '/private/tmp/maws-probe2-1RzDNs', message: { role: 'user', content: 'run it' } }),
+    ]);
+    const fs = await start();
+    fs.bind([{ sessionId: session, appSessionId: app }]);
+    const agentId = 'a014f6be436bed86b' as AgentId;
+    const dir = 'subagents/workflows/wf_7cacbb2d-902';
+    await fixture.addSidecar(session, `${dir}/agent-${agentId}.jsonl`, [
+      JSON.stringify({ type: 'user', uuid: 'c1', parentUuid: null, isSidechain: true, agentId, cwd: '/private/tmp/maws-probe2-1RzDNs', message: { role: 'user', content: 'Reply with exactly ALPHA and nothing else.' } }),
+      JSON.stringify({ type: 'assistant', uuid: 'c2', parentUuid: 'c1', isSidechain: true, agentId, message: { id: 'msg_a', model: 'm', content: [{ type: 'text', text: 'ALPHA' }] } }),
+    ].map((line) => `${line}\n`).join(''));
+
+    // No meta yet: a workflow agent still follows, since no meta would name a parent tool use anyway.
+    const child = await fs.agentEvents(app, agentId);
+    expect(child.complete).toBe(true);
+    expect(child.events.map((e) => e.kind)).toEqual(['session.started', 'turn.started', 'user.message', 'assistant.block.complete']);
+    for (const event of child.events) expect([event.agentId, event.parentToolUseId]).toEqual([agentId, null]);
+    await fixture.addSidecar(session, `${dir}/agent-${agentId}.meta.json`, readFileSync(join(WORKFLOW_DISK, `agent-${agentId}.meta.json`), 'utf8'));
+    await expect.poll(() => events('fs.subagentsChanged').at(-1)?.agents[0]).toMatchObject({ agentId, runId: 'wf_7cacbb2d-902', meta: { agentType: 'workflow-subagent' } });
   });
 
   it('reads workflow runs, and a followed session emits one workflow.progress per snapshot change', async () => {

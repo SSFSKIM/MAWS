@@ -69,6 +69,7 @@ const KNOWN_SILENT_TYPES = new Set([
   'last-prompt', 'custom-title', 'ai-title', 'relocated', 'queue-operation', 'mode', 'permission-mode', 'atis-latch',
   'file-history-snapshot', 'file-history-delta', 'cost-state', 'summary', 'tag', 'history-suppression', 'ended-by-model',
   'continued-in', 'attribution-snapshot', 'fork-context-ref', 'observer-ref',
+  'agent-name', 'bridge-session', // a teammate's display name (SPEC 35 AgentNameRecord); remote-control bridge bookkeeping
 ]);
 
 interface Produced {

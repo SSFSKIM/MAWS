@@ -168,13 +168,17 @@ describe('store rows', () => {
     expect(store.getState().followed).toMatchObject({ sessionId: S1, appSessionId, state: null, events: [] });
     expect(fake.pending.map((p) => [p.name, p.input])).toEqual([['session.events', { appSessionId, afterSeq: null, limit: null }]]);
 
-    // A batch that lands before the snapshot, and one for another session.
+    // Batches that land before the snapshot are buffered (they are newer than it), and one for another session is not
+    // this view's: C6's hydration protocol — apply the snapshot, drain the buffer with dedup by id, then live.
     const ev = (id: string): SessionEvent => ({ id, sessionId: S1, at: 'now', seq: null, agentId: null, parentToolUseId: null, kind: 'notice.posted', level: 'info', text: id, key: null }) as unknown as SessionEvent;
     fake.event('session.eventBatch', { appSessionId, events: [ev('e2'), ev('e3')] });
     fake.event('session.eventBatch', { appSessionId: 'other' as AppSessionId, events: [ev('x')] });
+    expect(store.getState().followed?.events).toEqual([]);
     await fake.reply('session.events', { events: [ev('e1'), ev('e2')], lastSeq: 0, complete: true });
     await following;
-    expect(store.getState().followed?.events.map((e) => e.id)).toEqual(['e2', 'e3', 'e1']);
+    expect(store.getState().followed?.events.map((e) => e.id)).toEqual(['e1', 'e2', 'e3']);
+    fake.event('session.eventBatch', { appSessionId, events: [ev('e3'), ev('e4')] }); // live, deduplicated
+    expect(store.getState().followed?.events.map((e) => e.id)).toEqual(['e1', 'e2', 'e3', 'e4']);
     fake.event('fs.followState', { appSessionId, agentId: null, state: 'following', chainLength: 12, leafUuid: '7c05f769-aaaa' as never, gap: null, skippedLines: 0, message: null });
     fake.event('fs.followState', { appSessionId, agentId: 'agent-1' as never, state: 'backfilling', chainLength: 1, leafUuid: null, gap: null, skippedLines: 0, message: null });
     expect(describeFollow(store.getState().followed!.state)).toBe('chain 12 · leaf 7c05f769 · following');
@@ -190,6 +194,23 @@ describe('store rows', () => {
     await fake.reply('fs.unfollow', undefined);
     await stop;
     expect(store.getState().sessions[S1].appSessionId).toBe(appSessionId);
+  });
+
+  it('keeps the latest events when a large snapshot lands after newer batches', async () => {
+    const fake = fakeClient();
+    const store = createStoreDiagnosticsStore(fake.client, { flushMs: 0 });
+    store.getState().connect();
+    fake.event('fs.sessionChanged', { summary: summary(S1), appSessionId: 'app-1' as AppSessionId });
+    await fake.tick();
+    fake.pending.splice(0);
+    const following = store.getState().follow(S1);
+    const ev = (id: string): SessionEvent => ({ id, kind: 'notice.posted', text: id }) as unknown as SessionEvent;
+    fake.event('session.eventBatch', { appSessionId: 'app-1' as AppSessionId, events: [ev('latest-1'), ev('latest-2')] });
+    await fake.reply('session.events', { events: Array.from({ length: 40 }, (_, i) => ev(`old-${i}`)), lastSeq: 0, complete: false });
+    await following;
+    const ids = store.getState().followed!.events.map((e) => e.id);
+    expect(ids).toHaveLength(FOLLOW_LOG);
+    expect(ids.slice(-2)).toEqual(['latest-1', 'latest-2']);
   });
 
   it('describes a follow state and an event for the log', () => {

@@ -167,13 +167,16 @@ export class FsService {
   }
 
   // `fs.agentEvents`: the child's transcript as X1 events, following it from now on. The agent must be listed under the
-  // session's `subagents/` (its transcript exists); its meta's `toolUseId` is the events' `parentToolUseId` (null for a
-  // workflow agent, whose meta names no tool use).
+  // session's `subagents/` (its transcript exists). An `Agent` tool call's child is attributed to the tool use its meta
+  // names, so until the meta has been read the call is refused rather than following with a parent it cannot know for
+  // the rest of the follow; the consumer retries on the `fs.subagentsChanged` the meta's arrival emits. A workflow
+  // agent's meta names no tool use (nor does the wire), so it follows at once with `parentToolUseId: null`.
   async agentEvents(appSessionId: AppSessionId, agentId: AgentId): Promise<{ events: SessionEvent[]; complete: boolean }> {
     const sessionId = this.sessionOf(appSessionId);
     const entry = await this.ensureFollow(appSessionId, agentId, async () => {
       const agent = (await this.listAgents(sessionId)).find((candidate) => candidate.agentId === agentId);
       if (agent === undefined) throw new Error(`unknown agent: ${agentId}`);
+      if (agent.runId === null && agent.meta === null) throw new Error(`agent meta not yet available: ${agentId}`);
       const parentToolUseId = (agent.meta?.toolUseId ?? null) as ParentToolUseId | null;
       return this.newFollow(appSessionId, sessionId, agent.transcriptPath, { agentId, parentToolUseId });
     });
@@ -269,7 +272,8 @@ export class FsService {
     return { follow, sessionId, agentId: agent?.agentId ?? null, location, workflows: new Map(), workflowIds: new Map(), workflowWork: Promise.resolve() };
   }
 
-  // Lists the session's agents (one listing at a time per session) and tells main when a bound session's list changed.
+  // Lists the session's agents (one listing at a time per session) and tells main when a bound session's agent set or
+  // one of their metas changed.
   private listAgents(sessionId: SessionId): Promise<SubagentEntry[]> {
     const previous = this.agentListing.get(sessionId) ?? Promise.resolve();
     const run = previous
@@ -280,7 +284,7 @@ export class FsService {
         const before = this.agents.get(sessionId) ?? [];
         this.agents.set(sessionId, agents);
         const appSessionId = this.bindings.appIdOf(sessionId);
-        if (appSessionId !== null && JSON.stringify(before) !== JSON.stringify(agents)) this.send('fs.subagentsChanged', { appSessionId, agents });
+        if (appSessionId !== null && agentSetKey(before) !== agentSetKey(agents)) this.send('fs.subagentsChanged', { appSessionId, agents });
         return agents;
       });
     this.agentListing.set(sessionId, run);
@@ -349,12 +353,11 @@ export class FsService {
   private onChange(change: StoreChange): void {
     switch (change.kind) {
       case 'transcript':
-        void this.summarizePath(change.path, change.sessionId, 'changed');
-        this.pokeFollows((entry) => {
-          if (entry.sessionId !== change.sessionId || entry.agentId !== null) return false;
-          entry.location.path = change.path;
-          return true;
-        });
+        // Poke at once (an append to the file being followed is the common case), then take the location from the
+        // listing as the re-summary (or removal) left it: a relocation notified new-path-then-old-path-deleted, or the
+        // other way round, must leave the follower on the surviving file, not on whichever path was notified last.
+        this.pokeFollows((entry) => entry.sessionId === change.sessionId && entry.agentId === null);
+        void this.summarizePath(change.path, change.sessionId, 'changed').then(() => this.locateFollows(change.sessionId));
         return;
       case 'sidecar':
         this.onSidecarChange(change);
@@ -380,8 +383,17 @@ export class FsService {
   // After a rescan: a session's transcript may have appeared or moved without a reported event; every follower is
   // pointed at what the listing found and poked.
   private relocateFollows(): void {
+    for (const entry of this.follows.values()) if (entry.agentId === null) entry.location.path = this.listed.get(entry.sessionId)?.path ?? null;
+    this.pokeFollows(() => true);
+  }
+
+  // A session's followers take their location from the discovery listing; one that moved is poked (the new file's
+  // inode makes it a reload). A session no longer listed has no location: its follower waits for the file to reappear.
+  private locateFollows(sessionId: SessionId): void {
+    const path = this.listed.get(sessionId)?.path ?? null;
     this.pokeFollows((entry) => {
-      if (entry.agentId === null) entry.location.path = this.listed.get(entry.sessionId)?.path ?? entry.location.path;
+      if (entry.sessionId !== sessionId || entry.agentId !== null || entry.location.path === path) return false;
+      entry.location.path = path;
       return true;
     });
   }
@@ -476,6 +488,12 @@ export class FsService {
 const WORKFLOW_SNAPSHOT = /^workflows\/([^/]+)\.json$/;
 const WORKFLOW_JOURNAL = /^subagents\/workflows\/([^/]+)\/journal\.jsonl$/;
 const AGENT_SIDECAR = /^subagents\/(?:.+\/)?agent-[^/]+\.(?:jsonl|meta\.json)$/;
+
+// What `fs.subagentsChanged` reports a change of: the agent set and their metas. An agent transcript's size and mtime
+// change on every append and ride along in the payload without being a change themselves.
+function agentSetKey(agents: readonly SubagentEntry[]): string {
+  return JSON.stringify(agents.map(({ agentId, transcriptPath, runId, meta }) => [agentId, transcriptPath, runId, meta]));
+}
 
 function followKey(appSessionId: AppSessionId, agentId: AgentId | null): string {
   return `${appSessionId}\0${agentId ?? ''}`;

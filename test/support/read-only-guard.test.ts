@@ -46,7 +46,7 @@ describe('filesystem service never imports a write API', () => {
 
   it('passes on the sources under src/engine-host/fs', () => {
     const { files, violations } = scanFilesystemService();
-    expect(files).toEqual(expect.arrayContaining(['discovery.ts', 'holders.ts', 'service.ts', 'sidecars.ts', 'watcher.ts', 'chain-follower.ts']));
+    expect(files).toEqual(expect.arrayContaining(['discovery.ts', 'holders.ts', 'service.ts', 'sidecars.ts', 'watcher.ts', 'chain-follower.ts', 'follow.ts', 'subagents.ts', 'workflows.ts', 'tasks.ts', 'artifacts.ts']));
     expect(files.some((file) => file.endsWith('.test.ts'))).toBe(false);
     expect(violations).toEqual([]);
   });

@@ -4,7 +4,8 @@
 // session is listed even when the host's own start-up scan finished before this page loaded. Session rows arrive in
 // bursts of thousands, so they are buffered and applied once per `flushMs`. M4 switches the rows to `session.list`.
 // Following (M3): one row at a time is followed through `session.events`; the view keeps its `fs.followState` and the
-// last twenty events of its `session.eventBatch`es, deduplicated by event id (disk-derived events carry `seq: null`).
+// last twenty events, hydrated as C6's protocol does: batches are buffered while the `session.events` snapshot is in
+// flight, then the snapshot is applied and the buffer drained, deduplicated by event id (disk events carry `seq: null`).
 import { create } from 'zustand';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, SessionId } from '@shared/graph/ids';
@@ -51,6 +52,9 @@ export function createStoreDiagnosticsStore(client: MawsBridge, options: { flush
   const flushMs = options.flushMs ?? FLUSH_MS;
   // Ids already in the followed view, so a snapshot overlapping its batches adds nothing twice.
   let seen = new Set<string>();
+  // C6's hydration protocol: batches that arrive while the snapshot is in flight are newer than it, so they are held
+  // here, applied after the snapshot and deduplicated by id; null once the view is live.
+  let buffered: SessionEvent[] | null = null;
   const store = create<StoreDiagnosticsStore>()((set, get) => ({
     fs: null,
     sessions: {},
@@ -160,13 +164,14 @@ export function createStoreDiagnosticsStore(client: MawsBridge, options: { flush
         if (current) set({ sessions: { ...get().sessions, [sessionId]: { ...current, appSessionId } } });
       }
       seen = new Set();
+      buffered = [];
       set({ followed: { sessionId, appSessionId, state: null, events: [] } });
       const snapshot = await client.invoke('session.events', { appSessionId, afterSeq: null, limit: null });
-      if (!snapshot.ok) {
-        console.error('[store] session.events failed', snapshot.error);
-        return;
-      }
-      addEvents(appSessionId, snapshot.value.events);
+      if (get().followed?.appSessionId !== appSessionId) return; // unfollowed or refollowed meanwhile
+      if (!snapshot.ok) console.error('[store] session.events failed', snapshot.error);
+      const held = buffered ?? [];
+      buffered = null;
+      applyEvents(appSessionId, [...(snapshot.ok ? snapshot.value.events : []), ...held]);
     },
 
     async unfollow() {
@@ -180,11 +185,21 @@ export function createStoreDiagnosticsStore(client: MawsBridge, options: { flush
   return store;
 
   function addEvents(appSessionId: AppSessionId, events: SessionEvent[]): void {
+    if (store.getState().followed?.appSessionId !== appSessionId) return;
+    if (buffered !== null) buffered.push(...events);
+    else applyEvents(appSessionId, events);
+  }
+
+  function applyEvents(appSessionId: AppSessionId, events: SessionEvent[]): void {
     const followed = store.getState().followed;
     if (followed?.appSessionId !== appSessionId) return;
-    const fresh = events.filter((event) => !seen.has(event.id));
+    const fresh: SessionEvent[] = [];
+    for (const event of events) {
+      if (seen.has(event.id)) continue;
+      seen.add(event.id);
+      fresh.push(event);
+    }
     if (fresh.length === 0) return;
-    for (const event of fresh) seen.add(event.id);
     store.setState({ followed: { ...followed, events: [...followed.events, ...fresh].slice(-FOLLOW_LOG) } });
   }
 }

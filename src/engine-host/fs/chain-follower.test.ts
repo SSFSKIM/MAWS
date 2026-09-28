@@ -295,6 +295,8 @@ describe('follows the leaf across a rewind', () => {
       line({ type: 'last-prompt', lastPrompt: 'one', leafUuid: 'u1' }),
       line({ type: 'file-history-snapshot', messageId: 'u1', snapshot: {} }),
       line({ type: 'cost-state', totalCostUSD: 0 }),
+      line({ type: 'agent-name', agentName: 'reviewer', sessionId: 'S' }), // SPEC 35 AgentNameRecord
+      line({ type: 'bridge-session', sessionId: 'S' }), // remote-control bridge bookkeeping
       line({ type: 'brand-new-record-type', payload: 1 }),
       line({ type: 'custom-title', customTitle: '' }),
     ];
