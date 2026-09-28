@@ -4,12 +4,32 @@
 // (allowlist, exclusions, the gateway variables) and the `--settings` JSON with the host's protected keys applied last.
 // Nothing here spawns; `transport.ts` runs the plan.
 import { randomBytes, randomUUID } from 'node:crypto';
+import { isAbsolute } from 'node:path';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
 import type { SessionId } from '@shared/graph/ids';
 
 export const ENGINE_BIN = '/Users/new/.local/share/claude/versions/2.1.283'; // pinned; the packaged app later moves this to a setting (C11), never to PATH
 export const ENGINE_VERSION = '2.1.283';
 export const RELAY_URL = 'http://127.0.0.1:8641';
+
+// The host's one binary configuration (C11's ask, M5): the pinned path and version by default; C11's `engine.configure`
+// moves the path to a setting, never to PATH. `buildLaunch`, `engine.binaryInfo` and `session.launch`'s binary refusals
+// read it; a process already spawned keeps the path its plan carries.
+export interface BinaryConfig { binaryPath: string | null; expectedVersion: string } // binaryPath null = ENGINE_BIN
+let binaryConfig: BinaryConfig = { binaryPath: null, expectedVersion: ENGINE_VERSION };
+
+export function setBinaryConfig(cfg: BinaryConfig): void {
+  if (cfg.binaryPath !== null && !isAbsolute(cfg.binaryPath)) throw new Error(`the engine binary path must be absolute, never resolved through PATH: ${cfg.binaryPath}`);
+  binaryConfig = { ...cfg };
+}
+
+export function getBinaryConfig(): BinaryConfig {
+  return { ...binaryConfig };
+}
+
+export function engineBinaryPath(): string {
+  return binaryConfig.binaryPath ?? ENGINE_BIN;
+}
 export const GATEWAY_AUTH_TOKEN = 'claudeusage-local-gateway'; // D-19: a non-secret marker; the relay substitutes the real token
 export const CHARTER_PIN = '87f8c7881119ea670901205dae35917d3751459c'; // the parent pin this child was authored against
 
@@ -157,7 +177,8 @@ export function mintLaunchId(): string {
   return out;
 }
 
-export function buildLaunch(spec: LaunchSpec, captured: Record<string, string>, opts: { relayUrl: string; engineVersion: string }): LaunchPlan {
+// `engineVersion` defaults to the binary configuration's expected version.
+export function buildLaunch(spec: LaunchSpec, captured: Record<string, string>, opts: { relayUrl: string; engineVersion?: string }): LaunchPlan {
   if (spec.resume !== null && !spec.resume.fork && spec.sessionId !== null) {
     throw new LaunchSpecConflict('sessionId', '--session-id never co-occurs with a non-fork --resume; a resumed launch takes the resumed id');
   }
@@ -180,7 +201,7 @@ export function buildLaunch(spec: LaunchSpec, captured: Record<string, string>, 
   args.push('--settings', JSON.stringify(flagSettings));
 
   return {
-    bin: ENGINE_BIN,
+    bin: engineBinaryPath(),
     args,
     env: buildEnvironment(spec, captured, opts.relayUrl),
     cwd: spec.cwd,
@@ -188,7 +209,7 @@ export function buildLaunch(spec: LaunchSpec, captured: Record<string, string>, 
     launchId: mintLaunchId(),
     sessionId,
     gateway: spec.gateway,
-    engineVersion: opts.engineVersion,
+    engineVersion: opts.engineVersion ?? binaryConfig.expectedVersion,
   };
 }
 
