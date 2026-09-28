@@ -144,6 +144,10 @@ export interface LaunchPlan { bin: string; args: string[]; env: Record<string, s
 export function buildLaunch(spec: LaunchSpec, captured: Record<string, string>, opts: { relayUrl: string; engineVersion: string }): LaunchPlan;
 export const ENGINE_BIN = '/Users/new/.local/share/claude/versions/2.1.283';   // pinned; the packaged app later moves this to a setting (C11), never to PATH
 export const ENGINE_VERSION = '2.1.283';
+// C11's ask (M5): the host holds one binary configuration, defaulting to the constants; buildLaunch, engine.binaryInfo and session.launch's
+// binary_missing / binary_version refusals read it; a process already spawned keeps its path. C11 adds the `engine.configure` command in its own ipc block.
+export interface BinaryConfig { binaryPath: string | null; expectedVersion: string }   // binaryPath null = ENGINE_BIN
+export function setBinaryConfig(cfg: BinaryConfig): void; export function getBinaryConfig(): BinaryConfig;
 export const RELAY_URL = 'http://127.0.0.1:8641';
 ```
 
@@ -392,6 +396,10 @@ export const EngineSessionStatusSchema = z.strictObject({
                             autoModeServer: z.enum(['enabled', 'disabled', 'unknown']), localLaneObserved: z.boolean() }),
   subagentModel: z.string().nullable(), modelOverrides: z.record(z.string(), z.string()),   // ANTHROPIC_DEFAULT_*_MODEL in effect (names and values from the constructed env)
   engineVersion: z.string().nullable(), fileCheckpointing: z.boolean(),
+  fastMode: z.strictObject({ state: z.enum(['off', 'cooldown', 'on']).nullable(), disabledReason: z.string().nullable() }),   // C11's ask: from initialize and every system/init (`fast_mode_state`, `fast_mode_disabled_reason`; pass2/real-settings seq 15 carries `off` / `sdk_opt_in_required`); nulls before the first frame
+  plugins: z.array(z.strictObject({ name: z.string(), path: z.string(), source: z.string().nullable(), version: z.string().nullable() })),   // system/init.plugins (real-settings lists eleven)
+  pluginErrors: z.array(z.strictObject({ plugin: z.string(), type: z.string(), message: z.string(), path: z.string().nullable() })),        // system/init.plugin_errors
+  pluginWarnings: z.array(z.strictObject({ plugin: z.string(), type: z.string(), message: z.string() })),                                    // system/init.plugin_warnings; all three empty before the first frame
   backgroundTasks: z.array(z.strictObject({ taskId: TaskIdSchema, taskType: z.string(), description: z.string(), ambient: z.boolean() })),
   grants: z.array(z.string()),                                                        // the snapshot's rule strings
   mcpServers: z.array(z.strictObject({ name: z.string(), status: z.string(), source: z.string().nullable() })),
@@ -856,6 +864,9 @@ Ready to paste into the charter's C3 section as "**Residue decisions (C3, 2026-0
 - Decision: (M3 re-review) Inbound frames observed while an out write is in flight are buffered and journaled after that write settles (its out row or `write_failed` row first), so the journal keeps causal order and the normaliser can attribute every response to its request (`boundary.rewind` from `pass2/rewind` seq 41–42 depends on it); the broker therefore needs no in-flight confirmation path: an item is `delivered` only at the flushed row and `confirmed` only afterwards, and an id-less item cannot retire on a `result` while its answer is unflushed. The `answer_note` row is written after the flush beside the answer, never before, so a retried request answered differently carries no stale note. Retired-item tombstones are bounded to the last 1,000 per process.
   Rationale: post-flush journaling was right (the graph must not show unsent frames) but it needs the read side held for the few milliseconds a write takes, or the response overtakes its request; buffering restores the invariant the reviewer named without giving up the flushed-write truth.
   Date/Author: 2026-09-28, controller.
+- Decision: (C11's asks via the coordinator, 2026-09-28; C11's document 1d831d8 under review, wording corrections possible) (1) In M4, `EngineSessionStatus` gains `fastMode { state, disabledReason }`, `plugins[]`, `pluginErrors[]`, `pluginWarnings[]` from the `initialize` response and every `system/init` frame (shapes in the schema block; null or empty before the first frame; `toSessionRecordPatch` unchanged). (2) In M5, the engine host holds a `BinaryConfig { binaryPath, expectedVersion }` defaulting to `ENGINE_BIN`/`ENGINE_VERSION` with a setter (`setBinaryConfig`) and a getter; `buildLaunch`, `engine.binaryInfo` and `session.launch`'s `binary_missing`/`binary_version` refusals read it instead of the constants; a process already spawned keeps its path; tests pin that an unconfigured host builds the same `LaunchPlan` as today and that a configured path appears as `bin` in the `spawn` meta row. C11 adds the `engine.configure` command (owner engine-host, its own ipc block).
+  Rationale: both additive; the status fields are already on the wire (`pass2/real-settings` seq 15) and the configuration keeps the pinned-path rule (never PATH) while letting the packaged app move the path to a setting.
+  Date/Author: 2026-09-28, coordinator via controller.
 
 ## Outcomes & Retrospective
 
