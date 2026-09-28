@@ -148,6 +148,26 @@ describe('follows the leaf across a rewind', () => {
     expectWellFormed(out.events());
   });
 
+  it('a rewrite that shifts the anchor\'s byte offset reloads to the same chain and replays no boundary', async () => {
+    const lines = linesOf(join(TEST_FIXTURE_DIR, 'transcript-rewind.jsonl'));
+    const { reader, follower, out } = await started(joined(lines), 'S' as SessionId);
+    expect(follower.snapshot().chain).toEqual(['u1', 'a1', 'u3', 'a3']);
+    expect(out.of('boundary.rewind')).toHaveLength(1);
+    const before = out.events().length;
+
+    // One bookkeeping record prepended: every offset moves, the anchor's `anchor:<offset>` id with it.
+    reader.replace(joined([line({ type: 'queue-operation', operation: 'enqueue', sessionId: 'S' }), ...lines]));
+    await follower.poke();
+    expect(out.states().slice(-2)).toEqual(['reloading', 'following']);
+    expect(follower.snapshot().chain).toEqual(['u1', 'a1', 'u3', 'a3']);
+    expect(follower.snapshot().rewind).toBeNull();
+    expect(out.of('boundary.rewind')).toHaveLength(1);
+    expect(out.of('boundary.retraction')).toEqual([]);
+    expect(out.events().length).toBe(before); // nothing but the state transitions
+    expect(follower.materialized()).toEqual(out.events());
+    expectWellFormed(out.events());
+  });
+
   it('without the anchor, the continuation is a second writer: retraction plus a warning', async () => {
     const lines = [...REWIND_LINES.slice(0, 26), ...REWIND_LINES.slice(27)];
     const { follower, out } = await started(joined(lines));
@@ -459,5 +479,189 @@ describe('survives torn tails and rewrites', () => {
     await follower.poke();
     expect(out.states().slice(-2)).toEqual(['reloading', 'following']);
     expect(follower.snapshot().chain.map(short)).toEqual(FULL_CHAIN.slice(0, 13));
+  });
+});
+
+// A reader whose reads can be held open, so `stop` can land while a read is in flight.
+class GatedReader extends MemoryFileReader {
+  private release: (() => void) | null = null;
+  hold(): void {
+    if (this.release === null) this.gate = new Promise<void>((resolve) => (this.release = resolve));
+  }
+  open(): void {
+    this.release?.();
+    this.release = null;
+    this.gate = null;
+  }
+  private gate: Promise<void> | null = null;
+  override async read(offset: number, length: number): Promise<Buffer> {
+    if (this.gate !== null) await this.gate;
+    return super.read(offset, length);
+  }
+}
+
+describe('stop cancels work in flight', () => {
+  const ONE = joined([line({ type: 'user', uuid: 'u1', parentUuid: null, cwd: '/d', timestamp: at(0), message: { role: 'user', content: 'one' } })]);
+  const TWO = joined([line({ type: 'user', uuid: 'u2', parentUuid: 'u1', timestamp: at(1), message: { role: 'user', content: 'two' } })]);
+
+  async function settle(): Promise<void> {
+    for (let i = 0; i < 5; i++) await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+
+  it('during start: the held read delivers nothing when released and materialized() is empty', async () => {
+    const reader = new GatedReader(ONE);
+    const out = new Collector();
+    const follower = new ChainFollower(reader, 'S' as SessionId, null, out.sink);
+    reader.hold();
+    const starting = follower.start();
+    await settle();
+    follower.stop();
+    reader.open();
+    await starting;
+    await settle();
+    expect(out.states()).toEqual(['backfilling', 'stopped']);
+    expect(out.events()).toEqual([]);
+    expect(follower.materialized()).toEqual([]);
+    expect(follower.snapshot().chain).toEqual([]);
+  });
+
+  it('during poke: a read held across stop delivers nothing and clears what was materialised', async () => {
+    const reader = new GatedReader(ONE);
+    const out = new Collector();
+    const follower = new ChainFollower(reader, 'S' as SessionId, null, out.sink);
+    await follower.start();
+    expect(follower.materialized()).toHaveLength(3);
+    reader.append(TWO);
+    reader.hold();
+    const poking = follower.poke();
+    await settle();
+    follower.stop();
+    reader.open();
+    await poking;
+    await settle();
+    expect(out.states()).toEqual(['backfilling', 'following', 'stopped']);
+    expect(out.events()).toHaveLength(3);
+    expect(follower.materialized()).toEqual([]);
+    expect(follower.snapshot().chain).toEqual([]);
+  });
+
+  it('during reload: the fresh run is discarded, no retraction and no state follow', async () => {
+    const reader = new GatedReader(Buffer.concat([ONE, TWO]));
+    const out = new Collector();
+    const follower = new ChainFollower(reader, 'S' as SessionId, null, out.sink);
+    await follower.start();
+    expect(follower.snapshot().chain).toEqual(['u1', 'u2']);
+    reader.replace(ONE);
+    reader.hold();
+    const poking = follower.poke();
+    await settle();
+    expect(out.states().at(-1)).toBe('reloading');
+    follower.stop();
+    reader.open();
+    await poking;
+    await settle();
+    expect(out.states()).toEqual(['backfilling', 'following', 'reloading', 'stopped']);
+    expect(out.of('boundary.retraction')).toEqual([]);
+    expect(follower.materialized()).toEqual([]);
+  });
+});
+
+// The rejoin contract asked of C6 (Cross-child reconciliation): a consumer that deduplicates by event id must release
+// the ids a boundary names, because a record cut by a rewind or retracted by a branch can rejoin the chain later and is
+// re-emitted under its original id. This reference consumer keeps a visible message list and a seen-id set.
+class ReferenceConsumer {
+  readonly messages: string[] = [];
+  private readonly seen = new Set<string>();
+
+  accept(events: SessionEvent[]): void {
+    for (const event of events) {
+      if (this.seen.has(event.id)) continue;
+      this.seen.add(event.id);
+      switch (event.kind) {
+        case 'user.message':
+          if (event.messageUuid !== null) this.show(event.messageUuid);
+          break;
+        case 'assistant.block.complete':
+          this.show(event.messageUuid);
+          break;
+        case 'boundary.rewind': {
+          const index = this.messages.indexOf(event.targetMessageUuid);
+          if (index !== -1) this.releaseAll(this.messages.splice(index));
+          break;
+        }
+        case 'boundary.retraction':
+          this.releaseAll(event.retractedMessageUuids);
+          break;
+        default:
+          break;
+      }
+    }
+  }
+
+  private show(uuid: string): void {
+    if (!this.messages.includes(uuid)) this.messages.push(uuid);
+  }
+
+  private releaseAll(uuids: string[]): void {
+    for (const uuid of uuids) {
+      const index = this.messages.indexOf(uuid);
+      if (index !== -1) this.messages.splice(index, 1);
+      for (const id of this.seen) if (id === uuid || id.startsWith(`${uuid}#`)) this.seen.delete(id);
+    }
+  }
+}
+
+describe('retract-then-rejoin converges for a consumer that releases boundary-named ids', () => {
+  function visibleChain(follower: ChainFollower): string[] {
+    const state = follower.snapshot();
+    return state.chain.filter((uuid) => ['user', 'assistant'].includes(state.skeletons.get(uuid)?.type ?? ''));
+  }
+
+  function incremental(out: Collector): ReferenceConsumer {
+    const consumer = new ReferenceConsumer();
+    for (const received of out.received) if (received.t === 'events') consumer.accept(received.events);
+    return consumer;
+  }
+
+  it('over the rewind-real two-step run', async () => {
+    const { reader, follower, out } = await started(joined(REWIND_LINES.slice(0, 27)));
+    reader.append(joined(REWIND_LINES.slice(27)));
+    await follower.poke();
+    const fromBatches = incremental(out);
+    const fromSnapshot = new ReferenceConsumer();
+    fromSnapshot.accept(follower.materialized());
+    expect(fromBatches.messages.map(short)).toEqual(['e3b48834', 'edf0f954', 'a4d68c72', '7c05f769']);
+    expect(fromSnapshot.messages).toEqual(fromBatches.messages);
+    expect(visibleChain(follower)).toEqual(fromBatches.messages);
+  });
+
+  it('over a sibling branch and a rejoin: u1 → u2, sibling u3, then u4 under u2', async () => {
+    const record = (uuid: string, parent: string | null, n: number) => line({ type: 'user', uuid, parentUuid: parent, cwd: '/d', timestamp: at(n), message: { role: 'user', content: uuid } });
+    const { reader, follower, out } = await started(joined([record('u1', null, 0), record('u2', 'u1', 1)]), 'S' as SessionId);
+    reader.append(joined([record('u3', 'u1', 2)]));
+    await follower.poke();
+    expect(follower.snapshot().chain).toEqual(['u1', 'u3']);
+    reader.append(joined([record('u4', 'u2', 3)]));
+    await follower.poke();
+    expect(follower.snapshot().chain).toEqual(['u1', 'u2', 'u4']);
+    expect(out.of('boundary.retraction').map((e) => e.retractedMessageUuids)).toEqual([['u2'], ['u3']]);
+
+    const fromBatches = incremental(out);
+    const fromSnapshot = new ReferenceConsumer();
+    fromSnapshot.accept(follower.materialized());
+    expect(fromBatches.messages).toEqual(['u1', 'u2', 'u4']);
+    expect(fromSnapshot.messages).toEqual(['u1', 'u2', 'u4']);
+    expect(visibleChain(follower)).toEqual(['u1', 'u2', 'u4']);
+
+    // The naive consumer (seen ids never released) drops the rejoined u2: the reason the release rule is the contract.
+    const naive = new Set<string>();
+    const shown: string[] = [];
+    for (const event of follower.materialized()) {
+      if (naive.has(event.id)) continue;
+      naive.add(event.id);
+      if (event.kind === 'user.message' && event.messageUuid !== null) shown.push(event.messageUuid);
+      if (event.kind === 'boundary.retraction') for (const uuid of event.retractedMessageUuids) shown.splice(shown.indexOf(uuid), 1);
+    }
+    expect(shown).toEqual(['u1', 'u4']);
   });
 });

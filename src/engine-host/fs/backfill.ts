@@ -102,14 +102,33 @@ type Base = () => EventBase;
 function userEvents(record: TranscriptRecord, uuid: MessageUuid, ctx: BackfillContext, base: Base, events: SessionEvent[]): void {
   const content = messageContent(record);
   const isMeta = record.isMeta === true;
-  const turn = (): void => {
+  const turn = (origin: string | null): void => {
     if (isMeta) return;
     ctx.lastTurnUserUuid = uuid;
-    events.push({ ...base(), kind: 'turn.started', userMessageUuid: uuid, origin: null });
+    events.push({ ...base(), kind: 'turn.started', userMessageUuid: uuid, origin });
   };
   if (typeof content === 'string') {
-    turn();
-    events.push({ ...base(), kind: 'user.message', messageUuid: uuid, content, isReplay: false, isSynthetic: isMeta, origin: null, bash: parseBash(content) });
+    const notification = parseTaskNotification(content);
+    const origin = notification === null ? null : 'task-notification'; // X1's engine-initiated origin
+    const bash = parseBash(content);
+    turn(origin);
+    events.push({ ...base(), kind: 'user.message', messageUuid: uuid, content: bashStripped(content, bash), isReplay: false, isSynthetic: isMeta, origin, bash });
+    // The real completion of a background agent: the notification naming the tool use that started it.
+    if (notification !== null && notification.toolUseId !== null) {
+      const started = ctx.seenToolUses.get(notification.toolUseId);
+      if (started !== undefined) {
+        const summary = notification.result ?? notification.summary;
+        events.push({
+          ...base(),
+          kind: 'subagent.finished',
+          taskId: notification.taskId === null ? started : (notification.taskId as TaskId),
+          status: notification.status,
+          summary: summary === null ? null : summary.slice(0, TEXT_CAP),
+          outputFile: notification.outputFile,
+          reason: null,
+        });
+      }
+    }
     return;
   }
   if (!Array.isArray(content)) return;
@@ -117,11 +136,14 @@ function userEvents(record: TranscriptRecord, uuid: MessageUuid, ctx: BackfillCo
   const results = blocks.filter((block) => block.type === 'tool_result');
   const others = blocks.filter((block) => block.type !== 'tool_result');
   if (others.length > 0) {
-    turn();
+    turn(null);
     events.push({ ...base(), kind: 'user.message', messageUuid: uuid, content: others, isReplay: false, isSynthetic: isMeta, origin: null, bash: null });
   }
   const structured = record.toolUseResult ?? null;
   const persisted = (structured as { persistedOutputPath?: unknown } | null)?.persistedOutputPath;
+  // A background agent's tool_result is its launch acknowledgement, not its outcome (`isAsync: true`); the outcome
+  // arrives later as a <task-notification> user record.
+  const asyncLaunched = (structured as { status?: unknown } | null)?.status === 'async_launched';
   for (const block of results) {
     const toolUseId = block.tool_use_id;
     if (typeof toolUseId !== 'string' || toolUseId.length === 0) continue;
@@ -142,7 +164,7 @@ function userEvents(record: TranscriptRecord, uuid: MessageUuid, ctx: BackfillCo
       messageUuid: uuid,
     });
     const taskId = ctx.seenToolUses.get(toolUseId);
-    if (taskId !== undefined) {
+    if (taskId !== undefined && !asyncLaunched) {
       events.push({
         ...base(),
         kind: 'subagent.finished',
@@ -251,8 +273,10 @@ function messageContent(record: TranscriptRecord): unknown {
 const isContentBlock = (value: unknown): value is ContentBlock & { [k: string]: unknown } =>
   typeof value === 'object' && value !== null && typeof (value as { type?: unknown }).type === 'string';
 
+type Bash = Extract<SessionEvent, { kind: 'user.message' }>['bash'];
+
 // Bash-mode messages carry their command and output as tags (`<bash-input>`, `<bash-stdout>…<bash-exit-code>`).
-function parseBash(content: string): Extract<SessionEvent, { kind: 'user.message' }>['bash'] {
+function parseBash(content: string): Bash {
   const input = /^<bash-input>([\s\S]*?)<\/bash-input>/.exec(content);
   if (input) return { part: 'input', command: input[1] };
   const stdout = /<bash-stdout>([\s\S]*?)<\/bash-stdout>/.exec(content);
@@ -260,4 +284,42 @@ function parseBash(content: string): Extract<SessionEvent, { kind: 'user.message
   const stderr = /<bash-stderr>([\s\S]*?)<\/bash-stderr>/.exec(content);
   const exit = /<bash-exit-code>(-?\d+)<\/bash-exit-code>/.exec(content);
   return { part: 'output', stdout: stdout[1], stderr: stderr?.[1] ?? '', exitCode: exit ? Number(exit[1]) : 0 };
+}
+
+// C1's derivation rule: the tags are stripped from the content and `bash` is filled.
+function bashStripped(content: string, bash: Bash): string {
+  if (bash === null) return content;
+  if (bash.part === 'input') return bash.command;
+  return bash.stderr.length > 0 ? `${bash.stdout}\n${bash.stderr}` : bash.stdout;
+}
+
+interface TaskNotification {
+  taskId: string | null;
+  toolUseId: string | null;
+  status: 'completed' | 'failed' | 'stopped';
+  summary: string | null;
+  result: string | null;
+  outputFile: string | null;
+}
+
+// The engine's `<task-notification>` block (SPEC 20.9): the outcome of a background task, delivered as a user record.
+function parseTaskNotification(content: string): TaskNotification | null {
+  if (!content.trimStart().startsWith('<task-notification>')) return null;
+  const element = (name: string): string | null => {
+    const match = new RegExp(`<${name}>([\\s\\S]*?)</${name}>`).exec(content);
+    return match === null ? null : match[1].trim();
+  };
+  const status = element('status');
+  const outcome: TaskNotification['status'] =
+    status === 'failed' || status === 'error' ? 'failed'
+    : status === 'stopped' || status === 'killed' || status === 'cancelled' || status === 'interrupted' ? 'stopped'
+    : 'completed';
+  return {
+    taskId: element('task-id'),
+    toolUseId: element('tool-use-id'),
+    status: outcome,
+    summary: element('summary'),
+    result: element('result'),
+    outputFile: element('output-file'),
+  };
 }

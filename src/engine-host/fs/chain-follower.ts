@@ -379,9 +379,11 @@ export class ChainFollower {
       this.report('backfilling');
       try {
         const stat = await this.reader.stat();
+        if (this.stopped) return;
         if (stat !== null) {
           this.core.ino = stat.ino;
           await this.readForward(this.core, stat.size, true);
+          if (this.stopped) return;
         }
         this.flush(this.core);
         this.report('following');
@@ -396,6 +398,7 @@ export class ChainFollower {
       if (this.stopped) return;
       try {
         const stat = await this.reader.stat();
+        if (this.stopped) return;
         if (stat === null) return; // a file not there yet, or gone: wait for it
         const core = this.core;
         if (core.ino !== null && (stat.ino !== core.ino || stat.size < core.offset)) {
@@ -403,7 +406,10 @@ export class ChainFollower {
           return;
         }
         if (core.ino === null) core.ino = stat.ino;
-        if (stat.size > core.offset) await this.readForward(core, stat.size, false);
+        if (stat.size > core.offset) {
+          await this.readForward(core, stat.size, false);
+          if (this.stopped) return;
+        }
         this.flush(core);
         this.report('following');
       } catch (error) {
@@ -412,9 +418,13 @@ export class ChainFollower {
     });
   }
 
+  // Effective across awaits: work in flight finds `stopped` when its read resolves and delivers nothing; the skeleton
+  // and the materialised list are discarded.
   stop(): void {
     this.stopped = true;
     this.core = this.freshCore();
+    this.delivered.length = 0;
+    this.deliveredIds.clear();
     this.report('stopped');
   }
 
@@ -454,21 +464,25 @@ export class ChainFollower {
   private async readForward(core: FollowerCore, toSize: number, flushEachPage: boolean): Promise<void> {
     while (core.offset < toSize) {
       const chunk = await this.reader.read(core.offset, Math.min(PAGE_BYTES, toSize - core.offset));
-      if (chunk.length === 0) break;
+      if (this.stopped || chunk.length === 0) return;
       await core.consume(chunk);
+      if (this.stopped) return;
       if (flushEachPage) this.flush(core);
     }
   }
 
   // The file was rewritten (GC, tombstone removal, hydration, relocation): run a cold start into a fresh core with
-  // delivery suppressed, then reconcile. Old-chain records missing from the fresh chain are one retraction; fresh-chain
-  // records the old follower had not delivered are delivered in chain order; anchor- and line-derived events are
-  // delivered only under an id not seen before, so a trailing anchor keeps its cut without a second boundary.
+  // delivery suppressed, then reconcile the old delivered state against the fresh final state and nothing else.
+  // Old-chain records missing from the fresh chain are one retraction; fresh-chain records the old follower had not
+  // delivered are delivered in chain order. The fresh run's own anchor-, branch- and line-derived events describe
+  // history the consumer already holds (a rewrite that shifts an anchor's byte offset changes its id, not its
+  // meaning) and are never delivered.
   private async reload(stat: { ino: number; size: number }): Promise<void> {
     this.report('reloading');
     const fresh = this.freshCore();
     fresh.ino = stat.ino;
     await this.readForward(fresh, stat.size, false);
+    if (this.stopped) return;
     const old = this.core;
     const freshChain = new Set(fresh.chain);
     const retracted = old.chain.filter((uuid) => !freshChain.has(uuid));
@@ -486,9 +500,6 @@ export class ChainFollower {
     for (const uuid of fresh.chain) {
       if (!old.emitted.has(uuid)) events.push(...(byRecord.get(uuid) ?? []));
     }
-    for (const produced of fresh.out) {
-      if (produced.source === null && !this.deliveredIds.has(produced.event.id)) events.push(produced.event);
-    }
     fresh.out = [];
     this.core = fresh;
     this.deliver(events);
@@ -497,6 +508,7 @@ export class ChainFollower {
   }
 
   private flush(core: FollowerCore): void {
+    if (this.stopped) return;
     if (core.out.length > 0) {
       this.deliver(core.out.map((produced) => produced.event));
       core.out = [];
@@ -512,7 +524,7 @@ export class ChainFollower {
   }
 
   private deliver(events: SessionEvent[]): void {
-    if (events.length === 0) return;
+    if (this.stopped || events.length === 0) return;
     for (const event of events) {
       this.delivered.push(event);
       this.deliveredIds.add(event.id);
@@ -520,8 +532,10 @@ export class ChainFollower {
     for (let i = 0; i < events.length; i += BATCH_SIZE) this.sink({ t: 'events', events: events.slice(i, i + BATCH_SIZE) });
   }
 
-  // State is reported on every transition and whenever the chain's shape changed since the last report.
+  // State is reported on every transition and whenever the chain's shape changed since the last report; nothing
+  // after `stopped`.
   private report(state: FollowState, message: string | null = null): void {
+    if (this.stopped && state !== 'stopped') return;
     const core = this.core;
     const payload: FollowerEvent = { t: 'state', state, chainLength: core.chain.length, leafUuid: core.leaf, gap: core.gap, skippedLines: core.skippedLines, message };
     const key = JSON.stringify(payload);

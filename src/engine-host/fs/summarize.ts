@@ -58,12 +58,34 @@ export function summarize(
   };
 }
 
+// Whole lines in the window parse as records. A line cut by the window's edge (a first record longer than the head
+// window, a last record longer than the tail window) still yields its top-level string fields by a bounded
+// `"<key>":"…"` scan, standing in the window at the fragment's position, so a long first prompt does not lose the
+// session's directory. A bare `"key":"` cannot occur inside a JSON string value (its quotes are escaped there).
+const FRAGMENT_KEYS = ['type', 'uuid', 'cwd', 'version', 'gitBranch', 'entrypoint', 'timestamp', 'sessionId'] as const;
+
+function fragmentRecord(fragment: string): TranscriptRecord | null {
+  const fields: Record<string, string> = {};
+  for (const key of FRAGMENT_KEYS) {
+    const match = new RegExp(`"${key}":"((?:[^"\\\\]|\\\\.)*)"`).exec(fragment);
+    if (match === null) continue;
+    try {
+      fields[key] = JSON.parse(`"${match[1]}"`) as string;
+    } catch {
+      continue;
+    }
+  }
+  if (Object.keys(fields).length === 0) return null;
+  return { ...fields, type: fields.type ?? 'fragment' };
+}
+
 function parseWindow(text: string, edges: { dropFirst?: boolean; dropLast?: boolean }): TranscriptRecord[] {
   const lines = text.split('\n');
-  if (edges.dropFirst) lines.shift();
+  const leading = edges.dropFirst ? fragmentRecord(lines.shift() ?? '') : null;
   // The window ends either on a complete line followed by '\n' (an empty last element) or inside a line.
-  if (edges.dropLast || lines.at(-1) === '') lines.pop();
-  const records: TranscriptRecord[] = [];
+  const trailing = edges.dropLast ? fragmentRecord(lines.pop() ?? '') : null;
+  if (!edges.dropLast && lines.at(-1) === '') lines.pop();
+  const records: TranscriptRecord[] = leading === null ? [] : [leading];
   for (const raw of lines) {
     const line = raw.replace(/^\0+/, '');
     if (line.length === 0) continue;
@@ -76,6 +98,7 @@ function parseWindow(text: string, edges: { dropFirst?: boolean; dropLast?: bool
     const result = TranscriptRecordSchema.safeParse(parsed);
     if (result.success) records.push(result.data);
   }
+  if (trailing !== null) records.push(trailing);
   return records;
 }
 

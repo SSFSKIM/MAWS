@@ -65,8 +65,11 @@ describe('transcript records map to X1 events', () => {
     const messages = only(events, 'user.message');
     expect(messages[0]).toMatchObject({ messageUuid: 'u1', content: 'Remember APPLE.', isReplay: false, isSynthetic: false, origin: null, bash: null });
     expect(messages[1]).toMatchObject({ messageUuid: 'u2', isSynthetic: true });
+    // C1's derivation rule: the tags are stripped from the content and `bash` is filled.
     expect(messages[2].bash).toEqual({ part: 'input', command: 'printf OK' });
+    expect(messages[2].content).toBe('printf OK');
     expect(messages[3].bash).toEqual({ part: 'output', stdout: 'OK', stderr: 'warn', exitCode: 3 });
+    expect(messages[3].content).toBe('OK\nwarn');
     expect(only(events, 'turn.started').map((e) => e.userMessageUuid)).toEqual(['u1', 'u3', 'u4']);
   });
 
@@ -170,17 +173,62 @@ describe('subagent sidecars map to the X1 graph', () => {
     ]);
     expect(started[0]).toMatchObject({ description: 'Read and report one.txt content', subagentType: 'general-purpose', isBackground: true, spawnDepth: 1 });
     expect(started[0].prompt).toMatch(/^Read the file \/private\/tmp\/maws-probe-WmHZ2j\/one\.txt/);
+    // Both agents launched asynchronously: the tool_result is the launch acknowledgement, the <task-notification>
+    // user record later in the file is the completion.
     const finished = only(events, 'subagent.finished');
     expect(finished.map((e) => [e.taskId, e.status])).toEqual([['ad286defbc77bc090', 'completed'], ['ae75ba6ce5d866acc', 'completed']]);
-    expect(finished[0].summary).toMatch(/^Async agent launched successfully/);
-    expect(finished[0].summary?.length).toBeLessThanOrEqual(200);
-    expect(finished[0]).toMatchObject({ outputFile: null, reason: null });
-    // Every tool use of the parent is an Agent tool use with its result, and the order is use → started → result → finished.
+    expect(finished[0]).toMatchObject({
+      id: '937c424f-3731-4c6c-8d8d-8f70030cc243#2',
+      summary: 'ONE',
+      outputFile: '/private/tmp/claude-501/-private-tmp-maws-probe-WmHZ2j/9a1d4262-0b43-46ad-acb9-5982f31d209c/tasks/ad286defbc77bc090.output',
+      reason: null,
+    });
+    expect(finished[1].summary).toBe('TWO');
+    const notifications = only(events, 'user.message').filter((e) => e.origin === 'task-notification');
+    expect(notifications.map((e) => e.messageUuid?.slice(0, 8))).toEqual(['937c424f', 'f8189f73']);
+    expect(only(events, 'turn.started').filter((e) => e.origin === 'task-notification')).toHaveLength(2);
     const uses = only(events, 'tool.use');
     expect(uses.map((e) => e.toolName)).toEqual(['Agent', 'Agent']);
     const sequence = events.filter((e) => ['tool.use', 'subagent.started', 'tool.result', 'subagent.finished'].includes(e.kind)).map((e) => e.kind);
-    expect(sequence).toEqual(['tool.use', 'subagent.started', 'tool.result', 'subagent.finished', 'tool.use', 'subagent.started', 'tool.result', 'subagent.finished']);
+    expect(sequence).toEqual(['tool.use', 'subagent.started', 'tool.result', 'tool.use', 'subagent.started', 'tool.result', 'subagent.finished', 'subagent.finished']);
     for (const event of events) expect(event.seq).toBeNull();
+
+    // A transcript ending right after the launch acknowledgements has both agents still unfinished.
+    const launchOnly = createBackfillContext({ sessionId: '9a1d4262-0b43-46ad-acb9-5982f31d209c' as SessionId, agent: null, subagents: fixtureSubagents() });
+    const truncated = mapAll(chain.slice(0, chain.findIndex((r) => r.uuid?.startsWith('d199932b')) + 1), launchOnly);
+    expect(only(truncated, 'subagent.started')).toHaveLength(2);
+    expect(only(truncated, 'subagent.finished')).toEqual([]);
+  });
+
+  it('a task notification finishes the agent its tool-use id names, with the status mapped and the result as summary', () => {
+    const notification = (status: string, extra = '') =>
+      `<task-notification>\n<task-id>agent-1</task-id>\n<tool-use-id>toolu_a</tool-use-id>\n<output-file>/tmp/x/tasks/agent-1.output</output-file>\n<status>${status}</status>\n<summary>Agent "d" finished</summary>${extra}\n</task-notification>`;
+    const subagents: SubagentLookup = {
+      byToolUseId: (id) => (id === 'toolu_a' ? { agentId: 'agent-1' as AgentId, meta: { agentType: 'general-purpose', description: 'd', toolUseId: 'toolu_a', spawnDepth: 1, requestShape: 'background' }, prompt: null } : null),
+    };
+    const run = (status: string, extra?: string) => {
+      const ctx = createBackfillContext({ sessionId: SESSION, agent: null, subagents });
+      return mapAll([
+        rec({ type: 'user', uuid: 'u1', parentUuid: null, cwd: '/d', timestamp: at(0), message: { role: 'user', content: 'go' } }),
+        rec({ type: 'assistant', uuid: 'a1', parentUuid: 'u1', timestamp: at(1), message: { id: 'm', model: 'x', content: [{ type: 'tool_use', id: 'toolu_a', name: 'Agent', input: {} }] } }),
+        rec({ type: 'user', uuid: 'r1', parentUuid: 'a1', timestamp: at(2), toolUseResult: { isAsync: true, status: 'async_launched', agentId: 'agent-1' },
+          message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_a', content: 'Async agent launched successfully.' }] } }),
+        rec({ type: 'user', uuid: 'n1', parentUuid: 'r1', timestamp: at(3), message: { role: 'user', content: notification(status, extra) } }),
+        rec({ type: 'user', uuid: 'n2', parentUuid: 'n1', timestamp: at(4), message: { role: 'user', content: notification(status).replace('toolu_a', 'toolu_unknown') } }),
+      ], ctx);
+    };
+    const completed = run('completed', '\n<result>ALPHA</result>');
+    expect(only(completed, 'subagent.finished')).toHaveLength(1);
+    expect(only(completed, 'subagent.finished')[0]).toMatchObject({ id: 'n1#2', taskId: 'agent-1', status: 'completed', summary: 'ALPHA', outputFile: '/tmp/x/tasks/agent-1.output', reason: null });
+    expect(only(completed, 'user.message').map((e) => e.origin)).toEqual([null, 'task-notification', 'task-notification']);
+    expect(only(completed, 'turn.started').map((e) => e.origin)).toEqual([null, 'task-notification', 'task-notification']);
+    // A notification for a tool use nobody started is a message and a turn, nothing more.
+    expect(only(completed, 'user.message')[2].content).toContain('toolu_unknown');
+
+    const failed = run('failed');
+    expect(only(failed, 'subagent.finished')[0]).toMatchObject({ status: 'failed', summary: 'Agent "d" finished' }); // no <result>: the summary element
+    expect(only(run('killed'), 'subagent.finished')[0].status).toBe('stopped');
+    expect(only(run('something-new'), 'subagent.finished')[0].status).toBe('completed');
   });
 
   it('attributes every sidecar event to its agent and the parent tool use', () => {

@@ -101,6 +101,25 @@ describe('head and tail summary', () => {
     expect(empty.firstPrompt).toBeNull();
   });
 
+  it('a first record longer than the head window still yields its top-level string fields from the fragment', () => {
+    // 150 KB first user record with the session's facts before the long prompt; only its first 64 KiB reach the head.
+    const big = line({ parentUuid: null, type: 'user', uuid: 'u1', timestamp: '2026-09-28T10:00:00.000Z', cwd: '/private/tmp/long-prompt', sessionId: 'S', version: '2.1.283', gitBranch: 'topic', entrypoint: 'cli', message: { role: 'user', content: 'y'.repeat(150 * 1024) } });
+    const tailRecord = line({ type: 'assistant', uuid: 'a1', parentUuid: 'u1', timestamp: '2026-09-28T10:00:05.000Z', gitBranch: 'topic', message: { role: 'assistant', content: [{ type: 'text', text: 'done' }] } });
+    const whole = Buffer.from(big + tailRecord, 'utf8');
+    expect(whole.length).toBeGreaterThan(2 * HEAD_TAIL_BYTES);
+    const summary = summarize(headAndTail(whole).head, headAndTail(whole).tail, { size: whole.length, mtimeMs: 1 }, '/p/S.jsonl', '-p');
+    expect(summary.directory).toBe('/private/tmp/long-prompt');
+    expect(summary.engineVersion).toBe('2.1.283');
+    expect(summary.entrypoint).toBe('cli');
+    expect(summary.gitBranch).toBe('topic');
+    expect(summary.firstRecordAt).toBe('2026-09-28T10:00:00.000Z');
+    expect(summary.lastRecordAt).toBe('2026-09-28T10:00:05.000Z');
+    expect(summary.leafUuid).toBe('a1');
+    expect(summary.hasMessages).toBe(true);
+    // The fragment of the same record at the start of the tail is not mistaken for the leaf or a whole record.
+    expect(summary.lastAssistantText).toBe('done');
+  });
+
   it('ignores the partial line at the start of a tail window and at the end of a head window', () => {
     const first = line({ type: 'user', uuid: 'u1', parentUuid: null, cwd: '/d', timestamp: '2026-09-28T10:00:00.000Z', message: { role: 'user', content: 'hi' } });
     const middle = line({ type: 'ai-title', aiTitle: 'Torn by the window', sessionId: 'S' });
