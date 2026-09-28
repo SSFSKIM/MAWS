@@ -70,6 +70,16 @@ describe('shell event subscription', () => {
     expect(stores.sessions.getState().records.has(A)).toBe(false);
   });
 
+  it('keeps a session’s tabs when its removal is older than what the store knows', async () => {
+    const { fake, stores } = setup();
+    await answerSnapshots(fake); // session.list at revision 1
+    await vi.waitFor(() => expect(stores.layout.getState().hydrated).toBe(true));
+    fake.event('session.changed', { record: record('a'), cause: 'update', revision: 4 });
+    fake.event('session.removed', { appSessionId: 'a', revision: 3 });
+    expect(stores.sessions.getState().records.has(A)).toBe(true);
+    expect(stores.layout.getState().main.panes[0].tabs.map((t) => t.id)).toEqual(['overview', 'session:a']);
+  });
+
   it('ignores replies and events after disconnect', async () => {
     const { fake, stores, disconnect } = setup();
     disconnect();

@@ -25,8 +25,8 @@ export function connectShell(client: MawsBridge = ipc, stores: ShellStores = { s
   const offs = [
     on('session.changed', (e) => sessions().applyChanged(e)),
     on('session.removed', (e) => {
-      sessions().applyRemoved(e);
-      stores.layout.getState().dropSession(e.appSessionId);
+      // A stale removal (older than what the store knows) leaves the session, so its tabs stay too.
+      if (sessions().applyRemoved(e)) stores.layout.getState().dropSession(e.appSessionId);
     }),
     on('session.projects.changed', (e) => sessions().applyProjects(e)),
     on('session.digest', (d) => sessions().applyDigest(d)),

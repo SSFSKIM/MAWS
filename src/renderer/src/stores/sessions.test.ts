@@ -32,6 +32,34 @@ describe('sessions store reconciles snapshots with events by revision', () => {
     expect([...store.getState().records.keys()]).toEqual([]);
   });
 
+  it('does not resurrect a record a newer snapshot left out when its older change arrives late', () => {
+    const store = createSessionsStore();
+    store.getState().applyChanged({ record: titled('a', 'a'), cause: 'discovered', revision: 1 });
+    store.getState().applyList({ sessions: [], revision: 5 });
+    expect(store.getState().records.has(A)).toBe(false);
+    expect(store.getState().applyChanged({ record: titled('a', 'late'), cause: 'facts', revision: 2 })).toBe(false);
+    expect(store.getState().records.has(A)).toBe(false);
+  });
+
+  it('still takes per-record events newer than the snapshot, for held and new sessions alike', () => {
+    const store = createSessionsStore();
+    store.getState().applyList({ sessions: [titled('a', 'a')], revision: 5 });
+    expect(store.getState().applyChanged({ record: titled('a', 'renamed'), cause: 'update', revision: 6 })).toBe(true);
+    expect(store.getState().applyChanged({ record: titled('b', 'new'), cause: 'discovered', revision: 7 })).toBe(true);
+    expect(store.getState().applyChanged({ record: titled('a', 'older'), cause: 'update', revision: 6 })).toBe(false);
+    expect([...store.getState().records.values()].map((r) => r.title.text)).toEqual(['renamed', 'new']);
+  });
+
+  it('reports whether a removal was accepted, refusing one older than what it knows', () => {
+    const store = createSessionsStore();
+    store.getState().applyList({ sessions: [titled('a', 'a')], revision: 5 });
+    expect(store.getState().applyRemoved({ appSessionId: A, revision: 3 })).toBe(false);
+    expect(store.getState().records.has(A)).toBe(true);
+    expect(store.getState().applyRemoved({ appSessionId: B, revision: 4 })).toBe(false); // unknown and not newer than the snapshot
+    expect(store.getState().applyRemoved({ appSessionId: A, revision: 6 })).toBe(true);
+    expect(store.getState().records.has(A)).toBe(false);
+  });
+
   it('replaces the project list when the newer of snapshot and event says so', () => {
     const store = createSessionsStore();
     store.getState().applyProjects({ projects: [project('p2', 0)], revision: 7 });

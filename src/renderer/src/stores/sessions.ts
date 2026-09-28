@@ -4,7 +4,10 @@
 // Reconciliation keeps the higher revision (C1's rule). The record side carries one index-wide counter, so each record
 // remembers the revision that last wrote it, and a removal leaves a tombstone: a snapshot older than an event never
 // overwrites or resurrects what the event said, and a snapshot newer than a local record that it no longer lists
-// removes it. Digests carry a per-session revision; projects travel as a whole list with the index revision.
+// removes it. Absence from a snapshot is also a fact as of its revision: an event for a session the store does not hold
+// is taken only if it is newer than the latest snapshot, so a late change cannot resurrect what the snapshot dropped.
+// A held record's events are judged against that record's own revision alone, so the counter advancing elsewhere
+// rejects nothing. Digests carry a per-session revision; projects travel as a whole list with the index revision.
 import { create } from 'zustand';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
@@ -24,8 +27,8 @@ export interface SessionsState {
   projectsVersion: number;
   digestsVersion: number;
   applyList(snapshot: { sessions: SessionRecord[]; revision: number }): void;
-  applyChanged(event: EventPayload<'session.changed'>): void;
-  applyRemoved(event: EventPayload<'session.removed'>): void;
+  applyChanged(event: EventPayload<'session.changed'>): boolean; // whether it was newer than what the store knew
+  applyRemoved(event: EventPayload<'session.removed'>): boolean;
   applyProjects(list: { projects: ProjectRecord[]; revision: number }): void;
   applyDigests(digests: SessionDigest[]): void;
   applyDigest(digest: SessionDigest): void;
@@ -36,6 +39,11 @@ export interface SessionsState {
 export function createSessionsStore() {
   const recordRevs = new Map<AppSessionId, number>(); // revision that last wrote each record, or removed it
   let projectsRevision = -1;
+  let listRevision = -1; // the latest session.list snapshot applied
+  // The revision an event about a session must exceed to be news: a held record's own; for one not held, also the
+  // latest snapshot, whose silence about it is as new as the snapshot. (The counter is index-wide and bumped on every
+  // change, so no two events share a revision; an equal one is the same fact again.)
+  const known = (id: AppSessionId, held: boolean) => Math.max(recordRevs.get(id) ?? -1, held ? -1 : listRevision);
 
   return create<SessionsState>()((set, get) => {
     const writeRecords = (records: Map<AppSessionId, SessionRecord>, revision: number) =>
@@ -72,19 +80,24 @@ export function createSessionsStore() {
           recordRevs.set(r.appId, revision);
         }
         for (const id of [...records.keys()]) if (!listed.has(id) && (recordRevs.get(id) ?? -1) <= revision) records.delete(id);
+        listRevision = Math.max(listRevision, revision);
         writeRecords(records, revision);
       },
       applyChanged({ record, revision }) {
-        if ((recordRevs.get(record.appId) ?? -1) > revision) return;
+        if (revision <= known(record.appId, get().records.has(record.appId))) return false;
         recordRevs.set(record.appId, revision);
         writeRecords(new Map(get().records).set(record.appId, record), revision);
+        return true;
       },
       applyRemoved({ appSessionId, revision }) {
-        if ((recordRevs.get(appSessionId) ?? -1) > revision) return;
+        const held = get().records.has(appSessionId);
+        if (revision <= known(appSessionId, held)) return false;
         recordRevs.set(appSessionId, revision);
+        if (!held) return false; // nothing to remove; the tombstone still guards against a late change
         const records = new Map(get().records);
         records.delete(appSessionId);
         writeRecords(records, revision);
+        return true;
       },
       applyProjects({ projects, revision }) {
         if (revision < projectsRevision) return;
