@@ -47,6 +47,22 @@ export function bashPartOf(content: string | ContentBlock[]): BashPart | null {
   return null;
 }
 
+// Engine-authored `user` frames that are not a human prompt and must never read as one downstream (coordinator
+// correction after M2): the `<local-command-stdout>` echo after a slash command such as `set_model` (`pass2/auto-routed`
+// seq 153; the content becomes the tag's inner text) and the `[Request interrupted by user]` marker after an interrupt
+// (`pass2/per-task-stop-on` seq 65; `… for tool use` in `per-task-stop-off` seq 71). Null for every other frame.
+export type EngineUserMarker = { origin: 'local-command'; content: string } | { origin: 'interrupt-marker'; content: string | ContentBlock[] };
+const LOCAL_COMMAND_STDOUT = /^<local-command-stdout>([\s\S]*)<\/local-command-stdout>\s*$/;
+const INTERRUPT_MARKER = /^\[Request interrupted by user[^\]]*\]$/;
+export function engineUserMarkerOf(content: string | ContentBlock[]): EngineUserMarker | null {
+  const text = typeof content === 'string' ? content : content.length === 1 && content[0]!.type === 'text' && typeof content[0]!.text === 'string' ? content[0]!.text : null;
+  if (text === null) return null;
+  const local = LOCAL_COMMAND_STDOUT.exec(text);
+  if (local) return { origin: 'local-command', content: local[1]! };
+  if (INTERRUPT_MARKER.test(text.trim())) return { origin: 'interrupt-marker', content };
+  return null;
+}
+
 export function denialKindOf(kind: string | undefined): DenialKind | 'unknown' | null {
   if (kind === undefined) return null;
   return (DENIAL_KINDS as readonly string[]).includes(kind) ? (kind as DenialKind) : 'unknown';

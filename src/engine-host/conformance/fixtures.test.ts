@@ -274,8 +274,14 @@ describe('normaliser: per-fixture graph facts (C2 findings restated)', () => {
     expect(ends[0]).toMatchObject({ terminalReason: 'aborted_streaming' });
     expect(ofKind(events, 'tool.result').filter((r) => seq(r) < seq(ends[0]) && r.denial === 'user-rejected')).toHaveLength(1);
     expect(ofKind(events, 'task.notification').find((e) => seq(e) > seq(ends[0]))).toMatchObject({ status: 'completed' });
-    // the engine's own "[Request interrupted by user]" user frame is a plain user.message
-    expect(ofKind(events, 'user.message').find((e) => e.seq === 65)).toMatchObject({ isReplay: false, isSynthetic: false, bash: null });
+    // the engine's own "[Request interrupted by user]" user frame carries its own origin, never a human prompt's
+    expect(ofKind(events, 'user.message').find((e) => e.seq === 65)).toMatchObject({ origin: 'interrupt-marker', isReplay: false, isSynthetic: false, bash: null });
+  });
+
+  it('pass2/auto-routed: the local-command echo after set_model carries its own origin and the tag\'s inner text', async () => {
+    const { events } = await run('pass2', 'auto-routed');
+    expect(ofKind(events, 'user.message').find((e) => e.seq === 153)).toMatchObject({ origin: 'local-command', content: 'Set model to `haiku (claude-haiku-4-5-20251001)`', isReplay: true, bash: null });
+    expect(ofKind(events, 'turn.started').some((e) => e.seq === 153)).toBe(false);
   });
 
   it('typed responses: trust-attested workspace_trust_recorded, prewarm claim_session, get_status base URL row', async () => {

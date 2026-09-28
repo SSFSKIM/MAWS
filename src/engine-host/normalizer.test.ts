@@ -106,6 +106,20 @@ describe('normaliser: ids, turns and the human prompt bubble', () => {
     expect(events[0]).toMatchObject({ kind: 'user.message', bash: { part: 'input', command: 'printf X' }, content: 'printf X', isReplay: true });
     expect(events[1]).toMatchObject({ kind: 'user.message', bash: { part: 'output', stdout: 'X', stderr: 'e', exitCode: 3 }, content: 'X' });
   });
+
+  it('engine-authored local-command output and interrupt markers carry their own origins and open nothing', () => {
+    const n = make();
+    const events = feed(n, [
+      inRow({ type: 'user', uuid: 'l-1', session_id: 'sess-1', isReplay: true, message: { role: 'user', content: '<local-command-stdout>Set model to `haiku`</local-command-stdout>' } }),
+      inRow({ type: 'user', uuid: 'm-1', session_id: 'sess-1', message: { role: 'user', content: [{ type: 'text', text: '[Request interrupted by user]' }] } }),
+      inRow({ type: 'user', uuid: 'm-2', session_id: 'sess-1', message: { role: 'user', content: [{ type: 'text', text: '[Request interrupted by user for tool use]' }] } }),
+    ]);
+    expect(kinds(events)).toEqual(['user.message', 'user.message', 'user.message']);
+    expect(events[0]).toMatchObject({ messageUuid: 'l-1', origin: 'local-command', content: 'Set model to `haiku`', isReplay: true, bash: null });
+    expect(events[1]).toMatchObject({ messageUuid: 'm-1', origin: 'interrupt-marker', content: [{ type: 'text', text: '[Request interrupted by user]' }], bash: null });
+    expect(events[2]).toMatchObject({ messageUuid: 'm-2', origin: 'interrupt-marker' });
+    expect(n.state.currentTurn).toBeNull();
+  });
 });
 
 describe('normaliser: tools, blocks and safeguards', () => {
