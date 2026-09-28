@@ -20,7 +20,7 @@
     "build:app": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dir",
     "verify": "pnpm typecheck && pnpm lint && pnpm test && pnpm build && pnpm e2e && pnpm build:app && pnpm e2e:packaged",
     "rebuild:native": "electron-rebuild -f -w node-pty",
-    "postinstall": "chmod +x node_modules/node-pty/prebuilds/darwin-arm64/spawn-helper"
+    "postinstall": "chmod +x node_modules/node-pty/prebuilds/darwin-arm64/spawn-helper && install-electron"
   },
   "dependencies": {
     "node-pty": "1.1.0",
