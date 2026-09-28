@@ -68,7 +68,8 @@ Status: approved by the owner on 2026-09-28 after one critique round and the pro
 ### P1
 
 - File editor tab (CodeMirror 6) and editable merge view.
-- Source control panel (stage, discard, commit, push, PR from a session's worktree).
+- Source control panel (stage, discard, commit, push, PR from a session's worktree); the summary's pull-request status and checks arrive here (owner, 2026-09-28).
+- MAWS-integrated SendUserFile: MAWS's own path for an agent to deliver a file into the right panel, in place of the engine tool that is disabled under the SDK entrypoint; the sandboxed PDF and HTML frame in the file viewer (owner, 2026-09-28).
 - Bottom dock for the auxiliary panel host (terminal drawer).
 - Browser panel as a separate WebContentsView with target-restricted automation and human takeover.
 - Side chat (`/btw`), Tasks panel (TaskCreate lists), cross-session messaging and teams, scheduled loops.
