@@ -23,7 +23,14 @@ const fake = vi.hoisted(() => {
   return { listeners, windows, hosts, app, emit, createWindow: vi.fn(() => void windows.push({})) };
 });
 
-vi.mock('electron', () => ({ app: fake.app, BrowserWindow: { getAllWindows: () => fake.windows } }));
+vi.mock('electron', () => {
+  const display = { workArea: { x: 0, y: 0, width: 1440, height: 900 } };
+  return {
+    app: fake.app,
+    BrowserWindow: { getAllWindows: () => fake.windows },
+    screen: { getAllDisplays: () => [display], getPrimaryDisplay: () => display },
+  };
+});
 vi.mock('./hosts', () => ({ createHosts: () => fake.hosts }));
 vi.mock('./ipc/router', () => ({ installRouter: vi.fn(), registerMainHandler: vi.fn() /* C3 */ }));
 // C3 start: main's attention service and its store, started from index.ts, are replaced like the other wired modules
@@ -46,9 +53,11 @@ vi.mock('./git/service', () => ({ GitService: class { dispose = git.dispose; } }
 vi.mock('./git/register', () => ({ registerGitHandlers: () => void (git.registered += 1) }));
 // end C4
 // C5 start: the layout store, the external-link command and the read side
-vi.mock('./layout/store', () => ({ LayoutFileStore: class { flush() {} }, registerLayoutHandlers: vi.fn() }));
+vi.mock('./layout/store', () => ({ LayoutFileStore: class { flush() {} get() { return null; } set() {} }, registerLayoutHandlers: vi.fn() }));
 vi.mock('./open-external', () => ({ registerOpenExternal: vi.fn() }));
 vi.mock('./sessions', () => ({ startSessions: () => ({ stop: vi.fn() }) }));
+vi.mock('./menu', () => ({ startMenu: vi.fn(), registerMenuHandlers: vi.fn() }));
+vi.mock('./window-state', () => ({ restoreWindowState: vi.fn(() => null), trackWindowState: vi.fn() }));
 // C5 end
 
 beforeAll(async () => {

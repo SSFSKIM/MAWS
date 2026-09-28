@@ -39,12 +39,13 @@ describe('layout value shapes', () => {
     expect(LayoutMainSchema.safeParse({ ...LAYOUT_DEFAULTS.main, panes: [pane, pane] }).success).toBe(true);
   });
 
-  it('owns get, set, list and openExternal in main', () => {
+  it('owns get, set, list, openExternal and setEnabledActions in main', () => {
     expect(Object.fromEntries(Object.entries(commands).map(([name, spec]) => [name, spec.owner]))).toEqual({
       'layout.get': 'main',
       'layout.set': 'main',
       'layout.list': 'main',
       'layout.openExternal': 'main',
+      'layout.setEnabledActions': 'main',
     });
   });
 });

@@ -2,7 +2,8 @@
 // main's through `layout.*`). The four persisted keys plus transient drag and focus state. The tab and pane transitions
 // are the pure functions of `layout-model.ts`; this store holds their result. Hydration reads each key, validates it
 // against C5's shapes (an absent or invalid value falls back to its default) and repairs `main.tabs` against the
-// sessions that exist. Writing changed keys back through `layout.set` is M2's subscription.
+// sessions that exist. `persistLayout` writes each changed key back through `layout.set`, 250 ms after its last change
+// and on `beforeunload`.
 import { create } from 'zustand';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
@@ -50,6 +51,9 @@ export interface LayoutState {
   setSidebar(patch: Partial<LayoutRegions['sidebar']>): void;
   setPanel(patch: Partial<LayoutRegions['panel']>): void;
   setPanelTabPinned(appSessionId: AppSessionId, tabId: string, pinned: boolean): void;
+  // The panel host's `onChange` (PanelHostProps): pinned refs go to `panel.pinned` (D-10), the rest to the session's own
+  // key; with no session only the pins are kept.
+  setPanelTabs(appSessionId: AppSessionId | null, next: PanelSessionState): void;
   effectivePanelTabs(appSessionId: AppSessionId | null): PanelTabRef[]; // panelPinned first, then the session's own
   setDragging(dragging: LayoutState['dragging']): void;
   focusCard(appSessionId: AppSessionId | null): void;
@@ -157,6 +161,16 @@ export function createLayoutStore() {
           set({ panelPinned: get().panelPinned.filter((t) => t.id !== tabId), panelBySession });
         }
       },
+      setPanelTabs(appSessionId, next) {
+        const panelPinned = next.tabs.filter((t) => t.pinned);
+        if (appSessionId === null) {
+          set({ panelPinned });
+          return;
+        }
+        const panelBySession = new Map(get().panelBySession);
+        panelBySession.set(appSessionId, { tabs: next.tabs.filter((t) => !t.pinned), activeTabId: next.activeTabId });
+        set({ panelPinned, panelBySession });
+      },
       effectivePanelTabs(appSessionId) {
         const own = appSessionId === null ? [] : (get().panelBySession.get(appSessionId)?.tabs ?? []);
         return [...get().panelPinned, ...own];
@@ -168,3 +182,61 @@ export function createLayoutStore() {
 }
 
 export const useLayout = createLayoutStore();
+
+// ---- persistence ------------------------------------------------------------------------------------------------------
+
+export const LAYOUT_WRITE_DELAY_MS = 250;
+
+// Each persisted key and the state slice it holds; a slice is replaced (never mutated) when it changes.
+function persistedKeys(state: LayoutState): Map<LayoutKey, unknown> {
+  const keys = new Map<LayoutKey, unknown>([
+    ['regions', state.regions],
+    ['main.tabs', state.main],
+    ['panel.pinned', state.panelPinned],
+  ]);
+  for (const [id, panel] of state.panelBySession) keys.set(`panel.${id}`, panel);
+  return keys;
+}
+
+// Writes each changed key through `layout.set`, 250 ms after that key's last change, and every pending key at once on
+// `beforeunload` and on stop. Nothing is written before hydration (the persisted values are not known yet, so a write
+// would clobber them) or for hydration itself.
+export function persistLayout(client: MawsBridge, store = useLayout): () => void {
+  const pending = new Map<LayoutKey, { timer: ReturnType<typeof setTimeout>; value: unknown }>();
+  let written: Map<LayoutKey, unknown> | null = store.getState().hydrated ? persistedKeys(store.getState()) : null;
+
+  const write = (key: LayoutKey, value: unknown) => {
+    void client.invoke('layout.set', { key, value }).then((result) => {
+      if (!result.ok) console.error(`[layout] layout.set ${key} failed`, result.error);
+    });
+  };
+  const schedule = (key: LayoutKey, value: unknown) => {
+    const before = pending.get(key);
+    if (before) clearTimeout(before.timer);
+    const timer = setTimeout(() => {
+      pending.delete(key);
+      write(key, value);
+    }, LAYOUT_WRITE_DELAY_MS);
+    pending.set(key, { timer, value });
+  };
+  const flush = () => {
+    for (const [key, { timer, value }] of pending) {
+      clearTimeout(timer);
+      write(key, value);
+    }
+    pending.clear();
+  };
+
+  const unsubscribe = store.subscribe((state) => {
+    if (!state.hydrated) return;
+    const now = persistedKeys(state);
+    if (written) for (const [key, value] of now) if (written.get(key) !== value) schedule(key, value);
+    written = now;
+  });
+  window.addEventListener('beforeunload', flush);
+  return () => {
+    unsubscribe();
+    window.removeEventListener('beforeunload', flush);
+    flush();
+  };
+}

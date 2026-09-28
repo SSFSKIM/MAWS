@@ -19,6 +19,12 @@ const toRef = (target: TabTarget): TabRef => {
 // The pane at an index the caller knows exists (the focused pane, or one `locate` found).
 const paneAt = (main: LayoutMain, pane: Pane): PaneState => main.panes[pane] as PaneState;
 
+// The active tab of the focused pane: what the toolbar titles and the right panel follows.
+export function activeTab(main: LayoutMain): TabRef | null {
+  const pane = main.panes[main.focusedPane] ?? main.panes[0];
+  return pane.tabs.find((t) => t.id === pane.activeTabId) ?? null;
+}
+
 function locate(main: LayoutMain, id: string): { pane: Pane; index: number } | null {
   for (const pane of [0, 1] as const) {
     const index = main.panes[pane]?.tabs.findIndex((t) => t.id === id) ?? -1;

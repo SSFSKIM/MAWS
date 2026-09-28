@@ -74,6 +74,9 @@ function fakeMain(initial: SettingsState['settings']['theme']) {
         return { keys: [] };
       case 'layout.get':
         return { value: null };
+      case 'layout.set':
+      case 'layout.setEnabledActions':
+        return undefined;
       // C5 end
       case 'pty.spawn':
         return { ptyId: 'p1', pid: 3333 };
