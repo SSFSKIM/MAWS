@@ -350,7 +350,7 @@ describe('plan outcomes map to the wire', () => {
     expect(userRows).toEqual(['plan it', '/clear', 'Implement this plan:\n\n# Plan\n1. do it']);
   });
 
-  it('the pre-plan mode is captured from any source, including the initialize response, and falls back to default', async () => {
+  it('the pre-plan mode is captured on a transition into plan from any source; a process that starts in plan has none', async () => {
     const planInit = setup({ responder: defaultResponder({ initialize: () => ({ response: { ...INIT_RESPONSE, current_permission_mode: 'plan' } }) }) });
     await planInit.session.start();
     expect(planInit.session.status()).toMatchObject({ permissionMode: { effective: 'plan' }, prePlanMode: null });
