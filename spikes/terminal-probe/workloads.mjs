@@ -88,8 +88,10 @@ export const AUTOMATED_MEASUREMENTS = ['W1', 'W2', 'W3', 'width', 'latency'];
 
 // The transport gate closing M2 (item 9 judged): the three floods at full size on the binary stream with acks. Each
 // passes when its output bytes and line feeds are exact (checked by the page), its last line is right, its frame p95
-// is at most 50 ms; MB/s is recorded against a floor (below it is a finding, not a switch).
-export const GATE_MEASUREMENTS = ['W1', 'W2', 'W3'];
+// is at most 50 ms; MB/s is recorded against a floor (below it is a finding, not a switch). Input echo latency
+// (item 16) is re-measured on the same transport, since the host now coalesces reads: p95 at most 30 ms.
+export const GATE_MEASUREMENTS = ['W1', 'W2', 'W3', 'latency'];
+export const GATE_ECHO_P95_MS = 30;
 export const GATE_CRITERIA = {
   // 50,000,000 bytes of 55-byte lines end 50 bytes into a line
   W1: { lastLine: (line) => line === 'the quick brown fox jumps over the lazy dog 012345', floorMBps: 5 },

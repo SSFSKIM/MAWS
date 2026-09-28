@@ -47,14 +47,14 @@ closes M2 (items 6 browser half and 9 pass/fail), whose results are recorded in 
 | 6 | Hyperlinks | OSC 8 `printf` and a bare `https://example.org`, ⌘-clicked; at the gate also an OSC 8 `javascript:alert(1)` link, and `pty.openLink` with that URL invoked from the page | M1 half: the adapter's link handler fired with `https://example.com` and `https://example.org`, exact, shown in the debug strip; nothing opened. The delivered event is `mouseup` with `metaKey false` under Playwright's `click({ modifiers: ['Meta'] })` (xterm activates on a plain click; the ⌘ requirement is the registry's, M3). **M2 gate** (three runs, identical): both clicks reached main through `pty.openLink`, which answered `opened: true`, and main's `shell.openExternal` (stubbed through `electronApp.evaluate` to record instead of open) received exactly `https://example.com` and `https://example.org`. The `javascript:` OSC 8 link never activated: xterm 6.0.0 drops an OSC 8 link whose scheme is not http(s) unless `linkHandler.allowNonHttpProtocols` is set (`OscLinkProvider.ts` lines 71 to 81), so the text draws with the OSC 8 underline and a click does nothing; `pty.openLink` invoked with it over the real IPC path answered `{ ok: true, value: { opened: false } }` (the schema accepts the URL, main's scheme check refuses it). **Browser open not observed**: the stub replaced the one call that opens it, by design of an unattended run; the real ⌘-click into the default browser is M5's by hand. | **pass** (M1 half); **pass** (M2 gate: through `pty.openLink` to `shell.openExternal`, the browser itself pending the owner at M5) | `xterm-06-links.png`, `xterm-06-links-m2-gate.png`; `results/xterm-items.json` (`links`), `results/xterm-links-m2-gate.json` |
 | 7 | Scrollback | `seq 1 20000` at the prompt, wheel to the top | Buffer holds exactly 10,040 lines (10,000 + 40 rows); the first line is `9962` (the document's formula gives 9961: the final prompt row occupies one buffer line, so one more `seq` line scrolled out). Wheel scroll reaches the top. After `claude` exits, none of its frames are in scrollback. | **pass** (M1) | `xterm-07-scrollback-top.png`; `results/xterm-items.json` (`scrollback`) |
 | 8 | Resize and reflow | pane divider dragged to 30 % and back with a shell, and while `claude` and `codex` run; `stty size` after | Shell: `stty size` reads `36 54` at 30 % and `40 93` back, matching the pane both times. Claude relaid out to 58×39 with the frame whole; codex likewise. Wrapped shell lines reflow. | **pass** (M1) | `xterm-08-claude-resized.png`, `xterm-08-claude-resized-back.png`, `xterm-08-codex-resized*.png`; `results/xterm-items.json` (`resize`) |
-| 9 | Sustained output | M1: W1, W2, W3 at 20 MB of output. **M2 gate**: the full workloads, W1 `yes … \| head -c 50000000`, W2 `base64 … \| head -c 50000000`, W3 `seq -f '%.0f' 1 20000000` (168,888,897 output bytes), `/bin/sh -c` as the pty's program, on the binary stream with acks | M1: every run received exactly the program's 20,000,000 output bytes and the expected line feeds; the last line is right (`2638888` for W3). **Gate, three consecutive runs**: every run received exactly 50,000,000 / 50,000,000 / 168,888,897 output bytes and 909,090 / 413,223 / 20,000,000 line feeds (W3's surplus CRs: 17, 4 and 6, the tty's, tolerated and reported); last lines `the quick brown fox jumps over the lazy dog 012345` (50 bytes into a 55-byte line), 17 base64 characters, `20000000`; buffer 10,040 lines (10,000 + 40 rows); frame p95 9.1 to 9.3 ms, max 9.4 ms, 0 frames over 33 ms, 0 long tasks; 17.6 to 19.3 MB/s (W1), 21.5 to 23.0 (W2), 7.8 to 8.2 (W3). The host paused the pty (`pty.list` sampled every 20 ms) in every W1 and W2 run of the three and in one W3 run of four (the fourth an instrumented run just before). No throw, no drop, no `write data discarded`. | **informational** (M1); **pass** (M2 gate: counts exact, last line right, p95 ≤ 50 ms, W1 and W2 above their 5 and 10 MB/s floors) | `xterm-09-W3-end.png`; `results/xterm-W{1,2,3}.json` (gate, the third run), `results/xterm-W{1,2,3}-m1.json` (M1) |
+| 9 | Sustained output | M1: W1, W2, W3 at 20 MB of output. **M2 gate**: the full workloads, W1 `yes … \| head -c 50000000`, W2 `base64 … \| head -c 50000000`, W3 `seq -f '%.0f' 1 20000000` (168,888,897 output bytes), `/bin/sh -c` as the pty's program, on the binary stream with acks | M1: every run received exactly the program's 20,000,000 output bytes and the expected line feeds; the last line is right (`2638888` for W3). **Gate, three consecutive runs** (host coalescing reads, every pty with IUTF8): every run received exactly 50,000,000 / 50,000,000 / 168,888,897 output bytes and 909,090 / 413,223 / 20,000,000 line feeds (W3's surplus CRs: 6, 1 and 8, the tty's, tolerated and reported); last lines `the quick brown fox jumps over the lazy dog 012345` (50 bytes into a 55-byte line), 17 base64 characters, `20000000`; buffer 10,040 lines (10,000 + 40 rows); frame p95 9.7 to 10.1 ms, max 10.5 ms, 0 frames over 33 ms, 0 long tasks; 35.2 to 47.3 MB/s (W1), 44.3 to 46.3 (W2), 9.5 to 9.7 (W3). The host paused the pty (`pty.list` sampled every 20 ms) in every W1 run, one W2 run and no W3 run. No throw, no drop, no `write data discarded`. (The same gate before coalescing, also passed: 17.6 to 19.3, 21.5 to 23.0 and 7.8 to 8.2 MB/s; see the gate measurements.) | **informational** (M1); **pass** (M2 gate: counts exact, last line right, p95 ≤ 50 ms, W1 and W2 far above their 5 and 10 MB/s floors) | `xterm-09-W3-end.png`; `results/xterm-W{1,2,3}.json` (gate, the third coalesced run), `results/xterm-W{1,2,3}-m1.json` (M1) |
 | 10 | Sleep and resume | `simulateContextLoss` (WEBGL_lose_context); `pmset sleepnow` | Context loss: `webgl` → `dom` in 3.0 s (the addon's own restore wait), the buffer intact, `echo after-loss-ok` answered, hide-and-show returned `webgl`. **`pmset sleepnow` is pending the owner's manual run at M5.** | **pass on simulated loss; sleep pending owner (M5)** | `xterm-10-after-context-loss.png`; `results/xterm-items.json` (`contextLoss`) |
 | 11 | Both TUIs, end to end | one "count to 20" conversation in each, from the probe's shell in the scratch cwd | Both start, draw, stream the answer, take input and exit cleanly; claude's frame, composer and status bars are whole throughout; codex's welcome box, tip and transcript draw without misalignment. | **pass** (M1) | `xterm-11-claude-frame.png`, `xterm-11-claude-streamed.png`, `xterm-11-codex-frame.png`, `xterm-11-codex-streamed.png`; `recordings/{claude,codex}.rec` |
 | 12 | Mouse wheel over `claude` (research) | wheel up 300 px and back over the TUI (mouse tracking `any`) | No `CSI < … M` sequences in any buffer line, composer clean. Same over codex. | **pass** (M1) | `xterm-12-claude-after-wheel.png`, `xterm-12-codex-after-wheel.png`; `results/xterm-tui-*.json` (`wheel`) |
 | 13 | Codex scroll-region inserts (research) | `codex` in its default (inline) mode, one turn of history; plus a synthetic DECSTBM + IL/DL screen | No gaps in codex's transcript; the synthetic scroll-region screen matches its expected nine rows exactly. Codex 0.155.1 was run in its default mode only; the 20-turn stress was not bought (one turn per TUI was the budget). | **pass on what was observed** (M1) | `xterm-13-scroll-region.png`, `xterm-11-codex-streamed.png`; `results/xterm-scroll-region.json` |
 | 14 | Kitty keyboard (research) | start each TUI; Shift+Enter, ⌥←, ⌃← through `cat` | Both TUIs sent `CSI ? u`; xterm 6.0.0 never answered (no `CSI ? flags u` seen on the input side), so both fell back to legacy keys. Shift+Enter arrives as `\r` (plain Enter), ⌥← as `CSI 1;3 D`, ⌃← as `CSI 1;5 D`. | **recorded** (informational) | `results/xterm-items.json` (`keys`), `results/xterm-tui-*.json` (`startup.kitty*`) |
 | 15 | Bytes and CSP (research) | console under the harness CSP | Not applicable to xterm (no WASM). | — | `results/smoke.json` |
-| 16 | Input echo latency (measurement) | `cat`, 100 single characters | p50 0.3 ms, p95 1.0 ms, max 4.9 ms (typed through `pty.write`, echoed by the tty, polled through `probe().line()`). | **recorded**; p95 ≤ 30 ms | `results/xterm-latency.json` |
+| 16 | Input echo latency (measurement) | `cat`, 100 single characters, each typed as soon as the previous echo is parsed | M1: p50 0.3 ms, p95 1.0 ms, max 4.9 ms (typed through `pty.write`, echoed by the tty, polled through `probe().line()`). M2 gate, on the coalescing host: p95 5.8, 5.8, 5.7 ms in three runs (p50 5.4, max 8.8): back-to-back keystrokes fall inside the host's 5 ms coalescing window; keystrokes 20 ms apart echo at p95 0.57 ms host-side (see the gate measurements). | **recorded**; p95 ≤ 30 ms (both phases) | `results/xterm-latency-m1.json` (M1), `results/xterm-latency.json` (M2 gate) |
 
 ## ghostty (`ghostty-web` 0.4.0-next.20.g1858a59)
 
@@ -111,34 +111,41 @@ The M1 flood files are kept as `results/xterm-W{1,2,3}-m1.json`; `results/xterm-
 
 ## Measurements (M2 transport gate, binary stream with acks, full workloads; xterm)
 
-Three consecutive runs of `run.mjs --phase m2-gate` on the M2 head (load average about 9 throughout: other sessions
-shared this Mac). Every run: output bytes and line feeds exact, the last line right, frame p95 within 50 ms, 0 long
-tasks, 0 blocked input events, heap 54 MB. "Paused" is whether `pty.list`, sampled every 20 ms during the run, ever
-reported the pty paused (the host's flow control engaged). The stream columns are from the third run's result files.
+The judged runs: three consecutive runs of `run.mjs --phase m2-gate` on the M2 head after the host began coalescing
+reads (a read after 5 ms of quiet is emitted on the next turn, reads inside the window are batched, 64 KiB flushes
+at once) and began starting every pty with IUTF8; load average 6.9 to 8.3 (other sessions shared this Mac). Every
+run: output bytes and line feeds exact, the last line right, frame p95 within 50 ms (max 10.5 ms), 0 frames over
+33 ms, 0 long tasks, 0 blocked input events, heap 51 MB. "Paused" is whether `pty.list`, sampled every 20 ms during
+the run, ever reported the pty paused. The stream columns are from the third run's result files
+(`results/xterm-W{1,2,3}.json`, `results/xterm-latency.json`).
 
-| Workload | Output bytes | Line feeds | Extra CR (runs 1, 2, 3) | Seconds (runs) | MB/s, PTY bytes (runs) | Frame p95 ms (runs) | Frames > 50 ms | Paused (runs) | `pty.data` events / average bytes (run 3) | Acks (run 3) | Max unparsed / unacknowledged at the page (run 3) | Gate |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| W1 `yes … \| head -c 50000000` | 50,000,000 | 909,090 | 0, 0, 0 | 2.64, 2.89, 2.81 | 19.27, 17.60, 18.12 (floor 5) | 9.3, 9.1, 9.2 | 0 | yes, yes, yes | 60,456 / 842 | 1,531 | 144 KB / 156 KB | **pass** |
-| W2 `base64 -b 120 -i /dev/urandom \| head -c 50000000` | 50,000,000 | 413,223 | 0, 0, 0 | 2.32, 2.19, 2.35 | 21.72, 22.99, 21.50 (floor 10) | 9.3, 9.3, 9.1 | 0 | yes, yes, yes | 55,128 / 914 | 1,516 | 174 KB / 204 KB | **pass** |
-| W3 `seq -f '%.0f' 1 20000000` | 168,888,897 | 20,000,000 | 17, 4, 6 | 24.14, 23.01, 23.82 | 7.83, 8.21, 7.93 (no floor) | 9.3, 9.3, 9.3 | 0 | yes, no, no | 657,763 / 287 | 5,734 | 90 KB / 90 KB | **pass** |
+| Workload | Output bytes | Line feeds | Extra CR (runs 1, 2, 3) | Seconds (runs) | MB/s, PTY bytes (runs) | Frame p95 ms (runs) | Paused (runs) | `pty.data` events / average bytes (run 3) | Acks (run 3) | Max unparsed / unacknowledged at the page (run 3) | Gate |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| W1 `yes … \| head -c 50000000` | 50,000,000 | 909,090 | 0, 0, 0 | 1.08, 1.36, 1.45 | 47.28, 37.39, 35.16 (floor 5) | 9.7, 9.7, 10.1 | yes, yes, yes | 775 / 65,689 | 772 | 133 KB / 133 KB | **pass** |
+| W2 `base64 -b 120 -i /dev/urandom \| head -c 50000000` | 50,000,000 | 413,223 | 0, 0, 0 | 1.09, 1.14, 1.11 | 46.28, 44.29, 45.33 (floor 10) | 10.1, 10.0, 9.9 | yes, no, no | 767 / 65,728 | 764 | 132 KB / 132 KB | **pass** |
+| W3 `seq -f '%.0f' 1 20000000` | 168,888,897 | 20,000,000 | 6, 1, 8 | 19.57, 19.85, 19.55 | 9.65, 9.52, 9.66 (no floor) | 9.9, 9.9, 9.8 | no, no, no | 4,883 / 38,683 | 4,778 | 116 KB / 116 KB | **pass** |
 
-Two instrumented runs just before these (while the page's counters were being added) read W1 16.63 and 18.81 MB/s,
-W2 21.38 and **9.54** MB/s, W3 7.40 and 8.07 MB/s, all with exact counts and p95 at or under 9.3 ms: W2 dipped under
-its 10 MB/s floor once under the same load, a finding recorded here and not a switch (the execution document's rule),
-and not reproduced in the three runs above. Compared with M1's string transport at 20 MB (13.6 / 22.0 / 7.8 MB/s), the
-binary stream with acks runs at the same speed or better while the floods are 2.5 to 8.4 times longer and nothing
-could pile up past 256 KiB unacknowledged.
+Input echo latency (item 16) on the same transport, `cat`, 100 characters each typed the moment the previous echo
+was parsed: p95 5.8, 5.8 and 5.7 ms (run 3: p50 5.4, max 8.8), within the 30 ms bound (**pass**). The rise from M1's
+p50 0.3 ms is the coalescing window, reached only because the sampler types back to back: measured host-side through
+the table (a scratch test under Node, not committed), back-to-back keystrokes echo at p50 5.14 / p95 6.10 ms while
+keystrokes 20 ms apart, slower than any human typing or key repeat, echo at p50 0.15 / p95 0.57 ms.
 
-What limits throughput, measured beside the gate: node-pty on macOS delivers at most 1,024 bytes per read (the tty's
-output queue), so the host emits one `pty.data` per small read: 55,000 to 660,000 events per flood above. Without the
-app (node-pty under plain Node, no IPC, no renderer: `.doperpowers` scratch script, same three commands) the same
-floods deliver at 46.5 MB/s (W1), 88.3 MB/s (W2) and 6.3 MB/s (W3, `seq` is its own limit and Node's per-read cost
-with 24-byte average reads), so W1 and W2 are limited by the app's per-event path (host emit, two IPC hops, the
-renderer), not by the pty. The renderer is never the choke point for long: the page never held more than 174 KB
-unparsed, frames stayed at the display's 8.3 ms, and the host paused only when the producer outran the pipeline
-(always for W1 and W2, rarely for W3, whose producer runs at about the pipeline's own rate). Batching reads in the
-host (one event per event-loop turn or per few milliseconds, as VS Code's pty host does) is the lever if throughput
-ever matters; it keeps the X2 shape and was not needed to pass the gate.
+Before coalescing (the same gate on the first M2 commit, one `pty.data` per node-pty read; `results` since replaced),
+three runs read W1 19.27 / 17.60 / 18.12, W2 21.72 / 22.99 / 21.50 and W3 7.83 / 8.21 / 7.93 MB/s with frame p95 at
+9.1 to 9.3 ms, byte-exact, from 60,456 / 55,128 / 657,763 events (average 842 / 914 / 287 bytes); two instrumented runs
+just before those read W2 at 21.38 and once **9.54** MB/s, under its 10 MB/s floor (a finding, not a switch). What
+limited them: node-pty on macOS delivers at most 1,024 bytes per read, and under a flood the host's loop takes the
+reads one per turn at about 10 bytes each, so one event per read (or per `setImmediate`, which was tried first and
+coalesced nothing: 206,310 events for 206,310 reads of a 2 MB `yes`) paid the per-event path (validation in the host
+and in main, two IPC hops) 55,000 to 660,000 times. Without the app (node-pty under plain Node, no IPC, no renderer,
+same three commands) the floods deliver at 46.5 MB/s (W1), 88.3 MB/s (W2) and 6.3 MB/s (W3, bound by `seq` and by
+Node's per-read cost). Coalesced, W1 and W2 run at about the pty's own rate for W1 (35 to 47 MB/s) and half of it for
+W2, events drop by 70 to 130 times, and frame p95 rises by under a millisecond (larger chunks parsed per frame).
+Compared with M1's string transport at 20 MB (13.6 / 22.0 / 7.8 MB/s), the production transport is 2 to 3.5 times
+faster on W1 and W2 while nothing can pile up past 256 KiB unacknowledged. The host paused W1 in every run and W2 or W3
+rarely or never: W3's producer runs at about the pipeline's own rate, so a pause needs a producer that outruns it
+(`yes`, or a hidden terminal's throttled acks).
 
 ## Verdict (final, after the M2 transport gate)
 
@@ -150,8 +157,9 @@ alternate-screen programs `less` and `claude`, reproduced without a prompt; 2, 3
 (row 1); that is recorded as the program's behaviour, not counted for or against the renderer, and it is what the
 Terminal tab will show for codex in any terminal. At the M2 transport gate it passed both transport items on the
 production transport: **item 9**, the full W1, W2 and W3 floods (50, 50 and 168.9 MB of output) arrived byte-exact
-with every line feed, the last lines right and frame p95 at 9.3 ms or less in three consecutive runs, the host pausing
-the pty whenever the producer outran the pipeline and the page never holding more than 174 KB unparsed (M1's
+with every line feed, the last lines right and frame p95 at 10.1 ms or less in three consecutive runs (35 to 47, 44
+to 46 and about 9.6 MB/s), the host pausing the pty whenever the producer outran the pipeline and the page never
+holding more than 133 KB unparsed (M1's
 `write data discarded` risk is gone: nothing can pile up past the 256 KiB watermark); **item 6's browser half**, both
 links reached main's `shell.openExternal` through `pty.openLink` and its scheme check, which refused a `javascript:`
 URL. The browser actually opening was not observed at the gate (the run stubbed `shell.openExternal` so that an
@@ -213,8 +221,9 @@ whose wait was too short),
 
 `results/`: `smoke.json`, `console.json` (both rewritten by the last gate run), `xterm-W1.json`, `xterm-W2.json`,
 `xterm-W3.json` (the M2 gate's third run, with its `gate` judgement), `xterm-W1-m1.json`, `xterm-W2-m1.json`,
-`xterm-W3-m1.json` (M1), `xterm-links-m2-gate.json` (the gate's item 6), `xterm-width.json`,
-`xterm-latency.json`, `xterm-scroll-region.json`, `xterm-items.json`, `xterm-tui-claude.json`, `xterm-tui-codex.json`,
+`xterm-W3-m1.json` (M1), `xterm-links-m2-gate.json` (the gate's item 6), `xterm-latency.json` (the gate's echo
+latency; M1's as `xterm-latency-m1.json`), `xterm-width.json`,
+`xterm-scroll-region.json`, `xterm-items.json`, `xterm-tui-claude.json`, `xterm-tui-codex.json`,
 `xterm-replay-claude.json`, `xterm-replay-codex.json`, `xterm-exit-claude.json`, `xterm-exit-codex.json` (the
 item-1 reproductions: before/after lines and the program's screen-control sequence counts), `ghostty-W1.json`,
 `ghostty-W2.json`, `ghostty-W3.json`, `ghostty-width.json`, `ghostty-latency.json`, `ghostty-scroll-region.json`,

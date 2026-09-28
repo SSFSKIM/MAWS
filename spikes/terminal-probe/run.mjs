@@ -20,6 +20,7 @@ import {
   CLAUDE_BIN_DEFAULT,
   CODEX_BIN_DEFAULT,
   GATE_CRITERIA,
+  GATE_ECHO_P95_MS,
   GATE_FRAME_P95_MS,
   GATE_MEASUREMENTS,
   SCRATCH_CWD,
@@ -214,6 +215,10 @@ const restorationCheck = (preSnap, postSnap) => {
 // Item 9 at the gate: output bytes and line feeds exact (the page's byte-count check, `error` otherwise), the last
 // line right, frame p95 within 50 ms; MB/s against its floor, a finding when below.
 const judgeGate = (id, metrics) => {
+  if (id === 'latency') {
+    const echoP95Ok = metrics.latency?.p95 != null && metrics.latency.p95 <= GATE_ECHO_P95_MS;
+    return { pass: echoP95Ok && metrics.error === undefined, echoP95Ok, echoP95Ms: metrics.latency?.p95 ?? null };
+  }
   const criteria = GATE_CRITERIA[id];
   const countsExact = metrics.error === undefined;
   const lastLineOk = criteria.lastLine(metrics.lastLine);
