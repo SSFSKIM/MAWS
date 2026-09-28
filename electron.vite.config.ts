@@ -3,8 +3,19 @@ import { resolve } from 'node:path';
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'electron-vite';
+import type { Rollup } from 'vite';
 
 const alias = { '@shared': resolve(__dirname, 'src/shared') };
+
+// zod 4.6.5's sources carry explanatory comments beside `@__PURE__` annotations that Rollup reports as
+// INVALID_ANNOTATION on every bundle that includes zod (the preload and the renderer). Harmless; dropped so a real
+// warning is not lost among them. Every other warning passes through.
+const rollupOptions = {
+  onwarn(warning: Rollup.RollupLog, warn: (warning: Rollup.RollupLog) => void) {
+    if (warning.code === 'INVALID_ANNOTATION' && warning.id?.includes('/node_modules/zod/')) return;
+    warn(warning);
+  },
+};
 
 export default defineConfig(({ command }) => {
   // Development CSP nonce: minted once per evaluation of this file and handed to both sides, to the dev server's
@@ -19,10 +30,14 @@ export default defineConfig(({ command }) => {
     },
     preload: {
       resolve: { alias },
+      // A sandboxed preload's `require` loads only `electron`, `events`, `timers` and `url`, so zod and the registries
+      // the allowlist imports must be bundled into out/preload/index.js; only `electron` stays external.
+      build: { externalizeDeps: false, rollupOptions },
     },
     renderer: {
       resolve: { alias },
       html: devNonce ? { cspNonce: devNonce } : undefined,
+      build: { rollupOptions },
       plugins: [react({ babel: { plugins: ['babel-plugin-react-compiler'] } }), tailwindcss()],
     },
   };
