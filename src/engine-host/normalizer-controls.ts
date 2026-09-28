@@ -89,8 +89,9 @@ export function mapInboundRequest(inbound: InboundTable, frame: ControlRequestFr
   }
 }
 
-// Our answer to an inbound request (an `out` control_response row).
-export function mapOutboundResponse(inbound: InboundTable, frame: ControlResponseFrame, out: EventSink): void {
+// Our answer to an inbound request (an `out` control_response row). `note` is the broker's annotation journaled just
+// before it (`meta answer_note`: why the answer differs from what the human chose), appended to a permission's message.
+export function mapOutboundResponse(inbound: InboundTable, frame: ControlResponseFrame, out: EventSink, note: string | null = null): void {
   const envelope = frame.response;
   const requestId = envelope.request_id as RequestId;
   const entry = inbound.get(requestId);
@@ -102,7 +103,7 @@ export function mapOutboundResponse(inbound: InboundTable, frame: ControlRespons
   switch (entry.kind) {
     case 'permission':
       out.emit({
-        kind: 'permission.resolved', requestId, toolUseId: entry.toolUseId!, behavior: payload.behavior === 'allow' ? 'allow' : 'deny', message,
+        kind: 'permission.resolved', requestId, toolUseId: entry.toolUseId!, behavior: payload.behavior === 'allow' ? 'allow' : 'deny', message: [message, note].filter((m) => m !== null).join('; ') || null,
         updatedInput: payload.updatedInput ?? null, updatedPermissions: Array.isArray(payload.updatedPermissions) ? payload.updatedPermissions : [], resolvedBy: 'user',
       }, attribution);
       return;

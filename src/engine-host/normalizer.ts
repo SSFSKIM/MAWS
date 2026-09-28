@@ -14,6 +14,7 @@ import type { EventPayload, SessionEvent } from '@shared/graph/events';
 import type { AgentId, ApiMessageId, AppSessionId, EventId, MessageUuid, ParentToolUseId, RequestId, SessionId, TaskId, ToolUseId } from '@shared/graph/ids';
 import { RewindConversationResponseSchema } from '@shared/wire/control';
 import {
+  ControlRequestFrameSchema,
   parseStdinFrame,
   parseStdoutFrame,
   type AssistantFrame,
@@ -59,6 +60,7 @@ export interface NormalizerState {
   pendingEcho: MessageUuid | null;
   outbound: Map<RequestId, { subtype: string; request: unknown }>;
   inbound: Map<RequestId, InboundEntry>;
+  answerNotes: Map<RequestId, string>; // the broker's `meta answer_note` rows, folded into the answer they precede
   streaming: Map<ParentToolUseId | null, Lane>;
   completedBlocks: Map<ApiMessageId, number>;
   taskTypes: Map<string, string>;
@@ -85,6 +87,7 @@ export class Normalizer {
       pendingEcho: null,
       outbound: new Map(),
       inbound: new Map(),
+      answerNotes: new Map(),
       streaming: new Map(),
       completedBlocks: new Map(),
       taskTypes: new Map(),
@@ -345,6 +348,16 @@ export class Normalizer {
 
   // The engine's answer to one of our requests: none as events, except the successful conversation rewind.
   private inboundResponse(frame: ControlResponseFrame, out: Emitter, attribution: Attribution): void {
+    // Any response envelope may re-deliver the engine's still-open requests (SPEC 45 ControlResponseEnvelope); those we
+    // do not already hold become their *.requested events here, as the broker re-accepts them from the same row.
+    for (const key of ['pending_permission_requests', 'pending_user_dialog_requests'] as const) {
+      const list = (frame.response as Record<string, unknown>)[key];
+      if (!Array.isArray(list)) continue;
+      for (const raw of list) {
+        const pending = ControlRequestFrameSchema.safeParse(raw);
+        if (pending.success && !this.state.inbound.has(pending.data.request_id as RequestId)) mapInboundRequest(this.state.inbound, pending.data, out, attribution);
+      }
+    }
     const requestId = frame.response.request_id as RequestId;
     const sent = this.state.outbound.get(requestId);
     if (!sent) return;
@@ -369,9 +382,13 @@ export class Normalizer {
       case 'control_request':
         this.state.outbound.set(frame.request_id as RequestId, { subtype: frame.request.subtype, request: frame.request });
         return;
-      case 'control_response':
-        mapOutboundResponse(this.state.inbound, frame, out);
+      case 'control_response': {
+        const requestId = frame.response.request_id as RequestId;
+        const note = this.state.answerNotes.get(requestId) ?? null;
+        this.state.answerNotes.delete(requestId);
+        mapOutboundResponse(this.state.inbound, frame, out, note);
         return;
+      }
       case 'bash_command':
       case 'control_cancel_request':
       case 'keep_alive':
@@ -418,6 +435,14 @@ export class Normalizer {
           maxAttempts: typeof meta.maxAttempts === 'number' ? meta.maxAttempts : null, trigger: (meta.trigger ?? 'user') as 'user', reason: stringOrNull(meta.reason),
         }, main);
         return;
+      case 'notice': {
+        const level = meta.level === 'info' || meta.level === 'notice' || meta.level === 'suggestion' ? meta.level : 'warning';
+        out.emit({ kind: 'notice.posted', level, text: stringOrNull(meta.text) ?? '', key: stringOrNull(meta.key) }, main);
+        return;
+      }
+      case 'answer_note':
+        if (typeof meta.requestId === 'string' && typeof meta.note === 'string') this.state.answerNotes.set(meta.requestId as RequestId, meta.note);
+        return;
       case 'parse_error':
       case 'transport_error':
       case 'replay_mismatch':
@@ -428,7 +453,7 @@ export class Normalizer {
         }, main);
         return;
       default:
-        return; // spawn, relay_health, initialize, status_check, queue, block_pairing, and the probe's own notes
+        return; // spawn, relay_health, initialize, status_check, queue, the normaliser's own warnings, and the probe's notes
     }
   }
 }

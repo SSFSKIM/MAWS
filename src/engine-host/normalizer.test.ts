@@ -270,6 +270,31 @@ describe('normaliser: requests, responses and boundaries', () => {
     expect(events[3]).toMatchObject({ outcome: 'clear_and_implement' });
   });
 
+  it('the broker\'s answer note (a meta row before our response) folds into permission.resolved.message', () => {
+    const n = make();
+    const events = feed(n, [
+      canUseTool('r-1'),
+      metaRow({ event: 'answer_note', requestId: 'r-1', note: 'scope downgraded: ask rule' }),
+      outRow({ type: 'control_response', response: { subtype: 'success', request_id: 'r-1', response: { behavior: 'allow', updatedInput: { command: 'ls' }, decisionClassification: 'user_temporary' } } }),
+      canUseTool('r-2'),
+      outRow({ type: 'control_response', response: { subtype: 'success', request_id: 'r-2', response: { behavior: 'allow', updatedInput: { command: 'ls' } } } }),
+    ]);
+    expect(kinds(events)).toEqual(['permission.requested', 'permission.resolved', 'permission.requested', 'permission.resolved']);
+    expect(events[1]).toMatchObject({ kind: 'permission.resolved', requestId: 'r-1', behavior: 'allow', message: 'scope downgraded: ask rule', updatedPermissions: [] });
+    expect(events[3]).toMatchObject({ kind: 'permission.resolved', requestId: 'r-2', message: null });
+    expect(n.state.answerNotes.size).toBe(0);
+  });
+
+  it('requests a response envelope re-delivers (pending_permission_requests / pending_user_dialog_requests) yield their *.requested events once', () => {
+    const n = make();
+    const pending = { type: 'control_request', request_id: 'r-9', request: { subtype: 'can_use_tool', tool_name: 'Bash', input: { command: 'ls' }, tool_use_id: 'toolu_9' } };
+    const dialog = { type: 'control_request', request_id: 'd-9', request: { subtype: 'request_user_dialog', dialog_kind: 'refusal_fallback_prompt', payload: {} } };
+    const envelope = { type: 'control_response', response: { subtype: 'success', request_id: 'L-1', response: { commands: [], current_permission_mode: 'auto' }, pending_permission_requests: [pending], pending_user_dialog_requests: [dialog] } };
+    const events = feed(n, [outRow({ type: 'control_request', request_id: 'L-1', request: { subtype: 'initialize' } }), inRow(envelope), inRow(envelope)]);
+    expect(kinds(events)).toEqual(['permission.requested', 'dialog.requested']);
+    expect(events[0]).toMatchObject({ requestId: 'r-9', toolUseId: 'toolu_9', seq: 2 });
+  });
+
   it('boundary.rewind derives from the correlated rewind_conversation response; a refusal yields nothing', () => {
     const n = make();
     const request = (request_id: string) => outRow({ type: 'control_request', request_id, request: { subtype: 'rewind_conversation', target_message_uuid: 'u-2' } });
@@ -286,6 +311,17 @@ describe('normaliser: requests, responses and boundaries', () => {
 });
 
 describe('normaliser: meta rows, system subtypes and the unknown', () => {
+  it('a host notice meta row yields notice.posted; the normaliser warning rows yield nothing', () => {
+    const events = feed(make(), [
+      metaRow({ event: 'notice', level: 'warning', key: 'dialog:undeclared:d-1', text: 'undeclared dialog' }),
+      metaRow({ event: 'notice', level: 'info', key: null, text: 'fyi' }),
+      metaRow({ event: 'block_pairing', rowSeq: 4, detail: {} }),
+    ]);
+    expect(kinds(events)).toEqual(['notice.posted', 'notice.posted']);
+    expect(events[0]).toMatchObject({ level: 'warning', key: 'dialog:undeclared:d-1', text: 'undeclared dialog', seq: 1 });
+    expect(events[1]).toMatchObject({ level: 'info', key: null, text: 'fyi' });
+  });
+
   it('maps the host\'s meta rows and tolerates the probe\'s exit row shape', () => {
     const events = feed(make(), [
       metaRow({ event: 'spawn', bin: '/x' }),
