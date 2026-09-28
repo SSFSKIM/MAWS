@@ -1,0 +1,21 @@
+# Unsigned local build (charter §12 C1 *Packaging skeleton*): `pnpm build:app` → dist/mac-arm64/MAWS.app.
+# Signing, notarization, DMG and updates arrive with the child that ships a release.
+appId: dev.maws.app # placeholder; the owner renames it
+productName: MAWS
+directories:
+  output: dist
+files:
+  - out/**
+  - package.json
+# node-pty's pty.node is loaded and its spawn-helper executed from real files beside the asar.
+asarUnpack:
+  - node_modules/node-pty/**
+# node-pty ships an N-API prebuild that runs under Electron as is (§12 C1 *node-pty native module*).
+npmRebuild: false
+mac:
+  target:
+    - target: dir
+      arch: [arm64]
+  identity: null
+  hardenedRuntime: false
+  category: public.app-category.developer-tools

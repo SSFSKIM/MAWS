@@ -1,0 +1,66 @@
+@import "tailwindcss";
+@import "./tokens.css";
+
+/* Tailwind's default palette and scales are removed: palette classes compile to nothing and only X7 tokens exist. */
+@theme {
+  --color-*: initial;
+  --font-*: initial;
+  --text-*: initial;
+  --radius-*: initial;
+  --spacing: 4px;
+}
+
+/* Every X7 token as the utility of the same name (bg-bg-raised, text-fg-muted, border-border-strong, font-mono,
+   text-ui, rounded-md for --radius, ...). `inline` because the values change per data-theme.
+   Tailwind also emits the same-named entries (--font-ui, --text-ui, --radius-sm, ...) into `@layer theme` as
+   self-references; tokens.css must stay unlayered so its declarations win the cascade over them. */
+@theme inline {
+  --color-bg: var(--bg);
+  --color-bg-raised: var(--bg-raised);
+  --color-bg-overlay: var(--bg-overlay);
+  --color-bg-hover: var(--bg-hover);
+  --color-bg-active: var(--bg-active);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-fg: var(--fg);
+  --color-fg-muted: var(--fg-muted);
+  --color-fg-faint: var(--fg-faint);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-danger: var(--danger);
+  --color-info: var(--info);
+  --color-diff-add-bg: var(--diff-add-bg);
+  --color-diff-del-bg: var(--diff-del-bg);
+
+  --font-ui: var(--font-ui);
+  --font-prose: var(--font-prose);
+  --font-mono: var(--font-mono);
+
+  --text-ui: var(--text-ui);
+  --text-ui-sm: var(--text-ui-sm);
+  --text-prose: var(--text-prose);
+  --text-code: var(--text-code);
+
+  --radius-sm: var(--radius-sm);
+  --radius-md: var(--radius);
+  --radius-lg: var(--radius-lg);
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--font-ui);
+    font-size: var(--text-ui);
+    -webkit-font-smoothing: antialiased;
+  }
+}
