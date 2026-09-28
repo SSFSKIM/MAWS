@@ -2,19 +2,14 @@
 // grouping*). One attention table feeds the sidebar row, the tab glyph, the Overview card and the OS notification
 // (§5.7); these are its pure readings, testable without React.
 import type { AttentionItem } from '@shared/graph/attention';
-import type { AttentionKind } from '@shared/graph/enums';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
+import { isActionable, isOpen } from '@shared/attention/kinds';
 
-export const ACTIONABLE_KINDS: AttentionKind[] = ['permission', 'question', 'plan', 'dialog', 'elicitation', 'auto_mode_unavailable', 'error', 'interrupted'];   // tier 1
-const ACTIONABLE = new Set<AttentionKind>(ACTIONABLE_KINDS);
+// The kinds and the open states are shared with main's notifier and dock badge (`@shared/attention/kinds`).
+export { ACTIONABLE_KINDS, isActionable, isOpen } from '@shared/attention/kinds';
 
 export interface NeedsYouRow { appSessionId: AppSessionId; oldest: AttentionItem; count: number; tier: 1 | 2 }
-
-// An item still waits on a human while pending or delivered (§4.6: delivered is not an alarm state, but it is not
-// answered yet either).
-export const isOpen = (item: AttentionItem) => item.state === 'pending' || item.state === 'delivered';
-export const isActionable = (item: AttentionItem) => ACTIONABLE.has(item.kind);
 
 const at = (item: AttentionItem) => Date.parse(item.createdAt); // ISO strings of different precision do not compare as text
 const oldestOf = (items: AttentionItem[]) => items.reduce((a, b) => (at(b) < at(a) ? b : a));

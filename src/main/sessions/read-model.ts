@@ -108,6 +108,11 @@ export class SessionReadModel {
     return this.attentionById.get(appSessionId) ?? [];
   }
 
+  // Every session's list, for the consumers that read across sessions (the notifier's start, the dock badge).
+  allAttention(): ReadonlyMap<AppSessionId, AttentionItem[]> {
+    return this.attentionById;
+  }
+
   setVisible(appSessionId: AppSessionId, visible: boolean): void {
     if (this.visible.has(appSessionId) === visible) return;
     if (visible) {

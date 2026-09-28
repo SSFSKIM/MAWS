@@ -58,6 +58,8 @@ vi.mock('./open-external', () => ({ registerOpenExternal: vi.fn() }));
 vi.mock('./sessions', () => ({ startSessions: () => ({ stop: vi.fn() }) }));
 vi.mock('./menu', () => ({ startMenu: vi.fn(), registerMenuHandlers: vi.fn() }));
 vi.mock('./window-state', () => ({ restoreWindowState: vi.fn(() => null), trackWindowState: vi.fn() }));
+vi.mock('./attention', () => ({ startAttention: vi.fn() }));
+vi.mock('./lifecycle/quit-guard', () => ({ installQuitGuard: vi.fn(), askToQuit: vi.fn() }));
 // C5 end
 
 beforeAll(async () => {

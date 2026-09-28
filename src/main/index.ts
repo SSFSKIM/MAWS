@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import { app, BrowserWindow, screen } from 'electron';
+import { app, BrowserWindow, dialog, screen } from 'electron';
 import { createHosts } from './hosts';
 import { installRouter } from './ipc/router';
 import { startSettings } from './settings';
@@ -19,7 +19,9 @@ import { registerGitHandlers } from './git/register';
 import { GitService } from './git/service';
 // C4 end
 // C5 start (emit comes with C3's imports)
+import { startAttention } from './attention';
 import { LayoutFileStore, registerLayoutHandlers } from './layout/store';
+import { askToQuit, installQuitGuard } from './lifecycle/quit-guard';
 import { registerMenuHandlers, startMenu } from './menu';
 import { registerOpenExternal } from './open-external';
 import { startSessions } from './sessions';
@@ -104,9 +106,33 @@ app.whenReady().then(() => {
   // `start()` is idempotent, so opening a window again forks nothing and a reload never reaches them.
   const openWindow = () => {
     void hosts.start();
-    tracked(createWindow(settings.state().resolvedTheme, placement())); // C5: restored and tracked placement
+    const win = createWindow(settings.state().resolvedTheme, placement()); // C5: restored placement
+    tracked(win); // C5: tracked placement
+    return win; // C5: the notifier re-creates the window through here
   };
   openWindow();
+
+  // ---- C5: notifications, dock badge and the quit guard ----
+  startAttention(sessions.model, { settings: () => settings.state().settings, openWindow });
+  installQuitGuard(sessions.model, {
+    ask: (count) =>
+      askToQuit(count, {
+        env: process.env,
+        show: (options) => {
+          const win = BrowserWindow.getFocusedWindow();
+          return win ? dialog.showMessageBox(win, options) : dialog.showMessageBox(options);
+        },
+      }),
+    // C3's engine host stops its sessions within the grace; a host that cannot answer (not started, or a build without
+    // C3's command) has nothing to stop.
+    shutdownEngine: async () => {
+      const result = await hosts.dispatch('engine-host', 'engine.shutdown', { graceMs: 5000 });
+      if (!result.ok && result.error.code !== 'unknown_command' && result.error.code !== 'host_unavailable') {
+        console.warn('[quit-guard] engine.shutdown failed', result.error);
+      }
+    },
+  });
+  // ---- end C5 ----
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) openWindow();
   });
