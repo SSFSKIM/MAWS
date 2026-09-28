@@ -1,6 +1,7 @@
 // The renderer adapter (C9 Interfaces *Terminal renderer adapter*): the one interface behind which the terminal
-// emulator library sits. Two implementations exist during the spike (`xterm.ts`, `ghostty.ts`); the product ships
-// one and keeps the seam so a future libghostty package re-runs the same spike without touching the tool.
+// emulator library sits. The spike (M1) ran xterm.js and ghostty-web behind it; ghostty-web was discarded at the M1
+// verdict (`spikes/terminal-probe/findings.md`, first failure: scrollback) and its adapter deleted. The `ghostty`
+// kind stays in the seam so a maintained libghostty package can re-run the same spike without touching the tool.
 
 export type RendererKind = 'xterm' | 'ghostty';
 export type Acceleration = 'webgl' | 'dom' | 'canvas2d';
@@ -75,14 +76,14 @@ export interface RendererOptions {
   webgl: boolean;
 }
 
-// Async because ghostty-web needs its WASM initialised; the adapters are loaded lazily so a page that never asks for
-// one never pays for its bundle.
+// Async because a WASM-backed candidate needs its module initialised; the adapter is loaded lazily so a page that
+// never asks for one never pays for its bundle.
 export async function createRenderer(kind: RendererKind, opts: RendererOptions): Promise<TerminalRenderer> {
   switch (kind) {
     case 'xterm':
       return (await import('./xterm')).createXtermRenderer(opts);
     case 'ghostty':
-      return (await import('./ghostty')).createGhosttyRenderer(opts);
+      throw new Error('ghostty-web was discarded at the M1 verdict (spikes/terminal-probe/findings.md); no adapter is installed');
   }
 }
 

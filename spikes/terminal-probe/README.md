@@ -1,9 +1,11 @@
 # Terminal probe (C9 M1 spike, kept as the performance harness)
 
 Child C9 of `docs/charter.md` (§7.2, C9 G1); execution document `docs/doperpowers/plans/2026-09-28-c9-terminal.md`.
-Both renderer candidates (`@xterm/xterm` 6.0.0 with the WebGL addon, `ghostty-web` 0.4.0-next.20.g1858a59) sit behind
+Both renderer candidates (`@xterm/xterm` 6.0.0 with the WebGL addon, `ghostty-web` 0.4.0-next.20.g1858a59) sat behind
 one adapter (`src/renderer/src/terminal/renderer.ts`) on the `#probe` page of the harness, each on its own pty, under
-the real `claude` and `codex` interfaces. `findings.md` is the verdict document.
+the real `claude` and `codex` interfaces. `findings.md` is the verdict document: ghostty-web was discarded at the M1
+verdict and its adapter and dependency removed; the page now runs the surviving candidate (`KINDS` in `Probe.tsx`)
+and a second entry there re-opens the second pane for a future candidate.
 
 ## Run
 

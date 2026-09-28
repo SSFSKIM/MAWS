@@ -10,33 +10,7 @@
       "pid": null,
       "exit": null,
       "cols": 93,
-      "rows": 40,
-      "bytes": 0,
-      "parsed": 0,
-      "lineFeeds": 0,
-      "carriageReturns": 0,
-      "syncFrames": 0,
-      "kittyQueried": false,
-      "kittyAnswered": false,
-      "xtversionQueried": false,
-      "xtversionAnswered": false,
-      "dsrReplies": [],
-      "lastInput": "",
-      "rawTail": "",
-      "lastLink": null,
-      "title": null,
-      "metrics": null
-    },
-    "ghostty": {
-      "kind": "ghostty",
-      "status": "idle",
-      "error": null,
-      "acceleration": "canvas2d",
-      "ptyId": null,
-      "pid": null,
-      "exit": null,
-      "cols": 86,
-      "rows": 48,
+      "rows": 41,
       "bytes": 0,
       "parsed": 0,
       "lineFeeds": 0,
@@ -55,8 +29,8 @@
     }
   },
   "console": [
-    "warning: task queue exceeded allotted deadline by 30ms"
+    "warning: task queue exceeded allotted deadline by 25ms"
   ],
   "cspRelated": [],
-  "at": "2026-09-28T20:02:37.416Z"
+  "at": "2026-09-28T20:24:32.910Z"
 }

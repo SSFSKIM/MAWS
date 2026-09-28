@@ -29,7 +29,7 @@ for (let i = 2; i < process.argv.length; i++) {
   else args.set(key, true);
 }
 const phase = args.get('phase') ?? 'm1';
-const renderers = args.get('renderer') === 'xterm' ? ['xterm'] : args.get('renderer') === 'ghostty' ? ['ghostty'] : ['xterm', 'ghostty'];
+const only = args.get('renderer'); // a renderer id, or unset for every candidate the page reports
 const steps = new Set((args.get('steps') ?? 'smoke,measure,items').split(','));
 const bins = { claude: process.env.MAWS_CLAUDE_BIN ?? CLAUDE_BIN_DEFAULT, codex: process.env.MAWS_CODEX_BIN ?? CODEX_BIN_DEFAULT };
 
@@ -103,7 +103,7 @@ try {
   writeResult('smoke', { phase, ready, console: consoleLines, cspRelated: csp, at: new Date().toISOString() });
   log('console lines', consoleLines.length, 'csp-related', csp.length);
   if (csp.length) console.log(csp.join('\n'));
-  const live = renderers.filter((r) => ready[r].status !== 'failed');
+  const live = Object.keys(ready).filter((r) => (!only || only === 'both' || r === only) && ready[r].status !== 'failed');
 
   // ---- measure: W1, W2, W3, width, latency (+ scroll-region) per renderer ----
   if (steps.has('measure')) {

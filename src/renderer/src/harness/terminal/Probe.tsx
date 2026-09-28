@@ -1,5 +1,6 @@
-// The `#probe` page (C9 M1, Interfaces *Harness*): two panes, each a `TerminalRenderer` (xterm.js left, ghostty-web
-// right) on its own pty, a workload bar, a metrics readout, a theme toggle and a paste field. Exposes
+// The `#probe` page (C9 M1, Interfaces *Harness*, kept as the performance harness): one pane per renderer candidate,
+// each a `TerminalRenderer` on its own pty (xterm.js since the M1 verdict; the right region held ghostty-web during
+// the spike), a workload bar, a metrics readout, a theme toggle and a paste field. Exposes
 // `window.__maws_harness.probe` for Playwright and `spikes/terminal-probe/run.mjs`. Tokens only (X7): every colour
 // here is a token utility; the terminals read the `--term-*` tokens through `theme.ts`.
 import { useEffect, useRef, useSyncExternalStore, type PointerEvent as ReactPointerEvent } from 'react';
@@ -20,10 +21,11 @@ import { readDocumentTheme } from '../../terminal/theme';
 import type { Metrics } from './metrics';
 import { Pane, type PaneDebug, type ProbeSnapshot } from './pane';
 
-const KINDS: RendererKind[] = ['xterm', 'ghostty'];
+// The candidates on the page; a second entry mounts a second pane on the right.
+const KINDS: RendererKind[] = ['xterm'];
 
 export interface ProbeApi {
-  ready(): Promise<Record<RendererKind, PaneDebug>>;
+  ready(): Promise<Partial<Record<RendererKind, PaneDebug>>>;
   run(workloadId: string, renderer: RendererKind, phase?: Phase): Promise<Metrics>;
   spawn(renderer: RendererKind, workloadId: string, phase?: Phase): Promise<{ ptyId: string; pid: number }>;
   type(renderer: RendererKind, data: string): Promise<void>;
@@ -54,7 +56,12 @@ function readFont(): TerminalFont {
 }
 
 // One set of panes per page, outside React: the emulators must survive re-renders and StrictMode's double mount.
-const panes: Record<RendererKind, Pane> = { xterm: new Pane('xterm', bins), ghostty: new Pane('ghostty', bins) };
+const panes = Object.fromEntries(KINDS.map((kind) => [kind, new Pane(kind, bins)])) as Partial<Record<RendererKind, Pane>>;
+const pane = (kind: RendererKind): Pane => {
+  const found = panes[kind];
+  if (!found) throw new Error(`${kind} is not a candidate on this page`);
+  return found;
+};
 const byPty = new Map<string, Pane>();
 let readyPromise: Promise<void> | null = null;
 
@@ -70,11 +77,11 @@ function start(): Promise<void> {
   // The terminals recolour when the document's theme attribute changes (the settings store sets it).
   new MutationObserver(() => {
     const theme = readDocumentTheme();
-    for (const pane of Object.values(panes)) pane.setTheme(theme);
+    for (const p of Object.values(panes)) p?.setTheme(theme);
   }).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
   const theme = readDocumentTheme();
   const font = readFont();
-  readyPromise = Promise.all(KINDS.map((kind) => panes[kind].create(theme, font))).then(() => {});
+  readyPromise = Promise.all(KINDS.map((kind) => pane(kind).create(theme, font))).then(() => {});
   return readyPromise;
 }
 
@@ -87,30 +94,30 @@ const programWorkload = (id: string): ProgramWorkload => {
 };
 
 const api: ProbeApi = {
-  ready: () => start().then(() => ({ xterm: panes.xterm.debug, ghostty: panes.ghostty.debug })),
-  run: (id, renderer, phase = 'm1') => panes[renderer].run(programWorkload(id), phase, claim(panes[renderer])),
-  spawn: (renderer, id, phase = 'm1') => panes[renderer].spawn(resolveProgram(programWorkload(id), phase, bins), claim(panes[renderer])),
-  type: (renderer, data) => panes[renderer].write(data),
-  kill: (renderer) => panes[renderer].kill(),
-  idle: (renderer, quietMs, maxMs) => panes[renderer].idle(quietMs, maxMs),
-  snapshot: (renderer, from, to) => panes[renderer].snapshot(from, to),
-  state: (renderer) => panes[renderer].debug,
-  focus: (renderer) => panes[renderer].focus(),
-  selection: (renderer) => panes[renderer].renderer?.getSelection() ?? '',
-  simulateContextLoss: (renderer) => panes[renderer].renderer?.simulateContextLoss?.(),
+  ready: () => start().then(() => Object.fromEntries(KINDS.map((kind) => [kind, pane(kind).debug]))),
+  run: (id, renderer, phase = 'm1') => pane(renderer).run(programWorkload(id), phase, claim(pane(renderer))),
+  spawn: (renderer, id, phase = 'm1') => pane(renderer).spawn(resolveProgram(programWorkload(id), phase, bins), claim(pane(renderer))),
+  type: (renderer, data) => pane(renderer).write(data),
+  kill: (renderer) => pane(renderer).kill(),
+  idle: (renderer, quietMs, maxMs) => pane(renderer).idle(quietMs, maxMs),
+  snapshot: (renderer, from, to) => pane(renderer).snapshot(from, to),
+  state: (renderer) => pane(renderer).debug,
+  focus: (renderer) => pane(renderer).focus(),
+  selection: (renderer) => pane(renderer).renderer?.getSelection() ?? '',
+  simulateContextLoss: (renderer) => pane(renderer).renderer?.simulateContextLoss?.(),
   // The drawn grid's box: the renderer's canvas when it has one (it need not fill the container), else the container.
   geometry(renderer) {
-    const element = panes[renderer].renderer?.element;
+    const element = pane(renderer).renderer?.element;
     if (!element) return null;
     const { x, y, width, height } = (element.querySelector('canvas') ?? element).getBoundingClientRect();
-    const { cols, rows } = panes[renderer].debug;
+    const { cols, rows } = pane(renderer).debug;
     return { x, y, width, height, cols, rows };
   },
   setSplit: (fraction) => useProbeStore.getState().setSplit(fraction),
-  setVisible: (renderer, visible) => panes[renderer].renderer?.setVisible(visible),
+  setVisible: (renderer, visible) => pane(renderer).renderer?.setVisible(visible),
   setBins: (next) => Object.assign(bins, next),
-  capture: (renderer, enabled) => panes[renderer].capture(enabled),
-  foreignCharacters: (renderer, allowed) => panes[renderer].foreignCharacters(new RegExp(allowed)),
+  capture: (renderer, enabled) => pane(renderer).capture(enabled),
+  foreignCharacters: (renderer, allowed) => pane(renderer).foreignCharacters(new RegExp(allowed)),
   screenshotReady: () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))),
 };
 
@@ -128,10 +135,10 @@ const useProbeStore = create<ProbeStore>()((set) => ({
 }));
 
 function usePaneDebug(kind: RendererKind): PaneDebug {
-  const pane = panes[kind];
+  const p = pane(kind);
   return useSyncExternalStore(
-    (cb) => pane.subscribe(cb),
-    () => pane.debug,
+    (cb) => p.subscribe(cb),
+    () => p.debug,
   );
 }
 
@@ -149,17 +156,17 @@ export function Probe() {
     void start();
   }, []);
 
-  const targets = (): RendererKind[] => (target === 'both' ? KINDS : [target]);
+  const targets = (): RendererKind[] => (target === 'both' ? KINDS : KINDS.filter((kind) => kind === target));
   const runWorkload = async (id: string) => {
     const workload = workloads[id]!;
     for (const kind of targets()) {
-      const pane = panes[kind];
+      const p = pane(kind);
       if (workload.kind === 'typed') {
-        await pane.write(workload.command).catch((error) => console.warn(`[probe] ${kind}: ${String(error)}`));
+        await p.write(workload.command).catch((error) => console.warn(`[probe] ${kind}: ${String(error)}`));
       } else if (workload.measure) {
-        void pane.run(workload, 'm1', claim(pane)).catch((error) => console.error(`[probe] ${kind} ${id} failed`, error));
+        void p.run(workload, 'm1', claim(p)).catch((error) => console.error(`[probe] ${kind} ${id} failed`, error));
       } else {
-        void pane.spawn(resolveProgram(workload, 'm1', bins), claim(pane)).catch((error) => console.error(`[probe] ${kind} ${id} failed`, error));
+        void p.spawn(resolveProgram(workload, 'm1', bins), claim(p)).catch((error) => console.error(`[probe] ${kind} ${id} failed`, error));
       }
     }
   };
@@ -185,7 +192,7 @@ export function Probe() {
       <header className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-border bg-bg-raised px-3 py-2 text-ui-sm">
         <span className="font-mono text-fg-faint">#probe</span>
         <div role="group" aria-label="target" className="flex gap-1 [app-region:no-drag]">
-          {(['both', 'xterm', 'ghostty'] as const).map((value) => (
+          {(['both', ...KINDS] as const).map((value) => (
             <button
               key={value}
               type="button"
@@ -211,7 +218,7 @@ export function Probe() {
           ))}
           <button
             type="button"
-            onClick={() => targets().forEach((kind) => void panes[kind].kill())}
+            onClick={() => targets().forEach((kind) => void pane(kind).kill())}
             className="rounded-sm border border-border px-2 py-0.5 text-danger hover:bg-bg-hover"
           >
             kill
@@ -231,9 +238,15 @@ export function Probe() {
         />
       </header>
       <div ref={rowRef} className="flex min-h-0 flex-1">
-        <PaneView kind="xterm" style={{ flexBasis: `${split * 100}%` }} />
+        <PaneView kind={KINDS[0]!} style={{ flexBasis: `${split * 100}%` }} />
         <div role="separator" aria-orientation="vertical" onPointerDown={onDividerDown} className="w-1 shrink-0 cursor-col-resize bg-border hover:bg-border-strong" />
-        <PaneView kind="ghostty" style={{ flex: 1 }} />
+        {KINDS[1] ? (
+          <PaneView kind={KINDS[1]} style={{ flex: 1 }} />
+        ) : (
+          <section aria-label="second pane" className="flex min-w-0 flex-1 items-center justify-center text-ui-sm text-fg-faint">
+            second candidate discarded at the M1 verdict (spikes/terminal-probe/findings.md); the divider still resizes the pane
+          </section>
+        )}
       </div>
     </div>
   );
@@ -245,8 +258,8 @@ function PaneView({ kind, style }: { kind: RendererKind; style: React.CSSPropert
 
   useEffect(() => {
     const host = hostRef.current!;
-    panes[kind].mount(host);
-    return () => panes[kind].unmount();
+    pane(kind).mount(host);
+    return () => pane(kind).unmount();
   }, [kind]);
 
   return (

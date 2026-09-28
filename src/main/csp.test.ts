@@ -28,20 +28,6 @@ describe('content security policy', () => {
     expect(withNonce).toEqual(['script-src']);
   });
 
-  // carried by C9: the harness-only sources (wasm for ghostty-web, its inlined WASM fetched as a data: URL)
-  it('appends extra script and connect sources after the base and dev entries, production and development alike', () => {
-    const extra = { script: ["'wasm-unsafe-eval'"], connect: ['data:'] };
-    expect(directives(buildCsp(null, extra))).toMatchObject({
-      'script-src': ["'self'", "'wasm-unsafe-eval'"],
-      'connect-src': ["'self'", 'data:'],
-    });
-    expect(directives(buildCsp({ nonce: 'N', devServerUrl: 'http://localhost:5173' }, extra))).toMatchObject({
-      'script-src': ["'self'", "'nonce-N'", "'wasm-unsafe-eval'"],
-      'connect-src': ["'self'", 'ws://localhost:5173', 'data:'],
-    });
-    expect(buildCsp(null, { script: [], connect: [] })).toBe(PRODUCTION_CSP);
-  });
-
   it('takes the socket host and port from the dev server URL', () => {
     const csp = buildCsp({ nonce: 'abc+/=', devServerUrl: 'http://127.0.0.1:5174/' });
     expect(directives(csp)['connect-src']).toEqual(["'self'", 'ws://127.0.0.1:5174']);

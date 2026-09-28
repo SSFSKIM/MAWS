@@ -2,7 +2,7 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { BrowserWindow, session } from 'electron';
-import { buildCsp, type ExtraCspSources } from './csp';
+import { buildCsp } from './csp';
 import type { ResolvedTheme } from './settings/store';
 
 // Each theme's `--bg` (X7), so the window's first frame and any area the page has not painted match the page.
@@ -21,10 +21,8 @@ const devPageUrl = devServerUrl ? new URL(pageFile, devServerUrl.endsWith('/') ?
 // What the app window loads; the IPC router accepts invokes only from a top frame at this URL's origin.
 export const appUrl = devPageUrl ?? pathToFileURL(rendererFile).href;
 
-// C9 block begin: the harness's extra CSP sources (ghostty-web's inlined WASM is fetched as a data: URL and compiled
-// in the page) and the fixed directories of its fake sessions (Interfaces *Harness*), created here because the
-// sandboxed page cannot.
-export const HARNESS_CSP_SOURCES: ExtraCspSources = { script: ["'wasm-unsafe-eval'"], connect: ['data:'] };
+// C9 block begin: the fixed directories of the harness's fake sessions (Interfaces *Harness*), created here because
+// the sandboxed page cannot. (The harness needed no CSP additions once ghostty-web was discarded at the M1 verdict.)
 export const HARNESS_SESSION_DIRS = ['/tmp/maws-harness/a', '/tmp/maws-harness/b'] as const;
 export function prepareHarness(): void {
   for (const dir of HARNESS_SESSION_DIRS) mkdirSync(dir, { recursive: true });
@@ -35,7 +33,7 @@ export function installContentSecurityPolicy(): void {
   if (devServerUrl && __MAWS_DEV_CSP_NONCE__ === null) {
     throw new Error('ELECTRON_RENDERER_URL is set but main was built without the dev CSP nonce');
   }
-  const csp = buildCsp(devServerUrl ? { nonce: __MAWS_DEV_CSP_NONCE__!, devServerUrl } : null, harness ? HARNESS_CSP_SOURCES : undefined);
+  const csp = buildCsp(devServerUrl ? { nonce: __MAWS_DEV_CSP_NONCE__!, devServerUrl } : null);
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
     callback({ responseHeaders: { ...details.responseHeaders, 'Content-Security-Policy': [csp] } });
   });
