@@ -1,0 +1,9 @@
+nodeLinker: hoisted
+
+allowBuilds:
+  electron: true
+  node-pty: true
+  esbuild: true
+  '@tailwindcss/oxide': true
+  # electron-builder's Windows installer helper; D-11 builds macOS arm64 only.
+  electron-winstaller: false
