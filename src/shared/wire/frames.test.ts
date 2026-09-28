@@ -7,10 +7,13 @@ import { parseJournalRow } from './journal';
 import {
   parseStdinFrame,
   parseStdoutFrame,
+  SafeguardResultSchema,
   STDOUT_FRAME_SCHEMAS,
   SYSTEM_SUBTYPE_SCHEMAS,
   UnknownFrameSchema,
   UnknownSystemFrameSchema,
+  type ResultFrame,
+  type StreamEventFrame,
 } from './frames';
 
 const PASS_DIRS: Record<FixturePass, string> = { pass1: FIXTURE_DIR, pass2: join(FIXTURE_DIR, 'pass2') };
@@ -55,6 +58,51 @@ describe('wire frames round-trip every probe fixture', () => {
       });
     }
   }
+});
+
+// Value pins on the parsed frames: the pass-2 facts the events derive from (M2 "Proves"), asserted through the typed schemas.
+describe('wire frames carry the pass-2 facts the events derive from', () => {
+  const inFrame = (pass: FixturePass, name: string, seq: number) => {
+    const row = framesOf(loadJournal(pass, name), 'in').find((r) => r.seq === seq);
+    if (!row) throw new Error(`${pass}/${name} has no in frame at seq ${seq}`);
+    return parseStdoutFrame(row.frame);
+  };
+
+  it('auto-classifier seq 34: the message_delta names exactly one tool use, evaluated not_flagged', () => {
+    const frame = inFrame('pass2', 'auto-classifier', 34) as StreamEventFrame;
+    expect(frame.type).toBe('stream_event');
+    expect(frame.event.type).toBe('message_delta');
+    const delta = frame.event.delta as { safeguard_results: unknown[] };
+    const results = delta.safeguard_results.map((r) => SafeguardResultSchema.parse(r));
+    expect(results).toHaveLength(1);
+    expect(results[0].type).toBe('dangerous_tool_use');
+    const toolUses = results[0].status.tool_uses ?? {};
+    expect(Object.keys(toolUses)).toHaveLength(1);
+    const [toolUseId] = Object.keys(toolUses);
+    expect(toolUseId).toMatch(/^toolu_/);
+    expect(toolUses[toolUseId]).toEqual({ type: 'evaluated', outcome: 'not_flagged' });
+  });
+
+  it('workflow seq 108: the result is an engine-initiated turn', () => {
+    const frame = inFrame('pass2', 'workflow', 108) as ResultFrame;
+    expect(frame.type).toBe('result');
+    expect((frame.origin as { kind: string }).kind).toBe('task-notification');
+    expect(frame.result_index).toBe(1);
+  });
+
+  it('bash-context-echoed: the first result is the echo receipt of a shouldQuery:false frame', () => {
+    const rows = loadJournal('pass2', 'bash-context-echoed');
+    const echo = framesOf(rows, 'out').find((r) => (r.frame as { shouldQuery?: boolean }).shouldQuery === false);
+    expect(echo).toBeDefined();
+    const first = framesOf(rows, 'in').find((r) => (r.frame as { type: string }).type === 'result');
+    expect(first).toBeDefined();
+    expect(first!.seq).toBeGreaterThan(echo!.seq);
+    const result = parseStdoutFrame(first!.frame) as ResultFrame;
+    expect(result.num_turns).toBe(0);
+    expect(result.terminal_reason).toBeUndefined();
+    expect(result.total_cost_usd).toBe(0);
+    expect((result.origin as { kind: string }).kind).toBe('human');
+  });
 });
 
 describe('wire frames reject malformed input', () => {

@@ -64,18 +64,22 @@ export function currentChain(records: TranscriptRecord[]): ChainResult {
   }
   if (leaf === null) return { chain: [], leaf: null, gap: null };
 
-  const chain: TranscriptRecord[] = [leaf];
+  // Collected leaf to root, reversed once at the end (an unshift per step is quadratic on long transcripts).
+  const leafToRoot: TranscriptRecord[] = [leaf];
   const visited = new Set<string>([leaf.uuid as string]);
   let current = leaf;
+  let gap: ChainResult['gap'] = null;
   for (;;) {
     const parentUuid = current.parentUuid;
-    if (parentUuid === null || parentUuid === undefined) return { chain, leaf, gap: null };
+    if (parentUuid === null || parentUuid === undefined) break;
     const parent = byUuid.get(parentUuid);
     if (parent === undefined || visited.has(parentUuid)) {
-      return { chain, leaf, gap: { parentUuid, childUuid: current.uuid as string } };
+      gap = { parentUuid, childUuid: current.uuid as string };
+      break;
     }
-    chain.unshift(parent);
+    leafToRoot.push(parent);
     visited.add(parentUuid);
     current = parent;
   }
+  return { chain: leafToRoot.reverse(), leaf, gap };
 }
