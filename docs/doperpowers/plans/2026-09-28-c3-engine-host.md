@@ -13,7 +13,7 @@ What C3 does not do: render anything (C5, C6, C7, C8), read `~/.claude` (C4), cr
 - [x] M1 — Launch contract (X6), transport and journal — reviewed clean 2026-09-28 (a95d113, fix 06636f6)
 - [x] M2 — Control channel, typed controls, normaliser and fixture conformance — reviewed clean 2026-09-28 (7bd93a6..d98e1e8, fix dd90303; all 40 fixtures replay into X1)
 - [x] M3 — Permission broker and the human round trips — reviewed clean 2026-09-28 (3740043..cdc1026, fixes 335f09d, 1811315, d06f03b)
-- [ ] M4 — Queue, steer, interrupt, rewind, `!` and `#`, process table and stores
+- [x] M4 — Queue, steer, interrupt, rewind, `!` and `#`, process table and stores — reviewed clean 2026-09-28 (c3a9088..c3951c2, fixes 9324240, 43d5e5b, bee5a43)
 - [ ] M5 — X2 surface: `session.*`, `engine.*`, `attention.*`, replay launch, e2e
 - [ ] M6 — Live acceptance against the pinned binary through the gateway
 
