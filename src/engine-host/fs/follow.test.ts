@@ -320,9 +320,14 @@ describe('a followed session backfills, then tails its transcript', () => {
     await settled();
     expect(delivered(app).filter((e) => e.kind === 'workflow.progress')).toHaveLength(1);
     await fixture.addSidecar(session, `workflows/${run}.json`, { ...JSON.parse(snapshot), workflowProgress: [] });
-    await expect.poll(() => delivered(app).filter((e) => e.kind === 'workflow.progress').map((e) => e.id)).toEqual([`workflow:${run}`, `workflow:${run}@2`]);
+    await expect.poll(() => delivered(app).filter((e) => e.kind === 'workflow.progress')).toHaveLength(2);
+    const [firstId, secondId] = delivered(app).flatMap((e) => (e.kind === 'workflow.progress' ? [e.id] : []));
+    expect(secondId).not.toBe(firstId);
+    // Back to the first progress: a new occurrence of its id, never the same id twice in one follow.
+    await fixture.addSidecar(session, `workflows/${run}.json`, snapshot);
+    await expect.poll(() => delivered(app).flatMap((e) => (e.kind === 'workflow.progress' ? [e.id] : []))).toEqual([firstId, secondId, `${firstId}@2`]);
     const second = await fs.eventsSnapshot(app, null);
-    expect(second.events.filter((e) => e.kind === 'workflow.progress')).toHaveLength(2); // the snapshot carries them too
+    expect(second.events.filter((e) => e.kind === 'workflow.progress')).toHaveLength(3); // the snapshot carries them too
   });
 
   it('tells main a task list changed and reads it on request', async () => {

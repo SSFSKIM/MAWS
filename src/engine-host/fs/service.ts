@@ -31,7 +31,7 @@ import type { StorePaths } from './paths';
 import { SubagentReader, subagentLookup } from './subagents';
 import { TaskReader } from './tasks';
 import { StoreWatcher, type StoreChange, type WatchFn } from './watcher';
-import { progressKey, WorkflowReader, workflowProgressEvent } from './workflows';
+import { progressKey, WorkflowReader, workflowProgressEvent, workflowProgressId } from './workflows';
 
 export const PROGRESS_EVERY = 100;
 // The floor under coalesced or dropped FSEvents for followed files (residue *Watcher mechanism*): each is stat'ed.
@@ -55,8 +55,9 @@ interface FollowEntry {
   follow: Follow;
   sessionId: SessionId;
   agentId: AgentId | null;
-  path: string | null; // where the transcript is, as last seen; null until the service has seen it
-  workflows: Map<string, { key: string; occurrences: number }>; // per run: the progress last delivered (session follows)
+  location: { path: string | null }; // where the transcript is, as last seen; null until the service has seen it
+  workflows: Map<string, string>; // per run: the progress key last delivered (session follows)
+  workflowIds: Map<string, number>; // deliveries per workflow.progress id in this follow, for the occurrence suffix
   workflowWork: Promise<unknown>; // workflow deliveries run one at a time, in change order
 }
 
@@ -265,20 +266,7 @@ export class FsService {
       subagents: subagentLookup(() => this.agents.get(sessionId) ?? [], this.subagentReader),
       emit: this.send,
     });
-    const entry: FollowEntry = {
-      follow,
-      sessionId,
-      agentId: agent?.agentId ?? null,
-      get path() {
-        return location.path;
-      },
-      set path(next) {
-        location.path = next;
-      },
-      workflows: new Map(),
-      workflowWork: Promise.resolve(),
-    };
-    return entry;
+    return { follow, sessionId, agentId: agent?.agentId ?? null, location, workflows: new Map(), workflowIds: new Map(), workflowWork: Promise.resolve() };
   }
 
   // Lists the session's agents (one listing at a time per session) and tells main when a bound session's list changed.
@@ -315,11 +303,12 @@ export class FsService {
         for (const run of runs) {
           if (run.snapshot === null) continue;
           const key = progressKey(run.snapshot);
-          const seen = entry.workflows.get(run.runId);
-          if (seen?.key === key) continue;
-          const occurrences = (seen?.occurrences ?? 0) + 1;
-          entry.workflows.set(run.runId, { key, occurrences });
-          events.push(workflowProgressEvent(entry.sessionId, run.snapshot, occurrences));
+          if (entry.workflows.get(run.runId) === key) continue;
+          entry.workflows.set(run.runId, key);
+          const id = workflowProgressId(run.snapshot);
+          const occurrence = (entry.workflowIds.get(id) ?? 0) + 1;
+          entry.workflowIds.set(id, occurrence);
+          events.push(workflowProgressEvent(entry.sessionId, run.snapshot, occurrence));
         }
         entry.follow.deliver(events);
       })
@@ -354,7 +343,7 @@ export class FsService {
     const followed = [...this.follows.values()].some((entry) => entry.sessionId === sessionId);
     if (appSessionId !== null || followed) this.listAgents(sessionId).catch(logAgentListFailure);
     const path = join(this.paths.projects, change.slug, sessionId, rel);
-    this.pokeFollows((entry) => entry.sessionId === sessionId && entry.agentId !== null && entry.path === path);
+    this.pokeFollows((entry) => entry.sessionId === sessionId && entry.agentId !== null && entry.location.path === path);
   }
 
   private onChange(change: StoreChange): void {
@@ -363,7 +352,7 @@ export class FsService {
         void this.summarizePath(change.path, change.sessionId, 'changed');
         this.pokeFollows((entry) => {
           if (entry.sessionId !== change.sessionId || entry.agentId !== null) return false;
-          entry.path = change.path;
+          entry.location.path = change.path;
           return true;
         });
         return;
@@ -392,7 +381,7 @@ export class FsService {
   // pointed at what the listing found and poked.
   private relocateFollows(): void {
     this.pokeFollows((entry) => {
-      if (entry.agentId === null) entry.path = this.listed.get(entry.sessionId)?.path ?? entry.path;
+      if (entry.agentId === null) entry.location.path = this.listed.get(entry.sessionId)?.path ?? entry.location.path;
       return true;
     });
   }

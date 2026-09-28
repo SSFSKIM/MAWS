@@ -6,7 +6,7 @@ import type { SessionId } from '@shared/graph/ids';
 import { SessionEventSchema } from '@shared/graph/events';
 import { FIXTURE_DIR } from '../../../test/support/fixtures';
 import { StoreFixture } from '../../../test/support/store-fixture';
-import { WorkflowReader, workflowProgressEvent } from './workflows';
+import { WorkflowReader, workflowProgressEvent, workflowProgressId } from './workflows';
 
 const S1 = 'bac6130b-8eb8-499e-aeb1-89e7624a52cd' as SessionId;
 const RUN = 'wf_7cacbb2d-902';
@@ -61,9 +61,16 @@ describe('workflow runs are read from the snapshot and the journal', () => {
     const [run] = await new WorkflowReader().list(sessionDir);
     const event = workflowProgressEvent(S1, run.snapshot!, 1);
     expect(SessionEventSchema.parse(event)).toEqual(event);
-    expect(event).toMatchObject({ kind: 'workflow.progress', id: `workflow:${RUN}`, taskId: 'wayue3on6', workflowName: 'maws-probe', seq: null, agentId: null, parentToolUseId: null });
+    expect(event).toMatchObject({ kind: 'workflow.progress', taskId: 'wayue3on6', workflowName: 'maws-probe', seq: null, agentId: null, parentToolUseId: null });
     expect(event.progress).toEqual(JSON.parse(disk(`${RUN}.json`)).workflowProgress);
     expect(event.at).toBe('2026-09-28T09:59:32.358Z'); // the snapshot's own timestamp
-    expect(workflowProgressEvent(S1, run.snapshot!, 3).id).toBe(`workflow:${RUN}@3`);
+    // The id names the progress it carries: the same progress has the same id in any follow, a different one never
+    // does (a consumer deduplicating by id across an unfollow and a re-follow must not keep a stale progress), and a
+    // progress delivered again within one follow (A, B, A) is a new occurrence.
+    expect(event.id).toBe(workflowProgressId(run.snapshot!));
+    expect(event.id).toMatch(new RegExp(`^workflow:${RUN}:[0-9a-f]{12}$`));
+    expect(workflowProgressId({ ...run.snapshot!, workflowProgress: [] })).not.toBe(event.id);
+    expect(workflowProgressId({ ...run.snapshot!, durationMs: 1 })).toBe(event.id); // bookkeeping is not progress
+    expect(workflowProgressEvent(S1, run.snapshot!, 3).id).toBe(`${event.id}@3`);
   });
 });

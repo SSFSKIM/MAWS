@@ -4,6 +4,7 @@
 // parsed leniently (a torn or unknown line is skipped). Each snapshot's `workflowProgress` is a whole snapshot of the
 // run, the same shape the wire's `workflow_progress` carries, so a followed session gets one `workflow.progress` per
 // snapshot change. Read-only: files are read, never written.
+import { createHash } from 'node:crypto';
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { SessionEvent } from '@shared/graph/events';
@@ -45,10 +46,9 @@ export class WorkflowReader {
   }
 }
 
-// The X1 event for one snapshot. Ids follow the disk-derived occurrence grammar: `workflow:<runId>` for the first
-// delivery in a follow, `workflow:<runId>@<g>` for the g-th.
+// The X1 event for one snapshot, `occurrence` counting deliveries of the same id within one follow.
 export function workflowProgressEvent(sessionId: SessionId, snapshot: WorkflowSnapshot, occurrence: number): Extract<SessionEvent, { kind: 'workflow.progress' }> {
-  const base = `workflow:${snapshot.runId}`;
+  const base = workflowProgressId(snapshot);
   return {
     id: (occurrence === 1 ? base : `${base}@${occurrence}`) as EventId,
     sessionId,
@@ -63,8 +63,16 @@ export function workflowProgressEvent(sessionId: SessionId, snapshot: WorkflowSn
   };
 }
 
-// What a followed session compares to decide that a snapshot changed: its progress and status, not its whole body
-// (a rewrite that only touches bookkeeping is not a new progress).
+// A snapshot is rewritten in place, so its id names the progress it carries (`workflow:<runId>:<digest>`), unlike a
+// record's: the same progress has the same id in any follow, and a newer one never reuses an older one's id, so a
+// consumer deduplicating by id across an unfollow and a re-follow keeps no stale progress. A progress delivered again
+// within one follow (A, B, A) takes the occurrence suffix of the disk-derived grammar (`@<g>`).
+export function workflowProgressId(snapshot: WorkflowSnapshot): string {
+  return `workflow:${snapshot.runId}:${createHash('sha256').update(progressKey(snapshot)).digest('hex').slice(0, 12)}`;
+}
+
+// What decides that a snapshot changed: its progress and status, not its whole body (a rewrite that only touches
+// bookkeeping is not a new progress).
 export function progressKey(snapshot: WorkflowSnapshot): string {
   return JSON.stringify([snapshot.status ?? null, snapshot.workflowProgress ?? null]);
 }
