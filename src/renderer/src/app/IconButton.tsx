@@ -40,9 +40,9 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
 });
 
 // The mockup's 16 px stroke icons (mockups/01-shell.html), drawn in currentColor.
-function Icon({ children }: { children: ReactNode }) {
+export function Icon({ children, className = 'size-4' }: { children: ReactNode; className?: string }) {
   return (
-    <svg viewBox="0 0 16 16" aria-hidden className="size-4 fill-none stroke-current [stroke-linecap:round] [stroke-linejoin:round] [stroke-width:1.5]">
+    <svg viewBox="0 0 16 16" aria-hidden className={`${className} shrink-0 fill-none stroke-current [stroke-linecap:round] [stroke-linejoin:round] [stroke-width:1.5]`}>
       {children}
     </svg>
   );
@@ -68,5 +68,47 @@ export const MaximizeIcon = () => (
 export const RestoreIcon = () => (
   <Icon>
     <path d="M13.5 6.5h-4v-4M2.5 9.5h4v4M9.5 6.5 14 2M6.5 9.5 2 14" />
+  </Icon>
+);
+export const ChevronDownIcon = ({ className }: { className?: string }) => (
+  <Icon className={className}>
+    <path d="m4 6 4 4 4-4" />
+  </Icon>
+);
+export const FolderIcon = ({ className }: { className?: string }) => (
+  <Icon className={className}>
+    <path d="M2 4h5l1.5 2H14v7H2z" />
+  </Icon>
+);
+export const SearchIcon = () => (
+  <Icon>
+    <circle cx="7" cy="7" r="4.5" />
+    <path d="m10.5 10.5 3 3" />
+  </Icon>
+);
+export const PinIcon = ({ className }: { className?: string }) => (
+  <Icon className={className}>
+    <path d="m6 2 6 6-2 1-1 3-5-5 3-1zM6 10l-4 4" />
+  </Icon>
+);
+export const ArchiveIcon = ({ className }: { className?: string }) => (
+  <Icon className={className}>
+    <path d="M3 6v7h10V6M2 3h12v3H2zM6 9h4" />
+  </Icon>
+);
+export const PlusIcon = ({ className }: { className?: string }) => (
+  <Icon className={className}>
+    <path d="M8 3v10M3 8h10" />
+  </Icon>
+);
+export const SortIcon = ({ className }: { className?: string }) => (
+  <Icon className={className}>
+    <path d="M3 4.5h10M4.5 8h7M6 11.5h4" />
+  </Icon>
+);
+export const GearIcon = () => (
+  <Icon>
+    <circle cx="8" cy="8" r="2" />
+    <path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4" />
   </Icon>
 );

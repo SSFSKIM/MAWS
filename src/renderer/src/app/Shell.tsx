@@ -1,8 +1,9 @@
 // The shell's frame (C5 execution document, M2): the toolbar across the top and the three regions on a CSS grid whose
 // columns are the layout store's widths (`regions.ts`). A collapsed region keeps its column at 0 and stays mounted but
 // inert; a maximized panel takes the main column's place while the main region keeps its state offscreen. The sidebar
-// and main contents arrive with M3 and M4; until then the main region holds C1's diagnostics strip.
+// is M3's; the main region's contents arrive with M4, and until then it holds C1's diagnostics strip.
 import { PanelRegion } from '../panel/PanelRegion';
+import { Sidebar } from '../sidebar/Sidebar';
 import { useLayout } from '../stores/layout';
 import { Diagnostics } from './Diagnostics';
 import { COLLAPSE_THRESHOLD_PX, gridColumns, SIDEBAR_BOUNDS, sidebarWidth } from './regions';
@@ -47,7 +48,9 @@ function SidebarRegion() {
       className={`relative col-start-1 row-start-2 flex min-h-0 min-w-0 bg-bg-raised ${collapsed ? '' : 'border-r border-border'}`}
     >
       {/* The contents clip here, not on the region, so the resizer can straddle the region's edge. */}
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden" />
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+        <Sidebar />
+      </div>
       {!collapsed && (
         <Resizer
           label="Resize sidebar"

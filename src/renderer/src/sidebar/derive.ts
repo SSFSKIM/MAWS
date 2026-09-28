@@ -32,6 +32,10 @@ export interface SidebarModel {
   projects: ProjectSection[]; // while searching, only the projects with a match
   other: SessionRecord[]; // no project, or a project the list does not hold
   searching: boolean;
+  // Whether Pinned and Other sessions hold anything before the search filters them: a section with sessions keeps its
+  // heading while a search empties it, one with none shows no heading.
+  hasPinned: boolean;
+  hasOther: boolean;
 }
 
 const isWorking = (digest: SessionDigest | undefined) => digest?.phase === 'working' || digest?.phase === 'starting';
@@ -71,6 +75,7 @@ export function sidebarModel({ records, digests, projects, rows, sort, query }: 
     };
   });
   const searching = query.trim() !== '';
+  const others = (grouped.get(null) ?? []).filter((r) => !r.pinned);
   return {
     needsYou: rows.filter((row) => {
       const r = records.get(row.appSessionId);
@@ -78,8 +83,10 @@ export function sidebarModel({ records, digests, projects, rows, sort, query }: 
     }),
     pinned: order(live.filter((r) => r.pinned && matches(r))),
     projects: searching ? sections.filter((s) => s.sessions.length > 0) : sections,
-    other: order((grouped.get(null) ?? []).filter((r) => !r.pinned && matches(r))),
+    other: order(others.filter(matches)),
     searching,
+    hasPinned: live.some((r) => r.pinned),
+    hasOther: others.length > 0,
   };
 }
 

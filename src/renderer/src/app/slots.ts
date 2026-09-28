@@ -5,7 +5,7 @@ import type { ComponentType } from 'react';
 import { create } from 'zustand';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionEvent } from '@shared/graph/events';
-import type { AgentId, AppSessionId, ProjectId } from '@shared/graph/ids';
+import type { AgentId, AppSessionId } from '@shared/graph/ids';
 import type { TabRef } from '@shared/ipc/schema/layout';
 import type { PanelHostProps } from '../panel/host-slot';
 import { FALLBACKS } from './slot-fallbacks';
@@ -17,7 +17,7 @@ export interface Slots {
   panelHost: ComponentType<PanelHostProps>; // X5, C8
   fileTab: ComponentType<{ tab: Extract<TabRef, { kind: 'file' }> }>; // C8
   diffTab: ComponentType<{ tab: Extract<TabRef, { kind: 'diff' }> }>; // C8
-  newSession: ComponentType<{ projectId: ProjectId | null; open: boolean; onClose: () => void }>; // C10
+  newSession: ComponentType<{ appSessionId: AppSessionId }>; // C10: an unstarted session's setup, in its pane above the composer (no modal sheet)
 }
 
 // A store rather than a plain map, so a registration after the first render still reaches the page.
