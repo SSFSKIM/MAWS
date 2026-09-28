@@ -126,6 +126,18 @@ describe('main ipc router', () => {
     ]);
   });
 
+  it('answers internal, and logs, when the host dispatcher rejects instead of answering', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    await load(DEV_URL, async () => {
+      throw new Error('port closed');
+    });
+    await expect(invoke(appWindow(), 'engine.ping')).resolves.toEqual({
+      ok: false,
+      error: { code: 'internal', message: 'port closed' },
+    });
+    expect(log).toHaveBeenCalledOnce();
+  });
+
   it('answers internal when a main-owned command has no handler yet', async () => {
     await expect(invoke(appWindow(), 'engine.hostState')).resolves.toMatchObject({
       ok: false,

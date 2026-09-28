@@ -40,6 +40,19 @@ describe('renderer ipc client', () => {
     }
   });
 
+  it('returns a void command’s outcome as ok with an undefined value', async () => {
+    const { bridge } = fakeBridge({ ok: true, value: undefined });
+    await expect(createClient(() => bridge).invoke('pty.write', { ptyId: 'p1' as never, data: 'x' })).resolves.toEqual({
+      ok: true,
+      value: undefined,
+    });
+    const { bridge: wrong } = fakeBridge({ ok: true, value: 'surprise' });
+    await expect(createClient(() => wrong).invoke('pty.kill', { ptyId: 'p1' as never })).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'invalid_output' },
+    });
+  });
+
   it('passes main’s own errors through', async () => {
     const error = { code: 'invalid_input', message: 'invalid input for settings.set', issues: [{ path: ['theme'] }] };
     const { bridge } = fakeBridge({ ok: false, error });

@@ -66,12 +66,19 @@ async function route(
   if (!input.ok) return input;
 
   const { owner } = commands[name];
-  if (owner !== 'main') return dispatchToHost(owner, name, input.value);
-
-  const handler = mainHandlers.get(name);
-  if (!handler) return { ok: false, error: ipcError('internal', `no main handler registered for ${name}`) };
+  let answer: () => Promise<CommandResult<CommandName>>;
+  if (owner !== 'main') {
+    answer = () => dispatchToHost(owner, name, input.value);
+  } else {
+    const handler = mainHandlers.get(name);
+    if (!handler) return { ok: false, error: ipcError('internal', `no main handler registered for ${name}`) };
+    answer = async () => ({ ok: true, value: (await handler(input.value)) as CommandOutput<CommandName> });
+  }
+  // A throwing main handler and a rejecting host dispatcher alike end as `internal` in the envelope, never as a
+  // rejection across the boundary. (A host that is not running answers `host_unavailable` itself; a rejection is a
+  // fault in the dispatch path, so it is not guessed to mean unavailability.)
   try {
-    return { ok: true, value: (await handler(input.value)) as CommandOutput<CommandName> };
+    return await answer();
   } catch (error) {
     console.error(`[ipc] ${name} failed`, error);
     return { ok: false, error: ipcError('internal', error instanceof Error ? error.message : String(error)) };
