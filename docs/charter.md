@@ -562,7 +562,7 @@ Explicitly out of scope for P0: bundle patches (D-1); Windows and Linux (D-11); 
 |---|---|---|---|
 | C1 Foundations | plan | landed 2026-09-28 (merged to master at 640f5d3; acceptance 1 to 7 passed, `pnpm verify` green, whole-branch review clean) | `docs/doperpowers/plans/2026-09-28-c1-foundations.md` (Outcomes & Retrospective written) |
 | C2 Probe, second pass | spike | landed 2026-09-28 (pin 32b75d61, commit f776f7e) | `spikes/protocol-probe/findings-pass2.md`, `fixtures/pass2/` |
-| C3 Engine host | plan | document fixed at 90b44cd, second review running; executor next | `docs/doperpowers/plans/2026-09-28-c3-engine-host.md` |
+| C3 Engine host | plan | executing since 2026-09-28 (document reviewed twice, closed at 67acf72; plan-executor in a worktree; merges first) | `docs/doperpowers/plans/2026-09-28-c3-engine-host.md` |
 | C4 Filesystem state, index, replay | plan | executing since 2026-09-28 (document closed at 82f167e; plan-executor in a worktree from master after C1) | `docs/doperpowers/plans/2026-09-28-c4-filesystem-index-replay.md` |
 | C5 Shell | plan | executing since 2026-09-28 (document reviewed twice, closed at baaefdb; plan-executor in a worktree from master after C1) | `docs/doperpowers/plans/2026-09-28-c5-shell.md` |
 | C6 Transcript | plan | executing since 2026-09-28 (document closed at 430b7df; plan-executor in a worktree) | `docs/doperpowers/plans/2026-09-28-c6-transcript.md` |
