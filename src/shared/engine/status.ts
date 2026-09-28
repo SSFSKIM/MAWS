@@ -9,6 +9,7 @@ import { EffortSchema } from './launch-spec';
 
 export const EngineSessionStatusSchema = z.strictObject({
   appSessionId: AppSessionIdSchema, engineSessionId: SessionIdSchema.nullable(), pid: z.number().int().nullable(), launchId: z.string(), launchedAt: z.string(),
+  taskListId: z.string().nullable(), // C8's ask (M5): the launch env's CLAUDE_CODE_TASK_LIST_ID when set, else the engine session id once known; null before (SPEC 20:167–203)
   cwd: z.string(), // the launch spec's cwd, present from the reservation onward (C10 counts reservations by directory through engine.sessions)
   pendingPlan: z.string().nullable(), // a clear_and_implement plan kept for retry after the pre-plan mode could not be restored (M3 review)
   process: z.enum(['starting', 'initializing', 'ready', 'exiting', 'exited']),

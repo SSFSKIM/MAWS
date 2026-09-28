@@ -760,3 +760,27 @@ describe('EngineSession (M4): the termination ladder, stdout EOF, held frames, t
     EngineSessionStatusSchema.parse(status);
   });
 });
+
+// C8's ask (M5): the task list the engine's tasks tools read, for C8's Background work tool.
+describe('EngineSession status: taskListId', () => {
+  it('reports the constructed environment\'s CLAUDE_CODE_TASK_LIST_ID when set, not the session id', async () => {
+    const launchSpec = spec();
+    const plan = buildLaunch(launchSpec, { PATH: '/usr/bin', HOME: '/Users/x', CLAUDE_CODE_TASK_LIST_ID: 'team-list' }, { relayUrl: RELAY_URL, engineVersion: ENGINE_VERSION });
+    const { session } = setup({ session: { plan } });
+    expect(session.status().taskListId).toBe('team-list');
+    await session.start();
+    expect(EngineSessionStatusSchema.parse(session.status())).toMatchObject({ taskListId: 'team-list', engineSessionId: '33333333-3333-4333-8333-333333333333' });
+  });
+
+  it('falls back to the engine session id, the one system/init names once it arrives', async () => {
+    const run = await replayedSession('pass2', 'real-settings', (row, { session, transport, ready, fixture }) => {
+      if (row.seq === 12) void ready().then(() => session.send((fixture.find((r) => r.seq === 12)!.frame as { message: { content: string } }).message.content));
+      else transport.kill('SIGTERM');
+    });
+    const init = run.fixture.find((r) => (r.frame as { type?: string; subtype?: string }).type === 'system' && (r.frame as { subtype?: string }).subtype === 'init')!.frame as { session_id: string };
+    const status = run.session.status();
+    expect(status.engineSessionId).toBe(init.session_id);
+    expect(status.taskListId).toBe(init.session_id);
+  });
+});
+

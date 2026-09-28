@@ -171,7 +171,7 @@ describe('ipc schema validates both directions', () => {
   describe('C3 entries', () => {
     const c3Commands = [...C3_SESSION_COMMANDS, ...C3_ENGINE_COMMANDS, ...C3_ATTENTION_COMMANDS];
     const status = {
-      appSessionId: 'app-1', engineSessionId: null, pid: null, launchId: 'abcdefgh', launchedAt: '2026-09-28T10:00:00.000Z', cwd: '/w', pendingPlan: null,
+      appSessionId: 'app-1', engineSessionId: null, pid: null, launchId: 'abcdefgh', launchedAt: '2026-09-28T10:00:00.000Z', taskListId: null, cwd: '/w', pendingPlan: null,
       process: 'starting', exit: null, engineState: 'unknown', activity: null, turn: null, model: { requested: null, resolved: null }, effort: null,
       permissionMode: { requested: 'default', effective: 'default', refusal: null }, prePlanMode: null,
       gateway: { mode: 'gateway', baseUrl: null, verified: 'pending', autoModeServer: 'unknown', localLane: null },

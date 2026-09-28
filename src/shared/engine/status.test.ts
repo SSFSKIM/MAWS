@@ -4,7 +4,7 @@ import { EngineSessionStatusSchema, toSessionRecordPatch, type EngineSessionStat
 
 const status = (over: Partial<EngineSessionStatus> = {}): EngineSessionStatus =>
   EngineSessionStatusSchema.parse({
-    appSessionId: 'app-1', engineSessionId: '33333333-3333-4333-8333-333333333333', pid: 42, launchId: 'L1', launchedAt: '2026-09-28T10:00:00.000Z', cwd: '/w', pendingPlan: null,
+    appSessionId: 'app-1', engineSessionId: '33333333-3333-4333-8333-333333333333', pid: 42, launchId: 'L1', launchedAt: '2026-09-28T10:00:00.000Z', taskListId: null, cwd: '/w', pendingPlan: null,
     process: 'ready', exit: null, engineState: 'idle', activity: null, turn: null, model: { requested: 'sonnet', resolved: 'claude-sonnet-5' }, effort: 'high',
     permissionMode: { requested: 'auto', effective: 'auto', refusal: null }, prePlanMode: null,
     gateway: { mode: 'gateway', baseUrl: 'http://127.0.0.1:8641', verified: 'routed', autoModeServer: 'enabled', localLane: null },

@@ -289,8 +289,10 @@ export class EngineSession {
     const tracked = this.tracker.snapshot();
     const turnId = this.tracker.turnEventId;
     const env = this.plan.env;
+    const engineSessionId = this.normalizer.state.sessionId ?? this.plan.sessionId;
     return {
-      appSessionId: this.spec.appSessionId, engineSessionId: this.normalizer.state.sessionId ?? this.plan.sessionId, pid: this.transport?.pid ?? null, launchId: this.plan.launchId, launchedAt: this.launchedAt,
+      appSessionId: this.spec.appSessionId, engineSessionId, pid: this.transport?.pid ?? null, launchId: this.plan.launchId, launchedAt: this.launchedAt,
+      taskListId: env.CLAUDE_CODE_TASK_LIST_ID ?? engineSessionId ?? null, // C8's ask: the list the engine's task tools read (SPEC 20)
       cwd: this.spec.cwd, pendingPlan: this.pendingPlan,
       process: this.processState, exit: this.exitInfo, engineState: tracked.engineState, activity: tracked.activity,
       // every open turn was opened by a turn.started the tracker saw, so its id is that event's
