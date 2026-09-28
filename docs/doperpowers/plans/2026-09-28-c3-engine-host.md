@@ -388,7 +388,7 @@ export const EngineSessionStatusSchema = z.strictObject({
   exit: z.strictObject({ code: z.number().int().nullable(), signal: z.string().nullable(), reason: z.enum(['quit', 'stop', 'archive', 'crash', 'unknown']), at: z.string() }).nullable(),
   engineState: z.enum(['idle', 'running', 'requires_action', 'unknown']),          // session_state_changed; 'unknown' before the first frame
   activity: z.enum(['compacting', 'requesting']).nullable(),                          // system/status
-  turn: z.strictObject({ origin: z.enum(['human', 'engine']), startedAt: z.string(), acceptedAt: z.string().nullable(), userMessageUuids: z.array(MessageUuidSchema) }).nullable(),   // startedAt: the querying frame's write (human) or system/init (engine); acceptedAt: the system/init inside a human turn
+  turn: z.strictObject({ id: EventIdSchema, origin: z.enum(['human', 'engine']), startedAt: z.string(), acceptedAt: z.string().nullable(), userMessageUuids: z.array(MessageUuidSchema) }).nullable(),   // id: the open turn's turn.started event id (C11 compares gateway.localLane.observedInTurn against it)   // startedAt: the querying frame's write (human) or system/init (engine); acceptedAt: the system/init inside a human turn
   model: z.strictObject({ requested: z.string().nullable(), resolved: z.string().nullable() }),
   effort: EffortSchema.nullable(),
   permissionMode: z.strictObject({ requested: PermissionModeSchema, effective: PermissionModeSchema, refusal: z.enum(AUTO_MODE_REFUSAL_CODES).nullable() }),
@@ -877,6 +877,9 @@ Ready to paste into the charter's C3 section as "**Residue decisions (C3, 2026-0
   Date/Author: 2026-09-28, coordinator via controller.
 - Decision: (C10's ask via the coordinator, 2026-09-28) `SessionStateStore` gains `exists(appSessionId)` (M4), and `session.queue.list` for an unreserved id answers the stored queue verbatim when a state file exists, constructing no `MessageQueue` (M5); `unknown session` only when neither a reservation nor a file exists.
   Rationale: C10's restart reconciliation must know whether a first message reached the queue before retrying a launch; reading the file is side-effect free, which constructing the queue (recovery, notice) is not.
+  Date/Author: 2026-09-28, coordinator via controller.
+- Decision: (coordinator, 2026-09-28) `EngineSessionStatus.turn` gains `id: EventId`, the open turn's `turn.started` event id, beside `startedAt` (additive, M4), so C11's `autoModeLane` compares `gateway.localLane.observedInTurn` with `status.turn.id` from the status alone.
+  Rationale: `observedInTurn` is that event id; the status must carry the same identifier for the comparison.
   Date/Author: 2026-09-28, coordinator via controller.
 
 ## Outcomes & Retrospective
