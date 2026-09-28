@@ -4,7 +4,7 @@
 // `serviceName` it was forked with.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { expect, type Page } from '@playwright/test';
+import { expect, type ElectronApplication, type Page } from '@playwright/test';
 import { collectConsoleErrors, REPO_ROOT, test } from './support/launch';
 
 const LIGHT_BG = 'rgb(250, 249, 246)'; // #faf9f6, light `--bg`
@@ -33,6 +33,8 @@ test('MAWS opens light, hosts answer, pty echoes, survives reload and window clo
   expect(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().map((win) => win.getTitle()))).toEqual(['MAWS']);
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
   expect(await page.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe(LIGHT_BG);
+
+  await openDiagnostics(app, page); // C5: the strip is the Diagnostics tab
 
   // Item 2: both hosts ready with distinct pids, neither the main process, each a Utility process in the app's
   // metrics under the serviceName it was forked with; the strip reads what the snapshots say.
@@ -72,6 +74,7 @@ test('MAWS opens light, hosts answer, pty echoes, survives reload and window clo
 
   // Reload: hosts and the shell belong to the app, not to the page.
   await page.reload();
+  await openDiagnostics(app, page); // C5
   await expect(page.getByLabel('engine host')).toHaveText(`engine host · ready · pid ${enginePid}`);
   await expect(page.getByLabel('pty host')).toHaveText(`pty host · ready · pid ${ptyPid}`);
   const after = await hostStates(page);
@@ -90,6 +93,7 @@ test('MAWS opens light, hosts answer, pty echoes, survives reload and window clo
   await app.evaluate(({ app }) => app.emit('activate'));
   const reopened = await opened;
   const reopenedConsoleErrors = await collectConsoleErrors(reopened);
+  await openDiagnostics(app, reopened); // C5
   await expect(reopened.getByLabel('engine host')).toHaveText(`engine host · ready · pid ${enginePid}`);
   await expect(reopened.getByLabel('pty host')).toHaveText(`pty host · ready · pid ${ptyPid}`);
   const reopenedStates = await hostStates(reopened);
@@ -115,6 +119,25 @@ test('MAWS opens light, hosts answer, pty echoes, survives reload and window clo
     .poll(() => [enginePid, ptyPid, shellPid].filter(isAlive), { timeout: 5_000, message: 'host and shell pids still alive after close' })
     .toEqual([]);
 });
+
+// ---- C5: the diagnostics strip is a tab ----------------------------------------------------------------------------------
+// Since C5's main area the strip is the content of the Diagnostics tab, opened from Help › Diagnostics. The menu item is
+// clicked in main (Playwright's keyboard never reaches a macOS menu), and again until the tab shows: a click that lands
+// before the page listens for `layout.action` is lost, and a reloaded page may already restore the tab by itself.
+async function openDiagnostics(app: ElectronApplication, page: Page): Promise<void> {
+  const strip = page.getByRole('region', { name: 'Diagnostics' });
+  await expect
+    .poll(
+      async () => {
+        if (await strip.isVisible()) return true;
+        await app.evaluate(({ Menu }) => Menu.getApplicationMenu()?.getMenuItemById('diagnostics.open')?.click());
+        return strip.isVisible();
+      },
+      { timeout: 10_000, message: 'Help › Diagnostics opens the Diagnostics tab' },
+    )
+    .toBe(true);
+}
+// ---- end C5 ---------------------------------------------------------------------------------------------------------------
 
 // `kill(pid, 0)` sends nothing; it throws ESRCH once the process is gone.
 function isAlive(pid: number): boolean {
