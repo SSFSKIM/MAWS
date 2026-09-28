@@ -17,11 +17,13 @@ import { ProjectRecordSchema, SessionDigestSchema, type ProjectRecord, type Sess
 import type { AttentionItem } from '../../src/shared/graph/attention';
 
 const StatusShape = EngineSessionStatusSchema.shape;
+// The compact turn may leave out `acceptedAt`; the expansion fills it with `startedAt` (a mid-turn session was accepted).
+const CompactTurnSchema = StatusShape.turn.unwrap().extend({ acceptedAt: z.string().nullable().optional() }).nullable();
 export const CompactEngineSchema = z.strictObject({
   appSessionId: AppSessionIdSchema,
   process: StatusShape.process,
   engineState: StatusShape.engineState,
-  turn: StatusShape.turn,
+  turn: CompactTurnSchema,
   pendingRequests: StatusShape.pendingRequests,
   exit: z.strictObject({ reason: z.enum(['quit', 'stop', 'archive', 'crash', 'unknown']) }).optional(),
 });
@@ -108,7 +110,7 @@ export function expandEngine(compact: CompactEngine, record: SessionRecord, time
     exit: compact.exit ? { code: null, signal: null, reason: compact.exit.reason, at: times.playedAt } : null,
     engineState: compact.engineState,
     activity: null,
-    turn: compact.turn,
+    turn: compact.turn === null ? null : { ...compact.turn, acceptedAt: compact.turn.acceptedAt === undefined ? compact.turn.startedAt : compact.turn.acceptedAt },
     model: record.model,
     effort: effort.data,
     permissionMode: record.permissionMode,

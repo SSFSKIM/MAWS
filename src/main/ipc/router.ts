@@ -48,6 +48,23 @@ export function registerMainHandler<N extends CommandName>(name: N, handler: Mai
   mainHandlers.set(name, handler as (input: unknown) => unknown);
 }
 
+// ---- C5: interceptCommand -------------------------------------------------------------------------------------------
+// The stub source's seam (C5 execution document, Main modules): in launch mode `scenario` the stub answers a few
+// commands (C4's record side, C3's `attention.list`/`attention.request`/`session.answer`) itself. An interceptor is
+// consulted after the sender check and input validation and before the main handler or the host dispatcher for
+// exactly that name. Only the stub source installs one; a production launch never does.
+const interceptors = new Map<CommandName, (input: unknown) => unknown>();
+
+export function interceptCommand<N extends CommandName>(name: N, handler: MainHandler<N>): () => void {
+  if (interceptors.has(name)) throw new Error(`${name} is already intercepted`);
+  const entry = handler as (input: unknown) => unknown;
+  interceptors.set(name, entry);
+  return () => {
+    if (interceptors.get(name) === entry) interceptors.delete(name);
+  };
+}
+// ---- end C5 -----------------------------------------------------------------------------------------------------------
+
 // Without a supervisor (tests, or a main that runs no hosts) every host-owned command is unavailable. The app passes
 // the host supervisor's `dispatch` (src/main/hosts).
 const hostsNotStarted: HostDispatch = async (owner, name) => ({
@@ -77,7 +94,10 @@ async function route(
 
   const { owner } = commands[name];
   let answer: () => Promise<CommandResult<CommandName>>;
-  if (owner !== 'main') {
+  const interceptor = interceptors.get(name); // C5: the stub source's seam, above
+  if (interceptor) {
+    answer = async () => ({ ok: true, value: (await interceptor(input.value)) as CommandOutput<CommandName> });
+  } else if (owner !== 'main') {
     answer = () => dispatchToHost(owner, name, input.value);
   } else {
     const handler = mainHandlers.get(name);
