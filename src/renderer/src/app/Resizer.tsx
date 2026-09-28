@@ -3,7 +3,8 @@
 // restores it too. Pointer: a drag with capture follows the pointer inside the bounds, and a drag that goes
 // `collapseThreshold` px past the minimum collapses the region (releasing before that leaves it at the minimum). The
 // keyboard never collapses: the region's toggle does that. `grow` says which way enlarges the region: +1 for a
-// resizer on a region's right (or bottom) edge, -1 for one on its left (or top) edge.
+// resizer on a region's right (or bottom) edge, -1 for one on its left (or top) edge. A drag-collapse hands back the
+// value the drag started from, so the region reopens at the size it had rather than at the minimum.
 import { useRef, type KeyboardEvent, type PointerEvent } from 'react';
 
 export const RESIZER_STEP = 8;
@@ -20,7 +21,7 @@ export interface ResizerProps {
   grow?: 1 | -1;
   collapseThreshold?: number | null;
   onChange(value: number): void;
-  onCollapse?(): void;
+  onCollapse?(restore: number): void; // `restore`: the value the drag started from, for reopening at that size
   className?: string;
 }
 
@@ -93,7 +94,7 @@ export function Resizer({
         const raw = current.start + grow * (coordinate(event) - current.from);
         if (collapseThreshold !== null && onCollapse && raw <= min - collapseThreshold) {
           end(event);
-          onCollapse();
+          onCollapse(current.start);
           return;
         }
         set(raw);

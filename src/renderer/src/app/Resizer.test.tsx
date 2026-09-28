@@ -10,7 +10,7 @@ function Harness({ grow = 1, initial = 300 }: { grow?: 1 | -1; initial?: number 
   const [collapsed, setCollapsed] = useState(false);
   return (
     <div>
-      <output data-testid="state">{collapsed ? 'collapsed' : width}</output>
+      <output data-testid="state">{collapsed ? `collapsed at ${width}` : width}</output>
       {!collapsed && (
         <Resizer
           label="Resize sidebar"
@@ -22,7 +22,10 @@ function Harness({ grow = 1, initial = 300 }: { grow?: 1 | -1; initial?: number 
           grow={grow}
           collapseThreshold={40}
           onChange={setWidth}
-          onCollapse={() => setCollapsed(true)}
+          onCollapse={(restore) => {
+            setWidth(restore);
+            setCollapsed(true);
+          }}
         />
       )}
     </div>
@@ -121,9 +124,9 @@ describe('resizer', () => {
     expect(state()).toBe('200');
   });
 
-  it('a drag 40 px past the minimum collapses the region', () => {
-    render(<Harness />);
-    drag(300, 250, 160);
-    expect(state()).toBe('collapsed');
+  it('a drag 40 px past the minimum collapses the region and hands back the width it started from', () => {
+    render(<Harness initial={360} />);
+    drag(360, 250, 160, 120); // raw width 120: 80 px under the 200 minimum
+    expect(state()).toBe('collapsed at 360');
   });
 });

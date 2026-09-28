@@ -58,7 +58,7 @@ function SidebarRegion() {
           defaultValue={SIDEBAR_BOUNDS.default}
           collapseThreshold={COLLAPSE_THRESHOLD_PX}
           onChange={(next) => setSidebar({ width: next })}
-          onCollapse={() => setSidebar({ collapsed: true })}
+          onCollapse={(restore) => setSidebar({ collapsed: true, width: restore })}
           className="absolute inset-y-0 -right-0.75"
         />
       )}

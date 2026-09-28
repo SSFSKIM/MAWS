@@ -38,7 +38,7 @@ export function PanelRegion() {
           grow={-1}
           collapseThreshold={COLLAPSE_THRESHOLD_PX}
           onChange={(next) => setPanel({ width: next })}
-          onCollapse={() => setPanel({ collapsed: true })}
+          onCollapse={(restore) => setPanel({ collapsed: true, width: restore })}
           className="absolute inset-y-0 -left-0.75"
         />
       )}
