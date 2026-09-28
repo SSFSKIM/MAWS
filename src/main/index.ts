@@ -7,6 +7,9 @@ import { appUrl, createWindow, installContentSecurityPolicy } from './window';
 
 // A fresh profile for the end-to-end smoke (and anyone else who wants one); must be set before the app is ready.
 if (process.env.MAWS_USER_DATA) app.setPath('userData', process.env.MAWS_USER_DATA);
+// The smoke runs unattended, so nothing may wait on a person: Chromium keeps its storage key in a mock keychain
+// instead of asking the login keychain, whose access prompt an unsigned or re-signed build can raise.
+if (process.env.MAWS_E2E) app.commandLine.appendSwitch('use-mock-keychain');
 
 // macOS convention (D-11): closing the last window keeps the app running; the dock icon re-creates it.
 app.whenReady().then(() => {
