@@ -7,7 +7,7 @@
 // A branch nothing explains is a second writer: retraction plus a warning. Every method is serialised behind one
 // promise chain, so a watcher event, a reconcile tick and a follow request never interleave.
 import type { SessionEvent } from '@shared/graph/events';
-import type { AgentId, MessageUuid, ParentToolUseId, SessionId } from '@shared/graph/ids';
+import type { AgentId, EventId, MessageUuid, ParentToolUseId, SessionId } from '@shared/graph/ids';
 import type { TranscriptSummary } from '@shared/wire/store';
 import { TranscriptRecordSchema, type TranscriptRecord } from '@shared/wire/transcript';
 import { createBackfillContext, eventBase, recordToEvents, type BackfillContext, type SubagentLookup } from './backfill';
@@ -73,6 +73,7 @@ const KNOWN_SILENT_TYPES = new Set([
 
 interface Produced {
   source: MessageUuid | null; // the record the event derives from; null for anchor-, branch- and line-derived events
+  group: number; // one `emit` call: the events of one record mapped once; a re-delivery is a new group
   event: SessionEvent;
 }
 
@@ -92,6 +93,7 @@ class FollowerCore {
   gap: FollowerState['gap'] = null;
   out: Produced[] = [];
   facts: FollowerFacts = {};
+  private groups = 0;
 
   constructor(
     private readonly reader: FileReader,
@@ -164,7 +166,7 @@ class FollowerCore {
         return;
       default:
         if (KNOWN_SILENT_TYPES.has(record.type)) return;
-        this.out.push({ source: null, event: { ...eventBase(this.ctx, `line:${offset}`), kind: 'frame.unknown', frameType: `transcript:${record.type}`, subtype: null } });
+        this.produce(null, { ...eventBase(this.ctx, `line:${offset}`), kind: 'frame.unknown', frameType: `transcript:${record.type}`, subtype: null });
     }
   }
 
@@ -192,7 +194,7 @@ class FollowerCore {
     const targetMessageUuid = segment.find((uuid) => this.skeletons.get(uuid)?.type === 'user') ?? null;
     if (targetMessageUuid !== null) {
       // A cut segment with no user record is attachments only, invisible to consumers: no boundary.
-      this.out.push({ source: null, event: { ...eventBase(this.ctx, `anchor:${offset}`), kind: 'boundary.rewind', targetMessageUuid, precedingAssistantUuid: leafUuid, prefillText } });
+      this.produce(null, { ...eventBase(this.ctx, `anchor:${offset}`), kind: 'boundary.rewind', targetMessageUuid, precedingAssistantUuid: leafUuid, prefillText });
     }
     this.rewind = { phase: 'announced', leafUuid, targetMessageUuid, prefillText, anchorOffset: offset };
   }
@@ -272,12 +274,12 @@ class FollowerCore {
       if (this.rewind?.phase === 'unanchored') {
         const targetMessageUuid = removed.find((member) => this.skeletons.get(member)?.type === 'user') ?? null;
         if (targetMessageUuid !== null) {
-          this.out.push({ source: null, event: { ...eventBase(this.ctx, `anchor:${this.rewind.anchorOffset}`), kind: 'boundary.rewind', targetMessageUuid, precedingAssistantUuid: this.rewind.leafUuid, prefillText: this.rewind.prefillText } });
+          this.produce(null, { ...eventBase(this.ctx, `anchor:${this.rewind.anchorOffset}`), kind: 'boundary.rewind', targetMessageUuid, precedingAssistantUuid: this.rewind.leafUuid, prefillText: this.rewind.prefillText });
         }
       } else {
         // No anchor explains this, or the announced rewind rejected the parent: a second writer (pass-2 item 10).
-        this.out.push({ source: null, event: { ...eventBase(this.ctx, `branch:${uuid}:retraction`), kind: 'boundary.retraction', retractedMessageUuids: removed, reason: 'transcript_branch', fallbackModel: null } });
-        this.out.push({ source: null, event: { ...eventBase(this.ctx, `branch:${uuid}:notice`), kind: 'notice.posted', level: 'warning', text: 'Another process wrote a sibling branch into this transcript', key: 'transcript_branch' } });
+        this.produce(null, { ...eventBase(this.ctx, `branch:${uuid}:retraction`), kind: 'boundary.retraction', retractedMessageUuids: removed, reason: 'transcript_branch', fallbackModel: null });
+        this.produce(null, { ...eventBase(this.ctx, `branch:${uuid}:notice`), kind: 'notice.posted', level: 'warning', text: 'Another process wrote a sibling branch into this transcript', key: 'transcript_branch' });
       }
     }
     this.chain = newChain;
@@ -292,8 +294,13 @@ class FollowerCore {
   }
 
   private emit(record: TranscriptRecord, uuid: MessageUuid): void {
-    for (const event of recordToEvents(record, this.ctx)) this.out.push({ source: uuid, event });
+    this.produce(uuid, ...recordToEvents(record, this.ctx));
     this.emitted.add(uuid);
+  }
+
+  private produce(source: MessageUuid | null, ...events: SessionEvent[]): void {
+    const group = ++this.groups;
+    for (const event of events) this.out.push({ source, group, event });
   }
 
   // A record that came onto the chain after its line was read: re-read it by offset (attachments carry no events, so
@@ -361,7 +368,9 @@ export class ChainFollower {
   private lastReported: string | null = null;
   private lastFactsLeaf: MessageUuid | null = null;
   private readonly delivered: SessionEvent[] = [];
-  private readonly deliveredIds = new Set<string>();
+  // Deliveries per record over the follower's life (reset only by `stop`): a record delivered again after a boundary
+  // removed it carries `<uuid>@<g>`, so the delivery log never holds an id twice and a consumer deduplicates by id alone.
+  private readonly deliveries = new Map<MessageUuid, number>();
 
   constructor(
     private readonly reader: FileReader,
@@ -424,7 +433,7 @@ export class ChainFollower {
     this.stopped = true;
     this.core = this.freshCore();
     this.delivered.length = 0;
-    this.deliveredIds.clear();
+    this.deliveries.clear();
     this.report('stopped');
   }
 
@@ -486,23 +495,23 @@ export class ChainFollower {
     const old = this.core;
     const freshChain = new Set(fresh.chain);
     const retracted = old.chain.filter((uuid) => !freshChain.has(uuid));
-    const events: SessionEvent[] = [];
+    const produced: Produced[] = [];
     if (retracted.length > 0) {
-      events.push({ ...eventBase(fresh.ctx, `rewrite:${stat.ino}:${stat.size}`), kind: 'boundary.retraction', retractedMessageUuids: retracted, reason: 'transcript_rewritten', fallbackModel: null });
+      produced.push({ source: null, group: 0, event: { ...eventBase(fresh.ctx, `rewrite:${stat.ino}:${stat.size}`), kind: 'boundary.retraction', retractedMessageUuids: retracted, reason: 'transcript_rewritten', fallbackModel: null } });
     }
-    const byRecord = new Map<MessageUuid, SessionEvent[]>();
-    for (const produced of fresh.out) {
-      if (produced.source === null) continue;
-      const list = byRecord.get(produced.source) ?? [];
-      list.push(produced.event);
-      byRecord.set(produced.source, list);
+    const byRecord = new Map<MessageUuid, Produced[]>();
+    for (const item of fresh.out) {
+      if (item.source === null) continue;
+      const list = byRecord.get(item.source) ?? [];
+      list.push(item);
+      byRecord.set(item.source, list);
     }
     for (const uuid of fresh.chain) {
-      if (!old.emitted.has(uuid)) events.push(...(byRecord.get(uuid) ?? []));
+      if (!old.emitted.has(uuid)) produced.push(...(byRecord.get(uuid) ?? []));
     }
     fresh.out = [];
     this.core = fresh;
-    this.deliver(events);
+    this.deliver(produced);
     this.flush(fresh);
     this.report('following');
   }
@@ -510,7 +519,7 @@ export class ChainFollower {
   private flush(core: FollowerCore): void {
     if (this.stopped) return;
     if (core.out.length > 0) {
-      this.deliver(core.out.map((produced) => produced.event));
+      this.deliver(core.out);
       core.out = [];
     }
     if (core.leaf !== this.lastFactsLeaf) {
@@ -523,12 +532,25 @@ export class ChainFollower {
     }
   }
 
-  private deliver(events: SessionEvent[]): void {
-    if (this.stopped || events.length === 0) return;
-    for (const event of events) {
-      this.delivered.push(event);
-      this.deliveredIds.add(event.id);
+  // Ids name delivery occurrences: a record's first delivery keeps the backfill's ids; each later one (a rewind
+  // continuation, a branch flip, a reload) carries `<uuid>@<g>` / `<uuid>@<g>#<n>` with `g` its delivery count.
+  private deliver(produced: Produced[]): void {
+    if (this.stopped || produced.length === 0) return;
+    const events: SessionEvent[] = [];
+    let currentGroup: { source: MessageUuid; group: number; g: number } | null = null;
+    for (const item of produced) {
+      if (item.source === null) {
+        events.push(item.event);
+        continue;
+      }
+      if (currentGroup === null || currentGroup.source !== item.source || currentGroup.group !== item.group) {
+        const g: number = (this.deliveries.get(item.source) ?? 0) + 1;
+        this.deliveries.set(item.source, g);
+        currentGroup = { source: item.source, group: item.group, g };
+      }
+      events.push(currentGroup.g === 1 ? item.event : { ...item.event, id: occurrenceId(item.event.id, item.source, currentGroup.g) });
     }
+    this.delivered.push(...events);
     for (let i = 0; i < events.length; i += BATCH_SIZE) this.sink({ t: 'events', events: events.slice(i, i + BATCH_SIZE) });
   }
 
@@ -548,4 +570,12 @@ export class ChainFollower {
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+// `<uuid>` → `<uuid>@<g>`, `<uuid>#<n>` → `<uuid>@<g>#<n>`; an id of another form (the synthetic start) gets `@<g>`.
+function occurrenceId(id: EventId, uuid: MessageUuid, g: number): EventId {
+  const plain: string = id;
+  if (plain === (uuid as string)) return `${uuid}@${g}` as EventId;
+  if (plain.startsWith(`${uuid}#`)) return `${uuid}@${g}${plain.slice(uuid.length)}` as EventId;
+  return `${plain}@${g}` as EventId;
 }

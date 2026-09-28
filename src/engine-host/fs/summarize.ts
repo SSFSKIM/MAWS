@@ -58,48 +58,103 @@ export function summarize(
   };
 }
 
-// Whole lines in the window parse as records. A line cut by the window's edge (a first record longer than the head
-// window, a last record longer than the tail window) still yields its top-level string fields by a bounded
-// `"<key>":"…"` scan, standing in the window at the fragment's position, so a long first prompt does not lose the
-// session's directory. A bare `"key":"` cannot occur inside a JSON string value (its quotes are escaped there).
-const FRAGMENT_KEYS = ['type', 'uuid', 'cwd', 'version', 'gitBranch', 'entrypoint', 'timestamp', 'sessionId'] as const;
+// Whole lines in the window parse as records. A line cut by the window's edge that begins at a record's start (the
+// head window's last line when the file goes on past it; a torn last line of the tail window) still yields its
+// top-level string fields by a bounded, structure-aware scan: it walks the fragment tracking JSON string state and
+// nesting depth and captures `"<key>":"…"` pairs at depth 1 only, so a long first prompt does not lose the session's
+// directory while a `uuid` or `gitBranch` inside a tool input never masquerades as the record's. A fragment that
+// begins mid-record (the tail window's cut-off first line) has no establishable depth and contributes nothing.
+const FRAGMENT_KEYS: ReadonlySet<string> = new Set(['type', 'uuid', 'cwd', 'version', 'gitBranch', 'entrypoint', 'timestamp', 'sessionId']);
 
-function fragmentRecord(fragment: string): TranscriptRecord | null {
+function scanRecordStart(fragment: string): TranscriptRecord | null {
+  const text = fragment.replace(/^\0+/, '');
+  if (!text.startsWith('{')) return null;
   const fields: Record<string, string> = {};
-  for (const key of FRAGMENT_KEYS) {
-    const match = new RegExp(`"${key}":"((?:[^"\\\\]|\\\\.)*)"`).exec(fragment);
-    if (match === null) continue;
-    try {
-      fields[key] = JSON.parse(`"${match[1]}"`) as string;
-    } catch {
+  let depth = 0;
+  let key: string | null = null; // a depth-1 key whose value is next
+  let i = 0;
+  while (i < text.length) {
+    const c = text[i];
+    if (c === '"') {
+      const end = closingQuote(text, i);
+      if (end === -1) break; // the cut fell inside a string: nothing further is trustworthy
+      const raw = text.slice(i + 1, end);
+      i = end + 1;
+      if (depth !== 1) continue;
+      if (key === null) {
+        let j = i;
+        while (j < text.length && (text[j] === ' ' || text[j] === '\t' || text[j] === '\r' || text[j] === '\n')) j++;
+        if (text[j] === ':') {
+          key = raw;
+          i = j + 1;
+        }
+      } else {
+        if (FRAGMENT_KEYS.has(key)) {
+          try {
+            fields[key] = JSON.parse(`"${raw}"`) as string;
+          } catch {
+            // an invalid escape: leave the field unset
+          }
+        }
+        key = null;
+      }
       continue;
     }
+    if (c === '{' || c === '[') {
+      depth += 1;
+      key = null; // a nested value: its keys are not the record's
+    } else if (c === '}' || c === ']') {
+      depth -= 1;
+    } else if (c === ',' && depth === 1) {
+      key = null; // a non-string value ended
+    }
+    i += 1;
   }
   if (Object.keys(fields).length === 0) return null;
   return { ...fields, type: fields.type ?? 'fragment' };
 }
 
+// The index of the quote closing the string that opens at `start`, honouring backslash escapes; -1 when unterminated.
+function closingQuote(text: string, start: number): number {
+  for (let i = start + 1; i < text.length; i++) {
+    if (text[i] === '\\') i += 1;
+    else if (text[i] === '"') return i;
+  }
+  return -1;
+}
+
 function parseWindow(text: string, edges: { dropFirst?: boolean; dropLast?: boolean }): TranscriptRecord[] {
   const lines = text.split('\n');
-  const leading = edges.dropFirst ? fragmentRecord(lines.shift() ?? '') : null;
-  // The window ends either on a complete line followed by '\n' (an empty last element) or inside a line.
-  const trailing = edges.dropLast ? fragmentRecord(lines.pop() ?? '') : null;
-  if (!edges.dropLast && lines.at(-1) === '') lines.pop();
-  const records: TranscriptRecord[] = leading === null ? [] : [leading];
+  if (edges.dropFirst) lines.shift(); // begins mid-record: contributes nothing
+  // The window ends on a complete line followed by '\n' (an empty last element), inside a line cut by the window's
+  // end, or on a torn last line of the file; the last two begin at a record start.
+  let trailing: string | null = null;
+  if (edges.dropLast) trailing = lines.pop() ?? null;
+  else if (lines.at(-1) === '') lines.pop();
+  else trailing = lines.pop() ?? null;
+  const records: TranscriptRecord[] = [];
   for (const raw of lines) {
-    const line = raw.replace(/^\0+/, '');
-    if (line.length === 0) continue;
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(line);
-    } catch {
-      continue;
-    }
-    const result = TranscriptRecordSchema.safeParse(parsed);
-    if (result.success) records.push(result.data);
+    const record = parseRecord(raw);
+    if (record !== null) records.push(record);
   }
-  if (trailing !== null) records.push(trailing);
+  if (trailing !== null) {
+    const record = parseRecord(trailing) ?? scanRecordStart(trailing);
+    if (record !== null) records.push(record);
+  }
   return records;
+}
+
+function parseRecord(raw: string): TranscriptRecord | null {
+  const line = raw.replace(/^\0+/, '');
+  if (line.length === 0) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(line);
+  } catch {
+    return null;
+  }
+  const result = TranscriptRecordSchema.safeParse(parsed);
+  return result.success ? result.data : null;
 }
 
 const isUuidRecord = (record: TranscriptRecord): boolean => typeof record.uuid === 'string';

@@ -120,6 +120,50 @@ describe('head and tail summary', () => {
     expect(summary.lastAssistantText).toBe('done');
   });
 
+  it('a nested uuid, cwd or gitBranch inside a tool input never masquerades as the record\'s in a head fragment', () => {
+    // A 150 KB assistant record: real top-level facts first, then a tool input carrying the same keys, then padding.
+    const big = line({
+      parentUuid: null, type: 'assistant', uuid: 'real-message', gitBranch: 'main', cwd: '/real', timestamp: '2026-09-28T10:00:00.000Z', version: '2.1.283',
+      message: { id: 'm', model: 'x', content: [{ type: 'tool_use', id: 't', name: 'Write', input: { uuid: 'nested-input-uuid', gitBranch: 'nested-input-branch', cwd: '/nested', content: 'y'.repeat(150 * 1024) } }] },
+    });
+    const whole = Buffer.from(big, 'utf8');
+    const summary = summarize(headAndTail(whole).head, headAndTail(whole).tail, { size: whole.length, mtimeMs: 1 }, '/p/S.jsonl', '-p');
+    expect(summary.leafUuid).toBe('real-message');
+    expect(summary.gitBranch).toBe('main');
+    expect(summary.directory).toBe('/real');
+    expect(summary.engineVersion).toBe('2.1.283');
+    expect(summary.firstRecordAt).toBe('2026-09-28T10:00:00.000Z');
+  });
+
+  it('a tail fragment that begins mid-record contributes nothing, even when it holds nested keys', () => {
+    // The big record's nested keys sit at its end, inside the tail window's cut-off first line; the whole record after
+    // it carries no gitBranch, so the branch must come from the head's record start, not from the tool input.
+    const big = line({
+      parentUuid: null, type: 'user', uuid: 'real-message', gitBranch: 'main', cwd: '/real', timestamp: '2026-09-28T10:00:00.000Z',
+      message: { role: 'user', content: [{ type: 'text', text: 'y'.repeat(150 * 1024) }, { type: 'tool_result', tool_use_id: 't', content: '{"uuid":"nested-input-uuid","gitBranch":"nested-input-branch","cwd":"/nested"}' }] },
+      toolUseResult: { uuid: 'nested-result-uuid', gitBranch: 'nested-result-branch', cwd: '/nested-result' },
+    });
+    const last = line({ type: 'assistant', uuid: 'a1', parentUuid: 'real-message', timestamp: '2026-09-28T10:00:05.000Z', message: { role: 'assistant', content: [{ type: 'text', text: 'done' }] } });
+    const whole = Buffer.from(big + last, 'utf8');
+    const summary = summarize(headAndTail(whole).head, headAndTail(whole).tail, { size: whole.length, mtimeMs: 1 }, '/p/S.jsonl', '-p');
+    expect(summary.leafUuid).toBe('a1');
+    expect(summary.gitBranch).toBe('main');
+    expect(summary.directory).toBe('/real');
+    expect(summary.lastRecordAt).toBe('2026-09-28T10:00:05.000Z');
+    expect(summary.lastAssistantText).toBe('done');
+  });
+
+  it('a torn last line of the tail window is scanned from its record start, depth 1 only', () => {
+    const first = line({ type: 'user', uuid: 'u1', parentUuid: null, cwd: '/d', gitBranch: 'main', timestamp: '2026-09-28T10:00:00.000Z', message: { role: 'user', content: 'hi' } });
+    const torn = JSON.stringify({ parentUuid: 'u1', type: 'assistant', uuid: 'u2', gitBranch: 'torn', timestamp: '2026-09-28T10:00:01.000Z', message: { id: 'm', content: [{ type: 'tool_use', input: { uuid: 'nested-input-uuid', gitBranch: 'nested-input-branch' } }] } });
+    const whole = Buffer.from(first + torn.slice(0, torn.length - 20), 'utf8'); // cut inside the nested input, no newline
+    const summary = summarize(whole, whole, { size: whole.length, mtimeMs: 1 }, '/p/S.jsonl', '-p');
+    expect(summary.leafUuid).toBe('u2');
+    expect(summary.gitBranch).toBe('torn');
+    expect(summary.lastRecordAt).toBe('2026-09-28T10:00:01.000Z');
+    expect(summary.directory).toBe('/d');
+  });
+
   it('ignores the partial line at the start of a tail window and at the end of a head window', () => {
     const first = line({ type: 'user', uuid: 'u1', parentUuid: null, cwd: '/d', timestamp: '2026-09-28T10:00:00.000Z', message: { role: 'user', content: 'hi' } });
     const middle = line({ type: 'ai-title', aiTitle: 'Torn by the window', sessionId: 'S' });

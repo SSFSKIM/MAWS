@@ -200,9 +200,11 @@ describe('follows the leaf across a rewind', () => {
     expect(out.of('boundary.retraction')).toHaveLength(1);
     expect(out.of('boundary.retraction')[0].reason).toBe('transcript_branch');
     expect(out.of('notice.posted')).toHaveLength(1);
-    // The cut records rejoin the chain and are re-read and re-emitted, so their events appear twice in delivery order.
+    // The cut records rejoin the chain and are re-read and re-emitted as a second delivery occurrence.
     expect(out.of('user.message').map((e) => short(e.messageUuid))).toEqual(['e3b48834', '36a2aa44', '36a2aa44', 'a4d68c72']);
-    for (const event of out.events()) expect(SessionEventSchema.parse(event)).toEqual(event);
+    expect(out.of('user.message').map((e) => e.id.slice(36))).toEqual(['#1', '#1', '@2#1', '#1']);
+    expect(out.of('assistant.block.complete').map((e) => e.id.slice(36))).toEqual(['', '', '@2', '']);
+    expectWellFormed(out.events());
   });
 
   it("agrees with currentChain on C1's synthetic fixture", async () => {
@@ -470,10 +472,14 @@ describe('survives torn tails and rewrites', () => {
     expect(out.of('boundary.rewind')).toHaveLength(1); // the anchor's boundary was delivered on the cold start; its id is known
     expectWellFormed(out.events());
 
-    // A file that shrinks under the same inode is also a rewrite.
+    // The turn appended again after the rewrite is a second delivery occurrence of the retracted records.
     reader.append(joined(REWIND_LINES.slice(27)));
     await follower.poke();
     expect(follower.snapshot().chain.map(short)).toEqual(FULL_CHAIN);
+    expect(out.events().slice(before + 1).map((e) => e.id.slice(36))).toEqual(['@2', '@2#1', '@2']);
+    expectWellFormed(out.events());
+
+    // A file that shrinks under the same inode is also a rewrite.
     const truncated = joined(REWIND_LINES.slice(0, 20));
     (reader as unknown as { bytes: Buffer }).bytes = truncated;
     await follower.poke();
@@ -566,9 +572,10 @@ describe('stop cancels work in flight', () => {
   });
 });
 
-// The rejoin contract asked of C6 (Cross-child reconciliation): a consumer that deduplicates by event id must release
-// the ids a boundary names, because a record cut by a rewind or retracted by a branch can rejoin the chain later and is
-// re-emitted under its original id. This reference consumer keeps a visible message list and a seen-id set.
+// The consumer contract (Cross-child reconciliation, C6 row): deduplicate by event id alone and remove the message
+// uuids a boundary names, exactly as for C3's live rewinds. No release rule: a record that rejoins the chain after a
+// boundary removed it arrives under a fresh occurrence id (`<uuid>@<g>`), so one follower's delivery log never carries
+// an id twice and a snapshot overlapping a batch is all duplicates.
 class ReferenceConsumer {
   readonly messages: string[] = [];
   private readonly seen = new Set<string>();
@@ -586,11 +593,14 @@ class ReferenceConsumer {
           break;
         case 'boundary.rewind': {
           const index = this.messages.indexOf(event.targetMessageUuid);
-          if (index !== -1) this.releaseAll(this.messages.splice(index));
+          if (index !== -1) this.messages.splice(index);
           break;
         }
         case 'boundary.retraction':
-          this.releaseAll(event.retractedMessageUuids);
+          for (const uuid of event.retractedMessageUuids) {
+            const index = this.messages.indexOf(uuid);
+            if (index !== -1) this.messages.splice(index, 1);
+          }
           break;
         default:
           break;
@@ -601,38 +611,46 @@ class ReferenceConsumer {
   private show(uuid: string): void {
     if (!this.messages.includes(uuid)) this.messages.push(uuid);
   }
+}
 
-  private releaseAll(uuids: string[]): void {
-    for (const uuid of uuids) {
-      const index = this.messages.indexOf(uuid);
-      if (index !== -1) this.messages.splice(index, 1);
-      for (const id of this.seen) if (id === uuid || id.startsWith(`${uuid}#`)) this.seen.delete(id);
+function expectNoIdTwice(out: Collector): void {
+  const ids = new Set<string>();
+  for (const received of out.received) {
+    if (received.t !== 'events') continue;
+    for (const event of received.events) {
+      expect(ids.has(event.id), `id ${event.id} delivered twice`).toBe(false);
+      ids.add(event.id);
     }
   }
 }
 
-describe('retract-then-rejoin converges for a consumer that releases boundary-named ids', () => {
+describe('retract-then-rejoin converges for a consumer that deduplicates by id and honours boundaries', () => {
   function visibleChain(follower: ChainFollower): string[] {
     const state = follower.snapshot();
     return state.chain.filter((uuid) => ['user', 'assistant'].includes(state.skeletons.get(uuid)?.type ?? ''));
   }
 
-  function incremental(out: Collector): ReferenceConsumer {
+  function converge(follower: ChainFollower, out: Collector): string[] {
     const consumer = new ReferenceConsumer();
     for (const received of out.received) if (received.t === 'events') consumer.accept(received.events);
-    return consumer;
+    const incremental = [...consumer.messages];
+    // A snapshot overlapping everything already delivered, into the same consumer: all duplicates, nothing changes.
+    consumer.accept(follower.materialized());
+    expect(consumer.messages).toEqual(incremental);
+    // A fresh consumer over the snapshot alone reaches the same list.
+    const fresh = new ReferenceConsumer();
+    fresh.accept(follower.materialized());
+    expect(fresh.messages).toEqual(incremental);
+    expect(visibleChain(follower)).toEqual(incremental);
+    expectNoIdTwice(out);
+    return incremental;
   }
 
   it('over the rewind-real two-step run', async () => {
     const { reader, follower, out } = await started(joined(REWIND_LINES.slice(0, 27)));
     reader.append(joined(REWIND_LINES.slice(27)));
     await follower.poke();
-    const fromBatches = incremental(out);
-    const fromSnapshot = new ReferenceConsumer();
-    fromSnapshot.accept(follower.materialized());
-    expect(fromBatches.messages.map(short)).toEqual(['e3b48834', 'edf0f954', 'a4d68c72', '7c05f769']);
-    expect(fromSnapshot.messages).toEqual(fromBatches.messages);
-    expect(visibleChain(follower)).toEqual(fromBatches.messages);
+    expect(converge(follower, out).map(short)).toEqual(['e3b48834', 'edf0f954', 'a4d68c72', '7c05f769']);
   });
 
   it('over a sibling branch and a rejoin: u1 → u2, sibling u3, then u4 under u2', async () => {
@@ -645,23 +663,33 @@ describe('retract-then-rejoin converges for a consumer that releases boundary-na
     await follower.poke();
     expect(follower.snapshot().chain).toEqual(['u1', 'u2', 'u4']);
     expect(out.of('boundary.retraction').map((e) => e.retractedMessageUuids)).toEqual([['u2'], ['u3']]);
+    // u2's second delivery carries the occurrence id.
+    expect(out.of('user.message').map((e) => [e.id, e.messageUuid])).toEqual([['u1#1', 'u1'], ['u2#1', 'u2'], ['u3#1', 'u3'], ['u2@2#1', 'u2'], ['u4#1', 'u4']]);
+    expect(out.of('turn.started').map((e) => e.id)).toEqual(['u1', 'u2', 'u3', 'u2@2', 'u4']);
+    expect(converge(follower, out)).toEqual(['u1', 'u2', 'u4']);
+  });
 
-    const fromBatches = incremental(out);
-    const fromSnapshot = new ReferenceConsumer();
-    fromSnapshot.accept(follower.materialized());
-    expect(fromBatches.messages).toEqual(['u1', 'u2', 'u4']);
-    expect(fromSnapshot.messages).toEqual(['u1', 'u2', 'u4']);
-    expect(visibleChain(follower)).toEqual(['u1', 'u2', 'u4']);
+  it('over the rewind-real reload cases: a rewrite that drops the last turn, then the turn appended again', async () => {
+    const { reader, follower, out } = await started(joined(REWIND_LINES));
+    reader.replace(joined(REWIND_LINES.slice(0, 27)));
+    await follower.poke();
+    expect(converge(follower, out).map(short)).toEqual(['e3b48834', 'edf0f954']);
+    reader.append(joined(REWIND_LINES.slice(27)));
+    await follower.poke();
+    expect(out.of('user.message').filter((e) => short(e.messageUuid) === 'a4d68c72').map((e) => e.id.slice(36))).toEqual(['#1', '@2#1']);
+    expect(converge(follower, out).map(short)).toEqual(['e3b48834', 'edf0f954', 'a4d68c72', '7c05f769']);
+  });
 
-    // The naive consumer (seen ids never released) drops the rejoined u2: the reason the release rule is the contract.
-    const naive = new Set<string>();
-    const shown: string[] = [];
-    for (const event of follower.materialized()) {
-      if (naive.has(event.id)) continue;
-      naive.add(event.id);
-      if (event.kind === 'user.message' && event.messageUuid !== null) shown.push(event.messageUuid);
-      if (event.kind === 'boundary.retraction') for (const uuid of event.retractedMessageUuids) shown.splice(shown.indexOf(uuid), 1);
-    }
-    expect(shown).toEqual(['u1', 'u4']);
+  it('the same file followed twice from scratch yields the same delivery log', async () => {
+    const edited = [...REWIND_LINES];
+    const record = JSON.parse(edited[29]) as { parentUuid: string };
+    record.parentUuid = fullUuid('57525d04');
+    edited[29] = JSON.stringify(record);
+    const first = await started(joined(edited));
+    const second = await started(joined(edited));
+    expect(second.out.events()).toEqual(first.out.events());
+    expect(first.out.events().map((e) => e.id).filter((id) => id.includes('@'))).toEqual([
+      `${fullUuid('36a2aa44')}@2`, `${fullUuid('36a2aa44')}@2#1`, `${fullUuid('57525d04')}@2`,
+    ]);
   });
 });
