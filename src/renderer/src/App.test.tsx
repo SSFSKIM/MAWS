@@ -29,7 +29,11 @@ function fakeMain(initial: SettingsState['settings']['theme']) {
       case 'fs.state':
         return { configHome: '/Users/new/.claude', watching: true, projects: 1, sessions: 1, bound: 0, followed: [], holders: [], lastScanAt: null };
       case 'fs.scan':
-        return { projects: 1, sessions: 1, changed: 1, durationMs: 1234 };
+        return { projects: 3, sessions: 1, changed: 1, durationMs: 1234 };
+      case 'session.list':
+        return { sessions: [], revision: 1 };
+      case 'session.projects.list':
+        return { projects: [{ id: 'p1', name: 'maws-accept', directory: '/private/tmp/maws-accept', order: 0, createdAt: '2026-09-28T10:00:00.000Z' }], revision: 1 };
       case 'pty.spawn':
         return { ptyId: 'p1', pid: 3333 };
       case 'pty.write':
@@ -138,43 +142,45 @@ describe('store section of the diagnostics strip', () => {
     delete (window as { maws?: MawsBridge }).maws;
   });
 
-  it('shows the watched config home, the scan counts, and each session with its title, directory and holder badge', async () => {
+  it('shows the watched config home, the counts (projects from the index), and each record with its title, source, directory, pin and holder badge', async () => {
     const main = fakeMain('light');
     await renderApp();
     expect(screen.getByRole('status', { name: 'store' }).textContent).toBe('store · /Users/new/.claude · watching');
     expect(screen.getByRole('status', { name: 'store scan' }).textContent).toBe('projects 1 · sessions 1 · scan 1.2 s');
 
-    const sessionId = '11111111-1111-4111-8111-111111111111';
-    const summary = {
-      sessionId,
-      transcriptPath: `/Users/new/.claude/projects/-private-tmp-maws-accept/${sessionId}.jsonl`,
-      slug: '-private-tmp-maws-accept',
+    const record = {
+      appId: 'aaaaaaaa-1111-4111-8111-111111111111',
+      engineSessionId: '11111111-1111-4111-8111-111111111111',
+      projectId: 'p1',
       directory: '/private/tmp/maws-accept',
-      relocatedCwd: null,
-      size: 10,
-      mtimeMs: 1,
-      firstRecordAt: null,
-      lastRecordAt: null,
-      customTitle: null,
-      aiTitle: 'Remembering fruit',
-      firstPrompt: 'Remember APPLE.',
-      lastAssistantText: null,
-      gitBranch: null,
+      additionalDirectories: [],
+      worktree: null,
+      branch: null,
+      title: { text: 'Remembering fruit', source: 'generated' },
+      pinned: false,
+      archived: false,
+      holder: { kind: 'terminal', pid: 78212 },
+      lastSeen: { messageUuid: null, at: null },
+      unread: false,
       engineVersion: '2.1.283',
-      entrypoint: 'cli',
-      sessionKind: null,
-      hasMessages: true,
-      leafUuid: null,
+      gateway: { routed: true, baseUrl: null, autoModeServer: 'unknown' },
+      model: { requested: null, resolved: null },
+      effort: null,
+      permissionMode: { requested: 'auto', effective: 'auto', refusal: null },
+      createdAt: '2026-09-28T10:00:00.000Z',
+      updatedAt: '2026-09-28T10:00:00.000Z',
     };
     await act(async () => {
-      main.send('fs.sessionChanged', { summary, appSessionId: null });
-      main.send('fs.holderChanged', { sessionId, appSessionId: null, holder: { kind: 'terminal', pid: 78212 }, registry: null, job: null });
+      main.send('session.changed', { record, cause: 'discovered', revision: 2 });
       await new Promise((resolve) => setTimeout(resolve, 60));
     });
     const row = within(screen.getByRole('list', { name: 'Discovered sessions' })).getByRole('listitem');
-    expect(row.textContent).toBe('Remembering fruit/private/tmp/maws-acceptterminal · 78212Follow');
+    expect(row.textContent).toBe('Remembering fruitgenerated/private/tmp/maws-acceptterminal · 78212Follow');
 
-    await act(async () => void main.send('fs.holderChanged', { sessionId, appSessionId: null, holder: { kind: 'none' }, registry: null, job: null }));
-    expect(row.textContent).toBe('Remembering fruit/private/tmp/maws-acceptFollow');
+    await act(async () => {
+      main.send('session.changed', { record: { ...record, pinned: true, holder: { kind: 'none' } }, cause: 'holder', revision: 3 });
+      await new Promise((resolve) => setTimeout(resolve, 60));
+    });
+    expect(row.textContent).toBe('pinRemembering fruitgenerated/private/tmp/maws-acceptFollow');
   });
 });

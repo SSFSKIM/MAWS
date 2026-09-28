@@ -1,8 +1,9 @@
 // The Store section of the diagnostics strip (C4 execution document, Architecture "Renderer"): the engine's store as
-// the filesystem state service sees it, so C4's acceptance can be read by eye before C5's sidebar exists. It shows the
-// config home and whether it is watched, the scan counts, and one row per discovered session with its title, its
-// directory from the first record and its holder badge. A row can be followed (M3): the detail then reads the chain
-// (`chain N · leaf <uuid8>`) and the last twenty events. C5 replaces it as the user-facing surface.
+// MAWS knows it, so C4's acceptance can be read by eye before C5's sidebar exists. It shows the config home and whether
+// it is watched, the counts (projects from the index's project list, sessions and scan time from the store scan), and
+// one row per session record from the index (`session.list`, M4) with its title and its source, its directory, a pin,
+// and its holder badge. A row can be followed (M3): the detail then reads the chain (`chain N · leaf <uuid8>`) and the
+// last twenty events. C5 replaces it as the user-facing surface.
 import { useEffect, useMemo } from 'react';
 import type { FsState } from '@shared/ipc/schema/fs';
 import {
@@ -19,13 +20,14 @@ import {
 export function StoreDiagnostics() {
   const fs = useStoreDiagnostics((s) => s.fs);
   const scan = useStoreDiagnostics((s) => s.scan);
-  const sessions = useStoreDiagnostics((s) => s.sessions);
-  const holders = useStoreDiagnostics((s) => s.holders);
+  const records = useStoreDiagnostics((s) => s.records);
+  const projects = useStoreDiagnostics((s) => s.projects);
   const followed = useStoreDiagnostics((s) => s.followed);
-  const rows = useMemo(() => rowsOf(sessions, holders), [sessions, holders]);
+  const rows = useMemo(() => rowsOf(records), [records]);
 
   useEffect(() => useStoreDiagnostics.getState().connect(), []);
 
+  const followedRecord = followed ? records[followed.appSessionId] : undefined;
   return (
     <section aria-label="Store" className="flex w-full min-w-0 flex-col rounded-sm border border-border">
       <div className="flex flex-wrap items-center gap-x-5 gap-y-1 border-b border-border px-3 py-2">
@@ -33,24 +35,31 @@ export function StoreDiagnostics() {
           {describeStore(fs)}
         </output>
         <output aria-label="store scan" className="font-mono">
-          {describeScan(scan)}
+          {describeScan(scan, projects?.length ?? null)}
         </output>
       </div>
-      {followed && <FollowDetail followed={followed} title={sessions[followed.sessionId] ? titleOf(sessions[followed.sessionId].summary) : followed.sessionId} />}
+      {followed && <FollowDetail followed={followed} title={followedRecord ? titleOf(followedRecord) : followed.appSessionId} />}
       <ul aria-label="Discovered sessions" className="max-h-96 overflow-auto">
-        {rows.map(({ summary, holder }) => {
-          const badge = describeHolder(holder);
-          const isFollowed = followed?.sessionId === summary.sessionId;
+        {rows.map((record) => {
+          const badge = describeHolder(record.holder);
+          const isFollowed = followed?.appSessionId === record.appId;
           return (
-            <li key={summary.sessionId} className="flex h-(--row-h) items-center gap-3 border-b border-border px-3 last:border-b-0">
-              <span className="min-w-0 flex-1 truncate text-fg">{titleOf(summary)}</span>
-              <span className="min-w-0 max-w-[45%] truncate font-mono text-fg-faint">{summary.directory ?? '—'}</span>
+            <li key={record.appId} className="flex h-(--row-h) items-center gap-3 border-b border-border px-3 last:border-b-0">
+              {record.pinned && (
+                <span aria-label="pinned" className="shrink-0 font-mono text-fg">
+                  pin
+                </span>
+              )}
+              <span className="min-w-0 flex-1 truncate text-fg">{titleOf(record)}</span>
+              <span className="shrink-0 font-mono text-fg-faint">{record.title.source}</span>
+              <span className="min-w-0 max-w-[45%] truncate font-mono text-fg-faint">{record.directory || '—'}</span>
               {badge && <span className="shrink-0 rounded-sm bg-accent-soft px-1.5 font-mono text-fg">{badge}</span>}
               <button
                 type="button"
                 aria-pressed={isFollowed}
-                onClick={() => void (isFollowed ? useStoreDiagnostics.getState().unfollow() : useStoreDiagnostics.getState().follow(summary.sessionId))}
-                className="shrink-0 rounded-sm border border-border px-2 text-fg hover:bg-bg-hover aria-pressed:bg-bg-active"
+                disabled={record.engineSessionId === null}
+                onClick={() => void (isFollowed ? useStoreDiagnostics.getState().unfollow() : useStoreDiagnostics.getState().follow(record.appId))}
+                className="shrink-0 rounded-sm border border-border px-2 text-fg hover:bg-bg-hover aria-pressed:bg-bg-active disabled:text-fg-faint"
               >
                 {isFollowed ? 'Unfollow' : 'Follow'}
               </button>
@@ -87,14 +96,15 @@ export function describeStore(fs: FsState | null): string {
   return `store · ${fs.configHome} · ${fs.watching ? 'watching' : 'not watching'}`;
 }
 
-export function describeScan(scan: ScanStatus): string {
+export function describeScan(scan: ScanStatus, projects: number | null): string {
   switch (scan.status) {
     case 'idle':
       return '';
     case 'running':
       return scan.progress ? `scanning ${scan.progress.scanned} / ${scan.progress.total}` : 'scanning…';
     case 'done':
-      return `projects ${scan.result.projects} · sessions ${scan.result.sessions} · scan ${(scan.result.durationMs / 1000).toFixed(1)} s`;
+      // N is the index's project list (existing directories with a session that has messages), not the host's slugs.
+      return `projects ${projects ?? '…'} · sessions ${scan.result.sessions} · scan ${(scan.result.durationMs / 1000).toFixed(1)} s`;
     case 'failed':
       return `scan failed: ${scan.error}`;
   }

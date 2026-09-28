@@ -1,23 +1,22 @@
-// The Store section's state (C4 execution document, M2): a diagnostics-only view of the engine host's filesystem
-// state service, so C4's acceptance is observable before C5's sidebar exists. It subscribes to the `fs.*` events
-// first, then asks for the `fs.state` snapshot (config home, watch, counts, live holders) and runs `fs.scan` so every
-// session is listed even when the host's own start-up scan finished before this page loaded. Session rows arrive in
-// bursts of thousands, so they are buffered and applied once per `flushMs`. M4 switches the rows to `session.list`.
+// The Store section's state (C4 execution document, M2 to M4): a diagnostics-only view of the engine's store as MAWS
+// knows it, so C4's acceptance is observable before C5's sidebar exists. It subscribes first, then asks for the
+// snapshots: `fs.state` (config home, watch), the index's session records (`session.list`, kept current by
+// `session.changed` / `session.removed`) and project list (`session.projects.list` / `session.projects.changed`), and
+// runs `fs.scan` for the store's counts. Record events that land while `session.list` is in flight are held and applied
+// over the snapshot when newer than it (C5's revision rule); rows arrive in bursts of thousands, so they are buffered and
+// applied once per `flushMs`.
 // Following (M3): one row at a time is followed through `session.events`; the view keeps its `fs.followState` and the
 // last twenty events, hydrated as C6's protocol does: batches are buffered while the `session.events` snapshot is in
 // flight, then the snapshot is applied and the buffer drained, deduplicated by event id (disk events carry `seq: null`).
 import { create } from 'zustand';
 import type { SessionEvent } from '@shared/graph/events';
-import type { AppSessionId, SessionId } from '@shared/graph/ids';
+import type { AppSessionId } from '@shared/graph/ids';
+import type { SessionRecord } from '@shared/graph/session';
 import type { EventPayload, MawsBridge } from '@shared/ipc/schema';
 import type { FsScanResult, FsState } from '@shared/ipc/schema/fs';
-import type { Holder, TranscriptSummary } from '@shared/wire/store';
+import type { ProjectRecord } from '@shared/ipc/schema/session';
+import type { Holder } from '@shared/wire/store';
 import { ipc } from '../ipc/client';
-
-export interface StoreRow {
-  summary: TranscriptSummary;
-  appSessionId: AppSessionId | null;
-}
 
 export type ScanStatus =
   | { status: 'idle' }
@@ -28,7 +27,6 @@ export type ScanStatus =
 export type FollowState = EventPayload<'fs.followState'>;
 
 export interface FollowView {
-  sessionId: SessionId;
   appSessionId: AppSessionId;
   state: FollowState | null; // the session's own follower (agentId null); null until the host reports
   events: SessionEvent[]; // the last FOLLOW_LOG events delivered, oldest first
@@ -36,17 +34,19 @@ export interface FollowView {
 
 export interface StoreDiagnosticsStore {
   fs: FsState | null; // the last fs.state snapshot; null until the host has answered
-  sessions: Record<string, StoreRow>; // by engine session id
-  holders: Record<string, Holder>; // live holders only, by engine session id
+  records: Record<string, SessionRecord>; // the index's records by app session id, archived ones included
+  projects: ProjectRecord[] | null; // the index's visible projects; null until main has answered
   scan: ScanStatus;
   followed: FollowView | null;
   connect(): () => void; // returns disconnect
-  follow(sessionId: SessionId): Promise<void>; // after connect; stops following whatever was followed before
+  follow(appSessionId: AppSessionId): Promise<void>; // after connect; stops following whatever was followed before
   unfollow(): Promise<void>;
 }
 
 const FLUSH_MS = 50;
 export const FOLLOW_LOG = 20;
+
+type RecordChange = { revision: number; record: SessionRecord | null }; // null: removed
 
 export function createStoreDiagnosticsStore(client: MawsBridge, options: { flushMs?: number } = {}) {
   const flushMs = options.flushMs ?? FLUSH_MS;
@@ -55,51 +55,48 @@ export function createStoreDiagnosticsStore(client: MawsBridge, options: { flush
   // C6's hydration protocol: batches that arrive while the snapshot is in flight are newer than it, so they are held
   // here, applied after the snapshot and deduplicated by id; null once the view is live.
   let heldBatches: SessionEvent[] | null = null;
-  // Each follow's own token: a snapshot answered for an earlier follow of the same row (unfollow, then follow again
-  // under the same app id) must neither be applied nor drain the current follow's buffer.
+  // Each follow's own token: a snapshot answered for an earlier follow of the same row (unfollow, then follow again)
+  // must neither be applied nor drain the current follow's buffer.
   let followToken = 0;
   const store = create<StoreDiagnosticsStore>()((set, get) => ({
     fs: null,
-    sessions: {},
-    holders: {},
+    records: {},
+    projects: null,
     scan: { status: 'idle' },
     followed: null,
     connect() {
       let connected = true;
-      const buffered = new Map<string, StoreRow | null>(); // null: removed
+      // Record changes waiting for the next flush; while `session.list` is in flight they wait for it instead.
+      const buffered = new Map<string, RecordChange>();
+      let listed = false;
       let flushTimer: ReturnType<typeof setTimeout> | null = null;
-      // Holder events are numbered so a snapshot answered after one can tell which of its entries are older.
-      let holderSeq = 0;
-      const lastHolderEvent = new Map<string, number>();
+      let projectsRevision = -1;
 
       const flush = () => {
         flushTimer = null;
-        const sessions = { ...get().sessions };
-        for (const [sessionId, row] of buffered) {
-          if (row) sessions[sessionId] = row;
-          else delete sessions[sessionId];
+        if (!listed) return;
+        const records = { ...get().records };
+        for (const [appId, { record }] of buffered) {
+          if (record) records[appId] = record;
+          else delete records[appId];
         }
         buffered.clear();
-        set({ sessions });
+        set({ records });
       };
-      const buffer = (sessionId: SessionId, row: StoreRow | null) => {
-        buffered.set(sessionId, row);
-        flushTimer ??= setTimeout(flush, flushMs);
+      const buffer = (appId: AppSessionId, change: RecordChange) => {
+        buffered.set(appId, change);
+        if (listed) flushTimer ??= setTimeout(flush, flushMs);
       };
-      const setHolder = (sessionId: string, holder: Holder) => {
-        const holders = { ...get().holders };
-        if (holder.kind === 'none') delete holders[sessionId];
-        else holders[sessionId] = holder;
-        set({ holders });
+      const setProjects = (projects: ProjectRecord[], revision: number) => {
+        if (revision < projectsRevision) return;
+        projectsRevision = revision;
+        set({ projects });
       };
 
       const offs = [
-        client.on('fs.sessionChanged', ({ summary, appSessionId }) => buffer(summary.sessionId, { summary, appSessionId })),
-        client.on('fs.sessionRemoved', ({ sessionId }) => buffer(sessionId, null)),
-        client.on('fs.holderChanged', ({ sessionId, holder }) => {
-          lastHolderEvent.set(sessionId, ++holderSeq);
-          setHolder(sessionId, holder);
-        }),
+        client.on('session.changed', ({ record, revision }) => buffer(record.appId, { revision, record })),
+        client.on('session.removed', ({ appSessionId, revision }) => buffer(appSessionId, { revision, record: null })),
+        client.on('session.projects.changed', ({ projects, revision }) => setProjects(projects, revision)),
         client.on('fs.scanProgress', (progress) => {
           if (get().scan.status === 'running') set({ scan: { status: 'running', progress } });
         }),
@@ -111,26 +108,35 @@ export function createStoreDiagnosticsStore(client: MawsBridge, options: { flush
       ];
 
       const readState = () => {
-        const stamp = holderSeq;
         void client.invoke('fs.state', undefined).then((result) => {
           if (!connected) return;
-          if (!result.ok) {
-            console.error('[store] fs.state failed', result.error);
-            return;
-          }
-          const holders: Record<string, Holder> = {};
-          for (const { sessionId, holder } of result.value.holders) holders[sessionId] = holder;
-          for (const [sessionId, seq] of lastHolderEvent) {
-            if (seq <= stamp) continue;
-            const current = get().holders[sessionId];
-            if (current) holders[sessionId] = current;
-            else delete holders[sessionId];
-          }
-          set({ fs: result.value, holders });
+          if (!result.ok) console.error('[store] fs.state failed', result.error);
+          else set({ fs: result.value });
         });
       };
 
       readState();
+      void client.invoke('session.list', { includeArchived: true }).then((result) => {
+        if (!connected) return;
+        if (!result.ok) console.error('[store] session.list failed', result.error);
+        const snapshot = result.ok ? result.value : { sessions: [], revision: -1 };
+        const records: Record<string, SessionRecord> = {};
+        for (const record of snapshot.sessions) records[record.appId] = record;
+        // What changed after the snapshot was taken wins over it; what it already holds is dropped.
+        for (const [appId, change] of buffered) {
+          if (change.revision <= snapshot.revision) continue;
+          if (change.record) records[appId] = change.record;
+          else delete records[appId];
+        }
+        buffered.clear();
+        listed = true;
+        set({ records });
+      });
+      void client.invoke('session.projects.list', undefined).then((result) => {
+        if (!connected) return;
+        if (!result.ok) console.error('[store] session.projects.list failed', result.error);
+        else setProjects(result.value.projects, result.value.revision);
+      });
       set({ scan: { status: 'running', progress: null } });
       void client.invoke('fs.scan', {}).then((result) => {
         if (!connected) return;
@@ -151,25 +157,12 @@ export function createStoreDiagnosticsStore(client: MawsBridge, options: { flush
       };
     },
 
-    async follow(sessionId) {
+    async follow(appSessionId) {
       if (get().followed) await get().unfollow();
-      const row = get().sessions[sessionId];
-      let appSessionId = row?.appSessionId ?? null;
-      if (appSessionId === null) {
-        // Diagnostics before the index (M4) binds every session: the page binds a fresh app id for the row it follows.
-        appSessionId = crypto.randomUUID() as AppSessionId;
-        const bound = await client.invoke('fs.bind', { bindings: [{ sessionId, appSessionId }] });
-        if (!bound.ok) {
-          console.error('[store] fs.bind failed', bound.error);
-          return;
-        }
-        const current = get().sessions[sessionId];
-        if (current) set({ sessions: { ...get().sessions, [sessionId]: { ...current, appSessionId } } });
-      }
       const token = ++followToken;
       seen = new Set();
       heldBatches = [];
-      set({ followed: { sessionId, appSessionId, state: null, events: [] } });
+      set({ followed: { appSessionId, state: null, events: [] } });
       const snapshot = await client.invoke('session.events', { appSessionId, afterSeq: null, limit: null });
       if (token !== followToken) return; // unfollowed or followed again meanwhile
       if (!snapshot.ok) console.error('[store] session.events failed', snapshot.error);
@@ -210,20 +203,17 @@ export function createStoreDiagnosticsStore(client: MawsBridge, options: { flush
   }
 }
 
-export interface StoreRowView extends StoreRow {
-  holder: Holder;
+const held = (holder: Holder) => holder.kind !== 'none';
+
+// The rows the section lists: records not archived, held sessions first, then the most recently changed.
+export function rowsOf(records: Record<string, SessionRecord>): SessionRecord[] {
+  return Object.values(records)
+    .filter((record) => !record.archived)
+    .sort((a, b) => Number(held(b.holder)) - Number(held(a.holder)) || b.updatedAt.localeCompare(a.updatedAt));
 }
 
-// Held sessions first, then the most recently written.
-export function rowsOf(sessions: Record<string, StoreRow>, holders: Record<string, Holder>): StoreRowView[] {
-  const none: Holder = { kind: 'none' };
-  return Object.values(sessions)
-    .map((row) => ({ ...row, holder: holders[row.summary.sessionId] ?? none }))
-    .sort((a, b) => Number(b.holder.kind !== 'none') - Number(a.holder.kind !== 'none') || b.summary.mtimeMs - a.summary.mtimeMs);
-}
-
-export function titleOf(summary: TranscriptSummary): string {
-  return summary.customTitle ?? summary.aiTitle ?? summary.firstPrompt ?? '(untitled)';
+export function titleOf(record: SessionRecord): string {
+  return record.title.text === '' ? '(untitled)' : record.title.text;
 }
 
 export function describeHolder(holder: Holder): string | null {
