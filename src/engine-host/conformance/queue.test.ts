@@ -30,33 +30,71 @@ afterEach(async () => {
 });
 
 describe('queue release never follows an engine-initiated turn', () => {
-  for (const [pass, name, prompt] of [['pass2', 'workflow', 5], ['pass1', 'subagent', 4]] as const) {
-    it(`${pass}/${name}: a message typed during the engine-initiated turn stays queued through its task-notification result`, async () => {
-      const run = await replayedSession(pass, name, (row, { session, transport, ready, fixture }) => {
-        if (row.seq === prompt) void ready().then(() => session.send(contentOf(fixture, prompt)));
-        else transport.kill('SIGTERM');
-      }, {
-        beforeStart: ({ session }) => {
-          let queued = false;
-          session.on('events', (batch) => {
-            if (!queued && batch.some((e) => e.kind === 'turn.started' && e.origin === 'engine')) {
-              queued = true;
-              void session.send('typed while the workflow reported back');
-            }
-          });
-        },
-      });
-      expect(metaRows(run.journal.rows, 'replay_mismatch')).toEqual([]);
-      const ended = ofKind(run.events, 'turn.ended');
-      expect(ended.map((e) => e.origin).filter((o) => o !== 'human').length).toBeGreaterThan(0);
-      expect(ended.filter((e) => e.origin === 'task-notification').length).toBe(name === 'subagent' ? 2 : 1);
-      // one user frame (the fixture's prompt); the entry typed during the engine turn was never released
-      expect(userOuts(run.journal.rows)).toHaveLength(1);
-      expect(metaRows(run.journal.rows, 'queue').filter((r) => r.action === 'release').map((r) => r.trigger)).toEqual(['send']);
-      expect(run.session.queue.state.entries).toMatchObject([{ content: 'typed while the workflow reported back', state: 'queued', messageUuid: null }]);
-      expect(run.rebuilt()).toEqual(run.events);
+  // pass2/workflow: the human turn ends at seq 90, the engine-initiated turn opens at seq 97 and ends at seq 108, then
+  // the exit (seq 110). The probe queued nothing, so a test that expects a release extends the recording with the one
+  // `out` user row the release writes (matched by type), inserted where the release happens.
+  const releaseRow = { seq: 9_001, direction: 'out' as const, at: '2026-09-28T10:00:00.000Z', frame: { type: 'user', uuid: 'recorded-release', message: { role: 'user', content: 'queued' }, parent_tool_use_id: null, origin: { kind: 'human' } } };
+  const insertAfter = (seq: number) => (rows: JournalRow[]) => {
+    const at = rows.findIndex((r) => r.seq === seq) + 1;
+    return [...rows.slice(0, at), releaseRow, ...rows.slice(at)];
+  };
+  const releases = (rows: JournalRow[]) => metaRows(rows, 'queue').filter((r) => r.action === 'release').map((r) => r.trigger);
+  const queueDuring = (origin: 'human' | 'engine', content: string) => ({ session }: { session: import('../session').EngineSession }) => {
+    let queued = false;
+    session.on('events', (batch) => {
+      if (!queued && batch.some((e) => e.kind === 'turn.started' && e.origin === origin)) {
+        queued = true;
+        void session.send(content);
+      }
     });
-  }
+  };
+  const driveWorkflow = (row: JournalRow, { session, transport, ready, fixture }: { session: import('../session').EngineSession; transport: { kill(s: 'SIGTERM'): void }; ready: () => Promise<void>; fixture: JournalRow[] }) => {
+    if (row.seq === 5) void ready().then(() => session.send(contentOf(fixture, 5)));
+    else if (row.seq !== releaseRow.seq) transport.kill('SIGTERM'); // the release row is the queue's own write
+  };
+
+  it('pass2/workflow: a message typed during the engine-initiated turn is not released into it; its end at seq 108 leaves the session idle, so the head goes then', async () => {
+    const run = await replayedSession('pass2', 'workflow', driveWorkflow, { edit: insertAfter(108), beforeStart: queueDuring('engine', 'typed while the workflow reported back') });
+    expect(metaRows(run.journal.rows, 'replay_mismatch')).toEqual([]);
+    const engineEnd = ofKind(run.events, 'turn.ended').find((e) => e.origin === 'task-notification')!;
+    const outs = userOuts(run.journal.rows);
+    expect(outs.map((f) => f.message.content)).toEqual([contentOf(run.fixture, 5), 'typed while the workflow reported back']);
+    const released = run.journal.rows.find((r) => r.direction === 'out' && (r.frame as { message?: { content: unknown } }).message?.content === 'typed while the workflow reported back')!;
+    expect(released.seq).toBeGreaterThan(engineEnd.seq!); // after the engine turn's result, never into it
+    expect(released.frame).not.toHaveProperty('priority');
+    expect(releases(run.journal.rows)).toEqual(['send', 'turn_ended']);
+    // no engine_turn hold; the only pause is the exit's: the recording ends before the engine acknowledges the release, so it comes back uncertain
+    expect(metaRows(run.journal.rows, 'queue').filter((r) => r.action === 'pause').map((r) => r.reason)).toEqual(['uncertain']);
+    expect(ofKind(run.events, 'notice.posted').map((e) => e.key)).toEqual([expect.stringMatching(/^queue:uncertain:/)]);
+    expect(run.rebuilt()).toEqual(run.events);
+  });
+
+  it('pass2/workflow: a message typed during the human turn is released at the human turn\'s end (seq 90) and nothing more at seq 108: one release across the two turns', async () => {
+    const run = await replayedSession('pass2', 'workflow', driveWorkflow, { edit: insertAfter(90), beforeStart: queueDuring('human', 'typed during the human turn') });
+    expect(metaRows(run.journal.rows, 'replay_mismatch')).toEqual([]);
+    expect(userOuts(run.journal.rows).map((f) => f.message.content)).toEqual([contentOf(run.fixture, 5), 'typed during the human turn']);
+    expect(releases(run.journal.rows)).toEqual(['send', 'turn_ended']); // acceptance 3.10: exactly one release across the two turns
+    const releaseMeta = run.journal.rows.find((r) => (r.frame as { trigger?: string }).trigger === 'turn_ended')!;
+    const humanEnd = ofKind(run.events, 'turn.ended')[0]!;
+    expect(releaseMeta.seq).toBeGreaterThan(humanEnd.seq!);
+    // no engine_turn hold; the only pause is the exit's: the recording ends before the engine acknowledges the release, so it comes back uncertain
+    expect(metaRows(run.journal.rows, 'queue').filter((r) => r.action === 'pause').map((r) => r.reason)).toEqual(['uncertain']);
+    expect(ofKind(run.events, 'notice.posted').map((e) => e.key)).toEqual([expect.stringMatching(/^queue:uncertain:/)]);
+  });
+
+  it('pass2/workflow with an empty queue: the engine turn\'s end writes nothing, pauses nothing and posts no notice', async () => {
+    const run = await replayedSession('pass2', 'workflow', (row, { session, transport, ready, fixture }) => {
+      if (row.seq === 5) void ready().then(() => session.send(contentOf(fixture, 5)));
+      else transport.kill('SIGTERM');
+    });
+    expect(metaRows(run.journal.rows, 'replay_mismatch')).toEqual([]);
+    expect(ofKind(run.events, 'turn.ended').map((e) => e.origin)).toEqual(['human', 'task-notification']);
+    expect(userOuts(run.journal.rows)).toHaveLength(1);
+    expect(releases(run.journal.rows)).toEqual(['send']);
+    expect(run.session.queue.state).toEqual({ entries: [], paused: false });
+    expect(metaRows(run.journal.rows, 'queue').filter((r) => r.action === 'pause')).toEqual([]);
+    expect(ofKind(run.events, 'notice.posted')).toEqual([]);
+  });
 
   it('pass2/dialogs: the submission is released at the command_lifecycle naming it (seq 6 against seq 5) and leaves the list at the turn.ended naming it (seq 55)', async () => {
     const seen: QueueState[] = [];

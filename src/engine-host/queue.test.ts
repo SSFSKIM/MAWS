@@ -112,17 +112,71 @@ describe('queue release never follows an engine-initiated turn', () => {
     expect(t.queue.busy).toBe(false);
   });
 
-  it('a task-notification turn and an echo receipt release nothing', async () => {
+  it('nothing is released into a running turn: an engine turn ending while another is open, an echo receipt and a child lane release nothing', async () => {
     const t = await harness();
     t.h.turn = true;
     await t.queue.send('waiting');
+    await t.queue.onTurnEnded(turnEnded({ origin: 'task-notification', userMessageUuids: [] })); // another turn is still open
     t.h.turn = false;
-    await t.queue.onTurnEnded(turnEnded({ origin: 'task-notification', userMessageUuids: [] }));
     await t.queue.onTurnEnded(turnEnded({ origin: 'human', isEchoReceipt: true, numTurns: 0, terminalReason: null }));
     await t.queue.onTurnEnded(turnEnded({ origin: 'human', parentToolUseId: 'toolu_x' as TurnEnded['parentToolUseId'] }));
     expect(t.writes).toEqual([]);
-    expect(t.queue.state.entries).toMatchObject([{ state: 'queued' }]);
-    expect(queueRows(t.rows)).toEqual([]);
+    expect(t.queue.state).toMatchObject({ paused: false, entries: [{ state: 'queued' }] });
+    expect(t.rows).toEqual([]);
+  });
+
+  it('an engine turn that leaves the session idle releases the head exactly as a human turn does (concern 1, as ruled)', async () => {
+    const t = await harness();
+    t.h.turn = true;
+    await t.queue.send('typed during the engine turn');
+    await t.queue.send('and another');
+    t.h.turn = false;
+    await t.queue.onTurnEnded(turnEnded({ origin: 'task-notification' }));
+    expect(t.writes.map((w) => w.message.content)).toEqual(['typed during the engine turn']);
+    expect(t.writes[0]).not.toHaveProperty('priority');
+    expect(queueRows(t.rows)).toEqual(['release:turn_ended']);
+    expect(t.queue.state.paused).toBe(false);
+    expect(notices(t.rows)).toEqual([]);
+  });
+
+  it('after an engine turn a head that cannot go pauses the queue (engine_turn) with an info notice naming it: not ready, or the write failed', async () => {
+    const notReady = await harness();
+    notReady.h.turn = true;
+    const { entry: head } = await notReady.queue.send('held');
+    notReady.h.turn = false;
+    notReady.h.ready = false;
+    await notReady.queue.onTurnEnded(turnEnded({ origin: 'task-notification' }));
+    expect(notReady.writes).toEqual([]);
+    expect(notReady.queue.state).toMatchObject({ paused: true, entries: [{ state: 'queued' }] });
+    expect(queueRows(notReady.rows)).toEqual(['pause:engine_turn']);
+    expect(notReady.rows.filter((r) => r.event === 'notice')).toEqual([{ event: 'notice', level: 'info', key: `queue:held_after_engine_turn:${head.queueId}`, text: expect.any(String) }]);
+    expect((await notReady.store.loadQueue(ID)).paused).toBe(true);
+
+    const failing = await harness({ failWrite: () => true });
+    failing.h.turn = true;
+    const { entry: failed } = await failing.queue.send('doomed');
+    failing.h.turn = false;
+    await failing.queue.onTurnEnded(turnEnded({ origin: 'task-notification' }));
+    expect(failing.queue.state).toMatchObject({ paused: true, entries: [{ state: 'queued', messageUuid: null }] });
+    expect(queueRows(failing.rows)).toEqual(['release:turn_ended', 'pause:engine_turn']);
+    expect(notices(failing.rows)).toEqual([`queue:held_after_engine_turn:${failed.queueId}`]);
+  });
+
+  it('an engine turn\'s end does nothing with an empty or paused queue', async () => {
+    const empty = await harness();
+    await empty.queue.onTurnEnded(turnEnded({ origin: 'task-notification' }));
+    expect(empty.queue.state).toEqual({ entries: [], paused: false });
+    expect(empty.rows).toEqual([]);
+
+    const paused = await harness();
+    paused.h.turn = true;
+    await paused.queue.send('x');
+    await paused.queue.pause('user');
+    paused.h.turn = false;
+    await paused.queue.onTurnEnded(turnEnded({ origin: 'task-notification' }));
+    expect(paused.writes).toEqual([]);
+    expect(queueRows(paused.rows)).toEqual(['pause:user']);
+    expect(notices(paused.rows)).toEqual([]);
   });
 
   it('while paused a human turn\'s end releases nothing; setPaused(false) submits the head', async () => {

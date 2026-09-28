@@ -3,8 +3,9 @@
 // quick sends at an idle engine serialise. A submission is persisted as `submitting` with its minted uuid before the
 // `user` frame is written, becomes `released` at the engine's `command_lifecycle` for that uuid, and leaves the list
 // at the `turn.ended` naming it or at the process's exit (retired `interrupted`, never re-sent). The release rule: a
-// main-lane, non-receipt `turn.ended` of a human turn submits the head while the queue is not paused; an
-// engine-initiated turn (`task-notification`) releases nothing. A submission a crash interrupted comes back as the
+// main-lane, non-receipt `turn.ended` submits the head while the queue is not paused and the session is idle, so nothing
+// is ever released into a running turn, an engine-initiated one (`task-notification`) included; after an engine turn a
+// head that cannot go (not ready, write failed) pauses the queue with an info notice. A submission a crash interrupted comes back as the
 // `uncertain` head of a paused queue for the human to re-send or remove. Steer bypasses the queue with `priority:
 // 'now'`. Every change is saved through the store before `onChange` fires. Releases and pauses are journaled as
 // `meta queue` rows and the queue's warnings as `meta notice` rows (the normaliser maps those to `notice.posted`).
@@ -17,7 +18,7 @@ import type { UserInputFrame } from '@shared/wire/frames';
 export const ACK_TIMEOUT_MS = 5_000;
 
 export type ReleaseTrigger = 'send' | 'turn_ended' | 'resume';
-export type PauseReason = 'user' | 'interrupt' | 'write_failed' | 'uncertain' | 'exit';
+export type PauseReason = 'user' | 'interrupt' | 'write_failed' | 'uncertain' | 'exit' | 'engine_turn';
 export type ExitKind = 'quit' | 'stop' | 'archive' | 'crash' | 'unknown';
 
 export interface MessageQueueDeps {
@@ -172,6 +173,28 @@ export class MessageQueue {
     });
     if (this.entries.length !== before) await this.persist();
     if (event.origin === 'human' || event.origin === null) await this.releaseHead('turn_ended');
+    else await this.releaseAfterEngineTurn();
+  }
+
+  // Concern 1, as ruled (the coordinator's reading of "no release at an engine turn"): nothing is released into an
+  // engine-initiated turn, but when one ends and leaves the session idle with entries waiting, the head goes exactly as
+  // after a human turn. Only when it cannot go at that moment (the process is not ready, or the write fails) does the
+  // queue pause (`engine_turn`) with an info notice naming the head, so nothing waits silently.
+  private async releaseAfterEngineTurn(): Promise<void> {
+    const head = this.entries.find((e) => e.state === 'queued');
+    if (!head || this.paused || this.busy) return;
+    if (this.deps.canWrite()) {
+      await this.submit(head, 'turn_ended', 'engine_turn');
+      return;
+    }
+    this.paused = true;
+    this.journal({ event: 'queue', action: 'pause', reason: 'engine_turn' });
+    this.heldNotice(head);
+    await this.persist();
+  }
+
+  private heldNotice(head: QueueEntry): void {
+    this.notice(`queue:held_after_engine_turn:${head.queueId}`, 'A background task finished while messages were queued, and the next one could not be sent; resume the queue to send it.', 'info');
   }
 
   // At the process's exit: every `released` entry no turn.ended named is retired `interrupted`; a `submitting` entry
@@ -221,8 +244,9 @@ export class MessageQueue {
     if (head) await this.submit(head, trigger);
   }
 
-  // queued → submitting (persisted) → the frame written; true when it reached the pipe.
-  private async submit(entry: QueueEntry, trigger: ReleaseTrigger): Promise<boolean> {
+  // queued → submitting (persisted) → the frame written; true when it reached the pipe. A failed write reverts the entry
+  // and pauses the queue with `failReason` (`engine_turn` after an engine-initiated turn, with its held notice).
+  private async submit(entry: QueueEntry, trigger: ReleaseTrigger, failReason: 'write_failed' | 'engine_turn' = 'write_failed'): Promise<boolean> {
     const uuid = randomUUID() as MessageUuid;
     Object.assign(entry, { state: 'submitting', messageUuid: uuid, submittedAt: new Date().toISOString(), uncertain: false });
     await this.persist();
@@ -242,7 +266,8 @@ export class MessageQueue {
         this.revert(entry);
         if (!this.paused) {
           this.paused = true;
-          this.journal({ event: 'queue', action: 'pause', reason: 'write_failed' });
+          this.journal({ event: 'queue', action: 'pause', reason: failReason });
+          if (failReason === 'engine_turn') this.heldNotice(entry);
         }
         await this.persist();
       }
@@ -285,8 +310,8 @@ export class MessageQueue {
     if (!parsed.success) throw new QueueEntryError(parsed.error.issues[0]?.message ?? 'invalid content');
   }
 
-  private notice(key: string, text: string): void {
-    this.journal({ event: 'notice', level: 'warning', key, text });
+  private notice(key: string, text: string, level: 'warning' | 'info' = 'warning'): void {
+    this.journal({ event: 'notice', level, key, text });
   }
 
   private journal(frame: Record<string, unknown>): void {

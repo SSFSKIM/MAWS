@@ -73,9 +73,9 @@ export async function replayedSession(
   pass: FixturePass,
   name: string,
   drive: (row: JournalRow, ctx: { session: EngineSession; transport: ReplayTransport; fixture: JournalRow[]; ready: () => Promise<void> }) => void,
-  opts: { spec?: Partial<LaunchSpec>; session?: Partial<EngineSessionOptions>; beforeStart?: (o: Observed) => void; wrap?: (t: ReplayTransport) => EngineTransport } = {},
+  opts: { spec?: Partial<LaunchSpec>; session?: Partial<EngineSessionOptions>; beforeStart?: (o: Observed) => void; wrap?: (t: ReplayTransport) => EngineTransport; edit?: (rows: JournalRow[]) => JournalRow[] } = {},
 ): Promise<Observed & { fixture: JournalRow[]; transport: () => ReplayTransport }> {
-  const fixture = loadJournal(pass, name);
+  const fixture = (opts.edit ?? ((rows: JournalRow[]) => rows))(loadJournal(pass, name)); // `edit`: a test that extends a recording says so in its name
   const spec = launchSpec({ appSessionId: `replay-${name}` as LaunchSpec['appSessionId'], sessionId: null, model: null, replay: `${pass}/${name}`, ...opts.spec });
   const plan = buildLaunch(spec, { PATH: '/usr/bin', HOME: '/Users/x' }, { relayUrl: RELAY_URL, engineVersion: ENGINE_VERSION });
   const journal = new MemoryJournal();
