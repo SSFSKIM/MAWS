@@ -368,9 +368,11 @@ export class ChainFollower {
   private lastReported: string | null = null;
   private lastFactsLeaf: MessageUuid | null = null;
   private readonly delivered: SessionEvent[] = [];
-  // Deliveries per record over the follower's life (reset only by `stop`): a record delivered again after a boundary
-  // removed it carries `<uuid>@<g>`, so the delivery log never holds an id twice and a consumer deduplicates by id alone.
-  private readonly deliveries = new Map<MessageUuid, number>();
+  // Deliveries per record uuid and per synthesised base id over the follower's life (reset only by `stop`): a record
+  // delivered again after a boundary removed it carries `<uuid>@<g>`, a boundary or notice whose base id was already
+  // delivered carries `<base>@<g>`, so the delivery log never holds an id twice and a consumer deduplicates by id alone.
+  private readonly deliveries = new Map<string, number>();
+  private startedDelivered = false; // `session.started` goes out at most once per follow
 
   constructor(
     private readonly reader: FileReader,
@@ -434,6 +436,7 @@ export class ChainFollower {
     this.core = this.freshCore();
     this.delivered.length = 0;
     this.deliveries.clear();
+    this.startedDelivered = false;
     this.report('stopped');
   }
 
@@ -499,12 +502,14 @@ export class ChainFollower {
     if (retracted.length > 0) {
       produced.push({ source: null, group: 0, event: { ...eventBase(fresh.ctx, `rewrite:${stat.ino}:${stat.size}`), kind: 'boundary.retraction', retractedMessageUuids: retracted, reason: 'transcript_rewritten', fallbackModel: null } });
     }
+    // One event group per record, its final mapping: the suppressed fresh run may have mapped a record more than once
+    // while branching away from it and rejoining; only the last group, the one standing on the final chain, counts.
     const byRecord = new Map<MessageUuid, Produced[]>();
     for (const item of fresh.out) {
       if (item.source === null) continue;
-      const list = byRecord.get(item.source) ?? [];
-      list.push(item);
-      byRecord.set(item.source, list);
+      const list = byRecord.get(item.source);
+      if (list === undefined || list[0].group !== item.group) byRecord.set(item.source, [item]);
+      else list.push(item);
     }
     for (const uuid of fresh.chain) {
       if (!old.emitted.has(uuid)) produced.push(...(byRecord.get(uuid) ?? []));
@@ -539,8 +544,17 @@ export class ChainFollower {
     const events: SessionEvent[] = [];
     let currentGroup: { source: MessageUuid; group: number; g: number } | null = null;
     for (const item of produced) {
-      if (item.source === null) {
+      if (item.event.kind === 'session.started') {
+        if (this.startedDelivered) continue;
+        this.startedDelivered = true;
         events.push(item.event);
+        continue;
+      }
+      if (item.source === null) {
+        // A synthesised boundary or notice: its base id counts as its own occurrence key.
+        const g: number = (this.deliveries.get(item.event.id) ?? 0) + 1;
+        this.deliveries.set(item.event.id, g);
+        events.push(g === 1 ? item.event : { ...item.event, id: `${item.event.id}@${g}` as EventId });
         continue;
       }
       if (currentGroup === null || currentGroup.source !== item.source || currentGroup.group !== item.group) {

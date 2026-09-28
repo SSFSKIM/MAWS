@@ -480,8 +480,7 @@ describe('survives torn tails and rewrites', () => {
     expectWellFormed(out.events());
 
     // A file that shrinks under the same inode is also a rewrite.
-    const truncated = joined(REWIND_LINES.slice(0, 20));
-    (reader as unknown as { bytes: Buffer }).bytes = truncated;
+    reader.truncate(joined(REWIND_LINES.slice(0, 20)).length);
     await follower.poke();
     expect(out.states().slice(-2)).toEqual(['reloading', 'following']);
     expect(follower.snapshot().chain.map(short)).toEqual(FULL_CHAIN.slice(0, 13));
@@ -678,6 +677,44 @@ describe('retract-then-rejoin converges for a consumer that deduplicates by id a
     await follower.poke();
     expect(out.of('user.message').filter((e) => short(e.messageUuid) === 'a4d68c72').map((e) => e.id.slice(36))).toEqual(['#1', '@2#1']);
     expect(converge(follower, out).map(short)).toEqual(['e3b48834', 'edf0f954', 'a4d68c72', '7c05f769']);
+  });
+
+  it('a same-inode shrink, regrow and shrink again yields two distinct retractions and the consumer ends at the chain', async () => {
+    const record = (uuid: string, parent: string | null, n: number) => line({ type: 'user', uuid, parentUuid: parent, cwd: '/d', timestamp: at(n), message: { role: 'user', content: uuid } });
+    const one = joined([record('u1', null, 0)]);
+    const two = joined([record('u2', 'u1', 1)]);
+    const { reader, follower, out } = await started(Buffer.concat([one, two]), 'S' as SessionId);
+    reader.truncate(one.length);
+    await follower.poke();
+    expect(follower.snapshot().chain).toEqual(['u1']);
+    reader.append(two);
+    await follower.poke();
+    expect(follower.snapshot().chain).toEqual(['u1', 'u2']);
+    reader.truncate(one.length);
+    await follower.poke();
+    expect(follower.snapshot().chain).toEqual(['u1']);
+    const retractions = out.of('boundary.retraction');
+    expect(retractions.map((e) => e.retractedMessageUuids)).toEqual([['u2'], ['u2']]);
+    expect(retractions[0].id).toMatch(/^rewrite:1:\d+$/);
+    expect(retractions[1].id).toBe(`${retractions[0].id}@2`);
+    expect(converge(follower, out)).toEqual(['u1']);
+  });
+
+  it('a reload delivers one event group per final-chain record: its final mapping, with no removal between', async () => {
+    const record = (uuid: string, parent: string | null, n: number) => line({ type: 'user', uuid, parentUuid: parent, cwd: '/d', timestamp: at(n), message: { role: 'user', content: uuid } });
+    const { reader, follower, out } = await started(joined([record('u1', null, 0)]), 'S' as SessionId);
+    const before = out.events().length;
+    // The rewritten file branches away from u2 and rejoins it: the suppressed fresh run maps u2 twice.
+    reader.replace(joined([record('u1', null, 0), record('u2', 'u1', 1), record('u3', 'u1', 2), record('u4', 'u2', 3)]));
+    await follower.poke();
+    expect(follower.snapshot().chain).toEqual(['u1', 'u2', 'u4']);
+    const delivered = out.events().slice(before);
+    expect(delivered.map((e) => [e.kind, e.id])).toEqual([
+      ['turn.started', 'u2'], ['user.message', 'u2#1'],
+      ['turn.started', 'u4'], ['user.message', 'u4#1'],
+    ]);
+    expect(out.of('session.started')).toHaveLength(1);
+    expect(converge(follower, out)).toEqual(['u1', 'u2', 'u4']);
   });
 
   it('the same file followed twice from scratch yields the same delivery log', async () => {

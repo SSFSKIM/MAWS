@@ -47,6 +47,11 @@ export class MemoryFileReader implements FileReader {
     this.present = true;
   }
 
+  // A truncation in place: the file shrinks under the same inode.
+  truncate(length: number): void {
+    this.bytes = Buffer.from(this.bytes.subarray(0, length));
+  }
+
   remove(): void {
     this.present = false;
   }
