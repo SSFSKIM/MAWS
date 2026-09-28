@@ -15,14 +15,16 @@ const B64 = '/usr/bin/base64 -b 120 -i /dev/urandom';
 const SEQ = "seq -f '%.0f' 1 20000000";
 
 // `sh -c` wrappers so head can cut the M1 phase; the gate runs the full producers.
-const flood = (producer, m1Expected, gateExpected, gateProducer = `${producer} | head -c 50000000`) => ({
+const flood = (producer, m1Expected, gateExpected, gateOutput = 50_000_000, gateProducer = `${producer} | head -c ${gateOutput}`) => ({
   kind: 'program',
   measure: 'flood',
   program: {
     m1: { shell: '/bin/sh', args: ['-c', `${producer} | head -c 20000000`] },
     'm2-gate': { shell: '/bin/sh', args: ['-c', gateProducer] },
   },
+  // PTY bytes, the program's own output bytes, and the line feeds (PTY bytes minus output bytes, one CR each).
   expectedBytes: { m1: m1Expected, 'm2-gate': gateExpected },
+  expectedOutputBytes: { m1: 20_000_000, 'm2-gate': gateOutput },
 });
 
 // The width workload prints each fixture, asks for the cursor position (`CSI 6 n`) and moves to the next line, with
@@ -50,7 +52,7 @@ export const workloads = {
   colours: { kind: 'typed', title: 'red/blue', command: "printf '\\e[31mred \\e[34mblue\\e[0m\\n'\r" },
   W1: { title: 'W1 yes | head', ...flood(FOX, 20_363_636, 50_909_090) },
   W2: { title: 'W2 base64 urandom', ...flood(B64, 20_165_289, 50_413_223) },
-  W3: { title: 'W3 seq 1..20000000', ...flood(SEQ, 22_638_888, 188_888_897, SEQ) },
+  W3: { title: 'W3 seq 1..20000000', ...flood(SEQ, 22_638_888, 188_888_897, 168_888_897, SEQ) },
   width: {
     kind: 'program',
     title: 'width fixtures + DSR',

@@ -15,11 +15,19 @@ export const PARENT_SESSION_VARIABLES = [
   'CLAUDECODE',
   'CLAUDE_CODE_ENTRYPOINT',
   'CLAUDE_CODE_SSE_PORT',
+  // Observed in M1 (not in the charter's list): with only the seven above stripped, a claude started from the
+  // terminal under the executor's own session reported "Transcript saving is off — inherited
+  // CLAUDE_CODE_CHILD_SESSION marker". These three are what a nested claude reads to know it is nested.
+  'CLAUDE_CODE_CHILD_SESSION',
+  'CLAUDE_CODE_EXECPATH',
+  'CLAUDE_CODE_SESSION_ATTENDED',
 ] as const;
 
 // Engine-launch settings the host may carry from its own environment; a terminal never forwards them (X6: the
 // terminal is not an engine launch).
 const ENGINE_LAUNCH_VARIABLES = ['ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN', 'ENABLE_TOOL_SEARCH', 'CLAUDE_CODE_FORK_SUBAGENT'] as const;
+// The gateway's per-tier model routing (`ANTHROPIC_DEFAULT_<TIER>_MODEL`, D-19), engine-launch settings like the two above.
+const GATEWAY_MODEL_VARIABLE = /^ANTHROPIC_DEFAULT_[A-Z_]*MODEL$/;
 
 const LOCALE_VARIABLES = ['LANG', 'LC_ALL', 'LC_CTYPE'] as const;
 
@@ -31,7 +39,7 @@ export function terminalEnvironment(base: NodeJS.ProcessEnv, { appVersion }: Ter
   const env: Record<string, string> = {};
   const excluded = new Set<string>([...PARENT_SESSION_VARIABLES, ...ENGINE_LAUNCH_VARIABLES]);
   for (const [name, value] of Object.entries(base)) {
-    if (value !== undefined && !excluded.has(name)) env[name] = value;
+    if (value !== undefined && !excluded.has(name) && !GATEWAY_MODEL_VARIABLE.test(name)) env[name] = value;
   }
   env.TERM = 'xterm-256color';
   env.COLORTERM = 'truecolor';

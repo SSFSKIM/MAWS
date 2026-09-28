@@ -1,0 +1,37 @@
+# Terminal probe (C9 M1 spike, kept as the performance harness)
+
+Child C9 of `docs/charter.md` (§7.2, C9 G1); execution document `docs/doperpowers/plans/2026-09-28-c9-terminal.md`.
+Both renderer candidates (`@xterm/xterm` 6.0.0 with the WebGL addon, `ghostty-web` 0.4.0-next.20.g1858a59) sit behind
+one adapter (`src/renderer/src/terminal/renderer.ts`) on the `#probe` page of the harness, each on its own pty, under
+the real `claude` and `codex` interfaces. `findings.md` is the verdict document.
+
+## Run
+
+```
+pnpm build
+node spikes/terminal-probe/run.mjs                       # smoke + measurements + shell-driven items, both renderers
+node spikes/terminal-probe/run.mjs --steps tui           # the real TUIs (one short conversation each; costs model usage)
+node spikes/terminal-probe/run.mjs --steps replay        # script -p of recordings/*.rec into each renderer
+node spikes/terminal-probe/run.mjs --phase m2-gate --steps measure   # the transport gate (full workloads), after M2
+MAWS_HARNESS=1 pnpm dev                                  # the page by hand: click #probe in the harness nav
+```
+
+Options: `--renderer xterm|ghostty|both`, `--steps smoke,measure,items,tui,replay`, `--tui claude,codex`,
+`--tui-renderer xterm|ghostty`, `--keep-open`. `MAWS_CLAUDE_BIN` and `MAWS_CODEX_BIN` override the TUI binaries
+(defaults in `workloads.mjs`). Both TUIs run in the scratch directory `/tmp/maws-harness/a`, which main creates.
+
+## Layout
+
+- `workloads.mjs`: the workload table (shared with the page), expected PTY byte counts per phase, the width script.
+- `fixtures/width.json`: strings with their expected column widths (item 3).
+- `results/<renderer>-<workload>.json`: `Metrics` from `metrics.ts`; `<renderer>-items.json`, `<renderer>-tui-<tui>.json`.
+- `evidence/<renderer>-<item>.png`: screenshots named by item number.
+- `recordings/<tui>.rec`: `script -r` recordings of the item-11 runs, redacted with `redact-recording.mjs`.
+- `findings.md`: the tables, the numbers and the verdict.
+
+## What the page exposes
+
+`window.__maws_harness.probe`: `ready()`, `run(workloadId, renderer, phase)`, `spawn`, `type`, `kill`, `idle`,
+`snapshot(renderer, from, to)` (the buffer through `TerminalProbe`, never library internals), `state` (the debug
+counters: bytes handed and parsed, `?2026h` count, Kitty and XTVERSION exchanges, DSR replies, last link, last input),
+`focus`, `selection`, `simulateContextLoss`, `geometry`, `setSplit`, `setVisible`, `setBins`, `screenshotReady`.

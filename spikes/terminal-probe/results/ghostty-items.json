@@ -1,0 +1,49 @@
+{
+  "shell": {
+    "pid": 3456,
+    "prompt": " new    a   12:49   "
+  },
+  "less": {
+    "alternateScreenWhileOpen": true,
+    "firstLineWhileOpen": "#",
+    "priorLinesIntact": true,
+    "residueLines": [
+      " new    a   12:49   "
+    ],
+    "lineCountBefore": 48,
+    "lineCountAfter": 48
+  },
+  "scrollback": {
+    "lineCount": 20034,
+    "rows": 48,
+    "expectedLineCount": 10048,
+    "firstLine": " new    a   12:49    seq 1 30",
+    "expectedFirstLine": "9953",
+    "note": "the first buffer line is the line that scrolled out last but one prompt line and the typed command also occupy the buffer"
+  },
+  "links": {
+    "osc8": null,
+    "bare": null
+  },
+  "selection": {
+    "selectedLength": 106,
+    "clipboardEqualsSelection": true,
+    "pastedEqualsSelection": false,
+    "sample": "apwrapwrapwrapwrapwrapwrapwrapwrapwrapwr"
+  },
+  "keys": {
+    "shiftEnter": "\\x0d",
+    "altLeft": "\\x1b[1;3D",
+    "ctrlLeft": "\\x1b[1;5D"
+  },
+  "resize": {
+    "at30": {
+      "stty": "48 122",
+      "pane": "48 122"
+    },
+    "at50": {
+      "stty": "48 86",
+      "pane": "48 86"
+    }
+  }
+}

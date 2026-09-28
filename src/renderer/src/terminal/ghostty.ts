@@ -30,7 +30,7 @@ export async function createGhosttyRenderer(opts: RendererOptions): Promise<Term
   let keyFilter: (ev: KeyboardEvent) => boolean = () => true;
 
   const terminal = new Terminal({
-    scrollback: opts.scrollback,
+    scrollback: opts.scrollback, // a byte budget in Ghostty core, not a line count (M1 finding, item 7)
     cursorBlink: false,
     fontFamily: opts.font.family,
     fontSize: opts.font.size,

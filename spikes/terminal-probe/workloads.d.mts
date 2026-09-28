@@ -17,6 +17,7 @@ export interface ProgramWorkload {
   measure?: 'flood' | 'width' | 'latency' | 'screen';
   program: ProgramSpec | Record<Phase, ProgramSpec>;
   expectedBytes?: Record<Phase, number>;
+  expectedOutputBytes?: Record<Phase, number>;
   expectedScreen?: string[];
 }
 export interface TypedWorkload {

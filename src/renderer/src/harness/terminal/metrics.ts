@@ -32,12 +32,25 @@ export interface WidthResult {
   reported: number | null; // the column the emulator reported minus one; null when no reply was parsed
 }
 
+// The PTY byte counts of a flood: what the tty emitted (`bytes`), the program's own bytes (`outputBytes`, everything
+// but the carriage returns ONLCR adds), and the line feeds. macOS's tty duplicates a `\r` when its output queue fills
+// mid-translation (observed on `seq`: +1 to +80 bytes per 20 MB run, every extra byte a CR), so `bytes` may exceed the
+// expected count by a few carriage returns while `outputBytes` and `lineFeeds` are exact.
+export interface ByteCounts {
+  bytes: number;
+  outputBytes: number;
+  lineFeeds: number;
+}
+
 export interface Metrics {
   renderer: RendererKind;
   workload: string;
   phase: 'm1' | 'm2-gate';
   expectedBytes: number | null;
   bytes: number;
+  outputBytes?: number;
+  lineFeeds?: number;
+  extraCarriageReturns?: number;
   seconds: number;
   mbps?: number;
   frames?: FrameSummary;
@@ -45,6 +58,7 @@ export interface Metrics {
   lastLine: string;
   lineCount: number;
   heapMB?: number;
+  blockedInputEvents: number; // physical wheel, key and touch events cancelled while the run was measured
   latency?: SampleSummary;
   widths?: WidthResult[];
   error?: string;
@@ -77,8 +91,25 @@ export function summarizeFrames(timestamps: readonly number[]): FrameSummary {
   };
 }
 
-export function byteCountError(expected: number, received: number): string | null {
-  return expected === received ? null : `byte count mismatch: expected ${expected}, received ${received}`;
+// A flood is complete when the program's bytes and its line feeds both match exactly; the only surplus allowed is
+// the tty's duplicated carriage returns.
+export function byteCountError(expected: ByteCounts, received: ByteCounts): string | null {
+  if (received.outputBytes !== expected.outputBytes) return `byte count mismatch: expected ${expected.outputBytes} output bytes, received ${received.outputBytes}`;
+  if (received.lineFeeds !== expected.lineFeeds) return `line feed count mismatch: expected ${expected.lineFeeds}, received ${received.lineFeeds}`;
+  if (received.bytes < expected.bytes) return `byte count mismatch: expected ${expected.bytes}, received ${received.bytes}`;
+  return null;
+}
+
+// Counts line feeds and carriage returns in a chunk (ASCII scan; the count is what the tty's ONLCR makes of it).
+export function countLineEndings(data: string): { lineFeeds: number; carriageReturns: number } {
+  let lineFeeds = 0;
+  let carriageReturns = 0;
+  for (let i = 0; i < data.length; i++) {
+    const c = data.charCodeAt(i);
+    if (c === 10) lineFeeds++;
+    else if (c === 13) carriageReturns++;
+  }
+  return { lineFeeds, carriageReturns };
 }
 
 // rAF timestamps while a run is in flight.

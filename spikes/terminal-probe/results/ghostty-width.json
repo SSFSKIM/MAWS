@@ -1,0 +1,90 @@
+{
+  "renderer": "ghostty",
+  "workload": "width fixtures + DSR",
+  "phase": "m1",
+  "expectedBytes": null,
+  "bytes": 182,
+  "outputBytes": 158,
+  "lineFeeds": 12,
+  "extraCarriageReturns": 12,
+  "seconds": 2.024,
+  "lastLine": "2638120",
+  "lineCount": 48,
+  "heapMB": 48,
+  "blockedInputEvents": 0,
+  "widths": [
+    {
+      "text": "hello world",
+      "expected": 11,
+      "reported": 11
+    },
+    {
+      "text": "한글 입력",
+      "expected": 9,
+      "reported": 9
+    },
+    {
+      "text": "日本語",
+      "expected": 6,
+      "reported": 6
+    },
+    {
+      "text": "中文",
+      "expected": 4,
+      "reported": 4
+    },
+    {
+      "text": "😀",
+      "expected": 2,
+      "reported": 2
+    },
+    {
+      "text": "👍🏽",
+      "expected": 2,
+      "reported": 2
+    },
+    {
+      "text": "👨‍👩‍👧‍👦",
+      "expected": 2,
+      "reported": 2
+    },
+    {
+      "text": "🇰🇷",
+      "expected": 2,
+      "reported": 2
+    },
+    {
+      "text": "é",
+      "expected": 1,
+      "reported": 1
+    },
+    {
+      "text": "é",
+      "expected": 1,
+      "reported": 1
+    },
+    {
+      "text": "┌─┐",
+      "expected": 3,
+      "reported": 3
+    },
+    {
+      "text": "\t",
+      "expected": 8,
+      "reported": 8
+    }
+  ],
+  "frames": {
+    "count": 242,
+    "p50": 8.300000000001091,
+    "p95": 9.300000000001091,
+    "max": 9.400000000001455,
+    "over33ms": 0,
+    "over50ms": 0
+  },
+  "longTasks": {
+    "count": 0,
+    "totalMs": 0,
+    "max": 0
+  }
+}

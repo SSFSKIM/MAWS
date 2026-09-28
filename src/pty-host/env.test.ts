@@ -14,8 +14,12 @@ const base = {
   CLAUDE_CODE_USER_DIALOG_TIMEOUT_MS: '1000',
   CLAUDE_CODE_MESSAGING_SOCKET: '/tmp/sock',
   CLAUDE_CODE_MESSAGING_TOKEN: 'tok',
+  CLAUDE_CODE_CHILD_SESSION: '1',
+  CLAUDE_CODE_EXECPATH: '/Users/owner/.local/share/claude/versions/2.1.283',
+  CLAUDE_CODE_SESSION_ATTENDED: '1',
   ANTHROPIC_BASE_URL: 'https://gateway.example',
   ANTHROPIC_AUTH_TOKEN: 'secret',
+  ANTHROPIC_DEFAULT_OPUS_MODEL: 'claude-opus-x',
   ENABLE_TOOL_SEARCH: '1',
   CLAUDE_CODE_FORK_SUBAGENT: '1',
 };
@@ -24,7 +28,7 @@ describe('pty host environment', () => {
   it('drops every parent-session variable and the engine-launch variables', () => {
     const env = terminalEnvironment(base, { appVersion: '0.0.0' });
     for (const name of PARENT_SESSION_VARIABLES) expect(env).not.toHaveProperty(name);
-    for (const name of ['ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN', 'ENABLE_TOOL_SEARCH', 'CLAUDE_CODE_FORK_SUBAGENT']) {
+    for (const name of ['ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_DEFAULT_OPUS_MODEL', 'ENABLE_TOOL_SEARCH', 'CLAUDE_CODE_FORK_SUBAGENT']) {
       expect(env).not.toHaveProperty(name);
     }
     expect(env.PATH).toBe(base.PATH);
@@ -40,6 +44,11 @@ describe('pty host environment', () => {
         'CLAUDECODE',
         'CLAUDE_CODE_ENTRYPOINT',
         'CLAUDE_CODE_SSE_PORT',
+        // observed in M1: a claude started under the executor's session reported "Transcript saving is off —
+        // inherited CLAUDE_CODE_CHILD_SESSION marker" with only the charter's seven names stripped
+        'CLAUDE_CODE_CHILD_SESSION',
+        'CLAUDE_CODE_EXECPATH',
+        'CLAUDE_CODE_SESSION_ATTENDED',
       ]),
     );
   });

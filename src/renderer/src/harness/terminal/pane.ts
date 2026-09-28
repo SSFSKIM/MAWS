@@ -8,7 +8,18 @@ import { SCRATCH_CWD, resolveProgram, WIDTH_FIXTURES, type Bins, type Phase, typ
 import { ipc } from '../../ipc/client';
 import { SCROLLBACK_LINES } from '../../terminal/constants';
 import { createRenderer, type Acceleration, type RendererKind, type TerminalFont, type TerminalModes, type TerminalRenderer, type TerminalTheme } from '../../terminal/renderer';
-import { byteCountError, FrameSampler, heapMB, observeLongTasks, summarizeFrames, summarizeSamples, type Metrics, type WidthResult } from './metrics';
+import { armInputGuard } from './input-guard';
+import {
+  byteCountError,
+  countLineEndings,
+  FrameSampler,
+  heapMB,
+  observeLongTasks,
+  summarizeFrames,
+  summarizeSamples,
+  type Metrics,
+  type WidthResult,
+} from './metrics';
 
 export type PaneStatus = 'creating' | 'failed' | 'idle' | 'running' | 'exited';
 
@@ -24,6 +35,8 @@ export interface PaneDebug {
   rows: number;
   bytes: number; // UTF-8 bytes handed to the renderer since spawn
   parsed: number; // bytes the renderer reported parsed
+  lineFeeds: number;
+  carriageReturns: number;
   syncFrames: number; // `CSI ? 2026 h` occurrences in the output
   kittyQueried: boolean; // the program sent `CSI ? u`
   kittyAnswered: boolean; // the terminal answered `CSI ? <flags> u`
@@ -31,6 +44,7 @@ export interface PaneDebug {
   xtversionAnswered: boolean; // a `DCS > | … ST` reply
   dsrReplies: string[]; // `row;col` from `CSI 6 n` answers
   lastInput: string; // the last onData payload, escaped
+  rawTail: string; // the last 120 characters of output, escaped
   lastLink: string | null; // "url (meta|plain)"
   title: string | null;
   metrics: Metrics | null;
@@ -72,6 +86,7 @@ export class Pane {
   private host: HTMLElement | null = null;
   private observer: ResizeObserver | null = null;
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
+  private captured: string[] | null = null; // the whole output stream while capturing (a debugging aid)
 
   constructor(
     readonly kind: RendererKind,
@@ -89,6 +104,8 @@ export class Pane {
       rows: 0,
       bytes: 0,
       parsed: 0,
+      lineFeeds: 0,
+      carriageReturns: 0,
       syncFrames: 0,
       kittyQueried: false,
       kittyAnswered: false,
@@ -96,6 +113,7 @@ export class Pane {
       xtversionAnswered: false,
       dsrReplies: [],
       lastInput: '',
+      rawTail: '',
       lastLink: null,
       title: null,
       metrics: null,
@@ -136,7 +154,7 @@ export class Pane {
         this.publish(true);
       });
       renderer.setLinkHandler((url, ev) => {
-        this.debug.lastLink = `${url} (${ev.metaKey ? 'meta' : 'plain'})`;
+        this.debug.lastLink = `${url} (${ev.type}; meta ${ev.metaKey}, ctrl ${ev.ctrlKey}, alt ${ev.altKey})`;
         this.publish(true);
       });
       renderer.setKeyFilter(() => true);
@@ -210,6 +228,9 @@ export class Pane {
     if (!renderer) return;
     const length = utf8.encode(data).length;
     this.debug.bytes += length;
+    const endings = countLineEndings(data);
+    this.debug.lineFeeds += endings.lineFeeds;
+    this.debug.carriageReturns += endings.carriageReturns;
     this.lastByteAt = performance.now();
     const combined = this.tail + data;
     let at = combined.indexOf(SYNC_ON);
@@ -218,6 +239,8 @@ export class Pane {
       at = combined.indexOf(SYNC_ON, at + 1);
     }
     this.tail = combined.slice(-(SYNC_ON.length - 1));
+    this.debug.rawTail = escape((this.debug.rawTail + data).slice(-120));
+    this.captured?.push(data);
     if (combined.includes(`${ESC}[?u`)) this.debug.kittyQueried = true;
     if (combined.includes(`${ESC}[>0q`) || combined.includes(`${ESC}[>q`)) this.debug.xtversionQueried = true;
     renderer.write(data, () => {
@@ -239,6 +262,8 @@ export class Pane {
     Object.assign(this.debug, {
       bytes: 0,
       parsed: 0,
+      lineFeeds: 0,
+      carriageReturns: 0,
       syncFrames: 0,
       kittyQueried: false,
       kittyAnswered: false,
@@ -246,6 +271,7 @@ export class Pane {
       xtversionAnswered: false,
       dsrReplies: [],
       lastInput: '',
+      rawTail: '',
       lastLink: null,
       exit: null,
       metrics: null,
@@ -258,7 +284,9 @@ export class Pane {
     if (!this.renderer) throw new Error(`${this.kind} has no renderer`);
     await this.kill();
     this.resetCounters();
+    // ghostty-web's reset() leaves the old screen in place (observed in M1), so the screen is cleared explicitly too.
     this.renderer.reset();
+    this.renderer.clear();
     const cols = this.debug.cols || 80;
     const rows = this.debug.rows || 24;
     const input = { cwd: SCRATCH_CWD, cols, rows, ...(spec.shell ? { shell: spec.shell } : {}), ...(spec.args ? { args: spec.args } : {}) };
@@ -313,12 +341,29 @@ export class Pane {
     });
   }
 
-  // Resolves once no byte has arrived for `quietMs` and everything received is parsed.
-  async idle(quietMs = 500): Promise<void> {
+  // Resolves once no byte has arrived for `quietMs` and everything received is parsed, or after `maxMs` for a
+  // program that never goes quiet (codex repaints its status line continuously). Returns whether it went quiet.
+  async idle(quietMs = 500, maxMs = 15_000): Promise<boolean> {
+    const started = performance.now();
     for (;;) {
       await new Promise((r) => setTimeout(r, quietMs));
-      if (performance.now() - this.lastByteAt >= quietMs && this.debug.parsed >= this.debug.bytes) return;
+      if (performance.now() - this.lastByteAt >= quietMs && this.debug.parsed >= this.debug.bytes) return true;
+      if (performance.now() - started >= maxMs) return false;
     }
+  }
+
+  // Debugging aid: capture the stream from the next spawn on, then report every character outside `allowed`.
+  capture(enabled: boolean): void {
+    this.captured = enabled ? [] : null;
+  }
+
+  foreignCharacters(allowed: RegExp): { position: number; text: string; context: string }[] {
+    const all = (this.captured ?? []).join('');
+    const found: { position: number; text: string; context: string }[] = [];
+    for (let i = 0; i < all.length && found.length < 20; i++) {
+      if (!allowed.test(all[i]!)) found.push({ position: i, text: escape(all[i]!), context: escape(all.slice(Math.max(0, i - 30), i + 30)) });
+    }
+    return found;
   }
 
   snapshot(from?: number, to?: number): ProbeSnapshot {
@@ -347,6 +392,7 @@ export class Pane {
     const expectedBytes = workload.expectedBytes?.[phase] ?? null;
     const frames = new FrameSampler();
     const longTasks = observeLongTasks();
+    const guard = armInputGuard(window);
     const t0 = performance.now();
     frames.start();
     await this.spawn(spec, claim);
@@ -361,6 +407,7 @@ export class Pane {
       await this.waitForParsed();
     }
     const seconds = (performance.now() - t0) / 1000;
+    const blockedInputEvents = guard.disarm();
     const frameSummary = summarizeFrames(frames.stop());
     const longTaskSummary = longTasks.stop();
     if (workload.measure === 'width') widths = this.widthResults();
@@ -369,20 +416,29 @@ export class Pane {
       const mismatch = workload.expectedScreen!.findIndex((line, i) => line !== screen[i]);
       if (mismatch !== -1) error = `screen mismatch at row ${mismatch}: expected ${JSON.stringify(workload.expectedScreen![mismatch])}, got ${JSON.stringify(screen[mismatch])}`;
     }
+    const received = { bytes: this.debug.bytes, outputBytes: this.debug.bytes - this.debug.carriageReturns, lineFeeds: this.debug.lineFeeds };
     const metrics: Metrics = {
       renderer: this.kind,
       workload: workload.title,
       phase,
       expectedBytes,
       bytes: this.debug.bytes,
+      outputBytes: received.outputBytes,
+      lineFeeds: received.lineFeeds,
+      extraCarriageReturns: this.debug.carriageReturns - this.debug.lineFeeds,
       seconds: Math.round(seconds * 1000) / 1000,
       lastLine: this.lastLine(),
       lineCount: this.renderer!.probe().lineCount(),
       heapMB: heapMB(),
+      blockedInputEvents,
       ...(latency ? { latency } : {}),
       ...(widths ? { widths } : {}),
     };
-    const bytesError = expectedBytes === null ? null : byteCountError(expectedBytes, this.debug.bytes);
+    const expectedOutput = workload.expectedOutputBytes?.[phase];
+    const bytesError =
+      expectedBytes === null || expectedOutput === undefined
+        ? null
+        : byteCountError({ bytes: expectedBytes, outputBytes: expectedOutput, lineFeeds: expectedBytes - expectedOutput }, received);
     if (bytesError) error = bytesError;
     if (error) metrics.error = error;
     else {

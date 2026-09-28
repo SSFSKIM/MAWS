@@ -28,7 +28,7 @@ export interface ProbeApi {
   spawn(renderer: RendererKind, workloadId: string, phase?: Phase): Promise<{ ptyId: string; pid: number }>;
   type(renderer: RendererKind, data: string): Promise<void>;
   kill(renderer: RendererKind): Promise<void>;
-  idle(renderer: RendererKind, quietMs?: number): Promise<void>;
+  idle(renderer: RendererKind, quietMs?: number, maxMs?: number): Promise<boolean>;
   snapshot(renderer: RendererKind, from?: number, to?: number): ProbeSnapshot;
   state(renderer: RendererKind): PaneDebug;
   focus(renderer: RendererKind): void;
@@ -36,6 +36,10 @@ export interface ProbeApi {
   simulateContextLoss(renderer: RendererKind): void;
   geometry(renderer: RendererKind): { x: number; y: number; width: number; height: number; cols: number; rows: number } | null;
   setSplit(fraction: number): void;
+  setVisible(renderer: RendererKind, visible: boolean): void;
+  setBins(next: Partial<Bins>): void;
+  capture(renderer: RendererKind, enabled: boolean): void;
+  foreignCharacters(renderer: RendererKind, allowed: string): { position: number; text: string; context: string }[];
   screenshotReady(): Promise<void>;
 }
 
@@ -88,20 +92,25 @@ const api: ProbeApi = {
   spawn: (renderer, id, phase = 'm1') => panes[renderer].spawn(resolveProgram(programWorkload(id), phase, bins), claim(panes[renderer])),
   type: (renderer, data) => panes[renderer].write(data),
   kill: (renderer) => panes[renderer].kill(),
-  idle: (renderer, quietMs) => panes[renderer].idle(quietMs),
+  idle: (renderer, quietMs, maxMs) => panes[renderer].idle(quietMs, maxMs),
   snapshot: (renderer, from, to) => panes[renderer].snapshot(from, to),
   state: (renderer) => panes[renderer].debug,
   focus: (renderer) => panes[renderer].focus(),
   selection: (renderer) => panes[renderer].renderer?.getSelection() ?? '',
   simulateContextLoss: (renderer) => panes[renderer].renderer?.simulateContextLoss?.(),
+  // The drawn grid's box: the renderer's canvas when it has one (it need not fill the container), else the container.
   geometry(renderer) {
     const element = panes[renderer].renderer?.element;
     if (!element) return null;
-    const { x, y, width, height } = element.getBoundingClientRect();
+    const { x, y, width, height } = (element.querySelector('canvas') ?? element).getBoundingClientRect();
     const { cols, rows } = panes[renderer].debug;
     return { x, y, width, height, cols, rows };
   },
   setSplit: (fraction) => useProbeStore.getState().setSplit(fraction),
+  setVisible: (renderer, visible) => panes[renderer].renderer?.setVisible(visible),
+  setBins: (next) => Object.assign(bins, next),
+  capture: (renderer, enabled) => panes[renderer].capture(enabled),
+  foreignCharacters: (renderer, allowed) => panes[renderer].foreignCharacters(new RegExp(allowed)),
   screenshotReady: () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))),
 };
 
@@ -173,8 +182,8 @@ export function Probe() {
 
   return (
     <div className="flex h-full flex-col bg-bg text-fg">
-      <header className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-border bg-bg-raised px-3 py-2 text-ui-sm [app-region:drag]">
-        <span className="pl-16 font-mono text-fg-faint">#probe</span>
+      <header className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-border bg-bg-raised px-3 py-2 text-ui-sm">
+        <span className="font-mono text-fg-faint">#probe</span>
         <div role="group" aria-label="target" className="flex gap-1 [app-region:no-drag]">
           {(['both', 'xterm', 'ghostty'] as const).map((value) => (
             <button

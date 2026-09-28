@@ -18,9 +18,6 @@ import {
   type TerminalTheme,
 } from './renderer';
 
-// How long the addon waits for the browser to restore a lost context before giving it up (Residue *WebGL policy*).
-export const CONTEXT_RESTORE_WAIT_MS = 3_000;
-
 const toXtermTheme = (theme: TerminalTheme): ITheme => ({
   background: theme.background,
   foreground: theme.foreground,
@@ -67,8 +64,9 @@ export function createXtermRenderer(opts: RendererOptions): TerminalRenderer {
     accelerationListeners.forEach((cb) => cb(a));
   };
 
-  // The WebGL addon is loaded after open() and only while the terminal is visible; on context loss it is dropped
-  // and the DOM renderer continues (the next show retries).
+  // The WebGL addon is loaded after open() and only while the terminal is visible. The addon itself waits three
+  // seconds for the browser to restore a lost context before it fires onContextLoss (Residue *WebGL policy*); then
+  // it is dropped at once and the DOM renderer continues (the next show retries).
   let webgl: WebglAddon | null = null;
   let visible = false;
   const releaseWebgl = () => {
@@ -81,9 +79,7 @@ export function createXtermRenderer(opts: RendererOptions): TerminalRenderer {
     try {
       const addon = new WebglAddon();
       addon.onContextLoss(() => {
-        setTimeout(() => {
-          if (webgl === addon) releaseWebgl();
-        }, CONTEXT_RESTORE_WAIT_MS);
+        if (webgl === addon) releaseWebgl();
       });
       terminal.loadAddon(addon);
       webgl = addon;
