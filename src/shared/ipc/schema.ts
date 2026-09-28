@@ -37,6 +37,18 @@ export {
   type ThemeSetting,
 } from './schema/settings';
 export type { IpcError } from './errors';
+// C5: the read side and the shapes the shell's stores consume.
+export {
+  ProjectRecordSchema,
+  SESSION_PHASES,
+  SessionDigestSchema,
+  SessionPatchSchema,
+  type ProjectRecord,
+  type SessionDigest,
+  type SessionPatch,
+  type SessionPhase,
+} from './schema/session';
+export { ChordSchema } from './schema/settings';
 
 export const commands = {
   ...session.commands,

@@ -2,6 +2,9 @@ import { join } from 'node:path';
 import { app, BrowserWindow } from 'electron';
 import { createHosts } from './hosts';
 import { installRouter } from './ipc/router';
+import { LayoutFileStore, registerLayoutHandlers } from './layout/store';
+import { registerOpenExternal } from './open-external';
+import { startSessions } from './sessions';
 import { startSettings } from './settings';
 import { appUrl, createWindow, installContentSecurityPolicy } from './window';
 // C3 start (the attention service's imports moved with its start into C4's block: src/main/index/attention-service.ts)
@@ -73,6 +76,17 @@ app.whenReady().then(() => {
     index.close();
   });
   // C4 end
+
+  // ---- C5: layout store and the read side (launch mode, read model, stub source in scenario mode) ----
+  const layout = new LayoutFileStore(join(app.getPath('userData'), 'layout.json'));
+  registerLayoutHandlers(layout);
+  registerOpenExternal();
+  const sessions = startSessions({ env: process.env, packaged: app.isPackaged, appRoot: app.getAppPath(), hosts });
+  app.on('will-quit', () => {
+    layout.flush();
+    sessions.stop();
+  });
+  // ---- end C5 ----
 
   // The hosts belong to the app, not to a window or a page (§4.1): they start here, before any window exists, and
   // `start()` is idempotent, so opening a window again forks nothing and a reload never reaches them.

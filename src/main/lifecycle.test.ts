@@ -13,6 +13,8 @@ const fake = vi.hoisted(() => {
     },
     whenReady: () => Promise.resolve(),
     getPath: () => '/tmp/maws-lifecycle-test',
+    getAppPath: () => '/tmp/maws-lifecycle-app',
+    isPackaged: false,
     setPath: vi.fn(),
     commandLine: { appendSwitch: vi.fn() },
     quit: vi.fn(),
@@ -44,6 +46,11 @@ const git = vi.hoisted(() => ({ dispose: vi.fn(), registered: 0 }));
 vi.mock('./git/service', () => ({ GitService: class { dispose = git.dispose; } }));
 vi.mock('./git/register', () => ({ registerGitHandlers: () => void (git.registered += 1) }));
 // end C4
+// C5 start: the layout store, the external-link command and the read side
+vi.mock('./layout/store', () => ({ LayoutFileStore: class { flush() {} }, registerLayoutHandlers: vi.fn() }));
+vi.mock('./open-external', () => ({ registerOpenExternal: vi.fn() }));
+vi.mock('./sessions', () => ({ startSessions: () => ({ stop: vi.fn() }) }));
+// C5 end
 
 beforeAll(async () => {
   await import('./index');
