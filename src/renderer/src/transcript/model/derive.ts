@@ -12,7 +12,7 @@ import type { LiveBlock, TranscriptState, TranscriptUi, TurnState } from './redu
 import { isEngineOrigin } from './reduce';
 import { TOOL_CATEGORIES, type Cell, type ChangedFile, type Row, type RowId, type SubagentRef, type SubagentStatus, type ToolCategory, type TurnId, type TurnSummary } from './rows';
 import { needsSeparator, separatorLabel } from './time';
-import { userTextOf, localCommandOutput } from './user-text';
+import { isLocalCommand, localCommandOutput, userTextOf } from './user-text';
 
 type Event<K extends SessionEvent['kind']> = Extract<SessionEvent, { kind: K }>;
 type RowOf<K extends Row['kind']> = Extract<Row, { kind: K }>;
@@ -148,6 +148,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): { rows: Row
   let user: RowOf<'user'> | null = null;
   let model: string | null = null;
   let retry: RowOf<'error'> | null = null;
+  let retryAt: string | null = null; // the first api.retry's time: the in-place row keeps its position
   const bashInputs = new Map<string, Event<'user.message'>>();
   const agentIds = new Map<ToolUseId, AgentId>();
 
@@ -192,8 +193,8 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): { rows: Row
         } else if (event.bash?.part === 'output') {
           const at = items.findIndex((item) => item.kind === 'row' && item.row.kind === 'bash' && item.row.exitCode === null);
           if (at >= 0) items[at] = { kind: 'row', row: bashRow((items[at] as { row: RowOf<'bash'> }).row, event) };
-        } else if (localCommandOutput(event.content) !== null) {
-          items.push({ kind: 'row', row: noticeRow(event, localCommandOutput(event.content)!, turn.id) });
+        } else if (isLocalCommand(event.origin, event.content)) {
+          items.push({ kind: 'row', row: localCommandRow(event, turn.id) });
         } else if (event.messageUuid !== null && turnIdOf.ofMessage(event.messageUuid) === turn.id && user === null && !dropped(event.messageUuid)) {
           const text = userTextOf(event.content);
           user = { id: rowId.user(event.messageUuid), turnId: turn.id, at: event.at, kind: 'user', messageUuid: event.messageUuid, text: text.text, attachments: text.attachments, lines: text.lines, editable: true };
@@ -368,8 +369,10 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): { rows: Row
         items.push({ kind: 'row', row: boundaryRow(event, turn.id) });
         break;
       case 'api.retry': {
-        retry = { id: rowId.retry(turn.id), turnId: turn.id, at: event.at, kind: 'error', severity: 'transient', text: retryCopy(event.attempt, event.maxRetries, event.errorStatus, event.error), attempt: { n: event.attempt, max: event.maxRetries }, scope: 'api', lostAttentionCount: null };
-        if (!items.some((item) => item.kind === 'row' && item.row === retry)) items.push({ kind: 'row', row: retry });
+        const first = retryAt === null;
+        retryAt ??= event.at;
+        retry = { id: rowId.retry(turn.id), turnId: turn.id, at: retryAt, kind: 'error', severity: 'transient', text: retryCopy(event.attempt, event.maxRetries, event.errorStatus, event.error), attempt: { n: event.attempt, max: event.maxRetries }, scope: 'api', lostAttentionCount: null };
+        if (first) items.push({ kind: 'row', row: retry }); // later retries replace this row in place (resolution pass)
         break;
       }
       case 'error.raised':
@@ -643,6 +646,12 @@ function boundaryRow(event: Event<'boundary.compaction' | 'boundary.reset' | 'bo
   }
 }
 
+// The engine's local-command echo, tags stripped; the raw text stands when the wrapper is absent (C3 tagged it).
+function localCommandRow(event: Event<'user.message'>, turnId: TurnId | null): RowOf<'local_command'> {
+  const text = localCommandOutput(event.content) ?? (typeof event.content === 'string' ? event.content : event.content.filter((block) => block.type === 'text').map((block) => str(block.text)).join('\n'));
+  return { id: event.messageUuid === null ? rowId.localOfEvent(event.id) : rowId.local(event.messageUuid), turnId, at: event.at, kind: 'local_command', messageUuid: event.messageUuid, text };
+}
+
 function noticeRow(event: SessionEvent, text: string, turnId: TurnId | null): RowOf<'error'> {
   return { id: rowId.error(event.id), turnId, at: event.at, kind: 'error', severity: 'notice', text, attempt: null, scope: 'notice', lostAttentionCount: null };
 }
@@ -666,10 +675,7 @@ function looseRows(state: TranscriptState, events: SessionEvent[]): Row[] {
         else if (event.bash?.part === 'output') {
           const at = rows.findIndex((row) => row.kind === 'bash' && row.exitCode === null);
           if (at >= 0) rows[at] = bashRow(rows[at] as RowOf<'bash'>, event);
-        } else {
-          const local = localCommandOutput(event.content);
-          if (local !== null) rows.push(noticeRow(event, local, null));
-        }
+        } else if (isLocalCommand(event.origin, event.content)) rows.push(localCommandRow(event, null));
         break;
       }
       case 'boundary.compaction':

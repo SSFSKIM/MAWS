@@ -8,7 +8,7 @@ import type { AgentId, ApiMessageId, EventId, MessageUuid, RequestId, SessionId,
 import { toolUseOf } from '@shared/graph/ids';
 import { rowId, turnId as turnIdOf } from './keys';
 import type { Row, RowId, TurnId } from './rows';
-import { isInterruptionMarker, localCommandOutput } from './user-text';
+import { isInterruptionMarker, isLocalCommand } from './user-text';
 
 type Event<K extends SessionEvent['kind']> = Extract<SessionEvent, { kind: K }>;
 
@@ -247,12 +247,12 @@ function apply(batch: Batch, event: SessionEvent): void {
         if (event.messageUuid !== null) state.echoUuids.add(event.messageUuid);
         return;
       }
-      if (event.bash !== null || localCommandOutput(event.content) !== null) {
-        if (!pushRouted(null)) batch.loose(event);
+      if (event.bash !== null || isLocalCommand(event.origin, event.content)) {
+        if (!pushRouted(null)) batch.loose(event); // a bash or local_command row; never a turn
         return;
       }
-      if (event.isSynthetic || isInterruptionMarker(event.content)) {
-        pushRouted(null, false);
+      if (event.isSynthetic || isInterruptionMarker(event.origin, event.content)) {
+        pushRouted(null, false); // retained on the turn, no row of its own
         return;
       }
       const own = event.messageUuid === null ? undefined : state.turns.get(turnIdOf.ofMessage(event.messageUuid));

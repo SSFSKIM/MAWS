@@ -36,6 +36,8 @@ export const rowId = {
   reconnect: (session: SessionId) => row(`reconnect:${session}`),
   boundary: (id: EventId) => row(`boundary:${id}`),
   bash: (inputMessage: MessageUuid) => row(`bash:${inputMessage}`),
+  local: (message: MessageUuid) => row(`local:${message}`), // a local-command echo row
+  localOfEvent: (id: EventId) => row(`local:${id}`),
 };
 
 export const cellId = {

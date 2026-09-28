@@ -85,13 +85,43 @@ describe('turn boundaries', () => {
     expect(third.events.some((e) => e.kind === 'assistant.block.complete' && e.apiMessageId === 'm3')).toBe(true);
   });
 
-  it('a local command echo never opens a turn and renders as a notice', () => {
+  it('a local-command echo never opens a turn and renders as a local_command row, tags stripped, loose outside a turn and in the work area inside one', () => {
     const b = builder();
-    b.emit('user.message', { messageUuid: uuid('lc'), content: '<local-command-stdout>Set model to `opus`</local-command-stdout>', isReplay: true, isSynthetic: false, origin: null, bash: null });
-    const state = reduce(b.events);
+    b.emit('user.message', { messageUuid: uuid('lc1'), content: '<local-command-stdout>Set model to `opus`</local-command-stdout>', isReplay: true, isSynthetic: false, origin: 'local-command', bash: null });
+    let state = reduce(b.events);
     expect(state.order).toEqual([]);
+    let list = rows(b.events);
+    expect(kinds(list)).toEqual(['time', 'local_command']);
+    expect(find(list, 'local_command')).toMatchObject({ id: rowId.local(uuid('lc1')), messageUuid: 'lc1', text: 'Set model to `opus`', turnId: null });
+    // Untagged by C4's backfill: the wrapper is still recognised.
+    b.emit('user.message', { messageUuid: uuid('lc2'), content: '<local-command-stdout>Set model to `sonnet`</local-command-stdout>', isReplay: true, isSynthetic: false, origin: null, bash: null });
+    b.turn('u1');
+    b.toolUse('t1', 'Bash', { command: 'ls' });
+    b.result('t1', 'ok');
+    b.emit('user.message', { messageUuid: uuid('lc3'), content: '<local-command-stdout>Set model to `haiku`</local-command-stdout>', isReplay: true, isSynthetic: false, origin: 'local-command', bash: null });
+    b.text('m1', 0, 'Done');
+    b.end(['u1']);
+    state = reduce(b.events);
+    expect(state.order).toEqual([turnId.ofMessage(uuid('u1'))]);
+    list = rows(b.events);
+    expect(kinds(list)).toEqual(['time', 'local_command', 'local_command', 'user', 'divider', 'cell', 'local_command', 'assistant_text']);
+    expect(find(list, 'local_command', 2)).toMatchObject({ turnId: turnId.ofMessage(uuid('u1')), text: 'Set model to `haiku`' });
+    expect(find(list, 'user').text).toBe('prompt u1');
+  });
+
+  it('an interrupt marker yields no row and opens no turn; the turn’s stopped disposition carries the interruption', () => {
+    const b = builder();
+    b.emit('user.message', { messageUuid: uuid('im0'), content: [{ type: 'text', text: '[Request interrupted by user]' }], isReplay: false, isSynthetic: false, origin: 'interrupt-marker', bash: null });
+    expect(reduce(b.events).order).toEqual([]);
+    b.turn('u1');
+    b.toolUse('t1', 'Bash', { command: 'sleep 9' });
+    b.result('t1', 'User rejected tool use', { isError: true, denial: 'user-rejected' });
+    b.emit('user.message', { messageUuid: uuid('im1'), content: [{ type: 'text', text: '[Request interrupted by user]' }], isReplay: false, isSynthetic: false, origin: 'interrupt-marker', bash: null });
+    b.end(['u1'], { isError: true, result: 'error_during_execution', terminalReason: 'aborted_streaming' });
     const list = rows(b.events);
-    expect(find(list, 'error')).toMatchObject({ severity: 'notice', scope: 'notice', text: 'Set model to `opus`' });
+    expect(kinds(list)).toEqual(['time', 'user', 'divider', 'cell']);
+    expect(find(list, 'divider').state).toBe('stopped');
+    expect(find(list, 'cell').status).toBe('stopped');
   });
 });
 

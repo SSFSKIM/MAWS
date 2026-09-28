@@ -17,6 +17,8 @@ const num = (value: unknown): number | null => (typeof value === 'number' ? valu
 const bool = (value: unknown): boolean => value === true;
 
 const BASH_INPUT = /^<bash-input>([\s\S]*?)<\/bash-input>$/;
+const LOCAL_COMMAND = /^\s*<local-command-(stdout|caveat)>[\s\S]*<\/local-command-\1>\s*$/;
+const INTERRUPT_MARKER = '[Request interrupted by user]';
 const BASH_OUTPUT = /^<bash-stdout>([\s\S]*?)<\/bash-stdout><bash-stderr>([\s\S]*?)<\/bash-stderr><bash-exit-code>(-?\d+)<\/bash-exit-code>$/;
 
 const NOTICE_LEVELS = new Set(['info', 'notice', 'suggestion', 'warning']);
@@ -162,10 +164,16 @@ export function journalToEvents(rows: JournalRow[], options: StubOptions = {}): 
         if (typeof content === 'string') {
           const input = BASH_INPUT.exec(content);
           const output = BASH_OUTPUT.exec(content);
+          // C3's two additive origins: the engine's slash-command echo, tagged from its wrapper.
+          const origin = LOCAL_COMMAND.test(content) ? 'local-command' : str(rec(frame.origin).kind);
           put('user.message', {
-            messageUuid: uuid as MessageUuid | null, content: input || output ? '' : content, isReplay: bool(frame.isReplay), isSynthetic: bool(frame.isSynthetic), origin: str(rec(frame.origin).kind),
+            messageUuid: uuid as MessageUuid | null, content: input || output ? '' : content, isReplay: bool(frame.isReplay), isSynthetic: bool(frame.isSynthetic), origin,
             bash: input ? { part: 'input', command: input[1] } : output ? { part: 'output', stdout: output[1], stderr: output[2], exitCode: Number(output[3]) } : null,
           });
+          return;
+        }
+        if (content.length === 1 && content[0].type === 'text' && content[0].text === INTERRUPT_MARKER) {
+          put('user.message', { messageUuid: uuid as MessageUuid | null, content, isReplay: bool(frame.isReplay), isSynthetic: bool(frame.isSynthetic), origin: 'interrupt-marker', bash: null });
           return;
         }
         const results = content.filter((block) => block.type === 'tool_result');

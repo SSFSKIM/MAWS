@@ -209,7 +209,8 @@ export const shellFooter = (status: 'done' | 'error' | 'stopped', exitCode: numb
   return exitCode === 0 ? `✓ Exit code 0 · ${t}` : `✕ Exit code ${exitCode} · ${t}`;
 };
 
-export const thinkingLabel = (live: boolean, durationMs: number | null) => (live || durationMs === null ? 'Thinking' : `Thought for ${duration(durationMs)}`);
+// A block that never streamed (disk history) has no duration: `Thought`, never a live-looking `Thinking`.
+export const thinkingLabel = (live: boolean, durationMs: number | null) => (live ? 'Thinking' : durationMs === null ? 'Thought' : `Thought for ${duration(durationMs)}`);
 
 export const SAFEGUARD_LINE = { not_flagged: 'Auto mode · reviewed · not flagged', flagged: 'Auto mode · flagged', not_evaluated: 'Auto mode · not reviewed' } as const;
 
@@ -270,4 +271,5 @@ export const reconnectCopy = (phase: 'attempting' | 'reconnected' | 'failed', at
 export const processExitCopy = (reason: string, lostAttentionCount: number) =>
   `Session process exited (${reason})${lostAttentionCount > 0 ? ` · ${plural(lostAttentionCount, 'approval')} lost` : ''}`;
 export const bashHeader = (command: string) => `! ${command}`;
+export const LOCAL_COMMAND_HEADER = 'Command output';
 export const bashFooter = (exitCode: number | null) => (exitCode === null ? '' : `exit ${exitCode}`);

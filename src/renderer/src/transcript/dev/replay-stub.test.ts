@@ -118,6 +118,16 @@ describe('replay stub: the querying-user mapping', () => {
     expect(dialogs.find((e) => e.seq === 43)).toMatchObject({ kind: 'elicitation.resolved', action: 'accept', content: { color: 'teal' } });
   });
 
+  it('tags the local-command echo and the interrupt marker from the wire', () => {
+    const routed = events('pass2', 'auto-routed');
+    const locals = routed.filter((e): e is Extract<SessionEvent, { kind: 'user.message' }> => e.kind === 'user.message' && e.origin === 'local-command');
+    expect(locals.map((e) => e.seq)).toEqual([153, 162, 173, 186]);
+    expect(locals.every((e) => e.isReplay && typeof e.content === 'string' && e.content.startsWith('<local-command-stdout>'))).toBe(true);
+    const marker = events('pass1', 'queue-and-interrupt').find((e) => e.seq === 197);
+    expect(marker).toMatchObject({ kind: 'user.message', origin: 'interrupt-marker', content: [{ type: 'text', text: '[Request interrupted by user]' }] });
+    expect(events('pass2', 'per-task-stop-on').find((e) => e.seq === 65)).toMatchObject({ kind: 'user.message', origin: 'interrupt-marker' });
+  });
+
   it('streams deltas with the block type of their content_block_start and completes with the envelope-local index', () => {
     const list = events('pass1', 'permission-roundtrip');
     const deltas = list.filter((e): e is Extract<SessionEvent, { kind: 'assistant.block.delta' }> => e.kind === 'assistant.block.delta' && e.apiMessageId === 'msg_011CfVbJVKzQBxgf5S8iR6fF');
@@ -232,6 +242,23 @@ describe('fixture gates through the model', () => {
     expect(groups[0].cells.map((cell) => cell.id)).toEqual(['cell:toolu_01Pw5t8WFEWy8m7zrSCNnca1', 'cell:hook:2fb18f8d-6da2-4d27-b7c5-5e55be53e312']);
     expect(groups[0].cells[1].detail).toMatchObject({ kind: 'hook', outcome: 'success', stdout: 'MAWS_POSTHOOK\n' });
     expect(groups[0].summary).toBe('Ran `git status --short`, ran 1 hook');
+  });
+
+  it('pass2/auto-routed: four local_command rows and no user row for them; the interrupt markers yield no row', () => {
+    const rows = rowsFor('pass2', 'auto-routed');
+    const locals = ofKind(rows, 'local_command');
+    expect(locals).toHaveLength(4);
+    expect(locals.every((row) => row.text.startsWith('Set model to '))).toBe(true);
+    expect(locals.every((row) => row.id.startsWith('local:'))).toBe(true);
+    expect(ofKind(rows, 'user').some((row) => row.text.includes('local-command') || row.text.startsWith('Set model'))).toBe(false);
+    const state = stateOf('pass2', 'auto-routed');
+    expect(state.order.every((id) => !state.turns.get(id)!.events.some((e) => e.kind === 'turn.started' && e.userMessageUuid && e.userMessageUuid.startsWith('local')))).toBe(true);
+    for (const [pass, name, seq] of [['pass1', 'queue-and-interrupt', 197], ['pass2', 'per-task-stop-on', 65]] as const) {
+      const marker = events(pass, name).find((e) => e.seq === seq) as Extract<SessionEvent, { kind: 'user.message' }>;
+      const all = rowsFor(pass, name);
+      expect(all.some((row) => 'messageUuid' in row && row.messageUuid === marker.messageUuid)).toBe(false);
+      expect(ofKind(all, 'user').some((row) => row.text.includes('interrupted by user'))).toBe(false);
+    }
   });
 
   it('pass1/init: a thinking disclosure then the answer', () => {

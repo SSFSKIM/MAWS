@@ -126,6 +126,7 @@ describe('cell lines', () => {
   it('thinking', () => {
     expect(thinkingLabel(true, null)).toBe('Thinking');
     expect(thinkingLabel(false, 12_000)).toBe('Thought for 12s');
+    expect(thinkingLabel(false, null)).toBe('Thought'); // never streamed: no duration to show
   });
 });
 
