@@ -7,6 +7,7 @@ import { EngineSessionStatusSchema } from '@shared/engine/status';
 import type { StdinFrame } from '@shared/wire/frames';
 import { loadEngineJournal } from '../../test/support/fixtures';
 import { buildLaunch, ENGINE_VERSION, RELAY_URL } from './launch';
+import { Normalizer } from './normalizer';
 import { ProcessTable } from './process-table';
 import { EngineSession, HostHookRegistry, type EngineSessionOptions } from './session';
 import { MemoryJournal, scriptedTransport, type ScriptedTransport } from './conformance/scripted-transport';
@@ -42,10 +43,11 @@ function autoResponder(responder: Responder) {
   };
 }
 
-function setup(opts: { spec?: Partial<LaunchSpec>; responder?: Responder; session?: Partial<EngineSessionOptions> } = {}) {
+type TransportOpts = Omit<Parameters<typeof scriptedTransport>[0] & object, 'onWrite'>;
+function setup(opts: { spec?: Partial<LaunchSpec>; responder?: Responder; session?: Partial<EngineSessionOptions>; transport?: TransportOpts } = {}) {
   const launchSpec = spec(opts.spec);
   const plan = buildLaunch(launchSpec, { PATH: '/usr/bin', HOME: '/Users/x', ANTHROPIC_DEFAULT_SONNET_MODEL: 'claude-sonnet-5' }, { relayUrl: RELAY_URL, engineVersion: ENGINE_VERSION });
-  const transport = scriptedTransport({ onWrite: autoResponder(opts.responder ?? defaultResponder()) });
+  const transport = scriptedTransport({ ...opts.transport, onWrite: autoResponder(opts.responder ?? defaultResponder()) });
   const journal = new MemoryJournal();
   const logs: string[] = [];
   const session = new EngineSession({ spec: launchSpec, plan, spawn: () => transport, journal, log: (m) => logs.push(m), ...opts.session });
@@ -74,7 +76,7 @@ afterEach(() => {
 describe('EngineSession: the handshake, journal-before-normalise and the gateway read', () => {
   it('spawn → initialize → get_status → ready, journaling every row before it is normalised', async () => {
     const { session, transport, journal, events } = setup({ spec: { trust: { accepted: true, directory: '/tmp/maws-session' } } });
-    expect(session.status().process).toBe('starting');
+    expect(session.status()).toMatchObject({ process: 'starting', cwd: '/tmp/maws-session', pendingPlan: null }); // from the reservation onward
     await session.start();
     expect(shape(journal)).toEqual(['meta:spawn', 'out:control_request/initialize', 'in:control_response', 'meta:initialize', 'out:control_request/get_status', 'in:control_response', 'meta:status_check']);
     expect(transport.requestsOf('initialize')[0]!.request).toEqual({
@@ -168,6 +170,33 @@ describe('EngineSession: inbound requests, host hooks and exit', () => {
     expect(transport.writes.at(-1)).toMatchObject({ type: 'control_response', response: { request_id: 'r1', response: { behavior: 'allow' } } });
     expect(session.status().grants).toEqual(['Bash(ls)']);
     expect(events.map((e) => e.kind)).toEqual(['permission.requested', 'permission.resolved']);
+  });
+
+  it('an answer whose write rejects leaves no resolution in the graph: write_failed, item pending, error.raised; the retry resolves exactly once', async () => {
+    let failures = 1;
+    const { session, transport, journal, events, lists, plan } = setup({ transport: { failWrite: (f) => f.type === 'control_response' && failures-- > 0 } });
+    await session.start();
+    transport.push({ type: 'control_request', request_id: 'r1', request: { subtype: 'can_use_tool', tool_name: 'Bash', input: { command: 'ls' }, tool_use_id: 'toolu_1' } });
+    await flush();
+    expect(await session.answer('r1' as RequestId, { kind: 'permission', decision: 'allow', scope: 'once' })).toBe('write_failed');
+    expect(events.map((e) => e.kind)).toEqual(['permission.requested', 'error.raised']);
+    expect(events[1]).toMatchObject({ scope: 'transport', code: 'write_failed', requestId: 'r1' });
+    expect(journal.rows.filter((r) => r.direction === 'out' && (r.frame as { type: string }).type === 'control_response')).toEqual([]);
+    expect(lists.at(-1)).toMatchObject([{ state: 'pending' }]);
+    expect(await session.answer('r1' as RequestId, { kind: 'permission', decision: 'allow', scope: 'once' })).toBe('delivered');
+    expect(events.filter((e) => e.kind === 'permission.resolved')).toHaveLength(1);
+    expect(lists.at(-1)).toMatchObject([{ state: 'delivered' }]);
+    const rebuilt = new Normalizer({ appSessionId: spec().appSessionId, launchId: plan.launchId, sessionId: plan.sessionId });
+    expect(journal.rows.flatMap((row) => rebuilt.push(row))).toEqual(session.events());
+  });
+
+  it('a user frame whose write rejects is journaled as write_failed, not as a sent prompt', async () => {
+    const { session, journal, events } = setup({ transport: { failWrite: (f) => f.type === 'user' } });
+    await session.start();
+    await expect(session.send('hi')).rejects.toThrow('EPIPE');
+    expect(journal.rows.at(-1)!.frame).toMatchObject({ event: 'write_failed', frameType: 'user', subtype: null, requestId: null });
+    expect(events.map((e) => e.kind)).toEqual(['error.raised']);
+    expect(session.status().turn).toBeNull();
   });
 
   it('an initialize response carrying one pending_permission_requests entry re-accepts it (event and broker item)', async () => {
@@ -348,6 +377,60 @@ describe('plan outcomes map to the wire', () => {
     expect(implement.origin).toEqual({ kind: 'human' });
     const userRows = journal.rows.filter((r) => r.direction === 'out' && (r.frame as { type: string }).type === 'user').map((r) => (r.frame as { message: { content: string } }).message.content);
     expect(userRows).toEqual(['plan it', '/clear', 'Implement this plan:\n\n# Plan\n1. do it']);
+  });
+
+  it('clear_and_implement is staged before the deny is written: a result that arrives while the write is in flight still runs the sequence', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const { session, transport } = setup({ transport: { holdWrite: (f) => (f.type === 'control_response' ? gate : null) } });
+    await session.start();
+    transport.push({ type: 'system', subtype: 'status', status: null, permissionMode: 'plan', session_id: 's' });
+    await session.send('plan it');
+    transport.push({ type: 'control_request', request_id: 'p1', request: { subtype: 'can_use_tool', tool_name: 'ExitPlanMode', input: { plan: '# P' }, tool_use_id: 'toolu_p' } });
+    await flush();
+    const answering = session.answer('p1' as RequestId, { kind: 'plan', outcome: 'clear_and_implement', feedback: null });
+    await flush();
+    transport.push({ type: 'result', subtype: 'success', session_id: 's', is_error: false, duration_ms: 1, num_turns: 1, total_cost_usd: 0, usage: {}, permission_denials: [], terminal_reason: 'completed', origin: { kind: 'human' } });
+    await flush();
+    expect(transport.requestsOf('set_permission_mode')).toHaveLength(0); // nothing is sent before the deny reached the pipe
+    release();
+    expect(await answering).toBe('delivered');
+    await flush();
+    await flush();
+    expect(transport.requestsOf('set_permission_mode').map((r) => r.request.mode)).toEqual(['auto']);
+    expect(transport.writes.filter((w) => w.type === 'user').map((w) => (w as { message: { content: string } }).message.content)).toEqual(['plan it', '/clear']);
+  });
+
+  it('a clear_and_implement whose deny write fails is rolled back: the turn\'s result sends nothing', async () => {
+    const { session, transport } = setup({ transport: { failWrite: (f) => f.type === 'control_response' } });
+    await session.start();
+    transport.push({ type: 'system', subtype: 'status', status: null, permissionMode: 'plan', session_id: 's' });
+    await session.send('plan it');
+    transport.push({ type: 'control_request', request_id: 'p1', request: { subtype: 'can_use_tool', tool_name: 'ExitPlanMode', input: { plan: '# P' }, tool_use_id: 'toolu_p' } });
+    await flush();
+    expect(await session.answer('p1' as RequestId, { kind: 'plan', outcome: 'clear_and_implement', feedback: null })).toBe('write_failed');
+    transport.push({ type: 'result', subtype: 'success', session_id: 's', is_error: false, duration_ms: 1, num_turns: 1, total_cost_usd: 0, usage: {}, permission_denials: [], terminal_reason: 'completed', origin: { kind: 'human' } });
+    await flush();
+    await flush();
+    expect(transport.requestsOf('set_permission_mode')).toHaveLength(0);
+    expect(transport.writes.filter((w) => w.type === 'user')).toHaveLength(1);
+  });
+
+  it('when the pre-plan mode cannot be restored the sequence stops: a notice, the plan kept as pendingPlan, neither /clear nor the plan sent', async () => {
+    const { session, transport, events } = setup({ responder: defaultResponder({ set_permission_mode: () => ({ error: 'Cannot set permission mode to auto' }) }) });
+    await session.start();
+    transport.push({ type: 'system', subtype: 'status', status: null, permissionMode: 'plan', session_id: 's' });
+    await session.send('plan it');
+    transport.push({ type: 'control_request', request_id: 'p1', request: { subtype: 'can_use_tool', tool_name: 'ExitPlanMode', input: { plan: '# Plan\n1. do it' }, tool_use_id: 'toolu_p' } });
+    await flush();
+    await session.answer('p1' as RequestId, { kind: 'plan', outcome: 'clear_and_implement', feedback: null });
+    transport.push({ type: 'result', subtype: 'success', session_id: 's', is_error: false, duration_ms: 1, num_turns: 1, total_cost_usd: 0, usage: {}, permission_denials: [], terminal_reason: 'completed', origin: { kind: 'human' } });
+    await flush();
+    await flush();
+    expect(transport.requestsOf('set_permission_mode')).toHaveLength(1);
+    expect(transport.writes.filter((w) => w.type === 'user')).toHaveLength(1);
+    expect(events.filter((e) => e.kind === 'notice.posted')).toMatchObject([{ level: 'warning', key: 'plan:mode_restore_failed' }]);
+    expect(EngineSessionStatusSchema.parse(session.status()).pendingPlan).toBe('# Plan\n1. do it');
   });
 
   it('the pre-plan mode is captured on a transition into plan from any source; a process that starts in plan has none', async () => {

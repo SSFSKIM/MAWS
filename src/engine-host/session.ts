@@ -23,7 +23,7 @@ import { EMPTY_GRANTS, reapply, recordFromResponse, type GrantSnapshot } from '.
 import { HostHookRegistry } from './host-hooks';
 import { RELAY_URL, spawnMeta, type LaunchPlan } from './launch';
 import { Normalizer, type NormalizerWarning } from './normalizer';
-import { ControlClient, ControlError } from './rpc';
+import { ControlClient, ControlError, writeFailedMeta } from './rpc';
 import type { EngineTransport, TransportProblem } from './transport';
 
 export { HostHookRegistry } from './host-hooks';
@@ -68,7 +68,9 @@ interface Listeners {
 type ProcessState = EngineSessionStatus['process'];
 type Frame = Record<string, unknown> & { type?: unknown; subtype?: unknown };
 
-interface ClearAndImplement { phase: 'awaiting_result' | 'clearing' | 'awaiting_clear'; plan: string; clearUuid: MessageUuid | null }
+// `delivered` settles when the deny response's write settles: the operation is staged before the write so a `result`
+// racing the write continuation finds it, and the sequence waits on delivery before sending anything (M3 review).
+interface ClearAndImplement { phase: 'awaiting_result' | 'clearing' | 'awaiting_clear'; plan: string; clearUuid: MessageUuid | null; delivered: Promise<boolean> }
 
 export class EngineSession {
   readonly exited: Promise<ExitSummary>;
@@ -114,6 +116,7 @@ export class EngineSession {
   private grants: GrantSnapshot;
   private catalogState: Catalog = { commands: [], agents: [], skills: [], terminalSlashCommands: [], revision: 0 };
   private clear: ClearAndImplement | null = null;
+  private pendingPlan: string | null = null; // a clear_and_implement plan kept for retry after the mode restore failed
 
   constructor(private readonly opts: EngineSessionOptions) {
     this.spec = opts.spec;
@@ -170,12 +173,25 @@ export class EngineSession {
 
   async answer(requestId: RequestId, answer: RequestAnswer): Promise<'delivered' | 'not_pending' | 'write_failed'> {
     const item = this.broker.item(requestId);
-    const outcome = await this.broker.answer(requestId, answer);
-    if (outcome === 'delivered' && answer.kind === 'plan' && answer.outcome === 'clear_and_implement' && item) {
-      const plan = (item.request.request.input as { plan?: unknown } | undefined)?.plan;
-      this.clear = { phase: 'awaiting_result', plan: typeof plan === 'string' ? plan : '', clearUuid: null };
+    if (answer.kind !== 'plan' || answer.outcome !== 'clear_and_implement' || item?.kind !== 'plan' || item.attention.state !== 'pending') return this.broker.answer(requestId, answer);
+    const plan = (item.request.request.input as { plan?: unknown } | undefined)?.plan;
+    let settle!: (ok: boolean) => void;
+    const staged: ClearAndImplement = { phase: 'awaiting_result', plan: typeof plan === 'string' ? plan : '', clearUuid: null, delivered: new Promise((resolve) => (settle = resolve)) };
+    const previous = { clear: this.clear, pendingPlan: this.pendingPlan };
+    this.clear = staged;
+    this.pendingPlan = null;
+    let outcome: Awaited<ReturnType<PermissionBroker['answer']>> = 'write_failed';
+    try {
+      outcome = await this.broker.answer(requestId, answer);
+      return outcome;
+    } finally {
+      settle(outcome === 'delivered');
+      if (outcome !== 'delivered' && this.clear === staged && staged.phase === 'awaiting_result') {
+        this.clear = previous.clear; // rolled back: the engine never received the deny
+        this.pendingPlan = previous.pendingPlan;
+      }
+      this.touch();
     }
-    return outcome;
   }
 
   // Ends the process through the termination ladder; `graceMs` (the end_session wait) is capped at 3 s.
@@ -195,7 +211,7 @@ export class EngineSession {
 
   // The command catalogue C7's `session.catalog` answers from (coordinator, C7's asks).
   catalog(): Catalog {
-    return { ...this.catalogState };
+    return structuredClone(this.catalogState);
   }
 
   status(): EngineSessionStatus {
@@ -207,6 +223,7 @@ export class EngineSession {
     const env = this.plan.env;
     return {
       appSessionId: this.spec.appSessionId, engineSessionId: this.normalizer.state.sessionId ?? this.plan.sessionId, pid: this.transport?.pid ?? null, launchId: this.plan.launchId, launchedAt: this.launchedAt,
+      cwd: this.spec.cwd, pendingPlan: this.pendingPlan,
       process: this.processState, exit: this.exitInfo, engineState: this.engineState, activity: this.activity,
       turn: turn ? { origin: turn.origin, startedAt: turn.startedAt, acceptedAt: turn.acceptedAt, userMessageUuids: [...turn.userMessageUuids] } : null,
       model: { requested: this.spec.model, resolved: this.resolvedModel }, effort: this.spec.effort,
@@ -215,7 +232,7 @@ export class EngineSession {
       subagentModel: env.CLAUDE_CODE_SUBAGENT_MODEL ?? null,
       modelOverrides: Object.fromEntries(Object.entries(env).filter(([key]) => /^ANTHROPIC_DEFAULT_[A-Z0-9_]+_MODEL$/.test(key))),
       engineVersion: this.engineVersion ?? this.plan.engineVersion, fileCheckpointing: env.CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING === '1',
-      backgroundTasks: [], grants: [...this.grants.allow], mcpServers: [...this.mcpServers], heldPeerMessages: [],
+      backgroundTasks: [], grants: [...this.grants.allow], mcpServers: this.mcpServers.map((s) => ({ ...s })), heldPeerMessages: [],
       pendingRequests: this.broker.live, queue: { length: 0, paused: false }, keepAlive,
       memory: { rssKiB: null, treeRssKiB: null, sampledAt: null },
       journalPath: this.journal.path, hostHooks: this.hooks.ids(), lastEventSeq: this.lastEventSeq,
@@ -496,11 +513,19 @@ export class EngineSession {
 
   private async runClear(clear: ClearAndImplement): Promise<void> {
     const client = this.client;
-    if (!client || this.processState !== 'ready') return;
+    const abandon = () => {
+      if (this.clear === clear) this.clear = null;
+    };
+    if (!(await clear.delivered) || !client || this.processState !== 'ready') return abandon();
     try {
       await setPermissionMode(client, { mode: this.prePlanMode ?? 'default' });
     } catch (error) {
+      // Stop here: sending /clear and the plan would run it in plan mode. The plan stays on the status for a retry.
       this.notice('plan:mode_restore_failed', `The mode before plan mode could not be restored: ${messageOf(error)}`);
+      abandon();
+      this.pendingPlan = clear.plan;
+      this.touch();
+      return;
     }
     if (this.clear !== clear || this.processState !== 'ready') return;
     const uuid = randomUUID() as MessageUuid;
@@ -513,9 +538,18 @@ export class EngineSession {
     const transport = this.transport;
     if (!transport) throw new Error('no engine process');
     const frame: UserInputFrame = { type: 'user', uuid, message: { role: 'user', content }, parent_tool_use_id: null, origin: { kind: 'human' } };
-    this.record('out', frame);
-    await transport.write(frame);
+    try {
+      await transport.write(frame);
+    } catch (error) {
+      this.recordIfOpen('meta', writeFailedMeta(frame, messageOf(error)));
+      throw error;
+    }
+    this.record('out', frame); // journaled once the bytes reached the pipe (M3 review)
     return uuid;
+  }
+
+  private recordIfOpen(direction: JournalDirection, frame: unknown): void {
+    if (!this.journalClosed) this.record(direction, frame);
   }
 
   private notice(key: string, text: string): void {

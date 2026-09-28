@@ -443,6 +443,12 @@ export class Normalizer {
       case 'answer_note':
         if (typeof meta.requestId === 'string' && typeof meta.note === 'string') this.state.answerNotes.set(meta.requestId as RequestId, meta.note);
         return;
+      case 'write_failed': // a frame we meant to send never reached the pipe (M3 review): no out row exists for it
+        out.emit({
+          kind: 'error.raised', scope: 'transport', message: `${stringOrNull(meta.frameType) ?? 'frame'} not written: ${stringOrNull(meta.message) ?? 'unknown error'}`,
+          code: 'write_failed', toolUseId: null, taskId: null, requestId: (stringOrNull(meta.requestId) as RequestId | null),
+        }, main);
+        return;
       case 'parse_error':
       case 'transport_error':
       case 'replay_mismatch':

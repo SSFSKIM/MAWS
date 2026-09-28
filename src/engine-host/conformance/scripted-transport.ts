@@ -43,8 +43,11 @@ export interface ScriptedTransport extends EngineTransport {
   requestsOf(subtype: string): { request_id: string; request: Record<string, unknown> }[];
 }
 
-// `onWrite` runs after each write is recorded (an auto-responder); `failWrites` rejects every write as a dead pipe.
-export function scriptedTransport(opts: { onWrite?: (frame: StdinFrame, t: ScriptedTransport) => void; failWrites?: boolean } = {}): ScriptedTransport {
+// `onWrite` runs after each write is recorded (an auto-responder); `failWrites` rejects every write as a dead pipe,
+// `failWrite` only the frames it names; `holdWrite` returns a promise the write waits on before it resolves.
+export function scriptedTransport(
+  opts: { onWrite?: (frame: StdinFrame, t: ScriptedTransport) => void; failWrites?: boolean; failWrite?: (frame: StdinFrame) => boolean; holdWrite?: (frame: StdinFrame) => Promise<void> | null } = {},
+): ScriptedTransport {
   const frames = new Queue<TransportItem>();
   const stderr = new Queue<string>();
   let exited = false;
@@ -58,7 +61,9 @@ export function scriptedTransport(opts: { onWrite?: (frame: StdinFrame, t: Scrip
     calls: [],
     exited: exitedPromise,
     async write(frame) {
-      if (exited || opts.failWrites) throw new TransportClosed(exited ? 'the process exited' : 'EPIPE');
+      if (exited || opts.failWrites || opts.failWrite?.(frame)) throw new TransportClosed(exited ? 'the process exited' : 'EPIPE');
+      const hold = opts.holdWrite?.(frame);
+      if (hold) await hold;
       t.writes.push(frame);
       opts.onWrite?.(frame, t);
     },

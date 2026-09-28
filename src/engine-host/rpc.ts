@@ -2,8 +2,10 @@
 // correlation over the control envelopes with host-minted ids `${launchId}-${n}`, per-class timeouts, cancellation,
 // and a late table so a response that arrives after its deadline is reconciled rather than treated as unexpected.
 // The client is not the wire's reader: the session's read loop journals every stdout frame and feeds it to
-// `observe()`, so the journal row precedes any correlation, and every `out` frame the client authors is journaled
-// (through the sink) before it is written. A timeout never proves a mutation did not apply (SPEC 45.16.4).
+// `observe()`, so the journal row precedes any correlation. Every `out` frame the client authors is journaled
+// (through the sink) when its write resolves, the §4.6 delivery truth, so the graph never shows as sent a frame the
+// engine never received; a write that rejects journals `meta write_failed` instead (M3 review). A timeout never proves
+// a mutation did not apply (SPEC 45.16.4).
 import type { RequestId } from '@shared/graph/ids';
 import type { ControlRequestFrame, StdinFrame } from '@shared/wire/frames';
 import type { JournalDirection, JournalRow } from '@shared/wire/journal';
@@ -125,16 +127,17 @@ export class ControlClient {
     });
     settled.catch(() => {}); // the caller's await below observes the rejection; never an unhandled rejection here
 
-    this.journal.row('out', frame);
     try {
       await this.transport.write(frame);
     } catch (error) {
       const entry = this.take(requestId);
       const message = error instanceof Error ? error.message : String(error);
+      this.journalWriteFailed(frame, message);
       const failure = new ControlError(subtype, requestId, `${subtype} not written: ${message}`, 'write_failed');
       entry?.reject(failure);
       throw failure;
     }
+    this.journal.row('out', frame);
     const entry = this.pendingTable.get(requestId);
     if (entry) {
       entry.timer = unref(
@@ -241,8 +244,30 @@ export class ControlClient {
     this.writeOut({ type: 'control_cancel_request', request_id: requestId }).catch((error: Error) => this.warn(`control_cancel_request ${requestId} not written: ${error.message}`));
   }
 
-  private writeOut(frame: StdinFrame): Promise<void> {
+  private async writeOut(frame: StdinFrame): Promise<void> {
+    try {
+      await this.transport.write(frame);
+    } catch (error) {
+      this.journalWriteFailed(frame, error instanceof Error ? error.message : String(error));
+      throw error;
+    }
     this.journal.row('out', frame);
-    return this.transport.write(frame);
   }
+
+  // The row a rejected write leaves instead of its `out` row (→ `error.raised { scope: 'transport' }`). Best effort:
+  // after the exit the session's journal is closed and the failure is the caller's to report.
+  private journalWriteFailed(frame: StdinFrame, message: string): void {
+    try {
+      this.journal.row('meta', writeFailedMeta(frame, message));
+    } catch {
+      /* journal closed */
+    }
+  }
+}
+
+// The `meta write_failed` row for a frame whose write rejected (M3 review): what was not sent, and why.
+export function writeFailedMeta(frame: StdinFrame, message: string): Record<string, unknown> {
+  const f = frame as { type: string; request_id?: string; request?: { subtype?: string }; response?: { request_id?: string }; uuid?: string };
+  const requestId = f.type === 'control_request' || f.type === 'control_cancel_request' ? (f.request_id ?? null) : f.type === 'control_response' ? (f.response?.request_id ?? null) : null;
+  return { event: 'write_failed', frameType: f.type, subtype: f.type === 'control_request' ? (f.request?.subtype ?? null) : null, requestId, message };
 }

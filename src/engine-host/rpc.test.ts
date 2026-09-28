@@ -45,7 +45,7 @@ describe('control client ids, timeouts, cancellation', () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
 
-  it('mints ${launchId}-${n} ids, journals the out row before writing, and resolves the typed response', async () => {
+  it('mints ${launchId}-${n} ids, journals the out row once the write resolved, and resolves the typed response', async () => {
     const { transport, writes } = fakeTransport();
     const journal = fakeJournal();
     const client = new ControlClient(transport, journal, 'LAUNCH01');
@@ -186,13 +186,33 @@ describe('control client ids, timeouts, cancellation', () => {
     expect(((await bad) as ControlError).code).toBe('invalid_response');
   });
 
-  it('a failed write rejects with ControlError write_failed and leaves nothing pending', async () => {
+  it('a failed write rejects with ControlError write_failed, leaves nothing pending, and journals a write_failed meta row instead of the out row', async () => {
     const { transport } = fakeTransport({ failWrites: true });
-    const client = new ControlClient(transport, fakeJournal(), 'LAUNCH01');
+    const journal = fakeJournal();
+    const client = new ControlClient(transport, journal, 'LAUNCH01');
     const error = (await client.request('get_usage', {}).catch((e: unknown) => e)) as ControlError;
     expect(error).toBeInstanceOf(ControlError);
     expect(error.code).toBe('write_failed');
     expect(client.pending).toBe(0);
+    await expect(client.respond('req-1' as never, { behavior: 'deny', message: 'no' })).rejects.toThrow('EPIPE');
+    expect(journal.rows.map((r) => [r.direction, r.frame])).toEqual([
+      ['meta', { event: 'write_failed', frameType: 'control_request', subtype: 'get_usage', requestId: 'LAUNCH01-1', message: 'EPIPE' }],
+      ['meta', { event: 'write_failed', frameType: 'control_response', subtype: null, requestId: 'req-1', message: 'EPIPE' }],
+    ]);
+  });
+
+  it('an out row is journaled only when the write resolves, never while it is in flight', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const journal = fakeJournal();
+    const transport: EngineTransport = { ...fakeTransport().transport, write: () => gate };
+    const client = new ControlClient(transport, journal, 'LAUNCH01');
+    const answered = client.respond('req-1' as never, { behavior: 'allow', updatedInput: {} });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(journal.rows).toEqual([]);
+    release();
+    await answered;
+    expect(journal.rows.map((r) => r.direction)).toEqual(['out']);
   });
 
   it('close rejects every pending request with ControlError exited and clears its timers', async () => {

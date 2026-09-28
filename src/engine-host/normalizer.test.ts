@@ -311,6 +311,11 @@ describe('normaliser: requests, responses and boundaries', () => {
 });
 
 describe('normaliser: meta rows, system subtypes and the unknown', () => {
+  it('a write_failed meta row yields error.raised { scope: transport } naming the request', () => {
+    const events = feed(make(), [metaRow({ event: 'write_failed', frameType: 'control_response', subtype: null, requestId: 'r-1', message: 'EPIPE' })]);
+    expect(events).toMatchObject([{ kind: 'error.raised', scope: 'transport', code: 'write_failed', message: 'control_response not written: EPIPE', requestId: 'r-1', toolUseId: null, taskId: null }]);
+  });
+
   it('a host notice meta row yields notice.posted; the normaliser warning rows yield nothing', () => {
     const events = feed(make(), [
       metaRow({ event: 'notice', level: 'warning', key: 'dialog:undeclared:d-1', text: 'undeclared dialog' }),

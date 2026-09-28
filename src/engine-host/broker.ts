@@ -46,9 +46,11 @@ export interface BrokerDeps {
   now?: () => string;
 }
 
+// An answer the broker refuses to write: the wrong kind for the item, or a dialog of a kind the host never declared
+// (answering it would claim the human completed or dismissed a dialog MAWS cannot render). The item stays pending.
 export class BrokerAnswerMismatch extends Error {
-  constructor(requestId: RequestId, expected: BrokerItemKind, got: RequestAnswer['kind']) {
-    super(`request ${requestId} is a ${expected} request; a ${got} answer cannot resolve it`);
+  constructor(message: string) {
+    super(message);
     this.name = 'BrokerAnswerMismatch';
   }
 }
@@ -60,7 +62,8 @@ interface Entry extends BrokerItem {
 type Frame = Record<string, unknown> & { type?: unknown };
 
 export class PermissionBroker {
-  private readonly items = new Map<string, Entry>();
+  private readonly items = new Map<string, Entry>(); // live items: pending, delivered, confirmed
+  private readonly tombstones = new Map<string, RetiredReason>(); // retired items keep their id and reason only (the process never exits on its own)
   private lostAtAccept = 0;
   private readonly now: () => string;
 
@@ -75,19 +78,24 @@ export class PermissionBroker {
     return n;
   }
 
+  // A live item (pending, delivered or confirmed); undefined once retired.
   item(requestId: RequestId): BrokerItem | undefined {
     return this.items.get(requestId);
   }
 
+  retiredReason(requestId: RequestId): RetiredReason | null {
+    return this.tombstones.get(requestId) ?? null;
+  }
+
   // Every item not yet retired, in arrival order: the session's broker list.
   snapshot(): AttentionItem[] {
-    return [...this.items.values()].filter((i) => i.attention.state !== 'retired').map((i) => i.attention);
+    return [...this.items.values()].map((i) => i.attention);
   }
 
   // An inbound request that needs a human. Hook callbacks and unknown subtypes are not broker items; a request id
   // seen before (a re-delivery) is ignored.
   accept(req: ControlRequestFrame): void {
-    if (this.items.has(req.request_id)) return;
+    if (this.items.has(req.request_id) || this.tombstones.has(req.request_id)) return;
     const shaped = shapeOf(req);
     if (!shaped) return;
     const at = this.now();
@@ -118,7 +126,10 @@ export class PermissionBroker {
   async answer(requestId: RequestId, answer: RequestAnswer): Promise<'delivered' | 'not_pending' | 'write_failed'> {
     const entry = this.items.get(requestId);
     if (!entry || entry.attention.state !== 'pending' || entry.answering) return 'not_pending';
-    if (answerKindOf(entry.kind) !== answer.kind) throw new BrokerAnswerMismatch(requestId, entry.kind, answer.kind);
+    if (answerKindOf(entry.kind) !== answer.kind) throw new BrokerAnswerMismatch(`request ${requestId} is a ${entry.kind} request; a ${answer.kind} answer cannot resolve it`);
+    if (entry.kind === 'dialog' && !DECLARED_DIALOG_KINDS.includes(String(entry.request.request.dialog_kind))) {
+      throw new BrokerAnswerMismatch(`request ${requestId} asks for a "${String(entry.request.request.dialog_kind)}" dialog, which MAWS did not declare; it cannot be answered`);
+    }
     const wire = toWire(entry, answer);
     entry.answering = true;
     if (wire.note) this.deps.meta({ event: 'answer_note', requestId, note: wire.note }); // before the response row it annotates
@@ -174,7 +185,7 @@ export class PermissionBroker {
         const echoReceipt = f.num_turns === 0 && (f.terminal_reason === undefined || f.terminal_reason === null);
         if (mainLane && !echoReceipt) {
           changed = this.retireWhere((e) => e.attention.state === 'confirmed', 'answered', at) || changed;
-          changed = this.retireWhere((e) => e.attention.state === 'delivered' && e.toolUseId === null, 'turn_ended', at) || changed;
+          changed = this.retireWhere((e) => (e.attention.state === 'delivered' || (e.attention.state === 'pending' && e.answering)) && e.toolUseId === null, 'turn_ended', at) || changed;
         }
         break;
       }
@@ -203,7 +214,7 @@ export class PermissionBroker {
     let lost = this.lostAtAccept;
     this.lostAtAccept = 0;
     let changed = false;
-    for (const entry of this.items.values()) {
+    for (const entry of [...this.items.values()]) {
       if (entry.attention.state === 'pending' || entry.attention.state === 'delivered') {
         lost += 1;
         changed = this.retire(entry, 'exit', at) || changed;
@@ -219,7 +230,15 @@ export class PermissionBroker {
     if (typeof toolUseId !== 'string') return false;
     let changed = false;
     for (const entry of this.items.values()) {
-      if (entry.toolUseId !== toolUseId || entry.attention.state !== 'delivered') continue;
+      // An answer whose write has not resolved yet counts as delivered here: the engine acting on the tool use is
+      // proof it read the answer, and the write continuation may run after the frame that proves it.
+      const delivered = entry.attention.state === 'delivered' || (entry.attention.state === 'pending' && entry.answering);
+      if (entry.toolUseId !== toolUseId || !delivered) continue;
+      if (entry.attention.state === 'pending') {
+        entry.deliveredAt = at; // the transition consumers see stays pending → delivered → confirmed
+        this.setState(entry, 'delivered', at);
+        this.emit();
+      }
       entry.confirmedAt = at;
       this.setState(entry, 'confirmed', at);
       changed = true;
@@ -229,14 +248,16 @@ export class PermissionBroker {
 
   private retireWhere(predicate: (entry: Entry) => boolean, reason: RetiredReason, at: string): boolean {
     let changed = false;
-    for (const entry of this.items.values()) if (entry.attention.state !== 'retired' && predicate(entry)) changed = this.retire(entry, reason, at) || changed;
+    for (const entry of [...this.items.values()]) if (predicate(entry)) changed = this.retire(entry, reason, at) || changed;
     return changed;
   }
 
   private retire(entry: Entry, reason: RetiredReason, at: string): boolean {
-    if (entry.attention.state === 'retired') return false;
+    if (!this.items.has(entry.attention.request.requestId!)) return false;
     entry.retiredReason = reason;
     this.setState(entry, 'retired', at);
+    this.items.delete(entry.attention.request.requestId!);
+    this.tombstones.set(entry.attention.request.requestId!, reason);
     return true;
   }
 

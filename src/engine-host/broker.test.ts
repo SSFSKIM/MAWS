@@ -60,7 +60,8 @@ describe('permission broker states and the approvals-lost rule', () => {
     broker.observe(toolResult('toolu_r1'));
     expect(broker.item(rid('r1'))).toMatchObject({ attention: { state: 'confirmed' }, confirmedAt: '2026-09-28T12:00:00.000Z' });
     broker.observe(result());
-    expect(broker.item(rid('r1'))).toMatchObject({ attention: { state: 'retired' }, retiredReason: 'answered' });
+    expect(broker.item(rid('r1'))).toBeUndefined(); // retired: only a tombstone (request id and reason) remains
+    expect(broker.retiredReason(rid('r1'))).toBe('answered');
     expect(last()).toEqual([]);
     expect(broker.processExited()).toEqual({ lost: 0 });
   });
@@ -81,11 +82,26 @@ describe('permission broker states and the approvals-lost rule', () => {
     }
   });
 
+  it('a confirming frame that arrives before the answer\'s write continuation still confirms the item', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const lists: AttentionItem[][] = [];
+    const broker = new PermissionBroker({ appSessionId: APP, client: { respond: () => gate }, meta: () => {}, onAttention: (items) => lists.push(items), now: () => 'T' });
+    broker.accept(canUseTool('r1'));
+    const answering = broker.answer(rid('r1'), { kind: 'permission', decision: 'allow', scope: 'once' });
+    broker.observe(toolResult('toolu_r1'));
+    expect(broker.item(rid('r1'))).toMatchObject({ attention: { state: 'confirmed' }, deliveredAt: 'T', confirmedAt: 'T' });
+    release();
+    expect(await answering).toBe('delivered');
+    expect(broker.item(rid('r1'))?.attention.state).toBe('confirmed');
+  });
+
   it('a control_cancel_request for a pending id retires it with abort; answering it afterwards is not_pending', async () => {
     const { broker, last, responses } = setup();
     broker.accept(canUseTool('r1'));
     broker.observe({ type: 'control_cancel_request', request_id: 'r1' });
-    expect(broker.item(rid('r1'))).toMatchObject({ attention: { state: 'retired' }, retiredReason: 'abort' });
+    expect(broker.item(rid('r1'))).toBeUndefined();
+    expect(broker.retiredReason(rid('r1'))).toBe('abort');
     expect(last()).toEqual([]);
     expect(await broker.answer(rid('r1'), { kind: 'permission', decision: 'deny' })).toBe('not_pending');
     expect(responses).toEqual([]);
@@ -99,7 +115,7 @@ describe('permission broker states and the approvals-lost rule', () => {
     await broker.answer(rid('r3'), { kind: 'elicitation', action: 'accept', content: { color: 'teal' } });
     expect(broker.live).toBe(3);
     expect(broker.processExited()).toEqual({ lost: 3 });
-    expect(['r1', 'r2', 'r3'].map((id) => broker.item(rid(id))?.retiredReason)).toEqual(['exit', 'exit', 'exit']);
+    expect(['r1', 'r2', 'r3'].map((id) => broker.retiredReason(rid(id)))).toEqual(['exit', 'exit', 'exit']);
     expect(last()).toEqual([]);
     expect(setup().broker.processExited()).toEqual({ lost: 0 });
   });
@@ -107,7 +123,7 @@ describe('permission broker states and the approvals-lost rule', () => {
   it('a request that arrives while the process is exiting is retired at once, unanswered, and counts as lost', () => {
     const { broker, responses, last } = setup({ exiting: true });
     broker.accept(canUseTool('r1'));
-    expect(broker.item(rid('r1'))?.retiredReason).toBe('exit');
+    expect(broker.retiredReason(rid('r1'))).toBe('exit');
     expect(last()).toEqual([]);
     expect(responses).toEqual([]);
     expect(broker.processExited()).toEqual({ lost: 1 });
@@ -148,6 +164,26 @@ describe('permission broker states and the approvals-lost rule', () => {
     expect(responses).toEqual([]);
   });
 
+  it('an answer for an undeclared dialog kind is refused like a wrong-kind answer; the item stays pending and nothing is written', async () => {
+    const { broker, responses } = setup();
+    broker.accept(dialog('d2', 'something_new'));
+    for (const behavior of ['completed', 'cancelled'] as const) {
+      await expect(broker.answer(rid('d2'), { kind: 'dialog', behavior })).rejects.toThrow(/something_new/);
+    }
+    expect(broker.item(rid('d2'))?.attention.state).toBe('pending');
+    expect(responses).toEqual([]);
+    expect(await broker.answer(rid('d2'), { kind: 'elicitation', action: 'cancel' }).catch((e: unknown) => (e as Error).name)).toBe('BrokerAnswerMismatch');
+  });
+
+  it('a retired item keeps only a tombstone, and a re-delivery of its request id is not re-accepted', () => {
+    const { broker, last } = setup();
+    broker.accept(canUseTool('r1'));
+    broker.observe({ type: 'control_cancel_request', request_id: 'r1' });
+    broker.accept(canUseTool('r1'));
+    expect(broker.item(rid('r1'))).toBeUndefined();
+    expect(last()).toEqual([]);
+  });
+
   it('summaries: the first question, the plan, the MCP server name', () => {
     const { broker, last } = setup();
     const question = loadJournal('pass1', 'question-roundtrip').find((r) => r.seq === 137)!.frame as ControlRequestFrame;
@@ -168,7 +204,8 @@ describe('id-less requests retire at the turn\'s end', () => {
     broker.observe(result({ parent_tool_use_id: 'toolu_parent' }));
     expect(broker.item(rid('e1'))?.attention.state).toBe('delivered');
     broker.observe(result());
-    expect(broker.item(rid('e1'))).toMatchObject({ attention: { state: 'retired' }, retiredReason: 'turn_ended', confirmedAt: null });
+    expect(broker.item(rid('e1'))).toBeUndefined();
+    expect(broker.retiredReason(rid('e1'))).toBe('turn_ended');
   });
 
   it('a pending id-less item survives the result (only delivery starts the clock) and an elicitation_complete retires it', () => {
@@ -177,7 +214,7 @@ describe('id-less requests retire at the turn\'s end', () => {
     broker.observe(result());
     expect(broker.item(rid('e1'))?.attention.state).toBe('pending');
     broker.observe({ type: 'system', subtype: 'elicitation_complete', mcp_server_name: 'maws-elicit', elicitation_id: 'el-1', session_id: 's' });
-    expect(broker.item(rid('e1'))).toMatchObject({ attention: { state: 'retired' }, retiredReason: 'answered' });
+    expect(broker.retiredReason(rid('e1'))).toBe('answered');
   });
 });
 

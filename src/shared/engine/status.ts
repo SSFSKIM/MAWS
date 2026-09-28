@@ -9,6 +9,8 @@ import { EffortSchema } from './launch-spec';
 
 export const EngineSessionStatusSchema = z.strictObject({
   appSessionId: AppSessionIdSchema, engineSessionId: SessionIdSchema.nullable(), pid: z.number().int().nullable(), launchId: z.string(), launchedAt: z.string(),
+  cwd: z.string(), // the launch spec's cwd, present from the reservation onward (C10 counts reservations by directory through engine.sessions)
+  pendingPlan: z.string().nullable(), // a clear_and_implement plan kept for retry after the pre-plan mode could not be restored (M3 review)
   process: z.enum(['starting', 'initializing', 'ready', 'exiting', 'exited']),
   exit: z.strictObject({ code: z.number().int().nullable(), signal: z.string().nullable(), reason: z.enum(['quit', 'stop', 'archive', 'crash', 'unknown']), at: z.string() }).nullable(),
   engineState: z.enum(['idle', 'running', 'requires_action', 'unknown']), // session_state_changed; 'unknown' before the first frame
