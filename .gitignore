@@ -8,3 +8,4 @@ spikes/**/fixtures/private/
 .doperpowers/sde/
 test-results/
 playwright-report/
+.claude/worktrees/
