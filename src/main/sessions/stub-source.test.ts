@@ -1,8 +1,12 @@
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+vi.mock('electron', () => ({ BrowserWindow: { getAllWindows: () => [] }, ipcMain: { handle: vi.fn() } }));
 import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandName, EventName } from '@shared/ipc/schema';
 import { TEST_FIXTURE_DIR } from '../../../test/support/fixtures';
+import type { onEmitted } from '../ipc/events';
+import { emittedAttentionSource } from '.';
 import { SessionReadModel } from './read-model';
 import { stubSource, type StubSourceDeps } from './stub-source';
 
@@ -14,9 +18,16 @@ const USAGE = 'app-59505fdc' as AppSessionId;
 function harness() {
   const handlers = new Map<CommandName, (input: unknown) => unknown>();
   const emitted: { name: EventName; payload: unknown }[] = [];
+  // main's emit and its taps, as sessions/index.ts wires them: the read model hears attention only as emitted.
+  const taps = new Map<string, (payload: unknown) => void>();
+  const tap = ((name: string, listener: (payload: unknown) => void) => {
+    taps.set(name, listener);
+    return () => taps.delete(name);
+  }) as typeof onEmitted;
   const deps: StubSourceDeps = {
     emit: (name, payload) => {
       emitted.push({ name, payload });
+      taps.get(name)?.(payload);
       return true;
     },
     intercept: (name, handler) => {
@@ -26,8 +37,13 @@ function harness() {
     now: () => Date.parse('2026-09-28T11:00:00.000Z'),
   };
   const model = new SessionReadModel('scenario');
+  const stopTap = model.registerScenario(emittedAttentionSource(tap));
   const source = stubSource(NINE, { kind: 'manual' }, deps);
-  const stop = model.registerScenario(source);
+  const stopSource = model.registerScenario(source);
+  const stop = () => {
+    stopSource();
+    stopTap();
+  };
   const call = <T>(name: CommandName, input?: unknown) => handlers.get(name)!(input) as T;
   const events = (name: EventName) => emitted.filter((e) => e.name === name).map((e) => e.payload);
   return { model, source, stop, handlers, call, events, emitted };
@@ -42,6 +58,11 @@ describe('stub source plays a timeline', () => {
     h = harness();
   });
   afterEach(() => h.stop());
+
+  it('emits nothing at load but the scenario’s attention, which reaches the read model through the emit tap', () => {
+    expect([...new Set(h.emitted.map((e) => e.name))]).toEqual(['attention.changed']);
+    expect(h.model.attention(FIX).map((i) => i.kind)).toEqual(['permission']);
+  });
 
   it('fills the read model from the scenario at start', () => {
     expect(h.model.digests()).toHaveLength(11);
@@ -71,7 +92,7 @@ describe('stub source plays a timeline', () => {
     expect(h.model.midTurnCount()).toBe(5);
     scenarioGlobal()!.advanceTo(3000);
     expect(h.model.attention(CHARTER).map((i) => i.summary)).toEqual(['Read: docs/charter.md']);
-    expect(h.events('attention.changed')).toHaveLength(1);
+    expect(h.events('attention.changed')).toHaveLength(3 + 1); // the three sessions waiting at load, then the 3 s entry
     expect(h.model.midTurnCount()).toBe(5);
     scenarioGlobal()!.advanceTo(8000);
     expect(h.model.midTurnCount()).toBe(4);

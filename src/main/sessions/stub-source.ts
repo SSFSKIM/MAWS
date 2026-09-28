@@ -51,17 +51,18 @@ export function stubSource(scenario: string | Scenario, clock: ScenarioClock, de
   const statuses = new Map<AppSessionId, EngineSessionStatus>();
   const costAtSeen = new Map<AppSessionId, number>();
 
-  // While the scenario loads nothing is emitted: the renderer reads the snapshots, as it would from C3 and C4.
+  // While the scenario loads nothing is emitted but attention: the renderer reads the snapshots, as it would from C3 and
+  // C4, and the read model learns attention only from `attention.changed` as emitted (the tap in sessions/index.ts),
+  // as it does in launch mode `index`. No window exists yet at load, so that emit reaches main-side taps alone.
   let loading = false;
-  const emit: StubSourceDeps['emit'] = (name, payload) => !loading && deps.emit(name, payload);
+  const emit: StubSourceDeps['emit'] = (name, payload) => (!loading || name === 'attention.changed') && deps.emit(name, payload);
 
   const requestKey = (appSessionId: string, requestId: string) => `${appSessionId}\u0000${requestId}`;
 
   function setAttention(appSessionId: AppSessionId, items: AttentionItem[], newRequests: Record<string, SessionEvent>): void {
     for (const [requestId, event] of Object.entries(newRequests)) requests.set(requestKey(appSessionId, requestId), event);
     attention.set(appSessionId, items);
-    writer?.observeAttention(appSessionId, items);
-    emit('attention.changed', { appSessionId, items });
+    emit('attention.changed', { appSessionId, items }); // the read model hears it through the emit tap
   }
 
   function setDigest(d: ScenarioDigest): void {

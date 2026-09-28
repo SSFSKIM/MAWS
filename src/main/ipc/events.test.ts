@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const electron = vi.hoisted(() => ({ windows: [] as { webContents: { send: ReturnType<typeof vi.fn>; isDestroyed: () => boolean } }[] }));
 vi.mock('electron', () => ({ BrowserWindow: { getAllWindows: () => electron.windows } }));
 
-import { emit } from './events';
+import { emit, onEmitted } from './events';
 
 const window = (destroyed = false) => ({ webContents: { send: vi.fn(), isDestroyed: () => destroyed } });
 
@@ -31,4 +31,19 @@ describe('main event emitter', () => {
     expect(w.webContents.send).not.toHaveBeenCalled();
     expect(log).toHaveBeenCalledWith(expect.stringContaining('pty.data'), [expect.objectContaining({ path: ['data'] })]);
   });
+
+  // ---- C5: onEmitted ----
+  it('hands every validated emit to main-side taps of that name, never an invalid one, until unsubscribed', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const heard: unknown[] = [];
+    const off = onEmitted('attention.changed', (payload) => heard.push(payload));
+    const change = { appSessionId: 'a1', items: [] };
+    emit('attention.changed', change as never);
+    emit('attention.changed', { appSessionId: 'a1', items: 'nope' } as never);
+    emit('attention.navigate', { appSessionId: 'a1', attentionId: null, source: 'menu' } as never);
+    off();
+    emit('attention.changed', change as never);
+    expect(heard).toEqual([change]);
+  });
+  // ---- end C5 ----
 });

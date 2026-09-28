@@ -1,7 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const opened = vi.hoisted(() => [] as string[]);
-vi.mock('electron', () => ({ shell: { openExternal: async (url: string) => void opened.push(url) } }));
+vi.mock('electron', () => ({
+  shell: {
+    openExternal: async (url: string) => {
+      if (url.includes('unopenable')) throw new Error('no application knows this URL');
+      opened.push(url);
+    },
+  },
+}));
 
 import { openExternalUrl } from './open-external';
 
@@ -21,5 +28,11 @@ describe('openExternalUrl', () => {
     for (const url of ['file:///etc/passwd', 'javascript:alert(1)', 'vscode://x', 'not a url']) expect(openExternalUrl(url), url).toBe(false);
     expect(opened).toEqual([]);
     expect(warn).toHaveBeenCalledTimes(4);
+  });
+
+  it('logs a failure to open instead of leaving the rejection unhandled', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    expect(openExternalUrl('https://unopenable.example/')).toBe(true);
+    await vi.waitFor(() => expect(error).toHaveBeenCalledExactlyOnceWith('[open-external] could not open the URL', expect.any(Error)));
   });
 });

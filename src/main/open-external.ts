@@ -17,7 +17,7 @@ export function openExternalUrl(url: string): boolean {
     console.warn(`[open-external] refused a ${protocol} URL`);
     return false;
   }
-  void shell.openExternal(url);
+  shell.openExternal(url).catch((error: unknown) => console.error('[open-external] could not open the URL', error));
   return true;
 }
 

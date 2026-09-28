@@ -5,7 +5,7 @@
 import type { AppSessionId } from '@shared/graph/ids';
 import type { EventName, EventPayload } from '@shared/ipc/schema';
 import type { HostSupervisor } from '../hosts/supervisor';
-import { emit } from '../ipc/events';
+import { emit, onEmitted } from '../ipc/events';
 import { interceptCommand, registerMainHandler } from '../ipc/router';
 import { SessionReadModel, type SessionSource } from './read-model';
 import { launchMode, scenarioClock, scenarioPath } from './select-source';
@@ -36,6 +36,14 @@ export function hostEventSource(hosts: Pick<HostSupervisor, 'onEvent'>): Session
   };
 }
 
+// Attention as main tells the renderer (`attention.changed`, from C3's attention service or the stub source), tapped
+// after validation so the read model's view is exactly the renderer's, with no call from the emitter into the model.
+export function emittedAttentionSource(tap: typeof onEmitted = onEmitted): SessionSource {
+  return {
+    start: (writer) => tap('attention.changed', ({ appSessionId, items }) => writer.observeAttention(appSessionId as AppSessionId, items)),
+  };
+}
+
 export function startSessions({ env, packaged, appRoot, hosts }: SessionsOptions): Sessions {
   const mode = launchMode(env, packaged);
   const model = new SessionReadModel(mode);
@@ -45,8 +53,11 @@ export function startSessions({ env, packaged, appRoot, hosts }: SessionsOptions
 
   const stops: (() => void)[] = [];
   if (mode === 'index') {
+    stops.push(model.register(emittedAttentionSource()));
     stops.push(model.register(hostEventSource(hosts)));
   } else {
+    // Attached before the stub, whose load emits the scenario's attention through the same tap.
+    stops.push(model.registerScenario(emittedAttentionSource()));
     try {
       const path = scenarioPath(env, { packaged, appRoot });
       const clock = scenarioClock(env);
