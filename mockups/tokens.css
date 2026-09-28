@@ -1,0 +1,24 @@
+/* MAWS mockup kit: shared tokens. Dark-first. Codex-density chrome, Claude-comfort transcript. */
+:root {
+  --bg: #131313; --bg-raised: #1a1a1a; --bg-overlay: #222222; --bg-hover: rgba(255,255,255,0.05); --bg-active: rgba(255,255,255,0.08);
+  --border: rgba(255,255,255,0.09); --border-strong: rgba(255,255,255,0.16);
+  --fg: #e8e6e3; --fg-muted: rgba(232,230,227,0.62); --fg-faint: rgba(232,230,227,0.40);
+  --accent: #d97757; --accent-soft: rgba(217,119,87,0.16);
+  --success: #4cc38a; --warning: #f0a35e; --danger: #f26d6d; --info: #7aa2f7;
+  --diff-add-bg: rgba(76,195,138,0.16); --diff-del-bg: rgba(242,109,109,0.16);
+  --font-ui: -apple-system, "SF Pro Text", Inter, system-ui, sans-serif;
+  --font-prose: -apple-system, "SF Pro Text", Inter, system-ui, sans-serif;
+  --font-mono: "SF Mono", "JetBrains Mono", Menlo, monospace;
+  --text-ui: 13px; --text-ui-sm: 12px; --text-prose: 15.5px; --lh-prose: 1.6; --measure: 72ch; --text-code: 13px;
+  --radius-sm: 6px; --radius: 10px; --radius-lg: 14px; --space: 4px;
+  --row-h: 30px; --toolbar-h: 44px; --sidebar-w: 300px; --panel-w: 380px;
+}
+html, body { background: var(--bg); color: var(--fg); font-family: var(--font-ui); font-size: var(--text-ui); margin: 0; -webkit-font-smoothing: antialiased; }
+.prose { font-family: var(--font-prose); font-size: var(--text-prose); line-height: var(--lh-prose); max-width: var(--measure); }
+.mono { font-family: var(--font-mono); font-size: var(--text-code); }
+.muted { color: var(--fg-muted); } .faint { color: var(--fg-faint); }
+/* Status glyph vocabulary */
+.g-working { color: var(--accent); animation: pulse 1.6s ease-in-out infinite; }
+.g-needs { color: var(--warning); } .g-question { color: var(--warning); } .g-plan { color: var(--info); }
+.g-idle { color: var(--fg-faint); } .g-failed { color: var(--danger); }
+@keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .45 } }
