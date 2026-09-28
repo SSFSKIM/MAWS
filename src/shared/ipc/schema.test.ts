@@ -117,7 +117,7 @@ describe('ipc schema validates both directions', () => {
     // C5 start: the shell's own entries (C5 execution document, Interfaces "X2"); the sibling entries it consumes are
     // pinned by C3's and C4's cases above.
     it('carries the C5 session.*, attention.* and layout.* entries, every command owned by main', () => {
-      const c5 = ['session.digests', 'session.setVisible', 'layout.get', 'layout.set', 'layout.list', 'layout.openExternal'];
+      const c5 = ['session.digests', 'session.setVisible', 'attention.pendingNavigate', 'layout.get', 'layout.set', 'layout.list', 'layout.openExternal'];
       for (const name of c5) expect(commands[name as keyof typeof commands]?.owner, name).toBe('main');
       for (const name of ['session.digest', 'attention.notified', 'attention.navigate', 'layout.action']) expect(Object.hasOwn(events, name), name).toBe(true);
     });

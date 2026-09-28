@@ -19,7 +19,7 @@ beforeEach(() => {
   resetShellStores();
   fillStores(nine);
   useNotices.setState({ notices: [] });
-  fake = fakeClient();
+  fake = fakeClient({ 'attention.pendingNavigate': { navigate: null } });
   disconnect = connectAttention(fake.client);
 });
 afterEach(() => disconnect());
@@ -59,6 +59,28 @@ describe('attention.navigate', () => {
     fake.event('attention.navigate', { appSessionId, attentionId: null, source: 'menu' });
     expect(active()).toBe(`session:${appSessionId}`);
     expect(useLayout.getState().focusRequest).toBeNull();
+  });
+});
+
+describe('a navigation queued while no page could hear it (attention.pendingNavigate)', () => {
+  it('subscribes first, then asks once; a late answer still opens the session and records the item', async () => {
+    disconnect();
+    const late = fakeClient();
+    disconnect = connectAttention(late.client);
+    const calls = late.calls.filter((c) => c.includes('attention.navigate') || c.includes('attention.pendingNavigate'));
+    expect(calls).toEqual(['on attention.navigate', 'invoke attention.pendingNavigate']);
+    const appSessionId = idOf('Quota reset recovery');
+    await late.reply('attention.pendingNavigate', { navigate: { appSessionId, attentionId: 'att-q', source: 'notification' } });
+    expect(active()).toBe(`session:${appSessionId}`);
+    expect(useLayout.getState().focusRequest).toEqual({ appSessionId, attentionId: 'att-q' });
+  });
+
+  it('an empty answer opens nothing', async () => {
+    disconnect();
+    const late = fakeClient();
+    disconnect = connectAttention(late.client);
+    await late.reply('attention.pendingNavigate', { navigate: null });
+    expect(active()).toBe('overview');
   });
 });
 

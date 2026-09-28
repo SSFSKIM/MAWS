@@ -72,6 +72,8 @@ function fakeMain(initial: SettingsState['settings']['theme']) {
         return { mode: 'index' };
       case 'attention.list':
         return [];
+      case 'attention.pendingNavigate':
+        return { navigate: null };
       case 'layout.list':
         return { keys: [] };
       case 'layout.get':

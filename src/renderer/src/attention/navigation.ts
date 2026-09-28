@@ -52,5 +52,13 @@ export function connectAttention(client: MawsBridge = ipc): () => void {
     client.on('attention.navigate', navigate),
     client.on('attention.notified', fallbackToast),
   ];
+  // Subscribed first, then the snapshot (C1's rule): a click main could not deliver before this page listened (a
+  // re-created or reloaded window) is pulled here, and the call tells main this page now hears the event. The answer is
+  // applied even after a disconnect: main clears the queue on read, so under StrictMode's remount the first call's
+  // answer is the only one carrying it, and opening a tab is a store action that needs no live connection.
+  void client.invoke('attention.pendingNavigate', undefined).then((result) => {
+    if (!result.ok) console.warn('[attention] attention.pendingNavigate unavailable', result.error);
+    else if (result.value.navigate) navigate(result.value.navigate);
+  });
   return () => offs.forEach((off) => off());
 }

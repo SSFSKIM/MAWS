@@ -53,10 +53,11 @@ function harness(opts: { focused?: boolean; settings?: Settings; before?: (w: Wr
   opts.before?.(writer);
   const state = { focused: opts.focused ?? false, settings: opts.settings ?? SETTINGS };
   const emit = vi.fn(() => true);
-  const focusWindow = vi.fn(() => Promise.resolve());
-  const stop = startNotifier(model, { isFocused: () => state.focused, focusWindow, settings: () => state.settings, emit });
+  const focusWindow = vi.fn();
+  const navigate = vi.fn();
+  const stop = startNotifier(model, { isFocused: () => state.focused, focusWindow, navigate, settings: () => state.settings, emit });
   const set = (appSessionId: AppSessionId, items: AttentionItem[]) => writer.observeAttention(appSessionId, items);
-  return { model, writer, state, emit, focusWindow, stop, set };
+  return { model, writer, state, emit, focusWindow, navigate, stop, set };
 }
 
 const posted = () => electron.FakeNotification.instances;
@@ -177,18 +178,14 @@ describe('notifier fires once per item when unfocused', () => {
     expect(emitted(h.emit, 'attention.notified')).toMatchObject([{ delivery: 'fallback' }]);
   });
 
-  it('a click focuses the window and then emits attention.navigate with the item', async () => {
+  it('a click focuses the window and hands the navigation to the relay, which emits or queues it', () => {
     const h = harness();
     const read = item(CHARTER, 'permission', T);
     h.set(CHARTER, [read]);
-    let loaded!: () => void;
-    h.focusWindow.mockImplementation(() => new Promise<void>((resolve) => (loaded = resolve)));
     posted()[0].fire('click');
     expect(h.focusWindow).toHaveBeenCalledOnce();
-    expect(emitted(h.emit, 'attention.navigate')).toEqual([]); // not before the page has loaded
-    loaded();
-    await Promise.resolve();
-    expect(emitted(h.emit, 'attention.navigate')).toEqual([{ appSessionId: CHARTER, attentionId: read.id, source: 'notification' }]);
+    expect(h.navigate).toHaveBeenCalledExactlyOnceWith({ appSessionId: CHARTER, attentionId: read.id, source: 'notification' });
+    expect(emitted(h.emit, 'attention.navigate')).toEqual([]); // never emitted around the relay
   });
 
   it('stops listening when stopped', () => {

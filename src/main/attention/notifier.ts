@@ -2,7 +2,8 @@
 // attention table through the read model, so it works with no page open:
 // - an item that first appears pending, with an actionable kind, while no MAWS window is focused and notifications are
 //   on, posts one macOS notification (`<project> · <session>`, the item's summary), once per item id ever;
-// - clicking it focuses (or re-creates) the window and, once the page has loaded, emits `attention.navigate`;
+// - clicking it focuses (or re-creates) the window and hands `attention.navigate` to the navigation relay, which emits
+//   it to a page that is listening or queues it for the page to pull (`attention.pendingNavigate`);
 // - macOS delivers notifications only from a code-signed binary (an unsigned one emits `failed`), so the first failure,
 //   or no notification support at all, switches to the fallback for the process lifetime: a dock bounce, and
 //   `attention.notified { delivery: 'fallback' }`, which the page shows as a toast;
@@ -13,6 +14,7 @@ import type { AttentionItem } from '@shared/graph/attention';
 import type { AttentionKind } from '@shared/graph/enums';
 import type { AppSessionId, AttentionId } from '@shared/graph/ids';
 import type { Settings } from '@shared/ipc/schema';
+import type { AttentionNavigate } from '@shared/ipc/schema/attention';
 import { isActionable, isOpen } from '@shared/attention/kinds';
 import type { emit as emitEvent } from '../ipc/events';
 import type { SessionReadModel } from '../sessions/read-model';
@@ -37,7 +39,8 @@ function wanted(item: AttentionItem, settings: Settings): boolean {
 
 export interface NotifierDeps {
   isFocused(): boolean; // whether a MAWS window has focus; false with no window
-  focusWindow(): Promise<void>; // brings the window forward (re-creating it if needed); resolves once its page has loaded
+  focusWindow(): void; // brings the window forward, re-creating it if none is open
+  navigate(navigation: AttentionNavigate): void; // the navigation relay: emits `attention.navigate` to a listening page, or queues it
   settings(): Settings;
   emit: typeof emitEvent;
 }
@@ -82,9 +85,8 @@ export function startNotifier(model: SessionReadModel, deps: NotifierDeps): () =
     });
     notification.on('click', () => {
       live.delete(notification);
-      void deps.focusWindow().then(() =>
-        deps.emit('attention.navigate', { appSessionId: item.appSessionId, attentionId: item.id, source: 'notification' }),
-      );
+      deps.focusWindow();
+      deps.navigate({ appSessionId: item.appSessionId, attentionId: item.id, source: 'notification' });
     });
     notification.on('close', () => live.delete(notification));
     notification.show();
