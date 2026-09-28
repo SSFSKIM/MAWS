@@ -382,6 +382,7 @@ Order: `rewind_conversation { target_message_uuid, last_seen_user_message_uuid, 
 ```ts
 export const EngineSessionStatusSchema = z.strictObject({
   appSessionId: AppSessionIdSchema, engineSessionId: SessionIdSchema.nullable(), pid: z.number().int().nullable(), launchId: z.string(), launchedAt: z.string(),
+  taskListId: z.string().nullable(),                                                  // C8's ask (M5): the launch env's CLAUDE_CODE_TASK_LIST_ID when set, else the engine session id once known; null before (SPEC 20:167–203)
   cwd: z.string(),                                                                    // the launch spec's cwd, present from the reservation onward (C10 counts reservations by directory through engine.sessions)
   pendingPlan: z.string().nullable(),                                                 // a clear_and_implement plan kept for retry after the pre-plan mode could not be restored (M3 review)
   process: z.enum(['starting', 'initializing', 'ready', 'exiting', 'exited']),
@@ -895,6 +896,9 @@ Ready to paste into the charter's C3 section as "**Residue decisions (C3, 2026-0
 - Decision: (M4 re-review 2) The `#` path guard stops predicting where a path resolves (two fixes in a row were defeated by dangling and nested symlinks) and uses the confined-open pattern: an existing, realpath'd parent inside a realpath'd listed folder, and `O_NOFOLLOW` on the final component. A symlinked memory file that the dialog itself lists is followed once through its own realpath; anything else that is a link at the final component is refused with a clear message.
   Rationale: the kernel, not a lexical walk, decides what the final component is; the trade (a hand-made symlink inside a memory folder is refused) is the right side of "no arbitrary writes through this command". Consequence for C7 and C11 (bee5a43): a `path` target inside a listed folder that does not exist yet (the auto-memory folder often does not) is refused with a clear message; only the `project` and `user` files get their parent created. A caller that needs the folder created asks the engine (a turn writes memory) or a later child adds a `session.memoryPrepare`.
   Date/Author: 2026-09-28, controller.
+- Decision: (C8's ask via the coordinator, 2026-09-28, M5) `EngineSessionStatus` gains `taskListId: string | null`: the constructed environment's `CLAUDE_CODE_TASK_LIST_ID` when set (the launch plan's `env`, which passes `CLAUDE_*` through), else the engine session id once known, else null. Team contexts are P1. One status test with the override set.
+  Rationale: SPEC 20:167–203 resolves the task-list id from that variable before falling back to the session id; a panel assuming "list id = session id" would show an unrelated checklist.
+  Date/Author: 2026-09-28, coordinator via controller.
 
 ## Outcomes & Retrospective
 
