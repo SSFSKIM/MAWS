@@ -62,7 +62,7 @@ export interface ChainFollowerOptions {
 const PAGE_BYTES = 1024 * 1024;
 const MAX_PARTIAL_BYTES = 8 * 1024 * 1024;
 const BATCH_SIZE = 500;
-const RELOAD_ATTEMPTS = 3;
+const SYNC_ATTEMPTS = 3; // stat-then-read attempts per start or poke when reads meet a replaced or shrunk file
 const NEWLINE = 0x0a;
 
 // Non-uuid record types the engine writes that carry nothing for the graph (SPEC 35.5).
@@ -391,20 +391,15 @@ export class ChainFollower {
     this.core = this.freshCore();
   }
 
+  // `following` is reported only once a read completed against a stable inode, so a snapshot never calls an
+  // interrupted backfill complete; a start whose every attempt was interrupted stays `backfilling` for the next poke.
   start(): Promise<void> {
     return this.enqueue(async () => {
       if (this.stopped) return;
       this.report('backfilling');
       try {
-        const stat = await this.reader.stat();
-        if (this.stopped) return;
-        if (stat !== null) {
-          this.core.ino = stat.ino;
-          await this.readForward(this.core, stat.size, true);
-          if (this.stopped) return;
-        }
-        this.flush(this.core);
-        this.report('following');
+        const outcome = await this.sync(true);
+        if (outcome === 'complete' || outcome === 'absent') this.report('following'); // a missing file waits, following
       } catch (error) {
         this.report('error', messageOf(error));
       }
@@ -415,21 +410,7 @@ export class ChainFollower {
     return this.enqueue(async () => {
       if (this.stopped) return;
       try {
-        const stat = await this.reader.stat();
-        if (this.stopped) return;
-        if (stat === null) return; // a file not there yet, or gone: wait for it
-        const core = this.core;
-        if (core.ino !== null && (stat.ino !== core.ino || stat.size < core.offset)) {
-          await this.reload(stat);
-          return;
-        }
-        if (core.ino === null) core.ino = stat.ino;
-        if (stat.size > core.offset) {
-          await this.readForward(core, stat.size, false);
-          if (this.stopped) return;
-        }
-        this.flush(core);
-        this.report('following');
+        if ((await this.sync(false)) === 'complete') this.report('following');
       } catch (error) {
         this.report('error', messageOf(error));
       }
@@ -483,6 +464,7 @@ export class ChainFollower {
   // Answers whether the whole range was read: a read that returns no bytes (the file was replaced or shrank since the
   // stat) ends it early, and the caller's next stat sees the new file.
   private async readForward(core: FollowerCore, toSize: number, flushEachPage: boolean): Promise<boolean> {
+    core.interrupted = false;
     while (core.offset < toSize) {
       const chunk = await this.reader.read(core.offset, Math.min(PAGE_BYTES, toSize - core.offset));
       if (this.stopped || chunk.length === 0) return false;
@@ -493,6 +475,33 @@ export class ChainFollower {
     return !core.interrupted;
   }
 
+  // One catch-up: stat, then read what was appended, or reload a rewritten file. A read interrupted by a replacement
+  // or a shrink (`readForward` answers false) is retried from a fresh stat, up to SYNC_ATTEMPTS times: what was read
+  // whole before the interruption is the old file's and is delivered; nothing of the new file is ever read under the
+  // old inode's cursor. 'absent': no file (not there yet, or gone); 'interrupted': every attempt was.
+  private async sync(flushEachPage: boolean): Promise<'complete' | 'interrupted' | 'absent' | 'stopped'> {
+    for (let attempt = 0; attempt < SYNC_ATTEMPTS; attempt++) {
+      const stat = await this.reader.stat();
+      if (this.stopped) return 'stopped';
+      if (stat === null) return 'absent';
+      const core = this.core;
+      // Nothing read yet (a start interrupted before its first byte): the new file is simply the file.
+      if (core.offset === 0 && core.skeletons.size === 0) core.ino = stat.ino;
+      let whole: boolean;
+      if (core.ino !== null && (stat.ino !== core.ino || stat.size < core.offset)) {
+        whole = await this.reload(stat);
+      } else {
+        if (core.ino === null) core.ino = stat.ino;
+        whole = stat.size > core.offset ? await this.readForward(core, stat.size, flushEachPage) : true;
+        if (this.stopped) return 'stopped';
+        this.flush(core);
+      }
+      if (this.stopped) return 'stopped';
+      if (whole) return 'complete';
+    }
+    return 'interrupted';
+  }
+
   // The file was rewritten (GC, tombstone removal, hydration, relocation): run a cold start into a fresh core with
   // delivery suppressed, then reconcile the old delivered state against the fresh final state and nothing else.
   // Old-chain records missing from the fresh chain are one retraction; fresh-chain records the old follower had not
@@ -501,28 +510,13 @@ export class ChainFollower {
   // meaning) and are never delivered.
   // A fresh run whose own read is interrupted (the file replaced again between the reload's stat and its read, or
   // shrunk) describes no file: it is abandoned, never reconciled — an empty fresh chain would retract everything the
-  // consumer holds — and the reload starts over from a fresh stat, up to RELOAD_ATTEMPTS times; after that the old
-  // state stands and the next poke tries again.
-  private async reload(first: { ino: number; size: number }): Promise<void> {
+  // consumer holds — the old state stands, and `sync` retries from a fresh stat. Answers whether it reconciled.
+  private async reload(stat: { ino: number; size: number }): Promise<boolean> {
     this.report('reloading');
-    let stat: { ino: number; size: number } | null = first;
-    let fresh: FollowerCore | null = null;
-    for (let attempt = 0; attempt < RELOAD_ATTEMPTS && stat !== null; attempt++) {
-      const candidate = this.freshCore();
-      candidate.ino = stat.ino;
-      const whole = await this.readForward(candidate, stat.size, false);
-      if (this.stopped) return;
-      if (whole) {
-        fresh = candidate;
-        break;
-      }
-      stat = await this.reader.stat();
-      if (this.stopped) return;
-    }
-    if (fresh === null) {
-      this.report('following'); // the old state stands; nothing was delivered
-      return;
-    }
+    const fresh = this.freshCore();
+    fresh.ino = stat.ino;
+    const whole = await this.readForward(fresh, stat.size, false);
+    if (this.stopped || !whole) return false;
     const old = this.core;
     const freshChain = new Set(fresh.chain);
     const retracted = old.chain.filter((uuid) => !freshChain.has(uuid));
@@ -546,7 +540,7 @@ export class ChainFollower {
     this.core = fresh;
     this.deliver(produced);
     this.flush(fresh);
-    this.report('following');
+    return true;
   }
 
   private flush(core: FollowerCore): void {

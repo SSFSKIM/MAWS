@@ -4,13 +4,14 @@ import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, AppSessionId, SessionId } from '@shared/graph/ids';
+import type { HostEmit } from '@shared/host/runtime';
 import type { EventName, EventPayload } from '@shared/ipc/schema';
 import { validateEventPayload } from '@shared/ipc/validate';
 import { FIXTURE_DIR, TRANSCRIPT_FIXTURE_DIR } from '../../../test/support/fixtures';
 import type { ReadRange } from '../../../test/support/memory-reader';
 import { StoreFixture } from '../../../test/support/store-fixture';
 import { ChainFollower, type FileReader } from './chain-follower';
-import { FsFileReader } from './follow';
+import { Follow, FsFileReader } from './follow';
 import { FsService } from './service';
 import { DEBOUNCE_MS, SETTLE_MS } from './watcher';
 
@@ -97,7 +98,7 @@ describe('the fs FileReader opens the file per read', () => {
     expect(states.slice(-2)).toEqual(['reloading', 'following']);
   });
 
-  it('a follower over the fs reader reloads onto a file replaced between its stat and its read', async () => {
+  it('a start whose read meets a replacement retries from a fresh stat and reports following only once complete', async () => {
     const record = (uuid: string, parentUuid: string | null, content: string) => JSON.stringify({ type: 'user', uuid, parentUuid, cwd: '/w', message: { role: 'user', content } });
     const path = await fixture.addTranscript('/work/a', S1, [record('u1', null, 'the old file, whose size covers the whole first record of the new one')]);
     const inner = new FsFileReader(() => path);
@@ -114,16 +115,95 @@ describe('the fs FileReader opens the file per read', () => {
         return inner.read(offset, length);
       },
     };
+    const host = recordingHost();
+    const follow = new Follow({ appSessionId: 'app-race' as AppSessionId, sessionId: S1 as SessionId, agent: null, reader, emit: host.emit });
+    await follow.started; // no poke: the start itself re-stats and retries
+    const snapshot = follow.snapshot();
+    expect(snapshot.complete).toBe(true);
+    expect(host.states.at(-1)).toMatchObject({ state: 'following', chainLength: 2, leafUuid: 'n1' });
+    expect(snapshot.events.flatMap((e) => (e.kind === 'user.message' ? [e.content] : []))).toEqual(['new', 'new file, second record, past the old size']);
+    expect(snapshot.events.filter((e) => e.kind === 'boundary.retraction')).toEqual([]);
+    expect(host.events.map((e) => e.id)).toEqual(snapshot.events.map((e) => e.id)); // nothing read under the old inode
+    expect(host.states.map((s) => s.state)).toEqual(['backfilling', 'following']);
+  });
+
+  it('a start whose reads keep meeting replacements stays backfilling, incomplete, until a poke completes it', async () => {
+    const record = (uuid: string, parentUuid: string | null) => JSON.stringify({ type: 'user', uuid, parentUuid, cwd: '/w', message: { role: 'user', content: uuid } });
+    const lines = [record('u1', null), record('u2', 'u1')];
+    const path = await fixture.addTranscript('/work/a', S1, lines);
+    const inner = new FsFileReader(() => path);
+    let churning = true;
+    const reader: FileReader = {
+      path,
+      stat: () => inner.stat(),
+      read: async (offset, length) => {
+        if (churning) await fixture.rewriteFile(path, lines); // a new inode under every read
+        return inner.read(offset, length);
+      },
+    };
+    const host = recordingHost();
+    const follow = new Follow({ appSessionId: 'app-churn' as AppSessionId, sessionId: S1 as SessionId, agent: null, reader, emit: host.emit });
+    await follow.started;
+    expect(follow.state).toBe('backfilling');
+    expect(follow.snapshot()).toEqual({ events: [], complete: false });
+    expect(host.states.map((s) => s.state)).not.toContain('following');
+
+    churning = false;
+    await follow.poke();
+    expect(follow.state).toBe('following');
+    const snapshot = follow.snapshot();
+    expect(snapshot.complete).toBe(true);
+    expect(snapshot.events.flatMap((e) => (e.kind === 'user.message' ? [e.content] : []))).toEqual(['u1', 'u2']);
+  });
+
+  it('an ordinary poke whose read meets a replacement delivers nothing partial and completes from the next stat', async () => {
+    const record = (uuid: string, parentUuid: string | null) => JSON.stringify({ type: 'user', uuid, parentUuid, cwd: '/w', message: { role: 'user', content: uuid } });
+    const path = await fixture.addTranscript('/work/a', S1, [record('u1', null), record('u2', 'u1')]);
+    const inner = new FsFileReader(() => path);
+    let replaceDuringRead: (() => Promise<void>) | null = null;
+    const reader: FileReader = {
+      path,
+      stat: () => inner.stat(),
+      read: async (offset, length) => {
+        const replace = replaceDuringRead;
+        replaceDuringRead = null;
+        if (replace) await replace();
+        return inner.read(offset, length);
+      },
+    };
     const events: SessionEvent[] = [];
-    const follower = new ChainFollower(reader, S1 as SessionId, null, (e) => e.t === 'events' && events.push(...e.events));
+    const states: string[] = [];
+    const follower = new ChainFollower(reader, S1 as SessionId, null, (e) => {
+      if (e.t === 'events') events.push(...e.events);
+      if (e.t === 'state') states.push(e.state);
+    });
     await follower.start();
-    expect(events).toEqual([]); // nothing read under the old inode
+    const delivered = events.length;
+
+    // An append, then the file is replaced (u3 kept, u4 added) between the poke's stat and its read.
+    await fixture.appendLines(path, [record('u3', 'u2')]);
+    replaceDuringRead = () => fixture.rewriteFile(path, [record('u1', null), record('u2', 'u1'), record('u3', 'u2'), record('u4', 'u3')]);
     await follower.poke();
-    expect(follower.snapshot().chain).toEqual(['n0', 'n1']);
-    expect(events.flatMap((e) => (e.kind === 'user.message' ? [e.content] : []))).toEqual(['new', 'new file, second record, past the old size']);
-    expect(events.filter((e) => e.kind === 'boundary.retraction')).toEqual([]);
+
+    expect(follower.snapshot().chain).toEqual(['u1', 'u2', 'u3', 'u4']);
+    const later = events.slice(delivered);
+    expect(later.flatMap((e) => (e.kind === 'user.message' ? [e.content] : []))).toEqual(['u3', 'u4']);
+    expect(later.filter((e) => e.kind === 'boundary.retraction')).toEqual([]);
+    expect(new Set(events.map((e) => e.id)).size).toBe(events.length);
+    expect(states.at(-1)).toBe('following');
   });
 });
+
+// A host emit that keeps what a Follow sends: its event batches, flattened, and its follow states, in order.
+function recordingHost() {
+  const events: SessionEvent[] = [];
+  const states: EventPayload<'fs.followState'>[] = [];
+  const emit = ((name: EventName, payload: unknown) => {
+    if (name === 'session.eventBatch') events.push(...(payload as EventPayload<'session.eventBatch'>).events);
+    if (name === 'fs.followState') states.push(payload as EventPayload<'fs.followState'>);
+  }) as HostEmit;
+  return { events, states, emit };
+}
 
 // ---- following through the service (M3 pins) ------------------------------------------------------------------------
 
