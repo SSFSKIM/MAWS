@@ -10,7 +10,7 @@ What nobody can do yet, and C1 does not attempt: talk to a real engine (C3), rea
 
 ## Progress
 
-- [ ] M1 — Scaffold, window and tokens
+- [x] M1 — Scaffold, window and tokens (2026-09-28 05:33, commit 3c32bf7, task review clean)
 - [ ] M2 — X1 shared types and validators against the probe fixtures
 - [ ] M3 — X2 IPC schema, transport and theme switching end to end
 - [ ] M4 — Utility processes: engine host and PTY host
