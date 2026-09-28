@@ -11,7 +11,7 @@ export interface Notice {
   dismissible: boolean;
 }
 
-type NoticeInput = Omit<Notice, 'id' | 'kind'> & { id?: string };
+export type NoticeInput = Omit<Notice, 'id' | 'kind'> & { id?: string };
 
 export interface NoticesState {
   notices: Notice[];
@@ -40,3 +40,7 @@ export function createNoticesStore() {
 }
 
 export const useNotices = createNoticesStore();
+
+// The helpers other modules call (C11's near-limit banner, the attention fallback toast); each returns the notice's id.
+export const banner = (notice: NoticeInput): string => useNotices.getState().banner(notice);
+export const toast = (notice: NoticeInput): string => useNotices.getState().toast(notice);

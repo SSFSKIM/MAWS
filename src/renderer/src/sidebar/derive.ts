@@ -40,8 +40,9 @@ export interface SidebarModel {
 
 const isWorking = (digest: SessionDigest | undefined) => digest?.phase === 'working' || digest?.phase === 'starting';
 
-// Case-insensitive substring over the title, the project's name and the directory.
-function matcher(query: string, projects: ReadonlyMap<ProjectId, ProjectRecord>): (record: SessionRecord) => boolean {
+// Case-insensitive substring over the title, the project's name and the directory. The ⌘K palette searches sessions
+// with the same rule, so the sidebar's filter and the palette agree on what a query finds.
+export function sessionMatcher(query: string, projects: ReadonlyMap<ProjectId, ProjectRecord>): (record: SessionRecord) => boolean {
   const q = query.trim().toLowerCase();
   if (q === '') return () => true;
   return (record) =>
@@ -52,7 +53,7 @@ function matcher(query: string, projects: ReadonlyMap<ProjectId, ProjectRecord>)
 
 export function sidebarModel({ records, digests, projects, rows, sort, query }: SidebarInput): SidebarModel {
   const byId = new Map(projects.map((p) => [p.id, p]));
-  const matches = matcher(query, byId);
+  const matches = sessionMatcher(query, byId);
   const order = (list: SessionRecord[]) => sortSessions(list, sort, { digests, rows });
   const waiting = new Set(rows.map((row) => row.appSessionId));
 

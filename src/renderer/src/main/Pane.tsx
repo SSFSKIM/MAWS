@@ -14,8 +14,8 @@ import { TabStrip } from './TabStrip';
 
 type PaneIndex = 0 | 1;
 
-// `share` is the pane's part of the region's width (the split ratio, or 1 alone).
-export function Pane({ index, split, share }: { index: PaneIndex; split: boolean; share: number }) {
+// `column` is the pane's column in the main region's grid (MainArea), where its strip and its content are placed.
+export function Pane({ index, split, column }: { index: PaneIndex; split: boolean; column: number }) {
   const pane = useLayout((s) => s.main.panes[index]);
   const idPrefix = useId();
   const element = useRef<HTMLElement>(null);
@@ -45,11 +45,17 @@ export function Pane({ index, split, share }: { index: PaneIndex; split: boolean
       data-pane={index}
       onPointerDownCapture={focus}
       onFocusCapture={focus}
-      style={{ flex: `${share} 1 0%` }}
-      className="flex min-h-0 min-w-0 flex-col"
+      className="contents"
     >
-      <TabStrip pane={index} split={split} idPrefix={idPrefix} />
-      <div role="tabpanel" aria-labelledby={`${idPrefix}-tab-${activeIndex}`} className="relative min-h-0 flex-1 overflow-hidden">
+      <div data-pane-strip className="min-w-0" style={{ gridRow: 1, gridColumn: column }}>
+        <TabStrip pane={index} split={split} idPrefix={idPrefix} />
+      </div>
+      <div
+        role="tabpanel"
+        aria-labelledby={`${idPrefix}-tab-${activeIndex}`}
+        className="relative min-h-0 min-w-0 overflow-hidden"
+        style={{ gridRow: 3, gridColumn: column }}
+      >
         {active && <TabContent key={active.id} tab={active} paneIndex={index} />}
       </div>
     </section>

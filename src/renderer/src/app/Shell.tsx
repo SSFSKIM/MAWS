@@ -3,11 +3,13 @@
 // inert; a maximized panel takes the main column's place while the main region keeps its state offscreen. The sidebar
 // is M3's, the main region's panes M4's (C1's diagnostics strip is now the content of the Diagnostics tab).
 import { MainArea } from '../main/MainArea';
+import { CommandPalette } from '../palette/CommandPalette';
 import { PanelRegion } from '../panel/PanelRegion';
 import { Sidebar } from '../sidebar/Sidebar';
 import { useLayout } from '../stores/layout';
 import { COLLAPSE_THRESHOLD_PX, gridColumns, SIDEBAR_BOUNDS, sidebarWidth } from './regions';
 import { Resizer } from './Resizer';
+import { ToastHost } from './ToastHost';
 import { Toolbar } from './Toolbar';
 
 export const SIDEBAR_REGION_ID = 'region-sidebar';
@@ -26,11 +28,13 @@ export function Shell() {
         data-region="main"
         aria-label="Main"
         inert={mainHidden}
-        className="col-start-2 row-start-2 flex min-h-0 min-w-0 flex-col overflow-hidden"
+        className="relative col-start-2 row-start-2 flex min-h-0 min-w-0 flex-col overflow-hidden"
       >
         <MainArea />
+        <ToastHost />
       </section>
       <PanelRegion />
+      <CommandPalette />
     </div>
   );
 }

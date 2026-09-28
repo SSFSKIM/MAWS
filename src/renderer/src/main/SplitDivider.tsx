@@ -11,7 +11,7 @@ export function SplitDivider({ width }: { width: number }) {
   const ratio = useLayout((s) => s.main.splitRatio);
   const w = width > 0 ? width : NOMINAL_WIDTH;
   return (
-    <div className="relative w-px shrink-0 bg-border">
+    <div className="relative w-px bg-border" style={{ gridRow: '1 / -1', gridColumn: 2 }}>
       <Resizer
         label="Resize panes"
         controls={paneDomId(0)}

@@ -1,10 +1,11 @@
 // The frame's own action handlers: the region toggles, panel maximize and the appearance (M2), the tab and pane
 // actions and Help › Diagnostics (M4), and the session actions the shell answers itself (open, open in split, pin).
-// The palette and attention register theirs in M5; until then those actions stay disabled in the menu and the page.
+// The ⌘K palette's toggle is here too (M5); ⌘⇧J is registered with the attention wiring (`attention/navigation.ts`).
 import type { MawsBridge } from '@shared/ipc/schema';
 import { ipc } from '../ipc/client';
 import { registerAction, requestCloseTab } from '../keymap/actions-runtime';
 import { focusPaneElement } from '../main/pane-dom';
+import { togglePalette } from '../palette/CommandPalette';
 import { useLayout } from '../stores/layout';
 import { activeTab } from '../stores/layout-model';
 import { useSessions } from '../stores/sessions';
@@ -47,6 +48,7 @@ export function registerShellActions(client: MawsBridge = ipc): () => void {
       focusPaneElement(other);
     }),
     registerAction('diagnostics.open', () => layout().openTab({ kind: 'diagnostics' })),
+    registerAction('palette.open', togglePalette),
 
     registerSessionAction('open', (appSessionId) => layout().openSession(appSessionId)),
     registerSessionAction('openInSplit', (appSessionId) => layout().openSession(appSessionId, { split: true })),
