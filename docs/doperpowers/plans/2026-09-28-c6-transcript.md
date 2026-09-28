@@ -13,7 +13,7 @@ What C6 does not do: talk to an engine (C3), read `~/.claude` (C4), own the comp
 ## Progress
 
 - [x] M1 — Anchoring spike (G1) — 2026-09-28, verdict promote (Surprises & Discoveries), review clean after one fix (mermaid per-fence completeness gate, eec9430)
-- [ ] M2 — Presentation model, replay stub and the snapshot suite
+- [x] M2 — Presentation model, replay stub and the snapshot suite — 2026-09-28, review clean after two fix rounds (five findings, then the steer consumption guard); 57 snapshots; perf 75.6 ms / 0.054 ms. Pending gates (siblings not on master): C4 backfill of `subagent-parent.jsonl` (covered by `events/disk-null-origin` meanwhile), C3 stub-equivalence, the C4 half of the pasted-content test
 - [ ] M3 — Transcript view: virtualised list, follow mode, markdown stack, text rows
 - [ ] M4 — Work area: divider, groups, cells, detail, receipts, subagent rows, bash rows
 - [ ] M5 — Requests, boundaries, errors, spills and the public API for C7 and C8
