@@ -1,0 +1,1147 @@
+{
+  "_note": "C5 acceptance scenario (docs/doperpowers/plans/2026-09-28-c5-shell.md, \"nine-sessions.json\"). Ids, directories, models, tool inputs, request payloads, answer lines, costs and journal times are copied from the probe journal named in each _from; _synthetic marks invented values. Synthetic times after the journals (10:02 to 10:10:12Z) order the plan request and the timeline after every journal time.",
+  "version": 1,
+  "projects": [
+    {
+      "_synthetic": true,
+      "_note": "The pass-2 real-settings*.jsonl journals ran in /private/tmp probe directories and name none of the three projects; the directories are the owner's checkouts (~/Developer/GitHub, as mockups/01-shell.html shows for MAWS).",
+      "id": "proj-maws",
+      "name": "MAWS",
+      "directory": "/Users/new/Developer/GitHub/MAWS",
+      "order": 0,
+      "createdAt": "2026-09-01T09:00:00.000Z"
+    },
+    {
+      "_synthetic": true,
+      "id": "proj-codex-somersault",
+      "name": "codex_somersault",
+      "directory": "/Users/new/Developer/GitHub/codex_somersault",
+      "order": 1,
+      "createdAt": "2026-09-01T09:01:00.000Z"
+    },
+    {
+      "_synthetic": true,
+      "id": "proj-claude-usage-menubar",
+      "name": "claude-usage-menubar",
+      "directory": "/Users/new/Developer/GitHub/claude-usage-menubar",
+      "order": 2,
+      "createdAt": "2026-09-01T09:02:00.000Z"
+    }
+  ],
+  "sessions": [
+    {
+      "_from": "spikes/protocol-probe/fixtures/subagent.jsonl seq 7 (system/init: session_id, cwd, model, permissionMode, claude_code_version); seq 1 (spawn: --model, routed)",
+      "appId": "app-9a1d4262",
+      "engineSessionId": "9a1d4262-0b43-46ad-acb9-5982f31d209c",
+      "projectId": "proj-maws",
+      "directory": "/private/tmp/maws-probe-WmHZ2j",
+      "additionalDirectories": [],
+      "worktree": null,
+      "branch": null,
+      "title": {
+        "_synthetic": true,
+        "text": "Charter + research",
+        "source": "user"
+      },
+      "pinned": false,
+      "archived": false,
+      "holder": {
+        "kind": "self"
+      },
+      "lastSeen": {
+        "messageUuid": null,
+        "at": "2026-09-28T09:24:31.225Z"
+      },
+      "unread": false,
+      "engineVersion": "2.1.283",
+      "gateway": {
+        "routed": false,
+        "_note": "pass-1 spawn row carries no routed flag: the pass-1 probe launched direct"
+      },
+      "model": {
+        "requested": "haiku",
+        "resolved": "claude-haiku-4-5-20251001"
+      },
+      "effort": null,
+      "permissionMode": {
+        "requested": "default",
+        "effective": "default",
+        "refusal": null
+      },
+      "createdAt": "2026-09-28T09:22:04.927Z",
+      "updatedAt": "2026-09-28T09:24:31.225Z",
+      "_synthetic": "appId, title, lastSeen, createdAt/updatedAt (journal first/last row times)"
+    },
+    {
+      "_from": "spikes/protocol-probe/fixtures/permission-roundtrip.jsonl seq 7 (system/init: session_id, cwd, model, permissionMode, claude_code_version); seq 1 (spawn: --model, routed)",
+      "appId": "app-3eb04b84",
+      "engineSessionId": "3eb04b84-ee74-4b66-bfbf-164bcd3c72a4",
+      "projectId": "proj-maws",
+      "directory": "/private/tmp/maws-probe-qqboLh",
+      "additionalDirectories": [],
+      "worktree": null,
+      "branch": null,
+      "title": {
+        "_synthetic": true,
+        "text": "Fix sidebar drag",
+        "source": "user"
+      },
+      "pinned": false,
+      "archived": false,
+      "holder": {
+        "kind": "self"
+      },
+      "lastSeen": {
+        "messageUuid": null,
+        "at": null
+      },
+      "unread": true,
+      "engineVersion": "2.1.283",
+      "gateway": {
+        "routed": false,
+        "_note": "pass-1 spawn row carries no routed flag: the pass-1 probe launched direct"
+      },
+      "model": {
+        "requested": "haiku",
+        "resolved": "claude-haiku-4-5-20251001"
+      },
+      "effort": null,
+      "permissionMode": {
+        "_synthetic": true,
+        "_note": "the journal ran --permission-mode default; the acceptance status line reads auto",
+        "requested": "auto",
+        "effective": "auto",
+        "refusal": null
+      },
+      "createdAt": "2026-09-28T09:21:49.636Z",
+      "updatedAt": "2026-09-28T09:21:58.773Z",
+      "_synthetic": "appId, title, lastSeen, createdAt/updatedAt (journal first/last row times)"
+    },
+    {
+      "_from": "spikes/protocol-probe/fixtures/question-roundtrip.jsonl seq 7 (system/init: session_id, cwd, model, permissionMode, claude_code_version); seq 1 (spawn: --model, routed)",
+      "appId": "app-d095dc75",
+      "engineSessionId": "d095dc75-508c-491f-8aa0-a6068b125cbe",
+      "projectId": "proj-maws",
+      "directory": "/private/tmp/maws-probe-4Khg7k",
+      "additionalDirectories": [],
+      "worktree": null,
+      "branch": null,
+      "title": {
+        "_synthetic": true,
+        "text": "Sidebar interaction pass",
+        "source": "user"
+      },
+      "pinned": false,
+      "archived": false,
+      "holder": {
+        "kind": "self"
+      },
+      "lastSeen": {
+        "messageUuid": null,
+        "at": "2026-09-28T09:22:04.886Z"
+      },
+      "unread": false,
+      "engineVersion": "2.1.283",
+      "gateway": {
+        "routed": false,
+        "_note": "pass-1 spawn row carries no routed flag: the pass-1 probe launched direct"
+      },
+      "model": {
+        "requested": "haiku",
+        "resolved": "claude-haiku-4-5-20251001"
+      },
+      "effort": null,
+      "permissionMode": {
+        "requested": "default",
+        "effective": "default",
+        "refusal": null
+      },
+      "createdAt": "2026-09-28T09:21:58.817Z",
+      "updatedAt": "2026-09-28T09:22:04.886Z",
+      "_synthetic": "appId, title, lastSeen, createdAt/updatedAt (journal first/last row times)"
+    },
+    {
+      "_from": "spikes/protocol-probe/fixtures/pass2/workflow.jsonl seq 8 (system/init: session_id, cwd, model, permissionMode, claude_code_version); seq 1 (spawn: --model, routed)",
+      "appId": "app-bac6130b",
+      "engineSessionId": "bac6130b-8eb8-499e-aeb1-89e7624a52cd",
+      "projectId": "proj-codex-somersault",
+      "directory": "/private/tmp/maws-probe2-1RzDNs",
+      "additionalDirectories": [],
+      "worktree": null,
+      "branch": null,
+      "title": {
+        "_synthetic": true,
+        "text": "Quota reset recovery",
+        "source": "user"
+      },
+      "pinned": false,
+      "archived": false,
+      "holder": {
+        "kind": "self"
+      },
+      "lastSeen": {
+        "messageUuid": null,
+        "at": null
+      },
+      "unread": true,
+      "engineVersion": "2.1.283",
+      "gateway": {
+        "routed": true
+      },
+      "model": {
+        "requested": "sonnet",
+        "resolved": "claude-sonnet-5[1m]"
+      },
+      "effort": null,
+      "permissionMode": {
+        "requested": "auto",
+        "effective": "auto",
+        "refusal": null
+      },
+      "createdAt": "2026-09-28T09:59:22.801Z",
+      "updatedAt": "2026-09-28T09:59:36.275Z",
+      "_synthetic": "appId, title, lastSeen, createdAt/updatedAt (journal first/last row times)"
+    },
+    {
+      "_from": "spikes/protocol-probe/fixtures/pass2/rewind.jsonl seq 8 (system/init: session_id, cwd, model, permissionMode, claude_code_version); seq 1 (spawn: --model, routed)",
+      "appId": "app-bdb23713",
+      "engineSessionId": "bdb23713-2f6c-40f3-8b18-b41a667a64e3",
+      "projectId": "proj-codex-somersault",
+      "directory": "/private/tmp/maws-probe2-FIiJVW",
+      "additionalDirectories": [],
+      "worktree": null,
+      "branch": null,
+      "title": {
+        "_synthetic": true,
+        "text": "Trace stream reconnects",
+        "source": "user"
+      },
+      "pinned": false,
+      "archived": false,
+      "holder": {
+        "kind": "none"
+      },
+      "lastSeen": {
+        "messageUuid": null,
+        "at": "2026-09-28T10:00:22.510Z"
+      },
+      "unread": false,
+      "engineVersion": "2.1.283",
+      "gateway": {
+        "routed": true
+      },
+      "model": {
+        "requested": "sonnet",
+        "resolved": "claude-sonnet-5[1m]"
+      },
+      "effort": null,
+      "permissionMode": {
+        "requested": "auto",
+        "effective": "auto",
+        "refusal": null
+      },
+      "createdAt": "2026-09-28T10:00:15.842Z",
+      "updatedAt": "2026-09-28T10:00:22.510Z",
+      "_synthetic": "appId, title, lastSeen, createdAt/updatedAt (journal first/last row times)"
+    },
+    {
+      "_from": "spikes/protocol-probe/fixtures/pass2/resume-live-holder.jsonl seq 8 (system/init: session_id, cwd, model, permissionMode, claude_code_version); seq 1 (spawn: --model, routed)",
+      "appId": "app-466b0d0d",
+      "engineSessionId": "466b0d0d-6a8e-4aae-9eab-4b9c7d2ad1d2",
+      "projectId": "proj-codex-somersault",
+      "directory": "/private/tmp/maws-probe2-23NT5D",
+      "additionalDirectories": [],
+      "worktree": null,
+      "branch": null,
+      "title": {
+        "_synthetic": true,
+        "text": "Somersault terminal run",
+        "source": "user"
+      },
+      "pinned": false,
+      "archived": false,
+      "holder": {
+        "_from": "spikes/protocol-probe/fixtures/pass2/resume-live-holder.jsonl seq 1 (spawn pid of the holder process); the journal has no sessions/<pid>.json snapshot row",
+        "kind": "terminal",
+        "pid": 7135
+      },
+      "lastSeen": {
+        "messageUuid": null,
+        "at": "2026-09-28T10:07:23.709Z"
+      },
+      "unread": false,
+      "engineVersion": "2.1.283",
+      "gateway": {
+        "routed": true
+      },
+      "model": {
+        "requested": "sonnet",
+        "resolved": "claude-sonnet-5[1m]"
+      },
+      "effort": null,
+      "permissionMode": {
+        "requested": "auto",
+        "effective": "auto",
+        "refusal": null
+      },
+      "createdAt": "2026-09-28T10:07:18.218Z",
+      "updatedAt": "2026-09-28T10:07:23.709Z",
+      "_synthetic": "appId, title, lastSeen, createdAt/updatedAt (journal first/last row times)"
+    },
+    {
+      "_from": "spikes/protocol-probe/fixtures/pass2/auto-classifier.jsonl seq 8 (system/init: session_id, cwd, model, permissionMode, claude_code_version); seq 1 (spawn: --model, routed)",
+      "appId": "app-59505fdc",
+      "engineSessionId": "59505fdc-476a-4b4b-b0de-9a2f566a0f87",
+      "projectId": "proj-claude-usage-menubar",
+      "directory": "/private/tmp/maws-probe2-Hy26JN",
+      "additionalDirectories": [],
+      "worktree": null,
+      "branch": null,
+      "title": {
+        "_synthetic": true,
+        "text": "Usage reset countdown",
+        "source": "user"
+      },
+      "pinned": false,
+      "archived": false,
+      "holder": {
+        "kind": "self"
+      },
+      "lastSeen": {
+        "messageUuid": null,
+        "at": "2026-09-28T09:57:38.142Z"
+      },
+      "unread": false,
+      "engineVersion": "2.1.283",
+      "gateway": {
+        "routed": true
+      },
+      "model": {
+        "requested": "sonnet",
+        "resolved": "claude-sonnet-5[1m]"
+      },
+      "effort": null,
+      "permissionMode": {
+        "requested": "auto",
+        "effective": "auto",
+        "refusal": null
+      },
+      "createdAt": "2026-09-28T09:57:15.999Z",
+      "updatedAt": "2026-09-28T09:57:38.142Z",
+      "_synthetic": "appId, title, lastSeen, createdAt/updatedAt (journal first/last row times)"
+    },
+    {
+      "_from": "spikes/protocol-probe/fixtures/reads.jsonl seq 7 (system/init: session_id, cwd, model, permissionMode, claude_code_version); seq 1 (spawn: --model, routed)",
+      "appId": "app-1238089b",
+      "engineSessionId": "1238089b-6440-4a64-8756-b280f00926fa",
+      "projectId": "proj-claude-usage-menubar",
+      "directory": "/private/tmp/maws-probe-35ZnCO",
+      "additionalDirectories": [],
+      "worktree": null,
+      "branch": null,
+      "title": {
+        "_synthetic": true,
+        "text": "SDK wire inventory",
+        "source": "user"
+      },
+      "pinned": false,
+      "archived": false,
+      "holder": {
+        "kind": "none"
+      },
+      "lastSeen": {
+        "messageUuid": null,
+        "at": "2026-09-28T09:22:18.561Z"
+      },
+      "unread": false,
+      "engineVersion": "2.1.283",
+      "gateway": {
+        "routed": false,
+        "_note": "pass-1 spawn row carries no routed flag: the pass-1 probe launched direct"
+      },
+      "model": {
+        "requested": "haiku",
+        "resolved": "claude-haiku-4-5-20251001"
+      },
+      "effort": null,
+      "permissionMode": {
+        "requested": "default",
+        "effective": "default",
+        "refusal": null
+      },
+      "createdAt": "2026-09-28T09:22:15.820Z",
+      "updatedAt": "2026-09-28T09:22:18.561Z",
+      "_synthetic": "appId, title, lastSeen, createdAt/updatedAt (journal first/last row times)"
+    },
+    {
+      "_from": "spikes/protocol-probe/fixtures/pass2/real-settings-idle-2.jsonl seq 4 (session_id of the first hook_started frame); spikes/protocol-probe/fixtures/pass2/real-settings-idle-2.jsonl seq 1 (spawn: cwd, --model, routed); spikes/protocol-probe/fixtures/pass2/real-settings-idle-2.jsonl seq 10 (initialize response: models[sonnet].resolvedModel, current_permission_mode); the journal has no system/init, so engineVersion is the spawn bin's version",
+      "appId": "app-7412a115",
+      "engineSessionId": "7412a115-9e8f-4ae4-a927-618be7867a92",
+      "projectId": "proj-claude-usage-menubar",
+      "directory": "/private/tmp/maws-probe2-AYRQnC",
+      "additionalDirectories": [],
+      "worktree": null,
+      "branch": null,
+      "title": {
+        "_synthetic": true,
+        "text": "Settings idle probe",
+        "source": "user"
+      },
+      "pinned": false,
+      "archived": false,
+      "holder": {
+        "kind": "self"
+      },
+      "lastSeen": {
+        "messageUuid": null,
+        "at": "2026-09-28T09:59:00.248Z"
+      },
+      "unread": false,
+      "engineVersion": "2.1.283",
+      "gateway": {
+        "routed": true
+      },
+      "model": {
+        "requested": "sonnet",
+        "resolved": "claude-sonnet-5[1m]"
+      },
+      "effort": null,
+      "permissionMode": {
+        "requested": "auto",
+        "effective": "auto",
+        "refusal": null
+      },
+      "createdAt": "2026-09-28T09:58:32.860Z",
+      "updatedAt": "2026-09-28T09:59:00.248Z",
+      "_synthetic": "appId, title, lastSeen, createdAt/updatedAt (journal first/last row times)"
+    },
+    {
+      "_from": "spikes/protocol-probe/fixtures/pass2/hooks.jsonl seq 9 (system/init: session_id, cwd, model, permissionMode, claude_code_version); seq 1 (spawn: --model, routed)",
+      "appId": "app-3d334c38",
+      "engineSessionId": "3d334c38-c304-40b8-a005-ee9adcf936e9",
+      "projectId": null,
+      "directory": "/private/tmp/maws-probe2-jUsOpI",
+      "additionalDirectories": [],
+      "worktree": null,
+      "branch": null,
+      "title": {
+        "_synthetic": true,
+        "text": "Terminal workflow notes",
+        "source": "user"
+      },
+      "pinned": false,
+      "archived": false,
+      "holder": {
+        "kind": "self"
+      },
+      "lastSeen": {
+        "messageUuid": null,
+        "at": null
+      },
+      "unread": true,
+      "engineVersion": "2.1.283",
+      "gateway": {
+        "routed": true
+      },
+      "model": {
+        "requested": "sonnet",
+        "resolved": "claude-sonnet-5[1m]"
+      },
+      "effort": null,
+      "permissionMode": {
+        "requested": "auto",
+        "effective": "auto",
+        "refusal": null
+      },
+      "createdAt": "2026-09-28T10:00:55.374Z",
+      "updatedAt": "2026-09-28T10:01:02.083Z",
+      "_synthetic": "appId, title, lastSeen, createdAt/updatedAt (journal first/last row times)"
+    },
+    {
+      "_from": "spikes/protocol-probe/fixtures/init.jsonl seq 5 (system/init: session_id, cwd, model, permissionMode, claude_code_version); seq 1 (spawn: --model, routed)",
+      "appId": "app-ae4e4257",
+      "engineSessionId": "ae4e4257-5e14-4c6d-82ec-40a193b16632",
+      "projectId": "proj-maws",
+      "directory": "/private/tmp/maws-probe-kXjalw",
+      "additionalDirectories": [],
+      "worktree": null,
+      "branch": null,
+      "title": {
+        "_synthetic": true,
+        "text": "Workstation north star",
+        "source": "user"
+      },
+      "pinned": true,
+      "archived": false,
+      "holder": {
+        "kind": "none"
+      },
+      "lastSeen": {
+        "messageUuid": null,
+        "at": "2026-09-28T09:21:23.094Z"
+      },
+      "unread": false,
+      "engineVersion": "2.1.283",
+      "gateway": {
+        "routed": false,
+        "_note": "pass-1 spawn row carries no routed flag: the pass-1 probe launched direct"
+      },
+      "model": {
+        "requested": "haiku",
+        "resolved": "claude-haiku-4-5-20251001"
+      },
+      "effort": null,
+      "permissionMode": {
+        "requested": "default",
+        "effective": "default",
+        "refusal": null
+      },
+      "createdAt": "2026-09-28T09:21:20.976Z",
+      "updatedAt": "2026-09-28T09:21:23.094Z",
+      "_synthetic": "appId, title, lastSeen, createdAt/updatedAt (journal first/last row times)"
+    }
+  ],
+  "digests": [
+    {
+      "_from": "spikes/protocol-probe/fixtures/subagent.jsonl seq 4 (turnStartedAt: the human user frame); spikes/protocol-probe/fixtures/subagent.jsonl seq 486 (cost.totalUsd: result.total_cost_usd); activity, context and childAgents synthetic",
+      "appSessionId": "app-9a1d4262",
+      "phase": "working",
+      "activity": "Running bun test",
+      "lastAssistantLine": null,
+      "turnStartedAt": "2026-09-28T09:22:05.261Z",
+      "lastTurnEndedAt": null,
+      "context": {
+        "_synthetic": true,
+        "percent": 41,
+        "totalTokens": 82000,
+        "maxTokens": 200000,
+        "autoCompactThreshold": null
+      },
+      "cost": {
+        "totalUsd": 0.0695054,
+        "sinceSeenUsd": 0
+      },
+      "childAgents": {
+        "_synthetic": true,
+        "active": 2,
+        "done": 1
+      },
+      "pendingRequests": 0
+    },
+    {
+      "_from": "spikes/protocol-probe/fixtures/permission-roundtrip.jsonl seq 4 (turnStartedAt: the human user frame); no result precedes the request at seq 49, so context and cost are null",
+      "appSessionId": "app-3eb04b84",
+      "phase": "waiting",
+      "activity": null,
+      "lastAssistantLine": null,
+      "turnStartedAt": "2026-09-28T09:21:49.996Z",
+      "lastTurnEndedAt": null,
+      "context": null,
+      "cost": null,
+      "childAgents": {
+        "active": 0,
+        "done": 0
+      },
+      "pendingRequests": 1
+    },
+    {
+      "_from": "spikes/protocol-probe/fixtures/question-roundtrip.jsonl seq 4 (turnStartedAt: the human user frame); no result precedes the request at seq 137",
+      "appSessionId": "app-d095dc75",
+      "phase": "waiting",
+      "activity": null,
+      "lastAssistantLine": null,
+      "turnStartedAt": "2026-09-28T09:21:59.216Z",
+      "lastTurnEndedAt": null,
+      "context": null,
+      "cost": null,
+      "childAgents": {
+        "active": 0,
+        "done": 0
+      },
+      "pendingRequests": 1
+    },
+    {
+      "_from": "spikes/protocol-probe/fixtures/pass2/workflow.jsonl seq 104 (lastAssistantLine); spikes/protocol-probe/fixtures/pass2/workflow.jsonl seq 108 (lastTurnEndedAt, cost.totalUsd); turnStartedAt synthetic (the plan turn is not in the journal)",
+      "appSessionId": "app-bac6130b",
+      "phase": "waiting",
+      "activity": null,
+      "lastAssistantLine": "Workflow completed: `[\"ALPHA\",\"BETA\"]`",
+      "turnStartedAt": "2026-09-28T10:02:00.000Z",
+      "lastTurnEndedAt": "2026-09-28T09:59:33.690Z",
+      "context": null,
+      "cost": {
+        "totalUsd": 0.1778396,
+        "sinceSeenUsd": 0.1778396
+      },
+      "childAgents": {
+        "active": 0,
+        "done": 0
+      },
+      "pendingRequests": 1
+    },
+    {
+      "_from": "spikes/protocol-probe/fixtures/pass2/rewind.jsonl seq 54 (lastAssistantLine); spikes/protocol-probe/fixtures/pass2/rewind.jsonl seq 58 (lastTurnEndedAt, cost.totalUsd)",
+      "appSessionId": "app-bdb23713",
+      "phase": "exited",
+      "activity": null,
+      "lastAssistantLine": "APPLE",
+      "turnStartedAt": "2026-09-28T10:00:20.646Z",
+      "lastTurnEndedAt": "2026-09-28T10:00:21.971Z",
+      "context": null,
+      "cost": {
+        "totalUsd": 0.06741660000000001,
+        "sinceSeenUsd": 0
+      },
+      "childAgents": {
+        "active": 0,
+        "done": 0
+      },
+      "pendingRequests": 0
+    },
+    {
+      "_from": "spikes/protocol-probe/fixtures/pass2/resume-live-holder.jsonl seq 29 (lastAssistantLine); spikes/protocol-probe/fixtures/pass2/resume-live-holder.jsonl seq 33 (lastTurnEndedAt, cost.totalUsd)",
+      "appSessionId": "app-466b0d0d",
+      "phase": "foreign",
+      "activity": null,
+      "lastAssistantLine": "HOLDER-AGAIN",
+      "turnStartedAt": "2026-09-28T10:07:21.441Z",
+      "lastTurnEndedAt": "2026-09-28T10:07:22.642Z",
+      "context": null,
+      "cost": {
+        "totalUsd": 0.06148300000000001,
+        "sinceSeenUsd": 0
+      },
+      "childAgents": {
+        "active": 0,
+        "done": 0
+      },
+      "pendingRequests": 0
+    },
+    {
+      "_from": "spikes/protocol-probe/fixtures/pass2/auto-classifier.jsonl seq 96 (lastAssistantLine); spikes/protocol-probe/fixtures/pass2/auto-classifier.jsonl seq 100 (lastTurnEndedAt, cost.totalUsd); spikes/protocol-probe/fixtures/pass2/auto-classifier.jsonl seq 32 (activity: the Bash command, via activityForTool); turnStartedAt synthetic",
+      "appSessionId": "app-59505fdc",
+      "phase": "working",
+      "activity": "Running curl -sI https://example.com | head -1",
+      "lastAssistantLine": "The request succeeded — httpbin.org echoed back the POST with the contents of `one.txt` (`ONE\\n`) as form data.",
+      "turnStartedAt": "2026-09-28T10:09:30.000Z",
+      "lastTurnEndedAt": "2026-09-28T09:57:37.611Z",
+      "context": null,
+      "cost": {
+        "totalUsd": 0.078367,
+        "sinceSeenUsd": 0
+      },
+      "childAgents": {
+        "active": 0,
+        "done": 0
+      },
+      "pendingRequests": 0
+    },
+    {
+      "_from": "spikes/protocol-probe/fixtures/reads.jsonl seq 47 (lastAssistantLine); spikes/protocol-probe/fixtures/reads.jsonl seq 51 (lastTurnEndedAt, cost.totalUsd)",
+      "appSessionId": "app-1238089b",
+      "phase": "exited",
+      "activity": null,
+      "lastAssistantLine": "OK",
+      "turnStartedAt": "2026-09-28T09:22:16.168Z",
+      "lastTurnEndedAt": "2026-09-28T09:22:17.331Z",
+      "context": null,
+      "cost": {
+        "totalUsd": 0.020775799999999997,
+        "sinceSeenUsd": 0
+      },
+      "childAgents": {
+        "active": 0,
+        "done": 0
+      },
+      "pendingRequests": 0
+    },
+    {
+      "_from": "spikes/protocol-probe/fixtures/pass2/real-settings-idle-2.jsonl: the journal holds no turn and no assistant text (the process idled from seq 10 to its exit at seq 12), so lastAssistantLine and lastTurnEndedAt are synthetic",
+      "appSessionId": "app-7412a115",
+      "phase": "idle",
+      "activity": null,
+      "lastAssistantLine": "Settings loaded from user, project and local sources; nothing to do until the next prompt.",
+      "turnStartedAt": null,
+      "lastTurnEndedAt": "2026-09-28T09:58:45.000Z",
+      "context": null,
+      "cost": null,
+      "childAgents": {
+        "active": 0,
+        "done": 0
+      },
+      "pendingRequests": 0,
+      "_synthetic": "lastAssistantLine, lastTurnEndedAt"
+    },
+    {
+      "_from": "spikes/protocol-probe/fixtures/pass2/hooks.jsonl seq 39 (lastAssistantLine); spikes/protocol-probe/fixtures/pass2/hooks.jsonl seq 43 (lastTurnEndedAt, cost.totalUsd)",
+      "appSessionId": "app-3d334c38",
+      "phase": "idle",
+      "activity": null,
+      "lastAssistantLine": "OK",
+      "turnStartedAt": "2026-09-28T10:00:55.770Z",
+      "lastTurnEndedAt": "2026-09-28T10:01:01.549Z",
+      "context": null,
+      "cost": {
+        "totalUsd": 0.0625828,
+        "sinceSeenUsd": 0.0625828
+      },
+      "childAgents": {
+        "active": 0,
+        "done": 0
+      },
+      "pendingRequests": 0
+    },
+    {
+      "_from": "spikes/protocol-probe/fixtures/init.jsonl seq 45 (lastAssistantLine); spikes/protocol-probe/fixtures/init.jsonl seq 49 (lastTurnEndedAt, cost.totalUsd)",
+      "appSessionId": "app-ae4e4257",
+      "phase": "exited",
+      "activity": null,
+      "lastAssistantLine": "OK",
+      "turnStartedAt": "2026-09-28T09:21:20.978Z",
+      "lastTurnEndedAt": "2026-09-28T09:21:22.541Z",
+      "context": null,
+      "cost": {
+        "totalUsd": 0.044139,
+        "sinceSeenUsd": 0
+      },
+      "childAgents": {
+        "active": 0,
+        "done": 0
+      },
+      "pendingRequests": 0
+    }
+  ],
+  "engine": [
+    {
+      "appSessionId": "app-9a1d4262",
+      "process": "ready",
+      "engineState": "running",
+      "turn": {
+        "origin": "human",
+        "startedAt": "2026-09-28T09:22:05.261Z",
+        "userMessageUuids": []
+      },
+      "pendingRequests": 0
+    },
+    {
+      "appSessionId": "app-3eb04b84",
+      "process": "ready",
+      "engineState": "requires_action",
+      "turn": {
+        "origin": "human",
+        "startedAt": "2026-09-28T09:21:49.996Z",
+        "userMessageUuids": []
+      },
+      "pendingRequests": 1
+    },
+    {
+      "appSessionId": "app-d095dc75",
+      "process": "ready",
+      "engineState": "requires_action",
+      "turn": {
+        "origin": "human",
+        "startedAt": "2026-09-28T09:21:59.216Z",
+        "userMessageUuids": []
+      },
+      "pendingRequests": 1
+    },
+    {
+      "appSessionId": "app-bac6130b",
+      "process": "ready",
+      "engineState": "requires_action",
+      "turn": {
+        "_synthetic": true,
+        "origin": "human",
+        "startedAt": "2026-09-28T10:02:00.000Z",
+        "userMessageUuids": []
+      },
+      "pendingRequests": 1
+    },
+    {
+      "appSessionId": "app-59505fdc",
+      "process": "ready",
+      "engineState": "running",
+      "turn": {
+        "_synthetic": true,
+        "origin": "human",
+        "startedAt": "2026-09-28T10:09:30.000Z",
+        "userMessageUuids": []
+      },
+      "pendingRequests": 0
+    },
+    {
+      "appSessionId": "app-7412a115",
+      "process": "ready",
+      "engineState": "idle",
+      "turn": null,
+      "pendingRequests": 0
+    },
+    {
+      "appSessionId": "app-3d334c38",
+      "process": "ready",
+      "engineState": "idle",
+      "turn": null,
+      "pendingRequests": 0
+    }
+  ],
+  "attention": [
+    {
+      "appSessionId": "app-3eb04b84",
+      "items": [
+        {
+          "_from": "spikes/protocol-probe/fixtures/permission-roundtrip.jsonl seq 49 (control_request can_use_tool)",
+          "id": "att-3eb04b84-permission",
+          "appSessionId": "app-3eb04b84",
+          "sessionId": "3eb04b84-ee74-4b66-bfbf-164bcd3c72a4",
+          "kind": "permission",
+          "request": {
+            "requestId": "f55b580f-ceae-4305-b69d-519b2626072e",
+            "toolUseId": "toolu_01RWDevVWYVi2Tn3y58pxRS3",
+            "taskId": null,
+            "agentId": null
+          },
+          "summary": "Bash: git log --oneline",
+          "createdAt": "2026-09-28T09:21:51.819Z",
+          "state": "pending",
+          "stateChangedAt": "2026-09-28T09:21:51.819Z",
+          "expiresAt": null
+        }
+      ],
+      "requests": {
+        "f55b580f-ceae-4305-b69d-519b2626072e": {
+          "_from": "spikes/protocol-probe/fixtures/permission-roundtrip.jsonl seq 49 (control_request can_use_tool)",
+          "id": "evt-3eb04b84-49",
+          "sessionId": "3eb04b84-ee74-4b66-bfbf-164bcd3c72a4",
+          "at": "2026-09-28T09:21:51.819Z",
+          "seq": 49,
+          "agentId": null,
+          "parentToolUseId": null,
+          "kind": "permission.requested",
+          "requestId": "f55b580f-ceae-4305-b69d-519b2626072e",
+          "toolUseId": "toolu_01RWDevVWYVi2Tn3y58pxRS3",
+          "toolName": "Bash",
+          "displayName": "Bash",
+          "input": {
+            "command": "git log --oneline",
+            "description": "Show commit history in one-line format"
+          },
+          "description": "Show commit history in one-line format",
+          "decisionReasonType": "rule",
+          "suggestions": [],
+          "blockedPath": null
+        }
+      }
+    },
+    {
+      "appSessionId": "app-d095dc75",
+      "items": [
+        {
+          "_from": "spikes/protocol-probe/fixtures/question-roundtrip.jsonl seq 137 (control_request can_use_tool AskUserQuestion)",
+          "id": "att-d095dc75-question",
+          "appSessionId": "app-d095dc75",
+          "sessionId": "d095dc75-508c-491f-8aa0-a6068b125cbe",
+          "kind": "question",
+          "request": {
+            "requestId": "24def552-1597-4470-95f8-8ed46dce2d74",
+            "toolUseId": "toolu_01SwshrZ4QjaJT8nymMQo7AG",
+            "taskId": null,
+            "agentId": null
+          },
+          "summary": "Which color do you prefer?",
+          "createdAt": "2026-09-28T09:22:02.716Z",
+          "state": "pending",
+          "stateChangedAt": "2026-09-28T09:22:02.716Z",
+          "expiresAt": null
+        }
+      ],
+      "requests": {
+        "24def552-1597-4470-95f8-8ed46dce2d74": {
+          "_from": "spikes/protocol-probe/fixtures/question-roundtrip.jsonl seq 137 (control_request can_use_tool AskUserQuestion; options without a preview map to preview null)",
+          "id": "evt-d095dc75-137",
+          "sessionId": "d095dc75-508c-491f-8aa0-a6068b125cbe",
+          "at": "2026-09-28T09:22:02.716Z",
+          "seq": 137,
+          "agentId": null,
+          "parentToolUseId": null,
+          "kind": "question.requested",
+          "requestId": "24def552-1597-4470-95f8-8ed46dce2d74",
+          "toolUseId": "toolu_01SwshrZ4QjaJT8nymMQo7AG",
+          "questions": [
+            {
+              "question": "Which color do you prefer?",
+              "header": "Color",
+              "options": [
+                {
+                  "label": "Red",
+                  "description": "A warm, bold color",
+                  "preview": "This is a red preview 🔴"
+                },
+                {
+                  "label": "Blue",
+                  "description": "A cool, calm color",
+                  "preview": "This is a blue preview 🔵"
+                }
+              ],
+              "multiSelect": false
+            },
+            {
+              "question": "Which fruits do you like?",
+              "header": "Fruits",
+              "options": [
+                {
+                  "label": "Apple",
+                  "description": "A crisp, sweet fruit",
+                  "preview": null
+                },
+                {
+                  "label": "Pear",
+                  "description": "A juicy, soft fruit",
+                  "preview": null
+                }
+              ],
+              "multiSelect": true
+            }
+          ]
+        }
+      }
+    },
+    {
+      "appSessionId": "app-bac6130b",
+      "items": [
+        {
+          "_synthetic": true,
+          "_from": "spikes/protocol-probe/fixtures/pass2/workflow.jsonl (session id only; the journal has no ExitPlanMode request)",
+          "id": "att-bac6130b-plan",
+          "appSessionId": "app-bac6130b",
+          "sessionId": "bac6130b-8eb8-499e-aeb1-89e7624a52cd",
+          "kind": "plan",
+          "request": {
+            "requestId": "req-synthetic-plan-bac6130b",
+            "toolUseId": "toolu_synthetic_plan_bac6130b",
+            "taskId": null,
+            "agentId": null
+          },
+          "summary": "Plan ready for review",
+          "createdAt": "2026-09-28T10:02:30.000Z",
+          "state": "pending",
+          "stateChangedAt": "2026-09-28T10:02:30.000Z",
+          "expiresAt": null
+        }
+      ],
+      "requests": {
+        "req-synthetic-plan-bac6130b": {
+          "_synthetic": true,
+          "_from": "spikes/protocol-probe/fixtures/pass2/workflow.jsonl (session id only)",
+          "id": "evt-bac6130b-synthetic-plan",
+          "sessionId": "bac6130b-8eb8-499e-aeb1-89e7624a52cd",
+          "at": "2026-09-28T10:02:30.000Z",
+          "seq": null,
+          "agentId": null,
+          "parentToolUseId": null,
+          "kind": "plan.requested",
+          "requestId": "req-synthetic-plan-bac6130b",
+          "toolUseId": "toolu_synthetic_plan_bac6130b",
+          "plan": "# Quota reset recovery\n\n1. Detect the quota-exhausted result and record the reset time it names.\n2. Park queued prompts instead of failing them, and show the countdown in the status line.\n3. Resume the parked queue once the reset time passes, oldest first.\n4. Add a probe that replays a quota-exhausted result and asserts the queue survives.",
+          "input": {
+            "plan": "# Quota reset recovery\n\n1. Detect the quota-exhausted result and record the reset time it names.\n2. Park queued prompts instead of failing them, and show the countdown in the status line.\n3. Resume the parked queue once the reset time passes, oldest first.\n4. Add a probe that replays a quota-exhausted result and asserts the queue survives."
+          }
+        }
+      }
+    }
+  ],
+  "timeline": [
+    {
+      "_synthetic": true,
+      "_note": "modelled on spikes/protocol-probe/fixtures/permission-roundtrip.jsonl seq 49 (the Bash can_use_tool frame); the file path is the session directory from spikes/protocol-probe/fixtures/subagent.jsonl seq 7",
+      "at": 3000,
+      "op": "attention",
+      "appSessionId": "app-9a1d4262",
+      "items": [
+        {
+          "_synthetic": true,
+          "_from": "spikes/protocol-probe/fixtures/permission-roundtrip.jsonl seq 49 (shape of the can_use_tool request)",
+          "id": "att-9a1d4262-read",
+          "appSessionId": "app-9a1d4262",
+          "sessionId": "9a1d4262-0b43-46ad-acb9-5982f31d209c",
+          "kind": "permission",
+          "request": {
+            "requestId": "req-synthetic-read-9a1d4262",
+            "toolUseId": "toolu_synthetic_read_9a1d4262",
+            "taskId": null,
+            "agentId": null
+          },
+          "summary": "Read: docs/charter.md",
+          "createdAt": "2026-09-28T10:10:03.000Z",
+          "state": "pending",
+          "stateChangedAt": "2026-09-28T10:10:03.000Z",
+          "expiresAt": null
+        }
+      ],
+      "requests": {
+        "req-synthetic-read-9a1d4262": {
+          "_synthetic": true,
+          "_from": "spikes/protocol-probe/fixtures/permission-roundtrip.jsonl seq 49 (shape of the can_use_tool request)",
+          "id": "evt-9a1d4262-synthetic-read",
+          "sessionId": "9a1d4262-0b43-46ad-acb9-5982f31d209c",
+          "at": "2026-09-28T10:10:03.000Z",
+          "seq": null,
+          "agentId": null,
+          "parentToolUseId": null,
+          "kind": "permission.requested",
+          "requestId": "req-synthetic-read-9a1d4262",
+          "toolUseId": "toolu_synthetic_read_9a1d4262",
+          "toolName": "Read",
+          "displayName": "Read",
+          "input": {
+            "file_path": "/private/tmp/maws-probe-WmHZ2j/docs/charter.md"
+          },
+          "description": null,
+          "decisionReasonType": "rule",
+          "suggestions": [],
+          "blockedPath": null
+        }
+      }
+    },
+    {
+      "at": 3000,
+      "op": "digest",
+      "digest": {
+        "appSessionId": "app-9a1d4262",
+        "phase": "waiting",
+        "activity": null,
+        "lastAssistantLine": null,
+        "turnStartedAt": "2026-09-28T09:22:05.261Z",
+        "lastTurnEndedAt": null,
+        "context": {
+          "_synthetic": true,
+          "percent": 41,
+          "totalTokens": 82000,
+          "maxTokens": 200000,
+          "autoCompactThreshold": null
+        },
+        "cost": {
+          "totalUsd": 0.0695054,
+          "sinceSeenUsd": 0
+        },
+        "childAgents": {
+          "_synthetic": true,
+          "active": 2,
+          "done": 1
+        },
+        "pendingRequests": 1
+      }
+    },
+    {
+      "at": 3000,
+      "op": "engine",
+      "appSessionId": "app-9a1d4262",
+      "engine": {
+        "appSessionId": "app-9a1d4262",
+        "process": "ready",
+        "engineState": "requires_action",
+        "turn": {
+          "origin": "human",
+          "startedAt": "2026-09-28T09:22:05.261Z",
+          "userMessageUuids": []
+        },
+        "pendingRequests": 1
+      }
+    },
+    {
+      "_synthetic": "lastTurnEndedAt",
+      "at": 8000,
+      "op": "digest",
+      "digest": {
+        "appSessionId": "app-59505fdc",
+        "phase": "idle",
+        "activity": null,
+        "lastAssistantLine": "The request succeeded — httpbin.org echoed back the POST with the contents of `one.txt` (`ONE\\n`) as form data.",
+        "turnStartedAt": "2026-09-28T10:09:30.000Z",
+        "lastTurnEndedAt": "2026-09-28T10:10:08.000Z",
+        "context": null,
+        "cost": {
+          "totalUsd": 0.078367,
+          "sinceSeenUsd": 0
+        },
+        "childAgents": {
+          "active": 0,
+          "done": 0
+        },
+        "pendingRequests": 0
+      }
+    },
+    {
+      "at": 8000,
+      "op": "engine",
+      "appSessionId": "app-59505fdc",
+      "engine": {
+        "appSessionId": "app-59505fdc",
+        "process": "ready",
+        "engineState": "idle",
+        "turn": null,
+        "pendingRequests": 0
+      }
+    },
+    {
+      "at": 12000,
+      "op": "engine",
+      "appSessionId": "app-3eb04b84",
+      "engine": {
+        "appSessionId": "app-3eb04b84",
+        "process": "exited",
+        "engineState": "idle",
+        "turn": null,
+        "pendingRequests": 0,
+        "exit": {
+          "reason": "unknown"
+        }
+      }
+    },
+    {
+      "at": 12000,
+      "op": "digest",
+      "digest": {
+        "appSessionId": "app-3eb04b84",
+        "phase": "exited",
+        "activity": null,
+        "lastAssistantLine": null,
+        "turnStartedAt": "2026-09-28T09:21:49.996Z",
+        "lastTurnEndedAt": null,
+        "context": null,
+        "cost": null,
+        "childAgents": {
+          "active": 0,
+          "done": 0
+        },
+        "pendingRequests": 0
+      }
+    },
+    {
+      "_synthetic": true,
+      "at": 12000,
+      "op": "attention",
+      "appSessionId": "app-3eb04b84",
+      "items": [
+        {
+          "_synthetic": true,
+          "id": "att-3eb04b84-interrupted",
+          "appSessionId": "app-3eb04b84",
+          "sessionId": "3eb04b84-ee74-4b66-bfbf-164bcd3c72a4",
+          "kind": "interrupted",
+          "request": {
+            "requestId": null,
+            "toolUseId": null,
+            "taskId": null,
+            "agentId": null
+          },
+          "summary": "Session interrupted, 1 approval lost",
+          "createdAt": "2026-09-28T10:10:12.000Z",
+          "state": "pending",
+          "stateChangedAt": "2026-09-28T10:10:12.000Z",
+          "expiresAt": null
+        }
+      ],
+      "requests": {}
+    }
+  ]
+}
