@@ -13,6 +13,8 @@ export default defineConfig({
           name: 'node',
           environment: 'node',
           include: ['src/{shared,main,preload,engine-host,pty-host}/**/*.test.ts', 'test/**/*.test.ts'],
+          // The compile-time suites (`identifiers are not interchangeable`) run through tsc on the node tsconfig.
+          typecheck: { enabled: true, include: ['src/**/*.test-d.ts'], tsconfig: './tsconfig.node.json' },
         },
       },
       {

@@ -1,0 +1,10 @@
+{"type":"user","uuid":"u1","parentUuid":null,"sessionId":"S","isSidechain":false,"timestamp":"2026-09-28T10:00:00.000Z","message":{"role":"user","content":"Remember APPLE."}}
+{"type":"assistant","uuid":"a1","parentUuid":"u1","sessionId":"S","isSidechain":false,"timestamp":"2026-09-28T10:00:01.000Z","message":{"role":"assistant","content":[{"type":"text","text":"OK"}]}}
+{"type":"file-history-snapshot","messageId":"a1","snapshot":{}}
+{"type":"user","uuid":"u2","parentUuid":"a1","sessionId":"S","isSidechain":false,"timestamp":"2026-09-28T10:00:02.000Z","message":{"role":"user","content":"Also remember BANANA."}}
+{"type":"system","uuid":"s1","parentUuid":"u2","sessionId":"S","isSidechain":false,"subtype":"informational","content":"note","timestamp":"2026-09-28T10:00:03.000Z"}
+{"type":"assistant","uuid":"a2","parentUuid":"s1","sessionId":"S","isSidechain":false,"timestamp":"2026-09-28T10:00:04.000Z","message":{"role":"assistant","content":[{"type":"text","text":"OK"}]}}
+{"type":"last-prompt","lastPrompt":"Also remember BANANA.","leafUuid":"a2"}
+{"type":"last-prompt","lastPrompt":"List every word I asked you to remember.","rewound":true,"leafUuid":"a2"}
+{"type":"user","uuid":"u3","parentUuid":"a1","sessionId":"S","isSidechain":false,"timestamp":"2026-09-28T10:00:05.000Z","message":{"role":"user","content":"List every word I asked you to remember."}}
+{"type":"assistant","uuid":"a3","parentUuid":"u3","sessionId":"S","isSidechain":false,"timestamp":"2026-09-28T10:00:06.000Z","message":{"role":"assistant","content":[{"type":"text","text":"APPLE"}]}}

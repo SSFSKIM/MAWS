@@ -1,0 +1,203 @@
+// X1 event graph (charter §13 X1; C1 execution document, Interfaces "X1 — events").
+// Every event is `EventBase & EventPayload`, a discriminated union on `kind`. The app's own record is strict: no unknown
+// fields, because the raw frame is always reachable through `seq` in the journal (X8), so nothing is lost by strictness.
+// Normalisation from frames to events is C3's (live) and C4's (disk); the derivation rules are pinned in the execution document.
+import * as z from 'zod';
+import { COMMAND_LIFECYCLE_STATES, DenialKindSchema, PermissionModeSchema, PLAN_OUTCOMES, SafeguardVerdictSchema, SESSION_STATES } from './enums';
+import {
+  AgentIdSchema,
+  ApiMessageIdSchema,
+  EventIdSchema,
+  MessageUuidSchema,
+  ParentToolUseIdSchema,
+  RequestIdSchema,
+  SessionIdSchema,
+  TaskIdSchema,
+  ToolUseIdSchema,
+} from './ids';
+
+// An API content block, unknown keys kept.
+export const ContentBlockSchema = z.looseObject({ type: z.string() });
+export type ContentBlock = z.infer<typeof ContentBlockSchema>;
+
+export const TokenUsageSchema = z.strictObject({
+  inputTokens: z.number(),
+  outputTokens: z.number(),
+  cacheReadInputTokens: z.number(),
+  cacheCreationInputTokens: z.number(),
+  thinkingTokens: z.number().nullable(),
+});
+export type TokenUsage = z.infer<typeof TokenUsageSchema>;
+
+export const QuestionSchema = z.strictObject({
+  question: z.string(),
+  header: z.string(),
+  options: z.array(z.strictObject({ label: z.string(), description: z.string().nullable(), preview: z.string().nullable() })),
+  multiSelect: z.boolean(),
+});
+export type Question = z.infer<typeof QuestionSchema>;
+
+export const EventBaseSchema = z.strictObject({
+  id: EventIdSchema,
+  sessionId: SessionIdSchema,
+  at: z.string(), // ISO-8601: the frame's timestamp when it has one, else receive time
+  seq: z.number().int().nullable(), // journal row the event derives from (X8); null for app-synthesised events
+  agentId: AgentIdSchema.nullable(), // the child agent this belongs to, when known
+  parentToolUseId: ParentToolUseIdSchema.nullable(), // non-null for child-agent traffic; the parent conversation is never joined
+});
+export type EventBase = z.infer<typeof EventBaseSchema>;
+
+export const EVENT_KINDS = [
+  // session lifecycle
+  'session.started', 'session.init', 'session.state', 'session.commands',
+  // turn lifecycle and the engine's command receipts
+  'turn.started', 'turn.ended', 'command.lifecycle',
+  // assistant output
+  'assistant.block.delta', 'assistant.block.complete',
+  // user input (replayed, bash-tagged, synthetic)
+  'user.message',
+  // tools (safeguard verdicts arrive separately and are folded onto the result)
+  'tool.use', 'tool.safeguard', 'tool.result', 'tool.progress',
+  // hooks: settings and plugin hooks emit lifecycle; host callback hooks are requests to us
+  'hook.started', 'hook.finished', 'hook.callback_requested', 'hook.callback_resolved',
+  // requests to the human (all arrive as can_use_tool or dedicated control requests)
+  'permission.requested', 'permission.resolved',
+  'question.requested', 'question.answered',
+  'plan.requested', 'plan.resolved',
+  'dialog.requested', 'dialog.resolved',
+  'elicitation.requested', 'elicitation.resolved',
+  // child agents and background work
+  'subagent.started', 'subagent.progress', 'subagent.finished', 'subagent.message',
+  'task.started', 'task.updated', 'task.notification', 'tasks.snapshot',
+  'workflow.progress',
+  // the revisable log
+  'boundary.compaction', 'boundary.reset', 'boundary.retraction', 'boundary.rewind',
+  // accounting
+  'usage.sample', 'context.sample',
+  // trouble: api.retry is the engine's own HTTP retry inside a turn (system/api_retry); session.reconnect is the app
+  // re-attaching a session record to an engine process (charter X1 "error and reconnect")
+  'error.raised', 'api.retry', 'session.reconnect', 'notice.posted', 'process.exited',
+  // retention of the unknown
+  'frame.unknown',
+] as const;
+export type EventKind = (typeof EVENT_KINDS)[number];
+
+const TaskOutcomeSchema = z.enum(['completed', 'failed', 'stopped']);
+const nullableString = () => z.string().nullable();
+
+// One strict member per kind: the base fields, the discriminator, the payload.
+const event = <K extends EventKind, S extends z.ZodRawShape>(kind: K, shape: S) =>
+  z.strictObject({ ...EventBaseSchema.shape, kind: z.literal(kind), ...shape });
+
+export const SessionEventSchema = z.discriminatedUnion('kind', [
+  event('session.started', { cwd: z.string(), engineVersion: nullableString(), resumedFrom: SessionIdSchema.nullable(), forked: z.boolean() }),
+  event('session.init', {
+    cwd: z.string(), model: z.string(), permissionMode: PermissionModeSchema, tools: z.array(z.string()),
+    slashCommands: z.array(z.string()), agents: z.array(z.string()), skills: z.array(z.string()),
+    plugins: z.array(z.strictObject({ name: z.string(), source: z.string() })),
+    mcpServers: z.array(z.unknown()), capabilities: z.array(z.string()), engineVersion: z.string(), outputStyle: nullableString(),
+  }),
+  event('session.state', { state: z.enum(SESSION_STATES) }),
+  event('session.commands', { // system/commands_changed
+    commands: z.array(z.strictObject({ name: z.string(), description: z.string(), argumentHint: nullableString(), builtin: z.boolean() })),
+  }),
+  event('turn.started', { userMessageUuid: MessageUuidSchema.nullable(), origin: nullableString() }),
+  event('turn.ended', {
+    result: z.string(), isError: z.boolean(), terminalReason: nullableString(), resultText: nullableString(),
+    durationMs: z.number(), numTurns: z.number(), costUsd: z.number(), usage: TokenUsageSchema,
+    permissionDenials: z.array(z.strictObject({ toolName: z.string(), toolUseId: ToolUseIdSchema, toolInput: z.unknown() })),
+    errors: z.array(z.string()), userMessageUuids: z.array(MessageUuidSchema),
+    origin: nullableString(), // `result.origin.kind`: 'human' for a turn we started, 'task-notification' for an engine-initiated turn
+    resultIndex: z.number().nullable(),
+    isEchoReceipt: z.boolean(), // true for the empty result (num_turns 0, null terminal_reason) that follows a shouldQuery:false frame; not a turn
+  }),
+  event('command.lifecycle', { commandUuid: MessageUuidSchema, state: z.enum(COMMAND_LIFECYCLE_STATES) }),
+  event('assistant.block.delta', {
+    apiMessageId: ApiMessageIdSchema.nullable(), blockIndex: z.number(), blockType: z.string(),
+    textDelta: nullableString(), thinkingDelta: nullableString(), inputJsonDelta: nullableString(), userMessageUuid: MessageUuidSchema.nullable(),
+  }),
+  event('assistant.block.complete', {
+    messageUuid: MessageUuidSchema, apiMessageId: ApiMessageIdSchema, blockIndex: z.number(), block: ContentBlockSchema, model: z.string(),
+    supersedes: MessageUuidSchema.nullable(), aborted: z.boolean(), userMessageUuids: z.array(MessageUuidSchema),
+  }),
+  event('user.message', {
+    messageUuid: MessageUuidSchema.nullable(), content: z.union([z.string(), z.array(ContentBlockSchema)]), isReplay: z.boolean(),
+    isSynthetic: z.boolean(), origin: nullableString(),
+    bash: z.discriminatedUnion('part', [
+      z.strictObject({ part: z.literal('input'), command: z.string() }),
+      z.strictObject({ part: z.literal('output'), stdout: z.string(), stderr: z.string(), exitCode: z.number() }),
+    ]).nullable(),
+  }),
+  event('tool.use', { toolUseId: ToolUseIdSchema, toolName: z.string(), input: z.unknown(), apiMessageId: ApiMessageIdSchema.nullable(), messageUuid: MessageUuidSchema.nullable() }),
+  event('tool.safeguard', { toolUseId: ToolUseIdSchema, verdict: z.enum(['not_flagged', 'flagged']), lane: z.literal('server') }), // one per tool use named in a message_delta.safeguard_results entry
+  event('tool.result', {
+    toolUseId: ToolUseIdSchema, content: z.union([z.string(), z.array(ContentBlockSchema)]), isError: z.boolean(), structured: z.unknown(),
+    spillPath: nullableString(), denial: DenialKindSchema.nullable(), safeguard: SafeguardVerdictSchema, messageUuid: MessageUuidSchema.nullable(),
+  }),
+  event('tool.progress', { toolUseId: ToolUseIdSchema, toolName: z.string(), elapsedSeconds: z.number(), taskId: TaskIdSchema.nullable(), heartbeat: z.boolean() }),
+  event('hook.started', { hookId: z.string(), hookName: z.string(), hookEvent: z.string() }),
+  event('hook.finished', {
+    hookId: z.string(), hookName: z.string(), hookEvent: z.string(), outcome: z.enum(['success', 'error', 'cancelled']),
+    exitCode: z.number().nullable(), stdout: z.string(), stderr: z.string(),
+  }),
+  event('hook.callback_requested', { requestId: RequestIdSchema, callbackId: z.string(), hookEvent: z.string(), toolUseId: ToolUseIdSchema.nullable(), input: z.unknown() }),
+  event('hook.callback_resolved', { requestId: RequestIdSchema, callbackId: z.string(), response: z.unknown() }),
+  event('permission.requested', {
+    requestId: RequestIdSchema, toolUseId: ToolUseIdSchema, toolName: z.string(), displayName: nullableString(),
+    input: z.unknown(), description: nullableString(), decisionReasonType: nullableString(), suggestions: z.array(z.unknown()), blockedPath: nullableString(),
+  }),
+  event('permission.resolved', {
+    requestId: RequestIdSchema, toolUseId: ToolUseIdSchema, behavior: z.enum(['allow', 'deny']), message: nullableString(),
+    updatedInput: z.unknown(), updatedPermissions: z.array(z.unknown()), resolvedBy: z.enum(['user', 'rule', 'auto', 'abort', 'exit']),
+  }),
+  event('question.requested', { requestId: RequestIdSchema, toolUseId: ToolUseIdSchema, questions: z.array(QuestionSchema) }),
+  event('question.answered', { requestId: RequestIdSchema, toolUseId: ToolUseIdSchema, answers: z.record(z.string(), z.string()) }),
+  event('plan.requested', { requestId: RequestIdSchema, toolUseId: ToolUseIdSchema, plan: z.string(), input: z.unknown() }),
+  event('plan.resolved', { requestId: RequestIdSchema, toolUseId: ToolUseIdSchema, outcome: z.enum(PLAN_OUTCOMES), feedback: nullableString() }),
+  event('dialog.requested', { requestId: RequestIdSchema, dialogKind: z.string(), payload: z.unknown(), toolUseId: ToolUseIdSchema.nullable() }),
+  event('dialog.resolved', { requestId: RequestIdSchema, behavior: z.enum(['completed', 'cancelled']), result: z.unknown() }),
+  event('elicitation.requested', { requestId: RequestIdSchema, mcpServerName: z.string(), elicitationId: nullableString(), mode: z.string(), payload: z.unknown() }),
+  event('elicitation.resolved', { requestId: RequestIdSchema, action: z.enum(['accept', 'decline', 'cancel']), content: z.unknown() }),
+  event('subagent.started', {
+    taskId: TaskIdSchema, toolUseId: ToolUseIdSchema.nullable(), description: z.string(), subagentType: nullableString(),
+    isBackground: z.boolean(), spawnDepth: z.number(), prompt: nullableString(),
+  }),
+  event('subagent.progress', {
+    taskId: TaskIdSchema, description: z.string(), usage: z.strictObject({ totalTokens: z.number(), toolUses: z.number(), durationMs: z.number() }),
+    lastToolName: nullableString(), summary: nullableString(),
+  }),
+  event('subagent.finished', { taskId: TaskIdSchema, status: TaskOutcomeSchema, summary: nullableString(), outputFile: nullableString(), reason: nullableString() }),
+  event('subagent.message', { direction: z.enum(['to_child', 'from_child', 'between']), fromAgentId: AgentIdSchema.nullable(), toAgentId: AgentIdSchema.nullable(), text: z.string() }),
+  event('task.started', { taskId: TaskIdSchema, toolUseId: ToolUseIdSchema.nullable(), taskType: z.string(), description: z.string(), isBackground: z.boolean(), workflowName: nullableString() }),
+  event('task.updated', {
+    taskId: TaskIdSchema,
+    patch: z.strictObject({ status: z.string().optional(), description: z.string().optional(), endTime: z.number().optional(), error: z.string().optional(), isBackground: z.boolean().optional() }),
+  }),
+  event('task.notification', { taskId: TaskIdSchema, toolUseId: ToolUseIdSchema.nullable(), status: TaskOutcomeSchema, summary: z.string(), outputFile: nullableString(), reason: nullableString() }),
+  event('tasks.snapshot', { tasks: z.array(z.strictObject({ taskId: TaskIdSchema, taskType: z.string(), description: z.string(), ambient: z.boolean() })) }),
+  event('workflow.progress', { taskId: TaskIdSchema, workflowName: nullableString(), progress: z.unknown() }), // shape fixed by C2's findings; kept opaque here
+  event('boundary.compaction', { trigger: z.string(), preTokens: z.number(), postTokens: z.number().nullable(), logicalParentUuid: MessageUuidSchema.nullable(), historical: z.boolean() }),
+  event('boundary.reset', { newConversationId: z.string(), trigger: nullableString() }),
+  event('boundary.retraction', { retractedMessageUuids: z.array(MessageUuidSchema), reason: z.string(), fallbackModel: nullableString() }),
+  event('boundary.rewind', { targetMessageUuid: MessageUuidSchema, precedingAssistantUuid: MessageUuidSchema.nullable(), prefillText: nullableString() }), // app-synthesised from a successful rewind_conversation; the engine emits no reset frame
+  event('usage.sample', { costUsd: z.number(), usage: TokenUsageSchema, modelUsage: z.record(z.string(), z.unknown()), source: z.enum(['result', 'get_usage']) }),
+  event('context.sample', { totalTokens: z.number(), maxTokens: z.number(), percentage: z.number(), autoCompactThreshold: z.number().nullable(), isAutoCompactEnabled: z.boolean(), model: z.string() }),
+  event('error.raised', {
+    scope: z.enum(['turn', 'task', 'process', 'transport', 'request']), message: z.string(), code: nullableString(),
+    toolUseId: ToolUseIdSchema.nullable(), taskId: TaskIdSchema.nullable(), requestId: RequestIdSchema.nullable(),
+  }),
+  event('api.retry', { attempt: z.number(), maxRetries: z.number(), retryDelayMs: z.number(), errorStatus: z.number().nullable(), error: z.string() }),
+  event('session.reconnect', { // app-synthesised: the session record is being re-attached to an engine process; C3 decides when it fires (D-16), C6 renders the phases (§5.3)
+    phase: z.enum(['attempting', 'reconnected', 'failed']), attempt: z.number(), maxAttempts: z.number().nullable(),
+    trigger: z.enum(['process_exit', 'host_restart', 'transport_error', 'user']), reason: nullableString(),
+  }),
+  event('notice.posted', { level: z.enum(['info', 'notice', 'suggestion', 'warning']), text: z.string(), key: nullableString() }),
+  event('process.exited', { code: z.number().nullable(), signal: nullableString(), reason: z.enum(['quit', 'stop', 'archive', 'crash', 'unknown']), lostAttentionCount: z.number() }),
+  event('frame.unknown', { frameType: z.string(), subtype: nullableString() }),
+]);
+
+export type SessionEvent = z.infer<typeof SessionEventSchema>;
+
+// The payload half of each member, `kind` included; `SessionEvent` is `EventBase & EventPayload` member by member.
+type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
+export type EventPayload = DistributiveOmit<SessionEvent, keyof EventBase>;
