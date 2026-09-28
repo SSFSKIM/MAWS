@@ -14,8 +14,8 @@ export function HookDetail({ detail }: { detail: Hook }) {
         </span>
         <span data-outcome={detail.outcome}>{DETAIL.hookOutcome(detail.outcome, detail.exitCode)}</span>
       </div>
-      {detail.stdout && <Output text={detail.stdout} truncation={null} />}
-      {detail.stderr && <Output text={detail.stderr} truncation={null} className="transcript-stderr" />}
+      {detail.stdout && <Output text={detail.stdout} />}
+      {detail.stderr && <Output text={detail.stderr} className="transcript-stderr" />}
     </div>
   );
 }

@@ -18,7 +18,7 @@ export function WebDetail({ detail }: { detail: Web }) {
       ) : (
         detail.query && <div className="transcript-detail-note">{detail.query}</div>
       )}
-      {detail.output && <Output text={detail.output} truncation={detail.truncated} />}
+      {detail.output && <Output text={detail.output} />}
     </div>
   );
 }

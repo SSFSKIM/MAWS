@@ -19,7 +19,7 @@ export function ReadDetail({ detail }: { detail: Read }) {
           </button>
         ))}
       </div>
-      {detail.preview && <Output text={detail.preview} truncation={detail.truncated} />}
+      {detail.preview && <Output text={detail.preview} />}
     </div>
   );
 }

@@ -7,7 +7,7 @@ import { loadJournal, loadSyntheticJournal } from '../../../../../../test/suppor
 import { useTranscriptStore } from '../../../stores/transcript';
 import { journalToEvents } from '../../dev/replay-stub';
 import type { Row, TurnId } from '../../model/rows';
-import { BASH_RESULT, builder, parent, task, tool } from '../../model/test-events';
+import { BASH_RESULT, builder, parent, task, tool, uuid } from '../../model/test-events';
 import { NO_ACTIONS, type RewindInterface } from '../context';
 import { renderRow, rowOf, spyActions, storeWith } from './test-support';
 
@@ -245,6 +245,73 @@ describe('subagent row', () => {
     view.unmount();
     renderRow(row, { storeKey: store.key, actions: { ...NO_ACTIONS } });
     expect(screen.queryByRole('button')).toBeNull();
+  });
+});
+
+describe('grouped subagent rows', () => {
+  // `n` Agent calls of one assistant message, each started.
+  function agents(names: string[]) {
+    const b = builder();
+    b.turn('u1');
+    names.forEach((name, i) => {
+      b.toolUse(`a${i}`, 'Agent', { description: name, prompt: 'p' }, 'm1', i);
+      b.emit('subagent.started', { taskId: task(`k${i}`), toolUseId: tool(`a${i}`), description: name, subagentType: null, isBackground: true, spawnDepth: 1, prompt: null });
+    });
+    return b;
+  }
+
+  describe('while children work', () => {
+    beforeEach(() => vi.useFakeTimers({ now: Date.parse('2026-09-28T10:00:05.000Z'), toFake: ['Date', 'setInterval', 'clearInterval'] }));
+    afterEach(() => vi.useRealTimers());
+
+    it('one child failed while another still works: the row keeps working and the working child’s line keeps ticking', async () => {
+      const b = agents(['Tester', 'Reviewer']);
+      b.emit('subagent.progress', { taskId: task('k1'), description: 'Reviewer', usage: { totalTokens: 1, toolUses: 1, durationMs: 1 }, lastToolName: 'Read', summary: null });
+      b.emit('subagent.finished', { taskId: task('k0'), status: 'failed', summary: null, outputFile: null, reason: 'boom' });
+      const store = await storeWith(b.events);
+      const view = renderRow(rowOf(store.rows(), 'subagent'), { storeKey: store.key });
+      const lines = () => [...view.container.querySelectorAll('[data-agent-detail]')].map((line) => line.textContent ?? '');
+      expect(lines()).toHaveLength(1);
+      expect(lines()[0]).toMatch(/^Reviewer · Read · \d+s$/);
+      const seconds = () => Number(/(\d+)s$/.exec(lines()[0])![1]);
+      const before = seconds();
+      act(() => vi.advanceTimersByTime(3000));
+      expect(seconds()).toBe(before + 3);
+    });
+  });
+
+  it('with five agents the overflow reveals the rest, and the fifth opens through openSubagent', async () => {
+    const store = await storeWith(agents(['A', 'B', 'C', 'D', 'E']).events);
+    const row = rowOf(store.rows(), 'subagent');
+    expect(row.overflow).toBe(1);
+    const actions = spyActions();
+    renderRow(row, { storeKey: store.key, actions });
+    expect(screen.queryByRole('button', { name: 'Open E' })).toBeNull();
+    const more = screen.getByRole('button', { name: /\+1/ });
+    expect(more.getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(more);
+    fireEvent.click(screen.getByRole('button', { name: 'Open E' }));
+    expect(actions.openSubagent).toHaveBeenCalledWith(row.agents[4]);
+  });
+});
+
+describe('the 64 KB DOM cap on every output branch', () => {
+  const BIG = `${'a'.repeat(40 * 1024)}MIDDLE${'z'.repeat(40 * 1024)}`;
+  const capped = (element: Element) => {
+    expect(element.textContent).not.toContain('MIDDLE');
+    expect(element.textContent).toMatch(/\d+ KB omitted/);
+  };
+
+  it('a bash row caps its stdout and its stderr', async () => {
+    for (const [stdout, stderr] of [[BIG, ''], ['ok', BIG]]) {
+      const b = builder();
+      b.emit('user.message', { messageUuid: uuid('bin'), content: '<bash-input>make</bash-input>', isReplay: true, isSynthetic: false, origin: 'human', bash: { part: 'input', command: 'make' } });
+      b.emit('user.message', { messageUuid: uuid('bout'), content: 'x', isReplay: true, isSynthetic: false, origin: 'human', bash: { part: 'output', stdout, stderr, exitCode: 1 } });
+      const store = await storeWith(b.events);
+      const view = renderRow(rowOf(store.rows(), 'bash'));
+      capped(view.container);
+      view.unmount();
+    }
   });
 });
 

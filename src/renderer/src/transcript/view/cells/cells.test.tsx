@@ -203,6 +203,51 @@ describe('image, thinking, hook and generic detail', () => {
   });
 });
 
+describe('the 64 KB DOM cap on every detail output branch', () => {
+  const BIG = `${'a'.repeat(40 * 1024)}MIDDLE${'z'.repeat(40 * 1024)}`;
+  const capped = (element: Element) => {
+    expect(element.textContent).not.toContain('MIDDLE');
+    expect(element.textContent).toMatch(/\d+ KB omitted/);
+  };
+  const withLs = (b: Builder) => {
+    b.toolUse('t9', 'Bash', { command: 'ls' });
+    b.result('t9', 'a', { structured: BASH_RESULT('a') });
+  };
+
+  it('shell stderr', async () => {
+    const { cell } = await expandedCell((b) => {
+      b.toolUse('t1', 'Bash', { command: 'make' });
+      b.result('t1', 'x', { structured: { ...BASH_RESULT('ok'), stderr: BIG } });
+      withLs(b);
+    }, 'cell:t1');
+    capped(cell);
+  });
+
+  it('MCP text blocks and a string result', async () => {
+    for (const content of [[{ type: 'text', text: BIG }], BIG] as const) {
+      const { cell } = await expandedCell((b) => {
+        b.toolUse('t1', 'mcp__docs__search', { query: 'q' });
+        b.result('t1', content as never);
+        withLs(b);
+      }, 'cell:t1');
+      capped(cell);
+      cleanup();
+    }
+  });
+
+  it('hook stdout and stderr', async () => {
+    for (const [stdout, stderr] of [[BIG, ''], ['', BIG]]) {
+      const { cell } = await expandedCell((b) => {
+        withLs(b);
+        b.emit('hook.started', { hookId: 'h1', hookName: 'PostToolUse:Bash', hookEvent: 'PostToolUse' });
+        b.emit('hook.finished', { hookId: 'h1', hookName: 'PostToolUse:Bash', hookEvent: 'PostToolUse', outcome: 'success', exitCode: 0, stdout, stderr });
+      }, 'cell:hook:h1');
+      capped(cell);
+      cleanup();
+    }
+  });
+});
+
 describe('safeguard verdict (§19)', () => {
   it('pass2/auto-classifier: the detail shows the auto-mode line and no cell line contains the word auto', async () => {
     const store = await storeWith(journalToEvents(loadJournal('pass2', 'auto-classifier')));

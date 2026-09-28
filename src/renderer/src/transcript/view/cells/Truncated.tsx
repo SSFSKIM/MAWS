@@ -1,9 +1,13 @@
-// Tool output past the DOM cap (residue *Bounded surfaces and truncation*): the model's Truncation keeps the whole
-// string; the view shows its head and tail around an "N KB omitted" marker. Copy actions still copy the whole string.
+// Tool output past the DOM cap (residue *Bounded surfaces and truncation*): anything over 64 KB shows its first 32 KB
+// and last 16 KB around an "N KB omitted" marker; the model keeps the whole string, and copy actions copy all of it.
+// Every output branch of the work area renders through one of these, so no expanded cell can put an unbounded
+// payload into the virtualised list.
+import { TRUNCATE_OVER, truncationOf } from '../../model/cells';
 import { DETAIL } from '../../model/copy';
-import type { Truncation } from '../../model/rows';
+import { Markdown } from '../markdown/Markdown';
 
-export function Truncated({ text, truncation }: { text: string; truncation: Truncation | null }) {
+export function Truncated({ text }: { text: string }) {
+  const truncation = truncationOf(text);
   if (!truncation) return <>{text}</>;
   return (
     <>
@@ -15,10 +19,15 @@ export function Truncated({ text, truncation }: { text: string; truncation: Trun
 }
 
 // A bounded output block (144 px, scrolls inside) for a tool's text output.
-export function Output({ text, truncation, className }: { text: string; truncation: Truncation | null; className?: string }) {
+export function Output({ text, className }: { text: string; className?: string }) {
   return (
     <pre className={`transcript-output ${className ?? ''}`}>
-      <Truncated text={text} truncation={truncation} />
+      <Truncated text={text} />
     </pre>
   );
+}
+
+// Tool-supplied markdown (MCP text blocks): rendered as markdown up to the cap, as capped plain text beyond it.
+export function CappedMarkdown({ text }: { text: string }) {
+  return text.length > TRUNCATE_OVER ? <Output text={text} /> : <Markdown markdown={text} live={false} />;
 }

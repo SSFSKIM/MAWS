@@ -31,8 +31,13 @@ export function ShellDetail({ cell, detail }: { cell: Cell; detail: Shell }) {
       )}
       {output.length > 0 && (
         <pre className="transcript-output transcript-output-faded">
-          <Truncated text={detail.stdout} truncation={detail.truncated} />
-          {detail.stderr && <span className="transcript-stderr">{`${detail.stdout ? '\n' : ''}${detail.stderr}`}</span>}
+          <Truncated text={detail.stdout} />
+          {detail.stderr && (
+            <span className="transcript-stderr">
+              {detail.stdout ? '\n' : ''}
+              <Truncated text={detail.stderr} />
+            </span>
+          )}
         </pre>
       )}
       <div className="transcript-shell-footer">

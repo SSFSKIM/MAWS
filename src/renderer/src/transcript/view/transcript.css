@@ -273,6 +273,8 @@ button.transcript-subagent-line:hover { color: var(--fg); }
 .transcript-glyph { border-radius: var(--radius-sm); }
 .transcript-glyph:hover { background: var(--bg-hover); }
 .transcript-glyph-overflow { color: var(--fg-muted); font-size: var(--text-ui-sm); }
+button.transcript-glyph-overflow { padding: 0 3px; border-radius: var(--radius-sm); }
+button.transcript-glyph-overflow:hover { color: var(--fg); background: var(--bg-hover); }
 .transcript-subagent-detail { padding-left: 26px; font-size: var(--text-ui-sm); }
 .transcript-lifecycle { display: flex; align-items: baseline; gap: 8px; padding: 4px 0 8px; color: var(--fg-muted); font-size: var(--text-ui); line-height: 1.5; overflow-wrap: anywhere; }
 .transcript-lifecycle .transcript-icon { align-self: center; }

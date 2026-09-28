@@ -547,10 +547,15 @@ function summaryOf(turn: TurnState, cells: Cell[], subagents: SubagentGroup[], m
 }
 
 function subagentRow(group: SubagentGroup, turnId: TurnId): RowOf<'subagent'> {
+  // Each child's own state; the row is terminal only when every child is (with errors when any failed, stopped when
+  // any was stopped), and working while any child has progressed or ended and another still runs.
   const statuses = group.refs.map((ref) => group.statuses.get(ref.taskId) ?? 'started');
-  const status: SubagentStatus = statuses.every((s) => s === 'finished') ? 'finished' : statuses.some((s) => s === 'finished_with_errors') ? 'finished_with_errors' : statuses.some((s) => s === 'stopped') ? 'stopped' : statuses.some((s) => s === 'working') ? 'working' : 'started';
-  const done = statuses.every((s) => s === 'finished' || s === 'finished_with_errors' || s === 'stopped');
-  const sentence = subagentSentence(group.refs.map((ref) => ref.name), done ? status : status === 'working' ? 'working' : 'started') + (group.phase && !done ? ` · ${group.phase}` : '');
+  const terminal = (s: SubagentStatus) => s === 'finished' || s === 'finished_with_errors' || s === 'stopped';
+  const done = statuses.every(terminal);
+  const status: SubagentStatus = done
+    ? statuses.includes('finished_with_errors') ? 'finished_with_errors' : statuses.includes('stopped') ? 'stopped' : 'finished'
+    : statuses.every((s) => s === 'started') ? 'started' : 'working';
+  const sentence = subagentSentence(group.refs.map((ref) => ref.name), status) + (group.phase && !done ? ` · ${group.phase}` : '');
   return { id: group.id, turnId, at: group.at, kind: 'subagent', agents: group.refs, sentence, status, overflow: Math.max(0, group.refs.length - 4) };
 }
 

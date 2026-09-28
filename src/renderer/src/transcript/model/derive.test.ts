@@ -201,6 +201,21 @@ describe('group state machine', () => {
     expect(find(list, 'cell').detail).toMatchObject({ kind: 'image', images: [{ dataUrl: 'data:image/png;base64,AAAA', mediaType: 'image/png' }] });
   });
 
+  it('a grouped subagent row is terminal only when every child is: one failed while another works reads working, then finished with errors', () => {
+    const b = builder();
+    b.turn('u1');
+    for (const [use, taskName, name, index] of [['a1', 'k1', 'A', 0], ['a2', 'k2', 'B', 1]] as const) {
+      b.toolUse(use, 'Agent', { description: name, prompt: 'p' }, 'm1', index);
+      b.emit('subagent.started', { taskId: task(taskName), toolUseId: tool(use), description: name, subagentType: null, isBackground: true, spawnDepth: 1, prompt: null });
+    }
+    b.emit('subagent.progress', { taskId: task('k2'), description: 'B', usage: { totalTokens: 1, toolUses: 1, durationMs: 1 }, lastToolName: 'Read', summary: null });
+    b.emit('subagent.finished', { taskId: task('k1'), status: 'failed', summary: null, outputFile: null, reason: 'boom' });
+    const mixed = find(rows(b.events), 'subagent');
+    expect(mixed).toMatchObject({ status: 'working', sentence: 'A and B started working' });
+    b.emit('subagent.finished', { taskId: task('k2'), status: 'completed', summary: null, outputFile: null, reason: null });
+    expect(find(rows(b.events), 'subagent')).toMatchObject({ status: 'finished_with_errors', sentence: 'A and B finished with errors' });
+  });
+
   it('two Agent calls of one message merge only when consecutive: a tool call between them makes two subagent rows', () => {
     const b = builder();
     b.turn('u1');

@@ -9,7 +9,7 @@ export function SearchDetail({ detail }: { detail: Search }) {
   return (
     <div className="transcript-search">
       {detail.matches !== null && <div className="transcript-detail-note">{plural(detail.matches, 'match', 'matches')}</div>}
-      {detail.output && <Output text={detail.output} truncation={detail.truncated} />}
+      {detail.output && <Output text={detail.output} />}
     </div>
   );
 }
