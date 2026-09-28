@@ -5,7 +5,7 @@
 // recorded as pending in findings.md.
 //
 //   pnpm build && node spikes/terminal-probe/run.mjs [--phase m1|m2-gate] [--renderer xterm|ghostty|both]
-//                [--steps smoke,measure,items,tui,replay] [--keep-open]
+//                [--steps smoke,measure,items,tui,exit-check,replay] [--keep-open]
 //   MAWS_CLAUDE_BIN / MAWS_CODEX_BIN override the TUI binaries.
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -72,7 +72,7 @@ const waitForPrompt = async (r) => {
     await idle(r, 400);
     const snap = await snapshot(r);
     const line = snap.lines[snap.cursorY] ?? '';
-    if (snap.modes.bracketedPaste || /[$%#>❯] ?$/.test(line)) return snap;
+    if (!snap.modes.alternateScreen && (snap.modes.bracketedPaste || /[$%#>❯] ?$/.test(line))) return snap;
   }
   throw new Error(`${r}: no prompt appeared`);
 };
@@ -88,6 +88,117 @@ const cellPoint = async (r, col, row) => {
   return { x: g.x + (col + 0.5) * cw, y: g.y + (row + 0.5) * ch, cw, ch };
 };
 const findRow = (snap, needle) => snap.lines.findIndex((l) => l.includes(needle));
+
+// The only screens the driver answers, each identified by its exact wording, each with the one safe answer. Anything
+// else that looks like a question stops the run with a screenshot: the driver never grants an unknown request.
+const KNOWN_SCREENS = [
+  {
+    name: 'claude-trust',
+    test: (text) => /Do you trust the files in this folder\?/.test(text),
+    answer: async (r) => {
+      // "Yes, proceed" is the preselected option; Enter takes it.
+      await probe.call('focus', r);
+      await page.keyboard.press('Enter');
+    },
+  },
+  {
+    name: 'codex-update',
+    test: (text) => /Update available!/.test(text) && /\d\. Skip\b/.test(text),
+    answer: async (r) => {
+      // Move the selection off "Update now" to "Skip" and confirm only once the marker sits on Skip; never on the
+      // install option.
+      await probe.call('focus', r);
+      for (let i = 0; i < 3; i++) {
+        const snap = await snapshot(r);
+        const selected = snap.lines.find((l) => l.trimStart().startsWith('›')) ?? '';
+        if (/›\s*\d\.\s*Skip\b/.test(selected) && !/until next version/.test(selected)) {
+          await page.keyboard.press('Enter');
+          return;
+        }
+        await page.keyboard.press('ArrowDown');
+        await sleep(300);
+      }
+      const last = await snapshot(r);
+      await probe.screenshot(`${r}-codex-update-prompt`);
+      throw new Error(`codex update prompt: could not move the selection to "Skip"; screen:\n${last.lines.filter((l) => l.trim()).slice(-8).join('\n')}`);
+    },
+  },
+];
+const LOOKS_LIKE_A_QUESTION = /Press Enter|Enter to continue|Yes, proceed|\(y\/n\)|\[y\/N\]|\[Y\/n\]|Do you trust|Allow|Approve|allow|approve/;
+const answerKnownScreen = async (r, tui, item, snap) => {
+  const text = snap.lines.join('\n');
+  const known = KNOWN_SCREENS.find((screen) => screen.test(text));
+  if (known) {
+    log(r, tui, `answering the known screen ${known.name}`);
+    (item.prompts ??= []).push({ screen: known.name, lines: snap.lines.filter((l) => l.trim()).slice(-8) });
+    await known.answer(r);
+    return true;
+  }
+  if (LOOKS_LIKE_A_QUESTION.test(text)) {
+    await probe.screenshot(`${r}-${tui}-unknown-prompt`);
+    throw new Error(`${tui}: an unknown prompt appeared; not answered (see evidence/${r}-${tui}-unknown-prompt.png):\n${snap.lines.filter((l) => l.trim()).slice(-8).join('\n')}`);
+  }
+  return false;
+};
+// Starts a TUI from the shell prompt and waits for its first frame, answering only the known screens.
+const startTui = async (r, tui, command, item) => {
+  await type(r, command);
+  for (let i = 0; i < 20; i++) {
+    await idle(r, 1000, 5000);
+    const snap = await snapshot(r);
+    if (await answerKnownScreen(r, tui, item, snap)) continue;
+    if (snap.lines.join('').trim()) return snap;
+  }
+  throw new Error(`${tui}: no frame appeared`);
+};
+// Sends the TUI's exit command (Enter again while the composer still shows it: codex's slash completion takes the
+// first Enter), then proves the shell is back by running a marker command that only a shell answers.
+const exitTui = async (r, tui) => {
+  const command = tui === 'claude' ? '/exit' : '/quit';
+  await probe.call('focus', r);
+  await page.keyboard.type(command, { delay: 40 });
+  await sleep(600);
+  for (let i = 0; i < 3; i++) {
+    await page.keyboard.press('Enter');
+    await idle(r, 1500, 6000);
+    const snap = await snapshot(r);
+    const composer = snap.lines.filter((l) => l.trim()).slice(-4).join('\n');
+    if (!snap.modes.alternateScreen && !composer.includes(command)) break;
+    if (snap.modes.alternateScreen && tui === 'codex') {
+      await page.keyboard.press('Control+KeyC');
+      await sleep(300);
+      await page.keyboard.press('Control+KeyC');
+      await idle(r, 1500, 6000);
+    }
+  }
+  await type(r, "printf 'MAWS_%s\\n' BACK\r");
+  for (let i = 0; i < 60; i++) { // codex shuts down slowly on a cold start ("Shutting down…" while its model still loads)
+    await idle(r, 1000, 2000);
+    const snap = await snapshot(r);
+    if (!snap.modes.alternateScreen && snap.lines.some((l) => l === 'MAWS_BACK')) return;
+  }
+  await probe.screenshot(`${r}-${tui}-still-open`);
+  throw new Error(`${tui}: the shell did not answer after the exit command (evidence/${r}-${tui}-still-open.png)`);
+};
+// Item 1's comparison: every line above the prompt row the command was typed on is unchanged after the TUI exits
+// (that row now holds the command); the TUI's own rows, if any, come after.
+const restorationCheck = (preSnap, postSnap) => {
+  const priorRows = preSnap.baseY + preSnap.cursorY;
+  const before = preSnap.lines.slice(0, priorRows);
+  const after = postSnap.lines.slice(0, priorRows);
+  const firstDifference = before.findIndex((l, i) => l !== after[i]);
+  return {
+    priorRows,
+    priorScrollbackIntact: firstDifference === -1,
+    firstDifference,
+    beforeLines: before,
+    afterLines: postSnap.lines,
+    alternateScreenAfter: postSnap.modes.alternateScreen,
+    lineCountBefore: preSnap.lineCount,
+    lineCountAfter: postSnap.lineCount,
+    tuiFramesInScrollback: postSnap.lines.slice(preSnap.lineCount).filter((l) => l.trim()).length,
+  };
+};
 
 try {
   // ---- smoke: the page loads, both renderers initialise, the console is clean of CSP refusals ----
@@ -295,22 +406,7 @@ try {
         const counters = await state(r);
         item.before = { pid: counters.pid, lineCount: preSnap.lineCount };
         // Typed from the shell so item 1 has a shell screen to restore; recorded by script -r for the replay.
-        await type(r, `script -q -r ${rec} ${bin}\r`);
-        // Startup: wait for the frame (quiet for a second, or codex's steady repaint), answer a trust prompt if one
-        // appears (at most twice; the screens are kept for the record).
-        item.prompts = [];
-        for (let i = 0; i < 20; i++) {
-          await idle(r, 1000, 5000);
-          const snap = await snapshot(r);
-          const text = snap.lines.join('\n');
-          if (item.prompts.length < 2 && /Yes, proceed|Enter to continue|Press Enter|trust this|do you trust/i.test(text)) {
-            log(r, tui, 'answering a prompt');
-            item.prompts.push(snap.lines.filter((l) => l.trim()).slice(-8));
-            await page.keyboard.press('Enter');
-            continue;
-          }
-          if (text.trim()) break;
-        }
+        await startTui(r, tui, `script -q -r ${rec} ${bin}\r`, item);
         await probe.screenshot(`${r}-11-${tui}-frame`);
         const started = await state(r);
         item.startup = { syncFrames: started.syncFrames, kittyQueried: started.kittyQueried, kittyAnswered: started.kittyAnswered, xtversionQueried: started.xtversionQueried, xtversionAnswered: started.xtversionAnswered, alternateScreen: (await snapshot(r)).modes.alternateScreen, mouseTracking: (await snapshot(r)).modes.mouseTracking, title: started.title };
@@ -354,9 +450,10 @@ try {
           await sleep(1000);
           const snap = await snapshot(r);
           const text = snap.lines.join('\n');
-          if (/trust|Yes, proceed|allow|approve/i.test(text) && !/count to 20/.test(text.split('\n').slice(-3).join('\n'))) {
-            log(r, tui, 'answering a mid-turn prompt');
-            await page.keyboard.press('Enter');
+          // Nothing is granted mid-turn: a permission request stops the run with a screenshot.
+          if (/\(y\/n\)|\[y\/N\]|Allow|Approve|Do you want to/.test(text.split('\n').slice(-12).join('\n')) && !/count to 20/.test(text.split('\n').slice(-3).join('\n'))) {
+            await probe.screenshot(`${r}-${tui}-mid-turn-prompt`);
+            throw new Error(`${tui}: a mid-turn prompt appeared; not answered (evidence/${r}-${tui}-mid-turn-prompt.png)`);
           }
           if (/\b20\b/.test(text) && /(19|nineteen)/i.test(text)) {
             streamed = snap;
@@ -377,39 +474,14 @@ try {
         await idle(r, 1200);
         await probe.screenshot(`${r}-08-${tui}-resized-back`);
         // Exit and item 1: the shell screen and scrollback are back.
-        await page.keyboard.type(tui === 'claude' ? '/exit' : '/quit', { delay: 40 });
-        await sleep(600);
-        await page.keyboard.press('Enter');
-        await idle(r, 2000);
-        let exitSnap = await snapshot(r);
-        if (tui === 'codex' && exitSnap.modes.alternateScreen) {
-          await page.keyboard.press('Control+KeyC');
-          await sleep(300);
-          await page.keyboard.press('Control+KeyC');
-          await idle(r, 2000);
-          exitSnap = await snapshot(r);
-        }
-        await waitForPrompt(r);
+        await exitTui(r, tui);
         const postSnap = await snapshot(r, 0);
-        item.exit = {
-          alternateScreenAfter: postSnap.modes.alternateScreen,
-          // Everything above the prompt row the command was typed on is unchanged (that row now holds the command).
-          priorScrollbackIntact: preSnap.lines.slice(0, preSnap.baseY + preSnap.cursorY).every((l, i) => l === postSnap.lines[i]),
-          lineCountBefore: preSnap.lineCount,
-          lineCountAfter: postSnap.lineCount,
-          tuiFramesInScrollback: postSnap.lines.slice(preSnap.lineCount).filter((l) => l.trim()).length,
-          lastLines: postSnap.lines.slice(-6),
-        };
+        item.exit = { ...restorationCheck(preSnap, postSnap), lastLines: postSnap.lines.slice(-6) };
         await probe.screenshot(`${r}-01-${tui}-exited`);
         // Item 2 without the variable (claude only): the sync count at startup through a subshell that unsets it.
         if (tui === 'claude') {
           const syncBeforeNoSync = (await state(r)).syncFrames;
-          await type(r, `(unset CLAUDE_CODE_FORCE_SYNC_OUTPUT; exec ${bin})\r`);
-          for (let i = 0; i < 20; i++) {
-            await idle(r, 1000);
-            const snap = await snapshot(r);
-            if (snap.lines.join('\n').trim()) break;
-          }
+          await startTui(r, tui, `(unset CLAUDE_CODE_FORCE_SYNC_OUTPUT; exec ${bin})\r`, item);
           await sleep(1500);
           item.noSync = { syncFramesAtStartup: (await state(r)).syncFrames - syncBeforeNoSync, withVariableAtStartup: item.startup.syncFrames };
           await probe.screenshot(`${r}-02-claude-nosync`);
@@ -419,6 +491,33 @@ try {
         }
         writeResult(`${r}-tui-${tui}`, item);
         log(r, tui, JSON.stringify(item).slice(0, 600));
+        await probe.call('kill', r);
+      }
+    }
+  }
+
+  // ---- exit-check: item 1 for each TUI without a conversation (start, then /exit or /quit; no model usage) ----
+  if (steps.has('exit-check')) {
+    for (const r of live) {
+      for (const tui of (args.get('tui') ?? 'claude,codex').split(',')) {
+        const item = { tui, bin: bins[tui], renderer: r, prompts: [] };
+        await spawnShell(r);
+        await type(r, 'seq 1 5\r'); // a few lines of prior scrollback to restore
+        await idle(r, 500);
+        const preSnap = await snapshot(r, 0);
+        item.before = { pid: (await state(r)).pid, lineCount: preSnap.lineCount, cursorRow: preSnap.baseY + preSnap.cursorY };
+        await probe.call('capture', r, true); // what the program writes from start to exit
+        const frame = await startTui(r, tui, `${bins[tui]}\r`, item);
+        item.startup = { alternateScreen: frame.modes.alternateScreen, lineCountWhileOpen: frame.lineCount };
+        await probe.screenshot(`${r}-01-${tui}-exit-check-open`);
+        await exitTui(r, tui);
+        const postSnap = await snapshot(r, 0);
+        item.exit = restorationCheck(preSnap, postSnap);
+        item.sequences = await probe.call('sequenceCounts', r);
+        await probe.call('capture', r, false);
+        await probe.screenshot(`${r}-01-${tui}-exit-check-restored`);
+        writeResult(`${r}-exit-${tui}`, item);
+        log(r, tui, 'exit-check', JSON.stringify({ intact: item.exit.priorScrollbackIntact, firstDifference: item.exit.firstDifference, priorRows: item.exit.priorRows, framesLeft: item.exit.tuiFramesInScrollback, lineCountAfter: item.exit.lineCountAfter, sequences: item.sequences }));
         await probe.call('kill', r);
       }
     }

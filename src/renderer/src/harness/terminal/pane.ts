@@ -17,6 +17,8 @@ import {
   observeLongTasks,
   summarizeFrames,
   summarizeSamples,
+  type FrameSummary,
+  type LongTaskSummary,
   type Metrics,
   type WidthResult,
 } from './metrics';
@@ -279,7 +281,8 @@ export class Pane {
     this.tail = '';
   }
 
-  // Spawns a program (or the login shell) as this pane's pty; the previous pty, if any, is killed first.
+  // Spawns a program (or `$SHELL`, without `-l` in M1: the login-shell default is M2's) as this pane's pty; the
+  // previous pty, if any, is killed first.
   async spawn(spec: { shell: string | null; args: string[] | null }, claim: (ptyId: string) => void): Promise<{ ptyId: string; pid: number }> {
     if (!this.renderer) throw new Error(`${this.kind} has no renderer`);
     await this.kill();
@@ -366,6 +369,28 @@ export class Pane {
     return found;
   }
 
+  // Debugging aid: how often the captured stream carried the sequences that clear the screen or scrollback or
+  // switch screens (a program that erases the scrollback itself, `CSI 3 J`, explains a "lost" history).
+  sequenceCounts(): Record<string, number> {
+    const all = (this.captured ?? []).join('');
+    const count = (needle: string) => all.split(needle).length - 1;
+    const matches = (pattern: RegExp) => (all.match(pattern) ?? []).length;
+    return {
+      'CSI 2 J (erase display)': count(`${ESC}[2J`),
+      'CSI 3 J (erase scrollback)': count(`${ESC}[3J`),
+      'CSI J / CSI 0 J (erase below)': matches(/\x1b\[0?J/g), // eslint-disable-line no-control-regex -- escape sequences
+      'CSI 1 J (erase above)': count(`${ESC}[1J`),
+      'CSI K (erase line)': matches(/\x1b\[[012]?K/g), // eslint-disable-line no-control-regex -- escape sequences
+      'CSI n A (cursor up)': matches(/\x1b\[\d*A/g), // eslint-disable-line no-control-regex -- escape sequences
+      'CSI H (cursor home or position)': matches(/\x1b\[(\d+;\d+)?H/g), // eslint-disable-line no-control-regex -- escape sequences
+      'CSI n S (scroll up)': matches(/\x1b\[\d*S/g), // eslint-disable-line no-control-regex -- escape sequences
+      'CSI n T (scroll down)': matches(/\x1b\[\d*T/g), // eslint-disable-line no-control-regex -- escape sequences
+      'CSI ? 1049 h (alternate screen on)': count(`${ESC}[?1049h`),
+      'CSI ? 1049 l (alternate screen off)': count(`${ESC}[?1049l`),
+      'ESC c (full reset)': count(`${ESC}c`),
+    };
+  }
+
   snapshot(from?: number, to?: number): ProbeSnapshot {
     const probe = this.renderer!.probe();
     const lineCount = probe.lineCount();
@@ -394,22 +419,26 @@ export class Pane {
     const longTasks = observeLongTasks();
     const guard = armInputGuard(window);
     const t0 = performance.now();
-    frames.start();
-    await this.spawn(spec, claim);
     let latency: Metrics['latency'];
     let widths: WidthResult[] | undefined;
     let error: string | undefined;
-    if (workload.measure === 'latency') {
-      latency = summarizeSamples(await this.sampleLatency(100));
-      await this.kill();
-    } else {
-      await this.waitForExit();
-      await this.waitForParsed();
+    // The guard, the sampler and the observer are released whatever happens in the measured window: a failed run
+    // must not leave the page deaf to input or sampling frames forever.
+    let measured: { seconds: number; blockedInputEvents: number; frames: FrameSummary; longTasks: LongTaskSummary };
+    try {
+      frames.start();
+      await this.spawn(spec, claim);
+      if (workload.measure === 'latency') {
+        latency = summarizeSamples(await this.sampleLatency(100));
+        await this.kill();
+      } else {
+        await this.waitForExit();
+        await this.waitForParsed();
+      }
+    } finally {
+      measured = { seconds: (performance.now() - t0) / 1000, blockedInputEvents: guard.disarm(), frames: summarizeFrames(frames.stop()), longTasks: longTasks.stop() };
     }
-    const seconds = (performance.now() - t0) / 1000;
-    const blockedInputEvents = guard.disarm();
-    const frameSummary = summarizeFrames(frames.stop());
-    const longTaskSummary = longTasks.stop();
+    const { seconds, blockedInputEvents, frames: frameSummary, longTasks: longTaskSummary } = measured;
     if (workload.measure === 'width') widths = this.widthResults();
     if (workload.measure === 'screen') {
       const screen = this.snapshot().lines.slice(0, workload.expectedScreen!.length);

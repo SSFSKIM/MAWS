@@ -1,0 +1,103 @@
+{
+  "tui": "codex",
+  "bin": "/Users/new/.codex/packages/standalone/current/bin/codex",
+  "renderer": "xterm",
+  "prompts": [
+    {
+      "screen": "codex-update",
+      "lines": [
+        "  ✨ Update available! 0.155.1 -> 0.158.0",
+        "  Release notes: https://github.com/openai/codex/releases/latest",
+        "› 1. Update now (runs `sh -c 'curl -fsSL https://chatgpt.com/codex/install.sh |",
+        "     CODEX_NON_INTERACTIVE=1 sh'`)",
+        "  2. Skip",
+        "  3. Skip until next version",
+        "  Press enter to continue"
+      ]
+    }
+  ],
+  "before": {
+    "pid": 4595,
+    "lineCount": 41,
+    "cursorRow": 6
+  },
+  "startup": {
+    "alternateScreen": false,
+    "lineCountWhileOpen": 41
+  },
+  "exit": {
+    "priorRows": 6,
+    "priorScrollbackIntact": false,
+    "firstDifference": 0,
+    "beforeLines": [
+      " new    a   13:53    seq 1 5",
+      "1",
+      "2",
+      "3",
+      "4",
+      "5"
+    ],
+    "afterLines": [
+      "",
+      "╭───────────────────────────────────────────────────────────────────────────────────────────╮",
+      "│ ✨ Update available! 0.155.1 -> 0.158.0                                                   │",
+      "│ Run sh -c 'curl -fsSL https://chatgpt.com/codex/install.sh | CODEX_NON_INTERACTIVE=1 sh'  │",
+      "│ to update.                                                                                │",
+      "│                                                                                           │",
+      "│ See full release notes:                                                                   │",
+      "│ https://github.com/openai/codex/releases/latest                                           │",
+      "╰───────────────────────────────────────────────────────────────────────────────────────────╯",
+      " new    a   13:54    printf 'MAWS_%s\\n' BACK",
+      "MAWS_BACK",
+      " new    a   13:54    ",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      ""
+    ],
+    "alternateScreenAfter": false,
+    "lineCountBefore": 41,
+    "lineCountAfter": 42,
+    "tuiFramesInScrollback": 0
+  },
+  "sequences": {
+    "CSI 2 J (erase display)": 0,
+    "CSI 3 J (erase scrollback)": 0,
+    "CSI J / CSI 0 J (erase below)": 7,
+    "CSI 1 J (erase above)": 0,
+    "CSI K (erase line)": 60,
+    "CSI n A (cursor up)": 0,
+    "CSI H (cursor home or position)": 256,
+    "CSI n S (scroll up)": 1,
+    "CSI n T (scroll down)": 0,
+    "CSI ? 1049 h (alternate screen on)": 0,
+    "CSI ? 1049 l (alternate screen off)": 0,
+    "ESC c (full reset)": 0
+  }
+}

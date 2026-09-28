@@ -1,0 +1,82 @@
+{
+  "tui": "claude",
+  "bin": "/Users/new/.local/share/claude/versions/2.1.283",
+  "renderer": "xterm",
+  "prompts": [],
+  "before": {
+    "pid": 87544,
+    "lineCount": 41,
+    "cursorRow": 6
+  },
+  "startup": {
+    "alternateScreen": true,
+    "lineCountWhileOpen": 41
+  },
+  "exit": {
+    "priorRows": 6,
+    "priorScrollbackIntact": true,
+    "firstDifference": -1,
+    "beforeLines": [
+      " new    a   13:49    seq 1 5",
+      "1",
+      "2",
+      "3",
+      "4",
+      "5"
+    ],
+    "afterLines": [
+      " new    a   13:49    seq 1 5",
+      "1",
+      "2",
+      "3",
+      "4",
+      "5",
+      " new    a   13:49    /Users/new/.local/share/claude/versions/2.1.283",
+      "Permission ask rule (/Users/new/.claude/settings.json): Write(~/.ssh/**) is not matched by fi",
+      "le permission checks — only Edit(path) rules are. Use Edit(~/.ssh/**) instead (Edit rules cov",
+      "er all file-editing tools).",
+      "Permission ask rule (/Users/new/.claude/settings.json): Write(~/.aws/**) is not matched by fi",
+      "le permission checks — only Edit(path) rules are. Use Edit(~/.aws/**) instead (Edit rules cov",
+      "er all file-editing tools).",
+      " new    a   13:49    printf 'MAWS_%s\\n' BACK",
+      "MAWS_BACK",
+      " new    a   13:49    ",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      ""
+    ],
+    "alternateScreenAfter": false,
+    "lineCountBefore": 41,
+    "lineCountAfter": 41,
+    "tuiFramesInScrollback": 0
+  },
+  "sequences": {
+    "CSI 2 J (erase display)": 1,
+    "CSI 3 J (erase scrollback)": 0,
+    "CSI ? 1049 h (alternate screen on)": 1,
+    "CSI ? 1049 l (alternate screen off)": 1,
+    "ESC c (full reset)": 0
+  }
+}

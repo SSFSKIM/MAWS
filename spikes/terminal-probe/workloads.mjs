@@ -1,6 +1,7 @@
 // The spike's workload table (C9 M1, the item table), shared by the `#probe` page (which imports it) and `run.mjs`
 // (which names workloads by id). A `program` workload is the pty's own program (no shell, no prompt, no echo); a
-// `typed` workload is a command typed into a login shell the page already runs. Expected counts are PTY bytes: the
+// `typed` workload is a command typed into the shell the page already runs (`$SHELL` without `-l` in M1; the
+// login-shell default is M2's). Expected counts are PTY bytes: the
 // program's output plus one CR per line feed under the tty's `onlcr`, verified on this Mac (Decision Log, W2/W3).
 import widths from './fixtures/width.json' with { type: 'json' };
 
@@ -32,7 +33,7 @@ const flood = (producer, m1Expected, gateExpected, gateOutput = 50_000_000, gate
 const widthScript = 'stty -echo; for s in "$@"; do printf "%s\\033[6n\\r\\n" "$s"; done; sleep 2';
 
 export const workloads = {
-  shell: { kind: 'program', title: 'Login shell', program: { shell: null, args: null } },
+  shell: { kind: 'program', title: 'Shell ($SHELL, no -l in M1)', program: { shell: null, args: null } },
   claude: { kind: 'program', title: 'claude', tui: 'claude', program: { shell: '$CLAUDE', args: [] } },
   'claude-nosync': {
     kind: 'program',

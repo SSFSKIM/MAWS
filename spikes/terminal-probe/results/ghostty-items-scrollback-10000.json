@@ -1,0 +1,47 @@
+{
+  "note": "The decisive item-7 run of 2026-09-28 19:47 UTC (12:47 local): ghostty-web with the adapter's scrollback option at 10000 (SCROLLBACK_LINES). Recovered verbatim from the driver log of that run (.doperpowers/sde/2026-09-28-c9-terminal/items.log) after the later diagnostic run (scrollback 100000000) overwrote results/ghostty-items.json. This run also had the `less` check before the buffer-shift fix (its lineCount/restoredExactly fields use the older comparison).",
+  "shell": {
+    "pid": 97505,
+    "prompt": " new    a   12:47   "
+  },
+  "scrollback": {
+    "lineCount": 822,
+    "rows": 48,
+    "expectedLineCount": 10048,
+    "firstLine": "19180",
+    "expectedFirstLine": "9953",
+    "note": "the first buffer line is the line that scrolled out last but one prompt line and the typed command also occupy the buffer"
+  },
+  "less": {
+    "alternateScreenWhileOpen": true,
+    "firstLineWhileOpen": "#",
+    "restoredExactly": false,
+    "lineCountBefore": 822,
+    "lineCountAfter": 823
+  },
+  "links": {
+    "osc8": null,
+    "bare": null
+  },
+  "selection": {
+    "selectedLength": 107,
+    "clipboardEqualsSelection": true,
+    "pastedEqualsSelection": false,
+    "sample": "apwrapwrapwrapwrapwrapwrapwrapwrapwrapwr"
+  },
+  "keys": {
+    "shiftEnter": "\\x0d",
+    "altLeft": "\\x1b[1;3D",
+    "ctrlLeft": "\\x1b[1;5D"
+  },
+  "resize": {
+    "at30": {
+      "stty": "48 122",
+      "pane": "48 122"
+    },
+    "at50": {
+      "stty": "48 86",
+      "pane": "48 86"
+    }
+  }
+}

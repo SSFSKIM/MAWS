@@ -1,4 +1,5 @@
 {
+  "note": "Diagnostic run of 2026-09-28 19:49 UTC (12:49 local) with the ghostty adapter's scrollback option temporarily set to 100000000 to test whether the option is honoured at all (it is, as a byte budget: 20034 lines kept). The decisive item-7 run at the real option value (10000) is results/ghostty-items-scrollback-10000.json.",
   "shell": {
     "pid": 3456,
     "prompt": " new    a   12:49   "

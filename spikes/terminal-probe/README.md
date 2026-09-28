@@ -13,6 +13,7 @@ and a second entry there re-opens the second pane for a future candidate.
 pnpm build
 node spikes/terminal-probe/run.mjs                       # smoke + measurements + shell-driven items, both renderers
 node spikes/terminal-probe/run.mjs --steps tui           # the real TUIs (one short conversation each; costs model usage)
+node spikes/terminal-probe/run.mjs --steps exit-check    # item 1 for each TUI: start, then /exit or /quit (no model usage)
 node spikes/terminal-probe/run.mjs --steps replay        # script -p of recordings/*.rec into each renderer
 node spikes/terminal-probe/run.mjs --phase m2-gate --steps measure   # the transport gate (full workloads), after M2
 MAWS_HARNESS=1 pnpm dev                                  # the page by hand: click #probe in the harness nav
@@ -20,7 +21,8 @@ MAWS_HARNESS=1 pnpm dev                                  # the page by hand: cli
 
 Options: `--renderer xterm|ghostty|both`, `--steps smoke,measure,items,tui,replay`, `--tui claude,codex`,
 `--tui-renderer xterm|ghostty`, `--keep-open`. `MAWS_CLAUDE_BIN` and `MAWS_CODEX_BIN` override the TUI binaries
-(defaults in `workloads.mjs`). Both TUIs run in the scratch directory `/tmp/maws-harness/a`, which main creates.
+(defaults in `workloads.mjs`). Both TUIs run in the scratch directory `/tmp/maws-harness/a`, which main creates, typed into the probe's shell
+(`$SHELL` spawned without `-l` in M1; the login-shell default with `-l` is M2's).
 
 ## Layout
 

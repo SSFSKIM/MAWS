@@ -42,6 +42,7 @@ export interface ProbeApi {
   setBins(next: Partial<Bins>): void;
   capture(renderer: RendererKind, enabled: boolean): void;
   foreignCharacters(renderer: RendererKind, allowed: string): { position: number; text: string; context: string }[];
+  sequenceCounts(renderer: RendererKind): Record<string, number>;
   screenshotReady(): Promise<void>;
 }
 
@@ -118,6 +119,7 @@ const api: ProbeApi = {
   setBins: (next) => Object.assign(bins, next),
   capture: (renderer, enabled) => pane(renderer).capture(enabled),
   foreignCharacters: (renderer, allowed) => pane(renderer).foreignCharacters(new RegExp(allowed)),
+  sequenceCounts: (renderer) => pane(renderer).sequenceCounts(),
   screenshotReady: () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))),
 };
 
