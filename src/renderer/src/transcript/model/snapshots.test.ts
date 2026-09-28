@@ -92,6 +92,26 @@ describe('presentation model snapshots', () => {
     });
   }
 
+  // A turn paused mid-work (C6 M4 pin): the first turn of pass1/permission-roundtrip after its Bash tool use (seq 47)
+  // and before the result (seq 53). Its one running call is still a group, active, with the thinking before it inside:
+  // an active group never unwraps (it unwraps once completed, in the full fixture's snapshot).
+  it('paused/pass1-permission-roundtrip-47', async () => {
+    const events = journalToEvents(loadJournal('pass1', 'permission-roundtrip')).filter((event) => event.seq !== null && event.seq <= 47);
+    const rows = await snapshot('paused/pass1-permission-roundtrip-47', events);
+    const group = rows.find((row) => row.kind === 'group');
+    expect(group).toMatchObject({ state: 'active', activeLabel: expect.stringMatching(/^Running `.+` for /) });
+    expect(group?.kind === 'group' && group.cells.map((cell) => [cell.toolName, cell.status])).toEqual([['thinking', 'done'], ['Bash', 'running']]);
+    expect(rows.filter((row) => row.kind === 'cell')).toEqual([]);
+  });
+
+  // pass2/workflow mid-turn (seq 82): the Workflow call is a subagent row, working, with no tool cell of the parent.
+  it('paused/pass2-workflow-82', async () => {
+    const events = journalToEvents(loadJournal('pass2', 'workflow')).filter((event) => event.seq !== null && event.seq <= 82);
+    const rows = await snapshot('paused/pass2-workflow-82', events);
+    expect(rows.find((row) => row.kind === 'divider')).toMatchObject({ state: 'working' });
+    expect(rows.find((row) => row.kind === 'subagent')).toMatchObject({ status: 'working' });
+  });
+
   it('synthetic/500', async () => {
     const rows = await snapshot('synthetic/500', synthesise({ turns: 500, seed: 1 }));
     expect(rows.length).toBeGreaterThan(1000);

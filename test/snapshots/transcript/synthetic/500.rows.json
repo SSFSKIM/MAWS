@@ -3455,18 +3455,11 @@
     "canUndo": true,
     "files": [
       {
-        "added": 10,
+        "added": 20,
         "cellId": "cell:toolu_8_0_3",
         "change": "create",
         "path": "src/model/derive.ts",
-        "removed": 6
-      },
-      {
-        "added": 10,
-        "cellId": "cell:toolu_8_2_2",
-        "change": "update",
-        "path": "src/model/derive.ts",
-        "removed": 5
+        "removed": 11
       }
     ],
     "id": "receipt:turn:u8",
@@ -7802,18 +7795,11 @@
         "removed": 5
       },
       {
-        "added": 9,
+        "added": 17,
         "cellId": "cell:toolu_17_0_7",
         "change": "update",
         "path": "src/app.ts",
-        "removed": 4
-      },
-      {
-        "added": 8,
-        "cellId": "cell:toolu_17_1_2",
-        "change": "create",
-        "path": "src/app.ts",
-        "removed": 5
+        "removed": 9
       }
     ],
     "id": "receipt:turn:u17",
@@ -17134,11 +17120,11 @@
     "canUndo": true,
     "files": [
       {
-        "added": 8,
+        "added": 17,
         "cellId": "cell:toolu_41_0_5",
         "change": "update",
         "path": "src/store.ts",
-        "removed": 3
+        "removed": 8
       },
       {
         "added": 6,
@@ -17153,13 +17139,6 @@
         "change": "update",
         "path": "src/util/time.ts",
         "removed": 1
-      },
-      {
-        "added": 9,
-        "cellId": "cell:toolu_41_1_5",
-        "change": "create",
-        "path": "src/store.ts",
-        "removed": 5
       }
     ],
     "id": "receipt:turn:u41",
@@ -17923,18 +17902,11 @@
     "canUndo": true,
     "files": [
       {
-        "added": 1,
+        "added": 2,
         "cellId": "cell:toolu_42_1_3",
         "change": "create",
         "path": "package.json",
-        "removed": 1
-      },
-      {
-        "added": 1,
-        "cellId": "cell:toolu_42_1_4",
-        "change": "create",
-        "path": "package.json",
-        "removed": 6
+        "removed": 7
       }
     ],
     "id": "receipt:turn:u42",
@@ -19590,11 +19562,11 @@
         "removed": 2
       },
       {
-        "added": 9,
+        "added": 13,
         "cellId": "cell:toolu_47_0_1",
         "change": "create",
         "path": "package.json",
-        "removed": 3
+        "removed": 5
       },
       {
         "added": 6,
@@ -19609,13 +19581,6 @@
         "change": "update",
         "path": "src/view/List.tsx",
         "removed": 4
-      },
-      {
-        "added": 4,
-        "cellId": "cell:toolu_47_2_0",
-        "change": "create",
-        "path": "package.json",
-        "removed": 2
       }
     ],
     "id": "receipt:turn:u47",
@@ -21203,15 +21168,8 @@
     "canUndo": true,
     "files": [
       {
-        "added": 11,
+        "added": 12,
         "cellId": "cell:toolu_50_0_0",
-        "change": "update",
-        "path": "src/model/derive.ts",
-        "removed": 0
-      },
-      {
-        "added": 1,
-        "cellId": "cell:toolu_50_0_3",
         "change": "update",
         "path": "src/model/derive.ts",
         "removed": 0
@@ -22372,18 +22330,11 @@
         "removed": 0
       },
       {
-        "added": 11,
+        "added": 23,
         "cellId": "cell:toolu_53_1_3",
         "change": "create",
         "path": "README.md",
-        "removed": 5
-      },
-      {
-        "added": 12,
-        "cellId": "cell:toolu_53_1_4",
-        "change": "update",
-        "path": "README.md",
-        "removed": 5
+        "removed": 10
       },
       {
         "added": 10,
@@ -24243,11 +24194,11 @@
     "canUndo": true,
     "files": [
       {
-        "added": 4,
+        "added": 13,
         "cellId": "cell:toolu_56_0_0",
         "change": "create",
         "path": "src/view/List.tsx",
-        "removed": 6
+        "removed": 7
       },
       {
         "added": 9,
@@ -24255,13 +24206,6 @@
         "change": "update",
         "path": "README.md",
         "removed": 2
-      },
-      {
-        "added": 9,
-        "cellId": "cell:toolu_56_1_1",
-        "change": "update",
-        "path": "src/view/List.tsx",
-        "removed": 1
       },
       {
         "added": 1,
@@ -26600,18 +26544,11 @@
     "canUndo": true,
     "files": [
       {
-        "added": 5,
+        "added": 9,
         "cellId": "cell:toolu_65_0_0",
         "change": "update",
         "path": "src/view/List.tsx",
         "removed": 3
-      },
-      {
-        "added": 4,
-        "cellId": "cell:toolu_65_0_1",
-        "change": "update",
-        "path": "src/view/List.tsx",
-        "removed": 0
       },
       {
         "added": 6,
@@ -27718,11 +27655,11 @@
         "removed": 0
       },
       {
-        "added": 10,
+        "added": 20,
         "cellId": "cell:toolu_68_1_1",
         "change": "update",
         "path": "src/app.ts",
-        "removed": 6
+        "removed": 12
       },
       {
         "added": 4,
@@ -27736,13 +27673,6 @@
         "cellId": "cell:toolu_68_1_5",
         "change": "update",
         "path": "src/model/derive.ts",
-        "removed": 6
-      },
-      {
-        "added": 10,
-        "cellId": "cell:toolu_68_1_6",
-        "change": "update",
-        "path": "src/app.ts",
         "removed": 6
       }
     ],
@@ -35325,32 +35255,18 @@
     "canUndo": true,
     "files": [
       {
-        "added": 12,
+        "added": 15,
         "cellId": "cell:toolu_86_0_0",
         "change": "update",
         "path": "src/store.ts",
         "removed": 6
       },
       {
-        "added": 3,
-        "cellId": "cell:toolu_86_0_2",
-        "change": "update",
-        "path": "src/store.ts",
-        "removed": 0
-      },
-      {
-        "added": 5,
+        "added": 7,
         "cellId": "cell:toolu_86_0_3",
         "change": "create",
         "path": "test/derive.test.ts",
-        "removed": 6
-      },
-      {
-        "added": 2,
-        "cellId": "cell:toolu_86_1_3",
-        "change": "update",
-        "path": "test/derive.test.ts",
-        "removed": 3
+        "removed": 9
       }
     ],
     "id": "receipt:turn:u86",
@@ -47588,18 +47504,11 @@
         "removed": 3
       },
       {
-        "added": 12,
+        "added": 22,
         "cellId": "cell:toolu_118_0_3",
         "change": "update",
         "path": "package.json",
-        "removed": 1
-      },
-      {
-        "added": 10,
-        "cellId": "cell:toolu_118_0_4",
-        "change": "update",
-        "path": "package.json",
-        "removed": 1
+        "removed": 2
       }
     ],
     "id": "receipt:turn:u118",
@@ -53147,11 +53056,11 @@
     "canUndo": true,
     "files": [
       {
-        "added": 3,
+        "added": 12,
         "cellId": "cell:toolu_131_0_0",
         "change": "update",
         "path": "src/app.ts",
-        "removed": 3
+        "removed": 9
       },
       {
         "added": 12,
@@ -53159,13 +53068,6 @@
         "change": "update",
         "path": "src/view/List.tsx",
         "removed": 3
-      },
-      {
-        "added": 9,
-        "cellId": "cell:toolu_131_2_1",
-        "change": "update",
-        "path": "src/app.ts",
-        "removed": 6
       }
     ],
     "id": "receipt:turn:u131",
@@ -54803,18 +54705,11 @@
     "canUndo": true,
     "files": [
       {
-        "added": 12,
+        "added": 14,
         "cellId": "cell:toolu_135_0_0",
         "change": "update",
         "path": "src/store.ts",
-        "removed": 6
-      },
-      {
-        "added": 2,
-        "cellId": "cell:toolu_135_0_5",
-        "change": "update",
-        "path": "src/store.ts",
-        "removed": 4
+        "removed": 10
       }
     ],
     "id": "receipt:turn:u135",
@@ -60708,18 +60603,11 @@
     "canUndo": true,
     "files": [
       {
-        "added": 10,
+        "added": 11,
         "cellId": "cell:toolu_155_0_0",
         "change": "update",
         "path": "src/util/time.ts",
-        "removed": 6
-      },
-      {
-        "added": 1,
-        "cellId": "cell:toolu_155_0_3",
-        "change": "create",
-        "path": "src/util/time.ts",
-        "removed": 4
+        "removed": 10
       }
     ],
     "id": "receipt:turn:u155",
@@ -64281,15 +64169,8 @@
     "canUndo": true,
     "files": [
       {
-        "added": 12,
+        "added": 23,
         "cellId": "cell:toolu_163_0_2",
-        "change": "update",
-        "path": "src/model/derive.ts",
-        "removed": 0
-      },
-      {
-        "added": 11,
-        "cellId": "cell:toolu_163_1_3",
         "change": "update",
         "path": "src/model/derive.ts",
         "removed": 4
@@ -64747,18 +64628,11 @@
     "canUndo": true,
     "files": [
       {
-        "added": 4,
+        "added": 13,
         "cellId": "cell:toolu_165_0_0",
         "change": "update",
         "path": "README.md",
-        "removed": 6
-      },
-      {
-        "added": 9,
-        "cellId": "cell:toolu_165_0_5",
-        "change": "update",
-        "path": "README.md",
-        "removed": 1
+        "removed": 7
       }
     ],
     "id": "receipt:turn:u165",
@@ -83660,18 +83534,11 @@
     "canUndo": true,
     "files": [
       {
-        "added": 9,
+        "added": 16,
         "cellId": "cell:toolu_212_0_0",
         "change": "create",
         "path": "src/store.ts",
-        "removed": 1
-      },
-      {
-        "added": 7,
-        "cellId": "cell:toolu_212_2_5",
-        "change": "update",
-        "path": "src/store.ts",
-        "removed": 4
+        "removed": 5
       }
     ],
     "id": "receipt:turn:u212",
@@ -86716,37 +86583,16 @@
     "canUndo": true,
     "files": [
       {
-        "added": 1,
+        "added": 18,
         "cellId": "cell:toolu_216_0_1",
         "change": "update",
         "path": "src/model/derive.ts",
-        "removed": 3
+        "removed": 6
       },
       {
-        "added": 12,
-        "cellId": "cell:toolu_216_0_3",
-        "change": "update",
-        "path": "src/model/derive.ts",
-        "removed": 2
-      },
-      {
-        "added": 5,
-        "cellId": "cell:toolu_216_0_4",
-        "change": "create",
-        "path": "src/model/derive.ts",
-        "removed": 1
-      },
-      {
-        "added": 4,
+        "added": 8,
         "cellId": "cell:toolu_216_2_0",
         "change": "update",
-        "path": "README.md",
-        "removed": 0
-      },
-      {
-        "added": 4,
-        "cellId": "cell:toolu_216_2_3",
-        "change": "create",
         "path": "README.md",
         "removed": 3
       }
@@ -96456,18 +96302,11 @@
     "canUndo": true,
     "files": [
       {
-        "added": 4,
+        "added": 7,
         "cellId": "cell:toolu_241_0_1",
         "change": "update",
         "path": "src/util/time.ts",
-        "removed": 2
-      },
-      {
-        "added": 3,
-        "cellId": "cell:toolu_241_2_0",
-        "change": "update",
-        "path": "src/util/time.ts",
-        "removed": 4
+        "removed": 6
       }
     ],
     "id": "receipt:turn:u241",
@@ -100854,11 +100693,11 @@
         "removed": 3
       },
       {
-        "added": 10,
+        "added": 19,
         "cellId": "cell:toolu_253_0_6",
         "change": "create",
         "path": "src/store.ts",
-        "removed": 6
+        "removed": 10
       },
       {
         "added": 10,
@@ -100873,13 +100712,6 @@
         "change": "create",
         "path": "README.md",
         "removed": 5
-      },
-      {
-        "added": 9,
-        "cellId": "cell:toolu_253_2_3",
-        "change": "update",
-        "path": "src/store.ts",
-        "removed": 4
       }
     ],
     "id": "receipt:turn:u253",
@@ -103056,11 +102888,11 @@
     "canUndo": true,
     "files": [
       {
-        "added": 12,
+        "added": 25,
         "cellId": "cell:toolu_258_0_4",
         "change": "create",
         "path": "src/model/derive.ts",
-        "removed": 6
+        "removed": 8
       },
       {
         "added": 6,
@@ -103068,20 +102900,6 @@
         "change": "create",
         "path": "package.json",
         "removed": 4
-      },
-      {
-        "added": 2,
-        "cellId": "cell:toolu_258_1_4",
-        "change": "update",
-        "path": "src/model/derive.ts",
-        "removed": 0
-      },
-      {
-        "added": 11,
-        "cellId": "cell:toolu_258_1_5",
-        "change": "create",
-        "path": "src/model/derive.ts",
-        "removed": 2
       }
     ],
     "id": "receipt:turn:u258",
@@ -110831,18 +110649,11 @@
     "canUndo": true,
     "files": [
       {
-        "added": 7,
+        "added": 16,
         "cellId": "cell:toolu_279_0_0",
         "change": "update",
         "path": "src/app.ts",
-        "removed": 4
-      },
-      {
-        "added": 9,
-        "cellId": "cell:toolu_279_1_2",
-        "change": "update",
-        "path": "src/app.ts",
-        "removed": 3
+        "removed": 7
       }
     ],
     "id": "receipt:turn:u279",
@@ -114372,18 +114183,11 @@
         "removed": 5
       },
       {
-        "added": 1,
+        "added": 7,
         "cellId": "cell:toolu_288_0_3",
         "change": "create",
         "path": "src/model/derive.ts",
-        "removed": 1
-      },
-      {
-        "added": 6,
-        "cellId": "cell:toolu_288_1_0",
-        "change": "update",
-        "path": "src/model/derive.ts",
-        "removed": 2
+        "removed": 3
       },
       {
         "added": 12,
@@ -122727,18 +122531,11 @@
         "removed": 6
       },
       {
-        "added": 10,
+        "added": 17,
         "cellId": "cell:toolu_305_1_0",
         "change": "update",
         "path": "src/model/derive.ts",
-        "removed": 1
-      },
-      {
-        "added": 7,
-        "cellId": "cell:toolu_305_1_1",
-        "change": "update",
-        "path": "src/model/derive.ts",
-        "removed": 5
+        "removed": 6
       }
     ],
     "id": "receipt:turn:u305",
@@ -124524,11 +124321,11 @@
     "canUndo": true,
     "files": [
       {
-        "added": 2,
+        "added": 6,
         "cellId": "cell:toolu_308_0_1",
         "change": "update",
         "path": "package.json",
-        "removed": 3
+        "removed": 5
       },
       {
         "added": 6,
@@ -124536,13 +124333,6 @@
         "change": "update",
         "path": "src/app.ts",
         "removed": 0
-      },
-      {
-        "added": 4,
-        "cellId": "cell:toolu_308_1_7",
-        "change": "create",
-        "path": "package.json",
-        "removed": 2
       }
     ],
     "id": "receipt:turn:u308",
@@ -129202,11 +128992,11 @@
     "canUndo": true,
     "files": [
       {
-        "added": 3,
+        "added": 22,
         "cellId": "cell:toolu_319_0_4",
         "change": "update",
         "path": "src/util/time.ts",
-        "removed": 5
+        "removed": 11
       },
       {
         "added": 12,
@@ -129214,20 +129004,6 @@
         "change": "update",
         "path": "src/store.ts",
         "removed": 1
-      },
-      {
-        "added": 10,
-        "cellId": "cell:toolu_319_1_6",
-        "change": "create",
-        "path": "src/util/time.ts",
-        "removed": 1
-      },
-      {
-        "added": 9,
-        "cellId": "cell:toolu_319_2_1",
-        "change": "update",
-        "path": "src/util/time.ts",
-        "removed": 5
       }
     ],
     "id": "receipt:turn:u319",
@@ -134694,11 +134470,11 @@
         "removed": 5
       },
       {
-        "added": 3,
+        "added": 6,
         "cellId": "cell:toolu_333_0_5",
         "change": "create",
         "path": "README.md",
-        "removed": 6
+        "removed": 8
       },
       {
         "added": 10,
@@ -134708,25 +134484,11 @@
         "removed": 6
       },
       {
-        "added": 3,
-        "cellId": "cell:toolu_333_1_4",
-        "change": "update",
-        "path": "README.md",
-        "removed": 2
-      },
-      {
-        "added": 10,
+        "added": 20,
         "cellId": "cell:toolu_333_2_1",
         "change": "update",
         "path": "src/model/derive.ts",
         "removed": 1
-      },
-      {
-        "added": 10,
-        "cellId": "cell:toolu_333_2_2",
-        "change": "update",
-        "path": "src/model/derive.ts",
-        "removed": 0
       }
     ],
     "id": "receipt:turn:u333",
@@ -137558,18 +137320,11 @@
     "canUndo": true,
     "files": [
       {
-        "added": 7,
+        "added": 9,
         "cellId": "cell:toolu_341_0_1",
         "change": "create",
         "path": "src/store.ts",
         "removed": 4
-      },
-      {
-        "added": 2,
-        "cellId": "cell:toolu_341_0_3",
-        "change": "update",
-        "path": "src/store.ts",
-        "removed": 0
       },
       {
         "added": 9,
@@ -142503,15 +142258,8 @@
         "removed": 0
       },
       {
-        "added": 9,
+        "added": 19,
         "cellId": "cell:toolu_355_0_1",
-        "change": "update",
-        "path": "src/store.ts",
-        "removed": 0
-      },
-      {
-        "added": 10,
-        "cellId": "cell:toolu_355_1_1",
         "change": "update",
         "path": "src/store.ts",
         "removed": 6
@@ -158429,18 +158177,11 @@
     "canUndo": true,
     "files": [
       {
-        "added": 4,
+        "added": 12,
         "cellId": "cell:toolu_392_0_0",
         "change": "create",
         "path": "src/view/List.tsx",
-        "removed": 4
-      },
-      {
-        "added": 8,
-        "cellId": "cell:toolu_392_0_5",
-        "change": "update",
-        "path": "src/view/List.tsx",
-        "removed": 2
+        "removed": 6
       },
       {
         "added": 3,
@@ -162120,18 +161861,11 @@
     "canUndo": true,
     "files": [
       {
-        "added": 9,
+        "added": 14,
         "cellId": "cell:toolu_405_0_0",
         "change": "create",
         "path": "src/util/time.ts",
         "removed": 5
-      },
-      {
-        "added": 5,
-        "cellId": "cell:toolu_405_1_3",
-        "change": "update",
-        "path": "src/util/time.ts",
-        "removed": 0
       }
     ],
     "id": "receipt:turn:u405",
@@ -164060,18 +163794,11 @@
     "canUndo": true,
     "files": [
       {
-        "added": 7,
+        "added": 12,
         "cellId": "cell:toolu_410_0_0",
         "change": "update",
         "path": "test/derive.test.ts",
-        "removed": 6
-      },
-      {
-        "added": 5,
-        "cellId": "cell:toolu_410_1_2",
-        "change": "update",
-        "path": "test/derive.test.ts",
-        "removed": 2
+        "removed": 8
       }
     ],
     "id": "receipt:turn:u410",
@@ -166069,11 +165796,11 @@
     "canUndo": true,
     "files": [
       {
-        "added": 6,
+        "added": 16,
         "cellId": "cell:toolu_417_0_2",
         "change": "update",
         "path": "src/store.ts",
-        "removed": 4
+        "removed": 10
       },
       {
         "added": 5,
@@ -166088,13 +165815,6 @@
         "change": "update",
         "path": "package.json",
         "removed": 0
-      },
-      {
-        "added": 10,
-        "cellId": "cell:toolu_417_1_0",
-        "change": "update",
-        "path": "src/store.ts",
-        "removed": 6
       }
     ],
     "id": "receipt:turn:u417",
@@ -171029,18 +170749,11 @@
     "canUndo": true,
     "files": [
       {
-        "added": 8,
+        "added": 12,
         "cellId": "cell:toolu_430_0_0",
         "change": "create",
         "path": "README.md",
-        "removed": 6
-      },
-      {
-        "added": 4,
-        "cellId": "cell:toolu_430_1_3",
-        "change": "update",
-        "path": "README.md",
-        "removed": 6
+        "removed": 12
       },
       {
         "added": 12,
@@ -177877,45 +177590,24 @@
         "removed": 2
       },
       {
-        "added": 5,
+        "added": 12,
         "cellId": "cell:toolu_445_0_2",
         "change": "create",
         "path": "package.json",
-        "removed": 6
+        "removed": 15
       },
       {
-        "added": 9,
+        "added": 12,
         "cellId": "cell:toolu_445_0_3",
         "change": "update",
         "path": "src/util/time.ts",
-        "removed": 6
+        "removed": 10
       },
       {
         "added": 9,
         "cellId": "cell:toolu_445_1_3",
         "change": "update",
         "path": "test/derive.test.ts",
-        "removed": 3
-      },
-      {
-        "added": 3,
-        "cellId": "cell:toolu_445_1_4",
-        "change": "update",
-        "path": "src/util/time.ts",
-        "removed": 4
-      },
-      {
-        "added": 6,
-        "cellId": "cell:toolu_445_1_6",
-        "change": "update",
-        "path": "package.json",
-        "removed": 6
-      },
-      {
-        "added": 1,
-        "cellId": "cell:toolu_445_2_7",
-        "change": "update",
-        "path": "package.json",
         "removed": 3
       }
     ],
@@ -181090,11 +180782,11 @@
     "canUndo": true,
     "files": [
       {
-        "added": 9,
+        "added": 19,
         "cellId": "cell:toolu_454_0_2",
         "change": "update",
         "path": "src/view/List.tsx",
-        "removed": 5
+        "removed": 10
       },
       {
         "added": 5,
@@ -181102,13 +180794,6 @@
         "change": "update",
         "path": "test/derive.test.ts",
         "removed": 1
-      },
-      {
-        "added": 10,
-        "cellId": "cell:toolu_454_2_0",
-        "change": "update",
-        "path": "src/view/List.tsx",
-        "removed": 5
       },
       {
         "added": 7,
@@ -185426,18 +185111,11 @@
         "removed": 4
       },
       {
-        "added": 5,
+        "added": 9,
         "cellId": "cell:toolu_465_0_1",
         "change": "create",
         "path": "test/derive.test.ts",
-        "removed": 6
-      },
-      {
-        "added": 4,
-        "cellId": "cell:toolu_465_0_5",
-        "change": "update",
-        "path": "test/derive.test.ts",
-        "removed": 4
+        "removed": 10
       }
     ],
     "id": "receipt:turn:u465",
@@ -197463,11 +197141,11 @@
     "canUndo": true,
     "files": [
       {
-        "added": 12,
+        "added": 24,
         "cellId": "cell:toolu_495_0_0",
         "change": "update",
         "path": "src/model/derive.ts",
-        "removed": 1
+        "removed": 5
       },
       {
         "added": 10,
@@ -197482,13 +197160,6 @@
         "change": "update",
         "path": "package.json",
         "removed": 6
-      },
-      {
-        "added": 12,
-        "cellId": "cell:toolu_495_2_0",
-        "change": "update",
-        "path": "src/model/derive.ts",
-        "removed": 4
       }
     ],
     "id": "receipt:turn:u495",
@@ -199204,18 +198875,11 @@
         "removed": 6
       },
       {
-        "added": 10,
+        "added": 13,
         "cellId": "cell:toolu_498_0_5",
         "change": "update",
         "path": "src/store.ts",
-        "removed": 1
-      },
-      {
-        "added": 3,
-        "cellId": "cell:toolu_498_2_5",
-        "change": "create",
-        "path": "src/store.ts",
-        "removed": 2
+        "removed": 3
       }
     ],
     "id": "receipt:turn:u498",

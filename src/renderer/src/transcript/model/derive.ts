@@ -494,7 +494,23 @@ function changedFiles(cells: Cell[], turn: TurnState): ChangedFile[] {
       files.push({ path: str(record(event.structured).filePath, filePathOf(input)), change: counts.change, added: counts.added, removed: counts.removed, cellId: cellId.tool(use.toolUseId) });
     }
   }
-  return files;
+  return byPath(files);
+}
+
+// A receipt names each file once: later edits of a path add their counts to its first entry, which keeps its cell;
+// a file created in the turn stays a create, and one deleted last reads as deleted.
+function byPath(files: ChangedFile[]): ChangedFile[] {
+  const merged = new Map<string, ChangedFile>();
+  for (const file of files) {
+    const first = merged.get(file.path);
+    if (!first) merged.set(file.path, { ...file });
+    else {
+      first.added += file.added;
+      first.removed += file.removed;
+      if (file.change === 'delete') first.change = 'delete';
+    }
+  }
+  return [...merged.values()];
 }
 
 function summaryOf(turn: TurnState, cells: Cell[], subagents: SubagentGroup[], model: string | null): TurnSummary {

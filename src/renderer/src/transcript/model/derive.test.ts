@@ -248,6 +248,26 @@ describe('receipt counts', () => {
   });
 });
 
+describe('receipts name each file once', () => {
+  it('two edits of one file are one entry with their counts summed; a create stays a create', () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('t1', 'Write', { file_path: '/p/new.ts', content: 'one\ntwo' });
+    b.result('t1', 'ok', { structured: { type: 'create', filePath: '/p/new.ts', structuredPatch: [{ oldStart: 0, oldLines: 0, newStart: 1, newLines: 2, lines: ['+one', '+two'] }], originalFile: null } });
+    b.toolUse('t2', 'Edit', { file_path: '/p/a.ts', old_string: 'x', new_string: 'y' });
+    b.result('t2', 'ok');
+    b.toolUse('t3', 'Edit', { file_path: '/p/new.ts', old_string: 'two', new_string: 'two\nthree' });
+    b.result('t3', 'ok');
+    b.end(['u1']);
+    const receipt = find(rows(b.events), 'receipt');
+    expect(receipt.files).toEqual([
+      { path: '/p/new.ts', change: 'create', added: 4, removed: 1, cellId: 'cell:t1' },
+      { path: '/p/a.ts', change: 'update', added: 1, removed: 1, cellId: 'cell:t2' },
+    ]);
+    expect(receipt).toMatchObject({ added: 5, removed: 2 });
+  });
+});
+
 describe('receipts aggregate successful edits only', () => {
   it('a failed edit cell contributes no receipt entry', () => {
     const b = builder();
