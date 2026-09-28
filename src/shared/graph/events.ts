@@ -145,6 +145,15 @@ export const SessionEventSchema = z.discriminatedUnion('kind', [
   event('permission.requested', {
     requestId: RequestIdSchema, toolUseId: ToolUseIdSchema, toolName: z.string(), displayName: nullableString(),
     input: z.unknown(), description: nullableString(), decisionReasonType: nullableString(), suggestions: z.array(z.unknown()), blockedPath: nullableString(),
+    // C3 start: C7's additive asks (C3 execution document, Decision Log "coordinator, C7's asks"): present only when
+    // the `can_use_tool` request carries the wire key, so a fixture recorded without them validates unchanged.
+    decisionReason: nullableString().optional(), // decision_reason
+    suppressAlwaysAllow: z.boolean().optional(), // suppress_always_allow_rule
+    defaultToNo: z.boolean().optional(), // default_to_no
+    matchedAskRule: z.strictObject({ source: z.string(), toolName: z.string(), ruleContent: nullableString() }).nullable().optional(), // matched_ask_rule
+    requiresUserInteraction: z.boolean().optional(), // requires_user_interaction
+    mcpServer: z.strictObject({ name: z.string(), source: z.string() }).nullable().optional(), // mcp_server (an object on the wire, SPEC 45)
+    // C3 end
   }),
   event('permission.resolved', {
     requestId: RequestIdSchema, toolUseId: ToolUseIdSchema, behavior: z.enum(['allow', 'deny']), message: nullableString(),

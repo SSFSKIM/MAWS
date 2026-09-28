@@ -1,6 +1,6 @@
 // X8 fixture loader: the protocol probe's journals (both passes) and the transcript-shaped JSONL beside them, validated
 // on load so a conformance test never re-reads files or re-derives the row shape (C1 execution document, "Fixture loader").
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { parseJournalRow, type JournalRow } from '@shared/wire/journal';
 import { parseTranscriptRecord, type TranscriptRecord } from '@shared/wire/transcript';
@@ -8,9 +8,18 @@ import { parseTranscriptRecord, type TranscriptRecord } from '@shared/wire/trans
 export const FIXTURE_DIR = join(__dirname, '../../spikes/protocol-probe/fixtures');
 export const TEST_FIXTURE_DIR = join(__dirname, '../fixtures');
 
-export type FixturePass = 'pass1' | 'pass2';
+// C3 start: pass 3 holds the journals C3's live acceptance records (M6); empty until then, so `listJournals('pass3')`
+// lists nothing and the conformance suite gains cases as files land.
+export type FixturePass = 'pass1' | 'pass2' | 'pass3';
 
-const PASS_DIR: Record<FixturePass, string> = { pass1: FIXTURE_DIR, pass2: join(FIXTURE_DIR, 'pass2') };
+const PASS_DIR: Record<FixturePass, string> = { pass1: FIXTURE_DIR, pass2: join(FIXTURE_DIR, 'pass2'), pass3: join(FIXTURE_DIR, 'pass3') };
+export const FIXTURE_PASSES: readonly FixturePass[] = ['pass1', 'pass2', 'pass3'];
+
+// A synthetic engine journal under test/fixtures/engine (the replay handshake prelude, the unanswered read), X8-validated.
+export function loadEngineJournal(name: string): JournalRow[] {
+  return readJsonl(join(TEST_FIXTURE_DIR, 'engine', `${name}.jsonl`)).map(parseJournalRow);
+}
+// C3 end
 
 function readJsonl(file: string): unknown[] {
   return readFileSync(file, 'utf8')
@@ -20,6 +29,7 @@ function readJsonl(file: string): unknown[] {
 }
 
 export function listJournals(pass: FixturePass): string[] {
+  if (!existsSync(PASS_DIR[pass])) return []; // C3: pass 3 is empty until M6 records it
   return readdirSync(PASS_DIR[pass])
     .filter((name) => name.endsWith('.jsonl'))
     .map((name) => basename(name, '.jsonl'))
