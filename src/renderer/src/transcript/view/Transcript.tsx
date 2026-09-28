@@ -180,7 +180,9 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
     const frame = requestAnimationFrame(() => {
       const element = document.getElementById(rowElementId(idPrefix, jump.rowId));
       const cell = jump.focus === jump.rowId ? null : element?.querySelector<HTMLElement>(`[data-cell-id="${CSS.escape(jump.focus)}"]`);
-      (cell ?? element)?.focus({ preventScroll: true });
+      // A cell takes focus itself when it is focusable (M4's denied cell), else through its own disclosure button.
+      const target = cell ? (cell.hasAttribute('tabindex') ? cell : cell.querySelector<HTMLElement>('button')) : element;
+      (target ?? element)?.focus({ preventScroll: true });
       useTranscriptStore.getState().jumpHandled(storeKey, jump.nonce);
     });
     return () => cancelAnimationFrame(frame);
