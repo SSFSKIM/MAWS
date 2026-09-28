@@ -37,8 +37,9 @@ export class HolderRegistry {
   private readonly jobs = new Map<string, JobState>();
   private readonly held = new Map<SessionId, Held>();
   private readonly unknownKinds = new Set<string>(); // logged once each
-  private chain: Promise<void> = Promise.resolve();
-  private queuedRefresh: Promise<void> | null = null;
+  private live: LiveSessionRecord[] = []; // every live record as last checked, one per pid: what fs.holders filters
+  private chain: Promise<unknown> = Promise.resolve();
+  private queuedRefresh: Promise<Error | null> | null = null;
   private poll: ReturnType<typeof setInterval> | null = null;
   private stopped = false;
 
@@ -59,7 +60,13 @@ export class HolderRegistry {
   // Re-reads every registry record, re-checks liveness and emits each holder that changed. Runs on every `sessions/`
   // change and on the poll; requests that arrive while one is queued share it, and one that arrives while a refresh
   // runs queues the next, so a change seen mid-read is always read again.
+  // A failure is logged and the last known holders stay (the poll and the watcher carry on); `liveNow` refuses instead.
   refresh(): Promise<void> {
+    return this.refreshed().then(() => undefined);
+  }
+
+  // The refresh as above, resolving with the error that stopped it, or null.
+  private refreshed(): Promise<Error | null> {
     if (this.queuedRefresh) return this.queuedRefresh;
     const run = this.serial(async () => {
       this.queuedRefresh = null;
@@ -76,7 +83,7 @@ export class HolderRegistry {
       if (jobId === null) await this.readAllJobs();
       else await this.readJob(jobId);
       await this.recompute();
-    });
+    }).then(() => undefined);
   }
 
   stop(): void {
@@ -95,25 +102,36 @@ export class HolderRegistry {
   }
 
   // The live holders as they are now, for a guard that must not trust an asynchronous projection: a registry read that
-  // starts after this call (the poll's liveness rule, unchanged), then every live record whose session id is listed or
-  // whose cwd is one of `directories`, both compared as NFC-normalised realpaths. Both filters null: every live holder.
+  // starts after this call (the poll's liveness rule, unchanged), then every live record, one row per live pid (not the
+  // newest-per-session badge: two processes on one session with different directories are two rows), whose session id
+  // is listed or whose cwd is one of `directories`, both compared as NFC-normalised realpaths. Both filters null: every
+  // live record. A registry that could not be read rejects rather than answering from the previous table.
   async liveNow(filter: { sessionIds: readonly SessionId[] | null; directories: readonly string[] | null }): Promise<{ sessionId: SessionId; holder: Holder; cwd: string | null }[]> {
-    await this.refresh();
+    const failure = await this.refreshed();
+    if (failure) throw new Error(`holder registry unreadable: ${(failure as NodeJS.ErrnoException).code ?? failure.message}`);
     const ids = filter.sessionIds === null ? null : new Set(filter.sessionIds);
     const directories = filter.directories === null ? null : new Set(await Promise.all(filter.directories.map(canonicalDirectory)));
     const answer: { sessionId: SessionId; holder: Holder; cwd: string | null }[] = [];
-    for (const [sessionId, { holder, registry }] of this.held) {
-      const cwd = registry.cwd === undefined ? null : await canonicalDirectory(registry.cwd);
+    for (const record of this.live) {
+      const sessionId = record.sessionId as SessionId;
+      const cwd = record.cwd === undefined ? null : await canonicalDirectory(record.cwd);
       const matches = (ids === null && directories === null) || ids?.has(sessionId) || (cwd !== null && directories?.has(cwd));
-      if (matches) answer.push({ sessionId, holder, cwd });
+      if (matches) answer.push({ sessionId, holder: this.holderFor(record, sessionId), cwd });
     }
     return answer;
   }
 
-  private serial(step: () => Promise<void>): Promise<void> {
-    const run = this.chain.then(() => (this.stopped ? undefined : step())).catch((error: unknown) => {
-      console.error('[fs] holder refresh failed:', error instanceof Error ? error.message : error);
-    });
+  // Runs `step` after every earlier one; resolves with the error that stopped it (logged here), or null.
+  private serial(step: () => Promise<void>): Promise<Error | null> {
+    const run = this.chain
+      .then(() => (this.stopped ? undefined : step()))
+      .then(
+        () => null,
+        (error: unknown) => {
+          console.error('[fs] holder refresh failed:', error instanceof Error ? error.message : error);
+          return error instanceof Error ? error : new Error(String(error));
+        },
+      );
     this.chain = run;
     return run;
   }
@@ -176,6 +194,7 @@ export class HolderRegistry {
     // A token that differs is a reused pid. When ps cannot run at all, liveness alone decides, as for a record that
     // carries no token (the engine's own probe treats a missing expected token the same way).
     const live = alive.filter((record) => record.procStart === undefined || tokens === null || tokens.get(record.pid) === record.procStart);
+    this.live = live;
 
     const bySession = new Map<SessionId, LiveSessionRecord>();
     for (const record of live) {

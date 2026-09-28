@@ -1,5 +1,5 @@
 import { execFileSync, spawn } from 'node:child_process';
-import { writeFile } from 'node:fs/promises';
+import { chmod, writeFile } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SessionId } from '@shared/graph/ids';
 import type { Holder, JobState, LiveSessionRecord } from '@shared/wire/store';
@@ -175,6 +175,22 @@ describe('holders come from live sessions/<pid>.json records', () => {
     await fixture.addRegistryRecord(process.pid, { sessionId: S1, kind: 'bg', parkedJobId: 'abcdabcd' });
     await holders.refresh();
     expect(holders.holderOf(S1)).toEqual({ kind: 'none' });
+  });
+
+  it('a background refresh that cannot read the registry logs and keeps the last known holders, without rejecting', async () => {
+    await fixture.addRegistryRecord(process.pid, { sessionId: S1, kind: 'interactive' });
+    const holders = create();
+    await holders.start();
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    await chmod(fixture.paths.sessions, 0o000); // the fixture's own temp directory
+    try {
+      await expect(holders.refresh()).resolves.toBeUndefined();
+      expect(errors).toHaveBeenCalledWith(expect.stringContaining('holder refresh failed'), expect.stringContaining('EACCES'));
+      expect(holders.holderOf(S1)).toEqual({ kind: 'terminal', pid: process.pid });
+    } finally {
+      await chmod(fixture.paths.sessions, 0o755);
+      errors.mockRestore();
+    }
   });
 
   it('polls liveness while a holder is known, so a killed process whose record stays behind stops holding', async () => {

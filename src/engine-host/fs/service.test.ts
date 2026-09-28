@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
-import { mkdir, realpath, rm, symlink } from 'node:fs/promises';
+import { chmod, mkdir, realpath, rm, symlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, SessionId } from '@shared/graph/ids';
@@ -255,6 +255,65 @@ describe('filesystem state service: discovery, sidecars and holders', () => {
       expect((await fs.holdersNow({ sessionIds: null, directories: [link] })).holders.map((h) => h.sessionId)).toEqual([S1]);
       expect((await fs.holdersNow({ sessionIds: null, directories: [join(fixture.configHome, 'elsewhere')] })).holders).toEqual([]);
       expect((await fs.holdersNow({ sessionIds: null, directories: null })).holders.map((h) => h.sessionId)).toEqual([S1]);
+    });
+
+    it('answers one row per live pid: two processes on one session with different directories are two rows, each found by its own directory', async () => {
+      const older = spawn('/bin/sleep', ['30'], { stdio: 'ignore' });
+      const newer = spawn('/bin/sleep', ['30'], { stdio: 'ignore' });
+      try {
+        const dirA = join(fixture.configHome, 'dir-a');
+        const dirB = join(fixture.configHome, 'dir-b');
+        await mkdir(dirA);
+        await mkdir(dirB);
+        await fixture.addRegistryRecord(older.pid!, { sessionId: S1, kind: 'interactive', cwd: dirA, startedAt: 1_000 });
+        await fixture.addRegistryRecord(newer.pid!, { sessionId: S1, kind: 'interactive', cwd: dirB, startedAt: 2_000 });
+        const fs = await start(deafWatch);
+
+        const row = (pid: number, dir: string) => ({ sessionId: S1, appSessionId: null, holder: { kind: 'terminal', pid }, cwd: dir });
+        const bySession = await fs.holdersNow({ sessionIds: [S1], directories: null });
+        expect(bySession.holders).toHaveLength(2);
+        expect(bySession.holders).toEqual(expect.arrayContaining([row(older.pid!, await realpath(dirA)), row(newer.pid!, await realpath(dirB))]));
+        expect((await fs.holdersNow({ sessionIds: null, directories: [dirA] })).holders).toEqual([row(older.pid!, await realpath(dirA))]);
+        expect((await fs.holdersNow({ sessionIds: null, directories: [dirB] })).holders).toEqual([row(newer.pid!, await realpath(dirB))]);
+        expect(fs.state().holders).toEqual([{ sessionId: S1, appSessionId: null, holder: { kind: 'terminal', pid: newer.pid } }]); // the badge stays one per session
+      } finally {
+        older.kill('SIGKILL');
+        newer.kill('SIGKILL');
+      }
+    });
+
+    it('compares and answers directories NFC-normalised, composed and decomposed names alike', async () => {
+      // fs.promises.realpath returns an existing directory's name as stored on disk (here decomposed), so the answered
+      // cwd is NFC only by normalisation; a directory that no longer exists is compared as written, NFC-normalised.
+      const decomposed = join(fixture.configHome, 'cafe\u0301');
+      const composed = join(fixture.configHome, 'caf\u00e9');
+      expect(composed).not.toBe(decomposed);
+      await mkdir(decomposed);
+      await fixture.addRegistryRecord(process.pid, { sessionId: S1, kind: 'interactive', cwd: decomposed });
+      const fs = await start(deafWatch);
+
+      const answer = await fs.holdersNow({ sessionIds: null, directories: [composed] });
+      expect(answer.holders.map((h) => h.sessionId)).toEqual([S1]);
+      expect(answer.holders[0].cwd?.endsWith('/caf\u00e9')).toBe(true);
+
+      const gone = '/nonexistent-maws-c4/proje\u0301t'; // a project directory since removed
+      await fixture.addRegistryRecord(process.pid, { sessionId: S1, kind: 'interactive', cwd: gone });
+      const byGone = await fs.holdersNow({ sessionIds: null, directories: ['/nonexistent-maws-c4/proj\u00e9t'] });
+      expect(byGone.holders.map((h) => [h.sessionId, h.cwd])).toEqual([[S1, '/nonexistent-maws-c4/proj\u00e9t']]);
+    });
+
+    it('fails with "holder registry unreadable: <errno>" when the registry cannot be read, rather than answering a stale table', async () => {
+      await fixture.addRegistryRecord(process.pid, { sessionId: S1, kind: 'interactive', cwd: '/work/a' });
+      const fs = await start(deafWatch);
+      expect((await fs.holdersNow({ sessionIds: [S1], directories: null })).holders).toHaveLength(1);
+      const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+      await chmod(fixture.paths.sessions, 0o000); // the fixture's own temp directory, never the owner's store
+      try {
+        await expect(fs.holdersNow({ sessionIds: [S1], directories: null })).rejects.toThrow('holder registry unreadable: EACCES');
+      } finally {
+        await chmod(fixture.paths.sessions, 0o755);
+        errors.mockRestore();
+      }
     });
 
     it('does not answer a record whose process has died, even with the file left behind', async () => {
