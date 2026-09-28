@@ -22,16 +22,23 @@ const oldestOf = (items: AttentionItem[]) => items.reduce((a, b) => (at(b) < at(
 // One row per session with an open item: tier 1 if any is actionable, else tier 2 (held peer messages only); the row
 // shows the oldest item of its tier. Order: tier, then longest wait, then title. Archived sessions, and sessions whose
 // record has not arrived yet, have no row.
+// The item a session's Needs-you row stands for: the oldest open item of its highest tier (actionable before held
+// messages), with the tier and the open count; null when nothing is open. The sidebar's tree row shows the same item.
+export function waitingItem(items: AttentionItem[]): Omit<NeedsYouRow, 'appSessionId'> | null {
+  const open = items.filter(isOpen);
+  if (open.length === 0) return null;
+  const actionable = open.filter(isActionable);
+  const tier = actionable.length > 0 ? 1 : 2;
+  return { oldest: oldestOf(tier === 1 ? actionable : open), count: open.length, tier };
+}
+
 export function needsYou(bySession: Map<AppSessionId, AttentionItem[]>, records: Map<AppSessionId, SessionRecord>): NeedsYouRow[] {
   const rows: NeedsYouRow[] = [];
   for (const [appSessionId, items] of bySession) {
     const record = records.get(appSessionId);
     if (!record || record.archived) continue;
-    const open = items.filter(isOpen);
-    if (open.length === 0) continue;
-    const actionable = open.filter(isActionable);
-    const tier = actionable.length > 0 ? 1 : 2;
-    rows.push({ appSessionId, oldest: oldestOf(tier === 1 ? actionable : open), count: open.length, tier });
+    const waiting = waitingItem(items);
+    if (waiting) rows.push({ appSessionId, ...waiting });
   }
   const title = (id: AppSessionId) => records.get(id)?.title.text ?? '';
   return rows.sort(

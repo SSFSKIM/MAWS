@@ -87,6 +87,16 @@ describe('sidebar row text', () => {
     expect(secondaryLine(r, null, [])).toBeNull();
   });
 
+  it('the waiting item is the one its Needs-you row shows: an actionable item outranks an older held message', () => {
+    const r = record('r');
+    const held = item('r', 'held_peer_message', '2026-09-28T09:00:00Z', { summary: 'Message from reviewer' });
+    const permission = item('r', 'permission', '2026-09-28T10:00:00Z', { summary: 'Bash: git push' });
+    const pending = [held, permission];
+    expect(needsYou(new Map([[r.appId, pending]]), new Map([[r.appId, r]]))[0].oldest).toBe(permission);
+    expect(secondaryLine(r, digest('r', { phase: 'waiting' }), pending)).toBe('Bash: git push');
+    expect(secondaryLine(r, digest('r', { phase: 'idle' }), [held])).toBe('Message from reviewer');
+  });
+
   it('ages read now, minutes, hours, days, weeks', () => {
     expect([0, 59_000, 60_000, 3_599_000, 3_600_000, 86_399_000, 86_400_000, 7 * 86_400_000, -5000].map(formatAge)).toEqual([
       'now', 'now', '1m', '59m', '1h', '23h', '1d', '1w', 'now',

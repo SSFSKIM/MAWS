@@ -5,7 +5,7 @@ import type { AttentionItem } from '@shared/graph/attention';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { ProjectRecord, SessionDigest } from '@shared/ipc/schema';
-import { isOpen, type NeedsYouRow } from '../attention/derive';
+import { waitingItem, type NeedsYouRow } from '../attention/derive';
 import { sortSessions, type SidebarSort } from '../overview/derive';
 
 // A project renders at most this many sessions before "Show N more" (residue *Sidebar scale*: no virtualisation).
@@ -91,14 +91,14 @@ export function sidebarModel({ records, digests, projects, rows, sort, query }: 
 }
 
 // What a row says under its title (§5.1: the current activity while working, the last assistant line when idle):
-// the holder for a foreign-live session, the oldest waiting item's line, the activity while working, else the last
-// answer.
+// the holder for a foreign-live session, the line of the item its Needs-you row shows (`waitingItem`), the activity
+// while working, else the last answer.
 export function secondaryLine(record: SessionRecord, digest: SessionDigest | null | undefined, pending: AttentionItem[]): string | null {
   const { holder } = record;
   if (holder.kind === 'terminal') return `Terminal · pid ${holder.pid}`;
   if (holder.kind === 'background_job') return holder.pid === null ? 'Background job' : `Background job · pid ${holder.pid}`;
-  const open = pending.filter(isOpen);
-  if (open.length > 0) return open.reduce((a, b) => (Date.parse(b.createdAt) < Date.parse(a.createdAt) ? b : a)).summary;
+  const waiting = waitingItem(pending);
+  if (waiting) return waiting.oldest.summary;
   if (isWorking(digest ?? undefined) && digest?.activity) return digest.activity;
   return digest?.lastAssistantLine ?? null;
 }
