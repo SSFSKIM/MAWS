@@ -1,0 +1,650 @@
+# C6 — Transcript
+
+Child of the composite spec `docs/charter.md`, child id **C6**, parent pin `87f8c7881119ea670901205dae35917d3751459c`. Design lives in the charter: the C6 section in §12, §5.3 (turn structure, groups, receipts, subagents, thinking, plan, question, boundaries, errors, time separators, virtualisation), §4.2 "further engine semantics" (revisable log, plan outcomes, bash echo), §5.4 (the composer and the docked request are C7's; the transcript leaves a slot), §6 (typography), §7.3 (the anchoring spike, folded in here as M1), contract X3 which C6 owns and X1, X4, X7, X8 which it consumes (§13), the binding grades in §11, and the Decision Log entries of §19 on the safeguard verdict (cell detail and turn summary only, never a per-cell badge), auto-denied counts in the divider, rewind as an app-synthesised boundary and turn origin. Until C1's code lands, the concrete X1 event kinds, identifiers and enums are those in the Interfaces section of `docs/doperpowers/plans/2026-09-28-c1-foundations.md`; every event name below is taken from there. This document carries the constraints, the concrete X3 definitions that C7 and C8 code against, the residue decisions in paste-ready form, the milestones with their gates, and the record.
+
+## Purpose
+
+After C6, a session's whole history reads like a conversation rather than a tool log. A user message sits in its bubble; below it the assistant's answer comes first, and the work that produced it (reads, searches, edits, commands, subagents, thinking) folds under one line, "Worked for 2m 14s · 12 tool calls · 1 denied", that opens into semantic groups ("Edited 3 files, ran 2 commands"), each group into cells, each cell into its full detail (the command with its cwd and output and exit status, the edit with its inline diff, the read with its path chips, the MCP call with a raw escape hatch). A denied action is never buried: it stands outside its group, the divider counts it, and clicking the count lands on it. A turn that changed files ends with a receipt naming the first three files with line counts, a route into Review, and Undo bound to the engine's file rewind. Subagents appear as one sentence per lifecycle step with a glyph each, updating as their messages arrive, and open the child's own transcript rendered by the same code. Answered questions and approved plans stay in history as what was asked and what was chosen; a pending one leaves a slot where C7's request card docks. Compaction, reset, retraction and rewind draw a line where the model's context changed, so what the reader sees matches what the model has. `!` commands show as replayed rows keyed on the engine's bash tags. Markdown streams with math, diagrams and highlighted code as tokens arrive, and a five-hundred-turn transcript with nested child activity scrolls at sixty frames per second while expanding old work never drags the reader back to the stream.
+
+To see it working before C3 and C4 exist: `pnpm dev:harness` opens the transcript harness, a development page that plays any probe fixture or a synthetic five-hundred-turn transcript into the real renderer at adjustable speed, through a replay stub that turns journal rows into X1 events. C7 docks its cards into the slot this renderer leaves; C8 mounts this renderer over a child agent's events for its drill-in.
+
+What C6 does not do: talk to an engine (C3), read `~/.claude` (C4), own the composer, the request card or the docked approval (C7), the right panel and its drill-in navigation (C8), or the tab strip and window (C5). C6 renders X1 events it is given and exposes a component, a store and callbacks.
+
+## Progress
+
+- [ ] M1 — Anchoring spike (G1)
+- [ ] M2 — Presentation model, replay stub and the snapshot suite
+- [ ] M3 — Transcript view: virtualised list, follow mode, markdown stack, text rows
+- [ ] M4 — Work area: divider, groups, cells, detail, receipts, subagent rows, bash rows
+- [ ] M5 — Requests, boundaries, errors, spills and the public API for C7 and C8
+- [ ] M6 — Acceptance run
+
+## Terms
+
+- **Event** (X1): one `SessionEvent` from `src/shared/graph/events.ts` (C1), a discriminated union on `kind`; C3 produces them from the wire, C4 from disk, the replay stub below from fixtures. C6 consumes events and nothing rawer.
+- **Presentation model** (X3): the tree of **rows** and **cells** derived from events, defined in `src/renderer/src/transcript/model/rows.ts`. A **row** is a unit of the virtualised list (one entry in `getVirtualItems()`); a **cell** is one tool call's line inside an activity group (or, when standalone, a row of its own); **cell detail** is the expanded body of a cell.
+- **Turn**: the events between a `turn.started` and its `turn.ended`, or opened implicitly by the first top-level `user.message` after a closed turn. A turn has an **origin**: `human` when the owner sent the message, `engine` when the engine started it after a workflow or background completion (`turn.started.origin !== 'human'`).
+- **Work area**: the rows of a turn between its user message and its final answer (thinking, groups, cells, subagent rows, request slots). The **divider** is the row that summarises the work area and folds it.
+- **Activity group**: consecutive **groupable** tool cells rendered as one row with a summary phrase; a **standalone** cell breaks the run and is a row of its own.
+- **Category**: one of the six summary buckets of X3 plus the catch-all `other` (Interfaces, classification), in the fixed order MCP sources, loaded skills, file changes, exploration, commands, web.
+- **Answer**: the assistant text blocks after the last tool use of a turn. **Commentary**: assistant text blocks between tool uses (the model narrating). Both are `assistant_text` rows; only the answer stays outside the work area.
+- **Follow mode**: the list is pinned to its end and moves with new content. Broken by any upward scroll beyond the threshold; restored by "Jump to latest" or by scrolling back to the end.
+- **Replay stub**: `src/renderer/src/transcript/dev/replay-stub.ts`, a development-only normaliser from X8 journal rows to X1 events, implementing the derivation rules pinned in C1's Interfaces for the frames the transcript renders. It stands in for C3's normaliser and is retired when C3 lands.
+- **Harness**: `src/renderer/harness.html`, a second renderer entry built only in development or when `MAWS_HARNESS=1`, that mounts the real transcript over a chosen fixture through the replay stub, with playback speed, an "expand all old work" control and a metrics overlay Playwright reads.
+- **Spill**: a tool result too large for the wire; the engine writes it under `tool-results/` and the event carries `spillPath` (X1 `tool.result`). C4 reads it on request.
+- **Safeguard verdict**: X1's `tool.result.safeguard` (`not_evaluated`, `not_flagged`, `flagged`), the auto-mode server lane's review of a tool call.
+- **Interruption**: a `user-rejected` denial inside a turn whose `turn.ended.terminalReason` is an aborted reason; rendered as "stopped", never as "denied" (pass-2 item 7).
+
+## Constraints
+
+Binding on every milestone, from the charter:
+
+- §5.3 element list and group semantics (binding), X3 (binding: C7's cards and C8's drill-in render the same rows), §19 safeguard rendering (cell detail and turn summary only, never a per-cell badge), auto-denied counts in the divider, rewind as an app-synthesised boundary, turn origin on engine-initiated turns. Visual details of §5.3, the copy, and mockup 02 are advisory.
+- X1 as defined in C1's Interfaces: C6 reads `SessionEvent` only; the eight identifiers stay branded; `ParentToolUseId` is converted with `toolUseOf` only where the parent cell is looked up; child-agent traffic (`parentToolUseId !== null`) is never rendered inside the parent's rows (§4.2, S-3). C6 never parses a wire frame in product code.
+- §4.2 "further engine semantics": the transcript is not append-only. `boundary.retraction`, `assistant.block.complete.supersedes`, `boundary.compaction`, `boundary.reset` and `boundary.rewind` are applied, never ignored. Plan outcomes are the three of `PLAN_OUTCOMES`. `!` output is a replayed row keyed on the bash tags; the echo message that follows is not a second user bubble.
+- X7: components use tokens only, as `var(--token)` or the utility of the same name; the tokens guard of C1 runs over `src/renderer/**` including everything C6 adds. Light theme first; dark must switch cleanly, highlighted code included.
+- §4.1: the renderer is sandboxed; it loads nothing by path (no `file:` images, no fetches); everything it shows arrives as event data or through an X2 command. The production CSP of C1 (`img-src 'self' data: blob:`, no remote scripts) is the security boundary for markdown, diagrams and images.
+- §7.3 and C6's G1: the anchoring spike runs first, on the owner's machine, with a recorded verdict; §10 item 7 is the parent-level check it serves.
+- X8: fixtures are the probe's journals; C6's synthetic fixtures use the same row format and must pass C1's wire validators.
+- X4: the request card is C7's; C6 renders a slot and a placeholder, never its own approval controls.
+- D-1, D-11: no engine code, macOS only.
+- Commit rules from `CLAUDE.md` and the owner's global instructions: no attribution footers.
+
+Advisory (§4.7, §5, §6): Streamdown and TanStack Virtual, kept here with the evidence in Dependencies; the numbers (bounded heights, thresholds, estimates), the copy strings, the glyph set, the theme names for Shiki. A milestone points at a residue decision by its italic title rather than restating it.
+
+## Repository map
+
+Everything C6 adds lives under `src/renderer/src/transcript/`, plus the harness entry, test support and the end-to-end spec. Files of other children it touches are marked; each touch is additive.
+
+```
+src/renderer/harness.html                                  dev entry (built in serve mode or MAWS_HARNESS=1)
+src/renderer/src/harness/{main.tsx,Harness.tsx,player.ts,metrics.ts}
+src/renderer/src/transcript/index.ts                       the public surface C7 and C8 import
+src/renderer/src/transcript/model/rows.ts                  X3 types (rows, cells, detail, classification, ids)
+src/renderer/src/transcript/model/classify.ts              tool name → category, presentation, group-start
+src/renderer/src/transcript/model/reduce.ts                applyEvents: events → TurnState (incremental)
+src/renderer/src/transcript/model/derive.ts                rowsOf: TurnState → Row[] (memoised per turn)
+src/renderer/src/transcript/model/keys.ts                  TurnId, RowId, CellId construction
+src/renderer/src/transcript/model/copy.ts                  divider, summary, group, cell and boundary strings
+src/renderer/src/transcript/model/time.ts                  durations, time separators
+src/renderer/src/transcript/model/serialize.ts             rows → markdown (copy)
+src/renderer/src/transcript/source/{types,ipc,replay}.ts   TranscriptSource and its two adapters
+src/renderer/src/transcript/view/Transcript.tsx            the virtualised list, follow mode, jump-to-latest
+src/renderer/src/transcript/view/rows/*.tsx                one component per row kind
+src/renderer/src/transcript/view/cells/*.tsx               Cell, CellDetail variants
+src/renderer/src/transcript/view/markdown/{Markdown.tsx,plugins.ts,Link.tsx,Image.tsx}
+src/renderer/src/transcript/view/transcript.css            component styles (tokens only)
+src/renderer/src/transcript/dev/replay-stub.ts             X8 journal rows → X1 events (development and tests)
+src/renderer/src/stores/transcript.ts                      Zustand store: one TranscriptState per app session or child
+src/renderer/src/styles/app.css                            [C1] + @source lines, @custom-variant dark, the Streamdown token bridge
+src/main/window.ts                                         [C1] + load harness.html when MAWS_HARNESS=1
+electron.vite.config.ts                                    [C1] + harness input, server.fs.allow for fixtures
+package.json                                               [C1] + dev:harness, e2e:transcript scripts, dependencies
+test/support/fixtures.ts                                   [C1] + loadSyntheticJournal, listSyntheticJournals, loadEventFixture
+test/support/synth-transcript.ts                           the seeded 500-turn generator (X1 events)
+test/fixtures/transcript/*.jsonl                           synthetic journals (X8 format) for elements no probe fixture produces
+test/fixtures/transcript/events/*.events.jsonl             synthetic X1 event lists for shapes C3 has not fixed on the wire
+test/snapshots/transcript/<pass>/<fixture>.rows.json       presentation-model snapshots
+e2e/transcript.spec.ts                                     Playwright over the harness (G1 and scroll behaviour)
+```
+
+## Interfaces and Dependencies
+
+Everything below is code that is itself a decision: the shapes C7 and C8 import, the classification table, the derivation rules, the strings that are decisions, and the library configuration. Zod schemas exist only for the row model's snapshot validation (`RowSchema`, used by the snapshot suite); X3 is otherwise TypeScript types, because rows never cross a process boundary.
+
+### X3 — identifiers and classification (`src/renderer/src/transcript/model/rows.ts`, `keys.ts`)
+
+```ts
+import type { SessionId, MessageUuid, ToolUseId, TaskId, AgentId, RequestId } from '@shared/graph/ids';
+import type { DenialKind, SafeguardVerdict, PermissionMode } from '@shared/graph/enums';
+import type { ContentBlock, TokenUsage, Question } from '@shared/graph/events';
+
+export type TurnId = string & z.$brand<'TurnId'>;   // `turn:<userMessageUuid>`; `turn:e<eventId>` for engine-initiated turns or a user message without uuid
+export type RowId  = string & z.$brand<'RowId'>;    // formats in keys.ts, listed below
+export type CellId = string & z.$brand<'CellId'>;   // `cell:<toolUseId>`; `cell:think:<messageUuid>:<blockIndex>`; `cell:hook:<hookId>`; `cell:reads:<firstToolUseId>` for a merged read cell
+
+export const TOOL_CATEGORIES = ['mcp', 'skills', 'files', 'exploration', 'commands', 'web', 'other'] as const;  // fixed summary order (X3); `other` is phrased only when it is the sole category
+export type ToolCategory = (typeof TOOL_CATEGORIES)[number];
+
+// Attached to every tool event at derivation time (X3's five fields, plus the two X1 facts the renderer shows in detail).
+export interface ToolClassification {
+  groupable: boolean;                 // false ⇒ standalone: the cell is a row of its own and breaks the group run
+  hidden: boolean;                    // true ⇒ the cell exists in the expanded group but contributes no summary phrase (bookkeeping tools)
+  category: ToolCategory;
+  denial: { kind: DenialKind; interruption: boolean; reason: string | null } | null;   // interruption: user-rejected inside an aborted turn
+  subagentLifecycle: 'start' | 'progress' | 'finish' | 'message' | null;
+  startsGroup: boolean;               // a new group begins here even though the previous cell was groupable
+  safeguard: SafeguardVerdict;
+  humanDecision: boolean;             // a permission.requested for this tool use was resolved by the human ('user')
+}
+```
+
+Row id formats (`keys.ts`), all deterministic from X1 identifiers so a re-derivation of a turn yields the same ids and the virtualiser keeps its anchor: `time:<turnId>`, `user:<messageUuid>` (or `user:<eventId>`), `text:<messageUuid>:<blockIndex>`, `divider:<turnId>`, `group:<firstCellId>`, standalone cells use their `CellId`, `receipt:<turnId>`, `subagent:<taskId>` (a grouped sentence uses the first task id), `agentmsg:<eventId>`, `think:<messageUuid>:<blockIndex>`, `plan:<toolUseId>`, `question:<toolUseId>`, `slot:<requestId>`, `error:<eventId>` (`retry:<turnId>` for the in-place retry row, `reconnect:<sessionId>`), `boundary:<eventId>`, `bash:<inputMessageUuid>`.
+
+### X3 — rows, cells and detail (`rows.ts`)
+
+```ts
+export interface RowBase { id: RowId; turnId: TurnId | null; at: string }
+
+export type Row = RowBase & (
+  | { kind: 'time'; label: string }                                                             // "Today 1:12 AM"
+  | { kind: 'user'; messageUuid: MessageUuid | null; text: string; attachments: Attachment[]; lines: number; editable: boolean }
+  | { kind: 'assistant_text'; messageUuid: MessageUuid | null; blockIndex: number; markdown: string; live: boolean; phase: 'answer' | 'commentary'; model: string | null }
+  | { kind: 'divider'; state: 'working' | 'completed' | 'stopped' | 'failed'; origin: 'human' | 'engine'; startedAt: string; endedAt: string | null;
+      toolCalls: number; denied: number; autoDenied: number; firstDeniedCell: CellId | null; expanded: boolean; summary: TurnSummary }
+  | { kind: 'group'; state: 'active' | 'completed'; cells: Cell[]; summary: string; activeLabel: string | null; icon: ToolCategory; expanded: boolean }
+  | ({ kind: 'cell' } & Cell)                                                                    // a standalone cell
+  | { kind: 'receipt'; files: ChangedFile[]; added: number; removed: number; state: 'applied' | 'undoing' | 'undone' | 'reapplying'; canUndo: boolean; canReapply: boolean }
+  | { kind: 'subagent'; agents: SubagentRef[]; sentence: string; status: SubagentStatus; overflow: number }   // overflow: agents beyond the four glyphs
+  | { kind: 'agent_message'; direction: 'to_child' | 'from_child' | 'between'; from: SubagentRef | null; to: SubagentRef | null; text: string }
+  | { kind: 'thinking'; messageUuid: MessageUuid | null; text: string; live: boolean; durationMs: number | null }
+  | { kind: 'plan'; toolUseId: ToolUseId; plan: string; outcome: (typeof PLAN_OUTCOMES)[number] | null; feedback: string | null }
+  | { kind: 'question'; toolUseId: ToolUseId; questions: Question[]; answers: Record<string, string> | null }
+  | { kind: 'request_slot'; requestId: RequestId; toolUseId: ToolUseId | null; requestKind: 'permission' | 'question' | 'plan' | 'dialog' | 'elicitation'; toolName: string | null; requestedAt: string }
+  | { kind: 'error'; severity: 'transient' | 'error' | 'notice'; text: string; attempt: { n: number; max: number | null } | null;
+      scope: 'turn' | 'task' | 'process' | 'transport' | 'request' | 'api' | 'reconnect' | 'notice' | 'exit'; lostAttentionCount: number | null }
+  | { kind: 'boundary'; boundaryKind: 'compaction' | 'reset' | 'retraction' | 'rewind'; text: string; detail: string | null; hiddenRows: number; revealed: boolean }
+  | { kind: 'bash'; command: string; stdout: string; stderr: string; exitCode: number | null; cwd: string | null }
+);
+
+export interface Attachment { kind: 'image' | 'file' | 'text'; name: string; bytes: number | null; dataUrl: string | null; mediaType: string | null }
+export interface ChangedFile { path: string; change: 'create' | 'update' | 'delete'; added: number; removed: number; cellId: CellId }
+export interface SubagentRef { taskId: TaskId; agentId: AgentId | null; toolUseId: ToolUseId | null; name: string; glyph: number; kind: 'agent' | 'workflow'; subagentType: string | null }
+export type SubagentStatus = 'started' | 'working' | 'finished' | 'finished_with_errors' | 'stopped';
+
+export interface Cell {
+  id: CellId; toolUseId: ToolUseId | null; toolName: string; category: ToolCategory;
+  classification: ToolClassification;
+  status: 'running' | 'done' | 'error' | 'denied' | 'stopped';
+  label: string;                       // the one line the collapsed cell shows (copy.ts)
+  paths: string[];                     // file chips; a merged read cell lists every path
+  startedAt: string; endedAt: string | null;
+  detail: CellDetail; expanded: boolean;
+  agent: SubagentRef | null;           // set when rendered inside a child transcript (variant 'child')
+}
+
+export type CellDetail =
+  | { kind: 'shell'; command: string; description: string | null; cwd: string | null; stdout: string; stderr: string; exitCode: number | null; interrupted: boolean;
+      backgroundTaskId: TaskId | null; truncated: Truncation | null; spill: Spill | null }
+  | { kind: 'edit'; filePath: string; change: 'create' | 'update' | 'delete'; hunks: Hunk[]; added: number; removed: number }
+  | { kind: 'read'; files: { path: string; range: [number, number] | null }[]; preview: string | null; truncated: Truncation | null }
+  | { kind: 'search'; query: string; scope: string | null; matches: number | null; output: string; truncated: Truncation | null }
+  | { kind: 'web'; url: string | null; query: string | null; output: string; truncated: Truncation | null }
+  | { kind: 'mcp'; server: string; tool: string; input: unknown; result: string | ContentBlock[]; structured: unknown; spill: Spill | null }
+  | { kind: 'image'; images: { dataUrl: string; mediaType: string; alt: string | null }[]; caption: string | null }
+  | { kind: 'thinking'; text: string; durationMs: number | null }
+  | { kind: 'hook'; event: string; name: string; outcome: 'success' | 'error' | 'cancelled' | 'running'; exitCode: number | null; stdout: string; stderr: string }
+  | { kind: 'generic'; input: unknown; result: string | ContentBlock[]; structured: unknown; isError: boolean; spill: Spill | null; truncated: Truncation | null };
+
+export interface Hunk { oldStart: number; oldLines: number; newStart: number; newLines: number; lines: string[] }   // the engine's structuredPatch shape, lines prefixed ' ', '+', '-'
+export interface Truncation { shownHead: number; shownTail: number; omittedBytes: number }
+export interface Spill { path: string; bytes: number | null; state: 'not_loaded' | 'loading' | 'loaded' | 'failed'; content: string | null }
+
+export interface TurnSummary {
+  durationMs: number | null; toolCalls: number; byCategory: Record<ToolCategory, number>;
+  denials: { kind: DenialKind; cellId: CellId; interruption: boolean }[]; autoDenied: number;
+  safeguard: { reviewed: number; flagged: number; notEvaluated: number };   // shown here and in cell detail only (§19)
+  costUsd: number | null; usage: TokenUsage | null; model: string | null; childAgents: number; terminalReason: string | null;
+}
+```
+
+Cells that are not standalone live only inside their `group` row's `cells`; a standalone cell is a flat `cell` row. Cell detail is part of the cell (rendered when `expanded`), which is how X3's "cell detail" row type manifests: a node of the presentation tree, not a separate virtual row, because a cell's detail opens inside its group's bounded scroller.
+
+### X3 — classification (`classify.ts`)
+
+`classifyTool(toolName, input, context)` returns a `ToolClassification`. The table is the contract; unknown tool names take the last row, so the function is total over MCP, plugin and future engine tools.
+
+| Tool name | Category | Presentation | Notes |
+|---|---|---|---|
+| `mcp__<server>__<tool>` | `mcp` | grouped | server and tool from the name; phrase "Used <server>" |
+| `Skill` | `skills` | grouped | "Loaded <skill> skill" from `input.skill` |
+| `ToolSearch` | `skills` | grouped | "Loaded N tools" from `structured.matches.length` |
+| `Read`, `Glob`, `LS`, `LSP`, `NotebookRead` | `exploration` | grouped | consecutive reads merge into one read cell with path chips |
+| `Grep` | `exploration` | grouped | "Searched for `<pattern>` in <path>" |
+| `Edit`, `MultiEdit`, `Write`, `NotebookEdit` | `files` | grouped | feeds the receipt; hunks from `structured.structuredPatch` |
+| `Bash`, `BashOutput`, `KillShell`, `Monitor` | `commands` | grouped | a result with `structured.backgroundTaskId` stays `running` until its `task.notification` |
+| `WebFetch`, `WebSearch` | `web` | grouped | "Fetched <host>" / "Searched the web for <query>" |
+| `Agent`, `Task` | — | standalone → `subagent` row | the tool cell is not rendered; lifecycle from `subagent.*` and `task.*` events keyed by `toolUseId`/`taskId` |
+| `Workflow` | — | standalone → `subagent` row, `kind: 'workflow'` | phases from `workflow.progress` on the row's detail line |
+| `SendMessage` | — | standalone → `agent_message` row | `direction` from `input.to` |
+| `AskUserQuestion` | — | standalone → `question` row (or `request_slot` while pending) | |
+| `ExitPlanMode` | — | standalone → `plan` row (or `request_slot` while pending) | |
+| `EnterPlanMode`, `EnterWorktree`, `ExitWorktree` | `other` | grouped, hidden | cell label "Entered plan mode", "Entered worktree <path>" |
+| `TodoWrite`, `TaskCreate`, `TaskUpdate`, `TaskList`, `TaskGet`, `TaskOutput`, `TaskStop` | `other` | grouped, hidden | bookkeeping; visible only in the expanded group |
+| `SendUserFile` | `other` | standalone | cell "Sent <file name>"; the file renders in C8's Sent files |
+| settings and plugin hook lifecycle (`hook.started`/`hook.finished`) | `commands` | grouped; standalone when `outcome !== 'success'` | cell "Hook <event> · <name>"; hooks outside any turn are not rendered |
+| any other name | `other` | grouped | "Used <ToolName>" |
+
+Overrides, applied after the table, in this order: a tool result carrying a `denial` (any kind) → standalone, `status: 'denied'`, or `'stopped'` when it is an interruption; a tool use with `humanDecision` → standalone (the human's decision stays visible when the group is collapsed); a result whose content contains an `image` block, or whose `structured.isImage` is true → standalone with `detail.kind: 'image'`; `isError` without a denial → stays grouped with `status: 'error'` (a failing command is ordinary work, Codex's rule, `research/codex-thread-ux.md` §2). `startsGroup` is true for the first groupable cell after the turn's start, after a standalone row of any kind, after an `assistant_text` commentary row, after a `subagent` or `agent_message` row, and after a boundary; thinking blocks between tool uses become `thinking` cells inside the open group and do not start one (a group that opens with a thinking cell and never gets a tool cell is emitted as a `thinking` row instead). A completed group with exactly one non-hidden cell unwraps to a standalone `cell` row; an active group never unwraps.
+
+### Derivation (`reduce.ts`, `derive.ts`)
+
+```ts
+export interface TurnState {
+  id: TurnId; origin: 'human' | 'engine'; state: 'open' | 'closed';
+  startedAt: string; endedAt: string | null;
+  events: SessionEvent[];                 // top-level events of this turn in arrival order (child events are indexed, not listed)
+  children: Map<ToolUseId, SessionEvent[]>;   // child-agent events by parent tool use, for subagent row updates and drill-in seeding
+  live: { messageUuid: MessageUuid | null; blockIndex: number; blockType: 'text' | 'thinking' | 'tool_use'; buffer: string } | null;
+  ended: Extract<SessionEvent, { kind: 'turn.ended' }> | null;
+  version: number;                        // bumps on every change; derive.ts memoises rows per (id, version, uiVersion)
+}
+export interface TranscriptUi { expandedTurns: Set<TurnId>; collapsedTurns: Set<TurnId>; expandedGroups: Set<RowId>; expandedCells: Set<CellId>; revealedBoundaries: Set<RowId>; version: number }
+export interface TranscriptState {
+  sessionId: SessionId | null; agentId: AgentId | null;    // agentId set for a child transcript
+  turns: Map<TurnId, TurnState>; order: TurnId[];
+  loose: SessionEvent[];                                   // events outside any turn (boundaries between turns, process exit, reconnects)
+  hidden: { fromTurn: TurnId; rows: number } | null;       // the branch a rewind hid
+  pending: Map<RequestId, SessionEvent>;                   // unresolved requests → request_slot rows
+  ui: TranscriptUi;
+}
+export function createState(sessionId: SessionId | null, agentId: AgentId | null): TranscriptState;
+export function applyEvents(state: TranscriptState, events: SessionEvent[]): TranscriptState;    // pure; returns a new state sharing untouched turns
+export function rowsOf(state: TranscriptState): Row[];                                          // flat, virtualised order; memoised per turn
+export function turnSummary(turn: TurnState): TurnSummary;
+```
+
+Rules the reducer implements (the parts that are decisions; the executor derives the rest from the row types):
+
+- **Turn boundaries.** `turn.started` opens a turn (id from `userMessageUuid`, else `turn:e<eventId>`; origin from `origin`). If no turn is open, a top-level non-replay `user.message` or `assistant.block.*` opens one implicitly (C4's backfill may not synthesise `turn.started`). `turn.ended` with `isEchoReceipt: true` is ignored. Any other `turn.ended` closes the turn, stores it, and re-derives the turn once, which is when interruptions are paired (denial `user-rejected` + aborted `terminalReason`) and the divider state settles (`completed`, `stopped` when the terminal reason is an abort, `failed` when `isError`).
+- **Child traffic.** An event with `parentToolUseId !== null` is appended to `children[toolUseOf(parentToolUseId)]` and updates the matching subagent row's last-activity line (`tool.use.toolName`, latest text) and nothing else in the parent. `variant: 'child'` transcripts are built from a child's own event slice, where those events are top-level.
+- **Streaming.** `assistant.block.delta` appends to `live.buffer` for the block named by `(apiMessageId, blockIndex)`; a text block's row shows the buffer with `live: true`; `assistant.block.complete` replaces the buffer with the block's content and clears `live`. A `tool_use` block's delta accumulates `inputJsonDelta`; the cell is created at `tool.use`, not from partial JSON. Deltas do not bump the turn `version` (the live row subscribes to the buffer directly), so no other turn re-derives on a token.
+- **Groups and rows** are derived per turn from `events`, in order: user row; then, in event order, thinking rows or cells, tool cells folded into groups by the classification, subagent rows (one per `subagent.started`; consecutive starts from the same assistant message merge into one grouped sentence), agent-message rows, plan and question rows, request slots for pending requests, commentary text rows; then the answer rows (text blocks after the last tool use of the turn); then the receipt when any `files` cell exists. The divider row is emitted right after the user row when the turn has any work-area row; a turn with no work area has no divider. Work-area rows are present in `rowsOf` only when the turn is expanded.
+- **Expansion state** lives in `ui`, keyed by ids, so a re-derived turn keeps what the reader opened. Default for a closed turn is collapsed; an open (working) turn is expanded with completed groups collapsed and the active group's header live. At `turn.ended` the turn collapses only if the reader is following (the view tells the store through `setFollowing`); otherwise it stays expanded until the reader collapses it (residue *Virtualisation and anchoring*).
+- **Revisable log.** `boundary.retraction` removes every row derived from `retractedMessageUuids` from its turn and inserts a boundary row at that position; `supersedes` on a completed block replaces the superseded message's rows. `boundary.compaction` and `boundary.reset` become boundary rows between turns (or inside the turn if they arrive mid-turn). `boundary.rewind` hides every row after `precedingAssistantUuid` (turns are kept in `turns`, removed from `order`, counted in `hidden`) and inserts a boundary row at the end offering to reveal them; a revealed branch renders muted with its rows marked not in context.
+- **Requests.** `permission.requested`, `question.requested`, `plan.requested`, `dialog.requested`, `elicitation.requested` add to `pending` and emit a `request_slot` row at their position; the matching `*.resolved`/`*.answered` removes the slot and, for a question or a plan, emits the historical row with the answer or the outcome. A permission resolved by the human marks the tool's `humanDecision`. A `permission.requested` whose `resolvedBy` is `'abort'` or `'exit'` leaves no historical row (the process exit row says what happened).
+- **Receipts** aggregate `files` cells of the turn including child-agent edits attributed to it; `added`/`removed` count `+`/`-` lines of `structured.structuredPatch` hunks, falling back to line counts of `input.new_string`/`input.old_string` when `structured` is null (disk backfill without `toolUseResult`).
+- **Bash rows.** A `user.message` with `bash.part === 'input'` opens a bash row keyed on its uuid; the next `bash.part === 'output'` completes it. A `user.message` with `origin === 'bash_echo'` renders nothing (overlap with C3, below).
+- **Time separators** are inserted before a `human` turn when ≥ 60 minutes passed since the previous row, and before an `engine` turn or a loose row when ≥ 10 minutes passed (Codex's thresholds); labels are Today, Yesterday, the weekday within six days, else the date, followed by the time in the user's locale.
+- **Spills.** A `tool.result` with `spillPath` yields a detail with `spill: { path, state: 'not_loaded' }` and the wire preview as content; loading is a view action through `TranscriptActions.loadSpill`.
+
+### Copy (`copy.ts`)
+
+The strings that are decisions. `{t}` is a duration: under a minute `45s`, under an hour `2m 14s`, else `1h 02m`. Counts pluralise (`1 tool call`, `12 tool calls`).
+
+| Row | State | Text |
+|---|---|---|
+| divider | working, under 1 s | `Working` |
+| divider | working | `Working for {t}` |
+| divider | completed, human origin | `Worked for {t} · {n} tool calls` (no count when n = 0) |
+| divider | completed, engine origin | `Continued for {t} · {n} tool calls` |
+| divider | stopped | `You stopped after {t} · {n} tool calls` |
+| divider | failed | `Failed after {t} · {n} tool calls` |
+| divider | suffixes | ` · {d} denied` (link to `firstDeniedCell`), ` · {a} auto-denied` (link); interruptions are not counted |
+| group, active | a tool running | `Running \`{cmd}\` for {t}` / `Reading {file}` / `Editing {file}` / `Searching for \`{pattern}\`` / `Fetching {host}` / `Using {server}` / `Loading {skill}` |
+| group, active | nothing running | `Thinking` |
+| group, completed | phrases in category order, joined by `, `, first letter capitalised | `Used {server}` (≤ 3 named, else `{n} sources`); `Loaded {skill} skill` / `{n} skills` / `{n} tools`; `Edited {n} files` (singular names the file: `Edited useSidebarDrag.ts`; creates and deletes fold into the count); `Read {n} files` / `Read {file}`, `searched for \`{pattern}\``; `Ran {n} commands` / `Ran \`{cmd}\``, `ran {n} hooks`; `Searched the web for {query}` / `Fetched {host}` / `Fetched {n} pages`; `Used {n} tools` only when `other` is the sole category; fallback `Worked` |
+| cell | shell done | `Ran \`{cmd}\` in {t}`; error: `Failed \`{cmd}\` in {t}`; stopped: `Stopped \`{cmd}\` after {t}`; background: `Started \`{cmd}\` in the background` |
+| cell | shell footer | `✓ Exit code 0 · {t}` / `✕ Exit code {n} · {t}` (exit code parsed from the result text when present) / `Failed · {t}` / `Stopped after {t}` |
+| cell | edit | `Edited {path} +{a} −{r}` / `Created {path}` / `Deleted {path}` |
+| cell | read | `Read {path}`; merged: `Read {n} files` with chips |
+| cell | denied | `Denied: \`{cmd or tool}\` · {reason}`; auto: `Auto mode blocked: \`{cmd}\` · {reason}`; interruption: `Stopped: \`{cmd}\`` |
+| cell detail | safeguard line | `Auto mode · reviewed · not flagged` / `Auto mode · flagged` / `Auto mode · not reviewed` |
+| turn summary | popover from the divider | `{Worked/Continued/...} for {t} on {model} · {n} tool calls: {category phrases} · {d} denied ({kinds}) · Auto mode reviewed {r} actions, {f} flagged · ${cost} · {tokens} tokens · {c} subagents` (segments omitted when zero or unknown) |
+| subagent | grouped sentence | `{A}, {B} and {C} started working` (≤ 3 names, else `{A}, {B} and {n} more`); `{A} finished`; `{A} finished with errors`; `{A} was stopped`; working detail: `{A} · {lastTool} · {t}` |
+| agent_message | | `Sent message to {name}: {text}` / `Message from {name}: {text}` / `Message from parent: {text}` |
+| thinking | | `Thinking` (live) / `Thought for {t}` |
+| plan | outcome badge | `Implemented` / `Cleared context and implemented` / `Kept planning: {feedback}` / `Pending` |
+| question | header | `{header}`; answered options carry `Chosen` |
+| request_slot | placeholder when C7 supplies no card | `Waiting for you · {toolName or kind} · answer in the composer` |
+| boundary | compaction | `Context compacted · {pre}k → {post}k tokens · {auto/manual}`; historical: `Compacted earlier · {pre}k → {post}k` |
+| boundary | reset | `Conversation reset · {trigger words}` (`after plan approval`, `cleared`, or the trigger verbatim) |
+| boundary | retraction | `Response retracted · {reason} · switched to {model}` |
+| boundary | rewind | `Rewound to here · {n} messages hidden · Show` / `· Hide` |
+| error | api retry | `Retrying ({n}/{max}) · {status} {error}` updated in place |
+| error | reconnect | `Reconnecting ({n}/{max})…` / `Reconnected` / `Could not reconnect · {reason}` |
+| error | process exit | `Session process exited ({reason}) · {k} approvals lost` |
+| error | turn or task error | the message; `Failed turns keep their partial output above` is implied by the divider, not written |
+| bash | | `! {command}` header, output, `exit {code}` footer |
+| user | collapse | `Show more` / `Show less` beyond 20 lines |
+| receipt | | `{n} files changed · +{a} −{r}`, `Review changes ↗`, `Show {n} more`, `Collapse files`, `Undo`, `Reapply`, states `Changes applied` / `Changes undone` |
+| jump control | | `Jump to latest` (with working dots while a turn is open) |
+
+### Public surface (`src/renderer/src/transcript/index.ts`)
+
+What C7 and C8 import; nothing else under `transcript/` is a contract.
+
+```ts
+export interface TranscriptSource {
+  subscribe(listener: (events: SessionEvent[]) => void): () => void;   // batches, in order
+  snapshot(): Promise<SessionEvent[]>;                                  // everything so far; called once on mount, then subscribe
+}
+export function ipcSource(appSessionId: AppSessionId, agentId?: AgentId): TranscriptSource;   // over the X2 surface below
+export function replaySource(events: SessionEvent[], options?: { speed?: number }): TranscriptSource & Player;   // harness and tests
+export interface Player { play(): void; pause(): void; step(): void; seek(seq: number): void; readonly done: boolean }
+
+export interface TranscriptActions {
+  openSubagent(ref: SubagentRef): void;                       // C8: Subagents tool with that agent selected
+  openFullLog(cell: Cell): void;                              // C8: destination of "Open full log"
+  reviewChanges(turnId: TurnId, path?: string): void;         // C8: Review tool
+  openFile(path: string, line?: number): void;                // C5: layout.openTab { kind: 'file' }
+  openExternal(url: string): void;                            // C5: layout.openExternal
+  editAndResubmit(row: Extract<Row, { kind: 'user' }>): void; // C7: prefill the composer; forks history (§4.2)
+  loadSpill(spill: Spill): Promise<string>;                   // C4: fs.readSpill; default adapter provided
+}
+export interface RewindInterface {
+  canUndo(turnId: TurnId): Promise<{ ok: boolean; reason: string | null }>;   // dry run; disables the button with the reason as tooltip
+  undo(turnId: TurnId): Promise<void>;
+  reapply: ((turnId: TurnId) => Promise<void>) | null;                        // null hides Reapply (C3 decides whether the wire supports it)
+}
+export interface TranscriptProps {
+  source: TranscriptSource;
+  variant: 'session' | 'child';
+  actions?: Partial<TranscriptActions>;
+  rewind?: RewindInterface;
+  renderRequest?: (slot: Extract<Row, { kind: 'request_slot' }>) => React.ReactNode;   // C7's X4 card; default placeholder
+  onFollowChange?: (following: boolean) => void;
+  className?: string;
+}
+export const Transcript: React.FC<TranscriptProps>;
+export { useTranscriptStore } from '../stores/transcript';     // rows, summaries and jumpTo(rowId) for C5's Overview line and C8's drill-in
+export { classifyTool, applyEvents, rowsOf, turnSummary, dividerCopy, serializeRows } ;
+export type { Row, Cell, CellDetail, TurnSummary, ToolClassification, ToolCategory, SubagentRef, TurnId, RowId, CellId };
+```
+
+`useTranscriptStore` (`src/renderer/src/stores/transcript.ts`) keeps one `TranscriptState` per key (`appSessionId`, or `appSessionId:agentId` for a child), applies batches through `applyEvents`, exposes `rows(key)`, `lastAssistantLine(key)` (for C5's sidebar and Overview secondary line), `jumpTo(key, rowId)` (expands the owning turn and group, then scrolls), and `setFollowing(key, boolean)`.
+
+### X2 surface C6 consumes — overlaps to confirm with the owners
+
+C6 owns no namespace. It codes against `TranscriptSource` and `TranscriptActions`, so each name below is one adapter line; the shapes are what C6 needs, proposed here for the owner to accept or rename.
+
+| Name | Kind | Owner | Shape | Why C6 needs it |
+|---|---|---|---|---|
+| `session.eventBatch` | event | C3 (live) and C4 (backfill and replay), re-emitted by main | `{ appSessionId: AppSessionId; events: SessionEvent[] }` | the stream; batched per animation frame before IPC (§5.7) |
+| `session.events` | command | C4, with C3 for the live tail | `{ appSessionId; afterSeq: number \| null }` → `{ events: SessionEvent[]; complete: boolean }` | snapshot for a page mounted after events flowed (C1's reload principle) |
+| `fs.readSpill` | command | C4 | `{ path: string; offset?: number; length?: number }` → `{ content: string; bytes: number; truncated: boolean }` | spilled results, loaded by the path the engine reported (§4.3) |
+| `fs.agentEvents` | command | C4 | `{ appSessionId; agentId: AgentId }` → `{ events: SessionEvent[] }` | a background child's full transcript for C8's drill-in (`agent-*.jsonl` backfilled to X1) |
+| `engine.rewindFiles` | command | C3 | `{ appSessionId; userMessageUuid: MessageUuid; dryRun: boolean }` → `{ ok: boolean; enabled: boolean; message: string \| null }` | receipt Undo; dry run answers `canUndo` |
+| `layout.openTab` | command | C5 | `{ kind: 'file'; path: string; line?: number }` → `void` | path chips |
+| `layout.openExternal` | command | C5 | `{ url: string }` → `void` | links in markdown |
+| `user.message.origin === 'bash_echo'` | value convention | C3 | the host stamps the non-querying echo frame's `origin.kind` as `bash_echo` (the `UserInputFrame.origin` field) so its replay carries it | the echo is not a second user bubble |
+
+C7 and C8 supply the rest as callbacks (no IPC from C6). `attention.*` is not consumed: the slot row carries the request reference, and C7 maps it to the attention item.
+
+### Markdown stack (`view/markdown/`)
+
+Verified against the published packages on 2026-09-28 (Dependencies). `Markdown.tsx` wraps Streamdown once for every markdown surface (assistant text, user text, plan body, question descriptions):
+
+```tsx
+<Streamdown mode={live ? 'streaming' : 'static'} isAnimating={live} parseIncompleteMarkdown={live}
+  plugins={plugins}                      // { code, math } always; mermaid joins after its lazy import (plugins.ts)
+  skipHtml                               // raw HTML in model output is dropped, never rendered
+  urlTransform={defaultUrlTransform}     // Streamdown's exported default: http(s), mailto and relative survive; data: and file: hrefs are dropped
+  linkSafety={{ enabled: false }}        // links are intercepted, not gated by a modal
+  components={{ a: TranscriptLink, img: TranscriptImage }}
+  controls={{ code: { copy: true, download: false }, table: { copy: true, download: false, fullscreen: false }, mermaid: { copy: true, download: false, fullscreen: true, panZoom: true }, image: false }}
+  lineNumbers={false} codeBlockMaxHeight={480} tableMaxHeight={320} dir="auto"
+  className="transcript-prose">{markdown}</Streamdown>
+```
+
+`plugins.ts`: `code = createCodePlugin({ themes: ['github-light', 'github-dark'] })` (Shiki on the main thread, JavaScript regex engine, grammars lazy per language, tokens cached per block; residue *Code highlighting*); `math = createMathPlugin({ singleDollarTextMath: false, errorColor: 'var(--danger)' })`; `mermaid` is `await import('@streamdown/mermaid')` the first time a completed fence tagged `mermaid` is seen in any transcript, then `createMermaidPlugin({ config })` with `securityLevel: 'strict'`, `suppressErrorRendering: true`, `theme: 'base'` and `themeVariables` read from the computed X7 tokens at that moment, rebuilt on theme change (residue *Mermaid*). `TranscriptLink` renders an `a` with the URL as title and routes clicks to `actions.openExternal` (http, https, mailto) or `actions.openFile` (a path that exists in the session's directories is not known to the renderer, so any non-URL href becomes a path chip that calls `openFile`). `TranscriptImage` renders `data:` sources inline (user attachments, image results) and everything else as a chip with the alt text and the source, because the renderer loads nothing by path (Constraints). Styles: `streamdown/styles.css` and `katex/dist/katex.min.css` are imported once by `Transcript.tsx`; `app.css` gains the `@source` lines for `streamdown` and the three plugins, `@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));` so Streamdown's `dark:` utilities follow MAWS's theme attribute, and a token bridge in `@theme inline` for the shadcn names Streamdown's dist uses (`--color-background: var(--bg); --color-foreground: var(--fg); --color-muted: var(--bg-raised); --color-muted-foreground: var(--fg-muted); --color-primary: var(--accent); --color-primary-foreground: var(--bg); --radius-xl: var(--radius-lg); --text-sm: var(--text-ui); --text-xs: var(--text-ui-sm)`; `--color-border` already maps X7's `--border`). Residue *Streamdown configuration*.
+
+### Virtualisation and follow mode (`view/Transcript.tsx`)
+
+```ts
+const virtualizer = useVirtualizer({
+  count: rows.length, getScrollElement: () => scrollRef.current,
+  getItemKey: (i) => rows[i].id,                 // stable X3 ids; index keys are what breaks prepend and re-derivation
+  estimateSize: (i) => ESTIMATES[rows[i].kind],  // time 56, user 96, assistant_text 140, divider 40, group 32 (280 expanded), cell 28 (220 expanded),
+                                                 // receipt 150, subagent 32, agent_message 32, thinking 32 (180 expanded), plan 260, question 220, request_slot 48, error 36, boundary 36, bash 120
+  overscan: 6, anchorTo: 'end', followOnAppend: true, scrollEndThreshold: 80,
+});
+// each row: <div ref={virtualizer.measureElement} data-index={item.index} style={{ transform: `translateY(${item.start}px)` }} />
+```
+
+Follow mode is `virtualizer.isAtEnd()` sampled on scroll and on data change; the store learns it through `setFollowing`. "Jump to latest" is a floating control above the bottom edge, visible while not following, calling `scrollToEnd({ behavior: 'instant' })`. Collapsed work-area rows are absent from `rows`, not hidden by CSS, so measurement is truthful. A jump to a row (`jumpTo`) expands what contains it, waits one frame for the rows to exist, then `scrollToIndex(index, { align: 'center' })` and moves focus to the row. The scroll container is a normal vertical scroller with rows in DOM order and `overflow-anchor: none` (the virtualizer owns anchoring; browser anchoring would fight it). Residue *Virtualisation and anchoring*.
+
+### Replay stub, synthetic fixtures and harness
+
+`replay-stub.ts` exports `journalToEvents(rows: JournalRow[], options?: { sessionId?: SessionId }): SessionEvent[]`. It implements, for the frames the transcript renders, exactly the derivation rules in C1's Interfaces ("Derivation rules that are part of the contract"): `system/init` → `session.init`; `out` `user` frames → `turn.started` (`userMessageUuid` from the frame's `uuid`, origin `human`); `in` `user` frames → `user.message` (bash tags parsed into `bash`, `isReplay`, `origin.kind`) or, per `tool_result` block, `tool.result` (`denial` from `tool_result_meta[].non_execution_kind`, `structured` from `tool_use_result`, `safeguard` from the verdicts collected off `message_delta.safeguard_results`, which also yield `tool.safeguard`); `assistant` frames → one `assistant.block.complete` per block plus `tool.use` for `tool_use` blocks (`supersedes`, `aborted` carried); `stream_event` `content_block_delta` → `assistant.block.delta`; `result` → `turn.ended` with `origin.kind`, `isEchoReceipt` (`num_turns: 0` and null `terminal_reason` after a `shouldQuery: false` frame), `permission_denials`; `control_request` `can_use_tool` → `question.requested` (AskUserQuestion), `plan.requested` (ExitPlanMode) or `permission.requested`, and the `out` `control_response` → the matching resolution (`resolvedBy: 'user'`); `hook_callback` → `hook.callback_requested`; `elicitation` → `elicitation.requested`/`resolved`; `system` `task_started`/`task_progress`/`task_updated`/`task_notification` → `subagent.*` for `local_agent` and `task.*` for other task types, `task_progress.workflow_progress` → `workflow.progress`; `hook_started`/`hook_response` → `hook.started`/`hook.finished`; `rewind_conversation` success response → `boundary.rewind`; `compact_boundary`, `conversation_reset`, `model_refusal_fallback` → the three other boundaries; `api_retry` → `api.retry`; `informational`/`notification` → `notice.posted`; the journal's `exit` meta row → `process.exited`; every unknown frame → `frame.unknown`. Timestamps come from the frame when it has one, else the row's `at`; `seq` is the row's `seq`; `parentToolUseId` and `agentId` are carried through. It is a development artefact: when C3 lands, the snapshot suite switches its input to C3's normaliser output and the stub is deleted (residue *Replay stub and harness*).
+
+Synthetic journals under `test/fixtures/transcript/` (X8 row format, validated by C1's `parseJournalRow`, `parseStdoutFrame`, `parseStdinFrame` in the round-trip suite, which the executor extends to this directory through `listSyntheticJournals()`), one per gap in the probe fixtures: `edit-and-receipt` (Read, Edit with `structuredPatch`, MultiEdit, Write, a test run, an answer with a fenced code block), `plan-outcomes` (three turns: ExitPlanMode allowed; denied with mode change and a `conversation_reset`; denied with feedback), `agents-and-messages` (two Agent calls in one message, progress, SendMessage, notification, an engine-initiated follow-up), `exploration-and-web` (Grep, Glob, six Reads, WebSearch, WebFetch, Skill, ToolSearch, an `mcp__` call), `denials` (a human deny, an `automode-blocked` result, a `user-rejected` interruption with an aborted result, and a `!` command with its two replayed frames followed by the host's `bash_echo` message), `attachments-and-images` (a user message with an image block, a Read returning an image block), `boundaries` (`compact_boundary`, two `api_retry`, `model_refusal_fallback` with retracted uuids, an `informational` notice, gaps for time separators, an exit meta row), `long-output` (a Bash result over 64 KB, a result with a spill notice), `math-and-diagrams` (answers with `$$` math and a `mermaid` fence). Shapes not yet fixed on the wire by C3 (`session.reconnect`, `process.exited` with `lostAttentionCount`, `spillPath`) are X1 event lists under `test/fixtures/transcript/events/*.events.jsonl`, loaded by `loadEventFixture(name)`.
+
+`test/support/synth-transcript.ts` exports `synthesise({ turns, seed, streamLast })` → `SessionEvent[]`, seeded and deterministic: per turn a user message of 1 to 20 lines, thinking, zero to three groups of one to eight tool calls across every category, every tenth turn two child agents with 5 to 20 child events each (`parentToolUseId` set), an answer with headings, lists, a table and fenced code (ts, py, json, sh), a mermaid fence every 25th turn, `$$` math every 15th, a receipt every 5th, a denial every 40th, a compaction every 200th, timestamps spaced to produce time separators; with `streamLast`, the final turn's answer is emitted as `assistant.block.delta` events for the player to release at a rate.
+
+The harness (`src/renderer/src/harness/`) reads `?fixture=<pass1|pass2|synthetic>/<name>` (synthetic: `synthetic/500`), `?speed=` (`0` instant, `1` wall clock from timestamps, `4`, `16`), `?theme=dark`, mounts `<Transcript source={replaySource(...)} variant="session" actions={toastActions} rewind={mockRewind} />`, offers a fixture picker, play, pause, step, "expand all old work", theme toggle, and exposes `window.__maws_harness = { load(fixture), play(speed), pause(), step(), expandAll(), expandTurn(n), scrollToTurn(n), metrics() }` where `metrics()` returns `{ frameIntervals: number[], rows, domRows, deriveMs, lastBatchMs }` (frame intervals from a `requestAnimationFrame` loop started by `play`). Fixtures reach the renderer through `import.meta.glob('/spikes/protocol-probe/fixtures/**/*.jsonl', { query: '?raw', import: 'default' })` and the same for `test/fixtures/transcript/`; `electron.vite.config.ts` adds the repository root to the renderer's `server.fs.allow` and `harness.html` to `rollupOptions.input` in serve mode or when `MAWS_HARNESS=1`; `src/main/window.ts` loads `harness.html` instead of `index.html` when `MAWS_HARNESS=1`. Actions in the harness show toasts naming the call (`openSubagent ad286defbc77bc090`, `rewind.undo turn:…`), so behaviour is observable without C7 or C8.
+
+### Dependencies
+
+All checked against the npm registry and the unpacked tarballs on 2026-09-28 (Surprises & Discoveries); the reasoning is in the residue decisions.
+
+| Package | Pin | Note |
+|---|---|---|
+| streamdown | ^2.6.0 | modified 2026-08-24; `plugins`, `mode`, `isAnimating`, `skipHtml`, `urlTransform`, `linkSafety`, `controls`, `components`, `lineNumbers`, `codeBlockMaxHeight`, `tableMaxHeight`, `dir` verified in `dist/index.d.ts`; hardening by rehype-harden with `allowedLinkPrefixes: ['*']`, `allowedImagePrefixes: ['*']` defaults and rehype-sanitize; `styles.css` export |
+| @streamdown/code | ^1.1.1 | depends on `shiki ^3.19.0` (resolves 3.23.0, not shiki 4); `createCodePlugin({ themes })`; `createHighlighter` with `createJavaScriptRegexEngine({ forgiving: true })`, one highlighter per language, tokens cached, all on the main thread |
+| @streamdown/math | ^1.0.2 | remark-math 6, rehype-katex 7, `katex ^0.16.27` (resolves 0.16.47); `createMathPlugin({ singleDollarTextMath, errorColor })` |
+| @streamdown/mermaid | ^1.0.2 | imports `mermaid` statically (`mermaid ^11.12.2`, resolves 11.17.2; mermaid 12.0.0 is outside its range); defaults `startOnLoad: false, theme: 'default', securityLevel: 'strict', suppressErrorRendering: true`; hence the dynamic import of the plugin module |
+| katex | ^0.16.47 | direct dependency for the stylesheet import |
+| @tanstack/react-virtual | ^3.14.13 | `@tanstack/virtual-core` 3.17.11 exports `anchorTo`, `followOnAppend`, `scrollEndThreshold`, `scrollToEnd`, `isAtEnd`, `getDistanceFromEnd`, `shouldAdjustScrollPositionOnItemSizeChange` (verified in the d.ts) |
+| radix-ui | ^1.6.7 | `Popover` for the turn summary, `Tooltip` for chips and disabled Undo; nothing else |
+
+Not added: `mermaid` or `shiki` directly (the plugins' ranges decide, one copy each), `react-markdown`, `@shikijs/stream` (the promote criterion of *Code highlighting* names it), any virtualiser other than TanStack.
+
+## Residue decisions (C6, 2026-09-28)
+
+Paste-ready for the charter's §12 C6 section, in the C1 format: what the design left to the child, settled here; the execution document `docs/doperpowers/plans/2026-09-28-c6-transcript.md` carries the milestones and the concrete X3 definitions. Grades: binding where the design binds the outcome, advisory where a later child may overturn with a dated line here.
+
+- *Derivation architecture*: an incremental reducer (`applyEvents`) that keeps one `TurnState` per turn and re-derives rows per turn on change, with rows memoised per turn version and streaming deltas written to a live buffer that only the live row subscribes to; the flat row list for the virtualiser is the concatenation of per-turn row arrays. Reason: a five-hundred-turn transcript receives up to sixty delta batches a second, and only the open turn may pay for them; retraction, supersession and rewind need "unapply", which a per-turn rebuild from retained events gives for free. Alternative: memoised selectors over the whole event array, rejected because every selector is O(events) per invalidation and the memo keys would have to reinvent turn boundaries. Binding on stable ids and per-turn re-derivation (C7 and C8 key on X3 ids); advisory on the store mechanism (Zustand, per C1's *State wiring*).
+- *Row identity*: ids are deterministic functions of X1 identifiers (`user:<messageUuid>`, `cell:<toolUseId>`, `group:<firstCellId>`, `divider:<turnId>`, `subagent:<taskId>`, `boundary:<eventId>`, …; the full table is in the execution document), never positions. Reason: TanStack's end anchoring and prepend stability require stable keys, and a re-derived turn must produce the same ids so expansion state and scroll anchors survive. Alternative: index keys, rejected (every prepend and every collapse renumbers). Binding (X3).
+- *Tool classification*: the table in the execution document maps tool names to the six categories of X3 plus a catch-all `other` that is phrased only when it is the sole category, with three presentations (grouped, grouped-but-hidden for bookkeeping tools such as `TodoWrite` and `Task*`, standalone), overrides in order (denial, human decision, image result), and a group-start rule (first groupable cell after the turn start, a standalone row, a commentary text block, a subagent row or a boundary; thinking cells never start a group). `Agent`, `Task` and `Workflow` calls are not cells: their lifecycle events are the subagent row. Hooks from settings and plugins are command cells inside a turn and are not rendered outside one. Reason: the function must be total over MCP, plugin and future tools, and a category for the unknown keeps the six-bucket order intact. Alternative: dropping unknown tools from the summary, rejected because it hides work. Binding (X3).
+- *Denials, interruptions and the safeguard verdict*: a denied cell is standalone whatever its group, the divider counts `denied` (`user-rejected` outside an aborted turn, `permission-rule`, `automode-unavailable`, `automode-parsing-error`) and `auto-denied` (`automode-blocked`) separately, each count linking to the first such cell, expanding the work area if collapsed and moving focus; `user-rejected` inside a turn whose terminal reason is an abort is an interruption, rendered "stopped", counted in neither. The safeguard verdict appears as one line in cell detail and as one segment of the turn summary popover, never on the cell line. Reason: §19 and pass-2 item 7. Binding.
+- *Copy*: the divider states (`Working`, `Working for {t}`, `Worked for {t} · {n} tool calls`, `Continued for {t} …` for engine-initiated turns, `You stopped after {t} …`, `Failed after {t} …`, ` · {d} denied`, ` · {a} auto-denied`), the group phrases per category, the cell lines, the subagent sentences, the boundary and error lines are fixed in the execution document's copy table. Reason: copy that lives in one table can be reviewed and translated; the count semantics are what §5.3 binds. Alternative: Codex's strings verbatim, adapted where the engine differs (no "review" concept, denial kinds). Binding for what the counts mean; advisory for the words.
+- *Streamdown configuration*: Streamdown 2.6.0 with `@streamdown/code` 1.1.1, `@streamdown/math` 1.0.2 and `@streamdown/mermaid` 1.0.2, `mode` `streaming` for the live block and `static` for completed ones, `skipHtml` (raw HTML from the model is dropped), Streamdown's default `urlTransform` (http, https, mailto, relative; `data:` and `file:` become null), `linkSafety` off with our own `a` and `img` components routing clicks to C5's open-external and open-file commands and rendering non-`data:` images as chips, copy controls only (download and fullscreen need main-process dialogs), no line numbers, code blocks bounded at 480 px and tables at 320 px with internal scroll. Streamdown's dual theme rides on Tailwind's `dark:` variant and on shadcn token names, both absent after C1's palette reset, so `app.css` gains `@custom-variant dark` keyed on `[data-theme="dark"]`, the `@source` lines for the four packages, and a token bridge (`--color-background: var(--bg)`, `--color-muted: var(--bg-raised)`, `--color-muted-foreground: var(--fg-muted)`, `--color-primary: var(--accent)`, `--radius-xl`, `--text-sm`, `--text-xs`) so every colour Streamdown paints is an X7 token. Reason: the package was verified current (modified 2026-08-24), designed for unterminated markdown, and its sanitiser plus C1's CSP leave no path for model output to load or execute anything. Alternative: react-markdown with our own streaming repair, rejected as work Streamdown already does. Advisory (§4.7) except the sanitisation posture (no raw HTML, nothing loaded by path), which follows §4.1 and is binding.
+- *Code highlighting*: Shiki through `@streamdown/code` on the main thread with its JavaScript regex engine, grammars lazy per language, themes `github-light`/`github-dark` (the container chrome is ours, tokens only). Promote-to-worker criterion: if the spike or the acceptance run records a long task over 50 ms attributable to highlighting a block under 500 lines, move highlighting to a worker over `@shikijs/stream` and record it here. Reason: the plugin already caches tokens per block and highlights only rendered rows (virtualised), so the expected cost is a few milliseconds per block; a worker adds a message round trip and a second bundle for a cost nobody has measured. Advisory.
+- *Mermaid*: the `@streamdown/mermaid` module is imported dynamically the first time a completed `mermaid` fence appears, so mermaid's bundle (about 2.5 MB) never loads for sessions without diagrams; fences render as code until then and while streaming. Config: `securityLevel: 'strict'`, `suppressErrorRendering: true`, theme `base` with `themeVariables` read from the computed X7 tokens and rebuilt on theme change; no iframe (strict mode plus C1's CSP is the isolation). Reason: the plugin imports mermaid statically, so laziness has to happen at the plugin boundary. Advisory.
+- *Math*: `@streamdown/math` with `$$` delimiters only (single-dollar off, as currency text is common in transcripts), KaTeX's stylesheet imported once by the transcript root, errors in `var(--danger)`. Advisory.
+- *Images and attachments*: the renderer shows only what arrives as data: base64 image blocks in user messages and tool results render inline from `data:` URLs; markdown images and file references become chips naming the source; files the agent sends belong to C8's Sent files. Reason: the sandbox and CSP (§4.1) forbid loading by path, and a chip is honest about it. Binding on "nothing loaded by path"; advisory on the chip.
+- *Spilled results*: a result with `spillPath` shows the wire preview and a "Load full result" action that calls C4's `fs.readSpill`, streaming into the bounded detail with the same 64 KB DOM cap; beyond 2 MB the detail shows the head and offers "Open full log" (C8's callback). Advisory on the numbers; the command is an overlap with C4.
+- *Virtualisation and anchoring*: TanStack Virtual 3.14.13 with `anchorTo: 'end'`, `followOnAppend: true`, `scrollEndThreshold: 80`, stable `getItemKey`, `measureElement` on every row, a per-kind estimate table, `overscan: 6`, normal DOM order and `overflow-anchor: none`. Follow mode is `isAtEnd()`; any upward scroll past the threshold breaks it; "Jump to latest" restores it. Collapsed work-area rows leave the row list rather than hide. A finished turn auto-collapses its work area only when the reader is following; otherwise it stays open until the reader closes it, so completion never yanks content from under a reader. Reason: verified in the published `virtual-core` 3.17.11 typings (`anchorTo`, `followOnAppend`, `scrollEndThreshold`, `scrollToEnd`, `isAtEnd`), and the behaviours are what §5.3 and §7.3 demand. Alternative: react-virtuoso, rejected because TanStack's chat mode now documents exactly this and keeps the heterogeneous row rendering ours. Binding for the behaviours (§5.3, §7.3, G1); advisory for the library and its parameters.
+- *Bounded surfaces and truncation*: group scroller 224 px, cell output 144 px, thinking 140 px, plan body 144 px collapsed, user bubbles collapse past 20 lines, code blocks 480 px; any tool output over 64 KB is shown as its first 32 KB and last 16 KB with an "N KB omitted" marker (copy still copies the whole string in memory). Reason: DOM size and measurement stability; the mockup's values. Advisory.
+- *Copy and export*: per-row copy (user text, assistant markdown source, code block source, command, output, whole cell, thinking) through `navigator.clipboard`, which the sandboxed renderer may use on a user gesture; "Copy turn as markdown" on the divider menu via `serializeRows`; no file export in C6 (C11's `/export` widget uses the engine's `export_conversation`). Advisory.
+- *Subagent rows*: one row per `subagent.started`, merged into a grouped sentence when several start from the same assistant message, up to four glyphs then "N more", the glyph seeded by hashing the task id into a fixed set of eight marks, the name from the task description; the row's detail line updates from `subagent.progress` and from the child's own events (last tool, elapsed) without rendering any child row in the parent; workflows are subagent rows of kind `workflow` with the phase and agent counts from `workflow.progress`; click calls C8's `openSubagent`. The drill-in is this same `Transcript` with `variant: 'child'` over the child's event slice. Binding on never flattening child traffic (X1); advisory on the sentence rules and glyphs.
+- *Engine-initiated turns*: a turn whose origin is not human has no user row; the `task.notification` or `subagent.finished` row that triggered it is its first row and its divider reads "Continued for …". Reason: the charter's turn origin exists so the reader can tell whose turn it was. Advisory on copy.
+- *Boundaries*: compaction and reset are rows between turns; retraction removes the retracted messages' rows and leaves a row where they were; rewind removes the hidden branch from the row order, keeps it in memory, and its boundary row can reveal it muted and marked not in context. Reason: §4.2's revisable log; the app-synthesised rewind boundary of §19. Binding on the outcomes; advisory on reveal.
+- *Replay stub and harness*: `journalToEvents` under `src/renderer/src/transcript/dev/` implements C1's derivation rules for the frames the transcript renders and feeds the snapshot suite and the harness; it is deleted when C3's normaliser lands and the suite switches to C3's output. The harness is a second renderer entry (`harness.html`) built in serve mode or under `MAWS_HARNESS=1`, loaded by main under the same variable, with fixtures bundled through `import.meta.glob` and a `window.__maws_harness` API for Playwright. Synthetic journals in X8 format fill the gaps no probe fixture covers and are validated by C1's wire validators. Reason: D-3 (real data from day one) with no engine yet. Advisory.
+- *Performance budget*: full derivation of a fifty-thousand-event, five-hundred-turn transcript under 300 ms; a delta batch under 2 ms in the store; during sixty-hertz streaming with that transcript loaded, requestAnimationFrame intervals p95 ≤ 17 ms and none over 50 ms after the first half second; DOM rows ≤ visible plus twice the overscan; no long task over 50 ms from highlighting. Reason: §10 item 7 and G1. Binding (the thresholds are the gate).
+- *Testing*: the presentation model is snapshotted for every probe fixture of both passes and every synthetic journal (`test/snapshots/transcript/<pass>/<fixture>.rows.json`), the classification table and the group state machine have table tests, row components have happy-dom tests for the behaviours acceptance names, and scroll behaviour, follow mode, the denial jump and G1 run in Playwright over the harness. Binding on "snapshot every fixture" and the G1 metrics; advisory on layout.
+- *X3 location and public surface*: X3 lives under `src/renderer/src/transcript/model/rows.ts` (types), `classify.ts`, `reduce.ts`, `derive.ts`, `copy.ts`; the public surface is `src/renderer/src/transcript/index.ts` (`Transcript`, `TranscriptSource`, `TranscriptActions`, `RewindInterface`, `useTranscriptStore`, the pure functions and the types). Renderer-local because rows never cross a process. Binding (canonical files for X3).
+- *X2 overlaps*: C6 consumes `session.eventBatch` (event) and `session.events` (snapshot command) from C3/C4, `fs.readSpill` and `fs.agentEvents` from C4, `engine.rewindFiles` (with dry run) from C3, `layout.openTab` and `layout.openExternal` from C5, and the `user.message.origin === 'bash_echo'` convention from C3; shapes proposed in the execution document, each behind one adapter line. Binding once the owners accept the names; until then C6 codes against its own `TranscriptSource` and `TranscriptActions`.
+
+## Acceptance
+
+C6 closes when all of the following are observed on the owner's Mac, in this order, from the C6 worktree after `pnpm install`:
+
+1. **G1, the anchoring spike (required, first).** `pnpm e2e:transcript --grep anchoring` passes and its recorded metrics are in Surprises & Discoveries. The harness loads `synthetic/500` (at least 7,000 rows including nested child activity, code, math and diagrams), starts streaming the last turn at sixty delta batches per second, scrolls to turn 120, expands its work area, one group and two cell details, then streams for ten seconds: `scrollTop` changes by 0 px, the expanded cell's `getBoundingClientRect().top` drifts ≤ 1 px, `metrics().frameIntervals` after the first 500 ms has p95 ≤ 17 ms and max ≤ 50 ms, and `metrics().domRows` ≤ 40. Then "Jump to latest" lands within 80 px of the end and follow mode resumes (the next batch keeps the end pinned). Verdict: promote if every number holds; otherwise the Decision Log records what was changed (parameters, library, or worker highlighting) and the test is rerun until it holds.
+2. **Every element of mockup 02 renders from fixture frames.** In `pnpm dev:harness`, each of these is seen with the fixture named: user bubble with copy and edit affordances and an image attachment (`transcript/attachments-and-images`); work divider `Worked for … · 12 tool calls · 1 denied` with the denied cell standing outside its group and the count jumping to it (`pass1/permission-roundtrip`); an exploration group `Read 6 files, searched for …` with path chips (`transcript/exploration-and-web`); an edit cell with an inline diff and a shell cell with command, cwd, output, exit footer and the three copy actions (`transcript/edit-and-receipt`, `pass2/auto-classifier`); a change receipt with three files, Review changes, Undo and Reapply (`transcript/edit-and-receipt`); subagent sentences for two agents starting, progressing and finishing, and an agent message row (`pass1/subagent`, `transcript/agents-and-messages`); a thinking disclosure `Thought for …` (`pass1/init`); a streaming turn with `Thinking` then `Running \`…\` for …` and a caret on the answer (`pass2/workflow` at speed 1); a historical plan card with each outcome badge (`transcript/plan-outcomes`); a historical question with two questions and the chosen answers (`pass1/question-roundtrip`); a request slot placeholder while a request is pending (`pass2/grant-askrule-start` paused before the response); a replayed bash row (`pass1/queue-and-interrupt`); boundary rows for rewind (`pass2/rewind`), compaction, reset and retraction (`transcript/boundaries`, `transcript/plan-outcomes`); retry and reconnect rows and a process-exit row (`transcript/boundaries`, `events/reconnect`); time separators (`transcript/boundaries`); a workflow row with phases (`pass2/workflow`); hook cells (`pass2/hooks`); an elicitation resolved in history (`pass2/dialogs`); the auto-mode verdict line in a cell's detail and in the turn summary popover, and no badge on the cell line (`pass2/auto-classifier`); an engine-initiated turn reading `Continued for …` (`pass2/workflow`); math and a rendered diagram (`transcript/math-and-diagrams`).
+3. **The group state machine matches X3.** `pnpm test -- src/renderer/src/transcript` passes, including `classification table` (every row of the classify table and every override), `group state machine` (start, flush on standalone, start on commentary, thinking cells inside groups, single-cell unwrap, active group never unwraps), `presentation model snapshots` (one file per probe fixture of both passes and per synthetic journal, no drift), `divider and summary copy`, `time separators`, `revisable log` (retraction removes rows, supersedes replaces, rewind hides and reveals, compaction and reset place rows), `interruption pairing`, `receipt counts`.
+4. **Denials.** In the harness on `pass1/permission-roundtrip` with the turn collapsed, the divider shows ` · 1 denied`; clicking it expands the work area, scrolls the denied cell to centre and focuses it; the denied cell is a standalone row, not inside a group. On `transcript/denials`, the auto-denied count appears separately and the interrupted call shows `Stopped`, counted in neither.
+5. **Receipt Undo calls the rewind interface.** Unit test: with a mock `RewindInterface`, clicking Undo calls `undo(turnId)` after `canUndo` resolved `ok`, the receipt shows `Changes undone`, Reapply enables when `reapply` is non-null and is absent when it is null, and a `canUndo` answering `{ ok: false, reason }` disables Undo with the reason as tooltip. In the harness, Undo shows the toast `rewind.undo turn:…`.
+6. **Replayed bash rows render from their tags.** `pass1/queue-and-interrupt` shows one bash row `! printf BASH_MODE_OK` with output `BASH_MODE_OK` and `exit 0`; no user bubble appears for either replayed frame and none for a `bash_echo` message (`transcript/denials` carries one).
+7. **Streaming markdown.** On `synthetic/500` at speed 1, the last answer streams with unterminated fences and tables rendering cleanly; a `mermaid` fence shows as code until its closing fence and then as a diagram; math renders; switching the theme in the harness turns highlighted code to the dark theme without a reload and `pnpm test -- test/support/tokens-guard` still passes over `src/renderer/src/transcript/**`.
+8. **Performance budget.** `pnpm test -- src/renderer/src/transcript/model/perf` reports full derivation of `synthesise({ turns: 500 })` under 300 ms and a hundred consecutive delta batches under 2 ms each (median), on the owner's Mac.
+9. **Child transcript.** In the harness on `pass1/subagent`, opening a subagent row (toast `openSubagent`) and choosing "Show child" mounts a second `Transcript` with `variant: 'child'` over the child's events, showing the child's Read cell and its answer, while the parent shows only the subagent row.
+10. `pnpm verify` (C1's chain) exits 0 with C6's unit tests and `e2e/transcript.spec.ts` included.
+
+## Plan of Work
+
+Constraints for every milestone are in Constraints above; each milestone below says what exists at its end, what it touches, what it exposes and consumes, the decisions that are its alone, its edge, and what it proves.
+
+### M1 — Anchoring spike (G1)
+
+Prototyping milestone; its deliverable is knowledge and the harness skeleton. Question: with TanStack Virtual's end anchoring over heterogeneous, expandable rows containing Streamdown blocks, does a five-hundred-turn transcript stream at sixty frames per second while a reader expands old work without being moved? At the end of M1 the harness page exists, loads a synthetic five-hundred-turn transcript rendered by a prototype row renderer over the real virtualiser configuration, streams its last turn, and `e2e/transcript.spec.ts` records the numbers of acceptance item 1; the verdict is in Surprises & Discoveries with the criteria applied.
+
+Touches: `src/renderer/harness.html`, `src/renderer/src/harness/*`, `src/renderer/src/transcript/model/rows.ts` (the X3 types as written in Interfaces, so the generator and the prototype speak X3 from the start), `src/renderer/src/transcript/model/keys.ts`, `src/renderer/src/transcript/view/Transcript.tsx` (the list and follow mode only), `src/renderer/src/transcript/view/markdown/{Markdown.tsx,plugins.ts}`, a throwaway `src/renderer/src/harness/prototype-rows.tsx` (deleted in M3), `test/support/synth-transcript.ts`, `e2e/transcript.spec.ts`, `electron.vite.config.ts`, `src/main/window.ts`, `package.json` (`dev:harness`, `e2e:transcript`, the Dependencies), `src/renderer/src/styles/app.css` (the `@source` lines, `@custom-variant dark`, the token bridge).
+
+Exposes: the harness API `window.__maws_harness`, `synthesise`, the virtualiser configuration, the Markdown wrapper. Consumes: C1's `SessionEvent` types, the smoke's launch helper (`e2e/support/launch.ts`).
+
+Decisions local to M1 (the choices are the residue *Virtualisation and anchoring*, *Streamdown configuration*, *Code highlighting*, *Mermaid*, *Performance budget*, *Replay stub and harness*; what follows is their execution): the prototype derives rows from the synthetic events with a deliberately naive function (one row per event kind, groups as fixed-size expandable rows) so the spike measures the list and the markdown stack, not the reducer; the synthetic transcript is streamed by `replaySource(events, { speed })` releasing delta batches on a 16 ms timer; frame intervals are sampled by a `requestAnimationFrame` loop in `metrics.ts` and long tasks by a `PerformanceObserver` on `longtask`, both surfaced in `metrics()`; the Playwright spec drives the harness through `page.evaluate` on `window.__maws_harness` and reads `scrollTop` and bounding rects from the page. Promote criterion: every number of acceptance item 1 holds on the owner's Mac. Discard criterion, per item: if `scrollTop` moves or the rect drifts, try `shouldAdjustScrollPositionOnItemSizeChange` returning true only for items above the viewport, then a taller `overscan`, then a different library, recording each attempt; if frames miss, attribute with the long-task list (highlighting → worker criterion of *Code highlighting*; markdown parse → `mode="static"` for completed blocks is already on, so the next lever is batching deltas to 30 Hz, which the charter permits since §5.7 batches per frame); if DOM rows exceed 40, lower `overscan`.
+
+Does not touch: the reducer and classification (M2), real row components (M3, M4), any X2 adapter.
+
+Proves: acceptance item 1. Pins: the spec asserts the numbers of item 1 and fails on any of them; the harness loads `synthetic/500` in under three seconds (the naive derivation is allowed to be slow, but not that slow).
+
+### M2 — Presentation model, replay stub and the snapshot suite
+
+At the end of M2 `applyEvents` and `rowsOf` derive the full X3 model from X1 events for every probe fixture, every synthetic journal and the synthetic transcript, the classification table and the copy table are code with table tests, and the snapshot suite holds one file per fixture. Nothing visual changes: the harness still uses the prototype rows (it switches to the real model in M3).
+
+Touches: `src/renderer/src/transcript/model/{classify,reduce,derive,copy,time,serialize}.ts` and their tests, `src/renderer/src/transcript/model/rows.ts` (schemas for the snapshot validator), `src/renderer/src/transcript/dev/replay-stub.ts`, `test/support/fixtures.ts` (`listSyntheticJournals`, `loadSyntheticJournal`, `loadEventFixture`, additive), `test/fixtures/transcript/*.jsonl`, `test/fixtures/transcript/events/*.events.jsonl`, `test/snapshots/transcript/**`, `src/shared/wire/frames.test.ts` (the round-trip suite gains the synthetic journal directory; additive).
+
+Exposes: everything under Derivation, Classification and Copy in Interfaces; `journalToEvents`; the fixture loaders. Consumes: C1's X1 types, enums, `parseJournalRow`, `toolUseOf`, the fixture loader.
+
+Decisions local to M2: the snapshot file is the `Row[]` of `rowsOf` with every turn expanded and every group and cell expanded, serialised with stable key order and timestamps as they are, so a snapshot reads as the full presentation and a diff shows exactly what a change touched; `structured` and `input` payloads are included verbatim (they are what detail renders), so the files are large and that is accepted; the synthetic journals are authored by hand from the fixture shapes recorded in Surprises & Discoveries (Bash `tool_use_result` `{stdout, stderr, interrupted, isImage, noOutputExpected}`, Write `{type, filePath, content, structuredPatch, originalFile, userModified}`, Agent `{agentId, status, isAsync, outputFile, prompt, description, resolvedModel}`, `task_started`/`task_progress`/`task_notification` as in `pass1/subagent`, `can_use_tool` for `AskUserQuestion` as in `pass1/question-roundtrip`, `rewind_conversation` as in `pass2/rewind`) and from `research/sdk-wire-gap.md` §1.2 for `compact_boundary`, `conversation_reset`, `model_refusal_fallback` and `api_retry`, and each must pass the round-trip suite before a snapshot is taken; the perf test (`model/perf.test.ts`) measures derivation and delta cost with `performance.now()` and asserts the *Performance budget* numbers, skipped unless `MAWS_PERF=1` so CI-style runs on slower machines do not flake, and run explicitly in M6.
+
+Does not touch: any React component, the store's IPC adapter, the harness UI.
+
+Proves: acceptance items 3 and 8. Pins beyond acceptance, one line each: `pass1/subagent` yields one `subagent` row whose sentence reads `Read and report one.txt content started working` then `… finished` with `summary` `ONE`, and no cell for the `Agent` tool use; `pass1/permission-roundtrip` yields a divider with `denied: 1` and `firstDeniedCell` naming `cell:toolu_01WfZTvMV6147Psn1MBSesXw`, that cell standalone with reason `Probe denial: do not retry this command.`; `pass1/question-roundtrip` yields a `question` row with two questions and answers `{ "Which color do you prefer?": "Red", "Which fruits do you like?": "Apple, Pear" }`; `pass1/queue-and-interrupt` yields one `bash` row with `exitCode: 0` and the turn ended `error_during_execution` renders a `stopped` divider; `pass2/workflow` yields a `subagent` row of kind `workflow` with two agents and a second turn of origin `engine`; `pass2/rewind` yields a `boundary` row of kind `rewind` after the second turn with `hiddenRows > 0`; `pass2/bash-context-echoed` yields no turn for the echo receipt; `pass2/auto-classifier` yields a shell cell whose detail carries `safeguard: 'not_flagged'` and whose `label` contains no auto-mode word; `pass2/hooks` yields a hook cell inside the turn's group; `transcript/denials` yields `autoDenied: 1` and one `stopped` cell not counted in `denied`; `transcript/plan-outcomes` yields three `plan` rows with the three outcomes and one `reset` boundary; `transcript/boundaries` yields a `retraction` boundary and the retracted message's text row absent, two `time` rows, a `retry` row keyed `retry:<turnId>` with `attempt.n === 2`; a `supersedes` block replaces the superseded rows in a unit case; `synthesise({ turns: 500, seed: 1 })` derives to the same `Row[]` twice (determinism).
+
+### M3 — Transcript view: virtualised list, follow mode, markdown stack, text rows
+
+At the end of M3 the real `Transcript` component renders the M2 model over the M1 list: user rows with attachments, copy and edit, and the 20-line collapse; assistant text rows static and live with Streamdown; thinking rows; time separators; the divider row with its copy and its expand and collapse; the jump-to-latest control; the harness plays every fixture into it and the prototype rows are gone. Groups, cells, receipts and the rest of the work area are placeholders that M4 replaces.
+
+Touches: `src/renderer/src/transcript/view/{Transcript.tsx,transcript.css}`, `view/rows/{Time,User,AssistantText,Thinking,Divider,Placeholder}.tsx` and tests, `view/markdown/{Markdown.tsx,plugins.ts,Link.tsx,Image.tsx}`, `src/renderer/src/stores/transcript.ts`, `src/renderer/src/transcript/source/{types,replay}.ts`, `src/renderer/src/harness/*` (switch to the real model; delete `prototype-rows.tsx`), `e2e/transcript.spec.ts` (follow mode, jump, divider collapse keeps position).
+
+Exposes: `Transcript` (props as in Interfaces, actions optional), the store, `replaySource`. Consumes: M1's list and markdown wrapper, M2's model.
+
+Decisions local to M3 (the choices are the residue *Virtualisation and anchoring*, *Bounded surfaces and truncation*, *Copy and export*; what follows is their execution): the live text row subscribes to the store's live buffer with a selector so a delta re-renders one component; `Markdown` receives `live` and switches Streamdown's `mode` at block completion, which is when Streamdown re-parses once in static mode; the divider is a `button` with `aria-expanded` and `aria-controls` naming the work-area region, and its denied and auto-denied counts are links; the turn summary is a Radix `Popover` opened from the divider's trailing control, read from `turnSummary`; the user bubble's edit affordance calls `actions.editAndResubmit` and its title says "Edit and resubmit forks history"; the time separator is `role="separator"` with the label; the jump control is positioned by the `Transcript` root, not by the scroller, so it never joins the measured rows; theme reactions (Shiki dark tokens, mermaid re-render) come from a `MutationObserver` on `<html>`'s `data-theme`, C1's theme signal.
+
+Does not touch: groups, cells, detail, receipts, subagent rows, plan, question, slot, boundary, error, bash rows (placeholders only), any X2 adapter.
+
+Proves: acceptance item 7 (streaming markdown and theme switch) and the follow-mode half of item 1 rerun against the real model. Pins: a divider click removes the work-area rows from `rowsOf` and the divider's own `getBoundingClientRect().top` is unchanged after the collapse (Playwright); scrolling up 200 px during streaming sets `following` false and shows "Jump to latest"; the user row collapses past 20 lines and "Show more" expands it; a live row shows a caret and a completed one does not; a markdown link click calls `actions.openExternal` with the href and a path click calls `actions.openFile`; an `img` with a non-`data:` source renders a chip with its alt and source; the tokens guard passes over the new files.
+
+### M4 — Work area: divider, groups, cells, detail, receipts, subagent rows, bash rows
+
+At the end of M4 the work area is complete: activity groups with their summary line, icon and bounded scroller; cells for shell, edit, read, search, web, MCP, image, thinking, hook and generic tools, each expanding to its detail with the mockup's actions; standalone denied cells; the denial jump; the change receipt with Review, Show more, Undo and Reapply over `RewindInterface`; subagent and agent-message rows updating per message with `openSubagent`; replayed bash rows; the active group's live header while a turn runs; the auto-collapse rule at completion.
+
+Touches: `view/rows/{Group,Cell,Receipt,Subagent,AgentMessage,Bash}.tsx`, `view/cells/{CellLine,ShellDetail,EditDetail,ReadDetail,SearchDetail,WebDetail,McpDetail,ImageDetail,ThinkingDetail,HookDetail,GenericDetail,Truncated}.tsx` and tests, `view/transcript.css`, `e2e/transcript.spec.ts` (denial jump, expand-old-work rerun on fixtures).
+
+Exposes: nothing new to C7 or C8 beyond the rows now rendering. Consumes: M2's cells and classification, M3's list and store.
+
+Decisions local to M4 (the choices are the residue *Tool classification*, *Denials, interruptions and the safeguard verdict*, *Copy*, *Bounded surfaces and truncation*, *Subagent rows*; what follows is their execution): the group scroller is `overscroll-behavior: contain` with `tabindex="0"` and an `aria-label`, and its cells are plain disclosure buttons, so keyboard users can reach detail; the shell detail's output is `white-space: pre-wrap` in a bounded scroller with the fade mask, `Copy command`, `Copy output`, `Copy all` as in the mockup, and `Open full log` calling `actions.openFullLog`; the edit detail renders hunks with the mockup's diff lines (line numbers, add and del backgrounds from `--diff-add-bg` and `--diff-del-bg`), no third-party diff component (C8's Review owns `@git-diff-view/react`); read detail lists path chips that call `actions.openFile` with the range's first line; MCP detail shows the result blocks as text or markdown when the block is `text`, with a "Raw" toggle showing the JSON; the receipt's file rows call `actions.reviewChanges(turnId, path)`; Undo runs `canUndo` on mount (once per receipt, cached) and disables with the reason; subagent glyphs are a fixed array of eight unicode marks in the UI font, indexed by a 32-bit hash of the task id, and the row is a button when `actions.openSubagent` is supplied; the standalone denied cell is `tabindex="-1"` with `scroll-margin` so the jump can focus it; the active group's header re-renders on `tool.progress` (elapsed seconds) and on the child's events for subagent rows, through selectors on the turn's version.
+
+Does not touch: plan, question, request slot, boundary, error rows (M5), IPC adapters (M5).
+
+Proves: acceptance items 4 and 5 and the work-area half of item 2 (divider, groups, cells, detail, receipt, subagent, agent message, streaming turn, bash row). Pins: the denied count click expands the work area, scrolls the standalone denied cell to centre and moves focus to it (Playwright on `pass1/permission-roundtrip`); a completed single-cell group renders as a standalone cell row; an active group never unwraps (snapshot of `pass2/workflow` paused mid-turn); a cell's detail shows the auto-mode line and the cell line never contains the word "auto"; the receipt lists three files and "Show 2 more" for five; a subagent row's detail line changes when a child `tool.use` arrives; the interrupted cell of `transcript/denials` reads `Stopped:` and is not a link target of the divider.
+
+### M5 — Requests, boundaries, errors, spills and the public API for C7 and C8
+
+At the end of M5 every row kind renders: historical plan and question rows, the request slot with C7's card injected through `renderRequest` and the placeholder without it, boundary rows for compaction, reset, retraction and rewind (with reveal), error rows for retries, reconnects, process exit, notices and turn or task errors, the spilled-result loader, and the IPC source adapter. `src/renderer/src/transcript/index.ts` is complete and frozen for C7 and C8, with a child-variant example in the harness.
+
+Touches: `view/rows/{Plan,Question,RequestSlot,Boundary,Error}.tsx` and tests, `view/cells/Spill.tsx`, `src/renderer/src/transcript/source/ipc.ts`, `src/shared/ipc/schema/{session,fs,engine,layout}.ts` (only if the owning children have not landed the entries: C6 adds the proposed entries of the overlap table under a `// proposed by C6, owner C3/C4/C5` comment so the adapter type-checks, and the owner replaces them; if the owner's entries exist, C6 adapts to them and records any rename in the Decision Log), `src/renderer/src/transcript/index.ts`, `src/renderer/src/harness/Harness.tsx` (child-variant view, request-card injection example).
+
+Exposes: the whole public surface of Interfaces, `ipcSource`. Consumes: M2 to M4; C1's `window.maws` client.
+
+Decisions local to M5 (the choices are the residue *Boundaries*, *Engine-initiated turns*, *Spilled results*, *Images and attachments*, *X2 overlaps*; what follows is their execution): the historical question row renders each question with its options, marks the chosen ones (`answers[question.question]` split on `, ` for multi-select), never renders option previews (previews are C7's live form concern and need the isolated frame of §5.3), and has no controls; the plan row renders the plan markdown through `Markdown`, bounded at 144 px with "Show more", and its outcome badge; the request slot is `role="status"` with the placeholder text, or the node `renderRequest` returns, and is the row `jumpTo` targets when C5's Needs-you opens a session at its pending request; retry rows update in place by id; the reconnect row is loose (not in a turn) and removed on `reconnected`; the process-exit row shows `lostAttentionCount` when non-null; the spill loader calls `actions.loadSpill`, whose default implementation invokes `fs.readSpill` through the X2 client, marks `state` through the store, and applies the same truncation as any output; `ipcSource` subscribes to `session.eventBatch`, then calls `session.events` once, and drops batches whose `seq` is at or below the snapshot's last `seq` (C1's higher-revision rule, applied to `seq`); a child `ipcSource(appSessionId, agentId)` filters live events by `agentId` and seeds from `fs.agentEvents`.
+
+Does not touch: C7's card internals, C8's panel, the attention table, anything under `src/main/` or the hosts.
+
+Proves: the remaining elements of acceptance item 2 (plan, question, slot, boundaries, errors, elicitation, engine-initiated turn) and item 9. Pins: with `renderRequest` supplied, the slot renders the supplied node and no placeholder; a `question.answered` for a pending slot replaces the slot row with a `question` row at the same position (same `turnId`, same index); the rewind boundary's reveal shows the hidden turns muted and hide removes them again with the divider row's position unchanged; a `boundary.retraction` naming a message removes that message's text row and leaves the boundary at its index; `ipcSource` ignores a batch with `seq` ≤ the snapshot's last `seq` and applies the next; the spill loader shows `Load full result (184 KB)` and, after a mocked `fs.readSpill`, the content with the truncation marker when over 64 KB.
+
+### M6 — Acceptance run
+
+At the end of M6 the Acceptance section has been executed as written on the owner's Mac, item by item, and recorded in Progress with timestamps; the G1 numbers are re-measured over the real model (not the M1 prototype) and recorded beside the M1 verdict; `pnpm verify` includes C6's suites and the transcript end-to-end spec.
+
+Touches: `package.json` (`verify` gains `e2e:transcript` after `e2e`), this document (Progress, Surprises & Discoveries, Decision Log).
+
+Exposes: nothing. Consumes: everything.
+
+Decisions local to M6: the acceptance run is done in the harness and by the test commands of Concrete Steps, in order; a failed item is fixed and the whole list rerun from that item; the perf test runs with `MAWS_PERF=1`; the final G1 rerun uses `synthetic/500` with the real reducer and its numbers are recorded even if they are better than M1's.
+
+Does not touch: any interface of Interfaces (a change here goes back to M5 with a Decision Log entry).
+
+Proves: acceptance items 1 to 10 in order.
+
+## Concrete Steps
+
+Working directory for everything: the C6 worktree of `/Users/new/Developer/GitHub/MAWS` (branched from `master` after C1 lands).
+
+Spike (M1):
+
+```
+pnpm install                                   # adds streamdown, the three plugins, katex, @tanstack/react-virtual, radix-ui
+pnpm dev:harness                               # MAWS_HARNESS=1 electron-vite dev; the window shows the harness with a fixture picker
+# in the window: choose synthetic/500, speed 1 → the list fills; scroll up, expand a turn; the stream continues below without moving the view
+MAWS_HARNESS=1 pnpm build && pnpm e2e:transcript --grep anchoring
+```
+
+Expected:
+
+```
+Running 1 test using 1 worker
+  ✓  e2e/transcript.spec.ts  anchoring: 500 turns stream while old work is expanded (frames p95 12.4ms max 31.0ms, drift 0px, domRows 27)
+  1 passed
+```
+
+The numbers in parentheses are the test's own report; record them in Surprises & Discoveries with the verdict.
+
+Model (M2):
+
+```
+pnpm test -- src/renderer/src/transcript/model
+```
+
+Expected: suites `classification table`, `group state machine`, `presentation model snapshots` (one case per fixture named `<pass>/<name>`: the 10 pass-1 journals, the 30 pass-2 journals, the 9 synthetic journals under `transcript/`, the event fixtures under `transcript/events/`, and `synthetic/500`), `divider and summary copy`, `time separators`, `revisable log`, `interruption pairing`, `receipt counts`, `determinism`; and in `src/shared/wire`, the round-trip suite now lists `transcript/<name>` cases. A snapshot mismatch prints the row index and the differing field. To accept an intended change: `pnpm test -- -u src/renderer/src/transcript/model` and review the snapshot diff in the commit.
+
+View (M3, M4, M5):
+
+```
+pnpm test -- src/renderer/src/transcript
+pnpm dev:harness                                # fixture picker lists pass1/*, pass2/*, transcript/*, synthetic/*
+MAWS_HARNESS=1 pnpm build && pnpm e2e:transcript
+```
+
+Expected tail of `pnpm e2e:transcript` after M5:
+
+```
+  ✓  anchoring: 500 turns stream while old work is expanded
+  ✓  follow mode breaks on scroll-up and Jump to latest restores it
+  ✓  collapsing a divider keeps its position
+  ✓  the denied count jumps to the standalone denied cell
+  ✓  theme switch re-themes highlighted code without reload
+  ✓  child transcript renders the subagent's events only
+  6 passed
+```
+
+Acceptance (M6):
+
+```
+MAWS_PERF=1 pnpm test -- src/renderer/src/transcript/model/perf
+pnpm verify                                     # C1's chain plus C6's suites; last lines are the packaged smoke's "2 passed"
+```
+
+If `pnpm dev:harness` shows fixtures missing: the renderer's `server.fs.allow` must include the repository root (`electron.vite.config.ts`), and the glob paths are absolute from the root (`/spikes/...`, `/test/fixtures/transcript/...`). If Streamdown renders unstyled: the `@source` lines in `app.css` must point at the hoisted `node_modules` (`../../../../node_modules/...` from `src/renderer/src/styles/`). If highlighted code stays light in dark mode: the `@custom-variant dark` line is missing or names the wrong attribute.
+
+## Surprises & Discoveries
+
+- Observation: Streamdown 2.6.0 is current and its plugin split is real; the packages the charter names as "KaTeX, Mermaid and Shiki plugins" are `@streamdown/math`, `@streamdown/mermaid` and `@streamdown/code`; there is no `@streamdown/katex` or `@streamdown/shiki`.
+  Evidence: `npm view streamdown version time.modified` → `2.6.0`, `2026-08-24`; `npm view @streamdown/katex` → 404; `@streamdown/code` 1.1.1, `@streamdown/math` 1.0.2, `@streamdown/mermaid` 1.0.2 (2026-09-28).
+- Observation: `@streamdown/code` highlights on the main thread with Shiki's JavaScript regex engine, one highlighter per language, tokens cached per block, grammars loaded lazily; there is no worker.
+  Evidence: `dist/index.js`: `import {bundledLanguagesInfo,bundledLanguages,createHighlighter} from 'shiki'; import {createJavaScriptRegexEngine} from 'shiki/engine/javascript'; … createHighlighter({themes:n,langs:[e],engine:S})`; `highlight()` returns `null` first and calls back; no `Worker` in the dist.
+- Observation: `@streamdown/mermaid` imports mermaid statically, so lazy loading must wrap the plugin module; Streamdown itself lazy-loads only its own diagram renderer chunk.
+  Evidence: plugin `dist/index.js` begins `import n from 'mermaid'`; Streamdown `chunk-YOKDWASO.js` contains `import('./mermaid-HWGCJPDP.js')`; defaults `{startOnLoad:false,theme:"default",securityLevel:"strict",fontFamily:"monospace",suppressErrorRendering:true}`.
+- Observation: Streamdown's dual theme and its chrome depend on Tailwind's `dark:` variant and on shadcn token names, both of which C1's `@theme` reset removes; a custom variant and a token bridge are needed.
+  Evidence: `chunk-YOKDWASO.js` uses `dark:bg-[var(--shiki-dark-bg,…)]`, `text-muted-foreground` ×21, `bg-muted` ×19, `border-border` ×15, `bg-background` ×15, `text-foreground` ×14, `text-primary`, `rounded-xl`, `text-sm` ×21, `text-xs` ×5; C1's `app.css` opens with `--color-*: initial; --text-*: initial; --radius-*: initial`.
+- Observation: TanStack Virtual's chat mode is shipped, not proposed.
+  Evidence: `@tanstack/virtual-core@3.17.11` `dist/esm/index.d.ts` exports `anchorTo`, `followOnAppend`, `scrollEndThreshold`, `scrollToEnd`, `isAtEnd`, `getDistanceFromEnd`, `shouldAdjustScrollPositionOnItemSizeChange`; `@tanstack/react-virtual@3.14.13` depends on it exactly.
+- Observation: the probe fixtures exercise few tool kinds; the transcript's table needs synthetic journals for most cells.
+  Evidence: tool_use names across all 40 journals: top-level `Bash` 25, `Workflow` 3, `Write` 2, `Agent` 2, `AskUserQuestion` 1, `ToolSearch` 1, `mcp__maws-elicit__ask_color` 1; child `Read` 2. No `Edit`, `Grep`, `Glob`, `WebFetch`, `WebSearch`, `Skill`, `SendMessage`, `ExitPlanMode`, no image block, no `compact_boundary`, no spill.
+- Observation: the engine's Bash result carries no exit code field; the footer's exit code is parsed from the result text when present, else the status word.
+  Evidence: `tool_use_result` keys for Bash across fixtures: `stdout, stderr, interrupted, isImage, noOutputExpected` (and `backgroundTaskId` for background runs); error results are strings.
+- Observation: the Agent tool's own result is internal metadata the model is told never to quote, which is why the tool cell is not rendered and the subagent row comes from task events.
+  Evidence: `pass1/subagent` seq 174 result text begins "Async agent launched successfully. (This tool result is internal metadata — never quote or paste any part of it …)", followed by `agentId` and `output_file`.
+- Observation: a child agent's assistant frames carry `subagent_type` and `task_description` beside `parent_tool_use_id`, which is enough to label the drill-in without the sidecar's `.meta.json`.
+  Evidence: `pass1/subagent` seq 225 child `user` frame: `"parent_tool_use_id": "toolu_01CYiK6ncgQLFUQ2iqC1b4oB", "subagent_type": "general-purpose", "task_description": "Read and report one.txt content"`.
+- Observation: the mockup's work divider sits above the answer, not below it; the answer-first layout is "divider, then prose, then receipt" for a completed turn.
+  Evidence: `mockups/02-transcript.html` lines 208 to 244 and `mockups/shots/02-transcript-full.png`.
+
+## Decision Log
+
+- Decision: Verification for C6 is a task review at each milestone boundary under subagent-driven execution, dependency-frontier reviews after M2 (X3, read by C7 and C8 before any view consumes it) and after M5 (the public surface), the M1 spike verdict reviewed as a document change rather than as code, and one whole-branch independent review through `doperpowers:reviewer-medium` at the end, per the charter's §19 call (reviewer-medium for plan children other than C3 and C4).
+  Rationale: X3 is the seam the charter's §15 names ("the transcript renderer is rebuilt when grouping lands: X3 freezes the classification fields before any renderer exists"); reviewing the model before the view is how that risk is paid once.
+  Date/Author: 2026-09-28, C6 author.
+- Decision: This document is authored against parent pin `87f8c7881119ea670901205dae35917d3751459c`, the charter blob carrying C2's findings, D-19 and C1's residue decisions; every X1 name in it comes from C1's execution document, the interim canonical source until C1's code lands, and the milestones assume C1's M1 to M5 (the toolchain, `@shared/*`, the tokens guard, the fixture loader, the smoke's launch helper) are on `master` when C6 branches.
+  Rationale: coordinator instructions during authoring; the C6 section of the charter has no residue yet, so this document's "Residue decisions" is written for the coordinator to paste there, after which the pin moves and a dated line is added here.
+  Date/Author: 2026-09-28, C6 author.
+- Decision: The advisory library picks of §4.7 are kept (Streamdown with its three plugins, TanStack Virtual) after verification against the registry and the unpacked tarballs on 2026-09-28; the one adjustment is the plugin names (Surprises & Discoveries) and the dynamic import of the mermaid plugin.
+  Rationale: both are current, both do what the charter wanted them for, and the alternatives (react-markdown with our own streaming repair; react-virtuoso) buy nothing the spike cannot decide later.
+  Date/Author: 2026-09-28, C6 author.
+
+## Outcomes & Retrospective
+
+Pending — written at finish.
