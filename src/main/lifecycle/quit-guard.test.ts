@@ -111,6 +111,30 @@ describe('quit decision', () => {
     expect(ask).toHaveBeenCalledTimes(2);
   });
 
+  it('a question that fails is logged once and treated as Cancel, with no unhandled rejection', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const unhandled = vi.fn();
+    process.on('unhandledRejection', unhandled);
+    try {
+      const ask = vi.fn().mockRejectedValueOnce(new Error('no dialog')).mockResolvedValueOnce('cancel');
+      const shutdownEngine = vi.fn();
+      installQuitGuard(modelWithMidTurn(2), { ask, shutdownEngine });
+      expect(electron.app.attempt()).toBe(false);
+      await settle();
+      await settle();
+      expect(unhandled).not.toHaveBeenCalled();
+      expect(log).toHaveBeenCalledOnce();
+      expect(String(log.mock.calls[0][0])).toContain('[quit-guard]');
+      expect(shutdownEngine).not.toHaveBeenCalled();
+      expect(electron.app.quits).toBe(0);
+      expect(electron.app.attempt()).toBe(false); // not stuck asking: the next quit asks again
+      expect(ask).toHaveBeenCalledTimes(2);
+    } finally {
+      process.off('unhandledRejection', unhandled);
+      log.mockRestore();
+    }
+  });
+
   it('words the question for one and for many', () => {
     expect(quitQuestion(1)).toMatchObject({ type: 'warning', message: '1 session mid-turn', buttons: ['Quit', 'Cancel'], defaultId: 1, cancelId: 1 });
     expect(quitQuestion(4)).toMatchObject({ message: '4 sessions mid-turn', detail: 'Quitting stops them. Transcripts stay on disk and can be resumed.' });

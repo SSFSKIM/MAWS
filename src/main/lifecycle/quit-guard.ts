@@ -52,6 +52,10 @@ export function installQuitGuard(
     asking = true;
     void deps
       .ask(count)
+      .catch((error: unknown) => {
+        console.error('[quit-guard] the quit question failed; treating it as Cancel', error);
+        return 'cancel' as const;
+      })
       .then(async (answer) => {
         if (quitDecision(count, answer) !== 'quit') return;
         disarmed = true;
