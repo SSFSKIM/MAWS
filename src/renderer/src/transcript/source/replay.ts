@@ -11,7 +11,7 @@ export interface ReplaySource extends TranscriptSource, Player {
   speed: number;
 }
 
-export function replaySource(events: SessionEvent[], options: { speed?: number } = {}): ReplaySource {
+export function replaySource(events: SessionEvent[], options: { speed?: number; key?: string } = {}): ReplaySource {
   const listeners = new Set<(events: SessionEvent[]) => void>();
   const times = events.map((event) => Date.parse(event.at));
   let next = 0; // index of the first unreleased event
@@ -43,6 +43,7 @@ export function replaySource(events: SessionEvent[], options: { speed?: number }
   };
 
   return {
+    key: options.key,
     subscribe(listener) {
       listeners.add(listener);
       return () => listeners.delete(listener);

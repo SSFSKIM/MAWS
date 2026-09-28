@@ -1,16 +1,22 @@
-// The transcript's virtualised list and follow mode (residue *Virtualisation and anchoring*). M1 lands the list over
-// X3 rows with a caller-supplied row renderer (the spike's prototype rows); M3 builds `Transcript` (TranscriptProps)
-// on it with the real row components and the store.
+// The transcript (C6 execution document, Public surface; residue *Virtualisation and anchoring*): `Transcript` attaches
+// its source to the store under a key, derives nothing itself, and renders the store's rows through the virtualised
+// `TranscriptList` with one component per row kind, plus the "Jump to latest" control.
 //
 // TanStack Virtual in chat mode: stable X3 keys, `anchorTo: 'end'` (a change at either edge keeps the row under the
 // reader where it was), `followOnAppend` (a reader at the end stays pinned as rows arrive), measured rows in normal
-// DOM order, and browser scroll anchoring off because the virtualiser owns it. Follow mode is `isAtEnd()` within the
-// threshold; any upward scroll past it breaks follow, and "Jump to latest" restores it.
+// DOM order, and browser scroll anchoring off because the virtualiser owns it. Follow mode is a mode: entered at the
+// end, left only by a scroll upward, and while following every structural change keeps the end pinned.
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { memo, useCallback, useImperativeHandle, useLayoutEffect, useRef, useState, type ReactNode, type Ref } from 'react';
+import { memo, useCallback, useEffect, useId, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type Ref } from 'react';
 import 'katex/dist/katex.min.css';
 import 'streamdown/styles.css';
+import type { AgentId } from '@shared/graph/ids';
+import { useTranscriptStore } from '../../stores/transcript';
 import type { Row, RowKind } from '../model/rows';
+import type { TranscriptSource } from '../source/types';
+import { NO_ACTIONS, rowElementId, TranscriptProvider, useDisclosures, type RewindInterface, type TranscriptActions, type TranscriptContextValue } from './context';
+import { RowView } from './rows/Row';
+import './transcript.css';
 
 export const SCROLL_END_THRESHOLD = 80;
 export const OVERSCAN = 6;
@@ -44,7 +50,6 @@ export interface TranscriptListProps {
 export function TranscriptList({ rows, renderRow, onFollowChange, handle, className }: TranscriptListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const followingRef = useRef(true);
-  const [following, setFollowing] = useState(true);
   // New functions invalidate the virtualiser's measurements, so they change only with the rows.
   const getItemKey = useCallback((index: number) => rows[index].id, [rows]);
   const estimateSize = useCallback((index: number) => estimateRow(rows[index]), [rows]);
@@ -66,7 +71,6 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
       const next = instance.isAtEnd() ? true : instance.scrollDirection === 'backward' ? false : followingRef.current;
       if (next === followingRef.current) return;
       followingRef.current = next;
-      setFollowing(next);
       onFollowChange?.(next);
     },
   });
@@ -91,7 +95,7 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
   }));
 
   return (
-    <div className={`relative min-h-0 ${className ?? ''}`}>
+    <div className={`min-h-0 ${className ?? ''}`}>
       <div ref={scrollRef} className="h-full overflow-y-auto [overflow-anchor:none]" data-transcript-scroller="">
         <div className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
           {virtualizer.getVirtualItems().map((item) => {
@@ -111,15 +115,6 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
           })}
         </div>
       </div>
-      {!following && (
-        <button
-          type="button"
-          className="absolute bottom-4 left-1/2 -translate-x-1/2 rounded-md border border-border-strong bg-bg-overlay px-3 py-1 text-ui text-fg hover:bg-bg-hover"
-          onClick={() => virtualizer.scrollToEnd({ behavior: 'instant' })}
-        >
-          Jump to latest
-        </button>
-      )}
     </div>
   );
 }
@@ -128,3 +123,101 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
 const RowSlot = memo(function RowSlot({ row, renderRow }: { row: Row; renderRow: (row: Row) => ReactNode }) {
   return renderRow(row);
 });
+
+export interface TranscriptProps {
+  source: TranscriptSource;
+  variant: 'session' | 'child';
+  actions?: Partial<TranscriptActions>;
+  rewind?: RewindInterface;
+  renderRequest?: (slot: Extract<Row, { kind: 'request_slot' }>) => ReactNode; // C7's X4 card; default placeholder
+  onFollowChange?: (following: boolean) => void;
+  className?: string;
+  handle?: Ref<TranscriptListHandle>; // additive: the list's imperative handle (the harness and tests)
+}
+
+const NO_ROWS: Row[] = [];
+const CHILD = 'child' as AgentId; // a child transcript's state treats its events as top-level (Derivation, *Child traffic*)
+
+// The store key of a source: its own (`ipcSource` names the app session and agent), else one per source object.
+const generatedKeys = new WeakMap<TranscriptSource, string>();
+let generated = 0;
+export function storeKeyOf(source: TranscriptSource): string {
+  if (source.key) return source.key;
+  let key = generatedKeys.get(source);
+  if (!key) {
+    key = `source:${++generated}`;
+    generatedKeys.set(source, key);
+  }
+  return key;
+}
+
+const renderRow = (row: Row) => <RowView row={row} />;
+
+export function Transcript({ source, variant, actions, rewind, renderRequest, onFollowChange, className, handle }: TranscriptProps) {
+  const storeKey = storeKeyOf(source);
+  const rows = useTranscriptStore((state) => state.entries[storeKey]?.rows ?? NO_ROWS);
+  const working = useTranscriptStore((state) => state.entries[storeKey]?.working ?? false);
+  const jump = useTranscriptStore((state) => state.entries[storeKey]?.jump ?? null);
+  const [following, setFollowing] = useState(true);
+  const listRef = useRef<TranscriptListHandle>(null);
+  const disclosures = useDisclosures();
+  const idPrefix = `transcript${useId().replace(/[^a-zA-Z0-9]/g, '')}`;
+
+  useEffect(() => {
+    const store = useTranscriptStore.getState();
+    void store.attach(storeKey, source, { agentId: variant === 'child' ? (source.agentId ?? CHILD) : null });
+    return () => store.detach(storeKey);
+  }, [storeKey, source, variant]);
+
+  useImperativeHandle(handle, () => listRef.current!, []);
+
+  // A jump (store.jumpTo): the store has already opened what holds the row; scroll it into place, then focus it once
+  // the virtualiser has mounted it.
+  useLayoutEffect(() => {
+    if (!jump) return;
+    const index = rows.findIndex((row) => row.id === jump.rowId);
+    if (index >= 0) listRef.current?.scrollToIndex(index, jump.align);
+    const frame = requestAnimationFrame(() => {
+      const element = document.getElementById(rowElementId(idPrefix, jump.rowId));
+      const cell = jump.focus === jump.rowId ? null : element?.querySelector<HTMLElement>(`[data-cell-id="${CSS.escape(jump.focus)}"]`);
+      (cell ?? element)?.focus({ preventScroll: true });
+      useTranscriptStore.getState().jumpHandled(storeKey, jump.nonce);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [jump, rows, storeKey, idPrefix]);
+
+  const followChange = useCallback(
+    (next: boolean) => {
+      setFollowing(next);
+      useTranscriptStore.getState().setFollowing(storeKey, next);
+      onFollowChange?.(next);
+    },
+    [storeKey, onFollowChange],
+  );
+
+  // Every row reads this context: it changes only with the props, never with the rows.
+  const context = useMemo<TranscriptContextValue>(
+    () => ({ storeKey, variant, actions: { ...NO_ACTIONS, ...actions }, rewind: rewind ?? null, renderRequest: renderRequest ?? null, disclosures, idPrefix }),
+    [storeKey, variant, actions, rewind, renderRequest, disclosures, idPrefix],
+  );
+
+  return (
+    <TranscriptProvider value={context}>
+      <div className={`transcript relative min-h-0 ${className ?? ''}`}>
+        <TranscriptList rows={rows} renderRow={renderRow} onFollowChange={followChange} handle={listRef} className="h-full" />
+        {!following && (
+          <button type="button" className="transcript-jump" onClick={() => listRef.current?.scrollToEnd()}>
+            Jump to latest
+            {working && (
+              <span className="transcript-working-dots" aria-hidden="true">
+                <span />
+                <span />
+                <span />
+              </span>
+            )}
+          </button>
+        )}
+      </div>
+    </TranscriptProvider>
+  );
+}

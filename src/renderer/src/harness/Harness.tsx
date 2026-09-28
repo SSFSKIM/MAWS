@@ -1,14 +1,15 @@
-// The transcript harness page (`#transcript`): plays a fixture into the transcript list at an adjustable speed, with
-// a fixture picker, playback controls, "expand all old work", a theme toggle and a metrics overlay, and assigns
-// `window.__maws_harness` for Playwright. M1 renders the spike's prototype rows; M3 switches to the real Transcript.
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import type { Row } from '../transcript/model/rows';
-import { TranscriptList, type TranscriptListHandle } from '../transcript/view/Transcript';
+// The transcript harness page (`#transcript`): plays a fixture into the real Transcript at an adjustable speed, with a
+// fixture picker, playback controls, "expand all old work", a theme toggle, a metrics overlay, and toasts naming every
+// action the transcript calls (C7 and C8 are absent here), and assigns `window.__maws_harness` for Playwright.
+import { useEffect, useRef, useState } from 'react';
+import { useTranscriptStore } from '../stores/transcript';
+import { rowId } from '../transcript/model/keys';
+import type { TranscriptActions, RewindInterface } from '../transcript/view/context';
+import { Transcript, type TranscriptListHandle } from '../transcript/view/Transcript';
 import type { HarnessApi, HarnessMetrics } from './api';
 import { FIXTURES, loadFixture } from './fixtures';
 import { FrameMetrics, percentile } from './metrics';
 import { HarnessSession } from './player';
-import { renderPrototypeRow } from './prototype-rows';
 
 declare global {
   interface Window {
@@ -17,8 +18,6 @@ declare global {
 }
 
 const SPEEDS = [0, 1, 4, 16];
-const NO_ROWS: Row[] = [];
-const noSubscription = () => () => {};
 const nextFrame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 const painted = async () => {
   await nextFrame();
@@ -36,11 +35,10 @@ export function Harness() {
     setSpeedState(value);
   };
   const [error, setError] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ text: string; n: number } | null>(null);
   const sessionRef = useRef<HarnessSession | null>(null);
   const listRef = useRef<TranscriptListHandle>(null);
   const frames = useRef(new FrameMetrics());
-
-  const rows = useSyncExternalStore(session?.model.subscribe ?? noSubscription, session?.model.rows ?? (() => NO_ROWS));
 
   useEffect(() => {
     const theme = params.get('theme');
@@ -48,15 +46,16 @@ export function Harness() {
 
     const load = async (name: string) => {
       const started = performance.now();
+      const loaded = await loadFixture(name);
       sessionRef.current?.dispose();
       frames.current.stop();
-      const next = new HarnessSession(loadFixture(name), speedRef.current);
+      const next = new HarnessSession(loaded, speedRef.current);
       sessionRef.current = next;
       setFixture(name);
       setSession(next);
       setError(null);
       await painted();
-      return { ms: performance.now() - started, rows: next.model.rows().length, events: next.eventCount };
+      return { ms: performance.now() - started, rows: next.rows().length, events: next.eventCount };
     };
     const current = () => {
       if (!sessionRef.current) throw new Error('no fixture loaded');
@@ -65,42 +64,44 @@ export function Harness() {
     const api: HarnessApi = {
       load,
       play: (playSpeed) => {
-        const { source } = current();
+        const { player } = current();
         if (playSpeed !== undefined) {
-          source.speed = playSpeed;
+          player.speed = playSpeed;
           setSpeed(playSpeed);
         }
         frames.current.start();
-        source.play();
+        player.play();
       },
-      pause: () => current().source.pause(),
-      step: () => current().source.step(),
+      pause: () => current().player.pause(),
+      step: () => current().player.step(),
+      turnId: (n) => current().turnId(n),
       expandAll: async () => {
-        current().model.expandAll();
+        useTranscriptStore.getState().expandAll(current().key);
         await painted();
       },
       expandTurn: async (n) => {
-        const { model } = current();
-        const id = model.turnId(n);
-        if (!model.isExpanded(id)) model.toggleTurn(id);
+        const session = current();
+        const turn = session.turnId(n);
+        const divider = session.rows().find((row) => row.id === rowId.divider(turn));
+        if (divider?.kind === 'divider' && !divider.expanded) useTranscriptStore.getState().toggleTurn(session.key, turn);
         await painted();
       },
       scrollToTurn: async (n) => {
-        const { model } = current();
-        const id = model.turnId(n);
-        listRef.current?.scrollToIndex(model.rows().findIndex((row) => row.turnId === id), 'start');
+        const session = current();
+        const turn = session.turnId(n);
+        listRef.current?.scrollToIndex(session.rows().findIndex((row) => row.turnId === turn), 'start');
         await painted();
       },
       metrics: (): HarnessMetrics => {
-        const { model, lastBatchMs, batches } = current();
+        const session = current();
         return {
           frameIntervals: [...frames.current.frameIntervals],
           longTasks: [...frames.current.longTasks],
-          rows: model.rows().length,
+          rows: session.rows().length,
           domRows: listRef.current?.scrollElement?.querySelectorAll('[data-index]').length ?? 0,
-          deriveMs: model.deriveMs,
-          lastBatchMs,
-          batches,
+          deriveMs: session.deriveMs,
+          lastBatchMs: session.lastBatchMs,
+          batches: session.batches,
           following: listRef.current?.following ?? true,
         };
       },
@@ -121,6 +122,12 @@ export function Harness() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the API is assigned once per mounted page
   }, []);
 
+  useEffect(() => {
+    if (!toast) return;
+    const timer = setTimeout(() => setToast(null), 2500);
+    return () => clearTimeout(timer);
+  }, [toast]);
+
   const run = (action: () => unknown) => {
     try {
       const result = action();
@@ -135,14 +142,16 @@ export function Harness() {
     root.dataset.theme = root.dataset.theme === 'dark' ? 'light' : 'dark';
   };
 
+  // Every callback the transcript makes shows as a toast naming it (stable, so the transcript's context never changes).
+  const [{ actions, rewind }] = useState(() => toastCallbacks((text) => setToast((previous) => ({ text, n: (previous?.n ?? 0) + 1 }))));
+
   return (
-    <div className="flex h-full flex-col bg-bg text-fg">
+    <div className="relative flex h-full flex-col bg-bg text-fg">
       <div className="flex flex-wrap items-center gap-2 border-b border-border bg-bg-raised px-4 py-2 pl-20 text-ui">
         <select aria-label="Fixture" className="rounded-sm border border-border bg-bg px-2 py-1" value={fixture} onChange={(event) => setFixture(event.target.value)}>
-          {FIXTURES.map((entry) => (
-            <option key={entry.name} value={entry.name} disabled={!entry.playable}>
-              {entry.name}
-              {entry.playable ? '' : ' (M2)'}
+          {FIXTURES.map((name) => (
+            <option key={name} value={name}>
+              {name}
             </option>
           ))}
         </select>
@@ -162,19 +171,46 @@ export function Harness() {
         {error && <span className="text-danger">{error}</span>}
       </div>
       {session ? (
-        <TranscriptList
-          key={session.id}
-          rows={rows}
-          renderRow={(row) => renderPrototypeRow(session.model, row)}
-          handle={listRef}
-          className="flex-1"
-        />
+        <Transcript key={session.id} source={session.source} variant="session" actions={actions} rewind={rewind} handle={listRef} className="flex-1" />
       ) : (
         <div className="flex flex-1 items-center justify-center text-fg-muted">Choose a fixture and load it.</div>
       )}
       {session && <MetricsOverlay />}
+      {toast && (
+        <div key={toast.n} role="status" className="pointer-events-none absolute bottom-16 right-4 rounded-md border border-border-strong bg-bg-overlay px-3 py-2 font-mono text-ui-sm text-fg">
+          {toast.text}
+        </div>
+      )}
     </div>
   );
+}
+
+function toastCallbacks(say: (text: string) => void): { actions: TranscriptActions; rewind: RewindInterface } {
+  return {
+    actions: {
+      openSubagent: (ref) => say(`openSubagent ${ref.agentId ?? ref.taskId}`),
+      openFullLog: (cell) => say(`openFullLog ${cell.id}`),
+      reviewChanges: (turn, path) => say(`reviewChanges ${turn}${path ? ` ${path}` : ''}`),
+      openFile: (path, line) => say(`openFile ${path}${line ? `:${line}` : ''}`),
+      openExternal: (url) => say(`openExternal ${url}`),
+      editAndResubmit: (row) => say(`editAndResubmit ${row.id}`),
+      loadSpill: (spill) => {
+        say(`loadSpill ${spill.path}`);
+        return Promise.resolve(`(the harness has no spill content for ${spill.path})`);
+      },
+    },
+    rewind: {
+      canUndo: () => Promise.resolve({ ok: true, reason: null }),
+      undo: (turn) => {
+        say(`rewind.undo ${turn}`);
+        return Promise.resolve();
+      },
+      reapply: (turn) => {
+        say(`rewind.reapply ${turn}`);
+        return Promise.resolve();
+      },
+    },
+  };
 }
 
 function HarnessButton({ onClick, children }: { onClick: () => void; children: React.ReactNode }) {

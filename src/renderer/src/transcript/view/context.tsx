@@ -49,15 +49,17 @@ export interface TranscriptContextValue {
   rewind: RewindInterface | null;
   renderRequest: ((slot: Extract<Row, { kind: 'request_slot' }>) => ReactNode) | null;
   disclosures: Disclosures;
+  idPrefix: string; // unique per mounted transcript: row element ids are `<idPrefix>-<rowId>`
 }
 
 const TranscriptContext = createContext<TranscriptContextValue>({
-  storeKey: '', variant: 'session', actions: NO_ACTIONS, rewind: null, renderRequest: null, disclosures: new Disclosures(),
+  storeKey: '', variant: 'session', actions: NO_ACTIONS, rewind: null, renderRequest: null, disclosures: new Disclosures(), idPrefix: 'transcript',
 });
 
 export const TranscriptProvider = TranscriptContext.Provider;
 export const useTranscriptContext = () => useContext(TranscriptContext);
 export const useActions = () => useContext(TranscriptContext).actions;
+export const rowElementId = (idPrefix: string, rowId: string) => `${idPrefix}-${rowId}`;
 
 // One disclosure of this transcript: [open, toggle].
 export function useDisclosure(id: string): [boolean, () => void] {

@@ -62,6 +62,7 @@
   --color-muted-foreground: var(--fg-muted);
   --color-primary: var(--accent);
   --color-primary-foreground: var(--bg);
+  --color-sidebar: var(--bg-raised); /* code, table and diagram frames and their copy/fullscreen toolbar (bg-sidebar, border-sidebar) */
   --radius-xl: var(--radius-lg);
   --text-sm: var(--text-ui);
   --text-xs: var(--text-ui-sm);

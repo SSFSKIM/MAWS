@@ -23,6 +23,7 @@ export interface HarnessApi {
   play(speed?: number): void;
   pause(): void;
   step(): void;
+  turnId(n: number): string; // the n-th turn's id (1-based, reading order); rows carry it as `data-turn-id`
   expandAll(): Promise<void>;
   expandTurn(n: number): Promise<void>;
   scrollToTurn(n: number): Promise<void>;

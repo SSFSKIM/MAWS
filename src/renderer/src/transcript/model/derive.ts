@@ -77,8 +77,9 @@ export function turnSummary(turn: TurnState): TurnSummary {
 }
 
 // The group phrases of a whole turn ("Edited 3 files, ran 2 commands"): the turn summary popover's category segment.
+// Denied and stopped calls did not run, so they are counted as tool calls but phrase nothing.
 export function turnPhrases(turn: TurnState): string {
-  return groupSummary(phrasesOf(deriveTurn(turn, null).cells));
+  return groupSummary(phrasesOf(deriveTurn(turn, null).cells.filter((cell) => cell.classification.denial === null)));
 }
 
 // A state whose every turn, group and cell is expanded and every rewound branch revealed: the snapshot suite's view.

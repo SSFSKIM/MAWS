@@ -24,6 +24,7 @@ export interface TranscriptEntry {
   phase: 'hydrating' | 'live';
   following: boolean;
   working: boolean; // a turn is open
+  clock: { at: number; wall: number } | null; // the latest event time applied, and the wall time it arrived: a working divider ticks from it
   jump: JumpRequest | null;
 }
 
@@ -31,6 +32,7 @@ export interface TranscriptStore {
   entries: Record<string, TranscriptEntry>;
   attach(key: string, source: TranscriptSource, options?: { agentId?: AgentId | null }): Promise<void>; // resolves when hydrated
   detach(key: string): void;
+  drop(key: string): void; // detach and forget the state
   rows(key: string): Row[];
   lastAssistantLine(key: string): string | null;
   jumpTo(key: string, id: RowId | CellId, options?: { align?: JumpRequest['align'] }): void; // expands what holds the row, then the view scrolls and focuses
@@ -51,11 +53,12 @@ export function liveBuffer(entry: TranscriptEntry | undefined, row: Row): string
   return entry.state.turns.get(row.turnId)?.live.get(identity)?.buffer ?? null;
 }
 
-// The time of the last event a turn retained: a working divider ticks from it.
-export function lastEventAt(entry: TranscriptEntry | undefined, turn: TurnId | null): string | null {
-  if (!entry || turn === null) return null;
-  const state = entry.state.turns.get(turn);
-  return state?.events.at(-1)?.at ?? state?.startedAt ?? null;
+// How long a working turn has run: event time up to the latest event, then wall time since it arrived, so a live
+// session and a replay (whose events are old) both tick from what the transcript last heard.
+export function workingDurationMs(entry: TranscriptEntry | undefined, startedAt: string, now: number): number {
+  const started = Date.parse(startedAt);
+  if (!entry?.clock) return Math.max(0, now - started);
+  return Math.max(0, entry.clock.at - started + (now - entry.clock.wall));
 }
 
 const isExpanded = (state: TranscriptState, id: TurnId) =>
@@ -136,13 +139,14 @@ export function createTranscriptStore() {
         attachments.get(key)?.detach();
         if (!entry(key)) {
           const state = createState(null, options.agentId ?? null);
-          set({ entries: { ...get().entries, [key]: { state, rows: rowsOf(state), phase: 'hydrating', following: true, working: false, jump: null } } });
+          set({ entries: { ...get().entries, [key]: { state, rows: rowsOf(state), phase: 'hydrating', following: true, working: false, clock: null, jump: null } } });
         } else put(key, { phase: 'hydrating' });
         const attachment = attachSource(source, {
           apply(events) {
             const current = entry(key)!;
             const next = applyEvents(current.state, events);
-            put(key, { state: keepFinishedTurnsOpen(current.state, next, current.following) });
+            const at = Math.max(current.clock?.at ?? 0, ...events.slice(-1).map((event) => Date.parse(event.at)));
+            put(key, { state: keepFinishedTurnsOpen(current.state, next, current.following), clock: { at, wall: Date.now() } });
           },
           has: (id) => entry(key)?.state.seen.has(id) ?? false,
         });
@@ -155,6 +159,13 @@ export function createTranscriptStore() {
       detach(key) {
         attachments.get(key)?.detach();
         attachments.delete(key);
+      },
+
+      drop(key) {
+        get().detach(key);
+        const entries = { ...get().entries };
+        delete entries[key];
+        set({ entries });
       },
 
       rows: (key) => entry(key)?.rows ?? NO_ROWS,

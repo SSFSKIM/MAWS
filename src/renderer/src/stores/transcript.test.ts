@@ -137,7 +137,7 @@ describe('transcript store', () => {
     const b = builder();
     b.turn('u1');
     const delta = (text: string) =>
-      b.emit('assistant.block.delta', { apiMessageId: api('m1'), blockIndex: 0, blockType: 'text', textDelta: text, thinkingDelta: null, inputJsonDelta: null });
+      b.emit('assistant.block.delta', { apiMessageId: api('m1'), blockIndex: 0, blockType: 'text', textDelta: text, thinkingDelta: null, inputJsonDelta: null, userMessageUuid: null });
     delta('Hel');
     const store = createTranscriptStore();
     const fake = pushSource(b.events);
