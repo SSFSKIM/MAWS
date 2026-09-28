@@ -70,6 +70,34 @@ describe('hover card approves read-only only', () => {
     ]);
   });
 
+  it('Enter or Space on a focused Approve or Deny answers nothing; only a pointer click does', async () => {
+    withMain();
+    const user = userEvent.setup();
+    render(<Sidebar />);
+    await user.hover(needsRow('Charter \\+ research'));
+    const card = await screen.findByRole('dialog', { name: 'Charter + research' });
+    const approve = await within(card).findByRole('button', { name: 'Approve' });
+    const deny = within(card).getByRole('button', { name: 'Deny' });
+    for (const button of [approve, deny]) {
+      button.focus();
+      expect(document.activeElement).toBe(button); // still focusable and labelled
+      await user.keyboard('{Enter}');
+      await user.keyboard(' ');
+    }
+    expect(fake.invoked('session.answer')).toEqual([]);
+    expect(useAttention.getState().bySession.get(readOp.appSessionId)).toEqual(readOp.items); // still pending
+    await user.click(approve);
+    expect(fake.invoked('session.answer')).toHaveLength(1);
+  });
+
+  it('a synthetic click with no pointer press before it answers nothing', async () => {
+    withMain();
+    render(<RequestPreview item={readOp.items[0]} request={requests['req-synthetic-read-9a1d4262']} placement="hover" paneIndex={null} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Approve' }), { detail: 1 });
+    fireEvent.click(screen.getByRole('button', { name: 'Deny' }), { detail: 0 });
+    expect(fake.invoked('session.answer')).toEqual([]);
+  });
+
   it('Enter on the focused row answers nothing', async () => {
     withMain();
     const user = userEvent.setup();

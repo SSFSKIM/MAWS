@@ -3,8 +3,10 @@
 // requesting agent, tool, a bounded preview of the input, the questions or the plan, the cwd) and offers "Open
 // session". Only in the hover placement, and only for a permission request whose tool is read-only (§5.1, shared
 // `READ_ONLY_TOOLS`), it also offers Approve and Deny by explicit click; they answer allow-once or a plain deny through
-// C3's `session.answer` and never offer another scope (scopes are the docked card's, X4).
-import { useState } from 'react';
+// C3's `session.answer` and never offer another scope (scopes are the docked card's, X4). "Explicit click" is literal:
+// the buttons stay focusable and labelled, but a click a key synthesised (Enter or Space on a focused button) answers
+// nothing, because keyboard approval belongs to the focused session pane or Overview card alone (§5.1, binding).
+import { useRef, useState, type MouseEvent, type PointerEvent } from 'react';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionEvent } from '@shared/graph/events';
 import { isReadOnlyRequest } from '@shared/attention/read-only-tools';
@@ -77,6 +79,18 @@ export const RequestPreview: Slots['requestCard'] = ({ item, request, placement 
   const canAnswer = placement === 'hover' && item.kind === 'permission' && isOpen(item) && !foreign && isReadOnlyRequest(request);
   const where = [projectName, record?.title.text, `waiting ${needsYouAge(item, now)}`].filter(Boolean).join(' · ');
 
+  // The button a pointer pressed; a click counts only as the release of that press (`detail` > 0: a keyboard- or
+  // script-synthesised click reports 0, and has no pointerdown before it).
+  const pressed = useRef<EventTarget | null>(null);
+  const onPointerDown = (event: PointerEvent<HTMLButtonElement>) => {
+    pressed.current = event.currentTarget;
+  };
+  const byPointer = (event: MouseEvent<HTMLButtonElement>) => {
+    const genuine = event.detail > 0 && pressed.current === event.currentTarget;
+    pressed.current = null;
+    return genuine;
+  };
+
   const answer = async (value: RequestAnswer) => {
     if (request?.kind !== 'permission.requested') return;
     setDelivery('sending');
@@ -144,7 +158,9 @@ export const RequestPreview: Slots['requestCard'] = ({ item, request, placement 
             <button
               type="button"
               disabled={delivery === 'sending'}
-              onClick={() => void answer({ kind: 'permission', decision: 'deny' })}
+              title="Click to deny"
+              onPointerDown={onPointerDown}
+              onClick={(event) => byPointer(event) && void answer({ kind: 'permission', decision: 'deny' })}
               className="rounded-sm border border-border-strong px-2.5 py-1 text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2 disabled:text-fg-faint"
             >
               Deny
@@ -152,7 +168,9 @@ export const RequestPreview: Slots['requestCard'] = ({ item, request, placement 
             <button
               type="button"
               disabled={delivery === 'sending'}
-              onClick={() => void answer({ kind: 'permission', decision: 'allow', scope: 'once' })}
+              title="Click to approve"
+              onPointerDown={onPointerDown}
+              onClick={(event) => byPointer(event) && void answer({ kind: 'permission', decision: 'allow', scope: 'once' })}
               className="rounded-sm border border-fg bg-fg px-2.5 py-1 text-bg outline-accent hover:bg-fg-muted focus-visible:outline-2 disabled:bg-fg-faint"
             >
               Approve
