@@ -2,9 +2,20 @@
 // engine's own store. Owner `engine-host` for every command. M2 fills the discovery and holder surface (`fs.state`,
 // `fs.scan`, `fs.bind`, `fs.holders`; `fs.sessionChanged`, `fs.sessionRemoved`, `fs.holderChanged`, `fs.scanProgress`); M3 adds
 // following, subagents, workflows, tasks and spills. C8 adds its file-tree commands later under names not listed here.
+// Every command that takes an `appSessionId` fails with `internal` `unknown app session: <id>` when main has not bound it.
 import * as z from 'zod';
-import { AgentIdSchema, AppSessionIdSchema, SessionIdSchema } from '@shared/graph/ids';
-import { HolderSchema, JobStateSchema, LiveSessionRecordSchema, TranscriptSummarySchema } from '@shared/wire/store';
+import { SessionEventSchema } from '@shared/graph/events';
+import { AgentIdSchema, AppSessionIdSchema, MessageUuidSchema, SessionIdSchema } from '@shared/graph/ids';
+import {
+  HolderSchema,
+  JobStateSchema,
+  LiveSessionRecordSchema,
+  PersistedTaskSchema,
+  SubagentMetaSchema,
+  TranscriptSummarySchema,
+  WorkflowJournalRowSchema,
+  WorkflowSnapshotSchema,
+} from '@shared/wire/store';
 import type { CommandSpec } from './common';
 
 // The snapshot `fs.state` answers (C1's reload-survival rule: a page that arrives late reads the truth, not events).
@@ -42,6 +53,36 @@ export const FsHoldersAnswerSchema = z.strictObject({
 });
 export type FsHoldersAnswer = z.infer<typeof FsHoldersAnswerSchema>;
 
+// One sidecar transcript under `<sessionId>/subagents/` (`runId` set for `subagents/workflows/<runId>/agent-*.jsonl`).
+// `meta` is null until `agent-<id>.meta.json` has been read whole.
+export const SubagentEntrySchema = z.strictObject({
+  agentId: AgentIdSchema,
+  meta: SubagentMetaSchema.nullable(),
+  transcriptPath: z.string(),
+  size: z.number(),
+  mtimeMs: z.number(),
+  runId: z.string().nullable(),
+});
+export type SubagentEntry = z.infer<typeof SubagentEntrySchema>;
+
+// One workflow run: `workflows/<runId>.json` (null until it has been read whole) and the rows of
+// `subagents/workflows/<runId>/journal.jsonl` (empty when there is none yet).
+export const WorkflowRunSchema = z.strictObject({ runId: z.string(), snapshot: WorkflowSnapshotSchema.nullable(), journal: z.array(WorkflowJournalRowSchema) });
+export type WorkflowRun = z.infer<typeof WorkflowRunSchema>;
+
+export const GapSchema = z.strictObject({ parentUuid: z.string(), childUuid: z.string() });
+
+export const FsReadSpillInputSchema = z.strictObject({
+  path: z.string(),
+  offset: z.number().int().nonnegative().optional(),
+  length: z.number().int().positive().max(8 * 1024 * 1024).optional(),
+});
+export type FsReadSpillInput = z.infer<typeof FsReadSpillInputSchema>;
+export const FsReadSpillOutputSchema = z.strictObject({ content: z.string(), bytes: z.number().int(), offset: z.number().int(), truncated: z.boolean() });
+export type FsReadSpillOutput = z.infer<typeof FsReadSpillOutputSchema>;
+
+export const FOLLOW_STATES = ['backfilling', 'following', 'reloading', 'stopped', 'error'] as const;
+
 export const commands = {
   'fs.state': { input: z.void(), output: FsStateSchema, owner: 'engine-host' },
   'fs.scan': { input: z.strictObject({ known: z.array(FsScanKnownSchema).optional() }), output: FsScanResultSchema, owner: 'engine-host' },
@@ -50,6 +91,22 @@ export const commands = {
   // Refreshes the registry (the poll's liveness rule), then answers every live holder whose sessionId is listed or whose
   // cwd (NFC-normalised realpath) is one of `directories`; both null answers every live holder. C10's ask.
   'fs.holders': { input: FsHoldersQuerySchema, output: FsHoldersAnswerSchema, owner: 'engine-host' },
+  // Stops the follower (and, with agentId null, the session's agent followers); following starts through
+  // `session.events` and `fs.agentEvents`.
+  'fs.unfollow': { input: z.strictObject({ appSessionId: AppSessionIdSchema, agentId: AgentIdSchema.nullable() }), output: z.void(), owner: 'engine-host' },
+  'fs.subagents': { input: z.strictObject({ appSessionId: AppSessionIdSchema }), output: z.strictObject({ agents: z.array(SubagentEntrySchema) }), owner: 'engine-host' },
+  // C6's name: the child's transcript as X1 events; starts following it, and later events arrive on
+  // `session.eventBatch` with `agentId` set. `complete` is true once its backfill has finished.
+  'fs.agentEvents': {
+    input: z.strictObject({ appSessionId: AppSessionIdSchema, agentId: AgentIdSchema }),
+    output: z.strictObject({ events: z.array(SessionEventSchema), complete: z.boolean() }),
+    owner: 'engine-host',
+  },
+  'fs.workflows': { input: z.strictObject({ appSessionId: AppSessionIdSchema }), output: z.strictObject({ runs: z.array(WorkflowRunSchema) }), owner: 'engine-host' },
+  'fs.tasks': { input: z.strictObject({ listId: z.string() }), output: z.strictObject({ tasks: z.array(PersistedTaskSchema) }), owner: 'engine-host' },
+  // C6's name and fields (`bytes` is the file's total size); `offset` is additive. Only a path whose realpath lies under
+  // `<configHome>/projects/`, `tasks/` or `jobs/` is read.
+  'fs.readSpill': { input: FsReadSpillInputSchema, output: FsReadSpillOutputSchema, owner: 'engine-host' },
 } as const satisfies Record<`fs.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {
@@ -65,4 +122,17 @@ export const events = {
     job: JobStateSchema.nullable(),
   }),
   'fs.scanProgress': z.strictObject({ scanned: z.number().int(), total: z.number().int() }),
+  'fs.followState': z.strictObject({
+    appSessionId: AppSessionIdSchema,
+    agentId: AgentIdSchema.nullable(),
+    state: z.enum(FOLLOW_STATES),
+    chainLength: z.number().int(),
+    leafUuid: MessageUuidSchema.nullable(),
+    gap: GapSchema.nullable(),
+    skippedLines: z.number().int(),
+    message: z.string().nullable(),
+  }),
+  'fs.subagentsChanged': z.strictObject({ appSessionId: AppSessionIdSchema, agents: z.array(SubagentEntrySchema) }),
+  'fs.workflowChanged': z.strictObject({ appSessionId: AppSessionIdSchema, runId: z.string() }),
+  'fs.tasksChanged': z.strictObject({ listId: z.string() }),
 } as const satisfies Record<`fs.${string}`, z.ZodType>;

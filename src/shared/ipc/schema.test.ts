@@ -63,9 +63,13 @@ describe('ipc schema validates both directions', () => {
     });
 
     it('carries the C4 fs.* entries, every command owned by the engine host', () => {
-      expect(Object.keys(fs.commands).sort()).toEqual(['fs.bind', 'fs.holders', 'fs.scan', 'fs.state']);
+      expect(Object.keys(fs.commands).sort()).toEqual([
+        'fs.agentEvents', 'fs.bind', 'fs.holders', 'fs.readSpill', 'fs.scan', 'fs.state', 'fs.subagents', 'fs.tasks', 'fs.unfollow', 'fs.workflows',
+      ]);
       for (const spec of Object.values(fs.commands)) expect(spec.owner).toBe('engine-host');
-      expect(Object.keys(fs.events).sort()).toEqual(['fs.holderChanged', 'fs.scanProgress', 'fs.sessionChanged', 'fs.sessionRemoved']);
+      expect(Object.keys(fs.events).sort()).toEqual([
+        'fs.followState', 'fs.holderChanged', 'fs.scanProgress', 'fs.sessionChanged', 'fs.sessionRemoved', 'fs.subagentsChanged', 'fs.tasksChanged', 'fs.workflowChanged',
+      ]);
     });
 
     it('names channels by kind so a command and an event of the same name never share one', () => {

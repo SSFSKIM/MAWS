@@ -84,6 +84,22 @@ export const WorkflowJournalRowSchema = z.looseObject({
 });
 export type WorkflowJournalRow = z.infer<typeof WorkflowJournalRowSchema>;
 
+// <projectDir>/<sessionId>/subagents/[<subdir>/]agent-<agentId>.meta.json (SPEC 35.11.1): `agentType` is the one field
+// the engine requires. C1's `AgentMeta` also requires `toolUseId` and `description`, which an `Agent` tool call's meta
+// carries and a workflow agent's does not (pass-2 `workflow-disk/agent-*.meta.json`), so the listing parses this looser
+// shape and the backfill's lookup takes only the metas that are also an `AgentMeta`.
+export const SubagentMetaSchema = z.looseObject({
+  agentType: z.string(),
+  description: z.string().optional(),
+  toolUseId: z.string().optional(),
+  spawnDepth: z.number().optional(),
+  requestShape: z.string().optional(),
+  requestNonInteractive: z.boolean().optional(),
+  model: z.string().optional(),
+  workflowPhase: z.string().optional(),
+});
+export type SubagentMeta = z.infer<typeof SubagentMetaSchema>;
+
 // What discovery learns about a transcript from its first and last 64 KiB, without parsing the whole file
 // (SPEC 35.14.2 for which window each fact comes from).
 export const TranscriptSummarySchema = z.strictObject({

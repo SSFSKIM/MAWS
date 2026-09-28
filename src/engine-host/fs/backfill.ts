@@ -25,6 +25,9 @@ export interface BackfillContext {
   readonly agentId: AgentId | null;
   readonly parentToolUseId: ParentToolUseId | null;
   readonly seenToolUses: Map<string, TaskId>; // Agent tool uses that started a subagent, for subagent.finished on their result
+  // Agent tool uses read before their child's meta existed: a tailer reads the assistant record before the tool runs
+  // and writes the meta, so the lookup is asked again at the tool use's result and at its task notification.
+  readonly pendingAgents: Set<string>;
   readonly subagents: SubagentLookup | null;
   lastAt: string; // the previous event's `at`, inherited by records without a timestamp
   started: boolean; // session.started emitted (once per follow)
@@ -33,7 +36,7 @@ export interface BackfillContext {
 
 export function createBackfillContext(init: {
   sessionId: SessionId;
-  agent: { agentId: AgentId; parentToolUseId: ParentToolUseId } | null;
+  agent: { agentId: AgentId; parentToolUseId: ParentToolUseId | null } | null; // a workflow agent names no tool use (its meta has no toolUseId)
   subagents?: SubagentLookup;
 }): BackfillContext {
   return {
@@ -41,6 +44,7 @@ export function createBackfillContext(init: {
     agentId: init.agent?.agentId ?? null,
     parentToolUseId: init.agent?.parentToolUseId ?? null,
     seenToolUses: new Map(),
+    pendingAgents: new Set(),
     subagents: init.subagents ?? null,
     lastAt: EPOCH,
     started: false,
@@ -115,7 +119,7 @@ function userEvents(record: TranscriptRecord, uuid: MessageUuid, ctx: BackfillCo
     events.push({ ...base(), kind: 'user.message', messageUuid: uuid, content: bashStripped(content, bash), isReplay: false, isSynthetic: isMeta, origin, bash });
     // The real completion of a background agent: the notification naming the tool use that started it.
     if (notification !== null && notification.toolUseId !== null) {
-      const started = ctx.seenToolUses.get(notification.toolUseId);
+      const started = ctx.seenToolUses.get(notification.toolUseId) ?? startPendingSubagent(ctx, notification.toolUseId, base, events);
       if (started !== undefined) {
         const summary = notification.result ?? notification.summary;
         events.push({
@@ -151,6 +155,7 @@ function userEvents(record: TranscriptRecord, uuid: MessageUuid, ctx: BackfillCo
     const content: string | ContentBlock[] = typeof resultContent === 'string' ? resultContent : Array.isArray(resultContent) ? resultContent.filter(isContentBlock) : '';
     const text = typeof content === 'string' ? content : content.map((b) => (typeof b.text === 'string' ? b.text : '')).join('\n');
     const isError = block.is_error === true;
+    startPendingSubagent(ctx, toolUseId, base, events);
     events.push({
       ...base(),
       kind: 'tool.result',
@@ -203,22 +208,37 @@ function assistantEvents(record: TranscriptRecord, uuid: MessageUuid, ctx: Backf
     const toolName = typeof block.name === 'string' ? block.name : '';
     events.push({ ...base(), kind: 'tool.use', toolUseId, toolName, input: block.input, apiMessageId, messageUuid: uuid });
     if (toolName !== 'Agent') return;
-    const child = ctx.subagents?.byToolUseId(toolUseId) ?? null;
-    if (child === null) return;
-    const taskId = child.agentId as string as TaskId;
-    ctx.seenToolUses.set(toolUseId, taskId);
-    events.push({
-      ...base(),
-      kind: 'subagent.started',
-      taskId,
-      toolUseId,
-      description: child.meta.description,
-      subagentType: child.meta.agentType,
-      isBackground: child.meta.requestShape === 'background',
-      spawnDepth: child.meta.spawnDepth ?? 1,
-      prompt: child.prompt,
-    });
+    if (startSubagent(ctx, toolUseId, base, events) === null) ctx.pendingAgents.add(toolUseId);
   });
+}
+
+// `subagent.started` for the child the lookup knows under this tool use; its task id, or null when the meta is unknown.
+function startSubagent(ctx: BackfillContext, toolUseId: string, base: Base, events: SessionEvent[]): TaskId | null {
+  const child = ctx.subagents?.byToolUseId(toolUseId) ?? null;
+  if (child === null) return null;
+  const taskId = child.agentId as string as TaskId;
+  ctx.seenToolUses.set(toolUseId, taskId);
+  events.push({
+    ...base(),
+    kind: 'subagent.started',
+    taskId,
+    toolUseId: toolUseId as ToolUseId,
+    description: child.meta.description,
+    subagentType: child.meta.agentType,
+    isBackground: child.meta.requestShape === 'background',
+    spawnDepth: child.meta.spawnDepth ?? 1,
+    prompt: child.prompt,
+  });
+  return taskId;
+}
+
+// The late start of an Agent tool use read before its meta existed; undefined when it is not pending or still unknown.
+function startPendingSubagent(ctx: BackfillContext, toolUseId: string, base: Base, events: SessionEvent[]): TaskId | undefined {
+  if (!ctx.pendingAgents.has(toolUseId)) return undefined;
+  const taskId = startSubagent(ctx, toolUseId, base, events);
+  if (taskId === null) return undefined;
+  ctx.pendingAgents.delete(toolUseId);
+  return taskId;
 }
 
 function systemEvents(record: TranscriptRecord, ctx: BackfillContext, base: Base, events: SessionEvent[]): void {

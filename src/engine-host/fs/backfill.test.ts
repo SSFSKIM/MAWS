@@ -231,6 +231,39 @@ describe('subagent sidecars map to the X1 graph', () => {
     expect(only(run('something-new'), 'subagent.finished')[0].status).toBe('completed');
   });
 
+  it('starts an agent whose meta was written after its Agent tool use was read, at the tool use\'s result (live tailing)', () => {
+    // The engine appends the assistant record before it runs the tool, and the tool writes agent-<id>.meta.json when
+    // it spawns the child, so a tailer reads the tool use before the meta exists.
+    const records = currentChain(loadTranscriptFixture('subagent-parent')).chain;
+    const full = fixtureSubagents();
+    let metasWritten = false;
+    const ctx = createBackfillContext({
+      sessionId: '9a1d4262-0b43-46ad-acb9-5982f31d209c' as SessionId,
+      agent: null,
+      subagents: { byToolUseId: (id) => (metasWritten ? full.byToolUseId(id) : null) },
+    });
+    const events: SessionEvent[] = [];
+    for (const record of records) {
+      const isResult = Array.isArray((record.message as { content?: unknown } | undefined)?.content) && JSON.stringify(record.message).includes('"tool_result"');
+      if (isResult) metasWritten = true;
+      events.push(...mapAll([record], ctx));
+    }
+    const sequence = events.filter((e) => ['tool.use', 'subagent.started', 'tool.result', 'subagent.finished'].includes(e.kind)).map((e) => e.kind);
+    expect(sequence).toEqual(['tool.use', 'subagent.started', 'tool.result', 'tool.use', 'subagent.started', 'tool.result', 'subagent.finished', 'subagent.finished']);
+    const started = only(events, 'subagent.started');
+    expect(started.map((e) => [e.taskId, e.toolUseId])).toEqual([
+      ['ad286defbc77bc090', 'toolu_01CYiK6ncgQLFUQ2iqC1b4oB'],
+      ['ae75ba6ce5d866acc', 'toolu_01A8AmiXuRTeJwjQEsaPE2DM'],
+    ]);
+    expect(started[0]).toMatchObject({ description: 'Read and report one.txt content', isBackground: true });
+    expect(only(events, 'subagent.finished').map((e) => e.summary)).toEqual(['ONE', 'TWO']);
+    // An Agent tool use whose meta never appears starts nothing and finishes nothing.
+    const never = createBackfillContext({ sessionId: '9a1d4262-0b43-46ad-acb9-5982f31d209c' as SessionId, agent: null, subagents: { byToolUseId: () => null } });
+    const without = mapAll(records, never);
+    expect(only(without, 'subagent.started')).toEqual([]);
+    expect(only(without, 'subagent.finished')).toEqual([]);
+  });
+
   it('attributes every sidecar event to its agent and the parent tool use', () => {
     const subagents = fixtureSubagents();
     for (const agentId of SIDECAR_IDS) {

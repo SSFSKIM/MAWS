@@ -6,6 +6,7 @@ import {
   JobStateSchema,
   LiveSessionRecordSchema,
   PersistedTaskSchema,
+  SubagentMetaSchema,
   TranscriptSummarySchema,
   WorkflowJournalRowSchema,
   WorkflowSnapshotSchema,
@@ -74,6 +75,16 @@ describe('store record schemas accept the owner\'s shapes', () => {
     expect(rows).toHaveLength(5);
     expect(rows.map((row) => row.type)).toEqual(['launched', 'started', 'started', 'result', 'result']);
     expect(rows[1].agentId).toBe('a014f6be436bed86b');
+  });
+
+  it('parses both sidecar meta shapes: an Agent tool call\'s and a workflow agent\'s, which names no tool use', () => {
+    const tool = SubagentMetaSchema.parse(JSON.parse(readFileSync(join(FIXTURE_DIR, 'subagent-sidecars/agent-ad286defbc77bc090.meta.json'), 'utf8')));
+    expect(tool).toMatchObject({ agentType: 'general-purpose', toolUseId: 'toolu_01CYiK6ncgQLFUQ2iqC1b4oB', requestShape: 'background' });
+    const workflow = SubagentMetaSchema.parse(JSON.parse(readFileSync(join(WORKFLOW_DISK, 'agent-a014f6be436bed86b.meta.json'), 'utf8')));
+    expect(workflow).toMatchObject({ agentType: 'workflow-subagent', description: 'alpha', workflowPhase: 'Echo' });
+    expect(workflow.toolUseId).toBeUndefined();
+    // SPEC 35.11.1: agentType is the one field the engine requires; a record without it is not a meta
+    expect(SubagentMetaSchema.safeParse({ description: 'x' }).success).toBe(false);
   });
 
   it('keeps the transcript summary strict: an unknown key is rejected', () => {

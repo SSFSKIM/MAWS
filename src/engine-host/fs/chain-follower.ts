@@ -377,7 +377,7 @@ export class ChainFollower {
   constructor(
     private readonly reader: FileReader,
     private readonly sessionId: SessionId,
-    private readonly agent: { agentId: AgentId; parentToolUseId: ParentToolUseId } | null,
+    private readonly agent: { agentId: AgentId; parentToolUseId: ParentToolUseId | null } | null,
     private readonly sink: (e: FollowerEvent) => void,
     private readonly options: ChainFollowerOptions = {},
   ) {

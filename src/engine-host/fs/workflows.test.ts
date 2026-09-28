@@ -1,0 +1,69 @@
+import { readFileSync } from 'node:fs';
+import { writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { SessionId } from '@shared/graph/ids';
+import { SessionEventSchema } from '@shared/graph/events';
+import { FIXTURE_DIR } from '../../../test/support/fixtures';
+import { StoreFixture } from '../../../test/support/store-fixture';
+import { WorkflowReader, workflowProgressEvent } from './workflows';
+
+const S1 = 'bac6130b-8eb8-499e-aeb1-89e7624a52cd' as SessionId;
+const RUN = 'wf_7cacbb2d-902';
+const WORKFLOW_DISK = join(FIXTURE_DIR, 'pass2/workflow-disk');
+const disk = (name: string) => readFileSync(join(WORKFLOW_DISK, name), 'utf8');
+
+describe('workflow runs are read from the snapshot and the journal', () => {
+  let fixture: StoreFixture;
+  let sessionDir: string;
+  beforeEach(async () => {
+    fixture = await StoreFixture.create();
+    const transcript = await fixture.addTranscript('/private/tmp/maws-probe2-1RzDNs', S1, ['{"type":"queue-operation"}']);
+    sessionDir = join(dirname(transcript), S1);
+  });
+  afterEach(async () => {
+    await fixture.dispose();
+  });
+
+  async function copyWorkflowDisk() {
+    await fixture.addSidecar(S1, `workflows/${RUN}.json`, disk(`${RUN}.json`));
+    await fixture.addSidecar(S1, `workflows/scripts/maws-probe-${RUN}.js`, disk(`maws-probe-${RUN}.js`));
+    await fixture.addSidecar(S1, `subagents/workflows/${RUN}/journal.jsonl`, disk('journal.jsonl'));
+    await fixture.addSidecar(S1, `subagents/workflows/${RUN}/agent-a014f6be436bed86b.meta.json`, disk('agent-a014f6be436bed86b.meta.json'));
+  }
+
+  it('lists the fixture run with its whole snapshot and five journal rows', async () => {
+    await copyWorkflowDisk();
+    const runs = await new WorkflowReader().list(sessionDir);
+    expect(runs).toHaveLength(1);
+    expect(runs[0].runId).toBe(RUN);
+    expect(runs[0].snapshot).toMatchObject({ runId: RUN, agentCount: 2, status: 'completed', taskId: 'wayue3on6', workflowName: 'maws-probe' });
+    expect(runs[0].journal.map((row) => row.type)).toEqual(['launched', 'started', 'started', 'result', 'result']);
+  });
+
+  it('reads the journal leniently, lists a run whose snapshot is not written yet, and keeps the last whole snapshot', async () => {
+    await fixture.addSidecar(S1, `subagents/workflows/${RUN}/journal.jsonl`, `${disk('journal.jsonl').split('\n')[0]}\n{"type":"star`);
+    const reader = new WorkflowReader();
+    expect(await reader.list(sessionDir)).toEqual([{ runId: RUN, snapshot: null, journal: [{ type: 'launched' }] }]);
+
+    const snapshot = await fixture.addSidecar(S1, `workflows/${RUN}.json`, disk(`${RUN}.json`));
+    expect((await reader.list(sessionDir))[0].snapshot?.agentCount).toBe(2);
+    await writeFile(snapshot, '{"runId":"wf_7cacbb2d-902","agentCou');
+    expect((await reader.list(sessionDir))[0].snapshot?.agentCount).toBe(2);
+  });
+
+  it('lists nothing for a session with no workflows', async () => {
+    expect(await new WorkflowReader().list(sessionDir)).toEqual([]);
+  });
+
+  it('turns a snapshot into the wire-shaped workflow.progress, the whole progress array as one event', async () => {
+    await copyWorkflowDisk();
+    const [run] = await new WorkflowReader().list(sessionDir);
+    const event = workflowProgressEvent(S1, run.snapshot!, 1);
+    expect(SessionEventSchema.parse(event)).toEqual(event);
+    expect(event).toMatchObject({ kind: 'workflow.progress', id: `workflow:${RUN}`, taskId: 'wayue3on6', workflowName: 'maws-probe', seq: null, agentId: null, parentToolUseId: null });
+    expect(event.progress).toEqual(JSON.parse(disk(`${RUN}.json`)).workflowProgress);
+    expect(event.at).toBe('2026-09-28T09:59:32.358Z'); // the snapshot's own timestamp
+    expect(workflowProgressEvent(S1, run.snapshot!, 3).id).toBe(`workflow:${RUN}@3`);
+  });
+});

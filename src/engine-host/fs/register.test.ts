@@ -62,5 +62,29 @@ describe('the engine host serves fs.* through the host protocol', () => {
       ok: true,
       value: { refreshedAt: expect.any(String), holders: [{ sessionId: S1, appSessionId: 'app-1', holder: { kind: 'terminal', pid: process.pid }, cwd: null }] },
     });
+
+    // Following: the temporary session.events handler answers through eventsSnapshot, and the events go out validated.
+    fake.deliver({ t: 'req', id: '5', name: 'session.events', input: { appSessionId: 'app-1', afterSeq: null, limit: null } });
+    expect(await response('5')).toMatchObject({ ok: true, value: { lastSeq: 0, complete: true, events: [expect.objectContaining({ kind: 'session.started' }), expect.objectContaining({ kind: 'turn.started' }), expect.objectContaining({ kind: 'user.message' })] } });
+    expect(fake.posted).toContainEqual({ t: 'evt', name: 'session.eventBatch', payload: expect.objectContaining({ appSessionId: 'app-1' }) });
+    expect(fake.posted).toContainEqual({ t: 'evt', name: 'fs.followState', payload: expect.objectContaining({ appSessionId: 'app-1', agentId: null, state: 'following', chainLength: 1 }) });
+
+    const requests: [string, string, unknown][] = [
+      ['6', 'fs.subagents', { appSessionId: 'app-1' }],
+      ['7', 'fs.workflows', { appSessionId: 'app-1' }],
+      ['8', 'fs.tasks', { listId: S1 }],
+      ['9', 'fs.readSpill', { path: '/etc/hosts' }],
+      ['10', 'fs.agentEvents', { appSessionId: 'app-1', agentId: 'nobody' }],
+      ['11', 'fs.unfollow', { appSessionId: 'app-unknown', agentId: null }],
+      ['12', 'fs.unfollow', { appSessionId: 'app-1', agentId: null }],
+    ];
+    for (const [id, name, input] of requests) fake.deliver({ t: 'req', id, name, input });
+    expect(await response('6')).toEqual({ t: 'res', id: '6', ok: true, value: { agents: [] } });
+    expect(await response('7')).toEqual({ t: 'res', id: '7', ok: true, value: { runs: [] } });
+    expect(await response('8')).toEqual({ t: 'res', id: '8', ok: true, value: { tasks: [] } });
+    expect(await response('9')).toMatchObject({ ok: false, error: { code: 'internal', message: 'path outside the engine store' } });
+    expect(await response('10')).toMatchObject({ ok: false, error: { code: 'internal', message: 'unknown agent: nobody' } });
+    expect(await response('11')).toMatchObject({ ok: false, error: { code: 'internal', message: 'unknown app session: app-unknown' } });
+    expect(await response('12')).toEqual({ t: 'res', id: '12', ok: true, value: undefined });
   });
 });
