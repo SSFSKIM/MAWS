@@ -35,5 +35,8 @@ export const CODEX_BIN_DEFAULT: string;
 export const SCRATCH_CWD: string;
 export const WIDTH_FIXTURES: WidthFixture[];
 export const AUTOMATED_MEASUREMENTS: string[];
+export const GATE_MEASUREMENTS: string[];
+export const GATE_CRITERIA: Record<string, { lastLine: (line: string) => boolean; floorMBps: number | null }>;
+export const GATE_FRAME_P95_MS: number;
 export const workloads: Record<string, Workload>;
 export function resolveProgram(workload: ProgramWorkload, phase: Phase, bins: Bins): ProgramSpec;

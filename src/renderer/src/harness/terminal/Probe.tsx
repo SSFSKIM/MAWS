@@ -322,6 +322,8 @@ function DebugStrip({ debug }: { debug: PaneDebug }) {
       <div className="flex flex-wrap gap-x-3">
         <span>title {debug.title ?? '—'}</span>
         <span>link {debug.lastLink ?? '—'}</span>
+        <span>open {debug.lastOpen ?? '—'}</span>
+        <span>acked {debug.acked}</span>
         <span className="truncate">input {debug.lastInput || '—'}</span>
       </div>
       {debug.metrics ? <div className="truncate text-fg">{JSON.stringify(debug.metrics)}</div> : null}

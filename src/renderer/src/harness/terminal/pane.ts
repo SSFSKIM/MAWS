@@ -104,6 +104,7 @@ export class Pane {
   private parsedOffset = 0; // the stream offset up to which the renderer has parsed
   private ackTimer: ReturnType<typeof setTimeout> | null = null;
   private acks = 0;
+  private flow = { chunks: 0, maxUnparsed: 0, maxUnacked: 0 }; // the stream seen from the page during a run
 
   constructor(
     readonly kind: RendererKind,
@@ -254,6 +255,9 @@ export class Pane {
     if (!renderer) return;
     const length = data.byteLength;
     this.debug.bytes += length;
+    this.flow.chunks++;
+    this.flow.maxUnparsed = Math.max(this.flow.maxUnparsed, this.debug.bytes - this.debug.parsed);
+    this.flow.maxUnacked = Math.max(this.flow.maxUnacked, offset + length - this.debug.acked);
     const endings = countLineEndings(data);
     this.debug.lineFeeds += endings.lineFeeds;
     this.debug.carriageReturns += endings.carriageReturns;
@@ -328,6 +332,7 @@ export class Pane {
     this.decoder = new TextDecoder();
     this.parsedOffset = 0;
     this.acks = 0;
+    this.flow = { chunks: 0, maxUnparsed: 0, maxUnacked: 0 };
     if (this.ackTimer) clearTimeout(this.ackTimer);
     this.ackTimer = null;
   }
@@ -484,13 +489,13 @@ export class Pane {
     // The guard, the sampler and the observer are released whatever happens in the measured window: a failed run
     // must not leave the page deaf to input or sampling frames forever.
     let measured: { seconds: number; blockedInputEvents: number; frames: FrameSummary; longTasks: LongTaskSummary };
-    // Whether the host's flow control engaged: `pty.list` sampled every 100 ms, latching a paused report.
+    // Whether the host's flow control engaged: `pty.list` sampled every 20 ms, latching a paused report.
     let pausedSeen = false;
     const sampler = setInterval(() => {
       void ipc.invoke('pty.list', undefined).then((result) => {
         if (result.ok && result.value.ptys.some((p) => p.ptyId === this.debug.ptyId && p.paused)) pausedSeen = true;
       });
-    }, 100);
+    }, 20);
     try {
       frames.start();
       await this.spawn(spec, claim);
@@ -529,6 +534,7 @@ export class Pane {
       blockedInputEvents,
       pausedSeen,
       acks: this.acks,
+      ...this.flow,
       ...(latency ? { latency } : {}),
       ...(widths ? { widths } : {}),
     };

@@ -123,8 +123,8 @@ describe('hosts in the diagnostics strip', () => {
     // Until the shell answers, nothing in the strip may contain the marker a reader (or the smoke) looks for.
     expect(echo()).not.toBe('');
     expect(echo()).not.toContain('MAWS_ECHO_OK');
-    await act(async () => void (await new Promise((resolve) => setTimeout(resolve, 10))));
+    // Polled rather than a fixed wait: under a loaded parallel run the fake shell's answer can take longer than 10 ms.
+    await vi.waitFor(() => expect(echo()).toBe('MAWS_ECHO_OK · shell pid 3333'), { timeout: 2_000, interval: 10 });
     expect(window.maws.invoke).toHaveBeenCalledWith('pty.spawn', expect.objectContaining({ shell: '/bin/sh' }));
-    expect(echo()).toBe('MAWS_ECHO_OK · shell pid 3333');
   });
 });

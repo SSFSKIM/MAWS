@@ -2,10 +2,12 @@
 // runs the automated workloads against each renderer, writes `results/<renderer>-<workload>.json` and
 // `evidence/<renderer>-<item>.png`, and drives the items Playwright can drive (typed workloads, clicks, wheel,
 // selection, resize, context loss, the TUIs). What needs a human (Korean IME composition, sleep and resume) is
-// recorded as pending in findings.md.
+// recorded as pending in findings.md. `--phase m2-gate` is the transport gate that closes M2: the full floods on the
+// binary stream with acks (judged against GATE_CRITERIA) and the links through `pty.openLink`, with main's
+// `shell.openExternal` stubbed to record the URL instead of opening a browser.
 //
 //   pnpm build && node spikes/terminal-probe/run.mjs [--phase m1|m2-gate] [--renderer xterm|ghostty|both]
-//                [--steps smoke,measure,items,tui,exit-check,replay] [--keep-open]
+//                [--steps smoke,measure,items,tui,exit-check,replay,links] [--keep-open]
 //   MAWS_CLAUDE_BIN / MAWS_CODEX_BIN override the TUI binaries.
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -13,7 +15,16 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { _electron } from '@playwright/test';
-import { AUTOMATED_MEASUREMENTS, CLAUDE_BIN_DEFAULT, CODEX_BIN_DEFAULT, SCRATCH_CWD, workloads } from './workloads.mjs';
+import {
+  AUTOMATED_MEASUREMENTS,
+  CLAUDE_BIN_DEFAULT,
+  CODEX_BIN_DEFAULT,
+  GATE_CRITERIA,
+  GATE_FRAME_P95_MS,
+  GATE_MEASUREMENTS,
+  SCRATCH_CWD,
+  workloads,
+} from './workloads.mjs';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
 const repo = resolve(here, '../..');
@@ -30,7 +41,7 @@ for (let i = 2; i < process.argv.length; i++) {
 }
 const phase = args.get('phase') ?? 'm1';
 const only = args.get('renderer'); // a renderer id, or unset for every candidate the page reports
-const steps = new Set((args.get('steps') ?? 'smoke,measure,items').split(','));
+const steps = new Set((args.get('steps') ?? (phase === 'm2-gate' ? 'smoke,measure,links' : 'smoke,measure,items')).split(','));
 const bins = { claude: process.env.MAWS_CLAUDE_BIN ?? CLAUDE_BIN_DEFAULT, codex: process.env.MAWS_CODEX_BIN ?? CODEX_BIN_DEFAULT };
 
 for (const dir of ['results', 'evidence', 'recordings']) mkdirSync(join(here, dir), { recursive: true });
@@ -200,6 +211,17 @@ const restorationCheck = (preSnap, postSnap) => {
   };
 };
 
+// Item 9 at the gate: output bytes and line feeds exact (the page's byte-count check, `error` otherwise), the last
+// line right, frame p95 within 50 ms; MB/s against its floor, a finding when below.
+const judgeGate = (id, metrics) => {
+  const criteria = GATE_CRITERIA[id];
+  const countsExact = metrics.error === undefined;
+  const lastLineOk = criteria.lastLine(metrics.lastLine);
+  const frameP95Ok = metrics.frames?.p95 != null && metrics.frames.p95 <= GATE_FRAME_P95_MS;
+  const belowFloor = criteria.floorMBps !== null && (metrics.mbps ?? 0) < criteria.floorMBps;
+  return { pass: countsExact && lastLineOk && frameP95Ok, countsExact, lastLineOk, frameP95Ok, floorMBps: criteria.floorMBps, belowFloor };
+};
+
 try {
   // ---- smoke: the page loads, both renderers initialise, the console is clean of CSP refusals ----
   await page.waitForFunction(() => !!document.querySelector('nav[aria-label="harness pages"]'), null, { timeout: 15_000 });
@@ -216,14 +238,15 @@ try {
   if (csp.length) console.log(csp.join('\n'));
   const live = Object.keys(ready).filter((r) => (!only || only === 'both' || r === only) && ready[r].status !== 'failed');
 
-  // ---- measure: W1, W2, W3, width, latency (+ scroll-region) per renderer ----
+  // ---- measure: W1, W2, W3, width, latency (+ scroll-region) per renderer; at the gate the three floods only ----
   if (steps.has('measure')) {
     for (const r of live) {
-      for (const id of [...AUTOMATED_MEASUREMENTS, 'scroll-region']) {
+      for (const id of phase === 'm2-gate' ? GATE_MEASUREMENTS : [...AUTOMATED_MEASUREMENTS, 'scroll-region']) {
         log(r, id, 'running');
         const metrics = await probe.call('run', id, r, phase);
+        if (phase === 'm2-gate') metrics.gate = judgeGate(id, metrics);
         writeResult(`${r}-${id}`, metrics);
-        log(r, id, JSON.stringify({ bytes: metrics.bytes, expected: metrics.expectedBytes, seconds: metrics.seconds, mbps: metrics.mbps, framesP95: metrics.frames?.p95, over50: metrics.frames?.over50ms, latencyP95: metrics.latency?.p95, error: metrics.error }));
+        log(r, id, JSON.stringify({ bytes: metrics.bytes, expected: metrics.expectedBytes, seconds: metrics.seconds, mbps: metrics.mbps, framesP95: metrics.frames?.p95, over50: metrics.frames?.over50ms, latencyP95: metrics.latency?.p95, pausedSeen: metrics.pausedSeen, acks: metrics.acks, gate: metrics.gate, error: metrics.error }));
         if (id === 'width') {
           await probe.screenshot(`${r}-03-width`);
           log(r, 'widths', JSON.stringify(metrics.widths?.map((w) => `${w.expected}/${w.reported}`)));
@@ -389,6 +412,61 @@ try {
 
       writeResult(`${r}-items`, item);
       log(r, 'items', JSON.stringify(item));
+      await probe.call('kill', r);
+    }
+  }
+
+  // ---- links (the gate's half of item 6): ⌘-click an OSC 8 link and a bare URL; each reaches main's pty.openLink,
+  // whose shell.openExternal is stubbed here to record the URL (no browser opens; the real ⌘-click by hand is M5's).
+  // A javascript: OSC 8 link checks the refusal end to end. ----
+  if (steps.has('links')) {
+    await app.evaluate(({ shell }) => {
+      globalThis.__mawsOpened = [];
+      shell.openExternal = async (url) => void globalThis.__mawsOpened.push(url);
+    });
+    for (const r of live) {
+      const item = {};
+      await spawnShell(r);
+      await type(r, workloads.osc8.command);
+      await type(r, workloads['osc8-script'].command);
+      await idle(r, 600);
+      const snap = await snapshot(r);
+      const bareRow = findRow(snap, 'https://example.org');
+      const osc8Row = snap.lines.findIndex((l, i) => l.trim() === 'example' && i !== bareRow);
+      const scriptRow = snap.lines.findIndex((l) => l.trim() === 'scripted');
+      const clickAt = async (row, text) => {
+        if (row < 0) return { clicked: false, reason: `no row reading ${JSON.stringify(text)}` };
+        const before = await state(r);
+        const pt = await cellPoint(r, snap.lines[row].indexOf(text) + 2, row);
+        await page.mouse.move(pt.x, pt.y);
+        await sleep(150);
+        await page.mouse.click(pt.x, pt.y, { modifiers: ['Meta'] });
+        await sleep(400);
+        const s = await state(r);
+        const activated = s.lastLink !== before.lastLink;
+        return { clicked: true, activated, handler: activated ? s.lastLink : null, openLink: activated ? s.lastOpen : null };
+      };
+      item.osc8 = await clickAt(osc8Row, 'example');
+      item.bare = await clickAt(bareRow, 'https://example.org');
+      // xterm 6.0.0 itself drops an OSC 8 link whose scheme is not http(s) unless `linkHandler.allowNonHttpProtocols`
+      // is set (OscLinkProvider.ts): the click is expected not to activate anything.
+      item.javascript = await clickAt(scriptRow, 'scripted');
+      // Main's refusal over the real IPC path, from the page: the schema accepts the URL, the handler refuses it.
+      item.javascriptInvoke = await page.evaluate(() => window.maws.invoke('pty.openLink', { url: 'javascript:alert(1)' }));
+      item.openExternalCalls = await app.evaluate(() => globalThis.__mawsOpened);
+      const opened = item.openExternalCalls.map((url) => url.replace(/\/$/, ''));
+      item.pass =
+        JSON.stringify(opened) === JSON.stringify(['https://example.com', 'https://example.org']) &&
+        item.osc8.activated &&
+        item.bare.activated &&
+        !item.javascript.activated &&
+        item.javascriptInvoke.ok === true &&
+        item.javascriptInvoke.value.opened === false;
+      item.note =
+        "main's shell.openExternal was stubbed through electronApp.evaluate: each URL reached it through pty.openLink and openExternalUrl's scheme check; this run opened no browser";
+      await probe.screenshot(`${r}-06-links-m2-gate`);
+      writeResult(`${r}-links-m2-gate`, item);
+      log(r, 'links', JSON.stringify(item));
       await probe.call('kill', r);
     }
   }

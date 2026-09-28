@@ -1,22 +1,27 @@
 {
   "renderer": "xterm",
   "workload": "W2 base64 urandom",
-  "phase": "m1",
-  "expectedBytes": 20165289,
-  "bytes": 20165289,
-  "outputBytes": 20000000,
-  "lineFeeds": 165289,
+  "phase": "m2-gate",
+  "expectedBytes": 50413223,
+  "bytes": 50413223,
+  "outputBytes": 50000000,
+  "lineFeeds": 413223,
   "extraCarriageReturns": 0,
-  "seconds": 0.916,
-  "lastLine": "7ulNAUcuSXJ/YZOCIIm+5J8YHO925xj",
+  "seconds": 2.345,
+  "lastLine": "1zGAWmKUMwKzU8aW1",
   "lineCount": 10040,
-  "heapMB": 48,
+  "heapMB": 54,
   "blockedInputEvents": 0,
+  "pausedSeen": true,
+  "acks": 1516,
+  "chunks": 55128,
+  "maxUnparsed": 173776,
+  "maxUnacked": 204080,
   "frames": {
-    "count": 109,
+    "count": 280,
     "p50": 8.300000000000182,
-    "p95": 9.299999999999727,
-    "max": 9.400000000000091,
+    "p95": 9.100000000000364,
+    "max": 9.399999999999636,
     "over33ms": 0,
     "over50ms": 0
   },
@@ -25,5 +30,13 @@
     "totalMs": 0,
     "max": 0
   },
-  "mbps": 22.02
+  "mbps": 21.5,
+  "gate": {
+    "pass": true,
+    "countsExact": true,
+    "lastLineOk": true,
+    "frameP95Ok": true,
+    "floorMBps": 10,
+    "belowFloor": false
+  }
 }

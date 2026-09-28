@@ -1,22 +1,27 @@
 {
   "renderer": "xterm",
   "workload": "W1 yes | head",
-  "phase": "m1",
-  "expectedBytes": 20363636,
-  "bytes": 20363636,
-  "outputBytes": 20000000,
-  "lineFeeds": 363636,
+  "phase": "m2-gate",
+  "expectedBytes": 50909090,
+  "bytes": 50909090,
+  "outputBytes": 50000000,
+  "lineFeeds": 909090,
   "extraCarriageReturns": 0,
-  "seconds": 1.495,
-  "lastLine": "the quick brown fox ",
+  "seconds": 2.809,
+  "lastLine": "the quick brown fox jumps over the lazy dog 012345",
   "lineCount": 10040,
-  "heapMB": 48,
+  "heapMB": 54,
   "blockedInputEvents": 0,
+  "pausedSeen": true,
+  "acks": 1531,
+  "chunks": 60456,
+  "maxUnparsed": 143728,
+  "maxUnacked": 156448,
   "frames": {
-    "count": 178,
-    "p50": 8.299999999999955,
-    "p95": 9.299999999999955,
-    "max": 9.399999999999864,
+    "count": 337,
+    "p50": 8.300000000000182,
+    "p95": 9.200000000000273,
+    "max": 9.400000000000091,
     "over33ms": 0,
     "over50ms": 0
   },
@@ -25,5 +30,13 @@
     "totalMs": 0,
     "max": 0
   },
-  "mbps": 13.62
+  "mbps": 18.12,
+  "gate": {
+    "pass": true,
+    "countsExact": true,
+    "lastLineOk": true,
+    "frameP95Ok": true,
+    "floorMBps": 5,
+    "belowFloor": false
+  }
 }

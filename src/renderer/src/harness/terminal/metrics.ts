@@ -64,6 +64,9 @@ export interface Metrics {
   // M2 gate: the binary stream's flow control seen from the page
   pausedSeen?: boolean; // `pty.list` reported the pty paused at least once during the run
   acks?: number; // `pty.ack` commands the page sent
+  chunks?: number; // `pty.data` events received
+  maxUnparsed?: number; // the most bytes received and not yet parsed by the renderer at once
+  maxUnacked?: number; // the most bytes the host had emitted beyond the page's last ack, as far as the page saw
   error?: string;
 }
 

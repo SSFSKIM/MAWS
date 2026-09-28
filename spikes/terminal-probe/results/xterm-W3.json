@@ -1,22 +1,27 @@
 {
   "renderer": "xterm",
   "workload": "W3 seq 1..20000000",
-  "phase": "m1",
-  "expectedBytes": 22638888,
-  "bytes": 22638904,
-  "outputBytes": 20000000,
-  "lineFeeds": 2638888,
-  "extraCarriageReturns": 16,
-  "seconds": 2.897,
-  "lastLine": "2638888",
+  "phase": "m2-gate",
+  "expectedBytes": 188888897,
+  "bytes": 188888903,
+  "outputBytes": 168888897,
+  "lineFeeds": 20000000,
+  "extraCarriageReturns": 6,
+  "seconds": 23.816,
+  "lastLine": "20000000",
   "lineCount": 10040,
-  "heapMB": 48,
+  "heapMB": 54,
   "blockedInputEvents": 0,
+  "pausedSeen": false,
+  "acks": 5734,
+  "chunks": 657763,
+  "maxUnparsed": 89739,
+  "maxUnacked": 89831,
   "frames": {
-    "count": 347,
-    "p50": 8.300000000000182,
-    "p95": 9.300000000000182,
-    "max": 9.400000000000546,
+    "count": 2857,
+    "p50": 8.299999999999272,
+    "p95": 9.299999999999272,
+    "max": 9.400000000001455,
     "over33ms": 0,
     "over50ms": 0
   },
@@ -25,5 +30,13 @@
     "totalMs": 0,
     "max": 0
   },
-  "mbps": 7.82
+  "mbps": 7.93,
+  "gate": {
+    "pass": true,
+    "countsExact": true,
+    "lastLineOk": true,
+    "frameP95Ok": true,
+    "floorMBps": null,
+    "belowFloor": false
+  }
 }

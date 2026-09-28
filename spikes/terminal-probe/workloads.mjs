@@ -1,7 +1,7 @@
 // The spike's workload table (C9 M1, the item table), shared by the `#probe` page (which imports it) and `run.mjs`
 // (which names workloads by id). A `program` workload is the pty's own program (no shell, no prompt, no echo); a
-// `typed` workload is a command typed into the shell the page already runs (`$SHELL` without `-l` in M1; the
-// login-shell default is M2's). Expected counts are PTY bytes: the
+// `typed` workload is a command typed into the shell the page already runs (`$SHELL` without `-l` in M1; since M2 the
+// host's default, the login shell `$SHELL -l`). Expected counts are PTY bytes: the
 // program's output plus one CR per line feed under the tty's `onlcr`, verified on this Mac (Decision Log, W2/W3).
 import widths from './fixtures/width.json' with { type: 'json' };
 
@@ -33,7 +33,7 @@ const flood = (producer, m1Expected, gateExpected, gateOutput = 50_000_000, gate
 const widthScript = 'stty -echo; for s in "$@"; do printf "%s\\033[6n\\r\\n" "$s"; done; sleep 2';
 
 export const workloads = {
-  shell: { kind: 'program', title: 'Shell ($SHELL, no -l in M1)', program: { shell: null, args: null } },
+  shell: { kind: 'program', title: 'Shell (the host default: $SHELL -l since M2)', program: { shell: null, args: null } },
   claude: { kind: 'program', title: 'claude', tui: 'claude', program: { shell: '$CLAUDE', args: [] } },
   'claude-nosync': {
     kind: 'program',
@@ -49,6 +49,12 @@ export const workloads = {
     kind: 'typed',
     title: 'OSC 8 link + bare URL',
     command: "printf '\\e]8;;https://example.com\\e\\\\example\\e]8;;\\e\\\\\\n'; printf 'https://example.org\\n'\r",
+  },
+  // M2 gate: an OSC 8 link whose scheme main must refuse (`pty.openLink` answers opened: false).
+  'osc8-script': {
+    kind: 'typed',
+    title: 'OSC 8 javascript: link',
+    command: "printf '\\e]8;;javascript:alert(1)\\e\\\\scripted\\e]8;;\\e\\\\\\n'\r",
   },
   colours: { kind: 'typed', title: 'red/blue', command: "printf '\\e[31mred \\e[34mblue\\e[0m\\n'\r" },
   W1: { title: 'W1 yes | head', ...flood(FOX, 20_363_636, 50_909_090) },
@@ -79,6 +85,19 @@ export const workloads = {
 };
 
 export const AUTOMATED_MEASUREMENTS = ['W1', 'W2', 'W3', 'width', 'latency'];
+
+// The transport gate closing M2 (item 9 judged): the three floods at full size on the binary stream with acks. Each
+// passes when its output bytes and line feeds are exact (checked by the page), its last line is right, its frame p95
+// is at most 50 ms; MB/s is recorded against a floor (below it is a finding, not a switch).
+export const GATE_MEASUREMENTS = ['W1', 'W2', 'W3'];
+export const GATE_CRITERIA = {
+  // 50,000,000 bytes of 55-byte lines end 50 bytes into a line
+  W1: { lastLine: (line) => line === 'the quick brown fox jumps over the lazy dog 012345', floorMBps: 5 },
+  // 50,000,000 bytes of 121-byte lines end 17 random base64 characters into a line
+  W2: { lastLine: (line) => /^[A-Za-z0-9+/]{17}$/.test(line), floorMBps: 10 },
+  W3: { lastLine: (line) => line === '20000000', floorMBps: null },
+};
+export const GATE_FRAME_P95_MS = 50;
 
 // Resolves a program's `$CLAUDE`/`$CODEX` placeholders against the binaries in use.
 export function resolveProgram(workload, phase, bins) {

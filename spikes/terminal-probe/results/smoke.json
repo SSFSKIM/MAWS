@@ -1,5 +1,5 @@
 {
-  "phase": "m1",
+  "phase": "m2-gate",
   "ready": {
     "xterm": {
       "kind": "xterm",
@@ -10,7 +10,7 @@
       "pid": null,
       "exit": null,
       "cols": 93,
-      "rows": 41,
+      "rows": 40,
       "bytes": 0,
       "parsed": 0,
       "lineFeeds": 0,
@@ -24,11 +24,13 @@
       "lastInput": "",
       "rawTail": "",
       "lastLink": null,
+      "lastOpen": null,
+      "acked": 0,
       "title": null,
       "metrics": null
     }
   },
   "console": [],
   "cspRelated": [],
-  "at": "2026-09-28T20:53:43.700Z"
+  "at": "2026-09-28T21:51:51.980Z"
 }
