@@ -1,6 +1,7 @@
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { BrowserWindow, session } from 'electron';
+import type { WindowState } from '@shared/ipc/schema/layout';
 import { buildCsp } from './csp';
 import type { ResolvedTheme } from './settings/store';
 
@@ -24,7 +25,19 @@ export function installContentSecurityPolicy(): void {
   });
 }
 
-export function createWindow(theme: ResolvedTheme): BrowserWindow {
+// ---- C5: window chrome and restored placement ---------------------------------------------------------------------
+// The toolbar is the title bar (C5 execution document, "Window state"): the traffic lights are centred in its 44 px
+// (`--toolbar-h`), and the window opens where it was left (`window-state.ts` validates the saved bounds against the
+// displays before they get here). Maximized is applied just before the first show, so the window never flashes small.
+const TRAFFIC_LIGHTS = { x: 16, y: 15 };
+
+function placementOptions(placement: WindowState | null) {
+  if (!placement) return {};
+  return { ...placement.bounds, fullscreen: placement.fullscreen };
+}
+// ---- end C5 -----------------------------------------------------------------------------------------------------------
+
+export function createWindow(theme: ResolvedTheme, placement: WindowState | null = null): BrowserWindow {
   const win = new BrowserWindow({
     title: 'MAWS',
     width: 1440,
@@ -34,6 +47,8 @@ export function createWindow(theme: ResolvedTheme): BrowserWindow {
     show: false,
     backgroundColor: THEME_BACKGROUND[theme],
     titleBarStyle: 'hiddenInset',
+    trafficLightPosition: TRAFFIC_LIGHTS, // C5
+    ...placementOptions(placement), // C5
     webPreferences: {
       sandbox: true,
       contextIsolation: true,
@@ -45,7 +60,10 @@ export function createWindow(theme: ResolvedTheme): BrowserWindow {
 
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', (event) => event.preventDefault());
-  win.once('ready-to-show', () => win.show());
+  win.once('ready-to-show', () => {
+    if (placement?.maximized) win.maximize(); // C5
+    win.show();
+  });
 
   if (devServerUrl) void win.loadURL(devServerUrl);
   else void win.loadFile(rendererFile);

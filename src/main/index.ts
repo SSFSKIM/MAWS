@@ -1,10 +1,7 @@
 import { join } from 'node:path';
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, screen } from 'electron';
 import { createHosts } from './hosts';
 import { installRouter } from './ipc/router';
-import { LayoutFileStore, registerLayoutHandlers } from './layout/store';
-import { registerOpenExternal } from './open-external';
-import { startSessions } from './sessions';
 import { startSettings } from './settings';
 import { appUrl, createWindow, installContentSecurityPolicy } from './window';
 // C3 start (the attention service's imports moved with its start into C4's block: src/main/index/attention-service.ts)
@@ -21,6 +18,13 @@ import { IndexSessionSource, type ReadModelWriter } from './index/source';
 import { registerGitHandlers } from './git/register';
 import { GitService } from './git/service';
 // C4 end
+// C5 start (emit comes with C3's imports)
+import { LayoutFileStore, registerLayoutHandlers } from './layout/store';
+import { registerMenuHandlers, startMenu } from './menu';
+import { registerOpenExternal } from './open-external';
+import { startSessions } from './sessions';
+import { restoreWindowState, trackWindowState } from './window-state';
+// C5 end
 
 // A fresh profile for the end-to-end smoke (and anyone else who wants one); must be set before the app is ready.
 if (process.env.MAWS_USER_DATA) app.setPath('userData', process.env.MAWS_USER_DATA);
@@ -88,13 +92,19 @@ app.whenReady().then(() => {
     layout.flush();
     sessions.stop();
   });
+  // The application menu from the action table, rebuilt on settings and on the page's registered handlers.
+  registerMenuHandlers(startMenu({ settings: () => settings.state().settings, emit }));
+  // Window bounds persist under `window.main`; a window opens where the last one was left, if that is still on screen.
+  const placement = () =>
+    restoreWindowState(layout.get('window.main'), screen.getAllDisplays().map((d) => d.workArea), screen.getPrimaryDisplay().workArea);
+  const tracked = (win: BrowserWindow) => trackWindowState(win, (state) => layout.set('window.main', state));
   // ---- end C5 ----
 
   // The hosts belong to the app, not to a window or a page (§4.1): they start here, before any window exists, and
   // `start()` is idempotent, so opening a window again forks nothing and a reload never reaches them.
   const openWindow = () => {
     void hosts.start();
-    createWindow(settings.state().resolvedTheme);
+    tracked(createWindow(settings.state().resolvedTheme, placement())); // C5: restored and tracked placement
   };
   openWindow();
   app.on('activate', () => {
