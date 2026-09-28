@@ -33,6 +33,8 @@ const DiffTab: Slots['diffTab'] = ({ tab }) => <Placeholder className="font-mono
 // An unstarted session's setup (C10's heading and setup, from its intent store) renders nothing until C10 registers it:
 // the pane shows the composer frame alone (C10's ask of C5, 2026-09-28).
 const NewSession: Slots['newSession'] = () => null;
+const AccountsTab: Slots['accountsTab'] = () => <Placeholder className="h-full">Accounts arrive with C11</Placeholder>;
+const SettingsTab: Slots['settingsTab'] = () => <Placeholder className="h-full">Settings arrive with C11</Placeholder>;
 
 export const FALLBACKS: Slots = {
   transcript: Transcript,
@@ -42,4 +44,6 @@ export const FALLBACKS: Slots = {
   fileTab: FileTab,
   diffTab: DiffTab,
   newSession: NewSession,
+  accountsTab: AccountsTab,
+  settingsTab: SettingsTab,
 };

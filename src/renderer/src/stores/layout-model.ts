@@ -2,7 +2,7 @@
 // functions over the persisted `main.tabs` value, one per row of the transition table, so the table is testable
 // without a store. At most two panes (D-8); Overview is permanent and first; a tab id exists at most once across panes.
 import type { AppSessionId } from '@shared/graph/ids';
-import { LAYOUT_DEFAULTS, tabId, type LayoutMain, type PaneState, type TabRef, type TabTarget } from '@shared/ipc/schema/layout';
+import { LAYOUT_DEFAULTS, tabId, UNPINNABLE_KINDS, type LayoutMain, type PaneState, type TabRef, type TabTarget } from '@shared/ipc/schema/layout';
 
 type Pane = 0 | 1;
 export type PaneTarget = Pane | 'focused' | 'other';
@@ -84,8 +84,18 @@ function place(main: LayoutMain, tab: TabRef, pane: Pane, index: number | 'after
 export function openTab(main: LayoutMain, target: TabTarget, opts: { pane?: PaneTarget; activate?: boolean } = {}): LayoutMain {
   const activate = opts.activate ?? true;
   const found = locate(main, tabId(target));
-  if (found) return activate ? activateTab(main, paneAt(main, found.pane).tabs[found.index].id) : { ...main, focusedPane: found.pane };
+  if (found) {
+    // The settings tab is one tab whatever its section: opening it again moves it to the section asked for.
+    const updated = target.kind === 'settings' ? replaceTab(main, found.pane, found.index, toRef(target)) : main;
+    return activate ? activateTab(updated, tabId(target)) : { ...updated, focusedPane: found.pane };
+  }
   return place(main, toRef(target), paneOf(main, opts.pane ?? 'focused'), 'afterActive', activate);
+}
+
+function replaceTab(main: LayoutMain, pane: Pane, index: number, tab: TabRef): LayoutMain {
+  const panes = [...main.panes] as PaneState[];
+  panes[pane] = { ...panes[pane], tabs: panes[pane].tabs.map((t, i) => (i === index ? tab : t)) };
+  return { ...main, panes: panes as LayoutMain['panes'] };
 }
 
 // ⌘-click and "open in split": an already open session moves to the other pane.
@@ -171,9 +181,8 @@ export function reopenClosed(main: LayoutMain, at: number | null): LayoutMain {
 }
 
 export function togglePinned(main: LayoutMain, id: string): LayoutMain {
-  if (id === 'overview') return main;
   const found = locate(main, id);
-  if (!found) return main;
+  if (!found || UNPINNABLE_KINDS.has(paneAt(main, found.pane).tabs[found.index].kind)) return main;
   const panes = [...main.panes] as PaneState[];
   const pane = panes[found.pane];
   panes[found.pane] = { ...pane, tabs: pinnedFirst(pane.tabs.map((t) => (t.id === id ? ({ ...t, pinned: !t.pinned } as TabRef) : t))) };

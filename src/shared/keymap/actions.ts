@@ -11,7 +11,7 @@ export interface ActionSpec {
   title: string;
   chord: string | null;
   sink: Sink;
-  menu: 'file' | 'view' | 'go' | 'help' | null;
+  menu: 'app' | 'file' | 'view' | 'go' | 'help' | null; // 'app' is the application menu (MAWS › Settings… ⌘,), for C11's settings.open
   scope: 'app' | 'pane' | 'composer';
 }
 

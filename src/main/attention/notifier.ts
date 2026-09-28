@@ -6,14 +6,34 @@
 // - macOS delivers notifications only from a code-signed binary (an unsigned one emits `failed`), so the first failure,
 //   or no notification support at all, switches to the fallback for the process lifetime: a dock bounce, and
 //   `attention.notified { delivery: 'fallback' }`, which the page shows as a toast;
-// - the dock badge is the count of tier-1 Needs-you sessions, at all times.
+// - the dock badge is the count of tier-1 Needs-you sessions, at all times;
+// - with C11's per-kind policy present (`notifications.kinds`), only a group that is on notifies.
 import { app, Notification } from 'electron';
 import type { AttentionItem } from '@shared/graph/attention';
+import type { AttentionKind } from '@shared/graph/enums';
 import type { AppSessionId, AttentionId } from '@shared/graph/ids';
 import type { Settings } from '@shared/ipc/schema';
 import { isActionable, isOpen } from '@shared/attention/kinds';
 import type { emit as emitEvent } from '../ipc/events';
 import type { SessionReadModel } from '../sessions/read-model';
+
+// C11's settings v3 adds a per-group switch (its eighth ask of C5); C5's v2 schema does not carry it, so it is read as
+// an optional extension and, when absent, every actionable kind notifies as before.
+export interface NotificationKinds { approvals: boolean; questions: boolean; planReviews: boolean; errors: boolean; heldPeerMessages: boolean }
+type NotificationSettings = Settings['notifications'] & { kinds?: NotificationKinds };
+
+const GROUP: Record<AttentionKind, keyof NotificationKinds> = {
+  permission: 'approvals', dialog: 'approvals', elicitation: 'approvals',
+  question: 'questions',
+  plan: 'planReviews',
+  error: 'errors', interrupted: 'errors', auto_mode_unavailable: 'errors',
+  held_peer_message: 'heldPeerMessages', // not actionable, so it never notifies today; the flag is honoured if that changes
+};
+
+function wanted(item: AttentionItem, settings: Settings): boolean {
+  const notifications: NotificationSettings = settings.notifications;
+  return notifications.enabled && (notifications.kinds?.[GROUP[item.kind]] ?? true);
+}
 
 export interface NotifierDeps {
   isFocused(): boolean; // whether a MAWS window has focus; false with no window
@@ -80,7 +100,7 @@ export function startNotifier(model: SessionReadModel, deps: NotifierDeps): () =
       if (seen.has(item.id)) continue;
       seen.add(item.id);
       if (item.state !== 'pending' || !isActionable(item) || !inNeedsYou(appSessionId)) continue;
-      if (deps.isFocused() || !deps.settings().notifications.enabled) continue;
+      if (deps.isFocused() || !wanted(item, deps.settings())) continue;
       post(item);
     }
     updateBadge();

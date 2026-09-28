@@ -18,6 +18,8 @@ export interface Slots {
   fileTab: ComponentType<{ tab: Extract<TabRef, { kind: 'file' }> }>; // C8
   diffTab: ComponentType<{ tab: Extract<TabRef, { kind: 'diff' }> }>; // C8
   newSession: ComponentType<{ appSessionId: AppSessionId }>; // C10: an unstarted session's setup, in its pane above the composer (no modal sheet)
+  accountsTab: ComponentType<Record<never, never>>; // C11 (eighth ask): the Accounts tab's content
+  settingsTab: ComponentType<{ section: Extract<TabRef, { kind: 'settings' }>['section'] }>; // C11: the Settings tab's content, at a section
 }
 
 // A store rather than a plain map, so a registration after the first render still reaches the page.

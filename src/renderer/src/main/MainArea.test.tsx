@@ -535,6 +535,30 @@ describe('⌃Tab follows DOM focus', () => {
   });
 });
 
+describe('accounts and settings tabs (C11)', () => {
+  it('render their fallbacks until C11 registers, titled Accounts and Settings, closable', async () => {
+    const user = userEvent.setup();
+    render(<Shell />);
+    act(() => useLayout.getState().openTab({ kind: 'accounts' }));
+    expect(tabNames()).toEqual(['Overview', 'Accounts']);
+    expect(within(main()).getByText('Accounts arrive with C11')).toBeTruthy();
+    act(() => useLayout.getState().openTab({ kind: 'settings', section: null }));
+    expect(within(main()).getByText('Settings arrive with C11')).toBeTruthy();
+    await user.click(within(tab('Settings')).getByRole('button', { name: 'Close Settings', hidden: true }));
+    expect(tabNames()).toEqual(['Overview', 'Accounts']);
+  });
+
+  it('pass the settings section to the registered slot, following a second open', () => {
+    registerSlot('settingsTab', ({ section }) => <p>section {String(section)}</p>);
+    render(<Shell />);
+    act(() => useLayout.getState().openTab({ kind: 'settings', section: 'keyboard' }));
+    expect(within(main()).getByText('section keyboard')).toBeTruthy();
+    act(() => useLayout.getState().openTab({ kind: 'settings', section: 'notifications' }));
+    expect(within(main()).getByText('section notifications')).toBeTruthy();
+    expect(tabNames()).toEqual(['Overview', 'Settings']);
+  });
+});
+
 // A transcript slot holding the elements a real pane may contain: a plain textarea, a terminal and a composer.
 function registerSlotForTest() {
   registerSlot('transcript', () => (

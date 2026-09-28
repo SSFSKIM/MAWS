@@ -36,7 +36,7 @@ describe('⌘⇧J (attention.next)', () => {
     useLayout.getState().openSession(idOf('Charter + research'), { split: true });
     expect(useLayout.getState().main.focusedPane).toBe(1);
     runAction('attention.next');
-    expect(useLayout.getState().main.panes[1].activeTabId).toBe(`session:${idOf('Fix sidebar drag')}`);
+    expect(useLayout.getState().main.panes[1]?.activeTabId).toBe(`session:${idOf('Fix sidebar drag')}`);
   });
 
   it('does nothing when nothing needs you', () => {

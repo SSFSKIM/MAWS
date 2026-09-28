@@ -114,6 +114,25 @@ describe('notifier fires once per item when unfocused', () => {
     expect(posted()).toHaveLength(0);
   });
 
+  it('with C11’s notifications.kinds present, posts only for a group that is on (approvals, questions, plan reviews, errors)', () => {
+    const kinds = { approvals: false, questions: true, planReviews: false, errors: true, heldPeerMessages: true };
+    // C11's settings v3 carries `kinds`; C5's v2 type does not, so the test widens it the way the notifier reads it.
+    const settings = { ...SETTINGS, notifications: { ...SETTINGS.notifications, kinds } } as Settings;
+    const h = harness({ settings });
+    const at = (n: number) => `2026-09-28T10:0${n}:00Z`;
+    h.set(CHARTER, [
+      item(CHARTER, 'permission', at(0)), item(CHARTER, 'dialog', at(1)), item(CHARTER, 'elicitation', at(2)),
+      item(CHARTER, 'question', at(3)), item(CHARTER, 'plan', at(4)),
+      item(CHARTER, 'error', at(5)), item(CHARTER, 'interrupted', at(6)), item(CHARTER, 'auto_mode_unavailable', at(7)),
+    ]);
+    expect(posted().map((n) => n.options.body)).toEqual([
+      `question for ${CHARTER}`, `error for ${CHARTER}`, `interrupted for ${CHARTER}`, `auto_mode_unavailable for ${CHARTER}`,
+    ]);
+    // A held peer message is not actionable, so its flag being on changes nothing today.
+    h.set(LOOSE, [item(LOOSE, 'held_peer_message', T)]);
+    expect(posted()).toHaveLength(4);
+  });
+
   it('never posts for the items that were already waiting when it started', () => {
     const waiting = item(CHARTER, 'permission', T);
     const h = harness({ before: (w) => w.observeAttention(CHARTER, [waiting]) });

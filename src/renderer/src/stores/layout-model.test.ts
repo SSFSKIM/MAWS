@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
-import { LAYOUT_DEFAULTS, type LayoutMain, type TabRef } from '@shared/ipc/schema/layout';
+import { LAYOUT_DEFAULTS, LayoutMainSchema, type LayoutMain, type TabRef } from '@shared/ipc/schema/layout';
 import {
   activateTab, closeTab, cycleTab, dropSession, focusPane, moveTab, openSession, openTab, reopenClosed, repairMain, selectTab,
   setSplitRatio, splitWithActive, togglePinned,
@@ -179,3 +179,28 @@ describe('layout store transitions', () => {
     expect(ids(repairMain(misplaced, known))).toEqual([['overview', 'session:a']]);
   });
 });
+
+// C11's eighth ask: two singleton tab kinds, opened like any tab, closable, never pinned.
+describe('accounts and settings tabs', () => {
+  const settings = (section: 'engine' | 'keyboard' | null) => ({ kind: 'settings' as const, section });
+
+  it('open as singletons: a second open activates the existing tab, and for settings updates its section', () => {
+    let m = openTab(abc(), settings('engine'));
+    m = openTab(m, { kind: 'accounts' });
+    expect(ids(m)).toEqual([['overview', 'session:a', 'session:b', 'session:c', 'settings', 'accounts']]);
+    m = openTab(activateTab(m, 'session:a'), settings('keyboard'));
+    expect(ids(m)).toEqual([['overview', 'session:a', 'session:b', 'session:c', 'settings', 'accounts']]);
+    expect(active(m)).toEqual(['settings']);
+    expect(m.panes[0].tabs.find((t) => t.id === 'settings')).toEqual({ id: 'settings', kind: 'settings', section: 'keyboard', pinned: false });
+    m = openTab(activateTab(m, 'session:a'), { kind: 'accounts' });
+    expect(active(m)).toEqual(['accounts']);
+  });
+
+  it('are closable and never pinned', () => {
+    const m = openTab(openTab(base, settings(null)), { kind: 'accounts' });
+    expect(togglePinned(togglePinned(m, 'settings'), 'accounts')).toBe(m);
+    expect(ids(closeTab(closeTab(m, 'settings'), 'accounts'))).toEqual([['overview']]);
+    expect(LayoutMainSchema.safeParse(m).success).toBe(true);
+  });
+});
+

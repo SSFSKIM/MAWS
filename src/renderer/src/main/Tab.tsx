@@ -6,7 +6,7 @@
 import { ContextMenu } from 'radix-ui';
 import type { KeyboardEvent, MouseEvent } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { TabRef } from '@shared/ipc/schema/layout';
+import { UNPINNABLE_KINDS, type TabRef } from '@shared/ipc/schema/layout';
 import { useChordHint } from '../app/IconButton';
 import { GlyphMark } from '../attention/GlyphMark';
 import { glyphFor, type Glyph } from '../attention/glyph';
@@ -66,6 +66,10 @@ function useTabLabel(tab: TabRef): TabLabel {
       return { title: `Diff · ${tab.ref}`, secondary: null, glyph: null, fileType: null };
     case 'diagnostics':
       return { title: 'Diagnostics', secondary: null, glyph: null, fileType: null };
+    case 'accounts':
+      return { title: 'Accounts', secondary: null, glyph: null, fileType: null };
+    case 'settings':
+      return { title: 'Settings', secondary: null, glyph: null, fileType: null };
   }
 }
 
@@ -142,7 +146,9 @@ export function Tab({ tab, pane, domId, active, stop, onKeyDown }: TabProps) {
       <ContextMenu.Trigger asChild>{element}</ContextMenu.Trigger>
       <ContextMenu.Portal>
         <ContextMenu.Content className="z-50 min-w-44 rounded-md border border-border-strong bg-bg-overlay p-1 text-ui text-fg">
-          <TabMenuItem onSelect={() => useLayout.getState().togglePinned(tab.id)}>{tab.pinned ? 'Unpin tab' : 'Pin tab'}</TabMenuItem>
+          {!UNPINNABLE_KINDS.has(tab.kind) && (
+            <TabMenuItem onSelect={() => useLayout.getState().togglePinned(tab.id)}>{tab.pinned ? 'Unpin tab' : 'Pin tab'}</TabMenuItem>
+          )}
           <TabMenuItem onSelect={() => moveToOtherPane(tab.id, pane)}>Move to other pane</TabMenuItem>
           <ContextMenu.Separator className="my-1 h-px bg-border" />
           <TabMenuItem onSelect={() => void requestCloseTab(tab.id)}>Close tab</TabMenuItem>

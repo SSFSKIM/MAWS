@@ -33,6 +33,10 @@ export function toolbarTitle(tab: TabRef | null, records: ReadonlyMap<AppSession
       return { title: `Diff · ${tab.ref}`, branch: null };
     case 'diagnostics':
       return { title: 'Diagnostics', branch: null };
+    case 'accounts':
+      return { title: 'Accounts', branch: null };
+    case 'settings':
+      return { title: 'Settings', branch: null };
   }
 }
 

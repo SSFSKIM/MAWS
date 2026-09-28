@@ -74,7 +74,23 @@ function TabContent({ tab, paneIndex }: { tab: TabRef; paneIndex: PaneIndex }) {
           <Diagnostics />
         </div>
       );
+    case 'accounts':
+      return <AccountsTab />;
+    case 'settings':
+      return <SettingsTab section={tab.section} />;
   }
+}
+
+function AccountsTab() {
+  const Slot = useSlot('accountsTab');
+  // eslint-disable-next-line react-hooks/static-components -- registered once at composition, not created in render
+  return <Slot />;
+}
+
+function SettingsTab({ section }: { section: Extract<TabRef, { kind: 'settings' }>['section'] }) {
+  const Slot = useSlot('settingsTab');
+  // eslint-disable-next-line react-hooks/static-components -- registered once at composition, not created in render
+  return <Slot section={section} />;
 }
 
 // A child agent's transcript in the main area (C6's child variant): the transcript slot alone, since nobody types to a

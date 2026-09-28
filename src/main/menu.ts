@@ -7,14 +7,15 @@
 // Items carry `id` (the action id; `tab.select:<n>` for the nine tab items) so the smoke can click them by id.
 import { Menu, type MenuItemConstructorOptions } from 'electron';
 import type { Settings, ThemeSetting } from '@shared/ipc/schema';
-import { ACTIONS, ACTION_IDS, effectiveChord, type ActionId, type KeymapOverrides } from '@shared/keymap/actions';
+import { ACTIONS, ACTION_IDS, type ActionId, type ActionSpec, type KeymapOverrides } from '@shared/keymap/actions';
 import type { emit as emitEvent } from './ipc/events';
 import { onEmitted } from './ipc/events';
 import { registerMainHandler } from './ipc/router';
 
 type Emit = typeof emitEvent;
 type Item = MenuItemConstructorOptions;
-type Placement = NonNullable<(typeof ACTIONS)[ActionId]['menu']>;
+type Placement = NonNullable<ActionSpec['menu']>;
+type ActionTable = Readonly<Record<ActionId, ActionSpec>>;
 
 const APPEARANCE: Partial<Record<ActionId, { label: string; theme: ThemeSetting }>> = {
   'theme.light': { label: 'Light', theme: 'light' },
@@ -25,7 +26,7 @@ const APPEARANCE: Partial<Record<ActionId, { label: string; theme: ThemeSetting 
 const group = (id: ActionId) => (id.startsWith('sidebar.') || id.startsWith('panel.') ? 'regions' : id.split('.')[0]);
 
 export function menuTemplate(
-  actions: typeof ACTIONS,
+  actions: ActionTable,
   overrides: KeymapOverrides,
   enabled: ReadonlySet<ActionId>,
   emit: Emit,
@@ -40,8 +41,11 @@ export function menuTemplate(
     ...extra,
   });
 
+  // The effective chord against the table given (overrides first; null unbinds).
+  const chordOf = (id: ActionId) => (overrides[id] === undefined ? actions[id].chord : overrides[id]);
+
   const itemsFor = (id: ActionId): Item[] => {
-    const chord = effectiveChord(id, overrides);
+    const chord = chordOf(id);
     if (id === 'tab.select') {
       // One action, nine items: a chord ending in 1 is numbered through 9; any other chord selects the first tab only.
       return Array.from({ length: 9 }, (_, i) => {
@@ -61,7 +65,7 @@ export function menuTemplate(
     for (const id of ids) {
       const look = APPEARANCE[id];
       if (look) {
-        appearance.push(item(id, look.label, effectiveChord(id, overrides), null, { type: 'radio', checked: theme === look.theme }));
+        appearance.push(item(id, look.label, chordOf(id), null, { type: 'radio', checked: theme === look.theme }));
         continue;
       }
       if (last !== null && group(id) !== last) out.push({ type: 'separator' });
@@ -72,8 +76,23 @@ export function menuTemplate(
     return out;
   };
 
+  // The application menu spelled out (what `role: 'appMenu'` builds), so actions placed in it sit after About.
+  const own = section('app');
+  const appMenu: Item[] = [
+    { role: 'about' },
+    { type: 'separator' },
+    ...(own.length > 0 ? [...own, { type: 'separator' } as Item] : []),
+    { role: 'services' },
+    { type: 'separator' },
+    { role: 'hide' },
+    { role: 'hideOthers' },
+    { role: 'unhide' },
+    { type: 'separator' },
+    { role: 'quit' },
+  ];
+
   return [
-    { role: 'appMenu' },
+    { label: 'MAWS', submenu: appMenu },
     { label: 'File', submenu: section('file') },
     {
       label: 'Edit',
@@ -94,7 +113,7 @@ export function menuTemplate(
   ];
 }
 
-export function buildMenu(actions: typeof ACTIONS, overrides: KeymapOverrides, enabled: ReadonlySet<ActionId>, emit: Emit, theme: ThemeSetting | null = null): Menu {
+export function buildMenu(actions: ActionTable, overrides: KeymapOverrides, enabled: ReadonlySet<ActionId>, emit: Emit, theme: ThemeSetting | null = null): Menu {
   return Menu.buildFromTemplate(menuTemplate(actions, overrides, enabled, emit, theme));
 }
 

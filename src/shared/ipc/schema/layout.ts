@@ -14,6 +14,8 @@ export const TabRefSchema = z.discriminatedUnion('kind', [
   z.strictObject({ id: z.string(), kind: z.literal('file'),    path: z.string(), line: z.number().int().nullable(), appSessionId: AppSessionIdSchema.nullable(), pinned: z.boolean() }),
   z.strictObject({ id: z.string(), kind: z.literal('diff'),    appSessionId: AppSessionIdSchema, ref: z.string(), pinned: z.boolean() }),
   z.strictObject({ id: z.literal('diagnostics'), kind: z.literal('diagnostics'), pinned: z.boolean() }),
+  z.strictObject({ id: z.literal('accounts'), kind: z.literal('accounts'), pinned: z.literal(false) }),   // C11 (eighth ask): singleton, closable, never pinned, titled 'Accounts'
+  z.strictObject({ id: z.literal('settings'), kind: z.literal('settings'), section: z.enum(['engine', 'gateway', 'keyboard', 'appearance', 'notifications']).nullable(), pinned: z.literal(false) }),   // C11: singleton; a second openTab activates it and updates `section`; titled 'Settings'
 ]);
 export type TabRef = z.infer<typeof TabRefSchema>;
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
@@ -34,8 +36,15 @@ export function tabId(tab: TabTarget): string {
       return `diff:${tab.appSessionId}:${tab.ref}`;
     case 'diagnostics':
       return 'diagnostics';
+    case 'accounts':
+      return 'accounts';
+    case 'settings':
+      return 'settings';
   }
 }
+
+// Tab kinds the pin control never applies to: Overview is pinned for good, C11's two singletons never are.
+export const UNPINNABLE_KINDS: ReadonlySet<TabRef['kind']> = new Set(['overview', 'accounts', 'settings']);
 
 export const PaneStateSchema = z.strictObject({ tabs: z.array(TabRefSchema).min(1), activeTabId: z.string() });
 export type PaneState = z.infer<typeof PaneStateSchema>;

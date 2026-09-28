@@ -77,6 +77,21 @@ describe('application menu', () => {
     ]);
   });
 
+  it('places an action whose menu is app in the application menu, after About (C11’s Settings… ⌘,)', () => {
+    // No C5 action uses 'app' yet; C11's settings.open will. A table with one action moved there stands in for it.
+    const table = { ...ACTIONS, 'diagnostics.open': { ...ACTIONS['diagnostics.open'], title: 'Settings…', chord: 'Cmd+,', menu: 'app' as const } };
+    const template = menuTemplate(table, {}, ALL, vi.fn());
+    const appMenu = template[0].submenu as Item[];
+    expect(appMenu.map((item) => item.role ?? item.id ?? item.type)).toEqual([
+      'about', 'separator', 'diagnostics.open', 'separator', 'services', 'separator', 'hide', 'hideOthers', 'unhide', 'separator', 'quit',
+    ]);
+    expect(byId(template, 'diagnostics.open')).toMatchObject({ label: 'Settings…', accelerator: 'Cmd+,' });
+    expect((top(template, 'Help')!.submenu as Item[]).some((item) => item.id === 'diagnostics.open')).toBe(false);
+    // With no app-menu action the application menu is the standard one, with no empty group.
+    const standard = menuTemplate(ACTIONS, {}, ALL, vi.fn())[0].submenu as Item[];
+    expect(standard.map((item) => item.role ?? item.type)).toEqual(['about', 'separator', 'services', 'separator', 'hide', 'hideOthers', 'unhide', 'separator', 'quit']);
+  });
+
   it('keeps the standard Edit and Window roles and leaves out close, so ⌘W is the shell’s', () => {
     const template = menuTemplate(ACTIONS, {}, ALL, vi.fn());
     const roles = items(template).map((item) => item.role).filter(Boolean);
