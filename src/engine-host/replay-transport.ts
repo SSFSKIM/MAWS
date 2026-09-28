@@ -200,7 +200,7 @@ export function replayEngine(journal: JournalRow[], opts: { prelude: JournalRow[
                 held = row;
                 opts.onHold?.(row);
               }
-              if (waiters.length === 0) {
+              if (waiters.length === 0 && !ended) { // the hold handler may have killed the replay
                 await new Promise<void>((r) => (wake = r));
                 wake = null;
               }

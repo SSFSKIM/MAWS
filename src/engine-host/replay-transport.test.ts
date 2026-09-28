@@ -202,6 +202,19 @@ describe('replay transport plays a fixture and advances on the adapter\'s writes
     expect(consumed).toEqual([1, 4]);
   });
 
+  it('a kill from inside onHold ends the stream instead of leaving the iterator waiting', async () => {
+    const journal = [
+      row(1, 'in', { type: 'system', subtype: 'status', status: null }),
+      row(2, 'out', { type: 'control_request', request_id: 'r-1', request: { subtype: 'list_permission_rules' } }),
+      row(3, 'in', { type: 'control_response', response: { subtype: 'success', request_id: 'r-1', response: {} } }),
+    ];
+    const transport: ReturnType<typeof replayEngine> = replayEngine(journal, { prelude, onHold: () => transport.kill('SIGTERM') });
+    const items: TransportItem[] = [];
+    for await (const item of transport.frames) items.push(item);
+    expect(items).toHaveLength(1);
+    await expect(transport.exited).resolves.toEqual({ code: null, signal: 'SIGTERM' });
+  });
+
   it('plays a whole probe fixture when the writes follow its out rows', async () => {
     const journal = loadJournal('pass2', 'bash-context-echoed');
     const transport = replayEngine(journal, { prelude });

@@ -170,6 +170,19 @@ describe('EngineSession: inbound requests, host hooks and exit', () => {
     expect(events.map((e) => e.kind)).toEqual(['permission.requested', 'permission.resolved']);
   });
 
+  it('an initialize response carrying one pending_permission_requests entry re-accepts it (event and broker item)', async () => {
+    const { session, transport, lists, events } = setup({ responder: defaultResponder({ initialize: () => null }) });
+    const started = session.start();
+    await flush();
+    const [init] = transport.requestsOf('initialize');
+    const pending = { type: 'control_request', request_id: 'old-1', request: { subtype: 'can_use_tool', tool_name: 'Bash', input: { command: 'ls' }, tool_use_id: 'toolu_old' } };
+    transport.push({ type: 'control_response', response: { subtype: 'success', request_id: init!.request_id, response: INIT_RESPONSE, pending_permission_requests: [pending], pending_user_dialog_requests: [] } });
+    await started;
+    expect(lists.at(-1)).toMatchObject([{ id: 'app-s:old-1', kind: 'permission', state: 'pending', request: { toolUseId: 'toolu_old' } }]);
+    expect(events).toMatchObject([{ kind: 'permission.requested', requestId: 'old-1' }]);
+    expect(session.status()).toMatchObject({ process: 'ready', pendingRequests: 1 });
+  });
+
   it('a hook_callback for a registered id runs the function and answers its return value; an unknown id answers {}', async () => {
     const hooks = new HostHookRegistry();
     const seen: unknown[] = [];
