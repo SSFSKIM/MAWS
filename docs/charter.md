@@ -276,7 +276,7 @@ Binding, because only the joint view could settle them: the purpose and scenes (
 
 ## 12. Children
 
-Level name for every child: "child", dispatched in the waves of §14. Ledgers: a plan child's record is its execution document under `docs/doperpowers/execplans/` plus the subagent-driven-execution ledger; a brief child opens `docs/doperpowers/ledgers/<date>-<child-id>.md`; a spike writes its findings under `spikes/`.
+Level name for every child: "child", dispatched in the waves of §14. Ledgers: a plan child's record is its execution document under `docs/doperpowers/plans/` plus the subagent-driven-execution ledger; a brief child opens `docs/doperpowers/ledgers/<date>-<child-id>.md`; a spike writes its findings under `spikes/`.
 
 ### C1: Foundations — plan
 
@@ -438,7 +438,7 @@ Explicitly out of scope for P0: bundle patches (D-1); Windows and Linux (D-11); 
 
 | Child | Grain | Status | Ledger / artifact |
 |---|---|---|---|
-| C1 Foundations | plan | in-flight (2026-09-28, pin 32b75d61) | `docs/doperpowers/execplans/2026-09-28-c1-foundations.md` (authoring) |
+| C1 Foundations | plan | in-flight (2026-09-28, pin 32b75d61) | `docs/doperpowers/plans/2026-09-28-c1-foundations.md` (authoring) |
 | C2 Probe, second pass | spike | landed 2026-09-28 (pin 32b75d61, commit f776f7e) | `spikes/protocol-probe/findings-pass2.md`, `fixtures/pass2/` |
 | C3 Engine host | plan | blocked-by C1 | |
 | C4 Filesystem state, index, replay | plan | blocked-by C1 | |
