@@ -220,6 +220,8 @@ commands = {
   'fs.tasks':      { input: z.strictObject({ listId: z.string() }), output: z.strictObject({ tasks: z.array(PersistedTaskSchema) }), owner: 'engine-host' },
   'fs.readSpill':  { input: z.strictObject({ path: z.string(), offset: z.number().int().nonnegative().optional(), length: z.number().int().positive().max(8 * 1024 * 1024).optional() }),
                      output: z.strictObject({ content: z.string(), bytes: z.number().int(), offset: z.number().int(), truncated: z.boolean() }), owner: 'engine-host' },   // C6's name and fields (`bytes` = the file's total size); `offset` is additive
+  'fs.holders':    { input: z.strictObject({ sessionIds: z.array(sessionId).nullable(), directories: z.array(z.string()).nullable() }),
+                     output: z.strictObject({ refreshedAt: z.string(), holders: z.array(z.strictObject({ sessionId, appSessionId: appSessionId.nullable(), holder: HolderSchema, cwd: z.string().nullable() })) }), owner: 'engine-host' },   // C10's ask (master 685c892): the registry as it is now, for exclusive-writer guards; awaits HolderRegistry.refresh() (the poll's liveness rule), answers every live record whose sessionId is in `sessionIds` or whose cwd (NFC realpath) is in `directories`; appSessionId from Bindings, null when unbound
 }
 events = {
   'fs.sessionChanged': z.strictObject({ summary: TranscriptSummarySchema, appSessionId: appSessionId.nullable() }),   // discovered, or head/tail facts changed; appSessionId once bound
@@ -460,6 +462,7 @@ What C4 adopted from the sibling documents on disk at authoring time, and what i
 | C5: digest `lastAssistantLine` for sessions nobody opened | supplied: `TranscriptSummary.lastAssistantText` (last assistant text block in the tail, 200 chars) through `writer.setDigest` for discovered, non-live sessions |
 | C3: `Normalizer: JournalRow → SessionEvent[]` (pure) | consumed by C4's `ReplayRunner.runJournal` through the `RowNormalizer` interface; C3's `ReplayTransport` is a separate test seam and untouched |
 | C1: `test/fixtures/transcript-rewind.jsonl` anchor | **asked of C1** `[architect]` (outside the wave-2 pass; relayed through the ledger, d.18): the rewound anchor should read `leafUuid: "a1"`, `lastPrompt: "Also remember BANANA."`, `explicit: true` (the preceding assistant and the rewound-away prompt), per the raw probe transcript; `currentChain` is unaffected |
+| C10 (`docs/doperpowers/plans/…c10…`, master 685c892, "Ask of C4"): `fs.holders { sessionIds, directories } → { refreshedAt, holders[] }` | added (M2 addition, 2026-09-28): implemented by `HolderRegistry` as an on-demand refresh with the same liveness rule as the poll; `fs.holderChanged` keeps feeding the index projection, which is asynchronous, while C10's guards need the registry now |
 | C1: `HostSupervisor` | `onEvent<N extends EventName>(name: N, listener: (payload: EventPayload<N>) => void): () => void` beside `onState`, additive. C3 adds it (first in the merge order; its attention service needs it) and C4 consumes it; C4's worktree carries an identical block until it rebases over C3's (wave-2 ledger d.9) |
 
 The coordinator's single pass over all five wave-2 documents is `docs/doperpowers/plans/2026-09-28-wave2-interface-ledger.md`; where a row above says settled, that ledger carries the reasoning.
@@ -785,6 +788,9 @@ Ready to paste under the charter's §12 C4 section as "**Residue decisions (C4, 
   Date/Author: 2026-09-28, C4 execution controller.
 - Decision (M2 fix wave, folded from the executor's report): every watched root is rescanned once 250 ms after its watch opens (start, late-appearing root, re-open), closing the FSEvents start-up gap; `readJsonWithRetry` reports three outcomes (read, absent, exhausted) and registry and job readers keep the previous value on exhaustion like sidecars; scan staleness is a set of session ids cleared as each listing starts; unknown-kind warnings log once per value per host run.
   Rationale: the rescan is the same floor-under-FSEvents reasoning as the 30 s reconcile and the 2 s holder poll, applied at the one moment neither covers; the rest executes the review adjudication.
+  Date/Author: 2026-09-28, C4 execution controller.
+- Decision (C10's ask, relayed by the coordinator, 2026-09-28): `fs.holders` is added to the `fs.*` surface exactly as C10's reviewed document states (input `{ sessionIds | null, directories | null }`, output `{ refreshedAt, holders: { sessionId, appSessionId | null, holder, cwd | null }[] }`), implemented by `HolderRegistry` (`refresh()` then a filter over live records by session id or NFC-realpath `cwd`), landed as an M2 addition after M2's re-review and reviewed with it.
+  Rationale: the index projection through `fs.holderChanged` is asynchronous; an exclusive-writer guard that launches or resumes must see the registry as it is at that instant, and the registry's refresh already exists. Nothing else changes.
   Date/Author: 2026-09-28, C4 execution controller.
 - 2026-09-28: Re-review round 2 passed the six fixes; two edits applied (replay launch cancellation on dispatch timeout, historical holder set for write attribution). Review closed.
 
