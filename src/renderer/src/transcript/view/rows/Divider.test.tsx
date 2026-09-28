@@ -34,9 +34,10 @@ describe('divider row', () => {
     jumpTo.mockRestore();
   });
 
-  it('toggles the work area: its rows join and leave the list, and aria-controls names them while open', async () => {
+  it('toggles the work area: its rows join and leave the list, and aria-controls names the list while open', async () => {
     const store = await storeWith(deniedTurn().events);
     const view = renderRow(rowOf(store.rows(), 'divider'), { storeKey: store.key });
+    expect(screen.getByRole('button', { name: /Worked for/ }).hasAttribute('aria-controls')).toBe(false);
     const before = store.rows().length;
     fireEvent.click(screen.getByRole('button', { name: /Worked for/ }));
     const expanded = store.rows();
@@ -44,10 +45,9 @@ describe('divider row', () => {
     const divider = rowOf(expanded, 'divider');
     expect(divider.expanded).toBe(true);
     view.rerenderRow(divider);
-    const controls = screen.getByRole('button', { name: /Worked for/ }).getAttribute('aria-controls')!.split(' ');
-    const workIds = expanded.slice(expanded.indexOf(divider) + 1).filter((row) => row.kind === 'cell' || row.kind === 'group').map((row) => row.id);
-    expect(workIds.length).toBeGreaterThan(0);
-    expect(controls).toEqual(workIds.map((id) => `t-${id}`));
+    // The work-area rows are virtual (some are never in the DOM), so the reference is the list, which always is
+    // (Transcript.test.tsx asserts the element exists).
+    expect(screen.getByRole('button', { name: /Worked for/ }).getAttribute('aria-controls')).toBe('t-list');
     fireEvent.click(screen.getByRole('button', { name: /Worked for/ }));
     expect(store.rows()).toHaveLength(before);
   });

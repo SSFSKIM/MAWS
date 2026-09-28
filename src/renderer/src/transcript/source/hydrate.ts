@@ -28,19 +28,23 @@ export function attachSource(source: TranscriptSource, sink: HydrationSink): Att
     if (phase === 'live') applyNew(events);
     else if (phase !== 'detached') buffer.push(events);
   });
-  const hydrated = source.snapshot().then((snapshot) => {
-    if (phase === 'detached') return;
-    applyNew(snapshot);
-    phase = 'draining';
-    while (buffer.length > 0) applyNew(buffer.shift()!); // a batch arriving during the drain joins the tail
-    phase = 'live';
-  });
-  return {
-    hydrated,
-    detach() {
-      phase = 'detached';
-      buffer.length = 0;
-      unsubscribe();
-    },
+  const detach = () => {
+    phase = 'detached';
+    buffer.length = 0;
+    unsubscribe();
   };
+  const hydrated = source.snapshot().then(
+    (snapshot) => {
+      if (phase === 'detached') return;
+      applyNew(snapshot);
+      phase = 'draining';
+      while (buffer.length > 0) applyNew(buffer.shift()!); // a batch arriving during the drain joins the tail
+      phase = 'live';
+    },
+    (reason: unknown) => {
+      detach(); // a failed snapshot leaves nothing subscribed and nothing buffering; the caller attaches again
+      throw reason;
+    },
+  );
+  return { hydrated, detach };
 }

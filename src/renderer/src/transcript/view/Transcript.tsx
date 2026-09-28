@@ -14,7 +14,7 @@ import type { AgentId } from '@shared/graph/ids';
 import { useTranscriptStore } from '../../stores/transcript';
 import type { Row, RowKind } from '../model/rows';
 import type { TranscriptSource } from '../source/types';
-import { NO_ACTIONS, rowElementId, TranscriptProvider, useDisclosures, type RewindInterface, type TranscriptActions, type TranscriptContextValue } from './context';
+import { listElementId, NO_ACTIONS, rowElementId, TranscriptProvider, useDisclosures, type RewindInterface, type TranscriptActions, type TranscriptContextValue } from './context';
 import { RowView } from './rows/Row';
 import './transcript.css';
 
@@ -45,9 +45,10 @@ export interface TranscriptListProps {
   onFollowChange?: (following: boolean) => void;
   handle?: Ref<TranscriptListHandle>;
   className?: string;
+  id?: string; // the scroll container's element id
 }
 
-export function TranscriptList({ rows, renderRow, onFollowChange, handle, className }: TranscriptListProps) {
+export function TranscriptList({ rows, renderRow, onFollowChange, handle, className, id }: TranscriptListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const followingRef = useRef(true);
   // New functions invalidate the virtualiser's measurements, so they change only with the rows.
@@ -96,7 +97,7 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
 
   return (
     <div className={`min-h-0 ${className ?? ''}`}>
-      <div ref={scrollRef} className="h-full overflow-y-auto [overflow-anchor:none]" data-transcript-scroller="">
+      <div ref={scrollRef} id={id} className="h-full overflow-y-auto [overflow-anchor:none]" data-transcript-scroller="">
         <div className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
           {virtualizer.getVirtualItems().map((item) => {
             const row = rows[item.index];
@@ -179,8 +180,9 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
     if (index >= 0) listRef.current?.scrollToIndex(index, jump.align);
     const frame = requestAnimationFrame(() => {
       const element = document.getElementById(rowElementId(idPrefix, jump.rowId));
-      const cell = jump.focus === jump.rowId ? null : element?.querySelector<HTMLElement>(`[data-cell-id="${CSS.escape(jump.focus)}"]`);
-      // A cell takes focus itself when it is focusable (M4's denied cell), else through its own disclosure button.
+      // A cell, standalone (its id is also the row id) or inside a group, takes focus itself when it is focusable
+      // (M4's denied cell), else through its own disclosure button; any other row focuses its wrapper.
+      const cell = element?.querySelector<HTMLElement>(`[data-cell-id="${CSS.escape(jump.focus)}"]`);
       const target = cell ? (cell.hasAttribute('tabindex') ? cell : cell.querySelector<HTMLElement>('button')) : element;
       (target ?? element)?.focus({ preventScroll: true });
       useTranscriptStore.getState().jumpHandled(storeKey, jump.nonce);
@@ -206,7 +208,7 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
   return (
     <TranscriptProvider value={context}>
       <div className={`transcript relative min-h-0 ${className ?? ''}`}>
-        <TranscriptList rows={rows} renderRow={renderRow} onFollowChange={followChange} handle={listRef} className="h-full" />
+        <TranscriptList id={listElementId(idPrefix)} rows={rows} renderRow={renderRow} onFollowChange={followChange} handle={listRef} className="h-full" />
         {!following && (
           <button type="button" className="transcript-jump" onClick={() => listRef.current?.scrollToEnd()}>
             Jump to latest

@@ -152,6 +152,32 @@ describe('transcript store', () => {
     expect(store.getState().entries[KEY].working).toBe(true);
   });
 
+  it('a snapshot that fails leaves the key failed and unsubscribed, and a later attach hydrates it', async () => {
+    const b = twoTurns();
+    const store = createTranscriptStore();
+    let listener: ((events: SessionEvent[]) => void) | null = null;
+    const failing: TranscriptSource = {
+      subscribe(l) {
+        listener = l;
+        return () => (listener = null);
+      },
+      snapshot: () => Promise.reject(new Error('session.events failed')),
+    };
+    const attached = store.getState().attach(KEY, failing);
+    const push = listener as ((events: SessionEvent[]) => void) | null;
+    push?.(b.events.slice(0, 2)); // buffered while hydrating
+    await attached;
+    const failed = store.getState().entries[KEY];
+    expect(failed.phase).toBe('failed');
+    expect(failed.error).toContain('session.events failed');
+    expect(listener).toBeNull(); // nothing buffers forever
+    expect(store.getState().rows(KEY).filter((row) => row.kind === 'user')).toHaveLength(0);
+
+    await store.getState().attach(KEY, pushSource(b.events).source);
+    expect(store.getState().entries[KEY]).toMatchObject({ phase: 'live', error: null });
+    expect(store.getState().rows(KEY).filter((row) => row.kind === 'user')).toHaveLength(2);
+  });
+
   it('drops a duplicate event id in a live batch', async () => {
     const b = twoTurns();
     const store = createTranscriptStore();

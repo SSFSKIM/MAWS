@@ -21,7 +21,8 @@ export interface JumpRequest {
 export interface TranscriptEntry {
   state: TranscriptState;
   rows: Row[];
-  phase: 'hydrating' | 'live';
+  phase: 'hydrating' | 'live' | 'failed'; // failed: the snapshot rejected; the key is detached and `attach` may be called again
+  error: string | null; // why the last attach failed
   following: boolean;
   working: boolean; // a turn is open
   clock: { at: number; wall: number } | null; // the latest event time applied, and the wall time it arrived: a working divider ticks from it
@@ -30,7 +31,7 @@ export interface TranscriptEntry {
 
 export interface TranscriptStore {
   entries: Record<string, TranscriptEntry>;
-  attach(key: string, source: TranscriptSource, options?: { agentId?: AgentId | null }): Promise<void>; // resolves when hydrated
+  attach(key: string, source: TranscriptSource, options?: { agentId?: AgentId | null }): Promise<void>; // resolves when hydrated, or when hydration failed (phase 'failed')
   detach(key: string): void;
   drop(key: string): void; // detach and forget the state
   rows(key: string): Row[];
@@ -139,8 +140,8 @@ export function createTranscriptStore() {
         attachments.get(key)?.detach();
         if (!entry(key)) {
           const state = createState(null, options.agentId ?? null);
-          set({ entries: { ...get().entries, [key]: { state, rows: rowsOf(state), phase: 'hydrating', following: true, working: false, clock: null, jump: null } } });
-        } else put(key, { phase: 'hydrating' });
+          set({ entries: { ...get().entries, [key]: { state, rows: rowsOf(state), phase: 'hydrating', error: null, following: true, working: false, clock: null, jump: null } } });
+        } else put(key, { phase: 'hydrating', error: null });
         const attachment = attachSource(source, {
           apply(events) {
             const current = entry(key)!;
@@ -151,9 +152,17 @@ export function createTranscriptStore() {
           has: (id) => entry(key)?.state.seen.has(id) ?? false,
         });
         attachments.set(key, attachment);
-        return attachment.hydrated.then(() => {
-          if (attachments.get(key) === attachment) put(key, { phase: 'live' });
-        });
+        // Resolves either way; a failure is recorded on the key (hydrate.ts has already unsubscribed and cleared its buffer).
+        return attachment.hydrated.then(
+          () => {
+            if (attachments.get(key) === attachment) put(key, { phase: 'live' });
+          },
+          (reason: unknown) => {
+            if (attachments.get(key) !== attachment) return;
+            attachments.delete(key);
+            put(key, { phase: 'failed', error: reason instanceof Error ? reason.message : String(reason) });
+          },
+        );
       },
 
       detach(key) {

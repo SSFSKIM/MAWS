@@ -60,6 +60,8 @@ export const TranscriptProvider = TranscriptContext.Provider;
 export const useTranscriptContext = () => useContext(TranscriptContext);
 export const useActions = () => useContext(TranscriptContext).actions;
 export const rowElementId = (idPrefix: string, rowId: string) => `${idPrefix}-${rowId}`;
+// The list's scroll container: the one mounted element a divider's aria-controls can name (its rows are virtual).
+export const listElementId = (idPrefix: string) => `${idPrefix}-list`;
 
 // One disclosure of this transcript: [open, toggle].
 export function useDisclosure(id: string): [boolean, () => void] {
