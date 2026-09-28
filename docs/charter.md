@@ -1,5 +1,7 @@
 # MAWS charter
 
+> **Parent:** root, the project's standing purpose (this document is the root spec; `CLAUDE.md` points here). **Level name:** P0, the first release. Children dispatch per their grain hint in §12, each carrying its section as its spec; each child's artifact (execution document, ledger, findings) opens by citing this document, its child id, and the parent pin (the git blob hash of this file at dispatch).
+
 MAWS is a codename. This document is the chartering design for the project: what it is for, what was decided and why, what ships first, and how the pieces fit. It is the input to the execution spec and to the decomposition into milestones. Research behind every claim lives in `research/`.
 
 Status: approved by the owner on 2026-09-28 after one critique round and the protocol probe; routed to decomposition into milestone specs. Decisions marked **D-n** were made with the project owner in the brainstorming rounds; decisions marked **S-n** are technical calls made by the design and can be overridden.
@@ -89,7 +91,7 @@ Extension model (D-9): plugin API for side-panel tabs and commands; app-specific
 - **Renderer** (sandboxed, context-isolated): React 19 with the React Compiler, Tailwind v4, Radix primitives. Talks to the main process through a small validated command/event IPC schema. Never receives the shell, git or engine bridge directly.
 - **Main process** (privileged): owns windows, layout persistence, notifications, the session index, the git service, and the IPC boundary.
 - **Utility processes**: the engine host (engine adapter, process table and filesystem state service, so a renderer reload or window crash never touches a session), the PTY host (node-pty), and a heavy-work worker for transcript indexing and search.
-- **Engine child processes**: one `claude` process per live session. Launch line: `-p --input-format stream-json --output-format stream-json --verbose --permission-prompt-tool stdio --include-partial-messages --forward-subagent-text --replay-user-messages --include-hook-events --setting-sources user,project,local`, plus cwd, additional directories, model, effort, permission mode, and resume or fork flags. Environment adds `CLAUDE_CODE_FORK_SUBAGENT=true` so fork-type subagents work as in the terminal, and the gateway variables when routing is on (chosen at launch; changing it restarts the process). The host's `initialize` sets `perTaskStopAffordance: true` (otherwise Stop kills every background agent and workflow), `supportedDialogKinds`, `workspaceTrust` attestation, and dialog expiry "never" through flag settings so unanswered dialogs and elicitations wait for the human. Version-pinned; the app records the engine version per session. (S-1)
+- **Engine child processes**: one `claude` process per live session. Launch line: `-p --input-format stream-json --output-format stream-json --verbose --permission-prompt-tool stdio --include-partial-messages --forward-subagent-text --replay-user-messages --include-hook-events --setting-sources user,project,local`, plus cwd, additional directories, model, effort, permission mode, and resume or fork flags. The binary is an absolute pinned path, never resolved through PATH. The environment is constructed, not inherited: at startup the app captures the login shell's environment once (as Claude Desktop's shell-path worker does) and passes an allowlist (PATH, HOME, locale, `CLAUDE_*`, `ANTHROPIC_*` and the tool paths the engine needs), because a Dock-launched app has none of the shell's exports. It adds `CLAUDE_CODE_FORK_SUBAGENT=true` so fork-type subagents work as in the terminal, the gateway variables only when routing is on (chosen at launch; changing it restarts the process), and passes the owner's `ANTHROPIC_DEFAULT_*_MODEL` overrides through when present, since they are part of the routing setup; Session info shows which overrides are in effect. The host's `initialize` sets `perTaskStopAffordance: true` (otherwise Stop kills every background agent and workflow), `supportedDialogKinds`, `workspaceTrust` attestation, and dialog expiry "never" through flag settings so unanswered dialogs and elicitations wait for the human. Version-pinned; the app records the engine version per session. (S-1)
 
 ### 4.2 Engine adapter
 
@@ -103,10 +105,12 @@ Verified against the real binary by the protocol probe (`spikes/protocol-probe/`
 - AskUserQuestion reaches the host as a `can_use_tool` request flagged `requires_user_interaction`; the answer is an allow with `updatedInput.answers` keyed by question text. There is no separate question request type to implement.
 - A denied tool produces an error `tool_result` and `result.permission_denials`; no `system/permission_denied` frame appears on this path. `permission_suggestions` can be absent. `updatedPermissions` rules with session destination take effect immediately.
 - Child agents deliver their assistant and user records with `parent_tool_use_id`, per message, with no token-level `stream_event` for children. Subagent panels therefore update per message, and their full transcripts are the `agent-*.jsonl` files on disk. Both children in the probe ran in the background even when only one asked to.
-- `--resume` restores the session but never replays history over the wire; the transcript view is rebuilt from the JSONL by the filesystem service. `fork_conversation` answers "unsupported"; forking is the `--fork-session` launch flag.
+- `--resume` restores the session but never replays history over the wire; the transcript view is rebuilt from the JSONL by the filesystem service. `fork_conversation` answered "unsupported" in a routed session; forking is the `--fork-session` launch flag.
+- `bash_command` output comes back as replayed `user` records tagged as bash input, stdout, stderr and exit code, bracketed by command-lifecycle frames; the replayed-row renderer keys on those tags, and the app-owned queue does not count that lifecycle as a released user message.
 - Interrupt with `cancel_queued` cancels queued messages explicitly; the running turn ends as `error_during_execution` with terminal reason `aborted_streaming`, and the next turn resumes. `bash_command` yields replayed user frames tagged as bash input, stdout, stderr and exit code.
-- All thirteen structured reads succeed. `get_usage` returned session accounting but no rate-limit windows through the model gateway, so the status line takes its 5h and 7d windows from ClaudeUsage.
-- One engine process idles at roughly 280 to 350 MB resident.
+- All thirteen structured reads succeed. `get_usage` returned session accounting but no rate-limit windows, so the status line takes its 5h and 7d windows from ClaudeUsage, with the engine's windows as the fallback for unrouted sessions.
+- Every first-pass scenario ran routed through the model gateway (the shell exports the gateway variables and model overrides), with empty settings sources and strict MCP. The usage, fork and model-catalogue observations are therefore routed-only and bare-process figures; the second pass repeats those scenarios unrouted and under the owner's real settings.
+- One bare engine process idles at roughly 280 to 350 MB resident; the real per-session cost is the process tree including stdio MCP servers, measured in the second pass.
 
 Further engine semantics the design commits to:
 
@@ -126,13 +130,13 @@ One watcher plus append-aware JSONL tailers over the engine's own store (respect
 - `tasks/`, `workflows/` snapshots and journals, `sessions/<pid>.json` for live peers, `jobs/` for detached sessions, `teams/`.
 - Settings, agents, skills, plugins and commands files for the palette and the management widgets.
 
-The service never writes into engine-owned locks, mailboxes or journals. The main JSONL is not append-only: rewind truncates it and persists an anchor, so the tailer re-anchors by uuid chain rather than byte offset. Whole-file sidecars (`.meta.json`, `custom-title.json`, workflow snapshots) are parsed with retry because their write atomicity is unknown. Spilled results are loaded by the path the engine reports, never by a derived name, because background shell output and regular spills use different keys. The session's directory comes from the first JSONL record's cwd, not from the project slug, which is lossy. Live holders are read from `sessions/<pid>.json`.
+The service never writes into engine-owned locks, mailboxes or journals. The main JSONL is not append-only: rewind truncates it and persists an anchor, so the tailer re-anchors by uuid chain rather than byte offset. Whole-file sidecars (`.meta.json`, `custom-title.json`, workflow snapshots) are parsed with retry because their write atomicity is unknown. Spilled results are loaded by the path the engine reports, never by a derived name, because background shell output and regular spills use different keys. The project slug is derived from the realpath of the directory, not the path as passed, so the service maps a session id to its files by discovery (`projects/*/<session>.jsonl`) or by realpath-then-slug, never from a cwd string, and reads the session's directory from the first JSONL record. Live holders are read from `sessions/<pid>.json`.
 
 ### 4.4 Session service and index
 
 SQLite (better-sqlite3) holds only what the engine does not: project list and membership, app session records (app id ↔ engine session id, title and its provenance, worktree, pin, archive state, last-seen cursor for unread), attention items, drafts and queued messages, tab and panel layout per session, replay fixtures. (S-4)
 
-Session process policy is memory-budgeted, never a fixed timer. A process stays live while it has a running turn, background tasks or workflows, session-scoped permission grants, MCP connections the user is relying on, or a held peer message. Idle processes without those are candidates for exit only under budget pressure, least recently used first; the budget defaults to a count derived from the measured 300 MB per process and is visible in Session info. When a process with session grants must exit, the app snapshots the grants it issued (it sees every `updatedPermissions` it sent) and re-applies them on resume through flag settings; the probe verifies that path. Exit never silently discards background work: the user is asked. (S-5)
+Session process policy is memory-budgeted, never a fixed timer. A process stays live while it has a running turn, background tasks or workflows, session-scoped permission grants, connected MCP servers per `mcp_status`, or a held peer message. Idle processes without those are candidates for exit only under budget pressure, least recently used first. The budget is measured in the second probe pass under the owner's real settings, counting the whole process tree under the engine pid (stdio MCP servers included), and is visible in Session info. When a process with session grants must exit, the app snapshots the grants it issued (it sees every `updatedPermissions` it sent) and re-applies them on resume through flag settings; the probe verifies that path. Exit never silently discards background work: the user is asked. Until the budget policy ships (C12), engine processes never exit on their own: only archive, quit, or an explicit stop ends one. (S-5)
 
 ### 4.5 Git and worktree service
 
@@ -140,7 +144,7 @@ Read-only status, branch, diff and log through the `git` binary, with a reposito
 
 ### 4.6 Permission broker
 
-A request router with one pending table for tool permissions, questions, plan approvals, dialogs and elicitations. Each item carries request id, session, agent, tool, input preview, engine suggestions and the scope options the engine accepts. Items move through pending, answered-unconfirmed, and confirmed or retired. There is no acknowledgement frame for a `control_response`: delivery truth is a successful write to a live process, and confirmation is the tool result or denial record that follows. If the process dies with answers outstanding, the engine retires the dangling tool calls on resume and will not ask again, so the retired items become one Needs-you entry ("session interrupted, N approvals lost") rather than re-pended cards. Abort from the engine removes an item. Items are the source of the Needs-you section. (S-7)
+A request router with one pending table for tool permissions, questions, plan approvals, dialogs and elicitations. Each item carries request id, session, agent, tool, input preview, engine suggestions and the scope options the engine accepts. Items move through pending, delivered, and confirmed or retired. "Delivered" is not an alarm state: a long command keeps an item delivered for minutes with nothing wrong. There is no acknowledgement frame for a `control_response`: delivery truth is a successful write to a live process; the only failure signals are a stdin write error and process exit; confirmation is the earliest frame carrying the item's tool-use id (tool result, tool progress, hook frame, denial record). If the process exits with delivered or pending items, the broker raises one Needs-you entry at exit time from its own table ("session interrupted, N approvals lost"); on resume the engine retires the dangling tool calls itself and will not ask again, so nothing is re-pended. Abort from the engine removes an item. Items are the source of the Needs-you section. (S-7)
 
 ### 4.7 Libraries
 
@@ -184,7 +188,7 @@ A pending permission or question replaces the composer surface with its card, na
 
 ### 5.5 Status line
 
-cwd · context used of window (with the autocompact threshold) · usage 5h and 7d with reset times · session cost · permission mode. Context and cost are per session and come from `get_context_usage` and the engine's accounting; the usage windows are account-wide and come from one ClaudeUsage read shared by every session, so showing them under each composer costs nothing and matches the owner's design. Clicking opens popovers. A usage banner appears above the composer when a window is near its limit.
+cwd · context used of window (with the autocompact threshold) · usage 5h and 7d with reset times · session cost · permission mode. Context and cost are per session and come from `get_context_usage` and the engine's accounting; the usage windows are account-wide and come from one ClaudeUsage read shared by every session, with the engine's own `get_usage` windows as the fallback for an unrouted session when ClaudeUsage is unavailable, so showing them under each composer costs nothing and matches the owner's design. Clicking opens popovers. A near-limit banner is account-wide too and appears once per window, not above every composer.
 
 ### 5.6 Right panel
 
@@ -214,7 +218,7 @@ Light-first, in Claude's bright style, with a dark theme as the alternate; the m
 
 Empirical questions the design cannot settle; each has its resolving move and runs first.
 
-1. **Protocol fixture probe**: first pass done. Seven scenarios recorded under `spikes/protocol-probe/fixtures/` with a fixture test file; findings folded into §4.2. Second pass, before M1 closes: workflow progress frames, rewind, hook callbacks, MCP elicitation and dialog expiry, `perTaskStopAffordance` effect on Stop, `workspaceTrust` attestation and `set_cwd` needs-trust, re-applying session grants through flag settings, resuming a session that is live in a terminal (guard or not), the non-querying user frame after `bash_command`, `claim_session` prewarm, and behaviour with the owner's real settings sources enabled (the first pass ran with empty settings sources and strict MCP).
+1. **Protocol fixture probe**: first pass done. Seven scenarios recorded under `spikes/protocol-probe/fixtures/` with a fixture test file, plus a real subagent transcript and its meta sidecar copied from the probe session so the child-JSONL mapping has a fixture; findings folded into §4.2. Second pass (child C2, first wave, before C3 is specified): unrouted runs of every scenario that touches usage, models or fork; the process-tree memory measurement under the owner's real settings sources; workflow progress frames, rewind, hook callbacks, MCP elicitation and dialog expiry, `perTaskStopAffordance` effect on Stop, `workspaceTrust` attestation and `set_cwd` needs-trust, re-applying session grants through flag settings, resuming a session that is live in a terminal (guard or not), the non-querying user frame after `bash_command`, `claim_session` prewarm, and behaviour with the owner's real settings sources enabled (the first pass ran with empty settings sources and strict MCP).
 
 Replay has two sources that test different code: the JSONL exercises backfill only (it holds no stream events, control requests or progress), while the raw-frame journal and the probe fixtures replay approvals, streaming, queueing and child forwarding. Both are P0.
 2. **Terminal spike**: ghostty-web with node-pty under real Claude Code and Codex TUI workloads (alternate screen, synchronized output, CJK and emoji, IME, selection, hyperlinks, scrollback, resize, sustained output). Fallback is xterm.js with WebGL.
@@ -224,14 +228,7 @@ Replay has two sources that test different code: the JSONL exercises backfill on
 
 ## 8. Milestones
 
-- M0 Foundations: repository, electron-vite scaffold, IPC schema, engine adapter with the fixture probe, filesystem state service, session index, replay mode.
-- M1 Shell and sessions: three regions, sidebar with Needs-you, Overview board, OS notifications and the next-needs-you shortcut, session start with trust, cwd and worktrees, foreign-live detection, tabs, the normalised transcript presentation model with a plain row renderer and streaming markdown, composer with the strip and the app-owned queue, approvals at the locus with the broker states, status line, quit coordination.
-- M2 Transcript information architecture: activity groups and cells over the M1 model, change receipts, subagent rows, thinking, plans with three outcomes, questions, errors, boundary rows, steer.
-- M3 Right panel tools: pinned summary, Subagents, Review, Terminal, Files and viewer tabs, Sent files, Background work and workflows, Session info.
-- M4 Palette and widgets: slash palette, terminal-menu translations, model and effort, plugins, MCP, config, permissions, hooks, memory, sandbox, usage; settings; gateway; `!` and `#` modes.
-- M5 Finish: keyboard map, layout persistence, split pane, worktree lifecycle and cleanup, memory budget policy and grant snapshots, prewarmed spare session, packaging and signing for internal distribution.
-
-M0 through M5 share the data model and the adapter contract, so the whole design is matured here and then decomposed; each milestone becomes its own spec.
+Superseded by the cut in §12. The original M0 to M5 sequence was a build order; the children below are the units of ownership, and the waves in §14 are the build order.
 
 ## 9. Research index
 
@@ -240,3 +237,223 @@ M0 through M5 share the data model and the adapter contract, so the whole design
 - `research/claude-desktop-ux-and-engine.md`: Claude Code session UI on claude.ai, the 307-method LocalSessions contract, how Desktop spawns and brokers the engine.
 - `research/sdk-wire-gap.md`: the complete 2.1.283 wire, the 67-row gap matrix, the four app-side mechanisms.
 - `research/landscape.md`: other agent workstations, terminal embedding, rendering libraries, Electron practice, Playwright over a WebContentsView.
+
+---
+
+# Roadmap
+
+The sections below extend the approved design into the composite spec for P0: the cut into children, the contracts that cross them, the ordering, and the record that tracks the unit to its retrospective. Decisions D-1 to D-17 and the verified engine facts in §4.2 are binding everywhere; the grades on the rest are given per child.
+
+## 10. Parent-level acceptance
+
+P0 closes when, on the owner's Mac with the pinned engine, every item below is observed in one sitting:
+
+1. MAWS opens to the Overview showing the owner's existing terminal-started sessions under their projects, with sessions live in a terminal shown as foreign-live.
+2. From a project's "+", a session starts in a new worktree with trust attested; project settings, hooks, MCP servers and plugins load as they do in the terminal.
+3. From an Overview card, the owner approves a command and answers an AskUserQuestion for a session in another project while an OS notification fires for a third session that needs them; ⌘⇧J lands on it.
+4. In one deep session: a subagent's transcript opens in the right panel and receives a message; the Review tool shows the session's diff; a terminal opens in the session's worktree; a file opens in a viewer tab; a file the agent sent renders in Sent files; a workflow shows its phases and agents in Background work.
+5. That session resumes afterward from the terminal with `claude --resume`, and a terminal-started session resumes in MAWS.
+6. Nine concurrent live sessions stay inside the measured memory budget with the interim never-exit rule, and quitting with turns in flight asks first.
+7. A five-hundred-turn transcript stays anchored while old work is expanded, and streaming never drags the reader down.
+8. The slash palette opens the model, effort, permissions, usage, context, config, plugins, MCP, sandbox, hooks, memory and skills widgets backed by the engine's reads; `!` and `#` work.
+9. Queue, steer, stop and resume behave as labelled; a queued message survives a process exit; a denied command is visible while its group is collapsed; an interrupted session raises "N approvals lost".
+10. The light theme is the default and the dark theme switches cleanly.
+
+## 11. Design authority
+
+Binding, because only the joint view could settle them: the purpose and scenes (§1), D-1 to D-17, the process model and launch contract (§4.1, extended by X6), the engine adapter semantics verified by the probe (§4.2), queue ownership, plan outcomes, `!` and `#` semantics and the revisable-log rule (§4.2 "further engine semantics"), the filesystem service rules (§4.3), the memory policy shape and interim rule (§4.4), the broker states (§4.6), the attention model (§5.7), and every cross-child contract in §13. Advisory, a child may overturn with evidence recorded in the Decision Log: library picks (§4.7), the per-surface layouts and copy in §5, the keyboard defaults (§5.8), token values (§6), and the sequencing suggestions inside each child section.
+
+## 12. Children
+
+Level name for every child: "child", dispatched in the waves of §14. Ledgers: a plan child's record is its execution document under `docs/doperpowers/execplans/` plus the subagent-driven-execution ledger; a brief child opens `docs/doperpowers/ledgers/<date>-<child-id>.md`; a spike writes its findings under `spikes/`.
+
+### C1: Foundations — plan
+
+- **Purpose:** the repository everything else builds in: electron-vite scaffold with React 19, the React Compiler and Tailwind v4; the process model skeleton (main, engine-host utility process, PTY host utility process, preload); the validated IPC schema (X2) and the shared types for the event graph and session record (X1) with runtime validators; the theme tokens (X7) light-first with a dark alternate; the test harness (unit tests, an Electron end-to-end smoke test, fixture loading); packaging skeleton for a local unsigned build.
+- **Acceptance:** `pnpm dev` opens a window with the three regions and the light theme; the engine host and PTY host start as utility processes and answer a ping over IPC; the PTY host spawns a shell and echoes; X1 and X2 schemas validate the probe fixtures' frames and reject malformed ones in unit tests; the end-to-end smoke test passes in CI-style headless mode; a local build produces an app bundle.
+- **Edges:** blocked-by: none. blocks: C3, C4, C5, C6, C9.
+- **Contracts:** owns X1, X2, X7; delivers the schema code that X3, X4, X5, X6 extend.
+- **Design inheritance:** §4.1 [binding], §4.7 [advisory], §6 [advisory values, binding token names per X7], `mockups/tokens.css` and `tokens-light.css` as the starting token set.
+- **Required:** required.
+- **Status:** not-dispatched, dispatchable now.
+
+### C2: Protocol probe, second pass — spike
+
+- **Purpose:** turn the remaining engine unknowns into recorded fixtures and findings before the engine host is specified, so C3 and C10 are built on observed behaviour.
+- **Acceptance:** fixtures and a findings document covering: unrouted runs (gateway variables unset) of the usage, models and fork scenarios; the same under the owner's real settings sources with MCP discovery on, including the process-tree memory measurement per session; workflow progress frames from a real Workflow run; rewind; hook callbacks with `--include-hook-events`; MCP elicitation and `request_user_dialog` with dialog expiry set to never; the effect of `perTaskStopAffordance` on Stop with a background task running; `workspaceTrust` attestation and `set_cwd` needs-trust; re-applying session grants through flag settings after a restart; resuming a session that is live in a terminal (guard or not); the non-querying `user` frame after `bash_command`; `--await-claim` and `claim_session`. Each item states what was observed and what the design should do.
+- **Edges:** blocked-by: none. blocks: C3, C10.
+- **Contracts:** delivers X8 fixtures.
+- **Design inheritance:** §4.2 [binding as verified], §7.1 [binding list], `spikes/protocol-probe/harness.mjs` [advisory, extend it].
+- **Required:** required.
+- **Status:** not-dispatched, dispatchable now.
+
+### C3: Engine host — plan
+
+- **Purpose:** the adapter that owns one engine process per session over the raw wire: transport and framing, request ids, cancellation and timeouts, the initialize handshake with hook registration and trust attestation, the control-request surface, the permission broker with its states, the app-owned queue, the process table with the interim never-exit rule, session launch from X6, raw-frame journaling, and normalisation into X1 events.
+- **Acceptance:** against the pinned binary: a session starts, streams text and thinking, runs a tool through a permission round trip answered from the host, answers an AskUserQuestion, dispatches subagents whose text arrives attributed by parent, queues a second message and releases it at turn end, steers with priority, interrupts and resumes, exits and is resumed with the queue intact; the broker raises "interrupted, N approvals lost" at exit; every structured read is exposed as a typed call; the journal replays into the same X1 graph in a unit test; conformance tests run against the C2 fixtures.
+- **Edges:** blocked-by: C1, C2. blocks: C7, C10, C11.
+- **Contracts:** owns X6; produces X1; consumes X8.
+- **Design inheritance:** §4.1, §4.2, §4.4 process policy, §4.6 [all binding]; §4.7 stack [advisory].
+- **Required:** required.
+- **Status:** not-dispatched, blocked-by C1, C2.
+
+### C4: Filesystem state, index and replay — plan
+
+- **Purpose:** the durable side of sessions: tailers over the engine's JSONL store with re-anchoring after truncation, sidecar readers with retry, discovery of sessions the app did not start and of their live holders, the SQLite index of app records, the two replay sources (JSONL backfill and raw-frame journal), and the read-only git service (status, branch, diff, log, watcher).
+- **Acceptance:** with the owner's real `~/.claude`: every project and session appears with its title, cwd from the first record and holder state; a session live in a terminal is marked foreign-live within two seconds of its process starting; a rewind in the terminal shrinks the transcript in MAWS without a restart; a subagent transcript from the fixtures maps to the X1 graph; replaying a fixture journal and backfilling the same session's JSONL produce one consistent graph; the index survives restart with titles, pins and layout; git status for a dirty worktree updates on file change.
+- **Edges:** blocked-by: C1. blocks: C8, C10.
+- **Contracts:** owns the replay engine in X8; produces X1; participates in X6 (holder detection informs launch).
+- **Design inheritance:** §4.3, §4.4 index scope [binding]; §4.7 [advisory].
+- **Required:** required.
+- **Status:** not-dispatched, blocked-by C1.
+
+### C5: Shell — plan
+
+- **Purpose:** the window the owner lives in: three regions with persisted sizes and accessible resizers, the sidebar (search, Needs-you, pinned, project tree with status glyphs, other sessions, hover cards, priority and recency sort, actions), the Overview board, the tab strip with the single pane and optional split, layout persistence, the keyboard map, OS notifications, the next-needs-you shortcut, quit coordination, theme switching.
+- **Acceptance:** driven by fixtures and then by C3 and C4: the sidebar and Overview show nine sessions across three projects with correct glyphs and Needs-you ordering; a hover card previews a read-only tool request and approves by click only; a notification fires for a session entering Needs-you while unfocused and ⌘⇧J opens it; tabs reorder, split and collapse as specified; layout survives restart; foreign-live sessions show holder and no controls; quitting with a running turn asks; every mockup 01 state renders.
+- **Edges:** blocked-by: C1. blocks: C8, C10.
+- **Contracts:** consumes X1, X2, X4, X7; owns the Overview card layout.
+- **Design inheritance:** §5.1, §5.2, §5.7, §5.8 [layouts advisory, attention model and split-focus rule binding]; mockups 01 and 04 vignette 1 [advisory].
+- **Required:** required.
+- **Status:** not-dispatched, blocked-by C1.
+
+### C6: Transcript — plan
+
+- **Purpose:** the presentation model (X3) and its renderer: streaming markdown with math, diagrams and code; user and assistant turns with answer-first work disclosure; activity groups, cells and detail; change receipts; subagent lifecycle and message rows; thinking; plan cards with the three outcomes; answered questions as history; errors and reconnects; boundary rows; time separators; virtualization with anchored reading position. Its first gate is the anchoring spike.
+- **Acceptance:** G1 (anchoring spike, required, first): a synthetic five-hundred-turn transcript streams while old work is expanded without moving the reader, at sixty frames per second on the owner's machine. G2: every element of mockup 02 renders from fixture frames; the group state machine matches the classification in X3; a denied action is visible while its group is collapsed and the divider's count jumps to it; a receipt's Undo calls the rewind interface; replayed bash rows render from their tags.
+- **Edges:** blocked-by: C1. blocks: C7, C8.
+- **Contracts:** owns X3; consumes X1, X7; exposes the renderer for C8's drill-in.
+- **Design inheritance:** §5.3 [binding for the element list and the group semantics, advisory for visual details]; `research/codex-thread-ux.md` §2 [advisory]; mockup 02 [advisory].
+- **Required:** required.
+- **Status:** not-dispatched, blocked-by C1.
+
+### C7: Composer and requests — plan
+
+- **Purpose:** how the owner talks to a session: the rich editor with attachments and paste handling, the context strip, the "+" menu, typed `@` context, the slash palette shell (commands from init, skills, custom commands, app actions, marked by origin), queue list with edit, delete and steer, the submit control's five states, `!` and `#` input modes, the request card (X4) in all its placements, the status line and its popovers with the ClaudeUsage read and the engine fallback, the near-limit banner once per window.
+- **Acceptance:** with C3 live: sending, queueing, steering, stopping and resuming behave as labelled; a permission replaces the composer and Enter/Esc answer it in the focused pane only; scope options map to the engine's grant kinds and take effect; a question form submits all answers; `!` runs and its output reaches the model's context (or the documented terminal-only fallback); `#` appends to the chosen memory file; ArrowUp recalls history; the status line shows cwd, context, windows, cost and mode; mockup 04 vignettes 2 to 5 render.
+- **Edges:** blocked-by: C1, C3, C6. blocks: C11.
+- **Contracts:** owns X4; consumes X1, X2, X3, X6.
+- **Design inheritance:** §5.4, §5.5 [binding for semantics, advisory for layout]; §4.2 queue and `!`/`#` [binding]; mockup 04 [advisory].
+- **Required:** required.
+- **Status:** not-dispatched, blocked-by C1, C3, C6.
+
+### C8: Right panel tools — decomposing at dispatch
+
+- **Purpose:** the auxiliary panel: the host with per-session tabs, pin, maximize and the "+" menu (X5); the pinned summary as the resting state; and the tools Subagents (lists, drill-in with the C6 renderer over child transcripts, message a child), Review (session diff with file navigation), Files (tree and viewer tabs), Sent files (renderers per type), Background work (shells, monitors, task lists, workflows with phases and agents, stop), Session info.
+- **Acceptance:** coarse until its own cut: every state of mockup 03 renders from live sessions; pinned tabs persist across sessions; each pinned-summary row opens its tool; a child receives a message from the drill-in; Review opens a file tab at the changed line.
+- **Edges:** blocked-by: C4, C5, C6. blocks: C10 (attach affordance), C12.
+- **Contracts:** owns X5; consumes X1, X3.
+- **Design inheritance:** §5.6 [binding for the tool list and the per-session-with-pin rule, advisory for layout]; `research/codex-shell-ux.md` §3 [advisory]; mockup 03 [advisory].
+- **Required:** required.
+- **Status:** not-dispatched, blocked-by C4, C5, C6.
+
+### C9: Terminal — plan
+
+- **Purpose:** a real terminal in the session's worktree: the PTY host service (lifecycle, resize, backpressure), the renderer adapter with ghostty-web first and xterm.js with WebGL as the fallback, decided by its spike gate; the Terminal tool registered into X5; the worktree identity warning.
+- **Acceptance:** G1 (spike, required, first): ghostty-web under the acceptance list in §7.2 (both TUIs, alternate screen, synchronized output, CJK and emoji, IME, selection and copy, hyperlinks, scrollback, resize and reflow, sustained output, sleep and resume); a failed item switches the adapter to xterm.js and records why. G2: a terminal opens in the session's cwd, survives switching sessions when pinned, warns when the session moved worktree and offers a new terminal, closes with confirmation when a command is running.
+- **Edges:** blocked-by: C1. blocks: C10.
+- **Contracts:** implements X5; owns the PTY IPC subset of X2.
+- **Design inheritance:** §5.6 Terminal [binding for behaviour], §7.2 [binding acceptance list], `research/landscape.md` Part B [advisory].
+- **Required:** required.
+- **Status:** not-dispatched, blocked-by C1.
+
+### C10: Sessions, worktrees and trust — plan
+
+- **Purpose:** the session lifecycle end to end: the new-session sheet (location, worktree new or existing, branch, model and effort, permission mode, additional directories), the trust step and attestation, worktree create, reuse and cleanup under the engine's convention, fork in place and fork to a new worktree with transcript copy and rollback, rename with provenance, archive, delete conversation, foreign-live behaviour with "attach in a terminal tab" for background jobs, and the grant snapshot hook for later re-application.
+- **Acceptance:** each path in §3 "Sessions" works against the real engine and the owner's repositories; a never-trusted directory prompts once and then loads project settings exactly as the terminal does (compared by the init frame); a fork to a new worktree produces a session that resumes from the terminal; cleanup distinguishes archive, remove clean checkout, discard changes, delete branch; a `--bg` job attaches in a terminal tab.
+- **Edges:** blocked-by: C3, C4, C5, C9. blocks: C12.
+- **Contracts:** extends X6 with trust and worktree fields; consumes X2, X5.
+- **Design inheritance:** §3 Sessions, §4.5, §5.1 new-session sheet, D-12 [binding]; `research/claude-desktop-ux-and-engine.md` B7, B8 [advisory].
+- **Required:** required.
+- **Status:** not-dispatched, blocked-by C3, C4, C5, C9.
+
+### C11: Palette widgets, settings, gateway and usage — plan
+
+- **Purpose:** the terminal's menu commands as widgets over the transcript, backed by the engine's reads and controls: model and effort (with gateway models and fast mode), permissions and rules, usage and context, config, plugins with reload, MCP status and reconnect, sandbox, hooks, memory, skills, agents, status, compact, rename, resume, export, diff; the settings screens (engine path and version, gateway toggle, keyboard map, theme, notification policy); the ClaudeUsage integration for windows and accounts.
+- **Acceptance:** every widget listed opens from the palette and shows live engine data; changes made in a widget are reflected by the next init frame or read; switching the gateway restarts the session with a visible notice; usage windows match ClaudeUsage's panel.
+- **Edges:** blocked-by: C3, C7. blocks: C12.
+- **Contracts:** consumes X2, X4, X6.
+- **Design inheritance:** §3 palette list, §5.4 palette, §5.5, D-7, D-17 [binding for the list and sources, advisory for layout]; the owner's screenshots of the terminal's menus in the vault note [advisory].
+- **Required:** required.
+- **Status:** not-dispatched, blocked-by C3, C7.
+
+### C12: Finish — decomposing at dispatch
+
+- **Purpose:** what makes P0 a daily driver: the memory budget policy with grant snapshots and re-application, the prewarmed spare session, split-pane polish, keyboard map editing, packaging with signing and notarization for internal distribution, the updater with restart coordination, and the recomposition run against §10.
+- **Acceptance:** coarse until its own cut; closes with §10 verified in one sitting.
+- **Edges:** blocked-by: C8, C10, C11. blocks: none.
+- **Contracts:** consumes all.
+- **Design inheritance:** §4.4 policy [binding shape], §3 P0 packaging line, `research/landscape.md` Part D [advisory].
+- **Required:** required.
+- **Status:** not-dispatched, deliberately late.
+
+## 13. Cross-child contracts
+
+- **X1 Event graph and session record** (owner C1 for the types; C3 and C4 produce; everyone consumes). Identifiers kept distinct and never flattened: session id, message uuid, API message id, tool-use id, task id, agent id, parent tool-use id, request id. Normalised event kinds: session lifecycle, turn lifecycle, assistant block delta and complete, user message (with replay and bash tags), tool use, tool result (with spill path), tool progress, permission request and resolution, question request and answer, plan request and outcome, dialog and elicitation, subagent lifecycle and message, task lifecycle and notification, workflow progress, compaction and reset and retraction boundaries, usage and context sample, error and reconnect, process exit. Session record: app id, engine session id, project id, directory (from the first record), worktree and branch, title with source (user, generated, tool), pin, archive state, holder (self, terminal pid, background job, none), last-seen cursor, unread flag, engine version, gateway state, model and effort, permission mode. Attention item: id, session id, kind (permission, question, plan, dialog, elicitation, error, interrupted, held peer message), request reference, created at, state (pending, delivered, confirmed, retired). Binding: without one graph the transcript, the panels and the attention model would each invent their own keys.
+- **X2 IPC schema** (owner C1). Namespaced commands and events with runtime validation on both sides: `session.*`, `engine.*`, `fs.*`, `git.*`, `pty.*`, `layout.*`, `attention.*`, `settings.*`. The renderer never receives shell, git or engine handles. Binding: the security boundary and every child's integration surface.
+- **X3 Presentation model** (owner C6). Row types: time separator, user, assistant text, work divider, activity group, cell, cell detail, change receipt, subagent row, agent message row, thinking, plan, question (historical), request card slot, error, boundary, replayed bash. Each tool event carries at derivation time: groupable or standalone, category in the fixed summary order (MCP sources, loaded skills, file changes, exploration, commands, web), denial marker, subagent lifecycle kind, group-start marker. Binding: C7's cards and C8's drill-in render the same rows.
+- **X4 Request card** (owner C7). One component for permission, question, plan, dialog and elicitation, taking an X1 attention item and an answer callback, placed docked at the composer, in an Overview card, in a hover card (read-only tools, click only), and inline. Binding: the same decision must look and behave identically wherever it appears.
+- **X5 Panel host and tool registry** (owner C8; C9 implements). A tool declares id, title, icon, pinnable, per-session state factory and render; the host owns tab order, pin, maximize and the "+" menu. Binding: tools land in different waves.
+- **X6 Launch contract** (owner C3; C10 extends). Absolute binary path, the flag set of §4.1, the constructed environment allowlist, initialize fields (hooks, `perTaskStopAffordance`, `supportedDialogKinds`, `workspaceTrust`), flag settings (dialog expiry, re-applied grants), resume and fork flags. Binding: verified behaviour depends on the exact set.
+- **X7 Theme tokens** (owner C1). The token names in `mockups/tokens.css`, light-first values from `tokens-light.css`, dark alternate; components use tokens only. Binding names, advisory values.
+- **X8 Fixtures and replay** (C2 delivers; C4 owns the engine). Fixture format is the probe's journal: one JSON object per line with sequence, direction, timestamp and frame; a scenario is a file; sidecars sit beside it. Replay feeds either the raw journal (C3's normaliser) or a JSONL transcript (C4's backfill). Binding: tests across children depend on it.
+
+## 14. Ordering and dependency map
+
+- Wave 1, now: C1 and C2 in parallel.
+- Wave 2, after C1 (and C2 for C3): C3, C4, C5, C6, C9 in parallel. C5 and C6 build on fixtures until C3 and C4 land.
+- Wave 3: C7 (after C3, C6) and C8 (after C4, C5, C6) in parallel.
+- Wave 4: C10 (after C3, C4, C5, C9) and C11 (after C3, C7) in parallel.
+- Wave 5: C12, then recomposition against §10.
+
+Forced sequence: the fixtures gate the engine host; the transcript gates the composer's cards and the panel's drill-in; the terminal gates the attach affordance. Everything else is parallel by construction because the contracts in §13 are fixed here.
+
+## 15. Risks and mitigations
+
+- The wire changes under us with a new Claude Code release: the engine is pinned per session and the conformance tests (C3) run against fixtures; upgrading is a deliberate re-probe (C2's harness stays).
+- Real settings make processes far heavier than the bare probe: C2 measures the tree; the interim never-exit rule keeps behaviour predictable until C12's budget.
+- Foreign-live detection races a terminal start: C4 marks by holder file and process liveness, and C10 refuses to resume a session whose holder is alive.
+- ghostty-web fails the acceptance list: C9's spike gate switches to xterm.js without touching the tool.
+- Scene A drowns Scene B or the reverse: §10 requires both in one sitting; C5 and C7 are separate children so neither is starved.
+- The transcript renderer is rebuilt when grouping lands: X3 freezes the classification fields before any renderer exists.
+
+## 16. Deferred and out of scope
+
+Deferred (may return): everything in §3 P1 and P2; the extension model of D-9; the detachable supervisor (D-16); the all-accounts usage view; dictation; the bottom dock; the topology view for subagents; the replay scrubber; workflow pause, skip and retry if the engine ever exposes them; per-message approval of held peer messages (needs an engine change).
+
+Explicitly out of scope for P0: bundle patches (D-1); Windows and Linux (D-11); a second engine (D-7); reproducing the 307-method Desktop contract (the design keeps only the essential workstation architecture); cloud sessions, sharing and remote control.
+
+## 17. Tracking map
+
+| Child | Grain | Status | Ledger / artifact |
+|---|---|---|---|
+| C1 Foundations | plan | not-dispatched | `docs/doperpowers/execplans/` (to be written at dispatch) |
+| C2 Probe, second pass | spike | not-dispatched | `spikes/protocol-probe/` findings |
+| C3 Engine host | plan | blocked-by C1, C2 | |
+| C4 Filesystem state, index, replay | plan | blocked-by C1 | |
+| C5 Shell | plan | blocked-by C1 | |
+| C6 Transcript | plan | blocked-by C1 | |
+| C7 Composer and requests | plan | blocked-by C1, C3, C6 | |
+| C8 Right panel tools | decomposing | blocked-by C4, C5, C6 | |
+| C9 Terminal | plan | blocked-by C1 | |
+| C10 Sessions, worktrees, trust | plan | blocked-by C3, C4, C5, C9 | |
+| C11 Palette, settings, gateway, usage | plan | blocked-by C3, C7 | |
+| C12 Finish | decomposing | deliberately late | |
+
+## 18. Surprises and discoveries
+
+- 2026-09-28, probe: AskUserQuestion travels over the permission channel; `fork_conversation` is unsupported (routed); resume does not replay history; child agents stream per message only; the project slug is the realpath; every first-pass scenario ran routed through the gateway because the shell exports the gateway variables.
+- 2026-09-28, research: Codex's center tabs are one chat plus its content tabs, not multiple conversations; MAWS's multi-session tabs are an intentional extension. `inline-composer` in Codex is an image-edit prompt. Claude Desktop's `LocalSessions` has 307 methods and no IPC stores; Desktop is an SDK client with a large app-side layer.
+- 2026-09-28, critique: session-scoped grants are not persisted for local sessions; there is no acknowledgement frame for a control response; print mode leaves project-scoped grants gated without a trust record; `perTaskStopAffordance` absent makes Stop kill background agents.
+
+## 19. Decision log
+
+- 2026-09-28: Verification call for this composite: each plan child ends with an independent review at the astra rung (reviewer-medium by default, reviewer-high for C3 and C4); the parent closes by recomposition against §10 with a scale review of the integrated app. Alternative rejected: per-child review only, which would miss the seams §10 exists to test.
+- 2026-09-28: Cut into twelve children rather than six or the original six milestones; reason: ownership and verification seams (live wire versus disk, shell versus transcript versus composer, terminal's own spike), with C8 and C12 left coarse for the frontier rule. Owner approved.
+- 2026-09-28: Tracking by this map plus ledgers, no ticket board; execution of wave 1 by plan-executor subagents from the architect session; model routing for executors prefers opus and fable unless astra-high fits; reviewers always astra. Owner decided.
+- 2026-09-28: Critique round 1 adopted in full except finding 14 (usage placement kept per D-17); round 2 wording holds adopted in full. Rejected alternative in round 2: a fixed idle timer for process exit, replaced by the interim never-exit rule.
+- 2026-09-28: Model override pass-through: the owner's `ANTHROPIC_DEFAULT_*_MODEL` variables are passed to the engine when present, shown in Session info; alternative rejected: stripping them, which would make "opus" mean something different from the terminal.
+
+## 20. Outcomes and retrospective
+
+Pending. Closing is a recomposition check against §10, then the retrospective.
