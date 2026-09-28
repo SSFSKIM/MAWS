@@ -1,0 +1,521 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MAWS · Session lifecycle</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="tokens-light.css" id="theme-light">
+<script>
+/* Light is the default (D-4). `?theme=dark` drops the light override so the dark tokens under :root apply. */
+if (new URLSearchParams(location.search).get('theme') === 'dark') { document.getElementById('theme-light').remove(); document.documentElement.style.colorScheme = 'dark'; }
+</script>
+<style>
+/* Adopted from the MAWS mockup kit: quiet, dense chrome; light by default.
+   Every state the charter names for the session lifecycle (C10) is held open
+   for inspection. Each frame is a real-size crop, not a scaled desktop. */
+* { box-sizing: border-box; }
+:root { color-scheme: light; --shadow: 0 8px 28px color-mix(in srgb, var(--bg) 70%, transparent), 0 1px 3px color-mix(in srgb, var(--fg) 10%, transparent); }
+body { padding: 40px 24px 72px; }
+main { width: 760px; max-width: 100%; margin: 0 auto; }
+button,input,textarea,summary { font: inherit; }
+button,a,input,textarea,summary { -webkit-tap-highlight-color: transparent; }
+button { color: var(--fg); background: transparent; border: 0; cursor: pointer; border-radius: var(--radius-sm); }
+button:hover { background: var(--bg-hover); }
+button:disabled { cursor: default; opacity: .45; }
+button:disabled:hover { background: transparent; }
+a { color: var(--fg); text-decoration: none; }
+a:hover { text-decoration: underline; }
+button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible,summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+input[type=radio],input[type=checkbox] { accent-color: var(--accent); margin: 0; }
+h1,h2,h3,p { margin: 0; }
+h1 { font-size: 21px; font-weight: 600; letter-spacing: -.45px; }
+h2 { font-size: 13px; font-weight: 550; }
+h3 { font-size: 13px; font-weight: 600; }
+code { font: 11px var(--font-mono); }
+.page-head { padding-bottom: 28px; border-bottom: 1px solid var(--border); margin-bottom: 32px; }
+.eyebrow { font-size: 11px; letter-spacing: .09em; text-transform: uppercase; color: var(--fg-muted); margin-bottom: 10px; }
+.page-head p { margin-top: 9px; color: var(--fg-muted); line-height: 1.6; }
+.vignette { margin: 0 0 40px; }
+figcaption { display: flex; align-items: baseline; gap: 12px; margin-bottom: 5px; }
+figcaption .number { color: var(--fg-muted); font: 11px var(--font-mono); }
+figcaption .dimension { margin-left: auto; color: var(--fg-muted); font-size: 11px; }
+.rationale { margin: 0 0 12px 32px; font-size: 11px; color: var(--fg-muted); line-height: 1.5; }
+.frame { border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--bg); overflow: hidden; }
+.small { font-size: 12px; }
+.label { font-size: 10px; text-transform: uppercase; letter-spacing: .075em; color: var(--fg-muted); font-weight: 600; }
+.row { display: flex; align-items: center; gap: 8px; }
+.between { justify-content: space-between; }
+.hint { font-size: 11px; color: var(--fg-muted); line-height: 1.5; }
+.btn { border: 1px solid var(--border-strong); border-radius: var(--radius-sm); padding: 7px 13px; background: var(--bg-hover); font-weight: 500; font-size: 12px; white-space: nowrap; }
+.btn.primary { background: var(--accent); color: var(--bg); border-color: var(--accent); font-weight: 650; }
+.btn.primary:hover { filter: brightness(1.08); }
+.btn.danger { background: var(--danger); color: var(--bg); border-color: var(--danger); font-weight: 650; }
+.btn.danger:hover { filter: brightness(1.08); }
+.text-action { color: var(--fg-muted); font-size: 11px; padding: 4px 6px; white-space: nowrap; }
+.text-action:hover { color: var(--fg); }
+.popover { background: var(--bg-overlay); border: 1px solid var(--border-strong); border-radius: var(--radius); box-shadow: var(--shadow); }
+.path { font: 11px var(--font-mono); color: var(--fg-muted); overflow-wrap: anywhere; }
+.divider { border-top: 1px solid var(--border); }
+.warn { color: var(--warning); }
+.info { color: var(--info); }
+.danger-text { color: var(--danger); }
+.g-foreign { color: var(--fg-muted); }
+/* Sidebar crop: 300 px, same vocabulary as 01. */
+.sidebar { width: 300px; min-width: 300px; background: var(--bg-raised); border-right: 1px solid var(--border); padding: 12px 10px; font-size: 12px; }
+.search { display: flex; gap: 8px; align-items: center; border: 1px solid var(--border-strong); border-radius: 6px; padding: 6px 8px; margin: 0 2px 14px; color: var(--fg-muted); }
+.search svg { width: 14px; height: 14px; flex-shrink: 0; }
+.search input { width: 100%; min-width: 0; background: transparent; border: 0; color: var(--fg); outline: 0; font-size: 12px; }
+.search input::placeholder { color: var(--fg-muted); }
+.search kbd { font: 10px var(--font-ui); white-space: nowrap; }
+.section-heading { height: 22px; display: flex; align-items: center; padding: 0 9px; margin: 6px 0 2px; }
+.section-heading.attention { color: var(--warning); margin-top: 0; }
+.section-heading .icon { margin-left: auto; }
+.icon { width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; color: var(--fg-muted); font-size: 15px; border-radius: 5px; }
+.icon.pressed { background: var(--bg-active); color: var(--fg); }
+.project-head { height: 30px; display: flex; align-items: center; padding: 0 7px; gap: 6px; }
+.project-head svg { width: 13px; height: 13px; color: var(--fg-muted); fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.project-head .name { flex: 1; }
+.project-head .collapsed { transform: rotate(-90deg); }
+.project-head .rollup { color: var(--accent); font-size: 10px; }
+.project-sessions { margin-left: 10px; padding-left: 5px; border-left: 1px solid var(--border); }
+.session { position: relative; display: grid; grid-template-columns: 14px minmax(0, 1fr) 27px; gap: 7px; align-items: start; min-height: 47px; padding: 7px 9px; border-radius: var(--radius-sm); }
+.session.selected { background: var(--bg-active); }
+.session.context { background: var(--bg-active); box-shadow: inset 2px 0 var(--accent); }
+.session-title { display: flex; align-items: baseline; gap: 5px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; line-height: 17px; font-size: 12px; }
+.session-title .truncate { overflow: hidden; text-overflow: ellipsis; }
+.session-sub { display: block; color: var(--fg-muted); font-size: 11px; margin-top: 3px; line-height: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.session-age { color: var(--fg-muted); text-align: right; font-size: 10px; line-height: 17px; }
+.session-glyph { line-height: 17px; text-align: center; }
+.provenance { font: 9px var(--font-mono); color: var(--fg-faint); letter-spacing: .04em; flex-shrink: 0; }
+.session:hover .provenance { color: var(--fg-muted); }
+.unread { width: 5px; height: 5px; border-radius: 50%; background: var(--info); display: block; margin: 7px 0 0 auto; }
+/* Sheet: macOS sheet over the main area. */
+.sheet-frame { position: relative; display: flex; min-height: 640px; }
+.main-area { flex: 1; min-width: 0; padding: 14px 12px; }
+.sheet { width: 100%; max-width: 436px; margin: 0 auto; background: var(--bg-overlay); border: 1px solid var(--border-strong); border-radius: var(--radius); box-shadow: var(--shadow); }
+.sheet-head { display: flex; align-items: baseline; gap: 8px; padding: 13px 16px; border-bottom: 1px solid var(--border); }
+.sheet-head .where { color: var(--fg-muted); font-size: 12px; }
+.sheet-head kbd { margin-left: auto; font: 10px var(--font-ui); color: var(--fg-muted); }
+.sheet-body { padding: 12px 16px 6px; }
+.sheet-foot { display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--border); }
+.sheet-foot .spacer { flex: 1; }
+.group-label { display: block; margin: 6px 0 5px; }
+.choice { display: grid; grid-template-columns: 14px 1fr; gap: 9px; padding: 7px 8px; border-radius: 5px; cursor: pointer; align-items: start; margin: 0 -8px; }
+.choice:has(input:checked) { background: var(--accent-soft); }
+.choice input { margin-top: 2px; }
+.choice .name { font-size: 12px; display: flex; gap: 8px; align-items: baseline; }
+.choice .name .path { margin-left: auto; }
+.choice .sub { display: block; font-size: 11px; color: var(--fg-muted); margin-top: 3px; line-height: 1.5; }
+.choice .nested { display: grid; grid-template-columns: 56px 1fr auto; align-items: center; gap: 8px; margin-top: 8px; font-size: 11px; color: var(--fg-muted); }
+.input { height: 28px; padding: 0 8px; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--bg); color: var(--fg); font-size: 12px; width: 100%; }
+.input.mono { font: 12px var(--font-mono); }
+.input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.chip { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--border-strong); padding: 4px 8px; border-radius: 6px; font-size: 11px; color: var(--fg); background: var(--bg); white-space: nowrap; }
+.chip.muted { color: var(--fg-muted); border-color: var(--border); }
+.chip .x { color: var(--fg-muted); }
+.field { display: grid; grid-template-columns: 84px 1fr; align-items: center; gap: 10px; min-height: 34px; font-size: 12px; }
+.field .k { font-size: 11px; color: var(--fg-muted); }
+.field .v { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.seg { display: flex; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--bg); padding: 3px; }
+.seg label { flex: 1; text-align: center; padding: 4px 6px; font-size: 11px; border-radius: 4px; cursor: pointer; white-space: nowrap; }
+.seg input { position: absolute; opacity: 0; }
+.seg label:has(input:checked) { background: var(--bg-active); color: var(--fg); box-shadow: inset 0 0 0 1px var(--border-strong); }
+.seg label:has(input:focus-visible) { outline: 2px solid var(--accent); }
+.seg.compact label { padding: 3px 4px; }
+.stack { margin-top: 4px; }
+.stack .k { display: block; font-size: 11px; color: var(--fg-muted); margin: 8px 0 6px; }
+textarea.input { height: 54px; padding: 6px 8px; resize: none; line-height: 1.5; }
+.route { display: flex; align-items: center; gap: 8px; font-size: 12px; margin-top: 10px; padding: 9px 0 4px; border-top: 1px solid var(--border); }
+.route .glyph { color: var(--success); }
+.route .text-action { margin-left: auto; }
+.route .sub { display: block; font-size: 11px; color: var(--fg-muted); margin-top: 2px; }
+.summary-row { display: grid; grid-template-columns: 62px minmax(0, 1fr) auto; align-items: center; gap: 10px; font-size: 12px; min-height: 30px; }
+.summary-row .val { min-width: 0; line-height: 1.5; }
+.summary-row .val .path { color: var(--fg-muted); }
+.block { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 12px 12px 10px; margin: 8px 0 6px; }
+.block.trust { border-top: 2px solid var(--info); }
+.block.relay { border-top: 2px solid var(--warning); }
+.block h3 { display: flex; align-items: center; gap: 8px; }
+.block .endpoint { display: block; font-size: 11px; color: var(--fg-muted); margin: 4px 0 0 22px; font-family: var(--font-mono); }
+.block p { font-size: 12px; line-height: 1.55; margin-top: 7px; }
+.block p.hint { font-size: 11px; }
+.loads { margin: 10px 0 4px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); }
+.loads .row { padding: 6px 10px; font-size: 11px; }
+.loads .row + .row { border-top: 1px solid var(--border); }
+.loads code { color: var(--fg); }
+.loads .row span:last-child { margin-left: auto; color: var(--fg-muted); white-space: nowrap; }
+.sheet-crop { padding: 20px; background: var(--bg-raised); }
+.sheet-crop .sheet { margin: 0 auto; }
+/* Context menu and popovers for fork and rename. */
+.menu-frame { position: relative; display: flex; min-height: 372px; }
+.menu { position: absolute; width: 226px; background: var(--bg-overlay); border: 1px solid var(--border-strong); border-radius: 8px; padding: 4px; box-shadow: var(--shadow); font-size: 12px; z-index: 2; }
+.menu-item { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 4px; width: 100%; text-align: left; }
+.menu-item .k { margin-left: auto; color: var(--fg-muted); font-size: 10px; }
+.menu-item .caret { margin-left: auto; color: var(--fg-muted); font-size: 10px; }
+.menu-item.active { background: var(--bg-active); }
+.menu-item:disabled { opacity: .45; }
+.menu-sep { border-top: 1px solid var(--border); margin: 4px 0; }
+.menu.sub { width: 244px; }
+.menu.sub .menu-item { display: block; }
+.menu.sub .desc { display: block; font-size: 11px; color: var(--fg-muted); margin-top: 2px; line-height: 1.45; }
+.pair { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 14px; align-items: start; padding: 18px; }
+.widget-head { display: flex; align-items: center; gap: 8px; padding: 12px 14px; border-bottom: 1px solid var(--border); }
+.widget-head .from { color: var(--fg-muted); font-size: 11px; margin-left: auto; }
+.widget-body { padding: 12px 14px; }
+.widget-foot { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--border); }
+.widget-foot .spacer { flex: 1; }
+.steps { list-style: none; margin: 10px 0 0; padding: 0; font-size: 11px; }
+.steps li { display: flex; gap: 8px; align-items: baseline; min-height: 22px; color: var(--fg-muted); line-height: 1.5; }
+.steps .mark { width: 14px; text-align: center; flex-shrink: 0; }
+.steps .text { min-width: 0; }
+.steps .ok { color: var(--success); }
+.steps .bad { color: var(--danger); }
+.steps li.failed { color: var(--fg); }
+.rollback { margin-top: 8px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 11px; line-height: 1.5; background: var(--bg); }
+.rollback strong { font-weight: 550; }
+.provenance-line { font-size: 11px; color: var(--fg-muted); margin-top: 8px; line-height: 1.6; }
+.provenance-line .provenance { font-size: 10px; margin-right: 4px; }
+.provenance-line .text-action { padding: 0; font-size: 11px; }
+.title-examples { margin-top: 12px; border-top: 1px solid var(--border); padding-top: 10px; }
+.title-examples .ex { display: flex; align-items: baseline; gap: 6px; font-size: 12px; min-height: 24px; }
+.title-examples .ex .hint { margin-left: auto; }
+/* Worktree cleanup. */
+.cleanup { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); gap: 14px; align-items: start; padding: 18px; }
+.tree-status { display: flex; align-items: center; gap: 8px; font-size: 12px; flex-wrap: wrap; }
+.tree-status .text-action { margin-left: auto; }
+.changes { margin: 8px 0 2px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); font: 11px var(--font-mono); }
+.changes .row { padding: 5px 10px; gap: 10px; }
+.changes .row + .row { border-top: 1px solid var(--border); }
+.changes .m { color: var(--warning); width: 10px; }
+.changes .q { color: var(--fg-muted); width: 10px; }
+.changes .counts { margin-left: auto; color: var(--fg-muted); }
+.changes .add { color: var(--success); } .changes .del { color: var(--danger); }
+.action-row { display: grid; grid-template-columns: 14px 1fr auto; gap: 10px; padding: 9px 8px; border-radius: 5px; align-items: start; margin: 0 -8px; }
+.action-row input { margin-top: 2px; }
+.action-row:has(input:checked) { background: var(--accent-soft); }
+.action-row .name { display: block; font-size: 12px; line-height: 17px; }
+.action-row .consequence { display: block; font-size: 11px; color: var(--fg-muted); margin-top: 3px; line-height: 1.5; }
+.action-row.disabled { opacity: .5; }
+.gate { font-size: 10px; white-space: nowrap; color: var(--fg-muted); border: 1px solid var(--border); padding: 2px 6px; border-radius: 4px; margin-top: 1px; }
+.gate.blocked { color: var(--warning); border-color: color-mix(in srgb, var(--warning) 45%, transparent); }
+.gate.destructive { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, transparent); }
+.gate.safe { color: var(--success); border-color: color-mix(in srgb, var(--success) 40%, transparent); }
+.clean-state { padding: 0; }
+.clean-state .widget-body { padding-top: 8px; }
+/* Foreign-live session pane. */
+.pane { display: flex; flex-direction: column; }
+.tabs { height: 38px; display: flex; align-items: stretch; border-bottom: 1px solid var(--border); font-size: 11px; }
+.tab { padding: 0 12px; display: flex; gap: 6px; align-items: center; color: var(--fg-muted); border-right: 1px solid var(--border); border-radius: 0; white-space: nowrap; }
+.tab.active { color: var(--fg); background: var(--bg-raised); box-shadow: inset 0 -2px var(--accent); }
+.tab small { font-size: 9px; color: var(--fg-muted); }
+.holder-bar { display: flex; align-items: center; gap: 8px; padding: 8px 20px; border-bottom: 1px solid var(--border); background: var(--bg-raised); font-size: 11px; color: var(--fg-muted); white-space: nowrap; }
+.holder-bar > span:not(.g-foreign) { overflow: hidden; text-overflow: ellipsis; }
+.holder-bar strong { color: var(--fg); font-weight: 500; }
+.holder-bar .text-action { margin-left: auto; color: var(--fg); }
+.transcript-crop { padding: 22px 24px 8px; }
+.assistant-label { display: flex; gap: 7px; align-items: center; font-size: 12px; font-weight: 600; margin-bottom: 8px; }
+.assistant-mark { color: var(--accent); font-size: 19px; line-height: 16px; font-weight: 400; }
+.prose-line { font-size: 15px; line-height: 1.6; max-width: 72ch; }
+.tail { display: flex; align-items: center; gap: 8px; margin-top: 14px; font-size: 11px; color: var(--fg-muted); }
+.tail .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--fg-muted); animation: pulse 1.6s ease-in-out infinite; }
+.locus-label { display: flex; justify-content: space-between; margin: 14px 24px 8px; color: var(--fg-muted); font-size: 11px; }
+.readonly-card { margin: 0 24px; border: 1px solid var(--border-strong); border-top: 2px solid var(--fg-muted); border-radius: var(--radius); background: var(--bg-raised); }
+.readonly-card .content { padding: 14px 16px; }
+.readonly-card .header { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.readonly-card .header .who { width: 26px; height: 26px; display: inline-grid; place-items: center; background: var(--bg-active); border: 1px solid var(--border-strong); border-radius: 7px; font-size: 17px; }
+.readonly-card .waiting { margin-left: auto; font-size: 11px; color: var(--fg-muted); }
+.codebox { font: 12px/1.7 var(--font-mono); background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px 12px; overflow-wrap: anywhere; }
+.readonly-card .footer { display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--border); }
+.readonly-card .footer .hint { margin-left: auto; }
+.holder-notice { margin: 14px 24px 0; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--bg-raised); padding: 13px 16px; }
+.holder-notice h3 { display: flex; align-items: center; gap: 8px; }
+.holder-notice p { font-size: 12px; color: var(--fg-muted); margin-top: 6px; line-height: 1.55; }
+.holder-notice .actions { display: flex; gap: 8px; align-items: center; margin-top: 12px; }
+.holder-notice .actions .hint { margin-left: auto; }
+.statusline { display: flex; align-items: center; gap: 5px; min-height: 38px; padding: 0 24px; color: var(--fg-muted); font-size: 11px; white-space: nowrap; }
+.statusline .path { margin-right: auto; }
+.variant-label { display: flex; align-items: center; gap: 10px; padding: 12px 24px 0; font-size: 10px; color: var(--fg-muted); text-transform: uppercase; letter-spacing: .07em; font-weight: 600; }
+.variant-label::after { content: ''; flex: 1; border-top: 1px solid var(--border); }
+/* Confirmations. */
+.confirm-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; padding: 18px; align-items: start; }
+.confirm { padding: 16px; }
+.confirm h3 { line-height: 1.4; }
+.confirm p { font-size: 12px; color: var(--fg-muted); line-height: 1.55; margin-top: 8px; }
+.confirm p strong { color: var(--fg); font-weight: 500; }
+.confirm .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.confirm .actions .hint { margin-right: auto; align-self: center; }
+.page-foot { color: var(--fg-muted); font-size: 11px; padding-top: 8px; }
+@media (max-width: 700px) {
+ body { padding: 24px 14px 40px; }
+ .dimension { display: none; }
+ .sheet-frame, .menu-frame { display: block; }
+ .sidebar { width: 100%; min-width: 0; border-right: 0; border-bottom: 1px solid var(--border); }
+ .menu, .menu.sub { position: static; width: auto; margin: 10px 12px; }
+ .pair, .cleanup, .confirm-pair { grid-template-columns: 1fr; padding: 12px; }
+ .field { grid-template-columns: 1fr; gap: 4px; }
+}
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+</head>
+<body>
+<svg aria-hidden="true" style="position:absolute;width:0;height:0;overflow:hidden"><defs>
+<symbol id="down" viewBox="0 0 16 16"><path d="m4 6 4 4 4-4"/></symbol>
+<symbol id="folder" viewBox="0 0 16 16"><path d="M2 4h5l1.5 2H14v7H2z"/></symbol>
+<symbol id="search" viewBox="0 0 20 20"><circle cx="8" cy="8" r="5.5"/><path d="m12 12 5 5"/></symbol>
+</defs></svg>
+<main>
+<header class="page-head">
+ <div class="eyebrow">MAWS / Interaction studies / 05</div>
+ <h1>Sessions: start, branch, hand off, clean up.</h1>
+ <p>One sheet to start. Trust said once. Worktrees that clean up without surprises. A session someone else is holding stays readable.</p>
+</header>
+
+<figure class="vignette" id="new-session">
+ <figcaption><span class="number">01</span><h2>New-session sheet from a project’s “+”</h2><span class="dimension">300 px sidebar · 436 px sheet</span></figcaption>
+ <p class="rationale">Location first, because it decides the worktree. The routing line says which account is paying before the first turn; Direct is one quiet control away, not a mode.</p>
+ <div class="frame sheet-frame">
+  <aside class="sidebar" aria-label="Session sidebar">
+   <label class="search"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><use href="#search"/></svg><input type="search" aria-label="Search sessions" placeholder="Search sessions"><kbd>⌘ K</kbd></label>
+   <div class="section-heading attention label">Needs you · 3</div>
+   <div class="section-heading label" style="margin-top:10px">Pinned · 2</div>
+   <div class="section-heading label" style="margin-top:10px">Projects <span class="icon" aria-hidden="true">+</span></div>
+   <div class="project-head"><svg><use href="#down"/></svg><svg><use href="#folder"/></svg><span class="name">MAWS</span><span class="icon pressed" aria-label="New session in MAWS (open)">+</span></div>
+   <div class="project-sessions">
+    <div class="session"><span class="session-glyph g-working" aria-label="Working">●</span><span><span class="session-title"><span class="truncate">Charter + research</span><span class="provenance" title="Title generated by the engine">auto</span></span><span class="session-sub">Running bun test</span></span><span class="session-age">now</span></div>
+    <div class="session"><span class="session-glyph g-needs" aria-label="Needs approval">◐</span><span><span class="session-title"><span class="truncate">Fix sidebar drag</span><span class="provenance" title="Title generated by the engine">auto</span></span><span class="session-sub">Waiting to push feat/sidebar-drag</span></span><span class="session-age">8m<span class="unread" aria-label="Unread"></span></span></div>
+    <div class="session"><span class="session-glyph g-question" aria-label="Question">?</span><span><span class="session-title"><span class="truncate">Sidebar interaction pass</span></span><span class="session-sub">Which sidebar layout?</span></span><span class="session-age">4m</span></div>
+   </div>
+   <div class="project-head"><svg class="collapsed"><use href="#down"/></svg><svg><use href="#folder"/></svg><span class="name">codex_somersault</span><span class="rollup">◇1</span></div>
+   <div class="project-head"><svg class="collapsed"><use href="#down"/></svg><svg><use href="#folder"/></svg><span class="name">claude-usage-menubar</span><span class="rollup">⧉1</span></div>
+   <div class="project-head"><svg class="collapsed"><use href="#down"/></svg><svg><use href="#folder"/></svg><span class="name">claude-code-bundle</span></div>
+  </aside>
+  <div class="main-area">
+   <section class="sheet" aria-label="New session sheet">
+    <div class="sheet-head"><h3>New session</h3><span class="where">in MAWS</span><kbd>esc</kbd></div>
+    <div class="sheet-body">
+     <span class="label group-label">Location</span>
+     <label class="choice"><input type="radio" name="location"><span><span class="name">Project directory <span class="path">~/Developer/GitHub/MAWS</span></span><span class="sub">⎇ main · clean</span></span></label>
+     <label class="choice"><input type="radio" name="location" checked><span><span class="name">New worktree <span class="path">.claude/worktrees/‹branch›</span></span><span class="sub">Same convention the engine’s own EnterWorktree uses, so both coexist.</span><span class="nested"><span>Branch</span><input class="input mono" value="feat/session-sheet" aria-label="Branch name"><span class="chip muted">from main ⌄</span></span></span></label>
+     <label class="choice"><input type="radio" name="location"><span><span class="name">Existing worktree <span class="path">2 available</span></span><span class="sub">charter · live in “Charter + research” &nbsp;·&nbsp; feat-usage-strip · idle</span></span></label>
+     <div class="divider" style="margin:10px 0 4px"></div>
+     <div class="field"><span class="k">Model</span><span class="v"><button class="chip" title="Opens the model and effort widget">Opus 5.5 ⌄</button><span class="seg compact" role="radiogroup" aria-label="Effort"><label><input type="radio" name="effort">Low</label><label><input type="radio" name="effort">Medium</label><label><input type="radio" name="effort" checked>High</label><label><input type="radio" name="effort">Max</label></span></span></div>
+     <div class="stack"><span class="k">Permission mode</span>
+      <div class="seg" role="radiogroup" aria-label="Permission mode"><label><input type="radio" name="mode">default</label><label><input type="radio" name="mode">acceptEdits</label><label><input type="radio" name="mode">plan</label><label><input type="radio" name="mode" checked>auto</label><label><input type="radio" name="mode">bypass</label></div>
+      <p class="hint" style="margin-top:6px">Auto: the classifier reviews tool calls; escalations, questions and plan reviews come to you. Inherited from your settings.</p>
+     </div>
+     <div class="field" style="margin-top:6px"><span class="k">Also read</span><span class="v"><span class="chip">claude-code-bundle <span class="x" aria-hidden="true">×</span></span><button class="chip muted">+ Add directory</button></span></div>
+     <div class="stack"><span class="k">First message <span style="font-weight:400">· optional</span></span><textarea class="input" aria-label="First message" placeholder="Sent as the first turn. Leave empty to open the session idle."></textarea></div>
+     <div class="route"><span class="glyph" aria-hidden="true">⇄</span><span>Routed through ClaudeUsage’s relay<span class="sub">alex@maws.dev is routing now · weekly resets soonest · gateway models available</span></span><button class="text-action" title="Run this session with the engine’s own login instead">Direct…</button></div>
+    </div>
+    <div class="sheet-foot"><span class="hint">⌘N · selected project</span><span class="spacer"></span><button class="btn">Cancel</button><button class="btn primary">Start session ↵</button></div>
+   </section>
+  </div>
+ </div>
+</figure>
+
+<figure class="vignette" id="trust">
+ <figcaption><span class="number">02</span><h2>Trust step for a directory never trusted</h2><span class="dimension">Same sheet · trust block replaces the fields</span></figcaption>
+ <p class="rationale">Trust is the terminal’s dialog, said once and attested in <code>initialize</code>; what it loads is read from disk so the decision is concrete, not a shrug.</p>
+ <div class="frame sheet-crop">
+  <section class="sheet" aria-label="New session sheet with trust step">
+   <div class="sheet-head"><h3>New session</h3><span class="where">in quota-ledger</span><kbd>esc</kbd></div>
+   <div class="sheet-body">
+    <div class="summary-row"><span class="label">Location</span><span class="val">Project directory · <span class="path">~/Developer/GitHub/quota-ledger</span></span><button class="text-action">Change</button></div>
+    <div class="summary-row"><span class="label">Options</span><span class="val hint">Opus 5.5 · High &nbsp;·&nbsp; auto &nbsp;·&nbsp; no extra directories</span><button class="text-action">Edit</button></div>
+    <section class="block trust" aria-label="Trust this directory">
+     <h3><span class="info" aria-hidden="true">◇</span>Trust this directory first</h3>
+     <p><strong style="font-weight:550">quota-ledger</strong> has never been trusted on this Mac. Trusting it loads the project’s own settings, hooks, MCP servers and plugins, exactly as the terminal does when you accept its trust dialog.</p>
+     <div class="loads" aria-label="What trusting loads">
+      <div class="row"><code>.claude/settings.json</code><span>4 allow rules · 1 PostToolUse hook</span></div>
+      <div class="row"><code>.mcp.json</code><span>2 MCP servers · ptc, advisor</span></div>
+      <div class="row"><code>enabledPlugins</code><span>1 plugin · doperpowers</span></div>
+     </div>
+     <p class="hint">Attested to the engine once at launch and recorded in <code>~/.claude.json</code>, so the terminal will not ask again either. Untrusted, the engine ignores these files and says so; MAWS would show that notice in the session.</p>
+    </section>
+   </div>
+   <div class="sheet-foot"><button class="text-action" title="Start with project settings ignored; the engine’s notice appears as a session warning">Start without trusting</button><span class="spacer"></span><button class="btn">Cancel</button><button class="btn primary">Trust and start ↵</button></div>
+  </section>
+ </div>
+</figure>
+
+<figure class="vignette" id="relay-down">
+ <figcaption><span class="number">03</span><h2>Relay unreachable at launch</h2><span class="dimension">Sheet foot · routing block in its failed state</span></figcaption>
+ <p class="rationale">The default route is down, so the sheet offers the two real options instead of failing: bring ClaudeUsage back, or run this one session on the engine’s own login.</p>
+ <div class="frame sheet-crop">
+  <section class="sheet" aria-label="New session sheet, relay unreachable">
+   <div class="sheet-body" style="padding-top:14px">
+    <div class="summary-row"><span class="label">Location</span><span class="val">New worktree · <span class="path">.claude/worktrees/feat-session-sheet</span></span><button class="text-action">Change</button></div>
+    <section class="block relay" aria-label="Relay unreachable">
+     <h3><span class="warn" aria-hidden="true">△</span>ClaudeUsage’s relay is not answering</h3>
+     <span class="endpoint">127.0.0.1:8641/api/hello · timed out after 2s</span>
+     <p>New sessions route through it by default. Open ClaudeUsage to bring the relay back, or run this session direct with the engine’s own login.</p>
+     <label class="choice" style="margin-top:8px"><input type="radio" name="fallback" checked><span><span class="name">Open ClaudeUsage, then start</span><span class="sub">MAWS keeps checking; the session starts routed as soon as the relay answers.</span></span></label>
+     <label class="choice"><input type="radio" name="fallback"><span><span class="name">Run direct</span><span class="sub">Uses the engine’s own login (alex@maws.dev, last signed in 3d ago). Gateway models unavailable; usage windows come from the engine. Switching back later restarts the session.</span></span></label>
+    </section>
+   </div>
+   <div class="sheet-foot"><button class="text-action">Retry ↻ <span class="hint">checked 4s ago</span></button><span class="spacer"></span><button class="btn">Cancel</button><button class="btn primary">Open ClaudeUsage ↵</button></div>
+  </section>
+ </div>
+</figure>
+
+<figure class="vignette" id="fork-rename">
+ <figcaption><span class="number">04</span><h2>Fork paths and rename with provenance</h2><span class="dimension">Session menu · two popovers</span></figcaption>
+ <p class="rationale">Fork is a launch flag, not a control request, so both paths are new sessions the engine writes itself; the worktree path creates the checkout first and can undo itself. Titles say who named them.</p>
+ <div class="frame">
+  <div class="menu-frame">
+   <aside class="sidebar" aria-label="Session sidebar" style="min-height:300px">
+    <div class="section-heading label">Projects <span class="icon" aria-hidden="true">+</span></div>
+    <div class="project-head"><svg><use href="#down"/></svg><svg><use href="#folder"/></svg><span class="name">MAWS</span><span class="icon" aria-hidden="true">+</span></div>
+    <div class="project-sessions">
+     <div class="session"><span class="session-glyph g-working" aria-label="Working">●</span><span><span class="session-title"><span class="truncate">Charter + research</span><span class="provenance" title="Title generated by the engine">auto</span></span><span class="session-sub">Running bun test</span></span><span class="session-age">now</span></div>
+     <div class="session context" aria-haspopup="menu"><span class="session-glyph g-needs" aria-label="Needs approval">◐</span><span><span class="session-title"><span class="truncate">Fix sidebar drag</span><span class="provenance" title="Title generated by the engine">auto</span></span><span class="session-sub">Waiting to push feat/sidebar-drag</span></span><span class="session-age">8m</span></div>
+     <div class="session"><span class="session-glyph g-question" aria-label="Question">?</span><span><span class="session-title"><span class="truncate">Sidebar drag: drop target</span></span><span class="session-sub">Which sidebar layout?</span></span><span class="session-age">4m</span></div>
+    </div>
+    <div class="project-head"><svg class="collapsed"><use href="#down"/></svg><svg><use href="#folder"/></svg><span class="name">codex_somersault</span><span class="rollup">◇1</span></div>
+   </aside>
+   <div class="menu" role="menu" style="left:118px;top:96px" aria-label="Session actions">
+    <button class="menu-item" role="menuitem">Open<span class="k">↵</span></button>
+    <button class="menu-item" role="menuitem">Open in split<span class="k">⌘↵</span></button>
+    <div class="menu-sep"></div>
+    <button class="menu-item" role="menuitem">Pin</button>
+    <button class="menu-item" role="menuitem">Rename…</button>
+    <button class="menu-item active" role="menuitem" aria-haspopup="menu" aria-expanded="true">Fork<span class="caret">▸</span></button>
+    <button class="menu-item" role="menuitem">Archive</button>
+    <div class="menu-sep"></div>
+    <button class="menu-item" role="menuitem">Delete conversation…</button>
+    <button class="menu-item" role="menuitem" disabled title="This session runs in the project directory, not a worktree">Remove worktree…</button>
+   </div>
+   <div class="menu sub" role="menu" style="left:346px;top:186px" aria-label="Fork">
+    <button class="menu-item active" role="menuitem">Fork in place<span class="desc">New session in the same directory, continuing from this point. The original stays as it is.</span></button>
+    <button class="menu-item" role="menuitem">Fork to a new worktree…<span class="desc">Creates the checkout, then launches with <code>--fork-session</code> from it. The engine finds the source session and writes the fork under the worktree’s own slug with a new id.</span></button>
+   </div>
+  </div>
+  <div class="pair" style="padding-top:8px">
+   <section class="popover" aria-label="Fork to a new worktree">
+    <div class="widget-head"><h3>Fork to a new worktree</h3><span class="from">from Fix sidebar drag</span></div>
+    <div class="widget-body">
+     <div class="field"><span class="k">Branch</span><span class="v"><input class="input mono" value="feat/sidebar-tests" aria-label="Branch name"></span></div>
+     <div class="field"><span class="k">From</span><span class="v"><button class="chip muted">⎇ feat/sidebar-drag ⌄</button></span></div>
+     <div class="field"><span class="k">Worktree</span><span class="path">.claude/worktrees/feat-sidebar-tests</span></div>
+     <ol class="steps" aria-label="Fork steps and their state">
+      <li><span class="mark ok">✓</span><span class="text">Create the worktree from feat/sidebar-drag</span></li>
+      <li><span class="mark ok">✓</span><span class="text">Record the new session in MAWS’s index</span></li>
+      <li class="failed"><span class="mark bad">✕</span><span class="text">Launch with <code>--fork-session</code> from the worktree · the engine refused: <code>settings_conflict</code></span></li>
+     </ol>
+     <div class="rollback"><strong>Rolled back.</strong> The worktree and MAWS’s record were removed; the source transcript was never touched. Had the launch succeeded, the engine would have written the fork under the worktree’s own slug with a new id. The refusal is journaled.</div>
+    </div>
+    <div class="widget-foot"><span class="hint">Resumes from the terminal too</span><span class="spacer"></span><button class="btn">Cancel</button><button class="btn primary">Try again ↵</button></div>
+   </section>
+   <section class="popover" aria-label="Rename session">
+    <div class="widget-head"><h3>Rename</h3><span class="from">Fix sidebar drag</span></div>
+    <div class="widget-body">
+     <input class="input" value="Fix sidebar drag" aria-label="Session title">
+     <p class="provenance-line"><span class="provenance">auto</span>Generated by the engine from the first prompt · 8m ago · <button class="text-action" title="generate_session_title">Regenerate</button></p>
+     <div class="title-examples" aria-label="How provenance reads in a row">
+      <div class="ex"><span>Fix sidebar drag</span><span class="provenance">auto</span><span class="hint">engine title · tag fades in on hover</span></div>
+      <div class="ex"><span>Sidebar drag: drop target</span><span class="hint">set by you · no tag</span></div>
+      <p class="hint" style="margin-top:6px">A <code>/rename</code> in the terminal shows here as well and replaces an older MAWS name.</p>
+     </div>
+    </div>
+    <div class="widget-foot"><span class="spacer"></span><button class="btn">Cancel</button><button class="btn primary">Rename ↵</button></div>
+   </section>
+  </div>
+ </div>
+</figure>
+
+<figure class="vignette" id="cleanup">
+ <figcaption><span class="number">05</span><h2>Worktree cleanup: four actions, gated by evidence</h2><span class="dimension">Cleanup sheet · dirty and clean states</span></figcaption>
+ <p class="rationale">Archive, remove, discard and delete are different losses. The sheet shows what would be lost before it lets the destructive ones be chosen.</p>
+ <div class="frame cleanup">
+  <section class="popover" aria-label="Clean up worktree, dirty state">
+   <div class="widget-head"><h3>Clean up worktree</h3><span class="from">Charter + research</span></div>
+   <div class="widget-body">
+    <div class="tree-status"><span class="path" style="color:var(--fg)">.claude/worktrees/charter</span><span class="hint">⎇ charter · 3 commits ahead of main · not pushed</span><button class="text-action">Review ↗</button></div>
+    <div class="changes" aria-label="Uncommitted changes">
+     <div class="row"><span class="m">M</span>docs/charter.md<span class="counts"><span class="add">+212</span> <span class="del">−18</span></span></div>
+     <div class="row"><span class="m">M</span>research/sdk-wire-gap.md<span class="counts"><span class="add">+40</span> <span class="del">−3</span></span></div>
+     <div class="row"><span class="q">?</span>research/notes.md<span class="counts">untracked</span></div>
+    </div>
+    <div class="divider" style="margin:10px 0 4px"></div>
+    <label class="action-row"><input type="checkbox" checked><span><span class="name">Archive the session</span><span class="consequence">Ends the engine process and hides the session from the project. The transcript stays under <code>~/.claude</code>; the worktree stays on disk. Reversible.</span></span><span class="gate safe">reversible</span></label>
+    <label class="action-row disabled"><input type="checkbox" disabled><span><span class="name">Remove the checkout</span><span class="consequence"><code>git worktree remove</code>. Needs a clean tree: blocked by the 3 changes above. Check “Discard” to unblock, or commit them from a terminal.</span></span><span class="gate blocked">blocked · dirty</span></label>
+    <label class="action-row"><input type="checkbox"><span><span class="name">Discard uncommitted changes</span><span class="consequence">Throws away the 3 changes listed above, then the checkout can be removed. Cannot be undone.</span></span><span class="gate destructive">cannot undo</span></label>
+    <label class="action-row"><input type="checkbox"><span><span class="name">Delete branch <code>charter</code></span><span class="consequence">3 commits exist only here and were never pushed. Deleting the branch loses them. Cannot be undone.</span></span><span class="gate destructive">3 commits only here</span></label>
+   </div>
+   <div class="widget-foot"><span class="hint">The button names exactly what is checked</span><span class="spacer"></span><button class="btn">Cancel</button><button class="btn primary">Archive session</button></div>
+  </section>
+  <section class="popover clean-state" aria-label="Clean up worktree, clean state">
+   <div class="widget-head"><h3>Clean checkout</h3><span class="from">Trace stream reconnects</span></div>
+   <div class="widget-body">
+    <div class="tree-status"><span class="path" style="color:var(--fg)">.claude/worktrees/reconnects</span></div>
+    <p class="hint" style="margin-top:4px">⎇ reconnects · merged into main · nothing uncommitted</p>
+    <div class="divider" style="margin:10px 0 4px"></div>
+    <label class="action-row"><input type="checkbox" checked><span><span class="name">Archive the session</span></span><span class="gate safe">reversible</span></label>
+    <label class="action-row"><input type="checkbox" checked><span><span class="name">Remove the checkout</span><span class="consequence">Tree is clean; nothing to lose.</span></span><span class="gate safe">clean</span></label>
+    <label class="action-row"><input type="checkbox" disabled><span><span class="name">Discard uncommitted changes</span><span class="consequence">Nothing to discard.</span></span><span class="gate">n/a</span></label>
+    <label class="action-row"><input type="checkbox" checked><span><span class="name">Delete branch <code>reconnects</code></span><span class="consequence">Every commit is on main. Safe to delete; still not undoable.</span></span><span class="gate destructive">cannot undo</span></label>
+   </div>
+   <div class="widget-foot"><span class="spacer"></span><button class="btn">Cancel</button><button class="btn primary">Archive, remove, delete branch</button></div>
+  </section>
+ </div>
+</figure>
+
+<figure class="vignette" id="foreign-live">
+ <figcaption><span class="number">06</span><h2>Foreign-live session</h2><span class="dimension">760 px session pane · two holders</span></figcaption>
+ <p class="rationale">Another process owns the session, so MAWS tails the transcript and says who holds it. Writing here would put a second branch into the same JSONL, so the composer and approvals are off, with the reason.</p>
+ <div class="frame pane">
+  <nav class="tabs" aria-label="Open tabs"><button class="tab"><span class="g-working">●</span>Charter + research <small>MAWS</small></button><button class="tab active" aria-current="page"><span class="g-foreign">⧉</span>Usage reset countdown <small>claude-usage-menubar</small></button><button class="tab"><span class="g-plan">◇</span>Quota reset recovery <small>codex_somersault</small></button></nav>
+  <div class="holder-bar"><span class="g-foreign" aria-hidden="true">⧉</span><span>Live elsewhere · <strong>background job e6dcd828</strong> · running since 14:02 · pid 48213</span><button class="text-action" style="margin-left:auto" title="Opens a Terminal tab in the right panel and runs claude attach e6dcd828">Attach in a terminal tab ↗</button></div>
+  <div class="transcript-crop">
+   <div class="assistant-label"><span class="assistant-mark">✳</span>Claude</div>
+   <p class="prose-line">The five-hour window resets at 16:40, so the countdown should count from the relay’s <code>resetsAt</code>, not from the last refresh.</p>
+   <div class="tail"><span class="dot" aria-hidden="true"></span>Tailing the transcript · last record 12s ago · read-only</div>
+  </div>
+  <div class="locus-label"><span>Approval pending in the holder</span><span>Answer it there</span></div>
+  <section class="readonly-card" aria-label="Approval request, read-only">
+   <div class="content">
+    <div class="header"><span class="who" aria-hidden="true">✳</span><h3 style="font-weight:550">Main session wants to run a command</h3><span class="waiting">Waiting 1m in the terminal</span></div>
+    <div class="codebox">git push origin feat/usage-strip</div>
+   </div>
+   <div class="footer"><button class="btn" disabled>Allow</button><button class="btn" disabled>Deny</button><span class="hint">Approvals belong to the process that asked. This one asked from the background job, not from MAWS.</span></div>
+  </section>
+  <section class="holder-notice" aria-label="Composer disabled">
+   <h3><span class="g-foreign" aria-hidden="true">⧉</span>Reading only while the job holds this session</h3>
+   <p>Started with <code>claude --bg</code> from a terminal. Resuming it here would be refused by the engine (“running as a background session”). Attach to the job in a terminal tab to type into it, or fork a copy to work from here.</p>
+   <div class="actions"><button class="btn primary">Attach in a terminal tab</button><button class="btn">Fork a copy</button><span class="hint">runs <code>claude attach e6dcd828</code></span></div>
+  </section>
+  <div class="statusline" aria-label="Session status"><span class="path">~/Developer/GitHub/claude-usage-menubar</span><span>ctx 12% of 1M</span><span>·</span><span>5h 74% ↻2h37m</span><span>·</span><span>7d 82% ↻5d21h</span><span>·</span><span>$0.62</span><span>·</span><span>auto · read from disk</span></div>
+  <div class="variant-label">Interactive terminal holder</div>
+  <div class="holder-bar" style="margin:10px 0 0;border-top:1px solid var(--border)"><span class="g-foreign" aria-hidden="true">⧉</span><span>Live elsewhere · <strong>claude in a terminal</strong> · pid 51190 · started 13:21 · <code>~/Developer/GitHub/codex_somersault</code></span></div>
+  <section class="holder-notice" style="margin-bottom:18px" aria-label="Composer disabled, interactive holder">
+   <h3><span class="g-foreign" aria-hidden="true">⧉</span>Reading only while the terminal holds this session</h3>
+   <p>The engine does not guard against a second writer here: sending from MAWS would write a sibling branch into the same transcript. Finish or quit the terminal session and this pane becomes yours; or fork a copy now.</p>
+   <div class="actions"><button class="btn">Fork a copy</button><span class="hint">holder read from <code>~/.claude/sessions/51190.json</code> · rechecked every 2s</span></div>
+  </section>
+ </div>
+</figure>
+
+<figure class="vignette" id="confirmations">
+ <figcaption><span class="number">07</span><h2>Archive and delete-conversation confirmations</h2><span class="dimension">Two small dialogs</span></figcaption>
+ <p class="rationale">Archive ends a process but keeps everything on disk; delete removes the engine’s own record. The copy names what each one costs, in one breath.</p>
+ <div class="frame confirm-pair">
+  <section class="popover confirm" role="alertdialog" aria-label="Archive session">
+   <h3>Archive “Trace stream reconnects”?</h3>
+   <p>Ends its engine process and hides it from codex_somersault. The transcript stays under <code>~/.claude</code>; resume it from Archived here or with <code>claude --resume</code> in the terminal. The worktree is not touched.</p>
+   <p><strong>1 background shell</strong> is still running and will be stopped.</p>
+   <div class="actions"><span class="hint">↵ archive · esc</span><button class="btn">Cancel</button><button class="btn primary">Archive</button></div>
+  </section>
+  <section class="popover confirm" role="alertdialog" aria-label="Delete conversation">
+   <h3>Delete “Terminal workflow notes”?</h3>
+   <p>Removes the transcript and its <strong>2 subagent transcripts</strong> from <code>~/.claude</code>. The terminal cannot resume it afterwards either. Files the session edited stay where they are.</p>
+   <p class="hint">A session held by a terminal cannot be deleted while it is live.</p>
+   <div class="actions"><span class="hint">esc cancels</span><button class="btn">Cancel</button><button class="btn danger">Delete</button></div>
+  </section>
+ </div>
+</figure>
+<footer class="page-foot">Static interaction study · choices and disclosures are interactive; no engine actions are sent. Append <code>?theme=dark</code> for the dark theme.</footer>
+</main>
+</body>
+</html>
