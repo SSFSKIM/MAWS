@@ -62,6 +62,7 @@ export interface ChainFollowerOptions {
 const PAGE_BYTES = 1024 * 1024;
 const MAX_PARTIAL_BYTES = 8 * 1024 * 1024;
 const BATCH_SIZE = 500;
+const RELOAD_ATTEMPTS = 3;
 const NEWLINE = 0x0a;
 
 // Non-uuid record types the engine writes that carry nothing for the graph (SPEC 35.5).
@@ -95,6 +96,7 @@ class FollowerCore {
   out: Produced[] = [];
   facts: FollowerFacts = {};
   private groups = 0;
+  interrupted = false; // a by-offset re-read met another file: this core's picture of the file is incomplete
 
   constructor(
     private readonly reader: FileReader,
@@ -315,7 +317,11 @@ class FollowerCore {
     }
     const record = parseLine(await this.reader.read(skeleton.offset, skeleton.length));
     if (record !== null && record.uuid === uuid) this.emit(record, uuid);
-    else this.emitted.add(uuid); // the file changed under the read; the next poke's stat sees the rewrite
+    else {
+      // The file changed under the read; the next poke's stat sees the rewrite (a reload in progress retries at once).
+      this.emitted.add(uuid);
+      this.interrupted = true;
+    }
   }
 
   // The engine re-points a record whose parent is a progress record to that record's parent (SPEC 35.12.3).
@@ -474,14 +480,17 @@ export class ChainFollower {
   }
 
   // Read [core.offset, toSize) in pages through the line dispatch; the ranges stay contiguous and no byte is read twice.
-  private async readForward(core: FollowerCore, toSize: number, flushEachPage: boolean): Promise<void> {
+  // Answers whether the whole range was read: a read that returns no bytes (the file was replaced or shrank since the
+  // stat) ends it early, and the caller's next stat sees the new file.
+  private async readForward(core: FollowerCore, toSize: number, flushEachPage: boolean): Promise<boolean> {
     while (core.offset < toSize) {
       const chunk = await this.reader.read(core.offset, Math.min(PAGE_BYTES, toSize - core.offset));
-      if (this.stopped || chunk.length === 0) return;
+      if (this.stopped || chunk.length === 0) return false;
       await core.consume(chunk);
-      if (this.stopped) return;
+      if (this.stopped) return false;
       if (flushEachPage) this.flush(core);
     }
+    return !core.interrupted;
   }
 
   // The file was rewritten (GC, tombstone removal, hydration, relocation): run a cold start into a fresh core with
@@ -490,18 +499,36 @@ export class ChainFollower {
   // delivered are delivered in chain order. The fresh run's own anchor-, branch- and line-derived events describe
   // history the consumer already holds (a rewrite that shifts an anchor's byte offset changes its id, not its
   // meaning) and are never delivered.
-  private async reload(stat: { ino: number; size: number }): Promise<void> {
+  // A fresh run whose own read is interrupted (the file replaced again between the reload's stat and its read, or
+  // shrunk) describes no file: it is abandoned, never reconciled — an empty fresh chain would retract everything the
+  // consumer holds — and the reload starts over from a fresh stat, up to RELOAD_ATTEMPTS times; after that the old
+  // state stands and the next poke tries again.
+  private async reload(first: { ino: number; size: number }): Promise<void> {
     this.report('reloading');
-    const fresh = this.freshCore();
-    fresh.ino = stat.ino;
-    await this.readForward(fresh, stat.size, false);
-    if (this.stopped) return;
+    let stat: { ino: number; size: number } | null = first;
+    let fresh: FollowerCore | null = null;
+    for (let attempt = 0; attempt < RELOAD_ATTEMPTS && stat !== null; attempt++) {
+      const candidate = this.freshCore();
+      candidate.ino = stat.ino;
+      const whole = await this.readForward(candidate, stat.size, false);
+      if (this.stopped) return;
+      if (whole) {
+        fresh = candidate;
+        break;
+      }
+      stat = await this.reader.stat();
+      if (this.stopped) return;
+    }
+    if (fresh === null) {
+      this.report('following'); // the old state stands; nothing was delivered
+      return;
+    }
     const old = this.core;
     const freshChain = new Set(fresh.chain);
     const retracted = old.chain.filter((uuid) => !freshChain.has(uuid));
     const produced: Produced[] = [];
     if (retracted.length > 0) {
-      produced.push({ source: null, group: 0, event: { ...eventBase(fresh.ctx, `rewrite:${stat.ino}:${stat.size}`), kind: 'boundary.retraction', retractedMessageUuids: retracted, reason: 'transcript_rewritten', fallbackModel: null } });
+      produced.push({ source: null, group: 0, event: { ...eventBase(fresh.ctx, `rewrite:${fresh.ino}:${fresh.offset}`), kind: 'boundary.retraction', retractedMessageUuids: retracted, reason: 'transcript_rewritten', fallbackModel: null } });
     }
     // One event group per record, its final mapping: the suppressed fresh run may have mapped a record more than once
     // while branching away from it and rejoining; only the last group, the one standing on the final chain, counts.

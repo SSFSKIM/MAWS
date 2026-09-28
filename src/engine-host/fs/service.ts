@@ -168,7 +168,7 @@ export class FsService {
 
   // `fs.agentEvents`: the child's transcript as X1 events, following it from now on. The agent must be listed under the
   // session's `subagents/` (its transcript exists). An `Agent` tool call's child is attributed to the tool use its meta
-  // names, so until the meta has been read the call is refused rather than following with a parent it cannot know for
+  // names, so until a meta naming it has been read the call is refused rather than following with a parent it cannot know for
   // the rest of the follow; the consumer retries on the `fs.subagentsChanged` the meta's arrival emits. A workflow
   // agent's meta names no tool use (nor does the wire), so it follows at once with `parentToolUseId: null`.
   async agentEvents(appSessionId: AppSessionId, agentId: AgentId): Promise<{ events: SessionEvent[]; complete: boolean }> {
@@ -176,7 +176,8 @@ export class FsService {
     const entry = await this.ensureFollow(appSessionId, agentId, async () => {
       const agent = (await this.listAgents(sessionId)).find((candidate) => candidate.agentId === agentId);
       if (agent === undefined) throw new Error(`unknown agent: ${agentId}`);
-      if (agent.runId === null && agent.meta === null) throw new Error(`agent meta not yet available: ${agentId}`);
+      // A meta without `toolUseId` (the schema requires only `agentType`) attributes nothing either.
+      if (agent.runId === null && typeof agent.meta?.toolUseId !== 'string') throw new Error(`agent meta not yet available: ${agentId}`);
       const parentToolUseId = (agent.meta?.toolUseId ?? null) as ParentToolUseId | null;
       return this.newFollow(appSessionId, sessionId, agent.transcriptPath, { agentId, parentToolUseId });
     });

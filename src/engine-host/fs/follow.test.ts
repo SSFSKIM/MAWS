@@ -58,6 +58,45 @@ describe('the fs FileReader opens the file per read', () => {
     expect((await reader.read(0, 18)).toString()).toBe('{"replaced":true}\n');
   });
 
+  it('abandons and retries a reload whose own read meets a second replacement, never retracting what still stands', async () => {
+    const record = (uuid: string, parentUuid: string | null, content: string) => JSON.stringify({ type: 'user', uuid, parentUuid, cwd: '/w', message: { role: 'user', content } });
+    const base = [record('u1', null, 'one'), record('u2', 'u1', 'two')];
+    const path = await fixture.addTranscript('/work/a', S1, base);
+    const inner = new FsFileReader(() => path);
+    let replaceDuringRead: (() => Promise<void>) | null = null;
+    const reader: FileReader = {
+      path,
+      stat: () => inner.stat(),
+      read: async (offset, length) => {
+        const replace = replaceDuringRead;
+        replaceDuringRead = null;
+        if (replace) await replace();
+        return inner.read(offset, length);
+      },
+    };
+    const events: SessionEvent[] = [];
+    const states: string[] = [];
+    const follower = new ChainFollower(reader, S1 as SessionId, null, (e) => {
+      if (e.t === 'events') events.push(...e.events);
+      if (e.t === 'state') states.push(e.state);
+    });
+    await follower.start();
+    expect(follower.snapshot().chain).toEqual(['u1', 'u2']);
+    const delivered = events.length;
+
+    // First rewrite (the GC shape); the reload stats it, and a second rewrite lands between that stat and its read.
+    await fixture.rewriteFile(path, [...base, record('u3', 'u2', 'three')]);
+    replaceDuringRead = () => fixture.rewriteFile(path, [...base, record('u3', 'u2', 'three'), record('u4', 'u3', 'four')]);
+    await follower.poke();
+
+    expect(follower.snapshot().chain).toEqual(['u1', 'u2', 'u3', 'u4']);
+    const later = events.slice(delivered);
+    expect(later.filter((e) => e.kind === 'boundary.retraction')).toEqual([]); // u1 and u2 still stand
+    expect(later.flatMap((e) => (e.kind === 'user.message' ? [e.content] : []))).toEqual(['three', 'four']);
+    expect(new Set(events.map((e) => e.id)).size).toBe(events.length);
+    expect(states.slice(-2)).toEqual(['reloading', 'following']);
+  });
+
   it('a follower over the fs reader reloads onto a file replaced between its stat and its read', async () => {
     const record = (uuid: string, parentUuid: string | null, content: string) => JSON.stringify({ type: 'user', uuid, parentUuid, cwd: '/w', message: { role: 'user', content } });
     const path = await fixture.addTranscript('/work/a', S1, [record('u1', null, 'the old file, whose size covers the whole first record of the new one')]);
@@ -354,12 +393,22 @@ describe('a followed session backfills, then tails its transcript', () => {
     await new Promise((resolve) => setTimeout(resolve, 200));
     expect(events('fs.subagentsChanged')).toHaveLength(listed);
 
-    // The meta lands: exactly one fs.subagentsChanged, which is the consumer's cue to retry.
-    await fixture.addSidecar(PARENT, `subagents/agent-${agentId}.meta.json`, readFileSync(join(SIDECARS, `agent-${agentId}.meta.json`), 'utf8'));
+    // A meta that names no tool use (the engine patches metas in place; SubagentMetaSchema requires only agentType) is
+    // no attribution either: still refused.
+    const metaPath = await fixture.addSidecar(PARENT, `subagents/agent-${agentId}.meta.json`, { agentType: 'general-purpose', description: 'Read and report one.txt content' });
+    await expect.poll(() => events('fs.subagentsChanged').at(-1)?.agents[0].meta?.agentType).toBe('general-purpose');
+    await expect(fs.agentEvents(app, agentId)).rejects.toThrow(`agent meta not yet available: ${agentId}`);
+    expect(fs.state().followed).toEqual([]);
+    await settled();
+    const partial = events('fs.subagentsChanged').length;
+
+    // The whole meta lands: exactly one fs.subagentsChanged, which is the consumer's cue to retry.
+    await writeFile(metaPath, readFileSync(join(SIDECARS, `agent-${agentId}.meta.json`), 'utf8'));
     await expect.poll(() => events('fs.subagentsChanged').at(-1)?.agents[0].meta?.toolUseId).toBe('toolu_01CYiK6ncgQLFUQ2iqC1b4oB');
     await settled();
     await new Promise((resolve) => setTimeout(resolve, 200));
-    expect(events('fs.subagentsChanged')).toHaveLength(listed + 1);
+    expect(partial).toBe(listed + 1);
+    expect(events('fs.subagentsChanged')).toHaveLength(listed + 2);
     expect(events('fs.subagentsChanged').at(-1)?.agents[0].size).toBe(statSync(agentPath).size); // the payload keeps size
     expect(events('fs.subagentsChanged').at(-1)).toMatchObject({
       appSessionId: app,

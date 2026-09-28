@@ -213,6 +213,35 @@ describe('store rows', () => {
     expect(ids.slice(-2)).toEqual(['latest-1', 'latest-2']);
   });
 
+  it('ignores a snapshot from an earlier follow of the same row that resolves after a re-follow started', async () => {
+    const fake = fakeClient();
+    const store = createStoreDiagnosticsStore(fake.client, { flushMs: 0 });
+    store.getState().connect();
+    const app = 'app-1' as AppSessionId;
+    fake.event('fs.sessionChanged', { summary: summary(S1), appSessionId: app });
+    await fake.tick();
+    fake.pending.splice(0);
+    const ev = (id: string): SessionEvent => ({ id, kind: 'notice.posted', text: id }) as unknown as SessionEvent;
+
+    const first = store.getState().follow(S1); // its session.events stays in flight
+    await fake.tick();
+    const stop = store.getState().unfollow();
+    await fake.reply('fs.unfollow', undefined);
+    await stop;
+    const second = store.getState().follow(S1); // the same app id, a new follow
+    await fake.tick();
+    expect(fake.pending.map((p) => p.name)).toEqual(['session.events', 'session.events']);
+    fake.event('session.eventBatch', { appSessionId: app, events: [ev('new-live')] }); // buffered for the new follow
+
+    await fake.reply('session.events', { events: [ev('stale-1'), ev('stale-2')], lastSeq: 0, complete: true }); // the old request
+    await first;
+    expect(store.getState().followed?.events).toEqual([]); // not applied, and the new follow's buffer not drained
+
+    await fake.reply('session.events', { events: [ev('fresh-1')], lastSeq: 0, complete: true });
+    await second;
+    expect(store.getState().followed?.events.map((e) => e.id)).toEqual(['fresh-1', 'new-live']);
+  });
+
   it('describes a follow state and an event for the log', () => {
     expect(describeFollow(null)).toBe('…');
     expect(describeFollow({ appSessionId: 'a' as AppSessionId, agentId: null, state: 'error', chainLength: 0, leafUuid: null, gap: null, skippedLines: 2, message: 'EACCES' })).toBe('chain 0 · leaf — · error · skipped 2 · EACCES');

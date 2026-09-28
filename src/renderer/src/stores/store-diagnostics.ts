@@ -54,7 +54,10 @@ export function createStoreDiagnosticsStore(client: MawsBridge, options: { flush
   let seen = new Set<string>();
   // C6's hydration protocol: batches that arrive while the snapshot is in flight are newer than it, so they are held
   // here, applied after the snapshot and deduplicated by id; null once the view is live.
-  let buffered: SessionEvent[] | null = null;
+  let heldBatches: SessionEvent[] | null = null;
+  // Each follow's own token: a snapshot answered for an earlier follow of the same row (unfollow, then follow again
+  // under the same app id) must neither be applied nor drain the current follow's buffer.
+  let followToken = 0;
   const store = create<StoreDiagnosticsStore>()((set, get) => ({
     fs: null,
     sessions: {},
@@ -163,20 +166,23 @@ export function createStoreDiagnosticsStore(client: MawsBridge, options: { flush
         const current = get().sessions[sessionId];
         if (current) set({ sessions: { ...get().sessions, [sessionId]: { ...current, appSessionId } } });
       }
+      const token = ++followToken;
       seen = new Set();
-      buffered = [];
+      heldBatches = [];
       set({ followed: { sessionId, appSessionId, state: null, events: [] } });
       const snapshot = await client.invoke('session.events', { appSessionId, afterSeq: null, limit: null });
-      if (get().followed?.appSessionId !== appSessionId) return; // unfollowed or refollowed meanwhile
+      if (token !== followToken) return; // unfollowed or followed again meanwhile
       if (!snapshot.ok) console.error('[store] session.events failed', snapshot.error);
-      const held = buffered ?? [];
-      buffered = null;
+      const held = heldBatches ?? [];
+      heldBatches = null;
       applyEvents(appSessionId, [...(snapshot.ok ? snapshot.value.events : []), ...held]);
     },
 
     async unfollow() {
       const followed = get().followed;
       if (!followed) return;
+      followToken += 1;
+      heldBatches = null;
       set({ followed: null });
       const result = await client.invoke('fs.unfollow', { appSessionId: followed.appSessionId, agentId: null });
       if (!result.ok) console.error('[store] fs.unfollow failed', result.error);
@@ -186,7 +192,7 @@ export function createStoreDiagnosticsStore(client: MawsBridge, options: { flush
 
   function addEvents(appSessionId: AppSessionId, events: SessionEvent[]): void {
     if (store.getState().followed?.appSessionId !== appSessionId) return;
-    if (buffered !== null) buffered.push(...events);
+    if (heldBatches !== null) heldBatches.push(...events);
     else applyEvents(appSessionId, events);
   }
 
