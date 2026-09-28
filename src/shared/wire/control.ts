@@ -287,16 +287,18 @@ export type GetStatusResponse = z.infer<typeof GetStatusResponseSchema>;
 export const McpStatusResponseSchema = z.looseObject({ mcpServers: z.array(z.looseObject({ name: z.string(), status: z.string(), source: z.string().optional() })) });
 export type McpStatusResponse = z.infer<typeof McpStatusResponseSchema>;
 
+// `auto-routed` seq 143: every entry carries value, resolvedModel, displayName, description; the capability flags are
+// present on the first entries and absent on others (models.4 carries none of the four), so they are optional.
 export const ModelOptionSchema = z.looseObject({
   value: z.string(),
   resolvedModel: z.string(),
   displayName: z.string(),
   description: z.string(),
-  supportsEffort: z.boolean(),
+  supportsEffort: z.boolean().optional(),
   supportedEffortLevels: z.array(z.string()).optional(),
-  supportsAdaptiveThinking: z.boolean(),
-  supportsFastMode: z.boolean(),
-  supportsAutoMode: z.boolean(),
+  supportsAdaptiveThinking: z.boolean().optional(),
+  supportsFastMode: z.boolean().optional(),
+  supportsAutoMode: z.boolean().optional(),
 });
 export const ListModelsResponseSchema = z.looseObject({ models: z.array(ModelOptionSchema) });
 export type ListModelsResponse = z.infer<typeof ListModelsResponseSchema>;

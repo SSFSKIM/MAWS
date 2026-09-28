@@ -155,6 +155,28 @@ describe('replay transport plays a fixture and advances on the adapter\'s writes
     expect(frameOf((await it2.next()).value as TransportItem)).toMatchObject({ command_uuid: 'MINT-B' });
   });
 
+  it('onHold fires once per held out row, after every earlier row was consumed, so adjacent out rows drive themselves', async () => {
+    const journal = [
+      row(1, 'in', { type: 'system', subtype: 'status', status: null }),
+      row(2, 'out', { type: 'control_request', request_id: 'r-1', request: { subtype: 'get_usage' } }),
+      row(3, 'out', { type: 'control_request', request_id: 'r-2', request: { subtype: 'get_settings' } }),
+      row(4, 'in', { type: 'control_response', response: { subtype: 'success', request_id: 'r-2', response: {} } }),
+      row(5, 'meta', { event: 'exit', code: 0, signal: null }),
+    ];
+    const consumed: number[] = [];
+    const holds: { seq: number; consumedSoFar: number }[] = [];
+    const transport: ReturnType<typeof replayEngine> = replayEngine(journal, {
+      prelude,
+      onHold: (held) => {
+        holds.push({ seq: held.seq, consumedSoFar: consumed.length });
+        void transport.write(held.frame as StdinFrame);
+      },
+    });
+    for await (const item of transport.frames) consumed.push((item.frame as { type: string }).type === 'system' ? 1 : 4);
+    expect(holds).toEqual([{ seq: 2, consumedSoFar: 1 }, { seq: 3, consumedSoFar: 1 }]);
+    expect(consumed).toEqual([1, 4]);
+  });
+
   it('plays a whole probe fixture when the writes follow its out rows', async () => {
     const journal = loadJournal('pass2', 'bash-context-echoed');
     const transport = replayEngine(journal, { prelude });

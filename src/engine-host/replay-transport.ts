@@ -63,7 +63,7 @@ function preludeResponse(prelude: JournalRow[], subtype: string): Frame | null {
   return response ? (response.frame as Frame) : null;
 }
 
-export function replayEngine(journal: JournalRow[], opts: { prelude: JournalRow[] }): ReplayTransport {
+export function replayEngine(journal: JournalRow[], opts: { prelude: JournalRow[]; onHold?: (row: JournalRow) => void }): ReplayTransport {
   const rows = journal;
   let cursor = 0; // index of the next row to consider
   let ended = false;
@@ -74,6 +74,7 @@ export function replayEngine(journal: JournalRow[], opts: { prelude: JournalRow[
   let stderrWaiter: ((r: IteratorResult<string>) => void) | null = null;
   let stderrEnded = false;
   let wake: (() => void) | null = null; // the frames iterator waiting for a write or a kill
+  let held: JournalRow | null = null; // the `out` row `onHold` was last told about
   let resolveExited!: (v: { code: number | null; signal: NodeJS.Signals | null }) => void;
   const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((r) => (resolveExited = r));
 
@@ -186,10 +187,18 @@ export function replayEngine(journal: JournalRow[], opts: { prelude: JournalRow[
               const frame = rewrite(row.frame);
               return { value: { frame, raw: JSON.stringify(frame), error: null }, done: false };
             }
-            // an `out` row: match a waiting write, or wait for one
+            // an `out` row: match a waiting write, or wait for one. `onHold` fires here, once per held row, when every
+            // earlier row has been delivered and the consumer has finished with it (it called `next()` again), which
+            // is the one moment a scripted driver can issue the row's frame without racing the consumer.
             if (waiters.length === 0) {
-              await new Promise<void>((r) => (wake = r));
-              wake = null;
+              if (held !== row) {
+                held = row;
+                opts.onHold?.(row);
+              }
+              if (waiters.length === 0) {
+                await new Promise<void>((r) => (wake = r));
+                wake = null;
+              }
               continue;
             }
             const mismatch = tryMatch();
