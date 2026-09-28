@@ -6,7 +6,7 @@
 // checkpoint*), the key filter and the ⌘ rule for links, the WebGL budget, lifecycle (lost on a host crash, respawn,
 // close) and theme pushes.
 import type { AppSessionId } from '@shared/graph/ids';
-import type { EventPayload, HostState, MawsBridge, PtyExit, PtyId, PtyInfo } from '@shared/ipc/schema';
+import type { EventPayload, HostState, IpcError, MawsBridge, PtyExit, PtyId, PtyInfo } from '@shared/ipc/schema';
 import type * as z from 'zod';
 import { ipc } from '../ipc/client';
 import { runAction } from '../keymap/actions-runtime';
@@ -42,6 +42,7 @@ export interface TerminalInfo {
   acceleration: Acceleration;
   visible: boolean;
   reconnect: 'exact' | 'lossy' | null; // which reattach path ran after a reload; null for a terminal this page spawned
+  error: string | null; // why the terminal could not start (spawn or renderer failure), for the tool's bar
 }
 
 export interface TerminalHandle {
@@ -136,6 +137,7 @@ class Entry implements TerminalHandle {
       acceleration: 'dom',
       visible: false,
       reconnect: null,
+      error: null,
     };
   }
 
@@ -160,6 +162,9 @@ class Entry implements TerminalHandle {
 }
 
 const deadStatus = (exit: PtyExit | null): TerminalStatus => (exit && (exit.exitCode !== null || exit.signal !== null) ? 'exited' : 'lost');
+
+// A failed `pty.kill` whose pty is gone anyway: the host no longer knows it, or the host itself is not running.
+const ptyGone = (error: IpcError): boolean => error.code === 'host_unavailable' || /unknown pty/.test(error.message);
 
 export class TerminalRegistry {
   private readonly entries = new Map<TerminalId, Entry>();
@@ -281,25 +286,32 @@ export class TerminalRegistry {
     if (entry.info.ptyId) this.byPty.delete(entry.info.ptyId);
     entry.resetStream();
     entry.renderer?.reset();
-    this.update(entry, { status: 'starting', exit: null, ptyId: null, pid: null, reconnect: null, title: null });
+    this.update(entry, { status: 'starting', exit: null, ptyId: null, pid: null, reconnect: null, title: null, error: null });
     await this.spawn(entry);
   }
 
+  // Kills the pty (SIGHUP), then disposes the handle. A kill that fails while the pty may still run keeps the handle,
+  // its status and its screen, and rejects, so the tool can show the failure instead of orphaning a live shell.
   async close(id: TerminalId): Promise<void> {
     const entry = this.entries.get(id);
     if (!entry) return;
-    entry.disposed = true;
     const { ptyId, status } = entry.info;
-    if (ptyId && status !== 'lost') await this.deps.ipc.invoke('pty.kill', { ptyId });
+    if (ptyId && status !== 'lost') {
+      const result = await this.deps.ipc.invoke('pty.kill', { ptyId });
+      if (!result.ok && !ptyGone(result.error)) throw new Error(`pty.kill failed: ${result.error.message}`);
+    }
     this.dispose(entry);
   }
 
+  // What runs in the foreground. Rejects when the host cannot answer: the tool then fails closed and asks before
+  // closing, rather than reading a failure as "nothing is running".
   async foreground(id: TerminalId): Promise<{ process: string | null; busy: boolean }> {
     const entry = this.entries.get(id);
     const ptyId = entry?.info.ptyId;
     if (!ptyId || entry.info.status !== 'running') return { process: null, busy: false };
     const result = await this.deps.ipc.invoke('pty.foreground', { ptyId });
-    return result.ok ? result.value : { process: null, busy: false };
+    if (!result.ok) throw new Error(`pty.foreground failed: ${result.error.message}`);
+    return result.value;
   }
 
   // Test hook (harness `terminals.setCheckpoints`): off stops both the quiescence and the pagehide checkpoints.
@@ -324,8 +336,12 @@ export class TerminalRegistry {
         this.attachRenderer(entry, renderer);
         return entry.renderer;
       },
-      (error) => {
+      (error: unknown) => {
+        // A terminal that cannot draw: one that was to spawn shows as exited with the reason; an adopted one keeps its
+        // pty's status (the pty runs on, and closing the tab kills it) and carries the reason too.
+        const reason = error instanceof Error ? error.message : String(error);
         console.error('[terminal] renderer creation failed', error);
+        this.update(entry, { error: `the terminal renderer could not start: ${reason}`, ...(entry.info.status === 'starting' ? { status: 'exited' as const } : {}) });
         return null;
       },
     );
@@ -411,7 +427,7 @@ export class TerminalRegistry {
     if (this.spawnsInFlight === 0) this.unclaimed.clear();
     if (!result.ok) {
       console.error(`[terminal] pty.spawn failed for ${label}`, result.error);
-      if (entry.info.status === 'starting') this.update(entry, { status: 'exited' });
+      if (entry.info.status === 'starting') this.update(entry, { status: 'exited', error: `the shell could not start: ${result.error.message}` });
       return;
     }
     const { ptyId, pid } = result.value;
@@ -441,8 +457,15 @@ export class TerminalRegistry {
       this.dispose(entry);
       return null;
     }
-    if (!renderer || entry.disposed) return null;
+    if (entry.disposed) return null;
     const { checkpoint, replay, replayFrom, nextOffset, info: now } = attached.value;
+    if (!renderer) {
+      // Nothing can show this pty: release the claim and its held events, and report the handle with the reason.
+      this.byPty.delete(info.ptyId);
+      entry.held = new HeldEvents();
+      this.update(entry, { status: now.alive ? 'running' : deadStatus(now.exit), exit: now.exit, pid: now.pid });
+      return entry.info.id;
+    }
     entry.size = { cols: now.cols, rows: now.rows };
     renderer.resize(now.cols, now.rows);
     entry.acked = nextOffset; // the attach acknowledged everything emitted

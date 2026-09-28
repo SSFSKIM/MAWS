@@ -171,6 +171,7 @@ export function RegistryPane() {
             handle {info.label} · {info.status}
             {info.exit ? ` (code ${info.exit.exitCode ?? 'null'}, signal ${info.exit.signal ?? 'null'})` : ''} · {info.acceleration} ·{' '}
             {info.visible ? 'visible' : 'hidden'} · reattach: {info.reconnect ?? '—'} · pid {info.pid ?? '—'}
+            {info.error ? <span className="text-danger"> · {info.error}</span> : null}
           </div>
         ))}
         {ptys.map((pty) => (

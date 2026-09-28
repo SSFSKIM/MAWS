@@ -7,6 +7,9 @@ import { createPtyTable, RING_BYTES, type PtyTable } from './table';
 
 // Real node-pty under Node (C9 Residue *Testing and harness*): the table's flow control, ring buffer, checkpoint,
 // initial command and foreground detection against real shells and programs. The Electron-runtime proof is the smoke.
+// Every test here waits on real processes and floods, which a saturated machine slows well past vitest's 5 s default
+// (two full runs at a load average of 22 on 10 cores timed out here, C9 M3): each gets 20 s.
+vi.setConfig({ testTimeout: 20_000 });
 const SESSION = 'app-session-1' as AppSessionId;
 const decoder = new TextDecoder();
 let labels = 0;

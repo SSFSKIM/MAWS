@@ -25,6 +25,12 @@ const theme = (background: string): TerminalTheme => ({
 
 type Handler = (input: unknown) => unknown;
 
+// A handler returning this answers the command with an error, as the router or a host would.
+class Failure {
+  constructor(readonly code: 'host_unavailable' | 'internal' | 'timeout', readonly message: string) {}
+}
+const fail = (code: Failure['code'], message: string) => new Failure(code, message);
+
 // A bridge whose commands answer from handlers (a returned promise holds the reply) and whose events the test emits.
 function fakeBridge() {
   const listeners = new Map<string, Set<(payload: unknown) => void>>();
@@ -40,7 +46,9 @@ function fakeBridge() {
     async invoke(name: CommandName, input: unknown) {
       calls.push({ name, input });
       const handler = handlers[name];
-      return { ok: true, value: handler ? await handler(input) : undefined };
+      const value = handler ? await handler(input) : undefined;
+      if (value instanceof Failure) return { ok: false, error: { code: value.code, message: value.message } };
+      return { ok: true, value };
     },
     on(name: EventName, listener: (payload: unknown) => void) {
       const set = listeners.get(name) ?? new Set();
@@ -93,10 +101,11 @@ let renderers: FakeRenderer[];
 let runAction: ReturnType<typeof vi.fn<(id: 'tab.next' | 'tab.previous') => void>>;
 let currentTheme: TerminalTheme;
 
-function makeRegistry(options: { webglBudget?: number } = {}) {
+function makeRegistry(options: { webglBudget?: number; rendererFails?: boolean } = {}) {
   return new TerminalRegistry({
     ipc: ipc.bridge,
     createRenderer: async (opts) => {
+      if (options.rendererFails) throw new Error('no WebGL, no DOM: the renderer could not start');
       const r = new FakeRenderer(opts);
       renderers.push(r);
       return r;
@@ -104,7 +113,7 @@ function makeRegistry(options: { webglBudget?: number } = {}) {
     readTheme: () => currentTheme,
     readFont: () => ({ family: 'mono', size: 13, lineHeight: 1.2 }),
     runAction,
-    ...options,
+    ...(options.webglBudget ? { webglBudget: options.webglBudget } : {}),
   });
 }
 
@@ -154,6 +163,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });
@@ -506,6 +516,79 @@ describe('terminal registry lifecycle', () => {
     expect(renderer.disposed).toBe(true);
     expect(registry.get(id)).toBeUndefined();
     expect(registry.list()).toEqual([]);
+  });
+
+  it('keeps a terminal whose pty.kill failed, and rethrows so the tool can say so', async () => {
+    const registry = makeRegistry();
+    const { id, renderer } = await openRunning(registry);
+    ipc.handlers['pty.kill'] = () => fail('timeout', 'pty-host did not answer pty.kill within 10 s');
+    await expect(registry.close(id)).rejects.toThrow('did not answer pty.kill');
+    expect(registry.get(id)?.info.status).toBe('running');
+    expect(renderer.disposed).toBe(false);
+    renderer.type('still here\r');
+    expect(ipc.inputs('pty.write').at(-1)).toMatchObject({ data: 'still here\r' });
+  });
+
+  it('disposes when pty.kill fails because the pty or its host is already gone', async () => {
+    const registry = makeRegistry();
+    const unknown = await openRunning(registry, 't1');
+    const unavailable = await openRunning(registry, 't2');
+    ipc.handlers['pty.kill'] = (input) =>
+      (input as { ptyId: string }).ptyId === unknown.ptyId ? fail('internal', 'unknown pty') : fail('host_unavailable', 'pty-host is restarting; cannot answer pty.kill');
+    await registry.close(unknown.id);
+    await registry.close(unavailable.id);
+    expect(registry.list()).toEqual([]);
+    expect([unknown.renderer.disposed, unavailable.renderer.disposed]).toEqual([true, true]);
+  });
+
+  it('shows a terminal whose shell could not spawn as exited with the reason', async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const registry = makeRegistry();
+    ipc.handlers['pty.spawn'] = () => fail('internal', 'spawn /bin/zsh ENOENT');
+    const id = registry.open({ appSessionId: A, label: 't1', cwd: '/tmp/a' });
+    registry.mount(id, parent());
+    await settle();
+    expect(registry.get(id)!.info).toMatchObject({ status: 'exited', exit: null, ptyId: null, error: 'the shell could not start: spawn /bin/zsh ENOENT' });
+    expect(logged).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects foreground when the host cannot answer, so the tool fails closed and asks', async () => {
+    const registry = makeRegistry();
+    const { id } = await openRunning(registry);
+    ipc.handlers['pty.foreground'] = () => fail('host_unavailable', 'pty-host is crashed; cannot answer pty.foreground');
+    await expect(registry.foreground(id)).rejects.toThrow('cannot answer pty.foreground');
+  });
+
+  it('shows a terminal whose renderer could not start as exited with the reason, and spawns nothing', async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const registry = makeRegistry({ rendererFails: true });
+    const id = registry.open({ appSessionId: A, label: 't1', cwd: '/tmp/a' });
+    registry.mount(id, parent());
+    await settle();
+    expect(registry.get(id)!.info).toMatchObject({ status: 'exited', exit: null, error: expect.stringContaining('renderer could not start') });
+    expect(registry.get(id)!.renderer).toBeNull();
+    expect(ipc.inputs('pty.spawn')).toEqual([]);
+    expect(logged).toHaveBeenCalledWith('[terminal] renderer creation failed', expect.any(Error));
+  });
+
+  it('reports an adopted pty whose renderer could not start, releases its claim and leaves the pty running', async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const registry = makeRegistry({ rendererFails: true });
+    ipc.handlers['pty.list'] = () => ({ ptys: [ptyInfo()] });
+    ipc.handlers['pty.attach'] = () => ({ info: ptyInfo(), checkpoint: null, replay: new Uint8Array(0), replayFrom: 0, nextOffset: 132 });
+    const ids = await registry.adopt();
+    expect(ids).toHaveLength(1);
+    const handle = registry.get(ids[0]!)!;
+    expect(handle.renderer).toBeNull();
+    expect(handle.info).toMatchObject({ ptyId: 'pty-live', status: 'running', error: expect.stringContaining('renderer could not start') });
+    expect(ipc.inputs('pty.kill')).toEqual([]);
+    ipc.data('pty-live', 132, bytes('ignored')); // released: nothing is held or written for it
+    expect(ipc.inputs('pty.ack')).toEqual([]);
+    await expect(registry.adopt()).resolves.toEqual([]); // still known: not adopted twice
+    await registry.close(ids[0]!); // and closable: the pty is killed
+    expect(ipc.inputs('pty.kill')).toEqual([{ ptyId: 'pty-live' }]);
+    expect(registry.list()).toEqual([]);
+    expect(logged).toHaveBeenCalledTimes(1);
   });
 
   it('asks the host what runs in the foreground', async () => {
