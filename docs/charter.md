@@ -589,7 +589,7 @@ Explicitly out of scope for P0: bundle patches (D-1); Windows and Linux (D-11); 
 | C8 Right panel tools | decomposing | blocked-by C4, C5, C6 | |
 | C9 Terminal | plan | executing since 2026-09-28 (document closed at b5ff6cc; plan-executor in a worktree) | `docs/doperpowers/plans/2026-09-28-c9-terminal.md` |
 | C10 Sessions, worktrees, trust | plan | blocked-by C3, C4, C5, C9; document drafted 2026-09-28 at 13b0b9d with a pass-3 fork probe, adversarial review in flight | `docs/doperpowers/plans/2026-09-28-c10-sessions-worktrees-trust.md` (in review), `spikes/protocol-probe/fixtures/pass3/` |
-| C11 Palette, settings, gateway, usage | plan | blocked-by C3, C7 | |
+| C11 Palette, settings, gateway, usage | plan | blocked-by C3, C7; document authoring since 2026-09-28 against the closed C7 document, C3 and C10, mockup 06 | `docs/doperpowers/plans/2026-09-28-c11-palette-settings-gateway-usage.md` (authoring) |
 | C12 Finish | decomposing | deliberately late | |
 
 ## 18. Surprises and discoveries
