@@ -83,6 +83,7 @@ Owner process vocabulary is C1's `Owner`: `main`, `engine-host`, `pty-host`. "De
 | `session.digests` | command | main | C5 | C5 renderer | void → `{ digests: SessionDigest[] }` | agreed |
 | `session.digest` | event | main | C5 | C5 renderer | `SessionDigest` (`appSessionId`, phase, activity, lastAssistantLine, context, cost, childAgents, pendingRequests, revision) | agreed; key renamed `appId` → `appSessionId` (ruling 1) |
 | `session.setVisible` | command | main | C5 | C5 renderer (read model forwards to `SessionSource.onSetVisible`) | `{ appSessionId, visible }` → void | agreed; C5's ask for an index API `sessions.setVisible` is settled as `SessionSource.onSetVisible` (d.5) |
+| `session.launchMode` | command | main | C5 | C5 renderer (scenario session creator) | void → `{ mode: 'index' | 'scenario' }` | added-for-consumer (C5 M3, 2026-09-28): the page registers the stub's session creator only in scenario mode |
 | `session.drafts.get` | command | main | C4 | ; C7 | `{ appSessionId }` → `Draft | null` | agreed |
 | `session.drafts.set` | command | main | C4 | ; C7 | `{ appSessionId, draft }` → void | agreed |
 | `session.replay.start` | command | main | C4 | C4 diagnostics; C12 | `{ source, speed }` → `{ appSessionId, sessionId, totalRows, spanMs }` | agreed; main allocates the ids and the `kind: 'replay'` record, dispatches `session.replay.launch`, and removes the record again on any dispatch error, rethrowing it (C4 fix wave, finding 4) |
