@@ -232,6 +232,10 @@ Not shared after reconciliation: `src/main/layout/store.ts` (C5 only, permanent,
 21. **C6 → owners: proposed schema entries in C6's worktree.** Under the merge order C6 lands after C3, C4 and C5, so C6 adds nothing to `src/shared/ipc/schema/*`; its worktree may carry the entries it consumes under a `// proposed by C6` comment and drops them at rebase, recording any drift in its Decision Log.
 22. **C9's `pty.spawn` requires `appSessionId` and `label`.** C1's Diagnostics echo test and smoke spawn without them; C9 M2 migrates both (ruling 9).
 
+<!-- C6 block (additive, 2026-09-28, recorded during C6 M5) -->
+23. **C8 → C6: child source provenance.** C6's child `ipcSource(appSessionId, agentId)` is memoised per key and owns provenance, so C5's agent tab and C8's panel drill-in share one source and never see the same child twice: live provenance (C3's `session.eventBatch` filtered by `agentId`, snapshot from `session.events` filtered by `agentId`, no disk follower) when the parent's snapshot holds the child's events; disk provenance (`fs.agentEvents`, following) otherwise; a live child that exits switches the same source to disk with a reset that clears the key's reducer state before re-hydration, so the live and disk id forms never coexist (`TranscriptSource.onReset`, additive). Both surfaces mount `Transcript variant: 'child'` over that source and build nothing of their own. Reason: both producers publish to `session.eventBatch` and C6 deduplicates by id, so two surfaces choosing sources independently would duplicate rows. Binding once landed; the contract text is in C6's execution document ("Child source provenance").
+<!-- end C6 block -->
+
 `[architect]` items: d.18 only (a correction to C1's synthetic fixture, outside the five documents).
 
 <!-- C7 additions, 2026-09-28 — begin -->
