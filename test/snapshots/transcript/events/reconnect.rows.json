@@ -32,20 +32,6 @@
     "turnId": "turn:u-rc-1"
   },
   {
-    "at": "2026-09-28T12:00:34.000Z",
-    "attempt": {
-      "max": 3,
-      "n": 2
-    },
-    "id": "reconnect:r4",
-    "kind": "error",
-    "lostAttentionCount": null,
-    "scope": "reconnect",
-    "severity": "transient",
-    "text": "Reconnected",
-    "turnId": null
-  },
-  {
     "at": "2026-09-28T12:01:00.010Z",
     "attachments": [],
     "dropped": false,

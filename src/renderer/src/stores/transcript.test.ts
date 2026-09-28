@@ -230,4 +230,58 @@ describe('transcript store', () => {
     fake.push([{ ...b.events[0], id: b.events[0].id as EventId }]);
     expect(store.getState().rows(KEY)).toBe(rows);
   });
+
+  // X3 consumers read the truth: the receipt's undo state and a loaded spill are part of the derived rows.
+  describe('reader state folded into the rows', () => {
+    function edit() {
+      const b = builder();
+      b.turn('u1');
+      b.toolUse('t1', 'Write', { file_path: '/p/a.ts', content: 'x\n' }, 'm1', 0);
+      b.result('t1', 'ok', { structured: { type: 'create', filePath: '/p/a.ts', content: 'x\n', structuredPatch: [{ oldStart: 0, oldLines: 0, newStart: 1, newLines: 1, lines: ['+x'] }] } });
+      b.text('m2', 0, 'Done.');
+      b.end(['u1']);
+      return b.events;
+    }
+    const receiptOf = (rows: Row[]) => rows.find((row): row is Extract<Row, { kind: 'receipt' }> => row.kind === 'receipt')!;
+
+    it('a receipt reads applied and not undoable until the dry run answers, then follows undo and reapply', async () => {
+      const store = createTranscriptStore();
+      await store.getState().attach(KEY, pushSource(edit()).source);
+      const id = receiptOf(store.getState().rows(KEY)).id;
+      expect(receiptOf(store.getState().rows(KEY))).toMatchObject({ state: 'applied', canUndo: false, canReapply: false });
+
+      store.getState().setReceipt(KEY, id, { check: { ok: true, reason: null }, reapply: true });
+      expect(receiptOf(store.getState().rows(KEY))).toMatchObject({ state: 'applied', canUndo: true, canReapply: false });
+      store.getState().setReceipt(KEY, id, { state: 'undoing' });
+      expect(receiptOf(store.getState().rows(KEY))).toMatchObject({ state: 'undoing', canUndo: false, canReapply: false });
+      store.getState().setReceipt(KEY, id, { state: 'undone' });
+      expect(receiptOf(store.getState().rows(KEY))).toMatchObject({ state: 'undone', canUndo: false, canReapply: true });
+
+      store.getState().setReceipt(KEY, id, { state: 'applied', check: { ok: false, reason: 'no checkpoint' }, reapply: false });
+      expect(receiptOf(store.getState().rows(KEY))).toMatchObject({ state: 'applied', canUndo: false, canReapply: false });
+    });
+
+    it('a spill loads into its cell detail, and a failure is kept with the reason', async () => {
+      const b = builder();
+      b.turn('u1');
+      b.toolUse('t1', 'Bash', { command: 'cat big.log' }, 'm1', 0);
+      b.result('t1', 'head…', { structured: { ...BASH_RESULT('head…'), persistedOutputSize: 188_416 }, spillPath: '/cfg/tool-results/t1.txt' });
+      b.end(['u1']);
+      const store = createTranscriptStore();
+      await store.getState().attach(KEY, pushSource(b.events).source);
+      store.getState().expandAll(KEY, { cells: true });
+      const spill = () => {
+        const row = store.getState().rows(KEY).find((r) => r.kind === 'cell');
+        return row?.kind === 'cell' && row.detail.kind === 'shell' ? row.detail.spill : null;
+      };
+      expect(spill()).toEqual({ path: '/cfg/tool-results/t1.txt', bytes: 188_416, state: 'not_loaded', content: null });
+      store.getState().setSpill(KEY, '/cfg/tool-results/t1.txt', { state: 'loading' });
+      expect(spill()).toMatchObject({ state: 'loading', content: null });
+      store.getState().setSpill(KEY, '/cfg/tool-results/t1.txt', { state: 'loaded', content: 'the whole log' });
+      expect(spill()).toMatchObject({ state: 'loaded', content: 'the whole log' });
+      store.getState().setSpill(KEY, '/cfg/tool-results/t1.txt', { state: 'failed', content: null, error: 'path outside the engine store' });
+      expect(spill()).toMatchObject({ state: 'failed', content: null });
+      expect(store.getState().entries[KEY].state.ui.spills.get('/cfg/tool-results/t1.txt')?.error).toBe('path outside the engine store');
+    });
+  });
 });

@@ -6,7 +6,7 @@
 import { create } from 'zustand';
 import type { AgentId } from '@shared/graph/ids';
 import { expandedTurnRows, rowsOf } from '../transcript/model/derive';
-import { applyEvents, createState, withUi, type TranscriptState, type TranscriptUi } from '../transcript/model/reduce';
+import { applyEvents, createState, RECEIPT_APPLIED, withReaderState, withUi, type ReceiptUndo, type SpillLoad, type TranscriptState, type TranscriptUi } from '../transcript/model/reduce';
 import type { CellId, Row, RowId, TurnId } from '../transcript/model/rows';
 import { attachSource, type Attachment } from '../transcript/source/hydrate';
 import type { TranscriptSource } from '../transcript/source/types';
@@ -27,17 +27,10 @@ export interface TranscriptEntry {
   working: boolean; // a turn is open
   clock: { at: number; wall: number } | null; // the latest event time applied, and the wall time it arrived: a working divider ticks from it
   jump: JumpRequest | null;
-  receipts: Record<string, ReceiptUndo>; // by receipt row id: the undo state the view drives through the RewindInterface
 }
 
-// A receipt's undo state (X3 receipt `state`, owned by the view since the RewindInterface is a view prop; kept in the
-// store so it survives a remount): the dry run's answer, asked once per receipt, and the last failure.
-export interface ReceiptUndo {
-  state: 'applied' | 'undoing' | 'undone' | 'reapplying';
-  check: { ok: boolean; reason: string | null } | 'pending' | null; // null: not asked yet
-  error: string | null;
-}
-export const RECEIPT_APPLIED: ReceiptUndo = { state: 'applied', check: null, error: null };
+// A receipt's undo state and a spill's load live in the state's `ui` (reduce.ts), so `rowsOf` reports them in the rows.
+export { RECEIPT_APPLIED, type ReceiptUndo, type SpillLoad };
 
 export interface TranscriptStore {
   entries: Record<string, TranscriptEntry>;
@@ -53,7 +46,9 @@ export interface TranscriptStore {
   toggleGroup(key: string, group: RowId): void;
   toggleCell(key: string, cell: CellId): void;
   expandAll(key: string, options?: { cells?: boolean }): void; // every turn and group (the harness's "expand all old work"), and with `cells` every cell
-  setReceipt(key: string, receipt: RowId, patch: Partial<ReceiptUndo>): void;
+  setReceipt(key: string, receipt: RowId, patch: Partial<ReceiptUndo>): void; // the receipt row's state, canUndo and canReapply follow
+  setSpill(key: string, path: string, patch: Partial<SpillLoad>): void; // the spill's state and content in its cell detail follow
+  toggleBoundary(key: string, boundary: RowId): void; // a rewind boundary reveals or hides the branch it hid
 }
 
 const NO_ROWS: Row[] = [];
@@ -84,7 +79,8 @@ const isExpanded = (state: TranscriptState, id: TurnId) =>
 function copyUi(ui: TranscriptUi): TranscriptUi {
   return {
     expandedTurns: new Set(ui.expandedTurns), collapsedTurns: new Set(ui.collapsedTurns), expandedGroups: new Set(ui.expandedGroups),
-    expandedCells: new Set(ui.expandedCells), revealedBoundaries: new Set(ui.revealedBoundaries), version: ui.version + 1,
+    expandedCells: new Set(ui.expandedCells), revealedBoundaries: new Set(ui.revealedBoundaries), receipts: new Map(ui.receipts), spills: new Map(ui.spills),
+    version: ui.version + 1,
   };
 }
 
@@ -161,7 +157,7 @@ export function createTranscriptStore() {
         existing?.attachment.detach();
         if (!entry(key)) {
           const state = createState(null, options.agentId ?? null);
-          set({ entries: { ...get().entries, [key]: { state, rows: rowsOf(state), phase: 'hydrating', error: null, following: true, working: false, clock: null, jump: null, receipts: {} } } });
+          set({ entries: { ...get().entries, [key]: { state, rows: rowsOf(state), phase: 'hydrating', error: null, following: true, working: false, clock: null, jump: null } } });
         } else put(key, { phase: 'hydrating', error: null });
         const attachment = attachSource(source, {
           apply(events) {
@@ -249,8 +245,17 @@ export function createTranscriptStore() {
 
       setReceipt(key, receipt, patch) {
         const current = entry(key);
-        if (current) put(key, { receipts: { ...current.receipts, [receipt]: { ...(current.receipts[receipt] ?? RECEIPT_APPLIED), ...patch } } });
+        if (!current) return;
+        const receipts = new Map(current.state.ui.receipts).set(receipt, { ...(current.state.ui.receipts.get(receipt) ?? RECEIPT_APPLIED), ...patch });
+        put(key, { state: withReaderState(current.state, { receipts }) });
       },
+      setSpill(key, path, patch) {
+        const current = entry(key);
+        if (!current) return;
+        const spills = new Map(current.state.ui.spills).set(path, { state: 'not_loaded', content: null, error: null, ...current.state.ui.spills.get(path), ...patch });
+        put(key, { state: withReaderState(current.state, { spills }) });
+      },
+      toggleBoundary: (key, boundary) => changeUi(key, (ui) => toggle(ui.revealedBoundaries, boundary)),
 
       expandAll(key, options = {}) {
         changeUi(key, (ui, state) => {

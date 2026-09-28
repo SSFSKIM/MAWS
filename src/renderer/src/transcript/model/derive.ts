@@ -10,7 +10,7 @@ import { agentMessageCopy, boundaryCopy, groupSummary, processExitCopy, reconnec
 import { collectCells, groupItems, phrasesOf, type WorkItem } from './groups';
 import { cellId, rowId, turnId as turnIdOf } from './keys';
 import type { LiveBlock, TranscriptState, TranscriptUi, TurnState } from './reduce';
-import { isEngineOrigin } from './reduce';
+import { isEngineOrigin, RECEIPT_APPLIED, type ReceiptUndo } from './reduce';
 import { TOOL_CATEGORIES, type Cell, type ChangedFile, type Row, type RowId, type SubagentRef, type SubagentStatus, type ToolCategory, type TurnId, type TurnSummary } from './rows';
 import { needsSeparator, separatorLabel } from './time';
 import { isInterruptionMarker, isLocalCommand, localCommandOutput, userTextOf } from './user-text';
@@ -112,11 +112,15 @@ export function withAllExpanded(state: TranscriptState): TranscriptState {
 // Per-turn derivation
 
 function rowsOfTurn(state: TranscriptState, turn: TurnState): Row[] {
-  const memo = state.memo.get(turn.id);
-  if (memo && memo.version === turn.version && memo.uiVersion === state.ui.version) return memo.rows;
-  const rows = deriveTurn(turn, state).rows;
-  state.memo.set(turn.id, { version: turn.version, uiVersion: state.ui.version, rows });
-  return rows;
+  let memo = state.memo.get(turn.id);
+  if (!memo || memo.version !== turn.version || memo.uiVersion !== state.ui.version) {
+    memo = { version: turn.version, uiVersion: state.ui.version, rows: deriveTurn(turn, state).rows };
+    state.memo.set(turn.id, memo);
+  }
+  const { receipts, spills } = state.ui;
+  if (receipts.size === 0 && spills.size === 0) return memo.rows;
+  if (memo.overlay?.receipts !== receipts || memo.overlay.spills !== spills) memo.overlay = { receipts, spills, rows: overlay(state.ui, memo.rows) };
+  return memo.overlay.rows;
 }
 
 // What the walk over a turn's events produces before grouping: cells and rows in event order.
@@ -478,7 +482,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): { rows: Row
   if (files.length > 0) {
     rows.push({
       id: rowId.receipt(turn.id), turnId: turn.id, at: context.lastAt, kind: 'receipt', files, added: files.reduce((n, f) => n + f.added, 0), removed: files.reduce((n, f) => n + f.removed, 0),
-      state: 'applied', canUndo: true, canReapply: false,
+      ...receiptFields(RECEIPT_APPLIED), // the reader's undo state is laid over in rowsOfTurn
     });
   }
   return { rows, summary, cells };
@@ -486,6 +490,45 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): { rows: Row
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Receipts, summary, rows of other kinds
+
+const receiptFields = (undo: ReceiptUndo) => ({
+  state: undo.state,
+  canUndo: undo.state === 'applied' && typeof undo.check === 'object' && undo.check?.ok === true,
+  canReapply: undo.state === 'undone' && undo.reapply,
+});
+
+// A spill the reader loaded (or is loading) reads so in the cell's detail; the same cell when nothing applies.
+function withSpillLoad(cell: Cell, spills: TranscriptUi['spills']): Cell {
+  const { detail } = cell;
+  if (!('spill' in detail) || detail.spill === null) return cell;
+  const load = spills.get(detail.spill.path);
+  if (!load) return cell;
+  return { ...cell, detail: { ...detail, spill: { ...detail.spill, state: load.state, content: load.content } } };
+}
+
+// The reader's receipt undo state and loaded spills laid over a turn's derived rows (M5: X3 consumers read the truth).
+// They change without a ui version bump (the store's `withReaderState`), so only the turn they touch is rebuilt, and
+// only its receipt row and the rows holding a spilled cell; every other row keeps its reference.
+function overlay(ui: TranscriptUi, rows: Row[]): Row[] {
+  let out: Row[] | null = null;
+  const replace = (i: number, row: Row) => {
+    if (row === rows[i]) return;
+    out ??= rows.slice();
+    out[i] = row;
+  };
+  rows.forEach((row, i) => {
+    if (row.kind === 'receipt') {
+      const undo = ui.receipts.get(row.id);
+      if (undo) replace(i, { ...row, ...receiptFields(undo) });
+    } else if (ui.spills.size > 0 && row.kind === 'cell') {
+      replace(i, { ...row, ...withSpillLoad(row, ui.spills) } as Row);
+    } else if (ui.spills.size > 0 && row.kind === 'group') {
+      const cells = row.cells.map((cell) => withSpillLoad(cell, ui.spills));
+      if (cells.some((cell, n) => cell !== row.cells[n])) replace(i, { ...row, cells });
+    }
+  });
+  return out ?? rows;
+}
 
 function changedFiles(cells: Cell[], turn: TurnState): ChangedFile[] {
   const files: ChangedFile[] = [];
@@ -651,7 +694,9 @@ function looseRows(state: TranscriptState, events: SessionEvent[]): Row[] {
       case 'session.reconnect': {
         const id: RowId = episode?.id ?? rowId.reconnect(event.id);
         const row: RowOf<'error'> = { id, turnId: null, at: event.at, kind: 'error', severity: event.phase === 'failed' ? 'error' : 'transient', text: reconnectCopy(event.phase, event.attempt, event.maxAttempts, event.reason), attempt: { n: event.attempt, max: event.maxAttempts }, scope: 'reconnect', lostAttentionCount: null };
-        if (episode) rows[episode.index] = row;
+        if (event.phase === 'reconnected') {
+          if (episode) rows.splice(episode.index, 1); // a reconnect that succeeded leaves no row
+        } else if (episode) rows[episode.index] = row;
         else {
           rows.push(row);
           episode = { index: rows.length - 1, id };

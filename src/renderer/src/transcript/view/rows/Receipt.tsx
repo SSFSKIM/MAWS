@@ -54,13 +54,14 @@ const reasonOf = (error: unknown) => (error instanceof Error ? error.message : S
 
 function UndoControls({ rewind, turnId, receipt }: { rewind: RewindInterface; turnId: TurnId; receipt: RowId }) {
   const { storeKey } = useTranscriptContext();
-  const undo: ReceiptUndo = useTranscriptStore((state) => state.entries[storeKey]?.receipts[receipt]) ?? RECEIPT_APPLIED;
+  const undo: ReceiptUndo = useTranscriptStore((state) => state.entries[storeKey]?.state.ui.receipts.get(receipt)) ?? RECEIPT_APPLIED;
   const update = (patch: Partial<ReceiptUndo>) => useTranscriptStore.getState().setReceipt(storeKey, receipt, patch);
 
   useEffect(() => {
     if (undo.check !== null) return;
     const set = (patch: Partial<ReceiptUndo>) => useTranscriptStore.getState().setReceipt(storeKey, receipt, patch);
-    set({ check: 'pending' });
+    const reapply = rewind.reapply !== null;
+    set({ check: 'pending', reapply });
     rewind.canUndo(turnId).then(
       (answer) => set({ check: answer }),
       (error: unknown) => set({ check: { ok: false, reason: reasonOf(error) } }),

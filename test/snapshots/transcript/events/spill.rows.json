@@ -88,7 +88,7 @@
       "interrupted": false,
       "kind": "shell",
       "spill": {
-        "bytes": null,
+        "bytes": 188416,
         "content": null,
         "path": "/Users/owner/.claude/projects/-tmp-demo/session/tool-results/toolu_spill_1.txt",
         "state": "not_loaded"

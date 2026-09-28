@@ -227,19 +227,21 @@ describe('event fixtures', () => {
     expect(ofKind(rows, 'thinking')[0].durationMs).toBeNull();
   });
 
-  it('events/spill: the shell detail carries the spill unloaded with the wire preview as content', () => {
+  it('events/spill: the shell detail carries the spill unloaded, its size from persistedOutputSize, with the wire preview as content', () => {
     const cell = cellsOf(rowsFor(loadEventFixture('spill')))[0];
-    expect(cell.detail).toMatchObject({ kind: 'shell', spill: { path: '/Users/owner/.claude/projects/-tmp-demo/session/tool-results/toolu_spill_1.txt', bytes: null, state: 'not_loaded', content: null } });
+    expect(cell.detail).toMatchObject({ kind: 'shell', spill: { path: '/Users/owner/.claude/projects/-tmp-demo/session/tool-results/toolu_spill_1.txt', bytes: 188_416, state: 'not_loaded', content: null } });
     expect(cell.detail.kind === 'shell' && cell.detail.stdout.startsWith('[1/1200]')).toBe(true);
   });
 
-  it('events/reconnect: reconnect rows update in place per session and a failed one says why', () => {
-    const rows = rowsFor(loadEventFixture('reconnect'));
-    const reconnects = ofKind(rows, 'error').filter((e) => e.scope === 'reconnect');
-    expect(reconnects.map((r) => r.text)).toEqual(['Reconnected', 'Could not reconnect · engine binary missing']);
-    expect(reconnects.map((r) => r.id)).toEqual(['reconnect:r4', 'reconnect:r11']); // one key per episode: its first attempting event
+  it('events/reconnect: a reconnect row updates in place through its episode, leaves on reconnected, and a failed one says why', () => {
+    const events = loadEventFixture('reconnect');
+    const reconnectsOf = (rows: Row[]) => ofKind(rows, 'error').filter((e) => e.scope === 'reconnect');
+    const attempting = reconnectsOf(rowsFor(events.slice(0, 6))); // through the second attempt of the first episode
+    expect(attempting.map((r) => [r.id, r.text])).toEqual([['reconnect:r4', 'Reconnecting (2/3)…']]); // keyed by its first attempting event
+    const rows = rowsFor(events);
+    expect(reconnectsOf(rows).map((r) => [r.id, r.text])).toEqual([['reconnect:r11', 'Could not reconnect · engine binary missing']]);
     expect(new Set(rows.map((r) => r.id)).size).toBe(rows.length);
-    expect(rows.map((r) => r.kind)).toEqual(['time', 'user', 'assistant_text', 'error', 'user', 'assistant_text', 'error']);
+    expect(rows.map((r) => r.kind)).toEqual(['time', 'user', 'assistant_text', 'user', 'assistant_text', 'error']);
   });
 
   it('events/process-exit: a permission resolved by exit leaves no row; the exit row carries the lost count', () => {

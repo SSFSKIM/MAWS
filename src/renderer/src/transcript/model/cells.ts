@@ -55,7 +55,13 @@ export function isImageResult(result: Event<'tool.result'> | null): boolean {
   return imageBlocks(result.content).length > 0 || record(result.structured).isImage === true;
 }
 
-const spillOf = (result: Event<'tool.result'> | null): Spill | null => (result?.spillPath ? { path: result.spillPath, bytes: null, state: 'not_loaded', content: null } : null);
+// A spilled result: its size when the engine reported it (Bash's `persistedOutputSize`, in bytes), unloaded until the
+// reader asks (the store folds the load state in; derive.ts).
+function spillOf(result: Event<'tool.result'> | null): Spill | null {
+  if (!result?.spillPath) return null;
+  const size = record(result.structured).persistedOutputSize;
+  return { path: result.spillPath, bytes: typeof size === 'number' && Number.isSafeInteger(size) && size > 0 ? size : null, state: 'not_loaded', content: null };
+}
 
 const EXIT_CODE = /[Ee]xit code:? (\d+)/;
 

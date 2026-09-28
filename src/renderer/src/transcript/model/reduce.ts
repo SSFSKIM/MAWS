@@ -7,7 +7,7 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, ApiMessageId, EventId, MessageUuid, RequestId, SessionId, TaskId, ToolUseId } from '@shared/graph/ids';
 import { toolUseOf } from '@shared/graph/ids';
 import { rowId, turnId as turnIdOf } from './keys';
-import type { Row, RowId, TurnId } from './rows';
+import type { Row, RowId, Spill, TurnId } from './rows';
 import { isInterruptionMarker, isLocalCommand } from './user-text';
 
 type Event<K extends SessionEvent['kind']> = Extract<SessionEvent, { kind: K }>;
@@ -47,10 +47,37 @@ export interface TranscriptUi {
   expandedGroups: Set<RowId>;
   expandedCells: Set<string>;
   revealedBoundaries: Set<RowId>;
+  // Additive (M5): what the reader did that X3 rows report, so consumers of `rowsOf` read the truth. By receipt row id,
+  // the undo state (the receipt's `state`, `canUndo`, `canReapply`); by spill path, the loaded result (`Spill.state`,
+  // `content`).
+  receipts: Map<RowId, ReceiptUndo>;
+  spills: Map<string, SpillLoad>;
   version: number;
 }
 
-export interface MemoEntry { version: number; uiVersion: number; rows: Row[] }
+// A receipt's undo state, driven by the view through the RewindInterface: the dry run's answer (asked once per
+// receipt), whether the interface offers Reapply, and the last failure.
+export interface ReceiptUndo {
+  state: 'applied' | 'undoing' | 'undone' | 'reapplying';
+  check: { ok: boolean; reason: string | null } | 'pending' | null; // null: not asked yet
+  reapply: boolean;
+  error: string | null;
+}
+export const RECEIPT_APPLIED: ReceiptUndo = { state: 'applied', check: null, reapply: false, error: null };
+
+// A spilled result the reader asked for: its load state, the content once loaded, and why a load failed.
+export interface SpillLoad {
+  state: Spill['state'];
+  content: string | null;
+  error: string | null;
+}
+
+export interface MemoEntry {
+  version: number;
+  uiVersion: number;
+  rows: Row[];
+  overlay?: { receipts: TranscriptUi['receipts']; spills: TranscriptUi['spills']; rows: Row[] }; // the reader state laid over `rows` (derive.ts)
+}
 
 export interface TranscriptState {
   sessionId: SessionId | null;
@@ -77,7 +104,7 @@ export interface TranscriptState {
 export function createState(sessionId: SessionId | null, agentId: AgentId | null): TranscriptState {
   return {
     sessionId, agentId, turns: new Map(), order: [], loose: [], hidden: null, pending: new Map(), seen: new Set(), echoUuids: new Set(),
-    ui: { expandedTurns: new Set(), collapsedTurns: new Set(), expandedGroups: new Set(), expandedCells: new Set(), revealedBoundaries: new Set(), version: 0 },
+    ui: { expandedTurns: new Set(), collapsedTurns: new Set(), expandedGroups: new Set(), expandedCells: new Set(), revealedBoundaries: new Set(), receipts: new Map(), spills: new Map(), version: 0 },
     current: null, placement: new Map(),
     index: { toolUses: new Map(), tasks: new Map(), requests: new Map(), hooks: new Map(), messages: new Map() },
     memo: new Map(),
@@ -91,6 +118,16 @@ export function withUi(state: TranscriptState, ui: TranscriptUi): TranscriptStat
   if (state.lineage.latest !== null && state.lineage.latest !== state) throw new Error('withUi: this state is not its lineage’s latest');
   if (ui.version <= state.ui.version) throw new Error('withUi: ui.version must grow');
   const next = { ...state, ui };
+  state.lineage.latest = next;
+  return next;
+}
+
+// A new state with the reader's receipt undo state or spill loads replaced. They are laid over the derived rows rather
+// than derived with them, so the ui version stays and only the turn they touch is rebuilt (derive.ts, rowsOfTurn); the
+// maps must be new objects, since the overlay memo compares them by reference. Joins the lineage like `withUi`.
+export function withReaderState(state: TranscriptState, patch: Partial<Pick<TranscriptUi, 'receipts' | 'spills'>>): TranscriptState {
+  if (state.lineage.latest !== null && state.lineage.latest !== state) throw new Error('withReaderState: this state is not its lineage’s latest');
+  const next = { ...state, ui: { ...state.ui, ...patch } };
   state.lineage.latest = next;
   return next;
 }

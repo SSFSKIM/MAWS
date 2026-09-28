@@ -192,7 +192,7 @@
     "added": 11,
     "at": "2026-09-28T09:22:31.747Z",
     "canReapply": false,
-    "canUndo": true,
+    "canUndo": false,
     "files": [
       {
         "added": 9,
