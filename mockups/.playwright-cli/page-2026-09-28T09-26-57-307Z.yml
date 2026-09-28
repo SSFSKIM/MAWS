@@ -1,0 +1,408 @@
+- main [ref=f2e2]:
+  - generic [ref=f2e3]:
+    - generic [ref=f2e4]: MAWS / Interaction studies / 04
+    - heading "Attention, without losing your place." [level=1] [ref=f2e5]
+    - paragraph [ref=f2e6]: Decisions at the composer. Quick actions across projects. Detail one layer away.
+  - figure "01 Needs-you quick approve 300 px sidebar · hover state" [ref=f2e7]:
+    - generic [ref=f2e8]:
+      - generic [ref=f2e9]: "01"
+      - heading "Needs-you quick approve" [level=2] [ref=f2e10]
+      - generic [ref=f2e11]: 300 px sidebar · hover state
+    - generic [ref=f2e12]:
+      - complementary "Session sidebar" [ref=f2e13]:
+        - generic [ref=f2e14]:
+          - searchbox "Search sessions" [ref=f2e18]
+          - generic [ref=f2e19]: ⌘ K
+        - generic [ref=f2e20]:
+          - text: Needs you · 3
+          - generic [ref=f2e21]: ⌘ ⇧ J
+        - button "MAWS · Fix sidebar drag approval 2m" [ref=f2e22] [cursor=pointer]:
+          - generic [ref=f2e23]: MAWS · Fix sidebar drag
+          - generic [ref=f2e24]:
+            - generic [ref=f2e25]: approval
+            - generic [ref=f2e26]: 2m
+        - button "codex_somersault · Quota reset recovery question 6m" [ref=f2e27] [cursor=pointer]:
+          - generic [ref=f2e28]: codex_somersault · Quota reset recovery
+          - generic [ref=f2e29]:
+            - generic [ref=f2e30]: question
+            - generic [ref=f2e31]: 6m
+        - button "MAWS · Rename project plan review 11m" [ref=f2e32] [cursor=pointer]:
+          - generic [ref=f2e33]: MAWS · Rename project
+          - generic [ref=f2e34]:
+            - generic [ref=f2e35]: plan review
+            - generic [ref=f2e36]: 11m
+        - generic [ref=f2e37]:
+          - generic [ref=f2e38]:
+            - text: Pinned
+            - generic [ref=f2e39]: "2"
+          - generic [ref=f2e40]: ◇ Engine adapter spike
+        - generic [ref=f2e41]:
+          - generic [ref=f2e42]:
+            - text: Projects
+            - generic [ref=f2e43]: +
+          - generic [ref=f2e44]:
+            - text: ⌄ MAWS
+            - generic [ref=f2e45]: 4 sessions
+      - region "Approval preview" [ref=f2e46]:
+        - generic [ref=f2e47]:
+          - heading "Fix sidebar drag" [level=3] [ref=f2e48]
+          - generic [ref=f2e49]: Waiting 2m
+        - generic [ref=f2e50]:
+          - generic [aria-hidden] [ref=f2e51]: ✳
+          - text: Main session wants to run
+        - generic [ref=f2e52]: git push origin feat/sidebar-drag
+        - generic [ref=f2e53]:
+          - text: cwd
+          - code [ref=f2e54]: ~/Developer/GitHub/MAWS
+        - paragraph [ref=f2e55]:
+          - text: "Suggested: allow"
+          - code [ref=f2e56]: git push
+          - text: for this project
+        - generic [ref=f2e57]:
+          - button "Approve" [ref=f2e58] [cursor=pointer]
+          - button "Deny" [ref=f2e59] [cursor=pointer]
+          - link "Open session ↗" [ref=f2e60] [cursor=pointer]:
+            - /url: "#command-approval"
+        - generic [ref=f2e61]:
+          - text: Enter approve · Esc deny
+          - generic [ref=f2e62]: This request only
+  - figure "02 Approval docked at the composer 760 px main column" [ref=f2e63]:
+    - generic [ref=f2e64]:
+      - generic [ref=f2e65]: "02"
+      - heading "Approval docked at the composer" [level=2] [ref=f2e66]
+      - generic [ref=f2e67]: 760 px main column
+    - generic [ref=f2e68]:
+      - paragraph [ref=f2e69]: Pushing the branch so the PR can be opened.
+      - generic [ref=f2e70]:
+        - generic [ref=f2e71]: Approval required
+        - generic [ref=f2e72]: Composer paused · draft preserved
+      - region "Command permission request" [ref=f2e73]:
+        - generic [ref=f2e74]:
+          - generic [ref=f2e75]:
+            - generic [aria-hidden] [ref=f2e76]: ✳
+            - heading "Main session wants to run a command" [level=3] [ref=f2e77]
+            - generic [ref=f2e78]: Needs you
+          - group [ref=f2e79]:
+            - generic "git push origin feat/sidebar-drag Expand ⤢" [ref=f2e80] [cursor=pointer]
+          - generic [ref=f2e81]:
+            - text: cwd
+            - code [ref=f2e82]: ~/Developer/GitHub/MAWS
+          - paragraph [ref=f2e83]: "Why: opening PR for the sidebar fix"
+          - group "Grant scope" [ref=f2e84]:
+            - generic [ref=f2e86] [cursor=pointer]:
+              - radio "Allow once Only this invocation" [checked] [ref=f2e87]
+              - text: Allow once
+              - generic [ref=f2e88]: Only this invocation
+            - generic [ref=f2e89] [cursor=pointer]:
+              - radio "Allow for this session Matching git push commands" [ref=f2e90]
+              - text: Allow for this session
+              - generic [ref=f2e91]: Matching git push commands
+            - generic [ref=f2e92] [cursor=pointer]:
+              - radio "Always allow “git push” in MAWS Project rule" [ref=f2e93]
+              - text: Always allow “git push” in MAWS
+              - generic [ref=f2e94]: Project rule
+          - group [ref=f2e95]:
+            - generic "Deny… with an optional reason" [ref=f2e96] [cursor=pointer]
+        - generic [ref=f2e97]:
+          - button "Allow" [ref=f2e98] [cursor=pointer]
+          - button "Deny" [ref=f2e99] [cursor=pointer]
+          - generic [ref=f2e100]: Enter · Esc · Tab changes scope
+      - generic "Session status" [ref=f2e101]:
+        - generic [ref=f2e102]: ~/Developer/GitHub/MAWS
+        - generic [ref=f2e103]: ·
+        - button "ctx 41% of 1M" [ref=f2e104] [cursor=pointer]
+        - generic [ref=f2e105]: ·
+        - button "5h 74% ↻2h37m" [ref=f2e106] [cursor=pointer]
+        - generic [ref=f2e107]: ·
+        - button "7d 82% ↻5d21h" [ref=f2e108] [cursor=pointer]
+        - generic [ref=f2e109]: ·
+        - button "$3.41" [ref=f2e110] [cursor=pointer]
+        - generic [ref=f2e111]: ·
+        - button "auto" [ref=f2e112] [cursor=pointer]
+  - figure "03 Edit approval variant 760 px main column" [ref=f2e113]:
+    - generic [ref=f2e114]:
+      - generic [ref=f2e115]: "03"
+      - heading "Edit approval variant" [level=2] [ref=f2e116]
+      - generic [ref=f2e117]: 760 px main column
+    - generic [ref=f2e118]:
+      - paragraph [ref=f2e119]: I’ll update the drop target and cover the cross-pane drag case.
+      - generic [ref=f2e120]:
+        - generic [ref=f2e121]: Approval required
+        - generic [ref=f2e122]: Composer paused · draft preserved
+      - region "Edit permission request" [ref=f2e123]:
+        - generic [ref=f2e124]:
+          - generic [ref=f2e125]:
+            - generic [aria-hidden] [ref=f2e126]: ✳
+            - heading "Main session wants to edit 2 files" [level=3] [ref=f2e127]
+            - generic [ref=f2e128]: Needs you
+          - generic [ref=f2e129]:
+            - generic [ref=f2e131]:
+              - generic [aria-hidden] [ref=f2e132]: ≡
+              - code [ref=f2e133]: src/renderer/sidebar/SessionRow.tsx
+              - generic [ref=f2e134]: +24 −8
+            - generic [ref=f2e135]:
+              - generic [ref=f2e136]:
+                - generic [aria-hidden] [ref=f2e137]: ≡
+                - code [ref=f2e138]: tests/sidebar-drag.spec.ts
+                - generic [ref=f2e139]: +186 −12
+              - generic [ref=f2e140]:
+                - text: Diff too large to preview ·
+                - link "Open in Review ↗" [ref=f2e141] [cursor=pointer]:
+                  - /url: "#edit-approval"
+          - generic [ref=f2e142]:
+            - text: cwd
+            - code [ref=f2e143]: ~/Developer/GitHub/MAWS
+          - group "Grant scope" [ref=f2e144]:
+            - generic [ref=f2e146] [cursor=pointer]:
+              - radio "Allow once These 2 files" [checked] [ref=f2e147]
+              - text: Allow once
+              - generic [ref=f2e148]: These 2 files
+            - generic [ref=f2e149] [cursor=pointer]:
+              - radio "Allow all edits this session Until this session ends" [ref=f2e150]
+              - text: Allow all edits this session
+              - generic [ref=f2e151]: Until this session ends
+            - generic [ref=f2e152] [cursor=pointer]:
+              - radio "Always allow edits in MAWS Project rule" [ref=f2e153]
+              - text: Always allow edits in MAWS
+              - generic [ref=f2e154]: Project rule
+        - generic [ref=f2e155]:
+          - button "Allow" [ref=f2e156] [cursor=pointer]
+          - button "Deny" [ref=f2e157] [cursor=pointer]
+          - generic [ref=f2e158]: Enter · Esc · Tab changes scope
+      - generic [ref=f2e159]:
+        - generic [ref=f2e160]: ~/Developer/GitHub/MAWS
+        - generic [ref=f2e161]: ·
+        - button "ctx 41% of 1M" [ref=f2e162] [cursor=pointer]
+        - generic [ref=f2e163]: ·
+        - button "5h 74% ↻2h37m" [ref=f2e164] [cursor=pointer]
+        - generic [ref=f2e165]: ·
+        - button "7d 82% ↻5d21h" [ref=f2e166] [cursor=pointer]
+        - generic [ref=f2e167]: ·
+        - button "$3.41" [ref=f2e168] [cursor=pointer]
+        - generic [ref=f2e169]: ·
+        - button "auto" [ref=f2e170] [cursor=pointer]
+  - figure "04 Slash palette & model widget Related open states" [ref=f2e171]:
+    - generic [ref=f2e172]:
+      - generic [ref=f2e173]: "04"
+      - heading "Slash palette & model widget" [level=2] [ref=f2e174]
+      - generic [ref=f2e175]: Related open states
+    - generic [ref=f2e176]:
+      - generic [ref=f2e177]:
+        - region "Slash command palette" [ref=f2e178]:
+          - generic [ref=f2e179]:
+            - generic [ref=f2e180]: ⌕
+            - code [ref=f2e181]: /mo
+            - generic [ref=f2e182]: Commands
+          - generic [ref=f2e183]: Engine
+          - button "/model Choose model and effort Engine ↵" [ref=f2e184] [cursor=pointer]:
+            - generic [ref=f2e185]:
+              - code [ref=f2e186]: /model
+              - generic [ref=f2e187]: Choose model and effort
+            - generic [ref=f2e188]: Engine ↵
+          - button "/mcp Manage connected tools Engine" [ref=f2e189] [cursor=pointer]:
+            - generic [ref=f2e190]:
+              - code [ref=f2e191]: /mcp
+              - generic [ref=f2e192]: Manage connected tools
+            - generic [ref=f2e193]: Engine
+          - button "/memory View and edit project memory Engine" [ref=f2e194] [cursor=pointer]:
+            - generic [ref=f2e195]:
+              - code [ref=f2e196]: /memory
+              - generic [ref=f2e197]: View and edit project memory
+            - generic [ref=f2e198]: Engine
+          - generic [ref=f2e199]: Skills
+          - button "/doperpowers:brainstorming Explore an idea before building Skill" [ref=f2e200] [cursor=pointer]:
+            - generic [ref=f2e201]:
+              - code [ref=f2e202]: /doperpowers:brainstorming
+              - generic [ref=f2e203]: Explore an idea before building
+            - generic [ref=f2e204]: Skill
+          - generic [ref=f2e205]: Custom
+          - button "/eli5 Explain it simply Custom" [ref=f2e206] [cursor=pointer]:
+            - generic [ref=f2e207]:
+              - code [ref=f2e208]: /eli5
+              - generic [ref=f2e209]: Explain it simply
+            - generic [ref=f2e210]: Custom
+          - generic [ref=f2e211]: MAWS
+          - button "/split Open in split pane MAWS" [ref=f2e212] [cursor=pointer]:
+            - generic [ref=f2e213]:
+              - code [ref=f2e214]: /split
+              - generic [ref=f2e215]: Open in split pane
+            - generic [ref=f2e216]: MAWS
+          - generic [ref=f2e217]:
+            - generic [ref=f2e218]: ↑↓ · Enter · Esc
+            - generic [ref=f2e219]: Matching + available commands
+        - region "Model and effort widget" [ref=f2e220]:
+          - generic [ref=f2e221]:
+            - heading "Model & effort" [level=3] [ref=f2e222]
+            - code [ref=f2e223]: /model
+          - group "Claude" [ref=f2e224]:
+            - generic [ref=f2e226] [cursor=pointer]:
+              - radio "✓ Fable 5.1 1M" [ref=f2e227]
+              - generic [ref=f2e228]: ✓
+              - generic [ref=f2e229]: Fable 5.1
+              - generic [ref=f2e230]: 1M
+            - generic [ref=f2e231] [cursor=pointer]:
+              - radio "✓ Opus 5.5 1M" [checked] [ref=f2e232]
+              - generic [ref=f2e233]: ✓
+              - generic [ref=f2e234]: Opus 5.5
+              - generic [ref=f2e235]: 1M
+            - generic [ref=f2e236] [cursor=pointer]:
+              - radio "✓ Sonnet 5" [ref=f2e237]
+              - generic [ref=f2e238]: ✓
+              - generic [ref=f2e239]: Sonnet 5
+            - generic [ref=f2e240]: Gateway
+            - generic [ref=f2e241] [cursor=pointer]:
+              - radio "✓ gpt-6-astra From gateway" [ref=f2e242]
+              - generic [ref=f2e243]: ✓
+              - generic [ref=f2e244]:
+                - text: gpt-6-astra
+                - generic [ref=f2e245]: From gateway
+            - generic [ref=f2e246] [cursor=pointer]:
+              - radio "✓ gpt-6-sol From gateway" [ref=f2e247]
+              - generic [ref=f2e248]: ✓
+              - generic [ref=f2e249]:
+                - text: gpt-6-sol
+                - generic [ref=f2e250]: From gateway
+            - generic [ref=f2e251] [cursor=pointer]:
+              - radio "✓ gpt-5.6-terra From gateway" [ref=f2e252]
+              - generic [ref=f2e253]: ✓
+              - generic [ref=f2e254]:
+                - text: gpt-5.6-terra
+                - generic [ref=f2e255]: From gateway
+            - generic [ref=f2e256] [cursor=pointer]:
+              - radio "✓ gpt-6-luna From gateway" [ref=f2e257]
+              - generic [ref=f2e258]: ✓
+              - generic [ref=f2e259]:
+                - text: gpt-6-luna
+                - generic [ref=f2e260]: From gateway
+          - generic [ref=f2e261]:
+            - text: Effort
+            - group "Model effort" [ref=f2e262]:
+              - generic [ref=f2e263] [cursor=pointer]:
+                - radio "Low" [ref=f2e264]
+                - text: Low
+              - generic [ref=f2e265] [cursor=pointer]:
+                - radio "Medium" [ref=f2e266]
+                - text: Medium
+              - generic [ref=f2e267] [cursor=pointer]:
+                - radio "High" [checked] [ref=f2e268]
+                - text: High
+              - generic [ref=f2e269] [cursor=pointer]:
+                - radio "Max" [ref=f2e270]
+                - text: Max
+            - generic [ref=f2e271]:
+              - generic [ref=f2e272]: Fast mode
+              - checkbox "Fast mode" [ref=f2e274] [cursor=pointer]
+      - generic [ref=f2e276]:
+        - generic [ref=f2e277]:
+          - generic [ref=f2e278]: MAWS
+          - generic [ref=f2e279]: ⑂ feat/sidebar-drag
+          - generic [ref=f2e280]: Opus 5.5 · High ⌄
+        - textbox "Message with slash command" [ref=f2e281]: /mo
+        - generic [ref=f2e282]:
+          - button "Add attachment" [ref=f2e283] [cursor=pointer]: ＋
+          - button "Add context" [ref=f2e284] [cursor=pointer]: "@"
+          - button "Send message" [ref=f2e285] [cursor=pointer]: ↑
+      - generic [ref=f2e286]:
+        - generic [ref=f2e287]: ~/Developer/GitHub/MAWS
+        - generic [ref=f2e288]: ·
+        - button "ctx 41% of 1M" [ref=f2e289] [cursor=pointer]
+        - generic [ref=f2e290]: ·
+        - button "5h 74% ↻2h37m" [ref=f2e291] [cursor=pointer]
+        - generic [ref=f2e292]: ·
+        - button "7d 82% ↻5d21h" [ref=f2e293] [cursor=pointer]
+        - generic [ref=f2e294]: ·
+        - button "$3.41" [ref=f2e295] [cursor=pointer]
+        - generic [ref=f2e296]: ·
+        - button "auto" [ref=f2e297] [cursor=pointer]
+  - figure "05 Status line popovers Usage + context detail" [ref=f2e298]:
+    - generic [ref=f2e299]:
+      - generic [ref=f2e300]: "05"
+      - heading "Status line popovers" [level=2] [ref=f2e301]
+      - generic [ref=f2e302]: Usage + context detail
+    - generic [ref=f2e303]:
+      - generic [ref=f2e304]:
+        - region "Account usage" [ref=f2e305]:
+          - generic [ref=f2e306]:
+            - heading "Usage" [level=3] [ref=f2e307]
+            - paragraph [ref=f2e308]: alex@maws.dev · Max
+            - generic [ref=f2e309]:
+              - generic [ref=f2e310]:
+                - generic [ref=f2e311]:
+                  - text: 5h
+                  - strong [ref=f2e312]: 74%
+                - generic [ref=f2e313]: resets in 2h 37m
+              - meter "Five-hour usage" [ref=f2e314]
+            - generic [ref=f2e316]:
+              - generic [ref=f2e317]:
+                - generic [ref=f2e318]:
+                  - text: Weekly
+                  - strong [ref=f2e319]: 82%
+                - generic [ref=f2e320]: resets in 5d 21h
+              - meter "Weekly usage" [ref=f2e321]
+            - generic [ref=f2e323]:
+              - generic [ref=f2e324]:
+                - generic [ref=f2e325]:
+                  - text: Fable
+                  - strong [ref=f2e326]: 86%
+                - generic [ref=f2e327]: weekly model limit
+              - meter "Fable usage" [ref=f2e328]
+            - generic [ref=f2e330]:
+              - generic [aria-hidden] [ref=f2e331]: △
+              - paragraph [ref=f2e332]: At this rate weekly runs out Friday 3 PM, before it resets
+            - generic [ref=f2e333]:
+              - generic [ref=f2e334]: Other accounts
+              - group [ref=f2e335]:
+                - generic "alex@personal.dev" [ref=f2e336] [cursor=pointer]
+          - generic [ref=f2e337]:
+            - link "Open ClaudeUsage ↗" [ref=f2e338] [cursor=pointer]:
+              - /url: "#status-popovers"
+            - generic [ref=f2e339]: Updated just now
+        - region "Context window" [ref=f2e340]:
+          - generic [ref=f2e341]:
+            - heading "Context window" [level=3] [ref=f2e342]
+            - paragraph [ref=f2e343]: 412k of 1M · autocompact at 850k
+            - paragraph [ref=f2e344]: 41.2% used · 438k until compaction
+            - 'img "Context breakdown: system prompt 18k, tools 46k, messages 326k, attachments 22k; 588k free. Autocompact at 850k." [ref=f2e345]':
+              - 'generic "System prompt: 18k" [ref=f2e346]'
+              - 'generic "Tools: 46k" [ref=f2e347]'
+              - 'generic "Messages: 326k" [ref=f2e348]'
+              - 'generic "Attachments: 22k" [ref=f2e349]'
+            - table "Context token breakdown" [ref=f2e350]:
+              - rowgroup [ref=f2e351]:
+                - row [ref=f2e352]:
+                  - cell "System prompt" [ref=f2e353]
+                  - cell "18k" [ref=f2e355]
+                - row [ref=f2e356]:
+                  - cell "Tools" [ref=f2e357]
+                  - cell "46k" [ref=f2e359]
+                - row [ref=f2e360]:
+                  - cell "Messages" [ref=f2e361]
+                  - cell "326k" [ref=f2e363]
+                - row [ref=f2e364]:
+                  - cell "Attachments" [ref=f2e365]
+                  - cell "22k" [ref=f2e367]
+            - button "Compact now" [ref=f2e368] [cursor=pointer]
+      - generic [ref=f2e369]:
+        - generic [ref=f2e370]:
+          - generic [ref=f2e371]: MAWS
+          - generic [ref=f2e372]: ⑂ feat/sidebar-drag
+          - generic [ref=f2e373]: Opus 5.5 · High ⌄
+        - textbox "Message" [ref=f2e374]:
+          - /placeholder: Ask a follow-up…
+        - generic [ref=f2e375]:
+          - button "Add attachment" [ref=f2e376] [cursor=pointer]: ＋
+          - button "Add context" [ref=f2e377] [cursor=pointer]: "@"
+          - button "Send message" [ref=f2e378] [cursor=pointer]: ↑
+      - generic [ref=f2e379]:
+        - generic [ref=f2e380]: ~/Developer/GitHub/MAWS
+        - generic [ref=f2e381]: ·
+        - button "ctx 41% of 1M" [ref=f2e382] [cursor=pointer]
+        - generic [ref=f2e383]: ·
+        - button "5h 74% ↻2h37m" [ref=f2e384] [cursor=pointer]
+        - generic [ref=f2e385]: ·
+        - button "7d 82% ↻5d21h" [ref=f2e386] [cursor=pointer]
+        - generic [ref=f2e387]: ·
+        - button "$3.41" [ref=f2e388] [cursor=pointer]
+        - generic [ref=f2e389]: ·
+        - button "auto" [ref=f2e390] [cursor=pointer]
+  - generic [ref=f2e391]: Static interaction study · scopes and disclosures are interactive; no engine actions are sent.

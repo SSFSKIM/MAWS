@@ -1,0 +1,1 @@
+const names=process.argv.slice(2);for(const name of names.length?names:['init','permission-roundtrip','question-roundtrip','subagent','reads','queue-and-interrupt','resume-fork']){if(!/^[a-z-]+$/.test(name))throw new Error('Invalid scenario');const {default:scenario}=await import('./scenarios/'+name+'.mjs');await scenario();}

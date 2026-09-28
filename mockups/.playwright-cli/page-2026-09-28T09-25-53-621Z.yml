@@ -1,0 +1,176 @@
+- generic [active] [ref=f1e1]:
+  - banner [ref=f1e2]:
+    - heading "Fix sidebar drag" [level=1] [ref=f1e5]
+    - generic [ref=f1e6]: MAWS / sidebar-drag
+  - main "Session transcript" [ref=f1e7]:
+    - generic [ref=f1e8]:
+      - generic [ref=f1e9]:
+        - strong [ref=f1e10]: Today
+        - text: 1:12 AM
+      - region "Your message" [ref=f1e11]:
+        - generic [ref=f1e12]:
+          - paragraph [ref=f1e13]: Can you fix drag-and-drop in the sidebar? Dragging a session should reorder it within a project. Keep the insertion line stable when I move between rows.
+          - generic [ref=f1e14]:
+            - text: sidebar-drag.png
+            - generic [ref=f1e19]: 184 KB
+        - generic [ref=f1e20]:
+          - generic [ref=f1e21]: 1:12 AM
+          - button "Copy" [ref=f1e22] [cursor=pointer]
+          - button "Edit" [ref=f1e23] [cursor=pointer]
+      - region "Completed assistant turn" [ref=f1e24]:
+        - generic [ref=f1e25]:
+          - button "Worked for 2m 14s · 12 tool calls" [ref=f1e26] [cursor=pointer]
+          - generic [ref=f1e29]: ·
+          - link "1 denied" [ref=f1e30] [cursor=pointer]:
+            - /url: "#denied-action"
+        - generic [ref=f1e31]:
+          - paragraph [ref=f1e32]: Sidebar dragging now uses the row’s midpoint to choose an insertion edge. The indicator stays anchored to the row instead of following whichever child element is under the pointer.
+          - paragraph [ref=f1e33]:
+            - text: I kept the change inside the existing React drag handlers; there’s no new dependency. The
+            - code [ref=f1e34]: moveSession
+            - text: handler commits the new order and clears the drop target afterward.
+          - list [ref=f1e35]:
+            - listitem [ref=f1e36]: Reorder sessions within their current project.
+            - listitem [ref=f1e37]: Keep row height and the insertion line stable while dragging.
+            - listitem [ref=f1e38]: Ignore cross-project drops and preserve the saved order.
+          - generic [ref=f1e39]:
+            - generic [ref=f1e40]:
+              - generic [ref=f1e41]: tsx
+              - generic [ref=f1e42]:
+                - button "Wrap" [ref=f1e43] [cursor=pointer]
+                - button "Copy" [ref=f1e44] [cursor=pointer]
+            - code [ref=f1e46]: "if (target && target.projectId === session.projectId) { moveSession(session.id, target.id, target.before); } setDragTarget(null);"
+        - generic "Change receipt" [ref=f1e47]:
+          - generic [ref=f1e48]:
+            - strong [ref=f1e51]: 3 files changed · +118 −42
+            - button "Review changes ↗" [ref=f1e52] [cursor=pointer]
+          - generic [ref=f1e53]:
+            - generic [ref=f1e54]: src/sidebar/useSidebarDrag.ts
+            - generic [ref=f1e55]:
+              - generic [ref=f1e56]: "+68"
+              - generic [ref=f1e57]: −24
+          - generic [ref=f1e58]:
+            - generic [ref=f1e59]: src/sidebar/SessionRow.tsx
+            - generic [ref=f1e60]:
+              - generic [ref=f1e61]: "+32"
+              - generic [ref=f1e62]: −14
+          - generic [ref=f1e63]:
+            - generic [ref=f1e64]: src/sidebar/sidebar.css
+            - generic [ref=f1e65]:
+              - generic [ref=f1e66]: "+18"
+              - generic [ref=f1e67]: −4
+          - generic [ref=f1e68]:
+            - generic [ref=f1e69]: Changes applied
+            - button "Undo" [ref=f1e70] [cursor=pointer]
+            - button "Reapply" [disabled] [ref=f1e71]
+      - region "Subagent activity" [ref=f1e72]:
+        - generic [ref=f1e73]:
+          - generic [aria-hidden] [ref=f1e74]: 🌼 ✻ ❋
+          - generic [ref=f1e75]: Reviewer, Tester and Docs writer started working
+        - generic [ref=f1e76]:
+          - generic [aria-hidden] [ref=f1e77]: ✻
+          - generic [ref=f1e78]: Tester finished with errors
+        - generic [ref=f1e79]: "Sent message to Reviewer: rerun after the fix"
+      - region "Assistant turn in progress" [ref=f1e83]:
+        - group [ref=f1e84]:
+          - generic "Thinking · 8s" [ref=f1e85] [cursor=pointer]
+        - group [ref=f1e88]:
+          - generic [ref=f1e91] [cursor=pointer]:
+            - text: Running
+            - code [ref=f1e92]: bun test
+            - text: for 12s
+        - paragraph [ref=f1e96]: "The Tester caught one more edge case: collapsing a project during a drag leaves a stale target. I’ve added cleanup for that path and am checking the full suite before asking the Reviewer to take another look"
+      - region [ref=f1e98]:
+        - 'heading "Plan: sidebar drag-and-drop" [level=2] [ref=f1e102]'
+        - list [ref=f1e103]:
+          - listitem [ref=f1e104]: Keep session order scoped to the current project.
+          - listitem [ref=f1e105]: Resolve the insertion edge from each row’s midpoint.
+          - listitem [ref=f1e106]: Render a stable indicator without shifting the list.
+          - listitem [ref=f1e107]: Clear drag state on drop, Escape, and project collapse.
+          - listitem [ref=f1e108]: Cover pointer and cancellation paths with regression tests.
+          - listitem [ref=f1e109]: Add keyboard reordering with a visible focus indicator.
+          - listitem [ref=f1e110]: Announce the new position to assistive technologies.
+          - listitem [ref=f1e111]: Update the keyboard map and ask the Reviewer to rerun.
+        - button "Show more ⌄" [ref=f1e112] [cursor=pointer]
+        - generic [ref=f1e113]:
+          - strong [ref=f1e114]: Implement this plan?
+          - button "Yes, implement" [ref=f1e115] [cursor=pointer]
+          - button "Something else" [ref=f1e116] [cursor=pointer]
+      - form [ref=f1e117]:
+        - generic [ref=f1e118]:
+          - heading "Two details before I continue" [level=2] [ref=f1e122]
+          - generic [ref=f1e123]: Needs your input
+        - group "Q1How should keyboard reordering work?" [ref=f1e124]:
+          - generic [ref=f1e126] [cursor=pointer]:
+            - radio "1 Space to grab, arrows to move Recommended Press Space again to drop. Escape cancels without changing the order." [checked] [ref=f1e127]
+            - generic [ref=f1e128]: "1"
+            - generic [ref=f1e129]:
+              - generic [ref=f1e130]:
+                - text: Space to grab, arrows to move
+                - generic [ref=f1e131]: Recommended
+              - generic [ref=f1e132]: Press Space again to drop. Escape cancels without changing the order.
+          - generic [ref=f1e133] [cursor=pointer]:
+            - radio "2 Move immediately with ⌥↑ / ⌥↓ One shortcut per position; no separate grab or drop state." [ref=f1e134]
+            - generic [ref=f1e135]: "2"
+            - generic [ref=f1e136]:
+              - generic [ref=f1e137]: Move immediately with ⌥↑ / ⌥↓
+              - generic [ref=f1e138]: One shortcut per position; no separate grab or drop state.
+          - generic [ref=f1e139] [cursor=pointer]:
+            - radio "3 Use the session’s context menu Add Move up and Move down alongside the existing actions." [ref=f1e140]
+            - generic [ref=f1e141]: "3"
+            - generic [ref=f1e142]:
+              - generic [ref=f1e143]: Use the session’s context menu
+              - generic [ref=f1e144]: Add Move up and Move down alongside the existing actions.
+          - generic "Focused option preview" [ref=f1e145]:
+            - generic [aria-hidden] [ref=f1e146]:
+              - generic [ref=f1e147]: ⠿ Fix sidebar drag
+              - generic [ref=f1e148]: Build session index
+              - generic [ref=f1e149]: Audit permissions
+            - generic [ref=f1e150]: Space picks up the focused session.↓ moves it below “Build session index”.
+        - group "Q2Which finishing touches should I include? Select all that apply" [ref=f1e151]:
+          - generic [ref=f1e153]:
+            - generic [ref=f1e154]:
+              - checkbox "Screen reader announcements" [checked] [ref=f1e155]
+              - text: Screen reader announcements
+            - generic [ref=f1e156]:
+              - checkbox "Reduced-motion support" [checked] [ref=f1e157]
+              - text: Reduced-motion support
+            - generic [ref=f1e158]:
+              - checkbox "Shortcut tooltip" [ref=f1e159]
+              - text: Shortcut tooltip
+        - generic [ref=f1e160]: Other
+        - textbox "Other" [ref=f1e161]:
+          - /placeholder: Add a preference or constraint…
+        - generic [ref=f1e162]:
+          - generic [ref=f1e163]: ↑↓ move · Enter select · ⌘Enter submit
+          - button "Submit answers" [ref=f1e164] [cursor=pointer]
+      - status [ref=f1e165]:
+        - generic [ref=f1e168]: Server is busy, reconnecting (2/5)
+  - contentinfo [ref=f1e169]:
+    - generic [ref=f1e170]:
+      - region "Queued messages" [ref=f1e171]:
+        - generic [ref=f1e172]:
+          - generic [ref=f1e175]: also update the keyboard map
+          - generic [ref=f1e176]:
+            - button "Edit" [ref=f1e177] [cursor=pointer]
+            - button "Delete" [ref=f1e178] [cursor=pointer]
+            - button "Steer" [ref=f1e179] [cursor=pointer]
+        - generic [ref=f1e180]:
+          - text: Queue paused because you interrupted ·
+          - button "Resume" [ref=f1e181] [cursor=pointer]
+      - generic [ref=f1e182]:
+        - generic "Session context" [ref=f1e183]:
+          - generic [ref=f1e184]: MAWS
+          - generic [ref=f1e185]: .claude/worktrees/sidebar-drag
+          - generic [ref=f1e186]: ⎇ sidebar-drag
+          - generic [ref=f1e187]: Opus 5.5 · High
+          - generic [ref=f1e188]: auto
+          - generic [ref=f1e189]: + dir
+        - textbox "Message to agent" [ref=f1e190]:
+          - /placeholder: Do anything
+        - generic [ref=f1e191]:
+          - button "Add attachments" [ref=f1e192] [cursor=pointer]: +
+          - button "Mention context" [ref=f1e193] [cursor=pointer]: "@"
+          - button "Microphone, coming in P1" [ref=f1e194] [cursor=pointer]
+          - button "Steer" [ref=f1e198] [cursor=pointer]
+      - generic [ref=f1e201]: … · ctx 41% of 1M · 5h 74% ↻2h37m · 7d 82% · $3.41 · auto
