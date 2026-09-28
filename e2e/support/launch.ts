@@ -75,7 +75,7 @@ export const test = base.extend<{ maws: MawsLaunch }>({
 // Playwright keeps a page's console messages and page errors from before anyone listened (Electron is attached from
 // launch), so the first load is covered by seeding from those buffers. Listeners go on first; whatever they received
 // by the time a buffer read answers is already in that buffer (one ordered channel), so it is dropped from the live list.
-async function collectConsoleErrors(page: Page): Promise<() => string[]> {
+export async function collectConsoleErrors(page: Page): Promise<() => string[]> {
   const liveConsole: string[] = [];
   const livePage: string[] = [];
   page.on('console', (message) => {

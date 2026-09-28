@@ -11,7 +11,12 @@ if (process.env.MAWS_USER_DATA) app.setPath('userData', process.env.MAWS_USER_DA
 // instead of asking the login keychain, whose access prompt an unsigned or re-signed build can raise.
 if (process.env.MAWS_E2E) app.commandLine.appendSwitch('use-mock-keychain');
 
-// macOS convention (D-11): closing the last window keeps the app running; the dock icon re-creates it.
+// macOS convention (D-11): closing the last window keeps the app running; the dock icon re-creates it (`activate`
+// below). This empty listener is load-bearing: with no `window-all-closed` listener Electron quits when the last
+// window closes, `will-quit` stops the hosts, and every live pty dies with a closed window (§4.1: hosts are app-scoped).
+// Only an explicit quit (Cmd+Q, the menu, the Dock) ends the app.
+app.on('window-all-closed', () => {});
+
 app.whenReady().then(() => {
   installContentSecurityPolicy();
   const hosts = createHosts();
