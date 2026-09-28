@@ -3,7 +3,7 @@
 // has a width (a first render, a test) a nominal 1000 px stands in.
 import { Resizer } from '../app/Resizer';
 import { useLayout } from '../stores/layout';
-import { paneDomId } from './Pane';
+import { paneDomId } from './pane-dom';
 
 const NOMINAL_WIDTH = 1000;
 

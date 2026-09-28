@@ -4,7 +4,8 @@
 import type { MawsBridge } from '@shared/ipc/schema';
 import { ipc } from '../ipc/client';
 import { registerAction, requestCloseTab } from '../keymap/actions-runtime';
-import { useLayout, whenHydrated } from '../stores/layout';
+import { focusPaneElement } from '../main/pane-dom';
+import { useLayout } from '../stores/layout';
 import { activeTab } from '../stores/layout-model';
 import { useSessions } from '../stores/sessions';
 import { useSettings } from '../stores/settings';
@@ -12,9 +13,6 @@ import { registerSessionAction } from './session-actions';
 
 export function registerShellActions(client: MawsBridge = ipc): () => void {
   const layout = () => useLayout.getState();
-  // A tab action that arrives before the persisted tabs are read (a menu click racing the first load) waits for them,
-  // or hydration would replace its result.
-  const tabs = (run: (arg: number | null) => void) => (arg: number | null) => whenHydrated(() => run(arg));
   const offs = [
     registerAction('sidebar.toggle', () => layout().setSidebar({ collapsed: !layout().regions.sidebar.collapsed })),
     // Hiding a maximized panel also un-maximizes it; maximizing a hidden one shows it.
@@ -28,24 +26,27 @@ export function registerShellActions(client: MawsBridge = ipc): () => void {
     registerAction('theme.dark', () => useSettings.getState().setTheme('dark')),
     registerAction('theme.system', () => useSettings.getState().setTheme('system')),
 
-    registerAction(
-      'tab.close',
-      tabs(() => {
-        const tab = activeTab(layout().main);
-        if (tab) void requestCloseTab(tab.id);
-      }),
-    ),
-    registerAction('tab.reopen', tabs(() => layout().reopenClosed())),
-    registerAction('tab.overview', tabs(() => layout().openTab({ kind: 'overview' }))),
-    registerAction('tab.select', tabs((n) => n !== null && layout().selectTab(n))),
-    registerAction('tab.next', tabs(() => layout().cycleTab(1))),
-    registerAction('tab.previous', tabs(() => layout().cycleTab(-1))),
-    registerAction('pane.split', tabs(() => layout().splitWithActive())),
-    registerAction(
-      'pane.focusOther',
-      tabs(() => layout().focusPane(layout().main.focusedPane === 0 ? 1 : 0)),
-    ),
-    registerAction('diagnostics.open', tabs(() => layout().openTab({ kind: 'diagnostics' }))),
+    // Tab changes made before the persisted tabs are read are replayed over them by the layout store itself.
+    registerAction('tab.close', () => {
+      const tab = activeTab(layout().main);
+      if (tab) void requestCloseTab(tab.id);
+    }),
+    registerAction('tab.reopen', () => layout().reopenClosed()),
+    registerAction('tab.overview', () => layout().openTab({ kind: 'overview' })),
+    registerAction('tab.select', (n) => {
+      if (n !== null) layout().selectTab(n);
+    }),
+    registerAction('tab.next', () => layout().cycleTab(1)),
+    registerAction('tab.previous', () => layout().cycleTab(-1)),
+    registerAction('pane.split', () => layout().splitWithActive()),
+    // DOM focus moves too, so a pane-scoped chord (bound to the element that holds focus) follows the pane.
+    registerAction('pane.focusOther', () => {
+      if (layout().main.panes.length < 2) return;
+      const other = layout().main.focusedPane === 0 ? 1 : 0;
+      layout().focusPane(other);
+      focusPaneElement(other);
+    }),
+    registerAction('diagnostics.open', () => layout().openTab({ kind: 'diagnostics' })),
 
     registerSessionAction('open', (appSessionId) => layout().openSession(appSessionId)),
     registerSessionAction('openInSplit', (appSessionId) => layout().openSession(appSessionId, { split: true })),

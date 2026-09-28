@@ -159,6 +159,29 @@ describe('tab strip reorders, closes, reopens', () => {
     expect(tabNames()).toEqual(['Overview', 'Charter + research · MAWS', 'Fix sidebar drag · MAWS']);
   });
 
+  it('Delete keeps focus on a guarded tab until its close succeeds', async () => {
+    const user = userEvent.setup();
+    let answer = false;
+    offs.push(registerCloseGuard('session', async () => answer));
+    render(<Shell />);
+    openThree();
+    tab('Fix sidebar drag · MAWS').focus();
+    await user.keyboard('{Delete}');
+    expect(tabNames()).toContain('Fix sidebar drag · MAWS');
+    expect(document.activeElement).toBe(tab('Fix sidebar drag · MAWS'));
+    answer = true;
+    await user.keyboard('{Delete}');
+    expect(tabNames()).not.toContain('Fix sidebar drag · MAWS');
+    expect(document.activeElement).toBe(tab('Quota reset recovery · codex_somersault')); // the neighbour that took its place
+  });
+
+  it('the strip’s "+" is disabled with "Arrives with C10" while no session creator is registered', () => {
+    render(<Shell />);
+    const plus = within(strips()[0].parentElement!).getByRole('button', { name: 'New session' }) as HTMLButtonElement;
+    expect(plus.disabled).toBe(true);
+    expect(plus.title).toBe('Arrives with C10');
+  });
+
   it('⌘1…9 select tabs of the focused pane, ⌘0 the Overview', () => {
     render(<Shell />);
     openThree();
@@ -261,6 +284,29 @@ describe('split', () => {
     expect(tabNames(strips()[1])).toEqual(['Quota reset recovery · codex_somersault', 'Fix sidebar drag · MAWS']);
   });
 
+  it('⌘⇧\\ moves DOM focus into the other pane, onto its active tab', () => {
+    render(<Shell />);
+    openThree();
+    act(() => runAction('pane.split')); // Quota goes right; Fix stays active on the left
+    act(() => tab('Quota reset recovery · codex_somersault').focus());
+    expect(useLayout.getState().main.focusedPane).toBe(1);
+    act(() => runAction('pane.focusOther'));
+    expect(useLayout.getState().main.focusedPane).toBe(0);
+    expect(document.activeElement).toBe(tab('Fix sidebar drag · MAWS'));
+    act(() => runAction('pane.focusOther'));
+    expect(document.activeElement).toBe(tab('Quota reset recovery · codex_somersault'));
+    expect(useLayout.getState().main.focusedPane).toBe(1);
+  });
+
+  it('⌘⇧\\ without a split leaves focus where it is', () => {
+    render(<Shell />);
+    openThree();
+    act(() => tab('Charter + research · MAWS').focus());
+    act(() => runAction('pane.focusOther'));
+    expect(document.activeElement).toBe(tab('Charter + research · MAWS'));
+    expect(useLayout.getState().main.focusedPane).toBe(0);
+  });
+
   it('a pointer or focus inside a pane focuses it, and only a split marks the focused strip', () => {
     render(<Shell />);
     openThree();
@@ -308,6 +354,21 @@ describe('unstarted sessions', () => {
     expect(within(panel).queryByRole('group', { name: 'Session status' })).toBeNull();
     expect(within(document.querySelector<HTMLElement>('[data-region="sidebar"]')!).queryByText('New session')).toBeNull();
     expect(within(screen.getByRole('banner')).getByText('New session')).toBeTruthy();
+  });
+
+  it('the strip’s "+" opens an unstarted tab in its pane, in the project of the pane’s session', async () => {
+    const asked: (ProjectId | null)[] = [];
+    offs.push(registerSessionCreator(async (projectId) => (asked.push(projectId), NEW)));
+    const user = userEvent.setup();
+    render(<Shell />);
+    await user.click(within(strips()[0].parentElement!).getByRole('button', { name: 'New session' }));
+    expect(asked).toEqual([null]); // on the Overview there is no session to take a project from
+    expect(selected()).toBe('New session');
+    await act(async () => runAction('tab.close'));
+    act(() => useLayout.getState().openSession(idOf('Quota reset recovery')));
+    await user.click(within(strips()[0].parentElement!).getByRole('button', { name: 'New session' }));
+    expect(asked).toEqual([null, 'proj-codex-somersault']);
+    expect(selected()).toBe('New session · codex_somersault');
   });
 
   it('a record arriving for the id turns the tab into the session’s ordinary tab', async () => {
@@ -361,6 +422,29 @@ describe('unstarted sessions', () => {
     openThree();
     await act(async () => runAction('tab.close'));
     expect(activeTab(useLayout.getState().main)?.id).toBe(`session:${idOf('Fix sidebar drag')}`);
+  });
+});
+
+describe('before the layout has hydrated', () => {
+  it('a session opened from the sidebar while layout.get is outstanding survives hydration', async () => {
+    const user = userEvent.setup();
+    const persisted = {
+      ...useLayout.getState().main,
+      panes: [{ tabs: [{ id: 'overview', kind: 'overview', pinned: true }, { id: 'diagnostics', kind: 'diagnostics', pinned: false }], activeTabId: 'diagnostics' }],
+    };
+    const layoutMain = fakeClient({ 'layout.list': { keys: ['main.tabs'] } });
+    useLayout.setState({ hydrated: false });
+    render(<Shell />);
+    const hydrating = useLayout.getState().hydrate(layoutMain.client, (id) => useSessions.getState().records.has(id));
+    await user.click(sidebarRow('Charter + research'));
+    expect(selected()).toBe('Charter + research · MAWS');
+    expect(layoutMain.pending('layout.get')).toBe(3); // the snapshot is still outstanding
+    await act(async () => {
+      for (const key of ['regions', 'main.tabs', 'panel.pinned']) await layoutMain.reply('layout.get', { value: key === 'main.tabs' ? persisted : null });
+      await hydrating;
+    });
+    expect(tabNames()).toEqual(['Overview', 'Diagnostics', 'Charter + research · MAWS']);
+    expect(selected()).toBe('Charter + research · MAWS');
   });
 });
 

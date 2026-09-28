@@ -8,11 +8,10 @@ import { useSlot } from '../app/slots';
 import { Overview } from '../overview/Overview';
 import { SessionPane } from '../session/SessionPane';
 import { useLayout } from '../stores/layout';
+import { paneDomId } from './pane-dom';
 import { TabStrip } from './TabStrip';
 
 type PaneIndex = 0 | 1;
-
-export const paneDomId = (index: PaneIndex) => `pane-${index}`;
 
 // `share` is the pane's part of the region's width (the split ratio, or 1 alone).
 export function Pane({ index, split, share }: { index: PaneIndex; split: boolean; share: number }) {

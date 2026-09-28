@@ -6,9 +6,11 @@
 // inset.
 import { useEffect, useRef, useState, type DragEvent, type KeyboardEvent } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
-import { requestCloseTab } from '../keymap/actions-runtime';
+import { createSession, requestCloseTab, useSessionCreatorRegistered } from '../keymap/actions-runtime';
 import { SESSION_DRAG_TYPE } from '../sidebar/SessionRow';
 import { useLayout } from '../stores/layout';
+import { useSessions } from '../stores/sessions';
+import { focusPaneElement } from './pane-dom';
 import { Tab, TAB_DRAG_TYPE } from './Tab';
 
 export { TAB_DRAG_TYPE };
@@ -50,6 +52,17 @@ export function TabStrip({ pane, split, idPrefix }: { pane: Pane; split: boolean
     strip.current?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
   }, [activeTabId]);
 
+  // After a keyboard close, focus goes to the tab that took the closed one's place (or the new last tab).
+  const refocus = useRef<{ id: string; index: number } | null>(null);
+  const stripTabs = state?.tabs;
+  useEffect(() => {
+    const pending = refocus.current;
+    if (!pending || stripTabs?.some((t) => t.id === pending.id)) return;
+    refocus.current = null;
+    const remaining = strip.current?.querySelectorAll<HTMLElement>('[role="tab"]') ?? [];
+    remaining[Math.min(pending.index, remaining.length - 1)]?.focus();
+  }, [stripTabs]);
+
   if (!state) return null;
   const tabs = state.tabs;
 
@@ -70,8 +83,14 @@ export function TabStrip({ pane, split, idPrefix }: { pane: Pane; split: boolean
       case 'Delete':
       case 'Backspace':
         if (tab.kind === 'overview') return;
-        focusAt(index === tabs.length - 1 ? index - 1 : index + 1);
-        void requestCloseTab(tab.id);
+        // Focus stays on the tab while its guard decides; only a close that happens hands it to the neighbour (the
+        // effect below, once the tab has left the strip).
+        refocus.current = { id: tab.id, index };
+        void requestCloseTab(tab.id).then(() => {
+          const main = useLayout.getState().main;
+          if (main.panes.some((p) => p.tabs.some((t) => t.id === tab.id))) refocus.current = null; // kept
+          else if (!main.panes[pane]) focusPaneElement(0); // the pane collapsed with its last tab
+        });
         break;
       default:
         return;
@@ -116,7 +135,7 @@ export function TabStrip({ pane, split, idPrefix }: { pane: Pane; split: boolean
   const stop = tabs.some((t) => t.id === state.activeTabId) ? state.activeTabId : tabs[0]?.id;
 
   return (
-    <div className="relative shrink-0">
+    <div className="relative flex h-10 shrink-0 items-stretch border-b border-border">
       <div
         ref={strip}
         role="tablist"
@@ -128,7 +147,7 @@ export function TabStrip({ pane, split, idPrefix }: { pane: Pane; split: boolean
           if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setMarker(null);
         }}
         onDrop={onDrop}
-        className="relative flex h-10 items-stretch overflow-x-auto border-b border-border [scrollbar-width:none]"
+        className="relative flex min-w-0 items-stretch overflow-x-auto [scrollbar-width:none]"
       >
         {tabs.map((tab, index) => (
           <Tab
@@ -145,8 +164,38 @@ export function TabStrip({ pane, split, idPrefix }: { pane: Pane; split: boolean
           <span aria-hidden className="pointer-events-none absolute inset-y-1 w-0.5 -translate-x-1/2 bg-accent" style={{ left: marker }} />
         )}
       </div>
+      <NewSessionButton pane={pane} />
       {/* The focused pane's mark under a split, drawn over the tabs rather than under their backgrounds. */}
       {split && focused && <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 z-10 h-0.5 bg-accent" />}
     </div>
+  );
+}
+
+// §5.2's "+" at the strip's end: a new session in this pane, in the project of the session the pane shows when it
+// shows one. Disabled until a session creator is registered (C10; the stub's in launch mode scenario), like the
+// sidebar's "+".
+function NewSessionButton({ pane }: { pane: Pane }) {
+  const canCreate = useSessionCreatorRegistered();
+  const appSessionId = useLayout((s) => {
+    const p = s.main.panes[pane];
+    const tab = p?.tabs.find((t) => t.id === p.activeTabId);
+    return tab?.kind === 'session' || tab?.kind === 'agent' ? tab.appSessionId : null;
+  });
+  const projectId = useSessions((s) =>
+    appSessionId ? (s.records.get(appSessionId)?.projectId ?? s.unstarted.get(appSessionId)?.projectId ?? null) : null,
+  );
+  return (
+    <button
+      type="button"
+      aria-label="New session"
+      title={canCreate ? 'New session' : 'Arrives with C10'}
+      disabled={!canCreate}
+      onClick={() => void createSession(projectId, { pane })}
+      className="mx-1 inline-flex size-7 shrink-0 items-center justify-center self-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2 disabled:text-fg-faint disabled:hover:bg-transparent"
+    >
+      <span aria-hidden className="text-ui leading-none">
+        +
+      </span>
+    </button>
   );
 }

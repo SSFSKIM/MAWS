@@ -84,7 +84,14 @@ export function createLayoutStore() {
   const closedAt = new Map<string, number>();
 
   return create<LayoutState>()((set, get) => {
-    const main = (next: (m: LayoutMain) => LayoutMain) => set({ main: next(get().main) });
+    // Tab changes made before the persisted tabs are read (a row click, a card, a menu action or a new session racing
+    // the first `layout.get`) apply at once and are kept, then replayed over the hydrated tabs, so hydration never
+    // wipes what the user just opened. After hydration a change simply applies.
+    const early: ((m: LayoutMain) => LayoutMain)[] = [];
+    const main = (next: (m: LayoutMain) => LayoutMain) => {
+      if (!get().hydrated) early.push(next);
+      set({ main: next(get().main) });
+    };
     // Every change of the pins goes through here, so the no-session selection is revalidated against them each time;
     // an unchanged list keeps its identity, so nothing is persisted for a selection change alone.
     const pins = (next: PanelTabRef[], requested?: string | null) => {
@@ -136,7 +143,8 @@ export function createLayoutStore() {
           const state = panels[i];
           if (state && known(id)) panelBySession.set(id, state);
         });
-        set({ regions, main: model.repairMain(persistedMain, known), ...pins(panelPinned), panelBySession, hydrated: true });
+        const hydratedMain = early.splice(0).reduce((m, change) => change(m), model.repairMain(persistedMain, known));
+        set({ regions, main: hydratedMain, ...pins(panelPinned), panelBySession, hydrated: true });
         // A first launch writes the defaults of the keys it lacks, so layout.json always holds the renderer's three
         // fixed keys (acceptance item 6 lists them); everything after this is written only when it changes.
         const values: Partial<Record<LayoutKey, unknown>> = { regions, 'main.tabs': get().main, 'panel.pinned': panelPinned };
@@ -221,20 +229,6 @@ export function createLayoutStore() {
 }
 
 export const useLayout = createLayoutStore();
-
-// Runs `run` now if the persisted layout has been read, else once it has: a tab opened before hydration would be
-// replaced by the hydrated tabs.
-export function whenHydrated(run: () => void, store = useLayout): void {
-  if (store.getState().hydrated) {
-    run();
-    return;
-  }
-  const off = store.subscribe((state) => {
-    if (!state.hydrated) return;
-    off();
-    run();
-  });
-}
 
 // ---- persistence ------------------------------------------------------------------------------------------------------
 

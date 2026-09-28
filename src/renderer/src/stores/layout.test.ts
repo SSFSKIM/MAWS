@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { LAYOUT_DEFAULTS, type LayoutMain } from '@shared/ipc/schema/layout';
 import { fakeClient } from '../../../../test/support/fake-client';
-import { createLayoutStore, whenHydrated } from './layout';
+import { createLayoutStore } from './layout';
 
 const A = 'app-a' as AppSessionId;
 const session = (id: string) => ({ id: `session:${id}`, kind: 'session', appSessionId: id, pinned: false });
@@ -85,19 +85,20 @@ describe('layout store actions', () => {
   });
 });
 
-describe('whenHydrated', () => {
-  it('runs a tab action after hydration, so the persisted tabs do not replace its result', async () => {
-    const fake = fakeClient({
-      'layout.list': { keys: ['main.tabs'] },
-      'layout.get': ({ key }: { key: string }) => ({ value: key === 'main.tabs' ? persistedMain : null }),
-    });
+describe('tab changes before hydration', () => {
+  it('a tab opened while the layout snapshot is outstanding is replayed over the hydrated tabs', async () => {
+    const fake = fakeClient({ 'layout.list': { keys: ['main.tabs'] } });
     const store = createLayoutStore();
-    whenHydrated(() => store.getState().openTab({ kind: 'diagnostics' }), store);
-    expect(store.getState().main.panes[0].tabs.map((t) => t.id)).toEqual(['overview']);
-    await store.getState().hydrate(fake.client, (id) => id === A);
-    expect(store.getState().main.panes[0].tabs.map((t) => t.id)).toEqual(['overview', 'diagnostics', 'session:app-a']); // opened after the active Overview
-    const ran = vi.fn();
-    whenHydrated(ran, store);
-    expect(ran).toHaveBeenCalledOnce();
+    const hydrating = store.getState().hydrate(fake.client, (id) => id === A || id === ('b' as AppSessionId));
+    store.getState().openSession('b' as AppSessionId); // a click before layout.get answers
+    expect(store.getState().main.panes[0].tabs.map((t) => t.id)).toEqual(['overview', 'session:b']); // shown at once
+    await new Promise((resolve) => setTimeout(resolve, 0)); // layout.list answered; the three reads are outstanding
+    expect(fake.pending('layout.get')).toBe(3);
+    for (const key of ['regions', 'main.tabs', 'panel.pinned']) await fake.reply('layout.get', { value: key === 'main.tabs' ? persistedMain : null });
+    await hydrating;
+    expect(store.getState().main.panes[0].tabs.map((t) => t.id)).toEqual(['overview', 'session:b', 'session:app-a']);
+    expect(store.getState().main.panes[0].activeTabId).toBe('session:b');
+    store.getState().openSession(A); // after hydration a change applies once, as before
+    expect(store.getState().main.panes[0].activeTabId).toBe('session:app-a');
   });
 });
