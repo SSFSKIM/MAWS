@@ -1,0 +1,263 @@
+// Transcript-to-X1 backfill (C4 execution document, "Chain follower and backfill", the mapping table): one disk record
+// in, the X1 events it stands for out. Used by the chain follower for every record it puts on the chain and by the
+// replay engine's transcript source (M5). Disk records carry no journal row, so every event has `seq: null` and a
+// deterministic id (`<uuid>`, `<uuid>#<n>`, `session:<id>:started`), which is what lets a consumer that receives the
+// same backfill twice deduplicate.
+import type { ContentBlock, EventBase, SessionEvent } from '@shared/graph/events';
+import type { AgentId, ApiMessageId, EventId, MessageUuid, ParentToolUseId, SessionId, TaskId, ToolUseId } from '@shared/graph/ids';
+import type { AgentMeta, TranscriptRecord } from '@shared/wire/transcript';
+
+// The three engine strings that name a spilled result (SPEC 12.12 and 20.10); the structured field wins when present.
+export const SPILL_MARKER = /(?:Full output saved to|were saved to|was saved to):? (\/\S+?\.(?:txt|json))\b/;
+
+const TEXT_CAP = 200;
+const EPOCH = '1970-01-01T00:00:00.000Z';
+
+// What the parent's mapping needs to know about a child agent when it meets the `Agent` tool use that spawned it:
+// the sidecar's meta (agent-<id>.meta.json, keyed by its `toolUseId`) and, when the sidecar transcript is readable,
+// its first user record as the prompt. M3's subagents reader supplies the production lookup.
+export interface SubagentLookup {
+  byToolUseId(toolUseId: string): { agentId: AgentId; meta: AgentMeta; prompt: string | null } | null;
+}
+
+export interface BackfillContext {
+  readonly sessionId: SessionId;
+  readonly agentId: AgentId | null;
+  readonly parentToolUseId: ParentToolUseId | null;
+  readonly seenToolUses: Map<string, TaskId>; // Agent tool uses that started a subagent, for subagent.finished on their result
+  readonly subagents: SubagentLookup | null;
+  lastAt: string; // the previous event's `at`, inherited by records without a timestamp
+  started: boolean; // session.started emitted (once per follow)
+  lastTurnUserUuid: MessageUuid | null; // the last turn.started, for turn.ended.userMessageUuids
+}
+
+export function createBackfillContext(init: {
+  sessionId: SessionId;
+  agent: { agentId: AgentId; parentToolUseId: ParentToolUseId } | null;
+  subagents?: SubagentLookup;
+}): BackfillContext {
+  return {
+    sessionId: init.sessionId,
+    agentId: init.agent?.agentId ?? null,
+    parentToolUseId: init.agent?.parentToolUseId ?? null,
+    seenToolUses: new Map(),
+    subagents: init.subagents ?? null,
+    lastAt: EPOCH,
+    started: false,
+    lastTurnUserUuid: null,
+  };
+}
+
+// The base fields of an event synthesised outside a record (anchors, branches, rewrites); the caller picks the id.
+export function eventBase(ctx: BackfillContext, id: string): EventBase {
+  return { id: id as EventId, sessionId: ctx.sessionId, at: ctx.lastAt, seq: null, agentId: ctx.agentId, parentToolUseId: ctx.parentToolUseId };
+}
+
+export function recordToEvents(record: TranscriptRecord, ctx: BackfillContext): SessionEvent[] {
+  if (typeof record.uuid !== 'string') return [];
+  const uuid = record.uuid as MessageUuid;
+  if (typeof record.timestamp === 'string') ctx.lastAt = record.timestamp;
+  const events: SessionEvent[] = [];
+  let ordinal = 0;
+  const base = (): EventBase => {
+    const id = ordinal === 0 ? uuid : `${uuid}#${ordinal}`;
+    ordinal += 1;
+    return eventBase(ctx, id);
+  };
+
+  if (!ctx.started && typeof record.cwd === 'string') {
+    ctx.started = true;
+    const id = ctx.agentId === null ? `session:${ctx.sessionId}:started` : `session:${ctx.sessionId}:agent:${ctx.agentId}:started`;
+    events.push({
+      ...eventBase(ctx, id),
+      kind: 'session.started',
+      cwd: record.cwd,
+      engineVersion: typeof record.version === 'string' ? record.version : null,
+      resumedFrom: null,
+      forked: Boolean(record.forkedFrom),
+    });
+  }
+
+  switch (record.type) {
+    case 'user':
+      userEvents(record, uuid, ctx, base, events);
+      break;
+    case 'assistant':
+      assistantEvents(record, uuid, ctx, base, events);
+      break;
+    case 'system':
+      systemEvents(record, ctx, base, events);
+      break;
+    case 'attachment': // context injections: on the chain, nothing to show
+    case 'progress': // never on the chain; the follower keeps only its skeleton
+      break;
+    default:
+      events.push({ ...base(), kind: 'frame.unknown', frameType: `transcript:${record.type}`, subtype: null });
+  }
+  return events;
+}
+
+type Base = () => EventBase;
+
+function userEvents(record: TranscriptRecord, uuid: MessageUuid, ctx: BackfillContext, base: Base, events: SessionEvent[]): void {
+  const content = messageContent(record);
+  const isMeta = record.isMeta === true;
+  const turn = (): void => {
+    if (isMeta) return;
+    ctx.lastTurnUserUuid = uuid;
+    events.push({ ...base(), kind: 'turn.started', userMessageUuid: uuid, origin: null });
+  };
+  if (typeof content === 'string') {
+    turn();
+    events.push({ ...base(), kind: 'user.message', messageUuid: uuid, content, isReplay: false, isSynthetic: isMeta, origin: null, bash: parseBash(content) });
+    return;
+  }
+  if (!Array.isArray(content)) return;
+  const blocks = content.filter(isContentBlock);
+  const results = blocks.filter((block) => block.type === 'tool_result');
+  const others = blocks.filter((block) => block.type !== 'tool_result');
+  if (others.length > 0) {
+    turn();
+    events.push({ ...base(), kind: 'user.message', messageUuid: uuid, content: others, isReplay: false, isSynthetic: isMeta, origin: null, bash: null });
+  }
+  const structured = record.toolUseResult ?? null;
+  const persisted = (structured as { persistedOutputPath?: unknown } | null)?.persistedOutputPath;
+  for (const block of results) {
+    const toolUseId = block.tool_use_id;
+    if (typeof toolUseId !== 'string' || toolUseId.length === 0) continue;
+    const resultContent = block.content;
+    const content: string | ContentBlock[] = typeof resultContent === 'string' ? resultContent : Array.isArray(resultContent) ? resultContent.filter(isContentBlock) : '';
+    const text = typeof content === 'string' ? content : content.map((b) => (typeof b.text === 'string' ? b.text : '')).join('\n');
+    const isError = block.is_error === true;
+    events.push({
+      ...base(),
+      kind: 'tool.result',
+      toolUseId: toolUseId as ToolUseId,
+      content,
+      isError,
+      structured,
+      spillPath: typeof persisted === 'string' ? persisted : (SPILL_MARKER.exec(text)?.[1] ?? null),
+      denial: null, // denial kinds are not recorded on disk in a parseable form
+      safeguard: 'not_evaluated',
+      messageUuid: uuid,
+    });
+    const taskId = ctx.seenToolUses.get(toolUseId);
+    if (taskId !== undefined) {
+      events.push({
+        ...base(),
+        kind: 'subagent.finished',
+        taskId,
+        status: isError ? 'failed' : 'completed',
+        summary: text.length > 0 ? text.slice(0, TEXT_CAP) : null,
+        outputFile: null,
+        reason: null,
+      });
+    }
+  }
+}
+
+function assistantEvents(record: TranscriptRecord, uuid: MessageUuid, ctx: BackfillContext, base: Base, events: SessionEvent[]): void {
+  const message = record.message as { id?: unknown; model?: unknown; content?: unknown } | undefined;
+  const content = Array.isArray(message?.content) ? message.content.filter(isContentBlock) : [];
+  // Every disk assistant record carries the API message id; the record uuid stands in if one ever lacks it.
+  const apiMessageId = (typeof message?.id === 'string' && message.id.length > 0 ? message.id : uuid) as ApiMessageId;
+  const model = typeof message?.model === 'string' ? message.model : '';
+  const apiBlockIndex = typeof record.apiBlockIndex === 'number' ? record.apiBlockIndex : null;
+  content.forEach((block, i) => {
+    events.push({
+      ...base(),
+      kind: 'assistant.block.complete',
+      messageUuid: uuid,
+      apiMessageId,
+      blockIndex: apiBlockIndex === null ? i : apiBlockIndex + i,
+      block,
+      model,
+      supersedes: null,
+      aborted: false,
+      userMessageUuids: [],
+    });
+    if (block.type !== 'tool_use' || typeof block.id !== 'string' || block.id.length === 0) return;
+    const toolUseId = block.id as ToolUseId;
+    const toolName = typeof block.name === 'string' ? block.name : '';
+    events.push({ ...base(), kind: 'tool.use', toolUseId, toolName, input: block.input, apiMessageId, messageUuid: uuid });
+    if (toolName !== 'Agent') return;
+    const child = ctx.subagents?.byToolUseId(toolUseId) ?? null;
+    if (child === null) return;
+    const taskId = child.agentId as string as TaskId;
+    ctx.seenToolUses.set(toolUseId, taskId);
+    events.push({
+      ...base(),
+      kind: 'subagent.started',
+      taskId,
+      toolUseId,
+      description: child.meta.description,
+      subagentType: child.meta.agentType,
+      isBackground: child.meta.requestShape === 'background',
+      spawnDepth: child.meta.spawnDepth ?? 1,
+      prompt: child.prompt,
+    });
+  });
+}
+
+function systemEvents(record: TranscriptRecord, ctx: BackfillContext, base: Base, events: SessionEvent[]): void {
+  const subtype = typeof record.subtype === 'string' ? record.subtype : null;
+  switch (subtype) {
+    case 'compact_boundary': {
+      const meta = record.compactMetadata as { trigger?: unknown; preTokens?: unknown } | undefined;
+      events.push({
+        ...base(),
+        kind: 'boundary.compaction',
+        trigger: typeof meta?.trigger === 'string' ? meta.trigger : 'unknown',
+        preTokens: typeof meta?.preTokens === 'number' ? meta.preTokens : 0,
+        postTokens: null,
+        logicalParentUuid: typeof record.logicalParentUuid === 'string' ? (record.logicalParentUuid as MessageUuid) : null,
+        historical: true,
+      });
+      return;
+    }
+    case 'turn_duration':
+      // Accounting is not on disk per turn; `seq: null` marks the event synthesised and C6 shows duration, not cost.
+      events.push({
+        ...base(),
+        kind: 'turn.ended',
+        result: 'success',
+        isError: false,
+        terminalReason: null,
+        resultText: null,
+        durationMs: typeof record.durationMs === 'number' ? record.durationMs : 0,
+        numTurns: 1,
+        costUsd: 0,
+        usage: { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, thinkingTokens: null },
+        permissionDenials: [],
+        errors: [],
+        userMessageUuids: ctx.lastTurnUserUuid === null ? [] : [ctx.lastTurnUserUuid],
+        origin: null,
+        resultIndex: null,
+        isEchoReceipt: false,
+      });
+      return;
+    case 'local_command':
+      events.push({ ...base(), kind: 'notice.posted', level: 'info', text: typeof record.content === 'string' ? record.content : '', key: 'local_command' });
+      return;
+    default:
+      events.push({ ...base(), kind: 'frame.unknown', frameType: 'transcript:system', subtype });
+  }
+}
+
+function messageContent(record: TranscriptRecord): unknown {
+  return (record.message as { content?: unknown } | undefined)?.content;
+}
+
+const isContentBlock = (value: unknown): value is ContentBlock & { [k: string]: unknown } =>
+  typeof value === 'object' && value !== null && typeof (value as { type?: unknown }).type === 'string';
+
+// Bash-mode messages carry their command and output as tags (`<bash-input>`, `<bash-stdout>…<bash-exit-code>`).
+function parseBash(content: string): Extract<SessionEvent, { kind: 'user.message' }>['bash'] {
+  const input = /^<bash-input>([\s\S]*?)<\/bash-input>/.exec(content);
+  if (input) return { part: 'input', command: input[1] };
+  const stdout = /<bash-stdout>([\s\S]*?)<\/bash-stdout>/.exec(content);
+  if (!stdout) return null;
+  const stderr = /<bash-stderr>([\s\S]*?)<\/bash-stderr>/.exec(content);
+  const exit = /<bash-exit-code>(-?\d+)<\/bash-exit-code>/.exec(content);
+  return { part: 'output', stdout: stdout[1], stderr: stderr?.[1] ?? '', exitCode: exit ? Number(exit[1]) : 0 };
+}

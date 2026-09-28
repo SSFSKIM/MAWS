@@ -72,3 +72,22 @@ export function snapshotRecords(rows: JournalRow[], label: string): TranscriptRe
   const { records } = row.frame as { records: unknown[] };
   return records.map(parseTranscriptRecord);
 }
+
+// C4's transcript fixtures: test/fixtures/transcripts/<name>.jsonl, copies of real store transcripts (rewind-real,
+// subagent-parent) and one synthetic torn tail; parsed with parseTranscriptRecord, unparseable lines skipped as the
+// engine's reader skips them (SPEC 35.3.1), so the torn-tail fixture loads to its eleven whole records.
+export const TRANSCRIPT_FIXTURE_DIR = join(TEST_FIXTURE_DIR, 'transcripts');
+
+export function loadTranscriptFixture(name: string): TranscriptRecord[] {
+  const records: TranscriptRecord[] = [];
+  for (const raw of readFileSync(join(TRANSCRIPT_FIXTURE_DIR, `${name}.jsonl`), 'utf8').split('\n')) {
+    const line = raw.replace(/^\0+/, '');
+    if (line.length === 0) continue;
+    try {
+      records.push(parseTranscriptRecord(JSON.parse(line)));
+    } catch {
+      continue;
+    }
+  }
+  return records;
+}
