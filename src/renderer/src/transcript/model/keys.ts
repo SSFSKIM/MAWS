@@ -17,14 +17,14 @@ export const turnId = {
 
 export const rowId = {
   time: (turn: TurnId) => row(`time:${turn}`),
-  timeOfEvent: (id: EventId) => row(`time:e${id}`), // a separator before a loose row (one outside any turn)
+  timeOfRow: (loose: RowId) => row(`time:${loose}`), // a separator before a loose row (one outside any turn)
   user: (uuid: MessageUuid) => row(`user:${uuid}`),
   userOfEvent: (id: EventId) => row(`user:${id}`),
   text: (apiMessageId: ApiMessageId, blockIndex: number) => row(`text:${blockIdentity(apiMessageId, blockIndex)}`),
   think: (apiMessageId: ApiMessageId, blockIndex: number) => row(`think:${blockIdentity(apiMessageId, blockIndex)}`),
   divider: (turn: TurnId) => row(`divider:${turn}`),
   group: (firstCell: CellId) => row(`group:${firstCell}`),
-  cell: (id: CellId) => row(id), // a standalone cell's row is keyed by its CellId
+  cell: (id: CellId) => id as RowId & CellId, // a standalone cell's row is keyed by its CellId (the `cell` row variant carries both brands)
   receipt: (turn: TurnId) => row(`receipt:${turn}`),
   subagent: (task: TaskId) => row(`subagent:${task}`), // a grouped sentence uses its first task id
   agentMessage: (id: EventId) => row(`agentmsg:${id}`),
@@ -36,6 +36,7 @@ export const rowId = {
   reconnect: (session: SessionId) => row(`reconnect:${session}`),
   boundary: (id: EventId) => row(`boundary:${id}`),
   bash: (inputMessage: MessageUuid) => row(`bash:${inputMessage}`),
+  bashOfEvent: (id: EventId) => row(`bash:${id}`),
   local: (message: MessageUuid) => row(`local:${message}`), // a local-command echo row
   localOfEvent: (id: EventId) => row(`local:${id}`),
 };

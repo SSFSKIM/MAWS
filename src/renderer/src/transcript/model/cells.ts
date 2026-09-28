@@ -179,7 +179,7 @@ function labelOf(rec: ToolRecord, detail: CellDetail, status: Cell['status'], ca
     default: {
       const s = record(rec.result?.structured);
       const detailText =
-        rec.use.toolName === 'Skill' ? str(input.skill, null as never) || null
+        rec.use.toolName === 'Skill' ? (typeof input.skill === 'string' ? input.skill : null)
         : rec.use.toolName === 'ToolSearch' ? String(Array.isArray(s.matches) ? s.matches.length : 0)
         : rec.use.toolName === 'EnterWorktree' ? str(s.path, str(input.path)) || null
         : rec.use.toolName === 'SendUserFile' ? baseName(filePathOf(input)) || null

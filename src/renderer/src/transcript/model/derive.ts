@@ -54,7 +54,7 @@ function flatten(state: TranscriptState): Row[] {
   };
   const emitLoose = (after: TurnId | null) => {
     for (const row of looseRows(state, looseAfter.get(after) ?? [])) {
-      emit([row], 'loose', rowId.timeOfEvent(row.id as never));
+      emit([row], 'loose', rowId.timeOfRow(row.id));
       if (row.kind === 'boundary' && row.boundaryKind === 'rewind' && row.revealed && state.hidden) {
         for (const id of state.hidden.turns) {
           const turn = state.turns.get(id)!;
@@ -149,7 +149,6 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): { rows: Row
   let model: string | null = null;
   let retry: RowOf<'error'> | null = null;
   let retryAt: string | null = null; // the first api.retry's time: the in-place row keeps its position
-  const bashInputs = new Map<string, Event<'user.message'>>();
   const agentIds = new Map<ToolUseId, AgentId>();
 
   for (const event of turn.events) {
@@ -188,11 +187,10 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): { rows: Row
     switch (event.kind) {
       case 'user.message': {
         if (event.bash?.part === 'input') {
-          if (event.messageUuid) bashInputs.set(event.messageUuid, event);
-          items.push({ kind: 'row', row: bashRow(event, null) });
+          items.push({ kind: 'row', row: bashRowOf(event, turn.id) });
         } else if (event.bash?.part === 'output') {
           const at = items.findIndex((item) => item.kind === 'row' && item.row.kind === 'bash' && item.row.exitCode === null);
-          if (at >= 0) items[at] = { kind: 'row', row: bashRow((items[at] as { row: RowOf<'bash'> }).row, event) };
+          if (at >= 0) items[at] = { kind: 'row', row: withBashOutput((items[at] as { row: RowOf<'bash'> }).row, event) };
         } else if (isLocalCommand(event.origin, event.content)) {
           items.push({ kind: 'row', row: localCommandRow(event, turn.id) });
         } else if (event.messageUuid !== null && turnIdOf.ofMessage(event.messageUuid) === turn.id && user === null && !dropped(event.messageUuid)) {
@@ -301,7 +299,8 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): { rows: Row
         const group = byTask.get(event.taskId);
         if (!group) break;
         const phases = Array.isArray(event.progress) ? event.progress.map(record).filter((entry) => entry.type === 'workflow_phase') : [];
-        group.phase = phases.length > 0 ? str(phases.at(-1)!.title, null as never) || null : group.phase;
+        const title = phases.at(-1)?.title;
+        group.phase = typeof title === 'string' && title.length > 0 ? title : group.phase;
         group.statuses.set(event.taskId, 'working');
         break;
       }
@@ -487,7 +486,7 @@ function groupItems(items: Item[], turn: TurnState, ui: TranscriptUi | undefined
     const hidden = cells.filter((cell) => cell.toolName !== 'thinking' && cell.classification.hidden);
     if (!active && visible.length === 1 && hidden.length === 0) {
       for (const cell of cells) if (cell.toolName === 'thinking') rows.push(thinkingRow(cell));
-      rows.push({ ...visible[0], classification: { ...visible[0].classification, startsGroup: false }, turnId: turn.id, at: visible[0].startedAt, kind: 'cell', id: visible[0].id as never } as Row);
+      rows.push(standaloneRow(visible[0], turn.id));
       return;
     }
     const id = rowId.group(cells[0].id);
@@ -508,7 +507,7 @@ function groupItems(items: Item[], turn: TurnState, ui: TranscriptUi | undefined
       }
       if (!cell.classification.groupable) {
         flush(false);
-        rows.push({ ...cell, turnId: turn.id, at: cell.startedAt, kind: 'cell', classification: { ...cell.classification, startsGroup: false } } as Row);
+        rows.push(standaloneRow(cell, turn.id));
         continue;
       }
       if (!open) open = [];
@@ -532,6 +531,9 @@ function groupItems(items: Item[], turn: TurnState, ui: TranscriptUi | undefined
   flush(turn.state === 'open');
   return rows;
 }
+
+// A standalone cell is a flat `cell` row keyed by its CellId (X3).
+const standaloneRow = (cell: Cell, turnId: TurnId): Row => ({ ...cell, id: rowId.cell(cell.id), turnId, at: cell.startedAt, kind: 'cell', classification: { ...cell.classification, startsGroup: false } });
 
 function phrasesOf(cells: Cell[]): GroupPhraseInput {
   const input: GroupPhraseInput = { mcpServers: [], skills: [], toolsLoaded: 0, editedFiles: [], readFiles: [], searches: [], commands: [], hooks: 0, webQueries: [], fetchedHosts: [], other: 0 };
@@ -656,12 +658,16 @@ function noticeRow(event: SessionEvent, text: string, turnId: TurnId | null): Ro
   return { id: rowId.error(event.id), turnId, at: event.at, kind: 'error', severity: 'notice', text, attempt: null, scope: 'notice', lostAttentionCount: null };
 }
 
-function bashRow(input: Event<'user.message'> | RowOf<'bash'>, output: Event<'user.message'> | null): RowOf<'bash'> {
-  const row: RowOf<'bash'> = 'kind' in input && input.kind === 'bash'
-    ? input
-    : { id: rowId.bash((input as Event<'user.message'>).messageUuid ?? ((input as Event<'user.message'>).id as never)), turnId: null, at: input.at, kind: 'bash', command: (input as Event<'user.message'>).bash?.part === 'input' ? ((input as Event<'user.message'>).bash as { command: string }).command : '', stdout: '', stderr: '', exitCode: null, cwd: null };
-  if (output?.bash?.part === 'output') return { ...row, stdout: output.bash.stdout, stderr: output.bash.stderr, exitCode: output.bash.exitCode };
-  return row;
+// A `!` command's replayed rows: the input message opens the row, the next output message completes it.
+function bashRowOf(input: Event<'user.message'>, turnId: TurnId | null): RowOf<'bash'> {
+  const command = input.bash?.part === 'input' ? input.bash.command : '';
+  const id = input.messageUuid === null ? rowId.bashOfEvent(input.id) : rowId.bash(input.messageUuid);
+  return { id, turnId, at: input.at, kind: 'bash', command, stdout: '', stderr: '', exitCode: null, cwd: null };
+}
+
+function withBashOutput(row: RowOf<'bash'>, output: Event<'user.message'>): RowOf<'bash'> {
+  if (output.bash?.part !== 'output') return row;
+  return { ...row, stdout: output.bash.stdout, stderr: output.bash.stderr, exitCode: output.bash.exitCode };
 }
 
 // Rows for the events outside any turn, placed after the turn they followed.
@@ -671,10 +677,10 @@ function looseRows(state: TranscriptState, events: SessionEvent[]): Row[] {
   for (const event of events) {
     switch (event.kind) {
       case 'user.message': {
-        if (event.bash?.part === 'input') rows.push(bashRow(event, null));
+        if (event.bash?.part === 'input') rows.push(bashRowOf(event, null));
         else if (event.bash?.part === 'output') {
           const at = rows.findIndex((row) => row.kind === 'bash' && row.exitCode === null);
-          if (at >= 0) rows[at] = bashRow(rows[at] as RowOf<'bash'>, event);
+          if (at >= 0) rows[at] = withBashOutput(rows[at] as RowOf<'bash'>, event);
         } else if (isLocalCommand(event.origin, event.content)) rows.push(localCommandRow(event, null));
         break;
       }

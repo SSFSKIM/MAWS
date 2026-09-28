@@ -138,7 +138,7 @@ export function journalToEvents(rows: JournalRow[], options: StubOptions = {}): 
     // Stdout (`in`) frames.
     switch (frame.type) {
       case 'system':
-        return systemFrame(row, frame, put, { get open() { return open; }, set open(v) { open = v; }, get pendingEcho() { return pendingEcho; } }, tasks, agentByToolUse);
+        return systemFrame(frame, put, { get open() { return open; }, set open(v) { open = v; }, get pendingEcho() { return pendingEcho; } }, tasks, agentByToolUse);
       case 'assistant': {
         const message = rec(frame.message);
         const apiMessageId = (str(message.id) ?? '') as ApiMessageId;
@@ -304,7 +304,7 @@ export function journalToEvents(rows: JournalRow[], options: StubOptions = {}): 
 interface TurnFlags { open: boolean; readonly pendingEcho: boolean }
 type Put = <K extends SessionEvent['kind']>(kind: K, payload: Payload<K>) => void;
 
-function systemFrame(row: JournalRow, frame: Frame, put: Put, turn: TurnFlags, tasks: Map<string, { taskType: string; workflowName: string | null }>, agentByToolUse: Map<string, string>): void {
+function systemFrame(frame: Frame, put: Put, turn: TurnFlags, tasks: Map<string, { taskType: string; workflowName: string | null }>, agentByToolUse: Map<string, string>): void {
   const taskId = (str(frame.task_id) ?? '') as TaskId;
   const toolUseId = (str(frame.tool_use_id) ?? null) as ToolUseId | null;
   switch (frame.subtype) {
@@ -399,5 +399,4 @@ function systemFrame(row: JournalRow, frame: Frame, put: Put, turn: TurnFlags, t
     default:
       put('frame.unknown', { frameType: 'system', subtype: str(frame.subtype) });
   }
-  void row;
 }
