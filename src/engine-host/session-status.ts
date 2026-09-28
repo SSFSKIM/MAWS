@@ -115,7 +115,7 @@ export class SessionStatusTracker {
   observe(frame: Frame, at: string): void {
     if (frame.type === 'stream_event') {
       const delta = (frame.event as { delta?: { safeguard_results?: unknown } } | undefined)?.delta;
-      if (list(delta?.safeguard_results).some((r) => (r.status as { type?: unknown } | undefined)?.type === 'unavailable')) this.observeLocalLane(at);
+      if (list(delta?.safeguard_results).some((r) => (r.status as { type?: unknown } | undefined)?.type === 'unavailable')) this.observeLocalLane(frame, at);
       return;
     }
     if (frame.type !== 'system') return;
@@ -135,7 +135,7 @@ export class SessionStatusTracker {
         if (Array.isArray(frame.commands)) this.setCatalog({ commands: frame.commands });
         return;
       case 'informational':
-        if (typeof frame.content === 'string' && /classifier/i.test(frame.content)) this.observeLocalLane(at); // the engine's own classifier lane and its billing notice (§19)
+        if (typeof frame.content === 'string' && /classifier/i.test(frame.content)) this.observeLocalLane(frame, at); // the engine's own classifier lane and its billing notice (§19)
         return;
       case 'background_tasks_changed':
         this.backgroundTasks = list(frame.tasks).map((t) => ({ taskId: String(t.task_id) as TaskId, taskType: String(t.task_type), description: String(t.description ?? ''), ambient: t.ambient === true }));
@@ -166,7 +166,9 @@ export class SessionStatusTracker {
     this.fastMode = { state: (FAST_MODE_STATES as readonly unknown[]).includes(state) ? (state as EngineSessionStatus['fastMode']['state']) : null, disabledReason: str(source.fast_mode_disabled_reason) };
   }
 
-  private observeLocalLane(at: string): void {
+  // Main-lane frames only (M4 review): a child agent's model is not the session's lane.
+  private observeLocalLane(frame: Frame, at: string): void {
+    if (typeof frame.parent_tool_use_id === 'string' && frame.parent_tool_use_id.length > 0) return;
     if (this.currentTurnEventId === null) return; // no turn has started in this process: nothing to attribute it to
     this.gateway.localLane = { observedInTurn: this.currentTurnEventId, at };
   }

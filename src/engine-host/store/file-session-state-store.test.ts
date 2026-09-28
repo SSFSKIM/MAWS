@@ -13,7 +13,7 @@ const spec = LaunchSpecSchema.parse({
   resume: null, sessionId: null, trust: null, mcpConfig: null, extraSettings: null, maxBudgetUsd: null, replay: null,
 });
 const entry = (over: Partial<QueueEntry> = {}): QueueEntry => ({
-  queueId: 'q-1', appSessionId: ID, content: 'hello', createdAt: '2026-09-28T10:00:00.000Z', state: 'queued', messageUuid: null, submittedAt: null, uncertain: false, ...over,
+  queueId: 'q-1', appSessionId: ID, content: 'hello', createdAt: '2026-09-28T10:00:00.000Z', state: 'queued', messageUuid: null, submittedAt: null, uncertain: false, steer: false, ...over,
 });
 
 let userData: string;
@@ -27,7 +27,7 @@ afterEach(async () => {
 describe('FileSessionStateStore', () => {
   it('answers the empty state for a session it has never seen', async () => {
     const store = new FileSessionStateStore(userData);
-    expect(await store.loadQueue(ID)).toEqual({ entries: [], paused: false });
+    expect(await store.loadQueue(ID)).toEqual({ entries: [], paused: false, corrupt: null });
     expect(await store.loadGrants(ID)).toEqual({ allow: [] });
     expect(await store.loadLaunchSpec(ID)).toBeNull();
   });
@@ -40,7 +40,7 @@ describe('FileSessionStateStore', () => {
     await Promise.all(saves);
 
     const after = new FileSessionStateStore(userData);
-    expect(await after.loadQueue(ID)).toEqual({ entries: [entry(), submitting], paused: true });
+    expect(await after.loadQueue(ID)).toEqual({ entries: [entry(), submitting], paused: true, corrupt: null });
     expect(await after.loadGrants(ID)).toEqual({ allow: ['Bash(touch granted.txt)'] });
     expect(await after.loadLaunchSpec(ID)).toEqual(spec);
 
@@ -58,7 +58,7 @@ describe('FileSessionStateStore', () => {
     await store.saveQueue(ID, persisted);
     expect(await store.exists(ID)).toBe(true);
     const file = await readFile(join(userData, 'engine-host', 'state', `${ID}.json`), 'utf8');
-    expect(await store.loadQueue(ID)).toEqual(persisted);
+    expect(await store.loadQueue(ID)).toEqual({ ...persisted, corrupt: null });
     expect(await readFile(join(userData, 'engine-host', 'state', `${ID}.json`), 'utf8')).toBe(file);
     await store.forget(ID);
     expect(await store.exists(ID)).toBe(false);
@@ -75,19 +75,22 @@ describe('FileSessionStateStore', () => {
   it('refuses to persist a queue that is not a valid QueueState', async () => {
     const store = new FileSessionStateStore(userData);
     await expect(store.saveQueue(ID, { entries: [{ ...entry(), state: 'sent' } as unknown as QueueEntry], paused: false })).rejects.toThrow();
-    expect(await store.loadQueue(ID)).toEqual({ entries: [], paused: false });
+    expect(await store.loadQueue(ID)).toEqual({ entries: [], paused: false, corrupt: null });
   });
 
-  it('moves an unreadable file aside and starts empty, rather than failing every launch of the session', async () => {
+  it('an unreadable file is moved aside and kept, and the next queue load reports where, once (even when a grants load found it first)', async () => {
     const dir = join(userData, 'engine-host', 'state');
     await mkdir(dir, { recursive: true });
     await writeFile(join(dir, `${ID}.json`), '{"version":1,"queue":');
     const warnings: string[] = [];
     const store = new FileSessionStateStore(userData, { warn: (m) => warnings.push(m) });
-    expect(await store.loadQueue(ID)).toEqual({ entries: [], paused: false });
+    expect(await store.loadGrants(ID)).toEqual({ allow: [] }); // a launch reads grants first
+    await store.saveLaunchSpec(ID, spec); // and writes a fresh file before the queue is loaded
+    const loaded = await store.loadQueue(ID);
+    expect(loaded).toMatchObject({ entries: [], paused: false, corrupt: expect.stringMatching(new RegExp(`${ID}\\.json\\.corrupt-\\d+$`)) });
+    expect(await readFile(loaded.corrupt!, 'utf8')).toBe('{"version":1,"queue":'); // kept, byte for byte
     expect(warnings).toHaveLength(1);
-    const names = await readdir(dir);
-    expect(names.some((n) => n.startsWith(`${ID}.json.corrupt-`))).toBe(true);
+    expect((await store.loadQueue(ID)).corrupt).toBeNull();
   });
 
   it('forget deletes the state file and the session\'s journal directory', async () => {

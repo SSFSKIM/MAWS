@@ -391,7 +391,13 @@ export class EngineSession {
       }
     }
     if (this.processState !== 'initializing') return;
-    await this.queue.recover();
+    try {
+      await this.queue.recover();
+    } catch (error) {
+      // a queue that cannot be loaded or saved is an initialization failure, never a live process stuck initializing (M4 review)
+      this.initializeFailed(new Error(`the session's queue could not be recovered: ${messageOf(error)}`));
+      return;
+    }
     if (this.processState === 'initializing') this.setProcess('ready');
   }
 

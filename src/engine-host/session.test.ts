@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AttentionItem } from '@shared/graph/attention';
 import { SessionEventSchema, type SessionEvent } from '@shared/graph/events';
-import type { RequestId } from '@shared/graph/ids';
+import type { AppSessionId, RequestId } from '@shared/graph/ids';
 import { LaunchSpecSchema, type LaunchSpec } from '@shared/engine/launch-spec';
 import { EngineSessionStatusSchema, type EngineSessionStatus } from '@shared/engine/status';
 import type { StdinFrame } from '@shared/wire/frames';
@@ -13,6 +13,7 @@ import { ProcessTable } from './process-table';
 import { EngineSession, HostHookRegistry, type EngineSessionOptions } from './session';
 import { MemoryJournal, scriptedTransport, type ScriptedTransport } from './conformance/scripted-transport';
 import { replayedSession } from './conformance/session-harness';
+import { MemorySessionStateStore } from './store/memory-session-state-store';
 
 const prelude = loadEngineJournal('replay-handshake');
 const responseOf = (seq: number) => (prelude.find((r) => r.seq === seq)!.frame as { response: { response: Record<string, unknown> } }).response.response;
@@ -418,6 +419,31 @@ describe('EngineSession: inbound requests, host hooks and exit', () => {
 });
 
 describe('failed initialize terminates the process', () => {
+  it('a queue recovery that fails is an initialization failure: init_failed, the ladder without end_session, the reservation held until the OS exit (M4 review)', async () => {
+    vi.useFakeTimers();
+    const store = new MemorySessionStateStore();
+    store.loadQueue = async () => {
+      throw new Error('EACCES: permission denied, open state.json');
+    };
+    const table = new ProcessTable({ ps: async () => '' });
+    let created: ReturnType<typeof setup> | null = null;
+    table.reserve('app-s' as AppSessionId, () => (created = setup({ session: { store } })).session);
+    const { session, transport, journal, events } = created!;
+    await vi.advanceTimersByTimeAsync(0);
+    expect(journal.rows.find((r) => (r.frame as { event?: string }).event === 'init_failed')!.frame).toMatchObject({ event: 'init_failed', message: expect.stringContaining('EACCES') });
+    expect(events.filter((e) => e.kind === 'error.raised')).toMatchObject([{ scope: 'process' }]);
+    expect(session.status().process).toBe('exiting');
+    expect(transport.requestsOf('end_session')).toEqual([]);
+    expect(transport.calls).toEqual(['endInput', 'kill:SIGTERM']);
+    expect(table.reserve('app-s' as AppSessionId, () => { throw new Error('must not create'); })).toMatchObject({ status: 'refused', reason: 'already_live' });
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(transport.calls).toEqual(['endInput', 'kill:SIGTERM', 'kill:SIGKILL']);
+    transport.exit(null, 'SIGKILL');
+    await session.exited;
+    expect(session.status()).toMatchObject({ process: 'exited', exit: { reason: 'crash' } });
+    expect(table.reserve('app-s' as AppSessionId, () => setup().session)).toMatchObject({ status: 'launching' });
+  });
+
   it('an initialize that never answers: exiting at the long deadline, SIGTERM with stdin closed, SIGKILL 3 s later, exited only at the real exit; the reservation holds until then', async () => {
     vi.useFakeTimers();
     const table = new ProcessTable();
@@ -702,6 +728,16 @@ describe('EngineSession (M4): the termination ladder, stdout EOF, held frames, t
     transport.push({ type: 'system', subtype: 'informational', content: 'Auto mode is using the local classifier for this model; classifier requests are charged as usage.', level: 'warning', uuid: 'inf-1', session_id: 's' });
     await flush();
     expect(session.status().gateway.localLane).toMatchObject({ observedInTurn: turnB.id });
+  });
+
+  it('a child agent\'s frames never set the local lane: both triggers apply to the main lane only (M4 review)', async () => {
+    const { session, transport } = setup();
+    await session.start();
+    await session.send('turn A');
+    transport.push({ type: 'stream_event', event: { type: 'message_delta', delta: { stop_reason: 'end_turn', safeguard_results: [{ type: 'dangerous_tool_use', status: { type: 'unavailable' } }] } }, session_id: 's', parent_tool_use_id: 'toolu_child', uuid: 'se-c' });
+    transport.push({ type: 'system', subtype: 'informational', content: 'Auto mode is using the local classifier; classifier requests are charged as usage.', level: 'warning', uuid: 'inf-c', session_id: 's', parent_tool_use_id: 'toolu_child' });
+    await flush();
+    expect(session.status().gateway.localLane).toBeNull();
   });
 
   it('pass2/real-settings: fast mode from initialize and system/init, the eleven plugins, empty plugin errors and warnings', async () => {

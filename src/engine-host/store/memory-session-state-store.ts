@@ -3,7 +3,7 @@
 // what it saved or loaded never changes what is stored.
 import type { AppSessionId } from '@shared/graph/ids';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
-import type { GrantSnapshot, QueueState, SessionStateStore } from '@shared/engine/session-state-store';
+import type { GrantSnapshot, QueueState, SessionStateStore, StoredQueue } from '@shared/engine/session-state-store';
 
 export class MemorySessionStateStore implements SessionStateStore {
   readonly queues = new Map<AppSessionId, QueueState>();
@@ -13,8 +13,8 @@ export class MemorySessionStateStore implements SessionStateStore {
   async exists(id: AppSessionId): Promise<boolean> {
     return this.queues.has(id) || this.grants.has(id) || this.specs.has(id);
   }
-  async loadQueue(id: AppSessionId): Promise<QueueState> {
-    return structuredClone(this.queues.get(id) ?? { entries: [], paused: false });
+  async loadQueue(id: AppSessionId): Promise<StoredQueue> {
+    return { ...structuredClone(this.queues.get(id) ?? { entries: [], paused: false }), corrupt: null };
   }
   async saveQueue(id: AppSessionId, queue: QueueState): Promise<void> {
     this.queues.set(id, structuredClone(queue));

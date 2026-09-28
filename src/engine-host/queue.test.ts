@@ -267,7 +267,7 @@ describe('queue release never follows an engine-initiated turn', () => {
 
 describe('queue submission survives a crash around delivery', () => {
   const entry = (over: Partial<QueueEntry>): QueueEntry => ({
-    queueId: 'q-x', appSessionId: ID, content: 'lost?', createdAt: '2026-09-28T10:00:00.000Z', state: 'queued', messageUuid: null, submittedAt: null, uncertain: false, ...over,
+    queueId: 'q-x', appSessionId: ID, content: 'lost?', createdAt: '2026-09-28T10:00:00.000Z', state: 'queued', messageUuid: null, submittedAt: null, uncertain: false, steer: false, ...over,
   });
   const SUBMITTED = '55555555-5555-4555-8555-555555555555' as MessageUuid;
 
@@ -279,7 +279,7 @@ describe('queue submission survives a crash around delivery', () => {
     expect(t.queue.state).toEqual({ paused: true, entries: [entry({ queueId: 'q-sub', content: 'lost?', uncertain: true }), entry({ queueId: 'q-later', content: 'later' })] });
     expect(notices(t.rows)).toEqual(['queue:uncertain:q-sub']);
     expect(queueRows(t.rows)).toEqual(['pause:uncertain']);
-    expect(await store.loadQueue(ID)).toEqual(t.queue.state);
+    expect(await store.loadQueue(ID)).toEqual({ ...t.queue.state, corrupt: null });
 
     await t.queue.setPaused(false);
     expect(t.writes).toHaveLength(1);
@@ -296,7 +296,7 @@ describe('queue submission survives a crash around delivery', () => {
     await store.saveQueue(ID, stored);
     const t = await harness({ store, recovered: false });
     await t.queue.onProcessExited('crash');
-    expect(await store.loadQueue(ID)).toEqual(stored);
+    expect(await store.loadQueue(ID)).toEqual({ ...stored, corrupt: null });
     expect(t.rows).toEqual([]);
   });
 
@@ -386,7 +386,7 @@ describe('queue submission survives a crash around delivery', () => {
     expect(sent).toMatchObject({ state: 'queued', messageUuid: null, submittedAt: null });
     expect(t.queue.state.paused).toBe(true);
     expect(queueRows(t.rows)).toEqual(['release:send', 'pause:write_failed']);
-    expect(await t.store.loadQueue(ID)).toEqual(t.queue.state);
+    expect(await t.store.loadQueue(ID)).toEqual({ ...t.queue.state, corrupt: null });
   });
 
   it('an exit while a submission\'s write is in flight wins: the late failure does not undo the recovery', async () => {
@@ -398,5 +398,132 @@ describe('queue submission survives a crash around delivery', () => {
     await sending;
     expect(t.queue.state.entries).toMatchObject([{ state: 'queued', uncertain: true }]);
     expect(queueRows(t.rows).filter((r) => r === 'pause:write_failed')).toEqual([]);
+  });
+});
+
+describe('queue persistence is never assumed (M4 review)', () => {
+  const failSaves = (store: MemorySessionStateStore) => {
+    store.saveQueue = async () => {
+      throw new Error('EIO: i/o error');
+    };
+  };
+
+  it('an idle send whose save fails writes no frame, answers queued, pauses (store_failed) with a warning notice, and announces nothing as durable', async () => {
+    const t = await harness();
+    const announced = t.changes.length;
+    failSaves(t.store);
+    const { disposition, entry } = await t.queue.send('not durable');
+    expect(disposition).toBe('queued');
+    expect(entry).toMatchObject({ state: 'queued', messageUuid: null, submittedAt: null });
+    expect(t.writes).toEqual([]);
+    expect(t.storeAtWrite).toEqual([]);
+    expect(t.queue.state.paused).toBe(true);
+    expect(queueRows(t.rows)).toEqual(['pause:store_failed']);
+    expect(t.rows.filter((r) => r.event === 'notice')).toEqual([{ event: 'notice', level: 'warning', key: `queue:store_failed:${entry.queueId}`, text: expect.stringContaining('EIO') }]);
+    expect(t.changes.length).toBe(announced); // no onChange for a save that did not land
+  });
+
+  it('a send queued behind a turn whose save fails is kept in memory, paused with the same notice', async () => {
+    const t = await harness();
+    t.h.turn = true;
+    failSaves(t.store);
+    const { disposition, entry } = await t.queue.send('behind');
+    expect(disposition).toBe('queued');
+    expect(t.queue.state).toMatchObject({ paused: true, entries: [{ queueId: entry.queueId, state: 'queued' }] });
+    expect(notices(t.rows)).toEqual([`queue:store_failed:${entry.queueId}`]);
+  });
+
+  it('a release at a turn\'s end whose save fails writes nothing and pauses', async () => {
+    const t = await harness();
+    t.h.turn = true;
+    await t.queue.send('waiting');
+    failSaves(t.store);
+    t.h.turn = false;
+    await t.queue.onTurnEnded(turnEnded());
+    expect(t.writes).toEqual([]);
+    expect(t.queue.state).toMatchObject({ paused: true, entries: [{ state: 'queued', messageUuid: null }] });
+    expect(queueRows(t.rows)).toEqual(['pause:store_failed']);
+  });
+
+  it('edit and remove whose save fails reject and leave the queue as it was', async () => {
+    const t = await harness();
+    t.h.turn = true;
+    const { entry } = await t.queue.send('draft');
+    failSaves(t.store);
+    await expect(t.queue.edit(entry.queueId, 'final')).rejects.toThrow('EIO');
+    await expect(t.queue.remove(entry.queueId)).rejects.toThrow('EIO');
+    expect(t.queue.state.entries).toMatchObject([{ queueId: entry.queueId, content: 'draft', state: 'queued' }]);
+  });
+
+  it('a recovery whose load reports a corrupt state file starts paused with a warning notice naming the kept file', async () => {
+    const store = new MemorySessionStateStore();
+    store.loadQueue = async () => ({ entries: [], paused: false, corrupt: '/u/engine-host/state/app-q.json.corrupt-1' });
+    const t = await harness({ store });
+    expect(t.queue.state.paused).toBe(true);
+    expect(queueRows(t.rows)).toEqual(['pause:state_corrupt']);
+    expect(t.rows.filter((r) => r.event === 'notice')).toEqual([{ event: 'notice', level: 'warning', key: `state:corrupt:${ID}`, text: expect.stringContaining('/u/engine-host/state/app-q.json.corrupt-1') }]);
+  });
+
+  it('a recovery whose save fails rejects (the session treats it as an initialization failure)', async () => {
+    const store = new MemorySessionStateStore();
+    failSaves(store);
+    await expect(harness({ store })).rejects.toThrow('EIO');
+  });
+});
+
+describe('promote is a durable submission (M4 review)', () => {
+  it('the entry is persisted as a submitting steer before the write and removed only after the flush', async () => {
+    const t = await harness();
+    t.h.turn = true;
+    await t.queue.send('first');
+    const { entry } = await t.queue.send('promote me');
+    const { messageUuid } = await t.queue.promote(entry.queueId);
+    expect(t.writes.at(-1)).toMatchObject({ uuid: messageUuid, priority: 'now', message: { content: 'promote me' } });
+    expect(t.storeAtWrite.at(-1)!.entries.find((e) => e.queueId === entry.queueId)).toMatchObject({ state: 'submitting', steer: true, messageUuid });
+    expect(t.queue.state.entries.map((e) => e.content)).toEqual(['first']);
+    expect((await t.store.loadQueue(ID)).entries.map((e) => e.content)).toEqual(['first']);
+  });
+
+  it('a crash before the flush recovers the promoted entry through the uncertain path', async () => {
+    const t = await harness({ holdWrites: true, failWrite: () => true });
+    t.h.turn = true;
+    const { entry } = await t.queue.send('promote me');
+    const promoting = t.queue.promote(entry.queueId);
+    await flush();
+    await t.queue.onProcessExited('crash');
+    t.held.shift()!();
+    await expect(promoting).rejects.toThrow('EPIPE');
+    expect(t.queue.state).toMatchObject({ paused: true, entries: [{ queueId: entry.queueId, state: 'queued', uncertain: true, steer: false, messageUuid: null }] });
+    expect(notices(t.rows)).toEqual([`queue:uncertain:${entry.queueId}`]);
+  });
+
+  it('a crash after the flush, before the removal is saved, leaves a submitting steer the next process recovers as uncertain', async () => {
+    const t = await harness();
+    t.h.turn = true;
+    const { entry } = await t.queue.send('promote me');
+    const realSave = t.store.saveQueue.bind(t.store);
+    let saves = 0;
+    t.store.saveQueue = (id, q) => (++saves === 1 ? realSave(id, q) : new Promise<void>(() => {})); // the host dies during the removal save
+    void t.queue.promote(entry.queueId);
+    await flush();
+    expect(t.writes.at(-1)).toMatchObject({ priority: 'now' });
+    expect((await t.store.loadQueue(ID)).entries).toMatchObject([{ queueId: entry.queueId, state: 'submitting', steer: true }]);
+
+    const next = await harness({ store: t.store, recovered: false });
+    next.store.saveQueue = realSave;
+    await next.queue.recover();
+    expect(next.queue.state).toMatchObject({ paused: true, entries: [{ queueId: entry.queueId, state: 'queued', uncertain: true, steer: false }] });
+  });
+
+  it('a failed steer write puts the entry back as queued in its place and rejects', async () => {
+    const t = await harness({ failWrite: (f) => f.priority === 'now' });
+    t.h.turn = true;
+    await t.queue.send('a');
+    const { entry } = await t.queue.send('b');
+    await t.queue.send('c');
+    await expect(t.queue.promote(entry.queueId)).rejects.toThrow('EPIPE');
+    expect(t.queue.state.entries.map((e) => [e.content, e.state, e.steer, e.messageUuid])).toEqual([['a', 'queued', false, null], ['b', 'queued', false, null], ['c', 'queued', false, null]]);
+    expect(await t.store.loadQueue(ID)).toMatchObject({ entries: [{ content: 'a' }, { content: 'b', state: 'queued', steer: false }, { content: 'c' }] });
+    expect(t.queue.state.paused).toBe(false);
   });
 });

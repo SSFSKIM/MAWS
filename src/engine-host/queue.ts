@@ -75,37 +75,63 @@ export class MessageQueue {
     this.entries = loaded.entries;
     this.paused = loaded.paused;
     this.loaded = true;
+    if (loaded.corrupt !== null) {
+      // the state file was unreadable and kept aside: never a silent empty queue (M4 review)
+      if (!this.paused) {
+        this.paused = true;
+        this.journal({ event: 'queue', action: 'pause', reason: 'state_corrupt' });
+      }
+      this.notice(`state:corrupt:${this.deps.appSessionId}`, `This session's saved queue and grants could not be read; the file was kept at ${loaded.corrupt} and the session started without them.`);
+    }
     this.settleAfterExit();
-    await this.persist();
+    await this.persist(); // rejects: a recovery that cannot be saved is an initialization failure
   }
 
   async send(content: SendContent): Promise<{ entry: QueueEntry; disposition: 'sent' | 'queued' }> {
     this.checkContent(content);
     if (!this.deps.canWrite()) throw new QueueEntryError('the session is not ready');
-    const entry: QueueEntry = { queueId: randomUUID(), appSessionId: this.deps.appSessionId, content, createdAt: new Date().toISOString(), state: 'queued', messageUuid: null, submittedAt: null, uncertain: false };
+    const entry: QueueEntry = { queueId: randomUUID(), appSessionId: this.deps.appSessionId, content, createdAt: new Date().toISOString(), state: 'queued', messageUuid: null, submittedAt: null, uncertain: false, steer: false };
     const submitNow = !this.busy && this.queuedCount === 0; // FIFO: a send never overtakes an entry already waiting
     this.entries.push(entry);
     if (!submitNow) {
-      await this.persist();
+      try {
+        await this.persist();
+      } catch (error) {
+        await this.storeFailed(entry, error);
+      }
       return { entry: structuredClone(entry), disposition: 'queued' };
     }
     const sent = await this.submit(entry, 'send');
     return { entry: structuredClone(entry), disposition: sent ? 'sent' : 'queued' };
   }
 
+  // An edit that cannot be saved is undone and rejects.
   async edit(queueId: string, content: SendContent): Promise<QueueEntry> {
     this.checkContent(content);
     const entry = this.queued(queueId);
+    const before = { content: entry.content, uncertain: entry.uncertain };
     entry.content = content;
     entry.uncertain = false; // an edit is the human's decision about an uncertain entry
-    await this.persist();
+    try {
+      await this.persist();
+    } catch (error) {
+      Object.assign(entry, before);
+      throw error;
+    }
     return structuredClone(entry);
   }
 
+  // A removal that cannot be saved is undone and rejects.
   async remove(queueId: string): Promise<void> {
     const entry = this.queued(queueId);
+    const index = this.entries.indexOf(entry);
     this.entries = this.entries.filter((e) => e !== entry);
-    await this.persist();
+    try {
+      await this.persist();
+    } catch (error) {
+      this.entries.splice(index, 0, entry);
+      throw error;
+    }
   }
 
   // The composer's Resume is setPaused(false), which also submits the head when the session is not busy.
@@ -113,8 +139,13 @@ export class MessageQueue {
     if (paused) return this.pause('user');
     if (this.paused) {
       this.paused = false;
+      try {
+        await this.persist();
+      } catch (error) {
+        this.paused = true; // still paused on disk: stay paused, release nothing
+        throw error;
+      }
       this.journal({ event: 'queue', action: 'resume', reason: 'user' });
-      await this.persist();
     }
     await this.releaseHead('resume');
   }
@@ -135,20 +166,35 @@ export class MessageQueue {
     return { messageUuid: uuid };
   }
 
-  // A queued entry steered out of the queue; it goes back to its place when the write fails.
+  // A queued entry steered out of the queue, durably (M4 review): persisted as a `submitting` steer before the write
+  // and removed only after the flush, so a crash on either side recovers it through the `uncertain` path like any
+  // submission; a failed write puts it back as queued in its place and rejects.
   async promote(queueId: string): Promise<{ messageUuid: MessageUuid }> {
     const entry = this.queued(queueId);
     if (!this.deps.canWrite()) throw new QueueEntryError('the session is not ready');
-    const index = this.entries.indexOf(entry);
-    this.entries.splice(index, 1);
+    const uuid = randomUUID() as MessageUuid;
+    Object.assign(entry, { state: 'submitting', messageUuid: uuid, submittedAt: new Date().toISOString(), uncertain: false, steer: true });
+    const current = () => entry.state !== 'queued' && entry.messageUuid === uuid && this.entries.includes(entry);
     try {
-      const result = await this.steer(entry.content);
       await this.persist();
-      return result;
     } catch (error) {
-      this.entries.splice(Math.min(index, this.entries.length), 0, entry);
+      if (current()) this.revert(entry);
       throw error;
     }
+    if (!current()) throw new QueueEntryError('the session ended before the steer was written');
+    try {
+      await this.deps.write({ type: 'user', uuid, message: { role: 'user', content: entry.content }, parent_tool_use_id: null, origin: { kind: 'human' }, priority: 'now' });
+    } catch (error) {
+      if (current()) {
+        this.revert(entry);
+        await this.persist().catch((e: unknown) => this.log(`promote revert not saved: ${messageOf(e)}`));
+      }
+      throw error;
+    }
+    // flushed: the steer is the engine's now and the entry leaves the app queue
+    this.entries = this.entries.filter((e) => e !== entry);
+    await this.persist().catch((e: unknown) => this.log(`promoted entry's removal not saved (a restart recovers it as uncertain): ${messageOf(e)}`));
+    return { messageUuid: uuid };
   }
 
   // submitting → released: the engine acknowledges every stdin user frame with command_lifecycle (pass2/dialogs 5–6).
@@ -157,7 +203,8 @@ export class MessageQueue {
     if (!entry) return; // a steer, the plan sequence's frames, or an entry already retired (a late `cancelled`)
     entry.state = 'released';
     this.clearAck(entry.queueId);
-    void this.persist();
+    // a lost save leaves `submitting` on disk, which recovery treats as uncertain: the safe side
+    this.persist().catch((error: unknown) => this.log(`release not saved: ${messageOf(error)}`));
   }
 
   // The release rule. Entries the turn names leave the list (a `submitting` one too: a result naming it is proof of
@@ -171,7 +218,7 @@ export class MessageQueue {
       if (done) this.clearAck(e.queueId);
       return !done;
     });
-    if (this.entries.length !== before) await this.persist();
+    if (this.entries.length !== before) await this.persist().catch((error: unknown) => this.log(`turn end not saved: ${messageOf(error)}`)); // a stale entry on disk is retired at the next recovery
     if (event.origin === 'human' || event.origin === null) await this.releaseHead('turn_ended');
     else await this.releaseAfterEngineTurn();
   }
@@ -190,7 +237,7 @@ export class MessageQueue {
     this.paused = true;
     this.journal({ event: 'queue', action: 'pause', reason: 'engine_turn' });
     this.heldNotice(head);
-    await this.persist();
+    await this.persist().catch((error: unknown) => this.log(`hold not saved: ${messageOf(error)}`));
   }
 
   private heldNotice(head: QueueEntry): void {
@@ -225,7 +272,7 @@ export class MessageQueue {
       if (entry.state === 'released') {
         this.notice(`queue:interrupted:${entry.queueId}`, 'A message was accepted, but the session ended before it was answered. Re-send it if you still want an answer.');
       } else if (entry.state === 'submitting') {
-        uncertain.push({ ...entry, state: 'queued', messageUuid: null, submittedAt: null, uncertain: true });
+        uncertain.push({ ...entry, state: 'queued', messageUuid: null, submittedAt: null, uncertain: true, steer: false });
         this.notice(`queue:uncertain:${entry.queueId}`, 'A message may not have been delivered before the session ended. Check the transcript, then resume the queue to send it or remove it.');
       } else {
         kept.push(entry);
@@ -249,12 +296,20 @@ export class MessageQueue {
   private async submit(entry: QueueEntry, trigger: ReleaseTrigger, failReason: 'write_failed' | 'engine_turn' = 'write_failed'): Promise<boolean> {
     const uuid = randomUUID() as MessageUuid;
     Object.assign(entry, { state: 'submitting', messageUuid: uuid, submittedAt: new Date().toISOString(), uncertain: false });
-    await this.persist();
     const current = () => entry.state === 'submitting' && entry.messageUuid === uuid && this.entries.includes(entry);
+    try {
+      await this.persist(); // no frame and no announced transition until the submission is durable (M4 review)
+    } catch (error) {
+      if (current()) {
+        this.revert(entry);
+        await this.storeFailed(entry, error);
+      }
+      return false;
+    }
     if (!current()) return false; // the process exited during the persist; recovery already took the entry
     if (!this.deps.canWrite()) {
       this.revert(entry);
-      await this.persist();
+      await this.persist().catch((error: unknown) => this.log(`revert not saved: ${messageOf(error)}`));
       return false;
     }
     this.journal({ event: 'queue', action: 'release', trigger, queueId: entry.queueId, messageUuid: uuid });
@@ -269,7 +324,7 @@ export class MessageQueue {
           this.journal({ event: 'queue', action: 'pause', reason: failReason });
           if (failReason === 'engine_turn') this.heldNotice(entry);
         }
-        await this.persist();
+        await this.persist().catch((e: unknown) => this.log(`revert not saved: ${messageOf(e)}`));
       }
       return false;
     }
@@ -278,7 +333,19 @@ export class MessageQueue {
   }
 
   private revert(entry: QueueEntry): void {
-    Object.assign(entry, { state: 'queued', messageUuid: null, submittedAt: null });
+    Object.assign(entry, { state: 'queued', messageUuid: null, submittedAt: null, steer: false });
+  }
+
+  // A save that did not land (M4 review): the entry stays queued in memory, the queue pauses (`store_failed`) and a
+  // warning says so; nothing is announced as durable unless a later save of that state lands.
+  private async storeFailed(entry: QueueEntry, error: unknown): Promise<void> {
+    this.log(`queue not saved: ${messageOf(error)}`);
+    if (!this.paused) {
+      this.paused = true;
+      this.journal({ event: 'queue', action: 'pause', reason: 'store_failed' });
+    }
+    this.notice(`queue:store_failed:${entry.queueId}`, `A message could not be saved (${messageOf(error)}), so it was not sent and the queue is paused. Resume to try again.`);
+    await this.persist().catch(() => {});
   }
 
   private startAck(entry: QueueEntry, uuid: MessageUuid): void {
@@ -322,18 +389,18 @@ export class MessageQueue {
     }
   }
 
-  // Saved through the store, then announced with what was saved.
+  // Saved through the store, then announced with what was saved; a failed save rejects and announces nothing.
   private async persist(): Promise<void> {
     const snapshot = this.state;
-    try {
-      await this.deps.store.saveQueue(this.deps.appSessionId, snapshot);
-    } catch (error) {
-      this.log(`queue not saved: ${error instanceof Error ? error.message : String(error)}`);
-    }
+    await this.deps.store.saveQueue(this.deps.appSessionId, snapshot);
     try {
       this.deps.onChange(snapshot);
     } catch (error) {
-      this.log(`queue listener failed: ${error instanceof Error ? error.message : String(error)}`);
+      this.log(`queue listener failed: ${messageOf(error)}`);
     }
   }
+}
+
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

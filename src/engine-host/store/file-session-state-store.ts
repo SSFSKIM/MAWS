@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import * as z from 'zod';
 import type { AppSessionId } from '@shared/graph/ids';
 import { LaunchSpecSchema, type LaunchSpec } from '@shared/engine/launch-spec';
-import { GrantSnapshotSchema, QueueStateSchema, type GrantSnapshot, type QueueState, type SessionStateStore } from '@shared/engine/session-state-store';
+import { GrantSnapshotSchema, QueueStateSchema, type GrantSnapshot, type QueueState, type SessionStateStore, type StoredQueue } from '@shared/engine/session-state-store';
 
 const StateFileSchema = z.strictObject({ version: z.literal(1), queue: QueueStateSchema, grants: GrantSnapshotSchema, launchSpec: LaunchSpecSchema.nullable() });
 type StateFile = z.infer<typeof StateFileSchema>;
@@ -19,6 +19,7 @@ export class FileSessionStateStore implements SessionStateStore {
   private readonly stateDir: string;
   private readonly journalDir: string;
   private readonly chains = new Map<AppSessionId, Promise<unknown>>();
+  private readonly corrupted = new Map<AppSessionId, string>(); // where an unreadable file went, until a queue load reports it
   private readonly warn: (message: string) => void;
 
   // `userData` is the app's userData directory; the engine host's files live under `engine-host/` there.
@@ -33,9 +34,15 @@ export class FileSessionStateStore implements SessionStateStore {
   }
 
   // Reads only: the recovery transitions (uncertain, interrupted) happen in MessageQueue, never here, so `loadQueue` for
-  // an id with no live process shows the queue exactly as it was persisted.
-  loadQueue(id: AppSessionId): Promise<QueueState> {
-    return this.run(id, async () => (await this.read(id)).queue);
+  // an id with no live process shows the queue exactly as it was persisted. `corrupt` names the file an unreadable state
+  // file was moved to by any operation since the last queue load (a launch reads grants before the queue), once.
+  loadQueue(id: AppSessionId): Promise<StoredQueue> {
+    return this.run(id, async () => {
+      const { queue } = await this.read(id);
+      const corrupt = this.corrupted.get(id) ?? null;
+      this.corrupted.delete(id);
+      return { ...queue, corrupt };
+    });
   }
 
   saveQueue(id: AppSessionId, queue: QueueState): Promise<void> {
@@ -92,8 +99,8 @@ export class FileSessionStateStore implements SessionStateStore {
     });
   }
 
-  // The file, or the empty state when there is none; an unreadable file is moved aside (kept for inspection) and the
-  // session starts empty rather than failing every launch.
+  // The file, or the empty state when there is none. An unreadable file is moved aside and kept (never deleted), the
+  // session starts empty rather than failing every launch, and the next queue load reports where it went (M4 review).
   private async read(id: AppSessionId): Promise<StateFile> {
     let text: string;
     try {
@@ -107,6 +114,7 @@ export class FileSessionStateStore implements SessionStateStore {
     } catch (error) {
       const aside = `${this.fileOf(id)}.corrupt-${Date.now()}`;
       await rename(this.fileOf(id), aside);
+      this.corrupted.set(id, aside);
       this.warn(`state file for ${id} was unreadable (${error instanceof Error ? error.message.split('\n')[0] : String(error)}); moved to ${aside}`);
       return empty();
     }

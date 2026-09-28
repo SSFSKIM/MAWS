@@ -13,11 +13,15 @@ export const QueueEntrySchema = z.strictObject({
   queueId: z.string(), appSessionId: AppSessionIdSchema, content: z.union([z.string(), z.array(ContentBlockSchema)]),
   createdAt: z.string(), state: z.enum(['queued', 'submitting', 'released']), messageUuid: MessageUuidSchema.nullable(), // messageUuid is minted at `submitting`
   submittedAt: z.string().nullable(), uncertain: z.boolean(), // uncertain: a submission a crash interrupted, awaiting the human
+  steer: z.boolean(), // a promoted entry on its way as a steer (M4 review): persisted `submitting` before the write, removed after the flush; false otherwise
 });
 export type QueueEntry = z.infer<typeof QueueEntrySchema>;
 
 export const QueueStateSchema = z.strictObject({ entries: z.array(QueueEntrySchema), paused: z.boolean() });
 export type QueueState = z.infer<typeof QueueStateSchema>;
+// What a load answers: the queue, and the path an unreadable state file was moved to (kept, never deleted) when the
+// load found one, so the queue can say so instead of starting silently empty (M4 review).
+export type StoredQueue = QueueState & { corrupt: string | null };
 
 // What `session.send`, `session.steer` and `session.queue.edit` accept (M4: content over 1 MiB is refused at the
 // schema; the renderer attaches files instead, C7). Measured as the UTF-8 length of the JSON the frame would carry.
@@ -35,7 +39,7 @@ export const GrantSnapshotSchema = z.strictObject({ allow: z.array(z.string()) }
 
 export interface SessionStateStore {
   exists(appSessionId: AppSessionId): Promise<boolean>; // a state file exists for the id (C10's ask: `session.queue.list` for an unreserved id)
-  loadQueue(appSessionId: AppSessionId): Promise<QueueState>;
+  loadQueue(appSessionId: AppSessionId): Promise<StoredQueue>; // reads only: the recovery transitions happen in MessageQueue
   saveQueue(appSessionId: AppSessionId, queue: QueueState): Promise<void>;
   loadGrants(appSessionId: AppSessionId): Promise<GrantSnapshot>;
   saveGrants(appSessionId: AppSessionId, grants: GrantSnapshot): Promise<void>;

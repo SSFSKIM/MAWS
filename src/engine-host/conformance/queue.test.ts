@@ -181,7 +181,7 @@ describe('queue submission survives a crash around delivery', () => {
     expect(noticeRow).toBeLessThan(run.journal.rows.findIndex((r) => (r.frame as { event?: string }).event === 'exit'));
     expect(run.session.queue.busy).toBe(false);
     await flush();
-    expect(await store.loadQueue(id)).toEqual({ entries: [], paused: false });
+    expect(await store.loadQueue(id)).toEqual({ entries: [], paused: false, corrupt: null });
     expect(sent).toBeDefined();
 
     const resumed = scriptedSession({ spec: { appSessionId: id, resume: { sessionId: '44444444-4444-4444-8444-444444444444' as never, fork: false }, sessionId: null }, session: { store } });
@@ -191,7 +191,7 @@ describe('queue submission survives a crash around delivery', () => {
 
   it('a stored submitting entry comes back at ready as the uncertain head of a paused queue with its notice; Resume writes it exactly once', async () => {
     const store = new MemorySessionStateStore();
-    const entry: QueueEntry = { queueId: 'q-1', appSessionId: 'app-s' as AppSessionId, content: 'did it arrive?', createdAt: '2026-09-28T10:00:00.000Z', state: 'submitting', messageUuid: '55555555-5555-4555-8555-555555555555' as MessageUuid, submittedAt: '2026-09-28T10:00:01.000Z', uncertain: false };
+    const entry: QueueEntry = { queueId: 'q-1', appSessionId: 'app-s' as AppSessionId, content: 'did it arrive?', createdAt: '2026-09-28T10:00:00.000Z', state: 'submitting', messageUuid: '55555555-5555-4555-8555-555555555555' as MessageUuid, submittedAt: '2026-09-28T10:00:01.000Z', uncertain: false, steer: false };
     await store.saveQueue('app-s' as AppSessionId, { entries: [entry], paused: false });
     const s = scriptedSession({ session: { store } });
     await s.session.start();

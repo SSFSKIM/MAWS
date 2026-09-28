@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -54,6 +54,24 @@ describe('memoryAppend (#)', () => {
     const inFolder = join(root, 'auto-memory', 'notes.md');
     expect(await memoryAppend(s.session, { text: 'f', target: { kind: 'path', path: inFolder } })).toEqual({ path: inFolder, created: true });
     expect(await readFile(inFolder, 'utf8')).toBe('\n- f\n');
+  });
+
+  it('refuses a symlink escape: a file link or a directory link inside a listed folder (M4 review)', async () => {
+    const s = await session();
+    const outside = join(root, 'outside');
+    await mkdir(outside, { recursive: true });
+    await writeFile(join(outside, 'secret.md'), 'secret\n');
+    await mkdir(join(root, 'auto-memory'), { recursive: true });
+    await symlink(join(outside, 'secret.md'), join(root, 'auto-memory', 'escape.md'));
+    await symlink(outside, join(root, 'auto-memory', 'linked-dir'));
+    await expect(memoryAppend(s.session, { text: 'x', target: { kind: 'path', path: join(root, 'auto-memory', 'escape.md') } })).rejects.toThrow(/not one of the memory files/);
+    await expect(memoryAppend(s.session, { text: 'x', target: { kind: 'path', path: join(root, 'auto-memory', 'linked-dir', 'new.md') } })).rejects.toThrow(/not one of the memory files/);
+    expect(await readFile(join(outside, 'secret.md'), 'utf8')).toBe('secret\n');
+    await expect(readFile(join(outside, 'new.md'), 'utf8')).rejects.toThrow();
+    // a listed folder reached through a symlink still accepts what is really inside it
+    await symlink(join(root, 'auto-memory'), join(root, 'memory-link'));
+    expect(await memoryAppend(s.session, { text: 'ok', target: { kind: 'path', path: join(root, 'memory-link', 'notes.md') } })).toMatchObject({ created: true });
+    expect(await readFile(join(root, 'auto-memory', 'notes.md'), 'utf8')).toBe('\n- ok\n');
   });
 
   it('refuses a path outside the listed files and folders, writing nothing', async () => {
