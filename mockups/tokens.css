@@ -12,6 +12,13 @@
   --text-ui: 13px; --text-ui-sm: 12px; --text-prose: 15.5px; --lh-prose: 1.6; --measure: 72ch; --text-code: 13px;
   --radius-sm: 6px; --radius: 10px; --radius-lg: 14px; --space: 4px;
   --row-h: 30px; --toolbar-h: 44px; --sidebar-w: 300px; --panel-w: 380px;
+
+  /* Terminal (C9): the same family on the raised dark ground. */
+  --term-bg: var(--bg-raised); --term-fg: var(--fg); --term-cursor: #d97757; --term-cursor-fg: #1a1a1a; --term-selection: rgba(217,119,87,0.30);
+  --term-ansi-black: #1a1a1a; --term-ansi-red: #f26d6d; --term-ansi-green: #4cc38a; --term-ansi-yellow: #f0c674;
+  --term-ansi-blue: #7aa2f7; --term-ansi-magenta: #d98ee6; --term-ansi-cyan: #5fd7e5; --term-ansi-white: #c8c6c3;
+  --term-ansi-bright-black: #6b6966; --term-ansi-bright-red: #ff8a8a; --term-ansi-bright-green: #6ee7a8; --term-ansi-bright-yellow: #ffd88a;
+  --term-ansi-bright-blue: #9cbaff; --term-ansi-bright-magenta: #e9a8f5; --term-ansi-bright-cyan: #8ae9f5; --term-ansi-bright-white: #f2f0ed;
 }
 html, body { background: var(--bg); color: var(--fg); font-family: var(--font-ui); font-size: var(--text-ui); margin: 0; -webkit-font-smoothing: antialiased; }
 .prose { font-family: var(--font-prose); font-size: var(--text-prose); line-height: var(--lh-prose); max-width: var(--measure); }

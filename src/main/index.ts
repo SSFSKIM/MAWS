@@ -3,7 +3,7 @@ import { app, BrowserWindow } from 'electron';
 import { createHosts } from './hosts';
 import { installRouter } from './ipc/router';
 import { startSettings } from './settings';
-import { appUrl, createWindow, installContentSecurityPolicy } from './window';
+import { appUrl, createWindow, installContentSecurityPolicy, prepareHarness } from './window';
 
 // A fresh profile for the end-to-end smoke (and anyone else who wants one); must be set before the app is ready.
 if (process.env.MAWS_USER_DATA) app.setPath('userData', process.env.MAWS_USER_DATA);
@@ -19,6 +19,9 @@ app.on('window-all-closed', () => {});
 
 app.whenReady().then(() => {
   installContentSecurityPolicy();
+  // C9 block begin: the harness's fake session directories
+  if (process.env.MAWS_HARNESS === '1') prepareHarness();
+  // C9 block end
   const hosts = createHosts();
   installRouter({ appUrl, dispatchToHost: hosts.dispatch });
   const settings = startSettings(join(app.getPath('userData'), 'settings.json'));

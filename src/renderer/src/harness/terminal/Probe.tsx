@@ -1,0 +1,286 @@
+// The `#probe` page (C9 M1, Interfaces *Harness*): two panes, each a `TerminalRenderer` (xterm.js left, ghostty-web
+// right) on its own pty, a workload bar, a metrics readout, a theme toggle and a paste field. Exposes
+// `window.__maws_harness.probe` for Playwright and `spikes/terminal-probe/run.mjs`. Tokens only (X7): every colour
+// here is a token utility; the terminals read the `--term-*` tokens through `theme.ts`.
+import { useEffect, useRef, useSyncExternalStore, type PointerEvent as ReactPointerEvent } from 'react';
+import { create } from 'zustand';
+import {
+  CLAUDE_BIN_DEFAULT,
+  CODEX_BIN_DEFAULT,
+  resolveProgram,
+  workloads,
+  type Bins,
+  type Phase,
+  type ProgramWorkload,
+} from '../../../../../spikes/terminal-probe/workloads.mjs';
+import { ipc } from '../../ipc/client';
+import { useSettings } from '../../stores/settings';
+import type { RendererKind, TerminalFont } from '../../terminal/renderer';
+import { readDocumentTheme } from '../../terminal/theme';
+import type { Metrics } from './metrics';
+import { Pane, type PaneDebug, type ProbeSnapshot } from './pane';
+
+const KINDS: RendererKind[] = ['xterm', 'ghostty'];
+
+export interface ProbeApi {
+  ready(): Promise<Record<RendererKind, PaneDebug>>;
+  run(workloadId: string, renderer: RendererKind, phase?: Phase): Promise<Metrics>;
+  spawn(renderer: RendererKind, workloadId: string, phase?: Phase): Promise<{ ptyId: string; pid: number }>;
+  type(renderer: RendererKind, data: string): Promise<void>;
+  kill(renderer: RendererKind): Promise<void>;
+  idle(renderer: RendererKind, quietMs?: number): Promise<void>;
+  snapshot(renderer: RendererKind, from?: number, to?: number): ProbeSnapshot;
+  state(renderer: RendererKind): PaneDebug;
+  focus(renderer: RendererKind): void;
+  selection(renderer: RendererKind): string;
+  simulateContextLoss(renderer: RendererKind): void;
+  geometry(renderer: RendererKind): { x: number; y: number; width: number; height: number; cols: number; rows: number } | null;
+  setSplit(fraction: number): void;
+  screenshotReady(): Promise<void>;
+}
+
+// The binaries the TUI workloads run: the owner's paths (acceptance item 9) unless the query string overrides them,
+// which is how run.mjs passes MAWS_CLAUDE_BIN and MAWS_CODEX_BIN into the sandboxed page.
+const query = new URLSearchParams(location.search);
+const bins: Bins = { claude: query.get('claude') ?? CLAUDE_BIN_DEFAULT, codex: query.get('codex') ?? CODEX_BIN_DEFAULT };
+
+function readFont(): TerminalFont {
+  const style = getComputedStyle(document.documentElement);
+  return { family: style.getPropertyValue('--font-mono').trim(), size: parseFloat(style.getPropertyValue('--text-code')) || 13, lineHeight: 1.2 };
+}
+
+// One set of panes per page, outside React: the emulators must survive re-renders and StrictMode's double mount.
+const panes: Record<RendererKind, Pane> = { xterm: new Pane('xterm', bins), ghostty: new Pane('ghostty', bins) };
+const byPty = new Map<string, Pane>();
+let readyPromise: Promise<void> | null = null;
+
+function start(): Promise<void> {
+  if (readyPromise) return readyPromise;
+  ipc.on('pty.data', (event) => byPty.get(event.ptyId)?.onChunk(event.data));
+  ipc.on('pty.exit', (event) => {
+    const pane = byPty.get(event.ptyId);
+    if (!pane) return;
+    byPty.delete(event.ptyId);
+    pane.onExit(event);
+  });
+  // The terminals recolour when the document's theme attribute changes (the settings store sets it).
+  new MutationObserver(() => {
+    const theme = readDocumentTheme();
+    for (const pane of Object.values(panes)) pane.setTheme(theme);
+  }).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+  const theme = readDocumentTheme();
+  const font = readFont();
+  readyPromise = Promise.all(KINDS.map((kind) => panes[kind].create(theme, font))).then(() => {});
+  return readyPromise;
+}
+
+const claim = (pane: Pane) => (ptyId: string) => byPty.set(ptyId, pane);
+
+const programWorkload = (id: string): ProgramWorkload => {
+  const workload = workloads[id];
+  if (!workload || workload.kind !== 'program') throw new Error(`${id} is not a program workload`);
+  return workload;
+};
+
+const api: ProbeApi = {
+  ready: () => start().then(() => ({ xterm: panes.xterm.debug, ghostty: panes.ghostty.debug })),
+  run: (id, renderer, phase = 'm1') => panes[renderer].run(programWorkload(id), phase, claim(panes[renderer])),
+  spawn: (renderer, id, phase = 'm1') => panes[renderer].spawn(resolveProgram(programWorkload(id), phase, bins), claim(panes[renderer])),
+  type: (renderer, data) => panes[renderer].write(data),
+  kill: (renderer) => panes[renderer].kill(),
+  idle: (renderer, quietMs) => panes[renderer].idle(quietMs),
+  snapshot: (renderer, from, to) => panes[renderer].snapshot(from, to),
+  state: (renderer) => panes[renderer].debug,
+  focus: (renderer) => panes[renderer].focus(),
+  selection: (renderer) => panes[renderer].renderer?.getSelection() ?? '',
+  simulateContextLoss: (renderer) => panes[renderer].renderer?.simulateContextLoss?.(),
+  geometry(renderer) {
+    const element = panes[renderer].renderer?.element;
+    if (!element) return null;
+    const { x, y, width, height } = element.getBoundingClientRect();
+    const { cols, rows } = panes[renderer].debug;
+    return { x, y, width, height, cols, rows };
+  },
+  setSplit: (fraction) => useProbeStore.getState().setSplit(fraction),
+  screenshotReady: () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))),
+};
+
+interface ProbeStore {
+  target: RendererKind | 'both';
+  split: number; // the left pane's share of the width
+  setTarget(target: RendererKind | 'both'): void;
+  setSplit(fraction: number): void;
+}
+const useProbeStore = create<ProbeStore>()((set) => ({
+  target: 'both',
+  split: 0.5,
+  setTarget: (target) => set({ target }),
+  setSplit: (fraction) => set({ split: Math.min(0.9, Math.max(0.1, fraction)) }),
+}));
+
+function usePaneDebug(kind: RendererKind): PaneDebug {
+  const pane = panes[kind];
+  return useSyncExternalStore(
+    (cb) => pane.subscribe(cb),
+    () => pane.debug,
+  );
+}
+
+export function Probe() {
+  const target = useProbeStore((s) => s.target);
+  const split = useProbeStore((s) => s.split);
+  const setTarget = useProbeStore((s) => s.setTarget);
+  const setSplit = useProbeStore((s) => s.setSplit);
+  const resolvedTheme = useSettings((s) => s.state?.resolvedTheme);
+  const setTheme = useSettings((s) => s.setTheme);
+  const rowRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    window.__maws_harness = { page: 'probe', probe: api };
+    void start();
+  }, []);
+
+  const targets = (): RendererKind[] => (target === 'both' ? KINDS : [target]);
+  const runWorkload = async (id: string) => {
+    const workload = workloads[id]!;
+    for (const kind of targets()) {
+      const pane = panes[kind];
+      if (workload.kind === 'typed') {
+        await pane.write(workload.command).catch((error) => console.warn(`[probe] ${kind}: ${String(error)}`));
+      } else if (workload.measure) {
+        void pane.run(workload, 'm1', claim(pane)).catch((error) => console.error(`[probe] ${kind} ${id} failed`, error));
+      } else {
+        void pane.spawn(resolveProgram(workload, 'm1', bins), claim(pane)).catch((error) => console.error(`[probe] ${kind} ${id} failed`, error));
+      }
+    }
+  };
+
+  const onDividerDown = (ev: ReactPointerEvent<HTMLDivElement>) => {
+    const row = rowRef.current;
+    if (!row) return;
+    ev.currentTarget.setPointerCapture(ev.pointerId);
+    const move = (e: PointerEvent) => {
+      const box = row.getBoundingClientRect();
+      setSplit((e.clientX - box.left) / box.width);
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  };
+
+  return (
+    <div className="flex h-full flex-col bg-bg text-fg">
+      <header className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-border bg-bg-raised px-3 py-2 text-ui-sm [app-region:drag]">
+        <span className="pl-16 font-mono text-fg-faint">#probe</span>
+        <div role="group" aria-label="target" className="flex gap-1 [app-region:no-drag]">
+          {(['both', 'xterm', 'ghostty'] as const).map((value) => (
+            <button
+              key={value}
+              type="button"
+              aria-pressed={target === value}
+              onClick={() => setTarget(value)}
+              className="rounded-sm px-2 py-0.5 text-fg-muted hover:bg-bg-hover aria-pressed:bg-bg-active aria-pressed:text-fg"
+            >
+              {value}
+            </button>
+          ))}
+        </div>
+        <div role="group" aria-label="workloads" className="flex flex-wrap gap-1 [app-region:no-drag]">
+          {Object.entries(workloads).map(([id, workload]) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => void runWorkload(id)}
+              className="rounded-sm border border-border px-2 py-0.5 text-fg hover:bg-bg-hover"
+              title={workload.title}
+            >
+              {id}
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={() => targets().forEach((kind) => void panes[kind].kill())}
+            className="rounded-sm border border-border px-2 py-0.5 text-danger hover:bg-bg-hover"
+          >
+            kill
+          </button>
+        </div>
+        <button
+          type="button"
+          onClick={() => void setTheme(resolvedTheme === 'dark' ? 'light' : 'dark')}
+          className="rounded-sm border border-border px-2 py-0.5 text-fg hover:bg-bg-hover [app-region:no-drag]"
+        >
+          theme: {resolvedTheme ?? '…'}
+        </button>
+        <input
+          aria-label="paste target"
+          placeholder="paste here"
+          className="rounded-sm border border-border bg-bg px-2 py-0.5 font-mono text-fg [app-region:no-drag]"
+        />
+      </header>
+      <div ref={rowRef} className="flex min-h-0 flex-1">
+        <PaneView kind="xterm" style={{ flexBasis: `${split * 100}%` }} />
+        <div role="separator" aria-orientation="vertical" onPointerDown={onDividerDown} className="w-1 shrink-0 cursor-col-resize bg-border hover:bg-border-strong" />
+        <PaneView kind="ghostty" style={{ flex: 1 }} />
+      </div>
+    </div>
+  );
+}
+
+function PaneView({ kind, style }: { kind: RendererKind; style: React.CSSProperties }) {
+  const debug = usePaneDebug(kind);
+  const hostRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const host = hostRef.current!;
+    panes[kind].mount(host);
+    return () => panes[kind].unmount();
+  }, [kind]);
+
+  return (
+    <section aria-label={`${kind} pane`} data-pane={kind} style={style} className="flex min-w-0 flex-col">
+      <div className="flex h-7 shrink-0 items-center gap-3 border-b border-border px-2 font-mono text-ui-sm text-fg-muted">
+        <span className="text-fg">{kind}</span>
+        <span>{debug.acceleration ?? '—'}</span>
+        <span>{debug.status}</span>
+        <span>{debug.pid === null ? '' : `pid ${debug.pid}`}</span>
+        <span>
+          {debug.cols}×{debug.rows}
+        </span>
+        {debug.exit ? <span>exit {debug.exit.exitCode ?? 'null'}/{debug.exit.signal ?? 'null'}</span> : null}
+        {debug.error ? <span className="text-danger">{debug.error}</span> : null}
+      </div>
+      <div ref={hostRef} className="min-h-0 flex-1 overflow-hidden bg-bg-raised p-1" />
+      <DebugStrip debug={debug} />
+    </section>
+  );
+}
+
+function DebugStrip({ debug }: { debug: PaneDebug }) {
+  const flags = [
+    `bytes ${debug.bytes}`,
+    `parsed ${debug.parsed}`,
+    `sync ${debug.syncFrames}`,
+    `kitty ${debug.kittyQueried ? 'queried' : '-'}/${debug.kittyAnswered ? 'answered' : '-'}`,
+    `xtversion ${debug.xtversionQueried ? 'queried' : '-'}/${debug.xtversionAnswered ? 'answered' : '-'}`,
+    `dsr ${debug.dsrReplies.length}`,
+  ];
+  return (
+    <output aria-label={`${debug.kind} debug`} className="flex shrink-0 flex-col gap-0.5 border-t border-border px-2 py-1 font-mono text-ui-sm text-fg-muted">
+      <div className="flex flex-wrap gap-x-3">
+        {flags.map((flag) => (
+          <span key={flag.split(' ')[0]}>{flag}</span>
+        ))}
+      </div>
+      <div className="flex flex-wrap gap-x-3">
+        <span>title {debug.title ?? '—'}</span>
+        <span>link {debug.lastLink ?? '—'}</span>
+        <span className="truncate">input {debug.lastInput || '—'}</span>
+      </div>
+      {debug.metrics ? <div className="truncate text-fg">{JSON.stringify(debug.metrics)}</div> : null}
+    </output>
+  );
+}

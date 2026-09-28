@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import * as pty from 'node-pty';
 import type { HostEmit } from '@shared/host/runtime';
 import type { CommandInput, CommandOutput, PtyId } from '@shared/ipc/schema';
+import { terminalEnvironment } from './env';
 
 export interface Ptys {
   spawn(input: CommandInput<'pty.spawn'>): CommandOutput<'pty.spawn'>;
@@ -13,8 +14,11 @@ export interface Ptys {
   kill(input: CommandInput<'pty.kill'>): void;
 }
 
-export function createPtys(emit: HostEmit): Ptys {
+export function createPtys(emit: HostEmit, appVersion: string): Ptys {
   const live = new Map<string, pty.IPty>();
+  // The terminal environment (Residue *Terminal environment*): the host's own environment minus the parent-session
+  // variables, plus the terminal's identity. M2 seeds it from X6's captured login-shell environment instead.
+  const base = terminalEnvironment(process.env, { appVersion });
 
   const get = (ptyId: string) => {
     const term = live.get(ptyId);
@@ -25,15 +29,12 @@ export function createPtys(emit: HostEmit): Ptys {
   return {
     spawn({ shell, args, cwd, cols, rows, env }) {
       const ptyId = randomUUID() as PtyId;
-      // The host's own environment for now, the caller's entries over it. The allowlisted launch environment is X6
-      // (C3's); C9 aligns terminals to it. Passing `process.env` itself lets node-pty drop the variables that
-      // belong to the host's own terminal (TMUX, COLUMNS, …).
       const term = pty.spawn(shell ?? (process.env.SHELL || '/bin/zsh'), args ?? [], {
         name: 'xterm-256color',
         cwd,
         cols,
         rows,
-        env: env ? { ...process.env, ...env } : process.env,
+        env: env ? { ...base, ...env } : base,
       });
       live.set(ptyId, term);
       term.onData((data) => emit('pty.data', { ptyId, data }));

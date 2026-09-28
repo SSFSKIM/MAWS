@@ -25,9 +25,30 @@ function recorder() {
 }
 
 describe('pty host over node-pty', () => {
+  it('starts a program with the terminal environment: identity set, parent-session variables stripped', async () => {
+    const rec = recorder();
+    process.env.CLAUDECODE = '1';
+    process.env.CLAUDE_CODE_SESSION_ID = 'parent';
+    try {
+      const ptys = createPtys(rec.emit, '9.9.9');
+      const { ptyId } = ptys.spawn({
+        shell: '/bin/sh',
+        args: ['-c', 'printf "%s|%s|%s|%s|%s" "$TERM" "$TERM_PROGRAM" "$TERM_PROGRAM_VERSION" "$CLAUDE_CODE_FORCE_SYNC_OUTPUT" "${CLAUDECODE-unset}${CLAUDE_CODE_SESSION_ID-unset}"'],
+        cwd: '/',
+        cols: 80,
+        rows: 24,
+      });
+      await rec.exited(ptyId);
+      expect(rec.output(ptyId)).toContain('xterm-256color|MAWS|9.9.9|1|unsetunset');
+    } finally {
+      delete process.env.CLAUDECODE;
+      delete process.env.CLAUDE_CODE_SESSION_ID;
+    }
+  });
+
   it("loads node-pty and runs /bin/sh -c 'printf ok' to a clean exit", async () => {
     const rec = recorder();
-    const ptys = createPtys(rec.emit);
+    const ptys = createPtys(rec.emit, '0.0.0-test');
     const { ptyId, pid } = ptys.spawn({ shell: '/bin/sh', args: ['-c', 'printf ok'], cwd: '/', cols: 80, rows: 24 });
     expect(pid).toBeGreaterThan(0);
     await expect(rec.exited(ptyId)).resolves.toEqual({ ptyId, exitCode: 0, signal: null });
@@ -36,7 +57,7 @@ describe('pty host over node-pty', () => {
 
   it('writes keystrokes to an interactive shell and streams its output back', async () => {
     const rec = recorder();
-    const ptys = createPtys(rec.emit);
+    const ptys = createPtys(rec.emit, '0.0.0-test');
     const { ptyId } = ptys.spawn({ shell: '/bin/sh', cwd: '/', cols: 80, rows: 24 });
     ptys.write({ ptyId, data: "printf 'MAWS_%s_OK\\n' PTY\r" });
     await vi.waitFor(() => expect(rec.output(ptyId)).toContain('MAWS_PTY_OK'), { timeout: 5_000, interval: 20 });
@@ -47,7 +68,7 @@ describe('pty host over node-pty', () => {
 
   it('gives each pty its own id and forgets a pty once it has exited', async () => {
     const rec = recorder();
-    const ptys = createPtys(rec.emit);
+    const ptys = createPtys(rec.emit, '0.0.0-test');
     const a = ptys.spawn({ shell: '/bin/sh', args: ['-c', 'exit 3'], cwd: '/', cols: 80, rows: 24 });
     const b = ptys.spawn({ shell: '/bin/sh', args: ['-c', 'exit 0'], cwd: '/', cols: 80, rows: 24 });
     expect(a.ptyId).not.toBe(b.ptyId);
@@ -57,7 +78,7 @@ describe('pty host over node-pty', () => {
   });
 
   it('fails with "unknown pty" for an id it never issued', () => {
-    const ptys = createPtys(() => {});
+    const ptys = createPtys(() => {}, '0.0.0-test');
     const ptyId = 'nope' as never;
     expect(() => ptys.write({ ptyId, data: 'x' })).toThrow('unknown pty');
     expect(() => ptys.resize({ ptyId, cols: 1, rows: 1 })).toThrow('unknown pty');
@@ -66,7 +87,7 @@ describe('pty host over node-pty', () => {
 
   it('passes the caller’s environment over the host’s own', async () => {
     const rec = recorder();
-    const ptys = createPtys(rec.emit);
+    const ptys = createPtys(rec.emit, '0.0.0-test');
     const { ptyId } = ptys.spawn({
       shell: '/bin/sh',
       args: ['-c', 'printf "%s|%s" "$MAWS_PTY_PROBE" "${HOME:+home}"'],

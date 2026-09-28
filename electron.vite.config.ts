@@ -41,7 +41,14 @@ export default defineConfig(({ command }) => {
     renderer: {
       resolve: { alias },
       html: devNonce ? { cspNonce: devNonce } : undefined,
-      build: { rollupOptions },
+      build: {
+        rollupOptions: {
+          ...rollupOptions,
+          // carried by C9 until the rebase over C6 (wave-2 ledger d.13): the harness page beside the app page
+          input: { index: resolve(__dirname, 'src/renderer/index.html'), harness: resolve(__dirname, 'src/renderer/harness.html') },
+          // carried by C9 until the rebase over C6 (wave-2 ledger d.13)
+        },
+      },
       plugins: [react({ babel: { plugins: ['babel-plugin-react-compiler'] } }), tailwindcss()],
     },
   };
