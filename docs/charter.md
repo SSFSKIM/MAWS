@@ -454,7 +454,7 @@ Explicitly out of scope for P0: bundle patches (D-1); Windows and Linux (D-11); 
 
 | Child | Grain | Status | Ledger / artifact |
 |---|---|---|---|
-| C1 Foundations | plan | in-flight (2026-09-28; dispatch pin 32b75d61, document authored against 722440a0) | `docs/doperpowers/plans/2026-09-28-c1-foundations.md` (under review) |
+| C1 Foundations | plan | executing since 2026-09-28 (dispatch pin 32b75d61; document reviewed twice, closed at 6eaf22b; plan-executor in a worktree) | `docs/doperpowers/plans/2026-09-28-c1-foundations.md` |
 | C2 Probe, second pass | spike | landed 2026-09-28 (pin 32b75d61, commit f776f7e) | `spikes/protocol-probe/findings-pass2.md`, `fixtures/pass2/` |
 | C3 Engine host | plan | blocked-by C1; document authoring since 2026-09-28 | `docs/doperpowers/plans/2026-09-28-c3-engine-host.md` (authoring) |
 | C4 Filesystem state, index, replay | plan | blocked-by C1; document authoring since 2026-09-28 | `docs/doperpowers/plans/2026-09-28-c4-filesystem-index-replay.md` (authoring) |
