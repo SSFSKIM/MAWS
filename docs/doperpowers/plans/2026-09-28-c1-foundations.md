@@ -12,7 +12,7 @@ What nobody can do yet, and C1 does not attempt: talk to a real engine (C3), rea
 
 - [x] M1 — Scaffold, window and tokens (2026-09-28 05:33, commit 3c32bf7, task review clean)
 - [x] M2 — X1 shared types and validators against the probe fixtures (2026-09-28 06:40, commits 08cf082, 610acda, fix 677b4f3; task review clean)
-- [ ] M3 — X2 IPC schema, transport and theme switching end to end
+- [x] M3 — X2 IPC schema, transport and theme switching end to end (2026-09-28 06:50, commit c6c3e61, fix 41c9ea6; task review clean)
 - [ ] M4 — Utility processes: engine host and PTY host
 - [ ] M5 — End-to-end smoke, packaging, `pnpm verify`, acceptance run
 
