@@ -1,5 +1,5 @@
 import type { SessionEvent } from '@shared/graph/events';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { useTranscriptStore } from '../../stores/transcript';
 import { cellId, rowId, turnId } from '../model/keys';
@@ -66,6 +66,20 @@ describe('Transcript', () => {
     expect(cell.contains(document.activeElement)).toBe(true);
     expect(document.activeElement?.hasAttribute('data-row-id')).toBe(false);
     expect(document.activeElement?.classList.contains('transcript-row')).toBe(false);
+  });
+
+  it('the denied count of a collapsed turn opens its work area and focuses the standalone denied cell itself', async () => {
+    const key = await mounted(deniedThenAnswer());
+    const turn = turnId.ofMessage(uuid('u1'));
+    const divider = document.querySelector(`[data-row-id="${rowId.divider(turn)}"]`)!;
+    expect(divider.querySelector('button[aria-expanded]')?.getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(within(divider as HTMLElement).getByRole('link', { name: '1 denied' }));
+    await waitFor(() => expect(useTranscriptStore.getState().entries[key].jump).toBeNull());
+    const target = cellId.tool(tool('t1'));
+    const cell = document.querySelector<HTMLElement>(`[data-cell-id="${target}"]`)!;
+    expect(document.activeElement).toBe(cell);
+    expect(cell.closest('[data-kind]')?.getAttribute('data-kind')).toBe('cell');
+    expect(document.querySelector(`[data-row-id="${rowId.divider(turn)}"] button[aria-expanded]`)?.getAttribute('aria-expanded')).toBe('true');
   });
 
   it('an open divider names a mounted element in aria-controls', async () => {

@@ -207,7 +207,7 @@
           "truncated": null
         },
         "endedAt": "2026-09-28T10:30:01.483Z",
-        "expanded": false,
+        "expanded": true,
         "id": "cell:reads:toolu_synth_x_read1",
         "label": "Read 6 files",
         "paths": [

@@ -6,7 +6,7 @@ import { vi } from 'vitest';
 import { useTranscriptStore } from '../../../stores/transcript';
 import type { Row } from '../../model/rows';
 import type { TranscriptSource } from '../../source/types';
-import { Disclosures, NO_ACTIONS, TranscriptProvider, type TranscriptActions } from '../context';
+import { Disclosures, NO_ACTIONS, TranscriptProvider, type RewindInterface, type TranscriptActions } from '../context';
 import { RowView } from './Row';
 
 let keys = 0;
@@ -37,9 +37,9 @@ export function spyActions(): TranscriptActions {
   };
 }
 
-export function renderRow(row: Row, options: { storeKey?: string; actions?: TranscriptActions } = {}) {
+export function renderRow(row: Row, options: { storeKey?: string; actions?: TranscriptActions; rewind?: RewindInterface } = {}) {
   const actions = options.actions ?? spyActions();
-  const value = { storeKey: options.storeKey ?? '', variant: 'session' as const, actions, rewind: null, renderRequest: null, disclosures: new Disclosures(), idPrefix: 't' };
+  const value = { storeKey: options.storeKey ?? '', variant: 'session' as const, actions, rewind: options.rewind ?? null, renderRequest: null, disclosures: new Disclosures(), idPrefix: 't' };
   const view = render(
     <TranscriptProvider value={value}>
       <RowView row={row} />

@@ -133,7 +133,7 @@
           "truncated": null
         },
         "endedAt": "2026-09-28T11:20:00.619Z",
-        "expanded": false,
+        "expanded": true,
         "id": "cell:reads:toolu_synth_mock_1",
         "label": "Read 2 files",
         "paths": [

@@ -30,7 +30,7 @@ describe('divider row', () => {
     const toggle = screen.getByRole('button', { name: /Worked for 2m 14s · 2 tool calls/ });
     expect(toggle.getAttribute('aria-expanded')).toBe('false');
     fireEvent.click(screen.getByRole('link', { name: '1 denied' }));
-    expect(jumpTo).toHaveBeenCalledWith(store.key, cellId.tool(tool('t1')));
+    expect(jumpTo).toHaveBeenCalledWith(store.key, cellId.tool(tool('t1')), { turnId: divider.turnId });
     jumpTo.mockRestore();
   });
 

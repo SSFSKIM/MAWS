@@ -1,4 +1,5 @@
 // Small pieces the row components share.
+import { useEffect, useState } from 'react';
 
 // The disclosure chevron; rotates when its button's aria-expanded is true (transcript.css).
 export function Chevron() {
@@ -16,3 +17,37 @@ export function copyText(text: string): void {
 
 const TIME = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' });
 export const clockTime = (at: string) => TIME.format(Date.parse(at));
+
+// A line of copy whose backtick spans are code (`Ran \`pnpm test\` in 3s`); an unmatched backtick stays literal.
+export function CodeText({ text }: { text: string }) {
+  const parts = text.split('`');
+  if (parts.length < 3) return <>{text}</>;
+  return (
+    <>
+      {parts.map((part, i) => {
+        if (i % 2 === 0) return part;
+        return i === parts.length - 1 ? `\`${part}` : <code key={i}>{part}</code>;
+      })}
+    </>
+  );
+}
+
+// `+{added} −{removed}` in the diff colours.
+export function LineCounts({ added, removed }: { added: number; removed: number }) {
+  return (
+    <span className="transcript-counts">
+      <span className="transcript-add">+{added}</span> <span className="transcript-del">−{removed}</span>
+    </span>
+  );
+}
+
+// Now, re-read once a second while `active` (a working duration ticks from it); frozen otherwise.
+export function useTicker(active: boolean): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!active) return;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [active]);
+  return now;
+}

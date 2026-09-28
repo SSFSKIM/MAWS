@@ -1,7 +1,7 @@
 import type { SessionEvent } from '@shared/graph/events';
 import { afterEach, describe, expect, it } from 'vitest';
 import { rowsOf, turnSummary, withAllExpanded } from './derive';
-import { rowId, turnId } from './keys';
+import { cellId, rowId, turnId } from './keys';
 import { applyEvents, createState } from './reduce';
 import type { Row } from './rows';
 import { BASH_RESULT, builder, task, tool, uuid } from './test-events';
@@ -174,6 +174,20 @@ describe('group state machine', () => {
     expect(g.cells[0]).toMatchObject({ label: 'Read 2 files', paths: ['/p/a.ts', '/p/b.ts'] });
     expect(g.cells[0].detail).toMatchObject({ kind: 'read', files: [{ path: '/p/a.ts', range: null }, { path: '/p/b.ts', range: [10, 29] }] });
     expect(g.summary).toBe('Read 3 files, searched for `x`');
+  });
+
+  it('a merged read cell expands under its own id', () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('t1', 'Read', { file_path: '/p/a.ts' });
+    b.result('t1', '1\tx');
+    b.toolUse('t2', 'Read', { file_path: '/p/b.ts' });
+    b.result('t2', '1\ty');
+    b.end(['u1']);
+    const state = reduce(b.events);
+    const ui = { ...state.ui, expandedTurns: new Set(state.order), expandedCells: new Set([cellId.reads(tool('t1'))]), version: state.ui.version + 1 };
+    const cell = rowsOf({ ...state, ui }).find((row) => row.kind === 'cell');
+    expect(cell).toMatchObject({ id: 'cell:reads:t1', expanded: true });
   });
 
   it('an image result is a standalone image cell', () => {

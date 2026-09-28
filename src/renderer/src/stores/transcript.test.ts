@@ -114,6 +114,19 @@ describe('transcript store', () => {
     expect(store.getState().entries[KEY].jump).toBeNull();
   });
 
+  it('jumpTo with the owning turn named locates the cell in that turn alone, and falls back when the hint misses', async () => {
+    for (const hint of [turnId.ofMessage(uuid('u1')), turnId.ofMessage(uuid('u2'))]) {
+      const store = createTranscriptStore();
+      await store.getState().attach(KEY, pushSource(twoTurns().events).source);
+      const target = cellId.tool(tool('t1'));
+      store.getState().jumpTo(KEY, target, { turnId: hint });
+      const { rows, jump } = store.getState().entries[KEY];
+      const group = rows.find((row) => row.kind === 'group');
+      expect(group?.kind === 'group' && group.expanded && group.cells.some((cell) => cell.id === target), `hint ${hint}`).toBe(true);
+      expect(jump).toMatchObject({ rowId: group!.id, focus: target });
+    }
+  });
+
   it('jumpTo a visible row only records the request', async () => {
     const b = twoTurns();
     const store = createTranscriptStore();

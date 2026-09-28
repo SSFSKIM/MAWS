@@ -74,8 +74,10 @@ export function groupItems(items: WorkItem[], turn: TurnState, ui: TranscriptUi 
       const last = open.at(-1);
       if (!hasTool) cell.classification = { ...cell.classification, startsGroup: true };
       hasTool = true;
-      if (last && MERGEABLE_READS.has(last.toolName) && MERGEABLE_READS.has(cell.toolName) && last.status !== 'running') open[open.length - 1] = mergeReads(last, cell);
-      else open.push(cell);
+      if (last && MERGEABLE_READS.has(last.toolName) && MERGEABLE_READS.has(cell.toolName) && last.status !== 'running') {
+        const merged = mergeReads(last, cell); // a new id (`cell:reads:…`), so its expansion is read under that id
+        open[open.length - 1] = { ...merged, expanded: ui?.expandedCells.has(merged.id) ?? false };
+      } else open.push(cell);
       continue;
     }
     if (item.kind === 'thinking') {

@@ -5,7 +5,7 @@
 // no row, and the live row reads its buffer through `liveBuffer`, so a token re-renders one component.
 import { create } from 'zustand';
 import type { AgentId } from '@shared/graph/ids';
-import { rowsOf } from '../transcript/model/derive';
+import { expandedTurnRows, rowsOf } from '../transcript/model/derive';
 import { applyEvents, createState, withUi, type TranscriptState, type TranscriptUi } from '../transcript/model/reduce';
 import type { CellId, Row, RowId, TurnId } from '../transcript/model/rows';
 import { attachSource, type Attachment } from '../transcript/source/hydrate';
@@ -27,7 +27,17 @@ export interface TranscriptEntry {
   working: boolean; // a turn is open
   clock: { at: number; wall: number } | null; // the latest event time applied, and the wall time it arrived: a working divider ticks from it
   jump: JumpRequest | null;
+  receipts: Record<string, ReceiptUndo>; // by receipt row id: the undo state the view drives through the RewindInterface
 }
+
+// A receipt's undo state (X3 receipt `state`, owned by the view since the RewindInterface is a view prop; kept in the
+// store so it survives a remount): the dry run's answer, asked once per receipt, and the last failure.
+export interface ReceiptUndo {
+  state: 'applied' | 'undoing' | 'undone' | 'reapplying';
+  check: { ok: boolean; reason: string | null } | 'pending' | null; // null: not asked yet
+  error: string | null;
+}
+export const RECEIPT_APPLIED: ReceiptUndo = { state: 'applied', check: null, error: null };
 
 export interface TranscriptStore {
   entries: Record<string, TranscriptEntry>;
@@ -36,22 +46,28 @@ export interface TranscriptStore {
   drop(key: string): void; // detach and forget the state
   rows(key: string): Row[];
   lastAssistantLine(key: string): string | null;
-  jumpTo(key: string, id: RowId | CellId, options?: { align?: JumpRequest['align'] }): void; // expands what holds the row, then the view scrolls and focuses
+  jumpTo(key: string, id: RowId | CellId, options?: { align?: JumpRequest['align']; turnId?: TurnId }): void; // expands what holds the row, then the view scrolls and focuses; `turnId` names the owning turn when the caller knows it (the search then derives that turn alone)
   jumpHandled(key: string, nonce: number): void;
   setFollowing(key: string, following: boolean): void;
   toggleTurn(key: string, turn: TurnId): void;
   toggleGroup(key: string, group: RowId): void;
   toggleCell(key: string, cell: CellId): void;
   expandAll(key: string): void; // every turn and group (the harness's "expand all old work")
+  setReceipt(key: string, receipt: RowId, patch: Partial<ReceiptUndo>): void;
 }
 
 const NO_ROWS: Row[] = [];
 
 // The buffer of a live text or thinking row: its block identity is the row id after the kind prefix (keys.ts).
 export function liveBuffer(entry: TranscriptEntry | undefined, row: Row): string | null {
-  if (!entry || row.turnId === null || (row.kind !== 'assistant_text' && row.kind !== 'thinking') || !row.live) return null;
-  const identity = row.id.slice(row.id.indexOf(':') + 1);
-  return entry.state.turns.get(row.turnId)?.live.get(identity)?.buffer ?? null;
+  if (row.turnId === null || (row.kind !== 'assistant_text' && row.kind !== 'thinking') || !row.live) return null;
+  return liveBlockBuffer(entry, row.turnId, row.id.slice(row.id.indexOf(':') + 1));
+}
+
+// The buffer of a streaming block by its identity `<apiMessageId>:<blockIndex>` (a thinking cell inside a group is
+// `cell:think:<identity>`).
+export function liveBlockBuffer(entry: TranscriptEntry | undefined, turnId: TurnId, identity: string): string | null {
+  return entry?.state.turns.get(turnId)?.live.get(identity)?.buffer ?? null;
 }
 
 // How long a working turn has run: event time up to the latest event, then wall time since it arrived, so a live
@@ -140,7 +156,7 @@ export function createTranscriptStore() {
         attachments.get(key)?.detach();
         if (!entry(key)) {
           const state = createState(null, options.agentId ?? null);
-          set({ entries: { ...get().entries, [key]: { state, rows: rowsOf(state), phase: 'hydrating', error: null, following: true, working: false, clock: null, jump: null } } });
+          set({ entries: { ...get().entries, [key]: { state, rows: rowsOf(state), phase: 'hydrating', error: null, following: true, working: false, clock: null, jump: null, receipts: {} } } });
         } else put(key, { phase: 'hydrating', error: null });
         const attachment = attachSource(source, {
           apply(events) {
@@ -196,7 +212,7 @@ export function createTranscriptStore() {
           put(key, { jump: request(visible.row.id) });
           return;
         }
-        const found = visible ?? locate(allExpandedRows(current.state), id);
+        const found = visible ?? (options.turnId ? locate(expandedTurnRows(current.state, options.turnId), id) : null) ?? locate(allExpandedRows(current.state), id);
         if (!found) return;
         const ui = copyUi(current.state.ui);
         if (found.row.turnId !== null && !isExpanded(current.state, found.row.turnId)) expandTurn(ui, found.row.turnId);
@@ -223,6 +239,11 @@ export function createTranscriptStore() {
 
       toggleGroup: (key, group) => changeUi(key, (ui) => toggle(ui.expandedGroups, group)),
       toggleCell: (key, cell) => changeUi(key, (ui) => toggle(ui.expandedCells, cell)),
+
+      setReceipt(key, receipt, patch) {
+        const current = entry(key);
+        if (current) put(key, { receipts: { ...current.receipts, [receipt]: { ...(current.receipts[receipt] ?? RECEIPT_APPLIED), ...patch } } });
+      },
 
       expandAll(key) {
         changeUi(key, (ui, state) => {

@@ -10182,7 +10182,7 @@
           "truncated": null
         },
         "endedAt": "2026-09-02T15:52:43.327Z",
-        "expanded": false,
+        "expanded": true,
         "id": "cell:reads:toolu_25_0_3",
         "label": "Read 2 files",
         "paths": [
@@ -16408,7 +16408,7 @@
           "truncated": null
         },
         "endedAt": "2026-09-02T17:43:34.578Z",
-        "expanded": false,
+        "expanded": true,
         "id": "cell:reads:toolu_40_2_5",
         "label": "Read 2 files",
         "paths": [
@@ -51839,7 +51839,7 @@
           "truncated": null
         },
         "endedAt": "2026-09-06T03:46:37.234Z",
-        "expanded": false,
+        "expanded": true,
         "id": "cell:reads:toolu_129_1_4",
         "label": "Read 3 files",
         "paths": [
@@ -138946,7 +138946,7 @@
           "truncated": null
         },
         "endedAt": "2026-09-27T15:50:55.833Z",
-        "expanded": false,
+        "expanded": true,
         "id": "cell:reads:toolu_348_0_3",
         "label": "Read 2 files",
         "paths": [
@@ -172778,7 +172778,7 @@
           "truncated": null
         },
         "endedAt": "2026-10-09T04:31:45.611Z",
-        "expanded": false,
+        "expanded": true,
         "id": "cell:reads:toolu_435_1_4",
         "label": "Read 2 files",
         "paths": [
@@ -189165,7 +189165,7 @@
           "truncated": null
         },
         "endedAt": "2026-10-15T19:27:36.854Z",
-        "expanded": false,
+        "expanded": true,
         "id": "cell:reads:toolu_476_1_1",
         "label": "Read 2 files",
         "paths": [

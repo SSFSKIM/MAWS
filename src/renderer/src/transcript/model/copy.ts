@@ -274,3 +274,31 @@ export const bashHeader = (command: string) => `! ${command}`;
 export const LOCAL_COMMAND_HEADER = 'Command output';
 export const NOT_SENT = 'Not sent'; // a dropped user row: a steer the engine cancelled, or an idle prompt dropped before its init
 export const bashFooter = (exitCode: number | null) => (exitCode === null ? '' : `exit ${exitCode}`);
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Cell detail and receipts
+
+export const DETAIL = {
+  copyCommand: 'Copy command',
+  copyOutput: 'Copy output',
+  copyAll: 'Copy all',
+  openFullLog: 'Open full log',
+  raw: 'Raw',
+  cwd: 'cwd',
+  input: 'Input',
+  result: 'Result',
+  noDiff: 'No diff recorded',
+  omitted: (bytes: number) => `${Math.max(1, Math.round(bytes / 1024))} KB omitted`,
+  hookOutcome: (outcome: string, exitCode: number | null) => (exitCode === null ? outcome : `${outcome} · exit ${exitCode}`),
+} as const;
+
+export const RECEIPT = {
+  heading: (files: number) => `${plural(files, 'file')} changed`,
+  review: 'Review changes ↗',
+  showMore: (n: number) => `Show ${n} more`,
+  collapse: 'Collapse files',
+  undo: 'Undo',
+  reapply: 'Reapply',
+  state: { applied: 'Changes applied', undoing: 'Undoing…', undone: 'Changes undone', reapplying: 'Reapplying…' },
+  failed: (action: 'Undo' | 'Reapply', reason: string) => `${action} failed · ${reason}`,
+} as const;

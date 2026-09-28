@@ -52,7 +52,7 @@ describe('local command row', () => {
   });
 });
 
-describe('placeholder rows (M4 and M5 replace them)', () => {
+describe('group and cell disclosure', () => {
   it('a group discloses its cells and a cell its detail, through the store', async () => {
     const b = builder();
     b.turn('u1');

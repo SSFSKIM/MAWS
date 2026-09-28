@@ -47,14 +47,15 @@ export function DividerRow({ row }: { row: DividerRowData }) {
         <Chevron />
         {label}
       </button>
-      {row.denied > 0 && <CountLink count={row.denied} noun="denied" cell={firstOf('denied')} storeKey={storeKey} />}
-      {row.autoDenied > 0 && <CountLink count={row.autoDenied} noun="auto-denied" cell={firstOf('auto_denied')} storeKey={storeKey} />}
+      {row.denied > 0 && <CountLink count={row.denied} noun="denied" cell={firstOf('denied')} turnId={row.turnId!} storeKey={storeKey} />}
+      {row.autoDenied > 0 && <CountLink count={row.autoDenied} noun="auto-denied" cell={firstOf('auto_denied')} turnId={row.turnId!} storeKey={storeKey} />}
       <TurnSummary row={row} durationMs={durationMs} />
     </div>
   );
 }
 
-function CountLink({ count, noun, cell, storeKey }: { count: number; noun: string; cell: CellId | null; storeKey: string }) {
+// The jump names the owning turn, so locating the cell in a collapsed turn derives that turn alone.
+function CountLink({ count, noun, cell, turnId, storeKey }: { count: number; noun: string; cell: CellId | null; turnId: TurnId; storeKey: string }) {
   return (
     <>
       <span aria-hidden="true">·</span>
@@ -63,7 +64,7 @@ function CountLink({ count, noun, cell, storeKey }: { count: number; noun: strin
         className="transcript-divider-count"
         onClick={(event) => {
           event.preventDefault();
-          if (cell) useTranscriptStore.getState().jumpTo(storeKey, cell);
+          if (cell) useTranscriptStore.getState().jumpTo(storeKey, cell, { turnId });
         }}
       >
         {count} {noun}

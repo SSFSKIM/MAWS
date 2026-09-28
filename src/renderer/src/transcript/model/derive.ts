@@ -83,6 +83,15 @@ export function turnPhrases(turn: TurnState): string {
   return groupSummary(phrasesOf(deriveTurn(turn, null).cells.filter((cell) => cell.classification.denial === null)));
 }
 
+// One turn's rows with its work area expanded (groups and cells as the reader left them), derived outside the memo:
+// what a jump into a collapsed turn looks for, at the cost of that turn alone.
+export function expandedTurnRows(state: TranscriptState, id: TurnId): Row[] {
+  const turn = state.turns.get(id);
+  if (!turn) return [];
+  const ui: TranscriptUi = { ...state.ui, expandedTurns: new Set([...state.ui.expandedTurns, id]), collapsedTurns: new Set() };
+  return deriveTurn(turn, { ...state, ui }).rows;
+}
+
 // A state whose every turn, group and cell is expanded and every rewound branch revealed: the snapshot suite's view.
 export function withAllExpanded(state: TranscriptState): TranscriptState {
   const turns = [...state.order, ...(state.hidden?.turns ?? [])];
