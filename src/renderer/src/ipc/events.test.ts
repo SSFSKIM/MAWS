@@ -1,8 +1,9 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
 import { digest, item, project, record } from '../../../../test/support/builders';
 import { fakeClient } from '../../../../test/support/fake-client';
+import { registerTabRetention } from '../keymap/actions-runtime';
 import { createAttentionStore } from '../stores/attention';
 import { createLayoutStore } from '../stores/layout';
 import { createSessionsStore } from '../stores/sessions';
@@ -78,6 +79,48 @@ describe('shell event subscription', () => {
     fake.event('session.removed', { appSessionId: 'a', revision: 3 });
     expect(stores.sessions.getState().records.has(A)).toBe(true);
     expect(stores.layout.getState().main.panes[0].tabs.map((t) => t.id)).toEqual(['overview', 'session:a']);
+  });
+
+  describe('tab retention (C10’s seventh ask)', () => {
+    const retentions: (() => void)[] = [];
+    afterEach(() => retentions.splice(0).forEach((off) => off()));
+
+    it('with none registered, a record-less tab is dropped on hydrate and a removal closes its tab', async () => {
+      const { fake, stores } = setup();
+      await answerSnapshots(fake);
+      await vi.waitFor(() => expect(stores.layout.getState().hydrated).toBe(true));
+      expect(stores.layout.getState().main.panes[0].tabs.map((t) => t.id)).toEqual(['overview', 'session:a']);
+      fake.event('session.removed', { appSessionId: 'a', revision: 2 });
+      expect(stores.layout.getState().main.panes[0].tabs.map((t) => t.id)).toEqual(['overview']);
+    });
+
+    it('hydration waits for ready, then keeps a record-less tab the retention retains', async () => {
+      let ready!: () => void;
+      const retains = vi.fn((id: string) => id === 'gone');
+      retentions.push(registerTabRetention({ ready: new Promise<void>((resolve) => (ready = resolve)), retains }));
+      const { fake, stores } = setup();
+      await answerSnapshots(fake);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(stores.layout.getState().hydrated).toBe(false); // still waiting on the intent snapshot
+      ready();
+      await vi.waitFor(() => expect(stores.layout.getState().hydrated).toBe(true));
+      expect(stores.layout.getState().main.panes[0].tabs.map((t) => t.id)).toEqual(['overview', 'session:a', 'session:gone']);
+    });
+
+    it('a removal leaves a retained session’s tab open, and closes one it does not retain', async () => {
+      retentions.push(registerTabRetention({ ready: Promise.resolve(), retains: (id) => id === 'a' }));
+      const { fake, stores } = setup();
+      await answerSnapshots(fake);
+      await vi.waitFor(() => expect(stores.layout.getState().hydrated).toBe(true));
+      fake.event('session.removed', { appSessionId: 'a', revision: 2 });
+      expect(stores.sessions.getState().records.has(A)).toBe(false);
+      expect(stores.layout.getState().main.panes[0].tabs.map((t) => t.id)).toEqual(['overview', 'session:a']);
+      retentions.splice(0).forEach((off) => off());
+      retentions.push(registerTabRetention({ ready: Promise.resolve(), retains: () => false }));
+      fake.event('session.changed', { record: record('a'), cause: 'update', revision: 3 });
+      fake.event('session.removed', { appSessionId: 'a', revision: 4 });
+      expect(stores.layout.getState().main.panes[0].tabs.map((t) => t.id)).toEqual(['overview']);
+    });
   });
 
   it('ignores replies and events after disconnect', async () => {

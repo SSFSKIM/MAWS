@@ -104,3 +104,25 @@ export function useUnstartedTitle(appSessionId: AppSessionId): { title: string; 
   const registered = unstartedTitles.useHandler('title') as UnstartedTitle | undefined;
   return registered?.(appSessionId) ?? { title: 'New session', project };
 }
+
+// ---- tab retention ------------------------------------------------------------------------------------------------------
+// C10's seventh ask of C5: an unstarted session has no record, so without a say from C10 a relaunch would drop its tab
+// (hydration keeps only tabs whose record exists) though its draft persists, and a rollback that removes a provisional
+// record would close the tab before its failure card can offer recovery. C10 registers once: hydration waits for
+// `ready` (its intent snapshot) and keeps a record-less session tab `retains` claims; `session.removed` closes a tab
+// only when `retains` says no. Unregistered, the default rules stand.
+export interface TabRetention {
+  ready: Promise<void>;
+  retains(appSessionId: string): boolean;
+}
+
+let retention: TabRetention | null = null;
+
+export function registerTabRetention(r: TabRetention): () => void {
+  retention = r;
+  return () => {
+    if (retention === r) retention = null;
+  };
+}
+
+export const currentTabRetention = (): TabRetention | null => retention;

@@ -8,8 +8,9 @@ import type { TabRef } from '@shared/ipc/schema/layout';
 import { record } from '../../../../test/support/builders';
 import { registerShellActions } from '../app/shell-actions';
 import { Shell } from '../app/Shell';
-import { resetSlots } from '../app/slots';
+import { registerSlot, resetSlots } from '../app/slots';
 import { createSession, registerCloseGuard, registerSessionCreator, registerUnstartedTitle, runAction } from '../keymap/actions-runtime';
+import { connectKeys } from '../keymap/dispatcher';
 import { useLayout } from '../stores/layout';
 import { activeTab } from '../stores/layout-model';
 import { useSessions } from '../stores/sessions';
@@ -447,6 +448,107 @@ describe('before the layout has hydrated', () => {
     expect(selected()).toBe('Charter + research · MAWS');
   });
 });
+
+// ⌃Tab is a renderer-sink, pane-scoped chord: it cycles the pane that owns the focused element, and only from an element
+// that may take it (a tab, a card), never from text entry, a key sink, a button or under an open menu.
+describe('⌃Tab follows DOM focus', () => {
+  const activeOf = (pane: 0 | 1) => useLayout.getState().main.panes[pane]?.activeTabId;
+  function splitOpen() {
+    act(() => {
+      useLayout.getState().openSession(idOf('Charter + research'));
+      useLayout.getState().openSession(idOf('Fix sidebar drag'));
+      useLayout.getState().openSession(idOf('Quota reset recovery'), { split: true });
+      useLayout.getState().openSession(idOf('Sidebar interaction pass')); // into the focused pane, the new right one
+    });
+  }
+  const pane = (label: string) => within(main()).getByRole('region', { name: label });
+
+  beforeEach(() => {
+    offs.push(connectKeys());
+  });
+
+  it('with focus on a tab of pane P cycles pane P once, forward and back, the other pane untouched', async () => {
+    const user = userEvent.setup();
+    render(<Shell />);
+    splitOpen();
+    act(() => useLayout.getState().focusPane(0));
+    const before0 = activeOf(0);
+    act(() => within(pane('Right pane')).getByRole('tab', { name: 'Sidebar interaction pass · MAWS' }).focus());
+    await user.keyboard('{Control>}{Tab}{/Control}');
+    expect(activeOf(1)).toBe(`session:${idOf('Quota reset recovery')}`);
+    expect(activeOf(0)).toBe(before0);
+    await user.keyboard('{Control>}{Shift>}{Tab}{/Shift}{/Control}');
+    expect(activeOf(1)).toBe(`session:${idOf('Sidebar interaction pass')}`);
+  });
+
+  it('with focus on an Overview card cycles that card’s pane', async () => {
+    const user = userEvent.setup();
+    render(<Shell />);
+    act(() => {
+      useLayout.getState().openSession(idOf('Charter + research'));
+      useLayout.getState().activateTab('overview');
+    });
+    const card = within(main()).getAllByRole('article')[0];
+    act(() => card.focus());
+    await user.keyboard('{Control>}{Tab}{/Control}');
+    expect(activeOf(0)).toBe(`session:${idOf('Charter + research')}`);
+  });
+
+  it('cycles nothing from text entry in the pane, from a key sink, from a button, or under an open menu', async () => {
+    const user = userEvent.setup();
+    registerSlotForTest();
+    render(<Shell />);
+    act(() => {
+      useLayout.getState().openSession(idOf('Charter + research'));
+      useLayout.getState().openSession(idOf('Fix sidebar drag'));
+    });
+    const start = activeOf(0);
+    for (const label of ['pane scratch', 'terminal input', 'composer input']) {
+      act(() => screen.getByLabelText(label).focus());
+      await user.keyboard('{Control>}{Tab}{/Control}');
+      expect(activeOf(0), label).toBe(start);
+    }
+    act(() => within(tab('Fix sidebar drag · MAWS')).getByRole('button', { hidden: true }).focus());
+    await user.keyboard('{Control>}{Tab}{/Control}');
+    expect(activeOf(0)).toBe(start);
+
+    const menu = document.createElement('div');
+    menu.setAttribute('role', 'menu');
+    menu.dataset.state = 'open';
+    document.body.append(menu);
+    act(() => tab('Fix sidebar drag · MAWS').focus());
+    await user.keyboard('{Control>}{Tab}{/Control}');
+    menu.remove();
+    expect(activeOf(0)).toBe(start);
+  });
+
+  it('runAction(tab.next) from inside a terminal key sink (C9’s forwarding) cycles the focused pane once', () => {
+    registerSlotForTest();
+    render(<Shell />);
+    act(() => {
+      useLayout.getState().openSession(idOf('Charter + research'));
+      useLayout.getState().openSession(idOf('Fix sidebar drag'));
+    });
+    act(() => screen.getByLabelText('terminal input').focus());
+    act(() => runAction('tab.next'));
+    expect(activeOf(0)).toBe('overview');
+  });
+});
+
+// A transcript slot holding the elements a real pane may contain: a plain textarea, a terminal and a composer.
+function registerSlotForTest() {
+  registerSlot('transcript', () => (
+    <div>
+      <textarea aria-label="pane scratch" />
+      <div data-key-sink="terminal">
+        <textarea aria-label="terminal input" />
+      </div>
+      <div data-key-sink="composer">
+        <textarea aria-label="composer input" />
+      </div>
+    </div>
+  ));
+}
 
 function fakeBridge() {
   return { invoke: vi.fn(async () => ({ ok: true, value: undefined })), on: vi.fn(() => () => {}) } as unknown as MawsBridge;

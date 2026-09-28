@@ -1,8 +1,10 @@
 // The one subscription point that feeds the shell's stores from X2 events (C5 execution document, Renderer stores).
 // C1's ordering rule: every event is subscribed before any snapshot command runs; each snapshot then reconciles with
 // the events that raced it inside its store (by revision for sessions, projects and digests; by buffer and replay for
-// attention). The layout hydrates once the sessions are known, so a persisted tab of a vanished session is dropped.
+// attention). The layout hydrates once the sessions are known, so a persisted tab of a vanished session is dropped,
+// unless a registered tab retention (C10's) keeps it.
 import type { MawsBridge } from '@shared/ipc/schema';
+import { currentTabRetention } from '../keymap/actions-runtime';
 import { useAttention } from '../stores/attention';
 import { createFreshness } from '../stores/freshness';
 import { useLayout } from '../stores/layout';
@@ -25,8 +27,9 @@ export function connectShell(client: MawsBridge = ipc, stores: ShellStores = { s
   const offs = [
     on('session.changed', (e) => sessions().applyChanged(e)),
     on('session.removed', (e) => {
-      // A stale removal (older than what the store knows) leaves the session, so its tabs stay too.
-      if (sessions().applyRemoved(e)) stores.layout.getState().dropSession(e.appSessionId);
+      // A stale removal (older than what the store knows) leaves the session, so its tabs stay too; so does a tab the
+      // registered retention keeps (a rolled-back provisional record, whose tab shows the failure).
+      if (sessions().applyRemoved(e) && !currentTabRetention()?.retains(e.appSessionId)) stores.layout.getState().dropSession(e.appSessionId);
     }),
     on('session.projects.changed', (e) => sessions().applyProjects(e)),
     on('session.digest', (d) => sessions().applyDigest(d)),
@@ -58,7 +61,10 @@ export function connectShell(client: MawsBridge = ipc, stores: ShellStores = { s
   ]).then(async () => {
     if (!live()) return;
     sessions().setLoaded();
-    await stores.layout.getState().hydrate(client, (id) => sessions().records.has(id));
+    const retention = currentTabRetention();
+    if (retention) await retention.ready;
+    if (!live()) return;
+    await stores.layout.getState().hydrate(client, (id) => sessions().records.has(id) || (retention?.retains(id) ?? false));
   });
 
   return () => {

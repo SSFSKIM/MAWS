@@ -1,14 +1,15 @@
 // One pane of the main region (§5.2, D-8; residue *Split*): its tab strip over the active tab's content. A pointer
 // press or focus anywhere inside makes it the focused pane, the target of ⌘1…9, ⌘\ and ⌃Tab. Only the active tab's
 // content is mounted; a tab's content remounts when it becomes active again.
-import { useId } from 'react';
+import { useId, useRef } from 'react';
 import type { TabRef } from '@shared/ipc/schema/layout';
 import { Diagnostics } from '../app/Diagnostics';
 import { useSlot } from '../app/slots';
 import { Overview } from '../overview/Overview';
+import { useKeyChord } from '../keymap/useKeyChord';
 import { SessionPane } from '../session/SessionPane';
 import { useLayout } from '../stores/layout';
-import { paneDomId } from './pane-dom';
+import { focusPaneElement, paneDomId } from './pane-dom';
 import { TabStrip } from './TabStrip';
 
 type PaneIndex = 0 | 1;
@@ -17,6 +18,17 @@ type PaneIndex = 0 | 1;
 export function Pane({ index, split, share }: { index: PaneIndex; split: boolean; share: number }) {
   const pane = useLayout((s) => s.main.panes[index]);
   const idPrefix = useId();
+  const element = useRef<HTMLElement>(null);
+  // ⌃Tab and ⌃⇧Tab cycle the pane that owns the focused element (renderer sink, pane scope: a tab or a card may take
+  // it, text entry, key sinks and buttons may not). Focus follows to the newly active tab, since the content that held
+  // it may have unmounted with its tab.
+  const cycle = (delta: 1 | -1) => {
+    useLayout.getState().focusPane(index);
+    useLayout.getState().cycleTab(delta);
+    requestAnimationFrame(() => focusPaneElement(index));
+  };
+  useKeyChord('tab.next', () => cycle(1), { within: element });
+  useKeyChord('tab.previous', () => cycle(-1), { within: element });
   if (!pane) return null;
   const activeIndex = pane.tabs.findIndex((t) => t.id === pane.activeTabId);
   const active = pane.tabs[activeIndex] ?? null;
@@ -27,6 +39,7 @@ export function Pane({ index, split, share }: { index: PaneIndex; split: boolean
 
   return (
     <section
+      ref={element}
       id={paneDomId(index)}
       aria-label={split ? (index === 0 ? 'Left pane' : 'Right pane') : 'Pane'}
       data-pane={index}
