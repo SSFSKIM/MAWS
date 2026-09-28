@@ -71,6 +71,11 @@ describe('pty host environment', () => {
     expect(terminalEnvironment({ PATH: '/bin', LC_CTYPE: 'ko_KR.UTF-8' }, { appVersion: '0' }).LC_CTYPE).toBe('ko_KR.UTF-8');
   });
 
+  it('drops the capture shell’s own session state, so a terminal shell starts at level 1 as in Terminal.app', () => {
+    const env = terminalEnvironment({ ...base, SHLVL: '3', OLDPWD: '/Users/owner/src', _: '/usr/bin/env' }, { appVersion: '0' });
+    for (const name of ['SHLVL', 'OLDPWD', '_']) expect(env).not.toHaveProperty(name);
+  });
+
   it('skips undefined entries and never mutates the base', () => {
     const input: NodeJS.ProcessEnv = { PATH: '/bin', EMPTY: undefined, CLAUDECODE: '1' };
     const env = terminalEnvironment(input, { appVersion: '0' });

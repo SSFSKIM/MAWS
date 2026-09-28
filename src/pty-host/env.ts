@@ -29,6 +29,11 @@ const ENGINE_LAUNCH_VARIABLES = ['ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN', '
 // The gateway's per-tier model routing (`ANTHROPIC_DEFAULT_<TIER>_MODEL`, D-19), engine-launch settings like the two above.
 const GATEWAY_MODEL_VARIABLE = /^ANTHROPIC_DEFAULT_[A-Z_]*MODEL$/;
 
+// What the capture's own shell (or the one the host was started from) set about its session rather than exported:
+// passed on, every terminal shell would start nested (`SHLVL` 2 or more) with a stale `OLDPWD` and `_`. A shell
+// sets all three for itself; Terminal.app starts one without them. (`PWD` is node-pty's: it sets it to the cwd.)
+const SHELL_SESSION_VARIABLES = ['SHLVL', 'OLDPWD', '_'] as const;
+
 const LOCALE_VARIABLES = ['LANG', 'LC_ALL', 'LC_CTYPE'] as const;
 
 // The seed every terminal environment is built from: X6's captured login-shell environment (run once, at host start,
@@ -53,7 +58,7 @@ export interface TerminalEnvironmentOptions {
 
 export function terminalEnvironment(base: NodeJS.ProcessEnv, { appVersion }: TerminalEnvironmentOptions): Record<string, string> {
   const env: Record<string, string> = {};
-  const excluded = new Set<string>([...PARENT_SESSION_VARIABLES, ...ENGINE_LAUNCH_VARIABLES]);
+  const excluded = new Set<string>([...PARENT_SESSION_VARIABLES, ...ENGINE_LAUNCH_VARIABLES, ...SHELL_SESSION_VARIABLES]);
   for (const [name, value] of Object.entries(base)) {
     if (value !== undefined && !excluded.has(name) && !GATEWAY_MODEL_VARIABLE.test(name)) env[name] = value;
   }
