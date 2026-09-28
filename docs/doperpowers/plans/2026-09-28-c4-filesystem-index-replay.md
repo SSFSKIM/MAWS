@@ -10,7 +10,7 @@ What C4 does not do: it never writes into `~/.claude` (the engine's store is rea
 
 ## Progress
 
-- [ ] M1 — Store shapes, chain follower and transcript-to-X1 backfill against fixtures
+- [x] M1 — Store shapes, chain follower and transcript-to-X1 backfill against fixtures (2026-09-28 13:40 KST; commits 1377b6e, c878a81, 489762a, 02c9aea; task review clean after three fix waves; 295 tests)
 - [ ] M2 — Filesystem state service, part one: watcher, discovery, sidecars, holders
 - [ ] M3 — Filesystem state service, part two: tailers, following, subagents, workflows, tasks, spills
 - [ ] M4 — The index in main: `node:sqlite`, stores, the `SessionSource`, projects and drafts
