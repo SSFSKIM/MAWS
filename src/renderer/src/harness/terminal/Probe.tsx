@@ -1,8 +1,9 @@
 // The `#probe` page (C9 M1, Interfaces *Harness*, kept as the performance harness): one pane per renderer candidate,
-// each a `TerminalRenderer` on its own pty (xterm.js since the M1 verdict; the right region held ghostty-web during
-// the spike), a workload bar, a metrics readout, a theme toggle and a paste field. Exposes
-// `window.__maws_harness.probe` for Playwright and `spikes/terminal-probe/run.mjs`. Tokens only (X7): every colour
-// here is a token utility; the terminals read the `--term-*` tokens through `theme.ts`.
+// each a `TerminalRenderer` on its own pty (xterm.js since the M1 verdict), a workload bar, a metrics readout, a theme
+// toggle and a paste field; since M3 the right region, which held ghostty-web during the spike, is the registry's
+// shell pane (`RegistryPane.tsx`). Exposes `window.__maws_harness.probe` for Playwright and
+// `spikes/terminal-probe/run.mjs`, and `.terminals` for the registry pane. Tokens only (X7): every colour here is a
+// token utility; the terminals read the `--term-*` tokens through `theme.ts`.
 import { useEffect, useRef, useSyncExternalStore, type PointerEvent as ReactPointerEvent } from 'react';
 import { create } from 'zustand';
 import {
@@ -17,10 +18,12 @@ import {
 import type { EventPayload } from '@shared/ipc/schema';
 import { ipc } from '../../ipc/client';
 import { useSettings } from '../../stores/settings';
+import { terminals } from '../../terminal/registry';
 import type { RendererKind, TerminalFont } from '../../terminal/renderer';
 import { readDocumentTheme } from '../../terminal/theme';
 import type { Metrics } from './metrics';
 import { Pane, type PaneDebug, type ProbeSnapshot } from './pane';
+import { RegistryPane, terminalsApi } from './RegistryPane';
 
 // The candidates on the page; a second entry mounts a second pane on the right.
 const KINDS: RendererKind[] = ['xterm'];
@@ -65,6 +68,8 @@ const pane = (kind: RendererKind): Pane => {
   return found;
 };
 const byPty = new Map<string, Pane>();
+// The registry pane's ptys are the registry's: the page's own listener neither delivers nor holds their events.
+const registryPtys = new Set<string>();
 // Events for a pty whose spawn reply has not reached the page yet (the reply and the events travel on different
 // channels): held until the pane claims the id, so a fast program's first bytes and its exit are never dropped.
 const unclaimed = new Map<string, (EventPayload<'pty.data'> | EventPayload<'pty.exit'>)[]>();
@@ -79,6 +84,7 @@ const deliver = (pane: Pane, event: EventPayload<'pty.data'> | EventPayload<'pty
 };
 
 function receive(event: EventPayload<'pty.data'> | EventPayload<'pty.exit'>) {
+  if (registryPtys.has(event.ptyId)) return;
   const pane = byPty.get(event.ptyId);
   if (pane) return deliver(pane, event);
   const held = unclaimed.get(event.ptyId) ?? [];
@@ -90,6 +96,13 @@ function start(): Promise<void> {
   if (readyPromise) return readyPromise;
   ipc.on('pty.data', receive);
   ipc.on('pty.exit', receive);
+  terminals.subscribe((infos) => {
+    for (const { ptyId } of infos) {
+      if (!ptyId || registryPtys.has(ptyId)) continue;
+      registryPtys.add(ptyId);
+      unclaimed.delete(ptyId); // its first events, held before the registry's spawn reply named it
+    }
+  });
   // The terminals recolour when the document's theme attribute changes (the settings store sets it).
   new MutationObserver(() => {
     const theme = readDocumentTheme();
@@ -174,7 +187,7 @@ export function Probe() {
   const rowRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    window.__maws_harness = { page: 'probe', probe: api };
+    window.__maws_harness = { page: 'probe', probe: api, terminals: terminalsApi };
     void start();
   }, []);
 
@@ -262,13 +275,7 @@ export function Probe() {
       <div ref={rowRef} className="flex min-h-0 flex-1">
         <PaneView kind={KINDS[0]!} style={{ flexBasis: `${split * 100}%` }} />
         <div role="separator" aria-orientation="vertical" onPointerDown={onDividerDown} className="w-1 shrink-0 cursor-col-resize bg-border hover:bg-border-strong" />
-        {KINDS[1] ? (
-          <PaneView kind={KINDS[1]} style={{ flex: 1 }} />
-        ) : (
-          <section aria-label="second pane" className="flex min-w-0 flex-1 items-center justify-center text-ui-sm text-fg-faint">
-            second candidate discarded at the M1 verdict (spikes/terminal-probe/findings.md); the divider still resizes the pane
-          </section>
-        )}
+        {KINDS[1] ? <PaneView kind={KINDS[1]} style={{ flex: 1 }} /> : <RegistryPane />}
       </div>
     </div>
   );

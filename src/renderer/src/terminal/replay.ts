@@ -317,7 +317,16 @@ export function trackStream(state: StreamState, chunk: Uint8Array | string): Str
   };
 
   for (let i = 0; i < bytes.length; i++) {
-    const b = bytes[i]!;
+    let b = bytes[i]!;
+    // The hot path, every byte of ordinary output: in ground, ASCII other than ESC, the shifts, CAN and SUB changes
+    // nothing this tracker records.
+    if (parser === GROUND && need === 0) {
+      while (b < 0x80 && b !== 0x1b && (b > 0x1a || (b !== 0x0e && b !== 0x0f && b !== 0x18 && b !== 0x1a))) {
+        if (++i === bytes.length) break;
+        b = bytes[i]!;
+      }
+      if (i === bytes.length) break;
+    }
     if (need > 0) {
       if ((b & 0xc0) === 0x80) {
         value = (value << 6) | (b & 0x3f);
