@@ -11,6 +11,7 @@ import { buildLaunch, ENGINE_VERSION, RELAY_URL } from '../launch';
 import { Normalizer } from '../normalizer';
 import { replayEngine, type ReplayTransport } from '../replay-transport';
 import { EngineSession, type EngineSessionOptions } from '../session';
+import type { EngineTransport } from '../transport';
 import { handshakePrelude } from './harness';
 import { autoResponder, MemoryJournal, scriptedTransport, type Responder, type ScriptedTransport } from './scripted-transport';
 
@@ -72,7 +73,7 @@ export async function replayedSession(
   pass: FixturePass,
   name: string,
   drive: (row: JournalRow, ctx: { session: EngineSession; transport: ReplayTransport; fixture: JournalRow[]; ready: () => Promise<void> }) => void,
-  opts: { spec?: Partial<LaunchSpec>; session?: Partial<EngineSessionOptions>; beforeStart?: (o: Observed) => void } = {},
+  opts: { spec?: Partial<LaunchSpec>; session?: Partial<EngineSessionOptions>; beforeStart?: (o: Observed) => void; wrap?: (t: ReplayTransport) => EngineTransport } = {},
 ): Promise<Observed & { fixture: JournalRow[]; transport: () => ReplayTransport }> {
   const fixture = loadJournal(pass, name);
   const spec = launchSpec({ appSessionId: `replay-${name}` as LaunchSpec['appSessionId'], sessionId: null, model: null, replay: `${pass}/${name}`, ...opts.spec });
@@ -90,7 +91,7 @@ export async function replayedSession(
           drive(row, { session, transport, fixture, ready: () => session.start() });
         },
       });
-      return transport;
+      return opts.wrap ? opts.wrap(transport) : transport;
     },
     ...opts.session,
   });
