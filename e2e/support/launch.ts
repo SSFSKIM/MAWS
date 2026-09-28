@@ -17,7 +17,7 @@ export interface MawsLaunch {
   userData: string;
   packaged: boolean;
   launchedAt: number; // Date.now() just before the process was started
-  cleanup(): Promise<void>; // closes the app if it is still open and removes the profile; throws if the app would not close
+  cleanup(): Promise<void>; // closes the app if it is still open and removes the profile it created; throws if the app would not close
 }
 
 // C3 start: `env` adds variables to the launch's environment (MAWS_ENGINE_REPLAY=1 for C3's replay test; C5, C6 and
@@ -27,13 +27,22 @@ export interface MawsLaunchOptions {
 }
 // C3 end
 
-export async function launchMaws(opts: MawsLaunchOptions = {}): Promise<MawsLaunch> {
+// C5 start: relaunch over a profile. The shell smoke checks persistence by relaunching over the profile its first launch
+// wrote. A launch given `userData` runs over that directory instead of a fresh one and leaves it in place at cleanup;
+// whoever created it removes it.
+export interface ShellLaunchOptions extends MawsLaunchOptions {
+  userData?: string;
+}
+// C5 end
+
+export async function launchMaws(opts: ShellLaunchOptions = {}): Promise<MawsLaunch> {
   const executable = process.env.MAWS_E2E_EXECUTABLE ? resolve(REPO_ROOT, process.env.MAWS_E2E_EXECUTABLE) : null;
   if (executable && !existsSync(executable)) throw new Error(`MAWS_E2E_EXECUTABLE does not exist: ${executable} (run pnpm build:app)`);
   const main = join(REPO_ROOT, 'out/main/index.js');
   if (!executable && !existsSync(main)) throw new Error(`${main} does not exist (run pnpm build)`);
 
-  const userData = mkdtempSync(join(tmpdir(), 'maws-e2e-'));
+  const ownsUserData = opts.userData === undefined; // C5
+  const userData = opts.userData ?? mkdtempSync(join(tmpdir(), 'maws-e2e-')); // C5: an existing profile when given
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) if (value !== undefined) env[key] = value;
   // A shell inherited from `electron-vite dev` or an editor must not turn the app into a dev-server client or a Node.
@@ -54,7 +63,7 @@ export async function launchMaws(opts: MawsLaunchOptions = {}): Promise<MawsLaun
     try {
       if (app && !closed) await closeOrKill(app);
     } finally {
-      rmSync(userData, { recursive: true, force: true });
+      if (ownsUserData) rmSync(userData, { recursive: true, force: true }); // C5: a given profile is the caller's
     }
   };
 
