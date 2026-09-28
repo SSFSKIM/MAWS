@@ -191,6 +191,7 @@ Merge order to master: **C3, C4, C5, C6, C9** (ruling 7). Each addition to a sha
 | `src/shared/wire/frames.test.ts` | round trip | — | — | — | gains `test/fixtures/transcript/**` (additive) | — | C6 only |
 | `src/shared/graph/session.ts` | X1 record | `gateway` extension | — | — | — | — | C3 only |
 | `src/shared/host/shell-env.ts` | — | `captureShellEnvironment()` | — | — | — | consumed by `src/pty-host/env.ts` `baseEnvironment()` | C3 adds; C9 consumes |
+| `src/shared/host/runtime.ts` | `createHostRuntime`, `runHost` | `HostCommandError` and typed-error forwarding in the runtime's catch (one delimited block; a handler may throw an `IpcError` with its code intact, `timeout` for a bounded control deadline), one regression case in `runtime.test.ts` | — | — | — | — (the PTY host runs the same runtime unchanged) | C3 only; a C1 file C3 extends (C3 re-review round 2, 2026-09-28) |
 | `src/engine-host/index.ts` | `engine.ping` | replaces the body: `runHost` + `registerEngineIpc` | one line `registerFs(on, emit)` | — | — | — | order C3, C4 |
 | `src/engine-host/ipc.ts` | — | X2 handlers | `session.events` delegates to `FsService.eventsSnapshot` for an `appSessionId` with no live process (one seam; C4's `register.ts` carries a temporary `session.events` handler only in C4's worktree, deleted at rebase) | — | — | — | order C3, C4 |
 | `src/main/attention/` (directory) | — | `service.ts`, `store.ts` (the `AttentionStore` port), `file-attention-store.ts` | — | `notifier.ts` | — | — | different files; no merge conflict |
