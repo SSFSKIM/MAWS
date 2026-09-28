@@ -94,7 +94,7 @@ kbd { font: 10px var(--font-ui); color: var(--fg-muted); white-space: nowrap; }
 .tabs > .icon { align-self: center; flex-shrink: 0; margin: 0 3px; }
 .transcript { flex: 1; overflow-y: auto; padding: 28px 36px 12px; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 .reading { max-width: var(--measure); margin: 0 auto; }
-.user-bubble { width: fit-content; max-width: 86%; margin-left: auto; padding: 11px 15px; background: var(--bg-overlay); border-radius: var(--radius-lg); font-size: 14px; line-height: 1.6; }
+.user-bubble { width: fit-content; max-width: 86%; margin-left: auto; padding: 9px 14px; background: var(--bg-overlay); border-radius: var(--radius-lg); font-size: 14px; line-height: 1.6; }
 .turn { margin: 27px 0 28px; }
 .assistant-label { display: flex; gap: 7px; align-items: center; font-size: 12px; font-weight: 600; margin-bottom: 10px; }
 .assistant-mark { color: var(--accent); font-size: 21px; line-height: 18px; font-weight: 400; }
@@ -120,33 +120,32 @@ details[open] > summary .chevron { transform: rotate(90deg); }
 .spinner { width: 12px; height: 12px; border: 1.5px solid var(--border-strong); border-top-color: var(--accent); border-radius: 50%; animation: spin 1.3s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .activity-output { padding: 8px 12px 12px 32px; color: var(--fg-muted); font-size: 11px; line-height: 1.9; }
-.composer-zone { padding: 16px 28px 0; flex-shrink: 0; }
-.queue-card { display: flex; align-items: center; gap: 8px; padding: 9px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); margin: 0 0 12px; font-size: 12px; }
+.composer-zone { padding: 10px 20px 0; flex-shrink: 0; }
+.queue-card { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); margin: 0 0 8px; font-size: 12px; }
 .queue-card .queued-count { font-size: 10px; color: var(--fg-muted); border-right: 1px solid var(--border); padding-right: 9px; }
 .queue-actions { display: flex; margin-left: auto; gap: 2px; }
 .text-action { color: var(--fg-muted); font-size: 11px; padding: 3px 6px; }
 .queue-actions .steer { color: var(--fg); }
-/* Composer, Claude Desktop's anatomy (§5.4, D-20): location chips above the box; editor with the submit control inside; toolbar below, inside the box. */
-.composer-frame { width: 100%; max-width: 680px; margin: 0 auto; }
-.chip-row { display: flex; flex-wrap: wrap; gap: 5px; margin: 0 0 8px 2px; }
-.chip { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--border); padding: 3px 7px; border-radius: var(--radius-sm); font-size: 11px; color: var(--fg-muted); white-space: nowrap; }
+/* Composer at Claude Desktop's proportions (§5.4, D-20): chips above; a thin rounded input line holding only the editor and the submit control; the controls beneath, unframed. About two thirds of the pane, capped at 720. */
+.composer-frame { width: clamp(360px, 66.6%, 720px); margin: 0 auto; }
+.chip-row { display: flex; flex-wrap: nowrap; gap: 5px; margin: 0 0 6px 2px; overflow: hidden; }
+.chip { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--border); padding: 2px 7px; border-radius: var(--radius-sm); font-size: 11px; color: var(--fg-muted); white-space: nowrap; }
 .chip:hover { color: var(--fg); }
-.box { background: var(--bg-raised); border: 1px solid var(--border-strong); border-radius: var(--radius-lg); padding: 10px 10px 8px 14px; }
+.box { display: flex; align-items: flex-end; gap: 8px; min-height: 44px; background: var(--bg-raised); border: 1px solid var(--border-strong); border-radius: var(--radius-lg); padding: 6px 6px 6px 16px; }
 .box:focus-within { border-color: var(--fg-muted); }
-.editor-row { display: flex; align-items: flex-end; gap: 8px; }
-.editor-row textarea { flex: 1; min-width: 0; display: block; resize: none; height: 48px; padding: 2px 0; border: 0; outline: none; background: transparent; font-size: 15px; line-height: 1.6; }
-.editor-row textarea::placeholder { color: var(--fg-muted); }
-.queue-submit { background: var(--fg); color: var(--bg); padding: 6px 11px; font-weight: 550; font-size: 12px; display: inline-flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.box textarea { flex: 1; min-width: 0; display: block; resize: none; height: 22px; max-height: 154px; margin: 4px 0; padding: 0; border: 0; outline: none; background: transparent; font-size: 14px; line-height: 22px; }
+.box textarea::placeholder { color: var(--fg-muted); }
+.queue-submit { height: 30px; background: var(--fg); color: var(--bg); padding: 0 11px; font-weight: 550; font-size: 12px; display: inline-flex; align-items: center; gap: 8px; flex-shrink: 0; }
 .queue-submit:hover { background: var(--fg-muted); }
 .queue-submit kbd { color: inherit; }
-.toolbar { display: flex; align-items: center; gap: 2px; margin-top: 6px; }
-.toolbar .icon { font-size: 17px; }
-.toolbar .icon svg { width: 14px; height: 14px; }
-.toolbar .sep { width: 1px; height: 14px; background: var(--border); margin: 0 5px; }
-.tool-chip { font-size: 11px; color: var(--fg-muted); padding: 4px 7px; border-radius: 6px; white-space: nowrap; }
+.toolbar { display: flex; align-items: center; gap: 1px; margin: 3px 4px 0 6px; }
+.toolbar .icon { width: 26px; height: 26px; padding: 5px; font-size: 16px; }
+.toolbar .icon svg { width: 13px; height: 13px; }
+.toolbar .sep { width: 1px; height: 12px; background: var(--border); margin: 0 5px; }
+.tool-chip { font-size: 11px; color: var(--fg-muted); padding: 3px 6px; border-radius: 6px; white-space: nowrap; }
 .tool-chip:hover { color: var(--fg); }
 .tool-chip.right { margin-left: auto; }
-.status-line { min-height: 44px; padding: 8px 0 9px; color: var(--fg-muted); display: flex; flex-wrap: wrap; column-gap: 5px; row-gap: 4px; font-size: 9px; line-height: 13px; font-variant-numeric: tabular-nums; }
+.status-line { min-height: 36px; padding: 6px 0 8px; color: var(--fg-muted); display: flex; flex-wrap: wrap; column-gap: 5px; row-gap: 4px; font-size: 9px; line-height: 13px; font-variant-numeric: tabular-nums; }
 .status-line .cwd { flex-basis: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); }
 .right-panel { border-left: 1px solid var(--border); background: var(--bg-raised); min-height: 0; overflow-y: auto; }
 .panel-tools { height: 40px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border); padding: 0 9px; }
@@ -257,7 +256,8 @@ details[open] > summary .chevron { transform: rotate(90deg); }
   <div class="composer-zone"><div class="composer-frame">
     <div class="queue-card"><span class="queued-count">1 queued</span><span>also add the keyboard map</span><div class="queue-actions"><button class="text-action">Edit</button><button class="text-action">Delete</button><button class="text-action steer">Steer ↗</button></div></div>
     <div class="chip-row" aria-label="Location"><button class="chip" title="Worktree .claude/worktrees/charter on branch charter">⎇ charter · .claude/worktrees/charter ⌄</button><button class="chip">+ dir</button></div>
-    <div class="box"><div class="editor-row"><textarea aria-label="Message Claude" placeholder="Do anything"></textarea><button class="queue-submit" title="Queue a message after the current turn">Queue <kbd>↵</kbd></button></div><div class="toolbar"><button class="icon" aria-label="Files, slash commands, connectors, plugins">+</button><button class="icon" aria-label="Mention context">@</button><button class="icon" aria-label="Dictate message"><svg><use href="#mic"/></svg></button><span class="sep" aria-hidden="true"></span><button class="tool-chip" title="Permission mode">auto ⌄</button><button class="tool-chip right" title="Model and effort">Opus 5.5 · High ⌄</button></div></div>
+    <div class="box"><textarea aria-label="Message Claude" placeholder="Do anything"></textarea><button class="queue-submit" title="Queue a message after the current turn">Queue <kbd>↵</kbd></button></div>
+     <div class="toolbar"><button class="icon" aria-label="Files, slash commands, connectors, plugins">+</button><button class="icon" aria-label="Mention context">@</button><button class="icon" aria-label="Dictate message"><svg><use href="#mic"/></svg></button><span class="sep" aria-hidden="true"></span><button class="tool-chip" title="Permission mode">auto ⌄</button><button class="tool-chip right" title="Model and effort">Opus 5.5 · High ⌄</button></div>
     <div class="status-line" aria-label="Session status"><span class="cwd">~/Developer/GitHub/MAWS/.claude/worktrees/charter</span><span>ctx 41% of 1M</span><span>·</span><span>5h 74% ↻2h37m</span><span>·</span><span>7d 82%</span><span>·</span><span>$3.41</span><span>·</span><span>auto</span></div>
   </div></div>
   <div class="bottom-preview" id="bottom-panel" hidden><span class="mono">Terminal</span> <span class="muted">· .claude/worktrees/charter</span><p class="mono">$ <span class="faint">Ready in the session worktree</span></p></div>

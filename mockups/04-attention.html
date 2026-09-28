@@ -86,11 +86,11 @@ figcaption .dimension { margin-left: auto; color: var(--fg-muted); font-size: 11
 .quick .hint { margin-top: 13px; }
 /* 02 + 03 — one composer locus, occupied by the permission request. */
 .main-crop { padding: 22px 24px 0; }
-.assistant-line { margin: 3px 0 28px; }
-.locus-label { display: flex; justify-content: space-between; margin: 0 2px 8px; color: var(--fg-muted); font-size: 11px; }
+.assistant-line { margin: 3px 0 22px; }
+.locus-label { display: flex; justify-content: space-between; margin: 0 2px 6px; color: var(--fg-muted); font-size: 11px; }
 .permission { border: 1px solid var(--border-strong); border-top: 2px solid var(--warning); border-radius: var(--radius); background: var(--bg-raised); }
-.permission-content { padding: 16px; }
-.permission-header { margin-bottom: 15px; }
+.permission-content { padding: 14px; }
+.permission-header { margin-bottom: 12px; }
 .permission-header .pending { margin-left: auto; }
 .command-summary { padding: 0; position: relative; }
 .command-summary summary { list-style: none; cursor: pointer; padding: 10px 82px 10px 12px; }
@@ -103,21 +103,21 @@ figcaption .dimension { margin-left: auto; color: var(--fg-muted); font-size: 11
 .why span { color: var(--fg-muted); }
 fieldset { border: 0; padding: 0; margin: 16px 0 0; min-width: 0; }
 legend { font-size: 11px; color: var(--fg-muted); margin-bottom: 7px; }
-.scope { display: flex; gap: 9px; align-items: center; min-height: 32px; padding: 5px 8px; border-radius: 5px; font-size: 12px; cursor: pointer; }
+.scope { display: flex; gap: 9px; align-items: center; min-height: 30px; padding: 5px 8px; border-radius: 5px; font-size: 12px; cursor: pointer; }
 .scope:has(input:checked) { background: var(--accent-soft); }
 .scope input { margin: 0; }
 .scope .scope-note { margin-left: auto; font-size: 11px; color: var(--fg-muted); }
 .deny-reason { margin: 8px 8px 0; font-size: 12px; }
 .deny-reason summary { color: var(--fg-muted); cursor: pointer; width: fit-content; }
 .deny-reason textarea { width: 100%; min-height: 55px; margin-top: 10px; background: var(--bg); color: var(--fg); border: 1px solid var(--border-strong); border-radius: 6px; padding: 8px; resize: vertical; }
-.permission-footer { display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--border); }
+.permission-footer { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--border); }
 .permission-footer .hint { margin-left: auto; }
-.statusline { display: flex; align-items: center; gap: 5px; min-height: 38px; color: var(--fg-muted); font-size: 11px; white-space: nowrap; }
+.statusline { display: flex; align-items: center; gap: 5px; min-height: 34px; color: var(--fg-muted); font-size: 11px; white-space: nowrap; }
 .statusline button { color: inherit; font-size: inherit; padding: 4px 2px; border-radius: 4px; }
 .statusline button:hover,.statusline .hovered { background: var(--bg-active); color: var(--fg); }
 .statusline .path { margin-right: auto; font-size: 11px; }
 .files { border: 1px solid var(--border); background: var(--bg); border-radius: 6px; }
-.file { padding: 11px 12px; }
+.file { padding: 9px 12px; }
 .file+.file { border-top: 1px solid var(--border); }
 .file code { font: 12px var(--font-mono); }
 .file .counts { margin-left: auto; font: 11px var(--font-mono); }
@@ -165,24 +165,23 @@ legend { font-size: 11px; color: var(--fg-muted); margin-bottom: 7px; }
 .switch input:checked+span { background: var(--accent); }
 .switch input:checked+span::before { transform: translateX(10px); background: var(--bg); }
 .switch input:focus-visible+span { outline: 2px solid var(--accent); outline-offset: 3px; }
-/* Composer, Claude Desktop's anatomy (§5.4, D-20): location chips above the box; editor with send inside; toolbar below, inside the box. A docked card takes the box's place under the same chips. */
-.composer-frame { width: 100%; margin: 12px auto 0; }
-.chip-row { display: flex; flex-wrap: wrap; gap: 5px; margin: 0 0 8px 2px; }
-.chip { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--border); padding: 3px 7px; border-radius: var(--radius-sm); font-size: 11px; color: var(--fg-muted); white-space: nowrap; }
+/* Composer at Claude Desktop's proportions (§5.4, D-20): chips above; a thin rounded input line holding only the editor and the round send; the controls beneath, unframed. About two thirds of the pane, capped at 720. A docked card takes the box's place under the same chips. */
+.composer-frame { width: clamp(360px, 66.6%, 720px); margin: 10px auto 0; }
+.chip-row { display: flex; flex-wrap: nowrap; gap: 5px; margin: 0 0 6px 2px; overflow: hidden; }
+.chip { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--border); padding: 2px 7px; border-radius: var(--radius-sm); font-size: 11px; color: var(--fg-muted); white-space: nowrap; }
 .chip:hover { color: var(--fg); }
-.box { background: var(--bg-raised); border: 1px solid var(--border-strong); border-radius: var(--radius-lg); padding: 10px 10px 8px 14px; }
+.box { display: flex; align-items: flex-end; gap: 8px; min-height: 44px; background: var(--bg-raised); border: 1px solid var(--border-strong); border-radius: var(--radius-lg); padding: 6px 6px 6px 16px; }
 .box:focus-within { border-color: var(--fg-muted); }
-.editor-row { display: flex; align-items: flex-end; gap: 8px; }
-.editor-row textarea { flex: 1; min-width: 0; display: block; resize: none; height: 44px; border: 0; outline: none; background: transparent; font-size: 15px; line-height: 1.6; padding: 2px 0; color: var(--fg); }
-.editor-row textarea::placeholder { color: var(--fg-muted); }
+.box textarea { flex: 1; min-width: 0; display: block; resize: none; height: 22px; max-height: 154px; margin: 4px 0; border: 0; outline: none; background: transparent; font-size: 14px; line-height: 22px; padding: 0; color: var(--fg); }
+.box textarea::placeholder { color: var(--fg-muted); }
 .send { width: 30px; height: 30px; border-radius: 50%; background: var(--fg); color: var(--bg); display: inline-grid; place-items: center; font-size: 15px; flex-shrink: 0; }
 .send:hover { background: var(--fg-muted); }
-.toolbar { display: flex; align-items: center; gap: 2px; margin-top: 6px; }
-.toolbar .icon { width: 28px; height: 28px; font-size: 17px; color: var(--fg-muted); border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; }
+.toolbar { display: flex; align-items: center; gap: 1px; margin: 3px 4px 0 6px; }
+.toolbar .icon { width: 26px; height: 26px; font-size: 16px; color: var(--fg-muted); border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; }
 .toolbar .icon:hover { color: var(--fg); }
-.toolbar svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
-.toolbar .sep { width: 1px; height: 14px; background: var(--border); margin: 0 5px; }
-.tool-chip { font-size: 11px; color: var(--fg-muted); padding: 4px 7px; border-radius: 6px; white-space: nowrap; }
+.toolbar svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.toolbar .sep { width: 1px; height: 12px; background: var(--border); margin: 0 5px; }
+.tool-chip { font-size: 11px; color: var(--fg-muted); padding: 3px 6px; border-radius: 6px; white-space: nowrap; }
 .tool-chip:hover { color: var(--fg); }
 .tool-chip.right { margin-left: auto; }
 /* 05 — usage uses one magnitude ink; context uses order + texture + labels. */
@@ -235,7 +234,7 @@ legend { font-size: 11px; color: var(--fg-muted); margin-bottom: 7px; }
  .statusline .path { flex-basis: 100%; }
  .file code { font-size: 10px; overflow-wrap: anywhere; }
  .file .counts { white-space: nowrap; }
- .composer-frame { max-width: none; }
+ .composer-frame { width: 100%; }
 }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
 </style>
@@ -363,7 +362,8 @@ legend { font-size: 11px; color: var(--fg-muted); margin-bottom: 7px; }
     <div class="model-bottom"><span class="small muted">Effort</span><fieldset class="effort" aria-label="Model effort"><label><input type="radio" name="effort">Low</label><label><input type="radio" name="effort">Medium</label><label><input type="radio" name="effort" checked>High</label><label><input type="radio" name="effort">Max</label></fieldset><div class="row between small"><label for="fast-mode">Fast mode</label><label class="switch"><input id="fast-mode" type="checkbox"><span></span></label></div></div>
    </section>
   </div>
-  <div class="composer-frame"><div class="chip-row" aria-label="Location"><button class="chip">~/Developer/GitHub/MAWS · ⎇ feat/sidebar-drag ⌄</button><button class="chip">+ dir</button></div><div class="box"><div class="editor-row"><textarea aria-label="Message with slash command" spellcheck="false">/mo</textarea><button class="send" aria-label="Send message" title="Send · ↵">↑</button></div><div class="toolbar"><button class="icon" aria-label="Files, slash commands, connectors, plugins">+</button><button class="icon" aria-label="Mention context">@</button><button class="icon" aria-label="Dictate"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="6" y="2" width="4" height="7" rx="2"/><path d="M3.5 7v1a4.5 4.5 0 0 0 9 0V7M8 12.5V15M5 15h6"/></svg></button><span class="sep" aria-hidden="true"></span><button class="tool-chip" title="Permission mode">auto ⌄</button><button class="tool-chip right" title="Model and effort">Opus 5.5 · High ⌄</button></div></div></div>
+  <div class="composer-frame"><div class="chip-row" aria-label="Location"><button class="chip">~/Developer/GitHub/MAWS · ⎇ feat/sidebar-drag ⌄</button><button class="chip">+ dir</button></div><div class="box"><textarea aria-label="Message with slash command" spellcheck="false">/mo</textarea><button class="send" aria-label="Send message" title="Send · ↵">↑</button></div>
+     <div class="toolbar"><button class="icon" aria-label="Files, slash commands, connectors, plugins">+</button><button class="icon" aria-label="Mention context">@</button><button class="icon" aria-label="Dictate"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="6" y="2" width="4" height="7" rx="2"/><path d="M3.5 7v1a4.5 4.5 0 0 0 9 0V7M8 12.5V15M5 15h6"/></svg></button><span class="sep" aria-hidden="true"></span><button class="tool-chip" title="Permission mode">auto ⌄</button><button class="tool-chip right" title="Model and effort">Opus 5.5 · High ⌄</button></div></div>
   <div class="statusline"><span class="path">~/Developer/GitHub/MAWS</span><span>·</span><button>ctx 41% of 1M</button><span>·</span><button>5h 74% ↻2h37m</button><span>·</span><button>7d 82% ↻5d21h</button><span>·</span><button>$3.41</button><span>·</span><button>auto</button></div>
  </div>
 </figure>
@@ -389,7 +389,8 @@ legend { font-size: 11px; color: var(--fg-muted); margin-bottom: 7px; }
     </div>
    </section>
   </div>
-  <div class="composer-frame"><div class="chip-row" aria-label="Location"><button class="chip">~/Developer/GitHub/MAWS · ⎇ feat/sidebar-drag ⌄</button><button class="chip">+ dir</button></div><div class="box"><div class="editor-row"><textarea aria-label="Message" placeholder="Ask a follow-up…"></textarea><button class="send" aria-label="Send message" title="Send · ↵">↑</button></div><div class="toolbar"><button class="icon" aria-label="Files, slash commands, connectors, plugins">+</button><button class="icon" aria-label="Mention context">@</button><button class="icon" aria-label="Dictate"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="6" y="2" width="4" height="7" rx="2"/><path d="M3.5 7v1a4.5 4.5 0 0 0 9 0V7M8 12.5V15M5 15h6"/></svg></button><span class="sep" aria-hidden="true"></span><button class="tool-chip" title="Permission mode">auto ⌄</button><button class="tool-chip right" title="Model and effort">Opus 5.5 · High ⌄</button></div></div></div>
+  <div class="composer-frame"><div class="chip-row" aria-label="Location"><button class="chip">~/Developer/GitHub/MAWS · ⎇ feat/sidebar-drag ⌄</button><button class="chip">+ dir</button></div><div class="box"><textarea aria-label="Message" placeholder="Ask a follow-up…"></textarea><button class="send" aria-label="Send message" title="Send · ↵">↑</button></div>
+     <div class="toolbar"><button class="icon" aria-label="Files, slash commands, connectors, plugins">+</button><button class="icon" aria-label="Mention context">@</button><button class="icon" aria-label="Dictate"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="6" y="2" width="4" height="7" rx="2"/><path d="M3.5 7v1a4.5 4.5 0 0 0 9 0V7M8 12.5V15M5 15h6"/></svg></button><span class="sep" aria-hidden="true"></span><button class="tool-chip" title="Permission mode">auto ⌄</button><button class="tool-chip right" title="Model and effort">Opus 5.5 · High ⌄</button></div></div>
   <div class="statusline"><span class="path">~/Developer/GitHub/MAWS</span><span>·</span><button class="hovered">ctx 41% of 1M</button><span>·</span><button class="hovered">5h 74% ↻2h37m</button><span>·</span><button class="hovered">7d 82% ↻5d21h</button><span>·</span><button>$3.41</button><span>·</span><button>auto</button></div>
  </div>
 </figure>

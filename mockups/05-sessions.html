@@ -96,28 +96,27 @@ figcaption .dimension { margin-left: auto; color: var(--fg-muted); font-size: 11
 .pane-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .pane-main.solo { min-height: 500px; }
 .pane-body { flex: 1; display: flex; flex-direction: column; justify-content: center; padding: 24px 20px 40px; }
-.pane-heading { text-align: center; font-size: 17px; font-weight: 550; letter-spacing: -.2px; margin: 0 0 18px; }
-.draft-line { margin: 0 2px 8px; font-size: 12px; color: var(--fg-muted); line-height: 1.5; }
+.pane-heading { text-align: center; font-size: 17px; font-weight: 550; letter-spacing: -.2px; margin: 0 0 14px; }
+.draft-line { margin: 0 2px 6px; font-size: 12px; color: var(--fg-muted); line-height: 1.5; }
 .draft-line q { color: var(--fg); }
-/* Composer, Claude Desktop's anatomy: location chips above the box; editor with send inside; toolbar below, inside the box. */
-.composer-frame { width: 100%; max-width: 680px; margin: 0 auto; }
-.chip-row { display: flex; flex-wrap: wrap; gap: 5px; margin: 0 0 8px 2px; }
-.chip-row .chip { border-color: var(--border); background: transparent; color: var(--fg-muted); padding: 3px 7px; border-radius: var(--radius-sm); }
+/* Composer at Claude Desktop's proportions (§5.4): chips above; a thin rounded input line holding only the editor and the round send, one line tall at rest, growing to a cap; the controls beneath, unframed. The frame is about two thirds of the pane, capped at 720 (floored at 360 so narrow crops stay legible). */
+.composer-frame { width: clamp(360px, 66.6%, 720px); margin: 0 auto; }
+.chip-row { display: flex; flex-wrap: nowrap; gap: 5px; margin: 0 0 6px 2px; overflow: hidden; }
+.chip-row .chip { border-color: var(--border); background: transparent; color: var(--fg-muted); padding: 2px 7px; border-radius: var(--radius-sm); font-size: 11px; }
 .chip-row .chip:hover { color: var(--fg); }
 .chip-row .chip.open { color: var(--fg); border-color: var(--border-strong); background: var(--bg-active); }
-.box { background: var(--bg-raised); border: 1px solid var(--border-strong); border-radius: var(--radius-lg); padding: 10px 10px 8px 14px; }
+.box { display: flex; align-items: flex-end; gap: 8px; min-height: 44px; background: var(--bg-raised); border: 1px solid var(--border-strong); border-radius: var(--radius-lg); padding: 6px 6px 6px 16px; }
 .box:focus-within { border-color: var(--fg-muted); }
-.editor-row { display: flex; align-items: flex-end; gap: 8px; }
-.editor-row textarea { flex: 1; min-width: 0; display: block; resize: none; height: 48px; border: 0; outline: none; background: transparent; font-size: 15px; line-height: 1.6; padding: 2px 0; color: var(--fg); }
-.editor-row textarea::placeholder { color: var(--fg-muted); }
+.box textarea { flex: 1; min-width: 0; display: block; resize: none; height: 22px; max-height: 154px; margin: 4px 0; border: 0; outline: none; background: transparent; font-size: 14px; line-height: 22px; padding: 0; color: var(--fg); }
+.box textarea::placeholder { color: var(--fg-muted); }
 .send { width: 30px; height: 30px; border-radius: 50%; background: var(--fg); color: var(--bg); display: inline-grid; place-items: center; font-size: 15px; flex-shrink: 0; }
 .send:hover { background: var(--fg-muted); }
-.toolbar { display: flex; align-items: center; gap: 2px; margin-top: 6px; }
-.toolbar .icon { width: 28px; height: 28px; font-size: 17px; color: var(--fg-muted); border-radius: 6px; }
+.toolbar { display: flex; align-items: center; gap: 1px; margin: 3px 4px 0 6px; }
+.toolbar .icon { width: 26px; height: 26px; font-size: 16px; color: var(--fg-muted); border-radius: 6px; }
 .toolbar .icon:hover { color: var(--fg); }
-.toolbar svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
-.toolbar .sep { width: 1px; height: 14px; background: var(--border); margin: 0 5px; }
-.tool-chip { font-size: 11px; color: var(--fg-muted); padding: 4px 7px; border-radius: 6px; white-space: nowrap; }
+.toolbar svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.toolbar .sep { width: 1px; height: 12px; background: var(--border); margin: 0 5px; }
+.tool-chip { font-size: 11px; color: var(--fg-muted); padding: 3px 6px; border-radius: 6px; white-space: nowrap; }
 .tool-chip:hover { color: var(--fg); }
 .tool-chip.right { margin-left: auto; }
 /* Location popover, shown as its own crop rather than held open in the pane. */
@@ -145,14 +144,14 @@ figcaption .dimension { margin-left: auto; color: var(--fg-muted); font-size: 11
 /* Docked cards replacing the box, 04's anatomy. */
 .docked { border: 1px solid var(--border-strong); border-top: 2px solid var(--info); border-radius: var(--radius); background: var(--bg-raised); }
 .docked.warn-tone { border-top-color: var(--warning); }
-.docked .content { padding: 14px 16px; }
+.docked .content { padding: 12px 14px; }
 .docked .header { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
 .docked .header .who { width: 26px; height: 26px; display: inline-grid; place-items: center; background: var(--bg-active); border: 1px solid var(--border-strong); border-radius: 7px; font-size: 15px; flex-shrink: 0; }
 .docked .header .pending { margin-left: auto; font-size: 11px; color: var(--fg-muted); white-space: nowrap; }
 .docked p { font-size: 12px; line-height: 1.55; }
 .docked .endpoint { display: block; font: 11px var(--font-mono); color: var(--fg-muted); margin: -4px 0 10px 34px; }
 .docked .choice { margin: 0; }
-.docked .footer { display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--border); }
+.docked .footer { display: flex; align-items: center; gap: 8px; padding: 9px 14px; border-top: 1px solid var(--border); }
 .docked .footer .hint { margin-left: auto; text-align: right; }
 .loads { margin: 10px 0 2px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); }
 .loads .row { padding: 6px 10px; font-size: 11px; }
@@ -309,10 +308,8 @@ figcaption .dimension { margin-left: auto; color: var(--fg-muted); font-size: 11
     <h3 class="pane-heading">What should this session do in MAWS?</h3>
     <div class="composer-frame">
      <div class="chip-row" aria-label="Location"><button class="chip" title="Location: new worktree on branch feat/session-tab">⎇ feat/session-tab · new worktree ⌄</button><button class="chip">+ dir</button></div>
-     <div class="box">
-      <div class="editor-row"><textarea aria-label="First message" placeholder="Message Claude to start the session"></textarea><button class="send" aria-label="Send" title="Send · ↵">↑</button></div>
-      <div class="toolbar"><button class="icon" aria-label="Files, slash commands, connectors, plugins">+</button><button class="icon" aria-label="Mention context">@</button><button class="icon" aria-label="Dictate"><svg><use href="#mic"/></svg></button><span class="sep" aria-hidden="true"></span><button class="tool-chip" title="Permission mode">auto ⌄</button><button class="tool-chip right" title="Model and effort">Opus 5.5 · High ⌄</button></div>
-     </div>
+     <div class="box"><textarea aria-label="First message" placeholder="Message Claude to start the session"></textarea><button class="send" aria-label="Send" title="Send · ↵">↑</button></div>
+     <div class="toolbar"><button class="icon" aria-label="Files, slash commands, connectors, plugins">+</button><button class="icon" aria-label="Mention context">@</button><button class="icon" aria-label="Dictate"><svg><use href="#mic"/></svg></button><span class="sep" aria-hidden="true"></span><button class="tool-chip" title="Permission mode">auto ⌄</button><button class="tool-chip right" title="Model and effort">Opus 5.5 · High ⌄</button></div>
     </div>
    </div>
   </div>
