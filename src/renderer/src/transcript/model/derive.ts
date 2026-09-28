@@ -76,6 +76,11 @@ export function turnSummary(turn: TurnState): TurnSummary {
   return deriveTurn(turn, null).summary;
 }
 
+// The group phrases of a whole turn ("Edited 3 files, ran 2 commands"): the turn summary popover's category segment.
+export function turnPhrases(turn: TurnState): string {
+  return groupSummary(phrasesOf(deriveTurn(turn, null).cells));
+}
+
 // A state whose every turn, group and cell is expanded and every rewound branch revealed: the snapshot suite's view.
 export function withAllExpanded(state: TranscriptState): TranscriptState {
   const turns = [...state.order, ...(state.hidden?.turns ?? [])];
@@ -127,7 +132,7 @@ const glyphOf = (id: string) => {
 
 const isAborted = (reason: string | null) => reason !== null && reason.startsWith('aborted');
 
-function deriveTurn(turn: TurnState, state: TranscriptState | null): { rows: Row[]; summary: TurnSummary } {
+function deriveTurn(turn: TurnState, state: TranscriptState | null): { rows: Row[]; summary: TurnSummary; cells: Cell[] } {
   const ui = state?.ui;
   const expanded = ui ? ui.expandedTurns.has(turn.id) || (turn.state === 'open' && !ui.collapsedTurns.has(turn.id)) : false;
   const context: TurnContext = { closed: turn.state === 'closed', terminalReason: turn.ended?.terminalReason ?? null, lastAt: turn.events.at(-1)?.at ?? turn.startedAt };
@@ -468,7 +473,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): { rows: Row
       state: 'applied', canUndo: true, canReapply: false,
     });
   }
-  return { rows, summary };
+  return { rows, summary, cells };
 }
 
 // ---------------------------------------------------------------------------------------------------------------------

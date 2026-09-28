@@ -40,15 +40,16 @@ describe.each([false, true])('markdown sanitisation (live: %s)', (live) => {
     const hrefs = [...view().querySelectorAll('a')].map((a) => a.getAttribute('href'));
     expect(hrefs).toContain('https://example.com/a');
     expect(hrefs).toContain('mailto:me@example.com');
-    expect(hrefs).toContain('maws-path:src/renderer/x.ts');
+    // The path chip (Link.tsx) names the path it opens; it is a button, never a navigable link.
+    expect([...view().querySelectorAll('[data-chip="path"]')].map((chip) => chip.getAttribute('title'))).toEqual(['src/renderer/x.ts']);
   });
 
   it('loads no image by URL: a non-data image becomes an image chip, a data image stays', () => {
     const root = view();
     const sources = [...root.querySelectorAll('img')].map((img) => img.getAttribute('src'));
     expect(sources.every((src) => src !== null && src.startsWith('data:image/'))).toBe(true);
-    const hrefs = [...root.querySelectorAll('a')].map((a) => a.getAttribute('href'));
-    expect(hrefs).toContain('maws-image:https://example.com/i.png');
+    const chips = [...root.querySelectorAll('[data-chip="image"]')].map((chip) => chip.getAttribute('title'));
+    expect(chips).toContain('https://example.com/i.png');
   });
 });
 

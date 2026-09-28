@@ -85,6 +85,16 @@ export function createState(sessionId: SessionId | null, agentId: AgentId | null
   };
 }
 
+// A new state with the reader's expansion state replaced (the store's toggles). It joins the lineage as its latest, so
+// later batches apply to it; `ui.version` must only grow, since derive.ts memoises rows on it.
+export function withUi(state: TranscriptState, ui: TranscriptUi): TranscriptState {
+  if (state.lineage.latest !== null && state.lineage.latest !== state) throw new Error('withUi: this state is not its lineage’s latest');
+  if (ui.version <= state.ui.version) throw new Error('withUi: ui.version must grow');
+  const next = { ...state, ui };
+  state.lineage.latest = next;
+  return next;
+}
+
 export const blockIdentityOf = (apiMessageId: ApiMessageId, blockIndex: number) => `${apiMessageId}:${blockIndex}`;
 export const isEngineOrigin = (origin: string | null) => origin !== null && origin !== 'human';
 
