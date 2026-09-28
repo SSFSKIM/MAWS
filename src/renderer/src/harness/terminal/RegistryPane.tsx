@@ -1,7 +1,9 @@
 // The `#probe` page's shell pane on the product wiring (C9 M3): login shells opened, shown, hidden, reattached after a
 // reload, marked lost and respawned through `TerminalRegistry`, so the page is a manual check of the registry; its
-// debug strip shows the host's `pty.list` rows and each handle's status, acceleration and reattach path. Exposes
-// `window.__maws_harness.terminals` (the same names the `#panel` page will carry in M4). Tokens only.
+// debug strip shows the host's `pty.list` rows (with a latch for a pty ever seen paused), a per-pty counter of bytes,
+// line feeds and carriage returns, and each handle's status, acceleration and reattach path; a Ping button measures
+// how long a click waits for the main thread. Exposes `window.__maws_harness.terminals` (the same names the `#panel`
+// page will carry in M4). Tokens only.
 import { useEffect, useRef, useState } from 'react';
 import { create } from 'zustand';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -11,6 +13,7 @@ import { ipc } from '../../ipc/client';
 import { useTerminals } from '../../stores/terminals';
 import { terminals, type TerminalId, type TerminalInfo } from '../../terminal/registry';
 import type { TerminalProbe } from '../../terminal/renderer';
+import { countLineEndings } from './metrics';
 
 // The registry pane's terminals belong to a session of their own, so a reload re-adopts exactly them.
 export const REGISTRY_SESSION = 'probe-registry' as AppSessionId;
@@ -27,9 +30,59 @@ export interface TerminalsHarnessApi {
   respawn(id: TerminalId): Promise<void>;
   close(id: TerminalId): Promise<void>;
   ptys(): Promise<PtyInfo[]>;
+  selection(id: TerminalId): string;
+  counters(id: TerminalId): StreamCounters | null; // every pty.data byte of the terminal's pty since it spawned
+  pausedSeen(id: TerminalId): boolean; // the host reported the terminal's pty paused in at least one 50 ms sample
+  pings(): Pings;
+}
+
+export interface StreamCounters {
+  bytes: number;
+  lineFeeds: number;
+  carriageReturns: number;
+}
+
+export interface Pings {
+  count: number;
+  lastMs: number | null; // how long the last click's event waited before its handler ran
+  maxMs: number | null;
 }
 
 const useSelection = create<{ selected: TerminalId | null }>()(() => ({ selected: null }));
+
+// A debugging tap beside the registry (the registry stays the product's only consumer): byte counts per pty, and the
+// host's pty.list sampled every 50 ms, latching a pty once seen paused and publishing its rows twice a second.
+const counters = new Map<string, StreamCounters>();
+const pausedSeen = new Set<string>();
+const useSamples = create<{ rows: PtyInfo[]; pings: Pings }>()(() => ({ rows: [], pings: { count: 0, lastMs: null, maxMs: null } }));
+let tapping = false;
+
+function tap(): void {
+  if (tapping) return;
+  tapping = true;
+  ipc.on('pty.data', ({ ptyId, data }) => {
+    const counter = counters.get(ptyId) ?? { bytes: 0, lineFeeds: 0, carriageReturns: 0 };
+    const endings = countLineEndings(data);
+    counter.bytes += data.byteLength;
+    counter.lineFeeds += endings.lineFeeds;
+    counter.carriageReturns += endings.carriageReturns;
+    counters.set(ptyId, counter);
+  });
+  let samples = 0;
+  setInterval(() => {
+    void ipc.invoke('pty.list', undefined).then((result) => {
+      if (!result.ok) return;
+      for (const pty of result.value.ptys) if (pty.paused) pausedSeen.add(pty.ptyId);
+      if (samples++ % 10 === 0) useSamples.setState({ rows: result.value.ptys });
+    });
+  }, 50);
+}
+
+function ping(ev: { timeStamp: number }): void {
+  const waited = Math.round((performance.now() - ev.timeStamp) * 10) / 10;
+  const { pings } = useSamples.getState();
+  useSamples.setState({ pings: { count: pings.count + 1, lastMs: waited, maxMs: Math.max(pings.maxMs ?? 0, waited) } });
+}
 const select = (selected: TerminalId | null) => useSelection.setState({ selected });
 
 let opened = 0;
@@ -42,6 +95,7 @@ function open(command?: string): TerminalId {
 }
 
 function ready(): Promise<TerminalId[]> {
+  tap();
   adoption ??= terminals.adopt((info) => info.appSessionId === REGISTRY_SESSION).then((ids) => {
     if (ids.length) select(ids[0]!);
     else open();
@@ -75,22 +129,20 @@ export const terminalsApi: TerminalsHarnessApi = {
     const result = await ipc.invoke('pty.list', undefined);
     return result.ok ? result.value.ptys : [];
   },
+  selection: (id) => handle(id)?.renderer?.getSelection() ?? '',
+  counters(id) {
+    const ptyId = handle(id)?.info.ptyId;
+    const counter = ptyId ? counters.get(ptyId) : undefined;
+    return counter ? { ...counter } : null;
+  },
+  pausedSeen(id) {
+    const ptyId = handle(id)?.info.ptyId;
+    return !!ptyId && pausedSeen.has(ptyId);
+  },
+  pings: () => useSamples.getState().pings,
 };
 
-function usePtyRows(): PtyInfo[] {
-  const [rows, setRows] = useState<PtyInfo[]>([]);
-  useEffect(() => {
-    let live = true;
-    const poll = () => void terminalsApi.ptys().then((ptys) => live && setRows(ptys));
-    poll();
-    const timer = setInterval(poll, 500);
-    return () => {
-      live = false;
-      clearInterval(timer);
-    };
-  }, []);
-  return rows;
-}
+const counterText = (c: StreamCounters | undefined) => (c ? `bytes ${c.bytes} · LF ${c.lineFeeds} · CR ${c.carriageReturns}` : 'bytes 0');
 
 export function RegistryPane() {
   const infos = useTerminals((s) => s.terminals);
@@ -98,7 +150,8 @@ export function RegistryPane() {
   const selected = useSelection((s) => s.selected);
   const hostRef = useRef<HTMLDivElement>(null);
   const [checkpoints, setCheckpoints] = useState(true);
-  const ptys = usePtyRows();
+  const ptys = useSamples((s) => s.rows);
+  const pings = useSamples((s) => s.pings);
   const current = infos.find((info) => info.id === selected) ?? null;
 
   useEffect(() => void ready(), []);
@@ -155,6 +208,10 @@ export function RegistryPane() {
         >
           checkpoints {checkpoints ? 'on' : 'off'}
         </button>
+        <button type="button" onClick={(ev) => ping(ev)} className={button}>
+          ping {pings.count}
+          {pings.lastMs === null ? '' : ` · ${pings.lastMs} ms (max ${pings.maxMs})`}
+        </button>
       </div>
       {current?.reconnect === 'lossy' ? (
         <div role="status" className="shrink-0 border-b border-border bg-bg-raised px-2 py-0.5 text-ui-sm text-fg-muted">
@@ -176,7 +233,8 @@ export function RegistryPane() {
         ))}
         {ptys.map((pty) => (
           <div key={pty.ptyId} data-pty={pty.ptyId}>
-            pty.list {pty.appSessionId}/{pty.label} · pid {pty.pid} · {pty.alive ? 'alive' : 'dead'} · paused {String(pty.paused)} · offset {pty.offset}
+            pty.list {pty.appSessionId}/{pty.label} · pid {pty.pid} · {pty.alive ? 'alive' : 'dead'} · paused {String(pty.paused)}
+            {pausedSeen.has(pty.ptyId) ? ' (paused seen)' : ''} · offset {pty.offset} · {counterText(counters.get(pty.ptyId))}
           </div>
         ))}
       </output>
