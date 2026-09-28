@@ -215,7 +215,7 @@ export class EngineSession {
       subagentModel: env.CLAUDE_CODE_SUBAGENT_MODEL ?? null,
       modelOverrides: Object.fromEntries(Object.entries(env).filter(([key]) => /^ANTHROPIC_DEFAULT_[A-Z0-9_]+_MODEL$/.test(key))),
       engineVersion: this.engineVersion ?? this.plan.engineVersion, fileCheckpointing: env.CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING === '1',
-      backgroundTasks: [], grants: [...this.grants.allow], mcpServers: this.mcpServers, heldPeerMessages: [],
+      backgroundTasks: [], grants: [...this.grants.allow], mcpServers: [...this.mcpServers], heldPeerMessages: [],
       pendingRequests: this.broker.live, queue: { length: 0, paused: false }, keepAlive,
       memory: { rssKiB: null, treeRssKiB: null, sampledAt: null },
       journalPath: this.journal.path, hostHooks: this.hooks.ids(), lastEventSeq: this.lastEventSeq,
