@@ -26,7 +26,7 @@ const grid = () => region('main').parentElement!;
 const offs: (() => void)[] = [];
 
 beforeEach(() => {
-  useLayout.setState({ regions: LAYOUT_DEFAULTS.regions, main: LAYOUT_DEFAULTS.main, panelPinned: [], panelBySession: new Map(), hydrated: true });
+  useLayout.setState({ regions: LAYOUT_DEFAULTS.regions, main: LAYOUT_DEFAULTS.main, panelPinned: [], panelBySession: new Map(), panelActiveNoSession: null, hydrated: true });
   useSessions.setState({ records: new Map() });
 });
 afterEach(() => {
@@ -227,6 +227,30 @@ describe('right panel', () => {
     expect(useLayout.getState().panelBySession.get(A)).toEqual({ tabs: [{ id: 'p', toolId: 'terminal', pinned: false }], activeTabId: 'p' });
     act(() => props!.onToggleMaximize());
     expect(useLayout.getState().regions.panel.maximized).toBe(true);
+  });
+
+  it('with the Overview focused, round-trips the selection between two pins and falls back when the selected pin goes', () => {
+    let props: PanelHostProps | null = null;
+    registerSlot('panelHost', (p) => {
+      props = p;
+      return null;
+    });
+    const p1 = { id: 'p1', toolId: 'terminal', pinned: true };
+    const p2 = { id: 'p2', toolId: 'files', pinned: true };
+    useLayout.setState({ panelPinned: [p1, p2] });
+    render(<Shell />);
+    expect(props!).toMatchObject({ appSessionId: null, activeTabId: null });
+    act(() => props!.onChange({ tabs: [p1, p2], activeTabId: 'p2' }));
+    expect(props!.activeTabId).toBe('p2');
+    act(() => props!.onChange({ tabs: [p1, p2], activeTabId: 'p1' }));
+    expect(props!.activeTabId).toBe('p1');
+    act(() => props!.onChange({ tabs: [p1, p2], activeTabId: 'p2' }));
+    // The host removes the selected pin without choosing another: the neighbour that took its place is selected.
+    act(() => props!.onChange({ tabs: [p1], activeTabId: 'p2' }));
+    expect(props!.tabs.map((t) => t.id)).toEqual(['p1']);
+    expect(props!.activeTabId).toBe('p1');
+    act(() => props!.onChange({ tabs: [], activeTabId: 'p1' }));
+    expect(props!.activeTabId).toBeNull();
   });
 
   it('shows no session when the focused pane is on the Overview', () => {

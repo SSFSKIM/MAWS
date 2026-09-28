@@ -17,6 +17,7 @@ function setup(given: Record<string, unknown> = {}) {
   });
   const store = createLayoutStore();
   const stop = persistLayout(fake.client, store);
+  running.push(stop);
   const hydrate = async (known: (id: AppSessionId) => boolean = () => true) => {
     const hydrating = store.getState().hydrate(fake.client, known);
     await vi.runAllTimersAsync();
@@ -25,9 +26,15 @@ function setup(given: Record<string, unknown> = {}) {
   return { store, stop, hydrate, sets: () => fake.invoked('layout.set') as { key: string; value: unknown }[] };
 }
 
+// Every persistence installed by a test, stopped after it (its beforeunload listener and timers must not leak).
+const running: (() => void)[] = [];
+
 describe('layout persistence', () => {
   beforeEach(() => vi.useFakeTimers());
-  afterEach(() => vi.useRealTimers());
+  afterEach(() => {
+    running.splice(0).forEach((stop) => stop());
+    vi.useRealTimers();
+  });
 
   it('writes nothing before hydration, and hydration writes only the keys layout.json lacks', async () => {
     const regions = { ...LAYOUT_DEFAULTS.regions, sidebar: { ...LAYOUT_DEFAULTS.regions.sidebar, width: 410 } };
@@ -96,6 +103,14 @@ describe('layout persistence', () => {
     expect(sets()).toHaveLength(1); // flushed, not written twice
   });
 
+  it('never writes the transient no-session selection', async () => {
+    const { store, hydrate, sets } = setup({ 'panel.pinned': [{ id: 'p1', toolId: 'terminal', pinned: true }, { id: 'p2', toolId: 'files', pinned: true }] });
+    await hydrate();
+    store.getState().setPanelTabs(null, { tabs: store.getState().panelPinned, activeTabId: 'p2' });
+    vi.advanceTimersByTime(1000);
+    expect(sets()).toEqual([]);
+  });
+
   it('flushes on stop and then stops listening', async () => {
     const { store, hydrate, sets, stop } = setup();
     await hydrate();
@@ -122,6 +137,30 @@ describe('panel tabs from the host', () => {
     expect(store.getState().panelPinned).toEqual([{ id: 'p', toolId: 'terminal', pinned: true }]);
     expect(store.getState().panelBySession.get(A)).toEqual({ tabs: [{ id: 'o', toolId: 'files', pinned: false }], activeTabId: 'o' });
     expect(store.getState().effectivePanelTabs(A).map((t) => t.id)).toEqual(['p', 'o']);
+  });
+
+  it('with no session keeps the pins and a transient selection among them', () => {
+    const store = createLayoutStore();
+    const p1 = { id: 'p1', toolId: 'terminal', pinned: true };
+    const p2 = { id: 'p2', toolId: 'files', pinned: true };
+    store.getState().setPanelTabs(null, { tabs: [p1, p2], activeTabId: 'p2' });
+    expect(store.getState().panelActiveNoSession).toBe('p2');
+    store.getState().setPanelTabs(null, { tabs: [p1, p2, { id: 'o', toolId: 'x', pinned: false }], activeTabId: 'o' });
+    expect(store.getState().panelActiveNoSession).toBe('p2'); // an unpinned tab has nowhere to live without a session
+  });
+
+  it('revalidates the no-session selection whenever the pins change', () => {
+    const store = createLayoutStore();
+    const pin = (id: string) => ({ id, toolId: 'files', pinned: true });
+    store.getState().setPanelTabs(null, { tabs: [pin('p1'), pin('p2'), pin('p3')], activeTabId: 'p2' });
+    // Unpinned from a session's panel: p2 leaves the pins, and its right neighbour takes the selection.
+    store.getState().setPanelTabPinned(A, 'p2', false);
+    expect(store.getState().panelPinned.map((t) => t.id)).toEqual(['p1', 'p3']);
+    expect(store.getState().panelActiveNoSession).toBe('p3');
+    store.getState().setPanelTabPinned(A, 'p3', false);
+    expect(store.getState().panelActiveNoSession).toBe('p1'); // no right neighbour: the last remaining pin
+    store.getState().setPanelTabPinned(A, 'p1', false);
+    expect(store.getState().panelActiveNoSession).toBeNull();
   });
 
   it('with no session keeps only the pins', () => {

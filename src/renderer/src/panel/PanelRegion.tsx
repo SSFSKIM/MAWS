@@ -71,8 +71,10 @@ function Host({ maximized }: { maximized: boolean }) {
   const appSessionId: AppSessionId | null = tab?.kind === 'session' ? tab.appSessionId : null;
   const pinned = useLayout((s) => s.panelPinned);
   const own = useLayout((s) => (appSessionId ? s.panelBySession.get(appSessionId) : undefined));
+  const activeNoSession = useLayout((s) => s.panelActiveNoSession);
   const tabs = own ? [...pinned, ...own.tabs] : pinned;
-  const activeTabId = own?.activeTabId ?? null;
+  // A session's selection lives in its own key; with no session in view, the transient pin selection.
+  const activeTabId = appSessionId ? (own?.activeTabId ?? null) : activeNoSession;
 
   return (
     // The slot's component is registered once at composition and read from a store, not created during render.
