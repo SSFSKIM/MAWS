@@ -1,8 +1,10 @@
-import { mkdir, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { StoreFixture } from '../../../test/support/store-fixture';
 import { readSpill, SPILL_DEFAULT_LENGTH } from './artifacts';
+import { resolveStorePaths } from './paths';
 
 const S1 = '11111111-1111-4111-8111-111111111111';
 const OUTSIDE = 'path outside the engine store';
@@ -31,6 +33,28 @@ describe('fs.readSpill reads engine artifacts by the path the engine reported', 
     expect((await readSpill(fixture.paths, { path: output })).content).toBe('ONE');
     const job = await fixture.addJob('bdb23713', { state: 'done', sessionId: S1 });
     expect((await readSpill(fixture.paths, { path: job })).content).toContain('"state":"done"');
+  });
+
+  it('reads a background task\'s output under the engine\'s task-output root, and nothing beside it', async () => {
+    // CLAUDE_CODE_TMPDIR points at a directory the test owns, so nothing touches the real /tmp/claude-<uid>.
+    const tmp = await mkdtemp(join(tmpdir(), 'maws-task-output-'));
+    try {
+      const paths = resolveStorePaths({ CLAUDE_CONFIG_DIR: fixture.configHome, CLAUDE_CODE_TMPDIR: tmp });
+      const uid = process.getuid!();
+      const output = join(tmp, `claude-${uid}`, '-private-tmp-maws-probe2-1RzDNs', S1, 'tasks', 'wayue3on6.output');
+      await mkdir(dirname(output), { recursive: true });
+      await writeFile(output, 'workflow done');
+      expect(await readSpill(paths, { path: output })).toEqual({ content: 'workflow done', bytes: 13, offset: 0, truncated: false });
+
+      await writeFile(join(tmp, 'outside.txt'), 'no');
+      await expect(readSpill(paths, { path: join(tmp, `claude-${uid}`, '..', 'outside.txt') })).rejects.toThrow(OUTSIDE);
+      const neighbour = join(tmp, `claude-${uid + 1}`, 'x.output');
+      await mkdir(dirname(neighbour), { recursive: true });
+      await writeFile(neighbour, 'another user');
+      await expect(readSpill(paths, { path: neighbour })).rejects.toThrow(OUTSIDE);
+    } finally {
+      await rm(tmp, { recursive: true, force: true });
+    }
   });
 
   it('refuses anything outside projects/, tasks/ and jobs/ under the config home, however the path is spelled', async () => {

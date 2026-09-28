@@ -1,7 +1,8 @@
 // Engine artifacts read on demand (C4 execution document, M3; charter §4.3 "spilled results are loaded by the path the
 // engine reports, never by a derived name"): spilled tool results (`tool.result.spillPath`), task outputs
 // (`task.notification.outputFile`) and workflow scripts, read lazily, on click, through `fs.readSpill`. Only a path whose
-// realpath lies under `<configHome>/projects/`, `tasks/` or `jobs/` is read, so the renderer cannot turn the command
+// realpath lies under `<configHome>/projects/`, `tasks/` or `jobs/`, or under the engine's task-output root
+// (`<CLAUDE_CODE_TMPDIR or /tmp>/claude-<uid>`, SPEC 20; C8's ask), is read, so the renderer cannot turn the command
 // into a general file reader; a symlink is judged by its target. Reads are bounded. Read-only: flag 'r' only.
 import { open, realpath } from 'node:fs/promises';
 import { isAbsolute, resolve, sep } from 'node:path';
@@ -14,7 +15,7 @@ const OUTSIDE = 'path outside the engine store';
 
 export async function readSpill(paths: StorePaths, { path, offset = 0, length = SPILL_DEFAULT_LENGTH }: FsReadSpillInput): Promise<FsReadSpillOutput> {
   if (!isAbsolute(path)) throw new Error(OUTSIDE);
-  const lexicalRoots = [paths.projects, paths.tasks, paths.jobs].map((root) => resolve(root));
+  const lexicalRoots = [paths.projects, paths.tasks, paths.jobs, paths.taskOutput].map((root) => resolve(root));
   const roots = [...lexicalRoots, ...(await Promise.all(lexicalRoots.map((root) => realpath(root).catch(() => null)))).filter((root) => root !== null)];
   let real: string;
   try {

@@ -11,7 +11,7 @@ import { join, sep } from 'node:path';
 import type { SessionId } from '@shared/graph/ids';
 import type { StorePaths } from './paths';
 
-export type StoreRoot = Exclude<keyof StorePaths, 'configHome'>;
+export type StoreRoot = Exclude<keyof StorePaths, 'configHome' | 'taskOutput'>; // task outputs are read on demand, not watched
 export const STORE_ROOTS: readonly StoreRoot[] = ['projects', 'sessions', 'jobs', 'tasks'];
 
 export type StoreChange =

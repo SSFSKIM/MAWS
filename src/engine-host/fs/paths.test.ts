@@ -49,6 +49,14 @@ describe('resolveStorePaths', () => {
     expect(paths.tasks).toBe(join('/tmp/café', 'tasks'));
   });
 
+  it('places background-task outputs where the engine does: CLAUDE_CODE_TMPDIR, else /tmp literally, never os.tmpdir()', () => {
+    const uid = process.getuid!();
+    expect(resolveStorePaths({ CLAUDE_CONFIG_DIR: '/cfg' }).taskOutput).toBe(`/tmp/claude-${uid}`);
+    expect(resolveStorePaths({ CLAUDE_CONFIG_DIR: '/cfg', CLAUDE_CODE_TMPDIR: '' }).taskOutput).toBe(`/tmp/claude-${uid}`); // empty is unset
+    expect(resolveStorePaths({ CLAUDE_CONFIG_DIR: '/cfg', CLAUDE_CODE_TMPDIR: '/scratch' }).taskOutput).toBe(`/scratch/claude-${uid}`);
+    expect(resolveStorePaths({ CLAUDE_CONFIG_DIR: '/cfg', TMPDIR: '/var/folders/x/T' }).taskOutput).toBe(`/tmp/claude-${uid}`);
+  });
+
   it('falls back to ~/.claude', () => {
     const paths = resolveStorePaths({});
     expect(paths.configHome).toBe(join(homedir(), '.claude'));

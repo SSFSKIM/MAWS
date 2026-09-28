@@ -9,6 +9,9 @@ export interface StorePaths {
   sessions: string;
   jobs: string;
   tasks: string;
+  // Background-task output files live outside the config home, under `<root>/claude-<uid>/<slug>/<session>/tasks/`
+  // (SPEC 20): read on demand through `fs.readSpill`, never watched.
+  taskOutput: string;
 }
 
 // `CLAUDE_CONFIG_DIR` if set, otherwise `~/.claude`, NFC-normalised, exactly as the engine resolves it (SPEC 35.1.1).
@@ -20,7 +23,16 @@ export function resolveStorePaths(env: NodeJS.ProcessEnv): StorePaths {
     sessions: join(configHome, 'sessions'),
     jobs: join(configHome, 'jobs'),
     tasks: join(configHome, 'tasks'),
+    taskOutput: taskOutputRoot(env),
   };
+}
+
+// The engine's task-output root, spelled as it spells it (SPEC 20, `rl()`): `CLAUDE_CODE_TMPDIR` when non-empty, else the
+// literal `/tmp` — never `os.tmpdir()`, which on macOS is `/var/folders/…/T` and matches nothing the engine writes —
+// joined with `claude-<uid>`. The engine then realpaths it (`/tmp` → `/private/tmp`); the reader compares realpaths.
+function taskOutputRoot(env: NodeJS.ProcessEnv): string {
+  const root = env.CLAUDE_CODE_TMPDIR !== undefined && env.CLAUDE_CODE_TMPDIR !== '' ? env.CLAUDE_CODE_TMPDIR : '/tmp';
+  return join(root, `claude-${process.getuid?.() ?? 0}`);
 }
 
 const SLUG_MAX = 200;

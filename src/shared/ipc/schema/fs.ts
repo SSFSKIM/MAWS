@@ -105,7 +105,7 @@ export const commands = {
   'fs.workflows': { input: z.strictObject({ appSessionId: AppSessionIdSchema }), output: z.strictObject({ runs: z.array(WorkflowRunSchema) }), owner: 'engine-host' },
   'fs.tasks': { input: z.strictObject({ listId: z.string() }), output: z.strictObject({ tasks: z.array(PersistedTaskSchema) }), owner: 'engine-host' },
   // C6's name and fields (`bytes` is the file's total size); `offset` is additive. Only a path whose realpath lies under
-  // `<configHome>/projects/`, `tasks/` or `jobs/` is read.
+  // `<configHome>/projects/`, `tasks/` or `jobs/`, or under the engine's task-output root `<CLAUDE_CODE_TMPDIR or /tmp>/claude-<uid>`, is read.
   'fs.readSpill': { input: FsReadSpillInputSchema, output: FsReadSpillOutputSchema, owner: 'engine-host' },
 } as const satisfies Record<`fs.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
