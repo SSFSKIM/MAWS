@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { EngineSessionStatusSchema } from '../../src/shared/engine/status';
-import { parseScenario, ScenarioError } from './scenario';
+import { join } from 'node:path';
+import { TEST_FIXTURE_DIR } from './fixtures';
+import { loadScenario, parseScenario, ScenarioError } from './scenario';
 
 const NOW = Date.parse('2026-09-28T10:00:00.000Z');
 
@@ -23,6 +25,15 @@ const file = (over: Record<string, unknown> = {}) => ({
 });
 
 describe('scenario loader', () => {
+  it('expands every engine entry and engine op of the shell scenarios into a status C3’s schema accepts', () => {
+    for (const name of ['nine-sessions', 'empty', 'many-sessions']) {
+      const scenario = loadScenario(join(TEST_FIXTURE_DIR, `shell/${name}.json`), NOW);
+      const statuses = [...scenario.engine, ...scenario.timeline.flatMap((op) => (op.op === 'engine' && op.engine ? [op.engine] : []))];
+      for (const status of statuses) expect(EngineSessionStatusSchema.safeParse(status).success, `${name} ${status.appSessionId}`).toBe(true);
+      if (name === 'nine-sessions') expect(statuses.length).toBeGreaterThanOrEqual(7 + 3);
+    }
+  });
+
   it('expands compact engine entries into C3’s full status', () => {
     const scenario = parseScenario(file(), NOW);
     for (const status of scenario.engine) expect(EngineSessionStatusSchema.safeParse(status).success).toBe(true);
