@@ -78,6 +78,34 @@ describe('normaliser: ids, turns and the human prompt bubble', () => {
     expect(events[4]).toMatchObject({ kind: 'user.message', messageUuid: 'u-1', isReplay: true }); // the second replay is not ours to suppress
   });
 
+  it('a prompt dropped before it ran (cancelled, discarded or refused while its turn is unaccepted) closes that turn from the lifecycle row', () => {
+    for (const state of ['cancelled', 'discarded', 'refused'] as const) {
+      const n = make();
+      const events = feed(n, [outRow(userOut('u-1')), inRow({ type: 'command_lifecycle', command_uuid: 'u-1', state, uuid: 'l-1', session_id: 'sess-1' })]);
+      expect(kinds(events)).toEqual(['turn.started', 'user.message', 'command.lifecycle', 'turn.ended']);
+      expect(events[3]).toEqual({
+        id: 'app-1:LAUNCH01:2:1', sessionId: 'sess-1', at: AT, seq: 2, agentId: null, parentToolUseId: null, kind: 'turn.ended',
+        result: 'cancelled', isError: false, terminalReason: 'cancelled', resultText: null, durationMs: 0, numTurns: 0, costUsd: 0,
+        usage: { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, thinkingTokens: 0 }, permissionDenials: [], errors: [],
+        userMessageUuids: ['u-1'], origin: 'human', resultIndex: null, isEchoReceipt: false,
+      });
+      expect(n.state.currentTurn).toBeNull();
+    }
+  });
+
+  it('a cancelled steer inside a running turn, a cancel for an accepted turn, and a cancel after the result close nothing', () => {
+    const lifecycleIn = (uuid: string, state = 'cancelled') => inRow({ type: 'command_lifecycle', command_uuid: uuid, state, uuid: `l-${uuid}`, session_id: 'sess-1' });
+    const steer = make(); // pass1/queue-and-interrupt seq 146/191: the steer's cancel names a uuid that did not open the turn
+    expect(kinds(feed(steer, [outRow(userOut('u-1')), inRow(initFrame), outRow(userOut('u-2')), lifecycleIn('u-2')]))).toEqual(['turn.started', 'user.message', 'session.init', 'user.message', 'command.lifecycle']);
+    expect(steer.state.currentTurn).not.toBeNull();
+    const accepted = make(); // accepted by system/init: its own result closes it (pass2/per-task-stop-on 66 → 67)
+    expect(kinds(feed(accepted, [outRow(userOut('u-1')), inRow(initFrame), lifecycleIn('u-1')]))).toEqual(['turn.started', 'user.message', 'session.init', 'command.lifecycle']);
+    const after = make(); // pass1/queue-and-interrupt seq 200, pass2/auto-unrouted 14: after the result, a no-op
+    expect(kinds(feed(after, [outRow(userOut('u-1')), inRow(initFrame), inRow(result()), lifecycleIn('u-1')])).slice(-1)).toEqual(['command.lifecycle']);
+    const completed = make(); // only the three drop states close
+    expect(kinds(feed(completed, [outRow(userOut('u-1')), lifecycleIn('u-1', 'queued')]))).toEqual(['turn.started', 'user.message', 'command.lifecycle']);
+  });
+
   it('system/init with no open turn opens an engine-initiated one, closed by a task-notification result', () => {
     const n = make();
     const events = feed(n, [inRow(initFrame), inRow(result({ origin: { kind: 'task-notification' }, user_message_uuids: [] }))]);

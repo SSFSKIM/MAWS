@@ -161,6 +161,7 @@ export class Normalizer {
       case 'command_lifecycle': {
         const f = frame as CommandLifecycleFrame;
         out.emit({ kind: 'command.lifecycle', commandUuid: f.command_uuid as MessageUuid, state: f.state }, attribution);
+        this.droppedPrompt(f, out, attribution);
         return;
       }
       case 'tool_progress': {
@@ -341,6 +342,22 @@ export class Normalizer {
       else this.state.currentTurn = null;
     }
     out.emit({ kind: 'usage.sample', costUsd: frame.total_cost_usd, usage, modelUsage: (f.modelUsage ?? {}) as Record<string, unknown>, source: 'result' }, attribution);
+  }
+
+  // A prompt written at idle and dropped before it ran (Decision Log, coordinator ruling carried into M4): a
+  // `cancelled`, `discarded` or `refused` lifecycle naming the uuid that opened the open human turn while no
+  // `system/init` has accepted it closes that turn, so no turn stays open forever. A steer's cancellation inside a
+  // running turn, and one arriving after the turn's result, close nothing (pass1/queue-and-interrupt seq 191, 200).
+  private droppedPrompt(frame: CommandLifecycleFrame, out: Emitter, attribution: Attribution): void {
+    const turn = this.state.currentTurn;
+    if (frame.state !== 'cancelled' && frame.state !== 'discarded' && frame.state !== 'refused') return;
+    if (!turn || turn.origin !== 'human' || turn.acceptedAt !== null || turn.userMessageUuids[0] !== frame.command_uuid) return;
+    out.emit({
+      kind: 'turn.ended', result: 'cancelled', isError: false, terminalReason: 'cancelled', resultText: null, durationMs: 0, numTurns: 0, costUsd: 0,
+      usage: { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, thinkingTokens: 0 }, permissionDenials: [], errors: [],
+      userMessageUuids: [frame.command_uuid as MessageUuid], origin: 'human', resultIndex: null, isEchoReceipt: false,
+    }, attribution);
+    this.state.currentTurn = null;
   }
 
   // ---------------------------------------------------------------------------------------------------------------------
