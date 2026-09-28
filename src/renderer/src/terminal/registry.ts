@@ -114,7 +114,7 @@ class Entry implements TerminalHandle {
   observer: ResizeObserver | null = null;
   resizeTimer: Timer | null = null;
   size: { cols: number; rows: number } | null = null;
-  spawning = false;
+  spawning: Promise<void> | null = null; // the spawn in flight, which a respawn awaits
   focusPending = false;
 
   constructor(id: TerminalId, init: TerminalInit, status: TerminalStatus) {
@@ -279,7 +279,8 @@ export class TerminalRegistry {
   }
 
   // An exited or lost terminal gets a new pty with the same cwd and label, in the same handle (tab and title stay);
-  // the old screen is cleared.
+  // the old screen is cleared. A terminal whose renderer could not start tries to create it again first (a transient
+  // failure recovers); if it fails again the terminal stays exited with the new reason, and the call rejects.
   async respawn(id: TerminalId): Promise<void> {
     const entry = this.entries.get(id);
     if (!entry || (entry.info.status !== 'exited' && entry.info.status !== 'lost')) return;
@@ -287,7 +288,8 @@ export class TerminalRegistry {
     entry.resetStream();
     entry.renderer?.reset();
     this.update(entry, { status: 'starting', exit: null, ptyId: null, pid: null, reconnect: null, title: null, error: null });
-    await this.spawn(entry);
+    if (!entry.renderer && !(await this.startRenderer(entry))) throw new Error(entry.info.error ?? 'the terminal renderer could not start');
+    await this.spawn(entry); // the spawn a mounted terminal's first fit already started, or a new one
   }
 
   // Kills the pty (SIGHUP), then disposes the handle. A kill that fails while the pty may still run keeps the handle,
@@ -330,6 +332,12 @@ export class TerminalRegistry {
   private createEntry(init: TerminalInit, status: TerminalStatus): Entry {
     const entry = new Entry(crypto.randomUUID() as TerminalId, init, status);
     this.entries.set(entry.info.id, entry);
+    void this.startRenderer(entry);
+    this.publish();
+    return entry;
+  }
+
+  private startRenderer(entry: Entry): Promise<TerminalRenderer | null> {
     const options: RendererOptions = { scrollback: SCROLLBACK_LINES, theme: this.currentTheme(), font: this.deps.readFont(), webgl: true };
     entry.ready = this.deps.createRenderer(options).then(
       (renderer) => {
@@ -345,8 +353,7 @@ export class TerminalRegistry {
         return null;
       },
     );
-    this.publish();
-    return entry;
+    return entry.ready;
   }
 
   private attachRenderer(entry: Entry, renderer: TerminalRenderer): void {
@@ -411,17 +418,22 @@ export class TerminalRegistry {
     if (!entry.info.ptyId && entry.info.status === 'starting') void this.spawn(entry);
   }
 
-  private async spawn(entry: Entry): Promise<void> {
-    if (entry.spawning || entry.info.ptyId || !entry.size || entry.disposed) return;
-    entry.spawning = true;
+  private spawn(entry: Entry): Promise<void> {
+    if (entry.spawning) return entry.spawning;
+    if (entry.info.ptyId || !entry.size || entry.disposed) return Promise.resolve();
+    entry.spawning = this.spawnPty(entry, entry.size);
+    return entry.spawning;
+  }
+
+  private async spawnPty(entry: Entry, measured: { cols: number; rows: number }): Promise<void> {
     this.spawnsInFlight++;
     const { appSessionId, label, cwd } = entry.info;
-    const spawned = { ...entry.size };
+    const spawned = { ...measured };
     const command = entry.command;
     entry.command = undefined; // the attach command runs in the first shell only, not in a respawned one
     const result = await this.deps.ipc.invoke('pty.spawn', { appSessionId, label, cwd, ...spawned, ...(command ? { command } : {}) });
     this.spawnsInFlight--;
-    entry.spawning = false;
+    entry.spawning = null;
     const held = result.ok ? this.unclaimed.get(result.value.ptyId) : undefined;
     if (result.ok) this.unclaimed.delete(result.value.ptyId);
     if (this.spawnsInFlight === 0) this.unclaimed.clear();

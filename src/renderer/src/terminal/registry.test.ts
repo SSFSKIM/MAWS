@@ -101,11 +101,13 @@ let renderers: FakeRenderer[];
 let runAction: ReturnType<typeof vi.fn<(id: 'tab.next' | 'tab.previous') => void>>;
 let currentTheme: TerminalTheme;
 
-function makeRegistry(options: { webglBudget?: number; rendererFails?: boolean } = {}) {
+// `rendererFails`: every renderer creation rejects; `rendererFailures`: only the first that many do.
+function makeRegistry(options: { webglBudget?: number; rendererFails?: boolean; rendererFailures?: number } = {}) {
+  let failures = options.rendererFailures ?? 0;
   return new TerminalRegistry({
     ipc: ipc.bridge,
     createRenderer: async (opts) => {
-      if (options.rendererFails) throw new Error('no WebGL, no DOM: the renderer could not start');
+      if (options.rendererFails || failures-- > 0) throw new Error('no WebGL, no DOM: the renderer could not start');
       const r = new FakeRenderer(opts);
       renderers.push(r);
       return r;
@@ -569,6 +571,35 @@ describe('terminal registry lifecycle', () => {
     expect(registry.get(id)!.renderer).toBeNull();
     expect(ipc.inputs('pty.spawn')).toEqual([]);
     expect(logged).toHaveBeenCalledWith('[terminal] renderer creation failed', expect.any(Error));
+  });
+
+  it('recovers a terminal whose renderer failed once: respawn creates the renderer again, then spawns', async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const registry = makeRegistry({ rendererFailures: 1 });
+    const id = registry.open({ appSessionId: A, label: 't1', cwd: '/tmp/a' });
+    registry.mount(id, parent());
+    await settle();
+    expect(registry.get(id)!.info).toMatchObject({ status: 'exited', error: expect.stringContaining('renderer could not start') });
+    await registry.respawn(id);
+    const handle = registry.get(id)!;
+    expect(handle.renderer).toBeInstanceOf(FakeRenderer);
+    expect(handle.container.contains(handle.renderer!.element)).toBe(true);
+    expect(handle.info).toMatchObject({ status: 'running', error: null, ptyId: 'pty-1', acceleration: 'webgl' });
+    expect(ipc.inputs('pty.spawn')).toEqual([{ appSessionId: A, label: 't1', cwd: '/tmp/a', cols: 80, rows: 24 }]);
+    expect(logged).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps a terminal whose renderer fails again exited, with the error, and rejects respawn', async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const registry = makeRegistry({ rendererFails: true });
+    const id = registry.open({ appSessionId: A, label: 't1', cwd: '/tmp/a' });
+    registry.mount(id, parent());
+    await settle();
+    await expect(registry.respawn(id)).rejects.toThrow('the terminal renderer could not start');
+    expect(registry.get(id)!.info).toMatchObject({ status: 'exited', exit: null, ptyId: null, error: expect.stringContaining('renderer could not start') });
+    expect(registry.get(id)!.renderer).toBeNull();
+    expect(ipc.inputs('pty.spawn')).toEqual([]);
+    expect(logged).toHaveBeenCalledTimes(2);
   });
 
   it('reports an adopted pty whose renderer could not start, releases its claim and leaves the pty running', async () => {
