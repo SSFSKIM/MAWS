@@ -56,5 +56,11 @@ describe('the engine host serves fs.* through the host protocol', () => {
       ok: true,
       value: { configHome: fixture.configHome, watching: true, sessions: 1, bound: 1, holders: [{ sessionId: S1, appSessionId: 'app-1', holder: { kind: 'terminal', pid: process.pid } }] },
     });
+
+    fake.deliver({ t: 'req', id: '4', name: 'fs.holders', input: { sessionIds: [S1], directories: null } });
+    expect(await response('4')).toMatchObject({
+      ok: true,
+      value: { refreshedAt: expect.any(String), holders: [{ sessionId: S1, appSessionId: 'app-1', holder: { kind: 'terminal', pid: process.pid }, cwd: null }] },
+    });
   });
 });

@@ -5,7 +5,7 @@
 // (`LC_ALL=C TZ=UTC`, never the host's zone). `jobs/<short>/state.json` adds the job's facts, never liveness.
 // Read-only: registry and job files are read, never written or removed.
 import { execFile } from 'node:child_process';
-import { readdir, stat } from 'node:fs/promises';
+import { readdir, realpath, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { SessionId } from '@shared/graph/ids';
 import { JobStateSchema, LiveSessionRecordSchema, type Holder, type JobState, type LiveSessionRecord } from '@shared/wire/store';
@@ -92,6 +92,22 @@ export class HolderRegistry {
   // Every session with a live holder.
   holders(): { sessionId: SessionId; holder: Holder }[] {
     return [...this.held].map(([sessionId, { holder }]) => ({ sessionId, holder }));
+  }
+
+  // The live holders as they are now, for a guard that must not trust an asynchronous projection: a registry read that
+  // starts after this call (the poll's liveness rule, unchanged), then every live record whose session id is listed or
+  // whose cwd is one of `directories`, both compared as NFC-normalised realpaths. Both filters null: every live holder.
+  async liveNow(filter: { sessionIds: readonly SessionId[] | null; directories: readonly string[] | null }): Promise<{ sessionId: SessionId; holder: Holder; cwd: string | null }[]> {
+    await this.refresh();
+    const ids = filter.sessionIds === null ? null : new Set(filter.sessionIds);
+    const directories = filter.directories === null ? null : new Set(await Promise.all(filter.directories.map(canonicalDirectory)));
+    const answer: { sessionId: SessionId; holder: Holder; cwd: string | null }[] = [];
+    for (const [sessionId, { holder, registry }] of this.held) {
+      const cwd = registry.cwd === undefined ? null : await canonicalDirectory(registry.cwd);
+      const matches = (ids === null && directories === null) || ids?.has(sessionId) || (cwd !== null && directories?.has(cwd));
+      if (matches) answer.push({ sessionId, holder, cwd });
+    }
+    return answer;
   }
 
   private serial(step: () => Promise<void>): Promise<void> {
@@ -247,6 +263,15 @@ function startTokens(ps: string, pids: number[]): Promise<Map<number, string> | 
       resolve(tokens);
     });
   });
+}
+
+// A directory as the engine keys it: realpath, NFC-normalised; a path that no longer resolves compares as written.
+async function canonicalDirectory(path: string): Promise<string> {
+  try {
+    return (await realpath(path)).normalize('NFC');
+  } catch {
+    return path.normalize('NFC');
+  }
 }
 
 async function listNames(dir: string): Promise<string[]> {

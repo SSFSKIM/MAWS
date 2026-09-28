@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import type { SessionId } from '@shared/graph/ids';
 import type { HostEmit } from '@shared/host/runtime';
-import type { FsScanKnown, FsScanResult, FsState } from '@shared/ipc/schema/fs';
+import type { FsHoldersAnswer, FsHoldersQuery, FsScanKnown, FsScanResult, FsState } from '@shared/ipc/schema/fs';
 import type { TranscriptSummary } from '@shared/wire/store';
 import { Bindings } from './bindings';
 import { Discovery, mapConcurrent, matchesKnown, SUMMARY_CONCURRENCY, type ListedTranscript } from './discovery';
@@ -93,6 +93,15 @@ export class FsService {
 
   bind(bindings: readonly { sessionId: SessionId; appSessionId: FsScanKnown['appSessionId'] }[]): void {
     for (const { sessionId, appSessionId } of bindings) this.bindings.bind(sessionId, appSessionId);
+  }
+
+  // `fs.holders`: the registry read now, filtered by session id or directory (HolderRegistry.liveNow).
+  async holdersNow(query: FsHoldersQuery): Promise<FsHoldersAnswer> {
+    const live = await this.holders.liveNow(query);
+    return {
+      refreshedAt: new Date().toISOString(),
+      holders: live.map(({ sessionId, holder, cwd }) => ({ sessionId, appSessionId: this.bindings.appIdOf(sessionId), holder, cwd })),
+    };
   }
 
   private onChange(change: StoreChange): void {

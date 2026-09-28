@@ -4,7 +4,7 @@
 // with main's environment. When C3's login-shell capture lands in this host, the service reads the captured
 // environment through the same accessor the launch contract uses.
 import type { HostEmit, HostOn } from '@shared/host/runtime';
-import type { FsScanKnown } from '@shared/ipc/schema/fs';
+import type { FsHoldersQuery, FsScanKnown } from '@shared/ipc/schema/fs';
 import { resolveStorePaths } from './paths';
 import { FsService } from './service';
 
@@ -15,6 +15,7 @@ export function registerFs(on: HostOn, emit: HostEmit, env: NodeJS.ProcessEnv = 
   on('fs.state', async () => service.state());
   on('fs.scan', async ({ known }) => service.scan((known ?? []) as FsScanKnown[]));
   on('fs.bind', async ({ bindings }) => service.bind(bindings as Pick<FsScanKnown, 'sessionId' | 'appSessionId'>[]));
+  on('fs.holders', async (query) => service.holdersNow(query as FsHoldersQuery));
   service.start().catch((error: unknown) => console.error('[fs] the filesystem state service failed to start:', error instanceof Error ? error.message : error));
   return service;
 }

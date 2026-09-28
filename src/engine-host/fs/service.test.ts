@@ -1,5 +1,7 @@
+import { spawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
-import { rm } from 'node:fs/promises';
+import { mkdir, realpath, rm, symlink } from 'node:fs/promises';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, SessionId } from '@shared/graph/ids';
 import type { EventName, EventPayload } from '@shared/ipc/schema';
@@ -219,6 +221,51 @@ describe('filesystem state service: discovery, sidecars and holders', () => {
       expect(await scanning).toMatchObject({ sessions: 0 });
       expect(emitted.filter((e) => e.name !== 'fs.scanProgress')).toEqual([]); // nothing re-listed, nothing removed twice
       expect(fs.state().sessions).toBe(0);
+    });
+  });
+
+  describe('fs.holders answers the registry as it is now (C10 exclusive-writer guards)', () => {
+    // A watch that never reports anything: whatever fs.holders answers, it read for itself.
+    const deafWatch: WatchFn = () => Object.assign(new EventEmitter(), { close: vi.fn() });
+
+    it('answers a live record by session id, refreshing the registry first, with the bound app id', async () => {
+      const fs = await start(deafWatch);
+      fs.bind([{ sessionId: S1, appSessionId: A1 }]);
+      await fixture.addRegistryRecord(process.pid, { sessionId: S1, kind: 'interactive', cwd: '/work/a' });
+      await fixture.addRegistryRecord(NO_SUCH_PID, { sessionId: S2, kind: 'interactive', cwd: '/work/a' });
+
+      const before = Date.now();
+      const answer = await fs.holdersNow({ sessionIds: [S1, S2], directories: null });
+      expect(answer.holders).toEqual([{ sessionId: S1, appSessionId: A1, holder: { kind: 'terminal', pid: process.pid }, cwd: '/work/a' }]);
+      expect(answer.refreshedAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+      expect(Date.parse(answer.refreshedAt)).toBeGreaterThanOrEqual(before);
+      expect((await fs.holdersNow({ sessionIds: [S3], directories: null })).holders).toEqual([]);
+    });
+
+    it('answers by directory, comparing NFC-normalised realpaths (a symlinked path finds the record)', async () => {
+      const real = join(fixture.configHome, 'work-real');
+      const link = join(fixture.configHome, 'work-link');
+      await mkdir(real);
+      await symlink(real, link);
+      await fixture.addRegistryRecord(process.pid, { sessionId: S1, kind: 'interactive', cwd: link });
+      const fs = await start(deafWatch);
+
+      const byReal = await fs.holdersNow({ sessionIds: null, directories: [real] });
+      expect(byReal.holders).toEqual([{ sessionId: S1, appSessionId: null, holder: { kind: 'terminal', pid: process.pid }, cwd: await realpath(real) }]);
+      expect((await fs.holdersNow({ sessionIds: null, directories: [link] })).holders.map((h) => h.sessionId)).toEqual([S1]);
+      expect((await fs.holdersNow({ sessionIds: null, directories: [join(fixture.configHome, 'elsewhere')] })).holders).toEqual([]);
+      expect((await fs.holdersNow({ sessionIds: null, directories: null })).holders.map((h) => h.sessionId)).toEqual([S1]);
+    });
+
+    it('does not answer a record whose process has died, even with the file left behind', async () => {
+      const child = spawn('/bin/sleep', ['30'], { stdio: 'ignore' });
+      await fixture.addRegistryRecord(child.pid!, { sessionId: S1, kind: 'interactive', cwd: '/work/a' });
+      const fs = await start(deafWatch);
+      expect((await fs.holdersNow({ sessionIds: [S1], directories: null })).holders).toHaveLength(1);
+      const exited = new Promise((resolve) => child.once('exit', resolve));
+      child.kill('SIGKILL');
+      await exited;
+      expect((await fs.holdersNow({ sessionIds: [S1], directories: ['/work/a'] })).holders).toEqual([]);
     });
   });
 
