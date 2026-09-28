@@ -59,6 +59,10 @@ export class MessageQueue {
     return this.deps.turnOpen() || this.entries.some((e) => e.state !== 'queued');
   }
 
+  get isPaused(): boolean {
+    return this.paused;
+  }
+
   get queuedCount(): number {
     return this.entries.filter((e) => e.state === 'queued').length;
   }

@@ -301,7 +301,7 @@ export class EngineSession {
       engineVersion: tracked.engineVersion ?? this.plan.engineVersion, fileCheckpointing: env.CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING === '1',
       fastMode: tracked.fastMode, plugins: tracked.plugins, pluginErrors: tracked.pluginErrors, pluginWarnings: tracked.pluginWarnings,
       backgroundTasks: tracked.backgroundTasks, grants: [...this.grants.allow], mcpServers: tracked.mcpServers, heldPeerMessages: tracked.heldPeerMessages,
-      pendingRequests: this.broker.live, queue: { length: this.queue.queuedCount, paused: this.queue.state.paused },
+      pendingRequests: this.broker.live, queue: { length: this.queue.queuedCount, paused: this.queue.isPaused },
       keepAlive: keepAliveReasons({ turnOpen: turn !== null, backgroundTasks: tracked.backgroundTasks.length, grants: this.grants.allow.length, mcpServers: tracked.mcpServers, heldPeerMessages: tracked.heldPeerMessages.length }),
       memory: tracked.memory,
       journalPath: this.journal.path, hostHooks: this.hooks.ids(), lastEventSeq: this.lastEventSeq,
