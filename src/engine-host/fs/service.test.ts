@@ -17,6 +17,9 @@ const S3 = '33333333-3333-4333-8333-333333333333' as SessionId;
 const A1 = 'app-1' as AppSessionId;
 const NO_SUCH_PID = 2 ** 22 - 1;
 
+// A watch that never reports anything: whatever the service knows, it read for itself.
+const deafWatch: WatchFn = () => Object.assign(new EventEmitter(), { close: vi.fn() });
+
 type Emitted = { [N in EventName]: { name: N; payload: EventPayload<N> } }[EventName];
 
 const user = (uuid: string, parentUuid: string | null, cwd: string, content: string) =>
@@ -230,8 +233,6 @@ describe('filesystem state service: discovery, sidecars and holders', () => {
   });
 
   describe('fs.holders answers the registry as it is now (C10 exclusive-writer guards)', () => {
-    // A watch that never reports anything: whatever fs.holders answers, it read for itself.
-    const deafWatch: WatchFn = () => Object.assign(new EventEmitter(), { close: vi.fn() });
 
     it('answers a live record by session id, refreshing the registry first, with the bound app id', async () => {
       const fs = await start(deafWatch);
@@ -357,11 +358,37 @@ describe('filesystem state service: discovery, sidecars and holders', () => {
     });
   });
 
-  it('works against a config home whose roots do not exist yet', async () => {
+  it('works against a config home whose roots do not exist yet: a missing root is empty, not a failure', async () => {
     await rm(fixture.paths.projects, { recursive: true });
     await rm(fixture.paths.jobs, { recursive: true });
+    await fixture.addRegistryRecord(process.pid, { sessionId: S1, kind: 'bg', jobId: '11111111' });
+    const errors = vi.spyOn(console, 'error');
     const fs = await start();
     expect(await fs.scan([])).toMatchObject({ projects: 0, sessions: 0, changed: 0 });
     expect(fs.state()).toMatchObject({ watching: false, sessions: 0 });
+    expect((await fs.holdersNow({ sessionIds: null, directories: null })).holders.map((h) => h.holder)).toEqual([
+      { kind: 'background_job', pid: process.pid, jobId: '11111111' },
+    ]);
+    expect(errors).not.toHaveBeenCalled();
+    errors.mockRestore();
+  });
+
+  it('a sessions path that is a regular file fails fs.holders with ENOTDIR, while the service and the poll carry on', async () => {
+    await rm(fixture.paths.sessions, { recursive: true });
+    await writeFile(fixture.paths.sessions, 'not a directory'); // the fixture's own temp tree
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const fs = await start(deafWatch);
+      await expect(fs.holdersNow({ sessionIds: null, directories: null })).rejects.toThrow('holder registry unreadable: ENOTDIR');
+      expect(fs.state()).toMatchObject({ configHome: fixture.configHome, holders: [] });
+
+      await rm(fixture.paths.sessions);
+      await mkdir(fixture.paths.sessions);
+      await fixture.addRegistryRecord(process.pid, { sessionId: S1, kind: 'interactive' });
+      expect((await fs.holdersNow({ sessionIds: [S1], directories: null })).holders.map((h) => h.sessionId)).toEqual([S1]);
+      expect(fs.state().holders.map((h) => h.sessionId)).toEqual([S1]);
+    } finally {
+      errors.mockRestore();
+    }
   });
 });

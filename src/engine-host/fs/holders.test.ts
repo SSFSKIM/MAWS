@@ -1,5 +1,6 @@
 import { execFileSync, spawn } from 'node:child_process';
 import { chmod, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SessionId } from '@shared/graph/ids';
 import type { Holder, JobState, LiveSessionRecord } from '@shared/wire/store';
@@ -153,6 +154,18 @@ describe('holders come from live sessions/<pid>.json records', () => {
     await holders.start();
     expect(holders.holderOf(S1)).toEqual({ kind: 'background_job', pid: process.pid, jobId: '11111111' });
     expect(emitted[0].job).toMatchObject({ sessionId: S1, state: 'working', name: 'nightly' });
+  });
+
+  it('a stray regular file under jobs/ is not a job and does not stop the others being read', async () => {
+    await writeFile(join(fixture.paths.jobs, 'README'), 'not a job');
+    await fixture.addJob('11111111', { sessionId: S1, state: 'working', name: 'nightly' });
+    await fixture.addRegistryRecord(process.pid, { sessionId: S1, kind: 'bg' });
+    const errors = vi.spyOn(console, 'error');
+    const holders = create();
+    await holders.start();
+    expect(holders.holderOf(S1)).toEqual({ kind: 'background_job', pid: process.pid, jobId: '11111111' });
+    expect(errors).not.toHaveBeenCalled();
+    errors.mockRestore();
   });
 
   it('a job state alone is not a holder: liveness is decided by pids', async () => {

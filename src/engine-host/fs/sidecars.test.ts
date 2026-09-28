@@ -69,6 +69,12 @@ describe('whole-file sidecars are parsed with retry', () => {
     }
   });
 
+  it('answers unreadable, not absent, for a path through a regular file (ENOTDIR)', async () => {
+    const file = join(fixture.configHome, 'a-file');
+    await writeFile(file, 'x');
+    expect(await readJsonWithRetry(join(file, 'x.json'), asTitle)).toEqual({ status: 'unreadable', code: 'ENOTDIR' });
+  });
+
   it('answers absent at once for a file that does not exist: a missing file is an answer, not a torn write', async () => {
     const started = Date.now();
     expect(await readJsonWithRetry(join(fixture.configHome, 'absent.json'), asTitle)).toEqual({ status: 'absent' });

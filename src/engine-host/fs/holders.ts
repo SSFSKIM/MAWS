@@ -185,7 +185,9 @@ export class HolderRegistry {
     try {
       size = (await stat(path)).size;
     } catch (error) {
-      if (!isMissing(error)) throw error;
+      // Gone, or an entry under jobs/ that is not a directory (ENOTDIR): either way not a job. Jobs contribute facts,
+      // never liveness, so this is not the registry's strict reading.
+      if (!isMissing(error) && (error as NodeJS.ErrnoException).code !== 'ENOTDIR') throw error;
       this.jobs.delete(jobId);
       return;
     }

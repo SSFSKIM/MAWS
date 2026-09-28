@@ -57,7 +57,8 @@ export function noteReadable(path: string): void {
   for (const key of reportedUnreadable) if (key.startsWith(`${path}\0`)) reportedUnreadable.delete(key);
 }
 
+// ENOENT alone means absence. ENOTDIR (a path component that is a file, such as a root replaced by a file between
+// listing and reading) says nothing about whether the thing exists: it is a filesystem error like EACCES or EIO.
 export function isMissing(error: unknown): boolean {
-  const code = (error as NodeJS.ErrnoException | null)?.code;
-  return code === 'ENOENT' || code === 'ENOTDIR';
+  return (error as NodeJS.ErrnoException | null)?.code === 'ENOENT';
 }
