@@ -1,8 +1,11 @@
-// One probe pane (C9 M1): a `TerminalRenderer` attached to its own pty through C1's string-based `pty.*`, with the
-// counters the spike's items read (bytes handed to the renderer and bytes it has parsed, `?2026h` occurrences, the
-// Kitty and XTVERSION exchanges, cursor-position replies, the last link and the last input bytes) and the workload
-// runs that produce `Metrics`. Held outside React so the emulator survives the page's re-renders; the page mounts
-// `renderer.element` and reads `debug` through the store.
+// One probe pane (C9 M1, moved to the production transport in M2): a `TerminalRenderer` attached to its own pty
+// through C9's binary `pty.*` stream, acknowledging what the renderer has parsed (`pty.ack`, coalesced) so the host's
+// flow control paces a flood, and opening links through `pty.openLink`. It keeps the counters the spike's items read
+// (bytes handed to the renderer and bytes it has parsed, `?2026h` occurrences, the Kitty and XTVERSION exchanges,
+// cursor-position replies, the last link and the last input bytes) and runs the workloads that produce `Metrics`.
+// Held outside React so the emulator survives the page's re-renders; the page mounts `renderer.element` and reads
+// `debug` through the store. (M3's registry is the product's version of this wiring; the probe stays a harness.)
+import type { AppSessionId } from '@shared/graph/ids';
 import type { EventPayload, PtyId } from '@shared/ipc/schema';
 import { SCRATCH_CWD, resolveProgram, WIDTH_FIXTURES, type Bins, type Phase, type ProgramWorkload } from '../../../../../spikes/terminal-probe/workloads.mjs';
 import { ipc } from '../../ipc/client';
@@ -48,6 +51,8 @@ export interface PaneDebug {
   lastInput: string; // the last onData payload, escaped
   rawTail: string; // the last 120 characters of output, escaped
   lastLink: string | null; // "url (meta|plain)"
+  lastOpen: string | null; // "url → opened true|false", pty.openLink's answer
+  acked: number; // the offset the last pty.ack named
   title: string | null;
   metrics: Metrics | null;
 }
@@ -65,7 +70,13 @@ export interface ProbeSnapshot {
 
 const ESC = '\x1b';
 const SYNC_ON = `${ESC}[?2026h`;
-const utf8 = new TextEncoder();
+// The probe's pty spawns belong to a session of their own; each spawn has a fresh label (the host refuses a second
+// live pty under the same session and label).
+const PROBE_SESSION = 'probe' as AppSessionId;
+let spawns = 0;
+// Ack coalescing (Residue *PTY stream and flow control*): one ack per 32 KiB parsed, or 16 ms after the last parse.
+const ACK_BYTES = 32 * 1024;
+const ACK_DELAY_MS = 16;
 // eslint-disable-next-line no-control-regex -- escaping control bytes is the point
 const escape = (s: string) => s.replace(/[\x00-\x1f\x7f]/g, (c) => `\\x${c.charCodeAt(0).toString(16).padStart(2, '0')}`);
 
@@ -89,6 +100,10 @@ export class Pane {
   private observer: ResizeObserver | null = null;
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
   private captured: string[] | null = null; // the whole output stream while capturing (a debugging aid)
+  private decoder = new TextDecoder(); // streaming: the scans and debugging aids read text, the renderer gets bytes
+  private parsedOffset = 0; // the stream offset up to which the renderer has parsed
+  private ackTimer: ReturnType<typeof setTimeout> | null = null;
+  private acks = 0;
 
   constructor(
     readonly kind: RendererKind,
@@ -117,6 +132,8 @@ export class Pane {
       lastInput: '',
       rawTail: '',
       lastLink: null,
+      lastOpen: null,
+      acked: 0,
       title: null,
       metrics: null,
     };
@@ -158,6 +175,12 @@ export class Pane {
       renderer.setLinkHandler((url, ev) => {
         this.debug.lastLink = `${url} (${ev.type}; meta ${ev.metaKey}, ctrl ${ev.ctrlKey}, alt ${ev.altKey})`;
         this.publish(true);
+        // M2: the browser half of item 6 goes through main's scheme-checked opener. (Whether a plain click opens is
+        // the registry's ⌘ policy, M3; the probe opens on every activation.)
+        void ipc.invoke('pty.openLink', { url }).then((result) => {
+          this.debug.lastOpen = `${url} → ${result.ok ? `opened ${result.value.opened}` : `failed: ${result.error.message}`}`;
+          this.publish(true);
+        });
       });
       renderer.setKeyFilter(() => true);
       this.debug.acceleration = renderer.acceleration;
@@ -224,33 +247,54 @@ export class Pane {
     this.publish();
   }
 
-  // Called by the page's single `pty.data` subscription for this pane's pty.
-  onChunk(data: string): void {
+  // Called by the page's single `pty.data` subscription for this pane's pty: bytes stamped with the stream offset of
+  // their first byte. The renderer takes the bytes; the scans below read a streaming decode of them.
+  onChunk(data: Uint8Array, offset: number): void {
     const renderer = this.renderer;
     if (!renderer) return;
-    const length = utf8.encode(data).length;
+    const length = data.byteLength;
     this.debug.bytes += length;
     const endings = countLineEndings(data);
     this.debug.lineFeeds += endings.lineFeeds;
     this.debug.carriageReturns += endings.carriageReturns;
     this.lastByteAt = performance.now();
-    const combined = this.tail + data;
+    const text = this.decoder.decode(data, { stream: true });
+    const combined = this.tail + text;
     let at = combined.indexOf(SYNC_ON);
     while (at !== -1) {
       this.debug.syncFrames++;
       at = combined.indexOf(SYNC_ON, at + 1);
     }
     this.tail = combined.slice(-(SYNC_ON.length - 1));
-    this.debug.rawTail = escape((this.debug.rawTail + data).slice(-120));
-    this.captured?.push(data);
+    this.debug.rawTail = escape((this.debug.rawTail + text).slice(-120));
+    this.captured?.push(text);
     if (combined.includes(`${ESC}[?u`)) this.debug.kittyQueried = true;
     if (combined.includes(`${ESC}[>0q`) || combined.includes(`${ESC}[>q`)) this.debug.xtversionQueried = true;
+    const ptyId = this.debug.ptyId;
     renderer.write(data, () => {
       this.debug.parsed += length;
+      if (ptyId === this.debug.ptyId) this.parsedUpTo(offset + length);
       this.parsedListeners.forEach((cb) => cb());
       this.publish();
     });
     this.publish();
+  }
+
+  // Acknowledges parsed bytes to the host: at once past 32 KiB since the last ack, else 16 ms after the last parse.
+  private parsedUpTo(offset: number): void {
+    this.parsedOffset = Math.max(this.parsedOffset, offset);
+    if (this.parsedOffset - this.debug.acked >= ACK_BYTES) this.sendAck();
+    else if (!this.ackTimer) this.ackTimer = setTimeout(() => this.sendAck(), ACK_DELAY_MS);
+  }
+
+  private sendAck(): void {
+    if (this.ackTimer) clearTimeout(this.ackTimer);
+    this.ackTimer = null;
+    const ptyId = this.debug.ptyId;
+    if (!ptyId || this.parsedOffset <= this.debug.acked) return;
+    this.debug.acked = this.parsedOffset;
+    this.acks++;
+    void ipc.invoke('pty.ack', { ptyId: ptyId as PtyId, offset: this.parsedOffset });
   }
 
   onExit(exit: EventPayload<'pty.exit'>): void {
@@ -275,14 +319,21 @@ export class Pane {
       lastInput: '',
       rawTail: '',
       lastLink: null,
+      lastOpen: null,
+      acked: 0,
       exit: null,
       metrics: null,
     });
     this.tail = '';
+    this.decoder = new TextDecoder();
+    this.parsedOffset = 0;
+    this.acks = 0;
+    if (this.ackTimer) clearTimeout(this.ackTimer);
+    this.ackTimer = null;
   }
 
-  // Spawns a program (or `$SHELL`, without `-l` in M1: the login-shell default is M2's) as this pane's pty; the
-  // previous pty, if any, is killed first.
+  // Spawns a program (or, for `shell: null`, the host's default: the login shell, `$SHELL -l`) as this pane's pty;
+  // the previous pty, if any, is killed first.
   async spawn(spec: { shell: string | null; args: string[] | null }, claim: (ptyId: string) => void): Promise<{ ptyId: string; pid: number }> {
     if (!this.renderer) throw new Error(`${this.kind} has no renderer`);
     await this.kill();
@@ -292,13 +343,21 @@ export class Pane {
     this.renderer.clear();
     const cols = this.debug.cols || 80;
     const rows = this.debug.rows || 24;
-    const input = { cwd: SCRATCH_CWD, cols, rows, ...(spec.shell ? { shell: spec.shell } : {}), ...(spec.args ? { args: spec.args } : {}) };
+    const input = {
+      appSessionId: PROBE_SESSION,
+      label: `probe-${this.kind}-${++spawns}`,
+      cwd: SCRATCH_CWD,
+      cols,
+      rows,
+      ...(spec.shell ? { shell: spec.shell } : {}),
+      ...(spec.args ? { args: spec.args } : {}),
+    };
     const result = await ipc.invoke('pty.spawn', input);
     if (!result.ok) throw new Error(`pty.spawn failed: ${result.error.message}`);
-    claim(result.value.ptyId);
     this.debug.ptyId = result.value.ptyId;
     this.debug.pid = result.value.pid;
     this.debug.status = 'running';
+    claim(result.value.ptyId); // after the state is set: events held for this pty are delivered now
     this.publish(true);
     return result.value;
   }
@@ -425,6 +484,13 @@ export class Pane {
     // The guard, the sampler and the observer are released whatever happens in the measured window: a failed run
     // must not leave the page deaf to input or sampling frames forever.
     let measured: { seconds: number; blockedInputEvents: number; frames: FrameSummary; longTasks: LongTaskSummary };
+    // Whether the host's flow control engaged: `pty.list` sampled every 100 ms, latching a paused report.
+    let pausedSeen = false;
+    const sampler = setInterval(() => {
+      void ipc.invoke('pty.list', undefined).then((result) => {
+        if (result.ok && result.value.ptys.some((p) => p.ptyId === this.debug.ptyId && p.paused)) pausedSeen = true;
+      });
+    }, 100);
     try {
       frames.start();
       await this.spawn(spec, claim);
@@ -436,6 +502,7 @@ export class Pane {
         await this.waitForParsed();
       }
     } finally {
+      clearInterval(sampler);
       measured = { seconds: (performance.now() - t0) / 1000, blockedInputEvents: guard.disarm(), frames: summarizeFrames(frames.stop()), longTasks: longTasks.stop() };
     }
     const { seconds, blockedInputEvents, frames: frameSummary, longTasks: longTaskSummary } = measured;
@@ -460,6 +527,8 @@ export class Pane {
       lineCount: this.renderer!.probe().lineCount(),
       heapMB: heapMB(),
       blockedInputEvents,
+      pausedSeen,
+      acks: this.acks,
       ...(latency ? { latency } : {}),
       ...(widths ? { widths } : {}),
     };

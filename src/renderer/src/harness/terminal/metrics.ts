@@ -61,6 +61,9 @@ export interface Metrics {
   blockedInputEvents: number; // physical wheel, key and touch events cancelled while the run was measured
   latency?: SampleSummary;
   widths?: WidthResult[];
+  // M2 gate: the binary stream's flow control seen from the page
+  pausedSeen?: boolean; // `pty.list` reported the pty paused at least once during the run
+  acks?: number; // `pty.ack` commands the page sent
   error?: string;
 }
 
@@ -100,12 +103,13 @@ export function byteCountError(expected: ByteCounts, received: ByteCounts): stri
   return null;
 }
 
-// Counts line feeds and carriage returns in a chunk (ASCII scan; the count is what the tty's ONLCR makes of it).
-export function countLineEndings(data: string): { lineFeeds: number; carriageReturns: number } {
+// Counts line feeds and carriage returns in a chunk of the binary stream (a UTF-8 continuation byte is never 10 or
+// 13, so a byte scan is exact; the count is what the tty's ONLCR makes of the program's line feeds).
+export function countLineEndings(data: Uint8Array): { lineFeeds: number; carriageReturns: number } {
   let lineFeeds = 0;
   let carriageReturns = 0;
   for (let i = 0; i < data.length; i++) {
-    const c = data.charCodeAt(i);
+    const c = data[i];
     if (c === 10) lineFeeds++;
     else if (c === 13) carriageReturns++;
   }

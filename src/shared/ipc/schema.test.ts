@@ -36,7 +36,7 @@ describe('ipc schema validates both directions', () => {
       expect(Object.keys(events)).toHaveLength(sum('events'));
     });
 
-    it('carries the C1 entries of Interfaces with their owners', () => {
+    it('carries the C1 entries of Interfaces, and C9’s pty additions, with their owners', () => {
       const owners = Object.fromEntries(Object.entries(commands).map(([name, spec]) => [name, spec.owner]));
       expect(owners).toEqual({
         'settings.get': 'main',
@@ -49,6 +49,13 @@ describe('ipc schema validates both directions', () => {
         'pty.write': 'pty-host',
         'pty.resize': 'pty-host',
         'pty.kill': 'pty-host',
+        // C9's additions (M2); `pty/*` is pinned in full by schema/pty.test.ts
+        'pty.ack': 'pty-host',
+        'pty.checkpoint': 'pty-host',
+        'pty.attach': 'pty-host',
+        'pty.list': 'pty-host',
+        'pty.foreground': 'pty-host',
+        'pty.openLink': 'main',
       });
       expect(Object.keys(events).sort()).toEqual(
         ['engine.hostState', 'pty.data', 'pty.exit', 'pty.hostState', 'settings.changed'].sort(),
@@ -99,17 +106,17 @@ describe('ipc schema validates both directions', () => {
     });
 
     it('holds pty inputs to their shapes', () => {
-      const spawn = { cwd: '/tmp', cols: 80, rows: 24 };
+      const spawn = { appSessionId: 'a1', label: 'terminal-1', cwd: '/tmp', cols: 80, rows: 24 };
       expect(validateCommandInput('pty.spawn', spawn)).toEqual({ ok: true, value: spawn });
       expect(validateCommandInput('pty.spawn', { ...spawn, cols: 0 }).ok).toBe(false);
       expect(validateCommandInput('pty.spawn', { ...spawn, rows: 2.5 }).ok).toBe(false);
-      expect(validateCommandInput('pty.spawn', { cols: 80, rows: 24 }).ok).toBe(false);
+      expect(validateCommandInput('pty.spawn', { appSessionId: 'a1', label: 'terminal-1', cols: 80, rows: 24 }).ok).toBe(false);
       expect(validateCommandInput('pty.write', { ptyId: 'p1', data: 'ls\n' }).ok).toBe(true);
       expect(validateCommandInput('pty.write', { ptyId: 'p1', data: 7 }).ok).toBe(false);
     });
 
     it('never transforms: an accepted input deep-equals what was sent', () => {
-      const input = { shell: '/bin/sh', args: ['-l'], cwd: '/', cols: 1, rows: 1, env: { A: 'b' } };
+      const input = { appSessionId: 'a1', label: 'terminal-1', shell: '/bin/sh', args: ['-l'], cwd: '/', cols: 1, rows: 1, command: 'ls' };
       const result = validateCommandInput('pty.spawn', input);
       expect(result).toEqual({ ok: true, value: input });
     });
@@ -142,7 +149,7 @@ describe('ipc schema validates both directions', () => {
 
   describe('event payload (main before sending, renderer on receipt)', () => {
     it('rejects a pty.data event whose data is a number', () => {
-      const result = validateEventPayload('pty.data', { ptyId: 'p1', data: 42 });
+      const result = validateEventPayload('pty.data', { ptyId: 'p1', offset: 0, data: 42 });
       expect(result.ok).toBe(false);
       if (result.ok) return;
       expect(result.issues).toEqual([expect.objectContaining({ path: ['data'] })]);
@@ -156,7 +163,7 @@ describe('ipc schema validates both directions', () => {
     });
 
     it('rejects unknown keys on the app’s own payloads', () => {
-      expect(validateEventPayload('pty.data', { ptyId: 'p1', data: 'x', extra: true }).ok).toBe(false);
+      expect(validateEventPayload('pty.data', { ptyId: 'p1', offset: 0, data: new Uint8Array(1), extra: true }).ok).toBe(false);
     });
   });
 });

@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { PARENT_SESSION_VARIABLES, terminalEnvironment } from './env';
+import { describe, expect, it, vi } from 'vitest';
+import { baseEnvironment, PARENT_SESSION_VARIABLES, terminalEnvironment } from './env';
 
 const base = {
   PATH: '/usr/bin:/bin',
@@ -76,5 +76,25 @@ describe('pty host environment', () => {
     const env = terminalEnvironment(input, { appVersion: '0' });
     expect(env).not.toHaveProperty('EMPTY');
     expect(input.CLAUDECODE).toBe('1');
+  });
+
+  it('seeds from the captured login-shell environment when the capture succeeds', async () => {
+    const captured = { PATH: '/opt/homebrew/bin:/usr/bin', HOME: '/Users/owner', SHELL: '/bin/zsh' };
+    await expect(baseEnvironment(async () => captured)).resolves.toBe(captured);
+  });
+
+  it("falls back to the host's own environment when the capture fails or yields nothing", async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      await expect(baseEnvironment(async () => null)).resolves.toBe(process.env);
+      await expect(
+        baseEnvironment(async () => {
+          throw new Error('timed out');
+        }),
+      ).resolves.toBe(process.env);
+      expect(warn).toHaveBeenCalledTimes(2);
+    } finally {
+      warn.mockRestore();
+    }
   });
 });

@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const electron = vi.hoisted(() => ({
   handlers: new Map<string, (event: unknown, input: unknown) => Promise<unknown>>(),
   windows: new Map<object, { webContents: { mainFrame: object } }>(),
+  opened: [] as string[], // C9: what `shell.openExternal` was asked to open
 }));
 vi.mock('electron', () => ({
   ipcMain: {
@@ -14,6 +15,7 @@ vi.mock('electron', () => ({
     },
   },
   BrowserWindow: { fromWebContents: (webContents: object) => electron.windows.get(webContents) ?? null },
+  shell: { openExternal: async (url: string) => void electron.opened.push(url) },
 }));
 
 const DEV_URL = 'http://localhost:5173/';
@@ -32,6 +34,7 @@ async function load(appUrl = DEV_URL, dispatchToHost?: Parameters<Router['instal
   vi.resetModules();
   electron.handlers.clear();
   electron.windows.clear();
+  electron.opened.length = 0;
   router = await import('./router');
   router.installRouter({ appUrl, dispatchToHost });
 }
@@ -119,10 +122,11 @@ describe('main ipc router', () => {
       ok: true,
       value: { pid: 7, uptimeMs: 1, hostVersion: '0' },
     });
-    await invoke(appWindow(), 'pty.spawn', { cwd: '/', cols: 80, rows: 24 });
+    const spawn = { appSessionId: 'a1', label: 'terminal-1', cwd: '/', cols: 80, rows: 24 };
+    await invoke(appWindow(), 'pty.spawn', spawn);
     expect(dispatch.mock.calls).toEqual([
       ['engine-host', 'engine.ping', undefined],
-      ['pty-host', 'pty.spawn', { cwd: '/', cols: 80, rows: 24 }],
+      ['pty-host', 'pty.spawn', spawn],
     ]);
   });
 
@@ -156,6 +160,19 @@ describe('main ipc router', () => {
     });
     expect(log).toHaveBeenCalledOnce();
   });
+
+  // C9 block begin: pty.openLink, main-owned, through the one scheme-checked shell.openExternal
+  it('opens an http(s) or mailto link from pty.openLink and refuses any other scheme with opened false', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await expect(invoke(appWindow(), 'pty.openLink', { url: 'https://example.com/a?b=1' })).resolves.toEqual({ ok: true, value: { opened: true } });
+    await expect(invoke(appWindow(), 'pty.openLink', { url: 'mailto:owner@example.com' })).resolves.toEqual({ ok: true, value: { opened: true } });
+    for (const url of ['javascript:alert(1)', 'file:///etc/passwd', 'x-apple.systempreferences:com.apple.preference']) {
+      await expect(invoke(appWindow(), 'pty.openLink', { url })).resolves.toEqual({ ok: true, value: { opened: false } });
+    }
+    expect(electron.opened).toEqual(['https://example.com/a?b=1', 'mailto:owner@example.com']);
+    expect(warn).toHaveBeenCalledTimes(3);
+  });
+  // C9 block end
 
   it('refuses a handler for a host-owned command or a second handler for the same command', () => {
     expect(() => router.registerMainHandler('engine.ping' as never, () => ({}) as never)).toThrow(

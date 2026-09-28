@@ -30,8 +30,9 @@ function fakeMain(initial: SettingsState['settings']['theme']) {
         return { ptyId: 'p1', pid: 3333 };
       case 'pty.write':
         setTimeout(() => {
-          send('pty.data', { ptyId: 'p1', data: `${input.data}\n` });
-          send('pty.data', { ptyId: 'p1', data: 'MAWS_ECHO_OK\r\n$ ' });
+          const echoed = new TextEncoder().encode(`${input.data}\n`);
+          send('pty.data', { ptyId: 'p1', offset: 0, data: echoed });
+          send('pty.data', { ptyId: 'p1', offset: echoed.byteLength, data: new TextEncoder().encode('MAWS_ECHO_OK\r\n$ ') });
         });
         return undefined;
       default:

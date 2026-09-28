@@ -29,7 +29,7 @@ describe('terminal probe metrics', () => {
     expect(byteCountError(expected, { bytes: 105, outputBytes: 100, lineFeeds: 10 })).toBe('byte count mismatch: expected 110, received 105');
   });
 
-  it('counts line feeds and carriage returns', () => {
-    expect(countLineEndings('a\r\nb\r\r\n')).toEqual({ lineFeeds: 2, carriageReturns: 3 });
+  it('counts line feeds and carriage returns in a binary chunk', () => {
+    expect(countLineEndings(new TextEncoder().encode('a\r\nb\r\r\n한\n'))).toEqual({ lineFeeds: 3, carriageReturns: 3 });
   });
 });

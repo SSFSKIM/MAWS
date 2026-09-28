@@ -15,6 +15,7 @@ import {
   type Owner,
 } from '@shared/ipc/schema';
 import { validateCommandInput } from '@shared/ipc/validate';
+import { openExternalUrl } from '../open-external'; // C9: pty.openLink
 
 export { emit } from './events';
 
@@ -47,6 +48,9 @@ const hostsNotStarted: HostDispatch = async (owner, name) => ({
 });
 
 export function installRouter({ appUrl, dispatchToHost = hostsNotStarted }: RouterOptions): void {
+  // C9 block begin: a terminal's link opens through the one scheme-checked shell.openExternal
+  registerMainHandler('pty.openLink', ({ url }) => ({ opened: openExternalUrl(url) }));
+  // C9 block end
   for (const name of Object.keys(commands) as CommandName[]) {
     ipcMain.handle(commandChannel(name), (event, input: unknown) => route(event, name, input, appUrl, dispatchToHost));
   }

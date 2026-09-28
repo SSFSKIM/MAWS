@@ -2,7 +2,7 @@
 // minus the variables that belong to the Claude session the app itself may have been started from, plus what names
 // this terminal. Nothing here injects engine-launch settings (gateway variables, `CLAUDE_CODE_FORK_SUBAGENT`): a
 // shell the owner types into must behave exactly like Terminal.app (D-12).
-// M1 ships the pure `terminalEnvironment`; M2 adds `baseEnvironment()` over C3's captured login-shell environment.
+import { captureShellEnvironment } from '@shared/host/shell-env';
 
 // §4.1's parent-session exclusions: a `claude` started in the terminal must never believe it is inside the session
 // that started the app (the executor's own shell is one).
@@ -30,6 +30,22 @@ const ENGINE_LAUNCH_VARIABLES = ['ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN', '
 const GATEWAY_MODEL_VARIABLE = /^ANTHROPIC_DEFAULT_[A-Z_]*MODEL$/;
 
 const LOCALE_VARIABLES = ['LANG', 'LC_ALL', 'LC_CTYPE'] as const;
+
+// The seed every terminal environment is built from: X6's captured login-shell environment (run once, at host start,
+// by the caller), or the host's own `process.env` when the capture fails. Async so the capture never blocks the
+// host's handshake with main; the first spawn waits for it.
+export async function baseEnvironment(
+  capture: () => Promise<NodeJS.ProcessEnv | null> = captureShellEnvironment,
+): Promise<NodeJS.ProcessEnv> {
+  try {
+    const captured = await capture();
+    if (captured) return captured;
+    console.warn('[pty-host] the login-shell environment capture yielded nothing; terminals start from the host environment');
+  } catch (error) {
+    console.warn('[pty-host] the login-shell environment capture failed; terminals start from the host environment', error);
+  }
+  return process.env;
+}
 
 export interface TerminalEnvironmentOptions {
   appVersion: string; // TERM_PROGRAM_VERSION

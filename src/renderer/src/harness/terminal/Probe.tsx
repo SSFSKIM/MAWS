@@ -14,6 +14,7 @@ import {
   type Phase,
   type ProgramWorkload,
 } from '../../../../../spikes/terminal-probe/workloads.mjs';
+import type { EventPayload } from '@shared/ipc/schema';
 import { ipc } from '../../ipc/client';
 import { useSettings } from '../../stores/settings';
 import type { RendererKind, TerminalFont } from '../../terminal/renderer';
@@ -64,17 +65,31 @@ const pane = (kind: RendererKind): Pane => {
   return found;
 };
 const byPty = new Map<string, Pane>();
+// Events for a pty whose spawn reply has not reached the page yet (the reply and the events travel on different
+// channels): held until the pane claims the id, so a fast program's first bytes and its exit are never dropped.
+const unclaimed = new Map<string, (EventPayload<'pty.data'> | EventPayload<'pty.exit'>)[]>();
 let readyPromise: Promise<void> | null = null;
+
+const deliver = (pane: Pane, event: EventPayload<'pty.data'> | EventPayload<'pty.exit'>) => {
+  if ('data' in event) pane.onChunk(event.data, event.offset);
+  else {
+    byPty.delete(event.ptyId);
+    pane.onExit(event);
+  }
+};
+
+function receive(event: EventPayload<'pty.data'> | EventPayload<'pty.exit'>) {
+  const pane = byPty.get(event.ptyId);
+  if (pane) return deliver(pane, event);
+  const held = unclaimed.get(event.ptyId) ?? [];
+  if (held.length < 1024) held.push(event);
+  unclaimed.set(event.ptyId, held);
+}
 
 function start(): Promise<void> {
   if (readyPromise) return readyPromise;
-  ipc.on('pty.data', (event) => byPty.get(event.ptyId)?.onChunk(event.data));
-  ipc.on('pty.exit', (event) => {
-    const pane = byPty.get(event.ptyId);
-    if (!pane) return;
-    byPty.delete(event.ptyId);
-    pane.onExit(event);
-  });
+  ipc.on('pty.data', receive);
+  ipc.on('pty.exit', receive);
   // The terminals recolour when the document's theme attribute changes (the settings store sets it).
   new MutationObserver(() => {
     const theme = readDocumentTheme();
@@ -86,7 +101,12 @@ function start(): Promise<void> {
   return readyPromise;
 }
 
-const claim = (pane: Pane) => (ptyId: string) => byPty.set(ptyId, pane);
+const claim = (pane: Pane) => (ptyId: string) => {
+  byPty.set(ptyId, pane);
+  const held = unclaimed.get(ptyId) ?? [];
+  unclaimed.delete(ptyId);
+  for (const event of held) deliver(pane, event);
+};
 
 const programWorkload = (id: string): ProgramWorkload => {
   const workload = workloads[id];
