@@ -68,6 +68,7 @@ export interface Attachment {
   bytes: number | null;
   dataUrl: string | null;
   mediaType: string | null;
+  text: string | null; // the content of a `text` attachment (pasted content, *Pasted content* under Derivation), null otherwise
 }
 export interface ChangedFile {
   path: string;

@@ -17,6 +17,7 @@ export const turnId = {
 
 export const rowId = {
   time: (turn: TurnId) => row(`time:${turn}`),
+  timeOfEvent: (id: EventId) => row(`time:e${id}`), // a separator before a loose row (one outside any turn)
   user: (uuid: MessageUuid) => row(`user:${uuid}`),
   userOfEvent: (id: EventId) => row(`user:${id}`),
   text: (apiMessageId: ApiMessageId, blockIndex: number) => row(`text:${blockIdentity(apiMessageId, blockIndex)}`),
