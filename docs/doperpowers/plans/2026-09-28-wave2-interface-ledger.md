@@ -130,14 +130,15 @@ Owner process vocabulary is C1's `Owner`: `main`, `engine-host`, `pty-host`. "De
 | `pty.resize` | command | pty-host | C1 / C9 | C9 | `{ ptyId, cols, rows }` → void | agreed |
 | `pty.kill` | command | pty-host | C1 / C9 | C9 | `{ ptyId, signal? }` → void (SIGHUP default) | agreed |
 | `pty.ack` | command | pty-host | C9 | C9 registry | `{ ptyId, offset }` → void | agreed |
-| `pty.attach` | command | pty-host | C9 | C9 registry | `{ ptyId }` → `{ info: PtyInfo, replay: Uint8Array, nextOffset }` | agreed |
+| `pty.checkpoint` | command | pty-host | C9 | C9 registry | `{ ptyId, offset, state: string }` → void; the emulator's serialised state as of `offset`, latest kept per pty | agreed (added by the C9 fix wave 2026-09-28, finding 4: stateful reattach) |
+| `pty.attach` | command | pty-host | C9 | C9 registry | `{ ptyId }` → `{ info: PtyInfo, checkpoint: { offset, state } \| null, replay: Uint8Array, replayFrom, nextOffset }`; `replay` covers `[replayFrom, nextOffset)`, `replayFrom === checkpoint.offset` means an exact reattach | agreed (payload widened by the C9 fix wave 2026-09-28, finding 4) |
 | `pty.list` | command | pty-host | C9 | C9 registry, harness | void → `{ ptys: PtyInfo[] }` | agreed |
 | `pty.foreground` | command | pty-host | C9 | C9 tool | `{ ptyId }` → `{ process, busy }` | agreed |
 | `pty.openLink` | command | main | C9 | C9 tool | `{ url }` → `{ opened }` | conflict-resolved: kept as ruling 9 lists it, but its handler calls the one scheme-checked `shell.openExternal` helper C5 lands for `layout.openExternal` (d.11), so the check is implemented once |
 | `pty.data` | event | pty-host | C9 (replaces C1's) | C9 registry (sole subscriber), C1 smoke via Diagnostics (migrated) | `{ ptyId, offset, data: Uint8Array }` | agreed; migration stated in C9 M2 (ruling 9) |
 | `pty.exit` | event | pty-host | C1 / C9 | C9 registry | `{ ptyId, exitCode, signal }`; nulls mean the host died | agreed |
 
-Counts: 101 distinct command names and 27 distinct event names defined or consumed across the five documents (126 table rows; `engine.hostState` and `pty.hostState` are both a command and an event; C1's entries appear where a wave-2 child consumes or migrates them). Status totals: 107 agreed, 13 conflict-resolved, 2 renamed-from, 4 added-for-consumer. Added for consumers: `session.brokerItems` and `session.pendingRequest` (ruling 1), `session.projects.list` (ruling 8), `session.replay.launch` (C4 fix wave 2026-09-28, finding 4; the `session.update` title payload was narrowed in the same wave, finding 5). Renamed: `session.rewindFiles` (from C6's `engine.rewindFiles`, ruling 3), `session.projects.changed` (from C5's `session.projectsChanged`, ruling 8).
+Counts: 102 distinct command names and 27 distinct event names defined or consumed across the five documents (127 table rows; `engine.hostState` and `pty.hostState` are both a command and an event; C1's entries appear where a wave-2 child consumes or migrates them; `pty.checkpoint` added by the C9 fix wave 2026-09-28). Status totals: 108 agreed, 13 conflict-resolved, 2 renamed-from, 4 added-for-consumer. Added for consumers: `session.brokerItems` and `session.pendingRequest` (ruling 1), `session.projects.list` (ruling 8), `session.replay.launch` (C4 fix wave 2026-09-28, finding 4; the `session.update` title payload was narrowed in the same wave, finding 5). Renamed: `session.rewindFiles` (from C6's `engine.rewindFiles`, ruling 3), `session.projects.changed` (from C5's `session.projectsChanged`, ruling 8).
 
 ## (b) Additive changes to X1, X3, X7 and shared test support
 
@@ -159,6 +160,7 @@ Counts: 101 distinct command names and 27 distinct event names defined or consum
 | Main helper | `openExternalUrl(url): boolean`, the one scheme-checked `shell.openExternal` (`http`, `https`, `mailto`) | C5 (adds), C9 (reuses) | `src/main/open-external.ts` | d.11 |
 | X6 capture | `captureShellEnvironment()` moves from `src/engine-host/shell-env.ts` to `src/shared/host/shell-env.ts` so the PTY host runs the same capture | C3 (adds), C9 (consumes) | `src/shared/host/shell-env.ts` | d.12 |
 | e2e support | `launch({ env })`: the smoke's launch helper accepts extra environment variables | C3 (adds), C5, C6, C9 (reuse) | `e2e/support/launch.ts` | one change instead of three |
+| Keymap dispatcher | the terminal container carries `data-key-sink="terminal"`; C5's dispatcher refuses pane-scoped dispatch (`request.accept`, `request.decline`, `tab.next`, `tab.previous`) inside any `[data-key-sink]` element and on any text-entry element whatever its content (xterm's helper textarea), and delivers composer-scoped actions only inside `data-key-sink="composer"`; the terminal forwards ⌃Tab and ⌃⇧Tab through `runAction('tab.next' \| 'tab.previous')`; menu-sink ⌘ chords are unaffected | C5 (rule), C9 (marker and forwarding) | `src/renderer/src/keymap/dispatcher.ts`, `src/renderer/src/keymap/actions-runtime.ts`, `src/renderer/src/terminal/registry.ts` | C5 and C9 fix waves 2026-09-28; C9 M4's `keeps Enter and Escape from the app's request handlers` is the merge gate after C9 rebases over C5 |
 
 ## (c) Shared files and merge order
 
