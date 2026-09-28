@@ -77,6 +77,8 @@ describe('the engine host serves fs.* through the host protocol', () => {
       ['10', 'fs.agentEvents', { appSessionId: 'app-1', agentId: 'nobody' }],
       ['11', 'fs.unfollow', { appSessionId: 'app-unknown', agentId: null }],
       ['12', 'fs.unfollow', { appSessionId: 'app-1', agentId: null }],
+      ['13', 'fs.unbind', { appSessionId: 'app-1' }],
+      ['14', 'fs.unbind', { appSessionId: 'app-unknown' }],
     ];
     for (const [id, name, input] of requests) fake.deliver({ t: 'req', id, name, input });
     expect(await response('6')).toEqual({ t: 'res', id: '6', ok: true, value: { agents: [] } });
@@ -86,5 +88,9 @@ describe('the engine host serves fs.* through the host protocol', () => {
     expect(await response('10')).toMatchObject({ ok: false, error: { code: 'internal', message: 'unknown agent: nobody' } });
     expect(await response('11')).toMatchObject({ ok: false, error: { code: 'internal', message: 'unknown app session: app-unknown' } });
     expect(await response('12')).toEqual({ t: 'res', id: '12', ok: true, value: undefined });
+    expect(await response('13')).toEqual({ t: 'res', id: '13', ok: true, value: undefined });
+    expect(await response('14')).toEqual({ t: 'res', id: '14', ok: true, value: undefined });
+    fake.deliver({ t: 'req', id: '15', name: 'fs.subagents', input: { appSessionId: 'app-1' } });
+    expect(await response('15')).toMatchObject({ ok: false, error: { code: 'internal', message: 'unknown app session: app-1' } });
   });
 });

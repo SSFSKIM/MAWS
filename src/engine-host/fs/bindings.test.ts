@@ -27,4 +27,16 @@ describe('bindings pair engine session ids with app session ids', () => {
     expect(bindings.sessionIdOf(a('a2'))).toBe('s2');
     expect(bindings.size).toBe(1);
   });
+
+  it('unbinds an app session id, dropping its pair on both sides; an unknown id is a no-op', () => {
+    const bindings = new Bindings();
+    bindings.bind(s('s1'), a('a1'));
+    bindings.bind(s('s2'), a('a2'));
+    expect(bindings.unbind(a('a1'))).toBe('s1');
+    expect(bindings.sessionIdOf(a('a1'))).toBeNull();
+    expect(bindings.appIdOf(s('s1'))).toBeNull();
+    expect(bindings.unbind(a('a1'))).toBeNull();
+    expect(bindings.appIdOf(s('s2'))).toBe('a2');
+    expect(bindings.size).toBe(1);
+  });
 });

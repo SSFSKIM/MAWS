@@ -1,8 +1,9 @@
 // X2 `fs.*` (C4 execution document, Interfaces "X2 additions"): the engine host's filesystem state service over the
 // engine's own store. Owner `engine-host` for every command. M2 fills the discovery and holder surface (`fs.state`,
 // `fs.scan`, `fs.bind`, `fs.holders`; `fs.sessionChanged`, `fs.sessionRemoved`, `fs.holderChanged`, `fs.scanProgress`); M3 adds
-// following, subagents, workflows, tasks and spills. C8 adds its file-tree commands later under names not listed here.
-// Every command that takes an `appSessionId` fails with `internal` `unknown app session: <id>` when main has not bound it.
+// following, subagents, workflows, tasks and spills; M4 adds `fs.unbind`. C8 adds its file-tree commands later under names not listed here.
+// Every command that takes an `appSessionId` fails with `internal` `unknown app session: <id>` when main has not bound it,
+// except `fs.unbind`, for which an unbound id is a no-op.
 import * as z from 'zod';
 import { SessionEventSchema } from '@shared/graph/events';
 import { AgentIdSchema, AppSessionIdSchema, MessageUuidSchema, SessionIdSchema } from '@shared/graph/ids';
@@ -88,6 +89,9 @@ export const commands = {
   'fs.scan': { input: z.strictObject({ known: z.array(FsScanKnownSchema).optional() }), output: FsScanResultSchema, owner: 'engine-host' },
   // main → host, after the index allocates or binds an app id
   'fs.bind': { input: z.strictObject({ bindings: z.array(FsBindingSchema) }), output: z.void(), owner: 'engine-host' },
+  // main → host, from the index's `unbindEngineId` (C10's ask, M4): drops the pair and stops any follower on it; an
+  // unknown app session id is a no-op
+  'fs.unbind': { input: z.strictObject({ appSessionId: AppSessionIdSchema }), output: z.void(), owner: 'engine-host' },
   // Refreshes the registry (the poll's liveness rule), then answers every live holder whose sessionId is listed or whose
   // cwd (NFC-normalised realpath) is one of `directories`; both null answers every live holder. C10's ask.
   'fs.holders': { input: FsHoldersQuerySchema, output: FsHoldersAnswerSchema, owner: 'engine-host' },

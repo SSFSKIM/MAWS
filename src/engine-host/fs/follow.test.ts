@@ -430,6 +430,28 @@ describe('a followed session backfills, then tails its transcript', () => {
     },
   );
 
+  it('fs.unbind drops the pair and stops the session\'s followers; later events carry no app id, and an unknown id is a no-op', async () => {
+    const path = await fixture.addTranscript(REWIND_DIR, REWIND, rewindLines);
+    const fs = await start();
+    fs.bind([{ sessionId: REWIND, appSessionId: APP }]);
+    await fs.eventsSnapshot(APP, null);
+    expect(fs.state()).toMatchObject({ bound: 1, followed: [{ appSessionId: APP, agentId: null }] });
+
+    await fs.unbind(APP);
+    expect(lastState()?.state).toBe('stopped');
+    expect(fs.state()).toMatchObject({ bound: 0, followed: [] });
+    await expect(fs.eventsSnapshot(APP, null)).rejects.toThrow(`unknown app session: ${APP}`);
+    await expect(fs.unbind(APP)).resolves.toBeUndefined();
+    await expect(fs.unbind('app-never-bound' as AppSessionId)).resolves.toBeUndefined();
+
+    const count = emitted.length;
+    await fixture.appendLines(path, [JSON.stringify({ type: 'custom-title', customTitle: 'After the unbind', sessionId: REWIND })]);
+    await expect.poll(() => events('fs.sessionChanged').some((e) => e.summary.customTitle === 'After the unbind')).toBe(true);
+    const later = emitted.slice(count);
+    expect(later.filter((e) => e.name === 'session.eventBatch' || e.name === 'fs.followState')).toEqual([]);
+    expect(later.filter((e) => e.name === 'fs.sessionChanged').map((e) => e.payload)).toEqual([expect.objectContaining({ appSessionId: null })]);
+  });
+
   it('follows an app session whose transcript does not exist yet, and picks it up when it appears', async () => {
     const fs = await start();
     fs.bind([{ sessionId: REWIND, appSessionId: APP }]);

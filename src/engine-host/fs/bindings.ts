@@ -16,6 +16,15 @@ export class Bindings {
     this.byApp.set(appSessionId, sessionId);
   }
 
+  // `fs.unbind` (C10's ask, M4): drops the app id's pair and answers the engine id it was paired with; null when unbound.
+  unbind(appSessionId: AppSessionId): SessionId | null {
+    const sessionId = this.byApp.get(appSessionId);
+    if (sessionId === undefined) return null;
+    this.byApp.delete(appSessionId);
+    this.bySession.delete(sessionId);
+    return sessionId;
+  }
+
   appIdOf(sessionId: SessionId): AppSessionId | null {
     return this.bySession.get(sessionId) ?? null;
   }

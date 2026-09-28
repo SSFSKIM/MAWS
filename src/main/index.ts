@@ -10,6 +10,11 @@ import { startAttentionService } from './attention/service';
 import { emit } from './ipc/events';
 import { registerMainHandler } from './ipc/router';
 // C3 end
+// C4 start (emit comes with C3's imports)
+import { Index } from './index/index';
+import { registerIndexHandlers } from './index/register';
+import { IndexSessionSource, type ReadModelWriter } from './index/source';
+// C4 end
 
 // A fresh profile for the end-to-end smoke (and anyone else who wants one); must be set before the app is ready.
 if (process.env.MAWS_USER_DATA) app.setPath('userData', process.env.MAWS_USER_DATA);
@@ -33,6 +38,19 @@ app.whenReady().then(() => {
   process.env.MAWS_USER_DATA = app.getPath('userData');
   startAttentionService({ onEvent: (name, listener) => hosts.onEvent(name, listener), dispatch: hosts.dispatch, store: new FileAttentionStore(join(app.getPath('userData'), 'attention.json')), emit, register: registerMainHandler });
   // C3 end
+
+  // C4 start: the index (<userData>/index.sqlite) answers the record side of session.*, and its session source folds the
+  // engine host's store events into it once the host is ready. Until C5's read model registers the source, nothing
+  // main-side reads what it writes, so its writer drops every observation.
+  const index = new Index(join(app.getPath('userData'), 'index.sqlite'));
+  registerIndexHandlers(index);
+  const noReadModel: ReadModelWriter = { observeRecord() {}, observeRemoved() {}, observeProject() {}, observeProjectRemoved() {}, setDigest() {} };
+  const stopSource = new IndexSessionSource(index, hosts, { emit }).start(noReadModel);
+  app.on('will-quit', () => {
+    stopSource();
+    index.close();
+  });
+  // C4 end
 
   // The hosts belong to the app, not to a window or a page (§4.1): they start here, before any window exists, and
   // `start()` is idempotent, so opening a window again forks nothing and a reload never reaches them.

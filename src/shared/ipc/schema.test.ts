@@ -64,13 +64,24 @@ describe('ipc schema validates both directions', () => {
 
     it('carries the C4 fs.* entries, every command owned by the engine host', () => {
       expect(Object.keys(fs.commands).sort()).toEqual([
-        'fs.agentEvents', 'fs.bind', 'fs.holders', 'fs.readSpill', 'fs.scan', 'fs.state', 'fs.subagents', 'fs.tasks', 'fs.unfollow', 'fs.workflows',
+        'fs.agentEvents', 'fs.bind', 'fs.holders', 'fs.readSpill', 'fs.scan', 'fs.state', 'fs.subagents', 'fs.tasks', 'fs.unbind', 'fs.unfollow', 'fs.workflows',
       ]);
       for (const spec of Object.values(fs.commands)) expect(spec.owner).toBe('engine-host');
       expect(Object.keys(fs.events).sort()).toEqual([
         'fs.followState', 'fs.holderChanged', 'fs.scanProgress', 'fs.sessionChanged', 'fs.sessionRemoved', 'fs.subagentsChanged', 'fs.tasksChanged', 'fs.workflowChanged',
       ]);
     });
+
+    // C4 (M4): the record side of the index, owned by main.
+    it('carries the C4 session.* record, project and draft entries, every command owned by main', () => {
+      const c4 = ['session.drafts.get', 'session.drafts.set', 'session.get', 'session.list', 'session.projects.add', 'session.projects.list', 'session.projects.remove', 'session.projects.update', 'session.update'];
+      for (const name of c4) expect(commands[name as keyof typeof commands]?.owner, name).toBe('main');
+      for (const name of ['session.changed', 'session.removed', 'session.projects.changed']) expect(Object.hasOwn(events, name), name).toBe(true);
+      expect(validateCommandInput('session.update', { appSessionId: 'a', patch: {} }).ok).toBe(false); // at least one field
+      expect(validateCommandInput('session.update', { appSessionId: 'a', patch: { title: { text: 'x', source: 'generated' } } }).ok).toBe(false); // MAWS never sets generated
+      expect(validateCommandInput('session.update', { appSessionId: 'a', patch: { title: null } }).ok).toBe(true);
+    });
+    // end C4
 
     it('names channels by kind so a command and an event of the same name never share one', () => {
       expect(commandChannel('engine.hostState')).toBe('maws:cmd:engine.hostState');

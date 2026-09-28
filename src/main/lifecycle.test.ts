@@ -31,6 +31,13 @@ vi.mock('./attention/file-attention-store', () => ({ FileAttentionStore: vi.fn()
 // C3 end
 vi.mock('./settings', () => ({ startSettings: () => ({ state: () => ({ resolvedTheme: 'light' }) }) }));
 vi.mock('./window', () => ({ appUrl: 'file:///index.html', createWindow: fake.createWindow, installContentSecurityPolicy: vi.fn() }));
+// C4: the index and its session source are replaced too; the lifecycle only has to open, start and close them.
+const c4 = vi.hoisted(() => ({ close: vi.fn(), stopSource: vi.fn(), started: 0 }));
+vi.mock('./index/index', () => ({ Index: class { close = c4.close; } }));
+vi.mock('./index/register', () => ({ registerIndexHandlers: vi.fn() }));
+vi.mock('./index/source', () => ({ IndexSessionSource: class { start = () => ((c4.started += 1), c4.stopSource); } }));
+vi.mock('./ipc/events', () => ({ emit: vi.fn() }));
+// end C4
 
 beforeAll(async () => {
   await import('./index');
@@ -60,5 +67,10 @@ describe('app lifecycle (macOS, D-11)', () => {
   it('stops the hosts on will-quit', () => {
     fake.emit('will-quit');
     expect(fake.hosts.stop).toHaveBeenCalledOnce();
+    // C4: the session source was started at ready and stops, with the index closed, at will-quit.
+    expect(c4.started).toBe(1);
+    expect(c4.stopSource).toHaveBeenCalledOnce();
+    expect(c4.close).toHaveBeenCalledOnce();
+    // end C4
   });
 });

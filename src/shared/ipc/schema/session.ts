@@ -34,6 +34,12 @@ import {
   SetCwdResponseSchema,
 } from '../../wire/control';
 // C3 end
+// C4 start: the record side, projects, drafts and replay (C4 execution document, Interfaces "X2 additions")
+// (AppSessionIdSchema and MessageUuidSchema come with C3's imports above.)
+import { ProjectIdSchema } from '@shared/graph/ids';
+import { SessionRecordSchema } from '@shared/graph/session';
+export type { EngineSessionStatus } from '../../engine/status'; // carried until the post-rebase swap to C3's toSessionRecordPatch
+// C4 end
 import type { CommandSpec } from './common';
 
 // C3 start
@@ -129,10 +135,97 @@ export const C3_SESSION_COMMANDS = Object.keys(c3Commands) as (keyof typeof c3Co
 export const C3_SESSION_EVENTS = Object.keys(c3Events) as (keyof typeof c3Events)[];
 // C3 end
 
+// C4 start ------------------------------------------------------------------------------------------------------------
+// The record side of the index in main (C4 execution document, Interfaces "X2 additions", `session.ts`): records,
+// projects and drafts, owner main. Every command naming an app session id with no index row fails with `internal`
+// `unknown app session: <id>`, except `session.get`, which answers null (an unstarted tab has an id and no row yet).
+
+// C5's project shape (C5 execution document, "Main modules"), defined here and imported by C5: the `projects` row
+// projected, `order` being its sort order.
+export const ProjectRecordSchema = z.strictObject({
+  id: ProjectIdSchema,
+  name: z.string(),
+  directory: z.string(),
+  order: z.number().int(),
+  createdAt: z.string(),
+});
+export type ProjectRecord = z.infer<typeof ProjectRecordSchema>;
+
+// Every field optional, at least one present. `title` sets the MAWS-side override of the Title rule (`null` clears it);
+// `generated` is never set by MAWS. "Mark all read" is `unread: false` plus `lastSeen`.
+export const SessionPatchSchema = z
+  .strictObject({
+    title: z.strictObject({ text: z.string(), source: z.enum(['user', 'tool']) }).nullable().optional(),
+    pinned: z.boolean().optional(),
+    archived: z.boolean().optional(),
+    unread: z.boolean().optional(),
+    lastSeen: z.strictObject({ messageUuid: MessageUuidSchema.nullable(), at: z.string() }).optional(),
+  })
+  .refine((patch) => Object.values(patch).some((value) => value !== undefined), { message: 'a patch sets at least one field' });
+export type SessionPatch = z.infer<typeof SessionPatchSchema>;
+
+// A composer draft: C7's Tiptap document, opaque here, and its attachments.
+export const DraftSchema = z.strictObject({
+  doc: z.unknown(),
+  attachments: z.array(z.strictObject({ path: z.string(), kind: z.string() })),
+  updatedAt: z.string(),
+});
+export type Draft = z.infer<typeof DraftSchema>;
+
+// A replay fixture the index lists (M5 seeds and plays them).
+export const ReplayFixtureSchema = z.strictObject({
+  id: z.string(),
+  name: z.string(),
+  kind: z.enum(['journal', 'transcript']),
+  path: z.string(),
+  sessionId: z.string().nullable(),
+  addedAt: z.string(),
+  lastPlayedAt: z.string().nullable(),
+});
+export type ReplayFixture = z.infer<typeof ReplayFixtureSchema>;
+
+export const SESSION_CHANGE_CAUSES = ['discovered', 'facts', 'holder', 'update', 'live', 'replay'] as const;
+export type SessionChangeCause = (typeof SESSION_CHANGE_CAUSES)[number];
+
+const appSession = z.strictObject({ appSessionId: AppSessionIdSchema });
+const c4Commands = {
+  'session.list': {
+    input: z.strictObject({ includeArchived: z.boolean().optional() }),
+    output: z.strictObject({ sessions: z.array(SessionRecordSchema), revision: z.number().int() }),
+    owner: 'main',
+  },
+  'session.get': { input: appSession, output: SessionRecordSchema.nullable(), owner: 'main' },
+  // pin, archive, mark read, C10's rename with provenance
+  'session.update': { input: z.strictObject({ appSessionId: AppSessionIdSchema, patch: SessionPatchSchema }), output: SessionRecordSchema, owner: 'main' },
+  'session.projects.list': { input: z.void(), output: z.strictObject({ projects: z.array(ProjectRecordSchema), revision: z.number().int() }), owner: 'main' },
+  // realpathed; an existing directory is required; origin 'user'
+  'session.projects.add': { input: z.strictObject({ directory: z.string() }), output: ProjectRecordSchema, owner: 'main' },
+  'session.projects.update': {
+    input: z.strictObject({ id: ProjectIdSchema, patch: z.strictObject({ name: z.string().optional(), order: z.number().int().optional() }) }),
+    output: ProjectRecordSchema,
+    owner: 'main',
+  },
+  // hides; rediscovery does not resurrect it
+  'session.projects.remove': { input: z.strictObject({ id: ProjectIdSchema }), output: z.void(), owner: 'main' },
+  'session.drafts.get': { input: appSession, output: DraftSchema.nullable(), owner: 'main' },
+  'session.drafts.set': { input: z.strictObject({ appSessionId: AppSessionIdSchema, draft: DraftSchema.nullable() }), output: z.void(), owner: 'main' },
+} as const satisfies Record<`session.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
+// `revision` is one index-wide counter bumped on every session or project change; a consumer keeps the higher of
+// snapshot and event (C5's rule).
+const c4Events = {
+  'session.changed': z.strictObject({ record: SessionRecordSchema, cause: z.enum(SESSION_CHANGE_CAUSES), revision: z.number().int() }),
+  'session.removed': z.strictObject({ appSessionId: AppSessionIdSchema, revision: z.number().int() }),
+  // the whole list, for C5's project tree (wave-2 ledger, d.6)
+  'session.projects.changed': z.strictObject({ projects: z.array(ProjectRecordSchema), revision: z.number().int() }),
+} as const satisfies Record<`session.${string}`, z.ZodType>;
+// C4 end --------------------------------------------------------------------------------------------------------------
+
 export const commands = {
   ...c3Commands, // C3
+  ...c4Commands, // C4
 } as const satisfies Record<`session.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {
   ...c3Events, // C3
+  ...c4Events, // C4
 } as const satisfies Record<`session.${string}`, z.ZodType>;

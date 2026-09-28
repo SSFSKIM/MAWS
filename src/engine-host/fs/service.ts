@@ -146,6 +146,15 @@ export class FsService {
     for (const { sessionId, appSessionId } of bindings) this.bindings.bind(sessionId, appSessionId);
   }
 
+  // `fs.unbind` (C10's ask, M4): main cleared the record's engine id, so the pair goes and whatever followed the session
+  // under that app id stops; later events for the engine id carry no app id until main binds it again. An app id main
+  // never bound (or already unbound) is a no-op, not an error.
+  async unbind(appSessionId: AppSessionId): Promise<void> {
+    if (this.bindings.sessionIdOf(appSessionId) === null) return;
+    await this.unfollow(appSessionId, null);
+    this.bindings.unbind(appSessionId);
+  }
+
   // `fs.holders`: the registry read now, filtered by session id or directory (HolderRegistry.liveNow).
   async holdersNow(query: FsHoldersQuery): Promise<FsHoldersAnswer> {
     const live = await this.holders.liveNow(query);

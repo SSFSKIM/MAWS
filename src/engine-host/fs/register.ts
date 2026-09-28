@@ -16,6 +16,7 @@ export function registerFs(on: HostOn, emit: HostEmit, env: NodeJS.ProcessEnv = 
   on('fs.state', async () => service.state());
   on('fs.scan', async ({ known }) => service.scan((known ?? []) as FsScanKnown[]));
   on('fs.bind', async ({ bindings }) => service.bind(bindings as Pick<FsScanKnown, 'sessionId' | 'appSessionId'>[]));
+  on('fs.unbind', async ({ appSessionId }) => service.unbind(appSessionId as AppSessionId));
   on('fs.holders', async (query) => service.holdersNow(query as FsHoldersQuery));
   on('fs.unfollow', async ({ appSessionId, agentId }) => service.unfollow(appSessionId as AppSessionId, agentId as AgentId | null));
   on('fs.subagents', async ({ appSessionId }) => service.subagents(appSessionId as AppSessionId));
