@@ -24,6 +24,7 @@ const DEFAULTS: Partial<Record<EventKind, Record<string, unknown>>> = {
   'permission.resolved': { requestId: 'req_1', toolUseId: 'toolu_1', behavior: 'allow', message: null, updatedInput: null, updatedPermissions: [], resolvedBy: 'user' },
   'question.requested': { requestId: 'req_1', toolUseId: 'toolu_1', questions: [] },
   'question.answered': { requestId: 'req_1', toolUseId: 'toolu_1', answers: {} },
+  'plan.requested': { requestId: 'req_1', toolUseId: 'toolu_1', plan: '', input: {} },
   'subagent.started': { taskId: 'task_1', toolUseId: null, description: 'child', subagentType: null, isBackground: false, spawnDepth: 1, prompt: null },
   'subagent.finished': { taskId: 'task_1', status: 'completed', summary: null, outputFile: null, reason: null },
   'boundary.compaction': { trigger: 'auto', preTokens: 1, postTokens: null, logicalParentUuid: null, historical: false },
