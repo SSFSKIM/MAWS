@@ -47,9 +47,14 @@ describe('transcript records chain from the leaf', () => {
     const anchors = records.filter((r) => r.type === 'last-prompt').map((r) => LastPromptAnchorSchema.parse(r));
     expect(anchors).toHaveLength(2);
     expect(anchors[0].rewound).toBeUndefined();
+    expect(anchors[0].lastPrompt).toBe('Also remember BANANA.');
+    // The rewound anchor carries the prompt that was rewound away (the rewind response's prefillText) and names the
+    // assistant record preceding the rewind point; `explicit` and `sessionId` ride the index signature.
     expect(anchors[1].rewound).toBe(true);
-    expect(anchors[1].lastPrompt).toBe('List every word I asked you to remember.');
-    expect(anchors[1].leafUuid).toBe('a2');
+    expect(anchors[1].lastPrompt).toBe('Also remember BANANA.');
+    expect(anchors[1].leafUuid).toBe('a1');
+    expect(anchors[1].explicit).toBe(true);
+    expect(anchors[1].sessionId).toBe('S');
   });
 
   it('stops at a missing parent and reports the gap instead of bridging it', () => {
