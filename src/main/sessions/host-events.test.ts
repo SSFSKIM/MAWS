@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 vi.mock('electron', () => ({ BrowserWindow: { getAllWindows: () => [] }, ipcMain: { handle: vi.fn() } }));
 
 import type { AppSessionId } from '@shared/graph/ids';
-import { humanTurn, status } from '../../../test/support/builders';
+import { humanTurn, record, status } from '../../../test/support/builders';
 import { ev } from '../../../test/support/events';
 import { item } from '../../../test/support/builders';
 import { emit } from '../ipc/events';
@@ -20,6 +20,7 @@ describe('read model snapshot matches events', () => {
       },
     };
     const model = new SessionReadModel('index');
+    model.register({ start: (writer) => (writer.observeRecord(record('a1')), () => {}) });
     const stop = model.register(hostEventSource(hosts as never));
     listeners.get('session.status')!({ appSessionId: 'a1', status: status('a1', { engineState: 'running', turn: humanTurn }) });
     listeners.get('session.eventBatch')!({ appSessionId: 'a1', events: [ev('turn.started', {}), ev('tool.use', { toolName: 'Grep' })] });

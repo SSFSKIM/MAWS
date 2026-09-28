@@ -37,6 +37,8 @@ describe('read model snapshot matches events', () => {
     model = new SessionReadModel('index');
     src = source();
     model.register(src);
+    src.writer.observeRecord(record(A));
+    src.writer.observeRecord(record(B));
     emitted = [];
     model.on('digest', (d) => emitted.push(d));
   });
@@ -118,6 +120,7 @@ describe('quit decision', () => {
     const src = source();
     model.register(src);
     const w = src.writer;
+    for (const id of ['s1', 's2', 's3', 's4', 's5', 's6', 's7']) w.observeRecord(record(id));
     w.applyEngineStatus(status('s1', { process: 'ready', engineState: 'running', turn: humanTurn }));
     w.applyEngineStatus(status('s2', { process: 'ready', engineState: 'requires_action', turn: humanTurn, pendingRequests: 1 }));
     w.applyEngineStatus(status('s3', { process: 'starting' }));
@@ -139,6 +142,52 @@ describe('quit decision', () => {
 
     w.forgetEngineStatus('s1' as AppSessionId);
     expect(model.midTurnCount()).toBe(3);
+  });
+});
+
+// C10's trust bootstrap launches under the session's id before its record exists (C10 ask 5): the read model keeps no
+// digest and no engine status for a session it has not observed, so nothing it says is about a session nobody lists.
+describe('read model drops input for a session with no observed record', () => {
+  let model: SessionReadModel;
+  let src: ReturnType<typeof source>;
+
+  beforeEach(() => {
+    model = new SessionReadModel('index');
+    src = source();
+    model.register(src);
+  });
+
+  it('drops an engine status: no digest, no status, no mid-turn count, no events', () => {
+    const onEngine = vi.fn();
+    const onDigest = vi.fn();
+    model.on('engine', onEngine);
+    model.on('digest', onDigest);
+    src.writer.applyEngineStatus(status(A, { process: 'ready', engineState: 'running', turn: humanTurn }));
+    expect(model.digests()).toEqual([]);
+    expect(model.engineStatus(A)).toBeNull();
+    expect(model.midTurnCount()).toBe(0);
+    expect(onEngine).not.toHaveBeenCalled();
+    expect(onDigest).not.toHaveBeenCalled();
+  });
+
+  it('drops a fold, and does not remember its event ids for later', () => {
+    const batch = [ev('turn.started', {}), ev('turn.ended', { costUsd: 0.5 })];
+    src.writer.fold(A, batch);
+    expect(model.digests()).toEqual([]);
+    src.writer.observeRecord(record(A));
+    src.writer.fold(A, batch);
+    expect(model.digests()).toMatchObject([{ appSessionId: A, phase: 'idle', cost: { totalUsd: 0.5 } }]);
+  });
+
+  it('takes both once the record is observed, and drops them again after it is removed', () => {
+    src.writer.observeRecord(record(A));
+    src.writer.applyEngineStatus(status(A, { process: 'ready', engineState: 'running', turn: humanTurn }));
+    expect(model.midTurnCount()).toBe(1);
+    src.writer.observeRemoved(A);
+    src.writer.applyEngineStatus(status(A, { process: 'ready', engineState: 'running', turn: humanTurn }));
+    src.writer.fold(A, [ev('turn.started', {})]);
+    expect(model.midTurnCount()).toBe(0);
+    expect(model.digests()).toEqual([]);
   });
 });
 

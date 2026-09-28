@@ -171,12 +171,16 @@ export class SessionReadModel {
       if (d.cost) this.costAtSeen.set(d.appSessionId, d.cost.totalUsd - d.cost.sinceSeenUsd);
       this.commit({ ...d, revision: 0 });
     },
+    // A status or batch for a session with no observed record is dropped (C10's trust bootstrap launches under the
+    // session's id before the record exists): the model describes only sessions a source has listed.
     fold: (appSessionId, events) => {
+      if (!this.records.has(appSessionId)) return;
       let seen = this.seen.get(appSessionId);
       if (!seen) this.seen.set(appSessionId, (seen = new Set()));
       this.commit(foldEvents(this.current(appSessionId), seen, events));
     },
     applyEngineStatus: (s) => {
+      if (!this.records.has(s.appSessionId)) return;
       this.statuses.set(s.appSessionId, s);
       this.fire('engine', s.appSessionId, s);
       this.commit(applyStatusToDigest(this.current(s.appSessionId), s));
