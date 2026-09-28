@@ -4,6 +4,17 @@
 // which is the linearization the transition table relies on: a chunk is appended to the ring and emitted with its
 // offset before the next message is handled, so `pty.attach`'s `nextOffset` is exactly where live events continue.
 //
+// node-pty on macOS reads at most 1 KiB at a time, and under a flood the host's loop is fast enough to take ~10-byte
+// reads one per turn (so batching per `setImmediate` coalesces nothing, measured). The host coalesces by time: a read
+// after 5 ms of quiet is flushed on the next `setImmediate` (a keystroke's echo is not delayed), reads within 5 ms of
+// the last flush wait for that window to close, and 64 KiB pending flushes at once. The flow reducer, the ring and
+// checkpoints see only flushed chunks. A flush always precedes `pty.exit` and the computation of
+// a `pty.attach` reply, so `nextOffset` covers every byte the host has read.
+//
+// Every pty starts through `/bin/sh -c 'stty iutf8; exec "$0" "$@"'`: node-pty sets IUTF8 only when it decodes to
+// strings, and without it canonical-mode erase removes one byte of a multi-byte character (Terminal.app's ttys have
+// it). The exec replaces the wrapper in place, so the pid is the program's and `$0` is the requested path.
+//
 // A pty that exits on its own stays as a dead entry for an hour, so a reloaded renderer can still show its last
 // screen; one the renderer killed is removed when it exits. An id the table does not hold fails with `unknown pty`.
 import { randomUUID } from 'node:crypto';
@@ -24,6 +35,9 @@ if (RING_BYTES !== 2 * HIGH_WATERMARK) throw new Error('the ring buffer must hol
 export const DEAD_ENTRY_TTL_MS = 60 * 60 * 1000;
 const DEFAULT_SHELL = '/bin/zsh';
 const LOGIN_ARGS = ['-l'];
+const FLUSH_BYTES = 64 * 1024;
+const FLUSH_INTERVAL_MS = 5;
+const IUTF8_WRAPPER = ['/bin/sh', '-c', 'stty iutf8 2>/dev/null; exec "$0" "$@"'] as const;
 
 interface PtyEntry {
   info: Omit<PtyInfo, 'paused' | 'offset'>;
@@ -33,6 +47,12 @@ interface PtyEntry {
   checkpoint: PtyCheckpoint | null;
   killed: boolean; // the renderer asked for it to end: remove the entry on exit instead of keeping it dead
   expiry: ReturnType<typeof setTimeout> | null;
+  pending: Buffer[]; // reads not yet flushed as an event
+  pendingBytes: number;
+  flushTimer: { cancel(): void } | null; // the queued flush, if any
+  lastFlushAt: number; // performance.now() of the last flush
+  reads: number; // node-pty reads since spawn
+  read: number; // bytes node-pty delivered since spawn: `flow.total` plus what is pending
 }
 
 export interface PtyTableOptions {
@@ -52,7 +72,8 @@ export interface PtyTable {
   attach(input: CommandInput<'pty.attach'>): CommandOutput<'pty.attach'>;
   list(): CommandOutput<'pty.list'>;
   foreground(input: CommandInput<'pty.foreground'>): Promise<CommandOutput<'pty.foreground'>>;
-  inspect(ptyId: string): { flow: Flow; ringStart: number }; // tests: the flow state and the ring's oldest offset
+  // tests: the flow state, the ring's oldest offset, and node-pty's reads and bytes read (flushed or pending)
+  inspect(ptyId: string): { flow: Flow; ringStart: number; reads: number; read: number };
 }
 
 export function createPtyTable({ emit, environment }: PtyTableOptions): PtyTable {
@@ -76,6 +97,26 @@ export function createPtyTable({ emit, environment }: PtyTableOptions): PtyTable
     entries.delete(ptyId);
   };
 
+  // Emits what is pending as one chunk: one exact-size copy (a pooled Buffer would otherwise travel whole through
+  // structured clone), appended to the ring and stamped with its offset, then stepped through the flow reducer.
+  const flush = (ptyId: string, entry: PtyEntry): void => {
+    entry.flushTimer?.cancel();
+    entry.flushTimer = null;
+    if (entry.pendingBytes === 0) return;
+    entry.lastFlushAt = performance.now();
+    const data = new Uint8Array(entry.pendingBytes);
+    let at = 0;
+    for (const chunk of entry.pending) {
+      data.set(chunk, at);
+      at += chunk.byteLength;
+    }
+    entry.pending = [];
+    entry.pendingBytes = 0;
+    entry.ring.append(data);
+    emit('pty.data', { ptyId: entry.info.ptyId, offset: entry.flow.total, data });
+    step(ptyId, entry, { kind: 'data', bytes: data.byteLength });
+  };
+
   const step = (ptyId: string, entry: PtyEntry, input: FlowInput): void => {
     const { flow, effect, clamped } = stepFlow(entry.flow, input);
     entry.flow = flow;
@@ -95,7 +136,8 @@ export function createPtyTable({ emit, environment }: PtyTableOptions): PtyTable
       }
       const program = shell ?? (env.SHELL || DEFAULT_SHELL);
       const ptyId = randomUUID() as PtyId;
-      const pty = nodePty.spawn(program, args ?? LOGIN_ARGS, {
+      const [wrapper, ...wrapperArgs] = IUTF8_WRAPPER;
+      const pty = nodePty.spawn(wrapper, [...wrapperArgs, program, ...(args ?? LOGIN_ARGS)], {
         name: 'xterm-256color',
         cwd,
         cols,
@@ -112,18 +154,35 @@ export function createPtyTable({ emit, environment }: PtyTableOptions): PtyTable
         checkpoint: null,
         killed: false,
         expiry: null,
+        pending: [],
+        pendingBytes: 0,
+        flushTimer: null,
+        lastFlushAt: -Infinity,
+        reads: 0,
+        read: 0,
       };
       entries.set(ptyId, entry);
 
-      // With `encoding: null` node-pty delivers Buffers, often views into Node's shared pool; each is copied into an
-      // exact-size Uint8Array, or structured clone would carry the whole pool across every hop.
       pty.onData((chunk: string | Buffer) => {
-        const data = new Uint8Array(chunk as Buffer);
-        entry.ring.append(data);
-        emit('pty.data', { ptyId, offset: entry.flow.total, data });
-        step(ptyId, entry, { kind: 'data', bytes: data.byteLength });
+        const buffer = chunk as Buffer;
+        entry.pending.push(buffer);
+        entry.pendingBytes += buffer.byteLength;
+        entry.reads++;
+        entry.read += buffer.byteLength;
+        if (entry.pendingBytes >= FLUSH_BYTES) flush(ptyId, entry);
+        else if (!entry.flushTimer) {
+          const wait = entry.lastFlushAt + FLUSH_INTERVAL_MS - performance.now();
+          if (wait <= 0) {
+            const immediate = setImmediate(() => flush(ptyId, entry));
+            entry.flushTimer = { cancel: () => clearImmediate(immediate) };
+          } else {
+            const timer = setTimeout(() => flush(ptyId, entry), wait);
+            entry.flushTimer = { cancel: () => clearTimeout(timer) };
+          }
+        }
       });
       pty.onExit(({ exitCode, signal }) => {
+        flush(ptyId, entry); // the program's last bytes precede its exit
         const exit = { exitCode, signal: signal || null };
         entry.info = { ...entry.info, alive: false, exit };
         emit('pty.exit', { ptyId, ...exit });
@@ -173,6 +232,7 @@ export function createPtyTable({ emit, environment }: PtyTableOptions): PtyTable
 
     attach({ ptyId }) {
       const entry = get(ptyId);
+      flush(ptyId, entry); // nextOffset covers every byte read, and the renderer receives them as a live event
       step(ptyId, entry, { kind: 'attach' });
       const replayFrom = Math.max(entry.checkpoint?.offset ?? 0, entry.ring.start);
       return {
@@ -196,7 +256,7 @@ export function createPtyTable({ emit, environment }: PtyTableOptions): PtyTable
 
     inspect(ptyId) {
       const entry = get(ptyId);
-      return { flow: entry.flow, ringStart: entry.ring.start };
+      return { flow: entry.flow, ringStart: entry.ring.start, reads: entry.reads, read: entry.read };
     },
   };
 }

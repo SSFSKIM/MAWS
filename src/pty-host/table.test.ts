@@ -268,6 +268,83 @@ describe('pty host foreground detection', () => {
   });
 });
 
+describe('pty host tty has iutf8', () => {
+  it('starts every pty with IUTF8 set, as Terminal.app does', async () => {
+    const h = harness();
+    const { ptyId } = await h.table.spawn(spawnInput({ shell: '/bin/sh', args: ['-c', 'stty -a'] }));
+    await h.exited(ptyId);
+    expect(h.text(ptyId)).toMatch(/(^|\s)iutf8(\s|$)/);
+    expect(h.text(ptyId)).not.toContain('-iutf8');
+  });
+
+  it('erases a whole multi-byte character in canonical mode', async () => {
+    const h = harness();
+    const { ptyId } = await h.table.spawn(spawnInput({ shell: '/bin/sh', args: ['-c', "stty -echo; printf 'MAWS_%s\\n' READY; head -n 1"] }));
+    await h.until(() => h.text(ptyId).includes('MAWS_READY'), 5_000, 'the reader');
+    h.table.write({ ptyId, data: '한\x7fa\n' });
+    await h.exited(ptyId);
+    const after = h.text(ptyId).split('MAWS_READY')[1]!;
+    expect(after.split(/\r?\n/).filter((line) => line.trim())).toEqual(['a']);
+  });
+
+  it('keeps the pid, and the program sees its own path as $0', async () => {
+    const h = harness();
+    const { ptyId, pid } = await h.table.spawn(spawnInput({ shell: '/bin/bash', args: ['-c', 'printf "MAWS_%s|%s\\n" "$$" "$0"'] }));
+    await h.exited(ptyId);
+    expect(h.text(ptyId)).toContain(`MAWS_${pid}|/bin/bash`);
+    expect(h.table.list().ptys.find((p) => p.ptyId === ptyId)?.shell).toBe('/bin/bash');
+  });
+});
+
+describe('pty host coalesces reads into fewer events', () => {
+  // A producer faster than the host's event loop (a slow one, like `seq` to a tty, gets one read per turn and is
+  // emitted at once: coalescing costs an interactive program no latency).
+  it('emits fewer events than node-pty reads under a flood, every byte in order at monotone, contiguous offsets', async () => {
+    const h = harness();
+    const { ptyId } = await h.table.spawn(spawnInput({ shell: '/bin/sh', args: ['-c', 'yes | head -c 2000000'] }));
+    h.ackers.add(ptyId);
+    await h.exited(ptyId);
+    const chunks = h.chunks.get(ptyId)!;
+    const { reads } = h.table.inspect(ptyId);
+    expect(chunks.length).toBeLessThan(reads / 2);
+    let next = 0;
+    for (const chunk of chunks) {
+      expect(chunk.offset).toBe(next);
+      expect(chunk.data.byteLength).toBeLessThanOrEqual(64 * 1024 + 1024); // flushed at 64 KiB, plus the read that crossed it
+      next += chunk.data.byteLength;
+    }
+    expect(asOutput(h.text(ptyId))).toBe('y\n'.repeat(1_000_000));
+    expect(next).toBe(h.table.inspect(ptyId).read);
+  }, 20_000);
+
+  it('flushes before the exit event, so a program’s last bytes precede its exit', async () => {
+    const events: string[] = [];
+    const table = createPtyTable({
+      emit: (name, payload) => void events.push(name === 'pty.data' ? `data:${decoder.decode((payload as EventPayload<'pty.data'>).data)}` : name),
+      environment: Promise.resolve(terminalEnvironment(process.env, { appVersion: '0' })),
+    });
+    tables.push(table);
+    await table.spawn(spawnInput({ shell: '/bin/sh', args: ['-c', "printf 'MAWS_LAST'"] }));
+    await vi.waitFor(() => expect(events.at(-1)).toBe('pty.exit'), { timeout: 5_000, interval: 20 });
+    expect(events.slice(0, -1).join('')).toContain('MAWS_LAST');
+  });
+
+  it('answers attach with every byte it has read: nextOffset covers what is still waiting to be flushed', async () => {
+    const h = harness();
+    const { ptyId } = await h.table.spawn(spawnInput({ shell: '/bin/sh', args: ['-c', 'yes | head -c 1000000'] }));
+    h.ackers.add(ptyId);
+    let attaches = 0;
+    while (!h.exits.has(ptyId)) {
+      const attach = h.table.attach({ ptyId });
+      expect(attach.nextOffset).toBe(h.table.inspect(ptyId).read);
+      expect(attach.nextOffset).toBe(h.bytes(ptyId).byteLength); // the flush was emitted before the reply
+      attaches++;
+      await new Promise((r) => setTimeout(r, 1));
+    }
+    expect(attaches).toBeGreaterThan(1);
+  }, 20_000);
+});
+
 describe('pty host environment', () => {
   it('starts a program with the terminal environment it was given, in the requested cwd', async () => {
     const h = harness(terminalEnvironment({ ...process.env, CLAUDECODE: '1', CLAUDE_CODE_SESSION_ID: 'parent' }, { appVersion: '9.9.9' }));
