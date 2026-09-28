@@ -3,9 +3,12 @@
 // first, then asks for the `fs.state` snapshot (config home, watch, counts, live holders) and runs `fs.scan` so every
 // session is listed even when the host's own start-up scan finished before this page loaded. Session rows arrive in
 // bursts of thousands, so they are buffered and applied once per `flushMs`. M4 switches the rows to `session.list`.
+// Following (M3): one row at a time is followed through `session.events`; the view keeps its `fs.followState` and the
+// last twenty events of its `session.eventBatch`es, deduplicated by event id (disk-derived events carry `seq: null`).
 import { create } from 'zustand';
+import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, SessionId } from '@shared/graph/ids';
-import type { MawsBridge } from '@shared/ipc/schema';
+import type { EventPayload, MawsBridge } from '@shared/ipc/schema';
 import type { FsScanResult, FsState } from '@shared/ipc/schema/fs';
 import type { Holder, TranscriptSummary } from '@shared/wire/store';
 import { ipc } from '../ipc/client';
@@ -21,23 +24,39 @@ export type ScanStatus =
   | { status: 'done'; result: FsScanResult }
   | { status: 'failed'; error: string };
 
+export type FollowState = EventPayload<'fs.followState'>;
+
+export interface FollowView {
+  sessionId: SessionId;
+  appSessionId: AppSessionId;
+  state: FollowState | null; // the session's own follower (agentId null); null until the host reports
+  events: SessionEvent[]; // the last FOLLOW_LOG events delivered, oldest first
+}
+
 export interface StoreDiagnosticsStore {
   fs: FsState | null; // the last fs.state snapshot; null until the host has answered
   sessions: Record<string, StoreRow>; // by engine session id
   holders: Record<string, Holder>; // live holders only, by engine session id
   scan: ScanStatus;
+  followed: FollowView | null;
   connect(): () => void; // returns disconnect
+  follow(sessionId: SessionId): Promise<void>; // after connect; stops following whatever was followed before
+  unfollow(): Promise<void>;
 }
 
 const FLUSH_MS = 50;
+export const FOLLOW_LOG = 20;
 
 export function createStoreDiagnosticsStore(client: MawsBridge, options: { flushMs?: number } = {}) {
   const flushMs = options.flushMs ?? FLUSH_MS;
-  return create<StoreDiagnosticsStore>()((set, get) => ({
+  // Ids already in the followed view, so a snapshot overlapping its batches adds nothing twice.
+  let seen = new Set<string>();
+  const store = create<StoreDiagnosticsStore>()((set, get) => ({
     fs: null,
     sessions: {},
     holders: {},
     scan: { status: 'idle' },
+    followed: null,
     connect() {
       let connected = true;
       const buffered = new Map<string, StoreRow | null>(); // null: removed
@@ -77,6 +96,11 @@ export function createStoreDiagnosticsStore(client: MawsBridge, options: { flush
         client.on('fs.scanProgress', (progress) => {
           if (get().scan.status === 'running') set({ scan: { status: 'running', progress } });
         }),
+        client.on('fs.followState', (state) => {
+          const followed = get().followed;
+          if (followed?.appSessionId === state.appSessionId && state.agentId === null) set({ followed: { ...followed, state } });
+        }),
+        client.on('session.eventBatch', ({ appSessionId, events }) => addEvents(appSessionId, events)),
       ];
 
       const readState = () => {
@@ -119,7 +143,50 @@ export function createStoreDiagnosticsStore(client: MawsBridge, options: { flush
         buffered.clear();
       };
     },
+
+    async follow(sessionId) {
+      if (get().followed) await get().unfollow();
+      const row = get().sessions[sessionId];
+      let appSessionId = row?.appSessionId ?? null;
+      if (appSessionId === null) {
+        // Diagnostics before the index (M4) binds every session: the page binds a fresh app id for the row it follows.
+        appSessionId = crypto.randomUUID() as AppSessionId;
+        const bound = await client.invoke('fs.bind', { bindings: [{ sessionId, appSessionId }] });
+        if (!bound.ok) {
+          console.error('[store] fs.bind failed', bound.error);
+          return;
+        }
+        const current = get().sessions[sessionId];
+        if (current) set({ sessions: { ...get().sessions, [sessionId]: { ...current, appSessionId } } });
+      }
+      seen = new Set();
+      set({ followed: { sessionId, appSessionId, state: null, events: [] } });
+      const snapshot = await client.invoke('session.events', { appSessionId, afterSeq: null, limit: null });
+      if (!snapshot.ok) {
+        console.error('[store] session.events failed', snapshot.error);
+        return;
+      }
+      addEvents(appSessionId, snapshot.value.events);
+    },
+
+    async unfollow() {
+      const followed = get().followed;
+      if (!followed) return;
+      set({ followed: null });
+      const result = await client.invoke('fs.unfollow', { appSessionId: followed.appSessionId, agentId: null });
+      if (!result.ok) console.error('[store] fs.unfollow failed', result.error);
+    },
   }));
+  return store;
+
+  function addEvents(appSessionId: AppSessionId, events: SessionEvent[]): void {
+    const followed = store.getState().followed;
+    if (followed?.appSessionId !== appSessionId) return;
+    const fresh = events.filter((event) => !seen.has(event.id));
+    if (fresh.length === 0) return;
+    for (const event of fresh) seen.add(event.id);
+    store.setState({ followed: { ...followed, events: [...followed.events, ...fresh].slice(-FOLLOW_LOG) } });
+  }
 }
 
 export interface StoreRowView extends StoreRow {
@@ -147,6 +214,47 @@ export function describeHolder(holder: Holder): string | null {
     case 'self':
       return 'MAWS';
     case 'none':
+      return null;
+  }
+}
+
+export function describeFollow(state: FollowState | null): string {
+  if (!state) return '…';
+  const parts = [`chain ${state.chainLength}`, `leaf ${state.leafUuid?.slice(0, 8) ?? '—'}`, state.state];
+  if (state.skippedLines > 0) parts.push(`skipped ${state.skippedLines}`);
+  if (state.gap) parts.push(`gap at ${state.gap.parentUuid.slice(0, 8)}`);
+  if (state.message) parts.push(state.message);
+  return parts.join(' · ');
+}
+
+const DETAIL_CHARS = 50;
+
+// One line per event for the log: its kind and the one detail that tells events of that kind apart.
+export function describeEvent(event: SessionEvent): string {
+  const detail = eventDetail(event);
+  return detail === null ? event.kind : `${event.kind} · ${detail.length > DETAIL_CHARS ? `${detail.slice(0, DETAIL_CHARS)}…` : detail}`;
+}
+
+function eventDetail(event: SessionEvent): string | null {
+  switch (event.kind) {
+    case 'user.message':
+      return typeof event.content === 'string' ? event.content : `${event.content.length} blocks`;
+    case 'assistant.block.complete':
+      return typeof event.block.text === 'string' ? event.block.text : event.block.type;
+    case 'tool.use':
+      return event.toolName;
+    case 'tool.result':
+      return event.isError ? 'error' : null;
+    case 'boundary.rewind':
+      return event.precedingAssistantUuid?.slice(0, 8) ?? null;
+    case 'boundary.retraction':
+      return `${event.retractedMessageUuids.length} retracted · ${event.reason}`;
+    case 'notice.posted':
+      return event.text;
+    case 'subagent.started':
+    case 'subagent.finished':
+      return event.taskId;
+    default:
       return null;
   }
 }

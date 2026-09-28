@@ -3,7 +3,8 @@ import type { AppSessionId, SessionId } from '@shared/graph/ids';
 import type { CommandName, CommandResult, EventName, EventPayload, MawsBridge } from '@shared/ipc/schema';
 import type { FsState } from '@shared/ipc/schema/fs';
 import type { Holder, TranscriptSummary } from '@shared/wire/store';
-import { createStoreDiagnosticsStore, describeHolder, rowsOf, titleOf } from './store-diagnostics';
+import type { SessionEvent } from '@shared/graph/events';
+import { createStoreDiagnosticsStore, describeEvent, describeFollow, describeHolder, FOLLOW_LOG, rowsOf, titleOf } from './store-diagnostics';
 
 const S1 = '11111111-1111-4111-8111-111111111111' as SessionId;
 const S2 = '22222222-2222-4222-8222-222222222222' as SessionId;
@@ -150,6 +151,55 @@ describe('store diagnostics', () => {
 });
 
 describe('store rows', () => {
+  it('follows a row: binds an app id when the row has none, keeps the chain state and the last events, deduplicated by id', async () => {
+    const fake = fakeClient();
+    const store = createStoreDiagnosticsStore(fake.client, { flushMs: 0 });
+    store.getState().connect();
+    fake.event('fs.sessionChanged', { summary: summary(S1), appSessionId: null });
+    await fake.tick();
+    fake.pending.splice(0);
+
+    const following = store.getState().follow(S1);
+    await fake.tick();
+    const bind = fake.pending.find((p) => p.name === 'fs.bind')!;
+    const [{ appSessionId }] = (bind.input as { bindings: { sessionId: string; appSessionId: AppSessionId }[] }).bindings;
+    expect(bind.input).toEqual({ bindings: [{ sessionId: S1, appSessionId }] });
+    await fake.reply('fs.bind', undefined);
+    expect(store.getState().followed).toMatchObject({ sessionId: S1, appSessionId, state: null, events: [] });
+    expect(fake.pending.map((p) => [p.name, p.input])).toEqual([['session.events', { appSessionId, afterSeq: null, limit: null }]]);
+
+    // A batch that lands before the snapshot, and one for another session.
+    const ev = (id: string): SessionEvent => ({ id, sessionId: S1, at: 'now', seq: null, agentId: null, parentToolUseId: null, kind: 'notice.posted', level: 'info', text: id, key: null }) as unknown as SessionEvent;
+    fake.event('session.eventBatch', { appSessionId, events: [ev('e2'), ev('e3')] });
+    fake.event('session.eventBatch', { appSessionId: 'other' as AppSessionId, events: [ev('x')] });
+    await fake.reply('session.events', { events: [ev('e1'), ev('e2')], lastSeq: 0, complete: true });
+    await following;
+    expect(store.getState().followed?.events.map((e) => e.id)).toEqual(['e2', 'e3', 'e1']);
+    fake.event('fs.followState', { appSessionId, agentId: null, state: 'following', chainLength: 12, leafUuid: '7c05f769-aaaa' as never, gap: null, skippedLines: 0, message: null });
+    fake.event('fs.followState', { appSessionId, agentId: 'agent-1' as never, state: 'backfilling', chainLength: 1, leafUuid: null, gap: null, skippedLines: 0, message: null });
+    expect(describeFollow(store.getState().followed!.state)).toBe('chain 12 · leaf 7c05f769 · following');
+
+    fake.event('session.eventBatch', { appSessionId, events: Array.from({ length: 30 }, (_, i) => ev(`n${i}`)) });
+    expect(store.getState().followed?.events).toHaveLength(FOLLOW_LOG);
+    expect(store.getState().followed?.events.at(-1)?.id).toBe('n29');
+
+    // Unfollow stops the host's follower and forgets the view; the row keeps its binding.
+    const stop = store.getState().unfollow();
+    expect(store.getState().followed).toBeNull();
+    expect(fake.pending.map((p) => [p.name, p.input])).toEqual([['fs.unfollow', { appSessionId, agentId: null }]]);
+    await fake.reply('fs.unfollow', undefined);
+    await stop;
+    expect(store.getState().sessions[S1].appSessionId).toBe(appSessionId);
+  });
+
+  it('describes a follow state and an event for the log', () => {
+    expect(describeFollow(null)).toBe('…');
+    expect(describeFollow({ appSessionId: 'a' as AppSessionId, agentId: null, state: 'error', chainLength: 0, leafUuid: null, gap: null, skippedLines: 2, message: 'EACCES' })).toBe('chain 0 · leaf — · error · skipped 2 · EACCES');
+    const rewind = { id: 'anchor:1', kind: 'boundary.rewind', targetMessageUuid: '36a2aa44-x', precedingAssistantUuid: 'edf0f954-x', prefillText: 'B' } as unknown as SessionEvent;
+    expect(describeEvent(rewind)).toBe('boundary.rewind · edf0f954');
+    expect(describeEvent({ id: 'u', kind: 'user.message', content: 'Remember APPLE. And more text that goes on for a while past the cut' } as unknown as SessionEvent)).toBe('user.message · Remember APPLE. And more text that goes on for a w…');
+  });
+
   it('orders held sessions first, then the most recently written', () => {
     const rows = rowsOf(
       {

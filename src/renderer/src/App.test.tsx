@@ -172,9 +172,9 @@ describe('store section of the diagnostics strip', () => {
       await new Promise((resolve) => setTimeout(resolve, 60));
     });
     const row = within(screen.getByRole('list', { name: 'Discovered sessions' })).getByRole('listitem');
-    expect(row.textContent).toBe('Remembering fruit/private/tmp/maws-acceptterminal · 78212');
+    expect(row.textContent).toBe('Remembering fruit/private/tmp/maws-acceptterminal · 78212Follow');
 
     await act(async () => void main.send('fs.holderChanged', { sessionId, appSessionId: null, holder: { kind: 'none' }, registry: null, job: null }));
-    expect(row.textContent).toBe('Remembering fruit/private/tmp/maws-accept');
+    expect(row.textContent).toBe('Remembering fruit/private/tmp/maws-acceptFollow');
   });
 });

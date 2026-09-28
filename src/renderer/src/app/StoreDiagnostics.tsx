@@ -1,16 +1,27 @@
 // The Store section of the diagnostics strip (C4 execution document, Architecture "Renderer"): the engine's store as
 // the filesystem state service sees it, so C4's acceptance can be read by eye before C5's sidebar exists. It shows the
 // config home and whether it is watched, the scan counts, and one row per discovered session with its title, its
-// directory from the first record and its holder badge. C5 replaces it as the user-facing surface.
+// directory from the first record and its holder badge. A row can be followed (M3): the detail then reads the chain
+// (`chain N · leaf <uuid8>`) and the last twenty events. C5 replaces it as the user-facing surface.
 import { useEffect, useMemo } from 'react';
 import type { FsState } from '@shared/ipc/schema/fs';
-import { describeHolder, rowsOf, titleOf, useStoreDiagnostics, type ScanStatus } from '../stores/store-diagnostics';
+import {
+  describeEvent,
+  describeFollow,
+  describeHolder,
+  rowsOf,
+  titleOf,
+  useStoreDiagnostics,
+  type FollowView,
+  type ScanStatus,
+} from '../stores/store-diagnostics';
 
 export function StoreDiagnostics() {
   const fs = useStoreDiagnostics((s) => s.fs);
   const scan = useStoreDiagnostics((s) => s.scan);
   const sessions = useStoreDiagnostics((s) => s.sessions);
   const holders = useStoreDiagnostics((s) => s.holders);
+  const followed = useStoreDiagnostics((s) => s.followed);
   const rows = useMemo(() => rowsOf(sessions, holders), [sessions, holders]);
 
   useEffect(() => useStoreDiagnostics.getState().connect(), []);
@@ -25,19 +36,49 @@ export function StoreDiagnostics() {
           {describeScan(scan)}
         </output>
       </div>
+      {followed && <FollowDetail followed={followed} title={sessions[followed.sessionId] ? titleOf(sessions[followed.sessionId].summary) : followed.sessionId} />}
       <ul aria-label="Discovered sessions" className="max-h-96 overflow-auto">
         {rows.map(({ summary, holder }) => {
           const badge = describeHolder(holder);
+          const isFollowed = followed?.sessionId === summary.sessionId;
           return (
             <li key={summary.sessionId} className="flex h-(--row-h) items-center gap-3 border-b border-border px-3 last:border-b-0">
               <span className="min-w-0 flex-1 truncate text-fg">{titleOf(summary)}</span>
               <span className="min-w-0 max-w-[45%] truncate font-mono text-fg-faint">{summary.directory ?? '—'}</span>
               {badge && <span className="shrink-0 rounded-sm bg-accent-soft px-1.5 font-mono text-fg">{badge}</span>}
+              <button
+                type="button"
+                aria-pressed={isFollowed}
+                onClick={() => void (isFollowed ? useStoreDiagnostics.getState().unfollow() : useStoreDiagnostics.getState().follow(summary.sessionId))}
+                className="shrink-0 rounded-sm border border-border px-2 text-fg hover:bg-bg-hover aria-pressed:bg-bg-active"
+              >
+                {isFollowed ? 'Unfollow' : 'Follow'}
+              </button>
             </li>
           );
         })}
       </ul>
     </section>
+  );
+}
+
+function FollowDetail({ followed, title }: { followed: FollowView; title: string }) {
+  return (
+    <div aria-label="Followed session" className="flex flex-col gap-1 border-b border-border px-3 py-2">
+      <div className="flex min-w-0 items-center gap-3">
+        <span className="min-w-0 flex-1 truncate text-fg">{title}</span>
+        <output aria-label="chain" className="shrink-0 font-mono">
+          {describeFollow(followed.state)}
+        </output>
+      </div>
+      <ol aria-label="Last events" className="max-h-60 overflow-auto font-mono text-fg-faint">
+        {followed.events.map((event) => (
+          <li key={event.id} className="truncate">
+            {describeEvent(event)}
+          </li>
+        ))}
+      </ol>
+    </div>
   );
 }
 
