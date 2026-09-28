@@ -288,6 +288,9 @@ export type SessionDigest = z.infer<typeof SessionDigestSchema>;
 const c5Commands = {
   'session.digests':    { input: z.void(), output: z.strictObject({ digests: z.array(SessionDigestSchema) }), owner: 'main' },   // snapshot for a page that missed the events
   'session.setVisible': { input: z.strictObject({ appSessionId: AppSessionIdSchema, visible: z.boolean() }), output: z.void(), owner: 'main' },
+  // The launch mode main decided at app ready (select-source.ts), so the page can register the scenario's session
+  // creator in mode `scenario` (the owner's design 2026-09-28: the stub stands in for C10's `session.create`).
+  'session.launchMode': { input: z.void(), output: z.strictObject({ mode: z.enum(['index', 'scenario']) }), owner: 'main' },
 } as const satisfies Record<`session.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 const c5Events = {
   'session.digest': SessionDigestSchema,

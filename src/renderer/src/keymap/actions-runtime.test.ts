@@ -1,6 +1,18 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { AppSessionId, ProjectId } from '@shared/graph/ids';
+import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
 import { fakeClient } from '../../../../test/support/fake-client';
-import { enabledActions, isActionEnabled, registerAction, runAction } from './actions-runtime';
+import { useLayout } from '../stores/layout';
+import { useSessions } from '../stores/sessions';
+import {
+  createSession,
+  enabledActions,
+  isActionEnabled,
+  isSessionCreatorRegistered,
+  registerAction,
+  registerSessionCreator,
+  runAction,
+} from './actions-runtime';
 import { connectActions } from './dispatcher';
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -90,5 +102,56 @@ describe('menu actions reach the page', () => {
     register('theme.dark', vi.fn());
     await settle();
     expect(fake.invoked('layout.setEnabledActions')).toHaveLength(3);
+  });
+});
+
+describe('session creator', () => {
+  const P = 'proj-maws' as ProjectId;
+  const NEW = 'app-new-1' as AppSessionId;
+  afterEach(() => {
+    disposers.splice(0).forEach((off) => off());
+    useLayout.setState({ main: LAYOUT_DEFAULTS.main });
+    useSessions.setState({ unstarted: new Map() });
+  });
+
+  it('is unavailable until a creator registers, and createSession then does nothing', async () => {
+    expect(isSessionCreatorRegistered()).toBe(false);
+    await createSession(P);
+    expect(useLayout.getState().main).toBe(LAYOUT_DEFAULTS.main);
+  });
+
+  it('asks the creator, records the unstarted session with its project and opens its tab in the focused pane', async () => {
+    const creator = vi.fn(async () => NEW);
+    disposers.push(registerSessionCreator(creator));
+    expect(isSessionCreatorRegistered()).toBe(true);
+    await createSession(P);
+    expect(creator).toHaveBeenCalledWith(P);
+    expect(useSessions.getState().unstarted.get(NEW)).toEqual({ projectId: P, createdAt: expect.any(String) });
+    const pane = useLayout.getState().main.panes[0];
+    expect(pane.tabs.map((t) => t.id)).toEqual(['overview', `session:${NEW}`]);
+    expect(pane.activeTabId).toBe(`session:${NEW}`);
+  });
+
+  it('opens nothing when the creator declines, and logs a creator that fails', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    disposers.push(registerSessionCreator(async () => null));
+    await createSession(null);
+    expect(useSessions.getState().unstarted.size).toBe(0);
+    disposers.push(registerSessionCreator(() => Promise.reject(new Error('boom'))));
+    await expect(createSession(null)).resolves.toBeUndefined();
+    expect(error).toHaveBeenCalledWith('[actions] session creator failed', expect.any(Error));
+    expect(useLayout.getState().main).toBe(LAYOUT_DEFAULTS.main);
+    error.mockRestore();
+  });
+
+  it('the last registration wins and an older disposer leaves the newer creator in place', async () => {
+    const first = vi.fn(async () => 'a' as AppSessionId);
+    const second = vi.fn(async () => NEW);
+    const offFirst = registerSessionCreator(first);
+    disposers.push(registerSessionCreator(second));
+    offFirst();
+    await createSession(null);
+    expect(first).not.toHaveBeenCalled();
+    expect(second).toHaveBeenCalledWith(null);
   });
 });

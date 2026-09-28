@@ -114,3 +114,27 @@ describe('sessions selectors', () => {
     expect(selectSortedSessions(store.getState(), null, 'priority', []).map((r) => r.appId)).toEqual(['z']);
   });
 });
+
+describe('unstarted sessions', () => {
+  const P = 'p' as ProjectId;
+
+  it('holds an unstarted session until its record arrives through an event', () => {
+    const store = createSessionsStore();
+    store.getState().addUnstarted(A, { projectId: P, createdAt: '2026-09-28T10:00:00Z' });
+    expect(store.getState().unstarted.get(A)).toEqual({ projectId: P, createdAt: '2026-09-28T10:00:00Z' });
+    store.getState().applyChanged({ record: titled('b', 'another'), cause: 'discovered', revision: 1 });
+    expect(store.getState().unstarted.has(A)).toBe(true);
+    store.getState().applyChanged({ record: titled('a', 'started'), cause: 'live', revision: 2 });
+    expect(store.getState().unstarted.has(A)).toBe(false);
+  });
+
+  it('drops an unstarted session a snapshot lists, and on request', () => {
+    const store = createSessionsStore();
+    store.getState().addUnstarted(A, { projectId: null, createdAt: '2026-09-28T10:00:00Z' });
+    store.getState().addUnstarted(B, { projectId: null, createdAt: '2026-09-28T10:00:00Z' });
+    store.getState().applyList({ sessions: [titled('a', 'started')], revision: 1 });
+    expect([...store.getState().unstarted.keys()]).toEqual([B]);
+    store.getState().dropUnstarted(B);
+    expect(store.getState().unstarted.size).toBe(0);
+  });
+});

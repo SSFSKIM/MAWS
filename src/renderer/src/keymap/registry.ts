@@ -6,6 +6,7 @@ import { create } from 'zustand';
 export interface HandlerRegistry<K extends string, A extends unknown[]> {
   register(id: K, handler: (...args: A) => unknown): () => void;
   run(id: K, ...args: A): void; // a missing handler is a no-op; a throw or rejection is logged, never propagated
+  get(id: K): ((...args: A) => unknown) | undefined; // for a caller that needs the handler's result
   has(id: K): boolean;
   ids(): K[];
   subscribe(listener: () => void): () => void;
@@ -39,6 +40,7 @@ export function createHandlerRegistry<K extends string, A extends unknown[]>(lab
         failed(id, error);
       }
     },
+    get: (id) => store.getState().handlers.get(id),
     has: (id) => store.getState().handlers.has(id),
     ids: () => [...store.getState().handlers.keys()],
     subscribe: (listener) => store.subscribe(listener),

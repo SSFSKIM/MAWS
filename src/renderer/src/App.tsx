@@ -1,6 +1,7 @@
 import { QueryClientProvider } from '@tanstack/react-query';
 import { useEffect } from 'react';
 import { Shell } from './app/Shell';
+import { connectScenarioSessionCreator } from './app/scenario-session-creator';
 import { registerShellActions } from './app/shell-actions';
 import { ipc } from './ipc/client';
 import { connectShell } from './ipc/events';
@@ -17,6 +18,7 @@ export function App() {
   useEffect(() => persistLayout(ipc), []); // C5: changed layout keys back to main
   useEffect(() => registerShellActions(), []); // C5: the frame's action handlers
   useEffect(() => connectActions(), []); // C5: menu actions in, the enabled set out
+  useEffect(() => connectScenarioSessionCreator(), []); // C5: the stub's session creator in launch mode scenario
 
   // index.html ships data-theme="light" for the first paint; from then on main's resolved theme decides.
   useEffect(() => {

@@ -4,9 +4,10 @@
 // snapshot when it lands; after that a change replaces its session's list directly.
 import { create } from 'zustand';
 import type { AttentionItem } from '@shared/graph/attention';
-import type { AppSessionId } from '@shared/graph/ids';
+import type { SessionEvent } from '@shared/graph/events';
+import type { AppSessionId, AttentionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
-import type { EventPayload } from '@shared/ipc/schema';
+import type { EventPayload, MawsBridge } from '@shared/ipc/schema';
 import { isOpen, needsYou, type NeedsYouRow } from '../attention/derive';
 
 export interface AttentionState {
@@ -15,19 +16,25 @@ export interface AttentionState {
   version: number; // bumped on every write to bySession; selectors memoise on it
   notificationDelivery: 'os' | 'fallback' | null;
   pendingReplacements: Map<AppSessionId, AttentionItem[]> | null; // non-null only while attention.list is outstanding
+  // The originating `*.requested` event of an item (`attention.request`), fetched once per item for the previews; null
+  // for an item with no broker request.
+  requests: Map<AttentionId, SessionEvent | null>;
   beginSnapshot(): void;
   applySnapshot(items: AttentionItem[]): void;
   applyChanged(change: EventPayload<'attention.changed'>): void;
   applyNotified(notified: EventPayload<'attention.notified'>): void;
+  loadRequest(client: MawsBridge, item: AttentionItem): Promise<void>; // once per item; a failure is not cached
 }
 
 export function createAttentionStore() {
+  const inFlight = new Map<AttentionId, Promise<void>>();
   return create<AttentionState>()((set, get) => ({
     loaded: false,
     bySession: new Map(),
     version: 0,
     notificationDelivery: null,
     pendingReplacements: null,
+    requests: new Map(),
     beginSnapshot() {
       set({ pendingReplacements: new Map() });
     },
@@ -47,6 +54,25 @@ export function createAttentionStore() {
     },
     applyNotified({ delivery }) {
       set({ notificationDelivery: delivery });
+    },
+    loadRequest(client, item) {
+      if (get().requests.has(item.id)) return Promise.resolve();
+      const keep = (event: SessionEvent | null) => set({ requests: new Map(get().requests).set(item.id, event) });
+      const { requestId } = item.request;
+      if (requestId === null) {
+        keep(null);
+        return Promise.resolve();
+      }
+      let pending = inFlight.get(item.id);
+      if (!pending) {
+        pending = client.invoke('attention.request', { appSessionId: item.appSessionId, requestId }).then((result) => {
+          inFlight.delete(item.id);
+          if (result.ok) keep(result.value.event);
+          else console.warn(`[attention] attention.request ${item.id} unavailable`, result.error);
+        });
+        inFlight.set(item.id, pending);
+      }
+      return pending;
     },
   }));
 }

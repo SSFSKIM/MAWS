@@ -48,6 +48,7 @@ export function startSessions({ env, packaged, appRoot, hosts }: SessionsOptions
   const mode = launchMode(env, packaged);
   const model = new SessionReadModel(mode);
   registerMainHandler('session.digests', () => ({ digests: model.digests() }));
+  registerMainHandler('session.launchMode', () => ({ mode }));
   registerMainHandler('session.setVisible', ({ appSessionId, visible }) => model.setVisible(appSessionId as AppSessionId, visible));
   model.on('digest', (digest) => emit('session.digest', digest));
 

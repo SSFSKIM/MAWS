@@ -1,6 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { item, record } from '../../../../test/support/builders';
+import { ev } from '../../../../test/support/events';
+import { fakeClient } from '../../../../test/support/fake-client';
 import { createAttentionStore, selectNeedsYou, selectPendingOf } from './attention';
 
 const S = 's1' as AppSessionId;
@@ -61,5 +63,45 @@ describe('attention snapshot and changes in both orders', () => {
     expect(selectNeedsYou(store.getState(), sessions)).toBe(rows); // memoised while the versions stand
     store.getState().applyChanged({ appSessionId: S, items: [] });
     expect(selectNeedsYou(store.getState(), sessions)).toEqual([]);
+  });
+});
+
+describe('the originating request of an item, fetched once', () => {
+  const event = ev('permission.requested', { requestId: older.request.requestId, toolName: 'Read', input: { file_path: '/r/a.md' } });
+
+  it('asks attention.request once per item, sharing a fetch in flight, and caches the answer', async () => {
+    const store = createAttentionStore();
+    const fake = fakeClient();
+    const a = store.getState().loadRequest(fake.client, older);
+    const b = store.getState().loadRequest(fake.client, older);
+    expect(fake.pending('attention.request')).toBe(1);
+    await fake.reply('attention.request', { event });
+    await Promise.all([a, b]);
+    expect(store.getState().requests.get(older.id)).toBe(event);
+    await store.getState().loadRequest(fake.client, older);
+    expect(fake.invoked('attention.request')).toEqual([{ appSessionId: S, requestId: older.request.requestId }]);
+  });
+
+  it('an item with no request id has no originating request and asks nothing', async () => {
+    const store = createAttentionStore();
+    const fake = fakeClient();
+    const bare = item('s1', 'error', '2026-09-28T09:00:00Z', { request: { requestId: null, toolUseId: null, taskId: null, agentId: null } });
+    await store.getState().loadRequest(fake.client, bare);
+    expect(store.getState().requests.get(bare.id)).toBeNull();
+    expect(fake.invoked('attention.request')).toEqual([]);
+  });
+
+  it('a failed fetch is not cached, so the next open asks again', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const store = createAttentionStore();
+    const fake = fakeClient();
+    const first = store.getState().loadRequest(fake.client, older);
+    await fake.fail('attention.request', 'no host');
+    await first;
+    expect(store.getState().requests.has(older.id)).toBe(false);
+    expect(warn).toHaveBeenCalledOnce();
+    void store.getState().loadRequest(fake.client, older);
+    expect(fake.pending('attention.request')).toBe(1);
+    warn.mockRestore();
   });
 });

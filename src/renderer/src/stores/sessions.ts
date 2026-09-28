@@ -23,6 +23,9 @@ export interface SessionsState {
   records: Map<AppSessionId, SessionRecord>;
   digests: Map<AppSessionId, SessionDigest>;
   engine: Map<AppSessionId, EngineSessionStatus>; // C3's session.status when present; null-tolerant
+  // Sessions created and not yet sent (owner design 2026-09-28): an app id with a setup intent and no record, whose tab
+  // shows the project it was created in. Transient; an entry goes when its record arrives or its tab closes.
+  unstarted: Map<AppSessionId, UnstartedSession>;
   recordsVersion: number; // bumped on every write to `records`; selectors memoise on the versions
   projectsVersion: number;
   digestsVersion: number;
@@ -34,6 +37,13 @@ export interface SessionsState {
   applyDigest(digest: SessionDigest): void;
   applyStatus(event: EventPayload<'session.status'>): void;
   setLoaded(): void;
+  addUnstarted(appSessionId: AppSessionId, entry: UnstartedSession): void;
+  dropUnstarted(appSessionId: AppSessionId): void;
+}
+
+export interface UnstartedSession {
+  projectId: ProjectId | null;
+  createdAt: string;
 }
 
 export function createSessionsStore() {
@@ -46,8 +56,14 @@ export function createSessionsStore() {
   const known = (id: AppSessionId, held: boolean) => Math.max(recordRevs.get(id) ?? -1, held ? -1 : listRevision);
 
   return create<SessionsState>()((set, get) => {
+    // A record arriving for an unstarted session makes it an ordinary session.
+    const started = (records: Map<AppSessionId, SessionRecord>) => {
+      const unstarted = get().unstarted;
+      if (![...unstarted.keys()].some((id) => records.has(id))) return unstarted;
+      return new Map([...unstarted].filter(([id]) => !records.has(id)));
+    };
     const writeRecords = (records: Map<AppSessionId, SessionRecord>, revision: number) =>
-      set({ records, recordsVersion: get().recordsVersion + 1, revision: Math.max(get().revision, revision) });
+      set({ records, recordsVersion: get().recordsVersion + 1, revision: Math.max(get().revision, revision), unstarted: started(records) });
     const keepDigests = (incoming: SessionDigest[]) => {
       const digests = new Map(get().digests);
       let changed = false;
@@ -67,6 +83,7 @@ export function createSessionsStore() {
       records: new Map(),
       digests: new Map(),
       engine: new Map(),
+      unstarted: new Map(),
       recordsVersion: 0,
       projectsVersion: 0,
       digestsVersion: 0,
@@ -111,6 +128,15 @@ export function createSessionsStore() {
       },
       setLoaded() {
         set({ loaded: true });
+      },
+      addUnstarted(appSessionId, entry) {
+        set({ unstarted: new Map(get().unstarted).set(appSessionId, entry) });
+      },
+      dropUnstarted(appSessionId) {
+        if (!get().unstarted.has(appSessionId)) return;
+        const unstarted = new Map(get().unstarted);
+        unstarted.delete(appSessionId);
+        set({ unstarted });
       },
     };
   });
