@@ -4,7 +4,7 @@
 // (envelope, name, input) before a handler runs, and every answer and event is validated before it is posted, so a
 // host can neither be fed nor emit anything outside X2. Nothing is thrown across the port: failures are `res` errors.
 import type { MessagePortMain } from 'electron';
-import { ipcError } from '../ipc/errors';
+import { ipcError, IpcErrorSchema, type IpcError } from '../ipc/errors';
 import { HostHelloSchema, HostRequestSchema, type HostMessage, type HostRequest } from '../ipc/host-protocol';
 import {
   commands,
@@ -26,6 +26,26 @@ export type HostRegister = (on: HostOn, emit: HostEmit) => void;
 export type HostPort = Pick<MessagePortMain, 'postMessage' | 'start'> & {
   on(event: 'message', listener: (event: { data: unknown }) => void): unknown;
 };
+
+// C3 start: typed errors through the host runtime (C3 execution document, Interfaces "Typed errors through the host
+// runtime"). A handler that throws a HostCommandError answers with its IpcError intact (the engine host's `timeout` for
+// a bounded control deadline, so the renderer can tell the host's deadline from the router's); every other throw
+// answers `internal` exactly as before.
+export class HostCommandError extends Error {
+  constructor(readonly ipcError: IpcError) {
+    super(ipcError.message);
+    this.name = 'HostCommandError';
+  }
+}
+
+function thrownError(error: unknown): IpcError {
+  if (error instanceof HostCommandError) {
+    const typed = IpcErrorSchema.safeParse(error.ipcError);
+    if (typed.success) return typed.data;
+  }
+  return ipcError('internal', error instanceof Error ? error.message : String(error));
+}
+// C3 end
 
 export interface HostRuntime {
   serve(port: HostPort): void;
@@ -92,7 +112,7 @@ export function createHostRuntime(register: HostRegister): HostRuntime {
     try {
       value = await handler(checkedInput.value);
     } catch (error) {
-      return { t: 'res', id, ok: false, error: ipcError('internal', error instanceof Error ? error.message : String(error)) };
+      return { t: 'res', id, ok: false, error: thrownError(error) }; // C3: typed errors keep their code
     }
     // An output the registry refuses is a fault in this host, not the renderer's `invalid_output`.
     const output = validateCommandOutput(name, value);
