@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { HostState, MawsBridge, SettingsState } from '@shared/ipc/schema';
 
@@ -26,6 +26,10 @@ function fakeMain(initial: SettingsState['settings']['theme']) {
       case 'engine.hostState':
       case 'pty.hostState':
         return HOSTS[name];
+      case 'fs.state':
+        return { configHome: '/Users/new/.claude', watching: true, projects: 1, sessions: 1, bound: 0, followed: [], holders: [], lastScanAt: null };
+      case 'fs.scan':
+        return { projects: 1, sessions: 1, changed: 1, durationMs: 1234 };
       case 'pty.spawn':
         return { ptyId: 'p1', pid: 3333 };
       case 'pty.write':
@@ -125,5 +129,52 @@ describe('hosts in the diagnostics strip', () => {
     await act(async () => void (await new Promise((resolve) => setTimeout(resolve, 10))));
     expect(window.maws.invoke).toHaveBeenCalledWith('pty.spawn', expect.objectContaining({ shell: '/bin/sh' }));
     expect(echo()).toBe('MAWS_ECHO_OK · shell pid 3333');
+  });
+});
+
+describe('store section of the diagnostics strip', () => {
+  afterEach(() => {
+    cleanup();
+    delete (window as { maws?: MawsBridge }).maws;
+  });
+
+  it('shows the watched config home, the scan counts, and each session with its title, directory and holder badge', async () => {
+    const main = fakeMain('light');
+    await renderApp();
+    expect(screen.getByRole('status', { name: 'store' }).textContent).toBe('store · /Users/new/.claude · watching');
+    expect(screen.getByRole('status', { name: 'store scan' }).textContent).toBe('projects 1 · sessions 1 · scan 1.2 s');
+
+    const sessionId = '11111111-1111-4111-8111-111111111111';
+    const summary = {
+      sessionId,
+      transcriptPath: `/Users/new/.claude/projects/-private-tmp-maws-accept/${sessionId}.jsonl`,
+      slug: '-private-tmp-maws-accept',
+      directory: '/private/tmp/maws-accept',
+      relocatedCwd: null,
+      size: 10,
+      mtimeMs: 1,
+      firstRecordAt: null,
+      lastRecordAt: null,
+      customTitle: null,
+      aiTitle: 'Remembering fruit',
+      firstPrompt: 'Remember APPLE.',
+      lastAssistantText: null,
+      gitBranch: null,
+      engineVersion: '2.1.283',
+      entrypoint: 'cli',
+      sessionKind: null,
+      hasMessages: true,
+      leafUuid: null,
+    };
+    await act(async () => {
+      main.send('fs.sessionChanged', { summary, appSessionId: null });
+      main.send('fs.holderChanged', { sessionId, appSessionId: null, holder: { kind: 'terminal', pid: 78212 }, registry: null, job: null });
+      await new Promise((resolve) => setTimeout(resolve, 60));
+    });
+    const row = within(screen.getByRole('list', { name: 'Discovered sessions' })).getByRole('listitem');
+    expect(row.textContent).toBe('Remembering fruit/private/tmp/maws-acceptterminal · 78212');
+
+    await act(async () => void main.send('fs.holderChanged', { sessionId, appSessionId: null, holder: { kind: 'none' }, registry: null, job: null }));
+    expect(row.textContent).toBe('Remembering fruit/private/tmp/maws-accept');
   });
 });
