@@ -289,6 +289,7 @@ export const DETAIL = {
   result: 'Result',
   noDiff: 'No diff recorded',
   omitted: (bytes: number) => `${Math.max(1, Math.round(bytes / 1024))} KB omitted`,
+  linesOmitted: (lines: number) => `${plural(lines, 'line')} omitted`,
   hookOutcome: (outcome: string, exitCode: number | null) => (exitCode === null ? outcome : `${outcome} · exit ${exitCode}`),
 } as const;
 

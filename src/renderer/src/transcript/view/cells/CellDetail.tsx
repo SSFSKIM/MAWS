@@ -21,7 +21,7 @@ function Body({ cell, turnId }: { cell: Cell; turnId: TurnId | null }) {
   const { detail } = cell;
   switch (detail.kind) {
     case 'shell': return <ShellDetail cell={cell} detail={detail} />;
-    case 'edit': return <EditDetail detail={detail} />;
+    case 'edit': return <EditDetail cell={cell} detail={detail} />;
     case 'read': return <ReadDetail detail={detail} />;
     case 'search': return <SearchDetail detail={detail} />;
     case 'web': return <WebDetail detail={detail} />;
@@ -29,7 +29,7 @@ function Body({ cell, turnId }: { cell: Cell; turnId: TurnId | null }) {
     case 'image': return <ImageDetail detail={detail} />;
     case 'thinking': return <ThinkingDetail cell={cell} detail={detail} turnId={turnId} />;
     case 'hook': return <HookDetail detail={detail} />;
-    case 'generic': return <GenericDetail detail={detail} />;
+    case 'generic': return <GenericDetail cell={cell} detail={detail} />;
   }
 }
 

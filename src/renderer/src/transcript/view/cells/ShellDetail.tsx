@@ -1,5 +1,6 @@
 // A shell call's detail, after mockup 02: the command with Copy command, its cwd, the output bounded with a fade, and
 // a footer with the exit status, Copy output and Copy all, plus Open full log (C8's) when the output was cut or spilled.
+import { truncationOf } from '../../model/cells';
 import { DETAIL, shellFooter } from '../../model/copy';
 import type { Cell, CellDetail } from '../../model/rows';
 import { useActions } from '../context';
@@ -43,7 +44,7 @@ export function ShellDetail({ cell, detail }: { cell: Cell; detail: Shell }) {
       <div className="transcript-shell-footer">
         <span>{footer}</span>
         <span>
-          {(detail.truncated || detail.spill) && (
+          {(detail.truncated || truncationOf(detail.stderr) || detail.spill) && (
             <button type="button" onClick={() => actions.openFullLog(cell)}>
               {DETAIL.openFullLog}
             </button>

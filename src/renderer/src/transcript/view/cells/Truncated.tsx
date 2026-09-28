@@ -4,6 +4,8 @@
 // payload into the virtualised list.
 import { TRUNCATE_OVER, truncationOf } from '../../model/cells';
 import { DETAIL } from '../../model/copy';
+import type { Cell } from '../../model/rows';
+import { useActions } from '../context';
 import { Markdown } from '../markdown/Markdown';
 
 export function Truncated({ text }: { text: string }) {
@@ -12,7 +14,7 @@ export function Truncated({ text }: { text: string }) {
   return (
     <>
       {text.slice(0, truncation.shownHead)}
-      <span className="transcript-omitted">{`\n… ${DETAIL.omitted(truncation.omittedBytes)} …\n`}</span>
+      <span className="transcript-omitted" data-omitted="">{`\n… ${DETAIL.omitted(truncation.omittedBytes)} …\n`}</span>
       {text.slice(-truncation.shownTail)}
     </>
   );
@@ -24,6 +26,19 @@ export function Output({ text, className }: { text: string; className?: string }
     <pre className={`transcript-output ${className ?? ''}`}>
       <Truncated text={text} />
     </pre>
+  );
+}
+
+// Where a detail stopped rendering a result made of parts (blocks, diff lines): what was left out, and the route to it.
+export function Omitted({ cell, text }: { cell: Cell; text: string }) {
+  const actions = useActions();
+  return (
+    <div className="transcript-omitted-row" data-omitted="">
+      <span className="transcript-omitted">{text}</span>
+      <button type="button" onClick={() => actions.openFullLog(cell)}>
+        {DETAIL.openFullLog}
+      </button>
+    </div>
   );
 }
 

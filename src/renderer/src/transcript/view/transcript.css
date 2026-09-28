@@ -144,6 +144,9 @@ button.transcript-chip:hover { background: var(--bg-hover); }
 .transcript-counts { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .transcript-stderr { color: var(--danger); }
 .transcript-omitted { color: var(--fg-muted); font-style: italic; }
+.transcript-omitted-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 8px; font-size: var(--text-ui-sm); }
+.transcript-omitted-row button { padding: 2px 6px; border-radius: var(--radius-sm); color: var(--fg-muted); }
+.transcript-omitted-row button:hover { color: var(--fg); background: var(--bg-hover); }
 .transcript-chips { display: flex; flex-wrap: wrap; gap: 5px; padding: 4px 0; }
 .transcript-link { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; overflow-wrap: anywhere; text-align: left; font-size: var(--text-ui-sm); }
 .transcript-button { padding: 5px 10px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--bg-raised); color: var(--fg); font-size: var(--text-ui-sm); }

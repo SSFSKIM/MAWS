@@ -214,13 +214,48 @@ describe('the 64 KB DOM cap on every detail output branch', () => {
     b.result('t9', 'a', { structured: BASH_RESULT('a') });
   };
 
-  it('shell stderr', async () => {
-    const { cell } = await expandedCell((b) => {
+  it('shell stderr, with Open full log as the route to the rest', async () => {
+    const { cell, actions } = await expandedCell((b) => {
       b.toolUse('t1', 'Bash', { command: 'make' });
       b.result('t1', 'x', { structured: { ...BASH_RESULT('ok'), stderr: BIG } });
       withLs(b);
     }, 'cell:t1');
     capped(cell);
+    fireEvent.click(within(cell).getByRole('button', { name: 'Open full log' }));
+    expect(actions.openFullLog).toHaveBeenCalledWith(expect.objectContaining({ id: 'cell:t1' }));
+  });
+
+  it('MCP blocks whose aggregate exceeds the cap render until the budget is spent, then one marker and Open full log', async () => {
+    const blocks = Array.from({ length: 12 }, (_, i) => ({ type: 'text', text: `BLOCK${i} ${'x'.repeat(10 * 1024)}` }));
+    const { cell, actions } = await expandedCell((b) => {
+      b.toolUse('t1', 'mcp__docs__search', { query: 'q' });
+      b.result('t1', blocks);
+      withLs(b);
+    }, 'cell:t1');
+    const text = cell.textContent ?? '';
+    expect(text).toContain('BLOCK0');
+    expect(text).not.toContain('BLOCK11');
+    expect(text.length).toBeLessThan(80 * 1024);
+    expect(cell.querySelectorAll('[data-omitted]')).toHaveLength(1);
+    expect(text).toMatch(/\d+ KB omitted/);
+    fireEvent.click(within(cell).getByRole('button', { name: 'Open full log' }));
+    expect(actions.openFullLog).toHaveBeenCalledWith(expect.objectContaining({ id: 'cell:t1' }));
+  });
+
+  it('an oversized structuredPatch renders hunks until the budget is spent, then N lines omitted and Open full log', async () => {
+    const lines = Array.from({ length: 4000 }, (_, i) => `+const line${i} = ${'y'.repeat(30)};`);
+    const hunk = { oldStart: 1, oldLines: 0, newStart: 1, newLines: lines.length, lines };
+    const { cell, actions } = await expandedCell((b) => {
+      b.toolUse('t1', 'Write', { file_path: '/p/big.ts', content: 'x' });
+      b.result('t1', 'ok', { structured: { type: 'create', filePath: '/p/big.ts', structuredPatch: [hunk], originalFile: null } });
+      withLs(b);
+    }, 'cell:t1');
+    const rendered = cell.querySelectorAll('[data-diff]').length;
+    expect(rendered).toBeGreaterThan(0);
+    expect(rendered).toBeLessThan(lines.length);
+    expect(cell.querySelector('[data-omitted]')?.textContent).toContain(`${lines.length - rendered} lines omitted`);
+    fireEvent.click(within(cell).getByRole('button', { name: 'Open full log' }));
+    expect(actions.openFullLog).toHaveBeenCalledWith(expect.objectContaining({ id: 'cell:t1' }));
   });
 
   it('MCP text blocks and a string result', async () => {
