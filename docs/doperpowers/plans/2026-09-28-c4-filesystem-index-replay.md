@@ -11,7 +11,7 @@ What C4 does not do: it never writes into `~/.claude` (the engine's store is rea
 ## Progress
 
 - [x] M1 — Store shapes, chain follower and transcript-to-X1 backfill against fixtures (2026-09-28 13:40 KST; commits 1377b6e, c878a81, 489762a, 02c9aea; task review clean after three fix waves; 295 tests)
-- [ ] M2 — Filesystem state service, part one: watcher, discovery, sidecars, holders
+- [x] M2 — Filesystem state service, part one: watcher, discovery, sidecars, holders (2026-09-28 20:05 KST; commits 4c0a5ae, 264c067, fix 5712eb7, C10's fs.holders addition c9ec166 with fixes 5a62c8b, 6d10cd7, a83a833; task reviews clean; 413 tests; real-store scan observed: projects 644 · sessions 3133 · 1.4 s, 7 badges; terminal-start flip deferred to M7 behind the trust prompt)
 - [ ] M3 — Filesystem state service, part two: tailers, following, subagents, workflows, tasks, spills
 - [ ] M4 — The index in main: `node:sqlite`, stores, the `SessionSource`, projects and drafts
 - [ ] M5 — Replay engine: clock, journal and transcript sources, `session.replay.*`
