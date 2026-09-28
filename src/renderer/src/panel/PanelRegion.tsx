@@ -25,7 +25,7 @@ export function PanelRegion() {
       data-region="panel"
       aria-label="Panel"
       inert={collapsed}
-      className={`relative col-start-3 row-start-2 flex min-h-0 min-w-0 flex-col overflow-hidden bg-bg-raised ${collapsed ? '' : 'border-l border-border'}`}
+      className={`relative col-start-3 row-start-2 flex min-h-0 min-w-0 bg-bg-raised ${collapsed ? '' : 'border-l border-border'}`}
     >
       {!collapsed && !maximized && (
         <Resizer
@@ -42,21 +42,24 @@ export function PanelRegion() {
           className="absolute inset-y-0 -left-0.75"
         />
       )}
-      <div className="flex h-10 shrink-0 items-center justify-end gap-1 border-b border-border px-2">
-        <IconButton
-          label={maximized ? 'Restore right panel' : 'Maximize right panel'}
-          action="panel.maximize"
-          pressed={maximized}
-          onClick={() => runAction('panel.maximize')}
-        >
-          {maximized ? <RestoreIcon /> : <MaximizeIcon />}
-        </IconButton>
-        <IconButton label="Hide right panel" action="panel.toggle" onClick={() => runAction('panel.toggle')}>
-          <PanelIcon />
-        </IconButton>
-      </div>
-      <div className="min-h-0 flex-1 overflow-auto">
-        <Host maximized={maximized} />
+      {/* The contents clip here, not on the region, so the resizer can straddle the region's edge. */}
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+        <div className="flex h-10 shrink-0 items-center justify-end gap-1 border-b border-border px-2">
+          <IconButton
+            label={maximized ? 'Restore right panel' : 'Maximize right panel'}
+            action="panel.maximize"
+            pressed={maximized}
+            onClick={() => runAction('panel.maximize')}
+          >
+            {maximized ? <RestoreIcon /> : <MaximizeIcon />}
+          </IconButton>
+          <IconButton label="Hide right panel" action="panel.toggle" onClick={() => runAction('panel.toggle')}>
+            <PanelIcon />
+          </IconButton>
+        </div>
+        <div className="min-h-0 flex-1 overflow-auto">
+          <Host maximized={maximized} />
+        </div>
       </div>
     </section>
   );

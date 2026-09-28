@@ -44,8 +44,10 @@ function SidebarRegion() {
       data-region="sidebar"
       aria-label="Sidebar"
       inert={collapsed}
-      className={`relative col-start-1 row-start-2 flex min-h-0 min-w-0 flex-col overflow-hidden bg-bg-raised ${collapsed ? '' : 'border-r border-border'}`}
+      className={`relative col-start-1 row-start-2 flex min-h-0 min-w-0 bg-bg-raised ${collapsed ? '' : 'border-r border-border'}`}
     >
+      {/* The contents clip here, not on the region, so the resizer can straddle the region's edge. */}
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden" />
       {!collapsed && (
         <Resizer
           label="Resize sidebar"

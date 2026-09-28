@@ -6,8 +6,10 @@ import { createLayoutStore, LAYOUT_WRITE_DELAY_MS, persistLayout } from './layou
 
 const A = 'app-a' as AppSessionId;
 
-// A store persisting through a fake main whose layout.json holds `values`.
-function setup(values: Record<string, unknown> = {}) {
+// A store persisting through a fake main whose layout.json holds the three fixed keys at their defaults, then `values`
+// (an `undefined` value leaves that key out).
+function setup(given: Record<string, unknown> = {}) {
+  const values: Record<string, unknown> = { regions: LAYOUT_DEFAULTS.regions, 'main.tabs': LAYOUT_DEFAULTS.main, 'panel.pinned': [], ...given };
   const fake = fakeClient({
     'layout.list': { keys: Object.keys(values) },
     'layout.get': ({ key }: { key: string }) => ({ value: values[key] ?? null }),
@@ -27,14 +29,26 @@ describe('layout persistence', () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
 
-  it('writes nothing before hydration and nothing for hydration itself', async () => {
-    const { store, hydrate, sets } = setup({ regions: { ...LAYOUT_DEFAULTS.regions, sidebar: { ...LAYOUT_DEFAULTS.regions.sidebar, width: 410 } } });
+  it('writes nothing before hydration, and hydration writes only the keys layout.json lacks', async () => {
+    const regions = { ...LAYOUT_DEFAULTS.regions, sidebar: { ...LAYOUT_DEFAULTS.regions.sidebar, width: 410 } };
+    const { store, hydrate, sets } = setup({ regions, 'main.tabs': undefined });
     store.getState().setSidebar({ width: 260 }); // the persisted value is not known yet: writing now would clobber it
     vi.advanceTimersByTime(1000);
+    expect(sets()).toEqual([]);
     await hydrate();
     vi.advanceTimersByTime(1000);
-    expect(sets()).toEqual([]);
+    expect(sets()).toEqual([{ key: 'main.tabs', value: LAYOUT_DEFAULTS.main }]); // a first launch materialises the default
     expect(store.getState().regions.sidebar.width).toBe(410);
+  });
+
+  it('a key that failed to read is not overwritten with its default', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const fake = fakeClient({ 'layout.list': { keys: [] }, 'layout.get': ({ key }: { key: string }) => ({ value: key === 'regions' ? LAYOUT_DEFAULTS.regions : [] }), 'layout.set': undefined });
+    const failing = { ...fake.client, invoke: (name: never, input: never) => (name === 'layout.get' && (input as { key: string }).key === 'main.tabs' ? Promise.resolve({ ok: false, error: { code: 'internal', message: 'x' } }) : fake.client.invoke(name, input)) } as typeof fake.client;
+    const store = createLayoutStore();
+    await store.getState().hydrate(failing, () => true);
+    expect(fake.invoked('layout.set')).toEqual([]);
+    error.mockRestore();
   });
 
   it('sends only the changed key, 250 ms after its last change', async () => {

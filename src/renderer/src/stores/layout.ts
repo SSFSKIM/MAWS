@@ -77,13 +77,17 @@ export function createLayoutStore() {
       focusedCardAppId: null,
 
       async hydrate(client, known) {
+        const absent: LayoutKey[] = []; // keys layout.json does not hold yet (not keys that failed to read)
         const read = async <T>(key: LayoutKey, schema: z.ZodType<T>, fallback: T): Promise<T> => {
           const result = await client.invoke('layout.get', { key });
           if (!result.ok) {
             console.error(`[layout] layout.get ${key} failed`, result.error);
             return fallback;
           }
-          if (result.value.value === null) return fallback;
+          if (result.value.value === null) {
+            absent.push(key);
+            return fallback;
+          }
           const parsed = schema.safeParse(result.value.value);
           if (!parsed.success) console.warn(`[layout] ${key} is not a valid value; using the default`);
           return parsed.success ? parsed.data : fallback;
@@ -107,6 +111,15 @@ export function createLayoutStore() {
           if (state && known(id)) panelBySession.set(id, state);
         });
         set({ regions, main: model.repairMain(persistedMain, known), panelPinned, panelBySession, hydrated: true });
+        // A first launch writes the defaults of the keys it lacks, so layout.json always holds the renderer's three
+        // fixed keys (acceptance item 6 lists them); everything after this is written only when it changes.
+        const values: Partial<Record<LayoutKey, unknown>> = { regions, 'main.tabs': get().main, 'panel.pinned': panelPinned };
+        for (const key of absent) {
+          if (!(key in values)) continue;
+          void client.invoke('layout.set', { key, value: values[key] }).then((result) => {
+            if (!result.ok) console.error(`[layout] layout.set ${key} failed`, result.error);
+          });
+        }
       },
 
       openTab: (ref, opts) => main((m) => model.openTab(m, ref, opts)),
