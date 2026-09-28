@@ -81,6 +81,25 @@ describe('head and tail summary', () => {
     expect(summary.lastAssistantText).toBe('Reply one');
   });
 
+  it('takes the custom title from the tail record, else the custom-title.json sidecar, else the head record (SPEC 35.14.3)', () => {
+    const filler = line({ type: 'attachment', uuid: 'f1', parentUuid: 'u1', attachment: { type: 'x', text: 'y'.repeat(HEAD_TAIL_BYTES) } });
+    const headOnly = Buffer.from(
+      line({ type: 'user', uuid: 'u1', parentUuid: null, cwd: '/d', message: { role: 'user', content: 'hi' } }) +
+        line({ type: 'custom-title', customTitle: 'In the head', sessionId: 'S' }) +
+        filler +
+        line({ type: 'assistant', uuid: 'a1', parentUuid: 'f1', message: { role: 'assistant', content: [{ type: 'text', text: 'ok' }] } }),
+      'utf8',
+    );
+    const windows = headAndTail(headOnly);
+    const stat = { size: headOnly.length, mtimeMs: 1 };
+    expect(summarize(windows.head, windows.tail, stat, '/p/S.jsonl', '-p').customTitle).toBe('In the head');
+    expect(summarize(windows.head, windows.tail, stat, '/p/S.jsonl', '-p', 'From the sidecar').customTitle).toBe('From the sidecar');
+
+    const inTail = Buffer.concat([headOnly, Buffer.from(line({ type: 'custom-title', customTitle: 'In the tail', sessionId: 'S' }), 'utf8')]);
+    const tailWindows = headAndTail(inTail);
+    expect(summarize(tailWindows.head, tailWindows.tail, { size: inTail.length, mtimeMs: 1 }, '/p/S.jsonl', '-p', 'From the sidecar').customTitle).toBe('In the tail');
+  });
+
   it('falls back to the first user text for the prompt, clears an empty custom title, and reads a bookkeeping-only file as having no messages', () => {
     const text =
       line({ type: 'user', uuid: 'u1', parentUuid: null, cwd: '/d', timestamp: '2026-09-28T10:00:00.000Z', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't', content: 'x' }] } }) +

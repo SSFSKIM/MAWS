@@ -62,6 +62,12 @@ describe('ipc schema validates both directions', () => {
       ); // C3: a subset, as above
     });
 
+    it('carries the C4 fs.* entries, every command owned by the engine host', () => {
+      expect(Object.keys(fs.commands).sort()).toEqual(['fs.bind', 'fs.scan', 'fs.state']);
+      for (const spec of Object.values(fs.commands)) expect(spec.owner).toBe('engine-host');
+      expect(Object.keys(fs.events).sort()).toEqual(['fs.holderChanged', 'fs.scanProgress', 'fs.sessionChanged', 'fs.sessionRemoved']);
+    });
+
     it('names channels by kind so a command and an event of the same name never share one', () => {
       expect(commandChannel('engine.hostState')).toBe('maws:cmd:engine.hostState');
       expect(eventChannel('engine.hostState')).toBe('maws:evt:engine.hostState');

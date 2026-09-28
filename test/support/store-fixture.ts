@@ -1,9 +1,10 @@
 // A temporary CLAUDE_CONFIG_DIR tree built from fixtures and torn down after the test (C4 execution document, "Test
-// support"). M1 ships the transcript and sidecar parts; M2 adds registry records and jobs. Tests write here, never
-// under the owner's ~/.claude.
+// support"). M1 ships the transcript and sidecar parts; M2 adds registry records, jobs and tasks. Tests write here,
+// never under the owner's ~/.claude.
 import { appendFile, mkdtemp, mkdir, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import type { JobState, LiveSessionRecord, PersistedTask } from '@shared/wire/store';
 import type { TranscriptRecord } from '@shared/wire/transcript';
 import { resolveStorePaths, slugOf, type StorePaths } from '../../src/engine-host/fs/paths';
 
@@ -57,6 +58,33 @@ export class StoreFixture {
     const path = join(this.paths.projects, slug, sessionId, rel);
     await mkdir(dirname(path), { recursive: true });
     await writeFile(path, typeof content === 'string' ? content : JSON.stringify(content));
+    return path;
+  }
+
+  // sessions/<pid>.json, written as the engine writes it: a bare writeFile (SPEC 35.27.1). The pid is the file name.
+  async addRegistryRecord(pid: number, record: Partial<LiveSessionRecord>): Promise<string> {
+    const path = join(this.paths.sessions, `${pid}.json`);
+    await writeFile(path, JSON.stringify(record));
+    return path;
+  }
+
+  async removeRegistryRecord(pid: number): Promise<void> {
+    await rm(join(this.paths.sessions, `${pid}.json`), { force: true });
+  }
+
+  // jobs/<short>/state.json (SPEC 20.15.5)
+  async addJob(short: string, state: Partial<JobState>): Promise<string> {
+    const path = join(this.paths.jobs, short, 'state.json');
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, JSON.stringify(state));
+    return path;
+  }
+
+  // tasks/<listId>/<id>.json, pretty-printed as the engine writes it (SPEC 20.2.3)
+  async addTask(listId: string, task: PersistedTask): Promise<string> {
+    const path = join(this.paths.tasks, listId, `${task.id}.json`);
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, JSON.stringify(task, null, 2));
     return path;
   }
 

@@ -7,6 +7,9 @@ import { join } from 'node:path';
 import { registerEngineIpc } from './ipc';
 import { JOURNAL_KEEP_PER_SESSION, JOURNAL_MAX_AGE_DAYS, pruneJournals } from './journal';
 // C3 end
+// C4 start
+import { registerFs } from './fs/register';
+// C4 end
 
 const HOST_VERSION = __MAWS_VERSION__;
 
@@ -26,4 +29,7 @@ runHost(HOST_VERSION, (on, emit) => {
   const { table } = registerEngineIpc(on, emit, { userData, replayEnabled: process.env.MAWS_ENGINE_REPLAY === '1', appVersion: HOST_VERSION });
   table.startSampling();
   // C3 end
+  // C4 start: the filesystem state service (fs.*) over the engine's store; read-only.
+  registerFs(on, emit);
+  // C4 end
 });

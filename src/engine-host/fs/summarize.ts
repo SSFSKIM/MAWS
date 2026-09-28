@@ -18,6 +18,7 @@ export function summarize(
   stat: { size: number; mtimeMs: number },
   path: string,
   slug: string,
+  sidecarTitle: string | null = null, // `custom-title.json`'s `customTitle`, which discovery reads beside the transcript (M2)
 ): TranscriptSummary {
   const headText = head.toString('utf8');
   const tailText = tail.toString('utf8');
@@ -31,7 +32,8 @@ export function summarize(
   const leaf = tailReversed.find((r) => isUuidRecord(r) && r.type !== 'progress') ?? headReversed.find((r) => isUuidRecord(r) && r.type !== 'progress') ?? null;
   const lastAssistant = tailReversed.map(assistantText).find((text) => text !== null) ?? headReversed.map(assistantText).find((text) => text !== null) ?? null;
 
-  const customTitle = lastString(tailReversed, 'custom-title', 'customTitle') ?? lastString(headReversed, 'custom-title', 'customTitle');
+  // SPEC 35.14.3: the tail record, else the sidecar, else the head record.
+  const customTitle = lastString(tailReversed, 'custom-title', 'customTitle') ?? sidecarTitle ?? lastString(headReversed, 'custom-title', 'customTitle');
   const firstWithParent = headRecords.find((r) => 'parentUuid' in r) ?? tailRecords.find((r) => 'parentUuid' in r);
   const sessionKind = SESSION_KINDS.find((kind) => kind === firstWithParent?.sessionKind) ?? null;
 

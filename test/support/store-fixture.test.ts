@@ -36,6 +36,17 @@ describe('StoreFixture builds a temporary config home', () => {
     expect(readFileSync(title, 'utf8')).toBe('{"customTitle":"Named"}');
     await expect(fixture.addSidecar('nope', 'custom-title.json', '{}')).rejects.toThrow(/no transcript/);
 
+    const registry = await fixture.addRegistryRecord(4242, { sessionId: 'S1', kind: 'interactive' });
+    expect(registry).toBe(join(fixture.configHome, 'sessions', '4242.json'));
+    expect(JSON.parse(readFileSync(registry, 'utf8'))).toEqual({ sessionId: 'S1', kind: 'interactive' });
+    await fixture.removeRegistryRecord(4242);
+    expect(() => statSync(registry)).toThrow();
+    const job = await fixture.addJob('abcd1234', { sessionId: 'S1', state: 'working' });
+    expect(job).toBe(join(fixture.configHome, 'jobs', 'abcd1234', 'state.json'));
+    const task = await fixture.addTask('S1', { id: '1', subject: 's', description: 'd', status: 'pending', blocks: [], blockedBy: [] });
+    expect(task).toBe(join(fixture.configHome, 'tasks', 'S1', '1.json'));
+    expect(JSON.parse(readFileSync(task, 'utf8')).subject).toBe('s');
+
     const home = fixture.configHome;
     await fixture.dispose();
     fixture = null;
