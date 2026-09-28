@@ -13,7 +13,6 @@ const fake = vi.hoisted(() => {
     },
     whenReady: () => Promise.resolve(),
     getPath: () => '/tmp/maws-lifecycle-test',
-    getAppPath: () => '/tmp/maws-lifecycle-app',
     isPackaged: false,
     setPath: vi.fn(),
     commandLine: { appendSwitch: vi.fn() },

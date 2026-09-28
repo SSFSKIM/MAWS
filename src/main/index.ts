@@ -81,7 +81,9 @@ app.whenReady().then(() => {
   const layout = new LayoutFileStore(join(app.getPath('userData'), 'layout.json'));
   registerLayoutHandlers(layout);
   registerOpenExternal();
-  const sessions = startSessions({ env: process.env, packaged: app.isPackaged, appRoot: app.getAppPath(), hosts });
+  // A relative scenario path is the repository's: the working directory of `pnpm dev`, `pnpm dev:stub` and the smoke's
+  // launch alike (`app.getAppPath()` is `out/main` when the built app is launched by file, as the smoke does).
+  const sessions = startSessions({ env: process.env, packaged: app.isPackaged, appRoot: process.cwd(), hosts });
   app.on('will-quit', () => {
     layout.flush();
     sessions.stop();

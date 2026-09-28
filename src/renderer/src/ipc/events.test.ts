@@ -80,8 +80,8 @@ describe('shell event subscription', () => {
     expect(stores.attention.getState().loaded).toBe(false);
   });
 
-  it('still loads when a snapshot command has no answerer, logging it', async () => {
-    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+  it('still loads when a snapshot command has no answerer, warning about it', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const { fake, stores } = setup();
     await fake.fail('session.list', 'no main handler registered for session.list');
     await fake.reply('session.projects.list', { projects: [], revision: 0 });
@@ -89,7 +89,7 @@ describe('shell event subscription', () => {
     await fake.fail('attention.list');
     expect(stores.sessions.getState().loaded).toBe(true);
     expect(stores.attention.getState().loaded).toBe(true);
-    expect(error).toHaveBeenCalledTimes(2);
-    error.mockRestore();
+    expect(warn.mock.calls.map(([line]) => line)).toEqual(['[shell] session.list unavailable; starting empty', '[shell] attention.list unavailable; starting empty']);
+    warn.mockRestore();
   });
 });

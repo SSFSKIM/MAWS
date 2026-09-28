@@ -40,7 +40,9 @@ export function connectShell(client: MawsBridge = ipc, stores: ShellStores = { s
   const answer = async <T>(label: string, request: Promise<{ ok: true; value: T } | { ok: false; error: unknown }>, apply: (value: T) => void) => {
     const result = await request;
     if (!live()) return;
-    if (!result.ok) console.error(`[shell] ${label} failed`, result.error);
+    // A snapshot nobody answers leaves its store empty and live on events: a degraded start, not a fault in the page.
+    // (In launch mode `index` before C3 and C4 land, the record side and attention have no answerer at all.)
+    if (!result.ok) console.warn(`[shell] ${label} unavailable; starting empty`, result.error);
     else apply(result.value);
   };
 
