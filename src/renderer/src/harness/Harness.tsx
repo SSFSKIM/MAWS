@@ -75,8 +75,8 @@ export function Harness() {
       pause: () => current().player.pause(),
       step: () => current().player.step(),
       turnId: (n) => current().turnId(n),
-      expandAll: async () => {
-        useTranscriptStore.getState().expandAll(current().key);
+      expandAll: async (options) => {
+        useTranscriptStore.getState().expandAll(current().key, options);
         await painted();
       },
       expandTurn: async (n) => {

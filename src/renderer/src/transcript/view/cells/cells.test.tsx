@@ -86,7 +86,7 @@ describe('shell detail', () => {
 
 describe('edit detail', () => {
   it('renders the hunks as diff lines with line numbers and add and del lines, and the path opens the file', async () => {
-    const hunk = { oldStart: 42, oldLines: 2, newStart: 42, newLines: 3, lines: [' const rect = row.getBoundingClientRect();', '-setTarget(id);', '+const edge = y < mid;', '+setTarget({ id, edge });'] };
+    const hunk = { oldStart: 42, oldLines: 2, newStart: 42, newLines: 3, lines: [' const rect = row.getBoundingClientRect();', '-setTarget(id);', '+const edge = y < mid;', '+setTarget({ id, edge });', 'return;'] }; // the last line unprefixed (seen in a synthetic journal): context, whole
     const { cell, actions } = await expandedCell((b) => {
       b.toolUse('t1', 'Edit', { file_path: '/p/src/drag.ts', old_string: 'setTarget(id);', new_string: 'x' });
       b.result('t1', 'ok', { structured: { filePath: '/p/src/drag.ts', structuredPatch: [hunk] } });
@@ -94,8 +94,9 @@ describe('edit detail', () => {
       b.result('t2', 'a', { structured: BASH_RESULT('a') });
     }, 'cell:t1');
     const lines = [...cell.querySelectorAll<HTMLElement>('[data-diff]')];
-    expect(lines.map((line) => line.dataset.diff)).toEqual(['context', 'del', 'add', 'add']);
-    expect(lines.map((line) => line.querySelector('[data-line-number]')?.textContent)).toEqual(['42', '43', '43', '44']);
+    expect(lines.map((line) => line.dataset.diff)).toEqual(['context', 'del', 'add', 'add', 'context']);
+    expect(lines.map((line) => line.querySelector('[data-line-number]')?.textContent)).toEqual(['42', '43', '43', '44', '45']);
+    expect(lines[4].textContent).toContain('return;');
     expect(lines[1].textContent).toContain('setTarget(id);');
     fireEvent.click(within(cell).getByRole('button', { name: 'drag.ts' }));
     expect(actions.openFile).toHaveBeenCalledWith('/p/src/drag.ts', 42);

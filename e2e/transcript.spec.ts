@@ -1,7 +1,8 @@
 // The transcript harness end to end (C6), over the real model and row components. `anchoring` is G1, the anchoring
 // spike (acceptance item 1): a five-hundred-turn synthetic transcript streams its last turn at sixty delta batches a
 // second while the reader, scrolled far up, expands old work; the reader must not be moved, frames must hold, and
-// "Jump to latest" must resume follow mode. The others pin follow mode, the divider collapse and the theme switch.
+// "Jump to latest" must resume follow mode. The others pin follow mode, the divider collapse, the theme switch, the
+// denial jump (acceptance item 4) and expanded old work over every fixture.
 // Runs only under `pnpm e2e:transcript`, which builds with MAWS_HARNESS=1 first (playwright.config.ts).
 import { expect, test as base, type Page } from '@playwright/test';
 import type { HarnessApi, HarnessMetrics } from '../src/renderer/src/harness/api';
@@ -284,4 +285,135 @@ test('theme switch re-themes highlighted code without reload', async ({ harness 
   await page.evaluate(() => (document.documentElement.dataset.theme = 'light'));
   await expect.poll(colour, { message: 'and back' }).toBe(light);
   expect(harness.consoleErrors()).toEqual([]);
+});
+
+// The FIXTURES catalogue as the harness offers it (its fixture picker).
+const fixtureNames = (page: Page) =>
+  page.evaluate(() => Array.from(document.querySelectorAll<HTMLOptionElement>('select[aria-label="Fixture"] option')).map((option) => option.value));
+
+// Loads a fixture and releases all of it; resolves once the rows stopped changing.
+async function loadAll(page: Page, fixture: string) {
+  await load(page, fixture);
+  await play(page, 0);
+  await expect.poll(async () => (await metrics(page)).batches, { message: `${fixture} released` }).toBeGreaterThan(0);
+  await settle(page, 300);
+}
+
+test('the denied count jumps to the standalone denied cell', async ({ harness }) => {
+  const { page } = harness;
+  await harnessReady(page);
+  await blockHumanInput(page);
+  await loadAll(page, 'pass1/permission-roundtrip');
+
+  // Three turns of one Bash call each; the second was denied by a permission rule. Its turn is collapsed.
+  const turnId = await turnIdOf(page, 2);
+  const divider = page.locator(rowSelector(`divider:${turnId}`));
+  const toggle = divider.locator('button[aria-expanded]').first();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  await expect(toggle).toHaveText(/^Worked for .+ · 1 tool call$/);
+  const count = divider.getByRole('link', { name: '1 denied' });
+  const cellId = await count.evaluate((link) => link.getAttribute('href')!.slice(1));
+  expect(cellId).toBe('cell:toolu_01WfZTvMV6147Psn1MBSesXw');
+  expect(await page.locator(`[data-cell-id="${cellId}"]`).count(), 'the denied cell is not rendered while its turn is collapsed').toBe(0);
+
+  await count.click();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+  const cell = page.locator(`[data-cell-id="${cellId}"]`);
+  await expect(cell).toBeFocused();
+  await settle(page, 300);
+  const placed = await cell.evaluate((element) => {
+    const scroller = document.querySelector<HTMLElement>('[data-transcript-scroller]')!;
+    const row = element.closest<HTMLElement>('[data-row-id]')!;
+    const view = scroller.getBoundingClientRect();
+    const rect = row.getBoundingClientRect();
+    const max = scroller.scrollHeight - scroller.clientHeight;
+    return {
+      kind: element.closest('[data-kind]')?.getAttribute('data-kind'),
+      inGroup: element.closest('[data-group-cells]') !== null,
+      label: element.querySelector('button')?.textContent ?? '',
+      offCentre: Math.round(Math.abs(rect.top + rect.height / 2 - (view.top + view.height / 2))),
+      clamped: scroller.scrollTop <= 1 || scroller.scrollTop >= max - 1, // a list too short to centre the row stops at an edge
+      inView: rect.top >= view.top && rect.bottom <= view.bottom,
+      focused: document.activeElement === element,
+    };
+  });
+  console.log(`denial jump: ${JSON.stringify(placed)}`);
+  test.info().annotations.push({ type: 'denial jump', description: JSON.stringify(placed) });
+  expect(placed.kind, 'the denied cell is a standalone row').toBe('cell');
+  expect(placed.inGroup, 'not inside a group').toBe(false);
+  expect(placed.label).toMatch(/^Denied: git branch --show-current · /);
+  expect(placed.focused, 'focus is on the cell itself').toBe(true);
+  expect(placed.inView, 'the denied cell is in view').toBe(true);
+  expect(placed.offCentre <= 2 || placed.clamped, `centred (off by ${placed.offCentre} px) unless the list stops at an edge`).toBe(true);
+
+  // The same jump deep in a long transcript, where the list can centre it: synthetic/500 denies a call every 40th turn.
+  await loadAll(page, 'synthetic/500');
+  await page.evaluate(() => (window as unknown as HarnessWindow).__maws_harness.scrollToTurn(200));
+  await settle(page, 300);
+  const link = page.locator('[data-kind="divider"] a[href^="#cell:"]').first();
+  await expect(link).toBeVisible();
+  const deep = await link.evaluate((element) => element.getAttribute('href')!.slice(1));
+  await link.click();
+  const deepCell = page.locator(`[data-cell-id="${deep}"]`);
+  await expect(deepCell).toBeFocused();
+  await settle(page, 300);
+  const deepPlaced = await deepCell.evaluate((element) => {
+    const scroller = document.querySelector<HTMLElement>('[data-transcript-scroller]')!;
+    const view = scroller.getBoundingClientRect();
+    const rect = element.closest<HTMLElement>('[data-row-id]')!.getBoundingClientRect();
+    return { kind: element.closest('[data-kind]')?.getAttribute('data-kind'), offCentre: Math.round(Math.abs(rect.top + rect.height / 2 - (view.top + view.height / 2))) };
+  });
+  console.log(`denial jump, synthetic/500: ${JSON.stringify(deepPlaced)}`);
+  expect(deepPlaced.kind).toBe('cell');
+  expect(deepPlaced.offCentre, 'the denied row is centred').toBeLessThanOrEqual(2);
+  expect(harness.consoleErrors()).toEqual([]);
+});
+
+// Expand-old-work over the fixtures: every turn, group and cell of every journal and event fixture opened, the list
+// walked a viewport at a time so every row mounts, no work-area row left to a placeholder, no console error.
+test('every fixture renders its whole work area expanded', async ({ harness }) => {
+  test.setTimeout(300_000);
+  const { page } = harness;
+  await harnessReady(page);
+  await blockHumanInput(page);
+  const fixtures = (await fixtureNames(page)).filter((name) => !name.startsWith('synthetic/'));
+  expect(fixtures.length).toBeGreaterThan(40);
+  const WORK_KINDS = ['group', 'cell', 'receipt', 'subagent', 'agent_message', 'bash'];
+  const seen = new Map<string, number>();
+  for (const fixture of fixtures) {
+    await loadAll(page, fixture);
+    await page.evaluate(() => (window as unknown as HarnessWindow).__maws_harness.expandAll({ cells: true }));
+    await settle(page, 200);
+    const walked = await page.evaluate(async (workKinds) => {
+      const scroller = document.querySelector<HTMLElement>('[data-transcript-scroller]')!;
+      const kinds: Record<string, number> = {};
+      const placeholders: string[] = [];
+      const rows = new Set<string>();
+      const frame = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      scroller.scrollTop = 0;
+      await frame();
+      for (let guard = 0; guard < 400; guard += 1) {
+        for (const row of Array.from(scroller.querySelectorAll<HTMLElement>('[data-row-id]'))) {
+          const id = row.dataset.rowId!;
+          if (rows.has(id)) continue;
+          rows.add(id);
+          const kind = row.querySelector<HTMLElement>('[data-kind]')?.dataset.kind ?? '';
+          kinds[kind] = (kinds[kind] ?? 0) + 1;
+          if (workKinds.includes(kind) && row.querySelector('.transcript-placeholder')) placeholders.push(id);
+        }
+        if (scroller.scrollTop >= scroller.scrollHeight - scroller.clientHeight - 1) break;
+        scroller.scrollTop += scroller.clientHeight;
+        await frame();
+      }
+      return { kinds, placeholders, rows: rows.size };
+    }, WORK_KINDS);
+    expect(walked.placeholders, `${fixture}: work-area rows render their own components`).toEqual([]);
+    expect(walked.rows, `${fixture}: rows rendered`).toBeGreaterThan(0);
+    for (const [kind, n] of Object.entries(walked.kinds)) seen.set(kind, (seen.get(kind) ?? 0) + n);
+    expect(harness.consoleErrors(), `${fixture}: no console errors`).toEqual([]);
+  }
+  const report = { fixtures: fixtures.length, kinds: Object.fromEntries([...seen].sort()) };
+  console.log(`expanded fixtures: ${JSON.stringify(report)}`);
+  test.info().annotations.push({ type: 'expanded fixtures', description: JSON.stringify(report) });
+  for (const kind of WORK_KINDS) expect(seen.get(kind) ?? 0, `some fixture renders a ${kind} row`).toBeGreaterThan(0);
 });

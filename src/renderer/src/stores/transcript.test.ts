@@ -52,6 +52,18 @@ describe('transcript store', () => {
     expect(store.getState().lastAssistantLine(KEY)).toBe('Last line');
   });
 
+  it('attaching the same source to its key again while it hydrates keeps the attachment and its buffered batches', async () => {
+    const b = twoTurns();
+    const store = createTranscriptStore();
+    const fake = pushSource([]);
+    const first = store.getState().attach(KEY, fake.source);
+    fake.push(b.events); // released before the snapshot resolved (the harness seeks history at load): buffered
+    const second = store.getState().attach(KEY, fake.source); // the view mounting over the same source
+    await Promise.all([first, second]);
+    expect(fake.subscribed).toBe(true);
+    expect(store.getState().rows(KEY).filter((row) => row.kind === 'user')).toHaveLength(2);
+  });
+
   it('detach unsubscribes and keeps the state', async () => {
     const store = createTranscriptStore();
     const fake = pushSource(twoTurns().events);
@@ -144,6 +156,24 @@ describe('transcript store', () => {
     store.getState().expandAll(KEY);
     const group = store.getState().rows(KEY).find((row) => row.kind === 'group');
     expect(group?.kind === 'group' && group.expanded).toBe(true);
+    expect(group?.kind === 'group' && group.cells.some((cell) => cell.expanded)).toBe(false);
+  });
+
+  it('expandAll with cells also opens every cell, standalone or in a group', async () => {
+    const b = twoTurns();
+    b.turn('u3');
+    b.toolUse('t9', 'Bash', { command: 'date' }, 'm9', 0);
+    b.result('t9', 'now', { structured: BASH_RESULT('now') });
+    b.end(['u3']);
+    const store = createTranscriptStore();
+    await store.getState().attach(KEY, pushSource(b.events).source);
+    store.getState().expandAll(KEY, { cells: true });
+    const cells = store.getState().rows(KEY).flatMap((row) => (row.kind === 'group' ? row.cells : row.kind === 'cell' ? [row] : []));
+    expect(cells.map((cell) => [cell.id, cell.expanded])).toEqual([
+      [cellId.tool(tool('t1')), true],
+      [cellId.tool(tool('t2')), true],
+      [cellId.tool(tool('t9')), true],
+    ]);
   });
 
   it('exposes the live buffer of a streaming block without re-deriving rows on later deltas', async () => {

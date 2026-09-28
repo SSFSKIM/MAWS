@@ -52,7 +52,7 @@ export interface TranscriptStore {
   toggleTurn(key: string, turn: TurnId): void;
   toggleGroup(key: string, group: RowId): void;
   toggleCell(key: string, cell: CellId): void;
-  expandAll(key: string): void; // every turn and group (the harness's "expand all old work")
+  expandAll(key: string, options?: { cells?: boolean }): void; // every turn and group (the harness's "expand all old work"), and with `cells` every cell
   setReceipt(key: string, receipt: RowId, patch: Partial<ReceiptUndo>): void;
 }
 
@@ -126,7 +126,8 @@ function keepFinishedTurnsOpen(previous: TranscriptState, next: TranscriptState,
 }
 
 export function createTranscriptStore() {
-  const attachments = new Map<string, Attachment>();
+  // Per key: the live attachment, the source it follows and its settled hydration (what `attach` resolves).
+  const attachments = new Map<string, { attachment: Attachment; source: TranscriptSource; settled: Promise<void> }>();
   let nonce = 0;
   return create<TranscriptStore>()((set, get) => {
     const entry = (key: string) => get().entries[key] as TranscriptEntry | undefined;
@@ -153,7 +154,11 @@ export function createTranscriptStore() {
       entries: {},
 
       attach(key, source, options = {}) {
-        attachments.get(key)?.detach();
+        // The same source attached again (the view mounting over a source its owner attached first) keeps the
+        // attachment: detaching would drop the batches it buffered while hydrating, which the source never resends.
+        const existing = attachments.get(key);
+        if (existing?.source === source) return existing.settled;
+        existing?.attachment.detach();
         if (!entry(key)) {
           const state = createState(null, options.agentId ?? null);
           set({ entries: { ...get().entries, [key]: { state, rows: rowsOf(state), phase: 'hydrating', error: null, following: true, working: false, clock: null, jump: null, receipts: {} } } });
@@ -167,22 +172,24 @@ export function createTranscriptStore() {
           },
           has: (id) => entry(key)?.state.seen.has(id) ?? false,
         });
-        attachments.set(key, attachment);
+        const current = () => attachments.get(key)?.attachment === attachment;
         // Resolves either way; a failure is recorded on the key (hydrate.ts has already unsubscribed and cleared its buffer).
-        return attachment.hydrated.then(
+        const settled = attachment.hydrated.then(
           () => {
-            if (attachments.get(key) === attachment) put(key, { phase: 'live' });
+            if (current()) put(key, { phase: 'live' });
           },
           (reason: unknown) => {
-            if (attachments.get(key) !== attachment) return;
+            if (!current()) return;
             attachments.delete(key);
             put(key, { phase: 'failed', error: reason instanceof Error ? reason.message : String(reason) });
           },
         );
+        attachments.set(key, { attachment, source, settled });
+        return settled;
       },
 
       detach(key) {
-        attachments.get(key)?.detach();
+        attachments.get(key)?.attachment.detach();
         attachments.delete(key);
       },
 
@@ -245,10 +252,15 @@ export function createTranscriptStore() {
         if (current) put(key, { receipts: { ...current.receipts, [receipt]: { ...(current.receipts[receipt] ?? RECEIPT_APPLIED), ...patch } } });
       },
 
-      expandAll(key) {
+      expandAll(key, options = {}) {
         changeUi(key, (ui, state) => {
           for (const id of state.order) expandTurn(ui, id);
-          for (const row of allExpandedRows(state)) if (row.kind === 'group') ui.expandedGroups.add(row.id);
+          for (const row of allExpandedRows(state)) {
+            if (row.kind === 'group') ui.expandedGroups.add(row.id);
+            if (!options.cells) continue;
+            if (row.kind === 'group') for (const cell of row.cells) ui.expandedCells.add(cell.id);
+            else if (row.kind === 'cell') ui.expandedCells.add(row.id);
+          }
         });
       },
     };

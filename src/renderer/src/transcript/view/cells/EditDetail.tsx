@@ -19,7 +19,7 @@ function linesOf(hunk: Hunk): { kind: DiffKind; number: number | null; sign: str
     if (sign === '-') return { kind: 'del', number: old++, sign: '−', text };
     if (sign === '\\') return { kind: 'meta', number: null, sign: '', text: line };
     old += 1;
-    return { kind: 'context', number: next++, sign: ' ', text };
+    return { kind: 'context', number: next++, sign: ' ', text: sign === ' ' ? text : line }; // an unprefixed line is context, whole
   });
 }
 

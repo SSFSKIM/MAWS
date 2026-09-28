@@ -24,7 +24,7 @@ export interface HarnessApi {
   pause(): void;
   step(): void;
   turnId(n: number): string; // the n-th turn's id (1-based, reading order); rows carry it as `data-turn-id`
-  expandAll(): Promise<void>;
+  expandAll(options?: { cells?: boolean }): Promise<void>; // every turn and group; with `cells`, every cell's detail too
   expandTurn(n: number): Promise<void>;
   scrollToTurn(n: number): Promise<void>;
   metrics(): HarnessMetrics;
