@@ -86,6 +86,8 @@ describe('pty host flow control pauses and resumes', () => {
   it('pauses a flood nobody acknowledges near the high watermark, and acks let it finish', async () => {
     const h = harness();
     const { ptyId } = await h.table.spawn(spawnInput({ shell: '/bin/sh', args: ['-c', 'yes | head -c 5000000'] }));
+    // The second is the flood's, not the process start's (the iutf8 wrapper and a loaded machine delay the first byte).
+    await h.until(() => (h.chunks.get(ptyId)?.length ?? 0) > 0, 5_000, 'the flood started');
     await h.until(() => h.table.list().ptys.find((p) => p.ptyId === ptyId)?.paused === true, 1_000, 'paused within one second');
     await new Promise((r) => setTimeout(r, 300)); // nothing more arrives while paused
     const largest = Math.max(...h.chunks.get(ptyId)!.map((c) => c.data.byteLength));
