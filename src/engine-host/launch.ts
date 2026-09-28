@@ -158,11 +158,13 @@ export function mintLaunchId(): string {
 }
 
 export function buildLaunch(spec: LaunchSpec, captured: Record<string, string>, opts: { relayUrl: string; engineVersion: string }): LaunchPlan {
-  if (spec.resume !== null && spec.sessionId !== null) {
-    throw new LaunchSpecConflict('sessionId', '--session-id never co-occurs with --resume; a resumed launch takes the resumed id');
+  if (spec.resume !== null && !spec.resume.fork && spec.sessionId !== null) {
+    throw new LaunchSpecConflict('sessionId', '--session-id never co-occurs with a non-fork --resume; a resumed launch takes the resumed id');
   }
   const flagSettings = mergeFlagSettings(spec);
-  const sessionId = (spec.resume?.sessionId ?? spec.sessionId ?? randomUUID()) as SessionId;
+  // A new session and a fork are pinned (the fork's id is known from spawn, C10's ask); a plain resume keeps its id.
+  const pinned = spec.resume === null || spec.resume.fork;
+  const sessionId = (pinned ? (spec.sessionId ?? randomUUID()) : spec.resume!.sessionId) as SessionId;
 
   const args = [...ENGINE_FLAGS];
   if (spec.model !== null) args.push('--model', spec.model);
@@ -170,10 +172,9 @@ export function buildLaunch(spec: LaunchSpec, captured: Record<string, string>, 
   for (const dir of spec.additionalDirectories) args.push('--add-dir', dir);
   if (spec.resume !== null) {
     args.push('--resume', spec.resume.sessionId);
-    if (spec.resume.fork) args.push('--fork-session');
-  } else {
-    args.push('--session-id', sessionId);
+    if (spec.resume.fork) args.push('--fork-session'); // SPEC 35.16.5: --session-id is accepted beside --resume only with it
   }
+  if (pinned) args.push('--session-id', sessionId);
   if (spec.mcpConfig !== null) args.push('--mcp-config', JSON.stringify(spec.mcpConfig));
   if (spec.maxBudgetUsd !== null) args.push('--max-budget-usd', String(spec.maxBudgetUsd));
   args.push('--settings', JSON.stringify(flagSettings));

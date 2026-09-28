@@ -166,7 +166,7 @@ describe('launch contract builds the X6 command line and environment', () => {
     expect(buildLaunch(spec(), CAPTURED, OPTS).launchId).not.toBe(plan.launchId);
   });
 
-  it('never co-occurs --resume with --session-id, adds --fork-session only for a fork, and refuses a pinned id on a resume', () => {
+  it('never pins --session-id on a non-fork resume, pins a fork like a new session, and refuses a pinned id on a non-fork resume', () => {
     const resumed = buildLaunch(spec({ resume: { sessionId: 'abc' as LaunchSpec['sessionId'] & string, fork: false } }), CAPTURED, OPTS);
     expect(resumed.args).toContain('--resume');
     expect(resumed.args[resumed.args.indexOf('--resume') + 1]).toBe('abc');
@@ -174,9 +174,15 @@ describe('launch contract builds the X6 command line and environment', () => {
     expect(resumed.args).not.toContain('--fork-session');
     expect(resumed.sessionId).toBe('abc');
 
-    const forked = buildLaunch(spec({ resume: { sessionId: 'abc' as LaunchSpec['sessionId'] & string, fork: true } }), CAPTURED, OPTS);
-    expect(forked.args.slice(ENGINE_FLAGS.length, ENGINE_FLAGS.length + 3)).toEqual(['--resume', 'abc', '--fork-session']);
-    expect(forked.args).not.toContain('--session-id');
+    // a fork is pinned like a new session (C10's ask; SPEC 35.16.5: --session-id is accepted beside --resume with --fork-session)
+    const forked = buildLaunch(spec({ resume: { sessionId: 'abc' as LaunchSpec['sessionId'] & string, fork: true }, sessionId: '22222222-2222-4222-8222-222222222222' as LaunchSpec['sessionId'] }), CAPTURED, OPTS);
+    expect(forked.args.slice(ENGINE_FLAGS.length, ENGINE_FLAGS.length + 5)).toEqual(['--resume', 'abc', '--fork-session', '--session-id', '22222222-2222-4222-8222-222222222222']);
+    expect(forked.sessionId).toBe('22222222-2222-4222-8222-222222222222');
+    const mintedFork = buildLaunch(spec({ resume: { sessionId: 'abc' as LaunchSpec['sessionId'] & string, fork: true } }), CAPTURED, OPTS);
+    const i = mintedFork.args.indexOf('--session-id');
+    expect(mintedFork.args.slice(i - 3, i)).toEqual(['--resume', 'abc', '--fork-session']);
+    expect(mintedFork.args[i + 1]).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    expect(mintedFork.sessionId).toBe(mintedFork.args[i + 1]);
 
     expect(() =>
       buildLaunch(spec({ resume: { sessionId: 'abc' as LaunchSpec['sessionId'] & string, fork: false }, sessionId: 'def' as LaunchSpec['sessionId'] & string }), CAPTURED, OPTS),
