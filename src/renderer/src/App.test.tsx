@@ -65,6 +65,16 @@ function fakeMain(initial: SettingsState['settings']['theme']) {
         return GIT_STATUS;
       case 'git.unwatch':
         return undefined;
+      // C5 start: the shell's snapshots (the record side above is C4's)
+      case 'session.digests':
+        return { digests: [] };
+      case 'attention.list':
+        return [];
+      case 'layout.list':
+        return { keys: [] };
+      case 'layout.get':
+        return { value: null };
+      // C5 end
       case 'pty.spawn':
         return { ptyId: 'p1', pid: 3333 };
       case 'pty.write':
@@ -151,6 +161,13 @@ describe('hosts in the diagnostics strip', () => {
     expect(pty()).toBe('pty host · restarting');
     act(() => main.send('pty.hostState', { state: 'ready', pid: 4444, restarts: 1, revision: 4 }));
     expect(pty()).toBe('pty host · ready · pid 4444');
+  });
+
+  it('shows the shell data counts once the stores have loaded (C5 M1)', async () => {
+    fakeMain('light');
+    await renderApp();
+    await act(async () => void (await new Promise((resolve) => setTimeout(resolve, 0))));
+    expect(screen.getByRole('status', { name: 'shell data' }).textContent).toBe('sessions · 0 · needs you · 0 · layout · hydrated');
   });
 
   it('runs the echo test and shows the output line with the shell’s pid', async () => {

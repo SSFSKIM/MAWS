@@ -28,7 +28,6 @@ export interface ScenarioControl {
 }
 
 declare global {
-  // eslint-disable-next-line no-var
   var __maws_scenario: ScenarioControl | undefined;
 }
 

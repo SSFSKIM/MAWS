@@ -1,9 +1,13 @@
 // The diagnostics strip in the main region: the theme control (M3), each utility process's state and pid, and the
 // PTY echo test (M4). The strip is how C1's acceptance is read by eye and by the smoke.
 import { useEffect } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import type { HostState, ThemeSetting } from '@shared/ipc/schema';
 import { useEcho, type EchoState } from '../stores/echo';
+import { selectCountNeedsYou, useAttention } from '../stores/attention';
 import { useHosts } from '../stores/hosts';
+import { useLayout } from '../stores/layout';
+import { useSessions } from '../stores/sessions';
 import { useSettings } from '../stores/settings';
 import { StoreDiagnostics } from './StoreDiagnostics';
 
@@ -54,6 +58,7 @@ export function Diagnostics() {
       </div>
       <HostRow label="engine host" state={engine} />
       <HostRow label="pty host" state={pty} />
+      <ShellDataRow />
       <div className="flex items-center gap-3">
         <button
           type="button"
@@ -79,6 +84,20 @@ function HostRow({ label, state }: { label: string; state: HostState | null }) {
     <output aria-label={label} className="flex items-center gap-2">
       <span aria-hidden className={`size-2 rounded-full ${state ? STATE_DOT[state.state] : 'bg-fg-faint'}`} />
       {describeHost(label, state)}
+    </output>
+  );
+}
+
+// C5: the shell's data at a glance, how M1's acceptance is read before any shell surface exists.
+function ShellDataRow() {
+  const { loaded, records, recordsVersion } = useSessions(useShallow((s) => ({ loaded: s.loaded, records: s.records, recordsVersion: s.recordsVersion })));
+  const attention = useAttention(useShallow((a) => ({ loaded: a.loaded, bySession: a.bySession, version: a.version })));
+  const hydrated = useLayout((l) => l.hydrated);
+  const sessions = loaded ? [...records.values()].filter((r) => !r.archived).length : '…';
+  const needsYou = attention.loaded ? selectCountNeedsYou(attention, { records, recordsVersion }) : '…';
+  return (
+    <output aria-label="shell data" className="font-mono">
+      {`sessions · ${sessions} · needs you · ${needsYou} · layout · ${hydrated ? 'hydrated' : 'pending'}`}
     </output>
   );
 }

@@ -7,7 +7,8 @@ import { SessionReadModel, type ReadModelWriter, type SessionSource } from './re
 
 const A = 'app-a' as AppSessionId;
 const B = 'app-b' as AppSessionId;
-const { revision: _r, ...digestInput } = digest(A, { phase: 'working', cost: { totalUsd: 2, sinceSeenUsd: 0.5 } });
+const { revision, ...digestInput } = digest(A, { phase: 'working', cost: { totalUsd: 2, sinceSeenUsd: 0.5 } });
+void revision;
 
 function source(): SessionSource & { writer: ReadModelWriter; visible: [AppSessionId, boolean][]; stop: ReturnType<typeof vi.fn> } {
   const stop = vi.fn();

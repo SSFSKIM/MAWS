@@ -16,6 +16,9 @@ const toRef = (target: TabTarget): TabRef => {
   return { ...target, id, pinned: false } as TabRef;
 };
 
+// The pane at an index the caller knows exists (the focused pane, or one `locate` found).
+const paneAt = (main: LayoutMain, pane: Pane): PaneState => main.panes[pane] as PaneState;
+
 function locate(main: LayoutMain, id: string): { pane: Pane; index: number } | null {
   for (const pane of [0, 1] as const) {
     const index = main.panes[pane]?.tabs.findIndex((t) => t.id === id) ?? -1;
@@ -71,7 +74,7 @@ function place(main: LayoutMain, tab: TabRef, pane: Pane, index: number | 'after
 export function openTab(main: LayoutMain, target: TabTarget, opts: { pane?: PaneTarget; activate?: boolean } = {}): LayoutMain {
   const activate = opts.activate ?? true;
   const found = locate(main, tabId(target));
-  if (found) return activate ? activateTab(main, main.panes[found.pane].tabs[found.index].id) : { ...main, focusedPane: found.pane };
+  if (found) return activate ? activateTab(main, paneAt(main, found.pane).tabs[found.index].id) : { ...main, focusedPane: found.pane };
   return place(main, toRef(target), paneOf(main, opts.pane ?? 'focused'), 'afterActive', activate);
 }
 
@@ -103,7 +106,7 @@ export function closeTab(main: LayoutMain, id: string): LayoutMain {
   if (id === 'overview') return main;
   const found = locate(main, id);
   if (!found) return main;
-  const tab = main.panes[found.pane].tabs[found.index];
+  const tab = paneAt(main, found.pane).tabs[found.index];
   const panes = main.panes.map((p, i) => (i === found.pane ? without(p, id) : p));
   const closed = [...main.closedTabs.filter((t) => t.id !== id), tab].slice(-CLOSED_MAX);
   return { ...withPanes(main, panes, main.focusedPane), closedTabs: closed };
@@ -112,16 +115,16 @@ export function closeTab(main: LayoutMain, id: string): LayoutMain {
 export function moveTab(main: LayoutMain, id: string, toPane: Pane, index: number): LayoutMain {
   const found = locate(main, id);
   if (!found) return main;
-  const tab = main.panes[found.pane].tabs[found.index];
+  const tab = paneAt(main, found.pane).tabs[found.index];
   if (found.pane === toPane) {
-    const pane = main.panes[toPane];
+    const pane = paneAt(main, toPane);
     const rest = pane.tabs.filter((t) => t.id !== id);
     const panes = [...main.panes] as PaneState[];
     panes[toPane] = insertAt({ tabs: rest, activeTabId: pane.activeTabId }, tab, index, true);
     return { ...main, panes: panes as LayoutMain['panes'], focusedPane: toPane };
   }
   const creating = toPane === 1 && main.panes.length === 1;
-  const source = without(main.panes[found.pane], id);
+  const source = without(paneAt(main, found.pane), id);
   let panes: PaneState[] = main.panes.map((p, i) => (i === found.pane ? source : p));
   if (creating) panes = [panes[0], { tabs: [tab], activeTabId: tab.id }];
   else panes[toPane] = insertAt(panes[toPane], tab, index, true);
@@ -131,19 +134,19 @@ export function moveTab(main: LayoutMain, id: string, toPane: Pane, index: numbe
 }
 
 export function splitWithActive(main: LayoutMain): LayoutMain {
-  const pane = main.panes[main.focusedPane];
+  const pane = paneAt(main, main.focusedPane);
   if (main.panes.length === 1 && pane.tabs.length < 2) return main;
   const to: Pane = main.panes.length === 2 ? ((1 - main.focusedPane) as Pane) : 1;
   return moveTab(main, pane.activeTabId, to, main.panes[to]?.tabs.length ?? 0);
 }
 
 export function selectTab(main: LayoutMain, n: number): LayoutMain {
-  const tab = main.panes[main.focusedPane].tabs[n - 1];
+  const tab = paneAt(main, main.focusedPane).tabs[n - 1];
   return tab ? activateTab(main, tab.id) : main;
 }
 
 export function cycleTab(main: LayoutMain, delta: 1 | -1): LayoutMain {
-  const { tabs, activeTabId } = main.panes[main.focusedPane];
+  const { tabs, activeTabId } = paneAt(main, main.focusedPane);
   const at = tabs.findIndex((t) => t.id === activeTabId);
   return activateTab(main, tabs[(at + delta + tabs.length) % tabs.length].id);
 }

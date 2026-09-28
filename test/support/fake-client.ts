@@ -15,6 +15,7 @@ export interface FakeClient {
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
+// `auto` answers a command at once: with the value, or with the value a function computes from the input.
 export function fakeClient(auto: Partial<Record<CommandName, unknown>> = {}): FakeClient {
   const listeners = new Map<string, Set<(payload: unknown) => void>>();
   const waiting = new Map<string, ((result: CommandResult<CommandName>) => void)[]>();
@@ -24,7 +25,10 @@ export function fakeClient(auto: Partial<Record<CommandName, unknown>> = {}): Fa
     invoke(name: CommandName, input: unknown) {
       calls.push(`invoke ${name}`);
       inputs.set(name, [...(inputs.get(name) ?? []), input]);
-      if (name in auto) return Promise.resolve({ ok: true, value: auto[name] });
+      if (name in auto) {
+        const given = auto[name];
+        return Promise.resolve({ ok: true, value: typeof given === 'function' ? (given as (i: unknown) => unknown)(input) : given });
+      }
       return new Promise<CommandResult<CommandName>>((resolve) => waiting.set(name, [...(waiting.get(name) ?? []), resolve]));
     },
     on(name: EventName, listener: (payload: unknown) => void) {

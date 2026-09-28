@@ -13,7 +13,7 @@ import { AppSessionIdSchema, type AppSessionId } from '../../src/shared/graph/id
 import { SessionRecordSchema, type SessionRecord } from '../../src/shared/graph/session';
 import { EffortSchema } from '../../src/shared/engine/launch-spec';
 import { EngineSessionStatusSchema, type EngineSessionStatus } from '../../src/shared/engine/status';
-import { ProjectRecordSchema, SessionDigestSchema, type ProjectRecord, type SessionDigest } from '../../src/shared/ipc/schema/session';
+import { ProjectRecordSchema, SessionDigestSchema, type ProjectRecord } from '../../src/shared/ipc/schema/session';
 import type { AttentionItem } from '../../src/shared/graph/attention';
 
 const StatusShape = EngineSessionStatusSchema.shape;
