@@ -1,26 +1,53 @@
 // Streamdown plugins for every markdown surface (residues *Code highlighting*, *Math*, *Mermaid*). Code and math are
-// always present; the mermaid plugin module (which imports mermaid, about 2.5 MB, statically) is imported the first
-// time a completed `mermaid` fence is seen in any transcript, so sessions without diagrams never load it. Until then,
-// and while a fence is streaming, a diagram renders as code.
+// always present. Mermaid is two separate questions:
+// - loading is global and once: the plugin module (which imports mermaid, about 2.5 MB, statically) is imported the
+//   first time a completed `mermaid` fence is seen in any transcript, live block or not, so sessions without diagrams
+//   never load it;
+// - drawing is per fence: a fence becomes a diagram only once its closing fence is present in its block's text, and
+//   renders as code until then, while streaming included (MermaidFence.tsx). Streamdown's own code renderer picks
+//   mermaid for any `mermaid` fence once the plugin exists and consults no completeness flag, so the gate is ours.
 import { createMathPlugin } from '@streamdown/math';
 import { useEffect, useSyncExternalStore } from 'react';
-import type { PluginConfig } from 'streamdown';
+import type { DiagramPlugin } from 'streamdown';
 import { createTranscriptCodePlugin } from './code-plugin';
 
-const code = createTranscriptCodePlugin({ themes: ['github-light', 'github-dark'] });
-const math = createMathPlugin({ singleDollarTextMath: false, errorColor: 'var(--danger)' });
+export const code = createTranscriptCodePlugin({ themes: ['github-light', 'github-dark'] });
+export const math = createMathPlugin({ singleDollarTextMath: false, errorColor: 'var(--danger)' });
 
 type MermaidModule = typeof import('@streamdown/mermaid');
 
-let plugins: PluginConfig = { code, math };
 let mermaidModule: MermaidModule | null = null;
-let mermaidRequested = false;
+let mermaid: DiagramPlugin | null = null;
+let requested = false;
 const listeners = new Set<() => void>();
 
-const COMPLETED_MERMAID_FENCE = /^ {0,3}(`{3,}|~{3,})\s*mermaid\b[^\n]*\n[\s\S]*?^ {0,3}\1\s*$/m;
+// CommonMark fences: up to three spaces of indent, three or more backticks or tildes; a closing fence uses the same
+// character, at least as many, and nothing else on its line.
+const OPENING = /^ {0,3}(`{3,}|~{3,})([^\n]*)$/;
 
-export function hasCompletedMermaidFence(markdown: string): boolean {
-  return COMPLETED_MERMAID_FENCE.test(markdown);
+export interface MermaidFences {
+  closed: number; // mermaid fences with their closing fence present
+  open: string | null; // the source of a trailing mermaid fence that has not closed, if the text ends inside one
+}
+
+export function mermaidFences(markdown: string): MermaidFences {
+  let closed = 0;
+  let fence: { marker: string; mermaid: boolean; lines: string[] } | null = null;
+  for (const line of markdown.split('\n')) {
+    if (fence) {
+      const closing = new RegExp(`^ {0,3}${fence.marker[0] === '`' ? '`' : '~'}{${fence.marker.length},}\\s*$`);
+      if (closing.test(line)) {
+        if (fence.mermaid) closed += 1;
+        fence = null;
+      } else fence.lines.push(line);
+      continue;
+    }
+    const opening = OPENING.exec(line);
+    if (opening && !(opening[1][0] === '`' && opening[2].includes('`'))) {
+      fence = { marker: opening[1], mermaid: /^\s*mermaid\b/.test(opening[2]), lines: [] };
+    }
+  }
+  return { closed, open: fence?.mermaid ? fence.lines.join('\n') : null };
 }
 
 // Mermaid's `base` theme takes its palette from the X7 tokens as they are computed at this moment.
@@ -42,16 +69,15 @@ function mermaidThemeVariables(): Record<string, string> {
 
 function rebuildMermaid(): void {
   if (!mermaidModule) return;
-  const mermaid = mermaidModule.createMermaidPlugin({
+  mermaid = mermaidModule.createMermaidPlugin({
     config: { securityLevel: 'strict', suppressErrorRendering: true, theme: 'base', themeVariables: mermaidThemeVariables() },
   });
-  plugins = { code, math, mermaid };
   for (const listener of listeners) listener();
 }
 
 function requestMermaid(): void {
-  if (mermaidRequested) return;
-  mermaidRequested = true;
+  if (requested) return;
+  requested = true;
   void import('@streamdown/mermaid').then((module) => {
     mermaidModule = module;
     rebuildMermaid();
@@ -64,12 +90,15 @@ const subscribe = (listener: () => void) => {
   listeners.add(listener);
   return () => listeners.delete(listener);
 };
-const current = () => plugins;
 
-// The plugin set for one markdown surface; a completed mermaid fence in a settled block triggers the lazy import.
-export function useMarkdownPlugins(markdown: string, live: boolean): PluginConfig {
+// The loaded mermaid plugin, or null until the first completed fence anywhere has loaded it.
+export function useMermaidPlugin(): DiagramPlugin | null {
+  return useSyncExternalStore(subscribe, () => mermaid);
+}
+
+// Loads the mermaid module when this surface's text holds a completed mermaid fence, whether the block is live or not.
+export function useMermaidLoader(closedFences: number): void {
   useEffect(() => {
-    if (!live && !mermaidRequested && hasCompletedMermaidFence(markdown)) requestMermaid();
-  }, [markdown, live]);
-  return useSyncExternalStore(subscribe, current);
+    if (closedFences > 0) requestMermaid();
+  }, [closedFences]);
 }
