@@ -1,0 +1,389 @@
+[
+  {
+    "at": "2026-09-28T09:22:18.973Z",
+    "id": "time:turn:a5bf8381-f5c0-4394-88a8-4b04c12e4911",
+    "kind": "time",
+    "label": "Yesterday 9:22 AM",
+    "turnId": "turn:a5bf8381-f5c0-4394-88a8-4b04c12e4911"
+  },
+  {
+    "at": "2026-09-28T09:22:18.973Z",
+    "attachments": [],
+    "editable": true,
+    "id": "user:a5bf8381-f5c0-4394-88a8-4b04c12e4911",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "a5bf8381-f5c0-4394-88a8-4b04c12e4911",
+    "text": "Count to 30 slowly. For each number use a separate Bash call sleep 1; echo NUMBER. Start now.",
+    "turnId": "turn:a5bf8381-f5c0-4394-88a8-4b04c12e4911"
+  },
+  {
+    "at": "2026-09-28T09:22:18.973Z",
+    "autoDenied": 0,
+    "denied": 0,
+    "endedAt": "2026-09-28T09:22:23.032Z",
+    "expanded": true,
+    "firstDeniedCell": null,
+    "id": "divider:turn:a5bf8381-f5c0-4394-88a8-4b04c12e4911",
+    "kind": "divider",
+    "origin": "human",
+    "startedAt": "2026-09-28T09:22:18.973Z",
+    "state": "stopped",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 4,
+        "exploration": 0,
+        "files": 0,
+        "mcp": 0,
+        "other": 0,
+        "skills": 0,
+        "web": 0
+      },
+      "childAgents": 0,
+      "costUsd": 0.000993,
+      "denials": [
+        {
+          "cellId": "cell:toolu_01NEnSoUyJwkZC21vfKNA56Z",
+          "disposition": "stopped",
+          "interruption": true,
+          "kind": "user-rejected"
+        },
+        {
+          "cellId": "cell:toolu_01WXTrdFDMyKeAruZKKbRqst",
+          "disposition": "stopped",
+          "interruption": true,
+          "kind": "user-rejected"
+        },
+        {
+          "cellId": "cell:toolu_011s1GPGyWzPXp6kpcaiHLdE",
+          "disposition": "stopped",
+          "interruption": true,
+          "kind": "user-rejected"
+        },
+        {
+          "cellId": "cell:toolu_01Dn5zKxMdmGMHT2q4RYWJFy",
+          "disposition": "stopped",
+          "interruption": true,
+          "kind": "user-rejected"
+        }
+      ],
+      "durationMs": 4006,
+      "model": "claude-haiku-4-5-20251001",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 4,
+        "reviewed": 0
+      },
+      "terminalReason": "aborted_streaming",
+      "toolCalls": 4,
+      "usage": {
+        "cacheCreationInputTokens": 0,
+        "cacheReadInputTokens": 0,
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "thinkingTokens": null
+      }
+    },
+    "toolCalls": 4,
+    "turnId": "turn:a5bf8381-f5c0-4394-88a8-4b04c12e4911"
+  },
+  {
+    "at": "2026-09-28T09:22:19.657Z",
+    "durationMs": 1964,
+    "id": "think:msg_011CfVbLSn1bZtUYHFCxbBhV:0",
+    "kind": "thinking",
+    "live": false,
+    "messageUuid": "d1ff2bcc-f663-412c-b022-b4624ed8d8a0",
+    "text": "The user is asking me to count to 30 slowly, using separate Bash calls with `sleep 1; echo NUMBER` for each number. This means I need to make 30 Bash tool calls, each one sleeping for 1 second and echoing a number.\n\nSince these are independent calls, I can call them all in parallel in a single tool call block. This is actually interesting because even though they can run in parallel, the `sleep 1` will mean there's a 1-second delay between each echo. But I can make all 30 calls at once.\n\nLet me make 30 Bash calls, one for each number from 1 to 30.",
+    "turnId": "turn:a5bf8381-f5c0-4394-88a8-4b04c12e4911"
+  },
+  {
+    "agent": null,
+    "at": "2026-09-28T09:22:21.808Z",
+    "category": "commands",
+    "classification": {
+      "category": "commands",
+      "denial": {
+        "disposition": "stopped",
+        "interruption": true,
+        "kind": "user-rejected",
+        "reason": "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed."
+      },
+      "groupable": false,
+      "hidden": false,
+      "humanDecision": false,
+      "safeguard": "not_evaluated",
+      "startsGroup": false,
+      "subagentLifecycle": null
+    },
+    "detail": {
+      "backgroundTaskId": null,
+      "command": "sleep 1; echo 1",
+      "cwd": null,
+      "description": "Count 1",
+      "exitCode": null,
+      "interrupted": false,
+      "kind": "shell",
+      "spill": null,
+      "stderr": "",
+      "stdout": "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed.",
+      "truncated": null
+    },
+    "endedAt": "2026-09-28T09:22:23.023Z",
+    "expanded": true,
+    "id": "cell:toolu_01NEnSoUyJwkZC21vfKNA56Z",
+    "kind": "cell",
+    "label": "Stopped: `sleep 1; echo 1`",
+    "paths": [],
+    "startedAt": "2026-09-28T09:22:21.808Z",
+    "status": "stopped",
+    "toolName": "Bash",
+    "toolUseId": "toolu_01NEnSoUyJwkZC21vfKNA56Z",
+    "turnId": "turn:a5bf8381-f5c0-4394-88a8-4b04c12e4911"
+  },
+  {
+    "agent": null,
+    "at": "2026-09-28T09:22:22.239Z",
+    "category": "commands",
+    "classification": {
+      "category": "commands",
+      "denial": {
+        "disposition": "stopped",
+        "interruption": true,
+        "kind": "user-rejected",
+        "reason": "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed."
+      },
+      "groupable": false,
+      "hidden": false,
+      "humanDecision": false,
+      "safeguard": "not_evaluated",
+      "startsGroup": false,
+      "subagentLifecycle": null
+    },
+    "detail": {
+      "backgroundTaskId": null,
+      "command": "sleep 1; echo 2",
+      "cwd": null,
+      "description": "Count 2",
+      "exitCode": null,
+      "interrupted": false,
+      "kind": "shell",
+      "spill": null,
+      "stderr": "",
+      "stdout": "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed.",
+      "truncated": null
+    },
+    "endedAt": "2026-09-28T09:22:23.025Z",
+    "expanded": true,
+    "id": "cell:toolu_01WXTrdFDMyKeAruZKKbRqst",
+    "kind": "cell",
+    "label": "Stopped: `sleep 1; echo 2`",
+    "paths": [],
+    "startedAt": "2026-09-28T09:22:22.239Z",
+    "status": "stopped",
+    "toolName": "Bash",
+    "toolUseId": "toolu_01WXTrdFDMyKeAruZKKbRqst",
+    "turnId": "turn:a5bf8381-f5c0-4394-88a8-4b04c12e4911"
+  },
+  {
+    "agent": null,
+    "at": "2026-09-28T09:22:22.603Z",
+    "category": "commands",
+    "classification": {
+      "category": "commands",
+      "denial": {
+        "disposition": "stopped",
+        "interruption": true,
+        "kind": "user-rejected",
+        "reason": "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed."
+      },
+      "groupable": false,
+      "hidden": false,
+      "humanDecision": false,
+      "safeguard": "not_evaluated",
+      "startsGroup": false,
+      "subagentLifecycle": null
+    },
+    "detail": {
+      "backgroundTaskId": null,
+      "command": "sleep 1; echo 3",
+      "cwd": null,
+      "description": "Count 3",
+      "exitCode": null,
+      "interrupted": false,
+      "kind": "shell",
+      "spill": null,
+      "stderr": "",
+      "stdout": "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed.",
+      "truncated": null
+    },
+    "endedAt": "2026-09-28T09:22:23.029Z",
+    "expanded": true,
+    "id": "cell:toolu_011s1GPGyWzPXp6kpcaiHLdE",
+    "kind": "cell",
+    "label": "Stopped: `sleep 1; echo 3`",
+    "paths": [],
+    "startedAt": "2026-09-28T09:22:22.603Z",
+    "status": "stopped",
+    "toolName": "Bash",
+    "toolUseId": "toolu_011s1GPGyWzPXp6kpcaiHLdE",
+    "turnId": "turn:a5bf8381-f5c0-4394-88a8-4b04c12e4911"
+  },
+  {
+    "agent": null,
+    "at": "2026-09-28T09:22:22.969Z",
+    "category": "commands",
+    "classification": {
+      "category": "commands",
+      "denial": {
+        "disposition": "stopped",
+        "interruption": true,
+        "kind": "user-rejected",
+        "reason": "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed."
+      },
+      "groupable": false,
+      "hidden": false,
+      "humanDecision": false,
+      "safeguard": "not_evaluated",
+      "startsGroup": false,
+      "subagentLifecycle": null
+    },
+    "detail": {
+      "backgroundTaskId": null,
+      "command": "sleep 1; echo 4",
+      "cwd": null,
+      "description": "Count 4",
+      "exitCode": null,
+      "interrupted": false,
+      "kind": "shell",
+      "spill": null,
+      "stderr": "",
+      "stdout": "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed.",
+      "truncated": null
+    },
+    "endedAt": "2026-09-28T09:22:23.028Z",
+    "expanded": true,
+    "id": "cell:toolu_01Dn5zKxMdmGMHT2q4RYWJFy",
+    "kind": "cell",
+    "label": "Stopped: `sleep 1; echo 4`",
+    "paths": [],
+    "startedAt": "2026-09-28T09:22:22.969Z",
+    "status": "stopped",
+    "toolName": "Bash",
+    "toolUseId": "toolu_01Dn5zKxMdmGMHT2q4RYWJFy",
+    "turnId": "turn:a5bf8381-f5c0-4394-88a8-4b04c12e4911"
+  },
+  {
+    "at": "2026-09-28T09:22:21.810Z",
+    "attachments": [],
+    "editable": true,
+    "id": "user:99662785-5122-45a7-a68f-d734959a0c52",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "99662785-5122-45a7-a68f-d734959a0c52",
+    "text": "After counting, reply exactly QUEUED.",
+    "turnId": "turn:99662785-5122-45a7-a68f-d734959a0c52"
+  },
+  {
+    "at": "2026-09-28T09:22:23.032Z",
+    "attachments": [],
+    "editable": true,
+    "id": "user:e88214f8-3ba3-4b4c-8e64-3be1595fcac0",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "e88214f8-3ba3-4b4c-8e64-3be1595fcac0",
+    "text": "Counting is cancelled. Reply exactly RESUMED.",
+    "turnId": "turn:e88214f8-3ba3-4b4c-8e64-3be1595fcac0"
+  },
+  {
+    "at": "2026-09-28T09:22:23.032Z",
+    "autoDenied": 0,
+    "denied": 0,
+    "endedAt": "2026-09-28T09:22:23.863Z",
+    "expanded": true,
+    "firstDeniedCell": null,
+    "id": "divider:turn:e88214f8-3ba3-4b4c-8e64-3be1595fcac0",
+    "kind": "divider",
+    "origin": "human",
+    "startedAt": "2026-09-28T09:22:23.032Z",
+    "state": "completed",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 0,
+        "exploration": 0,
+        "files": 0,
+        "mcp": 0,
+        "other": 0,
+        "skills": 0,
+        "web": 0
+      },
+      "childAgents": 0,
+      "costUsd": 0.0048568,
+      "denials": [],
+      "durationMs": 827,
+      "model": "claude-haiku-4-5-20251001",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 0,
+        "reviewed": 0
+      },
+      "terminalReason": "completed",
+      "toolCalls": 0,
+      "usage": {
+        "cacheCreationInputTokens": 771,
+        "cacheReadInputTokens": 21518,
+        "inputTokens": 10,
+        "outputTokens": 32,
+        "thinkingTokens": null
+      }
+    },
+    "toolCalls": 0,
+    "turnId": "turn:e88214f8-3ba3-4b4c-8e64-3be1595fcac0"
+  },
+  {
+    "at": "2026-09-28T09:22:23.641Z",
+    "durationMs": 200,
+    "id": "think:msg_011CfVbLjueS3qopFDNCKMnk:0",
+    "kind": "thinking",
+    "live": false,
+    "messageUuid": "7359f0c5-644d-4120-a06a-e255a0f5fa7d",
+    "text": "The user is cancelling the counting request and asking me to reply with exactly \"RESUMED\".",
+    "turnId": "turn:e88214f8-3ba3-4b4c-8e64-3be1595fcac0"
+  },
+  {
+    "at": "2026-09-28T09:22:23.841Z",
+    "blockIndex": 1,
+    "id": "text:msg_011CfVbLjueS3qopFDNCKMnk:1",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "RESUMED",
+    "messageUuid": "641c9e3d-30b7-472f-b785-37b3a2197971",
+    "model": "claude-haiku-4-5-20251001",
+    "phase": "answer",
+    "turnId": "turn:e88214f8-3ba3-4b4c-8e64-3be1595fcac0"
+  },
+  {
+    "at": "2026-09-28T09:22:23.864Z",
+    "command": "printf BASH_MODE_OK",
+    "cwd": null,
+    "exitCode": 0,
+    "id": "bash:44857c87-6a98-48a5-930d-919b0e32c8b8",
+    "kind": "bash",
+    "stderr": "",
+    "stdout": "BASH_MODE_OK",
+    "turnId": null
+  },
+  {
+    "at": "2026-09-28T09:22:24.891Z",
+    "attempt": null,
+    "id": "error:j238#0",
+    "kind": "error",
+    "lostAttentionCount": 0,
+    "scope": "exit",
+    "severity": "notice",
+    "text": "Session process exited (quit)",
+    "turnId": null
+  }
+]

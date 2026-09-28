@@ -1,0 +1,138 @@
+[
+  {
+    "at": "2026-09-28T09:58:21.765Z",
+    "id": "time:turn:531078df-e314-4293-9167-94e372fb3b29",
+    "kind": "time",
+    "label": "Yesterday 9:58 AM",
+    "turnId": "turn:531078df-e314-4293-9167-94e372fb3b29"
+  },
+  {
+    "at": "2026-09-28T09:58:21.765Z",
+    "attachments": [],
+    "editable": true,
+    "id": "user:531078df-e314-4293-9167-94e372fb3b29",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "531078df-e314-4293-9167-94e372fb3b29",
+    "text": "Use Bash to run exactly: git status --short && sleep 4. Then reply OK.",
+    "turnId": "turn:531078df-e314-4293-9167-94e372fb3b29"
+  },
+  {
+    "at": "2026-09-28T09:58:21.765Z",
+    "autoDenied": 0,
+    "denied": 0,
+    "endedAt": "2026-09-28T09:58:29.330Z",
+    "expanded": true,
+    "firstDeniedCell": null,
+    "id": "divider:turn:531078df-e314-4293-9167-94e372fb3b29",
+    "kind": "divider",
+    "origin": "human",
+    "startedAt": "2026-09-28T09:58:21.765Z",
+    "state": "completed",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 1,
+        "exploration": 0,
+        "files": 0,
+        "mcp": 0,
+        "other": 0,
+        "skills": 0,
+        "web": 0
+      },
+      "childAgents": 0,
+      "costUsd": 0.14081999999999997,
+      "denials": [],
+      "durationMs": 7557,
+      "model": "claude-sonnet-5",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 0,
+        "reviewed": 1
+      },
+      "terminalReason": "completed",
+      "toolCalls": 1,
+      "usage": {
+        "cacheCreationInputTokens": 32658,
+        "cacheReadInputTokens": 32490,
+        "inputTokens": 4,
+        "outputTokens": 118,
+        "thinkingTokens": null
+      }
+    },
+    "toolCalls": 1,
+    "turnId": "turn:531078df-e314-4293-9167-94e372fb3b29"
+  },
+  {
+    "at": "2026-09-28T09:58:23.313Z",
+    "durationMs": 0,
+    "id": "think:msg_011CfVe5sQnBAAYAmf1GZJ7y:0",
+    "kind": "thinking",
+    "live": false,
+    "messageUuid": "6433a07a-319c-4932-a0ec-2c7860033d30",
+    "text": "",
+    "turnId": "turn:531078df-e314-4293-9167-94e372fb3b29"
+  },
+  {
+    "agent": null,
+    "at": "2026-09-28T09:58:23.398Z",
+    "category": "commands",
+    "classification": {
+      "category": "commands",
+      "denial": null,
+      "groupable": true,
+      "hidden": false,
+      "humanDecision": false,
+      "safeguard": "not_flagged",
+      "startsGroup": false,
+      "subagentLifecycle": null
+    },
+    "detail": {
+      "backgroundTaskId": "bq0m66mlf",
+      "command": "git status --short && sleep 4",
+      "cwd": null,
+      "description": "Show git status short, then wait 4 seconds",
+      "exitCode": 0,
+      "interrupted": false,
+      "kind": "shell",
+      "spill": null,
+      "stderr": "",
+      "stdout": "",
+      "truncated": null
+    },
+    "endedAt": "2026-09-28T09:58:28.250Z",
+    "expanded": true,
+    "id": "cell:toolu_01BEsEnmchyVf7wzA16cTqqc",
+    "kind": "cell",
+    "label": "Ran `git status --short && sleep 4` in 4s",
+    "paths": [],
+    "startedAt": "2026-09-28T09:58:23.398Z",
+    "status": "done",
+    "toolName": "Bash",
+    "toolUseId": "toolu_01BEsEnmchyVf7wzA16cTqqc",
+    "turnId": "turn:531078df-e314-4293-9167-94e372fb3b29"
+  },
+  {
+    "at": "2026-09-28T09:58:29.006Z",
+    "blockIndex": 0,
+    "id": "text:msg_011CfVe6MSF7RNo5xyRDoWfr:0",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "\n\u001b[1;36mto human\u001b[0m\n\nOK\n",
+    "messageUuid": "159692af-5fd4-477f-9731-39bae9d72545",
+    "model": "claude-sonnet-5",
+    "phase": "answer",
+    "turnId": "turn:531078df-e314-4293-9167-94e372fb3b29"
+  },
+  {
+    "at": "2026-09-28T09:58:32.760Z",
+    "attempt": null,
+    "id": "error:j64#0",
+    "kind": "error",
+    "lostAttentionCount": 0,
+    "scope": "exit",
+    "severity": "notice",
+    "text": "Session process exited (quit)",
+    "turnId": null
+  }
+]

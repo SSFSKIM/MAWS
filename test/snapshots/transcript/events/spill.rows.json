@@ -1,0 +1,122 @@
+[
+  {
+    "at": "2026-09-28T12:00:00.010Z",
+    "id": "time:turn:u-spill-1",
+    "kind": "time",
+    "label": "Yesterday 12:00 PM",
+    "turnId": "turn:u-spill-1"
+  },
+  {
+    "at": "2026-09-28T12:00:00.010Z",
+    "attachments": [],
+    "editable": true,
+    "id": "user:u-spill-1",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "u-spill-1",
+    "text": "Dump the whole build log.",
+    "turnId": "turn:u-spill-1"
+  },
+  {
+    "at": "2026-09-28T12:00:00.010Z",
+    "autoDenied": 0,
+    "denied": 0,
+    "endedAt": "2026-09-28T12:00:04.100Z",
+    "expanded": true,
+    "firstDeniedCell": null,
+    "id": "divider:turn:u-spill-1",
+    "kind": "divider",
+    "origin": "human",
+    "startedAt": "2026-09-28T12:00:00.000Z",
+    "state": "completed",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 1,
+        "exploration": 0,
+        "files": 0,
+        "mcp": 0,
+        "other": 0,
+        "skills": 0,
+        "web": 0
+      },
+      "childAgents": 0,
+      "costUsd": 0.02,
+      "denials": [],
+      "durationMs": 4100,
+      "model": "claude-opus-5-5",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 1,
+        "reviewed": 0
+      },
+      "terminalReason": "completed",
+      "toolCalls": 1,
+      "usage": {
+        "cacheCreationInputTokens": 0,
+        "cacheReadInputTokens": 0,
+        "inputTokens": 400,
+        "outputTokens": 40,
+        "thinkingTokens": null
+      }
+    },
+    "toolCalls": 1,
+    "turnId": "turn:u-spill-1"
+  },
+  {
+    "agent": null,
+    "at": "2026-09-28T12:00:01.010Z",
+    "category": "commands",
+    "classification": {
+      "category": "commands",
+      "denial": null,
+      "groupable": true,
+      "hidden": false,
+      "humanDecision": false,
+      "safeguard": "not_evaluated",
+      "startsGroup": false,
+      "subagentLifecycle": null
+    },
+    "detail": {
+      "backgroundTaskId": null,
+      "command": "cat build.log",
+      "cwd": null,
+      "description": "Print the build log",
+      "exitCode": 0,
+      "interrupted": false,
+      "kind": "shell",
+      "spill": {
+        "bytes": null,
+        "content": null,
+        "path": "/Users/owner/.claude/projects/-tmp-demo/session/tool-results/toolu_spill_1.txt",
+        "state": "not_loaded"
+      },
+      "stderr": "",
+      "stdout": "[1/1200] compiling src/app.ts\n[2/1200] compiling src/store.ts\n[3/1200] compiling src/view/List.tsx\n…",
+      "truncated": null
+    },
+    "endedAt": "2026-09-28T12:00:03.000Z",
+    "expanded": true,
+    "id": "cell:toolu_spill_1",
+    "kind": "cell",
+    "label": "Ran `cat build.log` in 1s",
+    "paths": [],
+    "startedAt": "2026-09-28T12:00:01.010Z",
+    "status": "done",
+    "toolName": "Bash",
+    "toolUseId": "toolu_spill_1",
+    "turnId": "turn:u-spill-1"
+  },
+  {
+    "at": "2026-09-28T12:00:04.000Z",
+    "blockIndex": 0,
+    "id": "text:msg_spill_2:0",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "The build log is 1,200 lines; the full output is in the spilled result above.",
+    "messageUuid": "a-spill-2",
+    "model": "claude-opus-5-5",
+    "phase": "answer",
+    "turnId": "turn:u-spill-1"
+  }
+]

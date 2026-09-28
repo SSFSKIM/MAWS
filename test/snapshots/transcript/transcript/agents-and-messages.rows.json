@@ -1,0 +1,150 @@
+[
+  {
+    "at": "2026-09-28T10:20:00.045Z",
+    "id": "time:turn:u-agents-and-messages-002",
+    "kind": "time",
+    "label": "Yesterday 10:20 AM",
+    "turnId": "turn:u-agents-and-messages-002"
+  },
+  {
+    "at": "2026-09-28T10:20:00.045Z",
+    "attachments": [],
+    "editable": true,
+    "id": "user:u-agents-and-messages-002",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "u-agents-and-messages-002",
+    "text": "Dispatch two agents: one to survey src/ for TODOs, one to list the tests. Tell the first to skip node_modules. Then summarise.",
+    "turnId": "turn:u-agents-and-messages-002"
+  },
+  {
+    "at": "2026-09-28T10:20:00.045Z",
+    "autoDenied": 0,
+    "denied": 0,
+    "endedAt": "2026-09-28T10:20:01.714Z",
+    "expanded": true,
+    "firstDeniedCell": null,
+    "id": "divider:turn:u-agents-and-messages-002",
+    "kind": "divider",
+    "origin": "human",
+    "startedAt": "2026-09-28T10:20:00.045Z",
+    "state": "completed",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 0,
+        "exploration": 0,
+        "files": 0,
+        "mcp": 0,
+        "other": 0,
+        "skills": 0,
+        "web": 0
+      },
+      "childAgents": 2,
+      "costUsd": 0.0123,
+      "denials": [],
+      "durationMs": 1569,
+      "model": "claude-opus-5-5",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 0,
+        "reviewed": 0
+      },
+      "terminalReason": "completed",
+      "toolCalls": 0,
+      "usage": {
+        "cacheCreationInputTokens": 0,
+        "cacheReadInputTokens": 21000,
+        "inputTokens": 12,
+        "outputTokens": 240,
+        "thinkingTokens": null
+      }
+    },
+    "toolCalls": 0,
+    "turnId": "turn:u-agents-and-messages-002"
+  },
+  {
+    "at": "2026-09-28T10:20:00.161Z",
+    "durationMs": 24,
+    "id": "think:msg_agentsandmessages_007:0",
+    "kind": "thinking",
+    "live": false,
+    "messageUuid": "a-agents-and-messages-013",
+    "text": "Two independent surveys: run them in parallel.",
+    "turnId": "turn:u-agents-and-messages-002"
+  },
+  {
+    "agents": [
+      {
+        "agentId": "ad1synthagent0001",
+        "glyph": 0,
+        "kind": "agent",
+        "name": "Survey src for TODOs",
+        "subagentType": "general-purpose",
+        "taskId": "ad1synthagent0001",
+        "toolUseId": "toolu_synth_agent_1"
+      },
+      {
+        "agentId": "ad2synthagent0002",
+        "glyph": 2,
+        "kind": "agent",
+        "name": "List the tests",
+        "subagentType": "general-purpose",
+        "taskId": "ad2synthagent0002",
+        "toolUseId": "toolu_synth_agent_2"
+      }
+    ],
+    "at": "2026-09-28T10:20:00.263Z",
+    "id": "subagent:ad1synthagent0001",
+    "kind": "subagent",
+    "overflow": 0,
+    "sentence": "Survey src for TODOs and List the tests finished",
+    "status": "finished",
+    "turnId": "turn:u-agents-and-messages-002"
+  },
+  {
+    "at": "2026-09-28T10:20:01.250Z",
+    "direction": "to_child",
+    "from": null,
+    "id": "agentmsg:j57#1",
+    "kind": "agent_message",
+    "text": "Sent message to ad1synthagent0001: Skip node_modules entirely.",
+    "to": null,
+    "turnId": "turn:u-agents-and-messages-002"
+  },
+  {
+    "at": "2026-09-28T10:20:01.636Z",
+    "blockIndex": 0,
+    "id": "text:msg_agentsandmessages_074:0",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "The TODO survey is back: two items. Waiting on the test listing.",
+    "messageUuid": "a-agents-and-messages-080",
+    "model": "claude-opus-5-5",
+    "phase": "answer",
+    "turnId": "turn:u-agents-and-messages-002"
+  },
+  {
+    "at": "2026-09-28T10:20:03.320Z",
+    "blockIndex": 0,
+    "id": "text:msg_agentsandmessages_089:0",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "Both agents are done:\n\n- **TODOs**: `src/app.ts:12`, `src/store.ts:40`\n- **Tests**: five files under `src/`",
+    "messageUuid": "a-agents-and-messages-097",
+    "model": "claude-opus-5-5",
+    "phase": "answer",
+    "turnId": "turn:ej85#1"
+  },
+  {
+    "at": "2026-09-28T10:20:03.444Z",
+    "attempt": null,
+    "id": "error:j98#0",
+    "kind": "error",
+    "lostAttentionCount": 0,
+    "scope": "exit",
+    "severity": "notice",
+    "text": "Session process exited (quit)",
+    "turnId": null
+  }
+]

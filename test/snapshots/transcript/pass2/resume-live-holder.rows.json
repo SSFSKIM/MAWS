@@ -1,0 +1,66 @@
+[
+  {
+    "at": "2026-09-28T10:07:18.591Z",
+    "id": "time:turn:f7132c82-9888-47e6-9278-bdf1dd986608",
+    "kind": "time",
+    "label": "Yesterday 10:07 AM",
+    "turnId": "turn:f7132c82-9888-47e6-9278-bdf1dd986608"
+  },
+  {
+    "at": "2026-09-28T10:07:18.591Z",
+    "attachments": [],
+    "editable": true,
+    "id": "user:f7132c82-9888-47e6-9278-bdf1dd986608",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "f7132c82-9888-47e6-9278-bdf1dd986608",
+    "text": "Remember the word KIWI. Reply OK.",
+    "turnId": "turn:f7132c82-9888-47e6-9278-bdf1dd986608"
+  },
+  {
+    "at": "2026-09-28T10:07:19.379Z",
+    "blockIndex": 0,
+    "id": "text:msg_011CfVemT3vkYYggTq2ozXzQ:0",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "OK",
+    "messageUuid": "ff13c8e7-4b37-48c2-b5f0-97a7d1be06a4",
+    "model": "claude-sonnet-5",
+    "phase": "answer",
+    "turnId": "turn:f7132c82-9888-47e6-9278-bdf1dd986608"
+  },
+  {
+    "at": "2026-09-28T10:07:21.441Z",
+    "attachments": [],
+    "editable": true,
+    "id": "user:f1ac3ca4-19bd-43dd-9d0b-223ce01e84b8",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "f1ac3ca4-19bd-43dd-9d0b-223ce01e84b8",
+    "text": "Reply exactly: HOLDER-AGAIN",
+    "turnId": "turn:f1ac3ca4-19bd-43dd-9d0b-223ce01e84b8"
+  },
+  {
+    "at": "2026-09-28T10:07:22.116Z",
+    "blockIndex": 0,
+    "id": "text:msg_011CfVemf3k4CxraN1LQXNfe:0",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "HOLDER-AGAIN",
+    "messageUuid": "ab504d63-48f9-496f-bf76-73972ec115a6",
+    "model": "claude-sonnet-5",
+    "phase": "answer",
+    "turnId": "turn:f1ac3ca4-19bd-43dd-9d0b-223ce01e84b8"
+  },
+  {
+    "at": "2026-09-28T10:07:23.705Z",
+    "attempt": null,
+    "id": "error:j35#0",
+    "kind": "error",
+    "lostAttentionCount": 0,
+    "scope": "exit",
+    "severity": "notice",
+    "text": "Session process exited (quit)",
+    "turnId": null
+  }
+]

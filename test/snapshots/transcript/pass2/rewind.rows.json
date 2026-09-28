@@ -1,0 +1,100 @@
+[
+  {
+    "at": "2026-09-28T10:00:16.184Z",
+    "id": "time:turn:e3b48834-657d-49b3-8245-02a9a5912f9f",
+    "kind": "time",
+    "label": "Yesterday 10:00 AM",
+    "turnId": "turn:e3b48834-657d-49b3-8245-02a9a5912f9f"
+  },
+  {
+    "at": "2026-09-28T10:00:16.184Z",
+    "attachments": [],
+    "editable": true,
+    "id": "user:e3b48834-657d-49b3-8245-02a9a5912f9f",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "e3b48834-657d-49b3-8245-02a9a5912f9f",
+    "text": "Remember the word APPLE. Reply OK.",
+    "turnId": "turn:e3b48834-657d-49b3-8245-02a9a5912f9f"
+  },
+  {
+    "at": "2026-09-28T10:00:18.495Z",
+    "blockIndex": 0,
+    "id": "text:msg_011CfVeEKbMMDa1ETe3ums6R:0",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "OK",
+    "messageUuid": "edf0f954-1b18-4bca-a53f-d3212ef6dbaa",
+    "model": "claude-sonnet-5",
+    "phase": "answer",
+    "turnId": "turn:e3b48834-657d-49b3-8245-02a9a5912f9f"
+  },
+  {
+    "at": "2026-09-28T10:00:20.640Z",
+    "boundaryKind": "rewind",
+    "detail": "Also remember the word BANANA. Reply OK.",
+    "hiddenRows": 2,
+    "id": "boundary:j42#0",
+    "kind": "boundary",
+    "revealed": true,
+    "text": "Rewound to here · 2 messages hidden · Hide",
+    "turnId": null
+  },
+  {
+    "at": "2026-09-28T10:00:18.588Z",
+    "attachments": [],
+    "editable": true,
+    "id": "user:36a2aa44-9ae9-455e-b52b-e70b27eecde5",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "36a2aa44-9ae9-455e-b52b-e70b27eecde5",
+    "text": "Also remember the word BANANA. Reply OK.",
+    "turnId": "turn:36a2aa44-9ae9-455e-b52b-e70b27eecde5"
+  },
+  {
+    "at": "2026-09-28T10:00:20.626Z",
+    "blockIndex": 0,
+    "id": "text:msg_011CfVeEVQgzDuQzujxrUe6R:0",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "OK",
+    "messageUuid": "57525d04-1955-412a-925d-f406bc870d17",
+    "model": "claude-sonnet-5",
+    "phase": "answer",
+    "turnId": "turn:36a2aa44-9ae9-455e-b52b-e70b27eecde5"
+  },
+  {
+    "at": "2026-09-28T10:00:20.646Z",
+    "attachments": [],
+    "editable": true,
+    "id": "user:a4d68c72-bdde-4afa-bc32-408c9dac42e6",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "a4d68c72-bdde-4afa-bc32-408c9dac42e6",
+    "text": "List every word I asked you to remember, comma separated, nothing else.",
+    "turnId": "turn:a4d68c72-bdde-4afa-bc32-408c9dac42e6"
+  },
+  {
+    "at": "2026-09-28T10:00:21.912Z",
+    "blockIndex": 0,
+    "id": "text:msg_011CfVeEdgX9Mx7soGEGamTo:0",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "APPLE",
+    "messageUuid": "7c05f769-39b6-4a06-a028-9c9c38d7f898",
+    "model": "claude-sonnet-5",
+    "phase": "answer",
+    "turnId": "turn:a4d68c72-bdde-4afa-bc32-408c9dac42e6"
+  },
+  {
+    "at": "2026-09-28T10:00:22.510Z",
+    "attempt": null,
+    "id": "error:j61#0",
+    "kind": "error",
+    "lostAttentionCount": 0,
+    "scope": "exit",
+    "severity": "notice",
+    "text": "Session process exited (quit)",
+    "turnId": null
+  }
+]

@@ -1,0 +1,156 @@
+[
+  {
+    "at": "2026-09-28T09:21:59.216Z",
+    "id": "time:turn:3807c712-5d96-4ba4-9e71-908ac237f8e4",
+    "kind": "time",
+    "label": "Yesterday 9:21 AM",
+    "turnId": "turn:3807c712-5d96-4ba4-9e71-908ac237f8e4"
+  },
+  {
+    "at": "2026-09-28T09:21:59.216Z",
+    "attachments": [],
+    "editable": true,
+    "id": "user:3807c712-5d96-4ba4-9e71-908ac237f8e4",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "3807c712-5d96-4ba4-9e71-908ac237f8e4",
+    "text": "Call AskUserQuestion once with two questions: choose Red or Blue (include a short preview for each option), and choose fruits Apple and Pear (multiSelect true). After receiving answers, repeat them briefly.",
+    "turnId": "turn:3807c712-5d96-4ba4-9e71-908ac237f8e4"
+  },
+  {
+    "at": "2026-09-28T09:21:59.216Z",
+    "autoDenied": 0,
+    "denied": 0,
+    "endedAt": "2026-09-28T09:22:04.356Z",
+    "expanded": true,
+    "firstDeniedCell": null,
+    "id": "divider:turn:3807c712-5d96-4ba4-9e71-908ac237f8e4",
+    "kind": "divider",
+    "origin": "human",
+    "startedAt": "2026-09-28T09:21:59.216Z",
+    "state": "completed",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 0,
+        "exploration": 0,
+        "files": 0,
+        "mcp": 0,
+        "other": 0,
+        "skills": 0,
+        "web": 0
+      },
+      "childAgents": 0,
+      "costUsd": 0.0258307,
+      "denials": [],
+      "durationMs": 5129,
+      "model": "claude-haiku-4-5-20251001",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 0,
+        "reviewed": 0
+      },
+      "terminalReason": "completed",
+      "toolCalls": 0,
+      "usage": {
+        "cacheCreationInputTokens": 9588,
+        "cacheReadInputTokens": 33857,
+        "inputTokens": 18,
+        "outputTokens": 446,
+        "thinkingTokens": null
+      }
+    },
+    "toolCalls": 0,
+    "turnId": "turn:3807c712-5d96-4ba4-9e71-908ac237f8e4"
+  },
+  {
+    "at": "2026-09-28T09:21:59.807Z",
+    "durationMs": 814,
+    "id": "think:msg_011CfVbJz9LfWv2YxAskcZFv:0",
+    "kind": "thinking",
+    "live": false,
+    "messageUuid": "ee584a59-4687-4f41-89a4-00ffbff1d74f",
+    "text": "The user wants me to:\n1. Call AskUserQuestion with two questions\n2. First question: choose Red or Blue (with short previews for each)\n3. Second question: choose fruits Apple and Pear (multiSelect true)\n4. After receiving answers, repeat them briefly\n\nLet me set up the AskUserQuestion tool call with these two questions.",
+    "turnId": "turn:3807c712-5d96-4ba4-9e71-908ac237f8e4"
+  },
+  {
+    "answers": {
+      "Which color do you prefer?": "Red",
+      "Which fruits do you like?": "Apple, Pear"
+    },
+    "at": "2026-09-28T09:22:02.711Z",
+    "id": "question:toolu_01SwshrZ4QjaJT8nymMQo7AG",
+    "kind": "question",
+    "questions": [
+      {
+        "header": "Color",
+        "multiSelect": false,
+        "options": [
+          {
+            "description": "A warm, bold color",
+            "label": "Red",
+            "preview": "This is a red preview 🔴"
+          },
+          {
+            "description": "A cool, calm color",
+            "label": "Blue",
+            "preview": "This is a blue preview 🔵"
+          }
+        ],
+        "question": "Which color do you prefer?"
+      },
+      {
+        "header": "Fruits",
+        "multiSelect": true,
+        "options": [
+          {
+            "description": "A crisp, sweet fruit",
+            "label": "Apple",
+            "preview": null
+          },
+          {
+            "description": "A juicy, soft fruit",
+            "label": "Pear",
+            "preview": null
+          }
+        ],
+        "question": "Which fruits do you like?"
+      }
+    ],
+    "toolUseId": "toolu_01SwshrZ4QjaJT8nymMQo7AG",
+    "turnId": "turn:3807c712-5d96-4ba4-9e71-908ac237f8e4"
+  },
+  {
+    "at": "2026-09-28T09:22:03.263Z",
+    "durationMs": 531,
+    "id": "think:msg_011CfVbKF9yr5aUeKVR2qTUf:0",
+    "kind": "thinking",
+    "live": false,
+    "messageUuid": "af811042-4b43-40aa-817c-7994ad1500f6",
+    "text": "Great! The user answered:\n- Color: Red\n- Fruits: Apple, Pear (both selected)\n\nNow I should repeat these answers briefly as requested.",
+    "turnId": "turn:3807c712-5d96-4ba4-9e71-908ac237f8e4"
+  },
+  {
+    "at": "2026-09-28T09:22:03.794Z",
+    "blockIndex": 1,
+    "id": "text:msg_011CfVbKF9yr5aUeKVR2qTUf:1",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "You chose **Red** for your color preference and selected both **Apple** and **Pear** for your favorite fruits.",
+    "messageUuid": "71b0064c-2e5f-4596-861c-6d9c202ca310",
+    "model": "claude-haiku-4-5-20251001",
+    "phase": "answer",
+    "turnId": "turn:3807c712-5d96-4ba4-9e71-908ac237f8e4"
+  },
+  {
+    "at": "2026-09-28T09:22:04.886Z",
+    "attempt": null,
+    "id": "error:j202#0",
+    "kind": "error",
+    "lostAttentionCount": 0,
+    "scope": "exit",
+    "severity": "notice",
+    "text": "Session process exited (quit)",
+    "turnId": null
+  }
+]

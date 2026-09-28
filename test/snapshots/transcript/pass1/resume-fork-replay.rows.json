@@ -1,0 +1,99 @@
+[
+  {
+    "at": "2026-09-28T09:22:34.610Z",
+    "id": "time:turn:1ac41aac-0ebe-496e-999e-b5cd2873aa65",
+    "kind": "time",
+    "label": "Yesterday 9:22 AM",
+    "turnId": "turn:1ac41aac-0ebe-496e-999e-b5cd2873aa65"
+  },
+  {
+    "at": "2026-09-28T09:22:34.610Z",
+    "attachments": [],
+    "editable": true,
+    "id": "user:1ac41aac-0ebe-496e-999e-b5cd2873aa65",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "1ac41aac-0ebe-496e-999e-b5cd2873aa65",
+    "text": "What word did I ask you to remember? Reply with just that word.",
+    "turnId": "turn:1ac41aac-0ebe-496e-999e-b5cd2873aa65"
+  },
+  {
+    "at": "2026-09-28T09:22:34.610Z",
+    "autoDenied": 0,
+    "denied": 0,
+    "endedAt": "2026-09-28T09:22:35.545Z",
+    "expanded": true,
+    "firstDeniedCell": null,
+    "id": "divider:turn:1ac41aac-0ebe-496e-999e-b5cd2873aa65",
+    "kind": "divider",
+    "origin": "human",
+    "startedAt": "2026-09-28T09:22:34.610Z",
+    "state": "completed",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 0,
+        "exploration": 0,
+        "files": 0,
+        "mcp": 0,
+        "other": 0,
+        "skills": 0,
+        "web": 0
+      },
+      "childAgents": 0,
+      "costUsd": 0.032200700000000006,
+      "denials": [],
+      "durationMs": 931,
+      "model": "claude-haiku-4-5-20251001",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 0,
+        "reviewed": 0
+      },
+      "terminalReason": "completed",
+      "toolCalls": 0,
+      "usage": {
+        "cacheCreationInputTokens": 75,
+        "cacheReadInputTokens": 22335,
+        "inputTokens": 10,
+        "outputTokens": 59,
+        "thinkingTokens": null
+      }
+    },
+    "toolCalls": 0,
+    "turnId": "turn:1ac41aac-0ebe-496e-999e-b5cd2873aa65"
+  },
+  {
+    "at": "2026-09-28T09:22:35.135Z",
+    "durationMs": 389,
+    "id": "think:msg_011CfVbMbZP2PJVi7LgUwh8j:0",
+    "kind": "thinking",
+    "live": false,
+    "messageUuid": "f00041c9-0c99-4c22-aa40-fef4f03aec64",
+    "text": "The user is asking me again what word they asked me to remember. I should check my memory to confirm. Looking at the memory I just saved, the word is ZEBRA. I should reply with just that word.",
+    "turnId": "turn:1ac41aac-0ebe-496e-999e-b5cd2873aa65"
+  },
+  {
+    "at": "2026-09-28T09:22:35.525Z",
+    "blockIndex": 1,
+    "id": "text:msg_011CfVbMbZP2PJVi7LgUwh8j:1",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "ZEBRA",
+    "messageUuid": "e7b5c5bd-b11b-484f-8687-ccbdf81315fa",
+    "model": "claude-haiku-4-5-20251001",
+    "phase": "answer",
+    "turnId": "turn:1ac41aac-0ebe-496e-999e-b5cd2873aa65"
+  },
+  {
+    "at": "2026-09-28T09:22:36.072Z",
+    "attempt": null,
+    "id": "error:j54#0",
+    "kind": "error",
+    "lostAttentionCount": 0,
+    "scope": "exit",
+    "severity": "notice",
+    "text": "Session process exited (quit)",
+    "turnId": null
+  }
+]

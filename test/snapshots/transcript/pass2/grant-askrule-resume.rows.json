@@ -1,0 +1,128 @@
+[
+  {
+    "at": "2026-09-28T10:06:33.116Z",
+    "id": "time:turn:c5a56eaa-ab54-4a18-8e89-9664bc4143d5",
+    "kind": "time",
+    "label": "Yesterday 10:06 AM",
+    "turnId": "turn:c5a56eaa-ab54-4a18-8e89-9664bc4143d5"
+  },
+  {
+    "at": "2026-09-28T10:06:33.116Z",
+    "attachments": [],
+    "editable": true,
+    "id": "user:c5a56eaa-ab54-4a18-8e89-9664bc4143d5",
+    "kind": "user",
+    "lines": 2,
+    "messageUuid": "c5a56eaa-ab54-4a18-8e89-9664bc4143d5",
+    "text": "Use Bash to run exactly: git log --oneline\nThen reply DONE.",
+    "turnId": "turn:c5a56eaa-ab54-4a18-8e89-9664bc4143d5"
+  },
+  {
+    "at": "2026-09-28T10:06:33.116Z",
+    "autoDenied": 0,
+    "denied": 0,
+    "endedAt": "2026-09-28T10:06:36.269Z",
+    "expanded": true,
+    "firstDeniedCell": null,
+    "id": "divider:turn:c5a56eaa-ab54-4a18-8e89-9664bc4143d5",
+    "kind": "divider",
+    "origin": "human",
+    "startedAt": "2026-09-28T10:06:33.116Z",
+    "state": "completed",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 1,
+        "exploration": 0,
+        "files": 0,
+        "mcp": 0,
+        "other": 0,
+        "skills": 0,
+        "web": 0
+      },
+      "childAgents": 0,
+      "costUsd": 0.0756788,
+      "denials": [],
+      "durationMs": 3138,
+      "model": "claude-sonnet-5",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 1,
+        "reviewed": 0
+      },
+      "terminalReason": "completed",
+      "toolCalls": 1,
+      "usage": {
+        "cacheCreationInputTokens": 128,
+        "cacheReadInputTokens": 58060,
+        "inputTokens": 4,
+        "outputTokens": 87,
+        "thinkingTokens": null
+      }
+    },
+    "toolCalls": 1,
+    "turnId": "turn:c5a56eaa-ab54-4a18-8e89-9664bc4143d5"
+  },
+  {
+    "agent": null,
+    "at": "2026-09-28T10:06:34.519Z",
+    "category": "commands",
+    "classification": {
+      "category": "commands",
+      "denial": null,
+      "groupable": false,
+      "hidden": false,
+      "humanDecision": true,
+      "safeguard": "not_evaluated",
+      "startsGroup": false,
+      "subagentLifecycle": null
+    },
+    "detail": {
+      "backgroundTaskId": null,
+      "command": "git log --oneline",
+      "cwd": null,
+      "description": "Show git log in one-line format",
+      "exitCode": 0,
+      "interrupted": false,
+      "kind": "shell",
+      "spill": null,
+      "stderr": "",
+      "stdout": "3ef2515 seed",
+      "truncated": null
+    },
+    "endedAt": "2026-09-28T10:06:35.259Z",
+    "expanded": true,
+    "id": "cell:toolu_016MdTPvp1Bz1pjKD2m5gNTp",
+    "kind": "cell",
+    "label": "Ran `git log --oneline` in 0s",
+    "paths": [],
+    "startedAt": "2026-09-28T10:06:34.519Z",
+    "status": "done",
+    "toolName": "Bash",
+    "toolUseId": "toolu_016MdTPvp1Bz1pjKD2m5gNTp",
+    "turnId": "turn:c5a56eaa-ab54-4a18-8e89-9664bc4143d5"
+  },
+  {
+    "at": "2026-09-28T10:06:36.195Z",
+    "blockIndex": 0,
+    "id": "text:msg_011CfVeiFKQc9HdAVQpYGc4N:0",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "DONE.",
+    "messageUuid": "779b9427-e662-4c19-90aa-f041557f1aac",
+    "model": "claude-sonnet-5",
+    "phase": "answer",
+    "turnId": "turn:c5a56eaa-ab54-4a18-8e89-9664bc4143d5"
+  },
+  {
+    "at": "2026-09-28T10:06:36.801Z",
+    "attempt": null,
+    "id": "error:j50#0",
+    "kind": "error",
+    "lostAttentionCount": 0,
+    "scope": "exit",
+    "severity": "notice",
+    "text": "Session process exited (quit)",
+    "turnId": null
+  }
+]

@@ -1,0 +1,131 @@
+[
+  {
+    "at": "2026-09-27T09:00:00.000Z",
+    "id": "time:turn:u-disk-1",
+    "kind": "time",
+    "label": "Sunday 9:00 AM",
+    "turnId": "turn:u-disk-1"
+  },
+  {
+    "at": "2026-09-27T09:00:00.000Z",
+    "attachments": [],
+    "editable": true,
+    "id": "user:u-disk-1",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "u-disk-1",
+    "text": "Dispatch an agent to read one.txt and report its content.",
+    "turnId": "turn:u-disk-1"
+  },
+  {
+    "at": "2026-09-27T09:00:00.000Z",
+    "autoDenied": 0,
+    "denied": 0,
+    "endedAt": "2026-09-27T09:00:10.500Z",
+    "expanded": true,
+    "firstDeniedCell": null,
+    "id": "divider:turn:u-disk-1",
+    "kind": "divider",
+    "origin": "human",
+    "startedAt": "2026-09-27T09:00:00.000Z",
+    "state": "completed",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 0,
+        "exploration": 0,
+        "files": 0,
+        "mcp": 0,
+        "other": 0,
+        "skills": 0,
+        "web": 0
+      },
+      "childAgents": 1,
+      "costUsd": 0,
+      "denials": [],
+      "durationMs": 10500,
+      "model": "claude-opus-5-5",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 0,
+        "reviewed": 0
+      },
+      "terminalReason": null,
+      "toolCalls": 0,
+      "usage": {
+        "cacheCreationInputTokens": 0,
+        "cacheReadInputTokens": 0,
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "thinkingTokens": null
+      }
+    },
+    "toolCalls": 0,
+    "turnId": "turn:u-disk-1"
+  },
+  {
+    "at": "2026-09-27T09:00:02.000Z",
+    "durationMs": null,
+    "id": "think:msg_disk_1:0",
+    "kind": "thinking",
+    "live": false,
+    "messageUuid": "a-disk-1",
+    "text": "One agent, one file.",
+    "turnId": "turn:u-disk-1"
+  },
+  {
+    "agents": [
+      {
+        "agentId": "ad286defbc77bc090",
+        "glyph": 5,
+        "kind": "agent",
+        "name": "Read and report one.txt content",
+        "subagentType": "general-purpose",
+        "taskId": "toolu_disk_agent",
+        "toolUseId": "toolu_disk_agent"
+      }
+    ],
+    "at": "2026-09-27T09:00:03.000Z",
+    "id": "subagent:toolu_disk_agent",
+    "kind": "subagent",
+    "overflow": 0,
+    "sentence": "Read and report one.txt content started working",
+    "status": "started",
+    "turnId": "turn:u-disk-1"
+  },
+  {
+    "at": "2026-09-27T09:00:10.000Z",
+    "blockIndex": 0,
+    "id": "text:msg_disk_2:0",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "The file contains: ONE",
+    "messageUuid": "a-disk-3",
+    "model": "claude-opus-5-5",
+    "phase": "answer",
+    "turnId": "turn:u-disk-1"
+  },
+  {
+    "at": "2026-09-27T09:05:00.000Z",
+    "attachments": [],
+    "editable": true,
+    "id": "user:u-disk-2",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "u-disk-2",
+    "text": "Thanks. Now say DONE.",
+    "turnId": "turn:u-disk-2"
+  },
+  {
+    "at": "2026-09-27T09:05:01.000Z",
+    "blockIndex": 0,
+    "id": "text:msg_disk_3:0",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "DONE",
+    "messageUuid": "a-disk-4",
+    "model": "claude-opus-5-5",
+    "phase": "answer",
+    "turnId": "turn:u-disk-2"
+  }
+]

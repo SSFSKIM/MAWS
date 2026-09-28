@@ -1,0 +1,286 @@
+[
+  {
+    "at": "2026-09-28T10:10:00.045Z",
+    "id": "time:turn:u-plan-outcomes-002",
+    "kind": "time",
+    "label": "Yesterday 10:10 AM",
+    "turnId": "turn:u-plan-outcomes-002"
+  },
+  {
+    "at": "2026-09-28T10:10:00.045Z",
+    "attachments": [],
+    "editable": true,
+    "id": "user:u-plan-outcomes-002",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "u-plan-outcomes-002",
+    "text": "Plan how to add retraction to the reducer, then implement it.",
+    "turnId": "turn:u-plan-outcomes-002"
+  },
+  {
+    "at": "2026-09-28T10:10:00.045Z",
+    "autoDenied": 0,
+    "denied": 0,
+    "endedAt": "2026-09-28T10:10:03.625Z",
+    "expanded": true,
+    "firstDeniedCell": null,
+    "id": "divider:turn:u-plan-outcomes-002",
+    "kind": "divider",
+    "origin": "human",
+    "startedAt": "2026-09-28T10:10:00.045Z",
+    "state": "completed",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 0,
+        "exploration": 0,
+        "files": 0,
+        "mcp": 0,
+        "other": 0,
+        "skills": 0,
+        "web": 0
+      },
+      "childAgents": 0,
+      "costUsd": 0.0123,
+      "denials": [],
+      "durationMs": 3480,
+      "model": "claude-opus-5-5",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 0,
+        "reviewed": 0
+      },
+      "terminalReason": "completed",
+      "toolCalls": 0,
+      "usage": {
+        "cacheCreationInputTokens": 0,
+        "cacheReadInputTokens": 21000,
+        "inputTokens": 12,
+        "outputTokens": 240,
+        "thinkingTokens": null
+      }
+    },
+    "toolCalls": 0,
+    "turnId": "turn:u-plan-outcomes-002"
+  },
+  {
+    "at": "2026-09-28T10:10:00.161Z",
+    "durationMs": 24,
+    "id": "think:msg_planoutcomes_007:0",
+    "kind": "thinking",
+    "live": false,
+    "messageUuid": "a-plan-outcomes-013",
+    "text": "Plan mode: present the plan and wait.",
+    "turnId": "turn:u-plan-outcomes-002"
+  },
+  {
+    "at": "2026-09-28T10:10:00.255Z",
+    "feedback": null,
+    "id": "plan:toolu_synth_plan_1",
+    "kind": "plan",
+    "outcome": "implement",
+    "plan": "# Plan 1\n\n1. Read the reducer.\n2. Add the retraction case.\n3. Extend the snapshot suite.",
+    "toolUseId": "toolu_synth_plan_1",
+    "turnId": "turn:u-plan-outcomes-002"
+  },
+  {
+    "at": "2026-09-28T10:10:03.555Z",
+    "blockIndex": 0,
+    "id": "text:msg_planoutcomes_025:0",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "Plan approved; implementing now.",
+    "messageUuid": "a-plan-outcomes-030",
+    "model": "claude-opus-5-5",
+    "phase": "answer",
+    "turnId": "turn:u-plan-outcomes-002"
+  },
+  {
+    "at": "2026-09-28T10:10:03.655Z",
+    "attachments": [],
+    "editable": true,
+    "id": "user:u-plan-outcomes-035",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "u-plan-outcomes-035",
+    "text": "Plan the snapshot suite; when I approve, start from a clean context.",
+    "turnId": "turn:u-plan-outcomes-035"
+  },
+  {
+    "at": "2026-09-28T10:10:03.655Z",
+    "autoDenied": 0,
+    "denied": 0,
+    "endedAt": "2026-09-28T10:10:07.164Z",
+    "expanded": true,
+    "firstDeniedCell": null,
+    "id": "divider:turn:u-plan-outcomes-035",
+    "kind": "divider",
+    "origin": "human",
+    "startedAt": "2026-09-28T10:10:03.655Z",
+    "state": "completed",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 0,
+        "exploration": 0,
+        "files": 0,
+        "mcp": 0,
+        "other": 0,
+        "skills": 0,
+        "web": 0
+      },
+      "childAgents": 0,
+      "costUsd": 0.0123,
+      "denials": [],
+      "durationMs": 3409,
+      "model": "claude-opus-5-5",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 0,
+        "reviewed": 0
+      },
+      "terminalReason": "completed",
+      "toolCalls": 0,
+      "usage": {
+        "cacheCreationInputTokens": 0,
+        "cacheReadInputTokens": 21000,
+        "inputTokens": 12,
+        "outputTokens": 240,
+        "thinkingTokens": null
+      }
+    },
+    "toolCalls": 0,
+    "turnId": "turn:u-plan-outcomes-035"
+  },
+  {
+    "at": "2026-09-28T10:10:03.771Z",
+    "durationMs": 24,
+    "id": "think:msg_planoutcomes_040:0",
+    "kind": "thinking",
+    "live": false,
+    "messageUuid": "a-plan-outcomes-046",
+    "text": "Plan mode: present the plan and wait.",
+    "turnId": "turn:u-plan-outcomes-035"
+  },
+  {
+    "at": "2026-09-28T10:10:03.865Z",
+    "feedback": null,
+    "id": "plan:toolu_synth_plan_2",
+    "kind": "plan",
+    "outcome": "clear_and_implement",
+    "plan": "# Plan 2\n\n1. Read the reducer.\n2. Add the retraction case.\n3. Extend the snapshot suite.",
+    "toolUseId": "toolu_synth_plan_2",
+    "turnId": "turn:u-plan-outcomes-035"
+  },
+  {
+    "at": "2026-09-28T10:10:07.149Z",
+    "boundaryKind": "reset",
+    "detail": "conv-plan-outcomes-058",
+    "hiddenRows": 0,
+    "id": "boundary:j59#0",
+    "kind": "boundary",
+    "revealed": false,
+    "text": "Conversation reset · after plan approval",
+    "turnId": "turn:u-plan-outcomes-035"
+  },
+  {
+    "at": "2026-09-28T10:10:07.194Z",
+    "attachments": [],
+    "editable": true,
+    "id": "user:u-plan-outcomes-060",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "u-plan-outcomes-060",
+    "text": "Plan the perf test.",
+    "turnId": "turn:u-plan-outcomes-060"
+  },
+  {
+    "at": "2026-09-28T10:10:07.194Z",
+    "autoDenied": 0,
+    "denied": 0,
+    "endedAt": "2026-09-28T10:10:10.782Z",
+    "expanded": true,
+    "firstDeniedCell": null,
+    "id": "divider:turn:u-plan-outcomes-060",
+    "kind": "divider",
+    "origin": "human",
+    "startedAt": "2026-09-28T10:10:07.194Z",
+    "state": "completed",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 0,
+        "exploration": 0,
+        "files": 0,
+        "mcp": 0,
+        "other": 0,
+        "skills": 0,
+        "web": 0
+      },
+      "childAgents": 0,
+      "costUsd": 0.0123,
+      "denials": [],
+      "durationMs": 3488,
+      "model": "claude-opus-5-5",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 0,
+        "reviewed": 0
+      },
+      "terminalReason": "completed",
+      "toolCalls": 0,
+      "usage": {
+        "cacheCreationInputTokens": 0,
+        "cacheReadInputTokens": 21000,
+        "inputTokens": 12,
+        "outputTokens": 240,
+        "thinkingTokens": null
+      }
+    },
+    "toolCalls": 0,
+    "turnId": "turn:u-plan-outcomes-060"
+  },
+  {
+    "at": "2026-09-28T10:10:07.310Z",
+    "durationMs": 24,
+    "id": "think:msg_planoutcomes_065:0",
+    "kind": "thinking",
+    "live": false,
+    "messageUuid": "a-plan-outcomes-071",
+    "text": "Plan mode: present the plan and wait.",
+    "turnId": "turn:u-plan-outcomes-060"
+  },
+  {
+    "at": "2026-09-28T10:10:07.404Z",
+    "feedback": "Add the delta-batch measurement before I approve.",
+    "id": "plan:toolu_synth_plan_3",
+    "kind": "plan",
+    "outcome": "keep_planning",
+    "plan": "# Plan 3\n\n1. Read the reducer.\n2. Add the retraction case.\n3. Extend the snapshot suite.",
+    "toolUseId": "toolu_synth_plan_3",
+    "turnId": "turn:u-plan-outcomes-060"
+  },
+  {
+    "at": "2026-09-28T10:10:10.704Z",
+    "blockIndex": 0,
+    "id": "text:msg_planoutcomes_083:0",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "Understood: I will add the delta-batch measurement to the plan.",
+    "messageUuid": "a-plan-outcomes-089",
+    "model": "claude-opus-5-5",
+    "phase": "answer",
+    "turnId": "turn:u-plan-outcomes-060"
+  },
+  {
+    "at": "2026-09-28T10:10:10.812Z",
+    "attempt": null,
+    "id": "error:j94#0",
+    "kind": "error",
+    "lostAttentionCount": 0,
+    "scope": "exit",
+    "severity": "notice",
+    "text": "Session process exited (quit)",
+    "turnId": null
+  }
+]

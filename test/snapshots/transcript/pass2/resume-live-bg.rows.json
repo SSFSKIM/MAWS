@@ -1,0 +1,20 @@
+[
+  {
+    "at": "2026-09-28T10:08:47.214Z",
+    "id": "time:eerror:j6#0",
+    "kind": "time",
+    "label": "Yesterday 10:08 AM",
+    "turnId": null
+  },
+  {
+    "at": "2026-09-28T10:08:47.214Z",
+    "attempt": null,
+    "id": "error:j6#0",
+    "kind": "error",
+    "lostAttentionCount": 0,
+    "scope": "exit",
+    "severity": "error",
+    "text": "Session process exited (crash)",
+    "turnId": null
+  }
+]

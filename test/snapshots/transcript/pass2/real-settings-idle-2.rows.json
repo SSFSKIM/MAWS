@@ -1,0 +1,20 @@
+[
+  {
+    "at": "2026-09-28T09:59:00.248Z",
+    "id": "time:eerror:j12#0",
+    "kind": "time",
+    "label": "Yesterday 9:59 AM",
+    "turnId": null
+  },
+  {
+    "at": "2026-09-28T09:59:00.248Z",
+    "attempt": null,
+    "id": "error:j12#0",
+    "kind": "error",
+    "lostAttentionCount": 0,
+    "scope": "exit",
+    "severity": "notice",
+    "text": "Session process exited (quit)",
+    "turnId": null
+  }
+]
