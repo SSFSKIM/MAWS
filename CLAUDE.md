@@ -6,6 +6,6 @@ The root spec is `docs/charter.md`: the approved design (§1 to §9) and the com
 
 Working rules:
 - The engine is an unmodified, version-pinned Claude Code binary driven over its stream-json wire and control protocol; never patch it (D-1). Verify wire claims against `spikes/protocol-probe/fixtures/` or a new probe, not against the spec alone.
-- Contracts X1 to X8 and decisions D-1 to D-18 are binding; a child that finds them wrong records a dated Decision Log entry in the charter rather than diverging.
+- Contracts X1 to X8 and decisions D-1 to D-19 are binding; a child that finds them wrong records a dated Decision Log entry in the charter rather than diverging.
 - Execution documents live under `docs/doperpowers/execplans/`, brief ledgers under `docs/doperpowers/ledgers/`, spike findings under `spikes/`.
 - Light theme is the default; components use tokens only.
