@@ -377,6 +377,8 @@ Order: `rewind_conversation { target_message_uuid, last_seen_user_message_uuid, 
 ```ts
 export const EngineSessionStatusSchema = z.strictObject({
   appSessionId: AppSessionIdSchema, engineSessionId: SessionIdSchema.nullable(), pid: z.number().int().nullable(), launchId: z.string(), launchedAt: z.string(),
+  cwd: z.string(),                                                                    // the launch spec's cwd, present from the reservation onward (C10 counts reservations by directory through engine.sessions)
+  pendingPlan: z.string().nullable(),                                                 // a clear_and_implement plan kept for retry after the pre-plan mode could not be restored (M3 review)
   process: z.enum(['starting', 'initializing', 'ready', 'exiting', 'exited']),
   exit: z.strictObject({ code: z.number().int().nullable(), signal: z.string().nullable(), reason: z.enum(['quit', 'stop', 'archive', 'crash', 'unknown']), at: z.string() }).nullable(),
   engineState: z.enum(['idle', 'running', 'requires_action', 'unknown']),          // session_state_changed; 'unknown' before the first frame
@@ -848,6 +850,9 @@ Ready to paste into the charter's C3 section as "**Residue decisions (C3, 2026-0
 - Decision: (M3 review) `out` rows are journaled after the transport write resolves, never before; a rejected write journals a `meta write_failed` row (→ `error.raised { scope: 'transport' }`) so a `permission.resolved` (or any other out-derived event) can appear only for a frame that reached the pipe, and a retry emits the resolution then. An answer for a `request_user_dialog` kind the host did not declare throws `BrokerAnswerMismatch` like an answer of the wrong kind (the item stays pending, as Interfaces promise). Clear-and-implement stages its state before the deny response is written and rolls it back if the write fails, so a `result` arriving between the engine consuming the response and the write callback still finds the operation; when restoring the pre-plan mode fails the sequence stops with the notice and the plan is kept on the status (`pendingPlan`) for the human to retry, and neither `/clear` nor the implement prompt is sent.
   Rationale: the journal is the graph; a row for a frame that never left the process would make the transcript lie. The other three close races the reviewer named against the round-trip guarantees M3 exists for.
   Date/Author: 2026-09-28, controller.
+- Decision: (C10's ask via the coordinator, 2026-09-28) `EngineSessionStatus` gains `cwd: string`, the launch spec's cwd, present on every status from the reservation onward (before `ready`), so `engine.sessions` lets C10 count reservations by directory without the index. Landed in M3's fix wave with `pendingPlan`; the status list command is `engine.sessions` as C10's document assumes.
+  Rationale: additive, and the value is known at the reservation.
+  Date/Author: 2026-09-28, coordinator via controller.
 
 ## Outcomes & Retrospective
 
