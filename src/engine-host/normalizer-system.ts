@@ -148,6 +148,7 @@ export function mapSystemFrame(frame: SystemFrame, tasks: TaskRegistry): SystemM
     case 'hook_progress':
     case 'peer_message_hold':
     case 'elicitation_complete':
+    case 'local_command_output': // untyped by C1 (parses as UnknownSystemFrame); the table lists it as none
       return none;
     case 'init':
       throw new Error('system/init is mapped by the Normalizer (it touches turn state)');

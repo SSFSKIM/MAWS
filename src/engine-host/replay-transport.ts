@@ -136,25 +136,28 @@ export function replayEngine(journal: JournalRow[], opts: { prelude: JournalRow[
     if ((recorded.type === 'user' || recorded.type === 'bash_command') && typeof recorded.uuid === 'string' && typeof written.uuid === 'string') idMap.set(recorded.uuid, written.uuid);
   };
 
-  // At a held `out` row with a write waiting: match and advance, or end the replay as a mismatch.
-  const tryMatch = (): TransportItem | null => {
-    const row = settleCursor();
-    if (!row || row.direction !== 'out' || waiters.length === 0) return null;
+  // The spec's gate: any unrecorded write ends the replay. Rejects the waiting write, ends the stream as a crash
+  // (`exited` `{ null, null }`) and returns the item the consumer journals as `meta replay_mismatch`.
+  const endAsMismatch = (expected: string): TransportItem => {
     const waiter = waiters.shift()!;
-    const recorded = row.frame as Frame;
-    const written = waiter.frame as unknown as Frame;
-    if (matches(recorded, written)) {
-      learnIds(recorded, written);
-      cursor += 1;
-      waiter.resolve();
-      return null;
-    }
-    const expected = describeOut(row);
-    const got = describeFrame(written);
+    const got = describeFrame(waiter.frame as unknown as Frame);
     const message = `replay mismatch: expected ${expected}, got ${got}`;
     waiter.reject(new TransportClosed(message));
     finish({ code: null, signal: null });
     return { frame: null, raw: '', error: { kind: 'replay_mismatch', message, length: 0, typeGuess: null, replay: { expected, got } } };
+  };
+
+  // At a held `out` row with a write waiting: match and advance, or end the replay as a mismatch.
+  const tryMatch = (): TransportItem | null => {
+    const row = settleCursor();
+    if (!row || row.direction !== 'out' || waiters.length === 0) return null;
+    const recorded = row.frame as Frame;
+    const written = waiters[0]!.frame as unknown as Frame;
+    if (!matches(recorded, written)) return endAsMismatch(describeOut(row));
+    learnIds(recorded, written);
+    cursor += 1;
+    waiters.shift()!.resolve();
+    return null;
   };
 
   const frames: AsyncIterable<TransportItem> = {
@@ -172,11 +175,13 @@ export function replayEngine(journal: JournalRow[], opts: { prelude: JournalRow[
             if (ended) return { value: undefined, done: true };
             const row = settleCursor();
             if (!row) {
-              await new Promise<void>((r) => (wake = r)); // a journal without an exit row waits for kill
+              if (waiters.length > 0) return { value: endAsMismatch('end of journal'), done: false }; // a write the journal never recorded
+              await new Promise<void>((r) => (wake = r)); // a journal without an exit row waits for kill (or a write)
               wake = null;
               continue;
             }
             if (row.direction === 'meta') {
+              if (waiters.length > 0) return { value: endAsMismatch(`seq ${row.seq} exit`), done: false }; // written after the engine's last frame
               const f = row.frame as { code?: unknown; signal?: unknown };
               cursor += 1;
               finish({ code: typeof f.code === 'number' ? f.code : null, signal: typeof f.signal === 'string' ? (f.signal as NodeJS.Signals) : null });

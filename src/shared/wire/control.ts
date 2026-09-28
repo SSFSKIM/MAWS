@@ -102,9 +102,11 @@ export type InitializeResponse = z.infer<typeof InitializeResponseSchema>;
 
 // --- inbound requests C1 did not type ---------------------------------------------------------------------------------
 
+// SPEC 45:4226: `dialog_kind`, `payload`, `tool_use_id?`; `payload` is the declared kind's own object, passed through.
 export const RequestUserDialogRequestSchema = z.looseObject({
   subtype: z.literal('request_user_dialog'),
   dialog_kind: z.string(),
+  payload: z.unknown(),
   tool_use_id: z.string().optional(),
 });
 export type RequestUserDialogRequest = z.infer<typeof RequestUserDialogRequestSchema>;
@@ -303,7 +305,9 @@ export const ModelOptionSchema = z.looseObject({
 export const ListModelsResponseSchema = z.looseObject({ models: z.array(ModelOptionSchema) });
 export type ListModelsResponse = z.infer<typeof ListModelsResponseSchema>;
 
-export const GetSessionCostResponseSchema = z.looseObject({});
+// No fixture carries `get_session_cost`; SPEC 45 (~/claude-code-bundle/2.1.283/SPEC/45-headless-and-sdk-protocol.md line
+// 4190: `| get_session_cost | C→A | — | text | …`) declares the one response field, the `/usage` text.
+export const GetSessionCostResponseSchema = z.looseObject({ text: z.string() });
 export type GetSessionCostResponse = z.infer<typeof GetSessionCostResponseSchema>;
 
 export const GetBinaryVersionResponseSchema = z.looseObject({ version: z.string() });

@@ -159,6 +159,33 @@ describe('control client ids, timeouts, cancellation', () => {
     expect(client.pending).toBe(0);
   });
 
+  it('an already-aborted signal refuses the request before anything is journaled or written', async () => {
+    const { transport, writes } = fakeTransport();
+    const journal = fakeJournal();
+    const client = new ControlClient(transport, journal, 'LAUNCH01');
+    const controller = new AbortController();
+    controller.abort();
+    const error = await client.request('set_model', { model: 'haiku' }, { signal: controller.signal }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ControlCancelled);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(writes).toEqual([]);
+    expect(journal.rows).toEqual([]);
+    expect(client.pending).toBe(0);
+  });
+
+  it('get_session_cost parses the SPEC-declared text response and rejects a malformed one', async () => {
+    const { transport } = fakeTransport();
+    const client = new ControlClient(transport, fakeJournal(), 'LAUNCH01', { warn: () => {} });
+    const ok = client.request('get_session_cost', {});
+    await vi.advanceTimersByTimeAsync(0);
+    client.observe(success('LAUNCH01-1', { text: 'Total cost: $0.12' }));
+    expect((await ok).text).toBe('Total cost: $0.12');
+    const bad = client.request('get_session_cost', {}).catch((e: unknown) => e);
+    await vi.advanceTimersByTimeAsync(0);
+    client.observe(success('LAUNCH01-2', { cost: 0.12 }));
+    expect(((await bad) as ControlError).code).toBe('invalid_response');
+  });
+
   it('a failed write rejects with ControlError write_failed and leaves nothing pending', async () => {
     const { transport } = fakeTransport({ failWrites: true });
     const client = new ControlClient(transport, fakeJournal(), 'LAUNCH01');

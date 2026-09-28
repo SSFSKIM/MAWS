@@ -219,7 +219,7 @@ describe('normaliser: requests, responses and boundaries', () => {
       outRow({ type: 'control_response', response: { subtype: 'success', request_id: 'h-1', response: { continue: true } } }),
       inRow({ type: 'control_request', request_id: 'e-1', request: { subtype: 'elicitation', mcp_server_name: 'srv', mode: 'form', message: 'pick' } }),
       outRow({ type: 'control_response', response: { subtype: 'success', request_id: 'e-1', response: { action: 'accept', content: { color: 'teal' } } } }),
-      inRow({ type: 'control_request', request_id: 'd-1', request: { subtype: 'request_user_dialog', dialog_kind: 'refusal_fallback_prompt', payload: {} } }),
+      inRow({ type: 'control_request', request_id: 'd-1', request: { subtype: 'request_user_dialog', dialog_kind: 'refusal_fallback_prompt', payload: { title: 'Model refused', options: ['retry'] } } }),
       outRow({ type: 'control_response', response: { subtype: 'success', request_id: 'd-1', response: { behavior: 'completed', result: { choice: 1 } } } }),
     ]);
     expect(kinds(events)).toEqual([
@@ -237,6 +237,8 @@ describe('normaliser: requests, responses and boundaries', () => {
     expect(events[10]).toMatchObject({ mcpServerName: 'srv', mode: 'form', elicitationId: null });
     expect(events[11]).toMatchObject({ action: 'accept', content: { color: 'teal' } });
     expect(events[12]).toMatchObject({ dialogKind: 'refusal_fallback_prompt', toolUseId: null });
+    // C7 validates the payload against the declared kind's own schema: it is the wire `payload` value, never the whole request
+    expect((events[12] as Extract<SessionEvent, { kind: 'dialog.requested' }>).payload).toEqual({ title: 'Model refused', options: ['retry'] });
     expect(events[13]).toMatchObject({ behavior: 'completed', result: { choice: 1 } });
     expect(n.state.inbound.size).toBe(0);
   });
@@ -324,6 +326,7 @@ describe('normaliser: meta rows, system subtypes and the unknown', () => {
       sys('peer_message_hold', { state: 'held' }),
       sys('thinking_tokens', { estimated_tokens: 1, estimated_tokens_delta: 1 }),
       sys('elicitation_complete', { mcp_server_name: 's', elicitation_id: 'e' }),
+      sys('local_command_output', { content: 'Set model to haiku' }), // table: journaled, no event
       sys('turn_starting', {}),
       inRow({ type: 'command_lifecycle', command_uuid: 'u-1', state: 'queued' }),
       inRow({ type: 'tool_progress', tool_use_id: 'toolu_1', tool_name: 'Bash', elapsed_time_seconds: 2.5 }),

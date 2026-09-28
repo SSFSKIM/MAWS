@@ -300,6 +300,21 @@ describe('normaliser: per-fixture graph facts (C2 findings restated)', () => {
     expect(ofKind(events, 'process.exited')).toMatchObject([{ code: 1, reason: 'crash' }]);
   });
 
+  it("C7's MCP permission request: mcpServer and requiresUserInteraction project from a can_use_tool the fixtures never carried", async () => {
+    // Inline until C7 ships test/fixtures/requests/mcp-permission.json (C3 Decision Log, "coordinator, C7's asks", final form).
+    const { Normalizer } = await import('../normalizer');
+    const n = new Normalizer({ appSessionId: 'conformance' as never, launchId: 'REPLAY01', sessionId: 'sess-mcp' as never });
+    const request = {
+      subtype: 'can_use_tool', tool_name: 'mcp__github__create_issue', display_name: 'create_issue', input: { title: 'Bug', body: 'Steps' }, tool_use_id: 'toolu_mcp_1',
+      mcp_server: { name: 'github', source: 'user' }, requires_user_interaction: true,
+    };
+    const [event] = n.push({ seq: 1, direction: 'in', at: '2026-09-28T00:00:00.000Z', frame: { type: 'control_request', request_id: 'req-mcp-1', request } });
+    expect(SessionEventSchema.parse(event)).toMatchObject({
+      kind: 'permission.requested', toolName: 'mcp__github__create_issue', toolUseId: 'toolu_mcp_1', mcpServer: { name: 'github', source: 'user' }, requiresUserInteraction: true,
+    });
+    for (const key of ['decisionReason', 'suppressAlwaysAllow', 'defaultToNo', 'matchedAskRule']) expect(key in event!).toBe(false);
+  });
+
   it('observes exactly the system subtypes C1 fixtured, across all fixtures', async () => {
     const seen = new Set<string>();
     for (const pass of FIXTURE_PASSES) {

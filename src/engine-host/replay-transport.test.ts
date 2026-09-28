@@ -130,6 +130,31 @@ describe('replay transport plays a fixture and advances on the adapter\'s writes
     expect(noExit.pid).toBeNull();
   });
 
+  it('an unrecorded write at a row-less tail ends the replay as a mismatch, never a hang', async () => {
+    const transport = replayEngine([row(1, 'in', { type: 'system', subtype: 'status', status: null })], { prelude });
+    const it = transport.frames[Symbol.asyncIterator]();
+    await it.next();
+    const write = transport.write({ type: 'control_request', request_id: 'M-1', request: { subtype: 'get_usage' } });
+    const item = (await it.next()).value as TransportItem;
+    expect(item.error).toMatchObject({ kind: 'replay_mismatch', replay: { expected: 'end of journal', got: 'control_request/get_usage' } });
+    await expect(write).rejects.toThrow(/replay mismatch/);
+    expect((await it.next()).done).toBe(true);
+    await expect(transport.exited).resolves.toEqual({ code: null, signal: null });
+  });
+
+  it('an unrecorded write before the exit row ends the replay as a mismatch, not a plain close', async () => {
+    const journal = [row(1, 'in', { type: 'system', subtype: 'status', status: null }), row(2, 'meta', { event: 'exit', code: 0, signal: null })];
+    const transport = replayEngine(journal, { prelude });
+    const it = transport.frames[Symbol.asyncIterator]();
+    await it.next();
+    const write = transport.write({ type: 'user', uuid: 'u', message: { role: 'user', content: 'hi' }, parent_tool_use_id: null });
+    const item = (await it.next()).value as TransportItem;
+    expect(item.error).toMatchObject({ kind: 'replay_mismatch', replay: { expected: 'seq 2 exit', got: 'user' } });
+    await expect(write).rejects.toThrow(/replay mismatch/);
+    expect((await it.next()).done).toBe(true);
+    await expect(transport.exited).resolves.toEqual({ code: null, signal: null });
+  });
+
   it('matches a can_use_tool response by request id and behavior, and a bash_command by type', async () => {
     const journal = [
       row(1, 'in', { type: 'control_request', request_id: 'eng-1', request: { subtype: 'can_use_tool', tool_name: 'Bash', input: {}, tool_use_id: 't' } }),

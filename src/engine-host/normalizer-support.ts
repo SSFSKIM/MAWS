@@ -1,7 +1,8 @@
 // Pure helpers the normaliser's mapping uses: token usage, the spill path, the `!` bash tags, denial kinds. Each is a
 // wire-to-X1 projection with its evidence named (C3 execution document, Interfaces "Normaliser").
 import { DENIAL_KINDS, type DenialKind } from '@shared/graph/enums';
-import type { ContentBlock, TokenUsage } from '@shared/graph/events';
+import type { ContentBlock, EventPayload, TokenUsage } from '@shared/graph/events';
+import type { AgentId, ParentToolUseId } from '@shared/graph/ids';
 
 // `result.usage` and `message_delta.usage` share this shape; absent counters read as 0, thinking as null.
 export function tokenUsageOf(usage: unknown): TokenUsage {
@@ -61,3 +62,14 @@ export function compact<T extends Record<string, unknown>>(obj: T): T {
 export const stringOrNull = (v: unknown): string | null => (typeof v === 'string' ? v : null);
 export const boolOr = (v: unknown, fallback: boolean): boolean => (typeof v === 'boolean' ? v : fallback);
 export const numberOr = (v: unknown, fallback: number): number => (typeof v === 'number' ? v : fallback);
+
+// Child attribution of an event: the parent tool use whose lane the frame arrived on and the agent behind it.
+export interface Attribution {
+  parentToolUseId: ParentToolUseId | null;
+  agentId: AgentId | null;
+}
+
+// Where a mapping puts its payloads; the Normalizer's Emitter stamps the base fields (id, seq, at, sessionId).
+export interface EventSink {
+  emit(payload: EventPayload, attribution: Attribution | null): void;
+}

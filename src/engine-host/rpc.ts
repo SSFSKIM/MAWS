@@ -111,6 +111,7 @@ export class ControlClient {
   private async exchange(subtype: string, payload: Record<string, unknown>, opts: RequestOptions & { klass?: Exclude<RequestClass, 'human'> }): Promise<{ envelope: ResponseEnvelope & { subtype: 'success' }; requestId: RequestId }> {
     const requestId = `${this.launchId}-${++this.counter}` as RequestId;
     if (this.closed !== null) throw new ControlError(subtype, requestId, `${subtype} not sent: ${this.closed}`, 'exited');
+    if (opts.signal?.aborted) throw new ControlCancelled(subtype, requestId); // never journaled or written: a mutation must not run after the caller heard "cancelled"
     const frame: StdinFrame = { type: 'control_request', request_id: requestId, request: { subtype, ...payload } };
     const timeoutMs = opts.timeoutMs ?? REQUEST_TIMEOUT_MS[opts.klass ?? (isOutboundSubtype(subtype) ? requestClassOf(subtype) : 'mutate')];
 
@@ -119,8 +120,7 @@ export class ControlClient {
       this.pendingTable.set(requestId, entry);
       if (opts.signal) {
         entry.onAbort = () => this.cancel(requestId);
-        if (opts.signal.aborted) entry.onAbort();
-        else opts.signal.addEventListener('abort', entry.onAbort, { once: true });
+        opts.signal.addEventListener('abort', entry.onAbort, { once: true });
       }
     });
     settled.catch(() => {}); // the caller's await below observes the rejection; never an unhandled rejection here

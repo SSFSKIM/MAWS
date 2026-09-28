@@ -6,14 +6,13 @@
 // a replay can start from any row given a saved state. Turn rule: the human turn opens at the host's own querying
 // `user` frame (the bubble shows on send), `system/init` marks acceptance inside it and opens an engine-initiated
 // turn only when no turn is open and no `!` echo awaits its receipt. This file holds the class and the frames that
-// touch turn, lane and correlation state; `normalizer-system.ts` maps the other system subtypes and
-// `normalizer-support.ts` holds the pure projections.
+// touch turn, lane and correlation state; `normalizer-controls.ts` projects inbound requests and our answers,
+// `normalizer-system.ts` maps the other system subtypes and `normalizer-support.ts` holds the pure projections.
 import * as z from 'zod';
 import { PERMISSION_MODES, type PermissionMode } from '@shared/graph/enums';
-import type { EventPayload, Question, SessionEvent } from '@shared/graph/events';
-import { QuestionSchema } from '@shared/graph/events';
+import type { EventPayload, SessionEvent } from '@shared/graph/events';
 import type { AgentId, ApiMessageId, AppSessionId, EventId, MessageUuid, ParentToolUseId, RequestId, SessionId, TaskId, ToolUseId } from '@shared/graph/ids';
-import { CanUseToolRequestSchema, ElicitationRequestSchema, HookCallbackRequestSchema, RequestUserDialogRequestSchema, RewindConversationResponseSchema } from '@shared/wire/control';
+import { RewindConversationResponseSchema } from '@shared/wire/control';
 import {
   parseStdinFrame,
   parseStdoutFrame,
@@ -33,7 +32,8 @@ import {
   type UserInputFrame,
 } from '@shared/wire/frames';
 import type { JournalRow } from '@shared/wire/journal';
-import { bashPartOf, compact, denialKindOf, spillPathOf, stringOrNull, tokenUsageOf } from './normalizer-support';
+import { bashPartOf, denialKindOf, spillPathOf, stringOrNull, tokenUsageOf, type Attribution, type EventSink } from './normalizer-support';
+import { mapInboundCancel, mapInboundRequest, mapOutboundResponse, type InboundEntry } from './normalizer-controls';
 import { mapSystemFrame, type TaskRegistry } from './normalizer-system';
 import type { SafeguardVerdict } from '@shared/graph/enums';
 
@@ -41,16 +41,6 @@ export interface NormalizerWarning {
   event: 'block_pairing' | 'unknown_denial_kind' | 'unmatched_response' | 'unknown_permission_mode';
   seq: number;
   detail: Record<string, unknown>;
-}
-
-// One inbound request awaiting our answer, kept so the answer (whose envelope carries no subtype) resolves to the right kind.
-type InboundKind = 'permission' | 'question' | 'plan' | 'hook' | 'elicitation' | 'dialog';
-interface InboundEntry {
-  kind: InboundKind;
-  toolUseId: ToolUseId | null;
-  callbackId: string | null;
-  parentToolUseId: ParentToolUseId | null;
-  agentId: AgentId | null;
 }
 
 interface Lane {
@@ -74,8 +64,6 @@ export interface NormalizerState {
   taskTypes: Map<string, string>;
   workflowNames: Map<string, string>;
 }
-
-const CLEAR_AND_IMPLEMENT_MESSAGE = 'Plan approved; MAWS is clearing context and will restart with the plan.';
 
 export class Normalizer {
   readonly state: NormalizerState;
@@ -183,13 +171,13 @@ export class Normalizer {
         return;
       }
       case 'control_request':
-        this.inboundRequest(frame as ControlRequestFrame, out, attribution);
+        mapInboundRequest(this.state.inbound, frame as ControlRequestFrame, out, attribution);
         return;
       case 'control_response':
         this.inboundResponse(frame as ControlResponseFrame, out, attribution);
         return;
       case 'control_cancel_request':
-        this.inboundCancel((frame as ControlCancelRequestFrame).request_id as RequestId, out);
+        mapInboundCancel(this.state.inbound, (frame as ControlCancelRequestFrame).request_id as RequestId, out);
         return;
       case 'tool_use_summary':
       case 'prompt_suggestion':
@@ -347,130 +335,7 @@ export class Normalizer {
   }
 
   // ---------------------------------------------------------------------------------------------------------------------
-  // Inbound requests and our answers
-
-  private inboundRequest(frame: ControlRequestFrame, out: Emitter, attribution: Attribution): void {
-    const requestId = frame.request_id as RequestId;
-    const request = frame.request;
-    const remember = (entry: Omit<InboundEntry, 'parentToolUseId' | 'agentId'>, agentId: AgentId | null = attribution.agentId) =>
-      this.state.inbound.set(requestId, { ...entry, parentToolUseId: attribution.parentToolUseId, agentId });
-    switch (request.subtype) {
-      case 'can_use_tool': {
-        const req = CanUseToolRequestSchema.parse(request) as z.infer<typeof CanUseToolRequestSchema> & Record<string, unknown>;
-        const toolUseId = req.tool_use_id as ToolUseId;
-        const agentId = (typeof req.agent_id === 'string' ? (req.agent_id as AgentId) : null) ?? attribution.agentId;
-        const attributed = { parentToolUseId: attribution.parentToolUseId, agentId };
-        if (req.tool_name === 'AskUserQuestion') {
-          remember({ kind: 'question', toolUseId, callbackId: null }, agentId);
-          const raw = (req.input as { questions?: unknown[] } | undefined)?.questions ?? [];
-          out.emit({ kind: 'question.requested', requestId, toolUseId, questions: raw.map(questionOf) }, attributed);
-          return;
-        }
-        if (req.tool_name === 'ExitPlanMode') {
-          remember({ kind: 'plan', toolUseId, callbackId: null }, agentId);
-          out.emit({ kind: 'plan.requested', requestId, toolUseId, plan: stringOrNull((req.input as { plan?: unknown } | undefined)?.plan) ?? '', input: req.input }, attributed);
-          return;
-        }
-        remember({ kind: 'permission', toolUseId, callbackId: null }, agentId);
-        const rule = req.matched_ask_rule as { source?: unknown; toolName?: unknown; ruleContent?: unknown } | null | undefined;
-        const mcp = req.mcp_server as { name?: unknown; source?: unknown } | null | undefined;
-        out.emit(compact({
-          kind: 'permission.requested', requestId, toolUseId, toolName: req.tool_name, displayName: req.display_name ?? null, input: req.input, description: req.description ?? null,
-          decisionReasonType: req.decision_reason_type ?? null, suggestions: req.permission_suggestions ?? [], blockedPath: req.blocked_path ?? null,
-          // C7's additive fields: present only when the wire carries the key
-          decisionReason: 'decision_reason' in req ? stringOrNull(req.decision_reason) : undefined,
-          suppressAlwaysAllow: 'suppress_always_allow_rule' in req ? req.suppress_always_allow_rule === true : undefined,
-          defaultToNo: 'default_to_no' in req ? req.default_to_no === true : undefined,
-          matchedAskRule: 'matched_ask_rule' in req ? (rule && typeof rule === 'object' ? { source: String(rule.source), toolName: String(rule.toolName), ruleContent: stringOrNull(rule.ruleContent) } : null) : undefined,
-          requiresUserInteraction: 'requires_user_interaction' in req ? req.requires_user_interaction === true : undefined,
-          mcpServer: 'mcp_server' in req ? (mcp && typeof mcp === 'object' ? { name: String(mcp.name), source: String(mcp.source) } : null) : undefined,
-        }) as EventPayload, attributed);
-        return;
-      }
-      case 'hook_callback': {
-        const req = HookCallbackRequestSchema.parse(request);
-        const toolUseId = (req.tool_use_id ?? req.input.tool_use_id ?? null) as ToolUseId | null;
-        remember({ kind: 'hook', toolUseId, callbackId: req.callback_id });
-        out.emit({ kind: 'hook.callback_requested', requestId, callbackId: req.callback_id, hookEvent: req.input.hook_event_name, toolUseId, input: req.input }, attribution);
-        return;
-      }
-      case 'elicitation': {
-        const req = ElicitationRequestSchema.parse(request) as z.infer<typeof ElicitationRequestSchema> & { elicitation_id?: unknown };
-        remember({ kind: 'elicitation', toolUseId: null, callbackId: null });
-        out.emit({ kind: 'elicitation.requested', requestId, mcpServerName: req.mcp_server_name, elicitationId: stringOrNull(req.elicitation_id), mode: req.mode, payload: request }, attribution);
-        return;
-      }
-      case 'request_user_dialog': {
-        const req = RequestUserDialogRequestSchema.parse(request);
-        const toolUseId = (req.tool_use_id ?? null) as ToolUseId | null;
-        remember({ kind: 'dialog', toolUseId, callbackId: null });
-        out.emit({ kind: 'dialog.requested', requestId, dialogKind: req.dialog_kind, payload: request, toolUseId }, attribution);
-        return;
-      }
-      default:
-        out.emit({ kind: 'frame.unknown', frameType: 'control_request', subtype: request.subtype }, attribution);
-    }
-  }
-
-  // Our answer to an inbound request (an `out` control_response row).
-  private outboundResponse(frame: ControlResponseFrame, out: Emitter): void {
-    const envelope = frame.response;
-    const requestId = envelope.request_id as RequestId;
-    const entry = this.state.inbound.get(requestId);
-    if (!entry) return;
-    this.state.inbound.delete(requestId);
-    const attribution = { parentToolUseId: entry.parentToolUseId, agentId: entry.agentId };
-    const payload = (envelope.subtype === 'success' ? (envelope.response ?? {}) : { behavior: 'deny', message: envelope.error }) as Record<string, unknown>;
-    const message = stringOrNull(payload.message);
-    switch (entry.kind) {
-      case 'permission':
-        out.emit({
-          kind: 'permission.resolved', requestId, toolUseId: entry.toolUseId!, behavior: payload.behavior === 'allow' ? 'allow' : 'deny', message,
-          updatedInput: payload.updatedInput ?? null, updatedPermissions: Array.isArray(payload.updatedPermissions) ? payload.updatedPermissions : [], resolvedBy: 'user',
-        }, attribution);
-        return;
-      case 'question': {
-        const answers = ((payload.updatedInput as { answers?: unknown } | undefined)?.answers ?? {}) as Record<string, string>;
-        out.emit({ kind: 'question.answered', requestId, toolUseId: entry.toolUseId!, answers }, attribution);
-        return;
-      }
-      case 'plan': {
-        const outcome = payload.behavior === 'allow' ? 'implement' : message === CLEAR_AND_IMPLEMENT_MESSAGE ? 'clear_and_implement' : 'keep_planning';
-        out.emit({ kind: 'plan.resolved', requestId, toolUseId: entry.toolUseId!, outcome, feedback: outcome === 'keep_planning' ? message : null }, attribution);
-        return;
-      }
-      case 'hook':
-        out.emit({ kind: 'hook.callback_resolved', requestId, callbackId: entry.callbackId!, response: envelope.subtype === 'success' ? envelope.response : { error: envelope.error } }, attribution);
-        return;
-      case 'elicitation':
-        out.emit({ kind: 'elicitation.resolved', requestId, action: payload.action === 'accept' ? 'accept' : payload.action === 'decline' ? 'decline' : 'cancel', content: payload.content ?? null }, attribution);
-        return;
-      case 'dialog':
-        out.emit({ kind: 'dialog.resolved', requestId, behavior: payload.behavior === 'completed' ? 'completed' : 'cancelled', result: payload.result ?? null }, attribution);
-        return;
-    }
-  }
-
-  // The engine withdrew one of its requests (none observed in the fixtures; SPEC 45).
-  private inboundCancel(requestId: RequestId, out: Emitter): void {
-    const entry = this.state.inbound.get(requestId);
-    if (!entry) return;
-    this.state.inbound.delete(requestId);
-    const attribution = { parentToolUseId: entry.parentToolUseId, agentId: entry.agentId };
-    switch (entry.kind) {
-      case 'permission':
-        out.emit({ kind: 'permission.resolved', requestId, toolUseId: entry.toolUseId!, behavior: 'deny', message: 'withdrawn by the engine', updatedInput: null, updatedPermissions: [], resolvedBy: 'abort' }, attribution);
-        return;
-      case 'dialog':
-        out.emit({ kind: 'dialog.resolved', requestId, behavior: 'cancelled', result: null }, attribution);
-        return;
-      case 'elicitation':
-        out.emit({ kind: 'elicitation.resolved', requestId, action: 'cancel', content: null }, attribution);
-        return;
-      default: // question, plan, hook: X1 has no withdrawn form; the request scope error says why the card went away
-        out.emit({ kind: 'error.raised', scope: 'request', message: `${entry.kind} request withdrawn by the engine`, code: 'abort', toolUseId: entry.toolUseId, taskId: null, requestId }, attribution);
-    }
-  }
+  // Inbound requests and our answers live in normalizer-controls.ts
 
   // The engine's answer to one of our requests: none as events, except the successful conversation rewind.
   private inboundResponse(frame: ControlResponseFrame, out: Emitter, attribution: Attribution): void {
@@ -499,7 +364,7 @@ export class Normalizer {
         this.state.outbound.set(frame.request_id as RequestId, { subtype: frame.request.subtype, request: frame.request });
         return;
       case 'control_response':
-        this.outboundResponse(frame, out);
+        mapOutboundResponse(this.state.inbound, frame, out);
         return;
       case 'bash_command':
       case 'control_cancel_request':
@@ -564,14 +429,9 @@ export class Normalizer {
 
 // ---------------------------------------------------------------------------------------------------------------------
 
-interface Attribution {
-  parentToolUseId: ParentToolUseId | null;
-  agentId: AgentId | null;
-}
-
 // Stamps the base fields on each payload a row yields: the row's seq, the frame's timestamp or the row's `at`, the
 // session id known at that point, and the event's index within the row.
-class Emitter {
+class Emitter implements EventSink {
   readonly events: SessionEvent[] = [];
   readonly at: string;
   private readonly sessionId: () => SessionId;
@@ -600,17 +460,4 @@ class Emitter {
 function laneOf(frame: StdoutFrame): ParentToolUseId | null {
   const parent = (frame as { parent_tool_use_id?: unknown }).parent_tool_use_id;
   return typeof parent === 'string' && parent.length > 0 ? (parent as ParentToolUseId) : null;
-}
-
-function questionOf(raw: unknown): Question {
-  const q = (raw ?? {}) as { question?: unknown; header?: unknown; options?: unknown[]; multiSelect?: unknown };
-  return QuestionSchema.parse({
-    question: String(q.question ?? ''),
-    header: String(q.header ?? ''),
-    options: (q.options ?? []).map((o) => {
-      const opt = (o ?? {}) as { label?: unknown; description?: unknown; preview?: unknown };
-      return { label: String(opt.label ?? ''), description: stringOrNull(opt.description), preview: stringOrNull(opt.preview) };
-    }),
-    multiSelect: q.multiSelect === true,
-  });
 }
