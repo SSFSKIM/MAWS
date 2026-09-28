@@ -50,7 +50,11 @@ export class SessionStatusTracker {
   peakTreeRssKiB: number | null = null;
   private catalogState: Catalog = { commands: [], agents: [], skills: [], terminalSlashCommands: [], revision: 0 };
   private modeKnown = false;
-  private currentTurnEventId: EventId | null = null;
+  private currentTurnEventId: EventId | null = null; // the last main-lane turn.started event id: status.turn.id while that turn is open
+
+  get turnEventId(): EventId | null {
+    return this.currentTurnEventId;
+  }
   private expiryTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(

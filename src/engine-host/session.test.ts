@@ -99,7 +99,7 @@ describe('EngineSession: the handshake, journal-before-normalise and the gateway
     const row = journal.rows.at(-1)!;
     expect(row).toMatchObject({ direction: 'out', frame: { type: 'user', uuid: messageUuid, origin: { kind: 'human' }, parent_tool_use_id: null, message: { role: 'user', content: 'hi' } } });
     expect(events.map((e) => [e.kind, e.seq])).toEqual([['turn.started', row.seq], ['user.message', row.seq]]);
-    expect(session.status().turn).toMatchObject({ origin: 'human', acceptedAt: null, userMessageUuids: [messageUuid] });
+    expect(session.status().turn).toEqual({ id: events[0]!.id, origin: 'human', startedAt: expect.any(String), acceptedAt: null, userMessageUuids: [messageUuid] }); // id: the turn.started event's
   });
 
   it('every event carries the seq of a journal row it derives from, and normaliser warnings become meta rows', async () => {
@@ -691,6 +691,8 @@ describe('EngineSession (M4): the termination ladder, stdout EOF, held frames, t
     transport.push({ type: 'stream_event', event: { type: 'message_delta', delta: { stop_reason: 'end_turn', safeguard_results: [{ type: 'dangerous_tool_use', status: { type: 'unavailable', reason: 'provider_not_anthropic' } }] } }, session_id: 's', parent_tool_use_id: null, uuid: 'se-9', timestamp: '2026-09-28T10:00:05.000Z' });
     await flush();
     expect(session.status().gateway.localLane).toEqual({ observedInTurn: turnA.id, at: '2026-09-28T10:00:05.000Z' });
+    expect(session.status().turn?.id).toBe(turnA.id); // C11 compares the two from the status alone
+    EngineSessionStatusSchema.parse(session.status());
     transport.push({ type: 'result', subtype: 'success', session_id: 's', is_error: false, duration_ms: 1, num_turns: 1, total_cost_usd: 0, usage: {}, permission_denials: [], terminal_reason: 'completed', origin: { kind: 'human' }, user_message_uuids: [a.messageUuid] });
     await flush();
     expect(session.status().gateway.localLane).toMatchObject({ observedInTurn: turnA.id }); // still turn A's until the next turn starts

@@ -287,12 +287,14 @@ export class EngineSession {
   status(): EngineSessionStatus {
     const turn = this.normalizer.state.currentTurn;
     const tracked = this.tracker.snapshot();
+    const turnId = this.tracker.turnEventId;
     const env = this.plan.env;
     return {
       appSessionId: this.spec.appSessionId, engineSessionId: this.normalizer.state.sessionId ?? this.plan.sessionId, pid: this.transport?.pid ?? null, launchId: this.plan.launchId, launchedAt: this.launchedAt,
       cwd: this.spec.cwd, pendingPlan: this.pendingPlan,
       process: this.processState, exit: this.exitInfo, engineState: tracked.engineState, activity: tracked.activity,
-      turn: turn ? { origin: turn.origin, startedAt: turn.startedAt, acceptedAt: turn.acceptedAt, userMessageUuids: [...turn.userMessageUuids] } : null,
+      // every open turn was opened by a turn.started the tracker saw, so its id is that event's
+      turn: turn && turnId ? { id: turnId, origin: turn.origin, startedAt: turn.startedAt, acceptedAt: turn.acceptedAt, userMessageUuids: [...turn.userMessageUuids] } : null,
       model: { requested: this.spec.model, resolved: tracked.resolvedModel }, effort: this.spec.effort,
       permissionMode: tracked.permissionMode, prePlanMode: tracked.prePlanMode,
       gateway: { mode: this.plan.gateway, ...tracked.gateway },
