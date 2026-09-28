@@ -893,7 +893,7 @@ Ready to paste into the charter's C3 section as "**Residue decisions (C3, 2026-0
   Rationale: the recovery guarantee is only as good as the persistence under it; each finding named a way the persisted state could lie to the resumed session or the human.
   Date/Author: 2026-09-28, controller.
 - Decision: (M4 re-review 2) The `#` path guard stops predicting where a path resolves (two fixes in a row were defeated by dangling and nested symlinks) and uses the confined-open pattern: an existing, realpath'd parent inside a realpath'd listed folder, and `O_NOFOLLOW` on the final component. A symlinked memory file that the dialog itself lists is followed once through its own realpath; anything else that is a link at the final component is refused with a clear message.
-  Rationale: the kernel, not a lexical walk, decides what the final component is; the trade (a hand-made symlink inside a memory folder is refused) is the right side of "no arbitrary writes through this command".
+  Rationale: the kernel, not a lexical walk, decides what the final component is; the trade (a hand-made symlink inside a memory folder is refused) is the right side of "no arbitrary writes through this command". Consequence for C7 and C11 (bee5a43): a `path` target inside a listed folder that does not exist yet (the auto-memory folder often does not) is refused with a clear message; only the `project` and `user` files get their parent created. A caller that needs the folder created asks the engine (a turn writes memory) or a later child adds a `session.memoryPrepare`.
   Date/Author: 2026-09-28, controller.
 
 ## Outcomes & Retrospective
