@@ -2,7 +2,7 @@
 // `styles/tokens.css`, read as computed values at runtime and rebuilt on every theme change, so no component and no
 // adapter ever holds a colour literal. `read` is injected so tests need no DOM; production passes
 // `getComputedStyle(document.documentElement).getPropertyValue`.
-import type { TerminalTheme } from './renderer';
+import type { TerminalFont, TerminalTheme } from './renderer';
 
 export const ANSI_NAMES = ['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white'] as const;
 
@@ -41,4 +41,10 @@ export function readTerminalTheme(read: (name: string) => string): TerminalTheme
 export function readDocumentTheme(): TerminalTheme {
   const style = getComputedStyle(document.documentElement);
   return readTerminalTheme((name) => style.getPropertyValue(name));
+}
+
+// Residue *Fonts and palette*: `--font-mono` at `--text-code`, line height 1.2.
+export function readDocumentFont(): TerminalFont {
+  const style = getComputedStyle(document.documentElement);
+  return { family: style.getPropertyValue('--font-mono').trim(), size: parseFloat(style.getPropertyValue('--text-code')) || 13, lineHeight: 1.2 };
 }

@@ -45,7 +45,9 @@ export function createXtermRenderer(opts: RendererOptions): TerminalRenderer {
     fontSize: opts.font.size,
     lineHeight: opts.font.lineHeight,
     theme: toXtermTheme(opts.theme),
-    linkHandler: { activate: (ev, text) => linkHandler(text, ev) },
+    // xterm drops OSC 8 links whose scheme is not http(s) before any handler runs unless this is set; main's
+    // `openExternalUrl` is the one scheme check (Residue *Copy, paste and links*).
+    linkHandler: { activate: (ev, text) => linkHandler(text, ev), allowNonHttpProtocols: true },
   });
   const fit = new FitAddon();
   const serializer = new SerializeAddon();
@@ -128,6 +130,9 @@ export function createXtermRenderer(opts: RendererOptions): TerminalRenderer {
       return () => accelerationListeners.delete(cb);
     },
     fit() {
+      // The fit addon clamps a hidden or detached container to 2×1 instead of refusing it, so the layout is checked
+      // first: a size is only measured for a connected element with a non-zero client box.
+      if (!element.isConnected || element.clientWidth === 0 || element.clientHeight === 0) return null;
       const dims = fit.proposeDimensions();
       if (!dims || !Number.isFinite(dims.cols) || !Number.isFinite(dims.rows) || dims.cols < 1 || dims.rows < 1) return null;
       return { cols: dims.cols, rows: dims.rows };
