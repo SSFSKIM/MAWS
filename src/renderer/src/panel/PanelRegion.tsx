@@ -6,7 +6,7 @@
 import type { AppSessionId } from '@shared/graph/ids';
 import { runAction } from '../keymap/actions-runtime';
 import { useLayout } from '../stores/layout';
-import { activeTab } from '../stores/layout-model';
+import { activeTab, sessionOfTab } from '../stores/layout-model';
 import { IconButton, MaximizeIcon, PanelIcon, RestoreIcon } from '../app/IconButton';
 import { COLLAPSE_THRESHOLD_PX, PANEL_BOUNDS, panelWidth } from '../app/regions';
 import { Resizer } from '../app/Resizer';
@@ -68,7 +68,7 @@ export function PanelRegion() {
 function Host({ maximized }: { maximized: boolean }) {
   const Panel = useSlot('panelHost');
   const tab = useLayout((s) => activeTab(s.main));
-  const appSessionId: AppSessionId | null = tab?.kind === 'session' ? tab.appSessionId : null;
+  const appSessionId: AppSessionId | null = sessionOfTab(tab);
   const pinned = useLayout((s) => s.panelPinned);
   const own = useLayout((s) => (appSessionId ? s.panelBySession.get(appSessionId) : undefined));
   const activeNoSession = useLayout((s) => s.panelActiveNoSession);

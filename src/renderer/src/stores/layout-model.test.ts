@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import type { AppSessionId } from '@shared/graph/ids';
+import type { AgentId, AppSessionId } from '@shared/graph/ids';
 import { LAYOUT_DEFAULTS, LayoutMainSchema, type LayoutMain, type TabRef } from '@shared/ipc/schema/layout';
 import {
-  activateTab, closeTab, cycleTab, dropSession, focusPane, moveTab, openSession, openTab, reopenClosed, repairMain, selectTab,
+  activateTab, activeTab, closeTab, cycleTab, dropSession, focusPane, moveTab, openSession, openTab, reopenClosed, repairMain, selectTab, sessionOfTab,
   setSplitRatio, splitWithActive, togglePinned,
 } from './layout-model';
 
@@ -201,6 +201,31 @@ describe('accounts and settings tabs', () => {
     expect(togglePinned(togglePinned(m, 'settings'), 'accounts')).toBe(m);
     expect(ids(closeTab(closeTab(m, 'settings'), 'accounts'))).toEqual([['overview']]);
     expect(LayoutMainSchema.safeParse(m).success).toBe(true);
+  });
+});
+
+describe('file tabs and the panel’s session (C8’s tenth ask)', () => {
+  const file = (line: number | null, appSessionId: AppSessionId | null = A_ID) => ({ kind: 'file' as const, path: '/repo/src/app.ts', line, appSessionId });
+  const FILE_ID = 'file:/repo/src/app.ts';
+
+  it('openTab on an open file tab at another line takes the new line and activates it, keeping its pin', () => {
+    let m = togglePinned(openTab(abc(), file(3)), FILE_ID);
+    m = openTab(activateTab(m, 'session:a'), file(42));
+    expect(ids(m)[0].filter((id) => id === FILE_ID)).toHaveLength(1);
+    expect(active(m)).toEqual([FILE_ID]);
+    expect(m.panes[0].tabs.find((t) => t.id === FILE_ID)).toEqual({ id: FILE_ID, ...file(42), pinned: true });
+    expect(LayoutMainSchema.safeParse(m).success).toBe(true);
+  });
+
+  it('the panel follows the session of the focused pane’s active session, agent, diff and file tab', () => {
+    const B = 'b' as AppSessionId;
+    expect(sessionOfTab(activeTab(abc()))).toBe('c');
+    expect(sessionOfTab(activeTab(openTab(abc(), { kind: 'agent', appSessionId: B, agentId: 'agent-1' as AgentId })))).toBe('b');
+    expect(sessionOfTab(activeTab(openTab(abc(), { kind: 'diff', appSessionId: B, ref: 'HEAD' })))).toBe('b');
+    expect(sessionOfTab(activeTab(openTab(abc(), file(1))))).toBe('a');
+    expect(sessionOfTab(activeTab(openTab(abc(), file(1, null))))).toBeNull();
+    expect(sessionOfTab(activeTab(base))).toBeNull(); // the Overview
+    expect(sessionOfTab(activeTab(openTab(abc(), { kind: 'diagnostics' })))).toBeNull();
   });
 });
 

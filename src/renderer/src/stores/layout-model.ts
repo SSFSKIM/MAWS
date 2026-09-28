@@ -25,6 +25,20 @@ export function activeTab(main: LayoutMain): TabRef | null {
   return pane.tabs.find((t) => t.id === pane.activeTabId) ?? null;
 }
 
+// The session a tab belongs to, which the right panel shows (C8's tenth ask): a session, agent or diff tab's, a file
+// tab's when it was opened from a session; none for the Overview and the app-wide tabs.
+export function sessionOfTab(tab: TabRef | null): AppSessionId | null {
+  switch (tab?.kind) {
+    case 'session':
+    case 'agent':
+    case 'diff':
+    case 'file':
+      return tab.appSessionId;
+    default:
+      return null;
+  }
+}
+
 function locate(main: LayoutMain, id: string): { pane: Pane; index: number } | null {
   for (const pane of [0, 1] as const) {
     const index = main.panes[pane]?.tabs.findIndex((t) => t.id === id) ?? -1;
@@ -85,8 +99,15 @@ export function openTab(main: LayoutMain, target: TabTarget, opts: { pane?: Pane
   const activate = opts.activate ?? true;
   const found = locate(main, tabId(target));
   if (found) {
-    // The settings tab is one tab whatever its section: opening it again moves it to the section asked for.
-    const updated = target.kind === 'settings' ? replaceTab(main, found.pane, found.index, toRef(target)) : main;
+    // The settings tab is one tab whatever its section: opening it again moves it to the section asked for. A file tab
+    // is one tab whatever its line: opening it at another line moves it there (C8's tenth ask), keeping its pin.
+    const open = paneAt(main, found.pane).tabs[found.index];
+    const updated =
+      target.kind === 'settings'
+        ? replaceTab(main, found.pane, found.index, toRef(target))
+        : target.kind === 'file' && open.kind === 'file' && open.line !== target.line
+          ? replaceTab(main, found.pane, found.index, { ...open, line: target.line })
+          : main;
     return activate ? activateTab(updated, tabId(target)) : { ...updated, focusedPane: found.pane };
   }
   return place(main, toRef(target), paneOf(main, opts.pane ?? 'focused'), 'afterActive', activate);

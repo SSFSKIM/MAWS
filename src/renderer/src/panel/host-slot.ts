@@ -6,7 +6,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { PanelTabRef } from '@shared/ipc/schema/layout';
 
 export interface PanelHostProps {
-  appSessionId: AppSessionId | null; // the session the panel shows (the focused pane's session tab, else null)
+  appSessionId: AppSessionId | null; // the session the panel shows: the focused pane's active tab's session (session, agent, diff, or a file tab opened from a session), else null
   tabs: PanelTabRef[]; // effectivePanelTabs(appSessionId): the `panel.pinned` refs first, then the session's own
   activeTabId: string | null;
   maximized: boolean;
