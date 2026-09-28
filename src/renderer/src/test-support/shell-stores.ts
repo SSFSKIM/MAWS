@@ -47,5 +47,6 @@ export function resetShellStores(): void {
     panelActiveNoSession: null,
     hydrated: true,
     focusedCardAppId: null,
+    focusRequest: null,
   });
 }

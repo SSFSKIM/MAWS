@@ -5,7 +5,7 @@
 // sessions that exist. `persistLayout` writes each changed key back through `layout.set`, 250 ms after its last change
 // and on `beforeunload`.
 import { create } from 'zustand';
-import type { AppSessionId } from '@shared/graph/ids';
+import type { AppSessionId, AttentionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import {
   LAYOUT_DEFAULTS,
@@ -36,6 +36,8 @@ export interface LayoutState {
   hydrated: boolean;
   dragging: { tabId: string; fromPane: Pane } | null;
   focusedCardAppId: AppSessionId | null;
+  // The item a notification click (`attention.navigate`) asked to be shown, for C6's transcript to jump to and clear.
+  focusRequest: { appSessionId: AppSessionId; attentionId: AttentionId } | null;
   hydrate(client: MawsBridge, known: (appSessionId: AppSessionId) => boolean): Promise<void>;
   openTab(ref: TabTarget, opts?: { pane?: model.PaneTarget; activate?: boolean }): void;
   openSession(appSessionId: AppSessionId, opts?: { split?: boolean }): void;
@@ -60,6 +62,7 @@ export interface LayoutState {
   effectivePanelTabs(appSessionId: AppSessionId | null): PanelTabRef[]; // panelPinned first, then the session's own
   setDragging(dragging: LayoutState['dragging']): void;
   focusCard(appSessionId: AppSessionId | null): void;
+  requestFocus(request: LayoutState['focusRequest']): void;
 }
 
 const PANEL_KEY = /^panel\.([^.]+)$/;
@@ -108,6 +111,7 @@ export function createLayoutStore() {
       hydrated: false,
       dragging: null,
       focusedCardAppId: null,
+      focusRequest: null,
 
       async hydrate(client, known) {
         const absent: LayoutKey[] = []; // keys layout.json does not hold yet (not keys that failed to read)
@@ -224,6 +228,7 @@ export function createLayoutStore() {
       },
       setDragging: (dragging) => set({ dragging }),
       focusCard: (appSessionId) => set({ focusedCardAppId: appSessionId }),
+      requestFocus: (focusRequest) => set({ focusRequest }),
     };
   });
 }
