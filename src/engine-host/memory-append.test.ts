@@ -74,6 +74,23 @@ describe('memoryAppend (#)', () => {
     expect(await readFile(join(root, 'auto-memory', 'notes.md'), 'utf8')).toBe('\n- ok\n');
   });
 
+  it('refuses a dangling symlink inside a listed folder that points outside it, creating nothing there (M4 re-review)', async () => {
+    const s = await session();
+    const outside = join(root, 'outside-dangling');
+    await mkdir(outside, { recursive: true });
+    await mkdir(join(root, 'auto-memory'), { recursive: true });
+    await symlink(join(outside, 'not-yet.md'), join(root, 'auto-memory', 'dangling.md')); // a file link to a path that does not exist
+    await symlink(join(outside, 'missing-dir'), join(root, 'auto-memory', 'dangling-dir')); // a directory link to a missing directory
+    await expect(memoryAppend(s.session, { text: 'x', target: { kind: 'path', path: join(root, 'auto-memory', 'dangling.md') } })).rejects.toThrow(/not one of the memory files/);
+    await expect(memoryAppend(s.session, { text: 'x', target: { kind: 'path', path: join(root, 'auto-memory', 'dangling-dir', 'new.md') } })).rejects.toThrow(/not one of the memory files/);
+    await expect(readFile(join(outside, 'not-yet.md'), 'utf8')).rejects.toThrow();
+    await expect(readFile(join(outside, 'missing-dir', 'new.md'), 'utf8')).rejects.toThrow();
+    // a dangling link that stays inside the folder is followed to its would-be target and accepted
+    await symlink(join(root, 'auto-memory', 'later.md'), join(root, 'auto-memory', 'inside.md'));
+    expect(await memoryAppend(s.session, { text: 'in', target: { kind: 'path', path: join(root, 'auto-memory', 'inside.md') } })).toMatchObject({ created: true });
+    expect(await readFile(join(root, 'auto-memory', 'later.md'), 'utf8')).toBe('\n- in\n');
+  });
+
   it('refuses a path outside the listed files and folders, writing nothing', async () => {
     const s = await session();
     const outside = join(root, 'elsewhere.md');

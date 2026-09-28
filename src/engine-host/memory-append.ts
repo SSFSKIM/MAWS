@@ -4,7 +4,7 @@
 // creates it when missing and appends `\n- ${text}\n`; the engine re-reads CLAUDE.md on the next turn. The path guard
 // compares real paths (M4 review): the target's and every listed file's and folder's, each resolved through its
 // nearest existing ancestor, so a symlink inside a listed folder cannot carry a write outside it.
-import { appendFile, mkdir, realpath, stat } from 'node:fs/promises';
+import { appendFile, lstat, mkdir, readlink, realpath, stat } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { getMemoryDialog } from './controls';
 import type { EngineSession } from './session';
@@ -42,18 +42,27 @@ async function chooseFile(dialog: { files: { kind: string; path: string }[]; fol
 }
 
 // The real path of `p`, which may not exist yet: its nearest existing ancestor resolved through `realpath`, with the
-// missing tail appended.
-async function realPathOf(p: string): Promise<string> {
+// missing tail appended. `realpath` answers ENOENT for a dangling symlink too, which `appendFile` would follow and
+// create outside (M4 re-review), so a component is treated as missing only when `lstat` says it does not exist; a
+// component that exists as a link whose target is missing is replaced by its would-be target (`readlink`, relative to
+// its directory) and resolved again, so the caller checks where the write would really land.
+async function realPathOf(p: string, hops = 0): Promise<string> {
+  if (hops > MAX_LINK_HOPS) throw Object.assign(new Error(`too many symbolic links resolving ${p}`), { code: 'ELOOP' });
   let current = resolve(p);
   const tail: string[] = [];
   for (;;) {
     try {
       return join(await realpath(current), ...tail);
     } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      const entry = await lstat(current).catch((e: NodeJS.ErrnoException) => (e.code === 'ENOENT' ? null : Promise.reject(e)));
+      if (entry?.isSymbolicLink()) return realPathOf(join(resolve(dirname(current), await readlink(current)), ...tail), hops + 1); // a dangling link
       const parent = dirname(current);
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT' || parent === current) throw error;
-      tail.unshift(basename(current));
+      if (parent === current) throw error;
+      tail.unshift(basename(current)); // genuinely missing: keep walking up
       current = parent;
     }
   }
 }
+
+const MAX_LINK_HOPS = 40;
