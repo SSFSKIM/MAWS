@@ -331,6 +331,10 @@ The engine's on-disk JSONL, which C4 tails and backfills from. Loose objects; th
 export interface TranscriptRecord { type: string; uuid?: string; parentUuid?: string | null; sessionId?: string; isSidechain?: boolean;
   agentId?: string; timestamp?: string; message?: unknown; [k: string]: unknown }
 export interface LastPromptAnchor extends TranscriptRecord { type: 'last-prompt'; lastPrompt: string; rewound?: boolean; leafUuid?: string }
+// `lastPrompt` is the prompt most recently submitted when the anchor was written; on a `rewound: true` anchor that is the prompt
+// rewound away (the same text the `rewind_conversation` response returns as `prefillText`), never the prompt about to be sent.
+// `leafUuid` on a rewound anchor names the assistant record preceding the rewind point (`precedingAssistantUuid`); `explicit`
+// and `sessionId` are retained through the index signature. Evidence grades in Surprises & Discoveries (2026-09-28, M2).
 export interface AgentMeta { agentType: string; description: string; toolUseId: string; spawnDepth: number; requestShape?: string; requestNonInteractive?: boolean; model?: string; [k: string]: unknown }   // agent-<id>.meta.json
 
 export function parseTranscriptRecord(line: unknown): TranscriptRecord;
@@ -554,13 +558,13 @@ C3's and C4's conformance tests import this rather than re-reading files. Both p
 {"type":"user","uuid":"u2","parentUuid":"a1","sessionId":"S","isSidechain":false,"timestamp":"2026-09-28T10:00:02.000Z","message":{"role":"user","content":"Also remember BANANA."}}
 {"type":"system","uuid":"s1","parentUuid":"u2","sessionId":"S","isSidechain":false,"subtype":"informational","content":"note","timestamp":"2026-09-28T10:00:03.000Z"}
 {"type":"assistant","uuid":"a2","parentUuid":"s1","sessionId":"S","isSidechain":false,"timestamp":"2026-09-28T10:00:04.000Z","message":{"role":"assistant","content":[{"type":"text","text":"OK"}]}}
-{"type":"last-prompt","lastPrompt":"Also remember BANANA.","leafUuid":"a2"}
-{"type":"last-prompt","lastPrompt":"List every word I asked you to remember.","rewound":true,"leafUuid":"a2"}
+{"type":"last-prompt","sessionId":"S","lastPrompt":"Also remember BANANA."}
+{"type":"last-prompt","sessionId":"S","rewound":true,"lastPrompt":"Also remember BANANA.","leafUuid":"a1","explicit":true}
 {"type":"user","uuid":"u3","parentUuid":"a1","sessionId":"S","isSidechain":false,"timestamp":"2026-09-28T10:00:05.000Z","message":{"role":"user","content":"List every word I asked you to remember."}}
 {"type":"assistant","uuid":"a3","parentUuid":"u3","sessionId":"S","isSidechain":false,"timestamp":"2026-09-28T10:00:06.000Z","message":{"role":"assistant","content":[{"type":"text","text":"APPLE"}]}}
 ```
 
-Expected: `currentChain` returns `chain` uuids exactly `['u1', 'a1', 'u3', 'a3']`, `leaf.uuid === 'a3'`, `gap === null`; `u2`, `s1`, `a2` (the abandoned branch, one of them a non-message record) and both anchors are excluded, and the second anchor parses as `LastPromptAnchor` with `rewound === true`. The gap case reuses the file: over the same records with `a1` removed, `chain` is `['u3', 'a3']` and `gap` is `{ parentUuid: 'a1', childUuid: 'u3' }`. The pass-2 snapshots stay in the suite as a parse-only case plus one gap assertion on real data: every record of the three `jsonl_snapshot` rows of `pass2/rewind` parses as `TranscriptRecord`, and `currentChain` over the `after-next-turn` records reports `gap.parentUuid === 'af765f44-46a0-45e9-acdc-c6fa44c05d80'` with `gap.childUuid === 'a4d68c72-bdde-4afa-bc32-408c9dac42e6'` (the new branch's parent is absent from the filtered snapshot).
+Expected: `currentChain` returns `chain` uuids exactly `['u1', 'a1', 'u3', 'a3']`, `leaf.uuid === 'a3'`, `gap === null`; `u2`, `s1`, `a2` (the abandoned branch, one of them a non-message record) and both anchors are excluded, and the second anchor parses as `LastPromptAnchor` with `rewound === true`, `lastPrompt` equal to the rewound-away prompt (`Also remember BANANA.`) and `leafUuid === 'a1'`. The gap case reuses the file: over the same records with `a1` removed, `chain` is `['u3', 'a3']` and `gap` is `{ parentUuid: 'a1', childUuid: 'u3' }`. The pass-2 snapshots stay in the suite as a parse-only case plus one gap assertion on real data: every record of the three `jsonl_snapshot` rows of `pass2/rewind` parses as `TranscriptRecord`, and `currentChain` over the `after-next-turn` records reports `gap.parentUuid === 'af765f44-46a0-45e9-acdc-c6fa44c05d80'` with `gap.childUuid === 'a4d68c72-bdde-4afa-bc32-408c9dac42e6'` (the new branch's parent is absent from the filtered snapshot).
 
 ### Dependencies
 
@@ -795,6 +799,8 @@ If the PTY host logs `Error: dlopen … pty.node` under Electron: run `pnpm rebu
   Evidence: built `out/renderer/assets/*.css`; computed `--font-ui` equals the token in dev and in the production build.
 - Observation (M1): `contextBridge` delivers a `TypeError` thrown in the preload to the page as a plain `Error` (`name === 'Error'`) with the message intact, so the page cannot distinguish error subclasses across the bridge.
   Evidence: `window.maws.on('nope.thing')` in the dev page: `constructor.name === 'Error'`, message `unknown event: nope.thing`.
+- Observation (M2, coordinator correction from the C4 author): the synthetic rewind fixture first written here had the rewound anchor's `lastPrompt` inverted (it carried the prompt about to be sent). The engine's `rewound: true` anchor carries the prompt that was rewound away, which is also the `prefillText` the `rewind_conversation` response returns. The pass-2 snapshots cannot show `leafUuid` or `explicit`: the probe's `summarizeRecord` (`scenarios/pass2/common.mjs`) projects each record down to `type, subtype, uuid, parentUuid, sessionId, isSidechain, rewound, lastPrompt, text`, so their absence from `rewind.jsonl` is the probe's, not the engine's. Evidence grades: `lastPrompt` semantics verified in the fixture; `leafUuid` present on the rewound anchor per the C2 findings (`findings-pass2.md` §4, `last-prompt {rewound: true, leafUuid}`) and equal to the preceding assistant record per the C4 author's real transcript; `explicit: true` per the C4 author only, unverified by any probe fixture. The fixture now carries the real shape; `currentChain` never walks anchors, so the chain assertions are unchanged.
+  Evidence: `pass2/rewind.jsonl` seq 42 `{"rewound":true,"targetMessageUuid":"36a2aa44…","prefillText":"Also remember the word BANANA. Reply OK.","precedingAssistantUuid":"edf0f954…"}`; `after-next-turn` snapshot record 6 `{"type":"last-prompt","sessionId":"bdb23713…","rewound":true,"lastPrompt":"Also remember the word BANANA. Reply OK."}` followed by record 7, the new user `a4d68c72` whose content is the next prompt.
 
 ## Decision Log
 
