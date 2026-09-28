@@ -133,6 +133,7 @@ export class ControlClient {
       entry?.reject(failure);
       throw failure;
     }
+    opts.onWritten?.(requestId);
     const entry = this.pendingTable.get(requestId);
     if (entry) {
       entry.timer = unref(

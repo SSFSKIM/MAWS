@@ -3,6 +3,7 @@
 // Request and response types live in src/shared/wire/control.ts (C1's file, C3's delimited block). A subtype absent
 // here (`fork_conversation`, which the engine answers `unsupported`) goes through `ControlClient.requestRaw`.
 import * as z from 'zod';
+import type { RequestId } from '@shared/graph/ids';
 import type * as C from '@shared/wire/control';
 import {
   CancelAsyncMessageResponseSchema,
@@ -105,7 +106,8 @@ export function requestClassOf(subtype: string): Exclude<RequestClass, 'human'> 
 // ---------------------------------------------------------------------------------------------------------------------
 // One function per subtype. `opts` is the client's (`timeoutMs`, `signal`).
 
-export type RequestOptions = { timeoutMs?: number; signal?: AbortSignal };
+// `onWritten` runs once the request frame reached the pipe, with the minted id (an operation's receipt, M5).
+export type RequestOptions = { timeoutMs?: number; signal?: AbortSignal; onWritten?: (requestId: RequestId) => void };
 type Fn<S extends OutboundSubtype> = (client: ControlClient, payload: OutboundRequest<S>, opts?: RequestOptions) => Promise<OutboundResponse<S>>;
 const fn =
   <S extends OutboundSubtype>(subtype: S): Fn<S> =>
