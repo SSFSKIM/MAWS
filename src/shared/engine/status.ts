@@ -1,10 +1,10 @@
 // The engine host's status for one live process (charter §4.4; C3 execution document, Interfaces "Process table and
-// status"): what `session.status` and `engine.sessions` answer and C8's Session info and C12's budget read. M3 fills
-// the process, turn, permission-mode, gateway, grant and request fields; M4's process table adds background tasks,
-// held peer messages, queue, memory and `toSessionRecordPatch`. Strict: an app shape.
+// status"): what `session.status` and `engine.sessions` answer and C8's Session info and C12's budget read, and
+// `toSessionRecordPatch`, what C4's index applies from a status. Strict: an app shape.
 import * as z from 'zod';
 import { AUTO_MODE_REFUSAL_CODES, PermissionModeSchema } from '../graph/enums';
-import { AppSessionIdSchema, MessageUuidSchema, SessionIdSchema, TaskIdSchema } from '../graph/ids';
+import { AppSessionIdSchema, EventIdSchema, MessageUuidSchema, SessionIdSchema, TaskIdSchema } from '../graph/ids';
+import type { SessionRecord } from '../graph/session';
 import { EffortSchema } from './launch-spec';
 
 export const EngineSessionStatusSchema = z.strictObject({
@@ -22,10 +22,15 @@ export const EngineSessionStatusSchema = z.strictObject({
   prePlanMode: PermissionModeSchema.nullable(),
   gateway: z.strictObject({
     mode: z.enum(['gateway', 'direct']), baseUrl: z.string().nullable(), verified: z.enum(['pending', 'routed', 'direct', 'mismatch']),
-    autoModeServer: z.enum(['enabled', 'disabled', 'unknown']), localLaneObserved: z.boolean(),
+    autoModeServer: z.enum(['enabled', 'disabled', 'unknown']),
+    localLane: z.strictObject({ observedInTurn: EventIdSchema, at: z.string() }).nullable(), // C11's correction (M4): the local auto-mode lane observed in the current turn; observedInTurn is that turn's turn.started event id; cleared at the next turn.started
   }),
   subagentModel: z.string().nullable(), modelOverrides: z.record(z.string(), z.string()), // ANTHROPIC_DEFAULT_*_MODEL in effect (names and values from the constructed env)
   engineVersion: z.string().nullable(), fileCheckpointing: z.boolean(),
+  fastMode: z.strictObject({ state: z.enum(['off', 'cooldown', 'on']).nullable(), disabledReason: z.string().nullable() }), // C11's ask: from initialize and every system/init (`fast_mode_state`, `fast_mode_disabled_reason`; pass2/real-settings seq 15 carries `off` / `sdk_opt_in_required`); nulls before the first frame
+  plugins: z.array(z.strictObject({ name: z.string(), path: z.string(), source: z.string().nullable(), version: z.string().nullable() })), // system/init.plugins (real-settings lists eleven)
+  pluginErrors: z.array(z.strictObject({ plugin: z.string(), type: z.string(), message: z.string(), path: z.string().nullable() })), // system/init.plugin_errors (SPEC 45 §45.10.2; absent when empty)
+  pluginWarnings: z.array(z.strictObject({ plugin: z.string(), type: z.string(), message: z.string() })), // system/init.plugin_warnings; all three empty before the first frame
   backgroundTasks: z.array(z.strictObject({ taskId: TaskIdSchema, taskType: z.string(), description: z.string(), ambient: z.boolean() })),
   grants: z.array(z.string()), // the snapshot's rule strings
   mcpServers: z.array(z.strictObject({ name: z.string(), status: z.string(), source: z.string().nullable() })),
@@ -36,3 +41,23 @@ export const EngineSessionStatusSchema = z.strictObject({
   journalPath: z.string(), hostHooks: z.array(z.string()), lastEventSeq: z.number().int(),
 });
 export type EngineSessionStatus = z.infer<typeof EngineSessionStatusSchema>;
+
+export type SessionRecordPatch = Partial<Pick<SessionRecord, 'engineSessionId' | 'engineVersion' | 'gateway' | 'model' | 'effort' | 'permissionMode' | 'holder'>>;
+
+// What C4's index applies from a status. The holder is `self` while this app holds a process and is left out once it
+// has exited (the index decides what holds it then); the gateway is left out until `get_status` verified it. The
+// record's permission mode requires a refusal exactly when requested and effective differ, so a mode the engine moved
+// to on its own (plan mode entered by a tool, the pre-plan mode restored) reads as the requested mode there.
+export function toSessionRecordPatch(s: EngineSessionStatus): SessionRecordPatch {
+  const { effective, refusal } = s.permissionMode;
+  const patch: SessionRecordPatch = {
+    engineSessionId: s.engineSessionId,
+    engineVersion: s.engineVersion,
+    model: { ...s.model },
+    effort: s.effort,
+    permissionMode: refusal === null ? { requested: effective, effective, refusal } : { ...s.permissionMode },
+  };
+  if (s.gateway.verified !== 'pending') patch.gateway = { routed: s.gateway.verified === 'routed', baseUrl: s.gateway.baseUrl, autoModeServer: s.gateway.autoModeServer };
+  if (s.process !== 'exited') patch.holder = { kind: 'self' };
+  return patch;
+}

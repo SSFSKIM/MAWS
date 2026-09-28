@@ -3,7 +3,7 @@
 // `{ version: 1, queue, grants, launchSpec }`, written to a temp file and renamed so a crash leaves the old file or the
 // new one, never half of either. Operations on one session run strictly in the order they were issued (one chain per
 // session, loads included), so a save issued at a process's exit is visible to the load of the resume that follows.
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import * as z from 'zod';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -28,6 +28,12 @@ export class FileSessionStateStore implements SessionStateStore {
     this.warn = opts.warn ?? ((message) => console.warn(`[engine-host state] ${message}`));
   }
 
+  exists(id: AppSessionId): Promise<boolean> {
+    return this.run(id, () => access(this.fileOf(id)).then(() => true, () => false));
+  }
+
+  // Reads only: the recovery transitions (uncertain, interrupted) happen in MessageQueue, never here, so `loadQueue` for
+  // an id with no live process shows the queue exactly as it was persisted.
   loadQueue(id: AppSessionId): Promise<QueueState> {
     return this.run(id, async () => (await this.read(id)).queue);
   }

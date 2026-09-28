@@ -88,7 +88,7 @@ describe('EngineSession: the handshake, journal-before-normalise and the gateway
     const status = EngineSessionStatusSchema.parse(session.status());
     expect(status).toMatchObject({
       process: 'ready', engineSessionId: '33333333-3333-4333-8333-333333333333', pid: 4242, permissionMode: { requested: 'auto', effective: 'auto', refusal: null },
-      gateway: { mode: 'gateway', baseUrl: RELAY_URL, verified: 'routed', autoModeServer: 'enabled', localLaneObserved: false }, modelOverrides: { ANTHROPIC_DEFAULT_SONNET_MODEL: 'claude-sonnet-5' },
+      gateway: { mode: 'gateway', baseUrl: RELAY_URL, verified: 'routed', autoModeServer: 'enabled', localLane: null }, modelOverrides: { ANTHROPIC_DEFAULT_SONNET_MODEL: 'claude-sonnet-5' },
       fileCheckpointing: true, journalPath: '/memory/journal.jsonl', model: { requested: 'sonnet', resolved: null }, pendingRequests: 0, grants: [],
     });
     expect(events).toEqual([]); // the handshake yields no events
@@ -117,7 +117,7 @@ describe('EngineSession: the handshake, journal-before-normalise and the gateway
   it('verifies direct as direct and flags a mismatch with a warning notice', async () => {
     const direct = setup({ spec: { gateway: 'direct' }, responder: defaultResponder({ get_status: () => ({ response: DIRECT_STATUS }) }) });
     await direct.session.start();
-    expect(direct.session.status().gateway).toEqual({ mode: 'direct', baseUrl: null, verified: 'direct', autoModeServer: 'disabled', localLaneObserved: false });
+    expect(direct.session.status().gateway).toEqual({ mode: 'direct', baseUrl: null, verified: 'direct', autoModeServer: 'disabled', localLane: null });
     const mismatch = setup({ responder: defaultResponder({ get_status: () => ({ response: DIRECT_STATUS }) }) });
     await mismatch.session.start();
     expect(mismatch.session.status().gateway.verified).toBe('mismatch');
@@ -329,13 +329,16 @@ describe('EngineSession: inbound requests, host hooks and exit', () => {
     expect(events.filter((e) => e.kind === 'permission.resolved')).toMatchObject([{ behavior: 'deny', message: 'Denied by the user in MAWS.' }]);
   });
 
-  it('a user frame whose write rejects is journaled as write_failed, not as a sent prompt', async () => {
+  it('a user frame whose write rejects is journaled as write_failed, not as a sent prompt; the entry goes back to the paused queue (M4)', async () => {
     const { session, journal, events } = setup({ transport: { failWrite: (f) => f.type === 'user' } });
     await session.start();
-    await expect(session.send('hi')).rejects.toThrow('EPIPE');
-    expect(journal.rows.at(-1)!.frame).toMatchObject({ event: 'write_failed', frameType: 'user', subtype: null, requestId: null });
+    const sent = await session.send('hi');
+    expect(sent).toMatchObject({ disposition: 'queued', messageUuid: null, entry: { state: 'queued', content: 'hi' } });
+    expect(journal.rows.at(-2)!.frame).toMatchObject({ event: 'write_failed', frameType: 'user', subtype: null, requestId: null });
+    expect(journal.rows.at(-1)!.frame).toEqual({ event: 'queue', action: 'pause', reason: 'write_failed' });
     expect(events.map((e) => e.kind)).toEqual(['error.raised']);
     expect(session.status().turn).toBeNull();
+    expect(session.status().queue).toEqual({ length: 1, paused: true });
   });
 
   it('an initialize response carrying one pending_permission_requests entry re-accepts it (event and broker item)', async () => {
@@ -387,7 +390,7 @@ describe('EngineSession: inbound requests, host hooks and exit', () => {
     await flush();
     transport.exit(1);
     await session.exited;
-    expect(journal.rows.at(-1)!.frame).toEqual({ event: 'exit', code: 1, signal: null, reason: 'crash', lostAttentionCount: 2 });
+    expect(journal.rows.at(-1)!.frame).toEqual({ event: 'exit', code: 1, signal: null, reason: 'crash', lostAttentionCount: 2, peakTreeRssKiB: null });
     expect(events.at(-1)).toMatchObject({ kind: 'process.exited', code: 1, reason: 'crash', lostAttentionCount: 2, seq: journal.rows.at(-1)!.seq });
     expect(lists.at(-1)).toEqual([]);
     expect(session.status()).toMatchObject({ process: 'exited', exit: { code: 1, signal: null, reason: 'crash' }, pendingRequests: 0 });

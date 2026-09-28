@@ -34,6 +34,7 @@ export interface GrantSnapshot {
 export const GrantSnapshotSchema = z.strictObject({ allow: z.array(z.string()) });
 
 export interface SessionStateStore {
+  exists(appSessionId: AppSessionId): Promise<boolean>; // a state file exists for the id (C10's ask: `session.queue.list` for an unreserved id)
   loadQueue(appSessionId: AppSessionId): Promise<QueueState>;
   saveQueue(appSessionId: AppSessionId, queue: QueueState): Promise<void>;
   loadGrants(appSessionId: AppSessionId): Promise<GrantSnapshot>;

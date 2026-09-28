@@ -51,6 +51,19 @@ describe('FileSessionStateStore', () => {
     expect(file.version).toBe(1);
   });
 
+  it('exists answers whether a state file exists; loadQueue on it shows the persisted queue untouched (no recovery transition)', async () => {
+    const store = new FileSessionStateStore(userData);
+    expect(await store.exists(ID)).toBe(false);
+    const persisted = { entries: [entry({ state: 'submitting', messageUuid: '11111111-1111-4111-8111-111111111111' as QueueEntry['messageUuid'], submittedAt: '2026-09-28T10:00:01.000Z' }), entry({ queueId: 'q-2', state: 'released', messageUuid: '22222222-2222-4222-8222-222222222222' as QueueEntry['messageUuid'], submittedAt: '2026-09-28T10:00:02.000Z' })], paused: false };
+    await store.saveQueue(ID, persisted);
+    expect(await store.exists(ID)).toBe(true);
+    const file = await readFile(join(userData, 'engine-host', 'state', `${ID}.json`), 'utf8');
+    expect(await store.loadQueue(ID)).toEqual(persisted);
+    expect(await readFile(join(userData, 'engine-host', 'state', `${ID}.json`), 'utf8')).toBe(file);
+    await store.forget(ID);
+    expect(await store.exists(ID)).toBe(false);
+  });
+
   it('a load issued after a save sees it, even across instances sharing the directory', async () => {
     const store = new FileSessionStateStore(userData);
     const saved = store.saveQueue(ID, { entries: [entry()], paused: false });

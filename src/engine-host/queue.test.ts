@@ -21,7 +21,7 @@ const flush = () => new Promise((r) => setImmediate(r));
 
 // A queue over fake session deps: `writes` are the user frames that reached the pipe, `rows` the meta rows journaled,
 // `turn` stands in for the normaliser's open turn (a write opens one, as the out row does).
-function harness(opts: { store?: MemorySessionStateStore; failWrite?: (frame: UserInputFrame) => boolean; holdWrites?: boolean } = {}) {
+async function harness(opts: { store?: MemorySessionStateStore; failWrite?: (frame: UserInputFrame) => boolean; holdWrites?: boolean; recovered?: boolean } = {}) {
   const store = opts.store ?? new MemorySessionStateStore();
   const writes: UserInputFrame[] = [];
   const rows: Record<string, unknown>[] = [];
@@ -44,6 +44,7 @@ function harness(opts: { store?: MemorySessionStateStore; failWrite?: (frame: Us
     onChange: (q) => changes.push(q),
     log: () => {},
   });
+  if (opts.recovered !== false) await queue.recover(); // what the session does before `ready`
   return { ...h, h, queue };
 }
 
@@ -56,7 +57,7 @@ afterEach(() => {
 
 describe('queue release never follows an engine-initiated turn', () => {
   it('a send while a turn is open is queued and persisted; the human turn\'s end releases it as a plain human frame', async () => {
-    const t = harness();
+    const t = await harness();
     t.h.turn = true;
     const { entry, disposition } = await t.queue.send('second');
     expect(disposition).toBe('queued');
@@ -75,7 +76,7 @@ describe('queue release never follows an engine-initiated turn', () => {
   });
 
   it('two sends in the same tick at an idle session serialise: sent then queued, one frame, the first persisted as submitting before the write', async () => {
-    const t = harness();
+    const t = await harness();
     const [first, second] = await Promise.all([t.queue.send('one'), t.queue.send('two')]);
     expect([first.disposition, second.disposition]).toEqual(['sent', 'queued']);
     expect(t.writes).toHaveLength(1);
@@ -86,7 +87,7 @@ describe('queue release never follows an engine-initiated turn', () => {
   });
 
   it('the engine\'s command_lifecycle releases the submission; the turn.ended naming it removes it and releases the next', async () => {
-    const t = harness();
+    const t = await harness();
     const { entry } = await t.queue.send('one');
     await t.queue.send('two');
     const uuid = entry.messageUuid!;
@@ -103,7 +104,7 @@ describe('queue release never follows an engine-initiated turn', () => {
   });
 
   it('a result naming a submission the engine never acknowledged still retires it', async () => {
-    const t = harness();
+    const t = await harness();
     const { entry } = await t.queue.send('one');
     t.h.turn = false;
     await t.queue.onTurnEnded(turnEnded({ userMessageUuids: [entry.messageUuid!] }));
@@ -112,7 +113,7 @@ describe('queue release never follows an engine-initiated turn', () => {
   });
 
   it('a task-notification turn and an echo receipt release nothing', async () => {
-    const t = harness();
+    const t = await harness();
     t.h.turn = true;
     await t.queue.send('waiting');
     t.h.turn = false;
@@ -125,7 +126,7 @@ describe('queue release never follows an engine-initiated turn', () => {
   });
 
   it('while paused a human turn\'s end releases nothing; setPaused(false) submits the head', async () => {
-    const t = harness();
+    const t = await harness();
     t.h.turn = true;
     await t.queue.send('held back');
     await t.queue.pause('interrupt');
@@ -138,7 +139,7 @@ describe('queue release never follows an engine-initiated turn', () => {
   });
 
   it('a send at an idle session goes behind entries still queued (FIFO), and setPaused(false) at idle releases the head', async () => {
-    const t = harness();
+    const t = await harness();
     t.h.turn = true;
     await t.queue.send('first');
     await t.queue.pause('interrupt');
@@ -152,7 +153,7 @@ describe('queue release never follows an engine-initiated turn', () => {
   });
 
   it('steer writes priority now at once with an entry still queued; promote steers a queued entry out of the queue', async () => {
-    const t = harness();
+    const t = await harness();
     t.h.turn = true;
     await t.queue.send('queued one');
     await t.queue.send('queued two');
@@ -168,7 +169,7 @@ describe('queue release never follows an engine-initiated turn', () => {
   });
 
   it('edit and remove act on queued entries only', async () => {
-    const t = harness();
+    const t = await harness();
     t.h.turn = true;
     const { entry } = await t.queue.send('draft');
     const edited = await t.queue.edit(entry.queueId, 'final');
@@ -183,7 +184,7 @@ describe('queue release never follows an engine-initiated turn', () => {
 
   it('a submission not acknowledged within 5 s posts one warning notice and stays submitting', async () => {
     vi.useFakeTimers();
-    const t = harness();
+    const t = await harness();
     const { entry } = await t.queue.send('one');
     await vi.advanceTimersByTimeAsync(4_999);
     expect(notices(t.rows)).toEqual([]);
@@ -194,7 +195,7 @@ describe('queue release never follows an engine-initiated turn', () => {
 
   it('an acknowledged submission posts no notice', async () => {
     vi.useFakeTimers();
-    const t = harness();
+    const t = await harness();
     const { entry } = await t.queue.send('one');
     t.queue.onLifecycle(lifecycle(entry.messageUuid!, 'queued'));
     await vi.advanceTimersByTimeAsync(10_000);
@@ -202,7 +203,7 @@ describe('queue release never follows an engine-initiated turn', () => {
   });
 
   it('refuses content over 1 MiB and sends nothing while the process is not ready', async () => {
-    const t = harness();
+    const t = await harness();
     await expect(t.queue.send('x'.repeat(1024 * 1024 + 1))).rejects.toThrow(/1 MiB/);
     t.h.ready = false;
     await expect(t.queue.send('hi')).rejects.toThrow(/not ready/);
@@ -219,7 +220,7 @@ describe('queue submission survives a crash around delivery', () => {
   it('a store holding a submitting entry recovers it as the uncertain head of a paused queue; setPaused(false) writes it exactly once and clears uncertain', async () => {
     const store = new MemorySessionStateStore();
     await store.saveQueue(ID, { entries: [entry({ queueId: 'q-later', content: 'later' }), entry({ queueId: 'q-sub', state: 'submitting', messageUuid: SUBMITTED, submittedAt: '2026-09-28T10:00:01.000Z' })], paused: false });
-    const t = harness({ store });
+    const t = await harness({ store, recovered: false });
     await t.queue.recover();
     expect(t.queue.state).toEqual({ paused: true, entries: [entry({ queueId: 'q-sub', content: 'lost?', uncertain: true }), entry({ queueId: 'q-later', content: 'later' })] });
     expect(notices(t.rows)).toEqual(['queue:uncertain:q-sub']);
@@ -235,10 +236,20 @@ describe('queue submission survives a crash around delivery', () => {
     expect(t.writes).toHaveLength(1);
   });
 
+  it('a process that exits before recovery leaves the stored queue exactly as it was', async () => {
+    const store = new MemorySessionStateStore();
+    const stored = { entries: [entry({ state: 'submitting', messageUuid: SUBMITTED, submittedAt: '2026-09-28T10:00:01.000Z' })], paused: false };
+    await store.saveQueue(ID, stored);
+    const t = await harness({ store, recovered: false });
+    await t.queue.onProcessExited('crash');
+    expect(await store.loadQueue(ID)).toEqual(stored);
+    expect(t.rows).toEqual([]);
+  });
+
   it('remove drops an uncertain entry and writes nothing', async () => {
     const store = new MemorySessionStateStore();
     await store.saveQueue(ID, { entries: [entry({ state: 'submitting', messageUuid: SUBMITTED, submittedAt: '2026-09-28T10:00:01.000Z' })], paused: false });
-    const t = harness({ store });
+    const t = await harness({ store, recovered: false });
     await t.queue.recover();
     await t.queue.remove('q-x');
     expect(t.queue.state.entries).toEqual([]);
@@ -246,7 +257,7 @@ describe('queue submission survives a crash around delivery', () => {
   });
 
   it('a released entry the process leaves without its turn.ended retires interrupted at the exit: gone from the store, a notice, nothing written, not busy', async () => {
-    const t = harness();
+    const t = await harness();
     const { entry: sent } = await t.queue.send('accepted then lost');
     t.queue.onLifecycle(lifecycle(sent.messageUuid!, 'queued'));
     t.h.turn = false; // the dead process's normaliser no longer holds the turn open for the resumed one
@@ -260,7 +271,7 @@ describe('queue submission survives a crash around delivery', () => {
     expect(t.writes).toHaveLength(writesBefore);
 
     // the resumed process's queue, over the same store
-    const resumed = harness({ store: t.store });
+    const resumed = await harness({ store: t.store, recovered: false });
     await resumed.queue.recover();
     expect((await resumed.queue.send('next')).disposition).toBe('sent');
   });
@@ -268,7 +279,7 @@ describe('queue submission survives a crash around delivery', () => {
   it('a store holding a released entry retires it at recovery with the same notice, never re-submitting it', async () => {
     const store = new MemorySessionStateStore();
     await store.saveQueue(ID, { entries: [entry({ state: 'released', messageUuid: SUBMITTED, submittedAt: '2026-09-28T10:00:01.000Z' })], paused: false });
-    const t = harness({ store });
+    const t = await harness({ store, recovered: false });
     await t.queue.recover();
     expect(t.queue.state).toEqual({ entries: [], paused: false });
     expect(notices(t.rows)).toEqual(['queue:interrupted:q-x']);
@@ -277,7 +288,7 @@ describe('queue submission survives a crash around delivery', () => {
   });
 
   it('a released entry its turn.ended named before the exit leaves nothing behind and no notice', async () => {
-    const t = harness();
+    const t = await harness();
     const { entry: sent } = await t.queue.send('answered');
     t.queue.onLifecycle(lifecycle(sent.messageUuid!, 'queued'));
     t.h.turn = false;
@@ -288,7 +299,7 @@ describe('queue submission survives a crash around delivery', () => {
   });
 
   it('a submitting entry at the exit takes the recovery path: queued at the head, uncertain, paused', async () => {
-    const t = harness();
+    const t = await harness();
     t.h.turn = true;
     await t.queue.send('queued first');
     t.h.turn = false;
@@ -301,13 +312,13 @@ describe('queue submission survives a crash around delivery', () => {
   });
 
   it('an exit nobody asked for pauses the queue; a requested stop leaves queued entries as they were', async () => {
-    const crashed = harness();
+    const crashed = await harness();
     crashed.h.turn = true;
     await crashed.queue.send('waiting');
     await crashed.queue.onProcessExited('crash');
     expect(crashed.queue.state).toMatchObject({ paused: true, entries: [{ state: 'queued', uncertain: false }] });
 
-    const stopped = harness();
+    const stopped = await harness();
     stopped.h.turn = true;
     await stopped.queue.send('waiting');
     await stopped.queue.onProcessExited('stop');
@@ -315,7 +326,7 @@ describe('queue submission survives a crash around delivery', () => {
   });
 
   it('a write that fails reverts the entry to queued and pauses the queue', async () => {
-    const t = harness({ failWrite: () => true });
+    const t = await harness({ failWrite: () => true });
     const { disposition, entry: sent } = await t.queue.send('doomed');
     expect(disposition).toBe('queued');
     expect(sent).toMatchObject({ state: 'queued', messageUuid: null, submittedAt: null });
@@ -325,7 +336,7 @@ describe('queue submission survives a crash around delivery', () => {
   });
 
   it('an exit while a submission\'s write is in flight wins: the late failure does not undo the recovery', async () => {
-    const t = harness({ holdWrites: true, failWrite: () => true });
+    const t = await harness({ holdWrites: true, failWrite: () => true });
     const sending = t.queue.send('in flight');
     await flush();
     await t.queue.onProcessExited('crash');

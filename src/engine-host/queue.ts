@@ -42,6 +42,7 @@ export class QueueEntryError extends Error {
 export class MessageQueue {
   private entries: QueueEntry[] = [];
   private paused = false;
+  private loaded = false; // recover() ran: before it the queue owns nothing and must never overwrite the stored one
   private readonly ackTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly log: (message: string) => void;
 
@@ -68,6 +69,7 @@ export class MessageQueue {
     const loaded = await this.deps.store.loadQueue(this.deps.appSessionId);
     this.entries = loaded.entries;
     this.paused = loaded.paused;
+    this.loaded = true;
     this.settleAfterExit();
     await this.persist();
   }
@@ -169,12 +171,14 @@ export class MessageQueue {
   }
 
   // At the process's exit: every `released` entry no turn.ended named is retired `interrupted`; a `submitting` entry
-  // takes the recovery path; an exit nobody asked for pauses the queue (Exit policy). The rows are journaled before
+  // takes the recovery path; an exit nobody asked for pauses a non-empty queue (Exit policy). The rows are journaled before
   // the returned promise's persist, so the session can call this right before it writes the exit row.
   onProcessExited(reason: ExitKind): Promise<void> {
     for (const queueId of [...this.ackTimers.keys()]) this.clearAck(queueId);
+    if (!this.loaded) return Promise.resolve(); // the process never reached recovery: the stored queue stays as it was
     this.settleAfterExit();
-    if ((reason === 'crash' || reason === 'unknown') && !this.paused) {
+    // only when something is left to hold back: a paused empty queue would silently hold the resumed session's next queue
+    if ((reason === 'crash' || reason === 'unknown') && !this.paused && this.entries.length > 0) {
       this.paused = true;
       this.journal({ event: 'queue', action: 'pause', reason: 'exit' });
     }

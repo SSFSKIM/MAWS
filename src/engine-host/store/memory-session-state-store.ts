@@ -10,6 +10,9 @@ export class MemorySessionStateStore implements SessionStateStore {
   readonly grants = new Map<AppSessionId, GrantSnapshot>();
   readonly specs = new Map<AppSessionId, LaunchSpec>();
 
+  async exists(id: AppSessionId): Promise<boolean> {
+    return this.queues.has(id) || this.grants.has(id) || this.specs.has(id);
+  }
   async loadQueue(id: AppSessionId): Promise<QueueState> {
     return structuredClone(this.queues.get(id) ?? { entries: [], paused: false });
   }

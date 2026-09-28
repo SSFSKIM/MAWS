@@ -47,7 +47,7 @@ export interface ScriptedTransport extends EngineTransport {
 // `onWrite` runs after each write is recorded (an auto-responder); `failWrites` rejects every write as a dead pipe,
 // `failWrite` only the frames it names; `holdWrite` returns a promise the write waits on before it resolves.
 export function scriptedTransport(
-  opts: { onWrite?: (frame: StdinFrame, t: ScriptedTransport) => void; failWrites?: boolean; failWrite?: (frame: StdinFrame) => boolean; holdWrite?: (frame: StdinFrame) => Promise<void> | null } = {},
+  opts: { onWrite?: (frame: StdinFrame, t: ScriptedTransport) => void; failWrites?: boolean; failWrite?: (frame: StdinFrame) => boolean; holdWrite?: (frame: StdinFrame) => Promise<void> | null; pid?: number } = {},
 ): ScriptedTransport {
   const frames = new Queue<TransportItem>();
   const stderr = new Queue<string>();
@@ -55,7 +55,7 @@ export function scriptedTransport(
   let resolveExited!: (v: { code: number | null; signal: NodeJS.Signals | null }) => void;
   const exitedPromise = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((r) => (resolveExited = r));
   const t: ScriptedTransport = {
-    pid: 4242,
+    pid: opts.pid ?? 4242,
     frames,
     stderr,
     writes: [],
@@ -104,6 +104,20 @@ export function scriptedTransport(
     },
   };
   return t;
+}
+
+// Answers every control request the session writes from `responder` (by subtype); a subtype it does not name stays
+// unanswered. The default answers the handshake from the prelude's recorded responses.
+export type Responder = Record<string, (request: Record<string, unknown>) => { response?: unknown; error?: string } | null>;
+export function autoResponder(responder: Responder) {
+  return (frame: StdinFrame, t: ScriptedTransport): void => {
+    if (frame.type !== 'control_request') return;
+    const answer = responder[frame.request.subtype]?.(frame.request);
+    if (!answer) return;
+    queueMicrotask(() =>
+      t.push({ type: 'control_response', response: answer.error === undefined ? { subtype: 'success', request_id: frame.request_id, ...(answer.response === undefined ? {} : { response: answer.response }) } : { subtype: 'error', request_id: frame.request_id, error: answer.error } }),
+    );
+  };
 }
 
 export class MemoryJournal implements SessionJournal {
