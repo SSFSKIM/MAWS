@@ -1,6 +1,6 @@
-import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SessionId } from '@shared/graph/ids';
 import type { TranscriptSummary } from '@shared/wire/store';
 import { StoreFixture } from '../../../test/support/store-fixture';
@@ -84,6 +84,24 @@ describe('discovery lists and summarises the store', () => {
 
     await rm(sidecar);
     expect((await discovery.summarizeOne(path))?.customTitle).toBeNull();
+  });
+
+  it('keeps the previous sidecar title when custom-title.json becomes unreadable, logging it once', async () => {
+    const path = await fixture.addTranscript('/work/a', S1, [user('u1', null, '/work/a', 'first prompt')]);
+    const sidecar = await fixture.addSidecar(S1, 'custom-title.json', { customTitle: 'Named in the sidecar' });
+    const discovery = new Discovery(fixture.paths);
+    expect((await discovery.summarizeOne(path))?.customTitle).toBe('Named in the sidecar');
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    await chmod(sidecar, 0o000); // the fixture's own temp file
+    try {
+      expect((await discovery.summarizeOne(path))?.customTitle).toBe('Named in the sidecar');
+      expect((await discovery.summarizeOne(path))?.customTitle).toBe('Named in the sidecar');
+      expect(errors).toHaveBeenCalledTimes(1);
+      expect(errors.mock.calls[0].join(' ')).toContain('EACCES');
+    } finally {
+      await chmod(sidecar, 0o644);
+      errors.mockRestore();
+    }
   });
 
   it('reads only the first and last 64 KiB of a large transcript', async () => {

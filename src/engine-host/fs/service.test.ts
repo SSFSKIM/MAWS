@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
-import { chmod, mkdir, realpath, rm, symlink } from 'node:fs/promises';
+import { chmod, mkdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, SessionId } from '@shared/graph/ids';
@@ -9,7 +9,7 @@ import { validateEventPayload } from '@shared/ipc/validate';
 import { StoreFixture } from '../../../test/support/store-fixture';
 import { Discovery, type ListedTranscript } from './discovery';
 import { FsService } from './service';
-import type { WatchFn } from './watcher';
+import { DEBOUNCE_MS, SETTLE_MS, type WatchFn } from './watcher';
 
 const S1 = '11111111-1111-4111-8111-111111111111' as SessionId;
 const S2 = '22222222-2222-4222-8222-222222222222' as SessionId;
@@ -54,6 +54,9 @@ describe('filesystem state service: discovery, sidecars and holders', () => {
   };
   const events = <N extends EventName>(name: N) => emitted.filter((e) => e.name === name).map((e) => e.payload as EventPayload<N>);
   const clear = () => emitted.splice(0);
+  // The timed pins measure steady-state latency: FSEvents starts its stream asynchronously and a write in its first
+  // milliseconds is only caught by the settle rescan (watcher.ts), so their clocks start once that has run.
+  const settled = () => new Promise((resolve) => setTimeout(resolve, SETTLE_MS + DEBOUNCE_MS + 50));
 
   async function threeSessions() {
     await fixture.addTranscript('/work/a', S1, [user('u1', null, '/work/a', 'first')]);
@@ -93,6 +96,7 @@ describe('filesystem state service: discovery, sidecars and holders', () => {
     await fixture.addTranscript('/work/a', S1, [user('u1', null, '/work/a', 'first')]);
     const fs = await start();
     fs.bind([{ sessionId: S1, appSessionId: A1 }]);
+    await settled();
     clear();
     const appended = Date.now();
     await fixture.appendLines(fixture.transcriptPath(S1), [titleLine(S1, 'Renamed')]);
@@ -119,6 +123,7 @@ describe('filesystem state service: discovery, sidecars and holders', () => {
     clear();
 
     await fixture.addRegistryRecord(NO_SUCH_PID, { sessionId: S2, kind: 'interactive' });
+    await settled();
     const written = Date.now();
     await fixture.addRegistryRecord(process.pid, { sessionId: S1, kind: 'interactive', cwd: '/work/a' });
     await expect.poll(() => events('fs.holderChanged').length, { timeout: 500, interval: 5 }).toBe(1);
@@ -314,6 +319,30 @@ describe('filesystem state service: discovery, sidecars and holders', () => {
         await chmod(fixture.paths.sessions, 0o755);
         errors.mockRestore();
       }
+    });
+
+    it('fails when one registry record is unreadable, while the poll keeps the holder it last read', async () => {
+      const record = await fixture.addRegistryRecord(process.pid, { sessionId: S1, kind: 'interactive', cwd: '/work/a' });
+      const fs = await start(deafWatch);
+      expect((await fs.holdersNow({ sessionIds: [S1], directories: null })).holders).toHaveLength(1);
+      const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+      await chmod(record, 0o000); // the fixture's own temp file, never the owner's store
+      try {
+        await expect(fs.holdersNow({ sessionIds: [S1], directories: null })).rejects.toThrow('holder registry unreadable: EACCES');
+        expect(fs.state().holders).toEqual([{ sessionId: S1, appSessionId: null, holder: { kind: 'terminal', pid: process.pid } }]);
+      } finally {
+        await chmod(record, 0o644);
+        errors.mockRestore();
+      }
+      expect((await fs.holdersNow({ sessionIds: [S1], directories: null })).holders).toHaveLength(1);
+    });
+
+    it('answers from the record last read whole when one registry record is torn, without failing', async () => {
+      const record = await fixture.addRegistryRecord(process.pid, { sessionId: S1, kind: 'interactive', cwd: '/work/a' });
+      const fs = await start(deafWatch);
+      await writeFile(record, '{"pid":'); // torn, never repaired within the retry schedule
+      const answer = await fs.holdersNow({ sessionIds: [S1], directories: null });
+      expect(answer.holders).toEqual([{ sessionId: S1, appSessionId: null, holder: { kind: 'terminal', pid: process.pid }, cwd: '/work/a' }]);
     });
 
     it('does not answer a record whose process has died, even with the file left behind', async () => {

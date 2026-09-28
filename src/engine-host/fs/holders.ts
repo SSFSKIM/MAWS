@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import type { SessionId } from '@shared/graph/ids';
 import { JobStateSchema, LiveSessionRecordSchema, type Holder, type JobState, type LiveSessionRecord } from '@shared/wire/store';
 import type { StorePaths } from './paths';
-import { isMissing, readJsonWithRetry } from './sidecars';
+import { isMissing, noteReadable, noteUnreadable, readJsonWithRetry } from './sidecars';
 
 export type HolderSink = (sessionId: SessionId, holder: Holder, registry: LiveSessionRecord | null, job: JobState | null) => void;
 
@@ -70,8 +70,10 @@ export class HolderRegistry {
     if (this.queuedRefresh) return this.queuedRefresh;
     const run = this.serial(async () => {
       this.queuedRefresh = null;
-      await this.readRegistry();
-      await this.recompute();
+      const unreadable = await this.readRegistry();
+      await this.recompute(); // the poll's view carries on from the records it could read and the ones it kept
+      // A record the filesystem refused is not an answer about that process: an on-demand query must not pass it off.
+      return unreadable === null ? null : Object.assign(new Error(`registry record unreadable: ${unreadable}`), { code: unreadable });
     });
     this.queuedRefresh = run;
     return run;
@@ -121,12 +123,13 @@ export class HolderRegistry {
     return answer;
   }
 
-  // Runs `step` after every earlier one; resolves with the error that stopped it (logged here), or null.
-  private serial(step: () => Promise<void>): Promise<Error | null> {
+  // Runs `step` after every earlier one; resolves with the error that stopped it (logged here), or with the failure the
+  // step itself reported (already logged by its reader), or null.
+  private serial(step: () => Promise<Error | null | void>): Promise<Error | null> {
     const run = this.chain
       .then(() => (this.stopped ? undefined : step()))
       .then(
-        () => null,
+        (reported) => reported ?? null,
         (error: unknown) => {
           console.error('[fs] holder refresh failed:', error instanceof Error ? error.message : error);
           return error instanceof Error ? error : new Error(String(error));
@@ -136,7 +139,8 @@ export class HolderRegistry {
     return run;
   }
 
-  private async readRegistry(): Promise<void> {
+  // Returns the errno of the first record the filesystem refused to read, or null.
+  private async readRegistry(): Promise<string | null> {
     const pids = new Set(
       (await listNames(this.paths.sessions)).flatMap((name) => {
         const pid = REGISTRY_FILE.exec(name)?.[1];
@@ -144,19 +148,29 @@ export class HolderRegistry {
       }),
     );
     for (const pid of this.records.keys()) if (!pids.has(pid)) this.records.delete(pid);
+    let unreadable: string | null = null;
     await Promise.all(
       [...pids].map(async (pid) => {
+        const path = join(this.paths.sessions, `${pid}.json`);
         // The engine patches the record by read-modify-write, so a read can land before `sessionId` is back.
         const record = await readJsonWithRetry(
-          join(this.paths.sessions, `${pid}.json`),
+          path,
           (raw) => LiveSessionRecordSchema.parse({ ...(raw as object), pid }),
           (value) => value.sessionId !== undefined || value.spare === true || value.parkedJobId !== undefined,
         );
-        // Unparseable after every retry: keep the record as last read whole. Absent: unlinked since the listing.
+        // Unparseable or unreadable after every retry: keep the record as last read whole. Absent: unlinked since the
+        // listing.
         if (record.status === 'ok') this.records.set(pid, record.value);
         else if (record.status === 'absent') this.records.delete(pid);
+        if (record.status === 'unreadable') {
+          noteUnreadable(path, record.code);
+          unreadable ??= record.code;
+        } else {
+          noteReadable(path);
+        }
       }),
     );
+    return unreadable;
   }
 
   private async readAllJobs(): Promise<void> {
@@ -181,7 +195,9 @@ export class HolderRegistry {
     }
     const job = await readJsonWithRetry(path, (raw) => JobStateSchema.parse(raw));
     if (job.status === 'ok') this.jobs.set(jobId, job.value);
-    else if (job.status === 'absent') this.jobs.delete(jobId); // unparseable keeps the state last read whole
+    else if (job.status === 'absent') this.jobs.delete(jobId); // unparseable and unreadable keep the state last read whole
+    if (job.status === 'unreadable') noteUnreadable(path, job.code);
+    else noteReadable(path);
   }
 
   private async recompute(): Promise<void> {

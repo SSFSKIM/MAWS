@@ -8,7 +8,7 @@ import * as z from 'zod';
 import type { SessionId } from '@shared/graph/ids';
 import type { TranscriptSummary } from '@shared/wire/store';
 import type { StorePaths } from './paths';
-import { isMissing, readJsonWithRetry } from './sidecars';
+import { isMissing, noteReadable, noteUnreadable, readJsonWithRetry } from './sidecars';
 import { HEAD_TAIL_BYTES, summarize } from './summarize';
 import { SESSION_ID } from './watcher';
 
@@ -85,9 +85,11 @@ export class Discovery {
     return summarize(head, tail, { size: info.size, mtimeMs: info.mtimeMs }, path, basename(dirname(path)), sidecarTitle);
   }
 
-  // A sidecar that never reads whole keeps the title it last had; one that is gone has none.
+  // A sidecar that never reads whole (torn, or unreadable) keeps the title it last had; one that is gone has none.
   private async readSidecarTitle(sidecar: string): Promise<string | null> {
     const read = await readJsonWithRetry(sidecar, (raw) => CustomTitleSchema.parse(raw).customTitle);
+    if (read.status === 'unreadable') noteUnreadable(sidecar, read.code);
+    else noteReadable(sidecar);
     if (read.status === 'ok') this.sidecarTitles.set(sidecar, read.value);
     else if (read.status === 'absent') this.sidecarTitles.delete(sidecar);
     return this.sidecarTitles.get(sidecar) ?? null;

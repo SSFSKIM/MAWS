@@ -1,4 +1,4 @@
-import { writeFile } from 'node:fs/promises';
+import { chmod, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { StoreFixture } from '../../../test/support/store-fixture';
@@ -56,6 +56,17 @@ describe('whole-file sidecars are parsed with retry', () => {
     const started = Date.now();
     expect(await readJsonWithRetry(path, asTitle)).toEqual({ status: 'unparseable' });
     expect(Date.now() - started).toBeGreaterThanOrEqual(490);
+  });
+
+  it('answers unreadable with the errno for a persistent filesystem error, distinct from unparseable content', async () => {
+    const path = join(fixture.configHome, 'locked.json');
+    await writeFile(path, '{"customTitle":"Named"}');
+    await chmod(path, 0o000); // the fixture's own temp file
+    try {
+      expect(await readJsonWithRetry(path, asTitle)).toEqual({ status: 'unreadable', code: 'EACCES' });
+    } finally {
+      await chmod(path, 0o644);
+    }
   });
 
   it('answers absent at once for a file that does not exist: a missing file is an answer, not a torn write', async () => {
