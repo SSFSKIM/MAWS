@@ -337,6 +337,7 @@ export interface SessionStateStore {
   loadLaunchSpec(appSessionId: AppSessionId): Promise<LaunchSpec | null>;   // the last spec, so a resume can reuse cwd, model, gateway
   saveLaunchSpec(appSessionId: AppSessionId, spec: LaunchSpec): Promise<void>;
   forget(appSessionId: AppSessionId): Promise<void>;
+  exists(appSessionId: AppSessionId): Promise<boolean>;                    // a state file exists for the id (C10's restart reconciliation, M4)
 }
 export class MessageQueue {
   constructor(deps: { appSessionId; client: ControlClient; store: SessionStateStore; onChange: (q: { entries: QueueEntry[]; paused: boolean }) => void });
@@ -456,7 +457,7 @@ Commands, `session.*`:
 | `session.events` | `{ appSessionId, afterSeq: number | null, limit: number | null }` | `{ events: SessionEvent[]; lastSeq: number; complete: boolean }` — the reload-survival snapshot; from the in-memory ring (last 5,000 events) or the journal |
 | `session.send` | `{ appSessionId, content: string | ContentBlock[] }` | `{ messageUuid: MessageUuid | null; disposition: 'sent' | 'queued'; queueId: string }` — immediate; every send is a queue entry (`queueId` always set), `messageUuid` minted at submission and null while `queued` |
 | `session.steer` | `{ appSessionId, content }` | `{ messageUuid }` |
-| `session.queue.list` | `{ appSessionId }` | `{ entries: QueueEntry[]; paused: boolean }` |
+| `session.queue.list` | `{ appSessionId }` | `{ entries: QueueEntry[]; paused: boolean }` — for an `appSessionId` with no reservation, answers the persisted queue from `SessionStateStore.loadQueue` as stored when `exists` is true, without constructing a `MessageQueue` (no recovery transition, no notice), so C10's restart reconciliation can tell whether a first message reached the queue before retrying a launch; `unknown session` only when neither a reservation nor a store file exists (C10's ask, M5 handler over M4's store) |
 | `session.queue.edit` / `.remove` / `.promote` / `.setPaused` | `{ appSessionId, queueId, content }` / `{ appSessionId, queueId }` / `{ appSessionId, queueId }` / `{ appSessionId, paused }` | `QueueEntry` / void / `{ messageUuid }` / void |
 | `session.interrupt` | `{ appSessionId, cancelEngineQueued: boolean }` | `{ stillQueued: string[]; cancelled: string[] }` (`cancel_queued` maps to the engine queue; the app queue pauses either way) |
 | `session.answer` | `{ appSessionId, requestId, answer: RequestAnswer }` | `{ outcome: 'delivered' | 'not_pending' | 'write_failed' }` |
@@ -873,6 +874,9 @@ Ready to paste into the charter's C3 section as "**Residue decisions (C3, 2026-0
   Date/Author: 2026-09-28, coordinator via controller.
 - Decision: (C11's review correction via the coordinator, M4) `EngineSessionStatus.gateway.localLaneObserved: boolean` is replaced by `localLane: { observedInTurn: EventId; at: string } | null`, set by the same two triggers with the open turn's `turn.started` event id and cleared to null at the next `turn.started`; C11 reads it as "observed in the current turn".
   Rationale: a boolean never reset made every turn after one local-lane observation read as local.
+  Date/Author: 2026-09-28, coordinator via controller.
+- Decision: (C10's ask via the coordinator, 2026-09-28) `SessionStateStore` gains `exists(appSessionId)` (M4), and `session.queue.list` for an unreserved id answers the stored queue verbatim when a state file exists, constructing no `MessageQueue` (M5); `unknown session` only when neither a reservation nor a file exists.
+  Rationale: C10's restart reconciliation must know whether a first message reached the queue before retrying a launch; reading the file is side-effect free, which constructing the queue (recovery, notice) is not.
   Date/Author: 2026-09-28, coordinator via controller.
 
 ## Outcomes & Retrospective
