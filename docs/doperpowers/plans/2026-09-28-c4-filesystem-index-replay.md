@@ -293,7 +293,7 @@ commands = {
   'git.unwatch':  { input: z.strictObject({ directory: z.string() }), output: z.void(), owner: 'main' },
 }
 events = { 'git.changed': z.strictObject({ repoRoot: z.string(), status: GitStatusSchema, reason: z.enum(['worktree','index','head','refs','initial']) }) }
-// GitStatus: { repoRoot, gitDir, commonDir, isWorktree: boolean, branch: string | null (null when detached), head: string, upstream: string | null, ahead: number, behind: number,
+// GitStatus: { repoRoot, gitDir, commonDir, isWorktree: boolean, branch: string | null (null when detached), head: string, upstream: string | null, remoteUrl: string | null, ahead: number, behind: number,
 //              dirty: boolean, files: { path, oldPath: nullable, index: string (one char from porcelain v2), worktree: string, untracked: boolean }[], stashCount: number, checkedAt: string }
 ```
 
@@ -409,7 +409,7 @@ A replay run gets a fresh `SessionId` `rp_<uuid>` and a fresh `AppSessionId` so 
 
 Binary: `process.env.MAWS_GIT ?? '/usr/bin/git'` (Apple's shim to the Command Line Tools, present on the owner's Mac; C11's settings screen may add a setting). Every call is `execFile(git, ['-C', directory, …], { maxBuffer: 64 MiB, timeout: 10_000, env: { PATH, HOME, GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0', LC_ALL: 'C' } })`; `GIT_OPTIONAL_LOCKS=0` keeps `git status` from writing the index (the service is read-only even in side effects).
 
-- `git.status`: `rev-parse --show-toplevel --git-dir --git-common-dir --abbrev-ref HEAD` (one call) then `status --porcelain=v2 --branch -z --untracked-files=normal`; `stash list --format=%H` for the count. Parsing: `# branch.oid/head/upstream/ab` headers; `1 <XY> …`, `2 <XY> … <path>\0<origPath>`, `? <path>`; `isWorktree` when `git-dir !== git-common-dir`.
+- `git.status`: `rev-parse --show-toplevel --git-dir --git-common-dir --abbrev-ref HEAD` (one call) then `status --porcelain=v2 --branch -z --untracked-files=normal`; `stash list --format=%H` for the count; `remoteUrl` from `remote get-url <remote>` where `<remote>` is the upstream's remote (the part of `# branch.upstream` before the first `/`), null when there is no upstream or the remote has no URL — same runner, same timeout, never a fetch (C8's ask, 2026-09-28: push state and an "Open on GitHub" link). Parsing: `# branch.oid/head/upstream/ab` headers; `1 <XY> …`, `2 <XY> … <path>\0<origPath>`, `? <path>`; `isWorktree` when `git-dir !== git-common-dir`.
 - `git.branches`: `for-each-ref --format=%(refname:short)%00%(upstream:short)%00%(HEAD) refs/heads`.
 - `git.diff`: `diff --no-color --no-ext-diff -U<context> [--cached | HEAD] [base] [-- path]` plus `diff --numstat` for the file table (`-` counts mark binaries).
 - `git.log`: `log --format=%H%x00%h%x00%an%x00%aI%x00%s%x00%P -z -n <limit> [-- path]`.
@@ -469,6 +469,7 @@ What C4 adopted from the sibling documents on disk at authoring time, and what i
 | C10 (review, relayed 2026-09-28): `sessions.createForLaunch({ appSessionId? })` | added (M4): the store creates the record under the caller's UUID v4 id when supplied and answers `{ ok: false, reason: 'exists', record }` on a collision; no other change |
 | C10 (third review round, relayed 2026-09-28): `sessions.unbindEngineId(appSessionId)` | added (M4): clears `engineSessionId` and the host binding through `fs.unbind`, leaving the record otherwise untouched; pinned by a discovery scan after the unbind that re-attributes nothing to that app id |
 | C8 (grounding, relayed 2026-09-28): `fs.readSpill` must read background-task `output_file`s | added (M3): a fourth root, the engine's task-output directory `realpath($CLAUDE_CODE_TMPDIR ?? /tmp)/claude-<uid>` (SPEC 20; not `os.tmpdir()`, which on macOS is `/var/folders/…` and would match nothing the engine writes); pinned by a read under it and a refusal of a sibling outside it |
+| C8 (owner ruling, relayed 2026-09-28): `git.status.remoteUrl` | added (M6): the upstream remote's URL via `git remote get-url`, null without an upstream or URL; read-only, no fetch |
 | C1: `HostSupervisor` | `onEvent<N extends EventName>(name: N, listener: (payload: EventPayload<N>) => void): () => void` beside `onState`, additive. C3 adds it (first in the merge order; its attention service needs it) and C4 consumes it; C4's worktree carries an identical block until it rebases over C3's (wave-2 ledger d.9) |
 
 The coordinator's single pass over all five wave-2 documents is `docs/doperpowers/plans/2026-09-28-wave2-interface-ledger.md`; where a row above says settled, that ledger carries the reasoning.
@@ -573,7 +574,7 @@ Decisions local to M6 (the binary, parsing and debounce are the residue *Git inv
 
 Does not touch: any write (`add`, `commit`, `stash`, `checkout`, `worktree add/remove` are C10 and P1), credentials, remotes (no `fetch`).
 
-Proves: acceptance item 8. Pins: over a `git-fixture` repository with one commit, `git.status` reports `dirty: false`; after writing an untracked file, `dirty: true` with the file `untracked: true`; after `git add`, `index: 'A'`; `git.branches` lists `main` as current; a linked worktree created with `git worktree add .claude/worktrees/wt -b wt` reports `isWorktree: true`, `branch: 'wt'`, `commonDir` equal to the main repository's `.git`; `git.watch` then a file write emits `git.changed { reason: 'worktree' }` within 1 s and a second identical write emits nothing; `git commit` in the fixture emits `reason: 'head'`; `git.diff { scope: 'worktree' }` after editing a tracked file returns a patch with the edit and `files[0].insertions === 1`; `git.log { limit: 1 }` returns the commit with `parents: []`; `git.status` on `/tmp` fails `internal` `not a git repository`; the service invokes `/usr/bin/git` with `GIT_OPTIONAL_LOCKS=0` (asserted on the spawn mock).
+Proves: acceptance item 8. Pins: over a `git-fixture` repository with one commit, `git.status` reports `dirty: false`; after writing an untracked file, `dirty: true` with the file `untracked: true`; after `git add`, `index: 'A'`; `git.branches` lists `main` as current; `git.status` on a repository with no upstream reports `remoteUrl: null`, and after `git remote add origin <url>` plus `git branch -u origin/main` (a local bare repository as the remote, no network) reports that URL; a linked worktree created with `git worktree add .claude/worktrees/wt -b wt` reports `isWorktree: true`, `branch: 'wt'`, `commonDir` equal to the main repository's `.git`; `git.watch` then a file write emits `git.changed { reason: 'worktree' }` within 1 s and a second identical write emits nothing; `git commit` in the fixture emits `reason: 'head'`; `git.diff { scope: 'worktree' }` after editing a tracked file returns a patch with the edit and `files[0].insertions === 1`; `git.log { limit: 1 }` returns the commit with `parents: []`; `git.status` on `/tmp` fails `internal` `not a git repository`; the service invokes `/usr/bin/git` with `GIT_OPTIONAL_LOCKS=0` (asserted on the spawn mock).
 
 ### M7 — Acceptance against the owner's `~/.claude`, hardening, review
 
@@ -835,6 +836,9 @@ Ready to paste under the charter's §12 C4 section as "**Residue decisions (C4, 
   Date/Author: 2026-09-28, C4 execution controller.
 - Decision (M3 final re-review, one residual Important taken as a bounded fix rather than debt): `start` and ordinary `poke` honour `readForward`'s interruption signal (retry after re-stat; no `following` until a complete read), because the alternative published `complete: true` over an incomplete backfill, a consumer-visible wrong state rather than a transient. The reviewer verifies this item alone; M3 then closes.
   Rationale: the previous "debt after this round" rule was for residuals of narrowing grain without consumer-visible effect; this one has one and costs a few lines.
+  Date/Author: 2026-09-28, C4 execution controller.
+- Decision (C8's ask via the owner's ruling, relayed by the coordinator, 2026-09-28): `GitStatus` gains `remoteUrl: string | null`, the upstream remote's URL from `git remote get-url`, resolved with the same runner and timeout as the rest of the status and never a fetch; null without an upstream or URL. Lands in M6 with a local-bare-remote pin.
+  Rationale: C8's summary shows push state and an "Open on GitHub" link; the URL is a property of the status the service already computes, and read-only §4.5 is untouched.
   Date/Author: 2026-09-28, C4 execution controller.
 - 2026-09-28: Re-review round 2 passed the six fixes; two edits applied (replay launch cancellation on dispatch timeout, historical holder set for write attribution). Review closed.
 
