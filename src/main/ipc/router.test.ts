@@ -42,7 +42,7 @@ const invoke = (event: unknown, name: string, input?: unknown) => {
   return handler(event, input);
 };
 
-const LIGHT = { settings: { version: 1, theme: 'light' }, resolvedTheme: 'light' } as const;
+const LIGHT = { settings: { version: 2, keymap: {}, notifications: { enabled: true, sound: false }, theme: 'light' }, resolvedTheme: 'light' } as const;
 
 describe('main ipc router', () => {
   beforeEach(async () => {

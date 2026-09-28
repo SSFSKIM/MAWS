@@ -16,7 +16,7 @@ describe('main event emitter', () => {
   it('sends a valid payload to every live window on the event channel', () => {
     const [a, b, closed] = [window(), window(), window(true)];
     electron.windows = [a, b, closed];
-    const state = { settings: { version: 1 as const, theme: 'dark' as const }, resolvedTheme: 'dark' as const };
+    const state = { settings: { version: 2 as const, keymap: {}, notifications: { enabled: true, sound: false }, theme: 'dark' as const }, resolvedTheme: 'dark' as const };
     expect(emit('settings.changed', state)).toBe(true);
     expect(a.webContents.send).toHaveBeenCalledExactlyOnceWith('maws:evt:settings.changed', state);
     expect(b.webContents.send).toHaveBeenCalledExactlyOnceWith('maws:evt:settings.changed', state);

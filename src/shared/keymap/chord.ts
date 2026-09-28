@@ -67,7 +67,8 @@ export function parseChord(accelerator: string): Chord {
 
 const NAMED_KEYS = new Set(Object.values(NAMED));
 
-type KeyEventLike = Pick<KeyboardEvent, 'metaKey' | 'ctrlKey' | 'altKey' | 'shiftKey' | 'key' | 'code'>;
+// The fields of a DOM `KeyboardEvent` a chord reads (shared code also compiles for main, which has no DOM types).
+export interface KeyEventLike { metaKey: boolean; ctrlKey: boolean; altKey: boolean; shiftKey: boolean; key: string; code: string }
 
 export function matchesChord(event: KeyEventLike, chord: Chord): boolean {
   if (event.metaKey !== chord.meta || event.ctrlKey !== chord.ctrl || event.altKey !== chord.alt || event.shiftKey !== chord.shift) {

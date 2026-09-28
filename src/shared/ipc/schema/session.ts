@@ -264,12 +264,44 @@ const c4Events = {
 } as const satisfies Record<`session.${string}`, z.ZodType>;
 // C4 end --------------------------------------------------------------------------------------------------------------
 
+// C5 start: the read side the shell adds (C5 execution document, Interfaces "X2 — session.*, read side"): the digest
+// of live facts and the visibility report C4's unread rule needs. Owner main.
+export const SESSION_PHASES = ['starting', 'working', 'waiting', 'idle', 'exited', 'failed', 'foreign'] as const;
+// working: a turn is running · waiting: the turn is blocked on a pending request · idle: process live, no turn
+// exited: no live process (resumable from disk) · failed: the last turn or the process ended in error and nothing ran since
+// foreign: holder is a terminal or background job (D-12) · starting: process launching, no turn yet
+export type SessionPhase = (typeof SESSION_PHASES)[number];
+export const SessionDigestSchema = z.strictObject({
+  appSessionId: AppSessionIdSchema,
+  phase: z.enum(SESSION_PHASES),
+  activity: z.string().nullable(),            // while working: "Running bun test", "Editing src/app.ts", "Thinking", "Compacting"; else null
+  lastAssistantLine: z.string().nullable(),   // first line of the latest completed assistant text block, ≤ 160 chars
+  turnStartedAt: z.string().nullable(), lastTurnEndedAt: z.string().nullable(),
+  context: z.strictObject({ percent: z.number(), totalTokens: z.number().int(), maxTokens: z.number().int(), autoCompactThreshold: z.number().int().nullable() }).nullable(),
+  cost: z.strictObject({ totalUsd: z.number(), sinceSeenUsd: z.number() }).nullable(),
+  childAgents: z.strictObject({ active: z.number().int(), done: z.number().int() }),
+  pendingRequests: z.number().int(),
+  revision: z.number().int(),                 // per session, monotonic; a consumer keeps the higher of snapshot and event
+});
+export type SessionDigest = z.infer<typeof SessionDigestSchema>;
+
+const c5Commands = {
+  'session.digests':    { input: z.void(), output: z.strictObject({ digests: z.array(SessionDigestSchema) }), owner: 'main' },   // snapshot for a page that missed the events
+  'session.setVisible': { input: z.strictObject({ appSessionId: AppSessionIdSchema, visible: z.boolean() }), output: z.void(), owner: 'main' },
+} as const satisfies Record<`session.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
+const c5Events = {
+  'session.digest': SessionDigestSchema,
+} as const satisfies Record<`session.${string}`, z.ZodType>;
+// C5 end --------------------------------------------------------------------------------------------------------------
+
 export const commands = {
   ...c3Commands, // C3
   ...c4Commands, // C4
+  ...c5Commands, // C5
 } as const satisfies Record<`session.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {
   ...c3Events, // C3
   ...c4Events, // C4
+  ...c5Events, // C5
 } as const satisfies Record<`session.${string}`, z.ZodType>;

@@ -1,8 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { CHORD_PATTERN, formatChord, matchesChord, parseChord } from './chord';
+import { CHORD_PATTERN, formatChord, matchesChord, parseChord, type KeyEventLike } from './chord';
 
-const key = (init: Partial<KeyboardEvent>) =>
-  ({ metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, key: '', code: '', ...init }) as KeyboardEvent;
+const key = (init: Partial<KeyEventLike>): KeyEventLike => ({ metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, key: '', code: '', ...init });
 
 describe('chord parser', () => {
   it('reads letters as KeyboardEvent codes', () => {

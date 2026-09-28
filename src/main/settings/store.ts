@@ -1,11 +1,30 @@
 // `settings.json` in `userData`: read once at start, written whole through a temporary file and a rename, so a crash
 // mid-write leaves the previous file rather than half of one. A missing file is a first run; an unreadable or invalid
 // one is replaced by the defaults with a warning (the bad file is overwritten on the next write), never a crash.
+// A version 1 file (C1's) is migrated to version 2 here, in the store, and rewritten; the schema never defaults.
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { SettingsSchema, type Settings, type SettingsPatch, type SettingsState, type ThemeSetting } from '@shared/ipc/schema';
+import * as z from 'zod';
+import { SettingsSchema, ThemeSettingSchema, type Settings, type SettingsPatch, type SettingsState, type ThemeSetting } from '@shared/ipc/schema';
 
-export const DEFAULT_SETTINGS: Settings = { version: 1, theme: 'light' }; // light-first (D-4, charter §10 item 10)
+export const DEFAULT_SETTINGS: Settings = {
+  version: 2,
+  theme: 'light', // light-first (D-4, charter §10 item 10)
+  keymap: {},
+  notifications: { enabled: true, sound: false },
+};
+
+const SettingsV1Schema = z.strictObject({ version: z.literal(1), theme: ThemeSettingSchema });
+
+// C5: version 1 → 2 adds the keymap overrides (none) and the notification defaults. C11 appends its own step.
+function migrate(file: string, raw: unknown): unknown {
+  const v1 = SettingsV1Schema.safeParse(raw);
+  if (!v1.success) return raw;
+  const next: Settings = { ...DEFAULT_SETTINGS, theme: v1.data.theme };
+  write(file, next);
+  console.log(`[settings] migrated ${file} from version 1 to 2`);
+  return next;
+}
 
 export type ResolvedTheme = SettingsState['resolvedTheme'];
 
@@ -45,7 +64,7 @@ function read(file: string): Settings {
     return DEFAULT_SETTINGS;
   }
   try {
-    return SettingsSchema.parse(JSON.parse(text));
+    return SettingsSchema.parse(migrate(file, JSON.parse(text)));
   } catch (error) {
     console.warn(`[settings] invalid ${file}; using defaults`, error);
     return DEFAULT_SETTINGS;

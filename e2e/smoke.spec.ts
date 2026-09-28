@@ -104,7 +104,7 @@ test('MAWS opens light, hosts answer, pty echoes, survives reload and window clo
   expect(dark).toMatchObject({ ok: true, value: { settings: { theme: 'dark' }, resolvedTheme: 'dark' } });
   await expect(reopened.locator('html')).toHaveAttribute('data-theme', 'dark');
   await expect.poll(() => reopened.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe(DARK_BG);
-  expect(JSON.parse(readFileSync(join(maws.userData, 'settings.json'), 'utf8'))).toEqual({ version: 1, theme: 'dark' });
+  expect(JSON.parse(readFileSync(join(maws.userData, 'settings.json'), 'utf8'))).toEqual({ version: 2, theme: 'dark', keymap: {}, notifications: { enabled: true, sound: false } });
 
   expect(maws.consoleErrors(), 'the console stays free of errors, first load included').toEqual([]);
   expect(reopenedConsoleErrors(), 'the re-created window\'s console stays free of errors').toEqual([]);

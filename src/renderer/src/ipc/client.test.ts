@@ -15,7 +15,7 @@ function fakeBridge(answer: unknown) {
   return { bridge: bridge as unknown as MawsBridge, deliver: (name: string, payload: unknown) => listeners.get(name)?.(payload) };
 }
 
-const LIGHT = { settings: { version: 1, theme: 'light' }, resolvedTheme: 'light' } as const;
+const LIGHT = { settings: { version: 2, keymap: {}, notifications: { enabled: true, sound: false }, theme: 'light' }, resolvedTheme: 'light' } as const;
 
 describe('renderer ipc client', () => {
   beforeEach(() => vi.restoreAllMocks());

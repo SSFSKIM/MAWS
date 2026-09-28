@@ -114,6 +114,15 @@ describe('ipc schema validates both directions', () => {
     });
     // end C4
 
+    // C5 start: the shell's own entries (C5 execution document, Interfaces "X2"); the sibling entries it consumes are
+    // pinned by C3's and C4's cases above.
+    it('carries the C5 session.*, attention.* and layout.* entries, every command owned by main', () => {
+      const c5 = ['session.digests', 'session.setVisible', 'layout.get', 'layout.set', 'layout.list', 'layout.openExternal'];
+      for (const name of c5) expect(commands[name as keyof typeof commands]?.owner, name).toBe('main');
+      for (const name of ['session.digest', 'attention.notified', 'attention.navigate', 'layout.action']) expect(Object.hasOwn(events, name), name).toBe(true);
+    });
+    // C5 end
+
     it('names channels by kind so a command and an event of the same name never share one', () => {
       expect(commandChannel('engine.hostState')).toBe('maws:cmd:engine.hostState');
       expect(eventChannel('engine.hostState')).toBe('maws:evt:engine.hostState');
@@ -175,7 +184,7 @@ describe('ipc schema validates both directions', () => {
   });
 
   describe('command output (renderer, on receipt)', () => {
-    const state = { settings: { version: 1, theme: 'system' }, resolvedTheme: 'dark' };
+    const state = { settings: { version: 2, keymap: {}, notifications: { enabled: true, sound: false }, theme: 'system' }, resolvedTheme: 'dark' };
 
     it('accepts a settings state and returns it unchanged', () => {
       expect(validateCommandOutput('settings.get', state)).toEqual({ ok: true, value: state });
@@ -210,7 +219,7 @@ describe('ipc schema validates both directions', () => {
     it('accepts well-formed events unchanged', () => {
       const exit = { ptyId: 'p1', exitCode: null, signal: null };
       expect(validateEventPayload('pty.exit', exit)).toEqual({ ok: true, value: exit });
-      const changed = { settings: { version: 1, theme: 'light' }, resolvedTheme: 'light' };
+      const changed = { settings: { version: 2, keymap: {}, notifications: { enabled: true, sound: false }, theme: 'light' }, resolvedTheme: 'light' };
       expect(validateEventPayload('settings.changed', changed)).toEqual({ ok: true, value: changed });
     });
 
