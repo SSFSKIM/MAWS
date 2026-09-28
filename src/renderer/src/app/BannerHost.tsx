@@ -4,7 +4,7 @@
 import { useShallow } from 'zustand/react/shallow';
 import { useNotices, type Notice } from '../stores/notices';
 
-export const LEVEL_EDGE: Record<Notice['level'], string> = { info: 'border-info', warning: 'border-warning', danger: 'border-danger' };
+export const LEVEL_EDGE: Record<Notice['level'], string> = { info: 'border-l-info', warning: 'border-l-warning', danger: 'border-l-danger' };
 
 export function BannerHost({ className = '', style }: { className?: string; style?: React.CSSProperties }) {
   const banners = useNotices(useShallow((s) => s.notices.filter((n) => n.kind === 'banner')));
