@@ -5,8 +5,9 @@
 import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, RequestId, TaskId, ToolUseId } from '@shared/graph/ids';
 import { presentationOf, tableRowOf } from './classify';
-import { cellOf, editCounts, filePathOf, hookCell, MERGEABLE_READS, mergeReads, thinkingCell, type HookRecord, type ToolRecord, type TurnContext } from './cells';
-import { activeGroupLabel, agentMessageCopy, boundaryCopy, groupSummary, hostOf, processExitCopy, reconnectCopy, retryCopy, subagentSentence, type GroupPhraseInput } from './copy';
+import { cellOf, editCounts, filePathOf, hookCell, type HookRecord, type ToolRecord, type TurnContext } from './cells';
+import { agentMessageCopy, boundaryCopy, groupSummary, processExitCopy, reconnectCopy, retryCopy, subagentSentence } from './copy';
+import { collectCells, groupItems, phrasesOf, type WorkItem } from './groups';
 import { cellId, rowId, turnId as turnIdOf } from './keys';
 import type { LiveBlock, TranscriptState, TranscriptUi, TurnState } from './reduce';
 import { isEngineOrigin } from './reduce';
@@ -111,11 +112,8 @@ function rowsOfTurn(state: TranscriptState, turn: TurnState): Row[] {
 
 // What the walk over a turn's events produces before grouping: cells and rows in event order.
 type Item =
-  | { kind: 'text'; row: RowOf<'assistant_text'> }
-  | { kind: 'thinking'; row: RowOf<'thinking'> }
+  | WorkItem
   | { kind: 'steer'; row: RowOf<'user'> } // outside the work area, in event order with the answer
-  | { kind: 'cell'; cell: Cell }
-  | { kind: 'row'; row: Row }
   // Placeholders the walk leaves and the resolution pass fills, once every event of the turn has been seen.
   | { kind: 'tool'; toolUseId: ToolUseId }
   | { kind: 'hook'; hookId: string }
@@ -408,7 +406,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): { rows: Row
   // Resolve the placeholders now that every event of the turn has been seen: tool and hook cells, question and plan
   // rows, subagent rows. The retry row updates in place: the last api.retry event's text at the first one's position.
   const retryRow = retry;
-  const resolved: Item[] = [];
+  const resolved: (WorkItem | Extract<Item, { kind: 'steer' }>)[] = [];
   for (const item of items) {
     switch (item.kind) {
       case 'tool': {
@@ -441,7 +439,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): { rows: Row
   const WORK_ROWS = new Set<Row['kind']>(['subagent', 'agent_message', 'question', 'plan', 'request_slot', 'error']);
   const lastWork = resolved.map((item) => item.kind === 'cell' || (item.kind === 'row' && WORK_ROWS.has(item.row.kind))).lastIndexOf(true);
   const answer: Row[] = [];
-  const workItems: Item[] = [];
+  const workItems: WorkItem[] = [];
   resolved.forEach((item, i) => {
     if (item.kind === 'steer') answer.push(item.row); // steers and answer in event order, outside the work area
     else if (item.kind === 'text' && i > lastWork) answer.push({ ...item.row, phase: 'answer' });
@@ -476,113 +474,6 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): { rows: Row
   }
   return { rows, summary, cells };
 }
-
-// ---------------------------------------------------------------------------------------------------------------------
-// The group state machine
-
-function groupItems(items: Item[], turn: TurnState, ui: TranscriptUi | undefined, tools: Map<ToolUseId, ToolRecord>): Row[] {
-  const rows: Row[] = [];
-  let open: Cell[] | null = null;
-  let hasTool = false;
-  const lastAt = turn.events.at(-1)?.at ?? turn.startedAt;
-  // Thinking blocks travel through the machine as cells (`cell:think:…`) and come back out as rows when their group
-  // never gets a tool cell or unwraps.
-  const thinkingRows = new Map<string, RowOf<'thinking'>>();
-  const thinkingRow = (cell: Cell): Row => thinkingRows.get(cell.id)!;
-  const elapsedOf = (cell: Cell): number => {
-    const rec = cell.toolUseId ? tools.get(cell.toolUseId) : undefined;
-    return Math.max((rec?.elapsedSeconds ?? 0) * 1000, Date.parse(lastAt) - Date.parse(cell.startedAt));
-  };
-  const flush = (active: boolean) => {
-    if (!open) return;
-    const cells = open;
-    open = null;
-    const wasTool = hasTool;
-    hasTool = false;
-    if (!wasTool) {
-      for (const cell of cells) rows.push(thinkingRow(cell));
-      return;
-    }
-    const visible = cells.filter((cell) => cell.toolName !== 'thinking' && !cell.classification.hidden);
-    const hidden = cells.filter((cell) => cell.toolName !== 'thinking' && cell.classification.hidden);
-    if (!active && visible.length === 1 && hidden.length === 0) {
-      for (const cell of cells) if (cell.toolName === 'thinking') rows.push(thinkingRow(cell));
-      rows.push(standaloneRow(visible[0], turn.id));
-      return;
-    }
-    const id = rowId.group(cells[0].id);
-    const running = cells.find((cell) => cell.status === 'running' && cell.toolName !== 'thinking');
-    rows.push({
-      id, turnId: turn.id, at: cells[0].startedAt, kind: 'group', state: active ? 'active' : 'completed', cells, summary: groupSummary(phrasesOf(cells)),
-      activeLabel: active ? activeGroupLabel(running ? { toolName: running.toolName, input: tools.get(running.toolUseId!)?.use.input ?? {}, elapsedMs: elapsedOf(running) } : null) : null,
-      icon: iconOf(cells), expanded: ui?.expandedGroups.has(id) ?? false,
-    });
-  };
-  for (const item of items) {
-    if (item.kind === 'cell') {
-      const cell = item.cell;
-      if (cell.toolName === 'thinking') {
-        if (!open) open = [];
-        open.push(cell);
-        continue;
-      }
-      if (!cell.classification.groupable) {
-        flush(false);
-        rows.push(standaloneRow(cell, turn.id));
-        continue;
-      }
-      if (!open) open = [];
-      const last = open.at(-1);
-      if (!hasTool) cell.classification = { ...cell.classification, startsGroup: true };
-      hasTool = true;
-      if (last && MERGEABLE_READS.has(last.toolName) && MERGEABLE_READS.has(cell.toolName) && last.status !== 'running') open[open.length - 1] = mergeReads(last, cell);
-      else open.push(cell);
-      continue;
-    }
-    if (item.kind === 'thinking') {
-      const id = `cell:${item.row.id}`;
-      thinkingRows.set(id, item.row);
-      if (!open) open = [];
-      open.push(thinkingCell(id, item.row.text, item.row.live, item.row.at, item.row.durationMs, ui?.expandedCells.has(id) ?? false));
-      continue;
-    }
-    flush(false);
-    if (item.kind === 'text' || item.kind === 'row') rows.push(item.row);
-  }
-  flush(turn.state === 'open');
-  return rows;
-}
-
-// A standalone cell is a flat `cell` row keyed by its CellId (X3).
-const standaloneRow = (cell: Cell, turnId: TurnId): Row => ({ ...cell, id: rowId.cell(cell.id), turnId, at: cell.startedAt, kind: 'cell', classification: { ...cell.classification, startsGroup: false } });
-
-function phrasesOf(cells: Cell[]): GroupPhraseInput {
-  const input: GroupPhraseInput = { mcpServers: [], skills: [], toolsLoaded: 0, editedFiles: [], readFiles: [], searches: [], commands: [], hooks: 0, webQueries: [], fetchedHosts: [], other: 0 };
-  for (const cell of cells) {
-    if (cell.toolName === 'thinking' || cell.classification.hidden) continue;
-    const detail = cell.detail;
-    if (cell.toolName === 'hook') input.hooks += 1;
-    else if (detail.kind === 'mcp') input.mcpServers.push(detail.server);
-    else if (cell.toolName === 'Skill') input.skills.push(cell.label.replace(/^Loaded (.*) skill$/, '$1'));
-    else if (cell.toolName === 'ToolSearch') input.toolsLoaded += Number(/(\d+)/.exec(cell.label)?.[1] ?? 0);
-    else if (detail.kind === 'edit') input.editedFiles.push(detail.filePath);
-    else if (detail.kind === 'read') input.readFiles.push(...detail.files.map((file) => file.path));
-    else if (detail.kind === 'search') input.searches.push(detail.query);
-    else if (detail.kind === 'shell') input.commands.push(detail.command);
-    else if (detail.kind === 'web') {
-      if (detail.url) input.fetchedHosts.push(hostOf(detail.url));
-      else if (detail.query) input.webQueries.push(detail.query);
-    } else input.other += 1;
-  }
-  return input;
-}
-
-const iconOf = (cells: Cell[]): ToolCategory => {
-  const present = new Set(cells.filter((cell) => cell.toolName !== 'thinking').map((cell) => cell.category));
-  return TOOL_CATEGORIES.find((category) => present.has(category)) ?? 'other';
-};
-
-const collectCells = (rows: Row[]): Cell[] => rows.flatMap((row) => (row.kind === 'group' ? row.cells : row.kind === 'cell' ? [row] : []));
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Receipts, summary, rows of other kinds
