@@ -91,63 +91,73 @@ figcaption .dimension { margin-left: auto; color: var(--fg-muted); font-size: 11
 .provenance { font: 9px var(--font-mono); color: var(--fg-faint); letter-spacing: .04em; flex-shrink: 0; }
 .session:hover .provenance { color: var(--fg-muted); }
 .unread { width: 5px; height: 5px; border-radius: 50%; background: var(--info); display: block; margin: 7px 0 0 auto; }
-/* Sheet: macOS sheet over the main area. */
-.sheet-frame { position: relative; display: flex; min-height: 640px; }
-.main-area { flex: 1; min-width: 0; padding: 14px 12px; }
-.sheet { width: 100%; max-width: 436px; margin: 0 auto; background: var(--bg-overlay); border: 1px solid var(--border-strong); border-radius: var(--radius); box-shadow: var(--shadow); }
-.sheet-head { display: flex; align-items: baseline; gap: 8px; padding: 13px 16px; border-bottom: 1px solid var(--border); }
-.sheet-head .where { color: var(--fg-muted); font-size: 12px; }
-.sheet-head kbd { margin-left: auto; font: 10px var(--font-ui); color: var(--fg-muted); }
-.sheet-body { padding: 12px 16px 6px; }
-.sheet-foot { display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--border); }
-.sheet-foot .spacer { flex: 1; }
+/* Unstarted session tab: the pane is the setup surface and the strip carries it. */
+.tab-frame { display: flex; min-height: 640px; }
+.pane-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.pane-body { flex: 1; display: flex; flex-direction: column; justify-content: center; padding: 20px 24px; }
+.empty-state h3 { font-size: 15px; font-weight: 550; line-height: 1.4; }
+.empty-state p { margin-top: 7px; font-size: 12px; color: var(--fg-muted); line-height: 1.6; max-width: 46ch; }
+.route-line { display: flex; align-items: center; gap: 8px; margin-top: 14px; font-size: 11px; color: var(--fg-muted); }
+.route-line .glyph { color: var(--success); }
+.route-line .text-action { padding: 2px 5px; }
+.draft-line { margin-top: 10px; font-size: 12px; color: var(--fg-muted); line-height: 1.55; }
+.draft-line q { color: var(--fg); }
+.composer-zone { padding: 0 20px; }
+.location-pop { width: 396px; margin-bottom: 12px; position: relative; }
+.location-pop::after { content: ''; position: absolute; left: 60px; bottom: -5px; width: 8px; height: 8px; background: var(--bg-overlay); border-right: 1px solid var(--border-strong); border-bottom: 1px solid var(--border-strong); transform: rotate(45deg); }
+.location-pop .pop-body { padding: 8px 12px 6px; }
+.location-pop .pop-foot { padding: 8px 12px; border-top: 1px solid var(--border); font-size: 11px; color: var(--fg-muted); }
 .group-label { display: block; margin: 6px 0 5px; }
-.choice { display: grid; grid-template-columns: 14px 1fr; gap: 9px; padding: 7px 8px; border-radius: 5px; cursor: pointer; align-items: start; margin: 0 -8px; }
+.choice { display: grid; grid-template-columns: 14px 1fr; gap: 9px; padding: 7px 8px; border-radius: 5px; cursor: pointer; align-items: start; margin: 0 -4px; }
 .choice:has(input:checked) { background: var(--accent-soft); }
 .choice input { margin-top: 2px; }
 .choice .name { font-size: 12px; display: flex; gap: 8px; align-items: baseline; }
 .choice .name .path { margin-left: auto; }
 .choice .sub { display: block; font-size: 11px; color: var(--fg-muted); margin-top: 3px; line-height: 1.5; }
-.choice .nested { display: grid; grid-template-columns: 56px 1fr auto; align-items: center; gap: 8px; margin-top: 8px; font-size: 11px; color: var(--fg-muted); }
+.choice .nested { display: grid; grid-template-columns: 48px 1fr auto; align-items: center; gap: 8px; margin-top: 8px; font-size: 11px; color: var(--fg-muted); }
 .input { height: 28px; padding: 0 8px; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--bg); color: var(--fg); font-size: 12px; width: 100%; }
 .input.mono { font: 12px var(--font-mono); }
 .input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
 .chip { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--border-strong); padding: 4px 8px; border-radius: 6px; font-size: 11px; color: var(--fg); background: var(--bg); white-space: nowrap; }
 .chip.muted { color: var(--fg-muted); border-color: var(--border); }
-.chip .x { color: var(--fg-muted); }
 .field { display: grid; grid-template-columns: 84px 1fr; align-items: center; gap: 10px; min-height: 34px; font-size: 12px; }
 .field .k { font-size: 11px; color: var(--fg-muted); }
 .field .v { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.seg { display: flex; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--bg); padding: 3px; }
-.seg label { flex: 1; text-align: center; padding: 4px 6px; font-size: 11px; border-radius: 4px; cursor: pointer; white-space: nowrap; }
-.seg input { position: absolute; opacity: 0; }
-.seg label:has(input:checked) { background: var(--bg-active); color: var(--fg); box-shadow: inset 0 0 0 1px var(--border-strong); }
-.seg label:has(input:focus-visible) { outline: 2px solid var(--accent); }
-.seg.compact label { padding: 3px 4px; }
-.stack { margin-top: 4px; }
-.stack .k { display: block; font-size: 11px; color: var(--fg-muted); margin: 8px 0 6px; }
-textarea.input { height: 54px; padding: 6px 8px; resize: none; line-height: 1.5; }
-.route { display: flex; align-items: center; gap: 8px; font-size: 12px; margin-top: 10px; padding: 9px 0 4px; border-top: 1px solid var(--border); }
-.route .glyph { color: var(--success); }
-.route .text-action { margin-left: auto; }
-.route .sub { display: block; font-size: 11px; color: var(--fg-muted); margin-top: 2px; }
-.summary-row { display: grid; grid-template-columns: 62px minmax(0, 1fr) auto; align-items: center; gap: 10px; font-size: 12px; min-height: 30px; }
-.summary-row .val { min-width: 0; line-height: 1.5; }
-.summary-row .val .path { color: var(--fg-muted); }
-.block { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 12px 12px 10px; margin: 8px 0 6px; }
-.block.trust { border-top: 2px solid var(--info); }
-.block.relay { border-top: 2px solid var(--warning); }
-.block h3 { display: flex; align-items: center; gap: 8px; }
-.block .endpoint { display: block; font-size: 11px; color: var(--fg-muted); margin: 4px 0 0 22px; font-family: var(--font-mono); }
-.block p { font-size: 12px; line-height: 1.55; margin-top: 7px; }
-.block p.hint { font-size: 11px; }
-.loads { margin: 10px 0 4px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); }
+.context-strip { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 8px; }
+.context-chip { display: inline-flex; gap: 4px; align-items: center; border: 1px solid var(--border); padding: 4px 7px; border-radius: var(--radius-sm); font-size: 10px; color: var(--fg-muted); white-space: nowrap; }
+.context-chip:first-child { color: var(--fg); }
+.context-chip.open { color: var(--fg); border-color: var(--border-strong); background: var(--bg-active); }
+.context-chip .x { color: var(--fg-muted); }
+.strip-hint { font-size: 11px; color: var(--fg-muted); margin: -2px 0 8px; line-height: 1.5; }
+.composer { background: var(--bg-raised); border: 1px solid var(--border-strong); border-radius: var(--radius-lg); padding: 12px; }
+.composer textarea { display: block; resize: none; width: 100%; height: 46px; border: 0; outline: none; background: transparent; font-size: 15px; line-height: 1.6; padding: 0 3px; color: var(--fg); }
+.composer textarea::placeholder { color: var(--fg-muted); }
+.composer-controls { display: flex; align-items: center; gap: 3px; }
+.composer-controls .icon { width: 28px; height: 28px; font-size: 18px; }
+.send-btn { margin-left: auto; background: var(--fg); color: var(--bg); padding: 6px 11px; font-weight: 550; font-size: 12px; display: flex; align-items: center; gap: 8px; }
+.send-btn:hover { background: var(--fg-muted); }
+.send-btn kbd { color: inherit; font: 10px var(--font-ui); }
+.pane-status { flex-wrap: wrap; white-space: normal; padding: 8px 0 10px; min-height: 0; row-gap: 3px; }
+.pane-status .path { flex-basis: 100%; margin: 0; }
+/* Docked cards at the composer locus, 04's anatomy. */
+.main-crop { padding-bottom: 4px; }
+.crop-empty { padding: 24px 24px 6px; }
+.docked { margin: 0 24px; border: 1px solid var(--border-strong); border-top: 2px solid var(--info); border-radius: var(--radius); background: var(--bg-raised); }
+.docked.warn-tone { border-top-color: var(--warning); }
+.docked .content { padding: 16px; }
+.docked .header { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.docked .header .who { width: 26px; height: 26px; display: inline-grid; place-items: center; background: var(--bg-active); border: 1px solid var(--border-strong); border-radius: 7px; font-size: 15px; flex-shrink: 0; }
+.docked .header .pending { margin-left: auto; font-size: 11px; color: var(--fg-muted); white-space: nowrap; }
+.docked p { font-size: 12px; line-height: 1.55; }
+.docked p + p { margin-top: 8px; }
+.docked .endpoint { display: block; font: 11px var(--font-mono); color: var(--fg-muted); margin: -6px 0 10px 34px; }
+.docked .footer { display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--border); }
+.docked .footer .hint { margin-left: auto; text-align: right; }
+.loads { margin: 10px 0 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); }
 .loads .row { padding: 6px 10px; font-size: 11px; }
 .loads .row + .row { border-top: 1px solid var(--border); }
 .loads code { color: var(--fg); }
 .loads .row span:last-child { margin-left: auto; color: var(--fg-muted); white-space: nowrap; }
-.sheet-crop { padding: 20px; background: var(--bg-raised); }
-.sheet-crop .sheet { margin: 0 auto; }
 /* Context menu and popovers for fork and rename. */
 .menu-frame { position: relative; display: flex; min-height: 372px; }
 .menu { position: absolute; width: 226px; background: var(--bg-overlay); border: 1px solid var(--border-strong); border-radius: 8px; padding: 4px; box-shadow: var(--shadow); font-size: 12px; z-index: 2; }
@@ -250,7 +260,7 @@ textarea.input { height: 54px; padding: 6px 8px; resize: none; line-height: 1.5;
 @media (max-width: 700px) {
  body { padding: 24px 14px 40px; }
  .dimension { display: none; }
- .sheet-frame, .menu-frame { display: block; }
+ .tab-frame, .menu-frame { display: block; }
  .sidebar { width: 100%; min-width: 0; border-right: 0; border-bottom: 1px solid var(--border); }
  .menu, .menu.sub { position: static; width: auto; margin: 10px 12px; }
  .pair, .cleanup, .confirm-pair { grid-template-columns: 1fr; padding: 12px; }
@@ -269,20 +279,21 @@ textarea.input { height: 54px; padding: 6px 8px; resize: none; line-height: 1.5;
 <header class="page-head">
  <div class="eyebrow">MAWS / Interaction studies / 05</div>
  <h1>Sessions: start, branch, hand off, clean up.</h1>
- <p>One sheet to start. Trust said once. Worktrees that clean up without surprises. A session someone else is holding stays readable.</p>
+ <p>A tab to start, set up from the strip. Trust said once, at the first send. Worktrees that clean up without surprises. A session someone else is holding stays readable.</p>
 </header>
 
 <figure class="vignette" id="new-session">
- <figcaption><span class="number">01</span><h2>New-session sheet from a project’s “+”</h2><span class="dimension">300 px sidebar · 436 px sheet</span></figcaption>
- <p class="rationale">Location first, because it decides the worktree. The routing line says which account is paying before the first turn; Direct is one quiet control away, not a mode.</p>
- <div class="frame sheet-frame">
+ <figcaption><span class="number">01</span><h2>Unstarted session tab from a project’s “+”</h2><span class="dimension">300 px sidebar · 458 px pane · location chip open</span></figcaption>
+ <p class="rationale">“+” opens a tab, not a sheet. The empty pane names the project, the strip above the editor carries the setup, and the first send starts the engine.</p>
+ <div class="frame tab-frame">
   <aside class="sidebar" aria-label="Session sidebar">
    <label class="search"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><use href="#search"/></svg><input type="search" aria-label="Search sessions" placeholder="Search sessions"><kbd>⌘ K</kbd></label>
    <div class="section-heading attention label">Needs you · 3</div>
    <div class="section-heading label" style="margin-top:10px">Pinned · 2</div>
    <div class="section-heading label" style="margin-top:10px">Projects <span class="icon" aria-hidden="true">+</span></div>
-   <div class="project-head"><svg><use href="#down"/></svg><svg><use href="#folder"/></svg><span class="name">MAWS</span><span class="icon pressed" aria-label="New session in MAWS (open)">+</span></div>
+   <div class="project-head"><svg><use href="#down"/></svg><svg><use href="#folder"/></svg><span class="name">MAWS</span><span class="icon pressed" aria-label="New session in MAWS (opened)">+</span></div>
    <div class="project-sessions">
+    <div class="session selected" aria-current="page"><span class="session-glyph g-idle" aria-label="Not started">○</span><span><span class="session-title"><span class="truncate">New session</span></span><span class="session-sub">Not started · set up in the tab</span></span><span class="session-age">now</span></div>
     <div class="session"><span class="session-glyph g-working" aria-label="Working">●</span><span><span class="session-title"><span class="truncate">Charter + research</span><span class="provenance" title="Title generated by the engine">auto</span></span><span class="session-sub">Running bun test</span></span><span class="session-age">now</span></div>
     <div class="session"><span class="session-glyph g-needs" aria-label="Needs approval">◐</span><span><span class="session-title"><span class="truncate">Fix sidebar drag</span><span class="provenance" title="Title generated by the engine">auto</span></span><span class="session-sub">Waiting to push feat/sidebar-drag</span></span><span class="session-age">8m<span class="unread" aria-label="Unread"></span></span></div>
     <div class="session"><span class="session-glyph g-question" aria-label="Question">?</span><span><span class="session-title"><span class="truncate">Sidebar interaction pass</span></span><span class="session-sub">Which sidebar layout?</span></span><span class="session-age">4m</span></div>
@@ -291,72 +302,76 @@ textarea.input { height: 54px; padding: 6px 8px; resize: none; line-height: 1.5;
    <div class="project-head"><svg class="collapsed"><use href="#down"/></svg><svg><use href="#folder"/></svg><span class="name">claude-usage-menubar</span><span class="rollup">⧉1</span></div>
    <div class="project-head"><svg class="collapsed"><use href="#down"/></svg><svg><use href="#folder"/></svg><span class="name">claude-code-bundle</span></div>
   </aside>
-  <div class="main-area">
-   <section class="sheet" aria-label="New session sheet">
-    <div class="sheet-head"><h3>New session</h3><span class="where">in MAWS</span><kbd>esc</kbd></div>
-    <div class="sheet-body">
-     <span class="label group-label">Location</span>
-     <label class="choice"><input type="radio" name="location"><span><span class="name">Project directory <span class="path">~/Developer/GitHub/MAWS</span></span><span class="sub">⎇ main · clean</span></span></label>
-     <label class="choice"><input type="radio" name="location" checked><span><span class="name">New worktree <span class="path">.claude/worktrees/‹branch›</span></span><span class="sub">Same convention the engine’s own EnterWorktree uses, so both coexist.</span><span class="nested"><span>Branch</span><input class="input mono" value="feat/session-sheet" aria-label="Branch name"><span class="chip muted">from main ⌄</span></span></span></label>
-     <label class="choice"><input type="radio" name="location"><span><span class="name">Existing worktree <span class="path">2 available</span></span><span class="sub">charter · live in “Charter + research” &nbsp;·&nbsp; feat-usage-strip · idle</span></span></label>
-     <div class="divider" style="margin:10px 0 4px"></div>
-     <div class="field"><span class="k">Model</span><span class="v"><button class="chip" title="Opens the model and effort widget">Opus 5.5 ⌄</button><span class="seg compact" role="radiogroup" aria-label="Effort"><label><input type="radio" name="effort">Low</label><label><input type="radio" name="effort">Medium</label><label><input type="radio" name="effort" checked>High</label><label><input type="radio" name="effort">Max</label></span></span></div>
-     <div class="stack"><span class="k">Permission mode</span>
-      <div class="seg" role="radiogroup" aria-label="Permission mode"><label><input type="radio" name="mode">default</label><label><input type="radio" name="mode">acceptEdits</label><label><input type="radio" name="mode">plan</label><label><input type="radio" name="mode" checked>auto</label><label><input type="radio" name="mode">bypass</label></div>
-      <p class="hint" style="margin-top:6px">Auto: the classifier reviews tool calls; escalations, questions and plan reviews come to you. Inherited from your settings.</p>
-     </div>
-     <div class="field" style="margin-top:6px"><span class="k">Also read</span><span class="v"><span class="chip">claude-code-bundle <span class="x" aria-hidden="true">×</span></span><button class="chip muted">+ Add directory</button></span></div>
-     <div class="stack"><span class="k">First message <span style="font-weight:400">· optional</span></span><textarea class="input" aria-label="First message" placeholder="Sent as the first turn. Leave empty to open the session idle."></textarea></div>
-     <div class="route"><span class="glyph" aria-hidden="true">⇄</span><span>Routed through ClaudeUsage’s relay<span class="sub">alex@maws.dev is routing now · weekly resets soonest · gateway models available</span></span><button class="text-action" title="Run this session with the engine’s own login instead">Direct…</button></div>
+  <div class="pane-main">
+   <nav class="tabs" aria-label="Open tabs"><button class="tab"><span class="g-working">●</span>Charter + research <small>MAWS</small></button><button class="tab active" aria-current="page"><span class="g-idle">○</span>New session <small>MAWS</small></button></nav>
+   <div class="pane-body">
+    <div class="empty-state">
+     <h3>What should this session do in MAWS?</h3>
+     <p>Where it runs and how it may act are in the strip below. The engine starts with your first message.</p>
+     <div class="route-line"><span class="glyph" aria-hidden="true">⇄</span><span>Routed through ClaudeUsage’s relay · routing alex@maws.dev</span><button class="text-action" title="Run this session with the engine’s own login instead">Direct…</button></div>
     </div>
-    <div class="sheet-foot"><span class="hint">⌘N · selected project</span><span class="spacer"></span><button class="btn">Cancel</button><button class="btn primary">Start session ↵</button></div>
-   </section>
+   </div>
+   <div class="composer-zone">
+    <section class="popover location-pop" aria-label="Location">
+     <div class="pop-body">
+      <span class="label group-label">Location</span>
+      <label class="choice"><input type="radio" name="location"><span><span class="name">Project directory <span class="path">~/Developer/GitHub/MAWS</span></span><span class="sub">⎇ main · clean</span></span></label>
+      <label class="choice"><input type="radio" name="location" checked><span><span class="name">New worktree <span class="path">.claude/worktrees/feat-session-tab</span></span><span class="sub">Created on the first send.</span><span class="nested"><span>Branch</span><input class="input mono" value="feat/session-tab" aria-label="Branch name"><span class="chip muted">from main ⌄</span></span></span></label>
+      <label class="choice"><input type="radio" name="location"><span><span class="name">Existing worktree <span class="path">2 available</span></span><span class="sub">charter · live in “Charter + research” &nbsp;·&nbsp; feat-usage-strip · idle</span></span></label>
+     </div>
+     <div class="pop-foot">Same convention as the engine’s own EnterWorktree, so both coexist.</div>
+    </section>
+    <div class="context-strip" aria-label="Session setup"><button class="context-chip">MAWS</button><button class="context-chip open" aria-expanded="true">New worktree · feat/session-tab ⌄</button><button class="context-chip">⎇ from main</button><button class="context-chip" title="Opens the model and effort widget">Opus 5.5 · High ⌄</button><button class="context-chip">auto ⌄</button><button class="context-chip">claude-code-bundle <span class="x" aria-hidden="true">×</span></button><button class="context-chip">+ dir</button></div>
+    <p class="strip-hint">auto · the classifier reviews tool calls; escalations, questions and plan reviews come to you · inherited from your settings</p>
+    <div class="composer"><textarea aria-label="First message" placeholder="Message Claude to start the session"></textarea><div class="composer-controls"><button class="icon" aria-label="Add attachments or commands">+</button><button class="icon" aria-label="Mention context">@</button><button class="send-btn" title="Starts the engine with this message">Send <kbd>↵</kbd></button></div></div>
+    <div class="statusline pane-status" aria-label="Session status"><span class="path">~/Developer/GitHub/MAWS · worktree created on send</span><span>ctx —</span><span>·</span><span>5h 74% ↻2h37m</span><span>·</span><span>7d 82% ↻5d21h</span><span>·</span><span>$0.00</span><span>·</span><span>auto</span></div>
+   </div>
   </div>
  </div>
 </figure>
 
 <figure class="vignette" id="trust">
- <figcaption><span class="number">02</span><h2>Trust step for a directory never trusted</h2><span class="dimension">Same sheet · trust block replaces the fields</span></figcaption>
- <p class="rationale">Trust is the terminal’s dialog, said once and attested in <code>initialize</code>; what it loads is read from disk so the decision is concrete, not a shrug.</p>
- <div class="frame sheet-crop">
-  <section class="sheet" aria-label="New session sheet with trust step">
-   <div class="sheet-head"><h3>New session</h3><span class="where">in quota-ledger</span><kbd>esc</kbd></div>
-   <div class="sheet-body">
-    <div class="summary-row"><span class="label">Location</span><span class="val">Project directory · <span class="path">~/Developer/GitHub/quota-ledger</span></span><button class="text-action">Change</button></div>
-    <div class="summary-row"><span class="label">Options</span><span class="val hint">Opus 5.5 · High &nbsp;·&nbsp; auto &nbsp;·&nbsp; no extra directories</span><button class="text-action">Edit</button></div>
-    <section class="block trust" aria-label="Trust this directory">
-     <h3><span class="info" aria-hidden="true">◇</span>Trust this directory first</h3>
-     <p><strong style="font-weight:550">quota-ledger</strong> has never been trusted on this Mac. Trusting it loads the project’s own settings, hooks, MCP servers and plugins, exactly as the terminal does when you accept its trust dialog.</p>
-     <div class="loads" aria-label="What trusting loads">
-      <div class="row"><code>.claude/settings.json</code><span>4 allow rules · 1 PostToolUse hook</span></div>
-      <div class="row"><code>.mcp.json</code><span>2 MCP servers · ptc, advisor</span></div>
-      <div class="row"><code>enabledPlugins</code><span>1 plugin · doperpowers</span></div>
-     </div>
-     <p class="hint">Attested to the engine once at launch and recorded in <code>~/.claude.json</code>, so the terminal will not ask again either. Untrusted, the engine ignores these files and says so; MAWS would show that notice in the session.</p>
-    </section>
+ <figcaption><span class="number">02</span><h2>Trust card at first send, directory never trusted</h2><span class="dimension">760 px main column · docked at the composer</span></figcaption>
+ <p class="rationale">Trust is the terminal’s dialog, asked once at the moment it matters. It docks where the composer was, keeps the draft, and shows what trusting loads, read from disk.</p>
+ <div class="frame main-crop">
+  <nav class="tabs" aria-label="Open tabs"><button class="tab"><span class="g-working">●</span>Charter + research <small>MAWS</small></button><button class="tab active" aria-current="page"><span class="g-idle">○</span>New session <small>quota-ledger</small></button></nav>
+  <div class="crop-empty"><div class="empty-state"><h3>What should this session do in quota-ledger?</h3><p class="draft-line">Your message is waiting: <q>Audit the reset math in the ledger and propose a fix.</q></p></div></div>
+  <div class="locus-label"><span>Trust required before the first turn</span><span>Composer paused · draft kept</span></div>
+  <section class="docked" aria-label="Trust request">
+   <div class="content">
+    <div class="header"><span class="who" aria-hidden="true">◇</span><h3>Trust quota-ledger?</h3><span class="pending">Asked once per directory</span></div>
+    <p><strong style="font-weight:550">~/Developer/GitHub/quota-ledger</strong> has never been trusted on this Mac. Trusting it loads the project’s own settings, hooks, MCP servers and plugins, exactly as the terminal does when you accept its trust dialog.</p>
+    <div class="loads" aria-label="What trusting loads">
+     <div class="row"><code>.claude/settings.json</code><span>4 allow rules · 1 PostToolUse hook</span></div>
+     <div class="row"><code>.mcp.json</code><span>2 MCP servers · ptc, advisor</span></div>
+     <div class="row"><code>enabledPlugins</code><span>1 plugin · doperpowers</span></div>
+    </div>
+    <p class="hint">Attested to the engine once at launch and recorded in <code>~/.claude.json</code>, so the terminal will not ask again either. Untrusted, the engine ignores these files and says so; MAWS shows that notice in the session.</p>
    </div>
-   <div class="sheet-foot"><button class="text-action" title="Start with project settings ignored; the engine’s notice appears as a session warning">Start without trusting</button><span class="spacer"></span><button class="btn">Cancel</button><button class="btn primary">Trust and start ↵</button></div>
+   <div class="footer"><button class="btn primary">Trust and start ↵</button><button class="text-action" title="Start with project settings ignored; the engine’s notice appears as a session warning">Start without trusting</button><span class="hint">Enter trusts · Esc returns to the composer, message kept</span></div>
   </section>
+  <div class="statusline pane-status" style="padding:8px 24px 10px" aria-label="Session status"><span class="path">~/Developer/GitHub/quota-ledger</span><span>ctx —</span><span>·</span><span>5h 74% ↻2h37m</span><span>·</span><span>7d 82% ↻5d21h</span><span>·</span><span>$0.00</span><span>·</span><span>auto</span></div>
  </div>
 </figure>
 
 <figure class="vignette" id="relay-down">
- <figcaption><span class="number">03</span><h2>Relay unreachable at launch</h2><span class="dimension">Sheet foot · routing block in its failed state</span></figcaption>
- <p class="rationale">The default route is down, so the sheet offers the two real options instead of failing: bring ClaudeUsage back, or run this one session on the engine’s own login.</p>
- <div class="frame sheet-crop">
-  <section class="sheet" aria-label="New session sheet, relay unreachable">
-   <div class="sheet-body" style="padding-top:14px">
-    <div class="summary-row"><span class="label">Location</span><span class="val">New worktree · <span class="path">.claude/worktrees/feat-session-sheet</span></span><button class="text-action">Change</button></div>
-    <section class="block relay" aria-label="Relay unreachable">
-     <h3><span class="warn" aria-hidden="true">△</span>ClaudeUsage’s relay is not answering</h3>
-     <span class="endpoint">127.0.0.1:8641/api/hello · timed out after 2s</span>
-     <p>New sessions route through it by default. Open ClaudeUsage to bring the relay back, or run this session direct with the engine’s own login.</p>
-     <label class="choice" style="margin-top:8px"><input type="radio" name="fallback" checked><span><span class="name">Open ClaudeUsage, then start</span><span class="sub">MAWS keeps checking; the session starts routed as soon as the relay answers.</span></span></label>
-     <label class="choice"><input type="radio" name="fallback"><span><span class="name">Run direct</span><span class="sub">Uses the engine’s own login (alex@maws.dev, last signed in 3d ago). Gateway models unavailable; usage windows come from the engine. Switching back later restarts the session.</span></span></label>
-    </section>
+ <figcaption><span class="number">03</span><h2>Relay unreachable at first send</h2><span class="dimension">760 px main column · docked at the composer</span></figcaption>
+ <p class="rationale">The default route is down, so the send docks the two real options instead of failing: bring ClaudeUsage back, or run this one session on the engine’s own login.</p>
+ <div class="frame main-crop">
+  <nav class="tabs" aria-label="Open tabs"><button class="tab"><span class="g-working">●</span>Charter + research <small>MAWS</small></button><button class="tab active" aria-current="page"><span class="g-idle">○</span>New session <small>MAWS</small></button></nav>
+  <div class="crop-empty"><div class="empty-state"><h3>What should this session do in MAWS?</h3><p class="draft-line">Your message is waiting: <q>Tighten the sidebar drop target and add a cross-pane test.</q></p></div></div>
+  <div class="locus-label"><span>Route unavailable</span><span>Composer paused · draft kept</span></div>
+  <section class="docked warn-tone" aria-label="Relay unreachable">
+   <div class="content">
+    <div class="header"><span class="who warn" aria-hidden="true">△</span><h3>ClaudeUsage’s relay is not answering</h3><span class="pending">Checked 4s ago</span></div>
+    <span class="endpoint">127.0.0.1:8641/api/hello · timed out after 2s</span>
+    <p>New sessions route through it by default. Open ClaudeUsage to bring the relay back, or run this session direct with the engine’s own login.</p>
+    <label class="choice" style="margin-top:10px"><input type="radio" name="fallback" checked><span><span class="name">Open ClaudeUsage, then start</span><span class="sub">MAWS keeps checking; the session starts routed as soon as the relay answers.</span></span></label>
+    <label class="choice"><input type="radio" name="fallback"><span><span class="name">Run direct</span><span class="sub">Uses the engine’s own login (alex@maws.dev, last signed in 3d ago). Gateway models unavailable; usage windows come from the engine. Switching back later restarts the session.</span></span></label>
    </div>
-   <div class="sheet-foot"><button class="text-action">Retry ↻ <span class="hint">checked 4s ago</span></button><span class="spacer"></span><button class="btn">Cancel</button><button class="btn primary">Open ClaudeUsage ↵</button></div>
+   <div class="footer"><button class="btn primary">Open ClaudeUsage ↵</button><button class="btn">Retry ↻</button><button class="btn">Cancel</button><span class="hint">Enter · Esc cancels, message kept</span></div>
   </section>
+  <div class="statusline pane-status" style="padding:8px 24px 10px" aria-label="Session status"><span class="path">~/Developer/GitHub/MAWS · worktree created on send</span><span>ctx —</span><span>·</span><span>5h —</span><span>·</span><span>7d —</span><span>·</span><span>$0.00</span><span>·</span><span>auto</span></div>
  </div>
 </figure>
 
