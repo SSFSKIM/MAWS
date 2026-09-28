@@ -1,4 +1,5 @@
 import { execFileSync, spawn } from 'node:child_process';
+import { writeFile } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SessionId } from '@shared/graph/ids';
 import type { Holder, JobState, LiveSessionRecord } from '@shared/wire/store';
@@ -97,6 +98,40 @@ describe('holders come from live sessions/<pid>.json records', () => {
     expect(holders.holderOf(S1)).toEqual({ kind: 'terminal', pid: process.pid });
     expect(errors).toHaveBeenCalledWith(expect.stringContaining('/nonexistent/ps failed'), expect.any(String));
     errors.mockRestore();
+  });
+
+  it('keeps a record whose rewrite stays unparseable: a torn registry file does not end a holder', async () => {
+    const path = await fixture.addRegistryRecord(process.pid, { sessionId: S1, kind: 'interactive' });
+    const holders = create();
+    await holders.start();
+    await writeFile(path, '{"pid":'); // torn, and never repaired within the retry schedule
+    await holders.refresh();
+    expect(holders.holderOf(S1)).toEqual({ kind: 'terminal', pid: process.pid });
+    expect(emitted).toHaveLength(1);
+  });
+
+  it('holds for a status value the engine adds later', async () => {
+    await fixture.addRegistryRecord(process.pid, { sessionId: S1, kind: 'interactive', status: 'some-new-status' });
+    const holders = create();
+    await holders.start();
+    expect(holders.holderOf(S1)).toEqual({ kind: 'terminal', pid: process.pid });
+    expect(emitted[0].registry?.status).toBe('some-new-status');
+  });
+
+  it('a record without kind is interactive, and an unknown kind with a live pid still holds as a background job, logged once', async () => {
+    await fixture.addRegistryRecord(process.pid, { sessionId: S1 });
+    const holders = create();
+    await holders.start();
+    expect(holders.holderOf(S1)).toEqual({ kind: 'terminal', pid: process.pid });
+
+    const warnings = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await fixture.addRegistryRecord(process.pid, { sessionId: S1, kind: 'future', jobId: 'cafe0123' });
+    await holders.refresh();
+    await holders.refresh();
+    expect(holders.holderOf(S1)).toEqual({ kind: 'background_job', pid: process.pid, jobId: 'cafe0123' });
+    expect(warnings).toHaveBeenCalledTimes(1);
+    expect(warnings.mock.calls[0].join(' ')).toContain('future');
+    warnings.mockRestore();
   });
 
   it('removing the record emits none', async () => {

@@ -32,6 +32,8 @@ describe('store record schemas accept the owner\'s shapes', () => {
     expect(record.futureField).toEqual({ nested: true });
     const bg = LiveSessionRecordSchema.parse({ pid: 1, sessionId: 's', kind: 'bg', jobId: 'bdb23713' });
     expect(bg.jobId).toBe('bdb23713');
+    // kind and status are open: a value the engine adds later must not drop the record (and with it a holder)
+    expect(LiveSessionRecordSchema.parse({ pid: 1, sessionId: 's', kind: 'future', status: 'some-new-status' })).toMatchObject({ kind: 'future', status: 'some-new-status' });
     expect(LiveSessionRecordSchema.safeParse({ sessionId: 's' }).success).toBe(false); // pid comes from the file name and is required
     expect(LiveSessionRecordSchema.safeParse({ pid: 1, spare: false }).success).toBe(false); // `spare` is either absent or true
   });

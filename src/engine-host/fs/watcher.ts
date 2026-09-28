@@ -3,7 +3,9 @@
 // `sessions/`. Each event is classified by its path relative to the root into a `StoreChange` and coalesced per key
 // with a 50 ms trailing debounce. An event with no filename, or a watcher error, becomes a `rescan` of that root (the
 // consumer readdir-diffs it); an errored watch re-opens after 1 s, and a root that does not exist yet (a fresh config
-// home has no `jobs/`) is retried every 5 s and rescanned once it appears. Nothing here reads or writes a file.
+// home has no `jobs/`) is retried every 5 s. FSEvents starts its stream asynchronously after `fs.watch` returns and
+// does not report a write made in its first milliseconds, so every root is rescanned once 250 ms after its watch
+// opens (at start, on appearing, on re-opening). Nothing here reads or writes a file.
 import { watch as fsWatch } from 'node:fs';
 import { join, sep } from 'node:path';
 import type { SessionId } from '@shared/graph/ids';
@@ -31,6 +33,7 @@ export type WatchFn = (path: string, options: { recursive: boolean }, listener: 
 export const DEBOUNCE_MS = 50;
 export const REOPEN_MS = 1_000;
 export const MISSING_RETRY_MS = 5_000;
+export const SETTLE_MS = 250;
 
 // The engine lists only transcripts whose stem is a UUID (SPEC 35.14.1, 35.16.2), which also excludes the
 // `.orphaned-` and `.superseded-` names (SPEC 35.2.6, 35.23).
@@ -107,7 +110,7 @@ export class StoreWatcher {
   }
 
   start(): void {
-    for (const root of STORE_ROOTS) this.open(root, false);
+    for (const root of STORE_ROOTS) this.open(root);
   }
 
   stop(): void {
@@ -125,7 +128,7 @@ export class StoreWatcher {
     return Object.fromEntries(STORE_ROOTS.map((root) => [root, this.roots.get(root)!.status])) as Record<StoreRoot, WatchStatus>;
   }
 
-  private open(root: StoreRoot, rescanOnOpen: boolean): void {
+  private open(root: StoreRoot): void {
     if (this.stopped) return;
     const watch = this.roots.get(root)!;
     watch.timer = null;
@@ -135,7 +138,7 @@ export class StoreWatcher {
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
         watch.status = 'missing';
-        watch.timer = setTimeout(() => this.open(root, true), MISSING_RETRY_MS);
+        watch.timer = setTimeout(() => this.open(root), MISSING_RETRY_MS);
       } else {
         watch.status = 'failed';
         console.error(`[fs] cannot watch ${this.paths[root]}:`, error instanceof Error ? error.message : error);
@@ -143,8 +146,12 @@ export class StoreWatcher {
       return;
     }
     handle.on('error', (error) => this.onError(root, handle, error));
-    Object.assign(watch, { status: 'open', handle });
-    if (rescanOnOpen) this.enqueue({ kind: 'rescan', root });
+    // The settle rescan: whatever changed while the stream was starting (or while the root was missing or closed).
+    const settle = setTimeout(() => {
+      if (watch.timer === settle) watch.timer = null;
+      this.enqueue({ kind: 'rescan', root });
+    }, SETTLE_MS);
+    Object.assign(watch, { status: 'open', handle, timer: settle });
   }
 
   private onError(root: StoreRoot, handle: WatchHandle, error: Error): void {
@@ -152,7 +159,8 @@ export class StoreWatcher {
     if (this.stopped || watch.handle !== handle) return;
     console.error(`[fs] watch on ${this.paths[root]} failed; re-opening in ${REOPEN_MS} ms:`, error.message);
     handle.close();
-    Object.assign(watch, { status: 'reopening', handle: null, timer: setTimeout(() => this.open(root, true), REOPEN_MS) });
+    if (watch.timer) clearTimeout(watch.timer);
+    Object.assign(watch, { status: 'reopening', handle: null, timer: setTimeout(() => this.open(root), REOPEN_MS) });
     this.enqueue({ kind: 'rescan', root });
   }
 

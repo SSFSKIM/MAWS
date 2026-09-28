@@ -27,7 +27,7 @@ describe('whole-file sidecars are parsed with retry', () => {
     const path = join(fixture.configHome, 'title.json');
     await writeFile(path, '{"customTitle":"Named","extra":1}');
     const started = Date.now();
-    expect(await readJsonWithRetry(path, asTitle)).toBe('Named');
+    expect(await readJsonWithRetry(path, asTitle)).toEqual({ status: 'ok', value: 'Named' });
     expect(Date.now() - started).toBeLessThan(20);
   });
 
@@ -35,7 +35,7 @@ describe('whole-file sidecars are parsed with retry', () => {
     const path = join(fixture.configHome, 'title.json');
     await writeFile(path, '{"customTi');
     setTimeout(() => void writeFile(path, '{"customTitle":"Later"}'), 60);
-    expect(await readJsonWithRetry(path, asTitle)).toBe('Later');
+    expect(await readJsonWithRetry(path, asTitle)).toEqual({ status: 'ok', value: 'Later' });
   });
 
   it('retries a parsed value the acceptance predicate refuses (a registry record before its sessionId)', async () => {
@@ -47,20 +47,20 @@ describe('whole-file sidecars are parsed with retry', () => {
       (raw) => raw as { sessionId?: string },
       (value) => value.sessionId !== undefined,
     );
-    expect(record).toEqual({ pid: 123, sessionId: 's' });
+    expect(record).toEqual({ status: 'ok', value: { pid: 123, sessionId: 's' } });
   });
 
-  it('gives up after the sixth failure with null, so the caller keeps its previous value', async () => {
+  it('gives up after the sixth failure as unparseable, distinct from absence, so the caller keeps its previous value', async () => {
     const path = join(fixture.configHome, 'broken.json');
     await writeFile(path, 'not json');
     const started = Date.now();
-    expect(await readJsonWithRetry(path, asTitle)).toBeNull();
+    expect(await readJsonWithRetry(path, asTitle)).toEqual({ status: 'unparseable' });
     expect(Date.now() - started).toBeGreaterThanOrEqual(490);
   });
 
-  it('answers null at once for a file that does not exist: a missing file is an answer, not a torn write', async () => {
+  it('answers absent at once for a file that does not exist: a missing file is an answer, not a torn write', async () => {
     const started = Date.now();
-    expect(await readJsonWithRetry(join(fixture.configHome, 'absent.json'), asTitle)).toBeNull();
+    expect(await readJsonWithRetry(join(fixture.configHome, 'absent.json'), asTitle)).toEqual({ status: 'absent' });
     expect(Date.now() - started).toBeLessThan(20);
   });
 });

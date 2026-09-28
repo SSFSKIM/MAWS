@@ -14,11 +14,14 @@ export const LiveSessionRecordSchema = z.looseObject({
   startedAt: z.number().optional(),
   procStart: z.string().optional(),
   version: z.string().optional(),
-  kind: z.enum(['interactive', 'bg', 'daemon', 'daemon-worker']).optional(),
+  // Open strings: a value the engine adds later must not drop the record, and with it a holder (M2 review). Known kinds:
+  // 'interactive' | 'bg' | 'daemon' | 'daemon-worker' (the Holder rule maps them); known statuses: 'busy' | 'shell' |
+  // 'idle' | 'waiting'.
+  kind: z.string().optional(),
   entrypoint: z.string().optional(),
   jobId: z.string().optional(),
   name: z.string().optional(),
-  status: z.enum(['busy', 'shell', 'idle', 'waiting']).optional(),
+  status: z.string().optional(),
   waitingFor: z.string().optional(),
   updatedAt: z.number().optional(),
   spare: z.literal(true).optional(),

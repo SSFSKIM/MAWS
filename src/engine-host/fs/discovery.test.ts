@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { SessionId } from '@shared/graph/ids';
@@ -71,6 +71,19 @@ describe('discovery lists and summarises the store', () => {
 
     await fixture.appendLines(path, [JSON.stringify({ type: 'custom-title', customTitle: 'Renamed in the tail', sessionId: S1 })]);
     expect((await discovery.summarizeOne(path))?.customTitle).toBe('Renamed in the tail');
+  });
+
+  it('keeps the previous sidecar title when custom-title.json is rewritten torn and stays that way, and drops it once the file is gone', async () => {
+    const path = await fixture.addTranscript('/work/a', S1, [user('u1', null, '/work/a', 'first prompt')]);
+    const sidecar = await fixture.addSidecar(S1, 'custom-title.json', { customTitle: 'Named in the sidecar' });
+    const discovery = new Discovery(fixture.paths);
+    expect((await discovery.summarizeOne(path))?.customTitle).toBe('Named in the sidecar');
+
+    await writeFile(sidecar, '{"customTit'); // a torn write the engine never finishes
+    expect((await discovery.summarizeOne(path))?.customTitle).toBe('Named in the sidecar');
+
+    await rm(sidecar);
+    expect((await discovery.summarizeOne(path))?.customTitle).toBeNull();
   });
 
   it('reads only the first and last 64 KiB of a large transcript', async () => {

@@ -69,6 +69,7 @@ export function Diagnostics() {
       </div>
       {/* C4: the engine's store as the filesystem state service sees it, on a row of its own */}
       <StoreDiagnostics />
+      {/* end C4 */}
     </section>
   );
 }

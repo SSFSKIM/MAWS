@@ -37,6 +37,9 @@ export class FsService {
   private readonly listed = new Map<SessionId, ListedTranscript>(); // the store's transcripts as last listed or seen
   private readonly summaries = new Map<SessionId, TranscriptSummary>();
   private readonly perPath = new Map<string, Promise<unknown>>(); // one summarisation at a time per file, in call order
+  // Sessions whose transcript was read (found or found gone) since the running scan began listing. Such a read is
+  // newer than the listing, so the scan neither forgets nor re-lists them from its snapshot.
+  private readonly observedSinceListing = new Set<SessionId>();
   private scans: Promise<unknown> = Promise.resolve();
   private lastScanAt: string | null = null;
   private stopped = false;
@@ -125,13 +128,17 @@ export class FsService {
   }
 
   private async pass(known: Map<SessionId, FsScanKnown> | null, mode: ScanMode, started: number): Promise<FsScanResult> {
+    this.observedSinceListing.clear();
     const files = await this.discovery.list();
+    // Reconcile the snapshot against the live table as it is now: the watcher may have found a transcript the listing
+    // missed, or seen one vanish that the listing still holds, while `list()` was in flight.
+    const stale = (sessionId: SessionId) => this.observedSinceListing.has(sessionId);
     const present = new Map(files.map((file) => [file.sessionId, file]));
 
     const gone = new Set([...this.listed.keys()].filter((sessionId) => !present.has(sessionId)));
     for (const sessionId of known?.keys() ?? []) if (!present.has(sessionId)) gone.add(sessionId);
-    for (const sessionId of gone) this.forget(sessionId);
-    for (const file of files) this.listed.set(file.sessionId, file);
+    for (const sessionId of gone) if (!stale(sessionId)) this.forget(sessionId);
+    for (const file of files) if (!stale(file.sessionId)) this.listed.set(file.sessionId, file);
 
     const todo = files.filter((file) => !matchesKnown(file, known?.get(file.sessionId))).sort((a, b) => b.mtimeMs - a.mtimeMs);
     let scanned = 0;
@@ -150,7 +157,7 @@ export class FsService {
     this.send('fs.scanProgress', { scanned, total: todo.length });
 
     this.lastScanAt = new Date().toISOString();
-    return { projects: countSlugs(files), sessions: files.length, changed: todo.length, durationMs: Math.round(performance.now() - started) };
+    return { projects: countSlugs(this.listed.values()), sessions: this.listed.size, changed: todo.length, durationMs: Math.round(performance.now() - started) };
   }
 
   // Re-reads one transcript's head and tail (serialised per file, so results land in the order they were asked for)
@@ -167,6 +174,7 @@ export class FsService {
         console.error(`[fs] cannot summarise ${path}:`, error instanceof Error ? error.message : error);
         return;
       }
+      this.observedSinceListing.add(sessionId);
       if (summary === null) {
         if (this.listed.get(sessionId)?.path === path) this.forget(sessionId);
         return;

@@ -8,23 +8,27 @@ import { readFile } from 'node:fs/promises';
 // Attempt times, in ms after the change that asked for the read (absolute offsets, not gaps).
 export const RETRY_SCHEDULE_MS = [0, 20, 50, 100, 250, 500] as const;
 
+// What a read concluded. `absent`: the file does not exist, so whatever it said is gone. `unparseable`: it exists but
+// never read whole within the schedule, so the caller keeps its previous value (a torn `custom-title.json` must not
+// clear a valid title, nor a torn registry record end a holder).
+export type SidecarRead<T> = { status: 'ok'; value: T } | { status: 'absent' } | { status: 'unparseable' };
+
 // Reads the whole file, `JSON.parse`s it, maps it through `parse` (which throws on a shape it refuses) and applies
-// `accept`; a failure at any step waits for the next attempt, and after the sixth it resolves `null` so the caller
-// keeps its previous value. A file that does not exist resolves `null` at once: the engine's writers never make a
-// file vanish mid-write (`writeFile` truncates in place; a rename replaces atomically), so absence is an answer.
-export async function readJsonWithRetry<T>(path: string, parse: (raw: unknown) => T, accept?: (value: T) => boolean): Promise<T | null> {
+// `accept`; a failure at any step waits for the next attempt. A file that does not exist is `absent` at once: the
+// engine's writers never make a file vanish mid-write (`writeFile` truncates in place; a rename replaces atomically).
+export async function readJsonWithRetry<T>(path: string, parse: (raw: unknown) => T, accept?: (value: T) => boolean): Promise<SidecarRead<T>> {
   const started = Date.now();
   for (const at of RETRY_SCHEDULE_MS) {
     const wait = started + at - Date.now();
     if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
     try {
       const value = parse(JSON.parse(await readFile(path, 'utf8')) as unknown);
-      if (accept === undefined || accept(value)) return value;
+      if (accept === undefined || accept(value)) return { status: 'ok', value };
     } catch (error) {
-      if (isMissing(error)) return null;
+      if (isMissing(error)) return { status: 'absent' };
     }
   }
-  return null;
+  return { status: 'unparseable' };
 }
 
 export function isMissing(error: unknown): boolean {

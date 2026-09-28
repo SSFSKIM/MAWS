@@ -36,6 +36,7 @@ export class HolderRegistry {
   private readonly records = new Map<number, LiveSessionRecord>();
   private readonly jobs = new Map<string, JobState>();
   private readonly held = new Map<SessionId, Held>();
+  private readonly unknownKinds = new Set<string>(); // logged once each
   private chain: Promise<void> = Promise.resolve();
   private queuedRefresh: Promise<void> | null = null;
   private poll: ReturnType<typeof setInterval> | null = null;
@@ -117,8 +118,9 @@ export class HolderRegistry {
           (raw) => LiveSessionRecordSchema.parse({ ...(raw as object), pid }),
           (value) => value.sessionId !== undefined || value.spare === true || value.parkedJobId !== undefined,
         );
-        // null: unreadable after every retry, or unlinked since the listing; the next listing settles which.
-        if (record) this.records.set(pid, record);
+        // Unparseable after every retry: keep the record as last read whole. Absent: unlinked since the listing.
+        if (record.status === 'ok') this.records.set(pid, record.value);
+        else if (record.status === 'absent') this.records.delete(pid);
       }),
     );
   }
@@ -144,7 +146,8 @@ export class HolderRegistry {
       return;
     }
     const job = await readJsonWithRetry(path, (raw) => JobStateSchema.parse(raw));
-    if (job) this.jobs.set(jobId, job);
+    if (job.status === 'ok') this.jobs.set(jobId, job.value);
+    else if (job.status === 'absent') this.jobs.delete(jobId); // unparseable keeps the state last read whole
   }
 
   private async recompute(): Promise<void> {
@@ -186,13 +189,22 @@ export class HolderRegistry {
 
   private holderFor(record: LiveSessionRecord, sessionId: SessionId): Holder {
     switch (record.kind) {
+      case 'interactive':
+      case undefined: // a record too old to say: only an interactive start writes one without a kind
+        return { kind: 'terminal', pid: record.pid };
       case 'bg':
         return { kind: 'background_job', pid: record.pid, jobId: record.jobId ?? this.jobFor(sessionId)?.jobId ?? null };
       case 'daemon':
       case 'daemon-worker':
         return { kind: 'background_job', pid: record.pid, jobId: null };
-      default: // 'interactive', and a record too old to say: only an interactive start writes one without a kind
-        return { kind: 'terminal', pid: record.pid };
+      default:
+        // A kind this build does not know, with a live pid, still holds the session: X6's launch refusal must hold for
+        // a process MAWS cannot classify. Not a terminal badge, since nothing says it is one.
+        if (!this.unknownKinds.has(record.kind)) {
+          this.unknownKinds.add(record.kind);
+          console.warn(`[fs] registry record ${record.pid} has kind ${JSON.stringify(record.kind)}, unknown to this build; holding as a background job`);
+        }
+        return { kind: 'background_job', pid: record.pid, jobId: record.jobId ?? null };
     }
   }
 

@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resolveStorePaths } from './paths';
-import { classifyStoreEvent, StoreWatcher, type StoreChange, type WatchFn } from './watcher';
+import { classifyStoreEvent, DEBOUNCE_MS, SETTLE_MS, StoreWatcher, type StoreChange, type WatchFn } from './watcher';
 
 const paths = resolveStorePaths({ CLAUDE_CONFIG_DIR: '/cfg' });
 const SID = '0b1c2d3e-4f50-4617-8293-a4b5c6d7e8f9';
@@ -135,11 +135,28 @@ describe('StoreWatcher', () => {
     expect(watcher.status().jobs).toBe('missing');
     vi.advanceTimersByTime(5_000);
     expect(watcher.status().jobs).toBe('missing');
+    changes.splice(0); // the other roots' settle rescans
     fake.missing.delete('/cfg/jobs');
     vi.advanceTimersByTime(5_000);
     expect(watcher.status().jobs).toBe('open');
-    vi.advanceTimersByTime(50);
+    vi.advanceTimersByTime(SETTLE_MS + DEBOUNCE_MS);
     expect(changes).toEqual([{ kind: 'rescan', root: 'jobs' }]);
+    watcher.stop();
+  });
+
+  // FSEvents starts its stream asynchronously after fs.watch returns, and a write in the first milliseconds is not
+  // reported (measured: 7 of 30 writes made 0 to 1 ms after the call were missed). One rescan per root once the stream
+  // has settled covers whatever changed in between, at start and after every re-open.
+  it('rescans each root once, 250 ms after its watch opens, so nothing written while the stream was starting is lost', () => {
+    const fake = fakeWatch();
+    const watcher = new StoreWatcher(paths, (c) => changes.push(c), { watch: fake.watch });
+    watcher.start();
+    vi.advanceTimersByTime(SETTLE_MS + DEBOUNCE_MS - 1);
+    expect(changes).toEqual([]);
+    vi.advanceTimersByTime(1);
+    expect(changes).toEqual(['projects', 'sessions', 'jobs', 'tasks'].map((root) => ({ kind: 'rescan', root })));
+    vi.advanceTimersByTime(10_000);
+    expect(changes).toHaveLength(4);
     watcher.stop();
   });
 

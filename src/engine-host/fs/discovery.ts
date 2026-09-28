@@ -26,6 +26,9 @@ export const SUMMARY_CONCURRENCY = 16;
 const CustomTitleSchema = z.looseObject({ customTitle: z.string() });
 
 export class Discovery {
+  // The last title each `custom-title.json` read whole, by sidecar path: what a torn rewrite falls back to.
+  private readonly sidecarTitles = new Map<string, string>();
+
   constructor(private readonly paths: StorePaths) {}
 
   // Every `<uuid>.jsonl` directly under a slug directory, stat'ed. A root or slug that vanishes mid-listing is simply
@@ -78,8 +81,16 @@ export class Discovery {
       await file.close();
     }
     const sessionId = basename(path, '.jsonl');
-    const sidecarTitle = await readJsonWithRetry(join(dirname(path), sessionId, 'custom-title.json'), (raw) => CustomTitleSchema.parse(raw).customTitle);
+    const sidecarTitle = await this.readSidecarTitle(join(dirname(path), sessionId, 'custom-title.json'));
     return summarize(head, tail, { size: info.size, mtimeMs: info.mtimeMs }, path, basename(dirname(path)), sidecarTitle);
+  }
+
+  // A sidecar that never reads whole keeps the title it last had; one that is gone has none.
+  private async readSidecarTitle(sidecar: string): Promise<string | null> {
+    const read = await readJsonWithRetry(sidecar, (raw) => CustomTitleSchema.parse(raw).customTitle);
+    if (read.status === 'ok') this.sidecarTitles.set(sidecar, read.value);
+    else if (read.status === 'absent') this.sidecarTitles.delete(sidecar);
+    return this.sidecarTitles.get(sidecar) ?? null;
   }
 
   // Summaries of `files`, most recently modified first, at most 16 reads in flight, yielded as they complete. A file

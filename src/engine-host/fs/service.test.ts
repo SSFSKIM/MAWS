@@ -5,6 +5,7 @@ import type { AppSessionId, SessionId } from '@shared/graph/ids';
 import type { EventName, EventPayload } from '@shared/ipc/schema';
 import { validateEventPayload } from '@shared/ipc/validate';
 import { StoreFixture } from '../../../test/support/store-fixture';
+import { Discovery, type ListedTranscript } from './discovery';
 import { FsService } from './service';
 import type { WatchFn } from './watcher';
 
@@ -163,6 +164,62 @@ describe('filesystem state service: discovery, sidecars and holders', () => {
     listeners.get(fixture.paths.projects)!('rename', null);
     await expect.poll(() => events('fs.sessionChanged').map((e) => e.summary.sessionId), { timeout: 1_000 }).toEqual([S1]);
     expect(fs.state().sessions).toBe(1);
+  });
+
+  describe('a scan whose listing is overtaken by the watcher', () => {
+    // A fake watch the test fires by hand, and a listing the test releases by hand: the scan's `list()` is taken before
+    // the watcher's news and resolves after it, which is the interleaving a slow readdir pass over the real store has.
+    const manualWatch = () => {
+      const listeners = new Map<string, (event: string, filename: string | null) => void>();
+      const watch: WatchFn = (path, _options, listener) => {
+        listeners.set(path, listener);
+        return Object.assign(new EventEmitter(), { close: vi.fn() });
+      };
+      return { watch, fire: (path: string, filename: string) => listeners.get(path)!('rename', filename) };
+    };
+    const deferredListing = () => {
+      let release!: (files: ListedTranscript[]) => void;
+      const listing = new Promise<ListedTranscript[]>((resolve) => (release = resolve));
+      vi.spyOn(Discovery.prototype, 'list').mockReturnValueOnce(listing);
+      return release;
+    };
+    afterEach(() => vi.restoreAllMocks());
+
+    it('never forgets a transcript the watcher discovered while the listing was in flight', async () => {
+      const manual = manualWatch();
+      const fs = await start(manual.watch);
+      const release = deferredListing();
+      const scanning = fs.scan([]);
+
+      const path = await fixture.addTranscript('/work/a', S1, [user('u1', null, '/work/a', 'new while listing')]);
+      manual.fire(fixture.paths.projects, `-work-a/${S1}.jsonl`);
+      await expect.poll(() => events('fs.sessionChanged').map((e) => e.summary.sessionId), { timeout: 1_000 }).toEqual([S1]);
+
+      release([]); // the stale snapshot, taken before the file existed
+      expect(await scanning).toMatchObject({ sessions: 1 });
+      expect(events('fs.sessionRemoved')).toEqual([]);
+      expect(fs.state().sessions).toBe(1);
+      expect(path).toBe(fixture.transcriptPath(S1));
+    });
+
+    it('never resurrects a transcript the watcher saw vanish while the listing was in flight', async () => {
+      const path = await fixture.addTranscript('/work/a', S1, [user('u1', null, '/work/a', 'soon gone')]);
+      const manual = manualWatch();
+      const fs = await start(manual.watch);
+      const stale = await new Discovery(fixture.paths).list();
+      const release = deferredListing();
+      const scanning = fs.scan([]);
+
+      await rm(path);
+      manual.fire(fixture.paths.projects, `-work-a/${S1}.jsonl`);
+      await expect.poll(() => events('fs.sessionRemoved').length, { timeout: 1_000 }).toBe(1);
+      clear();
+
+      release(stale); // still lists the file
+      expect(await scanning).toMatchObject({ sessions: 0 });
+      expect(emitted.filter((e) => e.name !== 'fs.scanProgress')).toEqual([]); // nothing re-listed, nothing removed twice
+      expect(fs.state().sessions).toBe(0);
+    });
   });
 
   it('works against a config home whose roots do not exist yet', async () => {
