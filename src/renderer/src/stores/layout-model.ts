@@ -100,13 +100,15 @@ export function openTab(main: LayoutMain, target: TabTarget, opts: { pane?: Pane
   const found = locate(main, tabId(target));
   if (found) {
     // The settings tab is one tab whatever its section: opening it again moves it to the section asked for. A file tab
-    // is one tab whatever its line: opening it at another line moves it there (C8's tenth ask), keeping its pin.
+    // is one tab per path whatever its line or session: opening it again takes the line and the session (null
+    // included) of this open, keeping its pin, so the right panel follows the session that last opened it (C8's tenth
+    // ask).
     const open = paneAt(main, found.pane).tabs[found.index];
     const updated =
       target.kind === 'settings'
         ? replaceTab(main, found.pane, found.index, toRef(target))
-        : target.kind === 'file' && open.kind === 'file' && open.line !== target.line
-          ? replaceTab(main, found.pane, found.index, { ...open, line: target.line })
+        : target.kind === 'file' && open.kind === 'file'
+          ? replaceTab(main, found.pane, found.index, { ...open, line: target.line, appSessionId: target.appSessionId })
           : main;
     return activate ? activateTab(updated, tabId(target)) : { ...updated, focusedPane: found.pane };
   }

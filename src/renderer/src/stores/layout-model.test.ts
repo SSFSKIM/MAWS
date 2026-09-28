@@ -208,13 +208,31 @@ describe('file tabs and the panel’s session (C8’s tenth ask)', () => {
   const file = (line: number | null, appSessionId: AppSessionId | null = A_ID) => ({ kind: 'file' as const, path: '/repo/src/app.ts', line, appSessionId });
   const FILE_ID = 'file:/repo/src/app.ts';
 
-  it('openTab on an open file tab at another line takes the new line and activates it, keeping its pin', () => {
-    let m = togglePinned(openTab(abc(), file(3)), FILE_ID);
-    m = openTab(activateTab(m, 'session:a'), file(42));
+  // Reopening an open file tab (after its pin, with another tab active) must leave one tab, active, pinned, carrying
+  // exactly what the latest open asked for.
+  const reopen = (first: ReturnType<typeof file>, again: ReturnType<typeof file>) => {
+    const m = openTab(activateTab(togglePinned(openTab(abc(), first), FILE_ID), 'session:a'), again);
     expect(ids(m)[0].filter((id) => id === FILE_ID)).toHaveLength(1);
     expect(active(m)).toEqual([FILE_ID]);
-    expect(m.panes[0].tabs.find((t) => t.id === FILE_ID)).toEqual({ id: FILE_ID, ...file(42), pinned: true });
     expect(LayoutMainSchema.safeParse(m).success).toBe(true);
+    return m.panes[0].tabs.find((t) => t.id === FILE_ID);
+  };
+
+  it('openTab on an open file tab at another line takes the new line and activates it, keeping its pin', () => {
+    expect(reopen(file(3), file(42))).toEqual({ id: FILE_ID, ...file(42), pinned: true });
+  });
+
+  it('openTab on an open file tab from another session takes that session, even at the same line', () => {
+    const B = 'b' as AppSessionId;
+    const tab = reopen(file(3, A_ID), file(3, B));
+    expect(tab).toEqual({ id: FILE_ID, ...file(3, B), pinned: true });
+    expect(sessionOfTab(tab ?? null)).toBe('b'); // the panel follows the file's new session
+  });
+
+  it('openTab on an open file tab with no session drops the old session', () => {
+    const tab = reopen(file(3, A_ID), file(7, null));
+    expect(tab).toEqual({ id: FILE_ID, ...file(7, null), pinned: true });
+    expect(sessionOfTab(tab ?? null)).toBeNull();
   });
 
   it('the panel follows the session of the focused pane’s active session, agent, diff and file tab', () => {
