@@ -120,6 +120,7 @@ Owner process vocabulary is C1's `Owner`: `main`, `engine-host`, `pty-host`. "De
 | `attention.request` | command | main | C3 | C5 hover card and Overview card; C7 | `{ appSessionId, requestId }` → `{ event: SessionEvent | null }` | conflict-resolved: C5 proposed owner engine-host; main answers by dispatching `session.pendingRequest` (ruling 1); defined in C3's `attention.ts` beside `list` and `changed` |
 | `attention.notified` | event | main | C5 | C5 renderer (fallback toast), C5 smoke | `{ appSessionId, attentionId, delivery: 'os' | 'fallback', at }` | agreed |
 | `attention.navigate` | event | main | C5 | C5 renderer | `{ appSessionId, attentionId | null, source: 'notification' | 'menu' }` | agreed |
+| `attention.pendingNavigate` | command | main | C5 | C5 renderer | void → `{ navigate: AttentionNavigate | null }`, cleared on read; the navigation main queued while no page had subscribed | added-for-consumer (C5 M5 fix wave, 2026-09-28): a notification click that re-creates the window cannot be delivered on `did-finish-load` |
 | `layout.get` | command | main | C5 | C5 renderer | `{ key }` → `{ value: unknown | null }` | conflict-resolved: C5 had assigned these to C4's index and C4 had dropped them; C5 owns them over `<userData>/layout.json` (ruling 10) |
 | `layout.set` | command | main | C5 | C5 renderer | `{ key, value }` → void | conflict-resolved: as `layout.get` |
 | `layout.list` | command | main | C5 | C5 renderer, C5 acceptance | void → `{ keys: string[] }` | conflict-resolved: as `layout.get` |
