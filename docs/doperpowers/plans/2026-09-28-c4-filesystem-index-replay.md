@@ -238,7 +238,7 @@ events = {
 // FsState: { configHome, watching: boolean, projects, sessions, bound, followed: { appSessionId, agentId | null }[], holders: { sessionId, appSessionId | null, holder }[], lastScanAt: string | null }
 ```
 
-`fs.readSpill` accepts only a path whose realpath lies under `<configHome>/projects/`, `<configHome>/tasks/` or `<configHome>/jobs/`; anything else fails with `IpcError.code: 'internal'` and message `path outside the engine store`. It is how spilled results (`tool.result.spillPath`), task outputs (`task.notification.outputFile`) and workflow scripts are read, lazily, on click.
+`fs.readSpill` accepts only a path whose realpath lies under `<configHome>/projects/`, `<configHome>/tasks/`, `<configHome>/jobs/` or the engine's task-output root `realpath($CLAUDE_CODE_TMPDIR ?? '/tmp')/claude-<uid>` (uid from `process.getuid()`; SPEC 20 §tasks: the engine uses that literal root, never `os.tmpdir()`, and every pass-2 fixture's `output_file` sits under `/private/tmp/claude-501/<slug>/<session>/tasks/<id>.output`; C8's ask, 2026-09-28); anything else fails with `IpcError.code: 'internal'` and message `path outside the engine store`. It is how spilled results (`tool.result.spillPath`), task outputs (`task.notification.outputFile`) and workflow scripts are read, lazily, on click.
 
 `src/shared/ipc/schema/session.ts`, C4's entries: the record side of the index plus projects, drafts and replay (C3's lifecycle and control entries and C5's `session.digests`, `session.setVisible`, `session.digest` live in the same module as their own blocks):
 
@@ -468,6 +468,7 @@ What C4 adopted from the sibling documents on disk at authoring time, and what i
 | C10 (`docs/doperpowers/plans/…c10…`, master 685c892, "Ask of C4"): `fs.holders { sessionIds, directories } → { refreshedAt, holders[] }` | added (M2 addition, 2026-09-28): implemented by `HolderRegistry` as an on-demand refresh with the same liveness rule as the poll; `fs.holderChanged` keeps feeding the index projection, which is asynchronous, while C10's guards need the registry now |
 | C10 (review, relayed 2026-09-28): `sessions.createForLaunch({ appSessionId? })` | added (M4): the store creates the record under the caller's UUID v4 id when supplied and answers `{ ok: false, reason: 'exists', record }` on a collision; no other change |
 | C10 (third review round, relayed 2026-09-28): `sessions.unbindEngineId(appSessionId)` | added (M4): clears `engineSessionId` and the host binding through `fs.unbind`, leaving the record otherwise untouched; pinned by a discovery scan after the unbind that re-attributes nothing to that app id |
+| C8 (grounding, relayed 2026-09-28): `fs.readSpill` must read background-task `output_file`s | added (M3): a fourth root, the engine's task-output directory `realpath($CLAUDE_CODE_TMPDIR ?? /tmp)/claude-<uid>` (SPEC 20; not `os.tmpdir()`, which on macOS is `/var/folders/…` and would match nothing the engine writes); pinned by a read under it and a refusal of a sibling outside it |
 | C1: `HostSupervisor` | `onEvent<N extends EventName>(name: N, listener: (payload: EventPayload<N>) => void): () => void` beside `onState`, additive. C3 adds it (first in the merge order; its attention service needs it) and C4 consumes it; C4's worktree carries an identical block until it rebases over C3's (wave-2 ledger d.9) |
 
 The coordinator's single pass over all five wave-2 documents is `docs/doperpowers/plans/2026-09-28-wave2-interface-ledger.md`; where a row above says settled, that ledger carries the reasoning.
@@ -730,6 +731,9 @@ Ready to paste under the charter's §12 C4 section as "**Residue decisions (C4, 
 - Observation: the same transcript carries two record types the follower's known-silent list lacked, `agent-name` (354) and `bridge-session` (343), and the engine writes an `Agent` tool use's assistant record before the child's `agent-<id>.meta.json` exists, so a live tail meets the tool use before its meta.
   Evidence: `frame.unknown` counts from the measurement run; SPEC 35 `AgentNameRecord { type: "agent-name", agentName, sessionId }` and the `bridge-session` record; the meta-after-tool-use order from the engine's spawn path. (M3 execution, 2026-09-28.)
 
+- Observation: SPEC 18 (§3858) lists `projects/`, `tasks/` and `jobs/` under the config home as the spill locations, but background-task outputs live outside the config home: SPEC 20 derives their root as `fs.realpathSync(CLAUDE_CODE_TMPDIR || '/tmp')/claude-<uid>/<slug>/<session>/tasks/` and explicitly does not call `os.tmpdir()`; every pass-2 fixture and this session's own task notifications name `/private/tmp/claude-501/…/tasks/<id>.output`. On macOS `os.tmpdir()` is `$TMPDIR` (`/var/folders/…/T`), so a root derived from it would never match.
+  Evidence: `SPEC/20-tasks-and-background-work.md` lines 2334–2335 and 2416–2420; `pass2/workflow.jsonl` `output_file: /private/tmp/claude-501/-private-tmp-maws-probe2-1RzDNs/…/tasks/wayue3on6.output`; `node -e "os.tmpdir()"` → `/var/folders/c1/…/T`. (C8's ask, folded 2026-09-28.)
+
 ## Decision Log
 
 - Decision: Verification for C4 is a task review at each milestone boundary under subagent-driven execution, with dependency-frontier reviews after M1 (the X1 production shapes and the follower's transition table, read by C6 and C8 before anything downstream consumes them), after M4 (the index API and the `SessionSource`, read by C5 and C10) and after M7, and one whole-branch independent review through `doperpowers:reviewer-high` at the end, per the charter's §19 call (reviewer-high for C3 and C4).
@@ -825,6 +829,9 @@ Ready to paste under the charter's §12 C4 section as "**Residue decisions (C4, 
   Date/Author: 2026-09-28, C4 execution controller.
 - Decision (M3 re-review, three narrower findings fixed in the M3 fix wave 2, closing the M3 loop): a reload interrupted by a rename-over between its stat and read is abandoned and retried rather than reconciled against an empty chain; the diagnostics store keys its in-flight snapshot on a per-follow token, not the app session id alone (unfollow then re-follow reuses the id); the `Agent`-tool child gate requires a meta with a `toolUseId`, not merely a meta. As with M2, a residual finding at this grain after the wave is ledger debt for the whole-branch review.
   Rationale: each is the previous fix applied one step further along the same seam; none reopens the design.
+  Date/Author: 2026-09-28, C4 execution controller.
+- Decision (C8's ask, relayed by the coordinator, 2026-09-28): `fs.readSpill` gains the engine's task-output root as a fourth allowed root. The coordinator's wording derived it from `os.tmpdir()`; the engine's own rule (SPEC 20) is `realpath($CLAUDE_CODE_TMPDIR ?? '/tmp')/claude-<uid>`, which is what the fixtures show, so that is the root implemented — the intent (read what the engine reports) resolves the wording. Lands in the M3 fix wave with one read-inside and one refuse-outside pin.
+  Rationale: `os.tmpdir()` on macOS is `$TMPDIR`, `/var/folders/…`, and would match nothing; the engine reads `CLAUDE_CODE_TMPDIR` or `/tmp` literally.
   Date/Author: 2026-09-28, C4 execution controller.
 - 2026-09-28: Re-review round 2 passed the six fixes; two edits applied (replay launch cancellation on dispatch timeout, historical holder set for write attribution). Review closed.
 
