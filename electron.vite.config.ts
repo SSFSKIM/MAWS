@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
@@ -6,6 +7,7 @@ import { defineConfig } from 'electron-vite';
 import type { Rollup } from 'vite';
 
 const alias = { '@shared': resolve(__dirname, 'src/shared') };
+const { version } = JSON.parse(readFileSync(resolve(__dirname, 'package.json'), 'utf8')) as { version: string };
 
 // zod 4.6.5's sources carry explanatory comments beside `@__PURE__` annotations that Rollup reports as
 // INVALID_ANNOTATION on every bundle that includes zod (the preload and the renderer). Harmless; dropped so a real
@@ -24,9 +26,11 @@ export default defineConfig(({ command }) => {
   const devNonce = command === 'serve' ? randomBytes(16).toString('base64') : null;
 
   return {
+    // The host entries are bundled with this config through `?modulePath` (src/main/hosts/index.ts), so they share
+    // its aliases, defines and externals: node-pty stays a real file under node_modules, for `asarUnpack`.
     main: {
       resolve: { alias },
-      define: { __MAWS_DEV_CSP_NONCE__: JSON.stringify(devNonce) },
+      define: { __MAWS_DEV_CSP_NONCE__: JSON.stringify(devNonce), __MAWS_VERSION__: JSON.stringify(version) },
     },
     preload: {
       resolve: { alias },

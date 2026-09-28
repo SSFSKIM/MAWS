@@ -39,7 +39,8 @@ export function registerMainHandler<N extends CommandName>(name: N, handler: Mai
   mainHandlers.set(name, handler as (input: unknown) => unknown);
 }
 
-// M3 stub of the supervisor: no utility process runs yet, so every host-owned command is unavailable.
+// Without a supervisor (tests, or a main that runs no hosts) every host-owned command is unavailable. The app passes
+// the host supervisor's `dispatch` (src/main/hosts).
 const hostsNotStarted: HostDispatch = async (owner, name) => ({
   ok: false,
   error: ipcError('host_unavailable', `${owner} is not running; cannot answer ${name}`),

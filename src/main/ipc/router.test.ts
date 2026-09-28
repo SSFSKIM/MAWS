@@ -101,7 +101,7 @@ describe('main ipc router', () => {
     await expect(invoke(appWindow(DEV_URL), 'settings.get')).resolves.toMatchObject({ error: { code: 'forbidden_sender' } });
   });
 
-  it('routes host-owned commands to the host dispatcher, which answers host_unavailable until M4', async () => {
+  it('answers host-owned commands with host_unavailable when no supervisor is passed', async () => {
     await expect(invoke(appWindow(), 'engine.ping')).resolves.toMatchObject({
       ok: false,
       error: { code: 'host_unavailable' },
