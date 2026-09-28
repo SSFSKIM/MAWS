@@ -8,6 +8,7 @@ import type { StdinFrame } from '@shared/wire/frames';
 import { loadEngineJournal } from '../../test/support/fixtures';
 import { buildLaunch, ENGINE_VERSION, RELAY_URL } from './launch';
 import { Normalizer } from './normalizer';
+import { rewindConversation } from './controls';
 import { ProcessTable } from './process-table';
 import { EngineSession, HostHookRegistry, type EngineSessionOptions } from './session';
 import { MemoryJournal, scriptedTransport, type ScriptedTransport } from './conformance/scripted-transport';
@@ -188,6 +189,90 @@ describe('EngineSession: inbound requests, host hooks and exit', () => {
     expect(lists.at(-1)).toMatchObject([{ state: 'delivered' }]);
     const rebuilt = new Normalizer({ appSessionId: spec().appSessionId, launchId: plan.launchId, sessionId: plan.sessionId });
     expect(journal.rows.flatMap((row) => rebuilt.push(row))).toEqual(session.events());
+  });
+
+  it('inbound frames read while an answer\'s write is in flight wait for it: pending until the flush, then delivered, then confirmed', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const { session, transport, journal, lists, plan } = setup({ transport: { holdWrite: (f) => (f.type === 'control_response' ? gate : null) } });
+    await session.start();
+    transport.push({ type: 'control_request', request_id: 'r1', request: { subtype: 'can_use_tool', tool_name: 'Bash', input: { command: 'ls' }, tool_use_id: 'toolu_1' } });
+    await flush();
+    const answering = session.answer('r1' as RequestId, { kind: 'permission', decision: 'allow', scope: 'once' });
+    await flush();
+    transport.push({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: 'ok' }] }, parent_tool_use_id: null, session_id: 's' });
+    await flush();
+    expect(lists.at(-1)).toMatchObject([{ state: 'pending' }]);
+    expect(journal.rows.some((r) => r.direction === 'in' && (r.frame as { type: string }).type === 'user')).toBe(false); // held
+    release();
+    expect(await answering).toBe('delivered');
+    await flush();
+    expect(lists.slice(-2).map((l) => l[0]!.state)).toEqual(['delivered', 'confirmed']);
+    const order = journal.rows.filter((r) => r.direction !== 'meta').slice(-2).map((r) => `${r.direction}:${(r.frame as { type: string }).type}`);
+    expect(order).toEqual(['out:control_response', 'in:user']);
+    const rebuilt = new Normalizer({ appSessionId: spec().appSessionId, launchId: plan.launchId, sessionId: plan.sessionId });
+    expect(journal.rows.flatMap((row) => rebuilt.push(row))).toEqual(session.events());
+  });
+
+  it('when that held write rejects: the item stays pending, write_failed is journaled before the held frame, and the exit counts it lost', async () => {
+    let fail!: (e: Error) => void;
+    const gate = new Promise<void>((_, reject) => (fail = reject));
+    gate.catch(() => {});
+    const { session, transport, journal, lists } = setup({ transport: { holdWrite: (f) => (f.type === 'control_response' ? gate : null) } });
+    await session.start();
+    transport.push({ type: 'control_request', request_id: 'r1', request: { subtype: 'can_use_tool', tool_name: 'Bash', input: { command: 'ls' }, tool_use_id: 'toolu_1' } });
+    await flush();
+    const answering = session.answer('r1' as RequestId, { kind: 'permission', decision: 'allow', scope: 'once' });
+    await flush();
+    transport.push({ type: 'system', subtype: 'status', status: 'requesting', session_id: 's' });
+    await flush();
+    fail(new Error('EPIPE'));
+    expect(await answering).toBe('write_failed');
+    await flush();
+    const order = journal.rows.slice(-2).map((r) => (r.direction === 'meta' ? `meta:${(r.frame as { event: string }).event}` : `${r.direction}:${(r.frame as { type: string }).type}`));
+    expect(order).toEqual(['meta:write_failed', 'in:system']);
+    expect(lists.at(-1)).toMatchObject([{ state: 'pending' }]);
+    transport.exit(1);
+    expect((await session.exited).lostAttentionCount).toBe(1);
+  });
+
+  it('a request whose success response arrives while its write is held is journaled first, so boundary.rewind derives (pass2/rewind seq 41-42 correlation)', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    let requestId = '';
+    const { session, transport, journal, events, plan } = setup({
+      transport: {
+        holdWrite: (f) => {
+          if (f.type !== 'control_request' || f.request.subtype !== 'rewind_conversation') return null;
+          requestId = f.request_id;
+          return gate;
+        },
+      },
+    });
+    await session.start();
+    const rewinding = rewindConversation(session.control!, { target_message_uuid: 'u-2', last_seen_user_message_uuid: 'u-2', interrupt_if_running: false });
+    await flush();
+    transport.push({ type: 'control_response', response: { subtype: 'success', request_id: requestId, response: { rewound: true, targetMessageUuid: 'u-2', prefillText: 'Also BANANA', precedingAssistantUuid: 'a-1' } } });
+    await flush();
+    release();
+    expect(await rewinding).toMatchObject({ rewound: true });
+    const rows = journal.rows.filter((r) => r.direction !== 'meta').slice(-2);
+    expect(rows.map((r) => r.direction)).toEqual(['out', 'in']);
+    expect(events.filter((e) => e.kind === 'boundary.rewind')).toMatchObject([{ targetMessageUuid: 'u-2', prefillText: 'Also BANANA', precedingAssistantUuid: 'a-1', seq: rows[1]!.seq }]);
+    const rebuilt = new Normalizer({ appSessionId: spec().appSessionId, launchId: plan.launchId, sessionId: plan.sessionId });
+    expect(journal.rows.flatMap((row) => rebuilt.push(row))).toEqual(session.events());
+  });
+
+  it('a failed session-scope allow on an ask-rule prompt leaves no note behind: the retried deny resolves without it', async () => {
+    let failures = 1;
+    const { session, transport, journal, events } = setup({ transport: { failWrite: (f) => f.type === 'control_response' && failures-- > 0 } });
+    await session.start();
+    transport.push({ type: 'control_request', request_id: 'r1', request: { subtype: 'can_use_tool', tool_name: 'Bash', input: { command: 'ls -la' }, tool_use_id: 'toolu_1', decision_reason_type: 'rule' } });
+    await flush();
+    expect(await session.answer('r1' as RequestId, { kind: 'permission', decision: 'allow', scope: 'session' })).toBe('write_failed');
+    expect(journal.rows.some((r) => (r.frame as { event?: string }).event === 'answer_note')).toBe(false);
+    expect(await session.answer('r1' as RequestId, { kind: 'permission', decision: 'deny' })).toBe('delivered');
+    expect(events.filter((e) => e.kind === 'permission.resolved')).toMatchObject([{ behavior: 'deny', message: 'Denied by the user in MAWS.' }]);
   });
 
   it('a user frame whose write rejects is journaled as write_failed, not as a sent prompt', async () => {

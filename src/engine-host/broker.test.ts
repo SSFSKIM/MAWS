@@ -20,7 +20,7 @@ const toolResult = (toolUseId: string) => ({ type: 'user', message: { role: 'use
 const result = (extra: Record<string, unknown> = {}) => ({ type: 'result', subtype: 'success', session_id: 's', is_error: false, duration_ms: 1, num_turns: 1, total_cost_usd: 0, usage: {}, permission_denials: [], terminal_reason: 'completed', ...extra });
 
 function setup(opts: { failWrites?: boolean; exiting?: boolean } = {}) {
-  const responses: { requestId: string; response: unknown }[] = [];
+  const responses: { requestId: string; response: unknown; preface?: Record<string, unknown>[] }[] = [];
   const meta: Record<string, unknown>[] = [];
   const lists: AttentionItem[][] = [];
   const grants: unknown[][] = [];
@@ -29,9 +29,9 @@ function setup(opts: { failWrites?: boolean; exiting?: boolean } = {}) {
     appSessionId: APP,
     sessionId: () => null,
     client: {
-      respond: async (requestId, response) => {
+      respond: async (requestId, response, respondOpts) => {
         if (opts.failWrites) throw new Error('EPIPE');
-        responses.push({ requestId, response });
+        responses.push({ requestId, response, ...(respondOpts?.preface ? { preface: respondOpts.preface } : {}) });
       },
     },
     meta: (frame) => meta.push(frame),
@@ -82,18 +82,34 @@ describe('permission broker states and the approvals-lost rule', () => {
     }
   });
 
-  it('a confirming frame that arrives before the answer\'s write continuation still confirms the item', async () => {
+  it('a confirming frame is ignored while the answer has not flushed: only a delivered item confirms (the session orders frames after the flush)', async () => {
     let release!: () => void;
     const gate = new Promise<void>((r) => (release = r));
     const lists: AttentionItem[][] = [];
     const broker = new PermissionBroker({ appSessionId: APP, client: { respond: () => gate }, meta: () => {}, onAttention: (items) => lists.push(items), now: () => 'T' });
     broker.accept(canUseTool('r1'));
+    broker.accept(elicitation('e1'));
     const answering = broker.answer(rid('r1'), { kind: 'permission', decision: 'allow', scope: 'once' });
+    const answeringE = broker.answer(rid('e1'), { kind: 'elicitation', action: 'decline' });
     broker.observe(toolResult('toolu_r1'));
-    expect(broker.item(rid('r1'))).toMatchObject({ attention: { state: 'confirmed' }, deliveredAt: 'T', confirmedAt: 'T' });
+    broker.observe(result());
+    expect(broker.item(rid('r1'))?.attention.state).toBe('pending');
+    expect(broker.item(rid('e1'))?.attention.state).toBe('pending'); // an unflushed id-less answer does not retire at a result
     release();
     expect(await answering).toBe('delivered');
-    expect(broker.item(rid('r1'))?.attention.state).toBe('confirmed');
+    expect(await answeringE).toBe('delivered');
+    expect(lists.at(-1)!.map((i) => i.state)).toEqual(['delivered', 'delivered']);
+  });
+
+  it('retired tombstones are bounded to the last 1,000 per process', () => {
+    const { broker } = setup();
+    for (let i = 0; i < 1_001; i += 1) {
+      broker.accept(canUseTool(`t${i}`));
+      broker.observe({ type: 'control_cancel_request', request_id: `t${i}` });
+    }
+    expect(broker.retiredReason(rid('t0'))).toBeNull();
+    expect(broker.retiredReason(rid('t1'))).toBe('abort');
+    expect(broker.retiredReason(rid('t1000'))).toBe('abort');
   });
 
   it('a control_cancel_request for a pending id retires it with abort; answering it afterwards is not_pending', async () => {
@@ -285,7 +301,8 @@ describe('permission answers on the wire', () => {
       broker.accept(canUseTool('r1', extra));
       expect(await broker.answer(rid('r1'), { kind: 'permission', decision: 'allow', scope: 'session' })).toBe('delivered');
       expect(responses[0]!.response).toEqual({ behavior: 'allow', updatedInput: { command: 'touch granted.txt', description: 'Create granted.txt file' }, decisionClassification: 'user_temporary' });
-      expect(meta).toEqual([{ event: 'answer_note', requestId: 'r1', note }]);
+      expect(responses[0]!.preface).toEqual([{ event: 'answer_note', requestId: 'r1', note }]); // journaled with the flushed answer only
+      expect(meta).toEqual([]);
       expect(grants).toEqual([]);
     }
   });

@@ -19,6 +19,7 @@ import type { ControlClient } from './rpc';
 // answered on the human's behalf (SPEC 45.22.13); it stays pending with a warning.
 export const DECLARED_DIALOG_KINDS: readonly string[] = Object.freeze(['auto_mode_server_fallback', 'refusal_fallback_prompt']);
 
+export const TOMBSTONE_LIMIT = 1_000;
 export const DENY_MESSAGE = 'Denied by the user in MAWS.';
 export const KEEP_PLANNING_MESSAGE = 'Keep planning.';
 
@@ -37,7 +38,7 @@ export interface BrokerItem {
 
 export interface BrokerDeps {
   appSessionId: AppSessionId;
-  client: Pick<ControlClient, 'respond'>;
+  client: Pick<ControlClient, 'respond'>; // `respond(id, response, { preface })` journals preface rows with the flushed answer
   meta: (frame: Record<string, unknown>) => void; // journals a meta row (the session's journal-then-normalise path)
   onAttention: (items: AttentionItem[]) => void; // the session's whole broker list, on every change
   onGrant?: (updatedPermissions: PermissionUpdate[]) => void; // the updatedPermissions of a delivered answer, for the grant snapshot
@@ -63,7 +64,7 @@ type Frame = Record<string, unknown> & { type?: unknown };
 
 export class PermissionBroker {
   private readonly items = new Map<string, Entry>(); // live items: pending, delivered, confirmed
-  private readonly tombstones = new Map<string, RetiredReason>(); // retired items keep their id and reason only (the process never exits on its own)
+  private readonly tombstones = new Map<string, RetiredReason>(); // retired items keep their id and reason only, the last TOMBSTONE_LIMIT (the process never exits on its own)
   private lostAtAccept = 0;
   private readonly now: () => string;
 
@@ -132,20 +133,23 @@ export class PermissionBroker {
     }
     const wire = toWire(entry, answer);
     entry.answering = true;
-    if (wire.note) this.deps.meta({ event: 'answer_note', requestId, note: wire.note }); // before the response row it annotates
+    // Delivered at the flushed row, before any frame the session held during the write is observed (M3 re-review).
+    const flushed = () => {
+      if (entry.attention.state !== 'pending') return;
+      const at = this.now();
+      entry.deliveredAt = at;
+      this.setState(entry, 'delivered', at);
+      this.emit();
+    };
     try {
-      await this.deps.client.respond(requestId, wire.response);
+      // the note is journaled only with a flushed answer, just before its row, so a failed write leaves none behind
+      await this.deps.client.respond(requestId, wire.response, { flushed, ...(wire.note ? { preface: [{ event: 'answer_note', requestId, note: wire.note }] } : {}) });
     } catch {
       entry.answering = false;
       return 'write_failed';
     }
     entry.answering = false;
-    if (entry.attention.state === 'pending') {
-      const at = this.now();
-      entry.deliveredAt = at;
-      this.setState(entry, 'delivered', at);
-      this.emit();
-    }
+    flushed(); // a client that does not call `flushed` (tests' fakes) still ends delivered
     if (wire.grants.length > 0) this.deps.onGrant?.(wire.grants);
     return 'delivered';
   }
@@ -185,7 +189,7 @@ export class PermissionBroker {
         const echoReceipt = f.num_turns === 0 && (f.terminal_reason === undefined || f.terminal_reason === null);
         if (mainLane && !echoReceipt) {
           changed = this.retireWhere((e) => e.attention.state === 'confirmed', 'answered', at) || changed;
-          changed = this.retireWhere((e) => (e.attention.state === 'delivered' || (e.attention.state === 'pending' && e.answering)) && e.toolUseId === null, 'turn_ended', at) || changed;
+          changed = this.retireWhere((e) => e.attention.state === 'delivered' && e.toolUseId === null, 'turn_ended', at) || changed;
         }
         break;
       }
@@ -230,15 +234,9 @@ export class PermissionBroker {
     if (typeof toolUseId !== 'string') return false;
     let changed = false;
     for (const entry of this.items.values()) {
-      // An answer whose write has not resolved yet counts as delivered here: the engine acting on the tool use is
-      // proof it read the answer, and the write continuation may run after the frame that proves it.
-      const delivered = entry.attention.state === 'delivered' || (entry.attention.state === 'pending' && entry.answering);
-      if (entry.toolUseId !== toolUseId || !delivered) continue;
-      if (entry.attention.state === 'pending') {
-        entry.deliveredAt = at; // the transition consumers see stays pending → delivered → confirmed
-        this.setState(entry, 'delivered', at);
-        this.emit();
-      }
+      // Only a delivered item confirms: the session holds inbound frames while an answer's write is in flight, so a
+      // frame proving the engine acted on the answer is always observed after the flushed row (M3 re-review).
+      if (entry.toolUseId !== toolUseId || entry.attention.state !== 'delivered') continue;
       entry.confirmedAt = at;
       this.setState(entry, 'confirmed', at);
       changed = true;
@@ -258,6 +256,7 @@ export class PermissionBroker {
     this.setState(entry, 'retired', at);
     this.items.delete(entry.attention.request.requestId!);
     this.tombstones.set(entry.attention.request.requestId!, reason);
+    if (this.tombstones.size > TOMBSTONE_LIMIT) this.tombstones.delete(this.tombstones.keys().next().value!);
     return true;
   }
 

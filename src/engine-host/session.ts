@@ -23,8 +23,9 @@ import { EMPTY_GRANTS, reapply, recordFromResponse, type GrantSnapshot } from '.
 import { HostHookRegistry } from './host-hooks';
 import { RELAY_URL, spawnMeta, type LaunchPlan } from './launch';
 import { Normalizer, type NormalizerWarning } from './normalizer';
-import { ControlClient, ControlError, writeFailedMeta } from './rpc';
-import type { EngineTransport, TransportProblem } from './transport';
+import { OutboundWriter } from './outbound-writer';
+import { ControlClient, ControlError } from './rpc';
+import type { EngineTransport, TransportItem, TransportProblem } from './transport';
 
 export { HostHookRegistry } from './host-hooks';
 
@@ -91,6 +92,8 @@ export class EngineSession {
 
   private transport: EngineTransport | null = null;
   private client: ControlClient | null = null;
+  private writer: OutboundWriter | null = null;
+  private readonly held: TransportItem[] = []; // inbound frames read while an out write was in flight (M3 re-review)
   private starting: Promise<void> | null = null;
   private processState: ProcessState = 'starting';
   private exitInfo: EngineSessionStatus['exit'] = null;
@@ -132,7 +135,7 @@ export class EngineSession {
     this.normalizer = new Normalizer({ appSessionId: opts.spec.appSessionId, launchId: opts.plan.launchId, sessionId: opts.plan.sessionId, warn: (w) => this.pendingWarnings.push(w) });
     this.broker = new PermissionBroker({
       appSessionId: opts.spec.appSessionId,
-      client: { respond: (requestId, response) => (this.client ? this.client.respond(requestId, response) : Promise.reject(new Error('no engine process'))) },
+      client: { respond: (requestId, response, opts) => (this.client ? this.client.respond(requestId, response, opts) : Promise.reject(new Error('no engine process'))) },
       meta: (frame) => this.record('meta', frame),
       onAttention: (items) => {
         this.emit('brokerItems', items);
@@ -199,6 +202,12 @@ export class EngineSession {
     if (this.processState === 'exited') return Promise.resolve(this.stopResult());
     this.stopReason ??= reason;
     return this.terminate(true, Math.min(opts.graceMs ?? LADDER_MS.endSession, LADDER_MS.endSession));
+  }
+
+  // The process's control client (null before spawn), for the per-subtype calls later milestones build on (M4's
+  // rewind, M5's reads); every request it writes goes through the session's journal and inbound gate.
+  get control(): ControlClient | null {
+    return this.client;
   }
 
   events(): SessionEvent[] {
@@ -268,7 +277,12 @@ export class EngineSession {
       return;
     }
     this.transport = transport;
-    const client = new ControlClient(transport, { row: (direction, frame) => this.record(direction, frame) }, this.plan.launchId, { warn: this.log });
+    // One writer for every out frame of this process (requests, answers, user frames); the read loop holds inbound
+    // frames while any of its writes is in flight and journals them after the write's own row.
+    const writer = new OutboundWriter(transport, { row: (direction, frame) => this.record(direction, frame) });
+    this.writer = writer;
+    writer.onIdle(() => this.drainHeld());
+    const client = new ControlClient(transport, { row: (direction, frame) => this.record(direction, frame) }, this.plan.launchId, { warn: this.log, writer });
     this.client = client;
     client.onInbound((req) => this.inbound(req));
     client.onLateResponse((late) =>
@@ -313,21 +327,34 @@ export class EngineSession {
     if (this.processState === 'initializing') this.setProcess('ready');
   }
 
+  // Causal order (M3 re-review): a frame read while one of our writes is in flight may be the engine's reply to it,
+  // and the write's own row is journaled only when the write settles; such frames wait in `held` and are processed,
+  // in arrival order, right after that row.
   private async readLoop(transport: EngineTransport): Promise<void> {
     for await (const item of transport.frames) {
-      try {
-        if (item.error) {
-          this.transportProblem(item.error);
-          continue;
-        }
-        this.record('in', item.frame);
-        this.track(item.frame as Frame);
-        this.broker.observe(item.frame);
-        this.client?.observe(item.frame);
-        this.touch();
-      } catch (error) {
-        this.log(`frame not processed: ${messageOf(error)}`);
+      if (this.writer?.busy || this.held.length > 0) this.held.push(item);
+      else this.processItem(item);
+    }
+    this.drainHeld(true);
+  }
+
+  private drainHeld(force = false): void {
+    while (this.held.length > 0 && (force || !this.writer?.busy)) this.processItem(this.held.shift()!);
+  }
+
+  private processItem(item: TransportItem): void {
+    try {
+      if (item.error) {
+        this.transportProblem(item.error);
+        return;
       }
+      this.record('in', item.frame);
+      this.track(item.frame as Frame);
+      this.broker.observe(item.frame);
+      this.client?.observe(item.frame);
+      this.touch();
+    } catch (error) {
+      this.log(`frame not processed: ${messageOf(error)}`);
     }
   }
 
@@ -535,21 +562,11 @@ export class EngineSession {
   }
 
   private async writeUser(content: UserInputFrame['message']['content'], uuid: MessageUuid = randomUUID() as MessageUuid): Promise<MessageUuid> {
-    const transport = this.transport;
-    if (!transport) throw new Error('no engine process');
+    const writer = this.writer;
+    if (!writer) throw new Error('no engine process');
     const frame: UserInputFrame = { type: 'user', uuid, message: { role: 'user', content }, parent_tool_use_id: null, origin: { kind: 'human' } };
-    try {
-      await transport.write(frame);
-    } catch (error) {
-      this.recordIfOpen('meta', writeFailedMeta(frame, messageOf(error)));
-      throw error;
-    }
-    this.record('out', frame); // journaled once the bytes reached the pipe (M3 review)
+    await writer.write(frame); // journaled once the bytes reached the pipe, `write_failed` otherwise (M3 review)
     return uuid;
-  }
-
-  private recordIfOpen(direction: JournalDirection, frame: unknown): void {
-    if (!this.journalClosed) this.record(direction, frame);
   }
 
   private notice(key: string, text: string): void {
