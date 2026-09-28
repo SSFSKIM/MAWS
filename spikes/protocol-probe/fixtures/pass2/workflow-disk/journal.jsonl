@@ -1,0 +1,5 @@
+{"type":"launched"}
+{"type":"started","key":"v2:05b91e79588e2070f3ee171eec62b1057e1e314b2dd6f7206d380d1d444566e0","agentId":"a014f6be436bed86b","label":"alpha","phase":"Echo"}
+{"type":"started","key":"v2:198871ea59af29b48f1bdcfe219a33f231475c71bc3e132623391db1d8dd56bb","agentId":"ae03d49e48b8ed708","label":"beta","phase":"Echo"}
+{"type":"result","key":"v2:05b91e79588e2070f3ee171eec62b1057e1e314b2dd6f7206d380d1d444566e0","agentId":"a014f6be436bed86b","result":"ALPHA"}
+{"type":"result","key":"v2:198871ea59af29b48f1bdcfe219a33f231475c71bc3e132623391db1d8dd56bb","agentId":"ae03d49e48b8ed708","result":"BETA"}
