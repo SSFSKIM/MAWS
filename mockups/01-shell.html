@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MAWS — Charter + research</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="tokens.css">
+<style>
+/* Adopted from the MAWS charter: attention-first chrome, comfortable reading,
+   three persistent regions. Shared tokens remain the single visual authority. */
+* { box-sizing: border-box; }
+body { overflow: hidden; }
+button, input, textarea { font: inherit; color: inherit; }
+button { border: 0; background: none; cursor: pointer; }
+button:hover { background: var(--bg-hover); }
+button, input, textarea, summary { outline-offset: 3px; }
+:focus-visible { outline: 2px solid var(--accent); }
+button { border-radius: var(--radius-sm); }
+svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; flex-shrink: 0; }
+.icon { width: 28px; height: 28px; padding: 6px; display: inline-flex; align-items: center; justify-content: center; color: var(--fg-muted); }
+.icon:hover { color: var(--fg); }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.app { height: 100dvh; display: grid; grid-template-columns: var(--sidebar-w) minmax(0, 1fr) var(--panel-w); grid-template-rows: var(--toolbar-h) minmax(0, 1fr); }
+.toolbar { grid-column: 1 / -1; display: flex; align-items: center; height: var(--toolbar-h); border-bottom: 1px solid var(--border); background: var(--bg-raised); -webkit-app-region: drag; }
+.toolbar button { -webkit-app-region: no-drag; }
+.traffic-region { width: 78px; flex-shrink: 0; display: flex; gap: 8px; padding-left: 16px; }
+.traffic-region i { width: 12px; height: 12px; border-radius: 50%; background: var(--danger); }
+.traffic-region i:nth-child(2) { background: var(--warning); }
+.traffic-region i:nth-child(3) { background: var(--success); }
+.app-label { width: 222px; display: flex; padding-right: 12px; align-items: center; justify-content: space-between; }
+.wordmark { font-size: 12px; font-weight: 650; letter-spacing: 1.7px; color: var(--fg-muted); }
+.toolbar-title { display: flex; align-items: center; gap: 12px; padding-left: 20px; font-weight: 550; }
+.branch { font-size: 11px; color: var(--fg-muted); border: 1px solid var(--border); padding: 3px 7px; font-weight: 400; border-radius: var(--radius-sm); }
+.toolbar-actions { display: flex; gap: 4px; margin-left: auto; padding: 0 12px; align-items: center; }
+.toolbar-actions .divider { width: 1px; height: 16px; background: var(--border); margin: 0 5px; }
+.icon.selected { background: var(--bg-active); color: var(--fg); }
+.sidebar { background: var(--bg-raised); border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
+.sidebar-scroll { padding: 10px 10px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+.search { height: 32px; margin: 0 2px 14px; display: flex; align-items: center; gap: 8px; padding: 0 9px; border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--fg-muted); }
+.search input { min-width: 0; width: 100%; background: transparent; border: 0; font-size: 12px; outline: 0; }
+.search:focus-within { border-color: var(--accent); }
+.search input::placeholder { color: var(--fg-muted); }
+kbd { font: 10px var(--font-ui); color: var(--fg-muted); white-space: nowrap; }
+.section-heading { font-size: 10px; font-weight: 650; letter-spacing: 1px; height: 22px; display: flex; align-items: center; padding: 0 10px; color: var(--fg-muted); margin: 6px 0 2px; }
+.section-heading.attention { color: var(--warning); margin-top: 0; }
+.section-heading .icon { margin-left: auto; font-size: 15px; width: 22px; height: 22px; }
+.need-row { position: relative; width: 100%; text-align: left; padding: 8px 10px; margin: 1px 0; height: 54px; }
+.need-row.previewed { background: var(--bg-active); }
+.need-title { display: flex; align-items: center; gap: 6px; font-size: 12px; white-space: nowrap; }
+.project-prefix { color: var(--fg-muted); font-size: 11px; }
+.need-title .truncate { overflow: hidden; text-overflow: ellipsis; }
+.need-meta { display: flex; align-items: center; gap: 6px; margin-top: 7px; color: var(--fg-muted); font-size: 11px; }
+.reason { display: inline-flex; align-items: center; gap: 4px; color: var(--warning); font-size: 10px; }
+.reason.plan { color: var(--info); }
+.wait { margin-left: auto; font-variant-numeric: tabular-nums; }
+.session { position: relative; display: grid; grid-template-columns: 14px minmax(0, 1fr) 27px; gap: 7px; align-items: start; min-height: 47px; padding: 7px 9px; border-radius: var(--radius-sm); }
+.session.selected { background: var(--bg-active); }
+.session:hover, .session.demo-hover { background: var(--bg-hover); }
+.session button.session-link { text-align: left; padding: 0; border-radius: 0; min-width: 0; }
+.session button.session-link:hover { background: transparent; }
+.session-title { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; line-height: 17px; font-size: 12px; }
+.session-sub { display: block; color: var(--fg-muted); font-size: 11px; margin-top: 3px; line-height: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.session:hover .session-sub, .session.demo-hover .session-sub { color: var(--fg); }
+.session-age { color: var(--fg-muted); text-align: right; font-size: 10px; line-height: 17px; }
+.session-glyph { line-height: 17px; text-align: center; }
+.unread { width: 5px; height: 5px; border-radius: 50%; background: var(--info); display: block; margin: 7px 0 0 auto; }
+.session-actions { position: absolute; right: 7px; top: 4px; display: none; background: var(--bg-overlay); border-radius: var(--radius-sm); }
+.session:hover .session-actions, .session:focus-within .session-actions, .session.demo-hover .session-actions { display: flex; }
+.session:has(.session-actions):hover .session-title, .session.demo-hover .session-title { padding-right: 36px; }
+.session-actions .icon { width: 23px; height: 23px; padding: 5px; }
+.project-head { height: var(--row-h); display: flex; align-items: center; padding: 0 7px; gap: 5px; }
+.project-head .project-toggle { display: flex; align-items: center; gap: 6px; padding: 5px 0; flex: 1; font-size: 12px; text-align: left; min-width: 0; }
+.project-head svg { width: 13px; height: 13px; color: var(--fg-muted); }
+.chevron { transition: transform .15s; }
+.project-toggle[aria-expanded="false"] .chevron { transform: rotate(-90deg); }
+.project-head .add-session { opacity: 0; width: 22px; height: 22px; }
+.project-head:hover .add-session, .project-head:focus-within .add-session { opacity: 1; }
+.rollup { color: var(--accent); font-size: 10px; }
+.project-sessions { margin-left: 10px; padding-left: 5px; border-left: 1px solid var(--border); }
+.sidebar-footer { margin-top: auto; min-height: 43px; border-top: 1px solid var(--border); display: flex; padding: 7px 16px; gap: 8px; align-items: center; color: var(--fg-muted); font-size: 11px; }
+.sidebar-footer .icon { margin-left: auto; }
+.main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.tabs { height: 40px; flex-shrink: 0; display: flex; align-items: stretch; border-bottom: 1px solid var(--border); overflow-x: auto; scrollbar-width: none; }
+.tab { padding: 0 10px; display: flex; gap: 6px; align-items: center; font-size: 11px; color: var(--fg-muted); white-space: nowrap; border-radius: 0; border-right: 1px solid var(--border); flex-shrink: 0; }
+.tab.active { color: var(--fg); background: var(--bg-raised); box-shadow: inset 0 -2px var(--accent); }
+.tab small { font-size: 9px; color: var(--fg-muted); }
+.tab .file-type { font: 9px var(--font-mono); color: var(--info); }
+.tabs > .icon { align-self: center; flex-shrink: 0; margin: 0 3px; }
+.transcript { flex: 1; overflow-y: auto; padding: 28px 36px 12px; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+.reading { max-width: var(--measure); margin: 0 auto; }
+.user-bubble { width: fit-content; max-width: 86%; margin-left: auto; padding: 11px 15px; background: var(--bg-overlay); border-radius: var(--radius-lg); font-size: 14px; line-height: 1.6; }
+.turn { margin: 27px 0 28px; }
+.assistant-label { display: flex; gap: 7px; align-items: center; font-size: 12px; font-weight: 600; margin-bottom: 10px; }
+.assistant-mark { color: var(--accent); font-size: 21px; line-height: 18px; font-weight: 400; }
+.prose p { margin: 0 0 12px; }
+.prose strong { font-weight: 580; }
+.work-disclosure { margin-top: 20px; border-bottom: 1px solid var(--border); padding-bottom: 12px; color: var(--fg-muted); }
+summary { cursor: pointer; list-style: none; }
+summary::-webkit-details-marker { display: none; }
+.work-disclosure summary { display: flex; gap: 7px; align-items: center; font-size: 11px; }
+.work-disclosure summary svg { width: 12px; height: 12px; }
+details[open] > summary .chevron { transform: rotate(90deg); }
+.work-log { margin: 12px 0 0 19px; font-size: 12px; line-height: 1.8; }
+.lifecycle { margin: 24px 0 17px; display: flex; align-items: flex-start; gap: 9px; font-size: 12px; line-height: 1.65; color: var(--fg-muted); }
+.seed-group { display: inline-flex; align-items: center; gap: 3px; flex-shrink: 0; padding-top: 2px; }
+.seed { width: 17px; height: 17px; color: var(--accent); }
+.seed:nth-child(2) { color: var(--info); transform: rotate(25deg); }
+.seed:nth-child(3) { color: var(--success); }
+.seed:nth-child(4) { color: var(--warning); transform: rotate(15deg); }
+.lifecycle strong { color: var(--fg); font-weight: 450; }
+.activity { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.activity summary { min-height: 43px; padding: 12px; display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.activity summary > .chevron { margin-left: auto; width: 12px; }
+.spinner { width: 12px; height: 12px; border: 1.5px solid var(--border-strong); border-top-color: var(--accent); border-radius: 50%; animation: spin 1.3s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.activity-output { padding: 8px 12px 12px 32px; color: var(--fg-muted); font-size: 11px; line-height: 1.9; }
+.composer-zone { padding: 16px 28px 0; flex-shrink: 0; }
+.queue-card { display: flex; align-items: center; gap: 8px; padding: 9px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); margin: 0 0 12px; font-size: 12px; }
+.queue-card .queued-count { font-size: 10px; color: var(--fg-muted); border-right: 1px solid var(--border); padding-right: 9px; }
+.queue-actions { display: flex; margin-left: auto; gap: 2px; }
+.text-action { color: var(--fg-muted); font-size: 11px; padding: 3px 6px; }
+.queue-actions .steer { color: var(--fg); }
+.context-strip { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 8px; }
+.context-chip { display: flex; gap: 4px; align-items: center; border: 1px solid var(--border); padding: 4px 6px; border-radius: var(--radius-sm); font-size: 10px; color: var(--fg-muted); }
+.context-chip:first-child { color: var(--fg); }
+.composer { background: var(--bg-raised); border: 1px solid var(--border-strong); border-radius: var(--radius-lg); padding: 12px; }
+.composer:focus-within { border-color: var(--fg-muted); }
+.composer textarea { display: block; resize: none; width: 100%; height: 49px; padding: 0 3px; border: 0; outline: none; background: transparent; font-size: 15px; line-height: 1.6; }
+.composer textarea::placeholder { color: var(--fg-muted); }
+.composer-controls { display: flex; align-items: center; gap: 3px; }
+.composer-controls .icon { font-size: 19px; }
+.queue-submit { margin-left: auto; background: var(--fg); color: var(--bg); padding: 7px 11px; font-weight: 550; font-size: 12px; display: flex; align-items: center; gap: 9px; }
+.queue-submit:hover { background: var(--fg-muted); }
+.queue-submit kbd { color: inherit; }
+.status-line { min-height: 44px; padding: 8px 0 9px; color: var(--fg-muted); display: flex; flex-wrap: wrap; column-gap: 5px; row-gap: 4px; font-size: 9px; line-height: 13px; font-variant-numeric: tabular-nums; }
+.status-line .cwd { flex-basis: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); }
+.right-panel { border-left: 1px solid var(--border); background: var(--bg-raised); min-height: 0; overflow-y: auto; }
+.panel-tools { height: 40px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border); padding: 0 9px; }
+.panel-tools .pinned { color: var(--fg); }
+.summary-card { margin: 21px 20px; }
+.summary-title { display: flex; align-items: center; justify-content: space-between; margin: 0 0 12px; font-size: 12px; font-weight: 550; }
+.summary-title span { font-size: 10px; color: var(--fg-muted); font-weight: 400; }
+.summary-section { border-bottom: 1px solid var(--border); padding: 12px 0 15px; }
+.summary-section summary { display: flex; align-items: center; gap: 8px; color: var(--fg-muted); font-size: 11px; }
+.summary-section summary svg { width: 11px; height: 11px; margin-left: auto; }
+.summary-section[open] > summary .chevron { transform: rotate(90deg); }
+.summary-content { padding-top: 12px; }
+.summary-row { display: flex; align-items: center; min-height: 28px; gap: 8px; font-size: 12px; }
+.summary-row .text-action { margin-left: auto; border: 1px solid var(--border); padding: 4px 8px; color: var(--fg); }
+.diff-add { color: var(--success); font-size: 11px; }
+.diff-del { color: var(--danger); font-size: 11px; }
+.diff-line { display: flex; gap: 9px; margin-top: 5px; }
+.agent-summary { display: flex; align-items: center; gap: 10px; }
+.agent-summary .seed-group { gap: 5px; padding: 0; }
+.summary-sub { color: var(--fg-muted); font-size: 11px; margin-top: 8px; }
+.source { display: flex; width: 100%; text-align: left; align-items: center; height: 32px; gap: 8px; padding: 0 3px; font-size: 11px; }
+.source svg { width: 13px; color: var(--fg-muted); }
+.source .source-kind { margin-left: auto; color: var(--fg-muted); font-size: 10px; }
+.panel-note { margin-top: 20px; color: var(--fg-faint); font-size: 10px; line-height: 1.6; }
+.hover-card { position: fixed; z-index: 10; left: 285px; top: 133px; width: 342px; padding: 15px; background: var(--bg-overlay); border: 1px solid var(--border-strong); border-radius: var(--radius); box-shadow: 0 10px 32px color-mix(in srgb, var(--bg) 80%, transparent); }
+.hover-card::before { content: ''; position: absolute; top: 21px; left: -5px; width: 8px; height: 8px; background: var(--bg-overlay); border-left: 1px solid var(--border-strong); border-bottom: 1px solid var(--border-strong); transform: rotate(45deg); }
+.hover-card-top { display: flex; align-items: center; gap: 6px; color: var(--warning); font-size: 11px; }
+.hover-card-top .icon { margin-left: auto; width: 18px; height: 18px; font-size: 16px; }
+.hover-card h2 { font-size: 13px; font-weight: 550; margin: 12px 0 5px; }
+.hover-card p { font-size: 11px; color: var(--fg-muted); margin: 5px 0 12px; }
+.command-preview { margin: 12px 0; padding: 11px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm); font: 11px var(--font-mono); white-space: nowrap; }
+.hover-card-footer { display: flex; justify-content: space-between; align-items: center; font-size: 10px; color: var(--fg-muted); }
+.approval-actions { display: flex; gap: 6px; }
+.approval-actions button { border: 1px solid var(--border-strong); padding: 6px 10px; font-size: 11px; color: var(--fg); }
+.approval-actions .approve { background: var(--fg); color: var(--bg); }
+.bottom-preview { padding: 12px 28px; background: var(--bg-raised); border-top: 1px solid var(--border); font-size: 11px; color: var(--fg-muted); }
+[hidden] { display: none !important; }
+.app.hide-right { grid-template-columns: var(--sidebar-w) minmax(0, 1fr); }
+.app.hide-right .right-panel { display: none; }
+@media (max-width: 1220px) { .app { grid-template-columns: var(--sidebar-w) minmax(0, 1fr); } .right-panel { display: none; } .transcript { padding-left: 28px; padding-right: 28px; } }
+@media (max-width: 760px) { .app, .app.hide-right { grid-template-columns: minmax(0, 1fr); } .sidebar { display: none; } .app-label { display: none; } .toolbar-title { padding-left: 4px; font-size: 12px; } .toolbar-title .branch { display: none; } .toolbar-actions { gap: 0; padding-right: 5px; } .transcript { padding: 20px; } .composer-zone { padding: 12px 16px 0; } .hover-card { display: none; } .tab { padding: 0 12px; } .queue-card { flex-wrap: wrap; } }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+</style>
+</head>
+<body>
+<svg aria-hidden="true" style="position:absolute;width:0;height:0;overflow:hidden"><defs>
+<symbol id="chevron" viewBox="0 0 16 16"><path d="m6 4 4 4-4 4"/></symbol>
+<symbol id="down" viewBox="0 0 16 16"><path d="m4 6 4 4 4-4"/></symbol>
+<symbol id="search" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></symbol>
+<symbol id="folder" viewBox="0 0 16 16"><path d="M2 4h5l1.5 2H14v7H2z"/></symbol>
+<symbol id="file" viewBox="0 0 16 16"><path d="M4 2h5l3 3v9H4zM9 2v4h3"/></symbol>
+<symbol id="pin" viewBox="0 0 16 16"><path d="m6 2 6 6-2 1-1 3-5-5 3-1zM6 10l-4 4"/></symbol>
+<symbol id="share" viewBox="0 0 16 16"><path d="M8 10V2m-3 3 3-3 3 3M4 7H2v7h12V7h-2"/></symbol>
+<symbol id="bottom" viewBox="0 0 16 16"><rect x="2" y="2.5" width="12" height="11" rx="1.5"/><path d="M2 10h12"/></symbol>
+<symbol id="right" viewBox="0 0 16 16"><rect x="2" y="2.5" width="12" height="11" rx="1.5"/><path d="M10 3v10"/></symbol>
+<symbol id="left" viewBox="0 0 16 16"><rect x="2" y="2.5" width="12" height="11" rx="1.5"/><path d="M6 3v10"/></symbol>
+<symbol id="mic" viewBox="0 0 16 16"><rect x="6" y="2" width="4" height="7" rx="2"/><path d="M3.5 7v1a4.5 4.5 0 0 0 9 0V7M8 12.5V15M5 15h6"/></symbol>
+<symbol id="flower" viewBox="0 0 20 20"><path d="M10 7C4 0 2 7 7 10c-7 6 0 8 3 3 6 7 8 0 3-3 7-6 0-8-3-3Z"/><circle cx="10" cy="10" r="2"/></symbol>
+<symbol id="star" viewBox="0 0 20 20"><path d="M10 2v16M2 10h16M4.3 4.3l11.4 11.4M4.3 15.7 15.7 4.3"/></symbol>
+<symbol id="archive" viewBox="0 0 16 16"><path d="M3 6v7h10V6M2 3h12v3H2zM6 9h4"/></symbol>
+</defs></svg>
+<div class="app" id="app">
+<header class="toolbar">
+  <div class="traffic-region" aria-hidden="true"><i></i><i></i><i></i></div>
+  <div class="app-label"><span class="wordmark">MAWS</span><button class="icon" aria-label="Sidebar"><svg><use href="#left"/></svg></button></div>
+  <div class="toolbar-title">Charter + research <span class="branch">⎇ charter</span></div>
+  <div class="toolbar-actions"><button class="icon" aria-label="Share session" title="Share session"><svg><use href="#share"/></svg></button><button class="icon" aria-label="More session actions" title="More session actions">•••</button><span class="divider"></span><button class="icon" id="bottom-toggle" aria-label="Toggle bottom panel" aria-pressed="false" title="Bottom panel · ⌘J"><svg><use href="#bottom"/></svg></button><button class="icon selected" id="right-toggle" aria-label="Toggle right panel" aria-pressed="true" title="Right panel · ⌘⇧B"><svg><use href="#right"/></svg></button></div>
+</header>
+<aside class="sidebar" aria-label="Projects and sessions">
+<div class="sidebar-scroll">
+  <label class="search"><svg><use href="#search"/></svg><input aria-label="Search sessions" placeholder="Search sessions"><kbd>⌘ K</kbd></label>
+  <h2 class="section-heading attention">NEEDS YOU · 3</h2>
+  <button class="need-row previewed" id="approval-trigger" aria-expanded="true" aria-controls="approval-preview"><span class="need-title"><span class="project-prefix">MAWS ·</span><span class="truncate">Fix sidebar drag</span></span><span class="need-meta"><span class="reason">◐ Bash approval</span><span class="wait">8m</span></span></button>
+  <button class="need-row"><span class="need-title"><span class="project-prefix">MAWS ·</span><span class="truncate">Sidebar interaction pass</span></span><span class="need-meta"><span class="reason">? Which sidebar layout?</span><span class="wait">4m</span></span></button>
+  <button class="need-row"><span class="need-title"><span class="project-prefix">codex_somersault ·</span><span class="truncate">Quota reset recovery</span></span><span class="need-meta"><span class="reason plan">◇ Plan review</span><span class="wait">2m</span></span></button>
+  <h2 class="section-heading">PINNED</h2>
+  <div class="session"><span class="session-glyph g-idle" aria-label="Idle, read">○</span><button class="session-link"><span class="session-title">Workstation north star</span><span class="session-sub">Two scenes. One strong foundation.</span></button><span class="session-age">1d</span></div>
+  <h2 class="section-heading">PROJECTS <button class="icon" aria-label="Add project">+</button></h2>
+  <div class="project-head"><button class="project-toggle" aria-expanded="true" aria-controls="maws-sessions"><svg class="chevron"><use href="#down"/></svg><svg><use href="#folder"/></svg>MAWS</button><button class="icon add-session" aria-label="New session in MAWS">+</button></div>
+  <div class="project-sessions" id="maws-sessions">
+    <div class="session selected" aria-current="page"><span class="session-glyph g-working" aria-label="Working">●</span><button class="session-link"><span class="session-title">Charter + research</span><span class="session-sub">Running bun test</span></button><span class="session-age">now</span></div>
+    <div class="session"><span class="session-glyph g-needs" aria-label="Needs approval">◐</span><button class="session-link"><span class="session-title">Fix sidebar drag</span><span class="session-sub">Waiting to push feat/sidebar</span></button><span class="session-age">8m<span class="unread" aria-label="Unread"></span></span></div>
+    <div class="session"><span class="session-glyph g-question" aria-label="Question">?</span><button class="session-link"><span class="session-title">Sidebar interaction pass</span><span class="session-sub">Which sidebar layout?</span></button><span class="session-age">4m</span></div>
+  </div>
+  <div class="project-head"><button class="project-toggle" aria-expanded="true" aria-controls="codex-sessions"><svg class="chevron"><use href="#down"/></svg><svg><use href="#folder"/></svg>codex_somersault</button><button class="icon add-session" aria-label="New session in codex_somersault">+</button></div>
+  <div class="project-sessions" id="codex-sessions">
+    <div class="session"><span class="session-glyph g-plan" aria-label="Plan review">◇</span><button class="session-link"><span class="session-title">Quota reset recovery</span><span class="session-sub">Recovery plan is ready for review.</span></button><span class="session-age">2m<span class="unread" aria-label="Unread"></span></span></div>
+    <div class="session demo-hover"><span class="session-glyph g-idle" aria-label="Done">✓</span><button class="session-link"><span class="session-title">Trace stream reconnects</span><span class="session-sub">Reconnects preserve the cursor now.</span></button><span class="session-age">23m</span><div class="session-actions"><button class="icon" aria-label="Pin Trace stream reconnects"><svg><use href="#pin"/></svg></button><button class="icon" aria-label="Archive Trace stream reconnects"><svg><use href="#archive"/></svg></button></div></div>
+  </div>
+  <div class="project-head"><button class="project-toggle" aria-expanded="false" aria-controls="usage-sessions"><svg class="chevron"><use href="#down"/></svg><svg><use href="#folder"/></svg>claude-usage-menubar</button><span class="rollup" aria-label="1 working session">●1</span><button class="icon add-session" aria-label="New session in claude-usage-menubar">+</button></div>
+  <div class="project-sessions" id="usage-sessions" hidden><div class="session"><span class="session-glyph g-working">●</span><button class="session-link"><span class="session-title">Usage reset countdown</span><span class="session-sub">Checking the five-hour reset window</span></button><span class="session-age">now</span></div></div>
+  <div class="project-head"><button class="project-toggle" aria-expanded="false" aria-controls="bundle-sessions"><svg class="chevron"><use href="#down"/></svg><svg><use href="#folder"/></svg>claude-code-bundle</button><button class="icon add-session" aria-label="New session in claude-code-bundle">+</button></div>
+  <div class="project-sessions" id="bundle-sessions" hidden><div class="session"><span class="session-glyph g-idle">✓</span><button class="session-link"><span class="session-title">SDK wire inventory</span><span class="session-sub">Control request inventory is complete.</span></button><span class="session-age">2h</span></div></div>
+  <h2 class="section-heading">OTHER SESSIONS</h2>
+  <div class="session"><span class="session-glyph g-idle" aria-label="Idle, unread">●</span><button class="session-link"><span class="session-title">Terminal workflow notes</span><span class="session-sub">Saved the keyboard shortcuts to compare.</span></button><span class="session-age">2h<span class="unread" aria-label="Unread"></span></span></div>
+</div>
+<div class="sidebar-footer"><svg><use href="#folder"/></svg><span>Local workspace</span><button class="icon" aria-label="Workspace settings">⚙</button></div>
+</aside>
+<main class="main" aria-label="Charter and research session">
+  <nav class="tabs" aria-label="Open tabs"><button class="tab active" aria-current="page"><span class="g-working">●</span>Charter + research <small>MAWS</small></button><button class="tab"><span class="file-type">TSX</span>sidebar.tsx</button><button class="tab"><span class="g-needs">◐</span>Fix sidebar drag <small>MAWS</small></button><button class="tab"><span class="g-question">?</span>Quota reset recovery <small>codex_somersault</small></button><button class="icon" aria-label="New tab">+</button></nav>
+  <div class="transcript"><div class="reading">
+    <div class="user-bubble">Let’s make MAWS a workstation for supervising agents,<br>not another chat window with a file tree.</div>
+    <article class="turn"><div class="assistant-label"><span class="assistant-mark">✳</span>Claude</div><div class="prose"><p><strong>The shell should make one thing obvious: where you’re needed.</strong> Keep approvals and questions visible across projects, without pulling you out of the session you’re reading.</p><p>I’ll anchor the charter in two equally important scenes: supervising many sessions, and going deep in one. Codex is the interaction benchmark; Claude Code remains the engine.</p></div><details class="work-disclosure"><summary><svg class="chevron"><use href="#chevron"/></svg>Worked for 1m 42s · 9 tool calls</summary><div class="work-log">Read the project notes and compared session navigation.<br>Reviewed the SDK wire and drafted the two core scenes.</div></details></article>
+    <div class="user-bubble">launch the research agents and start the charter</div>
+    <div class="lifecycle"><span class="seed-group" aria-label="Three research agents"><svg class="seed"><use href="#flower"/></svg><svg class="seed"><use href="#flower"/></svg><svg class="seed"><use href="#star"/></svg></span><span><strong>Codex shell study</strong>, <strong>Codex thread study</strong> and <strong>Wire gap analysis</strong> started working</span></div>
+    <details class="activity"><summary><span class="spinner" aria-hidden="true"></span><span>Running <code class="mono">bun test</code> <span class="muted">for 12s</span></span><svg class="chevron"><use href="#chevron"/></svg></summary><div class="activity-output mono">$ bun test<br>Checking session index and permission routing…</div></details>
+  </div></div>
+  <div class="composer-zone">
+    <div class="queue-card"><span class="queued-count">1 queued</span><span>also add the keyboard map</span><div class="queue-actions"><button class="text-action">Edit</button><button class="text-action">Delete</button><button class="text-action steer">Steer ↗</button></div></div>
+    <div class="context-strip" aria-label="Session context"><button class="context-chip">MAWS</button><button class="context-chip">.claude/worktrees/charter</button><button class="context-chip">⎇ charter</button><button class="context-chip">Opus 5.5 · High</button><button class="context-chip">auto</button><button class="context-chip">+ dir</button></div>
+    <div class="composer"><textarea aria-label="Message Claude" placeholder="Do anything"></textarea><div class="composer-controls"><button class="icon" aria-label="Add attachments or commands">+</button><button class="icon" aria-label="Mention context">@</button><button class="icon" aria-label="Dictate message"><svg><use href="#mic"/></svg></button><button class="queue-submit" title="Queue a message after the current turn">Queue <kbd>↵</kbd></button></div></div>
+    <div class="status-line" aria-label="Session status"><span class="cwd">~/Developer/GitHub/MAWS/.claude/worktrees/charter</span><span>ctx 41% of 1M</span><span>·</span><span>5h 74% ↻2h37m</span><span>·</span><span>7d 82%</span><span>·</span><span>$3.41</span><span>·</span><span>auto</span></div>
+  </div>
+  <div class="bottom-preview" id="bottom-panel" hidden><span class="mono">Terminal</span> <span class="muted">· .claude/worktrees/charter</span><p class="mono">$ <span class="faint">Ready in the session worktree</span></p></div>
+</main>
+<aside class="right-panel" aria-label="Session summary">
+  <div class="panel-tools"><button class="icon" aria-label="Add tool tab">+</button><button class="icon pinned" id="pin-toggle" aria-label="Pin summary across sessions" aria-pressed="true" title="Pinned across sessions"><svg><use href="#pin"/></svg></button></div>
+  <div class="summary-card"><h2 class="summary-title">Session overview <span>Charter + research</span></h2>
+    <details class="summary-section" open><summary>Environment <svg class="chevron"><use href="#chevron"/></svg></summary><div class="summary-content"><div class="summary-row"><span>⎇ charter</span><button class="text-action">Review</button></div><div class="diff-line"><span class="diff-add">+2,559</span><span class="diff-del">−321</span><span class="muted" style="font-size:11px">across 8 files</span></div></div></details>
+    <details class="summary-section" open><summary>Pull request <svg class="chevron"><use href="#chevron"/></svg></summary><div class="summary-content summary-row"><span class="muted">No pull request yet</span><button class="text-action">Create PR</button></div></details>
+    <details class="summary-section" open><summary>Subagents <svg class="chevron"><use href="#chevron"/></svg></summary><div class="summary-content"><div class="summary-row agent-summary"><span class="seed-group" aria-label="Research and review agents"><svg class="seed"><use href="#flower"/></svg><svg class="seed"><use href="#flower"/></svg><svg class="seed"><use href="#star"/></svg><svg class="seed"><use href="#flower"/></svg></span><button class="text-action">Open</button></div><div class="summary-sub">3 working · 2 done</div></div></details>
+    <details class="summary-section" open><summary>Background work <svg class="chevron"><use href="#chevron"/></svg></summary><div class="summary-content summary-row"><span>1 shell · 1 workflow</span><button class="text-action">Open</button></div></details>
+    <details class="summary-section" open><summary>Sent files <svg class="chevron"><use href="#chevron"/></svg></summary><div class="summary-content summary-row"><span>charter.md, research/…</span><button class="text-action">Open</button></div></details>
+    <details class="summary-section" open><summary>Sources <svg class="chevron"><use href="#chevron"/></svg></summary><div class="summary-content"><button class="source"><svg><use href="#file"/></svg>docs/charter.md<span class="source-kind">MD</span></button><button class="source"><svg><use href="#file"/></svg>research/codex-shell-ux.md<span class="source-kind">MD</span></button><button class="source"><svg><use href="#file"/></svg>research/sdk-wire-gap.md<span class="source-kind">MD</span></button></div></details>
+    <p class="panel-note">Tools stay with this session. Pin a tab to keep it<br>with you as you switch.</p>
+  </div>
+</aside>
+</div>
+<section class="hover-card" id="approval-preview" aria-label="Bash approval preview">
+  <div class="hover-card-top"><span>◐</span>Approval needed <button class="icon" id="close-preview" aria-label="Close approval preview">×</button></div>
+  <h2>Push the sidebar fix</h2><p>MAWS · Fix sidebar drag · waiting 8m</p>
+  <div class="command-preview">git push origin feat/sidebar</div>
+  <p>Publish the branch to origin. This sends local commits to the remote repository.</p>
+  <div class="hover-card-footer"><span>This command only</span><div class="approval-actions"><button title="Static approval preview">Deny</button><button class="approve" title="Static approval preview">Approve</button></div></div>
+</section>
+<script>
+const app = document.getElementById('app');
+const preview = document.getElementById('approval-preview');
+const trigger = document.getElementById('approval-trigger');
+function showPreview(show) { preview.hidden = !show; trigger.setAttribute('aria-expanded', String(show)); trigger.classList.toggle('previewed', show); }
+trigger.addEventListener('mouseenter', () => showPreview(true));
+trigger.addEventListener('focus', () => showPreview(true));
+trigger.addEventListener('click', () => showPreview(preview.hidden));
+document.getElementById('close-preview').addEventListener('click', () => showPreview(false));
+document.addEventListener('keydown', event => { if (event.key === 'Escape') showPreview(false); });
+document.querySelectorAll('.project-toggle').forEach(button => button.addEventListener('click', () => {
+  const expanded = button.getAttribute('aria-expanded') === 'true';
+  button.setAttribute('aria-expanded', String(!expanded));
+  document.getElementById(button.getAttribute('aria-controls')).hidden = expanded;
+}));
+document.getElementById('right-toggle').addEventListener('click', event => {
+  const hidden = app.classList.toggle('hide-right');
+  event.currentTarget.setAttribute('aria-pressed', String(!hidden));
+  event.currentTarget.classList.toggle('selected', !hidden);
+});
+document.getElementById('bottom-toggle').addEventListener('click', event => {
+  const panel = document.getElementById('bottom-panel');
+  panel.hidden = !panel.hidden;
+  event.currentTarget.setAttribute('aria-pressed', String(!panel.hidden));
+  event.currentTarget.classList.toggle('selected', !panel.hidden);
+});
+document.getElementById('pin-toggle').addEventListener('click', event => {
+  const pinned = event.currentTarget.getAttribute('aria-pressed') !== 'true';
+  event.currentTarget.setAttribute('aria-pressed', String(pinned));
+  event.currentTarget.classList.toggle('pinned', pinned);
+});
+</script>
+</body>
+</html>
