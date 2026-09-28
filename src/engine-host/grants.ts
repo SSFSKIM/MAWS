@@ -2,14 +2,14 @@
 // the session-scoped allow rules MAWS issued by answering a permission with `updatedPermissions` whose destination is
 // `session`. The engine forgets them on `--resume` (pass 2 `grant-reapply`), so the snapshot is kept app-side and
 // re-applied through `apply_flag_settings { settings: { permissions: { allow } } }` before the first user frame of a
-// resumed launch (`pass2/grant-reapply-resume` seq 7). M4 persists the snapshot through the SessionStateStore port.
+// resumed launch (`pass2/grant-reapply-resume` seq 7). The snapshot persists through the SessionStateStore port, which
+// owns its type.
+import type { GrantSnapshot } from '@shared/engine/session-state-store';
 import { PermissionUpdateSchema } from '@shared/wire/control';
 import { applyFlagSettings, type RequestOptions } from './controls';
 import type { ControlClient } from './rpc';
 
-export interface GrantSnapshot {
-  allow: string[]; // rule strings as list_permission_rules renders them: 'Bash(touch granted.txt)'
-}
+export type { GrantSnapshot } from '@shared/engine/session-state-store';
 
 export const EMPTY_GRANTS: GrantSnapshot = Object.freeze({ allow: Object.freeze([]) as unknown as string[] });
 
