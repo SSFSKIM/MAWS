@@ -116,7 +116,7 @@ export const RequestPreview: Slots['requestCard'] = ({ item, request, placement 
         shown.input !== null && (
           <pre
             data-testid="request-input"
-            className="m-0 max-h-[8lh] overflow-auto rounded-sm border border-border bg-bg px-2.5 py-2 font-mono text-ui-sm whitespace-pre"
+            className="m-0 max-h-[8lh] overflow-auto rounded-sm border border-border bg-bg px-2.5 py-2 font-mono text-ui-sm break-words whitespace-pre-wrap"
           >
             {shown.input}
           </pre>
@@ -129,18 +129,18 @@ export const RequestPreview: Slots['requestCard'] = ({ item, request, placement 
           {record.directory}
         </p>
       )}
+      {canAnswer && <p className="m-0 text-fg-muted">Approve applies to this request only.</p>}
       <div className="flex items-center gap-2">
         <button
           type="button"
           onClick={() => useLayout.getState().openSession(item.appSessionId)}
-          className="rounded-sm border border-border-strong px-2.5 py-1 text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2"
+          className="rounded-sm border border-border-strong px-2.5 py-1 whitespace-nowrap text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2"
         >
           Open session
         </button>
         {delivery === 'not_delivered' && <span className="text-danger">Not delivered</span>}
         {canAnswer && (
           <div className="ml-auto flex items-center gap-1.5">
-            <span className="text-fg-muted">This request only</span>
             <button
               type="button"
               disabled={delivery === 'sending'}

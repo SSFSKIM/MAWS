@@ -42,7 +42,7 @@ export function ProjectGroup({ section, expanded, showAll, onToggle, onShowMore 
     >
       <div
         onClick={() => onToggle(project.id)}
-        className="flex h-(--row-h) cursor-default items-center gap-[5px] rounded-sm px-[7px] select-none group-focus-visible/project:outline-2 group-focus-visible/project:-outline-offset-2 group-focus-visible/project:outline-accent hover:bg-bg-hover"
+        className="group/line flex h-(--row-h) cursor-default items-center gap-[5px] rounded-sm px-[7px] select-none group-focus-visible/project:outline-2 group-focus-visible/project:-outline-offset-2 group-focus-visible/project:outline-accent hover:bg-bg-hover"
       >
         <ChevronDownIcon className={`size-[13px] text-fg-muted transition-transform motion-reduce:transition-none ${expanded ? '' : '-rotate-90'}`} />
         <FolderIcon className="size-[13px] text-fg-muted" />
@@ -67,7 +67,7 @@ export function ProjectGroup({ section, expanded, showAll, onToggle, onShowMore 
             event.stopPropagation();
             void createSession(project.id);
           }}
-          className="inline-flex size-[22px] items-center justify-center rounded-sm text-fg-muted opacity-0 group-hover/project:opacity-100 group-focus/project:opacity-100 hover:bg-bg-hover hover:text-fg disabled:text-fg-faint disabled:hover:bg-transparent"
+          className="inline-flex size-[22px] items-center justify-center rounded-sm text-fg-muted opacity-0 group-hover/line:opacity-100 group-focus/project:opacity-100 hover:bg-bg-hover hover:text-fg disabled:text-fg-faint disabled:hover:bg-transparent"
         >
           <PlusIcon className="size-[13px]" />
         </button>
