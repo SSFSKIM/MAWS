@@ -42,9 +42,8 @@ export function needsYou(bySession: Map<AppSessionId, AttentionItem[]>, records:
   );
 }
 
-// ⌘⇧J: the first row unless it is the current session, then the next, wrapping.
+// ⌘⇧J: the oldest row that is not the current session (§5.7 sends it to the oldest item), so from any row but the
+// first it goes to the first, and from the first to the second; a single row is its own answer.
 export function nextNeedsYou(rows: NeedsYouRow[], currentAppId: AppSessionId | null): NeedsYouRow | null {
-  if (rows.length === 0) return null;
-  const at = rows.findIndex((row) => row.appSessionId === currentAppId);
-  return at === -1 ? rows[0] : rows[(at + 1) % rows.length];
+  return rows.find((row) => row.appSessionId !== currentAppId) ?? rows[0] ?? null;
 }

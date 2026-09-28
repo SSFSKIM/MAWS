@@ -92,7 +92,9 @@ describe('needs-you ordering', () => {
     const rows = needsYou(atLoad(), records);
     expect(nextNeedsYou(rows, null)).toBe(rows[0]);
     expect(nextNeedsYou(rows, rows[0].appSessionId)).toBe(rows[1]);
+    expect(nextNeedsYou(rows, rows[1].appSessionId)).toBe(rows[0]); // a middle current row: still the oldest, not the next
     expect(nextNeedsYou(rows, rows[2].appSessionId)).toBe(rows[0]);
+    expect(nextNeedsYou(rows, 'not-waiting' as AppSessionId)).toBe(rows[0]);
     expect(nextNeedsYou(rows.slice(0, 1), rows[0].appSessionId)).toBe(rows[0]);
     expect(nextNeedsYou([], null)).toBeNull();
   });
