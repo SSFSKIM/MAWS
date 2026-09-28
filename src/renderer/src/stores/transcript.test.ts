@@ -250,8 +250,14 @@ describe('transcript store', () => {
       const id = receiptOf(store.getState().rows(KEY)).id;
       expect(receiptOf(store.getState().rows(KEY))).toMatchObject({ state: 'applied', canUndo: false, canReapply: false });
 
+      const before = store.getState().rows(KEY);
+      const uiVersion = store.getState().entries[KEY].state.ui.version;
       store.getState().setReceipt(KEY, id, { check: { ok: true, reason: null }, reapply: true });
       expect(receiptOf(store.getState().rows(KEY))).toMatchObject({ state: 'applied', canUndo: true, canReapply: false });
+      // Laid over the derived rows: no re-derivation (the ui version stays), every other turn row keeps its reference
+      // (time separators are rebuilt with the flat list, as on any change).
+      expect(store.getState().entries[KEY].state.ui.version).toBe(uiVersion);
+      expect(store.getState().rows(KEY).filter((row, i) => row !== before[i] && row.kind !== 'time').map((row) => row.kind)).toEqual(['receipt']);
       store.getState().setReceipt(KEY, id, { state: 'undoing' });
       expect(receiptOf(store.getState().rows(KEY))).toMatchObject({ state: 'undoing', canUndo: false, canReapply: false });
       store.getState().setReceipt(KEY, id, { state: 'undone' });
