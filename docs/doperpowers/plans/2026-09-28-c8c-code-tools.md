@@ -547,7 +547,7 @@ Ready to paste into the charter's C8 section under "**Residue decisions (C8c, 20
   - (5) Minor 2 (a removed child named like its watched parent reported as the parent's `changed`) and Minor 4 (`unwatch` of a path whose realpath moved within the root drops the older of two holds) are left as tracker rows: each needs an ambiguous FSEvents event or a directory moved inside a root between two watches, and each degrades to a re-read or a stale hold released at `destroyed`.
   - (6) Minor 5 (the watch tests' 700 ms drains) is watched under `pnpm verify`'s load, not changed now.
   - (7) The missing `spikes/code-tools/findings.md` is the architect's to write from Surprises at hand-back (ruled 2026-09-29).
-  Date/Author: 2026-09-29, C8c executor (controller).
+  Date/Author: 2026-09-29, C8c executor (controller). Confirmed by the architect the same day: (1) and (2) stand as amendments of K1's binding sentences, recorded in the charter as C8c's correction of K1 ("`read` has no race window" was wrong); `O_NOFOLLOW_ANY` stays hard-coded with a comment naming it macOS-only, and a test fails loudly on a platform that ignores it, so a port cannot silently lose the guard.
 
 ## Outcomes & Retrospective
 
