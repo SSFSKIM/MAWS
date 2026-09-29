@@ -188,9 +188,12 @@ export function tooLarge(file: { hunks: readonly string[] }): boolean {
 }
 
 // C6's `Hunk` (the engine's structuredPatch) as the `@@` text git would print; a pure addition keeps the engine's
-// `-1,0` where git writes `-0,0` (both parse).
+// `-1,0` where git writes `-0,0` (both parse). A line with no diff prefix is a context line, whole, as C6's edit detail
+// reads it (M4: the diff view's parser ends a hunk at such a line and throws on the empty hunk it leaves).
+const DIFF_PREFIXES = new Set([' ', '+', '-', '\\']);
 export function hunkText(hunk: Hunk): string {
-  return [`@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@`, ...hunk.lines].join('\n');
+  const lines = hunk.lines.map((line) => (DIFF_PREFIXES.has(line[0]) ? line : ` ${line}`));
+  return [`@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@`, ...lines].join('\n');
 }
 
 // What `DiffView` is fed for one file (R8): each `hunks` entry is parsed as a whole unified diff, so one string with a

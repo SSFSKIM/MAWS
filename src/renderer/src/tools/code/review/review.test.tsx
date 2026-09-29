@@ -197,6 +197,12 @@ describe('review model', () => {
     ]);
   });
 
+  it('prints an unprefixed hunk line as a context line, as C6’s edit detail reads it (M4)', () => {
+    expect(hunkText({ oldStart: 1, oldLines: 3, newStart: 1, newLines: 3, lines: ['import x', '', '-a', '+b', '\\ No newline at end of file'] })).toBe(
+      '@@ -1,3 +1,3 @@\n import x\n \n-a\n+b\n\\ No newline at end of file',
+    );
+  });
+
   it('signs hunks so a changed hunk text changes the signature', () => {
     expect(hunksSignature(['@@ -1 +1 @@\n-a\n+b'])).toBe(hunksSignature(['@@ -1 +1 @@\n-a\n+b']));
     expect(hunksSignature(['@@ -1 +1 @@\n-a\n+b'])).not.toBe(hunksSignature(['@@ -1 +1 @@\n-a\n+c']));
@@ -763,6 +769,37 @@ describe('review tool', () => {
     expect(useTranscriptStore.getState().rows(A).some((row) => row.kind === 'group' || row.kind === 'cell')).toBe(true);
     expect({ rows: rows(), body: bodyText() }).toEqual(collapsed);
     expect(main.callsOf('git.diff')).toEqual([]); // Last turn reads no git
+  });
+
+  it('draws a Last turn file whose hunks carry unprefixed context lines (M4: edit-and-receipt’s src/app.ts)', async () => {
+    main.state.status = statusOf({ dirty: false });
+    await attachTranscript(journalToEvents(loadSyntheticJournal('edit-and-receipt')));
+    const receipt = receiptRow();
+    if (receipt?.kind !== 'receipt') throw new Error('no receipt');
+    render(<TestHost />);
+    openReview({ scope: 'turn', turnId: receipt.turnId!, path: receipt.files[0].path });
+    await waitFor(() => expect(bodyText()).toContain("import { store } from './store';"));
+    expect(bodyText()).toContain('measureRows');
+  });
+
+  it('keeps the app standing when the diff view cannot parse a block, saying so in the block (M4)', async () => {
+    const { default: ReviewView } = await import('./ReviewView');
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    render(
+      <ReviewView
+        file={{ path: 'a.ts', oldPath: null, blocks: [['@@ -1,1 +1,1 @@\nnot a diff line'], ['@@ -1 +1 @@\n-a\n+b']] }}
+        mode="unified"
+        wrap={false}
+        hunk={0}
+        navigate={0}
+        initialScrollTop={0}
+        onHunk={() => {}}
+        onLeave={() => {}}
+      />,
+    );
+    await waitFor(() => expect(bodyText()).toContain('Diff unavailable: Malformed diff, empty hunk'));
+    expect(document.querySelectorAll('[data-review-block]')).toHaveLength(2); // the other block still draws
+    errors.mockRestore();
   });
 
   it('shows a child agent’s edit from its own activity entry', async () => {

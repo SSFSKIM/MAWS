@@ -14,7 +14,8 @@
 import { DiffModeEnum, DiffView } from '@git-diff-view/react';
 import '@git-diff-view/react/styles/diff-view.css';
 import { getDiffViewHighlighter } from '@git-diff-view/shiki';
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { Component, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { REVIEW_COPY } from '../copy';
 import { diffViewHunks, hunkAnchor } from './review-model';
 import type { ReviewMode } from './view-state';
 
@@ -129,17 +130,42 @@ export default function ReviewView({ file, mode, wrap, hunk, navigate, initialSc
     <div ref={scroller} data-review-body onScroll={scrolled} className="review-diff min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
       {data.map((block, index) => (
         <div key={index} data-review-block={index} className={index > 0 ? 'border-t border-border' : undefined}>
-          <DiffView
-            data={block}
-            diffViewMode={mode === 'split' ? DiffModeEnum.Split : DiffModeEnum.Unified}
-            diffViewWrap={wrap}
-            diffViewTheme={theme}
-            diffViewFontSize={12}
-            diffViewHighlight={shiki !== null}
-            registerHighlighter={shiki ?? undefined}
-          />
+          <BlockBoundary block={block}>
+            <DiffView
+              data={block}
+              diffViewMode={mode === 'split' ? DiffModeEnum.Split : DiffModeEnum.Unified}
+              diffViewWrap={wrap}
+              diffViewTheme={theme}
+              diffViewFontSize={12}
+              diffViewHighlight={shiki !== null}
+              registerHighlighter={shiki ?? undefined}
+            />
+          </BlockBoundary>
         </div>
       ))}
     </div>
   );
+}
+
+// The diff view throws while rendering a diff its parser rejects; uncaught, that would unmount the whole window (M4:
+// found over a fixture's unprefixed context lines). One block says so instead, and tries again when its diff changes.
+class BlockBoundary extends Component<{ block: unknown; children: ReactNode }, { error: string | null; block: unknown }> {
+  state = { error: null, block: this.props.block };
+
+  static getDerivedStateFromError(error: unknown): Partial<{ error: string }> {
+    return { error: error instanceof Error ? error.message : String(error) };
+  }
+
+  static getDerivedStateFromProps(props: { block: unknown }, state: { error: string | null; block: unknown }) {
+    return props.block === state.block ? null : { error: null, block: props.block };
+  }
+
+  render() {
+    if (this.state.error === null) return this.props.children;
+    return (
+      <p role="status" className="px-3 py-2 text-ui-sm text-fg-muted">
+        {REVIEW_COPY.unavailable(this.state.error)}
+      </p>
+    );
+  }
 }

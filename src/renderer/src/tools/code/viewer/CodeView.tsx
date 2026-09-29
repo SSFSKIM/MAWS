@@ -60,6 +60,16 @@ function scrollTo(view: EditorView, top: (el: HTMLElement) => number) {
   view.requestMeasure({ read: () => null, write: () => void (view.scrollDOM.scrollTop = top(view.scrollDOM)) });
 }
 
+// The offset a whole-document replacement must keep. CodeMirror anchors the scroll to the line at the top, and that
+// anchor maps through a replacement of everything to the document's start, so its measure scrolls to the top after any
+// measure request's write (M4: the e2e's follow-the-file case). The offset is put back in the frame after that measure,
+// which CodeMirror scheduled first.
+function keepOffset(view: EditorView, top: number) {
+  requestAnimationFrame(() => {
+    if (view.dom.isConnected) view.scrollDOM.scrollTop = top;
+  });
+}
+
 export default function CodeView({ entry, wrap }: { entry: ViewerEntry; wrap: boolean }) {
   const host = useRef<HTMLDivElement>(null);
   const editor = useRef<EditorView | null>(null);
@@ -124,7 +134,7 @@ export default function CodeView({ entry, wrap }: { entry: ViewerEntry; wrap: bo
     } else {
       const top = view.scrollDOM.scrollTop;
       view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } });
-      if (was.epoch !== -1) scrollTo(view, () => top);
+      if (was.epoch !== -1) keepOffset(view, top);
     }
     applied.current = { epoch, length: text.length };
   }, [text, epoch, tabId]);
