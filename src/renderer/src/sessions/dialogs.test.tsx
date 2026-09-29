@@ -11,7 +11,7 @@ import { useSessions } from '../stores/sessions';
 import { REPO, resetSetupStore } from '../test-support/setup-intents';
 import { resetShellStores } from '../test-support/shell-stores';
 import { closeDialog, openDialog } from './dialogs';
-import { confirmLabel } from './CleanupDialog';
+import { cleanupTargetOf, confirmLabel } from './CleanupDialog';
 import { SessionDialogs, DeletionNotice } from './SessionDialogs';
 import { useSetup } from './store';
 
@@ -77,7 +77,7 @@ describe('cleanup dialog archives idle only', () => {
       'session.archive': ({ appSessionId }: { appSessionId: AppSessionId }) => (appSessionId === IDLE2 ? { status: 'skipped_live', holder: { kind: 'terminal', pid: 5151 } } : { archived: true }),
     });
     render(<SessionDialogs />);
-    act(() => openDialog({ kind: 'cleanup', target: { repoRoot: REPO, path: WT } }));
+    act(() => openDialog({ kind: 'cleanup', target: { repoRoot: REPO, path: WT, branch: 'worktree-accept-one' } }));
     const dialog = await screen.findByRole('dialog', { name: 'Clean up worktree accept-one' });
     await within(dialog).findByText('2 idle sessions to archive');
     expect(within(dialog).getByText(/busy · 2 sessions live here/)).toBeTruthy();
@@ -110,7 +110,7 @@ describe('cleanup dialog archives idle only', () => {
       'git.worktree.deleteBranch': () => ({ deleted: true, wasMerged: true }),
     });
     render(<SessionDialogs />);
-    act(() => openDialog({ kind: 'cleanup', target: { repoRoot: REPO, path: WT } }));
+    act(() => openDialog({ kind: 'cleanup', target: { repoRoot: REPO, path: WT, branch: 'worktree-accept-one' } }));
     const dialog = await screen.findByRole('dialog');
     await within(dialog).findByText(/· clean/);
     expect(within(dialog).getByText('After removal only')).toBeTruthy();
@@ -131,7 +131,7 @@ describe('cleanup dialog archives idle only', () => {
       'git.worktree.remove': () => ({ refused: 'changed', detail: `head moved to ${'b'.repeat(40)}` }),
     });
     render(<SessionDialogs />);
-    act(() => openDialog({ kind: 'cleanup', target: { repoRoot: REPO, path: WT } }));
+    act(() => openDialog({ kind: 'cleanup', target: { repoRoot: REPO, path: WT, branch: 'worktree-accept-one' } }));
     const dialog = await screen.findByRole('dialog');
     await within(dialog).findByText(/dirty · 1 change/);
     expect(within(dialog).getByText('dirty: 1 change')).toBeTruthy(); // the remove step's guard
@@ -146,6 +146,74 @@ describe('cleanup dialog archives idle only', () => {
     expect(await within(dialog).findByText(`Remove refused · changed: head moved to ${'b'.repeat(40)}`)).toBeTruthy();
     expect(fake.invoked('git.worktree.remove')).toEqual([{ repoRoot: REPO, path: WT, expect: { branch: 'worktree-accept-one', head: HEAD }, discard: true }]);
     expect(fake.invoked('git.worktree.deleteBranch')).toEqual([]);
+  });
+
+  it('reopened after the checkout was removed, it still reaches the leftover branch (detached) from the record’s branch', async () => {
+    withMain({
+      'git.worktree.list': () => ({ ...listed, worktrees: [] }),
+      'git.worktree.status': () => null,
+      'git.worktree.branch': () => branchStatus({ checkedOutAt: null }),
+      'git.worktree.deleteBranch': () => ({ deleted: true, wasMerged: true }),
+    });
+    render(<SessionDialogs />);
+    act(() => openDialog({ kind: 'cleanup', target: { repoRoot: REPO, path: WT, branch: 'worktree-accept-one' } }));
+    const dialog = await screen.findByRole('dialog');
+    await within(dialog).findByText(/· detached/);
+    await userEvent.click(within(dialog).getByRole('checkbox', { name: 'Delete branch' }));
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Delete branch' }));
+    await waitFor(() => expect(fake.invoked('git.worktree.deleteBranch')).toEqual([{ repoRoot: REPO, branch: 'worktree-accept-one', expect: { head: HEAD }, acknowledgeUnmerged: false }]));
+  });
+
+  it('finds the worktree under another spelling of its path (/tmp for /private/tmp), as main canonicalises it', async () => {
+    const canonical = '/private/tmp/maws-e2e/repo/.claude/worktrees/accept-one';
+    withMain({
+      'git.worktree.list': () => ({ ...listed, worktrees: [{ ...listed.worktrees[0]!, path: canonical }] }),
+      'git.worktree.status': () => worktreeStatus({ path: canonical }),
+      'git.worktree.branch': () => branchStatus({ checkedOutAt: canonical }),
+      'git.worktree.remove': () => ({ removed: true, prunedOnly: false }),
+    });
+    render(<SessionDialogs />);
+    act(() => openDialog({ kind: 'cleanup', target: { repoRoot: REPO, path: '/tmp/maws-e2e/repo/.claude/worktrees/accept-one', branch: 'worktree-accept-one' } }));
+    const dialog = await screen.findByRole('dialog');
+    await within(dialog).findByText(/· clean/);
+    await userEvent.click(within(dialog).getByRole('checkbox', { name: 'Remove checkout' }));
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Remove' }));
+    await waitFor(() => expect(fake.invoked('git.worktree.remove')).toEqual([{ repoRoot: REPO, path: canonical, expect: { branch: 'worktree-accept-one', head: HEAD }, discard: false }]));
+  });
+
+  it('says so when a checked Delete branch cannot run because the branch was not there when the dialog opened', async () => {
+    let branchReads = 0;
+    withMain({
+      'git.worktree.list': () => ({ ...listed, worktrees: [] }),
+      'git.worktree.status': () => null,
+      'git.worktree.branch': () => (++branchReads === 1 ? null : branchStatus({ checkedOutAt: null })),
+    });
+    render(<SessionDialogs />);
+    act(() => openDialog({ kind: 'cleanup', target: { repoRoot: REPO, path: WT, branch: 'worktree-accept-one' } }));
+    const dialog = await screen.findByRole('dialog');
+    await within(dialog).findByText(/· detached/);
+    await userEvent.click(within(dialog).getByRole('checkbox', { name: 'Delete branch' }));
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Delete branch' }));
+    expect(await within(dialog).findByText(/Delete branch not run: the branch appeared after this dialog opened; close and reopen it/)).toBeTruthy();
+    expect(fake.invoked('git.worktree.deleteBranch')).toEqual([]);
+  });
+
+  it('shows all four ladder steps, Discard disabled with its reason on a clean tree', async () => {
+    withMain({ 'git.worktree.list': () => listed, 'git.worktree.status': () => worktreeStatus(), 'git.worktree.branch': () => branchStatus() });
+    render(<SessionDialogs />);
+    act(() => openDialog({ kind: 'cleanup', target: { repoRoot: REPO, path: WT, branch: 'worktree-accept-one' } }));
+    const dialog = await screen.findByRole('dialog');
+    await within(dialog).findByText(/· clean/);
+    const discard = within(dialog).getByRole('checkbox', { name: 'Discard changes and remove' });
+    expect(discard.hasAttribute('disabled')).toBe(true);
+    expect(within(dialog).getByText('Nothing to discard')).toBeTruthy();
+    expect(within(dialog).getAllByRole('checkbox').map((c) => c.getAttribute('aria-label'))).toEqual(['Archive sessions', 'Remove checkout', 'Discard changes and remove', 'Delete branch']);
+  });
+
+  it('targets a managed worktree at its repository root, which survives the checkout', () => {
+    expect(cleanupTargetOf(record(IDLE1, { directory: WT, worktree: { path: WT, branch: 'worktree-accept-one' } }))).toEqual({ repoRoot: REPO, path: WT, branch: 'worktree-accept-one' });
+    expect(cleanupTargetOf(record(IDLE1, { directory: '/elsewhere/hand', worktree: { path: '/elsewhere/hand', branch: 'hand/made' } }))).toEqual({ repoRoot: '/elsewhere/hand', path: '/elsewhere/hand', branch: 'hand/made' });
+    expect(cleanupTargetOf(record(IDLE1, { worktree: null }))).toBeNull();
   });
 
   it('names exactly what is checked', () => {

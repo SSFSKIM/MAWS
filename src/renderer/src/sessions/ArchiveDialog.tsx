@@ -7,6 +7,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import { useSessions } from '../stores/sessions';
 import { BackgroundWorkDisclosure } from './BackgroundWorkDisclosure';
+import { cleanupTargetOf } from './CleanupDialog';
 import { closeDialog, openDialog } from './dialogs';
 import { archiveSession } from './record-ops';
 import { Sheet, SheetForm } from './Sheet';
@@ -37,7 +38,8 @@ export function ArchiveDialog({ appSessionId }: { appSessionId: AppSessionId }) 
     setBusy(false);
     if ('error' in answer) return setError(answer.error);
     if ('skipped' in answer) return setError(`Live in ${answer.skipped}`);
-    if (cleanup !== null) openDialog({ kind: 'cleanup', target: { repoRoot: record.directory, path: cleanup } });
+    const target = cleanup !== null ? cleanupTargetOf(record) : null;
+    if (target !== null) openDialog({ kind: 'cleanup', target });
     else closeDialog();
   };
 

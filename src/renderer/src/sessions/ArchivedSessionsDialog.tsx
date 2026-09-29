@@ -7,6 +7,7 @@ import type { SessionRecord } from '@shared/graph/session';
 import { ipc } from '../ipc/client';
 import { useSessions } from '../stores/sessions';
 import { isManagedWorktree } from './ArchiveDialog';
+import { cleanupTargetOf } from './CleanupDialog';
 import { openDialog } from './dialogs';
 import { Sheet } from './Sheet';
 import { QUIET, SECONDARY } from './ui';
@@ -53,7 +54,7 @@ export function ArchivedSessionsDialog({ projectId }: { projectId: ProjectId }) 
                 Unarchive
               </button>
               {r.worktree !== null && isManagedWorktree(r.worktree.path) && (
-                <button type="button" onClick={() => openDialog({ kind: 'cleanup', target: { repoRoot: r.directory, path: r.worktree!.path } })} className={QUIET}>
+                <button type="button" onClick={() => openDialog({ kind: 'cleanup', target: cleanupTargetOf(r)! })} className={QUIET}>
                   Remove worktree…
                 </button>
               )}

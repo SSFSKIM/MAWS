@@ -4,10 +4,13 @@
 import { create } from 'zustand';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 
-// The worktree a cleanup is about, as git reported it when the dialog was asked for (every step revalidates it).
+// The worktree a cleanup is about, as the session's record names it: the repository (whose root outlives the
+// checkout), the checkout's path, and its branch, which stays reachable after the checkout was removed in an earlier
+// sitting. The dialog reads git's identity at open and every step revalidates it.
 export interface CleanupTarget {
   repoRoot: string;
   path: string;
+  branch: string | null;
 }
 
 export interface ConfirmRequest {

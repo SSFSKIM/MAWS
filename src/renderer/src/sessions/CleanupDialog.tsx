@@ -10,6 +10,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { cleanupState, type BranchStatus, type CleanupRefusal, type WorktreeStatus } from '@shared/sessions/worktree';
 import { ipc } from '../ipc/client';
 import { useSessions } from '../stores/sessions';
+import type { SessionRecord } from '@shared/graph/session';
 import type { CleanupTarget } from './dialogs';
 import { archiveSession } from './record-ops';
 import { holderWords } from './setup-actions';
@@ -32,13 +33,33 @@ interface Facts {
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 const basename = (path: string) => path.split('/').filter(Boolean).at(-1) ?? path;
 
+const MANAGED = '/.claude/worktrees/';
+
+// The cleanup target of a session's worktree: a managed worktree's repository root is the part of its path before
+// `.claude/worktrees/`, so it stays valid after the checkout is gone; a hand-made one is asked through the session's
+// directory (main normalises any path inside a repository to the main root). Null for a session with no worktree.
+export function cleanupTargetOf(record: SessionRecord): CleanupTarget | null {
+  if (record.worktree === null) return null;
+  const { path, branch } = record.worktree;
+  const at = path.indexOf(MANAGED);
+  return { repoRoot: at > 0 ? path.slice(0, at) : record.directory, path, branch };
+}
+
+// Git's identity of the target at open. The path is matched by main (NFC realpath on both sides, so `/tmp` and
+// `/private/tmp` spellings meet) through `git.worktree.status`, never compared here; with no checkout listed any more,
+// the record's branch is still read, so its leftover branch keeps its ladder step.
 async function readIdentity(target: CleanupTarget): Promise<Identity | { error: string }> {
-  const list = await ipc.invoke('git.worktree.list', { repoRoot: target.repoRoot });
+  const [list, status] = await Promise.all([
+    ipc.invoke('git.worktree.list', { repoRoot: target.repoRoot }),
+    ipc.invoke('git.worktree.status', { repoRoot: target.repoRoot, path: target.path }),
+  ]);
   if (!list.ok) return { error: list.error.message };
-  const entry = list.value.worktrees.find((w) => w.path === target.path) ?? null;
-  const branchName = entry?.branch ?? null;
-  const branch = branchName === null ? null : await ipc.invoke('git.worktree.branch', { repoRoot: list.value.repoRoot, branch: branchName });
-  return { repoRoot: list.value.repoRoot, path: target.path, branch: branchName, head: entry?.head ?? null, branchHead: branch?.ok ? (branch.value?.head ?? null) : null };
+  if (!status.ok) return { error: status.error.message };
+  const repoRoot = list.value.repoRoot;
+  const entry = status.value;
+  const branchName = entry !== null ? entry.branch : target.branch;
+  const branch = branchName === null ? null : await ipc.invoke('git.worktree.branch', { repoRoot, branch: branchName });
+  return { repoRoot, path: entry?.path ?? target.path, branch: branchName, head: entry?.head ?? null, branchHead: branch?.ok ? (branch.value?.head ?? null) : null };
 }
 
 async function readFacts(identity: Identity): Promise<Facts | { error: string }> {
@@ -121,6 +142,8 @@ export function CleanupDialog({ target }: { target: CleanupTarget }) {
     state === 'busy' ? `busy · ${plural(liveCount, 'session')} live here` : state === 'dirty' ? `dirty · ${plural(changes, 'change')}` : state;
   const removeReason =
     state === 'clean' ? null : state === 'busy' ? `busy: ${plural(liveCount, 'session')} live here` : state === 'dirty' ? `dirty: ${plural(changes, 'change')}` : 'Nothing to remove';
+  const discardReason =
+    state === 'dirty' ? null : state === 'busy' ? `busy: ${plural(liveCount, 'session')} live here` : state === 'clean' ? 'Nothing to discard' : 'Nothing to remove';
   const removing = checked.remove || checked.discard;
   const branch = facts.branch;
   const checkedOutElsewhere = branch?.checkedOutAt != null && branch.checkedOutAt !== identity.path;
@@ -167,6 +190,9 @@ export function CleanupDialog({ target }: { target: CleanupTarget }) {
         if (!removed.ok) return setError(removed.error.message);
         if ('refused' in removed.value) return setError(`Remove refused · ${refusalWords(removed.value)}`);
       }
+      if (steps.deleteBranch && (identity.branch === null || identity.branchHead === null)) {
+        return setError('Delete branch not run: the branch appeared after this dialog opened; close and reopen it');
+      }
       if (steps.deleteBranch && identity.branch !== null && identity.branchHead !== null) {
         const deleted = await ipc.invoke('git.worktree.deleteBranch', { repoRoot: identity.repoRoot, branch: identity.branch, expect: { head: identity.branchHead }, acknowledgeUnmerged: acks.unmerged });
         if (!deleted.ok) return setError(deleted.error.message);
@@ -211,12 +237,10 @@ export function CleanupDialog({ target }: { target: CleanupTarget }) {
         <Step label="Remove checkout" checked={checked.remove} disabledReason={removeReason} onChange={toggle('remove')}>
           git worktree remove; needs a clean tree.
         </Step>
-        {state === 'dirty' && (
-          <Step label="Discard changes and remove" checked={checked.discard} disabledReason={null} onChange={toggle('discard')}>
-            {`Throws away ${plural(changes, 'uncommitted change')}, then removes the checkout.`}
-            {checked.discard && <Ack checked={acks.discard} onChange={(v) => setAcks((a) => ({ ...a, discard: v }))}>{`Discard ${plural(changes, 'uncommitted change')}; this cannot be undone`}</Ack>}
-          </Step>
-        )}
+        <Step label="Discard changes and remove" checked={checked.discard} disabledReason={discardReason} onChange={toggle('discard')}>
+          {state === 'dirty' ? `Throws away ${plural(changes, 'uncommitted change')}, then removes the checkout.` : 'Throws away uncommitted changes, then removes the checkout.'}
+          {steps.discard && <Ack checked={acks.discard} onChange={(v) => setAcks((a) => ({ ...a, discard: v }))}>{`Discard ${plural(changes, 'uncommitted change')}; this cannot be undone`}</Ack>}
+        </Step>
         {branch !== null && (
           <Step label="Delete branch" checked={checked.deleteBranch} disabledReason={branchReason} onChange={toggle('deleteBranch')}>
             {branch.merged ? `Every commit is on ${branch.base}; still not undoable.` : `${plural(branch.ahead, 'commit')} not on ${branch.base} are lost.`}
