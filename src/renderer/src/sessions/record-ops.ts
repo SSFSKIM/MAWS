@@ -2,14 +2,16 @@
 // delete, fork, and the tabs that go with a record that leaves. Each answer is returned for the sheet that asked, and
 // every refusal is in words.
 import { useEffect, useState } from 'react';
-import type { AppSessionId } from '@shared/graph/ids';
+import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { DeleteOutcome } from '@shared/ipc/schema/session';
-import type { ForkTarget } from '@shared/sessions/intent';
+import type { FirstMessage, ForkTarget } from '@shared/sessions/intent';
+import type { ResubmitProvider } from '../composer/resubmit-seam';
 import { ipc } from '../ipc/client';
 import { useLayout } from '../stores/layout';
 import { toast } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
+import { firstMessageOf } from './first-message';
 import { holderWords } from './holder-words';
 import { useSetup } from './store';
 
@@ -67,23 +69,29 @@ export function deleteOutcomeWords(outcome: DeleteOutcome | { status: 'error'; e
   }
 }
 
-// `session.fork`: the fork's tab opens as soon as its setup starts; a refusal is in words.
-export async function forkSession(appSessionId: AppSessionId, target: ForkTarget): Promise<{ ok: true } | { ok: false; error: string }> {
-  const result = await ipc.invoke('session.fork', { appSessionId, target, message: null, rewindTo: null });
+// `session.fork`: the fork's tab opens as soon as its setup starts; a refusal is in words. `first` is a resubmit's: the
+// edited message the fork sends at `ready`, and the message it rewinds to before that (C7's resubmit seam).
+export async function forkSession(
+  appSessionId: AppSessionId,
+  target: ForkTarget,
+  first: { message: FirstMessage | null; rewindTo: MessageUuid | null } = { message: null, rewindTo: null },
+): Promise<{ ok: true; appSessionId: AppSessionId } | { ok: false; error: string }> {
+  const result = await ipc.invoke('session.fork', { appSessionId, target, message: first.message, rewindTo: first.rewindTo });
   if (!result.ok) return { ok: false, error: result.error.message };
   const outcome = result.value;
   const fork = outcome.appSessionId as AppSessionId;
   useSetup.getState().follow(fork); // this window started it: its answer and phases tell its tab what runs
-  // a fork into a directory that needs trust, or with the relay down, opens with its card waiting
-  if (outcome.status === 'needs_trust') useSetup.getState().dock(fork, { kind: 'trust', trust: outcome.trust, message: null });
-  if (outcome.status === 'relay_unreachable') useSetup.getState().dock(fork, { kind: 'relay', health: outcome.health, message: null });
+  // a fork into a directory that needs trust, or with the relay down, opens with its card waiting (holding the message
+  // its continuation sends, which its Cancel hands back)
+  if (outcome.status === 'needs_trust') useSetup.getState().dock(fork, { kind: 'trust', trust: outcome.trust, message: first.message });
+  if (outcome.status === 'relay_unreachable') useSetup.getState().dock(fork, { kind: 'relay', health: outcome.health, message: first.message });
   if (outcome.status === 'starting' || outcome.status === 'needs_trust' || outcome.status === 'relay_unreachable') {
     // the tab renders from the fork's intent, which may still be on its way as an event
     const intent = await ipc.invoke('session.intent.get', { appSessionId: fork });
     if (intent.ok && intent.value !== null) useSetup.getState().setIntent(intent.value);
     useSessions.getState().addUnstarted(fork, { projectId: useSessions.getState().records.get(appSessionId)?.projectId ?? null, createdAt: new Date().toISOString() });
     useLayout.getState().openTab({ kind: 'session', appSessionId: fork });
-    return { ok: true };
+    return { ok: true, appSessionId: fork };
   }
   const error =
     outcome.status === 'invalid' || outcome.status === 'refused'
@@ -116,3 +124,14 @@ export async function forkInPlace(appSessionId: AppSessionId): Promise<void> {
   const answer = await forkSession(appSessionId, { kind: 'inPlace' });
   if (!answer.ok) fail(answer.error);
 }
+
+// C7's resubmit seam (C10 execution document, "session.fork"): Send on an edited message forks the conversation in
+// place, rewound to before that message, with the edit as the fork's first message; the fork's tab opens as any fork's
+// does. A refusal throws, so the composer keeps the edit and shows why.
+export const resubmitProvider: ResubmitProvider = {
+  async forkFrom({ appSessionId, messageUuid, content }) {
+    const answer = await forkSession(appSessionId, { kind: 'inPlace' }, { message: firstMessageOf(content), rewindTo: messageUuid });
+    if (!answer.ok) throw new Error(answer.error);
+    return { appSessionId: answer.appSessionId };
+  },
+};

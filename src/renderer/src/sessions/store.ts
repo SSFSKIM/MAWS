@@ -38,7 +38,10 @@ export interface SetupState {
   deletions: Map<AppSessionId, DeletionManifestView>;
   dismissed: Set<AppSessionId>; // failures the human dismissed ("Back to editing"), until the next start
   removed: Set<AppSessionId>; // intents main dropped: an older snapshot never brings one back (ids are never reused)
-  resumes: Map<AppSessionId, FirstMessage>; // the message of a record's resume this window started, until `ready` or `failed`
+  // the first message a record's start holds, until `ready` or `failed` returns it: a resume's this window started, or an
+  // intent's whose removal came before its setup ended (a launch that wrote a transcript and failed before the handoff
+  // keeps the record and drops the intent, then fails: its message was neither sent nor handed back in main)
+  resumes: Map<AppSessionId, FirstMessage>;
   followed: Set<AppSessionId>; // ids this window sent a start for or saw a setup phase of (their answers and events tell their story)
   applyIntents(intents: SetupIntent[]): void;
   applyIntentChanged(event: EventPayload<'session.intent.changed'>): void;
@@ -84,11 +87,14 @@ export function createSetupStore() {
     },
     applyIntentChanged({ appSessionId, intent }) {
       if (intent === null) {
+        const held = get().intents.get(appSessionId)?.message ?? null;
+        const ended = get().phases.get(appSessionId)?.phase === 'ready';
         set((s) => ({
           intents: without(s.intents, appSessionId),
           cards: without(s.cards, appSessionId),
           phases: without(s.phases, appSessionId),
           removed: new Set(s.removed).add(appSessionId),
+          resumes: held !== null && !ended ? new Map(s.resumes).set(appSessionId, held) : s.resumes,
         }));
         return;
       }

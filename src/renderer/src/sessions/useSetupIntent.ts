@@ -1,24 +1,22 @@
 // The hook C7's chips and submit control bind while a session is unstarted (C10 execution document, Interfaces "The
-// unstarted session", useSetupIntent.ts; C7 document, "Ask of C10": the names and shapes are C7's). C7 exports
-// `registerSetupIntentHook` under the same names; M4b adds the one registration line, so this module's `SetupIntentHook`
-// is written to be assignable to C7's.
+// unstarted session", useSetupIntent.ts; C7 document, "Ask of C10": the names and shapes are C7's). App.tsx registers it
+// through C7's `registerSetupIntentHook` at module load, so this module's `SetupIntentHook` extends C7's landed type:
+// the intent is C10's whole `SetupIntent` (C7 reads a subset) and `patch` takes C10's patch (C7 writes a subset).
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { ModelCatalogue, ModelCatalogueEntry } from '@shared/sessions/models';
 import { autoModeNote, BUILTIN_MODELS } from '@shared/sessions/models';
 import type { FirstMessage, Location, SetupIntent, SetupIntentPatch } from '@shared/sessions/intent';
-import type { ModelOptionSchema } from '@shared/wire/control';
 import { defaultBranchName, type WorktreeInfo } from '@shared/sessions/worktree';
-import type * as z from 'zod';
+import type { ModelInfo, SetupIntentHook as ComposerSetupIntentHook } from '../composer/setup-intent';
 import { ipc } from '../ipc/client';
 import { useSessions } from '../stores/sessions';
 import { patchIntent, startIntent, type HookResult } from './setup-actions';
 import { useSetup } from './store';
 
-type ModelOption = z.infer<typeof ModelOptionSchema>;
-// C7's `ModelInfo`: C3's `ModelOption` with only `value` and `displayName` required; the catalogue fills the two
-// capability flags and leaves `description` and `supportedEffortLevels` absent (C7 then offers every effort level).
-export type ModelInfo = Pick<ModelOption, 'value' | 'displayName'> & Partial<Pick<ModelOption, 'description' | 'supportedEffortLevels' | 'supportsAutoMode' | 'supportsFastMode'>>;
+// C7's `ModelInfo`: the catalogue fills `value`, `displayName` and the two capability flags and leaves `description`
+// and `supportedEffortLevels` absent (C7 then offers every effort level).
+export type { ModelInfo };
 
 export interface SetupIntentOptions {
   locations: Location[]; // the project directory; each listed worktree of its repository; one new-worktree template
@@ -27,7 +25,7 @@ export interface SetupIntentOptions {
   autoModeNote: string | null;
 }
 
-export interface SetupIntentHook {
+export interface SetupIntentHook extends ComposerSetupIntentHook {
   intent: SetupIntent;
   options: SetupIntentOptions;
   patch(p: SetupIntentPatch): Promise<HookResult>;

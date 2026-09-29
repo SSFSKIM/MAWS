@@ -1,17 +1,20 @@
-// Which setup card a session's tab shows, and what its buttons do (C10 execution document, "The unstarted session";
-// M3's carried rule: a continuation that is refused hands the docked message back). The trust and relay cards wait on
-// a start's answer, the failure card on a failed setup. M4a renders the chosen card in a plain frame where its tab
-// shows it (the unstarted heading's column, a record's composer column); M4b docks the same bodies through C7's
-// `dockCard` inside `DockedCardFrame`, which then owns the frame, focus, Enter and Esc.
+// The setup cards in the composer's place (C10 execution document, "The unstarted session"; M3's carried rule: a
+// continuation that is refused hands the docked message back; D-20: the cards sit where a permission card sits). The
+// trust and relay cards wait on a start's answer, the failure card on a failed setup. Each is docked through C7's
+// `dockCard` and renders inside C7's `DockedCardFrame`, which owns the frame, the focus, Enter (`onAccept`) and Esc
+// (`onDecline`); `connectSetupDock` keeps one docked card per session in step with the setup store, for an unstarted
+// tab and a record's resume alike (C7's composer shows a session's docked card whether or not it has started).
 import { useEffect, useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { isGatewayModel } from '@shared/sessions/models';
+import { DockedCardFrame } from '../composer/docked/DockedCardFrame';
+import { dockCard } from '../composer/docked/registry';
 import { ipc } from '../ipc/client';
 import { useSessions } from '../stores/sessions';
 import { FAILURE_CARD_TITLE, FailureCard } from './FailureCard';
 import { RELAY_CARD_TITLE, RelayCard, type RelayPolicy } from './RelayCard';
-import { continueSetup, releaseMessage, resolveWorktree, type WorktreeResource } from './setup-actions';
-import { failureOf, isStarting, useSetup, type SetupFailure, type WaitingCard } from './store';
+import { continueSetup, reclaimMessage, releaseMessage, resolveWorktree, type WorktreeResource } from './setup-actions';
+import { failureOf, isStarting, UNSENT, useSetup, type SetupFailure, type SetupState, type WaitingCard } from './store';
 import { TRUST_CARD_TITLE, TrustCard } from './TrustCard';
 
 export const RELAY_POLL_MS = 5_000;
@@ -19,13 +22,37 @@ export const RELAY_POLL_MS = 5_000;
 // C11's settings v3 owns `relayUnreachable`; until it lands the default applies (C10's readSettings seam).
 const RELAY_POLICY: RelayPolicy = 'ask';
 
-function Frame({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <section aria-label={title} className="rounded-lg border border-border-strong bg-bg-raised p-3">
-      <h2 className="m-0 mb-2 text-ui font-medium text-fg">{title}</h2>
-      {children}
-    </section>
-  );
+export type SetupCardKind = WaitingCard['kind'] | 'failure';
+
+// The card a session's composer shows, if any: the card a start waits on, else a failure its intent retains.
+export function setupCardOf(s: SetupState, appSessionId: AppSessionId): SetupCardKind | null {
+  const card = s.cards.get(appSessionId);
+  if (card) return card.kind;
+  return failureOf(s, appSessionId) === null ? null : 'failure';
+}
+
+// Docks, swaps and undocks each session's setup card as the store changes (one card per session, `c10:<kind>`).
+export function connectSetupDock(store: typeof useSetup = useSetup): () => void {
+  const docked = new Map<AppSessionId, { kind: SetupCardKind; undock(): void }>();
+  const sync = (s: SetupState) => {
+    for (const [id, held] of docked) {
+      if (setupCardOf(s, id) === held.kind) continue;
+      held.undock();
+      docked.delete(id);
+    }
+    for (const id of new Set([...s.cards.keys(), ...s.intents.keys()])) {
+      const kind = setupCardOf(s, id);
+      if (kind === null || docked.has(id)) continue;
+      docked.set(id, { kind, undock: dockCard(id, { id: `c10:${kind}`, render: () => <SetupCard appSessionId={id} /> }) });
+    }
+  };
+  sync(store.getState());
+  const off = store.subscribe(sync);
+  return () => {
+    off();
+    docked.forEach((held) => held.undock());
+    docked.clear();
+  };
 }
 
 export function SetupCard({ appSessionId }: { appSessionId: AppSessionId }) {
@@ -33,19 +60,16 @@ export function SetupCard({ appSessionId }: { appSessionId: AppSessionId }) {
   const failure = useSetup((s) => failureOf(s, appSessionId));
   const busy = useSetup((s) => isStarting(s, appSessionId));
 
-  if (card?.kind === 'trust')
+  if (card?.kind === 'trust') {
+    const accept = () => void continueSetup(appSessionId, { trust: 'accepted' }, card.message);
+    const decline = () => void releaseMessage(appSessionId, card.message);
     return (
-      <Frame title={TRUST_CARD_TITLE}>
-        <TrustCard
-          trust={card.trust}
-          busy={busy}
-          onAccept={() => void continueSetup(appSessionId, { trust: 'accepted' }, card.message)}
-          onStartWithoutTrusting={() => void continueSetup(appSessionId, { trust: 'declined' }, card.message)}
-          onDecline={() => void releaseMessage(appSessionId, card.message)}
-        />
-      </Frame>
+      <DockedCardFrame appSessionId={appSessionId} title={TRUST_CARD_TITLE} onAccept={busy ? null : accept} onDecline={decline}>
+        <TrustCard trust={card.trust} busy={busy} onAccept={accept} onStartWithoutTrusting={() => void continueSetup(appSessionId, { trust: 'declined' }, card.message)} onDecline={decline} />
+      </DockedCardFrame>
     );
-  if (card?.kind === 'relay') return <RelayHost appSessionId={appSessionId} card={card} />;
+  }
+  if (card?.kind === 'relay') return <RelayHost appSessionId={appSessionId} card={card} busy={busy} />;
   if (failure !== null) return <FailureHost appSessionId={appSessionId} failure={failure} busy={busy} />;
   return null;
 }
@@ -62,23 +86,19 @@ function FailureHost({ appSessionId, failure, busy }: { appSessionId: AppSession
     const worktree = await resolveWorktree(appSessionId, resolution);
     if (worktree !== null) setResolved({ key, worktree });
   };
+  const retry = () => void continueSetup(appSessionId, {}, message);
+  // After a reload the card cannot tell whether main still runs the start (and is sending the message): it asks main to
+  // hand the message back first and returns it only then. Any other failure's message is main's to release.
+  const back = () => void (failure === UNSENT ? reclaimMessage(appSessionId, message) : releaseMessage(appSessionId, message));
   return (
-    <Frame title={FAILURE_CARD_TITLE}>
-      <FailureCard
-        failure={shown}
-        busy={busy}
-        retainedWorktree={retainedWorktree}
-        onAccept={() => void continueSetup(appSessionId, {}, message)}
-        onDecline={() => void releaseMessage(appSessionId, message)}
-        onDiscard={() => void resolve('discard')}
-        onKeep={() => void resolve('keep')}
-      />
-    </Frame>
+    <DockedCardFrame appSessionId={appSessionId} title={FAILURE_CARD_TITLE} onAccept={busy ? null : retry} onDecline={busy ? null : back}>
+      <FailureCard failure={shown} busy={busy} retainedWorktree={retainedWorktree} onAccept={retry} onDecline={back} onDiscard={() => void resolve('discard')} onKeep={() => void resolve('keep')} />
+    </DockedCardFrame>
   );
 }
 
 // The relay card polls the relay while it is docked and starts routed by itself once the relay answers.
-function RelayHost({ appSessionId, card }: { appSessionId: AppSessionId; card: Extract<WaitingCard, { kind: 'relay' }> }) {
+function RelayHost({ appSessionId, card, busy }: { appSessionId: AppSessionId; card: Extract<WaitingCard, { kind: 'relay' }>; busy: boolean }) {
   const [health, setHealth] = useState(card.health);
   const [now, setNow] = useState(() => Date.now());
   const model = useSetup((s) => s.intents.get(appSessionId)?.model ?? null);
@@ -112,19 +132,12 @@ function RelayHost({ appSessionId, card }: { appSessionId: AppSessionId; card: E
     setHealth(result.value);
     if (result.value.ok) void continueSetup(appSessionId, { gateway: 'gateway' }, card.message);
   };
+  const direct = () => void continueSetup(appSessionId, { gateway: 'direct' }, card.message);
+  const decline = () => void releaseMessage(appSessionId, card.message);
 
   return (
-    <Frame title={RELAY_CARD_TITLE}>
-      <RelayCard
-        health={health}
-        policy={RELAY_POLICY}
-        now={now}
-        gatewayModel={gatewayModel}
-        openClaudeUsage={null}
-        onAccept={() => void continueSetup(appSessionId, { gateway: 'direct' }, card.message)}
-        onDecline={() => void releaseMessage(appSessionId, card.message)}
-        onRecheck={() => void recheck()}
-      />
-    </Frame>
+    <DockedCardFrame appSessionId={appSessionId} title={RELAY_CARD_TITLE} onAccept={busy || gatewayModel ? null : direct} onDecline={decline}>
+      <RelayCard health={health} policy={RELAY_POLICY} now={now} gatewayModel={gatewayModel} openClaudeUsage={null} onAccept={direct} onDecline={decline} onRecheck={() => void recheck()} />
+    </DockedCardFrame>
   );
 }

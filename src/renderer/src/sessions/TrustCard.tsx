@@ -1,6 +1,6 @@
 // The trust step's card body (C10 execution document, "The unstarted session", TrustCard; mockup 05 vignette 02 for
 // the content): what trust would load, read from the directory itself, and the three answers. The frame (title, focus,
-// Enter and Esc) is its host's: M4a's interim `SetupCard`, then C7's `DockedCardFrame` through `dockCard` (M4b).
+// Enter and Esc) is C7's `DockedCardFrame`, docked through `dockCard` by `SetupCard.tsx`.
 // "Trust and start" is the default (§3: sessions load project settings as the terminal does); "Start without trusting"
 // is the quiet secondary (owner's decision, §19).
 import { TRUST_GATES, type TrustState } from '@shared/sessions/trust';

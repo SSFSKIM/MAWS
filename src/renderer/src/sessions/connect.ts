@@ -1,17 +1,26 @@
 // C10's renderer composition (C10 execution document, Repository map: App.tsx's registrations; Actions): the setup
 // store, C5's tab retention (registered at once, so hydration waits for the intent snapshot), and, in launch mode
-// `index`, the `newSession` slot, the session creator, the close guard, the unstarted title and the session and
-// project actions. In launch mode `scenario` C5's stub creator stands and nothing of C10's is registered but the
-// retention, which keeps nothing there (a stub's new session has no intent).
+// `index`, the `newSession` slot, the session creator, the close guard, the unstarted title, the session and project
+// actions, and C7's seams: the setup cards docked in the composer's place, a handed-back first message prefilled into
+// the editor, and the resubmit provider (an edited message forks). The setup-intent hook itself is registered at
+// App.tsx's module load, before any composer renders (C7's rule for a hook). In launch mode `scenario` C5's stub
+// creator stands and nothing of C10's is registered but the retention, which keeps nothing there (a stub's new
+// session has no intent).
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { registerSlot } from '../app/slots';
+import { registerResubmitProvider } from '../composer/resubmit-seam';
 import { ipc } from '../ipc/client';
 import { registerCloseGuard, registerSessionCreator, registerTabRetention, registerUnstartedTitle } from '../keymap/actions-runtime';
+import { prefillComposer } from '../stores/composer';
 import { useSessions } from '../stores/sessions';
 import { registerSessionActions } from './actions';
 import { heldToast } from './attach';
+import { messagePrefill } from './first-message';
+import { registerMessageReturn } from './message-return';
 import { NewSessionEmptyState } from './NewSessionEmptyState';
+import { resubmitProvider } from './record-ops';
+import { connectSetupDock } from './SetupCard';
 import { beforeCloseUnstarted } from './setup-actions';
 import { connectSetup, useSetup } from './store';
 import { baseDirectoryOf } from './useSetupIntent';
@@ -58,6 +67,9 @@ export function connectSessions(client: MawsBridge = ipc): () => void {
       registerCloseGuard('session', (ref) => (ref.kind === 'session' ? beforeCloseUnstarted(ref.appSessionId).then((r) => r === 'closed') : Promise.resolve(true))),
       registerUnstartedTitle(unstartedTitle),
       registerSessionActions(),
+      connectSetupDock(),
+      registerMessageReturn((appSessionId, message) => prefillComposer(appSessionId, messagePrefill(message))),
+      registerResubmitProvider(resubmitProvider),
     );
   });
   return () => {

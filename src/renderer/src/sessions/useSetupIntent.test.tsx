@@ -14,9 +14,8 @@ import { beforeCloseUnstarted } from './setup-actions';
 import { closeDialog, useDialogs } from './dialogs';
 import { createUnstartedSession, retainsTab, unstartedTitle } from './connect';
 import { connectSetup, useSetup } from './store';
-import { useSetupIntent, type ModelInfo } from './useSetupIntent';
-import type { ContentBlock } from '@shared/graph/events';
-import type { Location, SetupIntent } from '@shared/sessions/intent';
+import { useSetupIntent } from './useSetupIntent';
+import type { UseSetupIntent } from '../composer/setup-intent';
 
 const CATALOGUE: ModelCatalogue = {
   source: 'cached',
@@ -60,17 +59,9 @@ afterEach(() => {
   delete (window as { maws?: MawsBridge }).maws;
 });
 
-// C7's side of the seam, restated from its document ("Ask of C10" and the composer's public surface): M4b's one line
-// `registerSetupIntentHook(useSetupIntent)` must typecheck, so the hook is assignable to C7's shape (pnpm typecheck).
-type C7ModelInfo = Pick<ModelInfo, 'value' | 'displayName'> & Partial<Pick<ModelInfo, 'description' | 'supportedEffortLevels' | 'supportsAutoMode' | 'supportsFastMode'>>;
-type C7SetupIntent = Pick<SetupIntent, 'location' | 'additionalDirectories' | 'model' | 'effort' | 'permissionMode' | 'message' | 'draft'>;
-interface C7SetupIntentHook {
-  intent: C7SetupIntent;
-  options: { locations: Location[]; branches: string[]; models: C7ModelInfo[]; autoModeNote: string | null };
-  patch(p: Partial<C7SetupIntent>): Promise<{ ok: true } | { ok: false; error: string }>;
-  start(first: { content: string | ContentBlock[]; display: string }): Promise<{ ok: true } | { ok: false; error: string }>;
-}
-const assignableToC7: (appSessionId: AppSessionId) => C7SetupIntentHook | null = useSetupIntent;
+// C7's side of the seam as landed: App.tsx's `registerSetupIntentHook(useSetupIntent)` typechecks against it (pnpm
+// typecheck), and so does this.
+const assignableToC7: UseSetupIntent = useSetupIntent;
 void assignableToC7;
 
 describe('setup intent hook', () => {

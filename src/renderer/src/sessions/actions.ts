@@ -1,12 +1,12 @@
 // C10's entries in C5's action registries (C10 execution document, "Actions registered into C5"): ⌘N and the palette's
 // `session.new`, the per-session entries C5's menus, hover actions and toolbar menu render through
-// `runSessionAction`, and the per-project entries its project menu renders through `runProjectAction`. "Add project"
-// (`registerAddProject` over C7's `layout.pickFiles`) arrives with M4b.
+// `runSessionAction`, the per-project entries its project menu renders through `runProjectAction`, and the workspace's
+// "Add project" (`registerAddProject`) over C7's native directory chooser (`layout.pickFiles`).
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import { registerSessionAction } from '../app/session-actions';
 import { ipc } from '../ipc/client';
 import { createSession, registerAction } from '../keymap/actions-runtime';
-import { registerProjectAction } from '../sidebar/project-actions';
+import { registerAddProject, registerProjectAction } from '../sidebar/project-actions';
 import { useLayout } from '../stores/layout';
 import { toast } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
@@ -83,6 +83,19 @@ async function revealProject(projectId: ProjectId): Promise<void> {
   if (!result.ok) fail(result.error.message);
 }
 
+// "Add project": the native directory chooser, then the index's project for that directory (nothing on cancel).
+async function addProject(): Promise<void> {
+  const picked = await ipc.invoke('layout.pickFiles', { kind: 'directory', directory: null, multiple: false });
+  if (!picked.ok) {
+    fail(picked.error.message);
+    return;
+  }
+  const directory = picked.value.files[0]?.path;
+  if (directory === undefined) return;
+  const added = await ipc.invoke('session.projects.add', { directory });
+  if (!added.ok) fail(added.error.message);
+}
+
 export function registerSessionActions(): () => void {
   const offs = [
     registerAction('session.new', () => createSession(focusedProject())),
@@ -102,6 +115,7 @@ export function registerSessionActions(): () => void {
     registerProjectAction('archiveSessions', archiveProjectSessions),
     registerProjectAction('revealInFinder', revealProject),
     registerProjectAction('archivedSessions', (projectId) => openDialog({ kind: 'archived', projectId })),
+    registerAddProject(addProject),
   ];
   return () => offs.forEach((off) => off());
 }

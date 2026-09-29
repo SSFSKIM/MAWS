@@ -9,7 +9,8 @@ import { useNotices } from '../stores/notices';
 import { health, ID, intent, MESSAGE, putIntent, REPO, resetSetupStore, resources, trustState } from '../test-support/setup-intents';
 import { FailureCard } from './FailureCard';
 import { RelayCard } from './RelayCard';
-import { SetupCard } from './SetupCard';
+import { connectSetupDock } from './SetupCard';
+import { resetDockedCards, useDockedCards } from '../composer/docked/registry';
 import { registerMessageReturn } from './message-return';
 import { resumeSession, startIntent } from './setup-actions';
 import { connectSetup, useSetup } from './store';
@@ -18,6 +19,18 @@ import { TrustCard } from './TrustCard';
 let fake: FakeClient;
 let returned: unknown[];
 let offReturn: () => void;
+let offDock: () => void;
+
+// Where C7's composer shows a docked card: the oldest one, in the composer's place (M4b docks every setup card there).
+function Docked() {
+  const cards = useDockedCards(ID);
+  return (
+    <div data-testid="docked" data-cards={cards.map((c) => c.id).join(' ')}>
+      {cards[0]?.render() ?? null}
+    </div>
+  );
+}
+const dockedIds = () => screen.getByTestId('docked').dataset.cards;
 
 function withMain(auto: Parameters<typeof fakeClient>[0] = {}) {
   fake = fakeClient(auto);
@@ -29,9 +42,12 @@ beforeEach(() => {
   useNotices.setState({ notices: [] });
   returned = [];
   offReturn = registerMessageReturn((_id, message) => returned.push(message));
+  resetDockedCards();
+  offDock = connectSetupDock();
 });
 afterEach(() => {
   cleanup();
+  offDock();
   offReturn();
   delete (window as { maws?: MawsBridge }).maws;
 });
@@ -59,10 +75,13 @@ describe('trust card', () => {
 
   it('docks only on needs_trust, and sends accepted or declined as pressed', async () => {
     withMain({ 'session.start': answer({ status: 'needs_trust', appSessionId: ID, trust: trustState() }), 'session.intent.release': () => intent() });
-    putIntent(intent({ message: MESSAGE }));
-    render(<SetupCard appSessionId={ID} />);
+    putIntent(intent()); // before Send: main retains the message from the start on
+    render(<Docked />);
     expect(screen.queryByRole('button', { name: 'Trust and start' })).toBeNull();
+    expect(dockedIds()).toBe('');
     expect(await act(() => startIntent(ID, MESSAGE))).toEqual({ ok: true });
+    expect(dockedIds(), 'docked in the composer through C7\'s dockCard').toBe('c10:trust');
+    expect(screen.getByRole('group', { name: 'Trust this folder?' }).textContent).toContain('Composer paused'); // C7's DockedCardFrame
     await userEvent.click(await screen.findByRole('button', { name: 'Trust and start' }));
     expect(fake.invoked('session.start').at(-1)).toEqual({ appSessionId: ID, message: null, options: { trust: 'accepted' } });
     await userEvent.click(await screen.findByRole('button', { name: 'Start without trusting' }));
@@ -72,17 +91,18 @@ describe('trust card', () => {
   it('Cancel undocks, returns the retained message to the editor, then releases it', async () => {
     withMain({ 'session.start': answer({ status: 'needs_trust', appSessionId: ID, trust: trustState() }), 'session.intent.release': () => intent() });
     putIntent(intent({ message: MESSAGE }));
-    render(<SetupCard appSessionId={ID} />);
+    render(<Docked />);
     await act(() => startIntent(ID, MESSAGE));
     await userEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
     expect(returned).toEqual([MESSAGE]);
     expect(fake.calls.filter((c) => c.startsWith('invoke')).at(-1)).toBe('invoke session.intent.release');
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Trust and start' })).toBeNull());
+    expect(dockedIds(), 'undocked').toBe('');
   });
 
   it("Cancel on a resume's card, sent without a message, releases quietly (main answers null for a record's id)", async () => {
     withMain({ 'session.start': answer({ status: 'needs_trust', appSessionId: ID, trust: trustState() }), 'session.intent.release': () => null });
-    render(<SetupCard appSessionId={ID} />);
+    render(<Docked />);
     await act(() => resumeSession(ID));
     await userEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
     expect(fake.invoked('session.intent.release')).toEqual([{ appSessionId: ID }]);
@@ -94,7 +114,7 @@ describe('trust card', () => {
     let outcome: StartOutcome = { status: 'needs_trust', appSessionId: ID, trust: trustState() };
     withMain({ 'session.start': () => outcome });
     putIntent(intent({ message: MESSAGE }));
-    render(<SetupCard appSessionId={ID} />);
+    render(<Docked />);
     await act(() => startIntent(ID, MESSAGE));
     outcome = { status: 'missing_directory', appSessionId: ID, directory: REPO };
     await userEvent.click(await screen.findByRole('button', { name: 'Trust and start' }));
@@ -107,7 +127,7 @@ describe('relay card', () => {
   it("'Run direct' re-invokes session.start with the direct route on the same id", async () => {
     withMain({ 'session.start': answer({ status: 'relay_unreachable', appSessionId: ID, health: health() }), 'engine.relayHealth': () => health() });
     putIntent(intent({ message: MESSAGE }));
-    render(<SetupCard appSessionId={ID} />);
+    render(<Docked />);
     await act(() => startIntent(ID, MESSAGE));
     expect(await screen.findByText(/relay is not answering/)).toBeTruthy();
     await userEvent.click(screen.getByRole('button', { name: 'Run direct' }));
@@ -120,7 +140,7 @@ describe('relay card', () => {
       let up = false;
       withMain({ 'session.start': answer(starting), 'engine.relayHealth': () => health({ ok: up, status: up ? 200 : null, error: up ? null : 'timed out' }) });
       putIntent(intent({ message: MESSAGE }));
-      render(<SetupCard appSessionId={ID} />);
+      render(<Docked />);
       act(() => useSetup.getState().applySetup({ appSessionId: ID, phase: 'failed', detail: null, outcome: { kind: 'relay_unreachable', health: health() } }));
       expect(await screen.findByRole('button', { name: 'Run direct' })).toBeTruthy();
       up = true;
@@ -170,7 +190,7 @@ describe('failure card', () => {
     const path = `${REPO}/.claude/worktrees/accept-fail`;
     withMain({ 'session.start': answer(starting), 'session.intent.resolveWorktree': () => ({ intent: intent(), worktree: { path, branch: 'worktree-accept-fail', createdHere: false, state: 'kept', detail: null, branchState: 'kept' } }) });
     putIntent(intent({ message: MESSAGE, progress: { ...intent().progress, worktree: { path, branch: 'worktree-accept-fail', head: 'abc', createdHere: true } } }));
-    render(<SetupCard appSessionId={ID} />);
+    render(<Docked />);
     act(() => useSetup.getState().applySetup({ appSessionId: ID, phase: 'launching', detail: 'Starting', outcome: null })); // this window follows the start
     expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
     act(() =>
@@ -181,6 +201,7 @@ describe('failure card', () => {
         outcome: { kind: 'error', message: 'the engine exited', resources: resources({ worktree: { path, branch: 'worktree-accept-fail', createdHere: true, state: 'remove_refused', detail: 'dirty: 1 uncommitted change', branchState: 'kept' } }) },
       }),
     );
+    expect(dockedIds()).toBe('c10:failure');
     await userEvent.click(await screen.findByRole('button', { name: 'Keep the worktree' }));
     expect(fake.invoked('session.intent.resolveWorktree')).toEqual([{ appSessionId: ID, resolution: 'keep' }]);
     await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
@@ -190,7 +211,7 @@ describe('failure card', () => {
   it('a record’s failed resume is no card but a toast; the record stays an exited session', async () => {
     withMain({ 'session.intent.list': () => ({ intents: [] }), 'session.deletions.list': () => ({ manifests: [] }) });
     const connection = connectSetup(fake.client);
-    render(<SetupCard appSessionId={ID} />);
+    render(<Docked />);
     act(() => fake.event('session.setup', { appSessionId: ID, phase: 'failed', detail: null, outcome: { kind: 'error', message: 'the engine exited (code 1)', resources: resources({ record: 'kept' }) } }));
     expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
     expect(useNotices.getState().notices.map((n) => n.text)).toEqual(['the engine exited (code 1)']);
@@ -201,7 +222,7 @@ describe('failure card', () => {
     withMain({ 'session.start': answer(starting), 'session.intent.list': () => ({ intents: [] }), 'session.deletions.list': () => ({ manifests: [] }), 'engine.relayHealth': () => health() });
     const connection = connectSetup(fake.client);
     await connection.ready;
-    render(<SetupCard appSessionId={ID} />);
+    render(<Docked />);
     await act(() => resumeSession(ID, MESSAGE));
     act(() => fake.event('session.setup', { appSessionId: ID, phase: 'failed', detail: null, outcome: { kind: 'error', message: 'the engine exited (code 1)', resources: resources({ record: 'kept' }) } }));
     expect(returned).toEqual([MESSAGE]);
@@ -218,15 +239,27 @@ describe('failure card', () => {
     connection.disconnect();
   });
 
-  it('a launch that kept its transcript is told after its intent went: a toast, no card', async () => {
+  it('a launch that kept its transcript is told after its intent went: a toast, no card, and its unsent first message back in the editor', async () => {
     withMain({ 'session.intent.list': () => ({ intents: [intent({ message: MESSAGE })] }), 'session.deletions.list': () => ({ manifests: [] }) });
     const connection = connectSetup(fake.client);
     await connection.ready;
-    render(<SetupCard appSessionId={ID} />);
+    render(<Docked />);
     act(() => fake.event('session.intent.changed', { appSessionId: ID, intent: null }));
     act(() => fake.event('session.setup', { appSessionId: ID, phase: 'failed', detail: null, outcome: { kind: 'error', message: 'the model is not available', resources: resources({ record: 'kept', transcript: 'kept' }) } }));
     expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
     expect(useNotices.getState().notices.map((n) => n.text)).toEqual(['the model is not available']);
+    expect(returned, 'the handoff never happened: the message comes back').toEqual([MESSAGE]);
+    connection.disconnect();
+  });
+
+  it('a start that became ready and then lost its intent hands nothing back', async () => {
+    withMain({ 'session.intent.list': () => ({ intents: [intent({ message: MESSAGE })] }), 'session.deletions.list': () => ({ manifests: [] }) });
+    const connection = connectSetup(fake.client);
+    await connection.ready;
+    act(() => fake.event('session.setup', { appSessionId: ID, phase: 'ready', detail: null, outcome: { kind: 'ready', engineSessionId: 'e' as never, firstTurn: 'sent' } }));
+    act(() => fake.event('session.intent.changed', { appSessionId: ID, intent: null }));
+    act(() => fake.event('session.setup', { appSessionId: ID, phase: 'failed', detail: null, outcome: { kind: 'error', message: 'later', resources: resources({ record: 'kept' }) } }));
+    expect(returned).toEqual([]);
     connection.disconnect();
   });
 
@@ -236,7 +269,7 @@ describe('failure card', () => {
     withMain({ 'session.intent.list': () => ({ intents: [intent({ message: MESSAGE })] }), 'session.deletions.list': () => ({ manifests: [] }), 'session.start': answer({ status: 'needs_trust', appSessionId: ID, trust: trustState() }), 'session.intent.release': () => intent() });
     const connection = connectSetup(fake.client);
     await connection.ready;
-    render(<SetupCard appSessionId={ID} />);
+    render(<Docked />);
     expect(await screen.findByText('Your first message has not been sent.')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Back to editing' })).toBeTruthy();
     await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
@@ -247,10 +280,30 @@ describe('failure card', () => {
     connection.disconnect();
   });
 
+  // (carried to M4b by the interim branch review) the reload card cannot know whether main still runs the start: Back to
+  // editing asks main first and returns the message only once main handed it back
+  it("after a reload, Back to editing releases first and returns the message only when main handed it back", async () => {
+    withMain({ 'session.intent.list': () => ({ intents: [intent({ message: MESSAGE })] }), 'session.deletions.list': () => ({ manifests: [] }) });
+    const connection = connectSetup(fake.client);
+    await connection.ready;
+    render(<Docked />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Back to editing' }));
+    expect(fake.invoked('session.intent.release')).toEqual([{ appSessionId: ID }]);
+    expect(returned, 'nothing before main answers').toEqual([]);
+    await act(() => fake.fail('session.intent.release', `starting: a start is in flight for ${ID}`));
+    expect(returned, 'main is sending it').toEqual([]);
+    expect(useNotices.getState().notices.map((n) => [n.level, n.text])).toEqual([['info', 'Starting…']]);
+    await userEvent.click(screen.getByRole('button', { name: 'Back to editing' }));
+    await act(() => fake.reply('session.intent.release', intent()));
+    expect(returned).toEqual([MESSAGE]);
+    await waitFor(() => expect(dockedIds()).toBe(''));
+    connection.disconnect();
+  });
+
   it('a start this window sent shows no such card before its first phase arrives', async () => {
     withMain({ 'session.start': answer(starting) });
     putIntent(intent({ message: MESSAGE }));
-    render(<SetupCard appSessionId={ID} />);
+    render(<Docked />);
     expect(await act(() => startIntent(ID, MESSAGE))).toEqual({ ok: true });
     expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
   });
@@ -258,7 +311,7 @@ describe('failure card', () => {
   it('a Retry main refuses because a start still runs hands nothing back', async () => {
     withMain(); // session.start waits for the test's answer
     putIntent(intent({ message: MESSAGE }));
-    render(<SetupCard appSessionId={ID} />);
+    render(<Docked />);
     await userEvent.click(await screen.findByRole('button', { name: 'Retry' }));
     await act(() => fake.fail('session.start', `starting: a start is in flight for ${ID}`));
     expect(returned).toEqual([]);
@@ -274,7 +327,7 @@ describe('failure card', () => {
       'session.intent.release': () => ({ ...discarded, message: null }),
     });
     putIntent(intent({ message: MESSAGE, progress: { ...intent().progress, worktree: { path, branch: 'worktree-accept-fail', head: 'abc', createdHere: true }, lastFailure } }));
-    render(<SetupCard appSessionId={ID} />);
+    render(<Docked />);
     expect(screen.getByText('MAWS quit before the session started')).toBeTruthy(); // after a restart, from the intent
     const discard = screen.getByRole('button', { name: 'Discard changes and remove' });
     expect(discard.hasAttribute('disabled')).toBe(true);

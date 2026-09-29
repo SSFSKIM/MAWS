@@ -26,8 +26,15 @@ import { connectStatusLine } from './statusline';
 import { registerTranscriptActions } from './transcript';
 // C7 end
 // C10 start
+import { registerSetupIntentHook } from './composer/setup-intent';
 import { connectSessions } from './sessions/connect';
 import { SessionDialogs } from './sessions/SessionDialogs';
+import { useSetupIntent } from './sessions/useSetupIntent';
+// C10 end
+
+// C10 start: C7's composer binds an unstarted session's chips and Send through C10's hook; registered at module load,
+// before any composer renders, so the function the composer calls as a hook is fixed for the page's life (C7's rule)
+registerSetupIntentHook(useSetupIntent);
 // C10 end
 
 export function App() {

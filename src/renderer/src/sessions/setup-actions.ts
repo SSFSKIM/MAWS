@@ -118,6 +118,22 @@ export async function releaseMessage(appSessionId: AppSessionId, docked: FirstMe
   return { ok: true };
 }
 
+// "Back to editing" on the card a reload restored (the store's UNSENT): the page cannot tell whether main still runs the
+// start, so main's hand-back comes first and the message returns to the editor only once main gave it up; a `starting`
+// refusal means main is sending it (the card goes when the start's next phase arrives).
+export async function reclaimMessage(appSessionId: AppSessionId, docked: FirstMessage | null): Promise<HookResult> {
+  const result = await ipc.invoke('session.intent.release', { appSessionId });
+  if (!result.ok) {
+    const starting = result.error.message.startsWith('starting:');
+    toast({ level: starting ? 'info' : 'danger', text: starting ? 'Starting…' : result.error.message, actions: [], dismissible: true });
+    return { ok: false, error: result.error.message };
+  }
+  useSetup.getState().settle(appSessionId);
+  if (docked !== null) returnMessage(appSessionId, docked);
+  if (result.value !== null) useSetup.getState().setIntent(result.value);
+  return { ok: true };
+}
+
 // The failure card's resolutions of a checkout the failed attempt created and kept.
 // Answers what became of the checkout, which the failure card shows in place of the rollback's account.
 export async function resolveWorktree(appSessionId: AppSessionId, resolution: 'discard' | 'keep'): Promise<WorktreeResource | null> {

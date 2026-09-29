@@ -1,6 +1,6 @@
 // The one place C10's sheets render (App.tsx's C10 block mounts it beside the shell), and what a session's tab shows
-// of C10 above its composer: a delete that stopped half-way ("Finish deleting" or "Keep"), and the card a resume is
-// waiting on (until M4b docks it through C7's `dockCard`).
+// of C10 above its composer: a delete that stopped half-way ("Finish deleting" or "Keep"). The card a start or a
+// resume waits on docks in the composer's place (`SetupCard.tsx`).
 import { useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { ipc } from '../ipc/client';
@@ -12,7 +12,6 @@ import { closeDialog, useDialogs } from './dialogs';
 import { ForkSheet } from './ForkSheet';
 import { deleteOutcomeWords, deleteSession } from './record-ops';
 import { RenameDialog } from './RenameDialog';
-import { SetupCard } from './SetupCard';
 import { Sheet, SheetForm } from './Sheet';
 import { useSetup } from './store';
 import { DANGER, PRIMARY, SECONDARY } from './ui';
@@ -56,12 +55,7 @@ export function SessionDialogs() {
 
 // What a session's tab shows of C10 above its composer.
 export function SessionTabNotes({ appSessionId }: { appSessionId: AppSessionId }) {
-  return (
-    <>
-      <DeletionNotice appSessionId={appSessionId} />
-      <SetupCard appSessionId={appSessionId} />
-    </>
-  );
+  return <DeletionNotice appSessionId={appSessionId} />;
 }
 
 // A delete of this conversation that stopped part-way (found at start, or answered `partial`).
