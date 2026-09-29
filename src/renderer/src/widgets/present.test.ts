@@ -34,11 +34,12 @@ import * as Status from './StatusWidget';
 import * as Usage from './UsageWidget';
 
 const ROOT = join(__dirname, '../../../..');
-const line = <T>(at: string) => fixtureLine(ROOT, at) as T;
+// The payload of a journal's row, named by journal and seq.
+const line = <T>(journal: string, seq: number) => fixtureLine(ROOT, `${journal}#${seq}`) as T;
 
 describe('every widget renders its fixture response', () => {
   it('context: the line with the autocompact threshold, six categories with Free space last, and the costs', () => {
-    const view = Context.present(line<GetContextUsageResponse>('reads#57'));
+    const view = Context.present(line<GetContextUsageResponse>('reads', 57));
     expect(view.line).toBe('30,433 of 200,000 · 15% · autocompact at 167,000');
     expect(view.categories.map((c) => c.name)).toEqual(['System prompt', 'System tools', 'System tools (deferred)', 'Skills', 'Messages', 'Free space']);
     expect(view.categories[2]).toEqual({ name: 'System tools (deferred)', tokens: '28,272', note: 'not in the window' });
@@ -54,7 +55,7 @@ describe('every widget renders its fixture response', () => {
   });
 
   it('permissions: a session grant and a startup-settings ask rule with their sources and editability', () => {
-    const view = Permissions.present(line<ListPermissionRulesResponse>('pass2/grant-askrule-start#65').state, null);
+    const view = Permissions.present(line<ListPermissionRulesResponse>('pass2/grant-askrule-start', 65).state, null);
     expect(view.groups.map((g) => [g.label, g.rules.length])).toEqual([
       ['Allow', 1],
       ['Ask', 1],
@@ -67,7 +68,7 @@ describe('every widget renders its fixture response', () => {
   });
 
   it('permissions: an empty state, an unknown source verbatim, and the effective mode with its refusal in words', () => {
-    const empty = Permissions.present(line<ListPermissionRulesResponse>('reads#63').state, null);
+    const empty = Permissions.present(line<ListPermissionRulesResponse>('reads', 63).state, null);
     expect(empty.groups.every((g) => g.rules.length === 0)).toBe(true);
     const odd = Permissions.present({ rules: [{ behavior: 'deny', source: 'someNewSource', rule: 'Read(.env)' }], workspaceDirectories: ['/w'], originalCwd: '/o', managedOnly: true }, {
       permissionMode: { requested: 'auto', effective: 'default', refusal: 'auto_mode_model' },
@@ -84,15 +85,15 @@ describe('every widget renders its fixture response', () => {
   });
 
   it('hooks: one PostToolUse hook from startup settings with its matcher and display text', () => {
-    const view = Hooks.present(line<GetHooksListingResponse>('pass2/hooks#46'));
+    const view = Hooks.present(line<GetHooksListingResponse>('pass2/hooks', 46));
     expect(view.events).toEqual([{ name: 'PostToolUse', summary: 'After tool execution', count: 1 }]);
     expect(view.hooks).toEqual([{ event: 'PostToolUse', matcher: 'Bash', source: 'Startup settings (--settings option)', text: 'echo MAWS_POSTHOOK', type: 'command' }]);
     expect(view.policy).toBeNull();
-    expect(Hooks.present(line<GetHooksListingResponse>('reads#66')).hooks).toEqual([]);
+    expect(Hooks.present(line<GetHooksListingResponse>('reads', 66)).hooks).toEqual([]);
   });
 
   it('memory: the user and project files with existence, the auto-memory folder and state', () => {
-    const view = Memory.present(line<GetMemoryDialogResponse>('reads#69'));
+    const view = Memory.present(line<GetMemoryDialogResponse>('reads', 69));
     expect(view.files.map((f) => [f.label, f.exists, f.note])).toEqual([
       ['User instructions', true, null],
       ['Project instructions', false, 'does not exist yet'],
@@ -103,7 +104,7 @@ describe('every widget renders its fixture response', () => {
   });
 
   it('sandbox: disabled · supported, with its settings and empty restrictions', () => {
-    const view = Sandbox.present(line<GetSandboxDialogResponse>('reads#75'));
+    const view = Sandbox.present(line<GetSandboxDialogResponse>('reads', 75));
     expect(view.line).toBe('disabled · supported');
     expect(view.rows).toContainEqual({ label: 'Enabled in settings', value: 'no' });
     expect(view.restrictions).toEqual([]);
@@ -111,7 +112,7 @@ describe('every widget renders its fixture response', () => {
   });
 
   it('diff: 0 files on the working tree; a null diff says why', () => {
-    expect(Diff.present(line<GetWorkspaceDiffResponse>('reads#81'))).toEqual({ line: '0 files · +0 −0 · working tree', files: [], skippedLarge: 0, restricted: 0 });
+    expect(Diff.present(line<GetWorkspaceDiffResponse>('reads', 81))).toEqual({ line: '0 files · +0 −0 · working tree', files: [], skippedLarge: 0, restricted: 0 });
     expect(Diff.present({ diff: null }).line).toBe('No diff · not a git repository, or a merge, rebase or cherry-pick is in progress');
     const one = Diff.present({
       diff: {
@@ -135,13 +136,13 @@ describe('every widget renders its fixture response', () => {
   });
 
   it('export: the default filename and the first line of the text', () => {
-    const view = Export.present(line<ExportConversationResponse>('reads#84'));
+    const view = Export.present(line<ExportConversationResponse>('reads', 84));
     expect(view.filename).toBe('2026-09-28-022217-reply-with-exactly-ok.txt');
     expect(view.firstLine).toBe('❯ Reply with exactly OK');
   });
 
   it('mcp: three servers with transports, tools as a count, stdio commands shortened', () => {
-    const view = Mcp.present(line<McpStatusResponse>('pass2/real-settings#63'));
+    const view = Mcp.present(line<McpStatusResponse>('pass2/real-settings', 63));
     expect(view.servers.map((s) => [s.name, s.status, s.transport, s.tools.length])).toEqual([
       ['plugin:ptc:ptc', 'connected', 'stdio · …/ptc-launch', 6],
       ['plugin:chatgpt-advisor:advisor', 'connected', 'stdio · node …/mcp-server.mjs', 3],
@@ -152,7 +153,7 @@ describe('every widget renders its fixture response', () => {
   });
 
   it('plugins: the eleven loaded plugins with their versions', () => {
-    const init = line<{ plugins: { name: string; path: string; source: string; version?: string }[] }>('pass2/real-settings#15');
+    const init = line<{ plugins: { name: string; path: string; source: string; version?: string }[] }>('pass2/real-settings', 15);
     const plugins = init.plugins.map((p) => ({ name: p.name, path: p.path, source: p.source, version: p.version ?? null }));
     const view = Plugins.present({ plugins, pluginErrors: [], pluginWarnings: [] });
     expect(view.plugins).toHaveLength(11);
@@ -166,7 +167,7 @@ describe('every widget renders its fixture response', () => {
   });
 
   it('status: every section and row verbatim, labels in the key column', () => {
-    const view = Status.present(line<GetStatusResponse>('pass2/auto-routed#145'));
+    const view = Status.present(line<GetStatusResponse>('pass2/auto-routed', 145));
     expect(view.sections.map((s) => s.title)).toEqual(['Session', 'Environment']);
     expect(view.sections[0].rows).toContainEqual({ label: 'Anthropic base URL', value: 'http://127.0.0.1:8641' });
     expect(view.sections[1].rows).toContainEqual({ label: 'Auto mode server', value: 'Enabled' });
@@ -174,10 +175,10 @@ describe('every widget renders its fixture response', () => {
   });
 
   it("skills: an empty dialog falls back to the catalogue's eighteen skills, with their descriptions", () => {
-    const initialize = line<{ commands: unknown[]; agents: unknown[] }>('pass2/auto-routed#4');
-    const init = line<{ skills: unknown[]; terminal_slash_commands: unknown[] }>('pass2/auto-routed#9');
+    const initialize = line<{ commands: unknown[]; agents: unknown[] }>('pass2/auto-routed', 4);
+    const init = line<{ skills: unknown[]; terminal_slash_commands: unknown[] }>('pass2/auto-routed', 9);
     const catalog = projectCatalog('l1', { commands: initialize.commands, agents: initialize.agents, skills: init.skills, terminalSlashCommands: init.terminal_slash_commands, revision: 1 });
-    const view = Skills.present(line<{ skills: unknown[] }>('reads#72'), catalog);
+    const view = Skills.present(line<{ skills: unknown[] }>('reads', 72), catalog);
     expect(view.source).toBe('catalogue');
     expect(view.skills).toHaveLength(18);
     expect(view.skills[0].name).toBe('deep-research');
@@ -191,7 +192,7 @@ describe('every widget renders its fixture response', () => {
   });
 
   it("usage: the engine's session accounting, and no windows reported through the relay", () => {
-    const view = Usage.present(line<GetUsageResponse>('reads#54'));
+    const view = Usage.present(line<GetUsageResponse>('reads', 54));
     expect(view.rows).toEqual([
       { label: 'Cost', value: '$0.0208' },
       { label: 'API time', value: '1.7 s' },
@@ -203,7 +204,7 @@ describe('every widget renders its fixture response', () => {
   });
 
   it('config: the effective settings, their sources and what was applied', () => {
-    const view = Config.present(line<GetSettingsResponse>('pass2/dialogs#58'));
+    const view = Config.present(line<GetSettingsResponse>('pass2/dialogs', 58));
     expect(view.effective).toEqual([{ key: 'dialogExpiry', value: '"never"' }]);
     expect(view.sources).toEqual([{ source: 'flagSettings', label: 'startup settings', keys: ['dialogExpiry'] }]);
     expect(view.applied).toEqual([
@@ -212,6 +213,6 @@ describe('every widget renders its fixture response', () => {
       { label: 'Advisor', value: 'none' },
       { label: 'Ultracode', value: 'off' },
     ]);
-    expect(Config.present(line<GetSettingsResponse>('reads#60')).effective).toEqual([]);
+    expect(Config.present(line<GetSettingsResponse>('reads', 60)).effective).toEqual([]);
   });
 });
