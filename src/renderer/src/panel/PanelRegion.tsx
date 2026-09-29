@@ -19,6 +19,7 @@ export function PanelRegion() {
   const windowWidth = useWindowWidth();
   const width = useLayout((s) => regionWidths(s.regions, windowWidth).panel);
   const max = useLayout((s) => regionWidths(s.regions, windowWidth).panelMax);
+  const persisted = useLayout((s) => s.regions.panel.width);
   const setPanel = useLayout((s) => s.setPanel);
 
   return (
@@ -39,6 +40,7 @@ export function PanelRegion() {
           defaultValue={PANEL_BOUNDS.default}
           grow={-1}
           collapseThreshold={COLLAPSE_THRESHOLD_PX}
+          restoreValue={persisted}
           onChange={(next) => setPanel({ width: next })}
           onCollapse={(restore) => setPanel({ collapsed: true, width: restore })}
           className="absolute inset-y-0 -left-0.75"

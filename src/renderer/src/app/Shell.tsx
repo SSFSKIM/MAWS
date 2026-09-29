@@ -45,6 +45,7 @@ function SidebarRegion() {
   const windowWidth = useWindowWidth();
   const width = useLayout((s) => regionWidths(s.regions, windowWidth).sidebar);
   const max = useLayout((s) => regionWidths(s.regions, windowWidth).sidebarMax);
+  const persisted = useLayout((s) => s.regions.sidebar.width);
   const setSidebar = useLayout((s) => s.setSidebar);
   return (
     <section
@@ -67,6 +68,7 @@ function SidebarRegion() {
           max={max}
           defaultValue={SIDEBAR_BOUNDS.default}
           collapseThreshold={COLLAPSE_THRESHOLD_PX}
+          restoreValue={persisted}
           onChange={(next) => setSidebar({ width: next })}
           onCollapse={(restore) => setSidebar({ collapsed: true, width: restore })}
           className="absolute inset-y-0 -right-0.75"

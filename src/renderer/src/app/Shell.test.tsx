@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -116,6 +116,23 @@ describe('shell frame', () => {
     act(() => setWindowWidth(1440)); // the persisted widths were never touched
     expect(grid().style.gridTemplateColumns).toBe('480px minmax(0, 1fr) 480px');
     expect([useLayout.getState().regions.sidebar.width, useLayout.getState().regions.panel.width]).toEqual([480, 640]);
+  });
+
+  it('a drag-collapse of a clamped region keeps its persisted width, so it reopens at that size', () => {
+    const regions = LAYOUT_DEFAULTS.regions;
+    useLayout.setState({ regions: { ...regions, sidebar: { ...regions.sidebar, width: 480 }, panel: { ...regions.panel, width: 640 } } });
+    setWindowWidth(960);
+    render(<Shell />);
+    const sidebarHandle = screen.getByRole('separator', { name: 'Resize sidebar' });
+    const panelHandle = () => screen.getByRole('separator', { name: 'Resize right panel' });
+    const dragBy = (handle: HTMLElement, dx: number) => {
+      act(() => void fireEvent.pointerDown(handle, { pointerId: 1, button: 0, clientX: 500 }));
+      act(() => void fireEvent.pointerMove(handle, { pointerId: 1, clientX: 500 + dx }));
+    };
+    dragBy(sidebarHandle, -50); // shown at 200 (persisted 480): 50 px leftwards is past the collapse threshold
+    expect(useLayout.getState().regions.sidebar).toMatchObject({ collapsed: true, width: 480 });
+    dragBy(panelHandle(), 250); // shown at 480 beside the collapsed sidebar (persisted 640): collapsed
+    expect(useLayout.getState().regions.panel).toMatchObject({ collapsed: true, width: 640 });
   });
 });
 
