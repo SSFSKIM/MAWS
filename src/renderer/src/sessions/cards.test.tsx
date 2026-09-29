@@ -185,6 +185,18 @@ describe('failure card', () => {
     connection.disconnect();
   });
 
+  it('a launch that kept its transcript is told after its intent went: a toast, no card', async () => {
+    withMain({ 'session.intent.list': () => ({ intents: [intent({ message: MESSAGE })] }), 'session.deletions.list': () => ({ manifests: [] }) });
+    const connection = connectSetup(fake.client);
+    await connection.ready;
+    render(<SetupCard appSessionId={ID} />);
+    act(() => fake.event('session.intent.changed', { appSessionId: ID, intent: null }));
+    act(() => fake.event('session.setup', { appSessionId: ID, phase: 'failed', detail: null, outcome: { kind: 'error', message: 'the model is not available', resources: resources({ record: 'kept', transcript: 'kept' }) } }));
+    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
+    expect(useNotices.getState().notices.map((n) => n.text)).toEqual(['the model is not available']);
+    connection.disconnect();
+  });
+
   it('Discard changes and remove needs its acknowledgement; Back to editing returns the message and releases it', async () => {
     const path = `${REPO}/.claude/worktrees/accept-fail`;
     const lastFailure = { at: '2026-09-29T10:00:00.000Z', phase: 'launching' as const, message: 'MAWS quit before the session started', resources: resources({ worktree: { path, branch: 'worktree-accept-fail', createdHere: true, state: 'remove_refused', detail: 'dirty: 2 uncommitted changes', branchState: 'kept' } }) };

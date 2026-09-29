@@ -341,8 +341,10 @@ async function rollbackIntent(s: Setup, run: IntentRun, cwd: string | null, erro
       if (record !== null && record.engineSessionId === null) s.sessions.bindEngineId(appSessionId, p.engineSessionId);
       const resources: SetupResources = { worktree: p.worktree ? keptWorktree(p.worktree, newBranch) : null, record: 'kept', transcript: 'kept' };
       await s.intents.remove(appSessionId);
-      run.event('failed', null, { kind: 'error', message, resources });
+      // the removal first: the renderer tells a failure without an intent as a record's (a toast; the session stays,
+      // exited), and a failure told while it still held the intent would be hidden with the intent a moment later
       s.emit('session.intent.changed', { appSessionId, intent: null });
+      run.event('failed', null, { kind: 'error', message, resources });
       return;
     }
 

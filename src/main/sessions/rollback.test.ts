@@ -189,6 +189,9 @@ describe('rollback per resource', () => {
       expect(existsSync(managed('kept'))).toBe(true);
       expect(intentFile(h, id)).toBeNull();
       expect(h.index.sessions.get(id)!.engineSessionId).toBe(h.host.launches[0]!.sessionId);
+      // the intent's removal is told before the failure, so the renderer reads the failure as a record's and says it
+      const told = h.events.filter((e) => (e.name === 'session.intent.changed' && (e.payload as { intent: unknown }).intent === null) || (e.name === 'session.setup' && (e.payload as { phase: string }).phase === 'failed'));
+      expect(told.map((e) => e.name)).toEqual(['session.intent.changed', 'session.setup']);
     });
 
     it('with the record rebound by a /clear after the pin, the transcript-keeping rollback leaves that id bound', async () => {
