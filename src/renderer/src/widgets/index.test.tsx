@@ -56,7 +56,7 @@ describe('every widget renders its fixture response', () => {
     hooks: 'echo MAWS_POSTHOOK',
     memory: 'Project instructions',
     skills: '/deep-research',
-    agents: 'Mention',
+    agents: 'Fast read-only search agent for locating code',
     status: 'http://127.0.0.1:8641',
     context: '30,433 of 200,000 · 15% · autocompact at 167,000',
     export: '2026-09-28-022217-reply-with-exactly-ok.txt',

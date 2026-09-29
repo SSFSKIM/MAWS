@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { loadScenario } from '../../../../test/support/scenario';
-import { createWidgetBackend, WidgetBackendError, type WidgetBackend } from '../../../../test/support/widget-backend';
+import { createWidgetBackend, fixtureLine, WidgetBackendError, type WidgetBackend } from '../../../../test/support/widget-backend';
 import { useSessions } from '../stores/sessions';
 import { readIntoCache, useEngineRead, WidgetReadPolicyContext, type WidgetReadPolicy } from './read';
 
@@ -61,6 +61,24 @@ describe('useEngineRead', () => {
     await waitFor(() => expect(result.current.state).toBe('ready'));
     await new Promise((r) => setTimeout(r, 10));
     expect(reads('session.getSandboxDialog')).toBe(1);
+  });
+
+  it('a status move while a refetch is in flight joins that refetch: it is never cancelled and asked again', async () => {
+    const { result } = renderHook(() => useEngineRead('session.getWorkspaceDiff', { appSessionId: ID }), { wrapper: wrapper() });
+    await waitFor(() => expect(result.current.state).toBe('ready'));
+    const answers: ((value: unknown) => void)[] = [];
+    backend.script('session.getWorkspaceDiff', () => new Promise((resolve) => answers.push(resolve)));
+    const move = () => {
+      backend.emitTurnStarted(ID);
+      act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: backend.status(ID) }));
+    };
+    move(); // the first move refetches
+    await waitFor(() => expect(reads('session.getWorkspaceDiff')).toBe(2));
+    move(); // the second arrives while that refetch is unanswered
+    await new Promise((r) => setTimeout(r, 10));
+    expect(reads('session.getWorkspaceDiff')).toBe(2);
+    await act(async () => answers.forEach((answer) => answer(fixtureLine(ROOT, 'reads#81'))));
+    expect(result.current.state).toBe('ready');
   });
 
   it('refetches when the session status moves, not when an unrelated field changes', async () => {

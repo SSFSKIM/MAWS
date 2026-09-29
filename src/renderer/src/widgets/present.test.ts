@@ -186,9 +186,9 @@ describe('every widget renders its fixture response', () => {
     const fromDialog = Skills.present({ skills: [{ name: 'mine', description: 'My skill' }, { bogus: true }] }, catalog);
     expect(fromDialog).toEqual({ source: 'dialog', skills: [{ name: 'mine', description: 'My skill' }] });
 
-    const agents = Agents.present(catalog);
-    expect(agents.length).toBeGreaterThan(0);
-    expect(agents[0]).toEqual({ name: catalog.agents[0].name, description: catalog.agents[0].description });
+    const agents = Agents.present(catalog); // the initialize response's five agents (seq 4), in its order
+    expect(agents.map((a) => a.name)).toEqual(['claude', 'Explore', 'general-purpose', 'Plan', 'statusline-setup']);
+    expect(agents[1].description).toMatch(/^Fast read-only search agent for locating code/);
   });
 
   it("usage: the engine's session accounting, and no windows reported through the relay", () => {
