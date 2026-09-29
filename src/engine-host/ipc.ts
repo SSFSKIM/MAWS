@@ -197,7 +197,7 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
   });
   handle('session.queue.edit', async ({ appSessionId, queueId, content }) => sessionOf(appSessionId).queue.edit(queueId, content));
   handle('session.queue.remove', async ({ appSessionId, queueId }) => sessionOf(appSessionId).queue.remove(queueId));
-  handle('session.queue.promote', async ({ appSessionId, queueId }) => sessionOf(appSessionId).queue.promote(queueId));
+  handle('session.queue.promote', async ({ appSessionId, queueId, priority }) => sessionOf(appSessionId).queue.promote(queueId, { priority: priority ?? 'now' }));
   handle('session.queue.setPaused', async ({ appSessionId, paused }) => sessionOf(appSessionId).queue.setPaused(paused));
   handle('session.interrupt', async ({ appSessionId, cancelEngineQueued }) => bounded(() => sessionOf(appSessionId).interrupt({ cancelEngineQueued })));
   handle('session.answer', async ({ appSessionId, requestId, answer }) => ({ outcome: await sessionOf(appSessionId).answer(requestId as RequestId, answer as Parameters<EngineSession['answer']>[1]) }));

@@ -183,7 +183,7 @@ describe('queue release never follows an engine-initiated turn', () => {
 });
 
 describe('steer priority', () => {
-  it("writes the priority it is given ('now' by default, 'next' on request); promote keeps 'now'", async () => {
+  it("writes the priority it is given ('now' by default, 'next' on request); promote defaults to 'now'", async () => {
     const s = scriptedSession();
     await s.session.start();
     await s.session.send('first');

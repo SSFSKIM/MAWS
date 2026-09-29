@@ -75,7 +75,8 @@ const c3Commands = {
   'session.queue.list': host(input({}), QueueStateSchema),
   'session.queue.edit': host(input({ queueId: z.string(), content: SendContentSchema }), QueueEntrySchema),
   'session.queue.remove': host(input({ queueId: z.string() }), z.void()),
-  'session.queue.promote': host(input({ queueId: z.string() }), MessageUuidOutput),
+  // steers a queued entry out of the app queue with steer's priority ('now' when absent; C7's composer picks 'next' to fold it in)
+  'session.queue.promote': host(input({ queueId: z.string(), priority: z.enum(['now', 'next']).optional() }), MessageUuidOutput),
   'session.queue.setPaused': host(input({ paused: z.boolean() }), z.void()),
   'session.interrupt': host(input({ cancelEngineQueued: z.boolean() }), z.strictObject({ stillQueued: z.array(z.string()), cancelled: z.array(z.string()) })),
   'session.answer': host(input({ requestId: RequestIdSchema, answer: RequestAnswerSchema }), z.strictObject({ outcome: z.enum(['delivered', 'not_pending', 'write_failed']) })),

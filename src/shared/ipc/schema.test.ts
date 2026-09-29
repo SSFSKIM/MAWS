@@ -213,6 +213,13 @@ describe('ipc schema validates both directions', () => {
       expect(validateCommandInput('session.steer', { ...steer, priority: 'later' }).ok).toBe(false);
     });
 
+    it("session.queue.promote takes steer's optional priority, now or next (C7's composer)", () => {
+      const promote = { appSessionId: 'app-1', queueId: 'q-1' };
+      expect(validateCommandInput('session.queue.promote', promote)).toEqual({ ok: true, value: promote }); // absent: the host sends 'now'
+      for (const priority of ['now', 'next'] as const) expect(validateCommandInput('session.queue.promote', { ...promote, priority })).toEqual({ ok: true, value: { ...promote, priority } });
+      expect(validateCommandInput('session.queue.promote', { ...promote, priority: 'later' }).ok).toBe(false);
+    });
+
     it('holds inputs strictly and never transforms', () => {
       const send = { appSessionId: 'app-1', content: 'hello' };
       expect(validateCommandInput('session.send', send)).toEqual({ ok: true, value: send });

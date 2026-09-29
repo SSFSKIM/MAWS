@@ -182,8 +182,8 @@ export class MessageQueue {
 
   // A queued entry steered out of the queue, durably (M4 review): persisted as a `submitting` steer before the write
   // and removed only after the flush, so a crash on either side recovers it through the `uncertain` path like any
-  // submission; a failed write puts it back as queued in its place and rejects.
-  async promote(queueId: string): Promise<{ messageUuid: MessageUuid }> {
+  // submission; a failed write puts it back as queued in its place and rejects. Its priority is steer's, `now` by default.
+  async promote(queueId: string, opts: { priority?: SteerPriority } = {}): Promise<{ messageUuid: MessageUuid }> {
     const entry = this.queued(queueId);
     if (!this.deps.canWrite()) throw new QueueEntryError('the session is not ready');
     const uuid = randomUUID() as MessageUuid;
@@ -197,7 +197,7 @@ export class MessageQueue {
     }
     if (!current()) throw new QueueEntryError('the session ended before the steer was written');
     try {
-      await this.deps.write({ type: 'user', uuid, message: { role: 'user', content: entry.content }, parent_tool_use_id: null, origin: { kind: 'human' }, priority: 'now' });
+      await this.deps.write({ type: 'user', uuid, message: { role: 'user', content: entry.content }, parent_tool_use_id: null, origin: { kind: 'human' }, priority: opts.priority ?? 'now' });
     } catch (error) {
       if (current()) {
         this.revert(entry);

@@ -523,6 +523,17 @@ describe('promote is a durable submission (M4 review)', () => {
     expect((await t.store.loadQueue(ID)).entries.map((e) => e.content)).toEqual(['first']);
   });
 
+  it("writes the priority it is given, 'now' by default and 'next' on request (C7's composer)", async () => {
+    const t = await harness();
+    t.h.turn = true;
+    const { entry: a } = await t.queue.send('default');
+    const { entry: b } = await t.queue.send('fold in');
+    const byDefault = await t.queue.promote(a.queueId);
+    const next = await t.queue.promote(b.queueId, { priority: 'next' });
+    expect(t.writes.map((w) => [w.uuid, w.message.content, w.priority])).toEqual([[byDefault.messageUuid, 'default', 'now'], [next.messageUuid, 'fold in', 'next']]);
+    expect(t.queue.state.entries).toEqual([]);
+  });
+
   it('a crash before the flush recovers the promoted entry through the uncertain path', async () => {
     const t = await harness({ holdWrites: true, failWrite: () => true });
     t.h.turn = true;
