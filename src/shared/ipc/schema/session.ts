@@ -311,7 +311,7 @@ const c7Commands = {
     owner: 'main',
   },
   'session.history.append': {
-    input: z.strictObject({ appSessionId: AppSessionIdSchema, display: z.string().min(1).max(4096), pastedContents: z.record(z.string(), PastedContentSchema) }),
+    input: z.strictObject({ appSessionId: AppSessionIdSchema, display: z.string().min(1).max(65_536) /* a prompt as typed; the bodies ride in pastedContents */, pastedContents: z.record(z.string(), PastedContentSchema) }),
     output: z.void(),
     owner: 'main',
   },

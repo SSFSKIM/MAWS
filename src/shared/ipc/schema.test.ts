@@ -365,7 +365,8 @@ describe('ipc schema validates both directions', () => {
       const append = { appSessionId: 'app-1', display: 'see [Pasted text #1 +40 lines]', pastedContents: { '1': text, '2': image } };
       expect(validateCommandInput('session.history.append', append)).toEqual({ ok: true, value: append });
       expect(validateCommandInput('session.history.append', { ...append, display: '' }).ok).toBe(false);
-      expect(validateCommandInput('session.history.append', { ...append, display: 'x'.repeat(4097) }).ok).toBe(false);
+      expect(validateCommandInput('session.history.append', { ...append, display: 'x'.repeat(65_536) }).ok).toBe(true); // a long prompt as typed
+      expect(validateCommandInput('session.history.append', { ...append, display: 'x'.repeat(65_537) }).ok).toBe(false);
       expect(validateCommandInput('session.history.append', { ...append, pastedContents: { '1': { ...text, type: 'file' } } }).ok).toBe(false);
       const entry = { display: 'hello', at: '2026-09-28T10:00:00.000Z', source: 'terminal', sessionId: null, pastedContents: { '1': { ...text, content: null, contentHash: 'c5ddbb6e32f0ffa0' } } };
       expect(validateCommandOutput('session.history.list', { entries: [entry] }).ok).toBe(true);
