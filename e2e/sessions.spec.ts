@@ -3,9 +3,9 @@
 // (`MAWS_ENGINE_REPLAY=1`) and its own `MAWS_E2E_REPLAY_FIXTURES` (M3's seam: each launch takes the next fixture and
 // pins its recorded id), a temp config home (`CLAUDE_CONFIG_DIR`) holding a synthetic `.claude.json` and any
 // transcripts the case needs, a throwaway profile, and scratch repositories under the temp root. No engine runs; the
-// owner's `~/.claude`, `~/.claude.json` and checkouts are never read or written. The Trash is per user, so what moves
-// there is asserted by absence.
-import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+// owner's `~/.claude`, `~/.claude.json` and checkouts are never read or written, and Delete's Trash move lands in a
+// temp directory (`MAWS_E2E_TRASH_DIR`, main's e2e seam), never the owner's `~/.Trash`.
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, type Page } from '@playwright/test';
 import type { CommandInput, CommandName, CommandResult } from '@shared/ipc/schema';
@@ -58,6 +58,7 @@ interface Case {
   maws: MawsLaunch;
   page: Page;
   store: StoreFixture;
+  trash: string; // where Delete's moves land (MAWS_E2E_TRASH_DIR), inside the temp config home
   repos: ScratchRepo[];
   dispose(): Promise<void>;
 }
@@ -66,13 +67,15 @@ interface Case {
 async function launchCase(opts: { fixtures: string[]; trusted: string[]; userData?: string; store?: StoreFixture }): Promise<Omit<Case, 'repos'>> {
   const store = opts.store ?? (await StoreFixture.create());
   writeFileSync(join(store.configHome, '.claude.json'), `${JSON.stringify({ projects: Object.fromEntries(opts.trusted.map((key) => [key, { hasTrustDialogAccepted: true }])) }, null, 2)}\n`);
+  const trash = join(store.configHome, 'e2e-trash');
+  mkdirSync(trash, { recursive: true });
   const maws = await launchMaws({
-    env: { MAWS_ENGINE_REPLAY: '1', MAWS_E2E_REPLAY_FIXTURES: opts.fixtures.join(','), CLAUDE_CONFIG_DIR: store.configHome },
+    env: { MAWS_ENGINE_REPLAY: '1', MAWS_E2E_REPLAY_FIXTURES: opts.fixtures.join(','), CLAUDE_CONFIG_DIR: store.configHome, MAWS_E2E_TRASH_DIR: trash },
     ...(opts.userData ? { userData: opts.userData } : {}),
   });
   await expect(maws.page.locator('[data-region="main"]')).toBeVisible();
   await collectSetup(maws.page);
-  return { maws, page: maws.page, store, dispose: () => maws.cleanup() };
+  return { maws, page: maws.page, store, trash, dispose: () => maws.cleanup() };
 }
 
 async function addProject(page: Page, directory: string): Promise<{ id: string; name: string }> {
@@ -298,7 +301,9 @@ test.describe('sessions', () => {
     await sheet.getByRole('button', { name: 'Delete' }).click();
     await expect(sheet).toHaveCount(0);
     await expect(row(page, gone.appId)).toHaveCount(0);
-    expect(existsSync(transcript), 'moved to the Trash (asserted by absence)').toBe(false);
+    expect(existsSync(transcript), 'moved out of the store').toBe(false);
+    expect(readdirSync(launched.trash).sort(), 'the transcript and its sidecar arrived in the e2e Trash').toEqual([doomed, `${doomed}.jsonl`].sort());
+    expect(readdirSync(join(launched.trash, doomed, 'subagents'))).toEqual(['agent-a1.jsonl']);
     expect(value(await invoke(page, 'session.get', { appSessionId: gone.appId }))).toBeNull();
   });
 

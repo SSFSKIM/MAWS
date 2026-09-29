@@ -36,6 +36,7 @@ import { WorktreeService } from './git/worktrees';
 import { registerWorktreeHandlers } from './git/worktrees-register';
 import { BootstrapNotes, FileIntentStore } from './sessions/intents';
 import { ReplaySeam } from './sessions/replay-seam';
+import { trashFor } from './sessions/e2e-trash';
 import { SessionService } from './sessions/service';
 import { engineHostSettled, registerSessionServiceHandlers } from './sessions/service-register';
 // C10 end
@@ -140,7 +141,7 @@ app.whenReady().then(() => {
     userData: app.getPath('userData'),
     env: captureShellEnvironment(),
     emit,
-    trash: (path) => shell.trashItem(path),
+    trash: trashFor(process.env, (path) => shell.trashItem(path)), // the e2e seam (MAWS_E2E_TRASH_DIR) or the Trash
     reveal: (path) => shell.showItemInFolder(path),
     replay: ReplaySeam.fromEnv(process.env, process.cwd()), // the e2e seam (MAWS_E2E_REPLAY_FIXTURES)
   });
