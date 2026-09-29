@@ -3,6 +3,7 @@
 // The ⌘K palette lists all three from the table; C10's relay card runs the hand-off.
 import type { ClaudeUsageOpenIntent, ClaudeUsageOpenResult, MawsBridge } from '@shared/ipc/schema';
 import type { TabTarget } from '@shared/ipc/schema/layout';
+import { ACCOUNTS, CLAUDE_USAGE_README_URL } from '../accounts/copy';
 import { ipc } from '../ipc/client';
 import { registerAction } from '../keymap/actions-runtime';
 import { useLayout } from '../stores/layout';
@@ -16,7 +17,9 @@ export const SETTINGS_SECTIONS = ['engine', 'gateway', 'keyboard', 'appearance',
 export const HAND_OFF_TOAST_MS = 8000;
 
 // The one hand-off call (the action here, the Accounts tab's four buttons in M5): activates ClaudeUsage and shows the
-// instruction naming the control in its panel. Answers null, with a warning toast, when main refused the call.
+// instruction naming the control in its panel; when ClaudeUsage is not installed the toast carries `Install ClaudeUsage`,
+// which opens its README (the architect's ruling of 2026-09-29: the relay card's `not_installed` is covered here, and
+// C10's card is left alone). Answers null, with a warning toast, when main refused the call.
 export async function openClaudeUsage(intent: ClaudeUsageOpenIntent, client: MawsBridge = ipc): Promise<ClaudeUsageOpenResult | null> {
   const result = await client.invoke('settings.claudeUsage.open', intent);
   if (!result.ok) {
@@ -24,8 +27,9 @@ export async function openClaudeUsage(intent: ClaudeUsageOpenIntent, client: Maw
     toast({ level: 'warning', text: `ClaudeUsage could not be opened · ${result.error.message}`, actions: [], dismissible: true });
     return null;
   }
-  const { opened, instruction } = result.value;
-  toast({ level: opened ? 'info' : 'warning', text: instruction, actions: [], dismissible: true, durationMs: HAND_OFF_TOAST_MS });
+  const { opened, reason, instruction } = result.value;
+  const install = { label: ACCOUNTS.install, run: () => void client.invoke('layout.openExternal', { url: CLAUDE_USAGE_README_URL }) };
+  toast({ level: opened ? 'info' : 'warning', text: instruction, actions: reason === 'not_installed' ? [install] : [], dismissible: true, durationMs: HAND_OFF_TOAST_MS });
   return result.value;
 }
 

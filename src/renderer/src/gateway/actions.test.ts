@@ -44,11 +44,21 @@ describe('gateway actions pass the command validator', () => {
     expect(useNotices.getState().notices[0]).toMatchObject({ kind: 'toast', level: 'info', text: OPENED.instruction, durationMs: 8000 }); // M4: read for 8 s
   });
 
-  it('warns with the instruction when ClaudeUsage did not open', async () => {
-    const { bridge } = validatingBridge(() => ({ opened: false, reason: 'not_installed', instruction: 'ClaudeUsage is not installed · …' }));
+  it('warns with the instruction when ClaudeUsage did not open; not installed, it offers Install ClaudeUsage, which opens the README', async () => {
+    const { bridge, calls } = validatingBridge((name) => (name === 'layout.openExternal' ? undefined : { opened: false, reason: 'not_installed', instruction: 'ClaudeUsage is not installed · …' }));
     off = registerGatewayActions(bridge);
     runAction('gateway.openClaudeUsage');
     await vi.waitFor(() => expect(useNotices.getState().notices[0]).toMatchObject({ level: 'warning', text: 'ClaudeUsage is not installed · …' }));
+    const [install] = useNotices.getState().notices[0]!.actions;
+    expect(install?.label).toBe('Install ClaudeUsage');
+    install!.run();
+    await vi.waitFor(() => expect(calls.at(-1)).toEqual({ name: 'layout.openExternal', input: { url: 'https://github.com/SSFSKIM/claude-usage-menubar#readme' } }));
+  });
+
+  it('a launch that failed for another reason warns without the install action', async () => {
+    const { bridge } = validatingBridge(() => ({ opened: false, reason: 'launch_failed', instruction: 'ClaudeUsage could not be opened' }));
+    expect(await openClaudeUsage({ intent: 'panel' }, bridge)).toMatchObject({ reason: 'launch_failed' });
+    expect(useNotices.getState().notices[0]).toMatchObject({ level: 'warning', actions: [] });
   });
 
   it("the four intents the Accounts tab sends are accepted; an account intent without its email, or a panel with one, is refused", async () => {
