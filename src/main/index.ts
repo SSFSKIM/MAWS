@@ -30,6 +30,7 @@ import { restoreWindowState, trackWindowState } from './window-state';
 // C5 end
 // C10 start (registerMainHandler comes with C3's imports)
 import { createGitRunner } from './git/runner';
+import { registerWorktreeHandlers, WorktreeService } from './git/worktrees';
 import { trustStateOf } from './sessions/trust';
 // C10 end
 
@@ -117,6 +118,10 @@ app.whenReady().then(() => {
   // C10 start: the trust check (M1): whether the pinned engine would find a directory trusted, read from the engine's own
   // global config (read only; CLAUDE_CONFIG_DIR honoured as the engine honours it). The session service joins in M3.
   registerMainHandler('session.trust.check', ({ directory }) => trustStateOf(directory, { git: createGitRunner(), env: process.env }));
+  // The worktree service (M2): git.worktree.*, every git mutation MAWS makes, with occupancy from holder authority (C3's
+  // process table and C4's fresh registry read through the engine host, the index's records). M3's service takes it.
+  const worktrees = new WorktreeService({ git: createGitRunner(), holders: { dispatch: hosts.dispatch, sessions: index.sessions } });
+  registerWorktreeHandlers(worktrees);
   // C10 end
 
   // The hosts belong to the app, not to a window or a page (§4.1): they start here, before any window exists, and
