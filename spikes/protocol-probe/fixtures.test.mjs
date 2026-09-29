@@ -96,7 +96,8 @@ for(const file of readdirSync(dir3).filter(f=>f.endsWith('.jsonl')))test('pass3/
    if(pending.delete(key))answered.set(row.direction+':'+f.response.request_id,JSON.stringify(f));
    else assert.equal(answered.get((row.direction==='in'?'out':'in')+':'+f.response.request_id),JSON.stringify(f),'response has pending request '+key);}
   assert.notEqual(f.event,'parse_error');assert.notEqual(f.event,'scenario_error');}
- const prov=rows.find(r=>r.frame.event==='provenance')?.frame;assert.equal(prov.charter,'docs/charter.md');assert.match(prov.child,/^C\d+[a-z]?$/); // any child of docs/charter.md (C2, C3, C10, C8a, …)assert.match(prov.pin,/^[0-9a-f]{40}$/);
+ // any child of docs/charter.md may record a pass-3 fixture (C2, C3, C10, C8a, …)
+ const prov=rows.find(r=>r.frame.event==='provenance')?.frame;assert.equal(prov.charter,'docs/charter.md');assert.match(prov.child,/^C\d+[a-z]?$/);assert.match(prov.pin,/^[0-9a-f]{40}$/);
  assert.equal(rows.find(r=>r.frame.event==='exit')?.frame.code,0);assert.equal(pending.size,0);
 });
 // C8c end
