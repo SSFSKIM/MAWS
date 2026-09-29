@@ -446,6 +446,26 @@ describe('session service', () => {
       expect(h.host.launches).toEqual([]);
     });
 
+    // a fork its own start rejects (or whose guard throws) opens no tab, so its intent must not outlive the answer
+    it('a fork whose start is rejected or throws leaves no intent behind, and says so', async () => {
+      const src = source();
+      const forkIntentIds = () => readdirSync(join(h.userData, 'sessions', 'intents')).filter((f) => f.endsWith('.json'));
+      const dropped = () => h.events.filter((e) => e.name === 'session.intent.changed' && (e.payload as { intent: unknown }).intent === null).map((e) => (e.payload as { appSessionId: string }).appSessionId);
+      rmSync(h.work, { recursive: true }); // the source's directory is gone: the fork's guard answers missing_directory
+      const missing = await h.service.fork(src.appId, { kind: 'inPlace' }, { message: OK_MESSAGE, rewindTo: null });
+      expect(missing).toMatchObject({ status: 'missing_directory' });
+      expect(forkIntentIds()).toEqual([]);
+      expect(await h.service.listIntents()).toEqual([]);
+      expect(dropped()).toEqual([missing.appSessionId]);
+      mkdirSync(h.work);
+      h.host.relayError = 'relay check failed'; // a guard that cannot answer throws
+      await expect(h.service.fork(src.appId, { kind: 'inPlace' }, { message: OK_MESSAGE, rewindTo: null })).rejects.toThrow('relay check failed');
+      expect(forkIntentIds()).toEqual([]);
+      expect(await h.service.listIntents()).toEqual([]);
+      expect(dropped()).toHaveLength(2);
+      expect(h.host.launches).toEqual([]);
+    });
+
     it('rewinds first when asked, and rolls back without touching the source when the rewind is refused', async () => {
       const src = source();
       const rewindTo = 'u-1' as never;

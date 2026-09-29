@@ -421,7 +421,9 @@ export class SessionService {
 
   // ---- fork, archive, delete, rename, reveal (record-actions.ts) --------------------------------------------------
 
-  // `session.fork`: a fork intent over the source's conversation, started at once. The outcome's id is the fork's.
+  // `session.fork`: a fork intent over the source's conversation, started at once. The outcome's id is the fork's. A
+  // start that is rejected or throws opens no tab, so the fork's intent goes before the answer (nothing launched: there
+  // is nothing else to forget).
   async fork(appSessionId: AppSessionId, target: ForkTarget, args: { message: FirstMessage | null; rewindTo: MessageUuid | null }): Promise<StartOutcome> {
     const allocated = await this.serial(appSessionId, async (): Promise<StartOutcome | AppSessionId> => {
       const s = await this.ready();
@@ -434,7 +436,23 @@ export class SessionService {
       return intent.appSessionId;
     });
     if (typeof allocated !== 'string') return allocated;
-    return this.startSession(allocated, { message: null, options: {} });
+    let outcome: StartOutcome;
+    try {
+      outcome = await this.startSession(allocated, { message: null, options: {} });
+    } catch (error) {
+      await this.dropForkIntent(allocated);
+      throw error;
+    }
+    if (outcome.status === 'invalid' || outcome.status === 'missing_directory' || outcome.status === 'refused') await this.dropForkIntent(allocated);
+    return outcome;
+  }
+
+  private dropForkIntent(forkId: AppSessionId): Promise<void> {
+    return this.serial(forkId, async () => {
+      if (this.deps.intents.get(forkId) === null) return;
+      await this.deps.intents.remove(forkId);
+      this.deps.emit('session.intent.changed', { appSessionId: forkId, intent: null });
+    });
   }
 
   archive(appSessionId: AppSessionId, opts: { onlyIfIdle?: boolean } = {}): Promise<ArchiveOutcome> {
