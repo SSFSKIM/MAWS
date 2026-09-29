@@ -329,7 +329,14 @@ export class Normalizer {
   private result(frame: ResultFrame, out: Emitter, attribution: Attribution): void {
     const f = frame as ResultFrame & Record<string, unknown>;
     const terminalReason = stringOrNull(f.terminal_reason);
-    const isEchoReceipt = this.state.pendingEcho !== null && frame.num_turns === 0 && terminalReason === null;
+    // C7 start: the receipt is the echo's own (pass2/bash-context-echoed seq 13 names it); an echo written during a turn
+    // joins that turn instead (C7 M6 live), whose result names it and ends the wait, so a later empty result of a local
+    // command such as /compact closes its own turn.
+    const named: unknown[] = Array.isArray(f.user_message_uuids) ? f.user_message_uuids : [];
+    const pendingEcho = this.state.pendingEcho;
+    const isEchoReceipt = pendingEcho !== null && frame.num_turns === 0 && terminalReason === null && (named.length === 0 || named.includes(pendingEcho));
+    if (!isEchoReceipt && pendingEcho !== null && named.includes(pendingEcho)) this.state.pendingEcho = null;
+    // C7 end
     const denials = (frame.permission_denials as { tool_name?: unknown; tool_use_id?: unknown; tool_input?: unknown }[]).map((d) => ({ toolName: String(d.tool_name), toolUseId: String(d.tool_use_id) as ToolUseId, toolInput: d.tool_input }));
     const usage = tokenUsageOf(frame.usage);
     const origin = (f.origin as { kind?: unknown } | undefined)?.kind;
