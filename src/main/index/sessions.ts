@@ -284,6 +284,18 @@ export class SessionStore {
     });
   }
 
+  // C10 start: D-16's start-time reset. C3 owns no process when the app starts, so every `self` holder a previous run
+  // left is stale: each becomes `none` (a terminal or job that holds it now arrives as fs.holderChanged, which `self`
+  // would have refused). Answers how many records it reset.
+  resetSelfHolders(): number {
+    return this.db.transaction(() => {
+      const held = this.db.all<SessionRow>('SELECT * FROM sessions').filter((row) => (JSON.parse(row.holder) as Holder).kind === 'self');
+      for (const row of held) if (this.write(row, { holder: JSON.stringify({ kind: 'none' }) })) this.changed(row.app_id as AppSessionId, 'holder');
+      return held.length;
+    });
+  }
+  // C10 end
+
   // C3 and C10: a record before the engine has a session id. A caller-supplied id that already has a row answers
   // `exists` with that row, so a restart reconciliation reuses it.
   createForLaunch(init: LaunchInit): { ok: true; record: SessionRecord } | { ok: false; reason: 'exists'; record: SessionRecord } {
