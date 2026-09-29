@@ -561,6 +561,31 @@ describe('unstarted send holds a starting state', () => {
     expect(JSON.stringify(stub.patch.mock.calls[0][0])).toContain('kept');
   });
 
+  // C10's M6 finding: a failed setup keeps its tab and its intent, and C3 keeps the failed launch's exited status for
+  // the id; with no record the tab is still unstarted (C5's pane rule), so the composer stays bound to the intent.
+  it('binds the intent on a failed setup’s retained tab (an exited status, no record): editable chips, Send, and its draft in the intent', async () => {
+    const stub = stubIntent();
+    const s = useSessions.getState();
+    useSessions.setState({ engine: new Map(s.engine).set(A, { ...status(A), process: 'exited' }) });
+    mount([{ index: 0, id: A }]);
+    await waitFor(() => expect(editorOf()).toBeTruthy());
+    const location = within(composerOf(0)).getByRole('button', { name: /^Location/ });
+    expect(location.title).toBe('/repo');
+    expect(within(composerOf(0)).getByRole('button', { name: 'Add a directory' }).hasAttribute('disabled')).toBe(false);
+    vi.useFakeTimers();
+    await type('after the failure');
+    expect(primary().textContent).toBe('Send');
+    expect(primary().disabled).toBe(false);
+    act(() => void vi.advanceTimersByTime(800));
+    expect(stub.patch).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(stub.patch.mock.calls[0][0])).toContain('after the failure');
+    expect(invoked('session.drafts.set')).toEqual([]);
+    vi.useRealTimers();
+    act(() => editorOf().focus());
+    await key(editorOf(), { key: 'Enter' });
+    expect(stub.start).toHaveBeenCalledWith({ content: 'after the failure', display: 'after the failure' });
+  });
+
   it('holds `!` and `#` until the session starts, and hides the queue', async () => {
     stubIntent();
     mount([{ index: 0, id: A }]);

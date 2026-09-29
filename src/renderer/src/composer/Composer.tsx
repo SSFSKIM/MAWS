@@ -161,7 +161,9 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
   const record = useSessions((s) => s.records.get(appSessionId) ?? null);
   const status = useSessionStatus(appSessionId, client);
   // Unstarted while C10 has an intent and C3 no status; the binding swaps when the status appears, without a remount.
-  const setup = status === null ? hook : null;
+  // C10: also while there is no record (C5's pane rule): a failed setup keeps its tab, and C3 the failed launch's
+  // exited status for the id.
+  const setup = status === null || record === null ? hook : null;
   const unstarted = setup !== null;
   const queue = useSessionQueue(appSessionId, client);
   const starting = useComposerStore((s) => isStarting(s, appSessionId));
