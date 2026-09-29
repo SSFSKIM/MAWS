@@ -6,8 +6,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { HostState } from '@shared/ipc/schema';
-import { mountPanelHost, type PanelHostImplementation } from '../../panel/host';
+import { instanceOf, panelHost, registerPanelTool } from '../../panel/host';
 import type { PanelToolContext } from '../../panel/tool';
+import { useLayout } from '../../stores/layout';
+import { useSessions } from '../../stores/sessions';
+import { resetPanelStores } from '../../test-support/panel';
 import type { TerminalInfo } from '../../terminal/registry';
 
 const registry = vi.hoisted(() => {
@@ -232,14 +235,48 @@ describe('terminal tool close', () => {
 
 describe('openTerminal', () => {
   it('asks the panel host for a Terminal tab with the cwd and command as params', () => {
-    const host: PanelHostImplementation = { addTool: vi.fn(() => 'terminal:7'), selectTab: vi.fn(), closeTab: vi.fn(async () => true), showSummary: vi.fn(), closeToolTabs: vi.fn() };
-    const unmount = mountPanelHost(host);
+    // C8a's host replaced C9's stand-in seam (the stand-in fold, ruling O2): the call is observed on `panelHost` itself.
+    const addTool = vi.spyOn(panelHost, 'addTool').mockReturnValue('terminal:7');
     try {
       expect(openTerminal({ appSessionId: A, cwd: '/tmp/maws-harness/a', command: 'printf MAWS_ATTACH_OK\\n' })).toBe('terminal:7');
-      expect(host.addTool).toHaveBeenCalledWith('terminal', { appSessionId: A, params: { cwd: '/tmp/maws-harness/a', command: 'printf MAWS_ATTACH_OK\\n' } });
+      expect(addTool).toHaveBeenCalledWith('terminal', { appSessionId: A, params: { cwd: '/tmp/maws-harness/a', command: 'printf MAWS_ATTACH_OK\\n' } });
     } finally {
-      unmount();
+      addTool.mockRestore();
     }
+  });
+});
+
+// Ported from C9's stand-in host test (harness/terminal/panel-state.test.ts) onto C8a's host by the stand-in fold:
+// unregistering the Terminal tool closes its tabs through the tool's own close path.
+describe('the panel host unregistering the Terminal tool', () => {
+  beforeEach(() => {
+    resetPanelStores();
+    useSessions.setState({ records: new Map([[A, SESSION_A]]) }); // the tab's session, whose directory its shell starts in
+  });
+  const terminalRefs = () => useLayout.getState().panelTabsOf(A).filter((ref) => ref.toolId === TERMINAL_TOOL_ID);
+
+  it('kills a terminal’s shell through the tool’s close path', async () => {
+    const unregister = registerPanelTool(terminalTool);
+    panelHost.addTool('terminal', { appSessionId: A, activate: false });
+    expect(terminalRefs()).toHaveLength(1);
+    unregister();
+    await vi.waitFor(() => expect(terminalRefs()).toEqual([]));
+    expect(registry.terminals.foreground).toHaveBeenCalledWith('t1');
+    expect(registry.terminals.close).toHaveBeenCalledWith('t1');
+  });
+
+  it('keeps a tab whose close failed, and closes it on a retry', async () => {
+    const unregister = registerPanelTool(terminalTool);
+    const tabId = panelHost.addTool('terminal', { appSessionId: A, activate: false });
+    registry.terminals.close.mockRejectedValueOnce(new Error('pty.kill failed: EPERM'));
+    unregister();
+    await vi.waitFor(() => expect(registry.terminals.close).toHaveBeenCalledTimes(1));
+    await Promise.resolve();
+    expect(terminalRefs().map((ref) => ref.id)).toEqual([tabId]);
+    expect((instanceOf(tabId)!.state as { ui: { getState(): { closeError: string | null } } }).ui.getState().closeError).toBe('pty.kill failed: EPERM');
+    await expect(panelHost.closeTab(tabId)).resolves.toBe(true);
+    expect(terminalRefs()).toEqual([]);
+    expect(registry.terminals.close).toHaveBeenCalledTimes(2);
   });
 });
 

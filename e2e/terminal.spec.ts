@@ -21,7 +21,9 @@ const INHERITED = {
   ANTHROPIC_AUTH_TOKEN: 'e2e-token',
   ELECTRON_MAWS_E2E_LAUNCHER: '1',
 };
-test.use({ mawsEnv: { MAWS_HARNESS: '1', ...INHERITED } });
+// C8a (the stand-in fold): the #panel page is C8a's product host over the harness scenario (ruling O1), so main knows its
+// sessions A and B and accepts their panel keys.
+test.use({ mawsEnv: { MAWS_HARNESS: '1', MAWS_SESSION_SOURCE: 'stub:test/fixtures/panel/harness-sessions.json', ...INHERITED } });
 
 const DIR_A = '/tmp/maws-harness/a';
 const DIR_B = '/tmp/maws-harness/b';
@@ -98,7 +100,11 @@ class Harness {
     await this.page.waitForFunction(() => (window as unknown as HarnessWindow).__maws_harness !== undefined, null, { timeout: 15_000 });
     await this.page.evaluate(() => (location.hash = '#panel'));
     await this.page.waitForFunction(() => (window as unknown as HarnessWindow).__maws_harness?.page === 'panel', null, { timeout: 15_000 });
-    return this.call<TerminalId[]>('panel', 'ready');
+    const adopted = await this.call<TerminalId[]>('panel', 'ready');
+    // C8a (the stand-in fold): the product panel is a side column; maximized, it gives the terminal the window's width
+    // that C9's stand-in page did, which these cases' line and wrap assertions are calibrated for.
+    await this.call('panel', 'maximize', true);
+    return adopted;
   }
 
   sessions = () => this.page.evaluate(() => (window as unknown as HarnessWindow).__maws_harness!.panel!.sessions as unknown as { A: string; B: string });
@@ -185,7 +191,8 @@ class Harness {
     );
   }
 
-  tab = (tabId: string) => this.page.locator(`[role="tab"][data-tab-id="${tabId}"]`);
+  // C8a (the stand-in fold): a tab of the product strip is its row (`data-tab-id`), whose `tab` role is its select button.
+  tab = (tabId: string) => this.page.locator(`[data-tab-id="${tabId}"]`);
   bar = (name: string) => this.page.getByRole('status', { name });
 }
 
@@ -247,7 +254,7 @@ test('opens a login shell in the session directory with the terminal environment
   // "+", Terminal, and the time from the click to the first visible line of the new terminal.
   const openFromMenu = async (): Promise<{ id: TerminalId; ms: number }> => {
     const before = new Set((await h.tabs()).map((t) => t.id));
-    await page.getByRole('button', { name: 'add tool' }).click();
+    await page.getByRole('button', { name: 'Add a tool' }).click();
     const clicked = Date.now();
     await page.getByRole('menuitem', { name: 'Terminal' }).click();
     const tab = (await h.tabs()).find((t) => !before.has(t.id))!;
@@ -303,12 +310,12 @@ test('keeps its buffer and process across tab switches', async ({ maws }) => {
     await expect.poll(lastNumber, { timeout: 5_000 }).toBeGreaterThan(50);
     const before = await lastNumber();
 
-    await h.page.getByRole('tab', { name: 'Review' }).getByRole('button').click();
+    await h.page.getByRole('button', { name: 'Session overview' }).click(); // the summary: every tool unmounted
     await expect(h.page.locator(`[data-terminal-id="${id}"]`), 'the unselected tool is unmounted').toHaveCount(0);
     expect(await h.info(id)).toMatchObject({ visible: false, status: 'running' });
     await sleep(5_000);
 
-    await h.tab(tabId).getByRole('button').first().click();
+    await h.tab(tabId).getByRole('tab').click();
     await expect(h.page.locator(`[data-terminal-id="${id}"]`)).toHaveCount(1);
     const lines = await h.lines(id);
     expect(lines.some((line) => line.trim() === 'line 1') || lines.length >= SCROLLBACK, 'the buffer was not restarted').toBe(true);
@@ -330,16 +337,18 @@ test('pinned tab keeps its shell across sessions and warns about the worktree', 
   await h.prompt(id);
   const pid = (await h.info(id))!.pid!;
 
-  await h.tab(tabId).getByRole('button', { name: 'pin tab' }).click();
+  await h.tab(tabId).getByRole('button', { name: 'Pin Terminal' }).click();
   await page.getByRole('group', { name: 'session' }).getByRole('button', { name: 'Session B' }).click();
-  await expect(h.tab(tabId)).toHaveAttribute('aria-selected', 'true');
+  // Each session keeps its own selection (C5's panel lists): B has none yet, so the pin is selected there by a click.
+  await h.tab(tabId).getByRole('tab').click();
+  await expect(h.tab(tabId).getByRole('tab')).toHaveAttribute('aria-selected', 'true');
   expect(await h.info(id)).toMatchObject({ pid, status: 'running', visible: true });
   const warning = h.bar('worktree warning');
   await expect(warning).toContainText(`This terminal is in ${DIR_A}; the session now runs in ${DIR_B}.`);
 
   await warning.getByRole('button', { name: 'New terminal here' }).click();
   const second = (await h.tabs()).find((tab) => tab.id !== tabId)!;
-  expect(second).toMatchObject({ selected: true, pinned: false, title: expect.stringMatching(/^Terminal 2/) });
+  expect(second).toMatchObject({ selected: true, pinned: false, title: expect.stringMatching(/^Terminal/) });
   await h.prompt(second.terminalId!);
   await guarded(h, async () => {
     await h.run(second.terminalId!, 'pwd');
@@ -348,7 +357,7 @@ test('pinned tab keeps its shell across sessions and warns about the worktree', 
   await expect(h.bar('worktree warning')).toHaveCount(0);
 
   await page.getByRole('group', { name: 'session' }).getByRole('button', { name: 'Session A' }).click();
-  await expect(h.tab(tabId)).toHaveAttribute('aria-selected', 'true');
+  await expect(h.tab(tabId).getByRole('tab')).toHaveAttribute('aria-selected', 'true');
   await expect(h.tab(second.id), 'the unpinned tab belongs to session B').toHaveCount(0);
   await expect(h.bar('worktree warning')).toHaveCount(0);
   expect(await h.info(id)).toMatchObject({ pid, status: 'running' });
@@ -362,7 +371,7 @@ test('asks before closing a busy terminal', async ({ maws }) => {
 
   await h.run(id, 'sleep 1000');
   await expect.poll(async () => (await h.page.evaluate(async (ptyId) => window.maws.invoke('pty.foreground', { ptyId: ptyId as never }), (await h.info(id))!.ptyId))).toMatchObject({ ok: true, value: { busy: true } });
-  await h.tab(tabId).getByRole('button', { name: 'close tab' }).click();
+  await h.tab(tabId).getByRole('button', { name: 'Close Terminal' }).click();
   const confirm = h.page.getByRole('alert', { name: 'close confirmation' });
   await expect(confirm).toHaveText(/^A command is running: sleep\. Close anyway\?/);
 
@@ -372,14 +381,14 @@ test('asks before closing a busy terminal', async ({ maws }) => {
   expect(isAlive(pid), 'Keep leaves the shell running').toBe(true);
   expect(await h.info(id)).toMatchObject({ status: 'running' });
 
-  await h.tab(tabId).getByRole('button', { name: 'close tab' }).click();
+  await h.tab(tabId).getByRole('button', { name: 'Close Terminal' }).click();
   await confirm.getByRole('button', { name: 'Close' }).click();
   await expect(h.tab(tabId)).toHaveCount(0);
   await expect.poll(() => isAlive(pid), { timeout: 5_000, message: 'the shell ends' }).toBe(false);
 
   const idle = await h.addTerminal();
   await h.prompt(idle.id);
-  await h.tab(idle.tabId).getByRole('button', { name: 'close tab' }).click();
+  await h.tab(idle.tabId).getByRole('button', { name: 'Close Terminal' }).click();
   await expect(h.tab(idle.tabId), 'an idle terminal closes without a question').toHaveCount(0);
   await expect(confirm).toHaveCount(0);
 });
@@ -544,7 +553,7 @@ test('floods without loss while the page stays responsive', async ({ maws }) => 
     test.info().annotations.push({ type: 'pausedSeenVisible', description: String(await pausedSeen()) });
     await h.idle(id, 500);
 
-    // W1 again with its tab hidden from its first byte: the Review tab is selected before the command is written to
+    // W1 again with its tab hidden from its first byte: the summary is shown (C9's Review placeholder, folded into C8a's host) before the command is written to
     // the pty (through `pty.write`, which needs no focus), and a hidden terminal acknowledges at most 256 KiB per
     // 250 ms, so the host must pause the pty at the high watermark and hold it paused between ticks. Asserted after a
     // full second hidden.
@@ -845,7 +854,7 @@ test('openTerminal runs the attach command', async ({ maws }) => {
   expect(await h.call<string>('panel', 'session'), 'the panel switched to the tab’s session').toBe(B);
   await expect(page.getByRole('group', { name: 'session' }).getByRole('button', { name: 'Session B' })).toHaveAttribute('aria-pressed', 'true');
   await expect(h.tab(otherTabId)).toBeVisible();
-  await expect(h.tab(otherTabId)).toHaveAttribute('aria-selected', 'true');
+  await expect(h.tab(otherTabId).getByRole('tab')).toHaveAttribute('aria-selected', 'true');
   const other = (await h.tabs()).find((t) => t.id === otherTabId)!;
   await expect(page.locator(`[data-terminal-id="${other.terminalId}"]`), 'its terminal is mounted on screen').toBeVisible();
   await h.expectLine(other.terminalId!, 'MAWS_ATTACH_B', 5_000);

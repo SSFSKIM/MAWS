@@ -20,6 +20,14 @@ import type { PanelTool, PanelToolInit } from './tool';
 
 type AnyTool = PanelTool<unknown, unknown>;
 
+// `addTool`'s options (C9's name for the spec's inline type, adopted): `appSessionId` is the target session.
+export interface AddToolOptions<P> {
+  appSessionId: AppSessionId | null;
+  params?: P;
+  pin?: boolean;
+  activate?: boolean;
+}
+
 export interface Instance {
   ref: PanelTabRef; // as created; the ref's `pinned` is read from the layout store, never from here
   tool: AnyTool; // the declaration it was created under (a re-registration of the same id replaces it)
@@ -308,7 +316,7 @@ function replaceRestored(existing: PanelTabRef, add: Add, id: string): string {
   return id;
 }
 
-function addTool<P>(toolId: string, opts: { appSessionId: AppSessionId | null; params?: P; pin?: boolean; activate?: boolean }): string {
+function addTool<P>(toolId: string, opts: AddToolOptions<P>): string {
   const tool = usePanelHost.getState().tools.get(toolId);
   if (!tool) throw new Error(`panel: no tool registered as ${toolId}`);
   const target = opts.appSessionId;

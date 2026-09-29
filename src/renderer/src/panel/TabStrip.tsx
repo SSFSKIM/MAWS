@@ -63,7 +63,7 @@ function Tab({ tab, selected, canPin, bodyId, onSelect }: { tab: PanelTabRef; se
   const revealed = selected ? '' : 'hidden group-hover:inline-flex group-focus-within:inline-flex'; // unrevealed glyphs take no width
 
   return (
-    <div className={`group flex h-7 max-w-48 min-w-18 shrink-0 items-center rounded-sm ${selected ? 'bg-bg-active text-fg' : 'text-fg-muted hover:bg-bg-hover hover:text-fg'}`}>
+    <div data-tab-id={tab.id} className={`group flex h-7 max-w-48 min-w-18 shrink-0 items-center rounded-sm ${selected ? 'bg-bg-active text-fg' : 'text-fg-muted hover:bg-bg-hover hover:text-fg'}`}>
       <button
         type="button"
         role="tab"

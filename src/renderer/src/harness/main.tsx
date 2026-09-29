@@ -16,11 +16,10 @@ const ROUTES: Record<string, () => ReactNode> = {
   // C8a end
 };
 
-// C9 block begin: the terminal harness pages (pages under harness/terminal/), routed as `#probe` and `#panel`
-import { PanelHarness } from './terminal/PanelHarness';
+// C9 block begin: the terminal probe page (harness/terminal/), routed as `#probe`; its `#panel` stand-in was folded
+// into C8a's page (ruling O2)
 import { Probe } from './terminal/Probe';
 ROUTES.probe = () => <Probe />;
-ROUTES.panel = () => <PanelHarness />;
 // C9 block end
 
 const routeOf = () => location.hash.replace(/^#/, '') || 'transcript';
