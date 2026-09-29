@@ -26,6 +26,6 @@ describe('declared dialog kinds and their pinned payloads', () => {
     expect(declaredDialog(dialogKind, payload)).toEqual({ ok: false, reason: 'undeclared' });
     const invalid = declaredDialog('refusal_fallback_prompt', { originalModel: 'x' });
     expect(invalid).toMatchObject({ ok: false, reason: 'invalid' });
-    expect(!invalid.ok && invalid.problem).toMatch(/fallbackModel/);
+    expect(!invalid.ok && invalid.reason === 'invalid' && invalid.problem).toMatch(/fallbackModel/);
   });
 });

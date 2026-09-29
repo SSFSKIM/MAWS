@@ -12,6 +12,9 @@ import { connectVisibility } from './session/visibility';
 import { persistLayout } from './stores/layout';
 import { useSettings } from './stores/settings';
 import { connectTranscript } from './transcript/shell'; // C6
+// C7 start
+import { connectRequestCard } from './request-card';
+// C7 end
 
 export function App() {
   const resolvedTheme = useSettings((s) => s.state?.resolvedTheme);
@@ -26,6 +29,9 @@ export function App() {
   useEffect(() => connectScenarioSessionCreator(), []); // C5: the stub's session creator in launch mode scenario
   useEffect(() => connectVisibility(), []); // C5: which sessions are on screen, for the unread rule
   useEffect(() => connectTranscript(), []); // C6: the transcript slot and its path chips' file tabs
+  // C7 start: the X4 card in C5's requestCard slot (docked, card, hover) and C6's transcript request slot (inline)
+  useEffect(() => connectRequestCard(), []);
+  // C7 end
 
   // index.html ships data-theme="light" for the first paint; from then on main's resolved theme decides.
   useEffect(() => {

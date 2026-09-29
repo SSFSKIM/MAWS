@@ -44,3 +44,10 @@ export function declaredDialog(kind: string, payload: unknown): { ok: true; dial
   if (!parsed.success) return { ok: false, reason: 'invalid', problem: z.prettifyError(parsed.error) };
   return { ok: true, dialog: { kind, payload: parsed.data } as DeclaredDialog };
 }
+
+// The title a card shows for a dialog: the kind's own title, or the undeclared kind verbatim.
+export function dialogTitle(kind: string, payload: unknown): string {
+  const read = declaredDialog(kind, payload);
+  if (!read.ok) return kind;
+  return read.dialog.kind === 'refusal_fallback_prompt' ? 'The model declined to continue' : read.dialog.payload.title;
+}
