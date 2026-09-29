@@ -16,11 +16,13 @@ export interface TerminalParams {
 }
 
 // The close confirmation lives beside the terminal's identity (the host may ask to close a tab that is not shown);
-// `confirmed` is the owner's "Close" in that bar, after which the host's second `beforeClose` lets the close through.
+// `confirmed` is the owner's "Close" in that bar, after which the host's second `beforeClose` lets the close through;
+// `closeError` is why the last close could not end the shell (the tab stays until one does).
 export interface TerminalTabUi {
   confirmClose: boolean;
   process: string | null; // what runs in the foreground; null when the host could not say
   confirmed: boolean;
+  closeError: string | null;
 }
 
 export interface TerminalTabState {
@@ -29,7 +31,7 @@ export interface TerminalTabState {
 }
 
 function createState({ appSessionId, session, instanceId, params }: PanelToolInit<TerminalParams>): TerminalTabState {
-  const ui = createStore<TerminalTabUi>()(() => ({ confirmClose: false, process: null, confirmed: false }));
+  const ui = createStore<TerminalTabUi>()(() => ({ confirmClose: false, process: null, confirmed: false, closeError: null }));
   // After a reload the registry has already re-adopted this tab's shell under its label (the tab id).
   const adopted = terminals.list().find((info) => info.label === instanceId);
   if (adopted) return { terminalId: adopted.id, ui };
@@ -41,23 +43,37 @@ function createState({ appSessionId, session, instanceId, params }: PanelToolIni
 }
 
 // A running terminal asks before it closes when a program other than the shell is in the foreground, and when the
-// host cannot say (fail closed); anything else closes at once.
+// host cannot say (fail closed). Otherwise, or once the owner confirmed, the close happens here: the shell is killed
+// and the handle disposed before the host may remove the tab, so a kill that fails keeps the tab with the reason
+// instead of leaving a shell running behind no tab.
 async function beforeClose(state: TerminalTabState): Promise<boolean> {
-  if (state.ui.getState().confirmed) return true;
-  if (terminals.get(state.terminalId)?.info.status !== 'running') return true;
-  let foreground: { process: string | null; busy: boolean };
-  try {
-    foreground = await terminals.foreground(state.terminalId);
-  } catch {
-    foreground = { process: null, busy: true };
+  const { confirmed } = state.ui.getState();
+  if (!confirmed && terminals.get(state.terminalId)?.info.status === 'running') {
+    let foreground: { process: string | null; busy: boolean };
+    try {
+      foreground = await terminals.foreground(state.terminalId);
+    } catch {
+      foreground = { process: null, busy: true };
+    }
+    if (foreground.busy) {
+      state.ui.setState({ confirmClose: true, process: foreground.process, closeError: null });
+      return false;
+    }
   }
-  if (!foreground.busy) return true;
-  state.ui.setState({ confirmClose: true, process: foreground.process });
-  return false;
+  try {
+    await terminals.close(state.terminalId);
+  } catch (error) {
+    state.ui.setState({ closeError: error instanceof Error ? error.message : String(error) });
+    return false;
+  }
+  state.ui.setState({ closeError: null });
+  return true;
 }
 
+// The shell is already gone (`beforeClose` closed it); the tab's own state holds nothing else to release. A tab the
+// host removes without asking (its tool unregistered) leaves its shell to the registry, which re-adopts it on reload.
 function dispose(state: TerminalTabState): void {
-  terminals.close(state.terminalId).catch((error: unknown) => console.error('[terminal] close failed; the shell may still run', error));
+  state.ui.setState({ confirmClose: false, process: null, closeError: null });
 }
 
 export const terminalTool: PanelTool<TerminalTabState, TerminalParams> = {

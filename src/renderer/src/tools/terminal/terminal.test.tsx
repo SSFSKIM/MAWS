@@ -113,6 +113,9 @@ const View = terminalTool.render;
 beforeEach(() => {
   registry.reset();
   vi.clearAllMocks();
+  // clearAllMocks keeps implementations a test replaced; every test starts from an idle shell and a close that works
+  registry.terminals.foreground.mockImplementation(async () => ({ process: 'zsh', busy: false }));
+  registry.terminals.close.mockImplementation(async () => {});
 });
 afterEach(() => cleanup());
 
@@ -146,17 +149,19 @@ describe('terminal tool state', () => {
 });
 
 describe('terminal tool close', () => {
-  it('closes an idle terminal without asking', async () => {
+  it('closes an idle terminal without asking, killing its shell before the tab goes', async () => {
     const state = newState();
     await expect(terminalTool.beforeClose(state)).resolves.toBe(true);
     expect(state.ui.getState().confirmClose).toBe(false);
+    expect(registry.terminals.close).toHaveBeenCalledWith(state.terminalId);
   });
 
-  it('vetoes and asks when the registry reports a command running', async () => {
+  it('vetoes and asks when the registry reports a command running, killing nothing', async () => {
     const state = newState();
     registry.terminals.foreground.mockResolvedValueOnce({ process: 'sleep', busy: true });
     await expect(terminalTool.beforeClose(state)).resolves.toBe(false);
     expect(state.ui.getState()).toMatchObject({ confirmClose: true, process: 'sleep' });
+    expect(registry.terminals.close).not.toHaveBeenCalled();
   });
 
   it('fails closed and asks when the host cannot say what runs', async () => {
@@ -166,7 +171,7 @@ describe('terminal tool close', () => {
     expect(state.ui.getState()).toMatchObject({ confirmClose: true, process: null });
   });
 
-  it('does not ask for a terminal that no longer runs, nor after the owner confirmed', async () => {
+  it('does not ask for a terminal that no longer runs, nor after the owner confirmed, and closes both', async () => {
     const exited = newState();
     registry.patch(exited.terminalId, { status: 'exited' });
     await expect(terminalTool.beforeClose(exited)).resolves.toBe(true);
@@ -174,12 +179,23 @@ describe('terminal tool close', () => {
     confirmed.ui.setState({ confirmed: true });
     await expect(terminalTool.beforeClose(confirmed)).resolves.toBe(true);
     expect(registry.terminals.foreground).not.toHaveBeenCalled();
+    expect(registry.terminals.close.mock.calls).toEqual([[exited.terminalId], [confirmed.terminalId]]);
   });
 
-  it('disposes by closing the terminal (SIGHUP) through the registry', () => {
+  it('keeps the tab with the reason when the kill fails, and lets it go when a retry succeeds', async () => {
+    const state = newState();
+    registry.terminals.close.mockRejectedValueOnce(new Error('pty.kill failed: EPERM'));
+    await expect(terminalTool.beforeClose(state)).resolves.toBe(false);
+    expect(state.ui.getState().closeError).toBe('pty.kill failed: EPERM');
+    await expect(terminalTool.beforeClose(state)).resolves.toBe(true);
+    expect(state.ui.getState().closeError).toBeNull();
+    expect(registry.terminals.close).toHaveBeenCalledTimes(2);
+  });
+
+  it('never kills on dispose (the close already did)', () => {
     const state = newState();
     terminalTool.dispose(state);
-    expect(registry.terminals.close).toHaveBeenCalledWith(state.terminalId);
+    expect(registry.terminals.close).not.toHaveBeenCalled();
   });
 });
 
@@ -284,17 +300,38 @@ describe('terminal view', () => {
     expect(ctx.close).toHaveBeenCalled();
   });
 
-  it('offers Copy, Paste, Select all and Clear from its context menu', () => {
+  it('shows a failed close with its reason and Close to retry', async () => {
+    const state = newState();
+    const ctx = context();
+    render(<View state={state} ctx={ctx} />);
+    registry.terminals.close.mockRejectedValueOnce(new Error('pty.kill failed: EPERM'));
+    await act(async () => void (await terminalTool.beforeClose(state)));
+    const alert = screen.getByRole('alert', { name: 'close failed' });
+    expect(alert.textContent).toContain('Could not close: pty.kill failed: EPERM');
+    fireEvent.click(within(alert).getByRole('button', { name: 'Close' }));
+    expect(ctx.close).toHaveBeenCalled();
+  });
+
+  it('offers Copy, Paste, Select all and Clear from its context menu', async () => {
+    const clipboard = { writeText: vi.fn(async () => {}), readText: vi.fn(async () => 'from the clipboard') };
+    Object.defineProperty(navigator, 'clipboard', { value: clipboard, configurable: true });
     const state = newState();
     render(<View state={state} ctx={context()} />);
-    fireEvent.contextMenu(screen.getByTestId('terminal-surface'), { clientX: 20, clientY: 30 });
+    const open = () => fireEvent.contextMenu(screen.getByTestId('terminal-surface'), { clientX: 20, clientY: 30 });
+    open();
     const menu = screen.getByRole('menu', { name: 'terminal' });
     expect([...menu.querySelectorAll('[role="menuitem"]')].map((item) => item.textContent)).toEqual(['Copy', 'Paste', 'Select all', 'Clear']);
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Clear' }));
-    expect(registry.renderer.clear).toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Copy' }));
+    expect(clipboard.writeText).toHaveBeenCalledWith('picked');
     expect(screen.queryByRole('menu', { name: 'terminal' })).toBeNull();
-    fireEvent.contextMenu(screen.getByTestId('terminal-surface'), { clientX: 20, clientY: 30 });
+    open();
+    await act(async () => fireEvent.click(screen.getByRole('menuitem', { name: 'Paste' })));
+    expect(registry.renderer.paste).toHaveBeenCalledWith('from the clipboard');
+    open();
     fireEvent.click(screen.getByRole('menuitem', { name: 'Select all' }));
     expect(registry.renderer.selectAll).toHaveBeenCalled();
+    open();
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Clear' }));
+    expect(registry.renderer.clear).toHaveBeenCalled();
   });
 });

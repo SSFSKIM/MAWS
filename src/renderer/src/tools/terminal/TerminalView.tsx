@@ -75,6 +75,14 @@ export function TerminalView({ state, ctx }: { state: TerminalTabState; ctx: Pan
           </button>
         </div>
       ) : null}
+      {confirm.closeError ? (
+        <div role="alert" aria-label="close failed" className={`${bar} text-danger`}>
+          <span>Could not close: {confirm.closeError}</span>
+          <button type="button" className={barButton} onClick={ctx.close}>
+            Close
+          </button>
+        </div>
+      ) : null}
       {info ? <StatusBar info={info} hostReady={hostReady} close={ctx.close} /> : null}
       {info?.reconnect === 'lossy' ? (
         <div role="status" aria-label="reconnect notice" className={`${bar} text-fg-muted`}>
