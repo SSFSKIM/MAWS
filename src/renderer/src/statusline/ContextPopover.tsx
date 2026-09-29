@@ -10,7 +10,7 @@ import { useSessionCatalog } from '../stores/catalog';
 import { toast } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
 
-export const tokens = (n: number) => (n >= 1_000_000 ? `${+(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : `${n}`);
+const tokens =(n: number) => (n >= 1_000_000 ? `${+(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : `${n}`);
 const SEGMENT = ['bg-fg', 'bg-fg-muted', 'bg-accent', 'bg-fg-faint', 'bg-info'];
 
 function Breakdown({ usage }: { usage: GetContextUsageResponse }) {

@@ -6,9 +6,8 @@ import type { AutoModeRefusalCode } from '@shared/graph/enums';
 import type { SessionRecord } from '@shared/graph/session';
 import type { SessionDigest } from '@shared/ipc/schema';
 import { useSessions } from '../stores/sessions';
-import { useUsage, type UsageWindow, type Windows } from '../stores/usage'; // C7: the window shapes
+import { useSessionWindows, useUsage, type UsageWindow, type Windows } from '../stores/usage'; // C7: the session's windows and their shapes
 // C7 start
-import { useSessionWindows } from '../stores/usage';
 import { useDirectFallback } from '../statusline/direct-fallback';
 import { resetsInCompact, windowShown } from '../statusline/format';
 import { ContextPopover, CostPopover, CwdPopover, ModePopover, UsagePopover } from '../statusline/popovers';
