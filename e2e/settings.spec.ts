@@ -202,6 +202,24 @@ function difference(page: Page, a: Buffer, b: Buffer): Promise<{ differing: numb
   );
 }
 
+// Whether the page can draw U+F07C in `family`: the glyph painted in that family (then a family no Mac has) against the
+// same glyph in the missing family alone. `document.fonts.check` cannot answer it: it reads true for a family that is
+// not installed (Electron 44, observed in the M5 fix wave), since no web font of that name is pending.
+function nerdFontDraws(page: Page, family: string): Promise<boolean> {
+  return page.evaluate((family) => {
+    const paint = (font: string) => {
+      const canvas = document.createElement('canvas');
+      canvas.width = canvas.height = 48;
+      const ctx = canvas.getContext('2d')!;
+      ctx.font = font;
+      ctx.fillText('\uF07C', 4, 36);
+      return ctx.getImageData(0, 0, 48, 48).data.join(',');
+    };
+    const missing = '"MAWS no such font"';
+    return paint(`32px "${family}", ${missing}`) !== paint(`32px ${missing}`);
+  }, family);
+}
+
 // eslint-disable-next-line no-empty-pattern -- Playwright requires the fixtures argument to be destructured
 test('settings: a Nerd Font in appearance.monoFont draws private-use prompt glyphs in the terminal, and follows a change', async ({}, testInfo) => {
   testInfo.skip(!HARNESS_BUILT, 'the #probe page needs a harness build (pnpm e2e:settings)');
@@ -209,6 +227,7 @@ test('settings: a Nerd Font in appearance.monoFont draws private-use prompt glyp
   const maws = await launchMaws({ env: { MAWS_HARNESS: '1' } });
   try {
     const { page } = maws;
+    testInfo.skip(!(await nerdFontDraws(page, NERD_FONT)), `the Nerd Font "${NERD_FONT}" is not installed on this Mac (name another in MAWS_E2E_NERD_FONT)`);
     const setFont = (monoFont: string | null) => page.evaluate((monoFont) => window.maws.invoke('settings.set', { appearance: { monoFont } }), monoFont);
     const rootFont = () => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--font-mono').trim());
     await setFont(NERD_FONT);
