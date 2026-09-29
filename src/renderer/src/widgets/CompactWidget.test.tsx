@@ -100,6 +100,19 @@ describe('compact widget', () => {
     off();
   });
 
+  it('an unanswered send says the command may still run and holds Compact now until the status moves', async () => {
+    backend.script('session.send', () => {
+      throw new WidgetBackendError({ code: 'timeout', message: 'session.send unanswered after 10 s' });
+    });
+    const close = mount();
+    fireEvent.click(await screen.findByRole('button', { name: 'Compact now' }));
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('The engine did not answer · the command may still run; check the transcript before sending again'));
+    expect(compactNow()).toHaveProperty('disabled', true); // no immediate second /compact
+    expect(close).not.toHaveBeenCalled();
+    act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: backend.emitStatus(ID, { engineState: 'running' }) }));
+    await waitFor(() => expect(compactNow()).toHaveProperty('disabled', false));
+  });
+
   it('keeps the widget open with the reason when the host refuses the send', async () => {
     backend.script('session.send', () => {
       throw new WidgetBackendError({ code: 'internal', message: 'the session is not ready' });

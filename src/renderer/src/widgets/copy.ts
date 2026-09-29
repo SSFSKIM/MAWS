@@ -322,6 +322,7 @@ export const COMPACT = {
   now: 'Compact now',
   waitTurn: 'Wait for the turn',
   queuedFirst: 'Queued messages go first',
+  unanswered: `${NO_ANSWER} · the command may still run; check the transcript before sending again`, // a send is no read: nothing to show "the last value" of
   open: 'Compact…',
 };
 
