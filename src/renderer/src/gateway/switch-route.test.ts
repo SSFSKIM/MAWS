@@ -173,6 +173,15 @@ describe('switchRoute names background work, requires a Direct model for a gatew
     expect(s.toasts).toEqual(['Settings idle probe restarted direct · on Sonnet 5']);
   });
 
+  it('reads the model to launch from the live status first, which the record is patched from', async () => {
+    const s = setup();
+    s.backend.emitStatus(READY, { model: { requested: 'claude/astra', resolved: 'gpt-5.5' } }); // the record still says sonnet
+    const run = s.switcher.switchRoute(READY, 'direct');
+    expect((await confirming(s)).confirm?.requiresModel).toBe(true);
+    s.switcher.answer(READY, null);
+    expect(await run).toBe('cancelled');
+  });
+
   it('a chosen model whose levels admit the current effort passes no effort key; switching to the gateway asks for no model', async () => {
     const s = setup({ model: 'claude/astra' });
     const run = s.switcher.switchRoute(READY, 'direct');

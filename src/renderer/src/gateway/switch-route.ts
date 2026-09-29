@@ -132,8 +132,9 @@ export function createRouteSwitcher(deps: SwitchDeps, store: GatewayStore) {
       const live = held !== null && LIVE.has(held.process);
       const fresh = live ? await readStatus(id) : null;
       const beforeLaunch = (fresh ?? held)?.launchId ?? null;
-      // The model the resume would launch: the record's (C3 keeps it current after every set_model), else the status's.
-      const launching = record.model.requested ?? fresh?.model.resolved ?? record.model.resolved;
+      // The model the resume would launch: the record's (C3 keeps it current from every status after a set_model), read
+      // from the live status first, which the record is patched from.
+      const launching = fresh?.model.requested ?? record.model.requested ?? fresh?.model.resolved ?? record.model.resolved;
       let confirm: SwitchConfirm = { target, backgroundTasks: fresh?.backgroundTasks ?? [], requiresModel: target === 'direct' && launching !== null && isGatewayModel(launching), model: null, effort: null };
       let error: string | null = null;
       let answer: SwitchAnswer | null = null;
