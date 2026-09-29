@@ -452,6 +452,35 @@ describe('a followed session backfills, then tails its transcript', () => {
     expect(later.filter((e) => e.name === 'fs.sessionChanged').map((e) => e.payload)).toEqual([expect.objectContaining({ appSessionId: null })]);
   });
 
+  it('fs.bind of a new engine id for a bound app id (the engine\'s /clear) replaces the pair and moves its follower to the new transcript', async () => {
+    const old = await fixture.addTranscript(REWIND_DIR, REWIND, rewindLines);
+    const next = await fixture.addTranscript('/work/cleared', S1, [JSON.stringify({ type: 'user', uuid: 'n1', parentUuid: null, cwd: '/work/cleared', message: { role: 'user', content: 'after the clear' } })]);
+    const fs = await start();
+    await fs.scan([]);
+    fs.bind([{ sessionId: REWIND, appSessionId: APP }]);
+    await fs.eventsSnapshot(APP, null);
+    const before = delivered().length;
+
+    await fs.bind([{ sessionId: S1 as SessionId, appSessionId: APP }]);
+    expect(fs.state()).toMatchObject({ bound: 1, followed: [{ appSessionId: APP, agentId: null }] });
+    const states = events('fs.followState').filter((s) => s.appSessionId === APP).map((s) => s.state);
+    expect(states).toContain('stopped');
+    const snapshot = await fs.eventsSnapshot(APP, null);
+    expect(snapshot.complete).toBe(true);
+    expect(snapshot.events.flatMap((e) => (e.kind === 'user.message' ? [e.content] : []))).toEqual(['after the clear']);
+    expect(snapshot.events.every((e) => e.sessionId === S1)).toBe(true);
+    await expect.poll(() => lastState()?.leafUuid).toBe('n1');
+    expect(delivered().slice(before).every((e) => e.sessionId === S1)).toBe(true);
+
+    // The old transcript is nobody's now: its changes reach main unbound (main made it a record of its own), and nothing
+    // of it reaches the app session; the new one's appends do.
+    await fixture.appendLines(old, [JSON.stringify({ type: 'custom-title', customTitle: 'Old after the clear', sessionId: REWIND })]);
+    await expect.poll(() => events('fs.sessionChanged').find((e) => e.summary.customTitle === 'Old after the clear')?.appSessionId).toBeNull();
+    await fixture.appendLines(next, [JSON.stringify({ type: 'user', uuid: 'n2', parentUuid: 'n1', cwd: '/work/cleared', message: { role: 'user', content: 'second' } })]);
+    await expect.poll(() => lastState()?.leafUuid).toBe('n2');
+    expect(delivered().slice(before).every((e) => e.sessionId === S1)).toBe(true);
+  });
+
   it('follows an app session whose transcript does not exist yet, and picks it up when it appears', async () => {
     const fs = await start();
     fs.bind([{ sessionId: REWIND, appSessionId: APP }]);

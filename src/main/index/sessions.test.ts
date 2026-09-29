@@ -124,15 +124,17 @@ describe('session records in the index', () => {
     expect(changes).toEqual([]);
   });
 
-  it('upserts 4,000 synthetic summaries inside one transaction in under 500 ms', () => {
+  it('upserts 4,000 synthetic summaries inside one transaction in under 500 ms of CPU time', () => {
     const summaries = Array.from({ length: 4_000 }, (_, i) => summary({ sessionId: sessionIdFor(i + 1), customTitle: i % 3 === 0 ? `t${i}` : null }));
-    const started = performance.now();
+    // The bound is on the work the upserts cost (this process's CPU time; vitest runs each file in its own process), so
+    // a loaded machine's scheduling does not decide it.
+    const cpu = process.cpuUsage();
     index.transaction(() => {
       for (const s of summaries) index.sessions.upsertFromSummary(s);
     });
-    const elapsed = performance.now() - started;
+    const spent = process.cpuUsage(cpu);
     expect(index.sessions.list()).toHaveLength(4_000);
-    expect(elapsed).toBeLessThan(500);
+    expect((spent.user + spent.system) / 1000).toBeLessThan(500);
   });
 
   it('createForLaunch takes a caller-supplied UUID v4 and answers exists with the first record on a collision', () => {
@@ -170,12 +172,65 @@ describe('session records in the index', () => {
     expect(later.record.appId).not.toBe(appId);
   });
 
-  it('refuses to bind an engine id another record holds', () => {
-    const s = summary();
-    index.sessions.upsertFromSummary(s);
+  it('a live process takes over the record discovery made for its transcript first; an engine id another MAWS process holds is refused', () => {
+    // Discovery can see the new transcript before the status naming its id arrives: that record yields, its facts move over.
+    const s = summary({ customTitle: 'Seen first' });
+    const discovered = index.sessions.upsertFromSummary(s).record;
     const { record } = index.sessions.createForLaunch(LAUNCH);
-    expect(() => index.sessions.bindEngineId(record.appId, s.sessionId)).toThrow(/already bound/);
-    expect(index.sessions.get(record.appId)?.engineSessionId).toBeNull();
+    bindings.length = 0;
+    changes.length = 0;
+    const bound = index.sessions.bindEngineId(record.appId, s.sessionId);
+    expect(bound).toMatchObject({ appId: record.appId, engineSessionId: s.sessionId, title: { text: 'Seen first', source: 'user' } });
+    expect(index.sessions.get(discovered.appId)).toBeNull();
+    expect(index.sessions.summaryOf(record.appId)?.sessionId).toBe(s.sessionId);
+    expect(bindings).toEqual([
+      [discovered.appId, null],
+      [record.appId, s.sessionId],
+    ]);
+    expect(changes.map(([r, cause]) => [r.appId, cause])).toEqual([
+      [discovered.appId, 'removed'],
+      [record.appId, 'live'],
+    ]);
+
+    // Two MAWS processes claiming one engine session is a conflict to surface, not to merge.
+    const other = index.sessions.createForLaunch(LAUNCH).record;
+    index.sessions.applyEngineStatus(other.appId, { holder: { kind: 'self' } });
+    const engineId = sessionIdFor(78);
+    index.sessions.bindEngineId(other.appId, engineId);
+    const third = index.sessions.createForLaunch(LAUNCH).record;
+    expect(() => index.sessions.bindEngineId(third.appId, engineId)).toThrow(/already bound/);
+    expect(index.sessions.get(third.appId)?.engineSessionId).toBeNull();
+    expect(index.sessions.get(other.appId)?.engineSessionId).toBe(engineId);
+  });
+
+  it('a second engine id for a bound record (the engine\'s /clear) rebinds it, and the old transcript becomes a record of its own', () => {
+    const { record } = index.sessions.createForLaunch(LAUNCH);
+    const appId = record.appId;
+    const a = summary({ customTitle: 'Before clear', lastRecordAt: '2026-09-28T10:00:00.000Z' });
+    index.sessions.bindEngineId(appId, a.sessionId);
+    index.sessions.upsertFromSummary(a);
+    index.sessions.setPinned(appId, true);
+    index.sessions.update(appId, { title: { text: 'Named in MAWS', source: 'user' } });
+    bindings.length = 0;
+
+    const b = sessionIdFor(79);
+    const rebound = index.sessions.bindEngineId(appId, b);
+    expect(rebound).toMatchObject({ appId, engineSessionId: b, pinned: true, title: { text: 'Named in MAWS', source: 'user' } });
+    // The app session no longer describes A's transcript: nothing tells the host A's size and mtime under this app id.
+    expect(index.sessions.summaryOf(appId)).toBeNull();
+    expect(index.sessions.bindings().find((binding) => binding.appSessionId === appId)).toEqual({ sessionId: b, appSessionId: appId, size: null, mtimeMs: null });
+    const history = index.sessions.getByEngineId(a.sessionId)!;
+    expect(history.appId).not.toBe(appId);
+    expect(history).toMatchObject({ pinned: false, title: { text: 'Before clear', source: 'user' } });
+    expect(index.sessions.summaryOf(history.appId)).toEqual(a);
+    expect(bindings).toEqual([
+      [appId, b],
+      [history.appId, a.sessionId],
+    ]);
+
+    // B's first summary fills the record; A's custom title was the engine's, so the MAWS rename holds.
+    const next = index.sessions.upsertFromSummary(summary({ sessionId: b, customTitle: null, lastRecordAt: '2026-09-28T11:00:00.000Z' }));
+    expect(next).toMatchObject({ created: false, advanced: true, record: { appId, title: { text: 'Named in MAWS', source: 'user' } } });
   });
 
   it('applyEngineStatus updates the engine id, holder, gateway, model and permission mode', () => {

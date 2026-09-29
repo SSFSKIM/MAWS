@@ -278,7 +278,9 @@ export class SessionStore {
     });
   }
 
-  // C3: the first status carrying the engine's session id. The host learns the pair through `onBinding` (fs.bind).
+  // C3: a status carrying the engine's session id, the first or a different one (the engine's `/clear` starts a new
+  // transcript under the same process; C3 live acceptance, 2026-09-29). The host learns the pair through `onBinding`
+  // (fs.bind), which replaces whatever pair the app id held. `bindRow` says what a rebind does to the old transcript.
   bindEngineId(appId: AppSessionId, sessionId: SessionId): SessionRecord {
     return this.db.transaction(() => {
       const existing = this.row(appId);
@@ -385,11 +387,7 @@ export class SessionStore {
   remove(appId: AppSessionId): void {
     this.db.transaction(() => {
       const existing = this.get(appId);
-      if (!existing) return;
-      this.db.run('DELETE FROM sessions WHERE app_id = ?', appId);
-      this.removed.set(appId, existing);
-      this.changed(appId, 'removed');
-      this.bindingChanged(appId);
+      if (existing) this.deleteRow(existing);
     });
   }
 
@@ -423,13 +421,33 @@ export class SessionStore {
     });
   }
 
+  // A live process's engine id binds its app session. Another record holding that id is one of two things: the record
+  // discovery made for the process's own new transcript, seen before the status naming it (it yields: removed, its
+  // transcript facts moving to this record), or another MAWS process's session (`self`), a conflict that is refused. A
+  // record already bound to a different id is rebinding (`/clear`): the transcript facts it held belong to the old
+  // transcript, which stays in the index as a record of its own, and the app session describes the new one once its
+  // summary arrives. The engine's custom title noted at a MAWS rename is forgotten: a new transcript's title is not a
+  // later terminal rename.
   private bindRow(existing: SessionRow, sessionId: SessionId, cause: ChangeCause): void {
     if (existing.engine_session_id === sessionId) return;
-    const holder = this.db.get<{ app_id: string }>('SELECT app_id FROM sessions WHERE engine_session_id = ?', sessionId);
-    if (holder) throw new Error(`engine session ${sessionId} is already bound to app session ${holder.app_id}`);
-    this.write(existing, { engine_session_id: sessionId });
+    const other = this.db.get<SessionRow>('SELECT * FROM sessions WHERE engine_session_id = ?', sessionId);
+    if (other && (JSON.parse(other.holder) as Holder).kind === 'self') throw new Error(`engine session ${sessionId} is already bound to app session ${other.app_id}`);
+    if (other) this.deleteRow(toRecord(other));
+    const rebinding = existing.engine_session_id !== null;
+    const previous = rebinding && existing.summary !== null ? (JSON.parse(existing.summary) as TranscriptSummary) : null;
+    const forgotten = { transcript_path: null, transcript_size: null, transcript_mtime_ms: null, summary: null, title_override_engine_title: null };
+    this.write(existing, { engine_session_id: sessionId, ...(rebinding ? forgotten : {}) });
     this.changed(existing.app_id as AppSessionId, cause);
     this.bindingChanged(existing.app_id as AppSessionId);
+    if (previous !== null) this.upsertFromSummary(previous);
+    if (other?.summary) this.upsertFromSummary(JSON.parse(other.summary) as TranscriptSummary);
+  }
+
+  private deleteRow(existing: SessionRecord): void {
+    this.db.run('DELETE FROM sessions WHERE app_id = ?', existing.appId);
+    this.removed.set(existing.appId, existing);
+    this.changed(existing.appId, 'removed');
+    this.bindingChanged(existing.appId);
   }
 
   // Writes the columns that differ from the row (and `updated_at` with them); answers whether anything changed.

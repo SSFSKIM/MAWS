@@ -16,7 +16,8 @@ export interface LoadedJournal {
   spanMs: number; // from the first to the last of them, as recorded
 }
 
-// The source's non-empty lines with their 1-based line numbers; fails with the named replay errors.
+// The source's non-empty lines with their 1-based line numbers, each with its leading NULs stripped (the engine's own
+// reader rule, SPEC 35.3.1, which fixture seeding follows too); fails with the named replay errors.
 export async function readSourceLines(path: string, read: SourceReader = readFile): Promise<{ text: string; line: number }[]> {
   let bytes: Buffer;
   try {
@@ -28,7 +29,7 @@ export async function readSourceLines(path: string, read: SourceReader = readFil
   const lines = bytes
     .toString('utf8')
     .split('\n')
-    .map((text, index) => ({ text, line: index + 1 }))
+    .map((text, index) => ({ text: text.replace(/^\0+/, ''), line: index + 1 }))
     .filter(({ text }) => text.trim().length > 0);
   if (lines.length === 0) throw new Error(`replay source empty: ${path}`);
   return lines;

@@ -178,8 +178,36 @@ export class FsService {
     return this.enqueueScan(new Map(known.map((entry) => [entry.sessionId, entry])), 'command');
   }
 
-  bind(bindings: readonly { sessionId: SessionId; appSessionId: FsScanKnown['appSessionId'] }[]): void {
-    for (const { sessionId, appSessionId } of bindings) this.bindings.bind(sessionId, appSessionId);
+  // `fs.bind`: each pair replaces whatever pair either id held. The pairs are in place when this returns (a replay's
+  // launch relies on that); an app id whose engine id changed (the engine's `/clear` starts a new transcript under the
+  // same process) has its followers stopped, and a followed session is followed again on its new transcript, which
+  // the returned promise waits for.
+  bind(bindings: readonly { sessionId: SessionId; appSessionId: FsScanKnown['appSessionId'] }[]): Promise<void> {
+    const moved = new Set<AppSessionId>();
+    for (const { sessionId, appSessionId } of bindings) {
+      const previous = this.bindings.sessionIdOf(appSessionId);
+      if (previous !== null && previous !== sessionId) moved.add(appSessionId);
+      const displaced = this.bindings.appIdOf(sessionId);
+      if (displaced !== null && displaced !== appSessionId) moved.add(displaced);
+      this.bindings.bind(sessionId, appSessionId);
+    }
+    return Promise.all([...moved].map((appSessionId) => this.refollow(appSessionId))).then(() => undefined);
+  }
+
+  // Followers of an app id whose engine id changed describe a transcript that is no longer the app session's: they stop,
+  // and the session's own is started again on the transcript the app id is bound to now, if any.
+  private async refollow(appSessionId: AppSessionId): Promise<void> {
+    const mine = (key: string) => key.startsWith(`${appSessionId}\0`);
+    await Promise.allSettled([...this.starting].filter(([key]) => mine(key)).map(([, starting]) => starting));
+    const current = this.bindings.sessionIdOf(appSessionId);
+    let followed = false;
+    for (const [key, entry] of this.follows) {
+      if (!mine(key) || entry.sessionId === current) continue;
+      followed ||= entry.agentId === null;
+      this.follows.delete(key);
+      entry.follow.stop();
+    }
+    if (followed && current !== null) await this.ensureFollow(appSessionId, null, () => this.followSession(appSessionId, current));
   }
 
   // Replay runs (M5) bind their ids here and answer the snapshot for them from the runner's materialised events.

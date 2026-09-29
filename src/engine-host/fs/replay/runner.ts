@@ -1,11 +1,13 @@
 // The replay runner (C4 execution document, Interfaces "Replay engine"; X8): plays one recorded source into the event
 // graph under a run's fresh ids, paced by the clock. A journal's `in` and `out` rows go through the row normaliser (C3's
 // `Normalizer`, which needs the `out` control requests to close its request table), each frame's `session_id` rewritten
-// to the run's id first; a transcript's chain goes through C4's backfill mapping. Events leave through `emit` — one
-// batch per row, or in `'instant'` one batch of at most REPLAY_BATCH events per turn of the event loop, never two in one
-// turn (a row crossing the boundary leaves its remainder for the next turn) — and are kept as the run's
-// materialised list for the snapshot command. Progress is reported every PROGRESS_EVERY rows and on every state or
-// speed change; the first report follows the start by a turn of the event loop, so it never precedes the launch's answer.
+// to the run's id first; a transcript's chain goes through C4's backfill mapping. Events leave through `emit` in
+// batches of at most REPLAY_BATCH events, one batch per turn of the event loop: at a speed one row's events (a row with
+// more spreads over turns, due with that row), in `'instant'` as many rows as fill a batch (a row crossing the boundary
+// leaves its remainder for the next turn); only a row whose mapping throws flushes what was gathered at once, in as
+// many batches as it takes, before the run ends in `error`. Every event sent is kept as the run's materialised list
+// for the snapshot command. Progress is reported every PROGRESS_EVERY rows and on every state or speed change; the
+// first report follows the start by a turn of the event loop, so it never precedes the launch's answer.
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, SessionId } from '@shared/graph/ids';
 import type { ReplayProgress, Speed } from '@shared/ipc/schema/session';

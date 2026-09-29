@@ -21,7 +21,7 @@ export async function loadTranscriptSource(path: string, read?: SourceReader): P
   const records: TranscriptRecord[] = [];
   for (const { text } of await readSourceLines(path, read)) {
     try {
-      records.push(parseTranscriptRecord(JSON.parse(text.replace(/^\0+/, ''))));
+      records.push(parseTranscriptRecord(JSON.parse(text)));
     } catch {
       continue;
     }
@@ -32,11 +32,14 @@ export async function loadTranscriptSource(path: string, read?: SourceReader): P
   return { records, subagents: await siblingSubagents(path, records), totalRows: chain.length, spanMs: times.length === 0 ? 0 : times[times.length - 1] - times[0] };
 }
 
-// The session's directory beside its transcript: named by the session id the records carry (a store transcript's file
-// stem is the same id; a fixture copy may be named otherwise), else by the file stem.
+// The session's directory beside its transcript: named by the file stem, as the FS service names it (a store
+// transcript's stem is its session id, while a resumed one's leading records can carry the prior session's), else by
+// the first session id the records carry (a fixture copy named otherwise).
 async function siblingSubagents(path: string, records: TranscriptRecord[]): Promise<SubagentLookup | null> {
-  const sessionId = records.map((record) => record.sessionId).find((id): id is string => typeof id === 'string' && id.length > 0) ?? basename(path, '.jsonl');
   const reader = new SubagentReader();
-  const agents = await reader.list(join(dirname(path), sessionId));
+  const stem = basename(path, '.jsonl');
+  let agents = await reader.list(join(dirname(path), stem));
+  const recorded = records.map((record) => record.sessionId).find((id): id is string => typeof id === 'string' && id.length > 0);
+  if (agents.length === 0 && recorded !== undefined && recorded !== stem) agents = await reader.list(join(dirname(path), recorded));
   return agents.length === 0 ? null : subagentLookup(() => agents, reader);
 }

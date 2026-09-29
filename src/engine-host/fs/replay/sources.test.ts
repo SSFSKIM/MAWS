@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -55,6 +55,30 @@ describe('replay sources load and validate before anything plays', () => {
     await expect(loadJournalSource(garbage)).rejects.toThrow(`replay source is not a journal: ${garbage}: line 2`);
     const journal = join(FIXTURE_DIR, 'pass2/workflow.jsonl');
     await expect(loadTranscriptSource(journal)).rejects.toThrow(`replay source is not a transcript: ${journal}`);
+  });
+
+  it('a journal line\'s leading NULs are stripped before parsing, as the transcript source and fixture seeding strip them', async () => {
+    const rows = readRows(join(FIXTURE_DIR, 'pass2/workflow.jsonl')).slice(0, 4);
+    const torn = file('nul.jsonl', [rows[0], `\0\0${rows[1]}`, '\0\0\0', rows[2], rows[3]].join('\n'));
+    const loaded = await loadJournalSource(torn);
+    expect(loaded.rows).toEqual(rows.map((row) => JSON.parse(row) as unknown));
+  });
+
+  it('finds the sibling sidecar directory by the file stem first, then by the records\' session id', async () => {
+    const sidecars = join(TRANSCRIPT_FIXTURE_DIR, '9a1d4262-0b43-46ad-acb9-5982f31d209c', 'subagents');
+    const parent = readRows(join(TRANSCRIPT_FIXTURE_DIR, 'subagent-parent.jsonl'));
+    // A resumed store transcript: named by its own id, while its leading records carry the prior session's.
+    const stem = '44444444-4444-4444-8444-444444444444';
+    const prior = parent.map((line) => line.replaceAll('9a1d4262-0b43-46ad-acb9-5982f31d209c', '55555555-5555-4555-8555-555555555555'));
+    const resumed = file(`${stem}.jsonl`, `${prior.join('\n')}\n`);
+    cpSync(sidecars, join(dir, stem, 'subagents'), { recursive: true });
+    const loaded = await loadTranscriptSource(resumed);
+    expect(loaded.subagents?.byToolUseId('toolu_01CYiK6ncgQLFUQ2iqC1b4oB')).toMatchObject({ agentId: 'ad286defbc77bc090' });
+    // A copy named otherwise has no stem directory: the records' id names it.
+    const copy = join(dir, 'copy', 'parent-copy.jsonl');
+    cpSync(join(TRANSCRIPT_FIXTURE_DIR, 'subagent-parent.jsonl'), copy);
+    cpSync(sidecars, join(dir, 'copy', '9a1d4262-0b43-46ad-acb9-5982f31d209c', 'subagents'), { recursive: true });
+    expect((await loadTranscriptSource(copy)).subagents?.byToolUseId('toolu_01CYiK6ncgQLFUQ2iqC1b4oB')).toMatchObject({ agentId: 'ad286defbc77bc090' });
   });
 
   it('reads through an injected reader, so a test can hold the load', async () => {

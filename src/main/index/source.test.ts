@@ -458,6 +458,8 @@ function inProcessHost(configHome: string) {
     start: () => (service = registerFs(on, emit, { CLAUDE_CONFIG_DIR: configHome })),
     stop: () => service?.stop(),
     listen: (name: EventName, listener: Listener) => host.onEvent(name as 'fs.sessionChanged', listener),
+    // An event from elsewhere in the host (C3's `session.status`), through the same validated relay.
+    fire: <N extends EventName>(name: N, payload: EventPayload<N>) => emit(name, payload),
   };
 }
 
@@ -506,6 +508,48 @@ describe('IndexSessionSource against the real filesystem state service', () => {
     await fixture.appendLines(fixture.transcriptPath(S[1]), [JSON.stringify({ type: 'custom-title', customTitle: 'Named later', sessionId: S[1] })]);
     await expect.poll(() => later.find((e) => e.summary.customTitle === 'Named later')?.appSessionId, { timeout: 3_000 }).toBe(allocated[1]);
     expect(index.sessions.get(allocated[1])?.title).toEqual({ text: 'Named later', source: 'user' });
+  });
+
+  it('a second engine id in session.status (the engine\'s /clear) rebinds the app session in the index and the host; the old transcript becomes its own record', async () => {
+    const [A, B] = S;
+    const line = (uuid: string, content: string) => JSON.stringify(user(uuid, null, '/work/c', content));
+    await fixture.addTranscript('/work/c', A, [line('a1', 'before the clear'), JSON.stringify({ type: 'custom-title', customTitle: 'Before', sessionId: A })]);
+    await fixture.addTranscript('/work/c', B, [line('b1', 'after the clear')]);
+    await fixture.addRegistryRecord(process.pid, { sessionId: B, cwd: '/work/c', kind: 'interactive', startedAt: Date.now() });
+    wired.start();
+    begin();
+    // Discovery sees both transcripts before any status names them: the launch's statuses take those records over.
+    await expect.poll(() => index.sessions.list().length, { timeout: 3_000 }).toBe(2);
+    const { record } = index.sessions.createForLaunch({ directory: '/work/c', additionalDirectories: [], worktree: null, model: { requested: null, resolved: null }, effort: null, permissionMode: { requested: 'default', effective: 'default', refusal: null } });
+    const app = record.appId;
+    const ask = async <T,>(name: CommandName, input: unknown): Promise<T> => {
+      const answer = await wired.host.dispatch('engine-host', name, input as never);
+      if (!answer.ok) throw new Error(answer.error.message);
+      return answer.value as T;
+    };
+    type Attributed = { holders: { sessionId: string; appSessionId: string | null }[] };
+    const attributed = (answer: Attributed, sessionId: SessionId) => answer.holders.filter((h) => h.sessionId === sessionId).map((h) => h.appSessionId);
+    const eventsOf = async () => (await ask<{ events: { kind: string; content?: unknown; sessionId: string }[] }>('session.events', { appSessionId: app, afterSeq: null, limit: 1000 })).events;
+    const said = async () => (await eventsOf()).filter((e) => e.kind === 'user.message').map((e) => e.content);
+
+    wired.fire('session.status', { appSessionId: app, status: status(app, { engineSessionId: A }) });
+    expect(index.sessions.get(app)).toMatchObject({ engineSessionId: A, title: { text: 'Before', source: 'user' } });
+    await expect.poll(said, { timeout: 3_000 }).toEqual(['before the clear']);
+
+    wired.fire('session.status', { appSessionId: app, status: status(app, { engineSessionId: B }) });
+    expect(index.sessions.get(app)?.engineSessionId).toBe(B);
+    expect(index.sessions.list().filter((r) => r.engineSessionId === B).map((r) => r.appId)).toEqual([app]);
+    const history = index.sessions.getByEngineId(A)!;
+    expect(history.appId).not.toBe(app);
+    expect(history.title).toEqual({ text: 'Before', source: 'user' });
+    // The host's pairs follow: B's holder is attributed to the app session, A to its own record; the follower moved.
+    await expect.poll(async () => attributed(await ask<Attributed>('fs.holders', { sessionIds: [B], directories: null }), B), { timeout: 3_000 }).toEqual([app]);
+    expect(attributed(await ask<Attributed>('fs.state', undefined), B)).toEqual([app]);
+    await expect.poll(said, { timeout: 3_000 }).toEqual(['after the clear']);
+    expect((await eventsOf()).every((e) => e.sessionId === B)).toBe(true);
+    await fixture.appendLines(fixture.transcriptPath(A), [JSON.stringify({ type: 'custom-title', customTitle: 'Old, renamed later', sessionId: A })]);
+    await expect.poll(() => index.sessions.get(history.appId)?.title.text, { timeout: 3_000 }).toBe('Old, renamed later');
+    expect(index.sessions.get(app)?.title.text).not.toBe('Old, renamed later');
   });
 
   it('unbindEngineId sends fs.unbind, and a following fs.scan re-attributes that transcript to no app id: the source allocates a fresh record', async () => {
