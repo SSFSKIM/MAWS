@@ -30,8 +30,8 @@ export function registerPanelTool<S, P>(tool: PanelTool<S, P>): () => void {
   tools.set(tool.id, stored);
   return () => {
     if (tools.get(tool.id) !== stored) return;
+    mounted?.closeToolTabs(tool.id); // while the tool is still listed, so the host can dispose its tabs' state
     tools.delete(tool.id);
-    mounted?.closeToolTabs(tool.id);
   };
 }
 

@@ -12,9 +12,11 @@ function TranscriptPlaceholder() {
 }
 
 // C9 block begin: terminal harness routes
+import { PanelHarness } from './terminal/PanelHarness';
 import { Probe } from './terminal/Probe';
 const C9_ROUTES: Record<string, () => ReactNode> = {
   '#probe': () => <Probe />,
+  '#panel': () => <PanelHarness />,
 };
 // C9 block end
 
