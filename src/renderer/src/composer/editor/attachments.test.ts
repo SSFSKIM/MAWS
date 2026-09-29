@@ -36,8 +36,13 @@ describe('attachments downscale, cap and persist within their budgets', () => {
     expect(base64Bytes('YWJj')).toBe(3);
   });
 
-  it('pre-checks the send against the 1 MiB content cap', () => {
+  it("pre-checks the send against C3's four bounds and names the one it hit", () => {
+    const block = (type: 'image' | 'document', bytes: number) => ({ type, source: { type: 'base64', media_type: type === 'image' ? 'image/png' : 'application/pdf', data: 'A'.repeat(Math.ceil(bytes / 3) * 4) } });
     expect(sendSizeRefusal('short')).toBeNull();
     expect(sendSizeRefusal('x'.repeat(MiB + 10))).toMatch(/^Message too large \(1025 KB\); attach the text as a file instead$/);
+    expect(sendSizeRefusal([block('image', 3 * MiB), block('image', 3 * MiB), { type: 'text', text: 'two screenshots' }])).toBeNull();
+    expect(sendSizeRefusal([block('image', 6 * MiB)])).toBe('Image too large (6 MB); each image can be at most 5 MB');
+    expect(sendSizeRefusal([block('document', 33 * MiB)])).toBe('PDF too large (33 MB); each PDF can be at most 32 MB');
+    expect(sendSizeRefusal([block('document', 30 * MiB), block('document', 30 * MiB)])).toBe('Message too large (81 MB); a message can be at most 48 MB in all');
   });
 });

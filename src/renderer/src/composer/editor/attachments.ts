@@ -1,8 +1,9 @@
 // Attachments (C7 execution document, "Sizes and caps"): an image is downscaled to at most 1568 px on its longest edge
 // (the vision model's working size) and re-encoded, PNG for screenshots (PNG or GIF sources) and JPEG at 0.85 otherwise,
 // then refused when still over 5 MiB (the API's per-image limit); a draft keeps attachment bytes up to 4 MiB in total,
-// in order, the rest marked `persisted: false`; a send is pre-checked against C3's 1 MiB content cap.
-import { MAX_SEND_CONTENT_BYTES } from '@shared/engine/session-state-store';
+// in order, the rest marked `persisted: false`; a send is pre-checked against C3's four bounds (text 1 MiB, each image
+// 5 MiB, each PDF 32 MiB, the whole message 48 MiB), through the same function C3's schema applies.
+import { sendContentRefusal, type SendBound } from '@shared/engine/session-state-store';
 import type { ContentBlock } from '@shared/graph/events';
 import type { Attachment } from './doc';
 
@@ -41,11 +42,18 @@ export function markPersisted(attachments: Attachment[]): Attachment[] {
   });
 }
 
-const encoder = new TextEncoder();
-// The composer's pre-check of C3's cap on a `user` frame's content (1 MiB of JSON), in the words it reports.
+const REFUSALS: Record<SendBound, (size: string) => string> = {
+  text: (size) => `Message too large (${size}); attach the text as a file instead`,
+  image: (size) => `Image too large (${size}); each image can be at most 5 MB`,
+  document: (size) => `PDF too large (${size}); each PDF can be at most 32 MB`,
+  content: (size) => `Message too large (${size}); a message can be at most 48 MB in all`,
+};
+// The composer's pre-check of C3's send bounds, in the words it reports: the bound that was hit and the size measured.
 export function sendSizeRefusal(content: string | ContentBlock[]): string | null {
-  const bytes = encoder.encode(JSON.stringify(content)).length;
-  return bytes > MAX_SEND_CONTENT_BYTES ? `Message too large (${Math.ceil(bytes / 1024)} KB); attach the text as a file instead` : null;
+  const refusal = sendContentRefusal(content);
+  if (!refusal) return null;
+  const size = refusal.bound === 'text' ? `${Math.ceil(refusal.bytes / 1024)} KB` : `${Math.ceil(refusal.bytes / MiB)} MB`;
+  return REFUSALS[refusal.bound](size);
 }
 
 const toBase64 = (bytes: Uint8Array): string => {

@@ -35,9 +35,56 @@ export type StoredQueue = QueueState & { corrupt: string | null };
 // schema; the renderer attaches files instead, C7). Measured as the UTF-8 length of the JSON the frame would carry.
 export const MAX_SEND_CONTENT_BYTES = 1024 * 1024;
 const encoder = new TextEncoder();
-export const SendContentSchema = z
-  .union([z.string(), z.array(ContentBlockSchema)])
-  .refine((content) => encoder.encode(JSON.stringify(content)).length <= MAX_SEND_CONTENT_BYTES, { message: 'content is larger than 1 MiB; attach it as a file instead' });
+// C7 start: the send cap relaxed to four bounds (C7 execution document, Decision Log "architect's ruling, 2026-09-29, on
+// the send cap"). Pasting screenshots is the Claude Desktop bar, and one 1568 px PNG is 1 to 3 MB of base64, so the
+// 1 MiB bound applies to text only (a string content, or the text blocks together); each image block is bounded at
+// 5 MiB decoded (the API's per-image limit), each document block at 32 MiB decoded, and the whole content at 48 MiB of
+// JSON, under the transport's 64 MiB line bound. A queued screenshot lives in the state file until it sends. The
+// composer pre-checks the same function and names the bound that was hit.
+export const MAX_SEND_TEXT_BYTES = MAX_SEND_CONTENT_BYTES;
+export const MAX_SEND_IMAGE_BYTES = 5 * 1024 * 1024;
+export const MAX_SEND_DOCUMENT_BYTES = 32 * 1024 * 1024;
+export const MAX_SEND_CONTENT_JSON_BYTES = 48 * 1024 * 1024;
+export type SendBound = 'text' | 'image' | 'document' | 'content';
+export interface SendRefusal {
+  bound: SendBound;
+  bytes: number; // what was measured: the text's UTF-8 bytes, one block's decoded bytes, or the content's JSON bytes
+  limit: number;
+  message: string;
+}
+const MESSAGES: Record<SendBound, string> = {
+  text: 'text is larger than 1 MiB; attach it as a file instead',
+  image: 'an image is larger than 5 MiB',
+  document: 'a document is larger than 32 MiB',
+  content: 'the message is larger than 48 MiB',
+};
+const decodedBytes = (data: string) => Math.floor((data.length * 3) / 4) - (data.endsWith('==') ? 2 : data.endsWith('=') ? 1 : 0);
+const base64Of = (block: { source?: unknown }) => {
+  const source = block.source as { type?: unknown; data?: unknown } | undefined;
+  return source?.type === 'base64' && typeof source.data === 'string' ? source.data : null;
+};
+export function sendContentRefusal(content: string | ReadonlyArray<{ type: string; [key: string]: unknown }>): SendRefusal | null {
+  const refuse = (bound: SendBound, bytes: number, limit: number): SendRefusal => ({ bound, bytes, limit, message: MESSAGES[bound] });
+  const text = typeof content === 'string' ? content : content.map((block) => (block.type === 'text' && typeof block.text === 'string' ? block.text : '')).join('');
+  const textBytes = encoder.encode(text).length;
+  if (textBytes > MAX_SEND_TEXT_BYTES) return refuse('text', textBytes, MAX_SEND_TEXT_BYTES);
+  if (typeof content !== 'string') {
+    for (const block of content) {
+      const data = block.type === 'image' || block.type === 'document' ? base64Of(block) : null;
+      if (data === null) continue;
+      const limit = block.type === 'image' ? MAX_SEND_IMAGE_BYTES : MAX_SEND_DOCUMENT_BYTES;
+      const bytes = decodedBytes(data);
+      if (bytes > limit) return refuse(block.type === 'image' ? 'image' : 'document', bytes, limit);
+    }
+  }
+  const json = typeof content === 'string' ? textBytes : encoder.encode(JSON.stringify(content)).length;
+  return json > MAX_SEND_CONTENT_JSON_BYTES ? refuse('content', json, MAX_SEND_CONTENT_JSON_BYTES) : null;
+}
+export const SendContentSchema = z.union([z.string(), z.array(ContentBlockSchema)]).superRefine((content, ctx) => {
+  const refusal = sendContentRefusal(content);
+  if (refusal) ctx.addIssue({ code: 'custom', message: refusal.message });
+});
+// C7 end
 export type SendContent = z.infer<typeof SendContentSchema>;
 
 export interface GrantSnapshot {
