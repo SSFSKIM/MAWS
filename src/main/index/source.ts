@@ -89,13 +89,14 @@ export class IndexSessionSource implements SessionSource {
         this.write('fs.holderChanged', () => this.index.sessions.setHolder(sessionId, holder));
       }),
       this.host.onEvent('session.status', ({ appSessionId, status }) => {
-        if (this.index.sessions.get(appSessionId) === null) return; // not a record the index holds (yet)
+        const record = this.index.sessions.get(appSessionId);
+        if (record === null) return; // not a record the index holds (yet)
         // C3's patch leaves the holder out once the process has exited, the index's call: nothing holds it then (a
         // terminal that resumes it arrives as fs.holderChanged, which a `self` holder would have refused).
         const patch = toSessionRecordPatch(status);
         if (status.process === 'exited') patch.holder = { kind: 'none' };
         this.write('session.status', () => this.index.sessions.applyEngineStatus(appSessionId, patch));
-        this.liveStatus(appSessionId, status.process === 'exited');
+        this.liveStatus(appSessionId, status.process === 'exited', record.engineSessionId !== null);
       }),
       this.host.onState('engine-host', (state) => {
         this.live.clear(); // a host that went away took its processes with it
@@ -145,15 +146,16 @@ export class IndexSessionSource implements SessionSource {
 
   // A process this app runs is the session's live source from its first status to its exit: a disk follow of the same
   // app id (a `session.events` read before the launch, then a resume of that id) stops then, once per run, so disk and
-  // live events never both flow for one id. It goes out at the tick, after any binding the same status made.
-  private liveStatus(appSessionId: AppSessionId, exited: boolean): void {
+  // live events never both flow for one id. Only an id bound before the status can have been followed (the host follows
+  // bound ids only); the unfollow goes out at the tick, in order after the bindings.
+  private liveStatus(appSessionId: AppSessionId, exited: boolean, wasBound: boolean): void {
     if (exited) {
       this.live.delete(appSessionId);
       return;
     }
     if (this.live.has(appSessionId)) return;
     this.live.add(appSessionId);
-    if (this.index.unavailable !== null || this.index.sessions.get(appSessionId)?.engineSessionId == null) return; // the host knows no such app id
+    if (!wasBound || this.index.unavailable !== null) return;
     this.unfollows.push(appSessionId);
     this.schedule();
   }

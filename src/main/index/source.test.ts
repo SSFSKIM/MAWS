@@ -333,11 +333,8 @@ describe('IndexSessionSource folds the host\'s events into the index and feeds t
       model: { requested: null, resolved: 'claude-opus-5' },
     });
     await settle();
-    // The binding first, then the disk follow of the now-live id stopped (liveStatus).
-    expect(fake.calls).toEqual([
-      { name: 'fs.bind', input: { bindings: [{ sessionId: engineId, appSessionId: record.appId }] } },
-      { name: 'fs.unfollow', input: { appSessionId: record.appId, agentId: null } },
-    ]);
+    // No fs.unfollow: an id unbound until this status was never followed from disk (liveStatus).
+    expect(fake.calls).toEqual([{ name: 'fs.bind', input: { bindings: [{ sessionId: engineId, appSessionId: record.appId }] } }]);
     expect(events('session.changed').at(-1)).toMatchObject({ cause: 'live', record: { appId: record.appId } });
 
     // C3's patch: a status before verification leaves the gateway, and one before the first frame the engine version,
