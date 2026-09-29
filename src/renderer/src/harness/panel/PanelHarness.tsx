@@ -35,6 +35,12 @@ import { summaryProbes } from './summaryProbes';
 import { openTerminal, TERMINAL_TOOL_ID, terminalTool } from '../../tools/terminal';
 import { adoptTerminals, connectTerminalProbes, createPanelTerminalsApi, inputGuard, keysApi, TerminalControls, TerminalDebugRows, terminalOf } from './terminalProbes';
 // C9 end
+// C8c start
+import { connectCodeEvents } from '../../ipc/events';
+import { registerCodeTools } from '../../tools/code';
+import { CodeHarnessBlock } from '../code/CodeHarnessBlock';
+import { codeProbes } from '../code/codeProbes';
+// C8c end
 
 // Registered once per page load, never on an effect's cleanup: a registration's disposer closes its tool's tabs.
 const disposers = new Map<string, () => void>();
@@ -54,6 +60,17 @@ function registerHarnessTools(): void {
 }
 
 let hydration: Promise<string[]> | null = null;
+// C8c start: Review, Files, the viewer and the diff tab registered into the page as App.tsx registers them, once per
+// page load (a registration's disposer closes the tools' tabs), and main's files.changed routed as App.tsx routes it.
+let codeRegistered = false;
+function registerCodeHarness(): () => void {
+  if (!codeRegistered) {
+    codeRegistered = true;
+    registerCodeTools();
+  }
+  return connectCodeEvents();
+}
+// C8c end
 
 function bootstrap(): () => void {
   registerSlot('panelHost', PanelHost);
@@ -64,6 +81,9 @@ function bootstrap(): () => void {
     connectPanelHost(),
     connectPanelEvents(), // the summary's git.changed and fs.workflowChanged (M2)
     connectTerminalProbes(), // C9: after the shell's actions, so the page's `tab.next` wins
+    // C8c start
+    registerCodeHarness(),
+    // C8c end
   ];
   // Once per load (StrictMode replays effects; a second hydrate would replace the panel lists again).
   hydration ??= (async () => {
@@ -176,6 +196,9 @@ export function PanelHarness() {
       keys: keysApi,
       openTerminal,
       // C9 end
+      // C8c start
+      code: codeProbes,
+      // C8c end
     };
     window.openTerminal = openTerminal; // C9: the console entry for C10's attach path
     return () => {
@@ -190,7 +213,9 @@ export function PanelHarness() {
         <Controls />
         <DebugStrip />
         <main className="col-start-2 row-start-2 flex min-w-0 items-center justify-center border-r border-border text-ui text-fg-muted">
-          <MainTitle />
+          {/* C8c start: a file or diff tab through the slots, else A's transcript with C8c's callbacks, else the title */}
+          <CodeHarnessBlock fallback={<MainTitle />} />
+          {/* C8c end */}
         </main>
         <PanelRegion />
       </div>

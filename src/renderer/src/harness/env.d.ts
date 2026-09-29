@@ -8,6 +8,9 @@ import type { ProbeApi } from './terminal/Probe';
 import type { PanelHarnessApi } from './panel/api'; // C8a: the product host's #panel page (C9's stand-in folded in)
 import type { KeyCounts } from './panel/terminalProbes';
 import type { TerminalsHarnessApi } from './terminal/terminals-api';
+// C8c start
+import type { CodeHarnessApi } from './code/api';
+// C8c end
 
 declare global {
   interface MawsHarnessPages extends Partial<HarnessApi> {
@@ -18,6 +21,9 @@ declare global {
     panel?: PanelHarnessApi; // #panel
     keys?: { counts(): KeyCounts }; // #panel
     openTerminal?: typeof openTerminal; // #panel
+    // C8c start
+    code?: CodeHarnessApi; // #panel: Review, Files and the viewer
+    // C8c end
   }
   interface Window {
     __maws_harness?: MawsHarnessPages;

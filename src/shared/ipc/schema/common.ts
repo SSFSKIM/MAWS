@@ -8,7 +8,12 @@ export interface CommandSpec<I extends z.ZodType, O extends z.ZodType> {
   owner: Owner;
 }
 
-export const NAMESPACES = ['session', 'engine', 'fs', 'git', 'pty', 'layout', 'attention', 'settings'] as const;
+export const NAMESPACES = [
+  'session', 'engine', 'fs', 'git', 'pty', 'layout', 'attention', 'settings',
+  // C8c start
+  'files',
+  // C8c end
+] as const;
 export type Namespace = (typeof NAMESPACES)[number];
 
 export const HostPingSchema = z.strictObject({ pid: z.number().int(), uptimeMs: z.number(), hostVersion: z.string() });
