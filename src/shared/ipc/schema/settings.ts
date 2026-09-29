@@ -4,6 +4,9 @@ import * as z from 'zod';
 import { ACTION_IDS } from '../../keymap/actions';
 import { CHORD_PATTERN } from '../../keymap/chord';
 import type { CommandSpec } from './common';
+// C7 start
+import { UsageSnapshotSchema } from '../../usage/types';
+// C7 end
 
 export const ThemeSettingSchema = z.enum(['light', 'dark', 'system']);
 export type ThemeSetting = z.infer<typeof ThemeSettingSchema>;
@@ -26,11 +29,24 @@ export type SettingsPatch = z.infer<typeof SettingsPatchSchema>;
 export const SettingsStateSchema = z.strictObject({ settings: SettingsSchema, resolvedTheme: z.enum(['light', 'dark']) });
 export type SettingsState = z.infer<typeof SettingsStateSchema>;
 
+// C7 start: the account usage main reads from ClaudeUsage's files (C7 execution document, Interfaces "Status line
+// popovers and usage"). `settings.usage` answers the snapshot with `pinsFor` filled for the engine session ids it names;
+// `settings.usageChanged` carries the next snapshot when the files change, `pinsFor` for the ids the last call named.
+const c7Commands = {
+  'settings.usage': { input: z.strictObject({ engineSessionIds: z.array(z.string()).max(64) }), output: UsageSnapshotSchema, owner: 'main' },
+} as const satisfies Record<`settings.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
+const c7Events = {
+  'settings.usageChanged': UsageSnapshotSchema,
+} as const satisfies Record<`settings.${string}`, z.ZodType>;
+// C7 end
+
 export const commands = {
   'settings.get': { input: z.void(), output: SettingsStateSchema, owner: 'main' },
   'settings.set': { input: SettingsPatchSchema, output: SettingsStateSchema, owner: 'main' },
+  ...c7Commands, // C7
 } as const satisfies Record<`settings.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {
   'settings.changed': SettingsStateSchema,
+  ...c7Events, // C7
 } as const satisfies Record<`settings.${string}`, z.ZodType>;

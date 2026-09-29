@@ -32,6 +32,7 @@ function fakeClient() {
       listeners.set(name, set);
       return () => set.delete(listener);
     }) as MawsBridge['on'],
+    pathForFile: () => '', // C7: MawsBridge gained pathForFile
   };
   const emit = <N extends EventName>(name: N, payload: EventPayload<N>) => {
     for (const listener of listeners.get(name) ?? []) listener(payload);

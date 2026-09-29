@@ -85,6 +85,7 @@ export type CommandResult<N extends CommandName> = { ok: true; value: CommandOut
 export interface MawsBridge {
   invoke<N extends CommandName>(name: N, input: CommandInput<N>): Promise<CommandResult<N>>;
   on<N extends EventName>(name: N, listener: (payload: EventPayload<N>) => void): () => void; // returns unsubscribe
+  pathForFile(file: File): string; // C7: a dropped file's path through Electron's webUtils.getPathForFile; '' when Electron has none (a file dragged from a browser)
 }
 
 export const commandChannel = (name: CommandName) => `maws:cmd:${name}`;

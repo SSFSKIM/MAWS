@@ -38,6 +38,13 @@ export const ACTIONS = {
   'request.decline':      { title: 'Decline the docked request', chord: 'Escape',       sink: 'renderer', menu: null, scope: 'pane' },
   'composer.send':        { title: 'Send (multi-line editor)',    chord: 'Cmd+Enter',    sink: 'renderer', menu: null, scope: 'composer' },  // C7 consumes
   'composer.cycleMode':   { title: 'Cycle permission mode',       chord: 'Shift+Tab',    sink: 'renderer', menu: null, scope: 'composer' },  // C7 consumes
+  // C7 start: the composer's own actions (C7 execution document, Keymap additions). Steer is delivered only inside the
+  // editor's `data-key-sink="composer"`; Stop and Focus are app-scoped because ⌘. is pressed while typing, where C5's
+  // dispatcher refuses every pane-scoped action, and are registered once (ComposerAppKeys), resolving the focused pane.
+  'composer.steer':       { title: 'Steer the running turn',      chord: 'Alt+Enter',    sink: 'renderer', menu: null, scope: 'composer' },
+  'composer.stop':        { title: 'Stop the running turn',       chord: 'Cmd+.',        sink: 'renderer', menu: null, scope: 'app' },
+  'composer.focus':       { title: 'Focus the composer',          chord: 'Cmd+L',        sink: 'renderer', menu: null, scope: 'app' },
+  // C7 end
 } as const satisfies Record<string, ActionSpec>;
 
 export type ActionId = keyof typeof ACTIONS;

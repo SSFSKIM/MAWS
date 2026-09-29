@@ -39,6 +39,9 @@ import {
 import { ProjectIdSchema, SessionIdSchema } from '@shared/graph/ids';
 import { SessionRecordSchema } from '@shared/graph/session';
 // C4 end
+// C7 start: the composer's prompt history shapes (C7 execution document, Interfaces "X2 additions")
+import { HistoryEntrySchema, PastedContentSchema } from '../../composer/history-entry';
+// C7 end
 import type { CommandSpec } from './common';
 
 // C3 start
@@ -297,14 +300,37 @@ const c5Events = {
 } as const satisfies Record<`session.${string}`, z.ZodType>;
 // C5 end --------------------------------------------------------------------------------------------------------------
 
+// C7 start: the composer's additions (C7 execution document, Interfaces "X2 additions"). `session.catalogChanged` is the
+// engine host's publication of C3's per-launch catalogue (the same `CatalogSchema` `session.catalog` answers), emitted
+// whole whenever its revision moves; `revision` restarts with every launch, so a consumer keys it by `launchId`.
+// `session.history.*` is main's: MAWS's own `<userData>/prompt-history.jsonl` and, read-only, the terminal's history.
+const c7Commands = {
+  'session.history.list': {
+    input: z.strictObject({ appSessionId: AppSessionIdSchema, limit: z.number().int().positive().max(500) }),
+    output: z.strictObject({ entries: z.array(HistoryEntrySchema) }),
+    owner: 'main',
+  },
+  'session.history.append': {
+    input: z.strictObject({ appSessionId: AppSessionIdSchema, display: z.string().min(1).max(4096), pastedContents: z.record(z.string(), PastedContentSchema) }),
+    output: z.void(),
+    owner: 'main',
+  },
+} as const satisfies Record<`session.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
+const c7Events = {
+  'session.catalogChanged': z.strictObject({ appSessionId: AppSessionIdSchema, launchId: z.string(), catalog: CatalogSchema }),
+} as const satisfies Record<`session.${string}`, z.ZodType>;
+// C7 end --------------------------------------------------------------------------------------------------------------
+
 export const commands = {
   ...c3Commands, // C3
   ...c4Commands, // C4
   ...c5Commands, // C5
+  ...c7Commands, // C7
 } as const satisfies Record<`session.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {
   ...c3Events, // C3
   ...c4Events, // C4
   ...c5Events, // C5
+  ...c7Events, // C7
 } as const satisfies Record<`session.${string}`, z.ZodType>;

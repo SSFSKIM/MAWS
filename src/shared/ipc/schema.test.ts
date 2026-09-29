@@ -103,7 +103,7 @@ describe('ipc schema validates both directions', () => {
 
     // C4 (M6): the read-only git service, owned by main.
     it('carries the C4 git.* entries, every command owned by main, with the diff and log bounds', () => {
-      expect(Object.keys(git.commands).sort()).toEqual(['git.branches', 'git.diff', 'git.log', 'git.status', 'git.unwatch', 'git.watch']);
+      expect(Object.keys(git.commands).sort()).toEqual(['git.branches', 'git.diff', 'git.log', 'git.lsFiles' /* C7 */, 'git.status', 'git.unwatch', 'git.watch']);
       for (const spec of Object.values(git.commands)) expect(spec.owner).toBe('main');
       expect(Object.keys(git.events)).toEqual(['git.changed']);
       expect(validateCommandInput('git.diff', { directory: '/r', scope: 'all', base: 'main', path: 'a.ts', context: 20 }).ok).toBe(true);
@@ -341,6 +341,63 @@ describe('ipc schema validates both directions', () => {
       }
       expect(validateEventPayload('session.queue', { ...queue, pauseReason: 'bored' }).ok).toBe(false);
       expect(validateCommandOutput('session.queue.list', { entries: [], paused: true, pauseReason: 'bored' }).ok).toBe(false);
+    });
+
+    it('registers the catalogue event, history, usage, file picking and file listing with their owners', () => {
+      for (const name of ['session.history.list', 'session.history.append', 'settings.usage', 'layout.pickFiles', 'git.lsFiles'] as const) expect(commands[name].owner, name).toBe('main');
+      for (const name of ['session.catalogChanged', 'settings.usageChanged']) expect(Object.hasOwn(events, name), name).toBe(true);
+    });
+
+    it('session.catalogChanged carries the whole catalogue under its launch', () => {
+      const catalog = { commands: [{ name: 'compact', description: 'Compact', argumentHint: '', builtin: true }], agents: [], skills: ['dataviz'], terminalSlashCommands: ['doctor'], revision: 2 };
+      const changed = { appSessionId: 'app-1', launchId: 'abcdefgh', catalog };
+      expect(validateEventPayload('session.catalogChanged', changed)).toEqual({ ok: true, value: changed });
+      expect(validateEventPayload('session.catalogChanged', { appSessionId: 'app-1', catalog }).ok).toBe(false);
+      expect(validateEventPayload('session.catalogChanged', { ...changed, catalog: { ...catalog, revision: 1.5 } }).ok).toBe(false);
+    });
+
+    it("session.history.* carry the terminal's record shapes, bounded", () => {
+      const text = { id: 1, type: 'text', content: 'body', contentHash: null, mediaType: null, filename: null };
+      const image = { id: 2, type: 'image', content: null, contentHash: null, mediaType: 'image/png', filename: 'shot.png' };
+      expect(validateCommandInput('session.history.list', { appSessionId: 'app-1', limit: 200 }).ok).toBe(true);
+      expect(validateCommandInput('session.history.list', { appSessionId: 'app-1', limit: 501 }).ok).toBe(false);
+      expect(validateCommandInput('session.history.list', { appSessionId: 'app-1', limit: 0 }).ok).toBe(false);
+      const append = { appSessionId: 'app-1', display: 'see [Pasted text #1 +40 lines]', pastedContents: { '1': text, '2': image } };
+      expect(validateCommandInput('session.history.append', append)).toEqual({ ok: true, value: append });
+      expect(validateCommandInput('session.history.append', { ...append, display: '' }).ok).toBe(false);
+      expect(validateCommandInput('session.history.append', { ...append, display: 'x'.repeat(4097) }).ok).toBe(false);
+      expect(validateCommandInput('session.history.append', { ...append, pastedContents: { '1': { ...text, type: 'file' } } }).ok).toBe(false);
+      const entry = { display: 'hello', at: '2026-09-28T10:00:00.000Z', source: 'terminal', sessionId: null, pastedContents: { '1': { ...text, content: null, contentHash: 'c5ddbb6e32f0ffa0' } } };
+      expect(validateCommandOutput('session.history.list', { entries: [entry] }).ok).toBe(true);
+      expect(validateCommandOutput('session.history.list', { entries: [{ ...entry, source: 'cloud' }] }).ok).toBe(false);
+      expect(validateCommandOutput('session.history.append', undefined).ok).toBe(true);
+    });
+
+    it('settings.usage answers the snapshot, pins for the ids asked, bounded at 64', () => {
+      const window = { percent: 51, resetsAt: '2026-09-28T16:09:59Z', recordedAt: '2026-09-28T15:10:29Z' };
+      const account = {
+        uuid: 'a1', email: '1@example.test', displayName: 'Account 1', planLabel: 'Max', rateLimitTier: null, needsReauthentication: false, lastSeenActive: null,
+        pinnedSessionCount: 3, credentialOwnership: 'appManaged', windows: { fiveHour: window, sevenDay: null, scoped: [{ model: 'Fable', window }] },
+      };
+      const snapshot = { available: true, dataDir: '/d', readAt: '2026-09-28T15:11:00.000Z', error: null, drainTarget: 'a1', drainTargetIsManual: false, accounts: [account], pinsFor: { s1: 'a1' } };
+      expect(validateCommandInput('settings.usage', { engineSessionIds: [] }).ok).toBe(true);
+      expect(validateCommandInput('settings.usage', { engineSessionIds: Array.from({ length: 65 }, (_, i) => `s${i}`) }).ok).toBe(false);
+      expect(validateCommandOutput('settings.usage', snapshot)).toEqual({ ok: true, value: snapshot });
+      expect(validateEventPayload('settings.usageChanged', snapshot).ok).toBe(true);
+      expect(validateCommandOutput('settings.usage', { ...snapshot, accounts: [{ ...account, credentialOwnership: 'borrowed' }] }).ok).toBe(false);
+      expect(validateCommandOutput('settings.usage', { ...snapshot, accounts: [{ ...account, pinnedSessionCount: -1 }] }).ok).toBe(false);
+    });
+
+    it('layout.pickFiles and the file listing hold their bounds', () => {
+      expect(validateCommandInput('layout.pickFiles', { kind: 'photos', directory: null, multiple: true }).ok).toBe(true);
+      expect(validateCommandInput('layout.pickFiles', { kind: 'folders', directory: null, multiple: true }).ok).toBe(false);
+      const picked = { path: '/r/a.png', name: 'a.png', bytes: 3, mediaType: 'image/png', data: 'AAAA' };
+      expect(validateCommandOutput('layout.pickFiles', { files: [picked, { ...picked, path: '/r', name: 'r', bytes: 0, mediaType: 'inode/directory', data: null }] }).ok).toBe(true);
+      expect(validateCommandInput('git.lsFiles', { directory: '/r', query: 'main', limit: 30 }).ok).toBe(true);
+      expect(validateCommandInput('git.lsFiles', { directory: '/r', query: 'x'.repeat(257), limit: 30 }).ok).toBe(false);
+      expect(validateCommandInput('git.lsFiles', { directory: '/r', query: '', limit: 201 }).ok).toBe(false);
+      expect(validateCommandOutput('git.lsFiles', { paths: ['src/main.ts'], truncated: false, source: 'walk' }).ok).toBe(true);
+      expect(validateCommandOutput('git.lsFiles', { paths: [], truncated: false, source: 'fs' }).ok).toBe(false);
     });
   });
   // C7 end
