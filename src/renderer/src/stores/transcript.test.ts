@@ -115,10 +115,10 @@ describe('transcript store', () => {
       others(after).forEach((row, i) => expect(row).toBe(kept[i]));
       return after;
     };
-    let rows = step(() => store.getState().toggleTurn(KEY, seventh));
+    const rows = step(() => store.getState().toggleTurn(KEY, seventh));
     const group = rows.find((row): row is Extract<Row, { kind: 'group' }> => row.kind === 'group' && row.turnId === seventh)!;
     expect(group).toBeDefined();
-    rows = step(() => store.getState().toggleGroup(KEY, group.id));
+    step(() => store.getState().toggleGroup(KEY, group.id));
     step(() => store.getState().toggleCell(KEY, group.cells[0].id));
     step(() => store.getState().toggleTurn(KEY, seventh));
   });
