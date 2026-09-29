@@ -1,5 +1,7 @@
-// C10's end-to-end spec (C10 execution document, M4; M4a's half: every start goes through `window.maws.invoke`; the
-// first send through C7's composer is M4b's). Each case launches the built app with the replay transport
+// C10's end-to-end spec (C10 execution document, M4). The cases the M4 gate names start through C7's composer: the
+// prompt typed into the unstarted tab's editor and sent, the location chosen with its Location chip, the trust and
+// failure cards docked in the composer's place; the others start through `window.maws.invoke`, where the case needs
+// no turn. Each case launches the built app with the replay transport
 // (`MAWS_ENGINE_REPLAY=1`) and its own `MAWS_E2E_REPLAY_FIXTURES` (M3's seam: each launch takes the next fixture and
 // pins its recorded id), a temp config home (`CLAUDE_CONFIG_DIR`) holding a synthetic `.claude.json` and any
 // transcripts the case needs, a throwaway profile, and scratch repositories under the temp root. No engine runs; the
@@ -77,8 +79,18 @@ async function launchCase(opts: { fixtures: string[]; trusted: string[]; userDat
     ...(opts.userData ? { userData: opts.userData } : {}),
   });
   await expect(maws.page.locator('[data-region="main"]')).toBeVisible();
+  await pageReportsHidden(maws.page);
   await collectSetup(maws.page);
   return { maws, page: maws.page, store, trash, dispose: () => maws.cleanup() };
+}
+
+// The page reports itself hidden. The cases route Direct (below), and C7's status line reads a direct session's usage
+// windows from the engine (`get_usage`) at each turn's end and whenever the page becomes visible, but only while the
+// page is visible; the replayed fixtures recorded no such read, and C3's replay transport ends a run on any write it
+// did not record (a `replay_mismatch`, the session exiting as a crash). Nothing the cases assert reads the page's
+// visibility but C5's unread rule, which none of them checks.
+async function pageReportsHidden(page: Page): Promise<void> {
+  await page.evaluate(() => Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' }));
 }
 
 async function addProject(page: Page, directory: string): Promise<{ id: string; name: string }> {
@@ -94,8 +106,44 @@ async function plus(page: Page, name: string): Promise<string> {
   return intents.at(-1)!.appSessionId;
 }
 
-// The chips are C7's: until M4b the case sets the intent through the same command they call. Direct, so the relay
-// pre-check never depends on whether this Mac's relay is up (the replay transport ignores the route).
+// Direct, so the relay pre-check never depends on whether this Mac's relay is up (the replay transport ignores the
+// route). No chip sets the route of an unstarted session (C7's frame has none; the relay card's "Run direct" is the
+// owner's way), so the case sets it through the command the card's continuation would.
+async function routeDirect(page: Page, id: string): Promise<void> {
+  value(await invoke(page, 'session.intent.patch', { appSessionId: id, patch: { gateway: 'direct' } }));
+}
+
+// C7's composer in the focused tab: its editor, and Send (the submit control) once the text is in.
+const editor = (page: Page) => page.locator('[data-region="main"]').getByRole('textbox', { name: 'Message' });
+async function send(page: Page, text: string): Promise<void> {
+  await editor(page).click();
+  await page.keyboard.type(text);
+  await expect(editor(page)).toHaveText(text);
+  const control = page.locator('[data-region="main"] [data-submit-state]');
+  await expect(control).toHaveText('Send');
+  await control.click();
+}
+
+// The Location chip's new worktree (C7's popover: the name, then Use).
+async function chooseNewWorktree(page: Page, repoRoot: string, name: string): Promise<void> {
+  await page.getByRole('button', { name: `Location ${repoRoot}` }).click();
+  const popover = page.getByRole('dialog', { name: 'Location' });
+  await popover.getByRole('textbox', { name: 'New worktree name' }).fill(name);
+  await popover.getByRole('button', { name: 'Use' }).click();
+  await expect(page.getByRole('button', { name: `Location ${join(repoRoot, '.claude/worktrees', name)}` })).toBeVisible();
+}
+
+// The turns C3 reports ended, per session, from before the first start.
+async function collectTurns(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const turns: unknown[] = [];
+    (window as unknown as { __c10Turns: unknown[] }).__c10Turns = turns;
+    window.maws.on('session.eventBatch', (b) => b.events.forEach((e) => e.kind === 'turn.ended' && turns.push(b.appSessionId)));
+  });
+}
+const turnEnded = (page: Page, id: string) => expect.poll(() => page.evaluate(() => (window as unknown as { __c10Turns: string[] }).__c10Turns), { timeout: 20_000 }).toContain(id);
+
+// Where the M4a cases need no turn, the chips' patch and the start go through the commands they call.
 async function startDirect(page: Page, id: string, patch: CommandInput<'session.intent.patch'>['patch'] = {}, message: CommandInput<'session.start'>['message'] = null) {
   value(await invoke(page, 'session.intent.patch', { appSessionId: id, patch: { gateway: 'direct', ...patch } }));
   return value(await invoke(page, 'session.start', { appSessionId: id, message, options: {} }));
@@ -113,7 +161,7 @@ async function menu(page: Page, id: string, item: string): Promise<void> {
 async function passRelay(page: Page): Promise<void> {
   const health = value(await invoke(page, 'engine.relayHealth', { force: true }));
   if (health.ok) return;
-  const card = page.getByRole('region', { name: 'Relay not answering' });
+  const card = page.getByRole('group', { name: 'Relay not answering' });
   await expect(card).toBeVisible();
   await card.getByRole('button', { name: 'Run direct' }).click();
 }
@@ -154,47 +202,64 @@ test.describe('sessions', () => {
     return { ...current, trustedRepos, untrustedRepos };
   }
 
-  test('new worktree: the location creates the worktree and the launch runs in it, unattested in a trusted repository', async () => {
+  test('new worktree: the Location chip creates the worktree and the first send runs in it, unattested and with no card in a trusted repository', async () => {
     const { page, maws, trustedRepos } = await begin({ fixtures: [AUTO_ROUTED] });
     const repo = trustedRepos[0]!;
     const project = await addProject(page, repo.root);
     const id = await plus(page, project.name);
     await expect(row(page, id), 'an unstarted session has no sidebar row').toHaveCount(0);
-    const location = { kind: 'newWorktree' as const, repoRoot: repo.root, name: 'e2e-one', branch: { kind: 'new' as const, name: 'worktree-e2e-one', base: 'HEAD' } };
-    expect(await startDirect(page, id, { location })).toEqual({ status: 'starting', appSessionId: id });
+    await routeDirect(page, id);
+    await chooseNewWorktree(page, repo.root, 'e2e-one');
+    expect(value(await invoke(page, 'session.intent.get', { appSessionId: id }))!.location).toEqual({ kind: 'newWorktree', repoRoot: repo.root, name: 'e2e-one', branch: { kind: 'new', name: 'worktree-e2e-one', base: 'HEAD' } });
+    await collectTurns(page);
+    const prompt = fixtureIdentity(AUTO_ROUTED).firstPrompt!;
+    await send(page, prompt.display);
     await untilPhase(page, id, 'ready');
     expect((await setupOf(page, id)).map((e) => [e.phase, e.detail])).toEqual([
       ['worktree', 'Creating worktree e2e-one'],
       ['launching', 'Starting'],
       ['ready', null],
     ]);
+    expect((await setupOf(page, id)).at(-1)!.outcome).toMatchObject({ kind: 'ready', firstTurn: 'sent' });
     const worktree = join(repo.root, '.claude/worktrees/e2e-one');
     expect(await runGit(repo.root, ['worktree', 'list', '--porcelain'])).toContain(`worktree ${worktree}\n`);
     expect(spawnRow(maws, id).cwd).toBe(worktree);
     expect(initializeRequest(maws, id).workspaceTrust, 'a trusted key attests nothing').toBeUndefined();
+    await expect(page.getByRole('group', { name: 'Trust this folder?' }), 'no trust card for a trusted repository').toHaveCount(0);
     await expect(row(page, id)).toBeVisible();
+    await turnEnded(page, id);
     expect(value(await invoke(page, 'session.intent.get', { appSessionId: id })), 'bound: the intent is gone').toBeNull();
     expect(maws.consoleErrors()).toEqual([]);
   });
 
-  test('trust bootstrap: an untrusted repository attests under a bootstrap id of its own, then launches the session', async () => {
+  test('unstarted tab, trust bootstrap and first send: the prompt typed into the composer docks the trust card; Trust and start runs the bootstrap under an id of its own, then the session, and the turn plays to its end', async () => {
     const { page, maws, untrustedRepos } = await begin({ fixtures: [BOOTSTRAP, AUTO_ROUTED], untrusted: 1 });
     const repo = untrustedRepos[0]!;
     const project = await addProject(page, repo.root);
     const id = await plus(page, project.name);
-    const guarded = await startDirect(page, id);
-    expect(guarded).toMatchObject({ status: 'needs_trust', appSessionId: id, trust: { trustKey: repo.root, trusted: false } });
-    expect(value(await invoke(page, 'session.start', { appSessionId: id, message: null, options: { trust: 'accepted' } }))).toEqual({ status: 'starting', appSessionId: id });
+    await expect(page.getByRole('button', { name: `Location ${repo.root}` }), "C7's composer frame under the heading").toBeVisible();
+    await routeDirect(page, id);
+    await collectTurns(page);
+    const prompt = fixtureIdentity(AUTO_ROUTED).firstPrompt!;
+    await send(page, prompt.display);
+    const card = page.getByRole('group', { name: 'Trust this folder?' });
+    await expect(card, 'docked in the composer’s place').toBeVisible();
+    await expect(card.getByText(repo.root, { exact: true })).toBeVisible();
+    expect(value(await invoke(page, 'session.intent.get', { appSessionId: id }))!.message, 'the message waits behind the card').toEqual({ content: prompt.content, display: prompt.display });
+    await card.getByRole('button', { name: 'Trust and start' }).click();
     await untilPhase(page, id, 'ready');
     const events = await setupOf(page, id);
     const bootstrapId = fixtureIdentity(BOOTSTRAP).sessionId;
     expect(events.filter((e) => e.phase === 'trusting').map((e) => e.detail)).toEqual([`Trusting ${repo.root}`, `Trust recorded for ${repo.root} (bootstrap ${bootstrapId})`]);
-    expect(events.at(-1)!.outcome).toEqual({ kind: 'ready', engineSessionId: fixtureIdentity(AUTO_ROUTED).sessionId, firstTurn: 'none' });
+    expect(events.at(-1)!.outcome).toEqual({ kind: 'ready', engineSessionId: fixtureIdentity(AUTO_ROUTED).sessionId, firstTurn: 'sent' });
     expect(bootstrapId).not.toBe(fixtureIdentity(AUTO_ROUTED).sessionId);
+    await expect(row(page, id)).toBeVisible();
+    await expect(page.getByRole('heading', { name: `New session in ${project.name}` }), 'the tab became the session').toHaveCount(0);
+    await turnEnded(page, id);
+    expect(value(await invoke(page, 'session.queue.list', { appSessionId: id })).entries).toEqual([]);
     expect(initializeRequest(maws, id).workspaceTrust).toEqual({ accepted: true, directory: repo.root });
     expect(readdirSync(join(maws.userData, 'engine-host', 'journal')), 'the bootstrap id was forgotten at release').toEqual([id]);
-    await expect(row(page, id)).toBeVisible();
-    expect(value(await invoke(page, 'session.queue.list', { appSessionId: id })).entries).toEqual([]);
+    expect(maws.consoleErrors()).toEqual([]);
   });
 
   test('fork in place with distinct ids: a second tab, a pinned id, two records', async () => {
@@ -221,7 +286,7 @@ test.describe('sessions', () => {
     await expect(page.getByRole('tab')).toHaveCount(3); // Overview, the source, the fork
   });
 
-  test('rollback keeps the tab: a launch past the fixture list is refused, the worktree and record go, the failure card stays', async () => {
+  test('rollback keeps the tab: a launch past the fixture list is refused, the worktree and record go, the failure card stays, and Back to editing returns the message to the editor', async () => {
     const { page, untrustedRepos } = await begin({ fixtures: [BOOTSTRAP], untrusted: 1 });
     const repo = untrustedRepos[0]!;
     const project = await addProject(page, repo.root);
@@ -229,11 +294,13 @@ test.describe('sessions', () => {
     const removed: string[] = [];
     await page.exposeFunction('__c10Removed', (appSessionId: string) => void removed.push(appSessionId));
     await page.evaluate(() => window.maws.on('session.removed', (e) => (window as unknown as { __c10Removed(id: string): void }).__c10Removed(e.appSessionId)));
-    const location = { kind: 'newWorktree' as const, repoRoot: repo.root, name: 'e2e-fail', branch: { kind: 'new' as const, name: 'worktree-e2e-fail', base: 'HEAD' } };
-    expect(await startDirect(page, id, { location, trust: 'accepted' })).toEqual({ status: 'starting', appSessionId: id });
+    await routeDirect(page, id);
+    await chooseNewWorktree(page, repo.root, 'e2e-fail');
+    await send(page, 'This launch will be refused.');
+    await page.getByRole('group', { name: 'Trust this folder?' }).getByRole('button', { name: 'Trust and start' }).click();
     await untilPhase(page, id, 'failed');
     await expect.poll(() => removed).toEqual([id]);
-    const card = page.getByRole('region', { name: 'The session did not start' });
+    const card = page.getByRole('group', { name: 'The session did not start' });
     await expect(card).toBeVisible();
     await expect(card.getByText('replay_disabled: MAWS_E2E_REPLAY_FIXTURES has no fixture left for this launch')).toBeVisible();
     await expect(card.getByText('Worktree e2e-fail removed')).toBeVisible();
@@ -243,6 +310,10 @@ test.describe('sessions', () => {
     expect(await runGit(repo.root, ['worktree', 'list', '--porcelain'])).not.toContain('e2e-fail');
     expect(await runGit(repo.root, ['branch', '--list', 'worktree-e2e-fail'])).toBe('');
     expect(value(await invoke(page, 'session.intent.get', { appSessionId: id }))).toMatchObject({ progress: { lastFailure: { phase: 'launching' } } });
+    await card.getByRole('button', { name: 'Back to editing' }).click();
+    await expect(card).toHaveCount(0);
+    await expect(editor(page), 'the message is back in the editor').toHaveText('This launch will be refused.');
+    await expect.poll(async () => value(await invoke(page, 'session.intent.get', { appSessionId: id }))!.message, { message: 'released in main' }).toBeNull();
   });
 
   test('archive and unarchive: the sheet archives, the row goes, Archived sessions brings it back', async () => {
@@ -390,15 +461,17 @@ test.describe('sessions', () => {
     current = { ...first, repos: [repo] };
     const project = await addProject(first.page, repo.root);
     const id = await plus(first.page, project.name);
-    const draft = { doc: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'half a thought' }] }] }, attachments: [], updatedAt: '2026-09-29T10:00:00.000Z' };
-    value(await invoke(first.page, 'session.intent.patch', { appSessionId: id, patch: { draft } }));
+    await editor(first.page).click();
+    await first.page.keyboard.type('half a thought');
+    // C7 keeps an unstarted session's draft through C10's hook (the intent), written a moment after the typing
+    await expect.poll(async () => JSON.stringify(value(await invoke(first.page, 'session.intent.get', { appSessionId: id }))!.draft)).toContain('half a thought');
     await expect.poll(async () => JSON.stringify(value(await invoke(first.page, 'layout.get', { key: 'main.tabs' })).value)).toContain(id);
     await first.maws.app.close();
 
     const second = await launchCase({ fixtures: [], trusted: [repo.root], store, userData: first.maws.userData });
     current = { ...second, repos: [repo], dispose: async () => (await second.maws.cleanup(), await first.maws.cleanup()) };
     await expect(second.page.getByRole('heading', { name: `New session in ${project.name}` }), 'hydration kept the unstarted tab').toBeVisible();
-    expect(value(await invoke(second.page, 'session.intent.get', { appSessionId: id }))!.draft).toEqual(draft);
+    await expect(editor(second.page), 'the draft is back in the editor').toHaveText('half a thought');
     expect(second.maws.consoleErrors()).toEqual([]);
   });
 
@@ -406,11 +479,7 @@ test.describe('sessions', () => {
     const { page, trustedRepos } = await begin({ fixtures: [READ_ONLY] });
     const project = await addProject(page, trustedRepos[0]!.root);
     const id = await plus(page, project.name);
-    await page.evaluate(() => {
-      const turns: unknown[] = [];
-      (window as unknown as { __c10Turns: unknown[] }).__c10Turns = turns;
-      window.maws.on('session.eventBatch', (b) => b.events.forEach((e) => e.kind === 'turn.ended' && turns.push(b.appSessionId)));
-    });
+    await collectTurns(page);
     const prompt = fixtureIdentity(READ_ONLY).firstPrompt!;
     expect(await startDirect(page, id, {}, { content: prompt.content as string, display: prompt.display })).toEqual({ status: 'starting', appSessionId: id });
     await untilPhase(page, id, 'ready');
@@ -419,16 +488,16 @@ test.describe('sessions', () => {
     const needsYou = page.getByRole('list', { name: 'Needs you' });
     const entry = needsYou.getByRole('listitem').first();
     await expect(entry).toBeVisible({ timeout: 20_000 });
-    const title = (await entry.getAttribute('data-title'))!;
-    const card = page.getByRole('dialog', { name: title });
+    // C7's X4 card in C5's hover placement (registered in C5's requestCard slot): the tool as its heading
+    const card = page.getByRole('dialog').filter({ has: page.getByRole('heading', { name: 'Read' }) });
     await expect(async () => {
       await page.mouse.move(700, 400);
       await entry.getByRole('button').first().hover();
       await expect(card).toBeVisible({ timeout: 2_000 });
     }).toPass({ timeout: 10_000 });
-    await expect(card.getByText('Read')).toBeVisible();
+    await expect(card.getByText('Approval needed')).toBeVisible();
     await card.getByRole('button', { name: 'Approve' }).click();
     await expect(needsYou.getByRole('listitem')).toHaveCount(0);
-    await expect.poll(() => page.evaluate(() => (window as unknown as { __c10Turns: string[] }).__c10Turns), { timeout: 20_000 }).toContain(id);
+    await turnEnded(page, id);
   });
 });
