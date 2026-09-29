@@ -122,6 +122,11 @@ describe('live suite bookkeeping', () => {
     expect(persistingControlOf('session.memoryAppend', pathTarget('/Users/x/.claude-other/notes.md'), home)).toBeNull();
     expect(persistingControlOf('session.memoryAppend', pathTarget(join(ownerConfigHome(), 'memory', 'n.md')))).toBe('memory:user'); // the default: the owner's home
     expect(persistingControlOf('session.getSettings', { appSessionId: 'a' })).toBeNull();
+    // C10 start: the launch attestation records trust in the global config as set_cwd's does
+    expect(persistingControlOf('session.launch', { spec: liveSpec('/tmp/x', { trust: { accepted: true, directory: '/tmp/x' } }) })).toBe('launch:trust');
+    expect(persistingControlOf('session.launch', { spec: liveSpec('/tmp/x') })).toBeNull();
+    expect(() => assertConfigHomeSafe({ configHome: null, controls: ['launch:trust'] })).toThrow(/launch:trust.*owner's config home/);
+    // C10 end
   });
 
   it('the live host fails a case before any spawn when its config home is the owner\'s and it declares a persisting control, and refuses an undeclared one at the call', async () => {

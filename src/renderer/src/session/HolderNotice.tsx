@@ -1,8 +1,10 @@
-// In place of the composer for a foreign-live session (D-12): who holds it and that MAWS only reads it. A background
-// job can later be attached in a terminal tab (C10); until then the button is disabled.
+// In place of the composer for a foreign-live session (D-12): who holds it and that MAWS only reads it, with what can be
+// done about it (C10's actions: attach to a background job in a terminal tab, fork a copy).
+import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
+import { HolderActions } from '../sessions/HolderActions'; // C10
 
-export function HolderNotice({ holder }: { holder: Extract<SessionRecord['holder'], { kind: 'terminal' | 'background_job' }> }) {
+export function HolderNotice({ appSessionId, holder }: { appSessionId: AppSessionId; holder: Extract<SessionRecord['holder'], { kind: 'terminal' | 'background_job' }> }) {
   const pid = holder.pid === null ? '' : ` · pid ${holder.pid}`;
   const text = holder.kind === 'terminal' ? `Live in Terminal${pid} · read-only` : `Live as background job${pid} · read-only`;
   return (
@@ -11,11 +13,9 @@ export function HolderNotice({ holder }: { holder: Extract<SessionRecord['holder
         ⌁
       </span>
       <span className="min-w-0 flex-1 truncate">{text}</span>
-      {holder.kind === 'background_job' && (
-        <button type="button" disabled title="Arrives with C10" className="rounded-sm border border-border px-2 py-0.5 whitespace-nowrap disabled:text-fg-faint">
-          Attach in a terminal tab
-        </button>
-      )}
+      {/* C10 start: Attach in a terminal tab (a job with a known id) and Fork a copy (any holder) */}
+      <HolderActions appSessionId={appSessionId} holder={holder} />
+      {/* C10 end */}
     </div>
   );
 }

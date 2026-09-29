@@ -10,7 +10,7 @@ import { FileSessionStateStore } from './file-session-state-store';
 const ID = 'app-store-1' as AppSessionId;
 const spec = LaunchSpecSchema.parse({
   appSessionId: ID, cwd: '/tmp/x', additionalDirectories: [], model: 'sonnet', effort: null, permissionMode: null, gateway: 'gateway', subagentModel: null,
-  resume: null, sessionId: null, trust: null, mcpConfig: null, extraSettings: null, maxBudgetUsd: null, replay: null,
+  resume: null, sessionId: null, trust: null, mcpConfig: null, extraSettings: null, maxBudgetUsd: null, inheritGrantsFrom: null /* C10 */, replay: null,
 });
 const entry = (over: Partial<QueueEntry> = {}): QueueEntry => ({
   queueId: 'q-1', appSessionId: ID, content: 'hello', createdAt: '2026-09-28T10:00:00.000Z', state: 'queued', messageUuid: null, submittedAt: null, uncertain: false, steer: false, ...over,

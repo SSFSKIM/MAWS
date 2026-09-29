@@ -37,6 +37,7 @@ function spec(overrides: Partial<LaunchSpec> = {}): LaunchSpec {
     extraSettings: null,
     maxBudgetUsd: null,
     replay: null,
+    inheritGrantsFrom: null, // C10
     ...overrides,
   });
 }

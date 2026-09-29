@@ -41,6 +41,17 @@ import { ClaudeUsageReader, claudeUsageDir } from './usage/claude-usage-reader';
 import { shell } from 'electron';
 import { registerFilesHandlers } from './files/register';
 // C8c end
+// C10 start (emit comes with C3's imports, createGitRunner with C7's, shell with C8c's)
+import { captureShellEnvironment } from '@shared/host/shell-env';
+import { WorktreeService } from './git/worktrees';
+import { registerWorktreeHandlers } from './git/worktrees-register';
+import { BootstrapNotes, FileIntentStore } from './sessions/intents';
+import { ReplaySeam } from './sessions/replay-seam';
+import { trashFor } from './sessions/e2e-trash';
+import { openDialogFor } from './files/e2e-pick';
+import { SessionService } from './sessions/service';
+import { engineHostSettled, registerSessionServiceHandlers } from './sessions/service-register';
+// C10 end
 // C11 start
 // (electron's `shell` comes with C8c's imports above)
 import type { CommandResult } from '@shared/ipc/schema';
@@ -126,6 +137,7 @@ app.whenReady().then(() => {
   // C4 start: registered after C5's will-quit above, so the index source has stopped before the index it reads closes
   app.on('will-quit', () => index.close());
   // C4 end
+
   // The application menu from the action table, rebuilt on settings and on the page's registered handlers.
   registerMenuHandlers(startMenu({ settings: () => settings.state().settings, emit }));
   // Window bounds persist under `window.main`; a window opens where the last one was left, if that is still on screen.
@@ -173,10 +185,11 @@ app.whenReady().then(() => {
   registerMainHandler('git.lsFiles', (input) => files.list(input));
   registerMainHandler('layout.pickFiles', (input, { sender }) =>
     pickFiles(input, {
-      showOpenDialog: (options) => {
+      // C10: the e2e seam (MAWS_E2E=1 never opens the native panel; MAWS_E2E_PICK_PATHS or cancelled), else the panel
+      showOpenDialog: openDialogFor(process.env, (options) => {
         const win = BrowserWindow.fromWebContents(sender);
         return win ? dialog.showOpenDialog(win, options) : dialog.showOpenDialog(options);
-      },
+      }),
     }),
   );
   app.on('will-quit', () => usage.stop());
@@ -189,6 +202,32 @@ app.whenReady().then(() => {
   });
   app.on('will-quit', () => filesService.dispose());
   // C8c end
+  // C10 start: the worktree service (M2): git.worktree.*, every git mutation MAWS makes, with occupancy from holder
+  // authority (C3's process table and C4's fresh registry read through the engine host, the index's records).
+  const worktrees = new WorktreeService({ git: createGitRunner(), holders: { dispatch: hosts.dispatch, sessions: index.sessions } });
+  registerWorktreeHandlers(worktrees);
+  // The session service (M3): intents, start, fork, archive, delete, rename and the trust check, reading the global
+  // config and the store with the environment the engine receives (the login-shell capture, as C3's host builds every
+  // launch's). Its start resets every stale `self` holder at once (D-16), then forgets stale bootstrap ids and
+  // reconciles interrupted handoffs once the engine host answers; `session.intent.list` waits for that.
+  const sessionsDir = join(app.getPath('userData'), 'sessions');
+  const sessionService = new SessionService({
+    index,
+    host: { dispatch: hosts.dispatch, onEvent: (name, listener) => hosts.onEvent(name, listener), ready: () => engineHostSettled(hosts) },
+    git: createGitRunner(),
+    worktrees,
+    intents: new FileIntentStore(join(sessionsDir, 'intents')),
+    bootstraps: new BootstrapNotes(join(sessionsDir, 'bootstraps')),
+    userData: app.getPath('userData'),
+    env: captureShellEnvironment(),
+    emit,
+    trash: trashFor(process.env, (path) => shell.trashItem(path)), // the e2e seam (MAWS_E2E_TRASH_DIR) or the Trash
+    reveal: (path) => shell.showItemInFolder(path),
+    replay: ReplaySeam.fromEnv(process.env, process.cwd()), // the e2e seam (MAWS_E2E_REPLAY_FIXTURES)
+  });
+  registerSessionServiceHandlers(sessionService);
+  sessionService.start().catch((error: unknown) => console.error('[sessions] the session service failed to start:', error));
+  // C10 end
 
   // C11 start: the plumbing of settings v3 (C11 execution document, M1). The engine host's binary configuration follows
   // settings.engine; ClaudeUsage's hand-off and status; the reveal guard; the export's Save as….

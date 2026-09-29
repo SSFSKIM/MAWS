@@ -11,7 +11,7 @@ const status = (over: Partial<EngineSessionStatus> = {}): EngineSessionStatus =>
     subagentModel: null, modelOverrides: {}, engineVersion: '2.1.283', fileCheckpointing: true,
     fastMode: { state: null, disabledReason: null }, plugins: [], pluginErrors: [], pluginWarnings: [],
     backgroundTasks: [], grants: [], mcpServers: [], heldPeerMessages: [], pendingRequests: 0, queue: { length: 0, paused: false }, keepAlive: [],
-    memory: { rssKiB: null, treeRssKiB: null, sampledAt: null }, journalPath: '/j', hostHooks: [], lastEventSeq: 0, ...over,
+    memory: { rssKiB: null, treeRssKiB: null, sampledAt: null }, journalPath: '/j', hostHooks: [], lastEventSeq: 0, trust: { attested: false, recorded: null } /* C10 */, ...over,
   });
 
 const record = (): SessionRecord =>

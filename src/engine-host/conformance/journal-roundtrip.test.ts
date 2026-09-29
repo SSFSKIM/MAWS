@@ -108,7 +108,7 @@ describe('journal round-trips into the same graph', () => {
     const prompt = (seq: number) => (fixture.find((r) => r.seq === seq)!.frame as { message: { content: string } }).message.content;
     const spec = LaunchSpecSchema.parse({
       appSessionId: 'app-ring', cwd: '/tmp/maws-ring', additionalDirectories: [], model: null, effort: null, permissionMode: null, gateway: 'gateway', subagentModel: null,
-      resume: null, sessionId: null, trust: null, mcpConfig: null, extraSettings: null, maxBudgetUsd: null, replay: 'spikes/protocol-probe/fixtures/pass2/rewind.jsonl',
+      resume: null, sessionId: null, trust: null, mcpConfig: null, extraSettings: null, maxBudgetUsd: null, inheritGrantsFrom: null /* C10 */, replay: 'spikes/protocol-probe/fixtures/pass2/rewind.jsonl',
     });
     await handlers.get('session.launch')!({ spec });
     for (let s = await status(); s.process !== 'ready'; s = await status()) await new Promise((r) => setTimeout(r, 5));

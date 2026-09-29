@@ -194,6 +194,7 @@ describe('toolbar', () => {
       ['Pin', false],
       ['Rename…', true],
       ['Fork', true],
+      ['Fork to a new worktree…', true], // C10
       ['Archive', true],
       ['Delete conversation…', true],
     ]); // no worktree, so no "Remove worktree…", as in the sidebar's menu

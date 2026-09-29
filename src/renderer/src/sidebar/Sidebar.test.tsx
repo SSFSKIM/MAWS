@@ -93,8 +93,9 @@ describe('sidebar renders eleven sessions', () => {
     fireEvent.contextMenu(row('Charter + research'));
     const menu = await screen.findByRole('menu');
     const items = within(menu).getAllByRole('menuitem');
-    expect(items.map((m) => m.textContent)).toEqual(['Open', 'Open in split', 'Pin', 'Rename…', 'Fork', 'Archive', 'Delete conversation…']);
-    expect(items.map((m) => m.hasAttribute('data-disabled'))).toEqual([false, true, true, true, true, true, true]);
+    // C10: a live session offers no Resume; "Fork to a new worktree…" sits beside the fork in place
+    expect(items.map((m) => m.textContent)).toEqual(['Open', 'Open in split', 'Pin', 'Rename…', 'Fork', 'Fork to a new worktree…', 'Archive', 'Delete conversation…']);
+    expect(items.map((m) => m.hasAttribute('data-disabled'))).toEqual([false, true, true, true, true, true, true, true]);
   });
 
   it('gives a collapsed project its roll-up and hides it while expanded', () => {
