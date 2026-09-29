@@ -282,3 +282,19 @@ describe('store section of the diagnostics strip', () => {
     expect(screen.queryByRole('status', { name: 'git status' })).toBeNull();
   });
 });
+
+// C7 start
+describe("C7's registrations from the app", () => {
+  afterEach(() => {
+    cleanup();
+    delete (window as { maws?: MawsBridge }).maws;
+  });
+
+  it("registers the composer's edit-and-resubmit adapter as the transcript's editAndResubmit", async () => {
+    fakeMain('light');
+    await renderApp();
+    const [{ registeredActions }, { editAndResubmitRow }] = await Promise.all([import('./transcript'), import('./composer')]);
+    expect(registeredActions().editAndResubmit).toBe(editAndResubmitRow);
+  });
+});
+// C7 end

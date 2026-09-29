@@ -20,9 +20,10 @@ import { PanelHost } from './panel/PanelHost';
 import { adoptTerminals, terminalTool } from './tools/terminal';
 // C8a end
 // C7 start
-import { ComposerAppKeys, connectComposer } from './composer';
+import { ComposerAppKeys, connectComposer, editAndResubmitRow } from './composer';
 import { connectRequestCard } from './request-card';
 import { connectStatusLine } from './statusline';
+import { registerTranscriptActions } from './transcript';
 // C7 end
 
 export function App() {
@@ -59,6 +60,7 @@ export function App() {
   useEffect(() => connectRequestCard(), []);
   useEffect(() => connectStatusLine(), []); // the shared ClaudeUsage read and the near-limit banner, app-wide
   useEffect(() => connectComposer(), []); // the composer in C5's composer slot
+  useEffect(() => registerTranscriptActions({ editAndResubmit: editAndResubmitRow }), []); // a bubble's Edit prefills the composer in edit mode
   // C7 end
 
   // index.html ships data-theme="light" for the first paint; from then on main's resolved theme decides.
