@@ -90,6 +90,13 @@ button.transcript-chip:hover { background: var(--bg-hover); }
 /* Assistant text: a long path or URL wraps rather than scrolling a narrow transcript sideways (as the bubble does) */
 .transcript-answer { padding: 4px 0 12px; line-height: var(--lh-prose); overflow-wrap: anywhere; }
 .transcript-commentary { padding: 2px 0 6px; color: var(--fg-muted); line-height: var(--lh-prose); overflow-wrap: anywhere; }
+/* The streaming caret after the last word. Streamdown puts it on its root's last child, which under `dir="auto"` is the
+   block's `display: contents` wrapper, so it would land on a line of its own below the paragraph; it moves into the
+   block's last paragraph, heading or list item instead. `--streamdown-caret` is set only while the caret shows. */
+.transcript-prose > [dir]:last-child::after { content: none; }
+.transcript-prose > [dir]:last-child > :is(p, h1, h2, h3, h4, h5, h6):last-child::after,
+.transcript-prose > [dir]:last-child > :is(ul, ol):last-child > li:last-child::after,
+.transcript-prose > [dir]:last-child > blockquote:last-child > p:last-child::after { content: var(--streamdown-caret); }
 .transcript-prose :not(pre) > code { padding: 1px 5px; border-radius: 4px; background: var(--bg-active); font-family: var(--font-mono); font-size: 0.9em; }
 .transcript-prose h1 { font-size: calc(var(--text-prose) * 1.3); }
 .transcript-prose h2 { font-size: calc(var(--text-prose) * 1.2); }

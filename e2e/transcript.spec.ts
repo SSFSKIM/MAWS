@@ -390,6 +390,29 @@ test('a long token in prose wraps in a narrow transcript', async ({ harness }) =
   expect(harness.consoleErrors()).toEqual([]);
 });
 
+// The streaming caret sits after the last word of the answer, inside its paragraph, not on a line of its own below it.
+test('the streaming caret follows the last word of a one-paragraph answer', async ({ harness }) => {
+  const { page } = harness;
+  await harnessReady(page);
+  await load(page, 'events/streaming-block');
+  // Up to the answer's first delta (s5): the text block is live.
+  for (let i = 0; i < 6; i += 1) await page.evaluate(() => (window as unknown as HarnessWindow).__maws_harness.step());
+  const prose = page.locator('[data-kind="assistant_text"] .transcript-prose');
+  await expect(prose).toHaveCount(1);
+  await expect(prose).toHaveAttribute('style', /--streamdown-caret/);
+  const caret = await prose.evaluate((element) => {
+    const block = element.lastElementChild!; // the block's wrapper
+    const paragraph = block.lastElementChild!;
+    return { wrapper: getComputedStyle(block, '::after').content, tag: paragraph.tagName, paragraph: getComputedStyle(paragraph, '::after').content };
+  });
+  expect(caret).toEqual({ wrapper: 'none', tag: 'P', paragraph: '" ▋"' });
+  // Complete, the caret is gone.
+  for (let i = 0; i < 4; i += 1) await page.evaluate(() => (window as unknown as HarnessWindow).__maws_harness.step());
+  await expect(prose).not.toHaveAttribute('style', /--streamdown-caret/);
+  expect(await prose.evaluate((element) => getComputedStyle(element.querySelector('p')!, '::after').content)).toBe('none');
+  expect(harness.consoleErrors()).toEqual([]);
+});
+
 // Acceptance item 9: the drill-in is this same Transcript with `variant: 'child'` over the child's own events (C8's
 // panel does this through the public surface; the harness stands in for it).
 test('child transcript renders the subagent\u2019s events only', async ({ harness }) => {
