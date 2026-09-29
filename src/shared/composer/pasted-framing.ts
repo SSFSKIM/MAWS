@@ -14,6 +14,12 @@ export function neutralisePastedTags(text: string): string {
   return text.replace(/<(?!\\)(?=\/?pasted_content)/gi, '<\\');
 }
 
+// The inverse, for recall: the text as typed from text that went on the wire (a user row's text). Lossy only for a
+// typed `<\pasted_content`, which comes back as `<pasted_content`.
+export function restorePastedTags(text: string): string {
+  return text.replace(/<\\(?=\/?pasted_content)/gi, '<');
+}
+
 // The tag id: the first four lowercase hex digits of SHA-256 of the session id; four random hex digits when there is no
 // session yet (an unstarted session's first send).
 export function pastedTagId(sessionId: string | null, random: () => number = Math.random): string {
