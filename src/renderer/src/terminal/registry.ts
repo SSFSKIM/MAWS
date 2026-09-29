@@ -184,7 +184,7 @@ export class TerminalRegistry {
   private metaHeld = false; // a ⌘ keydown seen and not yet released (link activation events may not carry metaKey)
   private theme: TerminalTheme | null = null;
   private themeKey = '';
-  private fontKey: string | null = null; // C11: the last font handed to a renderer, so a root `--font-mono` change reaches them
+  private fontKey: string | null = null; // C11: the font the renderers were last given, so a root `--font-mono` change reaches them
   private hostState: HostState | null = null;
   private readonly webglBudget: number;
 
@@ -732,7 +732,7 @@ export class TerminalRegistry {
   // `data-theme`: read for each new renderer, and pushed to every handle, hidden ones included, when it changes.
   private currentFont(): TerminalFont {
     const font = this.deps.readFont();
-    this.fontKey = JSON.stringify(font);
+    this.fontKey ??= JSON.stringify(font); // what every renderer holds; only refreshFont moves it, so none is skipped
     return font;
   }
 
