@@ -171,6 +171,7 @@ describe('failure card', () => {
     withMain({ 'session.start': answer(starting), 'session.intent.resolveWorktree': () => ({ intent: intent(), worktree: { path, branch: 'worktree-accept-fail', createdHere: false, state: 'kept', detail: null, branchState: 'kept' } }) });
     putIntent(intent({ message: MESSAGE, progress: { ...intent().progress, worktree: { path, branch: 'worktree-accept-fail', head: 'abc', createdHere: true } } }));
     render(<SetupCard appSessionId={ID} />);
+    act(() => useSetup.getState().applySetup({ appSessionId: ID, phase: 'launching', detail: 'Starting', outcome: null })); // this window follows the start
     expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
     act(() =>
       useSetup.getState().applySetup({
@@ -227,6 +228,41 @@ describe('failure card', () => {
     expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
     expect(useNotices.getState().notices.map((n) => n.text)).toEqual(['the model is not available']);
     connection.disconnect();
+  });
+
+  // the window reloaded while a card waited (or a start ran): main holds the message and reports no failure, and the
+  // card lived in the old page; the tab offers Retry and Back to editing instead of a composer locked with nothing to press
+  it('after a reload, an intent still holding its message offers Retry (which docks the trust card again) and Back to editing', async () => {
+    withMain({ 'session.intent.list': () => ({ intents: [intent({ message: MESSAGE })] }), 'session.deletions.list': () => ({ manifests: [] }), 'session.start': answer({ status: 'needs_trust', appSessionId: ID, trust: trustState() }), 'session.intent.release': () => intent() });
+    const connection = connectSetup(fake.client);
+    await connection.ready;
+    render(<SetupCard appSessionId={ID} />);
+    expect(await screen.findByText('Your first message has not been sent.')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Back to editing' })).toBeTruthy();
+    await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(fake.invoked('session.start')).toEqual([{ appSessionId: ID, message: null, options: {} }]);
+    await userEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
+    expect(returned).toEqual([MESSAGE]);
+    expect(fake.invoked('session.intent.release')).toEqual([{ appSessionId: ID }]);
+    connection.disconnect();
+  });
+
+  it('a start this window sent shows no such card before its first phase arrives', async () => {
+    withMain({ 'session.start': answer(starting) });
+    putIntent(intent({ message: MESSAGE }));
+    render(<SetupCard appSessionId={ID} />);
+    expect(await act(() => startIntent(ID, MESSAGE))).toEqual({ ok: true });
+    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
+  });
+
+  it('a Retry main refuses because a start still runs hands nothing back', async () => {
+    withMain(); // session.start waits for the test's answer
+    putIntent(intent({ message: MESSAGE }));
+    render(<SetupCard appSessionId={ID} />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Retry' }));
+    await act(() => fake.fail('session.start', `starting: a start is in flight for ${ID}`));
+    expect(returned).toEqual([]);
+    expect(useNotices.getState().notices.map((n) => [n.level, n.text])).toEqual([['info', 'Starting…']]);
   });
 
   it('Discard changes and remove needs its acknowledgement; Back to editing returns the message and releases it', async () => {

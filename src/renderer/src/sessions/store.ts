@@ -39,6 +39,7 @@ export interface SetupState {
   dismissed: Set<AppSessionId>; // failures the human dismissed ("Back to editing"), until the next start
   removed: Set<AppSessionId>; // intents main dropped: an older snapshot never brings one back (ids are never reused)
   resumes: Map<AppSessionId, FirstMessage>; // the message of a record's resume this window started, until `ready` or `failed`
+  followed: Set<AppSessionId>; // ids this window sent a start for or saw a setup phase of (their answers and events tell their story)
   applyIntents(intents: SetupIntent[]): void;
   applyIntentChanged(event: EventPayload<'session.intent.changed'>): void;
   applySetup(event: SetupEvent): void;
@@ -48,6 +49,7 @@ export interface SetupState {
   settle(appSessionId: AppSessionId): void; // the human dismissed what the last start left: its card and its failure
   setInvoking(appSessionId: AppSessionId, invoking: boolean): void;
   holdResume(appSessionId: AppSessionId, message: FirstMessage): void;
+  follow(appSessionId: AppSessionId): void; // a start of the id this window sent (its answer and events follow)
   applyDeletions(manifests: DeletionManifestView[]): void;
   setDeletion(appSessionId: AppSessionId, manifest: DeletionManifestView | null): void;
 }
@@ -73,6 +75,7 @@ export function createSetupStore() {
     dismissed: new Set(),
     removed: new Set(),
     resumes: new Map(),
+    followed: new Set(),
     applyIntents(intents) {
       const { removed } = get();
       const next = new Map(get().intents);
@@ -100,7 +103,7 @@ export function createSetupStore() {
         event.phase === 'failed' && event.outcome?.kind === 'relay_unreachable' ? new Map(get().cards).set(id, { kind: 'relay', health: event.outcome.health, message }) : get().cards;
       // a resume's message is the engine's at `ready`, the card's or the editor's at `failed` (connectSetup hands it back)
       const resumes = event.phase === 'ready' || event.phase === 'failed' ? without(get().resumes, id) : get().resumes;
-      set((s) => ({ phases: new Map(s.phases).set(id, event), cards, resumes }));
+      set((s) => ({ phases: new Map(s.phases).set(id, event), cards, resumes, followed: s.followed.has(id) ? s.followed : new Set(s.followed).add(id) }));
     },
     setIntent(intent) {
       get().applyIntentChanged({ appSessionId: intent.appSessionId, intent });
@@ -120,8 +123,12 @@ export function createSetupStore() {
       if (invoking) {
         next.add(appSessionId);
         dismissed.delete(appSessionId); // a new start's failure is shown again
+        get().follow(appSessionId);
       } else next.delete(appSessionId);
       set({ invoking: next, dismissed });
+    },
+    follow(appSessionId) {
+      if (!get().followed.has(appSessionId)) set((s) => ({ followed: new Set(s.followed).add(appSessionId) }));
     },
     holdResume(appSessionId, message) {
       set((s) => ({ resumes: new Map(s.resumes).set(appSessionId, message) }));
@@ -146,16 +153,24 @@ export function isStarting(s: Pick<SetupState, 'invoking' | 'phases'>, appSessio
   return s.invoking.has(appSessionId) || (phase !== undefined && RUNNING.has(phase));
 }
 
+// What the tab shows for an intent that holds its first message with nothing failed and no card: the page reloaded
+// while a card waited or a start ran (main marks a restart's own case failed at start). Retry re-runs the guards,
+// which dock the card again; Back to editing hands the message back.
+export const UNSENT: SetupFailure = { message: 'Your first message has not been sent.', resources: { worktree: null, record: 'none', transcript: 'none' } };
+
 // The failure the tab's card shows, while the setup's intent is retained: the latest `failed` event's error, else
-// (after a restart, or before any event) the intent's last failure. None while a start runs or a card waits, or once
-// the human went back to editing. A failure without an intent is a record's (a resume, or a launch that kept its
-// transcript): an exited session with the engine's own notice, not a card (Rollback (1)).
-export function failureOf(s: Pick<SetupState, 'invoking' | 'phases' | 'intents' | 'cards' | 'dismissed'>, appSessionId: AppSessionId): SetupFailure | null {
-  if (!s.intents.has(appSessionId) || isStarting(s, appSessionId) || s.cards.has(appSessionId) || s.dismissed.has(appSessionId)) return null;
+// (after a restart, or before any event) the intent's last failure, else UNSENT for a held message whose start this
+// window never followed. None while a start runs or a card waits, or once the human went back to editing. A failure
+// without an intent is a record's (a resume, or a launch that kept its transcript): an exited session with the
+// engine's own notice, not a card (Rollback (1)).
+export function failureOf(s: Pick<SetupState, 'invoking' | 'phases' | 'intents' | 'cards' | 'dismissed' | 'followed'>, appSessionId: AppSessionId): SetupFailure | null {
+  const intent = s.intents.get(appSessionId);
+  if (intent === undefined || isStarting(s, appSessionId) || s.cards.has(appSessionId) || s.dismissed.has(appSessionId)) return null;
   // the stored objects themselves, so a selector over this answer is stable between renders
   const event = s.phases.get(appSessionId);
   if (event?.phase === 'failed' && event.outcome?.kind === 'error') return event.outcome;
-  return s.intents.get(appSessionId)?.progress.lastFailure ?? null;
+  if (intent.progress.lastFailure !== null) return intent.progress.lastFailure;
+  return intent.message !== null && !s.followed.has(appSessionId) ? UNSENT : null;
 }
 
 // What a resume held elsewhere tells the human (the engine's own refusal: a job took the session after MAWS's read).

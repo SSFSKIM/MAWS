@@ -214,6 +214,26 @@ describe('rollback per resource', () => {
     });
   });
 
+  // an attempt that created its checkout and died before any record (here in the trust bootstrap) is marked failed at
+  // start with the checkout it retains, so the failure card's "Keep the worktree" and "Discard" are reachable
+  it('quit after the worktree was created and before a record: failed at start, the checkout reported kept', async () => {
+    const id = await create(worktree('quit'));
+    h.trust.write({}); // the repository is untrusted: the accepted decision runs a bootstrap
+    h.host.launchHangs = (spec) => spec.appSessionId !== id; // the app dies while the bootstrap launches
+    await h.service.startSession(id, { message: null, options: { trust: 'accepted' } });
+    await h.until(() => intentFile(h, id)?.progress.bootstrap != null && h.host.calls.some((c) => c.name === 'session.launch'));
+    await h.restart();
+    expect(h.host.launches).toEqual([]);
+    expect(intentFile(h, id)).toMatchObject({
+      message: null,
+      progress: {
+        worktree: { path: managed('quit'), createdHere: true },
+        lastFailure: { phase: 'trusting', message: 'MAWS quit before the session started', resources: { worktree: { path: managed('quit'), branch: 'worktree-quit', createdHere: true, state: 'kept', branchState: 'kept' }, record: 'none', transcript: 'none' } },
+      },
+    });
+    expect((await h.service.resolveRetainedWorktree(id, 'keep')).intent.location).toEqual({ kind: 'existingWorktree', repoRoot: repo.root, path: managed('quit') });
+  });
+
   it('forks to a new worktree: the worktree under the repository root, the fork launched there with the pin, the source untouched', async () => {
     const sid = '00000000-0000-4000-8000-0000000f0f0f' as SessionId;
     const source = h.index.sessions.upsertFromSummary(summary({ sessionId: sid, directory: repo.root })).record;

@@ -23,7 +23,7 @@ import { DeletionManifests, type DeletionManifest } from './delete-manifest';
 import { checkAdditionalDirectories, checkLocation, sessionDirectoryOf, trustDirectoryOf, type RuleVerdict } from './intent-rules';
 import { readSettings } from './launch-mapping';
 import { archiveRecord, deleteRecord, forkIntentOf, previewDeletion, renameRecord, revealablePath } from './record-actions';
-import { reconcileIntent, retainedWorktree } from './recovery';
+import { markInterrupted, reconcileIntent, retainedWorktree } from './recovery';
 import { removeCreatedWorktree, type Setup } from './setup';
 import { forkRefusal, guardIntentStart, guardResumeStart, type GuardContext, type Guarded } from './start-guards';
 import { trustKeyOf, trustStateOf } from './trust';
@@ -102,6 +102,10 @@ export class SessionService {
     };
     await this.deps.intents.load();
     await this.deps.host.ready?.();
+    // a start the quit cut short before any record is marked failed, so its tab offers Retry (recovery.ts)
+    for (const intent of this.deps.intents.list()) {
+      await markInterrupted(this.s, intent).catch((error: unknown) => this.log(`${intent.appSessionId}: could not mark the interrupted start: ${error instanceof Error ? error.message : String(error)}`));
+    }
     // nothing is reserved at start, so every bootstrap id a previous run left is forgotten
     for (const intent of this.deps.intents.list()) {
       const bootstrap = intent.progress.bootstrap;

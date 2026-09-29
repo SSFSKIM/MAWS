@@ -46,6 +46,24 @@ export async function reconcileIntent(s: Setup, intent: SetupIntent): Promise<Re
   return 'not_started';
 }
 
+// An intent with no record whose start was cut short: the app quit in the `worktree` or `trusting` phase, or while a
+// trust or relay card waited for the human (that card lived in the renderer only). It still holds its first message,
+// or a checkout the attempt created, and nothing failed, so its tab would show no card and no way forward. It is
+// marked failed as the quit left it, the phase the furthest its progress shows, so the tab's failure card offers Retry
+// (which re-runs the guards and docks the trust or relay card again) and the retained checkout's two resolutions. An
+// intent already failed keeps its own account. Runs at start before the bootstrap ids are forgotten, whose note is
+// what shows a quit in the trust bootstrap.
+export async function markInterrupted(s: Setup, intent: SetupIntent): Promise<void> {
+  const p = intent.progress;
+  const holds = intent.message !== null || p.worktree?.createdHere === true;
+  if (!holds || p.send !== null || p.lastFailure !== null || s.sessions.get(intent.appSessionId) !== null) return;
+  const phase = p.launch !== null ? 'launching' : p.bootstrap !== null || p.trustRecorded ? 'trusting' : 'worktree';
+  const resources: SetupResources = { worktree: retainedWorktree(intent), record: 'none', transcript: 'none' };
+  const next: SetupIntent = { ...intent, updatedAt: s.now(), progress: { ...p, lastFailure: { at: s.now(), phase, message: 'MAWS quit before the session started', resources } } };
+  await s.intents.put(next);
+  s.emit('session.intent.changed', { appSessionId: intent.appSessionId, intent: next });
+}
+
 // The checkout an intent keeps across a restart, as the tab reports it: kept, its branch kept when this intent made it.
 export function retainedWorktree(intent: SetupIntent): SetupResources['worktree'] {
   const w = intent.progress.worktree;

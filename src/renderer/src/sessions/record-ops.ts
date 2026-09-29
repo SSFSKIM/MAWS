@@ -73,6 +73,7 @@ export async function forkSession(appSessionId: AppSessionId, target: ForkTarget
   if (!result.ok) return { ok: false, error: result.error.message };
   const outcome = result.value;
   const fork = outcome.appSessionId as AppSessionId;
+  useSetup.getState().follow(fork); // this window started it: its answer and phases tell its tab what runs
   // a fork into a directory that needs trust, or with the relay down, opens with its card waiting
   if (outcome.status === 'needs_trust') useSetup.getState().dock(fork, { kind: 'trust', trust: outcome.trust, message: null });
   if (outcome.status === 'relay_unreachable') useSetup.getState().dock(fork, { kind: 'relay', health: outcome.health, message: null });

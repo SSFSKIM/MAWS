@@ -185,6 +185,49 @@ describe('handoff recovery', () => {
     });
   });
 
+  // An intent with no record that still holds a message had no way forward after a restart: nothing had failed, and the
+  // card it waited behind lived in the renderer only. It is marked failed at start, so its tab shows Retry.
+  describe('a start that never reached a record', () => {
+    const quitFailure = (phase: string) => ({ phase, message: 'MAWS quit before the session started', resources: { worktree: null, record: 'none', transcript: 'none' } });
+
+    it('quit during the trust bootstrap: failed at trusting with its message; Retry bootstraps, launches and sends once', async () => {
+      const untrusted = h.dir('untrusted');
+      const other = (await h.service.create({ projectId: null, location: { kind: 'directory', path: untrusted } })).appSessionId;
+      h.host.launchHangs = (spec) => spec.appSessionId !== other; // the app dies while the bootstrap launches
+      await h.service.startSession(other, { message: MESSAGE, options: { trust: 'accepted' } });
+      await h.until(() => intentFile(h, other)?.progress.bootstrap != null && h.host.calls.some((c) => c.name === 'session.launch'));
+      await afterRestart(null);
+      expect(h.index.sessions.get(other)).toBeNull();
+      expect(intentFile(h, other)).toMatchObject({ message: MESSAGE, progress: { bootstrap: null, send: null, lastFailure: quitFailure('trusting') } });
+      await h.service.startSession(other, { message: null, options: {} });
+      expect(await h.settled(other)).toMatchObject({ phase: 'ready', outcome: { firstTurn: 'sent' } });
+      expect(h.host.launches.map((l) => l.appSessionId === other)).toEqual([false, true]);
+      expect(h.host.calledWith('session.send')).toEqual([{ appSessionId: other, content: 'Reply OK' }]);
+    });
+
+    it('quit while the trust card waited: failed with its message; Retry asks for trust again', async () => {
+      const untrusted = h.dir('untrusted');
+      const other = (await h.service.create({ projectId: null, location: { kind: 'directory', path: untrusted } })).appSessionId;
+      expect(await h.service.startSession(other, { message: MESSAGE, options: {} })).toMatchObject({ status: 'needs_trust' });
+      await afterRestart(null);
+      expect(intentFile(h, other)).toMatchObject({ message: MESSAGE, progress: { lastFailure: quitFailure('worktree') } });
+      expect(await h.service.startSession(other, { message: null, options: {} })).toMatchObject({ status: 'needs_trust' });
+      expect(intentFile(h, other)!.message).toEqual(MESSAGE);
+    });
+
+    it('an intent nobody started, or one already failed, is left as it is', async () => {
+      await h.service.patch(id, { draft: { doc: { type: 'doc' }, attachments: [], updatedAt: '2026-09-29T00:00:00.000Z' } });
+      const failed = (await h.service.create({ projectId: null, location: { kind: 'directory', path: h.work } })).appSessionId;
+      h.host.script = () => ({ answer: { refused: 'binary_missing', message: 'no engine binary' } });
+      await h.service.startSession(failed, { message: MESSAGE, options: {} });
+      expect(await h.settled(failed)).toMatchObject({ phase: 'failed' });
+      const before = [intentFile(h, id), intentFile(h, failed)];
+      expect(before[1]).toMatchObject({ message: MESSAGE, progress: { lastFailure: { message: 'binary_missing: no engine binary' } } });
+      await afterRestart(null);
+      expect([intentFile(h, id), intentFile(h, failed)]).toEqual(before);
+    });
+  });
+
   it('a store the host cannot read leaves intent and record as they are, surfaces the error, and Retry reconciles again', async () => {
     h.host.script = () => ({ ready: false });
     await start();

@@ -60,7 +60,7 @@ export function resources(over: Partial<SetupResources> = {}): SetupResources {
 }
 
 export function resetSetupStore(): void {
-  useSetup.setState({ loaded: true, intents: new Map(), phases: new Map(), cards: new Map(), invoking: new Set(), deletions: new Map(), dismissed: new Set(), removed: new Set(), resumes: new Map() });
+  useSetup.setState({ loaded: true, intents: new Map(), phases: new Map(), cards: new Map(), invoking: new Set(), deletions: new Map(), dismissed: new Set(), removed: new Set(), resumes: new Map(), followed: new Set() });
 }
 
 export function putIntent(value: SetupIntent): void {

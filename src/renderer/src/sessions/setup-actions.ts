@@ -89,6 +89,11 @@ export async function startIntent(appSessionId: AppSessionId, first: FirstMessag
 // clears the retained message in main, so the card returns the message it docked with to the editor first.
 export async function continueSetup(appSessionId: AppSessionId, options: StartOptions, docked: FirstMessage | null): Promise<HookResult> {
   const outcome = await start(appSessionId, null, options);
+  if ('error' in outcome && outcome.error.startsWith('starting:')) {
+    // a start of this id still runs (another window's, or one this page lost to a reload): main holds the message
+    toast({ level: 'info', text: 'Starting…', actions: [], dismissible: true });
+    return { ok: false, error: outcome.error };
+  }
   const refusal = 'error' in outcome ? outcome.error : refusalOf(outcome);
   if (refusal !== null) {
     if (docked !== null) returnMessage(appSessionId, docked);
