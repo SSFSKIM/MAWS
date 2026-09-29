@@ -292,6 +292,21 @@ describe('turn boundaries', () => {
     expect(state.turns.get(turnId.ofMessage(uuid('u1')))).toMatchObject({ state: 'closed', closedBy: 'stopped' });
   });
 
+  // Coordinator ruling (final rebase fix wave): C4's synthesised exit is disk-derived (`seq: null`) and was never
+  // witnessed, so it leaves no notice; C3's live exits carry a seq and keep theirs, `unknown` included (C3 journals a
+  // clean exit with no stop reason as `unknown`).
+  it('a disk-synthesised unknown exit (seq null) renders no notice row; a live one keeps its row', () => {
+    const b = builder();
+    b.turn('u1');
+    b.text('m1', 0, 'Done.');
+    b.emit('process.exited', { code: null, signal: null, reason: 'unknown', lostAttentionCount: 0 });
+    const live = rowsOf(reduce(b.events)).filter((row) => row.kind === 'error');
+    expect(live.map((row) => (row as Extract<Row, { kind: 'error' }>).text)).toEqual(['Session process exited (unknown)']);
+    const disk = rowsOf(reduce(b.events.map((event) => (event.kind === 'process.exited' ? { ...event, seq: null } : event))));
+    expect(disk.filter((row) => row.kind === 'error')).toEqual([]);
+    expect(reduce(b.events.map((event) => (event.kind === 'process.exited' ? { ...event, seq: null } : event))).current).toBeNull();
+  });
+
   // Whole-branch review: C4's disk backfill emits turn.ended only from system/turn_duration, which an interrupted turn
   // lacks, and writes turn.started before the prompt's user.message.
   // Whole-branch review: C4's disk backfill emits turn.ended only from system/turn_duration, which SDK-entrypoint

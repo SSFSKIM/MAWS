@@ -77,7 +77,7 @@ describe('C4 backfill through the transcript model', () => {
     const rows = expanded(state);
     expect(ofKind(rows, 'divider')).toEqual([]); // no work area, so no divider, and nothing ticks
     expect(ofKind(rows, 'user').map((u) => u.text)).toEqual(['reply with exactly: ok']);
-    expect(ofKind(rows, 'error').map((e) => e.text)).toEqual(['Session process exited (unknown)']);
+    expect(ofKind(rows, 'error')).toEqual([]); // C4's synthesis closes the turn; nobody witnessed an exit, so no notice
   });
 
   it('interrupt-marker (C4 landed the ask): no marker bubble, no turn of its own, and the interrupted turn closes stopped', async () => {
