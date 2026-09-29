@@ -42,8 +42,8 @@ describe('normaliser replays every probe fixture into the X1 graph', () => {
     // C10's fork-worktree and C8c's workspace-diff probes (copied from master at 644ea7a)
     // and C3's own live recordings (M6: rewind-files from 3.12, plan-outcomes from 3.20, steer-now from 3.7's passing rerun and steer-now-unheld from its first run, engine-turn-release from 3.10, steer-next from the fix wave's live check)
     // C10 start: M1's records under a scratch config home (the pinned fork's source and fork, the trust bootstrap, the
-    // home directory's session-only trust, the exact-key check, the read-only permission round trip)
-    const c10 = ['fork-pinned-id-fork', 'fork-pinned-id-start', 'home-trust-session-only', 'read-only-permission', 'trust-bootstrap-recorded', 'trust-exact-key'];
+    // home directory's session-only trust and its unattested control, the exact-key check, the read-only permission round trip)
+    const c10 = ['fork-pinned-id-fork', 'fork-pinned-id-start', 'home-trust-session-only', 'home-trust-unattested', 'read-only-permission', 'trust-bootstrap-recorded', 'trust-exact-key'];
     // C10 end
     expect(listJournals('pass3')).toEqual(['engine-turn-release', 'fork-worktree-fork', 'fork-worktree-resume-in-b', 'fork-worktree-start', 'plan-outcomes', 'rewind-files', 'steer-next', 'steer-now', 'steer-now-unheld', 'workspace-diff-branch', 'workspace-diff-dirty', ...c10].sort());
   });

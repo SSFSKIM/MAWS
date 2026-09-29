@@ -67,6 +67,21 @@ describe("M1's pass-3 records", () => {
     expect(rows.some((r) => r.f.type === 'user' || (r.f.type === 'system' && r.f.subtype === 'init'))).toBe(false);
   });
 
+  it('home-trust-unattested: under ~ the local rule loads without the attestation and no trust notice is printed, attested or not', () => {
+    const rulesOf = (name: string) => {
+      const rows = frames('pass3', name);
+      const id = (rows.find((r) => r.direction === 'out' && r.f.request?.subtype === 'list_permission_rules')!.frame as { request_id: string }).request_id;
+      return (rows.find((r) => r.direction === 'in' && r.f.response?.request_id === id)!.f.response!.response as { state: { rules: { source: string; rule: string }[] } }).state.rules;
+    };
+    const notice = (name: string) => loadJournal('pass3', name).some((r) => r.direction === 'stderr' && String((r.frame as { text: string }).text).includes('this workspace has not been trusted'));
+    expect(pinOf('pass3', 'home-trust-unattested')).toMatch(/^[0-9a-f-]{36}$/);
+    expect('workspace_trust_recorded' in initResponse('pass3', 'home-trust-unattested')).toBe(false);
+    for (const name of ['home-trust-unattested', 'home-trust-session-only']) {
+      expect(rulesOf(name)).toMatchObject([{ source: 'localSettings', rule: 'Bash(echo MAWS_C10_HOME:*)' }]);
+      expect(notice(name)).toBe(false);
+    }
+  });
+
   it('trust-exact-key: an accepted "/" does not satisfy the headless gate (no workspace_trust_recorded; the notice on stderr)', () => {
     expect('workspace_trust_recorded' in initResponse('pass3', 'trust-exact-key')).toBe(false);
     expect(loadJournal('pass3', 'trust-exact-key').some((r) => r.direction === 'stderr' && String((r.frame as { text: string }).text).includes('this workspace has not been trusted'))).toBe(true);
