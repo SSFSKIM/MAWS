@@ -384,6 +384,7 @@ export type { TurnActivity };
 // C8 ask (2026-09-28, additive): an actions registry, because C7 (`editAndResubmit`), C8b (`openSubagent`, `openFullLog`) and C8c (`reviewChanges`, `openFile`) land in different waves and each contributes one callback from its own block.
 export function registerTranscriptActions(partial: Partial<TranscriptActions>): () => void;   // merged over DEFAULT_ACTIONS at render; a later registration of the same key wins; the disposer removes its keys (restoring an earlier registration of the same key if one remains)
 export const DEFAULT_ACTIONS: TranscriptActions;                                              // the M5 defaults: loadSpill over fs.readSpill, openExternal over layout.openExternal, the rest no-ops
+export function registerRequestRenderer(render: TranscriptProps['renderRequest']): () => void;   // C7 registers its X4 card renderer once from its own block; TranscriptSlot passes the latest registration as `renderRequest` (placeholder until then); the disposer restores the previous one
 export const TranscriptSlot: React.FC<{ appSessionId: AppSessionId; agentId?: AgentId; className?: string }>;   // the component C6 registers into C5's `transcript` slot once C5 is on master (rebase step; pending until then): one <Transcript> over ipcSource and ipcRewind with actions = registered partials merged over DEFAULT_ACTIONS, re-rendered when the registry changes    // C7: the request card and queued rows render markdown through the same sanitising pipeline (one renderer, no second stack)
 export type { Row, Cell, CellDetail, TurnSummary, ToolClassification, ToolCategory, SubagentRef, TurnId, RowId, CellId };
 ```
@@ -841,6 +842,8 @@ If `pnpm dev:harness` shows fixtures missing: the renderer's `server.fs.allow` m
   Date/Author: 2026-09-28, C6 controller (from the coordinator).
 - Decision: Extension from C8c's review (coordinator, 2026-09-28): each `TurnActivity.files[]` entry with `use: 'edited'` carries the edit cell's detail (`edit: CellDetail<'edit'>`, the hunks `EditDetail` renders; null for reads), same selector, same memo, no second derivation, so Review's "Last turn" scope can show a completed, collapsed turn's hunks while its work rows are dropped and its receipt stays. Folded into M5's fix round 3.
   Date/Author: 2026-09-28, C6 controller (from the coordinator).
+- Decision: M5 re-review round 3 found that `TranscriptSlot` had no seam for C7's request card (`renderRequest`), so the shell transcript would always show the placeholder; the public surface gains `registerRequestRenderer(render)` with a disposer (the same registry pattern as the actions), and `TranscriptSlot` passes the latest registration as `renderRequest`. Fixed in M5 fix round 4 with a rendered-slot test. Minor deferred to the ledger: a `ui` version change recomputes the turn's work projection alongside its rows (the projection itself adds no derivation); cache it on the turn reference if a perf check shows cost.
+  Date/Author: 2026-09-28, C6 controller.
 
 ## Outcomes & Retrospective
 
