@@ -531,10 +531,14 @@ test('bash, memory, paste, history recall, the palette, the status line and + di
       await messageIn(pane).click();
       await page.keyboard.type('/compact');
       const commands = page.getByRole('listbox', { name: 'Commands' });
-      await expect(commands.getByRole('option').first()).toContainText('/compact');
-      const compactRow = await commands.getByRole('option').first().innerText();
-      await page.keyboard.press('Enter');
-      await page.keyboard.press('Enter');
+      // C11 start: /compact and /model open C11's widgets (a registered widget wins over the headless text path), and the
+      // palette groups its rows, so the case reads the chosen row and then drives each widget's own flow
+      const chosen = commands.locator('[role="option"][aria-selected="true"]');
+      await expect(chosen).toContainText('/compact');
+      const compactRow = await chosen.innerText();
+      await page.keyboard.press('Enter'); // the compact widget opens
+      await page.locator('[data-widget="compact"]').getByRole('button', { name: 'Compact now' }).click(); // sends /compact
+      // C11 end
       await expect.poll(() => framesOf(rowsOf(m.journalPath), 'in').some(({ frame }) => frame.type === 'system' && frame.subtype === 'compact_boundary'), { timeout: 180_000 }).toBe(true);
       await idle(page, m.id);
       const compact = framesOf(rowsOf(m.journalPath), 'in').filter(({ frame }) => frame.type === 'system' && frame.subtype === 'compact_boundary').map(({ seq, frame }) => ({ seq, meta: frame.compact_metadata }));
@@ -542,11 +546,14 @@ test('bash, memory, paste, history recall, the palette, the status line and + di
       const modelBefore = await pane.getByRole('button', { name: /^Model / }).getAttribute('aria-label');
       await messageIn(pane).click();
       await page.keyboard.type('/model');
-      await expect(commands.getByRole('option').first()).toContainText('/model');
-      const modelRow = await commands.getByRole('option').first().innerText();
+      // C11 start: the model widget opens; Haiku is chosen and applied there (set_model), not typed as a prompt
+      await expect(chosen).toContainText('/model');
+      const modelRow = await chosen.innerText();
       await page.keyboard.press('Enter');
-      await page.keyboard.insertText('haiku');
-      await page.keyboard.press('Enter');
+      const modelWidget = page.locator('[data-widget="model"]');
+      await modelWidget.getByRole('radio', { name: /^Haiku/ }).click();
+      await modelWidget.getByRole('button', { name: 'Apply' }).click();
+      // C11 end
       await page.waitForTimeout(5_000);
       await idle(page, m.id);
       const answer = framesOf(rowsOf(m.journalPath), 'in')
