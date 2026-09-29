@@ -83,12 +83,21 @@ export function workingDurationMs(entry: TranscriptEntry | undefined, startedAt:
 const isExpanded = (state: TranscriptState, id: TurnId) =>
   state.ui.expandedTurns.has(id) || (state.turns.get(id)?.state === 'open' && !state.ui.collapsedTurns.has(id));
 
-function copyUi(ui: TranscriptUi): TranscriptUi {
+// A copy of the ui for one change. `turns` names the turns whose rows the change touches (their stamps bump, so only
+// they re-derive); `'all'` is a whole-transcript change.
+function copyUi(ui: TranscriptUi, turns: Iterable<TurnId> | 'all'): TranscriptUi {
+  const stamps = new Map(ui.stamps);
+  if (turns !== 'all') for (const id of turns) stamps.set(id, (stamps.get(id) ?? 0) + 1);
   return {
     expandedTurns: new Set(ui.expandedTurns), collapsedTurns: new Set(ui.collapsedTurns), expandedGroups: new Set(ui.expandedGroups),
     expandedCells: new Set(ui.expandedCells), revealedBoundaries: new Set(ui.revealedBoundaries), receipts: new Map(ui.receipts), spills: new Map(ui.spills),
-    version: ui.version + 1,
+    global: turns === 'all' ? ui.global + 1 : ui.global, stamps, version: ui.version + 1,
   };
+}
+
+// The turn a visible row or cell belongs to (a toggle acts on what the reader sees), or null when it is not shown.
+function turnOfShown(rows: Row[], id: string): TurnId | null {
+  return locate(rows, id)?.row.turnId ?? null;
 }
 
 const expandTurn = (ui: TranscriptUi, id: TurnId) => {
@@ -123,7 +132,7 @@ function keepFinishedTurnsOpen(previous: TranscriptState, next: TranscriptState,
     if (!next.ui.collapsedTurns.has(id) && !next.ui.expandedTurns.has(id)) keep.push(id);
   }
   if (keep.length === 0) return next;
-  const ui = copyUi(next.ui);
+  const ui = copyUi(next.ui, keep);
   for (const id of keep) ui.expandedTurns.add(id);
   return withUi(next, ui);
 }
@@ -186,14 +195,15 @@ export function createTranscriptStore() {
       }
       set({ entries: { ...get().entries, [key]: next } });
     };
-    const changeUi = (key: string, change: (ui: TranscriptUi, state: TranscriptState) => void) => {
+    const changeUi = (key: string, turns: (current: TranscriptEntry) => Iterable<TurnId> | 'all', change: (ui: TranscriptUi, state: TranscriptState) => void) => {
       const current = entry(key);
       if (!current) return;
-      const ui = copyUi(current.state.ui);
+      const ui = copyUi(current.state.ui, turns(current));
       change(ui, current.state);
       put(key, { state: withUi(current.state, ui) });
     };
     const toggle = <T>(values: Set<T>, value: T) => (values.has(value) ? values.delete(value) : values.add(value));
+    const scoped = (turn: TurnId | null): TurnId[] | 'all' => (turn === null ? 'all' : [turn]);
 
     return {
       entries: {},
@@ -279,7 +289,7 @@ export function createTranscriptStore() {
         }
         const found = visible ?? (options.turnId ? locate(expandedTurnRows(current.state, options.turnId), id) : null) ?? locate(allExpandedRows(current.state), id);
         if (!found) return;
-        const ui = copyUi(current.state.ui);
+        const ui = copyUi(current.state.ui, found.row.turnId === null ? 'all' : [found.row.turnId]);
         if (found.row.turnId !== null && !isExpanded(current.state, found.row.turnId)) expandTurn(ui, found.row.turnId);
         if (found.group) ui.expandedGroups.add(found.group.id);
         put(key, { state: withUi(current.state, ui), jump: request(found.row.id) });
@@ -294,7 +304,7 @@ export function createTranscriptStore() {
       },
 
       toggleTurn(key, turn) {
-        changeUi(key, (ui, state) => {
+        changeUi(key, () => [turn], (ui, state) => {
           if (isExpanded(state, turn)) {
             ui.expandedTurns.delete(turn);
             ui.collapsedTurns.add(turn);
@@ -302,8 +312,8 @@ export function createTranscriptStore() {
         });
       },
 
-      toggleGroup: (key, group) => changeUi(key, (ui) => toggle(ui.expandedGroups, group)),
-      toggleCell: (key, cell) => changeUi(key, (ui) => toggle(ui.expandedCells, cell)),
+      toggleGroup: (key, group) => changeUi(key, (current) => scoped(turnOfShown(current.rows, group)), (ui) => toggle(ui.expandedGroups, group)),
+      toggleCell: (key, cell) => changeUi(key, (current) => scoped(turnOfShown(current.rows, cell)), (ui) => toggle(ui.expandedCells, cell)),
 
       setReceipt(key, receipt, patch) {
         const current = entry(key);
@@ -317,10 +327,10 @@ export function createTranscriptStore() {
         const spills = new Map(current.state.ui.spills).set(path, { state: 'not_loaded', content: null, error: null, ...current.state.ui.spills.get(path), ...patch });
         put(key, { state: withReaderState(current.state, { spills }) });
       },
-      toggleBoundary: (key, boundary) => changeUi(key, (ui) => toggle(ui.revealedBoundaries, boundary)),
+      toggleBoundary: (key, boundary) => changeUi(key, () => 'all', (ui) => toggle(ui.revealedBoundaries, boundary)),
 
       expandAll(key, options = {}) {
-        changeUi(key, (ui, state) => {
+        changeUi(key, () => 'all', (ui, state) => {
           for (const id of state.order) expandTurn(ui, id);
           for (const row of allExpandedRows(state)) {
             if (row.kind === 'group') ui.expandedGroups.add(row.id);

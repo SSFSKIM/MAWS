@@ -63,6 +63,12 @@ export interface TranscriptUi {
   // `content`).
   receipts: Map<RowId, ReceiptUndo>;
   spills: Map<string, SpillLoad>;
+  // Every ui change bumps `version` (the flat list's memo and `withUi`'s order read it). What a turn's rows depend on is
+  // narrower (whole-branch review: one click re-derived all 500 turns): `global` bumps for whole-transcript changes
+  // (expand all, the snapshot view, a boundary's reveal), and `stamps` holds a per-turn stamp bumped by the toggles,
+  // jumps and completions that name that turn. derive.ts memoises a turn's rows on (version, global, its stamp).
+  global: number;
+  stamps: Map<TurnId, number>;
   version: number;
 }
 
@@ -93,7 +99,8 @@ export interface TurnWork {
 
 export interface MemoEntry {
   version: number;
-  uiVersion: number;
+  uiVersion: number; // the ui's `global` when derived
+  uiStamp: number; // the turn's own ui stamp when derived
   rows: Row[];
   work: TurnWork;
   overlay?: { receipts: TranscriptUi['receipts']; spills: TranscriptUi['spills']; rows: Row[] }; // the reader state laid over `rows` (derive.ts)
@@ -124,7 +131,7 @@ export interface TranscriptState {
 export function createState(sessionId: SessionId | null, agentId: AgentId | null): TranscriptState {
   return {
     sessionId, agentId, turns: new Map(), order: [], loose: [], hidden: null, pending: new Map(), seen: new Set(), echoUuids: new Set(),
-    ui: { expandedTurns: new Set(), collapsedTurns: new Set(), expandedGroups: new Set(), expandedCells: new Set(), revealedBoundaries: new Set(), receipts: new Map(), spills: new Map(), version: 0 },
+    ui: { expandedTurns: new Set(), collapsedTurns: new Set(), expandedGroups: new Set(), expandedCells: new Set(), revealedBoundaries: new Set(), receipts: new Map(), spills: new Map(), global: 0, stamps: new Map(), version: 0 },
     current: null, placement: new Map(),
     index: { toolUses: new Map(), tasks: new Map(), requests: new Map(), hooks: new Map(), messages: new Map() },
     memo: new Map(),

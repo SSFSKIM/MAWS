@@ -5,6 +5,8 @@ import { cellId, rowId, turnId } from '../transcript/model/keys';
 import type { Row } from '../transcript/model/rows';
 import { api, BASH_RESULT, builder, tool, uuid } from '../transcript/model/test-events';
 import type { TranscriptSource } from '../transcript/source/types';
+import { synthesise } from '../../../../test/support/synth-transcript';
+import { turnDerivations } from '../transcript/model/derive';
 import { createTranscriptStore, liveBuffer } from './transcript';
 
 // A source whose snapshot is fixed and whose batches the test pushes.
@@ -92,6 +94,33 @@ describe('transcript store', () => {
     expect(store.getState().rows(KEY).filter((row) => row.kind === 'user')).toHaveLength(2);
     store.getState().toggleTurn(KEY, first);
     expect(kinds(store.getState().rows(KEY))).not.toContain('group');
+  });
+
+  // Whole-branch review: one click re-derived all 500 turns (22 to 24 ms). A toggle names its turn, and only that turn
+  // re-derives; every other turn's rows keep their references in the flat list.
+  it('a toggle re-derives only the turn it names: turn, group and cell toggles on turn 7 of fifty', async () => {
+    const store = createTranscriptStore();
+    await store.getState().attach(KEY, pushSource(synthesise({ turns: 50, seed: 1 })).source);
+    const state = () => store.getState().entries[KEY].state;
+    const seventh = state().order[6];
+    const others = (rows: Row[]) => rows.filter((row) => row.turnId !== seventh);
+    const step = (act: () => void) => {
+      const before = store.getState().rows(KEY);
+      const derivations = turnDerivations.count;
+      act();
+      const after = store.getState().rows(KEY);
+      expect(turnDerivations.count - derivations).toBe(1);
+      const kept = others(before);
+      expect(others(after)).toHaveLength(kept.length);
+      others(after).forEach((row, i) => expect(row).toBe(kept[i]));
+      return after;
+    };
+    let rows = step(() => store.getState().toggleTurn(KEY, seventh));
+    const group = rows.find((row): row is Extract<Row, { kind: 'group' }> => row.kind === 'group' && row.turnId === seventh)!;
+    expect(group).toBeDefined();
+    rows = step(() => store.getState().toggleGroup(KEY, group.id));
+    step(() => store.getState().toggleCell(KEY, group.cells[0].id));
+    step(() => store.getState().toggleTurn(KEY, seventh));
   });
 
   it('keeps a finishing turn expanded when the reader is not following, and collapses it when following', async () => {

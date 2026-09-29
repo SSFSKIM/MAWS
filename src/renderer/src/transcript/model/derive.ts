@@ -27,19 +27,22 @@ const str = (value: unknown, fallback = ''): string => (typeof value === 'string
 
 // The flat list is memoised on the identity of its parts (the per-turn row arrays, the order, the loose list, the
 // hidden branch and the ui version), so a batch of deltas that changed no turn's version yields the same array.
-const flatMemo = new WeakMap<TranscriptState['memo'], { keys: unknown[]; rows: Row[] }>();
+const flatMemo = new WeakMap<TranscriptState['memo'], { keys: unknown[]; rows: Row[]; times: Map<RowId, Row> }>();
 
 export function rowsOf(state: TranscriptState): Row[] {
   const turnRows = [...state.order, ...(state.hidden?.turns ?? [])].map((id) => rowsOfTurn(state, state.turns.get(id)!));
   const keys = [state.order, state.loose, state.hidden, state.ui.version, ...turnRows];
   const previous = flatMemo.get(state.memo);
   if (previous && previous.keys.length === keys.length && previous.keys.every((key, i) => key === keys[i])) return previous.rows;
-  const rows = flatten(state);
-  flatMemo.set(state.memo, { keys, rows });
+  const times = new Map<RowId, Row>();
+  const rows = flatten(state, previous?.times ?? new Map(), times);
+  flatMemo.set(state.memo, { keys, rows, times });
   return rows;
 }
 
-function flatten(state: TranscriptState): Row[] {
+// `before` holds the previous flatten's time separators: an unchanged one is reused, so a re-flatten keeps the
+// reference of every row outside the turns that changed.
+function flatten(state: TranscriptState, before: Map<RowId, Row>, times: Map<RowId, Row>): Row[] {
   const out: Row[] = [];
   let previousAt: string | null = null;
   const looseAfter = new Map<TurnId | null, SessionEvent[]>();
@@ -50,7 +53,14 @@ function flatten(state: TranscriptState): Row[] {
   }
   const emit = (rows: Row[], subject: 'human' | 'engine' | 'peer' | 'loose', separator: RowId) => {
     if (rows.length === 0) return;
-    if (needsSeparator(previousAt, rows[0].at, subject)) out.push({ id: separator, turnId: subject === 'loose' ? null : rows[0].turnId, at: rows[0].at, kind: 'time', label: separatorLabel(rows[0].at) });
+    if (needsSeparator(previousAt, rows[0].at, subject)) {
+      const label = separatorLabel(rows[0].at);
+      const turnId = subject === 'loose' ? null : rows[0].turnId;
+      const kept = before.get(separator);
+      const time: Row = kept?.kind === 'time' && kept.label === label && kept.at === rows[0].at && kept.turnId === turnId ? kept : { id: separator, turnId, at: rows[0].at, kind: 'time', label };
+      times.set(separator, time);
+      out.push(time);
+    }
     out.push(...rows);
     previousAt = rows.at(-1)!.at;
   };
@@ -96,7 +106,7 @@ export function expandedTurnRows(state: TranscriptState, id: TurnId): Row[] {
 // A state whose every turn, group and cell is expanded and every rewound branch revealed: the snapshot suite's view.
 export function withAllExpanded(state: TranscriptState): TranscriptState {
   const turns = [...state.order, ...(state.hidden?.turns ?? [])];
-  const ui: TranscriptUi = { ...state.ui, expandedTurns: new Set(turns), collapsedTurns: new Set(), expandedGroups: new Set(), expandedCells: new Set(), revealedBoundaries: new Set(), version: state.ui.version + 1 };
+  const ui: TranscriptUi = { ...state.ui, expandedTurns: new Set(turns), collapsedTurns: new Set(), expandedGroups: new Set(), expandedCells: new Set(), revealedBoundaries: new Set(), global: state.ui.global + 1, version: state.ui.version + 1 };
   const first = rowsOf({ ...state, ui });
   for (const row of first) {
     if (row.kind === 'group') {
@@ -106,6 +116,7 @@ export function withAllExpanded(state: TranscriptState): TranscriptState {
     else if (row.kind === 'boundary' && row.boundaryKind === 'rewind') ui.revealedBoundaries.add(row.id);
   }
   ui.version += 1;
+  ui.global += 1;
   return { ...state, ui };
 }
 
@@ -114,9 +125,10 @@ export function withAllExpanded(state: TranscriptState): TranscriptState {
 
 function rowsOfTurn(state: TranscriptState, turn: TurnState): Row[] {
   let memo = state.memo.get(turn.id);
-  if (!memo || memo.version !== turn.version || memo.uiVersion !== state.ui.version) {
+  const stamp = state.ui.stamps.get(turn.id) ?? 0;
+  if (!memo || memo.version !== turn.version || memo.uiVersion !== state.ui.global || memo.uiStamp !== stamp) {
     const derived = deriveTurn(turn, state);
-    memo = { version: turn.version, uiVersion: state.ui.version, rows: derived.rows, work: derived.work };
+    memo = { version: turn.version, uiVersion: state.ui.global, uiStamp: stamp, rows: derived.rows, work: derived.work };
     state.memo.set(turn.id, memo);
   }
   const { receipts, spills } = state.ui;
