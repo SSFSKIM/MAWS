@@ -46,6 +46,8 @@ import { UsageFooter } from './gateway/UsageFooter';
 import { registerUsagePopoverFooter } from './statusline';
 import { sessionInfoTool } from './tools/session-info';
 import { registerAllWidgets } from './widgets';
+import { registerAccountsTab } from './accounts';
+import { connectMonoFont, registerSettingsTab } from './settings-tab';
 // C11 end
 
 // C10 start: C7's composer binds an unstarted session's chips and Send through C10's hook; registered at module load,
@@ -115,6 +117,12 @@ export function App() {
   useEffect(() => {
     registerPanelTool(sessionInfoTool);
   }, []);
+  // M5: the Accounts and Settings tabs in C5's slots, and appearance.monoFont as the root --font-mono override
+  useEffect(() => {
+    registerAccountsTab();
+    registerSettingsTab();
+  }, []);
+  useEffect(() => connectMonoFont(), []);
   // C11 end
 
   // index.html ships data-theme="light" for the first paint; from then on main's resolved theme decides.
