@@ -736,6 +736,14 @@ Ready to paste into the charter's C8 section under "**Residue decisions (C8b, 20
   Rationale: the Purpose names "its description, the sentence it is working on" as two facts; overwriting the dispatch description with the activity would lose the title the owner recognises and leave the second line at `Working` on this engine.
   Date/Author: 2026-09-29, C8b controller.
 
+- Decision (C8b M1 task 2 fix pass, 2026-09-29), one line each:
+  - `TaskGraphEntry.disk` gains `runsError: string | null` (a failed `fs.workflows`); `disk.error` is the sidecars' alone (a shape refinement, so the view can say which read failed).
+  - Supersedes item (1) of the task 2 entry: the store's cursor is `(lastSeq, n)`, n being the event id's last segment (its place in its journal row). After a snapshot, which answers whole rows, it is `(lastSeq, +∞)`. C3's batcher splits at 500 events regardless of row boundaries (`engine-host/session-stream.ts:74, 84`), so comparing seq alone lost the tail of a split row. A watch that left the cursor mid-row re-reads with `afterSeq: lastSeq - 1`.
+  - The open item (13) is applied as ruled above: `activity` on `TaskNode`. The title and second-line rule is the pure `rowTitle`/`rowSecondLine` in `model/task-graph.ts`.
+  - A relaunch marks the old launch's running nodes `exited` before it applies the new status's background tasks. The last release and a status going both invalidate a snapshot still in flight. The relay store takes the parent's `SendMessage` and counts rounds in the live form only; the receipt accepts both forms (O3).
+  - The suites' builders and fixture loaders live in `test/support/agents-events.ts`. The fake agent-work client stays at `tools/agents/fake-work-client.ts` (test-only): it is typed by the renderer's `AgentWorkClient`, whose module reaches `window` through the IPC client, which the node project cannot compile.
+  Date/Author: 2026-09-29, C8b M1 task 2 (executor, on the review's findings and the controller's ruling).
+
 ## Outcomes & Retrospective
 
 Pending — written at finish.
