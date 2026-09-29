@@ -157,15 +157,17 @@ export async function feed(id: AgentsFakeId, fixture: string): Promise<void> {
   if (!session) throw new Error(`agents.feed: load a transcript into ${id} first (panel.loadTranscript)`);
   const { events } = await loadFixture(fixture);
   reset(id, () => {
+    // The snapshot is the fixture's own events the transcript applied (history released at load among them); the
+    // batches are the player's, so the task graph and the relay see what the transcript sees.
     const wire: FakeWire = {
-    snapshot: (afterSeq) => snapshotOf(events, useTranscriptStore.getState().entries[appSessionId]?.state.seen ?? new Set(), afterSeq),
-    subscribe: (listener) => session.player.subscribe(listener),
+      snapshot: (afterSeq) => snapshotOf(events, useTranscriptStore.getState().entries[appSessionId]?.state.seen ?? new Set(), afterSeq),
+      subscribe: (listener) => session.player.subscribe(listener),
     };
     fake.bindWire(appSessionId, wire);
     fedEvents.set(appSessionId, events);
     seedAttention(appSessionId, wire.snapshot(null).events);
   });
-  setView({ session, agentTab: null });
+  if (id === 'A') setView({ session, agentTab: null }); // the column shows A, the session the cases load
 }
 
 // Starts the session's task graph over: the wire goes (a snapshot in flight is stale), the entry and the session's relays
