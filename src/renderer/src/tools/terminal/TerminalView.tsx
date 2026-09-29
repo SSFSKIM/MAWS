@@ -1,7 +1,8 @@
 // The Terminal tool's render (C9 Residue *Persistence*, *Lifecycle and close*, *Copy, paste and links*): it lends the
 // registry a box to mount the terminal's container into while the tab is shown and gives it back when it is not, so
 // the emulator is never re-created; above the terminal it shows the bars of the lifecycle (exited, lost, could not
-// start), the lossy-reconnect notice, the worktree warning and the busy-close confirmation. Tokens only.
+// start), the lossy-reconnect notice, the worktree warning and the busy-close confirmation, and over it a note while
+// the shell starts. Tokens only.
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { useStore } from 'zustand';
 import type { SessionRecord } from '@shared/graph/session';
@@ -115,6 +116,13 @@ export function TerminalView({ state, ctx }: { state: TerminalTabState; ctx: Pan
       ) : null}
       <div className="relative min-h-0 flex-1">
         <div ref={surfaceRef} data-testid="terminal-surface" onContextMenu={openContextMenu} className="absolute inset-0 overflow-hidden bg-[var(--term-bg)] p-1" />
+        {info?.status === 'starting' ? (
+          // Over the blank surface rather than a bar above it, so the terminal's size does not change when it goes. The
+          // first terminal after launch spends about half a second here while the host captures the login-shell environment.
+          <div role="status" aria-label="terminal starting" className="pointer-events-none absolute left-2 top-1 text-ui-sm text-fg-muted">
+            Starting shell…
+          </div>
+        ) : null}
         {menu ? <ContextMenu at={menu} state={state} dismiss={() => setMenu(null)} /> : null}
       </div>
     </div>

@@ -322,6 +322,17 @@ describe('terminal view', () => {
     expect(ctx.close).toHaveBeenCalled();
   });
 
+  it('says the shell is starting over the surface until the terminal runs, without a bar that would resize it', () => {
+    const state = newState();
+    render(<View state={state} ctx={context()} />);
+    act(() => registry.patch(state.terminalId!, { status: 'starting' }));
+    const starting = screen.getByRole('status', { name: 'terminal starting' });
+    expect(starting.textContent).toBe('Starting shell…');
+    expect(starting.parentElement).toBe(screen.getByTestId('terminal-surface').parentElement);
+    act(() => registry.patch(state.terminalId!, { status: 'running' }));
+    expect(screen.queryByRole('status', { name: 'terminal starting' })).toBeNull();
+  });
+
   it('says why a terminal could not start', () => {
     const state = newState();
     render(<View state={state} ctx={context()} />);
