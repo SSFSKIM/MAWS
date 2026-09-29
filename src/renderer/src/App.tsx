@@ -19,6 +19,10 @@ import { connectPanelHost, registerPanelTool } from './panel/host';
 import { PanelHost } from './panel/PanelHost';
 import { adoptTerminals, terminalTool } from './tools/terminal';
 // C8a end
+// C8c start
+import { connectCodeEvents } from './ipc/events';
+import { registerCodeTools } from './tools/code';
+// C8c end
 
 export function App() {
   const resolvedTheme = useSettings((s) => s.state?.resolvedTheme);
@@ -50,6 +54,13 @@ export function App() {
     void adoptTerminals();
   }, []);
   // C8a end
+  // C8c start: the Files tool and the file viewer (Review and the transcript's actions join in M3), registered once and
+  // never unregistered, as C8a's block does (a registration's disposer closes the tool's tabs); main's files.changed.
+  useEffect(() => {
+    registerCodeTools();
+  }, []);
+  useEffect(() => connectCodeEvents(), []);
+  // C8c end
 
   // index.html ships data-theme="light" for the first paint; from then on main's resolved theme decides.
   useEffect(() => {

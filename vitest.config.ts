@@ -62,7 +62,13 @@ export default defineConfig({
         test: {
           name: 'renderer-compiled',
           environment: 'happy-dom',
-          include: ['src/renderer/src/panel/**/*.test.tsx', 'src/renderer/src/app/Shell.panel.test.tsx'], // M3: the host inside C5's Shell
+          include: [
+            'src/renderer/src/panel/**/*.test.tsx',
+            'src/renderer/src/app/Shell.panel.test.tsx', // M3: the host inside C5's Shell
+            // C8c start: the code tools render under the host's rule too (a tool's state is a store handle)
+            'src/renderer/src/tools/code/**/*.test.tsx',
+            // C8c end
+          ],
           env: { MAWS_REACT_COMPILER: '1' },
         },
       },

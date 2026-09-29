@@ -1,0 +1,31 @@
+/* The code tools' token bridge (C8c execution document, Interfaces *The `--code-*` tokens*): styles the viewer needs
+   beyond utilities, from X7 tokens only. The CodeMirror theme itself is `viewer/code-theme.ts` (EditorView.theme, loaded
+   with the code view); the `--code-*` values live in tokens.css, chosen by eye to read as C6's shiki themes do
+   (github-light and github-dark). M3 adds @git-diff-view/react's variables here. */
+
+/* The line a jump landed on, for two seconds. */
+@keyframes code-flash {
+  from {
+    background-color: var(--accent-soft);
+  }
+  to {
+    background-color: transparent;
+  }
+}
+.cm-flash-line {
+  animation: code-flash 2s ease-out forwards;
+}
+
+/* The follow-the-file notice: shown, then faded (no flash for an external change). */
+@keyframes code-updated {
+  0%,
+  60% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+.code-updated {
+  animation: code-updated 2s ease-out forwards;
+}

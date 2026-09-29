@@ -26,6 +26,14 @@
   --term-ansi-blue: #0451a5; --term-ansi-magenta: #bc05bc; --term-ansi-cyan: #0598bc; --term-ansi-white: #555555;
   --term-ansi-bright-black: #666666; --term-ansi-bright-red: #cd3131; --term-ansi-bright-green: #14ce14; --term-ansi-bright-yellow: #b5ba00;
   --term-ansi-bright-blue: #0451a5; --term-ansi-bright-magenta: #bc05bc; --term-ansi-bright-cyan: #0598bc; --term-ansi-bright-white: #a5a5a5;
+
+  /* C8c start: the file viewer's syntax colours (X7 extension; names binding, values advisory): GitHub light's, as
+     C6's shiki theme renders the transcript's code blocks. */
+  --code-keyword: #cf222e; --code-string: #0a3069; --code-comment: #6e7781; --code-number: #0550ae; --code-type: #953800;
+  --code-function: #8250df; --code-variable: #1f2328; --code-property: #0550ae; --code-operator: #cf222e; --code-punctuation: #1f2328;
+  --code-meta: #6e7781; --code-invalid: #82071e;
+  --code-gutter-fg: rgba(31,30,27,0.36); --code-line-active-bg: rgba(20,18,14,0.035); --code-selection-bg: rgba(201,102,63,0.20);
+  /* C8c end */
 }
 
 [data-theme="dark"] {
@@ -43,4 +51,11 @@
   --term-ansi-blue: #7aa2f7; --term-ansi-magenta: #d98ee6; --term-ansi-cyan: #5fd7e5; --term-ansi-white: #c8c6c3;
   --term-ansi-bright-black: #6b6966; --term-ansi-bright-red: #ff8a8a; --term-ansi-bright-green: #6ee7a8; --term-ansi-bright-yellow: #ffd88a;
   --term-ansi-bright-blue: #9cbaff; --term-ansi-bright-magenta: #e9a8f5; --term-ansi-bright-cyan: #8ae9f5; --term-ansi-bright-white: #f2f0ed;
+
+  /* C8c start: GitHub dark's syntax colours on the raised dark ground. */
+  --code-keyword: #ff7b72; --code-string: #a5d6ff; --code-comment: #8b949e; --code-number: #79c0ff; --code-type: #ffa657;
+  --code-function: #d2a8ff; --code-variable: #e8e6e3; --code-property: #79c0ff; --code-operator: #ff7b72; --code-punctuation: #c8c6c3;
+  --code-meta: #8b949e; --code-invalid: #ffa198;
+  --code-gutter-fg: rgba(232,230,227,0.34); --code-line-active-bg: rgba(255,255,255,0.04); --code-selection-bg: rgba(217,119,87,0.28);
+  /* C8c end */
 }
