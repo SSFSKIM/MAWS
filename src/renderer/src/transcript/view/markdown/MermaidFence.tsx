@@ -7,7 +7,7 @@
 // A closed fence keeps showing as code until its diagram has drawn: Streamdown's diagram block is an empty frame while
 // mermaid lays it out (about a third of a second, longer for the first diagram of a page load), so the diagram renders
 // hidden beside the code and replaces it once its SVG is in place. A diagram mermaid cannot draw stays as its code.
-import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { Streamdown, type CustomRendererProps } from 'streamdown';
 import { STREAMDOWN_OPTIONS } from './options';
 import { code, useMermaidPlugin } from './plugins';
@@ -24,18 +24,19 @@ export function MermaidFence({ code: source, isIncomplete, meta }: CustomRendere
   const opening = `\`\`\`mermaid${meta ? ` ${meta}` : ''}`;
   const fenced = complete ? `${opening}\n${source}\n\`\`\`` : `${opening}\n${source}`;
   const diagram = complete && mermaid !== null;
-  const drawn = useDrawn(diagram ? source : null);
+  const [root, setRoot] = useState<HTMLDivElement | null>(null);
+  const drawn = useDrawn(root, diagram ? source : null);
   const withDiagrams = useMemo(() => (mermaid ? { code, mermaid } : CODE_ONLY), [mermaid]);
   return (
-    <div className="transcript-mermaid" data-drawn={drawn.ready ? '' : undefined}>
+    <div className="transcript-mermaid" data-drawn={drawn ? '' : undefined}>
       {diagram && (
-        <div ref={drawn.ref} className="transcript-mermaid-diagram">
+        <div ref={setRoot} className="transcript-mermaid-diagram">
           <Streamdown {...STREAMDOWN_OPTIONS} mode="static" plugins={withDiagrams}>
             {fenced}
           </Streamdown>
         </div>
       )}
-      {!drawn.ready && (
+      {!drawn && (
         <Streamdown {...STREAMDOWN_OPTIONS} mode="static" plugins={CODE_ONLY}>
           {fenced}
         </Streamdown>
@@ -44,12 +45,10 @@ export function MermaidFence({ code: source, isIncomplete, meta }: CustomRendere
   );
 }
 
-// Whether the diagram of `source` (null: none is drawing) has its SVG in the element `ref` names.
-function useDrawn(source: string | null) {
-  const ref = useRef<HTMLDivElement>(null);
+// Whether the diagram of `source` (null: none is drawing) has its SVG in `root`, the diagram's element.
+function useDrawn(root: HTMLElement | null, source: string | null): boolean {
   const [drawnFor, setDrawnFor] = useState<string | null>(null);
   useEffect(() => {
-    const root = ref.current;
     if (source === null || !root) return;
     const check = () => {
       if (root.querySelector('[data-streamdown="mermaid"] [role="img"] > svg')) setDrawnFor(source);
@@ -58,6 +57,6 @@ function useDrawn(source: string | null) {
     const observer = new MutationObserver(check);
     observer.observe(root, { childList: true, subtree: true });
     return () => observer.disconnect();
-  }, [source]);
-  return { ref, ready: source !== null && drawnFor === source };
+  }, [root, source]);
+  return source !== null && drawnFor === source;
 }
