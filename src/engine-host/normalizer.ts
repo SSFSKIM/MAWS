@@ -69,7 +69,16 @@ export interface NormalizerState {
   completedBlocks: Map<ApiMessageId, number>;
   taskTypes: Map<string, string>;
   workflowNames: Map<string, string>;
+  trustNotice: { held: string | null; settled: boolean }; // C10: the engine's stderr trust line, held until the launch's initialize response settles it (or the exit does)
 }
+
+// C10 start: the engine's trust line on stderr (fixture pass2/trust-no-attestation seq 5). It is printed at settings
+// load, before `initialize` is read, so it means "ignored" only when that response did not record trust.
+const TRUST_NOTICE_KEY = 'trust:ignored';
+function isTrustNotice(text: string): boolean {
+  return text.trimStart().startsWith('Ignoring ') && text.includes('this workspace has not been trusted');
+}
+// C10 end
 
 export class Normalizer {
   readonly state: NormalizerState;
@@ -97,6 +106,7 @@ export class Normalizer {
       completedBlocks: new Map(),
       taskTypes: new Map(),
       workflowNames: new Map(),
+      trustNotice: { held: null, settled: false }, // C10
     };
   }
 
@@ -114,8 +124,13 @@ export class Normalizer {
         case 'meta':
           this.pushMeta(row, out);
           break;
-        case 'stderr':
+        case 'stderr': {
+          // C10 start: held per launch, released at the correlated initialize response or the exit row
+          const text = String((row.frame as { text?: unknown } | null)?.text ?? '');
+          if (!this.state.trustNotice.settled && this.state.trustNotice.held === null && isTrustNotice(text)) this.state.trustNotice.held = text.trim();
+          // C10 end
           break;
+        }
       }
     } catch (error) {
       const message = error instanceof z.ZodError ? error.issues.map((i) => `${i.path.join('.') || '<root>'}: ${i.message}`).join('; ') : error instanceof Error ? error.message : String(error);
@@ -387,12 +402,29 @@ export class Normalizer {
     const sent = this.state.outbound.get(requestId);
     if (!sent) return;
     this.state.outbound.delete(requestId);
+    // C10 start: the launch's initialize answered; the held trust line was a warning only if trust was not recorded
+    if (sent.subtype === 'initialize') {
+      const recorded = frame.response.subtype === 'success' && (frame.response.response as { workspace_trust_recorded?: unknown } | undefined)?.workspace_trust_recorded === true;
+      if (!recorded) this.postTrustNotice(out, attribution);
+      this.state.trustNotice = { held: null, settled: true };
+      return;
+    }
+    // C10 end
     if (sent.subtype !== 'rewind_conversation' || frame.response.subtype !== 'success') return;
     const parsed = RewindConversationResponseSchema.safeParse(frame.response.response);
     if (!parsed.success || !parsed.data.rewound) return;
     const target = parsed.data.targetMessageUuid ?? (sent.request as { target_message_uuid?: unknown }).target_message_uuid;
     out.emit({ kind: 'boundary.rewind', targetMessageUuid: String(target) as MessageUuid, precedingAssistantUuid: (parsed.data.precedingAssistantUuid ?? null) as MessageUuid | null, prefillText: parsed.data.prefillText ?? null }, attribution);
   }
+
+  // C10 start: the held trust line as the session's warning, once
+  private postTrustNotice(out: Emitter, attribution: Attribution): void {
+    const text = this.state.trustNotice.held;
+    if (text === null) return;
+    this.state.trustNotice.held = null;
+    out.emit({ kind: 'notice.posted', level: 'warning', text, key: TRUST_NOTICE_KEY }, attribution);
+  }
+  // C10 end
 
   // ---------------------------------------------------------------------------------------------------------------------
   // Stdin frames (ours)
@@ -444,6 +476,7 @@ export class Normalizer {
     const main: Attribution = { parentToolUseId: null, agentId: null };
     switch (meta.event) {
       case 'exit': {
+        this.postTrustNotice(out, main); // C10: exited before answering initialize: nothing recorded
         const code = typeof meta.code === 'number' ? meta.code : null;
         const signal = stringOrNull(meta.signal);
         const reason = typeof meta.reason === 'string' ? (meta.reason as 'quit' | 'stop' | 'archive' | 'crash' | 'unknown') : code === 0 && signal === null ? 'unknown' : 'crash';

@@ -511,7 +511,8 @@ describe('normaliser: per-fixture graph facts (C2 findings restated)', () => {
       'question.answered', 'question.requested', 'session.commands', 'session.init', 'subagent.finished', 'subagent.progress', 'subagent.started',
       'task.notification', 'task.started', 'task.updated', 'tasks.snapshot', 'tool.result', 'tool.safeguard', 'tool.use', 'turn.ended', 'turn.started',
       'usage.sample', 'user.message', 'workflow.progress',
-    ]);
+      'notice.posted', // C10: the trust notice (pass2/trust-no-attestation, pass3/trust-exact-key)
+    ].sort());
     void kinds;
   });
 });
