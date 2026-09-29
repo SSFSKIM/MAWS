@@ -43,6 +43,8 @@ export async function launchMaws(opts: ShellLaunchOptions = {}): Promise<MawsLau
 
   const ownsUserData = opts.userData === undefined; // C5
   const userData = opts.userData ?? mkdtempSync(join(tmpdir(), 'maws-e2e-')); // C5: an existing profile when given
+  // C5: a relaunch over a given profile still starts from an empty engine store, which C4's block below creates anew.
+  if (!ownsUserData) rmSync(join(userData, 'claude-config'), { recursive: true, force: true });
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) if (value !== undefined) env[key] = value;
   // A shell inherited from `electron-vite dev` or an editor must not turn the app into a dev-server client or a Node.
