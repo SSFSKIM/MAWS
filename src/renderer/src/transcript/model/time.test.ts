@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { configureTime, duration, needsSeparator, separatorLabel } from './time';
 
 const NOW = '2026-09-28T15:00:00.000Z';
@@ -36,6 +36,30 @@ describe('time separators', () => {
     expect(separatorLabel('2026-09-22T09:05:00.000Z')).toBe('Tuesday 9:05 AM'); // six days back, still a weekday
     expect(separatorLabel('2026-09-21T09:05:00.000Z')).toBe('Sep 21, 2026 9:05 AM'); // seven days back
     expect(separatorLabel('2025-12-31T18:30:00.000Z')).toBe('Dec 31, 2025 6:30 PM');
+  });
+
+  // Every flatten of the row list labels every separator (hundreds on a long transcript), so a label must not build
+  // formatters: building four per label cost about 12 ms per flatten of synthetic/500, several times in one frame when
+  // receipts mount (M6 profile).
+  it('reuses its formatters across labels', () => {
+    configureTime({ now: NOW, locale: 'en-US', timeZone: 'UTC' });
+    separatorLabel('2026-09-28T01:12:00.000Z'); // warm
+    const spy = vi.spyOn(Intl, 'DateTimeFormat');
+    for (let i = 0; i < 500; i += 1) separatorLabel(new Date(Date.parse('2026-09-20T00:00:00.000Z') + i * 1_800_000).toISOString());
+    expect(spy.mock.calls.length).toBeLessThanOrEqual(4);
+    spy.mockRestore();
+  });
+
+  it('labels afresh when the clock, the zone or the locale changes', () => {
+    const at = '2026-09-28T14:30:00.000Z';
+    configureTime({ now: NOW, locale: 'en-US', timeZone: 'UTC' });
+    expect(separatorLabel(at)).toBe('Today 2:30 PM');
+    configureTime({ now: '2026-09-29T15:00:00.000Z', locale: 'en-US', timeZone: 'UTC' });
+    expect(separatorLabel(at)).toBe('Yesterday 2:30 PM');
+    configureTime({ now: NOW, locale: 'en-US', timeZone: 'Asia/Seoul' });
+    expect(separatorLabel(at)).toBe('Yesterday 11:30 PM');
+    configureTime({ now: NOW, locale: 'en-GB', timeZone: 'UTC' });
+    expect(separatorLabel(at)).toBe('Today 14:30');
   });
 
   it('follows the configured time zone for the day boundary', () => {

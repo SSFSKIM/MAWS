@@ -36,9 +36,21 @@ export function needsSeparator(previousAt: string | null, at: string, subject: S
   return gap >= (subject === 'human' ? HOUR : 10 * MINUTE);
 }
 
-// Calendar day of an instant in the configured zone, as a day number, so "today" and "yesterday" follow the zone.
-function dayNumber(ms: number, timeZone: string): number {
-  const parts = new Intl.DateTimeFormat('en-US', { timeZone, year: 'numeric', month: 'numeric', day: 'numeric' }).formatToParts(new Date(ms));
+// Formatters are built once per (locale, zone, shape) and reused: the flat row list labels every separator on each
+// flatten, and building a formatter costs far more than formatting with one (M6 profile: four per label cost about
+// 12 ms per flatten of synthetic/500, and mounting a few receipts flattens several times in one frame).
+const formatters = new Map<string, Intl.DateTimeFormat>();
+function formatter(locale: string | undefined, timeZone: string | undefined, options: Intl.DateTimeFormatOptions): Intl.DateTimeFormat {
+  const key = `${locale ?? ''}|${timeZone ?? ''}|${JSON.stringify(options)}`;
+  let format = formatters.get(key);
+  if (!format) formatters.set(key, (format = new Intl.DateTimeFormat(locale, { ...options, timeZone })));
+  return format;
+}
+
+// Calendar day of an instant in the configured zone (the system's when none is configured), as a day number, so
+// "today" and "yesterday" follow the zone.
+function dayNumber(ms: number, timeZone: string | undefined): number {
+  const parts = formatter('en-US', timeZone, { year: 'numeric', month: 'numeric', day: 'numeric' }).formatToParts(new Date(ms));
   const value = (type: string) => Number(parts.find((part) => part.type === type)?.value);
   return Math.floor(Date.UTC(value('year'), value('month') - 1, value('day')) / DAY);
 }
@@ -46,15 +58,14 @@ function dayNumber(ms: number, timeZone: string): number {
 export function separatorLabel(at: string): string {
   const locale = config?.locale ?? undefined;
   const timeZone = config?.timeZone ?? undefined;
-  const zone = timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
   const instant = Date.parse(at);
   const now = config ? Date.parse(config.now) : Date.now();
-  const daysAgo = dayNumber(now, zone) - dayNumber(instant, zone);
-  const time = new Intl.DateTimeFormat(locale, { timeZone, hour: 'numeric', minute: '2-digit' }).format(instant);
+  const daysAgo = dayNumber(now, timeZone) - dayNumber(instant, timeZone);
+  const time = formatter(locale, timeZone, { hour: 'numeric', minute: '2-digit' }).format(instant);
   let day: string;
   if (daysAgo === 0) day = 'Today';
   else if (daysAgo === 1) day = 'Yesterday';
-  else if (daysAgo > 1 && daysAgo <= 6) day = new Intl.DateTimeFormat(locale, { timeZone, weekday: 'long' }).format(instant);
-  else day = new Intl.DateTimeFormat(locale, { timeZone, year: 'numeric', month: 'short', day: 'numeric' }).format(instant);
+  else if (daysAgo > 1 && daysAgo <= 6) day = formatter(locale, timeZone, { weekday: 'long' }).format(instant);
+  else day = formatter(locale, timeZone, { year: 'numeric', month: 'short', day: 'numeric' }).format(instant);
   return `${day} ${time}`;
 }
