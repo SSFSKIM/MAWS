@@ -130,31 +130,47 @@ async function paste(page: Page, item: { text: string } | { file: { name: string
 
 const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
 
-test('the editor sends as typed: Enter, Shift+Enter lines and ⌘Enter; a composing Enter never sends; ArrowUp recalls', async ({ editor }) => {
+test('the editor sends as typed: Enter in one line, lines by Shift+Enter then Enter, ⌘Enter always; a composing Enter never sends; ArrowUp recalls', async ({ editor }) => {
   const { page } = editor;
   const id = 'c7-editor-send';
-  await launchEditor(page, id, turnsJournal(scratch, id, 2));
+  await launchEditor(page, id, turnsJournal(scratch, id, 3));
   await page.keyboard.type('hello');
   await page.keyboard.press('Enter');
   await expect.poll(() => sent(page, id)).toEqual(['hello']);
   await expect.poll(async () => (await serialized(page))?.display).toBe('');
 
+  // once the document has a second line, Enter breaks lines too (§5.8) and ⌘Enter sends
   await page.keyboard.type('two');
   await page.keyboard.press('Shift+Enter');
   await page.keyboard.type('lines');
-  // an Enter that belongs to an input method's composition is the IME's, never a send
-  await page.evaluate(() => document.querySelector('[contenteditable="true"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', isComposing: true, bubbles: true, cancelable: true })));
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('three');
+  await expect.poll(async () => (await serialized(page))?.display).toBe('two\nlines\nthree');
   expect(await submissions(page)).toHaveLength(1);
   await page.keyboard.press('Meta+Enter');
-  await expect.poll(() => sent(page, id)).toEqual(['hello', 'two\nlines']);
+  await expect.poll(() => sent(page, id)).toEqual(['hello', 'two\nlines\nthree']);
+  await expect.poll(async () => (await serialized(page))?.display).toBe('');
+
+  // an Enter that belongs to an input method's composition is the IME's, never a send, even in one line: the marker
+  // typed after it goes out in the same message
+  await page.keyboard.type('ime');
+  await page.evaluate(() => document.querySelector('[contenteditable="true"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', isComposing: true, bubbles: true, cancelable: true })));
+  await page.keyboard.type('marker');
+  await page.keyboard.press('Meta+Enter');
+  await expect.poll(() => sent(page, id)).toEqual(['hello', 'two\nlines\nthree', 'ime\nmarker']);
+  expect(await submissions(page)).toHaveLength(3);
 
   await expect.poll(async () => (await serialized(page))?.display).toBe('');
   await page.keyboard.press('ArrowUp');
-  await expect.poll(async () => (await serialized(page))?.display).toBe('two\nlines');
+  await expect.poll(async () => (await serialized(page))?.display).toBe('ime\nmarker');
   await page.keyboard.press('ArrowUp');
-  await expect.poll(async () => (await serialized(page))?.display).toBe('hello');
+  await expect.poll(async () => (await serialized(page))?.display).toBe('two\nlines\nthree');
+  // going back leaves the caret at the entry's start, so ArrowDown walks its lines before the next entry
   await page.keyboard.press('ArrowDown');
-  await expect.poll(async () => (await serialized(page))?.display).toBe('two\nlines');
+  await page.keyboard.press('ArrowDown');
+  expect((await serialized(page))?.display).toBe('two\nlines\nthree');
+  await page.keyboard.press('ArrowDown');
+  await expect.poll(async () => (await serialized(page))?.display).toBe('ime\nmarker');
   await page.keyboard.press('ArrowDown');
   await expect.poll(async () => (await serialized(page))?.display).toBe(''); // the draft the recall began from
   expect(editor.consoleErrors()).toEqual([]);
