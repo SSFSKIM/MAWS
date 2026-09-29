@@ -1,5 +1,5 @@
 // The `/` palette (C7 execution document, "Mentions, palette and the "+" menu"): the union of the engine's catalogue,
-// the declared widget catalogue and MAWS's actions, each row badged by origin, ranked by `rank.ts`, at most 40 rows,
+// the declared widget catalogue and MAWS's actions, each row under its origin's heading (C11), ranked by `rank.ts`, at most 40 rows,
 // the item list memoised per catalogue and registered widgets. Choosing a row follows the one dispatch rule: a
 // registered widget opens; a headless command is inserted as `/<name> ` for the engine to parse from the prompt; a MAWS
 // action runs; an unavailable row stays listed and disabled with its hint.
