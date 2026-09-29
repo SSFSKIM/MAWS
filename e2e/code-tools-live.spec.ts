@@ -301,6 +301,7 @@ test('live: a turn that edits a file opens Review on Last turn and the viewer at
       rmSync(config, { recursive: true, force: true });
       console.log(`[c8c-live] scratch clone and config removed; the turn's journal is kept: ${join(scratch, 'turn.jsonl')}`);
     }
+    // Read only, and in the finally so a failing model run is checked too.
+    expectOwnerHomeUntouched(created.session_id, scratch);
   }
-  expectOwnerHomeUntouched(created.session_id, scratch);
 });
