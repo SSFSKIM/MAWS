@@ -19,16 +19,17 @@
 // swap-and-restore between the install and its confirmation attaches the watcher outside until a batch's confirmation
 // catches a standing swap, or forwards outside filenames if it was restored; a swap between a batch's confirmation and
 // its per-name `lstat` classifies that batch's kinds from outside metadata. `openExternal` is path-checked immediately
-// before `shell.openPath`, with no descriptor guarantee, and hands the OS only a regular, non-executable file whose
-// extension macOS opens rather than launches.
+// before `shell.openPath`, with no descriptor guarantee, and hands the OS only a regular, non-executable file of a document
+// or media kind (`opensExternally`, an allowlist).
 import fs, { type BigIntStats } from 'node:fs';
 import type { FileHandle } from 'node:fs/promises';
-import { basename, dirname, extname, isAbsolute, join, normalize } from 'node:path';
+import { basename, dirname, isAbsolute, join, normalize } from 'node:path';
 import type { AppSessionId } from '@shared/graph/ids';
 import {
   BINARY_SNIFF_BYTES,
   FILES_LIST_MAX_ENTRIES,
   FILES_READ_DEFAULT_LENGTH,
+  opensExternally,
   type FilesChanged,
   type FilesEntry,
   type FilesListOutput,
@@ -76,13 +77,6 @@ const { O_RDONLY, O_NONBLOCK, O_DIRECTORY } = fs.constants;
 // macOS 26.6.2), and O_NOFOLLOW_ANY alone refuses a symlink in the last component with ELOOP as well.
 export const O_NOFOLLOW_ANY = 0x20000000;
 export const OPEN_FLAGS = O_RDONLY | O_NONBLOCK | O_NOFOLLOW_ANY;
-
-// Extensions macOS launches or installs rather than opens in a viewer (lower case; compared case-insensitively).
-const LAUNCHED_EXTENSIONS = new Set([
-  '.app', '.command', '.tool', '.terminal', '.workflow', '.action', '.pkg', '.mpkg', '.scpt', '.scptd', '.applescript', '.jar',
-  '.webloc', '.inetloc', '.fileloc', '.url', '.shortcut', '.prefpane', '.saver', '.kext', '.plugin', '.bundle', '.dmg',
-  '.mobileconfig', '.osax', '.appex',
-]);
 
 class Refusal extends Error {
   constructor() {
@@ -250,7 +244,7 @@ export function createFilesService({ records, hooks, emit = () => {}, openPath, 
     // "Open externally" shows a document in its viewer; it never runs a program an agent wrote into the tree. The
     // object is in-root (step 1), so naming it in the message leaks nothing.
     const target = await fs.promises.lstat(real0).catch(() => null);
-    if (!target || !target.isFile() || (target.mode & 0o111) !== 0 || LAUNCHED_EXTENSIONS.has(extname(real0).toLowerCase())) {
+    if (!target || !target.isFile() || (target.mode & 0o111) !== 0 || !opensExternally(basename(real0))) {
       throw new Error(`not opened outside MAWS: ${path}`);
     }
     if (env.MAWS_E2E === '1' && env.MAWS_E2E_OPEN_LOG) {

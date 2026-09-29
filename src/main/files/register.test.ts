@@ -20,7 +20,7 @@ vi.mock('electron', () => ({
 
 const APP_URL = 'http://localhost:5173/';
 const mainFrame = { url: APP_URL, parent: null };
-const sender = Object.assign(new EventEmitter(), { id: 7, mainFrame });
+const sender = Object.assign(new EventEmitter(), { id: 7, mainFrame, destroyed: false, isDestroyed: () => sender.destroyed });
 const event = { sender, senderFrame: mainFrame };
 const OUT = "path outside the session's directories";
 
@@ -35,6 +35,7 @@ describe('main answers files.* through the router', () => {
     electron.windows.clear();
     electron.windows.set(sender, { webContents: sender });
     sender.removeAllListeners();
+    sender.destroyed = false;
     root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-files-register-')));
     mkdirSync(join(root, 'repo', 'src'), { recursive: true });
     writeFileSync(join(root, 'repo', 'src', 'a.ts'), 'export {};\n');
@@ -53,7 +54,7 @@ describe('main answers files.* through the router', () => {
     const files = registerFilesHandlers({ record: (id) => records.get(id) ?? null }, { emit, openPath, env: {} });
     dispose = () => files.dispose();
     installRouter({ appUrl: APP_URL });
-    return { files, emit, openPath };
+    return { files, emit, openPath, epochs: files.epochs };
   }
   const invoke = (name: string, input?: unknown) => electron.handlers.get(`maws:cmd:${name}`)!(event, input) as Promise<Result>;
 
@@ -107,11 +108,37 @@ describe('main answers files.* through the router', () => {
   it('opens an allowed file through shell.openPath and answers its error text', async () => {
     const openPath = vi.fn<(path: string) => Promise<string>>(async () => 'no application');
     await install(openPath);
-    expect(await invoke('files.openExternal', { appSessionId: 'A', path: join(root, 'repo', 'src', 'a.ts') })).toEqual({
+    writeFileSync(join(root, 'repo', 'doc.pdf'), '%PDF-1.4\n');
+    expect(await invoke('files.openExternal', { appSessionId: 'A', path: join(root, 'repo', 'doc.pdf') })).toEqual({
       ok: true,
       value: { opened: false, message: 'no application' },
     });
-    expect(openPath).toHaveBeenCalledWith(join(root, 'repo', 'src', 'a.ts'));
+    expect(openPath).toHaveBeenCalledWith(join(root, 'repo', 'doc.pdf'));
+    expect(await invoke('files.openExternal', { appSessionId: 'A', path: join(root, 'repo', 'src', 'a.ts') })).toEqual({
+      ok: false,
+      error: { code: 'internal', message: `not opened outside MAWS: ${join(root, 'repo', 'src', 'a.ts')}` },
+    });
     expect(await invoke('files.openExternal', { appSessionId: 'A', path: '/etc/hosts' })).toEqual({ ok: false, error: { code: 'internal', message: OUT } });
+    expect(openPath).toHaveBeenCalledTimes(1);
+  });
+
+  it('forgets a closed window: its epoch is pruned on destroyed', async () => {
+    const { files, epochs } = await install();
+    await invoke('files.watch', { appSessionId: 'A', path: join(root, 'repo', 'src') });
+    sender.emit('did-navigate');
+    expect(epochs.has(7)).toBe(true); // a live window keeps its epoch, so a watch in flight across the reload is caught
+    sender.emit('destroyed');
+    expect(epochs.has(7)).toBe(false);
+    expect(files.watching()).toEqual([]);
+  });
+
+  it('drops a watch still in flight when its window closes, though the pruned epoch reads as before', async () => {
+    const { files, epochs } = await install();
+    const answer = invoke('files.watch', { appSessionId: 'A', path: join(root, 'repo', 'src') });
+    sender.destroyed = true;
+    sender.emit('destroyed');
+    await answer;
+    expect(epochs.has(7)).toBe(false);
+    expect(files.watching()).toEqual([]);
   });
 });

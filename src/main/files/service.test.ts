@@ -324,9 +324,10 @@ describe('files service boundary', () => {
   it('has a kernel that honours O_NOFOLLOW_ANY: the service flags refuse a symlink anywhere on the path', async () => {
     symlinkSync(join(root, 'src'), inRoot('alias'));
     await expect(fs.promises.open(inRoot('alias', 'a.ts'), OPEN_FLAGS)).rejects.toMatchObject({ code: 'ELOOP' }); // an ancestor
-    // the temp root as the OS names it (/var/folders/…, /var → /private/var): a system symlink high on the path
-    expect(root.startsWith('/private/var/')).toBe(true);
-    await expect(fs.promises.open(root.slice('/private'.length), OPEN_FLAGS | fs.constants.O_DIRECTORY)).rejects.toMatchObject({ code: 'ELOOP' });
+    // a symlink high on the path, several real directories above the target (as /var → /private/var would be)
+    symlinkSync(base, at('high'));
+    await expect(fs.promises.open(at('high', 'root', 'src', 'a.ts'), OPEN_FLAGS)).rejects.toMatchObject({ code: 'ELOOP' });
+    await expect(fs.promises.open(at('high', 'root', 'src'), OPEN_FLAGS | fs.constants.O_DIRECTORY)).rejects.toMatchObject({ code: 'ELOOP' });
     symlinkSync(inRoot('README.md'), inRoot('readme-link'));
     await expect(fs.promises.open(inRoot('readme-link'), OPEN_FLAGS)).rejects.toMatchObject({ code: 'ELOOP' }); // the last component
     const handle = await fs.promises.open(inRoot('src', 'a.ts'), OPEN_FLAGS); // a realpath opens
@@ -585,6 +586,11 @@ describe('files service listing and reading', () => {
 });
 
 describe('files openExternal', () => {
+  beforeEach(() => {
+    write(inRoot('doc.pdf'), '%PDF-1.4\n%%EOF\n');
+    write(inRoot('media', 'clip.mp4'), 'x');
+  });
+
   it('refuses a path outside the roots and opens nothing', async () => {
     const openPath = vi.fn(async () => '');
     const files = service({ openPath, env: {} });
@@ -594,30 +600,36 @@ describe('files openExternal', () => {
     expect(openPath).not.toHaveBeenCalled();
   });
 
-  it('refuses what macOS would launch or install rather than open, and opens a PDF', async () => {
+  it('hands the OS only a regular, non-executable document or media file, and refuses everything else', async () => {
     const log = at('open.log');
     const files = service({ env: { MAWS_E2E: '1', MAWS_E2E_OPEN_LOG: log } });
+    write(inRoot('tool.py'), 'print("hi")\n'); // not a document kind: an installed launcher could run it
+    write(inRoot('archive.zip'), 'PK');
+    write(inRoot('data.bin'), Buffer.from([1, 0, 2]));
     write(inRoot('run.sh'), '#!/bin/sh\necho hi\n');
-    fs.chmodSync(inRoot('run.sh'), 0o755);
-    write(inRoot('script.command'), 'echo hi\n'); // not executable: refused by its extension
-    write(inRoot('Installer.PKG'), 'x'); // the extension case-insensitively
-    mkdirSync(inRoot('Tool.app', 'Contents'), { recursive: true }); // a bundle is a directory
-    write(inRoot('doc.pdf'), '%PDF-1.4\n%%EOF\n');
-    for (const name of ['run.sh', 'script.command', 'Installer.PKG', 'Tool.app']) {
+    write(inRoot('script.command'), 'echo hi\n');
+    write(inRoot('movie.mp4'), 'x');
+    fs.chmodSync(inRoot('movie.mp4'), 0o755); // an allowed kind with an execute bit is still refused
+    mkdirSync(inRoot('Bundle.pdf')); // an allowed name on a directory is still refused
+    for (const name of ['tool.py', 'archive.zip', 'data.bin', 'run.sh', 'script.command', 'movie.mp4', 'Bundle.pdf']) {
       await expect(files.openExternal(A, inRoot(name))).rejects.toThrow(new Error(`not opened outside MAWS: ${inRoot(name)}`));
     }
     expect(fs.existsSync(log)).toBe(false); // nothing was handed to the OS
-    expect(await files.openExternal(A, inRoot('doc.pdf'))).toEqual({ opened: true, message: null });
-    expect(readFileSync(log, 'utf8')).toBe(`${inRoot('doc.pdf')}\n`);
+    const open = ['doc.pdf', 'page.html', 'clip.mp4', 'report.DOCX'];
+    for (const name of open) {
+      write(inRoot(name), 'x');
+      expect(await files.openExternal(A, inRoot(name))).toEqual({ opened: true, message: null });
+    }
+    expect(readFileSync(log, 'utf8')).toBe(open.map((name) => `${inRoot(name)}\n`).join(''));
   });
 
   it('opens the checked realpath and relays shell.openPath’s answer', async () => {
     const openPath = vi.fn<(path: string) => Promise<string>>(async () => '');
     const files = service({ openPath, env: {} });
-    expect(await files.openExternal(A, inRoot('README.md'))).toEqual({ opened: true, message: null });
-    expect(openPath).toHaveBeenCalledWith(inRoot('README.md'));
+    expect(await files.openExternal(A, inRoot('doc.pdf'))).toEqual({ opened: true, message: null });
+    expect(openPath).toHaveBeenCalledWith(inRoot('doc.pdf'));
     openPath.mockResolvedValueOnce('No application knows how to open this file');
-    expect(await files.openExternal(A, inRoot('README.md'))).toEqual({ opened: false, message: 'No application knows how to open this file' });
+    expect(await files.openExternal(A, inRoot('doc.pdf'))).toEqual({ opened: false, message: 'No application knows how to open this file' });
   });
 
   it('under MAWS_E2E=1 with MAWS_E2E_OPEN_LOG appends the realpath instead of opening', async () => {
@@ -626,13 +638,13 @@ describe('files openExternal', () => {
     symlinkSync(root, at('root-link'));
     records.set(A, record(at('root-link')));
     const files = service({ openPath, env: { MAWS_E2E: '1', MAWS_E2E_OPEN_LOG: log } });
-    expect(await files.openExternal(A, at('root-link', 'README.md'))).toEqual({ opened: true, message: null });
-    expect(await files.openExternal(A, at('root-link', 'src', 'a.ts'))).toEqual({ opened: true, message: null });
-    expect(readFileSync(log, 'utf8')).toBe(`${inRoot('README.md')}\n${inRoot('src', 'a.ts')}\n`);
+    expect(await files.openExternal(A, at('root-link', 'doc.pdf'))).toEqual({ opened: true, message: null });
+    expect(await files.openExternal(A, at('root-link', 'media', 'clip.mp4'))).toEqual({ opened: true, message: null });
+    expect(readFileSync(log, 'utf8')).toBe(`${inRoot('doc.pdf')}\n${inRoot('media', 'clip.mp4')}\n`);
     expect(openPath).not.toHaveBeenCalled();
     // without MAWS_E2E the log variable is ignored: the production path has no seam
     const production = service({ openPath, env: { MAWS_E2E_OPEN_LOG: log } });
-    await production.openExternal(A, inRoot('README.md'));
+    await production.openExternal(A, inRoot('doc.pdf'));
     expect(openPath).toHaveBeenCalledTimes(1);
   });
 });

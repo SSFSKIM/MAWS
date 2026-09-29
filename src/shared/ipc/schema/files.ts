@@ -4,6 +4,7 @@
 // and `worktree.path`) by the open-first boundary in `src/main/files/service.ts`; refusals answer `internal` with
 // `path outside the session's directories`. Nothing here writes a file.
 import * as z from 'zod';
+import { extensionOf, mimeOf } from '@shared/files/mime';
 import { AppSessionIdSchema } from '@shared/graph/ids';
 import type { CommandSpec } from './common';
 
@@ -13,6 +14,17 @@ export const FILES_READ_MAX_LENGTH = 8 * 1024 * 1024; // one call's ceiling; the
 export const FILES_LIST_MAX_ENTRIES = 5000;
 // How much of a file's head decides its encoding (a NUL in it makes the file binary); main and the viewer share it.
 export const BINARY_SNIFF_BYTES = 8192;
+
+// Whether `files.openExternal` hands a file of this name to the OS (and the viewer offers the button): an allowlist of
+// the document and media kinds MAWS opens outside on purpose, because any installed app can register to launch a file
+// it is asked to open (Python Launcher for `.py`), so a list of what not to open is incomplete by construction.
+// main's service also requires a regular file with no execute bit.
+const EXTERNAL_DOCUMENTS = new Set(['doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'odt', 'ods', 'odp', 'rtf', 'pages', 'numbers', 'key', 'epub']);
+export function opensExternally(name: string): boolean {
+  const mime = mimeOf(name);
+  if (mime === 'application/pdf' || mime === 'text/html' || /^(image|audio|video)\//.test(mime)) return true;
+  return EXTERNAL_DOCUMENTS.has(extensionOf(name));
+}
 
 export const FilesEntrySchema = z.strictObject({
   name: z.string(),
