@@ -114,7 +114,7 @@ function UnstartedFooter({ appSessionId, intent }: { appSessionId: AppSessionId;
     <div data-routing-footer className="flex min-w-0 flex-col gap-1">
       <p className="m-0 text-ui-sm text-fg">
         {route.line}
-        <span className="text-fg-muted"> · {ROUTE.choiceNote}</span>
+        {route.choices.length > 0 && <span className="text-fg-muted"> · {ROUTE.choiceNote}</span>}
       </p>
       {route.choices.length > 0 && (
         <div role="group" aria-label={ROUTE.choiceLabel} title={starting ? ROUTE.choiceStarting : undefined} className="-ml-1 flex items-center gap-x-1">

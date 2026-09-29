@@ -150,8 +150,11 @@ describe('an unstarted session chooses its route and restarts nothing — the fo
     for (const button of within(within(unstarted({ message: { content: 'Reply OK', display: 'Reply OK' } })).getByRole('group')).getAllByRole('button')) expect((button as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it('offerDirect false leaves a routed intent without the choice', () => {
+  it('offerDirect false leaves a routed intent without the choice, and without the note about one', () => {
     settingsWith({ offerDirect: false });
-    expect(within(unstarted()).queryByRole('group', { name: 'Route for this session' })).toBeNull();
+    const footer = unstarted();
+    expect(within(footer).queryByRole('group', { name: 'Route for this session' })).toBeNull();
+    expect(footer.textContent).toContain("Starts routed through ClaudeUsage's relay");
+    expect(footer.textContent).not.toContain('Applies at the first send');
   });
 });
