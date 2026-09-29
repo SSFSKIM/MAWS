@@ -781,6 +781,12 @@ Ready to paste into the charter's C8 section under "**Residue decisions (C8b, 20
   Rationale: each follows the nearest decision's reason: facts in words and never guesses, the four kinds and stop only, reported paths only, one tab per session and path, and M2's session-follow rule. None adds X2 surface or reopens a binding decision.
   Date/Author: 2026-09-29, C8b M3 (executor).
 
+- Decision (C8b M2 review fixes, 2026-09-29), one line each:
+  - A pinned Subagents tab that passes through the Overview (`ctx.appSessionId` null) keeps its view, scroll and draft. Only a change to another non-null session resets them, as M2's (2) reads.
+  - Done rows' `<ago>` advances on a 30-second tick (C5's `useNow` period), gated by the tool's visibility, which `useNow` itself is not. The one-second tick stays for live Active rows only, and neither tick runs while its section is collapsed. The relay line's tick also stops while the tool is hidden.
+  - An answered steer clears the tab's draft only while that draft still belongs to the relay's agent (`clearDraftFor`).
+  Date/Author: 2026-09-29, C8b M2 (executor, on the M2 review's findings).
+
 ## Outcomes & Retrospective
 
 Pending — written at finish.
