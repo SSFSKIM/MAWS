@@ -1,0 +1,32 @@
+{
+  "osc8": {
+    "clicked": true,
+    "activated": true,
+    "handler": "https://example.com (mouseup; meta false, ctrl false, alt false)",
+    "openLink": "https://example.com → opened true"
+  },
+  "bare": {
+    "clicked": true,
+    "activated": true,
+    "handler": "https://example.org (mouseup; meta false, ctrl false, alt false)",
+    "openLink": "https://example.org → opened true"
+  },
+  "javascript": {
+    "clicked": true,
+    "activated": false,
+    "handler": null,
+    "openLink": null
+  },
+  "javascriptInvoke": {
+    "ok": true,
+    "value": {
+      "opened": false
+    }
+  },
+  "openExternalCalls": [
+    "https://example.com",
+    "https://example.org"
+  ],
+  "pass": true,
+  "note": "main's shell.openExternal was stubbed through electronApp.evaluate: each URL reached it through pty.openLink and openExternalUrl's scheme check; this run opened no browser"
+}

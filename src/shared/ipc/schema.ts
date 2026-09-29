@@ -25,7 +25,7 @@ export {
   type Namespace,
   type Owner,
 } from './schema/common';
-export { PtyIdSchema, type PtyId } from './schema/pty';
+export { PtyIdSchema, type PtyAttach, type PtyCheckpoint, type PtyExit, type PtyId, type PtyInfo } from './schema/pty';
 export {
   SettingsPatchSchema,
   SettingsSchema,

@@ -1,22 +1,29 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MawsBridge } from '@shared/ipc/schema';
-import { ECHO_COMMAND, createEchoStore } from './echo';
+import { DIAGNOSTICS_SESSION, ECHO_COMMAND, createEchoStore } from './echo';
 
 // A fake main whose PTY host answers spawn and, on write, streams back what a terminal would: the echoed command
 // line first, then the command's output, split across chunks.
-function fakeMain(onWrite: (emit: (data: string) => void, emitExit: () => void) => void) {
+function fakeMain(onWrite: (emit: (data: string | Uint8Array) => void, emitExit: () => void) => void) {
   const listeners = new Map<string, Set<(payload: unknown) => void>>();
   const send = (name: string, payload: unknown) => listeners.get(name)?.forEach((l) => l(payload));
+  // The PTY host's binary stream: each chunk a Uint8Array stamped with the offset of its first byte.
+  let offset = 0;
+  const data = (chunk: string | Uint8Array) => {
+    const bytes = typeof chunk === 'string' ? new TextEncoder().encode(chunk) : chunk;
+    send('pty.data', { ptyId: 'p1', offset, data: bytes });
+    offset += bytes.byteLength;
+  };
   const client = {
     invoke: vi.fn(async (name: string) => {
       if (name === 'pty.spawn') {
-        send('pty.data', { ptyId: 'p1', data: 'sh-3.2$ ' }); // output may beat the spawn reply
+        data('sh-3.2$ '); // output may beat the spawn reply
         return { ok: true, value: { ptyId: 'p1', pid: 4242 } };
       }
       if (name === 'pty.write') {
         setTimeout(() =>
           onWrite(
-            (data) => send('pty.data', { ptyId: 'p1', data }),
+            data,
             () => send('pty.exit', { ptyId: 'p1', exitCode: 1, signal: null }),
           ),
         );
@@ -51,10 +58,27 @@ describe('echo test', () => {
     expect(store.getState().echo).toEqual({ status: 'running' });
     await vi.runAllTimersAsync();
     await run;
-    expect(main.raw.invoke).toHaveBeenCalledWith('pty.spawn', expect.objectContaining({ shell: '/bin/sh' }));
+    expect(main.raw.invoke).toHaveBeenCalledWith(
+      'pty.spawn',
+      expect.objectContaining({ appSessionId: DIAGNOSTICS_SESSION, label: expect.stringMatching(/^echo-/), shell: '/bin/sh', args: [] }),
+    );
     expect(main.raw.invoke).toHaveBeenCalledWith('pty.write', { ptyId: 'p1', data: ECHO_COMMAND });
     expect(store.getState().echo).toEqual({ status: 'ok', line: 'MAWS_ECHO_OK', pid: 4242 });
     expect(main.listeners.get('pty.data')?.size).toBe(0); // stops listening; the shell itself lives on
+  });
+
+  it('decodes a character split across two chunks', async () => {
+    const bytes = new TextEncoder().encode('한 MAWS_ECHO_OK\r\n');
+    const main = fakeMain((emit) => {
+      emit('\r\n');
+      emit(bytes.subarray(0, 2)); // inside the three bytes of 한
+      emit(bytes.subarray(2));
+    });
+    const store = createEchoStore(main.client);
+    const run = store.getState().run();
+    await vi.runAllTimersAsync();
+    await run;
+    expect(store.getState().echo).toEqual({ status: 'ok', line: '한 MAWS_ECHO_OK', pid: 4242 });
   });
 
   it('never takes the terminal’s echo of the command line for its output', () => {

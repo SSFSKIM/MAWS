@@ -1,0 +1,36 @@
+{
+  "phase": "m2-gate",
+  "ready": {
+    "xterm": {
+      "kind": "xterm",
+      "status": "idle",
+      "error": null,
+      "acceleration": "webgl",
+      "ptyId": null,
+      "pid": null,
+      "exit": null,
+      "cols": 93,
+      "rows": 40,
+      "bytes": 0,
+      "parsed": 0,
+      "lineFeeds": 0,
+      "carriageReturns": 0,
+      "syncFrames": 0,
+      "kittyQueried": false,
+      "kittyAnswered": false,
+      "xtversionQueried": false,
+      "xtversionAnswered": false,
+      "dsrReplies": [],
+      "lastInput": "",
+      "rawTail": "",
+      "lastLink": null,
+      "lastOpen": null,
+      "acked": 0,
+      "title": null,
+      "metrics": null
+    }
+  },
+  "console": [],
+  "cspRelated": [],
+  "at": "2026-09-28T22:10:01.922Z"
+}

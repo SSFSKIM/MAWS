@@ -1,0 +1,44 @@
+{
+  "renderer": "xterm",
+  "workload": "input echo latency (cat)",
+  "phase": "m2-gate",
+  "expectedBytes": null,
+  "bytes": 188,
+  "outputBytes": 184,
+  "lineFeeds": 4,
+  "extraCarriageReturns": 0,
+  "seconds": 1.125,
+  "lastLine": "cdefghijklmnopqrstuv",
+  "lineCount": 40,
+  "heapMB": 51,
+  "blockedInputEvents": 0,
+  "pausedSeen": false,
+  "acks": 29,
+  "chunks": 102,
+  "maxUnparsed": 44,
+  "maxUnacked": 47,
+  "latency": {
+    "count": 100,
+    "p50": 5.4,
+    "p95": 5.7,
+    "max": 8.8
+  },
+  "frames": {
+    "count": 134,
+    "p50": 8.299999999999272,
+    "p95": 9.900000000001455,
+    "max": 10.200000000000728,
+    "over33ms": 0,
+    "over50ms": 0
+  },
+  "longTasks": {
+    "count": 0,
+    "totalMs": 0,
+    "max": 0
+  },
+  "gate": {
+    "pass": true,
+    "echoP95Ok": true,
+    "echoP95Ms": 5.7
+  }
+}

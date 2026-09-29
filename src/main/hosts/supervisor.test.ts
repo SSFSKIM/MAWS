@@ -234,10 +234,11 @@ describe('host supervisor', () => {
   it('relays host events to the renderer and drops events outside the registry', async () => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => {});
     const { pty } = await startReady();
-    fromHost(pty, { t: 'evt', name: 'pty.data', payload: { ptyId: 'p1', data: 'hi' } });
+    const data = new Uint8Array([104, 105]);
+    fromHost(pty, { t: 'evt', name: 'pty.data', payload: { ptyId: 'p1', offset: 0, data } });
     fromHost(pty, { t: 'evt', name: 'nope.thing', payload: {} });
     await flush();
-    expect(emit).toHaveBeenCalledExactlyOnceWith('pty.data', { ptyId: 'p1', data: 'hi' });
+    expect(emit).toHaveBeenCalledExactlyOnceWith('pty.data', { ptyId: 'p1', offset: 0, data });
     expect(log).toHaveBeenCalledOnce();
   });
 
@@ -365,7 +366,7 @@ describe('host supervisor', () => {
     serve(pty, (on) => on('pty.spawn', async () => ({ ptyId: `p${++next}` as never, pid: 1000 + next })));
     pty.spawn(2);
     for (let i = 0; i < 3; i++) {
-      await supervisor.dispatch('pty-host', 'pty.spawn', { cwd: '/', cols: 80, rows: 24 });
+      await supervisor.dispatch('pty-host', 'pty.spawn', { appSessionId: 'a1', label: `terminal-${i}`, cwd: '/', cols: 80, rows: 24 });
     }
     fromHost(pty, { t: 'evt', name: 'pty.exit', payload: { ptyId: 'p2', exitCode: 0, signal: null } });
     await flush();

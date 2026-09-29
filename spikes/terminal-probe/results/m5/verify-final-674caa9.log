@@ -1,0 +1,120 @@
+load at start: { 22.36 83.06 123.73 }
+$ pnpm typecheck && pnpm lint && pnpm test && pnpm build && pnpm e2e && pnpm build:app && pnpm e2e:packaged && pnpm e2e:terminal
+$ tsc --noEmit -p tsconfig.node.json --composite false && tsc --noEmit -p tsconfig.web.json --composite false && tsc --noEmit -p tsconfig.e2e.json --composite false
+$ eslint .
+$ vitest run
+Testing types with tsc and vue-tsc is an experimental feature.
+Breaking changes might not follow SemVer, please pin Vitest's version when using it.
+
+ RUN  v5.0.2 /Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a6f3eb0835c0683ff
+
+
+ Test Files  42 passed (42)
+      Tests  423 passed (423)
+Type Errors  no errors
+   Start at  21:27:27
+   Duration  15.55s (tests 57%, environment 22%, transform 9%, import 9%, typecheck 3%, worker 1%)
+
+    Isolate  40 workers spawned · ~280ms startup each (spawn + environment, per file)
+             at least ~963ms faster with isolate: false — reuses workers across files instead of one per file
+
+$ electron-vite build
+vite v7.3.6 building ssr environment for production...
+transforming...
+✓ 26 modules transformed.
+rendering chunks...
+out/main/index-D_tpfdzO.js  13.90 kB
+out/main/index-DYRYkHbK.js  27.36 kB
+out/main/index.js           27.42 kB
+✓ built in 165ms
+vite v7.3.6 building ssr environment for production...
+transforming...
+✓ 110 modules transformed.
+rendering chunks...
+out/preload/index.js  188.50 kB
+✓ built in 409ms
+vite v7.3.6 building client environment for production...
+transforming...
+✓ 197 modules transformed.
+rendering chunks...
+../../out/renderer/index.html                   0.33 kB
+../../out/renderer/assets/index-Cxp6Sx5u.css   20.91 kB
+../../out/renderer/assets/index-BTM6gp4Q.js   933.69 kB
+✓ built in 1.25s
+$ playwright test
+
+Running 2 tests using 1 worker
+
+  ✓  1 e2e/smoke.spec.ts:13:5 › preload bundle has no external runtime imports (5ms)
+  ✓  2 e2e/smoke.spec.ts:22:5 › MAWS opens light, hosts answer, pty echoes, survives reload and window close, theme switches, exits clean (2.4s)
+
+  2 passed (2.8s)
+$ CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dir
+  • electron-builder  version=26.15.3 os=25.6.0
+  • loaded configuration  file=/Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a6f3eb0835c0683ff/electron-builder.yml
+  • author is missed in the package.json  appPackageFile=/Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a6f3eb0835c0683ff/package.json
+  • detected workspace root for project using packageManager field  pm=pnpm config=pnpm@11.23.0 resolved=/Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a6f3eb0835c0683ff projectDir=/Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a6f3eb0835c0683ff
+  • skipped dependencies rebuild  reason=npmRebuild is set to false
+  • packaging       platform=darwin arch=arm64 electron=44.4.5 appOutDir=dist/mac-arm64
+  • downloaded      label=electron progress=100%
+  • downloaded electron zip extracted successfully  output=/Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a6f3eb0835c0683ff/dist/mac-arm64
+  • searching for node modules  pm=pnpm searchDir=/Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a6f3eb0835c0683ff
+  • default Electron icon is used  reason=application icon is not set
+  • skipped macOS code signing  reason=identity explicitly is set to null
+$ MAWS_E2E_EXECUTABLE=${MAWS_E2E_EXECUTABLE:-dist/mac-arm64/MAWS.app/Contents/MacOS/MAWS} playwright test
+
+Running 2 tests using 1 worker
+
+  ✓  1 e2e/smoke.spec.ts:13:5 › preload bundle has no external runtime imports (5ms)
+  ✓  2 e2e/smoke.spec.ts:22:5 › MAWS opens light, hosts answer, pty echoes, survives reload and window close, theme switches, exits clean (4.7s)
+
+  2 passed (5.0s)
+$ MAWS_HARNESS=1 electron-vite build && MAWS_HARNESS=1 playwright test e2e/terminal.spec.ts
+vite v7.3.6 building ssr environment for production...
+transforming...
+✓ 26 modules transformed.
+rendering chunks...
+out/main/index-D_tpfdzO.js  13.90 kB
+out/main/index-DYRYkHbK.js  27.36 kB
+out/main/index.js           27.42 kB
+✓ built in 267ms
+vite v7.3.6 building ssr environment for production...
+transforming...
+✓ 110 modules transformed.
+rendering chunks...
+out/preload/index.js  188.50 kB
+✓ built in 353ms
+vite v7.3.6 building client environment for production...
+transforming...
+✓ 234 modules transformed.
+rendering chunks...
+../../out/renderer/index.html                      0.42 kB
+../../out/renderer/harness.html                    0.56 kB
+../../out/renderer/assets/xterm-GVL3fBIr.css       7.11 kB
+../../out/renderer/assets/settings-Cxp6Sx5u.css   20.91 kB
+../../out/renderer/assets/index-CN5jRQnL.js       98.01 kB
+../../out/renderer/assets/harness-BsnbbmHZ.js    154.37 kB
+../../out/renderer/assets/xterm-fKmXudMO.js      630.88 kB
+../../out/renderer/assets/settings-DgkH803f.js   835.91 kB
+✓ built in 2.73s
+
+Running 13 tests using 1 worker
+
+  ✓   1 e2e/terminal.spec.ts:236:5 › opens a login shell in the session directory with the terminal environment (6.3s)
+  ✓   2 e2e/terminal.spec.ts:287:5 › keeps its buffer and process across tab switches (9.9s)
+  ✓   3 e2e/terminal.spec.ts:319:5 › pinned tab keeps its shell across sessions and warns about the worktree (7.5s)
+  ✓   4 e2e/terminal.spec.ts:350:5 › asks before closing a busy terminal (37.3s)
+  ✓   5 e2e/terminal.spec.ts:380:5 › shows terminal lost on host crash and respawns after restart (11.0s)
+  ✓   6 e2e/terminal.spec.ts:450:5 › re-adopts a live pty after reload exactly (12.4s)
+  ✓   7 e2e/terminal.spec.ts:486:5 › reconnects lossily with a notice when no checkpoint reaches the ring (16.5s)
+  ✓   8 e2e/terminal.spec.ts:514:5 › floods without loss while the page stays responsive (53.0s)
+  -   9 e2e/terminal.spec.ts:617:6 › keeps Enter and Escape from the app's request handlers
+  ✓  10 e2e/terminal.spec.ts:641:5 › copies a selection and opens links externally (7.2s)
+  ✓  11 e2e/terminal.spec.ts:707:5 › recolours on theme change without literals (5.4s)
+  ✓  12 e2e/terminal.spec.ts:765:5 › falls back to the DOM renderer on context loss and returns to WebGL on next show (6.6s)
+  ✓  13 e2e/terminal.spec.ts:788:5 › openTerminal runs the attach command (4.7s)
+
+  1 skipped
+  12 passed (3.0m)
+exit=0
+load at end: { 27.71 58.70 103.84 }

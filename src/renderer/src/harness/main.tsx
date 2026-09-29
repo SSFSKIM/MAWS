@@ -10,6 +10,13 @@ const ROUTES: Record<string, () => ReactNode> = {
   transcript: () => <Harness />,
 };
 
+// C9 block begin: the terminal harness pages (pages under harness/terminal/), routed as `#probe` and `#panel`
+import { PanelHarness } from './terminal/PanelHarness';
+import { Probe } from './terminal/Probe';
+ROUTES.probe = () => <Probe />;
+ROUTES.panel = () => <PanelHarness />;
+// C9 block end
+
 const routeOf = () => location.hash.replace(/^#/, '') || 'transcript';
 
 function Router() {

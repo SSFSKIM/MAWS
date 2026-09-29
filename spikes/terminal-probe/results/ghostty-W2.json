@@ -1,0 +1,29 @@
+{
+  "renderer": "ghostty",
+  "workload": "W2 base64 urandom",
+  "phase": "m1",
+  "expectedBytes": 20165289,
+  "bytes": 20165289,
+  "outputBytes": 20000000,
+  "lineFeeds": 165289,
+  "extraCarriageReturns": 0,
+  "seconds": 0.928,
+  "lastLine": "BUQEgQSG4Ex1KBSp8CsEXseO66XZIvs",
+  "lineCount": 683,
+  "heapMB": 48,
+  "blockedInputEvents": 0,
+  "frames": {
+    "count": 36,
+    "p50": 25,
+    "p95": 41.600000000000364,
+    "max": 41.899999999999636,
+    "over33ms": 13,
+    "over50ms": 0
+  },
+  "longTasks": {
+    "count": 0,
+    "totalMs": 0,
+    "max": 0
+  },
+  "mbps": 21.73
+}

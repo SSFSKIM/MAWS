@@ -1,0 +1,14 @@
+[
+  { "text": "hello world", "width": 11, "note": "ASCII" },
+  { "text": "한글 입력", "width": 9, "note": "Hangul syllables (2 cells each) and a space" },
+  { "text": "日本語", "width": 6, "note": "Japanese" },
+  { "text": "中文", "width": 4, "note": "Chinese" },
+  { "text": "😀", "width": 2, "note": "single emoji" },
+  { "text": "👍🏽", "width": 2, "note": "emoji with skin-tone modifier: one cluster" },
+  { "text": "👨‍👩‍👧‍👦", "width": 2, "note": "ZWJ family: one cluster" },
+  { "text": "🇰🇷", "width": 2, "note": "flag: two regional indicators, one cluster" },
+  { "text": "é", "width": 1, "note": "e-acute, precomposed U+00E9" },
+  { "text": "é", "width": 1, "note": "e + combining acute U+0301" },
+  { "text": "┌─┐", "width": 3, "note": "box drawing" },
+  { "text": "\t", "width": 8, "note": "a tab: the cursor moves to the next tab stop" }
+]

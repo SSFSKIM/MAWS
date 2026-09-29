@@ -36,8 +36,10 @@ function fakeMain(initial: SettingsState['settings']['theme']) {
   const send = (name: string, payload: unknown) => listeners.get(name)?.forEach((l) => l(payload));
   let written = '';
   const answerEcho = () => {
-    send('pty.data', { ptyId: 'p1', data: `${written}\n` });
-    send('pty.data', { ptyId: 'p1', data: 'MAWS_ECHO_OK\r\n$ ' });
+    // Since C9 the stream is binary: each chunk is bytes stamped with its stream offset.
+    const line = new TextEncoder().encode(`${written}\n`);
+    send('pty.data', { ptyId: 'p1', offset: 0, data: line });
+    send('pty.data', { ptyId: 'p1', offset: line.byteLength, data: new TextEncoder().encode('MAWS_ECHO_OK\r\n$ ') });
     markEchoed();
   };
   const state = () => ({ settings: { version: 2, keymap: {}, notifications: { enabled: true, sound: false }, theme }, resolvedTheme: theme === 'dark' ? 'dark' : 'light' });

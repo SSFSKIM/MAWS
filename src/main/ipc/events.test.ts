@@ -27,7 +27,7 @@ describe('main event emitter', () => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => {});
     const w = window();
     electron.windows = [w];
-    expect(emit('pty.data', { ptyId: 'p1', data: 42 } as never)).toBe(false);
+    expect(emit('pty.data', { ptyId: 'p1', offset: 0, data: 42 } as never)).toBe(false);
     expect(w.webContents.send).not.toHaveBeenCalled();
     expect(log).toHaveBeenCalledWith(expect.stringContaining('pty.data'), [expect.objectContaining({ path: ['data'] })]);
   });

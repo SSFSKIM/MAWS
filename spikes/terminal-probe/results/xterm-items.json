@@ -1,0 +1,55 @@
+{
+  "shell": {
+    "pid": 2252,
+    "prompt": " new    a   12:49    "
+  },
+  "less": {
+    "alternateScreenWhileOpen": true,
+    "firstLineWhileOpen": "#",
+    "priorLinesIntact": true,
+    "residueLines": [
+      " new    a   12:49    "
+    ],
+    "lineCountBefore": 40,
+    "lineCountAfter": 40
+  },
+  "scrollback": {
+    "lineCount": 10040,
+    "rows": 40,
+    "expectedLineCount": 10040,
+    "firstLine": "9962",
+    "expectedFirstLine": "9961",
+    "note": "the first buffer line is the line that scrolled out last but one prompt line and the typed command also occupy the buffer"
+  },
+  "links": {
+    "osc8": "https://example.com (mouseup; meta false, ctrl false, alt false)",
+    "bare": "https://example.org (mouseup; meta false, ctrl false, alt false)"
+  },
+  "selection": {
+    "selectedLength": 111,
+    "clipboardEqualsSelection": true,
+    "pastedEqualsSelection": true,
+    "sample": "apwrapwrapwrapwrapwrapwrapwrapwrapwrapwr"
+  },
+  "keys": {
+    "shiftEnter": "\\x0d",
+    "altLeft": "\\x1b[1;3D",
+    "ctrlLeft": "\\x1b[1;5D"
+  },
+  "resize": {
+    "at30": {
+      "stty": "36 54",
+      "pane": "36 54"
+    },
+    "at50": {
+      "stty": "40 93",
+      "pane": "40 93"
+    }
+  },
+  "contextLoss": {
+    "acceleration": "dom",
+    "fellBackMs": 3034,
+    "inputAfterLoss": true,
+    "afterShow": "webgl"
+  }
+}

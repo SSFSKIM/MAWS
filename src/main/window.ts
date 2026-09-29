@@ -1,3 +1,4 @@
+import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { BrowserWindow, session } from 'electron';
@@ -20,6 +21,14 @@ const harness = process.env.MAWS_HARNESS === '1';
 const pageFile = harness ? join(__dirname, '../renderer/harness.html') : rendererFile;
 const pageUrl = devServerUrl && harness ? new URL('harness.html', devServerUrl).href : devServerUrl;
 // end C6
+
+// C9 block begin: the fixed directories of the harness's fake sessions (Interfaces *Harness*), created here because
+// the sandboxed page cannot. (The harness needed no CSP additions once ghostty-web was discarded at the M1 verdict.)
+export const HARNESS_SESSION_DIRS = ['/tmp/maws-harness/a', '/tmp/maws-harness/b'] as const;
+export function prepareHarness(): void {
+  for (const dir of HARNESS_SESSION_DIRS) mkdirSync(dir, { recursive: true });
+}
+// C9 block end
 
 export function installContentSecurityPolicy(): void {
   if (devServerUrl && __MAWS_DEV_CSP_NONCE__ === null) {

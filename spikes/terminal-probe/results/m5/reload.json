@@ -1,0 +1,65 @@
+{
+  "step": "reload",
+  "startedAt": "2026-09-29T01:32:47.399Z",
+  "item7": {
+    "reloadedThrough": "menu reload CmdOrCtrl+R Reload",
+    "t1": {
+      "pidBefore": 28350,
+      "pidAfter": 28350,
+      "reconnect": "exact",
+      "rows": 37,
+      "countBefore": 10037,
+      "countAfter": 10037,
+      "expected": 10037,
+      "firstBefore": "9965",
+      "firstAfter": "9965",
+      "modesBefore": {
+        "alternateScreen": false,
+        "bracketedPaste": true,
+        "applicationCursorKeys": false,
+        "mouseTracking": "none"
+      },
+      "modesAfter": {
+        "alternateScreen": false,
+        "bracketedPaste": true,
+        "applicationCursorKeys": false,
+        "mouseTracking": "none"
+      }
+    },
+    "t2": {
+      "pidBefore": 29002,
+      "pidAfter": 29002,
+      "reconnect": "exact",
+      "modesBefore": {
+        "alternateScreen": true,
+        "bracketedPaste": false,
+        "applicationCursorKeys": true,
+        "mouseTracking": "none"
+      },
+      "modesAfter": {
+        "alternateScreen": true,
+        "bracketedPaste": false,
+        "applicationCursorKeys": true,
+        "mouseTracking": "none"
+      },
+      "framesSampled": 361,
+      "framesWithoutRenderer": 0,
+      "blankFrames": 0,
+      "minNonBlankRows": 36,
+      "distinctHeads": 4,
+      "notAlternate": 0,
+      "afterQ": {
+        "alternateScreen": false,
+        "priorRows": 62,
+        "priorScrollbackIntact": true,
+        "firstDifference": -1,
+        "markerOnScreen": true,
+        "countBeforeTop": 63,
+        "countAfterQ": 64
+      }
+    }
+  },
+  "console": [
+    "warning: task queue exceeded allotted deadline by 22ms"
+  ]
+}

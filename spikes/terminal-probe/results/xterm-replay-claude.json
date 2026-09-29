@@ -1,0 +1,20 @@
+{
+  "lastLines": [
+    "",
+    "to-human view · [ full transcript ]                                                       [-]",
+    "                                                                          ◉ xhigh · /effort",
+    "─────────────────────────────────────────────────────────────────────────────────────────────",
+    "❯ ",
+    "─────────────────────────────────────────────────────────────────────────────────────────────",
+    "  ⚠ Transcript saving is off — inherited CLAUDE_CODE_CHILD_SESSION marker · restart with C…",
+    "  new@SK:/private/tmp/maws-harness/a [Opus 4.8 (1M context)] ctx:3%, 25k $0.80 · 11s · ≡ 0…",
+    "  ⏵⏵ auto mode on (shift+tab to cycle)",
+    "                                                                             [ kairos off ]"
+  ],
+  "modes": {
+    "alternateScreen": true,
+    "bracketedPaste": true,
+    "applicationCursorKeys": false,
+    "mouseTracking": "any"
+  }
+}

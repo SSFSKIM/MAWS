@@ -1,0 +1,430 @@
+$ vitest run --reporter=verbose --reporter=json --outputFile.json=.doperpowers/sde/2026-09-28-c9-terminal/m5/test-fix.json
+Testing types with tsc and vue-tsc is an experimental feature.
+Breaking changes might not follow SemVer, please pin Vitest's version when using it.
+
+ RUN  v5.0.2 /Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a6f3eb0835c0683ff
+
+ ✓ |node| src/shared/host/shell-env.test.ts > login-shell environment capture (C9 stand-in for C3) > parses NUL-separated pairs after the marker, ignoring what a chatty rc file printed before it 1ms
+ ✓ |node| src/shared/host/shell-env.test.ts > login-shell environment capture (C9 stand-in for C3) > yields null when the marker never appeared or no pair followed it 0ms
+ ✓ |node| src/shared/host/shell-env.test.ts > login-shell environment capture (C9 stand-in for C3) > captures a real shell environment, and null for a shell that cannot run 41ms
+ ✓ |node| src/renderer/src/terminal/scroll-up.node.test.ts > terminal scroll-up keeps rows in scrollback > keeps all sixty shell rows above codex after it starts and quits (xterm alone loses seventeen) 32ms
+ ✓ |node| src/renderer/src/terminal/scroll-up.node.test.ts > terminal scroll-up keeps rows in scrollback > moves the rows a top-anchored region scrolls out into scrollback and leaves the screen as xterm draws it 15ms
+ ✓ |node| src/renderer/src/terminal/scroll-up.node.test.ts > terminal scroll-up keeps rows in scrollback > scrolls a full-screen region into scrollback, one row by default and at most the region per call 10ms
+ ✓ |node| src/renderer/src/terminal/scroll-up.node.test.ts > terminal scroll-up keeps rows in scrollback > leaves a region whose top is below the first row to xterm 9ms
+ ✓ |node| src/renderer/src/terminal/scroll-up.node.test.ts > terminal scroll-up keeps rows in scrollback > leaves the alternate screen to xterm and the normal buffer untouched 18ms
+ ✓ |node| src/renderer/src/terminal/scroll-up.node.test.ts > terminal scroll-up keeps rows in scrollback > installs nothing and warns once, naming the version, when the internals it needs are not there 2ms
+ ✓ |node| src/renderer/src/terminal/replay.node.test.ts > terminal stream tracker > is at a boundary only with no escape sequence and no partial UTF-8 character pending 2ms
+ ✓ |node| src/renderer/src/terminal/replay.node.test.ts > terminal stream tracker > records the private modes the serializer does not restore and emits them explicitly 0ms
+ ✓ |node| src/renderer/src/terminal/replay.node.test.ts > terminal stream tracker > follows xterm: combined parameters, a split sequence, resets, and which modes each reset clears 1ms
+ ✓ |node| src/renderer/src/terminal/replay.node.test.ts > terminal stream tracker > never mutates the state it is given 0ms
+ ✓ |node| src/renderer/src/terminal/replay.node.test.ts > terminal replay alignment > drops a tail that starts inside a UTF-8 character up to its first line feed 10ms
+ ✓ |node| src/renderer/src/terminal/replay.node.test.ts > terminal replay alignment > drops a tail that starts inside an escape sequence up to its first line feed 4ms
+ ✓ |node| src/renderer/src/terminal/replay.node.test.ts > terminal replay alignment > aligns a tail without a line feed to nothing 0ms
+ ✓ |node| src/renderer/src/terminal/replay.node.test.ts > terminal checkpoint restores modes and the alternate screen > restores bracketed paste, application cursor keys, mouse tracking, the alternate screen and the cursor 10ms
+ ✓ |node| src/renderer/src/terminal/replay.node.test.ts > terminal checkpoint restores modes and the alternate screen > takes no checkpoint inside an escape sequence, so a split SGR restores as red RED, never mRED 17ms
+ ✓ |node| src/renderer/src/terminal/replay.node.test.ts > terminal checkpoint restores modes and the alternate screen > takes no checkpoint inside a UTF-8 character, so a split 한 restores whole 22ms
+ ✓ |node| src/renderer/src/terminal/replay.node.test.ts > terminal checkpoint restores modes and the alternate screen > takes no checkpoint while DECSC holds state, so a saved line-drawing set restores as ┌─┐, never lqk 16ms
+ ✓ |node| src/renderer/src/terminal/replay.node.test.ts > terminal checkpoint restores modes and the alternate screen > keeps SGR mouse encoding, focus reporting and a hidden cursor, which the serializer alone drops 14ms
+ ✓ |node| src/shared/graph/graph.test.ts > graph schemas accept and reject > enums > carry the X1 values verbatim 2ms
+ ✓ |node| src/shared/graph/graph.test.ts > graph schemas accept and reject > enums > lists every event kind once and the union covers each 1ms
+ ✓ |node| src/shared/graph/graph.test.ts > graph schemas accept and reject > events > accepts a tool.result with every denial kind and rejects an invented one 3ms
+ ✓ |node| src/shared/graph/graph.test.ts > graph schemas accept and reject > events > accepts a tool.result with every safeguard verdict and rejects an invented one 0ms
+ ✓ |node| src/shared/graph/graph.test.ts > graph schemas accept and reject > events > is strict: an unknown field on the app record is rejected, a missing base field too 0ms
+ ✓ |node| src/shared/graph/graph.test.ts > graph schemas accept and reject > events > accepts session.reconnect phases and rejects an unknown phase 1ms
+ ✓ |node| src/shared/graph/graph.test.ts > graph schemas accept and reject > events > accepts one event per kind through a representative payload 37ms
+ ✓ |node| src/shared/graph/graph.test.ts > graph schemas accept and reject > events > rejects an unknown kind and wrong-typed payload fields 0ms
+ ✓ |node| src/shared/graph/graph.test.ts > graph schemas accept and reject > events > brands the identifiers on parse 1ms
+ ✓ |node| src/shared/graph/graph.test.ts > graph schemas accept and reject > session record > accepts a well-formed record 2ms
+ ✓ |node| src/shared/graph/graph.test.ts > graph schemas accept and reject > session record > rejects a silent downgrade and accepts the same downgrade with its refusal code 1ms
+ ✓ |node| src/shared/graph/graph.test.ts > graph schemas accept and reject > session record > rejects a refusal that did not happen and accepts the honoured request 3ms
+ ✓ |node| src/shared/graph/graph.test.ts > graph schemas accept and reject > session record > rejects an unknown refusal code, an unknown mode and an unknown holder 2ms
+ ✓ |node| src/shared/graph/graph.test.ts > graph schemas accept and reject > attention item > accepts every kind including auto_mode_unavailable, and every state 1ms
+ ✓ |node| src/shared/graph/graph.test.ts > graph schemas accept and reject > attention item > rejects an unknown kind, an unknown state and a stray field 0ms
+ ✓ |node| src/main/ipc/router.test.ts > main ipc router > registers one ipcMain handler per command in the registry and nothing else 193ms
+ ✓ |node| src/main/ipc/router.test.ts > main ipc router > dispatches a valid command from the app window to its main handler 3ms
+ ✓ |node| src/main/ipc/router.test.ts > main ipc router > answers settings.set({ theme: "sepia" }) with invalid_input and never calls the handler 4ms
+ ✓ |node| src/main/hosts/supervisor.test.ts > host supervisor > forks each host once, however often start() is called 5ms
+ ✓ |node| src/main/hosts/supervisor.test.ts > host supervisor > forks nothing when start() follows stop(), and settles at once (will-quit racing activate) 1ms
+ ✓ |node| src/main/hosts/supervisor.test.ts > host supervisor > hands each host its port with the hello 3ms
+ ✓ |node| src/main/hosts/supervisor.test.ts > host supervisor > reports starting, then ready with the pid, on every transition with a rising revision 1ms
+ ✓ |node| src/main/hosts/supervisor.test.ts > host supervisor > dispatches a command to its owner and answers the host’s reply 3ms
+ ✓ |node| src/main/hosts/supervisor.test.ts > host supervisor > answers unknown_command when the host does not know the name 2ms
+ ✓ |node| src/main/hosts/supervisor.test.ts > host supervisor > logs and drops a response for an unknown id, and a malformed message 2ms
+ ✓ |node| src/main/hosts/supervisor.test.ts > host supervisor > answers internal when the host replies with an output the command’s schema refuses 1ms
+ ✓ |node| src/main/hosts/supervisor.test.ts > host supervisor > fails a request the host never answers with timeout after 10 s 2ms
+ ✓ |node| src/main/hosts/supervisor.test.ts > host supervisor > relays host events to the renderer and drops events outside the registry 3ms
+ ✓ |node| src/main/hosts/supervisor.test.ts > host supervisor > on a crash fails pending requests with host_unavailable, reports crashed, then restarts after 0.5 s 3ms
+ ✓ |node| src/main/hosts/supervisor.test.ts > host supervisor > emits crashed, restarting and ready to state listeners in that order 1ms
+ ✓ |node| src/main/hosts/supervisor.test.ts > host supervisor > leaves a host crashed after three unexpected exits within sixty seconds 5ms
+ ✓ |node| src/main/hosts/supervisor.test.ts > host supervisor > counts only the exits of the last sixty seconds 3ms
+ ✓ |node| src/main/hosts/supervisor.test.ts > host supervisor > tells the renderer every pty it knew of is gone when the pty host crashes 4ms
+ ✓ |node| src/main/hosts/supervisor.test.ts > host supervisor > stop() kills both hosts, fails pending requests and never restarts 3ms
+ ✓ |node| src/main/ipc/router.test.ts > main ipc router > refuses an invoke from a frame whose URL origin is not the app’s with forbidden_sender 2ms
+ ✓ |node| src/main/ipc/router.test.ts > main ipc router > refuses a subframe of the app window, a frame gone before dispatch, and a sender that is not a window 2ms
+ ✓ |node| src/main/ipc/router.test.ts > main ipc router > accepts file: frames in production and refuses the dev origin there 4ms
+ ✓ |node| src/main/ipc/router.test.ts > main ipc router > answers host-owned commands with host_unavailable when no supervisor is passed 4ms
+ ✓ |node| src/main/ipc/router.test.ts > main ipc router > hands a host dispatcher the owner, the name and the validated input 5ms
+ ✓ |node| src/main/ipc/router.test.ts > main ipc router > answers internal, and logs, when the host dispatcher rejects instead of answering 4ms
+ ✓ |node| src/main/ipc/router.test.ts > main ipc router > answers internal when a main-owned command has no handler yet 8ms
+ ✓ |node| src/main/ipc/router.test.ts > main ipc router > answers internal, and logs, when a handler throws 2ms
+ ✓ |node| src/main/ipc/router.test.ts > main ipc router > opens an http(s) or mailto link from pty.openLink and refuses any other scheme with opened false 3ms
+ ✓ |node| src/main/ipc/router.test.ts > main ipc router > refuses a handler for a host-owned command or a second handler for the same command 2ms
+ ✓ |node| src/shared/wire/frames.test.ts > wire frames round-trip every probe fixture > finds both passes 2ms
+ ✓ |node| src/shared/wire/frames.test.ts > wire frames round-trip every probe fixture > pass1/init 13ms
+ ✓ |node| src/shared/wire/frames.test.ts > wire frames round-trip every probe fixture > pass1/permission-roundtrip 13ms
+ ✓ |node| src/shared/wire/frames.test.ts > wire frames round-trip every probe fixture > pass1/question-roundtrip 9ms
+ ✓ |node| src/shared/wire/frames.test.ts > wire frames round-trip every probe fixture > pass1/queue-and-interrupt 46ms
+ ✓ |node| src/shared/wire/frames.test.ts > wire frames round-trip every probe fixture > pass1/reads 4ms
+ ✓ |node| src/shared/wire/frames.test.ts > wire frames round-trip every probe fixture > pass1/resume-fork-cli 4ms
+ ✓ |node| src/shared/wire/frames.test.ts > wire frames round-trip every probe fixture > pass1/resume-fork-no-replay 3ms
+ ✓ |node| src/shared/wire/frames.test.ts > wire frames round-trip every probe fixture > pass1/resume-fork-replay 2ms
+ ✓ |node| src/shared/wire/frames.test.ts > wire frames round-trip every probe fixture > pass1/resume-fork-start 9ms
+ ✓ |node| src/renderer/src/terminal/replay.node.test.ts > terminal checkpoint restores modes and the alternate screen > keeps the pen out of the alternate screen the serializer writes after it 6ms
+ ✓ |node| src/shared/wire/control.test.ts > control payloads parse from the fixtures > question-roundtrip: AskUserQuestion travels on the permission channel and its answers come back in updatedInput 6ms
+ ✓ |node| src/shared/wire/control.test.ts > control payloads parse from the fixtures > queue-and-interrupt: the interrupt response names one cancelled uuid 3ms
+ ✓ |node| src/shared/wire/control.test.ts > control payloads parse from the fixtures > auto-haiku seq 7: the refused permission mode is a control error carrying the refusal code 1ms
+ ✓ |node| src/shared/wire/control.test.ts > control payloads parse from the fixtures > hooks seq 26 parses as HookCallbackRequest 2ms
+ ✓ |node| src/shared/wire/control.test.ts > control payloads parse from the fixtures > dialogs seq 41 parses as ElicitationRequest in form mode 2ms
+ ✓ |node| src/shared/wire/control.test.ts > control payloads parse from the fixtures > rewind: the stale target is refused, the second rewind succeeds with a prefill 2ms
+ ✓ |node| src/shared/wire/control.test.ts > control payloads parse from the fixtures > initialize and set_permission_mode responses parse across both passes 10ms
+ ✓ |node| src/shared/wire/control.test.ts > control payloads parse from the fixtures > rejects malformed control payloads 2ms
+ ✓ |node| src/main/settings/index.test.ts > theme switching in main > starts light by default: native chrome, window background and a settings.changed on start 248ms
+ ✓ |node| src/main/settings/index.test.ts > theme switching in main > settings.set dark flips native chrome, the window background and the file, and emits settings.changed 5ms
+ ✓ |node| src/main/settings/index.test.ts > theme switching in main > settings.set with an invalid theme changes nothing 5ms
+ ✓ |node| src/main/settings/index.test.ts > theme switching in main > comes back with the persisted theme on the next start 5ms
+ ✓ |node| src/main/settings/index.test.ts > theme switching in main > system follows the OS, and an OS change re-emits settings.changed 5ms
+ ✓ |node| src/main/settings/index.test.ts > theme switching in main > an OS change that does not move the resolved theme emits nothing 3ms
+ ✓ |node| src/shared/host/runtime.test.ts > host runtime speaks the host protocol > answers a request with the handler’s validated output 4ms
+ ✓ |node| src/shared/host/runtime.test.ts > host runtime speaks the host protocol > answers a request naming a command outside the registry with unknown_command 2ms
+ ✓ |node| src/shared/host/runtime.test.ts > host runtime speaks the host protocol > answers a registry command this host has no handler for with internal 2ms
+ ✓ |node| src/shared/host/runtime.test.ts > host runtime speaks the host protocol > validates the input against the X2 schema before the handler sees it 2ms
+ ✓ |node| src/shared/host/runtime.test.ts > host runtime speaks the host protocol > turns a throwing handler into internal carrying its message 2ms
+ ✓ |node| src/shared/host/runtime.test.ts > host runtime speaks the host protocol > refuses to answer with an output that fails the command’s schema 2ms
+ ✓ |node| src/shared/host/runtime.test.ts > host runtime speaks the host protocol > logs and drops a message that is not a well-formed request 4ms
+ ✓ |node| src/shared/host/runtime.test.ts > host runtime speaks the host protocol > emits valid events as evt messages and drops invalid ones with a log 1ms
+ ✓ |node| src/shared/host/runtime.test.ts > host runtime speaks the host protocol > refuses a command owned by the other host, in either order 1ms
+ ✓ |node| src/shared/host/runtime.test.ts > host runtime speaks the host protocol > refuses to register a main-owned command or the same command twice 0ms
+ ✓ |node| src/shared/wire/frames.test.ts > wire frames round-trip every probe fixture > pass1/subagent 15ms
+ ✓ |node| src/shared/wire/frames.test.ts > wire frames round-trip every probe fixture > pass2/auto-classifier 4ms
+ ✓ |node| src/shared/wire/frames.test.ts > wire frames round-trip every probe fixture > pass2/auto-haiku 1ms
+ ✓ |node| src/shared/wire/frames.test.ts > wire frames round-trip every probe fixture > pass2/auto-routed 7ms
+ ✓ |node| src/shared/wire/frames.test.ts > wire frames round-trip every probe fixture > pass2/auto-unrouted 4ms
+ ✓ |node| src/shared/wire/frames.test.ts > wire frames round-trip every probe fixture > pass2/bash-context-alone 1ms
+ ✓ |node| src/shared/wire/frames.test.ts > wire frames round-trip every probe fixture > pass2/bash-context-echoed 1ms
+ ✓ |node| src/shared/wire/frames.test.ts > wire frames round-trip every probe fixture > pass2/dialogs 2ms
+ ✓ |node| src/shared/wire/frames.test.ts > wire frames round-trip every probe fixture > pass2/grant-askrule-resume 1ms
+ ✓ |node| src/shared/wire/frames.test.ts > wire frames round-trip every probe fixture > pass2/grant-askrule-start 4ms
+ ✓ |node| src/shared/wire/frames.test.ts > wire frames round-trip every probe fixture > pass2/grant-reapply-resume 2ms
+ ✓ |node| src/shared/wire/frames.test.ts > wire frames round-trip every probe fixture > pass2/grant-reapply-start 2ms
+ ✓ |node| src/shared/wire/frames.test.ts > wire frames round-trip every probe fixture > pass2/hooks 2ms
+ ✓ |node| src/shared/wire/frames.test.ts > wire frames round-trip every probe fixture > pass2/per-task-stop-off 3ms
+ ✓ |node| src/shared/wire/frames.test.ts > wire frames round-trip every probe fixture > pass2/per-task-stop-on 4ms
+ ✓ |node| src/shared/wire/frames.test.ts > wire frames round-trip every probe fixture > pass2/per-task-stop-workflow-off 2ms
+ ✓ |node| src/shared/wire/frames.test.ts > wire frames round-trip every probe fixture > pass2/per-task-stop-workflow-on 5ms
+ ✓ |node| src/shared/wire/frames.test.ts > wire frames round-trip every probe fixture > pass2/prewarm 3ms
+ ✓ |node| src/shared/wire/frames.test.ts > wire frames round-trip every probe fixture > pass2/real-settings 3ms
+ ✓ |node| src/shared/wire/frames.test.ts > wire frames round-trip every probe fixture > pass2/real-settings-idle-1 1ms
+ ✓ |node| src/shared/wire/frames.test.ts > wire frames round-trip every probe fixture > pass2/real-settings-idle-2 2ms
+ ✓ |node| src/shared/wire/frames.test.ts > wire frames round-trip every probe fixture > pass2/real-settings-idle-3 1ms
+ ✓ |node| src/shared/wire/frames.test.ts > wire frames round-trip every probe fixture > pass2/resume-live-bg 0ms
+ ✓ |node| src/shared/wire/frames.test.ts > wire frames round-trip every probe fixture > pass2/resume-live-holder 2ms
+ ✓ |node| src/shared/wire/frames.test.ts > wire frames round-trip every probe fixture > pass2/resume-live-second 1ms
+ ✓ |node| src/shared/wire/frames.test.ts > wire frames round-trip every probe fixture > pass2/rewind 2ms
+ ✓ |node| src/shared/wire/frames.test.ts > wire frames round-trip every probe fixture > pass2/routing-flag-override 1ms
+ ✓ |node| src/shared/wire/frames.test.ts > wire frames round-trip every probe fixture > pass2/routing-user-settings 1ms
+ ✓ |node| src/shared/wire/frames.test.ts > wire frames round-trip every probe fixture > pass2/trust-attested 0ms
+ ✓ |node| src/shared/wire/frames.test.ts > wire frames round-trip every probe fixture > pass2/trust-no-attestation 2ms
+ ✓ |node| src/shared/wire/frames.test.ts > wire frames round-trip every probe fixture > pass2/workflow 4ms
+ ✓ |node| src/shared/wire/frames.test.ts > wire frames carry the pass-2 facts the events derive from > auto-classifier seq 34: the message_delta names exactly one tool use, evaluated not_flagged 1ms
+ ✓ |node| src/shared/wire/frames.test.ts > wire frames carry the pass-2 facts the events derive from > workflow seq 108: the result is an engine-initiated turn 1ms
+ ✓ |node| src/shared/wire/frames.test.ts > wire frames carry the pass-2 facts the events derive from > bash-context-echoed: the first result is the echo receipt of a shouldQuery:false frame 0ms
+ ✓ |node| src/shared/wire/frames.test.ts > wire frames reject malformed input > tolerates an unknown frame type and retains it whole 0ms
+ ✓ |node| src/shared/wire/frames.test.ts > wire frames reject malformed input > rejects a control_request without request_id even though the loose schema would accept it 1ms
+ ✓ |node| src/shared/wire/frames.test.ts > wire frames reject malformed input > rejects a known system subtype that fails its own schema, and keeps an unknown subtype 0ms
+ ✓ |node| src/shared/wire/frames.test.ts > wire frames reject malformed input > the system entry of the stdout table dispatches on subtype like parseStdoutFrame does 1ms
+ ✓ |node| src/shared/wire/frames.test.ts > wire frames reject malformed input > rejects a system frame without a subtype 0ms
+ ✓ |node| src/shared/wire/frames.test.ts > wire frames reject malformed input > rejects a control_response success without request_id 0ms
+ ✓ |node| src/shared/wire/frames.test.ts > wire frames reject malformed input > rejects a user frame whose message role is not user 0ms
+ ✓ |node| src/shared/wire/frames.test.ts > wire frames reject malformed input > rejects a stream_event with an empty event 0ms
+ ✓ |node| src/shared/wire/frames.test.ts > wire frames reject malformed input > rejects a command_lifecycle with an unknown state 1ms
+ ✓ |node| src/shared/wire/frames.test.ts > wire frames reject malformed input > rejects a result without accounting fields and an assistant without a message id 0ms
+ ✓ |node| src/shared/wire/frames.test.ts > wire frames reject malformed input > rejects a frame that is not an object or has no string type 0ms
+ ✓ |node| src/shared/wire/frames.test.ts > wire frames reject malformed input > rejects stdin frames outside the authored union and malformed authored ones 0ms
+ ✓ |node| src/shared/wire/frames.test.ts > wire frames reject malformed input > exposes one dispatch entry per known discriminator 0ms
+ ✓ |node| src/main/settings/store.test.ts > settings store > defaults to light when there is no file yet, silently and without writing one 2ms
+ ✓ |node| src/main/settings/store.test.ts > settings store > reads the persisted setting 2ms
+ ✓ |node| src/main/settings/store.test.ts > settings store > replaces a file with unparseable JSON by the defaults and warns, never throws 1ms
+ ✓ |node| src/main/settings/store.test.ts > settings store > replaces a file with an unknown theme by the defaults and warns, never throws 1ms
+ ✓ |node| src/main/settings/store.test.ts > settings store > replaces a file with another version by the defaults and warns, never throws 1ms
+ ✓ |node| src/main/settings/store.test.ts > settings store > replaces a file with an unknown key by the defaults and warns, never throws 1ms
+ ✓ |node| src/main/settings/store.test.ts > settings store > replaces an unreadable path by the defaults and warns 1ms
+ ✓ |node| src/main/settings/store.test.ts > settings store > persists an update as compact JSON through a temporary file, leaving only settings.json 1ms
+ ✓ |node| src/main/settings/store.test.ts > settings store > creates the settings directory when it does not exist yet 2ms
+ ✓ |node| src/main/settings/store.test.ts > settings store > keeps what a patch leaves out, including a key present as undefined 2ms
+ ✓ |node| src/main/settings/store.test.ts > settings store > resolves system against the OS and leaves explicit themes alone 0ms
+ ✓ |node| src/shared/wire/transcript.test.ts > transcript records chain from the leaf > parses every sidecar and workflow-disk JSONL record 7ms
+ ✓ |node| src/shared/wire/transcript.test.ts > transcript records chain from the leaf > parses the records of the three pass-2 rewind snapshots 4ms
+ ✓ |node| src/shared/wire/transcript.test.ts > transcript records chain from the leaf > follows uuid/parentUuid from the leaf and excludes the abandoned branch and the anchors 1ms
+ ✓ |node| src/shared/wire/transcript.test.ts > transcript records chain from the leaf > stops at a missing parent and reports the gap instead of bridging it 0ms
+ ✓ |node| src/shared/wire/transcript.test.ts > transcript records chain from the leaf > reports the parent the filtered after-next-turn snapshot dropped 1ms
+ ✓ |node| src/shared/wire/transcript.test.ts > transcript records chain from the leaf > handles empty input, a leaf-only file and a parent cycle 0ms
+ ✓ |node| src/shared/wire/transcript.test.ts > transcript records chain from the leaf > accepts loose records with only a type and rejects the rest 1ms
+ ✓ |node| src/shared/wire/transcript.test.ts > transcript records chain from the leaf > parses the sidecar agent meta 1ms
+ ✓ |node| test/support/tokens-guard.test.ts > renderer uses tokens only > rejects colour literals and palette classes 2ms
+ ✓ |node| test/support/tokens-guard.test.ts > renderer uses tokens only > rejects every colour function the guard names 1ms
+ ✓ |node| test/support/tokens-guard.test.ts > renderer uses tokens only > accepts token utilities and token variables 0ms
+ ✓ |node| test/support/tokens-guard.test.ts > renderer uses tokens only > holds for every renderer source outside tokens.css 19ms
+ ✓ |node| src/main/lifecycle.test.ts > app lifecycle (macOS, D-11) > keeps the app, its hosts and their ptys running when the last window closes 1ms
+ ✓ |node| src/main/lifecycle.test.ts > app lifecycle (macOS, D-11) > re-creates the window on activate when none is open, and not otherwise 0ms
+ ✓ |node| src/main/lifecycle.test.ts > app lifecycle (macOS, D-11) > stops the hosts on will-quit 0ms
+ ✓ |node| src/shared/ipc/schema.test.ts > ipc schema validates both directions > registry composition > has one module per namespace 1ms
+ ✓ |node| src/shared/ipc/schema.test.ts > ipc schema validates both directions > registry composition > keys of schema/session.ts carry their namespace 0ms
+ ✓ |node| src/shared/ipc/schema.test.ts > ipc schema validates both directions > registry composition > keys of schema/engine.ts carry their namespace 0ms
+ ✓ |node| src/shared/ipc/schema.test.ts > ipc schema validates both directions > registry composition > keys of schema/fs.ts carry their namespace 0ms
+ ✓ |node| src/shared/ipc/schema.test.ts > ipc schema validates both directions > registry composition > keys of schema/git.ts carry their namespace 0ms
+ ✓ |node| src/shared/ipc/schema.test.ts > ipc schema validates both directions > registry composition > keys of schema/pty.ts carry their namespace 0ms
+ ✓ |node| src/shared/ipc/schema.test.ts > ipc schema validates both directions > registry composition > keys of schema/layout.ts carry their namespace 0ms
+ ✓ |node| src/shared/ipc/schema.test.ts > ipc schema validates both directions > registry composition > keys of schema/attention.ts carry their namespace 0ms
+ ✓ |node| src/shared/ipc/schema.test.ts > ipc schema validates both directions > registry composition > keys of schema/settings.ts carry their namespace 0ms
+ ✓ |node| src/shared/ipc/schema.test.ts > ipc schema validates both directions > registry composition > merges without losing a key to a duplicate 1ms
+ ✓ |node| src/shared/ipc/schema.test.ts > ipc schema validates both directions > registry composition > carries the C1 entries of Interfaces, and C9’s pty additions, with their owners 0ms
+ ✓ |node| src/shared/ipc/schema.test.ts > ipc schema validates both directions > registry composition > names channels by kind so a command and an event of the same name never share one 0ms
+ ✓ |node| src/shared/ipc/schema.test.ts > ipc schema validates both directions > names > knows registered names only, never prototype keys 0ms
+ ✓ |node| src/shared/ipc/schema.test.ts > ipc schema validates both directions > command input (main, on receipt) > rejects settings.set({ theme: "sepia" }) as invalid_input with the issues 2ms
+ ✓ |node| src/shared/ipc/schema.test.ts > ipc schema validates both directions > command input (main, on receipt) > accepts each theme setting and an empty patch, and rejects the version or unknown keys 0ms
+ ✓ |node| src/shared/ipc/schema.test.ts > ipc schema validates both directions > command input (main, on receipt) > takes void input as undefined only 0ms
+ ✓ |node| src/shared/ipc/schema.test.ts > ipc schema validates both directions > command input (main, on receipt) > holds pty inputs to their shapes 2ms
+ ✓ |node| src/shared/ipc/schema.test.ts > ipc schema validates both directions > command input (main, on receipt) > never transforms: an accepted input deep-equals what was sent 0ms
+ ✓ |node| src/shared/ipc/schema.test.ts > ipc schema validates both directions > command output (renderer, on receipt) > accepts a settings state and returns it unchanged 0ms
+ ✓ |node| src/shared/ipc/schema.test.ts > ipc schema validates both directions > command output (renderer, on receipt) > rejects a malformed output as invalid_output 0ms
+ ✓ |node| src/shared/ipc/schema.test.ts > ipc schema validates both directions > command output (renderer, on receipt) > holds host snapshots to HostStateSchema, revision included 1ms
+ ✓ |node| src/shared/ipc/schema.test.ts > ipc schema validates both directions > event payload (main before sending, renderer on receipt) > rejects a pty.data event whose data is a number 0ms
+ ✓ |node| src/shared/ipc/schema.test.ts > ipc schema validates both directions > event payload (main before sending, renderer on receipt) > accepts well-formed events unchanged 0ms
+ ✓ |node| src/shared/ipc/schema.test.ts > ipc schema validates both directions > event payload (main before sending, renderer on receipt) > rejects unknown keys on the app’s own payloads 0ms
+ ✓ |node| src/pty-host/ring.test.ts > pty host ring buffer and attach offsets > starts empty at offset 0 2ms
+ ✓ |node| src/pty-host/ring.test.ts > pty host ring buffer and attach offsets > keeps every byte until it is full, addressed by stream offset 1ms
+ ✓ |node| src/pty-host/ring.test.ts > pty host ring buffer and attach offsets > drops the oldest bytes across the wrap and answers from its start for an offset it no longer holds 0ms
+ ✓ |node| src/pty-host/ring.test.ts > pty host ring buffer and attach offsets > keeps only the tail of a chunk larger than itself 0ms
+ ✓ |node| src/pty-host/ring.test.ts > pty host ring buffer and attach offsets > matches the tail of the stream after many uneven appends 3ms
+ ✓ |node| src/pty-host/ring.test.ts > pty host ring buffer and attach offsets > returns a copy the caller may keep while the ring moves on 0ms
+ ✓ |node| src/shared/ipc/schema/pty.test.ts > pty schema validates and rejects > names an owner for every pty entry: the host for the terminal commands, main for hostState and openLink 1ms
+ ✓ |node| src/shared/ipc/schema/pty.test.ts > pty schema validates and rejects > takes a spawn with a session, a label and an optional command, and refuses the removed env key 3ms
+ ✓ |node| src/shared/ipc/schema/pty.test.ts > pty schema validates and rejects > accepts a pty.data payload with a Uint8Array and an offset, and rejects a string or a negative offset 1ms
+ ✓ |node| src/shared/ipc/schema/pty.test.ts > pty schema validates and rejects > holds ack, checkpoint and foreground to their shapes 1ms
+ ✓ |node| src/shared/ipc/schema/pty.test.ts > pty schema validates and rejects > answers attach with the info, the checkpoint, the replay bytes and the offsets 1ms
+ ✓ |node| src/shared/ipc/schema/pty.test.ts > pty schema validates and rejects > accepts any URL for pty.openLink, javascript: included (main refuses the scheme), and rejects a non-URL 0ms
+ ✓ |node| src/shared/ipc/schema/pty.test.ts > pty schema validates and rejects > keeps the exit shape C1 set, nulls meaning the host died 0ms
+ ✓ |node| src/main/csp.test.ts > content security policy > is exactly the production policy without a dev server 1ms
+ ✓ |node| src/main/csp.test.ts > content security policy > adds the nonce to script-src only, and the HMR socket to connect-src, in development 1ms
+ ✓ |node| src/main/csp.test.ts > content security policy > takes the socket host and port from the dev server URL 0ms
+ ✓ |node| src/main/ipc/events.test.ts > main event emitter > sends a valid payload to every live window on the event channel 4ms
+ ✓ |node| src/main/ipc/events.test.ts > main event emitter > refuses to send an invalid payload and logs the event name and issues 1ms
+ ✓ |node| src/pty-host/flow.test.ts > pty host flow control pauses and resumes > starts flowing with nothing emitted or acknowledged 1ms
+ ✓ |node| src/pty-host/flow.test.ts > pty host flow control pauses and resumes > keeps flowing while unacknowledged bytes stay below the high watermark 0ms
+ ✓ |node| src/pty-host/flow.test.ts > pty host flow control pauses and resumes > pauses when a chunk brings unacknowledged bytes to 256 KiB 0ms
+ ✓ |node| src/pty-host/flow.test.ts > pty host flow control pauses and resumes > counts chunks node-pty had already read while paused, without pausing again 0ms
+ ✓ |node| src/pty-host/flow.test.ts > pty host flow control pauses and resumes > resumes when an ack leaves 64 KiB or less unacknowledged, and stays paused otherwise 1ms
+ ✓ |node| src/pty-host/flow.test.ts > pty host flow control pauses and resumes > never moves the acknowledged offset backwards 0ms
+ ✓ |node| src/pty-host/flow.test.ts > pty host flow control pauses and resumes > records an ack while flowing without any effect 0ms
+ ✓ |node| src/pty-host/flow.test.ts > pty host flow control pauses and resumes > clamps an ack above the total and says so 0ms
+ ✓ |node| src/pty-host/flow.test.ts > pty host flow control pauses and resumes > attach acknowledges everything emitted and resumes a paused pty 1ms
+ ✓ |node| src/pty-host/env.test.ts > pty host environment > drops every parent-session variable and the engine-launch variables 2ms
+ ✓ |node| src/pty-host/env.test.ts > pty host environment > names the §4.1 exclusions 1ms
+ ✓ |node| src/pty-host/env.test.ts > pty host environment > sets the terminal identity and the synchronized-output switch 0ms
+ ✓ |node| src/pty-host/env.test.ts > pty host environment > sets LC_CTYPE=UTF-8 only when no locale variable is present 0ms
+ ✓ |node| src/pty-host/env.test.ts > pty host environment > drops the capture shell’s own session state, so a terminal shell starts at level 1 as in Terminal.app 0ms
+ ✓ |node| src/pty-host/env.test.ts > pty host environment > skips undefined entries and never mutates the base 0ms
+ ✓ |node| src/pty-host/env.test.ts > pty host environment > seeds from the captured login-shell environment when the capture succeeds 0ms
+ ✓ |node| src/pty-host/env.test.ts > pty host environment > falls back to the host's own environment when the capture fails or yields nothing 1ms
+ ✓ |node| src/preload/bridge.test.ts > preload bridge > answers a name outside the command registry with unknown_command, without touching IPC 2ms
+ ✓ |node| src/preload/bridge.test.ts > preload bridge > refuses prototype keys as command names 0ms
+ ✓ |node| src/preload/bridge.test.ts > preload bridge > invokes a registered command on its command channel and returns main’s result as is 0ms
+ ✓ |node| src/preload/bridge.test.ts > preload bridge > turns a transport rejection into an internal error rather than a rejected promise 0ms
+ ✓ |node| src/preload/bridge.test.ts > preload bridge > throws synchronously for an event name outside the registry 0ms
+ ✓ |node| src/preload/bridge.test.ts > preload bridge > delivers a registered event’s payload, without the IPC event object, until unsubscribed 0ms
+ ✓ |node| src/preload/bridge.test.ts > preload bridge > exposes exactly invoke and on 0ms
+ ✓ |node| src/renderer/src/terminal/replay.node.test.ts > terminal checkpoint restores modes and the alternate screen > restores exactly from every split point the tracker calls a boundary 454ms
+ ✓ |node| src/renderer/src/terminal/replay.node.test.ts > terminal checkpoint restores modes and the alternate screen > carries the explicit modes of a restored checkpoint into the next one 4ms
+ ✓ |renderer| src/renderer/src/stores/echo.test.ts > echo test > spawns /bin/sh, writes the command and reports the output line with the shell pid 4ms
+ ✓ |renderer| src/renderer/src/stores/echo.test.ts > echo test > decodes a character split across two chunks 2ms
+ ✓ |renderer| src/renderer/src/stores/echo.test.ts > echo test > never takes the terminal’s echo of the command line for its output 1ms
+ ✓ |renderer| src/renderer/src/stores/echo.test.ts > echo test > fails when the marker does not come back within five seconds 2ms
+ ✓ |renderer| src/renderer/src/stores/echo.test.ts > echo test > fails when the shell exits before answering 1ms
+ ✓ |renderer| src/renderer/src/stores/echo.test.ts > echo test > fails with the host’s error when the spawn is refused 0ms
+ ✓ |renderer| src/renderer/src/stores/hosts.test.ts > renderer hosts store > subscribes to both host-state events before asking for either snapshot 2ms
+ ✓ |renderer| src/renderer/src/stores/hosts.test.ts > renderer hosts store > shows the snapshots of hosts that were ready before the page arrived 2ms
+ ✓ |renderer| src/renderer/src/stores/hosts.test.ts > renderer hosts store > keeps an event newer than a snapshot that lands after it 2ms
+ ✓ |renderer| src/renderer/src/stores/hosts.test.ts > renderer hosts store > takes a snapshot newer than an event on the other host 2ms
+ ✓ |renderer| src/renderer/src/stores/hosts.test.ts > renderer hosts store > follows every later transition 2ms
+ ✓ |renderer| src/renderer/src/stores/hosts.test.ts > renderer hosts store > ignores the snapshot of a disconnected connection (StrictMode remount) 3ms
+ ✓ |renderer| src/renderer/src/stores/hosts.test.ts > renderer hosts store > stops listening when disconnected 2ms
+ ✓ |renderer| src/renderer/src/tools/terminal/terminal.test.tsx > terminal tool state > opens a terminal labelled with the tab id in params.cwd, else the session worktree, else its directory 2ms
+ ✓ |renderer| src/renderer/src/tools/terminal/terminal.test.tsx > terminal tool state > takes over a re-adopted terminal whose label is the tab id instead of opening another 0ms
+ ✓ |renderer| src/renderer/src/tools/terminal/terminal.test.tsx > terminal tool state > refuses to create a terminal with neither a session nor a cwd 1ms
+ ✓ |renderer| src/renderer/src/tools/terminal/terminal.test.tsx > terminal tool state > is the multi-instance, pinnable tool with id terminal 0ms
+ ✓ |renderer| src/renderer/src/tools/terminal/terminal.test.tsx > terminal tool close > closes an idle terminal without asking, killing its shell before the tab goes 1ms
+ ✓ |renderer| src/renderer/src/tools/terminal/terminal.test.tsx > terminal tool close > vetoes and asks when the registry reports a command running, killing nothing 0ms
+ ✓ |renderer| src/renderer/src/tools/terminal/terminal.test.tsx > terminal tool close > fails closed and asks when the host cannot say what runs 0ms
+ ✓ |renderer| src/renderer/src/tools/terminal/terminal.test.tsx > terminal tool close > does not ask for a terminal that no longer runs, nor after the owner confirmed, and closes both 0ms
+ ✓ |renderer| src/renderer/src/tools/terminal/terminal.test.tsx > terminal tool close > keeps the tab with the reason when the kill fails, and lets it go when a retry succeeds 1ms
+ ✓ |renderer| src/renderer/src/tools/terminal/terminal.test.tsx > terminal tool close > never kills on dispose (the close already did) 0ms
+ ✓ |renderer| src/renderer/src/tools/terminal/terminal.test.tsx > openTerminal > asks the panel host for a Terminal tab with the cwd and command as params 0ms
+ ✓ |renderer| src/renderer/src/tools/terminal/terminal.test.tsx > terminal view > mounts the terminal’s container while visible, focuses on request, and detaches on unmount 14ms
+ ✓ |renderer| src/renderer/src/tools/terminal/terminal.test.tsx > terminal view > warns exactly when the shown session runs somewhere other than the terminal’s cwd, and offers a new terminal there 13ms
+ ✓ |renderer| src/renderer/src/tools/terminal/terminal.test.tsx > terminal view > sets the tab title suffix from the program’s title 2ms
+ ✓ |renderer| src/renderer/src/tools/terminal/terminal.test.tsx > terminal view > shows an exited terminal’s code with New terminal and Close 3ms
+ ✓ |renderer| src/renderer/src/tools/terminal/terminal.test.tsx > terminal view > says why a terminal could not start 1ms
+ ✓ |renderer| src/renderer/src/tools/terminal/terminal.test.tsx > terminal view > shows a lost terminal with New terminal disabled until the terminal service is ready 3ms
+ ✓ |renderer| src/renderer/src/tools/terminal/terminal.test.tsx > terminal view > shows the lossy reconnect notice 1ms
+ ✓ |renderer| src/renderer/src/tools/terminal/terminal.test.tsx > terminal view > asks inline before closing a busy terminal: Keep dismisses, Close confirms and closes 4ms
+ ✓ |renderer| src/renderer/src/tools/terminal/terminal.test.tsx > terminal view > shows a failed close with its reason and Close to retry 2ms
+ ✓ |renderer| src/renderer/src/tools/terminal/terminal.test.tsx > terminal view > offers Copy, Paste, Select all and Clear from its context menu 9ms
+ ✓ |renderer| src/renderer/src/stores/settings.test.ts > renderer settings store > subscribes to settings.changed before asking for the snapshot, then takes the snapshot 5ms
+ ✓ |renderer| src/renderer/src/stores/settings.test.ts > renderer settings store > keeps an event that arrived while the snapshot was in flight 3ms
+ ✓ |renderer| src/renderer/src/stores/settings.test.ts > renderer settings store > follows every later settings.changed 2ms
+ ✓ |renderer| src/renderer/src/stores/settings.test.ts > renderer settings store > stops listening when disconnected 2ms
+ ✓ |renderer| src/renderer/src/stores/settings.test.ts > renderer settings store > ignores the snapshot of a disconnected connection that lands after a newer event (StrictMode remount) 2ms
+ ✓ |renderer| src/renderer/src/stores/settings.test.ts > renderer settings store > ignores the snapshot of a disconnected connection even when no event arrived 3ms
+ ✓ |renderer| src/renderer/src/stores/settings.test.ts > renderer settings store > setTheme asks main and applies main’s answer 3ms
+ ✓ |renderer| src/renderer/src/stores/settings.test.ts > renderer settings store > does not let a delayed settings.set reply replace a newer settings.changed 4ms
+ ✓ |renderer| src/renderer/src/stores/settings.test.ts > renderer settings store > logs a failed snapshot and leaves the state unknown 3ms
+ ✓ |renderer| src/renderer/src/harness/terminal/panel-state.test.ts > panel harness host > kills a terminal’s shell through the tool’s close path when the Terminal tool is unregistered 54ms
+ ✓ |renderer| src/renderer/src/harness/terminal/panel-state.test.ts > panel harness host > keeps a tab whose close failed when its tool is unregistered, and closes it on a retry 53ms
+ ✓ |renderer| src/renderer/src/ipc/query.test.tsx > useCommand > resolves to the validated command output 66ms
+ ✓ |renderer| src/renderer/src/terminal/registry.test.ts > terminal registry acks, dedupes and throttles > coalesces acks: two 20 KiB chunks give one ack after the second, a lone 20 KiB chunk is acked by the 16 ms timer 9ms
+ ✓ |renderer| src/renderer/src/terminal/registry.test.ts > terminal registry acks, dedupes and throttles > acks only what the renderer has parsed 3ms
+ ✓ |renderer| src/renderer/src/terminal/registry.test.ts > terminal registry acks, dedupes and throttles > acks at most 256 KiB per 250 ms tick while hidden, and is unthrottled when visible 6ms
+ ✓ |renderer| src/renderer/src/terminal/registry.test.ts > terminal registry acks, dedupes and throttles > checkpoints once after 500 ms of quiet, with the offset of the last parsed byte and the explicit modes 2ms
+ ✓ |renderer| src/renderer/src/terminal/registry.test.ts > terminal registry acks, dedupes and throttles > never checkpoints during steady output, a chunk every 100 ms for two seconds 2ms
+ ✓ |renderer| src/renderer/src/terminal/registry.test.ts > terminal registry acks, dedupes and throttles > defers a checkpoint that falls due inside an escape sequence to the next chunk that ends on a boundary 1ms
+ ✓ |renderer| src/renderer/src/terminal/registry.test.ts > terminal registry acks, dedupes and throttles > checkpoints every live handle at pagehide at once, and setCheckpoints(false) stops both paths 2ms
+ ✓ |renderer| src/renderer/src/terminal/registry.test.ts > terminal registry acks, dedupes and throttles > skips checkpoints for a renderer that cannot serialise 1ms
+ ✓ |renderer| src/renderer/src/terminal/registry.test.ts > terminal registry reattaches without a gap > writes the checkpoint, the replay, then only the chunks from nextOffset on: exact 4ms
+ ✓ |renderer| src/renderer/src/terminal/registry.test.ts > terminal registry reattaches without a gap > resets, writes the aligned tail and nudges a repaint when the ring does not reach the checkpoint: lossy 1ms
+ ✓ |renderer| src/renderer/src/terminal/registry.test.ts > terminal registry reattaches without a gap > is lossy with no checkpoint 1ms
+ ✓ |renderer| src/renderer/src/terminal/registry.test.ts > terminal registry reattaches without a gap > holds the first chunks of a pty whose spawn reply has not arrived and delivers them after it 0ms
+ ✓ |renderer| src/renderer/src/terminal/registry.test.ts > terminal registry reattaches without a gap > holds an exit that overtakes the spawn reply 1ms
+ ✓ |renderer| src/renderer/src/terminal/registry.test.ts > terminal registry reattaches without a gap > adopts only what the page accepts, and a dead pty as exited with its screen 1ms
+ ✓ |renderer| src/renderer/src/terminal/registry.test.ts > terminal registry reattaches without a gap > drops a chunk below nextOffset after the reattach 1ms
+ ✓ |renderer| src/renderer/src/terminal/registry.test.ts > terminal registry lifecycle > creates every container with the terminal key-sink marker and mounts the renderer inside it 1ms
+ ✓ |renderer| src/renderer/src/terminal/registry.test.ts > terminal registry lifecycle > retries a mount without a size on the next resize callback instead of spawning at a default size 2ms
+ ✓ |renderer| src/renderer/src/terminal/registry.test.ts > terminal registry lifecycle > resizes the renderer and the pty once per settled size change 2ms
+ ✓ |renderer| src/renderer/src/terminal/registry.test.ts > terminal registry lifecycle > forwards input, follows the title and focuses on request 1ms
+ ✓ |renderer| src/renderer/src/terminal/registry.test.ts > terminal registry lifecycle > marks lost on an exit without code or signal and exited on a real one 1ms
+ ✓ |renderer| src/renderer/src/terminal/registry.test.ts > terminal registry lifecycle > marks every live handle lost once on a host crash, idempotent with the supervisor exit events 2ms
+ ✓ |renderer| src/renderer/src/terminal/registry.test.ts > terminal registry lifecycle > respawns a lost terminal with its cwd and label in the same handle, the old screen cleared 1ms
+ ✓ |renderer| src/renderer/src/terminal/registry.test.ts > terminal registry lifecycle > closes by killing the pty, then disposes the handle 2ms
+ ✓ |renderer| src/renderer/src/terminal/registry.test.ts > terminal registry lifecycle > keeps a terminal whose pty.kill failed, and rethrows so the tool can say so 1ms
+ ✓ |renderer| src/renderer/src/terminal/registry.test.ts > terminal registry lifecycle > disposes when pty.kill fails because the pty or its host is already gone 5ms
+ ✓ |renderer| src/renderer/src/terminal/registry.test.ts > terminal registry lifecycle > shows a terminal whose shell could not spawn as exited with the reason 2ms
+ ✓ |renderer| src/renderer/src/terminal/registry.test.ts > terminal registry lifecycle > rejects foreground when the host cannot answer, so the tool fails closed and asks 2ms
+ ✓ |renderer| src/renderer/src/terminal/registry.test.ts > terminal registry lifecycle > shows a terminal whose renderer could not start as exited with the reason, and spawns nothing 2ms
+ ✓ |renderer| src/renderer/src/terminal/registry.test.ts > terminal registry lifecycle > recovers a terminal whose renderer failed once: respawn creates the renderer again, then spawns 2ms
+ ✓ |renderer| src/renderer/src/terminal/registry.test.ts > terminal registry lifecycle > keeps a terminal whose renderer fails again exited, with the error, and rejects respawn 1ms
+ ✓ |renderer| src/renderer/src/terminal/registry.test.ts > terminal registry lifecycle > reports an adopted pty whose renderer could not start, releases its claim and leaves the pty running 1ms
+ ✓ |renderer| src/renderer/src/terminal/registry.test.ts > terminal registry lifecycle > asks the host what runs in the foreground 0ms
+ ✓ |renderer| src/renderer/src/terminal/registry.test.ts > terminal key filter > installs the filter: ⌃Tab keydown runs tab.next once and stays with the app, ordinary keys go to the pty 1ms
+ ✓ |renderer| src/renderer/src/terminal/registry.test.ts > terminal registry links > opens a link through pty.openLink on a ⌘-click and does nothing on a plain click 1ms
+ ✓ |renderer| src/renderer/src/terminal/registry.test.ts > terminal registry links > honours a held ⌘ when the activating event does not carry it, until ⌘ is released or the window blurs 1ms
+ ✓ |renderer| src/renderer/src/terminal/registry.test.ts > webgl budget > gives WebGL to visible terminals up to the budget; the next shown after one hides takes it 5ms
+ ✓ |renderer| src/renderer/src/terminal/registry.test.ts > webgl budget > releases on hide and reacquires on show, and a lost context stays on the DOM renderer until the next show 3ms
+ ✓ |renderer| src/renderer/src/terminal/registry.test.ts > terminal theme from tokens > rebuilds the theme on settings.changed and pushes it to every handle, hidden ones included 1ms
+ ✓ |renderer| src/renderer/src/ipc/query.test.tsx > useCommand > fails with an IpcCommandError carrying the IPC error 57ms
+ ✓ |renderer| src/renderer/src/ipc/query.test.tsx > useCommand is for reads only > allows exactly the read commands with a value to cache 0ms
+ ✓ |renderer| src/renderer/src/ipc/query.test.tsx > useCommand is for reads only > refuses writes and void-output commands at the type level 0ms
+ ✓ |renderer| src/renderer/src/App.test.tsx > theme in the page > mirrors the persisted theme onto <html data-theme> 109ms
+ ✓ |renderer| src/renderer/src/App.test.tsx > theme in the page > switches through settings.set when a theme is chosen in the diagnostics strip 20ms
+ ✓ |renderer| src/renderer/src/App.test.tsx > theme in the page > renders the strip inside the main region 7ms
+ ✓ |renderer| src/renderer/src/App.test.tsx > hosts in the diagnostics strip > reads both hosts ready with their pids from the snapshots 8ms
+ ✓ |renderer| src/renderer/src/App.test.tsx > hosts in the diagnostics strip > follows a host through crashed, restarting and ready 9ms
+ ✓ |renderer| src/renderer/src/App.test.tsx > hosts in the diagnostics strip > runs the echo test and shows the output line with the shell’s pid 24ms
+ ✓ |renderer| src/renderer/src/terminal/registry.test.ts > terminal theme from tokens > also follows the document theme attribute, which the page sets after settings.changed 58ms
+ ✓ |renderer| src/renderer/src/terminal/registry.test.ts > terminal theme from tokens > creates new terminals with the current theme 2ms
+ ✓ |renderer| src/renderer/src/panel/host.test.ts > panel host registry > lists registered tools, the last registration of an id winning 1ms
+ ✓ |renderer| src/renderer/src/panel/host.test.ts > panel host registry > closes a tool’s tabs through the mounted host when the tool is unregistered, and only the current registration 1ms
+ ✓ |renderer| src/renderer/src/panel/host.test.ts > panel host registry > forwards addTool, selectTab, closeTab and showSummary to the mounted host 1ms
+ ✓ |renderer| src/renderer/src/panel/host.test.ts > panel host registry > refuses a call when no host is mounted, and unmounting leaves a newer host in place 1ms
+ ✓ |renderer| src/renderer/src/harness/terminal/metrics.test.ts > terminal probe metrics > takes nearest-rank percentiles of a sample set 1ms
+ ✓ |renderer| src/renderer/src/harness/terminal/metrics.test.ts > terminal probe metrics > summarises frame intervals from rAF timestamps 1ms
+ ✓ |renderer| src/renderer/src/harness/terminal/metrics.test.ts > terminal probe metrics > summarises latency samples 0ms
+ ✓ |renderer| src/renderer/src/harness/terminal/metrics.test.ts > terminal probe metrics > accepts a flood only when its output bytes and line feeds match exactly, tolerating duplicated carriage returns 0ms
+ ✓ |renderer| src/renderer/src/harness/terminal/metrics.test.ts > terminal probe metrics > counts line feeds and carriage returns in a binary chunk 0ms
+ ✓ |renderer| src/renderer/src/ipc/client.test.ts > renderer ipc client > returns a valid command output 3ms
+ ✓ |renderer| src/renderer/src/ipc/client.test.ts > renderer ipc client > turns an output that fails the command’s schema into invalid_output 1ms
+ ✓ |renderer| src/renderer/src/ipc/client.test.ts > renderer ipc client > turns a malformed result envelope into invalid_output 1ms
+ ✓ |renderer| src/renderer/src/ipc/client.test.ts > renderer ipc client > returns a void command’s outcome as ok with an undefined value 0ms
+ ✓ |renderer| src/renderer/src/ipc/client.test.ts > renderer ipc client > passes main’s own errors through 0ms
+ ✓ |renderer| src/renderer/src/ipc/client.test.ts > renderer ipc client > delivers a valid event to the listener 0ms
+ ✓ |renderer| src/renderer/src/ipc/client.test.ts > renderer ipc client > drops a pty.data event whose data is a number and logs the event name and the issues 1ms
+ ✓ |renderer| src/renderer/src/ipc/client.test.ts > renderer ipc client > unsubscribes through the bridge 0ms
+ ✓ |renderer| src/renderer/src/terminal/keys.test.ts > terminal key filter > gives ⌘K to the app 1ms
+ ✓ |renderer| src/renderer/src/terminal/keys.test.ts > terminal key filter > gives ⌘1 to the app 0ms
+ ✓ |renderer| src/renderer/src/terminal/keys.test.ts > terminal key filter > gives ⌘W to the app 0ms
+ ✓ |renderer| src/renderer/src/terminal/keys.test.ts > terminal key filter > gives ⌘⇧J to the app 0ms
+ ✓ |renderer| src/renderer/src/terminal/keys.test.ts > terminal key filter > gives ⌘⇧C (not the copy chord) to the app 0ms
+ ✓ |renderer| src/renderer/src/terminal/keys.test.ts > terminal key filter > gives ⌘ alone to the app 0ms
+ ✓ |renderer| src/renderer/src/terminal/keys.test.ts > terminal key filter > keeps the tab cycle: ⌃Tab is tab.next and ⌃⇧Tab is tab.previous 0ms
+ ✓ |renderer| src/renderer/src/terminal/keys.test.ts > terminal key filter > sends Esc to the pty 0ms
+ ✓ |renderer| src/renderer/src/terminal/keys.test.ts > terminal key filter > sends Enter to the pty 0ms
+ ✓ |renderer| src/renderer/src/terminal/keys.test.ts > terminal key filter > sends Tab to the pty 0ms
+ ✓ |renderer| src/renderer/src/terminal/keys.test.ts > terminal key filter > sends ⇧Tab to the pty 0ms
+ ✓ |renderer| src/renderer/src/terminal/keys.test.ts > terminal key filter > sends ⌃C to the pty 0ms
+ ✓ |renderer| src/renderer/src/terminal/keys.test.ts > terminal key filter > sends ⌃D to the pty 0ms
+ ✓ |renderer| src/renderer/src/terminal/keys.test.ts > terminal key filter > sends ⌃L to the pty 0ms
+ ✓ |renderer| src/renderer/src/terminal/keys.test.ts > terminal key filter > sends ⌃R to the pty 0ms
+ ✓ |renderer| src/renderer/src/terminal/keys.test.ts > terminal key filter > sends ⌥← to the pty 0ms
+ ✓ |renderer| src/renderer/src/terminal/keys.test.ts > terminal key filter > sends ↑ to the pty 0ms
+ ✓ |renderer| src/renderer/src/terminal/keys.test.ts > terminal key filter > sends ⌘C to the pty 0ms
+ ✓ |renderer| src/renderer/src/terminal/keys.test.ts > terminal key filter > sends ⌘V to the pty 0ms
+ ✓ |renderer| src/renderer/src/terminal/keys.test.ts > terminal key filter > sends ⌘A to the pty 0ms
+ ✓ |renderer| src/renderer/src/terminal/keys.test.ts > terminal key filter > sends ⌘C under the Korean layout to the pty 0ms
+ ✓ |renderer| src/renderer/src/terminal/keys.test.ts > terminal key filter > sends a composing IME key to the pty 0ms
+ ✓ |renderer| src/renderer/src/terminal/theme.test.ts > terminal theme from tokens > maps the 21 --term-* tokens onto the renderer theme in ANSI order 2ms
+ ✓ |renderer| src/renderer/src/terminal/theme.test.ts > terminal theme from tokens > throws naming the token when a value is missing 0ms
+ ✓ |renderer| src/renderer/src/harness/terminal/input-guard.test.ts > probe input guard > blocks and counts physical wheel, key and touch events while armed, and lets synthesized ones through 2ms
+ ✓ |renderer| src/renderer/src/terminal/xterm.test.ts > xterm adapter > measures nothing for a detached or zero-sized container, where the fit addon would propose 2×1 17ms
+ ✓ |renderer| src/renderer/src/terminal/xterm.test.ts > xterm adapter > lets OSC 8 links of any scheme reach the link handler, main being the one scheme check 4ms
+ ✓ |renderer| src/renderer/src/stores/terminals.test.ts > terminals store > mirrors the registry’s infos and host state, never its handles 1ms
+ ✓ |node| src/pty-host/table.test.ts > pty host flow control pauses and resumes > pauses a flood nobody acknowledges near the high watermark, and acks let it finish 3283ms
+ ✓ |node| src/pty-host/table.test.ts > pty host flow control pauses and resumes > stays paused on an ack that leaves more than the low watermark outstanding 103ms
+ ✓ |node| src/pty-host/table.test.ts > pty host flow control pauses and resumes > clamps an ack above the total and logs it instead of failing 25ms
+ ✓ |node| src/pty-host/table.test.ts > pty host ring buffer and attach offsets > loses nothing of seq 1 200000 with a renderer-like acker, offsets contiguous 1039ms
+ ✓ |node| src/pty-host/table.test.ts > pty host ring buffer and attach offsets > continues after attach at nextOffset: every later event is at or above it, the first exactly at it 249ms
+ ✓ |node| src/pty-host/table.test.ts > pty host checkpoint and replay window > keeps the ring reaching back to the acknowledged offset while paused, so a checkpoint there is exact 537ms
+ ✓ |node| src/pty-host/table.test.ts > pty host checkpoint and replay window > answers lossy when the flood outran the checkpoint: replay from the ring start, the whole ring 3409ms
+ ✓ |node| src/pty-host/table.test.ts > pty host checkpoint and replay window > replaces a checkpoint with the next, clamps one above the total, and still answers it for a dead pty 525ms
+ ✓ |node| src/pty-host/table.test.ts > pty host initial command runs under zsh and bash > /bin/zsh starts as a login shell and runs the command it was spawned with 1040ms
+ ✓ |node| src/pty-host/table.test.ts > pty host initial command runs under zsh and bash > /bin/bash starts as a login shell and runs the command it was spawned with 33ms
+ ✓ |node| src/pty-host/table.test.ts > pty host foreground detection > reports busy false at a /bin/sh prompt and busy true with the program while sleep runs 95ms
+ ✓ |node| src/pty-host/table.test.ts > pty host foreground detection > reports nothing running for a dead pty 22ms
+ ✓ |node| src/pty-host/table.test.ts > pty host tty has iutf8 > starts every pty with IUTF8 set, as Terminal.app does 46ms
+ ✓ |node| src/pty-host/table.test.ts > pty host tty has iutf8 > erases a whole multi-byte character in canonical mode 44ms
+ ✓ |node| src/pty-host/table.test.ts > pty host tty has iutf8 > keeps the pid, and the program sees its own path as $0 23ms
+ ✓ |node| src/pty-host/table.test.ts > pty host coalesces reads into fewer events > emits fewer events than node-pty reads under a flood, every byte in order at monotone, contiguous offsets 1118ms
+ ✓ |node| src/pty-host/table.test.ts > pty host coalesces reads into fewer events > flushes before the exit event, so a program’s last bytes precede its exit 24ms
+ ✓ |node| src/pty-host/table.test.ts > pty host coalesces reads into fewer events > answers attach with every byte it has read: nextOffset covers what is still waiting to be flushed 441ms
+ ✓ |node| src/pty-host/table.test.ts > pty host environment > starts a program with the terminal environment it was given, in the requested cwd 24ms
+ ✓ |node| src/pty-host/table.test.ts > pty host environment > defaults the shell to the environment’s SHELL, started with -l 34ms
+ ✓ |node| src/pty-host/table.test.ts > pty host lifecycle > lists a live pty with its session, label, size and offset 2ms
+ ✓ |node| src/pty-host/table.test.ts > pty host lifecycle > keeps a pty that exited on its own as a dead entry: writes fail with "pty exited", kill removes it 23ms
+ ✓ |node| src/pty-host/table.test.ts > pty host lifecycle > removes a killed pty once it has exited, with SIGHUP by default 211ms
+ ✓ |node| src/pty-host/table.test.ts > pty host lifecycle > refuses a second live pty under the same session and label, and replaces a dead one 24ms
+ ✓ |node| src/pty-host/table.test.ts > pty host lifecycle > fails with "unknown pty" for an id it never issued 1ms
+ ✓ |node| src/pty-host/table.test.ts > pty host lifecycle > writes keystrokes to an interactive shell and streams its output back as bytes 33ms
+ ✓ |node| src/shared/graph/events.test-d.ts:8 > session events are EventBase & EventPayload > every event carries the base fields and a kind from EVENT_KINDS
+ ✓ |node| src/shared/graph/events.test-d.ts:15 > session events are EventBase & EventPayload > payload fields keep their branded ids and enums
+ ✓ |node| src/shared/graph/ids.test-d.ts:30 > identifiers are not interchangeable > no brand is assignable to another
+ ✓ |node| src/shared/graph/ids.test-d.ts:34 > identifiers are not interchangeable > a plain string is none of them
+ ✓ |node| src/shared/graph/ids.test-d.ts:40 > identifiers are not interchangeable > a parent tool use is not the child tool use, in either direction
+ ✓ |node| src/shared/graph/ids.test-d.ts:45 > identifiers are not interchangeable > every brand is a branded string and is usable where a string is
+ ✓ |node| src/shared/graph/ids.test-d.ts:51 > identifiers are not interchangeable > toolUseOf is the one sanctioned crossing
+ ✓ |node| src/shared/wire/journal.test-d.ts:8 > journal rows and wire frames are typed as written > a journal row has exactly seq, direction, at and an opaque frame
+ ✓ |node| src/shared/wire/journal.test-d.ts:13 > journal rows and wire frames are typed as written > wire frames retain unknown keys and keep required fields required
+
+ Test Files  42 passed (42)
+      Tests  416 passed (416)
+Type Errors  no errors
+   Start at  19:09:06
+   Duration  13.65s (tests 63%, environment 17%, transform 9%, import 7%, typecheck 4%, worker 1%)
+
+JSON report written to /Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a6f3eb0835c0683ff/.doperpowers/sde/2026-09-28-c9-terminal/m5/test-fix.json

@@ -1,0 +1,82 @@
+{
+  "tui": "claude",
+  "bin": "/Users/new/.local/share/claude/versions/2.1.283",
+  "renderer": "xterm",
+  "before": {
+    "pid": 6496,
+    "lineCount": 40
+  },
+  "startup": {
+    "syncFrames": 3,
+    "kittyQueried": true,
+    "kittyAnswered": false,
+    "xtversionQueried": true,
+    "xtversionAnswered": false,
+    "alternateScreen": true,
+    "mouseTracking": "any",
+    "title": "✳ Claude Code"
+  },
+  "wheel": {
+    "strayMouseSequences": [],
+    "lastLines": [
+      "❯ Try \"fix typecheck errors\"",
+      "─────────────────────────────────────────────────────────────────────────────────────────────",
+      "  ⚠ Transcript saving is off — inherited CLAUDE_CODE_CHILD_SESSION marker · restart with C…",
+      "  new@SK:/private/tmp/maws-harness/a [Fable 5.1] $0.00 · 0s · ≡ 0.00% weekly usage",
+      "  ⏵⏵ auto mode on (shift+tab to cycle)",
+      "                                                                             [ kairos off ]"
+    ]
+  },
+  "altDrag": {
+    "selectionLength": 87
+  },
+  "imeInsert": {
+    "composerHasText": true,
+    "note": "insertText commits without composition; real IME composition is the owner's manual run (M5)"
+  },
+  "conversation": {
+    "answered": true,
+    "syncFramesDuringTurn": 89,
+    "lastLines": [
+      "                                                                          ◉ xhigh · /effort",
+      "─────────────────────────────────────────────────────────────────────────────────────────────",
+      "❯ ",
+      "─────────────────────────────────────────────────────────────────────────────────────────────",
+      "  ⚠ Transcript saving is off — inherited CLAUDE_CODE_CHILD_SESSION marker · restart with C…",
+      "  new@SK:/private/tmp/maws-harness/a [Opus 4.8 (1M context)] ctx:3%, 25k $0.80 · 11s · ≡ 0…",
+      "  ⏵⏵ auto mode on (shift+tab to cycle)",
+      "                                                                             [ kairos off ]"
+    ]
+  },
+  "resize": {
+    "cols": 58,
+    "rows": 39,
+    "lastLines": [
+      "─────────────────────────────────────────────────────────────────────────────────────────────",
+      "❯ ",
+      "─────────────────────────────────────────────────────────────────────────────────────────────",
+      "  ⚠ Transcript saving is off — inherited CLAUDE_CODE_CHILD_SESSION marker · restart with C…",
+      "  new@SK:/private/tmp/maws-harness/a [Opus 4.8 (1M context)] ctx:3%, 25k $0.80 · 11s · ≡ 0…",
+      "  ⏵⏵ auto mode on (shift+tab to cycle)"
+    ]
+  },
+  "exit": {
+    "alternateScreenAfter": false,
+    "priorScrollbackIntact": false,
+    "lineCountBefore": 40,
+    "lineCountAfter": 40,
+    "tuiFramesInScrollback": 0,
+    "lastLines": [
+      "",
+      "",
+      "",
+      "",
+      "",
+      ""
+    ]
+  },
+  "noSync": {
+    "syncFramesAtStartup": 0,
+    "withVariableAtStartup": 3
+  }
+}

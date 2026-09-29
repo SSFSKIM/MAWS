@@ -1,0 +1,28 @@
+{
+  "renderer": "ghostty",
+  "workload": "scroll region inserts",
+  "phase": "m1",
+  "expectedBytes": null,
+  "bytes": 125,
+  "outputBytes": 107,
+  "lineFeeds": 9,
+  "extraCarriageReturns": 9,
+  "seconds": 1.016,
+  "lastLine": "done",
+  "lineCount": 48,
+  "heapMB": 48,
+  "blockedInputEvents": 0,
+  "frames": {
+    "count": 121,
+    "p50": 8.30000000000291,
+    "p95": 9.299999999999272,
+    "max": 9.400000000001455,
+    "over33ms": 0,
+    "over50ms": 0
+  },
+  "longTasks": {
+    "count": 0,
+    "totalMs": 0,
+    "max": 0
+  }
+}
