@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { isDowngraded, scopeOptions } from './scope';
-import { fixtureRequest, permission, type PermissionEvent } from './test-requests';
+import { fixtureRequest, permission, syntheticRequest, type PermissionEvent } from './test-requests';
 
 const reapply = fixtureRequest('pass2', 'grant-reapply-start', 30) as PermissionEvent;
 const askRule = fixtureRequest('pass2', 'grant-askrule-start', 27) as PermissionEvent;
@@ -15,6 +15,15 @@ describe('scope options follow the downgrade rule', () => {
     expect(options[1].updatedPermissions).toEqual([{ type: 'addRules', rules: [{ toolName: 'Bash', ruleContent: 'touch granted.txt' }], behavior: 'allow', destination: 'session' }]);
     expect(options[2]).toMatchObject({ label: 'Always allow touch granted.txt in probe', detail: 'Project rule' });
     expect(options[2].updatedPermissions).toEqual([{ type: 'addRules', rules: [{ toolName: 'Bash', ruleContent: 'touch granted.txt' }], behavior: 'allow', destination: 'localSettings' }]);
+  });
+
+  it('counts an edit by its files and names the rule it would keep (the edit-approval variant, test/fixtures/requests/edit-permission.json)', () => {
+    const edit = syntheticRequest('edit-permission') as PermissionEvent;
+    expect(scopeOptions(edit, { name: 'repo' }).map((o) => [o.scope, o.label, o.detail])).toEqual([
+      ['once', 'Allow once', 'This 1 file'],
+      ['session', 'Allow for this session', 'Until this session ends'],
+      ['local_settings', 'Always allow Edit in repo', 'Project rule'],
+    ]);
   });
 
   it('offers once only for an ask-rule prompt (grant-askrule-start seq 27: decisionReasonType rule, no matchedAskRule)', () => {

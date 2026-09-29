@@ -5,7 +5,9 @@ export type HarnessPlacement = 'docked' | 'card' | 'hover' | 'inline';
 // What a pane shows: a session's waiting request in one placement, a focusable region whose `request.accept` binding
 // only counts (the other pane of acceptance item 2, which must keep its Enter to itself), or (M4) a session's composer.
 // M4b: a composer pane may show the session's transcript above it (C6's slot, whose bubbles offer Edit).
-export type HarnessPane = { appSessionId: string; placement: HarnessPlacement } | { counter: true } | { composer: string; transcript?: boolean } | null;
+// M6: or sit in C5's own session pane (`shell`), which centres an unstarted session's frame under its heading; such a
+// pane spans the page (the mockup checklist's screenshots).
+export type HarnessPane = { appSessionId: string; placement: HarnessPlacement } | { counter: true } | { composer: string; transcript?: boolean; shell?: boolean } | null;
 
 // M4: the stub of C10's setup intent the page registers (the fields the composer reads).
 export interface HarnessIntent {

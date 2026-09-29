@@ -14,7 +14,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
-import { Composer, ComposerAppKeys, DockedCardFrame, dockCard, editAndResubmitRow } from '../../composer';
+import { Composer, ComposerAppKeys, connectComposer, DockedCardFrame, dockCard, editAndResubmitRow } from '../../composer';
 import { setRewindWindow } from '../../composer/resubmit-seam';
 import { ipc } from '../../ipc/client';
 import { connectShell } from '../../ipc/events';
@@ -22,6 +22,7 @@ import { queryClient } from '../../ipc/query';
 import { connectKeys } from '../../keymap/dispatcher';
 import { useKeyChord } from '../../keymap/useKeyChord';
 import { RequestCard } from '../../request-card';
+import { SessionPane } from '../../session/SessionPane';
 import { selectPendingOf, useAttention } from '../../stores/attention';
 import { useLayout } from '../../stores/layout';
 import { registerTranscriptActions, TranscriptSlot } from '../../transcript';
@@ -122,6 +123,7 @@ export function ComposerHarness() {
   useEffect(() => {
     const theme = new URLSearchParams(location.search).get('theme');
     if (theme === 'dark' || theme === 'light') document.documentElement.dataset.theme = theme;
+    connectComposer(); // C5's session pane (a `shell` pane) finds the composer in its slot, as in the app
     const offs = [connectShell(), connectKeys(), registerTranscriptActions({ editAndResubmit: editAndResubmitRow })];
     window.__maws_cards = {
       show: (next) => {
@@ -157,12 +159,22 @@ export function ComposerHarness() {
         {panes.map((pane, i) => {
           const index = i as 0 | 1;
           return (
-            <section key={i} data-pane={index} aria-label={`pane ${index}`} onFocusCapture={() => useLayout.getState().focusPane(index)} className="flex min-w-0 flex-col gap-3">
+            <section
+              key={i}
+              data-pane={index}
+              aria-label={`pane ${index}`}
+              onFocusCapture={() => useLayout.getState().focusPane(index)}
+              className={`flex min-w-0 flex-col gap-3 ${pane !== null && 'shell' in pane && pane.shell ? 'col-span-2' : ''}`}
+            >
               <button type="button" className="self-start rounded-sm border border-border px-2 py-0.5 text-ui-sm text-fg-muted">
                 pane {index}
               </button>
               {pane === null ? null : 'counter' in pane ? (
                 <CounterPane onCount={() => void (counted.current += 1)} />
+              ) : 'composer' in pane && pane.shell ? (
+                <div className="h-[36rem] overflow-hidden rounded-md border border-border">
+                  <SessionPane appSessionId={pane.composer as AppSessionId} paneIndex={index} />
+                </div>
               ) : 'composer' in pane ? (
                 <div className="mt-auto flex min-w-0 flex-col gap-3">
                   {pane.transcript && <TranscriptSlot key={`transcript:${pane.composer}`} appSessionId={pane.composer as AppSessionId} className="h-72" />}
