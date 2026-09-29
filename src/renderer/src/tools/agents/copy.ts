@@ -21,6 +21,11 @@ export const SUBAGENTS_COPY = {
   finishedWithErrors: (ago: string) => `finished with errors · ${ago}`,
   stopped: (ago: string) => `stopped · ${ago}`,
   endedWithSession: 'ended with the session',
+  // the same outcomes with no end time known (a sidecar's `stoppedByUser` carries none)
+  finishedUndated: 'finished',
+  finishedWithErrorsUndated: 'finished with errors',
+  stoppedUndated: 'stopped',
+  noSession: 'Open a session to see its subagents', // a pinned tab while no session is shown
   statusUnavailable: 'status unavailable',
   elapsedUnavailable: 'elapsed unavailable',
   footer: 'Live activity · includes nested agents',
@@ -37,6 +42,8 @@ export const SUBAGENTS_COPY = {
   stopConfirm: (title: string) => `Stop ${title}?`,
   stopConfirmYes: 'Stop',
   stopConfirmNo: 'Keep running',
+  stopping: 'stopping…',
+  stopFailed: (message: string) => `Couldn't stop it: ${message}`,
   waitingToStart: 'Waiting for the agent to start',
 } as const;
 

@@ -24,6 +24,18 @@ export function formatElapsed(ms: number): string {
   return `${Math.floor(minutes / 60)}h ${pad(minutes % 60)}m`;
 }
 
+const MINUTE = 60_000;
+const HOUR = 60 * MINUTE;
+const DAY = 24 * HOUR;
+
+// How long ago an agent ended, in the app's relative form (the status line's): `just now`, `3m ago`, `2h ago`, `1d ago`.
+export function formatAgo(ms: number): string {
+  if (ms < MINUTE) return 'just now';
+  if (ms < HOUR) return `${Math.floor(ms / MINUTE)}m ago`;
+  if (ms < DAY) return `${Math.floor(ms / HOUR)}h ago`;
+  return `${Math.floor(ms / DAY)}d ago`;
+}
+
 // `512 tokens`, `38.1k tokens`, `1.2M tokens`.
 export function formatTokens(n: number): string {
   if (n < 1000) return `${n} ${n === 1 ? 'token' : 'tokens'}`;

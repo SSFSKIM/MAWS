@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { TaskId } from '@shared/graph/ids';
 import { event } from '../../../../../../test/support/agents-events';
-import { elapsedOf, formatElapsed, formatTokens } from './elapsed';
+import { elapsedOf, formatAgo, formatElapsed, formatTokens } from './elapsed';
 import { applyTaskEvents, emptyGraph, type TaskNode } from './task-graph';
 
 const T = Date.parse('2026-09-29T10:00:00.000Z');
@@ -46,5 +46,13 @@ describe('elapsed', () => {
     expect(formatTokens(1_200_000)).toBe('1.2M tokens');
     expect(formatTokens(999_990)).toBe('1.0M tokens');
     expect(formatTokens(512)).toBe('512 tokens');
+  });
+
+  it('formats how long ago an agent ended', () => {
+    expect(formatAgo(40_000)).toBe('just now');
+    expect(formatAgo(180_000)).toBe('3m ago');
+    expect(formatAgo(2 * 3_600_000 + 5)).toBe('2h ago');
+    expect(formatAgo(26 * 3_600_000)).toBe('1d ago');
+    expect(formatAgo(-5_000)).toBe('just now'); // a clock a little behind the engine's
   });
 });
