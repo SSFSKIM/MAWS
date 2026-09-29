@@ -1,6 +1,6 @@
 // The relay-down card body (C10 execution document, "The unstarted session", RelayCard; mockup 05 vignette 03 for the
 // content; D-19; C11's asks (2) and (7)): the relay's health, "Open ClaudeUsage, then start" (C11's
-// `gateway.openClaudeUsage`, disabled until C11 registers it; the host polls the relay while the card is docked and
+// `gateway.openClaudeUsage`, disabled with no further words until C11 registers it; the host polls the relay while the card is docked and
 // starts routed by itself once it answers), "Run direct" (`onAccept`), Retry and Cancel (`onDecline`). Under C11's
 // `relayUnreachable: 'wait'` the primary is the ClaudeUsage path; under `ask` both are offered.
 import type { RelayHealth } from '@shared/engine/relay-health';
@@ -31,7 +31,7 @@ export function RelayCard({
   const age = Math.max(0, Math.round((now - Date.parse(health.checkedAt)) / 1000));
   const reason = health.error ?? (health.status === null ? 'no answer' : `HTTP ${health.status}`);
   const open = (
-    <button key="open" type="button" disabled={openClaudeUsage === null} title={openClaudeUsage === null ? 'Arrives with C11' : undefined} onClick={() => openClaudeUsage?.()} className={policy === 'wait' ? PRIMARY : SECONDARY}>
+    <button key="open" type="button" disabled={openClaudeUsage === null} onClick={() => openClaudeUsage?.()} className={policy === 'wait' ? PRIMARY : SECONDARY}>
       Open ClaudeUsage, then start
     </button>
   );

@@ -34,7 +34,11 @@ function isForeign(record: SessionRecord): boolean {
 // toolbar's session menu): a foreign-live session only Open, and "Remove worktree…" only with a worktree.
 export function sessionActionsFor(record: SessionRecord): SessionActionId[] {
   if (isForeign(record)) return ['open'];
-  return SESSION_ACTION_IDS.filter((id) => (id !== 'removeWorktree' || record.worktree !== null) && (id !== 'resume' || record.holder.kind !== 'self')); // C10: resume
+  const offered = SESSION_ACTION_IDS.filter((id) => id !== 'removeWorktree' || record.worktree !== null);
+  // C10 start: Resume only for a session no process holds (a MAWS-live one has nothing to resume)
+  if (record.holder.kind === 'self') return offered.filter((id) => id !== 'resume');
+  // C10 end
+  return offered;
 }
 
 const registry = createHandlerRegistry<SessionActionId, [AppSessionId]>('session actions');

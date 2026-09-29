@@ -165,8 +165,21 @@ describe('setup intent hook', () => {
     putIntent(intent());
     const { result } = renderHook(() => useSetupIntent(ID));
     await act(() => fake.fail('session.trust.check', 'global config unreadable: EACCES'));
-    expect(await act(() => result.current!.start(MESSAGE))).toEqual({ ok: false, error: 'global config unreadable: EACCES' });
+    const refused = result.current!.start(MESSAGE); // Send checks again first
+    await act(() => fake.fail('session.trust.check', 'global config unreadable: EACCES'));
+    expect(await refused).toEqual({ ok: false, error: 'global config unreadable: EACCES' });
     expect(fake.invoked('session.start')).toEqual([]);
+  });
+
+  it('checks trust again at Send after a failed check, and starts once the check answers', async () => {
+    withMain({ 'session.trust.check': undefined, 'session.start': () => ({ status: 'starting', appSessionId: ID }) });
+    putIntent(intent());
+    const { result } = renderHook(() => useSetupIntent(ID));
+    await act(() => fake.fail('session.trust.check', 'global config unreadable: EACCES'));
+    const started = result.current!.start(MESSAGE);
+    await act(() => fake.reply('session.trust.check', trustState({ trusted: true, source: 'trustKey' })));
+    expect(await started).toEqual({ ok: true });
+    expect(fake.invoked('session.start')).toEqual([{ appSessionId: ID, message: MESSAGE, options: {} }]);
   });
 });
 

@@ -2,7 +2,7 @@
 // unstarted session", useSetupIntent.ts; C7 document, "Ask of C10": the names and shapes are C7's). C7 exports
 // `registerSetupIntentHook` under the same names; M4b adds the one registration line, so this module's `SetupIntentHook`
 // is written to be assignable to C7's.
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { ModelCatalogue, ModelCatalogueEntry } from '@shared/sessions/models';
 import { autoModeNote, BUILTIN_MODELS } from '@shared/sessions/models';
@@ -119,7 +119,10 @@ export function resetCatalogue(): void {
   catalogueRead = null;
 }
 
-function useSetupOptions(appSessionId: AppSessionId, intent: SetupIntent | null): { options: SetupIntentOptions; trustError: string | null } {
+function useSetupOptions(
+  appSessionId: AppSessionId,
+  intent: SetupIntent | null,
+): { options: SetupIntentOptions; trustError: string | null; recheck(): Promise<string | null> } {
   const projectDirectory = useSessions((s) => (intent?.projectId ? (s.projects.get(intent.projectId)?.directory ?? null) : null));
   const base = intent ? baseDirectoryOf(intent.location) : null;
   const [facts, setFacts] = useState<RepositoryFacts | null>(null);
@@ -155,21 +158,32 @@ function useSetupOptions(appSessionId: AppSessionId, intent: SetupIntent | null)
       autoModeNote: noteFor(catalogue, intent),
     };
   }, [intent, projectDirectory, facts, catalogue, worktreeName]);
-  return { options, trustError: facts?.trustError ?? null };
+  // A failed trust check is read again at Send (the directory may be readable now): the refusal stands only while the
+  // check still fails.
+  const recheck = useCallback(async () => {
+    if (base === null) return null;
+    const read = await readRepository(base);
+    setFacts(read);
+    return read.trustError;
+  }, [base]);
+  return { options, trustError: facts?.trustError ?? null, recheck };
 }
 
 // Non-null exactly while the session is unstarted: an intent, and no record with an engine status (C7's definition).
 export function useSetupIntent(appSessionId: AppSessionId): SetupIntentHook | null {
   const intent = useSetup((s) => s.intents.get(appSessionId) ?? null);
   const started = useSessions((s) => s.records.has(appSessionId) && s.engine.has(appSessionId));
-  const { options, trustError } = useSetupOptions(appSessionId, intent);
+  const { options, trustError, recheck } = useSetupOptions(appSessionId, intent);
   return useMemo(() => {
     if (intent === null || started) return null;
     return {
       intent,
       options,
       patch: (p) => patchIntent(appSessionId, p),
-      start: (first) => (trustError !== null ? Promise.resolve({ ok: false, error: trustError }) : startIntent(appSessionId, first)),
+      start: async (first) => {
+        const error = trustError === null ? null : await recheck();
+        return error !== null ? { ok: false, error } : startIntent(appSessionId, first);
+      },
     };
-  }, [appSessionId, intent, started, options, trustError]);
+  }, [appSessionId, intent, started, options, trustError, recheck]);
 }

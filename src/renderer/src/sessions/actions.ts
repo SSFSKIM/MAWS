@@ -10,6 +10,7 @@ import { registerProjectAction } from '../sidebar/project-actions';
 import { useLayout } from '../stores/layout';
 import { toast } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
+import { cleanupTargetOf } from './CleanupDialog';
 import { confirm, openDialog } from './dialogs';
 import { archiveSession, forkInPlace } from './record-ops';
 import { resumeSession } from './setup-actions';
@@ -34,7 +35,8 @@ export function focusedProject(): ProjectId | null {
 
 function removeWorktree(appSessionId: AppSessionId): void {
   const record = useSessions.getState().records.get(appSessionId);
-  if (record?.worktree) openDialog({ kind: 'cleanup', target: { repoRoot: record.directory, path: record.worktree.path } });
+  const target = record ? cleanupTargetOf(record) : null;
+  if (target) openDialog({ kind: 'cleanup', target });
 }
 
 async function removeProject(projectId: ProjectId): Promise<void> {
@@ -83,7 +85,11 @@ async function revealProject(projectId: ProjectId): Promise<void> {
 export function registerSessionActions(): () => void {
   const offs = [
     registerAction('session.new', () => createSession(focusedProject())),
-    registerSessionAction('resume', (id) => resumeSession(id)),
+    // the session's tab first, so a trust or relay card its start docks is on screen
+    registerSessionAction('resume', (id) => {
+      useLayout.getState().openSession(id);
+      return resumeSession(id);
+    }),
     registerSessionAction('rename', (id) => openDialog({ kind: 'rename', appSessionId: id })),
     registerSessionAction('fork', (id) => forkInPlace(id)),
     registerSessionAction('forkToWorktree', (id) => openDialog({ kind: 'fork', appSessionId: id })),

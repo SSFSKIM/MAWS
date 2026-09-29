@@ -9,7 +9,8 @@ import { registerSessionCreator, runAction } from '../keymap/actions-runtime';
 import { PROJECT_ACTION_IDS, PROJECT_ACTIONS, runProjectAction } from '../sidebar/project-actions';
 import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
-import { resetSetupStore } from '../test-support/setup-intents';
+import { resetSetupStore, trustState } from '../test-support/setup-intents';
+import { useSetup } from './store';
 import { resetShellStores } from '../test-support/shell-stores';
 import { focusedProject, registerSessionActions } from './actions';
 import { closeDialog, useDialogs } from './dialogs';
@@ -54,6 +55,19 @@ describe('the session and project entries', () => {
     offs.push(registerSessionCreator(async (projectId) => (created.push(projectId), null)));
     runAction('session.new');
     await waitFor(() => expect(created).toEqual([P2]));
+  });
+
+  it('Resume opens the session’s tab, so a card its start docks is on screen', async () => {
+    fake = fakeClient({ 'session.start': () => ({ status: 'needs_trust', appSessionId: A, trust: trustState() }) });
+    window.maws = fake.client;
+    useSessions.setState({ records: new Map([[A, record(A, { holder: { kind: 'none' } })]]) });
+    act(() => runSessionAction('resume', A));
+    const active = () => {
+      const pane = useLayout.getState().main.panes[useLayout.getState().main.focusedPane]!;
+      return pane.tabs.find((t) => t.id === pane.activeTabId);
+    };
+    expect(active()).toMatchObject({ kind: 'session', appSessionId: A });
+    await waitFor(() => expect(useSetup.getState().cards.get(A)).toMatchObject({ kind: 'trust' }));
   });
 
   it('the per-session entries open their sheets', () => {
