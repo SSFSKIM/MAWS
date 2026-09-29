@@ -267,6 +267,14 @@ export const MODEL = {
   } as Record<string, string>,
   refused: 'The engine refused the model',
   routingAccount: 'the routing account', // the gateway note's account when ClaudeUsage names none
+  // an unstarted session's route (the architect's ruling of 2026-09-29, the D-19 surface on an unstarted tab)
+  route: 'Route',
+  directCannotServe: 'The direct route cannot serve these; choosing one starts the session on the relay',
+  directNeedsClaude: 'Choose a Claude model first: the direct route cannot serve a gateway model',
+  relayAskTitle: 'Start on the relay?',
+  relayAsk: (name: string) => `${name} runs through ClaudeUsage’s relay · this session would start routed instead of direct`,
+  keepDirect: 'Keep Direct',
+  useRelay: 'Use the relay',
   // A gateway model's auto-mode note as the widget words it (§19; mockup 06 vignette 03): C10's `GATEWAY_AUTO_NOTE`
   // is its chip's one line; the widget's form names the account the local reviews are counted against.
   gatewayNote: {

@@ -5,17 +5,27 @@
 // mode, the effort levels the chosen entry admits with `Engine default`, one Apply for both, and the fast switch, whose
 // lane warning comes first, inline. A live session is C3's (`list_models`, `set_model`, `apply_flag_settings`); an
 // unstarted one is its setup intent's through C7's seam (C10 registers the hook; the catalogue and the patch are C10's),
-// with no fast switch, since fast mode needs a process. The palette's argument preselects (`/model haiku`,
-// `/effort high`, `/effort auto` for the default) or opens the fast confirmation (`/fast on`, `/fast off`).
+// with no fast switch, since fast mode needs a process, and with the session's route at its top (the architect's ruling
+// of 2026-09-29, the D-19 surface on an unstarted tab): `Route · ClaudeUsage relay | Direct` writes the intent's
+// `gateway`; under Direct the Gateway group greys, and picking one of its models asks before flipping back to the
+// relay. The palette's argument preselects (`/model haiku`, `/effort high`, `/effort auto` for the default) or opens
+// the fast confirmation (`/fast on`, `/fast off`).
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { EffortSchema, type Effort } from '@shared/engine/launch-spec';
 import type { PermissionMode } from '@shared/graph/enums';
 import type { AppSessionId } from '@shared/graph/ids';
+import { isGatewayModel } from '@shared/sessions/models';
+import { SETTINGS_DEFAULTS_V3 } from '@shared/settings/defaults';
 import { intentBindings } from '../composer/frame/bindings';
 import { useSetupIntent } from '../composer/setup-intent';
+import { ROUTE, type Route } from '../gateway/copy';
+import { unstartedRoute } from '../gateway/routing-facts';
+import { patchIntent } from '../sessions/setup-actions';
+import { useSetup } from '../sessions/store';
 import { NOT_RUNNING } from '../statusline/mode-menu';
 import { isStarting, rememberListedModels, useComposerStore } from '../stores/composer';
 import { useSessions } from '../stores/sessions';
+import { useSettings } from '../stores/settings';
 import { useUsage } from '../stores/usage';
 import { MODEL, WIDGET_FOOT, WIDGET_TITLE } from './copy';
 import {
@@ -54,6 +64,8 @@ interface Binding {
   apply(model: string | null | undefined, effort: Effort | null | undefined): Promise<ControlAnswer>;
   fast: { view: FastView; pending: boolean; set(on: boolean): Promise<ControlAnswer> } | null;
   unstarted: boolean;
+  // an unstarted session's route (its intent's `gateway`): the segment's options, empty when there is nothing to choose
+  route: { value: Route; choices: Route[]; set(route: Route): Promise<ControlAnswer> } | null;
 }
 
 function useLiveBinding(appSessionId: AppSessionId, models: readonly ModelRow[]): Binding | null {
@@ -87,6 +99,7 @@ function useLiveBinding(appSessionId: AppSessionId, models: readonly ModelRow[])
         set: (on) => applyFlagSettings({ appSessionId, settings: { fastMode: on } }),
       },
       unstarted: false,
+      route: null,
     };
   }, [appSessionId, models, status, requests]);
 }
@@ -95,6 +108,9 @@ function useLiveBinding(appSessionId: AppSessionId, models: readonly ModelRow[])
 function useIntentBinding(appSessionId: AppSessionId): Binding | null {
   const setup = useSetupIntent(appSessionId);
   const starting = useComposerStore((s) => isStarting(s, appSessionId));
+  // C10's intent carries the route C7's hook type does not name; it is read from C10's store and written by its patch
+  const gateway = useSetup((s) => s.intents.get(appSessionId)?.gateway ?? null);
+  const settings = useSettings((s) => s.state?.settings) ?? SETTINGS_DEFAULTS_V3;
   if (!setup) return null;
   const bound = intentBindings(setup, { starting }).model;
   const { model, effort } = bound.value;
@@ -111,6 +127,17 @@ function useIntentBinding(appSessionId: AppSessionId): Binding | null {
     },
     fast: null,
     unstarted: true,
+    route:
+      gateway === null
+        ? null
+        : {
+            value: gateway,
+            choices: unstartedRoute({ gateway }, settings).choices,
+            async set(route) {
+              const result = await patchIntent(appSessionId, { gateway: route });
+              return result.ok ? { ok: true } : { ok: false, error: result.error, caption: null };
+            },
+          },
   };
 }
 
@@ -126,15 +153,17 @@ function useRoutingAccount(appSessionId: AppSessionId): string {
 
 const EFFORT_NAMES: readonly string[] = EffortSchema.options;
 
-function ModelRadio({ entry, checked, current, pending, disabled, choose }: { entry: ModelEntryView; checked: boolean; current: boolean; pending: boolean; disabled: boolean; choose(): void }) {
+// `greyed`: shown and choosable, but not what the session's route serves (a gateway model under Direct): choosing it asks.
+function ModelRadio({ entry, checked, current, pending, disabled, greyed = false, choose }: { entry: ModelEntryView; checked: boolean; current: boolean; pending: boolean; disabled: boolean; greyed?: boolean; choose(): void }) {
   return (
     <button
       type="button"
       role="radio"
       aria-checked={checked}
+      aria-disabled={greyed || undefined}
       disabled={disabled}
       onClick={choose}
-      className="flex w-full flex-col items-start rounded-sm px-2 py-1 text-left outline-accent hover:bg-bg-hover focus-visible:outline-2 disabled:text-fg-faint aria-checked:bg-bg-active"
+      className={`flex w-full flex-col items-start rounded-sm px-2 py-1 text-left outline-accent hover:bg-bg-hover focus-visible:outline-2 disabled:text-fg-faint aria-checked:bg-bg-active ${greyed ? 'text-fg-faint' : ''}`}
     >
       <span className="flex w-full items-baseline gap-2">
         <span>{entry.displayName}</span>
@@ -163,6 +192,7 @@ function ModelBody({ name, args, binding, appSessionId }: { name: Name; args: st
   const [failure, setFailure] = useState<{ error: string; caption: string | null } | null>(null);
   const [unknown, setUnknown] = useState<string | null>(null);
   const [fastAsk, setFastAsk] = useState<'on' | 'off' | null>(null);
+  const [relayAsk, setRelayAsk] = useState<ModelEntryView | null>(null); // a gateway model picked under Direct
   const effortRow = useRef<HTMLDivElement>(null);
   const fastRow = useRef<HTMLDivElement>(null);
 
@@ -217,23 +247,78 @@ function ModelBody({ name, args, binding, appSessionId }: { name: Name; args: st
     if (binding.fast) void run(() => binding.fast!.set(on));
   };
 
-  const group = (label: string, entries: ModelEntryView[]) =>
+  const route = binding.route;
+  const direct = route?.value === 'direct';
+  const setRoute = (next: Route) => void run(() => route!.set(next));
+  const startOnRelay = (entry: ModelEntryView) => {
+    setRelayAsk(null);
+    void run(async () => {
+      const answer = await route!.set('gateway');
+      if (answer.ok) setChosenModel(entry.value);
+      return answer;
+    });
+  };
+
+  const group = (label: string, entries: ModelEntryView[], greyed = false) =>
     entries.length > 0 && (
       <Group label={label} count={entries.length}>
+        {greyed && <p className="m-0 mb-1 text-ui-sm text-fg-muted">{MODEL.directCannotServe}</p>}
         <Radios label={MODEL.list(label)}>
           {entries.map((entry) => (
-            <ModelRadio key={entry.value} entry={entry} checked={entry.value === selected} current={entry.value === binding.current} pending={binding.pending} disabled={locked} choose={() => setChosenModel(entry.value)} />
+            <ModelRadio
+              key={entry.value}
+              entry={entry}
+              checked={entry.value === selected}
+              current={entry.value === binding.current}
+              pending={binding.pending}
+              disabled={locked}
+              greyed={greyed}
+              choose={() => (greyed ? setRelayAsk(entry) : setChosenModel(entry.value))}
+            />
           ))}
         </Radios>
+        {greyed && relayAsk && (
+          <div role="group" aria-label={MODEL.relayAskTitle} className="mt-1 flex flex-col gap-1 border-l-2 border-warning pl-2 text-ui-sm">
+            <p className="m-0">{MODEL.relayAsk(relayAsk.displayName)}</p>
+            <span className="flex gap-2">
+              <TextButton onClick={() => setRelayAsk(null)}>{MODEL.keepDirect}</TextButton>
+              <TextButton onClick={() => startOnRelay(relayAsk)}>{MODEL.useRelay}</TextButton>
+            </span>
+          </div>
+        )}
       </Group>
     );
+  // Direct cannot serve a gateway model, so the session keeps the relay while one is chosen
+  const directRefused = selected !== null && isGatewayModel(selected) ? MODEL.directNeedsClaude : null;
 
   return (
     <div className="flex flex-col gap-2">
+      {route && route.choices.length > 0 && (
+        <Group label={MODEL.route}>
+          <Radios label={MODEL.route}>
+            <div className="flex flex-wrap gap-1">
+              {route.choices.map((choice) => (
+                <button
+                  key={choice}
+                  type="button"
+                  role="radio"
+                  aria-checked={choice === route.value}
+                  disabled={locked || (choice === 'direct' && directRefused !== null)}
+                  title={choice === 'direct' && directRefused !== null ? directRefused : undefined}
+                  onClick={() => choice !== route.value && setRoute(choice)}
+                  className="rounded-sm border border-border px-2 py-0.5 text-ui-sm outline-accent hover:bg-bg-hover focus-visible:outline-2 disabled:text-fg-faint aria-checked:bg-bg-active"
+                >
+                  {ROUTE.choice[choice]}
+                </button>
+              ))}
+            </div>
+          </Radios>
+        </Group>
+      )}
       {binding.models.length === 0 && <p className="m-0 text-ui-sm text-fg-muted">{MODEL.none}</p>}
       {unknown && <p className="m-0 text-ui-sm text-warning">{unknown}</p>}
       {group(MODEL.group.claude, claude)}
-      {group(MODEL.group.gateway, gateway)}
+      {group(MODEL.group.gateway, gateway, direct)}
       {selected !== null && showsGatewayNote(selected, binding.mode) && (
         <p role="note" className="m-0 border-l-2 border-info pl-2 text-ui-sm">
           <strong className="font-semibold">{MODEL.gatewayNote.lead}</strong> {MODEL.gatewayNote.body(account)}

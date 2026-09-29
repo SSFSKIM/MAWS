@@ -292,3 +292,71 @@ describe("the model widget on an unstarted session, with C10's registered hook",
     useSetup.setState({ intents: new Map() });
   });
 });
+
+// The architect's ruling (2026-09-29, "the D-19 surface on an unstarted tab"): the route choice lives in the model widget
+// while the session is unstarted, one segment at its top writing `session.intent.patch { patch: { gateway } }`; under
+// Direct the Gateway group greys, and picking a claude/* model there asks before flipping the route back to the relay.
+describe('the model widget on an unstarted session carries its route', () => {
+  const mountUnstarted = (over: Parameters<typeof intent>[0] = {}) => {
+    let held = intent({ appSessionId: INTENT_ID, model: 'sonnet', permissionMode: 'default', ...over });
+    useSetup.setState({ intents: new Map([[INTENT_ID, held]]) });
+    backend.script('session.intent.patch', (input) => (held = { ...held, ...(input as { patch: object }).patch }));
+    offs.push(registerSetupIntentHook(useC10SetupIntent));
+    const Widget = modelWidget('model');
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <Widget appSessionId={INTENT_ID} args="" close={() => {}} />
+      </QueryClientProvider>,
+    );
+  };
+  const route = () => within(screen.getByRole('radiogroup', { name: 'Route' }));
+  const patches = () => backend.calls.filter((c) => c.command === 'session.intent.patch').map((c) => (c.input as { patch: unknown }).patch);
+  afterEach(() => useSetup.setState({ intents: new Map() }));
+
+  it('opens with a Route segment on the intent’s route, and Direct writes the intent’s gateway and greys the Gateway group', async () => {
+    mountUnstarted();
+    await waitFor(() => expect(within(screen.getByRole('radiogroup', { name: 'Gateway models' })).getAllByRole('radio')).toHaveLength(7));
+    expect(route().getAllByRole('radio').map((r) => [r.textContent, r.getAttribute('aria-checked')])).toEqual([
+      ['ClaudeUsage relay', 'true'],
+      ['Direct', 'false'],
+    ]);
+    expect(within(screen.getByRole('radiogroup', { name: 'Gateway models' })).getAllByRole('radio').every((r) => r.getAttribute('aria-disabled') !== 'true')).toBe(true);
+    fireEvent.click(route().getByRole('radio', { name: 'Direct' }));
+    await waitFor(() => expect(route().getByRole('radio', { name: 'Direct' }).getAttribute('aria-checked')).toBe('true'));
+    expect(patches()).toEqual([{ gateway: 'direct' }]);
+    const gateway = screen.getByRole('region', { name: 'Gateway' });
+    expect(within(gateway).getAllByRole('radio').every((r) => r.getAttribute('aria-disabled') === 'true')).toBe(true);
+    expect(gateway.textContent).toContain('The direct route cannot serve these');
+  });
+
+  it('a claude/* model picked on Direct asks first: Keep Direct changes nothing, Use the relay flips the route and picks it', async () => {
+    mountUnstarted({ gateway: 'direct' });
+    await waitFor(() => expect(within(screen.getByRole('radiogroup', { name: 'Gateway models' })).getAllByRole('radio')).toHaveLength(7));
+    fireEvent.click(radio('Gateway models', 'astra'));
+    const ask = screen.getByRole('group', { name: 'Start on the relay?' });
+    expect(ask.textContent).toContain('astra runs through ClaudeUsage’s relay');
+    expect(checkedIn('Gateway models')).toBeNull();
+    fireEvent.click(within(ask).getByRole('button', { name: 'Keep Direct' }));
+    expect(screen.queryByRole('group', { name: 'Start on the relay?' })).toBeNull();
+    expect(patches()).toEqual([]);
+    fireEvent.click(radio('Gateway models', 'astra'));
+    fireEvent.click(within(screen.getByRole('group', { name: 'Start on the relay?' })).getByRole('button', { name: 'Use the relay' }));
+    await waitFor(() => expect(route().getByRole('radio', { name: 'ClaudeUsage relay' }).getAttribute('aria-checked')).toBe('true'));
+    expect(patches()).toEqual([{ gateway: 'gateway' }]);
+    expect(checkedIn('Gateway models')).toMatch(/^astra/);
+  });
+
+  it('refuses Direct while the intent holds a gateway model, saying why', async () => {
+    mountUnstarted({ model: 'claude/astra' });
+    await waitFor(() => expect(route().getByRole('radio', { name: 'Direct' })).toBeTruthy());
+    const direct = route().getByRole('radio', { name: 'Direct' }) as HTMLButtonElement;
+    expect(direct.disabled).toBe(true);
+    expect(direct.title).toBe('Choose a Claude model first: the direct route cannot serve a gateway model');
+  });
+
+  it('a live session has no Route segment (its route changes by a restart, from the status line)', async () => {
+    mount('model');
+    await waitFor(() => expect(screen.getByRole('radiogroup', { name: 'Claude models' })).toBeTruthy());
+    expect(screen.queryByRole('radiogroup', { name: 'Route' })).toBeNull();
+  });
+});
