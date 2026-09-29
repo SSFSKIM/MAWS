@@ -371,37 +371,53 @@ describe('edit-and-resubmit in the composer', () => {
 
   it('keeps edit mode in the draft: entering it writes the edit, and every way out of edit mode writes a draft without it', async () => {
     const edit = { messageUuid: 'u-1', seenCursor: 'u-2' };
-    const wait = { timeout: 2_000 };
     mount();
+    // a successful resend first (its answers settle on real timers): the editor clears, carrying no edit
     await editFirst();
-    await waitFor(() => expect(draftedEdit()).toEqual(edit), wait);
-    act(() => editor().focus());
-    await key(editor(), { key: 'Escape' }); // Esc
-    await waitFor(() => expect(draftedEdit()).toBeNull(), wait);
-    expect(drafted()?.draft?.doc).toMatchObject({ content: [{ content: [{ text: 'first prompt' }] }] });
-
-    await editFirst();
-    await waitFor(() => expect(draftedEdit()).toEqual(edit), wait);
-    await userEvent.setup().click(within(line()!).getByRole('button', { name: 'Leave edit mode' })); // ×
-    await waitFor(() => expect(draftedEdit()).toBeNull(), wait);
-
-    await editFirst();
-    await waitFor(() => expect(draftedEdit()).toEqual(edit), wait);
-    act(() => prefillComposer(A, { text: 'handed back', editing: null })); // a prefill with no edit
-    await waitFor(() => expect(drafted()?.draft?.doc.content).toMatchObject([{ content: [{ text: 'handed back' }] }]), wait);
-    expect(draftedEdit()).toBeNull();
-
-    await editFirst(); // a successful resend: the next draft carries no edit
     await confirmRewind();
     await fake.reply('session.rewind', rewound);
     await waitFor(() => expect(fake.pending('session.send')).toBe(1));
     await fake.reply('session.send', sent);
     await waitFor(() => expect(editor().editor.getText()).toBe(''));
     expect(docEdit()).toBeNull();
-    act(() => void editor().editor.commands.insertContent('a new message'));
-    await waitFor(() => expect(drafted()?.draft?.doc.content).toMatchObject([{ content: [{ text: 'a new message' }] }]), wait);
+
+    // the draft writes, on fake timers: each is due DRAFT_DELAY_MS after the last change
+    vi.useFakeTimers();
+    const written = () => act(() => vi.advanceTimersByTimeAsync(DRAFT_DELAY_MS));
+    const enter = async () => {
+      focusedOn(A);
+      act(() => editAndResubmitRow(rowOf('u-1')));
+      await act(() => vi.advanceTimersByTimeAsync(0));
+      expect(line()?.textContent).toContain('Editing an earlier message');
+      await written();
+      expect(draftedEdit()).toEqual(edit);
+    };
+    act(() => void editor().editor.commands.insertContent('a new message')); // after the resend: no edit
+    await written();
+    expect(drafted()?.draft?.doc.content).toMatchObject([{ content: [{ text: 'a new message' }] }]);
     expect(draftedEdit()).toBeNull();
-  }, 15_000); // five draft writes, 750 ms apart at the least
+
+    await enter();
+    act(() => editor().focus());
+    await key(editor(), { key: 'Escape' }); // Esc
+    await written();
+    expect(line()).toBeNull();
+    expect(draftedEdit()).toBeNull();
+    expect(drafted()?.draft?.doc).toMatchObject({ content: [{ content: [{ text: 'first prompt' }] }] });
+
+    await enter();
+    act(() => void fireEvent.click(within(line()!).getByRole('button', { name: 'Leave edit mode' }))); // ×
+    await written();
+    expect(draftedEdit()).toBeNull();
+
+    await enter();
+    act(() => prefillComposer(A, { text: 'handed back', editing: null })); // a prefill with no edit
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    await written();
+    expect(drafted()?.draft?.doc.content).toMatchObject([{ content: [{ text: 'handed back' }] }]);
+    expect(draftedEdit()).toBeNull();
+    vi.useRealTimers();
+  });
 
   it('Keep editing stays in edit mode, and the draft keeps the edit with it', async () => {
     setRewindWindow(20);
