@@ -298,8 +298,9 @@ export function createWidgetBackend(options: WidgetBackendOptions): WidgetBacken
       mcpServers: answer.mcpServers.map((server) => {
         const enabled = toggled.get(`${status.appSessionId}\n${server.name as string}`);
         if (enabled === undefined) return server;
-        const { error: _error, ...rest } = server;
-        return { ...rest, status: enabled ? 'connected' : 'disabled' };
+        const rest: Record<string, unknown> = { ...server, status: enabled ? 'connected' : 'disabled' };
+        delete rest.error; // a toggled server reports no error until the engine says otherwise
+        return rest;
       }),
     };
   }

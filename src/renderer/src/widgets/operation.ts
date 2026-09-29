@@ -34,7 +34,9 @@ export function useOperation<C extends OperationCommand>(appSessionId: AppSessio
   const early = useRef(new Map<string, OperationEvent>()); // completions that arrived before their receipt
   const waiting = useRef<((outcome: OperationEvent['outcome'] | null) => void) | null>(null);
   const late = useRef(onLate);
-  late.current = onLate;
+  useEffect(() => {
+    late.current = onLate;
+  });
 
   const settle = useCallback((event: OperationEvent) => {
     if (event.late) {

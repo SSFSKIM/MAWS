@@ -166,26 +166,24 @@ function ModelBody({ name, args, binding, appSessionId }: { name: Name; args: st
   const effortRow = useRef<HTMLDivElement>(null);
   const fastRow = useRef<HTMLDivElement>(null);
 
-  // the palette's argument, once the catalogue is known
-  const argsTaken = useRef(false);
-  useEffect(() => {
-    if (argsTaken.current || binding.models.length === 0) return;
-    argsTaken.current = true;
-    const arg = args.trim();
-    if (arg === '') return;
-    if (name === 'model') {
+  // the palette's argument, taken once the catalogue is known (state adjusted while rendering, as React advises)
+  const [argsTaken, setArgsTaken] = useState(false);
+  const arg = args.trim();
+  if (!argsTaken && binding.models.length > 0) {
+    setArgsTaken(true);
+    if (arg !== '' && name === 'model') {
       const row = rowNamed(binding.models, arg);
       if (row) setChosenModel(row.value);
       else setUnknown(MODEL.unknownArg(arg));
-    } else if (name === 'effort') {
+    } else if (arg !== '' && name === 'effort') {
       const level = arg.toLowerCase();
       if (level === 'auto') setChosenEffort(null); // the terminal's `/effort auto` clears the override
       else if (EFFORT_NAMES.includes(level)) setChosenEffort(level as Effort);
-    } else if (binding.fast && !binding.fast.view.disabled) {
+    } else if (arg !== '' && binding.fast && binding.fast.view.disabled === null) {
       if (arg === 'on' && !binding.fast.view.checked) setFastAsk('on');
       if (arg === 'off' && binding.fast.view.checked) setFastAsk('off');
     }
-  }, [args, binding, name]);
+  }
   useEffect(() => {
     (name === 'effort' ? effortRow : name === 'fast' ? fastRow : null)?.current?.scrollIntoView?.({ block: 'nearest' });
   }, [name]);

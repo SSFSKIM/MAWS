@@ -7,7 +7,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import type { ListModelsResponse } from '@shared/wire/control';
 import { loadScenario } from '../../../../test/support/scenario';
-import { createWidgetBackend, fixtureLine, WidgetBackendError, type WidgetBackend } from '../../../../test/support/widget-backend';
+import { createWidgetBackend, fixtureLine, RESPONSES, WidgetBackendError, type WidgetBackend } from '../../../../test/support/widget-backend';
 import { registerSetupIntentHook, type SetupIntentHook } from '../composer';
 import { useSessions } from '../stores/sessions';
 import { useUsage } from '../stores/usage';
@@ -16,7 +16,7 @@ import { modelWidget } from './ModelWidget';
 
 const ROOT = join(__dirname, '../../../..');
 const ID = 'app-7412a115' as AppSessionId; // routed, idle, sonnet, effective auto
-const CATALOGUE = (fixtureLine(ROOT, 'pass2/auto-routed#143') as ListModelsResponse).models;
+const CATALOGUE = (fixtureLine(ROOT, RESPONSES.list_models) as ListModelsResponse).models; // pass2/auto-routed, seq 143
 let backend: WidgetBackend;
 let offs: (() => void)[] = [];
 
