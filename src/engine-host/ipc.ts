@@ -379,7 +379,10 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
     // `exited` is set at the exit row, before the exit's queue and store saves land; `session.exited` settles after them
     // (session.ts handleExit), so waiting on it keeps a late save from recreating the state file erased below
     if (session) await session.exited;
-    if (table.get(id) !== session) throw new HostCommandError({ code: 'internal', message: `already_live: ${id} was relaunched` });
+    // a different row under the id is a relaunch; a row merely released meanwhile (a concurrent forget, the archive's
+    // release) is not, and the erase below is idempotent
+    const now = table.get(id);
+    if (now && now !== session) throw new HostCommandError({ code: 'internal', message: `already_live: ${id} was relaunched` });
     table.release(id);
     streams.get(id)?.dispose();
     streams.delete(id);

@@ -134,4 +134,51 @@ describe('session.forget', () => {
     expect(existsSync(join(userData, 'engine-host', 'state', `${id}.json`))).toBe(false);
     expect(host.emitted.filter((e) => e.name === 'session.forgotten').map((e) => e.payload)).toEqual([{ appSessionId: id }]);
   });
+
+  // After the exit's wait: a row released meanwhile (a second forget, C3's archive release) is not a relaunch; only a
+  // different row under the id is.
+  async function heldAtExit(id: AppSessionId) {
+    const inner = new FileSessionStateStore(userData);
+    let release!: () => void;
+    let held: Promise<void> | null = null;
+    const store: EngineIpcDeps['store'] = Object.assign(Object.create(inner) as FileSessionStateStore, {
+      saveQueue: async (appId: AppSessionId, queue: Parameters<FileSessionStateStore['saveQueue']>[1]) => {
+        if (held) await held;
+        return inner.saveQueue(appId, queue);
+      },
+    });
+    const host = engineHost({ store });
+    await host.call('session.launch', { spec: spec(id, 'spikes/protocol-probe/fixtures/reads.jsonl') });
+    await until(() => host.ipc.table.get(id)?.lifecycle === 'ready', 'ready');
+    held = new Promise((resolve) => (release = resolve));
+    const stopping = host.handlers.get('session.stop')!({ appSessionId: id, reason: 'stop' });
+    await until(() => host.ipc.table.get(id)?.status().process === 'exited', 'the exit');
+    return { host, stopping, release: () => release() };
+  }
+
+  it('succeeds for a row released while it waited on the exit (two concurrent forgets)', async () => {
+    const id = 'app-forget-twice' as AppSessionId;
+    const { host, stopping, release } = await heldAtExit(id);
+    const first = host.handlers.get('session.forget')!({ appSessionId: id });
+    const second = host.handlers.get('session.forget')!({ appSessionId: id });
+    await new Promise((r) => setTimeout(r, 20));
+    release();
+    await expect(Promise.all([first, second, stopping])).resolves.toBeDefined();
+    expect(host.ipc.table.get(id)).toBeUndefined();
+    expect(existsSync(join(userData, 'engine-host', 'state', `${id}.json`))).toBe(false);
+  });
+
+  it('refuses already_live when another process took the id while it waited on the exit', async () => {
+    const id = 'app-forget-relaunched' as AppSessionId;
+    const { host, stopping, release } = await heldAtExit(id);
+    const forgetting = host.handlers.get('session.forget')!({ appSessionId: id });
+    const refused = expect(forgetting).rejects.toEqual(new HostCommandError({ code: 'internal', message: `already_live: ${id} was relaunched` }));
+    host.ipc.table.release(id);
+    await host.call('session.launch', { spec: spec(id, 'spikes/protocol-probe/fixtures/reads.jsonl') });
+    release();
+    await refused;
+    await stopping;
+    expect(host.ipc.table.get(id)).toBeDefined(); // the relaunched row is untouched
+    await host.ipc.table.shutdown({ graceMs: 0 });
+  });
 });
