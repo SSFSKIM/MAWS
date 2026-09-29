@@ -569,6 +569,25 @@ describe('a stop before the process is spawned (whole-branch review)', () => {
   });
 });
 
+describe('late answers after the deadline (debt wave 3 review)', () => {
+  it("a host-issued read answering late posts no notice (nobody saw an error); a late mutation still says it may have applied", async () => {
+    vi.useFakeTimers();
+    const { session, transport, journal } = setup();
+    const starting = session.start();
+    await vi.advanceTimersByTimeAsync(0);
+    await starting;
+    expect(transport.requestsOf('get_context_usage')).toHaveLength(1); // the ready read, never answered by the responder
+    const setModel = session.control!.request('set_model', { model: 'opus' }).catch(() => 'timed out');
+    await vi.advanceTimersByTimeAsync(8_000);
+    expect(await setModel).toBe('timed out');
+    transport.answer('get_context_usage', { totalTokens: 1, maxTokens: 2, percentage: 50, isAutoCompactEnabled: true, model: 'm', categories: [] });
+    transport.answer('set_model');
+    await vi.advanceTimersByTimeAsync(0);
+    const notices = journal.rows.filter((r) => (r.frame as { event?: string }).event === 'notice').map((r) => (r.frame as { key: string }).key);
+    expect(notices.filter((k) => k.startsWith('late_response:'))).toEqual([`late_response:set_model:${transport.requestsOf('set_model')[0]!.request_id}`]);
+  });
+});
+
 describe('failed initialize terminates the process', () => {
   it('a queue recovery that fails is an initialization failure: init_failed, the ladder without end_session, the reservation held until the OS exit (M4 review)', async () => {
     vi.useFakeTimers();

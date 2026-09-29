@@ -22,7 +22,7 @@ import type { ControlRequestFrame } from '@shared/wire/frames';
 import type { JournalDirection, JournalRow } from '@shared/wire/journal';
 import { BashMode } from './bash-mode';
 import { DECLARED_DIALOG_KINDS, PermissionBroker } from './broker';
-import { endSession, getContextUsage, getStatus, initialize, interrupt } from './controls';
+import { endSession, getContextUsage, getStatus, initialize, interrupt, requestClassOf } from './controls';
 import { EMPTY_GRANTS, reapply, recordFromResponse, type GrantSnapshot } from './grants';
 import { HostHookRegistry } from './host-hooks';
 import { RELAY_URL, spawnMeta, type LaunchPlan } from './launch';
@@ -399,9 +399,12 @@ export class EngineSession {
     const client = new ControlClient(transport, { row: (direction, frame) => this.record(direction, frame) }, this.plan.launchId, { warn: this.log, writer });
     this.client = client;
     client.onInbound((req) => this.inbound(req));
-    client.onLateResponse((late) =>
-      this.record('meta', { event: 'notice', level: 'warning', key: `late_response:${late.subtype}:${late.requestId}`, text: `${late.subtype} answered after its deadline; it may have applied after the error you saw.` }),
-    );
+    // A late read applied nothing, and a host-issued one (the gateway and context reads) showed no error to anyone: only a
+    // late mutation gets the notice (debt wave 3 review).
+    client.onLateResponse((late) => {
+      if (requestClassOf(late.subtype) === 'read') return;
+      this.record('meta', { event: 'notice', level: 'warning', key: `late_response:${late.subtype}:${late.requestId}`, text: `${late.subtype} answered after its deadline; it may have applied after the error you saw.` });
+    });
     const reading = this.readLoop(transport);
     const draining = this.stderrLoop(transport);
     void Promise.all([reading, draining])
