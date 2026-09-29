@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, SessionId } from '@shared/graph/ids';
 import type { Location, SetupIntent } from '@shared/sessions/intent';
 import { runGit } from '../../../test/support/git-fixture';
+import { summary } from '../../../test/support/index-fixture';
 import { ScratchRepo } from '../../../test/support/scratch-repo';
 import { SessionHarness } from '../../../test/support/session-harness';
 import { DOWN_RELAY } from '../../../test/support/session-host';
@@ -208,6 +209,18 @@ describe('rollback per resource', () => {
       expect(await h.settled(id)).toMatchObject({ outcome: { resources: { record: 'kept', transcript: 'kept' } } });
       expect(h.index.sessions.get(id)!.engineSessionId).toBe(cleared);
     });
+  });
+
+  it('forks to a new worktree: the worktree under the repository root, the fork launched there with the pin, the source untouched', async () => {
+    const sid = '00000000-0000-4000-8000-0000000f0f0f' as SessionId;
+    const source = h.index.sessions.upsertFromSummary(summary({ sessionId: sid, directory: repo.root })).record;
+    const outcome = await h.service.fork(source.appId, { kind: 'newWorktree', name: 'forked', branch: { kind: 'new', name: 'worktree-forked', base: 'HEAD' } }, { message: MESSAGE, rewindTo: null });
+    expect(outcome).toMatchObject({ status: 'starting' });
+    expect(await h.settled(outcome.appSessionId)).toMatchObject({ phase: 'ready', outcome: { firstTurn: 'sent' } });
+    expect(h.setupEvents(outcome.appSessionId)[0]).toMatchObject({ phase: 'worktree', detail: 'Creating worktree forked' });
+    expect(h.host.launches[0]).toMatchObject({ appSessionId: outcome.appSessionId, cwd: managed('forked'), resume: { sessionId: sid, fork: true }, inheritGrantsFrom: source.appId });
+    expect(h.index.sessions.get(outcome.appSessionId)).toMatchObject({ directory: managed('forked'), worktree: { path: managed('forked'), branch: 'worktree-forked' } });
+    expect(h.index.sessions.get(source.appId)).toMatchObject({ engineSessionId: sid, directory: repo.root });
   });
 
   it('two starts creating one worktree path: the second is refused while the first is in flight', async () => {

@@ -313,6 +313,19 @@ describe('session service', () => {
       expect(h.host.calledWith('fs.unfollow')).toEqual([]);
     });
 
+    it('a resume’s bootstrap never touches the record, even when the app quits between the bootstrap and the real launch', async () => {
+      const record = recordAt(h.work);
+      h.index.transaction(() => h.index.sessions.applyEngineStatus(record.appId, { model: { requested: 'opus', resolved: 'claude-opus' }, effort: 'high', permissionMode: { requested: 'plan', effective: 'plan', refusal: null } }));
+      const before = h.index.sessions.get(record.appId)!;
+      h.host.launchHangs = (spec) => spec.appSessionId === record.appId; // the app dies at the real launch
+      await h.service.startSession(record.appId, { message: null, options: { trust: 'accepted' } });
+      await h.until(() => h.host.forgotten.length === 1);
+      await h.restart();
+      const after = h.index.sessions.get(record.appId)!;
+      for (const key of ['engineSessionId', 'model', 'effort', 'permissionMode', 'directory'] as const) expect(after[key]).toEqual(before[key]);
+      expect(readdirSync(join(h.userData, 'sessions', 'bootstraps'))).toEqual([]);
+    });
+
     it('a failed unfollow fails the resume before anything launches', async () => {
       h.trustDirectory(h.work);
       const record = recordAt(h.work);
@@ -349,6 +362,7 @@ describe('session service', () => {
       expect(h.index.sessions.get(forkId)!.engineSessionId).toBe(spec.sessionId);
       expect(h.host.calledWith('session.renameSession')).toEqual([{ appSessionId: forkId, title: 'Plan (fork)' }]);
       expect(h.index.sessions.get(src.appId)!.engineSessionId).toBe(SID);
+      expect(intentFile(h, forkId)).toBeNull(); // the intent went at ready
     });
 
     it('refuses busy while the source has a turn open, and no_engine_session for a record without an id', async () => {
