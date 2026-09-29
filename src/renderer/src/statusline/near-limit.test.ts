@@ -78,7 +78,7 @@ describe('near-limit banner posts once per window: the notices adapter', () => {
     const settings = createSettingsStore(fake.client);
     const off = connectNearLimitBanners({ client: fake.client, usage, notices, settings });
     const banners = () => notices.getState().notices.filter((n) => n.kind === 'banner');
-    return { fake, usage, notices, off, banners };
+    return { fake, usage, notices, settings, off, banners };
   };
 
   it('posts nothing until the dismissed keys are read, then each qualifying window once, keyed by its id', async () => {
@@ -134,6 +134,19 @@ describe('near-limit banner posts once per window: the notices adapter', () => {
     await vi.advanceTimersByTimeAsync(2 * HOUR);
     expect(banners().map((b) => b.id)).toEqual([bannerKey('a2', 'weekly_all', at(26 * HOUR))]);
     expect(fake.invoked('layout.set')).toEqual([]);
+    off();
+  });
+
+  it('takes its threshold from the settings’ usage.nearLimitPercent, so an 80 % window posts under 80', async () => {
+    const { usage, banners, settings: settingsStore, off } = setup();
+    const fable = bannerKey('a2', 'weekly_scoped#Fable', at(30 * HOUR));
+    usage.getState().applySnapshot(MIXED);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(banners().map((b) => b.id)).not.toContain(fable);
+    // C11's field, not in SettingsSchema yet: the state as main would send it once C11 lands it
+    const state = { settings: { version: 2, theme: 'system', keymap: {}, notifications: { enabled: true, sound: false }, usage: { nearLimitPercent: 80 } }, resolvedTheme: 'light' };
+    settingsStore.setState({ state: state as never });
+    expect(banners().map((b) => b.id)).toContain(fable);
     off();
   });
 

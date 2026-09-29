@@ -27,7 +27,8 @@ export function bannerKey(accountUuid: string, limitKey: string, resetsAt: strin
   return `usage:${accountUuid}:${limitKey}:${minute}`;
 }
 
-// C11's `settings.usage.nearLimitPercent` (50–100) once C11 lands it; 90 until then.
+// C11's `settings.usage.nearLimitPercent` (50–100) once C11 lands it; 90 until then. `settings` is SettingsState's
+// `settings` member (the persisted settings), not the state around it.
 export function thresholdFrom(settings: unknown): number {
   const percent = (settings as { usage?: { nearLimitPercent?: unknown } } | null)?.usage?.nearLimitPercent;
   return typeof percent === 'number' && percent >= 50 && percent <= 100 ? percent : DEFAULT_NEAR_LIMIT_PERCENT;
@@ -81,7 +82,7 @@ export function connectNearLimitBanners(deps: NearLimitDeps = { client: ipc, usa
   const evaluate = () => {
     const snapshot = usage.getState().snapshot;
     if (!live || dismissed === null || !snapshot) return;
-    const current = nearLimitBanners(snapshot, dismissed, { thresholdPercent: thresholdFrom(settings.getState().state), now: Date.now() });
+    const current = nearLimitBanners(snapshot, dismissed, { thresholdPercent: thresholdFrom(settings.getState().state?.settings ?? null), now: Date.now() });
     const onScreen = shown();
     for (const { key, text } of current) {
       const held = notices.getState().notices.find((n) => n.id === key);
