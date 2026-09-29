@@ -329,4 +329,19 @@ describe('ipc schema validates both directions', () => {
     });
   });
   // C3 end
+
+  // C7 start: C7's additions (C7 execution document, Interfaces "X2 additions" and the Decision Log's execution-start entry)
+  describe('C7 entries', () => {
+    it("carries the queue's pause reason on session.queue and session.queue.list as a closed, nullable, optional set", () => {
+      const queue = { appSessionId: 'app-1', entries: [], paused: true };
+      expect(validateEventPayload('session.queue', queue).ok).toBe(true); // a state file older than the field
+      for (const pauseReason of ['user', 'interrupt', 'write_failed', 'uncertain', 'exit', 'engine_turn', 'refused', 'store_failed', 'state_corrupt', null]) {
+        expect(validateEventPayload('session.queue', { ...queue, pauseReason }).ok, String(pauseReason)).toBe(true);
+        expect(validateCommandOutput('session.queue.list', { entries: [], paused: true, pauseReason }).ok, String(pauseReason)).toBe(true);
+      }
+      expect(validateEventPayload('session.queue', { ...queue, pauseReason: 'bored' }).ok).toBe(false);
+      expect(validateCommandOutput('session.queue.list', { entries: [], paused: true, pauseReason: 'bored' }).ok).toBe(false);
+    });
+  });
+  // C7 end
 });

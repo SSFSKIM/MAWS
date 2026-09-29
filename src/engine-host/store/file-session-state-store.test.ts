@@ -120,3 +120,28 @@ describe('FileSessionStateStore', () => {
     expect(await store.loadGrants(ID)).toEqual({ allow: ['Bash'] });
   });
 });
+
+// C7 start: the queue's pause reason rides next to `paused` in the state file (architect's ruling on C7's Decision Log
+// item 2): a closed set, absent in files written before it existed.
+describe('FileSessionStateStore: the pause reason (C7)', () => {
+  it('round-trips the reason through a new instance and loads an older file without one', async () => {
+    await new FileSessionStateStore(userData).saveQueue(ID, { entries: [entry()], paused: true, pauseReason: 'interrupt' });
+    expect(await new FileSessionStateStore(userData).loadQueue(ID)).toEqual({ entries: [entry()], paused: true, pauseReason: 'interrupt', corrupt: null });
+
+    const dir = join(userData, 'engine-host', 'state');
+    await writeFile(join(dir, `${ID}.json`), JSON.stringify({ version: 1, queue: { entries: [], paused: true }, grants: { allow: [] }, launchSpec: null }));
+    const legacy = await new FileSessionStateStore(userData).loadQueue(ID);
+    expect(legacy).toEqual({ entries: [], paused: true, corrupt: null });
+    expect(legacy.pauseReason).toBeUndefined();
+  });
+
+  it('refuses an unknown reason on save and treats a file carrying one as unreadable', async () => {
+    const store = new FileSessionStateStore(userData, { warn: () => {} });
+    await expect(store.saveQueue(ID, { entries: [], paused: true, pauseReason: 'bored' as never })).rejects.toThrow();
+    const dir = join(userData, 'engine-host', 'state');
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, `${ID}.json`), JSON.stringify({ version: 1, queue: { entries: [], paused: true, pauseReason: 'bored' }, grants: { allow: [] }, launchSpec: null }));
+    expect(await store.loadQueue(ID)).toMatchObject({ entries: [], paused: false, corrupt: expect.stringContaining('.corrupt-') });
+  });
+});
+// C7 end

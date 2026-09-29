@@ -17,7 +17,15 @@ export const QueueEntrySchema = z.strictObject({
 });
 export type QueueEntry = z.infer<typeof QueueEntrySchema>;
 
-export const QueueStateSchema = z.strictObject({ entries: z.array(QueueEntrySchema), paused: z.boolean() });
+// C7 start: why the queue is paused (C7 execution document, Decision Log "execution start 2026-09-29" item 2, as the
+// architect ruled): the closed set of reasons MessageQueue pauses for, one per `meta queue { action: 'pause' }` row it
+// journals. Persisted beside `paused` and published on `session.queue`; absent only in a state file written before it.
+export const QUEUE_PAUSE_REASONS = ['user', 'interrupt', 'write_failed', 'uncertain', 'exit', 'engine_turn', 'refused', 'store_failed', 'state_corrupt'] as const;
+export const QueuePauseReasonSchema = z.enum(QUEUE_PAUSE_REASONS);
+export type QueuePauseReason = z.infer<typeof QueuePauseReasonSchema>;
+// C7 end
+
+export const QueueStateSchema = z.strictObject({ entries: z.array(QueueEntrySchema), paused: z.boolean(), pauseReason: QueuePauseReasonSchema.nullable().optional() }); // C7: pauseReason
 export type QueueState = z.infer<typeof QueueStateSchema>;
 // What a load answers: the queue, and the path an unreadable state file was moved to (kept, never deleted) when the
 // load found one, so the queue can say so instead of starting silently empty (M4 review).

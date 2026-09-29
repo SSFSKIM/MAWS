@@ -13,7 +13,7 @@ import { EffortSchema, LaunchSpecSchema } from '../../engine/launch-spec';
 import { OperationEventSchema, OperationReceiptSchema } from '../../engine/operations';
 import { RelayHealthSchema } from '../../engine/relay-health';
 import { RewindFilesOutcomeSchema, RewindOutcomeSchema } from '../../engine/rewind-outcome';
-import { QueueEntrySchema, QueueStateSchema, SendContentSchema } from '../../engine/session-state-store';
+import { QueueEntrySchema, QueuePauseReasonSchema, QueueStateSchema, SendContentSchema } from '../../engine/session-state-store'; // C7: QueuePauseReasonSchema
 import { EngineSessionStatusSchema } from '../../engine/status';
 import {
   ExportConversationResponseSchema,
@@ -125,7 +125,7 @@ const c3Commands = {
 const c3Events = {
   'session.eventBatch': z.strictObject({ appSessionId: AppSessionIdSchema, events: z.array(SessionEventSchema).max(500) }), // batched per session every 16 ms; C4 emits the same for backfill and replay
   'session.status': z.strictObject({ appSessionId: AppSessionIdSchema, status: EngineSessionStatusSchema }),
-  'session.queue': z.strictObject({ appSessionId: AppSessionIdSchema, entries: z.array(QueueEntrySchema), paused: z.boolean() }),
+  'session.queue': z.strictObject({ appSessionId: AppSessionIdSchema, entries: z.array(QueueEntrySchema), paused: z.boolean(), pauseReason: QueuePauseReasonSchema.nullable().optional() }), // C7: pauseReason
   'session.brokerItems': z.strictObject({ appSessionId: AppSessionIdSchema, items: z.array(AttentionItemSchema) }), // internal: main's attention service
   'session.operation': OperationEventSchema,
   'session.forgotten': z.strictObject({ appSessionId: AppSessionIdSchema }), // internal (M5 review): archived or forgotten, live or exited; main's attention service retires the session

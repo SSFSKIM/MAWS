@@ -90,7 +90,7 @@ export class SessionStream {
 
   queue(queue: QueueState): void {
     this.flush();
-    this.opts.emit('session.queue', { appSessionId: this.opts.appSessionId, entries: queue.entries, paused: queue.paused });
+    this.opts.emit('session.queue', { appSessionId: this.opts.appSessionId, entries: queue.entries, paused: queue.paused, pauseReason: queue.pauseReason ?? null }); // C7: pauseReason
   }
 
   brokerItems(items: AttentionItem[]): void {
