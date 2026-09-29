@@ -57,9 +57,8 @@ export const DEADLINE_SHAPES: Record<C3Command, DeadlineShape> = {
   'session.getBinaryVersion': 'bounded',
 };
 
-// C10 start: C10's engine-host commands and their deadline shapes (C10 execution document, X2 additions)
+// C10 start: C10's engine-host commands (C10 execution document, X2 additions); each handler names its deadline shape
 type C10Command = 'engine.models' | 'session.forget';
-export const C10_ENGINE_HOST_DEADLINES: Record<C10Command, DeadlineShape> = { 'engine.models': 'bounded', 'session.forget': 'immediate' };
 // C10 end
 
 // The longest wait before a live launch spawns: its three checks run in parallel, each under its own timeout.
@@ -348,7 +347,8 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
   const handleC10 = <N extends C10Command>(name: N, handler: (input: CommandInput<N>) => Promise<CommandOutput<N>>) => on(name, handler);
 
   // The catalogue before any session exists: with `refresh`, the most recently launched ready session's list_models
-  // (a failure falls back to what is cached, logged); otherwise the cache, else the built-in list.
+  // (a failure falls back to what is cached, logged); otherwise the cache, else the built-in list. Bounded: its one
+  // control round trip runs under `bounded`.
   handleC10('engine.models', async ({ refresh }): Promise<ModelCatalogue> => {
     await modelsLoaded;
     const asked = refresh
@@ -371,6 +371,7 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
 
   // The whole erase behind delete conversation: the state file and the journal directory, then `session.forgotten` so
   // main's attention service retires the id. Refused while a process is reserved; the host keeps nothing afterwards.
+  // Immediate: no control round trip, answered once the erase is flushed.
   handleC10('session.forget', async ({ appSessionId }) => {
     assertSafeAppSessionId(appSessionId); // it deletes a file and a directory named after it
     const id = appSessionId as AppSessionId;
