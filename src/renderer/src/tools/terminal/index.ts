@@ -68,7 +68,9 @@ export function resetTerminalAdoption(): void {
 // While the page's adoption is in flight the tab also stays pending and is retried when it answers.
 export function ensureTerminal(state: TerminalTabState, shown: { appSessionId: AppSessionId | null; session: SessionRecord | null }): TerminalId | null {
   // A tab disposed while it waited (closed, reconciled or unregistered before the adoption answered) opens nothing, and
-  // a shell the adoption re-created under its label is released, so no shell is left running with no tab.
+  // a shell the adoption re-created under its label is released, so no shell is left running with no tab. A later call
+  // on the same disposed state (a queued retry, a view re-rendering before unmount) repeats this: the lookup finds the
+  // label gone or the close already under way, and re-closing is idempotent; expected, not a leak.
   if (disposed.has(state)) {
     const orphan = terminals.list().find((info) => info.label === state.instanceId);
     if (orphan) terminals.close(orphan.id).catch((error: unknown) => console.error(`[terminal] could not end ${orphan.id} of a closed tab`, error));

@@ -1,6 +1,6 @@
 // The harness entry: a hash router over development pages. `#transcript` (the default) is C6's transcript harness;
-// C9 adds `#probe` and `#panel` (pages under harness/terminal/). One page is mounted per load, and each assigns
-// `window.__maws_harness` on mount.
+// C9 adds `#probe` (harness/terminal/) and C8a `#panel` (harness/panel/, into which C9's stand-in was folded). One page
+// is mounted per load, and each assigns `window.__maws_harness` on mount.
 import { StrictMode, useEffect, useState, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import '../styles/app.css';
