@@ -88,6 +88,40 @@ describe('task graph store', () => {
       expect(nodeOf('a425e926e506edeb1')?.agent?.parentAgentId).toBe('a38d4aebfaea9f6b1');
     });
 
+    it('keeps the tail of a row C3’s batcher split across two batches (the cursor is seq and place in the row)', async () => {
+      const nested = replayed('pass3', 'nested-agents');
+      setStatus(live());
+      store.getState().watch(A);
+      await snapshot(upTo(nested, 110), 110);
+      const row111 = nested.filter((e) => e.seq === 111);
+      const issuing = row111.findIndex((e) => e.kind === 'tool.use');
+      expect(issuing).toBeGreaterThan(0);
+      fake.batch('A', row111.slice(0, issuing)); // the batcher's splice at 500 events ignores row boundaries
+      fake.batch('A', [...row111.slice(issuing), ...nested.filter((e) => e.seq === 112)]);
+      expect(nodeOf('a425e926e506edeb1')?.agent?.parentAgentId).toBe('a38d4aebfaea9f6b1');
+      expect(entry().lastSeq).toBe(112);
+    });
+
+    it('drops the tail of a row the snapshot holds whole when a held batch straddles it', async () => {
+      setStatus(live());
+      store.getState().watch(A);
+      fake.batch('A', [event('subagent.started', { taskId: 'a' }, { seq: 5, n: 1 }), event('subagent.started', { taskId: 'c' }, { seq: 6 })]);
+      await snapshot([event('subagent.started', { taskId: 'a' }, { seq: 4 }), event('subagent.finished', { taskId: 'a' }, { seq: 5, n: 0 }), event('subagent.progress', { taskId: 'b' }, { seq: 5, n: 1 })], 5);
+      expect(nodeOf('a')?.status).toBe('completed'); // (5, 1) of the held batch is the snapshot's already: not applied again
+      expect(nodeOf('c')?.status).toBe('running');
+      expect(entry().lastSeq).toBe(6);
+    });
+
+    it('re-reads from the row before when a release left the cursor mid-row', async () => {
+      setStatus(live());
+      const release = store.getState().watch(A);
+      await snapshot([], 3);
+      fake.batch('A', [event('subagent.started', { taskId: 'a' }, { seq: 4, n: 0 })]);
+      release();
+      store.getState().watch(A);
+      expect(fake.calls.filter((c) => c.startsWith('events'))).toEqual(['events A null', 'events A 3']);
+    });
+
     it('drops disk-form events and events of another launch, and discards every kind the reducer does not read', async () => {
       setStatus(live());
       store.getState().watch(A);
@@ -115,7 +149,7 @@ describe('task graph store', () => {
       expect(nodeOf(ONE)?.agent).toMatchObject({ model: 'haiku', spawnDepth: 1 });
       expect(nodeOf(ONE)?.provenance).toMatchObject({ wire: true, disk: true });
       await fake.answer('workflows', []);
-      expect(entry().disk).toMatchObject({ runs: [], error: null });
+      expect(entry().disk).toMatchObject({ runs: [], error: null, runsError: null });
       expect(entry().disk.agents).toHaveLength(2);
     });
 
@@ -149,6 +183,41 @@ describe('task graph store', () => {
       expect(nodeOf('fresh')?.status).toBe('running');
       expect(nodeOf(ONE)?.status).toBe('exited'); // kept
       expect(entry().lastSeq).toBe(1);
+    });
+  });
+
+  describe('the edges of a launch and a watch', () => {
+    it('a relaunch marks the old launch’s nodes exited before it applies the new launch’s listed tasks', async () => {
+      setStatus(live());
+      store.getState().watch(A);
+      await snapshot(upTo(pass1, 296));
+      setStatus(live({ launchId: 'second', backgroundTasks: [bgTask('fresh-bg')] }));
+      expect(nodeOf(ONE)?.status).toBe('exited');
+      expect(nodeOf('fresh-bg')?.status).toBe('running');
+    });
+
+    it('a snapshot answered after the last release, or after the status went, is dropped', async () => {
+      setStatus(live());
+      const release = store.getState().watch(A);
+      release();
+      await snapshot(upTo(pass1, 296));
+      expect(entry().phase).not.toBe('live');
+      expect(graph().tasks.size).toBe(0);
+      store.getState().watch(A);
+      sessions.setState({ engine: new Map() }); // the record went, and its status with it
+      await snapshot(upTo(pass1, 296));
+      expect(entry().phase).toBe('disk');
+      expect(graph().tasks.size).toBe(0);
+    });
+
+    it('keeps the sidecars’ error and the runs’ error apart', async () => {
+      store.getState().watch(A);
+      await fake.fail('workflows', 'workflows unreadable');
+      expect(entry().disk).toMatchObject({ error: null, runsError: 'workflows unreadable' });
+      await fake.fail('subagents', 'sidecars unreadable');
+      expect(entry().disk).toMatchObject({ error: 'sidecars unreadable', runsError: 'workflows unreadable' });
+      fake.subagentsChanged('A', []);
+      expect(entry().disk).toMatchObject({ error: null, runsError: 'workflows unreadable' });
     });
   });
 

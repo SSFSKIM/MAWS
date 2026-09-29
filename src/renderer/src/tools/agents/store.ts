@@ -27,7 +27,7 @@ export interface TaskGraphEntry {
   launchId: string | null;
   lastSeq: number | null;
   error: string | null;
-  disk: { agents: SubagentEntry[] | null; runs: WorkflowRun[] | null; error: string | null };
+  disk: { agents: SubagentEntry[] | null; runs: WorkflowRun[] | null; error: string | null; runsError: string | null }; // error: fs.subagents'; runsError: fs.workflows'
   pendingStops: Map<TaskId, PendingStop>;
 }
 
@@ -44,10 +44,15 @@ export interface TaskGraphStore {
 export const STOP_SETTLE_MS = 2000;
 const WORKFLOW_REREAD_MS = 250; // fs.workflowChanged fires per write of a run's snapshot; one trailing re-read
 
-// The launch segment of a live event id, `<app>:<launch>:<seq>:<n>` (read from the right: the app id is opaque).
+// The launch segment and the place in its journal row of a live event id, `<app>:<launch>:<seq>:<n>` (read from the
+// right: the app id is opaque).
 export function launchOf(eventId: string): string | null {
   const parts = eventId.split(':');
   return parts.length >= 4 ? parts[parts.length - 3] : null;
+}
+export function placeInRow(eventId: string): number {
+  const n = Number(eventId.slice(eventId.lastIndexOf(':') + 1));
+  return Number.isInteger(n) ? n : 0;
 }
 
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
@@ -59,7 +64,8 @@ interface Watch {
   offs: (() => void)[];
   wire: boolean; // the wire half runs: a status is applied and a watcher holds the session
   held: SessionEvent[][] | null; // batches that arrived while the snapshot was being read
-  generation: number; // bumped per snapshot read, so a stale answer is dropped
+  generation: number; // bumped per snapshot read, at the last release and when the status goes, so a stale answer is dropped
+  cursorN: number; // the cursor's place within row `lastSeq`: +Infinity after a snapshot (whole rows), else the last event's n
   status: EngineSessionStatus | null; // the latest applied: the stop's absence check reads it alone
   settle: Map<TaskId, ReturnType<typeof setTimeout>>;
   workflowTimer: ReturnType<typeof setTimeout> | null;
@@ -70,13 +76,13 @@ export function createTaskGraphStore({ sessions = useSessions }: { sessions?: ty
   const watches = new Map<AppSessionId, Watch>();
   const watchOf = (id: AppSessionId): Watch => {
     let w = watches.get(id);
-    if (!w) watches.set(id, (w = { watchers: 0, offs: [], wire: false, held: null, generation: 0, status: null, settle: new Map(), workflowTimer: null, initializing: false }));
+    if (!w) watches.set(id, (w = { watchers: 0, offs: [], wire: false, held: null, generation: 0, cursorN: Infinity, status: null, settle: new Map(), workflowTimer: null, initializing: false }));
     return w;
   };
 
   return create<TaskGraphStore>()((set, get) => {
     const blank = (): TaskGraphEntry => ({
-      graph: emptyGraph(), phase: 'idle', launchId: null, lastSeq: null, error: null, disk: { agents: null, runs: null, error: null }, pendingStops: new Map(),
+      graph: emptyGraph(), phase: 'idle', launchId: null, lastSeq: null, error: null, disk: { agents: null, runs: null, error: null, runsError: null }, pendingStops: new Map(),
     });
     const read = (id: AppSessionId) => get().entries.get(id) ?? blank();
     // Writes only what changed, so an event that changes nothing leaves the entry (and its graph) the same object.
@@ -133,20 +139,29 @@ export function createTaskGraphStore({ sessions = useSessions }: { sessions?: ty
       }
     };
 
-    // Live-form events of this launch above the cursor; each event is filtered by its own seq against the cursor as the
-    // batch found it (one journal row yields several events with one seq), and the kinds the reducer does not read are
-    // dropped before they reach the graph, whatever their agentId.
-    const applyWire = (id: AppSessionId, events: SessionEvent[], lastSeqFloor: number | null = null) => {
+    // Live-form events of this launch above the cursor, dropping the kinds the reducer does not read before they reach
+    // the graph, whatever their agentId. The cursor is (seq, place in the row): one journal row yields several events
+    // with one seq, and C3's batcher can split a row across two batches, while a snapshot answers whole rows.
+    const applyWire = (id: AppSessionId, events: SessionEvent[], snapshotLastSeq: number | null = null) => {
+      const w = watchOf(id);
       const e = read(id);
-      const floor = e.lastSeq;
       let lastSeq = e.lastSeq;
+      let cursorN = w.cursorN;
       const accepted: SessionEvent[] = [];
       for (const ev of events) {
-        if (ev.seq === null || launchOf(ev.id) !== e.launchId || (floor !== null && ev.seq <= floor)) continue;
-        lastSeq = lastSeq === null ? ev.seq : Math.max(lastSeq, ev.seq);
+        if (ev.seq === null || launchOf(ev.id) !== e.launchId) continue;
+        const n = placeInRow(ev.id);
+        if (lastSeq !== null && (ev.seq < lastSeq || (ev.seq === lastSeq && n <= cursorN))) continue;
+        if (lastSeq === null || ev.seq > lastSeq) cursorN = n;
+        else cursorN = Math.max(cursorN, n);
+        lastSeq = ev.seq;
         if (TASK_EVENT_KINDS.has(ev.kind)) accepted.push(ev);
       }
-      if (lastSeqFloor !== null) lastSeq = lastSeq === null ? lastSeqFloor : Math.max(lastSeq, lastSeqFloor);
+      if (snapshotLastSeq !== null && (lastSeq === null || snapshotLastSeq >= lastSeq)) {
+        lastSeq = snapshotLastSeq;
+        cursorN = Infinity;
+      }
+      w.cursorN = cursorN;
       write(id, { graph: applyTaskEvents(e.graph, accepted), lastSeq });
       settleEnded(id);
     };
@@ -175,8 +190,9 @@ export function createTaskGraphStore({ sessions = useSessions }: { sessions?: ty
         w.held = null;
         for (const batch of held) applyWire(id, batch);
       };
+      const lastSeq = read(id).lastSeq;
       agentWorkClient()
-        .events(id, read(id).lastSeq)
+        .events(id, lastSeq !== null && w.cursorN !== Infinity ? lastSeq - 1 : lastSeq) // a cursor left mid-row reads that row again
         .then(
           (snapshot) => {
             if (w.generation !== generation) return;
@@ -205,8 +221,8 @@ export function createTaskGraphStore({ sessions = useSessions }: { sessions?: ty
       agentWorkClient()
         .workflows(id)
         .then(
-          (runs) => applyDisk(id, { runs }),
-          (error: unknown) => applyDisk(id, { error: messageOf(error) }),
+          (runs) => applyDisk(id, { runs, runsError: null }),
+          (error: unknown) => applyDisk(id, { runsError: messageOf(error) }),
         );
     };
 
@@ -227,10 +243,11 @@ export function createTaskGraphStore({ sessions = useSessions }: { sessions?: ty
       if (status === null) {
         w.wire = false;
         w.held = null;
+        w.generation += 1; // a snapshot still in flight is stale now
         write(id, { phase: 'disk' });
         return;
       }
-      let graph = applySnapshot(e.graph, status.backgroundTasks);
+      let graph = e.graph;
       const patch: Partial<TaskGraphEntry> = {};
       let relaunched = false;
       if (e.launchId !== status.launchId) {
@@ -243,6 +260,7 @@ export function createTaskGraphStore({ sessions = useSessions }: { sessions?: ty
         }
         patch.launchId = status.launchId;
       }
+      graph = applySnapshot(graph, status.backgroundTasks); // after the relaunch's exit mark, so the new launch's tasks stay running
       if (status.process === 'exited') graph = markExited(graph, status.exit?.at ?? nowIso());
       write(id, { ...patch, graph });
       settleEnded(id);
@@ -260,6 +278,7 @@ export function createTaskGraphStore({ sessions = useSessions }: { sessions?: ty
       w.workflowTimer = null;
       w.wire = false;
       w.held = null;
+      w.generation += 1; // nobody holds the session: a snapshot still in flight is dropped, and the next watch reads again
     };
 
     return {
