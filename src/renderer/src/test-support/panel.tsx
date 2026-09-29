@@ -2,6 +2,7 @@
 // shown session from the focused pane's active tab, `onChange` and `onTogglePinned` bound to the layout store) with
 // the two writers spied, and a reset of every store the host reads. Imported only by happy-dom suites.
 import { QueryClientProvider } from '@tanstack/react-query';
+import { act } from '@testing-library/react';
 import { useMemo } from 'react';
 import { vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -167,3 +168,42 @@ export function resetPanelStores(opts: { hydrated?: boolean } = {}): void {
 
 export const panelOf = (id: AppSessionId) => useLayout.getState().panelBySession.get(id);
 export const pinIds = () => useLayout.getState().panelPinned.map((r) => r.id);
+
+// ---- a held hydration (M1's barrier pins, M3's Shell suite) --------------------------------------------------------------
+
+// A main process whose `layout.get` answers only once released, recording every `layout.set` (layout.json's writes).
+export function heldBridge(values: Record<string, unknown>) {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  const sets: { key: string; value: unknown }[] = [];
+  const client = {
+    async invoke(name: string, input: { key: string; value?: unknown }) {
+      if (name === 'layout.list') return { ok: true, value: { keys: Object.keys(values) } };
+      if (name === 'layout.get') {
+        await gate;
+        return { ok: true, value: { value: values[input.key] ?? null } };
+      }
+      if (name === 'layout.set') {
+        sets.push({ key: input.key, value: input.value });
+        return { ok: true, value: undefined };
+      }
+      throw new Error(`unexpected ${name}`);
+    },
+    on: () => () => {},
+  } as unknown as MawsBridge;
+  // The value a key holds after the recorded writes; undefined when it was never written.
+  const written = (key: string): unknown => sets.findLast((s) => s.key === key)?.value;
+  return { client, release, sets, written };
+}
+
+// layout.json as a relaunch finds it: the renderer's fixed keys, A on screen, then the keys given.
+export const persisted = (keys: Record<string, unknown>) => ({ regions: LAYOUT_DEFAULTS.regions, 'main.tabs': mainShowing(A), 'panel.pinned': [], ...keys });
+
+// Hydrates the layout store over a held bridge as `connectShell` does (the sessions store's records are the sessions
+// that exist), running `before` while `layout.get` is held.
+export async function hydrateHeld(bridge: ReturnType<typeof heldBridge>, before: () => void = () => {}) {
+  const hydrating = useLayout.getState().hydrate(bridge.client, (id) => useSessions.getState().records.has(id));
+  before();
+  bridge.release();
+  await act(() => hydrating);
+}

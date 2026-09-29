@@ -59,7 +59,12 @@ export default defineConfig({
       {
         resolve: { alias },
         plugins: [react({ babel: { plugins: ['babel-plugin-react-compiler'] } })],
-        test: { name: 'renderer-compiled', environment: 'happy-dom', include: ['src/renderer/src/panel/**/*.test.tsx'], env: { MAWS_REACT_COMPILER: '1' } },
+        test: {
+          name: 'renderer-compiled',
+          environment: 'happy-dom',
+          include: ['src/renderer/src/panel/**/*.test.tsx', 'src/renderer/src/app/Shell.panel.test.tsx'], // M3: the host inside C5's Shell
+          env: { MAWS_REACT_COMPILER: '1' },
+        },
       },
       // C8a end
     ],

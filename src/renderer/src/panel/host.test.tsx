@@ -1,7 +1,6 @@
 import { act, cleanup, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { MawsBridge } from '@shared/ipc/schema';
 import { LAYOUT_DEFAULTS, type PanelTabRef } from '@shared/ipc/schema/layout';
 import { createLayoutStore, persistLayout, useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
@@ -9,9 +8,12 @@ import {
   A,
   B,
   C,
+  heldBridge,
+  hydrateHeld,
   mainShowing,
   onChangeCalls,
   panelOf,
+  persisted,
   pinIds,
   probeTool,
   type ProbeState,
@@ -28,41 +30,6 @@ const connect = () => cleanups.push(connectPanelHost());
 const settle = () => act(async () => new Promise<void>((resolve) => setTimeout(resolve, 0)));
 const show = (id: AppSessionId | null) => act(() => useLayout.setState({ main: id ? mainShowing(id) : LAYOUT_DEFAULTS.main }));
 const register = (...tools: PanelTool<ProbeState, unknown>[]) => tools.map((t) => registerPanelTool(t));
-const known = (id: AppSessionId) => useSessions.getState().records.has(id);
-
-// A main process whose `layout.get` answers only once released, recording every `layout.set`.
-function heldBridge(values: Record<string, unknown>) {
-  let release!: () => void;
-  const gate = new Promise<void>((resolve) => (release = resolve));
-  const sets: { key: string; value: unknown }[] = [];
-  const client = {
-    async invoke(name: string, input: { key: string; value?: unknown }) {
-      if (name === 'layout.list') return { ok: true, value: { keys: Object.keys(values) } };
-      if (name === 'layout.get') {
-        await gate;
-        return { ok: true, value: { value: values[input.key] ?? null } };
-      }
-      if (name === 'layout.set') {
-        sets.push({ key: input.key, value: input.value });
-        return { ok: true, value: undefined };
-      }
-      throw new Error(`unexpected ${name}`);
-    },
-    on: () => () => {},
-  } as unknown as MawsBridge;
-  return { client, release, sets };
-}
-
-// layout.json as a relaunch finds it: the renderer's fixed keys, A on screen, then the panel keys given.
-const persisted = (panel: Record<string, unknown>) => ({ regions: LAYOUT_DEFAULTS.regions, 'main.tabs': mainShowing(A), 'panel.pinned': [], ...panel });
-
-async function hydrateHeld(bridge: ReturnType<typeof heldBridge>, before: () => void = () => {}) {
-  const hydrating = useLayout.getState().hydrate(bridge.client, known);
-  before();
-  bridge.release();
-  await act(() => hydrating);
-}
-
 beforeEach(() => resetPanelStores());
 afterEach(() => {
   cleanup();
