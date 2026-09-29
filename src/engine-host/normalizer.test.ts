@@ -497,6 +497,23 @@ describe('normaliser: meta rows, system subtypes and the unknown', () => {
   });
 });
 
+describe('normaliser: aborted and supersedes on assistant.block.complete (debt wave 3)', () => {
+  const assistantFrame = (extra: Record<string, unknown>) => ({
+    type: 'assistant', uuid: 'a-1', session_id: 'sess-1', parent_tool_use_id: null,
+    message: { id: 'msg_1', model: 'm', type: 'message', role: 'assistant', content: [{ type: 'text', text: 'partial' }] }, ...extra,
+  });
+
+  it("carries the wire's aborted flag, and false when the frame has none", () => {
+    expect(feed(make(), [inRow(assistantFrame({ aborted: true }))])[0]).toMatchObject({ kind: 'assistant.block.complete', aborted: true });
+    expect(feed(make(), [inRow(assistantFrame({}))])[0]).toMatchObject({ kind: 'assistant.block.complete', aborted: false });
+  });
+
+  it("keeps supersedes null even when the wire names the replaced frames: X1's single uuid cannot hold the wire's list", () => {
+    const events = feed(make(), [inRow(assistantFrame({ supersedes: ['old-1', 'old-2'] }))]);
+    expect(events[0]).toMatchObject({ kind: 'assistant.block.complete', supersedes: null });
+  });
+});
+
 describe('normaliser: context.sample (debt wave 3)', () => {
   // pass3/context-sample seq 51 and 53: the read C3's session issues at a turn's end, and the engine's answer
   const journal = loadJournal('pass3', 'context-sample');

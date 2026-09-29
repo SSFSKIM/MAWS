@@ -296,7 +296,13 @@ export class Normalizer {
         blockIndex = this.state.completedBlocks.get(apiMessageId) ?? 0;
       }
       this.state.completedBlocks.set(apiMessageId, blockIndex + 1);
-      out.emit({ kind: 'assistant.block.complete', messageUuid, apiMessageId, blockIndex, block, model: frame.message.model, supersedes: null, aborted: false, userMessageUuids }, attribution);
+      // `aborted`: the wire's `aborted: true`, set on the partial text block the engine flushes when an interrupt cuts
+      // its stream (pass3/interrupt-text seq 96; an interrupted tool_use or thinking block is never flushed). `supersedes`
+      // stays null: the wire's `supersedes` (SPEC 45, refusal fallback) is an array naming every block frame of the
+      // refused attempt, on the first frame of the replacement only, which X1's single `MessageUuid | null` cannot carry
+      // (no fixture records one; tracker row, debt wave 3). The engine's `model_refusal_fallback` frame still yields
+      // `boundary.retraction`.
+      out.emit({ kind: 'assistant.block.complete', messageUuid, apiMessageId, blockIndex, block, model: frame.message.model, supersedes: null, aborted: (frame as { aborted?: unknown }).aborted === true, userMessageUuids }, attribution);
       if (block.type === 'tool_use') {
         out.emit({ kind: 'tool.use', toolUseId: String(block.id) as ToolUseId, toolName: String(block.name), input: block.input, apiMessageId, messageUuid }, attribution);
       }

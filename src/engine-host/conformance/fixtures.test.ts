@@ -45,7 +45,7 @@ describe('normaliser replays every probe fixture into the X1 graph', () => {
     // home directory's session-only trust and its unattested control, the exact-key check, the read-only permission round trip)
     const c10 = ['fork-pinned-id-fork', 'fork-pinned-id-start', 'home-trust-session-only', 'home-trust-unattested', 'read-only-permission', 'trust-bootstrap-recorded', 'trust-exact-key'];
     // C10 end
-    const wave3 = ['context-sample', 'question-deny']; // debt wave 3: the turn-end context read, a question skipped by a deny
+    const wave3 = ['context-sample', 'interrupt-text', 'question-deny']; // debt wave 3: the turn-end context read, a text block cut by an interrupt, a question skipped by a deny
     expect(listJournals('pass3')).toEqual(['engine-turn-release', 'fork-worktree-fork', 'fork-worktree-resume-in-b', 'fork-worktree-start', 'plan-outcomes', 'rewind-files', 'steer-next', 'steer-now', 'steer-now-unheld', 'workspace-diff-branch', 'workspace-diff-dirty', ...c10, ...wave3].sort());
   });
 
@@ -223,6 +223,15 @@ describe('normaliser: per-fixture graph facts (C2 findings restated)', () => {
     expect(boundaries).toHaveLength(1);
     expect(boundaries[0]).toMatchObject({ seq: 140, targetMessageUuid: target, prefillText: 'Use the Edit tool to change notes.txt so it says BETA instead of ALPHA.', precedingAssistantUuid: '284cab33-7b4b-474a-8e6b-c6cc0f9f81c8' });
     expect(ofKind(events, 'turn.ended').map((e) => [e.seq, e.terminalReason])).toEqual([[70, 'completed'], [132, 'completed']]);
+  });
+
+  it('pass3/interrupt-text (debt wave 3): the partial text block an interrupt cuts arrives with aborted: true, every other block complete', async () => {
+    const { events } = await run('pass3', 'interrupt-text');
+    const blocks = ofKind(events, 'assistant.block.complete');
+    expect(blocks.filter((e) => e.aborted).map((e) => [e.seq, e.blockIndex, e.block.type])).toEqual([[96, 1, 'text']]);
+    expect(blocks.find((e) => e.aborted)!.block).toMatchObject({ text: expect.stringContaining('History of Tea') as unknown });
+    expect(blocks.every((e) => e.supersedes === null)).toBe(true);
+    expect(ofKind(events, 'turn.ended').map((e) => e.terminalReason)).toEqual(['aborted_streaming', 'completed']);
   });
 
   it('pass3/question-deny (debt wave 3): a plain deny skips the question tool, the model reads the denial and the turn completes', async () => {
