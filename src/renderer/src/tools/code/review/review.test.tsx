@@ -721,6 +721,31 @@ describe('review tool', () => {
     await waitFor(() => expect(row('logo.png').dataset.viewed).toBeUndefined());
   });
 
+  it('past the scope cap, signs a binary’s mark over the header its own fetch reads, and drops it when the blob changes', async () => {
+    const binary = (index: string) => ({
+      patch: `diff --git a/logo.png b/logo.png\nindex ${index} 100644\nBinary files a/logo.png and b/logo.png differ\n`,
+      files: [{ path: 'logo.png', oldPath: null, insertions: 0, deletions: 0, binary: true }],
+    });
+    const past = (index: string) => ({ patch: binary(index).patch + 'x'.repeat(REVIEW_SCOPE_BYTES_CAP), files: binary(index).files });
+    main.state.uncommitted = past('1..2');
+    main.state.perFile = { 'logo.png': binary('1..2') };
+    openReview();
+    render(<TestHost />);
+    await waitFor(() => expect(screen.getByText('Mark viewed')).toBeTruthy()); // offered once the header is read
+    expect(main.callsOf('git.diff').filter((input) => input.path === 'logo.png')).toHaveLength(1);
+    fireEvent.click(screen.getByText('Mark viewed'));
+    expect(row('logo.png').dataset.viewed).toBe('true');
+    act(() => main.emit('git.changed', { repoRoot: '/repo', status: statusOf({ ...DIRTY }), reason: 'worktree' }));
+    await waitFor(() => expect(main.callsOf('git.diff').filter((input) => input.path === 'logo.png')).toHaveLength(2));
+    await waitFor(() => expect(row('logo.png').dataset.viewed).toBe('true')); // the same blob: the mark stands
+    main.state.uncommitted = past('1..3');
+    main.state.perFile = { 'logo.png': binary('1..3') };
+    act(() => main.emit('git.changed', { repoRoot: '/repo', status: statusOf({ ...DIRTY }), reason: 'worktree' }));
+    await waitFor(() => expect(main.callsOf('git.diff').filter((input) => input.path === 'logo.png')).toHaveLength(3));
+    await waitFor(() => expect(screen.getByText('Mark viewed')).toBeTruthy());
+    expect(row('logo.png').dataset.viewed).toBeUndefined();
+  });
+
   it('keeps viewed marks across unmounts and drops a mark when the file’s hunks change', async () => {
     render(<TestHost />);
     openReview();
