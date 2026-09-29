@@ -13,7 +13,7 @@ import { continueSetup, patchIntent } from '../sessions/setup-actions';
 import { useSetup } from '../sessions/store';
 import { toast } from '../stores/notices';
 import { useSettings } from '../stores/settings';
-import { pickDirectModel } from './direct-model';
+import { pickDirectModel, useDirectModelPick } from './direct-model';
 
 // `wait` makes "Open ClaudeUsage, then start" the primary; `ask` and `direct` offer both (under `direct` the card only
 // appears for a gateway model, which the fallback cannot serve).
@@ -26,6 +26,10 @@ export function useOpenClaudeUsage(): (() => void) | null {
   const registered = useActionEnabled('gateway.openClaudeUsage');
   return registered ? () => runAction('gateway.openClaudeUsage') : null;
 }
+
+// Whether Run direct's Claude-model pick is open for the session: the card's poll pauses meanwhile, so a relay that
+// recovers under the open pick does not start the session routed while the human is choosing to run it direct.
+export const usePickingDirectModel = (appSessionId: AppSessionId): boolean => useDirectModelPick((s) => s.picking?.appSessionId === appSessionId);
 
 // Run direct from the card, with the message the card docked with.
 export async function runDirect(appSessionId: AppSessionId, docked: FirstMessage | null, gatewayModel: boolean, pick: typeof pickDirectModel = pickDirectModel): Promise<void> {

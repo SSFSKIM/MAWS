@@ -222,10 +222,12 @@ describe('relay card', () => {
 // C11 start: the docked card as C11 feeds it (C11's Asks of C10 (2) and (7)): the policy from settings v3, the hand-off
 // action once registered, and Run direct on a gateway model asking for a Claude model first.
 describe('relay card, with C11', () => {
+  let relayUp = false;
   const docked = async (over: Parameters<typeof intent>[0] = {}) => {
+    relayUp = false;
     withMain({
       'session.start': answer({ status: 'relay_unreachable', appSessionId: ID, health: health() }),
-      'engine.relayHealth': () => health(),
+      'engine.relayHealth': () => health({ ok: relayUp, status: relayUp ? 200 : null, error: relayUp ? null : 'timed out' }),
       'session.intent.patch': (input: unknown) => ({ ...intent(over), ...(input as { patch: object }).patch }),
       'engine.models': { models: [...BUILTIN_MODELS], source: 'builtin', at: null },
     });
@@ -264,6 +266,25 @@ describe('relay card, with C11', () => {
     await userEvent.click(within(pick).getByRole('button', { name: 'Use this model' }));
     await waitFor(() => expect(fake.invoked('session.start').at(-1)).toEqual({ appSessionId: ID, message: null, options: { gateway: 'direct' } }));
     expect(fake.invoked('session.intent.patch').at(-1)).toEqual({ appSessionId: ID, patch: { model: 'sonnet' } });
+  });
+
+  it('while the Claude-model pick is open the card stops polling, so a recovering relay starts nothing under it', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const card = await docked({ model: 'claude/astra' });
+      await userEvent.click(card.getByRole('button', { name: 'Run direct' }));
+      const pick = await screen.findByRole('dialog', { name: 'Choose a Claude model' });
+      relayUp = true;
+      const polls = fake.invoked('engine.relayHealth').length;
+      await act(() => vi.advanceTimersByTimeAsync(12_000));
+      expect(fake.invoked('engine.relayHealth').length, 'no poll while the pick is open').toBe(polls);
+      expect(fake.invoked('session.start').map((i) => (i as { options: unknown }).options)).toEqual([{}]); // only the first send's
+      await userEvent.click(within(pick).getByRole('button', { name: 'Cancel' }));
+      await act(() => vi.advanceTimersByTimeAsync(5_000));
+      await waitFor(() => expect(fake.invoked('session.start').at(-1)).toEqual({ appSessionId: ID, message: null, options: { gateway: 'gateway' } })); // the poll is back
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 // C11 end

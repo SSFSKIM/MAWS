@@ -10,7 +10,7 @@ import { isGatewayModel } from '@shared/sessions/models';
 import { DockedCardFrame } from '../composer/docked/DockedCardFrame';
 import { dockCard } from '../composer/docked/registry';
 // C11 start: the card's policy, its hand-off and Run direct on a gateway model (C11's Asks of C10 (2) and (7))
-import { runDirect, useOpenClaudeUsage, useRelayPolicy } from '../gateway/relay-card';
+import { runDirect, useOpenClaudeUsage, usePickingDirectModel, useRelayPolicy } from '../gateway/relay-card';
 // C11 end
 import { ipc } from '../ipc/client';
 import { useSessions } from '../stores/sessions';
@@ -107,9 +107,11 @@ function RelayHost({ appSessionId, card, busy }: { appSessionId: AppSessionId; c
   // C11 start: settings v3's relayUnreachable (wait → 'wait'; ask and direct → 'ask'), and C11's hand-off action
   const policy = useRelayPolicy();
   const openClaudeUsage = useOpenClaudeUsage();
+  const picking = usePickingDirectModel(appSessionId); // Run direct's Claude-model pick is open: the poll pauses
   // C11 end
 
   useEffect(() => {
+    if (picking) return; // C11: no routed start under an open Claude-model pick
     let live = true;
     const check = async () => {
       const result = await ipc.invoke('engine.relayHealth', { force: true });
@@ -127,7 +129,7 @@ function RelayHost({ appSessionId, card, busy }: { appSessionId: AppSessionId; c
       live = false;
       clearInterval(timer);
     };
-  }, [appSessionId, card]);
+  }, [appSessionId, card, picking /* C11 */]);
 
   const recheck = async () => {
     const result = await ipc.invoke('engine.relayHealth', { force: true });
