@@ -7,16 +7,19 @@
 // paste cache for recall. Never the owner's `~/.claude`. The page needs a harness build: `pnpm e2e:composer` builds one
 // and runs this file; under a plain build the cases skip. The surface half (M4) runs the whole composer on the
 // `#composer` page (a pane kind there, over the layout store's panes): the submit states over `queue-and-interrupt`,
-// the one app-level ⌘. from either pane, drafts, and an unstarted session over the page's stub of C10's intent.
+// the one app-level ⌘. from either pane, drafts, and an unstarted session over the page's stub of C10's intent. M4b's
+// edit-and-resubmit runs there too, with the session's transcript above its composer (a bubble's Edit is the way in):
+// the replay holds a `rewind_conversation` answer back past C3's 8 s bound, or withholds it, and the engine host's
+// own journal says how many rewinds and prompts were written.
 import { execFileSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test as base, type Page } from '@playwright/test';
 import type { SessionEvent } from '@shared/graph/events';
 import type { CardsHarnessApi, HarnessIntent, HarnessPane } from '../src/renderer/src/harness/composer/api';
 import type { EditorHarnessApi, EditorPane } from '../src/renderer/src/harness/composer/editor-api';
-import { invoke, launchReady, queueInterruptJournal, turnsJournal, value } from './support/c7-replay';
+import { invoke, launchReady, queueInterruptJournal, rewindJournal, turnsJournal, value, type RewindReplay } from './support/c7-replay';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 
 const HARNESS_BUILT = existsSync(join(REPO_ROOT, 'out/renderer/harness.html'));
@@ -540,5 +543,108 @@ test('an unstarted session binds the frame to the intent, holds a starting state
   await cards(page, 'undockStub');
   await expect(messageIn(page, 0)).toBeFocused();
   await expect(messageIn(page, 0)).toHaveText('next');
+  expect(editor.consoleErrors()).toEqual([]);
+});
+
+// ---- M4b: edit-and-resubmit ------------------------------------------------------------------------------------------
+
+// The engine host's own journal of the launch: what was written to the engine, whatever the renderer believed.
+type JournalLine = { direction: string; frame: { type?: string; request?: { subtype?: string } } };
+async function written(page: Page, id: string): Promise<{ rewinds: number; cancels: number; users: number }> {
+  const lines = readFileSync((await statusOf(page, id)).journalPath, 'utf8')
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line) as JournalLine)
+    .filter((row) => row.direction === 'out');
+  return {
+    rewinds: lines.filter((row) => row.frame.type === 'control_request' && row.frame.request?.subtype === 'rewind_conversation').length,
+    cancels: lines.filter((row) => row.frame.type === 'control_cancel_request').length,
+    users: lines.filter((row) => row.frame.type === 'user').length,
+  };
+}
+
+const editLine = (page: Page) => pane(page, 0).locator('[data-edit-mode]');
+
+// Two prompts sent from the composer over `rewindJournal`, then the second bubble's Edit (C6's, through the adapter
+// App.tsx registers): the composer holds `turn two` in edit mode; ` edited` is typed, Send asks to rewind, and the
+// confirm is given (after `beforeConfirm`).
+async function editSecondPrompt(page: Page, id: string, replay: RewindReplay, beforeConfirm: () => Promise<unknown> = async () => {}): Promise<void> {
+  await openComposerPage(page);
+  await launchReady(page, id, rewindJournal(scratch, id, replay));
+  await showPanes(page, [{ composer: id, transcript: true }, null]);
+  for (const text of ['turn one', 'turn two']) {
+    await messageIn(page, 0).click();
+    await page.keyboard.type(text);
+    await page.keyboard.press('Enter');
+    await expect.poll(() => sent(page, id)).toContain(text);
+    await expect.poll(async () => (await statusOf(page, id)).turn).toBeNull();
+  }
+  const bubble = pane(page, 0).locator('.transcript-user').filter({ hasText: 'turn two' });
+  await bubble.hover();
+  await bubble.getByRole('button', { name: 'Edit' }).click();
+  await expect(editLine(page)).toHaveText(/Editing an earlier message · sending forks this session from here/);
+  await expect(messageIn(page, 0)).toHaveText('turn two');
+  await messageIn(page, 0).click();
+  await page.keyboard.press('End');
+  await page.keyboard.type(' edited');
+  await page.keyboard.press('Enter');
+  const dialog = page.getByRole('alertdialog');
+  await expect(dialog).toContainText('Forking arrives with C10. Rewind this session to that message and resend instead?');
+  await beforeConfirm();
+  await dialog.getByRole('button', { name: 'Rewind and resend' }).click();
+}
+
+test('edit-and-resubmit never repeats a rewind: a send that fails after the replayed rewind retries the send alone', async ({ editor }) => {
+  const { page } = editor;
+  const id = 'c7-resubmit-send-fails';
+  await editSecondPrompt(page, id, 'answered', () => cards(page, 'failNextSend', id)); // the resend after the rewind fails
+  await expect(editLine(page)).toHaveText(/Rewound · the message was not sent/);
+  expect(await written(page, id)).toEqual({ rewinds: 1, cancels: 0, users: 2 }); // rewound; the resend never reached the engine
+  await editLine(page).getByRole('button', { name: 'Retry' }).click();
+  await expect.poll(() => sent(page, id)).toEqual(['turn one', 'turn two', 'turn two edited']);
+  await expect(editLine(page)).toHaveCount(0);
+  await expect(messageIn(page, 0)).toHaveText('');
+  expect(await written(page, id)).toEqual({ rewinds: 1, cancels: 0, users: 3 });
+  expect((await statusOf(page, id)).process).toBe('ready');
+  expect(editor.consoleErrors()).toEqual([]);
+});
+
+test('edit-and-resubmit reconciles an unconfirmed rewind: held past the bridge timeout, its late answer lets Send go', async ({ editor }) => {
+  test.setTimeout(90_000);
+  const { page } = editor;
+  const id = 'c7-resubmit-held';
+  await editSecondPrompt(page, id, 'held');
+  await expect(editLine(page)).toHaveText(/Rewind unconfirmed · checking the transcript…/, { timeout: 15_000 }); // C3's 8 s bound answered `timeout`
+  await expect(messageIn(page, 0)).toHaveAttribute('contenteditable', 'false');
+  await expect(messageIn(page, 0)).toHaveText('turn two edited');
+  expect(await written(page, id)).toEqual({ rewinds: 1, cancels: 1, users: 2 });
+
+  // the held answer is released: a read of the test's own goes first, and the late `rewound: true` follows it
+  value(await invoke(page, 'session.getContextUsage', { appSessionId: id, detail: 'summary' }));
+  await expect(editLine(page)).toHaveText(/Rewound/);
+  expect(await sent(page, id)).toEqual(['turn one', 'turn two']); // confirmed by the transcript: Send is the human's
+  await control(page, 0).click();
+  await expect.poll(() => sent(page, id)).toEqual(['turn one', 'turn two', 'turn two edited']);
+  await expect(editLine(page)).toHaveCount(0);
+  expect(await written(page, id)).toEqual({ rewinds: 1, cancels: 1, users: 3 });
+  expect(editor.consoleErrors()).toEqual([]);
+});
+
+test('edit-and-resubmit reconciles an unconfirmed rewind: withheld for the whole window, Send without rewinding sends alone', async ({ editor }) => {
+  test.setTimeout(90_000);
+  const { page } = editor;
+  const id = 'c7-resubmit-withheld';
+  await openComposerPage(page);
+  await cards(page, 'rewindWindow', 2_000); // C3's late window is 60 s; the composer's is shortened for the run
+  await editSecondPrompt(page, id, 'withheld');
+  await expect(editLine(page)).toHaveText(/Rewind unconfirmed · checking the transcript…/, { timeout: 15_000 });
+  await expect(editLine(page)).toHaveText(/The rewind could not be confirmed/);
+  expect(await editLine(page).getByRole('button').allTextContents()).toEqual(['Rewind again', 'Send without rewinding', 'Keep editing']);
+  await expect(messageIn(page, 0)).toHaveAttribute('contenteditable', 'true');
+  await editLine(page).getByRole('button', { name: 'Send without rewinding' }).click();
+  await expect.poll(() => sent(page, id)).toEqual(['turn one', 'turn two', 'turn two edited']);
+  await expect(editLine(page)).toHaveCount(0);
+  expect(await written(page, id)).toEqual({ rewinds: 1, cancels: 1, users: 3 });
+  await cards(page, 'rewindWindow', null);
   expect(editor.consoleErrors()).toEqual([]);
 });

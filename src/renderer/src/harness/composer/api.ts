@@ -4,7 +4,8 @@ export type HarnessPlacement = 'docked' | 'card' | 'hover' | 'inline';
 
 // What a pane shows: a session's waiting request in one placement, a focusable region whose `request.accept` binding
 // only counts (the other pane of acceptance item 2, which must keep its Enter to itself), or (M4) a session's composer.
-export type HarnessPane = { appSessionId: string; placement: HarnessPlacement } | { counter: true } | { composer: string } | null;
+// M4b: a composer pane may show the session's transcript above it (C6's slot, whose bubbles offer Edit).
+export type HarnessPane = { appSessionId: string; placement: HarnessPlacement } | { counter: true } | { composer: string; transcript?: boolean } | null;
 
 // M4: the stub of C10's setup intent the page registers (the fields the composer reads).
 export interface HarnessIntent {
@@ -29,4 +30,8 @@ export interface CardsHarnessApi {
   dockStub(appSessionId: string): void;
   undockStub(): void;
   stubAccepts(): number;
+  // M4b: the next `session.send` a composer makes for the session fails without reaching main (an injected write
+  // failure); the rewind state machine's window, shortened for a run (null restores C3's 60 s).
+  failNextSend(appSessionId: string): void;
+  rewindWindow(ms: number | null): void;
 }

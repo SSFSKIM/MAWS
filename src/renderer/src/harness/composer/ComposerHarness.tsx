@@ -6,12 +6,17 @@
 // through `window.__maws_cards`. `?session=<appSessionId>&placement=<placement>` sets pane 0 on load for manual use,
 // and `?theme=dark` the theme. M3's editor has its own page (`#editor`). M4 adds the composer as a pane kind, over the
 // layout store's panes (so the one app-level ⌘. and ⌘L resolve the focused pane as they do in the shell), with C10's
-// setup intent stubbed (`intent-stub.ts`) and a stub card docked through `dockCard`.
+// setup intent stubbed (`intent-stub.ts`) and a stub card docked through `dockCard`. M4b shows a composer pane's
+// transcript above it on request (C6's slot, with the composer's edit-and-resubmit registered as the app registers it),
+// and can fail a composer's next `session.send` before it reaches main.
 import { QueryClientProvider } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { AppSessionId } from '@shared/graph/ids';
-import { Composer, ComposerAppKeys, DockedCardFrame, dockCard } from '../../composer';
+import type { MawsBridge } from '@shared/ipc/schema';
+import { Composer, ComposerAppKeys, DockedCardFrame, dockCard, editAndResubmitRow } from '../../composer';
+import { setRewindWindow } from '../../composer/resubmit-seam';
+import { ipc } from '../../ipc/client';
 import { connectShell } from '../../ipc/events';
 import { queryClient } from '../../ipc/query';
 import { connectKeys } from '../../keymap/dispatcher';
@@ -19,6 +24,7 @@ import { useKeyChord } from '../../keymap/useKeyChord';
 import { RequestCard } from '../../request-card';
 import { selectPendingOf, useAttention } from '../../stores/attention';
 import { useLayout } from '../../stores/layout';
+import { registerTranscriptActions, TranscriptSlot } from '../../transcript';
 import type { CardsHarnessApi, HarnessPane, HarnessPlacement } from './api';
 import { setStubIntent, stubLog } from './intent-stub';
 
@@ -88,6 +94,17 @@ function StubCard({ appSessionId, onAccept }: { appSessionId: AppSessionId; onAc
   );
 }
 
+// M4b: the composers' client, which fails a session's next `session.send` when the test asked for it.
+const failSend = new Set<string>();
+const composerClient: MawsBridge = {
+  ...ipc,
+  invoke: ((name, input) => {
+    const appSessionId = (input as { appSessionId?: string } | undefined)?.appSessionId;
+    if (name === 'session.send' && appSessionId !== undefined && failSend.delete(appSessionId)) return Promise.resolve({ ok: false, error: { code: 'internal', message: 'write_failed: injected by the harness' } });
+    return ipc.invoke(name, input);
+  }) as MawsBridge['invoke'],
+};
+
 // M4: the layout store's panes mirror the page's composer panes, so ComposerAppKeys resolves the focused pane's session.
 function mirrorLayout(panes: [HarnessPane, HarnessPane]) {
   const tabsOf = (pane: HarnessPane) =>
@@ -105,7 +122,7 @@ export function ComposerHarness() {
   useEffect(() => {
     const theme = new URLSearchParams(location.search).get('theme');
     if (theme === 'dark' || theme === 'light') document.documentElement.dataset.theme = theme;
-    const offs = [connectShell(), connectKeys()];
+    const offs = [connectShell(), connectKeys(), registerTranscriptActions({ editAndResubmit: editAndResubmitRow })];
     window.__maws_cards = {
       show: (next) => {
         mirrorLayout(next);
@@ -125,6 +142,8 @@ export function ComposerHarness() {
         stub.current.undock = null;
       },
       stubAccepts: () => stub.current.accepts,
+      failNextSend: (appSessionId) => void failSend.add(appSessionId),
+      rewindWindow: (ms) => setRewindWindow(ms),
     };
     return () => {
       offs.forEach((off) => off());
@@ -145,8 +164,9 @@ export function ComposerHarness() {
               {pane === null ? null : 'counter' in pane ? (
                 <CounterPane onCount={() => void (counted.current += 1)} />
               ) : 'composer' in pane ? (
-                <div className="mt-auto">
-                  <Composer key={pane.composer} appSessionId={pane.composer as AppSessionId} paneIndex={index} />
+                <div className="mt-auto flex min-w-0 flex-col gap-3">
+                  {pane.transcript && <TranscriptSlot key={`transcript:${pane.composer}`} appSessionId={pane.composer as AppSessionId} className="h-72" />}
+                  <Composer key={pane.composer} appSessionId={pane.composer as AppSessionId} paneIndex={index} client={composerClient} />
                 </div>
               ) : (
                 <RequestPane appSessionId={pane.appSessionId as AppSessionId} placement={pane.placement} index={index} />
