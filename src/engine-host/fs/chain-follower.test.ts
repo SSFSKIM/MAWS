@@ -168,9 +168,12 @@ describe('follows the leaf across a rewind', () => {
     expectWellFormed(out.events());
   });
 
-  it('without the anchor, the continuation is a second writer: retraction plus a warning', async () => {
+  it('without the anchor and with two live holders, the continuation is a second writer: retraction plus a warning', async () => {
+    // With at most one holder this same shape is the terminal rewind (below); two processes make it contested.
     const lines = [...REWIND_LINES.slice(0, 26), ...REWIND_LINES.slice(27)];
-    const { follower, out } = await started(joined(lines));
+    const out = new Collector();
+    const follower = new ChainFollower(new MemoryFileReader(joined(lines)), SESSION, null, out.sink, { holders: () => 2 });
+    await follower.start();
     expect(follower.snapshot().chain.map(short)).toEqual(FULL_CHAIN);
     expect(out.of('boundary.rewind')).toEqual([]);
     const retractions = out.of('boundary.retraction');
@@ -386,14 +389,20 @@ describe('a terminal rewind without an anchor', () => {
     expect(short(whole.follower.snapshot().leaf)).toBe('fa24f6e9');
   });
 
-  it('with two live holders, or none, the same branch is a second writer: the retraction and the notice', async () => {
-    for (const holders of [2, 0]) {
-      const { follower, out } = await follow(TERMINAL_LINES.slice(0, 48), holders);
-      expect(out.of('boundary.rewind')).toEqual([]);
-      expect(out.of('boundary.retraction').map((e) => [e.reason, e.retractedMessageUuids.map(short)])).toEqual([['transcript_branch', BANANA_TURN]]);
-      expect(out.of('notice.posted').map((e) => e.key)).toEqual(['transcript_branch']);
-      expect(short(follower.snapshot().leaf)).toBe('c25b804b');
-    }
+  it('with no live holder (nobody is writing it, a historical backfill) the same branch is still one boundary.rewind', async () => {
+    const { follower, out } = await follow(TERMINAL_LINES.slice(0, 48), 0);
+    expect(out.of('boundary.rewind').map((e) => short(e.targetMessageUuid))).toEqual(['7b39835b']);
+    expect(out.of('boundary.retraction')).toEqual([]);
+    expect(out.of('notice.posted')).toEqual([]);
+    expect(short(follower.snapshot().leaf)).toBe('c25b804b');
+  });
+
+  it('with two live holders the same branch is a second writer: the retraction and the notice', async () => {
+    const { follower, out } = await follow(TERMINAL_LINES.slice(0, 48), 2);
+    expect(out.of('boundary.rewind')).toEqual([]);
+    expect(out.of('boundary.retraction').map((e) => [e.reason, e.retractedMessageUuids.map(short)])).toEqual([['transcript_branch', BANANA_TURN]]);
+    expect(out.of('notice.posted').map((e) => e.key)).toEqual(['transcript_branch']);
+    expect(short(follower.snapshot().leaf)).toBe('c25b804b');
   });
 
   it('with one live holder, a prompt parented mid-turn is still a second writer', async () => {

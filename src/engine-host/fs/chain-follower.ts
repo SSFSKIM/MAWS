@@ -58,8 +58,8 @@ export interface FileReader {
 
 export interface ChainFollowerOptions {
   subagents?: SubagentLookup; // the sidecar metas the backfill consults for `Agent` tool uses
-  // The live holders of this transcript's session now (the registry's live records naming it). Absent: none, so an
-  // unanchored branch is never read as a terminal rewind.
+  // The live holders of this transcript's session now (the registry's live records naming it). Absent: none, so the
+  // terminal-rewind reading is decided by the transcript's shape alone.
   holders?: () => number;
 }
 
@@ -308,7 +308,8 @@ class FollowerCore {
   // A terminal `/rewind` (the interactive engine, 2.1.284) writes no anchor: the next prompt simply parents onto the
   // last record of the turn it rewound to. That shape is read as a rewind only when this record opens a turn, its
   // parent is on the current chain with a turn-opening prompt right after it (so the parent ended a turn), an assistant
-  // record precedes the parent, and exactly one process holds the session now; otherwise it is the second writer's.
+  // record precedes the parent, and at most one process holds the session now (none: nobody is writing it; two or
+  // more: a contested transcript, the second writer's).
   private terminalRewind(record: TranscriptRecord, parent: MessageUuid | null): { targetMessageUuid: MessageUuid; precedingAssistantUuid: MessageUuid } | null {
     if (parent === null || !startsTurn(record) || !this.onChain.has(parent)) return null;
     const at = this.chain.indexOf(parent);
@@ -318,7 +319,7 @@ class FollowerCore {
       .slice(0, at + 1)
       .reverse()
       .find((member) => this.skeletons.get(member)?.type === 'assistant');
-    if (precedingAssistantUuid === undefined || this.holders() !== 1) return null;
+    if (precedingAssistantUuid === undefined || this.holders() > 1) return null;
     return { targetMessageUuid: next, precedingAssistantUuid };
   }
 

@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process';
 import { readFileSync, statSync } from 'node:fs';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
@@ -502,7 +503,7 @@ describe('a followed session backfills, then tails its transcript', () => {
     expect((await fs.eventsSnapshot(APP, null)).events.every((e) => e.sessionId === S1)).toBe(true);
   });
 
-  it('reads a terminal rewind (no anchor) as boundary.rewind while one registry record holds the session, and as a second writer with none', async () => {
+  it('reads a terminal rewind (no anchor) as boundary.rewind with one registry holder or none, and as a second writer with two', async () => {
     const TERMINAL = 'a76ad588-e4b4-4a99-bf4e-69287514916f' as SessionId;
     const lines = readFileSync(join(TRANSCRIPT_FIXTURE_DIR, 'rewind-terminal.jsonl'), 'latin1').split('\n').filter((l) => l.length > 0).slice(0, 48);
     await fixture.addTranscript('/private/tmp/maws-accept', TERMINAL, lines.slice(0, 42));
@@ -516,15 +517,28 @@ describe('a followed session backfills, then tails its transcript', () => {
     expect(delivered().filter((e) => e.kind === 'boundary.rewind').map((e) => e.kind === 'boundary.rewind' && e.targetMessageUuid.slice(0, 8))).toEqual(['7b39835b']);
     expect(delivered().filter((e) => e.kind === 'boundary.retraction' || e.kind === 'notice.posted')).toEqual([]);
 
-    // The same branch with nobody holding the session (the record gone): the second writer's retraction and notice.
-    const OTHER = 'app-terminal-unheld' as AppSessionId;
+    // Each later follow re-reads the whole file under a fresh app id, with the registry as it is then.
+    const refollow = async (app: string) => {
+      await fs.unbind(APP);
+      await fs.unbind('app-terminal-contested' as AppSessionId);
+      fs.bind([{ sessionId: TERMINAL, appSessionId: app as AppSessionId }]);
+      const events = (await fs.eventsSnapshot(app as AppSessionId, null)).events;
+      return { rewinds: events.filter((e) => e.kind === 'boundary.rewind').length, notices: events.flatMap((e) => (e.kind === 'notice.posted' ? [e.key] : [])) };
+    };
+    // Two live processes on the session: contested, the second writer's retraction and notice.
+    const second = spawn('/bin/sleep', ['30'], { stdio: 'ignore' });
+    try {
+      await fixture.addRegistryRecord(second.pid!, { sessionId: TERMINAL, cwd: '/private/tmp/maws-accept', kind: 'interactive', startedAt: Date.now() });
+      await expect.poll(async () => (await fs.holdersNow({ sessionIds: [TERMINAL], directories: null })).holders.length).toBe(2);
+      expect(await refollow('app-terminal-contested')).toEqual({ rewinds: 0, notices: ['transcript_branch'] });
+    } finally {
+      second.kill('SIGKILL');
+    }
+    // Nobody holding it (a historical backfill): the rewind again.
+    await fixture.removeRegistryRecord(second.pid!);
     await fixture.removeRegistryRecord(process.pid);
     await expect.poll(() => fs.state().holders.length).toBe(0);
-    await fs.unbind(APP);
-    fs.bind([{ sessionId: TERMINAL, appSessionId: OTHER }]);
-    const snapshot = await fs.eventsSnapshot(OTHER, null);
-    expect(snapshot.events.filter((e) => e.kind === 'boundary.rewind')).toEqual([]);
-    expect(snapshot.events.filter((e) => e.kind === 'notice.posted').map((e) => e.kind === 'notice.posted' && e.key)).toEqual(['transcript_branch']);
+    expect(await refollow('app-terminal-unheld')).toEqual({ rewinds: 1, notices: [] });
   });
 
   it('follows an app session whose transcript does not exist yet, and picks it up when it appears', async () => {
