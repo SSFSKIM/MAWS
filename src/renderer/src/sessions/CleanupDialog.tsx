@@ -13,7 +13,7 @@ import { useSessions } from '../stores/sessions';
 import type { SessionRecord } from '@shared/graph/session';
 import type { CleanupTarget } from './dialogs';
 import { archiveSession } from './record-ops';
-import { holderWords } from './setup-actions';
+import { holderWords } from './holder-words';
 import { Sheet, SheetForm } from './Sheet';
 import { DANGER, PRIMARY } from './ui';
 

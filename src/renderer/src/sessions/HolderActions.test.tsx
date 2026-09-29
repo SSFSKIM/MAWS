@@ -1,7 +1,7 @@
 // Foreign-live in the renderer (C10 execution document, M5): the holder notice's actions, Attach in a terminal tab over
 // C9's Terminal tool and C8a's panel host (the terminal registry mocked, so the pins stop where C9's `pty.spawn`
-// begins), the de-duplication by the tab the attach opened, the row menu's Attach, and the Attach a `held` answer or
-// the engine's own refusal offers.
+// begins), one attach tab per job (remembered across a reload through the layout key, re-run at an idle prompt), the
+// row menu's Attach, and the Attach a `held` answer or the engine's own refusal offers.
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -23,11 +23,14 @@ import { resetSetupStore } from '../test-support/setup-intents';
 const registry = vi.hoisted(() => {
   let infos: TerminalInfo[] = [];
   let next = 0;
+  const foreground = { busy: true }; // `claude attach` holds the terminal until the owner detaches
   const host: HostState = { state: 'ready', pid: 1, restarts: 0, revision: 1 };
   return {
+    foreground,
     reset() {
       infos = [];
       next = 0;
+      foreground.busy = true;
     },
     exit(id: string) {
       infos = infos.map((info) => (info.id === id ? { ...info, status: 'exited' } : info));
@@ -38,14 +41,14 @@ const registry = vi.hoisted(() => {
       subscribe: () => () => {},
       open: vi.fn((init: { appSessionId: string; label: string; cwd: string; command?: string }) => {
         const id = `t${++next}`;
-        infos = [...infos, { id, appSessionId: init.appSessionId, label: init.label, cwd: init.cwd, status: 'running' } as unknown as TerminalInfo];
+        infos = [...infos, { id, appSessionId: init.appSessionId, label: init.label, cwd: init.cwd, ptyId: `pty-${id}`, status: 'running' } as unknown as TerminalInfo];
         return id;
       }),
       get: (id: string) => {
         const info = infos.find((i) => i.id === id);
         return info ? { info, renderer: null, container: document.createElement('div') } : undefined;
       },
-      foreground: async () => ({ process: 'zsh', busy: false }),
+      foreground: vi.fn(async () => (foreground.busy ? { process: '2.1.283', busy: true } : { process: 'zsh', busy: false })),
       close: async (id: string) => void (infos = infos.filter((info) => info.id !== id)),
       adopt: vi.fn(async (): Promise<string[]> => []),
     },
@@ -54,7 +57,8 @@ const registry = vi.hoisted(() => {
 vi.mock('../terminal/registry', () => ({ terminals: registry.terminals }));
 
 const { terminalTool } = await import('../tools/terminal');
-const { connectSetup } = await import('./store');
+const { connectSessions } = await import('./connect');
+const { forgetAttachTabs } = await import('./attach');
 const { registerSessionActions } = await import('./actions');
 const { resumeSession } = await import('./setup-actions');
 
@@ -67,6 +71,7 @@ const JOB = { kind: 'background_job', pid: 4242, jobId: 'e6dcd828' } as const;
 let fake: FakeClient;
 let holders: { sessionId: SessionId; appSessionId: AppSessionId | null; holder: SessionRecord['holder']; cwd: string | null }[];
 let offs: (() => void)[] = [];
+let persisted: unknown = null; // main's layout.json value of `sessions.attachTabs`
 
 function held(holder: SessionRecord['holder'], over: Partial<SessionRecord> = {}): SessionRecord {
   const r = record(A, { engineSessionId: ENGINE, directory: '/work/repo', holder, ...over });
@@ -82,6 +87,9 @@ function answerWith(over: Parameters<typeof fakeClient>[0] = {}): void {
     'session.fork': { status: 'refused', appSessionId: 'f1111111-1111-4111-8111-111111111111', reason: 'busy', message: 'a turn is running' },
     'session.intent.list': { intents: [] },
     'session.deletions.list': { manifests: [] },
+    'layout.get': ({ key }: { key: string }) => ({ value: key === 'sessions.attachTabs' ? persisted : null }),
+    'layout.set': ({ key, value }: { key: string; value: unknown }) => void (key === 'sessions.attachTabs' && (persisted = value)),
+    'pty.write': undefined,
     ...over,
   };
   for (const [name, answer] of Object.entries(over)) if (answer === null) delete answers[name as keyof typeof answers];
@@ -99,6 +107,8 @@ beforeEach(() => {
   registry.reset();
   vi.clearAllMocks();
   useNotices.setState({ notices: [] });
+  forgetAttachTabs();
+  persisted = null;
   holders = [{ sessionId: ENGINE, appSessionId: A, holder: JOB, cwd: '/work/repo/.claude/worktrees/job' }];
   answerWith();
   offs = [registerPanelTool(terminalTool), registerSessionActions()];
@@ -129,7 +139,7 @@ describe('held outcomes and the attach command', () => {
     await waitFor(() => expect(opened()).toMatchObject([{ cwd: '/work/repo', command: COMMAND }]));
   });
 
-  it('focuses the tab it opened while that terminal runs, and opens another once it has ended', async () => {
+  it('a second Attach shows the tab while the attach holds its terminal, re-runs it at an idle prompt, and opens another once the shell has ended', async () => {
     renderNotice(held(JOB));
     await userEvent.click(attachButton());
     await waitFor(() => expect(opened()).toHaveLength(1));
@@ -139,10 +149,44 @@ describe('held outcomes and the attach command', () => {
     await userEvent.click(attachButton());
     await waitFor(() => expect(useLayout.getState().panelBySession.get(A)?.activeTabId).toBe(first));
     expect(opened(), 'no second attach while the first runs').toHaveLength(1);
+    expect(fake.invoked('pty.write'), 'nothing typed into a busy terminal').toEqual([]);
+
+    registry.foreground.busy = false; // the owner left the attach with the TUI's key: the shell's prompt
+    act(() => panelHost.showSummary());
+    await userEvent.click(attachButton());
+    await waitFor(() => expect(fake.invoked('pty.write')).toEqual([{ ptyId: 'pty-t1', data: `${COMMAND}\n` }]));
+    expect(useLayout.getState().panelBySession.get(A)?.activeTabId).toBe(first);
+    expect(opened(), 'the attach re-ran in the same tab').toHaveLength(1);
+
     registry.exit(registry.terminals.list()[0]!.id);
     await userEvent.click(attachButton());
     await waitFor(() => expect(opened()).toHaveLength(2));
     expect(opened()[1]!.label).not.toBe(first);
+  });
+
+  it('types nothing when the foreground cannot be read: the tab is only shown', async () => {
+    renderNotice(held(JOB));
+    await userEvent.click(attachButton());
+    await waitFor(() => expect(opened()).toHaveLength(1));
+    registry.terminals.foreground.mockRejectedValueOnce(new Error('pty.foreground failed: host unavailable'));
+    await userEvent.click(attachButton());
+    await waitFor(() => expect(registry.terminals.foreground).toHaveBeenCalledTimes(1));
+    expect(fake.invoked('pty.write')).toEqual([]);
+    expect(opened()).toHaveLength(1);
+  });
+
+  it('after a reload (the page forgets, the layout keeps the tab and its shell) Attach finds the job’s tab instead of opening a second', async () => {
+    renderNotice(held(JOB));
+    await userEvent.click(attachButton());
+    await waitFor(() => expect(opened()).toHaveLength(1));
+    const first = opened()[0]!.label;
+    expect(persisted).toEqual({ version: 1, tabs: [{ tabId: first, appSessionId: A, jobId: 'e6dcd828' }] });
+    forgetAttachTabs(); // a reload: the key is read again from main
+    act(() => panelHost.showSummary());
+    await userEvent.click(attachButton());
+    await waitFor(() => expect(useLayout.getState().panelBySession.get(A)?.activeTabId).toBe(first));
+    expect(opened()).toHaveLength(1);
+    expect(fake.invoked('layout.get')).toEqual([{ key: 'sessions.attachTabs' }, { key: 'sessions.attachTabs' }]);
   });
 
   it('opens a new tab once the one it opened was closed', async () => {
@@ -150,10 +194,12 @@ describe('held outcomes and the attach command', () => {
     await userEvent.click(attachButton());
     await waitFor(() => expect(opened()).toHaveLength(1));
     const first = opened()[0]!.label;
+    registry.foreground.busy = false; // a close asks while a program runs; this one is at its prompt
     await act(async () => void (await panelHost.closeTab(first)));
     expect(instanceOf(first)).toBeUndefined();
     await userEvent.click(attachButton());
     await waitFor(() => expect(opened()).toHaveLength(2));
+    expect((persisted as { tabs: { tabId: string }[] }).tabs.map((t) => t.tabId), 'the closed tab is forgotten').toEqual([opened()[1]!.label]);
   });
 
   it('shows the panel when it was collapsed', async () => {
@@ -182,7 +228,7 @@ describe('held outcomes and the attach command', () => {
     const { attachToJob } = await import('./attach');
     const attaching = attachToJob(A, { jobId: 'e6dcd828', command: COMMAND });
     await fake.fail('fs.holders', 'holder registry unreadable: EACCES');
-    expect(await attaching).toMatchObject({ ok: true, reused: false });
+    expect(await attaching).toMatchObject({ ok: true, how: 'opened' });
     expect(opened()).toMatchObject([{ cwd: '/work/repo', command: COMMAND }]);
   });
 
@@ -240,8 +286,8 @@ describe('held outcomes and the attach command', () => {
   it("the engine's own refusal of a resume (a setup failed held) toasts the holder with Attach, before the registry has the job", async () => {
     held({ kind: 'none' });
     holders = []; // MAWS's read lost the race: the job's registry record is not there yet
-    const setup = connectSetup(fake.client);
-    await setup.ready;
+    const disconnect = connectSessions(fake.client); // the composition, which hands the setup store the Attach toast
+    await waitFor(() => expect(fake.invoked('session.intent.list')).toHaveLength(1));
     act(() =>
       fake.event('session.setup', { appSessionId: A, phase: 'failed', detail: null, outcome: { kind: 'held', holder: { kind: 'background_job', pid: null, jobId: 'e6dcd828' }, attach: { jobId: 'e6dcd828', command: COMMAND } } }),
     );
@@ -249,6 +295,6 @@ describe('held outcomes and the attach command', () => {
     expect(toast).toMatchObject({ level: 'warning', text: 'Held by bg · e6dcd828' });
     act(() => toast!.actions.find((a) => a.label === 'Attach')!.run());
     await waitFor(() => expect(opened()).toMatchObject([{ cwd: '/work/repo', command: COMMAND }]));
-    setup.disconnect();
+    disconnect();
   });
 });

@@ -373,4 +373,15 @@ describe('ipc schema validates both directions', () => {
     });
   });
   // C8a end
+  // C10 start: the attach tabs' layout key (C10 execution document, M5)
+  describe('C10 layout entries', () => {
+    it('takes sessions.attachTabs as a layout key, outside the panel namespace, and holds its value to its shape', () => {
+      const value = { version: 1, tabs: [{ tabId: 'terminal:abc', appSessionId: 'a1111111-1111-4111-8111-111111111111', jobId: 'e6dcd828' }] };
+      expect(validateCommandInput('layout.set', { key: 'sessions.attachTabs', value })).toEqual({ ok: true, value: { key: 'sessions.attachTabs', value } });
+      expect(layout.AttachTabsSchema.safeParse(value).success).toBe(true);
+      expect(layout.AttachTabsSchema.safeParse({ version: 1, tabs: [{ ...value.tabs[0], command: 'x' }] }).success).toBe(false);
+      expect(layout.AttachTabsSchema.safeParse({ version: 2, tabs: [] }).success).toBe(false);
+    });
+  });
+  // C10 end
 });

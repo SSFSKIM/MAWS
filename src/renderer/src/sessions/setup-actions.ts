@@ -3,15 +3,15 @@
 // a record's resume, and the close guard's decision. Every command goes through `ipc`; the answers update the setup
 // store directly as well as through the events that follow.
 import type { AppSessionId } from '@shared/graph/ids';
-import type { SessionRecord } from '@shared/graph/session';
 import type { StartOptions } from '@shared/ipc/schema/session';
 import type { FirstMessage, SetupIntent, SetupIntentPatch } from '@shared/sessions/intent';
 import type { SetupResources, StartOutcome } from '@shared/sessions/setup';
 import { ipc } from '../ipc/client';
 import { toast } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
-import { attachOrSay, type KnownJob } from './attach';
+import { heldToast } from './attach';
 import { confirm } from './dialogs';
+import { holderWords } from './holder-words';
 import { isStarting, useSetup } from './store';
 
 export type HookResult = { ok: true } | { ok: false; error: string };
@@ -34,19 +34,6 @@ export function registerMessageReturn(fn: MessageReturn): () => void {
 export const returnMessage: MessageReturn = (appSessionId, message) => messageReturn(appSessionId, message);
 
 // ---- outcomes in words -------------------------------------------------------------------------------------------
-
-export function holderWords(holder: SessionRecord['holder']): string {
-  switch (holder.kind) {
-    case 'terminal':
-      return `terminal · ${holder.pid}`;
-    case 'background_job':
-      return holder.jobId === null ? 'a background job' : `bg · ${holder.jobId}`;
-    case 'self':
-      return 'Working in MAWS';
-    case 'none':
-      return 'no holder';
-  }
-}
 
 // The refusal a start answered, in words; null for the outcomes that start or dock a card.
 function refusalOf(outcome: StartOutcome): string | null {
@@ -165,13 +152,6 @@ export async function resumeSession(appSessionId: AppSessionId, message: FirstMe
   if (refusal === null) return;
   if (outcome.status === 'held') heldToast(appSessionId, outcome.holder, outcome.attach);
   else toast({ level: 'danger', text: refusal, actions: [], dismissible: true });
-}
-
-// A session held elsewhere, in words, with the job's Attach when there is a job to attach to (M5): from a `held`
-// answer, or from the engine's own refusal that failed a setup.
-export function heldToast(appSessionId: AppSessionId, holder: SessionRecord['holder'], attach: KnownJob | null): void {
-  const actions = attach === null ? [] : [{ label: 'Attach', run: () => void attachOrSay(appSessionId, attach) }];
-  toast({ level: 'warning', text: `Held by ${holderWords(holder)}`, actions, dismissible: true });
 }
 
 // ---- closing an unstarted tab ------------------------------------------------------------------------------------

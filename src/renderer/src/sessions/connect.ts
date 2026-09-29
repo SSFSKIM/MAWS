@@ -10,6 +10,7 @@ import { ipc } from '../ipc/client';
 import { registerCloseGuard, registerSessionCreator, registerTabRetention, registerUnstartedTitle } from '../keymap/actions-runtime';
 import { useSessions } from '../stores/sessions';
 import { registerSessionActions } from './actions';
+import { heldToast } from './attach';
 import { NewSessionEmptyState } from './NewSessionEmptyState';
 import { beforeCloseUnstarted } from './setup-actions';
 import { connectSetup, useSetup } from './store';
@@ -46,7 +47,7 @@ export async function createUnstartedSession(projectId: ProjectId | null, client
 }
 
 export function connectSessions(client: MawsBridge = ipc): () => void {
-  const setup = connectSetup(client);
+  const setup = connectSetup(client, useSetup, heldToast);
   const offs: (() => void)[] = [registerTabRetention({ ready: setup.ready, retains: retainsTab })];
   let live = true;
   void client.invoke('session.launchMode', undefined).then((result) => {

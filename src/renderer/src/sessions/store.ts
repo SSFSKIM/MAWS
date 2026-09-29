@@ -6,6 +6,7 @@
 // settled set C5's hydration waits for (`registerTabRetention.ready`).
 import { create } from 'zustand';
 import type { AppSessionId } from '@shared/graph/ids';
+import type { SessionRecord } from '@shared/graph/session';
 import type { RelayHealth } from '@shared/engine/relay-health';
 import type { EventPayload, MawsBridge } from '@shared/ipc/schema';
 import type { DeletionManifestView } from '@shared/ipc/schema/session';
@@ -14,7 +15,7 @@ import type { SetupEvent } from '@shared/sessions/setup';
 import type { TrustState } from '@shared/sessions/trust';
 import { ipc } from '../ipc/client';
 import { toast } from '../stores/notices';
-import { heldToast } from './setup-actions';
+import { holderWords } from './holder-words';
 
 // A card a start answered with and that waits for the human, with the first message it docked with (the intent's
 // retained message, or a resume's), which its continuation runs with and a refusal hands back. A failed setup's card
@@ -149,9 +150,16 @@ export function failureOf(s: Pick<SetupState, 'invoking' | 'phases' | 'intents' 
   return s.intents.get(appSessionId)?.progress.lastFailure ?? null;
 }
 
+// What a resume held elsewhere tells the human (the engine's own refusal: a job took the session after MAWS's read).
+// The composition hands in the toast with the job's Attach (`sessions/attach.ts`), which keeps the Terminal tool out of
+// this store's imports; without it the holder is still named.
+type SessionHolder = SessionRecord['holder'];
+export type HeldNotice = (appSessionId: AppSessionId, holder: SessionHolder, attach: { jobId: string; command: string } | null) => void;
+const nameHolder: HeldNotice = (_appSessionId, holder) => toast({ level: 'warning', text: `Held by ${holderWords(holder)}`, actions: [], dismissible: true });
+
 // Subscribes, then loads the intent snapshot and the interrupted deletions. `ready` resolves once the intents are known
 // (answered or failed: a page with no answerer starts empty rather than holding hydration forever).
-export function connectSetup(client: MawsBridge = ipc, store: typeof useSetup = useSetup): { ready: Promise<void>; disconnect(): void } {
+export function connectSetup(client: MawsBridge = ipc, store: typeof useSetup = useSetup, onHeld: HeldNotice = nameHolder): { ready: Promise<void>; disconnect(): void } {
   let live = true;
   const offs = [
     client.on('session.intent.changed', (e) => live && store.getState().applyIntentChanged(e)),
@@ -162,7 +170,7 @@ export function connectSetup(client: MawsBridge = ipc, store: typeof useSetup = 
       // engine's own refusal (a job took the session after MAWS's read) names the holder and offers its Attach
       if (e.phase === 'failed' && !store.getState().intents.has(e.appSessionId)) {
         if (e.outcome?.kind === 'error') toast({ level: 'danger', text: e.outcome.message, actions: [], dismissible: true });
-        else if (e.outcome?.kind === 'held') heldToast(e.appSessionId, e.outcome.holder, e.outcome.attach);
+        else if (e.outcome?.kind === 'held') onHeld(e.appSessionId, e.outcome.holder, e.outcome.attach);
       }
     }),
   ];

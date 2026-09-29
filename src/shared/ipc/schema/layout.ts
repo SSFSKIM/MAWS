@@ -88,11 +88,23 @@ export const SummarySectionsSchema = z.strictObject({ version: z.literal(1), col
 export type SummarySections = z.infer<typeof SummarySectionsSchema>;
 // C8a end
 
+// C10 start: the Terminal tabs "Attach in a terminal tab" opened, by session and background job (C10 execution
+// document, M5), so a reloaded or reopened window finds the job's tab (its shell survives, re-adopted under the tab id)
+// instead of opening a second `claude attach`; the Terminal tab's own params are not persisted. Written by
+// `sessions/attach.ts`; entries whose tab the layout no longer lists are dropped at the next write.
+export const AttachTabSchema = z.strictObject({ tabId: z.string(), appSessionId: AppSessionIdSchema, jobId: z.string() });
+export type AttachTab = z.infer<typeof AttachTabSchema>;
+export const AttachTabsSchema = z.strictObject({ version: z.literal(1), tabs: z.array(AttachTabSchema) });   // key `sessions.attachTabs`
+// C10 end
+
 export const LayoutKeySchema = z.union([
   z.literal('regions'), z.literal('main.tabs'), z.literal('panel.pinned'), z.string().regex(/^panel\.[^.]+$/), z.literal('window.main'),
   // C8a start
   z.literal('summary.sections'),
   // C8a end
+  // C10 start
+  z.literal('sessions.attachTabs'),
+  // C10 end
 ]);
 export type LayoutKey = z.infer<typeof LayoutKeySchema>;
 

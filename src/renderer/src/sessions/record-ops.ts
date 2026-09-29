@@ -10,7 +10,7 @@ import { ipc } from '../ipc/client';
 import { useLayout } from '../stores/layout';
 import { toast } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
-import { holderWords } from './setup-actions';
+import { holderWords } from './holder-words';
 import { useSetup } from './store';
 
 const fail = (text: string) => toast({ level: 'danger', text, actions: [], dismissible: true });
