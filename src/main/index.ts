@@ -45,6 +45,7 @@ import { createClaudeUsageApp, execRunner } from './gateway/claude-usage-app';
 import { onEmitted } from './ipc/events';
 import { startEngineConfigure } from './settings/engine-configure';
 import { revealPath } from './settings/reveal';
+import { knownSessionDirectories } from './settings/session-directories';
 // C11 end
 
 // A fresh profile for the end-to-end smoke (and anyone else who wants one); must be set before the app is ready.
@@ -197,16 +198,7 @@ app.whenReady().then(() => {
   });
   registerMainHandler('settings.claudeUsage.status', () => claudeUsage.status());
   registerMainHandler('settings.claudeUsage.open', (intent) => claudeUsage.open(intent));
-  // every session record's directories, archived included, from the read model and the index
-  const sessionDirectories = () => {
-    const directoriesOf = (r: SessionRecord) => [r.directory, ...r.additionalDirectories, ...(r.worktree ? [r.worktree.path] : [])];
-    const held = sessions.model.allRecords().flatMap(directoriesOf);
-    try {
-      return [...held, ...index.sessions.list({ includeArchived: true }).flatMap(directoriesOf)];
-    } catch {
-      return held; // the index is unavailable
-    }
-  };
+  const sessionDirectories = () => knownSessionDirectories(sessions.model, index);
   registerMainHandler('settings.reveal', ({ path }) =>
     revealPath(path, { configHome: () => claudeConfigDir(process.env, home), sessionDirectories, showItemInFolder: (p) => shell.showItemInFolder(p) }),
   );
