@@ -206,6 +206,13 @@ describe('ipc schema validates both directions', () => {
       expect(validateCommandOutput('session.answer', { outcome: 'not_pending' }).ok).toBe(true);
     });
 
+    it("session.steer takes an optional priority, now or next (coordinator ruling after M6 live 3.7)", () => {
+      const steer = { appSessionId: 'app-1', content: 'Reply NEXT_OK' };
+      expect(validateCommandInput('session.steer', steer)).toEqual({ ok: true, value: steer }); // absent: the host sends 'now'
+      for (const priority of ['now', 'next'] as const) expect(validateCommandInput('session.steer', { ...steer, priority })).toEqual({ ok: true, value: { ...steer, priority } });
+      expect(validateCommandInput('session.steer', { ...steer, priority: 'later' }).ok).toBe(false);
+    });
+
     it('holds inputs strictly and never transforms', () => {
       const send = { appSessionId: 'app-1', content: 'hello' };
       expect(validateCommandInput('session.send', send)).toEqual({ ok: true, value: send });

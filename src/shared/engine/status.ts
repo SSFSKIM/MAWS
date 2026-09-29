@@ -16,7 +16,7 @@ export const EngineSessionStatusSchema = z.strictObject({
   exit: z.strictObject({ code: z.number().int().nullable(), signal: z.string().nullable(), reason: z.enum(['quit', 'stop', 'archive', 'crash', 'unknown']), at: z.string() }).nullable(),
   engineState: z.enum(['idle', 'running', 'requires_action', 'unknown']), // session_state_changed; 'unknown' before the first frame
   activity: z.enum(['compacting', 'requesting']).nullable(), // system/status
-  turn: z.strictObject({ id: EventIdSchema /* the open turn's turn.started event id; C11 compares gateway.localLane.observedInTurn with it */, origin: z.enum(['human', 'engine']), startedAt: z.string(), acceptedAt: z.string().nullable(), userMessageUuids: z.array(MessageUuidSchema) }).nullable(), // startedAt: the querying frame's write (human) or system/init (engine); acceptedAt: the system/init inside a human turn
+  turn: z.strictObject({ id: EventIdSchema /* the open turn's turn.started event id; C11 compares gateway.localLane.observedInTurn with it */, origin: z.enum(['human', 'engine']), startedAt: z.string(), acceptedAt: z.string().nullable(), userMessageUuids: z.array(MessageUuidSchema) }).nullable(), // startedAt: the engine's `started` lifecycle for the prompt (human) or system/init (engine); acceptedAt equals startedAt (coordinator ruling after M6)
   model: z.strictObject({ requested: z.string().nullable(), resolved: z.string().nullable() }),
   effort: EffortSchema.nullable(),
   permissionMode: z.strictObject({ requested: PermissionModeSchema, effective: PermissionModeSchema, refusal: z.enum(AUTO_MODE_REFUSAL_CODES).nullable() }),

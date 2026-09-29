@@ -57,6 +57,10 @@ export interface NormalizerState {
   safeguards: Map<ToolUseId, SafeguardVerdict>;
   lastUserMessageUuid: MessageUuid | null;
   pendingHumanUuids: Set<MessageUuid>;
+  // Host-written querying prompts the engine has not started yet (coordinator ruling after M6 live 3.7): the human turn
+  // opens at the engine's `command_lifecycle { state: 'started' }` naming one, so a `now` steer that preempts the
+  // running turn, or a notification turn the engine runs first, never closes a turn that was not its own.
+  unstartedPrompts: Set<MessageUuid>;
   pendingEcho: MessageUuid | null;
   outbound: Map<RequestId, { subtype: string; request: unknown }>;
   inbound: Map<RequestId, InboundEntry>;
@@ -84,6 +88,7 @@ export class Normalizer {
       safeguards: new Map(),
       lastUserMessageUuid: null,
       pendingHumanUuids: new Set(),
+      unstartedPrompts: new Set(),
       pendingEcho: null,
       outbound: new Map(),
       inbound: new Map(),
@@ -161,7 +166,7 @@ export class Normalizer {
       case 'command_lifecycle': {
         const f = frame as CommandLifecycleFrame;
         out.emit({ kind: 'command.lifecycle', commandUuid: f.command_uuid as MessageUuid, state: f.state }, attribution);
-        this.droppedPrompt(f, out, attribution);
+        this.promptLifecycle(f, out, attribution);
         return;
       }
       case 'tool_progress': {
@@ -204,10 +209,7 @@ export class Normalizer {
     }, attribution);
     if (attribution.parentToolUseId !== null) return;
     if (this.state.pendingEcho !== null) return; // the `!` echo's own lifecycle (pass2/bash-context-echoed seq 12): opens nothing, marks nothing
-    if (this.state.currentTurn) {
-      this.state.currentTurn.acceptedAt = out.at;
-      return;
-    }
+    if (this.state.currentTurn) return; // a human turn: its `started` lifecycle opened it and marked acceptance
     this.state.currentTurn = { origin: 'engine', userMessageUuids: [], startedAt: out.at, acceptedAt: out.at };
     out.emit({ kind: 'turn.started', userMessageUuid: null, origin: 'engine' }, attribution);
   }
@@ -340,24 +342,30 @@ export class Normalizer {
       }, attribution);
       if (isEchoReceipt) this.state.pendingEcho = null;
       else this.state.currentTurn = null;
+      for (const uuid of Array.isArray(f.user_message_uuids) ? f.user_message_uuids : []) this.state.unstartedPrompts.delete(uuid as MessageUuid); // named: no longer waiting
     }
     out.emit({ kind: 'usage.sample', costUsd: frame.total_cost_usd, usage, modelUsage: (f.modelUsage ?? {}) as Record<string, unknown>, source: 'result' }, attribution);
   }
 
-  // A prompt written at idle and dropped before it ran (Decision Log, coordinator ruling carried into M4): a
-  // `cancelled`, `discarded` or `refused` lifecycle naming the uuid that opened the open human turn while no
-  // `system/init` has accepted it closes that turn, so no turn stays open forever. A steer's cancellation inside a
-  // running turn, and one arriving after the turn's result, close nothing (pass1/queue-and-interrupt seq 191, 200).
-  private droppedPrompt(frame: CommandLifecycleFrame, out: Emitter, attribution: Attribution): void {
-    const turn = this.state.currentTurn;
-    if (frame.state !== 'cancelled' && frame.state !== 'discarded' && frame.state !== 'refused') return;
-    if (!turn || turn.origin !== 'human' || turn.acceptedAt !== null || turn.userMessageUuids[0] !== frame.command_uuid) return;
-    out.emit({
-      kind: 'turn.ended', result: 'cancelled', isError: false, terminalReason: 'cancelled', resultText: null, durationMs: 0, numTurns: 0, costUsd: 0,
-      usage: { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, thinkingTokens: 0 }, permissionDenials: [], errors: [],
-      userMessageUuids: [frame.command_uuid as MessageUuid], origin: 'human', resultIndex: null, isEchoReceipt: false,
-    }, attribution);
-    this.state.currentTurn = null;
+  // The human turn's boundary (coordinator ruling after M6 live 3.7): the engine's `started` for a host-written
+  // querying prompt opens its turn, from this row; if a turn is already open (the engine drained two prompts into one
+  // turn) the prompt joins it. A prompt cancelled, discarded or refused before it started has no turn to close: its
+  // `command.lifecycle` event marks the dropped row (pass1/queue-and-interrupt seq 191), and it stops waiting.
+  private promptLifecycle(frame: CommandLifecycleFrame, out: Emitter, attribution: Attribution): void {
+    const uuid = frame.command_uuid as MessageUuid;
+    if (!this.state.unstartedPrompts.has(uuid)) return;
+    if (frame.state === 'cancelled' || frame.state === 'discarded' || frame.state === 'refused' || frame.state === 'completed') {
+      this.state.unstartedPrompts.delete(uuid);
+      return;
+    }
+    if (frame.state !== 'started') return;
+    this.state.unstartedPrompts.delete(uuid);
+    if (this.state.currentTurn) {
+      this.state.currentTurn.userMessageUuids.push(uuid);
+      return;
+    }
+    this.state.currentTurn = { origin: 'human', userMessageUuids: [uuid], startedAt: out.at, acceptedAt: out.at };
+    out.emit({ kind: 'turn.started', userMessageUuid: uuid, origin: 'human' }, attribution);
   }
 
   // ---------------------------------------------------------------------------------------------------------------------
@@ -422,12 +430,8 @@ export class Normalizer {
       out.emit({ kind: 'user.message', messageUuid: uuid, content, isReplay: false, isSynthetic: true, origin: 'bash_echo', bash: null }, main);
       return;
     }
-    if (this.state.currentTurn === null) {
-      this.state.currentTurn = { origin: 'human', userMessageUuids: uuid === null ? [] : [uuid], startedAt: out.at, acceptedAt: null };
-      out.emit({ kind: 'turn.started', userMessageUuid: uuid, origin: 'human' }, main);
-    } else if (uuid !== null) {
-      this.state.currentTurn.userMessageUuids.push(uuid); // a steer into the open turn
-    }
+    // no turn opens at the write: the engine's `started` for this uuid opens it (promptLifecycle)
+    if (uuid !== null) this.state.unstartedPrompts.add(uuid);
     this.state.lastUserMessageUuid = uuid;
     out.emit({ kind: 'user.message', messageUuid: uuid, content, isReplay: false, isSynthetic: false, origin: 'human', bash: null }, main);
   }

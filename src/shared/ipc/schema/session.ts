@@ -70,7 +70,8 @@ const c3Commands = {
   'session.catalog': host(input({}), CatalogSchema),
   // the composer: sends, the app queue, steer, interrupt, answers, `!` and `#`
   'session.send': host(input({ content: SendContentSchema }), z.strictObject({ messageUuid: MessageUuidSchema.nullable(), disposition: z.enum(['sent', 'queued']), queueId: z.string() })),
-  'session.steer': host(input({ content: SendContentSchema }), MessageUuidOutput),
+  // priority: 'now' (the default) preempts the running turn on 2.1.283; 'next' runs after it (coordinator ruling after M6 live 3.7)
+  'session.steer': host(input({ content: SendContentSchema, priority: z.enum(['now', 'next']).optional() }), MessageUuidOutput),
   'session.queue.list': host(input({}), QueueStateSchema),
   'session.queue.edit': host(input({ queueId: z.string(), content: SendContentSchema }), QueueEntrySchema),
   'session.queue.remove': host(input({ queueId: z.string() }), z.void()),

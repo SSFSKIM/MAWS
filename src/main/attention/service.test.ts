@@ -121,10 +121,12 @@ describe('attention service merges broker items with the derived kinds', () => {
     const { fire, batch, last } = setup();
     const failed = event('turn.ended', { isError: true, terminalReason: 'api_error', result: 'error_during_execution', resultText: null, isEchoReceipt: false, origin: 'human', errors: ['overloaded'] });
     const hard = event('turn.ended', { isError: false, terminalReason: 'prompt_too_long', result: 'success', resultText: null, isEchoReceipt: false, origin: 'human', errors: [] });
-    const fine = event('turn.ended', { isError: false, terminalReason: 'aborted_streaming', result: 'success', resultText: null, isEchoReceipt: false, origin: 'human', errors: [] });
+    // a user abort is not a failure, and the wire marks every abort is_error: true (3.8's aborted_streaming; pass3/plan-outcomes seq 510 aborted_tools)
+    const fine = event('turn.ended', { isError: true, terminalReason: 'aborted_streaming', result: 'error_during_execution', resultText: null, isEchoReceipt: false, origin: 'human', errors: [] });
+    const aborted = event('turn.ended', { isError: true, terminalReason: 'aborted_tools', result: 'error_during_execution', resultText: null, isEchoReceipt: false, origin: 'human', errors: [] });
     const task = event('task.notification', { taskId: 'task-1', toolUseId: null, status: 'failed', summary: 'npm test exited 1', outputFile: null, reason: null });
     const unavailable = event('tool.result', { toolUseId: 'toolu_7', denial: 'automode-unavailable' });
-    batch(failed, hard, fine, task, unavailable);
+    batch(failed, hard, fine, aborted, task, unavailable);
     expect(last().map((i) => [i.kind, i.summary, i.request])).toEqual([
       ['error', 'Turn failed: api_error (overloaded)', { requestId: null, toolUseId: null, taskId: null, agentId: null }],
       ['error', 'Turn failed: prompt_too_long', { requestId: null, toolUseId: null, taskId: null, agentId: null }],

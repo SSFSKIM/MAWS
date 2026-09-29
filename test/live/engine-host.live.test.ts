@@ -4,20 +4,18 @@
 // registerEngineIpc; support/live-host.ts); 3.18 builds the EngineSession the launcher would, because host hooks have no
 // X2 path in P0. Skipped, never failed, when the gate says so. `MAWS_LIVE=1 pnpm test:live`.
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, type TestContext } from 'vitest';
 import type { SessionEvent } from '@shared/graph/events';
 import type { MessageUuid } from '@shared/graph/ids';
 import type { RequestAnswer } from '@shared/engine/answers';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
-import { captureShellEnvironment } from '@shared/host/shell-env';
 import { parseJournalRow, type JournalRow } from '@shared/wire/journal';
 import { getHooksListing } from '../../src/engine-host/controls';
 import { HostHookRegistry } from '../../src/engine-host/host-hooks';
 import { ENGINE_VERSION, RELAY_URL } from '../../src/engine-host/launch';
-import { exportFixture, frameInventory, LiveLedger, liveGate, liveSpec, turnAttribution, withRawProcess, type LiveContext } from './support/live';
+import { exportFixture, frameInventory, LiveLedger, liveGate, liveSpec, scratchConfigHome, turnAttribution, withRawProcess, type LiveContext } from './support/live';
 import { LiveHost, startDirectSession } from './support/live-host';
 
 const REPO_ROOT = resolve(__dirname, '../..');
@@ -369,6 +367,42 @@ describe('engine host live', () => {
     });
   }, LONG_CASE_MS);
 
+  // Fix wave (coordinator ruling on 3.7): what the engine does with `priority: 'next'` sent while a turn runs; the
+  // journal becomes pass3/steer-next.jsonl.
+  it('3.7n steer with priority next during a turn', async (ctx) => {
+    const g = live(ctx);
+    let journalPath = '';
+    await withHost(g, '3.7n', async (host) => {
+      const spec = liveSpec(g.scratch());
+      const { status } = await host.launch(spec);
+      journalPath = status.journalPath;
+      const s = sessionView(host, spec);
+      const first = await s.send(SLOW_COUNT(1));
+      await s.wait('tool.result', 'the first count');
+      const { messageUuid: next } = await host.call('session.steer', { appSessionId: s.id, content: 'Reply NEXT_OK', priority: 'next' });
+      const frame = outFrames(s.journal()).find((r) => r.frame.type === 'user' && r.frame.uuid === next)!;
+      const answered = await host.waitFor(() => mainTurnsEnded(s.events()).find((t) => t.userMessageUuids.includes(next as MessageUuid)), 'a result naming the next steer', LONG_CASE_MS - 60_000);
+      await host.waitFor(() => s.status().turn === null && s.status().queue.length === 0, 'an idle session', TURN_MS);
+      const events = s.events();
+      const name = (u: string | null) => (u === first.messageUuid ? 'first' : u === next ? 'next' : String(u));
+      const log: string[] = [];
+      for (const e of events) {
+        if (e.parentToolUseId !== null) continue;
+        if (e.kind === 'turn.started') log.push(`start ${e.seq} ${name(e.userMessageUuid)}`);
+        else if (e.kind === 'turn.ended' && !e.isEchoReceipt) log.push(`end ${e.seq} ${e.terminalReason} [${e.userMessageUuids.map(name).join(',')}] ${JSON.stringify(e.resultText?.slice(-30))}`);
+        else if (e.kind === 'command.lifecycle') log.push(`lifecycle ${e.seq} ${e.state} ${name(e.commandUuid)}`);
+      }
+      console.log(`   next steer out seq ${frame.seq} priority ${String(frame.frame.priority)}`);
+      console.log(`   ${log.join(' | ')}`);
+      const firstEnd = mainTurnsEnded(events).find((t) => t.userMessageUuids.includes(first.messageUuid!))!;
+      console.log(`   first turn ended seq ${firstEnd.seq} ${firstEnd.terminalReason}; next answered seq ${answered.seq} ${JSON.stringify(answered.resultText)}`);
+      expect(frame.frame.priority).toBe('next');
+      expect(answered.resultText).toContain('NEXT_OK');
+      expect(turnAttribution(events)).toEqual([]); // each reply under its own prompt's turn, whatever the engine chose
+    });
+    exportTo('steer-next', journalPath, g);
+  }, LONG_CASE_MS);
+
   it('3.8 interrupt, then resume the queue', async (ctx) => {
     const g = live(ctx);
     await withHost(g, '3.8', async (host) => {
@@ -695,10 +729,19 @@ describe('engine host live', () => {
       const afterNull = await host.call('session.getSettings', { appSessionId: id });
       console.log(`   effortLevel after low: ${JSON.stringify((afterLow.effective as { effortLevel?: unknown }).effortLevel)}; after null: ${JSON.stringify((afterNull.effective as { effortLevel?: unknown }).effortLevel)} (setEffort ok ${effort})`);
       await observe('session.setThinking', { appSessionId: id, maxThinkingTokens: 4096, display: 'summarized' });
+    });
+    // `set_cwd` with trust records the directory as trusted in the config home's `.claude.json`: it persists, so it runs
+    // under a scratch config home only (M6 review; the coordinator's live-acceptance rule). No model turn.
+    await withHost(g, '3.17 (set_cwd trust, scratch home)', async (host) => {
+      const cwd = g.scratch();
+      const spec = liveSpec(cwd);
+      await host.launch(spec);
       const sub = join(realpathSync(cwd), 'sub');
       mkdirSync(sub);
-      await observe('session.setCwd', { appSessionId: id, path: sub, trust: { accepted: true, directory: sub } });
-    });
+      const res = await host.callRaw('session.setCwd', { appSessionId: spec.appSessionId, path: sub, trust: { accepted: true, directory: sub } });
+      console.log(`   observe session.setCwd (scratch home) → ${JSON.stringify(res.ok ? res.value : res.error)}`);
+      expect(res).toMatchObject({ ok: true, value: { status: 'ok', cwd: sub } });
+    }, new LiveHost({ userData: g.userData, configHome: scratchConfigHome(), controls: ['set_cwd:trust'] }));
   });
 
   it('3.18 host hook round trip', async (ctx) => {
@@ -777,9 +820,7 @@ describe('engine host live', () => {
       denied = deny.includes('ExitPlanMode');
       console.log(`   owner settings deny ${JSON.stringify(deny)}${denied ? ': plan approval cannot occur under them; running under a scratch user config' : ''}`);
     });
-    const configDir = mkdtempSync(join(tmpdir(), 'maws-live-config-'));
-    writeFileSync(join(configDir, 'settings.json'), '{}\n');
-    const scratchHost = new LiveHost({ userData: g.userData, captureEnv: async () => ({ ...(await captureShellEnvironment()), ...(denied ? { CLAUDE_CONFIG_DIR: configDir } : {}) }) });
+    const scratchHost = new LiveHost({ userData: g.userData, configHome: denied ? scratchConfigHome() : null });
     await withHost(g, '3.20', async (host) => {
       const spec = liveSpec(g.scratch());
       const { status } = await host.launch(spec);

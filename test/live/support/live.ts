@@ -49,6 +49,37 @@ export function redactJournal(text: string, env: Record<string, string> = string
     .join('\n');
 }
 
+// The config-home rule (coordinator, live-acceptance rule for every executor): a case under the owner's config home
+// observes the owner's real configuration and may only read; a control the engine persists into the config home
+// (`set_cwd` trust into `.claude.json`, an MCP toggle, a grant to a settings file, a `#` note to the user's CLAUDE.md)
+// runs under a scratch CLAUDE_CONFIG_DIR only. A case declares the persisting controls it will issue; the host checks the
+// declaration before anything spawns and refuses an undeclared one at the call.
+export const PERSISTING_CONTROLS = ['set_cwd:trust', 'mcp_toggle', 'grant:local_settings', 'memory:user'] as const;
+export type PersistingControl = (typeof PERSISTING_CONTROLS)[number];
+
+// `configHome`: the scratch CLAUDE_CONFIG_DIR, or null for the owner's own home.
+export function assertConfigHomeSafe(plan: { configHome: string | null; controls: readonly PersistingControl[] }): void {
+  if (plan.configHome !== null || plan.controls.length === 0) return;
+  throw new Error(`live case refused before spawning: ${plan.controls.join(', ')} would persist into the owner's config home; run it under a scratch CLAUDE_CONFIG_DIR`);
+}
+
+// The persisting control an X2 call would issue, or null for everything that leaves the config home as it was.
+export function persistingControlOf(command: string, input: unknown): PersistingControl | null {
+  const i = input as { trust?: unknown; answer?: { kind?: string; scope?: string }; target?: { kind?: string } };
+  if (command === 'session.setCwd' && i.trust) return 'set_cwd:trust';
+  if (command === 'session.mcpToggle') return 'mcp_toggle';
+  if (command === 'session.answer' && i.answer?.kind === 'permission' && i.answer.scope === 'local_settings') return 'grant:local_settings';
+  if (command === 'session.memoryAppend' && i.target?.kind === 'user') return 'memory:user';
+  return null;
+}
+
+// A scratch config home: an empty user settings layer, so the owner's `~/.claude.json` and settings are never written.
+export function scratchConfigHome(): string {
+  const dir = mkdtempSync(join(tmpdir(), 'maws-live-config-'));
+  writeFileSync(join(dir, 'settings.json'), '{}\n');
+  return dir;
+}
+
 // The provenance every pass-3 fixture C3 exports carries first (M6).
 export const PROVENANCE = { charter: 'docs/charter.md', child: 'C3', pin: '87f8c7881119ea670901205dae35917d3751459c' } as const;
 

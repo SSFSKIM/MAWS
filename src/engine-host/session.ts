@@ -29,7 +29,7 @@ import { RELAY_URL, spawnMeta, type LaunchPlan } from './launch';
 import { Normalizer, type NormalizerWarning } from './normalizer';
 import { JournalClosed, OutboundWriter } from './outbound-writer';
 import { keepAliveReasons } from './process-table';
-import { MessageQueue } from './queue';
+import { MessageQueue, type SteerPriority } from './queue';
 import { ControlClient, ControlError } from './rpc';
 import { SessionStatusTracker, type Catalog } from './session-status';
 import { MemorySessionStateStore } from './store/memory-session-state-store';
@@ -168,8 +168,9 @@ export class EngineSession {
       store: this.store,
       write: writeFrame,
       meta: (frame) => this.record('meta', frame),
-      // a host sequence that writes its own prompts (clear and implement) holds the queue like an open turn
-      turnOpen: () => this.processState !== 'exited' && (this.normalizer.state.currentTurn !== null || this.clear !== null),
+      // a host sequence that writes its own prompts (clear and implement) holds the queue like an open turn, and so does a
+      // prompt written but not yet started (a `now` steer preempts the running turn and runs next: M6 live 3.7)
+      turnOpen: () => this.processState !== 'exited' && (this.normalizer.state.currentTurn !== null || this.normalizer.state.unstartedPrompts.size > 0 || this.clear !== null),
       canWrite: () => this.processState === 'ready',
       onChange: (queue) => {
         this.emit('queue', queue);
@@ -208,8 +209,8 @@ export class EngineSession {
     return { messageUuid: entry.messageUuid, disposition, queueId: entry.queueId, entry };
   }
 
-  steer(content: SendContent): Promise<{ messageUuid: MessageUuid }> {
-    return this.queue.steer(content);
+  steer(content: SendContent, opts: { priority?: SteerPriority } = {}): Promise<{ messageUuid: MessageUuid }> {
+    return this.queue.steer(content, opts);
   }
 
   // Pauses the app queue first ("queue paused because you interrupted"), so the turn.ended the interrupt causes
@@ -598,7 +599,8 @@ export class EngineSession {
     const rows = (title: string) => status.sections.find((s) => s.title === title)?.rows ?? [];
     const baseUrl = rows('Session').find((r) => r.label === 'Anthropic base URL')?.value ?? null;
     const server = rows('Environment').find((r) => r.label === 'Auto mode server')?.value;
-    const autoModeServer = server === 'Enabled' ? 'enabled' : server === 'Disabled' ? 'disabled' : 'unknown';
+    // the row follows the current mode (it reads Disabled in `default`: M6 live 3.9), so it names the lane only in auto
+    const autoModeServer = this.tracker.effectiveMode !== 'auto' ? this.tracker.gateway.autoModeServer : server === 'Enabled' ? 'enabled' : server === 'Disabled' ? 'disabled' : 'unknown';
     const expected = this.plan.env.ANTHROPIC_BASE_URL ?? RELAY_URL;
     const verified = this.plan.gateway === 'gateway' ? (baseUrl === expected ? 'routed' : 'mismatch') : baseUrl === null ? 'direct' : 'mismatch';
     const wasMismatch = this.tracker.gateway.verified === 'mismatch';

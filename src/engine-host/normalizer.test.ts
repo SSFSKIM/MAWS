@@ -40,70 +40,83 @@ const result = (extra: Record<string, unknown> = {}) => ({
   usage: { input_tokens: 1, output_tokens: 2, cache_read_input_tokens: 3, cache_creation_input_tokens: 4, output_tokens_details: { thinking_tokens: 5 } },
   modelUsage: { m: {} }, permission_denials: [], result: 'OK', terminal_reason: 'completed', origin: { kind: 'human' }, user_message_uuids: ['u-1'], result_index: 0, uuid: 'r-1', ...extra,
 });
+const startedIn = (uuid: string) => ({ direction: 'in' as const, frame: { type: 'command_lifecycle', command_uuid: uuid, state: 'started', uuid: `s-${uuid}`, session_id: 'sess-1' } });
 const userOut = (uuid: string, extra: Record<string, unknown> = {}) => ({ type: 'user', uuid, message: { role: 'user', content: 'hi' }, parent_tool_use_id: null, origin: { kind: 'human' }, ...extra });
 
 describe('normaliser: ids, turns and the human prompt bubble', () => {
   it('derives ids from the journal row, at from the frame timestamp when present, and sessionId from the frames', () => {
     const n = make({ sessionId: null });
-    const events = feed(n, [outRow(userOut('u-1')), inRow({ ...initFrame }, '2026-09-28T11:00:00.000Z'), inRow({ type: 'user', uuid: 'e-1', session_id: 'sess-1', timestamp: '2026-09-28T12:00:00.000Z', message: { role: 'user', content: '[Request interrupted by user]' } })]);
-    expect(events.map((e) => e.id)).toEqual(['app-1:LAUNCH01:1:0', 'app-1:LAUNCH01:1:1', 'app-1:LAUNCH01:2:0', 'app-1:LAUNCH01:3:0']);
-    expect(events.map((e) => e.seq)).toEqual([1, 1, 2, 3]);
+    const events = feed(n, [outRow(userOut('u-1')), startedIn('u-1'), inRow({ ...initFrame }, '2026-09-28T11:00:00.000Z'), inRow({ type: 'user', uuid: 'e-1', session_id: 'sess-1', timestamp: '2026-09-28T12:00:00.000Z', message: { role: 'user', content: '[Request interrupted by user]' } })]);
+    expect(events.map((e) => e.id)).toEqual(['app-1:LAUNCH01:1:0', 'app-1:LAUNCH01:2:0', 'app-1:LAUNCH01:2:1', 'app-1:LAUNCH01:3:0', 'app-1:LAUNCH01:4:0']);
+    expect(events.map((e) => e.seq)).toEqual([1, 2, 2, 3, 4]);
     expect(events[0]!.at).toBe(AT);
-    expect(events[3]!.at).toBe('2026-09-28T12:00:00.000Z');
-    expect(events[2]!.sessionId).toBe('sess-1');
+    expect(events[4]!.at).toBe('2026-09-28T12:00:00.000Z');
+    expect(events[3]!.sessionId).toBe('sess-1');
     expect(n.state.sessionId).toBe('sess-1');
   });
 
-  it('opens a human turn at the querying out frame, marks acceptance at system/init, and closes at result', () => {
+  it("shows the prompt at the write, opens its human turn at the engine's started lifecycle, adds nothing at system/init, and closes at result", () => {
     const n = make();
-    const events = feed(n, [outRow(userOut('u-1')), inRow(initFrame), inRow(result())]);
-    expect(kinds(events)).toEqual(['turn.started', 'user.message', 'session.init', 'turn.ended', 'usage.sample']);
-    expect(events[0]).toMatchObject({ kind: 'turn.started', userMessageUuid: 'u-1', origin: 'human' });
-    expect(events[1]).toMatchObject({ kind: 'user.message', messageUuid: 'u-1', origin: 'human', isReplay: false, isSynthetic: false, bash: null, content: 'hi' });
-    expect(events[3]).toMatchObject({ kind: 'turn.ended', isEchoReceipt: false, origin: 'human', terminalReason: 'completed', resultText: 'OK', userMessageUuids: ['u-1'], usage: { inputTokens: 1, outputTokens: 2, cacheReadInputTokens: 3, cacheCreationInputTokens: 4, thinkingTokens: 5 } });
-    expect(events[4]).toMatchObject({ kind: 'usage.sample', source: 'result', costUsd: 0.01, modelUsage: { m: {} } });
+    const events = feed(n, [outRow(userOut('u-1')), startedIn('u-1'), inRow(initFrame), inRow(result())]);
+    expect(kinds(events)).toEqual(['user.message', 'command.lifecycle', 'turn.started', 'session.init', 'turn.ended', 'usage.sample']);
+    expect(events[0]).toMatchObject({ kind: 'user.message', seq: 1, messageUuid: 'u-1', origin: 'human', isReplay: false, isSynthetic: false, bash: null, content: 'hi' });
+    expect(events[2]).toMatchObject({ kind: 'turn.started', seq: 2, userMessageUuid: 'u-1', origin: 'human' });
+    expect(events[4]).toMatchObject({ kind: 'turn.ended', isEchoReceipt: false, origin: 'human', terminalReason: 'completed', resultText: 'OK', userMessageUuids: ['u-1'], usage: { inputTokens: 1, outputTokens: 2, cacheReadInputTokens: 3, cacheCreationInputTokens: 4, thinkingTokens: 5 } });
+    expect(events[5]).toMatchObject({ kind: 'usage.sample', source: 'result', costUsd: 0.01, modelUsage: { m: {} } });
     expect(n.state.currentTurn).toBeNull();
+    expect(n.state.unstartedPrompts.size).toBe(0);
   });
 
-  it('a steer written into an open turn adds its uuid and opens nothing; the engine replay of a prompt is suppressed once', () => {
+  it('a written prompt waits unstarted (no turn) until its started lifecycle; startedAt equals acceptedAt', () => {
+    const n = make();
+    feed(n, [outRow(userOut('u-1'))]);
+    expect(n.state.currentTurn).toBeNull();
+    expect([...n.state.unstartedPrompts]).toEqual(['u-1']);
+    feed(n, [inRow({ type: 'command_lifecycle', command_uuid: 'u-1', state: 'queued', uuid: 'q', session_id: 'sess-1' })], 2);
+    expect(n.state.currentTurn).toBeNull();
+    feed(n, [startedIn('u-1')], 3);
+    expect(n.state.currentTurn).toMatchObject({ origin: 'human', userMessageUuids: ['u-1'], startedAt: AT, acceptedAt: AT });
+    expect(n.state.unstartedPrompts.size).toBe(0);
+  });
+
+  it("a now steer that preempts the running turn opens its own turn at its own started (live 3.7 shape); the engine's replay of a prompt is suppressed once", () => {
     const n = make();
     const events = feed(n, [
-      outRow(userOut('u-1')), inRow(initFrame), outRow(userOut('u-2', { priority: 'now' })),
+      outRow(userOut('u-1')), startedIn('u-1'), inRow(initFrame), outRow(userOut('u-2', { priority: 'now' })),
       inRow({ type: 'user', uuid: 'u-1', session_id: 'sess-1', isReplay: true, origin: { kind: 'human' }, message: { role: 'user', content: 'hi' } }),
       inRow({ type: 'user', uuid: 'u-1', session_id: 'sess-1', isReplay: true, origin: { kind: 'human' }, message: { role: 'user', content: 'hi' } }),
+      inRow(result({ terminal_reason: 'aborted_streaming', result: '', user_message_uuids: ['u-1'] })), // the preempted turn
+      inRow({ type: 'command_lifecycle', command_uuid: 'u-1', state: 'cancelled', uuid: 'l-c', session_id: 'sess-1' }),
+      startedIn('u-2'), inRow(initFrame), inRow(result({ result: 'STEERED', user_message_uuids: ['u-2'] })),
     ]);
-    expect(kinds(events)).toEqual(['turn.started', 'user.message', 'session.init', 'user.message', 'user.message']);
-    expect(n.state.currentTurn?.userMessageUuids).toEqual(['u-1', 'u-2']);
-    expect(n.state.currentTurn?.acceptedAt).toBe(AT);
-    expect(events[4]).toMatchObject({ kind: 'user.message', messageUuid: 'u-1', isReplay: true }); // the second replay is not ours to suppress
+    const turns = events.filter((e) => e.kind === 'turn.started' || e.kind === 'turn.ended').map((e) => (e.kind === 'turn.started' ? `start ${e.seq} ${e.userMessageUuid}` : `end ${e.seq} ${(e as { userMessageUuids: string[] }).userMessageUuids.join(',')}`));
+    expect(turns).toEqual(['start 2 u-1', 'end 7 u-1', 'start 9 u-2', 'end 11 u-2']);
+    expect(only(events, 'user.message').map((e) => [e.seq, e.messageUuid, e.isReplay])).toEqual([[1, 'u-1', false], [4, 'u-2', false], [6, 'u-1', true]]); // the second replay is not ours to suppress
   });
 
-  it('a prompt dropped before it ran (cancelled, discarded or refused while its turn is unaccepted) closes that turn from the lifecycle row', () => {
+  it('a prompt cancelled, discarded or refused before it started has no turn to close: only its command.lifecycle marks it', () => {
     for (const state of ['cancelled', 'discarded', 'refused'] as const) {
       const n = make();
       const events = feed(n, [outRow(userOut('u-1')), inRow({ type: 'command_lifecycle', command_uuid: 'u-1', state, uuid: 'l-1', session_id: 'sess-1' })]);
-      expect(kinds(events)).toEqual(['turn.started', 'user.message', 'command.lifecycle', 'turn.ended']);
-      expect(events[3]).toEqual({
-        id: 'app-1:LAUNCH01:2:1', sessionId: 'sess-1', at: AT, seq: 2, agentId: null, parentToolUseId: null, kind: 'turn.ended',
-        result: 'cancelled', isError: false, terminalReason: 'cancelled', resultText: null, durationMs: 0, numTurns: 0, costUsd: 0,
-        usage: { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, thinkingTokens: 0 }, permissionDenials: [], errors: [],
-        userMessageUuids: ['u-1'], origin: 'human', resultIndex: null, isEchoReceipt: false,
-      });
+      expect(kinds(events)).toEqual(['user.message', 'command.lifecycle']);
       expect(n.state.currentTurn).toBeNull();
+      expect(n.state.unstartedPrompts.size).toBe(0);
     }
   });
 
-  it('a cancelled steer inside a running turn, a cancel for an accepted turn, and a cancel after the result close nothing', () => {
+  it('a steer cancelled inside a running turn (pass1/queue-and-interrupt 146/191) and a cancel after the result close nothing; two prompts drained together share one turn', () => {
     const lifecycleIn = (uuid: string, state = 'cancelled') => inRow({ type: 'command_lifecycle', command_uuid: uuid, state, uuid: `l-${uuid}`, session_id: 'sess-1' });
-    const steer = make(); // pass1/queue-and-interrupt seq 146/191: the steer's cancel names a uuid that did not open the turn
-    expect(kinds(feed(steer, [outRow(userOut('u-1')), inRow(initFrame), outRow(userOut('u-2')), lifecycleIn('u-2')]))).toEqual(['turn.started', 'user.message', 'session.init', 'user.message', 'command.lifecycle']);
-    expect(steer.state.currentTurn).not.toBeNull();
-    const accepted = make(); // accepted by system/init: its own result closes it (pass2/per-task-stop-on 66 → 67)
-    expect(kinds(feed(accepted, [outRow(userOut('u-1')), inRow(initFrame), lifecycleIn('u-1')]))).toEqual(['turn.started', 'user.message', 'session.init', 'command.lifecycle']);
+    const steer = make();
+    expect(kinds(feed(steer, [outRow(userOut('u-1')), startedIn('u-1'), inRow(initFrame), outRow(userOut('u-2')), lifecycleIn('u-2')]))).toEqual(['user.message', 'command.lifecycle', 'turn.started', 'session.init', 'user.message', 'command.lifecycle']);
+    expect(steer.state.currentTurn?.userMessageUuids).toEqual(['u-1']);
+    const accepted = make(); // a started prompt's own result closes it (pass2/per-task-stop-on 66 → 67)
+    expect(kinds(feed(accepted, [outRow(userOut('u-1')), startedIn('u-1'), inRow(initFrame), lifecycleIn('u-1')])).slice(-1)).toEqual(['command.lifecycle']);
+    expect(accepted.state.currentTurn).not.toBeNull();
     const after = make(); // pass1/queue-and-interrupt seq 200, pass2/auto-unrouted 14: after the result, a no-op
-    expect(kinds(feed(after, [outRow(userOut('u-1')), inRow(initFrame), inRow(result()), lifecycleIn('u-1')])).slice(-1)).toEqual(['command.lifecycle']);
-    const completed = make(); // only the three drop states close
-    expect(kinds(feed(completed, [outRow(userOut('u-1')), lifecycleIn('u-1', 'queued')]))).toEqual(['turn.started', 'user.message', 'command.lifecycle']);
+    expect(kinds(feed(after, [outRow(userOut('u-1')), startedIn('u-1'), inRow(initFrame), inRow(result()), lifecycleIn('u-1')])).slice(-1)).toEqual(['command.lifecycle']);
+    const drained = make();
+    feed(drained, [outRow(userOut('u-1')), outRow(userOut('u-2')), startedIn('u-1'), startedIn('u-2')]);
+    expect(drained.state.currentTurn?.userMessageUuids).toEqual(['u-1', 'u-2']);
   });
 
   it('system/init with no open turn opens an engine-initiated one, closed by a task-notification result', () => {
@@ -117,12 +130,12 @@ describe('normaliser: ids, turns and the human prompt bubble', () => {
   it('the ! echo opens no turn, its system/init opens nothing, and its empty result is the receipt', () => {
     const n = make();
     const echo = { type: 'user', uuid: 'e-1', shouldQuery: false, parent_tool_use_id: null, origin: { kind: 'human' }, message: { role: 'user', content: '<bash-input>ls</bash-input>\n<bash-stdout>a</bash-stdout>' } };
-    const events = feed(n, [outRow(echo), inRow(initFrame), inRow(result({ num_turns: 0, terminal_reason: null, result: undefined, user_message_uuids: ['e-1'] })), outRow(userOut('u-9'))]);
-    expect(kinds(events)).toEqual(['user.message', 'session.init', 'turn.ended', 'usage.sample', 'turn.started', 'user.message']);
+    const events = feed(n, [outRow(echo), inRow(initFrame), inRow(result({ num_turns: 0, terminal_reason: null, result: undefined, user_message_uuids: ['e-1'] })), outRow(userOut('u-9')), startedIn('u-9')]);
+    expect(kinds(events)).toEqual(['user.message', 'session.init', 'turn.ended', 'usage.sample', 'user.message', 'command.lifecycle', 'turn.started']);
     expect(events[0]).toMatchObject({ kind: 'user.message', messageUuid: 'e-1', origin: 'bash_echo', isSynthetic: true, isReplay: false, bash: null });
     expect(events[2]).toMatchObject({ kind: 'turn.ended', isEchoReceipt: true });
     expect(n.state.pendingEcho).toBeNull();
-    expect(events[4]).toMatchObject({ kind: 'turn.started', origin: 'human' });
+    expect(events[6]).toMatchObject({ kind: 'turn.started', origin: 'human', userMessageUuid: 'u-9' });
   });
 
   it('bash-tagged replayed user frames fill the bash field with the tags stripped', () => {
@@ -158,7 +171,7 @@ describe('normaliser: tools, blocks and safeguards', () => {
   it('pairs deltas and completes by the stream index per message id; a signature delta yields nothing', () => {
     const n = make();
     const events = feed(n, [
-      outRow(userOut('u-1')), messageStart, start(0, 'thinking'),
+      outRow(userOut('u-1')), startedIn('u-1'), messageStart, start(0, 'thinking'),
       inRow({ type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'hm' } }, session_id: 'sess-1', parent_tool_use_id: null, uuid: 'd0' }),
       inRow({ type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'signature_delta', signature: 'sig' } }, session_id: 'sess-1', parent_tool_use_id: null, uuid: 'd0s' }),
       assistant('msg_1', [{ type: 'thinking', thinking: 'hm', signature: 'sig' }]),

@@ -140,7 +140,8 @@ export function startAttentionService(deps: AttentionServiceDeps): AttentionServ
           if (event.origin === 'human') retireDerived(state, RETIRED_BY_NEXT_TURN);
           break;
         case 'turn.ended':
-          if (event.isEchoReceipt || !(event.isError || HARD_FAILURE_REASONS.has(event.terminalReason ?? ''))) break;
+          // a user abort is not a failure: the wire marks every abort is_error: true (M6 review; pass3/plan-outcomes seq 510)
+          if (event.isEchoReceipt || event.terminalReason?.startsWith('aborted_') || !(event.isError || HARD_FAILURE_REASONS.has(event.terminalReason ?? ''))) break;
           derive(id, state, event.id, { ...base, kind: 'error', summary: `Turn failed: ${event.terminalReason ?? event.result}${event.errors[0] ? ` (${event.errors[0]})` : ''}` });
           break;
         case 'task.notification':

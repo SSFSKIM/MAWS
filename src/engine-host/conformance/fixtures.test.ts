@@ -40,8 +40,8 @@ describe('normaliser replays every probe fixture into the X1 graph', () => {
     expect(listJournals('pass1')).toHaveLength(10);
     expect(listJournals('pass2')).toHaveLength(30);
     // C10's fork-worktree and C8c's workspace-diff probes (copied from master at 644ea7a)
-    // and C3's own live recordings (M6: rewind-files from 3.12, plan-outcomes from 3.20)
-    expect(listJournals('pass3')).toEqual(['fork-worktree-fork', 'fork-worktree-resume-in-b', 'fork-worktree-start', 'plan-outcomes', 'rewind-files', 'workspace-diff-branch', 'workspace-diff-dirty']);
+    // and C3's own live recordings (M6: rewind-files from 3.12, plan-outcomes from 3.20, steer-now from 3.7, engine-turn-release from 3.10)
+    expect(listJournals('pass3')).toEqual(['engine-turn-release', 'fork-worktree-fork', 'fork-worktree-resume-in-b', 'fork-worktree-start', 'plan-outcomes', 'rewind-files', 'steer-now', 'workspace-diff-branch', 'workspace-diff-dirty']);
   });
 
   for (const pass of FIXTURE_PASSES) {
@@ -97,12 +97,13 @@ describe('normaliser: per-fixture graph facts (C2 findings restated)', () => {
     expect(ofKind(events, 'process.exited')).toMatchObject([{ code: 0, reason: 'unknown' }]);
   });
 
-  it('pass1/permission-roundtrip: the prompt bubble derives from the out rows 4, 94, 192 before each system/init', async () => {
+  it("pass1/permission-roundtrip: the prompt bubble derives from the out rows 4, 94, 192; each turn opens at the engine's started lifecycle 6, 97, 195", async () => {
     const { events } = await run('pass1', 'permission-roundtrip');
     const starts = ofKind(events, 'turn.started');
-    expect(starts.map((e) => [e.seq, e.origin, idSuffix(e)])).toEqual([[4, 'human', '4:0'], [94, 'human', '94:0'], [192, 'human', '192:0']]);
+    // coordinator ruling after M6 live 3.7: the turn boundary is the engine's acceptance, the bubble the host's write
+    expect(starts.map((e) => [e.seq, e.origin, idSuffix(e)])).toEqual([[6, 'human', '6:1'], [97, 'human', '97:1'], [195, 'human', '195:1']]);
     const humans = ofKind(events, 'user.message').filter((e) => e.origin === 'human');
-    expect(humans.map((e) => [e.seq, e.isReplay, idSuffix(e)])).toEqual([[4, false, '4:1'], [94, false, '94:1'], [192, false, '192:1']]);
+    expect(humans.map((e) => [e.seq, e.isReplay, idSuffix(e)])).toEqual([[4, false, '4:0'], [94, false, '94:0'], [192, false, '192:0']]);
     expect(starts.map((e) => e.userMessageUuid)).toEqual(humans.map((e) => e.messageUuid));
     const inits = ofKind(events, 'session.init').map((e) => e.seq);
     expect(inits).toEqual([7, 98, 196]);
@@ -140,6 +141,10 @@ describe('normaliser: per-fixture graph facts (C2 findings restated)', () => {
     expect(bash.map((e) => e.bash)).toEqual([{ part: 'input', command: 'printf BASH_MODE_OK' }, { part: 'output', stdout: 'BASH_MODE_OK', stderr: '', exitCode: 0 }]);
     expect(bash.every((e) => seq(e) > seq(ends[1]))).toBe(true);
     expect(ofKind(events, 'command.lifecycle').some((e) => e.state === 'cancelled')).toBe(true);
+    // the steer written at 146 never started (cancelled at 191): it opens no turn and joins none; 191 and 200 close nothing
+    expect(ofKind(events, 'turn.started').map((e) => [e.seq, e.origin, e.userMessageUuid])).toEqual([[6, 'human', 'a5bf8381-f5c0-4394-88a8-4b04c12e4911'], [202, 'human', 'e88214f8-3ba3-4b4c-8e64-3be1595fcac0']]);
+    expect(ends[0]!.userMessageUuids).toEqual(['a5bf8381-f5c0-4394-88a8-4b04c12e4911']);
+    expect(ends.map((e) => e.seq).filter((n) => n === 191 || n === 200)).toEqual([]);
   });
 
   it('pass1/subagent: two subagents, child events attributed to the launch result agentId, two task-notification turns', async () => {
@@ -155,7 +160,7 @@ describe('normaliser: per-fixture graph facts (C2 findings restated)', () => {
     expect(childCompletes.length).toBeGreaterThan(0);
     expect(ofKind(events, 'subagent.finished')).toHaveLength(2);
     expect(ofKind(events, 'turn.ended').map((e) => e.origin)).toEqual(['human', 'task-notification', 'task-notification']);
-    expect(ofKind(events, 'turn.started').map((e) => [e.seq, e.origin])).toEqual([[4, 'human'], [355, 'engine'], [425, 'engine']]);
+    expect(ofKind(events, 'turn.started').map((e) => [e.seq, e.origin])).toEqual([[6, 'human'], [355, 'engine'], [425, 'engine']]);
     // block-index rule for both kinds at once
     const starts = new Map<string, { index: number; type: string }[]>();
     for (const row of loadJournal('pass1', 'subagent')) {
@@ -183,7 +188,7 @@ describe('normaliser: per-fixture graph facts (C2 findings restated)', () => {
     expect(ofKind(events, 'workflow.progress')).toHaveLength(3);
     expect(ofKind(events, 'task.notification')).toMatchObject([{ status: 'completed' }]);
     expect(ofKind(events, 'turn.ended').map((e) => e.origin)).toEqual(['human', 'task-notification']);
-    expect(ofKind(events, 'turn.started').map((e) => [e.seq, e.origin])).toEqual([[5, 'human'], [97, 'engine']]);
+    expect(ofKind(events, 'turn.started').map((e) => [e.seq, e.origin])).toEqual([[7, 'human'], [97, 'engine']]);
   });
 
   it('pass2/rewind yields exactly one boundary.rewind from seq 42 and the typed rewind responses parse', async () => {
@@ -245,6 +250,55 @@ describe('normaliser: per-fixture graph facts (C2 findings restated)', () => {
     expect(implement!.seq).toBeGreaterThan(524);
     expect(text(ofKind(events, 'user.message').find((e) => e.messageUuid === '8e7fbc83-df00-48bf-a05a-6b1592924ec4')?.content)).toMatch(/^Implement this plan:\n\n# Plan: create second\.txt/);
     expect(ofKind(events, 'turn.ended').at(-1)).toMatchObject({ seq: 579, terminalReason: 'completed', userMessageUuids: ['8e7fbc83-df00-48bf-a05a-6b1592924ec4'] });
+  });
+
+  // Coordinator ruling after M6 live 3.7: a human turn opens at the engine's `started` lifecycle for its prompt.
+  const turnLog = (events: SessionEvent[]) =>
+    events.filter((e) => e.parentToolUseId === null && ((e.kind === 'turn.ended' && !e.isEchoReceipt) || e.kind === 'turn.started')).map((e) =>
+      e.kind === 'turn.started' ? `start ${e.seq} ${e.origin} ${e.userMessageUuid ?? '-'}` : `end ${e.seq} ${(e as Extract<SessionEvent, { kind: 'turn.ended' }>).origin} ${(e as Extract<SessionEvent, { kind: 'turn.ended' }>).userMessageUuids.join(',') || '-'}`,
+    );
+
+  it("pass3/steer-now (live 3.7): a now steer preempts the running turn and its reply is attributed to the steer's own turn, the queued prompt's to its own", async () => {
+    const { events, rows } = await run('pass3', 'steer-now');
+    const [count, steer, after] = ['07d1e738-414a-4630-a243-a1ee35210326', '55744f27-09fb-4141-89d5-5f0adfddffca', '6ebd79ba-a46b-4442-ac6a-716532177882'];
+    expect((rows.find((r) => r.seq === 46)!.frame as { priority?: string }).priority).toBe('now');
+    expect(turnLog(events)).toEqual([
+      `start 19 human ${count}`, `end 48 human ${count}`, // preempted: aborted_streaming, naming only the counting prompt
+      `start 55 human ${steer}`, `end 73 human ${steer}`, // the steer's own started opens its own turn
+      `start 78 human ${after}`, `end 95 human ${after}`,
+    ]);
+    expect(ofKind(events, 'turn.ended').map((e) => e.terminalReason)).toEqual(['aborted_streaming', 'completed', 'completed']);
+    expect(ofKind(events, 'turn.ended')[1]!.resultText).toContain('STEERED');
+    expect(ofKind(events, 'turn.ended')[2]!.resultText).toContain('AFTER');
+    // the prompts show at the write: the bubbles at 16, 46, 53
+    expect(ofKind(events, 'user.message').filter((e) => e.origin === 'human').map((e) => [e.seq, e.messageUuid])).toEqual([[16, count], [46, steer], [53, after]]);
+  });
+
+  it('pass3/engine-turn-release (live 3.10): a pending task-notification turn runs ahead of a prompt released at idle, and each reply keeps its own turn', async () => {
+    const { events } = await run('pass3', 'engine-turn-release');
+    const [first, a, b] = ['458685fe-08d6-4f66-82c0-0ad0a63245ae', '562abf01-f74a-4656-b617-4166196def6e', '1a5ce608-758a-47bf-95c1-d259be2ca524'];
+    expect(turnLog(events)).toEqual([
+      `start 19 human ${first}`, `end 91 human ${first}`,
+      `start 99 human ${a}`, `end 116 human ${a}`,
+      'start 124 engine -', 'end 150 task-notification -',
+      'start 154 engine -', 'end 175 task-notification -', // B was written at 152; the second notification ran first
+      `start 176 human ${b}`, `end 193 human ${b}`,
+    ]);
+    expect(ofKind(events, 'task.notification').map((e) => e.status)).toEqual(['completed', 'completed']);
+  });
+
+  it("an origin.kind 'peer' passes through as the string 'peer' (live 3.5: journal live-d652796d/k7lvflg3.jsonl, results at seq 156 and 185)", async () => {
+    const { Normalizer } = await import('../normalizer');
+    const n = new Normalizer({ appSessionId: 'conformance' as never, launchId: 'PEER0001', sessionId: 's' as never });
+    const at = '2026-09-28T10:00:00.000Z';
+    const [init] = [{ type: 'system', subtype: 'init', cwd: '/w', session_id: 's', tools: [], mcp_servers: [], model: 'm', permissionMode: 'auto', slash_commands: [], claude_code_version: '2.1.283', uuid: 'i' }];
+    const peerResult = { type: 'result', subtype: 'success', session_id: 's', is_error: false, duration_ms: 1, duration_api_ms: 1, num_turns: 1, total_cost_usd: 0, usage: {}, permission_denials: [], result: 'ok', terminal_reason: 'completed', origin: { kind: 'peer' }, user_message_uuids: [], uuid: 'r' };
+    const peerUser = { type: 'user', uuid: 'pu', session_id: 's', isReplay: false, origin: { kind: 'peer' }, message: { role: 'user', content: 'from a subagent' } };
+    const events = [init, peerUser, peerResult].flatMap((frame, i) => n.push({ seq: i + 1, direction: 'in', at, frame }));
+    expect(ofKind(events, 'turn.started')).toMatchObject([{ origin: 'engine' }]);
+    expect(ofKind(events, 'user.message')).toMatchObject([{ messageUuid: 'pu', origin: 'peer' }]);
+    expect(ofKind(events, 'turn.ended')).toMatchObject([{ origin: 'peer' }]);
+    for (const e of events) expect(SessionEventSchema.safeParse(e).success).toBe(true);
   });
 
   it("pass3/workspace-diff-*: every get_workspace_diff response parses with the typed schema (C8c's ask)", async () => {
@@ -330,7 +384,7 @@ describe('normaliser: per-fixture graph facts (C2 findings restated)', () => {
       [9, 'bash_echo', null, true, false],
       [16, 'human', null, false, false],
     ]);
-    expect(ofKind(events, 'turn.started').map((e) => [e.seq, e.origin])).toEqual([[16, 'human']]);
+    expect(ofKind(events, 'turn.started').map((e) => [e.seq, e.origin])).toEqual([[18, 'human']]); // the prompt's started lifecycle (written at 16)
     expect(ofKind(events, 'session.init').map((e) => e.seq)).toEqual([12, 19]);
     expect(ofKind(events, 'turn.ended').map((e) => [e.seq, e.isEchoReceipt])).toEqual([[13, true], [30, false]]);
     // the engine's replay of the prompt (seq 21, same uuid) is deduplicated

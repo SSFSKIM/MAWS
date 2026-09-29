@@ -150,7 +150,61 @@ describe('queue release never follows an engine-initiated turn', () => {
     const { messageUuid } = await s.session.steer('Stop counting and reply STEERED');
     expect(userOuts(s.journal.rows).at(-1)).toEqual({ type: 'user', uuid: messageUuid, message: { role: 'user', content: 'Stop counting and reply STEERED' }, parent_tool_use_id: null, origin: { kind: 'human' }, priority: 'now' });
     expect(s.session.queue.state.entries.map((e) => [e.content, e.state])).toEqual([['first', 'submitting'], ['queued', 'queued']]);
-    expect(s.session.status().turn?.userMessageUuids).toContain(messageUuid); // folded into the open turn, which opened nothing new
+    // not folded into the open turn: the steer waits unstarted and holds the queue until its own turn ends (coordinator ruling after M6 live 3.7)
+    expect(s.session.status().turn?.userMessageUuids ?? []).not.toContain(messageUuid);
+    expect(s.session.queue.busy).toBe(true);
+  });
+});
+
+describe('steer priority', () => {
+  it("writes the priority it is given ('now' by default, 'next' on request); promote keeps 'now'", async () => {
+    const s = scriptedSession();
+    await s.session.start();
+    await s.session.send('first');
+    await s.session.send('to promote');
+    const now = await s.session.steer('default');
+    const next = await s.session.steer('Reply NEXT_OK', { priority: 'next' });
+    await s.session.queue.promote(s.session.queue.state.entries.find((e) => e.content === 'to promote')!.queueId);
+    const outs = userOuts(s.journal.rows);
+    expect(outs.slice(1).map((f) => [f.message.content, f.priority])).toEqual([['default', 'now'], ['Reply NEXT_OK', 'next'], ['to promote', 'now']]);
+    expect([now.messageUuid, next.messageUuid]).toEqual([outs[1]!.uuid, outs[2]!.uuid]);
+  });
+});
+
+describe('a now steer holds the queue until its own turn ends (coordinator ruling after M6 live 3.7)', () => {
+  it("the preempted turn's result releases nothing; the steer's own result releases the head, whose reply is its own turn", async () => {
+    const s = scriptedSession();
+    await s.session.start();
+    const lifecycle = (uuid: string, state: string) => s.transport.push({ type: 'command_lifecycle', command_uuid: uuid, state, uuid: `lc-${uuid}-${state}`, session_id: 's' });
+    const result = (uuids: string[], extra: Record<string, unknown> = {}) =>
+      s.transport.push({ type: 'result', subtype: 'success', session_id: 's', is_error: false, duration_ms: 1, num_turns: 1, total_cost_usd: 0, usage: {}, permission_denials: [], terminal_reason: 'completed', origin: { kind: 'human' }, user_message_uuids: uuids, ...extra });
+    const first = await s.session.send('Count to 8 slowly.');
+    lifecycle(first.messageUuid!, 'queued');
+    lifecycle(first.messageUuid!, 'started');
+    await flush();
+    const queued = await s.session.send('Reply with exactly AFTER');
+    expect(queued.disposition).toBe('queued');
+    const { messageUuid: steer } = await s.session.steer('Stop counting and reply STEERED');
+    // the live shape (pass3/steer-now seq 48 → 54 → 55): the running turn ends preempted, its command is cancelled, the steer starts
+    result([first.messageUuid!], { terminal_reason: 'aborted_streaming', result: '' });
+    await flush();
+    expect(userOuts(s.journal.rows).map((f) => f.message.content)).toEqual(['Count to 8 slowly.', 'Stop counting and reply STEERED']); // nothing released
+    expect(s.session.queue.busy).toBe(true);
+    lifecycle(first.messageUuid!, 'cancelled');
+    lifecycle(steer, 'started');
+    await flush();
+    expect(s.session.status().turn?.userMessageUuids).toEqual([steer]);
+    result([steer], { result: 'STEERED' });
+    await flush();
+    await flush();
+    const outs = userOuts(s.journal.rows);
+    expect(outs.map((f) => f.message.content)).toEqual(['Count to 8 slowly.', 'Stop counting and reply STEERED', 'Reply with exactly AFTER']);
+    const steerEnd = s.journal.rows.find((r) => r.direction === 'in' && (r.frame as { type?: string; user_message_uuids?: string[] }).user_message_uuids?.[0] === steer)!;
+    const release = s.journal.rows.find((r) => (r.frame as { event?: string; trigger?: string }).event === 'queue' && (r.frame as { trigger?: string }).trigger === 'turn_ended')!;
+    expect(release.seq).toBeGreaterThan(steerEnd.seq);
+    lifecycle(outs[2]!.uuid, 'started');
+    await flush();
+    expect(ofKind(s.events, 'turn.started').map((e) => e.userMessageUuid)).toEqual([first.messageUuid, steer, outs[2]!.uuid]);
   });
 });
 

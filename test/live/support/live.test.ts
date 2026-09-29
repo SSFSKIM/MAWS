@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { parseJournalRow, type JournalRow } from '@shared/wire/journal';
-import { exportFixture, frameInventory, journalCost, LiveLedger, liveSpec, PROVENANCE, turnAttribution } from './live';
+import { assertConfigHomeSafe, exportFixture, frameInventory, journalCost, LiveLedger, liveSpec, persistingControlOf, PROVENANCE, turnAttribution } from './live';
 import { LiveHost } from './live-host';
 
 const REPO_ROOT = resolve(__dirname, '../../..');
@@ -72,19 +72,23 @@ describe('live suite bookkeeping', () => {
   it('the live host drives the X2 surface through the host runtime: launch to ready, a send, its turn, a read, shutdown', async () => {
     const userData = mkdtempSync(join(tmpdir(), 'maws-live-host-'));
     const host = new LiveHost({ userData, replayEnabled: true, cwd: REPO_ROOT });
-    const spec = liveSpec('/tmp/maws-live-host', { appSessionId: 'live-host-replay' as never, replay: 'spikes/protocol-probe/fixtures/reads.jsonl', maxBudgetUsd: null });
-    const { status } = await host.launch(spec);
-    expect(status).toMatchObject({ process: 'ready', gateway: { verified: 'routed' } });
-    expect(await host.call('session.send', { appSessionId: spec.appSessionId, content: 'Reply with exactly OK' })).toMatchObject({ disposition: 'sent' });
-    const ended = await host.waitFor(() => host.events(spec.appSessionId).find((e) => e.kind === 'turn.ended'), 'turn.ended', 5_000);
-    expect(ended).toMatchObject({ resultText: 'OK', terminalReason: 'completed' });
-    const usage = await host.callRaw('session.getUsage', { appSessionId: spec.appSessionId });
-    expect(usage).toMatchObject({ ok: true, value: { subscription_type: null, rate_limits_available: expect.any(Boolean) } });
-    // an input the X2 schema refuses never reaches a handler: the runtime answers it
-    expect(await host.callRaw('session.status', { appSessionId: 42 } as never)).toMatchObject({ ok: false, error: { code: 'invalid_input' } });
-    await host.shutdown();
-    expect(host.status(spec.appSessionId)).toMatchObject({ process: 'exited', exit: { reason: 'quit' } });
-    rmSync(userData, { recursive: true, force: true, maxRetries: 10 });
+    try {
+      const spec = liveSpec('/tmp/maws-live-host', { appSessionId: 'live-host-replay' as never, replay: 'spikes/protocol-probe/fixtures/reads.jsonl', maxBudgetUsd: null });
+      const { status } = await host.launch(spec);
+      expect(status).toMatchObject({ process: 'ready', gateway: { verified: 'routed' } });
+      expect(await host.call('session.send', { appSessionId: spec.appSessionId, content: 'Reply with exactly OK' })).toMatchObject({ disposition: 'sent' });
+      const ended = await host.waitFor(() => host.events(spec.appSessionId).find((e) => e.kind === 'turn.ended'), 'turn.ended', 5_000);
+      expect(ended).toMatchObject({ resultText: 'OK', terminalReason: 'completed' });
+      const usage = await host.callRaw('session.getUsage', { appSessionId: spec.appSessionId });
+      expect(usage).toMatchObject({ ok: true, value: { subscription_type: null, rate_limits_available: expect.any(Boolean) } });
+      // an input the X2 schema refuses never reaches a handler: the runtime answers it
+      expect(await host.callRaw('session.status', { appSessionId: 42 } as never)).toMatchObject({ ok: false, error: { code: 'invalid_input' } });
+      await host.shutdown();
+      expect(host.status(spec.appSessionId)).toMatchObject({ process: 'exited', exit: { reason: 'quit' } });
+    } finally {
+      await host.shutdown().catch(() => {});
+      rmSync(userData, { recursive: true, force: true, maxRetries: 10 });
+    }
   });
 
   it('turn attribution: a human turn is misattributed when the result closing it does not name the prompt that opened it', () => {
@@ -94,6 +98,33 @@ describe('live suite bookkeeping', () => {
     const events = [started(16, 'human', 'p1'), ended(48, ['p1']), started(53, 'human', 'after'), ended(72, ['steer']), started(78, 'engine', null), ended(92, ['after']), ended(95, [], true)];
     expect(turnAttribution(events as never)).toEqual(['turn opened at seq 53 by after closed at seq 72 by a result naming [steer]']);
     expect(turnAttribution([started(4, 'human', 'a'), ended(9, ['a']), started(10, 'engine', null), ended(12, [])] as never)).toEqual([]);
+  });
+
+  it("the config-home guard: a case under the owner's home may not declare a control the engine persists (coordinator's live-acceptance rule)", () => {
+    expect(() => assertConfigHomeSafe({ configHome: null, controls: ['set_cwd:trust'] })).toThrow(/set_cwd:trust.*owner's config home/);
+    expect(() => assertConfigHomeSafe({ configHome: '/tmp/maws-live-config-x', controls: ['set_cwd:trust'] })).not.toThrow();
+    expect(() => assertConfigHomeSafe({ configHome: null, controls: [] })).not.toThrow(); // reads only
+    for (const control of ['mcp_toggle', 'grant:local_settings', 'memory:user'] as const) expect(() => assertConfigHomeSafe({ configHome: null, controls: [control] })).toThrow();
+    // the controls a call would issue, inferred from the X2 command and its input
+    expect(persistingControlOf('session.setCwd', { appSessionId: 'a', path: '/x', trust: { accepted: true, directory: '/x' } })).toBe('set_cwd:trust');
+    expect(persistingControlOf('session.setCwd', { appSessionId: 'a', path: '/x', trust: null })).toBeNull();
+    expect(persistingControlOf('session.mcpToggle', { appSessionId: 'a', serverName: 's', enabled: false })).toBe('mcp_toggle');
+    expect(persistingControlOf('session.answer', { appSessionId: 'a', requestId: 'r', answer: { kind: 'permission', decision: 'allow', scope: 'local_settings' } })).toBe('grant:local_settings');
+    expect(persistingControlOf('session.answer', { appSessionId: 'a', requestId: 'r', answer: { kind: 'permission', decision: 'allow', scope: 'session' } })).toBeNull(); // 3.9's grant: destination session
+    expect(persistingControlOf('session.memoryAppend', { appSessionId: 'a', text: 't', target: { kind: 'user', path: null } })).toBe('memory:user');
+    expect(persistingControlOf('session.memoryAppend', { appSessionId: 'a', text: 't', target: { kind: 'project', path: null } })).toBeNull(); // the scratch repo's CLAUDE.md
+    expect(persistingControlOf('session.getSettings', { appSessionId: 'a' })).toBeNull();
+  });
+
+  it('the live host fails a case before any spawn when its config home is the owner\'s and it declares a persisting control, and refuses an undeclared one at the call', async () => {
+    const userData = mkdtempSync(join(tmpdir(), 'maws-live-guard-'));
+    try {
+      expect(() => new LiveHost({ userData, controls: ['set_cwd:trust'] })).toThrow(/owner's config home/);
+      const host = new LiveHost({ userData, replayEnabled: true, cwd: REPO_ROOT });
+      await expect(host.callRaw('session.setCwd', { appSessionId: 'nobody', path: '/x', trust: { accepted: true, directory: '/x' } })).rejects.toThrow(/set_cwd:trust.*not declared/);
+    } finally {
+      rmSync(userData, { recursive: true, force: true });
+    }
   });
 
   it('the ledger sums the run, prints the cost line, and refuses to go on past the cap', () => {

@@ -170,7 +170,7 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
     const { messageUuid, disposition, queueId } = await sessionOf(appSessionId).send(content);
     return { messageUuid, disposition, queueId };
   });
-  handle('session.steer', async ({ appSessionId, content }) => sessionOf(appSessionId).steer(content));
+  handle('session.steer', async ({ appSessionId, content, priority }) => sessionOf(appSessionId).steer(content, { priority: priority ?? 'now' }));
   handle('session.queue.list', async ({ appSessionId }) => {
     assertSafeAppSessionId(appSessionId); // it may read a state file named after it
     const session = table.get(appSessionId as AppSessionId);

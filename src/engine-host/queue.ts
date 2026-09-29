@@ -4,10 +4,11 @@
 // `user` frame is written, becomes `released` at the engine's `command_lifecycle` for that uuid, and leaves the list
 // at the `turn.ended` naming it or at the process's exit (retired `interrupted`, never re-sent). The release rule: a
 // main-lane, non-receipt `turn.ended` submits the head while the queue is not paused and the session is idle, so nothing
-// is ever released into a running turn, an engine-initiated one (`task-notification`) included; after an engine turn a
+// is ever released into a running turn, an engine-initiated one (`task-notification`) included, nor while a prompt the
+// host wrote (a steer) waits for the engine to start it; after an engine turn a
 // head that cannot go (not ready, write failed) pauses the queue with an info notice. A submission a crash interrupted comes back as the
 // `uncertain` head of a paused queue for the human to re-send or remove. Steer bypasses the queue with `priority:
-// 'now'`. Every change is saved through the store before `onChange` fires. Releases and pauses are journaled as
+// 'now'` (or `'next'` on request). Every change is saved through the store before `onChange` fires. Releases and pauses are journaled as
 // `meta queue` rows and the queue's warnings as `meta notice` rows (the normaliser maps those to `notice.posted`).
 import { randomUUID } from 'node:crypto';
 import type { SessionEvent } from '@shared/graph/events';
@@ -18,6 +19,7 @@ import type { UserInputFrame } from '@shared/wire/frames';
 export const ACK_TIMEOUT_MS = 5_000;
 
 export type ReleaseTrigger = 'send' | 'turn_ended' | 'resume';
+export type SteerPriority = 'now' | 'next';
 export type PauseReason = 'user' | 'interrupt' | 'write_failed' | 'uncertain' | 'exit' | 'engine_turn';
 export type ExitKind = 'quit' | 'stop' | 'archive' | 'crash' | 'unknown';
 
@@ -162,12 +164,13 @@ export class MessageQueue {
     await this.persist();
   }
 
-  // Steer: written at once with the engine queue's highest priority, never entering the app queue (§4.2).
-  async steer(content: SendContent): Promise<{ messageUuid: MessageUuid }> {
+  // Steer: written at once, never entering the app queue (§4.2). `now` (the default) preempts the running turn on
+  // 2.1.283 and runs as the next turn (M6 live 3.7); `next` waits for the running turn to end (C8b's relay).
+  async steer(content: SendContent, opts: { priority?: SteerPriority } = {}): Promise<{ messageUuid: MessageUuid }> {
     this.checkContent(content);
     if (!this.deps.canWrite()) throw new QueueEntryError('the session is not ready');
     const uuid = randomUUID() as MessageUuid;
-    await this.deps.write({ type: 'user', uuid, message: { role: 'user', content }, parent_tool_use_id: null, origin: { kind: 'human' }, priority: 'now' });
+    await this.deps.write({ type: 'user', uuid, message: { role: 'user', content }, parent_tool_use_id: null, origin: { kind: 'human' }, priority: opts.priority ?? 'now' });
     return { messageUuid: uuid };
   }
 

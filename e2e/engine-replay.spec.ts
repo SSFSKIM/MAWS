@@ -88,8 +88,8 @@ test('a replayed permission round trip crosses the X2 surface and survives reloa
   const early = await eventsOf(page, id);
   const at = (predicate: (e: SessionEvent) => boolean) => early.findIndex(predicate);
   const order = [
-    at((e) => e.kind === 'turn.started' && e.origin === 'human'),
-    at((e) => e.kind === 'user.message' && e.messageUuid === sent.messageUuid),
+    at((e) => e.kind === 'user.message' && e.messageUuid === sent.messageUuid), // the bubble at the write, seq 4
+    at((e) => e.kind === 'turn.started' && e.origin === 'human' && e.userMessageUuid === sent.messageUuid), // the engine's started lifecycle, seq 6 (coordinator ruling after M6)
     at((e) => e.kind === 'session.init'), // seq 7
     at((e) => e.kind === 'assistant.block.delta'), // the first, seq 12
     at((e) => e.kind === 'tool.use' && e.toolUseId === TOOL_USE), // seq 47

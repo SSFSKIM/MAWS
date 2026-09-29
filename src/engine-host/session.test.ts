@@ -19,6 +19,8 @@ const prelude = loadEngineJournal('replay-handshake');
 const responseOf = (seq: number) => (prelude.find((r) => r.seq === seq)!.frame as { response: { response: Record<string, unknown> } }).response.response;
 const INIT_RESPONSE = responseOf(3); // pass2/auto-routed seq 4: current_permission_mode auto
 const ROUTED_STATUS = responseOf(5); // pass2/auto-routed seq 145: Anthropic base URL = the relay, Auto mode server Enabled
+// the relay's base URL row with the server lane off: what a routed session in `default` mode reads (live 3.9)
+const DIRECT_STATUS_ROUTED = { sections: [{ title: 'Session', rows: [{ label: 'Anthropic base URL', value: RELAY_URL }] }, { title: 'Environment', rows: [{ label: 'Auto mode server', value: 'Disabled' }] }] };
 const DIRECT_STATUS = { sections: [{ title: 'Session', rows: [{ label: 'Login', value: 'Expired — log in again' }] }, { title: 'Environment', rows: [{ label: 'Auto mode server', value: 'Disabled' }] }] };
 
 function spec(overrides: Partial<LaunchSpec> = {}): LaunchSpec {
@@ -95,12 +97,17 @@ describe('EngineSession: the handshake, journal-before-normalise and the gateway
     });
     expect(events).toEqual([]); // the handshake yields no events
 
-    // a send is journaled then normalised: the bubble derives from the out row
+    // a send is journaled then normalised: the bubble derives from the out row; the turn opens at the engine's started
     const { messageUuid } = await session.send('hi');
     const row = journal.rows.at(-1)!;
     expect(row).toMatchObject({ direction: 'out', frame: { type: 'user', uuid: messageUuid, origin: { kind: 'human' }, parent_tool_use_id: null, message: { role: 'user', content: 'hi' } } });
-    expect(events.map((e) => [e.kind, e.seq])).toEqual([['turn.started', row.seq], ['user.message', row.seq]]);
-    expect(session.status().turn).toEqual({ id: events[0]!.id, origin: 'human', startedAt: expect.any(String), acceptedAt: null, userMessageUuids: [messageUuid] }); // id: the turn.started event's
+    expect(events.map((e) => [e.kind, e.seq])).toEqual([['user.message', row.seq]]);
+    expect(session.status().turn).toBeNull();
+    transport.push({ type: 'command_lifecycle', command_uuid: messageUuid, state: 'started', uuid: 'lc-1', session_id: 's', timestamp: '2026-09-28T10:00:01.000Z' });
+    await flush();
+    const started = events.find((e) => e.kind === 'turn.started')!;
+    expect(started).toMatchObject({ seq: journal.rows.at(-1)!.seq, userMessageUuid: messageUuid, origin: 'human' });
+    expect(session.status().turn).toEqual({ id: started.id, origin: 'human', startedAt: '2026-09-28T10:00:01.000Z', acceptedAt: '2026-09-28T10:00:01.000Z', userMessageUuids: [messageUuid] }); // id: the turn.started event's
   });
 
   it('every event carries the seq of a journal row it derives from, and normaliser warnings become meta rows', async () => {
@@ -114,6 +121,16 @@ describe('EngineSession: the handshake, journal-before-normalise and the gateway
     expect(journal.rows.find((r) => r.seq === complete.seq)).toMatchObject({ direction: 'in', frame: { type: 'assistant' } });
     expect(journal.rows.at(-1)!.frame).toEqual({ event: 'block_pairing', rowSeq: complete.seq, detail: { apiMessageId: 'msg_1', blockIndex: 0, started: 'thinking', completed: 'text' } });
     for (const e of events) expect(journal.rows.some((r) => r.seq === e.seq)).toBe(true);
+  });
+
+  it("reads the Auto mode server row as the lane only while the effective mode is auto (the row follows the mode: live 3.9 reads Disabled in default)", async () => {
+    const defaultMode = setup({ spec: { permissionMode: 'default' }, responder: defaultResponder({ initialize: () => ({ response: { ...INIT_RESPONSE, current_permission_mode: 'default' } }), get_status: () => ({ response: DIRECT_STATUS_ROUTED }) }) });
+    await defaultMode.session.start();
+    expect(defaultMode.session.status().permissionMode.effective).toBe('default');
+    expect(defaultMode.session.status().gateway).toMatchObject({ verified: 'routed', autoModeServer: 'unknown' });
+    const auto = setup({ responder: defaultResponder({ get_status: () => ({ response: DIRECT_STATUS_ROUTED }) }) });
+    await auto.session.start();
+    expect(auto.session.status().gateway.autoModeServer).toBe('disabled');
   });
 
   it('verifies direct as direct and flags a mismatch with a warning notice', async () => {
@@ -713,6 +730,8 @@ describe('EngineSession (M4): the termination ladder, stdout EOF, held frames, t
     const { session, transport, events } = setup();
     await session.start();
     const a = await session.send('turn A');
+    transport.push({ type: 'command_lifecycle', command_uuid: a.messageUuid, state: 'started', uuid: 'lc-a', session_id: 's' });
+    await flush();
     const turnA = events.find((e) => e.kind === 'turn.started')!;
     transport.push({ type: 'stream_event', event: { type: 'message_delta', delta: { stop_reason: 'end_turn', safeguard_results: [{ type: 'dangerous_tool_use', status: { type: 'unavailable', reason: 'provider_not_anthropic' } }] } }, session_id: 's', parent_tool_use_id: null, uuid: 'se-9', timestamp: '2026-09-28T10:00:05.000Z' });
     await flush();
@@ -722,7 +741,9 @@ describe('EngineSession (M4): the termination ladder, stdout EOF, held frames, t
     transport.push({ type: 'result', subtype: 'success', session_id: 's', is_error: false, duration_ms: 1, num_turns: 1, total_cost_usd: 0, usage: {}, permission_denials: [], terminal_reason: 'completed', origin: { kind: 'human' }, user_message_uuids: [a.messageUuid] });
     await flush();
     expect(session.status().gateway.localLane).toMatchObject({ observedInTurn: turnA.id }); // still turn A's until the next turn starts
-    await session.send('turn B');
+    const b = await session.send('turn B');
+    transport.push({ type: 'command_lifecycle', command_uuid: b.messageUuid, state: 'started', uuid: 'lc-b', session_id: 's' });
+    await flush();
     expect(session.status().gateway.localLane).toBeNull();
     const turnB = events.filter((e) => e.kind === 'turn.started')[1]!;
     transport.push({ type: 'system', subtype: 'informational', content: 'Auto mode is using the local classifier for this model; classifier requests are charged as usage.', level: 'warning', uuid: 'inf-1', session_id: 's' });
