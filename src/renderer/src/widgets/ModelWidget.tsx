@@ -17,7 +17,6 @@ import { NOT_RUNNING } from '../statusline/mode-menu';
 import { isStarting, rememberListedModels, useComposerStore } from '../stores/composer';
 import { useSessions } from '../stores/sessions';
 import { useUsage } from '../stores/usage';
-import { GATEWAY_NOTE, showsGatewayNote } from './c10-seam';
 import { MODEL, WIDGET_FOOT, WIDGET_TITLE } from './copy';
 import {
   acceptedModel,
@@ -30,6 +29,7 @@ import {
   rowNamed,
   rowOf,
   setEffort,
+  showsGatewayNote,
   setModel,
   useModelRequests,
   type ControlAnswer,
@@ -236,7 +236,7 @@ function ModelBody({ name, args, binding, appSessionId }: { name: Name; args: st
       {group(MODEL.group.gateway, gateway)}
       {selected !== null && showsGatewayNote(selected, binding.mode) && (
         <p role="note" className="m-0 border-l-2 border-info pl-2 text-ui-sm">
-          <strong className="font-semibold">{GATEWAY_NOTE.lead}</strong> {GATEWAY_NOTE.body(account)}
+          <strong className="font-semibold">{MODEL.gatewayNote.lead}</strong> {MODEL.gatewayNote.body(account)}
         </p>
       )}
       <div ref={effortRow}>

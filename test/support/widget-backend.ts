@@ -358,13 +358,14 @@ export function createWidgetBackend(options: WidgetBackendOptions): WidgetBacken
   }
 
   // C10's rename: through the engine while the process is ready, the record's override otherwise; answers the record.
-  function rename(status: EngineSessionStatus, title: string): { record: SessionRecord; via: 'engine' | 'override' } {
-    const record = records.get(status.appSessionId);
-    if (!record) throw new WidgetBackendError({ code: 'internal', message: `no record for ${status.appSessionId}` });
-    if (status.process === 'ready') fixtureLine(options.root, RESPONSES.rename_session);
+  function rename(appSessionId: AppSessionId | null, title: string): { record: SessionRecord; via: 'engine' | 'override' } {
+    const record = appSessionId === null ? undefined : records.get(appSessionId);
+    if (!record) throw new WidgetBackendError({ code: 'internal', message: `unknown app session: ${appSessionId}` });
+    const ready = statuses.get(record.appId)?.process === 'ready';
+    if (ready) fixtureLine(options.root, RESPONSES.rename_session);
     const renamed: SessionRecord = { ...record, title: { text: title.trim(), source: 'user' } };
     records.set(record.appId, renamed);
-    return { record: renamed, via: status.process === 'ready' ? 'engine' : 'override' };
+    return { record: renamed, via: ready ? 'engine' : 'override' };
   }
 
   // `mcp_status` as the engine would answer after the toggles it accepted.
@@ -386,6 +387,7 @@ export function createWidgetBackend(options: WidgetBackendOptions): WidgetBacken
     const scripted = scripts.get(command);
     if (scripted) return scripted(input);
     if (command === 'session.status') return statusOf(appSessionIdOf(input));
+    if (command === 'session.rename') return rename(appSessionIdOf(input), (input as { title: string }).title);
     const status = statusOf(appSessionIdOf(input));
     if (command === 'session.catalog') return catalog;
     if (command === 'session.queue.list') {
@@ -398,7 +400,6 @@ export function createWidgetBackend(options: WidgetBackendOptions): WidgetBacken
     }
     if (command === 'session.stop') return stop(status, (input as { reason: 'stop' | 'archive' }).reason);
     if (command === 'session.start') return start(status, input as { options: StartOptions });
-    if (command === 'session.rename') return rename(status, (input as { title: string }).title);
     if (status.process !== 'ready') throw new WidgetBackendError({ code: 'internal', message: `${status.appSessionId} has no ready process` });
     if (command === 'session.send') return send(status, (input as { content: QueueEntry['content'] }).content);
     if (command === 'session.interrupt') return interrupt(status);

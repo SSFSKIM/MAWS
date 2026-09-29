@@ -1,5 +1,6 @@
 // The rename and resume widgets (C11 execution document, the widget table; M3 refresh task "rename and resume through
-// C10's landed actions", with C10's pieces behind c10-seam.ts until the integration).
+// C10's landed actions"): `/rename <title>` through C10's `session.rename`, the dialog and Resume through C5's registry
+// where C10 registers them.
 import { join } from 'node:path';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -7,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge, SessionDigest } from '@shared/ipc/schema';
 import { loadScenario } from '../../../../test/support/scenario';
-import { createWidgetBackend, type WidgetBackend } from '../../../../test/support/widget-backend';
+import { createWidgetBackend, WidgetBackendError, type WidgetBackend } from '../../../../test/support/widget-backend';
 import { registerSessionAction } from '../app/session-actions';
 import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
@@ -21,7 +22,7 @@ const scenario = () => loadScenario(join(ROOT, 'test/fixtures/shell/nine-session
 
 beforeEach(() => {
   const s = scenario();
-  backend = createWidgetBackend({ root: ROOT, statuses: s.engine });
+  backend = createWidgetBackend({ root: ROOT, statuses: s.engine, records: s.sessions });
   window.maws = backend.bridge();
   useSessions.setState({ engine: new Map(s.engine.map((st) => [st.appSessionId, backend.status(st.appSessionId)])), records: new Map(s.sessions.map((r) => [r.appId, r])), digests: new Map(s.digests.map((d) => [d.appSessionId, d as unknown as SessionDigest])) });
 });
@@ -41,17 +42,23 @@ const mount = (Widget: typeof RenameWidget, appSessionId: AppSessionId, args = '
 };
 
 describe('rename widget', () => {
-  it('`/rename <title>` renames through the engine at once and says so', async () => {
-    backend.script('session.renameSession', () => undefined); // rename_session answers no payload (reads.jsonl seq 90)
+  it("`/rename <title>` renames through C10's session.rename at once and says so", async () => {
     mount(RenameWidget, READY, 'Live C11');
     await waitFor(() => expect(screen.getByRole('status').textContent).toBe('Renamed · Live C11'));
-    expect(backend.calls.filter((c) => c.command === 'session.renameSession').map((c) => c.input)).toEqual([{ appSessionId: READY, title: 'Live C11' }]);
+    expect(backend.calls.filter((c) => c.command === 'session.rename').map((c) => c.input)).toEqual([{ appSessionId: READY, title: 'Live C11' }]);
   });
 
-  it('refuses in words on a session without a process until C10 names it through its record', async () => {
+  it('renames a session without a process too (C10 names it through its record)', async () => {
     mount(RenameWidget, 'app-bdb23713' as AppSessionId, 'Later');
-    await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('The session is not running · renaming it arrives with C10'));
-    expect(backend.calls.filter((c) => c.command === 'session.renameSession')).toHaveLength(0);
+    await waitFor(() => expect(screen.getByRole('status').textContent).toBe('Renamed · Later'));
+  });
+
+  it('says a refused rename in its words', async () => {
+    backend.script('session.rename', () => {
+      throw new WidgetBackendError({ code: 'internal', message: 'unknown session' });
+    });
+    mount(RenameWidget, READY, 'Nope');
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('unknown session'));
   });
 
   it('without a title opens the registered rename dialog and closes', () => {
@@ -64,7 +71,6 @@ describe('rename widget', () => {
   });
 
   it('without a title and no dialog registered, offers the title to edit', async () => {
-    backend.script('session.renameSession', () => undefined);
     mount(RenameWidget, READY);
     const field = screen.getByRole('textbox', { name: 'New title' }) as HTMLInputElement;
     expect(field.value).toBe('Settings idle probe');
@@ -83,8 +89,21 @@ describe('resume widget', () => {
     expect(foreign).toHaveProperty('disabled', true);
     expect(foreign.title).toBe('Live in terminal');
     const exited = within(rows[1]).getByRole('button', { name: 'Resume' });
-    expect(exited).toHaveProperty('disabled', true);
-    expect(exited.title).toBe('Resuming arrives with C10');
+    expect(exited).toHaveProperty('disabled', true); // no resume action registered
+  });
+
+  it("resumes an exited session through C10's registered resume action and closes", () => {
+    const resume = vi.fn();
+    const off = registerSessionAction('resume', resume);
+    const close = mount(ResumeWidget, 'app-bac6130b' as AppSessionId);
+    const rows = within(screen.getByRole('list', { name: 'Sessions of this project' })).getAllByRole('listitem');
+    expect(within(rows[0]).getByRole('button', { name: 'Resume' })).toHaveProperty('disabled', true); // foreign-live stays refused
+    const exited = within(rows[1]).getByRole('button', { name: 'Resume' });
+    expect(exited).toHaveProperty('disabled', false);
+    fireEvent.click(exited);
+    expect(resume).toHaveBeenCalledWith('app-bdb23713');
+    expect(close).toHaveBeenCalledTimes(1);
+    off();
   });
 
   it('opens a listed session in its tab and closes', () => {

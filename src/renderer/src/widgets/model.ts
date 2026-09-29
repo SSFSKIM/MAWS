@@ -12,7 +12,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { ListModelsResponse } from '@shared/wire/control';
 import { ipc } from '../ipc/client';
 import { useSessions } from '../stores/sessions';
-import { isGatewayModel } from './c10-seam';
+import { isGatewayModel } from '@shared/sessions/models';
 import { MODEL } from './copy';
 import { transportWords } from './read';
 
@@ -55,6 +55,11 @@ export function presentModels(models: readonly ModelRow[]): { claude: ModelEntry
   const all = models.map(view);
   return { claude: all.filter((m) => !m.gateway), gateway: all.filter((m) => m.gateway) };
 }
+
+// Whether the widget shows a gateway model's auto-mode note: C10's `autoModeNote` rule for its gateway arm (a gateway
+// model when the mode is auto, or, on an unstarted intent, left to settings, whose default is auto for the owner, D-18),
+// applied to the widget's own wording of the note (`MODEL.gatewayNote`, which names the routing account).
+export const showsGatewayNote = (value: string, mode: string | null): boolean => isGatewayModel(value) && (mode === 'auto' || mode === null);
 
 // The row a model id names: the alias itself, else the first row that resolves to it (`default` and `opus` share one).
 export const rowOf = (models: readonly ModelRow[], id: string | null): ModelRow | undefined =>

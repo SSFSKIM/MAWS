@@ -14,7 +14,7 @@ import { autoUnavailableReason, MODE_OPTIONS } from '../statusline';
 import { listedModelsOf, rememberListedModels, useComposerStore, type ListedModel } from '../stores/composer';
 import { toast } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
-import { isGatewayModel } from './c10-seam';
+import { isGatewayModel } from '@shared/sessions/models';
 import { TYPED } from './copy';
 import { applyFlagSettings, effortsOf, rowNamed, rowOf, setEffort, setModel, type ControlAnswer } from './model';
 import { setPermissionMode } from './PermissionsWidget';

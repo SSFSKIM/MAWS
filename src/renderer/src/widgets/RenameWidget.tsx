@@ -1,17 +1,22 @@
 // `/rename` (C11 execution document, the widget table; M3 refresh task "rename and resume through C10's landed
-// actions"): with a title, the session is renamed through the engine at once (`/rename Live C11`) and the widget says
+// actions"): with a title, the session is renamed at once through C10's `session.rename` (`/rename Live C11`: through
+// the engine while its process is ready, so the terminal sees it; the record's override otherwise) and the widget says
 // so; without one, C10's rename dialog opens (the session action `rename` C10 registers into C5's registry), or, while
-// no dialog is registered, the widget offers the title to edit. The title is persisted by the engine, so the terminal
-// sees it.
+// no dialog is registered, the widget offers the title to edit.
 import { useEffect, useRef, useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { runSessionAction, useSessionActionEnabled } from '../app/session-actions';
+import { ipc } from '../ipc/client';
 import { useSessions } from '../stores/sessions';
-import { renameSession } from './c10-seam';
 import { RENAME, WIDGET_FOOT, WIDGET_TITLE } from './copy';
 import { WidgetFrame } from './WidgetFrame';
 
 type Outcome = { renamed: string } | { refused: string } | null;
+
+async function renameSession(appSessionId: AppSessionId, title: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  const result = await ipc.invoke('session.rename', { appSessionId, title });
+  return result.ok ? { ok: true } : { ok: false, error: result.error.message };
+}
 
 export function RenameWidget({ appSessionId, args, close }: { appSessionId: AppSessionId; args: string; close(): void }) {
   const given = args.trim();

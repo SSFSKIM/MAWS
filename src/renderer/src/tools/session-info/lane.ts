@@ -8,7 +8,7 @@ import type { EngineSessionStatus } from '@shared/engine/status';
 import type { SessionEvent } from '@shared/graph/events';
 import { MODE_REFUSAL_WORDS } from '../../statusline/mode-menu';
 import type { TranscriptState } from '../../transcript/model/reduce';
-import { isGatewayModel } from '../../widgets/c10-seam';
+import { isGatewayModel } from '@shared/sessions/models';
 import { LANE } from './copy';
 
 // `unknown` (the row not read yet) is the one kind beyond the document's five: it renders `Not read yet`.

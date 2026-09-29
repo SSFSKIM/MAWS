@@ -266,7 +266,13 @@ export const MODEL = {
     invalid_request: 'The engine refused the request',
   } as Record<string, string>,
   refused: 'The engine refused the model',
-  routingAccount: 'the routing account', // the gateway note's account (the note itself is in c10-seam.ts) when ClaudeUsage names none
+  routingAccount: 'the routing account', // the gateway note's account when ClaudeUsage names none
+  // A gateway model's auto-mode note as the widget words it (§19; mockup 06 vignette 03): C10's `GATEWAY_AUTO_NOTE`
+  // is its chip's one line; the widget's form names the account the local reviews are counted against.
+  gatewayNote: {
+    lead: 'Auto-mode reviews for this model run locally.',
+    body: (account: string) => `A GPT route carries no Anthropic verdict, so the engine reviews each tool call itself on Sonnet 5 through ${account}. Those requests count against usage.`,
+  },
   effort: 'Effort',
   effortList: 'Effort levels',
   engineDefault: 'Engine default',
@@ -349,5 +355,4 @@ export const RESUME = {
   none: 'No other sessions in this project',
   open: 'Open',
   resume: 'Resume',
-  arrivesWith: 'Resuming arrives with C10',
 };

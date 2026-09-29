@@ -18,7 +18,7 @@ import type { MawsBridge } from '@shared/ipc/schema';
 import { ipc } from '../ipc/client';
 import { toast } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
-import { isGatewayModel } from '../widgets/c10-seam';
+import { isGatewayModel } from '@shared/sessions/models';
 import { sessionStart, type SessionStart, type StartOptions } from './c10-seam';
 import { SWITCH, type Route } from './copy';
 import { switchRefusal } from './routing-facts';

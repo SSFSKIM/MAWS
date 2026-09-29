@@ -5,6 +5,7 @@
 // launch), and is disabled for a foreign-live session with its holder as the reason.
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
+import { runSessionAction, useSessionActionEnabled } from '../app/session-actions';
 import { useNow } from '../app/use-now';
 import { GlyphMark } from '../attention/GlyphMark';
 import { glyphFor } from '../attention/glyph';
@@ -12,7 +13,6 @@ import { sessionAge } from '../sidebar/derive';
 import { selectPendingOf, useAttention } from '../stores/attention';
 import { useLayout } from '../stores/layout';
 import { useSessions, type SessionsState } from '../stores/sessions';
-import { resumeAction } from './c10-seam';
 import { RESUME, WIDGET_FOOT, WIDGET_TITLE } from './copy';
 import { Row, Rows, TextButton } from './parts';
 import { WidgetFrame } from './WidgetFrame';
@@ -40,6 +40,7 @@ function ResumeRow({ record, close }: { record: SessionRecord; close(): void }) 
   const now = useNow();
   const glyph = glyphFor(record, digest, pending);
   const held = foreign(record);
+  const resumable = useSessionActionEnabled('resume'); // C10's resume (`session.start { message: null }`)
   return (
     <Row
       main={
@@ -63,11 +64,11 @@ function ResumeRow({ record, close }: { record: SessionRecord; close(): void }) 
           </TextButton>
           {(held || !live) && (
             <TextButton
-              disabled={held || resumeAction === null}
-              title={held ? glyph.label : resumeAction === null ? RESUME.arrivesWith : undefined}
+              disabled={held || !resumable}
+              title={held ? glyph.label : undefined}
               onClick={() => {
                 close();
-                resumeAction?.(record.appId);
+                runSessionAction('resume', record.appId);
               }}
             >
               {RESUME.resume}
