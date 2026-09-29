@@ -4,13 +4,15 @@
 // registerEngineIpc; support/live-host.ts); 3.18 builds the EngineSession the launcher would, because host hooks have no
 // X2 path in P0. Skipped, never failed, when the gate says so. `MAWS_LIVE=1 pnpm test:live`.
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, type TestContext } from 'vitest';
 import type { SessionEvent } from '@shared/graph/events';
 import type { MessageUuid } from '@shared/graph/ids';
 import type { RequestAnswer } from '@shared/engine/answers';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
+import { captureShellEnvironment } from '@shared/host/shell-env';
 import { parseJournalRow, type JournalRow } from '@shared/wire/journal';
 import { getHooksListing } from '../../src/engine-host/controls';
 import { HostHookRegistry } from '../../src/engine-host/host-hooks';
@@ -755,9 +757,26 @@ describe('engine host live', () => {
     });
   }, LONG_CASE_MS);
 
+  // The owner's user settings deny ExitPlanMode and EnterPlanMode (`permissions.deny`), so under the real setting
+  // sources the plan tool does not exist and no plan approval can happen (a live 3.20 run: the model found no
+  // ExitPlanMode through ToolSearch and wrote its plan to a file instead). The case checks that first, with no model
+  // turn, and then runs its three outcomes in a process whose user settings layer is a scratch CLAUDE_CONFIG_DIR, the
+  // launch line and everything else unchanged (flag settings cannot lift a deny: deny rules union across sources).
   it('3.20 plan approval: keep planning, implement, clear and implement', async (ctx) => {
     const g = live(ctx);
     let journalPath = '';
+    let denied = false;
+    await withHost(g, '3.20 (owner settings)', async (host) => {
+      const spec = liveSpec(g.scratch());
+      await host.launch(spec);
+      const settings = await host.call('session.getSettings', { appSessionId: spec.appSessionId });
+      const deny = ((settings.effective as { permissions?: { deny?: string[] } }).permissions?.deny ?? []).filter((rule) => /PlanMode/.test(rule));
+      denied = deny.includes('ExitPlanMode');
+      console.log(`   owner settings deny ${JSON.stringify(deny)}${denied ? ': plan approval cannot occur under them; running under a scratch user config' : ''}`);
+    });
+    const configDir = mkdtempSync(join(tmpdir(), 'maws-live-config-'));
+    writeFileSync(join(configDir, 'settings.json'), '{}\n');
+    const scratchHost = new LiveHost({ userData: g.userData, captureEnv: async () => ({ ...(await captureShellEnvironment()), ...(denied ? { CLAUDE_CONFIG_DIR: configDir } : {}) }) });
     await withHost(g, '3.20', async (host) => {
       const spec = liveSpec(g.scratch());
       const { status } = await host.launch(spec);
@@ -812,7 +831,7 @@ describe('engine host live', () => {
       console.log(`   plan.requested seq ${p3.seq}; plan.resolved seq ${r3.seq} ${r3.outcome}; boundary.reset seq ${reset.seq}; implement user.message seq ${implement.seq}; turn.started seq ${started?.seq}; turn.ended seq ${done.seq}`);
       expect(r3.outcome).toBe('clear_and_implement');
       expect(started).toBeDefined();
-    });
+    }, scratchHost);
     exportTo('plan-outcomes', journalPath, g);
   }, LONG_CASE_MS);
 

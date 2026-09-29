@@ -313,7 +313,9 @@ function toWire(entry: Entry, answer: RequestAnswer): Wire {
     case 'plan':
       if (answer.outcome === 'implement') return { response: { behavior: 'allow', updatedInput: request.input }, grants: [], note: null }; // the engine strips plan/planFilePath and restores the pre-plan mode (SPEC 21 §6.7)
       if (answer.outcome === 'keep_planning') return { response: { behavior: 'deny', message: answer.feedback ?? KEEP_PLANNING_MESSAGE }, grants: [], note: null };
-      return { response: { behavior: 'deny', message: CLEAR_AND_IMPLEMENT_MESSAGE }, grants: [], note: null }; // the session runs the rest after the turn's result
+      // `interrupt` ends the turn at the deny (as deny_and_stop does): without it the model read the message as approval
+      // and implemented in plan mode in the same turn (M6, live 3.20); the session runs the rest after the turn's result
+      return { response: { behavior: 'deny', message: CLEAR_AND_IMPLEMENT_MESSAGE, interrupt: true }, grants: [], note: null };
     case 'dialog':
       return { response: answer.result === undefined ? { behavior: answer.behavior } : { behavior: answer.behavior, result: answer.result }, grants: [], note: null };
     case 'elicitation':

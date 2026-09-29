@@ -237,7 +237,7 @@ describe('id-less requests retire at the turn\'s end', () => {
 describe('plan outcomes map to the wire', () => {
   const plan = (id: string): ControlRequestFrame => ({ type: 'control_request', request_id: id, request: { subtype: 'can_use_tool', tool_name: 'ExitPlanMode', input: { plan: '# Plan\n1. do it', planFilePath: '/p.md' }, tool_use_id: `toolu_${id}` } });
 
-  it('implement is a bare allow with the request input; keep_planning denies with the feedback; clear_and_implement denies with the contract message', async () => {
+  it('implement is a bare allow with the request input; keep_planning denies with the feedback; clear_and_implement denies with the contract message and interrupts the turn', async () => {
     const { broker, responses } = setup();
     for (const id of ['p1', 'p2', 'p3', 'p4']) broker.accept(plan(id));
     await broker.answer(rid('p1'), { kind: 'plan', outcome: 'implement', feedback: null });
@@ -248,7 +248,8 @@ describe('plan outcomes map to the wire', () => {
       { behavior: 'allow', updatedInput: { plan: '# Plan\n1. do it', planFilePath: '/p.md' } },
       { behavior: 'deny', message: 'Add tests first.' },
       { behavior: 'deny', message: 'Keep planning.' },
-      { behavior: 'deny', message: 'Plan approved; MAWS is clearing context and will restart with the plan.' },
+      // interrupt: a live run (M6) showed the model reading the bare deny as approval and implementing in plan mode
+      { behavior: 'deny', message: 'Plan approved; MAWS is clearing context and will restart with the plan.', interrupt: true },
     ]);
   });
 });
