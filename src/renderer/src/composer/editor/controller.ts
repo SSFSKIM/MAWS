@@ -37,8 +37,9 @@ export interface DraftPort {
 }
 
 // How a submission was asked for: Enter and ⌘Enter send, ⌥Enter steers; the Composer's control adds its caret menu's
-// Queue and Interrupt and send (M4), which reach the caller's `onSubmit` through the same path as a key.
-export type SubmitHow = 'send' | 'steer' | 'queue' | 'interrupt_and_send';
+// Queue and Interrupt and send (M4), and edit mode its Send without rewinding (M4b), which reach the caller's
+// `onSubmit` through the same path as a key.
+export type SubmitHow = 'send' | 'steer' | 'queue' | 'interrupt_and_send' | 'send_without_rewinding';
 
 export interface EditorHandle {
   focus(): void;

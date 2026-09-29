@@ -176,7 +176,6 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
     if (!editing || entry?.phase !== 'live' || entry.rows.length === 0) return null;
     return entry.rows.some((r) => r.kind === 'user' && r.messageUuid === editing.messageUuid);
   });
-  const bypassRewind = useRef(false); // Send without rewinding: the next submission sends as it stands
 
   // ---- what the frame binds to ------------------------------------------------------------------------------------
   const cwd = setup ? locationPath(setup.intent.location) : (status?.cwd ?? record?.directory ?? '');
@@ -264,8 +263,7 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
       return accepted;
     }
     const { state } = resubmitRecordOf(useComposerStore.getState(), appSessionId);
-    const bypass = state === 'rewind_unresolved' && bypassRewind.current;
-    bypassRewind.current = false;
+    const bypass = state === 'rewind_unresolved' && how === 'send_without_rewinding'; // the human's explicit choice
     if (useSessions.getState().engine.get(appSessionId)?.process !== 'ready') return false; // as the control says: nothing to rewind or send to
     if (state === 'idle') {
       askToRewind(appSessionId);
@@ -278,11 +276,7 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
       resubmitSendFailed(appSessionId);
       return result.error.message;
     };
-    const retry = () => {
-      bypassRewind.current = bypass;
-      handle.current?.submit(how);
-    };
-    const accepted = await submitSerialized(client, appSessionId, s, 'send', null, { dispatch, retry });
+    const accepted = await submitSerialized(client, appSessionId, s, 'send', null, { dispatch, retry: () => handle.current?.submit(how) });
     if (accepted) resubmitSent(appSessionId);
     return accepted;
   };
@@ -365,10 +359,7 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
           onLeave={() => leaveEditMode(appSessionId)}
           onRetry={() => handle.current?.submit('send')}
           onRewindAgain={() => void rewindAgain(client, appSessionId)}
-          onSendWithoutRewinding={() => {
-            bypassRewind.current = true;
-            handle.current?.submit('send');
-          }}
+          onSendWithoutRewinding={() => handle.current?.submit('send_without_rewinding')}
           onKeepEditing={() => keepEditing(appSessionId)}
         />
       )}

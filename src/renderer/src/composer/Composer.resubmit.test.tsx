@@ -75,7 +75,7 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-type TiptapElement = HTMLElement & { editor: { commands: { insertContent(text: string): boolean }; getText(): string; isEditable: boolean } };
+type TiptapElement = HTMLElement & { editor: { commands: { insertContent(text: string): boolean; clearContent(): boolean }; getText(): string; isEditable: boolean } };
 const pane = () => screen.getByRole('region', { name: 'pane 0' });
 const editor = () => within(pane()).getByRole('textbox', { name: 'Message', hidden: true }) as TiptapElement;
 const primary = () => pane().querySelector<HTMLButtonElement>('[data-submit-state]')!;
@@ -248,6 +248,22 @@ describe('edit-and-resubmit in the composer', () => {
     await waitFor(() => expect(line()?.textContent).toContain('Editing an earlier message'));
     expect(editor().editor.getText()).toBe('first prompt');
     expect(fake.invoked('session.send')).toHaveLength(1);
+  });
+
+  it('Send without rewinding over an empty editor is not remembered: a later plain Enter while unresolved sends nothing', async () => {
+    setRewindWindow(20);
+    mount();
+    await editFirst();
+    await confirmRewind();
+    await fake.fail('session.rewind');
+    await waitFor(() => expect(line()?.textContent).toContain('The rewind could not be confirmed'));
+    act(() => void editor().editor.commands.clearContent());
+    await userEvent.setup().click(within(line()!).getByRole('button', { name: 'Send without rewinding' })); // nothing to send
+    act(() => void editor().editor.commands.insertContent('typed again'));
+    await key(editor(), { key: 'Enter' });
+    await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+    expect(fake.invoked('session.send')).toEqual([]);
+    expect(resubmitOf(useComposerStore.getState(), A)).toBe('rewind_unresolved');
   });
 
   it('the engine exiting mid-rewind returns to edit mode with the banner and sends nothing', async () => {
