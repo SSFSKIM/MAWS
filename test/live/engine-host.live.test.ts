@@ -82,9 +82,10 @@ function readJournal(path: string): JournalRow[] {
 }
 
 // Books one launch's journal: cost, the frame inventory, and the path the acceptance asks every case to print.
-function book(label: string, journalPath: string, events: SessionEvent[] = []): JournalRow[] {
+// `sessionKey`: the engine session id, which a non-fork resume keeps (the ledger counts a session's cumulative figure once).
+function book(label: string, journalPath: string, events: SessionEvent[], sessionKey: string): JournalRow[] {
   const rows = readJournal(journalPath);
-  const { costUsd, turns } = ledger.add(label, journalPath, rows);
+  const { costUsd, turns } = ledger.add(label, journalPath, rows, sessionKey);
   const { systemSubtypes, types } = frameInventory(rows);
   for (const [subtype, seqs] of systemSubtypes) if (!subtypeSeen.has(subtype)) subtypeSeen.set(subtype, `${journalPath}:${seqs[0]}`);
   for (const [type, seqs] of types) if (!typeSeen.has(type)) typeSeen.set(type, `${journalPath}:${seqs[0]}`);
@@ -100,13 +101,15 @@ async function withHost(ctx: LiveContext, label: string, fn: (host: LiveHost) =>
     await fn(host);
   } finally {
     await host.shutdown().catch((error: unknown) => console.log(`   shutdown failed: ${String(error)}`));
-    const byPath = new Map<string, SessionEvent[]>();
+    const byPath = new Map<string, { events: SessionEvent[]; sessionKey: string }>();
     const ids = new Set(host.emitted.map((e) => (e.payload as { appSessionId?: string }).appSessionId).filter((id): id is string => typeof id === 'string'));
     for (const id of ids) {
       const events = host.events(id);
-      for (const status of host.statuses(id)) if (!byPath.has(status.journalPath)) byPath.set(status.journalPath, events.filter((e) => launchOf(e) === status.launchId));
+      for (const status of host.statuses(id)) {
+        if (!byPath.has(status.journalPath)) byPath.set(status.journalPath, { events: events.filter((e) => launchOf(e) === status.launchId), sessionKey: status.engineSessionId ?? status.journalPath });
+      }
     }
-    for (const [path, events] of byPath) book(label, path, events);
+    for (const [path, { events, sessionKey }] of byPath) book(label, path, events, sessionKey);
   }
 }
 
@@ -385,27 +388,36 @@ describe('engine host live', () => {
     });
   }, LONG_CASE_MS);
 
+  // The owner's user-level PreToolUse guardrail (~/.claude/hooks/bash-guardrail.sh) allows every non-destructive Bash
+  // command, so pass 2's `touch granted.txt` never reaches a prompt under the real setting sources; a command the
+  // guardrail defers on (`rm -rf` of a directory inside the scratch repository) takes the same default-mode path.
   it('3.9 session grant survives stop and resume', async (ctx) => {
     const g = live(ctx);
     await withHost(g, '3.9', async (host) => {
-      const spec = liveSpec(g.scratch(), { permissionMode: 'default' });
+      const cwd = g.scratch();
+      mkdirSync(join(cwd, 'granted-dir'));
+      writeFileSync(join(cwd, 'granted-dir', 'x.txt'), 'x\n');
+      const spec = liveSpec(cwd, { permissionMode: 'default' });
       await host.launch(spec);
       const s = sessionView(host, spec);
-      await s.send('Use Bash to run exactly `touch granted.txt` (nothing else), then reply DONE.');
-      const ask = await s.wait('permission.requested', 'touch granted.txt');
-      console.log(`   permission.requested seq ${ask.seq} decisionReasonType ${ask.decisionReasonType} input ${JSON.stringify(ask.input)}`);
+      await s.send('Use Bash to run exactly `rm -rf granted-dir` (nothing else), then reply DONE.');
+      const ask = await s.wait('permission.requested', 'rm -rf granted-dir');
+      console.log(`   permission.requested seq ${ask.seq} decisionReasonType ${ask.decisionReasonType} input ${JSON.stringify(ask.input)} suggestions ${JSON.stringify(ask.suggestions)}`);
       expect(ask.decisionReasonType).toBeNull();
       // hold the queue so the second ask waits for the resumed process
       await host.call('session.queue.setPaused', { appSessionId: s.id, paused: true });
-      const queued = await s.send('Run exactly `touch granted.txt` with Bash again now, even though you ran it before (nothing else), then reply DONE.');
+      const queued = await s.send('Run exactly `rm -rf granted-dir` with Bash again now, even though you ran it before (nothing else), then reply DONE.');
       expect(queued.disposition).toBe('queued');
       expect(await s.answer(ask.requestId, { kind: 'permission', decision: 'allow', scope: 'session' })).toEqual({ outcome: 'delivered' });
       const wire = answerRow(s.journal(), ask.requestId)!;
-      const updated = (wire.frame.response as { response: { updatedPermissions?: unknown } }).response.updatedPermissions;
+      const updated = (wire.frame.response as { response: { updatedPermissions?: { rules: { ruleContent?: string }[] }[] } }).response.updatedPermissions;
       console.log(`   control_response seq ${wire.seq} updatedPermissions ${JSON.stringify(updated)}`);
-      expect(updated).toEqual([{ type: 'addRules', rules: [{ toolName: 'Bash', ruleContent: 'touch granted.txt' }], behavior: 'allow', destination: 'session' }]);
+      const ruleContent = updated?.[0]?.rules[0]?.ruleContent;
+      expect(updated).toEqual([{ type: 'addRules', rules: [{ toolName: 'Bash', ruleContent }], behavior: 'allow', destination: 'session' }]);
+      expect(ruleContent).toMatch(/^rm -rf granted-dir/);
+      const grant = `Bash(${ruleContent})`;
       await host.waitFor(() => s.status().grants.length > 0, 'the grant', 5_000);
-      expect(s.status().grants).toEqual(['Bash(touch granted.txt)']);
+      expect(s.status().grants).toEqual([grant]);
       await s.waitTurns(1);
 
       const stopped = await host.call('session.stop', { appSessionId: s.id, reason: 'stop' });
@@ -427,10 +439,10 @@ describe('engine host live', () => {
       const apply = outs.find((r) => (r.frame.request as { subtype?: string } | undefined)?.subtype === 'apply_flag_settings')!;
       const firstUser = outs.find((r) => r.frame.type === 'user');
       console.log(`   apply_flag_settings seq ${apply.seq}: ${JSON.stringify(apply.frame.request)}; first user frame ${firstUser ? `seq ${firstUser.seq}` : 'none yet'}`);
-      expect(apply.frame.request).toEqual({ subtype: 'apply_flag_settings', settings: { permissions: { allow: ['Bash(touch granted.txt)'] } } });
+      expect(apply.frame.request).toEqual({ subtype: 'apply_flag_settings', settings: { permissions: { allow: [grant] } } });
       expect(firstUser).toBeUndefined();
       const rules = await host.call('session.listPermissionRules', { appSessionId: s.id });
-      const rule = (rules.state.rules as { rule: string; source: string }[]).find((r) => r.rule === 'Bash(touch granted.txt)');
+      const rule = (rules.state.rules as { rule: string; source: string }[]).find((r) => r.rule === grant);
       console.log(`   listPermissionRules ${JSON.stringify(rule)}`);
       expect(rule).toMatchObject({ source: 'flagSettings' });
 
@@ -717,7 +729,7 @@ describe('engine host live', () => {
       expect(JSON.stringify(listing)).not.toContain(callbackId);
     } finally {
       await session.stop('stop');
-      book('3.18', session.status().journalPath, events);
+      book('3.18', session.status().journalPath, events, spec.sessionId!);
     }
   }, LONG_CASE_MS);
 

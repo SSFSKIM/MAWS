@@ -90,4 +90,13 @@ describe('live suite bookkeeping', () => {
     ledger.add('3.10', '/j/c.jsonl', [row(1, 'in', result(0.3, 1))]);
     expect(() => ledger.assertUnderCap()).toThrow(/live cost cap \$1\.00 reached: \$1\.05/);
   });
+
+  it('a resumed launch continues its session\'s cumulative figure, so a session costs its largest launch, not their sum', () => {
+    const ledger = new LiveLedger(5);
+    ledger.add('3.9', '/j/start.jsonl', [row(1, 'in', result(0.1262, 1))], 'session-a');
+    ledger.add('3.9', '/j/resume.jsonl', [row(1, 'in', result(0.1536, 1))], 'session-a'); // the resumed process reports 0.1262 + 0.0274
+    ledger.add('3.3', '/j/other.jsonl', [row(1, 'in', result(0.2, 3))], 'session-b');
+    expect(ledger.total).toBeCloseTo(0.3536);
+    expect(ledger.summary()).toBe('live cost: total_cost_usd sum = $0.35 across 3 turns');
+  });
 });

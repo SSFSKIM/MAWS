@@ -98,19 +98,23 @@ export function frameInventory(rows: JournalRow[]): { systemSubtypes: Map<string
   return { systemSubtypes, types };
 }
 
-// The run's cost, journal by journal, and the cap the owner set for a single run (stop and report past it).
+// The run's cost, journal by journal, and the cap the owner set for a single run (stop and report past it). A resumed
+// process restores its session's cost state and keeps counting (a live 3.9 resume reported the first launch's figure
+// plus its own turn), so launches that share an engine session (`sessionKey`) cost their largest figure, not their sum.
 export class LiveLedger {
-  readonly entries: { label: string; journalPath: string; costUsd: number; turns: number }[] = [];
+  readonly entries: { label: string; journalPath: string; sessionKey: string; costUsd: number; turns: number }[] = [];
   constructor(readonly capUsd: number) {}
 
-  add(label: string, journalPath: string, rows: JournalRow[]): { costUsd: number; turns: number } {
+  add(label: string, journalPath: string, rows: JournalRow[], sessionKey: string = journalPath): { costUsd: number; turns: number } {
     const cost = journalCost(rows);
-    this.entries.push({ label, journalPath, ...cost });
+    this.entries.push({ label, journalPath, sessionKey, ...cost });
     return cost;
   }
 
   get total(): number {
-    return this.entries.reduce((sum, e) => sum + e.costUsd, 0);
+    const bySession = new Map<string, number>();
+    for (const e of this.entries) bySession.set(e.sessionKey, Math.max(bySession.get(e.sessionKey) ?? 0, e.costUsd));
+    return [...bySession.values()].reduce((sum, cost) => sum + cost, 0);
   }
 
   summary(): string {
