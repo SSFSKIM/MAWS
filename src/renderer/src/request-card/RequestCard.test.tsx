@@ -416,7 +416,9 @@ describe('request card placements and delivery states', () => {
 
   describe('the hover placement', () => {
     it('offers Approve and Deny for an unflagged Read, answering by pointer only', async () => {
-      mount(unflaggedRead, 'hover');
+      const { item } = mount(unflaggedRead, 'hover');
+      // named for its request and tool, so a reader of the hover dialog (named for the session) finds the approval
+      expect(screen.getByRole('group', { name: 'Approval needed: Read' }).dataset.requestCard).toBe(item.id);
       const approve = screen.getByRole('button', { name: 'Approve' });
       expect(screen.getByRole('button', { name: 'Deny' })).toBeTruthy();
       expect(screen.getByRole('button', { name: 'Open session' })).toBeTruthy();

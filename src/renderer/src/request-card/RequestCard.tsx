@@ -284,8 +284,10 @@ function RequestCardFor({ item, request: given, placement, onAnswered }: Request
     }
   }
 
+  // Hover, the card sits in C5's dialog named for the session; the card itself is named for its request and tool.
+  const named = hover ? { role: 'group', 'aria-label': title === null ? heading.text : `${heading.text}: ${title}` } : {};
   const content = (
-    <div ref={rootRef} data-request-card={item.id} aria-busy={busy} className={`flex flex-col gap-3 text-fg ${placement === 'docked' || placement === 'inline' ? 'text-ui' : 'text-ui-sm'}`}>
+    <div ref={rootRef} data-request-card={item.id} aria-busy={busy} {...named} className={`flex flex-col gap-3 text-fg ${placement === 'docked' || placement === 'inline' ? 'text-ui' : 'text-ui-sm'}`}>
       {!framed && (
         <div className={`flex items-center gap-1.5 ${TONE[heading.tone]}`}>
           <span aria-hidden>{heading.char}</span>
