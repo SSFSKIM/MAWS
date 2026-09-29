@@ -212,6 +212,24 @@ describe('a submission the engine drops before it started releases the next queu
     await flush();
     expect(ofKind(s.events, 'turn.started').map((e) => e.userMessageUuid)).toEqual([outs[1]!.uuid]);
   });
+
+  it('a drop caused by interrupt() releases nothing: the queue reads paused with the waiting entry still queued', async () => {
+    const s = scriptedSession({ responder: handshakeResponder({ interrupt: () => ({ response: { still_queued: [], cancelled: [] } }) }) });
+    await s.session.start();
+    const lifecycle = (uuid: string, state: string) => s.transport.push({ type: 'command_lifecycle', command_uuid: uuid, state, uuid: `lc-${uuid}-${state}`, session_id: 's' });
+    const first = await s.session.send('first');
+    expect((await s.session.send('waiting')).disposition).toBe('queued');
+    lifecycle(first.messageUuid!, 'queued');
+    await s.session.interrupt({ cancelEngineQueued: true });
+    lifecycle(first.messageUuid!, 'cancelled'); // the engine drops the unstarted submission the interrupt cancelled
+    await flush();
+    await flush();
+    expect(userOuts(s.journal.rows).map((f) => f.message.content)).toEqual(['first']);
+    expect(metaRows(s.journal.rows, 'queue').map((r) => `${String(r.action)}:${String(r.trigger ?? r.reason)}`)).toEqual(['release:send', 'pause:interrupt']);
+    expect(s.session.status().queue).toEqual({ length: 1, paused: true });
+    expect(s.session.queue.state.entries.map((e) => [e.content, e.state])).toEqual([['waiting', 'queued']]);
+    expect(ofKind(s.events, 'notice.posted').filter((e) => e.key?.startsWith('queue:dropped:'))).toHaveLength(1);
+  });
 });
 
 describe('steer priority', () => {

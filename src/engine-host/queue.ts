@@ -225,10 +225,13 @@ export class MessageQueue {
       this.entries = this.entries.filter((e) => e !== entry);
       this.clearAck(entry.queueId);
       this.started.delete(entry.queueId);
-      this.notice(`queue:dropped:${entry.queueId}`, `The engine ${event.state} a message before starting it, so it was not answered. Re-send it if you still want an answer.`);
-      // A refusal may describe the engine's state rather than this message: pause instead of draining the queue into it
-      // (coordinator ruling); resume is one click.
-      if (event.state === 'refused' && !this.paused) {
+      // A refusal may describe the engine's state rather than this message: with messages waiting, pause instead of
+      // draining the queue into it (coordinator ruling); resume is one click. An empty queue is not paused, or it would
+      // silently hold the next send.
+      const pause = event.state === 'refused' && !this.paused && this.queuedCount > 0;
+      const text = `The engine ${event.state} a message before starting it, so it was not answered. Re-send it if you still want an answer.`;
+      this.notice(`queue:dropped:${entry.queueId}`, pause ? `${text} The queue is paused; resume it to send the next message.` : text);
+      if (pause) {
         this.paused = true;
         this.journal({ event: 'queue', action: 'pause', reason: 'refused' });
       }

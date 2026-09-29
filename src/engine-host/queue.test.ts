@@ -136,6 +136,16 @@ describe('queue release never follows an engine-initiated turn', () => {
     expect(await refused.store.loadQueue(ID)).toMatchObject({ paused: true, entries: [{ content: 'two', state: 'queued' }] });
     await refused.queue.setPaused(false); // resume is one click
     expect(refused.writes.map((w) => w.message.content)).toEqual(['one', 'two']);
+    expect(refused.rows.find((r) => r.event === 'notice')!.text).toContain('The queue is paused; resume it to send the next message.');
+    // with nothing waiting, a refused drop does not pause: a paused empty queue would silently hold the next send
+    const alone = await harness();
+    const { entry: only } = await alone.queue.send('one');
+    alone.queue.onLifecycle(lifecycle(only.messageUuid!, 'refused'));
+    alone.h.turn = false;
+    await flush();
+    expect(alone.queue.state).toEqual({ entries: [], paused: false });
+    expect(queueRows(alone.rows)).toEqual(['release:send']);
+    expect(alone.rows.find((r) => r.event === 'notice')!.text).not.toContain('paused');
     // a paused queue (an interrupt pauses before it cancels) releases nothing at the drop
     const paused = await harness();
     const { entry: sent } = await paused.queue.send('one');
