@@ -10,7 +10,8 @@ import { health, ID, intent, MESSAGE, putIntent, REPO, resetSetupStore, resource
 import { FailureCard } from './FailureCard';
 import { RelayCard } from './RelayCard';
 import { SetupCard } from './SetupCard';
-import { registerMessageReturn, resumeSession, startIntent } from './setup-actions';
+import { registerMessageReturn } from './message-return';
+import { resumeSession, startIntent } from './setup-actions';
 import { connectSetup, useSetup } from './store';
 import { TrustCard } from './TrustCard';
 
@@ -192,6 +193,27 @@ describe('failure card', () => {
     act(() => fake.event('session.setup', { appSessionId: ID, phase: 'failed', detail: null, outcome: { kind: 'error', message: 'the engine exited (code 1)', resources: resources({ record: 'kept' }) } }));
     expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
     expect(useNotices.getState().notices.map((n) => n.text)).toEqual(['the engine exited (code 1)']);
+    connection.disconnect();
+  });
+
+  it("a resume that fails after it started returns its message to the editor; C3's relay answer docks the card with it instead", async () => {
+    withMain({ 'session.start': answer(starting), 'session.intent.list': () => ({ intents: [] }), 'session.deletions.list': () => ({ manifests: [] }), 'engine.relayHealth': () => health() });
+    const connection = connectSetup(fake.client);
+    await connection.ready;
+    render(<SetupCard appSessionId={ID} />);
+    await act(() => resumeSession(ID, MESSAGE));
+    act(() => fake.event('session.setup', { appSessionId: ID, phase: 'failed', detail: null, outcome: { kind: 'error', message: 'the engine exited (code 1)', resources: resources({ record: 'kept' }) } }));
+    expect(returned).toEqual([MESSAGE]);
+    // a resume that became ready sent it: nothing comes back
+    await act(() => resumeSession(ID, MESSAGE));
+    act(() => fake.event('session.setup', { appSessionId: ID, phase: 'ready', detail: null, outcome: { kind: 'ready', engineSessionId: 'e' as never, firstTurn: 'sent' } }));
+    act(() => fake.event('session.setup', { appSessionId: ID, phase: 'failed', detail: null, outcome: { kind: 'error', message: 'later', resources: resources({ record: 'kept' }) } }));
+    expect(returned).toEqual([MESSAGE]);
+    // C3's relay answer: the card holds the message, and its Cancel returns it
+    await act(() => resumeSession(ID, MESSAGE));
+    act(() => fake.event('session.setup', { appSessionId: ID, phase: 'failed', detail: null, outcome: { kind: 'relay_unreachable', health: health() } }));
+    expect(returned).toEqual([MESSAGE]);
+    expect(useSetup.getState().cards.get(ID)).toMatchObject({ kind: 'relay', message: MESSAGE });
     connection.disconnect();
   });
 

@@ -1,6 +1,8 @@
 // A record's resume (C10 execution document, Interfaces "Session service", Resume): the trust bootstrap under an id of
 // its own when the owner accepted trust for a key the engine has not recorded, the disk-to-live handoff, C3's launch
-// with `--resume`, and the message sent at `ready`. Nothing rolls back: the record is the conversation's.
+// with `--resume`, and the message sent at `ready`. Nothing rolls back: the record is the conversation's. A failure
+// hands the message back (`onFailed`; the renderer returns it to the editor), except C3's `relay_unreachable`, whose
+// card's continuation still sends it.
 import type { SessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { FirstMessage } from '@shared/sessions/intent';
@@ -16,7 +18,7 @@ import { trustStateOf } from './trust';
 export async function runResume(
   s: Setup,
   record: SessionRecord,
-  input: { decision: 'accepted' | 'declined' | null; options: StartOptions; message: FirstMessage | null; onSent: () => void },
+  input: { decision: 'accepted' | 'declined' | null; options: StartOptions; message: FirstMessage | null; onSent: () => void; onFailed: () => void },
 ): Promise<void> {
   const appSessionId = record.appId;
   let watch: LaunchWatch | null = null;
@@ -68,6 +70,7 @@ export async function runResume(
     const resources: SetupResources = { worktree: null, record: 'kept', transcript: transcript ? 'kept' : 'none' };
     const outcome: SetupEvent['outcome'] =
       error instanceof RelayFailure ? { kind: 'relay_unreachable', health: error.health } : error instanceof HeldFailure ? await heldOutcome(s, error) : { kind: 'error', message: messageOf(error), resources };
+    if (outcome.kind !== 'relay_unreachable') input.onFailed();
     setupEvent(s, appSessionId, 'failed', null, outcome);
   } finally {
     watch?.dispose();

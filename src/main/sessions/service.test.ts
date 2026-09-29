@@ -360,6 +360,32 @@ describe('session service', () => {
       expect(h.host.launches).toHaveLength(1);
       expect(h.host.calledWith('session.send'), 'the message never reached the engine').toEqual([]);
       expect(h.index.sessions.get(record.appId)).toMatchObject({ appId: record.appId, engineSessionId: SID, archived: false });
+      // the failure handed the message back (the renderer returns it to the editor): a later plain Resume sends nothing
+      h.host.script = () => ({});
+      await h.service.startSession(record.appId, { message: null, options: {} });
+      expect(await h.settled(record.appId, 2)).toMatchObject({ phase: 'ready', outcome: { firstTurn: 'none' } });
+      expect(h.host.calledWith('session.send')).toEqual([]);
+    });
+
+    it('a resume that fails with an error hands its message back, and one C3 answers relay_unreachable keeps it for the card', async () => {
+      h.trustDirectory(h.work);
+      const record = recordAt(h.work);
+      h.host.script = () => ({ exit: { error: 'the model is not available' } });
+      await h.service.startSession(record.appId, { message: OK_MESSAGE, options: {} });
+      expect(await h.settled(record.appId)).toMatchObject({ phase: 'failed', outcome: { kind: 'error' } });
+      h.host.script = () => ({});
+      await h.service.startSession(record.appId, { message: null, options: {} });
+      expect(await h.settled(record.appId, 2)).toMatchObject({ phase: 'ready', outcome: { firstTurn: 'none' } });
+      expect(h.host.calledWith('session.send'), 'the failed resume took its message back').toEqual([]);
+      h.host.exitNow(record.appId);
+      // the relay card's continuation still sends the message given with the resume it docked for
+      h.host.script = () => ({ answer: { relay: DOWN_RELAY } });
+      await h.service.startSession(record.appId, { message: OK_MESSAGE, options: {} });
+      expect(await h.settled(record.appId, 3)).toMatchObject({ phase: 'failed', outcome: { kind: 'relay_unreachable' } });
+      h.host.script = () => ({});
+      await h.service.startSession(record.appId, { message: null, options: { gateway: 'direct' } });
+      expect(await h.settled(record.appId, 4)).toMatchObject({ phase: 'ready', outcome: { firstTurn: 'sent' } });
+      expect(h.host.calledWith('session.send')).toEqual([{ appSessionId: record.appId, content: 'Reply OK' }]);
     });
 
     it('a resume that fails after ready stops its process before telling the failure', async () => {

@@ -107,7 +107,9 @@ export async function guardResumeStart(s: Setup, record: SessionRecord, args: { 
     if (!trust.trusted) return [{ status: 'needs_trust', appSessionId, trust }, null];
   }
   const message = resumeMessages.get(appSessionId) ?? null;
-  const run = () => runResume(s, record, { decision, options: args.options, message, onSent: () => resumeMessages.delete(appSessionId) });
+  // the retained message goes once it is C3's (sent) or handed back (a failure other than C3's relay answer)
+  const drop = () => resumeMessages.delete(appSessionId);
+  const run = () => runResume(s, record, { decision, options: args.options, message, onSent: drop, onFailed: drop });
   return [{ status: 'starting', appSessionId }, run];
 }
 

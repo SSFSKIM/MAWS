@@ -16,6 +16,7 @@ import type { TrustState } from '@shared/sessions/trust';
 import { ipc } from '../ipc/client';
 import { toast } from '../stores/notices';
 import { toastHeld } from './holder-words';
+import { returnMessage } from './message-return';
 
 // A card a start answered with and that waits for the human, with the first message it docked with (the intent's
 // retained message, or a resume's), which its continuation runs with and a refusal hands back. A failed setup's card
@@ -37,6 +38,7 @@ export interface SetupState {
   deletions: Map<AppSessionId, DeletionManifestView>;
   dismissed: Set<AppSessionId>; // failures the human dismissed ("Back to editing"), until the next start
   removed: Set<AppSessionId>; // intents main dropped: an older snapshot never brings one back (ids are never reused)
+  resumes: Map<AppSessionId, FirstMessage>; // the message of a record's resume this window started, until `ready` or `failed`
   applyIntents(intents: SetupIntent[]): void;
   applyIntentChanged(event: EventPayload<'session.intent.changed'>): void;
   applySetup(event: SetupEvent): void;
@@ -45,6 +47,7 @@ export interface SetupState {
   undock(appSessionId: AppSessionId): void;
   settle(appSessionId: AppSessionId): void; // the human dismissed what the last start left: its card and its failure
   setInvoking(appSessionId: AppSessionId, invoking: boolean): void;
+  holdResume(appSessionId: AppSessionId, message: FirstMessage): void;
   applyDeletions(manifests: DeletionManifestView[]): void;
   setDeletion(appSessionId: AppSessionId, manifest: DeletionManifestView | null): void;
 }
@@ -69,6 +72,7 @@ export function createSetupStore() {
     deletions: new Map(),
     dismissed: new Set(),
     removed: new Set(),
+    resumes: new Map(),
     applyIntents(intents) {
       const { removed } = get();
       const next = new Map(get().intents);
@@ -89,13 +93,14 @@ export function createSetupStore() {
       set((s) => ({ intents: new Map(s.intents).set(appSessionId, intent) }));
     },
     applySetup(event) {
-      // C3's own relay answer at launch docks the relay card, with the message the intent still retains
-      const message = get().intents.get(event.appSessionId)?.message ?? null;
+      // C3's own relay answer at launch docks the relay card, with the message the intent (or the resume) still retains
+      const id = event.appSessionId;
+      const message = get().intents.get(id)?.message ?? get().resumes.get(id) ?? null;
       const cards =
-        event.phase === 'failed' && event.outcome?.kind === 'relay_unreachable'
-          ? new Map(get().cards).set(event.appSessionId, { kind: 'relay', health: event.outcome.health, message })
-          : get().cards;
-      set((s) => ({ phases: new Map(s.phases).set(event.appSessionId, event), cards }));
+        event.phase === 'failed' && event.outcome?.kind === 'relay_unreachable' ? new Map(get().cards).set(id, { kind: 'relay', health: event.outcome.health, message }) : get().cards;
+      // a resume's message is the engine's at `ready`, the card's or the editor's at `failed` (connectSetup hands it back)
+      const resumes = event.phase === 'ready' || event.phase === 'failed' ? without(get().resumes, id) : get().resumes;
+      set((s) => ({ phases: new Map(s.phases).set(id, event), cards, resumes }));
     },
     setIntent(intent) {
       get().applyIntentChanged({ appSessionId: intent.appSessionId, intent });
@@ -117,6 +122,9 @@ export function createSetupStore() {
         dismissed.delete(appSessionId); // a new start's failure is shown again
       } else next.delete(appSessionId);
       set({ invoking: next, dismissed });
+    },
+    holdResume(appSessionId, message) {
+      set((s) => ({ resumes: new Map(s.resumes).set(appSessionId, message) }));
     },
     applyDeletions(manifests) {
       set({ deletions: new Map(manifests.map((m) => [m.appSessionId as AppSessionId, m])) });
@@ -165,10 +173,13 @@ export function connectSetup(client: MawsBridge = ipc, store: typeof useSetup = 
     client.on('session.intent.changed', (e) => live && store.getState().applyIntentChanged(e)),
     client.on('session.setup', (e) => {
       if (!live) return;
+      const resumed = store.getState().resumes.get(e.appSessionId) ?? null;
       store.getState().applySetup(e);
-      // a resume that failed after it started has no card: its reason is a toast (the record stays, exited); the
-      // engine's own refusal (a job took the session after MAWS's read) names the holder and offers its Attach
+      // a resume that failed after it started has no card: its message returns to the editor (main handed it back) and
+      // its reason is a toast (the record stays, exited); the engine's own refusal (a job took the session after MAWS's
+      // read) names the holder and offers its Attach. C3's relay answer docked the relay card with the message instead.
       if (e.phase === 'failed' && !store.getState().intents.has(e.appSessionId)) {
+        if (resumed !== null && e.outcome?.kind !== 'relay_unreachable') returnMessage(e.appSessionId, resumed);
         if (e.outcome?.kind === 'error') toast({ level: 'danger', text: e.outcome.message, actions: [], dismissible: true });
         else if (e.outcome?.kind === 'held') onHeld(e.appSessionId, e.outcome.holder, e.outcome.attach);
       }

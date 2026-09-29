@@ -12,26 +12,11 @@ import { useSessions } from '../stores/sessions';
 import { heldToast } from './attach';
 import { confirm } from './dialogs';
 import { holderWords } from './holder-words';
+import { returnMessage } from './message-return';
 import { isStarting, useSetup } from './store';
 
 export type HookResult = { ok: true } | { ok: false; error: string };
 export type WorktreeResource = NonNullable<SetupResources['worktree']>;
-
-// ---- the message a card hands back -------------------------------------------------------------------------------
-// A cancelled card, "Back to editing" and a continuation that is refused return the retained first message to the
-// editor. The composer's `prefillComposer` is C7's; M4b points this seam at it. Until then the text is not lost: it
-// stays in the draft the intent keeps, and a start is never refused silently (a toast names the refusal).
-export type MessageReturn = (appSessionId: AppSessionId, message: FirstMessage) => void;
-let messageReturn: MessageReturn = () => {};
-
-export function registerMessageReturn(fn: MessageReturn): () => void {
-  messageReturn = fn;
-  return () => {
-    if (messageReturn === fn) messageReturn = () => {};
-  };
-}
-
-export const returnMessage: MessageReturn = (appSessionId, message) => messageReturn(appSessionId, message);
 
 // ---- outcomes in words -------------------------------------------------------------------------------------------
 
@@ -57,10 +42,13 @@ function refusalOf(outcome: StartOutcome): string | null {
   }
 }
 
-// Docks the card an outcome waits on, carrying the message the continuation will run with.
+// Docks the card an outcome waits on, carrying the message the continuation will run with; a record's resume that
+// started keeps its message in the store until it is sent (`ready`) or handed back (`failed`), since it has no intent.
 function dockFor(appSessionId: AppSessionId, outcome: StartOutcome, message: FirstMessage | null): void {
-  if (outcome.status === 'needs_trust') useSetup.getState().dock(appSessionId, { kind: 'trust', trust: outcome.trust, message });
-  else if (outcome.status === 'relay_unreachable') useSetup.getState().dock(appSessionId, { kind: 'relay', health: outcome.health, message });
+  const store = useSetup.getState();
+  if (outcome.status === 'needs_trust') store.dock(appSessionId, { kind: 'trust', trust: outcome.trust, message });
+  else if (outcome.status === 'relay_unreachable') store.dock(appSessionId, { kind: 'relay', health: outcome.health, message });
+  else if (outcome.status === 'starting' && message !== null && !store.intents.has(appSessionId)) store.holdResume(appSessionId, message);
 }
 
 async function start(appSessionId: AppSessionId, message: FirstMessage | null, options: StartOptions): Promise<StartOutcome | { error: string }> {
