@@ -73,7 +73,7 @@ function setup(opts: { model?: string; effort?: EngineSessionStatus['effort']; t
       record: (id) => records.get(id) ?? null,
       status: (id) => backend.status(id),
       start: sessionStartOver(client),
-      toast: (text) => void toasts.push(text),
+      toast: (text, action) => void toasts.push(action ? `${text} [${action.label}]` : text),
       timeouts: { turnMs: 300, exitMs: 300, readyMs: 400 },
     },
     store,
@@ -285,6 +285,38 @@ describe('one switch in flight per session', () => {
     expect(s.log.filter((c) => c === 'session.status'), 'one machine read the status').toHaveLength(1);
     expect(s.switcher.answer(READY, null)).toBe(true);
     expect(await first).toBe('cancelled');
+  });
+});
+
+// Whole-branch review: a switch toward the gateway checks the relay after the answer and before anything is stopped.
+describe('a switch toward the gateway checks the relay first', () => {
+  it('a relay that does not answer refuses the switch in words, with Open ClaudeUsage, and interrupts and stops nothing', async () => {
+    const s = setup({ turn: true });
+    s.backend.script('engine.relayHealth', () => ({ url: 'http://127.0.0.1:8641', ok: false, status: null, latencyMs: null, checkedAt: '2026-09-29T12:00:00.000Z', error: 'ECONNREFUSED' }));
+    const run = s.switcher.switchRoute(READY, 'gateway');
+    await confirming(s);
+    s.switcher.answer(READY, CONFIRM);
+    expect(await run).toBe('failed');
+    expect(stateOf(s)).toMatchObject({ phase: 'failed', error: "ClaudeUsage's relay is not answering · nothing was stopped" });
+    expect(s.toasts).toEqual(["ClaudeUsage's relay is not answering · nothing was stopped [Open ClaudeUsage]"]);
+    expect(s.log).not.toContain('session.interrupt');
+    expect(s.log).not.toContain('session.stop');
+    expect(s.log).not.toContain('session.start');
+  });
+
+  it('an answering relay lets the switch run; a switch to Direct asks it nothing', async () => {
+    const s = setup();
+    const run = s.switcher.switchRoute(READY, 'gateway');
+    await confirming(s);
+    s.switcher.answer(READY, CONFIRM);
+    expect(await run).toBe('done');
+    expect(s.backend.calls.filter((c) => c.command === 'engine.relayHealth').map((c) => c.input)).toEqual([{ force: true }]);
+    const d = setup();
+    const direct = d.switcher.switchRoute(READY, 'direct');
+    await confirming(d);
+    d.switcher.answer(READY, CONFIRM);
+    expect(await direct).toBe('done');
+    expect(d.backend.calls.filter((c) => c.command === 'engine.relayHealth')).toEqual([]);
   });
 });
 

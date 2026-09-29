@@ -96,7 +96,7 @@ export const CATALOG_LINES = { initialize: 'pass2/auto-routed#4', init: 'pass2/a
 // `/compact`, a user message and no control), the app queue, and (M4, the route switch) the interrupt, the queue's
 // pause and the stop, each moving the status and the queue as C3's host does, C10's resume (`session.start`) and rename
 // (`session.rename`), and C10's model catalogue (`engine.models`, the recorded `list_models` answer as the host's cache).
-const LOCAL_COMMANDS = ['session.status', 'session.catalog', 'session.send', 'session.queue.list', 'session.queue.setPaused', 'session.interrupt', 'session.stop', 'session.start', 'session.rename', 'engine.models'] as const satisfies readonly CommandName[];
+const LOCAL_COMMANDS = ['session.status', 'session.catalog', 'session.send', 'session.queue.list', 'session.queue.setPaused', 'session.interrupt', 'session.stop', 'session.start', 'session.rename', 'engine.models', 'engine.relayHealth'] as const satisfies readonly CommandName[];
 
 export const WIDGET_BACKEND_COMMANDS: readonly CommandName[] = [...LOCAL_COMMANDS, ...(Object.keys(SUBTYPE_OF) as CommandName[])];
 
@@ -407,6 +407,7 @@ export function createWidgetBackend(options: WidgetBackendOptions): WidgetBacken
     const scripted = scripts.get(command);
     if (scripted) return scripted(input);
     if (command === 'engine.models') return { models, source: 'cached', at: now() };
+    if (command === 'engine.relayHealth') return { url: 'http://127.0.0.1:8641', ok: true, status: 200, latencyMs: 1, checkedAt: now(), error: null }; // a relay that answers, unless a test scripts otherwise
     if (command === 'session.status') return statusOf(appSessionIdOf(input));
     if (command === 'session.rename') return rename(appSessionIdOf(input), (input as { title: string }).title);
     if (command === 'session.start') return start(appSessionIdOf(input), input as { options: StartOptions });

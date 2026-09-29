@@ -25,6 +25,7 @@ export const ROUTE = {
 
 export const FOOTER = {
   openClaudeUsage: 'Open ClaudeUsage ↗',
+  openClaudeUsageAction: 'Open ClaudeUsage', // a toast's action (no arrow: it runs the hand-off)
   accounts: 'Accounts',
   sessionInfo: 'Session info',
   label: 'Route',
@@ -55,6 +56,7 @@ export const SWITCH = {
     failed: 'The switch failed',
   },
   alreadySwitching: 'This session is already switching routes',
+  relayDown: "ClaudeUsage's relay is not answering · nothing was stopped",
   notRunning: 'The session is not running in this app',
   turnDidNotStop: 'The running turn did not stop within 10 s · nothing else was changed',
   readFailed: (why: string) => `The session's status could not be read · ${why}`,

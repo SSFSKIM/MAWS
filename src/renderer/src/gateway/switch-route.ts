@@ -19,7 +19,8 @@ import { ipc } from '../ipc/client';
 import { toast } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
 import { isGatewayModel } from '@shared/sessions/models';
-import { SWITCH, type Route } from './copy';
+import { runAction } from '../keymap/actions-runtime';
+import { FOOTER, SWITCH, type Route } from './copy';
 import { switchRefusal } from './routing-facts';
 import { sessionStartOver, type SessionStart, type StartOptions } from './session-start';
 import { useGateway, type GatewayStore, type SwitchConfirm, type SwitchState } from './store';
@@ -43,7 +44,7 @@ export interface SwitchDeps {
   record(appSessionId: AppSessionId): SessionRecord | null;
   status(appSessionId: AppSessionId): EngineSessionStatus | null; // the latest status held for the session
   start: SessionStart; // C10's session.start (the resume) and its setup failures
-  toast(text: string): void;
+  toast(text: string, action?: { label: string; run(): void }): void;
   timeouts?: Partial<SwitchTimeouts>;
 }
 
@@ -98,6 +99,14 @@ export function createRouteSwitcher(deps: SwitchDeps, store: GatewayStore) {
     if (!result.ok) throw new Failed(words(result.error.message));
     return result.value;
   }
+
+  const relayAnswers = async (): Promise<boolean> => {
+    try {
+      return (await store.getState().refreshRelay(true)).ok;
+    } catch {
+      return false; // the check itself failed: nothing is stopped on a relay no one could read
+    }
+  };
 
   const readStatus = (id: AppSessionId) => invoke(() => deps.client.invoke('session.status', { appSessionId: id }), SWITCH.readFailed);
 
@@ -159,6 +168,13 @@ export function createRouteSwitcher(deps: SwitchDeps, store: GatewayStore) {
         confirm = { ...confirm, model: answer.model, effort: answer.effort, backgroundTasks: answer.backgroundTasks ?? confirm.backgroundTasks };
         state = { ...state, confirm };
         if (!live) break;
+
+        // Toward the gateway, the relay is asked before anything stops: a restart onto a relay that does not answer would
+        // leave the session stopped behind C10's relay card.
+        if (target === 'gateway' && !(await relayAnswers())) {
+          deps.toast(SWITCH.relayDown, { label: FOOTER.openClaudeUsageAction, run: () => runAction('gateway.openClaudeUsage') });
+          return fail(SWITCH.relayDown);
+        }
 
         // Whether the app queue runs now, read before the interrupt that would pause it (once per switch).
         if (queueRunning === null) {
@@ -263,7 +279,7 @@ const app = createRouteSwitcher(
     record: (id) => useSessions.getState().records.get(id) ?? null,
     status: (id) => useSessions.getState().engine.get(id) ?? null,
     start: sessionStartOver(ipc),
-    toast: (text) => void toast({ level: 'info', text, actions: [], dismissible: true }),
+    toast: (text, action) => void toast({ level: action ? 'warning' : 'info', text, actions: action ? [action] : [], dismissible: true }),
   },
   useGateway,
 );
