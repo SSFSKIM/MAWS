@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { AgentId, TaskId, ToolUseId } from '@shared/graph/ids';
 import type { SessionEvent } from '@shared/graph/events';
-import { after, event, replayed, sidecarsOf, upTo, workflowRunsOf } from '../test-events';
+import { after, event, replayed, sidecarsOf, upTo, workflowRunsOf } from '../../../../../../test/support/agents-events';
 import {
   agentRows,
   applySnapshot,

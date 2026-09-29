@@ -5,7 +5,8 @@ import { status } from '../../../../../test/support/builders';
 import { createSessionsStore } from '../../stores/sessions';
 import { setAgentWorkClient } from './client';
 import { createTaskGraphStore, STOP_SETTLE_MS } from './store';
-import { event, fakeAgentWorkClient, flush, replayed, sidecarsOf, upTo, type FakeAgentWorkClient } from './test-events';
+import { event, replayed, sidecarsOf, upTo } from '../../../../../test/support/agents-events';
+import { fakeAgentWorkClient, flush, type FakeAgentWorkClient } from './fake-work-client';
 
 const A = 'A' as AppSessionId;
 const pass1 = replayed('pass1', 'subagent');

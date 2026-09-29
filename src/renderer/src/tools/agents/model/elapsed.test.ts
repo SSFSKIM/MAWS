@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { TaskId } from '@shared/graph/ids';
-import { event } from '../test-events';
+import { event } from '../../../../../../test/support/agents-events';
 import { elapsedOf, formatElapsed, formatTokens } from './elapsed';
 import { applyTaskEvents, emptyGraph, type TaskNode } from './task-graph';
 

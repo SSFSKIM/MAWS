@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { AgentId, AppSessionId } from '@shared/graph/ids';
 import type { SessionEvent } from '@shared/graph/events';
-import { event, replayed } from '../test-events';
+import { event, replayed } from '../../../../../../test/support/agents-events';
 import { matchesReceipt, matchesSendMessage, parentRoundsBetween, relayText, type Relay } from './relay';
 
 const events = replayed('pass3', 'relay-to-child');

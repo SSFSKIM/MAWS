@@ -4,7 +4,8 @@ import type { SessionEvent } from '@shared/graph/events';
 import { setAgentWorkClient } from './client';
 import { relayText, restoreDraft } from './model/relay';
 import { createRelayStore, relayKey } from './relay-store';
-import { event, fakeAgentWorkClient, replayed, type FakeAgentWorkClient } from './test-events';
+import { event, replayed } from '../../../../../test/support/agents-events';
+import { fakeAgentWorkClient, type FakeAgentWorkClient } from './fake-work-client';
 
 const A = 'A' as AppSessionId;
 const recorded = replayed('pass3', 'relay-to-child');

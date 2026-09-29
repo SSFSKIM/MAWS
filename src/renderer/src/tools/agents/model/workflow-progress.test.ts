@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { replayed, workflowRunsOf } from '../test-events';
+import { replayed, workflowRunsOf } from '../../../../../../test/support/agents-events';
 import { applyTaskEvents, emptyGraph, mergeRuns, type TaskNode } from './task-graph';
 import { agentTableOf, phasesOf, workflowTotals } from './workflow-progress';
 
