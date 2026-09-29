@@ -262,4 +262,56 @@ describe('attention service persistence failures', () => {
     expect(store.sessions.get(APP)).toEqual([first]);
     service.stop();
   });
+
+  // M5 re-review: a transient load failure must not let a live write replace persisted items nobody read.
+  it('a failed load is retried at once and then every 5 s; nothing is written before a load succeeds, then the merge runs and writes resume', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const persisted = item({ kind: 'interrupted', state: 'pending', id: `${APP}:interrupted:e1` as never, summary: 'Session interrupted, 1 approval lost', request: { requestId: null, toolUseId: null, taskId: null, agentId: null } });
+    const store = new FakeStore([persisted]);
+    const list = store.list.bind(store);
+    let failures = 2; // the first attempt and the immediate retry
+    const attempts = vi.fn(async () => {
+      if (failures > 0) {
+        failures -= 1;
+        throw new Error('EBUSY: attention.json');
+      }
+      return list();
+    });
+    store.list = attempts;
+    const { service, fire, handlers, last } = setup({ store });
+    const permission = item({ kind: 'permission', state: 'pending' });
+    fire('session.brokerItems', { appSessionId: APP, items: [permission] });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(attempts).toHaveBeenCalledTimes(2);
+    await expect(service.settled()).rejects.toThrow('EBUSY');
+    expect(store.replaced).toEqual([]); // the persisted list is untouched
+    expect(await handlers.get('attention.list')!(undefined)).toEqual([permission]); // the live list still serves
+    expect(last()).toEqual([permission]);
+    await vi.advanceTimersByTimeAsync(4_998);
+    expect(attempts).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(2);
+    expect(attempts).toHaveBeenCalledTimes(3);
+    await service.ready;
+    await expect(service.settled()).resolves.toBeUndefined();
+    expect(last()).toEqual([permission, persisted]);
+    expect(store.sessions.get(APP)).toEqual([permission, persisted]);
+    service.stop();
+  });
+
+  it('a load that fails once succeeds on the immediate retry', async () => {
+    const store = new FakeStore([]);
+    const list = store.list.bind(store);
+    let failures = 1;
+    store.list = vi.fn(async () => {
+      if (failures-- > 0) throw new Error('EAGAIN');
+      return list();
+    });
+    const { service, fire } = setup({ store });
+    fire('session.brokerItems', { appSessionId: APP, items: [item({ kind: 'permission', state: 'pending' })] });
+    await service.ready;
+    await expect(service.settled()).resolves.toBeUndefined();
+    expect(store.list).toHaveBeenCalledTimes(2);
+    expect(store.sessions.get(APP)).toHaveLength(1);
+    service.stop();
+  });
 });

@@ -38,7 +38,7 @@ export interface AttentionServiceDeps {
 }
 
 export interface AttentionService {
-  readonly ready: Promise<void>; // the persisted items are loaded
+  readonly ready: Promise<void>; // the persisted items are loaded (pending while every load attempt fails)
   list(): AttentionItem[];
   settled(): Promise<void>; // every change so far has reached the store
   stop(): void;
@@ -203,35 +203,69 @@ export function startAttentionService(deps: AttentionServiceDeps): AttentionServ
 
   // The previous run's items, merged with what this run already knows (M5 review): its broker and held-message items
   // died with its processes (D-16); a derived item stays unless this run retired its kind or the session was archived.
-  const ready = deps.store
-    .list()
-    .then((persisted) => {
-      const loaded = new Map<AppSessionId, AttentionItem[]>();
-      for (const item of persisted) loaded.set(item.appSessionId, [...(loaded.get(item.appSessionId) ?? []), item]);
-      for (const [id, items] of loaded) {
-        if (forgotten.has(id)) continue;
-        const state = stateOf(id);
-        for (const item of items) {
-          if (BROKER_KINDS.has(item.kind) || item.kind === 'held_peer_message' || state.retiredKinds.has(item.kind) || state.derived.has(item.id)) continue;
-          state.derived.set(item.id, item);
-        }
-        if (JSON.stringify(merged(state)) !== JSON.stringify(items)) owed.set(id, 'replace'); // the store holds what was dropped
-        changed(id, state);
-        writeOwed();
+  const merge = (persisted: AttentionItem[]) => {
+    const loaded = new Map<AppSessionId, AttentionItem[]>();
+    for (const item of persisted) loaded.set(item.appSessionId, [...(loaded.get(item.appSessionId) ?? []), item]);
+    for (const [id, items] of loaded) {
+      if (forgotten.has(id)) continue;
+      const state = stateOf(id);
+      for (const item of items) {
+        if (BROKER_KINDS.has(item.kind) || item.kind === 'held_peer_message' || state.retiredKinds.has(item.kind) || state.derived.has(item.id)) continue;
+        state.derived.set(item.id, item);
       }
-    })
-    .catch((error: unknown) => log(`persisted items not loaded: ${error instanceof Error ? error.message : String(error)}`))
-    .finally(() => loadFinished());
+      if (JSON.stringify(merged(state)) !== JSON.stringify(items)) owed.set(id, 'replace'); // the store holds what was dropped
+      changed(id, state);
+      writeOwed();
+    }
+  };
+
+  // The load (M5 re-review): retried at once after a failure, then every PERSIST_RETRY_MS; until one succeeds no write
+  // reaches the store (a live write would replace a list nobody read) and settled() rejects with the load's error.
+  let loadedOk = false;
+  let loadError: unknown = null;
+  let loadTimer: ReturnType<typeof setTimeout> | null = null;
+  let stopped = false;
+  let markReady!: () => void;
+  const ready = new Promise<void>((resolve) => (markReady = resolve));
+  let attempt: Promise<void> = Promise.resolve();
+  const load = (retryNow: boolean) => {
+    attempt = deps.store.list().then(
+      (persisted) => {
+        loadedOk = true;
+        loadError = null;
+        loadFinished(); // queued writes may go now, after the merge below queued its own
+        merge(persisted);
+        markReady();
+      },
+      (error: unknown) => {
+        loadError = error;
+        log(`persisted items not loaded (retrying): ${error instanceof Error ? error.message : String(error)}`);
+        if (stopped) return;
+        if (retryNow) return load(false);
+        loadTimer = setTimeout(() => {
+          loadTimer = null;
+          load(false);
+        }, PERSIST_RETRY_MS);
+        (loadTimer as { unref?: () => void }).unref?.();
+      },
+    );
+    return attempt;
+  };
+  void load(true);
 
   return {
     ready,
     list,
     settled: async () => {
-      await ready;
+      await attempt;
+      if (!loadedOk) throw loadError;
       await writes;
       if (failure !== null) throw failure;
     },
     stop: () => {
+      stopped = true;
+      if (loadTimer !== null) clearTimeout(loadTimer);
+      loadTimer = null;
       unsubscribe.forEach((off) => off());
       if (retryTimer !== null) clearTimeout(retryTimer);
       retryTimer = null;
