@@ -227,6 +227,25 @@ describe('the repository watcher debounces, coalesces and backs off', () => {
     watcher.dispose();
   });
 
+  it('holds nothing for a watch whose owner was released while its status was being read', async () => {
+    const fake = fakeWatch();
+    let answer!: (s: GitStatus) => void;
+    const read = vi.fn(() => new Promise<GitStatus>((resolve) => (answer = resolve)));
+    const watcher = new GitWatcher({ status: read, emit: () => {}, watch: fake.watch, statFile: async () => null });
+    const pending = watcher.watch(ROOT, 1);
+    watcher.release(1); // did-navigate while git status runs
+    answer(status());
+    expect(await pending).toEqual(status());
+    expect(fake.opened).toEqual([]); // no root opened, no count left behind
+    const again = watcher.watch(ROOT, 1); // the reloaded page watches afresh
+    answer(status());
+    await again;
+    expect(fake.opened.map((w) => w.closed)).toEqual([false]);
+    watcher.release(1);
+    expect(fake.opened.map((w) => w.closed)).toEqual([true]);
+    watcher.dispose();
+  });
+
   it('emits for a content write to a file inside an untracked directory, which porcelain lists as the directory alone', async () => {
     const fake = fakeWatch();
     const files = new Map<string, { size: number; mtimeMs: number }>([[`${ROOT}/new/`, { size: 96, mtimeMs: 1 }]]);
