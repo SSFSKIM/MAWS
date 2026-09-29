@@ -10,7 +10,17 @@ import type { SessionId } from '@shared/graph/ids';
 
 export const ENGINE_BIN = '/Users/new/.local/share/claude/versions/2.1.283'; // pinned; the packaged app later moves this to a setting (C11), never to PATH
 export const ENGINE_VERSION = '2.1.283';
-export const RELAY_URL = 'http://127.0.0.1:8641';
+// C11 start: the dev-only relay override (C11 execution document, M6; ruled 2026-09-29). The relay-down live cases point
+// the host at a loopback forwarder they stop and start, so ClaudeUsage itself is never quit. Read once, when this module
+// loads in the host, and only as `http://127.0.0.1:<port>`; any other value is ignored. Main deletes the variable before
+// forking a packaged app's hosts (`main/hosts/supervisor.ts`), and terminals never carry `MAWS_*`.
+export function relayUrlFrom(env: Record<string, string | undefined>): string {
+  const override = env.MAWS_RELAY_URL;
+  const port = override ? /^http:\/\/127\.0\.0\.1:([0-9]{1,5})$/.exec(override)?.[1] : undefined;
+  return port !== undefined && Number(port) >= 1 && Number(port) <= 65_535 ? override! : 'http://127.0.0.1:8641';
+}
+// C11 end
+export const RELAY_URL = relayUrlFrom(process.env); // ClaudeUsage's relay, http://127.0.0.1:8641, unless C11's dev override names a loopback port
 
 // The host's one binary configuration (C11's ask, M5): the pinned path and version by default; C11's `engine.configure`
 // moves the path to a setting, never to PATH. `buildLaunch`, `engine.binaryInfo` and `session.launch`'s binary refusals
