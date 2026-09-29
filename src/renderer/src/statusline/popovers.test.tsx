@@ -13,6 +13,8 @@ import { useSessions } from '../stores/sessions';
 import { useUsage } from '../stores/usage';
 import { resetShellStores } from '../test-support/shell-stores';
 import { registerUsagePopoverFooter } from './footer';
+import { ModeMenu } from './ModeMenu';
+import type { ModeBinding } from './mode-menu';
 
 const NOW = Date.parse('2026-09-29T07:40:00Z');
 const A = 'app-a' as AppSessionId;
@@ -232,5 +234,19 @@ describe('the mode menu in the status line', () => {
     fireEvent.click(screen.getByRole('menuitemradio', { name: /^default/ }));
     await settle();
     expect(screen.getByRole('alert').textContent).toBe('Auto mode is disabled by settings');
+  });
+});
+
+describe('the mode menu on its own binding', () => {
+  it('a binding whose set rejects shows the reason as the alert and leaves the menu usable', async () => {
+    const binding: ModeBinding = {
+      value: 'default', options: ['default', 'plan'], disabled: null, refusal: null, autoUnavailable: null,
+      set: () => Promise.reject(new Error('the bridge went away')),
+    };
+    render(<ModeMenu binding={binding} />);
+    fireEvent.click(screen.getByRole('menuitemradio', { name: /^plan/ }));
+    await settle();
+    expect(screen.getByRole('alert').textContent).toBe('the bridge went away');
+    expect((screen.getByRole('menuitemradio', { name: /^plan/ }) as HTMLButtonElement).disabled).toBe(false);
   });
 });

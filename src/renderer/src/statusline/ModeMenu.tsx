@@ -31,11 +31,16 @@ export function ModeMenu({ binding, onDone }: { binding: ModeBinding; onDone?: (
   const apply = async (mode: PermissionMode) => {
     setPending(true);
     setError(null);
-    const result = await binding.set(mode);
-    setPending(false);
-    setConfirming(null);
-    if (result.ok) onDone?.();
-    else setError(result.error);
+    try {
+      const result = await binding.set(mode);
+      if (result.ok) onDone?.();
+      else setError(result.error);
+    } catch (thrown) {
+      setError(thrown instanceof Error ? thrown.message : String(thrown)); // a binding that rejects: shown like a refusal
+    } finally {
+      setPending(false);
+      setConfirming(null);
+    }
   };
   const choose = (mode: PermissionMode) => {
     if (mode === binding.value) return onDone?.();
