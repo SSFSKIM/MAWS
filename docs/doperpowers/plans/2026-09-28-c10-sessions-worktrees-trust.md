@@ -10,7 +10,7 @@ What C10 does not do: render the transcript or the composer (C6, C7; C7 owns the
 
 ## Progress
 
-- [ ] M1 — Trust, launch mapping, X6 extensions, the pinned-fork probe, the models catalogue
+- [x] M1 — Trust, launch mapping, X6 extensions, the pinned-fork probe, the models catalogue (2026-09-29, reviewed clean on opus after one fix wave)
 - [ ] M2 — Worktree service, holder authority and the cleanup state machine
 - [ ] M3 — Session service: intents, start, fork, archive, delete, rename, setup events, rollback
 - [ ] M4 — The unstarted session: empty state, intent hook and chips (with C7), docked trust and relay cards, progress and failure, actions, dialogs, end-to-end over the replay transport (split at execution, Decision Log 2026-09-29: M4a is everything that does not need C7's composer and runs before M5; M4b, the C7 wiring, runs last)
