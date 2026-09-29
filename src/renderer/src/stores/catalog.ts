@@ -76,7 +76,7 @@ export function attachCatalog(appSessionId: AppSessionId, client: MawsBridge = i
       const snapshot = await client.invoke('session.catalog', { appSessionId });
       if (!live) return;
       const launchId = status.ok ? status.value.launchId : '';
-      apply(snapshot.ok ? projectCatalog(launchId, snapshot.value) : { ...EMPTY_CATALOG, launchId: snapshot.ok ? launchId : '' });
+      apply(snapshot.ok ? projectCatalog(launchId, snapshot.value) : EMPTY_CATALOG); // refused before any process: the empty catalogue
       const drained = buffer ?? [];
       buffer = null;
       drained.forEach(apply);
