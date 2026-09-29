@@ -141,6 +141,24 @@ describe('turn activity', () => {
     expect(activity()).toBe(collapsed);
   });
 
+  // Whole-branch review: every delta batch clones the open turn without changing its version, so an entry keyed on
+  // the TurnState reference churned C8a's summary at the delta rate.
+  it('keeps a streaming turn’s entry, and the list, through deltas that change no version', async () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('b1', 'Bash', { command: 'ls' }, 'm1', 0);
+    const delta = (id: string, piece: string) =>
+      b.emit('assistant.block.delta', { apiMessageId: api('m2'), blockIndex: 0, blockType: 'text', textDelta: piece, thinkingDelta: null, inputJsonDelta: null, userMessageUuid: null }, { id });
+    delta('d1', 'Str');
+    const { push, activity } = await attached(b.events);
+    const first = activity();
+    push([delta('d2', 'eam')]);
+    expect(activity()[0]).toBe(first[0]);
+    push([delta('d3', 'ing')]);
+    expect(activity()[0]).toBe(first[0]);
+    expect(activity()).toBe(first);
+  });
+
   it('keeps an unchanged turn’s entry when another turn changes, and a child’s status turns terminal with its finish', async () => {
     const b = work();
     const { push, activity } = await attached(b.events);

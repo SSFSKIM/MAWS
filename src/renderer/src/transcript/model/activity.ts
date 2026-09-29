@@ -38,19 +38,23 @@ export interface TurnActivity extends TurnWork {
   endedAt: string | null;
 }
 
-const byTurn = new WeakMap<TurnState, TurnActivity>();
-// The list, per lineage (its shared per-turn memo map): the same array while no turn changed.
+// Per lineage (its shared per-turn memo map), each turn's entry keyed on (id, version) like `turnWork`: a delta batch
+// clones the open turn without bumping its version, and must not produce a new entry (whole-branch review).
+const byTurn = new WeakMap<TranscriptState['memo'], Map<TurnState['id'], { version: number; activity: TurnActivity }>>();
+// The list, per lineage: the same array while no turn changed.
 const lists = new WeakMap<TranscriptState['memo'], TurnActivity[]>();
 
 // One entry per turn in `state.order`; an unchanged turn keeps its entry, and an unchanged list is the same array.
 export function turnActivity(state: TranscriptState): TurnActivity[] {
+  let entries = byTurn.get(state.memo);
+  if (!entries) byTurn.set(state.memo, (entries = new Map()));
+  const known = entries;
   const list = state.order.map((id) => {
     const turn = state.turns.get(id)!;
-    let activity = byTurn.get(turn);
-    if (!activity) {
-      activity = { turnId: turn.id, origin: turn.origin, state: turn.state, startedAt: turn.startedAt, endedAt: turn.endedAt, ...turnWork(state, turn) };
-      byTurn.set(turn, activity);
-    }
+    const kept = known.get(id);
+    if (kept && kept.version === turn.version) return kept.activity;
+    const activity: TurnActivity = { turnId: turn.id, origin: turn.origin, state: turn.state, startedAt: turn.startedAt, endedAt: turn.endedAt, ...turnWork(state, turn) };
+    known.set(id, { version: turn.version, activity });
     return activity;
   });
   const previous = lists.get(state.memo);
