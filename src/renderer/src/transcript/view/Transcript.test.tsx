@@ -130,6 +130,29 @@ describe('Transcript', () => {
     });
   }
 
+  // A jump whose target the old rows did not hold (a notification opening an item the fresh history brings) was never
+  // shown, so the re-resolved jump is performed even though focus sits outside the transcript.
+  it('a jump this view never handled lands at install, focus elsewhere notwithstanding', async () => {
+    const events = deniedThenAnswer();
+    const later = events.findIndex((event) => event.kind === 'turn.started' && event.userMessageUuid === uuid('u2'));
+    const key = `transcript-test-${++keys}`;
+    const outside = document.body.appendChild(document.createElement('button'));
+    onTestFinished(() => outside.remove());
+    const first = render(<Transcript source={{ key, subscribe: () => () => {}, snapshot: () => Promise.resolve(events.slice(later)) }} variant="session" />);
+    await waitFor(() => expect(useTranscriptStore.getState().entries[key]?.phase).toBe('live'));
+    first.unmount();
+    let resolve: (events: SessionEvent[]) => void = () => {};
+    render(<Transcript source={{ key, subscribe: () => () => {}, snapshot: () => new Promise((r) => (resolve = r)) }} variant="session" />);
+    await waitFor(() => expect(useTranscriptStore.getState().entries[key].phase).toBe('hydrating'));
+    const target = cellId.tool(tool('t1'));
+    act(() => useTranscriptStore.getState().jumpTo(key, target)); // absent from the old rows: nothing to show yet
+    expect(useTranscriptStore.getState().entries[key].jump).toBeNull();
+    act(() => outside.focus());
+    await act(async () => resolve(events.map((event) => ({ ...event, id: `disk:${event.id}` as EventId, seq: null }))));
+    await waitFor(() => expect(useTranscriptStore.getState().entries[key].phase).toBe('live'));
+    await waitFor(() => expect(document.querySelector(`[data-cell-id="${target}"]`)?.contains(document.activeElement)).toBe(true));
+  });
+
   it('the denied count of a collapsed turn opens its work area and focuses the standalone denied cell itself', async () => {
     const key = await mounted(deniedThenAnswer());
     const turn = turnId.ofMessage(uuid('u1'));

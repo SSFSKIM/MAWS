@@ -183,8 +183,11 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
   useImperativeHandle(handle, () => listRef.current!, []);
 
   // Whether the reader has scrolled, clicked, typed in the transcript or put focus elsewhere since the last jump they
-  // asked for: a jump re-resolved when a staged restart installs (`reissued`) then leaves them where they are.
+  // asked for: a jump re-resolved when a staged restart installs (`reissued`) then leaves them where they are. Only
+  // when this view handled that jump itself (`handledFocus`, the id it focused): a jump whose target the old rows did
+  // not hold (a notification opening an item the fresh history brings) was never shown, so it is performed.
   const readerMoved = useRef(false);
+  const handledFocus = useRef<string | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const moved = useCallback(() => {
     readerMoved.current = true;
@@ -194,8 +197,10 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
   // the virtualiser has mounted it.
   useLayoutEffect(() => {
     if (!jump) return;
-    if (!jump.reissued) readerMoved.current = false;
-    else if (readerMoved.current || !focusIsHereOrNowhere(rootRef.current)) {
+    if (!jump.reissued) {
+      readerMoved.current = false;
+      handledFocus.current = jump.focus;
+    } else if (handledFocus.current === jump.focus && (readerMoved.current || !focusIsHereOrNowhere(rootRef.current))) {
       useTranscriptStore.getState().jumpHandled(storeKey, jump.nonce);
       return;
     }
