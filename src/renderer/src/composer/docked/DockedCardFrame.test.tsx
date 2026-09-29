@@ -106,7 +106,7 @@ describe('docked frame hosts a foreign card', () => {
     expect(frameA).not.toBe(document.activeElement);
   });
 
-  it('takes focus on mount when its pane held focus, and returns it to the composer on unmount', () => {
+  it('takes focus on mount when its pane held focus, and returns it to the composer on unmount', async () => {
     const focusEditor = vi.fn();
     registerFocusTarget(A, { focusEditor, focusFrame: () => {}, insertText: () => {} });
     function Host() {
@@ -125,7 +125,7 @@ describe('docked frame hosts a foreign card', () => {
     act(() => toggle.focus());
     act(() => toggle.click());
     expect(document.activeElement).toBe(screen.getByRole('group', { name: 'Trust this folder' }));
-    act(() => toggle.click());
+    await act(async () => toggle.click()); // the return waits out the commit, in case the next docked frame takes it
     expect(focusEditor).toHaveBeenCalledTimes(1);
   });
 

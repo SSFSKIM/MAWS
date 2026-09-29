@@ -241,6 +241,31 @@ describe("composer DOM under C5's dispatcher", () => {
     await waitFor(() => expect(editorOf().contains(document.activeElement)).toBe(true)); // focus is back in the editor
   });
 
+  it('hands focus from a retiring docked request to the next one, whose Enter answers it (§5.7)', async () => {
+    live(A);
+    mount([{ index: 0, id: A }]);
+    act(() => editorOf().focus());
+    const first = permission({ requestId: 'req-1' as never, at: '2026-09-29T09:00:00.000Z' });
+    const second = permission({ requestId: 'req-2' as never, at: '2026-09-29T09:01:00.000Z' });
+    const [one, two] = [itemFor(first, A), itemFor(second, A)];
+    const requests = new Map([
+      [one.id, first],
+      [two.id, second],
+    ]);
+    act(() => useAttention.setState({ bySession: new Map([[A, [one, two]]]), requests, version: 1 }));
+    await waitFor(() => expect(document.activeElement?.getAttribute('data-docked-frame')).toBe(A));
+    expect(within(composerOf(0)).getByText('1 more waiting')).toBeTruthy();
+    await key(document.activeElement as HTMLElement, { key: 'Enter' });
+    await waitFor(() => expect(invoked('session.answer')).toEqual([{ appSessionId: A, requestId: 'req-1', answer: { kind: 'permission', decision: 'allow', scope: 'once' } }]));
+    act(() => useAttention.setState({ bySession: new Map([[A, [two]]]), version: 2 })); // the first retires behind the second
+    await waitFor(() => expect(composerOf(0).querySelector('[data-request-card]')?.getAttribute('data-request-card')).toBe(two.id));
+    await new Promise((resolve) => requestAnimationFrame(resolve)); // past any deferred return to the editor
+    const next = composerOf(0).querySelector<HTMLElement>('[data-docked-frame]')!;
+    expect(document.activeElement).toBe(next);
+    await key(next, { key: 'Enter' });
+    await waitFor(() => expect(invoked('session.answer').at(-1)).toEqual({ appSessionId: A, requestId: 'req-2', answer: { kind: 'permission', decision: 'allow', scope: 'once' } }));
+  });
+
   it('docks a foreign card ahead of any request, hides the editor the same way, and answers Enter through its own onAccept', async () => {
     live(A);
     mount([{ index: 0, id: A }]);
