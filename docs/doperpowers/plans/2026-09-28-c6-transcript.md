@@ -183,7 +183,7 @@ export type CellDetail =
 
 export interface Hunk { oldStart: number; oldLines: number; newStart: number; newLines: number; lines: string[] }   // the engine's structuredPatch shape, lines prefixed ' ', '+', '-'
 export interface Truncation { shownHead: number; shownTail: number; omittedBytes: number }
-export interface Spill { path: string; bytes: number | null; state: 'not_loaded' | 'loading' | 'loaded' | 'failed'; content: string | null }
+export interface Spill { path: string; bytes: number | null; state: 'not_loaded' | 'loading' | 'loaded' | 'partial' | 'failed'; content: string | null }   // partial (M5): the load was truncated or filled the 2 MB read; the detail shows the head marker and Open full log
 
 export interface TurnSummary {
   durationMs: number | null; toolCalls: number; byCategory: Record<ToolCategory, number>;
@@ -378,7 +378,7 @@ export interface TurnActivity { turnId: TurnId; origin: 'human' | 'engine'; stat
 export function turnActivity(state: TranscriptState): TurnActivity[];     // memoised per (turn id, turn version); order = state.order
 export const SUBAGENT_GLYPHS: readonly string[];                          // the eight marks, indexed by glyphFor
 export function glyphFor(taskId: TaskId): number;                         // the 32-bit hash the subagent row uses
-export const SubagentGlyph: React.FC<{ ref: SubagentRef; className?: string }>;   // the row's glyph, for C8's summary
+export const SubagentGlyph: React.FC<{ agent: SubagentRef; className?: string }>; // the row's glyph, for C8's summary (`agent`, not `ref`: React 19 reserves `ref` on function components)
 export type { TurnActivity };
 // `useTranscriptStore` exposes `activity(key)` over the same projection.    // C7: the request card and queued rows render markdown through the same sanitising pipeline (one renderer, no second stack)
 export type { Row, Cell, CellDetail, TurnSummary, ToolClassification, ToolCategory, SubagentRef, TurnId, RowId, CellId };
@@ -829,6 +829,8 @@ If `pnpm dev:harness` shows fixtures missing: the renderer's `server.fs.allow` m
   Date/Author: 2026-09-28, C6 controller.
 - Decision: Second C8 ask (coordinator, 2026-09-28, additive to the public surface): `turnActivity(state)` (memoised per turn version; per turn the files read and edited, the tools used, and the subagent refs with glyph and terminal state, independent of disclosure) and the glyph exports (`SUBAGENT_GLYPHS`, `glyphFor`, `SubagentGlyph`), plus `useTranscriptStore.activity(key)`, so C8a's resting summary does not empty when the human collapses a completed turn (the disclosed `rows` drop cells and subagent rows). Written into Public surface; implemented in M5's fix round 2.
   Date/Author: 2026-09-28, C6 controller (from the coordinator).
+- Decision: M5 fix round 2 landed (4c7a916, 0cc1bb7) with the review's six findings, the `process.exited` closure and C8's activity projection. Executor decisions kept: `SubagentGlyph` takes `agent`, not `ref` (React 19 reserves `ref` on function components and the React Compiler refuses `ref.glyph` in render; spec signature updated); a child source tells the two event forms apart by `seq` (live events carry one, disk events `seq: null`, the fact behind ruling 5; this is form discrimination, never deduplication, which stays by id), holding batches that arrive before provenance is decided and filtering them once it is; a child whose start appears only in disk history (a disk-backed parent writes no exit event) is read from disk; X3 `Spill.state` gains `'partial'` (the default adapter keeps the `truncated` flag internally so `loadSpill` keeps its shape; a caller's own `loadSpill` counts as partial when its content fills the 2 MB read); the plan body is always bounded at 144 px with `Show more` only on real overflow; the `App.test.tsx` flake did not recur in three full runs (recorded, no change).
+  Date/Author: 2026-09-28, C6 controller.
 
 ## Outcomes & Retrospective
 
