@@ -19,6 +19,7 @@ import { SETTINGS_DEFAULTS_V3 } from '@shared/settings/defaults';
 import { intentBindings } from '../composer/frame/bindings';
 import { useSetupIntent } from '../composer/setup-intent';
 import { ROUTE, type Route } from '../gateway/copy';
+import { directChoice, pickDirectModel } from '../gateway/direct-model';
 import { unstartedRoute } from '../gateway/routing-facts';
 import { patchIntent } from '../sessions/setup-actions';
 import { useSetup } from '../sessions/store';
@@ -65,7 +66,8 @@ interface Binding {
   fast: { view: FastView; pending: boolean; set(on: boolean): Promise<ControlAnswer> } | null;
   unstarted: boolean;
   // an unstarted session's route (its intent's `gateway`): the segment's options, empty when there is nothing to choose
-  route: { value: Route; choices: Route[]; set(route: Route): Promise<ControlAnswer> } | null;
+  // `set` writes the route, with the model and effort it needs, in one intent patch
+  route: { value: Route; choices: Route[]; set(patch: { gateway: Route; model?: string | null; effort?: Effort | null }): Promise<ControlAnswer> } | null;
 }
 
 function useLiveBinding(appSessionId: AppSessionId, models: readonly ModelRow[]): Binding | null {
@@ -133,8 +135,8 @@ function useIntentBinding(appSessionId: AppSessionId): Binding | null {
         : {
             value: gateway,
             choices: unstartedRoute({ gateway }, settings).choices,
-            async set(route) {
-              const result = await patchIntent(appSessionId, { gateway: route });
+            async set(patch) {
+              const result = await patchIntent(appSessionId, patch);
               return result.ok ? { ok: true } : { ok: false, error: result.error, caption: null };
             },
           },
@@ -249,11 +251,36 @@ function ModelBody({ name, args, binding, appSessionId }: { name: Name; args: st
 
   const route = binding.route;
   const direct = route?.value === 'direct';
-  const setRoute = (next: Route) => void run(() => route!.set(next));
+  // Direct never saves the route alone while the model the session would start on is a relay alias (the direct route
+  // cannot serve one), as the switch sheet and the relay card's Run direct ask first: a pending Claude choice is the
+  // pick and goes with the route in one patch; otherwise pickDirectModel asks, and its cancel changes nothing.
+  const written = (answer: ControlAnswer) => {
+    if (answer.ok) {
+      setChosenModel(undefined);
+      setChosenEffort(undefined);
+    }
+    return answer;
+  };
+  const goDirect = async () => {
+    if (chosenModel !== undefined && chosenModel !== null && !isGatewayModel(chosenModel) && selectedRow) {
+      const lowered = directChoice(selectedRow, effort).effort;
+      const chosen = lowered ?? (chosenEffort !== undefined ? chosenEffort : undefined);
+      await run(async () => written(await route!.set({ gateway: 'direct', model: chosenModel, ...(chosen !== undefined && { effort: chosen }) })));
+      return;
+    }
+    if (selected !== null && isGatewayModel(selected)) {
+      const pick = await pickDirectModel(appSessionId);
+      if (pick === null) return;
+      await run(async () => written(await route!.set({ gateway: 'direct', model: pick.model, ...(pick.effort !== null && { effort: pick.effort }) })));
+      return;
+    }
+    await run(() => route!.set({ gateway: 'direct' }));
+  };
+  const setRoute = (next: Route) => void (next === 'direct' ? goDirect() : run(() => route!.set({ gateway: next })));
   const startOnRelay = (entry: ModelEntryView) => {
     setRelayAsk(null);
     void run(async () => {
-      const answer = await route!.set('gateway');
+      const answer = await route!.set({ gateway: 'gateway' });
       if (answer.ok) setChosenModel(entry.value);
       return answer;
     });
@@ -288,8 +315,6 @@ function ModelBody({ name, args, binding, appSessionId }: { name: Name; args: st
         )}
       </Group>
     );
-  // Direct cannot serve a gateway model, so the session keeps the relay while one is chosen
-  const directRefused = selected !== null && isGatewayModel(selected) ? MODEL.directNeedsClaude : null;
 
   return (
     <div className="flex flex-col gap-2">
@@ -303,8 +328,7 @@ function ModelBody({ name, args, binding, appSessionId }: { name: Name; args: st
                   type="button"
                   role="radio"
                   aria-checked={choice === route.value}
-                  disabled={locked || (choice === 'direct' && directRefused !== null)}
-                  title={choice === 'direct' && directRefused !== null ? directRefused : undefined}
+                  disabled={locked}
                   onClick={() => choice !== route.value && setRoute(choice)}
                   className="rounded-sm border border-border px-2 py-0.5 text-ui-sm outline-accent hover:bg-bg-hover focus-visible:outline-2 disabled:text-fg-faint aria-checked:bg-bg-active"
                 >
