@@ -34,7 +34,8 @@ describe('mode menu', () => {
   });
 
   it('the live binding shows the effective mode and sets through session.setPermissionMode, answering the refusal in words', async () => {
-    const fake = fakeClient({ 'session.setPermissionMode': { effective: 'default', refusal: 'auto_mode_model', error: null } });
+    // as C3's host answers a refusal (engine-host/ipc.ts): the code and the control error's message together
+    const fake = fakeClient({ 'session.setPermissionMode': { effective: 'default', refusal: 'auto_mode_model', error: 'Cannot set permission mode to auto: model not supported' } });
     const binding = liveModeBinding(record('a'), status('a'), models, fake.client);
     expect(binding).toMatchObject({ value: 'auto', refusal: null, autoUnavailable: null, disabled: null });
     expect(binding.options).toEqual(['default', 'acceptEdits', 'plan', 'auto', 'bypassPermissions']);

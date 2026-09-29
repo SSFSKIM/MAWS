@@ -223,7 +223,7 @@ describe('the mode menu in the status line', () => {
   });
 
   it('bypassPermissions asks first, and a refusal stays in the menu in words', async () => {
-    mount(record('app-a'), { 'session.listModels': { models: [] }, 'session.setPermissionMode': { effective: 'default', refusal: 'auto_mode_settings', error: null } });
+    mount(record('app-a'), { 'session.listModels': { models: [] }, 'session.setPermissionMode': { effective: 'default', refusal: 'auto_mode_settings', error: 'Auto mode is disabled in settings.json' } });
     fireEvent.click(field('auto'));
     await settle();
     fireEvent.click(screen.getByRole('menuitemradio', { name: /bypassPermissions/ }));

@@ -80,8 +80,9 @@ export function liveModeBinding(record: SessionRecord, status: EngineSessionStat
     async set(next) {
       const result = await client.invoke('session.setPermissionMode', { appSessionId: record.appId, mode: next });
       if (!result.ok) return { ok: false, error: result.error.message };
-      if (result.value.error !== null) return { ok: false, error: result.value.error };
+      // C3's host answers a refusal with the control error's message beside its code: the code's words come first
       if (result.value.refusal !== null) return { ok: false, error: MODE_REFUSAL_WORDS[result.value.refusal] };
+      if (result.value.error !== null) return { ok: false, error: result.value.error };
       return { ok: true };
     },
   };
