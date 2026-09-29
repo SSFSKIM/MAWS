@@ -1,7 +1,8 @@
 // The `#panel` harness's agent-tool surface, `window.__maws_harness.agents` (C8b execution document, Interfaces
 // *Harness API*). Types only, so the e2e project can import them. Every read is of what the panel renders (the DOM of
 // the selected tool), so a case asserts what the owner would see; the calls go through the same controls a click does.
-// Beyond the document's list: `patchStatus` (the e2e cannot build a whole status), `reset` (a graph that has seen the
+// Beyond the document's list: `graph` and `stopSettleMs` (the store's cursor and settle window, read in the page),
+// `patchStatus` (the e2e cannot build a whole status), `reset` (a graph that has seen the
 // page's seeded status starts over for a disk-only case), `releaseThrough` (a recorded journal's
 // release counts measured from the fixture rather than guessed), `agentTab` and `childTranscript` (the
 // stand-in for C5's agent tab in the shared-attachment case), `transcriptCalls` (the adapters' taps) and fields the
@@ -96,6 +97,8 @@ export interface AgentsHarnessApi {
   loadMore(): Promise<void>;
   showEarlier(): Promise<void>;
 
+  graph(id: AgentsFakeId): { phase: string; launchId: string | null; lastSeq: number | null } | null; // the task-graph store's cursor for the session
+  stopSettleMs(): number; // the store's STOP_SETTLE_MS (the e2e cannot import the renderer's store)
   instances(toolId: string): string[]; // the tab ids of the tool's live instances, in creation order (O2)
   clickTranscriptSubagent(n: number): Promise<void>; // the n-th (1-based) agent control of the column's transcript, its turns expanded
   clickTranscriptFullLog(n: number): Promise<void>; // the n-th "Open full log" of the column's transcript, its cells expanded

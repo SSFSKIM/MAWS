@@ -9,7 +9,7 @@ import { useLayout } from '../../stores/layout';
 import { activeTab, sessionOfTab } from '../../stores/layout-model';
 import { BACKGROUND_COPY, LOG_COPY, RELAY_COPY, SUBAGENTS_COPY } from '../../tools/agents/copy';
 import { relayKey, useRelays } from '../../tools/agents/relay-store';
-import { useTaskGraph } from '../../tools/agents/store';
+import { STOP_SETTLE_MS, useTaskGraph } from '../../tools/agents/store';
 import { useTranscriptStore } from '../../transcript';
 import { fakeId } from '../panel/fakeSessions';
 import { attachesOf, childSourceFor, columnHandle, columnView, fake, feed, patchStatus, releaseThrough, reset, setAgentTab } from './AgentsHarnessBlock';
@@ -245,10 +245,13 @@ const column = () => document.querySelector<HTMLElement>('[data-agents-harness-t
 async function clickTranscriptSubagent(n: number): Promise<void> {
   const session = columnView().session;
   if (!session) throw new Error('agents: nothing fed yet');
-  useTranscriptStore.getState().expandAll(session.key); // the subagent rows sit in the turns' work areas
-  await frames();
-  const controls = [...(column()?.querySelectorAll('button.transcript-subagent-line, button.transcript-glyph') ?? [])];
-  click(controls[n - 1], `transcript agent control ${n} of ${controls.length}`);
+  // C6's Transcript loads lazily (its first render is a tick after mount), and the subagent rows sit in the turns' work
+  // areas: expanded, then waited for.
+  await until(() => columnHandle.current !== null, 'the column’s transcript to mount');
+  useTranscriptStore.getState().expandAll(session.key);
+  const controls = () => [...(column()?.querySelectorAll('button.transcript-subagent-line, button.transcript-glyph') ?? [])];
+  await until(() => controls().length >= n, `transcript agent control ${n}`);
+  click(controls()[n - 1], `transcript agent control ${n}`);
 }
 
 // The n-th "Open full log" of the column's transcript with every cell expanded, scrolling the list from its top to reach
@@ -256,6 +259,7 @@ async function clickTranscriptSubagent(n: number): Promise<void> {
 async function clickTranscriptFullLog(n: number): Promise<void> {
   const session = columnView().session;
   if (!session) throw new Error('agents: nothing fed yet');
+  await until(() => columnHandle.current !== null, 'the column’s transcript to mount'); // C6's Transcript loads lazily
   useTranscriptStore.getState().expandAll(session.key, { cells: true });
   await frames();
   const scroller = columnHandle.current?.scrollElement;
@@ -319,6 +323,11 @@ export const agentsProbes: AgentsHarnessApi = {
   output: (taskId) => click(buttonNamed(region()?.querySelector(`[data-shell="${CSS.escape(taskId)}"]`), BACKGROUND_COPY.output), `Output of ${taskId}`),
   loadMore: () => logAction(LOG_COPY.loadMore),
   showEarlier: () => logAction(LOG_COPY.showEarlier),
+  graph(id) {
+    const entry = useTaskGraph.getState().entries.get(fakeId(id));
+    return entry ? { phase: entry.phase, launchId: entry.launchId, lastSeq: entry.lastSeq } : null;
+  },
+  stopSettleMs: () => STOP_SETTLE_MS,
   instances: (toolId) => instanceIds().filter((id) => instanceOf(id)?.tool.id === toolId),
   clickTranscriptSubagent,
   clickTranscriptFullLog,

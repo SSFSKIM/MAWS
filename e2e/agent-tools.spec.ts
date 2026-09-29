@@ -157,9 +157,13 @@ test.describe('the #panel harness: the agent tools', () => {
     await expect.poll(async () => (await h.drillIn())?.rows ?? 0).toBeGreaterThan(0);
     await h.agents('agentTab', FIRST.agentId); // C5's agent tab, standing in: a second child transcript over the same source
     await expect.poll(() => h.agents('childTranscript', FIRST.agentId)).toMatchObject({ keys: [expect.any(String)], sources: 1, attaches: 2 });
-    const child = await h.agents('childTranscript', FIRST.agentId);
-    expect(child.drillInRows, 'the drill-in shows the store’s rows').toBe(child.rows);
-    expect(child.agentTabRows, 'and so does the agent tab').toBe(child.rows);
+    // C6's Transcript renders a tick after it mounts (its lazy chunk): both views catch up to the store's rows.
+    await expect
+      .poll(async () => {
+        const child = await h.agents('childTranscript', FIRST.agentId);
+        return { drillIn: child.drillInRows === child.rows, agentTab: child.agentTabRows === child.rows, rows: child.rows > 0 };
+      }, 'the drill-in and the agent tab show the store’s rows')
+      .toEqual({ drillIn: true, agentTab: true, rows: true });
     h.expectQuietConsole();
   });
 
@@ -232,21 +236,22 @@ test.describe('the #panel harness: the agent tools', () => {
 
   test('a nested agent renders under its parent', async ({ maws }) => {
     const h = await Harness.open(maws);
+    const rows = async () => {
+      const view = await h.subagents();
+      return [...(view?.active ?? []), ...(view?.done ?? []), ...(view?.disk ?? [])].map((row) => ({ agentId: row.agentId, depth: row.depth, orphan: row.orphan }));
+    };
+    // The recorded run: the outer agent dispatches the inner one (spawn depths 1 and 2); both finished.
+    const nested = [
+      { agentId: 'a38d4aebfaea9f6b1', depth: 0, orphan: false },
+      { agentId: 'a425e926e506edeb1', depth: 1, orphan: false },
+    ];
     await h.load('A', 'pass3/nested-agents');
-    await h.agents('fixtureFs', 'nested-agents-sidecars');
     await h.open('subagents');
-    // R5 promoted live nesting: the inner agent is at depth 1 directly under the outer one, in whichever list they are.
-    await expect
-      .poll(async () => {
-        const view = await h.subagents();
-        const rows = [...(view?.active ?? []), ...(view?.done ?? []), ...(view?.disk ?? [])];
-        return rows.map((row) => row.depth);
-      })
-      .toEqual([0, 1]);
-    const view = (await h.subagents())!;
-    const [outer, inner] = [...view.active, ...view.done, ...view.disk];
-    expect(outer.agentId).not.toBe(inner.agentId);
-    expect(inner.orphan).toBe(false);
+    // R5 promoted live nesting: from the wire alone (the inner start's issuing Agent call), before any sidecar is read.
+    await expect.poll(rows, 'nested from the wire').toEqual(nested);
+    await h.agents('fixtureFs', 'nested-agents-sidecars');
+    // The sidecars' parentAgentId confirms the same nesting.
+    await expect.poll(rows, 'nested with the sidecars read').toEqual(nested);
     h.expectQuietConsole();
   });
 
@@ -259,18 +264,22 @@ test.describe('the #panel harness: the agent tools', () => {
     await expect.poll(async () => (await card())?.title).toBe(WORKFLOW.description);
     expect((await card())!.phases).toEqual([]);
 
-    const counts = ['0/2', '1/2', '2/2'];
+    // Per frame (the recorded run's workflow_agent rows): alpha starts, alpha is done (8,861 tokens, 1.4 s) while beta
+    // runs, beta is done (8,857 tokens, 1.5 s). A running agent's time counts from its start; a done one's is its own.
+    const frames = [
+      { count: '0/2', table: [{ label: 'alpha', tokens: '', time: /^\d+(s|m \d{2}s|h \d{2}m)$/ }, { label: 'beta', tokens: '', time: /^$/ }] },
+      { count: '1/2', table: [{ label: 'alpha', tokens: '8.9k', time: /^1s$/ }, { label: 'beta', tokens: '', time: /^\d+(s|m \d{2}s|h \d{2}m)$/ }] },
+      { count: '2/2', table: [{ label: 'alpha', tokens: '8.9k', time: /^1s$/ }, { label: 'beta', tokens: '8.9k', time: /^1s$/ }] },
+    ];
     for (const [i, n] of progress.frames.entries()) {
       await h.release(n);
-      await expect.poll(async () => (await card())?.phases).toEqual([expect.objectContaining({ title: 'Echo', count: counts[i] })]);
+      const expected = frames[i];
+      await expect.poll(async () => (await card())?.phases, `frame ${i + 1}`).toEqual([expect.objectContaining({ title: 'Echo', count: expected.count })]);
+      const table = (await card())!.table;
+      expect(table.map((row) => ({ label: row.label, tokens: row.tokens })), `frame ${i + 1}: tokens`).toEqual(expected.table.map(({ label, tokens }) => ({ label, tokens })));
+      for (const [j, row] of table.entries()) expect(row.time, `frame ${i + 1}: ${row.label}'s time`).toMatch(expected.table[j].time);
     }
-    const done = (await card())!;
-    expect(done.line).toMatch(/^workflow maws-probe · .+ · 2 agents · .+ tokens$/);
-    expect(done.table.map((row) => row.label)).toEqual(['alpha', 'beta']);
-    for (const row of done.table) {
-      expect(row.tokens, `${row.label}'s tokens`).not.toBe('');
-      expect(row.time, `${row.label}'s time`).not.toBe('');
-    }
+    expect((await card())!.line).toMatch(/^workflow maws-probe · .+ · 2 agents · .+ tokens$/);
 
     // As C3's status reads while the run runs, then Stop: the id is still listed when the call resolves.
     await h.agents('patchStatus', 'A', { backgroundTasks: [WORKFLOW] });
@@ -281,12 +290,13 @@ test.describe('the #panel harness: the agent tools', () => {
     // The engine's first frame, the snapshot without it, with the status C3 writes from the same frame: still stopping.
     await h.release(AGENTS_STOP_WORKFLOW_TAIL.batches[0]);
     await h.agents('patchStatus', 'A', { backgroundTasks: [] });
+    await expect.poll(async () => (await h.agents('graph', 'A'))?.lastSeq, 'the snapshot batch applied').toBe(AGENTS_STOP_WORKFLOW_TAIL.first);
     expect(await card()).toMatchObject({ stopping: true, status: '' });
     const started = Date.now();
     await h.release(AGENTS_STOP_WORKFLOW_TAIL.batches[1]);
     await h.release(AGENTS_STOP_WORKFLOW_TAIL.batches[2]);
     await expect.poll(async () => card()).toMatchObject({ stopping: false, status: 'stopped', error: null });
-    expect(Date.now() - started, 'stopped from the frames, well inside STOP_SETTLE_MS').toBeLessThan(2_000);
+    expect(Date.now() - started, 'stopped from the frames, well inside STOP_SETTLE_MS').toBeLessThan(await h.agents('stopSettleMs'));
     h.expectQuietConsole();
   });
 
@@ -312,8 +322,13 @@ test.describe('the #panel harness: the agent tools', () => {
     await h.open('background');
     await expect.poll(async () => (await h.background())?.shells.map((s) => s.taskId)).toEqual([ghost.taskId]);
     await h.agents('patchStatus', 'A', { backgroundTasks: [] });
+    // A snapshot's silence never removes a node: the ghost stays until the stop resolves.
+    await expect.poll(async () => (await h.background())?.shells.map((s) => s.taskId), 'kept after the status drops it').toEqual([ghost.taskId]);
+    const settle = await h.agents('stopSettleMs');
+    const stopped = Date.now();
     await h.agents('stop', ghost.taskId);
-    await expect.poll(async () => (await h.background())?.shells, { timeout: 4_000, message: 'gone within STOP_SETTLE_MS' }).toEqual([]);
+    await expect.poll(async () => (await h.background())?.shells, { timeout: 2 * settle, message: 'gone after STOP_SETTLE_MS' }).toEqual([]);
+    expect(Date.now() - stopped, 'removed by the settle window, not at once').toBeGreaterThanOrEqual(settle);
     expect((await h.agents('calls')).stopTask).toEqual([{ appSessionId: 'A', taskId: ghost.taskId }]);
     h.expectQuietConsole();
   });
@@ -524,6 +539,24 @@ test.describe('the #panel harness: the agent tools', () => {
           await h.agents('stop', WORKFLOW.taskId);
           await expect.poll(async () => (await h.background())?.workflows[0]?.stopping).toBe(true);
           await expect.poll(async () => (await h.background())?.tasks.heading).toBe('Tasks · 0/1');
+        },
+      ],
+      [
+        'the drill-in with its composer disabled',
+        async () => {
+          await h.load('A', 'events/agents-relay', { releaseTo: AGENTS_RELAY_TAIL.first });
+          for (const n of AGENTS_RELAY_TAIL.batches) await h.release(n);
+          await h.open('subagents');
+          await h.agents('clickRow', AGENTS_RELAY_TAIL.foregroundAgentId);
+          await expect.poll(async () => (await h.drillIn())?.relay.disabled).toMatch(/is waiting on this agent/);
+        },
+      ],
+      [
+        'a shell row',
+        async () => {
+          await h.load('A', 'events/agents-stop-shell', { releaseTo: AGENTS_STOP_SHELL_TAIL.first });
+          await h.open('background');
+          await expect.poll(async () => (await h.background())?.shells.map((s) => s.output)).toEqual(['enabled']);
         },
       ],
       [
