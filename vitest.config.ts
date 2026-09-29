@@ -19,6 +19,19 @@ Object.assign(alias, {
 // Renderer suites that drive a real emulator without a DOM (C9: `@xterm/headless` round trips) run under Node.
 const RENDERER_NODE_TESTS = 'src/renderer/src/terminal/**/*.node.test.ts';
 
+// Suites timed by real filesystem events and polls, or by a whole-app mount, overrun vitest's 5 s default once the
+// machine's load average passes about 100 (and pass at 30 s). They run in `-timing` projects with 30 s; every other
+// suite keeps 5 s, so a real hang still fails fast.
+const TIMING_TIMEOUTS = { testTimeout: 30_000, hookTimeout: 30_000 };
+const TIMING_NODE_TESTS = [
+  'src/engine-host/fs/follow.test.ts',
+  'src/engine-host/fs/watcher.test.ts',
+  'src/main/git/watcher.test.ts',
+  'src/main/index/source.test.ts', // its wired cases follow real transcripts through the fs service
+  'src/main/usage/claude-usage-reader.test.ts',
+];
+const TIMING_RENDERER_TESTS = ['src/renderer/src/App.test.tsx'];
+
 // C3 start: the `live` project runs the engine-host suite against the pinned binary through the relay
 // (`MAWS_LIVE=1 pnpm test:live`); it exists only under MAWS_LIVE=1 so `pnpm test` and `pnpm verify` never see it.
 const liveProjects =
@@ -50,20 +63,22 @@ export default defineConfig({
           name: 'node',
           environment: 'node',
           include: ['src/{shared,main,preload,engine-host,pty-host}/**/*.test.ts', 'test/**/*.test.ts', RENDERER_NODE_TESTS],
-          exclude: ['**/node_modules/**', 'test/live/**/*.live.test.ts'], // C3: live cases run only in the `live` project; their support's own tests run here
+          exclude: ['**/node_modules/**', 'test/live/**/*.live.test.ts', ...TIMING_NODE_TESTS], // C3: live cases run only in the `live` project; their support's own tests run here
           // The compile-time suites (`identifiers are not interchangeable`) run through tsc on the node tsconfig.
           typecheck: { enabled: true, include: ['src/**/*.test-d.ts'], tsconfig: './tsconfig.node.json' },
         },
       },
+      { resolve: { alias }, test: { name: 'node-timing', environment: 'node', include: TIMING_NODE_TESTS, ...TIMING_TIMEOUTS } },
       {
         resolve: { alias },
         test: {
           name: 'renderer',
           environment: 'happy-dom',
           include: ['src/renderer/**/*.test.{ts,tsx}'],
-          exclude: [...configDefaults.exclude, RENDERER_NODE_TESTS],
+          exclude: [...configDefaults.exclude, RENDERER_NODE_TESTS, ...TIMING_RENDERER_TESTS],
         },
       },
+      { resolve: { alias }, test: { name: 'renderer-timing', environment: 'happy-dom', include: TIMING_RENDERER_TESTS, ...TIMING_TIMEOUTS } },
       ...liveProjects, // C3
       // C8a start: the panel host's suites again under the React Compiler, as electron-vite builds the app, so a render
       // that reads mutable module state (the instance map, a tool's state) without selecting it is caught in a test.

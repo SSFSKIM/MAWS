@@ -179,6 +179,7 @@ export function heldBridge(values: Record<string, unknown>) {
   const client = {
     async invoke(name: string, input: { key: string; value?: unknown }) {
       if (name === 'layout.list') return { ok: true, value: { keys: Object.keys(values) } };
+      if (name === 'engine.sessions') return { ok: true, value: [] }; // the shell's connect reads the engine table
       if (name === 'layout.get') {
         await gate;
         return { ok: true, value: { value: values[input.key] ?? null } };

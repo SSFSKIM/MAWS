@@ -28,7 +28,7 @@ export const GitStatusSchema = z.strictObject({
   branch: z.string().nullable(), // null when HEAD is detached
   head: z.string(), // the commit HEAD names; '' in a repository with no commit yet
   upstream: z.string().nullable(),
-  remoteUrl: z.string().nullable(), // the upstream remote's URL (`git remote get-url`); null without an upstream or a URL (C8's ask)
+  remoteUrl: z.string().nullable(), // the upstream remote's URL (`git remote get-url`), else `origin`'s (or the sole remote's) when no upstream is set; null for a local upstream or without a URL (C8's ask)
   ahead: z.number().int(),
   behind: z.number().int(),
   dirty: z.boolean(),

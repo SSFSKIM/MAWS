@@ -57,6 +57,9 @@ export function connectShell(client: MawsBridge = ipc, stores: ShellStores = { s
     else apply(result.value);
   };
 
+  // C3's process table, so a live session reads live after a reload before its next status (debt wave 3).
+  void answer('engine.sessions', client.invoke('engine.sessions', undefined), (statuses) => sessions().applyStatuses(statuses));
+
   attention().beginSnapshot();
   void answer('attention.list', client.invoke('attention.list', undefined), (items) => attention().applySnapshot(items)).then(() => {
     if (live() && !attention().loaded) attention().applySnapshot([]); // no answerer: start empty, keep what was buffered
