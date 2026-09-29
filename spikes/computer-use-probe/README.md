@@ -40,9 +40,12 @@ Shim environment: `CUA_SHIM_CODEX_HOME`, `CUA_SHIM_SESSION_ID` (default: Claude 
 `CUA_SHIM_PERSIST` (`session` | `always` | `none`), `CUA_SHIM_SURFACES` (`computer` by default; `browser,computer`
 also enables OpenAI's browser control, untested here), `CUA_SHIM_LOG` (JSONL journal), `CUA_SHIM_MODEL`.
 
-Known gotchas for the model: `get_app_state` on an app handle relaunches the app if it has quit; the accessibility
-tree uses the system language's role names; screenshot coordinates are in screenshot pixels, and Claude Code
-downscales images above 2000 px (prefer element indices).
+No skill or instruction document is needed. OpenAI's first tool result carries the full API document, and the shim
+appends a short "host notes" block to the server instructions (which Claude Code shows the model) covering what that
+document does not: one approval dialog per app per session, index-first addressing and pixel coordinates, dropping an
+app's handle after quitting it (`getAXState` on the handle relaunches the app), `listApps` lagging a moment behind
+cmd+q, `js_reset` for a confused REPL, and not mixing in osascript. Override or disable with `CUA_SHIM_HOST_NOTES`.
+The notes take effect on the next server connection (`/reload-plugins` or a new session).
 
 ## Scripts
 

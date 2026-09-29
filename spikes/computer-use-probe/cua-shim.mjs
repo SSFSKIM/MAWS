@@ -11,12 +11,15 @@
 //   2. an accepted app-approval elicitation gets `_meta.persist` so the approval sticks for the session;
 //   3. image results get their real MIME type (node_repl labels JPEG screenshots `image/png`);
 //   4. tools/list is trimmed to js and js_reset (plus the host-only turn_ended), marked `anthropic/alwaysLoad`;
-//   5. `notifications/cancelled` and everything else pass through untouched.
+//   5. the initialize result's `instructions` gain host notes: what OpenAI's returned API document does not say about
+//      operating under this host (Claude Code shows server instructions to the model, capped at 2,048 characters);
+//   6. `notifications/cancelled` and everything else pass through untouched.
 //
 // Env: CUA_SHIM_CODEX_HOME (scratch home for approvals and config; default /tmp/maws-cu-probe/codex-home),
 //      CUA_SHIM_SESSION_ID (default CLAUDE_CODE_SESSION_ID, else a fresh uuid), CUA_SHIM_MODEL (default "claude"),
 //      CUA_SHIM_PERSIST (session | always | none; default session), CUA_SHIM_SURFACES (default computer),
-//      CUA_SHIM_LOG (JSONL journal path; unset = no journal), CUA_SHIM_PLUGIN_MCP (override the plugin .mcp.json path).
+//      CUA_SHIM_LOG (JSONL journal path; unset = no journal), CUA_SHIM_PLUGIN_MCP (override the plugin .mcp.json path),
+//      CUA_SHIM_HOST_NOTES (replacement text for the host notes; "none" disables them).
 import {spawn} from 'node:child_process';
 import {readFileSync,mkdirSync,appendFileSync} from 'node:fs';
 import {homedir} from 'node:os';
@@ -33,6 +36,13 @@ const SURFACES=env.CUA_SHIM_SURFACES||'computer';
 const LOG=env.CUA_SHIM_LOG;
 const MODEL_TOOLS=new Set(['js','js_reset']);
 const KEEP_TOOLS=new Set([...MODEL_TOOLS,'turn_ended']);
+const HOST_NOTES=env.CUA_SHIM_HOST_NOTES==='none'?'':(env.CUA_SHIM_HOST_NOTES??`Host notes (Claude Code through cua-shim):
+- Use this when a task needs a macOS app's GUI and no CLI, API or skill covers it. The first js call returns the API document; read it before writing more code.
+- Each app asks the user for approval once per session, in a dialog. Do not retry an app the user declined; report it instead.
+- Address elements by index from the latest accessibility text. Coordinates are screenshot pixels; if the host says it downscaled an image, apply the multiplier it gives. Role names follow the system language.
+- After quitting an app, stop using its handle: getAXState() on it relaunches the app. Verify with cua.listApps({emit:false}), which can lag a moment behind cmd+q.
+- Batch deterministic actions with one observation per call, and pass timeout_ms for long waits. If the REPL state is confused, call js_reset and bind the app again.
+- Do not drive the same app through osascript or other tools while a cua session is open.`);
 
 const plugin=JSON.parse(readFileSync(PLUGIN_MCP,'utf8')).mcpServers.cua_repl;
 const modules=plugin.env.NODE_REPL_NODE_MODULE_DIRS;
@@ -75,6 +85,7 @@ const listRequests=new Set();
 function toHost(msg){
  if(msg.method==='elicitation/create'&&msg.id!==undefined)pendingElicitations.add(msg.id);
  if(msg.id!==undefined&&msg.result){
+  if(HOST_NOTES&&typeof msg.result.protocolVersion==='string'&&msg.result.capabilities)msg.result.instructions=[msg.result.instructions,HOST_NOTES].filter(Boolean).join('\n\n');
   if(listRequests.has(msg.id)){listRequests.delete(msg.id);if(Array.isArray(msg.result.tools))msg.result.tools=msg.result.tools.filter(t=>KEEP_TOOLS.has(t.name)).map(t=>MODEL_TOOLS.has(t.name)?{...t,_meta:{...(t._meta??{}),'anthropic/alwaysLoad':true}}:t);}
   if(Array.isArray(msg.result.content))msg.result.content=msg.result.content.map(sniff);
  }
