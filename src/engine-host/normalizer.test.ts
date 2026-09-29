@@ -153,6 +153,19 @@ describe('normaliser: ids, turns and the human prompt bubble', () => {
     expect(only(events, 'turn.ended').map((e) => [e.userMessageUuids, e.isEchoReceipt])).toEqual([[['u-1', 'e-1'], false], [['u-2'], false]]);
     expect(n.state.currentTurn).toBeNull();
   });
+
+  it("an empty result naming the pending echo and another prompt closes that prompt's turn and is no receipt", () => {
+    const n = make();
+    const echo = { type: 'user', uuid: 'e-1', shouldQuery: false, parent_tool_use_id: null, origin: { kind: 'human' }, message: { role: 'user', content: '<bash-input>echo X</bash-input>\n<bash-stdout>X</bash-stdout>' } };
+    const events = feed(n, [
+      outRow(echo),
+      outRow(userOut('u-2', { message: { role: 'user', content: '/compact' } })), startedIn('u-2'),
+      inRow(result({ num_turns: 0, terminal_reason: null, result: undefined, user_message_uuids: ['e-1', 'u-2'] })),
+    ]);
+    expect(only(events, 'turn.ended').map((e) => [e.userMessageUuids, e.isEchoReceipt])).toEqual([[['e-1', 'u-2'], false]]);
+    expect(n.state.currentTurn).toBeNull(); // /compact's turn closed
+    expect(n.state.pendingEcho).toBeNull(); // and the echo it named waits no longer
+  });
   // C7 end
 
   it('bash-tagged replayed user frames fill the bash field with the tags stripped', () => {
