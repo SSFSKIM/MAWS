@@ -128,6 +128,33 @@ describe('the editor mounts over its draft, takes prefills and submits through t
     expect(handle.current?.doc().content).toHaveLength(1);
   });
 
+  it('a recalled bare slash command opens no palette: the arrows keep walking history and Enter sends', async () => {
+    const entry = (display: string, at: string) => ({ display, at, source: 'maws', sessionId: null, pastedContents: {} });
+    const history = [entry('/compact', '2026-09-29T09:01:00.000Z'), entry('hello', '2026-09-29T09:00:00.000Z')];
+    const recalling = {
+      ...client,
+      invoke: vi.fn(async (name: string) => (name === 'session.history.list' ? { ok: true, value: { entries: history } } : { ok: false, error: { code: 'internal', message: 'no session' } })),
+    } as unknown as MawsBridge;
+    const onSubmit = vi.fn<(s: Serialized, how: 'send' | 'steer') => Promise<boolean>>(async () => false);
+    const { port } = drafts(null);
+    const handle = createRef<EditorHandle>();
+    const { container } = render(<Editor appSessionId={APP} cwd="/repo" sessionId="s" drafts={port} client={recalling} onSubmit={onSubmit} handle={handle} />);
+    const content = contentOf(container);
+    await waitFor(() => expect(recalling.invoke).toHaveBeenCalledWith('session.history.list', expect.anything()));
+    content.focus();
+    const press = (key: string) => act(async () => void content.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })));
+    await press('ArrowUp');
+    expect(handle.current?.serialize().display).toBe('/compact');
+    await new Promise((resolve) => requestAnimationFrame(resolve)); // past Tiptap's deferred focus
+    expect(document.querySelector('[role="listbox"]')).toBeNull(); // no palette over the recalled entry
+    await press('ArrowUp');
+    expect(handle.current?.serialize().display).toBe('hello');
+    await press('ArrowDown');
+    expect(handle.current?.serialize().display).toBe('/compact');
+    await press('Enter');
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ display: '/compact' }), 'send'));
+  });
+
   it('numbers pasted chips in document order, as display and pastedContents do', async () => {
     const atom = (name: string, text: string) => pastedNode({ id: name, kind: 'text', name, lines: 1, text });
     const { port } = drafts({ doc: docOf([paragraph(atom('Pasted text #2', 'first'), textNode(' and '), atom('notes.txt', 'second'), atom('Pasted text #1', 'third'))]), attachments: [], updatedAt: '2026-09-29T00:00:00.000Z' });

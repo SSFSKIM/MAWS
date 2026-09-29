@@ -14,7 +14,7 @@ import { Placeholder, UndoRedo } from '@tiptap/extensions';
 import { Plugin, PluginKey } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import { ReactNodeViewRenderer } from '@tiptap/react';
-import type { SuggestionOptions } from '@tiptap/suggestion';
+import { exitSuggestion, type SuggestionOptions } from '@tiptap/suggestion';
 import { AtMenu } from '../mentions/AtMenu';
 import { suggestionRenderer, type PopupItem } from '../mentions/popup';
 import { SlashPalette } from '../mentions/SlashPalette';
@@ -30,6 +30,12 @@ export const slashKey = new PluginKey('composer-slash');
 
 // Whether an `@` or `/` popup is open (the editor's keys leave Enter and the arrows to it then).
 export const suggesting = (editor: Editor): boolean => Boolean(atKey.getState(editor.state)?.active || slashKey.getState(editor.state)?.active);
+
+// Closes both popups and keeps them closed over the text they matched until the owner types there (the plugin's own
+// dismissal, as Escape does): a document the editor put in place, such as a recalled `/compact`, opens none.
+export function closeSuggestions(editor: Editor): void {
+  for (const key of [atKey, slashKey]) if (key.getState(editor.state)?.active) exitSuggestion(editor.view, key);
+}
 
 const run = ({ editor, range, props }: { editor: Editor; range: Range; props: PopupItem }) => props.apply(editor, range);
 

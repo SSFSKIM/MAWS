@@ -20,7 +20,7 @@ import { downscaleImage, fileBase64, imageRefusal, markPersisted } from './attac
 import { atomId, attachmentsOf, editingOfDoc, emptyDoc, isMultiline, mentionNode, pastedNode, textNode, type Attachment, type ComposerDoc } from './doc';
 import { createDraftWriter, docOfDraft, isEmptyDoc, type DraftWriter } from './drafts';
 import type { EditorEnv } from './env';
-import { suggesting } from './extensions';
+import { closeSuggestions, suggesting } from './extensions';
 import { historyNavigation, recallDoc, recallEntries, type HistoryNav, type Recall } from './history';
 import { classifyFile, classifyText, mentionPath } from './paste';
 import { mentionLabel, prefillToDoc } from './recall';
@@ -283,6 +283,9 @@ export class EditorController {
     const carrying = (shown: ComposerDoc): ComposerDoc => ({ ...shown, attrs: { ...shown.attrs, editing: editingOfDoc({ attrs: editor.state.doc.attrs }) } });
     if (next.show?.kind === 'entry') this.setDoc(carrying(recallDoc(this.recalls[next.show.index])), { silently: true, caret: 'end' });
     else if (next.show?.kind === 'draft') this.setDoc(carrying(next.show.doc), { silently: true, caret: 'end' });
+    // The caret sits at the end of what is shown, where a recalled `/compact` would open the palette and take the next
+    // arrow and Enter from the walk: a recall opens no popup.
+    if (next.show) closeSuggestions(editor);
     return next.show !== null || navigating;
   }
 
