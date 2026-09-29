@@ -1,0 +1,816 @@
+{
+  "config": {
+    "argv": [
+      "/Users/new/.nvm/versions/node/v22.23.2/bin/node",
+      "/Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a6f3eb0835c0683ff/node_modules/.bin/playwright",
+      "test",
+      "--reporter=list,json"
+    ],
+    "configFile": "/Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a6f3eb0835c0683ff/playwright.config.ts",
+    "rootDir": "/Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a6f3eb0835c0683ff/e2e",
+    "failOnFlakyTests": false,
+    "forbidOnly": false,
+    "fullyParallel": false,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {
+      "actualWorkers": 1
+    },
+    "preserveOutput": "always",
+    "projects": [
+      {
+        "outputDir": "/Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a6f3eb0835c0683ff/test-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "",
+        "name": "",
+        "testDir": "/Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a6f3eb0835c0683ff/e2e",
+        "testIgnore": [],
+        "testMatch": [
+          "**/*.@(spec|test).?(c|m)[jt]s?(x)"
+        ],
+        "timeout": 60000
+      }
+    ],
+    "quiet": false,
+    "reporter": [
+      [
+        "list"
+      ],
+      [
+        "json"
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "missing",
+    "updateSourceMethod": "patch",
+    "version": "1.63.0",
+    "workers": 1,
+    "webServer": null
+  },
+  "suites": [
+    {
+      "title": "smoke.spec.ts",
+      "file": "smoke.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "preload bundle has no external runtime imports",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 60000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 5,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-29T02:09:37.164Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "4219922fea2e2bd3c691-848b4e59daa4223789f5",
+          "file": "smoke.spec.ts",
+          "line": 13,
+          "column": 5
+        },
+        {
+          "title": "MAWS opens light, hosts answer, pty echoes, survives reload and window close, theme switches, exits clean",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 60000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1626,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-29T02:09:37.189Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "4219922fea2e2bd3c691-927d83b6328b1c471145",
+          "file": "smoke.spec.ts",
+          "line": 22,
+          "column": 5
+        }
+      ]
+    },
+    {
+      "title": "terminal.spec.ts",
+      "file": "terminal.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "opens a login shell in the session directory with the terminal environment",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 60000,
+              "annotations": [
+                {
+                  "type": "coldPromptMs",
+                  "description": "1511"
+                },
+                {
+                  "type": "promptMs",
+                  "description": "760"
+                },
+                {
+                  "type": "blockedInputEvents",
+                  "description": "0"
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 4654,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-29T02:09:38.833Z",
+                  "annotations": [
+                    {
+                      "type": "coldPromptMs",
+                      "description": "1511"
+                    },
+                    {
+                      "type": "promptMs",
+                      "description": "760"
+                    },
+                    {
+                      "type": "blockedInputEvents",
+                      "description": "0"
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "8f9206fb64e745a9d86f-6b22bdc49dc91803f3db",
+          "file": "terminal.spec.ts",
+          "line": 236,
+          "column": 5
+        },
+        {
+          "title": "keeps its buffer and process across tab switches",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 60000,
+              "annotations": [
+                {
+                  "type": "blockedInputEvents",
+                  "description": "0"
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 9828,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-29T02:09:43.492Z",
+                  "annotations": [
+                    {
+                      "type": "blockedInputEvents",
+                      "description": "0"
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "8f9206fb64e745a9d86f-99ef08603f666e991455",
+          "file": "terminal.spec.ts",
+          "line": 287,
+          "column": 5
+        },
+        {
+          "title": "pinned tab keeps its shell across sessions and warns about the worktree",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 60000,
+              "annotations": [
+                {
+                  "type": "blockedInputEvents",
+                  "description": "0"
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 5283,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-29T02:09:53.326Z",
+                  "annotations": [
+                    {
+                      "type": "blockedInputEvents",
+                      "description": "0"
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "8f9206fb64e745a9d86f-9dc5a34283e8ba277fd2",
+          "file": "terminal.spec.ts",
+          "line": 319,
+          "column": 5
+        },
+        {
+          "title": "asks before closing a busy terminal",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 60000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 5247,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-29T02:09:58.614Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "8f9206fb64e745a9d86f-fc1432e7c99138fdf800",
+          "file": "terminal.spec.ts",
+          "line": 350,
+          "column": 5
+        },
+        {
+          "title": "shows terminal lost on host crash and respawns after restart",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 60000,
+              "annotations": [
+                {
+                  "type": "lostMs",
+                  "description": "14"
+                },
+                {
+                  "type": "blockedInputEvents",
+                  "description": "0"
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 6903,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-29T02:10:03.867Z",
+                  "annotations": [
+                    {
+                      "type": "lostMs",
+                      "description": "14"
+                    },
+                    {
+                      "type": "blockedInputEvents",
+                      "description": "0"
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "8f9206fb64e745a9d86f-bb4ce091a05365451bdd",
+          "file": "terminal.spec.ts",
+          "line": 380,
+          "column": 5
+        },
+        {
+          "title": "re-adopts a live pty after reload exactly",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [
+                {
+                  "type": "blockedInputEvents",
+                  "description": "0"
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 11160,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-29T02:10:10.777Z",
+                  "annotations": [
+                    {
+                      "type": "blockedInputEvents",
+                      "description": "0"
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "8f9206fb64e745a9d86f-5950f78ddaf1d89308fc",
+          "file": "terminal.spec.ts",
+          "line": 450,
+          "column": 5
+        },
+        {
+          "title": "reconnects lossily with a notice when no checkpoint reaches the ring",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [
+                {
+                  "type": "topReconnect",
+                  "description": "exact"
+                },
+                {
+                  "type": "topRepaintMs",
+                  "description": "1151"
+                },
+                {
+                  "type": "blockedInputEvents",
+                  "description": "0"
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 11457,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-29T02:10:21.942Z",
+                  "annotations": [
+                    {
+                      "type": "topReconnect",
+                      "description": "exact"
+                    },
+                    {
+                      "type": "topRepaintMs",
+                      "description": "1151"
+                    },
+                    {
+                      "type": "blockedInputEvents",
+                      "description": "0"
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "8f9206fb64e745a9d86f-1007ce15ab8632581640",
+          "file": "terminal.spec.ts",
+          "line": 486,
+          "column": 5
+        },
+        {
+          "title": "floods without loss while the page stays responsive",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 600000,
+              "annotations": [
+                {
+                  "type": "pausedSeenVisible",
+                  "description": "true"
+                },
+                {
+                  "type": "W3",
+                  "description": "{\"seconds\":26.949,\"mbps\":6.3,\"outputBytes\":168888897,\"lineFeeds\":20000000,\"surplusCarriageReturns\":58,\"dTrue\":{\"bytes\":4,\"lineFeeds\":1,\"carriageReturns\":1},\"dW3\":{\"bytes\":188888959,\"lineFeeds\":20000001,\"carriageReturns\":20000059}}"
+                },
+                {
+                  "type": "pings",
+                  "description": "{\"clicks\":18,\"count\":18,\"lastMs\":0.4,\"maxMs\":1.6}"
+                },
+                {
+                  "type": "blockedInputEvents",
+                  "description": "0"
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 39977,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-29T02:10:33.408Z",
+                  "annotations": [
+                    {
+                      "type": "pausedSeenVisible",
+                      "description": "true"
+                    },
+                    {
+                      "type": "W3",
+                      "description": "{\"seconds\":26.949,\"mbps\":6.3,\"outputBytes\":168888897,\"lineFeeds\":20000000,\"surplusCarriageReturns\":58,\"dTrue\":{\"bytes\":4,\"lineFeeds\":1,\"carriageReturns\":1},\"dW3\":{\"bytes\":188888959,\"lineFeeds\":20000001,\"carriageReturns\":20000059}}"
+                    },
+                    {
+                      "type": "pings",
+                      "description": "{\"clicks\":18,\"count\":18,\"lastMs\":0.4,\"maxMs\":1.6}"
+                    },
+                    {
+                      "type": "blockedInputEvents",
+                      "description": "0"
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "8f9206fb64e745a9d86f-05ac4852d21a1ac4a990",
+          "file": "terminal.spec.ts",
+          "line": 514,
+          "column": 5
+        },
+        {
+          "title": "keeps Enter and Escape from the app's request handlers",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 60000,
+              "annotations": [
+                {
+                  "type": "skip",
+                  "description": "runs after the rebase over C5",
+                  "location": {
+                    "file": "/Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a6f3eb0835c0683ff/e2e/terminal.spec.ts",
+                    "line": 613,
+                    "column": 6
+                  }
+                },
+                {
+                  "type": "skip",
+                  "location": {
+                    "file": "/Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a6f3eb0835c0683ff/e2e/terminal.spec.ts",
+                    "line": 613,
+                    "column": 6
+                  }
+                }
+              ],
+              "expectedStatus": "skipped",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "skipped",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-29T02:11:13.392Z",
+                  "annotations": [
+                    {
+                      "type": "skip",
+                      "description": "runs after the rebase over C5",
+                      "location": {
+                        "file": "/Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a6f3eb0835c0683ff/e2e/terminal.spec.ts",
+                        "line": 613,
+                        "column": 6
+                      }
+                    },
+                    {
+                      "type": "skip",
+                      "location": {
+                        "file": "/Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a6f3eb0835c0683ff/e2e/terminal.spec.ts",
+                        "line": 613,
+                        "column": 6
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "skipped"
+            }
+          ],
+          "id": "8f9206fb64e745a9d86f-8dcca191530ad5cd13d7",
+          "file": "terminal.spec.ts",
+          "line": 613,
+          "column": 6
+        },
+        {
+          "title": "copies a selection and opens links externally",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 60000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 7164,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-29T02:11:13.392Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "8f9206fb64e745a9d86f-797ffd19b11c0cc30e29",
+          "file": "terminal.spec.ts",
+          "line": 637,
+          "column": 5
+        },
+        {
+          "title": "recolours on theme change without literals",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 60000,
+              "annotations": [
+                {
+                  "type": "blockedInputEvents",
+                  "description": "0"
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 4119,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-29T02:11:20.562Z",
+                  "annotations": [
+                    {
+                      "type": "blockedInputEvents",
+                      "description": "0"
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "8f9206fb64e745a9d86f-830563ae1ca588b8ed1c",
+          "file": "terminal.spec.ts",
+          "line": 703,
+          "column": 5
+        },
+        {
+          "title": "falls back to the DOM renderer on context loss and returns to WebGL on next show",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 60000,
+              "annotations": [
+                {
+                  "type": "domAfterMs",
+                  "description": "3057"
+                },
+                {
+                  "type": "blockedInputEvents",
+                  "description": "2"
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 6447,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-29T02:11:24.685Z",
+                  "annotations": [
+                    {
+                      "type": "domAfterMs",
+                      "description": "3057"
+                    },
+                    {
+                      "type": "blockedInputEvents",
+                      "description": "2"
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "8f9206fb64e745a9d86f-661c1619cf1a0b16fae4",
+          "file": "terminal.spec.ts",
+          "line": 761,
+          "column": 5
+        },
+        {
+          "title": "openTerminal runs the attach command",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 60000,
+              "annotations": [
+                {
+                  "type": "coldAttachMs",
+                  "description": "1612"
+                },
+                {
+                  "type": "attachMs",
+                  "description": "716"
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 4150,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-29T02:11:31.137Z",
+                  "annotations": [
+                    {
+                      "type": "coldAttachMs",
+                      "description": "1612"
+                    },
+                    {
+                      "type": "attachMs",
+                      "description": "716"
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "8f9206fb64e745a9d86f-31e94eab1af681c9e81b",
+          "file": "terminal.spec.ts",
+          "line": 784,
+          "column": 5
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "2026-09-29T02:09:36.898Z",
+    "duration": 118405.89600000001,
+    "expected": 14,
+    "skipped": 1,
+    "unexpected": 0,
+    "flaky": 0
+  }
+}

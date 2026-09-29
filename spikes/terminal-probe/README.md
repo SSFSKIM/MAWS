@@ -37,8 +37,14 @@ page saw it (`chunks`, `acks`, `maxUnparsed`, `maxUnacked`, `pausedSeen` from `p
 - `results/<renderer>-<workload>.json`: `Metrics` from `metrics.ts` (the floods W1 to W3 from the M2 gate; M1's
   20 MB runs kept as `xterm-W{1,2,3}-m1.json`); `<renderer>-items.json`, `<renderer>-tui-<tui>.json`,
   `<renderer>-links-m2-gate.json`.
-- `evidence/<renderer>-<item>.png`: screenshots named by item number.
+- `results/m5/`: the C9 M5 acceptance run's evidence (Playwright JSON and logs, the scratch driver's JSON, the
+  `pnpm test` / `pnpm verify` logs, the tmux controls for the `CSI S` finding), copied with every session id (UUID)
+  zeroed at the same length.
+- `evidence/<renderer>-<item>.png`: screenshots named by item number; `evidence/m5-*.png` from the M5 acceptance run.
+  Screenshots are **not redacted**: they show local paths and, in TUI frames, local session ids and usage lines, never
+  credentials.
 - `recordings/<tui>.rec`: `script -r` recordings of the item-11 runs, redacted with `redact-recording.mjs`.
+- `upstream-xterm-scrollup.md`: the draft report of xterm.js's `CSI S` behaviour (M5; not filed, the owner decides).
 - `findings.md`: the tables, the numbers and the verdict.
 
 ## What the page exposes

@@ -219,7 +219,7 @@ whose wait was too short),
 `ghostty-10-palette-dark.png`, `ghostty-11-claude-replay-early.png`, `ghostty-11-claude-replay-end.png`,
 `ghostty-11-codex-replay-early.png`, `ghostty-11-codex-replay-end.png`, `ghostty-13-scroll-region.png`.
 
-M5 acceptance run (the `#panel` Terminal tab, 189×40): `m5-09-codex-{frame,korean,after-wheel,exited}-before-fix.png` (17 shell rows lost at `/quit`), `m5-09-codex-{frame,korean,after-wheel,exited}.png` (after the adapter's `CSI S` handler: all 60 kept), `m5-09-claude-*` likewise, `m5-09-codex-self-update.png` (codex 0.155.1 starting its own update on launch; cut off), `m5-03-*.png` and `m5-07-*.png` (acceptance items 3 and 7). The recorded codex start-and-quit is the fixture `src/renderer/src/terminal/__fixtures__/codex-0.155.1-start-quit.bin` of the headless suite.
+M5 acceptance run (the `#panel` Terminal tab, 189×40): `m5-09-codex-{frame,korean,after-wheel,exited}-before-fix.png` (17 shell rows lost at `/quit`), `m5-09-codex-{frame,korean,after-wheel,exited}.png` (after the adapter's `CSI S` handler: all 60 kept), `m5-09-claude-*` likewise, `m5-09-codex-self-update.png` (codex 0.155.1 starting its own update on launch; cut off), `m5-03-*.png` and `m5-07-*.png` (acceptance items 3 and 7). The run's JSON and logs (session ids zeroed) are under `results/m5/`, the draft upstream report in `upstream-xterm-scrollup.md`. The recorded codex start-and-quit is the fixture `src/renderer/src/terminal/__fixtures__/codex-0.155.1-start-quit.bin` of the headless suite.
 
 `results/`: `smoke.json`, `console.json` (both rewritten by the last gate run), `xterm-W1.json`, `xterm-W2.json`,
 `xterm-W3.json` (the M2 gate's third run, with its `gate` judgement), `xterm-W1-m1.json`, `xterm-W2-m1.json`,
