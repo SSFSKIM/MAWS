@@ -2,6 +2,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { SETTINGS_DEFAULTS_V3 } from '@shared/settings/defaults';
 
 // A fake nativeTheme that behaves like Electron's (`shouldUseDarkColors` follows `themeSource`, `system` follows the
 // fake OS), one fake app window that records its background colour and the events sent to it, and an `ipcMain` that
@@ -74,7 +75,7 @@ afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
 const invoke = (name: string, input?: unknown) =>
   electron.handlers.get(`maws:cmd:${name}`)!({ sender: electron.win.webContents, senderFrame: electron.win.webContents.mainFrame }, input);
-const state = (theme: string, resolvedTheme: string) => ({ settings: { version: 2, keymap: {}, notifications: { enabled: true, sound: false }, theme }, resolvedTheme });
+const state = (theme: string, resolvedTheme: string) => ({ settings: { ...SETTINGS_DEFAULTS_V3, theme }, resolvedTheme });
 const changed = (theme: string, resolvedTheme: string) => ['maws:evt:settings.changed', state(theme, resolvedTheme)];
 const clearRecords = () => {
   electron.win.backgrounds = [];
@@ -98,7 +99,7 @@ describe('theme switching in main', () => {
     expect(electron.theme.themeSource).toBe('dark');
     expect(electron.win.backgrounds).toEqual(['#131313']);
     expect(electron.win.sent).toEqual([changed('dark', 'dark')]);
-    expect(readFileSync(file, 'utf8')).toBe('{"version":2,"theme":"dark","keymap":{},"notifications":{"enabled":true,"sound":false}}');
+    expect(readFileSync(file, 'utf8')).toBe(JSON.stringify({ ...SETTINGS_DEFAULTS_V3, theme: 'dark' }));
     await expect(invoke('settings.get')).resolves.toEqual({ ok: true, value: state('dark', 'dark') });
   });
 

@@ -5,6 +5,7 @@ import { createNoticesStore } from '../stores/notices';
 import { createSettingsStore } from '../stores/settings';
 import { createUsageStore } from '../stores/usage';
 import { bannerKey, connectNearLimitBanners, nearLimitBanners, thresholdFrom } from './near-limit';
+import { SETTINGS_DEFAULTS_V3 } from '@shared/settings/defaults';
 
 const NOW = Date.parse('2026-09-29T08:00:00Z');
 const at = (ms: number) => new Date(NOW + ms).toISOString();
@@ -167,9 +168,9 @@ describe('near-limit banner posts once per window: the notices adapter', () => {
     usage.getState().applySnapshot(MIXED);
     await vi.advanceTimersByTimeAsync(0);
     expect(banners().map((b) => b.id)).not.toContain(fable);
-    // C11's field, not in SettingsSchema yet: the state as main would send it once C11 lands it
-    const state = { settings: { version: 2, theme: 'system', keymap: {}, notifications: { enabled: true, sound: false }, usage: { nearLimitPercent: 80 } }, resolvedTheme: 'light' };
-    settingsStore.setState({ state: state as never });
+    // C11's field (settings v3): the state as main sends it
+    const state = { settings: { ...SETTINGS_DEFAULTS_V3, theme: 'system' as const, usage: { nearLimitPercent: 80 } }, resolvedTheme: 'light' as const };
+    settingsStore.setState({ state });
     expect(banners().map((b) => b.id)).toContain(fable);
     off();
   });

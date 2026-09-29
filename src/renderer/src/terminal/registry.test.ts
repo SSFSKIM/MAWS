@@ -10,6 +10,7 @@ import { FakeRenderer } from './renderer.fake';
 import type { TerminalTheme } from './renderer';
 import { TerminalRegistry } from './registry';
 import { alignReplay, explicitModes, INITIAL_STREAM } from './replay';
+import { SETTINGS_DEFAULTS_V3 } from '@shared/settings/defaults';
 
 const A = 'session-a' as AppSessionId;
 const KiB = 1024;
@@ -780,7 +781,7 @@ describe('terminal theme from tokens', () => {
     registry.unmount(hidden.id);
     expect(shown.renderer.options.theme.background).toBe('light-bg');
     currentTheme = theme('dark-bg');
-    ipc.emit('settings.changed', { settings: { version: 2, keymap: {}, notifications: { enabled: true, sound: false }, theme: 'dark' }, resolvedTheme: 'dark' });
+    ipc.emit('settings.changed', { settings: { ...SETTINGS_DEFAULTS_V3, theme: 'dark' }, resolvedTheme: 'dark' });
     expect(shown.renderer.theme.background).toBe('dark-bg');
     expect(hidden.renderer.theme.background).toBe('dark-bg');
   });

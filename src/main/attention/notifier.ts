@@ -8,22 +8,19 @@
 //   or no notification support at all, switches to the fallback for the process lifetime: a dock bounce, and
 //   `attention.notified { delivery: 'fallback' }`, which the page shows as a toast;
 // - the dock badge is the count of tier-1 Needs-you sessions, at all times;
-// - with C11's per-kind policy present (`notifications.kinds`), only a group that is on notifies.
+// - with C11's per-kind policy (`notifications.kinds`), only a group that is on notifies.
 import { app, Notification } from 'electron';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { AttentionKind } from '@shared/graph/enums';
 import type { AppSessionId, AttentionId } from '@shared/graph/ids';
-import type { Settings } from '@shared/ipc/schema';
+import type { NotificationKinds, Settings } from '@shared/ipc/schema'; // C11: NotificationKinds
 import type { AttentionNavigate } from '@shared/ipc/schema/attention';
 import { isActionable, isOpen } from '@shared/attention/kinds';
 import type { emit as emitEvent } from '../ipc/events';
 import type { SessionReadModel } from '../sessions/read-model';
 
-// C11's settings v3 adds a per-group switch (its eighth ask of C5); C5's v2 schema does not carry it, so it is read as
-// an optional extension and, when absent, every actionable kind notifies as before.
-export interface NotificationKinds { approvals: boolean; questions: boolean; planReviews: boolean; errors: boolean; heldPeerMessages: boolean }
-type NotificationSettings = Settings['notifications'] & { kinds?: NotificationKinds };
-
+// C11: `NotificationKinds` is settings v3's per-group switch (C11's eighth ask of C5); every version 3 file carries it
+// (the store migrates earlier files with every group on but held peer messages).
 const GROUP: Record<AttentionKind, keyof NotificationKinds> = {
   permission: 'approvals', dialog: 'approvals', elicitation: 'approvals',
   question: 'questions',
@@ -33,8 +30,8 @@ const GROUP: Record<AttentionKind, keyof NotificationKinds> = {
 };
 
 function wanted(item: AttentionItem, settings: Settings): boolean {
-  const notifications: NotificationSettings = settings.notifications;
-  return notifications.enabled && (notifications.kinds?.[GROUP[item.kind]] ?? true);
+  const { notifications } = settings;
+  return notifications.enabled && notifications.kinds[GROUP[item.kind]]; // C11: the schema's kinds, always present in v3
 }
 
 export interface NotifierDeps {

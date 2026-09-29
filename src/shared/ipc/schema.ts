@@ -50,6 +50,9 @@ export {
 } from './schema/session';
 export { ChordSchema } from './schema/settings';
 // C5 end
+// C11 start: settings v3 and the ClaudeUsage hand-off shapes
+export { NotificationKindsSchema, type NotificationKinds } from './schema/settings';
+// C11 end
 
 export const commands = {
   ...session.commands,

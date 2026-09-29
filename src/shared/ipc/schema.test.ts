@@ -16,6 +16,9 @@ import { C3_ENGINE_COMMANDS, C3_ENGINE_EVENTS } from './schema/engine';
 import { C3_SESSION_COMMANDS, C3_SESSION_EVENTS } from './schema/session';
 import { OPERATION_COMMANDS } from '../engine/operations';
 // C3 end
+// C11 start
+import { SETTINGS_DEFAULTS_V3 } from '../settings/defaults';
+// C11 end
 
 // One entry per namespace, checked against NAMESPACES at compile time and at run time.
 const modules = { session, engine, fs, git, pty, layout, attention, settings } satisfies Record<
@@ -191,7 +194,7 @@ describe('ipc schema validates both directions', () => {
   });
 
   describe('command output (renderer, on receipt)', () => {
-    const state = { settings: { version: 2, keymap: {}, notifications: { enabled: true, sound: false }, theme: 'system' }, resolvedTheme: 'dark' };
+    const state = { settings: { ...SETTINGS_DEFAULTS_V3, theme: 'system' }, resolvedTheme: 'dark' };
 
     it('accepts a settings state and returns it unchanged', () => {
       expect(validateCommandOutput('settings.get', state)).toEqual({ ok: true, value: state });
@@ -226,7 +229,7 @@ describe('ipc schema validates both directions', () => {
     it('accepts well-formed events unchanged', () => {
       const exit = { ptyId: 'p1', exitCode: null, signal: null };
       expect(validateEventPayload('pty.exit', exit)).toEqual({ ok: true, value: exit });
-      const changed = { settings: { version: 2, keymap: {}, notifications: { enabled: true, sound: false }, theme: 'light' }, resolvedTheme: 'light' };
+      const changed = { settings: { ...SETTINGS_DEFAULTS_V3, theme: 'light' }, resolvedTheme: 'light' };
       expect(validateEventPayload('settings.changed', changed)).toEqual({ ok: true, value: changed });
     });
 

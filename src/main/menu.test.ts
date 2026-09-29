@@ -2,6 +2,7 @@ import type { MenuItemConstructorOptions } from 'electron';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Settings } from '@shared/ipc/schema';
 import { ACTIONS, ACTION_IDS, type ActionId } from '@shared/keymap/actions';
+import { SETTINGS_DEFAULTS_V3 } from '@shared/settings/defaults';
 
 const electron = vi.hoisted(() => ({
   setApplicationMenu: vi.fn(),
@@ -15,7 +16,7 @@ const { emit } = await import('./ipc/events');
 const { menuTemplate, startMenu } = await import('./menu');
 
 type Item = MenuItemConstructorOptions;
-const SETTINGS: Settings = { version: 2, theme: 'light', keymap: {}, notifications: { enabled: true, sound: false } };
+const SETTINGS: Settings = SETTINGS_DEFAULTS_V3;
 const ALL = new Set<ActionId>(ACTION_IDS);
 const MENU_SINK = ACTION_IDS.filter((id) => ACTIONS[id].sink === 'menu');
 

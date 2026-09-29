@@ -1,5 +1,7 @@
 // X2 `settings.*`: the persisted app settings and the theme resolved from them (charter §12 C1 *Theme switching*).
-// Version 2 (C5): the keymap overrides and the notification policy. C11 extends the object later with its own step.
+// Version 2 (C5): the keymap overrides and the notification policy. Version 3 (C11): the engine binary, the gateway
+// policy, the near-limit threshold, the monospace font and the per-kind notification switches. Migrations live in
+// `src/shared/settings/defaults.ts`, run by main's store; the schema never defaults.
 import * as z from 'zod';
 import { ACTION_IDS } from '../../keymap/actions';
 import { CHORD_PATTERN } from '../../keymap/chord';
@@ -13,17 +15,57 @@ export type ThemeSetting = z.infer<typeof ThemeSettingSchema>;
 
 export const ChordSchema = z.string().regex(CHORD_PATTERN); // Electron accelerator syntax, readable by parseChord
 
+// C11 start: the sections version 3 adds (C11 execution document, Interfaces "Settings, version 3").
+// The groups C5's notifier maps X1's attention kinds to (src/main/attention/notifier.ts GROUP): approvals = permission,
+// dialog, elicitation; questions = question; planReviews = plan; errors = error, interrupted, auto_mode_unavailable;
+// heldPeerMessages = held_peer_message (not actionable, so it never notifies in P0).
+export const NotificationKindsSchema = z.strictObject({ approvals: z.boolean(), questions: z.boolean(), planReviews: z.boolean(), errors: z.boolean(), heldPeerMessages: z.boolean() });
+export type NotificationKinds = z.infer<typeof NotificationKindsSchema>;
+// An engine binary is named by absolute path, never resolved through PATH (§4.1); macOS paths only.
+export const AbsolutePathSchema = z.string().refine((path) => path.startsWith('/'), { message: 'must be an absolute path' });
+const EngineSettingsSchema = z.strictObject({
+  binaryPath: AbsolutePathSchema.nullable(), // null = C3's ENGINE_BIN
+  pinnedVersion: z.string(), // what engine.binaryInfo must report; a mismatch refuses launches (binary_version) until re-pinned
+  subagentModel: z.string().nullable(), // the default CLAUDE_CODE_SUBAGENT_MODEL for new sessions; null = the captured shell's value
+});
+const GatewaySettingsSchema = z.strictObject({
+  defaultRoute: z.enum(['gateway', 'direct']), // D-19: 'gateway'; seeds C10's intent.gateway
+  relayUnreachable: z.enum(['ask', 'wait', 'direct']), // the launch policy C10's session.start consults
+  offerDirect: z.boolean(), // the per-session Direct option; D-19's fallback stays when the relay is unreachable
+});
+const UsageSettingsSchema = z.strictObject({ nearLimitPercent: z.number().int().min(50).max(100) }); // C7's banner threshold
+const AppearanceSettingsSchema = z.strictObject({ monoFont: z.string().min(1).max(200).nullable() }); // prepended to --font-mono; null = the token stack
+const NotificationSettingsSchema = z.strictObject({ enabled: z.boolean(), sound: z.boolean(), kinds: NotificationKindsSchema });
+// C11 end
+
 export const SettingsSchema = z.strictObject({
-  version: z.literal(2),
+  version: z.literal(3), // C11: version 3
   theme: ThemeSettingSchema,
   // Overrides only; null unbinds; absent means the default. `partialRecord`, because zod 4's enum-keyed `record` is
   // exhaustive and would reject `{}` and every single override; unknown keys are still rejected.
   keymap: z.partialRecord(z.enum(ACTION_IDS), ChordSchema.nullable()),
-  notifications: z.strictObject({ enabled: z.boolean(), sound: z.boolean() }),
+  notifications: NotificationSettingsSchema, // C11: C5's two fields plus kinds
+  // C11 start
+  engine: EngineSettingsSchema,
+  gateway: GatewaySettingsSchema,
+  usage: UsageSettingsSchema,
+  appearance: AppearanceSettingsSchema,
+  // C11 end
 });
 export type Settings = z.infer<typeof SettingsSchema>;
 
-export const SettingsPatchSchema = SettingsSchema.omit({ version: true }).partial();
+// C11: a section is patched by field (each section `.partial()`), and `notifications.kinds` one level further, so one
+// kind is patched alone; `applySettingsPatch` (src/shared/settings/defaults.ts) is the one merge. The keymap is a
+// record of overrides and is replaced whole, so an override is removed by leaving it out.
+export const SettingsPatchSchema = z.strictObject({
+  theme: ThemeSettingSchema.optional(),
+  keymap: SettingsSchema.shape.keymap.optional(),
+  notifications: z.strictObject({ enabled: z.boolean().optional(), sound: z.boolean().optional(), kinds: NotificationKindsSchema.partial().optional() }).optional(),
+  engine: EngineSettingsSchema.partial().optional(),
+  gateway: GatewaySettingsSchema.partial().optional(),
+  usage: UsageSettingsSchema.partial().optional(),
+  appearance: AppearanceSettingsSchema.partial().optional(),
+});
 export type SettingsPatch = z.infer<typeof SettingsPatchSchema>;
 
 export const SettingsStateSchema = z.strictObject({ settings: SettingsSchema, resolvedTheme: z.enum(['light', 'dark']) });
