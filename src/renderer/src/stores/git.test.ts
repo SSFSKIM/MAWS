@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { GitDiff, GitStatus } from '@shared/ipc/schema/git';
 import { fakeClient } from '../../../../test/support/fake-client';
+import { changeLine } from '../panel/summary/derive';
 import { createGitStore } from './git';
 
 const DIR = '/work/repo/sub';
@@ -63,10 +64,12 @@ describe('git store', () => {
     await fake.reply('git.watch', status());
     await fake.reply('git.diff', diff(1));
     store.getState().applyChanged({ repoRoot: '/elsewhere', status: status({ repoRoot: '/elsewhere' }), reason: 'worktree' });
+    await wait();
+    expect(entry()!.status!.repoRoot).toBe('/work/repo');
     release();
     store.getState().applyChanged({ repoRoot: '/work/repo', status: status({ branch: 'other' }), reason: 'head' });
     await wait();
-    expect(entry()!.status!.branch).toBe('main');
+    expect(entry()).toBeUndefined();
     expect(fake.invoked('git.diff')).toHaveLength(1);
   });
 
@@ -101,17 +104,51 @@ describe('git store', () => {
     expect(entry()).toMatchObject({ root: '/work/repo', status: status(), uncommitted: null, error: 'git diff failed: bad object' });
   });
 
-  it('a second watcher after the first released re-runs git.watch and one git.diff', async () => {
-    const { fake, store } = setup();
+  it('a second watcher after the first released re-runs git.watch and one git.diff, showing nothing of the first mount meanwhile', async () => {
+    const { fake, store, entry } = setup();
     const release = store.getState().watch(DIR);
     await fake.reply('git.watch', status());
     await fake.reply('git.diff', diff(1));
     release();
     await wait();
+    expect(entry()).toBeUndefined(); // forgotten: a stale root would take a git.changed before the new watch answers
+    store.getState().applyChanged({ repoRoot: '/work/repo', status: status(), reason: 'worktree' });
     store.getState().watch(DIR);
     expect(fake.invoked('git.watch')).toHaveLength(2);
-    await fake.reply('git.watch', status());
+    expect(entry()).toBeUndefined();
+    const fresh = status({ files: [...status().files, { path: 'b.ts', oldPath: null, index: '.', worktree: 'M', untracked: false }] });
+    await fake.reply('git.watch', fresh);
     expect(fake.invoked('git.diff')).toHaveLength(2);
+    // Before the new diff answers the change line is unknown, never the first mount's sum beside a fresh file count.
+    expect(changeLine(entry()!.status, entry()!.uncommitted?.files ?? null)).toEqual({ kind: 'unknown' });
+    await fake.reply('git.diff', diff(4));
+    expect(changeLine(entry()!.status, entry()!.uncommitted?.files ?? null)).toMatchObject({ kind: 'change', insertions: 4, files: 2 });
+  });
+
+  it('a bridge that throws is recorded as the entry’s error, and a later diff still runs', async () => {
+    const fake = fakeClient();
+    const invoke = fake.client.invoke;
+    let throwing: string | null = 'git.watch';
+    fake.client.invoke = ((name: string, input: never) => (name === throwing ? Promise.reject(new Error(`bridge gone: ${name}`)) : invoke(name as never, input))) as never;
+    const store = createGitStore(fake.client, { diffDelayMs: DELAY });
+    const entry = () => store.getState().entries.get(DIR);
+    const release = store.getState().watch(DIR);
+    await wait();
+    expect(entry()).toEqual({ root: null, status: null, uncommitted: null, error: 'bridge gone: git.watch' });
+    release();
+    await wait();
+
+    throwing = 'git.diff';
+    store.getState().watch(DIR);
+    await fake.reply('git.watch', status());
+    await wait();
+    expect(entry()).toMatchObject({ status: status(), uncommitted: null, error: 'bridge gone: git.diff' });
+    throwing = null;
+    store.getState().applyChanged({ repoRoot: '/work/repo', status: status(), reason: 'worktree' });
+    await wait();
+    expect(fake.pending('git.diff')).toBe(1); // not stuck in flight
+    await fake.reply('git.diff', diff(2));
+    expect(entry()).toMatchObject({ uncommitted: { files: diff(2).files }, error: null });
   });
 
   it('a release before git.watch answers unwatches only once the watch has landed', async () => {

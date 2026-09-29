@@ -5,7 +5,7 @@
 // no trigger of its own: a content change to an already-dirty file emits `git.changed` (C4's watcher compares each
 // listed file's size and mtime), so the line is as fresh as the events plus one diff each time a watch starts.
 import { create } from 'zustand';
-import type { EventPayload, MawsBridge } from '@shared/ipc/schema';
+import type { CommandName, CommandResult, EventPayload, MawsBridge } from '@shared/ipc/schema';
 import type { GitDiffFile, GitStatus } from '@shared/ipc/schema/git';
 import { ipc } from '../ipc/client';
 
@@ -34,6 +34,16 @@ interface Watched {
 
 const EMPTY: GitEntry = { root: null, status: null, uncommitted: null, error: null };
 
+// A bridge that throws (not a command's failure answer) is a failure too, with its message, so nothing stays in flight
+// and nothing escapes as an unhandled rejection.
+async function settled<N extends CommandName>(call: Promise<CommandResult<N>>): Promise<CommandResult<N>> {
+  try {
+    return await call;
+  } catch (error) {
+    return { ok: false, error: { code: 'internal', message: error instanceof Error ? error.message : String(error) } };
+  }
+}
+
 export function createGitStore(client: MawsBridge, options: { diffDelayMs?: number } = {}) {
   const delay = options.diffDelayMs ?? GIT_DIFF_DELAY_MS;
   const watched = new Map<string, Watched>();
@@ -50,7 +60,7 @@ export function createGitStore(client: MawsBridge, options: { diffDelayMs?: numb
         return;
       }
       w.diffing = true;
-      const result = await client.invoke('git.diff', { directory, scope: 'all' });
+      const result = await settled(client.invoke('git.diff', { directory, scope: 'all' }));
       w.diffing = false;
       if (watched.get(directory) !== w) return; // released meanwhile
       if (get().entries.get(directory)?.status?.dirty) {
@@ -86,7 +96,7 @@ export function createGitStore(client: MawsBridge, options: { diffDelayMs?: numb
           const created: Watched = { count: 1, landed: Promise.resolve(), timer: null, diffing: false, again: false };
           w = created;
           watched.set(directory, created);
-          created.landed = client.invoke('git.watch', { directory }).then((result) => {
+          created.landed = settled(client.invoke('git.watch', { directory })).then((result) => {
             if (watched.get(directory) !== created) return;
             if (!result.ok) return patch(directory, { root: null, status: null, uncommitted: null, error: result.error.message });
             take(directory, result.value);
@@ -101,7 +111,13 @@ export function createGitStore(client: MawsBridge, options: { diffDelayMs?: numb
           if (--held.count > 0) return;
           watched.delete(directory);
           if (held.timer !== null) clearTimeout(held.timer);
-          void held.landed.then(() => client.invoke('git.unwatch', { directory }));
+          // Forgotten: a re-mount shows nothing of this mount's branch or sum, and no stale root takes a git.changed.
+          set((s) => {
+            const entries = new Map(s.entries);
+            entries.delete(directory);
+            return { entries };
+          });
+          void held.landed.then(() => settled(client.invoke('git.unwatch', { directory })));
         };
       },
 
