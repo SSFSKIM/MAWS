@@ -570,6 +570,9 @@ export class EngineSession {
       case 'replay_mismatch':
         this.record('meta', { event: 'replay_mismatch', message: problem.message, ...(problem.replay ?? {}) });
         return;
+      case 'replay_unrecorded_read': // not a problem: the replay answered a read its fixture never recorded (no event)
+        this.record('meta', { event: 'replay_unrecorded_read', message: problem.message, ...(problem.read ?? {}) });
+        return;
       case 'line_budget':
         this.record('meta', { event: 'transport_error', message: problem.message, code: 'line_budget', length: problem.length });
         void this.terminate(false); // the transport already killed the process; the ladder marks it exiting

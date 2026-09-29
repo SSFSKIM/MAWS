@@ -3,12 +3,15 @@
 // fixture recorded there. Recorded request ids and user uuids are mapped onto the ones the adapter minted and the map
 // is applied to every following `in` row, so correlation and deduplication see the host's own ids. The host's own
 // `initialize` and `get_status` are answered from the handshake prelude when the fixture's next `out` row is not that
-// request; an unrecorded `end_session` ends the replay as the engine does, with exit 0 (M4); any other unrecorded write
-// is a replay mismatch that ends the stream (`exited` `{ null, null }`), so a test cannot pass by advancing past a
-// frame the probe never saw. `stderr` rows replay; `meta exit` ends the stream with
+// request; an unrecorded `end_session` ends the replay as the engine does, with exit 0 (M4); an unrecorded read (a
+// control whose class is `read`: it mutates nothing, so answering it cannot change what the fixture replays next) is
+// answered with an empty success, announced by a `replay_unrecorded_read` item the consumer journals as a meta row
+// (debt wave 3); any other unrecorded write is a replay mismatch that ends the stream (`exited` `{ null, null }`), so a
+// test cannot pass by advancing past a frame the probe never saw. `stderr` rows replay; `meta exit` ends the stream with
 // the row's code and signal; `kill` ends a journal that has no exit row. Nothing here journals (the harness does).
 import type { StdinFrame } from '@shared/wire/frames';
 import type { JournalRow } from '@shared/wire/journal';
+import { requestClassOf } from './controls';
 import { TransportClosed, type EngineTransport, type TransportItem } from './transport';
 
 export const PRELUDE_SUBTYPES: ReadonlySet<string> = new Set(['initialize', 'get_status']);
@@ -71,7 +74,7 @@ export function replayEngine(journal: JournalRow[], opts: { prelude: JournalRow[
   let cursor = 0; // index of the next row to consider
   let ended = false;
   const idMap = new Map<string, string>(); // recorded id → minted id
-  const injected: Frame[] = []; // prelude answers, delivered before the cursor's next row
+  const injected: TransportItem[] = []; // prelude and unrecorded-read answers, delivered before the cursor's next row
   const waiters: Waiter[] = []; // writes not yet matched, in order
   const stderrQueue: string[] = [];
   let stderrWaiter: ((r: IteratorResult<string>) => void) | null = null;
@@ -174,7 +177,7 @@ export function replayEngine(journal: JournalRow[], opts: { prelude: JournalRow[
               pendingMismatch = null;
               return { value: item, done: false };
             }
-            if (injected.length > 0) return { value: { frame: injected.shift()!, raw: '', error: null }, done: false };
+            if (injected.length > 0) return { value: injected.shift()!, done: false };
             if (ended) return { value: undefined, done: true };
             const row = settleCursor();
             if (!row) {
@@ -203,7 +206,8 @@ export function replayEngine(journal: JournalRow[], opts: { prelude: JournalRow[
                 held = row;
                 opts.onHold?.(row);
               }
-              if (waiters.length === 0 && !ended) { // the hold handler may have killed the replay
+              // the hold handler may have killed the replay, or issued a read answered at once (injected)
+              if (waiters.length === 0 && injected.length === 0 && !ended) {
                 await new Promise<void>((r) => (wake = r));
                 wake = null;
               }
@@ -257,7 +261,19 @@ export function replayEngine(journal: JournalRow[], opts: { prelude: JournalRow[
           const answer = preludeResponse(opts.prelude, (f as ControlRequest).request.subtype);
           if (!answer) return Promise.reject(new TransportClosed(`the handshake prelude has no ${(f as ControlRequest).request.subtype} response`));
           const response = { ...(answer as ControlResponse).response, request_id: (f as ControlRequest).request_id };
-          injected.push({ ...answer, response });
+          injected.push({ frame: { ...answer, response }, raw: '', error: null });
+          wake?.();
+          return Promise.resolve();
+        }
+      }
+      if (f.type === 'control_request' && requestClassOf((f as ControlRequest).request.subtype) === 'read') {
+        const upcoming = nextOut();
+        if (!upcoming || !matches(upcoming.frame as Frame, f)) {
+          const { subtype } = (f as ControlRequest).request;
+          const requestId = (f as ControlRequest).request_id;
+          const message = `replay: ${subtype} was not recorded; answered with an empty success`;
+          injected.push({ frame: null, raw: '', error: { kind: 'replay_unrecorded_read', message, length: 0, typeGuess: null, read: { subtype, requestId } } });
+          injected.push({ frame: { type: 'control_response', response: { subtype: 'success', request_id: requestId, response: {} } }, raw: '', error: null });
           wake?.();
           return Promise.resolve();
         }
