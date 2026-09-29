@@ -380,7 +380,11 @@ export const SUBAGENT_GLYPHS: readonly string[];                          // the
 export function glyphFor(taskId: TaskId): number;                         // the 32-bit hash the subagent row uses
 export const SubagentGlyph: React.FC<{ agent: SubagentRef; className?: string }>; // the row's glyph, for C8's summary (`agent`, not `ref`: React 19 reserves `ref` on function components)
 export type { TurnActivity };
-// `useTranscriptStore` exposes `activity(key)` over the same projection.    // C7: the request card and queued rows render markdown through the same sanitising pipeline (one renderer, no second stack)
+// `useTranscriptStore` exposes `activity(key)` over the same projection.
+// C8 ask (2026-09-28, additive): an actions registry, because C7 (`editAndResubmit`), C8b (`openSubagent`, `openFullLog`) and C8c (`reviewChanges`, `openFile`) land in different waves and each contributes one callback from its own block.
+export function registerTranscriptActions(partial: Partial<TranscriptActions>): () => void;   // merged over DEFAULT_ACTIONS at render; a later registration of the same key wins; the disposer removes its keys (restoring an earlier registration of the same key if one remains)
+export const DEFAULT_ACTIONS: TranscriptActions;                                              // the M5 defaults: loadSpill over fs.readSpill, openExternal over layout.openExternal, the rest no-ops
+export const TranscriptSlot: React.FC<{ appSessionId: AppSessionId; agentId?: AgentId; className?: string }>;   // the component C6 registers into C5's `transcript` slot once C5 is on master (rebase step; pending until then): one <Transcript> over ipcSource and ipcRewind with actions = registered partials merged over DEFAULT_ACTIONS, re-rendered when the registry changes    // C7: the request card and queued rows render markdown through the same sanitising pipeline (one renderer, no second stack)
 export type { Row, Cell, CellDetail, TurnSummary, ToolClassification, ToolCategory, SubagentRef, TurnId, RowId, CellId };
 ```
 
@@ -831,6 +835,8 @@ If `pnpm dev:harness` shows fixtures missing: the renderer's `server.fs.allow` m
   Date/Author: 2026-09-28, C6 controller (from the coordinator).
 - Decision: M5 fix round 2 landed (4c7a916, 0cc1bb7) with the review's six findings, the `process.exited` closure and C8's activity projection. Executor decisions kept: `SubagentGlyph` takes `agent`, not `ref` (React 19 reserves `ref` on function components and the React Compiler refuses `ref.glyph` in render; spec signature updated); a child source tells the two event forms apart by `seq` (live events carry one, disk events `seq: null`, the fact behind ruling 5; this is form discrimination, never deduplication, which stays by id), holding batches that arrive before provenance is decided and filtering them once it is; a child whose start appears only in disk history (a disk-backed parent writes no exit event) is read from disk; X3 `Spill.state` gains `'partial'` (the default adapter keeps the `truncated` flag internally so `loadSpill` keeps its shape; a caller's own `loadSpill` counts as partial when its content fills the 2 MB read); the plan body is always bounded at 144 px with `Show more` only on real overflow; the `App.test.tsx` flake did not recur in three full runs (recorded, no change).
   Date/Author: 2026-09-28, C6 controller.
+- Decision: Third C8 ask (coordinator, 2026-09-28, additive): `registerTranscriptActions(partial)` with its disposer and `DEFAULT_ACTIONS` on the public surface, and a `TranscriptSlot` component that builds the one `<Transcript actions={…}>` with the registered partials merged over the defaults (later registration of a key wins; a disposer removes its keys). Registering the slot into C5's `transcript` slot happens at the rebase once C5 is on master (C5 is absent from this branch); recorded as pending. If C8c later drops its diff-view library, it may ask for `EditDetail`'s hunk line renderer to be exported (nothing now). Implemented in M5's current fix round.
+  Date/Author: 2026-09-28, C6 controller (from the coordinator).
 
 ## Outcomes & Retrospective
 
