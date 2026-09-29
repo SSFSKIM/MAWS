@@ -45,6 +45,27 @@ describe('useEngineRead', () => {
     expect(reads('session.getSandboxDialog')).toBe(1);
   });
 
+  // M4: Session info holds its reads while its tab is hidden and repeats them every 30 s while it is shown.
+  it('holds the read while not enabled, and repeats it at the interval while enabled', async () => {
+    let enabled = false;
+    const { result, rerender } = renderHook(() => useEngineRead('session.getSandboxDialog', { appSessionId: ID }, { enabled, refetchIntervalMs: 40 }), { wrapper: wrapper() });
+    await new Promise((r) => setTimeout(r, 60));
+    expect(reads('session.getSandboxDialog')).toBe(0);
+    expect(result.current.state).toBe('loading');
+    act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: { ...backend.status(ID), engineState: 'running' } }));
+    await new Promise((r) => setTimeout(r, 10));
+    expect(reads('session.getSandboxDialog'), 'a status move while held reads nothing').toBe(0);
+    enabled = true;
+    rerender();
+    await waitFor(() => expect(result.current.state).toBe('ready'));
+    await waitFor(() => expect(reads('session.getSandboxDialog')).toBeGreaterThanOrEqual(3));
+    enabled = false;
+    rerender();
+    const held = reads('session.getSandboxDialog');
+    await new Promise((r) => setTimeout(r, 100));
+    expect(reads('session.getSandboxDialog')).toBe(held);
+  });
+
   it('is not running, and reads nothing, without a ready process', async () => {
     useSessions.setState({ engine: new Map([[ID, { ...backend.status(ID), process: 'exited' }]]) });
     const { result } = renderHook(() => useEngineRead('session.getSandboxDialog', { appSessionId: ID }), { wrapper: wrapper() });

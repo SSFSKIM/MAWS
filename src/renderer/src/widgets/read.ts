@@ -51,6 +51,8 @@ export interface EngineRead<T> {
 
 export interface EngineReadOptions {
   refreshOn?: (status: EngineSessionStatus) => string; // the status facts whose change refetches; MOVES_READS by default
+  enabled?: boolean; // false holds the read (Session info while its tab is hidden); true by default
+  refetchIntervalMs?: number; // a read repeated while enabled (Session info's 30 s while visible)
 }
 
 export const errorWords = (error: IpcCommandError | null): string | null => {
@@ -65,6 +67,7 @@ export function useEngineRead<N extends SessionRead>(command: N, input: CommandI
   const active = useContext(WidgetReadPolicyContext).mode === 'active';
   const appSessionId = (input as { appSessionId: AppSessionId }).appSessionId;
   const refreshOn = options.refreshOn ?? MOVES_READS;
+  const wanted = options.enabled ?? true;
   const ready = useSessions((s) => s.engine.get(appSessionId)?.process === 'ready');
   const moved = useSessions((s) => {
     const status = s.engine.get(appSessionId);
@@ -74,7 +77,8 @@ export function useEngineRead<N extends SessionRead>(command: N, input: CommandI
     queryKey: engineReadKey(command, input),
     queryFn: () => fetchEngineRead(command, input),
     staleTime: READ_STALE_MS,
-    enabled: active && ready,
+    enabled: active && ready && wanted,
+    refetchInterval: active && ready && wanted && options.refetchIntervalMs !== undefined ? options.refetchIntervalMs : false,
   });
   const { refetch } = query;
 
@@ -83,15 +87,15 @@ export function useEngineRead<N extends SessionRead>(command: N, input: CommandI
   useEffect(() => {
     if (seen.current === moved) return;
     seen.current = moved;
-    if (active && ready) void refetch({ cancelRefetch: false });
-  }, [active, ready, moved, refetch]);
+    if (active && ready && wanted) void refetch({ cancelRefetch: false });
+  }, [active, ready, wanted, moved, refetch]);
 
   useEffect(() => {
-    if (!active) return;
+    if (!active || !wanted) return;
     return ipc.on('session.operation', (event) => {
       if (event.appSessionId === appSessionId) void refetch({ cancelRefetch: false });
     });
-  }, [active, appSessionId, refetch]);
+  }, [active, wanted, appSessionId, refetch]);
 
   let state: ReadState;
   if (active && !ready) state = 'not_running';
