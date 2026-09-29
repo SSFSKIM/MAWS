@@ -47,6 +47,7 @@ describe('layout value shapes', () => {
       'layout.openExternal': 'main',
       'layout.setEnabledActions': 'main',
       'layout.pickFiles': 'main', // C7
+      'layout.saveTextFile': 'main', // C11
     });
   });
 

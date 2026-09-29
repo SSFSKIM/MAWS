@@ -20,6 +20,9 @@ import { createBinaryProbe, VERSION_TIMEOUT_MS, type BinaryCheck } from './binar
 import * as controls from './controls';
 import { createLauncher } from './launcher';
 import { LaunchSpecConflict, mergeFlagSettings, RELAY_URL, type LaunchPlan } from './launch';
+// C11 start
+import { setBinaryConfig } from './launch';
+// C11 end
 import { memoryAppend, MemoryAppendBudgetSpent } from './memory-append';
 import { OperationTable } from './operations';
 import { ProcessTable } from './process-table';
@@ -155,6 +158,19 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
   handle('engine.relayHealth', async ({ force }) => relayCheck(force));
   handle('engine.sessions', async () => table.list().map((session) => session.status()));
   handle('engine.shutdown', async ({ graceMs }) => table.shutdown({ graceMs }));
+  // C11 start: the binary configuration main sends from settings.engine (C11 execution document, M1). The next launch
+  // and engine.binaryInfo read it; a process already spawned keeps the path its plan carries. C3's setter refuses a
+  // relative path (the validator already has), which reaches the renderer as invalid_input.
+  on('engine.configure', async ({ binaryPath, expectedVersion }) => {
+    try {
+      setBinaryConfig({ binaryPath, expectedVersion });
+    } catch (error) {
+      throw new HostCommandError({ code: 'invalid_input', message: error instanceof Error ? error.message : String(error) });
+    }
+    const { path, version, ok, error } = await binaryProbe(); // `problem` is the launcher's, not X2's
+    return { path, expectedVersion, version, ok, error };
+  });
+  // C11 end
 
   // -- lifecycle and state -------------------------------------------------------------------------------------------
   handle('session.launch', async ({ spec }) => launch(spec as Parameters<typeof launch>[0]));

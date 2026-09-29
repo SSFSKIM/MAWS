@@ -433,4 +433,80 @@ describe('ipc schema validates both directions', () => {
     });
   });
   // C7 end
+  // C11 start
+  describe('C11 entries', () => {
+    it('adds its five commands under existing namespaces with their owners, and no namespace or event', () => {
+      expect(NAMESPACES).toEqual(['session', 'engine', 'fs', 'git', 'pty', 'layout', 'attention', 'settings']);
+      const owners = { 'settings.claudeUsage.status': 'main', 'settings.claudeUsage.open': 'main', 'settings.reveal': 'main', 'layout.saveTextFile': 'main', 'engine.configure': 'engine-host' } as const;
+      for (const [name, owner] of Object.entries(owners)) expect(commands[name as keyof typeof owners].owner, name).toBe(owner);
+      for (const name of Object.keys(owners)) expect(Object.hasOwn(events, name), name).toBe(false);
+    });
+
+    it('settings.get and settings.changed carry the whole version 3 state', () => {
+      const state = { settings: { ...SETTINGS_DEFAULTS_V3, gateway: { defaultRoute: 'direct', relayUnreachable: 'wait', offerDirect: false } }, resolvedTheme: 'light' };
+      expect(validateCommandOutput('settings.get', state)).toEqual({ ok: true, value: state });
+      expect(validateEventPayload('settings.changed', state).ok).toBe(true);
+      expect(validateEventPayload('settings.changed', { ...state, settings: { ...state.settings, version: 2 } }).ok).toBe(false);
+    });
+
+    it('settings.set takes a section by field and one notification kind alone', () => {
+      expect(validateCommandInput('settings.set', { notifications: { kinds: { errors: false } } }).ok).toBe(true);
+      expect(validateCommandInput('settings.set', { gateway: { relayUnreachable: 'wait' } }).ok).toBe(true);
+      expect(validateCommandInput('settings.set', { engine: { binaryPath: null } }).ok).toBe(true);
+      expect(validateCommandInput('settings.set', { engine: { binaryPath: 'bin/claude' } }).ok).toBe(false);
+      expect(validateCommandInput('settings.set', { usage: { nearLimitPercent: 95 } }).ok).toBe(true);
+      expect(validateCommandInput('settings.set', { usage: { nearLimitPercent: 40 } }).ok).toBe(false);
+      expect(validateCommandInput('settings.set', { appearance: { monoFont: 'Hack Nerd Font' } }).ok).toBe(true);
+      expect(validateCommandInput('settings.set', { gateway: { relay: 'x' } }).ok).toBe(false);
+    });
+
+    it('settings.claudeUsage.open takes the four intents, an email only in the two that name an account', () => {
+      const ok = (input: unknown) => validateCommandInput('settings.claudeUsage.open', input).ok;
+      expect(ok({ intent: 'panel' })).toBe(true);
+      expect(ok({ intent: 'addAccount' })).toBe(true);
+      expect(ok({ intent: 'reconnect', accountEmail: '1@example.test' })).toBe(true);
+      expect(ok({ intent: 'remove', accountEmail: '1@example.test' })).toBe(true);
+      expect(ok({ intent: 'panel', accountEmail: null })).toBe(false);
+      expect(ok({ intent: 'reconnect' })).toBe(false);
+      expect(ok({ intent: 'remove', accountEmail: '' })).toBe(false);
+      expect(ok({ intent: 'login' })).toBe(false);
+      const out = (value: unknown) => validateCommandOutput('settings.claudeUsage.open', value).ok;
+      expect(out({ opened: true, reason: null, instruction: 'ClaudeUsage is in the menu bar · click its icon' })).toBe(true);
+      expect(out({ opened: false, reason: 'not_installed', instruction: 'x' })).toBe(true);
+      expect(out({ opened: false, reason: 'crashed', instruction: 'x' })).toBe(false);
+    });
+
+    it('settings.claudeUsage.status answers the bundle id it checked', () => {
+      const status = { installed: true, running: false, bundleId: 'com.haegi.ClaudeUsage', dataDirPresent: true, checkedAt: '2026-09-29T08:00:00.000Z' };
+      expect(validateCommandInput('settings.claudeUsage.status', undefined).ok).toBe(true);
+      expect(validateCommandOutput('settings.claudeUsage.status', status)).toEqual({ ok: true, value: status });
+      expect(validateCommandOutput('settings.claudeUsage.status', { ...status, bundleId: 'com.example.Other' }).ok).toBe(false);
+    });
+
+    it('settings.reveal takes a path and answers whether it revealed', () => {
+      expect(validateCommandInput('settings.reveal', { path: '/Users/new/.claude/settings.json' }).ok).toBe(true);
+      expect(validateCommandInput('settings.reveal', { path: 1 }).ok).toBe(false);
+      expect(validateCommandOutput('settings.reveal', { revealed: false }).ok).toBe(true);
+    });
+
+    it('engine.configure takes an absolute path or null and answers binaryInfo', () => {
+      expect(validateCommandInput('engine.configure', { binaryPath: null, expectedVersion: '2.1.283' }).ok).toBe(true);
+      expect(validateCommandInput('engine.configure', { binaryPath: '/opt/claude', expectedVersion: '2.1.283' }).ok).toBe(true);
+      expect(validateCommandInput('engine.configure', { binaryPath: 'claude', expectedVersion: '2.1.283' }).ok).toBe(false);
+      expect(validateCommandInput('engine.configure', { binaryPath: '/opt/claude' }).ok).toBe(false);
+      const info = { path: '/opt/claude', expectedVersion: '2.1.283', version: null, ok: false, error: 'no executable engine binary at /opt/claude' };
+      expect(validateCommandOutput('engine.configure', info)).toEqual({ ok: true, value: info });
+    });
+
+    it('layout.saveTextFile takes a bounded name and text and answers saved with a path, or not saved', () => {
+      expect(validateCommandInput('layout.saveTextFile', { defaultName: 'a.txt', text: '' }).ok).toBe(true);
+      expect(validateCommandInput('layout.saveTextFile', { defaultName: '', text: 'x' }).ok).toBe(false);
+      expect(validateCommandInput('layout.saveTextFile', { defaultName: 'x'.repeat(256), text: 'x' }).ok).toBe(false);
+      expect(validateCommandOutput('layout.saveTextFile', { saved: true, path: '/Users/new/Downloads/a.txt' }).ok).toBe(true);
+      expect(validateCommandOutput('layout.saveTextFile', { saved: false }).ok).toBe(true);
+      expect(validateCommandOutput('layout.saveTextFile', { saved: true }).ok).toBe(false);
+      expect(validateCommandOutput('layout.saveTextFile', { saved: false, path: '/x' }).ok).toBe(false);
+    });
+  });
+  // C11 end
 });

@@ -113,6 +113,17 @@ const c7Commands = {
 } as const satisfies Record<`layout.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 // C7 end
 
+// C11 start: the export widget's Save as… (C11 execution document, Interfaces "X2 additions"): a save dialog at
+// ~/Downloads/<defaultName>, written through a temporary file and a rename; `saved: false` on cancel.
+const c11Commands = {
+  'layout.saveTextFile': {
+    input: z.strictObject({ defaultName: z.string().min(1).max(255), text: z.string().max(64 * 1024 * 1024) }),
+    output: z.union([z.strictObject({ saved: z.literal(true), path: z.string() }), z.strictObject({ saved: z.literal(false) })]),
+    owner: 'main',
+  },
+} as const satisfies Record<`layout.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
+// C11 end
+
 export const commands = {
   'layout.get':          { input: z.strictObject({ key: LayoutKeySchema }), output: z.strictObject({ value: z.unknown().nullable() }), owner: 'main' },
   'layout.set':          { input: z.strictObject({ key: LayoutKeySchema, value: z.unknown() }), output: z.void(), owner: 'main' },
@@ -122,6 +133,7 @@ export const commands = {
   // action whose child has not landed renders disabled in the menu as it does in the page (src/main/menu.ts).
   'layout.setEnabledActions': { input: z.strictObject({ actions: z.array(z.enum(ACTION_IDS)) }), output: z.void(), owner: 'main' },
   ...c7Commands, // C7
+  ...c11Commands, // C11
 } as const satisfies Record<`layout.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {
