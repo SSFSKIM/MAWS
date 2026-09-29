@@ -6,9 +6,11 @@
 //
 // A closed fence keeps showing as code until its diagram has drawn: Streamdown's diagram block is an empty frame while
 // mermaid lays it out (about a third of a second, longer for the first diagram of a page load), so the diagram renders
-// hidden beside the code and replaces it once its SVG is in place. A diagram mermaid cannot draw stays as its code.
+// hidden beside the code and replaces it once its SVG is in place. A diagram mermaid cannot draw stays as its code, with
+// a muted line saying so.
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { Streamdown, type CustomRendererProps } from 'streamdown';
+import { DIAGRAM } from '../../model/copy';
 import { STREAMDOWN_OPTIONS } from './options';
 import { code, useMermaidPlugin } from './plugins';
 
@@ -25,38 +27,45 @@ export function MermaidFence({ code: source, isIncomplete, meta }: CustomRendere
   const fenced = complete ? `${opening}\n${source}\n\`\`\`` : `${opening}\n${source}`;
   const diagram = complete && mermaid !== null;
   const [root, setRoot] = useState<HTMLDivElement | null>(null);
-  const drawn = useDrawn(root, diagram ? source : null);
+  const outcome = useOutcome(root, diagram ? source : null);
   const withDiagrams = useMemo(() => (mermaid ? { code, mermaid } : CODE_ONLY), [mermaid]);
   return (
-    <div className="transcript-mermaid" data-drawn={drawn ? '' : undefined}>
+    <div className="transcript-mermaid" data-drawn={outcome === 'drawn' ? '' : undefined}>
       {diagram && (
         <div ref={setRoot} className="transcript-mermaid-diagram">
-          <Streamdown {...STREAMDOWN_OPTIONS} mode="static" plugins={withDiagrams}>
+          <Streamdown {...STREAMDOWN_OPTIONS} mode="static" plugins={withDiagrams} mermaid={FAILURE_MARKER}>
             {fenced}
           </Streamdown>
         </div>
       )}
-      {!drawn && (
+      {outcome !== 'drawn' && (
         <Streamdown {...STREAMDOWN_OPTIONS} mode="static" plugins={CODE_ONLY}>
           {fenced}
         </Streamdown>
       )}
+      {outcome === 'failed' && <p className="transcript-mermaid-failed">{DIAGRAM.failed}</p>}
     </div>
   );
 }
 
-// Whether the diagram of `source` (null: none is drawing) has its SVG in `root`, the diagram's element.
-function useDrawn(root: HTMLElement | null, source: string | null): boolean {
-  const [drawnFor, setDrawnFor] = useState<string | null>(null);
+// Streamdown's error box for a diagram mermaid rejected, replaced by a marker the hidden diagram's observer reads: the
+// fence stays as its code, with one muted line saying the diagram could not be drawn.
+const FAILURE_MARKER = { errorComponent: () => <span data-mermaid-failed="" /> };
+
+// What became of the diagram of `source` (null: none is drawing) in `root`, the diagram's element: its SVG is in
+// place, mermaid rejected it, or neither yet.
+function useOutcome(root: HTMLElement | null, source: string | null): 'drawing' | 'drawn' | 'failed' {
+  const [settled, setSettled] = useState<{ source: string; outcome: 'drawn' | 'failed' } | null>(null);
   useEffect(() => {
     if (source === null || !root) return;
     const check = () => {
-      if (root.querySelector('[data-streamdown="mermaid"] [role="img"] > svg')) setDrawnFor(source);
+      if (root.querySelector('[data-streamdown="mermaid"] [role="img"] > svg')) setSettled({ source, outcome: 'drawn' });
+      else if (root.querySelector('[data-mermaid-failed]')) setSettled({ source, outcome: 'failed' });
     };
     check();
     const observer = new MutationObserver(check);
     observer.observe(root, { childList: true, subtree: true });
     return () => observer.disconnect();
   }, [root, source]);
-  return source !== null && drawnFor === source;
+  return source !== null && settled?.source === source ? settled.outcome : 'drawing';
 }

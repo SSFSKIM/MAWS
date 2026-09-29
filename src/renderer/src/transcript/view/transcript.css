@@ -100,6 +100,7 @@ button.transcript-chip:hover { background: var(--bg-hover); }
 /* A mermaid fence's diagram draws hidden behind its code, and replaces it once drawn (MermaidFence.tsx) */
 .transcript-mermaid { position: relative; }
 .transcript-mermaid:not([data-drawn]) { overflow: hidden; }
+.transcript-mermaid-failed { margin-top: -8px; color: var(--fg-muted); font-size: var(--text-ui-sm); }
 .transcript-mermaid:not([data-drawn]) > .transcript-mermaid-diagram { position: absolute; inset: 0 0 auto 0; visibility: hidden; pointer-events: none; }
 .transcript-prose :not(pre) > code { padding: 1px 5px; border-radius: 4px; background: var(--bg-active); font-family: var(--font-mono); font-size: 0.9em; }
 .transcript-prose h1 { font-size: calc(var(--text-prose) * 1.3); }

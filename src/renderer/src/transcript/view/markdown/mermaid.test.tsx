@@ -22,6 +22,7 @@ vi.mock('@streamdown/mermaid', () => {
         render: async (_id: string, source: string) => {
           rendered.push(source);
           await gate?.promise;
+          if (source.includes('BROKEN')) throw new Error('Parse error on line 2');
           return { svg: '<svg data-fake-diagram="true"></svg>' };
         },
       }),
@@ -120,6 +121,15 @@ describe('mermaid fences', () => {
     gate = null;
     await waitFor(() => expect(diagrams(container)).toBe(1));
     expect(mermaidCode(container)).toBe(0);
+  });
+
+  it('keeps a fence mermaid rejected as its code, with one muted line saying the diagram could not be drawn', async () => {
+    const Markdown = await freshMarkdown();
+    const { container } = render(<Markdown markdown={CLOSED.replace('A --> B', 'BROKEN -->')} live={false} />);
+    await waitFor(() => expect(container.querySelector('.transcript-mermaid-failed')?.textContent).toBe('Diagram could not be drawn'));
+    expect(diagrams(container)).toBe(0);
+    expect(mermaidCode(container)).toBe(1);
+    expect(container.textContent).not.toContain('Mermaid Error');
   });
 
   it('draws every fence of a completed answer', async () => {
