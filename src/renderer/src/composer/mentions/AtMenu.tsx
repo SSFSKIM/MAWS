@@ -1,6 +1,6 @@
 // The `@` menu (C7 execution document, "Mentions, palette and the "+" menu"): Files from main's `git.lsFiles` over the
-// session's directory (debounced 80 ms, relative paths, directories last), or over the additional directories as
-// absolute paths when the query starts with `/`, `~` or `..` (path mode); Agents from the catalogue, inserting an agent
+// session's directory (debounced 80 ms, relative paths, directories last), and in path mode (a query starting with
+// `/`, `~` or `..`) over the additional directories too, every path then absolute; Agents from the catalogue, inserting an agent
 // mention; Skills from the catalogue, whose choice puts the skill's real invocation `/<skill> ` at the start of the
 // message (the engine has no `@skill` mention).
 import type { Editor, Range } from '@tiptap/core';
@@ -39,14 +39,14 @@ function rowOf(item: AtItem): Row {
 
 const PATH_MODE = /^(\/|~|\.\.)/;
 
-// Files for the query: the session's directory, or in path mode each additional directory (absolute paths).
+// Files for the query: the session's directory, and in path mode each additional directory (absolute paths).
 function useFiles(cwd: string, additional: readonly string[], query: string): AtItem[] {
   const settled = useDebounced(query, 80);
   const [files, setFiles] = useState<{ query: string; items: AtItem[] }>({ query: '', items: [] });
   useEffect(() => {
     let live = true;
     const pathMode = PATH_MODE.test(settled);
-    const roots = pathMode ? additional : cwd === '' ? [] : [cwd];
+    const roots = [...(cwd === '' ? [] : [cwd]), ...(pathMode ? additional : [])];
     const q = pathMode ? settled.replace(/^(~\/?|\.\.\/?|\/)/, '') : settled;
     void Promise.all(
       roots.map(async (root) => {
