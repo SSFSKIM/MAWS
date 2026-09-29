@@ -334,7 +334,7 @@ function FileSection({ file, files, ui, appSessionId, data, viewedKey: key }: { 
 function RefusedPath({ path }: { path: string }) {
   return (
     <div role="alert" data-review-refused className="flex flex-col gap-0.5 px-3 py-2">
-      <span className="text-ui-sm text-danger">{`Refused: ${REFUSAL}`}</span>
+      <span className="text-ui-sm text-danger">{REVIEW_COPY.refused(REFUSAL)}</span>
       <span className="truncate font-mono text-ui-sm text-fg-muted">{path}</span>
     </div>
   );

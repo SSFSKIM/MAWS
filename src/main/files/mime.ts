@@ -4,7 +4,7 @@
 // The type decides the encoding with the sniff: base64 unless the type is text and the head holds no NUL.
 import { isTextMime, mimeOf } from '@shared/files/mime';
 
-export { isTextMime, mimeOf }; // the name-only table is shared with the viewer (src/shared/files/mime.ts)
+export { isTextMime }; // the name-only table is shared with the viewer (src/shared/files/mime.ts)
 
 export function isBinaryHead(head: Uint8Array): boolean {
   return head.includes(0);

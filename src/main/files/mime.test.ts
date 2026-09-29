@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { fileMime, isBinaryHead, isTextMime, mimeOf } from './mime';
+import { mimeOf } from '@shared/files/mime';
+import { fileMime, isBinaryHead, isTextMime } from './mime';
 
 describe('files mime', () => {
   it('names a type by extension, case-insensitively, and text/plain for anything unknown', () => {

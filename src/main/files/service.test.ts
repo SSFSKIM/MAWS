@@ -64,7 +64,9 @@ function service(extra: Partial<FilesServiceOptions> = {}) {
   return created;
 }
 function within<T>(promise: Promise<T>, ms: number): Promise<T> {
-  return Promise.race([promise, new Promise<T>((_, reject) => setTimeout(() => reject(new Error(`not answered within ${ms} ms`)), ms))]);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<T>((_, reject) => (timer = setTimeout(() => reject(new Error(`not answered within ${ms} ms`)), ms)));
+  return Promise.race([promise, late]).finally(() => clearTimeout(timer));
 }
 
 beforeEach(() => {
@@ -176,7 +178,7 @@ describe('files service boundary', () => {
       await expect(service().read({ appSessionId: A, path: inRoot('src', 'a.ts') })).rejects.toThrow(OUT);
     });
 
-    it('refuses an ancestor replaced by a symlink pointing outside (step 5)', async () => {
+    it('refuses an ancestor replaced by a symlink pointing outside (step 3, ELOOP)', async () => {
       points['before-open'] = () => swapToLink(inRoot('src'), join(outside, 'src'));
       await expect(service().read({ appSessionId: A, path: inRoot('src', 'a.ts') })).rejects.toThrow(OUT);
     });

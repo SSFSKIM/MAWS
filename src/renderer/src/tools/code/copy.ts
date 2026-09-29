@@ -93,6 +93,7 @@ export const REVIEW_COPY = {
   detachedAt: (head: string) => `detached at ${head.slice(0, 7)}`,
   notRepository: 'Not a git repository',
   unavailable: (message: string) => `Diff unavailable: ${message}`,
+  refused: (message: string) => `Refused: ${message}`, // a diff tab's path outside the session's directories
   unknownRef: 'unknown ref',
   turnNotLoaded: 'the turn is not loaded · Open the session',
   loading: 'Loading',
