@@ -16,6 +16,7 @@ import { Disclosures, NO_ACTIONS, TranscriptProvider } from '../view/context';
 import { RowView } from '../view/rows/Row';
 import { Transcript } from '../view/Transcript';
 import { ipcLoadSpillOver, ipcRewindOver, ipcSourceOver } from './ipc';
+import type { TranscriptSource } from './types';
 
 const APP = 'app-1' as AppSessionId;
 const AGENT = 'agent-7' as AgentId;
@@ -41,6 +42,14 @@ function fakeClient() {
 }
 
 const batch = (events: SessionEvent[], appSessionId = APP) => ({ appSessionId, events });
+
+// A session source subscribed and past an empty snapshot, as the store drives it (batches before the snapshot are held).
+async function subscribed(fake: ReturnType<typeof fakeClient>, source: TranscriptSource, listener: (events: SessionEvent[]) => void) {
+  source.subscribe(listener);
+  const snapshot = source.snapshot();
+  fake.calls.at(-1)!.answer({ ok: true, value: { events: [], lastSeq: 0, complete: true } } as never);
+  await snapshot;
+}
 
 afterEach(() => {
   for (const key of Object.keys(useTranscriptStore.getState().entries)) useTranscriptStore.getState().drop(key);
@@ -117,6 +126,50 @@ describe('ipcSource', () => {
     expect(useTranscriptStore.getState().rows(APP)).toEqual(rowsOf(applyEvents(createState(null, null), all)));
   });
 
+  // A resumed session: a read before the launch started C4's disk follower, which keeps delivering the new launch's
+  // events in disk form beside the live journal's. Each reply renders once, from the live form; the disk history before
+  // the launch and an event the app synthesises (seq null, under the app session id) still pass.
+  it('prefers the live form when a disk follower delivers the same events after a resume', async () => {
+    const b = builder();
+    b.turn('u1');
+    b.text('m1', 0, 'Before the resume.');
+    b.end(['u1']);
+    const history = b.events.map((event) => ({ ...event, id: `disk:${event.id}` as EventId, seq: null }));
+    const r = builder('2026-09-28T11:00:00.000Z');
+    r.turn('u2');
+    r.text('m2', 0, 'After the resume.');
+    r.end(['u2']);
+    const liveForm = r.events.map((event, i) => ({ ...event, id: `${APP}:launch-2:${i + 1}:0` as EventId, seq: i + 1 }));
+    const diskForm = r.events.map((event) => ({ ...event, id: `disk:${event.id}` as EventId, seq: null }));
+    const notice = { ...r.emit('notice.posted', { level: 'warning', key: 'relay:direct_fallback', text: 'Direct route.' }), id: `${APP}:c10:relay-fallback:1` as EventId, seq: null };
+
+    const fake = fakeClient();
+    const source = ipcSourceOver(fake.client, APP);
+    const store = useTranscriptStore.getState();
+    const hydrated = store.attach(source.key!, source);
+    fake.calls[0].answer({ ok: true, value: { events: history, lastSeq: 0, complete: true } } as never);
+    await hydrated;
+    fake.emit('session.eventBatch', batch(liveForm.slice(0, 2)));
+    fake.emit('session.eventBatch', batch([...diskForm.slice(0, 2), notice])); // the follower's copy, and the app's notice
+    fake.emit('session.eventBatch', batch([...diskForm.slice(2), ...liveForm.slice(2)])); // the copy first within a batch
+    const entry = useTranscriptStore.getState().entries[APP];
+    expect([...entry.state.seen]).toEqual([...history, ...liveForm.slice(0, 2), notice, ...liveForm.slice(2)].map((event) => event.id));
+    const texts = entry.rows.filter((row) => row.kind === 'assistant_text');
+    expect(texts).toHaveLength(2); // one reply before the resume, one after: none twice
+    store.detach(source.key!);
+
+    // The next attachment starts over: its snapshot is live (the stream's ring), so the follower's copies drop, those
+    // delivered before the snapshot answered included.
+    store.drop(source.key!);
+    const again = store.attach(source.key!, source);
+    fake.emit('session.eventBatch', batch(diskForm.slice(0, 1))); // during the round trip: held, then dropped
+    fake.calls[1].answer({ ok: true, value: { events: liveForm, lastSeq: liveForm.length, complete: true } } as never);
+    await again;
+    fake.emit('session.eventBatch', batch(diskForm.slice(1)));
+    expect([...useTranscriptStore.getState().entries[APP].state.seen]).toEqual(liveForm.map((event) => event.id));
+    store.detach(source.key!);
+  });
+
   it('keeps a followed child’s own events out of the parent; the child’s parent-side traffic still reaches it', async () => {
     const b = builder();
     b.turn('u1');
@@ -125,7 +178,7 @@ describe('ipcSource', () => {
     const fake = fakeClient();
     const source = ipcSourceOver(fake.client, APP);
     const received: EventId[][] = [];
-    source.subscribe((events) => received.push(events.map((event) => event.id)));
+    await subscribed(fake, source, (events) => received.push(events.map((event) => event.id)));
     const own = { ...b.events[0], id: 'own' as EventId, agentId: AGENT }; // the child's slice: top-level in its own transcript
     const traffic = { ...b.events[0], id: 'traffic' as EventId, agentId: AGENT, parentToolUseId: 't1' as ParentToolUseId };
     fake.emit('session.eventBatch', batch([b.events[0], own, traffic]));
@@ -135,14 +188,14 @@ describe('ipcSource', () => {
 
   // C3 attributes a local agent's lifecycle events to the agent they concern (`agentId` = the task id) while they stay
   // top-level parent events (rebase equivalence gate, pass1/subagent seq 172): the parent keeps them.
-  it('keeps the parent’s lifecycle reports on a child, which C3 tags with the child’s agent id', () => {
+  it('keeps the parent’s lifecycle reports on a child, which C3 tags with the child’s agent id', async () => {
     const b = builder();
     b.turn('u1');
     const started = { ...b.emit('subagent.started', { taskId: AGENT as string as TaskId, toolUseId: tool('t1'), description: 'Look', subagentType: null, isBackground: false, spawnDepth: 1, prompt: null }), agentId: AGENT };
     const progress = { ...b.emit('subagent.progress', { taskId: AGENT as string as TaskId, description: 'Look', usage: { totalTokens: 1, toolUses: 1, durationMs: 1 }, lastToolName: 'Read', summary: null }), agentId: AGENT };
     const fake = fakeClient();
     const received: EventId[][] = [];
-    ipcSourceOver(fake.client, APP).subscribe((events) => received.push(events.map((event) => event.id)));
+    await subscribed(fake, ipcSourceOver(fake.client, APP), (events) => received.push(events.map((event) => event.id)));
     fake.emit('session.eventBatch', batch([b.events[0], started, progress]));
     expect(received).toEqual([[b.events[0].id, started.id, progress.id]]);
   });
