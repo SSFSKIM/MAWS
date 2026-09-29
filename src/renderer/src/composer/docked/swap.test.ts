@@ -35,6 +35,17 @@ describe('the docked swap takes the oldest answerable request, once it is read',
     expect(swapOf([answerable], new Map([[answerable.id, declared as SessionEvent]])).item?.id).toBe(answerable.id);
   });
 
+  it('shows a request main no longer holds as a notice, never in the editor’s place, whatever its kind', () => {
+    const kinds = [permission(), { ...permission(), kind: 'question.requested', questions: [] }, syntheticRequest('refusal-fallback-dialog')] as SessionEvent[];
+    for (const event of kinds) {
+      const gone = itemFor(event as never, A);
+      const swap = swapOf([gone], new Map<AttentionId, SessionEvent | null>([[gone.id, null]])); // attention.request answered null
+      expect(swap.item).toBeNull();
+      expect(swap.notice?.id).toBe(gone.id);
+      expect(swap.waiting).toBe(0);
+    }
+  });
+
   it('keeps an answered request docked (collapsed) until it retires', () => {
     const event = permission();
     const delivered = itemFor(event, A, { state: 'delivered' });
