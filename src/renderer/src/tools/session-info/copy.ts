@@ -34,6 +34,12 @@ export const INFO = {
   passedThrough: 'passed through from your shell',
   // Gateway
   route: 'Route',
+  routed: (baseUrl: string) => `Gateway · ClaudeUsage relay · ${baseUrl}`,
+  direct: "Direct · engine's own login",
+  directLogin: (login: string) => `Direct · engine's own login · ${login}`,
+  unverified: 'Route unverified',
+  mismatch: (mode: string) => `the engine's base URL does not match the ${mode === 'direct' ? 'direct' : 'gateway'} route it was launched on`,
+  pending: 'not verified yet',
   account: 'Account',
   toolSearch: 'Tool search',
   toolSearchOn: 'on · ENABLE_TOOL_SEARCH, needed behind a base URL',
