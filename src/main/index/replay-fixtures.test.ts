@@ -36,9 +36,13 @@ describe('replay fixtures in the index', () => {
     const fixtures = index.fixtures.list();
     const journals = fixtures.filter((f) => f.kind === 'journal');
     const transcripts = fixtures.filter((f) => f.kind === 'transcript');
-    // Every probe journal of both passes, and nothing under the fixtures tree that is not a journal (the sidecar
-    // transcripts, the workflow's own on-disk journal).
-    const expected = [...listJournals('pass1').map((name) => join(FIXTURE_DIR, `${name}.jsonl`)), ...listJournals('pass2').map((name) => join(FIXTURE_DIR, 'pass2', `${name}.jsonl`))];
+    // Every probe journal of every pass (C3 recorded pass 3), and nothing under the fixtures tree that is not a journal
+    // (the sidecar transcripts, the workflow's own on-disk journal).
+    const expected = [
+      ...listJournals('pass1').map((name) => join(FIXTURE_DIR, `${name}.jsonl`)),
+      ...(['pass2', 'pass3'] as const).flatMap((pass) => listJournals(pass).map((name) => join(FIXTURE_DIR, pass, `${name}.jsonl`))),
+    ];
+    expect(listJournals('pass3').length).toBeGreaterThan(0);
     expect(journals.map((f) => f.path).sort()).toEqual(expected.sort());
     expect(journals.find((f) => f.path.endsWith('pass2/workflow.jsonl'))).toMatchObject({ name: 'workflow', lastPlayedAt: null });
     expect(journals.find((f) => f.name === 'subagent')?.sessionId).toBe('9a1d4262-0b43-46ad-acb9-5982f31d209c');

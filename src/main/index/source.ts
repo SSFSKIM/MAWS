@@ -12,7 +12,7 @@ import type { CommandInput, CommandName, CommandOutput, EventName, EventPayload 
 import type { ProjectRecord } from '@shared/ipc/schema/session';
 import type { Holder, TranscriptSummary } from '@shared/wire/store';
 import type { HostSupervisor } from '../hosts/supervisor';
-import { toSessionRecordPatch } from './engine-status';
+import { toSessionRecordPatch } from '@shared/engine/status';
 import type { Index } from './index';
 import type { BindingChange, ChangeCause } from './sessions';
 
@@ -114,7 +114,11 @@ export class IndexSessionSource implements SessionSource {
       }),
       this.host.onEvent('session.status', ({ appSessionId, status }) => {
         if (this.index.sessions.get(appSessionId) === null) return; // not a record the index holds (yet)
-        this.write('session.status', () => this.index.sessions.applyEngineStatus(appSessionId, toSessionRecordPatch(status)));
+        // C3's patch leaves the holder out once the process has exited, the index's call: nothing holds it then (a
+        // terminal that resumes it arrives as fs.holderChanged, which a `self` holder would have refused).
+        const patch = toSessionRecordPatch(status);
+        if (status.process === 'exited') patch.holder = { kind: 'none' };
+        this.write('session.status', () => this.index.sessions.applyEngineStatus(appSessionId, patch));
       }),
       this.host.onState('engine-host', (state) => {
         if (state.state === 'ready') void this.sync();

@@ -14,7 +14,7 @@ import type { AppSessionId, MessageUuid, ProjectId, SessionId } from '@shared/gr
 import type { SessionRecord } from '@shared/graph/session';
 import type { Holder, TranscriptSummary } from '@shared/wire/store';
 import type { Db, Value } from './db';
-import type { EngineStatusPatch } from './engine-status';
+import type { SessionRecordPatch } from '@shared/engine/status';
 import { locate, type ProjectStore } from './projects';
 
 export type ChangeCause = 'discovered' | 'facts' | 'holder' | 'update' | 'live' | 'replay' | 'removed';
@@ -313,13 +313,14 @@ export class SessionStore {
     });
   }
 
-  // C3's `toSessionRecordPatch(status)`, applied as it stands: the engine id binds, the holder is C3's to set.
-  applyEngineStatus(appId: AppSessionId, patch: EngineStatusPatch): SessionRecord {
+  // C3's `toSessionRecordPatch(status)`, applied as it stands: the engine id binds, the holder is C3's to set. A null
+  // engine id or version is one the engine has not reported yet (before its first frame): the record's value stands.
+  applyEngineStatus(appId: AppSessionId, patch: SessionRecordPatch): SessionRecord {
     return this.db.transaction(() => {
       const existing = this.row(appId);
       if (patch.engineSessionId !== undefined && patch.engineSessionId !== null) this.bindRow(existing, patch.engineSessionId, 'live');
       const values: Record<string, Value> = {};
-      if (patch.engineVersion !== undefined) values.engine_version = patch.engineVersion;
+      if (patch.engineVersion !== undefined && patch.engineVersion !== null) values.engine_version = patch.engineVersion;
       if (patch.holder !== undefined) values.holder = JSON.stringify(patch.holder);
       if (patch.gateway !== undefined) {
         values.gateway_routed = patch.gateway.routed;

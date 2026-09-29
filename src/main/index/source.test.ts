@@ -7,7 +7,7 @@ import type { AppSessionId, MessageUuid, SessionId } from '@shared/graph/ids';
 import type { HostEmit, HostOn } from '@shared/host/runtime';
 import { ipcError } from '@shared/ipc/errors';
 import type { CommandName, CommandResult, EventName, EventPayload, HostState } from '@shared/ipc/schema';
-import type { EngineSessionStatus } from '@shared/ipc/schema/session';
+import { EngineSessionStatusSchema, type EngineSessionStatus } from '@shared/engine/status';
 import { validateCommandOutput, validateEventPayload } from '@shared/ipc/validate';
 import type { Holder, TranscriptSummary } from '@shared/wire/store';
 import { sessionIdFor, summary, tempDir } from '../../../test/support/index-fixture';
@@ -84,17 +84,18 @@ function recordingWriter() {
 type Emitted = { name: EventName; payload: unknown };
 
 
-const status = (appSessionId: AppSessionId, over: Partial<EngineSessionStatus> = {}): EngineSessionStatus => ({
-  appSessionId,
-  engineSessionId: null,
-  process: 'ready',
-  model: { requested: null, resolved: 'claude-opus-5' },
-  effort: null,
-  permissionMode: { requested: 'default', effective: 'default', refusal: null },
-  gateway: { mode: 'gateway', baseUrl: 'http://127.0.0.1:8641', autoModeServer: 'enabled', verified: 'routed', localLaneObserved: false },
-  engineVersion: '2.1.283',
-  ...over,
-});
+// C3's status as its process table reports it (src/shared/engine/status.ts), validated.
+const status = (appSessionId: AppSessionId, over: Partial<EngineSessionStatus> = {}): EngineSessionStatus =>
+  EngineSessionStatusSchema.parse({
+    appSessionId, engineSessionId: null, pid: 42, launchId: 'L1', launchedAt: '2026-09-28T10:00:00.000Z', taskListId: null, cwd: '/x', pendingPlan: null,
+    process: 'ready', exit: null, engineState: 'idle', activity: null, turn: null, model: { requested: null, resolved: 'claude-opus-5' }, effort: null,
+    permissionMode: { requested: 'default', effective: 'default', refusal: null }, prePlanMode: null,
+    gateway: { mode: 'gateway', baseUrl: 'http://127.0.0.1:8641', verified: 'routed', autoModeServer: 'enabled', localLane: null },
+    subagentModel: null, modelOverrides: {}, engineVersion: '2.1.283', fileCheckpointing: true,
+    fastMode: { state: null, disabledReason: null }, plugins: [], pluginErrors: [], pluginWarnings: [],
+    backgroundTasks: [], grants: [], mcpServers: [], heldPeerMessages: [], pendingRequests: 0, queue: { length: 0, paused: false }, keepAlive: [],
+    memory: { rssKiB: null, treeRssKiB: null, sampledAt: null }, journalPath: '/j', hostHooks: [], lastEventSeq: 0, ...over,
+  });
 
 describe('IndexSessionSource folds the host\'s events into the index and feeds the read model', () => {
   let dir: ReturnType<typeof tempDir>;
@@ -320,6 +321,12 @@ describe('IndexSessionSource folds the host\'s events into the index and feeds t
     expect(fake.calls).toEqual([{ name: 'fs.bind', input: { bindings: [{ sessionId: engineId, appSessionId: record.appId }] } }]);
     expect(events('session.changed').at(-1)).toMatchObject({ cause: 'live', record: { appId: record.appId } });
 
+    // C3's patch: a status before verification leaves the gateway, and one before the first frame the engine version,
+    // as the record holds them.
+    fake.fire('session.status', { appSessionId: record.appId, status: status(record.appId, { engineSessionId: engineId, engineVersion: null, gateway: { mode: 'gateway', baseUrl: null, verified: 'pending', autoModeServer: 'unknown', localLane: null } }) });
+    expect(index.sessions.get(record.appId)).toMatchObject({ engineVersion: '2.1.283', gateway: { routed: true, baseUrl: 'http://127.0.0.1:8641', autoModeServer: 'enabled' } });
+    // C3's patch leaves the holder out once the process has exited ("the index decides"): nothing holds it then, and a
+    // foreign holder arrives through fs.holderChanged.
     fake.fire('session.status', { appSessionId: record.appId, status: status(record.appId, { engineSessionId: engineId, process: 'exited' }) });
     expect(index.sessions.get(record.appId)?.holder).toEqual({ kind: 'none' });
     // A status for an app session the index has no row for is ignored, not a crash.

@@ -36,9 +36,8 @@ import {
 // C3 end
 // C4 start: the record side, projects, drafts and replay (C4 execution document, Interfaces "X2 additions")
 // (AppSessionIdSchema and MessageUuidSchema come with C3's imports above.)
-import { ProjectIdSchema } from '@shared/graph/ids';
+import { ProjectIdSchema, SessionIdSchema } from '@shared/graph/ids';
 import { SessionRecordSchema } from '@shared/graph/session';
-export type { EngineSessionStatus } from '../../engine/status'; // carried until the post-rebase swap to C3's toSessionRecordPatch
 // C4 end
 import type { CommandSpec } from './common';
 
