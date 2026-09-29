@@ -14,7 +14,6 @@ After each merge the architect triages every row into one of three bins. A row n
 | Logged | Owner | Item | Evidence | Closes when |
 |---|---|---|---|---|
 | 2026-09-28 | C5 | Palette "reveal project" may lose focus to the dialog close; not reproduced. | C5 hand-back residue 4. | Reproduced and fixed, or closed as not reproducible after C7's palette work lands. |
-| 2026-09-28 | C3 | `src/engine-host/session.ts` is ~780 lines; the stop ladder/exit block and the clear-and-implement sequence belong in their own modules. | C3 whole-branch review, carried forward. | Extract at C12 finish or the first C3 refresh. |
 | 2026-09-28 | C3 | Stopped-but-unarchived sessions each keep a bounded (~6,000-event) ring until relaunch or archive. | C3 Outcomes. | C12's memory budget decides the cap or an eviction rule. |
 | 2026-09-28 | C3 | Preload (235 kB) and renderer (982 kB) bundles import the full X2 registry. | C3 Outcomes; C5 owns the renderer bundle. | Split the registry by namespace at C5's rebase or C12 finish. |
 | 2026-09-28 | C9 | OSC 8 links become plain underline after an exact reattach (serialize addon limit); scroll-region and DECSC state are refused as checkpoint boundaries rather than restored. | C9 Outcomes. | Revisit when the serialize addon carries links, or serialise links beside the checkpoint. |
