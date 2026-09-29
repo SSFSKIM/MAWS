@@ -52,7 +52,7 @@ export interface EditorHandle {
   attachPicked(files: PickedFile[]): Promise<void>; // `layout.pickFiles`'s answer: bytes attach, a path is mentioned
   openSlash(): void; // the "+" menu's Slash commands: the palette at `/`
   openMention(): void; // the toolbar's `@`: the `@` menu at the caret (after a space, the terminal's trigger rule)
-  openWidget(name: string): boolean; // whether a widget is registered for the name
+  openWidget(name: string, args?: string): boolean; // whether a widget is registered for the name (C11: `args`, default '')
   setEditing(editing: Editing | null): void; // M4b: the edit mode the document (and so the draft) carries
 }
 
@@ -220,6 +220,18 @@ export class EditorController {
     if (!editor || disabled !== null || this.busy) return;
     const s = serializeDraft(editor.getJSON(), { sessionId, cwd });
     if (s.empty) return;
+    // C11 start: a typed `/<name> <args>` naming a registered widget opens it with its argument, as choosing the row does
+    // (a registered widget wins over the headless text path); the document and its draft clear as a palette choice's do.
+    const plain = s.mode === 'send' && typeof s.content === 'string' && Object.keys(s.pastedContents).length === 0 && editingOfDoc({ attrs: editor.state.doc.attrs }) === null;
+    const typed = plain ? /^\/(\S+)(?:\s+([\s\S]*))?$/.exec(s.display.trim()) : null;
+    if (typed && slashWidget(typed[1])) {
+      this.writer.cancel();
+      this.drafts.save(null);
+      this.setDoc(emptyDoc(), { silently: true, caret: null });
+      this.view.setWidget({ name: typed[1], args: typed[2] ?? '' });
+      return;
+    }
+    // C11 end
     const target = memoryTargetOf(useComposerStore.getState(), appSessionId);
     const focused = editor.isFocused; // read-only while in flight drops focus; it comes back with the cleared editor
     this.busy = true;
@@ -394,9 +406,9 @@ export class EditorController {
         const before = from > 1 ? e.state.doc.textBetween(from - 1, from, '\n', ' ') : '';
         e.chain().focus().insertContent(before === '' || /\s/.test(before) ? '@' : ' @').run();
       },
-      openWidget: (name) => {
+      openWidget: (name, args = '' /* C11: the argument a widget opens with */) => {
         if (!slashWidget(name)) return false;
-        this.view.setWidget({ name, args: '' });
+        this.view.setWidget({ name, args });
         return true;
       },
       setEditing: (editing) => this.setEditing(editing),

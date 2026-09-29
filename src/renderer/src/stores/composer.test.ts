@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, MessageUuid, RequestId } from '@shared/graph/ids';
-import { DEFAULT_MEMORY_TARGET, editingOf, IDLE_RESUBMIT, insertComposerText, isDocked, isStarting, markDocked, memoryTargetOf, prefillComposer, registerFocusTarget, resetComposerStore, resubmitOf, resubmitRecordOf, setEditing, setMemoryTarget, setResubmit, setStarting, takePrefill, useComposerStore } from './composer';
+import { DEFAULT_MEMORY_TARGET, editingOf, IDLE_RESUBMIT, insertComposerText, isDocked, openComposerWidget, isStarting, markDocked, memoryTargetOf, prefillComposer, registerFocusTarget, resetComposerStore, resubmitOf, resubmitRecordOf, setEditing, setMemoryTarget, setResubmit, setStarting, takePrefill, useComposerStore } from './composer';
 
 const A = 'app-a' as AppSessionId;
 const B = 'app-b' as AppSessionId;
@@ -82,3 +82,19 @@ describe('composer store seam', () => {
     warn.mockRestore();
   });
 });
+
+// C11 start: opening a widget over a session's mounted composer (the context widget's Compact…, Session info's actions)
+describe('openComposerWidget', () => {
+  it("asks the session's mounted composer to open the widget with the argument, and answers whether it did", () => {
+    const target = { focusEditor: vi.fn(), focusFrame: vi.fn(), insertText: vi.fn(), openWidget: vi.fn(() => true) };
+    const off = registerFocusTarget(A, target);
+    expect(openComposerWidget(A, 'compact', 'focus on tests')).toBe(true);
+    expect(target.openWidget).toHaveBeenCalledWith('compact', 'focus on tests');
+    off();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(openComposerWidget(A, 'compact', '')).toBe(false);
+    expect(warn).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
+  });
+});
+// C11 end

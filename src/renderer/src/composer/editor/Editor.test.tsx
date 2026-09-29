@@ -8,6 +8,7 @@ import { fakeClient } from '../../../../../test/support/fake-client';
 import { connectKeys } from '../../keymap/dispatcher';
 import { resetCatalogStore } from '../../stores/catalog';
 import { prefillComposer, resetComposerStore } from '../../stores/composer';
+import { registerSlashWidget } from '../mentions/widgets'; // C11
 import { docOf, hardBreak, paragraph, pastedNode, textNode } from './doc';
 import { Editor, type DraftPort, type EditorHandle } from './Editor';
 import type { Serialized } from './serialize';
@@ -221,3 +222,69 @@ describe('the editor mounts over its draft, takes prefills and submits through t
     expect(handle.current?.serialize()).toMatchObject({ display: '', empty: true });
   });
 });
+
+// C11 start: the widget seam C11 added to the editor (C11 execution document, the Arguments rule; Decision (M2) item 11):
+// a typed `/<name> <args>` for a registered widget opens it with its argument, and the handle opens one with an argument.
+describe('a registered widget named at Enter opens with its argument', () => {
+  const opened = (container: HTMLElement) => container.querySelector('[data-test-widget]')?.textContent ?? null;
+  let off: () => void;
+  beforeEach(() => {
+    const offs = (['model', 'compact'] as const).map((name) =>
+      registerSlashWidget(name, { title: name, component: ({ args }: { args: string }) => <p data-test-widget>{`${name}:${args}`}</p> }),
+    );
+    off = () => offs.forEach((o) => o());
+  });
+  afterEach(() => off());
+
+  const enter = (content: HTMLElement) => act(async () => void content.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })));
+
+  it('opens the widget with the typed argument in place of sending, and clears the document and its draft', async () => {
+    const onSubmit = vi.fn(async () => true);
+    const { port, saved } = drafts({ doc: docOf([paragraph(textNode('/model haiku'))]), attachments: [], updatedAt: '2026-09-29T00:00:00.000Z' });
+    const handle = createRef<EditorHandle>();
+    const { container } = render(<Editor appSessionId={APP} cwd="/repo" sessionId={null} drafts={port} client={client} onSubmit={onSubmit} handle={handle} />);
+    const content = contentOf(container);
+    await waitFor(() => expect(content.textContent).toBe('/model haiku'));
+    content.focus();
+    await enter(content);
+    await waitFor(() => expect(opened(container)).toBe('model:haiku'));
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(handle.current?.serialize().empty).toBe(true);
+    expect(saved).toEqual([null]);
+  });
+
+  it('keeps the whole rest of the line as the argument, and none when only the name is typed', async () => {
+    const { port } = drafts({ doc: docOf([paragraph(textNode('/compact focus on tests'))]), attachments: [], updatedAt: '2026-09-29T00:00:00.000Z' });
+    const handle = createRef<EditorHandle>();
+    const { container } = render(<Editor appSessionId={APP} cwd="/repo" sessionId={null} drafts={port} client={client} onSubmit={vi.fn(async () => true)} handle={handle} />);
+    const content = contentOf(container);
+    await waitFor(() => expect(content.textContent).toBe('/compact focus on tests'));
+    content.focus();
+    await enter(content);
+    await waitFor(() => expect(opened(container)).toBe('compact:focus on tests'));
+    act(() => handle.current?.insertText('/model'));
+    await enter(content);
+    await waitFor(() => expect(opened(container)).toBe('model:'));
+  });
+
+  it('sends a command no widget is registered for, as before', async () => {
+    const onSubmit = vi.fn(async () => true);
+    const { port } = drafts({ doc: docOf([paragraph(textNode('/review the diff'))]), attachments: [], updatedAt: '2026-09-29T00:00:00.000Z' });
+    const { container } = render(<Editor appSessionId={APP} cwd="/repo" sessionId={null} drafts={port} client={client} onSubmit={onSubmit} />);
+    const content = contentOf(container);
+    await waitFor(() => expect(content.textContent).toBe('/review the diff'));
+    content.focus();
+    await enter(content);
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ display: '/review the diff' }), 'send'));
+    expect(opened(container)).toBeNull();
+  });
+
+  it('opens a widget through the handle with an argument', async () => {
+    const handle = createRef<EditorHandle>();
+    const { container } = render(<Editor appSessionId={APP} cwd="/repo" sessionId={null} drafts={drafts(null).port} client={client} handle={handle} />);
+    act(() => void handle.current?.openWidget('compact', 'keep the plan'));
+    await waitFor(() => expect(opened(container)).toBe('compact:keep the plan'));
+    expect(handle.current?.openWidget('status', '')).toBe(false); // none registered for it
+  });
+});
+// C11 end
