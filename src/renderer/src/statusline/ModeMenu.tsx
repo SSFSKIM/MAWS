@@ -53,10 +53,11 @@ export function ModeMenu({ binding, onDone }: { binding: ModeBinding; onDone?: (
       <div role="group" aria-label={`Switch to ${confirming}`} className="flex flex-col gap-2 p-1">
         <p>{BYPASS_CONFIRM}</p>
         <div className="flex justify-end gap-1">
-          <button type="button" className={`${BUTTON} text-fg-muted`} onClick={() => setConfirming(null)} disabled={pending}>
+          {/* focus starts on the safe choice: an Enter pressed on through the menu never grants bypassPermissions */}
+          <button type="button" className={`${BUTTON} text-fg-muted`} onClick={() => setConfirming(null)} disabled={pending} autoFocus>
             Cancel
           </button>
-          <button type="button" className={`${BUTTON} text-danger`} onClick={() => void apply(confirming)} disabled={pending} autoFocus>
+          <button type="button" className={`${BUTTON} text-danger`} onClick={() => void apply(confirming)} disabled={pending}>
             Switch to {confirming}
           </button>
         </div>

@@ -230,6 +230,7 @@ describe('the mode menu in the status line', () => {
     await settle();
     fireEvent.click(screen.getByRole('menuitemradio', { name: /bypassPermissions/ }));
     expect(fake.invoked('session.setPermissionMode')).toEqual([]);
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Cancel' })); // a stray Enter keeps the mode
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     fireEvent.click(screen.getByRole('menuitemradio', { name: /^default/ }));
     await settle();
