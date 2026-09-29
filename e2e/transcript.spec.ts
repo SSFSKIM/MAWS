@@ -369,6 +369,27 @@ test('the denied count jumps to the standalone denied cell', async ({ harness })
   expect(harness.consoleErrors()).toEqual([]);
 });
 
+// A long unbreakable token (a path, a URL) in answer or commentary prose wraps inside a narrow transcript instead of
+// scrolling it sideways (R7 measured 80 px of horizontal overflow at 280 px before the prose wrapped).
+test('a long token in prose wraps in a narrow transcript', async ({ harness }) => {
+  const { page } = harness;
+  await harnessReady(page);
+  await loadAll(page, 'transcript/edit-and-receipt');
+  const overflow = await page.evaluate(async () => {
+    const scroller = document.querySelector<HTMLElement>('[data-transcript-scroller]')!;
+    scroller.closest<HTMLElement>('.transcript')!.style.flex = '0 0 280px'; // the harness lays it out as flex-1
+    const token = `/tmp/${'averylongdirectoryname/'.repeat(12)}file.ts`; // no hyphen: nothing to break at
+    const paragraphs = ['.transcript-answer p', '.transcript-commentary p'].map((selector) => scroller.querySelector(selector)).filter((p) => p !== null);
+    for (const paragraph of paragraphs) paragraph.append(document.createTextNode(` ${token}`));
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    return { width: scroller.clientWidth, paragraphs: paragraphs.length, overflow: scroller.scrollWidth - scroller.clientWidth };
+  });
+  expect(overflow.width, 'the transcript is narrow').toBeLessThanOrEqual(280);
+  expect(overflow.paragraphs, 'the fixture shows answer prose').toBeGreaterThan(0);
+  expect(overflow.overflow, 'no horizontal overflow').toBeLessThanOrEqual(0);
+  expect(harness.consoleErrors()).toEqual([]);
+});
+
 // Acceptance item 9: the drill-in is this same Transcript with `variant: 'child'` over the child's own events (C8's
 // panel does this through the public surface; the harness stands in for it).
 test('child transcript renders the subagent\u2019s events only', async ({ harness }) => {
