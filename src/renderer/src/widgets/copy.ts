@@ -244,7 +244,6 @@ export const OPERATION = {
 
 // Model, effort and fast mode (one component; `effort` and `fast` open it at their row).
 export const MODEL = {
-  models: 'Models',
   group: { claude: 'Claude', gateway: 'Gateway' } as const,
   list: (group: string) => `${group} models`,
   oneM: '1M',
@@ -273,7 +272,6 @@ export const MODEL = {
   engineDefault: 'Engine default',
   unstarted: 'Applies when the session starts',
   fast: 'Fast mode',
-  fastList: 'Fast mode',
   fastForOpus: 'Fast mode is for Opus',
   cooldown: 'on · cooling down',
   fastWarning: 'Fast mode disables the auto-mode server lane: reviews then run locally on Sonnet 5 and count against usage',
@@ -330,10 +328,7 @@ export const COMPACT = {
 export const RENAME = {
   title: 'New title',
   rename: 'Rename',
-  open: 'Rename…',
   renamed: (title: string) => `Renamed · ${title}`,
-  current: 'Now',
-  arrivesWith: 'Renaming arrives with C10',
 };
 
 // Resume.
@@ -343,5 +338,4 @@ export const RESUME = {
   open: 'Open',
   resume: 'Resume',
   arrivesWith: 'Resuming arrives with C10',
-  archived: 'archived',
 };
