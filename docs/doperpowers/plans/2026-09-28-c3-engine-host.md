@@ -471,7 +471,7 @@ Commands, `session.*`:
 | `session.rewind` | `{ appSessionId, targetMessageUuid, lastSeenMessageUuid, files: boolean }` | `RewindOutcome` |
 | `session.rewindFiles` | `{ appSessionId, userMessageUuid: MessageUuid, dryRun: boolean }` | `RewindFilesOutcome` — C6's `engine.rewindFiles` shape under the `session.*` namespace (Cross-child reconciliation below) |
 | `session.bash` | `{ appSessionId, command }` | `{ commandUuid }` — immediate: answered at the `bash_command` write; the replayed frames, the echo and the receipt follow as events (Rewind, `!`, `#`) |
-| `session.memoryAppend` | `{ appSessionId, text, target: { kind: 'user' | 'project' | 'path'; path: string | null } }` | `{ path: string; created: boolean }` |
+| `session.memoryAppend` | `{ appSessionId, text (≤ 64 KiB), target: { kind: 'user' | 'project' | 'path'; path: string | null } }` | `{ path: string; created: boolean }` |
 | `session.setCwd` | `{ appSessionId, path, trust: { accepted: true; directory } | null }` | `SetCwdResponse` (C10) |
 | `session.renameSession` | `{ appSessionId, title }` | void (`source: 'host'`) |
 | `session.generateTitle` | `{ appSessionId, description, persist: boolean }` | `OperationReceipt` — operation; `session.operation.outcome.value` is `{ title: string }` |
@@ -909,7 +909,7 @@ Ready to paste into the charter's C3 section as "**Residue decisions (C3, 2026-0
   Rationale: the traversal is a data-loss hole a renderer bug or a hostile page could exercise; the rest close gaps between the host's exit path and main's derived attention, and enforce the bounded-command contract where filesystem work followed a control read. Landed at 797b18b..cc769da; the executor found the real cause behind the startup loss was live writes racing the load (`replaceForSession` overwrote the persisted list), so the attention service writes nothing to the store until its load has finished; persisted held-peer items are dropped at startup like broker items (their processes are gone); `session.forgotten` is emitted only after `forget` succeeds and the session's pending batch is flushed.
   Date/Author: 2026-09-28, controller.
 - Decision: (M5 re-review) `memoryAppend` commits synchronously (`fs.writeSync` on the O_NOFOLLOW handle) right after its final deadline check, so the check and the write are one uninterrupted step and no append can outlive the command's deadline. Main's attention service retries a failed `store.list()` (once at once, then every 5 s), writes nothing to the store until a load has succeeded, keeps serving `attention.list`/`attention.changed` from memory meanwhile, and `settled()` rejects until then.
-  Rationale: a bounded command must not mutate after the bridge reported failure; a transient read error must never let a live write replace persisted attention that was never read.
+  Rationale: a bounded command must not mutate after the bridge reported failure; a transient read error must never let a live write replace persisted attention that was never read. Re-review 2 objected that the synchronous write itself could exceed the budget on a slow filesystem; ruled bounded by design intent: `session.memoryAppend.text` is capped at 64 KiB at the schema (a local write of that size is microseconds), the memory files are the engine's own local `CLAUDE.md`/memory paths, and a network-mounted home is outside P0; the residual is logged as accepted debt for the whole-branch review rather than making `#` an operation.
   Date/Author: 2026-09-28, controller.
 
 ## Outcomes & Retrospective
