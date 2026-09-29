@@ -65,6 +65,18 @@ describe('read model snapshot matches events', () => {
     expect(model.digests()[0].cost?.totalUsd).toBe(0.12);
   });
 
+  it('sums cost across processes: a restart whose running total starts lower never lowers the session’s total', () => {
+    src.writer.fold(A, [ev('turn.started', {}), ev('turn.ended', { costUsd: 0.3 })]);
+    src.writer.fold(A, [ev('process.exited', { reason: 'quit' })]);
+    src.writer.fold(A, [ev('turn.started', {}), ev('turn.ended', { costUsd: 0.05 })]);
+    const totals = emitted.filter((d) => d.appSessionId === A).map((d) => d.cost?.totalUsd);
+    expect(totals).toEqual([0.3, 0.3, 0.35]);
+    // A scripted digest (the stub's, a seed) is the live process's running total: the next process adds to it.
+    src.writer.setDigest(digestInput); // total 2
+    src.writer.fold(A, [ev('process.exited', { reason: 'quit' }), ev('turn.started', {}), ev('turn.ended', { costUsd: 0.25 })]);
+    expect(model.digests().find((d) => d.appSessionId === A)?.cost?.totalUsd).toBe(2.25);
+  });
+
   it('computes cost since seen from the cost at the moment the session became visible', () => {
     src.writer.setDigest(digestInput); // total 2, since seen 0.5 → seen at 1.5
     src.writer.fold(A, [ev('usage.sample', { costUsd: 2.5 })]);

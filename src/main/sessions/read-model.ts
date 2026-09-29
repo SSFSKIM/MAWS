@@ -12,7 +12,7 @@ import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { ProjectRecord, SessionDigest } from '@shared/ipc/schema';
-import { applyStatusToDigest, emptyDigest, foldEvents } from './digest';
+import { applyStatusToDigest, costLedger, emptyDigest, foldEvents, type CostLedger } from './digest';
 import type { LaunchMode } from './select-source';
 
 export interface SessionSource {
@@ -50,6 +50,7 @@ export class SessionReadModel {
   // continues from it, so a consumer that still holds the old digest takes the new ones (a revision never repeats).
   private readonly lastRevision = new Map<AppSessionId, number>();
   private readonly seen = new Map<AppSessionId, Set<string>>();
+  private readonly ledgers = new Map<AppSessionId, CostLedger>(); // cost across the session's processes (digest.ts)
   private readonly costAtSeen = new Map<AppSessionId, number>();
   private readonly statuses = new Map<AppSessionId, EngineSessionStatus>();
   private readonly attentionById = new Map<AppSessionId, AttentionItem[]>();
@@ -164,6 +165,7 @@ export class SessionReadModel {
       this.records.delete(appSessionId);
       this.digestsById.delete(appSessionId);
       this.seen.delete(appSessionId);
+      this.ledgers.delete(appSessionId);
       this.costAtSeen.delete(appSessionId);
       this.statuses.delete(appSessionId);
       this.attentionById.delete(appSessionId);
@@ -179,6 +181,7 @@ export class SessionReadModel {
     setDigest: (d) => {
       // A given `sinceSeenUsd` fixes the cost at which the session was last seen, so later samples stay consistent.
       if (d.cost) this.costAtSeen.set(d.appSessionId, d.cost.totalUsd - d.cost.sinceSeenUsd);
+      this.ledgers.delete(d.appSessionId); // the given cost is the live process's running total from here
       this.commit({ ...d, revision: 0 });
     },
     // A status or batch for a session with no observed record is dropped (C10's trust bootstrap launches under the
@@ -187,7 +190,9 @@ export class SessionReadModel {
       if (!this.records.has(appSessionId)) return;
       let seen = this.seen.get(appSessionId);
       if (!seen) this.seen.set(appSessionId, (seen = new Set()));
-      this.commit(foldEvents(this.current(appSessionId), seen, events));
+      let ledger = this.ledgers.get(appSessionId);
+      if (!ledger) this.ledgers.set(appSessionId, (ledger = costLedger(this.current(appSessionId))));
+      this.commit(foldEvents(this.current(appSessionId), seen, events, ledger));
     },
     applyEngineStatus: (s) => {
       if (!this.records.has(s.appSessionId)) return;

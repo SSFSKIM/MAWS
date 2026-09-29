@@ -60,10 +60,43 @@ function firstLine(block: { type: string } & Record<string, unknown>): string | 
 }
 
 // The engine reports cost as the process's running total (`result.total_cost_usd`; the probe's pass2/rewind results read
-// 0.0555, 0.0614, 0.0674), so a sample replaces the total rather than adding to it.
+// 0.0555, 0.0614, 0.0674), so a sample replaces the process's total rather than adding to it. A session outlives its
+// processes: a resumed process starts its total again at zero, so the session's cost is every finished process's final
+// total plus the live process's running total. A synthesised `turn.ended` (`seq: null`, C4's backfill from disk, where
+// no accounting is recorded per turn) carries no cost and leaves the ledger alone.
+export interface CostLedger {
+  finishedUsd: number; // the final totals of the processes that exited
+  runningUsd: number; // the live process's running total
+}
+
+// A session's ledger when its fold begins: a cost already on the digest (scripted by the stub, or seeded) is the live
+// process's running total.
+export const costLedger = (d: SessionDigest): CostLedger => ({ finishedUsd: 0, runningUsd: d.cost?.totalUsd ?? 0 });
+
+export function foldCost(ledger: CostLedger, event: SessionEvent): CostLedger {
+  if (event.agentId !== null || event.parentToolUseId !== null) return ledger; // a child's cost is inside the parent's total
+  switch (event.kind) {
+    case 'turn.ended':
+      return event.isEchoReceipt || event.seq === null ? ledger : { ...ledger, runningUsd: event.costUsd };
+    case 'usage.sample':
+      return { ...ledger, runningUsd: event.costUsd };
+    case 'process.exited':
+      return { finishedUsd: ledger.finishedUsd + ledger.runningUsd, runningUsd: 0 };
+    default:
+      return ledger;
+  }
+}
+
+const costOf = (ledger: CostLedger) => ledger.finishedUsd + ledger.runningUsd;
 const withCost = (d: SessionDigest, totalUsd: number): SessionDigest => ({ ...d, cost: { totalUsd, sinceSeenUsd: d.cost?.sinceSeenUsd ?? 0 } });
 
+// One event on its own: the digest's cost is taken as its process's running total (`foldEvents` carries the ledger).
 export function foldDigest(prev: SessionDigest, event: SessionEvent): SessionDigest {
+  return foldWithLedger(prev, event, foldCost(costLedger(prev), event));
+}
+
+// `ledger` is the session's cost ledger after this event (`foldCost`).
+function foldWithLedger(prev: SessionDigest, event: SessionEvent, ledger: CostLedger): SessionDigest {
   const pending = REQUESTED.has(event.kind) ? 1 : RESOLVED.has(event.kind) ? -1 : 0;
   const d = pending === 0 ? prev : { ...prev, pendingRequests: Math.max(0, prev.pendingRequests + pending) };
 
@@ -87,7 +120,8 @@ export function foldDigest(prev: SessionDigest, event: SessionEvent): SessionDig
     case 'turn.ended': {
       if (event.isEchoReceipt) return d;
       const failed = event.isError && event.terminalReason !== 'aborted_streaming';
-      return withCost({ ...d, phase: failed ? 'failed' : 'idle', lastTurnEndedAt: event.at, activity: null }, event.costUsd);
+      const ended: SessionDigest = { ...d, phase: failed ? 'failed' : 'idle', lastTurnEndedAt: event.at, activity: null };
+      return event.seq === null ? ended : withCost(ended, costOf(ledger));
     }
     case 'context.sample':
       return {
@@ -100,7 +134,7 @@ export function foldDigest(prev: SessionDigest, event: SessionEvent): SessionDig
         },
       };
     case 'usage.sample':
-      return withCost(d, event.costUsd);
+      return withCost(d, costOf(ledger));
     case 'subagent.started':
       return { ...d, childAgents: { ...d.childAgents, active: d.childAgents.active + 1 } };
     case 'subagent.finished':
@@ -118,14 +152,16 @@ export function foldDigest(prev: SessionDigest, event: SessionEvent): SessionDig
 }
 
 // Folds a batch, skipping ids already in `seen` (a backfill overlapping a snapshot, a repeated batch) and keeping the
-// last SEEN_WINDOW ids. `seen` is the caller's per-session window, mutated here; insertion order is age order.
-export function foldEvents(prev: SessionDigest, seen: Set<string>, events: SessionEvent[]): SessionDigest {
+// last SEEN_WINDOW ids. `seen` and `ledger` are the caller's per-session state, mutated here; insertion order is age
+// order.
+export function foldEvents(prev: SessionDigest, seen: Set<string>, events: SessionEvent[], ledger: CostLedger = costLedger(prev)): SessionDigest {
   let digest = prev;
   for (const event of events) {
     if (seen.has(event.id)) continue;
     seen.add(event.id);
     if (seen.size > SEEN_WINDOW) seen.delete(seen.values().next().value as string);
-    digest = foldDigest(digest, event);
+    Object.assign(ledger, foldCost(ledger, event));
+    digest = foldWithLedger(digest, event, ledger);
   }
   return digest;
 }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionEvent } from '@shared/graph/events';
-import { emptyDigest, foldDigest, foldEvents } from './digest';
+import { costLedger, emptyDigest, foldDigest, foldEvents } from './digest';
 import { ev } from '../../../test/support/events';
 
 const APP = 'app-1' as AppSessionId;
@@ -72,6 +72,29 @@ describe('digest fold', () => {
     // The probe's results report a cumulative total_cost_usd (pass2/rewind: 0.0555, 0.0614, 0.0674).
     const digest = run([ev('turn.ended', { costUsd: 0.0555 }), ev('turn.ended', { costUsd: 0.0614 }), ev('turn.ended', { costUsd: 0.0674 })]);
     expect(digest.cost?.totalUsd).toBe(0.0674);
+  });
+
+  it('keeps a finished process’s cost when a new process restarts its running total at zero', () => {
+    const ledger = costLedger(emptyDigest(APP));
+    const seen = new Set<string>();
+    const totals: number[] = [];
+    let digest = emptyDigest(APP);
+    for (const batch of [
+      [ev('turn.started', {}), ev('turn.ended', { costUsd: 0.3 })],
+      [ev('process.exited', { reason: 'quit' })],
+      [ev('turn.started', {}), ev('turn.ended', { costUsd: 0.05 })], // the resumed process counts from zero
+      [ev('usage.sample', { costUsd: 0.07 })],
+    ]) {
+      digest = foldEvents(digest, seen, batch, ledger);
+      totals.push(digest.cost?.totalUsd ?? 0);
+    }
+    expect(totals).toEqual([0.3, 0.3, 0.35, 0.37]);
+    expect(ledger).toEqual({ finishedUsd: 0.3, runningUsd: 0.07 });
+  });
+
+  it('a synthesised turn end (C4’s backfill, no accounting on disk) leaves the cost alone', () => {
+    const live = run([ev('turn.started', {}), ev('turn.ended', { costUsd: 0.4 })]);
+    expect(run([ev('turn.started', { seq: null }), ev('turn.ended', { seq: null, costUsd: 0 })], live).cost?.totalUsd).toBe(0.4);
   });
 
   it('child traffic and echo receipts leave the parent alone', () => {
