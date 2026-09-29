@@ -39,8 +39,10 @@ describe('scope options follow the downgrade rule', () => {
     expect(options[1].updatedPermissions).toEqual([{ type: 'addRules', rules: [{ toolName: 'Read' }], behavior: 'allow', destination: 'session' }]);
   });
 
-  it('names the files a file tool touches in the once option', () => {
-    expect(scopeOptions(permission({ toolName: 'Edit', input: { file_path: '/p/a.ts', old_string: 'a', new_string: 'b' } }), null)[0].detail).toBe('This file only');
-    expect(scopeOptions(permission({ toolName: 'NotebookEdit', input: { notebook_path: '/p/n.ipynb' } }), null)[0].detail).toBe('This file only');
+  it('counts the file rows a file tool touches in the once option', () => {
+    expect(scopeOptions(permission({ toolName: 'Edit', input: { file_path: '/p/a.ts', old_string: 'a', new_string: 'b' } }), null)[0].detail).toBe('This 1 file');
+    expect(scopeOptions(permission({ toolName: 'NotebookEdit', input: { notebook_path: '/p/n.ipynb' } }), null)[0].detail).toBe('This 1 file');
+    const multi = { file_path: '/p/a.ts', edits: [{ file_path: '/p/b.ts', old_string: 'a', new_string: 'b' }, { old_string: 'c', new_string: 'd' }] };
+    expect(scopeOptions(permission({ toolName: 'MultiEdit', input: multi }), null)[0].detail).toBe('These 2 files');
   });
 });

@@ -31,6 +31,13 @@ export const field = (input: unknown, key: string): string | null => {
 // The file a file tool writes or reads (`notebook_path` for notebooks, `path` for LS).
 export const filePath = (input: unknown): string | null => field(input, 'file_path') ?? field(input, 'notebook_path') ?? field(input, 'path');
 
+// The file rows a file tool touches: its own path and any path an individual edit names, each once.
+export function filePaths(input: unknown): string[] {
+  const edits = input !== null && typeof input === 'object' && Array.isArray((input as { edits?: unknown }).edits) ? (input as { edits: unknown[] }).edits : [];
+  const paths = [filePath(input), ...edits.map((edit) => field(edit, 'file_path'))].filter((path): path is string => path !== null);
+  return [...new Set(paths)];
+}
+
 // The MCP server and the tool's own name: the engine's `mcp_server` when it sent one, else the `mcp__<server>__<tool>`
 // name the engine gives every MCP tool.
 export function mcpParts(ev: PermissionEvent): { server: string; source: string | null; tool: string } | null {

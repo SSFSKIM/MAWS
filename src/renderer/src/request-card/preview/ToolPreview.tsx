@@ -6,7 +6,7 @@
 import { useState } from 'react';
 import type { SessionEvent } from '@shared/graph/events';
 import { pretty } from '../controls';
-import { field, filePath, mcpParts, toolClass } from '../tools';
+import { field, filePath, filePaths, mcpParts, toolClass } from '../tools';
 
 type PermissionEvent = Extract<SessionEvent, { kind: 'permission.requested' }>;
 
@@ -63,12 +63,16 @@ export function ToolPreview({ request, compact = false }: { request: PermissionE
     case 'command':
       return <Command command={field(input, 'command') ?? pretty(input)} description={field(input, 'description') ?? request.description} />;
     case 'edit': {
-      const path = filePath(input);
+      const paths = filePaths(input);
       return (
         <div className="flex flex-col gap-1.5">
-          <p data-testid="request-input" className="m-0 truncate font-mono text-ui-sm text-fg" title={path ?? undefined}>
-            {path ?? request.toolName}
-          </p>
+          <ul data-testid="request-input" className="m-0 flex list-none flex-col gap-0.5 p-0 font-mono text-ui-sm text-fg">
+            {(paths.length > 0 ? paths : [request.toolName]).map((path) => (
+              <li key={path} className="truncate" title={path}>
+                {path}
+              </li>
+            ))}
+          </ul>
           {!compact && edits(request).map((change, i) => <Change key={i} {...change} />)}
         </div>
       );

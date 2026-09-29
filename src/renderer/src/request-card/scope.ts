@@ -5,7 +5,7 @@
 // writes for the scope (`engine-host/broker.ts`, `sessionRule` and `localSettingsRule`), shown, never sent: the answer
 // carries the scope alone. Pure.
 import type { SessionEvent } from '@shared/graph/events';
-import { toolClass } from './tools';
+import { filePaths, toolClass } from './tools';
 
 type PermissionEvent = Extract<SessionEvent, { kind: 'permission.requested' }>;
 export type Scope = 'once' | 'session' | 'local_settings';
@@ -43,7 +43,8 @@ function ruleFromRequest(ev: PermissionEvent, destination: string): AddRules {
 const ruleText = (rules: AddRules['rules']) => rules.map((r) => r.ruleContent ?? r.toolName).join(', ');
 
 export function scopeOptions(ev: PermissionEvent, project: { name: string } | null): ScopeOption[] {
-  const once: ScopeOption = { scope: 'once', label: 'Allow once', detail: toolClass(ev.toolName) === 'edit' ? 'This file only' : 'Only this invocation', updatedPermissions: null };
+  const files = toolClass(ev.toolName) === 'edit' ? Math.max(1, filePaths(ev.input).length) : 0; // the preview's file rows
+  const once: ScopeOption = { scope: 'once', label: 'Allow once', detail: files === 0 ? 'Only this invocation' : files === 1 ? 'This 1 file' : `These ${files} files`, updatedPermissions: null };
   if (isDowngraded(ev)) return [once];
 
   const suggestions = addRulesSuggestions(ev);
