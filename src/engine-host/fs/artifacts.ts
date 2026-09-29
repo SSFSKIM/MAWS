@@ -21,10 +21,12 @@ export async function readSpill(paths: StorePaths, { path, offset = 0, length = 
   try {
     real = await realpath(path);
   } catch (error) {
-    // A path that does not exist is refused as outside unless it would lie inside, so the command says nothing about
-    // what exists elsewhere on disk. "Inside" is judged by the realpath of the deepest existing ancestor (C8c's
-    // `files.*` rule), so an in-store symlink to an outside directory cannot be used to test outside names.
-    if (isMissing(error)) throw new Error((await missingWithin(resolve(path), roots)) ? `spill not found: ${path}` : OUTSIDE, { cause: error });
+    // Any path that does not resolve is refused as outside unless it would lie inside, so the command says nothing about
+    // what exists elsewhere on disk, whatever the error. "Inside" is judged by the realpath of the deepest existing
+    // ancestor (C8c's `files.*` rule), walked on the path as given so the kernel resolves every link and `..`; an
+    // in-store symlink to an outside directory cannot be used to test outside names.
+    if (!(await missingWithin(path, roots))) throw new Error(OUTSIDE, { cause: error });
+    if (isMissing(error)) throw new Error(`spill not found: ${path}`, { cause: error });
     throw error;
   }
   if (!within(real, roots)) throw new Error(OUTSIDE);
@@ -72,8 +74,10 @@ function utf8Cut(page: Buffer): { end: number; missing: number } {
   return { end: start, missing: start + size - page.length };
 }
 
-// Whether a missing absolute path would lie under a root once its deepest existing ancestor is resolved. A component
-// that exists without resolving (a dangling symlink) could point anywhere, so it is not judged inside.
+// Whether an absolute path that does not resolve would lie under a root once its deepest existing ancestor is resolved.
+// Not inside: a component that exists without resolving (a dangling symlink could point anywhere), a missing part that
+// holds `.` or `..` (the kernel would not resolve it either), or an ancestor that fails with anything but ENOENT or
+// ENOTDIR (EACCES, ELOOP: what failed may lie outside).
 async function missingWithin(path: string, roots: readonly string[]): Promise<boolean> {
   let ancestor = path;
   const tail: string[] = [];
@@ -82,11 +86,13 @@ async function missingWithin(path: string, roots: readonly string[]): Promise<bo
     if (parent === ancestor) return false;
     tail.unshift(basename(ancestor));
     ancestor = parent;
-    const real = await realpath(ancestor).catch((error: unknown) => {
-      if (isMissing(error) || (error as NodeJS.ErrnoException).code === 'ENOTDIR') return null;
-      throw error;
-    });
+    const real = await realpath(ancestor).then(
+      (resolved) => resolved,
+      (error: unknown) => (isMissing(error) || (error as NodeJS.ErrnoException).code === 'ENOTDIR' ? null : false),
+    );
+    if (real === false) return false;
     if (real === null) continue;
+    if (tail.some((part) => part === '.' || part === '..')) return false;
     const dangling = await lstat(join(ancestor, tail[0])).then(
       () => true,
       () => false,
