@@ -44,7 +44,8 @@ No skill or instruction document is needed. OpenAI's first tool result carries t
 appends a short "host notes" block to the server instructions (which Claude Code shows the model) covering what that
 document does not: one approval dialog per app per session, index-first addressing and pixel coordinates, dropping an
 app's handle after quitting it (`getAXState` on the handle relaunches the app), `listApps` lagging a moment behind
-cmd+q, `js_reset` for a confused REPL, and not mixing in osascript. Override or disable with `CUA_SHIM_HOST_NOTES`.
+cmd+q, `typeText` dropping characters the keyboard layout cannot produce (emoji; use `paste`), `js_reset` for a
+confused REPL, and not mixing in osascript. Override or disable with `CUA_SHIM_HOST_NOTES`.
 The notes take effect on the next server connection (`/reload-plugins` or a new session).
 
 ## Scripts

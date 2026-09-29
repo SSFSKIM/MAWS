@@ -41,6 +41,7 @@ const HOST_NOTES=env.CUA_SHIM_HOST_NOTES==='none'?'':(env.CUA_SHIM_HOST_NOTES??`
 - Each app asks the user for approval once per session, in a dialog. Do not retry an app the user declined; report it instead.
 - Address elements by index from the latest accessibility text. Coordinates are screenshot pixels; if the host says it downscaled an image, apply the multiplier it gives. Role names follow the system language.
 - After quitting an app, stop using its handle: getAXState() on it relaunches the app. Verify with cua.listApps({emit:false}), which can lag a moment behind cmd+q.
+- typeText goes through the keyboard layout and silently drops characters it cannot key, such as emoji; use paste for those and for multiline text.
 - Batch deterministic actions with one observation per call, and pass timeout_ms for long waits. If the REPL state is confused, call js_reset and bind the app again.
 - Do not drive the same app through osascript or other tools while a cua session is open.`);
 
