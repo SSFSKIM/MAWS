@@ -568,7 +568,7 @@ describe('default loadSpill', () => {
     const spill = { path: '/cfg/projects/p/s/tool-results/toolu_1.txt', bytes: 188_416, state: 'not_loaded' as const, content: null };
     const loaded = load(spill);
     expect(fake.calls.map((call) => [call.name, call.input])).toEqual([['fs.readSpill', { path: spill.path, length: 2 * 1024 * 1024 }]]);
-    fake.calls[0].answer({ ok: true, value: { content: 'full', bytes: 188_416, offset: 0, truncated: false } });
+    fake.calls[0].answer({ ok: true, value: { content: 'full', bytes: 4, offset: 0, length: 4, truncated: false } }); // C4's landed shape: `length` is the page's bytes
     await expect(loaded).resolves.toBe('full');
     const refused = load(spill);
     fake.calls[1].answer({ ok: false, error: { code: 'internal', message: 'path outside the engine store' } });

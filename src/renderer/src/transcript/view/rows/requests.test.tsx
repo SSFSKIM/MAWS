@@ -249,7 +249,7 @@ describe('spilled result', () => {
 
   it('events/spill: Load full result (184 KB), then the content from fs.readSpill, capped with the omitted marker over 64 KB', async () => {
     const content = `${'line of the build log\n'.repeat(5000)}BUILD OK`; // about 107 KB
-    const invoke = vi.fn(() => Promise.resolve({ ok: true, value: { content, bytes: content.length, offset: 0, truncated: false } }));
+    const invoke = vi.fn(() => Promise.resolve({ ok: true, value: { content, bytes: content.length, offset: 0, length: content.length, truncated: false } }));
     (window as { maws?: MawsBridge }).maws = { invoke, on: vi.fn(() => () => {}) } as unknown as MawsBridge;
     const store = await storeWith(loadEventFixture('spill'));
     useTranscriptStore.getState().expandAll(store.key, { cells: true });
@@ -286,7 +286,7 @@ describe('spilled result', () => {
   }
 
   it('an unknown-size spill answered truncated by fs.readSpill is partial: the head, then Showing the first 2 MB with Open full log', async () => {
-    const invoke = vi.fn(() => Promise.resolve({ ok: true, value: { content: 'head of the dump', bytes: 3_250_000, offset: 0, truncated: true } }));
+    const invoke = vi.fn(() => Promise.resolve({ ok: true, value: { content: 'head of the dump', bytes: 3_250_000, offset: 0, length: 16, truncated: true } }));
     (window as { maws?: MawsBridge }).maws = { invoke, on: vi.fn(() => () => {}) } as unknown as MawsBridge;
     const { store, cellRow, spillOf } = await unknownSizeSpill();
     expect(spillOf()).toMatchObject({ bytes: null, state: 'not_loaded' });
