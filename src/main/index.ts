@@ -28,11 +28,16 @@ import { registerOpenExternal } from './open-external';
 import { startSessions } from './sessions';
 import { restoreWindowState, trackWindowState } from './window-state';
 // C5 end
-// C10 start (registerMainHandler comes with C3's imports)
+// C10 start (emit comes with C3's imports)
+import { shell } from 'electron';
+import { captureShellEnvironment } from '@shared/host/shell-env';
 import { createGitRunner } from './git/runner';
 import { WorktreeService } from './git/worktrees';
 import { registerWorktreeHandlers } from './git/worktrees-register';
-import { trustStateOf } from './sessions/trust';
+import { BootstrapNotes, FileIntentStore } from './sessions/intents';
+import { ReplaySeam } from './sessions/replay-seam';
+import { SessionService } from './sessions/service';
+import { engineHostSettled, registerSessionServiceHandlers } from './sessions/service-register';
 // C10 end
 
 // A fresh profile for the end-to-end smoke (and anyone else who wants one); must be set before the app is ready.
@@ -116,13 +121,31 @@ app.whenReady().then(() => {
   const tracked = (win: BrowserWindow) => trackWindowState(win, (state) => layout.set('window.main', state));
   // ---- end C5 ----
 
-  // C10 start: the trust check (M1): whether the pinned engine would find a directory trusted, read from the engine's own
-  // global config (read only; CLAUDE_CONFIG_DIR honoured as the engine honours it). The session service joins in M3.
-  registerMainHandler('session.trust.check', ({ directory }) => trustStateOf(directory, { git: createGitRunner(), env: process.env }));
-  // The worktree service (M2): git.worktree.*, every git mutation MAWS makes, with occupancy from holder authority (C3's
-  // process table and C4's fresh registry read through the engine host, the index's records). M3's service takes it.
+  // C10 start: the worktree service (M2): git.worktree.*, every git mutation MAWS makes, with occupancy from holder
+  // authority (C3's process table and C4's fresh registry read through the engine host, the index's records).
   const worktrees = new WorktreeService({ git: createGitRunner(), holders: { dispatch: hosts.dispatch, sessions: index.sessions } });
   registerWorktreeHandlers(worktrees);
+  // The session service (M3): intents, start, fork, archive, delete, rename and the trust check, reading the global
+  // config and the store with the environment the engine receives (the login-shell capture, as C3's host builds every
+  // launch's). Its start resets every stale `self` holder at once (D-16), then forgets stale bootstrap ids and
+  // reconciles interrupted handoffs once the engine host answers; `session.intent.list` waits for that.
+  const sessionsDir = join(app.getPath('userData'), 'sessions');
+  const sessionService = new SessionService({
+    index,
+    host: { dispatch: hosts.dispatch, onEvent: (name, listener) => hosts.onEvent(name, listener), ready: () => engineHostSettled(hosts) },
+    git: createGitRunner(),
+    worktrees,
+    intents: new FileIntentStore(join(sessionsDir, 'intents')),
+    bootstraps: new BootstrapNotes(join(sessionsDir, 'bootstraps')),
+    userData: app.getPath('userData'),
+    env: captureShellEnvironment(),
+    emit,
+    trash: (path) => shell.trashItem(path),
+    reveal: (path) => shell.showItemInFolder(path),
+    replay: ReplaySeam.fromEnv(process.env, process.cwd()), // the e2e seam (MAWS_E2E_REPLAY_FIXTURES)
+  });
+  registerSessionServiceHandlers(sessionService);
+  sessionService.start().catch((error: unknown) => console.error('[sessions] the session service failed to start:', error));
   // C10 end
 
   // The hosts belong to the app, not to a window or a page (§4.1): they start here, before any window exists, and
