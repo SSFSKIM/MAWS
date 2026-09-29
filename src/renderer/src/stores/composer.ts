@@ -9,6 +9,7 @@
 // flow (M4b) drives, each per session so they outlive a tab switch.
 import { create } from 'zustand';
 import type { AppSessionId, MessageUuid, RequestId } from '@shared/graph/ids';
+import { toast } from './notices';
 
 export interface Prefill {
   text: string; // the row's text with `[Pasted text #n +L lines]` placeholders in place
@@ -71,8 +72,14 @@ export function resetComposerStore(): void {
   useComposerStore.setState(initial());
 }
 
-// Replaces the session's untaken prefill: the latest ask wins.
+// Replaces the session's untaken prefill: the latest ask wins. Refused while the session's rewind is in flight or
+// unconfirmed (M4b): the editor holds the text that rewind is to resend, and a new edit would abandon it.
 export function prefillComposer(appSessionId: AppSessionId, prefill: Prefill): void {
+  const { state } = resubmitRecordOf(useComposerStore.getState(), appSessionId);
+  if (state === 'rewinding' || state === 'rewind_uncertain') {
+    toast({ level: 'info', text: 'A rewind is in progress', actions: [], dismissible: true });
+    return;
+  }
   useComposerStore.setState((s) => ({ prefills: new Map(s.prefills).set(appSessionId, prefill) }));
 }
 

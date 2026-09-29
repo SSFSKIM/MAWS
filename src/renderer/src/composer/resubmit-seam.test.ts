@@ -4,7 +4,7 @@ import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
 import type { CommandResult, MawsBridge } from '@shared/ipc/schema';
 import { status } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
-import { editingOf, resetComposerStore, resubmitRecordOf, setEditing, useComposerStore } from '../stores/composer';
+import { editingOf, prefillComposer, resetComposerStore, resubmitRecordOf, setEditing, useComposerStore } from '../stores/composer';
 import { useNotices } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
 import { resetShellStores } from '../test-support/shell-stores';
@@ -274,11 +274,24 @@ describe('resubmit state never repeats a rewind and reconciles an uncertain one'
     expect(resubmitProvider()).toBeNull();
   });
 
-  it('a new edit replaces the last one and forgets its state', async () => {
+  it('a prefill is refused while a rewind is in flight or unconfirmed (it would overwrite the confirmed text); once unresolved a new edit replaces the last one', async () => {
+    vi.useFakeTimers();
+    const next = { text: 'another message', editing: { messageUuid: u('u-5'), seenCursor: u('u-5') } };
     const { outcome } = confirmed();
+    prefillComposer(A, next); // rewinding
+    expect(useComposerStore.getState().prefills.has(A)).toBe(false);
     rewinds[0].answer(failed('timeout'));
     await outcome;
-    enterEditMode(A, { messageUuid: u('u-5'), seenCursor: u('u-5') });
+    prefillComposer(A, next); // rewind_uncertain
+    expect(useComposerStore.getState().prefills.has(A)).toBe(false);
+    expect(toasts()).toEqual(['A rewind is in progress', 'A rewind is in progress']);
+    expect(record().state).toBe('rewind_uncertain');
+    expect(editingOf(useComposerStore.getState(), A)).toEqual({ messageUuid: 'u-1', seenCursor: 'u-2' });
+
+    await vi.advanceTimersByTimeAsync(REWIND_WINDOW_MS);
+    prefillComposer(A, next); // rewind_unresolved: the human may move on
+    expect(useComposerStore.getState().prefills.has(A)).toBe(true);
+    enterEditMode(A, next.editing); // the composer takes it
     expect(record().state).toBe('idle');
     boundary('u-1');
     expect(record().state).toBe('idle');
