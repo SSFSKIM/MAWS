@@ -787,6 +787,10 @@ Ready to paste into the charter's C8 section under "**Residue decisions (C8b, 20
   - An answered steer clears the tab's draft only while that draft still belongs to the relay's agent (`clearDraftFor`).
   Date/Author: 2026-09-29, C8b M2 (executor, on the M2 review's findings).
 
+- Decision (controller, 2026-09-29, before M4): M4 runs as two executor tasks. Task 5 first merges master (C8c landed at e02dffb8: its pass-3 integrity loop, its `e2e/panel.spec.ts` amendment and its blocks in `App.tsx`, `ipc/events.ts`, `vitest.config.ts`, `playwright.config.ts` and `package.json` meet C8b's; the merge keeps one pass-3 loop, C8c's, and leaves the "unregistered tools" case naming only what is still unregistered), then builds the harness block, the fake client, the three derived fixtures with their generators and reproducibility suite, `e2e/agent-tools.spec.ts` with `e2e:agents` in `verify`, and the C8b-marked harness amendments of `e2e/panel.spec.ts` (O2). Task 6 runs acceptance item 4 live through Playwright under a scratch `CLAUDE_CONFIG_DIR` through the relay (the pre-flight entry), records G2 and the observations in Surprises, and runs `pnpm verify`. The whole-branch review follows task 6. M3's review Minors were fixed at f607a75..17421a5 and ride into that review.
+  Rationale: the merge and the harness share the tree the e2e runs over; the live run costs money and waits on the engine, so it is its own task with its own evidence.
+  Date/Author: 2026-09-29, C8b controller.
+
 ## Outcomes & Retrospective
 
 Pending — written at finish.
