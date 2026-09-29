@@ -165,6 +165,13 @@ export function stubSource(scenario: string | Scenario, clock: ScenarioClock, de
         deps.intercept('attention.list', () => [...attention.values()].flat().filter((i) => OPEN.has(i.state))),
         deps.intercept('attention.request', ({ appSessionId, requestId }) => ({ event: requests.get(requestKey(appSessionId, requestId)) ?? null })),
         deps.intercept('session.answer', ({ appSessionId, requestId }) => answer(appSessionId as AppSessionId, requestId)),
+        // C6: a stub session has no journal and no transcript, so its history is empty (the transcript hydrates to
+        // nothing rather than to the load-failure banner); an id the stub does not hold is refused as C4 refuses it.
+        deps.intercept('session.events', ({ appSessionId }) => {
+          if (!s.get(appSessionId as AppSessionId)) throw new Error(`unknown app session: ${appSessionId}`);
+          return { events: [], lastSeq: 0, complete: true };
+        }),
+        // end C6
       ];
 
       const timers: ReturnType<typeof setTimeout>[] = [];
