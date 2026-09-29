@@ -66,9 +66,10 @@ export function App() {
   useEffect(() => connectComposer(), []); // the composer in C5's composer slot
   useEffect(() => registerTranscriptActions({ editAndResubmit: editAndResubmitRow }), []); // a bubble's Edit prefills the composer in edit mode
   // C7 end
-  // C8b start: the agent tools. Registration is never undone (a registration's disposer closes the tool's tabs, which
-  // StrictMode's effect replay would do); the transcript's subagent rows open Subagents; a task list changed on disk
-  // refreshes its checklist; development builds expose the stores the live acceptance reads.
+  // C8b start: the agent tools (Subagents, Background work and the Log). Registration is never undone (a registration's
+  // disposer closes the tool's tabs, which StrictMode's effect replay would do); the transcript's subagent rows open
+  // Subagents (a workflow's, Background work) and its "Open full log" opens the Log (openFullLog); a task list changed
+  // on disk refreshes its checklist; development builds expose the stores the live acceptance reads.
   useEffect(() => registerAgentTools(), []);
   useEffect(() => registerTranscriptActions(agentTranscriptActions), []);
   useEffect(() => connectAgentWorkEvents(), []);
