@@ -209,6 +209,53 @@ describe('the repository watcher debounces, coalesces and backs off', () => {
     expect(fake.opened.every((w) => w.closed)).toBe(true);
   });
 
+  it('counts each owner apart and releases everything an owner still holds at once', async () => {
+    const fake = fakeWatch();
+    const watcher = new GitWatcher({ status: async () => status(), emit: () => {}, watch: fake.watch, statFile: async () => null });
+    await watcher.watch(ROOT, 1);
+    await watcher.watch(`${ROOT}/src`, 1);
+    await watcher.watch(ROOT, 2);
+    watcher.unwatch(`${ROOT}/src`, 2); // not owner 2's: a no-op
+    watcher.release(1); // window 1 closed or reloaded holding two
+    expect(fake.opened[0].closed).toBe(false);
+    watcher.unwatch(ROOT, 1); // already released
+    expect(fake.opened[0].closed).toBe(false);
+    watcher.release(2);
+    expect(fake.opened[0].closed).toBe(true);
+    await watcher.watch(ROOT, 1); // a reloaded window watches afresh
+    expect(fake.opened.filter((w) => !w.closed)).toHaveLength(1);
+    watcher.dispose();
+  });
+
+  it('emits for a content write to a file inside an untracked directory, which porcelain lists as the directory alone', async () => {
+    const fake = fakeWatch();
+    const files = new Map<string, { size: number; mtimeMs: number }>([[`${ROOT}/new/`, { size: 96, mtimeMs: 1 }]]);
+    const current = status({ dirty: true, files: [{ path: 'new/', oldPath: null, index: '?', worktree: '?', untracked: true }] });
+    const emitted: GitChanged[] = [];
+    const watcher = new GitWatcher({ status: async () => current, emit: (e) => emitted.push(e), watch: fake.watch, statFile: async (path) => files.get(path) ?? null });
+    await watcher.watch(ROOT);
+    await vi.advanceTimersByTimeAsync(300);
+    const quiet = emitted.length;
+
+    files.set(`${ROOT}/new/a.txt`, { size: 3, mtimeMs: 2 });
+    fake.fire(ROOT, 'new/a.txt');
+    await vi.advanceTimersByTimeAsync(300);
+    expect(emitted).toHaveLength(quiet + 1);
+    expect(emitted.at(-1)).toMatchObject({ reason: 'worktree', status: current });
+
+    fake.fire(ROOT, 'new/a.txt'); // an event that left the file as it was: silent
+    await vi.advanceTimersByTimeAsync(300);
+    expect(emitted).toHaveLength(quiet + 1);
+    files.set(`${ROOT}/new/a.txt`, { size: 3, mtimeMs: 3 }); // same size, a second write
+    fake.fire(ROOT, 'new/a.txt');
+    await vi.advanceTimersByTimeAsync(300);
+    expect(emitted).toHaveLength(quiet + 2);
+    fake.fire(ROOT, 'elsewhere.txt'); // not beneath an untracked directory and not listed: nothing moved
+    await vi.advanceTimersByTimeAsync(300);
+    expect(emitted).toHaveLength(quiet + 2);
+    watcher.dispose();
+  });
+
   it('fails a watch whose git dir watch cannot open, closing what it opened and registering nothing', async () => {
     const fake = fakeWatch();
     const wt = status({ repoRoot: '/wt', gitDir: '/repo/.git/worktrees/wt', isWorktree: true });
@@ -349,6 +396,20 @@ describe('git.changed from a watched fixture repository', () => {
     const again = await nextChange(dirtyTracked, 1000);
     expect(again.event.status.files).toContainEqual({ path: 'README.md', oldPath: null, index: '.', worktree: 'M', untracked: false });
   }, 15_000);
+
+  it('emits for each content write to a file inside an untracked directory', async () => {
+    await repo.write('notes/draft.md', 'one\n');
+    await service.watch(repo.root);
+    await settle();
+    const baseline = events.length;
+    await repo.write('notes/draft.md', 'two\n'); // the directory's entries are unchanged: only the file's facts move
+    const { event } = await nextChange(baseline, 1000);
+    expect(event).toMatchObject({ reason: 'worktree', status: { files: [{ path: 'notes/', untracked: true }] } });
+    await settle();
+    const before = events.length;
+    await repo.write('notes/draft.md', 'three\n');
+    await nextChange(before, 1000);
+  }, 10_000);
 
   it('emits head for a commit', async () => {
     await repo.write('README.md', 'hello\nmore\n');

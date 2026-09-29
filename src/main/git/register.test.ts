@@ -1,3 +1,4 @@
+import { EventEmitter } from 'node:events';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GitFixture } from '../../../test/support/git-fixture';
 import type { ExecFileFn } from './runner';
@@ -16,7 +17,7 @@ vi.mock('electron', () => ({
 
 const APP_URL = 'http://localhost:5173/';
 const mainFrame = { url: APP_URL, parent: null };
-const sender = { mainFrame };
+const sender = Object.assign(new EventEmitter(), { id: 7, mainFrame }); // the app window's webContents
 const event = { sender, senderFrame: mainFrame };
 
 type Result = { ok: boolean; value?: unknown; error?: { code: string; message: string } };
@@ -29,6 +30,7 @@ describe('main answers git.* through the router', () => {
     electron.handlers.clear();
     electron.windows.clear();
     electron.windows.set(sender, { webContents: sender });
+    sender.removeAllListeners();
     repo = await GitFixture.create();
   });
   afterEach(() => {
@@ -45,6 +47,7 @@ describe('main answers git.* through the router', () => {
     dispose = () => service.dispose();
     registerGitHandlers(service);
     installRouter({ appUrl: APP_URL });
+    return service;
   }
   const invoke = (name: string, input?: unknown) => electron.handlers.get(`maws:cmd:${name}`)!(event, input) as Promise<Result>;
 
@@ -58,6 +61,20 @@ describe('main answers git.* through the router', () => {
     expect(await invoke('git.watch', { directory: repo.root })).toMatchObject({ ok: true, value: { repoRoot: repo.root } });
     expect(await invoke('git.unwatch', { directory: repo.root })).toEqual({ ok: true, value: undefined });
     expect(await invoke('git.unwatch', { directory: '/never/watched' })).toEqual({ ok: true, value: undefined });
+  });
+
+  it('holds watches for the requesting window and releases them when it navigates or closes', async () => {
+    const service = await install();
+    const release = vi.spyOn(service, 'release');
+    const watch = vi.spyOn(service, 'watch');
+    await invoke('git.watch', { directory: repo.root });
+    await invoke('git.watch', { directory: repo.root });
+    expect(watch.mock.calls.map((call) => call[1])).toEqual([7, 7]);
+    expect(sender.listenerCount('did-navigate')).toBe(1); // followed once, however many watches
+    sender.emit('did-navigate'); // a reload: the new page watches afresh
+    expect(release).toHaveBeenCalledWith(7);
+    sender.emit('destroyed');
+    expect(release).toHaveBeenCalledTimes(2);
   });
 
   it('fails internal "not a git repository" outside a repository, and invalid_input for a limit out of range', async () => {
