@@ -392,11 +392,15 @@ test('child transcript renders the subagent\u2019s events only', async ({ harnes
   await page.getByRole('button', { name: 'Show child · Read and report one.txt content' }).click();
   const child = page.locator('[data-harness-child]');
   await expect(child.locator('.transcript')).toHaveCount(1);
+  await expect(child.locator('[data-kind="assistant_text"]')).toHaveText(['ONE']);
+  // The parent reported the child finished, so the child's turn is closed: its divider has settled (not "Working for …")
+  // and, like any closed turn, its work area opens from the divider.
+  const childDivider = child.locator('[data-kind="divider"] button[aria-expanded]').first();
+  await expect(childDivider).toHaveText(/^Worked for /);
+  await expect(childDivider).toHaveAttribute('aria-expanded', 'false');
+  await childDivider.click();
   await expect(child.locator(`[data-cell-id="${CHILD_READS[0]}"]`)).toHaveCount(1);
   await expect(child.locator(`[data-cell-id="${CHILD_READS[0]}"] button`).first()).toHaveText(/^Read /);
-  await expect(child.locator('[data-kind="assistant_text"]')).toHaveText(['ONE']);
-  // The parent reported the child finished, so the child's divider has settled rather than ticking "Working for …".
-  await expect(child.locator('[data-kind="divider"] button[aria-expanded]').first()).toHaveText(/^Worked for /);
   // Only that agent's events: not the other agent's Read, not the parent's prompt, sentence or answers.
   await expect(child.locator(`[data-cell-id="${CHILD_READS[1]}"]`)).toHaveCount(0);
   await expect(child.locator('[data-kind="user"], [data-kind="subagent"]')).toHaveCount(0);
