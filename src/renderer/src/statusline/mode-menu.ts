@@ -54,8 +54,8 @@ export function autoUnavailableReason(models: readonly Pick<ModelOption, 'value'
   return option?.supportsAutoMode === false ? MODE_REFUSAL_WORDS.auto_mode_model : null;
 }
 
-// The menu's input. Structurally a ChipBinding<PermissionMode | null, PermissionMode> (the frame's binding shape) with
-// the two facts only the mode menu reads.
+// The menu's input: the frame's binding fields (value, options, disabled, set) with the two facts only the mode menu
+// reads. It is its own type, not assignable to M4's ChipBinding; M4 types `FrameBindings.mode: ModeBinding`.
 export interface ModeBinding {
   value: PermissionMode | null; // the effective mode; null while nothing is known (an unstarted session's default)
   options: PermissionMode[];
