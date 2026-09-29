@@ -739,6 +739,8 @@ Explicitly out of scope for P0: bundle patches (D-1); Windows and Linux (D-11); 
 
 - 2026-09-28 (C9 hand-back): C9 handed back at 01f27f1 (code 674caa9): xterm.js ships (ghostty-web discarded at M1 on scrollback as a byte budget); the `pty.*` host with a binary stream, credit flow control, a 512 KiB ring, checkpoint and reattach, login shell with captured env; gates W1 to W3 byte- and LF-exact at 35 to 47 MB/s; the Terminal tool in X5's final shape; the guarded `CSI S` handler (`src/renderer/src/terminal/scroll-up.ts`) from today's fork ruling, upstream draft at `spikes/terminal-probe/upstream-xterm-scrollup.md`, not filed. Notes for C8a's refresh pass: do not offer Terminal from "+" when no session is shown (a null-session pinned tab defers with a notice); `closeToolTabs` goes through `closeTab`/`beforeClose`, since dispose never kills a shell. For C5's rebase gate: un-skip `keeps Enter and Escape from the app's request handlers`; the app menu's `selectAll` role versus xterm's ⌘A is checked by hand. Residue in `docs/tech-debt-tracker.md`. Owner's hands: Korean IME composition, real ⌘-click browser open, `pmset sleepnow`, and whether to file the xterm.js report.
 
+- 2026-09-28 (owner): the xterm.js scroll-up report is filed upstream as https://github.com/xtermjs/xterm.js/issues/6195, from C9's draft `spikes/terminal-probe/upstream-xterm-scrollup.md`; C9 cites it beside its `scroll-up.ts` handler at rebase, and an xterm bump checks the issue before dropping the handler.
+
 ## 20. Outcomes and retrospective
 
 Pending. Closing is a recomposition check against §10, then the retrospective.
