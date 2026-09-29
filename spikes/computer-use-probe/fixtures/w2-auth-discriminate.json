@@ -1,0 +1,99 @@
+[
+ {
+  "label": "openai-node__brew-adhoc-node__node_repl",
+  "ok": false,
+  "chain": [
+   "/Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node",
+   "/opt/homebrew/bin/node",
+   "/Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl",
+   "/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex"
+  ],
+  "tail": "data transmission you should confirm right before typing.\n- Avoid redundant confirmations if you already confirmed something and there is no material new risk.\n"
+ },
+ {
+  "label": "openai-node__sh__node_repl",
+  "ok": false,
+  "chain": [
+   "/Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node",
+   "/bin/sh",
+   "/Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl",
+   "/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex"
+  ],
+  "tail": "data transmission you should confirm right before typing.\n- Avoid redundant confirmations if you already confirmed something and there is no material new risk.\n"
+ },
+ {
+  "label": "brew-adhoc-node__node_repl",
+  "ok": false,
+  "chain": [
+   "/opt/homebrew/bin/node",
+   "/Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl",
+   "/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex",
+   "/Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node"
+  ],
+  "tail": "data transmission you should confirm right before typing.\n- Avoid redundant confirmations if you already confirmed something and there is no material new risk.\n"
+ },
+ {
+  "label": "nvm-node__node_repl#0",
+  "ok": false,
+  "chain": [
+   "/Users/new/.nvm/versions/node/v22.23.2/bin/node",
+   "/Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl",
+   "/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex",
+   "/Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node"
+  ],
+  "tail": "data transmission you should confirm right before typing.\n- Avoid redundant confirmations if you already confirmed something and there is no material new risk.\n"
+ },
+ {
+  "label": "openai-node__node_repl#0",
+  "ok": true,
+  "chain": [
+   "/Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node",
+   "/Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl",
+   "/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex",
+   "/Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node"
+  ],
+  "tail": "nsmission you should confirm right before typing.\n- Avoid redundant confirmations if you already confirmed something and there is no material new risk.\n apps=31"
+ },
+ {
+  "label": "nvm-node__node_repl#1",
+  "ok": false,
+  "chain": [
+   "/Users/new/.nvm/versions/node/v22.23.2/bin/node",
+   "/Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl",
+   "/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex",
+   "/Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node"
+  ],
+  "tail": "data transmission you should confirm right before typing.\n- Avoid redundant confirmations if you already confirmed something and there is no material new risk.\n"
+ },
+ {
+  "label": "openai-node__node_repl#1",
+  "ok": true,
+  "chain": [
+   "/Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node",
+   "/Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl",
+   "/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex",
+   "/Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node"
+  ],
+  "tail": "nsmission you should confirm right before typing.\n- Avoid redundant confirmations if you already confirmed something and there is no material new risk.\n apps=31"
+ },
+ {
+  "label": "sender=openai-node (no OpenAI ancestor)",
+  "out": "{\"exec\":\"/Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node\",\"got\":[],\"closedAfterStep\":1}"
+ },
+ {
+  "label": "sender=nvm-node (no OpenAI ancestor)",
+  "out": "{\"exec\":\"/Users/new/.nvm/versions/node/v22.23.2/bin/node\",\"got\":[],\"closedAfterStep\":1}"
+ },
+ {
+  "label": "sender=nvm-node under openai-node",
+  "out": "{\"exec\":\"/Users/new/.nvm/versions/node/v22.23.2/bin/node\",\"got\":[{\"result\":{\"serverApiVersion\":\"CodexComputerUseIPC-5\"},\"jsonrpc\":\"2.0\",\"id\":1},{\"id\":2,\"apps\":31}],\"closedAfterStep\":3}"
+ },
+ {
+  "label": "sender=brew-adhoc-node under openai-node",
+  "out": "{\"exec\":\"/opt/homebrew/Cellar/node/26.7.0/bin/node\",\"got\":[],\"closedAfterStep\":1}"
+ },
+ {
+  "label": "sender=psf-python under openai-node",
+  "out": "[\n {\n  \"label\": \"ping-v5-then-listapps\",\n  \"at\": 1790639816.326144,\n  \"connected\": true,\n  \"exchanges\": [\n   {\n    \"sent\": {\n     \"jsonrpc\": \"2.0\",\n     \"id\": 1,\n     \"method\": \"ping\",\n     \"params\": {\n      \"clientApiVersion\": \"CodexComputerUseIPC-5\"\n     }\n    },\n    \"got\": {\n     \"closed\": true,\n     \"partial\": \"\"\n    }\n   },\n   {\n    \"sent\": {\n     \"jsonrpc\": \"2.0\",\n     \"id\": 2,\n     \"method\": \"request\",\n     \"params\": {\n      \"clientApiVersion\": \"CodexComputerUseIPC-5\",\n      \"deadlineUnixMilliseconds\": 1790639826326,\n      \"request\": {},\n      \"requestType\": \"ComputerUseIPCListAppsRequest\"\n     }\n    },\n    \"error\": \"BrokenPipeError(32, 'Broken pipe')\"\n   }\n  ]\n },\n {\n  \"label\": \"ping-v4\",\n  \"at\": 1790639816.3411782,\n  \"connected\": true,\n  \"exchanges\": [\n   {\n    \"sent\": {\n     \"jsonrpc\": \"2.0\",\n     \"id\": 1,\n     \"method\": \"ping\",\n     \"params\": {\n      \"clientApiVersion\": \"CodexComputerUseIPC-4\"\n     }\n    },\n    \"got\": {\n     \"closed\": true,\n     \"partial\": \"\"\n    }\n   }\n  ]\n }\n]"
+ }
+]

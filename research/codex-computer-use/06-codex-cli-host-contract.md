@@ -1,5 +1,7 @@
 # 06: What computer use requires of its MCP host (Codex CLI 0.158.0-alpha.2.1)
 
+> **Correction (2026-09-28, wave 2).** `js` is annotated `readOnlyHint:true` (open question 3), and H3 is moot in practice: the `js` description is 1,511 characters and the API documentation arrives in the first tool result. Bare `elicitation:{}` (H7) is verified live to receive app approvals. See `README.md` §9 and `spikes/computer-use-probe/findings.md` §2.
+
 Researcher 6 of 6. Layer: the Codex CLI (`codex app-server`) as the MCP host of the `cua_repl` plugin server.
 Date: 2026-09-28. Purpose: state the contract any other harness (Claude Code first) would have to meet to host OpenAI's
 computer-use stack, so MAWS can decide whether a Claude Code agent can reuse the native controller.

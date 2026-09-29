@@ -1,6 +1,6 @@
 # Codex Computer Use — Security Perimeter and Native Lifecycle
 
-> **Correction (2026-09-28, wave 2).** Live tests refine §0 and §1e. The effective check is on the sender and its **immediate parent**. OpenAI's signed `node` satisfies it whatever script it runs, so a non-OpenAI harness that launches `cua-repl.mjs` is accepted without any Codex ancestor. The allowlists decoded here are real. See `README.md` §7 and §9, and `spikes/computer-use-probe/findings.md` §1.
+> **Correction (2026-09-28, wave 2).** Live tests refine §0 and §1e. The relay-needs-a-trusted-ancestor model in §1b is confirmed by 16 live connections. What §0 and §1e missed: OpenAI's bundled `node` (team `2DC432GLL2`) is itself the trusted ancestor when it is `node_repl`'s parent, so a non-OpenAI harness that launches `cua-repl.mjs` is accepted with no Codex or ChatGPT process in the chain. Also: `HX7739G8FX` (§1c) is the Node.js Foundation, not an OpenAI team; and §1a's "cannot join the group container" is wrong, since an unsigned process opened the socket and was refused by the service's own check. See `README.md` §7 and §9, and `spikes/computer-use-probe/findings.md` §1.
 
 Layer 02 of the Codex desktop computer-use reverse-engineering wave. Scope: the
 security perimeter and lifecycle of the **native** side (the Swift service bundle,

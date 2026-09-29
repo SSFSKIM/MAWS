@@ -88,8 +88,11 @@ What happens when the model runs `await app.click(2); await app.getAXState();`:
 5. **Action.** The worker sends
    `request {clientApiVersion:"CodexComputerUseIPC-5", codexTurnMetadata, deadlineUnixMilliseconds, requestType:"ComputerUseIPCAppPerformActionRequest", request:{app:<resolved path>, action:{click:{at:{elementID:{_0:"2"}}, clickCount:1, mouseButton:0}}}}`
    over the socket. `node_repl` opened that socket itself. (03 §2.2–2.4 [V])
-6. **Service.** The service authenticates the peer (§7), resolves the app and performs the action. Observed: the
-   target app stayed in the background, and the real pointer did not move. (01 §4 [I]; W2 §4 [V])
+6. **Service.** The service authenticates the peer (§7), resolves the app and performs the action. Wave 2 sampled
+   the frontmost app and the pointer only before and after each call: the target app was not frontmost at either
+   point, and an element-index click left the real pointer where it was (W2 §4 [V]). Report 01 §4 reads the focus
+   enforcer as briefly activating the target app during the action [I]; that sampling can neither confirm nor exclude
+   it.
 7. **Observation.** `getAXState()` sends `ComputerUseIPCAppGetSkyshotRequest {app, disableDiff?}`. The service
    returns AX text (a diff after the first call) and a screenshot file URL. The cell writes the text; for a screenshot
    it reads the JPEG and calls `nodeRepl.emitImage`. The MCP result carries text blocks, image blocks and
@@ -131,7 +134,9 @@ The JS layer is thin, about 700 lines for macOS. All the hard work is in the Swi
 - **Accessibility tree.** This is the primary signal. The service renders one numbered line per element, with
   indentation for depth, flags such as `settable` and `disabled`, `ID:`, `Value:`, `Help:` and
   `Secondary Actions:`. The block ends with a `The focused UI element is …` line.
-  - Element ids are stable integers across a session. The model addresses elements by id.
+  - The model addresses elements by integer id. Ids stay stable within a chain of diffs, and a replaced element gets
+    a fresh id, but a full refetch can renumber: a diff removed id 10 and re-added the same element as `+ 19`, and the
+    next full tree listed it as 10 again (`w2-textedit-actions.jsonl` seq 14 and 20).
   - After the first call the service sends a **diff**: `~` changed, `+` added, `Removed element IDs: …`.
     `disableDiff` asks for the full tree.
   - Role names are the **localized** AX role descriptions. On this Korean-language Mac, a text area is `텍스트 엔트리 영역`.
@@ -141,13 +146,17 @@ The JS layer is thin, about 700 lines for macOS. All the hard work is in the Swi
 
   (01 §3.2 [V/I], 03 §1.1 [V]; W2 §4 [V])
 - **Screenshot.** ScreenCaptureKit captures **the target window only**, including when it sits behind another app.
-  - The image is a JPEG at full backing resolution: 1312×844 px for a 656×422 pt window on a 2× display.
+  - The image is a JPEG at full backing resolution: 1312×844 px for a 656×422 pt window on a 2× display. This is
+    single-window evidence: both wave-2 screenshots come from that one window.
   - It travels as a file URL. The cell emits it as an MCP image **mislabeled `image/png`**, with
     `_meta["codex/imageDetail"]: "original"`.
   - There is no OCR; the model's own vision reads the image.
 
   (01 §3.1 [V/I]; W2 §4 [V])
-- **Coordinates** are in **screenshot pixel space**. The service maps them back to screen points. (W2 §4 [V])
+- **Coordinates** are in **screenshot pixel space**, and the service maps them back to screen points (W2 §4 [V]). On
+  the one window tested, screenshot pixels and backing pixels are the same numbers, so this does not show which space
+  applies once an image is downscaled. Report 01 §3.1 reads the service's scaling fields as a downscaled image in
+  scaled coordinates [I], which stays unreconciled until a large-window test (§10).
 - **Observation discipline** is taught, not enforced: actions return nothing, and the documentation tells the model to
   batch its actions and then observe once. `getScreenshot()` alone may move the diff baseline without the model seeing
   the text. (03 §1.3, §3 [V/I])
@@ -155,18 +164,23 @@ The JS layer is thin, about 700 lines for macOS. All the hard work is in the Swi
 ## 5. Action
 
 - **Element operations go through AX**: `setValue` and `selectText` set attributes, and secondary actions call
-  `AXUIElementPerformAction`. (01 §4 [V strings]; W2: `setValue` replaced a text view's contents [V])
+  `AXUIElementPerformAction`. (01 §4 [I]; W2: `setValue` replaced a text view's contents [V])
 - **Pointer and keyboard** are synthesized events aimed at the target window. CoreGraphics is soft-linked, so it does
   not show in the import table.
-  - A focus enforcer and a "focus-steal preventer" keep other apps from taking focus mid-action.
-  - A drawn "Lens" cursor shows the agent's position.
+  - A focus enforcer and a "focus-steal preventer" keep other apps from taking focus mid-action. Report 01 reads the
+    enforcer as briefly activating the target app for the action [I].
+  - A drawn "Lens" cursor shows the agent's position. After actions, this virtual cursor and a purple computer-use
+    badge over the traffic lights are composited into the target window and appear in the model's own screenshot
+    (W2 §4 [V]).
   - Key chords use xdotool keysym names, such as `super+s` or `KP_0`.
   - `paste` saves and restores the clipboard, and detects when the user interferes.
 
   (01 §4 [V/I])
-- **Background operation, observed.** An element click, typing, `super+Down`, `super+s` and `super+q` all reached a
-  TextEdit window behind Google Chrome. Chrome stayed frontmost the whole time, and the pointer stayed put during the
-  click. (W2 §4 [V])
+- **Background operation, observed at call boundaries.** An element click, typing, `super+Down`, `super+s` and
+  `super+q` all reached a TextEdit window behind Google Chrome. TextEdit was not frontmost before or after any call,
+  and the element-index click left the pointer where it was. The frontmost app and pointer were not sampled during a
+  call, so "no focus steal during an action" is not established, and 01 §4's brief activation [I] is neither confirmed
+  nor excluded. (W2 §4 [V])
 - **Interruption.** Real user input during an action, including Esc on the overlay, yields `userIntervened` (-10016).
   The overlay text and accent colour come from `~/.codex/computer-use/config.json`, which the Desktop writes. (01 §4.1,
   05 §4.1 [V/I]; not exercised)
@@ -177,12 +191,16 @@ The JS layer is thin, about 700 lines for macOS. All the hard work is in the Swi
 
 1. **Service-side policy.** It returns `forbidden` for password managers, Keychain Access, Passwords and system security
    processes. `denied` comes from organization policy (`[computer_use]` requirements, fed by the host). In browsers it
-   enforces a URL blocklist and detects incognito windows. (01 §5 [V])
+   enforces a URL blocklist and detects incognito windows. (01 §5 [I], from strings)
 2. **Per-app user approval** through MCP form elicitation, on every app operation, persisted three ways:
    - *this conversation*: `$CODEX_HOME/computer-use/sessions/<session_id>.toml`, written by `node_repl` when the call
-     carried `x-codex-turn-metadata.session_id` and the reply carried `_meta.persist:"session"` [V, W2 §3];
+     carried `x-codex-turn-metadata.session_id`; without it, every app operation prompted [V, W2 §3]. Every run also
+     replied `_meta.persist:"session"`, so whether `persist` is required was not isolated, and whether the file is
+     honoured after a `node_repl` restart is untested;
    - *always*: `…/Group Containers/2DC432GLL2.com.openai.sky.CUAService/Library/Application Support/Software/ComputerUseAppApprovals.json`,
-     which Desktop settings can list and revoke (05 §4.3 [V]);
+     which Desktop settings can list and revoke (05 §4.3 [V]). Every `node_repl` reads this file from the service's
+     group container whatever its `CODEX_HOME`, so a `cua_repl` hosted by MAWS would inherit the user's Codex "always"
+     approvals (04 §4(d) [I]). On this Mac those are Finder, Screen Sharing, Xcode and systemuiserver;
    - Desktop also auto-accepts apps the user @-mentioned, once the user has approved any app by hand (05 §5.4 [V]).
 3. **Sensitive-action confirmations** (purchases, deletion, messaging, credentials) are **model instructions only**.
    The policy text is `tinysky-alt-confirmations.md`, which the call's `_meta["openai/confirmation_policies"]` can
@@ -191,56 +209,73 @@ The JS layer is thin, about 700 lines for macOS. All the hard work is in the Swi
    privileged host functions. Policy code runs only in the trusted worker, which loads only from
    `NODE_REPL_TRUSTED_CODE_PATHS`. (04 §5 [V])
 5. **The peer gate on the socket** (§7).
-6. **A locked Mac.** A root-installed SecurityAgent plugin rewrites `system.login.screensaver`, so the service can
-   auto-unlock the Mac during an active computer-use turn. The lock-screen guardian keeps the session visible, and
-   physical input pauses the unlock. It is installed on this Mac (plugin 26.812). (02 §2–3 [V])
+6. **A locked Mac.** A root-installed SecurityAgent plugin is installed on this Mac (plugin 26.812), and
+   `system.login.screensaver` has been rewritten to consult it first (02 §3 [V]). From strings: the plugin lets the
+   service auto-unlock the Mac during an active computer-use turn, the lock-screen guardian keeps the session visible,
+   and physical input pauses the unlock (02 §2–3 [I]).
+
+**Where consent is enforced.** The per-app prompt and its persistence live on the client side, in `@oai/sky`'s policy
+step and `node_repl`'s interceptor (03 §5.1, 04 §4 [V]). The service's part is the policy answer, `allowed`, `denied`
+or `forbidden` (03 §5.1 [V]), and it does not authenticate the turn metadata it is sent (01 §1.5 [I]). A client that
+skips the policy step therefore skips the prompt. Wave 2 ran such a client, though only for requests that need no
+approval: our own `sock-client.mjs`, under a Node.js-Foundation `node` spawned by OpenAI's `node`, completed `ping` and
+`ListApps` (31 apps) directly on the socket (W2 §1, `w2-auth-discriminate.json` [V]). Whether the service refuses an
+app operation that no approval covers is untested (03 E4). This is route 4 in §11.
 
 ## 7. The trust gate, and what the live tests showed
 
 **Static picture (01 §2, 02 §1).** The service reads the connecting process's audit token. It builds code-signing
 identities for the sender, its parent, its responsible process and its ancestors, and compares them in Swift against
-allowlists compiled into the binary:
-- teams `2DC432GLL2` (OpenAI) and `HX7739G8FX`, with signing ids `node` and `node_repl` (the "relay");
-- team `2DC432GLL2`;
-- OpenAI app bundle ids;
-- team `MQ55VZLNZQ` with signing id `codex-acp`, which is Zed's Codex adapter.
+allowlists compiled into the binary. Two roles matter:
+- **trusted**: team `2DC432GLL2` (OpenAI). The lists also admit OpenAI app bundle ids and Zed's `codex-acp` under team
+  `MQ55VZLNZQ`.
+- **relay**: signing id `node` or `node_repl`, under team `2DC432GLL2` **or** `HX7739G8FX`. `HX7739G8FX` is the
+  Node.js Foundation, not an OpenAI team; the relay list admits the unmodified upstream Node binary.
 
-Failure reasons include `untrustedParent` and `relayWithoutTrustedAncestor`. Both reports concluded that a
-non-OpenAI harness would be rejected.
+Failure reasons include `senderProcessNotAuthenticated`, `untrustedParent` and `relayWithoutTrustedAncestor`.
 
-**Live results (W2 §1 [V]):**
+**The predicate, confirmed by 16 live connections (W2 §1 [V]):**
 
-| Connecting process | Its parent | Result |
-|---|---|---|
-| unsigned Python | shell | connection closed without a reply |
-| OpenAI `node_repl` | unsigned Node | rejected |
-| OpenAI `SkyComputerUseClient mcp` | unsigned Node | `-10000 Sender process is not authenticated` |
-| OpenAI `node_repl` | OpenAI `node` running OpenAI's `cua-repl.mjs` | **accepted** |
-| OpenAI `node_repl` | OpenAI `node` running **our own** script | **accepted** |
+1. The **sender** must be a relay. A non-relay sender is rejected with `-10000` even under a trusted parent (an ad-hoc
+   Homebrew `node` and a PSF `python3`, each spawned by OpenAI's `node`, were both rejected). A trusted non-relay
+   sender would presumably be admitted directly, but no such binary was tested [I].
+2. The service then walks the parent chain **through consecutive relays** and must reach a **trusted** (team
+   `2DC432GLL2`) process. The first ancestor that is neither a relay nor trusted halts the walk. A relay chain that
+   never reaches a 2DC432GLL2 process fails with `relayWithoutTrustedAncestor`.
 
-The probes had no OpenAI process anywhere in their ancestry. The effective rule is that both the sender and its
-immediate parent must carry an allowlisted signature. OpenAI's signed `node` is a trusted parent whatever JavaScript it
-runs, because code signing covers the executable and not the script. So **any MCP host that launches the bundled
-launcher exactly as Codex does gets working computer use.** That is how wave 2 drove a complete approve → read → act →
-screenshot loop from outside Codex.
+The decisive rows: OpenAI `node` → `node_repl` is **accepted** (the parent is team 2DC432GLL2). Node.js-Foundation
+`node` → `node_repl` is **rejected** (the parent is a relay but team HX7, and nothing above is 2DC432GLL2).
+Interposing an ad-hoc `node` or `/bin/sh` between OpenAI's `node` and `node_repl` is **rejected** (the relay chain
+breaks before the 2DC432GLL2 ancestor). Above every probe sits `zsh ← claude ← … ← cmux`, with no OpenAI process.
+
+**What this means for reuse.** A host still gets working computer use by launching the bundled launcher exactly as
+Codex does: `cua_node/bin/node .../@oai/cua-repl/bin/cua-repl.mjs`. OpenAI's `node` (team 2DC432GLL2) becomes
+`node_repl`'s parent and is the trusted ancestor; whatever launched that `node` is irrelevant, and no Codex or ChatGPT
+app process is needed. That is how wave 2 drove a complete approve → read → act → screenshot loop from outside Codex.
+The constraint is specific: you must not interpose any non-relay process between `node_repl` and OpenAI's `node`, and a
+Node.js-Foundation `node` alone is not a sufficient trusted ancestor.
 
 What this does not settle:
+- Whether the *responsible* process is ever consulted, and how team, id and executable-name combine within one
+  requirement row.
 - The gate is OpenAI's policy, and one release could tighten it, for example to require a Codex ancestor. The Zed
-  entry shows OpenAI already allowlists specific third-party harnesses.
+  entry shows OpenAI already allowlists specific third-party harnesses by signature.
 - Whether OpenAI's terms allow using these bundled components from another agent is a non-technical question these
   tests cannot answer.
 
 ## 8. What a host must provide
 
 Condensed from 06 §1 and updated with wave 2. The "Claude Code 2.1.283" column is verified from its local spec
-(`~/claude-code-bundle/2.1.283/SPEC/`) but not yet run.
+(`~/claude-code-bundle/2.1.283/SPEC/`) but not yet run, except where a row says "verified live": there the neutral
+client advertised what Claude Code advertises.
 
 | Requirement | Why | Codex | Claude Code 2.1.283 |
 |---|---|---|---|
 | Launch `cua_node/bin/node …/cua-repl.mjs` with the plugin env, outside any sandbox, with a start budget of about 120 s | Trust gate (§7); the service socket | yes | yes. stdio servers run unsandboxed; set `MCP_TIMEOUT` |
-| Advertise **form elicitation** and answer `elicitation/create` during a call | Every app operation asks; without the capability, `createElicitation` throws before the persisted-approval check | yes (relays to UI) | yes. Headless: a `control_request` of subtype `elicitation` |
-| Send `x-codex-turn-metadata.session_id` in `tools/call._meta` and return `_meta.persist` in the elicitation reply | Otherwise approval never persists, and every app call prompts (W2 §3) | yes | **no**. Needs a small MCP shim between Claude Code and `cua-repl.mjs` to inject both |
+| Advertise an **elicitation** capability (bare `elicitation:{}` is enough) and answer `elicitation/create` during a call | Every app operation asks; with no elicitation capability, `createElicitation` throws before the persisted-approval check (W2 §2) | yes (relays to UI) | yes, **verified live** for the capability: a client advertising bare `elicitation:{}`, Claude Code's default, received the approval request (W2 §2). Headless: a `control_request` of subtype `elicitation` |
+| Send `x-codex-turn-metadata.session_id` in `tools/call._meta` and return `_meta.persist` in the elicitation reply | Without the session id, every app operation prompted even though the reply carried `persist` (W2 §3). Every run sent `persist`, so whether it is required is untested | yes | **no**. Needs a small MCP shim between Claude Code and `cua-repl.mjs` to inject both |
 | Turn image blocks into model image input, keeping order | Screenshots | yes; images are exempt from the token limit | yes; images count 1,600 tokens each, and a large text block can cut later images |
+| Keep the model's coordinates in the screenshot's pixel space | Coordinate clicks are in screenshot pixels (§4) | yes, when the model accepts the `original` detail the cell requests: up to 6,000 px (06 §2) | **partly**. Images above 2,000 px (a window wider than 1,000 pt on a 2× display) are downscaled, with a text note giving the coordinate multiplier (06 H4). Coordinate clicks then need that multiplier; element-index addressing is unaffected |
 | Keep `js` directly visible | Tool quality | `omit_tools_from` | set `alwaysLoad: true` (otherwise it is deferred behind ToolSearch) |
 | Call hidden `turn_ended` at turn end or interrupt | Releases per-turn state | Stop, SubagentStop and Interrupt hooks | `mcp_tool` hooks on Stop, SubagentStop and StopFailure; there is no interrupt hook, but it sends `notifications/cancelled` |
 
@@ -251,20 +286,37 @@ approval is raised without Codex turn metadata.
 ## 9. Corrections to the layer reports
 
 1. **01 §2.3 and "Portability verdict"; 02 §0 and §1e.** "A Claude Code harness cannot connect / would be rejected" is
-   wrong for the launcher route: see §7, W2 §1 rows d and e. The allowlist strings are real. The effective check is on
-   the sender and its immediate parent, not on a trusted ancestor.
-2. **01 §6.4.** "`SkyComputerUseClient mcp` aborts before `tools/list`" does not reproduce on this build. It lists 10
+   wrong for the launcher route: see §7 and W2 §1. The allowlist strings and the relay-needs-a-trusted-ancestor model
+   are real and confirmed. What the reports missed is that OpenAI's bundled `node` (team `2DC432GLL2`), which any host
+   can launch, is itself the trusted ancestor when it is `node_repl`'s parent.
+2. **02 §1c.** `HX7739G8FX` is the **Node.js Foundation**, not "an OpenAI secondary/CI signing team". It sits on the
+   relay list, so an upstream Node binary may relay, but it is not trusted and cannot be the ancestor that satisfies the
+   gate.
+3. **02 §1a** ("a caller outside team 2DC432GLL2 cannot join this group container"). An unsigned-by-OpenAI process
+   opened the socket (`connect()` succeeded, W2 §1). The group container does not block the connection; the service's
+   own peer check does.
+4. **01 §6.3** ("the client validates its parent before relaying"). Under a foreign parent, `SkyComputerUseClient`'s
+   call reached the service and came back `-10000`; the rejection happened at the service, not in the client.
+5. **01 §6.4.** "`SkyComputerUseClient mcp` aborts before `tools/list`" does not reproduce on this build. It lists 10
    tools and fails per call with -10000 under a foreign parent.
-3. **04 §4(d) and §6.** "Pre-seeding approval files avoids needing elicitation at all" is wrong. `createElicitation`
-   throws before the interceptor runs whenever the client lacks form elicitation
-   (`node_repl-embedded/privileged-node-repl.js:69`). Pre-seeding avoids the *prompt*, not the *capability*.
-4. **05 §4.2.** The `sessions/*.toml` files are not a dead format. `node_repl` writes them today, keyed by
+6. **04 §4(d) and §6.** "Pre-seeding approval files avoids needing elicitation at all" is wrong. `createElicitation`
+   throws before the interceptor runs whenever the client advertises no elicitation capability
+   (`node_repl-embedded/privileged-node-repl.js:69`; W2 §2). Pre-seeding avoids the *prompt*, not the *capability*.
+7. **05 §4.2.** The `sessions/*.toml` files are not a dead format. `node_repl` writes them today, keyed by
    `x-codex-turn-metadata.session_id` (W2 §3).
-5. **06 open question 3.** The `js` annotations are `readOnlyHint:true, destructiveHint:false, openWorldHint:false`, so
+8. **06 open question 3.** The `js` annotations are `readOnlyHint:true, destructiveHint:false, openWorldHint:false`, so
    Codex adds no approval of its own. **06 H3** ("degraded by default" under Claude Code) does not apply in practice
    (§8).
-6. **03 §3.** The mislabeled JPEG and the screenshot-pixel coordinate space are now confirmed.
-7. **04 §3.** Server info is `rmcp 1.5.0`, the crate default, not `node_repl 0.1.0`.
+9. **03 §3.** The mislabeled JPEG and the screenshot-pixel coordinate space are now confirmed, on one 656×422 pt window
+   (§4).
+10. **04 §3.** Server info is `rmcp 1.5.0`, the crate default, not `node_repl 0.1.0`.
+11. **03 §7.2 and 06 H7.** Whether `node_repl` treats bare `elicitation:{}` as form support is settled: it does. A client
+    advertising it received the app-approval request; only a client advertising no elicitation got "createElicitation
+    is unavailable" (W2 §2).
+12. **03 §7.2** ("in practice it is likely blocked on the service side"). The service's peer check did not block a thin
+    client of our own: `sock-client.mjs`, run by a Node.js-Foundation `node` whose parent was OpenAI's `node`,
+    completed `ping` and `ListApps` (W2 §1). The check constrains which binaries run the client and sit above it, not
+    whose code runs. Whether the service enforces consent for such a client is still E4 (§6, §11 route 4).
 
 ## 10. Open questions
 
@@ -273,6 +325,14 @@ approval is raised without Codex turn metadata.
 - What `turn_ended` releases, and what breaks if it never arrives.
 - How Esc and the overlay are detected, and how `userIntervened` reaches the model mid-cell.
 - Whether a screenshot-only observation moves the diff baseline (03 E6).
+- Screenshot scale on a large window. Both wave-2 screenshots come from one 656×422 pt window, where screenshot and
+  backing pixels coincide. A window large enough to be downscaled would show whether the service scales the image, as
+  01 §3.1 reads its scaling fields [I], and which space coordinate clicks use then.
+- Focus during an action: whether the service briefly activates the target app (01 §4 [I]). Wave 2 sampled the
+  frontmost app and pointer only between calls.
+- Where consent is enforced: whether the service refuses an app operation that skipped the policy step (03 E4). This
+  decides what route 4 in §11 bypasses.
+- Whether `_meta.persist` is required for a session approval, and whether one survives a `node_repl` restart.
 - Behavior under a real Claude Code 2.1.283 host: stream-json elicitation, ToolSearch, hooks, and the model's ability
   to use the API.
 - The model-gate digests (`NODE_REPL_ENFORCE_MODEL_CHECK`, off in this deployment).
@@ -281,19 +341,28 @@ approval is raised without Codex turn metadata.
 
 ## 11. What this means for MAWS (input for the next discussion, not a decision)
 
-Three routes are now concrete:
+Four routes are now concrete:
 
-- **Host OpenAI's `cua_repl` under Claude Code.** Technically proven from a neutral client. To match Codex's approval
-  behavior it needs a thin MCP shim that injects the session metadata and `persist`. Its risks are non-technical
-  (OpenAI's terms) and structural (OpenAI can tighten the gate or the protocol, `CodexComputerUseIPC-5`, in any weekly
-  release).
-- **Delegate GUI work to a Codex agent.** Claude hands a GUI task to Codex through `codex app-server`, as the
-  `codex-companion` "amigo" verb already does. This is the sanctioned path, but a GPT model performs the GUI steps.
-- **Build MAWS's own controller** with its own TCC identity, using this architecture as the template:
-  - an AX-first rendering with stable ids and diffs;
-  - per-window ScreenCaptureKit capture;
-  - background event targeting;
-  - a split REPL that keeps policy on the trusted side;
-  - per-app consent through MCP elicitation.
+1. **Host OpenAI's `cua_repl` under Claude Code.** Technically proven from a neutral client, and Claude Code's default
+   elicitation capability is enough (§8). To match Codex's approval behavior it needs a thin MCP shim that injects the
+   session metadata and `persist`. It would also inherit the user's Codex "always" approvals (§6 [I]). Its risks are
+   non-technical (OpenAI's terms) and structural (OpenAI can tighten the gate or the protocol,
+   `CodexComputerUseIPC-5`, in any weekly release).
+2. **Delegate GUI work to a Codex agent.** Claude hands a GUI task to Codex through `codex app-server`, as the
+   `codex-companion` "amigo" verb already does. This is the sanctioned path, but a GPT model performs the GUI steps.
+3. **Build MAWS's own controller** with its own TCC identity, using this architecture as the template:
+   - an AX-first rendering with ids that stay stable across diffs;
+   - per-window ScreenCaptureKit capture;
+   - background event targeting;
+   - a split REPL that keeps policy on the trusted side;
+   - per-app consent through MCP elicitation.
 
-  This is durable and independent. Its hardest part is reliable background input without stealing focus.
+   This is durable and independent. Its hardest part is reliable input to a background window. Wave 2 did not
+   establish that OpenAI's service avoids a brief focus change during an action (§5), so that part has no proven
+   template to copy.
+4. **Speak the service's socket protocol directly.** MAWS-authored JS speaks `CodexComputerUseIPC-5` on the socket,
+   run by a relay `node` under an OpenAI `node` parent, bypassing `node_repl` and its elicitation. Wave 2's
+   `sock-client.mjs` completed `ping` and `ListApps` this way (§6). MAWS would then own consent itself, and whether
+   the service enforces approval for app operations without the policy step is untested (03 E4). Coupling to a private
+   protocol and the terms question weigh more heavily here than on route 1: MAWS would depend on the wire encodings
+   directly, and would drive OpenAI's service with its consent layer bypassed.

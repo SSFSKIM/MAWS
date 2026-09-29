@@ -1,5 +1,7 @@
 # 03: The JS controller stack (`@oai/cua` tinyskyAlt and `@oai/sky` mac target)
 
+> **Correction (2026-09-28, wave 2).** Live tests confirm §3's predictions on one 656×422 pt window: the JPEG screenshot is labeled `image/png`, and coordinates are in screenshot pixels. §7.2's open questions are settled: bare `elicitation:{}` is enough for app approvals, and a thin socket client of our own passed the service's peer check when run by a relay `node` under OpenAI's `node`. See `README.md` §9 and `spikes/computer-use-probe/findings.md`.
+
 Researcher 3 of 6, wave 1, static analysis only. Target: ChatGPT.app 26.924.22138 (macOS), `cua_node` 0.0.24, containing `@oai/cua` 0.2.5, `@oai/sky` 0.7.4 and `@oai/cua-repl` 0.1.0. I confirmed that the prettified snapshot matches the installed originals: `targets/mac/client.js` re-prettified byte-identical, and `tinysky-alt-confirmations.md` is identical.
 
 ## Conventions

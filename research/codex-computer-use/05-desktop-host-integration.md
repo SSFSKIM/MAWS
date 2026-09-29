@@ -1,5 +1,7 @@
 # 05: How the Codex desktop host wires in native computer use
 
+> **Correction (2026-09-28, wave 2).** §4.2's reading of `sessions/*.toml` as the earlier era's storage is wrong: the files are live, written by `node_repl` and keyed by `x-codex-turn-metadata.session_id`. See `README.md` §9 and `spikes/computer-use-probe/findings.md` §3.
+
 Researcher 5 of 6, layer: the Electron host (ChatGPT.app 26.924.22138, macOS, bundle `com.openai.codex`, build flavor `prod`).
 Date: 2026-09-28. Method: static reading of the readable source, read-only inspection of the installed app, `~/.codex` and
 `~/Library/Group Containers`, plus `ps` of the running processes. Nothing was started, killed, connected to or modified.
