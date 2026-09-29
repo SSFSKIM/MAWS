@@ -537,13 +537,17 @@ test('floods without loss while the page stays responsive', async ({ maws }) => 
     test.info().annotations.push({ type: 'pausedSeenVisible', description: String(await pausedSeen()) });
     await h.idle(id, 500);
 
-    // W1 again with its tab hidden for its first stretch: a hidden terminal acknowledges at most 256 KiB per 250 ms,
-    // so the host must pause the pty at the high watermark and hold it paused between ticks. Asserted.
+    // W1 again with its tab hidden from its first byte: the Review tab is selected before the command is written to
+    // the pty (through `pty.write`, which needs no focus), and a hidden terminal acknowledges at most 256 KiB per
+    // 250 ms, so the host must pause the pty at the high watermark and hold it paused between ticks. Asserted after a
+    // full second hidden.
     await h.call('terminals', 'resetPausedSeen', id); // this phase proves its own pause, not the visible run's
     expect(await pausedSeen()).toBe(false);
-    await h.run(id, `${FOX}; echo W1-HIDDEN-$((6*7))`);
     await h.call('panel', 'selectTab', 'review');
-    await expect.poll(pausedSeen, { timeout: 10_000, message: "W1's fox line pauses the pty at the high watermark" }).toBe(true);
+    await expect.poll(async () => (await h.info(id))!.visible, { message: 'the terminal is hidden' }).toBe(false);
+    await h.run(id, `${FOX}; echo W1-HIDDEN-$((6*7))`);
+    await sleep(1_000);
+    expect(await pausedSeen(), "W1's fox line pauses the pty at the high watermark").toBe(true);
     await h.call('panel', 'selectTab', tabId);
     await ends('W1-HIDDEN-42');
     await h.idle(id, 500);
