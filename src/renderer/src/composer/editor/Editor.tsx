@@ -1,8 +1,9 @@
 // The composer's editor (C7 execution document, M3): the Tiptap instance with its keys, draft, history, paste and drop,
 // the `@` menu and `/` palette, the `!` and `#` decoration and the prefill intake (the behaviour is `controller.ts`'s).
 // The root is the one element that carries `data-key-sink="composer"` (with the popups it portals), so C5's dispatcher
-// delivers the composer's chords here (⌘Enter sends, ⌥Enter steers) and never a pane's Enter or Esc. Enter sends,
-// Shift+Enter breaks the line, a composing IME key never sends; ArrowUp on an empty editor (or while recalling) walks
+// delivers the composer's chords here (⌘Enter sends, ⌥Enter steers) and never a pane's Enter or Esc. Enter sends a
+// one-line document and breaks the line once there are more (§5.8), Shift+Enter breaks the line, a composing IME key
+// never sends; ArrowUp on an empty editor (or while recalling) walks
 // history. Mount one Editor per session (key it by the session): its draft and history are that session's. What a
 // submission does is the caller's (`onSubmit`); the default dispatches by mode (`submit.ts`). The frame around it, the
 // attachment strip and the submit control are the Composer's (M4), which drives the editor through its handle.

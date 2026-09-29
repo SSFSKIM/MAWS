@@ -48,6 +48,9 @@ export const docOf = (paragraphs: JSONContent[], attachments: Attachment[] = [])
   content: paragraphs.length > 0 ? paragraphs : [{ type: 'paragraph' }],
 });
 
+// More than one line: several paragraphs, or a hard break in one (§5.8: Enter then breaks the line; ⌘Enter sends).
+export const isMultiline = (doc: ComposerDoc): boolean => (doc.content?.length ?? 0) > 1 || (doc.content ?? []).some((p) => (p.content ?? []).some((n) => n.type === 'hardBreak'));
+
 let counter = 0;
 // An id for an atom or attachment, unique within this renderer.
 export const atomId = (prefix: string): string => `${prefix}-${Date.now().toString(36)}-${(counter++).toString(36)}`;

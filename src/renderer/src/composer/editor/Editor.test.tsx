@@ -7,7 +7,7 @@ import type { Draft } from '@shared/ipc/schema/session';
 import { connectKeys } from '../../keymap/dispatcher';
 import { resetCatalogStore } from '../../stores/catalog';
 import { prefillComposer, resetComposerStore } from '../../stores/composer';
-import { docOf, paragraph, textNode } from './doc';
+import { docOf, hardBreak, paragraph, textNode } from './doc';
 import { Editor, type DraftPort, type EditorHandle } from './Editor';
 import type { Serialized } from './serialize';
 
@@ -93,5 +93,24 @@ describe('the editor mounts over its draft, takes prefills and submits through t
     await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ content: 'keep me' }), 'steer'));
     expect(content.textContent).toBe('keep me');
     expect(saved).toEqual([]);
+  });
+
+  it('sends on a plain Enter in a one-line document, and breaks the line with it once the document has more lines', async () => {
+    const onSubmit = vi.fn<(s: Serialized, how: 'send' | 'steer') => Promise<boolean>>(async () => false);
+    const multiline = docOf([paragraph(textNode('one'), hardBreak(), textNode('two'))]);
+    const { port } = drafts({ doc: multiline, attachments: [], updatedAt: '2026-09-29T00:00:00.000Z' });
+    const handle = createRef<EditorHandle>();
+    const { container } = render(<Editor appSessionId={APP} cwd="/repo" sessionId={null} drafts={port} client={client} onSubmit={onSubmit} handle={handle} />);
+    const content = contentOf(container);
+    await waitFor(() => expect(handle.current?.serialize().display).toBe('one\ntwo'));
+    content.focus();
+    const enter = () => act(async () => void content.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })));
+    await enter();
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(handle.current?.doc().content).toHaveLength(2); // a new line, not a send
+    act(() => handle.current?.clear());
+    act(() => handle.current?.insertText('single'));
+    await enter();
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ content: 'single' }), 'send'));
   });
 });

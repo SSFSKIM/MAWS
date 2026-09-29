@@ -16,7 +16,7 @@ import { toast } from '../../stores/notices';
 import { useTranscriptStore } from '../../transcript';
 import { slashWidget } from '../mentions/widgets';
 import { downscaleImage, fileBase64, imageRefusal, markPersisted } from './attachments';
-import { atomId, attachmentsOf, emptyDoc, mentionNode, PASTED, pastedNode, textNode, type Attachment, type ComposerDoc } from './doc';
+import { atomId, attachmentsOf, emptyDoc, isMultiline, mentionNode, PASTED, pastedNode, textNode, type Attachment, type ComposerDoc } from './doc';
 import { createDraftWriter, docOfDraft, isEmptyDoc, type DraftWriter } from './drafts';
 import type { EditorEnv } from './env';
 import { suggesting } from './extensions';
@@ -164,6 +164,7 @@ export class EditorController {
     if (suggesting(editor)) return false;
     const plain = !event.shiftKey && !event.altKey && !event.metaKey && !event.ctrlKey;
     if (event.key === 'Enter' && plain) {
+      if (isMultiline(editor.getJSON())) return false; // the line breaks (ProseMirror's own Enter); ⌘Enter sends
       void this.submit('send');
       return true;
     }
