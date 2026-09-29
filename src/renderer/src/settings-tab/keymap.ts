@@ -4,6 +4,7 @@
 // the action table as the section lists it. Every action is editable (C5's residue: all bindings editable).
 import { ACTIONS, ACTION_IDS, effectiveChord, type ActionId, type ActionSpec, type KeymapOverrides } from '@shared/keymap/actions';
 import { formatChord, parseChord, type Chord, type KeyEventLike } from '@shared/keymap/chord';
+import { MENU_ROLE_CHORDS } from '@shared/keymap/menu-roles';
 import { KEYBOARD } from './copy';
 
 // KeyboardEvent.code → accelerator token for punctuation (the inverse of C5's table in chord.ts).
@@ -46,6 +47,12 @@ function chordsHeld(id: ActionId, overrides: KeymapOverrides): string[] {
   return [chord];
 }
 
+// The application menu's role item that holds `chord` window-wide (Undo, Copy, Quit…), if any.
+export function reservedItemOf(chord: string): string | null {
+  const wanted = parseChord(chord);
+  return MENU_ROLE_CHORDS.find((role) => same(parseChord(role.chord), wanted))?.item ?? null;
+}
+
 // The action other than `id` that already holds `chord`, if any.
 export function conflictOf(id: ActionId, chord: string, overrides: KeymapOverrides): ActionId | null {
   const wanted = parseChord(chord);
@@ -79,6 +86,9 @@ export function captureChord(event: KeyEventLike, id: ActionId, overrides: Keyma
   // without Shift) would stop typing it; a function key is the one bare key a menu may take.
   const spec: ActionSpec = ACTIONS[id];
   if (spec.sink === 'menu' && !event.metaKey && !event.ctrlKey && !event.altKey && !FUNCTION_KEY.test(event.key)) return { kind: 'refused', message: KEYBOARD.menuNeedsModifier };
+  // A role item's chord never reaches an action, whatever its sink: the menu takes it first.
+  const reserved = reservedItemOf(chord);
+  if (reserved !== null) return { kind: 'refused', message: KEYBOARD.reserved(reserved) };
   const taken = conflictOf(id, chord, overrides);
   if (taken !== null) return { kind: 'refused', message: KEYBOARD.conflict(ACTIONS[taken].title) };
   return { kind: 'chord', chord };

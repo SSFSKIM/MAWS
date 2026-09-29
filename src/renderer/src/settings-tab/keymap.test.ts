@@ -63,6 +63,18 @@ describe('keymap capture records, refuses conflicts and unbinds', () => {
     expect(captureChord(key('Backspace', 'Backspace', { metaKey: true }), 'attention.next', {})).toEqual({ kind: 'chord', chord: 'Cmd+Backspace' });
   });
 
+  it("refuses the application menu's role chords, naming the item, for any action", () => {
+    expect(captureChord(key('KeyC', 'c', { metaKey: true }), 'attention.next', {})).toEqual({ kind: 'refused', message: 'Reserved by macOS · Copy' });
+    expect(captureChord(key('KeyZ', 'Z', { metaKey: true, shiftKey: true }), 'attention.next', {})).toEqual({ kind: 'refused', message: 'Reserved by macOS · Redo' });
+    expect(captureChord(key('KeyV', 'V', { metaKey: true, altKey: true, shiftKey: true }), 'attention.next', {})).toEqual({ kind: 'refused', message: 'Reserved by macOS · Paste and Match Style' });
+    expect(captureChord(key('KeyH', '˙', { metaKey: true, altKey: true }), 'attention.next', {})).toEqual({ kind: 'refused', message: 'Reserved by macOS · Hide Others' });
+    expect(captureChord(key('KeyF', 'f', { metaKey: true, ctrlKey: true }), 'attention.next', {})).toEqual({ kind: 'refused', message: 'Reserved by macOS · Toggle Full Screen' });
+    expect(captureChord(key('KeyQ', 'q', { metaKey: true }), 'composer.focus', {})).toEqual({ kind: 'refused', message: 'Reserved by macOS · Quit MAWS' }); // a renderer action too
+    // the same letters under other modifiers are free
+    expect(captureChord(key('KeyC', 'C', { metaKey: true, shiftKey: true }), 'attention.next', {})).toEqual({ kind: 'chord', chord: 'Cmd+Shift+C' });
+    expect(captureChord(key('KeyM', 'µ', { metaKey: true, altKey: true }), 'attention.next', {})).toEqual({ kind: 'chord', chord: 'Cmd+Alt+M' });
+  });
+
   it("refuses a key outside C5's vocabulary with the parser's message", () => {
     expect(captureChord(key('Numpad1', '1', { metaKey: true }), 'attention.next', {})).toEqual({ kind: 'refused', message: 'unknown key "Numpad1" in chord "Cmd+Numpad1"' });
   });
