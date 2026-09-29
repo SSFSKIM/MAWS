@@ -20,7 +20,7 @@ import { GitService } from './git/service';
 // C4 end
 // C5 start (emit comes with C3's imports)
 import { startAttention } from './attention';
-import { LayoutFileStore, registerLayoutHandlers } from './layout/store';
+import { dropPanelKeysOfRemovedSessions, LayoutFileStore, registerLayoutHandlers } from './layout/store';
 import { askToQuit, installQuitGuard } from './lifecycle/quit-guard';
 import { registerMenuHandlers, startMenu } from './menu';
 import { registerOpenExternal } from './open-external';
@@ -77,21 +77,25 @@ app.whenReady().then(() => {
     git.dispose();
     replays.dispose();
     attention.stop();
-    index.close();
+    // (the index closes at will-quit after C5's block below, once the read model has stopped the source that reads it)
   });
   // C4 end
 
   // ---- C5: layout store and the read side (launch mode, read model, stub source in scenario mode) ----
   const layout = new LayoutFileStore(join(app.getPath('userData'), 'layout.json'));
-  registerLayoutHandlers(layout);
   registerOpenExternal();
   // A relative scenario path is the repository's: the working directory of `pnpm dev`, `pnpm dev:stub` and the smoke's
   // launch alike (`app.getAppPath()` is `out/main` when the built app is launched by file, as the smoke does).
   const sessions = startSessions({ env: process.env, packaged: app.isPackaged, appRoot: process.cwd(), hosts, indexSource });
+  registerLayoutHandlers(layout, (appSessionId) => sessions.model.record(appSessionId) !== null);
+  dropPanelKeysOfRemovedSessions(sessions.model, layout);
   app.on('will-quit', () => {
     layout.flush();
     sessions.stop();
   });
+  // C4 start: registered after C5's will-quit above, so the index source has stopped before the index it reads closes
+  app.on('will-quit', () => index.close());
+  // C4 end
   // The application menu from the action table, rebuilt on settings and on the page's registered handlers.
   registerMenuHandlers(startMenu({ settings: () => settings.state().settings, emit }));
   // Window bounds persist under `window.main`; a window opens where the last one was left, if that is still on screen.

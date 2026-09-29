@@ -8,7 +8,7 @@
 // a rename made in MAWS is an override kept apart (`title_override`), together with the engine's custom title at the
 // moment it was set, and a later summary whose custom title differs from that clears the override: the later explicit
 // act wins in either direction. Projection: override, else custom title (`user`), else AI title (`generated`), else first
-// prompt (`none`), else an empty title.
+// prompt (`none`) less the engine's slash-command wrappers (`promptTitle`), else an empty title.
 import { randomUUID } from 'node:crypto';
 import type { AppSessionId, MessageUuid, ProjectId, SessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
@@ -39,7 +39,7 @@ interface SessionRow {
   last_seen_at: string | null;
   unread: number;
   engine_version: string | null;
-  gateway_routed: number;
+  gateway_routed: number | null; // null: never verified (a discovered session)
   gateway_base_url: string | null;
   gateway_auto_mode_server: string;
   model_requested: string | null;
@@ -88,11 +88,37 @@ export interface BindingChange {
 
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+// A slash command's prompt is the engine's markup: `<command-name>/review</command-name>` with its `<command-message>`
+// and `<command-args>`, or a local command's `<local-command-stdout>` (and siblings). A prompt that opens with that markup
+// is projected as the command the person typed, `/<name> <args>`, followed by any words outside the markup; each element
+// goes whole, an unclosed one (a prompt cut at the summary's cap) to the end. Any other prompt is prose and kept as it
+// is, markup-looking words included. Whitespace is collapsed; null when nothing readable remains.
+const COMMAND_TAGS = 'command-name|command-message|command-args|local-command-stdout|local-command-stderr|local-command-caveat';
+const OPENS_WITH_MARKUP = new RegExp(`^\\s*<(?:${COMMAND_TAGS})>`);
+const COMMAND_ELEMENT = new RegExp(`<(${COMMAND_TAGS})>([\\s\\S]*?)(?:<\\/\\1>|$)`, 'g');
+
+export function promptTitle(prompt: string): string | null {
+  const collapse = (text: string) => text.replace(/\s+/g, ' ').trim();
+  let name = '';
+  let args = '';
+  const rest = OPENS_WITH_MARKUP.test(prompt)
+    ? prompt.replace(COMMAND_ELEMENT, (_element, tag: string, inner: string) => {
+        if (tag === 'command-name') name = collapse(inner);
+        if (tag === 'command-args') args = collapse(inner);
+        return ' ';
+      })
+    : prompt;
+  const command = name === '' ? '' : `${name.startsWith('/') ? name : `/${name}`} ${args}`;
+  const text = collapse(`${command} ${rest}`);
+  return text === '' ? null : text;
+}
+
 function titleOf(row: SessionRow): SessionRecord['title'] {
   if (row.title_override !== null) return JSON.parse(row.title_override) as SessionRecord['title'];
   if (row.custom_title) return { text: row.custom_title, source: 'user' };
   if (row.ai_title) return { text: row.ai_title, source: 'generated' };
-  if (row.first_prompt) return { text: row.first_prompt, source: 'none' };
+  const prompt = row.first_prompt ? promptTitle(row.first_prompt) : null;
+  if (prompt) return { text: prompt, source: 'none' };
   return { text: '', source: 'none' };
 }
 
@@ -112,7 +138,7 @@ function toRecord(row: SessionRow): SessionRecord {
     lastSeen: { messageUuid: row.last_seen_uuid as MessageUuid | null, at: row.last_seen_at },
     unread: row.unread === 1,
     engineVersion: row.engine_version,
-    gateway: { routed: row.gateway_routed === 1, baseUrl: row.gateway_base_url, autoModeServer: row.gateway_auto_mode_server as SessionRecord['gateway']['autoModeServer'] },
+    gateway: { routed: row.gateway_routed === null ? null : row.gateway_routed === 1, baseUrl: row.gateway_base_url, autoModeServer: row.gateway_auto_mode_server as SessionRecord['gateway']['autoModeServer'] },
     model: { requested: row.model_requested, resolved: row.model_resolved },
     effort: row.effort,
     permissionMode: {

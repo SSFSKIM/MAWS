@@ -8,7 +8,7 @@ import { runAction } from '../keymap/actions-runtime';
 import { useLayout } from '../stores/layout';
 import { activeTab, sessionOfTab } from '../stores/layout-model';
 import { IconButton, MaximizeIcon, PanelIcon, RestoreIcon } from '../app/IconButton';
-import { COLLAPSE_THRESHOLD_PX, PANEL_BOUNDS, panelWidth } from '../app/regions';
+import { COLLAPSE_THRESHOLD_PX, PANEL_BOUNDS, regionWidths, useWindowWidth } from '../app/regions';
 import { Resizer } from '../app/Resizer';
 import { useSlot } from '../app/slots';
 
@@ -16,7 +16,10 @@ export const PANEL_REGION_ID = 'region-panel';
 
 export function PanelRegion() {
   const { collapsed, maximized } = useLayout((s) => s.regions.panel);
-  const width = useLayout((s) => panelWidth(s.regions));
+  const windowWidth = useWindowWidth();
+  const width = useLayout((s) => regionWidths(s.regions, windowWidth).panel);
+  const max = useLayout((s) => regionWidths(s.regions, windowWidth).panelMax);
+  const persisted = useLayout((s) => s.regions.panel.width);
   const setPanel = useLayout((s) => s.setPanel);
 
   return (
@@ -33,10 +36,11 @@ export function PanelRegion() {
           controls={PANEL_REGION_ID}
           value={width}
           min={PANEL_BOUNDS.min}
-          max={PANEL_BOUNDS.max}
+          max={max}
           defaultValue={PANEL_BOUNDS.default}
           grow={-1}
           collapseThreshold={COLLAPSE_THRESHOLD_PX}
+          restoreValue={persisted}
           onChange={(next) => setPanel({ width: next })}
           onCollapse={(restore) => setPanel({ collapsed: true, width: restore })}
           className="absolute inset-y-0 -left-0.75"

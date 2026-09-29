@@ -302,6 +302,13 @@ export function persistLayout(client: MawsBridge, store = useLayout): () => void
     if (!state.hydrated) return;
     const now = persistedKeys(state);
     if (written) for (const [key, value] of now) if (written.get(key) !== value) schedule(key, value);
+    // A key that left the state (a removed session's `panel.<id>`, which main deletes) must not be written back by a
+    // write still pending from before.
+    for (const [key, { timer }] of pending) {
+      if (now.has(key)) continue;
+      clearTimeout(timer);
+      pending.delete(key);
+    }
     written = now;
   });
   window.addEventListener('beforeunload', flush);

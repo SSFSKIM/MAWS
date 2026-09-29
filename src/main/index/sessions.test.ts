@@ -7,6 +7,7 @@ import type { SessionRecord } from '@shared/graph/session';
 import { SessionRecordSchema } from '@shared/graph/session';
 import { sessionIdFor, summary, tempDir } from '../../../test/support/index-fixture';
 import { Index } from './index';
+import { promptTitle } from './sessions';
 
 const LAUNCH = {
   directory: '/nowhere/launch',
@@ -48,7 +49,7 @@ describe('session records in the index', () => {
       directory: '/nowhere/at/all',
       title: { text: 'hello', source: 'none' },
       holder: { kind: 'none' },
-      gateway: { routed: true, baseUrl: null, autoModeServer: 'unknown' },
+      gateway: { routed: null, baseUrl: null, autoModeServer: 'unknown' }, // unknown: no verification ran
       pinned: false,
       archived: false,
       unread: false,
@@ -111,6 +112,28 @@ describe('session records in the index', () => {
     it('falls back from custom to AI title to first prompt to an empty title', () => {
       const { record } = index.sessions.upsertFromSummary(summary({ firstPrompt: null }));
       expect(titleOf(record.appId)).toEqual({ text: '', source: 'none' });
+    });
+
+    it('offers a slash command as the command typed, never its markup', () => {
+      // As the engine writes a `/clear` prompt (spikes/protocol-probe fixtures).
+      const clear = '<command-name>/clear</command-name>\n            <command-message>clear</command-message>\n            <command-args></command-args>';
+      const { record } = index.sessions.upsertFromSummary(summary({ customTitle: null, aiTitle: null, firstPrompt: clear }));
+      expect(titleOf(record.appId)).toEqual({ text: '/clear', source: 'none' });
+      const command = (name: string, args: string) =>
+        `<command-message>${name} is running…</command-message>\n<command-name>/${name}</command-name>\n<command-args>${args}</command-args>`;
+      expect(promptTitle(command('fix-issue', 'the parser drops  trailing commas'))).toBe('/fix-issue the parser drops trailing commas');
+      expect(promptTitle(command('review', 'PR 12'))).toBe('/review PR 12');
+      expect(promptTitle(`${command('review', 'PR 12')}\n  Look at the   sidebar drag first`)).toBe('/review PR 12 Look at the sidebar drag first');
+      expect(promptTitle('<command-name>/init</command-name>\n<command-message>init is analyzing your codebase…')).toBe('/init'); // cut at the cap
+      expect(promptTitle('<command-name>/fix-issue</command-name>\n<command-args>the parser dr')).toBe('/fix-issue the parser dr');
+      // A local command's output alone has nothing readable: the empty title.
+      expect(promptTitle('<local-command-stdout>Set model to opus</local-command-stdout>')).toBeNull();
+      // Prose that mentions the markup is prose.
+      expect(promptTitle('Why does the sidebar show <command-name> in some titles?')).toBe('Why does the sidebar show <command-name> in some titles?');
+      expect(promptTitle('Why does <div> wrap here?')).toBe('Why does <div> wrap here?');
+      // An AI title still wins over a readable prompt, and a readable prompt is kept as it stands.
+      const titled = index.sessions.upsertFromSummary(summary({ sessionId: sessionIdFor(2), customTitle: null, aiTitle: null, firstPrompt: 'Fix the drag' }));
+      expect(titleOf(titled.record.appId)).toEqual({ text: 'Fix the drag', source: 'none' });
     });
   });
 

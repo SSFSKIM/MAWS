@@ -58,8 +58,9 @@ describe('main ipc router', () => {
   it('dispatches a valid command from the app window to its main handler', async () => {
     const handler = vi.fn(() => LIGHT);
     router.registerMainHandler('settings.get', handler);
-    await expect(invoke(appWindow(), 'settings.get')).resolves.toEqual({ ok: true, value: LIGHT });
-    expect(handler).toHaveBeenCalledWith(undefined);
+    const event = appWindow();
+    await expect(invoke(event, 'settings.get')).resolves.toEqual({ ok: true, value: LIGHT });
+    expect(handler).toHaveBeenCalledWith(undefined, { sender: event.sender }); // the requesting window, for per-window state
   });
 
   it('answers settings.set({ theme: "sepia" }) with invalid_input and never calls the handler', async () => {
@@ -187,7 +188,7 @@ describe('main ipc router', () => {
       const dispose = router.interceptCommand('session.list', stub);
       await expect(invoke(appWindow(), 'session.list', {})).resolves.toEqual({ ok: true, value: { sessions: [], revision: 7 } });
       await expect(invoke(appWindow(), 'session.digests')).resolves.toEqual({ ok: true, value: { digests: [] } });
-      expect(stub).toHaveBeenCalledWith({});
+      expect(stub).toHaveBeenCalledWith({}, { sender: expect.anything() });
       dispose();
       await expect(invoke(appWindow(), 'session.list', {})).resolves.toMatchObject({ ok: false, error: { code: 'internal' } });
     });

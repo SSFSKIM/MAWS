@@ -4,7 +4,9 @@
 // `collapseThreshold` px past the minimum collapses the region (releasing before that leaves it at the minimum). The
 // keyboard never collapses: the region's toggle does that. `grow` says which way enlarges the region: +1 for a
 // resizer on a region's right (or bottom) edge, -1 for one on its left (or top) edge. A drag-collapse hands back the
-// value the drag started from, so the region reopens at the size it had rather than at the minimum.
+// value the drag started from, so the region reopens at the size it had rather than at the minimum; a region shown
+// narrower than its persisted size (clamped to the window) passes that size as `restoreValue`, so the clamp is never
+// written back.
 import { useRef, type KeyboardEvent, type PointerEvent } from 'react';
 
 export const RESIZER_STEP = 8;
@@ -21,6 +23,7 @@ export interface ResizerProps {
   grow?: 1 | -1;
   collapseThreshold?: number | null;
   onChange(value: number): void;
+  restoreValue?: number; // what a drag-collapse hands back; `value` when not given
   onCollapse?(restore: number): void; // `restore`: the value the drag started from, for reopening at that size
   className?: string;
 }
@@ -37,11 +40,12 @@ export function Resizer({
   defaultValue,
   grow = 1,
   collapseThreshold = null,
+  restoreValue,
   onChange,
   onCollapse,
   className = '',
 }: ResizerProps) {
-  const drag = useRef<{ pointerId: number; from: number; start: number } | null>(null);
+  const drag = useRef<{ pointerId: number; from: number; start: number; restore: number } | null>(null);
   const vertical = orientation === 'vertical';
   const coordinate = (event: PointerEvent) => (vertical ? event.clientX : event.clientY);
 
@@ -86,7 +90,7 @@ export function Resizer({
         if (event.button !== 0) return;
         event.preventDefault(); // no text selection while dragging
         event.currentTarget.setPointerCapture?.(event.pointerId);
-        drag.current = { pointerId: event.pointerId, from: coordinate(event), start: value };
+        drag.current = { pointerId: event.pointerId, from: coordinate(event), start: value, restore: restoreValue ?? value };
       }}
       onPointerMove={(event) => {
         const current = drag.current;
@@ -94,7 +98,7 @@ export function Resizer({
         const raw = current.start + grow * (coordinate(event) - current.from);
         if (collapseThreshold !== null && onCollapse && raw <= min - collapseThreshold) {
           end(event);
-          onCollapse(current.start);
+          onCollapse(current.restore);
           return;
         }
         set(raw);

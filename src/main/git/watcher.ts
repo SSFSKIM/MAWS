@@ -5,8 +5,12 @@
 // `git status` runs per root with one re-run for whatever arrived meanwhile, and `git.changed` carries the fresh status
 // only when the compared projection moved. The projection is the status's own facts plus the size and mtime of every
 // listed file, so a second content write to an already-dirty file emits although its porcelain line is unchanged (C8a's
-// ask), while a save that leaves bytes and mtime as they were is silent. Watches are ref-counted per root by the
-// directories callers passed; the first watch of a root emits its status as `initial`.
+// ask), while a save that leaves bytes and mtime as they were is silent. An untracked directory is one porcelain line
+// (`dir/`) whose own mtime moves only when its entries do, so each file an event touched beneath it joins the
+// projection too, for as long as the directory stays listed untracked, up to INNER_CAP files per root; a touched file
+// beyond the cap is not kept and counts as a change. Watches are ref-counted per root by the
+// directories each owner (the requesting window) passed, and an owner's are released together when it goes; the first
+// watch of a root emits its status as `initial`.
 import { watch as fsWatch } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { isAbsolute, join, relative, sep } from 'node:path';
@@ -32,6 +36,7 @@ export interface GitWatcherDeps {
 }
 
 const DEBOUNCE_MS = 250;
+export const INNER_CAP = 2_000; // files beneath untracked directories whose facts a root keeps (an unignored node_modules)
 const MAX_WAIT_MS = 1000; // the longest a debounce window runs from its first event
 const BACKOFF_MS = 5000; // after a status timeout, until a status succeeds
 // When several kinds of path changed in one window, the event names the weightiest; HEAD moving outranks them all.
@@ -61,6 +66,9 @@ export function classifyRootPath(rel: string, gitDirRel: string | null): Exclude
   return 'worktree';
 }
 
+// Who holds a watch: main passes the requesting window's `webContents.id`; 0 is a caller without a window.
+export type WatchOwner = number;
+
 interface Root {
   root: string;
   count: number;
@@ -71,6 +79,8 @@ interface Root {
   inFlight: boolean;
   again: boolean;
   pending: Set<Exclude<GitChangeReason, 'initial'>>;
+  touched: Set<string>; // worktree paths (root-relative) the pending events named
+  inner: Map<string, FileFacts | null>; // touched files beneath an untracked directory, as last read
   last: { status: GitStatus; projection: string };
   backoff: boolean;
   failing: boolean;
@@ -78,7 +88,8 @@ interface Root {
 
 export class GitWatcher {
   private readonly roots = new Map<string, Root>();
-  private readonly directories = new Map<string, { root: string; count: number }>();
+  private readonly owners = new Map<WatchOwner, Map<string, { root: string; count: number }>>(); // by directory
+  private readonly generations = new Map<WatchOwner, number>(); // bumped by each release of the owner
   private readonly watchFn: WatchFn;
   private readonly statFile: (path: string) => Promise<FileFacts | null>;
 
@@ -89,33 +100,52 @@ export class GitWatcher {
 
   // Resolves the directory's status (failing as `status` fails, with nothing registered), then counts one more watcher
   // on its root, opening the root's watches when it is the first.
-  async watch(directory: string): Promise<GitStatus> {
+  // A watch whose owner was released while its status was being read (the window navigated or closed meanwhile) answers
+  // the status and holds nothing: its page is gone and could never unwatch.
+  async watch(directory: string, owner: WatchOwner = 0): Promise<GitStatus> {
+    const generation = this.generations.get(owner) ?? 0;
     const status = await this.deps.status(directory);
-    const projection = await this.project(status);
+    const projection = await this.project(status, new Map());
+    if ((this.generations.get(owner) ?? 0) !== generation) return status;
     let root = this.roots.get(status.repoRoot);
     if (!root) {
       root = this.open(status, projection);
       this.deps.emit({ repoRoot: root.root, status, reason: 'initial' });
     }
     root.count++;
-    const entry = this.directories.get(directory);
-    this.directories.set(directory, { root: status.repoRoot, count: (entry?.count ?? 0) + 1 });
+    let directories = this.owners.get(owner);
+    if (!directories) this.owners.set(owner, (directories = new Map()));
+    const entry = directories.get(directory);
+    directories.set(directory, { root: status.repoRoot, count: (entry?.count ?? 0) + 1 });
     return status;
   }
 
-  // One watcher fewer for the directory's root; the last closes the root's watches. A directory never watched, or
-  // already released as often as it was watched, is a no-op.
-  unwatch(directory: string): void {
-    const entry = this.directories.get(directory);
-    if (!entry) return;
-    if (--entry.count === 0) this.directories.delete(directory);
-    const root = this.roots.get(entry.root);
-    if (root && --root.count === 0) this.close(root);
+  // One watcher fewer for the directory's root; the last closes the root's watches. A directory the owner never
+  // watched, or already released as often as it watched it, is a no-op.
+  unwatch(directory: string, owner: WatchOwner = 0): void {
+    const directories = this.owners.get(owner);
+    const entry = directories?.get(directory);
+    if (!directories || !entry) return;
+    if (--entry.count === 0) directories.delete(directory);
+    this.drop(entry.root, 1);
+  }
+
+  // Everything the owner still holds (its window closed or reloaded without unwatching).
+  release(owner: WatchOwner): void {
+    this.generations.set(owner, (this.generations.get(owner) ?? 0) + 1);
+    const directories = this.owners.get(owner);
+    this.owners.delete(owner);
+    for (const entry of directories?.values() ?? []) this.drop(entry.root, entry.count);
   }
 
   dispose(): void {
     for (const root of [...this.roots.values()]) this.close(root);
-    this.directories.clear();
+    this.owners.clear();
+  }
+
+  private drop(repoRoot: string, count: number): void {
+    const root = this.roots.get(repoRoot);
+    if (root && (root.count -= count) <= 0) this.close(root);
   }
 
   private open(status: GitStatus, projection: string): Root {
@@ -129,6 +159,8 @@ export class GitWatcher {
       inFlight: false,
       again: false,
       pending: new Set(),
+      touched: new Set(),
+      inner: new Map(),
       last: { status, projection },
       backoff: false,
       failing: false,
@@ -138,9 +170,10 @@ export class GitWatcher {
     const onError = (error: Error) => console.warn(`[git] watch failed under ${root.root}: ${error.message}`);
     // A watch that cannot open (the directory vanished since its status was read) fails this call and leaves no root.
     try {
-      const rootWatch = this.watchFn(root.root, { recursive: true }, (_event, filename) =>
-        this.changed(root, filename === null ? 'worktree' : classifyRootPath(filename.split(sep).join('/'), gitDirRel)),
-      );
+      const rootWatch = this.watchFn(root.root, { recursive: true }, (_event, filename) => {
+        const rel = filename === null ? null : filename.split(sep).join('/');
+        this.changed(root, rel === null ? 'worktree' : classifyRootPath(rel, gitDirRel), rel);
+      });
       root.handles.push(rootWatch);
       rootWatch.on('error', onError);
       if (gitDirRel === null) {
@@ -177,12 +210,15 @@ export class GitWatcher {
     if (root.timer) clearTimeout(root.timer);
     for (const handle of root.handles) handle.close();
     this.roots.delete(root.root);
-    for (const [directory, entry] of this.directories) if (entry.root === root.root) this.directories.delete(directory);
+    for (const directories of this.owners.values()) {
+      for (const [directory, entry] of directories) if (entry.root === root.root) directories.delete(directory);
+    }
   }
 
-  private changed(root: Root, reason: Exclude<GitChangeReason, 'initial'> | null): void {
+  private changed(root: Root, reason: Exclude<GitChangeReason, 'initial'> | null, rel: string | null = null): void {
     if (reason === null || root.closed) return;
     root.pending.add(reason);
+    if (reason === 'worktree' && rel !== null) root.touched.add(rel);
     this.schedule(root);
   }
 
@@ -208,19 +244,24 @@ export class GitWatcher {
   private async refresh(root: Root): Promise<void> {
     root.inFlight = true;
     const reasons = root.pending;
+    const touched = root.touched;
     root.pending = new Set();
+    root.touched = new Set();
     try {
       const status = await this.deps.status(root.root);
-      const projection = await this.project(status);
+      const { inner, overflow } = await this.innerFacts(root, status, touched);
+      const projection = await this.project(status, inner);
+      root.inner = inner;
       root.backoff = false;
       root.failing = false;
-      if (root.closed || projection === root.last.projection) return;
+      if (root.closed || (projection === root.last.projection && !overflow)) return;
       const previous = root.last.status;
       const headMoved = status.head !== previous.head || status.branch !== previous.branch;
       root.last = { status, projection };
       this.deps.emit({ repoRoot: root.root, status, reason: headMoved ? 'head' : weightiest(reasons) });
     } catch (error) {
       for (const reason of reasons) root.pending.add(reason); // carried to the next pass
+      for (const rel of touched) root.touched.add(rel);
       const timedOut = error instanceof GitTimeoutError;
       if (timedOut) root.backoff = true;
       if (!root.failing) console.warn(`[git] status failed under ${root.root}${timedOut ? '; debouncing at 5 s until it succeeds' : ''}: ${error instanceof Error ? error.message : String(error)}`);
@@ -235,9 +276,32 @@ export class GitWatcher {
     }
   }
 
+  // The files beneath the status's untracked directories: those already known that are still beneath one, and those
+  // the events touched, read afresh (in parallel), while the root keeps fewer than INNER_CAP. `overflow`: a touched file
+  // beyond the cap, whose change cannot be judged, so the pass emits.
+  private async innerFacts(root: Root, status: GitStatus, touched: Set<string>): Promise<{ inner: Map<string, FileFacts | null>; overflow: boolean }> {
+    const dirs = status.files.filter((file) => file.untracked && file.path.endsWith('/')).map((file) => file.path);
+    const beneath = (rel: string) => dirs.some((dir) => rel.startsWith(dir));
+    const inner = new Map([...root.inner].filter(([rel]) => beneath(rel)));
+    const read: string[] = [];
+    let room = INNER_CAP - inner.size;
+    let overflow = false;
+    for (const rel of touched) {
+      if (!beneath(rel)) continue;
+      if (inner.has(rel)) read.push(rel);
+      else if (room > 0) {
+        read.push(rel);
+        room--;
+      } else overflow = true;
+    }
+    const facts = await Promise.all(read.map((rel) => this.statFile(join(status.repoRoot, rel))));
+    read.forEach((rel, i) => inner.set(rel, facts[i]));
+    return { inner, overflow };
+  }
+
   // What a change is judged by: every status fact except the time it was read, plus each listed file's size and mtime
-  // (a deleted file is null).
-  private async project(status: GitStatus): Promise<string> {
+  // (a deleted file is null), and the facts of the touched files beneath an untracked directory.
+  private async project(status: GitStatus, inner: Map<string, FileFacts | null>): Promise<string> {
     const stats = await Promise.all(
       status.files.map(async (file) => {
         const facts = await this.statFile(join(status.repoRoot, file.path));
@@ -245,7 +309,8 @@ export class GitWatcher {
       }),
     );
     const { files, branch, head, upstream, remoteUrl, ahead, behind, stashCount } = status;
-    return JSON.stringify({ files, branch, head, upstream, remoteUrl, ahead, behind, stashCount, stats });
+    const beneath = [...inner].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    return JSON.stringify({ files, branch, head, upstream, remoteUrl, ahead, behind, stashCount, stats, beneath });
   }
 }
 

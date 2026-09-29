@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -25,8 +25,11 @@ const withActive = (tab: TabRef): LayoutMain => ({ ...LAYOUT_DEFAULTS.main, pane
 const region = (name: string) => document.querySelector<HTMLElement>(`[data-region="${name}"]`)!;
 const grid = () => region('main').parentElement!;
 const offs: (() => void)[] = [];
+// happy-dom's window, resized as a person resizes the app's (it dispatches `resize`).
+const setWindowWidth = (width: number) => (window as unknown as { happyDOM: { setWindowSize(size: { width: number }): void } }).happyDOM.setWindowSize({ width });
 
 beforeEach(() => {
+  setWindowWidth(1440); // the app window's default size
   useLayout.setState({ regions: LAYOUT_DEFAULTS.regions, main: LAYOUT_DEFAULTS.main, panelPinned: [], panelBySession: new Map(), panelActiveNoSession: null, hydrated: true });
   useSessions.setState({ records: new Map() });
 });
@@ -91,6 +94,45 @@ describe('shell frame', () => {
     useLayout.setState({ regions: { ...LAYOUT_DEFAULTS.regions, sidebar: { ...LAYOUT_DEFAULTS.regions.sidebar, width: 900 } } });
     render(<Shell />);
     expect(grid().style.gridTemplateColumns).toBe('480px minmax(0, 1fr) 380px');
+  });
+
+  it('keeps the main column at least 480 px wide at the 960 px minimum window, the panel yielding first', () => {
+    const regions = LAYOUT_DEFAULTS.regions;
+    useLayout.setState({ regions: { ...regions, sidebar: { ...regions.sidebar, width: 480 }, panel: { ...regions.panel, width: 640 } } });
+    render(<Shell />);
+    expect(grid().style.gridTemplateColumns).toBe('480px minmax(0, 1fr) 480px'); // 1440 wide: main keeps 480
+    act(() => setWindowWidth(960));
+    expect(grid().style.gridTemplateColumns).toBe('200px minmax(0, 1fr) 280px'); // 960 - 200 - 280 = 480
+    const bounds = () => screen.getAllByRole('separator').map((s) => [s.getAttribute('aria-valuenow'), s.getAttribute('aria-valuemax')]);
+    expect(bounds()).toEqual([['200', '200'], ['280', '280']]);
+    act(() => useLayout.getState().setPanel({ collapsed: true })); // the sidebar may take the panel's room
+    expect(grid().style.gridTemplateColumns).toBe('480px minmax(0, 1fr) 0px');
+    act(() => useLayout.getState().setPanel({ collapsed: false }));
+    act(() => setWindowWidth(1100)); // 620 px of room: the sidebar keeps 340 beside the panel's 280
+    expect(grid().style.gridTemplateColumns).toBe('340px minmax(0, 1fr) 280px');
+    act(() => useLayout.getState().setPanel({ maximized: true })); // the maximized panel is the main column
+    expect(grid().style.gridTemplateColumns).toBe('480px 0px minmax(0, 1fr)');
+    act(() => useLayout.getState().setPanel({ maximized: false }));
+    act(() => setWindowWidth(1440)); // the persisted widths were never touched
+    expect(grid().style.gridTemplateColumns).toBe('480px minmax(0, 1fr) 480px');
+    expect([useLayout.getState().regions.sidebar.width, useLayout.getState().regions.panel.width]).toEqual([480, 640]);
+  });
+
+  it('a drag-collapse of a clamped region keeps its persisted width, so it reopens at that size', () => {
+    const regions = LAYOUT_DEFAULTS.regions;
+    useLayout.setState({ regions: { ...regions, sidebar: { ...regions.sidebar, width: 480 }, panel: { ...regions.panel, width: 640 } } });
+    setWindowWidth(960);
+    render(<Shell />);
+    const sidebarHandle = screen.getByRole('separator', { name: 'Resize sidebar' });
+    const panelHandle = () => screen.getByRole('separator', { name: 'Resize right panel' });
+    const dragBy = (handle: HTMLElement, dx: number) => {
+      act(() => void fireEvent.pointerDown(handle, { pointerId: 1, button: 0, clientX: 500 }));
+      act(() => void fireEvent.pointerMove(handle, { pointerId: 1, clientX: 500 + dx }));
+    };
+    dragBy(sidebarHandle, -50); // shown at 200 (persisted 480): 50 px leftwards is past the collapse threshold
+    expect(useLayout.getState().regions.sidebar).toMatchObject({ collapsed: true, width: 480 });
+    dragBy(panelHandle(), 250); // shown at 480 beside the collapsed sidebar (persisted 640): collapsed
+    expect(useLayout.getState().regions.panel).toMatchObject({ collapsed: true, width: 640 });
   });
 });
 

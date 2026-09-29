@@ -92,9 +92,11 @@ const pathOf = (path: readonly PropertyKey[]) =>
   path.reduce<string>((out, part) => (typeof part === 'number' ? `${out}[${part}]` : out ? `${out}.${String(part)}` : String(part)), '');
 
 // X1's record carries `gateway { routed, baseUrl, autoModeServer }`, C3's status `{ mode, baseUrl, verified, … }`: the
-// scripted `routed` is converted, never copied, to the two outcomes C3's verification produces for a verified launch.
+// scripted `routed` is converted, never copied, to the two outcomes C3's verification produces for a verified launch;
+// an unknown `routed` (null) is a routed launch whose verification has not answered yet.
 function gatewayOf(record: SessionRecord): EngineSessionStatus['gateway'] {
   const { autoModeServer } = record.gateway;
+  if (record.gateway.routed === null) return { mode: 'gateway', baseUrl: null, verified: 'pending', autoModeServer, localLane: null };
   return record.gateway.routed
     ? { mode: 'gateway', baseUrl: RELAY_URL, verified: 'routed', autoModeServer, localLane: null }
     : { mode: 'direct', baseUrl: null, verified: 'direct', autoModeServer, localLane: null };

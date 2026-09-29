@@ -8,7 +8,7 @@ import { isAbsolute } from 'node:path';
 import type { GitBranches, GitChanged, GitDiff, GitDiffInput, GitLog, GitLogInput, GitStatus } from '@shared/ipc/schema/git';
 import { parseBranches, parseLog, parseNumstat, parseRevParse, parseStatus, upstreamRemote } from './porcelain';
 import { createGitRunner, GitCommandError, GitTimeoutError, type ExecFileFn, type GitRun } from './runner';
-import { GitWatcher, type WatchFn } from './watcher';
+import { GitWatcher, type WatchFn, type WatchOwner } from './watcher';
 
 export interface GitServiceOptions {
   emit?: (change: GitChanged) => void; // `git.changed`; main passes the router's emit
@@ -89,14 +89,19 @@ export class GitService {
     }
   }
 
-  // Ref-counted per repository root; answers the directory's status.
-  watch(directory: string): Promise<GitStatus> {
+  // Ref-counted per repository root and per owner (the requesting window); answers the directory's status.
+  watch(directory: string, owner?: WatchOwner): Promise<GitStatus> {
     requireAbsolute(directory);
-    return this.watcher.watch(directory);
+    return this.watcher.watch(directory, owner);
   }
 
-  unwatch(directory: string): void {
-    this.watcher.unwatch(directory);
+  unwatch(directory: string, owner?: WatchOwner): void {
+    this.watcher.unwatch(directory, owner);
+  }
+
+  // Every watch the owner still holds, as when its window closes or reloads.
+  release(owner: WatchOwner): void {
+    this.watcher.release(owner);
   }
 
   dispose(): void {
