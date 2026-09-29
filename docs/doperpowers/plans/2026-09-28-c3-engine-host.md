@@ -916,6 +916,9 @@ Ready to paste into the charter's C3 section as "**Residue decisions (C3, 2026-0
 - Decision: (C8c's ask via the coordinator, 2026-09-28, M6) `GetWorkspaceDiffResponseSchema` is typed from `spikes/protocol-probe/fixtures/pass3/workspace-diff-dirty.jsonl` (seq 8, 10, 13, 18) and `workspace-diff-branch.jsonl` (seq 7, 12) with the shape in the control catalogue above; the two fixtures are pass-3 conformance cases. Master's pass-3 fixtures (C10's `fork-worktree-*`, C8c's `workspace-diff-*`), findings and `run-pass3.mjs` were copied into the branch at 644ea7a as identical files so the conformance sweep of `fixtures/pass3/` replays them before C3 merges.
   Rationale: the fixtures exist and the response was loose; typing it now spares C8c a wire guess.
   Date/Author: 2026-09-28, coordinator via controller.
+- Decision: (C6's check via the coordinator, 2026-09-28) No live event the host emits carries `seq: null`, child-tagged or not: the normaliser's emitter (`src/engine-host/normalizer.ts`, the `Emitter` around line 486) is the only constructor of `SessionEvent`s and stamps `seq` from the journal row for every event, and `session.ts`, `queue.ts`, `broker.ts` and `session-stream.ts` construct no events (their synthesised facts are `meta` rows the normaliser maps); verified by grep (`seq: null` occurs nowhere in `src/engine-host/` or `src/main/attention/` outside tests). C6's form filter therefore drops nothing of the live child transcript. The hand-back lists the fixtures and journals the conformance sweep covered for C6's equivalence gate.
+  Rationale: the M2 decision that every event derives from a journal row made this a structural property rather than a per-site discipline.
+  Date/Author: 2026-09-28, controller.
 
 ## Outcomes & Retrospective
 
