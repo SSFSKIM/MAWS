@@ -728,7 +728,7 @@ test('falls back to the DOM renderer on context loss and returns to WebGL on nex
 
     const lostAt = Date.now();
     await h.call('terminals', 'simulateContextLoss', id);
-    await expect.poll(async () => (await h.info(id))!.acceleration, { timeout: 4_000 }).toBe('dom');
+    await expect.poll(async () => (await h.info(id))!.acceleration, { timeout: 4_000, intervals: [50] }).toBe('dom');
     test.info().annotations.push({ type: 'domAfterMs', description: String(Date.now() - lostAt) });
     expect(await h.hasLine(id, 'BEFORE-LOSS-42'), 'the buffer is intact').toBe(true);
     await h.run(id, 'echo AFTER-LOSS-$((6*7))');
