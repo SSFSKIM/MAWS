@@ -25,14 +25,23 @@ const GIT_STATUS = {
 };
 
 // The page against a fake `window.maws` that behaves like main: `settings.set` answers the new state and emits
-// `settings.changed` first, as the router does; both hosts are ready; the PTY host answers a write to its shell with
-// the terminal's echo of the line and then the command's output, and resolves `echoed` once both are delivered.
+// `settings.changed` first, as the router does; both hosts are ready; the PTY host records a write to its shell and
+// answers nothing until the test calls `answerEcho()`, which delivers the terminal's echo of the line and then the
+// command's output and resolves `echoed`. No timer is involved, so "not yet answered" cannot race the delivery.
 function fakeMain(initial: SettingsState['settings']['theme']) {
   let theme = initial;
   let markEchoed!: () => void;
   const echoed = new Promise<void>((resolve) => (markEchoed = resolve));
   const listeners = new Map<string, Set<(payload: unknown) => void>>();
   const send = (name: string, payload: unknown) => listeners.get(name)?.forEach((l) => l(payload));
+  let written = '';
+  const answerEcho = () => {
+    // Since C9 the stream is binary: each chunk is bytes stamped with its stream offset.
+    const line = new TextEncoder().encode(`${written}\n`);
+    send('pty.data', { ptyId: 'p1', offset: 0, data: line });
+    send('pty.data', { ptyId: 'p1', offset: line.byteLength, data: new TextEncoder().encode('MAWS_ECHO_OK\r\n$ ') });
+    markEchoed();
+  };
   const state = () => ({ settings: { version: 2, keymap: {}, notifications: { enabled: true, sound: false }, theme }, resolvedTheme: theme === 'dark' ? 'dark' : 'light' });
   const answer = (name: string, input: { theme: typeof theme; data: string }) => {
     switch (name) {
@@ -92,11 +101,7 @@ function fakeMain(initial: SettingsState['settings']['theme']) {
       case 'pty.spawn':
         return { ptyId: 'p1', pid: 3333 };
       case 'pty.write':
-        setTimeout(() => {
-          send('pty.data', { ptyId: 'p1', data: `${input.data}\n` });
-          send('pty.data', { ptyId: 'p1', data: 'MAWS_ECHO_OK\r\n$ ' });
-          markEchoed();
-        });
+        written = input.data;
         return undefined;
       default:
         throw new Error(`unexpected ${name}`);
@@ -111,7 +116,7 @@ function fakeMain(initial: SettingsState['settings']['theme']) {
     }),
   } as unknown as MawsBridge;
   current = { send };
-  return { send, echoed };
+  return { send, echoed, answerEcho };
 }
 
 let current: { send(name: string, payload: unknown): void } | null = null;
@@ -199,9 +204,12 @@ describe('hosts in the diagnostics strip', () => {
     // Until the shell answers, nothing in the strip may contain the marker a reader (or the smoke) looks for.
     expect(echo()).not.toBe('');
     expect(echo()).not.toContain('MAWS_ECHO_OK');
-    // Wait on the shell's answer itself, not a timing window: the store settles synchronously inside the second
-    // `pty.data` delivery, so its state is set before `echoed` resumes this callback and act renders it.
-    await act(async () => void (await main.echoed));
+    // The shell answers only now: the store settles synchronously inside the second `pty.data` delivery, so its
+    // state is set before `echoed` resumes this callback and act renders it.
+    await act(async () => {
+      main.answerEcho();
+      await main.echoed;
+    });
     expect(window.maws.invoke).toHaveBeenCalledWith('pty.spawn', expect.objectContaining({ shell: '/bin/sh' }));
     expect(echo()).toBe('MAWS_ECHO_OK · shell pid 3333');
   });

@@ -1,0 +1,29 @@
+{
+  "renderer": "xterm",
+  "workload": "W2 base64 urandom",
+  "phase": "m1",
+  "expectedBytes": 20165289,
+  "bytes": 20165289,
+  "outputBytes": 20000000,
+  "lineFeeds": 165289,
+  "extraCarriageReturns": 0,
+  "seconds": 0.916,
+  "lastLine": "7ulNAUcuSXJ/YZOCIIm+5J8YHO925xj",
+  "lineCount": 10040,
+  "heapMB": 48,
+  "blockedInputEvents": 0,
+  "frames": {
+    "count": 109,
+    "p50": 8.300000000000182,
+    "p95": 9.299999999999727,
+    "max": 9.400000000000091,
+    "over33ms": 0,
+    "over50ms": 0
+  },
+  "longTasks": {
+    "count": 0,
+    "totalMs": 0,
+    "max": 0
+  },
+  "mbps": 22.02
+}

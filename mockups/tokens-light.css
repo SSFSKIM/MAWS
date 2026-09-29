@@ -6,4 +6,11 @@
   --accent: #c9663f; --accent-soft: rgba(201,102,63,0.14);
   --success: #1f8f55; --warning: #b86a1a; --danger: #c93b3b; --info: #3b6fd1;
   --diff-add-bg: rgba(31,143,85,0.14); --diff-del-bg: rgba(201,59,59,0.12);
+
+  /* Terminal (C9, X7 extension; values advisory): a VS Code-light-derived readable set on a white ground. */
+  --term-bg: var(--bg-raised); --term-fg: var(--fg); --term-cursor: #c9663f; --term-cursor-fg: #ffffff; --term-selection: rgba(201,102,63,0.25);
+  --term-ansi-black: #1f1e1b; --term-ansi-red: #cd3131; --term-ansi-green: #00795b; --term-ansi-yellow: #949800;
+  --term-ansi-blue: #0451a5; --term-ansi-magenta: #bc05bc; --term-ansi-cyan: #0598bc; --term-ansi-white: #555555;
+  --term-ansi-bright-black: #666666; --term-ansi-bright-red: #cd3131; --term-ansi-bright-green: #14ce14; --term-ansi-bright-yellow: #b5ba00;
+  --term-ansi-bright-blue: #0451a5; --term-ansi-bright-magenta: #bc05bc; --term-ansi-bright-cyan: #0598bc; --term-ansi-bright-white: #a5a5a5;
 }

@@ -1,0 +1,50 @@
+{
+  "note": "Diagnostic run of 2026-09-28 19:49 UTC (12:49 local) with the ghostty adapter's scrollback option temporarily set to 100000000 to test whether the option is honoured at all (it is, as a byte budget: 20034 lines kept). The decisive item-7 run at the real option value (10000) is results/ghostty-items-scrollback-10000.json.",
+  "shell": {
+    "pid": 3456,
+    "prompt": " new    a   12:49   "
+  },
+  "less": {
+    "alternateScreenWhileOpen": true,
+    "firstLineWhileOpen": "#",
+    "priorLinesIntact": true,
+    "residueLines": [
+      " new    a   12:49   "
+    ],
+    "lineCountBefore": 48,
+    "lineCountAfter": 48
+  },
+  "scrollback": {
+    "lineCount": 20034,
+    "rows": 48,
+    "expectedLineCount": 10048,
+    "firstLine": " new    a   12:49    seq 1 30",
+    "expectedFirstLine": "9953",
+    "note": "the first buffer line is the line that scrolled out last but one prompt line and the typed command also occupy the buffer"
+  },
+  "links": {
+    "osc8": null,
+    "bare": null
+  },
+  "selection": {
+    "selectedLength": 106,
+    "clipboardEqualsSelection": true,
+    "pastedEqualsSelection": false,
+    "sample": "apwrapwrapwrapwrapwrapwrapwrapwrapwrapwr"
+  },
+  "keys": {
+    "shiftEnter": "\\x0d",
+    "altLeft": "\\x1b[1;3D",
+    "ctrlLeft": "\\x1b[1;5D"
+  },
+  "resize": {
+    "at30": {
+      "stty": "48 122",
+      "pane": "48 122"
+    },
+    "at50": {
+      "stty": "48 86",
+      "pane": "48 86"
+    }
+  }
+}

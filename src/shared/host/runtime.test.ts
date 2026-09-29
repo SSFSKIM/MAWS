@@ -113,9 +113,10 @@ describe('host runtime speaks the host protocol', () => {
     const fake = fakePort();
     let emit!: Parameters<Parameters<typeof createHostRuntime>[0]>[1];
     createHostRuntime((_on, e) => (emit = e)).serve(fake.port);
-    emit('pty.data', { ptyId: 'p' as never, data: 'hi' });
-    emit('pty.data', { ptyId: 'p' as never, data: 5 as never });
-    expect(fake.posted).toEqual([{ t: 'evt', name: 'pty.data', payload: { ptyId: 'p', data: 'hi' } }]);
+    const data = new Uint8Array([104, 105]);
+    emit('pty.data', { ptyId: 'p' as never, offset: 0, data });
+    emit('pty.data', { ptyId: 'p' as never, offset: 2, data: 'hi' as never });
+    expect(fake.posted).toEqual([{ t: 'evt', name: 'pty.data', payload: { ptyId: 'p', offset: 0, data } }]);
     expect(log).toHaveBeenCalledWith(expect.stringContaining('pty.data'), expect.anything());
   });
 

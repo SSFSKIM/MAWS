@@ -12,6 +12,13 @@ import { connectVisibility } from './session/visibility';
 import { persistLayout } from './stores/layout';
 import { useSettings } from './stores/settings';
 import { connectTranscript } from './transcript/shell'; // C6
+// C8a start
+import { registerSlot } from './app/slots';
+import { connectPanelEvents } from './ipc/events';
+import { connectPanelHost, registerPanelTool } from './panel/host';
+import { PanelHost } from './panel/PanelHost';
+import { adoptTerminals, terminalTool } from './tools/terminal';
+// C8a end
 // C7 start
 import { ComposerAppKeys, connectComposer } from './composer';
 import { connectRequestCard } from './request-card';
@@ -31,6 +38,23 @@ export function App() {
   useEffect(() => connectScenarioSessionCreator(), []); // C5: the stub's session creator in launch mode scenario
   useEffect(() => connectVisibility(), []); // C5: which sessions are on screen, for the unread rule
   useEffect(() => connectTranscript(), []); // C6: the transcript slot and its path chips' file tabs
+  // C8a start: the panel host into C5's slot, and its store-driven transitions (the hydration barrier, reconciliation,
+  // the collapse focus). Below `persistLayout` on purpose: the barrier writes inside the hydration notification, and
+  // persistence must already be subscribed to hear it.
+  useEffect(() => {
+    registerSlot('panelHost', PanelHost);
+    return connectPanelHost();
+  }, []);
+  useEffect(() => connectPanelEvents(), []); // the summary's git.changed and fs.workflowChanged
+  // Tool registration is the panel host's line (ruling O2). Never unregistered: a registration's disposer closes the
+  // tool's tabs, which StrictMode's effect replay would do on every mount.
+  useEffect(() => {
+    registerPanelTool(terminalTool); // C9's Terminal
+    // After a renderer reload the PTY host still runs the shells of the restored Terminal tabs: re-adopt them. A tab
+    // restored before this answers waits for it (`ensureTerminal`), so it reattaches rather than starting a second shell.
+    void adoptTerminals();
+  }, []);
+  // C8a end
   // C7 start: the X4 card in C5's requestCard slot (docked, card, hover) and C6's transcript request slot (inline)
   useEffect(() => connectRequestCard(), []);
   useEffect(() => connectStatusLine(), []); // the shared ClaudeUsage read and the near-limit banner, app-wide

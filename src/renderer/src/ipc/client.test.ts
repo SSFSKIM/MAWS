@@ -72,7 +72,7 @@ describe('renderer ipc client', () => {
     const { bridge, deliver } = fakeBridge(null);
     const listener = vi.fn();
     createClient(() => bridge).on('pty.data', listener);
-    deliver('pty.data', { ptyId: 'p1', data: 42 });
+    deliver('pty.data', { ptyId: 'p1', offset: 0, data: 42 });
     expect(listener).not.toHaveBeenCalled();
     expect(log).toHaveBeenCalledExactlyOnceWith(
       expect.stringContaining('pty.data'),

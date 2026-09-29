@@ -10,6 +10,10 @@ import { createFreshness } from '../stores/freshness';
 import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
 import { ipc } from './client';
+// C8a start
+import { useGit } from '../stores/git';
+import { queryClient } from './query';
+// C8a end
 
 export interface ShellStores {
   sessions: typeof useSessions;
@@ -73,3 +77,15 @@ export function connectShell(client: MawsBridge = ipc, stores: ShellStores = { s
     offs.forEach((off) => off());
   };
 }
+
+// C8a start: the panel summary's pushed facts (C8a execution document, Repository map). A separate connection, mounted
+// by App.tsx's C8a block and by the `#panel` harness: C4's `git.changed` into the git store, and `fs.workflowChanged`
+// invalidating that session's cached `fs.workflows` (a disk-only session's Background work).
+export function connectPanelEvents(client: MawsBridge = ipc): () => void {
+  const offs = [
+    client.on('git.changed', (event) => useGit.getState().applyChanged(event)),
+    client.on('fs.workflowChanged', ({ appSessionId }) => void queryClient.invalidateQueries({ queryKey: ['maws', 'fs.workflows', { appSessionId }] })),
+  ];
+  return () => offs.forEach((off) => off());
+}
+// C8a end

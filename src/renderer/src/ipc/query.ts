@@ -18,6 +18,7 @@ export const QUERY_COMMANDS = [
   'engine.hostState',
   'pty.ping',
   'pty.hostState',
+  'fs.workflows', // C8a: a disk-only session's workflow runs (the summary's Background work), invalidated on fs.workflowChanged
   // C7 start: the composer's, the request card's and the status line's reads (C7 execution document, Repository map)
   'attention.request',
   'session.catalog',

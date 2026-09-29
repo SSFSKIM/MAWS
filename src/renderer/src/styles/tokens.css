@@ -19,6 +19,13 @@
   --text-ui: 13px; --text-ui-sm: 12px; --text-prose: 15.5px; --lh-prose: 1.6; --measure: 72ch; --text-code: 13px;
   --radius-sm: 6px; --radius: 10px; --radius-lg: 14px; --space: 4px;
   --row-h: 30px; --toolbar-h: 44px; --sidebar-w: 300px; --panel-w: 380px;
+
+  /* Terminal (C9, X7 extension; values advisory): a VS Code-light-derived readable set on a white ground. */
+  --term-bg: var(--bg-raised); --term-fg: var(--fg); --term-cursor: #c9663f; --term-cursor-fg: #ffffff; --term-selection: rgba(201,102,63,0.25);
+  --term-ansi-black: #1f1e1b; --term-ansi-red: #cd3131; --term-ansi-green: #00795b; --term-ansi-yellow: #949800;
+  --term-ansi-blue: #0451a5; --term-ansi-magenta: #bc05bc; --term-ansi-cyan: #0598bc; --term-ansi-white: #555555;
+  --term-ansi-bright-black: #666666; --term-ansi-bright-red: #cd3131; --term-ansi-bright-green: #14ce14; --term-ansi-bright-yellow: #b5ba00;
+  --term-ansi-bright-blue: #0451a5; --term-ansi-bright-magenta: #bc05bc; --term-ansi-bright-cyan: #0598bc; --term-ansi-bright-white: #a5a5a5;
 }
 
 [data-theme="dark"] {
@@ -29,4 +36,11 @@
   --accent: #d97757; --accent-soft: rgba(217,119,87,0.16);
   --success: #4cc38a; --warning: #f0a35e; --danger: #f26d6d; --info: #7aa2f7;
   --diff-add-bg: rgba(76,195,138,0.16); --diff-del-bg: rgba(242,109,109,0.16);
+
+  /* Terminal (C9): the same family on the raised dark ground. */
+  --term-bg: var(--bg-raised); --term-fg: var(--fg); --term-cursor: #d97757; --term-cursor-fg: #1a1a1a; --term-selection: rgba(217,119,87,0.30);
+  --term-ansi-black: #1a1a1a; --term-ansi-red: #f26d6d; --term-ansi-green: #4cc38a; --term-ansi-yellow: #f0c674;
+  --term-ansi-blue: #7aa2f7; --term-ansi-magenta: #d98ee6; --term-ansi-cyan: #5fd7e5; --term-ansi-white: #c8c6c3;
+  --term-ansi-bright-black: #6b6966; --term-ansi-bright-red: #ff8a8a; --term-ansi-bright-green: #6ee7a8; --term-ansi-bright-yellow: #ffd88a;
+  --term-ansi-bright-blue: #9cbaff; --term-ansi-bright-magenta: #e9a8f5; --term-ansi-bright-cyan: #8ae9f5; --term-ansi-bright-white: #f2f0ed;
 }

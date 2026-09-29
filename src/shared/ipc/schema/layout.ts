@@ -79,7 +79,24 @@ export const LAYOUT_DEFAULTS: { regions: LayoutRegions; main: LayoutMain; panelP
   panelPinned: [],
 };
 
-export const LayoutKeySchema = z.union([z.literal('regions'), z.literal('main.tabs'), z.literal('panel.pinned'), z.string().regex(/^panel\.[^.]+$/), z.literal('window.main'), z.literal('usage.banners')]); // C7: usage.banners
+// C8a start: the panel summary's collapsed sections (C8a execution document, Interfaces *Layout key
+// `summary.sections`*), written by `stores/summary.ts`; an absent key means every section expanded. Outside the
+// `panel.` namespace on purpose: C5's hydration reads every `panel.<x>` key as a session's list.
+export const SUMMARY_SECTIONS = ['environment', 'push', 'subagents', 'background', 'sources'] as const;
+export type SummarySection = (typeof SUMMARY_SECTIONS)[number];
+export const SummarySectionsSchema = z.strictObject({ version: z.literal(1), collapsed: z.array(z.enum(SUMMARY_SECTIONS)) });   // key `summary.sections`
+export type SummarySections = z.infer<typeof SummarySectionsSchema>;
+// C8a end
+
+export const LayoutKeySchema = z.union([
+  z.literal('regions'), z.literal('main.tabs'), z.literal('panel.pinned'), z.string().regex(/^panel\.[^.]+$/), z.literal('window.main'),
+  // C8a start
+  z.literal('summary.sections'),
+  // C8a end
+  // C7 start
+  z.literal('usage.banners'),
+  // C7 end
+]);
 export type LayoutKey = z.infer<typeof LayoutKeySchema>;
 
 // C7 start: the composer's file picker and the near-limit banners' dismissals (C7 execution document, Interfaces "X2

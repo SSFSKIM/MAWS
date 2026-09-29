@@ -1,0 +1,17 @@
+{
+  "step": "scroll",
+  "startedAt": "2026-09-29T01:31:55.586Z",
+  "item3": {
+    "pid": 21314,
+    "pidAfter": 21314,
+    "ptyListPid": 21314,
+    "lastLineWhenShown": 1117,
+    "lastLineAfterWheel": 1487,
+    "bufferFirstLine": " new    a   18:31    for i in $(seq 1 100000); do echo line $i; sleep 0.001; done",
+    "bufferLines": 1119,
+    "note": "m5-03-scrolled-up.png shows the viewport after 4000 px of wheel while the loop still prints"
+  },
+  "console": [
+    "warning: task queue exceeded allotted deadline by 25ms"
+  ]
+}

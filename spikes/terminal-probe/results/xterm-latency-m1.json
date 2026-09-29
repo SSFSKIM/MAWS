@@ -1,0 +1,34 @@
+{
+  "renderer": "xterm",
+  "workload": "input echo latency (cat)",
+  "phase": "m1",
+  "expectedBytes": null,
+  "bytes": 188,
+  "outputBytes": 184,
+  "lineFeeds": 4,
+  "extraCarriageReturns": 0,
+  "seconds": 0.347,
+  "lastLine": "cdefghijklmnopqrstuv",
+  "lineCount": 40,
+  "heapMB": 48,
+  "blockedInputEvents": 0,
+  "latency": {
+    "count": 100,
+    "p50": 0.3,
+    "p95": 1,
+    "max": 4.9
+  },
+  "frames": {
+    "count": 41,
+    "p50": 8.300000000001091,
+    "p95": 9.399999999999636,
+    "max": 9.399999999999636,
+    "over33ms": 0,
+    "over50ms": 0
+  },
+  "longTasks": {
+    "count": 0,
+    "totalMs": 0,
+    "max": 0
+  }
+}

@@ -1,0 +1,48 @@
+start 2026-09-28 19:27:37 -0700
+19:27  up  7:29, 24 users, load averages: 30.93 27.05 21.93
+$ pnpm typecheck && pnpm lint && pnpm test && pnpm build && pnpm e2e && pnpm build:app && pnpm e2e:packaged
+$ tsc --noEmit -p tsconfig.node.json --composite false && tsc --noEmit -p tsconfig.web.json --composite false && tsc --noEmit -p tsconfig.e2e.json --composite false
+$ eslint .
+$ vitest run
+Testing types with tsc and vue-tsc is an experimental feature.
+Breaking changes might not follow SemVer, please pin Vitest's version when using it.
+
+ RUN  v5.0.2 /Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a6f3eb0835c0683ff
+
+ ❯ |renderer| src/renderer/src/App.test.tsx (6 tests | 1 failed) 283ms
+   ❯ hosts in the diagnostics strip (3)
+     × runs the echo test and shows the output line with the shell’s pid 16ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |renderer| src/renderer/src/App.test.tsx > hosts in the diagnostics strip > runs the echo test and shows the output line with the shell’s pid
+AssertionError: expected 'MAWS_ECHO_OK · shell pid 3333' not to contain 'MAWS_ECHO_OK'
+
+Expected: "MAWS_ECHO_OK"
+Received: "MAWS_ECHO_OK · shell pid 3333"
+
+ ❯ src/renderer/src/App.test.tsx:125:24
+    123|     // Until the shell answers, nothing in the strip may contain the m…
+    124|     expect(echo()).not.toBe('');
+    125|     expect(echo()).not.toContain('MAWS_ECHO_OK');
+       |                        ^
+    126|     // Polled rather than a fixed wait: under a loaded parallel run th…
+    127|     await vi.waitFor(() => expect(echo()).toBe('MAWS_ECHO_OK · shell p…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 41 passed (42)
+      Tests  1 failed | 416 passed (417)
+Type Errors  no errors
+   Start at  19:27:47
+   Duration  15.44s (tests 60%, environment 19%, transform 9%, import 8%, typecheck 3%, worker 1%)
+
+    Isolate  40 workers spawned · ~244ms startup each (spawn + environment, per file)
+             at least ~842ms faster with isolate: false — reuses workers across files instead of one per file
+
+[ELIFECYCLE] Test failed. See above for more details.
+[ELIFECYCLE] Command failed with exit code 1.
+exit 1
+end 2026-09-28 19:28:03 -0700
+19:28  up  7:29, 24 users, load averages: 23.39 25.59 21.55

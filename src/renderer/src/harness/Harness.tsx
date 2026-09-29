@@ -16,11 +16,7 @@ import { FIXTURES, loadFixture } from './fixtures';
 import { FrameMetrics, percentile } from './metrics';
 import { HarnessSession } from './player';
 
-declare global {
-  interface Window {
-    __maws_harness?: HarnessApi;
-  }
-}
+// `window.__maws_harness` is declared once for every harness page, this one's members included (`./env.d.ts`).
 
 const SPEEDS = [0, 1, 4, 16];
 const nextFrame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
@@ -146,7 +142,7 @@ export function Harness() {
       setError(String(reason));
     }
   };
-  const api = () => window.__maws_harness!;
+  const api = () => window.__maws_harness as HarnessApi; // this page assigned it on mount
   const toggleTheme = () => {
     const root = document.documentElement;
     root.dataset.theme = root.dataset.theme === 'dark' ? 'light' : 'dark';
@@ -265,7 +261,7 @@ function HarnessButton({ onClick, children }: { onClick: () => void; children: R
 function MetricsOverlay() {
   const [metrics, setMetrics] = useState<HarnessMetrics | null>(null);
   useEffect(() => {
-    const timer = setInterval(() => setMetrics(window.__maws_harness?.metrics() ?? null), 500);
+    const timer = setInterval(() => setMetrics(window.__maws_harness?.metrics?.() ?? null), 500);
     return () => clearInterval(timer);
   }, []);
   if (!metrics) return null;
