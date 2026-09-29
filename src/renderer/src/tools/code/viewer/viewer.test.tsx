@@ -1,6 +1,7 @@
 // The file viewer (C8c execution document, M2): the kind decision and its caps, the data URL by encoding, the line jump's
 // target, and the `fileTab` slot over a fake X2 client (a refusal in words, continuation reads, the line jump, Source,
 // the follow-the-file refresh, the no-session tab).
+import { EditorView } from '@codemirror/view';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mimeOf } from '@shared/files/mime';
@@ -277,6 +278,96 @@ describe('viewer', () => {
     act(() => main.emit('files.changed', { appSessionId: A, path: '/r/app.ts', kind: 'removed' }));
     await waitFor(() => expect(notice()).toBe('File removed'));
     expect(codeText()).toBe('const a = 2;');
+  });
+
+  it('does not take an event for a file that merely ends like its own', async () => {
+    const main = serve({ '/r/app.ts': 'x\n' });
+    connect();
+    render(<FileViewer tab={fileTab('/r/app.ts')} />);
+    await waitFor(() => expect(codeText()).toBe('x'));
+    act(() => main.emit('files.changed', { appSessionId: A, path: '/x/r/app.ts', kind: 'removed' }));
+    act(() => main.emit('files.changed', { appSessionId: A, path: '/x/r', kind: 'changed' }));
+    act(() => main.emit('files.changed', { appSessionId: A, path: '/x/r', kind: 'invalidated' }));
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(main.callsOf('files.read')).toHaveLength(1);
+    expect(notice()).toBeNull();
+  });
+
+  it('a follow-the-file re-read of a head keeps what Load more had reached', async () => {
+    // Long lines: happy-dom has no layout, and CodeMirror replacing a whole document of 200,000 short lines there lays
+    // them all out.
+    const main = serve({ '/r/big.log': { generated: 20 * MiB, line: `${'log line '.repeat(28)}\n` } });
+    connect();
+    render(<FileViewer tab={fileTab('/r/big.log')} />);
+    await waitFor(() => expect(notice()).toBe('Showing the first 1.0 MB of 20.0 MB'));
+    fireEvent.click(screen.getByRole('button', { name: 'Load more' }));
+    await waitFor(() => expect(notice()).toBe('Showing the first 2.0 MB of 20.0 MB'));
+    main.calls.splice(0);
+    act(() => main.emit('files.changed', { appSessionId: A, path: '/r/big.log', kind: 'changed' }));
+    await waitFor(() => expect(main.callsOf('files.read').map((input) => input.offset)).toEqual([0, MiB]));
+    await waitFor(() => expect(document.querySelector('[data-updated]')).not.toBeNull());
+    expect(notice()).toBe('Showing the first 2.0 MB of 20.0 MB');
+  });
+
+  it('shows File removed with the last content when the file goes during a re-read continuation', async () => {
+    const text = 'b'.repeat(MiB + 10);
+    let gone = false;
+    const main = installFakeMain(async (name, input) => {
+      if (name !== 'files.read') return ok();
+      const offset = (input.offset as number | undefined) ?? 0;
+      if (gone && offset > 0) return fail(`not found: /r/log.txt`);
+      const end = Math.min(text.length, offset + MiB);
+      return ok({ encoding: 'utf8', content: text.slice(offset, end), bytes: text.length, offset, length: end - offset, truncated: end < text.length, mime: 'text/plain' });
+    });
+    connect();
+    render(<FileViewer tab={fileTab('/r/log.txt')} />);
+    await waitFor(() => expect(useViewer.getState().entries.get('file:/r/log.txt')?.complete).toBe(true));
+    gone = true;
+    act(() => main.emit('files.changed', { appSessionId: A, path: '/r/log.txt', kind: 'changed' }));
+    await waitFor(() => expect(notice()).toBe('File removed'));
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(useViewer.getState().entries.get('file:/r/log.txt')?.text).toBe(text);
+  });
+
+  it('lets no load of a pruned tab land in the entry that replaced it', async () => {
+    const gates = [deferred<void>(), deferred<void>()];
+    let reads = 0;
+    const answers = ['old\n', 'new\n'];
+    installFakeMain(async (name) => {
+      if (name !== 'files.read') return ok();
+      const n = reads++;
+      await gates[n].promise;
+      return ok({ encoding: 'utf8', content: answers[n], bytes: 4, offset: 0, length: 4, truncated: false, mime: 'text/plain' });
+    });
+    openFile(A, '/r/a.txt');
+    const first = render(<FileViewer tab={fileTab('/r/a.txt')} />);
+    await waitFor(() => expect(reads).toBe(1));
+    first.unmount();
+    act(() => useLayout.getState().closeTab('file:/r/a.txt')); // pruned while its read is in flight
+    expect(useViewer.getState().entries.has('file:/r/a.txt')).toBe(false);
+    openFile(A, '/r/a.txt');
+    render(<FileViewer tab={fileTab('/r/a.txt')} />);
+    await waitFor(() => expect(reads).toBe(2));
+    await act(async () => gates[1].resolve());
+    await waitFor(() => expect(codeText()).toBe('new'));
+    await act(async () => gates[0].resolve());
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(useViewer.getState().entries.get('file:/r/a.txt')?.text).toBe('new\n');
+  });
+
+  it("takes CodeMirror's dark theme with the page's, so none of its light base colours apply in dark", async () => {
+    serve({ '/r/app.ts': 'x\n' });
+    document.documentElement.dataset.theme = 'dark';
+    try {
+      render(<FileViewer tab={fileTab('/r/app.ts')} />);
+      await waitFor(() => expect(codeText()).toBe('x'));
+      const view = () => EditorView.findFromDOM(document.querySelector('.cm-editor') as HTMLElement)!;
+      expect(view().state.facet(EditorView.darkTheme)).toBe(true);
+      act(() => void (document.documentElement.dataset.theme = 'light'));
+      await waitFor(() => expect(view().state.facet(EditorView.darkTheme)).toBe(false));
+    } finally {
+      delete document.documentElement.dataset.theme;
+    }
   });
 
   it('re-reads and re-watches after its directory watch is invalidated', async () => {

@@ -9,7 +9,7 @@ import { highlightSelectionMatches, search, searchKeymap } from '@codemirror/sea
 import { Compartment, EditorState, StateEffect, StateField, type Extension } from '@codemirror/state';
 import { Decoration, EditorView, highlightActiveLine, highlightActiveLineGutter, keymap, lineNumbers, type DecorationSet } from '@codemirror/view';
 import { useEffect, useRef } from 'react';
-import { codeHighlightStyle, codeTheme } from './code-theme';
+import { codeHighlightStyle, codeThemeDark, codeThemeLight } from './code-theme';
 import { jumpTarget } from './kinds';
 import { languageFor, languageNameFor } from './languages';
 import { useViewer, viewState, type ViewerEntry } from './viewer-store';
@@ -20,6 +20,10 @@ export const FLASH_CLASS = 'cm-flash-line';
 // Module-level, so an EditorState a view left behind reconfigures under the next view of the same tab.
 const wrapping = new Compartment();
 const language = new Compartment();
+const theming = new Compartment();
+
+// The page's theme, as the shell and the harness set it on the root element (C9's terminal reads it the same way).
+const pageTheme = () => (document.documentElement.dataset.theme === 'dark' ? codeThemeDark : codeThemeLight);
 
 const flash = StateEffect.define<number | null>(); // a line's start, or null to clear
 const flashLine = Decoration.line({ class: FLASH_CLASS });
@@ -44,7 +48,7 @@ const extensions = (wrap: boolean): Extension[] => [
   highlightSelectionMatches(),
   keymap.of(searchKeymap),
   syntaxHighlighting(codeHighlightStyle),
-  codeTheme,
+  theming.of(pageTheme()),
   flashField,
   wrapping.of(wrap ? EditorView.lineWrapping : []),
   language.of([]),
@@ -79,7 +83,12 @@ export default function CodeView({ entry, wrap }: { entry: ViewerEntry; wrap: bo
       scrollTo(view, () => top);
     }
     saved.ratioPending = false;
+    // A state left behind under the other theme, and every later switch, take the page's theme.
+    view.dispatch({ effects: theming.reconfigure(pageTheme()) });
+    const themes = new MutationObserver(() => view.dispatch({ effects: theming.reconfigure(pageTheme()) }));
+    themes.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
     return () => {
+      themes.disconnect();
       if (flashTimer.current !== null) clearTimeout(flashTimer.current);
       flashTimer.current = null;
       const state = view.state.update({ effects: flash.of(null) }).state; // a flash does not outlive its view

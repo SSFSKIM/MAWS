@@ -110,15 +110,21 @@ function SessionTree({ ui, appSessionId, session }: { ui: StoreApi<FilesUi>; app
     [rootEntries, listings, appSessionId, view.expanded, roles],
   );
 
-  useEffect(() => useFiles.getState().list(appSessionId, null), [appSessionId]);
-  // Watches follow the expansion set (declared before the listing effect, so a first listing waits for its watch).
+  // The roots, again whenever the record changes the directories the session may read.
+  const declared = session ? rootsFor(session).map((c) => c.path).join('\0') : '';
+  useEffect(() => useFiles.getState().list(appSessionId, null), [appSessionId, declared]);
+  // Watches follow the expanded directories that are shown: one under a collapsed parent keeps its expansion in memory
+  // but is not watched (nor listed) while hidden. Declared before the listing effect, so a first listing waits for its
+  // watch.
+  const shown = rows.flatMap((row) => (row.kind !== 'notice' && row.expanded ? [row.path] : [])).join('\0'); // NUL: the one byte no path holds
   useEffect(() => {
-    const holds = [...view.expanded].map((path) => useFiles.getState().watch(appSessionId, path));
+    const holds = shown === '' ? [] : shown.split('\0').map((path) => useFiles.getState().watch(appSessionId, path));
     return () => holds.forEach((hold) => hold.release());
-  }, [appSessionId, view.expanded]);
+  }, [appSessionId, shown]);
   useEffect(() => {
-    for (const path of view.expanded) if (!useFiles.getState().listing(appSessionId, path)) useFiles.getState().list(appSessionId, path);
-  }, [appSessionId, view.expanded]);
+    if (shown === '') return;
+    for (const path of shown.split('\0')) if (!useFiles.getState().listing(appSessionId, path)) useFiles.getState().list(appSessionId, path);
+  }, [appSessionId, shown]);
 
   // A reveal: expand the path's ancestors under its root and select it; a path under no root opens its tab anyway,
   // where the viewer says why it cannot be read.

@@ -27,23 +27,41 @@ export const codeHighlightStyle = HighlightStyle.define([
   { tag: t.strikethrough, textDecoration: 'line-through' },
 ]);
 
-export const codeTheme = EditorView.theme({
+// Every colour CodeMirror's base themes set for what the code view uses (the view, search, the gutters, selection,
+// panels) is restated from tokens, at the base rule's specificity or above: a base rule wins over a theme rule of lower
+// specificity (`.cm-button:active`, the focused selection layer), and ties go to the theme, which is mounted later.
+// Built twice, light and dark, so CodeMirror's `&light`/`&dark` base rules follow the page's theme too.
+const spec = {
   '&': { height: '100%', color: 'var(--fg)', backgroundColor: 'var(--bg)', fontSize: 'var(--text-code)' },
   '&.cm-focused': { outline: 'none' },
   '.cm-scroller': { fontFamily: 'var(--font-mono)', lineHeight: '1.55' },
   '.cm-content': { caretColor: 'var(--fg)' },
+  '.cm-cursor, .cm-dropCursor': { borderLeftColor: 'var(--fg)' },
   '.cm-gutters': { backgroundColor: 'var(--bg)', color: 'var(--code-gutter-fg)', border: 'none' },
   '.cm-lineNumbers .cm-gutterElement': { paddingLeft: '12px', paddingRight: '8px' },
   '.cm-activeLine': { backgroundColor: 'var(--code-line-active-bg)' },
   '.cm-activeLineGutter': { backgroundColor: 'var(--code-line-active-bg)', color: 'var(--fg-muted)' },
-  '.cm-selectionBackground, &.cm-focused .cm-selectionBackground, .cm-content ::selection': { backgroundColor: 'var(--code-selection-bg)' },
+  '.cm-specialChar': { color: 'var(--code-invalid)' },
+  '.cm-placeholder': { color: 'var(--fg-faint)' },
+  '.cm-selectionBackground, .cm-content ::selection': { backgroundColor: 'var(--code-selection-bg)' },
+  '&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground': { backgroundColor: 'var(--code-selection-bg)' },
   '.cm-selectionMatch': { backgroundColor: 'var(--accent-soft)' },
   '.cm-searchMatch': { backgroundColor: 'var(--accent-soft)', outline: '1px solid var(--border-strong)' },
   '.cm-searchMatch.cm-searchMatch-selected': { backgroundColor: 'var(--code-selection-bg)' },
+  '&.cm-focused .cm-matchingBracket': { backgroundColor: 'var(--accent-soft)' },
+  '&.cm-focused .cm-nonmatchingBracket': { backgroundColor: 'var(--diff-del-bg)' },
+  '.cm-foldPlaceholder': { backgroundColor: 'var(--bg-raised)', border: '1px solid var(--border)', color: 'var(--fg-muted)' },
   '.cm-panels': { backgroundColor: 'var(--bg-raised)', color: 'var(--fg)' },
   '.cm-panels.cm-panels-top': { borderBottom: '1px solid var(--border)' },
+  '.cm-panels.cm-panels-bottom': { borderTop: '1px solid var(--border)' },
   '.cm-panel.cm-search': { fontFamily: 'var(--font-ui)', fontSize: 'var(--text-ui-sm)', padding: '4px 8px' },
   '.cm-textfield': { backgroundColor: 'var(--bg)', color: 'var(--fg)', border: '1px solid var(--border-strong)', borderRadius: 'var(--radius-sm)' },
   '.cm-button': { backgroundImage: 'none', backgroundColor: 'var(--bg-raised)', color: 'var(--fg)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)' },
+  '.cm-button:active': { backgroundImage: 'none', backgroundColor: 'var(--bg-active)' },
+  '.cm-textfield:focus, .cm-button:focus-visible': { outline: '2px solid var(--accent)', outlineOffset: '-1px' }, // not the UA's ring
+  '.cm-panel.cm-search input[type=checkbox]': { accentColor: 'var(--accent)' },
   '.cm-panel.cm-search [name=close]': { color: 'var(--fg-muted)' },
-});
+};
+
+export const codeThemeLight = EditorView.theme(spec);
+export const codeThemeDark = EditorView.theme(spec, { dark: true });

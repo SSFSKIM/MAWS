@@ -43,7 +43,17 @@ describe('files tree', () => {
     expect(roleOf('/Users/new/Developer/wt', candidates)).toBe('worktree');
     expect(roleOf('/elsewhere', candidates)).toBeNull();
     expect(sameFile('/private/tmp/a/b.ts', '/tmp/a/b.ts')).toBe(true);
+    expect(sameFile('/private/var/folders/x', '/var/folders/x')).toBe(true);
     expect(sameFile('/repo2/a', '/repo/a')).toBe(false);
+  });
+
+  it('never takes a path for another that merely ends like it (the only alias is /private)', () => {
+    expect(sameFile('/Users/new/work/app/config.ts', '/app/config.ts')).toBe(false);
+    expect(sameFile('/x/private/tmp/a', '/tmp/a')).toBe(false);
+    expect(sameFile('/private/tmp/a', 'tmp/a')).toBe(false);
+    expect(expandTo(['/Users/new/work/app'], '/app/config.ts')).toBeNull();
+    expect(expandTo(['/Users/new/work/app'], '/work/app/config.ts')).toBeNull();
+    expect(roleOf('/Users/new/work/app', [{ path: '/app', role: 'directory' }])).toBeNull();
   });
 
   it('hides .git only as a root direct child', () => {
@@ -167,6 +177,35 @@ describe('files store', () => {
     expect(main.callsOf('files.unwatch')).toHaveLength(0);
     again.release();
     await vi.advanceTimersByTimeAsync(WATCH_GRACE_MS);
+    expect(main.callsOf('files.unwatch')).toEqual([{ appSessionId: S, path: '/r' }]);
+  });
+
+  it('drops a listing when its watch is finally released, so it is listed afresh on the next expand', async () => {
+    vi.useFakeTimers();
+    mainWith({ '/r': [] });
+    const hold = useFiles.getState().watch(S, '/r');
+    useFiles.getState().list(S, '/r');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(useFiles.getState().listing(S, '/r')).toMatchObject({ status: 'ok' });
+    hold.release();
+    await vi.advanceTimersByTimeAsync(WATCH_GRACE_MS);
+    expect(useFiles.getState().listing(S, '/r')).toBeUndefined();
+    expect(useFiles.getState().holders(S, '/r')).toBe(0);
+  });
+
+  it('unwatches a watch whose grace ran out while main was still installing it, once the install answers', async () => {
+    vi.useFakeTimers();
+    const gate = deferred<void>();
+    const main = installFakeMain(async (name) => {
+      if (name === 'files.watch') await gate.promise;
+      return answer();
+    });
+    const hold = useFiles.getState().watch(S, '/r');
+    hold.release();
+    await vi.advanceTimersByTimeAsync(WATCH_GRACE_MS);
+    expect(main.callsOf('files.unwatch')).toHaveLength(0);
+    gate.resolve();
+    await vi.advanceTimersByTimeAsync(0);
     expect(main.callsOf('files.unwatch')).toEqual([{ appSessionId: S, path: '/r' }]);
   });
 
@@ -322,6 +361,37 @@ describe('files tool', () => {
     openTool({ path: '/r/src/app.ts', line: 9 }); // re-targeting the open tab
     await waitFor(() => expect(fileTabs().map((t) => t.kind === 'file' && [t.path, t.line])).toContainEqual(['/r/src/app.ts', 9]));
     expect(panelOf(A)?.tabs).toHaveLength(1);
+  });
+
+  it('open with a path that only ends like a root opens it as given, in no root', async () => {
+    main = mainWith({ '': [dir('/Users/new/work/app')], '/Users/new/work/app': [file('/Users/new/work/app/config.ts')] });
+    render(<TestHost />);
+    openTool({ path: '/app/config.ts', line: 2 });
+    await waitFor(() => expect(fileTabs()).toEqual([expect.objectContaining({ path: '/app/config.ts', line: 2, appSessionId: A })]));
+    expect(item('app').getAttribute('aria-expanded')).toBe('false');
+    expect(main.callsOf('files.list').filter((input) => input.path !== undefined)).toEqual([]);
+  });
+
+  it('lists the roots again when the session record changes its directories', async () => {
+    render(<TestHost />);
+    openTool();
+    await waitFor(() => expect(items()).toHaveLength(2));
+    act(() => useSessions.setState((s) => ({ records: new Map(s.records).set(A, record(A, { directory: '/r', additionalDirectories: [] })) })));
+    await waitFor(() => expect(main.callsOf('files.list').filter((input) => input.path === undefined)).toHaveLength(2));
+  });
+
+  it('stops watching the expanded directories under a collapsed parent, and remembers their expansion', async () => {
+    render(<TestHost />);
+    openTool();
+    fireEvent.click(await screen.findByText('r'));
+    fireEvent.click(await screen.findByText('src'));
+    await screen.findByText('app.ts');
+    expect([useFiles.getState().holders(A, '/r'), useFiles.getState().holders(A, '/r/src')]).toEqual([1, 1]);
+    fireEvent.click(item('r'));
+    await waitFor(() => expect([useFiles.getState().holders(A, '/r'), useFiles.getState().holders(A, '/r/src')]).toEqual([0, 0]));
+    fireEvent.click(item('r'));
+    expect(await screen.findByText('app.ts')).toBeTruthy(); // src is still expanded
+    await waitFor(() => expect(useFiles.getState().holders(A, '/r/src')).toBe(1));
   });
 
   it('keeps the selection through a refresh caused by files.changed, and re-lists and re-watches an invalidated directory', async () => {

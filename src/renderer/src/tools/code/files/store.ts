@@ -26,6 +26,7 @@ export interface FilesStore {
   listing(appSessionId: AppSessionId, path: string | null): Listing | undefined;
   list(appSessionId: AppSessionId, path: string | null): void; // (re-)lists; a listing already held stays shown until the answer
   watch(appSessionId: AppSessionId, path: string): WatchHold;
+  holders(appSessionId: AppSessionId, path: string): number; // the holds on a directory now (diagnostics and tests)
   applyChanged(event: FilesChanged): void;
   reset(): void; // tests: forget every listing and hold without unwatching
 }
@@ -95,8 +96,10 @@ export function createFilesStore(client: MawsBridge, options: { graceMs?: number
       w.state = 'installing';
       const at = generation;
       w.ready = settled(client.invoke('files.watch', { appSessionId: w.appSessionId, path: w.path })).then((result) => {
-        if (at !== generation || watched.get(key) !== w) return;
+        if (at !== generation) return;
+        // Set before the identity check: a hold whose grace ran out during the install unwatches once this answers.
         w.state = result.ok ? 'installed' : 'failed';
+        if (watched.get(key) !== w) return;
         if (w.listAfter || get().listings.has(key)) {
           w.listAfter = false;
           list(w.appSessionId, w.path);
@@ -138,6 +141,7 @@ export function createFilesStore(client: MawsBridge, options: { graceMs?: number
               held.grace = null;
               if (held.count > 0 || watched.get(key) !== held) return;
               watched.delete(key);
+              drop(key); // unwatched, so no longer kept current: listed afresh on the next expand
               void held.ready.then(() => {
                 if (held.state === 'installed') void settled(client.invoke('files.unwatch', { appSessionId, path }));
               });
@@ -145,6 +149,8 @@ export function createFilesStore(client: MawsBridge, options: { graceMs?: number
           },
         };
       },
+
+      holders: (appSessionId, path) => watched.get(listingKey(appSessionId, path))?.count ?? 0,
 
       applyChanged(event) {
         if (event.kind === 'invalidated') {

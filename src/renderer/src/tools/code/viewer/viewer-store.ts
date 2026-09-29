@@ -89,7 +89,10 @@ const isNotFound = (message: string) => message.startsWith('not found:');
 
 export function createViewerStore(client: MawsBridge) {
   const holds = new Map<string, WatchHold>();
+  // The latest load of each tab, from one counter that only grows (never reset, not even by `reset`), so a load of a
+  // removed entry can never match the entry that replaced it.
   const generations = new Map<string, number>();
+  let lastGeneration = 0;
   const mounted = new Map<string, number>();
   const stale = new Set<string>();
   const used = new Map<string, number>();
@@ -137,9 +140,11 @@ export function createViewerStore(client: MawsBridge) {
     const load = async (tabId: string, reason: 'open' | 'change') => {
       const entry = get().entries.get(tabId);
       if (!entry) return;
-      const generation = (generations.get(tabId) ?? 0) + 1;
+      const generation = ++lastGeneration;
       generations.set(tabId, generation);
       const live = () => generations.get(tabId) === generation;
+      // A re-read of a head covers what Load more had reached, not only the first chunk.
+      const extent = reason === 'change' && entry.kind === 'head' ? Math.min(CODE_CAP, entry.loaded) : 0;
       const { appSessionId, path } = entry;
       const read = (offset: number, length: number) => settled(client.invoke('files.read', { appSessionId, path, offset, length }));
 
@@ -169,16 +174,18 @@ export function createViewerStore(client: MawsBridge) {
 
       let text = head.content;
       let loaded = head.offset + head.length;
-      let more = head.truncated && kind !== 'head';
+      const wanted = () => kind !== 'head' || loaded < extent;
+      let more = head.truncated && wanted();
       if (reason === 'open') patch(tabId, { ...base, text, base64: null, loaded, complete: !head.truncated, ...(sourceView ? { sourceView } : {}) });
       while (more && loaded < CODE_CAP) {
-        const next = await read(loaded, FILES_READ_DEFAULT_LENGTH);
+        const next = await read(loaded, kind === 'head' ? Math.min(FILES_READ_DEFAULT_LENGTH, extent - loaded) : FILES_READ_DEFAULT_LENGTH);
         if (!live()) return;
-        if (!next.ok) return fail(tabId, next.error.message, 'open'); // mid-file: nothing of either version stays
+        // Mid-file: nothing of either version stays, except that a file gone during a re-read keeps its last content.
+        if (!next.ok) return fail(tabId, next.error.message, reason);
         if (next.value.length === 0) break; // the file shrank under the read
         text += next.value.content;
         loaded = next.value.offset + next.value.length;
-        more = next.value.truncated;
+        more = next.value.truncated && wanted();
         if (reason === 'open') patch(tabId, { text, loaded, complete: !more });
       }
       if (reason === 'change') patch(tabId, { ...base, text, base64: null, loaded, complete: kind !== 'head' });
@@ -202,7 +209,7 @@ export function createViewerStore(client: MawsBridge) {
           holds.get(tabId)?.release();
           views.delete(tabId);
           stale.delete(tabId);
-          generations.set(tabId, (generations.get(tabId) ?? 0) + 1); // an older load lands nowhere
+          generations.set(tabId, ++lastGeneration); // an older load lands nowhere
           const fresh: ViewerEntry = {
             tabId, appSessionId, path, status: 'loading', error: null, kind: null, mime: '', encoding: 'utf8', bytes: 0, loaded: 0, complete: false,
             text: '', epoch: (entry?.epoch ?? 0) + 1, base64: null, removed: false, updated: 0, sourceView: false, line, pendingJump: line, loadingMore: false,

@@ -20,13 +20,14 @@ export const joinPath = (dir: string, name: string): string => (dir.endsWith('/'
 
 // Whether a realpath the service answered (a root, an event's path) names the file a caller spelled another way: the
 // same string, the same string but for case (APFS is case-insensitive and the native realpath canonicalises case), or
-// the spelling as a suffix of the realpath (`/tmp/x` is `/private/tmp/x` on macOS). Used only to match, never to grant:
-// the service judges every path it is given.
+// the spelling under macOS's one firmlinked prefix (`/tmp/x` is `/private/tmp/x`). Nothing looser: a path that merely
+// ends like a root is another file, and taking it for one would open a different in-root file (K4). Used only to match,
+// never to grant: the service judges every path it is given.
 export function sameFile(real: string, given: string): boolean {
   if (real === given) return true;
   const r = real.toLowerCase();
   const g = given.toLowerCase();
-  return r === g || (g.startsWith('/') && g.length > 1 && r.endsWith(g)); // g's leading '/' keeps the suffix at a segment boundary
+  return r === g || (g.startsWith('/') && r === `/private${g}`);
 }
 
 // The session's roots as the record declares them, in the service's order (directory, additional directories, the
