@@ -488,3 +488,25 @@ describe('card focus owner is the Overview article', () => {
     expect(fake.invoked('session.answer')[0]).toMatchObject({ appSessionId: 'app-b' });
   });
 });
+
+describe('a card whose item changes starts over (C5 renders the slot unkeyed)', () => {
+  const inArticle = (event: RequestEvent) => (
+    <Pane>
+      <Card event={event} placement="card" item={itemFor(event, APP)} />
+    </Pane>
+  );
+
+  it('the next request in the same Overview card inherits neither the delivery nor the picked scope', async () => {
+    const view = render(inArticle(reapply));
+    focusOn(article());
+    await press('2');
+    expect(screen.getByRole('radio', { name: 'Allow for this session' }).getAttribute('aria-checked')).toBe('true');
+    view.rerender(inArticle({ ...reapply, requestId: 'req-next' } as RequestEvent));
+    expect(screen.getByRole('radio', { name: 'Allow once' }).getAttribute('aria-checked')).toBe('true'); // not a scope nobody picked here
+    fireEvent.click(screen.getByRole('button', { name: 'Deny' }));
+    expect(await screen.findByText('Answered · Denied')).toBeTruthy();
+    view.rerender(inArticle({ ...reapply, requestId: 'req-third' } as RequestEvent));
+    expect(screen.queryByText(/Answered/)).toBeNull();
+    expect(screen.getByRole('button', { name: 'Allow' })).toBeTruthy();
+  });
+});

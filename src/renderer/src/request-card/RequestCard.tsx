@@ -163,7 +163,14 @@ const answerable = (request: SessionEvent | null): boolean =>
     request.kind === 'elicitation.requested' ||
     (request.kind === 'dialog.requested' && declaredDialog(request.dialogKind, request.payload).ok));
 
-export function RequestCard({ item, request: given, placement, onAnswered }: RequestCardProps) {
+// Keyed by the item: every piece of per-request state (the delivery phase, the answered line, a failure, the bound
+// keys, a variant's picked scope or selections) belongs to one request, and a placement that renders the card unkeyed
+// (C5's Overview card and hover card pass the session's next request into the same slot) must never carry it over.
+export function RequestCard(props: RequestCardProps) {
+  return <RequestCardFor key={props.item.id} {...props} />;
+}
+
+function RequestCardFor({ item, request: given, placement, onAnswered }: RequestCardProps) {
   const fetched = useAttention((s) => s.requests.get(item.id));
   useEffect(() => {
     if (given === null) void useAttention.getState().loadRequest(ipc, item);
