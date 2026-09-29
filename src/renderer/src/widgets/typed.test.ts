@@ -53,6 +53,17 @@ describe('model', () => {
     expect(controls('session.setModel')).toEqual([]);
   });
 
+  // M4 fix wave re-review, carried Minor: applied in auto, a model that cannot hold it says so, as the widget's caption does
+  it('/model haiku in auto appends the widget’s Cannot hold auto mode caption to its toast', async () => {
+    setStatus({ permissionMode: { requested: 'auto', effective: 'auto', refusal: null } });
+    expect(await TYPED_APPLY.model!(READY, 'haiku')).toBe(true);
+    await toastSoon().toEqual([['info', 'Model · Haiku · set · the next init frame confirms it · Cannot hold auto mode · runs in default']]);
+    useNotices.setState({ notices: [] });
+    setStatus({ permissionMode: { requested: 'default', effective: 'default', refusal: null } });
+    expect(await TYPED_APPLY.model!(READY, 'haiku')).toBe(true);
+    await toastSoon().toEqual([['info', 'Model · Haiku · set · the next init frame confirms it']]);
+  });
+
   // M4 fix wave re-review, carried Minor: the editor stops waiting after a short bound and opens the widget, so a
   // decision that arrives later is too late and applies nothing
   it('a decision the editor stopped waiting for applies nothing and answers false', async () => {

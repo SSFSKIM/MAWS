@@ -53,8 +53,10 @@ const applyModel: TypedApply = async (id, args, tooLate) => {
   const models = status && (await catalogue(id));
   const row = models ? rowNamed(models, args) : undefined;
   if (!status || !row || tooLate?.aborted) return false;
-  if (isGatewayModel(row.value) && status.permissionMode.effective === 'auto') return false; // the local-lane note first
-  report(setModel({ appSessionId: id, model: row.value }), TYPED.model(row.displayName));
+  const auto = status.permissionMode.effective === 'auto';
+  if (isGatewayModel(row.value) && auto) return false; // the local-lane note first
+  // in auto, a model that cannot hold it says so, as the widget's caption does (absent `supportsAutoMode` is not `false`)
+  report(setModel({ appSessionId: id, model: row.value }), TYPED.model(row.displayName, auto && row.supportsAutoMode !== true));
   return true;
 };
 

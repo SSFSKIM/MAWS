@@ -303,7 +303,7 @@ export const MODEL = {
 // A typed `/<widget> <args>` applied at Enter (the architect's correction of 2026-09-29): the toast after the control
 // answered, in the widget's words; a refusal or the transport branch toasts the widget's error words instead.
 export const TYPED = {
-  model: (name: string) => `Model · ${name} · ${MODEL.pending}`,
+  model: (name: string, cannotHoldAuto = false) => `Model · ${name} · ${MODEL.pending}${cannotHoldAuto ? ` · ${MODEL.cannotHoldAuto}` : ''}`,
   effort: (level: string | null) => `Effort · ${level ?? MODEL.engineDefault} · ${MODEL.pending}`,
   fastOff: `Fast mode · off · ${MODEL.pending}`,
   mode: (mode: string) => `Permission mode · ${mode}`,
