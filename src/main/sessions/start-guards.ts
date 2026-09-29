@@ -11,7 +11,7 @@ import type { FirstMessage, SetupIntent } from '@shared/sessions/intent';
 import type { StartOutcome } from '@shared/sessions/setup';
 import type { TrustState } from '@shared/sessions/trust';
 import type { StartOptions } from '@shared/ipc/schema/session';
-import { attachCommand } from './attach';
+import { attachCommand } from '@shared/sessions/attach';
 import { hostCall, isDirectory, reservationOf } from './context';
 import { holderAuthority } from './holders';
 import { checkAdditionalDirectories, checkLocation, sessionDirectoryOf, trustDirectoryOf } from './intent-rules';

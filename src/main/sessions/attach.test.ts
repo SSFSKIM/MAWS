@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { loadJournal } from '../../../test/support/fixtures';
-import { attachCommand, BG_REFUSAL, bgRefusalOf } from './attach';
+import { attachCommand } from '@shared/sessions/attach';
+import { BG_REFUSAL, bgRefusalOf } from './attach';
 
 const PINNED = '/Users/new/.local/share/claude/versions/2.1.283';
 
