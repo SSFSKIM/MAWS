@@ -144,6 +144,25 @@ describe('files watch', { timeout: 20_000 }, () => {
     await files.unwatch(A, dir, 1); // an unknown hold is a no-op
   });
 
+  it('an unwatch in flight across its window’s release leaves the next page’s hold under the same key', async () => {
+    await files.watch(A, dir, 1);
+    let resume!: () => void;
+    const gate = new Promise<void>((resolve) => (resume = resolve));
+    const realpath = fs.promises.realpath.bind(fs.promises);
+    vi.spyOn(fs.promises, 'realpath').mockImplementationOnce((async (path: string) => {
+      await gate;
+      return realpath(path);
+    }) as typeof fs.promises.realpath);
+    const stale = files.unwatch(A, dir, 1); // the old page's, held at its realpath
+    files.release(1); // the window navigates
+    await files.watch(A, dir, 1); // the new page's hold, under the same (owner, session, path)
+    resume();
+    await stale;
+    expect(files.watching()).toEqual([dir]);
+    await files.unwatch(A, dir, 1); // the new page's own unwatch still drops it
+    expect(files.watching()).toEqual([]);
+  });
+
   it('unwatch drops the hold on the directory the path names now when its realpath moved between two watches', async () => {
     const asked = join(root, 'Case'); // APFS is case-insensitive: a case-only rename moves the realpath under the same path
     mkdirSync(asked);

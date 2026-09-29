@@ -102,6 +102,7 @@ export function createFilesService({ records, hooks, emit = () => {}, openPath, 
     await hooks?.at?.(point, path);
   };
   const watches = new WatchTable({ emit, beforeBatch: (real) => at('before-batch', real) });
+  const releases = new Map<number, number>(); // per window, how many times its holds were released (files.unwatch)
 
   // Step 1: absolute, already normal (a `..` is refused before the disk is touched, since the kernel resolves `/X/..`
   // only when `/X` exists) and with no trailing separator (under which `lstat` follows a final-component symlink, so
@@ -266,13 +267,20 @@ export function createFilesService({ records, hooks, emit = () => {}, openPath, 
     list,
     read,
     watch,
-    // the hold on the directory the path names now (the realpath a watch of it would be keyed by), else the first found
+    // the hold on the directory the path names now (the realpath a watch of it would be keyed by), else the first found;
+    // a release of the window meanwhile (a navigation) took the page's holds, and a hold under the same key is the new
+    // page's, so an unwatch that straddled it drops nothing
     unwatch: async (appSessionId, path, owner) => {
+      const generation = releases.get(owner) ?? 0;
       const real = isAbsolute(path) ? await fs.promises.realpath(path).catch(() => null) : null;
+      if ((releases.get(owner) ?? 0) !== generation) return;
       watches.unwatch({ owner, appSessionId, path }, real);
     },
     openExternal,
-    release: (owner) => watches.release(owner),
+    release: (owner) => {
+      releases.set(owner, (releases.get(owner) ?? 0) + 1);
+      watches.release(owner);
+    },
     watching: () => watches.watching(),
     dispose: () => watches.dispose(),
   };
