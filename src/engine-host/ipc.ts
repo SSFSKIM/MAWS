@@ -374,8 +374,8 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
     assertSafeAppSessionId(appSessionId); // it deletes a file and a directory named after it
     const id = appSessionId as AppSessionId;
     const session = table.get(id);
-    const process = session?.status().process;
-    if (session && process !== 'exited') throw new HostCommandError({ code: 'internal', message: `already_live: process is ${process}` });
+    const state = session?.status().process;
+    if (session && state !== 'exited') throw new HostCommandError({ code: 'internal', message: `already_live: process is ${state}` });
     table.release(id);
     streams.get(id)?.dispose();
     streams.delete(id);
