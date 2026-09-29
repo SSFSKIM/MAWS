@@ -72,15 +72,20 @@ const HISTORY_LIMIT = 200;
 const warn = (text: string) => void toast({ level: 'warning', text, actions: [], dismissible: true });
 const pastedCount = (doc: ComposerDoc) => (doc.content ?? []).flatMap((p) => p.content ?? []).filter((n) => n.type === PASTED).length;
 
+// C4's drafts, which need the session's index record: a session the index does not hold has no draft to restore, and
+// its writes fail (said once per mount, not on every pause).
 export function ipcDrafts(client: MawsBridge, appSessionId: AppSessionId): DraftPort {
+  let warned = false;
   return {
     load: async () => {
       const result = await client.invoke('session.drafts.get', { appSessionId });
-      return result.ok ? result.value : null; // a session with no record has no draft to restore
+      return result.ok ? result.value : null;
     },
     save: (draft) =>
       void client.invoke('session.drafts.set', { appSessionId, draft }).then((result) => {
-        if (!result.ok) console.warn('[composer] session.drafts.set failed', result.error.message);
+        if (result.ok || warned) return;
+        warned = true;
+        console.warn('[composer] session.drafts.set failed; the draft is not kept', result.error.message);
       }),
   };
 }
