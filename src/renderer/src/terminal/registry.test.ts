@@ -740,7 +740,7 @@ describe('terminal theme from tokens', () => {
     registry.unmount(hidden.id);
     expect(shown.renderer.options.theme.background).toBe('light-bg');
     currentTheme = theme('dark-bg');
-    ipc.emit('settings.changed', { settings: { version: 1, theme: 'dark' }, resolvedTheme: 'dark' });
+    ipc.emit('settings.changed', { settings: { version: 2, keymap: {}, notifications: { enabled: true, sound: false }, theme: 'dark' }, resolvedTheme: 'dark' });
     expect(shown.renderer.theme.background).toBe('dark-bg');
     expect(hidden.renderer.theme.background).toBe('dark-bg');
   });

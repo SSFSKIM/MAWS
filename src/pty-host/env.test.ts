@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { baseEnvironment, PARENT_SESSION_VARIABLES, terminalEnvironment } from './env';
 
 const base = {
@@ -71,6 +71,11 @@ describe('pty host environment', () => {
     expect(terminalEnvironment({ PATH: '/bin', LC_CTYPE: 'ko_KR.UTF-8' }, { appVersion: '0' }).LC_CTYPE).toBe('ko_KR.UTF-8');
   });
 
+  it('drops the profile directory main sets for its hosts, so a MAWS started in a terminal never opens this one’s profile', () => {
+    const env = terminalEnvironment({ ...base, MAWS_USER_DATA: '/Users/owner/Library/Application Support/MAWS' }, { appVersion: '0' });
+    expect(env).not.toHaveProperty('MAWS_USER_DATA');
+  });
+
   it('drops the capture shell’s own session state, so a terminal shell starts at level 1 as in Terminal.app', () => {
     const env = terminalEnvironment({ ...base, SHLVL: '3', OLDPWD: '/Users/owner/src', _: '/usr/bin/env' }, { appVersion: '0' });
     for (const name of ['SHLVL', 'OLDPWD', '_']) expect(env).not.toHaveProperty(name);
@@ -86,20 +91,5 @@ describe('pty host environment', () => {
   it('seeds from the captured login-shell environment when the capture succeeds', async () => {
     const captured = { PATH: '/opt/homebrew/bin:/usr/bin', HOME: '/Users/owner', SHELL: '/bin/zsh' };
     await expect(baseEnvironment(async () => captured)).resolves.toBe(captured);
-  });
-
-  it("falls back to the host's own environment when the capture fails or yields nothing", async () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    try {
-      await expect(baseEnvironment(async () => null)).resolves.toBe(process.env);
-      await expect(
-        baseEnvironment(async () => {
-          throw new Error('timed out');
-        }),
-      ).resolves.toBe(process.env);
-      expect(warn).toHaveBeenCalledTimes(2);
-    } finally {
-      warn.mockRestore();
-    }
   });
 });

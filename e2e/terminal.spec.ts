@@ -86,9 +86,11 @@ class Harness {
     ) as Promise<T>;
   }
 
-  // The window opens on the harness entry; `#panel` is a hash route. After a reload the page comes back on it.
+  // The window opens on the harness entry, C6's hash router, on its default page; `#panel` is a hash route. A mounted
+  // page has assigned `window.__maws_harness`, which also means the router listens for `hashchange` (its effect runs
+  // in the same commit). After a reload the page comes back on `#panel`.
   async load(): Promise<TerminalId[]> {
-    await this.page.waitForFunction(() => !!document.querySelector('nav[aria-label="harness pages"]'), null, { timeout: 15_000 });
+    await this.page.waitForFunction(() => (window as unknown as HarnessWindow).__maws_harness !== undefined, null, { timeout: 15_000 });
     await this.page.evaluate(() => (location.hash = '#panel'));
     await this.page.waitForFunction(() => (window as unknown as HarnessWindow).__maws_harness?.page === 'panel', null, { timeout: 15_000 });
     return this.call<TerminalId[]>('panel', 'ready');
@@ -271,7 +273,7 @@ test('opens a login shell in the session directory with the terminal environment
     await h.expectLine(id, 'P:MAWS');
     await h.expectLine(id, 'S:1');
     expect((await h.lines(id)).some((line) => /^L:.+/.test(line.trim())), 'a non-empty locale').toBe(true);
-    await h.run(id, `echo "N:$(env | grep -c -E '^(CLAUDE_CODE_SESSION_ID|CLAUDE_PID|CLAUDECODE|ANTHROPIC_BASE_URL|ANTHROPIC_AUTH_TOKEN)=')"`);
+    await h.run(id, `echo "N:$(env | grep -c -E '^(CLAUDE_CODE_SESSION_ID|CLAUDE_PID|CLAUDECODE|ANTHROPIC_BASE_URL|ANTHROPIC_AUTH_TOKEN|MAWS_USER_DATA)=')"`);
     await h.expectLine(id, 'N:0');
     const shell = process.env.SHELL ?? '/bin/zsh';
     await h.run(id, 'echo "0:$0"');

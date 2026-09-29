@@ -34,22 +34,20 @@ const GATEWAY_MODEL_VARIABLE = /^ANTHROPIC_DEFAULT_[A-Z_]*MODEL$/;
 // sets all three for itself; Terminal.app starts one without them. (`PWD` is node-pty's: it sets it to the cwd.)
 const SHELL_SESSION_VARIABLES = ['SHLVL', 'OLDPWD', '_'] as const;
 
+// What main sets in its own environment for its hosts (C3: the engine host's profile directory travels this way), which
+// the PTY host inherits at fork and its login-shell capture passes on. A MAWS started in a terminal would otherwise open
+// this app's profile (`MAWS_USER_DATA` selects it) instead of its own.
+const APP_HOST_VARIABLES = ['MAWS_USER_DATA'] as const;
+
 const LOCALE_VARIABLES = ['LANG', 'LC_ALL', 'LC_CTYPE'] as const;
 
-// The seed every terminal environment is built from: X6's captured login-shell environment (run once, at host start,
-// by the caller), or the host's own `process.env` when the capture fails. Async so the capture never blocks the
-// host's handshake with main; the first spawn waits for it.
-export async function baseEnvironment(
-  capture: () => Promise<NodeJS.ProcessEnv | null> = captureShellEnvironment,
-): Promise<NodeJS.ProcessEnv> {
-  try {
-    const captured = await capture();
-    if (captured) return captured;
-    console.warn('[pty-host] the login-shell environment capture yielded nothing; terminals start from the host environment');
-  } catch (error) {
-    console.warn('[pty-host] the login-shell environment capture failed; terminals start from the host environment', error);
-  }
-  return process.env;
+// The seed every terminal environment is built from: X6's captured login-shell environment (C3's capture, run once, at
+// host start, by the caller). The capture never rejects and never comes back empty: when it fails it answers the host's
+// own `process.env` itself. Async so the capture never blocks the host's handshake with main; the first spawn waits for it.
+export function baseEnvironment(
+  capture: () => Promise<Record<string, string>> = captureShellEnvironment,
+): Promise<Record<string, string>> {
+  return capture();
 }
 
 export interface TerminalEnvironmentOptions {
@@ -58,7 +56,7 @@ export interface TerminalEnvironmentOptions {
 
 export function terminalEnvironment(base: NodeJS.ProcessEnv, { appVersion }: TerminalEnvironmentOptions): Record<string, string> {
   const env: Record<string, string> = {};
-  const excluded = new Set<string>([...PARENT_SESSION_VARIABLES, ...ENGINE_LAUNCH_VARIABLES, ...SHELL_SESSION_VARIABLES]);
+  const excluded = new Set<string>([...PARENT_SESSION_VARIABLES, ...ENGINE_LAUNCH_VARIABLES, ...SHELL_SESSION_VARIABLES, ...APP_HOST_VARIABLES]);
   for (const [name, value] of Object.entries(base)) {
     if (value !== undefined && !excluded.has(name) && !GATEWAY_MODEL_VARIABLE.test(name)) env[name] = value;
   }

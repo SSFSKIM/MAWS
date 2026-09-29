@@ -230,7 +230,8 @@ const judgeGate = (id, metrics) => {
 
 try {
   // ---- smoke: the page loads, both renderers initialise, the console is clean of CSP refusals ----
-  await page.waitForFunction(() => !!document.querySelector('nav[aria-label="harness pages"]'), null, { timeout: 15_000 });
+  // C6's hash router opens on its default page; a mounted page has assigned __maws_harness and the router listens.
+  await page.waitForFunction(() => window.__maws_harness !== undefined, null, { timeout: 15_000 });
   await page.evaluate(() => (location.hash = '#probe'));
   await page.waitForFunction(() => window.__maws_harness?.page === 'probe', null, { timeout: 15_000 });
   await probe.call('setBins', bins);

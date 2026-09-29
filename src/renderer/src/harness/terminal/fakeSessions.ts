@@ -25,7 +25,7 @@ function record(appId: AppSessionId, title: string, directory: string, worktree:
     lastSeen: { messageUuid: null, at: null },
     unread: false,
     engineVersion: null,
-    gateway: { routed: false },
+    gateway: { routed: false, baseUrl: null, autoModeServer: 'unknown' },
     model: { requested: null, resolved: null },
     effort: null,
     permissionMode: { requested: 'default', effective: 'default', refusal: null },
