@@ -340,7 +340,12 @@ export class EngineSession {
 
   private record(direction: JournalDirection, frame: unknown): JournalRow {
     if (this.journalClosed) throw new JournalClosed(`${direction} row`);
-    const row = this.journal.row(direction, frame);
+    let row: JournalRow;
+    try {
+      row = this.journal.row(direction, frame);
+    } catch (error) {
+      throw new JournalWriteFailed(error);
+    }
     const events = this.normalizer.push(row);
     for (const w of this.pendingWarnings.splice(0)) this.record('meta', { event: w.event, rowSeq: w.seq, detail: w.detail }); // journaled and normalised like any row; they yield no events
     if (events.length > 0) {
@@ -476,6 +481,8 @@ export class EngineSession {
     while (this.held.length > 0 && (force || !this.writer?.busy)) this.processItem(this.held.shift()!);
   }
 
+  // A frame the journal could not take is never acted on (no request reaches the broker, no response settles a
+  // request): the journal no longer records what the engine said, so the process ends as for a failed out row.
   private processItem(item: TransportItem): void {
     try {
       if (item.error) {
@@ -490,8 +497,21 @@ export class EngineSession {
       this.client?.observe(item.frame);
       this.touch();
     } catch (error) {
-      this.log(`frame not processed: ${messageOf(error)}`);
+      if (error instanceof JournalWriteFailed) this.inboundJournalFailed(error);
+      else this.log(`frame not processed: ${messageOf(error)}`);
     }
+  }
+
+  // The out path's rule (OutboundWriter.settle) for an inbound row: `transport_error { journal_failed }` if the journal
+  // can still take it, then the ladder without end_session (whole-branch review).
+  private inboundJournalFailed(error: JournalWriteFailed): void {
+    try {
+      this.record('meta', { event: 'transport_error', code: 'journal_failed', message: `journal write failed: ${error.message}` });
+    } catch {
+      /* the journal cannot take that row either; the log line and the ladder still report it */
+    }
+    this.log(`journal write failed on an inbound frame: ${error.message}; ending the process`);
+    void this.terminate(false);
   }
 
   private async stderrLoop(transport: EngineTransport): Promise<void> {
@@ -776,6 +796,14 @@ export class EngineSession {
         this.log(`${name} listener failed: ${messageOf(error)}`);
       }
     }
+  }
+}
+
+// The session's journal refused a row while live (disk full, …); the message is the journal's own.
+class JournalWriteFailed extends Error {
+  constructor(cause: unknown) {
+    super(messageOf(cause), { cause });
+    this.name = 'JournalWriteFailed';
   }
 }
 

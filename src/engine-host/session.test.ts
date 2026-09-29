@@ -336,6 +336,23 @@ describe('EngineSession: inbound requests, host hooks and exit', () => {
     expect((await session.exited).reason).toBe('crash');
   });
 
+  it('a journal write that fails on an inbound row ends the process the same way: journal_failed, the ladder without end_session, the frame never acted on (whole-branch review)', async () => {
+    const { session, transport, journal, events, lists } = setup();
+    await session.start();
+    journal.failOnce = (direction) => direction === 'in';
+    transport.push({ type: 'control_request', request_id: 'r1', request: { subtype: 'can_use_tool', tool_name: 'Bash', input: { command: 'ls' }, tool_use_id: 'toolu_1' } });
+    await flush();
+    expect(journal.rows.at(-1)!.frame).toEqual({ event: 'transport_error', code: 'journal_failed', message: 'journal write failed: ENOSPC: no space left on device' });
+    expect(events.map((e) => e.kind)).toEqual(['error.raised']);
+    expect(events[0]).toMatchObject({ scope: 'transport', code: 'journal_failed' });
+    expect(lists).toEqual([]); // the unjournaled request never reached the broker
+    expect(session.status()).toMatchObject({ process: 'exiting', pendingRequests: 0 });
+    expect(transport.requestsOf('end_session')).toEqual([]);
+    expect(transport.calls).toEqual(['endInput', 'kill:SIGTERM']);
+    transport.exit(null, 'SIGTERM');
+    expect((await session.exited).reason).toBe('crash');
+  });
+
   it('a failed session-scope allow on an ask-rule prompt leaves no note behind: the retried deny resolves without it', async () => {
     let failures = 1;
     const { session, transport, journal, events } = setup({ transport: { failWrite: (f) => f.type === 'control_response' && failures-- > 0 } });
