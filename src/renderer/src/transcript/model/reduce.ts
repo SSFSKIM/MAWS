@@ -361,10 +361,14 @@ function apply(batch: Batch, event: SessionEvent): void {
         if (current === null || !current.accepted) state.current = id;
         return;
       }
-      // A turn.started for a prompt with no pending turn: the engine runs this turn now. A turn it left open (C4's
-      // backfill has no turn_duration for an interrupted turn) ends here as stopped; a waiting prompt stays pending.
+      // A turn.started for a prompt with no pending turn: the engine runs this turn now, so a turn it left open ends
+      // here (C4's backfill writes turn.ended only from system/turn_duration, which SDK-entrypoint sessions never
+      // write and an interrupted turn lacks). It reads stopped only on interrupt evidence the turn retains, else
+      // completed; a waiting prompt stays pending.
       const previous = state.current === null ? null : state.turns.get(state.current)!;
-      if (previous !== null && previous.state === 'open' && previous.accepted) batch.closeUnended(batch.touch(previous.id), 'stopped', event.at);
+      if (previous !== null && previous.state === 'open' && previous.accepted) {
+        batch.closeUnended(batch.touch(previous.id), wasInterrupted(previous) ? 'stopped' : 'completed', event.at);
+      }
       const turn = batch.open(id, originOf(event.origin), event.at);
       const current = state.current === null ? null : state.turns.get(state.current)!;
       if (current === null || !current.accepted) state.current = id;
@@ -573,6 +577,10 @@ function apply(batch: Batch, event: SessionEvent): void {
       return; // session lifecycle, accounting, snapshots and unknown frames: nothing the transcript shows
   }
 }
+
+// Interrupt evidence a turn retains: the engine's interrupt marker, or a call the human rejected.
+const wasInterrupted = (turn: TurnState) =>
+  turn.events.some((event) => (event.kind === 'user.message' && isInterruptionMarker(event.origin, event.content)) || (event.kind === 'tool.result' && event.denial === 'user-rejected'));
 
 // *Streaming*: a complete pairs with the live entry of its identity when that entry is compatible and uncompleted,
 // else with the earliest uncompleted entry of the same message and block type (the split-envelope case, where each

@@ -238,25 +238,45 @@ describe('turn boundaries', () => {
 
   // Whole-branch review: C4's disk backfill emits turn.ended only from system/turn_duration, which an interrupted turn
   // lacks, and writes turn.started before the prompt's user.message.
-  it('a turn.started for a prompt with no pending turn closes the previous open turn as stopped and takes over', () => {
+  // Whole-branch review: C4's disk backfill emits turn.ended only from system/turn_duration, which SDK-entrypoint
+  // sessions (MAWS launches with sdk-ts) never write, and an interrupted turn lacks too. A superseded turn closes as
+  // completed unless it carries interrupt evidence the reducer retains.
+  it('a turn.started for a prompt with no pending turn closes the previous open turn, completed without interrupt evidence, and takes over', () => {
     const b = builder();
-    b.turn('u1');
-    b.text('m1', 0, 'Interrupted answer');
-    b.turn('u2');
-    b.text('m2', 0, 'Second answer');
-    b.end(['u2']);
-    b.turn('u3');
-    b.text('m3', 0, 'Third answer');
-    b.end(['u3']);
+    for (const n of [1, 2, 3]) {
+      b.emit('turn.started', { userMessageUuid: uuid(`u${n}`), origin: null });
+      b.emit('user.message', { messageUuid: uuid(`u${n}`), content: `From disk ${n}`, isReplay: false, isSynthetic: false, origin: null, bash: null });
+      b.toolUse(`t${n}`, 'Bash', { command: `step ${n}` }, `m${n}a`, 0);
+      b.result(`t${n}`, 'ok');
+      b.text(`m${n}`, 0, `Answer ${n}`);
+    }
     const state = reduce(b.events);
     const ids = ['u1', 'u2', 'u3'].map((u) => turnId.ofMessage(uuid(u)));
     expect(state.order).toEqual(ids);
-    expect(ids.map((id) => [state.turns.get(id)!.state, state.turns.get(id)!.closedBy])).toEqual([['closed', 'stopped'], ['closed', null], ['closed', null]]);
-    const list = rows(b.events);
+    expect(ids.map((id) => [state.turns.get(id)!.state, state.turns.get(id)!.closedBy])).toEqual([['closed', 'completed'], ['closed', 'completed'], ['open', null]]);
+    const list = rowsOf(withAllExpanded(state));
+    expect(list.filter((row) => row.kind === 'divider').map((row) => (row as Extract<Row, { kind: 'divider' }>).state)).toEqual(['completed', 'completed', 'working']);
     expect(list.filter((row) => row.kind === 'assistant_text').map((row) => [row.turnId, (row as Extract<Row, { kind: 'assistant_text' }>).markdown])).toEqual([
-      [ids[0], 'Interrupted answer'], [ids[1], 'Second answer'], [ids[2], 'Third answer'],
+      [ids[0], 'Answer 1'], [ids[1], 'Answer 2'], [ids[2], 'Answer 3'],
     ]);
     expect(list.filter((row) => row.kind === 'user').map((row) => [row.turnId, (row as Extract<Row, { kind: 'user' }>).steer])).toEqual([[ids[0], false], [ids[1], false], [ids[2], false]]);
+  });
+
+  it('a superseded turn with interrupt evidence (the marker, or a user-rejected denial) closes as stopped', () => {
+    const marker = builder();
+    marker.turn('u1');
+    marker.toolUse('t1', 'Bash', { command: 'sleep 9' });
+    marker.emit('user.message', { messageUuid: uuid('im'), content: [{ type: 'text', text: '[Request interrupted by user for tool use]' }], isReplay: false, isSynthetic: false, origin: null, bash: null });
+    marker.turn('u2');
+    let state = reduce(marker.events);
+    expect(state.turns.get(turnId.ofMessage(uuid('u1')))).toMatchObject({ state: 'closed', closedBy: 'stopped' });
+    const denied = builder();
+    denied.turn('u1');
+    denied.toolUse('t1', 'Bash', { command: 'rm -rf x' });
+    denied.result('t1', 'User rejected tool use', { isError: true, denial: 'user-rejected' });
+    denied.turn('u2');
+    state = reduce(denied.events);
+    expect(state.turns.get(turnId.ofMessage(uuid('u1')))).toMatchObject({ state: 'closed', closedBy: 'stopped' });
   });
 
   it('a cancel naming a pending prompt marks its bubble dropped and closes its turn without work; later lifecycles change nothing', () => {
