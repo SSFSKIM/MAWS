@@ -41,6 +41,7 @@ interface Watched {
   state: 'installing' | 'installed' | 'failed';
   ready: Promise<void>;
   listAfter: boolean; // a listing was asked for while installing
+  reinstall: boolean; // invalidated while installing: installed again once the in-flight install answers
 }
 
 // A bridge that throws is a failure with its message, so nothing stays in flight (as the git store does).
@@ -97,8 +98,19 @@ export function createFilesStore(client: MawsBridge, options: { graceMs?: number
     const install = (key: string, w: Watched) => {
       w.state = 'installing';
       const at = generation;
-      w.ready = settled(client.invoke('files.watch', { appSessionId: w.appSessionId, path: w.path })).then((result) => {
+      w.ready = settled(client.invoke('files.watch', { appSessionId: w.appSessionId, path: w.path })).then(async (result): Promise<void> => {
         if (at !== generation) return;
+        if (w.reinstall && watched.get(key) === w) {
+          // Invalidated while this install was in flight: main may have counted it before dropping the watch, or dropped
+          // an older one and kept it, so its hold is given back (a no-op for a hold main no longer has) before the
+          // re-install; the holders' `ready` follows the re-install.
+          w.reinstall = false;
+          if (result.ok) await settled(client.invoke('files.unwatch', { appSessionId: w.appSessionId, path: w.path }));
+          if (at !== generation || watched.get(key) !== w) return;
+          install(key, w);
+          return w.ready;
+        }
+        w.reinstall = false;
         // Set before the identity check: a hold whose grace ran out during the install unwatches once this answers.
         w.state = result.ok ? 'installed' : 'failed';
         if (watched.get(key) !== w) return;
@@ -125,7 +137,7 @@ export function createFilesStore(client: MawsBridge, options: { graceMs?: number
           w.grace = null;
           if (w.state === 'failed') install(key, w); // a refused watch is tried again by the next holder
         } else {
-          w = { appSessionId, path, count: 1, grace: null, state: 'installing', ready: Promise.resolve(), listAfter: false };
+          w = { appSessionId, path, count: 1, grace: null, state: 'installing', ready: Promise.resolve(), listAfter: false, reinstall: false };
           watched.set(key, w);
           install(key, w);
         }
@@ -166,7 +178,8 @@ export function createFilesStore(client: MawsBridge, options: { graceMs?: number
             if (w.count > 0) {
               if (listed) put(key, { status: 'loading' });
               w.listAfter = listed;
-              install(key, w);
+              if (w.state === 'installing') w.reinstall = true; // one files.watch in flight per hold
+              else install(key, w);
             } else {
               if (w.grace !== null) clearTimeout(w.grace);
               watched.delete(key);

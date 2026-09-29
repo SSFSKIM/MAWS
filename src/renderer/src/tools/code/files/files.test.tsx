@@ -272,6 +272,34 @@ describe('files store', () => {
     expect(useFiles.getState().listing(S, '/r')).toMatchObject({ status: 'ok' });
   });
 
+  it('re-watches a directory invalidated while its watch installs once that install answers, so main keeps one hold for it', async () => {
+    vi.useFakeTimers();
+    const gate = deferred<void>();
+    let firstWatch = true;
+    const main = installFakeMain(async (name, input) => {
+      if (name === 'files.watch' && firstWatch) {
+        firstWatch = false;
+        await gate.promise;
+      }
+      if (name === 'files.list') return answer({ root: '/r', path: input.path, entries: [], truncated: false });
+      return answer();
+    });
+    const hold = useFiles.getState().watch(S, '/r');
+    useFiles.getState().list(S, '/r');
+    useFiles.getState().applyChanged({ appSessionId: S, path: '/r', kind: 'invalidated' });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(main.callsOf('files.watch')).toHaveLength(1); // no second install while the first is in flight
+    gate.resolve();
+    await vi.advanceTimersByTimeAsync(0);
+    await hold.ready;
+    // Main may have counted the first install before it dropped the watch: its hold is given back before the re-watch.
+    expect(main.calls.map((c) => c.name)).toEqual(['files.watch', 'files.unwatch', 'files.watch', 'files.list']);
+    expect(useFiles.getState().listing(S, '/r')).toMatchObject({ status: 'ok' });
+    hold.release();
+    await vi.advanceTimersByTimeAsync(WATCH_GRACE_MS);
+    expect(main.callsOf('files.unwatch')).toHaveLength(main.callsOf('files.watch').length);
+  });
+
   it('keeps a refused listing as its message', async () => {
     mainWith({ '/r': "path outside the session's directories" });
     useFiles.getState().list(S, '/r');
