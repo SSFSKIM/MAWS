@@ -97,6 +97,9 @@ export const SubagentMetaSchema = z.looseObject({
   requestNonInteractive: z.boolean().optional(),
   model: z.string().optional(),
   workflowPhase: z.string().optional(),
+  parentAgentId: z.string().optional(), // a nested agent's parent (SPEC 18 §18.25.2), beside spawnDepth 2+
+  name: z.string().optional(), // the name `Agent` was called with; what `SendMessage` addresses
+  stoppedByUser: z.boolean().optional(), // the sidecar's one status fact (SPEC 18 §18.26.2)
 });
 export type SubagentMeta = z.infer<typeof SubagentMetaSchema>;
 

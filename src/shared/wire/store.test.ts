@@ -87,6 +87,21 @@ describe('store record schemas accept the owner\'s shapes', () => {
     expect(SubagentMetaSchema.safeParse({ description: 'x' }).success).toBe(false);
   });
 
+  it('types the lineage, name and stopped keys real sidecar metas carry (C8b\'s ask)', () => {
+    // The three shapes quoted in the C4 document's Surprises entry, read from the owner's sidecars (elisions filled in).
+    const nested = SubagentMetaSchema.parse({ agentType: 'general-purpose', description: 'Audit removed behavior', toolUseId: 'call_0123', parentAgentId: 'af96b76372097d464', spawnDepth: 2 });
+    const stopped = SubagentMetaSchema.parse({ agentType: 'doperpowers:plan-executor', description: 'Execute M2', toolUseId: 'toolu_01', spawnDepth: 1, requestShape: 'background', requestNonInteractive: true, stoppedByUser: true });
+    const named = SubagentMetaSchema.parse({ agentType: 'general-purpose', description: '/code-review high', name: 'code-review', spawnDepth: 1, stoppedByUser: true });
+    const parentAgentId: string | undefined = nested.parentAgentId;
+    const stoppedByUser: boolean | undefined = stopped.stoppedByUser;
+    const name: string | undefined = named.name;
+    expect({ parentAgentId, stoppedByUser, name }).toEqual({ parentAgentId: 'af96b76372097d464', stoppedByUser: true, name: 'code-review' });
+    expect(named.toolUseId).toBeUndefined();
+    expect(SubagentMetaSchema.safeParse({ agentType: 'x', stoppedByUser: 'yes' }).success).toBe(false);
+    expect(SubagentMetaSchema.safeParse({ agentType: 'x', parentAgentId: 7 }).success).toBe(false);
+    expect(SubagentMetaSchema.safeParse({ agentType: 'x', name: null }).success).toBe(false);
+  });
+
   it('keeps the transcript summary strict: an unknown key is rejected', () => {
     const summary = {
       sessionId: '9a1d4262-0b43-46ad-acb9-5982f31d209c', transcriptPath: '/p/x.jsonl', slug: '-p',
