@@ -28,7 +28,7 @@ const row = (label: string) => screen.getByRole('group', { name: label });
 const settings = () => useSettings.getState().state!.settings;
 
 beforeEach(() => {
-  useGateway.setState({ relay: null, relayCheckedAt: null, directLogin: new Map() });
+  useGateway.setState({ relay: null, directLogin: new Map() });
 });
 afterEach(() => {
   cleanup();

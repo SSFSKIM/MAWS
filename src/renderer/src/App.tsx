@@ -44,7 +44,6 @@ import { agentsDevSurface, agentTranscriptActions, registerAgentTools } from './
 import { registerGatewayActions } from './gateway/actions';
 import { connectDirectLogin } from './gateway/direct-login';
 import { startRelayMonitor } from './gateway/relay-monitor';
-import { connectGatewaySettings } from './gateway/store';
 import { GatewayDialogs } from './gateway/SwitchSheet';
 import { UsageFooter } from './gateway/UsageFooter';
 import { registerUsagePopoverFooter } from './statusline';
@@ -119,10 +118,9 @@ export function App() {
     if (import.meta.env.DEV) window.__maws_agents = agentsDevSurface();
   }, []);
   // C8b end
-  // C11 start: Settings…, Accounts and Open ClaudeUsage in the action table; the gateway store follows the settings; the
-  // relay monitor's app-wide banner while a routed session is live; a widget for every name of the slash palette
+  // C11 start: Settings…, Accounts and Open ClaudeUsage in the action table; the relay monitor's app-wide banner while a
+  // routed session is live; a widget for every name of the slash palette
   useEffect(() => registerGatewayActions(), []);
-  useEffect(() => connectGatewaySettings(), []);
   useEffect(() => startRelayMonitor(), []);
   useEffect(() => registerAllWidgets(), []);
   // M4: the routing footer in C7's usage popover, and a Direct session's login from every get_status answer

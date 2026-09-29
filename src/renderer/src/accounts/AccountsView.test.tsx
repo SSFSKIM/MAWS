@@ -55,7 +55,7 @@ afterEach(() => {
   cleanup();
   vi.useRealTimers();
   useUsage.setState({ snapshot: null });
-  useGateway.setState({ relay: null, relayCheckedAt: null, claudeUsage: null });
+  useGateway.setState({ relay: null, claudeUsage: null });
   useNotices.setState({ notices: [] });
   delete (window as { maws?: MawsBridge }).maws;
 });
