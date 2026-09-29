@@ -514,7 +514,7 @@ test('reconnects lossily with a notice when no checkpoint reaches the ring', asy
 test('floods without loss while the page stays responsive', async ({ maws }) => {
   test.setTimeout(600_000);
   const h = await harnessOf(maws);
-  const { id } = await h.addTerminal();
+  const { tabId, id } = await h.addTerminal();
   await h.prompt(id);
   // A prompt without a clock or a duration, so `true` and the workload differ only by the workload's output.
   await h.run(id, 'exec /bin/bash --norc --noprofile');
@@ -523,12 +523,27 @@ test('floods without loss while the page stays responsive', async ({ maws }) => 
   await h.idle(id, 800);
 
   await guarded(h, async () => {
+    // `head -c` cuts the last fox line short, so each run's marker ends that line.
+    const ends = (marker: string) =>
+      expect
+        .poll(async () => (await h.snap(id)).screen.some((line) => line.trimEnd().endsWith(marker) && !line.includes('echo')), { timeout: 120_000, message: `${marker} ends W1` })
+        .toBe(true);
+    const pausedSeen = () => h.call<boolean>('terminals', 'pausedSeen', id);
+
+    // W1 with its tab shown. The renderer mostly keeps up, and the pty pauses in one to a few episodes of 10 to 35 ms
+    // per run, which a sampler on a loaded machine can miss: recorded, not asserted.
     await h.run(id, `${FOX}; echo W1-$((6*7))`);
-    await expect
-      // `head -c` cuts the last fox line short, so the marker ends that line.
-      .poll(async () => (await h.snap(id)).screen.some((line) => line.trimEnd().endsWith('W1-42') && !line.includes('echo')), { timeout: 120_000, message: 'W1 ends' })
-      .toBe(true);
-    expect(await h.call<boolean>('terminals', 'pausedSeen', id), "W1's fox line pauses the pty at the high watermark").toBe(true);
+    await ends('W1-42');
+    test.info().annotations.push({ type: 'pausedSeenVisible', description: String(await pausedSeen()) });
+    await h.idle(id, 500);
+
+    // W1 again with its tab hidden for its first stretch: a hidden terminal acknowledges at most 256 KiB per 250 ms,
+    // so the host must pause the pty at the high watermark and hold it paused between ticks. Asserted.
+    await h.run(id, `${FOX}; echo W1-HIDDEN-$((6*7))`);
+    await h.call('panel', 'selectTab', 'review');
+    await expect.poll(pausedSeen, { timeout: 10_000, message: "W1's fox line pauses the pty at the high watermark" }).toBe(true);
+    await h.call('panel', 'selectTab', tabId);
+    await ends('W1-HIDDEN-42');
     await h.idle(id, 500);
 
     // The command is typed and its echo counted before Enter, so the delta is the output, the Enter's CR LF and the
