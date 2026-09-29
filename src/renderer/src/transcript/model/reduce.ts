@@ -271,8 +271,10 @@ class Batch {
     this.advance(turn.id);
   }
 
-  // A child transcript's turn, closed by the parent's report that the child ended (not retained: no row of its own).
-  closeChild(turn: TurnState, outcome: 'completed' | 'failed' | 'stopped', at: string): void {
+  // A turn closed without a turn.ended of its own (not retained: no row of its own): a child transcript's turn at the
+  // parent's report that the child ended, and a session's turn the engine never ended (its process exited, or C4's
+  // backfill shows the next prompt starting with no turn_duration for this one).
+  closeUnended(turn: TurnState, outcome: 'completed' | 'failed' | 'stopped', at: string): void {
     turn.state = 'closed';
     turn.closedBy = outcome;
     turn.endedAt = at;
@@ -352,9 +354,13 @@ function apply(batch: Batch, event: SessionEvent): void {
         if (current === null || !current.accepted) state.current = id;
         return;
       }
+      // A turn.started for a prompt with no pending turn: the engine runs this turn now. A turn it left open (C4's
+      // backfill has no turn_duration for an interrupted turn) ends here as stopped; a waiting prompt stays pending.
+      const previous = state.current === null ? null : state.turns.get(state.current)!;
+      if (previous !== null && previous.state === 'open' && previous.accepted) batch.closeUnended(batch.touch(previous.id), 'stopped', event.at);
       const turn = batch.open(id, originOf(event.origin), event.at);
       const current = state.current === null ? null : state.turns.get(state.current)!;
-      if (current !== null && !current.accepted) state.current = id; // the engine runs this turn, not a waiting prompt
+      if (current === null || !current.accepted) state.current = id;
       batch.push(turn, event);
       return;
     }
@@ -466,7 +472,7 @@ function apply(batch: Batch, event: SessionEvent): void {
       // task id and the agent id carry the same string (C1 Interfaces).
       if (state.agentId !== null && (event.taskId as string) === (state.agentId as string)) {
         const turn = batch.current();
-        if (turn) batch.closeChild(turn, event.status, event.at);
+        if (turn) batch.closeUnended(turn, event.status, event.at);
         return;
       }
       if (!pushRouted(index.tasks.get(event.taskId))) batch.loose(event, false);
@@ -543,8 +549,16 @@ function apply(batch: Batch, event: SessionEvent): void {
       // as stopped, and the exit is the parent's row, not the child's.
       if (state.agentId !== null) {
         const turn = batch.current();
-        if (turn) batch.closeChild(turn, 'stopped', event.at);
+        if (turn) batch.closeUnended(turn, 'stopped', event.at);
         return;
+      }
+      // A session's process exiting ends every turn the engine was running (no turn.ended will come for them); a
+      // prompt still waiting for its turn.started stays pending, and the exit is a loose row.
+      if (event.kind === 'process.exited') {
+        for (const id of state.order) {
+          const turn = state.turns.get(id)!;
+          if (turn.state === 'open' && turn.accepted) batch.closeUnended(batch.touch(id), 'stopped', event.at);
+        }
       }
       return batch.loose(event);
     }

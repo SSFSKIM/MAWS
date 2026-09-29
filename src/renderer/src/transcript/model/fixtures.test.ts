@@ -244,7 +244,7 @@ describe('event fixtures', () => {
     const rows = rowsFor(loadEventFixture('process-exit'));
     expect(ofKind(rows, 'request_slot')).toHaveLength(0);
     expect(rows.at(-1)).toMatchObject({ kind: 'error', scope: 'exit', severity: 'error', text: 'Session process exited (crash) · 1 approval lost', lostAttentionCount: 1 });
-    expect(cellsOf(rows)[0]).toMatchObject({ status: 'running', classification: { humanDecision: false } });
+    expect(cellsOf(rows)[0]).toMatchObject({ status: 'stopped', classification: { humanDecision: false } }); // the killed process ended its turn: the call stopped (M6 whole-branch fix)
   });
 });
 

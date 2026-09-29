@@ -211,6 +211,54 @@ describe('turn boundaries', () => {
     expect(state.order).toEqual([turnId.ofMessage(uuid('u0')), turnId.ofMessage(uuid('q'))]);
   });
 
+  // Whole-branch review: C3 synthesises no turn.ended for a killed process, only process.exited (its acceptance step
+  // 14: kill -9 mid-turn, resume, send a prompt).
+  it('a session process exit closes the running turn as stopped, so the next prompt is its own turn', () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('t1', 'Bash', { command: 'sleep 60' });
+    prompt(b, 'u2', 'waiting'); // pending when the process dies: it stays pending
+    b.emit('process.exited', { code: null, signal: 'SIGKILL', reason: 'crash', lostAttentionCount: 0 });
+    let state = reduce(b.events);
+    const [one, two] = [turnId.ofMessage(uuid('u1')), turnId.ofMessage(uuid('u2'))];
+    expect(state.turns.get(one)).toMatchObject({ state: 'closed', closedBy: 'stopped' });
+    expect(state.turns.get(two)).toMatchObject({ state: 'open', accepted: false });
+    expect(find(rowsOf(state), 'divider')).toMatchObject({ turnId: one, state: 'stopped' });
+    prompt(b, 'u3', 'after the resume');
+    b.emit('turn.started', { userMessageUuid: uuid('u3'), origin: 'human' });
+    b.text('m3', 0, 'Resumed answer');
+    b.end(['u3']);
+    state = applyEvents(state, b.events.slice(-4));
+    const three = turnId.ofMessage(uuid('u3'));
+    expect(state.order).toEqual([one, two, three]);
+    expect(state.turns.get(three)!.state).toBe('closed');
+    expect(find(rowsOf(state), 'assistant_text')).toMatchObject({ turnId: three, markdown: 'Resumed answer' });
+    expect(rowsOf(state).filter((row) => row.kind === 'user' && row.steer)).toEqual([]);
+  });
+
+  // Whole-branch review: C4's disk backfill emits turn.ended only from system/turn_duration, which an interrupted turn
+  // lacks, and writes turn.started before the prompt's user.message.
+  it('a turn.started for a prompt with no pending turn closes the previous open turn as stopped and takes over', () => {
+    const b = builder();
+    b.turn('u1');
+    b.text('m1', 0, 'Interrupted answer');
+    b.turn('u2');
+    b.text('m2', 0, 'Second answer');
+    b.end(['u2']);
+    b.turn('u3');
+    b.text('m3', 0, 'Third answer');
+    b.end(['u3']);
+    const state = reduce(b.events);
+    const ids = ['u1', 'u2', 'u3'].map((u) => turnId.ofMessage(uuid(u)));
+    expect(state.order).toEqual(ids);
+    expect(ids.map((id) => [state.turns.get(id)!.state, state.turns.get(id)!.closedBy])).toEqual([['closed', 'stopped'], ['closed', null], ['closed', null]]);
+    const list = rows(b.events);
+    expect(list.filter((row) => row.kind === 'assistant_text').map((row) => [row.turnId, (row as Extract<Row, { kind: 'assistant_text' }>).markdown])).toEqual([
+      [ids[0], 'Interrupted answer'], [ids[1], 'Second answer'], [ids[2], 'Third answer'],
+    ]);
+    expect(list.filter((row) => row.kind === 'user').map((row) => [row.turnId, (row as Extract<Row, { kind: 'user' }>).steer])).toEqual([[ids[0], false], [ids[1], false], [ids[2], false]]);
+  });
+
   it('a cancel naming a pending prompt marks its bubble dropped and closes its turn without work; later lifecycles change nothing', () => {
     const b = builder();
     b.turn('u1');
