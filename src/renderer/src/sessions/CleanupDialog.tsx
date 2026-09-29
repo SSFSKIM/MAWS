@@ -11,7 +11,7 @@ import { cleanupState, type BranchStatus, type CleanupRefusal, type WorktreeStat
 import { ipc } from '../ipc/client';
 import { useSessions } from '../stores/sessions';
 import type { SessionRecord } from '@shared/graph/session';
-import type { CleanupTarget } from './dialogs';
+import { cleanupTargetAt, type CleanupTarget } from './dialogs';
 import { archiveSession } from './record-ops';
 import { holderWords } from './holder-words';
 import { Sheet, SheetForm } from './Sheet';
@@ -33,16 +33,10 @@ interface Facts {
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 const basename = (path: string) => path.split('/').filter(Boolean).at(-1) ?? path;
 
-const MANAGED = '/.claude/worktrees/';
-
-// The cleanup target of a session's worktree: a managed worktree's repository root is the part of its path before
-// `.claude/worktrees/`, so it stays valid after the checkout is gone; a hand-made one is asked through the session's
-// directory (main normalises any path inside a repository to the main root). Null for a session with no worktree.
+// The cleanup target of a session's worktree (a hand-made one is asked through the session's directory); null for a
+// session with no worktree.
 export function cleanupTargetOf(record: SessionRecord): CleanupTarget | null {
-  if (record.worktree === null) return null;
-  const { path, branch } = record.worktree;
-  const at = path.indexOf(MANAGED);
-  return { repoRoot: at > 0 ? path.slice(0, at) : record.directory, path, branch };
+  return record.worktree === null ? null : cleanupTargetAt(record.worktree, record.directory);
 }
 
 // Git's identity of the target at open. The path is matched by main (NFC realpath on both sides, so `/tmp` and

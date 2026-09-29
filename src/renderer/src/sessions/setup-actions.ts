@@ -10,13 +10,17 @@ import { ipc } from '../ipc/client';
 import { toast } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
 import { heldToast } from './attach';
-import { confirm } from './dialogs';
+import { cleanupTargetAt, confirm, removeWorktreeAction } from './dialogs';
 import { holderWords } from './holder-words';
 import { returnMessage } from './message-return';
 import { isStarting, useSetup } from './store';
 
 export type HookResult = { ok: true } | { ok: false; error: string };
 export type WorktreeResource = NonNullable<SetupResources['worktree']>;
+
+const basename = (path: string) => path.split('/').filter(Boolean).at(-1) ?? path;
+// A directory inside the intent's repository, which a cleanup target of a hand-made checkout is asked through.
+const repositoryOf = (intent: SetupIntent) => (intent.location.kind === 'directory' ? intent.location.path : intent.location.repoRoot);
 
 // ---- outcomes in words -------------------------------------------------------------------------------------------
 
@@ -136,14 +140,20 @@ export async function reclaimMessage(appSessionId: AppSessionId, docked: FirstMe
 
 // The failure card's resolutions of a checkout the failed attempt created and kept.
 // Answers what became of the checkout, which the failure card shows in place of the rollback's account.
+// A kept checkout is named with its way into the cleanup: until a session runs there no record names it.
 export async function resolveWorktree(appSessionId: AppSessionId, resolution: 'discard' | 'keep'): Promise<WorktreeResource | null> {
   const result = await ipc.invoke('session.intent.resolveWorktree', { appSessionId, resolution });
   if (!result.ok) {
     toast({ level: 'danger', text: result.error.message, actions: [], dismissible: true });
     return null;
   }
-  useSetup.getState().setIntent(result.value.intent);
-  return result.value.worktree;
+  const { intent, worktree } = result.value;
+  useSetup.getState().setIntent(intent);
+  if (resolution === 'keep' && worktree.state === 'kept') {
+    const target = cleanupTargetAt(worktree, repositoryOf(intent));
+    toast({ level: 'info', text: `Worktree ${basename(worktree.path)} kept as this session’s location`, actions: [removeWorktreeAction(target)], dismissible: true });
+  }
+  return worktree;
 }
 
 // ---- a record's resume -------------------------------------------------------------------------------------------
@@ -198,7 +208,8 @@ export async function beforeCloseUnstarted(appSessionId: AppSessionId): Promise<
     toast({ level: 'danger', text: result.error.message, actions: [], dismissible: true });
     return 'kept';
   }
+  // no record names this checkout, so the notice is its way into the cleanup
   const leftover = result.value.leftover?.worktree;
-  if (leftover) toast({ level: 'info', text: `Worktree ${leftover.path} was kept; remove it with Remove worktree…`, actions: [], dismissible: true });
+  if (leftover) toast({ level: 'info', text: `Worktree ${leftover.path} was kept`, actions: [removeWorktreeAction(cleanupTargetAt(leftover, repositoryOf(intent)))], dismissible: true });
   return 'closed';
 }

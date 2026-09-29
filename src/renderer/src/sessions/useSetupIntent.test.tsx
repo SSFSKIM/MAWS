@@ -7,6 +7,7 @@ import { CANNOT_HOLD_AUTO_NOTE, GATEWAY_AUTO_NOTE } from '@shared/sessions/model
 import type { StartOutcome } from '@shared/sessions/setup';
 import { record, status } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
+import { useNotices } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
 import { health, ID, intent, MESSAGE, putIntent, REPO, resetSetupStore, trustState } from '../test-support/setup-intents';
 import { resetShellStores } from '../test-support/shell-stores';
@@ -52,6 +53,7 @@ function withMain(auto: Parameters<typeof fakeClient>[0] = {}) {
 beforeEach(() => {
   resetShellStores();
   resetSetupStore();
+  useNotices.setState({ notices: [] });
 });
 afterEach(() => {
   cleanup();
@@ -249,6 +251,19 @@ describe('close guard', () => {
     act(() => (useDialogs.getState().open as { answer(yes: boolean): void }).answer(true));
     expect(await closed).toBe('closed');
     expect(fake.invoked('session.intent.discard')).toEqual([{ appSessionId: ID }]);
+  });
+
+  it("a worktree the failed attempt kept is named with a Remove worktree… that opens its cleanup (no record names it)", async () => {
+    const path = `${REPO}/.claude/worktrees/accept-fail`;
+    withMain({ 'session.intent.discard': () => ({ leftover: { worktree: { path, branch: 'worktree-accept-fail' } } }) });
+    const location = { kind: 'newWorktree' as const, repoRoot: REPO, name: 'accept-fail', branch: { kind: 'new' as const, name: 'worktree-accept-fail', base: 'HEAD' } };
+    putIntent(intent({ location, progress: { ...intent().progress, worktree: { path, branch: 'worktree-accept-fail', head: 'abc', createdHere: true } } }));
+    expect(await beforeCloseUnstarted(ID)).toBe('closed');
+    const [notice] = useNotices.getState().notices;
+    expect(notice?.text).toBe(`Worktree ${path} was kept`);
+    expect(notice?.actions.map((a) => a.label)).toEqual(['Remove worktree…']);
+    act(() => notice!.actions[0]!.run());
+    expect(useDialogs.getState().open).toEqual({ kind: 'cleanup', target: { repoRoot: REPO, path, branch: 'worktree-accept-fail' } });
   });
 });
 

@@ -13,6 +13,21 @@ export interface CleanupTarget {
   branch: string | null;
 }
 
+const MANAGED = '/.claude/worktrees/';
+
+// The cleanup target of a worktree: a managed worktree's repository root is the part of its path before
+// `.claude/worktrees/`, so it stays valid after the checkout is gone; a hand-made one is asked through `directory`, any
+// path inside its repository (main normalises it to the main root).
+export function cleanupTargetAt(worktree: { path: string; branch: string | null }, directory: string): CleanupTarget {
+  const at = worktree.path.indexOf(MANAGED);
+  return { repoRoot: at > 0 ? worktree.path.slice(0, at) : directory, path: worktree.path, branch: worktree.branch };
+}
+
+// "Remove worktree…" on a notice about a worktree no session record names yet (a failed attempt's checkout).
+export function removeWorktreeAction(target: CleanupTarget): { label: string; run: () => void } {
+  return { label: 'Remove worktree…', run: () => openDialog({ kind: 'cleanup', target }) };
+}
+
 export interface ConfirmRequest {
   title: string;
   body: string;

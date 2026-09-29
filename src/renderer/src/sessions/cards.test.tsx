@@ -6,6 +6,7 @@ import type { StartOutcome } from '@shared/sessions/setup';
 import { TRUST_GATES } from '@shared/sessions/trust';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
 import { useNotices } from '../stores/notices';
+import { closeDialog, useDialogs } from './dialogs';
 import { health, ID, intent, MESSAGE, putIntent, REPO, resetSetupStore, resources, trustState } from '../test-support/setup-intents';
 import { FailureCard } from './FailureCard';
 import { RelayCard } from './RelayCard';
@@ -235,7 +236,8 @@ describe('failure card', () => {
 
   it('docks on failed; Retry re-invokes session.start with nothing beyond the id; Keep the worktree detaches it', async () => {
     const path = `${REPO}/.claude/worktrees/accept-fail`;
-    withMain({ 'session.start': answer(starting), 'session.intent.resolveWorktree': () => ({ intent: intent(), worktree: { path, branch: 'worktree-accept-fail', createdHere: false, state: 'kept', detail: null, branchState: 'kept' } }) });
+    const detached = intent({ message: MESSAGE, location: { kind: 'existingWorktree', repoRoot: REPO, path }, progress: { ...intent().progress, worktree: { path, branch: 'worktree-accept-fail', head: 'abc', createdHere: false } } });
+    withMain({ 'session.start': answer(starting), 'session.intent.resolveWorktree': () => ({ intent: detached, worktree: { path, branch: 'worktree-accept-fail', createdHere: false, state: 'kept', detail: null, branchState: 'none' } }) });
     putIntent(intent({ message: MESSAGE, progress: { ...intent().progress, worktree: { path, branch: 'worktree-accept-fail', head: 'abc', createdHere: true } } }));
     render(<Docked />);
     act(() => useSetup.getState().applySetup({ appSessionId: ID, phase: 'launching', detail: 'Starting', outcome: null })); // this window follows the start
@@ -251,6 +253,13 @@ describe('failure card', () => {
     expect(dockedIds()).toBe('c10:failure');
     await userEvent.click(await screen.findByRole('button', { name: 'Keep the worktree' }));
     expect(fake.invoked('session.intent.resolveWorktree')).toEqual([{ appSessionId: ID, resolution: 'keep' }]);
+    // the kept checkout's cleanup is reachable from the result (no record names it until a session runs there)
+    const [kept] = useNotices.getState().notices;
+    expect(kept?.text).toBe('Worktree accept-fail kept as this session’s location');
+    expect(kept?.actions.map((a) => a.label)).toEqual(['Remove worktree…']);
+    act(() => kept!.actions[0]!.run());
+    expect(useDialogs.getState().open).toEqual({ kind: 'cleanup', target: { repoRoot: REPO, path, branch: 'worktree-accept-fail' } });
+    act(() => closeDialog());
     await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
     expect(fake.invoked('session.start')).toEqual([{ appSessionId: ID, message: null, options: {} }]);
   });
