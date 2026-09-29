@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MawsBridge } from '@shared/ipc/schema';
@@ -9,6 +9,7 @@ import { useNotices } from '../stores/notices';
 import { closeDialog, useDialogs } from './dialogs';
 import { health, ID, intent, MESSAGE, putIntent, REPO, resetSetupStore, resources, trustState } from '../test-support/setup-intents';
 import { FailureCard } from './FailureCard';
+import { NewSessionEmptyState } from './NewSessionEmptyState';
 import { RelayCard } from './RelayCard';
 import { connectSetupDock } from './SetupCard';
 import { connectKeys } from '../keymap/dispatcher';
@@ -399,5 +400,87 @@ describe('failure card', () => {
     expect(returned).toEqual([MESSAGE]);
     expect(fake.invoked('session.intent.release')).toEqual([{ appSessionId: ID }]);
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull()); // dismissed until the next start
+  });
+});
+
+// While a failed attempt's checkout is still the intent's, `session.intent.patch` refuses every location change
+// (`retained_worktree`) until "Keep the worktree" or "Discard changes and remove" resolves it; once the card that offers
+// them is dismissed, the empty state above the composer offers them instead.
+describe('a retained worktree with its card dismissed', () => {
+  const path = `${REPO}/.claude/worktrees/accept-fail`;
+  const location = { kind: 'newWorktree' as const, repoRoot: REPO, name: 'accept-fail', branch: { kind: 'new' as const, name: 'worktree-accept-fail', base: 'HEAD' } };
+  const retained = (state: 'kept' | 'remove_refused', detail: string | null) =>
+    intent({
+      location,
+      message: MESSAGE,
+      progress: {
+        ...intent().progress,
+        worktree: { path, branch: 'worktree-accept-fail', head: 'abc', createdHere: true },
+        lastFailure: { at: '2026-09-29T10:00:00.000Z', phase: 'launching', message: 'the engine exited', resources: resources({ worktree: { path, branch: 'worktree-accept-fail', createdHere: true, state, detail, branchState: 'kept' } }) },
+      },
+    });
+  const note = () => screen.queryByRole('note', { name: 'Worktree from the failed attempt' });
+
+  it('after Back to editing, the empty state keeps Discard changes and remove (acknowledged) and Keep the worktree', async () => {
+    const held = retained('remove_refused', 'dirty: 2 uncommitted changes');
+    withMain({
+      'session.intent.release': () => ({ ...held, message: null }),
+      'session.intent.resolveWorktree': () => ({ intent: { ...held, message: null, progress: { ...held.progress, worktree: null } }, worktree: { path, branch: 'worktree-accept-fail', createdHere: true, state: 'removed', detail: null, branchState: 'deleted' } }),
+    });
+    putIntent(held);
+    render(
+      <>
+        <NewSessionEmptyState appSessionId={ID} />
+        <Docked />
+      </>,
+    );
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy();
+    expect(note(), 'the failure card offers the resolutions itself').toBeNull();
+    await userEvent.click(screen.getByRole('button', { name: 'Back to editing' }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull());
+    const shown = note()!;
+    expect(shown.textContent).toContain('Worktree accept-fail from the failed attempt is still this session’s: Send reuses it, and the location cannot change until you keep or discard it.');
+    expect(within(shown).getByRole('button', { name: 'Keep the worktree' })).toBeTruthy();
+    const discard = within(shown).getByRole('button', { name: 'Discard changes and remove' });
+    expect(discard.hasAttribute('disabled')).toBe(true);
+    await userEvent.click(within(shown).getByRole('checkbox', { name: 'Discard 2 uncommitted changes; this cannot be undone' }));
+    await userEvent.click(discard);
+    expect(fake.invoked('session.intent.resolveWorktree')).toEqual([{ appSessionId: ID, resolution: 'discard' }]);
+    await waitFor(() => expect(note(), 'resolved: nothing is retained any more').toBeNull());
+  });
+
+  it('after Cancel on the relay card C3 docked, Keep the worktree stays reachable (a clean checkout kept for the retry)', async () => {
+    const held = retained('kept', null);
+    withMain({
+      'session.intent.release': () => ({ ...held, message: null }),
+      'session.intent.resolveWorktree': () => ({
+        intent: { ...held, message: null, location: { kind: 'existingWorktree', repoRoot: REPO, path }, progress: { ...held.progress, worktree: { path, branch: 'worktree-accept-fail', head: 'abc', createdHere: false } } },
+        worktree: { path, branch: 'worktree-accept-fail', createdHere: false, state: 'kept', detail: null, branchState: 'none' },
+      }),
+    });
+    putIntent(held);
+    render(
+      <>
+        <NewSessionEmptyState appSessionId={ID} />
+        <Docked />
+      </>,
+    );
+    act(() => useSetup.getState().applySetup({ appSessionId: ID, phase: 'failed', detail: null, outcome: { kind: 'relay_unreachable', health: health() } }));
+    expect(note(), 'the relay card waits').toBeNull();
+    await userEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
+    const shown = await waitFor(() => note()!);
+    expect(within(shown).queryByRole('button', { name: 'Discard changes and remove' }), 'a clean kept checkout offers no discard, as on the card').toBeNull();
+    await userEvent.click(within(shown).getByRole('button', { name: 'Keep the worktree' }));
+    expect(fake.invoked('session.intent.resolveWorktree')).toEqual([{ appSessionId: ID, resolution: 'keep' }]);
+    await waitFor(() => expect(note()).toBeNull());
+  });
+
+  it('shows nothing while a start runs', () => {
+    withMain();
+    putIntent(retained('remove_refused', 'dirty: 1 uncommitted change'));
+    act(() => useSetup.getState().settle(ID));
+    act(() => useSetup.getState().applySetup({ appSessionId: ID, phase: 'launching', detail: 'Starting', outcome: null }));
+    render(<NewSessionEmptyState appSessionId={ID} />);
+    expect(note()).toBeNull();
   });
 });

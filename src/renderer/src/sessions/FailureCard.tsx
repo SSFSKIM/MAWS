@@ -37,6 +37,27 @@ export function resourceLines(resources: SetupResources): string[] {
   return lines;
 }
 
+// Which resolutions a failure's checkout offers: "Keep the worktree" while the attempt's checkout is still the intent's
+// (`retained`) and was not removed; "Discard changes and remove" when its removal was refused or failed, behind an
+// acknowledgement naming the changes. Shared with the empty state's note, which offers them once the card is dismissed.
+export function worktreeResolutions(w: SetupResources['worktree'], retained: boolean): { keep: boolean; discard: boolean; changes: string } {
+  const keep = retained && w !== null && w.state !== 'removed';
+  const discard = keep && (w.state === 'remove_refused' || w.state === 'remove_failed');
+  const changes = (w?.state === 'remove_refused' && w.detail?.startsWith('dirty: ') ? detailWords(w.detail) : null) ?? 'uncommitted changes';
+  return { keep, discard, changes };
+}
+
+// The acknowledgement a discard waits on.
+export function DiscardAcknowledgement({ changes, checked, onChange }: { changes: string; checked: boolean; onChange(checked: boolean): void }) {
+  const words = `Discard ${changes}; this cannot be undone`;
+  return (
+    <label className="flex items-center gap-2 text-ui-sm text-fg">
+      <input type="checkbox" aria-label={words} checked={checked} onChange={(e) => onChange(e.target.checked)} className={CHOICE} />
+      {words}
+    </label>
+  );
+}
+
 export function FailureCard({
   failure,
   busy,
@@ -55,10 +76,7 @@ export function FailureCard({
   onKeep(): void;
 }) {
   const [acknowledged, setAcknowledged] = useState(false);
-  const w = failure.resources.worktree;
-  const kept = retainedWorktree && w !== null && w.state !== 'removed';
-  const discardable = kept && (w.state === 'remove_refused' || w.state === 'remove_failed');
-  const changes = w?.state === 'remove_refused' && w.detail?.startsWith('dirty: ') ? detailWords(w.detail) : 'uncommitted changes';
+  const { keep: kept, discard: discardable, changes } = worktreeResolutions(failure.resources.worktree, retainedWorktree);
   return (
     <div className="flex flex-col gap-2.5 text-ui text-fg">
       <p className="m-0 text-danger">{failure.message}</p>
@@ -67,12 +85,7 @@ export function FailureCard({
           <li key={line}>{line}</li>
         ))}
       </ul>
-      {discardable && (
-        <label className="flex items-center gap-2 text-ui-sm text-fg">
-          <input type="checkbox" aria-label={`Discard ${changes}; this cannot be undone`} checked={acknowledged} onChange={(e) => setAcknowledged(e.target.checked)} className={CHOICE} />
-          {`Discard ${changes}; this cannot be undone`}
-        </label>
-      )}
+      {discardable && <DiscardAcknowledgement changes={changes} checked={acknowledged} onChange={setAcknowledged} />}
       <div className="flex flex-wrap items-center gap-2">
         <button type="button" disabled={busy} onClick={onAccept} className={PRIMARY}>
           Retry
