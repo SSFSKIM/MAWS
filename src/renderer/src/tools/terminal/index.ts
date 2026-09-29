@@ -1,14 +1,12 @@
-// The Terminal tool (C9 Residue *Terminal tool and X5*): an X5 `PanelTool` whose state is only the identity of a
-// terminal in the registry, so the shell, its emulator and its scrollback outlive every tab switch, panel close and
-// session switch under a pin; and `openTerminal`, C10's entry point for "attach in a terminal tab".
+// The Terminal tool (C9 Residue *Terminal tool and X5*): an X5 `PanelTool` whose state is the identity of a terminal in
+// the registry (plus its close confirmation), so the shell, its emulator and its scrollback outlive every tab switch,
+// panel close and session switch under a pin; and `openTerminal`, C10's entry point for "attach in a terminal tab".
 import type { AppSessionId } from '@shared/graph/ids';
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import { panelHost } from '../../panel/host';
 import type { PanelTool, PanelToolInit } from '../../panel/tool';
 import { terminals, type TerminalId } from '../../terminal/registry';
 import { sessionDirectory, TerminalIcon, TerminalView } from './TerminalView';
-
-export { sessionDirectory };
 
 export const TERMINAL_TOOL_ID = 'terminal';
 

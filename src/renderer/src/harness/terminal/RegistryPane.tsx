@@ -50,7 +50,6 @@ export const terminalsApi = createTerminalsApi({
   },
 });
 
-
 export function RegistryPane() {
   const infos = useTerminals((s) => s.terminals);
   const host = useTerminals((s) => s.host);
