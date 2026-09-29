@@ -103,6 +103,20 @@ describe('theme switching in main', () => {
     await expect(invoke('settings.get')).resolves.toEqual({ ok: true, value: state('dark', 'dark') });
   });
 
+  // C11 start
+  it('settings.set of one gateway field changes that field alone, and settings.changed carries the whole state', async () => {
+    startSettings(file);
+    clearRecords();
+    const whole = { settings: { ...SETTINGS_DEFAULTS_V3, gateway: { ...SETTINGS_DEFAULTS_V3.gateway, relayUnreachable: 'wait' } }, resolvedTheme: 'light' };
+    await expect(invoke('settings.set', { gateway: { relayUnreachable: 'wait' } })).resolves.toEqual({ ok: true, value: whole });
+    expect(electron.win.sent).toEqual([['maws:evt:settings.changed', whole]]);
+    await expect(invoke('settings.set', { notifications: { kinds: { errors: false } } })).resolves.toMatchObject({
+      ok: true,
+      value: { settings: { notifications: { enabled: true, sound: false, kinds: { ...SETTINGS_DEFAULTS_V3.notifications.kinds, errors: false } } } },
+    });
+  });
+  // C11 end
+
   it('settings.set with an invalid theme changes nothing', async () => {
     startSettings(file);
     clearRecords();
