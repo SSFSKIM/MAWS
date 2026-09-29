@@ -9,7 +9,7 @@ import type { Settings } from '@shared/ipc/schema';
 import { SETTINGS_DEFAULTS_V3 } from '@shared/settings/defaults';
 import type { AccountUsage, UsageSnapshot } from '@shared/usage/types';
 import { loadScenario } from '../../../../test/support/scenario';
-import { paceLine, paceRunsOutAt, routingFacts } from './routing-facts';
+import { paceLine, paceRunsOutAt, routingFacts, unstartedRoute } from './routing-facts';
 
 const ROOT = join(__dirname, '../../../..');
 const scenario = loadScenario(join(ROOT, 'test/fixtures/shell/nine-sessions.json'));
@@ -83,6 +83,26 @@ describe('routingFacts names the account and the switch', () => {
     const foreign = recordOf('app-466b0d0d'); // held by a terminal
     expect(routingFacts(foreign, null, snapshot(), settings(), null)).toMatchObject({ canSwitch: false, targets: [], refusal: 'Held by a terminal · switch it there' });
     expect(routingFacts({ ...record, archived: true }, null, snapshot(), settings(), null)).toMatchObject({ canSwitch: false, refusal: 'Archived · unarchive it to switch' });
+  });
+});
+
+// The architect's ruling (Decision Log, 2026-09-29, from C10's review): D-19's per-session Direct on an unstarted
+// session is a choice of the intent's route (`session.intent.patch { gateway }`), restarting nothing. The footer reads it
+// before routingFacts, which would call such a session's unrecorded route unknown and offer a restart.
+describe('an unstarted session chooses its route and restarts nothing', () => {
+  it('names the route the intent starts on and offers both', () => {
+    expect(unstartedRoute({ gateway: 'gateway' }, settings())).toEqual({ route: 'gateway', line: "Starts routed through ClaudeUsage's relay", choices: ['gateway', 'direct'] });
+    expect(unstartedRoute({ gateway: 'direct' }, settings())).toMatchObject({ route: 'direct', line: "Starts direct · engine's own login" });
+  });
+
+  it('offerDirect false offers no choice on a routed intent, and the way back on a direct one', () => {
+    expect(unstartedRoute({ gateway: 'gateway' }, settings({ offerDirect: false })).choices).toEqual([]);
+    expect(unstartedRoute({ gateway: 'direct' }, settings({ offerDirect: false })).choices).toEqual(['gateway', 'direct']);
+  });
+
+  it('what routingFacts would say of the same session, which is why the footer branches first', () => {
+    const unstarted = { ...record, gateway: { ...record.gateway, routed: null } }; // a provisional record: no status, no route yet
+    expect(routingFacts(unstarted, null, null, settings(), null)).toMatchObject({ route: 'unknown', targets: ['gateway', 'direct'] });
   });
 });
 

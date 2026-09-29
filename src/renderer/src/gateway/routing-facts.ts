@@ -5,6 +5,7 @@
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { SessionRecord } from '@shared/graph/session';
 import type { Settings } from '@shared/ipc/schema';
+import type { SetupIntent } from '@shared/sessions/intent';
 import type { UsageSnapshot, UsageWindow } from '@shared/usage/types';
 import { PACE, ROUTE, type Route } from './copy';
 
@@ -61,6 +62,23 @@ export function routingFacts(record: SessionRecord, status: EngineSessionStatus 
   const offered: Route[] = route === 'gateway' ? ['direct'] : route === 'direct' ? ['gateway'] : ['gateway', 'direct'];
   const targets = refusal !== null ? [] : offered.filter((t) => t === 'gateway' || settings.gateway.offerDirect);
   return { route, line, note, account, targets, canSwitch: targets.length > 0, switchLabel: targets.length > 0 ? ROUTE.switchTo[targets[0]] : '', refusal };
+}
+
+// ---- an unstarted session ------------------------------------------------------------------------------------------------
+
+// D-19's per-session Direct before the first send (the architect's ruling, Decision Log 2026-09-29, from C10's review):
+// the route is the setup intent's `gateway`, chosen with `session.intent.patch`, so nothing restarts. The Direct choice
+// follows `offerDirect` as the switch does; an intent already direct (the default route, or a choice made here) is
+// always offered the way back.
+export interface UnstartedRoute {
+  route: Route;
+  line: string;
+  choices: Route[]; // the segment's options, in order; empty when there is nothing to choose
+}
+
+export function unstartedRoute(intent: Pick<SetupIntent, 'gateway'>, settings: Settings): UnstartedRoute {
+  const choices: Route[] = settings.gateway.offerDirect || intent.gateway === 'direct' ? ['gateway', 'direct'] : [];
+  return { route: intent.gateway, line: ROUTE.starts[intent.gateway], choices };
 }
 
 // ---- the pace line ------------------------------------------------------------------------------------------------------

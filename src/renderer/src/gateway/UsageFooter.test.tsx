@@ -1,5 +1,6 @@
 // The routing footer in C7's usage popover (C11 execution document, Interfaces "Gateway", *Routing facts*; M4 refresh
-// task "the popover footer as C7 asked"), rendered through C7's own popover body and seam.
+// task "the popover footer as C7 asked"), rendered through C7's own popover body and seam; and (the architect's ruling of
+// 2026-09-29, from C10's review) an unstarted session's route chosen on its intent, restarting nothing.
 import { join } from 'node:path';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -13,8 +14,10 @@ import { registerAction } from '../keymap/actions-runtime';
 import { panelHost } from '../panel/host';
 import { registerUsagePopoverFooter } from '../statusline';
 import { UsagePopoverBody } from '../statusline/UsagePopover';
+import { useSetup } from '../sessions/store';
 import { useSessions } from '../stores/sessions';
 import { useSettings } from '../stores/settings';
+import { intent as intentOf } from '../test-support/setup-intents';
 import { useGateway } from './store';
 import { answerSwitch } from './switch-route';
 import { UsageFooter } from './UsageFooter';
@@ -40,6 +43,7 @@ afterEach(() => {
   offs.splice(0).forEach((off) => off());
   useSessions.setState({ engine: new Map(), records: new Map() });
   useGateway.setState({ switching: new Map(), directLogin: new Map() });
+  useSetup.setState({ intents: new Map(), phases: new Map(), invoking: new Set() });
   useSettings.setState({ state: null });
   delete (window as { maws?: MawsBridge }).maws;
   vi.restoreAllMocks();
@@ -102,5 +106,52 @@ describe('routingFacts names the account and the switch — the footer', () => {
     const footer = popover(null);
     expect(footer.textContent).toContain('Route not recorded · a resume uses the default route (gateway)');
     expect(within(footer).getAllByRole('button', { name: /^Switch to/ }).map((b) => b.textContent)).toEqual(['Switch to gateway…', 'Switch to Direct…']);
+  });
+});
+
+// An unstarted session (C10's setup intent, and no process yet: a provisional record while its first launch runs, or
+// any host of C7's footer before the record exists) chooses its route on the intent and restarts nothing (the
+// architect's ruling of 2026-09-29; D-19's per-session Direct). Branching before routingFacts is what keeps its
+// unrecorded route from reading "Route not recorded" with a restart offered.
+describe('an unstarted session chooses its route and restarts nothing — the footer', () => {
+  const unstarted = (over: Parameters<typeof intentOf>[0] = {}) => {
+    const held = intentOf({ appSessionId: READY, ...over });
+    useSetup.setState({ intents: new Map([[READY, held]]) });
+    useSessions.setState({ engine: new Map(), records: new Map([[READY, { ...record, gateway: { ...record.gateway, routed: null } }]]) });
+    backend.script('session.intent.patch', (input) => ({ ...held, ...(input as { patch: object }).patch }));
+    return popover(null);
+  };
+
+  it('names the intent’s route and offers the relay and Direct, with no switch', () => {
+    const footer = unstarted();
+    expect(footer.textContent).toContain("Starts routed through ClaudeUsage's relay");
+    expect(footer.textContent).toContain('Applies at the first send · nothing restarts');
+    const choice = within(footer).getByRole('group', { name: 'Route for this session' });
+    expect(within(choice).getAllByRole('button').map((b) => [b.textContent, b.getAttribute('aria-pressed')])).toEqual([
+      ['ClaudeUsage relay', 'true'],
+      ['Direct', 'false'],
+    ]);
+    expect(within(footer).queryByRole('button', { name: /^Switch to/ })).toBeNull();
+    expect(footer.textContent).not.toContain('Route not recorded');
+  });
+
+  it('Direct patches the intent’s gateway and never starts or stops anything', async () => {
+    const footer = unstarted();
+    fireEvent.click(within(footer).getByRole('button', { name: 'Direct' }));
+    await vi.waitFor(() => expect(useSetup.getState().intents.get(READY)?.gateway).toBe('direct'));
+    expect(backend.calls.map((c) => [c.command, c.input])).toEqual([['session.intent.patch', { appSessionId: READY, patch: { gateway: 'direct' } }]]);
+  });
+
+  it('while its start runs, or its first message waits behind a card, the choice is disabled', () => {
+    useSetup.setState({ invoking: new Set([READY]) });
+    for (const button of within(within(unstarted()).getByRole('group')).getAllByRole('button')) expect((button as HTMLButtonElement).disabled).toBe(true);
+    cleanup();
+    useSetup.setState({ invoking: new Set() });
+    for (const button of within(within(unstarted({ message: { content: 'Reply OK', display: 'Reply OK' } })).getByRole('group')).getAllByRole('button')) expect((button as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('offerDirect false leaves a routed intent without the choice', () => {
+    settingsWith({ offerDirect: false });
+    expect(within(unstarted()).queryByRole('group', { name: 'Route for this session' })).toBeNull();
   });
 });

@@ -15,6 +15,12 @@ export const ROUTE = {
   held: (holder: string) => `Held by ${holder} · switch it there`,
   holders: { terminal: 'a terminal', background_job: 'a background job' } as Record<string, string>,
   archived: 'Archived · unarchive it to switch',
+  // an unstarted session (D-19's per-session Direct): the intent's route, chosen before the first send
+  starts: { gateway: "Starts routed through ClaudeUsage's relay", direct: "Starts direct · engine's own login" } satisfies Record<Route, string>,
+  choice: { gateway: 'ClaudeUsage relay', direct: 'Direct' } satisfies Record<Route, string>,
+  choiceLabel: 'Route for this session',
+  choiceNote: 'Applies at the first send · nothing restarts',
+  choiceStarting: 'The session is starting',
 };
 
 export const FOOTER = {
