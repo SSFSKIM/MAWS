@@ -29,6 +29,7 @@ import { registerTranscriptActions } from './transcript';
 import { registerGatewayActions } from './gateway/actions';
 import { startRelayMonitor } from './gateway/relay-monitor';
 import { connectGatewaySettings } from './gateway/store';
+import { registerAllWidgets } from './widgets';
 // C11 end
 
 export function App() {
@@ -68,10 +69,11 @@ export function App() {
   useEffect(() => registerTranscriptActions({ editAndResubmit: editAndResubmitRow }), []); // a bubble's Edit prefills the composer in edit mode
   // C7 end
   // C11 start: Settings…, Accounts and Open ClaudeUsage in the action table; the gateway store follows the settings; the
-  // relay monitor's app-wide banner while a routed session is live
+  // relay monitor's app-wide banner while a routed session is live; a widget for every name of the slash palette
   useEffect(() => registerGatewayActions(), []);
   useEffect(() => connectGatewaySettings(), []);
   useEffect(() => startRelayMonitor(), []);
+  useEffect(() => registerAllWidgets(), []);
   // C11 end
 
   // index.html ships data-theme="light" for the first paint; from then on main's resolved theme decides.
