@@ -8,6 +8,10 @@ export default defineConfig({
   // C9 (inside C6's block, wave-2 ledger (d)): so does the terminal spec, under `pnpm e2e:terminal`.
   testIgnore: process.env.MAWS_HARNESS === '1' ? [] : ['transcript.spec.ts', 'terminal.spec.ts'],
   // end C6
+  // C8a start: so does the panel spec, under `pnpm e2e:panel` (its product-app cases pass MAWS_HARNESS=0 per launch).
+  // This replaces the list above outside the harness run, so it repeats C6's two names.
+  ...(process.env.MAWS_HARNESS === '1' ? {} : { testIgnore: ['transcript.spec.ts', 'terminal.spec.ts', 'panel.spec.ts'] }),
+  // C8a end
   workers: 1,
   retries: 0,
   timeout: 60_000,
