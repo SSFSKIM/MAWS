@@ -184,7 +184,7 @@ describe('ipc schema validates both directions', () => {
       for (const name of c3Commands) expect(Object.hasOwn(commands, name), name).toBe(true);
       for (const name of [...C3_SESSION_EVENTS, ...C3_ENGINE_EVENTS, ...C3_ATTENTION_EVENTS]) expect(Object.hasOwn(events, name), name).toBe(true);
       for (const name of c3Commands) expect(commands[name].owner, name).toBe(name.startsWith('attention.') ? 'main' : 'engine-host');
-      expect(C3_SESSION_EVENTS).toEqual(['session.eventBatch', 'session.status', 'session.queue', 'session.brokerItems', 'session.operation']);
+      expect(C3_SESSION_EVENTS).toEqual(['session.eventBatch', 'session.status', 'session.queue', 'session.brokerItems', 'session.operation', 'session.forgotten']);
       expect(C3_ATTENTION_COMMANDS).toEqual(['attention.list', 'attention.request']);
       expect(C3_ATTENTION_EVENTS).toEqual(['attention.changed']);
       expect(C3_ENGINE_COMMANDS).toEqual(['engine.binaryInfo', 'engine.relayHealth', 'engine.sessions', 'engine.shutdown']);

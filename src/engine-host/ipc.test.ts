@@ -263,6 +263,20 @@ describe('engine host X2 surface', () => {
     expect(await host.call('session.stop', { appSessionId: id as AppSessionId, reason: 'archive' })).toMatchObject({ exited: true });
     expect(forget).toHaveBeenCalledExactlyOnceWith(id);
     expect(host.ipc.table.get(id as AppSessionId)!.status().exit).toMatchObject({ reason: 'archive' });
+    // the internal event main's attention service retires the session on (M5 review), after the session's last batch
+    const names = host.emitted.filter((e) => (e.payload as { appSessionId?: string }).appSessionId === id).map((e) => e.name);
+    expect(names.at(-1)).toBe('session.forgotten');
+    expect(host.emitted.at(-1)).toEqual({ name: 'session.forgotten', payload: { appSessionId: id } });
+
+    // an already-exited session: archive still forgets it and says so
+    const ended = 'app-archive-exited';
+    await host.call('session.launch', { spec: replaySpec(ended, 'spikes/protocol-probe/fixtures/init.jsonl') });
+    await until(() => host.statuses(ended).some((s) => s.process === 'ready'), 'ready');
+    await host.call('session.stop', { appSessionId: ended as AppSessionId, reason: 'stop' });
+    expect(host.emitted.some((e) => e.name === 'session.forgotten' && (e.payload as { appSessionId: string }).appSessionId === ended)).toBe(false);
+    expect(await host.call('session.stop', { appSessionId: ended as AppSessionId, reason: 'archive' })).toMatchObject({ exited: true });
+    expect(forget).toHaveBeenLastCalledWith(ended);
+    expect(host.emitted.at(-1)).toEqual({ name: 'session.forgotten', payload: { appSessionId: ended } });
   });
 
   it('mutations report what the engine said: a refused mode with its code and the status requested/refusal, a model error, void setters', async () => {

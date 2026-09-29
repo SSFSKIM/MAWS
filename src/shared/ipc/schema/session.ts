@@ -121,6 +121,7 @@ const c3Events = {
   'session.queue': z.strictObject({ appSessionId: AppSessionIdSchema, entries: z.array(QueueEntrySchema), paused: z.boolean() }),
   'session.brokerItems': z.strictObject({ appSessionId: AppSessionIdSchema, items: z.array(AttentionItemSchema) }), // internal: main's attention service
   'session.operation': OperationEventSchema,
+  'session.forgotten': z.strictObject({ appSessionId: AppSessionIdSchema }), // internal (M5 review): archived or forgotten, live or exited; main's attention service retires the session
 } as const;
 
 export const C3_SESSION_COMMANDS = Object.keys(c3Commands) as (keyof typeof c3Commands)[];

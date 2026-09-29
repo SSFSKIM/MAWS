@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AttentionItemSchema, type AttentionItem } from '@shared/graph/attention';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -176,5 +176,90 @@ describe('attention service merges broker items with the derived kinds', () => {
     expect(await handlers.get('attention.list')!(undefined)).toEqual([interrupted, other]);
     await service.settled();
     expect(store.sessions.get(APP)).toEqual([interrupted]);
+  });
+
+  // M5 review (Important 2): main starts the host without awaiting the service, so live events can precede the load.
+  it('merges persisted derived items with live state at startup: a live retirement wins, an item the live state does not know is kept', async () => {
+    const keep = item({ kind: 'interrupted', state: 'pending', id: `${APP}:interrupted:e1` as never, summary: 'Session interrupted, 1 approval lost', request: { requestId: null, toolUseId: null, taskId: null, agentId: null } });
+    const retiredByTurn = item({ kind: 'error', state: 'pending', appSessionId: 'app-b' as never, id: 'app-b:error:e2' as never, request: { requestId: null, toolUseId: null, taskId: null, agentId: null } });
+    const archived = item({ kind: 'error', state: 'pending', appSessionId: 'app-c' as never, id: 'app-c:error:e3' as never, request: { requestId: null, toolUseId: null, taskId: null, agentId: null } });
+    let release!: () => void;
+    const store = new FakeStore([keep, retiredByTurn, archived]);
+    const list = store.list.bind(store);
+    store.list = async () => {
+      await new Promise<void>((r) => (release = r));
+      return list();
+    };
+    const { service, fire, handlers } = setup({ store });
+    const permission = item({ kind: 'permission', state: 'pending' });
+    fire('session.brokerItems', { appSessionId: APP, items: [permission] }); // live before the load
+    fire('session.eventBatch', { appSessionId: 'app-b', events: [event('turn.started', { userMessageUuid: 'u', origin: 'human' })] });
+    fire('session.forgotten', { appSessionId: 'app-c' });
+    release();
+    await service.ready;
+    expect(await handlers.get('attention.list')!(undefined)).toEqual([permission, keep]);
+    await service.settled();
+    expect(store.sessions.get(APP)).toEqual([permission, keep]);
+    expect(store.sessions.get('app-b') ?? []).toEqual([]); // the persisted error was retired by this run's human turn
+    expect(store.sessions.has('app-c')).toBe(false);
+  });
+
+  // M5 review (Important 4)
+  it('session.forgotten (an archive, live or exited) retires the whole session', async () => {
+    const { service, store, fire, batch, changed } = setup();
+    batch(event('process.exited', { code: 0, signal: null, reason: 'crash', lostAttentionCount: 2 }));
+    expect(changed.at(-1)!.items).toHaveLength(1);
+    fire('session.forgotten', { appSessionId: APP });
+    expect(changed.at(-1)).toEqual({ appSessionId: APP, items: [] });
+    await service.settled();
+    expect(store.retired).toEqual([APP]);
+    expect(service.list()).toEqual([]);
+  });
+});
+
+// M5 review (Important 5): nothing is treated as saved that was not.
+describe('attention service persistence failures', () => {
+  afterEach(() => vi.useRealTimers());
+
+  class FlakyStore extends FakeStore {
+    failures = 1;
+    override async replaceForSession(id: AppSessionId, items: AttentionItem[]) {
+      if (this.failures > 0) {
+        this.failures -= 1;
+        throw new Error('EIO: attention.json not written');
+      }
+      return super.replaceForSession(id, items);
+    }
+  }
+
+  it('a failed write rejects settled(), keeps serving the list, and is retried with the next change', async () => {
+    const store = new FlakyStore();
+    const { service, fire, handlers, last } = setup({ store });
+    const first = item({ kind: 'permission', state: 'pending' });
+    fire('session.brokerItems', { appSessionId: APP, items: [first] });
+    await expect(service.settled()).rejects.toThrow('EIO: attention.json not written');
+    expect(await handlers.get('attention.list')!(undefined)).toEqual([first]);
+    expect(last()).toEqual([first]);
+    const second = item({ kind: 'permission', state: 'delivered', request: { requestId: 'req-2' as never, toolUseId: 'toolu_2' as never, taskId: null, agentId: null } });
+    fire('session.brokerItems', { appSessionId: APP, items: [first, second] });
+    await expect(service.settled()).resolves.toBeUndefined();
+    expect(store.sessions.get(APP)).toEqual([first, second]);
+    service.stop();
+  });
+
+  it('a failed write is retried after 5 s with no further change', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const store = new FlakyStore();
+    const { service, fire } = setup({ store });
+    const first = item({ kind: 'permission', state: 'pending' });
+    fire('session.brokerItems', { appSessionId: APP, items: [first] });
+    await expect(service.settled()).rejects.toThrow('EIO');
+    expect(store.sessions.get(APP)).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(store.sessions.get(APP)).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(service.settled()).resolves.toBeUndefined();
+    expect(store.sessions.get(APP)).toEqual([first]);
+    service.stop();
   });
 });

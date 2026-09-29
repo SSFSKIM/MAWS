@@ -5,7 +5,8 @@
 // hard-failure terminal reason, SPEC 45.25.4's set) or a failed background task, `auto_mode_unavailable` from a tool
 // result denied that way, `interrupted` from an exit that lost approvals (the summary string is the contract), and
 // `held_peer_message` from the status's held messages. Error-like items retire when the session's next human turn
-// starts or the session is stopped; an archive retires everything. Each change is persisted through the AttentionStore
+// starts or the session is stopped; an archive (`session.forgotten`, or an archive exit) retires everything. Each change
+// is persisted through the AttentionStore (a failed write is owed and retried, never taken as saved)
 // and emitted whole as `attention.changed`; `attention.list` and `attention.request` are answered here, the latter by
 // asking the engine host for the item's originating request event (`session.pendingRequest`).
 import type { AttentionItem } from '@shared/graph/attention';
@@ -47,23 +48,56 @@ interface SessionState {
   broker: AttentionItem[];
   derived: Map<string, AttentionItem>;
   signature: string;
+  retiredKinds: Set<AttentionItem['kind']>; // retired live since this run started: a persisted item of the kind stays retired
 }
+
+export const PERSIST_RETRY_MS = 5_000;
 
 const noRequest = { requestId: null, toolUseId: null, taskId: null, agentId: null };
 
 export function startAttentionService(deps: AttentionServiceDeps): AttentionService {
   const log = deps.log ?? ((message: string) => console.warn(`[attention] ${message}`));
   const sessions = new Map<AppSessionId, SessionState>();
-  let writes: Promise<void> = Promise.resolve();
+  const forgotten = new Set<AppSessionId>(); // archived during this run: nothing persisted may bring them back
 
   const stateOf = (id: AppSessionId): SessionState => {
     let state = sessions.get(id);
-    if (!state) sessions.set(id, (state = { broker: [], derived: new Map(), signature: '[]' }));
+    if (!state) sessions.set(id, (state = { broker: [], derived: new Map(), signature: '[]', retiredKinds: new Set() }));
     return state;
   };
   const merged = (state: SessionState): AttentionItem[] => [...state.broker, ...state.derived.values()];
-  const persist = (op: () => Promise<void>) => {
-    writes = writes.then(op).catch((error: unknown) => log(`not persisted: ${error instanceof Error ? error.message : String(error)}`));
+
+  // Persistence (M5 review): the sessions whose stored list is behind the in-memory one, written in order; a failed
+  // write stays owed, is retried with the next change and after PERSIST_RETRY_MS, and makes settled() reject until a
+  // write succeeds. The in-memory lists keep serving attention.list and attention.changed meanwhile.
+  const owed = new Map<AppSessionId, 'replace' | 'retire'>();
+  // No write before the persisted items were read: a live write would replace a session's stored list first.
+  let loadFinished!: () => void;
+  let writes: Promise<void> = new Promise((resolve) => (loadFinished = resolve));
+  let failure: unknown = null;
+  let retryTimer: ReturnType<typeof setTimeout> | null = null;
+  const writeOwed = () => {
+    writes = writes.then(async () => {
+      for (const [id, op] of [...owed]) {
+        owed.delete(id);
+        try {
+          if (op === 'retire') await deps.store.retireForSession(id);
+          else await deps.store.replaceForSession(id, merged(sessions.get(id) ?? stateOf(id)));
+        } catch (error) {
+          if (!owed.has(id)) owed.set(id, op);
+          failure = error;
+          log(`not persisted (retrying): ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+      if (owed.size === 0) failure = null;
+      else if (retryTimer === null) {
+        retryTimer = setTimeout(() => {
+          retryTimer = null;
+          writeOwed();
+        }, PERSIST_RETRY_MS);
+        (retryTimer as { unref?: () => void }).unref?.();
+      }
+    });
   };
 
   // After any change: emit and persist the session's whole list when it differs from the last one.
@@ -73,7 +107,17 @@ export function startAttentionService(deps: AttentionServiceDeps): AttentionServ
     if (signature === state.signature) return;
     state.signature = signature;
     deps.emit('attention.changed', { appSessionId: id, items });
-    persist(() => deps.store.replaceForSession(id, items));
+    owed.set(id, 'replace');
+    writeOwed();
+  };
+
+  // An archive (or a forget): nothing of the session needs anyone.
+  const retireSession = (id: AppSessionId) => {
+    sessions.delete(id);
+    forgotten.add(id);
+    deps.emit('attention.changed', { appSessionId: id, items: [] });
+    owed.set(id, 'retire');
+    writeOwed();
   };
 
   const derive = (id: AppSessionId, state: SessionState, key: string, fields: Pick<AttentionItem, 'kind' | 'summary' | 'sessionId' | 'createdAt'> & Partial<AttentionItem>) => {
@@ -82,6 +126,7 @@ export function startAttentionService(deps: AttentionServiceDeps): AttentionServ
     state.derived.set(itemId, { id: itemId, appSessionId: id, request: noRequest, state: 'pending', stateChangedAt: fields.createdAt, expiresAt: null, ...fields });
   };
   const retireDerived = (state: SessionState, kinds: ReadonlySet<AttentionItem['kind']>) => {
+    for (const kind of kinds) state.retiredKinds.add(kind);
     for (const [itemId, item] of state.derived) if (kinds.has(item.kind)) state.derived.delete(itemId);
   };
 
@@ -108,9 +153,7 @@ export function startAttentionService(deps: AttentionServiceDeps): AttentionServ
           break;
         case 'process.exited':
           if (event.reason === 'archive') {
-            sessions.delete(id);
-            deps.emit('attention.changed', { appSessionId: id, items: [] });
-            persist(() => deps.store.retireForSession(id));
+            retireSession(id);
             return;
           }
           state.broker = []; // the broker retired its items at the exit; a held message cannot be released by a dead process
@@ -144,6 +187,7 @@ export function startAttentionService(deps: AttentionServiceDeps): AttentionServ
     }),
     deps.onEvent('session.eventBatch', ({ appSessionId, events }) => onEvents(appSessionId, events)),
     deps.onEvent('session.status', ({ appSessionId, status }) => onHeld(appSessionId, status)),
+    deps.onEvent('session.forgotten', ({ appSessionId }) => retireSession(appSessionId)),
   ];
 
   const list = () => [...sessions.values()].flatMap(merged);
@@ -157,21 +201,27 @@ export function startAttentionService(deps: AttentionServiceDeps): AttentionServ
     return answer.value as CommandOutput<'attention.request'>;
   });
 
-  // The previous run's items: its broker items died with its processes (D-16); what was derived stays until retired.
+  // The previous run's items, merged with what this run already knows (M5 review): its broker and held-message items
+  // died with its processes (D-16); a derived item stays unless this run retired its kind or the session was archived.
   const ready = deps.store
     .list()
     .then((persisted) => {
       const loaded = new Map<AppSessionId, AttentionItem[]>();
       for (const item of persisted) loaded.set(item.appSessionId, [...(loaded.get(item.appSessionId) ?? []), item]);
       for (const [id, items] of loaded) {
-        if (sessions.has(id)) continue; // this run already spoke for it
+        if (forgotten.has(id)) continue;
         const state = stateOf(id);
-        for (const item of items) if (!BROKER_KINDS.has(item.kind)) state.derived.set(item.id, item);
-        state.signature = JSON.stringify(items);
+        for (const item of items) {
+          if (BROKER_KINDS.has(item.kind) || item.kind === 'held_peer_message' || state.retiredKinds.has(item.kind) || state.derived.has(item.id)) continue;
+          state.derived.set(item.id, item);
+        }
+        if (JSON.stringify(merged(state)) !== JSON.stringify(items)) owed.set(id, 'replace'); // the store holds what was dropped
         changed(id, state);
+        writeOwed();
       }
     })
-    .catch((error: unknown) => log(`persisted items not loaded: ${error instanceof Error ? error.message : String(error)}`));
+    .catch((error: unknown) => log(`persisted items not loaded: ${error instanceof Error ? error.message : String(error)}`))
+    .finally(() => loadFinished());
 
   return {
     ready,
@@ -179,7 +229,12 @@ export function startAttentionService(deps: AttentionServiceDeps): AttentionServ
     settled: async () => {
       await ready;
       await writes;
+      if (failure !== null) throw failure;
     },
-    stop: () => unsubscribe.forEach((off) => off()),
+    stop: () => {
+      unsubscribe.forEach((off) => off());
+      if (retryTimer !== null) clearTimeout(retryTimer);
+      retryTimer = null;
+    },
   };
 }

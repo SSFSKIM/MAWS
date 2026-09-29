@@ -153,7 +153,11 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
   handle('session.stop', async ({ appSessionId, reason }) => {
     if (reason === 'archive') assertSafeAppSessionId(appSessionId); // archive deletes a directory named after it (M5 review)
     const result = await sessionOf(appSessionId).stop(reason);
-    if (reason === 'archive') await store.forget(appSessionId as AppSessionId); // the state file and the journal directory
+    if (reason === 'archive') {
+      await store.forget(appSessionId as AppSessionId); // the state file and the journal directory
+      streams.get(appSessionId as AppSessionId)?.flush(); // the session's last events first
+      emit('session.forgotten', { appSessionId: appSessionId as AppSessionId }); // main's attention service retires it (M5 review)
+    }
     return result;
   });
   handle('session.pendingRequest', async ({ appSessionId, requestId }) => ({ event: streamOf(appSessionId).pendingRequest(requestId as RequestId) }));
