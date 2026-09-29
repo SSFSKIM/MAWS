@@ -158,7 +158,7 @@ test('the editor sends as typed: Enter in one line, lines by Shift+Enter then En
   await page.keyboard.type('marker');
   await page.keyboard.press('Meta+Enter');
   await expect.poll(() => sent(page, id)).toEqual(['hello', 'two\nlines\nthree', 'ime\nmarker']);
-  expect(await submissions(page)).toHaveLength(3);
+  await expect.poll(async () => (await submissions(page)).length).toBe(3); // recorded when session.send answers, after the write
 
   await expect.poll(async () => (await serialized(page))?.display).toBe('');
   await page.keyboard.press('ArrowUp');
