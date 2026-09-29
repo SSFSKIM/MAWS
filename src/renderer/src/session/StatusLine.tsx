@@ -10,18 +10,14 @@ import { useSessionWindows, useUsage, type UsageWindow, type Windows } from '../
 // C7 start
 import { useDirectFallback } from '../statusline/direct-fallback';
 import { resetsInCompact, tokens, windowShown } from '../statusline/format'; // tokens: the one formatter, shared with the context popover
+import { MODE_REFUSAL_WORDS } from '../statusline/mode-menu';
 import { ContextPopover, CostPopover, CwdPopover, ModePopover, UsagePopover } from '../statusline/popovers';
 import { USAGE_UNAVAILABLE } from '../statusline/UsagePopover';
 import { LINE_TICK_MS, useNow } from '../statusline/use-now';
 // C7 end
 
-export const REFUSAL_WORDS: Record<AutoModeRefusalCode, string> = {
-  auto_mode_settings: 'Auto mode refused: settings do not allow it',
-  auto_mode_circuit_breaker: 'Auto mode refused: paused after repeated classifier failures',
-  auto_mode_fast_mode: 'Auto mode refused: not available in fast mode',
-  auto_mode_model: 'Auto mode refused: this model does not support it',
-  auto_mode_unavailable: 'Auto mode refused: auto mode is unavailable',
-};
+// C7: the refusal in the words the mode chip and the mode menu use (C7 execution document, "Composer frame" Mode)
+export const REFUSAL_WORDS: Record<AutoModeRefusalCode, string> = MODE_REFUSAL_WORDS;
 
 // macOS homes live under /Users/<name>; the renderer is told no home directory, and needs none for this.
 export const formatCwd = (directory: string): string => directory.replace(/^\/Users\/[^/]+(?=\/|$)/, '~');

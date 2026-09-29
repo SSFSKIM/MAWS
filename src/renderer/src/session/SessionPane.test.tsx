@@ -136,7 +136,7 @@ describe('status line', () => {
     render(<SessionPane appSessionId={A} paneIndex={0} />);
     const mode = statusButtons()[5];
     expect(mode.textContent).toContain('default');
-    expect(mode.getAttribute('title')).toBe('Auto mode refused: this model does not support it');
+    expect(mode.getAttribute('title')).toBe('This model does not support auto mode'); // C7: the mode chip's words
     expect(within(mode).getByRole('img', { name: 'Warning' })).toBeTruthy();
   });
 
