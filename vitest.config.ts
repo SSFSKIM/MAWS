@@ -3,8 +3,19 @@ import { configDefaults, defineConfig } from 'vitest/config';
 // C8a start
 import react from '@vitejs/plugin-react';
 // C8a end
+// C8c start
+import { createRequire } from 'node:module';
+// C8c end
 
 const alias = { '@shared': resolve(__dirname, 'src/shared') };
+// C8c start: `lowlight` aliased to a grammar-less build (ruled 2026-09-29, the C8c document's M1 fold (2)): the diff
+// view's core would otherwise ship every highlight.js grammar, unused since Review highlights through shiki. The shim
+// takes lowlight's engine through `lowlight-engine`, its `lib/index.js`, which the package's exports do not name.
+Object.assign(alias, {
+  lowlight: resolve(__dirname, 'src/renderer/src/tools/code/review/lowlight-no-grammars.mjs'),
+  'lowlight-engine': resolve(createRequire(__filename).resolve('lowlight'), '../lib/index.js'),
+});
+// C8c end
 // Renderer suites that drive a real emulator without a DOM (C9: `@xterm/headless` round trips) run under Node.
 const RENDERER_NODE_TESTS = 'src/renderer/src/terminal/**/*.node.test.ts';
 
