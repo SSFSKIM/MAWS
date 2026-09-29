@@ -186,6 +186,18 @@ describe('session service', () => {
       expect(await h.service.startSession(gatewayModel, { message: null, options: {} })).toMatchObject({ status: 'relay_unreachable' });
     });
 
+    it('a launch with no status for the watchdog’s span is stopped and rolled back', async () => {
+      h.dispose();
+      h = await new SessionHarness({ watchdogMs: 50 }).start();
+      h.trustDirectory(h.work);
+      h.host.script = () => ({ ready: false });
+      const id = await create();
+      await h.service.startSession(id, { message: OK_MESSAGE, options: {} });
+      expect(await h.settled(id)).toMatchObject({ phase: 'failed', outcome: { kind: 'error', message: 'no answer from the engine host', resources: { record: 'removed' } } });
+      expect(h.host.calledWith('session.stop')).toEqual([{ appSessionId: id, reason: 'stop' }]);
+      expect(intentFile(h, id)?.message).toEqual(OK_MESSAGE);
+    });
+
     it('the index records the launch under the intent id: record, spec, intent and fs.bind name one id', async () => {
       h.trustDirectory(h.work);
       const id = await create();

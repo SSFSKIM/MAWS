@@ -401,7 +401,7 @@ export class SessionService {
     }
 
     // guards passed: the pin is minted once and kept across retries; a bootstrap an interrupted attempt left goes
-    let progress = intent.progress;
+    let progress = intent.progress.lastFailure === null ? intent.progress : { ...intent.progress, lastFailure: null }; // a new attempt
     if (progress.engineSessionId === null) progress = { ...progress, engineSessionId: randomUUID() as NonNullable<typeof progress.engineSessionId> };
     if (progress.bootstrap !== null && (await this.forgetQuietly(progress.bootstrap.appSessionId))) progress = { ...progress, bootstrap: null };
     if (progress !== intent.progress) await this.putIntent({ ...intent, progress, updatedAt: this.now() });

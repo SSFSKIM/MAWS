@@ -60,6 +60,14 @@ export class SetupFailure extends Error {
   }
 }
 
+// A launch that reported nothing for the watchdog's span (C3's own initialize deadline is shorter, so this is the host
+// itself not answering): the process, if any, is stopped.
+class WatchdogFailure extends SetupFailure {
+  constructor() {
+    super('launching', 'no answer from the engine host');
+  }
+}
+
 class RelayFailure extends Error {
   constructor(readonly health: RelayHealth) {
     super(`relay unreachable: ${health.error ?? `status ${health.status ?? 'none'}`}`);
@@ -412,7 +420,7 @@ export async function runIntentSetup(s: Setup, appSessionId: AppSessionId, attem
     await run.progress({ launch: { launchId: answer.session.launchId, at: s.now() } });
     if (attempt.directFallback) directFallbackNotice(s, appSessionId, run.intent.progress.engineSessionId);
     const end = await watch.untilReady();
-    if (end.kind === 'timeout') throw new SetupFailure('launching', 'no answer from the engine host');
+    if (end.kind === 'timeout') throw new WatchdogFailure();
     if (end.kind === 'exited') throw exitFailure(end.errors);
 
     // binding
@@ -618,7 +626,7 @@ export async function runResume(
     if (answer.status === 'relay_unreachable') throw new RelayFailure(answer.health);
     if (answer.status === 'refused') throw new SetupFailure('launching', `${answer.reason}: ${answer.message}`);
     const end = await watch.untilReady();
-    if (end.kind === 'timeout') throw new SetupFailure('launching', 'no answer from the engine host');
+    if (end.kind === 'timeout') throw new WatchdogFailure();
     if (end.kind === 'exited') throw exitFailure(end.errors);
     let firstTurn: 'sent' | 'queued' | 'none' = 'none';
     if (input.message !== null) {
@@ -630,7 +638,7 @@ export async function runResume(
     setupEvent(s, appSessionId, 'ready', null, { kind: 'ready', engineSessionId: engineSessionId as SessionId, firstTurn });
   } catch (error) {
     if (!(error instanceof SetupFailure) && !(error instanceof RelayFailure) && !(error instanceof HeldFailure)) s.log(`resume of ${appSessionId} failed: ${messageOf(error)}`);
-    if (error instanceof SetupFailure && error.message === 'no answer from the engine host') await stopQuietly(s, appSessionId);
+    if (error instanceof WatchdogFailure) await stopQuietly(s, appSessionId);
     const transcript = record.engineSessionId !== null && (await pathExists(await transcriptPathOf(s.env, record.directory, record.engineSessionId)));
     const resources: SetupResources = { worktree: null, record: 'kept', transcript: transcript ? 'kept' : 'none' };
     const outcome: SetupEvent['outcome'] =
