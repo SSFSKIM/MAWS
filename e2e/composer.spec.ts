@@ -5,16 +5,18 @@
 // session's directory: listed as a project for `@`, and discovered as a session (a transcript in the launch's scratch
 // config home) for drafts, whose store needs an indexed record; the same scratch home holds the terminal's history and
 // paste cache for recall. Never the owner's `~/.claude`. The page needs a harness build: `pnpm e2e:composer` builds one
-// and runs this file; under a plain build the cases skip. The surface half (submit states, queue, rewind, unstarted
-// sessions, Stop) is M4's.
+// and runs this file; under a plain build the cases skip. The surface half (M4) runs the whole composer on the
+// `#composer` page (a pane kind there, over the layout store's panes): the submit states over `queue-and-interrupt`,
+// the one app-level ⌘. from either pane, drafts, and an unstarted session over the page's stub of C10's intent.
 import { execFileSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test as base, type Page } from '@playwright/test';
 import type { SessionEvent } from '@shared/graph/events';
+import type { CardsHarnessApi, HarnessIntent, HarnessPane } from '../src/renderer/src/harness/composer/api';
 import type { EditorHarnessApi, EditorPane } from '../src/renderer/src/harness/composer/editor-api';
-import { invoke, launchReady, turnsJournal, value } from './support/c7-replay';
+import { invoke, launchReady, queueInterruptJournal, turnsJournal, value } from './support/c7-replay';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 
 const HARNESS_BUILT = existsSync(join(REPO_ROOT, 'out/renderer/harness.html'));
@@ -347,5 +349,196 @@ test('drafts survive a tab switch and a reload', async ({ editor }) => {
   await openEditor(page);
   await show(page, pane);
   await expect.poll(async () => (await serialized(page))?.display).toBe('a draft to keep');
+  expect(editor.consoleErrors()).toEqual([]);
+});
+
+// ---- M4: the composer surface ------------------------------------------------------------------------------------
+
+type CardsWindow = Window & { __maws_cards: CardsHarnessApi; __c7: { batches: { appSessionId: string; events: SessionEvent[] }[] } };
+
+async function openComposerPage(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const w = window as unknown as { __c7?: { batches: unknown[] } };
+    if (!w.__c7) {
+      const log = { batches: [] as unknown[] };
+      w.__c7 = log;
+      window.maws.on('session.eventBatch', (payload) => log.batches.push(payload));
+    }
+    location.hash = 'composer';
+  });
+  await page.waitForFunction(() => (window as unknown as Partial<CardsWindow>).__maws_cards !== undefined);
+}
+const showPanes = (page: Page, panes: [HarnessPane, HarnessPane]) => page.evaluate((p) => (window as unknown as CardsWindow).__maws_cards.show(p), panes);
+const cards = <K extends keyof CardsHarnessApi>(page: Page, name: K, ...args: Parameters<CardsHarnessApi[K]>) =>
+  page.evaluate(([n, a]) => ((window as unknown as CardsWindow).__maws_cards[n] as (...x: unknown[]) => unknown)(...(a as unknown[])), [name, args] as const) as Promise<ReturnType<CardsHarnessApi[K]>>;
+const pane = (page: Page, index: 0 | 1) => page.getByRole('region', { name: `pane ${index}` });
+const messageIn = (page: Page, index: 0 | 1) => pane(page, index).getByRole('textbox', { name: 'Message' });
+const control = (page: Page, index: 0 | 1) => pane(page, index).locator('[data-submit-state]');
+const statusOf = async (page: Page, id: string) => value(await invoke(page, 'session.status', { appSessionId: id }));
+const COUNT = 'Count to 30 slowly. For each number use a separate Bash call sleep 1; echo NUMBER. Start now.';
+
+test('the composer sends, queues, steers, stops and resumes as labelled', async ({ editor }) => {
+  const { page } = editor;
+  const id = 'c7-surface-queue';
+  await openComposerPage(page);
+  await launchReady(page, id, queueInterruptJournal(scratch, id));
+  await showPanes(page, [{ composer: id }, null]);
+  await messageIn(page, 0).click();
+  await expect(control(page, 0)).toHaveText('Send');
+  await expect(control(page, 0)).toBeDisabled(); // nothing to send yet
+  await page.keyboard.type(COUNT);
+  await expect(control(page, 0)).toBeEnabled();
+  await page.keyboard.press('Enter');
+  await expect.poll(() => sent(page, id)).toEqual([COUNT]);
+  await expect(control(page, 0)).toHaveText('Stop'); // the turn runs, the editor is empty
+
+  const queued = 'Counting is cancelled. Reply exactly RESUMED.';
+  await page.keyboard.type(queued);
+  await expect(control(page, 0)).toHaveText('Queue');
+  await page.keyboard.down('Alt');
+  await expect(control(page, 0)).toHaveText('Steer'); // live while ⌥ is down
+  await page.keyboard.up('Alt');
+  await expect(control(page, 0)).toHaveText('Queue');
+  await pane(page, 0).getByRole('button', { name: 'More ways to send' }).click();
+  const menu = page.getByRole('menu');
+  expect(await menu.getByRole('menuitem').allTextContents()).toEqual([
+    'QueueEnterSends when this turn ends',
+    'Steer⌥EnterAdds this to the running turn at its next step',
+    'Interrupt and sendStops the running turn, then sends this',
+  ]);
+  await page.keyboard.press('Escape');
+  await expect(menu).toHaveCount(0);
+  await messageIn(page, 0).click();
+  await page.keyboard.press('Enter'); // the app queue holds it: nothing is written while the turn runs
+  const list = pane(page, 0).getByRole('region', { name: 'Queued messages' });
+  await expect(list).toContainText('1 queued');
+  await expect(list).toContainText(queued);
+  expect(await sent(page, id)).toEqual([COUNT]);
+
+  await page.keyboard.press('Meta+.'); // the one app-level Stop, from the editor
+  await expect(list.locator('header')).toHaveText(/Queue paused because you interrupted/);
+  await expect.poll(async () => (await statusOf(page, id)).turn).toBeNull();
+  await expect(control(page, 0)).toHaveText('Resume');
+  await list.getByRole('button', { name: 'Resume' }).click();
+  await expect.poll(async () => (await sent(page, id)).filter((c) => typeof c === 'string')).toEqual([COUNT, queued]); // released: seq 199 (between them, the engine's own interruption row)
+  await expect(list).toHaveCount(0);
+  expect(editor.consoleErrors()).toEqual([]);
+});
+
+test("composer.stop reaches the one app-level handler from either pane's editor", async ({ editor }) => {
+  const { page } = editor;
+  const [a, b] = ['c7-stop-a', 'c7-stop-b'];
+  await openComposerPage(page);
+  await launchReady(page, a, queueInterruptJournal(scratch, a));
+  await launchReady(page, b, queueInterruptJournal(scratch, b));
+  await showPanes(page, [null, { composer: b }]); // pane 1's composer first, then pane 0's: registration order runs against focus
+  await expect(messageIn(page, 1)).toBeVisible();
+  await showPanes(page, [{ composer: a }, { composer: b }]);
+  for (const [index, id] of [[0, a], [1, b]] as const) {
+    await messageIn(page, index).click();
+    await page.keyboard.type(COUNT);
+    await page.keyboard.press('Enter');
+    await expect.poll(async () => (await statusOf(page, id)).turn).not.toBeNull();
+  }
+  await messageIn(page, 1).click();
+  await page.keyboard.type('typing when I stop');
+  await page.keyboard.press('Meta+.');
+  await expect.poll(async () => (await statusOf(page, b)).turn).toBeNull();
+  expect((await statusOf(page, a)).turn, 'the other pane keeps running').not.toBeNull();
+  await messageIn(page, 0).click();
+  await page.keyboard.press('Meta+.');
+  await expect.poll(async () => (await statusOf(page, a)).turn).toBeNull();
+  expect([(await statusOf(page, a)).process, (await statusOf(page, b)).process]).toEqual(['ready', 'ready']); // no unrecorded write ended either replay
+  expect(editor.consoleErrors()).toEqual([]);
+});
+
+test('the composer keeps its draft across a tab switch and a reload', async ({ editor }) => {
+  const { page } = editor;
+  await openComposerPage(page);
+  let appId: string | null = null;
+  await expect
+    .poll(async () => {
+      appId = value(await invoke(page, 'session.list', {})).sessions.find((s) => s.engineSessionId === transcriptSession)?.appId ?? null;
+      return appId;
+    })
+    .not.toBeNull();
+  await showPanes(page, [{ composer: appId! }, null]);
+  await messageIn(page, 0).click();
+  await page.keyboard.type('a composer draft');
+  await expect.poll(async () => value(await invoke(page, 'session.drafts.get', { appSessionId: appId! }))).not.toBeNull();
+  await expect(control(page, 0)).toBeDisabled(); // no process behind the record: nothing sends
+  await showPanes(page, [null, null]);
+  await showPanes(page, [{ composer: appId! }, null]);
+  await expect(messageIn(page, 0)).toHaveText('a composer draft');
+  await page.reload();
+  await openComposerPage(page);
+  await showPanes(page, [{ composer: appId! }, null]);
+  await expect(messageIn(page, 0)).toHaveText('a composer draft');
+  expect(editor.consoleErrors()).toEqual([]);
+});
+
+test('an unstarted session binds the frame to the intent, holds a starting state and starts on Send', async ({ editor }) => {
+  const { page } = editor;
+  const id = 'c7-unstarted';
+  const intent: HarnessIntent = { location: { kind: 'directory', path: repo }, additionalDirectories: [], model: null, effort: null, permissionMode: null, message: null, draft: null };
+  await openComposerPage(page);
+  await cards(page, 'intent', id, intent);
+  await showPanes(page, [{ composer: id }, null]);
+  const p = pane(page, 0);
+  await expect(p.getByRole('button', { name: `Location ${repo}` })).toBeVisible();
+  await expect(p.getByRole('region', { name: 'Queued messages' })).toHaveCount(0);
+
+  // a chip writes through the intent
+  await p.getByRole('button', { name: /^Permission mode/ }).click();
+  await page.getByRole('menuitemradio', { name: /^plan/ }).click();
+  await expect.poll(() => cards(page, 'patches')).toEqual([{ appSessionId: id, patch: { permissionMode: 'plan' } }]);
+  await expect(p.getByRole('button', { name: /^Permission mode/ })).toHaveText('plan');
+
+  // `!` waits for the engine
+  await messageIn(page, 0).click();
+  await page.keyboard.type('!ls');
+  await expect(control(page, 0)).toBeDisabled();
+  await expect(control(page, 0)).toHaveAttribute('title', 'Available once the session starts');
+  await page.keyboard.press('Meta+a');
+  await page.keyboard.press('Backspace');
+
+  await page.keyboard.type('first words');
+  await page.keyboard.press('Enter');
+  await expect(control(page, 0)).toHaveText('Starting…');
+  await expect(control(page, 0)).toBeDisabled();
+  await expect(p.getByRole('button', { name: 'Add a directory' })).toHaveAttribute('title', 'Session is starting…');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('x');
+  expect(await cards(page, 'starts')).toEqual([{ appSessionId: id, content: 'first words', display: 'first words' }]);
+  await expect(messageIn(page, 0)).toHaveText('first words');
+
+  await cards(page, 'answerStart', { ok: false, error: 'refused: the directory is not trusted' });
+  await expect(control(page, 0)).toHaveText('Send');
+  await expect(control(page, 0)).toBeEnabled();
+  await expect(messageIn(page, 0)).toHaveText('first words');
+
+  await messageIn(page, 0).click();
+  await page.keyboard.press('Enter');
+  await expect.poll(async () => (await cards(page, 'starts')).length).toBe(2);
+  await cards(page, 'intent', id, { ...intent, message: { content: 'first words', display: 'first words' } });
+  await cards(page, 'answerStart', { ok: true });
+  await expect(messageIn(page, 0)).toHaveText('');
+  await expect(control(page, 0)).toHaveAttribute('title', 'Your first message is with the setup above');
+  await expect(control(page, 0)).toBeDisabled();
+  await cards(page, 'intent', id, { ...intent, message: null });
+  await messageIn(page, 0).click();
+  await page.keyboard.type('next');
+  await expect(control(page, 0)).toBeEnabled();
+
+  // a card docked through dockCard takes the composer's place and focus, and answers Enter through its own onAccept
+  await cards(page, 'dockStub', id);
+  const frame = p.getByRole('group', { name: 'Trust this folder?' });
+  await expect(frame).toBeFocused();
+  await expect(messageIn(page, 0)).toBeHidden();
+  await page.keyboard.press('Enter');
+  await expect.poll(() => cards(page, 'stubAccepts')).toBe(1);
+  await cards(page, 'undockStub');
+  await expect(messageIn(page, 0)).toBeFocused();
+  await expect(messageIn(page, 0)).toHaveText('next');
   expect(editor.consoleErrors()).toEqual([]);
 });

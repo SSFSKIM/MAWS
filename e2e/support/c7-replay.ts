@@ -61,3 +61,15 @@ export function turnsJournal(dir: string, name: string, turns: number): string {
   writeFileSync(path, rows.map((row) => JSON.stringify(row)).join('\n') + '\n');
   return path;
 }
+
+// `queue-and-interrupt` (pass 1) as MAWS's app queue meets it: the probe wrote its second prompt into the running turn
+// (seq 146; the engine queued it, seq 150, and cancelled it at the interrupt, seq 191), where MAWS holds a message sent
+// during a turn in its own queue and writes it only when the queue releases it. Without those three rows the replay
+// holds at the interrupt (seq 190) through the turn, and after it at the next prompt (seq 199), which the released
+// entry is.
+export function queueInterruptJournal(dir: string, name: string): string {
+  const rows = rowsOf('spikes/protocol-probe/fixtures/queue-and-interrupt.jsonl').filter((r) => ![146, 150, 191].includes(r.seq));
+  const path = join(dir, `${name}-queue-interrupt-${Date.now()}.jsonl`);
+  writeFileSync(path, rows.map((row) => JSON.stringify(row)).join('\n') + '\n');
+  return path;
+}
