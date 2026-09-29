@@ -1,16 +1,20 @@
 // `/permissions` (C11 execution document, the widget table; mockup 06 vignette 05, the pattern for every engine-read
 // widget): the effective mode from the init frame with a refusal in words (D-18), then every rule of
 // `list_permission_rules` grouped allow, ask, deny, each with the engine's own phrasing, the rule in mono and its source
-// file, then the workspace directories. M2 is the read half; M3 adds the mode segment over `session.setPermissionMode`.
+// file, then the workspace directories. The mode segment is C7's mode menu over `session.setPermissionMode`: it selects
+// the effective mode the engine answered, whatever was asked, and a refusal never moves it.
+import { useMemo, type ReactNode } from 'react';
 import * as z from 'zod';
 import type { EngineSessionStatus } from '@shared/engine/status';
+import type { PermissionMode } from '@shared/graph/enums';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { ListPermissionRulesResponse } from '@shared/wire/control';
-import { MODE_REFUSAL_WORDS } from '../statusline/mode-menu';
+import { ipc } from '../ipc/client';
+import { liveModeBinding, ModeMenu, MODE_REFUSAL_WORDS } from '../statusline';
 import { useSessions } from '../stores/sessions';
 import { PERMISSIONS, WIDGET_FOOT, WIDGET_TITLE } from './copy';
 import { Group, Mono, parseEach, Row, Rows } from './parts';
-import { useEngineRead } from './read';
+import { transportWords, useEngineRead } from './read';
 import { WidgetFrame } from './WidgetFrame';
 
 const DescriptionSchema = z.looseObject({ prefix: z.string(), emphasis: z.string().optional() });
@@ -54,7 +58,7 @@ export function present(state: ListPermissionRulesResponse['state'], status: Pic
   };
 }
 
-export function PermissionsBody({ view }: { view: PermissionsView }) {
+export function PermissionsBody({ view, mode }: { view: PermissionsView; mode?: ReactNode }) {
   const none = view.groups.every((g) => g.rules.length === 0);
   return (
     <div className="flex flex-col">
@@ -63,8 +67,10 @@ export function PermissionsBody({ view }: { view: PermissionsView }) {
           <p className="m-0">
             {PERMISSIONS.effective} <strong className="font-semibold">{view.mode.effective}</strong> <span className="text-ui-sm text-fg-muted">· {PERMISSIONS.fromInit}</span>
           </p>
-          {view.mode.refusal && <p className="m-0 mt-1 border-l-2 border-warning pl-2 text-ui-sm">{view.mode.refusal}</p>}
+          {/* the mode menu words a refusal itself */}
+          {!mode && view.mode.refusal && <p className="m-0 mt-1 border-l-2 border-warning pl-2 text-ui-sm">{view.mode.refusal}</p>}
           {view.grants > 0 && <p className="m-0 mt-1 text-ui-sm text-fg-muted">{PERMISSIONS.grants(view.grants)}</p>}
+          {mode && <div className="mt-1">{mode}</div>}
         </div>
       )}
       {none && <p className="m-0 text-ui-sm text-fg-muted">{PERMISSIONS.none}</p>}
@@ -108,12 +114,35 @@ export function PermissionsBody({ view }: { view: PermissionsView }) {
   );
 }
 
+// The segment's control (and the harness's `control('setPermissionMode', …)`): C3's `{ effective, refusal, error }`
+// with the refusal in C7's words, and a rejected invoke as the transport branch, which moves nothing.
+export async function setPermissionMode(input: { appSessionId: AppSessionId; mode: PermissionMode }): Promise<{ ok: true } | { ok: false; error: string }> {
+  const result = await ipc.invoke('session.setPermissionMode', input);
+  if (!result.ok) return { ok: false, error: transportWords(result.error) };
+  if (result.value.refusal !== null) return { ok: false, error: MODE_REFUSAL_WORDS[result.value.refusal] };
+  if (result.value.error !== null) return { ok: false, error: result.value.error };
+  return { ok: true };
+}
+
+// C7's mode menu over C7's live binding (the chip's and the status line's, so all three read the same effective mode
+// and word refusals alike); the models it checks auto against come through the widget's own read, which a passive
+// harness does not issue.
+function ModeSegment({ appSessionId, status }: { appSessionId: AppSessionId; status: EngineSessionStatus }) {
+  const record = useSessions((s) => s.records.get(appSessionId) ?? null);
+  const models = useEngineRead('session.listModels', { appSessionId });
+  const binding = useMemo(
+    () => ({ ...liveModeBinding(record ?? { appId: appSessionId, permissionMode: status.permissionMode, model: status.model }, status, models.data?.models ?? null), set: (mode: PermissionMode) => setPermissionMode({ appSessionId, mode }) }),
+    [record, appSessionId, status, models.data],
+  );
+  return <ModeMenu binding={binding} />;
+}
+
 export function PermissionsWidget({ appSessionId, close }: { appSessionId: AppSessionId; args: string; close(): void }) {
   const read = useEngineRead('session.listPermissionRules', { appSessionId });
   const status = useSessions((s) => s.engine.get(appSessionId) ?? null);
   return (
     <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.permissions} command="permissions" foot={WIDGET_FOOT.permissions} state={read.state} error={read.error} close={close}>
-      {read.data && <PermissionsBody view={present(read.data.state, status)} />}
+      {read.data && <PermissionsBody view={present(read.data.state, status)} mode={status && <ModeSegment appSessionId={appSessionId} status={status} />} />}
     </WidgetFrame>
   );
 }
