@@ -349,6 +349,27 @@ describe('IndexSessionSource folds the host\'s events into the index and feeds t
     expect(() => fake.fire('session.status', { appSessionId: randomUUID() as AppSessionId, status: status(randomUUID() as AppSessionId) })).not.toThrow();
   });
 
+  it('a host restart forgets which ids were live: a relaunch after it stops the disk follow again, with no exit seen', async () => {
+    const fake = scriptedHost();
+    begin(fake.host);
+    const { record } = index.sessions.createForLaunch({ directory: '/x', additionalDirectories: [], worktree: null, model: { requested: null, resolved: null }, effort: null, permissionMode: { requested: 'default', effective: 'default', refusal: null } });
+    const engineId = sessionIdFor(32);
+    index.sessions.bindEngineId(record.appId, engineId);
+    const unfollows = () => fake.calls.filter((c) => c.name === 'fs.unfollow').length;
+    fake.fire('session.status', { appSessionId: record.appId, status: status(record.appId, { engineSessionId: engineId }) });
+    await settle();
+    expect(unfollows()).toBe(1);
+    fake.fire('session.status', { appSessionId: record.appId, status: status(record.appId, { engineSessionId: engineId }) });
+    await settle();
+    expect(unfollows()).toBe(1); // the same run
+    // The host crashes and comes back; its process went with it and no `exited` status was ever sent.
+    fake.setState('crashed');
+    fake.setState('ready');
+    fake.fire('session.status', { appSessionId: record.appId, status: status(record.appId, { engineSessionId: engineId, process: 'starting' }) });
+    await settle();
+    expect(unfollows()).toBe(2);
+  });
+
   describe('the unread rule', () => {
     const advance = (s: TranscriptSummary, at: string, leaf: string) => ({ ...s, lastRecordAt: at, leafUuid: leaf as MessageUuid, size: s.size + 1 });
 
