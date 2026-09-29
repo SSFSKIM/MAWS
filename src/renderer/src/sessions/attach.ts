@@ -11,8 +11,10 @@
 // `sessions.attachTabs`, because a reload or a reopened window keeps the tab and its shell (C9 re-adopts the pty under
 // the tab's id, its label) while the Terminal tab's own params are not persisted. A second Attach goes to that tab:
 // while `claude attach` (or anything else) holds the terminal it only shows the tab; at the idle shell (the owner left
-// the attach with the TUI's key) it runs the attach again there. A tab that is gone, or whose shell has ended, gives way
-// to a new one.
+// the attach with the TUI's key) it runs the attach again there. A listed tab whose terminal the page has not re-adopted
+// or started yet (after a reload, or after an app restart, when the tab comes back with a fresh shell) is shown, and
+// the same Attach waits once for its terminal to run, then decides as for a running one. A tab that is gone, or whose
+// shell has ended, gives way to a new one.
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import { AttachTabsSchema, type AttachTab } from '@shared/ipc/schema/layout';
@@ -101,6 +103,29 @@ function tabState(tabId: string, appSessionId: AppSessionId): TabState {
   return terminal.status === 'starting' ? { kind: 'pending' } : { kind: 'gone' };
 }
 
+// How long a shown tab's terminal has to reach running (a re-adoption, or a fresh shell's spawn) before the Attach
+// settles for having shown it.
+export const PENDING_TERMINAL_MS = 10_000;
+
+// The tab's terminal once it runs; null when it ends first or does not run in time.
+function runningTerminal(tabId: string): Promise<TerminalId | null> {
+  return new Promise((resolve) => {
+    const settle = (id: TerminalId | null) => {
+      clearTimeout(timer);
+      off();
+      resolve(id);
+    };
+    const check = () => {
+      const terminal = terminals.list().find((info) => info.label === tabId);
+      if (terminal?.status === 'running') settle(terminal.id);
+      else if (terminal !== undefined && terminal.status !== 'starting') settle(null);
+    };
+    const timer = setTimeout(() => settle(null), PENDING_TERMINAL_MS);
+    const off = terminals.subscribe(check);
+    check();
+  });
+}
+
 // Whether the terminal sits at its shell's prompt: nothing else in the foreground. A read that fails is not an answer,
 // so nothing is typed into a terminal whose state is unknown.
 async function atPrompt(terminalId: TerminalId): Promise<boolean> {
@@ -158,10 +183,12 @@ async function attach(appSessionId: AppSessionId, known: KnownJob | null): Promi
   const job = await jobOf(record, known);
   if ('error' in job) return { ok: false, error: job.error };
   const existing = ((await rememberedTabs()) ?? []).find((t) => t.appSessionId === appSessionId && t.jobId === job.jobId)?.tabId;
-  const state = existing === undefined ? ({ kind: 'gone' } as const) : tabState(existing, appSessionId);
+  let state = existing === undefined ? ({ kind: 'gone' } as const) : tabState(existing, appSessionId);
   if (existing !== undefined && state.kind === 'pending') {
-    showTab(appSessionId, existing);
-    return { ok: true, tabId: existing, how: 'shown' };
+    showTab(appSessionId, existing); // showing it is what starts or re-adopts its terminal
+    const terminalId = await runningTerminal(existing);
+    if (terminalId === null) return { ok: true, tabId: existing, how: 'shown' };
+    state = { kind: 'running', terminalId };
   }
   if (existing !== undefined && state.kind === 'running') {
     const rerun = await atPrompt(state.terminalId);

@@ -25,6 +25,8 @@ const registry = vi.hoisted(() => {
   let next = 0;
   const foreground = { busy: true }; // `claude attach` holds the terminal until the owner detaches
   const host: HostState = { state: 'ready', pid: 1, restarts: 0, revision: 1 };
+  const listeners = new Set<(infos: TerminalInfo[], host: HostState | null) => void>();
+  const notify = () => listeners.forEach((cb) => cb(infos, host));
   return {
     foreground,
     reset() {
@@ -34,14 +36,25 @@ const registry = vi.hoisted(() => {
     },
     exit(id: string) {
       infos = infos.map((info) => (info.id === id ? { ...info, status: 'exited' } : info));
+      notify();
+    },
+    // the page (re)gains the tab's terminal: re-adopted after a reload, or a fresh shell started after an app restart
+    start(label: string, appSessionId: string) {
+      const id = `t${++next}`;
+      infos = [...infos, { id, appSessionId, label, cwd: '/work/repo', ptyId: `pty-${id}`, status: 'running' } as unknown as TerminalInfo];
+      notify();
     },
     terminals: {
       list: () => infos,
       host: () => host,
-      subscribe: () => () => {},
+      subscribe: (cb: (infos: TerminalInfo[], host: HostState | null) => void) => {
+        listeners.add(cb);
+        return () => listeners.delete(cb);
+      },
       open: vi.fn((init: { appSessionId: string; label: string; cwd: string; command?: string }) => {
         const id = `t${++next}`;
         infos = [...infos, { id, appSessionId: init.appSessionId, label: init.label, cwd: init.cwd, ptyId: `pty-${id}`, status: 'running' } as unknown as TerminalInfo];
+        notify();
         return id;
       }),
       get: (id: string) => {
@@ -204,7 +217,31 @@ describe('held outcomes and the attach command', () => {
     await userEvent.click(attachButton());
     await waitFor(() => expect(useLayout.getState().panelBySession.get(A)?.activeTabId).toBe(first));
     expect(opened(), 'no second attach tab').toHaveLength(1);
+    // C9 re-adopts the pty, where `claude attach` still holds the terminal: shown, nothing typed
+    act(() => registry.start(first, A));
+    await waitFor(() => expect(registry.terminals.foreground).toHaveBeenCalled());
     expect(fake.invoked('pty.write')).toEqual([]);
+  });
+
+  // (carried to M4b from the M5 review) after an app restart the remembered tab comes back with no pty: the page starts
+  // a fresh shell for it once it shows, and the one Attach runs there as soon as that shell is running
+  it('after an app restart, one Attach shows the remembered tab and runs the attach in its fresh shell once it is running', async () => {
+    renderNotice(held(JOB));
+    await userEvent.click(attachButton());
+    await waitFor(() => expect(opened()).toHaveLength(1));
+    const first = opened()[0]!.label;
+    forgetAttachTabs();
+    resetPanelHost();
+    offs.push(registerPanelTool(terminalTool));
+    registry.reset();
+    registry.foreground.busy = false; // a fresh login shell at its prompt
+    act(() => panelHost.showSummary());
+    await userEvent.click(attachButton());
+    await waitFor(() => expect(useLayout.getState().panelBySession.get(A)?.activeTabId).toBe(first));
+    expect(fake.invoked('pty.write'), 'no shell yet').toEqual([]);
+    act(() => registry.start(first, A));
+    await waitFor(() => expect(fake.invoked('pty.write')).toEqual([{ ptyId: 'pty-t1', data: `\x15${COMMAND}\n` }])); // the fresh shell (the registry's ids restarted with the page)
+    expect(opened(), 'no second attach tab').toHaveLength(1);
   });
 
   it('a failed read of the key is not taken for "no tabs": a later Attach reads it again and keeps what it holds', async () => {
