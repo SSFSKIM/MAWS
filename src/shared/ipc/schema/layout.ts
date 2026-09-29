@@ -133,6 +133,9 @@ const c11Commands = {
     output: z.union([z.strictObject({ saved: z.literal(true), path: z.string() }), z.strictObject({ saved: z.literal(false) })]),
     owner: 'main',
   },
+  // The Settings tab's chord capture (M5 fix wave): while `active`, the window's application menu gives up its key
+  // equivalents (webContents.setIgnoreMenuShortcuts), so a chord another action holds reaches the capture instead.
+  'layout.captureChords': { input: z.strictObject({ active: z.boolean() }), output: z.void(), owner: 'main' },
 } as const satisfies Record<`layout.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 // C11 end
 

@@ -56,6 +56,7 @@ import { engineHostSettled, registerSessionServiceHandlers } from './sessions/se
 // (electron's `shell` comes with C8c's imports above, `onEmitted` with C7's)
 import type { CommandResult } from '@shared/ipc/schema';
 import { saveTextFile } from './files/save-text';
+import { captureChords } from './settings/capture-chords';
 import { createClaudeUsageApp, execRunner } from './gateway/claude-usage-app';
 import { startEngineConfigure } from './settings/engine-configure';
 import { revealPath } from './settings/reveal';
@@ -256,6 +257,7 @@ app.whenReady().then(() => {
   registerMainHandler('settings.reveal', ({ path }) =>
     revealPath(path, { configHome: () => claudeConfigDir(process.env, home), sessionDirectories, showItemInFolder: (p) => shell.showItemInFolder(p) }),
   );
+  registerMainHandler('layout.captureChords', captureChords); // the Settings tab's chord capture sets the menu aside (M5 fix wave)
   registerMainHandler('layout.saveTextFile', (input, { sender }) =>
     saveTextFile(input, {
       downloads: app.getPath('downloads'),

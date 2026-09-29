@@ -39,6 +39,7 @@ export function settingsBridge(initial: Settings = SETTINGS_DEFAULTS_V3): Settin
     }),
     'engine.relayHealth': () => ({ url: 'http://127.0.0.1:8641', ok: true, status: 200, latencyMs: 2, checkedAt: new Date().toISOString(), error: null }),
     'layout.pickFiles': () => ({ files: [] }),
+    'layout.captureChords': () => undefined,
   };
   const bridge = {
     invoke: vi.fn(async (name: string, input: unknown) => {

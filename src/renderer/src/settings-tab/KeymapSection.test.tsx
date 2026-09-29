@@ -78,6 +78,24 @@ describe('keymap capture records, refuses conflicts and unbinds', () => {
     expect((screen.getByRole('button', { name: 'Reset to defaults' }) as HTMLButtonElement).disabled).toBe(true);
   });
 
+  it('sets the menu shortcuts aside while a row records, and back when it ends by a chord, Escape, blur or unmount', async () => {
+    renderSection();
+    const captures = () => b.calls.filter((c) => c.name === 'layout.captureChords').map((c) => c.input);
+    const capture = record('Next Needs-you');
+    expect(capture.hasAttribute('data-chord-capture')).toBe(true);
+    await vi.waitFor(() => expect(captures()).toEqual([{ active: true }]));
+    fireEvent.keyDown(capture, { key: 'Escape', code: 'Escape' });
+    await vi.waitFor(() => expect(captures()).toEqual([{ active: true }, { active: false }]));
+    fireEvent.blur(record('Command palette'));
+    await vi.waitFor(() => expect(captures()).toEqual([{ active: true }, { active: false }, { active: true }, { active: false }]));
+    fireEvent.keyDown(record('Command palette'), { key: 'P', code: 'KeyP', metaKey: true, shiftKey: true });
+    await vi.waitFor(() => expect(captures().slice(4)).toEqual([{ active: true }, { active: false }]));
+    record('Command palette');
+    await vi.waitFor(() => expect(captures().slice(6)).toEqual([{ active: true }]));
+    cleanup();
+    await vi.waitFor(() => expect(captures().slice(6)).toEqual([{ active: true }, { active: false }]));
+  });
+
   it('every action is a row, the docked request keys included', () => {
     renderSection();
     for (const title of ['Approve / answer the docked request', 'Decline the docked request', 'Settings…', 'Select tab 1–9', 'Open ClaudeUsage']) expect(row(title)).toBeTruthy();

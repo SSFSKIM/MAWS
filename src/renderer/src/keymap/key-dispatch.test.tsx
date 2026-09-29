@@ -197,3 +197,30 @@ describe('composer chords', () => {
     expect(send).toHaveBeenCalledOnce();
   });
 });
+
+// C11 start: the Settings tab's chord capture takes every key while it records (C11 M5 fix wave, item 1): an app-scoped
+// chord pressed there is what is being recorded, not a command to run.
+describe('the chord capture', () => {
+  function AppChord({ spy }: { spy: () => void }) {
+    useKeyChord('composer.stop', spy);
+    return null;
+  }
+
+  it('an app-scoped chord pressed while recording runs nothing; elsewhere it runs', async () => {
+    cleanup();
+    const stop = vi.fn();
+    render(
+      <>
+        <AppChord spy={stop} />
+        <kbd data-chord-capture tabIndex={0} aria-label="recording" />
+        <textarea aria-label="elsewhere" />
+      </>,
+    );
+    const press = (label: string) => fireEvent.keyDown(screen.getByLabelText(label), { key: '.', code: 'Period', metaKey: true });
+    press('recording');
+    expect(stop).not.toHaveBeenCalled();
+    press('elsewhere');
+    expect(stop).toHaveBeenCalledOnce();
+  });
+});
+// C11 end

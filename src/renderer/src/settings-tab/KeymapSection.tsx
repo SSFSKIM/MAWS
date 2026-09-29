@@ -4,9 +4,10 @@
 // (settings v3's patch replaces `keymap` whole, M1 decision (2)); a chord equal to the default drops the override. A
 // `menu` action's change rebuilds the application menu in main; a `renderer` action's reaches the dispatcher through
 // the settings store.
-import { useState, type KeyboardEvent } from 'react';
+import { useEffect, useState, type KeyboardEvent } from 'react';
 import { ACTIONS, type ActionId, type KeymapOverrides } from '@shared/keymap/actions';
 import { GatewaySheet } from '../gateway/GatewaySheet';
+import { ipc } from '../ipc/client';
 import { KEYBOARD } from './copy';
 import { captureChord, displayChord, keymapGroups, type KeymapRow } from './keymap';
 import { TEXT_ACTION, writeSettings } from './parts';
@@ -22,6 +23,19 @@ export function KeymapSection({ keymap }: { keymap: KeymapOverrides }) {
   const [recording, setRecording] = useState<ActionId | null>(null);
   const [refusal, setRefusal] = useState<string | null>(null);
   const [confirmReset, setConfirmReset] = useState(false);
+
+  // While a row records, the macOS menu sets its key equivalents aside (⌘W, ⌘K, ⌘1… would otherwise run before the page
+  // sees them) and C5's dispatcher skips the recording element; both come back when recording ends, however it ends.
+  const capturing = recording !== null;
+  useEffect(() => {
+    if (!capturing) return;
+    const set = (active: boolean) =>
+      void ipc.invoke('layout.captureChords', { active }).then((result) => {
+        if (!result.ok) console.warn('[settings] layout.captureChords failed', result.error);
+      });
+    set(true);
+    return () => set(false);
+  }, [capturing]);
 
   const stop = () => {
     setRecording(null);
@@ -120,6 +134,7 @@ function KeyRow({
           {recording ? (
             // Focused while recording: it takes every keydown until a chord is accepted, Escape cancels, or it loses focus.
             <kbd
+              data-chord-capture
               tabIndex={0}
               ref={(el) => el?.focus()}
               onKeyDown={onKeyDown}

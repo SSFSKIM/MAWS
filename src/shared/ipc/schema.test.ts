@@ -495,8 +495,8 @@ describe('ipc schema validates both directions', () => {
   // C10 end
   // C11 start
   describe('C11 entries', () => {
-    it('adds its five commands under existing namespaces with their owners, and no namespace or event', () => {
-      const owners = { 'settings.claudeUsage.status': 'main', 'settings.claudeUsage.open': 'main', 'settings.reveal': 'main', 'layout.saveTextFile': 'main', 'engine.configure': 'engine-host' } as const;
+    it('adds its six commands under existing namespaces with their owners, and no namespace or event', () => {
+      const owners = { 'settings.claudeUsage.status': 'main', 'settings.claudeUsage.open': 'main', 'settings.reveal': 'main', 'layout.saveTextFile': 'main', 'layout.captureChords': 'main', 'engine.configure': 'engine-host' } as const;
       // Every C11 command sits under a namespace that existed before C11 (C8c's `files` is the one added since).
       const before = ['session', 'engine', 'fs', 'git', 'pty', 'layout', 'attention', 'settings'];
       for (const name of Object.keys(owners)) expect(before, name).toContain(name.split('.')[0]);
@@ -569,6 +569,15 @@ describe('ipc schema validates both directions', () => {
       expect(validateCommandOutput('layout.saveTextFile', { saved: false }).ok).toBe(true);
       expect(validateCommandOutput('layout.saveTextFile', { saved: true }).ok).toBe(false);
       expect(validateCommandOutput('layout.saveTextFile', { saved: false, path: '/x' }).ok).toBe(false);
+    });
+
+    it('layout.captureChords takes exactly { active } and answers nothing (M5 fix wave)', () => {
+      expect(validateCommandInput('layout.captureChords', { active: true }).ok).toBe(true);
+      expect(validateCommandInput('layout.captureChords', { active: false }).ok).toBe(true);
+      expect(validateCommandInput('layout.captureChords', {}).ok).toBe(false);
+      expect(validateCommandInput('layout.captureChords', { active: 'yes' }).ok).toBe(false);
+      expect(validateCommandInput('layout.captureChords', { active: true, extra: 1 }).ok).toBe(false);
+      expect(validateCommandOutput('layout.captureChords', undefined).ok).toBe(true);
     });
   });
   // C11 end
