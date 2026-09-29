@@ -2,7 +2,7 @@
 // panel geometry): ClaudeUsage's accounts as C7's one reader carries them (D-17), with the routing account marked and
 // why, the add row, and the relay's line. Sign-in, reconnect and removal are ClaudeUsage's (D-19): each is a hand-off,
 // and the tab updates by itself when ClaudeUsage rewrites its files (C7's watcher); nothing here polls ClaudeUsage.
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { ClaudeUsageOpenIntent } from '@shared/ipc/schema';
 import { openClaudeUsage } from '../gateway/actions';
 import { useGateway } from '../gateway/store';
@@ -18,22 +18,25 @@ const TEXT_ACTION = 'rounded-sm px-1.5 py-1 text-ui-sm whitespace-nowrap text-fg
 const LINK = 'rounded-sm px-1 text-ui-sm whitespace-nowrap text-fg outline-accent hover:underline focus-visible:outline-2';
 export const HAND_OFF_WAIT_MS = 60_000;
 
-// After a hand-off: `Waiting for ClaudeUsage…` until ClaudeUsage's next rewrite reaches C7's reader, at most 60 s.
+// After a hand-off: `Waiting for ClaudeUsage…` until ClaudeUsage's next rewrite reaches C7's reader, at most 60 s from
+// the latest hand-off (each one names a new thing to wait for, so it restarts the wait).
 function useHandOff() {
-  const [waiting, setWaiting] = useState(false);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [handOffs, setHandOffs] = useState(0); // the hand-offs that opened ClaudeUsage; each restarts the wait
+  const [settled, setSettled] = useState(0); // the last of them whose wait ended
+  const waiting = handOffs > settled;
   useEffect(() => {
-    if (!waiting) return;
-    const off = ipc.on('settings.usageChanged', () => setWaiting(false));
-    timer.current = setTimeout(() => setWaiting(false), HAND_OFF_WAIT_MS);
+    if (handOffs === 0) return;
+    const done = () => setSettled(handOffs);
+    const off = ipc.on('settings.usageChanged', done);
+    const timer = setTimeout(done, HAND_OFF_WAIT_MS);
     return () => {
       off();
-      if (timer.current) clearTimeout(timer.current);
+      clearTimeout(timer);
     };
-  }, [waiting]);
+  }, [handOffs]);
   const handOff = (intent: ClaudeUsageOpenIntent) => {
     void openClaudeUsage(intent).then((result) => {
-      if (result?.opened) setWaiting(true);
+      if (result?.opened) setHandOffs((n) => n + 1);
     });
   };
   return { waiting, handOff };

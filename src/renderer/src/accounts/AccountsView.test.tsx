@@ -127,6 +127,21 @@ describe('the Accounts tab', () => {
     expect(screen.queryByRole('status')).toBeNull();
   });
 
+  it('a second hand-off while waiting restarts the 60 s wait (M5 fix wave)', async () => {
+    show();
+    await settle();
+    const open = () => fireEvent.click(screen.getAllByRole('button', { name: 'Open ClaudeUsage ↗' })[0]!);
+    open();
+    await settle();
+    await act(() => vi.advanceTimersByTimeAsync(40_000));
+    open();
+    await settle();
+    await act(() => vi.advanceTimersByTimeAsync(40_000));
+    expect(screen.getByRole('status').textContent).toBe('Waiting for ClaudeUsage…');
+    await act(() => vi.advanceTimersByTimeAsync(20_000));
+    expect(screen.queryByRole('status')).toBeNull();
+  });
+
   it('Refresh forces a relay check', async () => {
     show();
     await settle();
