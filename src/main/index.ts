@@ -3,6 +3,7 @@ import { app, BrowserWindow, dialog, screen } from 'electron';
 import { createHosts } from './hosts';
 import { installRouter } from './ipc/router';
 import { startSettings } from './settings';
+import { registerPtyOpenLink } from './pty-links'; // C9
 import { appUrl, createWindow, installContentSecurityPolicy, prepareHarness } from './window'; // C9: prepareHarness
 // C3 start (the attention service's imports moved with its start into C4's block: src/main/index/attention-service.ts)
 import { emit } from './ipc/events';
@@ -42,8 +43,9 @@ app.on('window-all-closed', () => {});
 
 app.whenReady().then(() => {
   installContentSecurityPolicy();
-  // C9 block begin: the harness's fake session directories
+  // C9 block begin: the harness's fake session directories; a terminal's links open through pty.openLink
   if (process.env.MAWS_HARNESS === '1') prepareHarness();
+  registerPtyOpenLink();
   // C9 block end
   const hosts = createHosts();
   installRouter({ appUrl, dispatchToHost: hosts.dispatch });

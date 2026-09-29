@@ -178,6 +178,7 @@ describe('main ipc router', () => {
 
   // C9 block begin: pty.openLink, main-owned, through the one scheme-checked shell.openExternal
   it('opens an http(s) or mailto link from pty.openLink and refuses any other scheme with opened false', async () => {
+    (await import('../pty-links')).registerPtyOpenLink(); // against the router module load() just imported
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     await expect(invoke(appWindow(), 'pty.openLink', { url: 'https://example.com/a?b=1' })).resolves.toEqual({ ok: true, value: { opened: true } });
     await expect(invoke(appWindow(), 'pty.openLink', { url: 'mailto:owner@example.com' })).resolves.toEqual({ ok: true, value: { opened: true } });
