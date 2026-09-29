@@ -138,8 +138,9 @@ export async function reclaimMessage(appSessionId: AppSessionId, docked: FirstMe
   return { ok: true };
 }
 
-// The failure card's resolutions of a checkout the failed attempt created and kept.
-// Answers what became of the checkout, which the failure card shows in place of the rollback's account.
+// The resolutions of a checkout the failed attempt created and kept (the failure card's, and the empty state's note
+// once the card is dismissed). Answers what became of the checkout, which the failure card shows in place of the
+// rollback's account.
 // A kept checkout is named with its way into the cleanup: until a session runs there no record names it.
 export async function resolveWorktree(appSessionId: AppSessionId, resolution: 'discard' | 'keep'): Promise<WorktreeResource | null> {
   const result = await ipc.invoke('session.intent.resolveWorktree', { appSessionId, resolution });
