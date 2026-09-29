@@ -281,6 +281,35 @@ describe('the queue after a switch', () => {
     expect(await s.backend.answer('session.queue.list', { appSessionId: READY })).toMatchObject({ paused: false, pauseReason: null });
   });
 
+  it('a cancel after the recheck returned to the sheet resumes the queue its interrupt paused, once', async () => {
+    const s = setup({ turn: true, tasks: [task('t1', 'Sleep 120 s')] });
+    const run = s.switcher.switchRoute(READY, 'direct');
+    await confirming(s);
+    s.backend.emitStatus(READY, { backgroundTasks: [task('t1', 'Sleep 120 s'), task('t2', 'A new agent')] });
+    s.switcher.answer(READY, CONFIRM);
+    await vi.waitFor(() => expect(stateOf(s)?.error).toBe('New background work started since you confirmed · check the list again'));
+    expect(s.log).toContain('session.interrupt');
+    expect(await s.backend.answer('session.queue.list', { appSessionId: READY })).toMatchObject({ paused: true, pauseReason: 'interrupt' });
+    s.switcher.answer(READY, null);
+    expect(await run).toBe('cancelled');
+    expect(s.log.filter((c) => c === 'session.queue.setPaused')).toHaveLength(1);
+    expect(await s.backend.answer('session.queue.list', { appSessionId: READY })).toMatchObject({ paused: false, pauseReason: null });
+    expect(s.log).not.toContain('session.stop');
+  });
+
+  it('a cancel after the recheck leaves a pause the human made alone', async () => {
+    const s = setup({ turn: true, tasks: [task('t1', 'Sleep 120 s')] });
+    await s.backend.answer('session.queue.setPaused', { appSessionId: READY, paused: true });
+    const run = s.switcher.switchRoute(READY, 'direct');
+    await confirming(s);
+    s.backend.emitStatus(READY, { backgroundTasks: [task('t2', 'A new agent')] });
+    s.switcher.answer(READY, CONFIRM);
+    await vi.waitFor(() => expect(stateOf(s)?.error).not.toBeNull());
+    s.switcher.answer(READY, null);
+    expect(await run).toBe('cancelled');
+    expect(s.log).not.toContain('session.queue.setPaused');
+  });
+
   it('a queue the human paused before the switch is left paused', async () => {
     const s = setup({ turn: true });
     await s.backend.answer('session.queue.setPaused', { appSessionId: READY, paused: true });

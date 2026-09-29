@@ -142,11 +142,19 @@ export function createRouteSwitcher(deps: SwitchDeps, store: GatewayStore) {
       let error: string | null = null;
       let answer: SwitchAnswer | null = null;
       let queueRunning: boolean | null = null;
+      // The queue the switch's own interrupt paused, resumed: only when it ran before and is still paused for that
+      // (at done, and on a cancel after the interrupt, since the process then keeps running with its queue held).
+      const resumeQueue = async () => {
+        if (!queueRunning) return;
+        const queue = await deps.client.invoke('session.queue.list', { appSessionId: id });
+        if (queue.ok && queue.value.paused && queue.value.pauseReason === 'interrupt') await deps.client.invoke('session.queue.setPaused', { appSessionId: id, paused: false });
+      };
 
       for (;;) {
         state = { target, phase: 'confirming', confirm, error };
         answer = await ask(id, state);
         if (answer === null) {
+          await resumeQueue();
           clear(id);
           return 'cancelled';
         }
@@ -222,11 +230,7 @@ export function createRouteSwitcher(deps: SwitchDeps, store: GatewayStore) {
         (offFailure as (() => void) | null)?.();
       }
 
-      // The queue the switch's own interrupt paused, resumed: only when it ran before and is still paused for that.
-      if (queueRunning) {
-        const queue = await deps.client.invoke('session.queue.list', { appSessionId: id });
-        if (queue.ok && queue.value.paused && queue.value.pauseReason === 'interrupt') await deps.client.invoke('session.queue.setPaused', { appSessionId: id, paused: false });
-      }
+      await resumeQueue();
       put(id, { ...state, phase: 'done', error: null });
       deps.toast(SWITCH.toast(record.title.text, target, answer.displayName));
       return 'done';
