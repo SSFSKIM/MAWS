@@ -7,7 +7,9 @@
 // removes it. Absence from a snapshot is also a fact as of its revision: an event for a session the store does not hold
 // is taken only if it is newer than the latest snapshot, so a late change cannot resurrect what the snapshot dropped.
 // A held record's events are judged against that record's own revision alone, so the counter advancing elsewhere
-// rejects nothing. Digests carry a per-session revision; projects travel as a whole list with the index revision.
+// rejects nothing. Digests carry a per-session revision that main never repeats for an app id, even across a removal;
+// a removed session's digest and engine status go with its record, and the revision it last had still refuses a late
+// digest from before the removal. Projects travel as a whole list with the index revision.
 import { create } from 'zustand';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
@@ -48,6 +50,7 @@ export interface UnstartedSession {
 
 export function createSessionsStore() {
   const recordRevs = new Map<AppSessionId, number>(); // revision that last wrote each record, or removed it
+  const forgottenDigestRevs = new Map<AppSessionId, number>(); // the digest revision a removed session last had
   let projectsRevision = -1;
   let listRevision = -1; // the latest session.list snapshot applied
   // The revision an event about a session must exceed to be news: a held record's own; for one not held, also the
@@ -62,15 +65,39 @@ export function createSessionsStore() {
       if (![...unstarted.keys()].some((id) => records.has(id))) return unstarted;
       return new Map([...unstarted].filter(([id]) => !records.has(id)));
     };
-    const writeRecords = (records: Map<AppSessionId, SessionRecord>, revision: number) =>
-      set({ records, recordsVersion: get().recordsVersion + 1, revision: Math.max(get().revision, revision), unstarted: started(records) });
+    // A session whose record goes takes its digest and engine status along.
+    const forget = (removed: AppSessionId[]) => {
+      const { digests, engine } = get();
+      const gone = removed.filter((id) => digests.has(id) || engine.has(id));
+      if (gone.length === 0) return {};
+      const nextDigests = new Map(digests);
+      const nextEngine = new Map(engine);
+      for (const id of gone) {
+        const digest = digests.get(id);
+        if (digest) forgottenDigestRevs.set(id, digest.revision);
+        nextDigests.delete(id);
+        nextEngine.delete(id);
+      }
+      return { digests: nextDigests, engine: nextEngine, digestsVersion: get().digestsVersion + 1 };
+    };
+    const writeRecords = (records: Map<AppSessionId, SessionRecord>, revision: number) => {
+      const removed = [...get().records.keys()].filter((id) => !records.has(id));
+      set({
+        records,
+        recordsVersion: get().recordsVersion + 1,
+        revision: Math.max(get().revision, revision),
+        unstarted: started(records),
+        ...forget(removed),
+      });
+    };
     const keepDigests = (incoming: SessionDigest[]) => {
       const digests = new Map(get().digests);
       let changed = false;
       for (const d of incoming) {
-        const current = digests.get(d.appSessionId);
-        if (current && current.revision >= d.revision) continue;
+        const current = digests.get(d.appSessionId)?.revision ?? forgottenDigestRevs.get(d.appSessionId) ?? -1;
+        if (current >= d.revision) continue;
         digests.set(d.appSessionId, d);
+        forgottenDigestRevs.delete(d.appSessionId);
         changed = true;
       }
       if (changed) set({ digests, digestsVersion: get().digestsVersion + 1 });

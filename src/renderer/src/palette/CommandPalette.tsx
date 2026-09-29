@@ -16,7 +16,7 @@ import { GlyphMark } from '../attention/GlyphMark';
 import { glyphFor } from '../attention/glyph';
 import { runAction, useActionEnabled } from '../keymap/actions-runtime';
 import { sessionMatcher } from '../sidebar/derive';
-import { projectNodeId } from '../sidebar/tree';
+import { revealProject } from '../sidebar/reveal';
 import { selectPendingOf, useAttention } from '../stores/attention';
 import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
@@ -89,11 +89,9 @@ function Palette() {
     close();
     useLayout.getState().openSession(appSessionId, { split });
   };
-  const revealProject = (projectId: ProjectId) => {
+  const reveal = (projectId: ProjectId) => {
     close();
-    const { regions, setSidebar } = useLayout.getState();
-    setSidebar({ collapsed: false, collapsedProjects: regions.sidebar.collapsedProjects.filter((id) => id !== projectId) });
-    requestAnimationFrame(() => document.querySelector<HTMLElement>(`[data-tree-id="${projectNodeId(projectId)}"]`)?.focus());
+    revealProject(projectId);
   };
   const run = (id: ActionId) => {
     close();
@@ -127,7 +125,7 @@ function Palette() {
         {entries.projects.length > 0 && (
           <Command.Group heading="Projects" className={GROUP}>
             {entries.projects.map((project) => (
-              <Command.Item key={project.id} value={`project:${project.id}`} onSelect={() => revealProject(project.id)} className={ITEM}>
+              <Command.Item key={project.id} value={`project:${project.id}`} onSelect={() => reveal(project.id)} className={ITEM}>
                 <span className="truncate">{project.name}</span>
               </Command.Item>
             ))}

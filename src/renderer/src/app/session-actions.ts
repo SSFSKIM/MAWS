@@ -3,6 +3,7 @@
 // registered. C5 registers open, open in split and pin; C10 registers the rest (residue *Slots*: unregistered actions
 // render disabled).
 import type { AppSessionId } from '@shared/graph/ids';
+import type { SessionRecord } from '@shared/graph/session';
 import { createHandlerRegistry } from '../keymap/registry';
 
 export const SESSION_ACTIONS = {
@@ -17,6 +18,18 @@ export const SESSION_ACTIONS = {
 } as const;
 export type SessionActionId = keyof typeof SESSION_ACTIONS;
 export const SESSION_ACTION_IDS = Object.keys(SESSION_ACTIONS) as SessionActionId[];
+
+// A session held by a terminal or a background job (D-12): shown with its holder, read-only.
+function isForeign(record: SessionRecord): boolean {
+  return record.holder.kind === 'terminal' || record.holder.kind === 'background_job';
+}
+
+// The actions a session's menus offer, whoever renders them (the sidebar's context menu and hover actions, the
+// toolbar's session menu): a foreign-live session only Open, and "Remove worktree…" only with a worktree.
+export function sessionActionsFor(record: SessionRecord): SessionActionId[] {
+  if (isForeign(record)) return ['open'];
+  return SESSION_ACTION_IDS.filter((id) => id !== 'removeWorktree' || record.worktree !== null);
+}
 
 const registry = createHandlerRegistry<SessionActionId, [AppSessionId]>('session actions');
 

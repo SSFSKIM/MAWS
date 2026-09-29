@@ -60,6 +60,13 @@ export interface LayoutState {
   // key; with no session only the pins are kept, and the selection goes to `panelActiveNoSession`.
   setPanelTabs(appSessionId: AppSessionId | null, next: PanelSessionState): void;
   effectivePanelTabs(appSessionId: AppSessionId | null): PanelTabRef[]; // panelPinned first, then the session's own
+  // A session's panel refs whichever session or the Overview is on screen (C8's eleventh ask: C10's Attach adds a
+  // Terminal tab to session A from a sidebar row while B is shown). Read as the host reads them (the pins first) and
+  // written as `setPanelTabs` splits them: pinned refs to `panel.pinned`, the rest to `panel.<appSessionId>`. The
+  // session's selection becomes `opts.activeTabId` when given and present, else stays if its tab survives, else moves
+  // as the no-session selection does (`pinSelection`).
+  panelTabsOf(appSessionId: AppSessionId): PanelTabRef[];
+  updatePanelTabs(appSessionId: AppSessionId, fn: (refs: PanelTabRef[]) => PanelTabRef[], opts?: { activeTabId?: string }): void;
   setDragging(dragging: LayoutState['dragging']): void;
   focusCard(appSessionId: AppSessionId | null): void;
   requestFocus(request: LayoutState['focusRequest']): void;
@@ -70,9 +77,9 @@ const PANEL_KEY = /^panel\.([^.]+)$/;
 const samePins = (a: PanelTabRef[], b: PanelTabRef[]) =>
   a.length === b.length && a.every((t, i) => t.id === b[i].id && t.toolId === b[i].toolId && t.pinned === b[i].pinned);
 
-// The no-session selection once the pins go from `before` to `after`: the requested id if it is a pin, else the current
-// one if it is still a pin, else the pin that took the removed one's place (the next surviving pin to its right, or the
-// last pin), else null.
+// A panel selection once its tabs go from `before` to `after` (the pins, for the no-session selection; a session's
+// effective tabs, for `updatePanelTabs`): the requested id if it is still there, else the current one if it is, else
+// the tab that took the removed one's place (the next surviving tab to its right, or the last one), else null.
 export function pinSelection(before: PanelTabRef[], after: PanelTabRef[], current: string | null, requested: string | null = current): string | null {
   const isPin = (id: string | null) => id !== null && after.some((t) => t.id === id);
   if (isPin(requested)) return requested;
@@ -147,12 +154,17 @@ export function createLayoutStore() {
           const state = panels[i];
           if (state && known(id)) panelBySession.set(id, state);
         });
-        const hydratedMain = early.splice(0).reduce((m, change) => change(m), model.repairMain(persistedMain, known));
+        const replayed = early.splice(0);
+        const hydratedMain = replayed.reduce((m, change) => change(m), model.repairMain(persistedMain, known));
         set({ regions, main: hydratedMain, ...pins(panelPinned), panelBySession, hydrated: true });
         // A first launch writes the defaults of the keys it lacks, so layout.json always holds the renderer's three
-        // fixed keys (acceptance item 6 lists them); everything after this is written only when it changes.
+        // fixed keys (acceptance item 6 lists them). Tabs replayed over the saved ones differ from what layout.json holds,
+        // and persistence takes the hydrated state as its baseline, so they are written here too. Everything after this
+        // is written only when it changes.
+        const unsaved = new Set(absent);
+        if (replayed.length > 0 && JSON.stringify(hydratedMain) !== JSON.stringify(persistedMain)) unsaved.add('main.tabs');
         const values: Partial<Record<LayoutKey, unknown>> = { regions, 'main.tabs': get().main, 'panel.pinned': panelPinned };
-        for (const key of absent) {
+        for (const key of unsaved) {
           if (!(key in values)) continue;
           void client.invoke('layout.set', { key, value: values[key] }).then((result) => {
             if (!result.ok) console.error(`[layout] layout.set ${key} failed`, result.error);
@@ -225,6 +237,13 @@ export function createLayoutStore() {
       effectivePanelTabs(appSessionId) {
         const own = appSessionId === null ? [] : (get().panelBySession.get(appSessionId)?.tabs ?? []);
         return [...get().panelPinned, ...own];
+      },
+      panelTabsOf: (appSessionId) => get().effectivePanelTabs(appSessionId),
+      updatePanelTabs(appSessionId, fn, opts) {
+        const before = get().effectivePanelTabs(appSessionId);
+        const after = fn(before);
+        const current = get().panelBySession.get(appSessionId)?.activeTabId ?? null;
+        get().setPanelTabs(appSessionId, { tabs: after, activeTabId: pinSelection(before, after, current, opts?.activeTabId ?? current) });
       },
       setDragging: (dragging) => set({ dragging }),
       focusCard: (appSessionId) => set({ focusedCardAppId: appSessionId }),

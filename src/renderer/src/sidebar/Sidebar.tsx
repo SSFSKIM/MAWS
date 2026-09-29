@@ -16,6 +16,7 @@ import { PROJECT_PAGE, sidebarModel, type SidebarModel } from './derive';
 import { menuTargetOf, SidebarMenuContent, type MenuTarget } from './menus';
 import { NeedsYou } from './NeedsYou';
 import { ProjectGroup } from './ProjectGroup';
+import { registerProjectRevealer } from './reveal';
 import { runAddProject, useAddProjectEnabled } from './project-actions';
 import { Search } from './Search';
 import { SectionHeading } from './SectionHeading';
@@ -100,6 +101,16 @@ function SidebarBody() {
     pendingFocus.current = null;
     element.focus();
   });
+  // A project revealed from outside (`reveal.ts`) may be hidden by the search: the search clears, and the project's
+  // row takes focus after the render that shows it (and that lifts a collapsed sidebar's `inert`).
+  useEffect(
+    () =>
+      registerProjectRevealer((projectId) => {
+        setQuery('');
+        requestAnimationFrame(() => focusItem(projectNodeId(projectId)));
+      }),
+    [], // eslint-disable-line react-hooks/exhaustive-deps -- focusItem reads refs only
+  );
 
   const toggleSection = (section: Section) => {
     const list = sidebar.collapsedSections;

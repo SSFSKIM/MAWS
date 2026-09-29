@@ -5,12 +5,11 @@ import { ContextMenu } from 'radix-ui';
 import type { ReactNode } from 'react';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
-import { runSessionAction, SESSION_ACTION_IDS, SESSION_ACTIONS, useSessionActionEnabled, type SessionActionId } from '../app/session-actions';
+import { runSessionAction, SESSION_ACTIONS, sessionActionsFor, useSessionActionEnabled, type SessionActionId } from '../app/session-actions';
 import { ipc } from '../ipc/client';
 import { createSession, useSessionCreatorRegistered } from '../keymap/actions-runtime';
 import { useSessions } from '../stores/sessions';
 import { PROJECT_ACTION_IDS, PROJECT_ACTIONS, runProjectAction, useProjectActionEnabled, type ProjectActionId } from './project-actions';
-import { isForeign } from './SessionRow';
 
 export type MenuTarget = { kind: 'session'; appSessionId: AppSessionId } | { kind: 'project'; projectId: ProjectId };
 
@@ -47,10 +46,7 @@ export function SidebarMenuContent({ target }: { target: MenuTarget | null }) {
 function SessionItems({ appSessionId }: { appSessionId: AppSessionId }) {
   const record = useSessions((s) => s.records.get(appSessionId));
   if (!record) return null;
-  const ids: SessionActionId[] = isForeign(record)
-    ? ['open']
-    : SESSION_ACTION_IDS.filter((id) => id !== 'removeWorktree' || record.worktree !== null);
-  return ids.map((id) => <SessionItem key={id} id={id} record={record} />);
+  return sessionActionsFor(record).map((id) => <SessionItem key={id} id={id} record={record} />);
 }
 
 function SessionItem({ id, record }: { id: SessionActionId; record: SessionRecord }) {

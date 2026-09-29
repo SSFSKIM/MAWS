@@ -4,6 +4,17 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LayoutFileStore } from './store';
 
+// A disk that fills up on demand: while `diskFull` is set, every write the store makes fails with ENOSPC.
+const disk = vi.hoisted(() => ({ full: false }));
+vi.mock('node:fs', async (importOriginal) => {
+  const fs = await importOriginal<typeof import('node:fs')>();
+  const writeFileSync: typeof fs.writeFileSync = (...args) => {
+    if (disk.full) throw Object.assign(new Error('ENOSPC: no space left on device, write'), { code: 'ENOSPC' });
+    fs.writeFileSync(...args);
+  };
+  return { ...fs, default: { ...fs, writeFileSync }, writeFileSync };
+});
+
 let dir: string;
 let file: string;
 
@@ -13,6 +24,7 @@ beforeEach(() => {
   file = join(dir, 'layout.json');
 });
 afterEach(() => {
+  disk.full = false;
   vi.useRealTimers();
   rmSync(dir, { recursive: true, force: true });
 });
@@ -61,5 +73,28 @@ describe('layout file store', () => {
     writeFileSync(file, '[1,2]');
     expect(new LayoutFileStore(file).list()).toEqual([]);
     expect(warn).toHaveBeenCalledTimes(2);
+  });
+
+  it('a failed write of the debounced window key or at quit is logged once each and never thrown', () => {
+    vi.useFakeTimers();
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const store = new LayoutFileStore(file);
+    disk.full = true;
+    store.set('window.main', WINDOW);
+    expect(() => vi.advanceTimersByTime(500)).not.toThrow();
+    expect(error).toHaveBeenCalledTimes(1);
+    expect(String(error.mock.calls[0][0])).toContain('ENOSPC');
+    store.set('window.main', { ...WINDOW, maximized: true });
+    expect(() => store.flush()).not.toThrow(); // will-quit
+    expect(error).toHaveBeenCalledTimes(2);
+    disk.full = false;
+    store.flush(); // the values survived the failures and reach the disk once it has room
+    expect(JSON.parse(readFileSync(file, 'utf8'))['window.main'].maximized).toBe(true);
+  });
+
+  it('a failed write of a renderer key still reaches the caller, whose router answers it as an error', () => {
+    const store = new LayoutFileStore(file);
+    disk.full = true;
+    expect(() => store.set('regions', { width: 240 })).toThrow(/ENOSPC/);
   });
 });

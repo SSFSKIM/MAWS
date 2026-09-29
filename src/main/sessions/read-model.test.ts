@@ -189,6 +189,19 @@ describe('read model drops input for a session with no observed record', () => {
     expect(model.midTurnCount()).toBe(0);
     expect(model.digests()).toEqual([]);
   });
+
+  it('a recreated session continues its digest revision where the removed one stopped', () => {
+    const emitted: SessionDigest[] = [];
+    model.on('digest', (d) => emitted.push(d));
+    src.writer.observeRecord(record(A));
+    src.writer.fold(A, [ev('turn.started', {})]);
+    src.writer.fold(A, [ev('turn.ended', { costUsd: 0.2 })]);
+    src.writer.observeRemoved(A);
+    src.writer.observeRecord(record(A));
+    src.writer.fold(A, [ev('turn.started', {})]);
+    expect(emitted.map((d) => d.revision)).toEqual([1, 2, 3]);
+    expect(model.digests()).toMatchObject([{ appSessionId: A, phase: 'working', revision: 3 }]);
+  });
 });
 
 describe('stub source plays a timeline', () => {

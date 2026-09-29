@@ -28,13 +28,16 @@ export class LayoutFileStore implements LayoutStore {
     return this.values.get(key) ?? null;
   }
 
+  // A renderer key is written at once and a failure throws, so the router answers `layout.set` with an error the page
+  // logs (a pending window write stays pending then, and retries). The window key is main's own and debounced.
   set(key: LayoutKey, value: unknown): void {
     this.values.set(key, value);
     if (key !== WINDOW_KEY) {
-      this.flush();
+      this.write();
+      this.cancelWindowWrite(); // the whole file just went out, window key included
       return;
     }
-    if (this.windowTimer) clearTimeout(this.windowTimer);
+    this.cancelWindowWrite();
     this.windowTimer = setTimeout(() => this.flush(), WINDOW_DEBOUNCE_MS);
   }
 
@@ -42,10 +45,24 @@ export class LayoutFileStore implements LayoutStore {
     return [...this.values.keys()];
   }
 
-  // Writes now, cancelling a pending window write (quit calls it too).
+  // Writes now, cancelling a pending window write: the debounce timer and `will-quit` call it, outside any handler
+  // that could catch, so a failed write (a full disk, a permission change) is logged and never thrown: layout
+  // persistence must not disrupt the app's lifecycle. The values stay in memory for the next write.
   flush(): void {
+    this.cancelWindowWrite();
+    try {
+      this.write();
+    } catch (error) {
+      console.error(`[layout] cannot write ${this.file}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  private cancelWindowWrite(): void {
     if (this.windowTimer) clearTimeout(this.windowTimer);
     this.windowTimer = null;
+  }
+
+  private write(): void {
     const temporary = `${this.file}.${process.pid}.tmp`;
     mkdirSync(dirname(this.file), { recursive: true });
     writeFileSync(temporary, JSON.stringify(Object.fromEntries(this.values)));

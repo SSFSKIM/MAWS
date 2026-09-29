@@ -12,7 +12,7 @@ import { activeTab } from '../stores/layout-model';
 import { useSessions } from '../stores/sessions';
 import { IconButton, PanelIcon, SidebarIcon } from './IconButton';
 import { sidebarWidth } from './regions';
-import { runSessionAction, SESSION_ACTION_IDS, SESSION_ACTIONS, useSessionActionEnabled, type SessionActionId } from './session-actions';
+import { runSessionAction, SESSION_ACTIONS, sessionActionsFor, useSessionActionEnabled, type SessionActionId } from './session-actions';
 
 const basename = (path: string) => path.split('/').filter(Boolean).at(-1) ?? path;
 
@@ -80,12 +80,15 @@ export function Toolbar() {
   );
 }
 
-// §5.1's session actions for the session on screen; "Open" is left out because it is the open tab.
+// §5.1's session actions for the session on screen, as its sidebar menus offer them (`sessionActionsFor`: a
+// foreign-live session has none here); "Open" is left out because it is the open tab. A session with no record (an
+// unstarted one) offers nothing yet, and with nothing to offer the menu is disabled.
 function SessionMenu({ appSessionId }: { appSessionId: AppSessionId | null }) {
-  const pinned = useSessions((s) => (appSessionId ? (s.records.get(appSessionId)?.pinned ?? false) : false));
+  const record = useSessions((s) => (appSessionId ? s.records.get(appSessionId) : undefined));
+  const ids = record ? sessionActionsFor(record).filter((id) => id !== 'open') : [];
   return (
     <DropdownMenu.Root modal={false}>
-      <DropdownMenu.Trigger asChild disabled={appSessionId === null}>
+      <DropdownMenu.Trigger asChild disabled={ids.length === 0}>
         <IconButton label="Session actions">
           <span aria-hidden className="text-ui leading-none tracking-tight">•••</span>
         </IconButton>
@@ -96,9 +99,9 @@ function SessionMenu({ appSessionId }: { appSessionId: AppSessionId | null }) {
           sideOffset={6}
           className="z-50 min-w-48 rounded-md border border-border-strong bg-bg-overlay p-1 text-ui text-fg"
         >
-          {appSessionId &&
-            SESSION_ACTION_IDS.filter((id) => id !== 'open').map((id) => (
-              <SessionMenuItem key={id} id={id} appSessionId={appSessionId} label={id === 'pin' && pinned ? 'Unpin' : SESSION_ACTIONS[id]} />
+          {record &&
+            ids.map((id) => (
+              <SessionMenuItem key={id} id={id} appSessionId={record.appId} label={id === 'pin' && record.pinned ? 'Unpin' : SESSION_ACTIONS[id]} />
             ))}
         </DropdownMenu.Content>
       </DropdownMenu.Portal>

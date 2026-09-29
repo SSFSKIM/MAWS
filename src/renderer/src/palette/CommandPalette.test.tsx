@@ -8,6 +8,8 @@ import { registerAction, runAction } from '../keymap/actions-runtime';
 import { useLayout } from '../stores/layout';
 import { activeTab } from '../stores/layout-model';
 import { fillStores, resetShellStores, scenarioFile } from '../test-support/shell-stores';
+import { Sidebar } from '../sidebar/Sidebar';
+import { projectNodeId } from '../sidebar/tree';
 import { CommandPalette, paletteEntries, usePalette } from './CommandPalette';
 
 const nine = scenarioFile('nine-sessions');
@@ -113,6 +115,22 @@ describe('command palette', () => {
     expect(options('Projects')).toEqual([nine.projects[1].name]);
     await user.click(within(group('Projects')!).getByRole('option'));
     expect(useLayout.getState().regions.sidebar).toMatchObject({ collapsed: false, collapsedProjects: [] });
+  });
+
+  it('a project the sidebar’s search hides is revealed: the search clears and the project row takes focus', async () => {
+    const project = nine.projects[1];
+    const user = userEvent.setup();
+    render(<Sidebar />);
+    await user.type(screen.getByRole('searchbox', { name: 'Search sessions' }), 'Terminal workflow');
+    const projectRow = () => document.querySelector<HTMLElement>(`[data-tree-id="${projectNodeId(project.id)}"]`);
+    expect(projectRow()).toBeNull(); // the filter hides the project
+    render(<CommandPalette />);
+    act(() => runAction('palette.open'));
+    await user.keyboard(project.name.slice(0, 7));
+    await user.click(within(group('Projects')!).getByRole('option'));
+    expect((screen.getByRole('searchbox', { name: 'Search sessions' }) as HTMLInputElement).value).toBe('');
+    await vi.waitFor(() => expect(document.activeElement).toBe(projectRow()));
+    expect(projectRow()!.getAttribute('aria-label')).toBe(project.name);
   });
 });
 

@@ -48,6 +48,26 @@ describe('layout persistence', () => {
     expect(store.getState().regions.sidebar.width).toBe(410);
   });
 
+  it('writes tabs opened before hydration over an existing main.tabs, before any later change and on beforeunload', async () => {
+    const saved = { ...LAYOUT_DEFAULTS.main, panes: [{ tabs: [...LAYOUT_DEFAULTS.main.panes[0].tabs, { id: 'diagnostics', kind: 'diagnostics', pinned: false }], activeTabId: 'overview' }] };
+    const { store, hydrate, sets } = setup({ 'main.tabs': saved });
+    store.getState().openSession(A); // a sidebar click or a notification navigation racing the first layout.get
+    await hydrate((id) => id === A);
+    window.dispatchEvent(new Event('beforeunload'));
+    const written = sets().filter((s) => s.key === 'main.tabs');
+    expect(written).toHaveLength(1);
+    expect((written[0].value as typeof saved).panes[0].tabs.map((t) => t.id)).toEqual(['overview', `session:${A}`, 'diagnostics']); // opened after the active Overview, over the saved tabs
+    expect(written[0].value).toBe(store.getState().main);
+  });
+
+  it('writes nothing for hydration alone when layout.json holds every key', async () => {
+    const { hydrate, sets } = setup();
+    await hydrate();
+    vi.advanceTimersByTime(1000);
+    window.dispatchEvent(new Event('beforeunload'));
+    expect(sets()).toEqual([]);
+  });
+
   it('a key that failed to read is not overwritten with its default', async () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     const fake = fakeClient({ 'layout.list': { keys: [] }, 'layout.get': ({ key }: { key: string }) => ({ value: key === 'regions' ? LAYOUT_DEFAULTS.regions : [] }), 'layout.set': undefined });
@@ -168,5 +188,68 @@ describe('panel tabs from the host', () => {
     store.getState().setPanelTabs(null, { tabs: [{ id: 'p', toolId: 'terminal', pinned: true }, { id: 'o', toolId: 'files', pinned: false }], activeTabId: 'p' });
     expect(store.getState().panelPinned.map((t) => t.id)).toEqual(['p']);
     expect(store.getState().panelBySession.size).toBe(0);
+  });
+});
+
+// C8's eleventh ask: a session's panel refs read and written while another session or the Overview is on screen.
+describe('panel tabs of a session not on screen', () => {
+  const B = 'app-b' as AppSessionId;
+  const terminal = { id: 'term-1', toolId: 'terminal', pinned: false };
+  const files = { id: 'files-1', toolId: 'files', pinned: false };
+
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => {
+    running.splice(0).forEach((stop) => stop());
+    vi.useRealTimers();
+  });
+
+  it('adds a ref to session A while B is shown, persists it to panel.<A>, and reads it back after switching to A', async () => {
+    const { store, hydrate, sets } = setup({ 'panel.app-a': { tabs: [files], activeTabId: 'files-1' } });
+    await hydrate((id) => id === A || id === B);
+    store.getState().openSession(B);
+    store.getState().updatePanelTabs(A, (refs) => [...refs, terminal]);
+    vi.advanceTimersByTime(LAYOUT_WRITE_DELAY_MS);
+    expect(sets().filter((s) => s.key.startsWith('panel.'))).toEqual([{ key: 'panel.app-a', value: { tabs: [files, terminal], activeTabId: 'files-1' } }]);
+    expect(store.getState().panelTabsOf(B)).toEqual([]);
+    store.getState().openSession(A);
+    expect(store.getState().panelTabsOf(A)).toEqual([files, terminal]);
+    expect(store.getState().effectivePanelTabs(A)).toEqual([files, terminal]);
+  });
+
+  it('reads the pins first and files a pinned ref to panel.pinned, with the Overview on screen', async () => {
+    const pin = { id: 'p1', toolId: 'review', pinned: true };
+    const { store, hydrate, sets } = setup({ 'panel.pinned': [pin] });
+    await hydrate();
+    let given: unknown = null;
+    store.getState().updatePanelTabs(A, (refs) => {
+      given = refs;
+      return [...refs, { ...terminal, pinned: true }, files];
+    });
+    expect(given).toEqual([pin]);
+    vi.advanceTimersByTime(LAYOUT_WRITE_DELAY_MS);
+    expect(sets()).toEqual([
+      { key: 'panel.pinned', value: [pin, { ...terminal, pinned: true }] },
+      { key: 'panel.app-a', value: { tabs: [files], activeTabId: null } },
+    ]);
+    expect(store.getState().panelTabsOf(B).map((t) => t.id)).toEqual(['p1', 'term-1']); // a pin shows for every session
+  });
+
+  it('selects a requested tab, keeps a surviving selection, and moves a removed one to its neighbour', () => {
+    const store = createLayoutStore();
+    store.getState().updatePanelTabs(A, () => [files, terminal], { activeTabId: 'term-1' });
+    expect(store.getState().panelBySession.get(A)?.activeTabId).toBe('term-1');
+    store.getState().updatePanelTabs(A, (refs) => [...refs, { id: 'x', toolId: 'x', pinned: false }]);
+    expect(store.getState().panelBySession.get(A)?.activeTabId).toBe('term-1');
+    store.getState().updatePanelTabs(A, (refs) => refs.filter((t) => t.id !== 'term-1'));
+    expect(store.getState().panelBySession.get(A)?.activeTabId).toBe('x');
+  });
+
+  it('revalidates the no-session pin selection when it drops a pin', () => {
+    const store = createLayoutStore();
+    const pin = (id: string) => ({ id, toolId: 'files', pinned: true });
+    store.getState().setPanelTabs(null, { tabs: [pin('p1'), pin('p2'), pin('p3')], activeTabId: 'p2' });
+    store.getState().updatePanelTabs(A, (refs) => refs.filter((t) => t.id !== 'p2'));
+    expect(store.getState().panelPinned.map((t) => t.id)).toEqual(['p1', 'p3']);
+    expect(store.getState().panelActiveNoSession).toBe('p3');
   });
 });

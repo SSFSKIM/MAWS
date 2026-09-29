@@ -81,6 +81,32 @@ describe('sessions store reconciles snapshots with events by revision', () => {
     expect(store.getState().engine.get(A)?.engineState).toBe('running');
   });
 
+  it('forgets a removed session’s digest and engine status, and takes the recreated session’s digests', () => {
+    const store = createSessionsStore();
+    store.getState().applyChanged({ record: record('a'), cause: 'discovered', revision: 1 });
+    store.getState().applyDigest(digest('a', { phase: 'working', revision: 2 }));
+    store.getState().applyStatus({ appSessionId: A, status: status('a', { engineState: 'running', turn: humanTurn }) });
+    expect(store.getState().applyRemoved({ appSessionId: A, revision: 2 })).toBe(true);
+    expect(store.getState().digests.has(A)).toBe(false);
+    expect(store.getState().engine.has(A)).toBe(false);
+    // A digest from before the removal that arrives late stays out; main's counter continues for the recreated session.
+    store.getState().applyDigest(digest('a', { phase: 'working', revision: 2 }));
+    expect(store.getState().digests.has(A)).toBe(false);
+    store.getState().applyChanged({ record: record('a'), cause: 'discovered', revision: 3 });
+    store.getState().applyDigest(digest('a', { phase: 'idle', revision: 3 }));
+    expect(store.getState().digests.get(A)).toMatchObject({ phase: 'idle', revision: 3 });
+  });
+
+  it('forgets the digest and engine status of a session a newer snapshot no longer lists', () => {
+    const store = createSessionsStore();
+    store.getState().applyChanged({ record: record('a'), cause: 'discovered', revision: 1 });
+    store.getState().applyDigest(digest('a', { revision: 4 }));
+    store.getState().applyStatus({ appSessionId: A, status: status('a') });
+    store.getState().applyList({ sessions: [], revision: 2 });
+    expect(store.getState().digests.has(A)).toBe(false);
+    expect(store.getState().engine.has(A)).toBe(false);
+  });
+
   it('bumps recordsVersion on every record write and not otherwise', () => {
     const store = createSessionsStore();
     const v0 = store.getState().recordsVersion;

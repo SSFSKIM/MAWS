@@ -46,6 +46,9 @@ export class SessionReadModel {
   private readonly records = new Map<AppSessionId, SessionRecord>();
   private readonly projects = new Map<ProjectId, ProjectRecord>();
   private readonly digestsById = new Map<AppSessionId, SessionDigest>();
+  // The last digest revision each app id emitted, kept for the process lifetime: a removed and recreated session
+  // continues from it, so a consumer that still holds the old digest takes the new ones (a revision never repeats).
+  private readonly lastRevision = new Map<AppSessionId, number>();
   private readonly seen = new Map<AppSessionId, Set<string>>();
   private readonly costAtSeen = new Map<AppSessionId, number>();
   private readonly statuses = new Map<AppSessionId, EngineSessionStatus>();
@@ -141,7 +144,9 @@ export class SessionReadModel {
     const cost = next.cost && { totalUsd: next.cost.totalUsd, sinceSeenUsd: next.cost.totalUsd - (this.costAtSeen.get(next.appSessionId) ?? 0) };
     const candidate = { ...next, cost, revision: prev?.revision ?? 0 };
     if (prev && JSON.stringify(prev) === JSON.stringify(candidate)) return;
-    const committed = { ...candidate, revision: (prev?.revision ?? 0) + 1 };
+    const revision = (this.lastRevision.get(next.appSessionId) ?? 0) + 1;
+    const committed = { ...candidate, revision };
+    this.lastRevision.set(next.appSessionId, revision);
     this.digestsById.set(next.appSessionId, committed);
     this.fire('digest', committed);
   }

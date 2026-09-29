@@ -14,6 +14,7 @@ import { registerShellActions } from './shell-actions';
 import { Shell } from './Shell';
 import { registerSlot, resetSlots } from './slots';
 import { toolbarTitle } from './Toolbar';
+import { scenarioFile } from '../test-support/shell-stores';
 
 vi.mock('./Diagnostics', () => ({ Diagnostics: () => <section aria-label="Diagnostics">diagnostics</section> }));
 
@@ -152,10 +153,20 @@ describe('toolbar', () => {
       ['Fork', true],
       ['Archive', true],
       ['Delete conversation…', true],
-      ['Remove worktree…', true],
-    ]);
+    ]); // no worktree, so no "Remove worktree…", as in the sidebar's menu
     await user.click(within(menu).getByRole('menuitem', { name: 'Open in split' }));
     expect(split).toHaveBeenCalledWith(A);
+  });
+
+  it('offers a foreign-live session no actions, as the sidebar does (D-12): the scenario’s terminal-held session', async () => {
+    const nine = scenarioFile('nine-sessions');
+    const held = nine.sessions.find((r) => r.holder.kind === 'terminal')!;
+    useSessions.setState({ records: new Map(nine.sessions.map((r) => [r.appId, r])) });
+    offs.push(registerShellActions(fakeBridge()));
+    render(<Shell />);
+    act(() => useLayout.setState({ main: withActive(sessionTab(held.appId)) }));
+    expect(within(screen.getByRole('banner')).getByText(held.title.text)).toBeTruthy();
+    expect((screen.getByRole('button', { name: 'Session actions' }) as HTMLButtonElement).disabled).toBe(true);
   });
 });
 

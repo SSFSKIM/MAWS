@@ -4,7 +4,7 @@
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import { ArchiveIcon, PinIcon } from '../app/IconButton';
-import { runSessionAction, useSessionActionEnabled } from '../app/session-actions';
+import { runSessionAction, sessionActionsFor, useSessionActionEnabled } from '../app/session-actions';
 import { useNow } from '../app/use-now';
 import { GlyphMark } from '../attention/GlyphMark';
 import { glyphFor } from '../attention/glyph';
@@ -15,10 +15,6 @@ import { secondaryLine, sessionAge } from './derive';
 import { sessionNodeId, useTree } from './tree';
 
 export const SESSION_DRAG_TYPE = 'application/x-maws-session';
-
-export function isForeign(record: SessionRecord): boolean {
-  return record.holder.kind === 'terminal' || record.holder.kind === 'background_job';
-}
 
 export function SessionRow({ record, level }: { record: SessionRecord; level: 1 | 2 }) {
   const id = record.appId;
@@ -31,6 +27,8 @@ export function SessionRow({ record, level }: { record: SessionRecord; level: 1 
   const secondary = secondaryLine(record, digest, pending);
   const selected = tree.selected === id;
   const title = record.title.text;
+  const offered = sessionActionsFor(record);
+  const hoverActions = HOVER_ACTIONS.filter((action) => offered.includes(action));
 
   return (
     <div
@@ -62,48 +60,55 @@ export function SessionRow({ record, level }: { record: SessionRecord; level: 1 
         {sessionAge(record, digest, now)}
         {record.unread && <span aria-label="Unread" role="img" className="mt-1.5 block size-[5px] rounded-full bg-info" />}
       </span>
-      {!isForeign(record) && <RowActions appSessionId={id} title={title} pinned={record.pinned} />}
+      {hoverActions.length > 0 && <RowActions actions={hoverActions} appSessionId={id} title={title} pinned={record.pinned} />}
     </div>
   );
 }
 
-// Pin and archive (§5.1 hover actions): out of the tab order, since the row is the tree's stop and its context menu
-// carries the same actions for the keyboard.
-function RowActions({ appSessionId, title, pinned }: { appSessionId: AppSessionId; title: string; pinned: boolean }) {
+type HoverAction = 'pin' | 'archive';
+const HOVER_ACTIONS: HoverAction[] = ['pin', 'archive'];
+
+// Pin and archive (§5.1 hover actions), those of them the session's menus offer (`sessionActionsFor`): out of the tab
+// order, since the row is the tree's stop and its context menu carries the same actions for the keyboard.
+function RowActions({ actions, appSessionId, title, pinned }: { actions: HoverAction[]; appSessionId: AppSessionId; title: string; pinned: boolean }) {
   const canPin = useSessionActionEnabled('pin');
   const canArchive = useSessionActionEnabled('archive');
   const button =
     'inline-flex size-[23px] items-center justify-center rounded-sm text-fg-muted hover:bg-bg-hover hover:text-fg disabled:text-fg-faint disabled:hover:bg-transparent';
   return (
     <span className="absolute top-1 right-[7px] hidden rounded-sm bg-bg-overlay group-hover/session:flex group-focus-within/session:flex">
-      <button
-        type="button"
-        tabIndex={-1}
-        aria-label={`${pinned ? 'Unpin' : 'Pin'} ${title}`}
-        title={canPin ? (pinned ? 'Unpin' : 'Pin') : 'Arrives with C10'}
-        disabled={!canPin}
-        onClick={(event) => {
-          event.stopPropagation();
-          runSessionAction('pin', appSessionId);
-        }}
-        className={button}
-      >
-        <PinIcon className="size-[13px]" />
-      </button>
-      <button
-        type="button"
-        tabIndex={-1}
-        aria-label={`Archive ${title}`}
-        title={canArchive ? 'Archive' : 'Arrives with C10'}
-        disabled={!canArchive}
-        onClick={(event) => {
-          event.stopPropagation();
-          runSessionAction('archive', appSessionId);
-        }}
-        className={button}
-      >
-        <ArchiveIcon className="size-[13px]" />
-      </button>
+      {actions.includes('pin') && (
+        <button
+          type="button"
+          tabIndex={-1}
+          aria-label={`${pinned ? 'Unpin' : 'Pin'} ${title}`}
+          title={canPin ? (pinned ? 'Unpin' : 'Pin') : 'Arrives with C10'}
+          disabled={!canPin}
+          onClick={(event) => {
+            event.stopPropagation();
+            runSessionAction('pin', appSessionId);
+          }}
+          className={button}
+        >
+          <PinIcon className="size-[13px]" />
+        </button>
+      )}
+      {actions.includes('archive') && (
+        <button
+          type="button"
+          tabIndex={-1}
+          aria-label={`Archive ${title}`}
+          title={canArchive ? 'Archive' : 'Arrives with C10'}
+          disabled={!canArchive}
+          onClick={(event) => {
+            event.stopPropagation();
+            runSessionAction('archive', appSessionId);
+          }}
+          className={button}
+        >
+          <ArchiveIcon className="size-[13px]" />
+        </button>
+      )}
     </span>
   );
 }
