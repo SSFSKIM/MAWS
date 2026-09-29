@@ -19,7 +19,14 @@ export interface MawsLaunch {
   cleanup(): Promise<void>; // closes the app if it is still open and removes the profile; throws if the app would not close
 }
 
-export async function launchMaws(): Promise<MawsLaunch> {
+// C3 start: `env` adds variables to the launch's environment (MAWS_ENGINE_REPLAY=1 for C3's replay test; C5, C6 and
+// C9 reuse it, through the `mawsEnv` option below, instead of editing this file).
+export interface MawsLaunchOptions {
+  env?: Record<string, string>;
+}
+// C3 end
+
+export async function launchMaws(opts: MawsLaunchOptions = {}): Promise<MawsLaunch> {
   const executable = process.env.MAWS_E2E_EXECUTABLE ? resolve(REPO_ROOT, process.env.MAWS_E2E_EXECUTABLE) : null;
   if (executable && !existsSync(executable)) throw new Error(`MAWS_E2E_EXECUTABLE does not exist: ${executable} (run pnpm build:app)`);
   const main = join(REPO_ROOT, 'out/main/index.js');
@@ -33,6 +40,7 @@ export async function launchMaws(): Promise<MawsLaunch> {
   delete env.ELECTRON_RUN_AS_NODE;
   env.MAWS_E2E = '1';
   env.MAWS_USER_DATA = userData;
+  Object.assign(env, opts.env); // C3
 
   let app: ElectronApplication | null = null;
   let closed = false;
@@ -60,10 +68,11 @@ export async function launchMaws(): Promise<MawsLaunch> {
 }
 
 // One launch per test, closed and removed at teardown; a teardown failure is reported beside the test's own result.
-export const test = base.extend<{ maws: MawsLaunch }>({
-  // eslint-disable-next-line no-empty-pattern -- Playwright requires the fixtures argument to be destructured
-  maws: async ({}, use) => {
-    const maws = await launchMaws();
+// C3: `test.use({ mawsEnv: { … } })` sets extra environment variables for a file's launches.
+export const test = base.extend<{ maws: MawsLaunch; mawsEnv: Record<string, string> }>({
+  mawsEnv: [{}, { option: true }], // C3
+  maws: async ({ mawsEnv }, use) => {
+    const maws = await launchMaws({ env: mawsEnv }); // C3: the env option
     try {
       await use(maws);
     } finally {
