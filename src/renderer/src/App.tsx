@@ -21,7 +21,8 @@ import { adoptTerminals, terminalTool } from './tools/terminal';
 // C8a end
 // C8c start
 import { connectCodeEvents } from './ipc/events';
-import { registerCodeTools } from './tools/code';
+import { codeTranscriptActions, registerCodeTools } from './tools/code';
+import { registerTranscriptActions } from './transcript';
 // C8c end
 
 export function App() {
@@ -54,12 +55,14 @@ export function App() {
     void adoptTerminals();
   }, []);
   // C8a end
-  // C8c start: the Files tool and the file viewer (Review and the transcript's actions join in M3), registered once and
-  // never unregistered, as C8a's block does (a registration's disposer closes the tool's tabs); main's files.changed.
+  // C8c start: Review, Files, the file viewer and the diff tab, registered once and never unregistered, as C8a's block
+  // does (a registration's disposer closes the tool's tabs); main's files.changed; and the transcript's two callbacks
+  // (K3), registered after C6's `connectTranscript` so they win over its file-tab default.
   useEffect(() => {
     registerCodeTools();
   }, []);
   useEffect(() => connectCodeEvents(), []);
+  useEffect(() => registerTranscriptActions(codeTranscriptActions), []);
   // C8c end
 
   // index.html ships data-theme="light" for the first paint; from then on main's resolved theme decides.

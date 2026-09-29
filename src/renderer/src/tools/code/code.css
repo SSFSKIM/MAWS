@@ -1,7 +1,7 @@
 /* The code tools' token bridge (C8c execution document, Interfaces *The `--code-*` tokens*): styles the viewer needs
    beyond utilities, from X7 tokens only. The CodeMirror theme itself is `viewer/code-theme.ts` (EditorView.theme, loaded
    with the code view); the `--code-*` values live in tokens.css, chosen by eye to read as C6's shiki themes do
-   (github-light and github-dark). M3 adds @git-diff-view/react's variables here. */
+   (github-light and github-dark). */
 
 /* The line a jump landed on, for two seconds. */
 @keyframes code-flash {
@@ -28,4 +28,41 @@
 }
 .code-updated {
   animation: code-updated 2s ease-out forwards;
+}
+
+/* Review's diff body (M3): @git-diff-view/react's colour variables (its diff-view.css names them `--diff-*--` on
+   `.diff-style-root`, one set per `data-theme`) from X7 tokens, so both themes follow the app's; one selector serves
+   both, since the tokens change with the theme. Scoped under ReviewView's scroller (`.review-diff`), one step more
+   specific than the library's own rules. Syntax colours are shiki's github-light and github-dark, as the transcript's
+   code blocks (C6), applied inline by the library. */
+.review-diff .diff-tailwindcss-wrapper[data-theme] .diff-style-root {
+  --diff-border--: var(--border);
+  --diff-plain-content--: var(--bg);
+  --diff-plain-lineNumber--: var(--bg);
+  --diff-plain-lineNumber-color--: var(--code-gutter-fg);
+  --diff-expand-content--: var(--bg-raised);
+  --diff-expand-lineNumber--: var(--bg-raised);
+  --diff-expand-lineNumber-color--: var(--code-gutter-fg);
+  --diff-empty-content--: var(--bg-hover);
+  --diff-add-content--: var(--diff-add-bg);
+  --diff-add-lineNumber--: var(--diff-add-bg);
+  --diff-add-content-highlight--: var(--diff-add-bg); /* over the line's own, so twice as strong */
+  --diff-del-content--: var(--diff-del-bg);
+  --diff-del-lineNumber--: var(--diff-del-bg);
+  --diff-del-content-highlight--: var(--diff-del-bg);
+  --diff-hunk-content--: var(--bg-hover);
+  --diff-hunk-content-color--: var(--fg-muted);
+  --diff-hunk-lineNumber--: var(--bg-active);
+  --diff-hunk-lineNumber-hover--: var(--accent);
+  --diff-add-widget--: var(--accent);
+  --diff-add-widget-color--: var(--bg-raised);
+}
+.review-diff .diff-tailwindcss-wrapper[data-theme] [data-state='diff'],
+.review-diff .diff-tailwindcss-wrapper[data-theme] [data-state='plain'],
+.review-diff .diff-tailwindcss-wrapper[data-theme] [data-state='hunk'] {
+  color: var(--fg);
+}
+/* The library sets its font inline; the app's mono face wins. */
+.review-diff .diff-table-scroll-container {
+  font-family: var(--font-mono) !important;
 }

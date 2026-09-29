@@ -4,9 +4,11 @@
 // two-argument form, filling the session from the focused pane (C5's Pane focuses on pointerdown, so at click time it
 // is the transcript's).
 import type { AppSessionId } from '@shared/graph/ids';
-import type { TranscriptActions } from '../../transcript';
+import { panelHost } from '../../panel/host';
 import { useLayout } from '../../stores/layout';
 import { activeTab, sessionOfTab } from '../../stores/layout-model';
+import { useSessions } from '../../stores/sessions';
+import { useTranscriptStore, type TranscriptActions, type TurnId } from '../../transcript';
 
 // `.`, `..` and repeated separators collapsed without touching the disk (ruled 2026-09-29, O1): a receipt's path comes
 // from the model's input and may carry `..`, which `files.*` refuses as not normal; the boundary then judges the
@@ -34,8 +36,27 @@ export function openFile(appSessionId: AppSessionId | null, path: string, line?:
 // The session the panel follows: the focused pane's active tab's.
 export const sessionOfFocusedPane = (): AppSessionId | null => sessionOfTab(activeTab(useLayout.getState().main));
 
-// The transcript's callbacks C8c supplies (K3), registered through C6's `registerTranscriptActions` (the App.tsx line
-// lands with Review, M3, together with `reviewChanges`).
-export const codeTranscriptActions: Pick<TranscriptActions, 'openFile'> = {
+// The session a turn belongs to, for a call outside a click: the transcript store key whose state holds the turn, the
+// session's own (`<appSessionId>`) or a child agent's (`<appSessionId>:<agentId>`), when the session is known.
+export function sessionOfTurn(turnId: TurnId): AppSessionId | null {
+  const { entries } = useTranscriptStore.getState();
+  const { records } = useSessions.getState();
+  for (const key of Object.keys(entries)) {
+    if (!entries[key].state.turns.has(turnId)) continue;
+    const candidates = [key, key.slice(0, key.indexOf(':'))] as AppSessionId[];
+    const found = candidates.find((id) => records.has(id));
+    if (found) return found;
+  }
+  return null;
+}
+
+// The transcript's callbacks C8c supplies (K3), registered through C6's `registerTranscriptActions` from App.tsx's C8c
+// block: a receipt's "Review changes" (and a file row of it) opens Review on the turn, a path chip opens the viewer.
+export const codeTranscriptActions: Pick<TranscriptActions, 'reviewChanges' | 'openFile'> = {
+  reviewChanges(turnId, path) {
+    const appSessionId = sessionOfFocusedPane() ?? sessionOfTurn(turnId);
+    if (appSessionId === null) return;
+    panelHost.addTool('review', { appSessionId, params: { scope: 'turn', turnId, ...(path ? { path } : {}) } });
+  },
   openFile: (path, line) => openFile(sessionOfFocusedPane(), path, line),
 };
