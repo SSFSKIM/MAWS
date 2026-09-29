@@ -207,10 +207,18 @@ export function createTranscriptStore() {
           return existing.settled;
         }
         if (existing) release(existing);
-        if (!entry(key)) {
+        const kept = entry(key);
+        if (!kept) {
           const state = createState(null, options.agentId ?? null);
           set({ entries: { ...get().entries, [key]: { state, rows: rowsOf(state), phase: 'hydrating', error: null, following: true, working: false, clock: null, jump: null } } });
-        } else put(key, { phase: 'hydrating', error: null });
+        } else {
+          // Starting the key over (no holder left): the snapshot is the whole history, and after an exit or a child's
+          // finish nobody observed it may carry the other id form (disk uuids for live ids), which id deduplication
+          // cannot recognise. The reducer state starts over; what the reader opened is kept, keyed by ids that resolve
+          // again when the history is in the same form.
+          const state = { ...createState(null, options.agentId ?? null), ui: kept.state.ui };
+          put(key, { state, phase: 'hydrating', error: null, clock: null, jump: null });
+        }
         const attached: Attached = { source, agentId: options.agentId ?? null, count: 1, attachment: null, settled: Promise.resolve(), offReset: null };
         attachments.set(key, attached);
         // A reset (a child source switching from its live stream to its disk transcript): the key starts over.

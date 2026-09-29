@@ -57,6 +57,28 @@ describe('ipcSource', () => {
     return b.events.map((event, i) => (i < 6 ? { ...event, seq: null } : event));
   }
 
+  // Whole-branch review: the last holder detached, the process exited unobserved, and the next attach's snapshot is the
+  // same history in the other id form (disk uuids for live ids). The key starts over instead of applying it twice.
+  it('an attach that starts a session key over resets its state: a snapshot in the other id form applies once', async () => {
+    const liveForm = history().map((event, i) => ({ ...event, id: `live:${i}` as EventId, seq: i }));
+    const diskForm = history().map((event, i) => ({ ...event, id: `disk:${i}` as EventId, seq: null }));
+    const fake = fakeClient();
+    const store = useTranscriptStore.getState();
+    const source = ipcSourceOver(fake.client, APP);
+    const first = store.attach(source.key!, source);
+    fake.calls[0].answer({ ok: true, value: { events: liveForm, lastSeq: liveForm.length - 1, complete: true } } as never);
+    await first;
+    store.detach(source.key!); // the tab goes away; the entry stays
+    const again = store.attach(source.key!, source);
+    fake.calls[1].answer({ ok: true, value: { events: diskForm, lastSeq: -1, complete: true } } as never);
+    await again;
+    const entry = useTranscriptStore.getState().entries[source.key!];
+    expect(entry.state.order).toHaveLength(4); // no phantom turns
+    expect([...entry.state.seen]).toEqual(diskForm.map((event) => event.id));
+    expect(entry.rows).toEqual(rowsOf(applyEvents(createState(null, null), diskForm)));
+    store.detach(source.key!);
+  });
+
   it('hydrates through the store: buffered before the snapshot, overlap dropped by id, order kept through the drain, then live', async () => {
     const all = history();
     const fake = fakeClient();
@@ -312,6 +334,31 @@ describe('child source provenance', () => {
     expect(rowIds('drill-in')).toEqual(rowIds('tab'));
     view.unmount();
     expect(fake.listeners.get('session.eventBatch')?.size).toBe(0);
+  });
+
+  // Whole-branch review: a drill-in open while the child ran, closed, and reopened after it finished. Unobserved, the
+  // source saw no end and fired no reset; the reopened attach reads the disk transcript, so the key starts over.
+  it('reopened after the child finished unobserved: the key starts over from the disk transcript, no id twice', async () => {
+    const { parent, child } = live();
+    const disk = onDisk(child);
+    const fake = fakeClient();
+    const store = useTranscriptStore.getState();
+    const open = store.attach(CHILD_KEY, childSource(fake), { agentId: AGENT });
+    answer(fake, 'session.events', { events: [...parent, ...child.slice(0, 2)], lastSeq: 9, complete: true });
+    await open;
+    expect([...useTranscriptStore.getState().entries[CHILD_KEY].state.seen]).toEqual(child.slice(0, 2).map((event) => event.id));
+    store.detach(CHILD_KEY); // the drill-in closes while the child still runs
+    const done = finish(AGENT, '2026-09-28T10:00:09.000Z', 'completed');
+    const reopened = store.attach(CHILD_KEY, childSource(fake), { agentId: AGENT });
+    answer(fake, 'session.events', { events: [...parent, ...child, done], lastSeq: 12, complete: true });
+    await flush();
+    answer(fake, 'fs.agentEvents', { events: disk, complete: true });
+    await reopened;
+    const entry = useTranscriptStore.getState().entries[CHILD_KEY];
+    expect([...entry.state.seen]).toEqual([...disk, done].map((event) => event.id));
+    expect(entry.rows).toEqual(rowsOf(applyEvents(createState(null, AGENT), [...disk, done])));
+    expect(entry.state.order).toHaveLength(1);
+    store.detach(CHILD_KEY);
   });
 
   it('relaunch of the parent with the child on disk: the exit closes the live child as stopped, resets the key, re-hydrates from disk, no id twice', async () => {
