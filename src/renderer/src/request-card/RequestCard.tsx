@@ -201,7 +201,9 @@ export function RequestCard({ item, request: given, placement, onAnswered }: Req
   useKeyChord('request.accept', accept, { within: ownerRef, enabled: cardKeys && bound.accept });
   useKeyChord('request.decline', decline, { within: ownerRef, enabled: cardKeys && bound.decline });
 
-  // Digits, from the element that owns the keys (the article, or the docked frame).
+  // Digits, from the element that owns the keys (the article, or the docked frame, which mounts once the request is
+  // known to be answerable).
+  const framed = placement === 'docked' && answerable(request);
   useEffect(() => {
     if (!live || (placement !== 'card' && placement !== 'docked')) return;
     const owner = placement === 'card' ? ownerRef.current : (rootRef.current?.closest<HTMLElement>('[data-docked-frame]') ?? null);
@@ -215,7 +217,7 @@ export function RequestCard({ item, request: given, placement, onAnswered }: Req
     };
     owner.addEventListener('keydown', onKeyDown);
     return () => owner.removeEventListener('keydown', onKeyDown);
-  }, [live, placement]);
+  }, [live, placement, framed]);
 
   if (phase === 'closed') return null;
 
@@ -272,7 +274,6 @@ export function RequestCard({ item, request: given, placement, onAnswered }: Req
     }
   }
 
-  const framed = placement === 'docked' && answerable(request);
   const content = (
     <div ref={rootRef} data-request-card={item.id} aria-busy={busy} className={`flex flex-col gap-3 text-fg ${placement === 'docked' || placement === 'inline' ? 'text-ui' : 'text-ui-sm'}`}>
       {!framed && (

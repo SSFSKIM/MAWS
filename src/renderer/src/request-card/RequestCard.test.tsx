@@ -274,6 +274,20 @@ describe('request card placements and delivery states', () => {
     await waitFor(() => expect(answers()).toEqual([{ kind: 'permission', decision: 'allow', scope: 'session' }]));
   });
 
+  it('docked with the request still loading, digits reach the frame that mounts once it arrives', async () => {
+    const item = itemFor(reapply, APP);
+    render(
+      <Pane>
+        <RequestCard item={item} request={null} placement="docked" paneIndex={0} />
+      </Pane>,
+    );
+    expect(screen.queryByRole('group')).toBeNull(); // the skeleton is not framed
+    await act(() => fake.reply('attention.request', { event: reapply }));
+    focusOn(frame());
+    await press('2');
+    expect(screen.getByRole('radio', { name: 'Allow for this session' }).getAttribute('aria-checked')).toBe('true');
+  });
+
   it("Enter in the Deny… with a reason textarea is a newline; ⌘Enter sends the deny with the reason", async () => {
     mount(reapply, 'docked');
     const user = userEvent.setup();

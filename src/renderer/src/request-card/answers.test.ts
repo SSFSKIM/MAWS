@@ -32,6 +32,7 @@ describe('toAnswer validates against RequestAnswerSchema for every variant', () 
     [{ kind: 'dialog', dialogKind: 'auto_mode_server_fallback', result: 'continue' }, { kind: 'dialog', behavior: 'completed', result: 'continue' }],
     [{ kind: 'dialog', dialogKind: 'auto_mode_server_fallback', result: 'interrupt' }, { kind: 'dialog', behavior: 'completed', result: 'interrupt' }],
     [{ kind: 'elicitation', action: 'accept', content: { color: 'teal' } }, { kind: 'elicitation', action: 'accept', content: { color: 'teal' } }],
+    [{ kind: 'elicitation', action: 'accept', content: null }, { kind: 'elicitation', action: 'accept' }], // a url-mode accept carries no content
     [{ kind: 'elicitation', action: 'decline' }, { kind: 'elicitation', action: 'decline' }],
     [{ kind: 'elicitation', action: 'cancel' }, { kind: 'elicitation', action: 'cancel' }],
   ];

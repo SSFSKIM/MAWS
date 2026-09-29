@@ -14,7 +14,7 @@ export type VariantState =
   | { kind: 'plan'; outcome: 'implement' | 'clear_and_implement' }
   | { kind: 'plan'; outcome: 'keep_planning'; feedback: string }
   | { kind: 'dialog'; dialogKind: string; result: string }
-  | { kind: 'elicitation'; action: 'accept'; content: Record<string, unknown> }
+  | { kind: 'elicitation'; action: 'accept'; content: Record<string, unknown> | null } // null: a url-mode accept, no content
   | { kind: 'elicitation'; action: 'decline' | 'cancel' };
 
 const blank = (text: string | undefined) => text === undefined || text.trim() === '';
@@ -52,7 +52,7 @@ function build(state: VariantState): RequestAnswer {
       return { kind: 'dialog', behavior: 'completed', result: state.result };
     }
     case 'elicitation':
-      return state.action === 'accept' ? { kind: 'elicitation', action: 'accept', content: state.content } : { kind: 'elicitation', action: state.action };
+      return state.action === 'accept' && state.content !== null ? { kind: 'elicitation', action: 'accept', content: state.content } : { kind: 'elicitation', action: state.action };
   }
 }
 

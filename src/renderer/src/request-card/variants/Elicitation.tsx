@@ -56,6 +56,7 @@ export function ElicitationBody({ request, busy, submit, bindKeys }: VariantProp
 
   const accept = () => {
     if (!form.ok) return;
+    if (url !== null) return submit(toAnswer({ kind: 'elicitation', action: 'accept', content: null }), 'Accepted');
     const content = formContent(form.fields, values);
     if (!content.ok) return setProblem(`${content.field} ${content.problem}`);
     submit(toAnswer({ kind: 'elicitation', action: 'accept', content: content.content }), 'Accepted');

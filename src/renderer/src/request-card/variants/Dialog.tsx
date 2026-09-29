@@ -6,7 +6,7 @@
 // The refusal's Edit prompt captures the prompt the refusal interrupted from the transcript store before it answers,
 // and only once the answer is delivered puts it in the composer in edit mode (the terminal's own recovery: rewind to
 // the last human prompt and restore it as the draft).
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { ipc } from '../../ipc/client';
 import { prefillComposer, type Prefill } from '../../stores/composer';
@@ -32,13 +32,17 @@ async function captureInitiatingPrompt(appSessionId: AppSessionId): Promise<Pref
 
 type DialogProps = VariantProps<'dialog.requested'>;
 
-function RefusalFallback({ item, payload, busy, submit, bindKeys }: DialogProps & { payload: RefusalFallbackPayload }) {
+function RefusalFallback({ item, payload, busy: answering, submit, bindKeys }: DialogProps & { payload: RefusalFallbackPayload }) {
+  const [capturing, setCapturing] = useState(false); // reading the prompt before the answer goes
+  const busy = answering || capturing;
   const answer = (result: 'retry_fallback' | 'edit_prompt' | 'cancelled', what: string, delivered?: () => void) =>
     submit(toAnswer({ kind: 'dialog', dialogKind: 'refusal_fallback_prompt', result }), what, delivered);
-  const retry = () => answer('retry_fallback', `Retry with ${payload.fallbackModel}`);
-  const cancel = () => answer('cancelled', 'Cancelled');
+  const retry = () => !capturing && answer('retry_fallback', `Retry with ${payload.fallbackModel}`);
+  const cancel = () => !capturing && answer('cancelled', 'Cancelled');
   const editPrompt = async () => {
+    setCapturing(true);
     const prompt = await captureInitiatingPrompt(item.appSessionId);
+    setCapturing(false);
     answer('edit_prompt', 'Edit prompt', () => {
       if (prompt) prefillComposer(item.appSessionId, prompt);
       else toast({ level: 'info', text: 'No prompt to edit', actions: [], dismissible: true });
