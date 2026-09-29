@@ -8,8 +8,10 @@ allowBuilds:
   # electron-builder's Windows installer helper; D-11 builds macOS arm64 only.
   electron-winstaller: false
 
-# C8c start: one highlight.js for @git-diff-view/* and lowlight (lowlight 3.3.0 asks ~11.11.0, the diff view ^11.11.0): two
-# copies declare the same global types, which tsconfig.web.json (skipLibCheck false) refuses.
+# C8c start: one highlight.js for @git-diff-view/* and lowlight. Two copies (the diff view's 11.12.0 and lowlight's
+# 11.11.2) declare the same global types, which tsconfig.web.json's `skipLibCheck: false` refuses; 11.11.2 satisfies
+# every range (lowlight 3.3.0 asks ~11.11.0, @git-diff-view/{core,react,lowlight} 0.1.7 ask ^11.11.0). Drop it when
+# the diff view's range moves (docs/tech-debt-tracker.md).
 overrides:
   highlight.js: 11.11.2
 # C8c end
