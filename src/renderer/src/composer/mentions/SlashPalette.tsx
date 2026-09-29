@@ -77,7 +77,9 @@ export function SlashPalette(props: PopupProps) {
   }
   const optionId = (i: number) => `composer-slash-${i}`;
   // the chosen row may sit in a group below the fold: keep it in view, on open and as the arrows move
-  useEffect(() => document.getElementById(optionId(active))?.scrollIntoView({ block: 'nearest' }), [active, rows]);
+  useEffect(() => {
+    document.getElementById(optionId(active))?.scrollIntoView({ block: 'nearest' });
+  }, [active, rows]);
   if (rows.length === 0) return null;
   return (
     <Listbox label="Commands" activeId={optionId(active)}>
