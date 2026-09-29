@@ -9,6 +9,7 @@ export interface Notice {
   text: string;
   actions: { label: string; run: () => void }[];
   dismissible: boolean;
+  durationMs?: number; // C11: a toast's own time on screen (the ClaudeUsage hand-off's instruction reads for 8 s); the host's default otherwise
 }
 
 export type NoticeInput = Omit<Notice, 'id' | 'kind'> & { id?: string };

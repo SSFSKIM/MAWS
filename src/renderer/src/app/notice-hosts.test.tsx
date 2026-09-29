@@ -77,4 +77,16 @@ describe('toast host', () => {
     await act(async () => vi.advanceTimersByTime(TOAST_DURATION_MS + 500));
     expect(useNotices.getState().notices.map((n) => n.kind)).toEqual(['banner']);
   });
+
+  // C11 start: a toast with its own duration (the ClaudeUsage hand-off's instruction, 8 s)
+  it('keeps a toast for its own duration when it names one', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    render(<ToastHost />);
+    act(() => void toast({ level: 'info', text: 'read me for eight seconds', actions: [], dismissible: true, durationMs: 8000 }));
+    await act(async () => vi.advanceTimersByTime(TOAST_DURATION_MS + 500));
+    expect(screen.getByText('read me for eight seconds')).toBeTruthy();
+    await act(async () => vi.advanceTimersByTime(8000 - TOAST_DURATION_MS));
+    expect(useNotices.getState().notices.filter((n) => n.kind === 'toast')).toEqual([]);
+  });
+  // C11 end
 });

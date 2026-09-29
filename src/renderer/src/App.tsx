@@ -32,8 +32,12 @@ import { registerTranscriptActions as registerCodeTranscriptActions } from './tr
 // C8c end
 // C11 start
 import { registerGatewayActions } from './gateway/actions';
+import { connectDirectLogin } from './gateway/direct-login';
 import { startRelayMonitor } from './gateway/relay-monitor';
 import { connectGatewaySettings } from './gateway/store';
+import { GatewayDialogs } from './gateway/SwitchSheet';
+import { UsageFooter } from './gateway/UsageFooter';
+import { registerUsagePopoverFooter } from './statusline';
 import { registerAllWidgets } from './widgets';
 // C11 end
 
@@ -88,6 +92,9 @@ export function App() {
   useEffect(() => connectGatewaySettings(), []);
   useEffect(() => startRelayMonitor(), []);
   useEffect(() => registerAllWidgets(), []);
+  // M4: the routing footer in C7's usage popover, and a Direct session's login from every get_status answer
+  useEffect(() => registerUsagePopoverFooter(UsageFooter), []);
+  useEffect(() => connectDirectLogin(queryClient), []);
   // C11 end
 
   // index.html ships data-theme="light" for the first paint; from then on main's resolved theme decides.
@@ -101,6 +108,9 @@ export function App() {
       {/* C7 start: the one app-level ⌘. and ⌘L, resolving the focused pane's session */}
       <ComposerAppKeys />
       {/* C7 end */}
+      {/* C11 start: the route switch's confirm and pickDirectModel's dialog */}
+      <GatewayDialogs />
+      {/* C11 end */}
     </QueryClientProvider>
   );
 }

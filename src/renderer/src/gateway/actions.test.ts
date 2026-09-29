@@ -41,7 +41,7 @@ describe('gateway actions pass the command validator', () => {
     runAction('gateway.openClaudeUsage');
     await vi.waitFor(() => expect(useNotices.getState().notices).toHaveLength(1));
     expect(calls).toEqual([{ name: 'settings.claudeUsage.open', input: { intent: 'panel' } }]);
-    expect(useNotices.getState().notices[0]).toMatchObject({ kind: 'toast', level: 'info', text: OPENED.instruction });
+    expect(useNotices.getState().notices[0]).toMatchObject({ kind: 'toast', level: 'info', text: OPENED.instruction, durationMs: 8000 }); // M4: read for 8 s
   });
 
   it('warns with the instruction when ClaudeUsage did not open', async () => {

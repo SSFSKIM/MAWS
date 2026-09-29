@@ -17,6 +17,7 @@ export function ToastHost() {
         <Toast.Root
           key={notice.id}
           open
+          duration={notice.durationMs} // C11: a toast's own duration, else the provider's
           onOpenChange={(open) => !open && dismiss(notice.id)}
           className={`flex w-80 items-start gap-2 rounded-md border border-l-2 border-border-strong bg-bg-overlay px-3 py-2 text-ui text-fg ${LEVEL_EDGE[notice.level]}`}
         >

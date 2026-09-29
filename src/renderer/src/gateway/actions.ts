@@ -12,6 +12,9 @@ type SettingsSection = Extract<TabTarget, { kind: 'settings' }>['section'];
 // settings.open's numeric arg names a section by its place in the Settings tab's index.
 export const SETTINGS_SECTIONS = ['engine', 'gateway', 'keyboard', 'appearance', 'notifications'] as const satisfies readonly NonNullable<SettingsSection>[];
 
+// The instruction names a control in ClaudeUsage's panel, so it stays long enough to read and act on (M4 decisions).
+export const HAND_OFF_TOAST_MS = 8000;
+
 // The one hand-off call (the action here, the Accounts tab's four buttons in M5): activates ClaudeUsage and shows the
 // instruction naming the control in its panel. Answers null, with a warning toast, when main refused the call.
 export async function openClaudeUsage(intent: ClaudeUsageOpenIntent, client: MawsBridge = ipc): Promise<ClaudeUsageOpenResult | null> {
@@ -22,7 +25,7 @@ export async function openClaudeUsage(intent: ClaudeUsageOpenIntent, client: Maw
     return null;
   }
   const { opened, instruction } = result.value;
-  toast({ level: opened ? 'info' : 'warning', text: instruction, actions: [], dismissible: true });
+  toast({ level: opened ? 'info' : 'warning', text: instruction, actions: [], dismissible: true, durationMs: HAND_OFF_TOAST_MS });
   return result.value;
 }
 
