@@ -148,11 +148,28 @@ test('live: Files, the viewer and Review over this checkout', async () => {
       await expect(panel.locator('[data-review-header]')).toHaveText(expected, { timeout: 15_000 });
       await expect(panel.locator('[role="option"] button[data-path="c8c-live-probe.txt"]')).toHaveAttribute('data-kind', 'untracked');
       observed.review = { header: expected, numstat: numstat.length, untracked };
-      // G3 is not runnable: C10's git.worktree.branch is not on master, so This branch says it arrives with C10.
-      const branch = panel.locator('[data-chip="branch"]');
-      await expect(branch).toBeDisabled();
-      observed.thisBranch = await branch.getAttribute('title');
-      expect(observed.thisBranch).toBe('Arrives with C10');
+    });
+
+    await test.step('G3: This branch is the three-dot diff against the main worktree’s branch (C10’s git.worktree.branch)', async () => {
+      const current = git(root, 'branch', '--show-current');
+      const base = git(mainCheckout, 'symbolic-ref', '--short', 'HEAD');
+      const chip = panel.locator('[data-chip="branch"]');
+      if (current === base) {
+        await expect(chip).toHaveAttribute('title', `Session runs on ${current}, the main worktree's branch`);
+        await expect(chip).toBeDisabled();
+        observed.thisBranch = { current, base, disabled: await chip.getAttribute('title') };
+        return;
+      }
+      await expect(chip).toBeEnabled({ timeout: 10_000 });
+      await chip.click();
+      await expect(panel.locator('[data-review-footer]')).toHaveText(`${current} · Since ${base}`);
+      const numstat = git(root, 'diff', `${base}...HEAD`, '--numstat').split('\n').filter(Boolean).map((l) => l.split('\t'));
+      const added = numstat.reduce((sum, [a]) => sum + (a === '-' ? 0 : Number(a)), 0);
+      const removed = numstat.reduce((sum, [, r]) => sum + (r === '-' ? 0 : Number(r)), 0);
+      if (numstat.length === 0) await expect(panel.locator('[data-review-empty]')).toHaveText(`Nothing on ${current} beyond ${base}`, { timeout: 15_000 });
+      else await expect(panel.locator('[data-review-header]')).toHaveText(`${numstat.length} ${numstat.length === 1 ? 'file' : 'files'} changed · +${added} −${removed} · This branch`, { timeout: 15_000 });
+      observed.thisBranch = { current, base, files: numstat.length, added, removed };
+      await panel.locator('[data-chip="uncommitted"]').click(); // back, for the steps below
     });
 
     await test.step('the viewer follows an edit made outside MAWS', async () => {
