@@ -53,6 +53,20 @@ describe('model', () => {
     expect(controls('session.setModel')).toEqual([]);
   });
 
+  // M4 fix wave re-review, carried Minor: the editor stops waiting after a short bound and opens the widget, so a
+  // decision that arrives later is too late and applies nothing
+  it('a decision the editor stopped waiting for applies nothing and answers false', async () => {
+    const late = new AbortController();
+    const deciding = TYPED_APPLY.model!(READY, 'opus', late.signal); // the catalogue is not held: one list_models first
+    late.abort();
+    expect(await deciding).toBe(false);
+    expect(controls('session.setModel')).toEqual([]);
+    const done = new AbortController();
+    done.abort();
+    for (const [name, args] of [['effort', 'high'], ['fast', 'off'], ['permissions', 'acceptEdits']] as const) expect(await TYPED_APPLY[name]!(READY, args, done.signal), name).toBe(false);
+    expect(backend.calls.map((c) => c.command).filter((c) => c !== 'session.listModels')).toEqual([]);
+  });
+
   it('a refused set_model toasts the code in words with the engine’s error', async () => {
     backend.script('session.setModel', () => ({ ok: false, error: 'not here', code: 'catalog_unknown' }));
     expect(await TYPED_APPLY.model!(READY, 'haiku')).toBe(true);

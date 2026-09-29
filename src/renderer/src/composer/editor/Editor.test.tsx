@@ -302,7 +302,7 @@ describe('a registered widget named at Enter opens with its argument', () => {
     await waitFor(() => expect(content.textContent).toBe('/effort opus'));
     content.focus();
     await enter(content);
-    await waitFor(() => expect(apply).toHaveBeenCalledWith(APP, 'opus'));
+    await waitFor(() => expect(apply).toHaveBeenCalledWith(APP, 'opus', expect.any(AbortSignal)));
     expect(opened(container), 'applied: no widget').toBeNull();
     expect(handle.current?.serialize().empty).toBe(true);
     expect(onSubmit).not.toHaveBeenCalled();
@@ -310,7 +310,7 @@ describe('a registered widget named at Enter opens with its argument', () => {
     act(() => handle.current?.insertText('/effort extreme'));
     await enter(content);
     await waitFor(() => expect(opened(container)).toBe('effort:extreme'));
-    expect(apply).toHaveBeenLastCalledWith(APP, 'extreme');
+    expect(apply).toHaveBeenLastCalledWith(APP, 'extreme', expect.any(AbortSignal));
 
     act(() => handle.current?.insertText('/effort'));
     apply.mockClear();
@@ -319,6 +319,32 @@ describe('a registered widget named at Enter opens with its argument', () => {
     expect(apply, 'no argument: the widget opens as built').not.toHaveBeenCalled();
     offApply();
   });
+
+  // C11 start (M4 fix wave re-review, carried Minor): the draft is gone at Enter, so a decision that takes long (a catalogue
+  // read, up to its 8 s bound) must not leave nothing on screen and then open the widget late over new typing: the editor
+  // opens it after a short bound and tells `apply` it is too late to apply.
+  it("opens the widget when apply has not decided within the bound, and signals apply that it is too late", async () => {
+    let signal: AbortSignal | null = null;
+    let decide: (applied: boolean) => void = () => {};
+    const apply = vi.fn((_id: string, _args: string, given?: AbortSignal) => {
+      signal = given ?? null;
+      return new Promise<boolean>((resolve) => (decide = resolve));
+    });
+    const offApply = registerSlashWidget('effort', { title: 'effort', component: ({ args }: { args: string }) => <p data-test-widget>{`effort:${args}`}</p>, apply });
+    const { port } = drafts({ doc: docOf([paragraph(textNode('/effort high'))]), attachments: [], updatedAt: '2026-09-29T00:00:00.000Z' });
+    const { container } = render(<Editor appSessionId={APP} cwd="/repo" sessionId={null} drafts={port} client={client} onSubmit={vi.fn(async () => true)} />);
+    const content = contentOf(container);
+    await waitFor(() => expect(content.textContent).toBe('/effort high'));
+    content.focus();
+    await enter(content);
+    expect(opened(container), 'undecided: nothing yet').toBeNull();
+    await waitFor(() => expect(opened(container)).toBe('effort:high'), { timeout: 1_000 });
+    expect(signal!.aborted, 'apply is told the editor stopped waiting').toBe(true);
+    await act(async () => decide(false)); // a late answer opens nothing a second time
+    expect(opened(container)).toBe('effort:high');
+    offApply();
+  });
+  // C11 end
 
   it('opens a widget through the handle with an argument', async () => {
     const handle = createRef<EditorHandle>();

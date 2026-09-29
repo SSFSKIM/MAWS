@@ -35,7 +35,8 @@ export interface SlashWidget {
   component: ComponentType<{ appSessionId: AppSessionId; args: string; close(): void }>;
   // C11 start: a typed `/<name> <args>` whose argument the widget resolves fully is applied through the widget's own
   // control path with no widget shown (the architect's correction of 2026-09-29); resolves false to open it instead.
-  apply?: (appSessionId: AppSessionId, args: string) => Promise<boolean>;
+  // `tooLate` aborts once the editor stopped waiting and opened the widget: nothing may be applied after it.
+  apply?: (appSessionId: AppSessionId, args: string, tooLate: AbortSignal) => Promise<boolean>;
   // C11 end
 }
 

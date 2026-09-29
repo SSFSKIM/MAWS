@@ -4,7 +4,8 @@
 // the widget's words. The widget opens with its argument instead (the answer is false) when the argument is missing,
 // ambiguous or invalid, or when the widget's own rule asks for a step first: `/fast on` shows its lane warning, a
 // gateway model in auto shows its local-lane note, `bypassPermissions` asks before switching, and a session without a
-// ready process has nothing to apply to.
+// ready process has nothing to apply to. The editor waits a short bound for the decision and then opens the widget; its
+// `tooLate` signal says so, and a decision reached after it applies nothing and answers false.
 import { EffortSchema, type Effort } from '@shared/engine/launch-spec';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { PermissionMode } from '@shared/graph/enums';
@@ -19,7 +20,7 @@ import { TYPED } from './copy';
 import { applyFlagSettings, effortsOf, rowNamed, rowOf, setEffort, setModel, type ControlAnswer } from './model';
 import { setPermissionMode } from './PermissionsWidget';
 
-export type TypedApply = (appSessionId: AppSessionId, args: string) => Promise<boolean>;
+export type TypedApply = (appSessionId: AppSessionId, args: string, tooLate?: AbortSignal) => Promise<boolean>;
 
 const ready = (id: AppSessionId) => {
   const status = useSessions.getState().engine.get(id);
@@ -47,18 +48,18 @@ function report(write: Promise<ControlAnswer | { ok: true } | { ok: false; error
   );
 }
 
-const applyModel: TypedApply = async (id, args) => {
+const applyModel: TypedApply = async (id, args, tooLate) => {
   const status = ready(id);
   const models = status && (await catalogue(id));
   const row = models ? rowNamed(models, args) : undefined;
-  if (!status || !row) return false;
+  if (!status || !row || tooLate?.aborted) return false;
   if (isGatewayModel(row.value) && status.permissionMode.effective === 'auto') return false; // the local-lane note first
   report(setModel({ appSessionId: id, model: row.value }), TYPED.model(row.displayName));
   return true;
 };
 
 const EFFORTS: readonly string[] = EffortSchema.options;
-const applyEffort: TypedApply = async (id, args) => {
+const applyEffort: TypedApply = async (id, args, tooLate) => {
   const status = ready(id);
   const word = args.toLowerCase();
   // the terminal's `/effort auto` clears the override (the widget's `Engine default`)
@@ -69,26 +70,28 @@ const applyEffort: TypedApply = async (id, args) => {
     const row = models ? rowOf(models, status.model.requested ?? status.model.resolved) : undefined;
     if (!effortsOf(row).includes(level)) return false; // the model does not admit it: the widget lists what it does
   }
+  if (tooLate?.aborted) return false;
   report(setEffort({ appSessionId: id, effort: level }), TYPED.effort(level));
   return true;
 };
 
-const applyFast: TypedApply = async (id, args) => {
+const applyFast: TypedApply = async (id, args, tooLate) => {
   const status = ready(id);
   if (!status || args.toLowerCase() !== 'off') return false; // `on` shows the lane warning first
   const models = await catalogue(id);
   const row = models ? rowOf(models, status.model.requested ?? status.model.resolved) : undefined;
-  if (row?.supportsFastMode !== true) return false; // the widget says fast mode is for Opus
+  if (row?.supportsFastMode !== true || tooLate?.aborted) return false; // the widget says fast mode is for Opus
   report(applyFlagSettings({ appSessionId: id, settings: { fastMode: false } }), TYPED.fastOff);
   return true;
 };
 
-const applyPermissions: TypedApply = async (id, args) => {
+const applyPermissions: TypedApply = async (id, args, tooLate) => {
   const status = ready(id);
   const option = MODE_OPTIONS.find((o) => o.mode.toLowerCase() === args.toLowerCase());
   if (!status || !option || option.confirm) return false; // bypassPermissions asks first, as the chip does
   const mode: PermissionMode = option.mode;
   if (mode === 'auto' && autoUnavailableReason(await catalogue(id), status.model) !== null) return false; // the segment says why
+  if (tooLate?.aborted) return false;
   report(setPermissionMode({ appSessionId: id, mode }), TYPED.mode(mode));
   return true;
 };

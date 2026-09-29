@@ -102,6 +102,10 @@ export function ipcDrafts(client: MawsBridge, appSessionId: AppSessionId): Draft
   };
 }
 
+// C11 start: how long Enter on a typed `/<widget> <args>` waits for the widget to decide before opening it
+export const TYPED_DECIDE_MS = 300;
+// C11 end
+
 export class EditorController {
   private inputs: ControllerInputs;
   private editor: TiptapEditor | null = null;
@@ -235,8 +239,27 @@ export class EditorController {
       this.setDoc(emptyDoc(), { silently: true, caret: null });
       const args = typed[2] ?? '';
       const open = () => this.view.setWidget({ name: typed[1], args });
-      if (widget.apply && args.trim() !== '') void widget.apply(appSessionId, args.trim()).then((applied) => applied || open(), open);
-      else open();
+      if (!widget.apply || args.trim() === '') {
+        open();
+        return;
+      }
+      // The draft is gone already, so a decision that takes long (a catalogue read, up to its 8 s bound) opens the
+      // widget after TYPED_DECIDE_MS instead of leaving nothing on screen, and `apply` is told it is too late to apply.
+      const tooLate = new AbortController();
+      let shown = false;
+      const openOnce = () => {
+        if (!shown) open();
+        shown = true;
+      };
+      const timer = setTimeout(() => {
+        tooLate.abort();
+        openOnce();
+      }, TYPED_DECIDE_MS);
+      const decided = (applied: boolean) => {
+        clearTimeout(timer);
+        if (!applied) openOnce();
+      };
+      void widget.apply(appSessionId, args.trim(), tooLate.signal).then(decided, () => decided(false));
       return;
     }
     // C11 end
