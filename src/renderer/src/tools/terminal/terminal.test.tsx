@@ -5,7 +5,7 @@ import { act, cleanup, fireEvent, render, screen, within } from '@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
-import type { HostState } from '@shared/ipc/schema';
+import type { HostState, PtyInfo } from '@shared/ipc/schema';
 import { instanceOf, panelHost, registerPanelTool } from '../../panel/host';
 import type { PanelToolContext } from '../../panel/tool';
 import { useLayout } from '../../stores/layout';
@@ -80,14 +80,18 @@ const registry = vi.hoisted(() => {
       foreground: vi.fn(async () => ({ process: 'zsh', busy: false })),
       close: vi.fn(async (id: string): Promise<void> => void id),
       respawn: vi.fn(async () => {}),
-      adopt: vi.fn(async (): Promise<string[]> => []),
+      adopt: vi.fn(async (accept?: (info: PtyInfo) => boolean, onListed?: (adopting: { label: string; id: string; attached: Promise<string | null> }[]) => void): Promise<string[]> => {
+        void accept;
+        onListed?.([]);
+        return [];
+      }),
     },
   };
 });
 
 vi.mock('../../terminal/registry', () => ({ terminals: registry.terminals }));
 
-const { adoptTerminals, openTerminal, resetTerminalAdoption, terminalTool, TERMINAL_TOOL_ID } = await import('./index');
+const { ADOPTION_TIMEOUT_MS, adoptTerminals, openTerminal, resetTerminalAdoption, terminalTool, TERMINAL_TOOL_ID } = await import('./index');
 
 const A = 'A' as AppSessionId;
 const B = 'B' as AppSessionId;
@@ -234,36 +238,61 @@ describe('terminal tool close', () => {
   });
 });
 
-// C8a's ruling (2026-09-29): a restored tab waits for the page's re-adoption, so it reattaches to its running pty.
+// C8a's ruling (2026-09-29): a restored tab waits for the page's re-adoption, so it reattaches to its running pty; the
+// wait is per tab (only a label the host listed waits for its attach) and bounded by ADOPTION_TIMEOUT_MS.
 describe('re-adoption before a tab opens a shell', () => {
   beforeEach(() => resetTerminalAdoption());
-  afterEach(() => resetTerminalAdoption());
+  afterEach(() => {
+    resetTerminalAdoption();
+    vi.useRealTimers();
+  });
+
+  // What the registry's adopt does: once `list` answers, an entry under each accepted pty's label whose attach is under
+  // way; `attach(label)` answers that attach (a pty whose attach failed answers with no terminal).
+  function hostAdoption() {
+    const attaches = new Map<string, (ok: boolean) => void>();
+    let list!: (labels: string[]) => void;
+    registry.terminals.adopt.mockImplementationOnce(
+      (accept = () => true, onListed) =>
+        new Promise<string[]>((resolveAll) => {
+          list = (labels) => {
+            const adopting = labels
+              .filter((label) => accept({ label, appSessionId: A } as PtyInfo))
+              .map((label) => {
+                const id = registry.terminals.open({ appSessionId: A, label, cwd: '/tmp/maws-harness/a' });
+                const attached = new Promise<string | null>((resolve) => attaches.set(label, (ok) => resolve(ok ? id : null)));
+                return { label, id, attached };
+              });
+            registry.terminals.open.mockClear();
+            onListed?.(adopting);
+            void Promise.all(adopting.map(({ attached }) => attached)).then((ids) => resolveAll(ids.filter((id): id is string => id !== null)));
+          };
+        }),
+    );
+    return { list: (labels: string[]) => list(labels), attach:(label: string, ok = true) => attaches.get(label)!(ok) };
+  }
 
   it('opens nothing while the adoption is in flight, then takes the pty re-adopted under the tab’s label', async () => {
-    let answer!: (ids: string[]) => void;
-    registry.terminals.adopt.mockImplementationOnce(() => new Promise((resolve) => (answer = resolve)));
+    const host = hostAdoption();
     const adoption = adoptTerminals();
     const state = newState({ instanceId: 'terminal:restored' });
     expect(state.terminalId).toBeNull();
-    expect(registry.terminals.open).not.toHaveBeenCalled();
-    // What the registry's adopt does for a live pty: an entry under the pty's label.
-    registry.terminals.open({ appSessionId: A, label: 'terminal:restored', cwd: '/tmp/maws-harness/a' });
-    registry.terminals.open.mockClear();
-    answer(['t1']);
-    await adoption;
+    host.list(['terminal:restored']);
+    await Promise.resolve();
+    expect(state.terminalId).toBeNull(); // listed: it waits for the attach
+    host.attach('terminal:restored');
+    await expect(adoption).resolves.toEqual(['t1']);
     await vi.waitFor(() => expect(state.terminalId).toBe('t1'));
     expect(registry.terminals.open).not.toHaveBeenCalled();
   });
 
   it('a tab disposed while the adoption is in flight opens nothing and releases the shell re-adopted under its label', async () => {
-    let answer!: (ids: string[]) => void;
-    registry.terminals.adopt.mockImplementationOnce(() => new Promise((resolve) => (answer = resolve)));
+    const host = hostAdoption();
     const adoption = adoptTerminals();
     const state = newState({ instanceId: 'terminal:gone' });
     terminalTool.dispose(state); // closed (beforeClose saw no terminal), reconciled or unregistered before adoption answered
-    registry.terminals.open({ appSessionId: A, label: 'terminal:gone', cwd: '/tmp/maws-harness/a' }); // what adopt re-created
-    registry.terminals.open.mockClear();
-    answer(['t1']);
+    host.list(['terminal:gone']);
+    host.attach('terminal:gone');
     await adoption;
     await vi.waitFor(() => expect(registry.terminals.close).toHaveBeenCalledWith('t1'));
     expect(registry.terminals.open).not.toHaveBeenCalled();
@@ -271,11 +300,10 @@ describe('re-adoption before a tab opens a shell', () => {
   });
 
   it('opens its own shell once the adoption answers without a pty for it, and after a failed adoption', async () => {
-    let answer!: (ids: string[]) => void;
-    registry.terminals.adopt.mockImplementationOnce(() => new Promise((resolve) => (answer = resolve)));
+    const host = hostAdoption();
     const adoption = adoptTerminals();
     const state = newState({ instanceId: 'terminal:new' });
-    answer([]);
+    host.list([]);
     await adoption;
     await vi.waitFor(() => expect(state.terminalId).toBe('t1'));
     expect(registry.terminals.open).toHaveBeenCalledOnce();
@@ -287,6 +315,56 @@ describe('re-adoption before a tab opens a shell', () => {
     expect(logged).toHaveBeenCalledOnce();
     logged.mockRestore();
     expect(newState({ instanceId: 'terminal:after' }).terminalId).toBe('t2');
+  });
+
+  it('holds only the tab whose label the host listed: a tab with another label opens its shell once the list answers', async () => {
+    const host = hostAdoption();
+    void adoptTerminals();
+    const restored = newState({ instanceId: 'terminal:restored' });
+    const fresh = newState({ instanceId: 'terminal:fresh' }); // a tab opened from "+" while the adoption runs
+    expect(fresh.terminalId).toBeNull(); // before the list answers, any label may be the host's
+    host.list(['terminal:restored']);
+    await vi.waitFor(() => expect(fresh.terminalId).toBe('t2'));
+    expect(registry.terminals.open).toHaveBeenCalledWith({ appSessionId: A, label: 'terminal:fresh', cwd: '/tmp/maws-harness/a' });
+    expect(restored.terminalId).toBeNull(); // its attach is still under way
+    host.attach('terminal:restored');
+    await vi.waitFor(() => expect(restored.terminalId).toBe('t1'));
+  });
+
+  it('bounds an attach that never answers: the stale handle is closed and never taken, and its tab opens a new shell', async () => {
+    expect(ADOPTION_TIMEOUT_MS).toBe(10_000);
+    vi.useFakeTimers();
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const host = hostAdoption();
+    const adoption = adoptTerminals();
+    const state = newState({ instanceId: 'terminal:stuck' });
+    registry.terminals.close.mockImplementationOnce(() => new Promise(() => {})); // even its kill hangs
+    host.list(['terminal:stuck']);
+    await vi.advanceTimersByTimeAsync(ADOPTION_TIMEOUT_MS - 1);
+    expect(state.terminalId).toBeNull();
+    expect(registry.terminals.close).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(registry.terminals.close).toHaveBeenCalledWith('t1');
+    await expect(adoption).resolves.toEqual([]);
+    expect(state.terminalId).toBe('t2'); // a new shell, not the handle still listed under its label
+    expect(registry.terminals.open).toHaveBeenCalledWith({ appSessionId: A, label: 'terminal:stuck', cwd: '/tmp/maws-harness/a' });
+    expect(logged).toHaveBeenCalledOnce();
+    logged.mockRestore();
+  });
+
+  it('bounds a list that never answers: every tab opens a new shell, and a list answering after adopts nothing', async () => {
+    vi.useFakeTimers();
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const host = hostAdoption();
+    const adoption = adoptTerminals();
+    const state = newState({ instanceId: 'terminal:restored' });
+    await vi.advanceTimersByTimeAsync(ADOPTION_TIMEOUT_MS);
+    await expect(adoption).resolves.toEqual([]);
+    expect(state.terminalId).toBe('t1');
+    host.list(['terminal:restored']);
+    expect(registry.terminals.list()).toHaveLength(1); // nothing re-created under the label its new shell took
+    expect(logged).toHaveBeenCalledOnce();
+    logged.mockRestore();
   });
 });
 

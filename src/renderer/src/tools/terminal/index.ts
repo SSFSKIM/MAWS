@@ -7,7 +7,7 @@ import type { PtyInfo } from '@shared/ipc/schema';
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import { panelHost } from '../../panel/host';
 import type { PanelTool, PanelToolInit } from '../../panel/tool';
-import { terminals, type TerminalId } from '../../terminal/registry';
+import { terminals, type Adopting, type TerminalId } from '../../terminal/registry';
 import { sessionDirectory, TerminalIcon, TerminalView } from './TerminalView';
 
 export const TERMINAL_TOOL_ID = 'terminal';
@@ -41,31 +41,93 @@ export interface TerminalTabState {
 const disposed = new WeakSet<TerminalTabState>();
 
 // Re-adoption after a renderer reload (C8a's ruling, 2026-09-29): the page starts it once, before any tab could want a
-// shell, and until it has answered no terminal opens, so a restored tab reattaches to the pty still running under its
-// label (the checkpoint reattach) instead of starting a second shell. The panel host restores tabs when the layout
-// hydrates, which C5 drives, so the order is enforced here rather than by starting adoption first.
+// shell, so a restored tab reattaches to the pty still running under its label (the checkpoint reattach) instead of
+// starting a second shell. The panel host restores tabs when the layout hydrates, which C5 drives, so the order is
+// enforced here rather than by starting adoption first. The gate is per tab and bounded: every tab waits for `pty.list`,
+// then only a tab whose label the host listed waits, for that pty's attach. Either wait that outlasts
+// `ADOPTION_TIMEOUT_MS` falls through to a new shell: a list that has not answered adopts nothing when it does, and a
+// pty whose attach has not answered is closed (its shell ended, so no shell runs with no tab) and never taken by a tab.
+export const ADOPTION_TIMEOUT_MS = 10_000;
 let adoption: Promise<TerminalId[]> | null = null;
-let adoptionSettled = false;
-export function adoptTerminals(accept?: (info: PtyInfo) => boolean): Promise<TerminalId[]> {
-  adoption ??= terminals
-    .adopt(accept)
+let listing: Promise<void> | null = null; // answers when `pty.list` has, or its wait ran out
+let attaching: Map<string, Promise<TerminalId | null>> | null = null; // by label, the attaches still waited for; null while listing
+const abandoned = new Set<TerminalId>(); // re-adopted handles whose attach ran out of time
+const timers = new Set<ReturnType<typeof setTimeout>>();
+let generation = 0; // tests reset the page's adoption; an earlier one's answers are then ignored
+
+function bounded<T>(work: Promise<T>, expired: () => T): Promise<T> {
+  return new Promise<T>((resolve) => {
+    const timer = setTimeout(() => {
+      timers.delete(timer);
+      resolve(expired());
+    }, ADOPTION_TIMEOUT_MS);
+    timers.add(timer);
+    void work.then((value) => {
+      clearTimeout(timer);
+      timers.delete(timer);
+      resolve(value);
+    });
+  });
+}
+
+export function adoptTerminals(accept: (info: PtyInfo) => boolean = () => true): Promise<TerminalId[]> {
+  if (adoption) return adoption;
+  let listExpired = false;
+  let heard!: (adopting: Adopting[]) => void;
+  const listed = new Promise<Adopting[]>((resolve) => (heard = resolve));
+  terminals
+    .adopt((info) => !listExpired && accept(info), heard)
     .catch((error: unknown) => {
       console.error('[terminal] re-adoption failed; tabs open new shells', error);
-      return [];
-    })
-    .finally(() => void (adoptionSettled = true));
+      heard([]);
+    });
+  const expireList = (): Adopting[] => {
+    listExpired = true;
+    console.error(`[terminal] pty.list did not answer within ${ADOPTION_TIMEOUT_MS} ms; tabs open new shells`);
+    return [];
+  };
+  const page = ++generation;
+  const waits = bounded(listed, expireList).then((adopting) => {
+    if (page !== generation) return [];
+    const pending = new Map<string, Promise<TerminalId | null>>();
+    for (const { label, id, attached } of adopting) {
+      const wait = bounded(attached, () => {
+        abandoned.add(id);
+        console.error(`[terminal] pty.attach for ${label} did not answer within ${ADOPTION_TIMEOUT_MS} ms; its tab opens a new shell`);
+        terminals.close(id).catch((error: unknown) => console.error(`[terminal] could not end the stale ${id}`, error));
+        return null;
+      });
+      pending.set(label, wait);
+      void wait.then(() => pending.delete(label));
+    }
+    attaching = pending;
+    return [...pending.values()];
+  });
+  listing = waits.then(() => {});
+  adoption = waits.then((all) => Promise.all(all)).then((ids) => ids.filter((id): id is TerminalId => id !== null));
   return adoption;
 }
 // Tests: forget the page's adoption.
 export function resetTerminalAdoption(): void {
-  adoption = null;
-  adoptionSettled = false;
+  generation++;
+  for (const timer of timers) clearTimeout(timer);
+  timers.clear();
+  abandoned.clear();
+  adoption = listing = attaching = null;
+}
+
+// What a tab under `label` still waits for before it may open a shell: nothing once its pty's attach has answered or
+// run out of time, or when the host listed no pty under its label.
+function adoptionWait(label: string): Promise<unknown> | null {
+  if (!listing) return null;
+  if (!attaching) return listing;
+  return attaching.get(label) ?? null;
 }
 
 // Starts the tab's terminal if it has none: the one the registry re-adopted under this tab's label after a reload, or
 // a new one in `params.cwd`, else the session's directory. A tab with no session yet (X5 allows a pinned tab to be
 // restored while Overview is shown) stays pending; its view asks for a session and calls this again when one is shown.
-// While the page's adoption is in flight the tab also stays pending and is retried when it answers.
+// While the page's adoption may still hand it a pty (`adoptionWait`), the tab also stays pending and is retried after.
 export function ensureTerminal(state: TerminalTabState, shown: { appSessionId: AppSessionId | null; session: SessionRecord | null }): TerminalId | null {
   // A tab disposed while it waited (closed, reconciled or unregistered before the adoption answered) opens nothing, and
   // a shell the adoption re-created under its label is released, so no shell is left running with no tab. A later call
@@ -78,11 +140,12 @@ export function ensureTerminal(state: TerminalTabState, shown: { appSessionId: A
   }
   const current = state.ui.getState().terminalId;
   if (current) return current;
-  if (adoption && !adoptionSettled) {
-    void adoption.then(() => ensureTerminal(state, shown));
+  const wait = adoptionWait(state.instanceId);
+  if (wait) {
+    void wait.then(() => ensureTerminal(state, shown));
     return null;
   }
-  const adopted = terminals.list().find((info) => info.label === state.instanceId);
+  const adopted = terminals.list().find((info) => info.label === state.instanceId && !abandoned.has(info.id));
   const owner = state.owner ?? shown.appSessionId ?? shown.session?.appId ?? null;
   const cwd = state.params.cwd ?? (shown.session ? sessionDirectory(shown.session) : undefined);
   let terminalId: TerminalId | null = adopted?.id ?? null;
