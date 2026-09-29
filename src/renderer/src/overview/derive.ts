@@ -101,11 +101,18 @@ export function cardFooter(digest: SessionDigest | null): string[] {
 
 export type SidebarSort = 'priority' | 'recency';
 
-const recency = (record: SessionRecord, digest: SessionDigest | undefined) =>
-  Math.max(time(digest?.turnStartedAt), time(digest?.lastTurnEndedAt), time(record.updatedAt));
+// A session's last activity: its latest turn start or turn end (C4 seeds a discovered session's turn end with its
+// transcript's last record), else its record's update. The update is when the index last wrote the record, discovery
+// included, so it never outranks a turn time.
+export function lastActivity(record: SessionRecord, digest: SessionDigest | null | undefined): number {
+  const turn = Math.max(time(digest?.turnStartedAt), time(digest?.lastTurnEndedAt));
+  return turn === Number.NEGATIVE_INFINITY ? time(record.updatedAt) : turn;
+}
+
+const recency = (record: SessionRecord, digest: SessionDigest | undefined) => lastActivity(record, digest);
 
 // Within a project. `priority`: sessions with a Needs-you row (in row order), then unread by last turn end, then working
-// by turn start, then the rest by recency. `recency`: the latest of turn start, turn end and update. Ties by title.
+// by turn start, then the rest by recency. `recency`: `lastActivity`. Ties by title.
 export function sortSessions(
   sessions: SessionRecord[],
   sort: SidebarSort,

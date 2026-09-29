@@ -93,10 +93,12 @@ describe('sidebar sort', () => {
     ]);
   });
 
-  it('recency: the latest of turn start, turn end and update, ties by title', () => {
-    // needs, unread and working all last moved at T0 (their records' updatedAt); idle-new at 09:30; idle-old at 02:00.
+  it('recency: the latest turn start or turn end, the record update only for a session with neither; ties by title', () => {
+    // A record's updatedAt is when the index last wrote it (discovery included), so it stands in for activity only when
+    // the digest has no turn time: needs at T0 and idle-new at 09:30 (updatedAt), working 03:00, idle-old 02:00, unread
+    // 01:00 (their turns).
     expect(sortSessions([...recs.values()], 'recency', { digests: ds, rows: waiting }).map((r) => r.appId)).toEqual([
-      'needs', 'unread', 'working', 'idle-new', 'idle-old',
+      'needs', 'idle-new', 'working', 'idle-old', 'unread',
     ]);
   });
 });

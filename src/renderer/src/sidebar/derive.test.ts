@@ -109,6 +109,9 @@ describe('sidebar row text', () => {
     expect(sessionAge(r, digest('r', { phase: 'working', turnStartedAt: '2026-09-28T08:00:00Z' }), now)).toBe('now');
     expect(sessionAge(r, digest('r', { phase: 'idle', lastTurnEndedAt: '2026-09-28T10:22:00Z' }), now)).toBe('8m');
     expect(sessionAge(r, null, now)).toBe('1h');
+    // A discovered session: the index wrote the record just now, its transcript last moved two days ago (C4's seed).
+    const discovered = record('d', { updatedAt: '2026-09-28T10:29:30Z' });
+    expect(sessionAge(discovered, digest('d', { phase: 'exited', lastTurnEndedAt: '2026-09-26T10:00:00Z' }), now)).toBe('2d');
     expect(needsYouAge(item('r', 'permission', '2026-09-28T10:26:00Z'), now)).toBe('4m');
   });
 });

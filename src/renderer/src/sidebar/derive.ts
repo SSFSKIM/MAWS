@@ -6,7 +6,7 @@ import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { ProjectRecord, SessionDigest } from '@shared/ipc/schema';
 import { holderLine, waitingItem, type NeedsYouRow } from '../attention/derive';
-import { sortSessions, type SidebarSort } from '../overview/derive';
+import { lastActivity, sortSessions, type SidebarSort } from '../overview/derive';
 
 // A project renders at most this many sessions before "Show N more" (residue *Sidebar scale*: no virtualisation).
 export const PROJECT_PAGE = 20;
@@ -116,12 +116,10 @@ export function formatAge(ms: number): string {
   return `${Math.floor(ms / WEEK)}w`;
 }
 
-const time = (iso: string | null | undefined) => (iso ? Date.parse(iso) : Number.NEGATIVE_INFINITY);
-
-// A working session is "now"; otherwise the age of its latest turn start, turn end or record update.
+// A working session is "now"; otherwise the age of its last activity.
 export function sessionAge(record: SessionRecord, digest: SessionDigest | null | undefined, now: number): string {
   if (isWorking(digest ?? undefined)) return 'now';
-  return formatAge(now - Math.max(time(digest?.turnStartedAt), time(digest?.lastTurnEndedAt), time(record.updatedAt)));
+  return formatAge(now - lastActivity(record, digest));
 }
 
 // A Needs-you row shows how long its oldest item has waited.
