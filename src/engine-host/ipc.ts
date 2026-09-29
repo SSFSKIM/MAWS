@@ -30,6 +30,9 @@ import type { EngineSession } from './session';
 import { SessionStream } from './session-stream';
 import { FileSessionStateStore } from './store/file-session-state-store';
 import { MAX_LINE_CHARS, spawnEngine, type EngineTransport } from './transport';
+// C4 start
+import type { SessionEvent } from '@shared/graph/events';
+// C4 end
 
 export type DeadlineShape = 'immediate' | 'bounded' | 'operation';
 type C3Command = (typeof C3_SESSION_COMMANDS)[number] | (typeof C3_ENGINE_COMMANDS)[number];
@@ -68,6 +71,10 @@ export interface EngineIpcDeps {
   captureEnv?: () => Promise<Record<string, string>>;
   spawn?: (plan: LaunchPlan) => EngineTransport;
   log?: (message: string) => void;
+  // C4 start: the history of an app session with no stream in this host, from its transcript on disk (C4's
+  // FsService.eventsSnapshot, which starts following it); absent, such a session is unknown here as before.
+  diskEvents?: (appSessionId: AppSessionId) => Promise<{ events: SessionEvent[]; complete: boolean }>;
+  // C4 end
 }
 
 export interface EngineIpc {
@@ -151,7 +158,13 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
   // -- lifecycle and state -------------------------------------------------------------------------------------------
   handle('session.launch', async ({ spec }) => launch(spec as Parameters<typeof launch>[0]));
   handle('session.status', async ({ appSessionId }) => sessionOf(appSessionId).status());
-  handle('session.events', async ({ appSessionId, afterSeq, limit }) => streamOf(appSessionId).snapshot(afterSeq, limit));
+  handle('session.events', async ({ appSessionId, afterSeq, limit }) => {
+    // C4 start: no stream here (not launched in this run, or archived and released): the transcript's history, whose
+    // events carry no seq, so `afterSeq` and `limit` select nothing and `lastSeq` is 0
+    if (deps.diskEvents && !streams.has(appSessionId as AppSessionId)) return { ...(await deps.diskEvents(appSessionId as AppSessionId)), lastSeq: 0 };
+    // C4 end
+    return streamOf(appSessionId).snapshot(afterSeq, limit);
+  });
   handle('session.stop', async ({ appSessionId, reason }) => {
     if (reason === 'archive') assertSafeAppSessionId(appSessionId); // archive deletes a directory named after it (M5 review)
     const session = sessionOf(appSessionId);

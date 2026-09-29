@@ -5,6 +5,7 @@ import type { HostState, ThemeSetting } from '@shared/ipc/schema';
 import { useEcho, type EchoState } from '../stores/echo';
 import { useHosts } from '../stores/hosts';
 import { useSettings } from '../stores/settings';
+import { StoreDiagnostics } from './StoreDiagnostics';
 
 const THEMES: { value: ThemeSetting; label: string }[] = [
   { value: 'light', label: 'Light' },
@@ -66,6 +67,9 @@ export function Diagnostics() {
           {describeEcho(echo)}
         </output>
       </div>
+      {/* C4: the engine's store as the filesystem state service sees it, on a row of its own */}
+      <StoreDiagnostics />
+      {/* end C4 */}
     </section>
   );
 }

@@ -201,6 +201,8 @@ export const SessionEventSchema = z.discriminatedUnion('kind', [
     trigger: z.enum(['process_exit', 'host_restart', 'transport_error', 'user']), reason: nullableString(),
   }),
   event('notice.posted', { level: z.enum(['info', 'notice', 'suggestion', 'warning']), text: z.string(), key: nullableString() }),
+  // reason 'unknown' (C4): also synthesised by the disk backfill, once per follow, for a transcript no live process holds
+  // whose last turn never ended (SDK entrypoints write no turn_duration): the process is gone and nobody saw it go.
   event('process.exited', { code: z.number().nullable(), signal: nullableString(), reason: z.enum(['quit', 'stop', 'archive', 'crash', 'unknown']), lostAttentionCount: z.number() }),
   event('frame.unknown', { frameType: z.string(), subtype: nullableString() }),
 ]);

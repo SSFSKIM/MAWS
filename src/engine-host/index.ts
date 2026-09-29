@@ -7,6 +7,9 @@ import { join } from 'node:path';
 import { registerEngineIpc } from './ipc';
 import { JOURNAL_KEEP_PER_SESSION, JOURNAL_MAX_AGE_DAYS, pruneJournals } from './journal';
 // C3 end
+// C4 start
+import { registerFs } from './fs/register';
+// C4 end
 
 const HOST_VERSION = __MAWS_VERSION__;
 
@@ -22,8 +25,12 @@ void pruneJournals(join(userData, 'engine-host', 'journal'), { keepPerSession: J
 
 runHost(HOST_VERSION, (on, emit) => {
   on('engine.ping', async () => hostPing(HOST_VERSION));
+  // C4 start: the filesystem state service (fs.*) over the engine's store, read-only; C3's `session.events` answers an
+  // app session with no process here from it (`diskEvents` below).
+  const fs = registerFs(on, emit);
+  // C4 end
   // C3 start
-  const { table } = registerEngineIpc(on, emit, { userData, replayEnabled: process.env.MAWS_ENGINE_REPLAY === '1', appVersion: HOST_VERSION });
+  const { table } = registerEngineIpc(on, emit, { userData, replayEnabled: process.env.MAWS_ENGINE_REPLAY === '1', appVersion: HOST_VERSION, diskEvents: (id) => fs.eventsSnapshot(id, null) /* C4 */ });
   table.startSampling();
   // C3 end
 });

@@ -4,7 +4,7 @@
 // handler registered here for `main` or to the host dispatcher for a utility process. Every outcome is a
 // `CommandResult`; nothing is thrown across the boundary.
 import { BrowserWindow, ipcMain, type IpcMainInvokeEvent } from 'electron';
-import { ipcError } from '@shared/ipc/errors';
+import { ipcError, type IpcError } from '@shared/ipc/errors';
 import {
   commandChannel,
   commands,
@@ -28,6 +28,15 @@ export interface RouterOptions {
   appUrl: string;
   dispatchToHost?: HostDispatch;
 }
+
+// C4: a main handler that fails with a specific IpcError (session.replay.start relaying the host dispatch's `timeout` or
+// `host_unavailable`) throws this; any other throw is `internal`.
+export class CommandFailure extends Error {
+  constructor(readonly error: IpcError) {
+    super(error.message);
+  }
+}
+// end C4
 
 const mainHandlers = new Map<CommandName, (input: unknown) => unknown>();
 
@@ -81,6 +90,7 @@ async function route(
   try {
     return await answer();
   } catch (error) {
+    if (error instanceof CommandFailure) return { ok: false, error: error.error }; // C4
     console.error(`[ipc] ${name} failed`, error);
     return { ok: false, error: ipcError('internal', error instanceof Error ? error.message : String(error)) };
   }

@@ -62,6 +62,58 @@ describe('ipc schema validates both directions', () => {
       ); // C3: a subset, as above
     });
 
+    it('carries the C4 fs.* entries, every command owned by the engine host', () => {
+      expect(Object.keys(fs.commands).sort()).toEqual([
+        'fs.agentEvents', 'fs.bind', 'fs.holders', 'fs.readSpill', 'fs.scan', 'fs.state', 'fs.subagents', 'fs.tasks', 'fs.unbind', 'fs.unfollow', 'fs.workflows',
+      ]);
+      for (const spec of Object.values(fs.commands)) expect(spec.owner).toBe('engine-host');
+      expect(Object.keys(fs.events).sort()).toEqual([
+        'fs.followState', 'fs.holderChanged', 'fs.scanProgress', 'fs.sessionChanged', 'fs.sessionRemoved', 'fs.subagentsChanged', 'fs.tasksChanged', 'fs.workflowChanged',
+      ]);
+    });
+
+    // C4 (M4): the record side of the index, owned by main.
+    it('carries the C4 session.* record, project and draft entries, every command owned by main', () => {
+      const c4 = ['session.drafts.get', 'session.drafts.set', 'session.get', 'session.list', 'session.projects.add', 'session.projects.list', 'session.projects.remove', 'session.projects.update', 'session.update'];
+      for (const name of c4) expect(commands[name as keyof typeof commands]?.owner, name).toBe('main');
+      for (const name of ['session.changed', 'session.removed', 'session.projects.changed']) expect(Object.hasOwn(events, name), name).toBe(true);
+      expect(validateCommandInput('session.update', { appSessionId: 'a', patch: {} }).ok).toBe(false); // at least one field
+      expect(validateCommandInput('session.update', { appSessionId: 'a', patch: { title: { text: 'x', source: 'generated' } } }).ok).toBe(false); // MAWS never sets generated
+      expect(validateCommandInput('session.update', { appSessionId: 'a', patch: { title: null } }).ok).toBe(true);
+    });
+
+    // C4 (M5): replay, started in main and run in the engine host.
+    it('carries the C4 session.replay.* entries with their owners and the speed and source bounds', () => {
+      expect(commands['session.replay.start'].owner).toBe('main');
+      expect(commands['session.replay.fixtures'].owner).toBe('main');
+      expect(commands['session.replay.launch'].owner).toBe('engine-host');
+      expect(commands['session.replay.control'].owner).toBe('engine-host');
+      expect(Object.hasOwn(events, 'session.replay.progress')).toBe(true);
+      const start = (source: unknown, speed: unknown) => validateCommandInput('session.replay.start', { source, speed }).ok;
+      expect(start({ kind: 'journal', path: '/f/workflow.jsonl' }, 5)).toBe(true);
+      expect(start({ kind: 'transcript', path: '/f/t.jsonl' }, 'instant')).toBe(true);
+      expect(start({ kind: 'journal', path: '/f/workflow.jsonl' }, 0.25)).toBe(true);
+      expect(start({ kind: 'journal', path: '/f/workflow.jsonl' }, 0.2)).toBe(false);
+      expect(start({ kind: 'journal', path: '/f/workflow.jsonl' }, 51)).toBe(false);
+      expect(start({ kind: 'journal', path: 'relative.jsonl' }, 1)).toBe(false);
+      expect(start({ kind: 'wire', path: '/f/x.jsonl' }, 1)).toBe(false);
+      expect(validateCommandInput('session.replay.control', { appSessionId: 'a', speed: 'instant' }).ok).toBe(true);
+      expect(validateCommandInput('session.replay.control', { appSessionId: 'a', action: 'rewind' }).ok).toBe(false);
+    });
+
+    // C4 (M6): the read-only git service, owned by main.
+    it('carries the C4 git.* entries, every command owned by main, with the diff and log bounds', () => {
+      expect(Object.keys(git.commands).sort()).toEqual(['git.branches', 'git.diff', 'git.log', 'git.status', 'git.unwatch', 'git.watch']);
+      for (const spec of Object.values(git.commands)) expect(spec.owner).toBe('main');
+      expect(Object.keys(git.events)).toEqual(['git.changed']);
+      expect(validateCommandInput('git.diff', { directory: '/r', scope: 'all', base: 'main', path: 'a.ts', context: 20 }).ok).toBe(true);
+      expect(validateCommandInput('git.diff', { directory: '/r', scope: 'everything' }).ok).toBe(false);
+      expect(validateCommandInput('git.diff', { directory: '/r', scope: 'all', context: 21 }).ok).toBe(false);
+      expect(validateCommandInput('git.log', { directory: '/r', limit: 0 }).ok).toBe(false);
+      expect(validateCommandInput('git.log', { directory: '/r', limit: 500 }).ok).toBe(true);
+    });
+    // end C4
+
     it('names channels by kind so a command and an event of the same name never share one', () => {
       expect(commandChannel('engine.hostState')).toBe('maws:cmd:engine.hostState');
       expect(eventChannel('engine.hostState')).toBe('maws:evt:engine.hostState');

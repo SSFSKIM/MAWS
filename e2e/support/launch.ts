@@ -1,8 +1,9 @@
 // Launches MAWS for an end-to-end test: the built app (`out/main/index.js` under the repo's Electron) by default, or
 // the executable named by MAWS_E2E_EXECUTABLE (the packaged `MAWS.app/Contents/MacOS/MAWS`). Every launch gets
-// MAWS_E2E=1 and a fresh `userData` under the OS temp directory, so nothing depends on or touches a real profile.
+// MAWS_E2E=1, a fresh `userData` under the OS temp directory and an empty engine store (`CLAUDE_CONFIG_DIR`), so nothing
+// depends on or touches a real profile.
 // Later children's end-to-end tests start from here, through the `maws` fixture of `test`.
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { _electron, test as base, type ElectronApplication, type Page } from '@playwright/test';
@@ -40,6 +41,11 @@ export async function launchMaws(opts: MawsLaunchOptions = {}): Promise<MawsLaun
   delete env.ELECTRON_RUN_AS_NODE;
   env.MAWS_E2E = '1';
   env.MAWS_USER_DATA = userData;
+  // C4 start: an empty engine store (C4 reads the config home the engine would), so the run never reads the owner's
+  // ~/.claude; a test's `env` may still name another.
+  env.CLAUDE_CONFIG_DIR = join(userData, 'claude-config');
+  mkdirSync(env.CLAUDE_CONFIG_DIR);
+  // C4 end
   Object.assign(env, opts.env); // C3
 
   let app: ElectronApplication | null = null;

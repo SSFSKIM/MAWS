@@ -1,0 +1,37 @@
+// The engine host's registration of C4's filesystem state service (C4 execution document, Architecture): the `fs.*`
+// commands on C1's host runtime, the service started at load. The config home is read from this process's own
+// environment exactly as the engine reads it (`CLAUDE_CONFIG_DIR`, else `~/.claude`); C1's supervisor forks the host
+// with main's environment. When C3's login-shell capture lands in this host, the service reads the captured
+// environment through the same accessor the launch contract uses.
+import type { AgentId, AppSessionId } from '@shared/graph/ids';
+import type { HostEmit, HostOn } from '@shared/host/runtime';
+import type { FsHoldersQuery, FsScanKnown } from '@shared/ipc/schema/fs';
+import { resolveStorePaths } from './paths';
+import { ReplayHost } from './replay/host';
+import { engineNormalizer } from './replay/normalizer';
+import { FsService } from './service';
+
+export function registerFs(on: HostOn, emit: HostEmit, env: NodeJS.ProcessEnv = process.env): FsService {
+  const service = new FsService({ paths: resolveStorePaths(env), emit });
+  // The runtime hands a handler the schema's parsed value, typed as its input; the ids in it passed the branded
+  // id schemas, which is what the brands stand for.
+  on('fs.state', async () => service.state());
+  on('fs.scan', async ({ known }) => service.scan((known ?? []) as FsScanKnown[]));
+  on('fs.bind', async ({ bindings }) => service.bind(bindings as Pick<FsScanKnown, 'sessionId' | 'appSessionId'>[]));
+  on('fs.unbind', async ({ appSessionId }) => service.unbind(appSessionId as AppSessionId));
+  on('fs.holders', async (query) => service.holdersNow(query as FsHoldersQuery));
+  on('fs.unfollow', async ({ appSessionId, agentId }) => service.unfollow(appSessionId as AppSessionId, agentId as AgentId | null));
+  on('fs.subagents', async ({ appSessionId }) => service.subagents(appSessionId as AppSessionId));
+  on('fs.agentEvents', async ({ appSessionId, agentId }) => service.agentEvents(appSessionId as AppSessionId, agentId as AgentId));
+  on('fs.workflows', async ({ appSessionId }) => service.workflows(appSessionId as AppSessionId));
+  on('fs.tasks', async ({ listId }) => service.tasks(listId));
+  on('fs.readSpill', async (input) => service.readSpill(input));
+  // Replay (M5): launched and controlled here, bound in the service's table and served by its snapshot seam. Journal
+  // replay goes through C3's `Normalizer`, one per run.
+  const replays = new ReplayHost({ emit, bindings: service, normalizer: engineNormalizer });
+  service.serveReplays(replays);
+  on('session.replay.launch', async (input) => replays.launch(input as Parameters<ReplayHost['launch']>[0]));
+  on('session.replay.control', async (input) => replays.control(input as Parameters<ReplayHost['control']>[0]));
+  service.start().catch((error: unknown) => console.error('[fs] the filesystem state service failed to start:', error instanceof Error ? error.message : error));
+  return service;
+}

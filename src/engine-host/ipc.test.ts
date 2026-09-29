@@ -380,3 +380,36 @@ describe('engine host X2 surface', () => {
     expect(await stopping).toEqual({ stopped: 1, forced: 0 });
   });
 });
+
+// C4 start: the one seam into C4's filesystem state service (C4 execution document, Architecture and Cross-child
+// reconciliation): `session.events` for an app session with no stream in this host (never launched in this run, or
+// archived and released) answers from disk through FsService.eventsSnapshot, `lastSeq: 0` (disk events carry no seq).
+describe('session.events for an app session with no process here answers from disk (C4)', () => {
+  const diskEvent = (text: string): SessionEvent => ({
+    id: `disk:${text}` as never, sessionId: 'S' as never, at: '2026-09-28T10:00:00.000Z', seq: null, agentId: null, parentToolUseId: null,
+    kind: 'notice.posted', level: 'info', text, key: null,
+  });
+
+  it('delegates with lastSeq 0 and the snapshot\'s completeness, passes a refusal through, and leaves a live stream to C3', async () => {
+    const diskEvents = vi.fn(async (appSessionId: AppSessionId) => {
+      if (appSessionId === 'app-unbound') throw new Error(`unknown app session: ${appSessionId}`);
+      return { events: [diskEvent(appSessionId)], complete: appSessionId !== 'app-backfilling' };
+    });
+    const host = engineHost({ diskEvents });
+    expect(await host.call('session.events', { appSessionId: 'app-disk' as AppSessionId, afterSeq: 3, limit: 10 })).toEqual({ events: [diskEvent('app-disk')], lastSeq: 0, complete: true });
+    expect(await host.call('session.events', { appSessionId: 'app-backfilling' as AppSessionId, afterSeq: null, limit: null })).toMatchObject({ lastSeq: 0, complete: false });
+    await expect(host.call('session.events', { appSessionId: 'app-unbound' as AppSessionId, afterSeq: null, limit: null })).rejects.toThrow('unknown app session: app-unbound');
+
+    const id = 'app-live-c4';
+    await host.call('session.launch', { spec: replaySpec(id, 'spikes/protocol-probe/fixtures/init.jsonl') });
+    await until(() => host.statuses(id).some((s) => s.process === 'ready'), 'ready');
+    diskEvents.mockClear();
+    const live = await host.call('session.events', { appSessionId: id as AppSessionId, afterSeq: null, limit: null });
+    expect(live.events).toEqual(host.events(id));
+    expect(diskEvents).not.toHaveBeenCalled();
+    // Archived and released, the session has no stream here any more: its history is the transcript's.
+    await host.call('session.stop', { appSessionId: id as AppSessionId, reason: 'archive' });
+    expect(await host.call('session.events', { appSessionId: id as AppSessionId, afterSeq: null, limit: null })).toEqual({ events: [diskEvent(id)], lastSeq: 0, complete: true });
+  });
+});
+// C4 end
