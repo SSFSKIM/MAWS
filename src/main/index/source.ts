@@ -9,43 +9,17 @@
 import type { AppSessionId, ProjectId, SessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { CommandInput, CommandName, CommandOutput, EventName, EventPayload } from '@shared/ipc/schema';
-import type { ProjectRecord } from '@shared/ipc/schema/session';
 import type { Holder, TranscriptSummary } from '@shared/wire/store';
 import type { HostSupervisor } from '../hosts/supervisor';
+import type { ReadModelWriter as ShellReadModelWriter, SessionSource } from '../sessions/read-model';
 import { toSessionRecordPatch } from '@shared/engine/status';
 import type { Index } from './index';
 import type { BindingChange, ChangeCause } from './sessions';
 
-// carried from C5 until rebase ----------------------------------------------------------------------------------------
-// C5's read-model port (C5 execution document, "Main modules", `src/main/sessions/read-model.ts`) and digest shape
-// (Interfaces, `SessionDigestSchema`), as far as this source uses them: C5's `ReadModelWriter` also folds events,
-// statuses and attention, which C4 never calls, so the real writer is a superset of this one. Dropped at rebase.
-export const SESSION_PHASES = ['starting', 'working', 'waiting', 'idle', 'exited', 'failed', 'foreign'] as const;
-export interface SessionDigest {
-  appSessionId: AppSessionId;
-  phase: (typeof SESSION_PHASES)[number];
-  activity: string | null;
-  lastAssistantLine: string | null;
-  turnStartedAt: string | null;
-  lastTurnEndedAt: string | null;
-  context: { percent: number; totalTokens: number; maxTokens: number; autoCompactThreshold: number | null } | null;
-  cost: { totalUsd: number; sinceSeenUsd: number } | null;
-  childAgents: { active: number; done: number };
-  pendingRequests: number;
-  revision: number;
-}
-export interface ReadModelWriter {
-  observeRecord(record: SessionRecord): void;
-  observeRemoved(appSessionId: AppSessionId): void;
-  observeProject(project: ProjectRecord): void;
-  observeProjectRemoved(id: ProjectId): void;
-  setDigest(digest: Omit<SessionDigest, 'revision'>): void;
-}
-export interface SessionSource {
-  start(writer: ReadModelWriter): () => void;
-  onSetVisible?(appSessionId: AppSessionId, visible: boolean): void;
-}
-// end carried from C5 --------------------------------------------------------------------------------------------------
+// C5's read-model port (C5 execution document, "Main modules"), as far as this source writes through it: records,
+// projects and the seed digest of a session with no live fold. The shell's writer also folds event batches, statuses
+// and attention, which main feeds it from the host directly (src/main/sessions/index.ts).
+export type ReadModelWriter = Pick<ShellReadModelWriter, 'observeRecord' | 'observeRemoved' | 'observeProject' | 'observeProjectRemoved' | 'setDigest'>;
 
 export type SourceHost = Pick<HostSupervisor, 'dispatch' | 'onEvent' | 'onState' | 'snapshot'>;
 

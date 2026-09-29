@@ -14,7 +14,7 @@ import { Index } from './index/index';
 import { registerIndexHandlers } from './index/register';
 import { registerReplayHandlers } from './index/replay';
 import { appRoot, seedReplayFixtures } from './index/replay-fixtures';
-import { IndexSessionSource, type ReadModelWriter } from './index/source';
+import { IndexSessionSource } from './index/source';
 import { registerGitHandlers } from './git/register';
 import { GitService } from './git/service';
 // C4 end
@@ -52,12 +52,11 @@ app.whenReady().then(() => {
   // C3 end
 
   // C4 start: the index (<userData>/index.sqlite) answers the record side of session.*, and its session source folds the
-  // engine host's store events into it once the host is ready. Until C5's read model registers the source, nothing
-  // main-side reads what it writes, so its writer drops every observation.
+  // engine host's store events into it once the host is ready. C5's read model starts the source (its block below:
+  // SessionReadModel.register, which refuses it in launch mode scenario) and stops it at will-quit.
   const index = new Index(join(app.getPath('userData'), 'index.sqlite'));
   registerIndexHandlers(index);
-  const noReadModel: ReadModelWriter = { observeRecord() {}, observeRemoved() {}, observeProject() {}, observeProjectRemoved() {}, setDigest() {} };
-  const stopSource = new IndexSessionSource(index, hosts, { emit }).start(noReadModel);
+  const indexSource = new IndexSessionSource(index, hosts, { emit });
   // C3's attention service, as C3 started it, with `Index.attention` as its store (C3's file store only when this app
   // cannot read the index); an archive the index records retires the session's attention.
   const attention = startIndexAttention(index, {
@@ -78,7 +77,6 @@ app.whenReady().then(() => {
     git.dispose();
     replays.dispose();
     attention.stop();
-    stopSource();
     index.close();
   });
   // C4 end
@@ -89,7 +87,7 @@ app.whenReady().then(() => {
   registerOpenExternal();
   // A relative scenario path is the repository's: the working directory of `pnpm dev`, `pnpm dev:stub` and the smoke's
   // launch alike (`app.getAppPath()` is `out/main` when the built app is launched by file, as the smoke does).
-  const sessions = startSessions({ env: process.env, packaged: app.isPackaged, appRoot: process.cwd(), hosts });
+  const sessions = startSessions({ env: process.env, packaged: app.isPackaged, appRoot: process.cwd(), hosts, indexSource });
   app.on('will-quit', () => {
     layout.flush();
     sessions.stop();

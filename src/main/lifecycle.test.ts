@@ -55,7 +55,10 @@ vi.mock('./git/register', () => ({ registerGitHandlers: () => void (git.register
 // C5 start: the layout store, the external-link command and the read side
 vi.mock('./layout/store', () => ({ LayoutFileStore: class { flush() {} get() { return null; } set() {} }, registerLayoutHandlers: vi.fn() }));
 vi.mock('./open-external', () => ({ registerOpenExternal: vi.fn() }));
-vi.mock('./sessions', () => ({ startSessions: () => ({ stop: vi.fn() }) }));
+// The read model starts C4's index source and stops it with the sessions, at will-quit.
+vi.mock('./sessions', () => ({
+  startSessions: ({ indexSource }: { indexSource: { start(writer: unknown): () => void } }) => ({ model: {}, stop: indexSource.start({}) }),
+}));
 vi.mock('./menu', () => ({ startMenu: vi.fn(), registerMenuHandlers: vi.fn() }));
 vi.mock('./window-state', () => ({ restoreWindowState: vi.fn(() => null), trackWindowState: vi.fn() }));
 vi.mock('./attention', () => ({ startAttention: vi.fn() }));
