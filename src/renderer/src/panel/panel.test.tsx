@@ -71,6 +71,19 @@ describe('panel tab strip and plus menu', () => {
     expect(pinIds()).toEqual(['terminal:pin00000', id]);
   });
 
+  it('on the Overview, the home glyph clears the pin selection and shows the summary', async () => {
+    const user = userEvent.setup();
+    register(probeTool('terminal', { title: 'Terminal' }).tool);
+    useLayout.setState({ main: LAYOUT_DEFAULTS.main, panelPinned: [ref('terminal:pin00000', true)] });
+    render(<TestHost />);
+    await user.click(screen.getByRole('tab', { name: 'Terminal' }));
+    expect(useLayout.getState().panelActiveNoSession).toBe('terminal:pin00000');
+    await user.click(screen.getByRole('button', { name: 'Session overview' }));
+    expect(useLayout.getState().panelActiveNoSession).toBeNull();
+    expect(screen.getByRole('tabpanel').textContent).toContain('Tools stay with this session.');
+    expect(pinIds()).toEqual(['terminal:pin00000']);
+  });
+
   it('a tab click selects it and the home glyph shows the summary without closing tabs', async () => {
     const user = userEvent.setup();
     register(probeTool('t', { title: 'Tee' }).tool);

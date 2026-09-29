@@ -76,6 +76,15 @@ describe('layout store actions', () => {
     expect(store.getState().panelBySession.get(A)?.tabs).toEqual([{ id: 't1', toolId: 'files', pinned: false }]);
   });
 
+  it('clears the no-session selection when setPanelTabs(null, …) asks for none (the panel home glyph on the Overview)', () => {
+    const store = createLayoutStore();
+    const pin = { id: 't1', toolId: 'files', pinned: true };
+    store.getState().setPanelTabs(null, { tabs: [pin], activeTabId: 't1' });
+    expect(store.getState().panelActiveNoSession).toBe('t1');
+    store.getState().setPanelTabs(null, { tabs: [pin], activeTabId: null });
+    expect(store.getState().panelActiveNoSession).toBeNull();
+  });
+
   it('patches the regions', () => {
     const store = createLayoutStore();
     store.getState().setSidebar({ width: 240 });
