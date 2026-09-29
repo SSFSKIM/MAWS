@@ -21,8 +21,15 @@ import { resetCatalogStore } from '../stores/catalog';
 import { ipcSource, useTranscriptStore, type Row } from '../transcript';
 import { builder } from '../transcript/model/test-events';
 import { Composer } from './Composer';
+import { newestUserUuid } from './edit-prefill';
 import { resetDockedCards } from './docked/registry';
 import { editAndResubmitRow, registerResubmitProvider, setRewindWindow } from './resubmit-seam';
+
+// The newest-message read passes through, counted: the composer reads it only in edit mode.
+vi.mock('./edit-prefill', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./edit-prefill')>();
+  return { ...actual, newestUserUuid: vi.fn(actual.newestUserUuid) };
+});
 
 const A = 'app-a' as AppSessionId;
 const B = 'app-b' as AppSessionId;
@@ -121,6 +128,17 @@ async function confirmRewind() {
 }
 
 describe('edit-and-resubmit in the composer', () => {
+  it('reads the newest message of the transcript only in edit mode', async () => {
+    mount();
+    await waitFor(() => expect(editor()).toBeTruthy());
+    const later = builder('2026-09-28T11:00:00.000Z');
+    later.turn('u-3', 'a later prompt');
+    vi.mocked(newestUserUuid).mockClear();
+    liveEvent(later.events.map((e, i) => ({ ...e, id: `newest-${i}` }) as SessionEvent));
+    await waitFor(() => expect(useTranscriptStore.getState().rows(A).some((r) => r.kind === 'user' && r.messageUuid === 'u-3')).toBe(true));
+    expect(newestUserUuid).not.toHaveBeenCalled();
+  });
+
   it("C6's Edit prefills the focused pane's session with the row's text and the newest message as the seen cursor; another session's row does nothing", async () => {
     mount();
     await editFirst();

@@ -167,7 +167,7 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
   const alt = useAltHeld();
   const editing = useComposerStore((s) => editingOf(s, appSessionId));
   const resubmit = useComposerStore((s) => resubmitRecordOf(s, appSessionId));
-  const newest = useTranscriptStore((s) => newestUserUuid(s.entries[appSessionId]?.rows ?? []));
+  const newest = useTranscriptStore((s) => (editing ? newestUserUuid(s.entries[appSessionId]?.rows ?? []) : null)); // the reconfirm's only reader
   const restored = useComposerStore((s) => s.restoredEdits.has(appSessionId));
   // Whether the hydrated transcript still holds the edited message; null until it can tell (not attached, hydrating, or
   // empty: a transcript the source could not fill says nothing about a rewind, whose own boundary row would be there).
