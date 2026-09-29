@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
-import { chmod, mkdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, SessionId } from '@shared/graph/ids';
@@ -8,7 +8,7 @@ import type { EventName, EventPayload } from '@shared/ipc/schema';
 import { validateEventPayload } from '@shared/ipc/validate';
 import { StoreFixture } from '../../../test/support/store-fixture';
 import { Discovery, type ListedTranscript } from './discovery';
-import { FsService } from './service';
+import { FsService, START_SCAN_FALLBACK_MS } from './service';
 import { DEBOUNCE_MS, SETTLE_MS, type WatchFn } from './watcher';
 
 const S1 = '11111111-1111-4111-8111-111111111111' as SessionId;
@@ -42,7 +42,7 @@ describe('filesystem state service: discovery, sidecars and holders', () => {
   });
 
   // Every payload is checked against its X2 schema, as the host runtime would before posting it.
-  const start = async (watch?: WatchFn) => {
+  const start = async (watch?: WatchFn, startScanFallbackMs?: number) => {
     service = new FsService({
       paths: fixture.paths,
       emit: (name, payload) => {
@@ -51,6 +51,7 @@ describe('filesystem state service: discovery, sidecars and holders', () => {
         emitted.push({ name, payload } as Emitted);
       },
       watch,
+      startScanFallbackMs,
     });
     await service.start();
     return service;
@@ -93,6 +94,62 @@ describe('filesystem state service: discovery, sidecars and holders', () => {
     await expect.poll(() => events('fs.sessionChanged').map((e) => [e.summary.sessionId, e.appSessionId]), { timeout: 1_000 }).toContainEqual([S1, 'app-1']);
     expect(fs.state()).toMatchObject({ configHome: fixture.configHome, watching: true, projects: 2, sessions: 3, bound: 3, followed: [], holders: [] });
     expect(fs.state().lastScanAt).not.toBeNull();
+  });
+
+  describe('the start-up pass waits for main\'s known map (M4 fix wave)', () => {
+    afterEach(() => vi.restoreAllMocks());
+
+    it('start lists and watches but reads no transcript; a scan whose known map covers every file reads no head or tail and emits nothing', async () => {
+      await threeSessions();
+      const reads = vi.spyOn(Discovery.prototype, 'summarizeOne');
+      const listeners = new Map<string, (event: string, filename: string | null) => void>();
+      const manual = {
+        watch: ((path, _options, listener) => {
+          listeners.set(path, listener);
+          return Object.assign(new EventEmitter(), { close: vi.fn() });
+        }) as WatchFn,
+        fire: (path: string, filename: string | null) => listeners.get(path)!('rename', filename),
+      };
+      const fs = await start(manual.watch);
+      await settled(); // past the watcher's settle rescan
+      expect(fs.state()).toMatchObject({ sessions: 3, projects: 2, lastScanAt: null, lastScan: null });
+      expect(reads).not.toHaveBeenCalled();
+      expect(events('fs.sessionChanged')).toEqual([]);
+
+      const known = await Promise.all(
+        [S1, S2, S3].map(async (sessionId, i) => {
+          const { size, mtimeMs } = await stat(fixture.transcriptPath(sessionId));
+          return { sessionId, appSessionId: `app-${i}` as AppSessionId, size, mtimeMs };
+        }),
+      );
+      expect(await fs.scan(known)).toMatchObject({ projects: 2, sessions: 3, changed: 0 });
+      await settled();
+      expect(reads).not.toHaveBeenCalled();
+      expect(events('fs.sessionChanged')).toEqual([]);
+      expect(fs.state()).toMatchObject({ bound: 3, lastScan: { projects: 2, sessions: 3, changed: 0 } });
+
+      // A rescan of the root afterwards (a dropped FSEvents name) still reads nothing main already holds.
+      manual.fire(fixture.paths.projects, null);
+      await settled();
+      expect(reads).not.toHaveBeenCalled();
+      expect(events('fs.sessionChanged')).toEqual([]);
+    });
+
+    it('without any fs.scan from main, the fallback pass summarises and emits everything once the fallback delay has passed', async () => {
+      expect(START_SCAN_FALLBACK_MS).toBe(3_000);
+      await threeSessions();
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      try {
+        await start(deafWatch);
+        await vi.advanceTimersByTimeAsync(START_SCAN_FALLBACK_MS - 1);
+        expect(events('fs.sessionChanged')).toEqual([]);
+        await vi.advanceTimersByTimeAsync(1);
+      } finally {
+        vi.useRealTimers();
+      }
+      await expect.poll(() => events('fs.sessionChanged').map((e) => e.summary.sessionId).sort(), { timeout: 2_000 }).toEqual([S1, S2, S3].sort());
+      expect(service!.state().lastScan).toMatchObject({ sessions: 3, changed: 3 });
+    });
   });
 
   it('a custom-title line appended in the terminal reaches fs.sessionChanged within 200 ms, once', async () => {
@@ -169,6 +226,7 @@ describe('filesystem state service: discovery, sidecars and holders', () => {
       return Object.assign(new EventEmitter(), { close: vi.fn() });
     };
     const fs = await start(watch);
+    await fs.scan([]); // main's first scan: from here on the host summarises what it finds
     expect(fs.state().sessions).toBe(0);
     await fixture.addTranscript('/work/a', S1, [user('u1', null, '/work/a', 'made while the stream dropped its names')]);
     listeners.get(fixture.paths.projects)!('rename', null);

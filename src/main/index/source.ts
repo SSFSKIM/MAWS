@@ -14,7 +14,7 @@ import type { Holder, TranscriptSummary } from '@shared/wire/store';
 import type { HostSupervisor } from '../hosts/supervisor';
 import { toSessionRecordPatch } from './engine-status';
 import type { Index } from './index';
-import type { ChangeCause } from './sessions';
+import type { BindingChange, ChangeCause } from './sessions';
 
 // carried from C5 until rebase ----------------------------------------------------------------------------------------
 // C5's read-model port (C5 execution document, "Main modules", `src/main/sessions/read-model.ts`) and digest shape
@@ -58,7 +58,8 @@ export interface SourceOptions {
 const TICK_MS = 16;
 const LAST_LINE_CHARS = 160; // C5's digest `lastAssistantLine`
 
-type Pending = { t: 'changed'; record: SessionRecord; cause: Exclude<ChangeCause, 'removed'> } | { t: 'removed' };
+// A record's change waiting for the tick: its latest committed state and that change's revision.
+type Pending = { t: 'changed'; record: SessionRecord; cause: Exclude<ChangeCause, 'removed'>; revision: number } | { t: 'removed'; revision: number };
 
 export class IndexSessionSource implements SessionSource {
   private readonly tickMs: number;
@@ -66,15 +67,15 @@ export class IndexSessionSource implements SessionSource {
   private readonly visible = new Set<AppSessionId>();
   private readonly holders = new Map<SessionId, Holder>(); // the registry's live holders by engine id, as last reported
   private readonly pending = new Map<AppSessionId, Pending>();
-  private projectsChanged = false;
+  private projectsRevision: number | null = null; // the latest project change waiting for the tick
   private shownProjects = new Set<ProjectId>();
-  private bindingQueue: { appSessionId: AppSessionId; sessionId: SessionId | null }[] = [];
+  private bindingQueue: BindingChange[] = [];
   private hostWork: Promise<unknown> = Promise.resolve(); // bindings go to the host in the order the index made them
   private syncs: Promise<unknown> = Promise.resolve();
   private timer: ReturnType<typeof setTimeout> | null = null;
   private writer: ReadModelWriter | null = null;
   private offs: (() => void)[] = [];
-  private readOnlyLogged = false;
+  private unavailableLogged = false;
 
   constructor(
     private readonly index: Index,
@@ -86,6 +87,12 @@ export class IndexSessionSource implements SessionSource {
   }
 
   start(writer: ReadModelWriter): () => void {
+    // A newer app's index: this source neither reads nor writes a schema it does not know, and the app runs on without
+    // session records (session.* answers `index unavailable`).
+    if (this.index.unavailable !== null) {
+      this.logUnavailable();
+      return () => {};
+    }
     this.writer = writer;
     const projects = this.index.projects.list();
     for (const project of projects) writer.observeProject(project);
@@ -96,9 +103,9 @@ export class IndexSessionSource implements SessionSource {
     }
 
     this.offs = [
-      this.index.sessions.onChange((record, cause) => this.recordChanged(record, cause)),
-      this.index.sessions.onBinding((appSessionId, sessionId) => this.bindingChanged(appSessionId, sessionId)),
-      this.index.projects.onChange(() => this.projectsChangedNow()),
+      this.index.sessions.onChange((record, cause, revision) => this.recordChanged(record, cause, revision)),
+      this.index.sessions.onBinding((change) => this.bindingChanged(change)),
+      this.index.projects.onChange((revision) => this.projectsChangedNow(revision)),
       this.host.onEvent('fs.sessionChanged', ({ summary }) => this.write('fs.sessionChanged', () => this.discovered(summary))),
       this.host.onEvent('fs.sessionRemoved', ({ sessionId }) => this.write('fs.sessionRemoved', () => this.index.sessions.markTranscriptRemoved(sessionId))),
       this.host.onEvent('fs.holderChanged', ({ sessionId, holder }) => {
@@ -133,6 +140,7 @@ export class IndexSessionSource implements SessionSource {
       return;
     }
     this.visible.add(appSessionId);
+    if (this.index.unavailable !== null) return;
     const record = this.index.sessions.get(appSessionId);
     if (record === null) return; // an unstarted tab: nothing to mark until its record exists
     this.write('session.setVisible', () => this.markSeen(record));
@@ -195,7 +203,7 @@ export class IndexSessionSource implements SessionSource {
     return this.syncs;
   }
 
-  private recordChanged(record: SessionRecord, cause: ChangeCause): void {
+  private recordChanged(record: SessionRecord, cause: ChangeCause, revision: number): void {
     const appId = record.appId;
     // Within a tick a record goes out once, in its final state, under the first cause the tick saw (a row discovered
     // and then refreshed is still news of a discovery); re-inserted last, so it follows whatever preceded it.
@@ -203,27 +211,27 @@ export class IndexSessionSource implements SessionSource {
     this.pending.delete(appId);
     if (cause === 'removed') {
       this.writer?.observeRemoved(appId);
-      this.pending.set(appId, { t: 'removed' });
+      this.pending.set(appId, { t: 'removed', revision });
     } else {
       this.writer?.observeRecord(record);
       if (cause === 'discovered' || cause === 'facts' || cause === 'holder') this.digest(record);
-      this.pending.set(appId, { t: 'changed', record, cause: previous?.t === 'changed' ? previous.cause : cause });
+      this.pending.set(appId, { t: 'changed', record, cause: previous?.t === 'changed' ? previous.cause : cause, revision });
     }
     this.schedule();
   }
 
-  private projectsChangedNow(): void {
+  private projectsChangedNow(revision: number): void {
     const projects = this.index.projects.list();
     const shown = new Set(projects.map((p) => p.id));
     for (const project of projects) this.writer?.observeProject(project);
     for (const id of this.shownProjects) if (!shown.has(id)) this.writer?.observeProjectRemoved(id);
     this.shownProjects = shown;
-    this.projectsChanged = true;
+    this.projectsRevision = revision;
     this.schedule();
   }
 
-  private bindingChanged(appSessionId: AppSessionId, sessionId: SessionId | null): void {
-    this.bindingQueue.push({ appSessionId, sessionId });
+  private bindingChanged(change: BindingChange): void {
+    this.bindingQueue.push(change);
     this.schedule();
   }
 
@@ -250,18 +258,30 @@ export class IndexSessionSource implements SessionSource {
     this.timer ??= setTimeout(() => this.flush(), this.tickMs);
   }
 
+  // Every change waiting for the tick goes out once, carrying its own revision, in revision order (a project a new
+  // record joins was committed, and stamped, before the record).
   private flush(): void {
     this.timer = null;
-    const revision = this.index.revision;
+    const out: { revision: number; send: () => void }[] = [];
     for (const [appSessionId, change] of this.pending) {
-      if (change.t === 'removed') this.options.emit('session.removed', { appSessionId, revision });
-      else this.options.emit('session.changed', { record: change.record, cause: change.cause, revision });
+      const { revision } = change;
+      out.push({
+        revision,
+        send: () =>
+          change.t === 'removed'
+            ? this.options.emit('session.removed', { appSessionId, revision })
+            : this.options.emit('session.changed', { record: change.record, cause: change.cause, revision }),
+      });
     }
     this.pending.clear();
-    if (this.projectsChanged) {
-      this.projectsChanged = false;
-      this.options.emit('session.projects.changed', { projects: this.index.projects.list(), revision });
+    if (this.projectsRevision !== null) {
+      const revision = this.projectsRevision;
+      this.projectsRevision = null;
+      const projects = this.index.projects.list();
+      out.push({ revision, send: () => this.options.emit('session.projects.changed', { projects, revision }) });
     }
+    out.sort((a, b) => a.revision - b.revision);
+    for (const { send } of out) send();
     this.flushBindings();
   }
 
@@ -293,12 +313,10 @@ export class IndexSessionSource implements SessionSource {
     return result.value as CommandOutput<N>;
   }
 
-  // Index writes from host events: a read-only index (a newer app's file) takes none, said once; a failed write is
-  // logged, never thrown into the supervisor's relay.
+  // Index writes from host events: a failed write is logged, never thrown into the supervisor's relay.
   private write(what: string, fn: () => unknown): void {
-    if (this.index.readOnly) {
-      if (!this.readOnlyLogged) console.error('[index] the index is read-only; session records will not follow the store this run');
-      this.readOnlyLogged = true;
+    if (this.index.unavailable !== null) {
+      this.logUnavailable();
       return;
     }
     try {
@@ -306,5 +324,10 @@ export class IndexSessionSource implements SessionSource {
     } catch (error) {
       console.error(`[index] ${what} could not be applied:`, error instanceof Error ? error.message : error);
     }
+  }
+
+  private logUnavailable(): void {
+    if (!this.unavailableLogged) console.error(`[index] index unavailable: ${this.index.unavailable}; session records will not follow the store this run`);
+    this.unavailableLogged = true;
   }
 }

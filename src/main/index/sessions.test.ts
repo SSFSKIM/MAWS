@@ -27,7 +27,7 @@ describe('session records in the index', () => {
     changes = [];
     bindings = [];
     index.sessions.onChange((record, cause) => changes.push([record, cause]));
-    index.sessions.onBinding((appId, sessionId) => bindings.push([appId, sessionId]));
+    index.sessions.onBinding((change) => bindings.push([change.appSessionId, change.sessionId]));
   });
   afterEach(() => {
     index.close();

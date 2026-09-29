@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, MessageUuid, SessionId } from '@shared/graph/ids';
 import type { HostEmit, HostOn } from '@shared/host/runtime';
@@ -18,7 +19,7 @@ import { IndexSessionSource, type ReadModelWriter, type SourceHost } from './sou
 
 type Listener = (payload: unknown) => void;
 
-const FS_STATE_EMPTY = { configHome: '/cfg', watching: true, projects: 0, sessions: 0, bound: 0, followed: [], holders: [], lastScanAt: null };
+const FS_STATE_EMPTY = { configHome: '/cfg', watching: true, projects: 0, sessions: 0, bound: 0, followed: [], holders: [], lastScanAt: null, lastScan: null };
 const SCAN_RESULT = { projects: 0, sessions: 0, changed: 0, durationMs: 1 };
 
 // A host the test scripts: commands answer from `answers` (default: ok with undefined) and are recorded; events are
@@ -200,6 +201,71 @@ describe('IndexSessionSource folds the host\'s events into the index and feeds t
     expect(changed).toHaveLength(3); // four changes to three records, one message each
     expect(changed.find((c) => c.record.appId === records[0].appId)).toMatchObject({ cause: 'discovered', record: { title: { text: 'renamed', source: 'user' } } });
     expect(Math.max(...changed.map((c) => c.revision))).toBe(index.revision);
+  });
+
+  it('4,000 discovered records go out with 4,000 distinct, strictly increasing revisions, in revision order', async () => {
+    const fake = scriptedHost();
+    begin(fake.host);
+    await settle();
+    emitted.length = 0;
+    for (let i = 1; i <= 4_000; i++) fake.fire('fs.sessionChanged', { summary: summary({ sessionId: sessionIdFor(0x200000 + i) }), appSessionId: null });
+    await settle();
+    const revisions = events('session.changed').map((c) => c.revision);
+    expect(revisions).toHaveLength(4_000);
+    for (let i = 1; i < revisions.length; i++) expect(revisions[i]).toBeGreaterThan(revisions[i - 1]);
+    expect(revisions.at(-1)).toBe(index.revision);
+  });
+
+  it('a tick\'s project and record events go out in revision order: the project a new record joins comes first', async () => {
+    const tree = tempDir('maws-source-');
+    try {
+      mkdirSync(join(tree.path, 'alpha'));
+      const fake = scriptedHost();
+      begin(fake.host);
+      await settle();
+      emitted.length = 0;
+      fake.fire('fs.sessionChanged', { summary: summary({ directory: join(tree.path, 'alpha') }), appSessionId: null });
+      await settle();
+      expect(emitted.map((e) => e.name)).toEqual(['session.projects.changed', 'session.changed']);
+      const [projects, changed] = emitted.map((e) => (e.payload as { revision: number }).revision);
+      expect(changed).toBe(projects + 1);
+    } finally {
+      tree.dispose();
+    }
+  });
+
+  it('a summary that changes nothing emits no session.changed', async () => {
+    const fake = scriptedHost();
+    begin(fake.host);
+    const s = summary();
+    fake.fire('fs.sessionChanged', { summary: s, appSessionId: null });
+    await settle();
+    const revision = index.revision;
+    emitted.length = 0;
+    fake.fire('fs.sessionChanged', { summary: s, appSessionId: index.sessions.getByEngineId(s.sessionId)!.appId });
+    await settle();
+    expect(emitted).toEqual([]);
+    expect(index.revision).toBe(revision);
+  });
+
+  it('an index of a newer version leaves the source inert: start neither throws nor touches it, and host events are ignored', async () => {
+    index.close();
+    const path = join(dir.path, 'index.sqlite');
+    const raw = new DatabaseSync(path);
+    raw.exec('DROP TABLE sessions; CREATE TABLE sessions (id INTEGER PRIMARY KEY, blob BLOB); PRAGMA user_version = 99');
+    raw.close();
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    index = new Index(path);
+    const fake = scriptedHost();
+    const recorded = recordingWriter();
+    expect(() => begin(fake.host, recorded.writer)).not.toThrow();
+    expect(() => fake.fire('fs.sessionChanged', { summary: summary(), appSessionId: null })).not.toThrow();
+    expect(() => source!.onSetVisible(randomUUID() as AppSessionId, true)).not.toThrow();
+    await settle();
+    expect(recorded.calls).toEqual([]);
+    expect(fake.calls).toEqual([]);
+    expect(emitted).toEqual([]);
+    expect(error).toHaveBeenCalledWith(expect.stringContaining('index unavailable'));
   });
 
   it('holders: applied to the record, remembered for a record that does not exist yet, and never over a self-held one', async () => {

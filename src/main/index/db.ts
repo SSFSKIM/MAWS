@@ -16,15 +16,22 @@ export class Db {
 
   constructor(
     private readonly db: DatabaseSync,
-    readonly readOnly: boolean,
     readonly applied: readonly number[], // the migrations this open ran
+    // Why the index cannot be used (a newer app's schema), or null. Every statement then fails with this reason.
+    readonly unavailable: string | null = null,
   ) {}
 
+  get readOnly(): boolean {
+    return this.unavailable !== null;
+  }
+
   exec(sql: string): void {
+    this.usable();
     this.db.exec(sql);
   }
 
   prepare(sql: string): StatementSync {
+    this.usable();
     let statement = this.statements.get(sql);
     if (!statement) this.statements.set(sql, (statement = this.db.prepare(sql)));
     return statement;
@@ -57,7 +64,7 @@ export class Db {
   }
 
   transaction<T>(fn: () => T): T {
-    if (this.readOnly) throw new Error('the index is read-only');
+    this.usable();
     if (this.deferred) return fn();
     const deferred = new Map<string, () => void>();
     this.db.exec('BEGIN IMMEDIATE');
@@ -88,6 +95,10 @@ export class Db {
     else if (!this.deferred.has(key)) this.deferred.set(key, fn);
   }
 
+  private usable(): void {
+    if (this.unavailable !== null) throw new Error(`index unavailable: ${this.unavailable}`);
+  }
+
   close(): void {
     this.statements.clear();
     if (this.db.isOpen) this.db.close();
@@ -100,10 +111,22 @@ function bind(values: Record<string, Value>): Record<string, SQLInputValue> {
   return bound;
 }
 
-// Opens the index file and brings it to the newest schema (residue *Index schema and location*): a file SQLite cannot
-// open or read is moved aside as `<path>.broken-<epoch>` (with its -wal and -shm) and a fresh one created, never deleted;
-// a file whose `user_version` is newer than the app knows is opened read-only, with one logged error, and every write
-// then fails with `the index is read-only`.
+// SQLite result codes that mean the file itself is not a usable database (primary codes; extended codes carry them in
+// the low byte). Everything else at open — SQLITE_BUSY from a second instance, an I/O error — is transient or
+// environmental and must never cost the owner a valid index.
+const SQLITE_CORRUPT = 11;
+const SQLITE_NOTADB = 26;
+
+function isBrokenFile(error: unknown): boolean {
+  const code = (error as { errcode?: unknown }).errcode;
+  return typeof code === 'number' && [SQLITE_CORRUPT, SQLITE_NOTADB].includes(code & 0xff);
+}
+
+// Opens the index file and brings it to the newest schema (residue *Index schema and location*): a file SQLite reports
+// as corrupt or not a database is moved aside as `<path>.broken-<epoch>` (with its -wal and -shm) and a fresh one
+// created, never deleted; any other failure at open propagates. A file whose `user_version` is newer than the app knows
+// is opened read-only, with one logged error, and marked unavailable: its schema may not be the one this app reads, so
+// every statement fails with `index unavailable: <reason>` rather than reading or writing it.
 export function openDb(path: string, migrations: readonly Migration[]): Db {
   const known = migrations.length;
   let db: DatabaseSync;
@@ -111,18 +134,19 @@ export function openDb(path: string, migrations: readonly Migration[]): Db {
   try {
     ({ db, version } = probe(path));
   } catch (error) {
+    if (!isBrokenFile(error)) throw error;
     const aside = `${path}.broken-${Date.now()}`;
     for (const suffix of ['', '-wal', '-shm']) if (existsSync(path + suffix)) renameSync(path + suffix, aside + suffix);
-    console.error(`[index] ${path} could not be opened (${error instanceof Error ? error.message : String(error)}); moved aside as ${aside}`);
+    console.error(`[index] ${path} is not a usable database (${error instanceof Error ? error.message : String(error)}); moved aside as ${aside}`);
     ({ db, version } = probe(path));
   }
 
   if (version > known) {
     db.close();
-    console.error(`[index] ${path} is at user_version ${version}, newer than this app's ${known}; the index is read-only`);
+    const reason = `user_version ${version} is newer than this app knows (${known})`;
+    console.error(`[index] ${path}: ${reason}; the index is unavailable this run and the file is left as it is`);
     const readOnly = new DatabaseSync(path, { readOnly: true });
-    readOnly.exec('PRAGMA busy_timeout = 2000');
-    return new Db(readOnly, true, []);
+    return new Db(readOnly, [], reason);
   }
 
   const pending = migrations.slice(version);
@@ -140,12 +164,11 @@ export function openDb(path: string, migrations: readonly Migration[]): Db {
   }
   return new Db(
     db,
-    false,
     pending.map((migration) => migration.version),
   );
 }
 
-// Opens with the index's pragmas and reads the schema version; anything that throws here means the file is unusable.
+// Opens with the index's pragmas and reads the schema version.
 function probe(path: string): { db: DatabaseSync; version: number } {
   const db = new DatabaseSync(path);
   try {

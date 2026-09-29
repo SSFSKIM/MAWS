@@ -19,6 +19,14 @@ import {
 } from '@shared/wire/store';
 import type { CommandSpec } from './common';
 
+export const FsScanResultSchema = z.strictObject({
+  projects: z.number().int(),
+  sessions: z.number().int(),
+  changed: z.number().int(), // transcripts not skipped by `known`, each emitted as fs.sessionChanged
+  durationMs: z.number(),
+});
+export type FsScanResult = z.infer<typeof FsScanResultSchema>;
+
 // The snapshot `fs.state` answers (C1's reload-survival rule: a page that arrives late reads the truth, not events).
 export const FsStateSchema = z.strictObject({
   configHome: z.string(),
@@ -29,19 +37,13 @@ export const FsStateSchema = z.strictObject({
   followed: z.array(z.strictObject({ appSessionId: AppSessionIdSchema, agentId: AgentIdSchema.nullable() })),
   holders: z.array(z.strictObject({ sessionId: SessionIdSchema, appSessionId: AppSessionIdSchema.nullable(), holder: HolderSchema })),
   lastScanAt: z.string().nullable(),
+  lastScan: FsScanResultSchema.nullable(), // the last pass that summarised (main's fs.scan, or the host's fallback); null before one
 });
 export type FsState = z.infer<typeof FsStateSchema>;
 
 export const FsScanKnownSchema = z.strictObject({ sessionId: SessionIdSchema, appSessionId: AppSessionIdSchema, size: z.number(), mtimeMs: z.number() });
 export type FsScanKnown = z.infer<typeof FsScanKnownSchema>;
 
-export const FsScanResultSchema = z.strictObject({
-  projects: z.number().int(),
-  sessions: z.number().int(),
-  changed: z.number().int(), // transcripts not skipped by `known`, each emitted as fs.sessionChanged
-  durationMs: z.number(),
-});
-export type FsScanResult = z.infer<typeof FsScanResultSchema>;
 
 export const FsBindingSchema = z.strictObject({ sessionId: SessionIdSchema, appSessionId: AppSessionIdSchema });
 

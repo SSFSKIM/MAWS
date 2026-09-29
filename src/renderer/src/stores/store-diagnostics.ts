@@ -1,8 +1,10 @@
 // The Store section's state (C4 execution document, M2 to M4): a diagnostics-only view of the engine's store as MAWS
 // knows it, so C4's acceptance is observable before C5's sidebar exists. It subscribes first, then asks for the
 // snapshots: `fs.state` (config home, watch), the index's session records (`session.list`, kept current by
-// `session.changed` / `session.removed`) and project list (`session.projects.list` / `session.projects.changed`), and
-// runs `fs.scan` for the store's counts. Record events that land while `session.list` is in flight are held and applied
+// `session.changed` / `session.removed`) and project list (`session.projects.list` / `session.projects.changed`). The
+// store's counts and scan time are the last summarising pass `fs.state` reports (`lastScan`: main's own `fs.scan` with
+// its known map, M4 fix wave); the page runs no scan of its own, which would make the host re-read every transcript main
+// already holds, and reads `fs.state` again when a pass ends (`fs.scanProgress` at `scanned === total`). Record events that land while `session.list` is in flight are held and applied
 // over the snapshot when newer than it (C5's revision rule); rows arrive in bursts of thousands, so they are buffered and
 // applied once per `flushMs`.
 // Following (M3): one row at a time is followed through `session.events`; the view keeps its `fs.followState` and the
@@ -98,7 +100,8 @@ export function createStoreDiagnosticsStore(client: MawsBridge, options: { flush
         client.on('session.removed', ({ appSessionId, revision }) => buffer(appSessionId, { revision, record: null })),
         client.on('session.projects.changed', ({ projects, revision }) => setProjects(projects, revision)),
         client.on('fs.scanProgress', (progress) => {
-          if (get().scan.status === 'running') set({ scan: { status: 'running', progress } });
+          if (progress.scanned >= progress.total) readState(); // a pass ended: its result is in fs.state
+          else set({ scan: { status: 'running', progress } });
         }),
         client.on('fs.followState', (state) => {
           const followed = get().followed;
@@ -110,8 +113,13 @@ export function createStoreDiagnosticsStore(client: MawsBridge, options: { flush
       const readState = () => {
         void client.invoke('fs.state', undefined).then((result) => {
           if (!connected) return;
-          if (!result.ok) console.error('[store] fs.state failed', result.error);
-          else set({ fs: result.value });
+          if (!result.ok) {
+            console.error('[store] fs.state failed', result.error);
+            set({ scan: { status: 'failed', error: result.error.message } });
+            return;
+          }
+          const { lastScan } = result.value;
+          set({ fs: result.value, ...(lastScan ? { scan: { status: 'done', result: lastScan } } : {}) });
         });
       };
 
@@ -138,16 +146,6 @@ export function createStoreDiagnosticsStore(client: MawsBridge, options: { flush
         else setProjects(result.value.projects, result.value.revision);
       });
       set({ scan: { status: 'running', progress: null } });
-      void client.invoke('fs.scan', {}).then((result) => {
-        if (!connected) return;
-        if (!result.ok) {
-          console.error('[store] fs.scan failed', result.error);
-          set({ scan: { status: 'failed', error: result.error.message } });
-          return;
-        }
-        set({ scan: { status: 'done', result: result.value } });
-        readState();
-      });
 
       return () => {
         connected = false;

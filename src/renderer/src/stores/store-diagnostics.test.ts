@@ -34,7 +34,7 @@ const record = (appId: AppSessionId, over: Partial<SessionRecord> = {}): Session
   ...over,
 });
 
-const fsState = (): FsState => ({ configHome: '/cfg', watching: true, projects: 1, sessions: 2, bound: 0, followed: [], holders: [], lastScanAt: null });
+const fsState = (lastScan: FsState['lastScan'] = null): FsState => ({ configHome: '/cfg', watching: true, projects: 1, sessions: 2, bound: 0, followed: [], holders: [], lastScanAt: lastScan ? '2026-09-28T10:00:01.000Z' : null, lastScan });
 const project = (id: string, directory: string) => ({ id: id as ProjectId, name: directory.split('/').at(-1)!, directory, order: 0, createdAt: '2026-09-28T10:00:00.000Z' });
 
 // A client whose replies the test releases by hand, so event/reply orderings can be staged.
@@ -76,7 +76,7 @@ async function connected(records: SessionRecord[] = [], revision = 1) {
 }
 
 describe('store diagnostics', () => {
-  it('subscribes first, then asks for the fs.state snapshot, the index\'s records and projects, and a scan', () => {
+  it('subscribes first, then asks for the fs.state snapshot and the index\'s records and projects, and runs no scan of its own', () => {
     const fake = fakeClient();
     createStoreDiagnosticsStore(fake.client, { flushMs: 0 }).getState().connect();
     expect(fake.client.on).toHaveBeenCalledWith('session.changed', expect.any(Function));
@@ -86,15 +86,14 @@ describe('store diagnostics', () => {
       ['fs.state', undefined],
       ['session.list', { includeArchived: true }],
       ['session.projects.list', undefined],
-      ['fs.scan', {}],
     ]);
   });
 
-  it('lists the index\'s records, applies changes and removals, and reports the scan with the index\'s project count', async () => {
+  it('lists the index\'s records, applies changes and removals, and reports the last scan fs.state holds once a pass ends', async () => {
     const fake = fakeClient();
     const store = createStoreDiagnosticsStore(fake.client, { flushMs: 0 });
     store.getState().connect();
-    await fake.reply('fs.state', fsState());
+    await fake.reply('fs.state', fsState()); // main's scan has not finished yet
     await fake.reply('session.list', { sessions: [record(A1)], revision: 3 });
     await fake.reply('session.projects.list', { projects: [project('p1', '/w'), project('p2', '/v')], revision: 3 });
     expect(store.getState().scan).toEqual({ status: 'running', progress: null });
@@ -114,9 +113,10 @@ describe('store diagnostics', () => {
     fake.event('session.projects.changed', { projects: [], revision: 2 }); // older than what is held: ignored
     expect(store.getState().projects?.map((p) => p.id)).toEqual(['p1']);
 
-    await fake.reply('fs.scan', { projects: 9, sessions: 2, changed: 2, durationMs: 1234 });
+    fake.event('fs.scanProgress', { scanned: 200, total: 200 }); // the pass ended: read its result
+    expect(fake.pending.map((p) => p.name)).toEqual(['fs.state']);
+    await fake.reply('fs.state', fsState({ projects: 9, sessions: 2, changed: 2, durationMs: 1234 }));
     expect(store.getState().scan).toEqual({ status: 'done', result: { projects: 9, sessions: 2, changed: 2, durationMs: 1234 } });
-    expect(fake.pending.map((p) => p.name)).toEqual(['fs.state']); // the counts are read again after the scan
   });
 
   it('applies record events that land while session.list is in flight over the snapshot only when newer than it', async () => {
@@ -144,13 +144,13 @@ describe('store diagnostics', () => {
     expect(store.getState().records).toEqual({});
   });
 
-  it('reports a failed scan without throwing', async () => {
+  it('reports a failed fs.state without throwing', async () => {
     const fake = fakeClient();
     const store = createStoreDiagnosticsStore(fake.client, { flushMs: 0 });
     const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
     store.getState().connect();
-    const scan = fake.pending.find((p) => p.name === 'fs.scan')!;
-    scan.resolve({ ok: false, error: { code: 'host_unavailable', message: 'engine-host is crashed' } } as CommandResult<CommandName>);
+    const state = fake.pending.find((p) => p.name === 'fs.state')!;
+    state.resolve({ ok: false, error: { code: 'host_unavailable', message: 'engine-host is crashed' } } as CommandResult<CommandName>);
     await fake.tick();
     expect(store.getState().scan).toEqual({ status: 'failed', error: 'engine-host is crashed' });
     expect(errors).toHaveBeenCalled();

@@ -27,9 +27,17 @@ function fakeMain(initial: SettingsState['settings']['theme']) {
       case 'pty.hostState':
         return HOSTS[name];
       case 'fs.state':
-        return { configHome: '/Users/new/.claude', watching: true, projects: 1, sessions: 1, bound: 0, followed: [], holders: [], lastScanAt: null };
-      case 'fs.scan':
-        return { projects: 3, sessions: 1, changed: 1, durationMs: 1234 };
+        return {
+          configHome: '/Users/new/.claude',
+          watching: true,
+          projects: 1,
+          sessions: 1,
+          bound: 0,
+          followed: [],
+          holders: [],
+          lastScanAt: '2026-09-28T10:00:01.000Z',
+          lastScan: { projects: 3, sessions: 1, changed: 1, durationMs: 1234 },
+        };
       case 'session.list':
         return { sessions: [], revision: 1 };
       case 'session.projects.list':

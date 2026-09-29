@@ -79,6 +79,12 @@ export interface Binding {
   mtimeMs: number | null;
 }
 
+// A committed change of a record's engine-id binding: the id it is bound to now (null: unbound, or the record removed).
+export interface BindingChange {
+  appSessionId: AppSessionId;
+  sessionId: SessionId | null;
+}
+
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function titleOf(row: SessionRow): SessionRecord['title'] {
@@ -119,14 +125,14 @@ function toRecord(row: SessionRow): SessionRecord {
 }
 
 export class SessionStore {
-  private readonly changeListeners = new Set<(record: SessionRecord, cause: ChangeCause) => void>();
-  private readonly bindingListeners = new Set<(appId: AppSessionId, sessionId: SessionId | null) => void>();
+  private readonly changeListeners = new Set<(record: SessionRecord, cause: ChangeCause, revision: number) => void>();
+  private readonly bindingListeners = new Set<(change: BindingChange) => void>();
   private readonly removed = new Map<string, SessionRecord>(); // the last record of a row deleted in the open transaction
 
   constructor(
     private readonly db: Db,
     private readonly projects: ProjectStore,
-    private readonly bump: () => void, // the index-wide revision
+    private readonly stamp: () => number, // the index-wide revision, taken once per committed change
   ) {}
 
   list(opts: { includeArchived?: boolean } = {}): SessionRecord[] {
@@ -387,13 +393,15 @@ export class SessionStore {
     });
   }
 
-  onChange(listener: (record: SessionRecord, cause: ChangeCause) => void): () => void {
+  // After commit, once per record per transaction, with the record as committed, the transaction's first cause for it,
+  // and the revision stamped for this change.
+  onChange(listener: (record: SessionRecord, cause: ChangeCause, revision: number) => void): () => void {
     this.changeListeners.add(listener);
     return () => void this.changeListeners.delete(listener);
   }
 
-  // After commit, per record whose engine id changed: the id it is bound to now (null: unbound or removed).
-  onBinding(listener: (appId: AppSessionId, sessionId: SessionId | null) => void): () => void {
+  // After commit, per record whose engine id changed, in commit order.
+  onBinding(listener: (change: BindingChange) => void): () => void {
     this.bindingListeners.add(listener);
     return () => void this.bindingListeners.delete(listener);
   }
@@ -450,22 +458,22 @@ export class SessionStore {
 
   // One notification per record per transaction, after commit, with the first cause and the record as committed.
   private changed(appId: AppSessionId, cause: ChangeCause): void {
-    this.bump();
     this.db.defer(`session:${appId}`, () => {
       const record = this.get(appId);
       const gone = this.removed.get(appId);
       this.removed.delete(appId);
       const [notified, notifiedCause] = record ? [record, cause === 'removed' ? 'update' : cause] : [gone, 'removed' as const];
       if (!notified) return;
-      for (const listener of this.changeListeners) listener(notified, notifiedCause);
+      const revision = this.stamp();
+      for (const listener of this.changeListeners) listener(notified, notifiedCause, revision);
     });
   }
 
   private bindingChanged(appId: AppSessionId): void {
     this.db.defer(`binding:${appId}`, () => {
       const row = this.db.get<{ engine_session_id: string | null }>('SELECT engine_session_id FROM sessions WHERE app_id = ?', appId);
-      const sessionId = (row?.engine_session_id ?? null) as SessionId | null;
-      for (const listener of this.bindingListeners) listener(appId, sessionId);
+      const change: BindingChange = { appSessionId: appId, sessionId: (row?.engine_session_id ?? null) as SessionId | null };
+      for (const listener of this.bindingListeners) listener(change);
     });
   }
 }

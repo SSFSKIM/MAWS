@@ -59,11 +59,11 @@ const project = (row: ProjectRow): ProjectRecord => ({
 });
 
 export class ProjectStore {
-  private readonly listeners = new Set<() => void>();
+  private readonly listeners = new Set<(revision: number) => void>();
 
   constructor(
     private readonly db: Db,
-    private readonly bump: () => void, // the index-wide revision
+    private readonly stamp: () => number, // the index-wide revision, taken once per committed change
     private readonly attachOrphans: (projectId: ProjectId, directory: string) => void, // sessions already in a new project's directory
   ) {}
 
@@ -144,7 +144,8 @@ export class ProjectStore {
     return create ? this.ensureForDirectory(location.projectDirectory, 'discovered').id : null;
   }
 
-  onChange(listener: () => void): () => void {
+  // After commit, once per transaction that changed projects, with that change's revision.
+  onChange(listener: (revision: number) => void): () => void {
     this.listeners.add(listener);
     return () => void this.listeners.delete(listener);
   }
@@ -156,9 +157,9 @@ export class ProjectStore {
   }
 
   private changed(): void {
-    this.bump();
     this.db.defer('projects', () => {
-      for (const listener of this.listeners) listener();
+      const revision = this.stamp();
+      for (const listener of this.listeners) listener(revision);
     });
   }
 }

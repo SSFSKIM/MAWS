@@ -17,21 +17,27 @@ export class Index {
   readonly drafts: DraftStore;
   readonly fixtures: ReplayFixtureStore;
   private readonly db: Db;
-  private changes = 0;
+  private stamped = 0;
 
   constructor(path: string) {
     this.db = openDb(path, MIGRATIONS);
-    const bump = () => void (this.changes += 1);
-    this.projects = new ProjectStore(this.db, bump, (projectId, directory) => this.sessions.attachOrphans(projectId, directory));
-    this.sessions = new SessionStore(this.db, this.projects, bump);
+    // One revision per committed change, stamped as each change is announced after its commit (never inside a
+    // transaction that may still roll back), so revisions are distinct and in commit order.
+    const stamp = () => ++this.stamped;
+    this.projects = new ProjectStore(this.db, stamp, (projectId, directory) => this.sessions.attachOrphans(projectId, directory));
+    this.sessions = new SessionStore(this.db, this.projects, stamp);
     this.attention = new IndexAttentionStore(this.db);
     this.drafts = new DraftStore(this.db);
     this.fixtures = new ReplayFixtureStore(this.db);
   }
 
-  // A newer app's database: reads answer, every write fails with `the index is read-only`.
+  // A newer app's database, opened read-only and not used: every store call fails with `index unavailable: <reason>`.
   get readOnly(): boolean {
     return this.db.readOnly;
+  }
+
+  get unavailable(): string | null {
+    return this.db.unavailable;
   }
 
   // The migrations this open applied (empty when the file was already current).
@@ -39,9 +45,10 @@ export class Index {
     return this.db.applied;
   }
 
-  // The index-wide revision: bumped on every session or project change (C5's snapshot-and-event rule).
+  // The index-wide revision: the last one stamped on a committed session or project change (C5's snapshot-and-event
+  // rule: every event carries its own, so a consumer can keep the higher of snapshot and event).
   get revision(): number {
-    return this.changes;
+    return this.stamped;
   }
 
   // Runs `fn` as one transaction; the stores' own transactions inside it join it, and their change notifications are

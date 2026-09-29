@@ -34,6 +34,10 @@ import { StoreWatcher, type StoreChange, type WatchFn } from './watcher';
 import { progressKey, WorkflowReader, workflowProgressEvent, workflowProgressId } from './workflows';
 
 export const PROGRESS_EVERY = 100;
+// The host's start-up pass lists and watches but summarises nothing until main's `fs.scan { known }` arrives, so an
+// unchanged store costs main one readdir pass; a host that hears nothing from main (driven alone: tests, diagnostics)
+// summarises on its own after this long (M4 fix wave).
+export const START_SCAN_FALLBACK_MS = 3_000;
 // The floor under coalesced or dropped FSEvents for followed files (residue *Watcher mechanism*): each is stat'ed.
 export const RECONCILE_MS = 30_000;
 
@@ -44,11 +48,13 @@ export interface FsServiceOptions {
   holders?: HolderDeps;
   openReader?: (locate: () => string | null) => FileReader; // tests record the reads; production is FsFileReader
   reconcileMs?: number;
+  startScanFallbackMs?: number;
 }
 
 type ScanMode =
   | 'command' // fs.scan: every transcript not skipped by `known` is emitted, changed or not (main asked for it)
-  | 'refresh'; // host start and rescans: only what changed since the host last looked is emitted
+  | 'refresh'; // fallback and rescans: only what changed since the host or main last looked is emitted; before main's
+// first fs.scan (and the fallback) a refresh only lists
 
 // One followed transcript: the session's own (`agentId` null) or one of its agents'.
 interface FollowEntry {
@@ -76,6 +82,14 @@ export class FsService {
   private readonly observedSinceListing = new Set<SessionId>();
   private scans: Promise<unknown> = Promise.resolve();
   private lastScanAt: string | null = null;
+  private lastScan: FsScanResult | null = null;
+  // Until main's first fs.scan (or the fallback), passes list and nothing is summarised.
+  private summarising = false;
+  private fallback: ReturnType<typeof setTimeout> | null = null;
+  private readonly startScanFallbackMs: number;
+  // The (size, mtime) main holds each transcript's summary for, from its fs.scan `known`: a refresh reads none of those
+  // that still match.
+  private readonly known = new Map<SessionId, { size: number; mtimeMs: number }>();
   private stopped = false;
   private readonly openReader: (locate: () => string | null) => FileReader;
   private readonly reconcileMs: number;
@@ -93,6 +107,7 @@ export class FsService {
     this.emit = options.emit;
     this.openReader = options.openReader ?? ((locate) => new FsFileReader(locate));
     this.reconcileMs = options.reconcileMs ?? RECONCILE_MS;
+    this.startScanFallbackMs = options.startScanFallbackMs ?? START_SCAN_FALLBACK_MS;
     this.taskReader = new TaskReader(options.paths);
     this.discovery = new Discovery(options.paths);
     this.watcher = new StoreWatcher(options.paths, (change) => this.onChange(change), { watch: options.watch });
@@ -103,15 +118,23 @@ export class FsService {
     );
   }
 
-  // Watch first, so nothing written during the first scan is missed; then read the registry and scan the store.
+  // Watch first, so nothing written meanwhile is missed; then read the registry and list the store. Summarising waits
+  // for main's fs.scan, which says what it already holds; without one the fallback summarises everything.
   async start(): Promise<void> {
     this.watcher.start();
     this.reconcile = setInterval(() => this.pokeFollows(() => true), this.reconcileMs);
+    this.fallback = setTimeout(() => {
+      this.fallback = null;
+      if (this.summarising || this.stopped) return;
+      this.summarising = true;
+      void this.enqueueScan(null, 'refresh').catch(logScanFailure);
+    }, this.startScanFallbackMs);
     await Promise.all([this.holders.start(), this.enqueueScan(null, 'refresh')]);
   }
 
   stop(): void {
     this.stopped = true;
+    if (this.fallback) clearTimeout(this.fallback);
     this.watcher.stop();
     this.holders.stop();
     if (this.reconcile) clearInterval(this.reconcile);
@@ -130,6 +153,7 @@ export class FsService {
       followed: [...this.follows.values()].map(({ follow }) => ({ appSessionId: follow.appSessionId, agentId: follow.agentId })),
       holders: this.holders.holders().map(({ sessionId, holder }) => ({ sessionId, appSessionId: this.bindings.appIdOf(sessionId), holder })),
       lastScanAt: this.lastScanAt,
+      lastScan: this.lastScan,
     };
   }
 
@@ -138,7 +162,13 @@ export class FsService {
   // Scans run one at a time; `durationMs` is the time from this call to its answer, including any scan it waited behind
   // (at start-up, the host's own first pass), so it reads as what the caller waited for.
   scan(known: readonly FsScanKnown[]): Promise<FsScanResult> {
-    for (const { sessionId, appSessionId } of known) this.bindings.bind(sessionId, appSessionId);
+    this.summarising = true;
+    if (this.fallback) clearTimeout(this.fallback);
+    this.fallback = null;
+    for (const { sessionId, appSessionId, size, mtimeMs } of known) {
+      this.bindings.bind(sessionId, appSessionId);
+      this.known.set(sessionId, { size, mtimeMs });
+    }
     return this.enqueueScan(new Map(known.map((entry) => [entry.sessionId, entry])), 'command');
   }
 
@@ -428,7 +458,10 @@ export class FsService {
     for (const sessionId of gone) if (!stale(sessionId)) this.forget(sessionId);
     for (const file of files) if (!stale(file.sessionId)) this.listed.set(file.sessionId, file);
 
-    const todo = files.filter((file) => !matchesKnown(file, known?.get(file.sessionId))).sort((a, b) => b.mtimeMs - a.mtimeMs);
+    // Only list until main has spoken (or the fallback fired). A refresh skips what main holds unchanged.
+    const summarising = mode === 'command' || this.summarising;
+    const baseline = mode === 'command' ? known : this.known;
+    const todo = summarising ? files.filter((file) => !matchesKnown(file, baseline?.get(file.sessionId))).sort((a, b) => b.mtimeMs - a.mtimeMs) : [];
     let scanned = 0;
     const visit = async (file: ListedTranscript) => {
       const cached = this.summaries.get(file.sessionId);
@@ -442,10 +475,12 @@ export class FsService {
     };
     const visits = mapConcurrent(todo, SUMMARY_CONCURRENCY, visit)[Symbol.asyncIterator]();
     while (!(await visits.next()).done); // drain: every visit has run
+    const result = { projects: countSlugs(this.listed.values()), sessions: this.listed.size, changed: todo.length, durationMs: Math.round(performance.now() - started) };
+    if (!summarising) return result;
     this.send('fs.scanProgress', { scanned, total: todo.length });
-
     this.lastScanAt = new Date().toISOString();
-    return { projects: countSlugs(this.listed.values()), sessions: this.listed.size, changed: todo.length, durationMs: Math.round(performance.now() - started) };
+    this.lastScan = result;
+    return result;
   }
 
   // Re-reads one transcript's head and tail (serialised per file, so results land in the order they were asked for)
@@ -481,6 +516,7 @@ export class FsService {
 
   private forget(sessionId: SessionId): void {
     this.listed.delete(sessionId);
+    this.known.delete(sessionId);
     this.summaries.delete(sessionId);
     this.send('fs.sessionRemoved', { sessionId, appSessionId: this.bindings.appIdOf(sessionId) });
   }

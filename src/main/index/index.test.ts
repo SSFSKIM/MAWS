@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -57,46 +57,77 @@ describe('the index opens, migrates and refuses what it cannot own', () => {
     expect(second.sessions.get(record.appId)).toMatchObject({ appId: record.appId, pinned: true });
   });
 
-  it('a database at a user_version newer than the app knows opens read-only: reads answer, writes refuse', () => {
+  it('a database at a user_version newer than the app knows opens read-only and is unavailable: nothing reads or writes a schema it does not know', () => {
     const path = join(dir.path, 'index.sqlite');
-    const seeded = open(path);
-    const { record } = seeded.sessions.upsertFromSummary(summary());
-    seeded.close();
-    opened.pop();
     const raw = new DatabaseSync(path);
-    raw.exec('PRAGMA user_version = 99');
+    // A future version whose sessions table has another shape entirely.
+    raw.exec("CREATE TABLE sessions (id INTEGER PRIMARY KEY, blob BLOB); INSERT INTO sessions (blob) VALUES (x'00'); PRAGMA user_version = 99");
     raw.close();
 
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     const index = open(path);
     expect(index.readOnly).toBe(true);
+    expect(index.unavailable).toBe('user_version 99 is newer than this app knows (1)');
     expect(error).toHaveBeenCalledWith(expect.stringContaining('user_version 99'));
-    expect(index.sessions.get(record.appId)).toMatchObject({ appId: record.appId });
-    expect(() => index.sessions.setPinned(record.appId, true)).toThrow('the index is read-only');
+    const message = 'index unavailable: user_version 99 is newer than this app knows (1)';
+    expect(() => index.sessions.list()).toThrow(message);
+    expect(() => index.sessions.get('x' as AppSessionId)).toThrow(message);
+    expect(() => index.sessions.setPinned('x' as AppSessionId, true)).toThrow(message);
+    expect(() => index.projects.list()).toThrow(message);
+    expect(() => index.drafts.get('x' as AppSessionId)).toThrow(message);
     expect(inspect(path).version).toBe(99);
   });
 
-  it('an unopenable file is moved aside as index.sqlite.broken-<epoch>, never deleted, and a fresh index is created', () => {
+  it('a file SQLite reports as not a database is moved aside as index.sqlite.broken-<epoch>, never deleted, and a fresh index is created', () => {
     const path = join(dir.path, 'index.sqlite');
-    writeFileSync(path, 'this is not a database, but it is sixteen bytes and more of text');
+    const garbage = 'this is not a database, but it is sixteen bytes and more of text';
+    writeFileSync(path, garbage);
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     const index = open(path);
     expect(index.readOnly).toBe(false);
     expect(index.applied).toEqual([1]);
     const aside = readdirSync(dir.path).filter((name) => /^index\.sqlite\.broken-\d+$/.test(name));
     expect(aside).toHaveLength(1);
+    expect(readFileSync(join(dir.path, aside[0]), 'utf8')).toBe(garbage);
     expect(error).toHaveBeenCalledWith(expect.stringContaining(aside[0]));
     expect(existsSync(path)).toBe(true);
     expect(inspect(path).version).toBe(1);
   });
 
-  it('bumps one index-wide revision on every session or project change', () => {
+  it('a transient failure at open (another connection holds the lock) throws and leaves the file untouched', () => {
+    const path = join(dir.path, 'index.sqlite');
+    const other = new DatabaseSync(path);
+    other.exec('CREATE TABLE held (x); PRAGMA user_version = 1');
+    other.exec('BEGIN EXCLUSIVE');
+    const before = readFileSync(path);
+    try {
+      expect(() => open(path)).toThrow(/locked|busy/i);
+    } finally {
+      other.exec('ROLLBACK');
+      other.close();
+    }
+    expect(readdirSync(dir.path).filter((name) => name.includes('broken'))).toEqual([]);
+    expect(readFileSync(path).equals(before)).toBe(true);
+  }, 10_000);
+
+  it('stamps one revision per committed change, in commit order; a rolled-back transaction consumes none', () => {
     const index = open();
+    const stamped: number[] = [];
+    index.sessions.onChange((_record, _cause, revision) => stamped.push(revision));
     const before = index.revision;
     const { record } = index.sessions.upsertFromSummary(summary());
-    const afterCreate = index.revision;
-    expect(afterCreate).toBeGreaterThan(before);
     index.sessions.setPinned(record.appId as AppSessionId, true);
-    expect(index.revision).toBeGreaterThan(afterCreate);
+    expect(stamped).toEqual([before + 1, before + 2]);
+    expect(index.revision).toBe(before + 2);
+
+    expect(() =>
+      index.transaction(() => {
+        index.sessions.setPinned(record.appId, false);
+        index.sessions.upsertFromSummary(summary());
+        throw new Error('abandoned');
+      }),
+    ).toThrow('abandoned');
+    expect(index.revision).toBe(before + 2);
+    expect(stamped).toHaveLength(2);
   });
 });

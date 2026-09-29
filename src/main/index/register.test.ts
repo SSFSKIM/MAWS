@@ -110,8 +110,7 @@ describe('main answers the record side of session.* from the index', () => {
     }
   });
 
-  it('an index opened read-only answers reads and returns internal for session.update', async () => {
-    const { record } = index.sessions.upsertFromSummary(summary());
+  it('an index of a newer version answers every session.* command internal "index unavailable: <reason>"', async () => {
     index.close();
     const raw = new DatabaseSync(join(dir.path, 'index.sqlite'));
     raw.exec('PRAGMA user_version = 99');
@@ -126,7 +125,12 @@ describe('main answers the record side of session.* from the index', () => {
     registerIndexHandlers(index);
     installRouter({ appUrl: APP_URL });
     expect(index.readOnly).toBe(true);
-    expect(await invoke('session.get', { appSessionId: record.appId })).toMatchObject({ ok: true, value: { appId: record.appId } });
-    expect(await invoke('session.update', { appSessionId: record.appId, patch: { pinned: true } })).toEqual({ ok: false, error: { code: 'internal', message: 'the index is read-only' } });
+    const unavailable = { ok: false, error: { code: 'internal', message: 'index unavailable: user_version 99 is newer than this app knows (1)' } };
+    const appSessionId = randomUUID();
+    expect(await invoke('session.list', {})).toEqual(unavailable);
+    expect(await invoke('session.get', { appSessionId })).toEqual(unavailable);
+    expect(await invoke('session.update', { appSessionId, patch: { pinned: true } })).toEqual(unavailable);
+    expect(await invoke('session.projects.list', undefined)).toEqual(unavailable);
+    expect(await invoke('session.drafts.get', { appSessionId })).toEqual(unavailable);
   });
 });
