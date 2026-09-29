@@ -54,6 +54,27 @@ describe('login-shell environment capture (X6)', { timeout: 15_000 }, () => {
     expect(warn.mock.calls[0]![0]).toMatch(/shell environment capture failed/);
   });
 
+  // Whole-branch review: an interactive zsh ignores SIGTERM and an rc file may read stdin; a capture that never settles
+  // is memoised and hangs every later launch, in the engine host and C9's PTY host alike.
+  it('falls back within the timeout when the shell ignores SIGTERM and a child keeps its output open', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const started = Date.now();
+    const env = await captureShellEnvironment({ shell: fakeShell("trap '' TERM; sleep 30"), timeoutMs: 500, fallback: { PATH: '/fallback' }, cache: false });
+    expect(env).toEqual({ PATH: '/fallback' });
+    expect(Date.now() - started).toBeLessThan(500 + 1_500);
+    expect(warn).toHaveBeenCalledOnce();
+    expect(warn.mock.calls[0]![0]).toMatch(/timed out after 500 ms/);
+  });
+
+  it('runs the shell with stdin closed: an rc file that reads stdin sees end of input instead of waiting forever', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const started = Date.now();
+    const env = await captureShellEnvironment({ shell: fakeShell("trap '' TERM; read line && exec env -0"), timeoutMs: 2_000, fallback: { PATH: '/fallback' }, cache: false });
+    expect(env).toEqual({ PATH: '/fallback' }); // the read failed at end of input, so the shell printed nothing
+    expect(Date.now() - started).toBeLessThan(2_000 + 1_500);
+    expect(warn).toHaveBeenCalledOnce();
+  });
+
   it('falls back when the shell prints no PATH', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const env = await captureShellEnvironment({ shell: fakeShell('printf "ONLY=x\\0"'), timeoutMs: SHELL_CAPTURE_TIMEOUT_MS, fallback: { PATH: '/fallback' }, cache: false });

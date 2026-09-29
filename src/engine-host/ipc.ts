@@ -12,7 +12,7 @@ import type { LaunchSpec } from '@shared/engine/launch-spec';
 import type { SessionStateStore } from '@shared/engine/session-state-store';
 import type { RelayHealth } from '@shared/engine/relay-health';
 import { HostCommandError, type HostEmit, type HostOn } from '@shared/host/runtime';
-import { captureShellEnvironment, SHELL_CAPTURE_TIMEOUT_MS } from '@shared/host/shell-env';
+import { captureShellEnvironment, SHELL_CAPTURE_GRACE_MS, SHELL_CAPTURE_TIMEOUT_MS } from '@shared/host/shell-env';
 import type { CommandInput, CommandName, CommandOutput } from '@shared/ipc/schema';
 import type { C3_ENGINE_COMMANDS } from '@shared/ipc/schema/engine';
 import type { C3_SESSION_COMMANDS } from '@shared/ipc/schema/session';
@@ -51,7 +51,7 @@ export const DEADLINE_SHAPES: Record<C3Command, DeadlineShape> = {
 };
 
 // The longest wait before a live launch spawns: its three checks run in parallel, each under its own timeout.
-export const PRE_SPAWN_BOUND_MS = Math.max(SHELL_CAPTURE_TIMEOUT_MS, VERSION_TIMEOUT_MS, RELAY_HEALTH_TIMEOUT_MS);
+export const PRE_SPAWN_BOUND_MS = Math.max(SHELL_CAPTURE_TIMEOUT_MS + SHELL_CAPTURE_GRACE_MS, VERSION_TIMEOUT_MS, RELAY_HEALTH_TIMEOUT_MS);
 const BOUNDED_BUDGET_S = 8;
 
 export interface EngineIpcDeps {

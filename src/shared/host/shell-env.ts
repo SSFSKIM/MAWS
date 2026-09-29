@@ -3,9 +3,11 @@
 // engine host through `buildLaunch`; C9's PTY host runs the same capture so terminals match). NUL-separated so
 // multi-line values survive; a chatty rc file that prints before the first pair is tolerated. On any failure (no shell,
 // a hang past the timeout, a non-zero exit) the host's own `process.env` stands in, with a logged warning.
-import { execFile } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 
 export const SHELL_CAPTURE_TIMEOUT_MS = 5_000;
+export const SHELL_CAPTURE_GRACE_MS = 250; // after the SIGKILL, before the capture gives up on the child
+const MAX_CAPTURE_BYTES = 16 * 1024 * 1024;
 
 export interface ShellCaptureOptions {
   shell?: string; // default $SHELL, then /bin/zsh
@@ -45,26 +47,50 @@ function stringsOnly(env: NodeJS.ProcessEnv): Record<string, string> {
   return out;
 }
 
-// Runs the capture once, without caching or fallback; rejects on any failure.
+// Runs the capture once, without caching or fallback; rejects on any failure. It settles by `timeoutMs` plus a short
+// grace whatever the shell does (whole-branch review): stdin is closed, so an rc file that reads it sees end of input;
+// the timeout kills with SIGKILL, since an interactive zsh ignores SIGTERM; and the capture gives up on its own timer,
+// since a child the rc file started can hold the output pipe open after the shell is gone.
 export function runShellCapture(opts: { shell: string; timeoutMs: number }): Promise<Record<string, string>> {
   return new Promise((resolve, reject) => {
-    execFile(
-      opts.shell,
-      ['-ilc', 'env -0'],
-      { timeout: opts.timeoutMs, maxBuffer: 16 * 1024 * 1024, encoding: 'utf8', windowsHide: true },
-      (error, stdout) => {
-        if (error) {
-          reject(error.killed ? new Error(`timed out after ${opts.timeoutMs} ms`) : error);
-          return;
-        }
-        const env = parseNulSeparatedEnv(stdout);
-        if (!('PATH' in env)) {
-          reject(new Error('capture printed no PATH'));
-          return;
-        }
-        resolve(env);
-      },
-    );
+    let child: ChildProcess;
+    try {
+      child = spawn(opts.shell, ['-ilc', 'env -0'], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+    } catch (error) {
+      reject(error instanceof Error ? error : new Error(String(error)));
+      return;
+    }
+    const chunks: Buffer[] = [];
+    let bytes = 0;
+    let settled = false;
+    const timedOut = () => new Error(`timed out after ${opts.timeoutMs} ms`);
+    const finish = (error: Error | null, env?: Record<string, string>) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(kill);
+      clearTimeout(giveUp);
+      if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+      child.stdout?.destroy(); // a grandchild may still hold the pipes; the host lets go of them
+      child.stderr?.destroy();
+      if (error) reject(error);
+      else resolve(env!);
+    };
+    const kill = setTimeout(() => child.kill('SIGKILL'), opts.timeoutMs);
+    const giveUp = setTimeout(() => finish(timedOut()), opts.timeoutMs + SHELL_CAPTURE_GRACE_MS);
+    child.stdout!.on('data', (chunk: Buffer) => {
+      bytes += chunk.length;
+      if (bytes > MAX_CAPTURE_BYTES) finish(new Error(`capture printed more than ${MAX_CAPTURE_BYTES} bytes`));
+      else chunks.push(chunk);
+    });
+    child.stderr!.resume(); // an rc file's chatter is drained, never read
+    child.on('error', (error) => finish(error));
+    child.on('close', (code, signal) => {
+      if (signal !== null) return finish(signal === 'SIGKILL' ? timedOut() : new Error(`the shell ended on ${signal}`));
+      if (code !== 0) return finish(new Error(`the shell exited ${code}`));
+      const env = parseNulSeparatedEnv(Buffer.concat(chunks).toString('utf8'));
+      if (!('PATH' in env)) return finish(new Error('capture printed no PATH'));
+      finish(null, env);
+    });
   });
 }
 
