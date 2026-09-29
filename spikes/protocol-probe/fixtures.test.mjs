@@ -117,10 +117,17 @@ test('pass3 nested-agents: the grandchild starts on the parent wire at depth 2 a
  const started=ins(r,f=>f.subtype==='task_started'&&f.task_type==='local_agent').map(x=>x.frame);assert.deepEqual(started.map(f=>f.spawn_depth),[1,2]);
  const meta=JSON.parse(readFileSync(new URL('nested-agents-sidecars/agent-'+started[1].task_id+'.meta.json',dir3),'utf8'));assert.equal(meta.parentAgentId,started[0].task_id);
  const issued=ins(r,f=>f.type==='assistant'&&f.parent_tool_use_id===started[0].tool_use_id).flatMap(x=>x.frame.message.content).some(b=>b.type==='tool_use'&&b.id===started[1].tool_use_id);assert.ok(issued);});
-test('pass3 stop-task: each stop emits the snapshot without the task, killed, then stopped, all before the stop_task response',()=>{const r=load3('stop-task');
+test('pass3 stop-task: each stop emits the snapshot without the task, killed, then stopped, all after the request and before the stop_task response',()=>{const r=load3('stop-task');
  const stops=notes(r,'stop_response');assert.deepEqual(stops.map(s=>s.kind),['shell','agent','workflow']);
- for(const s of stops){assert.equal(s.subtype,'success');const seq=ins(r,f=>f.type==='system'&&(f.subtype==='task_updated'||f.subtype==='task_notification')&&f.task_id===s.task_id);
-  const notification=seq.find(x=>x.frame.subtype==='task_notification');assert.equal(notification.frame.status,'stopped');assert.equal(seq.find(x=>x.frame.subtype==='task_updated').frame.patch.status,'killed');
-  assert.ok(notification.seq<s.seq);const snap=ins(r,f=>f.subtype==='background_tasks_changed').filter(x=>x.seq<seq[0].seq).at(-1);assert.ok(!snap.frame.tasks.some(t=>t.task_id===s.task_id));}
- assert.equal(notes(r,'stop_missing')[0].subtype,'success');assert.deepEqual(notes(r,'stop_missing')[0].framesAfter,[]);});
+ const requests=r.filter(x=>x.direction==='out'&&x.frame.request?.subtype==='stop_task');
+ for(const s of stops){assert.equal(s.subtype,'success');const request=requests.find(x=>x.frame.request.task_id===s.task_id);assert.ok(request.seq<s.seq);
+  const frames=ins(r,f=>f.type==='system'&&(f.subtype==='task_updated'||f.subtype==='task_notification')&&f.task_id===s.task_id);
+  const updated=frames.find(x=>x.frame.subtype==='task_updated'),notification=frames.find(x=>x.frame.subtype==='task_notification');
+  assert.equal(updated.frame.patch.status,'killed');assert.equal(notification.frame.status,'stopped');
+  assert.ok(request.seq<updated.seq&&updated.seq<notification.seq&&notification.seq<s.seq);
+  const snap=ins(r,f=>f.subtype==='background_tasks_changed').filter(x=>x.seq>request.seq&&x.seq<updated.seq);
+  assert.equal(snap.length,1);assert.ok(!snap[0].frame.tasks.some(t=>t.task_id===s.task_id));}
+ for(const event of ['stop_missing','stop_again']){const n=notes(r,event)[0];assert.equal(n.subtype,'success');assert.deepEqual(n.framesAfter,[]);}});
+test('pass3 nested-agents-sidecars carry no secrets',()=>{const side=new URL('nested-agents-sidecars/',dir3);const files=readdirSync(side);assert.equal(files.length,4);
+ for(const file of files){const text=readFileSync(new URL(file,side),'utf8');assert.ok(!text.includes('sk-ant-'),file);if(secret&&secret.length>=8)assert.ok(!text.includes(secret),file);}});
 // C8b end
