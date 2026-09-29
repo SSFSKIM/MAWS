@@ -137,8 +137,8 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
 
   // -- engine.* ------------------------------------------------------------------------------------------------------
   handle('engine.binaryInfo', async () => {
-    const { problem: _problem, ...info } = await binaryProbe();
-    return info;
+    const { path, expectedVersion, version, ok, error } = await binaryProbe(); // `problem` is the launcher's, not X2's
+    return { path, expectedVersion, version, ok, error };
   });
   handle('engine.relayHealth', async ({ force }) => (deps.checkRelay ?? ((f: boolean) => checkRelayHealth(RELAY_URL, undefined, { force: f })))(force));
   handle('engine.sessions', async () => table.list().map((session) => session.status()));
@@ -230,7 +230,7 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
         // the X6 protected keys hold for the process's life, not only at launch
         mergeFlagSettings({ ...specs.get(appSessionId as AppSessionId)!, effort: session.status().effort, extraSettings: settings });
       } catch (error) {
-        if (error instanceof LaunchSpecConflict) throw new Error(error.message);
+        if (error instanceof LaunchSpecConflict) throw new Error(error.message, { cause: error });
         throw error;
       }
       await controls.applyFlagSettings(client, { settings });

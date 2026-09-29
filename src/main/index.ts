@@ -4,6 +4,12 @@ import { createHosts } from './hosts';
 import { installRouter } from './ipc/router';
 import { startSettings } from './settings';
 import { appUrl, createWindow, installContentSecurityPolicy } from './window';
+// C3 start
+import { FileAttentionStore } from './attention/file-attention-store';
+import { startAttentionService } from './attention/service';
+import { emit } from './ipc/events';
+import { registerMainHandler } from './ipc/router';
+// C3 end
 
 // A fresh profile for the end-to-end smoke (and anyone else who wants one); must be set before the app is ready.
 if (process.env.MAWS_USER_DATA) app.setPath('userData', process.env.MAWS_USER_DATA);
@@ -22,6 +28,11 @@ app.whenReady().then(() => {
   const hosts = createHosts();
   installRouter({ appUrl, dispatchToHost: hosts.dispatch });
   const settings = startSettings(join(app.getPath('userData'), 'settings.json'));
+  // C3 start: the engine host's userData travels in the environment it is forked with (the host protocol's hello carries
+  // no fields), and main's attention service answers `attention.*` over the hosts' events (C3 execution document, M5).
+  process.env.MAWS_USER_DATA = app.getPath('userData');
+  startAttentionService({ onEvent: (name, listener) => hosts.onEvent(name, listener), dispatch: hosts.dispatch, store: new FileAttentionStore(join(app.getPath('userData'), 'attention.json')), emit, register: registerMainHandler });
+  // C3 end
 
   // The hosts belong to the app, not to a window or a page (§4.1): they start here, before any window exists, and
   // `start()` is idempotent, so opening a window again forks nothing and a reload never reaches them.

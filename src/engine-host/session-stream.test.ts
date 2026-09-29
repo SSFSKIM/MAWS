@@ -111,7 +111,7 @@ describe('session event stream: batches, the ring and the reload snapshot', () =
   });
 
   it('a journal that can no longer be read answers what the ring holds, incomplete', async () => {
-    const { events, launchId, sessionId, appSessionId, journalPath } = await recordedInit();
+    const { events, launchId, sessionId, appSessionId } = await recordedInit();
     const stream = new SessionStream({ appSessionId, launchId, sessionId: sessionId as never, journalPath: join(dir, 'gone', 'LAUNCHS1.jsonl'), emit: recorder().emit, ringSize: 5 });
     stream.events(events);
     const answer = await stream.snapshot(null, null);
