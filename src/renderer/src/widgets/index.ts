@@ -20,6 +20,7 @@ import { ResumeWidget } from './ResumeWidget';
 import { SandboxWidget } from './SandboxWidget';
 import { SkillsWidget } from './SkillsWidget';
 import { StatusWidget } from './StatusWidget';
+import { TYPED_APPLY } from './typed';
 import { UsageWidget } from './UsageWidget';
 
 export const WIDGETS: Record<WidgetCommandName, SlashWidget['component']> = {
@@ -46,7 +47,7 @@ export const WIDGETS: Record<WidgetCommandName, SlashWidget['component']> = {
 };
 
 export function registerAllWidgets(): () => void {
-  const offs = WIDGET_COMMANDS.map((w) => w.name).map((name) => registerSlashWidget(name, { title: WIDGET_TITLE[name], component: WIDGETS[name] }));
+  const offs = WIDGET_COMMANDS.map((w) => w.name).map((name) => registerSlashWidget(name, { title: WIDGET_TITLE[name], component: WIDGETS[name], apply: TYPED_APPLY[name] }));
   return () => offs.forEach((off) => off());
 }
 

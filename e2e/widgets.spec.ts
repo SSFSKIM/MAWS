@@ -248,21 +248,54 @@ test.describe('interactive', () => {
     expect(backend.consoleErrors()).toEqual([]);
   });
 
-  test('arguments prefill: /model haiku, /effort high, /compact focus on tests, /rename New title', async ({ backend }) => {
+  // The architect's correction (2026-09-29): a typed argument that resolves applies at Enter through the widget's own
+  // control, the outcome a toast in its words; one that does not, or whose widget asks first, opens the widget with it.
+  test('arguments: a resolved /model, /fast off, /effort and /permissions apply at Enter; the rest open their widget with the argument', async ({ backend }) => {
     const { page } = backend;
     await openPage(page, { appSessionId: READY, mode: 'interactive' });
     await expect(page.getByRole('textbox', { name: 'Message' })).toBeVisible();
+    const inputsOf = async (command: string) => (await commandsOf(backend)).filter((c) => c.command === command).map((c) => c.input);
+    const noWidget = () => expect(page.locator('[data-widget]')).toHaveCount(0);
 
-    await typeCommand(page, '/model haiku');
-    await expect(widget(page, 'model').getByRole('radio', { name: /^Haiku/ })).toHaveAttribute('aria-checked', 'true');
+    await typeCommand(page, '/model opus');
+    await expect(page.getByText('Model · Opus 5.5 (1M context) · set · the next init frame confirms it')).toBeVisible();
+    await noWidget();
+    expect(await inputsOf('session.setModel')).toEqual([{ appSessionId: READY, model: 'opus' }]);
+
+    await typeCommand(page, '/fast off');
+    await expect(page.getByText('Fast mode · off · set · the next init frame confirms it')).toBeVisible();
+    await noWidget();
+    expect(await inputsOf('session.applyFlagSettings')).toEqual([{ appSessionId: READY, settings: { fastMode: false } }]);
+
+    await typeCommand(page, '/fast on'); // its lane warning is the confirmation, so the widget opens with it
+    await expect(widget(page, 'fast')).toContainText('Fast mode disables the auto-mode server lane');
     await page.keyboard.press('Escape');
 
     await typeCommand(page, '/effort high');
-    const effort = widget(page, 'effort');
-    await expect(effort.getByRole('radiogroup', { name: 'Effort levels' }).getByRole('radio', { name: 'high', exact: true })).toHaveAttribute('aria-checked', 'true');
-    await effort.getByRole('button', { name: 'Apply' }).click();
-    await expect.poll(async () => (await commandsOf(backend)).filter((c) => c.command === 'session.setEffort')).toEqual([{ command: 'session.setEffort', input: { appSessionId: READY, effort: 'high' } }]);
+    await expect(page.getByText('Effort · high · set · the next init frame confirms it')).toBeVisible();
+    await noWidget();
+    expect(await inputsOf('session.setEffort')).toEqual([{ appSessionId: READY, effort: 'high' }]);
+
+    await typeCommand(page, '/effort extreme'); // no such level
+    await expect(widget(page, 'effort')).toBeVisible();
     await page.keyboard.press('Escape');
+
+    await typeCommand(page, '/model claude/astra'); // a gateway model in auto: the local-lane note first
+    const model = widget(page, 'model');
+    await expect(model.getByRole('radio', { name: /^astra/ })).toHaveAttribute('aria-checked', 'true');
+    await expect(model.getByRole('note')).toContainText('Auto-mode reviews for this model run locally.');
+    await page.keyboard.press('Escape');
+    expect(await inputsOf('session.setModel')).toHaveLength(1);
+
+    await typeCommand(page, '/permissions acceptEdits');
+    await expect(page.getByText('Permission mode · acceptEdits')).toBeVisible();
+    await noWidget();
+    expect(await inputsOf('session.setPermissionMode')).toEqual([{ appSessionId: READY, mode: 'acceptEdits' }]);
+
+    await typeCommand(page, '/permissions bypassPermissions'); // asks first, as the chip does
+    await expect(widget(page, 'permissions').getByRole('status').first()).toHaveText('bypassPermissions asks first · choose it below');
+    await page.keyboard.press('Escape');
+    expect(await inputsOf('session.setPermissionMode')).toHaveLength(1);
 
     await typeCommand(page, '/compact focus on tests');
     const compact = widget(page, 'compact');

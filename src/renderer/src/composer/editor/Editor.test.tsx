@@ -290,6 +290,36 @@ describe('a registered widget named at Enter opens with its argument', () => {
     expect(opened(container)).toBeNull();
   });
 
+  // The architect's correction (2026-09-29): an argument the widget resolves applies with no widget shown.
+  it('hands a typed argument to the widget’s apply first: applied, nothing opens; not applied, the widget opens with it', async () => {
+    const apply = vi.fn(async (_id: string, args: string) => args === 'opus');
+    const offApply = registerSlashWidget('effort', { title: 'effort', component: ({ args }: { args: string }) => <p data-test-widget>{`effort:${args}`}</p>, apply });
+    const onSubmit = vi.fn(async () => true);
+    const { port } = drafts({ doc: docOf([paragraph(textNode('/effort opus'))]), attachments: [], updatedAt: '2026-09-29T00:00:00.000Z' });
+    const handle = createRef<EditorHandle>();
+    const { container } = render(<Editor appSessionId={APP} cwd="/repo" sessionId={null} drafts={port} client={client} onSubmit={onSubmit} handle={handle} />);
+    const content = contentOf(container);
+    await waitFor(() => expect(content.textContent).toBe('/effort opus'));
+    content.focus();
+    await enter(content);
+    await waitFor(() => expect(apply).toHaveBeenCalledWith(APP, 'opus'));
+    expect(opened(container), 'applied: no widget').toBeNull();
+    expect(handle.current?.serialize().empty).toBe(true);
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    act(() => handle.current?.insertText('/effort extreme'));
+    await enter(content);
+    await waitFor(() => expect(opened(container)).toBe('effort:extreme'));
+    expect(apply).toHaveBeenLastCalledWith(APP, 'extreme');
+
+    act(() => handle.current?.insertText('/effort'));
+    apply.mockClear();
+    await enter(content);
+    await waitFor(() => expect(opened(container)).toBe('effort:'));
+    expect(apply, 'no argument: the widget opens as built').not.toHaveBeenCalled();
+    offApply();
+  });
+
   it('opens a widget through the handle with an argument', async () => {
     const handle = createRef<EditorHandle>();
     const { container } = render(<Editor appSessionId={APP} cwd="/repo" sessionId={null} drafts={drafts(null).port} client={client} handle={handle} />);

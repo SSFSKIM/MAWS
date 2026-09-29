@@ -220,17 +220,23 @@ export class EditorController {
     if (!editor || disabled !== null || this.busy) return;
     const s = serializeDraft(editor.getJSON(), { sessionId, cwd });
     if (s.empty) return;
-    // C11 start: a typed `/<name> <args>` naming a registered widget opens it with its argument, as choosing the row does
-    // (a registered widget wins over the headless text path); the document and its draft clear as a palette choice's do.
-    // Only a one-line document: a multi-line draft that starts with a widget's name is a message, and sends as text.
+    // C11 start: a typed `/<name> <args>` naming a registered widget is the widget's (a registered widget wins over the
+    // headless text path): an argument the widget resolves fully applies through the widget's own control path with no
+    // widget shown, and otherwise the widget opens with its argument, as choosing the row does. The document and its
+    // draft clear as a palette choice's do. Only a one-line document: a multi-line draft that starts with a widget's name
+    // is a message, and sends as text.
     const plain =
       s.mode === 'send' && typeof s.content === 'string' && Object.keys(s.pastedContents).length === 0 && !isMultiline(editor.getJSON()) && editingOfDoc({ attrs: editor.state.doc.attrs }) === null;
     const typed = plain ? /^\/(\S+)(?:\s+([\s\S]*))?$/.exec(s.display.trim()) : null;
-    if (typed && slashWidget(typed[1])) {
+    const widget = typed ? slashWidget(typed[1]) : null;
+    if (typed && widget) {
       this.writer.cancel();
       this.drafts.save(null);
       this.setDoc(emptyDoc(), { silently: true, caret: null });
-      this.view.setWidget({ name: typed[1], args: typed[2] ?? '' });
+      const args = typed[2] ?? '';
+      const open = () => this.view.setWidget({ name: typed[1], args });
+      if (widget.apply && args.trim() !== '') void widget.apply(appSessionId, args.trim()).then((applied) => applied || open(), open);
+      else open();
       return;
     }
     // C11 end

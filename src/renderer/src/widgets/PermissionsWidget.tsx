@@ -10,9 +10,9 @@ import type { PermissionMode } from '@shared/graph/enums';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { ListModelsResponse, ListPermissionRulesResponse } from '@shared/wire/control';
-import { liveModeBinding, ModeMenu, MODE_REFUSAL_WORDS, NOT_RUNNING } from '../statusline';
+import { liveModeBinding, ModeMenu, MODE_OPTIONS, MODE_REFUSAL_WORDS, NOT_RUNNING } from '../statusline';
 import { useSessions } from '../stores/sessions';
-import { FRAME, PERMISSIONS, WIDGET_FOOT, WIDGET_TITLE } from './copy';
+import { FRAME, PERMISSIONS, TYPED, WIDGET_FOOT, WIDGET_TITLE } from './copy';
 import { Group, Mono, parseEach, Row, Rows } from './parts';
 import { useEngineRead } from './read';
 import { WidgetFrame } from './WidgetFrame';
@@ -148,9 +148,19 @@ function ModeSegment({ appSessionId, status }: { appSessionId: AppSessionId; sta
 
 // The mode is C3's status and needs no read, so the segment shows while the rules read is loading, has failed, or (a
 // passive harness over a journal that never recorded `list_permission_rules`) never runs.
-export function PermissionsWidget({ appSessionId, close }: { appSessionId: AppSessionId; args: string; close(): void }) {
+// A typed argument the widget did not apply (it asks first, or names no mode), said above the segment.
+const argumentLine = (args: string): string | null => {
+  const arg = args.trim();
+  if (arg === '') return null;
+  const option = MODE_OPTIONS.find((o) => o.mode.toLowerCase() === arg.toLowerCase());
+  if (!option) return TYPED.modeUnknown(arg);
+  return option.confirm ? TYPED.modeAsks(option.mode) : null;
+};
+
+export function PermissionsWidget({ appSessionId, args, close }: { appSessionId: AppSessionId; args: string; close(): void }) {
   const read = useEngineRead('session.listPermissionRules', { appSessionId });
   const status = useSessions((s) => s.engine.get(appSessionId) ?? null);
+  const argument = argumentLine(args);
   return (
     <WidgetFrame
       appSessionId={appSessionId}
@@ -161,6 +171,11 @@ export function PermissionsWidget({ appSessionId, close }: { appSessionId: AppSe
       error={read.data ? read.error : null}
       close={close}
     >
+      {argument && (
+        <p role="status" className="m-0 mb-1 text-ui-sm text-fg-muted">
+          {argument}
+        </p>
+      )}
       {status && <ModeHeader mode={modeOf(status)} grants={status.grants.length} segment={<ModeSegment appSessionId={appSessionId} status={status} />} />}
       {read.data ? (
         <PermissionsBody view={present(read.data.state, status)} withMode={false} />

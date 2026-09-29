@@ -294,6 +294,18 @@ export const MODEL = {
   } as Record<string, string>,
 };
 
+// A typed `/<widget> <args>` applied at Enter (the architect's correction of 2026-09-29): the toast after the control
+// answered, in the widget's words; a refusal or the transport branch toasts the widget's error words instead.
+export const TYPED = {
+  model: (name: string) => `Model · ${name} · ${MODEL.pending}`,
+  effort: (level: string | null) => `Effort · ${level ?? MODEL.engineDefault} · ${MODEL.pending}`,
+  fastOff: `Fast mode · off · ${MODEL.pending}`,
+  mode: (mode: string) => `Permission mode · ${mode}`,
+  // the permissions widget opened with an argument it did not apply
+  modeAsks: (mode: string) => `${mode} asks first · choose it below`,
+  modeUnknown: (arg: string) => `No permission mode named ${arg}`,
+};
+
 // Plugins' Reload.
 export const RELOAD = {
   reload: 'Reload',
