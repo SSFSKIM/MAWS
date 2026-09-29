@@ -20,15 +20,20 @@ export interface Foreground {
 // Runs a probe program and answers its exit code and stdout, or null when it could not run (missing, timed out).
 export type ProbeRunner = (file: string, args: string[]) => Promise<{ code: number; stdout: string } | null>;
 
+// Any shell's name as node-pty reports it (a login shell's carries a leading dash): what an idle prompt is called.
+const SHELL_NAME = /^-?(ba|z|da|k|tc|fi)?sh$/;
+
 // Three readings, most exact first: the terminal's foreground group from `ps`; when `ps` fails, the shell's children
 // from `pgrep` (a foreground job is always a descendant of the shell, so a shell with no children holds the terminal
-// itself); when that fails too or the shell has children (a background job, a prompt's helper), the name rule, which
-// errs toward asking before close.
+// itself, unless it exec'd a program, which then owns the pid under its own name); when that fails too, the shell has
+// children (a background job, a prompt's helper) or the childless pid runs something other than a shell, the name
+// rule, which errs toward asking before close.
 export async function foregroundOf(target: ForegroundTarget, run: ProbeRunner = runProbe): Promise<Foreground> {
   const process = target.process || null;
   const group = await foregroundGroup(target.pid, run);
   if (group !== null) return { process, busy: group !== target.pid };
-  if ((await hasChildren(target.pid, run)) === false) return { process, busy: false };
+  const shellNamed = process !== null && (process === basename(target.shell) || SHELL_NAME.test(process));
+  if (shellNamed && (await hasChildren(target.pid, run)) === false) return { process, busy: false };
   return { process, busy: process !== null && process !== basename(target.shell) };
 }
 
