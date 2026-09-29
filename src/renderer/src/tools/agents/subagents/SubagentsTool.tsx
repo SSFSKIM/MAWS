@@ -7,7 +7,7 @@ import { useEffect, useSyncExternalStore } from 'react';
 import type { AgentId, AppSessionId, ToolUseId } from '@shared/graph/ids';
 import { Icon } from '../../../app/IconButton';
 import type { PanelTool, PanelToolContext } from '../../../panel/tool';
-import { AGENT_TOOL_IDS } from '../actions';
+import { AGENT_TOOL_IDS } from '../tool-ids';
 import { SUBAGENTS_COPY } from '../copy';
 import { useTaskGraph } from '../store';
 import { AgentList } from './AgentList';

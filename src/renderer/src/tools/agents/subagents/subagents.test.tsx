@@ -12,7 +12,7 @@ import type { SubagentEntry, WorkflowRun } from '@shared/ipc/schema/fs';
 import { digest, item, record, status } from '../../../../../../test/support/builders';
 import { event, sidecarsOf, workflowRunsOf } from '../../../../../../test/support/agents-events';
 import { connectKeys } from '../../../keymap/dispatcher';
-import { instanceOf, panelHost, registerPanelTool } from '../../../panel/host';
+import { instanceOf, panelHost } from '../../../panel/host';
 import type { PanelToolContext } from '../../../panel/tool';
 import { itemFor, permission } from '../../../request-card/test-requests';
 import { useAttention } from '../../../stores/attention';
@@ -27,6 +27,7 @@ import { RELAY_LONG_WAIT_MS, relayText } from '../model/relay';
 import { useRelays } from '../relay-store';
 import { useTaskGraph } from '../store';
 import { SubagentsSummary } from './SubagentsSummary';
+import type { BackgroundHandle } from '../background/BackgroundTool';
 import { subagentsTool, type SubagentsHandle, type SubagentsParams } from './SubagentsTool';
 
 // K2's test: the drill-in reaches the child through C6's `ipcSource` and builds nothing of its own.
@@ -689,12 +690,11 @@ describe('openSubagent', () => {
     expect(openedState()?.view).toEqual({ kind: 'pending', toolUseId: 'tu-a1' });
   });
 
-  it('routes a workflow to Background work, and does nothing while that tool is not registered', () => {
-    expect(() => agentTranscriptActions.openSubagent(ref({ kind: 'workflow', taskId: 'wf' as TaskId }))).not.toThrow();
-    expect(panelOf(HOST_A)?.tabs ?? []).toEqual([]);
-    const probe = { ...subagentsTool, id: 'background', title: 'Background work' };
-    registerPanelTool(probe as never);
+  // C8b M3: Background work registers beside Subagents, so the workflow route is live (it opened nothing before).
+  it('routes a workflow to Background work with the run selected', () => {
     act(() => agentTranscriptActions.openSubagent(ref({ kind: 'workflow', taskId: 'wf' as TaskId })));
-    expect(panelOf(HOST_A)?.tabs.map((t) => t.toolId)).toEqual(['background']);
+    const tab = panelOf(HOST_A)?.tabs.find((t) => t.toolId === 'background');
+    expect(tab).toBeDefined();
+    expect((instanceOf(tab!.id)?.state as BackgroundHandle).snapshot()).toMatchObject({ appSessionId: HOST_A, selected: 'wf' });
   });
 });

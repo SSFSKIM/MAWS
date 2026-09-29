@@ -77,12 +77,20 @@ export const RELAY_COPY = {
 
 export const BACKGROUND_COPY = {
   title: 'Background work',
+  noSession: 'Open a session to see its background work', // a pinned tab while no session is shown
   workflows: (n: number) => `Workflows · ${n}`,
   shellsRunning: (n: number) => `Shells · ${n} running`,
   monitors: (n: number) => `Monitors · ${n}`,
   tasks: (completed: number, total: number) => `Tasks · ${completed}/${total}`,
-  // a workflow card: the node's description as its title, then this line (the frame's summary is not on X1)
-  workflowLine: (workflowName: string, elapsed: string, agents: number, tokens: string) => `workflow ${workflowName} · ${elapsed} · ${plural(agents, 'agent')} · ${tokens}`,
+  tasksHeading: 'Tasks', // before the list is read, or when it cannot be
+  // a workflow card: the node's description as its title, then this line (the frame's summary is not on X1); a run whose
+  // name no frame or snapshot gave reads `workflow · …`
+  workflowLine: (workflowName: string | null, elapsed: string, agents: number, tokens: string) =>
+    `workflow${workflowName ? ` ${workflowName}` : ''} · ${elapsed} · ${plural(agents, 'agent')} · ${tokens}`,
+  phasesLabel: 'Phases', // the card's disclosure over its phase rows and tables
+  // an ended task's state word (a card's badge, a row's `· <status> <ago>`)
+  status: { completed: 'completed', failed: 'failed', stopped: 'stopped', exited: 'ended with the session', unknown: 'status unavailable' },
+  runsUnavailable: (message: string) => `Workflow runs unavailable: ${message}`,
   phase: (title: string, done: number, total: number) => `${title} ${done}/${total}`,
   phaseQueued: (title: string) => `${title} · Queued`,
   phaseUntitled: (index: number) => `Phase ${index}`, // agents naming a phaseIndex with no workflow_phase row
@@ -93,7 +101,9 @@ export const BACKGROUND_COPY = {
   stopping: 'stopping…',
   stopFailed: (message: string) => `Couldn't stop it: ${message}`,
   running: (description: string, elapsed: string) => `${description} · running ${elapsed}`, // a shell or a monitor
+  runningUntimed: (description: string) => `${description} · running · elapsed unavailable`, // known from the status's list alone
   ended: (description: string, status: string, ago: string) => `${description} · ${status} ${ago}`,
+  endedUndated: (description: string, status: string) => `${description} · ${status}`, // no end time known, or ended with the session
   output: 'Output',
   outputPending: 'Output path not reported yet',
   earlierCompleted: (n: number) => `${plural(n, 'earlier task')} completed`,
@@ -115,6 +125,8 @@ export const LOG_COPY = {
   endOfFile: 'End of file',
   noFile: 'No file to open: the engine reported no output file for this cell; the transcript shows what was kept',
   notRestored: 'This log was not restored. Reopen it from its row',
+  copyPath: 'Copy path',
+  copied: 'Copied',
 } as const;
 
 // The summary card's Subagents and Background work sections, filled by the tools' `summary` components.

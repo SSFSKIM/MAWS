@@ -36,10 +36,15 @@ export function formatAgo(ms: number): string {
   return `${Math.floor(ms / DAY)}d ago`;
 }
 
+// `512`, `38.1k`, `1.2M`: a token count where its column names the unit (a workflow's agent table).
+export function formatTokenCount(n: number): string {
+  if (n < 1000) return String(n);
+  const k = Math.round(n / 100) / 10;
+  if (k < 1000) return `${k.toFixed(1)}k`;
+  return `${(Math.round(n / 100_000) / 10).toFixed(1)}M`;
+}
+
 // `512 tokens`, `38.1k tokens`, `1.2M tokens`.
 export function formatTokens(n: number): string {
-  if (n < 1000) return `${n} ${n === 1 ? 'token' : 'tokens'}`;
-  const k = Math.round(n / 100) / 10;
-  if (k < 1000) return `${k.toFixed(1)}k tokens`;
-  return `${(Math.round(n / 100_000) / 10).toFixed(1)}M tokens`;
+  return n === 1 ? '1 token' : `${formatTokenCount(n)} tokens`;
 }
