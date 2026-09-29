@@ -90,14 +90,6 @@ export function ipcDrafts(client: MawsBridge, appSessionId: AppSessionId): Draft
   };
 }
 
-// The caret is on the first (or last) visual line of the first (or last) paragraph.
-function atEdge(view: EditorView, direction: 'up' | 'down'): boolean {
-  const { $from } = view.state.selection;
-  const index = $from.index(0);
-  const edgeParagraph = direction === 'up' ? index === 0 : index === view.state.doc.childCount - 1;
-  return edgeParagraph && view.endOfTextblock(direction);
-}
-
 export class EditorController {
   private inputs: ControllerInputs;
   private editor: TiptapEditor | null = null;
@@ -168,8 +160,8 @@ export class EditorController {
       void this.submit('send');
       return true;
     }
-    if (event.key === 'ArrowUp' && plain) return this.history(view, 'up');
-    if (event.key === 'ArrowDown' && plain) return this.history(view, 'down');
+    if (event.key === 'ArrowUp' && plain) return this.history('up');
+    if (event.key === 'ArrowDown' && plain) return this.history('down');
     if (event.key === 'Escape') return this.inputs.onEscape?.() ?? false;
     return false;
   }
@@ -255,22 +247,20 @@ export class EditorController {
     if (result.ok) this.listed = result.value.entries;
   }
 
-  private history(view: EditorView, direction: 'up' | 'down'): boolean {
+  private history(direction: 'up' | 'down'): boolean {
     const editor = this.editor!;
     const navigating = this.nav.index !== null;
     const doc = editor.getJSON();
+    // ArrowUp from an empty editor starts; while recalling, both arrows move between entries (an edit ends it)
     if (direction === 'up' ? !navigating && !isEmptyDoc(doc) : !navigating) return false;
-    if (navigating && !atEdge(view, direction)) return false;
     if (!navigating) {
       const transcript = useTranscriptStore.getState();
       this.recalls = recallEntries(transcript.rows(this.inputs.appSessionId), transcript.activity(this.inputs.appSessionId), this.listed);
     }
     const next = historyNavigation(this.nav, direction, this.recalls.length, doc);
     this.nav = next.nav;
-    // The caret goes where the next press continues the walk: to the start going back, to the end going forward.
-    const caret = direction === 'up' ? 'start' : 'end';
-    if (next.show?.kind === 'entry') this.setDoc(recallDoc(this.recalls[next.show.index]), { silently: true, caret });
-    else if (next.show?.kind === 'draft') this.setDoc(next.show.doc, { silently: true, caret });
+    if (next.show?.kind === 'entry') this.setDoc(recallDoc(this.recalls[next.show.index]), { silently: true, caret: 'end' });
+    else if (next.show?.kind === 'draft') this.setDoc(next.show.doc, { silently: true, caret: 'end' });
     return next.show !== null || navigating;
   }
 
