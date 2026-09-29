@@ -1,5 +1,6 @@
 // The Terminal tool against a mocked registry (C9 M4 unit pins): the state factory, the close veto, the attach entry
 // point, and the view's mount, worktree warning, title suffix, lifecycle bars and context menu.
+import { StrictMode } from 'react';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -246,12 +247,26 @@ describe('terminal view', () => {
   it('mounts the terminal’s container while visible without taking focus, focuses on request, and detaches on unmount', () => {
     const state = newState();
     const { rerender, unmount } = render(<View state={state} ctx={context()} />);
-    expect(registry.terminals.mount).toHaveBeenCalledWith(state.terminalId, expect.any(HTMLElement));
+    expect(registry.terminals.mount).toHaveBeenCalledWith(state.terminalId, expect.any(HTMLElement), { focus: false });
     expect(registry.terminals.focus).not.toHaveBeenCalled();
     rerender(<View state={state} ctx={context({ focusRequest: 1 })} />);
     expect(registry.terminals.focus).toHaveBeenCalledWith(state.terminalId);
     unmount();
     expect(registry.terminals.unmount).toHaveBeenCalledWith(state.terminalId);
+  });
+
+  it('keeps a selected tab’s focus through StrictMode’s simulated remount', () => {
+    const state = newState();
+    render(
+      <StrictMode>
+        <View state={state} ctx={context({ focusRequest: 1 })} />
+      </StrictMode>,
+    );
+    // the first pass focuses and uses the request up; the remount that follows unmounts the container and mounts it
+    // again with the focus carried over, which the registry restores once the container is back in place
+    expect(registry.terminals.focus).toHaveBeenCalledOnce();
+    expect(registry.terminals.unmount).toHaveBeenCalledOnce();
+    expect(registry.terminals.mount).toHaveBeenLastCalledWith(state.terminalId, expect.any(HTMLElement), { focus: true });
   });
 
   it('does not replay a focus request made before the terminal started, nor one a remount carries over', () => {
@@ -276,7 +291,7 @@ describe('terminal view', () => {
     expect(registry.terminals.open).toHaveBeenCalledWith({ appSessionId: B, label: 'terminal:5', cwd: '/tmp/maws-harness/b' });
     expect(state.terminalId).toBe('t1');
     expect(screen.queryByRole('status', { name: 'terminal pending' })).toBeNull();
-    expect(registry.terminals.mount).toHaveBeenCalledWith('t1', expect.any(HTMLElement));
+    expect(registry.terminals.mount).toHaveBeenCalledWith('t1', expect.any(HTMLElement), { focus: false });
     rerender(<View state={state} ctx={context({ appSessionId: A, session: SESSION_A })} />);
     expect(registry.terminals.open).toHaveBeenCalledTimes(1);
   });

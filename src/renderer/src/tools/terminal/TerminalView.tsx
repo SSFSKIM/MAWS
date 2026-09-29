@@ -32,18 +32,27 @@ export function TerminalView({ state, ctx }: { state: TerminalTabState; ctx: Pan
     if (!id) ensureTerminal(state, { appSessionId, session });
   }, [id, state, appSessionId, session]);
 
-  // Mounting never takes focus (a restored or session-switched tab must not steal it from the composer); the host
-  // asks for focus through `focusRequest`.
+  // Whether the focus effect below focused the terminal since the mount effect last ran. StrictMode's simulated remount
+  // (dev builds) unmounts the container right after that focus, dropping it, and the request is already used up; the
+  // mount that follows carries it over. Any later run of the mount effect clears it.
+  const acted = useRef(false);
+
+  // Mounting never takes focus of its own accord (a restored or session-switched tab must not steal it from the
+  // composer); the host asks for focus through `focusRequest`.
   useEffect(() => {
+    const refocus = acted.current;
+    acted.current = false;
     if (!id || !visible) return;
-    terminals.mount(id, surfaceRef.current!);
+    terminals.mount(id, surfaceRef.current!, { focus: refocus });
     return () => terminals.unmount(id);
   }, [id, visible]);
 
   // A request is honoured once, when it is new: one made while the tab had no terminal (a deferred tab) is used up
   // then, so the terminal starting later does not replay it, and a remount under the same counter takes no focus.
   useEffect(() => {
-    if (takeFocusRequest(state, focusRequest) && id) terminals.focus(id);
+    if (!takeFocusRequest(state, focusRequest) || !id) return;
+    terminals.focus(id);
+    acted.current = true;
   }, [id, focusRequest, state]);
 
   useEffect(() => setTitle(title), [setTitle, title]);

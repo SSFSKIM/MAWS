@@ -22,7 +22,9 @@ export interface PanelToolContext {
   status: EngineSessionStatus | null; // C3's status when the session is live in this app; null for a disk-only session
   pinned: boolean;
   visible: boolean; // selected and the panel is not collapsed
-  focusRequest: number; // increments when the host wants the tool to take focus (tab selection, panel opened)
+  // Increments when the host wants the tool to take focus (tab selection, panel opened). One counter per tab that only
+  // grows and lives as long as the tab's state (across unmounts), so a tool can remember the last value it acted on.
+  focusRequest: number;
   setTitle(suffix: string | null): void; // "Terminal · claude"
   close(): void; // runs beforeClose, then dispose
   openTool: typeof panelHost.addTool; // a tool opening another
