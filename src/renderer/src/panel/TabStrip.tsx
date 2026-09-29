@@ -60,7 +60,7 @@ function Tab({ tab, selected, canPin, bodyId, onSelect }: { tab: PanelTabRef; se
   const title = tool?.title ?? tab.toolId; // a placeholder shows its tool id
   const pinnable = tool ? tool.pinnable : true;
   const ToolIcon = tool?.icon;
-  const revealed = selected ? '' : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100';
+  const revealed = selected ? '' : 'hidden group-hover:inline-flex group-focus-within:inline-flex'; // unrevealed glyphs take no width
 
   return (
     <div className={`group flex h-7 max-w-48 min-w-18 shrink-0 items-center rounded-sm ${selected ? 'bg-bg-active text-fg' : 'text-fg-muted hover:bg-bg-hover hover:text-fg'}`}>
@@ -106,7 +106,7 @@ function GlyphButton(props: { label: string; pressed?: boolean; disabled?: boole
       title={props.label}
       disabled={props.disabled}
       onClick={props.onClick}
-      className={`inline-flex size-5 shrink-0 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:opacity-100 focus-visible:outline-2 disabled:pointer-events-none disabled:text-fg-faint ${props.className}`}
+      className={`inline-flex size-5 shrink-0 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2 disabled:pointer-events-none disabled:text-fg-faint ${props.className}`}
     >
       {props.children}
     </button>
