@@ -49,6 +49,20 @@ describe('layout.pickFiles', () => {
     expect(files).toEqual([{ path: folder, name: 'extra', bytes: 0, mediaType: 'inode/directory', data: null }]);
   });
 
+  it('answers HEIC, BMP and TIFF by path: the Messages API and the canvas downscale take only PNG, JPEG, GIF and WebP', async () => {
+    const picked = ['a.heic', 'b.bmp', 'c.tiff', 'd.webp'].map((name) => {
+      writeFileSync(join(dir, name), 'x');
+      return join(dir, name);
+    });
+    const { files } = await pickFiles({ kind: 'files', directory: null, multiple: true }, { showOpenDialog: dialogAnswering(picked) });
+    expect(files.map((f) => [f.name, f.mediaType, f.data])).toEqual([
+      ['a.heic', 'image/heic', null],
+      ['b.bmp', 'image/bmp', null],
+      ['c.tiff', 'image/tiff', null],
+      ['d.webp', 'image/webp', Buffer.from('x').toString('base64')],
+    ]);
+  });
+
   it('answers nothing for a cancelled dialog and data: null over the caps', async () => {
     expect(await pickFiles({ kind: 'files', directory: null, multiple: true }, { showOpenDialog: dialogAnswering([join(dir, 'x')], true) })).toEqual({ files: [] });
     expect(IMAGE_MAX_BYTES).toBe(20 * 1024 * 1024);
