@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import * as z from 'zod';
 import { SessionEventSchema, type SessionEvent } from '@shared/graph/events';
-import { ClaimSessionResponseSchema, GetStatusResponseSchema, InitializeResponseSchema, RewindConversationResponseSchema, RewindFilesResponseSchema } from '@shared/wire/control';
+import { ClaimSessionResponseSchema, GetStatusResponseSchema, GetWorkspaceDiffResponseSchema, InitializeResponseSchema, RewindConversationResponseSchema, RewindFilesResponseSchema } from '@shared/wire/control';
 import { FIXTURE_PASSES, listJournals, loadJournal, type FixturePass } from '../../../test/support/fixtures';
 import { RELAY_URL } from '../launch';
 import { replayFixture, type ConformanceRun } from './harness';
@@ -35,10 +35,11 @@ const idSuffix = (event: SessionEvent) => event.id.split(':').slice(-2).join(':'
 const seq = (event: SessionEvent | undefined): number => event?.seq ?? -1; // every live event has a row; -1 only if a pin's lookup missed
 
 describe('normaliser replays every probe fixture into the X1 graph', () => {
-  it('sees both recorded passes and an empty pass 3', () => {
+  it('sees the three recorded passes', () => {
     expect(listJournals('pass1')).toHaveLength(10);
     expect(listJournals('pass2')).toHaveLength(30);
-    expect(listJournals('pass3')).toEqual([]);
+    // C10's fork-worktree and C8c's workspace-diff probes (copied from master at 644ea7a)
+    expect(listJournals('pass3')).toEqual(['fork-worktree-fork', 'fork-worktree-resume-in-b', 'fork-worktree-start', 'workspace-diff-branch', 'workspace-diff-dirty']);
   });
 
   for (const pass of FIXTURE_PASSES) {
@@ -196,6 +197,34 @@ describe('normaliser: per-fixture graph facts (C2 findings restated)', () => {
     expect((rewinds[0]!.response as { reason: string }).reason).toBe('stale_target');
     const files = requests.find((r) => r.subtype === 'rewind_files');
     expect(RewindFilesResponseSchema.parse(files?.response)).toEqual({ canRewind: false, error: 'File rewinding is not enabled.' });
+  });
+
+  it("pass3/workspace-diff-*: every get_workspace_diff response parses with the typed schema (C8c's ask)", async () => {
+    const dirty = await run('pass3', 'workspace-diff-dirty');
+    const branch = await run('pass3', 'workspace-diff-branch');
+    const diffs = (r: ConformanceRun) => r.requests.filter((q) => q.subtype === 'get_workspace_diff');
+    expect(diffs(dirty).map((q) => [q.seq, q.ok])).toEqual([[7, true], [12, true], [17, true]]); // answered at seq 8, 13, 18
+    expect(diffs(branch).map((q) => [q.ok])).toEqual([[true], [true]]); // answered at seq 7, 12
+    const raw = (run: ConformanceRun, seq: number) => (loadJournal('pass3', run === dirty ? 'workspace-diff-dirty' : 'workspace-diff-branch').find((r) => r.seq === seq)!.frame as { response: { response: unknown } }).response.response;
+    for (const [r, seq] of [[dirty, 8], [dirty, 13], [dirty, 18], [branch, 7], [branch, 12]] as const) {
+      const parsed = GetWorkspaceDiffResponseSchema.parse(raw(r, seq));
+      expect(parsed.diff?.perFileStats.every((f) => typeof f.isUntracked === 'boolean' && typeof f.isBinary === 'boolean')).toBe(true);
+    }
+    const dirtyDiff = GetWorkspaceDiffResponseSchema.parse(raw(dirty, 8)).diff!;
+    expect(dirtyDiff.source).toEqual({ kind: 'working-tree' });
+    expect(dirtyDiff.hunks[0]).toMatchObject({ path: 'alpha.txt', hunks: [{ oldStart: 1, oldLines: 7, newStart: 1, newLines: 7 }, { oldStart: 23 }] });
+    expect(GetWorkspaceDiffResponseSchema.parse(raw(branch, 12)).diff).toMatchObject({
+      stats: { filesCount: 1, linesAdded: 4, linesRemoved: 0 }, skippedLarge: [], restricted: [],
+      source: { kind: 'branch', baseBranch: 'main', baseRef: '7726a64784915f093f448ecb56d459033d332512' },
+    });
+    // null outside a git repository or mid-merge (the engine's own declaration; findings-pass3-workspace-diff.md)
+    expect(GetWorkspaceDiffResponseSchema.parse({ diff: null })).toEqual({ diff: null });
+    const bad = structuredClone(raw(branch, 12)) as { diff: { perFileStats: Record<string, unknown>[]; source: Record<string, unknown> } };
+    delete bad.diff.perFileStats[0]!.isUntracked;
+    expect(GetWorkspaceDiffResponseSchema.safeParse(bad).success).toBe(false);
+    const noRef = structuredClone(raw(branch, 12)) as { diff: { source: Record<string, unknown> } };
+    delete noRef.diff.source.baseRef;
+    expect(GetWorkspaceDiffResponseSchema.safeParse(noRef).success).toBe(false);
   });
 
   it('grant fixtures: decisionReasonType null at grant-reapply-start seq 30 and rule at grant-askrule-start seq 27', async () => {

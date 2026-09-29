@@ -270,12 +270,29 @@ export type GetSkillsDialogResponse = z.infer<typeof GetSkillsDialogResponseSche
 export const GetSandboxDialogResponseSchema = z.looseObject({ supported: z.boolean(), enabled: z.boolean(), mode: z.string() });
 export type GetSandboxDialogResponse = z.infer<typeof GetSandboxDialogResponseSchema>;
 
+// Typed from C8c's pass-3 fixtures (`workspace-diff-dirty` seq 8, 13, 18; `workspace-diff-branch` seq 7, 12; C3 M6):
+// hunk lines carry a leading space, minus or plus and no `@@` header; `diff` is null outside a git repository or during
+// a merge, rebase or cherry-pick (the engine's own declaration, findings-pass3-workspace-diff.md).
+export const WorkspaceDiffSourceSchema = z.union([
+  z.looseObject({ kind: z.literal('working-tree') }),
+  z.looseObject({ kind: z.literal('branch'), baseBranch: z.string(), baseRef: z.string() }),
+]);
 export const GetWorkspaceDiffResponseSchema = z.looseObject({
-  diff: z.looseObject({
-    stats: z.looseObject({ filesCount: z.number(), linesAdded: z.number(), linesRemoved: z.number() }),
-    perFileStats: z.array(z.unknown()),
-    hunks: z.array(z.unknown()),
-  }),
+  diff: z
+    .looseObject({
+      stats: z.looseObject({ filesCount: z.number(), linesAdded: z.number(), linesRemoved: z.number() }),
+      perFileStats: z.array(z.looseObject({ path: z.string(), added: z.number(), removed: z.number(), isBinary: z.boolean(), isUntracked: z.boolean() })),
+      hunks: z.array(
+        z.looseObject({
+          path: z.string(),
+          hunks: z.array(z.looseObject({ oldStart: z.number(), oldLines: z.number(), newStart: z.number(), newLines: z.number(), lines: z.array(z.string()) })),
+        }),
+      ),
+      skippedLarge: z.array(z.string()),
+      restricted: z.array(z.string()),
+      source: WorkspaceDiffSourceSchema,
+    })
+    .nullable(),
 });
 export type GetWorkspaceDiffResponse = z.infer<typeof GetWorkspaceDiffResponseSchema>;
 
