@@ -59,7 +59,7 @@
         "cacheReadInputTokens": 33874,
         "inputTokens": 18,
         "outputTokens": 614,
-        "thinkingTokens": null
+        "thinkingTokens": 274
       }
     },
     "toolCalls": 0,
@@ -166,7 +166,7 @@
         "cacheReadInputTokens": 22665,
         "inputTokens": 10,
         "outputTokens": 80,
-        "thinkingTokens": null
+        "thinkingTokens": 57
       }
     },
     "toolCalls": 0,
@@ -234,7 +234,7 @@
         "cacheReadInputTokens": 23197,
         "inputTokens": 10,
         "outputTokens": 80,
-        "thinkingTokens": null
+        "thinkingTokens": 54
       }
     },
     "toolCalls": 0,
@@ -270,7 +270,7 @@
     "lostAttentionCount": 0,
     "scope": "exit",
     "severity": "notice",
-    "text": "Session process exited (quit)",
+    "text": "Session process exited (unknown)",
     "turnId": null
   }
 ]

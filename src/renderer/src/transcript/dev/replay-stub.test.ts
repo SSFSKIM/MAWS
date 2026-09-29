@@ -51,7 +51,7 @@ describe('replay stub: the querying-user mapping', () => {
     const ends = list.filter((e): e is Extract<SessionEvent, { kind: 'turn.ended' }> => e.kind === 'turn.ended');
     expect(ends.map((e) => [e.seq, e.origin, e.permissionDenials.length, e.resultIndex])).toEqual([[93, 'human', 0, 0], [191, 'human', 1, 1], [279, 'human', 0, 2]]);
     expect(list.filter((e) => e.kind === 'session.init')).toHaveLength(3);
-    expect(list.at(-1)).toMatchObject({ kind: 'process.exited', code: 0, reason: 'quit', seq: 289 });
+    expect(list.at(-1)).toMatchObject({ kind: 'process.exited', code: 0, reason: 'unknown', seq: 289 }); // a clean exit the host did not ask for (C3)
   });
 
   it('pass1/queue-and-interrupt: the in replay of the prompt is deduplicated and the bash frames become tagged messages', () => {
@@ -134,18 +134,18 @@ describe('replay stub: the querying-user mapping', () => {
     const routed = events('pass2', 'auto-routed');
     const locals = routed.filter((e): e is Extract<SessionEvent, { kind: 'user.message' }> => e.kind === 'user.message' && e.origin === 'local-command');
     expect(locals.map((e) => e.seq)).toEqual([153, 162, 173, 186]);
-    expect(locals.every((e) => e.isReplay && typeof e.content === 'string' && e.content.startsWith('<local-command-stdout>'))).toBe(true);
+    expect(locals.every((e) => e.isReplay && typeof e.content === 'string' && e.content.startsWith('Set model to'))).toBe(true); // C3 carries the tag's inner text
     const marker = events('pass1', 'queue-and-interrupt').find((e) => e.seq === 197);
     expect(marker).toMatchObject({ kind: 'user.message', origin: 'interrupt-marker', content: [{ type: 'text', text: '[Request interrupted by user]' }] });
     expect(events('pass2', 'per-task-stop-on').find((e) => e.seq === 65)).toMatchObject({ kind: 'user.message', origin: 'interrupt-marker' });
   });
 
-  it('streams deltas with the block type of their content_block_start and completes with the envelope-local index', () => {
+  it('streams deltas with the block type of their content_block_start and completes with the stream index (C3)', () => {
     const list = events('pass1', 'permission-roundtrip');
     const deltas = list.filter((e): e is Extract<SessionEvent, { kind: 'assistant.block.delta' }> => e.kind === 'assistant.block.delta' && e.apiMessageId === 'msg_011CfVbJVKzQBxgf5S8iR6fF');
     expect(new Set(deltas.map((e) => `${e.blockIndex}:${e.blockType}`))).toEqual(new Set(['0:thinking', '1:text']));
     expect(list.find((e) => e.seq === 85)).toMatchObject({ kind: 'assistant.block.complete', blockIndex: 0, block: { type: 'thinking' } });
-    expect(list.find((e) => e.seq === 89)).toMatchObject({ kind: 'assistant.block.complete', blockIndex: 0, block: { type: 'text', text: 'DONE' } });
+    expect(list.find((e) => e.seq === 89)).toMatchObject({ kind: 'assistant.block.complete', blockIndex: 1, block: { type: 'text', text: 'DONE' } });
   });
 });
 
@@ -252,7 +252,7 @@ describe('fixture gates through the model', () => {
     expect(ofKind(rows, 'user')).toHaveLength(1);
     expect(ofKind(rows, 'user')[0].text.startsWith('I just ran a shell command')).toBe(true);
     expect(rows.map((row) => row.kind)).toEqual(['time', 'bash', 'user', 'assistant_text', 'error']); // the last row is the process exit
-    expect(rows.at(-1)).toMatchObject({ scope: 'exit', severity: 'notice', text: 'Session process exited (quit)' });
+    expect(rows.at(-1)).toMatchObject({ scope: 'exit', severity: 'notice', text: 'Session process exited (unknown)' });
   });
 
   it('pass2/auto-classifier: a shell cell whose classification carries the verdict and whose label has no auto-mode word', () => {

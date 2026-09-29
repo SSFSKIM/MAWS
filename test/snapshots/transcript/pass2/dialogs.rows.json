@@ -59,7 +59,7 @@
         "cacheReadInputTokens": 75073,
         "inputTokens": 6,
         "outputTokens": 165,
-        "thinkingTokens": null
+        "thinkingTokens": 24
       }
     },
     "toolCalls": 2,
@@ -214,7 +214,7 @@
     "lostAttentionCount": 0,
     "scope": "exit",
     "severity": "notice",
-    "text": "Session process exited (quit)",
+    "text": "Session process exited (unknown)",
     "turnId": null
   }
 ]

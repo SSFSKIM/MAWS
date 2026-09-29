@@ -18,6 +18,8 @@ const bool = (value: unknown): boolean => value === true;
 
 const BASH_INPUT = /^<bash-input>([\s\S]*?)<\/bash-input>$/;
 const LOCAL_COMMAND = /^\s*<local-command-(stdout|caveat)>[\s\S]*<\/local-command-\1>\s*$/;
+const LOCAL_COMMAND_STDOUT = /^<local-command-stdout>([\s\S]*)<\/local-command-stdout>\s*$/; // C3 carries the inner text
+const CLEAR_AND_IMPLEMENT_MESSAGE = 'Plan approved; MAWS is clearing context and will restart with the plan.'; // C3's normalizer-controls.ts
 const INTERRUPT_MARKERS = ['[Request interrupted by user]', '[Request interrupted by user for tool use]']; // the engine's two markers
 const BASH_OUTPUT = /^<bash-stdout>([\s\S]*?)<\/bash-stdout><bash-stderr>([\s\S]*?)<\/bash-stderr><bash-exit-code>(-?\d+)<\/bash-exit-code>$/;
 
@@ -28,7 +30,7 @@ function usageOf(usage: unknown): TokenUsage {
   const u = rec(usage);
   return {
     inputTokens: num(u.input_tokens) ?? 0, outputTokens: num(u.output_tokens) ?? 0, cacheReadInputTokens: num(u.cache_read_input_tokens) ?? 0,
-    cacheCreationInputTokens: num(u.cache_creation_input_tokens) ?? 0, thinkingTokens: num(u.thinking_tokens),
+    cacheCreationInputTokens: num(u.cache_creation_input_tokens) ?? 0, thinkingTokens: num(rec(u.output_tokens_details).thinking_tokens),
   };
 }
 
@@ -43,33 +45,41 @@ export function journalToEvents(rows: JournalRow[], options: StubOptions = {}): 
   const events: SessionEvent[] = [];
   let sessionId: SessionId | null = options.sessionId ?? null;
   let open = false; // a turn is open: from its prompt's `command_lifecycle started` or an engine-initiated init, until its result
+  let turnUuids: MessageUuid[] = []; // the open turn's prompts (a `started` inside an open turn joins it); top-level completes carry them
+  const unstarted = new Set<string>(); // our querying prompts the engine has not started yet
   let pendingEcho = false; // a shouldQuery:false frame went out and its receipt has not arrived
   const promptUuids = new Set<string>(); // our own prompts; the engine's inbound replay of one yields nothing
-  const currentApi = new Map<string, string>(); // parent key → api message id of the message being streamed
-  const blockTypes = new Map<string, string>(); // `${parent key}:${index}` → content block type
+  // Per parent key, the message being streamed: its api message id, the prompt it answers, and its started blocks in
+  // order (a complete takes the stream index of the next started block of its message, else the count so far).
+  const lanes = new Map<string, { apiMessageId: string | null; userMessageUuid: string | null; started: { index: number; type: string }[] }>();
+  const completedBlocks = new Map<string, number>(); // api message id → next block index when not streamed
   const tasks = new Map<string, { taskType: string; workflowName: string | null }>();
   const agentByToolUse = new Map<string, string>(); // Agent tool use → agent id (the task id), for child traffic
   const safeguards = new Map<string, 'not_flagged' | 'flagged'>();
   const inboundRequests = new Map<string, Frame>(); // control requests from the engine, by request id
   const outboundRequests = new Map<string, Frame>(); // our control requests, by request id
 
-  const emit = <K extends SessionEvent['kind']>(row: JournalRow, n: number, kind: K, payload: Payload<K>, frame: Frame, parent: string | null): void => {
-    if (sessionId === null) sessionId = (str(frame.session_id) ?? 'journal') as SessionId;
+  const emit = <K extends SessionEvent['kind']>(row: JournalRow, n: number, kind: K, payload: Payload<K>, frame: Frame, parent: string | null, agentOf: string | null): void => {
     events.push({
-      id: `j${row.seq}#${n}` as EventId, sessionId, at: str(frame.timestamp) ?? row.at, seq: row.seq,
-      agentId: (parent === null ? null : (agentByToolUse.get(parent) ?? null)) as AgentId | null, parentToolUseId: parent as ParentToolUseId | null, kind, ...payload,
+      id: `j${row.seq}#${n}` as EventId, sessionId: sessionId ?? ('unknown' as SessionId), at: str(frame.timestamp) ?? row.at, seq: row.seq,
+      agentId: (parent === null ? agentOf : (agentByToolUse.get(parent) ?? null)) as AgentId | null, parentToolUseId: parent as ParentToolUseId | null, kind, ...payload,
     } as unknown as SessionEvent);
   };
 
-  rows.forEach((row, rowIndex) => {
+  rows.forEach((row) => {
     let n = 0;
     const frame = rec(row.frame);
     const parent = str(frame.parent_tool_use_id);
     const parentKey = parent ?? '';
-    const put = <K extends SessionEvent['kind']>(kind: K, payload: Payload<K>) => emit(row, n++, kind, payload, frame, parent);
+    // A local agent's lifecycle event names the agent it concerns (C3: its `agentId` is the task id, which C1 records
+    // as the same string).
+    const put: Put = (kind, payload, agentOf = null) => emit(row, n++, kind, payload, frame, parent, agentOf);
+    if (row.direction === 'in' && typeof frame.session_id === 'string' && frame.session_id.length > 0) sessionId = frame.session_id as SessionId;
 
     if (row.direction === 'meta') {
-      if (frame.event === 'exit') put('process.exited', { code: num(frame.code), signal: str(frame.signal), reason: num(frame.code) === 0 ? 'quit' : 'crash', lostAttentionCount: 0 });
+      // The host writes the reason when it knows it (quit, stop, archive); a clean exit it did not ask for is unknown.
+      const reason = (str(frame.reason) ?? (num(frame.code) === 0 && str(frame.signal) === null ? 'unknown' : 'crash')) as Payload<'process.exited'>['reason'];
+      if (frame.event === 'exit') put('process.exited', { code: num(frame.code), signal: str(frame.signal), reason, lostAttentionCount: num(frame.lostAttentionCount) ?? 0 });
       return;
     }
     if (row.direction === 'stderr') return;
@@ -84,7 +94,10 @@ export function journalToEvents(rows: JournalRow[], options: StubOptions = {}): 
             put('user.message', { messageUuid: uuid as MessageUuid | null, content, isReplay: false, isSynthetic: true, origin: 'bash_echo', bash: null });
             return;
           }
-          if (uuid) promptUuids.add(uuid);
+          if (uuid) {
+            promptUuids.add(uuid);
+            unstarted.add(uuid);
+          }
           // C3's mapping (*Turn boundaries on this engine*): the bubble at the write; the turn opens when the engine
           // accepts the prompt (`command_lifecycle started`, below).
           put('user.message', { messageUuid: uuid as MessageUuid | null, content, isReplay: false, isSynthetic: false, origin: str(rec(frame.origin).kind) ?? 'human', bash: null });
@@ -108,8 +121,8 @@ export function journalToEvents(rows: JournalRow[], options: StubOptions = {}): 
                 const answers = rec(rec(body.updatedInput).answers);
                 put('question.answered', { requestId: id, toolUseId, answers: Object.fromEntries(Object.entries(answers).map(([k, v]) => [k, String(v)])) });
               } else if (request.tool_name === 'ExitPlanMode') {
-                const resetFollows = rows.slice(rowIndex + 1).some((later, i, slice) => rec(later.frame).type === 'conversation_reset' && !slice.slice(0, i).some((mid) => rec(mid.frame).type === 'result'));
-                const outcome = resetFollows ? 'clear_and_implement' : body.behavior === 'allow' ? 'implement' : 'keep_planning';
+                // MAWS's clear-and-implement is a deny carrying C3's fixed message, then the conversation reset.
+                const outcome = body.behavior === 'allow' ? 'implement' : body.message === CLEAR_AND_IMPLEMENT_MESSAGE ? 'clear_and_implement' : 'keep_planning';
                 put('plan.resolved', { requestId: id, toolUseId, outcome, feedback: outcome === 'keep_planning' ? str(body.message) : null });
               } else {
                 put('permission.resolved', {
@@ -138,7 +151,7 @@ export function journalToEvents(rows: JournalRow[], options: StubOptions = {}): 
     // Stdout (`in`) frames.
     switch (frame.type) {
       case 'system':
-        return systemFrame(frame, put, { get open() { return open; }, set open(v) { open = v; }, get pendingEcho() { return pendingEcho; } }, tasks, agentByToolUse);
+        return systemFrame(frame, put, { get open() { return open; }, set open(v) { open = v; turnUuids = []; }, get pendingEcho() { return pendingEcho; } }, tasks, agentByToolUse);
       case 'assistant': {
         const message = rec(frame.message);
         const apiMessageId = (str(message.id) ?? '') as ApiMessageId;
@@ -147,11 +160,16 @@ export function journalToEvents(rows: JournalRow[], options: StubOptions = {}): 
         if (!open && parent === null) {
           put('turn.started', { userMessageUuid: null, origin: 'engine' });
           open = true;
+          turnUuids = [];
         }
-        blocks.forEach((block, index) => {
+        const lane = lanes.get(parentKey);
+        blocks.forEach((block) => {
+          const streamed = lane && lane.apiMessageId === apiMessageId ? lane.started.shift() : undefined;
+          const blockIndex = streamed ? streamed.index : (completedBlocks.get(apiMessageId) ?? 0);
+          completedBlocks.set(apiMessageId, blockIndex + 1);
           put('assistant.block.complete', {
-            messageUuid: uuid, apiMessageId, blockIndex: index, block, model: str(message.model) ?? '', supersedes: (str(frame.supersedes) ?? null) as MessageUuid | null,
-            aborted: bool(frame.aborted), userMessageUuids: Array.isArray(frame.user_message_uuids) ? (frame.user_message_uuids as MessageUuid[]) : [],
+            messageUuid: uuid, apiMessageId, blockIndex, block, model: str(message.model) ?? '', supersedes: (str(frame.supersedes) ?? null) as MessageUuid | null,
+            aborted: bool(frame.aborted), userMessageUuids: parent === null ? [...turnUuids] : [],
           });
           if (block.type === 'tool_use') put('tool.use', { toolUseId: str(block.id) as ToolUseId, toolName: str(block.name) ?? '', input: block.input, apiMessageId, messageUuid: uuid });
         });
@@ -165,9 +183,10 @@ export function journalToEvents(rows: JournalRow[], options: StubOptions = {}): 
           const input = BASH_INPUT.exec(content);
           const output = BASH_OUTPUT.exec(content);
           // C3's two additive origins: the engine's slash-command echo, tagged from its wrapper.
+          const local = LOCAL_COMMAND_STDOUT.exec(content);
           const origin = LOCAL_COMMAND.test(content) ? 'local-command' : str(rec(frame.origin).kind);
           put('user.message', {
-            messageUuid: uuid as MessageUuid | null, content: input || output ? '' : content, isReplay: bool(frame.isReplay), isSynthetic: bool(frame.isSynthetic), origin,
+            messageUuid: uuid as MessageUuid | null, content: input ? input[1] : output ? output[1] : local ? local[1] : content, isReplay: bool(frame.isReplay), isSynthetic: bool(frame.isSynthetic), origin,
             bash: input ? { part: 'input', command: input[1] } : output ? { part: 'output', stdout: output[1], stderr: output[2], exitCode: Number(output[3]) } : null,
           });
           return;
@@ -196,23 +215,28 @@ export function journalToEvents(rows: JournalRow[], options: StubOptions = {}): 
         const index = num(event.index) ?? 0;
         switch (event.type) {
           case 'message_start':
-            currentApi.set(parentKey, str(rec(event.message).id) ?? '');
+            lanes.set(parentKey, { apiMessageId: str(rec(event.message).id), userMessageUuid: str(frame.user_message_uuid), started: [] });
             return;
-          case 'content_block_start':
-            blockTypes.set(`${parentKey}:${index}`, str(rec(event.content_block).type) ?? 'text');
+          case 'content_block_start': {
+            const lane = lanes.get(parentKey) ?? { apiMessageId: null, userMessageUuid: null, started: [] };
+            lane.started.push({ index, type: str(rec(event.content_block).type) ?? 'text' });
+            lanes.set(parentKey, lane);
             return;
+          }
           case 'content_block_delta': {
             const delta = rec(event.delta);
-            const blockType = blockTypes.get(`${parentKey}:${index}`) ?? 'text';
+            const lane = lanes.get(parentKey);
+            const blockType = lane?.started.find((s) => s.index === index)?.type ?? 'text';
             if (delta.type === 'signature_delta') return;
             if (!open && parent === null) {
               put('turn.started', { userMessageUuid: null, origin: 'engine' });
               open = true;
+              turnUuids = [];
             }
             put('assistant.block.delta', {
-              apiMessageId: (currentApi.get(parentKey) ?? null) as ApiMessageId | null, blockIndex: index, blockType,
+              apiMessageId: (lane?.apiMessageId ?? null) as ApiMessageId | null, blockIndex: index, blockType,
               textDelta: delta.type === 'text_delta' ? (str(delta.text) ?? '') : null, thinkingDelta: delta.type === 'thinking_delta' ? (str(delta.thinking) ?? '') : null,
-              inputJsonDelta: delta.type === 'input_json_delta' ? (str(delta.partial_json) ?? '') : null, userMessageUuid: null,
+              inputJsonDelta: delta.type === 'input_json_delta' ? (str(delta.partial_json) ?? '') : null, userMessageUuid: (lane?.userMessageUuid ?? null) as MessageUuid | null,
             });
             return;
           }
@@ -290,10 +314,17 @@ export function journalToEvents(rows: JournalRow[], options: StubOptions = {}): 
         const state = frame.state as Payload<'command.lifecycle'>['state'];
         const commandUuid = (str(frame.command_uuid) ?? '') as MessageUuid;
         put('command.lifecycle', { commandUuid, state });
-        // The engine accepted one of our prompts (never the `!` echo): its turn starts here.
-        if (state === 'started' && promptUuids.has(commandUuid)) {
+        // The engine accepted one of our prompts (never the `!` echo): its turn starts here, or, with a turn open
+        // (`priority: 'next'`), the prompt joins that turn and nothing opens (C3's rule).
+        if (!unstarted.has(commandUuid)) return;
+        if (state === 'cancelled' || state === 'discarded' || state === 'refused' || state === 'completed') unstarted.delete(commandUuid);
+        if (state !== 'started') return;
+        unstarted.delete(commandUuid);
+        if (open) turnUuids.push(commandUuid);
+        else {
           put('turn.started', { userMessageUuid: commandUuid, origin: 'human' });
           open = true;
+          turnUuids = [commandUuid];
         }
         return;
       }
@@ -310,7 +341,7 @@ export function journalToEvents(rows: JournalRow[], options: StubOptions = {}): 
 }
 
 interface TurnFlags { open: boolean; readonly pendingEcho: boolean }
-type Put = <K extends SessionEvent['kind']>(kind: K, payload: Payload<K>) => void;
+type Put = <K extends SessionEvent['kind']>(kind: K, payload: Payload<K>, agentOf?: string | null) => void;
 
 function systemFrame(frame: Frame, put: Put, turn: TurnFlags, tasks: Map<string, { taskType: string; workflowName: string | null }>, agentByToolUse: Map<string, string>): void {
   const taskId = (str(frame.task_id) ?? '') as TaskId;
@@ -334,7 +365,7 @@ function systemFrame(frame: Frame, put: Put, turn: TurnFlags, tasks: Map<string,
       tasks.set(taskId, { taskType, workflowName: str(frame.workflow_name) });
       if (toolUseId) agentByToolUse.set(toolUseId, taskId);
       if (taskType === 'local_agent') {
-        put('subagent.started', { taskId, toolUseId, description: str(frame.description) ?? '', subagentType: str(frame.subagent_type), isBackground: bool(frame.is_backgrounded), spawnDepth: num(frame.spawn_depth) ?? 0, prompt: str(frame.prompt) });
+        put('subagent.started', { taskId, toolUseId, description: str(frame.description) ?? '', subagentType: str(frame.subagent_type), isBackground: bool(frame.is_backgrounded), spawnDepth: num(frame.spawn_depth) ?? 0, prompt: str(frame.prompt) }, taskId);
       } else {
         put('task.started', { taskId, toolUseId, taskType, description: str(frame.description) ?? '', isBackground: bool(frame.is_backgrounded), workflowName: str(frame.workflow_name) });
       }
@@ -345,7 +376,7 @@ function systemFrame(frame: Frame, put: Put, turn: TurnFlags, tasks: Map<string,
       if (Array.isArray(frame.workflow_progress)) put('workflow.progress', { taskId, workflowName: task?.workflowName ?? null, progress: frame.workflow_progress });
       else if (!task || task.taskType === 'local_agent') {
         const usage = rec(frame.usage);
-        put('subagent.progress', { taskId, description: str(frame.description) ?? '', usage: { totalTokens: num(usage.total_tokens) ?? 0, toolUses: num(usage.tool_uses) ?? 0, durationMs: num(usage.duration_ms) ?? 0 }, lastToolName: str(frame.last_tool_name), summary: str(frame.summary) });
+        put('subagent.progress', { taskId, description: str(frame.description) ?? '', usage: { totalTokens: num(usage.total_tokens) ?? 0, toolUses: num(usage.tool_uses) ?? 0, durationMs: num(usage.duration_ms) ?? 0 }, lastToolName: str(frame.last_tool_name), summary: str(frame.summary) }, taskId);
       }
       return;
     }
@@ -357,14 +388,15 @@ function systemFrame(frame: Frame, put: Put, turn: TurnFlags, tasks: Map<string,
           ...(num(patch.end_time) !== null ? { endTime: num(patch.end_time)! } : {}), ...(str(patch.error) !== null ? { error: str(patch.error)! } : {}),
           ...(typeof patch.is_backgrounded === 'boolean' ? { isBackground: patch.is_backgrounded } : {}),
         },
-      });
+      }, tasks.get(taskId)?.taskType === 'local_agent' ? taskId : null);
       return;
     }
     case 'task_notification': {
       const task = tasks.get(taskId);
       const status = (TASK_OUTCOMES.has(str(frame.status) ?? '') ? frame.status : 'completed') as 'completed' | 'failed' | 'stopped';
-      if (!task || task.taskType === 'local_agent') put('subagent.finished', { taskId, status, summary: str(frame.summary), outputFile: str(frame.output_file), reason: str(frame.reason) });
-      else put('task.notification', { taskId, toolUseId, status, summary: str(frame.summary) ?? '', outputFile: str(frame.output_file), reason: str(frame.reason) });
+      const outputFile = str(frame.output_file) || null;
+      if (!task || task.taskType === 'local_agent') put('subagent.finished', { taskId, status, summary: str(frame.summary), outputFile, reason: str(frame.reason) }, taskId);
+      else put('task.notification', { taskId, toolUseId, status, summary: str(frame.summary) ?? '', outputFile, reason: str(frame.reason) });
       return;
     }
     case 'hook_started':

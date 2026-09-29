@@ -157,6 +157,40 @@ describe('turn boundaries', () => {
     expect(state.order).toEqual([one]);
   });
 
+  // C3's normaliser emits no turn.started for a `started` that arrives inside an open turn (it adds the uuid to that
+  // turn): the fold happens at the `command.lifecycle started` itself (rebase equivalence gate, pass3/steer-next seq 71).
+  it("a command.lifecycle started inside an open turn folds the pending prompt, with no turn.started to follow (C3's shape)", () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('t1', 'Bash', { command: 'sleep 1' });
+    prompt(b, 'u2', 'also check the logs');
+    b.result('t1', 'ok');
+    b.emit('command.lifecycle', { commandUuid: uuid('u2'), state: 'started' });
+    b.text('m1', 0, 'Both done');
+    let state = reduce(b.events);
+    const one = turnId.ofMessage(uuid('u1'));
+    expect(state.order).toEqual([one]);
+    expect(state.turns.has(turnId.ofMessage(uuid('u2')))).toBe(false);
+    b.end(['u1', 'u2']);
+    state = applyEvents(state, [b.events.at(-1)!]);
+    expect(state.turns.get(one)!.state).toBe('closed');
+    const users = rowsOf(state).filter((row): row is Extract<Row, { kind: 'user' }> => row.kind === 'user');
+    expect(users.map((row) => [row.id, row.turnId, row.steer, row.dropped])).toEqual([
+      [rowId.user(uuid('u1')), one, false, false],
+      [rowId.user(uuid('u2')), one, true, false],
+    ]);
+  });
+
+  it('a command.lifecycle started with no turn open leaves the pending prompt for its turn.started', () => {
+    const b = builder();
+    prompt(b, 'u1', 'Hello?');
+    b.emit('command.lifecycle', { commandUuid: uuid('u1'), state: 'started' });
+    const state = reduce(b.events);
+    const id = turnId.ofMessage(uuid('u1'));
+    expect(state.order).toEqual([id]);
+    expect(state.turns.get(id)!.accepted).toBe(false);
+  });
+
   it('a started with no turn open still opens the pending turn in place', () => {
     const b = builder();
     b.turn('u1');

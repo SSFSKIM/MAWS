@@ -23,8 +23,13 @@ const valueOf = <N extends CommandName>(result: CommandResult<N>): CommandOutput
 
 // `session.eventBatch` carries every event of an app session, a followed child's own slice included (C4 emits it with
 // `agentId` set). The parent takes its own events and the child traffic it indexes under the parent tool use
-// (`parentToolUseId` set), never a child's slice, which would render as top-level.
-const ofParent = (event: SessionEvent) => event.agentId === null || event.parentToolUseId !== null;
+// (`parentToolUseId` set), never a child's slice, which would render as top-level. C3 tags the parent's lifecycle reports
+// on a local agent (`subagent.*`, `task.updated`) with the agent they concern, so a top-level event whose task id is its
+// own agent id is such a report: the parent's, never part of the child's slice (for local agents the two ids carry the
+// same string, C1 Interfaces).
+const reportsOnOwnAgent = (event: SessionEvent) => event.agentId !== null && 'taskId' in event && (event.taskId as string | null) === (event.agentId as string);
+const ofParent = (event: SessionEvent) => event.agentId === null || event.parentToolUseId !== null || reportsOnOwnAgent(event);
+const ownOf = (agentId: AgentId) => (event: SessionEvent) => event.agentId === agentId && !reportsOnOwnAgent(event);
 
 function sessionSource(client: MawsBridge, appSessionId: AppSessionId): TranscriptSource {
   return {
@@ -69,6 +74,7 @@ function childSource(client: MawsBridge, appSessionId: AppSessionId, agentId: Ag
   // For local agents the engine's task id and the sidecar's agent id carry the same string (C1 Interfaces, observed in
   // the fixtures); X1 keeps them as two types, so the comparison is on the strings.
   const names = (taskId: string) => taskId === (agentId as string);
+  const own = ownOf(agentId);
   const starts = (event: SessionEvent) => (event.kind === 'subagent.started' || event.kind === 'task.started') && names(event.taskId);
   const finishes = (event: SessionEvent) => (event.kind === 'subagent.finished' || event.kind === 'task.notification') && names(event.taskId);
   const exits = (event: SessionEvent) => event.kind === 'process.exited' && event.agentId === null;
@@ -97,7 +103,7 @@ function childSource(client: MawsBridge, appSessionId: AppSessionId, agentId: Ag
     for (const event of events) {
       if (starts(event)) startedInStream = true;
       const ends = endsChild(event);
-      if ((event.agentId === agentId && liveForm(event) === (provenance === 'live')) || finishes(event) || (provenance === 'live' && ends)) passed.push(event);
+      if ((own(event) && liveForm(event) === (provenance === 'live')) || finishes(event) || (provenance === 'live' && ends)) passed.push(event);
       if (ends && provenance === 'live') end ??= event;
     }
     if (passed.length > 0) subscriber.listener(passed);
@@ -147,7 +153,7 @@ function childSource(client: MawsBridge, appSessionId: AppSessionId, agentId: Ag
         if (end > started || (started < 0 && end >= 0)) ended ??= parent[end];
         if (started >= 0 && end < started && liveForm(parent[started]) && !onDisk()) {
           decide('live');
-          return parent.filter((event) => event.agentId === agentId && liveForm(event));
+          return parent.filter((event) => own(event) && liveForm(event));
         }
       }
       if (!onDisk()) decide('disk');

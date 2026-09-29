@@ -132,6 +132,20 @@ describe('ipcSource', () => {
     expect(received).toEqual([[b.events[0].id, 'traffic']]);
   });
 
+  // C3 attributes a local agent's lifecycle events to the agent they concern (`agentId` = the task id) while they stay
+  // top-level parent events (rebase equivalence gate, pass1/subagent seq 172): the parent keeps them.
+  it('keeps the parent’s lifecycle reports on a child, which C3 tags with the child’s agent id', () => {
+    const b = builder();
+    b.turn('u1');
+    const started = { ...b.emit('subagent.started', { taskId: AGENT as string as TaskId, toolUseId: tool('t1'), description: 'Look', subagentType: null, isBackground: false, spawnDepth: 1, prompt: null }), agentId: AGENT };
+    const progress = { ...b.emit('subagent.progress', { taskId: AGENT as string as TaskId, description: 'Look', usage: { totalTokens: 1, toolUses: 1, durationMs: 1 }, lastToolName: 'Read', summary: null }), agentId: AGENT };
+    const fake = fakeClient();
+    const received: EventId[][] = [];
+    ipcSourceOver(fake.client, APP).subscribe((events) => received.push(events.map((event) => event.id)));
+    fake.emit('session.eventBatch', batch([b.events[0], started, progress]));
+    expect(received).toEqual([[b.events[0].id, started.id, progress.id]]);
+  });
+
   it('a failed snapshot rejects with the X2 error, and the store marks the key failed', async () => {
     const fake = fakeClient();
     const source = ipcSourceOver(fake.client, APP);
@@ -200,6 +214,25 @@ describe('child source provenance', () => {
     expect(fake.calls.map((call) => call.name)).toEqual(['session.events']);
     fake.emit('session.eventBatch', batch([...child.slice(2), { ...child[0], id: 'other' as EventId, agentId: 'agent-8' as AgentId }, parent[0]]));
     expect(received).toEqual([child.slice(2).map((event) => event.id)]);
+  });
+
+  // C3 tags the parent's lifecycle reports on a local agent with that agent's id (rebase equivalence gate): they are
+  // the parent's rows, never the child's own events; only the report that it ended joins the slice.
+  it('live: the parent’s lifecycle reports tagged with the child’s agent id stay out of the child’s slice, except its end', async () => {
+    const { parent, child } = live();
+    const tagged = <E extends SessionEvent>(event: E): E => ({ ...event, agentId: AGENT });
+    const report = builder('2026-09-28T10:00:02.000Z');
+    const progress = tagged(report.emit('subagent.progress', { taskId: AGENT as string as TaskId, description: 'Look around', usage: { totalTokens: 1, toolUses: 1, durationMs: 1 }, lastToolName: 'Read', summary: null }, { id: 'progress' }));
+    const finished = tagged(finish(AGENT, '2026-09-28T10:00:08.000Z', 'completed'));
+    const fake = fakeClient();
+    const source = childSource(fake);
+    const received: EventId[][] = [];
+    source.subscribe((events) => received.push(events.map((event) => event.id)));
+    const snapshot = source.snapshot();
+    answer(fake, 'session.events', { events: [...parent.map((event) => (event.kind === 'subagent.started' ? tagged(event) : event)), ...child.slice(0, 2)], lastSeq: 9, complete: true });
+    await expect(snapshot).resolves.toEqual(child.slice(0, 2));
+    fake.emit('session.eventBatch', batch([child[2], progress, finished]));
+    expect(received).toEqual([[child[2].id, finished.id]]);
   });
 
   it('disk: a child the parent never started in its snapshot (a disk-backed parent) is read with fs.agentEvents, which starts following', async () => {

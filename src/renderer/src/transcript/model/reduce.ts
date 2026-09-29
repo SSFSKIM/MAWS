@@ -410,9 +410,17 @@ function apply(batch: Batch, event: SessionEvent): void {
     case 'command.lifecycle': {
       // *Turn boundaries on this engine*: a cancel naming a pending prompt drops it (its bubble reads Not sent) and
       // closes its turn without work. Naming a turn the engine accepted, or one already closed, it changes nothing.
-      if (event.state !== 'cancelled' && event.state !== 'discarded' && event.state !== 'refused') return;
+      // A `started` naming a pending prompt while an accepted turn runs folds it into that turn (`priority: 'next'`):
+      // C3 adds the uuid to the open turn and emits no turn.started for it. With no turn running, the turn.started
+      // that follows opens it.
       const pending = state.turns.get(turnIdOf.ofMessage(event.commandUuid));
       if (!pending || pending.accepted || pending.state !== 'open') return;
+      if (event.state === 'started') {
+        const running = state.current === null ? null : state.turns.get(state.current)!;
+        if (running !== null && running.id !== pending.id && running.state === 'open' && running.accepted) batch.fold(pending, running.id);
+        return;
+      }
+      if (event.state !== 'cancelled' && event.state !== 'discarded' && event.state !== 'refused') return;
       batch.drop(batch.touch(pending.id), event);
       return;
     }
