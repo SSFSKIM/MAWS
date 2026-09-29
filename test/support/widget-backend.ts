@@ -94,9 +94,9 @@ export const CATALOG_LINES = { initialize: 'pass2/auto-routed#4', init: 'pass2/a
 
 // Host-local commands the backend answers besides the table: the status, the catalogue, a prompt (the compact widget's
 // `/compact`, a user message and no control), the app queue, and (M4, the route switch) the interrupt, the queue's
-// pause and the stop, each moving the status and the queue as C3's host does, and C10's resume (`session.start`) and
-// rename (`session.rename`).
-const LOCAL_COMMANDS = ['session.status', 'session.catalog', 'session.send', 'session.queue.list', 'session.queue.setPaused', 'session.interrupt', 'session.stop', 'session.start', 'session.rename'] as const satisfies readonly CommandName[];
+// pause and the stop, each moving the status and the queue as C3's host does, C10's resume (`session.start`) and rename
+// (`session.rename`), and C10's model catalogue (`engine.models`, the recorded `list_models` answer as the host's cache).
+const LOCAL_COMMANDS = ['session.status', 'session.catalog', 'session.send', 'session.queue.list', 'session.queue.setPaused', 'session.interrupt', 'session.stop', 'session.start', 'session.rename', 'engine.models'] as const satisfies readonly CommandName[];
 
 export const WIDGET_BACKEND_COMMANDS: readonly CommandName[] = [...LOCAL_COMMANDS, ...(Object.keys(SUBTYPE_OF) as CommandName[])];
 
@@ -337,11 +337,31 @@ export function createWidgetBackend(options: WidgetBackendOptions): WidgetBacken
     return { exited: true, code: 0, signal: null };
   }
 
+  // The status C3 starts holding for a record the backend held none for (a session that never ran in this app): the
+  // record's facts over the first held status's shape, exited, with nothing running or held.
+  function exitedFromRecord(record: SessionRecord): EngineSessionStatus {
+    const template = statuses.values().next().value;
+    if (!template) throw new WidgetBackendError({ code: 'internal', message: 'the widget backend holds no status to shape one from' });
+    const effort = EngineSessionStatusSchema.shape.effort.safeParse(record.effort);
+    return shaped({
+      ...template,
+      appSessionId: record.appId, engineSessionId: record.engineSessionId, taskListId: record.engineSessionId, cwd: record.directory, pid: null,
+      process: 'exited', exit: { code: 0, signal: null, reason: 'quit', at: now() }, engineState: 'idle', activity: null, turn: null, pendingPlan: null,
+      model: record.model, effort: effort.success ? effort.data : null, permissionMode: { ...record.permissionMode, refusal: null }, prePlanMode: null,
+      backgroundTasks: [], grants: [], heldPeerMessages: [], pendingRequests: 0, queue: { length: 0, paused: false }, keepAlive: [], lastEventSeq: 0,
+      trust: { attested: false, recorded: null },
+    });
+  }
+
   // C10's resume of a session with no process (`session.start { message: null }`): `starting`, then the process on a new
   // launch, ready on the route asked for (else the record's last one, else the gateway: the default), verified, with the
   // model and effort the options override. A live session answers `already_live`, as C10's guards do.
   const LIVE = new Set<EngineSessionStatus['process']>(['starting', 'initializing', 'ready', 'exiting']);
-  function start(status: EngineSessionStatus, input: { options: StartOptions }): StartOutcome {
+  function start(appSessionId: AppSessionId | null, input: { options: StartOptions }): StartOutcome {
+    const record = appSessionId === null ? undefined : records.get(appSessionId);
+    const held = appSessionId === null ? undefined : statuses.get(appSessionId);
+    if (!held && record) statuses.set(record.appId, exitedFromRecord(record));
+    const status = statusOf(appSessionId);
     const id = status.appSessionId;
     if (LIVE.has(status.process)) return { status: 'already_live', appSessionId: id };
     const routed = records.get(id)?.gateway.routed ?? null;
@@ -386,8 +406,10 @@ export function createWidgetBackend(options: WidgetBackendOptions): WidgetBacken
   function served(command: CommandName, input: unknown): unknown {
     const scripted = scripts.get(command);
     if (scripted) return scripted(input);
+    if (command === 'engine.models') return { models, source: 'cached', at: now() };
     if (command === 'session.status') return statusOf(appSessionIdOf(input));
     if (command === 'session.rename') return rename(appSessionIdOf(input), (input as { title: string }).title);
+    if (command === 'session.start') return start(appSessionIdOf(input), input as { options: StartOptions });
     const status = statusOf(appSessionIdOf(input));
     if (command === 'session.catalog') return catalog;
     if (command === 'session.queue.list') {
@@ -399,7 +421,6 @@ export function createWidgetBackend(options: WidgetBackendOptions): WidgetBacken
       return void setQueue(status, { paused, pauseReason: paused ? 'user' : null });
     }
     if (command === 'session.stop') return stop(status, (input as { reason: 'stop' | 'archive' }).reason);
-    if (command === 'session.start') return start(status, input as { options: StartOptions });
     if (status.process !== 'ready') throw new WidgetBackendError({ code: 'internal', message: `${status.appSessionId} has no ready process` });
     if (command === 'session.send') return send(status, (input as { content: QueueEntry['content'] }).content);
     if (command === 'session.interrupt') return interrupt(status);

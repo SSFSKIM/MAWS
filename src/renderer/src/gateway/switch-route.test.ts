@@ -2,7 +2,8 @@
 // refresh task "the switch's failure and the queue"): the confirm names background work and requires a Direct model for
 // a gateway alias before anything is stopped, then interrupt → recheck → stop → start in order, one start at most, and
 // the queue resumed only when the switch's own interrupt paused it. The sessions are the widget backend's over C5's
-// nine-sessions scenario; C10's `session.start` is a scripted stand-in.
+// nine-sessions scenario, which answers C10's `session.start` (the resume, ready on the route asked for) through the
+// switch's own start adapter; a case scripts its refusal or a start that never becomes ready.
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { EngineSessionStatus } from '@shared/engine/status';
@@ -11,13 +12,14 @@ import type { SessionRecord } from '@shared/graph/session';
 import type { CommandName, MawsBridge } from '@shared/ipc/schema';
 import { loadScenario } from '../../../../test/support/scenario';
 import { createWidgetBackend, type WidgetBackend } from '../../../../test/support/widget-backend';
-import type { SessionStart, StartAnswer, StartOptions } from './c10-seam';
+import type { SetupEvent, StartOutcome } from '@shared/sessions/setup';
+import { sessionStartOver, type StartOptions } from './session-start';
 import { createGatewayStore, type GatewayStore } from './store';
 import { createRouteSwitcher, switchButtonLabel, type SwitchAnswer } from './switch-route';
 
 const ROOT = join(__dirname, '../../../..');
 const READY = 'app-7412a115' as AppSessionId; // Settings idle probe: ready, idle, routed
-const LIFECYCLE: readonly CommandName[] = ['session.status', 'session.interrupt', 'session.stop', 'session.queue.list', 'session.queue.setPaused'];
+const LIFECYCLE: readonly CommandName[] = ['session.status', 'session.interrupt', 'session.stop', 'session.start', 'session.queue.list', 'session.queue.setPaused'];
 const task = (taskId: string, description: string, taskType = 'local_agent') => ({ taskId, taskType, description, ambient: false }) as EngineSessionStatus['backgroundTasks'][number];
 
 interface Setup {
@@ -26,7 +28,7 @@ interface Setup {
   log: string[];
   starts: { appSessionId: AppSessionId; options: StartOptions }[];
   toasts: string[];
-  failSetup(reason: string): void;
+  failSetup(outcome: SetupEvent['outcome']): void;
   switcher: ReturnType<typeof createRouteSwitcher>;
 }
 
@@ -36,9 +38,11 @@ afterEach(() => {
   live = null;
 });
 
-function setup(opts: { model?: string; effort?: EngineSessionStatus['effort']; tasks?: EngineSessionStatus['backgroundTasks']; turn?: boolean; start?: (options: StartOptions) => StartAnswer | 'no_ready'; startSeam?: boolean } = {}): Setup {
+// `start`: C10's answer instead of the backend's resume (`no_ready`: `starting`, and nothing follows); `onStart`: run as
+// the start is asked, before the backend's own resume.
+function setup(opts: { model?: string; effort?: EngineSessionStatus['effort']; tasks?: EngineSessionStatus['backgroundTasks']; turn?: boolean; start?: StartOutcome | 'no_ready'; onStart?: () => void } = {}): Setup {
   const scenario = loadScenario(join(ROOT, 'test/fixtures/shell/nine-sessions.json'));
-  const backend = createWidgetBackend({ root: ROOT, statuses: scenario.engine });
+  const backend = createWidgetBackend({ root: ROOT, statuses: scenario.engine, records: scenario.sessions });
   const records = new Map<AppSessionId, SessionRecord>(scenario.sessions.map((r) => [r.appId, r]));
   const log: string[] = [];
   const bridge = backend.bridge();
@@ -46,6 +50,7 @@ function setup(opts: { model?: string; effort?: EngineSessionStatus['effort']; t
     ...bridge,
     invoke: ((name: CommandName, input: unknown) => {
       if (LIFECYCLE.includes(name)) log.push(name);
+      if (name === 'session.start') opts.onStart?.();
       return bridge.invoke(name as never, input as never);
     }) as MawsBridge['invoke'],
   };
@@ -56,26 +61,10 @@ function setup(opts: { model?: string; effort?: EngineSessionStatus['effort']; t
   if (opts.effort) backend.emitStatus(READY, { effort: opts.effort });
   if (opts.tasks) backend.emitStatus(READY, { backgroundTasks: opts.tasks });
   if (opts.turn) backend.emitTurnStarted(READY);
-  const starts: Setup['starts'] = [];
-  const failures = new Set<(reason: string) => void>();
-  const start: SessionStart = {
-    async start(appSessionId, options) {
-      log.push('session.start');
-      starts.push({ appSessionId, options });
-      const answer = opts.start?.(options) ?? { status: 'starting' };
-      if (answer === 'no_ready') return { status: 'starting' };
-      if (answer.status === 'starting') {
-        const verified = options.gateway === 'gateway' ? 'routed' : 'direct';
-        setTimeout(() => backend.emitStatus(appSessionId, { process: 'initializing', launchId: 'launch-2', exit: null }), 0);
-        setTimeout(() => backend.emitStatus(appSessionId, { process: 'ready', gateway: { mode: options.gateway, baseUrl: options.gateway === 'gateway' ? 'http://127.0.0.1:8641' : null, verified, autoModeServer: 'enabled', localLane: null } }), 5);
-      }
-      return answer;
-    },
-    onSetupFailure(_appSessionId, listener) {
-      failures.add(listener);
-      return () => void failures.delete(listener);
-    },
-  };
+  if (opts.start) {
+    const answer = opts.start;
+    backend.script('session.start', (input) => (answer === 'no_ready' ? { status: 'starting', appSessionId: (input as { appSessionId: AppSessionId }).appSessionId } : answer));
+  }
   const toasts: string[] = [];
   const store = createGatewayStore(client);
   const switcher = createRouteSwitcher(
@@ -83,13 +72,23 @@ function setup(opts: { model?: string; effort?: EngineSessionStatus['effort']; t
       client,
       record: (id) => records.get(id) ?? null,
       status: (id) => backend.status(id),
-      start: () => (opts.startSeam === false ? null : start),
+      start: sessionStartOver(client),
       toast: (text) => void toasts.push(text),
       timeouts: { turnMs: 300, exitMs: 300, readyMs: 400 },
     },
     store,
   );
-  live = { backend, store, log, starts, toasts, failSetup: (reason) => failures.forEach((l) => l(reason)), switcher };
+  live = {
+    backend,
+    store,
+    log,
+    get starts() {
+      return backend.calls.filter((c) => c.command === 'session.start').map((c) => ({ appSessionId: (c.input as { appSessionId: AppSessionId }).appSessionId, options: (c.input as { options: StartOptions }).options }));
+    },
+    toasts,
+    failSetup: (outcome) => backend.emitSetup({ appSessionId: READY, phase: 'failed', detail: null, outcome }),
+    switcher,
+  };
   return live;
 }
 
@@ -159,6 +158,17 @@ describe('switchRoute names background work, requires a Direct model for a gatew
     expect(s.starts).toEqual([]);
   });
 
+  it('the recheck compares against the list the sheet showed when it was answered, not the one read at open', async () => {
+    const s = setup({ tasks: [task('t1', 'Sleep 120 s')] });
+    const run = s.switcher.switchRoute(READY, 'direct');
+    await confirming(s);
+    const shown = [task('t1', 'Sleep 120 s'), task('t2', 'Started while the sheet was open')];
+    s.backend.emitStatus(READY, { backgroundTasks: shown }); // C10's disclosure shows it live, so the human saw it
+    s.switcher.answer(READY, { ...CONFIRM, backgroundTasks: shown });
+    expect(await run).toBe('done');
+    expect(s.log).toContain('session.stop');
+  });
+
   it('a gateway model requires a Claude model before anything stops, and the choice reaches session.start', async () => {
     const s = setup({ model: 'claude/astra', effort: 'max' });
     const run = s.switcher.switchRoute(READY, 'direct');
@@ -199,27 +209,27 @@ describe('switchRoute names background work, requires a Direct model for a gatew
   });
 
   it('a refused start is failed with the reason and never retried', async () => {
-    const s = setup({ start: () => ({ status: 'refused', reason: 'Held by a terminal' }) });
+    const s = setup({ start: { status: 'held', appSessionId: READY, holder: { kind: 'terminal', pid: 4711 }, attach: null } });
     const run = s.switcher.switchRoute(READY, 'direct');
     await confirming(s);
     s.switcher.answer(READY, CONFIRM);
     expect(await run).toBe('failed');
     expect(s.starts).toHaveLength(1);
-    expect(stateOf(s)).toMatchObject({ phase: 'failed', error: 'Stopped; the restart was refused: Held by a terminal · Resume from the sidebar' });
+    expect(stateOf(s)).toMatchObject({ phase: 'failed', error: 'Stopped; the restart was refused: Held by terminal · 4711 · Resume from the sidebar' });
     expect(s.toasts).toEqual([]);
   });
 
   it('a setup failure after starting, or a mismatched route, is failed', async () => {
-    const s = setup({ start: () => 'no_ready' });
+    const s = setup({ start: 'no_ready' });
     const run = s.switcher.switchRoute(READY, 'direct');
     await confirming(s);
     s.switcher.answer(READY, CONFIRM);
     await vi.waitFor(() => expect(s.starts).toHaveLength(1));
-    s.failSetup('The relay was unreachable');
+    s.failSetup({ kind: 'relay_unreachable', health: { url: 'http://127.0.0.1:8641', ok: false, status: null, latencyMs: null, checkedAt: '2026-09-29T12:00:00.000Z', error: 'ECONNREFUSED' } });
     expect(await run).toBe('failed');
     expect(stateOf(s)?.error).toBe('Stopped; the restart was refused: The relay was unreachable · Resume from the sidebar');
 
-    const m = setup({ start: () => 'no_ready' });
+    const m = setup({ start: 'no_ready' });
     const mismatch = m.switcher.switchRoute(READY, 'direct');
     await confirming(m);
     m.switcher.answer(READY, CONFIRM);
@@ -230,7 +240,7 @@ describe('switchRoute names background work, requires a Direct model for a gatew
   });
 
   it('a restart verified on the other route is a mismatch that fails at once, not after the ready bound', async () => {
-    const s = setup({ start: () => 'no_ready' });
+    const s = setup({ start: 'no_ready' });
     const run = s.switcher.switchRoute(READY, 'direct');
     await confirming(s);
     s.switcher.answer(READY, CONFIRM);
@@ -243,7 +253,7 @@ describe('switchRoute names background work, requires a Direct model for a gatew
   });
 
   it('a restart that never becomes ready is failed after its bound', async () => {
-    const s = setup({ start: () => 'no_ready' });
+    const s = setup({ start: 'no_ready' });
     const run = s.switcher.switchRoute(READY, 'direct');
     await confirming(s);
     s.switcher.answer(READY, CONFIRM);
@@ -251,7 +261,7 @@ describe('switchRoute names background work, requires a Direct model for a gatew
     expect(stateOf(s)?.error).toBe('Stopped; the restart did not become ready within 60 s · Resume from the sidebar');
   });
 
-  it('refuses a second switch while one is in flight, and every switch without C10’s start', async () => {
+  it('refuses a second switch while one is in flight', async () => {
     const s = setup();
     const run = s.switcher.switchRoute(READY, 'direct');
     await confirming(s);
@@ -260,11 +270,6 @@ describe('switchRoute names background work, requires a Direct model for a gatew
     expect(stateOf(s)?.phase).toBe('confirming');
     s.switcher.answer(READY, null);
     expect(await run).toBe('cancelled');
-
-    const none = setup({ startSeam: false });
-    expect(await none.switcher.switchRoute(READY, 'direct')).toBe('failed');
-    expect(none.log).toEqual([]);
-    expect(none.toasts).toEqual(['Switching routes arrives with C10']);
   });
 });
 
@@ -340,9 +345,8 @@ describe('the queue after a switch', () => {
     let unscript: (() => void) | null = null;
     const s = setup({
       turn: true,
-      start: () => {
+      onStart: () => {
         unscript = live!.backend.script('session.queue.list', () => ({ entries: [], paused: true, pauseReason: 'refused' }));
-        return { status: 'starting' };
       },
     });
     const run = s.switcher.switchRoute(READY, 'direct');

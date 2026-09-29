@@ -15,7 +15,6 @@ import { registerUsagePopoverFooter } from '../statusline';
 import { UsagePopoverBody } from '../statusline/UsagePopover';
 import { useSessions } from '../stores/sessions';
 import { useSettings } from '../stores/settings';
-import { provideSessionStart } from './c10-seam';
 import { useGateway } from './store';
 import { answerSwitch } from './switch-route';
 import { UsageFooter } from './UsageFooter';
@@ -30,7 +29,7 @@ const offs: (() => void)[] = [];
 const settingsWith = (gateway: Partial<Settings['gateway']>) => useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V3, gateway: { ...SETTINGS_DEFAULTS_V3.gateway, ...gateway } }, resolvedTheme: 'light' } as never });
 
 beforeEach(() => {
-  backend = createWidgetBackend({ root: ROOT, statuses: scenario.engine });
+  backend = createWidgetBackend({ root: ROOT, statuses: scenario.engine, records: scenario.sessions });
   window.maws = backend.bridge();
   useSessions.setState({ engine: new Map([[READY, backend.status(READY)]]), records: new Map([[READY, record]]) });
   settingsWith({});
@@ -52,17 +51,15 @@ const popover = (status: EngineSessionStatus | null = useSessions.getState().eng
 };
 
 describe('routingFacts names the account and the switch — the footer', () => {
-  it('a routed session: the relay sentence, the hand-off, Accounts, Session info, and Switch to Direct… disabled until C10', () => {
+  it('a routed session: the relay sentence, the hand-off, Accounts, Session info, and Switch to Direct…', () => {
     const footer = popover();
     expect(footer.textContent).toContain("Routed through ClaudeUsage's relay");
     for (const name of ['Open ClaudeUsage ↗', 'Accounts', 'Session info']) expect(within(footer).getByRole('button', { name })).toBeTruthy();
     const change = within(footer).getByRole('button', { name: 'Switch to Direct…' }) as HTMLButtonElement;
-    expect(change.disabled).toBe(true);
-    expect(change.title).toBe('Switching routes arrives with C10');
+    expect(change.disabled).toBe(false);
   });
 
-  it('with a start, the switch opens its confirm; Accounts and Session info open their surfaces', async () => {
-    offs.push(provideSessionStart({ start: async () => ({ status: 'starting' }), onSetupFailure: () => () => {} }));
+  it('the switch opens its confirm; Accounts and Session info open their surfaces', async () => {
     const accounts = vi.fn();
     offs.push(registerAction('accounts.open', accounts));
     const addTool = vi.spyOn(panelHost, 'addTool').mockReturnValue('session-info:x');

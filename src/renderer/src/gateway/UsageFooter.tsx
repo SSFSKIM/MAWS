@@ -13,7 +13,6 @@ import { POPOVER_TICK_MS, useNow } from '../statusline/use-now';
 import { useSessions } from '../stores/sessions';
 import { useSettings } from '../stores/settings';
 import { useSessionWindows, useUsage } from '../stores/usage';
-import { useSessionStartAvailable } from './c10-seam';
 import { FOOTER, ROUTE, SWITCH } from './copy';
 import { paceLine, routingFacts } from './routing-facts';
 import { useGateway } from './store';
@@ -33,7 +32,6 @@ function Footer({ appSessionId, record, status }: { appSessionId: AppSessionId; 
   const settings = useSettings((s) => s.state?.settings) ?? SETTINGS_DEFAULTS_V3;
   const login = useGateway((s) => s.directLogin.get(appSessionId) ?? null);
   const switching = useGateway((s) => s.switching.get(appSessionId) ?? null);
-  const canStart = useSessionStartAvailable();
   const shown = useSessionWindows(record, status);
   const facts = routingFacts(record, status, snapshot, settings, login);
   const pace = facts.route === 'direct' || !shown.windows ? [] : [paceLine(shown.windows.sevenDay, 'weekly', now), paceLine(shown.windows.fiveHour, 'fiveHour', now)].filter((l) => l !== null);
@@ -78,8 +76,7 @@ function Footer({ appSessionId, record, status }: { appSessionId: AppSessionId; 
             key={target}
             type="button"
             className={LINK}
-            disabled={!canStart || busy}
-            title={canStart ? undefined : FOOTER.switchUnavailable}
+            disabled={busy}
             onClick={() => void switchRoute(appSessionId, target)}
           >
             {switching?.phase === 'failed' && switching.target === target ? `${SWITCH.retry} · ${ROUTE.switchTo[target]}` : ROUTE.switchTo[target]}

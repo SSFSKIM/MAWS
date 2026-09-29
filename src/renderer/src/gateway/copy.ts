@@ -22,7 +22,6 @@ export const FOOTER = {
   accounts: 'Accounts',
   sessionInfo: 'Session info',
   label: 'Route',
-  switchUnavailable: 'Switching routes arrives with C10',
 };
 
 export const PACE = {
@@ -58,9 +57,18 @@ export const SWITCH = {
   refused: (why: string) => `Stopped; the restart was refused: ${why} · Resume from the sidebar`,
   notReady: 'Stopped; the restart did not become ready within 60 s · Resume from the sidebar',
   mismatch: (target: Route) => `Restarted, but the route reads unverified (asked for ${target === 'direct' ? 'Direct' : 'the gateway'}) · check Session info`,
-  unavailable: 'Switching routes arrives with C10',
   retry: 'Retry',
   toast: (title: string, target: Route, model: string | null) => `${title} restarted ${target === 'direct' ? 'direct' : 'routed'}${model === null ? '' : ` · on ${model}`}`,
+};
+
+// C10's start outcomes other than `starting`, and its setup failures, as the switch's refusal words.
+export const START = {
+  needsTrust: 'The folder is not trusted yet · resume it from the sidebar to answer',
+  relayUnreachable: 'The relay was unreachable',
+  held: (holder: string) => `Held by ${holder}`,
+  alreadyLive: 'This session is already running',
+  archived: 'This session is archived',
+  missingDirectory: (directory: string) => `Directory not found: ${directory}`,
 };
 
 export const DIRECT_MODEL = {
@@ -72,10 +80,4 @@ export const DIRECT_MODEL = {
   cancel: 'Cancel',
   loading: 'Reading the catalogue…',
   none: 'No Claude model in the catalogue',
-};
-
-export const BACKGROUND = {
-  // The C10 seam's stand-in for `BackgroundWorkDisclosure` (§4.4's wording): the running tasks by count and description.
-  count: (n: number) => `${n} background ${n === 1 ? 'task' : 'tasks'} running`,
-  list: 'Background work',
 };

@@ -1,7 +1,8 @@
 // The widgets harness page (`#widgets`; C11 execution document, M2 decisions and Acceptance item 2). Interactive: C7's
 // composer over one session with a widget picker beside it, over the app's real stores and X2, so typing `/` in the
 // composer and choosing a name opens C11's widget as the app does; under MAWS_WIDGET_BACKEND=fixtures main answers the
-// widgets' reads from the fixture-backed widget backend over C5's scenario records. Passive (C3's strict replay): the
+// widgets' reads from the fixture-backed widget backend over C5's scenario records, and C10's session actions and
+// sheets are registered as the app registers them (`/rename`'s dialog, Resume, the route switch's resume). Passive (C3's strict replay): the
 // engine-read widgets and the model and compact widgets mounted at once reading only the query cache and the status,
 // which the spec's scripted driver moves through `read` and `control` with exactly the fixture's recorded frames, so
 // nothing on the page writes to the replay on its own.
@@ -11,10 +12,11 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { ToastHost } from '../../app/ToastHost';
-import { provideSessionStart, type StartOptions } from '../../gateway/c10-seam';
 import { connectDirectLogin } from '../../gateway/direct-login';
 import { GatewayDialogs } from '../../gateway/SwitchSheet';
 import { UsageFooter } from '../../gateway/UsageFooter';
+import { registerSessionActions } from '../../sessions/actions';
+import { SessionDialogs } from '../../sessions/SessionDialogs';
 import { registerUsagePopoverFooter } from '../../statusline';
 import { UsagePopoverBody } from '../../statusline/UsagePopover';
 import { useSessions } from '../../stores/sessions';
@@ -44,11 +46,6 @@ declare global {
 // The widgets mounted together in passive mode: M2's fourteen engine-read widgets, and the model and compact widgets
 // (M3), whose reads (`list_models`, the summary `get_context_usage`) the replay-conformance driver issues.
 const PASSIVE: readonly WidgetCommandName[] = ['model', 'permissions', 'usage', 'context', 'compact', 'config', 'plugins', 'mcp', 'sandbox', 'hooks', 'memory', 'skills', 'agents', 'status', 'diff', 'export'];
-
-// M4: the page's stand-in for C10's `session.start` (the route switch's restart; C10 seam): it records the call and
-// answers `starting`; the spec then moves the backend's status to ready on the new route, as C10's launch would.
-const starts: { appSessionId: string; options: StartOptions }[] = [];
-const standInStart = { start: async (appSessionId: AppSessionId, options: StartOptions) => (starts.push({ appSessionId, options }), { status: 'starting' as const }), onSetupFailure: () => () => {} };
 
 // M4: the session's routing facts as C7's usage popover shows them (its body with C11's footer), and C11's Session info
 // tool as C8a's host renders it for the shown session, beside the composer.
@@ -152,7 +149,7 @@ export function WidgetsHarness() {
     const theme = new URLSearchParams(location.search).get('theme');
     if (theme === 'dark' || theme === 'light') document.documentElement.dataset.theme = theme;
     mirrorLayout(start.pane);
-    const offs = [connectShell(), connectKeys(), connectUsage(), registerAllWidgets(), registerUsagePopoverFooter(UsageFooter), connectDirectLogin(queryClient), provideSessionStart(standInStart)];
+    const offs = [connectShell(), connectKeys(), connectUsage(), registerAllWidgets(), registerUsagePopoverFooter(UsageFooter), connectDirectLogin(queryClient), registerSessionActions()]; // C10's actions: /rename's dialog, Resume
     window.__maws_widgets = {
       show: (next) => {
         mirrorLayout(next);
@@ -162,7 +159,6 @@ export function WidgetsHarness() {
       open: (name, args = '') => setOpened({ name, args }),
       read: (command, input) => readIntoCache(queryClient, command as SessionRead, input as never),
       control: (name, input) => (CONTROLS[name] ? CONTROLS[name](input as never) : Promise.reject(new Error(`no widget control named ${name}`))),
-      starts: () => starts.map((call) => ({ appSessionId: call.appSessionId, options: { ...call.options } })),
     };
     return () => {
       offs.forEach((off) => off());
@@ -181,6 +177,7 @@ export function WidgetsHarness() {
         <Interactive key={appSessionId} appSessionId={appSessionId} opened={opened} open={(name) => setOpened({ name, args: '' })} close={() => setOpened(null)} />
       )}
       <ComposerAppKeys />
+      <SessionDialogs />
       <GatewayDialogs />
       <ToastHost />
     </QueryClientProvider>

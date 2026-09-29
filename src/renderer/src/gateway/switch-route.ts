@@ -19,15 +19,17 @@ import { ipc } from '../ipc/client';
 import { toast } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
 import { isGatewayModel } from '@shared/sessions/models';
-import { sessionStart, type SessionStart, type StartOptions } from './c10-seam';
 import { SWITCH, type Route } from './copy';
 import { switchRefusal } from './routing-facts';
+import { sessionStartOver, type SessionStart, type StartOptions } from './session-start';
 import { useGateway, type GatewayStore, type SwitchConfirm, type SwitchState } from './store';
 
 export type SwitchOutcome = 'done' | 'cancelled' | 'failed';
 // What the sheet answers: the Direct model chosen (with its display name for the toast, and the effort the launch needs
-// when the chosen entry does not admit the current one), or all null for a switch that needs no model.
-export type SwitchAnswer = { model: string | null; displayName: string | null; effort: Effort | null };
+// when the chosen entry does not admit the current one), or all null for a switch that needs no model; and the
+// background work its disclosure showed when it was answered (C10's `BackgroundWorkDisclosure` lists it live), which
+// is what the recheck compares against, since that is what the human confirmed.
+export type SwitchAnswer = { model: string | null; displayName: string | null; effort: Effort | null; backgroundTasks?: EngineSessionStatus['backgroundTasks'] };
 
 export interface SwitchTimeouts {
   turnMs: number; // the interrupted turn's end
@@ -40,7 +42,7 @@ export interface SwitchDeps {
   client: MawsBridge;
   record(appSessionId: AppSessionId): SessionRecord | null;
   status(appSessionId: AppSessionId): EngineSessionStatus | null; // the latest status held for the session
-  start(): SessionStart | null; // C10's session.start; null before C10
+  start: SessionStart; // C10's session.start (the resume) and its setup failures
   toast(text: string): void;
   timeouts?: Partial<SwitchTimeouts>;
 }
@@ -110,11 +112,7 @@ export function createRouteSwitcher(deps: SwitchDeps, store: GatewayStore) {
       deps.toast(SWITCH.alreadySwitching);
       return 'failed';
     }
-    const start = deps.start();
-    if (!start) {
-      deps.toast(SWITCH.unavailable);
-      return 'failed';
-    }
+    const { start } = deps;
     const record = deps.record(id);
     const refusal = record ? switchRefusal(record) : SWITCH.notRunning;
     if (!record || refusal) {
@@ -158,7 +156,7 @@ export function createRouteSwitcher(deps: SwitchDeps, store: GatewayStore) {
           clear(id);
           return 'cancelled';
         }
-        confirm = { ...confirm, model: answer.model, effort: answer.effort };
+        confirm = { ...confirm, model: answer.model, effort: answer.effort, backgroundTasks: answer.backgroundTasks ?? confirm.backgroundTasks };
         state = { ...state, confirm };
         if (!live) break;
 
@@ -258,13 +256,13 @@ export function createRouteSwitcher(deps: SwitchDeps, store: GatewayStore) {
   return { switchRoute, answer };
 }
 
-// The app's switcher: the IPC client, C5's sessions store, C10's start through its seam, C5's toasts.
+// The app's switcher: the IPC client, C5's sessions store, C10's start, C5's toasts.
 const app = createRouteSwitcher(
   {
     client: ipc,
     record: (id) => useSessions.getState().records.get(id) ?? null,
     status: (id) => useSessions.getState().engine.get(id) ?? null,
-    start: sessionStart,
+    start: sessionStartOver(ipc),
     toast: (text) => void toast({ level: 'info', text, actions: [], dismissible: true }),
   },
   useGateway,

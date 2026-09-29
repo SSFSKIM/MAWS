@@ -1,24 +1,36 @@
 // The Direct model choice's body and its dialog (C11 execution document, Interfaces "Gateway": `pickDirectModel`, the
-// sheet the switch embeds). The catalogue's Claude group, `default` preselected, each row with its display name and the
-// `Cannot hold auto mode` caption where it applies; the answer carries the effort the chosen entry admits.
-import { useQuery } from '@tanstack/react-query';
-import { AlertDialog } from 'radix-ui';
+// sheet the switch embeds). The catalogue's Claude group (C10's `engine.models`, answered before any process), `default`
+// preselected, each row with its display name and the `Cannot hold auto mode` caption where it applies; the answer
+// carries the effort the chosen entry admits.
 import { useState } from 'react';
 import { EffortSchema, type Effort } from '@shared/engine/launch-spec';
 import type { AppSessionId } from '@shared/graph/ids';
+import type { ModelCatalogueEntry } from '@shared/sessions/models';
+import { useCommand } from '../ipc/query';
 import { useSessions } from '../stores/sessions';
-import { presentModels, type ModelRow } from '../widgets/model';
-import { directCatalogue } from './c10-seam';
+import { effortsOf, presentModels, type ModelRow } from '../widgets/model';
 import { DIRECT_MODEL } from './copy';
 import { directChoice, preselected, useDirectModelPick } from './direct-model';
+import { GatewaySheet } from './GatewaySheet';
 import type { SwitchAnswer } from './switch-route';
 
-// The session's Claude-group models (null while the catalogue is read, or while `enabled` is false: nothing is asked).
-export function useClaudeModels(appSessionId: AppSessionId, enabled = true): readonly ModelRow[] | null {
-  const read = useQuery({ queryKey: ['maws', 'gateway.directCatalogue', appSessionId], queryFn: () => directCatalogue(appSessionId), staleTime: 60_000, enabled });
+// A catalogue entry as a model row: C10's entries are loose, so the capability keys are read as C3 types them, and the
+// untyped `supportedEffortLevels` is parsed (absent: the whole vocabulary).
+const rowOfEntry = (entry: ModelCatalogueEntry): ModelRow => ({
+  value: entry.value,
+  displayName: entry.displayName,
+  ...(entry.supportsAutoMode !== undefined && { supportsAutoMode: entry.supportsAutoMode }),
+  ...(entry.supportsFastMode !== undefined && { supportsFastMode: entry.supportsFastMode }),
+  supportedEffortLevels: effortsOf({ supportedEffortLevels: entry.supportedEffortLevels }),
+});
+
+// The catalogue's Claude-group models (null while it is read, or while `enabled` is false: nothing is asked).
+export function useClaudeModels(enabled = true): readonly ModelRow[] | null {
+  const read = useCommand('engine.models', { refresh: false }, { staleTime: 60_000, enabled });
   if (!read.data) return read.isError ? [] : null;
-  const claude = new Set(presentModels(read.data).claude.map((m) => m.value));
-  return read.data.filter((m) => claude.has(m.value));
+  const rows = read.data.models.map(rowOfEntry);
+  const claude = new Set(presentModels(rows).claude.map((m) => m.value));
+  return rows.filter((m) => claude.has(m.value));
 }
 
 // The effort the session runs at now (the status's, else the record's), for the chosen entry's admitted levels.
@@ -33,7 +45,7 @@ export function useCurrentEffort(appSessionId: AppSessionId): Effort | null {
 // for an explicit pick, since the restart changes the session's model; `pickDirectModel`'s dialog, whose one act is the
 // choice, preselects.
 export function useDirectChoice(appSessionId: AppSessionId, initial: string | null, preselect: boolean, enabled = true) {
-  const models = useClaudeModels(appSessionId, enabled);
+  const models = useClaudeModels(enabled);
   const effort = useCurrentEffort(appSessionId);
   const [picked, pick] = useState<string | null>(initial);
   const row = models === null ? null : (models.find((m) => m.value === picked) ?? (preselect ? preselected(models) : null));
@@ -64,13 +76,6 @@ export function DirectModelList({ models, chosen, pick }: { models: readonly Mod
   );
 }
 
-export const DIALOG = {
-  overlay: 'fixed inset-0 z-40 bg-bg opacity-60',
-  content: 'fixed top-[20%] left-1/2 z-50 flex w-[min(440px,90vw)] -translate-x-1/2 flex-col gap-3 rounded-lg border border-border-strong bg-bg-overlay p-4 text-ui text-fg',
-  cancel: 'rounded-sm border border-border px-2 py-0.5 text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2',
-  action: 'rounded-sm bg-accent px-2 py-0.5 text-bg outline-accent hover:opacity-90 focus-visible:outline-2 disabled:opacity-50',
-};
-
 // `pickDirectModel`'s dialog, rendered by the gateway's dialog host while a pick is open.
 export function DirectModelDialog() {
   const picking = useDirectModelPick((s) => s.picking);
@@ -81,21 +86,16 @@ export function DirectModelDialog() {
 function PickDialog({ appSessionId, resolve }: { appSessionId: AppSessionId; resolve(choice: { model: string; effort: Effort | null } | null): void }) {
   const { models, row, answer, pick } = useDirectChoice(appSessionId, null, true);
   return (
-    <AlertDialog.Root open onOpenChange={(open) => !open && resolve(null)}>
-      <AlertDialog.Portal>
-        <AlertDialog.Overlay className={DIALOG.overlay} />
-        <AlertDialog.Content className={DIALOG.content}>
-          <AlertDialog.Title className="m-0 text-ui font-semibold">{DIRECT_MODEL.title}</AlertDialog.Title>
-          <AlertDialog.Description className="m-0 text-fg-muted">{DIRECT_MODEL.why}</AlertDialog.Description>
-          <DirectModelList models={models} chosen={row?.value ?? null} pick={pick} />
-          <div className="flex justify-end gap-2">
-            <AlertDialog.Cancel className={DIALOG.cancel}>{DIRECT_MODEL.cancel}</AlertDialog.Cancel>
-            <AlertDialog.Action className={DIALOG.action} disabled={answer === null} onClick={() => answer?.model && resolve({ model: answer.model, effort: answer.effort })}>
-              {DIRECT_MODEL.choose}
-            </AlertDialog.Action>
-          </div>
-        </AlertDialog.Content>
-      </AlertDialog.Portal>
-    </AlertDialog.Root>
+    <GatewaySheet
+      title={DIRECT_MODEL.title}
+      onClose={() => resolve(null)}
+      canSubmit={answer?.model != null}
+      onSubmit={() => answer?.model && resolve({ model: answer.model, effort: answer.effort })}
+      submitLabel={DIRECT_MODEL.choose}
+      cancelLabel={DIRECT_MODEL.cancel}
+    >
+      <p className="m-0 text-fg-muted">{DIRECT_MODEL.why}</p>
+      <DirectModelList models={models} chosen={row?.value ?? null} pick={pick} />
+    </GatewaySheet>
   );
 }

@@ -57,7 +57,9 @@ function SessionInfoBody({ appSessionId, visible, record }: { appSessionId: AppS
   const settings = useSettings((s) => s.state?.settings) ?? SETTINGS_DEFAULTS_V3;
   const snapshot = useUsage((s) => s.snapshot);
   const directLogin = useGateway((s) => s.directLogin.get(appSessionId) ?? null);
+  // the model's catalogue entry: the session's own list_models answer when C7 read one, else C10's engine.models cache
   const models = useComposerStore((s) => listedModelsOf(s, appSessionId));
+  const catalogue = useCommand('engine.models', { refresh: false }, { enabled: visible, staleTime: 60_000 });
   // the transcript's state only while it holds rows for the session (the reviews count is omitted otherwise)
   const transcript = useTranscriptStore((s) => (s.entries[appSessionId]?.rows.length ? s.entries[appSessionId].state : undefined));
   const now = useNow(POPOVER_TICK_MS);
@@ -68,7 +70,8 @@ function SessionInfoBody({ appSessionId, visible, record }: { appSessionId: AppS
   if (status) {
     const server = status.gateway.autoModeServer === 'unknown' ? serverRow(statusRead.data?.sections) : null;
     const laneStatus = server ? { ...status, gateway: { ...status.gateway, autoModeServer: server } } : status;
-    const entry = rowOf(models ?? [], status.model.requested ?? status.model.resolved) ?? null;
+    const id = status.model.requested ?? status.model.resolved;
+    const entry = rowOf(models ?? [], id) ?? catalogue.data?.models.find((m) => m.value === id) ?? null;
     const account = facts.route === 'direct' ? INFO.direct : (facts.account?.email ?? null);
     lane = autoModeLane(laneStatus, entry, reviewsOf(transcript), account);
   }

@@ -203,6 +203,16 @@ describe('the widget backend', () => {
     expect(backend.calls.filter((c) => c.command === 'session.start').map((c) => c.input)).toHaveLength(2);
   });
 
+  it('resumes a session it held no status for, from its record', async () => {
+    const { backend } = backendOf();
+    const never = 'app-1238089b' as AppSessionId; // SDK wire inventory: a record, no status
+    expect(() => backend.status(never)).toThrow();
+    expect(await backend.answer('session.start', { appSessionId: never, message: null, options: {} })).toEqual({ status: 'starting', appSessionId: never });
+    await vi.waitFor(() => expect(backend.status(never).process).toBe('ready'));
+    expect(EngineSessionStatusSchema.safeParse(backend.status(never)).success).toBe(true);
+    expect(backend.status(never)).toMatchObject({ appSessionId: never, backgroundTasks: [], turn: null });
+  });
+
   it("resumes on the record's last route when the options name none", async () => {
     const { backend } = backendOf();
     await backend.answer('session.stop', { appSessionId: READY, reason: 'stop' });

@@ -100,6 +100,14 @@ test.describe('interactive', () => {
       await expect(chosen, name).toContainText(`/${name}`);
       await expect(chosen, name).not.toHaveAttribute('aria-disabled', 'true');
       await page.keyboard.press('Enter');
+      if (name === 'rename') {
+        // no title: C10's rename dialog (the session action C10 registers), not a widget of C11's
+        const dialog = page.getByRole('dialog', { name: 'Rename' });
+        await expect(dialog).toBeVisible();
+        await page.keyboard.press('Escape');
+        await expect(dialog).toBeHidden();
+        continue;
+      }
       await expect(widget(page, name)).toBeVisible();
       await expect(widget(page, name).locator('footer')).toContainText('Read with');
       await page.keyboard.press('Escape'); // the frame took focus when it opened
@@ -306,7 +314,7 @@ test.describe('interactive', () => {
 
     await typeCommand(page, '/rename New title');
     await expect(widget(page, 'rename').getByRole('status')).toHaveText('Renamed · New title');
-    expect((await commandsOf(backend)).filter((c) => c.command === 'session.renameSession')).toEqual([{ command: 'session.renameSession', input: { appSessionId: READY, title: 'New title' } }]);
+    expect((await commandsOf(backend)).filter((c) => c.command === 'session.rename')).toEqual([{ command: 'session.rename', input: { appSessionId: READY, title: 'New title' } }]); // C10's
     expect(backend.consoleErrors()).toEqual([]);
   });
 
@@ -425,13 +433,17 @@ test.describe('interactive', () => {
     await expect(rows).toHaveCount(2); // nine-sessions' proj-claude-usage-menubar, without this session
     await expect(rows.nth(0)).toContainText('Usage reset countdown');
     await expect(rows.nth(1)).toContainText('SDK wire inventory');
-    await expect(rows.nth(1).getByRole('button', { name: 'Resume' })).toBeDisabled(); // C10's
+    // C10's resume (the session action it registers): `session.start` with no message, the record's own route
+    await rows.nth(1).getByRole('button', { name: 'Resume' }).click();
+    await expect(widget(page, 'resume')).toBeHidden();
+    await expect.poll(async () => (await commandsOf(backend)).filter((c) => c.command === 'session.start')).toEqual([{ command: 'session.start', input: { appSessionId: 'app-1238089b', message: null, options: {} } }]);
+    expect(backend.consoleErrors()).toEqual([]);
   });
 
   // ---- M4: Session info and the route switch, beside the composer on the same page ------------------------------------
   // Session info is C11's panel tool rendered for the shown session; the routing footer is C11's in C7's usage popover
-  // body. C10's `session.start` does not exist on this branch: the page stands in for it (it records the call and
-  // answers `starting`), and the case moves the backend's status to ready on the new route as C10's launch would.
+  // body. The restart is C10's `session.start`, which the widget backend answers in main: the process comes up ready on
+  // the route asked for, as C10's resume would launch it.
 
   test('Session info renders the six sections and derives the lane from the status and the model', async ({ backend }) => {
     const { page, app } = backend;
@@ -472,18 +484,20 @@ test.describe('interactive', () => {
       (_, [id, tasks]) => void (globalThis as unknown as BackendGlobal).__maws_widget_backend.emitStatus(id as never, { model: { requested: 'claude/astra', resolved: 'claude/astra' }, backgroundTasks: tasks as never }),
       [READY, TWO_TASKS] as const,
     );
-  const LIFECYCLE = ['session.status', 'session.interrupt', 'session.stop', 'session.queue.list', 'session.queue.setPaused'];
+  const LIFECYCLE = ['session.status', 'session.interrupt', 'session.stop', 'session.start', 'session.queue.list', 'session.queue.setPaused'];
 
   test('the switch names background work, requires a Claude model, then re-reads, stops and starts direct in order', async ({ backend }) => {
-    const { page, app } = backend;
+    const { page } = backend;
     await openPage(page, { appSessionId: READY, mode: 'interactive' });
     await onAstraWithWork(backend);
     const usage = page.getByRole('region', { name: 'Account usage' });
     await expect(usage).toContainText("Routed through ClaudeUsage's relay");
     await usage.getByRole('button', { name: 'Switch to Direct…' }).click();
 
-    const sheet = page.getByRole('alertdialog', { name: 'Switch this session to Direct?' });
-    await expect(sheet.getByRole('list', { name: 'Background work' }).getByRole('listitem')).toHaveText(['Sleep 120 s', 'Index the repository']);
+    const sheet = page.getByRole('dialog', { name: 'Switch this session to Direct?' });
+    const disclosure = sheet.getByRole('note'); // C10's BackgroundWorkDisclosure, in the archive dialog's words
+    await expect(disclosure).toContainText('2 background tasks are still running and will be stopped');
+    await expect(disclosure.getByRole('listitem')).toHaveText(['Sleep 120 s', 'Index the repository']);
     const confirm = sheet.getByRole('button', { name: 'Stop them and switch' });
     await expect(confirm, 'a Claude model first').toBeDisabled();
     await sheet.getByRole('radio', { name: /^Sonnet 5/ }).click();
@@ -491,21 +505,15 @@ test.describe('interactive', () => {
     const before = (await commandsOf(backend)).length;
     await confirm.click();
 
-    await expect.poll(() => page.evaluate(() => (window as unknown as WidgetsWindow).__maws_widgets.starts())).toEqual([{ appSessionId: READY, options: { gateway: 'direct', model: 'sonnet' } }]);
-    const lifecycle = (await commandsOf(backend)).slice(before).map((c) => c.command).filter((c) => LIFECYCLE.includes(c));
+    // C10's resume restarts the process on the direct route with the chosen model; the switch's notice follows
+    await expect(page.getByText('Settings idle probe restarted direct · on Sonnet 5', { exact: true })).toBeVisible();
+    const log = (await commandsOf(backend)).slice(before);
+    expect(log.filter((c) => c.command === 'session.start').map((c) => c.input)).toEqual([{ appSessionId: READY, message: null, options: { gateway: 'direct', model: 'sonnet' } }]);
+    const lifecycle = log.map((c) => c.command).filter((c) => LIFECYCLE.includes(c));
     expect(lifecycle, 'no turn was open: no interrupt').not.toContain('session.interrupt');
-    expect(lifecycle.filter((c) => c === 'session.stop')).toHaveLength(1);
-    expect(lifecycle.indexOf('session.status'), 'the recheck precedes the stop').toBeLessThan(lifecycle.indexOf('session.stop'));
-
-    // C10's launch, stood in for: the process ready on the direct route with the chosen model
-    await app.evaluate((_, id) => {
-      const b = (globalThis as unknown as BackendGlobal).__maws_widget_backend;
-      b.emitStatus(id as never, {
-        process: 'ready', exit: null, launchId: 'launch-2', backgroundTasks: [], model: { requested: 'sonnet', resolved: 'claude-sonnet-5[1m]' },
-        gateway: { mode: 'direct', baseUrl: null, verified: 'direct', autoModeServer: 'enabled', localLane: null },
-      });
-    }, READY);
-    await expect(page.getByText('Settings idle probe restarted direct · on Sonnet 5')).toBeVisible();
+    const stop = lifecycle.indexOf('session.stop');
+    expect(lifecycle.slice(stop - 1, stop + 2), 'the recheck, the stop, the restart, in one log').toEqual(['session.status', 'session.stop', 'session.start']);
+    expect(lifecycle.filter((c) => c === 'session.stop' || c === 'session.start')).toEqual(['session.stop', 'session.start']);
     await expect(usage.getByRole('button', { name: 'Switch to gateway…' })).toBeVisible();
     await expect(usage).toContainText("Direct · engine's own login");
     await expect(valueOf(page.locator(`[data-session-info="${READY}"]`), 'Route')).toHaveText(/^Direct · engine's own login/);
@@ -517,22 +525,28 @@ test.describe('interactive', () => {
     await openPage(page, { appSessionId: READY, mode: 'interactive' });
     await onAstraWithWork(backend);
     await page.getByRole('region', { name: 'Account usage' }).getByRole('button', { name: 'Switch to Direct…' }).click();
-    const sheet = page.getByRole('alertdialog', { name: 'Switch this session to Direct?' });
+    const sheet = page.getByRole('dialog', { name: 'Switch this session to Direct?' });
     await sheet.getByRole('radio', { name: /^Sonnet 5/ }).click();
-    // a third task between the confirm and the stop
+    // a third task between the confirm and the stop: it starts as the switch re-reads the status after the answer
     await app.evaluate(
-      (_, [id, tasks]) => void (globalThis as unknown as BackendGlobal).__maws_widget_backend.emitStatus(id as never, { backgroundTasks: tasks as never }),
+      (_, [id, tasks]) => {
+        const b = (globalThis as unknown as BackendGlobal).__maws_widget_backend;
+        const off = b.script('session.status', () => {
+          off();
+          return b.emitStatus(id as never, { backgroundTasks: tasks as never });
+        });
+      },
       [READY, [...TWO_TASKS, { taskId: 'task-3', taskType: 'local_agent', description: 'A third agent', ambient: false }]] as const,
     );
     await sheet.getByRole('button', { name: 'Stop them and switch' }).click();
-    const again = page.getByRole('alertdialog', { name: 'Switch this session to Direct?' });
-    await expect(again.getByRole('list', { name: 'Background work' }).getByRole('listitem')).toHaveText(['Sleep 120 s', 'Index the repository', 'A third agent']);
+    const again = page.getByRole('dialog', { name: 'Switch this session to Direct?' });
+    await expect(again.getByRole('note').getByRole('listitem')).toHaveText(['Sleep 120 s', 'Index the repository', 'A third agent']);
     await expect(again.getByRole('alert')).toHaveText('New background work started since you confirmed · check the list again');
     expect((await commandsOf(backend)).map((c) => c.command)).not.toContain('session.stop');
     await again.getByRole('button', { name: 'Cancel' }).click();
     await expect(again).toBeHidden();
     expect((await commandsOf(backend)).map((c) => c.command)).not.toContain('session.stop');
-    expect(await page.evaluate(() => (window as unknown as WidgetsWindow).__maws_widgets.starts())).toEqual([]);
+    expect((await commandsOf(backend)).map((c) => c.command)).not.toContain('session.start');
   });
 });
 
