@@ -577,7 +577,7 @@ describe('default loadSpill', () => {
 });
 
 describe('rewind adapter', () => {
-  const OUTCOME = { ok: true, enabled: true, message: null, filesChanged: 2, insertions: 3, deletions: 1, skippedLinks: 0 };
+  const OUTCOME = { ok: true, enabled: true, message: null, dryRun: true, changedFiles: ['/p/a.ts', '/p/b.ts'], insertions: 3, deletions: 1, skippedLinks: null }; // C3's RewindFilesOutcome
 
   function turns() {
     const b = builder();
