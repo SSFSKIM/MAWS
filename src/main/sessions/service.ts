@@ -28,7 +28,8 @@ import { canonicalPath, holderAuthority } from './holders';
 import { checkAdditionalDirectories, checkLocation, sessionDirectoryOf, trustDirectoryOf, type RuleVerdict } from './intent-rules';
 import { readSettings } from './launch-mapping';
 import { reconcileIntent, retainedWorktree } from './recovery';
-import { removeCreatedWorktree, runIntentSetup, runResume, type Setup } from './setup';
+import { runResume } from './resume';
+import { removeCreatedWorktree, runIntentSetup, type Setup } from './setup';
 import { trustKeyOf, trustStateOf } from './trust';
 
 // A refusal of an intent command, mapped to X2 by the registration: `invalid` is `invalid_input` naming the field;

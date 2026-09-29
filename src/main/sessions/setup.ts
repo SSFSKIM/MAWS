@@ -8,245 +8,34 @@
 // reconciliation; `session.launch` answering `launching` is the linearisation point after which the process is C3's to
 // report; rollback is per resource, never forced, and never a transcript.
 import { randomUUID } from 'node:crypto';
-import type { AppSessionId, MessageUuid, SessionId } from '@shared/graph/ids';
+import type { AppSessionId, SessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
-import type { EngineSessionStatus } from '@shared/engine/status';
-import type { RelayHealth } from '@shared/engine/relay-health';
-import type { FirstMessage, Location, SetupIntent } from '@shared/sessions/intent';
+import type { Location, SetupIntent } from '@shared/sessions/intent';
 import type { SetupEvent, SetupPhase, SetupResources } from '@shared/sessions/setup';
-import type { StartOptions } from '@shared/ipc/schema/session';
-import type { GitRun } from '../git/runner';
-import { WorktreeAddFailed, type WorktreeService } from '../git/worktrees';
-import type { SessionStore } from '../index/sessions';
-import type { HostDispatch } from '../ipc/router';
-import { attachCommand, bgRefusalOf } from './attach';
-import { hostCall, pathExists, realOrSelf, reservationOf, transcriptPathOf, type Emit, type HostEvents } from './context';
+import { WorktreeAddFailed } from '../git/worktrees';
+import { hostCall, pathExists, realOrSelf, transcriptPathOf } from './context';
 import { canonicalPath } from './holders';
 import { newWorktreeTarget } from './intent-rules';
-import type { BootstrapNotes, IntentStore } from './intents';
-import { bootstrapSpec, intentLaunchSpec, resumeLaunchSpec, trustMapping, type C10Settings } from './launch-mapping';
-import type { ReplaySeam } from './replay-seam';
+import { LaunchWatch } from './launch-watch';
+import { bootstrapSpec, intentLaunchSpec, trustMapping } from './launch-mapping';
+import {
+  directFallbackNotice,
+  exitFailure,
+  heldOutcome,
+  HeldFailure,
+  messageOf,
+  newestUserUuid,
+  RelayFailure,
+  SetupFailure,
+  setupEvent,
+  stopQuietly,
+  takeReplay,
+  WatchdogFailure,
+  type Setup,
+} from './setup-steps';
 import { trustStateOf } from './trust';
 
-// The service's dependencies, resolved (the engine's environment in hand).
-export interface Setup {
-  sessions: SessionStore;
-  dispatch: HostDispatch;
-  onEvent: HostEvents;
-  worktrees: WorktreeService;
-  git: GitRun;
-  intents: IntentStore;
-  bootstraps: BootstrapNotes;
-  emit: Emit;
-  env: NodeJS.ProcessEnv;
-  replay: ReplaySeam | null;
-  settings: () => C10Settings;
-  now: () => string;
-  log: (message: string) => void;
-  watchdogMs: number;
-  stopWaitMs: number;
-  watches: Set<LaunchWatch>; // halted when the service is disposed
-}
-
-// ---- failures ------------------------------------------------------------------------------------------------------
-
-export class SetupFailure extends Error {
-  constructor(
-    readonly phase: SetupPhase,
-    message: string,
-  ) {
-    super(message);
-    this.name = 'SetupFailure';
-  }
-}
-
-// A launch that reported nothing for the watchdog's span (C3's own initialize deadline is shorter, so this is the host
-// itself not answering): the process, if any, is stopped.
-class WatchdogFailure extends SetupFailure {
-  constructor() {
-    super('launching', 'no answer from the engine host');
-  }
-}
-
-class RelayFailure extends Error {
-  constructor(readonly health: RelayHealth) {
-    super(`relay unreachable: ${health.error ?? `status ${health.status ?? 'none'}`}`);
-  }
-}
-
-// The engine's own refusal to resume a session a `--bg` job holds (authoritative over MAWS's holder read).
-class HeldFailure extends Error {
-  constructor(
-    readonly jobId: string | null,
-    text: string,
-  ) {
-    super(text);
-  }
-}
-
-const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
-
-// ---- the launch watch ----------------------------------------------------------------------------------------------
-
-export type LaunchEnd = { kind: 'ready'; status: EngineSessionStatus } | { kind: 'exited'; errors: string[] } | { kind: 'timeout' };
-
-// One launch's statuses and exit, from the moment before `session.launch` (so nothing it reports is missed). The
-// watchdog restarts at every status: a launch that reports nothing for `watchdogMs` has timed out.
-export class LaunchWatch {
-  private last: EngineSessionStatus | null = null;
-  private exited = false;
-  private halted = false;
-  private readonly errors: string[] = [];
-  private readonly offs: (() => void)[];
-  private wake: (() => void) | null = null;
-  private timer: ReturnType<typeof setTimeout> | null = null;
-
-  constructor(
-    private readonly s: Setup,
-    readonly appSessionId: AppSessionId,
-  ) {
-    s.watches.add(this);
-    this.offs = [
-      s.onEvent('session.status', ({ appSessionId: id, status }) => {
-        if (id !== appSessionId) return;
-        this.last = status;
-        if (status.process === 'exited' || status.exit !== null) this.exited = true;
-        this.poke();
-      }),
-      s.onEvent('session.eventBatch', ({ appSessionId: id, events }) => {
-        if (id !== appSessionId) return;
-        for (const event of events) {
-          if (event.kind === 'error.raised' && event.scope === 'process') this.errors.push(event.message);
-          if (event.kind === 'process.exited') this.exited = true;
-        }
-        this.poke();
-      }),
-    ];
-  }
-
-  async untilReady(): Promise<LaunchEnd> {
-    for (;;) {
-      if (this.exited) return { kind: 'exited', errors: await this.exitErrors() };
-      if (this.last?.process === 'ready') return { kind: 'ready', status: this.last };
-      if (await this.nextChange(this.s.watchdogMs)) return { kind: 'timeout' };
-    }
-  }
-
-  // Whether the process exits within `ms`.
-  async untilExit(ms: number): Promise<boolean> {
-    const deadline = Date.now() + ms;
-    for (;;) {
-      if (this.exited) return true;
-      const left = deadline - Date.now();
-      if (left <= 0 || (await this.nextChange(left))) return this.exited;
-    }
-  }
-
-  dispose(): void {
-    for (const off of this.offs) off();
-    this.s.watches.delete(this);
-  }
-
-  // The service was disposed (tests restart the app over the same disk): nothing here resolves again.
-  halt(): void {
-    this.halted = true;
-    if (this.timer) clearTimeout(this.timer);
-    this.dispose();
-  }
-
-  private poke(): void {
-    const wake = this.wake;
-    this.wake = null;
-    wake?.();
-  }
-
-  // Resolves true on timeout, false on a change; never while halted.
-  private nextChange(ms: number): Promise<boolean> {
-    if (this.halted) return new Promise(() => {});
-    return new Promise((resolve) => {
-      this.timer = setTimeout(() => {
-        this.wake = null;
-        if (!this.halted) resolve(true);
-      }, ms);
-      this.wake = () => {
-        if (this.timer) clearTimeout(this.timer);
-        if (!this.halted) resolve(false);
-      };
-    });
-  }
-
-  // The process-scope errors the exit came with: C3 batches events, so a snapshot of the session's ring fills in what
-  // the batch has not delivered yet.
-  private async exitErrors(): Promise<string[]> {
-    if (this.errors.length > 0) return this.errors;
-    try {
-      const snapshot = await hostCall(this.s.dispatch, 'session.events', { appSessionId: this.appSessionId, afterSeq: null, limit: null });
-      for (const event of snapshot.events) if (event.kind === 'error.raised' && event.scope === 'process') this.errors.push(event.message);
-    } catch {
-      // nothing more to learn
-    }
-    return this.errors;
-  }
-}
-
-// ---- small steps ---------------------------------------------------------------------------------------------------
-
-function setupEvent(s: Setup, appSessionId: AppSessionId, phase: SetupPhase, detail: string | null, outcome: SetupEvent['outcome'] = null): void {
-  s.emit('session.setup', { appSessionId, phase, detail, outcome });
-}
-
-// The next replay fixture, or null without the seam; a spent list refuses the launch.
-function takeReplay(s: Setup, phase: SetupPhase): { path: string; sessionId: SessionId } | null {
-  if (s.replay === null) return null;
-  const fixture = s.replay.take();
-  if (fixture === null) throw new SetupFailure(phase, 'replay_disabled: MAWS_E2E_REPLAY_FIXTURES has no fixture left for this launch');
-  return fixture;
-}
-
-async function stopQuietly(s: Setup, appSessionId: AppSessionId): Promise<void> {
-  try {
-    if ((await reservationOf(s.dispatch, appSessionId)) !== null) await hostCall(s.dispatch, 'session.stop', { appSessionId, reason: 'stop' });
-  } catch (error) {
-    s.log(`could not stop ${appSessionId}: ${messageOf(error)}`);
-  }
-}
-
-function exitFailure(errors: string[]): Error {
-  const text = errors.join('\n');
-  const refusal = bgRefusalOf(text);
-  if (refusal) return new HeldFailure(refusal.jobId, text);
-  return new SetupFailure('launching', text.trim() === '' ? 'the engine exited before it was ready' : `the engine exited before it was ready: ${text.trim()}`);
-}
-
-async function heldOutcome(s: Setup, failure: HeldFailure): Promise<Extract<NonNullable<SetupEvent['outcome']>, { kind: 'held' }>> {
-  let attach: { jobId: string; command: string } | null = null;
-  if (failure.jobId !== null) {
-    const binary = await hostCall(s.dispatch, 'engine.binaryInfo', undefined).catch(() => null);
-    if (binary) attach = { jobId: failure.jobId, command: attachCommand(binary.path, failure.jobId) };
-  }
-  return { kind: 'held', holder: { kind: 'background_job', pid: null, jobId: failure.jobId }, attach };
-}
-
-// The newest user message the launched session reports, for a fork's rewind (C3 passes it as the human's last seen).
-async function newestUserUuid(s: Setup, appSessionId: AppSessionId): Promise<MessageUuid | null> {
-  const snapshot = await hostCall(s.dispatch, 'session.events', { appSessionId, afterSeq: null, limit: null }).catch(() => null);
-  const users = (snapshot?.events ?? []).filter((e) => e.kind === 'user.message' && e.messageUuid !== null && !e.isSynthetic);
-  const last = users.at(-1);
-  return last && last.kind === 'user.message' ? last.messageUuid : null;
-}
-
-// Tells the session its launch fell back to the direct route (C11's `relayUnreachable: 'direct'`).
-function directFallbackNotice(s: Setup, appSessionId: AppSessionId, sessionId: SessionId | null): void {
-  s.emit('session.eventBatch', {
-    appSessionId,
-    events: [
-      {
-        id: `${appSessionId}:c10:relay-fallback:${randomUUID()}`, sessionId: sessionId ?? 'unknown', at: s.now(), seq: null, agentId: null, parentToolUseId: null,
-        kind: 'notice.posted', level: 'warning', key: 'relay:direct_fallback', text: 'The relay was unreachable, so this session started on the direct route.',
-      },
-    ],
-  } as never);
-}
+export { SetupFailure, type Setup } from './setup-steps';
 
 // ---- the trust bootstrap -------------------------------------------------------------------------------------------
 
@@ -588,68 +377,5 @@ async function rollbackIntent(s: Setup, run: IntentRun, cwd: string | null, erro
   } catch (rollbackError) {
     s.log(`rollback of ${appSessionId} failed: ${messageOf(rollbackError)}`);
     run.event('failed', null, { kind: 'error', message: `${message}; rollback failed: ${messageOf(rollbackError)}`, resources: { worktree: null, record: 'kept', transcript: 'none' } });
-  }
-}
-
-// ---- a record's resume ---------------------------------------------------------------------------------------------
-
-export async function runResume(
-  s: Setup,
-  record: SessionRecord,
-  input: { decision: 'accepted' | 'declined' | null; options: StartOptions; message: FirstMessage | null; onSent: () => void },
-): Promise<void> {
-  const appSessionId = record.appId;
-  let watch: LaunchWatch | null = null;
-  let launched = false;
-  try {
-    const trust = await trustStateOf(record.directory, { git: s.git, env: s.env });
-    const attestation = input.decision === 'accepted' ? { accepted: true as const, directory: trust.trustKey } : null;
-    const gateway = input.options.gateway ?? (record.gateway.routed === true ? 'gateway' : record.gateway.routed === false ? 'direct' : s.settings().gateway.defaultRoute);
-    if (input.decision === 'accepted' && !trust.isHome && !trust.trusted) {
-      // under a bootstrap id of its own, never the record's (whose statuses C4 would apply to the conversation)
-      await runBootstrap(s, appSessionId, {
-        cwd: record.directory,
-        additionalDirectories: record.additionalDirectories,
-        gateway,
-        trustKey: trust.trustKey,
-        note: { put: (bootstrapId, at) => s.bootstraps.put({ bootstrapId, appSessionId, at }), clear: (bootstrapId) => s.bootstraps.remove(bootstrapId) },
-      });
-    }
-    setupEvent(s, appSessionId, 'launching', 'Starting');
-    // disk-to-live: C4's follower fed the exited session's tab from its transcript; C3's stream takes over
-    if (record.engineSessionId !== null) {
-      await hostCall(s.dispatch, 'fs.unfollow', { appSessionId, agentId: null }).catch((error: unknown) => {
-        throw new SetupFailure('launching', `could not hand the transcript over to the live session: ${messageOf(error)}`);
-      });
-    }
-    const fixture = takeReplay(s, 'launching');
-    const spec = resumeLaunchSpec(record, input.options, { trust: attestation, replay: fixture?.path ?? null }, s.settings());
-    watch = new LaunchWatch(s, appSessionId);
-    const answer = await hostCall(s.dispatch, 'session.launch', { spec });
-    if (answer.status === 'relay_unreachable') throw new RelayFailure(answer.health);
-    if (answer.status === 'refused') throw new SetupFailure('launching', `${answer.reason}: ${answer.message}`);
-    launched = true;
-    const end = await watch.untilReady();
-    if (end.kind === 'timeout') throw new WatchdogFailure();
-    if (end.kind === 'exited') throw exitFailure(end.errors);
-    let firstTurn: 'sent' | 'queued' | 'none' = 'none';
-    if (input.message !== null) {
-      const sent = await hostCall(s.dispatch, 'session.send', { appSessionId, content: input.message.content });
-      input.onSent();
-      firstTurn = sent.disposition;
-    }
-    const engineSessionId = end.status.engineSessionId ?? record.engineSessionId ?? spec.sessionId;
-    setupEvent(s, appSessionId, 'ready', null, { kind: 'ready', engineSessionId: engineSessionId as SessionId, firstTurn });
-  } catch (error) {
-    if (!(error instanceof SetupFailure) && !(error instanceof RelayFailure) && !(error instanceof HeldFailure)) s.log(`resume of ${appSessionId} failed: ${messageOf(error)}`);
-    // a process this resume launched (still starting, or ready with its message refused) stops before the failure is told
-    if (launched) await stopQuietly(s, appSessionId);
-    const transcript = record.engineSessionId !== null && (await pathExists(await transcriptPathOf(s.env, record.directory, record.engineSessionId)));
-    const resources: SetupResources = { worktree: null, record: 'kept', transcript: transcript ? 'kept' : 'none' };
-    const outcome: SetupEvent['outcome'] =
-      error instanceof RelayFailure ? { kind: 'relay_unreachable', health: error.health } : error instanceof HeldFailure ? await heldOutcome(s, error) : { kind: 'error', message: messageOf(error), resources };
-    setupEvent(s, appSessionId, 'failed', null, outcome);
-  } finally {
-    watch?.dispose();
   }
 }

@@ -2,7 +2,7 @@ import { chmodSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, SessionId } from '@shared/graph/ids';
-import type { Location, SetupIntent } from '@shared/sessions/intent';
+import type { BranchChoice, Location, SetupIntent } from '@shared/sessions/intent';
 import { runGit } from '../../../test/support/git-fixture';
 import { summary } from '../../../test/support/index-fixture';
 import { ScratchRepo } from '../../../test/support/scratch-repo';
@@ -238,12 +238,13 @@ describe('rollback per resource', () => {
   it('patch refuses a new worktree the rules refuse, naming the location: a bad name, a taken path, a branch that exists, is missing or is checked out', async () => {
     const id = await create({ kind: 'directory', path: repo.root });
     const refused = (location: Location) => h.service.patch(id, { location });
+    const withBranch = (name: string, branch: BranchChoice): Location => ({ kind: 'newWorktree', repoRoot: repo.root, name, branch });
     await expect(refused(worktree('-bad'))).rejects.toMatchObject({ reason: 'invalid', field: 'location', message: "location: Worktree name cannot start with '-'" });
     await repo.addManagedWorktree('taken');
-    await expect(refused({ ...worktree('taken'), branch: { kind: 'new', name: 'worktree-other', base: 'HEAD' } })).rejects.toMatchObject({ field: 'location', message: 'location: worktree path exists' });
-    await expect(refused({ ...worktree('fresh'), branch: { kind: 'new', name: 'main', base: 'HEAD' } })).rejects.toMatchObject({ field: 'location', message: 'location: branch exists' });
-    await expect(refused({ ...worktree('fresh'), branch: { kind: 'existing', name: 'nope' } })).rejects.toMatchObject({ field: 'location', message: 'location: branch missing' });
-    await expect(refused({ ...worktree('fresh'), branch: { kind: 'existing', name: 'worktree-taken' } })).rejects.toMatchObject({
+    await expect(refused(withBranch('taken', { kind: 'new', name: 'worktree-other', base: 'HEAD' }))).rejects.toMatchObject({ field: 'location', message: 'location: worktree path exists' });
+    await expect(refused(withBranch('fresh', { kind: 'new', name: 'main', base: 'HEAD' }))).rejects.toMatchObject({ field: 'location', message: 'location: branch exists' });
+    await expect(refused(withBranch('fresh', { kind: 'existing', name: 'nope' }))).rejects.toMatchObject({ field: 'location', message: 'location: branch missing' });
+    await expect(refused(withBranch('fresh', { kind: 'existing', name: 'worktree-taken' }))).rejects.toMatchObject({
       field: 'location',
       message: `location: branch checked out at ${managed('taken')}`,
     });
