@@ -7,7 +7,7 @@ import type { Draft } from '@shared/ipc/schema/session';
 import { connectKeys } from '../../keymap/dispatcher';
 import { resetCatalogStore } from '../../stores/catalog';
 import { prefillComposer, resetComposerStore } from '../../stores/composer';
-import { docOf, hardBreak, paragraph, textNode } from './doc';
+import { docOf, hardBreak, paragraph, pastedNode, textNode } from './doc';
 import { Editor, type DraftPort, type EditorHandle } from './Editor';
 import type { Serialized } from './serialize';
 
@@ -126,5 +126,15 @@ describe('the editor mounts over its draft, takes prefills and submits through t
     await act(async () => void content.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })));
     await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ content: 'see @zzz' }), 'send'));
     expect(handle.current?.doc().content).toHaveLength(1);
+  });
+
+  it('numbers pasted chips in document order, as display and pastedContents do', async () => {
+    const atom = (name: string, text: string) => pastedNode({ id: name, kind: 'text', name, lines: 1, text });
+    const { port } = drafts({ doc: docOf([paragraph(atom('Pasted text #2', 'first'), textNode(' and '), atom('notes.txt', 'second'), atom('Pasted text #1', 'third'))]), attachments: [], updatedAt: '2026-09-29T00:00:00.000Z' });
+    const handle = createRef<EditorHandle>();
+    const { container } = render(<Editor appSessionId={APP} cwd="/repo" sessionId={null} drafts={port} client={client} handle={handle} />);
+    await waitFor(() => expect(container.querySelectorAll('[data-pasted]')).toHaveLength(3));
+    await waitFor(() => expect([...container.querySelectorAll('[data-pasted]')].map((el) => el.textContent)).toEqual(['Pasted text #1 +1 lines', 'notes.txt +1 lines', 'Pasted text #3 +1 lines']));
+    expect(handle.current?.serialize().display).toBe('[Pasted text #1 +1 lines] and [Pasted text #2 +1 lines][Pasted text #3 +1 lines]');
   });
 });

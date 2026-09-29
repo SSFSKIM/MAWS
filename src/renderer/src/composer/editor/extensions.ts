@@ -12,6 +12,7 @@ import Paragraph from '@tiptap/extension-paragraph';
 import Text from '@tiptap/extension-text';
 import { Placeholder, UndoRedo } from '@tiptap/extensions';
 import { Plugin, PluginKey } from '@tiptap/pm/state';
+import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import { ReactNodeViewRenderer } from '@tiptap/react';
 import type { SuggestionOptions } from '@tiptap/suggestion';
 import { AtMenu } from '../mentions/AtMenu';
@@ -21,6 +22,7 @@ import { MentionView } from './nodes/Mention';
 import { PastedView } from './nodes/Pasted';
 import { handlesPlainText, plainTextSlice } from './clipboard';
 import type { EditorEnv } from './env';
+import { PASTED } from './doc';
 import { ComposerDocument, MentionNode, PastedNode } from './schema';
 
 export const atKey = new PluginKey('composer-at');
@@ -55,6 +57,28 @@ const TextPaste = (env: () => EditorEnv) =>
       ];
     },
   });
+
+// Each pasted atom's number in document order, as a node decoration its chip reads (inserting or deleting one before it
+// renumbers it, as `display` and `pastedContents` do).
+const PastedNumbers = Extension.create({
+  name: 'composerPastedNumbers',
+  addProseMirrorPlugins() {
+    return [
+      new Plugin({
+        key: new PluginKey('composerPastedNumbers'),
+        props: {
+          decorations: (state) => {
+            const decorations: Decoration[] = [];
+            state.doc.descendants((node, pos) => {
+              if (node.type.name === PASTED) decorations.push(Decoration.node(pos, pos + node.nodeSize, {}, { pastedNumber: decorations.length + 1 }));
+            });
+            return DecorationSet.create(state.doc, decorations);
+          },
+        },
+      }),
+    ];
+  },
+});
 
 export function composerExtensions(env: () => EditorEnv): AnyExtension[] {
   const at: Omit<SuggestionOptions<PopupItem, PopupItem>, 'editor'> = {
@@ -92,5 +116,6 @@ export function composerExtensions(env: () => EditorEnv): AnyExtension[] {
       onDrop: (_editor, files) => env().files(files),
     }),
     TextPaste(env),
+    PastedNumbers,
   ];
 }

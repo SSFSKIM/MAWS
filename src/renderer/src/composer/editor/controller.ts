@@ -17,7 +17,7 @@ import { useTranscriptStore } from '../../transcript';
 import { popupTakesKeys } from '../mentions/popup';
 import { slashWidget } from '../mentions/widgets';
 import { downscaleImage, fileBase64, imageRefusal, markPersisted } from './attachments';
-import { atomId, attachmentsOf, emptyDoc, isMultiline, mentionNode, PASTED, pastedNode, textNode, type Attachment, type ComposerDoc } from './doc';
+import { atomId, attachmentsOf, emptyDoc, isMultiline, mentionNode, pastedNode, textNode, type Attachment, type ComposerDoc } from './doc';
 import { createDraftWriter, docOfDraft, isEmptyDoc, type DraftWriter } from './drafts';
 import type { EditorEnv } from './env';
 import { suggesting } from './extensions';
@@ -71,7 +71,6 @@ export interface ControllerView {
 
 const HISTORY_LIMIT = 200;
 const warn = (text: string) => void toast({ level: 'warning', text, actions: [], dismissible: true });
-const pastedCount = (doc: ComposerDoc) => (doc.content ?? []).flatMap((p) => p.content ?? []).filter((n) => n.type === PASTED).length;
 
 // C4's drafts, which need the session's index record: a session the index does not hold has no draft to restore, and
 // its writes fail (said once per mount, not on every pause).
@@ -276,7 +275,7 @@ export class EditorController {
   private pasteText(text: string): boolean {
     const editor = this.editor;
     if (!editor || classifyText(text) === 'inline') return false;
-    this.insertPasted(text, `Pasted text #${pastedCount(editor.getJSON()) + 1}`);
+    this.insertPasted(text, 'Pasted text #1'); // the chip shows its place in the document
     return true;
   }
 
