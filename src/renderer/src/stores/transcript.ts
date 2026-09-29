@@ -150,6 +150,9 @@ interface Attached {
   // opened) and installs it only once its snapshot has applied, so the old rows stay on screen until then, and stay if
   // the snapshot fails (a retry stages afresh).
   restartUi: TranscriptUi | null;
+  // The last jump asked for while staging: it opened rows of the old state only, so it is resolved again on the
+  // installed one, whether or not the view has handled it meanwhile.
+  stagedJump: Pick<JumpRequest, 'focus' | 'align'> | null;
 }
 
 export function createTranscriptStore() {
@@ -192,8 +195,11 @@ export function createTranscriptStore() {
             staged = null; // later batches apply to the installed state
             attached.restartUi = null;
             // A jump asked for during the round trip (C5 remounting a kept session at an attention item's row) was
-            // resolved against the old state; it is resolved again, by the id it targets, on the installed one.
-            const pending = entry(key)?.jump ?? null;
+            // resolved against the old state, and the view may already have handled it there; it is resolved again, by
+            // the id it targets, on the installed one, so installing never closes what the jump opened. So is a jump
+            // asked for before the restart that the view has not handled yet.
+            const pending = attached.stagedJump ?? entry(key)?.jump ?? null;
+            attached.stagedJump = null;
             put(key, { state, phase: 'live', clock: stagedAt > 0 ? { at: stagedAt, wall: Date.now() } : null, jump: null });
             if (pending) get().jumpTo(key, pending.focus, { align: pending.align });
           } else put(key, { phase: 'live' });
@@ -247,12 +253,13 @@ export function createTranscriptStore() {
         // finish nobody observed it may carry the other id form (disk uuids for live ids), which id deduplication
         // cannot recognise. The reducer state starts over in a staged state installed once the snapshot has applied;
         // what the reader opened is kept, keyed by ids that resolve again when the history is in the same form.
-        const attached: Attached = { source, agentId: options.agentId ?? null, count: 1, attachment: null, settled: Promise.resolve(), offReset: null, restartUi: kept ? kept.state.ui : null };
+        const attached: Attached = { source, agentId: options.agentId ?? null, count: 1, attachment: null, settled: Promise.resolve(), offReset: null, restartUi: kept ? kept.state.ui : null, stagedJump: null };
         attachments.set(key, attached);
         // A reset (a child source switching from its live stream to its disk transcript): the key starts over.
         attached.offReset = source.onReset?.(() => {
           if (attachments.get(key) !== attached) return;
           attached.restartUi = null; // an explicit reset empties the key at once
+          attached.stagedJump = null;
           const state = createState(null, attached.agentId);
           put(key, { state, phase: 'hydrating', error: null, clock: null, jump: null });
           hydrate(key, attached);
@@ -301,6 +308,8 @@ export function createTranscriptStore() {
         const current = entry(key);
         if (!current) return;
         const request = (rowId: RowId): JumpRequest => ({ rowId, focus: id, align: options.align ?? 'center', nonce: ++nonce });
+        const attached = attachments.get(key);
+        if (attached?.restartUi) attached.stagedJump = { focus: id, align: options.align ?? 'center' }; // staging: resolved again at install
         const visible = locate(current.rows, id);
         if (visible && (!visible.group || (visible.group.kind === 'group' && visible.group.expanded))) {
           put(key, { jump: request(visible.row.id) });

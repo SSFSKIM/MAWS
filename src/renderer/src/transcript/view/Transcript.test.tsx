@@ -1,4 +1,5 @@
 import type { SessionEvent } from '@shared/graph/events';
+import type { EventId } from '@shared/graph/ids';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { useTranscriptStore } from '../../stores/transcript';
@@ -68,6 +69,30 @@ describe('Transcript', () => {
     expect(cell.contains(document.activeElement)).toBe(true);
     expect(document.activeElement?.hasAttribute('data-row-id')).toBe(false);
     expect(document.activeElement?.classList.contains('transcript-row')).toBe(false);
+  });
+
+  // Whole-branch review P3 (rebase task): the view handles a jump asked for during a staged restart on the old rows
+  // before the fresh snapshot lands; installing the fresh state must not undo it (the turn it opened stays open and
+  // the target keeps focus).
+  it('a jump the view handled during a staged restart still holds once the fresh history is installed', async () => {
+    const events = deniedThenAnswer();
+    const key = `transcript-test-${++keys}`;
+    const first = render(<Transcript source={{ key, subscribe: () => () => {}, snapshot: () => Promise.resolve(events) }} variant="session" />);
+    await waitFor(() => expect(useTranscriptStore.getState().entries[key]?.phase).toBe('live'));
+    first.unmount(); // the last holder detaches; the key's rows stay
+    let resolve: (events: SessionEvent[]) => void = () => {};
+    render(<Transcript source={{ key, subscribe: () => () => {}, snapshot: () => new Promise((r) => (resolve = r)) }} variant="session" />);
+    await waitFor(() => expect(useTranscriptStore.getState().entries[key].phase).toBe('hydrating'));
+    const target = cellId.tool(tool('t1'));
+    act(() => useTranscriptStore.getState().jumpTo(key, target));
+    await waitFor(() => expect(useTranscriptStore.getState().entries[key].jump).toBeNull()); // handled on the old rows
+    expect(document.querySelector(`[data-cell-id="${target}"]`)).not.toBeNull();
+    await act(async () => resolve(events.map((event) => ({ ...event, id: `disk:${event.id}` as EventId, seq: null }))));
+    await waitFor(() => expect(useTranscriptStore.getState().entries[key].phase).toBe('live'));
+    await waitFor(() => expect(useTranscriptStore.getState().entries[key].jump).toBeNull());
+    const cell = document.querySelector<HTMLElement>(`[data-cell-id="${target}"]`);
+    expect(cell).not.toBeNull();
+    expect(cell!.contains(document.activeElement)).toBe(true);
   });
 
   it('the denied count of a collapsed turn opens its work area and focuses the standalone denied cell itself', async () => {
