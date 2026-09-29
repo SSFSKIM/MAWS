@@ -7,3 +7,9 @@ allowBuilds:
   '@tailwindcss/oxide': true
   # electron-builder's Windows installer helper; D-11 builds macOS arm64 only.
   electron-winstaller: false
+
+# C8c start: one highlight.js for @git-diff-view/* and lowlight (lowlight 3.3.0 asks ~11.11.0, the diff view ^11.11.0): two
+# copies declare the same global types, which tsconfig.web.json (skipLibCheck false) refuses.
+overrides:
+  highlight.js: 11.11.2
+# C8c end
