@@ -217,14 +217,15 @@ export class IndexSessionSource implements SessionSource {
   // a session MAWS runs (`self`) is C5's live fold.
   private digest(record: SessionRecord): void {
     if (!this.writer || record.holder.kind === 'self') return;
-    const text = this.index.sessions.summaryOf(record.appId)?.lastAssistantText ?? null;
+    const summary = this.index.sessions.summaryOf(record.appId);
+    const text = summary?.lastAssistantText ?? null;
     this.writer.setDigest({
       appSessionId: record.appId,
       phase: record.holder.kind === 'terminal' || record.holder.kind === 'background_job' ? 'foreign' : 'exited',
       activity: null,
       lastAssistantLine: text === null ? null : text.split('\n', 1)[0].slice(0, LAST_LINE_CHARS),
       turnStartedAt: null,
-      lastTurnEndedAt: null,
+      lastTurnEndedAt: summary?.lastRecordAt ?? null, // C5's rebase: the session's last activity (age, recency order)
       context: null,
       cost: null,
       childAgents: { active: 0, done: 0 },

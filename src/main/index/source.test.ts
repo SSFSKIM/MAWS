@@ -270,6 +270,20 @@ describe('IndexSessionSource folds the host\'s events into the index and feeds t
     expect(error).toHaveBeenCalledWith(expect.stringContaining('index unavailable'));
   });
 
+  // C5's rebase: the seed digest is the only activity time the shell has for a session nobody runs (the record's
+  // `updatedAt` is when the index wrote it), and the sidebar's age, its recency sort and the Overview's order read it.
+  it('seeds a discovered session’s digest with its transcript’s last record time', async () => {
+    const fake = scriptedHost();
+    const recorded = recordingWriter();
+    begin(fake.host, recorded.writer);
+    await settle();
+
+    const found = summary({ lastRecordAt: '2026-09-20T08:30:00.000Z' });
+    fake.fire('fs.sessionChanged', { summary: found, appSessionId: null });
+    const record = index.sessions.getByEngineId(found.sessionId)!;
+    expect(recorded.of('setDigest').filter((d) => d.appSessionId === record.appId).at(-1)).toMatchObject({ phase: 'exited', turnStartedAt: null, lastTurnEndedAt: '2026-09-20T08:30:00.000Z' });
+  });
+
   it('holders: applied to the record, remembered for a record that does not exist yet, and never over a self-held one', async () => {
     const fake = scriptedHost();
     const recorded = recordingWriter();
