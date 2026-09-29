@@ -22,4 +22,14 @@ describe('the subsequence scorer', () => {
     expect(rankPaths('main', [...paths].reverse())).toEqual(rankPaths('main', paths));
     expect(rankPaths('', ['b/c.ts', 'a.ts', 'b/']).slice(0, 3)).toEqual(['b/', 'a.ts', 'b/c.ts']);
   });
+
+  it('ranks a keystroke over 100,000 paths without stalling (a generous bound, not a benchmark)', () => {
+    const paths = Array.from({ length: 100_000 }, (_, i) => `packages/pkg-${i % 97}/src/components/widget-${i}/index.test.tsx`);
+    paths.push('src/main.ts');
+    const started = performance.now();
+    for (const query of ['main', 'wdgt', 'pkg12idx', 'zzz']) rankPaths(query, paths);
+    const perKeystroke = (performance.now() - started) / 4;
+    expect(rankPaths('main', paths)[0]).toBe('src/main.ts');
+    expect(perKeystroke).toBeLessThan(1_000); // ~40–120 ms measured on the owner's Mac; a stall is seconds
+  });
 });
