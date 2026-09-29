@@ -240,19 +240,22 @@ test('@ and / menus with the widget union', async ({ editor }) => {
   await expect.poll(async () => (await serialized(page))?.content).toBe('@src/a.ts');
   await clearEditor(page);
 
-  // `/` lists the catalogue with origin badges; a headless command goes in as text
+  // `/` lists the catalogue under origin headings; a headless command goes in as text
   await page.keyboard.type('/');
   const commands = page.getByRole('listbox', { name: 'Commands' });
+  // C11 start: the rows sit under their origin's heading (C11's group headings); the list opens on the best match
+  const chosen = commands.locator('[role="option"][aria-selected="true"]');
   await expect(commands.getByRole('option').first()).toHaveAttribute('data-origin', 'engine');
-  await expect(commands.getByRole('option').first()).toContainText('Engine');
+  await expect(commands.getByRole('group').first()).toHaveAccessibleName('Engine');
   await page.keyboard.type('split');
-  await expect(commands.getByRole('option').first()).toHaveAttribute('data-origin', 'maws'); // MAWS's own actions are in the union
-  await expect(commands.getByRole('option').first()).toContainText('MAWS');
+  await expect(chosen).toHaveAttribute('data-origin', 'maws'); // MAWS's own actions are in the union
+  await expect(commands.getByRole('group', { name: 'MAWS' })).toContainText('Split / send to other pane');
+  // C11 end
   await clearEditor(page);
   await page.keyboard.type('/');
   for (const name of ['compact', 'model']) {
     await page.keyboard.type(name);
-    await expect(commands.getByRole('option').first()).toContainText(`/${name}`);
+    await expect(chosen).toContainText(`/${name}`); // C11: the chosen row
     await page.keyboard.press('Enter');
     await expect.poll(async () => (await serialized(page))?.display).toBe(`/${name}`);
     await clearEditor(page);
@@ -261,7 +264,7 @@ test('@ and / menus with the widget union', async ({ editor }) => {
   // terminal-only and widget-only names are listed, disabled, and Enter leaves them be
   for (const [name, origin] of [['doctor', 'engine'], ['permissions', 'widget']]) {
     await page.keyboard.type(name);
-    const row = commands.getByRole('option').first();
+    const row = chosen; // C11: the chosen row (a skill may be shown above it)
     await expect(row).toContainText(`/${name}`);
     await expect(row).toHaveAttribute('data-origin', origin);
     await expect(row).toHaveAttribute('aria-disabled', 'true');
@@ -278,7 +281,7 @@ test('@ and / menus with the widget union', async ({ editor }) => {
   await page.evaluate(() => ['model', 'permissions'].forEach((name) => (window as unknown as EditorWindow).__maws_editor.registerWidget(name)));
   for (const name of ['model', 'permissions']) {
     await page.keyboard.type(name);
-    await expect(commands.getByRole('option').first()).toContainText(`/${name}`);
+    await expect(chosen).toContainText(`/${name}`); // C11: the chosen row
     await page.keyboard.press('Enter');
     const widget = page.getByRole('region', { name: `/${name} widget` });
     await expect(widget).toBeVisible();
