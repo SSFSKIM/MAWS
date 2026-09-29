@@ -98,6 +98,13 @@ export function selectTab(id: string | null): void {
   selectIn(get().session, id);
 }
 
+// Activating a tab of another session shows that session, so the tab the caller asked for is on screen
+// (`openTerminal` for B while A is shown lands in B, and B is shown).
+function activateIn(session: AppSessionId, id: string): void {
+  if (get().session !== session) set({ session });
+  selectIn(session, id);
+}
+
 export function addTool(toolId: string, { appSessionId, params, pin = false, activate = true }: AddToolOptions<unknown>): string {
   const tool = toolOf(toolId);
   const home = appSessionId ?? get().session;
@@ -105,13 +112,13 @@ export function addTool(toolId: string, { appSessionId, params, pin = false, act
     const existing = visibleTabs(get(), home).find((id) => get().tabs[id]!.toolId === toolId);
     if (existing) {
       tool.open?.(get().tabs[existing]!.state, params);
-      if (activate) selectIn(home, existing);
+      if (activate) activateIn(home, existing);
       return existing;
     }
   }
   const id = `${toolId}:${crypto.randomUUID().slice(0, 8)}`;
   insert(createTab(toolId, id, home, appSessionId, params ?? {}), pin);
-  if (activate) selectIn(home, id);
+  if (activate) activateIn(home, id);
   return id;
 }
 

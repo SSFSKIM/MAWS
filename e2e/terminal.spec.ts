@@ -203,6 +203,11 @@ async function guarded<T>(harness: Harness, body: () => Promise<T>): Promise<T> 
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// The debug strip's PTY host state reads `ready`.
+async function hostReady(h: Harness): Promise<void> {
+  await expect(h.page.getByLabel('pty host state')).toHaveText(/^host ready pid \d+/, { timeout: 15_000 });
+}
+
 // `kill(pid, 0)` sends nothing; it throws ESRCH once the process is gone.
 function isAlive(pid: number): boolean {
   try {
@@ -217,9 +222,9 @@ function isAlive(pid: number): boolean {
 test('opens a login shell in the session directory with the terminal environment', async ({ maws }) => {
   const h = await harnessOf(maws);
   const { page } = maws;
-  // The first spawn awaits the PTY host's one login-shell environment capture (M2), which runs for about a second
-  // after launch; the owner clicks "+" in an app that has been open for longer than that.
-  await sleep(2_000);
+  // Measured from the click with the host ready (acceptance item 2), with nothing else waited for: this is the first
+  // spawn after launch, so it also waits for whatever is left of the host's login-shell environment capture.
+  await hostReady(h);
   await page.getByRole('button', { name: 'add tool' }).click();
   const clicked = Date.now();
   await page.getByRole('menuitem', { name: 'Terminal' }).click();
@@ -743,16 +748,17 @@ test('falls back to the DOM renderer on context loss and returns to WebGL on nex
 test('openTerminal runs the attach command', async ({ maws }) => {
   const h = await harnessOf(maws);
   const { page } = maws;
-  const { A } = await h.sessions();
-  await sleep(2_000); // past the PTY host's environment capture, as in the first test
+  const { A, B } = await h.sessions();
+  const openTerminal = (appSessionId: string, cwd: string, command: string) =>
+    page.evaluate(
+      ([appSessionId, cwd, command]) =>
+        (window as unknown as { openTerminal(init: { appSessionId: string; cwd: string; command: string }): string }).openTerminal({ appSessionId, cwd, command }),
+      [appSessionId, cwd, command] as const,
+    );
+  await hostReady(h); // as in the first test: measured with the host ready, the first spawn after launch
   const opened = Date.now();
   // Quoted: unquoted, the shell reads `\n` as `n` and the line would end `MAWS_ATTACH_OKn` with no newline.
-  const command = "printf 'MAWS_ATTACH_OK\\n'";
-  const tabId = await page.evaluate(
-    ([appSessionId, cwd, command]) =>
-      (window as unknown as { openTerminal(init: { appSessionId: string; cwd: string; command: string }): string }).openTerminal({ appSessionId, cwd, command }),
-    [A, DIR_A, command] as const,
-  );
+  const tabId = await openTerminal(A, DIR_A, "printf 'MAWS_ATTACH_OK\\n'");
   const tab = (await h.tabs()).find((t) => t.id === tabId)!;
   expect(tab).toMatchObject({ toolId: 'terminal', selected: true });
   const id = tab.terminalId!;
@@ -765,4 +771,16 @@ test('openTerminal runs the attach command', async ({ maws }) => {
       return lines.slice(at + 1).some((line) => line.trim() !== '');
     }, { message: 'a prompt after it' })
     .toBe(true);
+
+  // For a session other than the one shown: the panel shows that session, with the new tab selected and visible.
+  expect(await h.call<string>('panel', 'session')).toBe(A);
+  const otherTabId = await openTerminal(B, DIR_B, "printf 'MAWS_ATTACH_B\\n'");
+  expect(await h.call<string>('panel', 'session'), 'the panel switched to the tab’s session').toBe(B);
+  await expect(page.getByRole('group', { name: 'session' }).getByRole('button', { name: 'Session B' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(h.tab(otherTabId)).toBeVisible();
+  await expect(h.tab(otherTabId)).toHaveAttribute('aria-selected', 'true');
+  const other = (await h.tabs()).find((t) => t.id === otherTabId)!;
+  await expect(page.locator(`[data-terminal-id="${other.terminalId}"]`), 'its terminal is mounted on screen').toBeVisible();
+  await h.expectLine(other.terminalId!, 'MAWS_ATTACH_B', 5_000);
+  expect(await h.info(other.terminalId!)).toMatchObject({ cwd: DIR_B, visible: true });
 });
