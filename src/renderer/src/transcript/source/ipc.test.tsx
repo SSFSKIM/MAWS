@@ -170,6 +170,31 @@ describe('ipcSource', () => {
     store.detach(source.key!);
   });
 
+  // Two subscriptions at once (a second attach before the first detached): each keeps its own live preference, held
+  // batches and listener, and each snapshot serves the subscription made just before it.
+  it('keeps concurrent subscriptions apart: neither snapshot nor batch crosses into the other', async () => {
+    const b = builder();
+    b.turn('u1');
+    b.text('m1', 0, 'Reply.');
+    b.end(['u1']);
+    const liveForm = b.events.map((event, i) => ({ ...event, id: `${APP}:launch-1:${i + 1}:0` as EventId, seq: i + 1 }));
+    const diskForm = b.events.map((event) => ({ ...event, id: `disk:${event.id}` as EventId, seq: null }));
+    const fake = fakeClient();
+    const subject = ipcSourceOver(fake.client, APP);
+    const first: EventId[] = [];
+    const second: EventId[] = [];
+    subject.subscribe((events) => first.push(...events.map((event) => event.id)));
+    const firstSnapshot = subject.snapshot();
+    subject.subscribe((events) => second.push(...events.map((event) => event.id)));
+    const secondSnapshot = subject.snapshot();
+    fake.calls[0].answer({ ok: true, value: { events: liveForm, lastSeq: liveForm.length, complete: true } } as never); // the first sees live
+    fake.calls[1].answer({ ok: true, value: { events: [], lastSeq: 0, complete: true } } as never); // the second, nothing yet
+    await Promise.all([firstSnapshot, secondSnapshot]);
+    fake.emit('session.eventBatch', batch(diskForm));
+    expect(first).toEqual([]); // live seen: the follower's copies drop
+    expect(second).toEqual(diskForm.map((event) => event.id)); // no live seen: the disk form is all it has
+  });
+
   it('keeps a followed child’s own events out of the parent; the child’s parent-side traffic still reaches it', async () => {
     const b = builder();
     b.turn('u1');

@@ -41,37 +41,55 @@ const ownOf = (agentId: AgentId) => (event: SessionEvent) => event.agentId === a
 // is neither form's copy of the other and always passes.
 function sessionSource(client: MawsBridge, appSessionId: AppSessionId): TranscriptSource {
   const liveForm = (event: SessionEvent) => event.seq !== null;
+  // Relies on a convention: main's synthesised events use ids under `<appSessionId>:` (C10's route notice), as C3's live ids do.
   const diskForm = (event: SessionEvent) => event.seq === null && !event.id.startsWith(`${appSessionId}:`);
-  // Per attachment: the store subscribes once per attachment, then snapshots.
-  let live = false;
-  let held: SessionEvent[][] | null = null; // batches before the snapshot answered
-  let pass: (events: SessionEvent[]) => void = () => {};
+  // Per subscription (the store subscribes once per attachment, then snapshots): whether it has seen the live form, the
+  // batches that arrived before its snapshot answered, and its filter. A snapshot serves the subscription made just
+  // before it, so a second subscription or a stale snapshot never delivers into another's listener.
+  interface Subscription {
+    live: boolean;
+    held: SessionEvent[][] | null;
+    pass(batch: SessionEvent[]): void;
+  }
+  let latest: Subscription | null = null;
   return {
     key: appSessionId,
     subscribe(listener) {
-      live = false;
-      held = [];
-      pass = (batch) => {
-        const events = batch.filter((event) => {
-          if (liveForm(event)) live = true;
-          return ofParent(event) && !(live && diskForm(event));
-        });
-        if (events.length > 0) listener(events);
+      const subscription: Subscription = {
+        live: false,
+        held: [],
+        pass(batch) {
+          const events = batch.filter((event) => {
+            if (liveForm(event)) subscription.live = true;
+            return ofParent(event) && !(subscription.live && diskForm(event));
+          });
+          if (events.length > 0) listener(events);
+        },
       };
-      return client.on('session.eventBatch', (batch) => {
+      latest = subscription;
+      const off = client.on('session.eventBatch', (batch) => {
         if (batch.appSessionId !== appSessionId) return;
-        if (held) held.push(batch.events);
-        else pass(batch.events);
+        if (subscription.held) subscription.held.push(batch.events);
+        else subscription.pass(batch.events);
       });
+      return () => {
+        off();
+        subscription.held = null;
+        subscription.pass = () => {};
+        if (latest === subscription) latest = null;
+      };
     },
     // The store orders and deduplicates by event id (ruling 5 of the wave-2 ledger); `lastSeq` is C3's own cursor. The
     // held batches are passed before the snapshot returns, while the store still buffers.
     async snapshot() {
+      const subscription = latest;
       const { events } = valueOf(await client.invoke('session.events', { appSessionId, afterSeq: null, limit: null }));
-      if (events.some(liveForm)) live = true;
-      const waiting = held ?? [];
-      held = null;
-      for (const batch of waiting) pass(batch);
+      if (subscription) {
+        if (events.some(liveForm)) subscription.live = true;
+        const waiting = subscription.held ?? [];
+        subscription.held = null;
+        for (const batch of waiting) subscription.pass(batch);
+      }
       return events;
     },
   };
