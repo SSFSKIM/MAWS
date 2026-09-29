@@ -41,8 +41,10 @@ function describeFrame(f: Frame): string {
   return String(f.type);
 }
 
-// Same type; control requests by subtype; control responses by request id and, when recorded, behavior.
-function matches(recorded: Frame, written: Frame): boolean {
+// Same type; control requests by subtype; control responses by request id and, when recorded, behavior; a cancel by
+// the id it names, read through the recorded→minted map (a cancel of a host-minted request names the id this run minted
+// for the recorded request, never the recorded one).
+function matches(recorded: Frame, written: Frame, idMap: ReadonlyMap<string, string> = new Map()): boolean {
   if (recorded.type !== written.type) return false;
   if (recorded.type === 'control_request') return (recorded as ControlRequest).request.subtype === (written as ControlRequest).request.subtype;
   if (recorded.type === 'control_response') {
@@ -51,7 +53,7 @@ function matches(recorded: Frame, written: Frame): boolean {
     if (a.request_id !== b.request_id) return false;
     return a.response?.behavior === undefined || a.response.behavior === b.response?.behavior;
   }
-  if (recorded.type === 'control_cancel_request') return recorded.request_id === written.request_id;
+  if (recorded.type === 'control_cancel_request') return (idMap.get(recorded.request_id as string) ?? recorded.request_id) === written.request_id;
   return true;
 }
 
@@ -154,7 +156,7 @@ export function replayEngine(journal: JournalRow[], opts: { prelude: JournalRow[
     if (!row || row.direction !== 'out' || waiters.length === 0) return null;
     const recorded = row.frame as Frame;
     const written = waiters[0]!.frame as unknown as Frame;
-    if (!matches(recorded, written)) return endAsMismatch(describeOut(row));
+    if (!matches(recorded, written, idMap)) return endAsMismatch(describeOut(row));
     learnIds(recorded, written);
     cursor += 1;
     waiters.shift()!.resolve();
