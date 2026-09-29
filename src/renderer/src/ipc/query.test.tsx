@@ -41,7 +41,9 @@ describe('useCommand', () => {
 describe('useCommand is for reads only', () => {
   it('allows exactly the read commands with a value to cache', () => {
     const c7 = ['attention.request', 'git.branches', 'git.lsFiles', 'session.catalog', 'session.getContextUsage', 'session.getMemoryDialog', 'session.getSessionCost', 'session.getUsage', 'session.history.list', 'session.listModels', 'session.listPermissionRules', 'settings.usage']; // C7
-    expect([...QUERY_COMMANDS].sort()).toEqual(['engine.hostState', 'engine.ping', 'fs.workflows', 'pty.hostState', 'pty.ping', 'settings.get', ...c7].sort());
+    // C11: the widgets', Session info's and the Settings tab's reads (engine.models joins with C10)
+    const c11 = ['engine.binaryInfo', 'engine.relayHealth', 'session.exportConversation', 'session.getHooksListing', 'session.getSandboxDialog', 'session.getSettings', 'session.getSkillsDialog', 'session.getStatus', 'session.getWorkspaceDiff', 'session.mcpStatus', 'settings.claudeUsage.status'];
+    expect([...QUERY_COMMANDS].sort()).toEqual(['engine.hostState', 'engine.ping', 'fs.workflows', 'pty.hostState', 'pty.ping', 'settings.get', ...c7, ...c11].sort());
   });
 
   // Compile-time: writes and void-output commands are not queries (checked by `pnpm typecheck`); they go through

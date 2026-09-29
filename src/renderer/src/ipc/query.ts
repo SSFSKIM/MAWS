@@ -33,6 +33,20 @@ export const QUERY_COMMANDS = [
   'session.listPermissionRules', // M4: the + dir chip's workspace directories
   'git.branches', // M4: the location chip's branch picker
   // C7 end
+  // C11 start: the widgets' engine reads, Session info's and the Settings tab's (C11 execution document, Repository map);
+  // C10's engine.models joins at the C10 integration
+  'session.getSettings',
+  'session.getHooksListing',
+  'session.getSandboxDialog',
+  'session.getSkillsDialog',
+  'session.getWorkspaceDiff',
+  'session.exportConversation',
+  'session.getStatus',
+  'session.mcpStatus',
+  'engine.binaryInfo',
+  'engine.relayHealth',
+  'settings.claudeUsage.status',
+  // C11 end
 ] as const satisfies readonly ValueCommand[];
 export type QueryCommand = (typeof QUERY_COMMANDS)[number];
 

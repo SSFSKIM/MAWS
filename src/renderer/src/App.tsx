@@ -25,6 +25,11 @@ import { connectRequestCard } from './request-card';
 import { connectStatusLine } from './statusline';
 import { registerTranscriptActions } from './transcript';
 // C7 end
+// C11 start
+import { registerGatewayActions } from './gateway/actions';
+import { startRelayMonitor } from './gateway/relay-monitor';
+import { connectGatewaySettings } from './gateway/store';
+// C11 end
 
 export function App() {
   const resolvedTheme = useSettings((s) => s.state?.resolvedTheme);
@@ -62,6 +67,12 @@ export function App() {
   useEffect(() => connectComposer(), []); // the composer in C5's composer slot
   useEffect(() => registerTranscriptActions({ editAndResubmit: editAndResubmitRow }), []); // a bubble's Edit prefills the composer in edit mode
   // C7 end
+  // C11 start: Settings…, Accounts and Open ClaudeUsage in the action table; the gateway store follows the settings; the
+  // relay monitor's app-wide banner while a routed session is live
+  useEffect(() => registerGatewayActions(), []);
+  useEffect(() => connectGatewaySettings(), []);
+  useEffect(() => startRelayMonitor(), []);
+  // C11 end
 
   // index.html ships data-theme="light" for the first paint; from then on main's resolved theme decides.
   useEffect(() => {
