@@ -203,6 +203,13 @@ describe('every widget renders its fixture response', () => {
     expect(view.engineWindows).toEqual({ fact: 'rate_limits_available: false', sentence: 'the engine reports no windows through the relay' });
   });
 
+  // C11 M6, live: a session switched to Direct under a login the engine reports no limits for reads the same answer, and
+  // the sentence names the login, not the relay.
+  it('usage on a direct session: no windows reported is said of the login', () => {
+    const view = Usage.present(line<GetUsageResponse>('reads', 54), 'direct');
+    expect(view.engineWindows).toEqual({ fact: 'rate_limits_available: false', sentence: 'the engine reports no windows for this login' });
+  });
+
   it('config: the effective settings, their sources and what was applied', () => {
     const view = Config.present(line<GetSettingsResponse>('pass2/dialogs', 58));
     expect(view.effective).toEqual([{ key: 'dialogExpiry', value: '"never"' }]);

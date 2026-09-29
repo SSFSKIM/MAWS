@@ -15,7 +15,7 @@ import { USAGE_UNAVAILABLE } from '../statusline/UsagePopover';
 import { POPOVER_TICK_MS, useNow } from '../statusline/use-now';
 import { useSessions } from '../stores/sessions';
 import { useSessionWindows, useUsage, type Windows } from '../stores/usage';
-import { USAGE, WIDGET_FOOT, WIDGET_TITLE } from './copy';
+import { USAGE, USAGE_DIRECT_FOOT, WIDGET_FOOT, WIDGET_TITLE } from './copy';
 import { Group, KeyValues, Mono, num } from './parts';
 import { useEngineRead } from './read';
 import { WidgetFrame } from './WidgetFrame';
@@ -37,7 +37,8 @@ export interface UsageView {
   engineWindows: { fact: string | null; sentence: string }; // what the engine said about windows, and what it means
 }
 
-export function present(answer: GetUsageResponse): UsageView {
+// `route`: a direct session's missing windows are its login's (C11 M6, live), not the relay's.
+export function present(answer: GetUsageResponse, route: 'gateway' | 'direct' = 'gateway'): UsageView {
   const s = answer.session;
   return {
     rows: [
@@ -54,7 +55,7 @@ export function present(answer: GetUsageResponse): UsageView {
     engineWindows:
       answer.rate_limits_available && answer.rate_limits !== null
         ? { fact: null, sentence: USAGE.engineDirect }
-        : { fact: `rate_limits_available: ${String(answer.rate_limits_available)}`, sentence: USAGE.engineNone },
+        : { fact: `rate_limits_available: ${String(answer.rate_limits_available)}`, sentence: route === 'direct' ? USAGE.engineNoneDirect : USAGE.engineNone },
   };
 }
 
@@ -118,9 +119,10 @@ export function UsageBody({ view, answer, appSessionId }: { view: UsageView; ans
 
 export function UsageWidget({ appSessionId, close }: { appSessionId: AppSessionId; args: string; close(): void }) {
   const read = useEngineRead('session.getUsage', { appSessionId });
+  const route = useSessions((s) => (s.engine.get(appSessionId)?.gateway.mode === 'direct' ? 'direct' : 'gateway'));
   return (
-    <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.usage} command="usage" foot={WIDGET_FOOT.usage} state={read.state} error={read.error} close={close}>
-      {read.data && <UsageBody view={present(read.data)} answer={read.data} appSessionId={appSessionId} />}
+    <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.usage} command="usage" foot={route === 'direct' ? USAGE_DIRECT_FOOT : WIDGET_FOOT.usage} state={read.state} error={read.error} close={close}>
+      {read.data && <UsageBody view={present(read.data, route)} answer={read.data} appSessionId={appSessionId} />}
     </WidgetFrame>
   );
 }

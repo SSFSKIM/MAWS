@@ -35,6 +35,9 @@ export const WIDGET_TITLE: Record<WidgetCommandName, string> = {
 
 const SESSION_ONLY_MODEL = "Sets with `set_model` and `apply_flag_settings` for this session only · your default model and effort are set in settings or the terminal's `/model`";
 
+// `/usage` on a direct session: its windows are the engine's own, not ClaudeUsage's (C11 M6, live).
+export const USAGE_DIRECT_FOOT: WidgetFoot = { readWith: 'get_usage', editedWhere: 'A direct session’s windows come from the engine’s own login' };
+
 export const WIDGET_FOOT: Record<WidgetCommandName, WidgetFoot> = {
   model: { readWith: 'list_models', editedWhere: SESSION_ONLY_MODEL },
   effort: { readWith: 'list_models', editedWhere: SESSION_ONLY_MODEL },
@@ -100,6 +103,7 @@ export const USAGE = {
   lines: 'Lines',
   model: (input: string, output: string, cacheRead: string, cacheWrite: string) => `${input} in · ${output} out · ${cacheRead} cache read · ${cacheWrite} cache write`,
   engineNone: 'the engine reports no windows through the relay',
+  engineNoneDirect: 'the engine reports no windows for this login',
   engineDirect: "the engine's own windows (a direct session)",
   direct: 'Direct · the engine’s own login',
   noPlanLimits: 'The engine reported no plan limits',
