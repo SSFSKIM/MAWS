@@ -32,16 +32,16 @@ export const WIDGET_TITLE: Record<WidgetCommandName, string> = {
   diff: 'Changes',
 };
 
-const SESSION_ONLY_MODEL = "Set for this session only · your default model and effort are set in settings or the terminal's `/model`";
+const SESSION_ONLY_MODEL = "Sets with `set_model` and `apply_flag_settings` for this session only · your default model and effort are set in settings or the terminal's `/model`";
 
 export const WIDGET_FOOT: Record<WidgetCommandName, WidgetFoot> = {
   model: { readWith: 'list_models', editedWhere: SESSION_ONLY_MODEL },
   effort: { readWith: 'list_models', editedWhere: SESSION_ONLY_MODEL },
   fast: { readWith: 'list_models', editedWhere: SESSION_ONLY_MODEL },
-  permissions: { readWith: 'list_permission_rules', editedWhere: 'Rules are edited in their settings files; session grants come from approval cards' },
+  permissions: { readWith: 'list_permission_rules', editedWhere: 'Sets the mode with `set_permission_mode` for this session only · rules are edited in their settings files; session grants come from approval cards' },
   usage: { readWith: 'get_usage', editedWhere: 'Windows come from ClaudeUsage; the engine reports none through the relay' },
   config: { readWith: 'get_settings and get_memory_dialog', editedWhere: "Settings are edited in their files or the terminal's `/config`; MAWS's own settings are in the Settings tab" },
-  plugins: { readWith: 'system/init', editedWhere: "Enable and disable in settings (`enabledPlugins`) or the terminal's `/plugins`; the engine lists what it loaded" },
+  plugins: { readWith: 'system/init', editedWhere: "Reload with `reload_plugins` is for this session · enable and disable in settings (`enabledPlugins`) or the terminal's `/plugins`; the engine lists what it loaded" },
   mcp: {
     readWith: 'mcp_status',
     editedWhere: 'Servers are configured in `.mcp.json` and settings · Reconnect is for this session · Enable and disable: recorded by the engine for this project in `~/.claude.json`',
@@ -52,7 +52,7 @@ export const WIDGET_FOOT: Record<WidgetCommandName, WidgetFoot> = {
   skills: { readWith: 'get_skills_dialog and system/init', editedWhere: 'Skills are files under `.claude/skills` and plugins; the palette runs them' },
   agents: { readWith: 'initialize', editedWhere: 'Agents are files under `.claude/agents` and plugins' },
   status: { readWith: 'get_status', editedWhere: 'What `/status` prints in the terminal' },
-  compact: { readWith: 'get_context_usage', editedWhere: 'Compaction rewrites the conversation; nothing on disk is truncated' },
+  compact: { readWith: 'get_context_usage', editedWhere: 'Sends `/compact` as the next message · compaction rewrites the conversation; nothing on disk is truncated' },
   context: { readWith: 'get_context_usage', editedWhere: "Context is the engine's own accounting" },
   rename: { readWith: 'rename_session', editedWhere: 'Named through the engine, so the terminal sees it' },
   resume: { readWith: 'the sessions list', editedWhere: 'There is no resume control on the wire; a resume is a launch (C10)' },
@@ -62,9 +62,6 @@ export const WIDGET_FOOT: Record<WidgetCommandName, WidgetFoot> = {
 
 // The frame.
 export const FRAME = { reading: 'Reading…', noAnswer: 'The engine did not answer', lastValue: 'showing the last value it reported', readWith: 'Read with', close: (title: string) => `Close ${title}` };
-
-// The widgets M3 builds, registered now so every name opens something.
-export const PENDING = 'This widget arrives with the next C11 milestone.';
 
 // Words several widgets share.
 export const SHARED = { none: 'none', on: 'on', off: 'off', yes: 'yes', no: 'no', reveal: 'Reveal', revealRefused: 'Finder was not opened for this path' };
@@ -233,4 +230,116 @@ export const EXPORT = {
   saved: (path: string) => `Saved to ${path}`,
   notSaved: (why: string) => `The export was not saved · ${why}`,
   lines: (n: string) => `${n} lines`,
+};
+
+// ---- M3: the mutating widgets ---------------------------------------------------------------------------------------
+
+// Operations (reload, reconnect, toggle): `Working…` from the receipt, then the outcome; a late success corrects an error.
+export const OPERATION = {
+  working: 'Working…',
+  appliedAfterAll: 'Applied after all',
+  failed: (message: string, code: string) => `${message} · ${code}`,
+};
+
+// Model, effort and fast mode (one component; `effort` and `fast` open it at their row).
+export const MODEL = {
+  models: 'Models',
+  group: { claude: 'Claude', gateway: 'Gateway' } as const,
+  list: (group: string) => `${group} models`,
+  oneM: '1M',
+  cannotHoldAuto: 'Cannot hold auto mode · runs in default',
+  current: 'current',
+  pending: 'set · the next init frame confirms it',
+  none: 'The engine listed no models',
+  unknownArg: (name: string) => `No model named ${name} in the engine's catalogue`,
+  apply: 'Apply',
+  // set_model's refusal codes (SPEC 45 §45.16:3860–3880) in words; `error` follows as the caption
+  code: {
+    catalog_unknown: "Not in the engine's catalogue",
+    restricted_by_org: 'Not allowed by your organization',
+    unavailable_for_account: 'Not available for this account',
+    not_offered: 'Not offered in this session',
+    alias_1m_disabled: '1M context is turned off',
+    alias_1m_unsupported: '1M context is not supported for this model',
+    blocked_by_hook: 'A PreModelSwitch hook refused it',
+    check_failed: 'The model check failed',
+    invalid_request: 'The engine refused the request',
+  } as Record<string, string>,
+  refused: 'The engine refused the model',
+  routingAccount: 'the routing account', // the gateway note's account (the note itself is in c10-seam.ts) when ClaudeUsage names none
+  effort: 'Effort',
+  effortList: 'Effort levels',
+  engineDefault: 'Engine default',
+  unstarted: 'Applies when the session starts',
+  fast: 'Fast mode',
+  fastList: 'Fast mode',
+  fastForOpus: 'Fast mode is for Opus',
+  cooldown: 'on · cooling down',
+  fastWarning: 'Fast mode disables the auto-mode server lane: reviews then run locally on Sonnet 5 and count against usage',
+  keepAuto: 'Keep auto mode',
+  cancel: 'Cancel',
+  turnOn: 'Turn on fast mode',
+  turnOff: 'Turn off fast mode',
+  // fast_mode_disabled_reason in words (SPEC 06 §18.1:5030's table); `sdk_opt_in_required` is what the switch sends
+  fastReason: {
+    sdk_opt_in_required: 'Off until turned on here',
+    not_first_party: 'Fast mode is only available when using the Anthropic API directly',
+    disabled_by_env: 'Fast mode is not available',
+    model_not_allowed: "This model is not in your organization's allowed models",
+    pending: 'Checking fast mode availability',
+    unknown: 'Fast mode is currently unavailable',
+    free: 'Fast mode requires a paid subscription',
+    preference: 'Fast mode has been disabled by your organization',
+    extra_usage_disabled: 'Fast mode requires usage credits',
+    network_error: 'Fast mode unavailable due to network connectivity issues',
+  } as Record<string, string>,
+};
+
+// Plugins' Reload.
+export const RELOAD = {
+  reload: 'Reload',
+  done: 'Reloaded',
+  reloaded: (commands: number, agents: number, plugins: number, errors: number) => `Reloaded · ${commands} commands · ${agents} agents · ${plugins} plugins · ${errors} error${errors === 1 ? '' : 's'}`,
+};
+
+// MCP's Reconnect and the persistent enable switch.
+export const MCP_ACTIONS = {
+  reconnect: 'Reconnect',
+  reconnected: 'Reconnected',
+  enabled: (name: string) => `Enabled: ${name}`,
+  persisted: 'Recorded by the engine for this project in ~/.claude.json',
+  done: 'Done',
+  notConnected: (error: string) => `On · not connected · ${error}`,
+  unconfirmed: (words: string) => `Unconfirmed · ${words}`,
+  readAgain: 'Read again',
+};
+
+// Compact.
+export const COMPACT = {
+  instructions: 'Instructions',
+  placeholder: 'What the summary should keep (optional)',
+  now: 'Compact now',
+  waitTurn: 'Wait for the turn',
+  queuedFirst: 'Queued messages go first',
+  open: 'Compact…',
+};
+
+// Rename.
+export const RENAME = {
+  title: 'New title',
+  rename: 'Rename',
+  open: 'Rename…',
+  renamed: (title: string) => `Renamed · ${title}`,
+  current: 'Now',
+  arrivesWith: 'Renaming arrives with C10',
+};
+
+// Resume.
+export const RESUME = {
+  list: 'Sessions of this project',
+  none: 'No other sessions in this project',
+  open: 'Open',
+  resume: 'Resume',
+  arrivesWith: 'Resuming arrives with C10',
+  archived: 'archived',
 };

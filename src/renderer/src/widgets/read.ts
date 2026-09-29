@@ -8,7 +8,7 @@ import { useQuery, type QueryClient } from '@tanstack/react-query';
 import { createContext, useContext, useEffect, useRef } from 'react';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { CommandInput, CommandOutput } from '@shared/ipc/schema';
+import type { CommandInput, CommandOutput, IpcError } from '@shared/ipc/schema';
 import { ipc } from '../ipc/client';
 import { IpcCommandError, type QueryCommand } from '../ipc/query';
 import { useSessions } from '../stores/sessions';
@@ -46,6 +46,7 @@ export interface EngineRead<T> {
   data: T | undefined;
   error: string | null; // the refusal in words; a timeout reads as the engine's silence; with data, that it is the last value
   refetch(): void;
+  refresh(): Promise<{ data: T | undefined; failed: IpcCommandError | null }>; // a read now, answering what it read or why it failed
 }
 
 export interface EngineReadOptions {
@@ -98,5 +99,19 @@ export function useEngineRead<N extends SessionRead>(command: N, input: CommandI
   else if (query.isError) state = 'error';
   else state = 'loading';
   const error = query.data !== undefined && query.error ? staleWords(query.error) : errorWords(query.error);
-  return { state, data: query.data, error, refetch: () => void refetch() };
+  return {
+    state,
+    data: query.data,
+    error,
+    refetch: () => void refetch(),
+    // joins a read already in flight (the one an operation's completion started), so a read-back costs one read
+    refresh: async () => {
+      const result = await refetch({ cancelRefetch: false });
+      return { data: result.data, failed: result.isError ? result.error : null };
+    },
+  };
 }
+
+// A control's transport branch (Interfaces "Transport and timeout errors are the separate branch"): a rejected invoke
+// infers nothing; the control keeps the value the engine last reported and says why.
+export const transportWords = (error: IpcError): string => `${error.code === 'timeout' ? FRAME.noAnswer : error.message} · ${FRAME.lastValue}`;
