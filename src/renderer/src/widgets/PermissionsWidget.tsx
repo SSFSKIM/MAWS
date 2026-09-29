@@ -3,7 +3,8 @@
 // `list_permission_rules` grouped allow, ask, deny, each with the engine's own phrasing, the rule in mono and its source
 // file, then the workspace directories. The mode segment is C7's mode menu over `session.setPermissionMode`: it selects
 // the effective mode the engine answered, whatever was asked, and a refusal never moves it.
-import { useMemo, type ReactNode } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { useEffect, useMemo, type ReactNode } from 'react';
 import * as z from 'zod';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { PermissionMode } from '@shared/graph/enums';
@@ -14,7 +15,7 @@ import { liveModeBinding, ModeMenu, MODE_OPTIONS, MODE_REFUSAL_WORDS, NOT_RUNNIN
 import { useSessions } from '../stores/sessions';
 import { FRAME, PERMISSIONS, TYPED, WIDGET_FOOT, WIDGET_TITLE } from './copy';
 import { Group, Mono, parseEach, Row, Rows } from './parts';
-import { useEngineRead } from './read';
+import { engineReadKey, useEngineRead } from './read';
 import { WidgetFrame } from './WidgetFrame';
 
 const DescriptionSchema = z.looseObject({ prefix: z.string(), emphasis: z.string().optional() });
@@ -161,6 +162,14 @@ export function PermissionsWidget({ appSessionId, args, close }: { appSessionId:
   const read = useEngineRead('session.listPermissionRules', { appSessionId });
   const status = useSessions((s) => s.engine.get(appSessionId) ?? null);
   const argument = argumentLine(args);
+  // A rules read cached before an approval card's session grant can still be fresh when the widget opens (live, M6):
+  // when the status counts more grants than the list shows, the list is read again, once per count.
+  const grants = status?.grants.length ?? 0;
+  const listedGrants = read.data ? read.data.state.rules.filter((rule) => rule.source === 'session').length : null;
+  const client = useQueryClient();
+  useEffect(() => {
+    if (listedGrants !== null && grants > listedGrants) void client.invalidateQueries({ queryKey: engineReadKey('session.listPermissionRules', { appSessionId }) });
+  }, [client, appSessionId, grants, listedGrants]);
   return (
     <WidgetFrame
       appSessionId={appSessionId}

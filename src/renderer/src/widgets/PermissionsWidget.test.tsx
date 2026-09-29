@@ -5,11 +5,13 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { loadScenario } from '../../../../test/support/scenario';
-import { createWidgetBackend, WidgetBackendError, type WidgetBackend } from '../../../../test/support/widget-backend';
+import { createWidgetBackend, fixtureLine, RESPONSES, WidgetBackendError, type WidgetBackend } from '../../../../test/support/widget-backend';
 import { useSessions } from '../stores/sessions';
 import { PermissionsWidget } from './PermissionsWidget';
+import { engineReadKey } from './read';
 
 const ROOT = join(__dirname, '../../../..');
+const RECORDED_GRANT = 'Bash(' + 'git log --oneline)'; // pass2/grant-askrule-start seq 65's session grant
 const ID = 'app-7412a115' as AppSessionId;
 let backend: WidgetBackend;
 
@@ -40,6 +42,23 @@ describe('permissions widget shows effective mode and rules with sources', () =>
     expect(screen.getByText('This model does not support auto mode')).toBeTruthy();
     expect(screen.getByText('1 session grant · re-applied after a resume')).toBeTruthy();
     expect(screen.getByRole('menuitemradio', { checked: true }).textContent).toMatch(/^default/); // the segment selects the effective mode
+  });
+
+  // C11 M6, live: a rules read cached before an approval card's session grant (fresh, so a mount does not refetch it)
+  // listed no grant while the status already counted one; the list is read again when the status names more grants.
+  it('reads the rules again when the status counts a session grant the cached list lacks', async () => {
+    useSessions.setState({ engine: new Map([[ID, { ...backend.status(ID), grants: [RECORDED_GRANT] }]]) });
+    const recorded = fixtureLine(ROOT, RESPONSES.list_permission_rules) as { state: { rules: { source: string }[] } };
+    const before = { ...recorded, state: { ...recorded.state, rules: recorded.state.rules.filter((r) => r.source !== 'session') } };
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    client.setQueryData(engineReadKey('session.listPermissionRules', { appSessionId: ID }), before);
+    render(
+      <QueryClientProvider client={client}>
+        <PermissionsWidget appSessionId={ID} args="" close={() => {}} />
+      </QueryClientProvider>,
+    );
+    const allow = await screen.findByRole('list', { name: 'Allow rules' });
+    expect(within(allow).getByRole('listitem').textContent).toContain('this session · grant');
   });
 
   it("lists every rule under allow, ask and deny with the engine's phrasing and its source (pass2/grant-askrule-start seq 65)", async () => {
