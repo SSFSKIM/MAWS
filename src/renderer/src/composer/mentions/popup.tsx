@@ -19,7 +19,13 @@ export interface PopupItem {
 
 export interface PopupHandle {
   onKeyDown(event: KeyboardEvent): boolean;
+  hasRows(): boolean;
 }
+
+// The open popup of each editor, so the editor's keys can tell a list that takes Enter and the arrows from an open
+// trigger with nothing to choose (which leaves them to the editor, as if no popup were open).
+const open = new WeakMap<Editor, ReactRenderer<PopupHandle, PopupProps>>();
+export const popupTakesKeys = (editor: Editor): boolean => open.get(editor)?.ref?.hasRows() ?? false;
 
 export interface PopupProps {
   query: string;
@@ -47,10 +53,12 @@ export function suggestionRenderer(Component: PopupComponent, env: () => EditorE
         renderer.element.dataset.keySink = 'composer';
         renderer.element.style.zIndex = '50';
         unmount = p.mount(renderer.element);
+        open.set(p.editor, renderer);
       },
       onUpdate: (p) => renderer?.updateProps(propsOf(p)),
       onKeyDown: ({ event }: SuggestionKeyDownProps) => renderer?.ref?.onKeyDown(event) ?? false,
-      onExit: () => {
+      onExit: (p) => {
+        if (open.get(p.editor) === renderer) open.delete(p.editor);
         unmount?.();
         renderer?.destroy();
         renderer = null;
@@ -74,6 +82,7 @@ export function useListKeys<T extends PopupItem>(props: PopupProps, items: reado
     if (!item.disabled) props.command(item);
   };
   useImperativeHandle(props.ref, () => ({
+    hasRows: () => items.length > 0,
     onKeyDown(event) {
       if (event.key === 'Escape') {
         exitSuggestion(props.editor.view, props.pluginKey);

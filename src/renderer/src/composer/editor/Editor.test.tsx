@@ -113,4 +113,18 @@ describe('the editor mounts over its draft, takes prefills and submits through t
     await enter();
     await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ content: 'single' }), 'send'));
   });
+
+  it('treats an open @ popup with no rows as no popup: Enter sends', async () => {
+    const onSubmit = vi.fn<(s: Serialized, how: 'send' | 'steer') => Promise<boolean>>(async () => false);
+    const { port } = drafts(null);
+    const handle = createRef<EditorHandle>();
+    const { container } = render(<Editor appSessionId={APP} cwd="" sessionId={null} drafts={port} client={client} onSubmit={onSubmit} handle={handle} />);
+    const content = contentOf(container);
+    content.focus();
+    act(() => handle.current?.insertText('see @zzz'));
+    await waitFor(() => expect(document.querySelector('.react-renderer')).not.toBeNull()); // the @ popup is open, empty
+    await act(async () => void content.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ content: 'see @zzz' }), 'send'));
+    expect(handle.current?.doc().content).toHaveLength(1);
+  });
 });

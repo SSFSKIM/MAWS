@@ -14,6 +14,7 @@ import { EMPTY_CATALOG, type SessionCatalog } from '../../stores/catalog';
 import { memoryTargetOf, takePrefill, useComposerStore, type Prefill } from '../../stores/composer';
 import { toast } from '../../stores/notices';
 import { useTranscriptStore } from '../../transcript';
+import { popupTakesKeys } from '../mentions/popup';
 import { slashWidget } from '../mentions/widgets';
 import { downscaleImage, fileBase64, imageRefusal, markPersisted } from './attachments';
 import { atomId, attachmentsOf, emptyDoc, isMultiline, mentionNode, PASTED, pastedNode, textNode, type Attachment, type ComposerDoc } from './doc';
@@ -161,7 +162,7 @@ export class EditorController {
     if (!editor) return false;
     if (event.defaultPrevented) return true; // C5's dispatcher ran a composer chord for this key (⌘Enter, ⌥Enter)
     if (event.isComposing || view.composing) return false;
-    if (suggesting(editor)) return false;
+    if (suggesting(editor) && popupTakesKeys(editor)) return false; // an open list takes Enter and the arrows
     const plain = !event.shiftKey && !event.altKey && !event.metaKey && !event.ctrlKey;
     if (event.key === 'Enter' && plain) {
       if (isMultiline(editor.getJSON())) return false; // the line breaks (ProseMirror's own Enter); ⌘Enter sends
