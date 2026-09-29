@@ -9,7 +9,7 @@ import { INPUT, Segment, Setting, useCommittedDraft, writeSettings } from './par
 const THEMES = (['light', 'dark', 'system'] as const satisfies readonly ThemeSetting[]).map((value) => ({ value, label: APPEARANCE.themes[value] }));
 
 export function AppearanceSection({ settings }: { settings: Settings }) {
-  const [draft, field] = useCommittedDraft(settings.appearance.monoFont, (next) => void writeSettings({ appearance: { monoFont: next } }));
+  const [draft, field] = useCommittedDraft(settings.appearance.monoFont, (next) => writeSettings({ appearance: { monoFont: next } }));
   return (
     <>
       <Setting label={APPEARANCE.theme}>

@@ -74,8 +74,8 @@ export function Switch({ checked, onChange, label, disabled = false }: { checked
 }
 
 // A text field bound to one nullable setting: typed freely, written once on Enter or blur (empty is null), put back on
-// Escape, and reset whenever the store's value moves. Spread the answer onto the <input>.
-export function useCommittedDraft(saved: string | null, write: (next: string | null) => void) {
+// Escape or when the write is refused, and reset whenever the store's value moves. Spread the answer onto the <input>.
+export function useCommittedDraft(saved: string | null, write: (next: string | null) => Promise<boolean>) {
   const [field, setField] = useState({ saved, draft: saved ?? '' });
   if (field.saved !== saved) setField({ saved, draft: saved ?? '' }); // the store moved: show its value
   const written = useRef(saved); // what was last written or saved, so Enter then blur writes once
@@ -88,7 +88,11 @@ export function useCommittedDraft(saved: string | null, write: (next: string | n
     const next = draft.trim() === '' ? null : draft.trim();
     if (next === written.current) return;
     written.current = next;
-    write(next);
+    void write(next).then((ok) => {
+      if (ok || written.current !== next) return; // written, or overtaken by a later edit
+      written.current = saved; // refused: the field shows the saved value again, and the same text can be retried
+      setField({ saved, draft: saved ?? '' });
+    });
   };
   return [
     draft,

@@ -106,7 +106,7 @@ function ConfigHome() {
 function SubagentModel({ settings }: { settings: Settings }) {
   const list = useId();
   const saved = settings.engine.subagentModel;
-  const [, field] = useCommittedDraft(saved, (next) => void writeSettings({ engine: { subagentModel: next } }));
+  const [, field] = useCommittedDraft(saved, (next) => writeSettings({ engine: { subagentModel: next } }));
   const models = useCommand('engine.models', { refresh: false, gateway: settings.gateway.defaultRoute }, { staleTime: 60_000 });
   const suggestions = (models.data?.models ?? []).filter((m) => !isGatewayModel(m.value));
   return (
