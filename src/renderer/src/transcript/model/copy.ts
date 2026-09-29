@@ -293,6 +293,7 @@ export const DETAIL = {
   openFullLog: 'Open full log',
   raw: 'Raw',
   cwd: 'cwd',
+  sessionDirectory: 'Session directory',
   input: 'Input',
   result: 'Result',
   noDiff: 'No diff recorded',

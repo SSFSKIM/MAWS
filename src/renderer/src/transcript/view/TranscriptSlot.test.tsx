@@ -3,11 +3,13 @@
 // defaults, and re-renders when they change.
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
+import type { SessionRecord } from '@shared/graph/session';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, onTestFinished, vi } from 'vitest';
+import { useSessions } from '../../stores/sessions';
 import { DEFAULT_ACTIONS, registerRequestRenderer, registerTranscriptActions, TranscriptSlot, useTranscriptStore } from '../index';
-import { builder, request, tool } from '../model/test-events';
+import { BASH_RESULT, builder, request, tool } from '../model/test-events';
 import { registeredActions } from './registry';
 
 const offsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetHeight')!;
@@ -97,6 +99,24 @@ describe('TranscriptSlot', () => {
     act(() => dispose());
     fireEvent.click(document.querySelector<HTMLElement>('[data-chip="path"]')!);
     expect(openFile).toHaveBeenCalledTimes(2);
+  });
+
+  it('tells the Transcript where the session runs, from its record: a shell call with no cwd shows the worktree’s checkout', async () => {
+    const id = 'app-slot-shell' as AppSessionId;
+    const b = builder();
+    b.turn('u1', 'List it');
+    b.toolUse('t1', 'Bash', { command: 'ls' });
+    b.result('t1', 'a', { structured: BASH_RESULT('a') });
+    b.end(['u1']);
+    const records = useSessions.getState().records;
+    act(() => useSessions.setState({ records: new Map([[id, { directory: '/w/project', worktree: { path: '/w/project-wt', branch: 'wt' } } as unknown as SessionRecord]]) }));
+    onTestFinished(() => useSessions.setState({ records }));
+    const invoke = vi.fn(() => Promise.resolve({ ok: true, value: { events: b.events, lastSeq: 3, complete: true } }));
+    (window as { maws?: MawsBridge }).maws = { invoke, on: vi.fn(() => () => {}) } as unknown as MawsBridge;
+    render(<TranscriptSlot appSessionId={id} />);
+    await waitFor(() => expect(useTranscriptStore.getState().entries[id]?.phase).toBe('live'));
+    act(() => useTranscriptStore.getState().expandAll(id, { cells: true }));
+    await waitFor(() => expect(document.querySelector('.transcript-shell-meta')?.textContent).toBe('Session directory /w/project-wt'));
   });
 
   it('docks the latest registered request renderer in a pending request’s slot; its disposer restores the previous one, then the placeholder', async () => {

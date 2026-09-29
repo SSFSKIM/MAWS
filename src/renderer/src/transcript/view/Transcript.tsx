@@ -136,6 +136,7 @@ export interface TranscriptProps {
   onFollowChange?: (following: boolean) => void;
   className?: string;
   handle?: Ref<TranscriptListHandle>; // additive: the list's imperative handle (the harness and tests)
+  sessionDirectory?: string | null; // additive: the session's directory, shown on a shell call whose input names no cwd
 }
 
 const NO_ROWS: Row[] = [];
@@ -162,7 +163,7 @@ const focusIsHereOrNowhere = (root: HTMLElement | null) => {
   return active === null || active === document.body || (root?.contains(active) ?? false);
 };
 
-export function Transcript({ source, variant, actions, rewind, renderRequest, onFollowChange, className, handle }: TranscriptProps) {
+export function Transcript({ source, variant, actions, rewind, renderRequest, onFollowChange, className, handle, sessionDirectory }: TranscriptProps) {
   const storeKey = storeKeyOf(source);
   const rows = useTranscriptStore((state) => state.entries[storeKey]?.rows ?? NO_ROWS);
   const working = useTranscriptStore((state) => state.entries[storeKey]?.working ?? false);
@@ -223,8 +224,8 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
 
   // Every row reads this context: it changes only with the props, never with the rows.
   const context = useMemo<TranscriptContextValue>(
-    () => ({ storeKey, variant, actions: { ...DEFAULT_ACTIONS, ...actions }, rewind: rewind ?? null, renderRequest: renderRequest ?? null, disclosures, idPrefix }),
-    [storeKey, variant, actions, rewind, renderRequest, disclosures, idPrefix],
+    () => ({ storeKey, variant, actions: { ...DEFAULT_ACTIONS, ...actions }, rewind: rewind ?? null, renderRequest: renderRequest ?? null, disclosures, idPrefix, sessionDirectory: sessionDirectory ?? null }),
+    [storeKey, variant, actions, rewind, renderRequest, disclosures, idPrefix, sessionDirectory],
   );
 
   return (

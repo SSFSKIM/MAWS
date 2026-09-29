@@ -40,10 +40,10 @@ export function spyActions(): TranscriptActions {
 
 export function renderRow(
   row: Row,
-  options: { storeKey?: string; actions?: TranscriptActions; rewind?: RewindInterface; renderRequest?: (slot: Extract<Row, { kind: 'request_slot' }>) => ReactNode } = {},
+  options: { storeKey?: string; actions?: TranscriptActions; rewind?: RewindInterface; renderRequest?: (slot: Extract<Row, { kind: 'request_slot' }>) => ReactNode; sessionDirectory?: string } = {},
 ) {
   const actions = options.actions ?? spyActions();
-  const value = { storeKey: options.storeKey ?? '', variant: 'session' as const, actions, rewind: options.rewind ?? null, renderRequest: options.renderRequest ?? null, disclosures: new Disclosures(), idPrefix: 't' };
+  const value = { storeKey: options.storeKey ?? '', variant: 'session' as const, actions, rewind: options.rewind ?? null, renderRequest: options.renderRequest ?? null, disclosures: new Disclosures(), idPrefix: 't', sessionDirectory: options.sessionDirectory ?? null };
   const view = render(
     <TranscriptProvider value={value}>
       <RowView row={row} />

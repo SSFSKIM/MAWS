@@ -17,7 +17,7 @@ const rowHolding = (rows: Row[], id: string) => rows.find((row) => row.id === id
 
 // One closed turn from `build`, every turn and group expanded and the named cell's detail open; renders the row that
 // holds that cell.
-async function expandedCell(build: (b: Builder) => void, id: string) {
+async function expandedCell(build: (b: Builder) => void, id: string, options: { sessionDirectory?: string } = {}) {
   const b = builder();
   b.turn('u1');
   build(b);
@@ -27,7 +27,7 @@ async function expandedCell(build: (b: Builder) => void, id: string) {
   state.expandAll(store.key);
   state.toggleCell(store.key, id as Cell['id']);
   const row = rowHolding(store.rows(), id);
-  const view = renderRow(row, { storeKey: store.key });
+  const view = renderRow(row, { storeKey: store.key, sessionDirectory: options.sessionDirectory });
   const cell = view.container.querySelector<HTMLElement>(`[data-cell-id="${id}"]`)!;
   return { ...view, store, cell, line: cell.querySelector('button')! };
 }
@@ -67,6 +67,26 @@ describe('shell detail', () => {
     expect(cell.textContent).toContain('✓ Exit code 0 · 3s');
     for (const name of ['Copy command', 'Copy output', 'Copy all']) expect(detail.getByRole('button', { name })).toBeDefined();
     expect(detail.queryByRole('button', { name: 'Open full log' })).toBeNull(); // nothing was cut
+  });
+
+  // The engine's Bash input names no cwd (a census of the probe journals): the session's directory stands in, labelled
+  // as such; a call whose input names one keeps it; with neither, no line.
+  it('without a cwd in its input, shows the session’s directory, labelled as the session directory', async () => {
+    const run = (b: Builder) => {
+      b.toolUse('t1', 'Bash', { command: 'ls' });
+      b.result('t1', 'a', { structured: BASH_RESULT('a') });
+    };
+    const { cell } = await expandedCell(run, 'cell:t1', { sessionDirectory: '/w/project' });
+    expect(cell.querySelector('.transcript-shell-meta')?.textContent).toBe('Session directory /w/project');
+    cleanup();
+    const own = await expandedCell((b) => {
+      b.toolUse('t1', 'Bash', { command: 'ls', cwd: '/w/elsewhere' });
+      b.result('t1', 'a', { structured: BASH_RESULT('a') });
+    }, 'cell:t1', { sessionDirectory: '/w/project' });
+    expect(own.cell.querySelector('.transcript-shell-meta')?.textContent).toBe('cwd /w/elsewhere');
+    cleanup();
+    const neither = await expandedCell(run, 'cell:t1');
+    expect(neither.cell.querySelector('.transcript-shell-meta')).toBeNull();
   });
 
   it('a failing command reads its exit code, and output over 64 KB shows its head, tail and the omitted marker, with Open full log', async () => {

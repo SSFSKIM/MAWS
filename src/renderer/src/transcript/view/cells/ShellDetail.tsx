@@ -4,7 +4,7 @@
 import { truncationOf } from '../../model/cells';
 import { DETAIL, shellFooter } from '../../model/copy';
 import type { Cell, CellDetail } from '../../model/rows';
-import { useActions } from '../context';
+import { useActions, useTranscriptContext } from '../context';
 import { copyText } from '../rows/parts';
 import { spilledOr, SpillLoader } from './Spill';
 import { Truncated } from './Truncated';
@@ -15,10 +15,14 @@ const durationOf = (cell: Cell) => (cell.endedAt === null ? 0 : Date.parse(cell.
 
 export function ShellDetail({ cell, detail }: { cell: Cell; detail: Shell }) {
   const actions = useActions();
+  // The call's own cwd when its input names one (the engine's Bash input does not), else the session's directory,
+  // labelled as such: a `cd` inside an earlier command may have moved the shell since.
+  const { sessionDirectory } = useTranscriptContext();
+  const where = detail.cwd ? { label: DETAIL.cwd, path: detail.cwd } : sessionDirectory ? { label: DETAIL.sessionDirectory, path: sessionDirectory } : null;
   const stdout = spilledOr(detail.spill, detail.stdout); // the whole result once the reader loaded the spill
   const output = [stdout, detail.stderr].filter((part) => part.length > 0).join('\n');
   const footer = cell.status === 'done' || cell.status === 'error' || cell.status === 'stopped' ? shellFooter(cell.status, detail.exitCode, durationOf(cell)) : null;
-  const all = [`$ ${detail.command}`, detail.cwd ? `${DETAIL.cwd} ${detail.cwd}` : null, output, footer].filter((part) => part !== null && part.length > 0).join('\n');
+  const all = [`$ ${detail.command}`, where ? `${where.label} ${where.path}` : null, output, footer].filter((part) => part !== null && part.length > 0).join('\n');
   return (
     <div className="transcript-shell">
       <div className="transcript-shell-heading">
@@ -28,9 +32,9 @@ export function ShellDetail({ cell, detail }: { cell: Cell; detail: Shell }) {
         </button>
       </div>
       {detail.description && <div className="transcript-shell-meta">{detail.description}</div>}
-      {detail.cwd && (
+      {where && (
         <div className="transcript-shell-meta">
-          {DETAIL.cwd} <span className="transcript-mono">{detail.cwd}</span>
+          {where.label} <span className="transcript-mono">{where.path}</span>
         </div>
       )}
       {output.length > 0 && (
