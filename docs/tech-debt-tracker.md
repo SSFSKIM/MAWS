@@ -13,7 +13,6 @@ After each merge the architect triages every row into one of three bins. A row n
 
 | Logged | Owner | Item | Evidence | Closes when |
 |---|---|---|---|---|
-| 2026-09-28 | C1 | The renderer echo test `src/renderer/src/App.test.tsx` is flaky under full-suite load: fails intermittently, passes in isolation and on the untouched base. | Reported by C5's executor during M1 on `worktree-agent-a3f9c764b1656a780`; reproduced on the C1 base with the full suite. | The test waits on the echo through a deterministic signal instead of a timing window, or moves to the Playwright smoke where the real IPC round-trip is observed. Owner: C12 finish, unless a wave-2 child touches the file first. |
 | 2026-09-28 | C5 | `panel.<appSessionId>` layout key is never deleted from `layout.json` when its session is removed. | C5 hand-back residue 3 (branch e014fd1; still open at the rebase hand-back 84214e2). | C8a deletes the key on `session.removed` and pins it. |
 | 2026-09-28 | C5 | Palette "reveal project" may lose focus to the dialog close; not reproduced. | C5 hand-back residue 4. | Reproduced and fixed, or closed as not reproducible after C7's palette work lands. |
 | 2026-09-28 | C5 | 960 px minimum window with a 480 px sidebar and a 640 px panel leaves the main area 0 px wide. | C5 hand-back residue 5. | Region bounds clamp against the window width (C12 finish). |
