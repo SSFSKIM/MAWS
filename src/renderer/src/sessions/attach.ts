@@ -42,10 +42,10 @@ function attachedTabAlive(tabId: string): boolean {
 async function jobOf(record: SessionRecord, known: KnownJob | null): Promise<{ jobId: string; cwd: string } | { error: string }> {
   if (record.engineSessionId !== null) {
     const read = await ipc.invoke('fs.holders', { sessionIds: [record.engineSessionId], directories: null });
-    if (read.ok) {
-      const row = read.value.holders.find((h) => h.sessionId === record.engineSessionId && h.holder.kind === 'background_job' && h.holder.jobId !== null);
-      if (row && row.holder.kind === 'background_job' && row.holder.jobId !== null) return { jobId: row.holder.jobId, cwd: row.cwd ?? record.directory };
-    } else if (known === null) return { error: read.error.message };
+    if (!read.ok && known === null) return { error: read.error.message };
+    for (const { sessionId, holder, cwd } of read.ok ? read.value.holders : []) {
+      if (sessionId === record.engineSessionId && holder.kind === 'background_job' && holder.jobId !== null) return { jobId: holder.jobId, cwd: cwd ?? record.directory };
+    }
   }
   if (known !== null) return { jobId: known.jobId, cwd: record.directory };
   return { error: 'No background job holds this session now; nothing to attach to' };

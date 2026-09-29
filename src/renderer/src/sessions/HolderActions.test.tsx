@@ -73,16 +73,19 @@ function held(holder: SessionRecord['holder'], over: Partial<SessionRecord> = {}
   useSessions.setState({ records: new Map([[A, r]]) });
   return r;
 }
-// Main and the hosts as these pins need them; `over` adds or replaces answers.
+// Main and the hosts as these pins need them; `over` adds or replaces answers, and an answer given as `null` is left to
+// the test (`fake.reply` / `fake.fail`).
 function answerWith(over: Parameters<typeof fakeClient>[0] = {}): void {
-  fake = fakeClient({
+  const answers: Parameters<typeof fakeClient>[0] = {
     'fs.holders': () => ({ refreshedAt: '2026-09-29T00:00:00.000Z', holders }),
     'engine.binaryInfo': { path: PINNED, expectedVersion: '2.1.283', version: '2.1.283', ok: true, error: null },
     'session.fork': { status: 'refused', appSessionId: 'f1111111-1111-4111-8111-111111111111', reason: 'busy', message: 'a turn is running' },
     'session.intent.list': { intents: [] },
     'session.deletions.list': { manifests: [] },
     ...over,
-  });
+  };
+  for (const [name, answer] of Object.entries(over)) if (answer === null) delete answers[name as keyof typeof answers];
+  fake = fakeClient(answers);
   window.maws = fake.client;
 }
 const renderNotice = (r: SessionRecord) => render(<HolderNotice appSessionId={A} holder={r.holder as Extract<SessionRecord['holder'], { kind: 'terminal' | 'background_job' }>} />);
@@ -167,6 +170,20 @@ describe('held outcomes and the attach command', () => {
     await userEvent.click(attachButton());
     await waitFor(() => expect(toasts().map((n) => n.text)).toEqual(['No background job holds this session now; nothing to attach to']));
     expect(opened()).toEqual([]);
+  });
+
+  it('an unreadable registry is said, unless a held answer already named the job', async () => {
+    answerWith({ 'fs.holders': null });
+    renderNotice(held(JOB));
+    await userEvent.click(attachButton());
+    await fake.fail('fs.holders', 'holder registry unreadable: EACCES');
+    await waitFor(() => expect(toasts().map((n) => n.text)).toEqual(['holder registry unreadable: EACCES']));
+    expect(opened()).toEqual([]);
+    const { attachToJob } = await import('./attach');
+    const attaching = attachToJob(A, { jobId: 'e6dcd828', command: COMMAND });
+    await fake.fail('fs.holders', 'holder registry unreadable: EACCES');
+    expect(await attaching).toMatchObject({ ok: true, reused: false });
+    expect(opened()).toMatchObject([{ cwd: '/work/repo', command: COMMAND }]);
   });
 
   it('a terminal holder and a job with no known id get no Attach; every holder gets "Fork a copy"', async () => {
