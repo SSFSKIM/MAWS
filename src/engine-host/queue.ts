@@ -2,7 +2,8 @@
 // interrupt", M4). Every send is an entry: submitted at once when the session is not busy, queued otherwise, so two
 // quick sends at an idle engine serialise. A submission is persisted as `submitting` with its minted uuid before the
 // `user` frame is written, becomes `released` at the engine's `command_lifecycle` for that uuid, and leaves the list
-// at the `turn.ended` naming it or at the process's exit (retired `interrupted`, never re-sent). The release rule: a
+// at the `turn.ended` naming it, at a lifecycle that drops it before it started, or at the process's exit (the last two
+// retire it `interrupted`, never re-sent). The release rule: a
 // main-lane, non-receipt `turn.ended` submits the head while the queue is not paused and the session is idle, so nothing
 // is ever released into a running turn, an engine-initiated one (`task-notification`) included, nor while a prompt the
 // host wrote (a steer) waits for the engine to start it; after an engine turn a
@@ -17,6 +18,7 @@ import { SendContentSchema, type QueueEntry, type QueueState, type SendContent, 
 import type { UserInputFrame } from '@shared/wire/frames';
 
 export const ACK_TIMEOUT_MS = 5_000;
+const DROPPED_BEFORE_START: ReadonlySet<string> = new Set(['cancelled', 'discarded', 'refused']);
 
 export type ReleaseTrigger = 'send' | 'turn_ended' | 'resume';
 export type SteerPriority = 'now' | 'next';
@@ -47,6 +49,7 @@ export class MessageQueue {
   private paused = false;
   private loaded = false; // recover() ran: before it the queue owns nothing and must never overwrite the stored one
   private readonly ackTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly started = new Set<string>(); // queue ids whose submission the engine started
   private readonly log: (message: string) => void;
 
   constructor(private readonly deps: MessageQueueDeps) {
@@ -206,9 +209,22 @@ export class MessageQueue {
   }
 
   // submitting → released: the engine acknowledges every stdin user frame with command_lifecycle (pass2/dialogs 5–6).
+  // A submission the engine drops before it started (`cancelled`, `discarded`, `refused`: pass1/queue-and-interrupt
+  // seq 191) will never be named by a turn.ended, so it is retired `interrupted` there, with the exit's notice, and no
+  // longer holds the queue busy (whole-branch review). Once started, its turn.ended retires it.
   onLifecycle(event: Extract<SessionEvent, { kind: 'command.lifecycle' }>): void {
-    const entry = this.entries.find((e) => e.state === 'submitting' && e.messageUuid === event.commandUuid);
+    const entry = this.entries.find((e) => e.state !== 'queued' && e.messageUuid === event.commandUuid);
     if (!entry) return; // a steer, the plan sequence's frames, or an entry already retired (a late `cancelled`)
+    if (event.state === 'started') this.started.add(entry.queueId);
+    if (DROPPED_BEFORE_START.has(event.state) && !this.started.has(entry.queueId)) {
+      this.entries = this.entries.filter((e) => e !== entry);
+      this.clearAck(entry.queueId);
+      this.started.delete(entry.queueId);
+      this.interruptedNotice(entry);
+      this.persist().catch((error: unknown) => this.log(`retirement not saved: ${messageOf(error)}`)); // a stale released entry on disk retires at the next recovery
+      return;
+    }
+    if (entry.state !== 'submitting') return;
     entry.state = 'released';
     this.clearAck(entry.queueId);
     // a lost save leaves `submitting` on disk, which recovery treats as uncertain: the safe side
@@ -223,7 +239,10 @@ export class MessageQueue {
     const before = this.entries.length;
     this.entries = this.entries.filter((e) => {
       const done = e.state !== 'queued' && e.messageUuid !== null && named.has(e.messageUuid);
-      if (done) this.clearAck(e.queueId);
+      if (done) {
+        this.clearAck(e.queueId);
+        this.started.delete(e.queueId);
+      }
       return !done;
     });
     if (this.entries.length !== before) await this.persist().catch((error: unknown) => this.log(`turn end not saved: ${messageOf(error)}`)); // a stale entry on disk is retired at the next recovery
@@ -246,6 +265,10 @@ export class MessageQueue {
     this.journal({ event: 'queue', action: 'pause', reason: 'engine_turn' });
     this.heldNotice(head);
     await this.persist().catch((error: unknown) => this.log(`hold not saved: ${messageOf(error)}`));
+  }
+
+  private interruptedNotice(entry: QueueEntry): void {
+    this.notice(`queue:interrupted:${entry.queueId}`, 'A message was accepted, but the session ended before it was answered. Re-send it if you still want an answer.');
   }
 
   private heldNotice(head: QueueEntry): void {
@@ -274,11 +297,12 @@ export class MessageQueue {
   // ---------------------------------------------------------------------------------------------------------------------
 
   private settleAfterExit(): void {
+    this.started.clear(); // whatever the process started went with it
     const uncertain: QueueEntry[] = [];
     const kept: QueueEntry[] = [];
     for (const entry of this.entries) {
       if (entry.state === 'released') {
-        this.notice(`queue:interrupted:${entry.queueId}`, 'A message was accepted, but the session ended before it was answered. Re-send it if you still want an answer.');
+        this.interruptedNotice(entry);
       } else if (entry.state === 'submitting') {
         uncertain.push({ ...entry, state: 'queued', messageUuid: null, submittedAt: null, uncertain: true, steer: false });
         this.notice(`queue:uncertain:${entry.queueId}`, 'A message may not have been delivered before the session ended. Check the transcript, then resume the queue to send it or remove it.');

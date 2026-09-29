@@ -142,6 +142,32 @@ describe('queue release never follows an engine-initiated turn', () => {
     expect(userOuts(s.journal.rows).map((f) => f.message.content)).toEqual(['Count to 30 slowly.', 'After counting, reply exactly QUEUED.']);
   });
 
+  it('pass1/queue-and-interrupt cut to the queued prompt (seq 146, 150) and the interrupt (190-192), plus one recorded send: the submission the engine cancels before it started (seq 191) retires interrupted there, so the next send goes at once', async () => {
+    const againRow = { seq: 9_002, direction: 'out' as const, at: '2026-09-28T10:00:00.000Z', frame: { type: 'user', uuid: 'recorded-again', message: { role: 'user', content: 'again' }, parent_tool_use_id: null, origin: { kind: 'human' } } };
+    const cut = (rows: JournalRow[]) => [...rows.filter((r) => r.seq <= 3 || [146, 150, 190, 191, 192].includes(r.seq)), againRow];
+    let afterInterrupt: { cancelled: number; busy: boolean; entries: QueueEntry[]; disposition: string | null } | null = null;
+    const run = await replayedSession('pass1', 'queue-and-interrupt', (row, { session, transport, ready, fixture }) => {
+      if (row.seq === 146) void ready().then(() => session.send(contentOf(fixture, 146)));
+      else if (row.seq === 190) {
+        void session.interrupt({ cancelEngineQueued: true }).then(async (result) => {
+          afterInterrupt = { cancelled: result.cancelled.length, busy: session.queue.busy, entries: session.queue.state.entries, disposition: null };
+          afterInterrupt.disposition = (await session.send('again')).disposition;
+          transport.kill('SIGTERM');
+        });
+      }
+    }, { edit: cut });
+    expect(metaRows(run.journal.rows, 'replay_mismatch')).toEqual([]);
+    expect(afterInterrupt).toEqual({ cancelled: 1, busy: false, entries: [], disposition: 'sent' });
+    const [submitted] = userOuts(run.journal.rows);
+    const cancelled = run.journal.rows.findIndex((r) => (r.frame as { type?: string; state?: string; command_uuid?: string }).type === 'command_lifecycle' && (r.frame as { state: string }).state === 'cancelled');
+    expect((run.journal.rows[cancelled]!.frame as { command_uuid: string }).command_uuid).toBe(submitted!.uuid);
+    const notice = run.journal.rows[cancelled + 1]!.frame as { event: string; key: string };
+    expect(notice).toMatchObject({ event: 'notice', key: expect.stringMatching(/^queue:interrupted:/) }); // at the lifecycle, not at the exit
+    expect(ofKind(run.events, 'notice.posted').filter((e) => e.key.startsWith('queue:interrupted:'))).toHaveLength(1);
+    expect(userOuts(run.journal.rows).map((f) => f.message.content)).toEqual([contentOf(run.fixture, 146), 'again']);
+    expect(run.rebuilt()).toEqual(run.events);
+  });
+
   it('steer writes priority now at once with an entry still queued, and never enters the app queue', async () => {
     const s = scriptedSession();
     await s.session.start();

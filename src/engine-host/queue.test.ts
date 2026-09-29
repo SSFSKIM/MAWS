@@ -103,6 +103,45 @@ describe('queue release never follows an engine-initiated turn', () => {
     expect(t.queue.state.entries).toMatchObject([{ content: 'two', state: 'submitting' }]);
   });
 
+  it('a submission the engine cancels, discards or refuses before it started is retired interrupted at that lifecycle, so the queue is not left busy (whole-branch review; pass1/queue-and-interrupt seq 191)', async () => {
+    for (const state of ['cancelled', 'discarded', 'refused'] as const) {
+      const t = await harness();
+      const { entry } = await t.queue.send('one');
+      await t.queue.send('two');
+      t.queue.onLifecycle(lifecycle(entry.messageUuid!, 'queued'));
+      t.queue.onLifecycle(lifecycle(entry.messageUuid!, state));
+      t.h.turn = false; // the normaliser stopped waiting on the dropped prompt: no turn is open
+      await flush();
+      expect(t.queue.state.entries).toMatchObject([{ content: 'two', state: 'queued' }]);
+      expect(t.queue.busy, state).toBe(false);
+      expect(notices(t.rows)).toEqual([`queue:interrupted:${entry.queueId}`]);
+      expect((await t.store.loadQueue(ID)).entries.map((e) => e.content)).toEqual(['two']);
+      expect(t.writes.map((w) => w.message.content)).toEqual(['one']); // nothing re-sent, nothing released at the drop
+    }
+    // dropped at its first lifecycle, still submitting: the same
+    const first = await harness();
+    const { entry } = await first.queue.send('one');
+    first.queue.onLifecycle(lifecycle(entry.messageUuid!, 'cancelled'));
+    first.h.turn = false;
+    await flush();
+    expect(first.queue.state.entries).toEqual([]);
+    expect((await first.queue.send('again')).disposition).toBe('sent');
+  });
+
+  it('a cancelled lifecycle after the submission started retires nothing: its turn.ended does', async () => {
+    const t = await harness();
+    const { entry } = await t.queue.send('one');
+    t.queue.onLifecycle(lifecycle(entry.messageUuid!, 'queued'));
+    t.queue.onLifecycle(lifecycle(entry.messageUuid!, 'started'));
+    t.queue.onLifecycle(lifecycle(entry.messageUuid!, 'cancelled'));
+    await flush();
+    expect(t.queue.state.entries).toMatchObject([{ state: 'released' }]);
+    expect(notices(t.rows)).toEqual([]);
+    t.h.turn = false;
+    await t.queue.onTurnEnded(turnEnded({ userMessageUuids: [entry.messageUuid!], terminalReason: 'aborted_streaming' }));
+    expect(t.queue.state.entries).toEqual([]);
+  });
+
   it('a result naming a submission the engine never acknowledged still retires it', async () => {
     const t = await harness();
     const { entry } = await t.queue.send('one');
