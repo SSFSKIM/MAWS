@@ -53,6 +53,16 @@ describe('useEngineRead', () => {
     expect(reads('session.getSandboxDialog')).toBe(0);
   });
 
+  it('reads once when the process becomes ready after the widget opened', async () => {
+    useSessions.setState({ engine: new Map([[ID, { ...backend.status(ID), process: 'initializing' }]]) });
+    const { result } = renderHook(() => useEngineRead('session.getSandboxDialog', { appSessionId: ID }), { wrapper: wrapper() });
+    expect(result.current.state).toBe('not_running');
+    act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: backend.status(ID) }));
+    await waitFor(() => expect(result.current.state).toBe('ready'));
+    await new Promise((r) => setTimeout(r, 10));
+    expect(reads('session.getSandboxDialog')).toBe(1);
+  });
+
   it('refetches when the session status moves, not when an unrelated field changes', async () => {
     const { result } = renderHook(() => useEngineRead('session.getWorkspaceDiff', { appSessionId: ID }), { wrapper: wrapper() });
     await waitFor(() => expect(result.current.state).toBe('ready'));

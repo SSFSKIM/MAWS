@@ -74,17 +74,18 @@ export function useEngineRead<N extends SessionRead>(command: N, input: CommandI
   });
   const { refetch } = query;
 
+  // A read already in flight (the one `enabled` started when the process became ready) answers for the move too.
   const seen = useRef(moved);
   useEffect(() => {
     if (seen.current === moved) return;
     seen.current = moved;
-    if (active && ready) void refetch();
+    if (active && ready) void refetch({ cancelRefetch: false });
   }, [active, ready, moved, refetch]);
 
   useEffect(() => {
     if (!active) return;
     return ipc.on('session.operation', (event) => {
-      if (event.appSessionId === appSessionId) void refetch();
+      if (event.appSessionId === appSessionId) void refetch({ cancelRefetch: false });
     });
   }, [active, appSessionId, refetch]);
 
