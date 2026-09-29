@@ -253,7 +253,8 @@ function ModelBody({ name, args, binding, appSessionId }: { name: Name; args: st
   const direct = route?.value === 'direct';
   // Direct never saves the route alone while the model the session would start on is a relay alias (the direct route
   // cannot serve one), as the switch sheet and the relay card's Run direct ask first: a pending Claude choice is the
-  // pick and goes with the route in one patch; otherwise pickDirectModel asks, and its cancel changes nothing.
+  // pick and goes with the route in one patch; otherwise pickDirectModel asks, and its cancel changes nothing. On an
+  // intent already holding a Claude model Direct is the route alone, and a choice not yet applied stays pending.
   const written = (answer: ControlAnswer) => {
     if (answer.ok) {
       setChosenModel(undefined);
@@ -261,8 +262,9 @@ function ModelBody({ name, args, binding, appSessionId }: { name: Name; args: st
     }
     return answer;
   };
+  const onRelayAlias = binding.current !== null && isGatewayModel(binding.current);
   const goDirect = async () => {
-    if (chosenModel !== undefined && chosenModel !== null && !isGatewayModel(chosenModel) && selectedRow) {
+    if (onRelayAlias && chosenModel !== undefined && chosenModel !== null && !isGatewayModel(chosenModel) && selectedRow) {
       const lowered = directChoice(selectedRow, effort).effort;
       const chosen = lowered ?? (chosenEffort !== undefined ? chosenEffort : undefined);
       await run(async () => written(await route!.set({ gateway: 'direct', model: chosenModel, ...(chosen !== undefined && { effort: chosen }) })));

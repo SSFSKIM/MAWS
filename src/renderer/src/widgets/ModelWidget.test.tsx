@@ -300,7 +300,7 @@ describe("the model widget on an unstarted session, with C10's registered hook",
 describe('the model widget on an unstarted session carries its route', () => {
   // every state the intent passed through, so a case can assert it never held Direct with a relay alias
   let history: { gateway: string; model: string | null }[] = [];
-  const mountUnstarted = (over: Parameters<typeof intent>[0] = {}) => {
+  const mountUnstarted = (over: Parameters<typeof intent>[0] = {}, hook: typeof useC10SetupIntent = useC10SetupIntent) => {
     let held = intent({ appSessionId: INTENT_ID, model: 'sonnet', permissionMode: 'default', ...over });
     history = [];
     useSetup.setState({ intents: new Map([[INTENT_ID, held]]) });
@@ -309,7 +309,7 @@ describe('the model widget on an unstarted session carries its route', () => {
       history.push({ gateway: held.gateway, model: held.model });
       return held;
     });
-    offs.push(registerSetupIntentHook(useC10SetupIntent));
+    offs.push(registerSetupIntentHook(hook));
     const Widget = modelWidget('model');
     render(
       <QueryClientProvider client={new QueryClient()}>
@@ -367,6 +367,36 @@ describe('the model widget on an unstarted session carries its route', () => {
     expect(patches()).toEqual([{ gateway: 'direct', model: 'sonnet' }]);
     expect(screen.queryByRole('dialog', { name: 'Choose a Claude model' })).toBeNull();
     neverDirectOnAlias();
+  });
+
+  it('the pending Claude choice lowers an intent effort the chosen model does not admit, in the same patch', async () => {
+    // C10's catalogue rows carry no effort levels (every listing entry on 2.1.283 lists all five); this hook narrows
+    // Sonnet's so the lowering has something to lower
+    const useNarrowedIntent: typeof useC10SetupIntent = (id) => {
+      const hook = useC10SetupIntent(id);
+      if (hook === null) return null;
+      const models = hook.options.models.map((m) => (m.value === 'sonnet' ? { ...m, supportedEffortLevels: ['low', 'medium', 'high'] } : m));
+      return { ...hook, options: { ...hook.options, models } };
+    };
+    mountUnstarted({ model: 'claude/astra', effort: 'max' }, useNarrowedIntent);
+    await waitFor(() => expect(within(screen.getByRole('radiogroup', { name: 'Claude models' })).getAllByRole('radio').length).toBeGreaterThan(0));
+    fireEvent.click(radio('Claude models', 'Sonnet 5')); // chosen, not applied
+    fireEvent.click(route().getByRole('radio', { name: 'Direct' }));
+    await waitFor(() => expect(patches()).toEqual([{ gateway: 'direct', model: 'sonnet', effort: 'high' }]));
+    neverDirectOnAlias();
+  });
+
+  // Carried task-5 Minor: on an intent already holding a Claude model, Direct is a route change only; a Claude choice
+  // made without Apply stays pending instead of being written with the route.
+  it('Direct on an intent already on a Claude model writes the route alone and leaves a pending choice pending', async () => {
+    mountUnstarted({ model: 'sonnet' });
+    await waitFor(() => expect(within(screen.getByRole('radiogroup', { name: 'Claude models' })).getAllByRole('radio').length).toBeGreaterThan(0));
+    fireEvent.click(radio('Claude models', 'Opus')); // chosen, not applied
+    fireEvent.click(route().getByRole('radio', { name: 'Direct' }));
+    await waitFor(() => expect(route().getByRole('radio', { name: 'Direct' }).getAttribute('aria-checked')).toBe('true'));
+    expect(patches()).toEqual([{ gateway: 'direct' }]);
+    expect(checkedIn('Claude models')).toMatch(/^Opus/);
+    expect(screen.queryByRole('dialog', { name: 'Choose a Claude model' })).toBeNull();
   });
 
   it('Direct on an intent holding a gateway model asks for a Claude model first; Cancel changes nothing, a pick writes all three at once', async () => {
