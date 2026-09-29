@@ -16,6 +16,7 @@ import { selectPendingOf, useAttention } from '../stores/attention';
 import { useSessions } from '../stores/sessions';
 import { HolderNotice } from './HolderNotice';
 import { StatusLine } from './StatusLine';
+import { SessionTabNotes } from '../sessions/SessionDialogs'; // C10
 
 type PaneIndex = 0 | 1;
 
@@ -65,6 +66,9 @@ function StartedPane({ record, paneIndex }: { record: SessionRecord; paneIndex: 
       <div className="shrink-0 px-7 pt-4">
         <ComposerColumn>
           {docked && <DockedRequest item={docked} paneIndex={paneIndex} />}
+          {/* C10 start: an interrupted delete's Finish deleting or Keep, and the card a resume waits on */}
+          <SessionTabNotes appSessionId={id} />
+          {/* C10 end */}
           {foreign ? (
             <HolderNotice holder={holder} />
           ) : (

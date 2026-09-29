@@ -8,10 +8,16 @@ import { createHandlerRegistry } from '../keymap/registry';
 
 export const SESSION_ACTIONS = {
   open: 'Open',
+  // C10 start: resume a session with no process (a foreign-live row never offers it; a MAWS-live one has nothing to resume)
+  resume: 'Resume',
+  // C10 end
   openInSplit: 'Open in split',
   pin: 'Pin',
   rename: 'Rename…',
   fork: 'Fork',
+  // C10 start: the fork that creates a worktree first (the small sheet); `fork` above is the fork in place
+  forkToWorktree: 'Fork to a new worktree…',
+  // C10 end
   archive: 'Archive',
   deleteConversation: 'Delete conversation…',
   removeWorktree: 'Remove worktree…',
@@ -28,7 +34,7 @@ function isForeign(record: SessionRecord): boolean {
 // toolbar's session menu): a foreign-live session only Open, and "Remove worktree…" only with a worktree.
 export function sessionActionsFor(record: SessionRecord): SessionActionId[] {
   if (isForeign(record)) return ['open'];
-  return SESSION_ACTION_IDS.filter((id) => id !== 'removeWorktree' || record.worktree !== null);
+  return SESSION_ACTION_IDS.filter((id) => (id !== 'removeWorktree' || record.worktree !== null) && (id !== 'resume' || record.holder.kind !== 'self')); // C10: resume
 }
 
 const registry = createHandlerRegistry<SessionActionId, [AppSessionId]>('session actions');

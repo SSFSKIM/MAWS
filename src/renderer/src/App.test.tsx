@@ -94,6 +94,12 @@ function fakeMain(initial: SettingsState['settings']['theme']) {
       case 'session.setVisible':
         return undefined;
       // C5 end
+      // C10 start: no unstarted sessions, no interrupted deletes
+      case 'session.intent.list':
+        return { intents: [] };
+      case 'session.deletions.list':
+        return { manifests: [] };
+      // C10 end
       case 'pty.spawn':
         return { ptyId: 'p1', pid: 3333 };
       case 'pty.write':

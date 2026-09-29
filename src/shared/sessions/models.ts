@@ -19,6 +19,16 @@ export const ModelCatalogueSchema = z.strictObject({
 });
 export type ModelCatalogue = z.infer<typeof ModelCatalogueSchema>;
 
+// The five entries `reads.jsonl` seq 3 carries before the relay's aliases, which exist only through the relay and
+// arrive with the first routed launch. Haiku is the one that cannot hold auto mode.
+export const BUILTIN_MODELS: readonly ModelCatalogueEntry[] = Object.freeze([
+  { value: 'default', displayName: 'Default (recommended)', supportsAutoMode: true, supportsFastMode: true },
+  { value: 'opus', displayName: 'Opus 5.5 (1M context)', supportsAutoMode: true, supportsFastMode: true },
+  { value: 'fable', displayName: 'Fable 5.1', supportsAutoMode: true },
+  { value: 'sonnet', displayName: 'Sonnet 5', supportsAutoMode: true },
+  { value: 'haiku', displayName: 'Haiku', supportsAutoMode: false },
+]);
+
 // The relay's aliases for non-Anthropic providers (`claude/astra`, `claude/<vendor>/…`).
 export function isGatewayModel(value: string): boolean {
   return value.startsWith('claude/');

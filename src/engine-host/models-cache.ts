@@ -6,17 +6,10 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import * as z from 'zod';
-import { ModelCatalogueEntrySchema, type ModelCatalogue, type ModelCatalogueEntry } from '@shared/sessions/models';
+import { BUILTIN_MODELS, ModelCatalogueEntrySchema, type ModelCatalogue } from '@shared/sessions/models';
 
-// The five entries `reads.jsonl` seq 3 carries before the relay's aliases, which exist only through the relay and
-// arrive with the first routed launch. Haiku is the one that cannot hold auto mode.
-export const BUILTIN_MODELS: readonly ModelCatalogueEntry[] = Object.freeze([
-  { value: 'default', displayName: 'Default (recommended)', supportsAutoMode: true, supportsFastMode: true },
-  { value: 'opus', displayName: 'Opus 5.5 (1M context)', supportsAutoMode: true, supportsFastMode: true },
-  { value: 'fable', displayName: 'Fable 5.1', supportsAutoMode: true },
-  { value: 'sonnet', displayName: 'Sonnet 5', supportsAutoMode: true },
-  { value: 'haiku', displayName: 'Haiku', supportsAutoMode: false },
-]);
+// The built-in list is shared (the renderer shows it when the host cannot answer at all).
+export { BUILTIN_MODELS };
 
 const CacheFileSchema = z.strictObject({ at: z.string(), models: z.array(ModelCatalogueEntrySchema) });
 type CacheFile = z.infer<typeof CacheFileSchema>;

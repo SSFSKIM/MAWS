@@ -19,6 +19,10 @@ import { connectPanelHost, registerPanelTool } from './panel/host';
 import { PanelHost } from './panel/PanelHost';
 import { adoptTerminals, terminalTool } from './tools/terminal';
 // C8a end
+// C10 start
+import { connectSessions } from './sessions/connect';
+import { SessionDialogs } from './sessions/SessionDialogs';
+// C10 end
 
 export function App() {
   const resolvedTheme = useSettings((s) => s.state?.resolvedTheme);
@@ -50,6 +54,10 @@ export function App() {
     void adoptTerminals();
   }, []);
   // C8a end
+  // C10 start: the setup store and C5's tab retention at once (before hydration's snapshots answer); in launch mode
+  // `index`, the newSession slot, the session creator, the close guard, the unstarted title and the session actions
+  useEffect(() => connectSessions(), []);
+  // C10 end
 
   // index.html ships data-theme="light" for the first paint; from then on main's resolved theme decides.
   useEffect(() => {
@@ -59,6 +67,9 @@ export function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <Shell />
+      {/* C10 start: the small sheets (rename, fork, archive, delete, cleanup, archived sessions) */}
+      <SessionDialogs />
+      {/* C10 end */}
     </QueryClientProvider>
   );
 }
