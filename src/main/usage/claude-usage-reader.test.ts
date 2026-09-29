@@ -161,3 +161,20 @@ describe('the ClaudeUsage directory', () => {
     expect(claudeUsageDir({}, '/Users/x')).toBe('/Users/x/Library/Application Support/ClaudeUsage');
   });
 });
+
+// C11 start: settings.claudeUsage.status's dataDirPresent reads the reader's availability without becoming a caller
+describe('claude-usage reader availability (C11)', () => {
+  it('answers whether the directory is there, and leaves the ids the last settings.usage named in place', async () => {
+    expect(await reader(join(scratch, 'absent')).available()).toBe(false);
+    const dir = copy();
+    const emitted: UsageSnapshot[] = [];
+    const r = reader(dir, emitted);
+    await r.snapshot([PINNED_TO_DRAIN]);
+    expect(await r.available()).toBe(true);
+    appendFileSync(join(dir, 'history', `${DRAIN}.jsonl`), '{"limitKey":"session","percent":61,"resetsAt":"2099-09-28T16:09:59Z","recordedAt":"2099-09-28T15:30:00Z"}\n');
+    await r.refresh();
+    expect(emitted).toHaveLength(1);
+    expect(emitted[0]!.pinsFor).toEqual({ [PINNED_TO_DRAIN]: DRAIN }); // a settings.usage([]) here would have emptied it
+  });
+});
+// C11 end

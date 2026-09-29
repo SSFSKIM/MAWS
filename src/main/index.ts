@@ -194,7 +194,7 @@ app.whenReady().then(() => {
       const health = await hosts.dispatch('engine-host', 'engine.relayHealth', { force: true });
       return health.ok && (health.value as { ok: boolean }).ok;
     },
-    dataDirPresent: async () => (await usage.snapshot([])).available,
+    dataDirPresent: () => usage.available(), // not usage.snapshot, which would replace the ids settings.usage last named
   });
   registerMainHandler('settings.claudeUsage.status', () => claudeUsage.status());
   registerMainHandler('settings.claudeUsage.open', (intent) => claudeUsage.open(intent));
