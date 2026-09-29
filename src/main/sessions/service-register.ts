@@ -31,6 +31,8 @@ export function registerSessionServiceHandlers(service: SessionService): void {
   registerMainHandler('session.delete', ({ appSessionId, stopIfLive }) => service.remove(id(appSessionId), stopIfLive));
   registerMainHandler('session.rename', ({ appSessionId, title }) => service.rename(id(appSessionId), title));
   registerMainHandler('session.revealPath', ({ path }) => service.revealPath(path));
+  registerMainHandler('session.deletions.list', async () => ({ manifests: await service.listDeletions() }));
+  registerMainHandler('session.deletions.keep', ({ appSessionId }) => service.keepDeletion(id(appSessionId)));
 }
 
 // The engine host answers: its first launch is ready, or it has given up (a crashed host answers `host_unavailable`,

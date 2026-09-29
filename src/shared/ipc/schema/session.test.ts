@@ -37,6 +37,7 @@ describe('C10 session lifecycle entries', () => {
     const main = [
       'session.archive', 'session.create', 'session.delete', 'session.fork', 'session.intent.discard', 'session.intent.get', 'session.intent.list',
       'session.intent.patch', 'session.intent.release', 'session.intent.resolveWorktree', 'session.rename', 'session.revealPath', 'session.start', 'session.trust.check',
+      'session.deletions.list', 'session.deletions.keep',
     ] as const;
     for (const name of main) expect(commands[name].owner, name).toBe('main');
     expect(commands['session.forget'].owner).toBe('engine-host');

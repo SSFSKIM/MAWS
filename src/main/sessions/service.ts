@@ -19,7 +19,7 @@ import type { SetupResources, StartOutcome } from '@shared/sessions/setup';
 import type { TrustState } from '@shared/sessions/trust';
 import type { ArchiveOutcome, DeleteOutcome, StartOptions } from '@shared/ipc/schema/session';
 import { emptyProgress, HostError, hostCall, STOP_WAIT_MS, WATCHDOG_MS, type SessionServiceDeps } from './context';
-import { DeletionManifests } from './delete-manifest';
+import { DeletionManifests, type DeletionManifest } from './delete-manifest';
 import { checkAdditionalDirectories, checkLocation, sessionDirectoryOf, trustDirectoryOf, type RuleVerdict } from './intent-rules';
 import { readSettings } from './launch-mapping';
 import { archiveRecord, deleteRecord, forkIntentOf, renameRecord, revealablePath } from './record-actions';
@@ -443,6 +443,17 @@ export class SessionService {
 
   remove(appSessionId: AppSessionId, stopIfLive: boolean): Promise<DeleteOutcome> {
     return this.serial(appSessionId, async () => deleteRecord(await this.ready(), { manifests: this.manifests, trash: this.deps.trash }, appSessionId, stopIfLive));
+  }
+
+  // A delete interrupted half-way, offered in the session's tab: "Finish deleting" is `session.delete` again, "Keep"
+  // drops the manifest and leaves what did not move where it is.
+  async listDeletions(): Promise<DeletionManifest[]> {
+    await this.ready();
+    return this.manifests.list();
+  }
+
+  keepDeletion(appSessionId: AppSessionId): Promise<void> {
+    return this.serial(appSessionId, async () => this.manifests.remove(appSessionId));
   }
 
   rename(appSessionId: AppSessionId, title: string): Promise<{ record: SessionRecord; via: 'engine' | 'override' }> {

@@ -341,6 +341,16 @@ export const StartOptionsSchema = z.strictObject({
 });
 export type StartOptions = z.infer<typeof StartOptionsSchema>;
 
+// What a delete meant to move and what it has moved, in move order (the transcript last).
+export const DeletionManifestSchema = z.strictObject({
+  appSessionId: AppSessionIdSchema,
+  engineSessionId: SessionIdSchema.nullable(),
+  paths: z.array(z.string()),
+  trashed: z.array(z.string()),
+  createdAt: z.string(),
+});
+export type DeletionManifestView = z.infer<typeof DeletionManifestSchema>;
+
 const appSessionC10 = z.strictObject({ appSessionId: AppSessionIdSchema });
 const c10Commands = {
   'session.trust.check': { input: z.strictObject({ directory: z.string() }), output: TrustStateSchema, owner: 'main' },
@@ -392,6 +402,10 @@ const c10Commands = {
     owner: 'main',
   },
   'session.revealPath': { input: z.strictObject({ path: z.string() }), output: z.void(), owner: 'main' },
+  // (M4a) a delete interrupted half-way, found at start, offered in the session's tab: "Finish deleting" is
+  // `session.delete` again; "Keep" drops the manifest and leaves every file that did not move where it is
+  'session.deletions.list': { input: z.void(), output: z.strictObject({ manifests: z.array(DeletionManifestSchema) }), owner: 'main' },
+  'session.deletions.keep': { input: appSessionC10, output: z.void(), owner: 'main' },
 } as const satisfies Record<`session.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 const c10Events = {
   'session.setup': SetupEventSchema,

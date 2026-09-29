@@ -544,6 +544,26 @@ describe('session service', () => {
       expect(h.index.sessions.get(record.appId)).toBeNull();
     });
 
+    it('lists an interrupted deletion for the session tab, and Keep drops its manifest and leaves the conversation', async () => {
+      const { record, dir, transcript } = conversation();
+      expect(await h.service.listDeletions()).toEqual([]);
+      h.trashFails = (path) => (path === join(dir, `${SID}.ccr-tip.json`) ? 'EPERM' : null);
+      await h.service.remove(record.appId, false);
+      expect(await h.service.listDeletions()).toEqual([
+        {
+          appSessionId: record.appId,
+          engineSessionId: SID,
+          paths: [join(dir, `${SID}-20260928T120000.cast`), join(dir, `${SID}.ccr-tip.json`), join(dir, SID), transcript],
+          trashed: [join(dir, `${SID}-20260928T120000.cast`)],
+          createdAt: expect.any(String),
+        },
+      ]);
+      await h.service.keepDeletion(record.appId);
+      expect(await h.service.listDeletions()).toEqual([]);
+      expect(existsSync(transcript)).toBe(true);
+      expect(h.index.sessions.get(record.appId)).not.toBeNull();
+    });
+
     it('ignores the archive fs.sessionRemoved makes between the transcript move and the removal', async () => {
       const { record, transcript } = conversation();
       h.trashFails = (path) => {
