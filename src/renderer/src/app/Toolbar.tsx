@@ -11,7 +11,7 @@ import { useLayout } from '../stores/layout';
 import { activeTab } from '../stores/layout-model';
 import { useSessions } from '../stores/sessions';
 import { IconButton, PanelIcon, SidebarIcon } from './IconButton';
-import { sidebarWidth } from './regions';
+import { sidebarWidth, useWindowWidth } from './regions';
 import { runSessionAction, SESSION_ACTIONS, sessionActionsFor, useSessionActionEnabled, type SessionActionId } from './session-actions';
 
 const basename = (path: string) => path.split('/').filter(Boolean).at(-1) ?? path;
@@ -43,7 +43,8 @@ export function toolbarTitle(tab: TabRef | null, records: ReadonlyMap<AppSession
 export function Toolbar() {
   const sidebar = useLayout((s) => s.regions.sidebar);
   const panelCollapsed = useLayout((s) => s.regions.panel.collapsed);
-  const width = useLayout((s) => sidebarWidth(s.regions));
+  const windowWidth = useWindowWidth();
+  const width = useLayout((s) => sidebarWidth(s.regions, windowWidth));
   const tab = useLayout((s) => activeTab(s.main));
   const records = useSessions((s) => s.records);
   const appSessionId = tab?.kind === 'session' ? tab.appSessionId : null;

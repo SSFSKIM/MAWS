@@ -7,7 +7,7 @@ import { CommandPalette } from '../palette/CommandPalette';
 import { PanelRegion } from '../panel/PanelRegion';
 import { Sidebar } from '../sidebar/Sidebar';
 import { useLayout } from '../stores/layout';
-import { COLLAPSE_THRESHOLD_PX, gridColumns, SIDEBAR_BOUNDS, sidebarWidth } from './regions';
+import { COLLAPSE_THRESHOLD_PX, gridColumns, regionWidths, SIDEBAR_BOUNDS, useWindowWidth } from './regions';
 import { Resizer } from './Resizer';
 import { ToastHost } from './ToastHost';
 import { Toolbar } from './Toolbar';
@@ -16,7 +16,8 @@ export const SIDEBAR_REGION_ID = 'region-sidebar';
 export const MAIN_REGION_ID = 'region-main';
 
 export function Shell() {
-  const columns = useLayout((s) => gridColumns(s.regions));
+  const windowWidth = useWindowWidth();
+  const columns = useLayout((s) => gridColumns(s.regions, windowWidth));
   const mainHidden = useLayout((s) => s.regions.panel.maximized && !s.regions.panel.collapsed);
 
   return (
@@ -41,7 +42,9 @@ export function Shell() {
 
 function SidebarRegion() {
   const collapsed = useLayout((s) => s.regions.sidebar.collapsed);
-  const width = useLayout((s) => sidebarWidth(s.regions));
+  const windowWidth = useWindowWidth();
+  const width = useLayout((s) => regionWidths(s.regions, windowWidth).sidebar);
+  const max = useLayout((s) => regionWidths(s.regions, windowWidth).sidebarMax);
   const setSidebar = useLayout((s) => s.setSidebar);
   return (
     <section
@@ -61,7 +64,7 @@ function SidebarRegion() {
           controls={SIDEBAR_REGION_ID}
           value={width}
           min={SIDEBAR_BOUNDS.min}
-          max={SIDEBAR_BOUNDS.max}
+          max={max}
           defaultValue={SIDEBAR_BOUNDS.default}
           collapseThreshold={COLLAPSE_THRESHOLD_PX}
           onChange={(next) => setSidebar({ width: next })}
