@@ -3,9 +3,12 @@
 // (`session.status`, `session.queue`, `session.brokerItems`) flushes the pending batch first, so a consumer never sees
 // a state ahead of the events that caused it. The last `ringSize` events stay in memory for `session.events`; a range
 // the ring has evicted is rebuilt from the launch's journal through a fresh Normalizer, which reproduces the live
-// events exactly (ids and seq included) because every event derives from a journal row. The originating `*.requested`
-// event of each live broker item is kept aside for `session.pendingRequest`, whatever the ring has evicted since.
+// events exactly (ids and seq included) because every event derives from a journal row; a rebuilt page stops at its
+// limit and the next page resumes where it stopped. The originating `*.requested` event of each live broker item is
+// kept aside for `session.pendingRequest`, whatever the ring has evicted since.
+import { createReadStream } from 'node:fs';
 import { basename, dirname } from 'node:path';
+import { createInterface } from 'node:readline';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, RequestId, SessionId } from '@shared/graph/ids';
@@ -13,7 +16,7 @@ import type { QueueState } from '@shared/engine/session-state-store';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { EventsSnapshot } from '@shared/ipc/schema/session';
 import type { HostEmit } from '@shared/host/runtime';
-import type { JournalRow } from '@shared/wire/journal';
+import { parseJournalRow } from '@shared/wire/journal';
 import { JournalReader } from './journal';
 import { Normalizer } from './normalizer';
 
@@ -33,8 +36,19 @@ export interface SessionStreamOptions {
   batchMs?: number;
 }
 
+// Where the last rebuilt page stopped: the next page (afterSeq = `through`) goes on from here.
+interface JournalCursor {
+  normalizer: Normalizer; // has seen every row before `offset`
+  file: number; // index into the launch's files
+  offset: number; // bytes into that file
+  expected: number; // the next row's seq
+  carried: SessionEvent[]; // the events of the row read past the last full page
+  through: number; // the last page's lastSeq
+}
+
 export class SessionStream {
   private readonly ring: SessionEvent[] = [];
+  private cursor: JournalCursor | null = null;
   private evictedThrough: number | null = null; // the seq of the last event the ring dropped
   private pending: SessionEvent[] = [];
   private timer: ReturnType<typeof setTimeout> | null = null;
@@ -94,55 +108,84 @@ export class SessionStream {
   // `session.events`: every event after `afterSeq` (null: from the start of this launch), whole rows at a time up to
   // about `limit`; `complete` is false when the answer stops short (the limit, or a journal that cannot be read back).
   async snapshot(afterSeq: number | null, limit: number | null): Promise<EventsSnapshot> {
-    let source: SessionEvent[];
-    let complete = true;
-    if (this.evictedThrough === null || (afterSeq !== null && afterSeq >= this.evictedThrough)) {
-      source = this.ring;
-    } else {
-      const rebuilt = await this.fromJournal();
-      source = rebuilt ?? this.ring;
-      complete = rebuilt !== null;
-    }
-    let events = afterSeq === null ? [...source] : source.filter((e) => e.seq !== null && e.seq > afterSeq);
-    if (limit !== null && events.length > limit) {
-      let end = limit;
-      while (end < events.length && events[end]!.seq === events[end - 1]!.seq) end += 1; // never split a row: the next page starts after it
-      if (end < events.length) {
-        events = events.slice(0, end);
-        complete = false;
-      }
-    }
-    return { events, lastSeq: events.at(-1)?.seq ?? afterSeq ?? 0, complete }; // the cursor for the next call
+    if (this.evictedThrough === null || (afterSeq !== null && afterSeq >= this.evictedThrough)) return page(this.ring, afterSeq, limit, true);
+    return (await this.fromJournal(afterSeq, limit)) ?? page(this.ring, afterSeq, limit, false);
   }
 
   dispose(): void {
     this.flush();
+    this.cursor = null;
   }
 
   private emitBatch(events: SessionEvent[]): void {
     this.opts.emit('session.eventBatch', { appSessionId: this.opts.appSessionId, events });
   }
 
-  // The launch's journal files (the base file, then its rotations) through a fresh normaliser; null when they cannot
-  // be read back whole (a rotated file pruned, a file removed by an archive).
-  private async fromJournal(): Promise<SessionEvent[] | null> {
+  // A page of the launch's journal files (the base file, then its rotations) through a normaliser that has seen every
+  // row before it. The cursor a page leaves behind (the normaliser, the file and byte offset reached, and the events of
+  // the row read past a full page) lets the next page, whose `afterSeq` is this one's `lastSeq`, go on from there, so
+  // paging reads each row once (whole-branch review); the journal is append-only, so rows written meanwhile are simply
+  // read next. Any other `afterSeq` starts over from the first row. Null when the files cannot be read back whole (a
+  // rotated file pruned, a file removed by an archive).
+  private async fromJournal(afterSeq: number | null, limit: number | null): Promise<EventsSnapshot | null> {
     const prefix = `${basename(this.opts.journalPath, '.jsonl')}.`; // `<file id>.jsonl`, then `<file id>.<n>.jsonl`
     const files = JournalReader.forSession(dirname(this.opts.journalPath)).filter((file) => basename(file).startsWith(prefix));
+    const resumable = this.cursor !== null && afterSeq !== null && afterSeq >= this.cursor.through;
+    const cursor = resumable ? this.cursor! : { normalizer: new Normalizer({ appSessionId: this.opts.appSessionId, launchId: this.opts.launchId, sessionId: this.opts.sessionId }), file: 0, offset: 0, expected: 1, carried: [], through: 0 };
+    this.cursor = null; // re-armed only by a page that read cleanly
     if (files.length === 0) return null;
-    const normalizer = new Normalizer({ appSessionId: this.opts.appSessionId, launchId: this.opts.launchId, sessionId: this.opts.sessionId });
-    const events: SessionEvent[] = [];
-    let expected = 1;
+    const wanted = (e: SessionEvent) => afterSeq === null || (e.seq !== null && e.seq > afterSeq);
+    const events = cursor.carried.filter(wanted);
+    cursor.carried = [];
+    let complete = true;
     try {
-      for (const file of files) {
-        for await (const row of JournalReader.rows(file)) {
-          if (row.seq !== expected) return null; // a gap: part of the launch is gone
-          expected += 1;
-          events.push(...normalizer.push(row as JournalRow));
+      reading: for (;;) {
+        const input = createReadStream(files[cursor.file]!, { encoding: 'utf8', start: cursor.offset });
+        const lines = createInterface({ input, crlfDelay: Infinity });
+        try {
+          for await (const line of lines) {
+            cursor.offset += Buffer.byteLength(line, 'utf8') + 1;
+            if (line.length === 0) continue;
+            const row = parseJournalRow(JSON.parse(line));
+            if (row.seq !== cursor.expected) return null; // a gap: part of the launch is gone
+            cursor.expected += 1;
+            const out = cursor.normalizer.push(row).filter(wanted);
+            if (out.length === 0) continue;
+            if (limit !== null && events.length >= limit) {
+              cursor.carried = out; // the page is full and more follows: this row opens the next page
+              complete = false;
+              break reading;
+            }
+            events.push(...out);
+          }
+        } finally {
+          lines.close();
+          input.destroy();
         }
+        if (cursor.file + 1 >= files.length) break; // the file being written: the next page resumes at its end
+        cursor.file += 1;
+        cursor.offset = 0;
       }
     } catch {
       return null;
     }
-    return events;
+    const lastSeq = events.at(-1)?.seq ?? afterSeq ?? 0;
+    cursor.through = lastSeq;
+    this.cursor = cursor;
+    return { events, lastSeq, complete }; // `lastSeq` is the cursor for the next call
   }
+}
+
+// `session.events` from the ring: every event after `afterSeq`, whole rows at a time up to about `limit`.
+function page(source: SessionEvent[], afterSeq: number | null, limit: number | null, complete: boolean): EventsSnapshot {
+  let events = afterSeq === null ? [...source] : source.filter((e) => e.seq !== null && e.seq > afterSeq);
+  if (limit !== null && events.length > limit) {
+    let end = limit;
+    while (end < events.length && events[end]!.seq === events[end - 1]!.seq) end += 1; // never split a row: the next page starts after it
+    if (end < events.length) {
+      events = events.slice(0, end);
+      complete = false;
+    }
+  }
+  return { events, lastSeq: events.at(-1)?.seq ?? afterSeq ?? 0, complete }; // the cursor for the next call
 }

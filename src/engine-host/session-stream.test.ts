@@ -1,3 +1,4 @@
+import { appendFileSync, readFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -9,6 +10,7 @@ import type { EventName, EventPayload } from '@shared/ipc/schema';
 import { validateEventPayload } from '@shared/ipc/validate';
 import { replayedSession } from './conformance/session-harness';
 import { JOURNAL_MAX_BYTES, JournalWriter } from './journal';
+import { Normalizer } from './normalizer';
 import { SessionStream } from './session-stream';
 
 let dir: string;
@@ -17,6 +19,7 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   vi.useRealTimers();
+  vi.restoreAllMocks();
   await rm(dir, { recursive: true, force: true });
 });
 
@@ -108,6 +111,49 @@ describe('session event stream: batches, the ring and the reload snapshot', () =
     expect(page.lastSeq).toBe(seqWithTwo);
     const rest = await stream.snapshot(page.lastSeq, null);
     expect([...page.events, ...rest.events]).toEqual(events);
+  });
+
+  // Whole-branch review: paging an evicted range must not rebuild the whole launch per page.
+  it('paging a rebuilt journal reads each row once across the pages, and a page stops at its limit', async () => {
+    const { events, launchId, sessionId, appSessionId, journalPath } = await recordedInit();
+    const rows = readFileSync(journalPath, 'utf8').trim().split('\n').length;
+    const stream = new SessionStream({ appSessionId, launchId, sessionId: sessionId as never, journalPath, emit: recorder().emit, ringSize: 5 });
+    stream.events(events);
+    stream.flush();
+    const push = vi.spyOn(Normalizer.prototype, 'push');
+    const first = await stream.snapshot(null, 5);
+    expect(first.complete).toBe(false);
+    expect(first.events).toEqual(events.slice(0, first.events.length));
+    const firstReads = push.mock.calls.length;
+    const pages = [first];
+    while (!pages.at(-1)!.complete) pages.push(await stream.snapshot(pages.at(-1)!.lastSeq, 5));
+    expect(pages.flatMap((p) => p.events)).toEqual(events);
+    expect(pages.length).toBeGreaterThan(3);
+    // the first page stopped at the row that opens the second, not at the end of the journal
+    expect(firstReads).toBe(pages[1]!.events[0]!.seq);
+    expect(firstReads).toBeLessThan(rows);
+    expect(push.mock.calls.length).toBe(rows); // every row normalised once over all the pages
+  });
+
+  it('a paging cursor follows the journal as it grows, and a page from the start rebuilds from the first row', async () => {
+    const { events, launchId, sessionId, appSessionId, journalPath } = await recordedInit();
+    const lastRow = Number((JSON.parse(readFileSync(journalPath, 'utf8').trim().split('\n').at(-1)!) as { seq: number }).seq);
+    const stream = new SessionStream({ appSessionId, launchId, sessionId: sessionId as never, journalPath, emit: recorder().emit, ringSize: 5 });
+    stream.events(events);
+    const push = vi.spyOn(Normalizer.prototype, 'push');
+    const first = await stream.snapshot(null, 5);
+    expect(first.complete).toBe(false);
+    // the launch writes on while the renderer pages (the ring's side of it does not matter to a journal page)
+    const notice = { seq: lastRow + 1, direction: 'meta', at: '2026-09-28T10:00:00.000Z', frame: { event: 'notice', level: 'info', key: 'appended', text: 'a row written after the first page' } };
+    appendFileSync(journalPath, `${JSON.stringify(notice)}\n`);
+    const rest = await stream.snapshot(first.lastSeq, null);
+    expect(rest.complete).toBe(true);
+    expect([...first.events, ...rest.events].slice(0, events.length)).toEqual(events);
+    expect(rest.events.at(-1)).toMatchObject({ kind: 'notice.posted', key: 'appended', seq: lastRow + 1 });
+    expect(push.mock.calls.length).toBe(lastRow + 1); // resumed where the first page stopped, the appended row included
+    const again = await stream.snapshot(null, null);
+    expect(again.events).toEqual([...first.events, ...rest.events]);
+    expect(push.mock.calls.length).toBe(2 * (lastRow + 1)); // from the start: a fresh rebuild
   });
 
   it('a journal that can no longer be read answers what the ring holds, incomplete', async () => {
