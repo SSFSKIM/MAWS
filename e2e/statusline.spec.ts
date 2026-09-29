@@ -4,7 +4,7 @@
 // minutes old (percentages untouched). The fixture's drain target is `2aca3c4b…` (5h 53 %, 7d 63 %); account
 // `477e393c…` pins `73171552…` (5h 77 %, 7d 44 %); the one window at or over 90 % is `aa9db20d…`'s 5-hour window at
 // 100 %. Runs on a plain build; the owner's ClaudeUsage directory is never read.
-import { cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
@@ -87,12 +87,18 @@ test('status line: the session’s account windows, the usage popover, and one n
       .poll(() => page.evaluate(() => window.maws.invoke('layout.get', { key: 'usage.banners' })))
       .toMatchObject({ ok: true, value: { value: [expect.stringMatching(/^usage:aa9db20d-af2c-4718-ba6f-5cea946b4974:session:.+Z$/)] } });
 
-    // After a reload the windows come back and the dismissed banner does not.
+    // After a reload the windows come back and the dismissed banner does not. The proof that the banner rule has read
+    // usage.banners and run is a banner it must post: account 477e393c…'s 5-hour window reaches 95 % (a new row in
+    // ClaudeUsage's history, which main's watcher publishes). The rule posts nothing before the dismissed keys are
+    // read, and it judges every account in the same snapshot, so when that banner shows, the dismissed one would too.
     await page.reload();
     const again = await open(page, QUOTA);
     await expect(field(again, '5h')).toHaveText(/^5h 53% /);
-    await page.waitForTimeout(1500); // the banner rule has run over the snapshot and the dismissed keys by now
-    await expect(nearLimitBanners(page)).toHaveCount(0);
+    const iso = (ms: number) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, 'Z'); // ClaudeUsage's form, compared as text
+    const row = { limitKey: 'session', percent: 95, recordedAt: iso(Date.now()), resetsAt: iso(Date.now() + 2 * 3_600_000) };
+    appendFileSync(join(usageDir, 'history', '477e393c-5c1a-4413-a3e6-7f5d1ed72cc3.jsonl'), `${JSON.stringify(row)}\n`);
+    await expect(nearLimitBanners(page)).toHaveCount(1, { timeout: 10_000 });
+    await expect(nearLimitBanners(page).locator('span').first()).toHaveText(/^5-hour window at 95% for 1@example\.test · resets in /);
     expect(maws.consoleErrors()).toEqual([]);
   } finally {
     await maws.cleanup();
