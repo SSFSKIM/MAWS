@@ -124,6 +124,7 @@ export function startAttentionService(deps: AttentionServiceDeps): AttentionServ
   };
 
   const onHeld = (id: AppSessionId, status: EngineSessionStatus) => {
+    if (status.process === 'exited') return; // the exit retired them; a late exited status must not re-derive any (M5 review)
     const state = stateOf(id);
     const keep = new Set<string>();
     for (const held of status.heldPeerMessages) {

@@ -143,6 +143,17 @@ describe('attention service merges broker items with the derived kinds', () => {
     expect(last()).toEqual([]);
   });
 
+  it('an exit drops the held-message item, and the exited status that follows never re-derives it (M5 review)', () => {
+    const { fire, batch, last } = setup();
+    const held = { messageUuid: 'm-1', from: 'peer', fromName: null, lane: 'team', heldAt: AT, expiresAt: '2026-09-28T10:05:00.000Z' };
+    fire('session.status', { appSessionId: APP, status: { process: 'ready', engineSessionId: SID, heldPeerMessages: [held] } as unknown as EngineSessionStatus });
+    expect(last().map((i) => i.kind)).toEqual(['held_peer_message']);
+    batch(event('process.exited', { code: 1, signal: null, reason: 'crash', lostAttentionCount: 0 }));
+    expect(last()).toEqual([]);
+    fire('session.status', { appSessionId: APP, status: { process: 'exited', engineSessionId: SID, heldPeerMessages: [held] } as unknown as EngineSessionStatus });
+    expect(last()).toEqual([]);
+  });
+
   it('a stop retires the error items before raising its own losses; an archive retires the session from the store', async () => {
     const { service, store, batch, last, changed } = setup();
     batch(event('turn.ended', { isError: true, terminalReason: 'model_error', result: 'x', resultText: null, isEchoReceipt: false, origin: 'human', errors: [] }));

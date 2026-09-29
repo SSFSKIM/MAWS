@@ -116,7 +116,13 @@ export class SessionStatusTracker {
     if (sample.treeRssKiB !== null) this.peakTreeRssKiB = Math.max(this.peakTreeRssKiB ?? 0, sample.treeRssKiB);
   }
 
+  // At the exit: a dead process can release no held peer message, so the exited status lists none (M5 review).
   dispose(): void {
+    this.heldPeerMessages = [];
+    this.clearExpiry();
+  }
+
+  private clearExpiry(): void {
     if (this.expiryTimer) clearTimeout(this.expiryTimer);
     this.expiryTimer = null;
   }
@@ -199,7 +205,7 @@ export class SessionStatusTracker {
   }
 
   private scheduleExpiry(): void {
-    this.dispose();
+    this.clearExpiry();
     if (this.heldPeerMessages.length === 0) return;
     const next = Math.min(...this.heldPeerMessages.map((m) => Date.parse(m.expiresAt)));
     this.expiryTimer = setTimeout(() => {

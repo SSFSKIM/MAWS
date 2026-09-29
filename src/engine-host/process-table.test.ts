@@ -48,6 +48,20 @@ describe('keep-alive reasons', () => {
     expect(statuses.at(-1)!.keepAlive).toEqual([]);
   });
 
+  it('the exited status carries no held peer message: a dead process cannot release one (M5 review)', async () => {
+    const s = scriptedSession();
+    await s.session.start();
+    const statuses: EngineSessionStatus[] = [];
+    s.session.on('status', (st) => statuses.push(st));
+    s.transport.push({ type: 'system', subtype: 'peer_message_hold', state: 'held', message_uuid: 'm-1', lane: 'socket', from: 'uds:/tmp/a', uuid: 'p-1', session_id: 's' });
+    await flush();
+    expect(s.session.status().heldPeerMessages).toHaveLength(1);
+    s.transport.exit(1);
+    await s.session.exited;
+    expect(statuses.at(-1)).toMatchObject({ process: 'exited', heldPeerMessages: [], keepAlive: [] });
+    expect(statuses.filter((st) => st.process === 'exited').every((st) => st.heldPeerMessages.length === 0)).toBe(true);
+  });
+
   it('grants and connected MCP servers keep a process', async () => {
     const s = scriptedSession({ session: { grants: { allow: ['Bash(ls)'] } } });
     await s.session.start();
