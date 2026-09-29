@@ -39,9 +39,11 @@ export function readIntoCache<N extends SessionRead>(client: QueryClient, comman
 // A memory sample or a queue count does not.
 export const MOVES_READS = (s: EngineSessionStatus): string => `${s.launchId}|${s.process}|${s.turn?.id ?? ''}|${s.engineState}`;
 
-// The status fact each cached answer was read under (by query key), so a widget opened after the status moved reads
-// again even when the answer is fresh by age (C11 M6, live: `/diff` opened just after a turn showed the turn-start read).
-const readUnder = new Map<string, string | null>();
+// The session's last event seq when each cached answer was read (by query key), so a widget opened after anything
+// happened in the session reads again even when the answer is fresh by age (C11 M6, live: `/diff` opened just after a
+// turn that wrote a file showed the read from before it; the turn left MOVES_READS' facts where they were).
+const readAtSeq = new Map<string, number | null>();
+const lastSeq = (id: AppSessionId): number | null => useSessions.getState().engine.get(id)?.lastEventSeq ?? null;
 
 export type ReadState = 'loading' | 'ready' | 'error' | 'not_running';
 
@@ -82,10 +84,9 @@ export function useEngineRead<N extends SessionRead>(command: N, input: CommandI
   const query = useQuery<CommandOutput<N>, IpcCommandError>({
     queryKey: key,
     queryFn: async () => {
-      const status = useSessions.getState().engine.get(appSessionId);
-      const fact = status ? refreshOn(status) : null;
+      const seq = lastSeq(appSessionId);
       const answer = await fetchEngineRead(command, input);
-      readUnder.set(keyHash, fact);
+      readAtSeq.set(keyHash, seq);
       return answer;
     },
     staleTime: READ_STALE_MS,
@@ -95,13 +96,21 @@ export function useEngineRead<N extends SessionRead>(command: N, input: CommandI
   const { refetch } = query;
 
   // A read already in flight (the one `enabled` started when the process became ready) answers for the move too.
-  // On open, an answer read under an earlier fact counts as a move.
-  const seen = useRef(readUnder.has(keyHash) ? readUnder.get(keyHash)! : moved);
+  const seen = useRef(moved);
   useEffect(() => {
     if (seen.current === moved) return;
     seen.current = moved;
     if (active && ready && wanted) void refetch({ cancelRefetch: false });
   }, [active, ready, wanted, moved, refetch]);
+
+  // On open: an answer read before the session's latest event is read again, once.
+  const opened = useRef(false);
+  useEffect(() => {
+    if (opened.current || !(active && ready && wanted)) return;
+    opened.current = true;
+    const at = readAtSeq.get(keyHash);
+    if (at !== undefined && at !== lastSeq(appSessionId)) void refetch({ cancelRefetch: false });
+  }, [active, ready, wanted, keyHash, appSessionId, refetch]);
 
   useEffect(() => {
     if (!active || !wanted) return;
