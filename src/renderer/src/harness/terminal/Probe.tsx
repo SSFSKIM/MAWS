@@ -17,13 +17,13 @@ import {
 } from '../../../../../spikes/terminal-probe/workloads.mjs';
 import type { EventPayload } from '@shared/ipc/schema';
 import { ipc } from '../../ipc/client';
-import { useSettings } from '../../stores/settings';
 import { terminals } from '../../terminal/registry';
 import type { RendererKind, TerminalFont } from '../../terminal/renderer';
 import { readDocumentTheme } from '../../terminal/theme';
 import type { Metrics } from './metrics';
 import { Pane, type PaneDebug, type ProbeSnapshot } from './pane';
 import { RegistryPane, terminalsApi } from './RegistryPane';
+import { useHarnessTheme } from './useHarnessTheme';
 
 // The candidates on the page; a second entry mounts a second pane on the right.
 const KINDS: RendererKind[] = ['xterm'];
@@ -182,8 +182,7 @@ export function Probe() {
   const split = useProbeStore((s) => s.split);
   const setTarget = useProbeStore((s) => s.setTarget);
   const setSplit = useProbeStore((s) => s.setSplit);
-  const resolvedTheme = useSettings((s) => s.state?.resolvedTheme);
-  const setTheme = useSettings((s) => s.setTheme);
+  const { resolvedTheme, setTheme } = useHarnessTheme();
   const rowRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {

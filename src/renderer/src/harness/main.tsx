@@ -1,10 +1,9 @@
 // carried by C9 until the rebase over C6 (wave-2 ledger d.13)
 // The harness entry: a second renderer page loaded instead of the app under MAWS_HARNESS=1, routed on
 // `location.hash`. C6 lands this router with `#transcript` as its default; C9 adds its routes as a block below.
-// Each page assigns `window.__maws_harness` on mount; one page per load.
-import { StrictMode, useEffect, useSyncExternalStore, type ReactNode } from 'react';
+// Each page assigns `window.__maws_harness` on mount and wires its own settings and theme; one page per load.
+import { StrictMode, useSyncExternalStore, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { useSettings } from '../stores/settings';
 import '../styles/app.css';
 
 function TranscriptPlaceholder() {
@@ -31,12 +30,7 @@ const subscribeHash = (cb: () => void) => {
 };
 
 function Harness() {
-  const resolvedTheme = useSettings((s) => s.state?.resolvedTheme);
   const hash = useSyncExternalStore(subscribeHash, () => location.hash);
-  useEffect(() => useSettings.getState().connect(), []);
-  useEffect(() => {
-    if (resolvedTheme) document.documentElement.dataset.theme = resolvedTheme;
-  }, [resolvedTheme]);
   const route = ROUTES[hash] ?? ROUTES['#transcript']!;
   return (
     <div className="flex h-full flex-col">

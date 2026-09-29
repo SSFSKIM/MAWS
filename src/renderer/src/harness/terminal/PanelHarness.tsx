@@ -32,6 +32,7 @@ import {
   type PanelTab,
 } from './panel-state';
 import { createTerminalsApi, type TerminalsHarnessApi } from './terminals-api';
+import { useHarnessTheme } from './useHarnessTheme';
 
 registerPanelTool(terminalTool);
 
@@ -132,6 +133,7 @@ const terminalsApi: TerminalsHarnessApi = createTerminalsApi({
 const button = 'rounded-sm border border-border px-2 py-0.5 text-fg hover:bg-bg-hover [app-region:no-drag]';
 
 export function PanelHarness() {
+  useHarnessTheme();
   useEffect(() => {
     window.__maws_harness = { page: 'panel', panel: panelApi, terminals: terminalsApi, keys: { counts: () => ({ ...useKeys.getState() }) }, openTerminal };
     window.openTerminal = openTerminal;
