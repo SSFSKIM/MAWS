@@ -684,3 +684,37 @@ test('edit-and-resubmit keeps edit mode across a reload, and Send after it confi
   expect(await written(page, id!)).toEqual({ rewinds: 1, cancels: 0, users: 3 });
   expect(editor.consoleErrors()).toEqual([]);
 });
+
+test('edit-and-resubmit across a reload during an unconfirmed rewind: edit mode is back at idle, and the late answer ends it with the text kept', async ({ editor }) => {
+  test.setTimeout(90_000);
+  const { page } = editor;
+  await openComposerPage(page);
+  let id: string | null = null;
+  await expect
+    .poll(async () => {
+      id = value(await invoke(page, 'session.list', {})).sessions.find((s) => s.engineSessionId === transcriptSession)?.appId ?? null;
+      return id;
+    })
+    .not.toBeNull();
+  await startEdit(page, id!, 'held');
+  await confirmResubmit(page);
+  await expect(editLine(page)).toHaveText(/Rewind unconfirmed · checking the transcript…/, { timeout: 15_000 });
+  const drafted = async () => ((value(await invoke(page, 'session.drafts.get', { appSessionId: id! })) as { doc: { attrs?: { editing?: unknown } } } | null)?.doc.attrs?.editing ?? null);
+  await expect.poll(drafted).toMatchObject({ messageUuid: expect.any(String) });
+
+  await page.reload();
+  await openComposerPage(page);
+  await showPanes(page, [{ composer: id!, transcript: true }, null]);
+  await expect(editLine(page)).toHaveText(/Editing an earlier message · sending forks this session from here/); // idle, nothing issued
+  await expect(messageIn(page, 0)).toHaveText('turn two edited');
+  expect(await written(page, id!)).toEqual({ rewinds: 1, cancels: 1, users: 2 });
+
+  value(await invoke(page, 'session.getContextUsage', { appSessionId: id!, detail: 'summary' })); // the held answer comes late
+  await expect(editLine(page)).toHaveCount(0); // the transcript shows the rewind: edit mode ends
+  await expect(messageIn(page, 0)).toHaveText('turn two edited');
+  await messageIn(page, 0).click();
+  await page.keyboard.press('Enter'); // an ordinary send now
+  await expect.poll(() => sent(page, id!)).toEqual(['turn two edited']);
+  expect(await written(page, id!)).toEqual({ rewinds: 1, cancels: 1, users: 3 });
+  expect(editor.consoleErrors()).toEqual([]);
+});
