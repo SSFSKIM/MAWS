@@ -1,9 +1,14 @@
 // Panel host tests (C8a): a probe tool whose every call is recorded, the host mounted as C5's region mounts it (the
 // shown session from the focused pane's active tab, `onChange` and `onTogglePinned` bound to the layout store) with
 // the two writers spied, and a reset of every store the host reads. Imported only by happy-dom suites.
+import { QueryClientProvider } from '@tanstack/react-query';
 import { useMemo } from 'react';
 import { vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
+import type { CommandName, CommandResult, MawsBridge } from '@shared/ipc/schema';
+import { queryClient } from '../ipc/query';
+import { useGit } from '../stores/git';
+import { useSummary } from '../stores/summary';
 import { LAYOUT_DEFAULTS, type LayoutMain, type PanelSessionState, type PanelTabRef, type TabRef } from '@shared/ipc/schema/layout';
 import { record } from '../../../../test/support/builders';
 import { resetPanelHost } from '../panel/host';
@@ -100,8 +105,27 @@ export function TestHost() {
     },
     onToggleMaximize() {},
   };
-  return <PanelHost {...props} />;
+  // The summary's Background work reads through TanStack Query, as under App.tsx's provider.
+  return (
+    <QueryClientProvider client={queryClient}>
+      <PanelHost {...props} />
+    </QueryClientProvider>
+  );
 }
+
+// Main as the summary's reads find it in suites that are not about the summary (M2): no repository, nothing persisted,
+// no workflow runs. The summary suite installs its own.
+const QUIET_ANSWERS: Record<string, CommandResult<CommandName>> = {
+  'git.watch': { ok: false, error: { code: 'internal', message: 'not a git repository' } },
+  'git.unwatch': { ok: true, value: undefined },
+  'layout.get': { ok: true, value: { value: null } },
+  'layout.set': { ok: true, value: undefined },
+  'fs.workflows': { ok: true, value: { runs: [] } },
+};
+const quietBridge = {
+  invoke: async (name: CommandName) => QUIET_ANSWERS[name] ?? { ok: false, error: { code: 'internal', message: `no answer for ${name} in the panel suites` } },
+  on: () => () => {},
+} as unknown as MawsBridge;
 
 const ORIGINAL = (() => {
   const { updatePanelTabs, openSession, setPanelTabs } = useLayout.getState();
@@ -132,7 +156,13 @@ export function resetPanelStores(opts: { hydrated?: boolean } = {}): void {
   useSessions.setState({
     records: new Map([A, B, C].map((id) => [id, record(id)])),
     engine: new Map(),
+    digests: new Map(),
   });
+  // The summary's stores (M2): main answered by the quiet bridge, no git facts held, every section expanded.
+  window.maws = quietBridge;
+  queryClient.clear();
+  useGit.setState({ entries: new Map() });
+  useSummary.setState({ collapsed: new Set() });
 }
 
 export const panelOf = (id: AppSessionId) => useLayout.getState().panelBySession.get(id);

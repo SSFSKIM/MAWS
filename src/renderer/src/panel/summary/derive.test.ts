@@ -5,7 +5,7 @@ import { loadSyntheticJournal } from '../../../../../test/support/fixtures';
 import { applyEvents, createState, turnActivity, type TurnActivity, type TurnId } from '../../transcript';
 import { journalToEvents } from '../../transcript/dev/journal';
 import { useTranscriptStore } from '../../stores/transcript';
-import { agentGlyphs, backgroundCounts, changeLine, githubUrl, pushState, sourcesOf } from './derive';
+import { absolutePath, agentGlyphs, backgroundCounts, changeLine, displayPath, githubUrl, pushState, sourcesOf } from './derive';
 
 const file = (path: string, over: Partial<GitFileStatus> = {}): GitFileStatus => ({ path, oldPath: null, index: '.', worktree: 'M', untracked: false, ...over });
 const status = (over: Partial<GitStatus> = {}): GitStatus => ({
@@ -139,6 +139,18 @@ describe('summary derivations', () => {
         ['Survey src for TODOs', 0],
         ['List the tests', 2],
       ]);
+    });
+  });
+
+  describe('source paths', () => {
+    it('shows a path relative to the session directory when it lies inside it, and opens a relative one resolved against it', () => {
+      expect(displayPath('/w/repo/docs/charter.md', '/w/repo')).toBe('docs/charter.md');
+      expect(displayPath('/w/repository/x.md', '/w/repo')).toBe('/w/repository/x.md');
+      expect(displayPath('/w/repo', '/w/repo')).toBe('/w/repo');
+      expect(displayPath('src', '/w/repo')).toBe('src');
+      expect(absolutePath('/w/repo/a.ts', '/w/repo')).toBe('/w/repo/a.ts');
+      expect(absolutePath('src', '/w/repo')).toBe('/w/repo/src');
+      expect(absolutePath('src', '/w/repo/')).toBe('/w/repo/src');
     });
   });
 

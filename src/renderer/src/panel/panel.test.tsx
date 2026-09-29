@@ -23,7 +23,7 @@ describe('panel tab strip and plus menu', () => {
     render(<TestHost />);
     expect(screen.getByRole('button', { name: 'Session overview' }).getAttribute('aria-pressed')).toBe('true');
     expect(tabs()).toEqual([]);
-    expect(screen.getByRole('tabpanel').textContent).toBe('Tools stay with this session. Pin a tab to keep it with you as you switch.');
+    expect(screen.getByRole('tabpanel').textContent).toContain('Tools stay with this session. Pin a tab to keep it with you as you switch.'); // below the summary's sections (M2)
   });
 
   it('"+" reads "No tools registered yet" when nothing is registered', async () => {

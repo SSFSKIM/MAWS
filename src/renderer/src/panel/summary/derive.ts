@@ -100,6 +100,17 @@ export function sourcesOf(turns: TurnActivity[], limit = 10): Source[] {
 
 const TERMINAL = new Set(['finished', 'finished_with_errors', 'stopped']);
 
+// A source's path as the card shows it: relative to the session's directory when it lies inside it.
+export function displayPath(path: string, directory: string): string {
+  const base = directory.endsWith('/') ? directory : `${directory}/`;
+  return path.startsWith(base) ? path.slice(base.length) : path;
+}
+
+// A source's path as a file tab opens it: a relative one (a Grep or Glob over `src`) resolved against the directory.
+export function absolutePath(path: string, directory: string): string {
+  return path.startsWith('/') ? path : `${directory.replace(/\/$/, '')}/${path}`;
+}
+
 // The activity's children, those still running before the finished, bounded. Each entry is the ref itself (with its
 // status), so the glyph line hands it to C6's `SubagentGlyph` as the transcript does.
 export function agentGlyphs(turns: TurnActivity[], limit = 4): (SubagentRef & { status: TurnActivity['subagents'][number]['status'] })[] {
