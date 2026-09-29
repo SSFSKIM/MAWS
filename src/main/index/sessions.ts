@@ -88,14 +88,28 @@ export interface BindingChange {
 
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-// A slash command's prompt is the engine's markup, not words: `<command-name>/clear</command-name>` with its
-// `<command-message>` and `<command-args>`, and a local command's `<local-command-stdout>` (and siblings). Each element
-// goes whole, an unclosed one (a prompt cut at the summary's cap) to the end; what is left, with its whitespace
-// collapsed, is the prompt's title, or null when nothing readable remains.
-const COMMAND_MARKUP = /<(command-name|command-message|command-args|local-command-stdout|local-command-stderr|local-command-caveat)>[\s\S]*?(?:<\/\1>|$)/g;
+// A slash command's prompt is the engine's markup: `<command-name>/review</command-name>` with its `<command-message>`
+// and `<command-args>`, or a local command's `<local-command-stdout>` (and siblings). A prompt that opens with that markup
+// is projected as the command the person typed, `/<name> <args>`, followed by any words outside the markup; each element
+// goes whole, an unclosed one (a prompt cut at the summary's cap) to the end. Any other prompt is prose and kept as it
+// is, markup-looking words included. Whitespace is collapsed; null when nothing readable remains.
+const COMMAND_TAGS = 'command-name|command-message|command-args|local-command-stdout|local-command-stderr|local-command-caveat';
+const OPENS_WITH_MARKUP = new RegExp(`^\\s*<(?:${COMMAND_TAGS})>`);
+const COMMAND_ELEMENT = new RegExp(`<(${COMMAND_TAGS})>([\\s\\S]*?)(?:<\\/\\1>|$)`, 'g');
 
 export function promptTitle(prompt: string): string | null {
-  const text = prompt.replace(COMMAND_MARKUP, ' ').replace(/\s+/g, ' ').trim();
+  const collapse = (text: string) => text.replace(/\s+/g, ' ').trim();
+  let name = '';
+  let args = '';
+  const rest = OPENS_WITH_MARKUP.test(prompt)
+    ? prompt.replace(COMMAND_ELEMENT, (_element, tag: string, inner: string) => {
+        if (tag === 'command-name') name = collapse(inner);
+        if (tag === 'command-args') args = collapse(inner);
+        return ' ';
+      })
+    : prompt;
+  const command = name === '' ? '' : `${name.startsWith('/') ? name : `/${name}`} ${args}`;
+  const text = collapse(`${command} ${rest}`);
   return text === '' ? null : text;
 }
 
