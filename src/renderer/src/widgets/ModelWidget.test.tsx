@@ -13,6 +13,9 @@ import { useSessions } from '../stores/sessions';
 import { useUsage } from '../stores/usage';
 import { acceptedModel, effortsOf, fastView, liveModel, presentModels, resetModelRequests, setModel, useModelRequests } from './model';
 import { modelWidget } from './ModelWidget';
+import { useSetup } from '../sessions/store';
+import { useSetupIntent as useC10SetupIntent } from '../sessions/useSetupIntent';
+import { ID as INTENT_ID, intent } from '../test-support/setup-intents';
 
 const ROOT = join(__dirname, '../../../..');
 const ID = 'app-7412a115' as AppSessionId; // routed, idle, sonnet, effective auto
@@ -258,5 +261,34 @@ describe('the model widget on an unstarted session binds to the setup intent', (
     expect(screen.queryByRole('switch', { name: 'Fast mode' })).toBeNull();
     expect(screen.getByText('Applies when the session starts')).toBeTruthy();
     expect(backend.calls).toHaveLength(0); // nothing asked of an engine that is not running
+  });
+});
+
+// The C10 integration (C11 task 5, held piece 5): the same widget with C10's own hook registered, as the app registers it,
+// over an intent in C10's setup store: the catalogue is C10's `engine.models`, and a choice is C10's
+// `session.intent.patch`, the write C7's chips make; nothing is asked of an engine.
+describe("the model widget on an unstarted session, with C10's registered hook", () => {
+  it('lists engine.models in its groups and writes the choice through session.intent.patch', async () => {
+    const held = intent({ appSessionId: INTENT_ID, model: 'sonnet', permissionMode: 'auto' });
+    useSetup.setState({ intents: new Map([[INTENT_ID, held]]) });
+    backend.script('session.intent.patch', (input) => ({ ...held, ...(input as { patch: object }).patch }));
+    offs.push(registerSetupIntentHook(useC10SetupIntent));
+    const Widget = modelWidget('model');
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <Widget appSessionId={INTENT_ID} args="" close={() => {}} />
+      </QueryClientProvider>,
+    );
+    // the cache's relay aliases (auto-routed seq 143) beside the Claude group
+    await waitFor(() => expect(within(screen.getByRole('radiogroup', { name: 'Gateway models' })).getAllByRole('radio')).toHaveLength(7));
+    expect(checkedIn('Claude models')).toMatch(/^Sonnet 5/);
+    fireEvent.click(radio('Gateway models', 'astra'));
+    expect(screen.getByRole('note').textContent).toMatch(/^Auto-mode reviews for this model run locally\./);
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+    await waitFor(() => expect(useSetup.getState().intents.get(INTENT_ID)?.model).toBe('claude/astra'));
+    expect(backend.calls.filter((c) => c.command === 'session.intent.patch').map((c) => c.input)).toEqual([{ appSessionId: INTENT_ID, patch: { model: 'claude/astra', effort: null } }]);
+    const engineCalls = backend.calls.map((c) => c.command).filter((c) => c !== 'engine.models' && c !== 'session.intent.patch' && c !== 'session.trust.check');
+    expect(engineCalls, 'nothing asked of an engine').toEqual([]);
+    useSetup.setState({ intents: new Map() });
   });
 });
