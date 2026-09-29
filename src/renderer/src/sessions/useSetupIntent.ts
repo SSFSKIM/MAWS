@@ -101,22 +101,14 @@ async function readRepository(directory: string): Promise<RepositoryFacts> {
   return { directory, repoRoot, worktrees: listed.ok ? listed.value.worktrees : [], branches: names, trustError: null };
 }
 
-// The catalogue once per page (it changes only when a launch or a refresh updates the host's cache); a failed read
-// shows the built-in list the host itself answers before any launch.
-let catalogueRead: Promise<ModelCatalogue> | null = null;
-function readCatalogue(): Promise<ModelCatalogue> {
-  catalogueRead ??= ipc.invoke('engine.models', { refresh: false }).then((result) => {
-    if (result.ok) return result.value;
-    console.warn('[sessions] engine.models unavailable', result.error);
-    catalogueRead = null; // asked again at the next mount
-    return BUILTIN_FALLBACK;
-  });
-  return catalogueRead;
-}
-
-// Tests: forget the page's catalogue.
-export function resetCatalogue(): void {
-  catalogueRead = null;
+// The catalogue at every mount: the host answers from its cache in memory, which a launch or a refresh updates (the
+// relay's `claude/*` aliases arrive with the first routed launch), so each new tab sees what the host knows now. A
+// failed read shows the built-in list the host itself answers before any launch.
+async function readCatalogue(): Promise<ModelCatalogue> {
+  const result = await ipc.invoke('engine.models', { refresh: false });
+  if (result.ok) return result.value;
+  console.warn('[sessions] engine.models unavailable', result.error);
+  return BUILTIN_FALLBACK;
 }
 
 function useSetupOptions(

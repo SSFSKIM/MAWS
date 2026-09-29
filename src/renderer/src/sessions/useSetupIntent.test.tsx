@@ -14,7 +14,7 @@ import { beforeCloseUnstarted } from './setup-actions';
 import { closeDialog, useDialogs } from './dialogs';
 import { createUnstartedSession, retainsTab, unstartedTitle } from './connect';
 import { connectSetup, useSetup } from './store';
-import { resetCatalogue, useSetupIntent, type ModelInfo } from './useSetupIntent';
+import { useSetupIntent, type ModelInfo } from './useSetupIntent';
 import type { ContentBlock } from '@shared/graph/events';
 import type { Location, SetupIntent } from '@shared/sessions/intent';
 
@@ -53,7 +53,6 @@ function withMain(auto: Parameters<typeof fakeClient>[0] = {}) {
 beforeEach(() => {
   resetShellStores();
   resetSetupStore();
-  resetCatalogue();
 });
 afterEach(() => {
   cleanup();
@@ -110,6 +109,19 @@ describe('setup intent hook', () => {
     const { result } = renderHook(() => useSetupIntent(ID));
     await act(() => fake.fail('engine.models', 'host unavailable'));
     expect(result.current!.options.models.map((m) => m.value)).toEqual(['default', 'opus', 'fable', 'sonnet', 'haiku']);
+  });
+
+  it('reads the catalogue again at every mount, so a later tab sees what the host learned since', async () => {
+    let catalogue: ModelCatalogue = { models: [{ value: 'default', displayName: 'Default' }], source: 'builtin', at: null };
+    withMain({ 'engine.models': () => catalogue });
+    putIntent(intent());
+    const first = renderHook(() => useSetupIntent(ID));
+    await waitFor(() => expect(first.result.current!.options.models.map((m) => m.value)).toEqual(['default']));
+    first.unmount();
+    catalogue = CATALOGUE; // a launch filled the host's cache, the relay's aliases included
+    const second = renderHook(() => useSetupIntent(ID));
+    await waitFor(() => expect(second.result.current!.options.models.map((m) => m.value)).toEqual(['default', 'haiku', 'claude/astra']));
+    expect(fake.invoked('engine.models')).toEqual([{ refresh: false }, { refresh: false }]);
   });
 
   it('notes a model that cannot hold auto mode, and a gateway model’s local auto lane', async () => {
