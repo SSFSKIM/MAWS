@@ -10,7 +10,7 @@ and a second entry there re-opens the second pane for a future candidate.
 ## Run
 
 ```
-pnpm build
+MAWS_HARNESS=1 pnpm build                                # the harness page is built only under MAWS_HARNESS=1 (or by the dev server)
 node spikes/terminal-probe/run.mjs                       # smoke + measurements + shell-driven items, both renderers
 node spikes/terminal-probe/run.mjs --steps tui           # the real TUIs (one short conversation each; costs model usage)
 node spikes/terminal-probe/run.mjs --steps exit-check    # item 1 for each TUI: start, then /exit or /quit (no model usage)

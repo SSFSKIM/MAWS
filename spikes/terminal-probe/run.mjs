@@ -6,7 +6,7 @@
 // binary stream with acks (judged against GATE_CRITERIA) and the links through `pty.openLink`, with main's
 // `shell.openExternal` stubbed to record the URL instead of opening a browser.
 //
-//   pnpm build && node spikes/terminal-probe/run.mjs [--phase m1|m2-gate] [--renderer xterm|ghostty|both]
+//   MAWS_HARNESS=1 pnpm build && node spikes/terminal-probe/run.mjs [--phase m1|m2-gate] [--renderer xterm|ghostty|both]
 //                [--steps smoke,measure,items,tui,exit-check,replay,links] [--keep-open]
 //   MAWS_CLAUDE_BIN / MAWS_CODEX_BIN override the TUI binaries.
 import { execFileSync } from 'node:child_process';
@@ -48,6 +48,7 @@ const bins = { claude: process.env.MAWS_CLAUDE_BIN ?? CLAUDE_BIN_DEFAULT, codex:
 for (const dir of ['results', 'evidence', 'recordings']) mkdirSync(join(here, dir), { recursive: true });
 const main = join(repo, 'out/main/index.js');
 if (!existsSync(main)) throw new Error(`${main} does not exist (run pnpm build)`);
+if (!existsSync(join(repo, 'out/renderer/harness.html'))) throw new Error('out/renderer/harness.html does not exist (run MAWS_HARNESS=1 pnpm build)');
 
 const log = (...parts) => console.log(new Date().toISOString().slice(11, 19), ...parts);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

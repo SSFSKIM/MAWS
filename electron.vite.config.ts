@@ -25,6 +25,14 @@ export default defineConfig(({ command }) => {
   // to main's CSP header. A build defines it as null and stamps nothing, so production carries no nonce at all.
   const devNonce = command === 'serve' ? randomBytes(16).toString('base64') : null;
 
+  // carried by C9 until the rebase over C6 (wave-2 ledger d.13): the harness page (src/renderer/harness.html) is a second
+  // renderer entry, built by the dev server or under MAWS_HARNESS=1 only, so a production build never contains it
+  const harnessInput =
+    command === 'serve' || process.env.MAWS_HARNESS === '1'
+      ? { index: resolve(__dirname, 'src/renderer/index.html'), harness: resolve(__dirname, 'src/renderer/harness.html') }
+      : null;
+  // carried by C9 until the rebase over C6 (wave-2 ledger d.13)
+
   return {
     // The host entries are bundled with this config through `?modulePath` (src/main/hosts/index.ts), so they share
     // its aliases, defines and externals: node-pty stays a real file under node_modules, for `asarUnpack`.
@@ -41,14 +49,7 @@ export default defineConfig(({ command }) => {
     renderer: {
       resolve: { alias },
       html: devNonce ? { cspNonce: devNonce } : undefined,
-      build: {
-        rollupOptions: {
-          ...rollupOptions,
-          // carried by C9 until the rebase over C6 (wave-2 ledger d.13): the harness page beside the app page
-          input: { index: resolve(__dirname, 'src/renderer/index.html'), harness: resolve(__dirname, 'src/renderer/harness.html') },
-          // carried by C9 until the rebase over C6 (wave-2 ledger d.13)
-        },
-      },
+      build: { rollupOptions: harnessInput ? { ...rollupOptions, input: harnessInput } : rollupOptions }, // carried by C9 until the rebase over C6: harness input
       plugins: [react({ babel: { plugins: ['babel-plugin-react-compiler'] } }), tailwindcss()],
     },
   };
