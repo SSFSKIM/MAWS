@@ -23,7 +23,7 @@
 // or media kind (`opensExternally`, an allowlist).
 import fs, { type BigIntStats } from 'node:fs';
 import type { FileHandle } from 'node:fs/promises';
-import { basename, dirname, isAbsolute, join, normalize } from 'node:path';
+import { basename, dirname, isAbsolute, join, normalize, sep } from 'node:path';
 import type { AppSessionId } from '@shared/graph/ids';
 import {
   BINARY_SNIFF_BYTES,
@@ -100,12 +100,14 @@ export function createFilesService({ records, hooks, emit = () => {}, openPath, 
   const watches = new WatchTable({ emit, beforeBatch: (real) => at('before-batch', real) });
 
   // Step 1: absolute, already normal (a `..` is refused before the disk is touched, since the kernel resolves `/X/..`
-  // only when `/X` exists), a known session with at least one resolvable root, and a realpath under one of them.
+  // only when `/X` exists) and with no trailing separator (under which `lstat` follows a final-component symlink, so
+  // the check below would pass a link to a directory), a known session with at least one resolvable root, and a
+  // realpath under one of them.
   async function precheck(appSessionId: AppSessionId, path: string): Promise<{ roots: string[]; real0: string }> {
     if (!isAbsolute(path)) throw new Error('path must be absolute');
     const record = records(appSessionId);
     if (!record) throw new Error(`unknown app session: ${appSessionId}`);
-    if (normalize(path) !== path) throw new Refusal();
+    if (normalize(path) !== path || (path !== sep && path.endsWith(sep))) throw new Refusal();
     const roots = await rootsOf(record);
     if (roots.length === 0) throw new Refusal();
     let real0: string;

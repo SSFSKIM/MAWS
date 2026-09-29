@@ -344,6 +344,10 @@ describe('files service boundary', () => {
     await expect(files.read({ appSessionId: A, path: inRoot('readme-link') })).rejects.toThrow(OUT);
     await expect(files.list({ appSessionId: A, path: inRoot('alias') })).rejects.toThrow(OUT); // a directory link too: shown, not opened
     await expect(files.watch(A, inRoot('alias'), 1)).rejects.toThrow(OUT);
+    // Spelled with a trailing slash, lstat follows the link (the path names the target directory): refused all the same.
+    await expect(files.list({ appSessionId: A, path: `${inRoot('alias')}/` })).rejects.toThrow(OUT);
+    await expect(files.watch(A, `${inRoot('alias')}/`, 1)).rejects.toThrow(OUT);
+    expect(files.watching()).toEqual([]);
   });
 
   // A readdir or fs.watch that fails after step 5 (the directory removed or replaced between the confirmation and the
