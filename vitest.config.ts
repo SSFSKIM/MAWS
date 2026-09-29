@@ -59,7 +59,7 @@ export default defineConfig({
       {
         resolve: { alias },
         plugins: [react({ babel: { plugins: ['babel-plugin-react-compiler'] } })],
-        test: { name: 'renderer-compiled', environment: 'happy-dom', include: ['src/renderer/src/panel/**/*.test.tsx'] },
+        test: { name: 'renderer-compiled', environment: 'happy-dom', include: ['src/renderer/src/panel/**/*.test.tsx'], env: { MAWS_REACT_COMPILER: '1' } },
       },
       // C8a end
     ],

@@ -121,7 +121,9 @@ describe('panel host registry and instances', () => {
     show(A);
     act(() => togglePinned(id));
     expect(probe.created).toHaveLength(1);
-    expect(probe.rendered.length).toBeGreaterThan(1); // the React Compiler (the app's build) skips unchanged renders
+    // Every re-render reaches the tool uncompiled; the React Compiler (the app's build, project renderer-compiled) skips
+    // the unchanged ones, so there only some do.
+    expect(probe.rendered.length).toBeGreaterThan(process.env.MAWS_REACT_COMPILER === '1' ? 1 : 40);
     expect(probe.rendered.every((state) => state === probe.rendered[0])).toBe(true);
   });
 
