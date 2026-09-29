@@ -8,9 +8,10 @@
 // hold between writes (`src/common/parser/EscapeSequenceParser.ts` VT500_TRANSITION_TABLE and
 // `src/common/input/TextDecoder.ts` Utf8ToUtf32), run over every chunk the registry writes. A checkpoint is taken only
 // where it reports a boundary (the parser in its ground state, no partial UTF-8 character, no open OSC 8 hyperlink,
-// the default charset in force), because `@xterm/addon-serialize` serialises the screen but no parser or decoder
-// continuation, writes the pen's open hyperlink as a plain SGR 4 underline that outlives the link's end, and carries
-// no charset designation (found by the split-point round trip in `replay.node.test.ts`). The tracker also records the
+// the default charset in force, no scroll region narrower than the screen), because `@xterm/addon-serialize`
+// serialises the screen but no parser or decoder continuation, writes the pen's open hyperlink as a plain SGR 4
+// underline that outlives the link's end, and carries no charset designation and no DECSTBM scroll region (found by
+// the split-point round trip in `replay.node.test.ts`). The tracker also records the
 // private modes the serializer does not restore (measured against `@xterm/headless` 6.0.0: SGR mouse encoding 1006,
 // SGR-pixels 1016 and cursor visibility 25; mouse tracking and focus reporting are carried explicitly too, as the
 // residue asks), and `checkpointState` appends them to `serialize()` as explicit DECSET/DECRST sequences.
@@ -49,7 +50,22 @@ export interface StreamState {
   readonly hyperlink: boolean; // an OSC 8 hyperlink is open in the pen
   readonly charsets: Charsets;
   readonly modes: Readonly<TrackedModes>;
+  readonly alternate: boolean; // the alternate screen is active (`?47`, `?1047`, `?1049`)
+  readonly regions: Regions;
 }
+
+// DECSTBM per buffer, as xterm keeps it: null is the full screen; `bottom` 0 is "the last row" (DECSTBM's default,
+// and what xterm makes of a bottom past the screen). xterm clears the alternate buffer's region when the program leaves
+// it and both buffers' on a resize (`resizedStream`).
+interface Region {
+  readonly top: number;
+  readonly bottom: number;
+}
+interface Regions {
+  readonly normal: Region | null;
+  readonly alternate: Region | null;
+}
+const FULL_SCREEN: Regions = { normal: null, alternate: null };
 
 // xterm's CharsetService and saved cursor as far as a boundary needs them: what G0 to G3 designate (a charset's final
 // byte; `B`, US ASCII, is the default), the shift level, the set in force (normally the level's designation; DECRC
@@ -91,12 +107,24 @@ export const INITIAL_STREAM: StreamState = {
   hyperlink: false,
   charsets: DEFAULT_CHARSETS,
   modes: DEFAULT_MODES,
+  alternate: false,
+  regions: FULL_SCREEN,
 };
 
-export function atBoundary(state: StreamState): boolean {
+// `rows`, the terminal's height when known, lets a region spelled out as the full screen (`CSI 1 ; rows r`) count as
+// none; without it such a region is treated as narrower, which only delays a checkpoint.
+export function atBoundary(state: StreamState, rows?: number): boolean {
   const { g, level, active, saved, cursorSaved } = state.charsets;
   const charsetsDefault = g === 'BBBB' && level === 0 && active === 'B' && saved === 'B';
-  return state.parser === GROUND && state.utf8Need === 0 && !state.hyperlink && charsetsDefault && !cursorSaved;
+  // Both buffers: the serializer writes the normal buffer under the alternate one and restores neither's region.
+  const full = (region: Region | null) => region === null || (region.top === 1 && rows !== undefined && region.bottom >= rows);
+  const fullScreen = full(state.regions.normal) && full(state.regions.alternate);
+  return state.parser === GROUND && state.utf8Need === 0 && !state.hyperlink && charsetsDefault && !cursorSaved && fullScreen;
+}
+
+// What a resize does to the tracked state: xterm puts both buffers' scroll regions back to the full screen.
+export function resizedStream(state: StreamState): StreamState {
+  return state.regions === FULL_SCREEN ? state : { ...state, regions: FULL_SCREEN };
 }
 
 const encoder = new TextEncoder();
@@ -117,6 +145,8 @@ export function trackStream(state: StreamState, chunk: Uint8Array | string): Str
   let hyperlink = state.hyperlink;
   let charsets = state.charsets;
   let modes = state.modes;
+  let alternate = state.alternate;
+  let regions = state.regions;
 
   const setModes = (next: Partial<TrackedModes>) => {
     modes = { ...modes, ...next };
@@ -133,6 +163,14 @@ export function trackStream(state: StreamState, chunk: Uint8Array | string): Str
   };
   const restoreCursor = () => {
     charsets = { ...charsets, active: charsets.saved, saved: 'B', cursorSaved: false };
+  };
+  const setRegion = (region: Region | null) => {
+    regions = alternate ? { ...regions, alternate: region } : { ...regions, normal: region };
+  };
+  const setAlternate = (on: boolean) => {
+    if (on === alternate) return;
+    alternate = on;
+    if (!on) regions = { ...regions, alternate: null }; // xterm clears the alternate buffer when it is left
   };
   const execute = (c: number) => {
     if (c === 0x0e) shift(1); // SO
@@ -151,6 +189,7 @@ export function trackStream(state: StreamState, chunk: Uint8Array | string): Str
         else if (mode === 1048 && set) saveCursor(true);
         else if (mode === 1049 && set) saveCursor(false);
         else if (mode === 1048 || mode === 1049) restoreCursor();
+        if (mode === 47 || mode === 1047 || mode === 1049) setAlternate(set);
       }
     } else if (final === 0x70 && collected === '!') {
       // DECSTR: xterm resets the DEC private modes, the pen (so any open hyperlink), the charsets and the saved cursor,
@@ -158,6 +197,14 @@ export function trackStream(state: StreamState, chunk: Uint8Array | string): Str
       setModes({ focusReporting: false, cursorHidden: false });
       hyperlink = false;
       charsets = DEFAULT_CHARSETS;
+      setRegion(null); // xterm resets the active buffer's region
+    } else if (final === 0x72 && collected === '') {
+      // DECSTBM, as xterm's setScrollRegion reads it: top defaults to 1, a missing or zero bottom is the last row, and
+      // a bottom not below the top is ignored (a bottom past the screen clamps to it, which `atBoundary` decides).
+      const [t, b] = params.split(';').map((p) => Number.parseInt(p.split(':')[0] || '0', 10));
+      const top = t || 1;
+      const bottom = b || 0;
+      if (bottom === 0 || bottom > top) setRegion(top === 1 && bottom === 0 ? null : { top, bottom });
     } else if (collected === '' && (final === 0x73 || final === 0x75)) {
       if (final === 0x73) saveCursor(true); // SCOSC `CSI s`
       else restoreCursor(); // SCORC `CSI u`
@@ -172,6 +219,8 @@ export function trackStream(state: StreamState, chunk: Uint8Array | string): Str
         modes = DEFAULT_MODES;
         hyperlink = false;
         charsets = DEFAULT_CHARSETS;
+        alternate = false;
+        regions = FULL_SCREEN;
       } else if (ch === '7') saveCursor(true);
       else if (ch === '8') restoreCursor();
       else if (ch === 'n' || ch === '}') shift(2); // LS2, LS2R
@@ -353,7 +402,7 @@ export function trackStream(state: StreamState, chunk: Uint8Array | string): Str
     // anything else (a stray continuation byte, 0xF8 and up) is skipped, as xterm skips it
   }
 
-  return { parser, utf8Need: need, utf8Size: size, utf8Value: value, collected, params, osc, hyperlink, charsets, modes };
+  return { parser, utf8Need: need, utf8Size: size, utf8Value: value, collected, params, osc, hyperlink, charsets, modes, alternate, regions };
 }
 
 // The tracked modes as explicit sequences, written after `serialize()` so a restored terminal holds exactly these

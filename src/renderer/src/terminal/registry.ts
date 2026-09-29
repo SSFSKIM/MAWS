@@ -23,7 +23,7 @@ import {
 } from './constants';
 import { terminalKeyFilter } from './keys';
 import { createRenderer, type Acceleration, type RendererOptions, type TerminalFont, type TerminalRenderer, type TerminalTheme } from './renderer';
-import { alignReplay, atBoundary, checkpointState, INITIAL_STREAM, trackStream, type StreamState } from './replay';
+import { alignReplay, atBoundary, checkpointState, INITIAL_STREAM, resizedStream, trackStream, type StreamState } from './replay';
 import { readDocumentFont, readDocumentTheme } from './theme';
 
 export type TerminalId = string & z.$brand<'TerminalId'>; // renderer-assigned; survives "New terminal" (a new pty under the same tab)
@@ -412,6 +412,7 @@ export class TerminalRegistry {
     if (!entry.size || entry.size.cols !== dims.cols || entry.size.rows !== dims.rows) {
       entry.size = dims;
       entry.renderer!.resize(dims.cols, dims.rows);
+      entry.tracker = resizedStream(entry.tracker); // the emulator's resize resets its scroll regions
       const { ptyId, status } = entry.info;
       if (ptyId && status === 'running') void this.deps.ipc.invoke('pty.resize', { ptyId, ...dims });
     }
@@ -617,6 +618,11 @@ export class TerminalRegistry {
     return this.checkpoints && entry.bound && !!ptyId && !!entry.renderer && (status === 'running' || status === 'exited');
   }
 
+  // A point the serializer can restore exactly; the terminal's height lets a region spelled out as the full screen count.
+  private atBoundary(entry: Entry): boolean {
+    return atBoundary(entry.tracker, entry.size?.rows);
+  }
+
   // Quiescence: 500 ms after the last parsed byte; if the stream is mid-sequence then, the first chunk after that
   // which ends on a boundary.
   private scheduleCheckpoint(entry: Entry): void {
@@ -625,17 +631,17 @@ export class TerminalRegistry {
     entry.quietTimer = setTimeout(() => {
       entry.quietTimer = null;
       if (entry.parsed <= entry.checkpointOffset) return;
-      if (atBoundary(entry.tracker)) this.takeCheckpoint(entry);
+      if (this.atBoundary(entry)) this.takeCheckpoint(entry);
       else entry.checkpointDue = true;
     }, CHECKPOINT_QUIESCENCE_MS);
-    if (entry.checkpointDue && atBoundary(entry.tracker)) this.takeCheckpoint(entry);
+    if (entry.checkpointDue && this.atBoundary(entry)) this.takeCheckpoint(entry);
   }
 
   // `pagehide` (a reload or a closing window) cannot wait: every live handle at a boundary is checkpointed now, the
   // rest keep the checkpoint the host already has. A handle whose last checkpoint is still current is skipped.
   private checkpointAll(): void {
     for (const entry of this.entries.values()) {
-      if (!this.canCheckpoint(entry) || !atBoundary(entry.tracker)) continue;
+      if (!this.canCheckpoint(entry) || !this.atBoundary(entry)) continue;
       const size = entry.size ? `${entry.size.cols}x${entry.size.rows}` : '';
       if (entry.parsed === entry.checkpointOffset && size === entry.checkpointSize) continue;
       this.takeCheckpoint(entry);

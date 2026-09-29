@@ -254,6 +254,26 @@ describe('terminal registry acks, dedupes and throttles', () => {
     expect(ipc.inputs('pty.checkpoint')).toEqual([{ ptyId, offset: 16, state: `SERIALIZED\x1b[?1000l\x1b[?1006h\x1b[?1004l\x1b[?25h` }]);
   });
 
+  it('takes no checkpoint while a scroll region narrower than the screen is set, and resumes once the region is full again or a resize clears it', async () => {
+    const registry = makeRegistry();
+    const { ptyId, renderer } = await openRunning(registry); // 80 × 24
+    ipc.data(ptyId, 0, bytes('\x1b[2;5r'));
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(ipc.inputs('pty.checkpoint')).toEqual([]);
+    ipc.data(ptyId, 6, bytes('\x1b[1;24r')); // the full screen, spelled out for these 24 rows
+    await vi.advanceTimersByTimeAsync(500);
+    expect(ipc.inputs('pty.checkpoint').map((c) => c.offset)).toEqual([13]);
+    ipc.data(ptyId, 13, bytes('\x1b[3;9r'));
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(ipc.inputs('pty.checkpoint')).toHaveLength(1);
+    renderer.fitSize = { cols: 100, rows: 30 }; // a resize puts xterm's region back to the full screen
+    FakeResizeObserver.trigger();
+    await vi.advanceTimersByTimeAsync(50);
+    ipc.data(ptyId, 19, bytes('x'));
+    await vi.advanceTimersByTimeAsync(500);
+    expect(ipc.inputs('pty.checkpoint').map((c) => c.offset)).toEqual([13, 20]);
+  });
+
   it('checkpoints every live handle at pagehide at once, and setCheckpoints(false) stops both paths', async () => {
     const registry = makeRegistry();
     const first = await openRunning(registry, 't1');

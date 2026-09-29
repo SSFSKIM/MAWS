@@ -5,7 +5,7 @@
 import { SerializeAddon } from '@xterm/addon-serialize';
 import { Terminal } from '@xterm/headless';
 import { describe, expect, it } from 'vitest';
-import { alignReplay, atBoundary, checkpointState, explicitModes, INITIAL_STREAM, trackStream, type StreamState } from './replay';
+import { alignReplay, atBoundary, checkpointState, explicitModes, INITIAL_STREAM, resizedStream, trackStream, type StreamState } from './replay';
 
 const utf8 = (text: string) => new TextEncoder().encode(text);
 const concat = (chunks: Uint8Array[]) => {
@@ -55,7 +55,7 @@ async function checkpointedRun(chunks: Uint8Array[]) {
     await source.write(chunk);
     tracker = trackStream(tracker, chunk);
     offset += chunk.byteLength;
-    if (atBoundary(tracker)) checkpoints.push({ offset, state: checkpointState(source.serializer.serialize(), tracker) });
+    if (atBoundary(tracker, 8)) checkpoints.push({ offset, state: checkpointState(source.serializer.serialize(), tracker) });
   }
   return { source, checkpoints, stream: concat(chunks) };
 }
@@ -145,6 +145,30 @@ describe('terminal stream tracker', () => {
     expect(trackStream(everything, '\x1b[!p').modes).toEqual({ mouseProtocol: 1002, mouseEncoding: 1006, focusReporting: false, cursorHidden: false });
     // Not a DECSET: no private marker, or an intermediate.
     expect(trackStream(INITIAL_STREAM, '\x1b[1000h\x1b[?1000$p').modes.mouseProtocol).toBe(0);
+  });
+
+  it('is not at a boundary while a scroll region other than the full screen is in force', () => {
+    const at = (text: string, rows?: number) => atBoundary(trackStream(INITIAL_STREAM, text), rows);
+    expect(at('\x1b[2;5r')).toBe(false);
+    expect(at('\x1b[2;5r\x1b[r')).toBe(true); // DECSTBM with no parameters: the full screen
+    expect(at('\x1b[2;5r\x1b[;r')).toBe(true);
+    expect(at('\x1b[2;5r\x1b[1r')).toBe(true);
+    expect(at('\x1b[5r')).toBe(false); // top only: rows 5 to the bottom
+    expect(at('\x1b[1;24r', 24)).toBe(true); // the full screen spelled out
+    expect(at('\x1b[1;30r', 24)).toBe(true); // xterm clamps a bottom past the screen to it
+    expect(at('\x1b[1;24r', 30)).toBe(false);
+    expect(at('\x1b[1;24r')).toBe(false); // without the size a spelled-out region is not known to be full
+    expect(at('\x1b[5;3r')).toBe(true); // bottom above top: xterm ignores it
+    expect(at('\x1b[2;5r\x1b[!p')).toBe(true); // DECSTR
+    expect(at('\x1b[2;5r\x1bc')).toBe(true); // RIS
+    // Per buffer, as xterm keeps it: the alternate screen's region is cleared when the program leaves it, and the
+    // normal buffer's outlives a visit to the alternate screen.
+    expect(at('\x1b[?1049h\x1b[2;5r')).toBe(false);
+    expect(at('\x1b[?1049h\x1b[2;5r\x1b[?1049l')).toBe(true);
+    expect(at('\x1b[2;5r\x1b[?1049h\x1b[r')).toBe(false);
+    expect(at('\x1b[2;5r\x1b[?1049h\x1b[?1049l')).toBe(false);
+    // A resize puts xterm's regions back to the full screen.
+    expect(atBoundary(resizedStream(trackStream(INITIAL_STREAM, '\x1b[2;5r\x1b[?1049h\x1b[3;4r')))).toBe(true);
   });
 
   it('never mutates the state it is given', () => {
@@ -253,6 +277,25 @@ describe('terminal checkpoint restores modes and the alternate screen', () => {
     const broken = await restore({ offset: 15, state: naive.serializer.serialize() }, stream);
     // Both saved parts are lost: the position (DECRC lands at the origin, over `start`) and the charset (ASCII).
     expect([broken.line(0), broken.line(1)]).toEqual(['lqkrt', '']);
+  });
+
+  it('takes no checkpoint while a scroll region is set, which the serializer does not carry, and restores exactly after CSI r', async () => {
+    const chunks = [utf8('top\r\n'), utf8('\x1b[2;4r'), utf8('\x1b[4;1Hx\n'), utf8('\ny\n'), utf8('\x1b[r'), utf8('\x1b[8;1Hz\nw\n')];
+    const { source, checkpoints, stream } = await checkpointedRun(chunks);
+    const after = (n: number) => concat(chunks.slice(0, n)).byteLength;
+    expect(checkpoints.map((c) => c.offset)).toEqual([after(1), after(5), after(6)]);
+    const screen = (t: ReturnType<typeof emulator>) => Array.from({ length: 8 }, (_, row) => t.screenLine(row));
+    for (const checkpoint of checkpoints) {
+      const target = await restore(checkpoint, stream);
+      expect(screen(target)).toEqual(screen(source));
+      expect(target.serializer.serialize()).toBe(source.serializer.serialize());
+    }
+    // The counterfactual: a checkpoint while the region is set loses it, so the replay's line feeds scroll the whole
+    // screen instead of rows 2 to 4.
+    const naive = emulator();
+    await naive.write(stream.subarray(0, after(2)));
+    const broken = await restore({ offset: after(2), state: naive.serializer.serialize() }, stream);
+    expect(screen(broken)).not.toEqual(screen(source));
   });
 
   it('keeps SGR mouse encoding, focus reporting and a hidden cursor, which the serializer alone drops', async () => {
