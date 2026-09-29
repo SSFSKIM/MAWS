@@ -5,16 +5,17 @@
 // recorded; the SPEC-derived synthetic requests (test/fixtures/requests) replay behind the handshake prelude
 // (test/fixtures/engine/replay-handshake.jsonl), each followed by the response the card must write. One case runs the
 // real shell on C5's stub scenario: the Overview card reached from the Needs-you row answers with Enter on its article.
-// The real composer's case is M4's gate (skipped until MAWS_C7_M4). The card page needs a harness build: `pnpm
-// e2e:requests` builds one and runs this file; under a plain `pnpm build && pnpm e2e` the card-page cases skip and the
-// shell case runs.
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+// The real composer's case (M4's gate) runs in the shell too. The card page needs a harness build: `pnpm e2e:requests`
+// builds one and runs this file; under a plain `pnpm build && pnpm e2e` the card-page cases skip and the two shell
+// cases run.
+import { randomUUID } from 'node:crypto';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test as base, type Page } from '@playwright/test';
 import type { SessionEvent } from '@shared/graph/events';
 import type { CardsHarnessApi, HarnessPane } from '../src/renderer/src/harness/composer/api';
-import { invoke, launchReady, value } from './support/c7-replay';
+import { invoke, launchReady, queueInterruptJournal, value } from './support/c7-replay';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 
 const HARNESS_BUILT = existsSync(join(REPO_ROOT, 'out/renderer/harness.html'));
@@ -305,6 +306,103 @@ test('the Overview card reached from the Needs-you row answers with Enter on its
   }
 });
 
+// The real composer's gate (C7 execution document, M4, moved from M2): the shell itself, not the card page, over C3's
+// replay and outside C5's stub scenario (which answers `session.answer` itself). The two sessions are discovered as
+// records from scratch transcripts under the launch's own CLAUDE_CONFIG_DIR (M3's route; main is unchanged), and each
+// replay launches under its record's app id, so C4 applies C3's status to the record and the pane shows the composer.
+// The left pane holds the permission session, the right one a session counting through a slow turn; the split opens
+// after the first composer mounted, so registration order runs against focus.
 test('the real composer gives way to the card and returns with focus in the editor', async () => {
-  test.skip(!process.env.MAWS_C7_M4, 'M4 gate: the docked swap in the real composer');
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-c7-gate-')));
+  const repo = join(root, 'repo');
+  const config = join(root, 'claude-config');
+  mkdirSync(repo);
+  const project = join(config, 'projects', repo.replace(/[^a-zA-Z0-9]/g, '-'));
+  mkdirSync(project, { recursive: true });
+  const titles = ['gate permission session', 'gate counting session'];
+  const engineIds = titles.map((title) => {
+    const sessionId = randomUUID();
+    const row = { parentUuid: null, isSidechain: false, type: 'user', message: { role: 'user', content: title }, uuid: randomUUID(), timestamp: '2026-09-29T10:00:00.000Z', cwd: repo, sessionId, version: '2.1.283' };
+    writeFileSync(join(project, `${sessionId}.jsonl`), `${JSON.stringify(row)}\n`);
+    return sessionId;
+  });
+  const shell = await launchMaws({ env: { MAWS_HARNESS: '0', MAWS_ENGINE_REPLAY: '1', CLAUDE_CONFIG_DIR: config } });
+  try {
+    const { app, page } = shell;
+    await page.evaluate(() => {
+      const log = { batches: [] as unknown[] };
+      (window as unknown as { __c7: typeof log }).__c7 = log;
+      window.maws.on('session.eventBatch', (payload) => log.batches.push(payload));
+    });
+    let ids: string[] = [];
+    await expect
+      .poll(async () => {
+        const { sessions } = value(await invoke(page, 'session.list', {}));
+        ids = engineIds.map((engineId) => sessions.find((s) => s.engineSessionId === engineId)?.appId ?? '');
+        return ids.every((id) => id !== '');
+      })
+      .toBe(true);
+    const [permissionId, countingId] = ids;
+    await launchReady(page, permissionId, PERMISSION, { cwd: repo });
+    await launchReady(page, countingId, queueInterruptJournal(root, 'gate'), { cwd: repo });
+
+    // A launched replay reports the fixture's engine session id, so the record keeps its app id but no longer its
+    // title (C4 files the transcript under a record of its own again): the rows are found by app id.
+    const row = (id: string) => page.locator(`[role="treeitem"][data-menu="session:${id}"]`);
+    const main = page.locator('[data-region="main"]');
+    const left = main.locator('[data-pane="0"]');
+    const right = main.locator('[data-pane="1"]');
+    const message = (paneLocator: typeof left) => paneLocator.getByRole('textbox', { name: 'Message' });
+    await row(permissionId).click();
+    await expect(message(left)).toBeVisible();
+    await row(countingId).click();
+    await app.evaluate(({ Menu }) => Menu.getApplicationMenu()?.getMenuItemById('pane.split')?.click());
+    await expect(right.locator(`[data-composer="${countingId}"]`)).toBeVisible();
+    await row(permissionId).click();
+    await expect(left.locator(`[data-composer="${permissionId}"]`)).toBeVisible();
+
+    // the right pane's session is busy with a slow turn
+    await message(right).click();
+    await page.keyboard.type('Count to 30 slowly. For each number use a separate Bash call sleep 1; echo NUMBER. Start now.');
+    await page.keyboard.press('Enter');
+    await expect.poll(async () => value(await invoke(page, 'session.status', { appSessionId: countingId })).turn).not.toBeNull();
+
+    // the left one sends the fixture's prompt from its composer, and the editor gives way to the permission card
+    await message(left).click();
+    await page.keyboard.type(firstPrompt(PERMISSION));
+    await page.keyboard.press('Enter');
+    const frame = left.getByRole('group', { name: 'Approval needed' });
+    await expect(frame).toBeVisible();
+    await expect(frame.getByTestId('request-input')).toHaveText('git log --oneline');
+    expect(await frame.getByRole('radio').evaluateAll((els) => els.map((el) => el.getAttribute('aria-label')))).toEqual(['Allow once']);
+    await expect(message(left)).toBeHidden();
+    await expect(frame).toBeFocused(); // the pane held focus
+
+    // Enter and ⌘. in the other pane's editor are that pane's: the card is not answered, the counting turn stops
+    await message(right).click();
+    await page.keyboard.press('Enter');
+    await page.keyboard.type('typing when I stop');
+    await page.keyboard.press('Meta+.');
+    await expect.poll(async () => value(await invoke(page, 'session.status', { appSessionId: countingId })).turn).toBeNull();
+    expect(await resolved(page, permissionId, 'permission.resolved')).toEqual([]);
+    expect(value(await invoke(page, 'session.status', { appSessionId: permissionId })).process, 'no interrupt reached the permission session').toBe('ready');
+
+    // Enter with focus in the card answers it; the composer returns with focus in the editor
+    await frame.focus();
+    await page.keyboard.press('Enter');
+    await expect.poll(async () => (await resolved(page, permissionId, 'permission.resolved')).map((e) => [e.behavior, e.updatedPermissions])).toEqual([['allow', []]]); // seq 50
+    await expect(message(left)).toBeVisible();
+    await expect(message(left)).toBeFocused();
+    await expect(frame).toHaveCount(0);
+
+    // ⌘. from this editor now resolves this pane's session: idle, so nothing is written (an unrecorded interrupt would end its replay)
+    await expect.poll(async () => value(await invoke(page, 'session.status', { appSessionId: permissionId })).turn).toBeNull();
+    await page.keyboard.press('Meta+.');
+    await page.waitForTimeout(300);
+    expect(value(await invoke(page, 'session.status', { appSessionId: permissionId })).process).toBe('ready');
+    expect(shell.consoleErrors()).toEqual([]);
+  } finally {
+    await shell.cleanup();
+    rmSync(root, { recursive: true, force: true });
+  }
 });
