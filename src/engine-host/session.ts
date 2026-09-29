@@ -449,7 +449,9 @@ export class EngineSession {
       this.initializeFailed(new Error(`the session's queue could not be recovered: ${messageOf(error)}`));
       return;
     }
-    if (this.processState === 'initializing') this.setProcess('ready');
+    if (this.processState !== 'initializing') return;
+    this.setProcess('ready');
+    void this.sampleContext(); // `ctx` from the start, a resume's whole context included, not only after the first turn
   }
 
   // The grant snapshot (unless the caller passed one) and the launch spec, from and to the SessionStateStore.
@@ -673,7 +675,7 @@ export class EngineSession {
     this.touch();
   }
 
-  // The status line's `ctx` after every turn (debt wave 3): the engine's context read, whose answer the normaliser turns
+  // The status line's `ctx` once ready and after every turn (debt wave 3): the engine's context read, whose answer the normaliser turns
   // into `context.sample` from its journal row; a failed read samples nothing and the last sample stands.
   private async sampleContext(): Promise<void> {
     const client = this.client;
