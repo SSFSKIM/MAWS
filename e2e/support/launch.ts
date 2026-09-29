@@ -19,7 +19,14 @@ export interface MawsLaunch {
   cleanup(): Promise<void>; // closes the app if it is still open and removes the profile; throws if the app would not close
 }
 
-export async function launchMaws(): Promise<MawsLaunch> {
+// carried by C9 until the rebase over C3 (wave-2 ledger): extra environment variables for the app (C9's terminal
+// end-to-end passes MAWS_HARNESS=1), applied over the inherited environment and under MAWS_E2E and MAWS_USER_DATA
+export interface LaunchOptions {
+  env?: Record<string, string>;
+}
+// carried by C9 until the rebase over C3 (wave-2 ledger)
+
+export async function launchMaws(options: LaunchOptions = {}): Promise<MawsLaunch> {
   const executable = process.env.MAWS_E2E_EXECUTABLE ? resolve(REPO_ROOT, process.env.MAWS_E2E_EXECUTABLE) : null;
   if (executable && !existsSync(executable)) throw new Error(`MAWS_E2E_EXECUTABLE does not exist: ${executable} (run pnpm build:app)`);
   const main = join(REPO_ROOT, 'out/main/index.js');
@@ -31,6 +38,7 @@ export async function launchMaws(): Promise<MawsLaunch> {
   // A shell inherited from `electron-vite dev` or an editor must not turn the app into a dev-server client or a Node.
   delete env.ELECTRON_RENDERER_URL;
   delete env.ELECTRON_RUN_AS_NODE;
+  Object.assign(env, options.env); // carried by C9 until the rebase over C3 (wave-2 ledger)
   env.MAWS_E2E = '1';
   env.MAWS_USER_DATA = userData;
 
@@ -60,10 +68,11 @@ export async function launchMaws(): Promise<MawsLaunch> {
 }
 
 // One launch per test, closed and removed at teardown; a teardown failure is reported beside the test's own result.
-export const test = base.extend<{ maws: MawsLaunch }>({
-  // eslint-disable-next-line no-empty-pattern -- Playwright requires the fixtures argument to be destructured
-  maws: async ({}, use) => {
-    const maws = await launchMaws();
+// carried by C9 until the rebase over C3 (wave-2 ledger): `mawsEnv` is an option a spec sets with `test.use`
+export const test = base.extend<{ mawsEnv: Record<string, string>; maws: MawsLaunch }>({
+  mawsEnv: [{}, { option: true }],
+  maws: async ({ mawsEnv }, use) => {
+    const maws = await launchMaws({ env: mawsEnv });
     try {
       await use(maws);
     } finally {
