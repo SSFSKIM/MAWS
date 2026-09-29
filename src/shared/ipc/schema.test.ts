@@ -10,6 +10,12 @@ import * as pty from './schema/pty';
 import * as session from './schema/session';
 import * as settings from './schema/settings';
 import { isCommandName, isEventName, validateCommandInput, validateCommandOutput, validateEventPayload } from './validate';
+// C3 start
+import { C3_ATTENTION_COMMANDS, C3_ATTENTION_EVENTS } from './schema/attention';
+import { C3_ENGINE_COMMANDS, C3_ENGINE_EVENTS } from './schema/engine';
+import { C3_SESSION_COMMANDS, C3_SESSION_EVENTS } from './schema/session';
+import { OPERATION_COMMANDS } from '../engine/operations';
+// C3 end
 
 // One entry per namespace, checked against NAMESPACES at compile time and at run time.
 const modules = { session, engine, fs, git, pty, layout, attention, settings } satisfies Record<
@@ -38,7 +44,8 @@ describe('ipc schema validates both directions', () => {
 
     it('carries the C1 entries of Interfaces with their owners', () => {
       const owners = Object.fromEntries(Object.entries(commands).map(([name, spec]) => [name, spec.owner]));
-      expect(owners).toEqual({
+      // C3: later children add entries, so C1's are pinned as a subset (they were the whole registry in C1)
+      expect(owners).toMatchObject({
         'settings.get': 'main',
         'settings.set': 'main',
         'engine.ping': 'engine-host',
@@ -50,9 +57,9 @@ describe('ipc schema validates both directions', () => {
         'pty.resize': 'pty-host',
         'pty.kill': 'pty-host',
       });
-      expect(Object.keys(events).sort()).toEqual(
-        ['engine.hostState', 'pty.data', 'pty.exit', 'pty.hostState', 'settings.changed'].sort(),
-      );
+      expect(Object.keys(events)).toEqual(
+        expect.arrayContaining(['engine.hostState', 'pty.data', 'pty.exit', 'pty.hostState', 'settings.changed']),
+      ); // C3: a subset, as above
     });
 
     it('names channels by kind so a command and an event of the same name never share one', () => {
@@ -159,4 +166,99 @@ describe('ipc schema validates both directions', () => {
       expect(validateEventPayload('pty.data', { ptyId: 'p1', data: 'x', extra: true }).ok).toBe(false);
     });
   });
+
+  // C3 start: the engine host's surface (C3 execution document, Interfaces "X2 — commands and events")
+  describe('C3 entries', () => {
+    const c3Commands = [...C3_SESSION_COMMANDS, ...C3_ENGINE_COMMANDS, ...C3_ATTENTION_COMMANDS];
+    const status = {
+      appSessionId: 'app-1', engineSessionId: null, pid: null, launchId: 'abcdefgh', launchedAt: '2026-09-28T10:00:00.000Z', taskListId: null, cwd: '/w', pendingPlan: null,
+      process: 'starting', exit: null, engineState: 'unknown', activity: null, turn: null, model: { requested: null, resolved: null }, effort: null,
+      permissionMode: { requested: 'default', effective: 'default', refusal: null }, prePlanMode: null,
+      gateway: { mode: 'gateway', baseUrl: null, verified: 'pending', autoModeServer: 'unknown', localLane: null },
+      subagentModel: null, modelOverrides: {}, engineVersion: null, fileCheckpointing: true, fastMode: { state: null, disabledReason: null },
+      plugins: [], pluginErrors: [], pluginWarnings: [], backgroundTasks: [], grants: [], mcpServers: [], heldPeerMessages: [], pendingRequests: 0,
+      queue: { length: 0, paused: false }, keepAlive: [], memory: { rssKiB: null, treeRssKiB: null, sampledAt: null }, journalPath: '/j', hostHooks: [], lastEventSeq: 0,
+    };
+
+    it('registers every command and event of the X2 tables, owner engine-host but attention.* (owner main, ruling 1)', () => {
+      for (const name of c3Commands) expect(Object.hasOwn(commands, name), name).toBe(true);
+      for (const name of [...C3_SESSION_EVENTS, ...C3_ENGINE_EVENTS, ...C3_ATTENTION_EVENTS]) expect(Object.hasOwn(events, name), name).toBe(true);
+      for (const name of c3Commands) expect(commands[name].owner, name).toBe(name.startsWith('attention.') ? 'main' : 'engine-host');
+      expect(C3_SESSION_EVENTS).toEqual(['session.eventBatch', 'session.status', 'session.queue', 'session.brokerItems', 'session.operation', 'session.forgotten']);
+      expect(C3_ATTENTION_COMMANDS).toEqual(['attention.list', 'attention.request']);
+      expect(C3_ATTENTION_EVENTS).toEqual(['attention.changed']);
+      expect(C3_ENGINE_COMMANDS).toEqual(['engine.binaryInfo', 'engine.relayHealth', 'engine.sessions', 'engine.shutdown']);
+      for (const name of OPERATION_COMMANDS) expect(C3_SESSION_COMMANDS).toContain(name);
+    });
+
+    it('every session.* command input names the session appSessionId (session.launch through its spec)', () => {
+      for (const name of C3_SESSION_COMMANDS) {
+        const shape = (commands[name].input as unknown as { shape: Record<string, unknown> }).shape;
+        if (name === 'session.launch') expect(Object.keys((shape.spec as { shape: object }).shape), name).toContain('appSessionId');
+        else expect(Object.keys(shape), name).toContain('appSessionId');
+      }
+    });
+
+    it("accepts C5's deny answer verbatim and refuses an allow without a scope", () => {
+      const deny = { appSessionId: 'app-1', requestId: 'req-1', answer: { kind: 'permission', decision: 'deny' } };
+      expect(validateCommandInput('session.answer', deny)).toEqual({ ok: true, value: deny });
+      expect(validateCommandInput('session.answer', { ...deny, answer: { kind: 'permission', decision: 'allow' } }).ok).toBe(false);
+      expect(validateCommandOutput('session.answer', { outcome: 'not_pending' }).ok).toBe(true);
+    });
+
+    it("session.steer takes an optional priority, now or next (coordinator ruling after M6 live 3.7)", () => {
+      const steer = { appSessionId: 'app-1', content: 'Reply NEXT_OK' };
+      expect(validateCommandInput('session.steer', steer)).toEqual({ ok: true, value: steer }); // absent: the host sends 'now'
+      for (const priority of ['now', 'next'] as const) expect(validateCommandInput('session.steer', { ...steer, priority })).toEqual({ ok: true, value: { ...steer, priority } });
+      expect(validateCommandInput('session.steer', { ...steer, priority: 'later' }).ok).toBe(false);
+    });
+
+    it('holds inputs strictly and never transforms', () => {
+      const send = { appSessionId: 'app-1', content: 'hello' };
+      expect(validateCommandInput('session.send', send)).toEqual({ ok: true, value: send });
+      expect(validateCommandInput('session.send', { ...send, priority: 'now' }).ok).toBe(false);
+      expect(validateCommandInput('session.send', { appSessionId: 'app-1', content: 'x'.repeat(1024 * 1024 + 1) }).ok).toBe(false);
+      expect(validateCommandInput('session.events', { appSessionId: 'app-1', afterSeq: null, limit: null }).ok).toBe(true);
+      expect(validateCommandInput('session.events', { appSessionId: 'app-1', afterSeq: 1.5, limit: null }).ok).toBe(false);
+      expect(validateCommandInput('session.getContextUsage', { appSessionId: 'app-1', detail: 'summary' }).ok).toBe(true);
+      expect(validateCommandInput('engine.shutdown', { graceMs: 5000 }).ok).toBe(true);
+      expect(validateCommandInput('engine.sessions', undefined).ok).toBe(true);
+      expect(validateCommandInput('session.stop', { appSessionId: 'app-1', reason: 'quit' }).ok).toBe(false);
+      // `#` text is capped at 64 KiB so its synchronous commit is bounded by construction (M5 re-review)
+      const note = (text: string) => validateCommandInput('session.memoryAppend', { appSessionId: 'app-1', text, target: { kind: 'project', path: null } });
+      expect(note('x'.repeat(65_536)).ok).toBe(true);
+      expect(note('x'.repeat(65_537))).toMatchObject({ ok: false, error: { code: 'invalid_input' } });
+    });
+
+    it('types the launch answer as launching, relay_unreachable or refused with the five reasons', () => {
+      expect(validateCommandOutput('session.launch', { status: 'launching', session: status }).ok).toBe(true);
+      const health = { url: 'http://127.0.0.1:8641', ok: false, status: null, latencyMs: null, checkedAt: '2026-09-28T10:00:00.000Z', error: 'ECONNREFUSED' };
+      expect(validateCommandOutput('session.launch', { status: 'relay_unreachable', health }).ok).toBe(true);
+      for (const reason of ['already_live', 'binary_missing', 'binary_version', 'replay_disabled', 'settings_conflict']) {
+        expect(validateCommandOutput('session.launch', { status: 'refused', reason, message: 'm' }).ok, reason).toBe(true);
+      }
+      expect(validateCommandOutput('session.launch', { status: 'refused', reason: 'busy', message: 'm' }).ok).toBe(false);
+    });
+
+    it('carries an operation receipt and its completion once, or once more late', () => {
+      expect(validateCommandOutput('session.generateTitle', { opId: 'abcdefgh-7' }).ok).toBe(true);
+      const done = { appSessionId: 'app-1', opId: 'abcdefgh-7', command: 'session.generateTitle', late: false, outcome: { ok: true, value: { title: 'Protocol probe' } } };
+      expect(validateEventPayload('session.operation', done)).toEqual({ ok: true, value: done });
+      const failed = { ...done, outcome: { ok: false, error: { code: 'timeout', message: 'generate_session_title unanswered after 120 s', engineCode: null } } };
+      expect(validateEventPayload('session.operation', failed).ok).toBe(true);
+      expect(validateEventPayload('session.operation', { ...done, command: 'session.getUsage' }).ok).toBe(false);
+      expect(validateEventPayload('session.operation', { ...done, command: 'session.mcpToggle', outcome: { ok: true, value: null } }).ok).toBe(true);
+    });
+
+    it('validates the event payloads the host emits and main relays', () => {
+      expect(validateEventPayload('session.status', { appSessionId: 'app-1', status }).ok).toBe(true);
+      expect(validateEventPayload('session.eventBatch', { appSessionId: 'app-1', events: [] }).ok).toBe(true);
+      expect(validateEventPayload('session.queue', { appSessionId: 'app-1', entries: [], paused: true }).ok).toBe(true);
+      expect(validateEventPayload('session.brokerItems', { appSessionId: 'app-1', items: [] }).ok).toBe(true);
+      expect(validateEventPayload('attention.changed', { appSessionId: 'app-1', items: [] }).ok).toBe(true);
+      expect(validateCommandOutput('attention.request', { event: null }).ok).toBe(true);
+      expect(validateCommandOutput('session.events', { events: [], lastSeq: 0, complete: true }).ok).toBe(true);
+    });
+  });
+  // C3 end
 });

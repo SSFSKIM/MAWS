@@ -16,7 +16,7 @@ import {
   type StreamEventFrame,
 } from './frames';
 
-const PASS_DIRS: Record<FixturePass, string> = { pass1: FIXTURE_DIR, pass2: join(FIXTURE_DIR, 'pass2') };
+const PASS_DIRS: Record<FixturePass, string> = { pass1: FIXTURE_DIR, pass2: join(FIXTURE_DIR, 'pass2'), pass3: join(FIXTURE_DIR, 'pass3') }; // C3: pass3 added with FixturePass
 
 function describeFailure(label: string, seq: number, error: unknown): string {
   const issues = error instanceof z.ZodError ? error.issues.map((i) => `${i.path.join('.') || '<root>'}: ${i.message}`) : [String(error)];

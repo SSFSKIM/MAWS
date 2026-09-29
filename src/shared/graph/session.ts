@@ -35,7 +35,11 @@ export const SessionRecordSchema = z.strictObject({
   lastSeen: z.strictObject({ messageUuid: MessageUuidSchema.nullable(), at: z.string().nullable() }),
   unread: z.boolean(),
   engineVersion: z.string().nullable(),
-  gateway: z.strictObject({ routed: z.boolean() }),
+  // C3 start: the auto-mode lanes in the session record (C3 execution document, "X1 extension"; additive, flagged to the
+  // coordinator): `baseUrl` from get_status's `Anthropic base URL` row, `autoModeServer` from its `Auto mode server` row.
+  // C4 fills `null` / `unknown` for sessions it discovers on disk.
+  gateway: z.strictObject({ routed: z.boolean(), baseUrl: z.string().nullable(), autoModeServer: z.enum(['enabled', 'disabled', 'unknown']) }),
+  // C3 end
   model: z.strictObject({ requested: z.string().nullable(), resolved: z.string().nullable() }),
   effort: z.string().nullable(),
   permissionMode: SessionPermissionModeSchema,

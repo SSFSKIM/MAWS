@@ -24,7 +24,11 @@ const fake = vi.hoisted(() => {
 
 vi.mock('electron', () => ({ app: fake.app, BrowserWindow: { getAllWindows: () => fake.windows } }));
 vi.mock('./hosts', () => ({ createHosts: () => fake.hosts }));
-vi.mock('./ipc/router', () => ({ installRouter: vi.fn() }));
+vi.mock('./ipc/router', () => ({ installRouter: vi.fn(), registerMainHandler: vi.fn() /* C3 */ }));
+// C3 start: main's attention service and its store, started from index.ts, are replaced like the other wired modules
+vi.mock('./attention/service', () => ({ startAttentionService: vi.fn() }));
+vi.mock('./attention/file-attention-store', () => ({ FileAttentionStore: vi.fn() }));
+// C3 end
 vi.mock('./settings', () => ({ startSettings: () => ({ state: () => ({ resolvedTheme: 'light' }) }) }));
 vi.mock('./window', () => ({ appUrl: 'file:///index.html', createWindow: fake.createWindow, installContentSecurityPolicy: vi.fn() }));
 
