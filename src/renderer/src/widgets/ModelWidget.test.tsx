@@ -119,6 +119,20 @@ describe('model widget groups gateway models, greys auto mode and warns on fast 
     expect(screen.queryByText('set · the next init frame confirms it')).toBeNull();
   });
 
+  // C11 M6, live: behind the relay the init frame after the opt-in answers `off` with a new reason (`preference`), not
+  // `on`; that answer ends the pending line and its reason shows.
+  it('an init frame that keeps fast mode off with a new reason ends the pending line and shows the reason', async () => {
+    setStatus({ model: { requested: 'opus', resolved: 'claude-opus-5-5[1m]' } });
+    mount('fast');
+    fireEvent.click(await screen.findByRole('switch', { name: 'Fast mode' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Turn on fast mode' }));
+    await waitFor(() => expect(screen.getByText('set · the next init frame confirms it')).toBeTruthy());
+    setStatus({ fastMode: { state: 'off', disabledReason: 'preference' } });
+    await waitFor(() => expect(screen.getByText('Fast mode has been disabled by your organization')).toBeTruthy());
+    expect(screen.queryByText('set · the next init frame confirms it')).toBeNull();
+    expect(screen.getByRole('switch', { name: 'Fast mode' }).getAttribute('aria-checked')).toBe('false');
+  });
+
   it('the fast switch is off on a model without fast mode, and says so', () => {
     expect(fastView({ state: 'off', disabledReason: null }, CATALOGUE.find((m) => m.value === 'sonnet'))).toEqual({ checked: false, caption: null, disabled: 'Fast mode is for Opus' });
     expect(fastView({ state: 'cooldown', disabledReason: null }, CATALOGUE.find((m) => m.value === 'opus'))).toEqual({ checked: true, caption: 'on · cooling down', disabled: null });

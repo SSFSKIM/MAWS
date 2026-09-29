@@ -119,11 +119,14 @@ const settled = <T>(held: ReadonlyMap<AppSessionId, Requested<T>>, fact: (status
 useSessions.subscribe(({ engine }) => {
   const { model, fast } = useModelRequests.getState();
   if (model.size === 0 && fast.size === 0) return;
-  const next = { model: settled(model, (s) => s.model.requested, engine), fast: settled(fast, (s) => s.fastMode.state, engine) };
+  const next = { model: settled(model, (s) => s.model.requested, engine), fast: settled(fast, fastFact, engine) };
   if (next.model !== model || next.fast !== fast) useModelRequests.setState(next);
 });
 
 const statusOf = (id: AppSessionId): EngineSessionStatus | null => useSessions.getState().engine.get(id) ?? null;
+// Fast mode's status fact is its state and its reason: behind the relay the init frame after the opt-in keeps `off` and
+// moves the reason (`sdk_opt_in_required` to `preference`, live 2026-09-29), and that is the engine's answer too.
+const fastFact = (status: EngineSessionStatus): string => `${status.fastMode.state}:${status.fastMode.disabledReason ?? ''}`;
 
 export type ControlAnswer = { ok: true } | { ok: false; error: string; caption: string | null };
 
@@ -146,10 +149,12 @@ export async function setEffort(input: { appSessionId: AppSessionId; effort: Eff
 
 // `session.applyFlagSettings` with the settings verbatim; a `fastMode` key is remembered until the init frame reports it.
 export async function applyFlagSettings(input: { appSessionId: AppSessionId; settings: Record<string, unknown> }): Promise<ControlAnswer> {
-  const basis = statusOf(input.appSessionId)?.fastMode.state ?? null;
+  const before = statusOf(input.appSessionId);
+  const basis = before ? fastFact(before) : null;
   const result = await ipc.invoke('session.applyFlagSettings', input);
   if (!result.ok) return { ok: false, error: transportWords(result.error), caption: null };
-  if ('fastMode' in input.settings && (statusOf(input.appSessionId)?.fastMode.state ?? null) === basis) rememberFast(input.appSessionId, { value: (input.settings.fastMode as boolean | null) ?? null, basis });
+  const after = statusOf(input.appSessionId);
+  if ('fastMode' in input.settings && (after ? fastFact(after) : null) === basis) rememberFast(input.appSessionId, { value: (input.settings.fastMode as boolean | null) ?? null, basis });
   return { ok: true };
 }
 
@@ -162,7 +167,7 @@ export const acceptedModel = (requests: ModelRequests, id: AppSessionId, status:
 // Whether fast mode was asked to change and the init frame has not reported the change.
 export const fastPending = (requests: ModelRequests, id: AppSessionId, status: EngineSessionStatus): boolean => {
   const held = requests.fast.get(id);
-  if (!held || held.basis !== status.fastMode.state) return false;
+  if (!held || held.basis !== fastFact(status)) return false;
   const on = status.fastMode.state === 'on' || status.fastMode.state === 'cooldown';
   return held.value === true ? !on : on;
 };
