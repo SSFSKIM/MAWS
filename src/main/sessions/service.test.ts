@@ -338,8 +338,10 @@ describe('session service', () => {
       await h.service.startSession(record.appId, { message: null, options: { trust: 'declined' } });
       expect(await h.settled(record.appId)).toMatchObject({ phase: 'ready', outcome: { firstTurn: 'none' } });
       expect(h.host.calledWith('session.send')).toEqual([]);
-      // an id with neither an intent nor a retained message
-      await expect(h.service.release(record.appId)).rejects.toMatchObject({ reason: 'unknown_intent' });
+      // a record's id holding no retained message (Cancel on the card of a resume sent without one) releases nothing
+      expect(await h.service.release(record.appId)).toBeNull();
+      // an id with neither an intent nor a record
+      await expect(h.service.release('99999999-9999-4999-8999-999999999999' as AppSessionId)).rejects.toMatchObject({ reason: 'unknown_intent' });
     });
 
     // M5, acceptance item 13: the registry had no record yet when the guards read it, so the resume launched; the engine

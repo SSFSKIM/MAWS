@@ -260,14 +260,15 @@ export class SessionService {
   }
 
   // `session.intent.release`: the hand-back after a cancelled card or "Back to editing"; the draft is untouched.
-  // A record's id releases the message a resume retained behind its card and answers null; an id with neither an intent
-  // nor a retained message is unknown.
+  // A record's id releases whatever message a resume retained behind its card (none, for a resume sent without one) and
+  // answers null, so the hand-back is idempotent and the renderer need not know what main retained; an id with neither
+  // an intent nor a record is unknown.
   async release(appSessionId: AppSessionId): Promise<SetupIntent | null> {
     this.refuseWhileStarting(appSessionId);
     return this.serial(appSessionId, async () => {
       await this.ready();
       this.refuseWhileStarting(appSessionId);
-      if (this.deps.intents.get(appSessionId) === null && this.resumeMessages.delete(appSessionId)) return null;
+      if (this.deps.intents.get(appSessionId) === null && (this.resumeMessages.delete(appSessionId) || this.deps.index.sessions.get(appSessionId) !== null)) return null;
       const intent = this.intentOf(appSessionId);
       return this.putIntent({ ...intent, message: null, updatedAt: this.now() });
     });

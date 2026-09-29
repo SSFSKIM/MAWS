@@ -10,7 +10,7 @@ import { health, ID, intent, MESSAGE, putIntent, REPO, resetSetupStore, resource
 import { FailureCard } from './FailureCard';
 import { RelayCard } from './RelayCard';
 import { SetupCard } from './SetupCard';
-import { registerMessageReturn, startIntent } from './setup-actions';
+import { registerMessageReturn, resumeSession, startIntent } from './setup-actions';
 import { connectSetup, useSetup } from './store';
 import { TrustCard } from './TrustCard';
 
@@ -77,6 +77,16 @@ describe('trust card', () => {
     expect(returned).toEqual([MESSAGE]);
     expect(fake.calls.filter((c) => c.startsWith('invoke')).at(-1)).toBe('invoke session.intent.release');
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Trust and start' })).toBeNull());
+  });
+
+  it("Cancel on a resume's card, sent without a message, releases quietly (main answers null for a record's id)", async () => {
+    withMain({ 'session.start': answer({ status: 'needs_trust', appSessionId: ID, trust: trustState() }), 'session.intent.release': () => null });
+    render(<SetupCard appSessionId={ID} />);
+    await act(() => resumeSession(ID));
+    await userEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
+    expect(fake.invoked('session.intent.release')).toEqual([{ appSessionId: ID }]);
+    expect(returned).toEqual([]);
+    expect(useNotices.getState().notices).toEqual([]);
   });
 
   it('a continuation that is refused hands the docked message back and says why', async () => {
