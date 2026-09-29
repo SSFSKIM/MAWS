@@ -732,6 +732,10 @@ Ready to paste into the charter's C8 section under "**Residue decisions (C8b, 20
   Rationale: each follows the nearest decision's reason: wire facts over disk facts, facts not guesses, one node per task, the verdicts' letter. None adds X2 surface, and none reopens a binding decision; (13) is left open because it changes what M2 renders.
   Date/Author: 2026-09-29, C8b M1 task 2 (executor).
 
+- Decision (controller, 2026-09-29, M1 task 2's open item 13): `subagent.progress.description` is the agent's current activity ("Reading one.txt"), not its dispatch description, and every recorded progress frame's `summary` is null. `TaskNode` gains `activity: string | null` (the latest `subagent.progress.description`); `description` stays the start event's (else the sidecar's, else the task id) and is never overwritten by progress. A row's title stays `name ?? description`; its second line becomes `summary ?? activity ?? (the description when the title is a name) ?? Working`; the drill-in and summaries read the same. The reducer rule "`subagent.progress` sets … `summary` and `description`" reads "sets … `summary` and `activity`".
+  Rationale: the Purpose names "its description, the sentence it is working on" as two facts; overwriting the dispatch description with the activity would lose the title the owner recognises and leave the second line at `Working` on this engine.
+  Date/Author: 2026-09-29, C8b controller.
+
 ## Outcomes & Retrospective
 
 Pending — written at finish.
