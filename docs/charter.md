@@ -605,6 +605,8 @@ Deferred (may return): everything in §3 P1 and P2; the extension model of D-9; 
 
 Explicitly out of scope for P0: bundle patches (D-1); Windows and Linux (D-11); a second engine (D-7); reproducing the 307-method Desktop contract (the design keeps only the essential workstation architecture); cloud sessions, sharing and remote control.
 
+Deferred, from the peer study (maws-90, 2026-09-28): computer use for Claude Code through `plugins/cua` (the source of truth for the plugin that hosts OpenAI's computer-use tool under a non-Codex host; published as github.com/SSFSKIM/cua by git subtree). When it returns, MAWS bundles `cua-shim.mjs` as an app resource and names it in its own `--mcp-config`, so the app never depends on the user's `~/.claude` plugins; `research/codex-computer-use/README.md` §8 lists what the host must provide and §11 the routes.
+
 ## 17. Tracking map
 
 | Child | Grain | Status | Ledger / artifact |
