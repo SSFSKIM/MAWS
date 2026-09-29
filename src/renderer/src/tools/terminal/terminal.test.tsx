@@ -255,6 +255,21 @@ describe('re-adoption before a tab opens a shell', () => {
     expect(registry.terminals.open).not.toHaveBeenCalled();
   });
 
+  it('a tab disposed while the adoption is in flight opens nothing and releases the shell re-adopted under its label', async () => {
+    let answer!: (ids: string[]) => void;
+    registry.terminals.adopt.mockImplementationOnce(() => new Promise((resolve) => (answer = resolve)));
+    const adoption = adoptTerminals();
+    const state = newState({ instanceId: 'terminal:gone' });
+    terminalTool.dispose(state); // closed (beforeClose saw no terminal), reconciled or unregistered before adoption answered
+    registry.terminals.open({ appSessionId: A, label: 'terminal:gone', cwd: '/tmp/maws-harness/a' }); // what adopt re-created
+    registry.terminals.open.mockClear();
+    answer(['t1']);
+    await adoption;
+    await vi.waitFor(() => expect(registry.terminals.close).toHaveBeenCalledWith('t1'));
+    expect(registry.terminals.open).not.toHaveBeenCalled();
+    expect(state.terminalId).toBeNull();
+  });
+
   it('opens its own shell once the adoption answers without a pty for it, and after a failed adoption', async () => {
     let answer!: (ids: string[]) => void;
     registry.terminals.adopt.mockImplementationOnce(() => new Promise((resolve) => (answer = resolve)));

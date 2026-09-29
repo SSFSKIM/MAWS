@@ -37,6 +37,9 @@ export interface TerminalTabState {
   focusSeen: number; // the last X5 `focusRequest` the view acted on or used up (the counter outlives the view's mounts)
 }
 
+// The states the host has disposed (`dispose` below); a pending tab's retry checks it.
+const disposed = new WeakSet<TerminalTabState>();
+
 // Re-adoption after a renderer reload (C8a's ruling, 2026-09-29): the page starts it once, before any tab could want a
 // shell, and until it has answered no terminal opens, so a restored tab reattaches to the pty still running under its
 // label (the checkpoint reattach) instead of starting a second shell. The panel host restores tabs when the layout
@@ -64,6 +67,13 @@ export function resetTerminalAdoption(): void {
 // restored while Overview is shown) stays pending; its view asks for a session and calls this again when one is shown.
 // While the page's adoption is in flight the tab also stays pending and is retried when it answers.
 export function ensureTerminal(state: TerminalTabState, shown: { appSessionId: AppSessionId | null; session: SessionRecord | null }): TerminalId | null {
+  // A tab disposed while it waited (closed, reconciled or unregistered before the adoption answered) opens nothing, and
+  // a shell the adoption re-created under its label is released, so no shell is left running with no tab.
+  if (disposed.has(state)) {
+    const orphan = terminals.list().find((info) => info.label === state.instanceId);
+    if (orphan) terminals.close(orphan.id).catch((error: unknown) => console.error(`[terminal] could not end ${orphan.id} of a closed tab`, error));
+    return null;
+  }
   const current = state.ui.getState().terminalId;
   if (current) return current;
   if (adoption && !adoptionSettled) {
@@ -145,7 +155,6 @@ async function beforeClose(state: TerminalTabState): Promise<boolean> {
 // a terminal still in the registry is ended here, fire-and-forget, the failure only logged since no tab is left to show
 // it. After a completed `beforeClose` the registry no longer has the terminal and nothing is killed; a second dispose
 // of the same state does nothing. The owner's own close keeps `beforeClose`'s contract (ask when busy, veto a failed kill).
-const disposed = new WeakSet<TerminalTabState>();
 function dispose(state: TerminalTabState): void {
   if (disposed.has(state)) return;
   disposed.add(state);
