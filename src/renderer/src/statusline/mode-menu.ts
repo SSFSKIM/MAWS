@@ -8,7 +8,7 @@ import type { EngineSessionStatus } from '@shared/engine/status';
 import type { MawsBridge } from '@shared/ipc/schema';
 import type { ListModelsResponse } from '@shared/wire/control';
 import { ipc } from '../ipc/client';
-import { transportWords } from '../widgets/transport'; // C11
+import { transportWords } from '../ipc/transport-words'; // C11
 
 type ModelOption = ListModelsResponse['models'][number]; // C3's `session.listModels` entry
 

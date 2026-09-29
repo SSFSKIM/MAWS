@@ -114,4 +114,4 @@ export function useEngineRead<N extends SessionRead>(command: N, input: CommandI
 
 // A control's transport branch (Interfaces "Transport and timeout errors are the separate branch"): a rejected invoke
 // infers nothing; the control keeps the value the engine last reported and says why.
-export { transportWords } from './transport';
+export { transportWords } from '../ipc/transport-words';

@@ -3,7 +3,7 @@
 // Backticks in a sentence mark code, which the frame renders in mono.
 import type { WidgetCommandName } from '../composer';
 import { NOT_RUNNING } from '../statusline/mode-menu';
-import { LAST_VALUE, NO_ANSWER } from './transport';
+import { LAST_VALUE, NO_ANSWER } from '../ipc/transport-words';
 
 export interface WidgetFoot {
   readWith: string; // the engine's read or control, by its wire name
