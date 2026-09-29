@@ -245,7 +245,7 @@ describe('ipc schema validates both directions', () => {
       gateway: { mode: 'gateway', baseUrl: null, verified: 'pending', autoModeServer: 'unknown', localLane: null },
       subagentModel: null, modelOverrides: {}, engineVersion: null, fileCheckpointing: true, fastMode: { state: null, disabledReason: null },
       plugins: [], pluginErrors: [], pluginWarnings: [], backgroundTasks: [], grants: [], mcpServers: [], heldPeerMessages: [], pendingRequests: 0,
-      queue: { length: 0, paused: false }, keepAlive: [], memory: { rssKiB: null, treeRssKiB: null, sampledAt: null }, journalPath: '/j', hostHooks: [], lastEventSeq: 0,
+      queue: { length: 0, paused: false }, keepAlive: [], memory: { rssKiB: null, treeRssKiB: null, sampledAt: null }, journalPath: '/j', hostHooks: [], lastEventSeq: 0, trust: { attested: false, recorded: null } /* C10 */,
     };
 
     it('registers every command and event of the X2 tables, owner engine-host but attention.* (owner main, ruling 1)', () => {

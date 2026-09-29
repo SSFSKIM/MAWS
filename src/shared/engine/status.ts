@@ -40,6 +40,11 @@ export const EngineSessionStatusSchema = z.strictObject({
   keepAlive: z.array(z.enum(['turn', 'background_tasks', 'grants', 'mcp_connected', 'held_peer_message'])), // §4.4: what would keep this process live under a budget; informational under the never-exit rule
   memory: z.strictObject({ rssKiB: z.number().int().nullable(), treeRssKiB: z.number().int().nullable(), sampledAt: z.string().nullable() }),
   journalPath: z.string(), hostHooks: z.array(z.string()), lastEventSeq: z.number().int(),
+  // C10 start (additive X6, flagged to the coordinator): `attested` iff the launch spec carried `trust`; `recorded` the
+  // initialize response's `workspace_trust_recorded`, null before the response or when it carries none. Not copied to
+  // the record by toSessionRecordPatch (the trust notice is the session's evidence).
+  trust: z.strictObject({ attested: z.boolean(), recorded: z.boolean().nullable() }),
+  // C10 end
 });
 export type EngineSessionStatus = z.infer<typeof EngineSessionStatusSchema>;
 

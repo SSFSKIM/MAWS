@@ -254,6 +254,7 @@ export function liveSpec(cwd: string, overrides: Partial<LaunchSpec> = {}): Laun
     extraSettings: null,
     maxBudgetUsd: LIVE_MAX_BUDGET_USD,
     replay: null,
+    inheritGrantsFrom: null, // C10
     ...overrides,
   });
 }

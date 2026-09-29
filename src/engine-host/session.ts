@@ -78,6 +78,7 @@ interface Listeners {
   brokerItems: (items: AttentionItem[]) => void;
   queue: (queue: QueueState) => void;
   exited: (summary: ExitSummary) => void;
+  models: (models: unknown[]) => void; // C10: the initialize response's model list, for the catalogue cache
 }
 
 type ProcessState = EngineSessionStatus['process'];
@@ -102,7 +103,7 @@ export class EngineSession {
   private readonly bashMode: BashMode;
   private readonly reconnect: boolean;
   private readonly log: (message: string) => void;
-  private readonly listeners: { [K in keyof Listeners]: Set<Listeners[K]> } = { events: new Set(), status: new Set(), brokerItems: new Set(), queue: new Set(), exited: new Set() };
+  private readonly listeners: { [K in keyof Listeners]: Set<Listeners[K]> } = { events: new Set(), status: new Set(), brokerItems: new Set(), queue: new Set(), exited: new Set(), models: new Set() /* C10 */ };
   private readonly pendingWarnings: NormalizerWarning[] = [];
   private readonly stderrTail: string[] = [];
   private readonly storeWrites = new Set<Promise<void>>();
@@ -128,6 +129,11 @@ export class EngineSession {
   private pendingPlan: string | null = null; // a clear_and_implement plan kept for retry after the mode restore failed
   private requestedModel: string | null; // the launch spec's, until `session.setModel` (M5)
   private requestedEffort: Effort | null; // the launch spec's, until `session.setEffort` (M5)
+  // C10 start: the initialize response's `workspace_trust_recorded` (status.trust.recorded), and whether the snapshot
+  // was inherited from `spec.inheritGrantsFrom` (then it is re-applied like a resume's)
+  private trustRecorded: boolean | null = null;
+  private inheritedGrants = false;
+  // C10 end
 
   constructor(private readonly opts: EngineSessionOptions) {
     this.spec = opts.spec;
@@ -333,6 +339,7 @@ export class EngineSession {
       keepAlive: keepAliveReasons({ turnOpen: turn !== null, backgroundTasks: tracked.backgroundTasks.length, grants: this.grants.allow.length, mcpServers: tracked.mcpServers, heldPeerMessages: tracked.heldPeerMessages.length }),
       memory: tracked.memory,
       journalPath: this.journal.path, hostHooks: this.hooks.ids(), lastEventSeq: this.lastEventSeq,
+      trust: { attested: this.spec.trust !== null, recorded: this.trustRecorded }, // C10
     };
   }
 
@@ -421,9 +428,13 @@ export class EngineSession {
     this.record('meta', { event: 'initialize', current_permission_mode: init.current_permission_mode, session_state: init.session_state ?? null, hooks_applied: init.hooks_applied ?? null, workspace_trust_recorded: init.workspace_trust_recorded ?? null });
     if (this.reconnect) this.record('meta', { event: 'reconnect', phase: 'reconnected', attempt: 1, maxAttempts: 1, trigger: 'user', reason: null });
     this.tracker.initialize(init);
+    // C10 start: trust into the status; the model list to the catalogue cache
+    this.trustRecorded = init.workspace_trust_recorded ?? null;
+    if (Array.isArray(init.models)) this.emit('models', init.models);
+    // C10 end
 
     await this.verifyGateway();
-    if (this.spec.resume !== null && this.grants.allow.length > 0 && this.processState === 'initializing') {
+    if ((this.spec.resume !== null || this.inheritedGrants /* C10 */) && this.grants.allow.length > 0 && this.processState === 'initializing') {
       try {
         await reapply(client, this.grants);
       } catch (error) {
@@ -450,6 +461,21 @@ export class EngineSession {
         this.log(`grants not loaded: ${messageOf(error)}`);
       }
     }
+    // C10 start: a fork's empty snapshot is seeded from the conversation it copies and saved as its own, so the human
+    // does not answer twice and a later resume of the fork re-applies it by the fork's own id
+    if (this.spec.inheritGrantsFrom !== null && this.grants.allow.length === 0) {
+      try {
+        const inherited = await this.store.loadGrants(this.spec.inheritGrantsFrom);
+        if (inherited.allow.length > 0) {
+          this.grants = inherited;
+          this.inheritedGrants = true;
+          this.storeWrite(this.store.saveGrants(this.spec.appSessionId, inherited), 'grants');
+        }
+      } catch (error) {
+        this.log(`grants of ${this.spec.inheritGrantsFrom} not inherited: ${messageOf(error)}`);
+      }
+    }
+    // C10 end
     this.storeWrite(this.store.saveLaunchSpec(this.spec.appSessionId, this.spec), 'launch spec');
   }
 
