@@ -527,6 +527,9 @@ Ready to paste into the charter's C8 section under "**Residue decisions (C8a, 20
   - Ledger: the C8 block gains the missing row for the layout key `summary.sections` (owner C8a, additive; main's `^panel\.` guard does not match it), and its X5 row carries O2's fold and O4's rule.
   Rationale: the architect's rulings, applied as given.
   Date/Author: 2026-09-29, C8a refresh pass, on the architect's rulings.
+- Decision (execution pre-flight, 2026-09-29, branch rebased onto master 00da1a2): (1) C9 is not on master at dispatch (its branch sits at ba19a63 over 196dcee), so M1 is built without the stand-in fold first; until C9's `terminalTool` exists on master the `#panel` page registers `stubTool('terminal')` under the page's own "unless a real tool of that id is already registered" rule, so "+" lists `Terminal` and the stub cases run against `harness-stub` from the start; the branch rebases onto master before M1's review and the fold runs inside M1 when C9 is there, else as the first task after the next rebase (the ledger records any reorder). (2) Shared-file blocks use the architect's markers `// C8a start` … `// C8a end`, after the siblings' blocks; `package.json` (JSON, no comments) takes the `e2e:panel` script and the `verify` call plainly, beside C6's `e2e:transcript`. (3) Verification: the architect's brief moves every per-milestone and whole-branch review to an opus general-purpose reviewer (the GPT gateway is rate limited); the rung the first Decision Log entry names stands as the review's depth, and each review is logged "reviewed on opus, gateway rate limited".
+  Rationale: the architect's dispatch brief and sequencing note; the interim stub keeps M1's harness behaviour testable without C9 and disappears at the fold.
+  Date/Author: 2026-09-29, C8a executor (controller).
 
 ## Outcomes & Retrospective
 
