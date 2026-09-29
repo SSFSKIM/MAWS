@@ -5,14 +5,17 @@
 // model turn: a session created with the pinned binary through ClaudeUsage's relay in a scratch clone of this
 // repository, found by C4's real index in a scratch CLAUDE_CONFIG_DIR, resumed by MAWS, and asked to make one edit;
 // its receipt's "Review changes" opens Last turn and `Open file ↗` lands the viewer at the hunk's first changed line.
-// The owner's ~/.claude and ~/.claude.json are never read for sessions nor written. Run on purpose only:
+// The owner's ~/.claude and ~/.claude.json are never read for sessions nor written (checked after the turn, read-only).
+// The second case removes its scratch clone and config dir after the run, keeping the turn's journal, unless
+// MAWS_CODE_LIVE_KEEP=1 keeps them too. Run on purpose only:
 //   pnpm build && MAWS_CODE_LIVE=1 pnpm exec playwright test e2e/code-tools-live.spec.ts
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { basename, dirname, join } from 'node:path';
 import { expect, type Page } from '@playwright/test';
 import { ENGINE_BIN, ENGINE_VERSION, GATEWAY_AUTH_TOKEN, RELAY_URL } from '../src/engine-host/launch';
-import { assertConfigHomeSafe, scratchConfigHome } from '../test/live/support/live';
+import { scratchConfigHome } from '../test/live/support/live';
 import { launchMaws, REPO_ROOT, test, type MawsLaunch } from './support/launch';
 import { CHARTER } from './support/panel-support';
 
@@ -30,6 +33,7 @@ test.describe.configure({ timeout: 300_000 });
 
 const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8', env: { ...process.env, GIT_CONFIG_NOSYSTEM: '1' } }).trim();
 const REFUSAL = "path outside the session's directories";
+const WORKTREE_SESSION = 'Fix sidebar drag'; // the scenario record pointed at the main checkout with this worktree
 
 async function hideWindow(maws: MawsLaunch): Promise<void> {
   await maws.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].hide());
@@ -38,6 +42,22 @@ async function hideWindow(maws: MawsLaunch): Promise<void> {
 async function addTool(page: Page, name: 'Files' | 'Review'): Promise<void> {
   await page.locator('[data-region="panel"]').getByRole('button', { name: 'Add a tool' }).click();
   await page.getByRole('menuitem', { name }).click();
+}
+
+// The owner's home after a live turn, read only: nothing in ~/.claude/history.jsonl or ~/.claude.json names the turn's
+// session or its scratch (by the scratch's own name, whichever spelling of /tmp), and ~/.claude/projects has no
+// transcript folder for it. Not a before/after stat: the owner's own Claude Code sessions write both files at any
+// moment, so their mtimes and sizes move whatever this run does.
+function expectOwnerHomeUntouched(sessionId: string, scratch: string): void {
+  const home = join(homedir(), '.claude');
+  const read = (path: string) => (existsSync(path) ? readFileSync(path, 'utf8') : '');
+  for (const path of [join(home, 'history.jsonl'), join(homedir(), '.claude.json')]) {
+    const text = read(path);
+    expect(text.includes(sessionId) || text.includes(basename(scratch)), `${path} names this run`).toBe(false);
+  }
+  const projects = join(home, 'projects');
+  const folders = existsSync(projects) ? readdirSync(projects).filter((name) => name.includes(basename(scratch))) : [];
+  expect(folders, `${projects} has a folder for this run`).toEqual([]);
 }
 
 // The flashed line of the code view: its text, and whether it sits in the middle third or the view rests at an end.
@@ -56,8 +76,16 @@ const flashed = (page: Page) =>
 test('live: Files, the viewer and Review over this checkout', async () => {
   const observed: Record<string, unknown> = {};
   const scratch = realpathSync(mkdtempSync('/tmp/maws-c8c-live-'));
-  const scenario = JSON.parse(readFileSync(join(REPO_ROOT, 'test/fixtures/shell/nine-sessions.json'), 'utf8')) as { sessions: { title: { text: string }; directory: string }[] };
-  scenario.sessions.find((s) => s.title.text === CHARTER)!.directory = REPO_ROOT;
+  type StubRecord = { appId: string; title: { text: string }; directory: string; worktree: { path: string; branch: string | null } | null };
+  const scenario = JSON.parse(readFileSync(join(REPO_ROOT, 'test/fixtures/shell/nine-sessions.json'), 'utf8')) as { sessions: StubRecord[] };
+  const charter = scenario.sessions.find((s) => s.title.text === CHARTER)!;
+  charter.directory = REPO_ROOT;
+  // A session that runs in this worktree of the main checkout (item 4's second root), read-only on the main checkout.
+  const worktree = realpathSync.native(REPO_ROOT);
+  const mainCheckout = realpathSync.native(dirname(git(REPO_ROOT, 'rev-parse', '--path-format=absolute', '--git-common-dir')));
+  const inWorktree = scenario.sessions.find((s) => s.title.text === WORKTREE_SESSION)!;
+  inWorktree.directory = mainCheckout;
+  inWorktree.worktree = { path: worktree, branch: git(REPO_ROOT, 'branch', '--show-current') || null };
   writeFileSync(join(scratch, 'scenario.json'), JSON.stringify(scenario));
   const root = realpathSync(REPO_ROOT);
   const probe = join(root, 'c8c-live-probe.txt'); // untracked, so Review has something to list; removed below
@@ -137,8 +165,22 @@ test('live: Files, the viewer and Review over this checkout', async () => {
       await expect(viewer.locator('.cm-content')).toContainText('three, written outside MAWS', { timeout: 5_000 });
       observed.followMs = Date.now() - written;
       // And the boundary: a path outside the session's directories is refused.
-      const refused = await page.evaluate(async (appSessionId) => window.maws.invoke('files.read', { appSessionId, path: '/etc/hosts' } as never), 'app-9a1d4262');
+      const refused = await page.evaluate(async (appSessionId) => window.maws.invoke('files.read', { appSessionId, path: '/etc/hosts' } as never), charter.appId);
       expect(refused).toEqual({ ok: false, error: { code: 'internal', message: REFUSAL } });
+    });
+
+    await test.step('Files: a session in a worktree has two roots, its directory and the worktree, in record order', async () => {
+      if (mainCheckout === worktree) throw new Error(`this run is not in a linked worktree: ${worktree}`);
+      await page.locator('[data-region="sidebar"]').getByRole('treeitem', { name: WORKTREE_SESSION }).click();
+      await addTool(page, 'Files');
+      const roots = panel.locator('[data-tool="files"] [role="treeitem"][data-kind="root"]');
+      await expect(roots).toHaveCount(2);
+      const shown = await roots.evaluateAll((rows) => rows.map((r) => ({ path: r.getAttribute('data-path'), role: r.querySelector('span.text-fg-faint')?.textContent ?? null })));
+      expect(shown).toEqual([
+        { path: mainCheckout, role: 'directory' },
+        { path: worktree, role: 'worktree' },
+      ]);
+      observed.worktreeRoots = shown;
     });
     expect(maws.consoleErrors()).toEqual([]);
   } finally {
@@ -155,7 +197,6 @@ test('live: a turn that edits a file opens Review on Last turn and the viewer at
   const scratch = realpathSync(mkdtempSync('/tmp/maws-c8c-live-'));
   const config = join(scratch, 'claude-config');
   execFileSync('/bin/mv', [scratchConfigHome(), config]);
-  assertConfigHomeSafe({ configHome: config, controls: [] });
   const clone = join(scratch, 'maws');
   git(scratch, 'clone', '--quiet', REPO_ROOT, clone);
   const engineEnv: Record<string, string> = { TERM: 'xterm-256color', LANG: process.env.LANG ?? 'en_US.UTF-8' };
@@ -253,6 +294,13 @@ test('live: a turn that edits a file opens Review on Last turn and the viewer at
     test.info().annotations.push({ type: 'observed', description: JSON.stringify(observed) });
     console.log(`[c8c-live] turn ${JSON.stringify(observed)}`);
     await maws.cleanup();
-    console.log(`[c8c-live] scratch kept for the journals: ${scratch}`);
+    if (process.env.MAWS_CODE_LIVE_KEEP === '1') {
+      console.log(`[c8c-live] scratch kept (MAWS_CODE_LIVE_KEEP=1): ${scratch}`);
+    } else {
+      rmSync(clone, { recursive: true, force: true });
+      rmSync(config, { recursive: true, force: true });
+      console.log(`[c8c-live] scratch clone and config removed; the turn's journal is kept: ${join(scratch, 'turn.jsonl')}`);
+    }
   }
+  expectOwnerHomeUntouched(created.session_id, scratch);
 });
