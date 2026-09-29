@@ -7,14 +7,18 @@
 import { expect, type ElectronApplication, type Page } from '@playwright/test';
 import { test } from './support/launch';
 
-// The parent-session variables a terminal must never inherit (§4.1) and two engine-launch ones (D-19), set to fake
-// values in the app's own environment so the exclusion is proven wherever the suite runs.
+// The parent-session variables a terminal must never inherit (§4.1), two engine-launch ones (D-19) and two a launcher
+// sets (an Electron switch, and the launcher's NODE_OPTIONS; `ELECTRON_RENDERER_URL` itself would make the built app a
+// dev-server client), set to fake values in the app's own environment so the exclusion is proven wherever the suite runs.
+const LAUNCHER_NODE_OPTIONS = '--max-http-header-size=16385';
 const INHERITED = {
   CLAUDE_CODE_SESSION_ID: 'e2e-parent-session',
   CLAUDE_PID: '424242',
   CLAUDECODE: '1',
   ANTHROPIC_BASE_URL: 'http://127.0.0.1:9/e2e',
   ANTHROPIC_AUTH_TOKEN: 'e2e-token',
+  ELECTRON_MAWS_E2E_LAUNCHER: '1',
+  NODE_OPTIONS: LAUNCHER_NODE_OPTIONS,
 };
 test.use({ mawsEnv: { MAWS_HARNESS: '1', ...INHERITED } });
 
@@ -273,8 +277,11 @@ test('opens a login shell in the session directory with the terminal environment
     await h.expectLine(id, 'P:MAWS');
     await h.expectLine(id, 'S:1');
     expect((await h.lines(id)).some((line) => /^L:.+/.test(line.trim())), 'a non-empty locale').toBe(true);
-    await h.run(id, `echo "N:$(env | grep -c -E '^(CLAUDE_CODE_SESSION_ID|CLAUDE_PID|CLAUDECODE|ANTHROPIC_BASE_URL|ANTHROPIC_AUTH_TOKEN|MAWS_USER_DATA)=')"`);
+    await h.run(id, `echo "N:$(env | grep -c -E '^(CLAUDE_CODE_SESSION_ID|CLAUDE_PID|CLAUDECODE|ANTHROPIC_BASE_URL|ANTHROPIC_AUTH_TOKEN|MAWS_USER_DATA|ELECTRON_MAWS_E2E_LAUNCHER)=')"`);
     await h.expectLine(id, 'N:0');
+    // the owner's rc files may set a NODE_OPTIONS of their own; the launcher's never arrives
+    await h.run(id, `[ "$NODE_OPTIONS" = '${LAUNCHER_NODE_OPTIONS}' ] && echo "NO:launcher" || echo "NO:not-launcher"`);
+    await h.expectLine(id, 'NO:not-launcher');
     const shell = process.env.SHELL ?? '/bin/zsh';
     await h.run(id, 'echo "0:$0"');
     await h.expectLine(id, `0:${shell}`);

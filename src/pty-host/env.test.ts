@@ -76,6 +76,19 @@ describe('pty host environment', () => {
     expect(env).not.toHaveProperty('MAWS_USER_DATA');
   });
 
+  it('drops what the launcher set: every ELECTRON_ variable, and NODE_OPTIONS when it is the launcher’s value', () => {
+    const launcher = { ELECTRON_RENDERER_URL: 'http://localhost:5173', NODE_OPTIONS: '--require ./launcher-hook.js' };
+    const env = terminalEnvironment(
+      { ...base, ...launcher, ELECTRON_RUN_AS_NODE: '1', ELECTRON_ENABLE_LOGGING: '1', NOT_ELECTRON_: 'kept' },
+      { appVersion: '0', launcher },
+    );
+    for (const name of ['ELECTRON_RENDERER_URL', 'ELECTRON_RUN_AS_NODE', 'ELECTRON_ENABLE_LOGGING', 'NODE_OPTIONS']) expect(env).not.toHaveProperty(name);
+    expect(env.NOT_ELECTRON_).toBe('kept');
+    // the owner's own NODE_OPTIONS (set by the login shell's rc files, or with no launcher value at all) passes
+    expect(terminalEnvironment({ ...base, NODE_OPTIONS: '--max-old-space-size=8192' }, { appVersion: '0', launcher }).NODE_OPTIONS).toBe('--max-old-space-size=8192');
+    expect(terminalEnvironment({ ...base, NODE_OPTIONS: '--max-old-space-size=8192' }, { appVersion: '0', launcher: {} }).NODE_OPTIONS).toBe('--max-old-space-size=8192');
+  });
+
   it('drops the capture shell’s own session state, so a terminal shell starts at level 1 as in Terminal.app', () => {
     const env = terminalEnvironment({ ...base, SHLVL: '3', OLDPWD: '/Users/owner/src', _: '/usr/bin/env' }, { appVersion: '0' });
     for (const name of ['SHLVL', 'OLDPWD', '_']) expect(env).not.toHaveProperty(name);

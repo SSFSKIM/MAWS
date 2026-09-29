@@ -8,7 +8,7 @@ import { createPtyTable } from './table';
 const HOST_VERSION = __MAWS_VERSION__;
 
 runHost(HOST_VERSION, (on, emit) => {
-  const environment = baseEnvironment().then((base) => terminalEnvironment(base, { appVersion: HOST_VERSION }));
+  const environment = baseEnvironment().then((base) => terminalEnvironment(base, { appVersion: HOST_VERSION, launcher: process.env }));
   const table = createPtyTable({ emit, environment });
   on('pty.ping', async () => hostPing(HOST_VERSION));
   on('pty.spawn', (input) => table.spawn(input));

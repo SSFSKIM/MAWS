@@ -39,6 +39,14 @@ const SHELL_SESSION_VARIABLES = ['SHLVL', 'OLDPWD', '_'] as const;
 // this app's profile (`MAWS_USER_DATA` selects it) instead of its own.
 const APP_HOST_VARIABLES = ['MAWS_USER_DATA'] as const;
 
+// What the app's launcher put in its environment, which the hosts inherit the same way: Electron's switches
+// (`ELECTRON_RENDERER_URL` from `electron-vite dev` makes a built MAWS started in the terminal a dev-server client and
+// trips `window.ts`'s dev-CSP guard; `ELECTRON_RUN_AS_NODE` turns any Electron app into Node), dropped by prefix as the
+// engine's allowlist does; and `NODE_OPTIONS` when it is the launcher's own value. A value the owner's rc files set is
+// set again by the terminal's login shell, and a `NODE_OPTIONS` of their own that differs from the launcher's passes.
+const LAUNCHER_PREFIXES = ['ELECTRON_'] as const;
+const LAUNCHER_VALUE_VARIABLES = ['NODE_OPTIONS'] as const;
+
 const LOCALE_VARIABLES = ['LANG', 'LC_ALL', 'LC_CTYPE'] as const;
 
 // The seed every terminal environment is built from: X6's captured login-shell environment (C3's capture, run once, at
@@ -52,13 +60,16 @@ export function baseEnvironment(
 
 export interface TerminalEnvironmentOptions {
   appVersion: string; // TERM_PROGRAM_VERSION
+  launcher?: NodeJS.ProcessEnv; // the environment the host inherited (default its own `process.env`)
 }
 
-export function terminalEnvironment(base: NodeJS.ProcessEnv, { appVersion }: TerminalEnvironmentOptions): Record<string, string> {
+export function terminalEnvironment(base: NodeJS.ProcessEnv, { appVersion, launcher = process.env }: TerminalEnvironmentOptions): Record<string, string> {
   const env: Record<string, string> = {};
   const excluded = new Set<string>([...PARENT_SESSION_VARIABLES, ...ENGINE_LAUNCH_VARIABLES, ...SHELL_SESSION_VARIABLES, ...APP_HOST_VARIABLES]);
+  const fromLauncher = (name: string, value: string) =>
+    LAUNCHER_PREFIXES.some((prefix) => name.startsWith(prefix)) || ((LAUNCHER_VALUE_VARIABLES as readonly string[]).includes(name) && launcher[name] === value);
   for (const [name, value] of Object.entries(base)) {
-    if (value !== undefined && !excluded.has(name) && !GATEWAY_MODEL_VARIABLE.test(name)) env[name] = value;
+    if (value !== undefined && !excluded.has(name) && !GATEWAY_MODEL_VARIABLE.test(name) && !fromLauncher(name, value)) env[name] = value;
   }
   env.TERM = 'xterm-256color';
   env.COLORTERM = 'truecolor';
