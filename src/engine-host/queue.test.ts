@@ -104,7 +104,7 @@ describe('queue release never follows an engine-initiated turn', () => {
   });
 
   it('a submission the engine cancels, discards or refuses before it started is retired at that lifecycle with its own notice, and the next queued message is released (whole-branch review; pass1/queue-and-interrupt seq 191)', async () => {
-    for (const state of ['cancelled', 'discarded', 'refused'] as const) {
+    for (const state of ['cancelled', 'discarded'] as const) {
       const t = await harness();
       const { entry } = await t.queue.send('one');
       await t.queue.send('two');
@@ -120,6 +120,22 @@ describe('queue release never follows an engine-initiated turn', () => {
       expect(t.writes.map((w) => w.message.content)).toEqual(['one', 'two']); // the dropped one is not re-sent; the next goes
       expect(queueRows(t.rows)).toEqual(['release:send', 'release:dropped']);
     }
+    // a refused drop retires the entry the same way but pauses the queue and releases nothing (coordinator ruling)
+    const refused = await harness();
+    const { entry: refusedEntry } = await refused.queue.send('one');
+    await refused.queue.send('two');
+    refused.queue.onLifecycle(lifecycle(refusedEntry.messageUuid!, 'queued'));
+    refused.queue.onLifecycle(lifecycle(refusedEntry.messageUuid!, 'refused'));
+    refused.h.turn = false;
+    await flush();
+    await flush();
+    expect(refused.queue.state).toMatchObject({ paused: true, entries: [{ content: 'two', state: 'queued' }] });
+    expect(notices(refused.rows)).toEqual([`queue:dropped:${refusedEntry.queueId}`]);
+    expect(queueRows(refused.rows)).toEqual(['release:send', 'pause:refused']);
+    expect(refused.writes.map((w) => w.message.content)).toEqual(['one']);
+    expect(await refused.store.loadQueue(ID)).toMatchObject({ paused: true, entries: [{ content: 'two', state: 'queued' }] });
+    await refused.queue.setPaused(false); // resume is one click
+    expect(refused.writes.map((w) => w.message.content)).toEqual(['one', 'two']);
     // a paused queue (an interrupt pauses before it cancels) releases nothing at the drop
     const paused = await harness();
     const { entry: sent } = await paused.queue.send('one');

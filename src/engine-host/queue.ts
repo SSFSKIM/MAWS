@@ -4,7 +4,7 @@
 // `user` frame is written, becomes `released` at the engine's `command_lifecycle` for that uuid, and leaves the list
 // at the `turn.ended` naming it, at a lifecycle that drops it before it started (retired `dropped`, never re-sent), or at
 // the process's exit (retired `interrupted`, never re-sent). The release rule: a
-// main-lane, non-receipt `turn.ended` submits the head, and so does a drop before start (no turn.ended will follow it), while the queue is not paused and the session is idle, so nothing
+// main-lane, non-receipt `turn.ended` submits the head, and so does a `cancelled` or `discarded` drop before start (no turn.ended will follow it; a `refused` one pauses), while the queue is not paused and the session is idle, so nothing
 // is ever released into a running turn, an engine-initiated one (`task-notification`) included, nor while a prompt the
 // host wrote (a steer) waits for the engine to start it; after an engine turn a
 // head that cannot go (not ready, write failed) pauses the queue with an info notice. A submission a crash interrupted comes back as the
@@ -214,8 +214,8 @@ export class MessageQueue {
   // submitting → released: the engine acknowledges every stdin user frame with command_lifecycle (pass2/dialogs 5–6).
   // A submission the engine drops before it started (`cancelled`, `discarded`, `refused`: pass1/queue-and-interrupt
   // seq 191) will never be named by a turn.ended, so it is retired there with its own notice, no longer holds the queue
-  // busy (whole-branch review), and the head is released under the usual gates (not paused, idle, ready): no turn.ended
-  // will come to release it. An interrupt pauses the queue first, so the drops it causes release nothing. Once started,
+  // busy (whole-branch review), and after a `cancelled` or `discarded` drop the head is released under the usual gates
+  // (not paused, idle, ready): no turn.ended will come to release it; a `refused` drop pauses the queue instead. An interrupt pauses the queue first, so the drops it causes release nothing. Once started,
   // its turn.ended retires it.
   onLifecycle(event: Extract<SessionEvent, { kind: 'command.lifecycle' }>): void {
     const entry = this.entries.find((e) => e.state !== 'queued' && e.messageUuid === event.commandUuid);
@@ -226,6 +226,12 @@ export class MessageQueue {
       this.clearAck(entry.queueId);
       this.started.delete(entry.queueId);
       this.notice(`queue:dropped:${entry.queueId}`, `The engine ${event.state} a message before starting it, so it was not answered. Re-send it if you still want an answer.`);
+      // A refusal may describe the engine's state rather than this message: pause instead of draining the queue into it
+      // (coordinator ruling); resume is one click.
+      if (event.state === 'refused' && !this.paused) {
+        this.paused = true;
+        this.journal({ event: 'queue', action: 'pause', reason: 'refused' });
+      }
       void this.persist()
         .catch((error: unknown) => this.log(`retirement not saved: ${messageOf(error)}`)) // a stale released entry on disk retires at the next recovery
         .then(() => this.releaseHead('dropped'))
