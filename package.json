@@ -15,7 +15,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.node.json --composite false && tsc --noEmit -p tsconfig.web.json --composite false && tsc --noEmit -p tsconfig.e2e.json --composite false",
     "lint": "eslint .",
     "test": "vitest run",
-    "test:live": "MAWS_LIVE=1 vitest run --project live",
+    "test:live": "MAWS_LIVE=1 vitest run --project live --silent=false",
     "e2e": "playwright test",
     "e2e:packaged": "MAWS_E2E_EXECUTABLE=${MAWS_E2E_EXECUTABLE:-dist/mac-arm64/MAWS.app/Contents/MacOS/MAWS} playwright test",
     "build:app": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dir",

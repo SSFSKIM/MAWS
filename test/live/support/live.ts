@@ -48,6 +48,80 @@ export function redactJournal(text: string, env: Record<string, string> = string
     .join('\n');
 }
 
+// The provenance every pass-3 fixture C3 exports carries first (M6).
+export const PROVENANCE = { charter: 'docs/charter.md', child: 'C3', pin: '87f8c7881119ea670901205dae35917d3751459c' } as const;
+
+// A live journal as a checked-in fixture: the provenance meta row first, at seq 0 so every live row keeps its seq (a
+// pin written against the live journal reads the same against the fixture), then the whole file through the probe's
+// redaction, the `spawn` row included.
+export function exportFixture(journalText: string, env: Record<string, string> = stringEnv(process.env), at = new Date().toISOString()): string {
+  const provenance = JSON.stringify({ seq: 0, direction: 'meta', at, frame: { event: 'provenance', ...PROVENANCE } });
+  const body = journalText.endsWith('\n') ? journalText : `${journalText}\n`;
+  return redactJournal(`${provenance}\n${body}`, env);
+}
+
+const isMainResult = (row: JournalRow): row is JournalRow & { frame: { total_cost_usd?: unknown; num_turns?: unknown } } => {
+  const frame = row.frame as { type?: unknown; parent_tool_use_id?: unknown } | null;
+  return row.direction === 'in' && frame?.type === 'result' && (frame.parent_tool_use_id ?? null) === null;
+};
+
+// What one process cost: the engine reports `total_cost_usd` cumulatively per process, so the last main-lane figure
+// (the largest) is the process's; turns are the main-lane results that were turns (not `!` echo receipts).
+export function journalCost(rows: JournalRow[]): { costUsd: number; turns: number } {
+  let costUsd = 0;
+  let turns = 0;
+  for (const row of rows) {
+    if (!isMainResult(row)) continue;
+    const cost = row.frame.total_cost_usd;
+    if (typeof cost === 'number' && cost > costUsd) costUsd = cost;
+    if (typeof row.frame.num_turns === 'number' && row.frame.num_turns > 0) turns += 1;
+  }
+  return { costUsd, turns };
+}
+
+// Every inbound frame type and `system` subtype a journal carries, with the seqs (M6 records what the live runs produce).
+export function frameInventory(rows: JournalRow[]): { systemSubtypes: Map<string, number[]>; types: Map<string, number[]> } {
+  const systemSubtypes = new Map<string, number[]>();
+  const types = new Map<string, number[]>();
+  const add = (map: Map<string, number[]>, key: string, seq: number) => {
+    const seqs = map.get(key);
+    if (seqs) seqs.push(seq);
+    else map.set(key, [seq]);
+  };
+  for (const row of rows) {
+    if (row.direction !== 'in') continue;
+    const frame = row.frame as { type?: unknown; subtype?: unknown } | null;
+    if (typeof frame?.type !== 'string') continue;
+    add(types, frame.type, row.seq);
+    if (frame.type === 'system' && typeof frame.subtype === 'string') add(systemSubtypes, frame.subtype, row.seq);
+  }
+  return { systemSubtypes, types };
+}
+
+// The run's cost, journal by journal, and the cap the owner set for a single run (stop and report past it).
+export class LiveLedger {
+  readonly entries: { label: string; journalPath: string; costUsd: number; turns: number }[] = [];
+  constructor(readonly capUsd: number) {}
+
+  add(label: string, journalPath: string, rows: JournalRow[]): { costUsd: number; turns: number } {
+    const cost = journalCost(rows);
+    this.entries.push({ label, journalPath, ...cost });
+    return cost;
+  }
+
+  get total(): number {
+    return this.entries.reduce((sum, e) => sum + e.costUsd, 0);
+  }
+
+  summary(): string {
+    return `live cost: total_cost_usd sum = $${this.total.toFixed(2)} across ${this.entries.reduce((sum, e) => sum + e.turns, 0)} turns`;
+  }
+
+  assertUnderCap(): void {
+    if (this.total >= this.capUsd) throw new Error(`live cost cap $${this.capUsd.toFixed(2)} reached: $${this.total.toFixed(2)} spent; stopping the run`);
+  }
+}
+
 function stringEnv(env: NodeJS.ProcessEnv): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [key, value] of Object.entries(env)) if (typeof value === 'string') out[key] = value;
@@ -85,7 +159,8 @@ export async function liveGate(): Promise<{ skip: string } | LiveContext> {
   };
 }
 
-// The live default: the real X6 contract through the gateway, auto mode, Sonnet, a pinned session id and the budget cap.
+// The live default: the real X6 contract through the gateway, auto mode, Sonnet (subagents too), a pinned session id and
+// the budget cap.
 export function liveSpec(cwd: string, overrides: Partial<LaunchSpec> = {}): LaunchSpec {
   return LaunchSpecSchema.parse({
     appSessionId: `live-${randomUUID().slice(0, 8)}`,
@@ -95,7 +170,7 @@ export function liveSpec(cwd: string, overrides: Partial<LaunchSpec> = {}): Laun
     effort: null,
     permissionMode: 'auto',
     gateway: 'gateway',
-    subagentModel: null,
+    subagentModel: 'sonnet', // the owner's shell exports CLAUDE_CODE_SUBAGENT_MODEL=opus; the live budget is a Sonnet one
     resume: null,
     sessionId: randomUUID(),
     trust: null,
