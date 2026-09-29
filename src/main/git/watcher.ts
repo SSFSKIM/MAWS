@@ -1,6 +1,7 @@
 // The repository watcher (C4 execution document, Interfaces "Git service" and M6): per repository root, one recursive
 // `fs.watch` on the root and one on the git dir when it lies outside the root (a linked worktree's lives under the
-// common dir's `worktrees/<name>/`). Paths are classified, a 250 ms trailing debounce gathers them, at most one
+// common dir's `worktrees/<name>/`), and for a linked worktree one on the common dir for the refs, packed-refs and
+// config it shares. Paths are classified, a 250 ms trailing debounce capped at 1 s gathers them, at most one
 // `git status` runs per root with one re-run for whatever arrived meanwhile, and `git.changed` carries the fresh status
 // only when the compared projection moved. The projection is the status's own facts plus the size and mtime of every
 // listed file, so a second content write to an already-dirty file emits although its porcelain line is unchanged (C8a's
@@ -31,23 +32,32 @@ export interface GitWatcherDeps {
 }
 
 const DEBOUNCE_MS = 250;
+const MAX_WAIT_MS = 1000; // the longest a debounce window runs from its first event
 const BACKOFF_MS = 5000; // after a status timeout, until a status succeeds
 // When several kinds of path changed in one window, the event names the weightiest; HEAD moving outranks them all.
 const WEIGHT: Record<Exclude<GitChangeReason, 'initial'>, number> = { worktree: 0, index: 1, refs: 2, head: 3 };
 
-// A path inside the git dir, relative to it.
+// A path inside the git dir, relative to it. `config` holds the upstream and the remote URL (`branch -u`,
+// `remote set-url`), so it counts as `refs`. Git's own `*.lock` files are ignored here, and only here.
 export function classifyGitPath(sub: string): Exclude<GitChangeReason, 'initial' | 'worktree'> | null {
   if (sub.endsWith('.lock') || sub === 'objects' || sub.startsWith('objects/')) return null;
   if (sub === 'HEAD' || sub === 'ORIG_HEAD' || sub === 'MERGE_HEAD') return 'head';
   if (sub === 'index') return 'index';
-  if (sub === 'packed-refs' || sub.startsWith('refs/')) return 'refs';
+  if (sub === 'packed-refs' || sub.startsWith('refs/') || sub === 'config') return 'refs';
   return null;
 }
 
+// A path inside a linked worktree's common dir, relative to it: only what the worktree shares — branch and
+// remote-tracking refs, packed-refs, config. The main worktree's own HEAD and index there are not this worktree's.
+export function classifyCommonPath(sub: string): 'refs' | null {
+  return classifyGitPath(sub) === 'refs' ? 'refs' : null;
+}
+
 // A path under the root, relative to it; `gitDirRel` is the git dir relative to the root when it lies inside (`.git`).
+// Everything outside the git dir is the worktree, a tracked `Cargo.lock` or `yarn.lock` included.
 export function classifyRootPath(rel: string, gitDirRel: string | null): Exclude<GitChangeReason, 'initial'> | null {
   if (gitDirRel !== null && (rel === gitDirRel || rel.startsWith(`${gitDirRel}/`))) return rel === gitDirRel ? null : classifyGitPath(rel.slice(gitDirRel.length + 1));
-  if (rel === '.git' || rel.endsWith('.lock')) return null; // a linked worktree's `.git` pointer file; editors' and git's lock files
+  if (rel === '.git') return null; // a linked worktree's `.git` pointer file
   return 'worktree';
 }
 
@@ -57,6 +67,7 @@ interface Root {
   closed: boolean;
   handles: { close(): void }[];
   timer: NodeJS.Timeout | null;
+  windowStart: number | null; // when the pending debounce window's first event arrived
   inFlight: boolean;
   again: boolean;
   pending: Set<Exclude<GitChangeReason, 'initial'>>;
@@ -114,6 +125,7 @@ export class GitWatcher {
       closed: false,
       handles: [],
       timer: null,
+      windowStart: null,
       inFlight: false,
       again: false,
       pending: new Set(),
@@ -137,6 +149,17 @@ export class GitWatcher {
         );
         root.handles.push(gitDirWatch);
         gitDirWatch.on('error', onError);
+      }
+      // A linked worktree's branch and remote-tracking refs, packed-refs and config live in the common dir: a push from
+      // the worktree or a fetch anywhere moves ahead/behind there and nowhere else. One recursive watch filtered to
+      // those paths, rather than separate watches on `refs/` and `packed-refs`, since `packed-refs` may not exist yet
+      // (a watch on a missing file cannot open) and `config` sits beside them.
+      if (status.isWorktree) {
+        const commonWatch = this.watchFn(status.commonDir, { recursive: true }, (_event, filename) =>
+          this.changed(root, filename === null ? 'refs' : classifyCommonPath(filename.split(sep).join('/'))),
+        );
+        root.handles.push(commonWatch);
+        commonWatch.on('error', onError);
       }
     } catch (error) {
       for (const handle of root.handles) handle.close();
@@ -163,15 +186,22 @@ export class GitWatcher {
     this.schedule(root);
   }
 
+  // Trailing debounce, capped from the window's first event so a writer that never pauses cannot hold the status off
+  // forever: 250 ms after the last event but at most 1 s after the first; under back-off, 5 s both ways.
   private schedule(root: Root): void {
     if (root.timer) clearTimeout(root.timer);
+    const now = Date.now();
+    root.windowStart ??= now;
+    const wait = root.backoff ? BACKOFF_MS : DEBOUNCE_MS;
+    const cap = root.backoff ? BACKOFF_MS : MAX_WAIT_MS;
     root.timer = setTimeout(
       () => {
         root.timer = null;
+        root.windowStart = null;
         if (root.inFlight) root.again = true;
         else void this.refresh(root);
       },
-      root.backoff ? BACKOFF_MS : DEBOUNCE_MS,
+      Math.max(0, Math.min(wait, root.windowStart + cap - now)),
     );
   }
 

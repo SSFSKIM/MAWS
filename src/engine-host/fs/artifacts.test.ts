@@ -44,15 +44,22 @@ describe('fs.readSpill reads engine artifacts by the path the engine reported', 
     expect(await readSpill(fixture.paths, { path: wide, offset: 1, length: 5 })).toMatchObject({ content: '😀', length: 4 });
   });
 
-  it('never backs up the file\'s tail, and never answers an empty page for a request shorter than one character', async () => {
+  it('never backs up the file\'s tail, and reads forward to finish a character a request is too short to hold', async () => {
     // A file that itself ends mid-character (an engine write in progress): the tail page keeps every byte.
     const torn = await fixture.addSidecar(S1, 'tool-results/torn.txt', '');
     await writeFile(torn, Buffer.from([0x61, 0x62, 0xe2, 0x82])); // 'ab' and the first two bytes of '€'
     expect(await readSpill(fixture.paths, { path: torn })).toMatchObject({ bytes: 4, length: 4, truncated: false, content: 'ab�' });
     expect(await readSpill(fixture.paths, { path: torn, length: 4 })).toMatchObject({ length: 4, truncated: false });
-    // One byte of a three-byte character: backing up would consume nothing and a pager would never advance.
+    // One byte of a three-byte character: backing up would consume nothing and a pager would never advance, so the page
+    // reads forward to the character's end; `length` then exceeds the request.
     const euro = await fixture.addSidecar(S1, 'tool-results/euro.txt', '€x');
-    expect(await readSpill(fixture.paths, { path: euro, length: 1 })).toMatchObject({ offset: 0, length: 1, truncated: true });
+    expect(await readSpill(fixture.paths, { path: euro, length: 1 })).toEqual({ content: '€', bytes: 4, offset: 0, length: 3, truncated: true });
+    expect(await readSpill(fixture.paths, { path: euro, offset: 3, length: 1 })).toEqual({ content: 'x', bytes: 4, offset: 3, length: 1, truncated: false });
+    const emoji = await fixture.addSidecar(S1, 'tool-results/emoji.txt', '😀');
+    expect(await readSpill(fixture.paths, { path: emoji, length: 2 })).toEqual({ content: '😀', bytes: 4, offset: 0, length: 4, truncated: false });
+    // A file that ends before the character does: the forward read stops at the end and answers what is there.
+    await writeFile(euro, Buffer.from([0xe2, 0x82]));
+    expect(await readSpill(fixture.paths, { path: euro, length: 1 })).toMatchObject({ bytes: 2, length: 2, truncated: false });
   });
 
   it('reads task outputs and job files, the other two roots', async () => {

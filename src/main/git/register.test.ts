@@ -41,7 +41,7 @@ describe('main answers git.* through the router', () => {
     const { GitService } = await import('./service');
     const { registerGitHandlers } = await import('./register');
     const { installRouter } = await import('../ipc/router');
-    const service = new GitService(options);
+    const service = new GitService({ env: repo.serviceEnv(), ...options });
     dispose = () => service.dispose();
     registerGitHandlers(service);
     installRouter({ appUrl: APP_URL });

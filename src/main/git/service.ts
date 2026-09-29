@@ -101,18 +101,24 @@ export class GitService {
     this.watcher.dispose();
   }
 
-  // The upstream's remote URL as configured; null without an upstream, for a local upstream, or when the remote has no
-  // URL. Never a fetch. A timeout still fails the status.
+  // The upstream's remote URL as configured, without user-info; null without an upstream, for a local upstream, or when
+  // the remote has no URL. Never a fetch. A timeout still fails the status.
   private async remoteUrl(repoRoot: string, upstream: string | null): Promise<string | null> {
     const remote = upstreamRemote(upstream);
     if (remote === null) return null;
     try {
-      return (await this.run(repoRoot, ['remote', 'get-url', remote])).trim() || null;
+      return withoutUserInfo((await this.run(repoRoot, ['remote', 'get-url', remote])).trim()) || null;
     } catch (error) {
       if (error instanceof GitTimeoutError) throw error;
       return null;
     }
   }
+}
+
+// `https://token@host/…` → `https://host/…`: a credential in a URL-form remote never reaches the renderer. The scp form
+// (`git@host:owner/repo`) carries a login name, not a secret, and is left as it is.
+export function withoutUserInfo(url: string): string {
+  return url.replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/]*@/i, '$1'); // up to the authority's last '@'
 }
 
 function requireAbsolute(directory: string): void {

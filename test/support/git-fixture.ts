@@ -37,9 +37,16 @@ export function runGit(cwd: string, args: string[]): Promise<string> {
 
 export class GitFixture {
   private readonly temps: string[] = [];
+  // An empty HOME for the service under test, so its git reads no global configuration of the machine's owner.
+  readonly home = realpathSync(mkdtempSync(join(tmpdir(), 'maws-git-home-')));
 
   private constructor(readonly root: string) {
-    this.temps.push(root);
+    this.temps.push(root, this.home);
+  }
+
+  // The environment to construct the service under test with: the caller's PATH and the fixture's empty HOME.
+  serviceEnv(): NodeJS.ProcessEnv {
+    return { PATH: process.env.PATH, HOME: this.home };
   }
 
   // A repository on `main` with one commit (`README.md`, one line).

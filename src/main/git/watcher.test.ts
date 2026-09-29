@@ -4,7 +4,7 @@ import { GitChangedSchema, type GitChanged, type GitStatus } from '@shared/ipc/s
 import { GitFixture } from '../../../test/support/git-fixture';
 import { GitTimeoutError } from './runner';
 import { GitService } from './service';
-import { classifyGitPath, classifyRootPath, GitWatcher, type WatchFn } from './watcher';
+import { classifyCommonPath, classifyGitPath, classifyRootPath, GitWatcher, type WatchFn } from './watcher';
 
 const ROOT = '/repo';
 
@@ -40,13 +40,15 @@ function fakeWatch() {
 }
 
 describe('the repository watcher classifies paths', () => {
-  it('counts .git paths only for HEAD, ORIG_HEAD, MERGE_HEAD, index, packed-refs and refs/**; objects/** and *.lock are ignored', () => {
+  it('counts .git paths only for HEAD, ORIG_HEAD, MERGE_HEAD, index, packed-refs, refs/** and config; objects/** and git\'s *.lock are ignored', () => {
     expect(classifyGitPath('HEAD')).toBe('head');
     expect(classifyGitPath('ORIG_HEAD')).toBe('head');
     expect(classifyGitPath('MERGE_HEAD')).toBe('head');
     expect(classifyGitPath('index')).toBe('index');
     expect(classifyGitPath('packed-refs')).toBe('refs');
     expect(classifyGitPath('refs/heads/main')).toBe('refs');
+    expect(classifyGitPath('config')).toBe('refs'); // `branch -u`, `remote set-url`: upstream and remoteUrl live here
+    expect(classifyGitPath('config.lock')).toBeNull();
     expect(classifyGitPath('refs/heads/main.lock')).toBeNull();
     expect(classifyGitPath('index.lock')).toBeNull();
     expect(classifyGitPath('objects/ab/cdef')).toBeNull();
@@ -62,7 +64,23 @@ describe('the repository watcher classifies paths', () => {
     expect(classifyRootPath('.git/objects/ab/cd', '.git')).toBeNull();
     expect(classifyRootPath('.git', '.git')).toBeNull();
     expect(classifyRootPath('.git', null)).toBeNull(); // a linked worktree's pointer file
-    expect(classifyRootPath('notes.txt.lock', '.git')).toBeNull();
+    expect(classifyRootPath('.git/config', '.git')).toBe('refs');
+    // A tracked lock file in the worktree is a change like any other; only git's own locks inside the git dir are ignored.
+    expect(classifyRootPath('Cargo.lock', '.git')).toBe('worktree');
+    expect(classifyRootPath('web/yarn.lock', '.git')).toBe('worktree');
+    expect(classifyRootPath('.git/index.lock', '.git')).toBeNull();
+  });
+
+  it('reads a linked worktree\'s common dir only for the shared refs, packed-refs and config', () => {
+    expect(classifyCommonPath('refs/heads/wt')).toBe('refs');
+    expect(classifyCommonPath('refs/remotes/origin/main')).toBe('refs');
+    expect(classifyCommonPath('packed-refs')).toBe('refs');
+    expect(classifyCommonPath('config')).toBe('refs');
+    expect(classifyCommonPath('refs/heads/wt.lock')).toBeNull();
+    expect(classifyCommonPath('HEAD')).toBeNull(); // the main worktree's own HEAD and index are not this worktree's
+    expect(classifyCommonPath('index')).toBeNull();
+    expect(classifyCommonPath('objects/ab/cd')).toBeNull();
+    expect(classifyCommonPath('worktrees/wt/index')).toBeNull(); // the per-worktree git dir has its own watch
   });
 });
 
@@ -177,7 +195,8 @@ describe('the repository watcher debounces, coalesces and backs off', () => {
     await watcher.watch(ROOT);
     expect(fake.opened.map((w) => w.path)).toEqual([ROOT]); // the main repository's .git is inside its root
     await watcher.watch('/repo/.claude/worktrees/wt');
-    expect(fake.opened.map((w) => w.path)).toEqual([ROOT, '/repo/.claude/worktrees/wt', '/repo/.git/worktrees/wt']);
+    // A linked worktree: its root, its own git dir, and the common dir where the shared refs live.
+    expect(fake.opened.map((w) => w.path)).toEqual([ROOT, '/repo/.claude/worktrees/wt', '/repo/.git/worktrees/wt', '/repo/.git']);
 
     watcher.unwatch(`${ROOT}/src`);
     watcher.unwatch(ROOT);
@@ -206,7 +225,47 @@ describe('the repository watcher debounces, coalesces and backs off', () => {
     watcher.unwatch('/wt'); // nothing was counted
     refuse = false;
     await watcher.watch('/wt'); // a later watch opens the root afresh
-    expect(fake.opened.filter((w) => !w.closed).map((w) => w.path)).toEqual(['/wt', wt.gitDir]);
+    expect(fake.opened.filter((w) => !w.closed).map((w) => w.path)).toEqual(['/wt', wt.gitDir, wt.commonDir]);
+    watcher.dispose();
+  });
+
+  it('caps each debounce window at 1 s from its first event, so a writer that never pauses cannot starve the status', async () => {
+    const fake = fakeWatch();
+    const reads: number[] = [];
+    const start = Date.now();
+    const watcher = new GitWatcher({ status: async () => (reads.push(Date.now() - start), status()), emit: () => {}, watch: fake.watch, statFile: async () => null });
+    await watcher.watch(ROOT);
+    await vi.advanceTimersByTimeAsync(300); // the settle pass
+    reads.length = 0;
+    const from = Date.now() - start;
+    for (let t = 0; t < 3000; t += 100) {
+      fake.fire(ROOT, 'target/debug/build.log');
+      await vi.advanceTimersByTimeAsync(100);
+    }
+    const within = reads.map((at) => at - from);
+    expect(within.length).toBeGreaterThanOrEqual(2);
+    expect(within[0]).toBeLessThanOrEqual(1000);
+    expect(within[1]).toBeLessThanOrEqual(2000);
+    watcher.dispose();
+  });
+
+  it('watches a linked worktree\'s common dir and reads its shared refs and config as refs', async () => {
+    const fake = fakeWatch();
+    let current = status({ repoRoot: '/wt', gitDir: '/repo/.git/worktrees/wt', isWorktree: true, branch: 'wt', upstream: 'origin/main' });
+    const emitted: GitChanged[] = [];
+    const read = vi.fn(async () => current);
+    const watcher = new GitWatcher({ status: read, emit: (e) => emitted.push(e), watch: fake.watch, statFile: async () => null });
+    await watcher.watch('/wt');
+    await vi.advanceTimersByTimeAsync(300);
+    const reads = read.mock.calls.length;
+    fake.fire('/repo/.git', 'objects/ab/cd');
+    fake.fire('/repo/.git', 'index'); // the main worktree's index
+    await vi.advanceTimersByTimeAsync(300);
+    expect(read.mock.calls.length).toBe(reads); // nothing of this worktree's
+    current = { ...current, behind: 1 };
+    fake.fire('/repo/.git', 'refs/remotes/origin/main');
+    await vi.advanceTimersByTimeAsync(300);
+    expect(emitted.at(-1)).toMatchObject({ reason: 'refs', status: { behind: 1 } });
     watcher.dispose();
   });
 
@@ -236,7 +295,7 @@ describe('git.changed from a watched fixture repository', () => {
   beforeEach(async () => {
     repo = await GitFixture.create();
     events = [];
-    service = new GitService({ emit: (e) => events.push(e) });
+    service = new GitService({ emit: (e) => events.push(e), env: repo.serviceEnv() });
   });
   afterEach(() => {
     service.dispose();
@@ -303,9 +362,38 @@ describe('git.changed from a watched fixture repository', () => {
     expect(event.status.dirty).toBe(false);
   }, 10_000);
 
+  it('emits for an edit to a tracked lock file', async () => {
+    await repo.write('Cargo.lock', 'version = 3\n');
+    await repo.git('add', 'Cargo.lock');
+    await repo.git('commit', '-q', '-m', 'lock');
+    await service.watch(repo.root);
+    await settle();
+    const baseline = events.length;
+    await repo.write('Cargo.lock', 'version = 4\n');
+    const { event } = await nextChange(baseline, 1000);
+    expect(event).toMatchObject({ reason: 'worktree', status: { files: [{ path: 'Cargo.lock', worktree: 'M' }] } });
+  }, 10_000);
+
+  it('emits for a linked worktree when a shared ref in the common dir moves its ahead/behind', async () => {
+    await repo.addBareRemote();
+    const wt = await repo.addWorktree('wt');
+    await repo.git('-C', wt, 'branch', '-q', '-u', 'origin/main'); // wt tracks origin/main (config in the common dir)
+    const watched = await service.watch(wt);
+    expect(watched).toMatchObject({ isWorktree: true, upstream: 'origin/main', behind: 0 });
+    await settle();
+    const baseline = events.length;
+    // In the main repository (a write inside the temporary fixture only): main moves on and the remote-tracking ref
+    // follows, as a push or fetch would; nothing under the worktree's root or its own git dir changes.
+    await repo.write('README.md', 'hello\nmain moved\n');
+    await repo.git('commit', '-q', '-am', 'main moves');
+    await repo.git('update-ref', 'refs/remotes/origin/main', 'main');
+    const { event } = await nextChange(baseline, 2000);
+    expect(event).toMatchObject({ repoRoot: wt, reason: 'refs', status: { branch: 'wt', behind: 1 } });
+  }, 10_000);
+
   it('emits nothing after the last unwatch', async () => {
     const spy = vi.fn(fsWatch as unknown as WatchFn);
-    const local = new GitService({ emit: (e) => events.push(e), watch: spy });
+    const local = new GitService({ emit: (e) => events.push(e), watch: spy, env: repo.serviceEnv() });
     await local.watch(repo.root);
     await settle();
     local.unwatch(repo.root);

@@ -4,7 +4,7 @@
 // realpath lies under `<configHome>/projects/`, `tasks/` or `jobs/`, or under the engine's task-output root
 // (`<CLAUDE_CODE_TMPDIR or /tmp>/claude-<uid>`, SPEC 20; C8's ask), is read, so the renderer cannot turn the command
 // into a general file reader; a symlink is judged by its target. Reads are bounded. Read-only: flag 'r' only.
-import { open, realpath } from 'node:fs/promises';
+import { open, realpath, type FileHandle } from 'node:fs/promises';
 import { isAbsolute, resolve, sep } from 'node:path';
 import type { FsReadSpillInput, FsReadSpillOutput } from '@shared/ipc/schema/fs';
 import type { StorePaths } from './paths';
@@ -32,34 +32,43 @@ export async function readSpill(paths: StorePaths, { path, offset = 0, length = 
   try {
     const info = await file.stat();
     if (!info.isFile()) throw new Error(`not a file: ${path}`);
-    const want = Math.max(0, Math.min(length, info.size - offset));
-    const buffer = Buffer.alloc(want);
-    let filled = 0;
-    while (filled < want) {
-      const { bytesRead } = await file.read(buffer, filled, want - filled, offset + filled);
-      if (bytesRead === 0) break;
-      filled += bytesRead;
+    let page = await readFully(file, Math.max(0, Math.min(length, info.size - offset)), offset);
+    // A page ends on a UTF-8 character boundary unless it reaches the file's end, so a character cut by the requested
+    // length is decoded whole on the next page instead of as U+FFFD on both. A page too short to hold the character it
+    // cuts reads forward (at most three bytes) to finish it instead: an empty page would never advance a pager.
+    if (offset + page.length < info.size) {
+      const cut = utf8Cut(page);
+      if (cut.end > 0 || cut.missing === 0) page = page.subarray(0, cut.end);
+      else page = Buffer.concat([page, await readFully(file, Math.min(cut.missing, info.size - offset - page.length), offset + page.length)]);
     }
-    const atEnd = offset + filled >= info.size;
-    const consumed = atEnd ? filled : completeUtf8Length(buffer.subarray(0, filled));
-    return { content: buffer.subarray(0, consumed).toString('utf8'), bytes: info.size, offset, length: consumed, truncated: offset + consumed < info.size };
+    return { content: page.toString('utf8'), bytes: info.size, offset, length: page.length, truncated: offset + page.length < info.size };
   } finally {
     await file.close();
   }
 }
 
-// The longest prefix of `page` that does not end inside a UTF-8 sequence, so a character cut by the requested length is
-// decoded whole on the next page instead of as U+FFFD on both. A page whose only character is cut (a request shorter
-// than one character) is answered whole, since an empty page would never advance a pager; bytes that are not valid
-// UTF-8 are left as they are.
-function completeUtf8Length(page: Buffer): number {
+async function readFully(file: FileHandle, length: number, position: number): Promise<Buffer> {
+  const buffer = Buffer.alloc(length);
+  let filled = 0;
+  while (filled < length) {
+    const { bytesRead } = await file.read(buffer, filled, length - filled, position + filled);
+    if (bytesRead === 0) break;
+    filled += bytesRead;
+  }
+  return buffer.subarray(0, filled);
+}
+
+// Where `page` must end so it does not end inside a UTF-8 sequence, and how many bytes that last sequence lacks (0 when
+// the page ends on a boundary). Bytes that are not valid UTF-8 are left as they are.
+function utf8Cut(page: Buffer): { end: number; missing: number } {
+  const whole = { end: page.length, missing: 0 };
   let start = page.length - 1;
   while (start >= 0 && page.length - start <= 4 && (page[start] & 0xc0) === 0x80) start--; // back over continuation bytes
-  if (start < 0 || page.length - start > 4) return page.length;
+  if (start < 0 || page.length - start > 4) return whole;
   const lead = page[start];
   const size = lead < 0x80 ? 1 : (lead & 0xe0) === 0xc0 ? 2 : (lead & 0xf0) === 0xe0 ? 3 : (lead & 0xf8) === 0xf0 ? 4 : 0;
-  if (size === 0 || start + size <= page.length) return page.length; // complete, or not a sequence at all
-  return start > 0 ? start : page.length;
+  if (size === 0 || start + size <= page.length) return whole; // complete, or not a sequence at all
+  return { end: start, missing: start + size - page.length };
 }
 
 function within(path: string, roots: readonly string[]): boolean {

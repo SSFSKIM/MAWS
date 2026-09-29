@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GitStatusSchema } from '@shared/ipc/schema/git';
 import { GitFixture } from '../../../test/support/git-fixture';
 import { GitTimeoutError, NotARepositoryError, type ExecFileFn } from './runner';
-import { GitService } from './service';
+import { GitService, withoutUserInfo } from './service';
 
 // Every test runs git against a temporary repository the fixture made; never this checkout or the owner's repositories.
 describe('git service answers status, branches, diff and log', () => {
@@ -12,7 +12,7 @@ describe('git service answers status, branches, diff and log', () => {
   let service: GitService;
   beforeEach(async () => {
     repo = await GitFixture.create();
-    service = new GitService();
+    service = new GitService({ env: repo.serviceEnv() });
   });
   afterEach(() => {
     service.dispose();
@@ -73,6 +73,17 @@ describe('git service answers status, branches, diff and log', () => {
     await repo.git('commit', '-q', '-am', 'second');
     expect(await service.status(repo.root)).toMatchObject({ ahead: 1, behind: 0, remoteUrl: bare });
     expect((await service.branches(repo.root)).branches).toEqual([{ name: 'main', upstream: 'origin/main', isCurrent: true }]);
+  });
+
+  it('strips user-info from the remote URL before it leaves main', async () => {
+    await repo.addBareRemote();
+    // The fixture rewrites its own temporary repository's config; nothing is fetched.
+    await repo.git('remote', 'set-url', 'origin', 'https://ghp_secret:x-oauth@github.com/owner/repo.git');
+    expect((await service.status(repo.root)).remoteUrl).toBe('https://github.com/owner/repo.git');
+    expect(withoutUserInfo('https://token@example.com/o/r.git')).toBe('https://example.com/o/r.git');
+    expect(withoutUserInfo('ssh://git@github.com/o/r.git')).toBe('ssh://github.com/o/r.git');
+    expect(withoutUserInfo('git@github.com:o/r.git')).toBe('git@github.com:o/r.git'); // scp form: a login name, no secret
+    expect(withoutUserInfo('/private/var/folders/x/remote')).toBe('/private/var/folders/x/remote');
   });
 
   it('recognises a linked worktree under .claude/worktrees with its own branch and the main repository as common dir', async () => {
