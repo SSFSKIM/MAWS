@@ -99,6 +99,9 @@ const sent = (page: Page, id: string) =>
     id,
   );
 const message = (page: Page) => page.getByRole('textbox', { name: 'Message' });
+// The paragraph ProseMirror's own selection is in (Tiptap hangs the editor on its view's element).
+const caretLine = (page: Page) =>
+  page.evaluate(() => (document.querySelector('.ProseMirror') as unknown as { editor: { state: { selection: { $from: { index(depth: number): number } } } } }).editor.state.selection.$from.index(0));
 
 async function launchEditor(page: Page, id: string, journal: string, cwd = repo): Promise<string | null> {
   await openEditor(page);
@@ -166,8 +169,11 @@ test('the editor sends as typed: Enter in one line, lines by Shift+Enter then En
   await page.keyboard.press('ArrowUp');
   await expect.poll(async () => (await serialized(page))?.display).toBe('two\nlines\nthree');
   // going back leaves the caret at the entry's start, so ArrowDown walks its lines before the next entry
-  await page.keyboard.press('ArrowDown');
-  await page.keyboard.press('ArrowDown');
+  // (a native caret move reaches ProseMirror's state a moment after the key, so each press waits until it has)
+  for (const line of [1, 2]) {
+    await page.keyboard.press('ArrowDown');
+    await expect.poll(() => caretLine(page)).toBe(line);
+  }
   expect((await serialized(page))?.display).toBe('two\nlines\nthree');
   await page.keyboard.press('ArrowDown');
   await expect.poll(async () => (await serialized(page))?.display).toBe('ime\nmarker');
