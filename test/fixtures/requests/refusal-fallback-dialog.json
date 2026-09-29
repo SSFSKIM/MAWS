@@ -1,0 +1,19 @@
+{
+  "description": "A request_user_dialog of the declared kind refusal_fallback_prompt, its payload in the pinned binary's schema; answered retry_fallback, edit_prompt or cancelled. Synthetic: no probe fixture produces one.",
+  "source": "cli.pretty.js:545548 (Y0: { originalModel, fallbackModel, apiRefusalCategory?, guidanceText?, retractedMessageUuids? } → retry_fallback | edit_prompt | cancelled, default cancelled); SPEC 45 §45.22.13",
+  "frame": {
+    "type": "control_request",
+    "request_id": "req-refusal-1",
+    "request": {
+      "subtype": "request_user_dialog",
+      "dialog_kind": "refusal_fallback_prompt",
+      "payload": {
+        "originalModel": "claude-fable-5",
+        "fallbackModel": "claude-sonnet-5",
+        "apiRefusalCategory": "cyber",
+        "guidanceText": "The model declined to continue this response. You can retry with another model or edit your prompt.",
+        "retractedMessageUuids": ["7d1e2f30-4a5b-4c6d-8e7f-90a1b2c3d4e5"]
+      }
+    }
+  }
+}

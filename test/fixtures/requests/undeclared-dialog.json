@@ -1,0 +1,13 @@
+{
+  "description": "A request_user_dialog of a kind MAWS's initialize did not declare (the binary's own cost_threshold dialog kind): it stays pending and visible, and MAWS never completes or cancels it. Synthetic: no probe fixture produces one.",
+  "source": "SPEC 45 §45.22.13 (an undeclared kind is never answered by the host); cli.pretty.js:927997 (the kind names beside auto_mode_server_fallback, cost_threshold among them); C3's broker posts notice dialog:undeclared:<requestId>",
+  "frame": {
+    "type": "control_request",
+    "request_id": "req-undeclared-1",
+    "request": {
+      "subtype": "request_user_dialog",
+      "dialog_kind": "cost_threshold",
+      "payload": { "thresholdUsd": 5, "spentUsd": 5.12 }
+    }
+  }
+}

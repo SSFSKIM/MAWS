@@ -28,6 +28,15 @@ import { registerOpenExternal } from './open-external';
 import { startSessions } from './sessions';
 import { restoreWindowState, trackWindowState } from './window-state';
 // C5 end
+// C7 start
+import type { AppSessionId } from '@shared/graph/ids';
+import type { SessionRecord } from '@shared/graph/session';
+import { pickFiles } from './files/pick';
+import { FileLister } from './git/ls-files';
+import { createGitRunner } from './git/runner';
+import { claudeConfigDir, PromptHistory } from './history/prompt-history';
+import { ClaudeUsageReader, claudeUsageDir } from './usage/claude-usage-reader';
+// C7 end
 // C8c start (emit comes with C3's imports)
 import { shell } from 'electron';
 import { registerFilesHandlers } from './files/register';
@@ -112,13 +121,61 @@ app.whenReady().then(() => {
     restoreWindowState(layout.get('window.main'), screen.getAllDisplays().map((d) => d.workArea), screen.getPrimaryDisplay().workArea);
   const tracked = (win: BrowserWindow) => trackWindowState(win, (state) => layout.set('window.main', state));
   // ---- end C5 ----
+
+  // C7 start: the composer's main services (C7 execution document, M1): ClaudeUsage's files for the status line (read
+  // only), the prompt history (MAWS's own file; the terminal's read only), the `@` menu's file listing and the picker.
+  const home = app.getPath('home');
+  const usage = new ClaudeUsageReader({ dir: claudeUsageDir(process.env, home), emit: (snapshot) => void emit('settings.usageChanged', snapshot) });
+  usage.start();
+  registerMainHandler('settings.usage', ({ engineSessionIds }) => usage.snapshot(engineSessionIds));
+  // a session's record from the read model (both launch modes), else the index; none for an unstarted session
+  const recordOf = (appSessionId: AppSessionId) => {
+    try {
+      return sessions.model.record(appSessionId) ?? index.sessions.get(appSessionId);
+    } catch {
+      return null; // the index is unavailable
+    }
+  };
+  const history = new PromptHistory({
+    file: join(app.getPath('userData'), 'prompt-history.jsonl'),
+    configDir: claudeConfigDir(process.env, home),
+    session: (appSessionId) => {
+      const record = recordOf(appSessionId);
+      return record && { directory: record.directory, engineSessionId: record.engineSessionId };
+    },
+  });
+  registerMainHandler('session.history.list', async ({ appSessionId, limit }) => ({ entries: await history.list(appSessionId as AppSessionId, limit) }));
+  registerMainHandler('session.history.append', ({ appSessionId, display, pastedContents, project }) => history.append(appSessionId as AppSessionId, display, pastedContents, project ?? null));
+  // listable roots: the directories of every session the read model holds (both launch modes) or the index holds
+  // (archived included), and every indexed project's directory
+  const roots = () => {
+    const directoriesOf = (r: SessionRecord) => [r.directory, ...r.additionalDirectories, ...(r.worktree ? [r.worktree.path] : [])];
+    const held = sessions.model.allRecords().flatMap(directoriesOf);
+    try {
+      return [...held, ...index.sessions.list({ includeArchived: true }).flatMap(directoriesOf), ...index.projects.list({ includeHidden: true }).map((p) => p.directory)];
+    } catch {
+      return held; // the index is unavailable
+    }
+  };
+  const files = new FileLister({ run: createGitRunner(), roots });
+  registerMainHandler('git.lsFiles', (input) => files.list(input));
+  registerMainHandler('layout.pickFiles', (input, { sender }) =>
+    pickFiles(input, {
+      showOpenDialog: (options) => {
+        const win = BrowserWindow.fromWebContents(sender);
+        return win ? dialog.showOpenDialog(win, options) : dialog.showOpenDialog(options);
+      },
+    }),
+  );
+  app.on('will-quit', () => usage.stop());
+  // C7 end
   // C8c start: files.* over each session's own directories (the allowlist is read from the read model, which C4's index
   // fills in launch mode index and the stub in scenario); watches are released per window inside the handlers.
-  const files = registerFilesHandlers(sessions.model, {
+  const filesService = registerFilesHandlers(sessions.model, {
     emit: (payload) => void emit('files.changed', payload),
     openPath: (path) => shell.openPath(path),
   });
-  app.on('will-quit', () => files.dispose());
+  app.on('will-quit', () => filesService.dispose());
   // C8c end
 
   // The hosts belong to the app, not to a window or a page (§4.1): they start here, before any window exists, and

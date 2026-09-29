@@ -29,6 +29,7 @@ export function createClient(bridge: () => MawsBridge): MawsBridge {
         listener(checked.value);
       });
     },
+    pathForFile: (file) => bridge().pathForFile(file), // C7: no IPC; the preload asks Electron
   };
 }
 

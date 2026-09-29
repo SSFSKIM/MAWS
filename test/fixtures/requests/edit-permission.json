@@ -1,0 +1,25 @@
+{
+  "description": "A can_use_tool request for an Edit in default mode, with the engine's acceptEdits and local-rule suggestions: the edit-approval variant of mockup 04 vignette 3 (the file row with its before and after, and the three grant scopes). Synthetic: shaped like the live grant request of the C7 M6 run (can_use_tool with display_name, description, tool_use_id), with an Edit input.",
+  "source": "mockups/04-attention.html vignette 03; SPEC 45 §45.19 (can_use_tool permission_suggestions)",
+  "frame": {
+    "type": "control_request",
+    "request_id": "req-edit-1",
+    "request": {
+      "subtype": "can_use_tool",
+      "tool_name": "Edit",
+      "display_name": "Edit",
+      "input": {
+        "file_path": "/tmp/maws-c7-shots/repo/src/a.ts",
+        "old_string": "export const a = 1;",
+        "new_string": "// the drop target now covers a cross-pane drag\nexport const a = 2;",
+        "replace_all": false
+      },
+      "description": "Update the drop target",
+      "permission_suggestions": [
+        { "type": "setMode", "mode": "acceptEdits", "destination": "session" },
+        { "type": "addRules", "rules": [{ "toolName": "Edit" }], "behavior": "allow", "destination": "localSettings" }
+      ],
+      "tool_use_id": "toolu_edit_1"
+    }
+  }
+}

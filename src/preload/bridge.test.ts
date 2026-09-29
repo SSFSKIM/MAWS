@@ -73,9 +73,9 @@ describe('preload bridge', () => {
     expect(listeners.get('maws:evt:pty.data')?.size).toBe(0);
   });
 
-  it('exposes exactly invoke and on', () => {
+  it('exposes exactly invoke, on and pathForFile', () => {
     const { transport } = fakeTransport();
-    expect(Object.keys(createBridge(transport)).sort()).toEqual(['invoke', 'on']);
+    expect(Object.keys(createBridge(transport)).sort()).toEqual(['invoke', 'on', 'pathForFile']); // C7: pathForFile
   });
 });
 
@@ -86,3 +86,21 @@ void ((bridge: MawsBridge) => {
   void bridge.invoke(name, undefined);
   bridge.on(event, (state) => void state.resolvedTheme);
 });
+
+// C7 start: a dropped file's path comes only from Electron's webUtils in the preload (C7 execution document, §4.1 rule)
+describe('preload bridge: pathForFile (C7)', () => {
+  it("answers Electron's path for a file, and '' when Electron has none or no webUtils was given", () => {
+    const { transport } = fakeTransport();
+    const file = new File(['x'], 'a.txt');
+    const getPathForFile = vi.fn((f: File) => (f === file ? '/Users/x/a.txt' : ''));
+    expect(createBridge(transport, { getPathForFile }).pathForFile(file)).toBe('/Users/x/a.txt');
+    expect(createBridge(transport, { getPathForFile }).pathForFile(new File(['y'], 'b.txt'))).toBe('');
+    const throwing = () => {
+      throw new TypeError('not a File');
+    };
+    expect(createBridge(transport, { getPathForFile: throwing }).pathForFile(file)).toBe('');
+    expect(createBridge(transport).pathForFile(file)).toBe('');
+    expect(transport.invoke).not.toHaveBeenCalled();
+  });
+});
+// C7 end

@@ -1,0 +1,17 @@
+{
+  "description": "A can_use_tool request for an MCP tool whose server rides as the object { name, source } and whose approval needs its own surface. Synthetic: no probe fixture produces one.",
+  "source": "SPEC 45 §45.19.1: the request schema at 45:4657, the producer spreading GOn(n.mcpInfo) at 45:4664, mcp_server typed { name, source } at 45:4696",
+  "frame": {
+    "type": "control_request",
+    "request_id": "req-mcp-1",
+    "request": {
+      "subtype": "can_use_tool",
+      "tool_name": "mcp__github__create_issue",
+      "display_name": "create_issue",
+      "input": { "owner": "maws", "repo": "probe", "title": "Bug", "body": "Steps to reproduce" },
+      "tool_use_id": "toolu_mcp_1",
+      "mcp_server": { "name": "github", "source": "user" },
+      "requires_user_interaction": true
+    }
+  }
+}

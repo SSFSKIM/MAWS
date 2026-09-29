@@ -143,7 +143,7 @@ describe('queue release never follows an engine-initiated turn', () => {
     alone.queue.onLifecycle(lifecycle(only.messageUuid!, 'refused'));
     alone.h.turn = false;
     await flush();
-    expect(alone.queue.state).toEqual({ entries: [], paused: false });
+    expect(alone.queue.state).toEqual({ entries: [], paused: false, pauseReason: null }); // C7: pauseReason
     expect(queueRows(alone.rows)).toEqual(['release:send']);
     expect(alone.rows.find((r) => r.event === 'notice')!.text).not.toContain('paused');
     // a paused queue (an interrupt pauses before it cancels) releases nothing at the drop
@@ -251,7 +251,7 @@ describe('queue release never follows an engine-initiated turn', () => {
   it('an engine turn\'s end does nothing with an empty or paused queue', async () => {
     const empty = await harness();
     await empty.queue.onTurnEnded(turnEnded({ origin: 'task-notification' }));
-    expect(empty.queue.state).toEqual({ entries: [], paused: false });
+    expect(empty.queue.state).toEqual({ entries: [], paused: false, pauseReason: null }); // C7: pauseReason
     expect(empty.rows).toEqual([]);
 
     const paused = await harness();
@@ -362,7 +362,7 @@ describe('queue submission survives a crash around delivery', () => {
     await store.saveQueue(ID, { entries: [entry({ queueId: 'q-later', content: 'later' }), entry({ queueId: 'q-sub', state: 'submitting', messageUuid: SUBMITTED, submittedAt: '2026-09-28T10:00:01.000Z' })], paused: false });
     const t = await harness({ store, recovered: false });
     await t.queue.recover();
-    expect(t.queue.state).toEqual({ paused: true, entries: [entry({ queueId: 'q-sub', content: 'lost?', uncertain: true }), entry({ queueId: 'q-later', content: 'later' })] });
+    expect(t.queue.state).toEqual({ paused: true, pauseReason: 'uncertain', entries: [entry({ queueId: 'q-sub', content: 'lost?', uncertain: true }), entry({ queueId: 'q-later', content: 'later' })] }); // C7: pauseReason
     expect(notices(t.rows)).toEqual(['queue:uncertain:q-sub']);
     expect(queueRows(t.rows)).toEqual(['pause:uncertain']);
     expect(await store.loadQueue(ID)).toEqual({ ...t.queue.state, corrupt: null });
@@ -421,7 +421,7 @@ describe('queue submission survives a crash around delivery', () => {
     await store.saveQueue(ID, { entries: [entry({ state: 'released', messageUuid: SUBMITTED, submittedAt: '2026-09-28T10:00:01.000Z' })], paused: false });
     const t = await harness({ store, recovered: false });
     await t.queue.recover();
-    expect(t.queue.state).toEqual({ entries: [], paused: false });
+    expect(t.queue.state).toEqual({ entries: [], paused: false, pauseReason: null }); // C7: pauseReason
     expect(notices(t.rows)).toEqual(['queue:interrupted:q-x']);
     expect(t.writes).toEqual([]);
     expect(t.queue.busy).toBe(false);
@@ -434,7 +434,7 @@ describe('queue submission survives a crash around delivery', () => {
     t.h.turn = false;
     await t.queue.onTurnEnded(turnEnded({ userMessageUuids: [sent.messageUuid!] }));
     await t.queue.onProcessExited('stop');
-    expect(t.queue.state).toEqual({ entries: [], paused: false });
+    expect(t.queue.state).toEqual({ entries: [], paused: false, pauseReason: null }); // C7: pauseReason
     expect(notices(t.rows)).toEqual([]);
   });
 
@@ -447,7 +447,7 @@ describe('queue submission survives a crash around delivery', () => {
     const submitting = t.queue.state.entries[0]!;
     expect(submitting.state).toBe('submitting');
     await t.queue.onProcessExited('crash');
-    expect(t.queue.state).toEqual({ paused: true, entries: [{ ...submitting, state: 'queued', messageUuid: null, submittedAt: null, uncertain: true }] });
+    expect(t.queue.state).toEqual({ paused: true, pauseReason: 'uncertain', entries: [{ ...submitting, state: 'queued', messageUuid: null, submittedAt: null, uncertain: true }] }); // C7: pauseReason
     expect(notices(t.rows)).toEqual([`queue:uncertain:${submitting.queueId}`]);
   });
 
@@ -624,3 +624,99 @@ describe('promote is a durable submission (M4 review)', () => {
     expect(t.queue.state.paused).toBe(false);
   });
 });
+
+// C7 start: why the queue is paused (C7 execution document, Decision Log "execution start 2026-09-29" item 2 and the
+// architect's ruling on it): every pause carries its reason in the state, the change, the store and a reload; resume clears it.
+describe('queue pause reasons (C7)', () => {
+  const lastPauseRow = (rows: Record<string, unknown>[]) => rows.filter((r) => r.event === 'queue' && r.action === 'pause').at(-1)?.reason ?? null;
+  // The reason the queue holds is the one it journaled, everywhere it is published.
+  async function expectReason(t: Awaited<ReturnType<typeof harness>>, reason: string) {
+    await t.queue.settled();
+    expect(lastPauseRow(t.rows)).toBe(reason);
+    expect(t.queue.state).toMatchObject({ paused: true, pauseReason: reason });
+    expect(t.changes.at(-1)).toMatchObject({ paused: true, pauseReason: reason });
+    expect(await t.store.loadQueue(ID)).toMatchObject({ paused: true, pauseReason: reason });
+  }
+
+  it('an unpaused queue has a null reason; interrupt and user pauses carry theirs; resume clears it everywhere', async () => {
+    const t = await harness();
+    expect(t.queue.state).toEqual({ entries: [], paused: false, pauseReason: null });
+    t.h.turn = true;
+    await t.queue.send('waiting');
+    await t.queue.pause('interrupt');
+    await expectReason(t, 'interrupt');
+    await t.queue.setPaused(false);
+    expect(t.queue.state).toMatchObject({ paused: false, pauseReason: null });
+    expect(t.changes.at(-1)).toMatchObject({ paused: false, pauseReason: null });
+    expect(await t.store.loadQueue(ID)).toMatchObject({ paused: false, pauseReason: null });
+    await t.queue.setPaused(true);
+    await expectReason(t, 'user');
+    await t.queue.pause('interrupt'); // already paused: the first reason stands, as the journal says
+    await expectReason(t, 'user');
+  });
+
+  it('every host pause path records the reason it journals', async () => {
+    const failing = await harness({ failWrite: () => true });
+    await failing.queue.send('doomed');
+    await expectReason(failing, 'write_failed');
+
+    const refused = await harness();
+    const { entry: sent } = await refused.queue.send('one');
+    await refused.queue.send('two');
+    refused.queue.onLifecycle(lifecycle(sent.messageUuid!, 'refused'));
+    await expectReason(refused, 'refused');
+
+    const crashed = await harness();
+    crashed.h.turn = true;
+    await crashed.queue.send('waiting');
+    await crashed.queue.onProcessExited('crash');
+    await expectReason(crashed, 'exit');
+
+    const engine = await harness();
+    engine.h.turn = true;
+    await engine.queue.send('held');
+    engine.h.turn = false;
+    engine.h.ready = false;
+    await engine.queue.onTurnEnded(turnEnded({ origin: 'task-notification' }));
+    await expectReason(engine, 'engine_turn');
+
+    const stored = new MemorySessionStateStore();
+    const unsaved = await harness({ store: stored });
+    unsaved.h.turn = true;
+    const realSave = stored.saveQueue.bind(stored);
+    stored.saveQueue = async () => Promise.reject(new Error('ENOSPC'));
+    const { entry: kept } = await unsaved.queue.send('unsaved');
+    stored.saveQueue = realSave;
+    await unsaved.queue.edit(kept.queueId, 'unsaved'); // the next save lands, reason and all
+    await expectReason(unsaved, 'store_failed');
+
+    const corrupt = new MemorySessionStateStore();
+    const realLoad = corrupt.loadQueue.bind(corrupt);
+    corrupt.loadQueue = async () => {
+      corrupt.loadQueue = realLoad; // corrupt once, at the recovery's load
+      return { entries: [], paused: false, corrupt: '/u/engine-host/state/app-q.json.corrupt-1' };
+    };
+    await expectReason(await harness({ store: corrupt }), 'state_corrupt');
+
+    const uncertainStore = new MemorySessionStateStore();
+    await uncertainStore.saveQueue(ID, { entries: [{ queueId: 'q-sub', appSessionId: ID, content: 'lost?', createdAt: '2026-09-28T10:00:00.000Z', state: 'submitting', messageUuid: '55555555-5555-4555-8555-555555555555' as MessageUuid, submittedAt: '2026-09-28T10:00:01.000Z', uncertain: false, steer: false }], paused: false, pauseReason: null });
+    await expectReason(await harness({ store: uncertainStore }), 'uncertain');
+  });
+
+  it('the reason survives a reload through the store; a state saved before the field existed loads paused with a null reason', async () => {
+    const t = await harness();
+    t.h.turn = true;
+    await t.queue.send('waiting');
+    await t.queue.pause('interrupt');
+    const next = await harness({ store: t.store });
+    expect(next.queue.state).toMatchObject({ paused: true, pauseReason: 'interrupt' });
+
+    const legacy = new MemorySessionStateStore();
+    await legacy.saveQueue(ID, { entries: [], paused: true });
+    const old = await harness({ store: legacy });
+    expect(old.queue.state).toEqual({ entries: [], paused: true, pauseReason: null });
+    await old.queue.setPaused(false);
+    expect(old.queue.state).toEqual({ entries: [], paused: false, pauseReason: null });
+  });
+});
+// C7 end

@@ -19,10 +19,16 @@ import { connectPanelHost, registerPanelTool } from './panel/host';
 import { PanelHost } from './panel/PanelHost';
 import { adoptTerminals, terminalTool } from './tools/terminal';
 // C8a end
+// C7 start
+import { ComposerAppKeys, connectComposer, editAndResubmitRow } from './composer';
+import { connectRequestCard } from './request-card';
+import { connectStatusLine } from './statusline';
+import { registerTranscriptActions } from './transcript';
+// C7 end
 // C8c start
 import { connectCodeEvents } from './ipc/events';
 import { codeTranscriptActions, registerCodeTools } from './tools/code';
-import { registerTranscriptActions } from './transcript';
+import { registerTranscriptActions as registerCodeTranscriptActions } from './transcript';
 // C8c end
 
 export function App() {
@@ -55,6 +61,12 @@ export function App() {
     void adoptTerminals();
   }, []);
   // C8a end
+  // C7 start: the X4 card in C5's requestCard slot (docked, card, hover) and C6's transcript request slot (inline)
+  useEffect(() => connectRequestCard(), []);
+  useEffect(() => connectStatusLine(), []); // the shared ClaudeUsage read and the near-limit banner, app-wide
+  useEffect(() => connectComposer(), []); // the composer in C5's composer slot
+  useEffect(() => registerTranscriptActions({ editAndResubmit: editAndResubmitRow }), []); // a bubble's Edit prefills the composer in edit mode
+  // C7 end
   // C8c start: Review, Files, the file viewer and the diff tab, registered once and never unregistered, as C8a's block
   // does (a registration's disposer closes the tool's tabs); main's files.changed; and the transcript's two callbacks
   // (K3), registered after C6's `connectTranscript` so they win over its file-tab default.
@@ -62,7 +74,7 @@ export function App() {
     registerCodeTools();
   }, []);
   useEffect(() => connectCodeEvents(), []);
-  useEffect(() => registerTranscriptActions(codeTranscriptActions), []);
+  useEffect(() => registerCodeTranscriptActions(codeTranscriptActions), []);
   // C8c end
 
   // index.html ships data-theme="light" for the first paint; from then on main's resolved theme decides.
@@ -73,6 +85,9 @@ export function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <Shell />
+      {/* C7 start: the one app-level ⌘. and ⌘L, resolving the focused pane's session */}
+      <ComposerAppKeys />
+      {/* C7 end */}
     </QueryClientProvider>
   );
 }
