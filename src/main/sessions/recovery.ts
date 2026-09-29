@@ -1,0 +1,62 @@
+// Handoff recovery (C10 execution document, Interfaces "Handoff recovery"): at app start an intent whose record exists
+// (`createForLaunch` ran) is settled against three facts and never re-run from scratch, so no restart sends a first
+// message twice or launches on its own (D-16). The facts: `sent`, the handoff was recorded (`progress.send`);
+// `transcript`, the pin's transcript exists; `queue`, C3's persisted queue for the id has an entry (C3's documented
+// `unknown session` reads as empty; any other error is this intent's reconciliation failure, and nothing moves).
+//
+// (a) any fact: the message is delivered or C3's. The record is bound to the pin when its transcript exists, unbound
+//     when it does not (so the next launch is a fresh pinned session rather than `--resume` against nothing), and left
+//     as it is when a `/clear` rebound it to another id; the intent goes.
+// (b) none: the message never reached C3. The provisional record is removed as rollback removes it (the tab survives
+//     through C5's retention, whose predicate is the retained intent), and the intent stays failed with its message,
+//     its pin and any worktree, for the failure card's Retry.
+import type { AppSessionId } from '@shared/graph/ids';
+import type { SetupIntent } from '@shared/sessions/intent';
+import type { SetupResources } from '@shared/sessions/setup';
+import { hostCall, isUnknownSession, pathExists, transcriptPathOf } from './context';
+import type { Setup } from './setup';
+
+export type Reconciled = 'none' | 'handed_off' | 'not_started';
+
+export async function reconcileIntent(s: Setup, intent: SetupIntent): Promise<Reconciled> {
+  const appSessionId = intent.appSessionId;
+  const record = s.sessions.get(appSessionId);
+  if (record === null) return 'none'; // nothing reached `launching`
+  const pin = intent.progress.engineSessionId;
+  const sent = intent.progress.send !== null;
+  const transcript = pin !== null && (await pathExists(await transcriptPathOf(s.env, record.directory, pin)));
+  const queued = sent || transcript ? false : await queueHolds(s, appSessionId);
+
+  if (sent || transcript || queued) {
+    const rebound = record.engineSessionId !== null && pin !== null && record.engineSessionId !== pin; // a `/clear` in the first message
+    if (!rebound) {
+      if (transcript) s.sessions.bindEngineId(appSessionId, pin!);
+      else if (record.engineSessionId !== null) s.sessions.unbindEngineId(appSessionId);
+    }
+    await s.intents.remove(appSessionId);
+    s.emit('session.intent.changed', { appSessionId, intent: null });
+    return 'handed_off';
+  }
+
+  s.sessions.remove(appSessionId);
+  const w = intent.progress.worktree;
+  const newBranch = intent.location.kind === 'newWorktree' && intent.location.branch.kind === 'new';
+  const resources: SetupResources = {
+    worktree: w === null ? null : { path: w.path, branch: w.branch, createdHere: w.createdHere, state: 'kept', detail: null, branchState: w.createdHere && newBranch ? 'kept' : 'none' },
+    record: 'removed',
+    transcript: 'none',
+  };
+  const next: SetupIntent = { ...intent, updatedAt: s.now(), progress: { ...intent.progress, lastFailure: { at: s.now(), phase: 'launching', message: 'MAWS quit before the session started', resources } } };
+  await s.intents.put(next);
+  s.emit('session.intent.changed', { appSessionId, intent: next });
+  return 'not_started';
+}
+
+async function queueHolds(s: Setup, appSessionId: AppSessionId): Promise<boolean> {
+  try {
+    return (await hostCall(s.dispatch, 'session.queue.list', { appSessionId })).entries.length > 0;
+  } catch (error) {
+    if (isUnknownSession(error)) return false; // no reservation and no store file: the app died before `session.launch`
+    throw error;
+  }
+}

@@ -109,8 +109,8 @@ export class FakeEngineHost {
   };
 
   // IndexSessionSource's view of the host: never ready, so it does not sync; it still folds statuses.
-  onState = (_owner: string, _listener: (state: HostState) => void) => () => {};
-  snapshot = (_owner: string): HostState => this.hostState;
+  onState = (): (() => void) => () => {};
+  snapshot = (): HostState => this.hostState;
 
   emitEvent<N extends EventName>(name: N, payload: EventPayload<N>): void {
     for (const listener of [...(this.listeners.get(name) ?? [])]) listener(payload);
@@ -133,7 +133,7 @@ export class FakeEngineHost {
   }
 
   private async answer(name: CommandName, input: Record<string, unknown>): Promise<unknown> {
-    const id = input.appSessionId as string;
+    const id = (input ?? {}).appSessionId as string;
     switch (name) {
       case 'engine.sessions':
         return [...this.table.values()];
