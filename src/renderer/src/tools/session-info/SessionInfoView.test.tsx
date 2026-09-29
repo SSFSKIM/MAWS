@@ -10,7 +10,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import type { UsageSnapshot } from '@shared/usage/types';
 import { loadScenario } from '../../../../../test/support/scenario';
-import { createWidgetBackend, fixtureLine, type WidgetBackend } from '../../../../../test/support/widget-backend';
+import { createWidgetBackend, fixtureLine, RESPONSES, type WidgetBackend } from '../../../../../test/support/widget-backend';
 import { panelHost } from '../../panel/host';
 import type { PanelToolContext } from '../../panel/tool';
 import { rememberListedModels, useComposerStore, type ListedModel } from '../../stores/composer';
@@ -101,7 +101,7 @@ describe('session info renders the six sections', () => {
   // Whole-branch review: after a set_model the engine accepted and before the next init frame, the Main row names the
   // requested model, pending in the model widget's words, as the lane does; once the frame resolves it, the resolved id.
   it('names the requested model as pending until an init frame resolves it, agreeing with the lane', async () => {
-    const catalogue = (fixtureLine(ROOT, 'pass2/auto-routed#143') as { models: ListedModel[] }).models;
+    const catalogue = (fixtureLine(ROOT, RESPONSES.list_models) as { models: ListedModel[] }).models;
     rememberListedModels(READY, catalogue);
     const status = backend.status(READY);
     useSessions.setState({ engine: new Map([[READY, { ...status, model: { requested: 'claude/astra', resolved: 'claude-sonnet-5[1m]' } }]]) });
