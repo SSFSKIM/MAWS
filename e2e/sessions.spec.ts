@@ -6,18 +6,19 @@
 // pins its recorded id), a temp config home (`CLAUDE_CONFIG_DIR`) holding a synthetic `.claude.json` and any
 // transcripts the case needs, a throwaway profile, and scratch repositories under the temp root. No engine runs; the
 // owner's `~/.claude`, `~/.claude.json` and checkouts are never read or written, and Delete's Trash move lands in a
-// temp directory (`MAWS_E2E_TRASH_DIR`, main's e2e seam), never the owner's `~/.Trash`.
+// temp directory (`MAWS_E2E_TRASH_DIR`, main's e2e seam), never the owner's `~/.Trash`. No native panel opens:
+// under MAWS_E2E `layout.pickFiles` answers from `MAWS_E2E_PICK_PATHS` or as cancelled (main's pick seam).
 import { execFileSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { expect, type Page } from '@playwright/test';
 import type { CommandInput, CommandName, CommandResult } from '@shared/ipc/schema';
 import { fixtureIdentity } from '../test/support/fixture-session-id';
 import { runGit } from '../test/support/git-fixture';
 import { ScratchRepo } from '../test/support/scratch-repo';
 import { StoreFixture } from '../test/support/store-fixture';
-import { launchMaws, test, type MawsLaunch } from './support/launch';
+import { launchMaws, REPO_ROOT, test, type MawsLaunch } from './support/launch';
 
 const FIXTURES = 'spikes/protocol-probe/fixtures';
 const AUTO_ROUTED = `${FIXTURES}/pass2/auto-routed.jsonl`;
@@ -150,6 +151,16 @@ async function startDirect(page: Page, id: string, patch: CommandInput<'session.
 }
 
 const row = (page: Page, id: string) => page.locator(`[data-menu="session:${id}"]`);
+
+// A main process built without the pick seam would put the native Open panel on this desktop at the first pick, so a
+// case that picks first checks that the build it launched carries the seam.
+function assertPickSeamBuilt(maws: MawsLaunch): void {
+  const bundles = maws.packaged
+    ? [join(dirname(dirname(process.env.MAWS_E2E_EXECUTABLE!)), 'Resources', 'app.asar')]
+    : readdirSync(join(REPO_ROOT, 'out/main')).filter((f) => f.endsWith('.js')).map((f) => join(REPO_ROOT, 'out/main', f));
+  const built = bundles.some((file) => existsSync(file) && readFileSync(file).includes('MAWS_E2E_PICK_PATHS'));
+  if (!built) throw new Error(`the launched build has no e2e pick seam (${bundles.join(', ')}); rebuild before picking`);
+}
 
 async function menu(page: Page, id: string, item: string): Promise<void> {
   await row(page, id).click({ button: 'right' });
@@ -452,6 +463,21 @@ test.describe('sessions', () => {
     await page.keyboard.press('Escape');
     await store.removeRegistryRecord(pid);
     expect(launched.maws.consoleErrors()).toEqual([]);
+  });
+
+  test("Add project picks through main's e2e seam: cancelled when MAWS_E2E_PICK_PATHS is unset, the listed directory when set; no native panel", async () => {
+    const { page, maws, trustedRepos } = await begin({ fixtures: [] });
+    assertPickSeamBuilt(maws);
+    const repo = trustedRepos[0]!;
+    expect(value(await invoke(page, 'layout.pickFiles', { kind: 'directory', directory: null, multiple: false })), 'unset: answered as cancelled').toEqual({ files: [] });
+    await page.getByRole('button', { name: 'Add project' }).first().click();
+    await expect.poll(async () => value(await invoke(page, 'session.projects.list', undefined)).projects.length, { message: 'a cancelled pick adds nothing' }).toBe(0);
+    await maws.app.evaluate((_electron, dir) => void (process.env.MAWS_E2E_PICK_PATHS = dir), repo.root);
+    await page.getByRole('button', { name: 'Add project' }).first().click();
+    await expect.poll(async () => value(await invoke(page, 'session.projects.list', undefined)).projects.map((p) => p.directory)).toEqual([repo.root]);
+    const [added] = value(await invoke(page, 'session.projects.list', undefined)).projects;
+    await expect(page.getByRole('button', { name: `New session in ${added!.name}`, exact: true })).toBeVisible();
+    expect(maws.consoleErrors()).toEqual([]);
   });
 
   test('an unstarted tab with a draft survives a relaunch', async () => {

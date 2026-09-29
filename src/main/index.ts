@@ -45,6 +45,7 @@ import { registerWorktreeHandlers } from './git/worktrees-register';
 import { BootstrapNotes, FileIntentStore } from './sessions/intents';
 import { ReplaySeam } from './sessions/replay-seam';
 import { trashFor } from './sessions/e2e-trash';
+import { openDialogFor } from './files/e2e-pick';
 import { SessionService } from './sessions/service';
 import { engineHostSettled, registerSessionServiceHandlers } from './sessions/service-register';
 // C10 end
@@ -169,10 +170,11 @@ app.whenReady().then(() => {
   registerMainHandler('git.lsFiles', (input) => files.list(input));
   registerMainHandler('layout.pickFiles', (input, { sender }) =>
     pickFiles(input, {
-      showOpenDialog: (options) => {
+      // C10: the e2e seam (MAWS_E2E=1 never opens the native panel; MAWS_E2E_PICK_PATHS or cancelled), else the panel
+      showOpenDialog: openDialogFor(process.env, (options) => {
         const win = BrowserWindow.fromWebContents(sender);
         return win ? dialog.showOpenDialog(win, options) : dialog.showOpenDialog(options);
-      },
+      }),
     }),
   );
   app.on('will-quit', () => usage.stop());
