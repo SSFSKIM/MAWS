@@ -13,6 +13,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { OperationCommand, OperationEvent } from '../../src/shared/engine/operations';
 import { EngineSessionStatusSchema, type EngineSessionStatus } from '../../src/shared/engine/status';
+import type { QueuePauseReason } from '../../src/shared/engine/session-state-store';
 import type { AutoModeRefusalCode, PermissionMode } from '../../src/shared/graph/enums';
 import type { IpcError } from '../../src/shared/ipc/errors';
 import { EventIdSchema, type AppSessionId, type EventId } from '../../src/shared/graph/ids';
@@ -87,8 +88,9 @@ export const INIT_FRAME: FixtureLine = 'pass2/real-settings#15';
 export const CATALOG_LINES = { initialize: 'pass2/auto-routed#4', init: 'pass2/auto-routed#9' } as const;
 
 // Host-local commands the backend answers besides the table: the status, the catalogue, a prompt (the compact widget's
-// `/compact`, a user message and no control) and the app queue.
-const LOCAL_COMMANDS = ['session.status', 'session.catalog', 'session.send', 'session.queue.list'] as const satisfies readonly CommandName[];
+// `/compact`, a user message and no control), the app queue, and (M4, the route switch) the interrupt, the queue's
+// pause and the stop, each moving the status and the queue as C3's host does.
+const LOCAL_COMMANDS = ['session.status', 'session.catalog', 'session.send', 'session.queue.list', 'session.queue.setPaused', 'session.interrupt', 'session.stop'] as const satisfies readonly CommandName[];
 
 export const WIDGET_BACKEND_COMMANDS: readonly CommandName[] = [...LOCAL_COMMANDS, ...(Object.keys(SUBTYPE_OF) as CommandName[])];
 
@@ -228,6 +230,13 @@ export function createWidgetBackend(options: WidgetBackendOptions): WidgetBacken
   let turnSeq = 0;
   let opSeq = 0;
   let queueSeq = 0;
+  // The app queue's pause per session (C3's `QueueState` without entries): paused by the human, or by an interrupt.
+  const queues = new Map<AppSessionId, { paused: boolean; pauseReason: QueuePauseReason | null }>();
+  const queueOf = (status: EngineSessionStatus) => queues.get(status.appSessionId) ?? { paused: status.queue.paused, pauseReason: status.queue.paused ? ('user' as const) : null };
+  const setQueue = (status: EngineSessionStatus, paused: boolean, pauseReason: QueuePauseReason | null) => {
+    queues.set(status.appSessionId, { paused, pauseReason });
+    emitStatus(status.appSessionId, { queue: { ...statusOf(status.appSessionId).queue, paused } });
+  };
 
   const statusOf = (appSessionId: AppSessionId | null): EngineSessionStatus => {
     const status = appSessionId === null ? undefined : statuses.get(appSessionId);
@@ -292,6 +301,19 @@ export function createWidgetBackend(options: WidgetBackendOptions): WidgetBacken
     return { opId };
   }
 
+  // C3's interrupt: the app queue pauses first (`interrupt`), the engine is asked, and the turn ends after the answer.
+  function interrupt(status: EngineSessionStatus): { stillQueued: string[]; cancelled: string[] } {
+    setQueue(status, true, 'interrupt');
+    if (status.turn !== null) setTimeout(() => emitStatus(status.appSessionId, { turn: null, engineState: 'idle', activity: null }), 0);
+    return { stillQueued: [], cancelled: [] };
+  }
+
+  // C3's stop ladder, answered as a clean exit; the queue and its pause stay in the state file (a `stop` keeps it).
+  function stop(status: EngineSessionStatus, reason: 'stop' | 'archive'): { exited: boolean; code: number | null; signal: string | null } {
+    emitStatus(status.appSessionId, { process: 'exited', exit: { code: 0, signal: null, reason, at: now() }, turn: null, engineState: 'idle', activity: null, pid: null });
+    return { exited: true, code: 0, signal: null };
+  }
+
   // `mcp_status` as the engine would answer after the toggles it accepted.
   function mcpStatus(status: EngineSessionStatus): unknown {
     const answer = fixtureLine(options.root, RESPONSES.mcp_status) as { mcpServers: Record<string, unknown>[] };
@@ -313,9 +335,15 @@ export function createWidgetBackend(options: WidgetBackendOptions): WidgetBacken
     if (command === 'session.status') return statusOf(appSessionIdOf(input));
     const status = statusOf(appSessionIdOf(input));
     if (command === 'session.catalog') return catalog;
-    if (command === 'session.queue.list') return { entries: [], paused: status.queue.paused, pauseReason: null };
+    if (command === 'session.queue.list') return { entries: [], ...queueOf(status) };
+    if (command === 'session.queue.setPaused') {
+      const paused = (input as { paused: boolean }).paused;
+      return void setQueue(status, paused, paused ? 'user' : null);
+    }
+    if (command === 'session.stop') return stop(status, (input as { reason: 'stop' | 'archive' }).reason);
     if (status.process !== 'ready') throw new WidgetBackendError({ code: 'internal', message: `${status.appSessionId} has no ready process` });
     if (command === 'session.send') return { messageUuid: null, disposition: 'sent', queueId: `queue-${++queueSeq}` };
+    if (command === 'session.interrupt') return interrupt(status);
     const subtype = SUBTYPE_OF[command];
     if (!subtype) throw new WidgetBackendError({ code: 'internal', message: `the widget backend does not answer ${command}` });
     const op = OPERATIONS[command];

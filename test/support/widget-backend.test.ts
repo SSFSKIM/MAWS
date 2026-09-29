@@ -159,6 +159,23 @@ describe('the widget backend', () => {
     expect(backend.calls.at(-2)).toEqual({ command: 'session.send', subtype: null, input: { appSessionId: READY, content: '/compact' } });
   });
 
+  // M4: the route switch's lifecycle commands, moving the status and the app queue as C3's host does.
+  it('interrupts an open turn (pausing the queue for it), stops the process, and resumes the queue', async () => {
+    const { backend, emitted } = backendOf();
+    backend.emitTurnStarted(READY);
+    expect(await backend.answer('session.interrupt', { appSessionId: READY, cancelEngineQueued: false })).toEqual({ stillQueued: [], cancelled: [] });
+    expect(await backend.answer('session.queue.list', { appSessionId: READY })).toMatchObject({ paused: true, pauseReason: 'interrupt' });
+    await vi.waitFor(() => expect(backend.status(READY).turn).toBeNull()); // the turn ends after the answer, as turn.ended follows
+    expect(backend.status(READY).engineState).toBe('idle');
+    expect(await backend.answer('session.stop', { appSessionId: READY, reason: 'stop' })).toEqual({ exited: true, code: 0, signal: null });
+    expect(backend.status(READY)).toMatchObject({ process: 'exited', exit: { reason: 'stop' } });
+    expect(emitted.at(-1)).toMatchObject({ name: 'session.status', payload: { status: { process: 'exited' } } });
+    await backend.answer('session.queue.setPaused', { appSessionId: READY, paused: false });
+    expect(await backend.answer('session.queue.list', { appSessionId: READY })).toMatchObject({ paused: false, pauseReason: null });
+    await backend.answer('session.queue.setPaused', { appSessionId: READY, paused: true });
+    expect(await backend.answer('session.queue.list', { appSessionId: READY })).toMatchObject({ paused: true, pauseReason: 'user' });
+  });
+
   it('keeps the synthetic answers readable, each citing where its shape comes from', () => {
     for (const name of ['reload-plugins.json', 'mcp-reconnect.json', 'mcp-toggle.json', 'mcp-toggle-connect-failed.json', 'get-session-cost.json']) {
       expect(syntheticFixture(ROOT, name)._from, name).toMatch(/SPEC/);
