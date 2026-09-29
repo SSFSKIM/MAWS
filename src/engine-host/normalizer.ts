@@ -3,9 +3,9 @@
 // (`in` frames, the host's own `out` frames, and the `meta` rows the host writes for exits, reconnects and transport
 // trouble), so `seq` is never null, every id is `${appSessionId}:${launchId}:${seq}:${i}`, and re-reading a journal
 // through a fresh Normalizer reproduces the live event list exactly. The correlation state is explicit (`state`) so
-// a replay can start from any row given a saved state. Turn rule: the human turn opens at the host's own querying
-// `user` frame (the bubble shows on send), `system/init` marks acceptance inside it and opens an engine-initiated
-// turn only when no turn is open and no `!` echo awaits its receipt. This file holds the class and the frames that
+// a replay can start from any row given a saved state. Turn rule: the bubble shows at the host's own querying `user`
+// frame, the human turn opens at the engine's `started` lifecycle for it (a `started` while a turn is open joins that
+// turn), and `system/init` opens an engine-initiated turn only when no turn is open and no `!` echo awaits its receipt. This file holds the class and the frames that
 // touch turn, lane and correlation state; `normalizer-controls.ts` projects inbound requests and our answers,
 // `normalizer-system.ts` maps the other system subtypes and `normalizer-support.ts` holds the pure projections.
 import * as z from 'zod';

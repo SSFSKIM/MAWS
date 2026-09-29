@@ -119,9 +119,10 @@ export function journalCost(rows: JournalRow[]): { costUsd: number; turns: numbe
   return { costUsd: done + peak, turns };
 }
 
-// Turn attribution in a live graph (M6): a main-lane human turn opens at the host's write of its prompt, so the result
-// that closes it should name that prompt; one that names only other prompts means the engine ran something else first
-// (a `now` steer, a queued task notification) and the graph put the wrong reply under the prompt.
+// Turn attribution in a live graph (M6): a main-lane human turn opens at the engine's `started` lifecycle for its
+// prompt, so the result that closes it should name that prompt; one that names only other prompts means the graph put
+// the wrong reply under the prompt (the failure the host-write boundary produced when a `now` steer or a queued task
+// notification ran first).
 export function turnAttribution(events: SessionEvent[]): string[] {
   const out: string[] = [];
   let open: { seq: number | null; uuid: string } | null = null;

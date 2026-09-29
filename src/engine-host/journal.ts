@@ -3,8 +3,10 @@
 // `<userData>/engine-host/journal/<appSessionId>/<launchId>.jsonl`. The journal is the source of `EventBase.seq`,
 // the input to the replay transport, and what `session.events` reads when its ring no longer holds a range, so a row
 // is on disk (a synchronous append) before the host normalises it and `row()` returns exactly the row the file holds:
-// the production journal is a faithful record (Reload survival, binding), never redacted; secrets never enter it
-// (the spawn row lists env key names only). The probe's redaction is applied only when a journal is exported as a
+// the production journal is a faithful record (Reload survival, binding), never redacted. The accepted posture: the
+// `spawn` row lists environment key names only, never their values, but journals the argument list verbatim, the
+// `--mcp-config` and `--settings` JSON included, and conversation content is kept verbatim, as the engine's own
+// transcript under `~/.claude` already keeps it. The probe's redaction is applied only when a journal is exported as a
 // fixture (`redactJournal`, test/live/support/live.ts); the writer's `redact` option serves that path and tests.
 // Rotation at `maxBytes` continues in `<launchId>.<n>.jsonl` with `seq` continuing; pruning keeps recent launches.
 import { closeSync, createReadStream, existsSync, mkdirSync, openSync, readdirSync, readSync, rmdirSync, statSync, unlinkSync, writeSync } from 'node:fs';
