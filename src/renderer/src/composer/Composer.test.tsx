@@ -303,6 +303,21 @@ describe("composer DOM under C5's dispatcher", () => {
     expect(editorOf().editor.getText()).toBe('one two three four');
   });
 
+  it('the model chip shows the resolved id until the first listModels, then the display name, which outlives the mount', async () => {
+    live(A, { status: { model: { requested: null, resolved: 'claude-sonnet' } } });
+    const view = mount([{ index: 0, id: A }]);
+    const chip = () => within(composerOf(0)).getByRole('button', { name: /^Model / });
+    expect(chip().getAttribute('aria-label')).toBe('Model claude-sonnet');
+    expect(invoked('session.listModels')).toEqual([]); // lazy: no read on mount
+    await userEvent.setup().click(chip());
+    await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model Sonnet'));
+    view.unmount();
+    queryClient.clear(); // nothing left in the query cache: the name is the session's own
+    mount([{ index: 0, id: A }]);
+    expect(chip().getAttribute('aria-label')).toBe('Model Sonnet');
+    expect(invoked('session.listModels')).toHaveLength(1);
+  });
+
   it('keeps `!` enabled while busy as Run, and the control says it runs now inside the turn', async () => {
     busy(A);
     mount([{ index: 0, id: A }]);

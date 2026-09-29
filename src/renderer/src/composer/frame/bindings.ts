@@ -31,7 +31,7 @@ export interface ModelChoice {
 export interface FrameBindings {
   location: ChipBinding<Location, Location>; // the chip row's LocationChip
   branch: ChipBinding<string | null, string>; // inside the location chip's popover
-  model: ChipBinding<ModelChoice, ModelInfo>; // the toolbar's ModelChip (effort inside)
+  model: ChipBinding<ModelChoice, ModelInfo> & { names?: readonly ModelInfo[] }; // the toolbar's ModelChip (effort inside); names: the session's last listed models, for the chip's label before this mount has read them
   mode: ModeBinding; // the toolbar's ModeChip, on the shared mode menu (M5)
   directories: ChipBinding<string[]>; // AddDirChip
 }
@@ -91,6 +91,7 @@ type ModelOption = ListModelsResponse['models'][number];
 // would each ask the engine, and a replayed engine refuses any request its journal did not record).
 export interface LiveReads {
   models?: readonly ModelOption[] | null;
+  modelNames?: readonly ModelOption[] | null; // the session's last listed models, remembered past any read
   directories?: readonly string[] | null;
   branch?: string | null;
   branches?: readonly string[];
@@ -115,6 +116,7 @@ export function liveBindings(status: EngineSessionStatus | null, record: Session
     model: {
       value: current,
       options: [...(reads.models ?? [])],
+      names: reads.modelNames ?? undefined,
       disabled: writable,
       set: async (next) => {
         if (!ready) return { ok: false, error: NOT_RUNNING };

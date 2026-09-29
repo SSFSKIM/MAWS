@@ -5,7 +5,7 @@
 import { useMemo, useState, type KeyboardEvent } from 'react';
 import type { PermissionMode } from '@shared/graph/enums';
 import type { SessionRecord } from '@shared/graph/session';
-import { useCommand } from '../ipc/query';
+import { useListModels } from '../composer/list-models';
 import { useSessions } from '../stores/sessions';
 import { BYPASS_CONFIRM, liveModeBinding, MODE_OPTIONS, MODE_REFUSAL_WORDS, type ModeBinding } from './mode-menu';
 
@@ -108,6 +108,6 @@ export function ModeMenu({ binding, onDone }: { binding: ModeBinding; onDone?: (
 // availability). M4's Mode chip may build the same binding through `liveModeBinding`.
 export function useLiveModeBinding(record: SessionRecord): ModeBinding {
   const status = useSessions((s) => s.engine.get(record.appId) ?? null);
-  const models = useCommand('session.listModels', { appSessionId: record.appId }, { enabled: status?.process === 'ready', staleTime: 60_000 });
-  return useMemo(() => liveModeBinding(record, status, models.data?.models ?? null), [record, status, models.data]);
+  const models = useListModels(record.appId, status?.process === 'ready');
+  return useMemo(() => liveModeBinding(record, status, models), [record, status, models]);
 }

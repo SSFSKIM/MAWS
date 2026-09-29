@@ -1,5 +1,6 @@
 // The toolbar's model with effort (C7 execution document, "Composer frame" Model · effort): the resolved model and the
-// effort; the menu lists the models the binding offers (C3's `listModels`, or C10's catalogue for an unstarted
+// effort, named by the model's display name once the session's models have been listed (the resolved id before);
+// the menu lists the models the binding offers (C3's `listModels`, or C10's catalogue for an unstarted
 // session) with their descriptions, and the chosen model's effort levels (every level when it names none). When C11
 // registered the `/model` widget the chip opens it instead.
 import { Popover } from 'radix-ui';
@@ -14,7 +15,7 @@ const EFFORTS = EffortSchema.options;
 const matches = modelMatches;
 const displayOf = (options: readonly ModelInfo[], model: string | null) => (model === null ? 'Default model' : (options.find((m) => matches(m, model))?.displayName ?? model));
 
-export function ModelChip({ binding, openWidget, onOpen }: { binding: ChipBinding<ModelChoice, ModelInfo>; openWidget: (() => boolean) | null; onOpen?(): void }) {
+export function ModelChip({ binding, openWidget, onOpen }: { binding: ChipBinding<ModelChoice, ModelInfo> & { names?: readonly ModelInfo[] }; openWidget: (() => boolean) | null; onOpen?(): void }) {
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -30,7 +31,8 @@ export function ModelChip({ binding, openWidget, onOpen }: { binding: ChipBindin
       setPending(false);
     }
   };
-  const label = `${displayOf(binding.options, model)}${effort ? ` · ${effort}` : ''}`;
+  // named from the options this mount read, else the session's last listed models, else the resolved id itself
+  const label = `${displayOf(binding.options.length > 0 ? binding.options : (binding.names ?? []), model)}${effort ? ` · ${effort}` : ''}`;
   return (
     <Popover.Root
       open={open}

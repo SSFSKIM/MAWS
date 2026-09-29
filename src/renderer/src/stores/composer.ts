@@ -6,9 +6,11 @@
 // targets a mounted composer registers (the docked frame gives focus back through them). M3 adds the `#` target each
 // session remembers; M4 adds the composer's own state beside these: the synchronous `starting` gate of an unstarted
 // session's first send, the edit mode a prefill with `editing` enters, and the resubmit state the edit-and-resubmit
-// flow (M4b) drives, each per session so they outlive a tab switch.
+// flow (M4b) drives, each per session so they outlive a tab switch. The final fixes add the models each session's
+// engine last listed, so the model chip names its model once any reader has asked (the ask itself stays lazy).
 import { create } from 'zustand';
 import type { AppSessionId, MessageUuid, RequestId } from '@shared/graph/ids';
+import type { ListModelsResponse } from '@shared/wire/control';
 import { toast } from './notices';
 
 export interface Prefill {
@@ -62,9 +64,22 @@ export interface ComposerState {
   editing: ReadonlyMap<AppSessionId, Editing>; // M4: edit mode, entered by a prefill with `editing`
   resubmit: ReadonlyMap<AppSessionId, Resubmit>; // M4b: absent is IDLE_RESUBMIT
   restoredEdits: ReadonlySet<AppSessionId>; // M4b: edit modes restored from a draft (a reload), until the edit ends
+  models: ReadonlyMap<AppSessionId, readonly ListedModel[]>; // the engine's latest `session.listModels` answer per session
 }
 
-const initial = (): ComposerState => ({ prefills: new Map(), docked: new Map(), focusTargets: new Map(), memoryTargets: new Map(), starting: new Set(), editing: new Map(), resubmit: new Map(), restoredEdits: new Set() });
+export type ListedModel = ListModelsResponse['models'][number];
+
+const initial = (): ComposerState => ({
+  prefills: new Map(),
+  docked: new Map(),
+  focusTargets: new Map(),
+  memoryTargets: new Map(),
+  starting: new Set(),
+  editing: new Map(),
+  resubmit: new Map(),
+  restoredEdits: new Set(),
+  models: new Map(),
+});
 
 export const useComposerStore = create<ComposerState>()(initial);
 
@@ -186,4 +201,11 @@ export function insertComposerText(appSessionId: AppSessionId, text: string): vo
   const target = useComposerStore.getState().focusTargets.get(appSessionId);
   if (target) target.insertText(text);
   else console.warn(`[composer] insertComposerText: no composer is mounted for ${appSessionId}`);
+}
+
+// The session's listed models, kept past any one read (a C10 `engine.models` source replaces this once it lands).
+export const listedModelsOf = (state: ComposerState, appSessionId: AppSessionId): readonly ListedModel[] | null => state.models.get(appSessionId) ?? null;
+
+export function rememberListedModels(appSessionId: AppSessionId, models: readonly ListedModel[]): void {
+  useComposerStore.setState((s) => (s.models.get(appSessionId) === models ? s : { models: new Map(s.models).set(appSessionId, models) }));
 }

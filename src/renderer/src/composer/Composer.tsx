@@ -25,7 +25,7 @@ import { useKeyChord } from '../keymap/useKeyChord';
 import { RequestCard } from '../request-card/RequestCard';
 import { nextMode } from '../statusline';
 import { useAttention, selectPendingOf } from '../stores/attention';
-import { editingOf, isStarting, memoryTargetOf, registerFocusTarget, resubmitRecordOf, setStarting, useComposerStore, type Editing, type ResubmitState } from '../stores/composer';
+import { editingOf, isStarting, listedModelsOf, memoryTargetOf, registerFocusTarget, resubmitRecordOf, setStarting, useComposerStore, type Editing, type ResubmitState } from '../stores/composer';
 import { useLayout } from '../stores/layout';
 import { toast } from '../stores/notices';
 import { useSessionQueue } from '../stores/queue';
@@ -60,6 +60,7 @@ import {
   settleRestoredEdit,
   takeAutoSend,
 } from './resubmit-seam';
+import { useListModels } from './list-models';
 import { locationPath, useSetupIntent, type SetupIntentHook } from './setup-intent';
 import { steerPriority, submitState, type SubmitDecision } from './submit/submit-state';
 import { SubmitControl } from './submit/SubmitControl';
@@ -138,13 +139,16 @@ function useDraftPort(appSessionId: AppSessionId, hook: SetupIntentHook | null, 
 }
 
 // The live chips' reads: C3's models and permission rules, each a control request to the engine, read once a chip that
-// shows it has opened (never per mount), and the branch list for the location popover.
+// shows it has opened (never per mount), the session's last listed models for the model chip's name, and the branch
+// list for the location popover.
 function useLiveReads(appSessionId: AppSessionId, want: { models: boolean; rules: boolean }, directory: string | null, git: { branch: string | null } | null) {
-  const models = useCommand('session.listModels', { appSessionId }, { enabled: want.models, staleTime: 60_000 });
+  const models = useListModels(appSessionId, want.models);
+  const modelNames = useComposerStore((s) => listedModelsOf(s, appSessionId));
   const rules = useCommand('session.listPermissionRules', { appSessionId }, { enabled: want.rules, staleTime: 10_000 });
   const branches = useCommand('git.branches', { directory: directory ?? '' }, { enabled: want.rules && directory !== null && git !== null, staleTime: 30_000 });
   return {
-    models: models.data?.models ?? null,
+    models,
+    modelNames,
     directories: rules.data ? workspaceDirectoriesOf(rules.data.state.workspaceDirectories) : null,
     branch: git?.branch ?? null,
     branches: branches.data?.branches.map((b) => b.name) ?? [],
