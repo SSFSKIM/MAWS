@@ -39,7 +39,7 @@ export const WIDGET_FOOT: Record<WidgetCommandName, WidgetFoot> = {
   fast: { readWith: 'list_models', editedWhere: SESSION_ONLY_MODEL },
   permissions: { readWith: 'list_permission_rules', editedWhere: 'Rules are edited in their settings files; session grants come from approval cards' },
   usage: { readWith: 'get_usage', editedWhere: 'Windows come from ClaudeUsage; the engine reports none through the relay' },
-  config: { readWith: 'get_settings', editedWhere: "Settings are edited in their files or the terminal's `/config`; MAWS's own settings are in the Settings tab" },
+  config: { readWith: 'get_settings and get_memory_dialog', editedWhere: "Settings are edited in their files or the terminal's `/config`; MAWS's own settings are in the Settings tab" },
   plugins: { readWith: 'system/init', editedWhere: "Enable and disable in settings (`enabledPlugins`) or the terminal's `/plugins`; the engine lists what it loaded" },
   mcp: {
     readWith: 'mcp_status',
