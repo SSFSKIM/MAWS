@@ -69,6 +69,10 @@ export interface FilesService {
 
 export const FILES_REFUSAL = "path outside the session's directories";
 
+// How many entries of one listing are read (`lstat`, and `readlink` for a link) at once: a directory of thousands of
+// names must not start thousands of filesystem calls together.
+const LIST_STAT_CONCURRENCY = 64;
+
 const { O_RDONLY, O_NONBLOCK, O_DIRECTORY } = fs.constants;
 // macOS only (MAWS is macOS only; macOS 11 and later): refuse a symlink anywhere on the path the kernel walks, not only
 // in its last component. Node's fs.constants does not carry it, so it is passed through numerically; a test asserts the
@@ -160,7 +164,7 @@ export function createFilesService({ records, hooks, emit = () => {}, openPath, 
       });
       await at('after-readdir', path);
       // Private until the final confirmation below; an entry whose lstat or readlink fails is dropped unnamed.
-      const collected = (await Promise.all(names.map((name) => entryAt(real, name)))).filter((entry) => entry !== null);
+      const collected = (await mapBounded(names, LIST_STAT_CONCURRENCY, (name) => entryAt(real, name))).filter((entry) => entry !== null);
       await confirm(path, roots, stat);
       const sorted = collected.sort((a, b) => Number(b.kind === 'dir') - Number(a.kind === 'dir') || a.name.localeCompare(b.name));
       const root = roots.filter((candidate) => under(candidate, real)).sort((a, b) => b.length - a.length)[0] ?? null;
@@ -290,6 +294,20 @@ async function entryAt(real: string, name: string): Promise<FilesEntry | null> {
   } catch {
     return null; // deleted since readdir, or unreadable: dropped, and Node's message (which names it) discarded
   }
+}
+
+// `items.map(fn)` with at most `limit` calls of `fn` pending at once, the answers in the items' order.
+async function mapBounded<T, R>(items: readonly T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const answers = new Array<R>(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const index = next++;
+      answers[index] = await fn(items[index]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return answers;
 }
 
 function kindOf(stat: fs.Stats): FilesEntry['kind'] {

@@ -579,6 +579,26 @@ describe('files service listing and reading', () => {
     expect(await files.list({ appSessionId: A, path: inRoot('a') })).toMatchObject({ root });
   });
 
+  it('reads the entries of a large directory a bounded number at a time', async () => {
+    mkdirSync(inRoot('wide'));
+    for (let i = 0; i < 300; i++) writeFileSync(inRoot('wide', `f${String(i).padStart(3, '0')}.txt`), '');
+    const lstat = fs.promises.lstat.bind(fs.promises);
+    let open = 0;
+    let most = 0;
+    vi.spyOn(fs.promises, 'lstat').mockImplementation(async (...args: Parameters<typeof lstat>) => {
+      most = Math.max(most, ++open);
+      try {
+        return await lstat(...args);
+      } finally {
+        open--;
+      }
+    });
+    const listing = await service().list({ appSessionId: A, path: inRoot('wide') });
+    expect(listing.entries).toHaveLength(300);
+    expect(most).toBeGreaterThan(1);
+    expect(most).toBeLessThanOrEqual(64);
+  });
+
   it('cuts a listing at the cap with truncated', async () => {
     mkdirSync(inRoot('many'));
     for (let i = 0; i <= FILES_LIST_MAX_ENTRIES; i++) writeFileSync(inRoot('many', `f${String(i).padStart(5, '0')}.txt`), '');
