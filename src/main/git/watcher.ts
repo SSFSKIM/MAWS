@@ -121,22 +121,28 @@ export class GitWatcher {
       backoff: false,
       failing: false,
     };
-    this.roots.set(root.root, root);
     const inside = relative(root.root, status.gitDir);
     const gitDirRel = inside !== '' && !inside.startsWith('..') && !isAbsolute(inside) ? inside.split(sep).join('/') : null;
     const onError = (error: Error) => console.warn(`[git] watch failed under ${root.root}: ${error.message}`);
-    const rootWatch = this.watchFn(root.root, { recursive: true }, (_event, filename) =>
-      this.changed(root, filename === null ? 'worktree' : classifyRootPath(filename.split(sep).join('/'), gitDirRel)),
-    );
-    rootWatch.on('error', onError);
-    root.handles.push(rootWatch);
-    if (gitDirRel === null) {
-      const gitDirWatch = this.watchFn(status.gitDir, { recursive: true }, (_event, filename) =>
-        this.changed(root, filename === null ? 'index' : classifyGitPath(filename.split(sep).join('/'))),
+    // A watch that cannot open (the directory vanished since its status was read) fails this call and leaves no root.
+    try {
+      const rootWatch = this.watchFn(root.root, { recursive: true }, (_event, filename) =>
+        this.changed(root, filename === null ? 'worktree' : classifyRootPath(filename.split(sep).join('/'), gitDirRel)),
       );
-      gitDirWatch.on('error', onError);
-      root.handles.push(gitDirWatch);
+      root.handles.push(rootWatch);
+      rootWatch.on('error', onError);
+      if (gitDirRel === null) {
+        const gitDirWatch = this.watchFn(status.gitDir, { recursive: true }, (_event, filename) =>
+          this.changed(root, filename === null ? 'index' : classifyGitPath(filename.split(sep).join('/'))),
+        );
+        root.handles.push(gitDirWatch);
+        gitDirWatch.on('error', onError);
+      }
+    } catch (error) {
+      for (const handle of root.handles) handle.close();
+      throw error;
     }
+    this.roots.set(root.root, root);
     // FSEvents starts its stream asynchronously, and the status above was read before the watch opened: one pass after
     // the debounce closes both gaps (the store watcher's settle rescan, M2, for the same reason).
     this.schedule(root);

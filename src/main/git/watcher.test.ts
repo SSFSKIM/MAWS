@@ -190,6 +190,26 @@ describe('the repository watcher debounces, coalesces and backs off', () => {
     expect(fake.opened.every((w) => w.closed)).toBe(true);
   });
 
+  it('fails a watch whose git dir watch cannot open, closing what it opened and registering nothing', async () => {
+    const fake = fakeWatch();
+    const wt = status({ repoRoot: '/wt', gitDir: '/repo/.git/worktrees/wt', isWorktree: true });
+    let refuse = true;
+    const watch: WatchFn = (path, options, listener) => {
+      if (refuse && path === wt.gitDir) throw Object.assign(new Error(`ENOENT: no such file or directory, watch '${path}'`), { code: 'ENOENT' });
+      return fake.watch(path, options, listener);
+    };
+    const emitted: GitChanged[] = [];
+    const watcher = new GitWatcher({ status: async () => wt, emit: (e) => emitted.push(e), watch, statFile: async () => null });
+    await expect(watcher.watch('/wt')).rejects.toThrow('ENOENT');
+    expect(fake.opened.map((w) => [w.path, w.closed])).toEqual([['/wt', true]]);
+    expect(emitted).toEqual([]);
+    watcher.unwatch('/wt'); // nothing was counted
+    refuse = false;
+    await watcher.watch('/wt'); // a later watch opens the root afresh
+    expect(fake.opened.filter((w) => !w.closed).map((w) => w.path)).toEqual(['/wt', wt.gitDir]);
+    watcher.dispose();
+  });
+
   it('reads the worktree git dir events through the git rule', async () => {
     const fake = fakeWatch();
     let current = status({ repoRoot: '/wt', gitDir: '/repo/.git/worktrees/wt', isWorktree: true });
