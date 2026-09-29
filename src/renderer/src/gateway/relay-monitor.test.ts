@@ -38,7 +38,7 @@ afterEach(() => vi.useRealTimers());
 
 describe('relay monitor posts one banner per outage', () => {
   it('while a gateway session is live, polls with force every 30 s; down, down, up posts one banner and dismisses it once', async () => {
-    const h = harness([true, false, false, true]);
+    const h = harness([true, false, false, false, true]);
     h.live('a');
     await vi.advanceTimersByTimeAsync(0);
     expect(h.invoke).toHaveBeenCalledExactlyOnceWith('engine.relayHealth', { force: true });
@@ -47,17 +47,22 @@ describe('relay monitor posts one banner per outage', () => {
     await vi.advanceTimersByTimeAsync(RELAY_POLL_MS); // down
     expect(h.banners()).toEqual([expect.objectContaining({ id: RELAY_BANNER_ID, level: 'warning', dismissible: true })]);
     expect(h.banners()[0]!.text).toBe(
-      "ClaudeUsage's relay stopped answering (last answer 30 s ago) · 1 live session keeps its process; its next request fails until it is back · new sessions will offer Direct",
+      "ClaudeUsage's relay stopped answering just now · 1 live session keeps its process; its next request fails until it is back · new sessions will offer Direct",
     );
+    // M5: while it stays down the same banner says for how long, and how many live sessions it is about, in place
+    h.live('b');
     await vi.advanceTimersByTimeAsync(RELAY_POLL_MS); // still down
-    expect(h.banner).toHaveBeenCalledOnce();
     expect(h.banners()).toHaveLength(1);
+    expect(h.banners()[0]!.text).toBe(
+      "ClaudeUsage's relay stopped answering 30 s ago · 2 live sessions keep their process; their next request fails until it is back · new sessions will offer Direct",
+    );
+    await vi.advanceTimersByTimeAsync(RELAY_POLL_MS);
+    expect(h.banners()[0]!.text).toMatch(/^ClaudeUsage's relay stopped answering 1 min ago · /);
 
     await vi.advanceTimersByTimeAsync(RELAY_POLL_MS); // back
-    expect(h.invoke).toHaveBeenCalledTimes(4);
+    expect(h.invoke).toHaveBeenCalledTimes(5);
     expect(h.banners()).toEqual([]);
     expect(h.toasts()).toEqual([expect.objectContaining({ text: 'Relay is back', level: 'info' })]);
-    expect(h.banner).toHaveBeenCalledOnce();
     expect(h.gateway.getState().relay).toMatchObject({ ok: true });
     h.stop();
   });
@@ -95,13 +100,13 @@ describe('relay monitor posts one banner per outage', () => {
     await vi.advanceTimersByTimeAsync(RELAY_POLL_MS);
     expect(h.banners()[0]!.text).toContain('2 live sessions keep their process; their next request fails');
     h.notices.getState().dismiss(RELAY_BANNER_ID);
-    await vi.advanceTimersByTimeAsync(RELAY_POLL_MS); // still down
+    await vi.advanceTimersByTimeAsync(RELAY_POLL_MS); // still down: neither posted again nor refreshed back into view
     expect(h.banners()).toEqual([]);
     await vi.advanceTimersByTimeAsync(RELAY_POLL_MS); // back
     expect(h.toasts()).toHaveLength(1);
     await vi.advanceTimersByTimeAsync(RELAY_POLL_MS); // down again
     expect(h.banners()).toHaveLength(1);
-    expect(h.banner).toHaveBeenCalledTimes(2);
+    expect(h.banner).toHaveBeenCalledTimes(2); // the first outage's post and the second's
     h.stop();
   });
 

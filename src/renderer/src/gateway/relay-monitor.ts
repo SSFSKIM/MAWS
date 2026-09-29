@@ -26,17 +26,18 @@ export interface RelayMonitorDeps {
   runAction(id: ActionId): void;
 }
 
-function ago(fromIso: string, toIso: string): string {
+// How long the relay has not answered, from the first check that found it down to the latest (mockup 06 vignette 02).
+function since(fromIso: string, toIso: string): string {
   const s = Math.max(0, Math.round((Date.parse(toIso) - Date.parse(fromIso)) / 1000));
+  if (s < 5) return 'just now';
   if (s < 60) return `${s} s ago`;
-  if (s < 3600) return `${Math.round(s / 60)} min ago`;
-  return `${Math.round(s / 3600)} h ago`;
+  if (s < 3600) return `${Math.floor(s / 60)} min ago`;
+  return `${Math.floor(s / 3600)} h ago`;
 }
 
-function bannerText(live: number, lastAnswerAt: string | null, failedAt: string): string {
-  const since = lastAnswerAt === null ? '' : ` (last answer ${ago(lastAnswerAt, failedAt)})`;
+function bannerText(live: number, outageSince: string, checkedAt: string): string {
   const sessions = live === 1 ? '1 live session keeps its process; its next request fails' : `${live} live sessions keep their process; their next request fails`;
-  return `ClaudeUsage's relay stopped answering${since} · ${sessions} until it is back · new sessions will offer Direct`;
+  return `ClaudeUsage's relay stopped answering ${since(outageSince, checkedAt)} · ${sessions} until it is back · new sessions will offer Direct`;
 }
 
 export function startRelayMonitor(
@@ -44,7 +45,6 @@ export function startRelayMonitor(
 ): () => void {
   const { gateway, sessions, notices } = deps;
   let timer: ReturnType<typeof setInterval> | null = null;
-  let lastAnswerAt: string | null = null; // the last check the relay answered
   let outage: { since: string } | null = null;
 
   const check = () => void gateway.getState().refreshRelay(true).catch((error: unknown) => console.warn('[gateway] relay check failed', error));
@@ -52,19 +52,20 @@ export function startRelayMonitor(
 
   const observe = (health: RelayHealth) => {
     if (health.ok) {
-      lastAnswerAt = health.checkedAt;
       if (outage === null) return;
       outage = null;
       if (bannerShown()) notices.getState().dismiss(RELAY_BANNER_ID);
       notices.getState().toast({ level: 'info', text: 'Relay is back', actions: [], dismissible: true });
       return;
     }
-    if (outage !== null) return; // this outage's banner is up, or was dismissed
-    outage = { since: health.checkedAt };
+    // One banner per outage: posted at its first failed check, then kept current in place (how long, how many live
+    // sessions) while it is shown; once dismissed it stays dismissed until the relay answers again.
+    if (outage !== null && !bannerShown()) return;
+    outage ??= { since: health.checkedAt };
     notices.getState().banner({
       id: RELAY_BANNER_ID,
       level: 'warning',
-      text: bannerText(liveGatewaySessions(sessions.getState()), lastAnswerAt, health.checkedAt),
+      text: bannerText(liveGatewaySessions(sessions.getState()), outage.since, health.checkedAt),
       actions: [
         { label: 'Open ClaudeUsage', run: () => deps.runAction('gateway.openClaudeUsage') },
         { label: 'Retry', run: check },
