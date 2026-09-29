@@ -494,8 +494,9 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
 
 // What the turn did whatever was disclosed, one entry per tool use from the turn's tool records (so the calls a merged
 // read cell folds together keep their own names; thinking and hooks are no tool uses; child agents' calls live in
-// `children` and are not tool uses of the turn, though their completed edits are its edited files, as on the receipt). A file counts as read or edited once its call completed without an error or a
-// denial: a refused or failed call touched nothing. An edit carries its cell's own detail (hunks, counts, change).
+// `children` and are not tool uses of the turn, though their completed edits are its edited files, as on the
+// receipt). A file counts as read or edited once its call completed without an error or a denial: a refused or failed
+// call touched nothing. An edit carries its cell's own detail (hunks, counts, change).
 const READS = new Set(['Read', 'Glob', 'Grep', 'LS', 'NotebookRead']);
 const EDITS = new Set(['Edit', 'MultiEdit', 'Write', 'NotebookEdit']);
 
