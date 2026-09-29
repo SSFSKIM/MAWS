@@ -25,7 +25,9 @@ export { useTranscriptStore } from '../stores/transcript';
 
 // The presentation model (X3) as pure functions.
 export { classifyTool } from './model/classify';
-export { applyEvents } from './model/reduce';
+// A consumer that applies events builds its own state with `createState` (never the store's: states form one
+// lineage, and applying to the store's state would make its next batch throw).
+export { applyEvents, createState, type TranscriptState } from './model/reduce';
 export { rowsOf, turnSummary } from './model/derive';
 export { dividerCopy } from './model/copy';
 export { serializeRows } from './model/serialize';
