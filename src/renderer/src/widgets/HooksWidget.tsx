@@ -4,7 +4,7 @@
 import * as z from 'zod';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { GetHooksListingResponse } from '@shared/wire/control';
-import { HOOKS_DISABLED_BY_POLICY, NO_HOOKS, WIDGET_FOOT, WIDGET_TITLE } from './copy';
+import { HOOKS, WIDGET_FOOT, WIDGET_TITLE } from './copy';
 import { Group, Mono, parseEach, Row, Rows } from './parts';
 import { useEngineRead } from './read';
 import { WidgetFrame } from './WidgetFrame';
@@ -30,9 +30,9 @@ export interface HooksView {
 function policyLine(raw: unknown): string | null {
   const p = PolicySchema.safeParse(raw);
   if (!p.success) return null;
-  if (p.data.disabledByPolicy || p.data.allDisabled) return HOOKS_DISABLED_BY_POLICY;
-  if (p.data.managedOnly) return 'Only managed hooks run';
-  if (p.data.pluginOnly) return 'Only plugin hooks run';
+  if (p.data.disabledByPolicy || p.data.allDisabled) return HOOKS.disabled;
+  if (p.data.managedOnly) return HOOKS.managedOnly;
+  if (p.data.pluginOnly) return HOOKS.pluginOnly;
   return null;
 }
 
@@ -54,15 +54,15 @@ export function HooksBody({ view }: { view: HooksView }) {
   return (
     <div className="flex flex-col">
       {view.policy && <p className="m-0 mb-2 text-ui-sm text-warning">{view.policy}</p>}
-      {view.hooks.length === 0 && <p className="m-0 text-ui-sm text-fg-muted">{NO_HOOKS}</p>}
+      {view.hooks.length === 0 && <p className="m-0 text-ui-sm text-fg-muted">{HOOKS.none}</p>}
       {view.events.map((event) => {
         const hooks = view.hooks.filter((h) => h.event === event.name);
         return (
           <Group key={event.name} label={event.name} count={event.count}>
             {event.summary && <p className="m-0 mb-1 text-ui-sm text-fg-muted">{event.summary}</p>}
-            <Rows label={`${event.name} hooks`}>
+            <Rows label={HOOKS.list(event.name)}>
               {hooks.map((h, i) => (
-                <Row key={i} main={<Mono>{h.text}</Mono>} note={h.source} detail={h.matcher ? `matcher ${h.matcher}` : null} />
+                <Row key={i} main={<Mono>{h.text}</Mono>} note={h.source} detail={h.matcher ? HOOKS.matcher(h.matcher) : null} />
               ))}
             </Rows>
           </Group>

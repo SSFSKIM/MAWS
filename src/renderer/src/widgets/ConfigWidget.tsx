@@ -7,7 +7,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { GetSettingsResponse } from '@shared/wire/control';
 import { runAction } from '../keymap/actions-runtime';
 import { useSessions } from '../stores/sessions';
-import { MAWS_SETTINGS, NO_EFFECTIVE, OPEN_FILE, RULE_SOURCE, WIDGET_FOOT, WIDGET_TITLE } from './copy';
+import { CONFIG, PERMISSIONS, SHARED, WIDGET_FOOT, WIDGET_TITLE } from './copy';
 import { Group, KeyValues, Mono, parseEach, RevealButton, Row, Rows, TextButton } from './parts';
 import { useEngineRead } from './read';
 import { WidgetFrame } from './WidgetFrame';
@@ -23,19 +23,19 @@ export interface ConfigView {
   errors: string[];
 }
 
-const shown = (value: unknown) => (typeof value === 'string' ? value : value === null || value === undefined ? 'none' : JSON.stringify(value));
+const shown = (value: unknown) => (typeof value === 'string' ? value : value === null || value === undefined ? SHARED.none : JSON.stringify(value));
 
 export function present(answer: GetSettingsResponse): ConfigView {
   const applied = AppliedSchema.safeParse(answer.applied ?? null);
   return {
     effective: Object.entries(answer.effective).map(([key, value]) => ({ key, value: JSON.stringify(value) })),
-    sources: parseEach(SourceSchema, answer.sources).map((s) => ({ source: s.source, label: RULE_SOURCE[s.source] ?? s.source, keys: Object.keys(s.settings) })),
+    sources: parseEach(SourceSchema, answer.sources).map((s) => ({ source: s.source, label: PERMISSIONS.source[s.source] ?? s.source, keys: Object.keys(s.settings) })),
     applied: applied.success
       ? [
-          { label: 'Model', value: shown(applied.data.model) },
-          { label: 'Effort', value: shown(applied.data.effort) },
-          { label: 'Advisor', value: shown(applied.data.advisor) },
-          { label: 'Ultracode', value: applied.data.ultracode ? 'on' : 'off' },
+          { label: CONFIG.model, value: shown(applied.data.model) },
+          { label: CONFIG.effort, value: shown(applied.data.effort) },
+          { label: CONFIG.advisor, value: shown(applied.data.advisor) },
+          { label: CONFIG.ultracode, value: applied.data.ultracode ? SHARED.on : SHARED.off },
         ]
       : [],
     errors: parseEach(ErrorSchema, answer.errors ?? []),
@@ -51,27 +51,33 @@ export function sourceFile(source: string, cwd: string | null, configHome: strin
   return null;
 }
 
-export function ConfigBody({ view, cwd, configHome }: { view: ConfigView; cwd: string | null; configHome: string | null }) {
+export function ConfigBody({ view, cwd, configHome, close }: { view: ConfigView; cwd: string | null; configHome: string | null; close(): void }) {
   return (
     <div className="flex flex-col">
-      <Group label="Effective">{view.effective.length === 0 ? <p className="m-0 text-ui-sm text-fg-muted">{NO_EFFECTIVE}</p> : <KeyValues rows={view.effective.map((e) => ({ label: e.key, value: <Mono>{e.value}</Mono> }))} label="Effective settings" />}</Group>
+      <Group label={CONFIG.effective}>
+        {view.effective.length === 0 ? (
+          <p className="m-0 text-ui-sm text-fg-muted">{CONFIG.noEffective}</p>
+        ) : (
+          <KeyValues rows={view.effective.map((e) => ({ label: e.key, value: <Mono>{e.value}</Mono> }))} label={CONFIG.effectiveList} />
+        )}
+      </Group>
       {view.sources.length > 0 && (
-        <Group label="Sources" count={view.sources.length}>
-          <Rows label="Settings sources">
+        <Group label={CONFIG.sources} count={view.sources.length}>
+          <Rows label={CONFIG.sourceList}>
             {view.sources.map((s) => {
               const file = sourceFile(s.source, cwd, configHome);
-              return <Row key={s.source} main={s.label} detail={s.keys.length > 0 ? s.keys.join(', ') : 'no keys'} actions={file ? <RevealButton path={file}>{OPEN_FILE}</RevealButton> : null} />;
+              return <Row key={s.source} main={s.label} detail={s.keys.length > 0 ? s.keys.join(', ') : CONFIG.noKeys} actions={file ? <RevealButton path={file}>{CONFIG.openFile}</RevealButton> : null} />;
             })}
           </Rows>
         </Group>
       )}
       {view.applied.length > 0 && (
-        <Group label="Applied">
-          <KeyValues rows={view.applied} label="Applied to this session" />
+        <Group label={CONFIG.applied}>
+          <KeyValues rows={view.applied} label={CONFIG.appliedList} />
         </Group>
       )}
       {view.errors.length > 0 && (
-        <Group label="Errors" count={view.errors.length}>
+        <Group label={CONFIG.errors} count={view.errors.length}>
           <Rows>
             {view.errors.map((e, i) => (
               <Row key={i} main={<span className="text-danger">{e}</span>} />
@@ -80,7 +86,14 @@ export function ConfigBody({ view, cwd, configHome }: { view: ConfigView; cwd: s
         </Group>
       )}
       <div className="mt-2">
-        <TextButton onClick={() => runAction('settings.open')}>{MAWS_SETTINGS}</TextButton>
+        <TextButton
+          onClick={() => {
+            close();
+            runAction('settings.open');
+          }}
+        >
+          {CONFIG.mawsSettings}
+        </TextButton>
       </div>
     </div>
   );
@@ -95,7 +108,7 @@ export function ConfigWidget({ appSessionId, close }: { appSessionId: AppSession
   const userFile = memory.data?.files.find((f) => f.kind === 'user')?.path;
   return (
     <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.config} command="config" foot={WIDGET_FOOT.config} state={read.state} error={read.error} close={close}>
-      {read.data && <ConfigBody view={present(read.data)} cwd={cwd} configHome={userFile ? dirname(userFile) : null} />}
+      {read.data && <ConfigBody view={present(read.data)} cwd={cwd} configHome={userFile ? dirname(userFile) : null} close={close} />}
     </WidgetFrame>
   );
 }

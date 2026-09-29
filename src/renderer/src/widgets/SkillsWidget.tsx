@@ -6,7 +6,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { GetSkillsDialogResponse } from '@shared/wire/control';
 import { insertComposerText } from '../composer';
 import { useSessionCatalog, type SessionCatalog } from '../stores/catalog';
-import { NO_SKILLS, USE, WIDGET_FOOT, WIDGET_TITLE } from './copy';
+import { SKILLS, WIDGET_FOOT, WIDGET_TITLE } from './copy';
 import { parseEach, Row, Rows, TextButton } from './parts';
 import { useEngineRead } from './read';
 import { WidgetFrame } from './WidgetFrame';
@@ -26,15 +26,15 @@ export function present(dialog: GetSkillsDialogResponse, catalog: SessionCatalog
 }
 
 export function SkillsBody({ view, appSessionId, close }: { view: SkillsView; appSessionId: AppSessionId; close(): void }) {
-  if (view.skills.length === 0) return <p className="m-0 text-ui-sm text-fg-muted">{NO_SKILLS}</p>;
+  if (view.skills.length === 0) return <p className="m-0 text-ui-sm text-fg-muted">{SKILLS.none}</p>;
   const use = (name: string) => {
     close();
     insertComposerText(appSessionId, `/${name} `);
   };
   return (
-    <Rows label="Skills">
+    <Rows label={SKILLS.list}>
       {view.skills.map((s) => (
-        <Row key={s.name} main={`/${s.name}`} detail={s.description ? <span className="line-clamp-2">{s.description}</span> : null} actions={<TextButton onClick={() => use(s.name)}>{USE}</TextButton>} />
+        <Row key={s.name} main={`/${s.name}`} detail={s.description ? <span className="line-clamp-2">{s.description}</span> : null} actions={<TextButton onClick={() => use(s.name)}>{SKILLS.use}</TextButton>} />
       ))}
     </Rows>
   );

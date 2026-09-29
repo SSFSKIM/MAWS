@@ -15,7 +15,7 @@ import { USAGE_UNAVAILABLE } from '../statusline/UsagePopover';
 import { POPOVER_TICK_MS, useNow } from '../statusline/use-now';
 import { useSessions } from '../stores/sessions';
 import { useSessionWindows, useUsage, type Windows } from '../stores/usage';
-import { ENGINE_WINDOWS_DIRECT, ENGINE_WINDOWS_NONE, NO_RECORD, WIDGET_FOOT, WIDGET_TITLE } from './copy';
+import { USAGE, WIDGET_FOOT, WIDGET_TITLE } from './copy';
 import { Group, KeyValues, Mono, num } from './parts';
 import { useEngineRead } from './read';
 import { WidgetFrame } from './WidgetFrame';
@@ -41,30 +41,30 @@ export function present(answer: GetUsageResponse): UsageView {
   const s = answer.session;
   return {
     rows: [
-      { label: 'Cost', value: dollars(s.total_cost_usd) },
-      { label: 'API time', value: seconds(s.total_api_duration_ms) },
-      { label: 'Wall time', value: seconds(s.total_duration_ms) },
-      { label: 'Lines', value: `+${count(s.total_lines_added)} −${count(s.total_lines_removed)}` },
+      { label: USAGE.cost, value: dollars(s.total_cost_usd) },
+      { label: USAGE.apiTime, value: seconds(s.total_api_duration_ms) },
+      { label: USAGE.wallTime, value: seconds(s.total_duration_ms) },
+      { label: USAGE.lines, value: `+${count(s.total_lines_added)} −${count(s.total_lines_removed)}` },
     ],
     models: Object.entries(s.model_usage).flatMap(([model, raw]) => {
       const u = ModelUsageSchema.safeParse(raw);
       if (!u.success) return [];
-      return [{ model, line: `${num(u.data.inputTokens)} in · ${num(u.data.outputTokens)} out · ${num(u.data.cacheReadInputTokens)} cache read · ${num(u.data.cacheCreationInputTokens)} cache write` }];
+      return [{ model, line: USAGE.model(num(u.data.inputTokens), num(u.data.outputTokens), num(u.data.cacheReadInputTokens), num(u.data.cacheCreationInputTokens)) }];
     }),
     engineWindows:
       answer.rate_limits_available && answer.rate_limits !== null
-        ? { fact: null, sentence: ENGINE_WINDOWS_DIRECT }
-        : { fact: `rate_limits_available: ${String(answer.rate_limits_available)}`, sentence: ENGINE_WINDOWS_NONE },
+        ? { fact: null, sentence: USAGE.engineDirect }
+        : { fact: `rate_limits_available: ${String(answer.rate_limits_available)}`, sentence: USAGE.engineNone },
   };
 }
 
 function windowRows(windows: Windows, now: number): { label: string; value: string }[] {
   const row = (label: string, window: UsageWindow | null) => {
-    if (!window) return { label, value: 'no reading' };
+    if (!window) return { label, value: USAGE.noReading };
     const shown = windowShown(window, now);
-    return { label, value: shown.reset ? '0% · no reading since the window reset' : `${Math.round(shown.percent)}% · resets in ${resetsIn(shown.resetInMs!)}` };
+    return { label, value: shown.reset ? USAGE.sinceReset : USAGE.resetsIn(Math.round(shown.percent), resetsIn(shown.resetInMs!)) };
   };
-  return [row('5h', windows.fiveHour), row('Weekly', windows.sevenDay), ...windows.scoped.map((s) => row(s.model, s.window))];
+  return [row(USAGE.fiveHour, windows.fiveHour), row(USAGE.weekly, windows.sevenDay), ...windows.scoped.map((s) => row(s.model, s.window))];
 }
 
 // The account's windows for a routed session (C7's store) or the engine's for a direct one (this widget's own read).
@@ -75,16 +75,16 @@ function AccountWindows({ record, status, answer }: { record: SessionRecord; sta
   if (shown.source === 'direct') {
     const windows = windowsFromGetUsage(answer, new Date(now).toISOString());
     return (
-      <Group label="Direct · the engine’s own login">
-        {windows ? <KeyValues rows={windowRows(windows, now)} label="Windows" /> : <p className="m-0 text-ui-sm text-fg-muted">The engine reported no plan limits</p>}
+      <Group label={USAGE.direct}>
+        {windows ? <KeyValues rows={windowRows(windows, now)} label={USAGE.windows} /> : <p className="m-0 text-ui-sm text-fg-muted">{USAGE.noPlanLimits}</p>}
       </Group>
     );
   }
-  const who = shown.account ? [shown.account.email, shown.account.planLabel].filter(Boolean).join(' · ') : snapshot?.available === false ? USAGE_UNAVAILABLE : 'Reading ClaudeUsage…';
+  const who = shown.account ? [shown.account.email, shown.account.planLabel].filter(Boolean).join(' · ') : snapshot?.available === false ? USAGE_UNAVAILABLE : USAGE.readingClaudeUsage;
   return (
-    <Group label={shown.source === 'pinned' ? 'Pinned account' : 'Routing account'}>
+    <Group label={shown.source === 'pinned' ? USAGE.pinned : USAGE.routing}>
       <p className="m-0 mb-1 text-ui-sm">{who}</p>
-      {shown.windows && <KeyValues rows={windowRows(shown.windows, now)} label="Windows" />}
+      {shown.windows && <KeyValues rows={windowRows(shown.windows, now)} label={USAGE.windows} />}
     </Group>
   );
 }
@@ -94,13 +94,13 @@ export function UsageBody({ view, answer, appSessionId }: { view: UsageView; ans
   const status = useSessions((s) => s.engine.get(appSessionId) ?? null);
   return (
     <div className="flex flex-col">
-      {record ? <AccountWindows record={record} status={status} answer={answer} /> : <p className="m-0 text-ui-sm text-fg-muted">{NO_RECORD}</p>}
-      <Group label="This session">
-        <KeyValues rows={view.rows} label="Session accounting" />
+      {record ? <AccountWindows record={record} status={status} answer={answer} /> : <p className="m-0 text-ui-sm text-fg-muted">{USAGE.noRecord}</p>}
+      <Group label={USAGE.session}>
+        <KeyValues rows={view.rows} label={USAGE.accounting} />
       </Group>
       {view.models.length > 0 && (
-        <Group label="Models">
-          <KeyValues rows={view.models.map((m) => ({ label: m.model, value: m.line }))} label="Tokens by model" />
+        <Group label={USAGE.models}>
+          <KeyValues rows={view.models.map((m) => ({ label: m.model, value: m.line }))} label={USAGE.byModel} />
         </Group>
       )}
       <p className="m-0 mt-2 text-ui-sm text-fg-muted">

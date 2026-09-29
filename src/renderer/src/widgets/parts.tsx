@@ -3,7 +3,7 @@
 import { useState, type ReactNode } from 'react';
 import type * as z from 'zod';
 import { ipc } from '../ipc/client';
-import { REVEAL_REFUSED } from './copy';
+import { SHARED } from './copy';
 
 export const num = (n: number): string => n.toLocaleString('en-US');
 
@@ -93,7 +93,7 @@ export function RevealButton({ path, children }: { path: string; children: React
   };
   return (
     <>
-      {refused && <span className="text-fg-faint">{REVEAL_REFUSED}</span>}
+      {refused && <span className="text-fg-faint">{SHARED.revealRefused}</span>}
       <TextButton onClick={() => void reveal()} title={path}>
         {children}
       </TextButton>

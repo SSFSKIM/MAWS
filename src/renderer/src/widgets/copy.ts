@@ -31,10 +31,12 @@ export const WIDGET_TITLE: Record<WidgetCommandName, string> = {
   diff: 'Changes',
 };
 
+const SESSION_ONLY_MODEL = "Set for this session only · your default model and effort are set in settings or the terminal's `/model`";
+
 export const WIDGET_FOOT: Record<WidgetCommandName, WidgetFoot> = {
-  model: { readWith: 'list_models', editedWhere: "Set for this session only · your default model and effort are set in settings or the terminal's `/model`" },
-  effort: { readWith: 'list_models', editedWhere: "Set for this session only · your default model and effort are set in settings or the terminal's `/model`" },
-  fast: { readWith: 'list_models', editedWhere: "Set for this session only · your default model and effort are set in settings or the terminal's `/model`" },
+  model: { readWith: 'list_models', editedWhere: SESSION_ONLY_MODEL },
+  effort: { readWith: 'list_models', editedWhere: SESSION_ONLY_MODEL },
+  fast: { readWith: 'list_models', editedWhere: SESSION_ONLY_MODEL },
   permissions: { readWith: 'list_permission_rules', editedWhere: 'Rules are edited in their settings files; session grants come from approval cards' },
   usage: { readWith: 'get_usage', editedWhere: 'Windows come from ClaudeUsage; the engine reports none through the relay' },
   config: { readWith: 'get_settings', editedWhere: "Settings are edited in their files or the terminal's `/config`; MAWS's own settings are in the Settings tab" },
@@ -57,70 +59,176 @@ export const WIDGET_FOOT: Record<WidgetCommandName, WidgetFoot> = {
   diff: { readWith: 'get_workspace_diff', editedWhere: 'Read-only; staging and commits are P1' },
 };
 
-// The frame's states.
-export const READING = 'Reading…';
-export const NO_ANSWER = 'The engine did not answer';
+// The frame.
+export const FRAME = { reading: 'Reading…', noAnswer: 'The engine did not answer', readWith: 'Read with', close: (title: string) => `Close ${title}` };
 
 // The widgets M3 builds, registered now so every name opens something.
-export const ARRIVES_IN_M3 = 'This widget arrives with the next C11 milestone.';
+export const PENDING = 'This widget arrives with the next C11 milestone.';
 
-// Permissions: a rule's source in words (unknown sources verbatim), and the groups in the engine's order.
-export const RULE_SOURCE: Record<string, string> = {
-  session: 'this session · grant',
-  flagSettings: 'startup settings',
-  projectSettings: '.claude/settings.json · project',
-  userSettings: '~/.claude/settings.json · user',
-  localSettings: '.claude/settings.local.json',
-  policySettings: 'managed',
-  cliArg: 'command line',
+// Words several widgets share.
+export const SHARED = { none: 'none', on: 'on', off: 'off', yes: 'yes', no: 'no', reveal: 'Reveal', revealRefused: 'Finder was not opened for this path' };
+
+// Permissions: a rule's source in words (an unknown source verbatim), the groups in the engine's order, the workspace.
+export const PERMISSIONS = {
+  source: {
+    session: 'this session · grant',
+    flagSettings: 'startup settings',
+    projectSettings: '.claude/settings.json · project',
+    userSettings: '~/.claude/settings.json · user',
+    localSettings: '.claude/settings.local.json',
+    policySettings: 'managed',
+    cliArg: 'command line',
+  } as Record<string, string>,
+  group: { allow: 'Allow', ask: 'Ask', deny: 'Deny' },
+  editability: { session: 'this session', readonly: 'read-only here', persistent: 'in a settings file' } as Record<string, string>,
+  rules: (group: string) => `${group} rules`,
+  none: 'No rules · every tool asks as the mode decides',
+  effective: 'Effective',
+  fromInit: 'from the init frame',
+  workspace: 'Workspace',
+  workspaceList: 'Workspace directories',
+  original: 'original directory',
+  added: 'added',
+  managedOnly: 'Only managed rules apply',
+  grants: (n: number) => `${n} session grant${n === 1 ? '' : 's'} · re-applied after a resume`,
 };
-export const RULE_GROUP = { allow: 'Allow', ask: 'Ask', deny: 'Deny' } as const;
-export const RULE_EDITABILITY: Record<string, string> = { session: 'this session', readonly: 'read-only here', persistent: 'in a settings file' };
-export const WORKSPACE = 'Workspace';
-export const NO_RULES = 'No rules · every tool asks as the mode decides';
-export const EFFECTIVE_MODE = 'from the init frame';
 
 // Usage.
-export const ENGINE_WINDOWS_NONE = 'the engine reports no windows through the relay';
-export const ENGINE_WINDOWS_DIRECT = "the engine's own windows (a direct session)";
-export const NO_RECORD = 'No record for this session';
+export const USAGE = {
+  cost: 'Cost',
+  apiTime: 'API time',
+  wallTime: 'Wall time',
+  lines: 'Lines',
+  model: (input: string, output: string, cacheRead: string, cacheWrite: string) => `${input} in · ${output} out · ${cacheRead} cache read · ${cacheWrite} cache write`,
+  engineNone: 'the engine reports no windows through the relay',
+  engineDirect: "the engine's own windows (a direct session)",
+  direct: 'Direct · the engine’s own login',
+  noPlanLimits: 'The engine reported no plan limits',
+  pinned: 'Pinned account',
+  routing: 'Routing account',
+  readingClaudeUsage: 'Reading ClaudeUsage…',
+  fiveHour: '5h',
+  weekly: 'Weekly',
+  windows: 'Windows',
+  noReading: 'no reading',
+  sinceReset: '0% · no reading since the window reset',
+  resetsIn: (percent: number, when: string) => `${percent}% · resets in ${when}`,
+  session: 'This session',
+  accounting: 'Session accounting',
+  models: 'Models',
+  byModel: 'Tokens by model',
+  noRecord: 'No record for this session',
+};
 
 // Context.
-export const NOT_IN_WINDOW = 'not in the window';
-
-// Plugins.
-export const NO_PLUGINS = 'The engine loaded no plugins';
-
-// MCP.
-export const NO_SERVERS = 'No MCP servers';
-
-// Hooks.
-export const NO_HOOKS = 'No hooks configured';
-export const HOOKS_DISABLED_BY_POLICY = 'Hooks are disabled by policy';
-
-// Memory.
-export const FILE_MISSING = 'does not exist yet';
-export const REVEAL = 'Reveal';
-export const REVEAL_REFUSED = 'Finder was not opened for this path';
-export const ADD_NOTE = 'Add a note';
-
-// Skills and agents.
-export const USE = 'Use';
-export const MENTION = 'Mention';
-export const NO_SKILLS = 'No skills in the catalogue';
-export const NO_AGENTS = 'No agents in the catalogue';
-
-// Diff.
-export const NO_DIFF = 'No diff · not a git repository, or a merge, rebase or cherry-pick is in progress';
-export const OPEN_IN_REVIEW = 'Open in Review';
-
-// Export.
-export const COPY = 'Copy';
-export const COPIED = 'Copied';
-export const SAVE_AS = 'Save as…';
-export const SAVED = (path: string) => `Saved to ${path}`;
+export const CONTEXT = {
+  line: (used: string, max: string, percent: number, threshold: string | null) => `${used} of ${max} · ${percent}% · ${threshold === null ? 'autocompact off' : `autocompact at ${threshold}`}`,
+  notInWindow: 'not in the window',
+  bar: (names: string) => `Context: ${names}`,
+  categories: 'Context categories',
+  costs: 'What loads with every request',
+  memoryFiles: 'Memory files',
+  mcpTools: 'MCP tools',
+  agents: 'Agents',
+  commands: 'Commands',
+  skills: 'Skills',
+  listed: (count: string, tokens: string) => `${count} · ${tokens} tokens`,
+  included: (included: string, total: string, tokens: string) => `${included} of ${total} · ${tokens} tokens`,
+};
 
 // Config.
-export const OPEN_FILE = 'Open file';
-export const MAWS_SETTINGS = 'MAWS settings';
-export const NO_EFFECTIVE = 'No settings in effect beyond the defaults';
+export const CONFIG = {
+  effective: 'Effective',
+  effectiveList: 'Effective settings',
+  noEffective: 'No settings in effect beyond the defaults',
+  sources: 'Sources',
+  sourceList: 'Settings sources',
+  noKeys: 'no keys',
+  applied: 'Applied',
+  appliedList: 'Applied to this session',
+  model: 'Model',
+  effort: 'Effort',
+  advisor: 'Advisor',
+  ultracode: 'Ultracode',
+  errors: 'Errors',
+  openFile: 'Open file',
+  mawsSettings: 'MAWS settings',
+};
+
+// Plugins.
+export const PLUGINS = { none: 'The engine loaded no plugins', problems: 'Problems', problemList: 'Plugin problems', loaded: 'Loaded', loadedList: 'Loaded plugins' };
+
+// MCP.
+export const MCP = { none: 'No MCP servers', list: 'MCP servers', scope: (scope: string) => `scope ${scope}`, from: (source: string) => `from ${source}`, tools: (n: number) => `${n} tool${n === 1 ? '' : 's'}` };
+
+// Sandbox.
+export const SANDBOX = {
+  supported: 'supported',
+  unsupported: (reason: string | null) => `unsupported${reason ? `: ${reason}` : ''}`,
+  enabled: 'Enabled',
+  enabledInSettings: 'Enabled in settings',
+  locked: 'Locked',
+  autoAllow: 'Auto-allow',
+  available: 'available',
+  notAvailable: 'not available',
+  fallback: 'Unsandboxed fallback',
+  unavailable: 'Unavailable',
+  network: 'Network',
+  managed: 'managed',
+  settings: 'Sandbox settings',
+  dependencies: 'Dependencies',
+  excluded: 'Excluded commands',
+  // the restriction lists in the terminal's order, by their wire keys
+  restriction: {
+    fs_deny_read: 'Deny reading',
+    fs_allow_read: 'Allow reading',
+    fs_allow_write: 'Allow writing',
+    fs_deny_write: 'Deny writing',
+    network_allowed_domains: 'Allowed domains',
+    network_denied_domains: 'Denied domains',
+    unix_sockets: 'Unix sockets',
+    ignored_glob_patterns: 'Ignored patterns',
+  },
+};
+
+// Hooks.
+export const HOOKS = {
+  none: 'No hooks configured',
+  disabled: 'Hooks are disabled by policy',
+  managedOnly: 'Only managed hooks run',
+  pluginOnly: 'Only plugin hooks run',
+  matcher: (matcher: string) => `matcher ${matcher}`,
+  list: (event: string) => `${event} hooks`,
+};
+
+// Memory.
+export const MEMORY = { missing: 'does not exist yet', files: 'Files', fileList: 'Memory files', folders: 'Folders', folderList: 'Memory folders', autoMemory: (status: string) => `Auto memory · ${status}`, addNote: 'Add a note' };
+
+// Skills and agents.
+export const SKILLS = { use: 'Use', none: 'No skills in the catalogue', list: 'Skills' };
+export const AGENTS = { mention: 'Mention', none: 'No agents in the catalogue', list: 'Agents' };
+
+// Diff.
+export const DIFF = {
+  none: 'No diff · not a git repository, or a merge, rebase or cherry-pick is in progress',
+  workingTree: 'working tree',
+  against: (branch: string) => `against ${branch}`,
+  files: (n: string, one: boolean) => `${n} file${one ? '' : 's'}`,
+  binary: 'binary',
+  untracked: 'untracked',
+  skipped: (n: string, one: boolean) => `${n} large file${one ? '' : 's'} skipped`,
+  restricted: (n: string, one: boolean) => `${n} restricted file${one ? '' : 's'} not shown`,
+  list: 'Changed files',
+  openInReview: 'Open in Review',
+  arrivesWith: (child: string) => `arrives with ${child}`,
+};
+
+// Export.
+export const EXPORT = {
+  copy: 'Copy',
+  copied: 'Copied',
+  saveAs: 'Save as…',
+  saved: (path: string) => `Saved to ${path}`,
+  notSaved: (why: string) => `The export was not saved · ${why}`,
+  lines: (n: string) => `${n} lines`,
+};

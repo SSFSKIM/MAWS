@@ -4,7 +4,7 @@
 import * as z from 'zod';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { GetContextUsageResponse } from '@shared/wire/control';
-import { NOT_IN_WINDOW, WIDGET_FOOT, WIDGET_TITLE } from './copy';
+import { CONTEXT, SHARED, WIDGET_FOOT, WIDGET_TITLE } from './copy';
 import { Group, KeyValues, num } from './parts';
 import { useEngineRead } from './read';
 import { WidgetFrame } from './WidgetFrame';
@@ -22,15 +22,15 @@ export interface ContextView {
 
 function listCost(value: unknown): string {
   const items = Costed.safeParse(value);
-  if (!items.success || items.data.length === 0) return 'none';
-  return `${items.data.length} · ${num(items.data.reduce((sum, i) => sum + i.tokens, 0))} tokens`;
+  if (!items.success || items.data.length === 0) return SHARED.none;
+  return CONTEXT.listed(num(items.data.length), num(items.data.reduce((sum, i) => sum + i.tokens, 0)));
 }
 
 function countedCost(value: unknown, total: string, included: string): string | null {
   const parsed = Counted(total, included).safeParse(value);
   if (!parsed.success) return null;
   const d = parsed.data as Record<string, number>;
-  return `${num(d[included])} of ${num(d[total])} · ${num(d.tokens)} tokens`;
+  return CONTEXT.included(num(d[included]), num(d[total]), num(d.tokens));
 }
 
 export function present(usage: GetContextUsageResponse): ContextView {
@@ -39,16 +39,16 @@ export function present(usage: GetContextUsageResponse): ContextView {
   const commands = countedCost(usage.slashCommands, 'totalCommands', 'includedCommands');
   const skills = countedCost(usage.skills, 'totalSkills', 'includedSkills');
   return {
-    line: `${num(usage.totalTokens)} of ${num(usage.maxTokens)} · ${Math.round(usage.percentage)}% · ${threshold === null ? 'autocompact off' : `autocompact at ${num(threshold)}`}`,
-    categories: usage.categories.map((c) => ({ name: c.name, tokens: num(c.tokens), note: c.kind === 'deferred' || c.isDeferred === true ? NOT_IN_WINDOW : null })),
+    line: CONTEXT.line(num(usage.totalTokens), num(usage.maxTokens), Math.round(usage.percentage), threshold === null ? null : num(threshold)),
+    categories: usage.categories.map((c) => ({ name: c.name, tokens: num(c.tokens), note: c.kind === 'deferred' || c.isDeferred === true ? CONTEXT.notInWindow : null })),
     used: usage.categories.filter((c) => c.kind === 'used').map((c) => ({ name: c.name, share: share(c.tokens) })),
     thresholdShare: threshold === null ? null : share(threshold),
     costs: [
-      { label: 'Memory files', value: listCost(usage.memoryFiles) },
-      { label: 'MCP tools', value: listCost(usage.mcpTools) },
-      { label: 'Agents', value: listCost(usage.agents) },
-      ...(commands === null ? [] : [{ label: 'Commands', value: commands }]),
-      ...(skills === null ? [] : [{ label: 'Skills', value: skills }]),
+      { label: CONTEXT.memoryFiles, value: listCost(usage.memoryFiles) },
+      { label: CONTEXT.mcpTools, value: listCost(usage.mcpTools) },
+      { label: CONTEXT.agents, value: listCost(usage.agents) },
+      ...(commands === null ? [] : [{ label: CONTEXT.commands, value: commands }]),
+      ...(skills === null ? [] : [{ label: CONTEXT.skills, value: skills }]),
     ],
   };
 }
@@ -59,13 +59,13 @@ export function ContextBody({ view }: { view: ContextView }) {
   return (
     <div className="flex flex-col gap-2">
       <p className="m-0">{view.line}</p>
-      <div role="img" aria-label={`Context: ${view.used.map((u) => u.name).join(', ')}`} className="relative flex h-2 overflow-hidden rounded-sm bg-bg-active">
+      <div role="img" aria-label={CONTEXT.bar(view.used.map((u) => u.name).join(', '))} className="relative flex h-2 overflow-hidden rounded-sm bg-bg-active">
         {view.used.map((u, i) => (
           <span key={u.name} title={u.name} className={`h-full shrink-0 border-r border-bg-raised ${SEGMENT[i % SEGMENT.length]}`} style={{ width: `${u.share}%` }} />
         ))}
         {view.thresholdShare !== null && <span aria-hidden className="absolute inset-y-0 w-px bg-warning" style={{ left: `${view.thresholdShare}%` }} />}
       </div>
-      <table aria-label="Context categories" className="w-full text-ui-sm">
+      <table aria-label={CONTEXT.categories} className="w-full text-ui-sm">
         <tbody>
           {view.categories.map((c) => (
             <tr key={c.name}>
@@ -78,7 +78,7 @@ export function ContextBody({ view }: { view: ContextView }) {
           ))}
         </tbody>
       </table>
-      <Group label="What loads with every request">
+      <Group label={CONTEXT.costs}>
         <KeyValues rows={view.costs} />
       </Group>
     </div>

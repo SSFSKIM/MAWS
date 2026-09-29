@@ -5,7 +5,7 @@
 import * as z from 'zod';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { McpStatusResponse } from '@shared/wire/control';
-import { NO_SERVERS, WIDGET_FOOT, WIDGET_TITLE } from './copy';
+import { MCP, WIDGET_FOOT, WIDGET_TITLE } from './copy';
 import { Mono, parseEach, Row, Rows } from './parts';
 import { MOVES_READS, useEngineRead } from './read';
 import { WidgetFrame } from './WidgetFrame';
@@ -51,9 +51,9 @@ export function present(answer: McpStatusResponse): { servers: McpServerView[] }
 }
 
 export function McpBody({ view }: { view: { servers: McpServerView[] } }) {
-  if (view.servers.length === 0) return <p className="m-0 text-ui-sm text-fg-muted">{NO_SERVERS}</p>;
+  if (view.servers.length === 0) return <p className="m-0 text-ui-sm text-fg-muted">{MCP.none}</p>;
   return (
-    <Rows label="MCP servers">
+    <Rows label={MCP.list}>
       {view.servers.map((s) => (
         <Row
           key={s.name}
@@ -66,13 +66,11 @@ export function McpBody({ view }: { view: { servers: McpServerView[] } }) {
                   <Mono>{s.transport}</Mono>
                 </span>
               )}
-              <span>{[s.scope && `scope ${s.scope}`, s.source && `from ${s.source}`].filter(Boolean).join(' · ')}</span>
+              <span>{[s.scope && MCP.scope(s.scope), s.source && MCP.from(s.source)].filter(Boolean).join(' · ')}</span>
               {s.error && <span className="text-danger">{s.error}</span>}
               {s.tools.length > 0 && (
                 <details>
-                  <summary className="cursor-default">
-                    {s.tools.length} tool{s.tools.length === 1 ? '' : 's'}
-                  </summary>
+                  <summary className="cursor-default">{MCP.tools(s.tools.length)}</summary>
                   <span className="font-mono text-ui-sm">{s.tools.join(', ')}</span>
                 </details>
               )}

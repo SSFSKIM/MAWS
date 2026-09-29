@@ -6,7 +6,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { ExportConversationResponse } from '@shared/wire/control';
 import { ipc } from '../ipc/client';
 import { toast } from '../stores/notices';
-import { COPIED, COPY, SAVE_AS, SAVED, WIDGET_FOOT, WIDGET_TITLE } from './copy';
+import { EXPORT, WIDGET_FOOT, WIDGET_TITLE } from './copy';
 import { Mono, num, TextButton } from './parts';
 import { useEngineRead } from './read';
 import { WidgetFrame } from './WidgetFrame';
@@ -27,12 +27,12 @@ export function ExportBody({ view }: { view: ExportView }) {
   const [done, setDone] = useState<string | null>(null);
   const copy = async () => {
     await navigator.clipboard.writeText(view.text);
-    setDone(COPIED);
+    setDone(EXPORT.copied);
   };
   const save = async () => {
     const result = await ipc.invoke('layout.saveTextFile', { defaultName: view.filename, text: view.text });
-    if (!result.ok) return void toast({ level: 'warning', text: `The export was not saved · ${result.error.message}`, actions: [], dismissible: true });
-    if (result.value.saved) setDone(SAVED(result.value.path));
+    if (!result.ok) return void toast({ level: 'warning', text: EXPORT.notSaved(result.error.message), actions: [], dismissible: true });
+    if (result.value.saved) setDone(EXPORT.saved(result.value.path));
   };
   return (
     <div className="flex flex-col gap-2">
@@ -40,11 +40,11 @@ export function ExportBody({ view }: { view: ExportView }) {
         <Mono>{view.filename}</Mono>
       </p>
       <p className="m-0 truncate text-ui-sm text-fg-muted" title={view.firstLine}>
-        {view.firstLine} <span className="text-fg-faint">· {num(view.lines)} lines</span>
+        {view.firstLine} <span className="text-fg-faint">· {EXPORT.lines(num(view.lines))}</span>
       </p>
       <div className="flex items-baseline gap-2">
-        <TextButton onClick={() => void copy()}>{COPY}</TextButton>
-        <TextButton onClick={() => void save()}>{SAVE_AS}</TextButton>
+        <TextButton onClick={() => void copy()}>{EXPORT.copy}</TextButton>
+        <TextButton onClick={() => void save()}>{EXPORT.saveAs}</TextButton>
         {done && (
           <span role="status" className="min-w-0 truncate text-ui-sm text-fg-muted">
             {done}

@@ -5,7 +5,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { insertComposerText } from '../composer';
 import { useSessionCatalog, type SessionCatalog } from '../stores/catalog';
 import { useSessions } from '../stores/sessions';
-import { MENTION, NO_AGENTS, WIDGET_FOOT, WIDGET_TITLE } from './copy';
+import { AGENTS, WIDGET_FOOT, WIDGET_TITLE } from './copy';
 import { Row, Rows, TextButton } from './parts';
 import { WidgetFrame } from './WidgetFrame';
 
@@ -14,15 +14,15 @@ export function present(catalog: SessionCatalog): { name: string; description: s
 }
 
 export function AgentsBody({ agents, appSessionId, close }: { agents: { name: string; description: string }[]; appSessionId: AppSessionId; close(): void }) {
-  if (agents.length === 0) return <p className="m-0 text-ui-sm text-fg-muted">{NO_AGENTS}</p>;
+  if (agents.length === 0) return <p className="m-0 text-ui-sm text-fg-muted">{AGENTS.none}</p>;
   const mention = (name: string) => {
     close();
     insertComposerText(appSessionId, `@agent-${name} `);
   };
   return (
-    <Rows label="Agents">
+    <Rows label={AGENTS.list}>
       {agents.map((a) => (
-        <Row key={a.name} main={a.name} detail={a.description ? <span className="line-clamp-2">{a.description}</span> : null} actions={<TextButton onClick={() => mention(a.name)}>{MENTION}</TextButton>} />
+        <Row key={a.name} main={a.name} detail={a.description ? <span className="line-clamp-2">{a.description}</span> : null} actions={<TextButton onClick={() => mention(a.name)}>{AGENTS.mention}</TextButton>} />
       ))}
     </Rows>
   );

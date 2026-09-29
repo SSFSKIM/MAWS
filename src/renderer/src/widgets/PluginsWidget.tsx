@@ -5,7 +5,7 @@
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
 import { useSessions } from '../stores/sessions';
-import { NO_PLUGINS, WIDGET_FOOT, WIDGET_TITLE } from './copy';
+import { PLUGINS, WIDGET_FOOT, WIDGET_TITLE } from './copy';
 import { Group, Mono, Row, Rows } from './parts';
 import { WidgetFrame } from './WidgetFrame';
 
@@ -28,8 +28,8 @@ export function PluginsBody({ view }: { view: PluginsView }) {
   return (
     <div className="flex flex-col">
       {view.problems.length > 0 && (
-        <Group label="Problems" count={view.problems.length}>
-          <Rows label="Plugin problems">
+        <Group label={PLUGINS.problems} count={view.problems.length}>
+          <Rows label={PLUGINS.problemList}>
             {view.problems.map((p, i) => (
               <Row key={i} main={p.plugin} note={<span className={p.level === 'error' ? 'text-danger' : 'text-warning'}>{p.level}</span>} detail={p.text} />
             ))}
@@ -37,10 +37,10 @@ export function PluginsBody({ view }: { view: PluginsView }) {
         </Group>
       )}
       {view.plugins.length === 0 ? (
-        <p className="m-0 text-ui-sm text-fg-muted">{NO_PLUGINS}</p>
+        <p className="m-0 text-ui-sm text-fg-muted">{PLUGINS.none}</p>
       ) : (
-        <Group label="Loaded" count={view.plugins.length}>
-          <Rows label="Loaded plugins">
+        <Group label={PLUGINS.loaded} count={view.plugins.length}>
+          <Rows label={PLUGINS.loadedList}>
             {view.plugins.map((p) => (
               <Row key={`${p.name}:${p.path}`} main={p.name} note={p.version ?? undefined} detail={<Mono>{p.source ?? p.path}</Mono>} />
             ))}

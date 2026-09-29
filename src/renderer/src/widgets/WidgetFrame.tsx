@@ -5,9 +5,9 @@
 // and Esc closes it and hands the keyboard back to the session's composer.
 import { useEffect, useRef, type ReactNode } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
-import { NOT_RUNNING } from '../statusline';
+import { NOT_RUNNING } from '../statusline/mode-menu';
 import { useComposerStore } from '../stores/composer';
-import { READING, type WidgetFoot } from './copy';
+import { FRAME, type WidgetFoot } from './copy';
 import type { ReadState } from './read';
 
 // A sentence with `code` spans in backticks, rendered with the spans in mono.
@@ -46,7 +46,7 @@ export function WidgetFrame({ appSessionId, title, command, foot, state, error, 
 
   let body: ReactNode;
   if (state === 'not_running') body = <p className="m-0 text-fg-muted">{NOT_RUNNING}</p>;
-  else if (state === 'loading') body = <p className="m-0 text-fg-muted">{READING}</p>;
+  else if (state === 'loading') body = <p className="m-0 text-fg-muted">{FRAME.reading}</p>;
   else if (state === 'error')
     body = (
       <p role="alert" className="m-0 text-danger">
@@ -73,14 +73,14 @@ export function WidgetFrame({ appSessionId, title, command, foot, state, error, 
         <h3 className="m-0 text-ui font-semibold">{title}</h3>
         <span className="flex items-baseline gap-2">
           <code className="font-mono text-ui-sm text-fg-muted">/{command}</code>
-          <button type="button" aria-label={`Close ${title}`} onClick={close} className="rounded-sm px-1 text-fg-muted outline-accent hover:bg-bg-hover focus-visible:outline-2">
+          <button type="button" aria-label={FRAME.close(title)} onClick={close} className="rounded-sm px-1 text-fg-muted outline-accent hover:bg-bg-hover focus-visible:outline-2">
             ×
           </button>
         </span>
       </header>
       <div className="max-h-[420px] overflow-y-auto px-2 py-2">{body}</div>
       <footer className="border-t border-border px-2 pt-2 text-ui-sm text-fg-muted">
-        Read with <code className="font-mono text-ui-sm">{foot.readWith}</code>
+        {FRAME.readWith} <code className="font-mono text-ui-sm">{foot.readWith}</code>
         {foot.editedWhere !== null && (
           <>
             {' · '}

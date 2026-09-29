@@ -8,8 +8,8 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { ListPermissionRulesResponse } from '@shared/wire/control';
 import { MODE_REFUSAL_WORDS } from '../statusline/mode-menu';
 import { useSessions } from '../stores/sessions';
-import { EFFECTIVE_MODE, NO_RULES, RULE_EDITABILITY, RULE_GROUP, RULE_SOURCE, WIDGET_FOOT, WIDGET_TITLE, WORKSPACE } from './copy';
-import { Group, Mono, Row, Rows } from './parts';
+import { PERMISSIONS, WIDGET_FOOT, WIDGET_TITLE } from './copy';
+import { Group, Mono, parseEach, Row, Rows } from './parts';
 import { useEngineRead } from './read';
 import { WidgetFrame } from './WidgetFrame';
 
@@ -17,10 +17,7 @@ const DescriptionSchema = z.looseObject({ prefix: z.string(), emphasis: z.string
 const BEHAVIORS = ['allow', 'ask', 'deny'] as const;
 // A workspace directory is a path, or an object carrying one (the wire leaves the entry's shape open).
 const WorkspaceDirectorySchema = z.union([z.string(), z.looseObject({ path: z.string() }).transform((d) => d.path)]);
-const directories = (raw: readonly unknown[]) => raw.flatMap((d) => {
-  const parsed = WorkspaceDirectorySchema.safeParse(d);
-  return parsed.success ? [parsed.data] : [];
-});
+const directories = (raw: readonly unknown[]) => parseEach(WorkspaceDirectorySchema, raw);
 
 export interface RuleView {
   rule: string;
@@ -34,7 +31,7 @@ export interface PermissionsView {
   groups: { behavior: (typeof BEHAVIORS)[number]; label: string; rules: RuleView[] }[];
   workspace: { path: string; note: string }[];
   managedOnly: boolean;
-  grants: number;
+  grants: number; // the session's grant snapshot, re-applied after a resume (C3's status)
 }
 
 export function present(state: ListPermissionRulesResponse['state'], status: Pick<EngineSessionStatus, 'permissionMode' | 'grants'> | null): PermissionsView {
@@ -42,7 +39,7 @@ export function present(state: ListPermissionRulesResponse['state'], status: Pic
     const description = DescriptionSchema.safeParse(r.description);
     return {
       rule: r.rule,
-      source: RULE_SOURCE[r.source] ?? r.source,
+      source: PERMISSIONS.source[r.source] ?? r.source,
       editability: r.editability ?? null,
       description: description.success ? { prefix: description.data.prefix, emphasis: description.data.emphasis ?? null } : null,
     };
@@ -50,8 +47,8 @@ export function present(state: ListPermissionRulesResponse['state'], status: Pic
   const added = directories(state.workspaceDirectories).filter((d) => d !== state.originalCwd);
   return {
     mode: status && { effective: status.permissionMode.effective, refusal: status.permissionMode.refusal === null ? null : MODE_REFUSAL_WORDS[status.permissionMode.refusal] },
-    groups: BEHAVIORS.map((behavior) => ({ behavior, label: RULE_GROUP[behavior], rules: state.rules.filter((r) => r.behavior === behavior).map(ruleView) })),
-    workspace: [{ path: state.originalCwd, note: 'original directory' }, ...added.map((path) => ({ path, note: 'added' }))],
+    groups: BEHAVIORS.map((behavior) => ({ behavior, label: PERMISSIONS.group[behavior], rules: state.rules.filter((r) => r.behavior === behavior).map(ruleView) })),
+    workspace: [{ path: state.originalCwd, note: PERMISSIONS.original }, ...added.map((path) => ({ path, note: PERMISSIONS.added }))],
     managedOnly: state.managedOnly,
     grants: status?.grants.length ?? 0,
   };
@@ -64,17 +61,18 @@ export function PermissionsBody({ view }: { view: PermissionsView }) {
       {view.mode && (
         <div className="mb-2">
           <p className="m-0">
-            Effective <strong className="font-semibold">{view.mode.effective}</strong> <span className="text-ui-sm text-fg-muted">· {EFFECTIVE_MODE}</span>
+            {PERMISSIONS.effective} <strong className="font-semibold">{view.mode.effective}</strong> <span className="text-ui-sm text-fg-muted">· {PERMISSIONS.fromInit}</span>
           </p>
           {view.mode.refusal && <p className="m-0 mt-1 border-l-2 border-warning pl-2 text-ui-sm">{view.mode.refusal}</p>}
+          {view.grants > 0 && <p className="m-0 mt-1 text-ui-sm text-fg-muted">{PERMISSIONS.grants(view.grants)}</p>}
         </div>
       )}
-      {none && <p className="m-0 text-ui-sm text-fg-muted">{NO_RULES}</p>}
+      {none && <p className="m-0 text-ui-sm text-fg-muted">{PERMISSIONS.none}</p>}
       {view.groups
         .filter((g) => g.rules.length > 0)
         .map((g) => (
           <Group key={g.behavior} label={g.label} count={g.rules.length}>
-            <Rows label={`${g.label} rules`}>
+            <Rows label={PERMISSIONS.rules(g.label)}>
               {g.rules.map((r, i) => (
                 <Row
                   key={`${r.rule}:${i}`}
@@ -89,7 +87,7 @@ export function PermissionsBody({ view }: { view: PermissionsView }) {
                             {r.description.emphasis && <strong className="font-semibold text-fg">{r.description.emphasis}</strong>}
                           </>
                         )}
-                        {r.editability && <span className="text-fg-faint">{r.description ? ' · ' : ''}{RULE_EDITABILITY[r.editability] ?? r.editability}</span>}
+                        {r.editability && <span className="text-fg-faint">{r.description ? ' · ' : ''}{PERMISSIONS.editability[r.editability] ?? r.editability}</span>}
                       </>
                     ) : null
                   }
@@ -98,13 +96,13 @@ export function PermissionsBody({ view }: { view: PermissionsView }) {
             </Rows>
           </Group>
         ))}
-      <Group label={WORKSPACE}>
-        <Rows label="Workspace directories">
+      <Group label={PERMISSIONS.workspace}>
+        <Rows label={PERMISSIONS.workspaceList}>
           {view.workspace.map((w) => (
             <Row key={w.path} main={<Mono>{w.path}</Mono>} note={w.note} />
           ))}
         </Rows>
-        {view.managedOnly && <p className="m-0 mt-1 text-ui-sm text-fg-muted">Only managed rules apply</p>}
+        {view.managedOnly && <p className="m-0 mt-1 text-ui-sm text-fg-muted">{PERMISSIONS.managedOnly}</p>}
       </Group>
     </div>
   );

@@ -5,7 +5,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { GetWorkspaceDiffResponse } from '@shared/wire/control';
 import { ARRIVES_WITH } from '../panel/arrives-with';
 import { panelHost, usePanelHost } from '../panel/host';
-import { NO_DIFF, OPEN_IN_REVIEW, WIDGET_FOOT, WIDGET_TITLE } from './copy';
+import { DIFF, WIDGET_FOOT, WIDGET_TITLE } from './copy';
 import { Mono, num, Row, Rows, TextButton } from './parts';
 import { useEngineRead } from './read';
 import { WidgetFrame } from './WidgetFrame';
@@ -17,15 +17,13 @@ export interface DiffView {
   restricted: number;
 }
 
-const plural = (n: number, one: string) => `${num(n)} ${one}${n === 1 ? '' : 's'}`;
-
 export function present({ diff }: GetWorkspaceDiffResponse): DiffView {
-  if (diff === null) return { line: NO_DIFF, files: [], skippedLarge: 0, restricted: 0 };
-  const where = diff.source.kind === 'branch' ? `against ${String(diff.source.baseBranch)}` : 'working tree';
+  if (diff === null) return { line: DIFF.none, files: [], skippedLarge: 0, restricted: 0 };
+  const where = diff.source.kind === 'branch' ? DIFF.against(String(diff.source.baseBranch)) : DIFF.workingTree;
   return {
-    line: `${plural(diff.stats.filesCount, 'file')} · +${num(diff.stats.linesAdded)} −${num(diff.stats.linesRemoved)} · ${where}`,
+    line: `${DIFF.files(num(diff.stats.filesCount), diff.stats.filesCount === 1)} · +${num(diff.stats.linesAdded)} −${num(diff.stats.linesRemoved)} · ${where}`,
     files: diff.perFileStats.map((f) => {
-      const marks = [f.isBinary ? 'binary' : null, f.isUntracked ? 'untracked' : null].filter((m) => m !== null);
+      const marks = [f.isBinary ? DIFF.binary : null, f.isUntracked ? DIFF.untracked : null].filter((m) => m !== null);
       return { path: f.path, stat: f.isBinary ? '' : `+${num(f.added)} −${num(f.removed)}`, note: marks.length > 0 ? marks.join(' · ') : null };
     }),
     skippedLarge: diff.skippedLarge.length,
@@ -43,12 +41,12 @@ export function DiffBody({ view, appSessionId, close }: { view: DiffView; appSes
     <div className="flex flex-col gap-2">
       <div className="flex items-baseline gap-2">
         <p className="m-0 flex-1">{view.line}</p>
-        <TextButton onClick={open} disabled={!review} title={review ? undefined : `arrives with ${ARRIVES_WITH.review}`}>
-          {OPEN_IN_REVIEW}
+        <TextButton onClick={open} disabled={!review} title={review ? undefined : DIFF.arrivesWith(ARRIVES_WITH.review)}>
+          {DIFF.openInReview}
         </TextButton>
       </div>
       {view.files.length > 0 && (
-        <Rows label="Changed files">
+        <Rows label={DIFF.list}>
           {view.files.map((f) => (
             <Row key={f.path} main={<Mono>{f.path}</Mono>} note={[f.stat, f.note].filter(Boolean).join(' · ')} />
           ))}
@@ -56,7 +54,7 @@ export function DiffBody({ view, appSessionId, close }: { view: DiffView; appSes
       )}
       {(view.skippedLarge > 0 || view.restricted > 0) && (
         <p className="m-0 text-ui-sm text-fg-muted">
-          {[view.skippedLarge > 0 ? `${plural(view.skippedLarge, 'large file')} skipped` : null, view.restricted > 0 ? `${plural(view.restricted, 'restricted file')} not shown` : null]
+          {[view.skippedLarge > 0 ? DIFF.skipped(num(view.skippedLarge), view.skippedLarge === 1) : null, view.restricted > 0 ? DIFF.restricted(num(view.restricted), view.restricted === 1) : null]
             .filter(Boolean)
             .join(' · ')}
         </p>

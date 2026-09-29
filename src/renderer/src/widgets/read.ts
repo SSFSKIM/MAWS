@@ -12,7 +12,7 @@ import type { CommandInput, CommandOutput } from '@shared/ipc/schema';
 import { ipc } from '../ipc/client';
 import { IpcCommandError, type QueryCommand } from '../ipc/query';
 import { useSessions } from '../stores/sessions';
-import { NO_ANSWER } from './copy';
+import { FRAME } from './copy';
 
 export type WidgetReadPolicy = { mode: 'active' } | { mode: 'passive' };
 export const WidgetReadPolicyContext = createContext<WidgetReadPolicy>({ mode: 'active' });
@@ -54,7 +54,7 @@ export interface EngineReadOptions {
 
 const errorWords = (error: IpcCommandError | null): string | null => {
   if (error === null) return null;
-  return error.error.code === 'timeout' ? `${NO_ANSWER} · ${error.message}` : error.message;
+  return error.error.code === 'timeout' ? `${FRAME.noAnswer} · ${error.message}` : error.message;
 };
 
 export function useEngineRead<N extends SessionRead>(command: N, input: CommandInput<N>, options: EngineReadOptions = {}): EngineRead<CommandOutput<N>> {

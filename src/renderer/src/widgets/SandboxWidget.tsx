@@ -4,26 +4,15 @@
 import * as z from 'zod';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { GetSandboxDialogResponse } from '@shared/wire/control';
-import { WIDGET_FOOT, WIDGET_TITLE } from './copy';
+import { SANDBOX, SHARED, WIDGET_FOOT, WIDGET_TITLE } from './copy';
 import { Group, KeyValues, Mono, Row, Rows } from './parts';
 import { useEngineRead } from './read';
 import { WidgetFrame } from './WidgetFrame';
 
 const Strings = z.array(z.string());
 const DependenciesSchema = z.looseObject({ errors: Strings.catch([]), warnings: Strings.catch([]) });
-const yes = (value: unknown) => (value === true ? 'yes' : value === false ? 'no' : '—');
+const yes = (value: unknown) => (value === true ? SHARED.yes : value === false ? SHARED.no : '—');
 
-// The restriction lists in the terminal's order, by their wire keys.
-const RESTRICTIONS: [key: string, label: string][] = [
-  ['fs_deny_read', 'Deny reading'],
-  ['fs_allow_read', 'Allow reading'],
-  ['fs_allow_write', 'Allow writing'],
-  ['fs_deny_write', 'Deny writing'],
-  ['network_allowed_domains', 'Allowed domains'],
-  ['network_denied_domains', 'Denied domains'],
-  ['unix_sockets', 'Unix sockets'],
-  ['ignored_glob_patterns', 'Ignored patterns'],
-];
 
 export interface SandboxView {
   line: string;
@@ -39,19 +28,19 @@ export function present(dialog: GetSandboxDialogResponse): SandboxView {
   const excluded = Strings.safeParse(dialog.excluded_commands);
   const unavailable = typeof dialog.unavailable_reason === 'string' ? dialog.unavailable_reason : null;
   return {
-    line: `${dialog.mode} · ${dialog.supported ? 'supported' : `unsupported${reason ? `: ${reason}` : ''}`}`,
+    line: `${dialog.mode} · ${dialog.supported ? SANDBOX.supported : SANDBOX.unsupported(reason)}`,
     rows: [
-      { label: 'Enabled', value: yes(dialog.enabled) },
-      { label: 'Enabled in settings', value: yes(dialog.enabled_in_settings) },
-      { label: 'Locked', value: yes(dialog.locked) },
-      { label: 'Auto-allow', value: dialog.auto_allow_available === true ? 'available' : 'not available' },
-      { label: 'Unsandboxed fallback', value: yes(dialog.unsandboxed_fallback) },
-      ...(unavailable ? [{ label: 'Unavailable', value: unavailable }] : []),
-      ...(restrictions.network_managed === true ? [{ label: 'Network', value: 'managed' }] : []),
+      { label: SANDBOX.enabled, value: yes(dialog.enabled) },
+      { label: SANDBOX.enabledInSettings, value: yes(dialog.enabled_in_settings) },
+      { label: SANDBOX.locked, value: yes(dialog.locked) },
+      { label: SANDBOX.autoAllow, value: dialog.auto_allow_available === true ? SANDBOX.available : SANDBOX.notAvailable },
+      { label: SANDBOX.fallback, value: yes(dialog.unsandboxed_fallback) },
+      ...(unavailable ? [{ label: SANDBOX.unavailable, value: unavailable }] : []),
+      ...(restrictions.network_managed === true ? [{ label: SANDBOX.network, value: SANDBOX.managed }] : []),
     ],
     dependencies: DependenciesSchema.catch({ errors: [], warnings: [] }).parse(dialog.dependencies),
     excluded: excluded.success ? excluded.data : [],
-    restrictions: RESTRICTIONS.flatMap(([key, label]) => {
+    restrictions: Object.entries(SANDBOX.restriction).flatMap(([key, label]) => {
       const values = Strings.safeParse(restrictions[key]);
       return values.success && values.data.length > 0 ? [{ label, values: values.data }] : [];
     }),
@@ -63,9 +52,9 @@ export function SandboxBody({ view }: { view: SandboxView }) {
   return (
     <div className="flex flex-col">
       <p className="m-0 mb-2">{view.line}</p>
-      <KeyValues rows={view.rows} label="Sandbox settings" />
+      <KeyValues rows={view.rows} label={SANDBOX.settings} />
       {problems.length > 0 && (
-        <Group label="Dependencies">
+        <Group label={SANDBOX.dependencies}>
           <Rows>
             {problems.map((p, i) => (
               <Row key={i} main={p.text} note={p.level} />
@@ -74,7 +63,7 @@ export function SandboxBody({ view }: { view: SandboxView }) {
         </Group>
       )}
       {view.excluded.length > 0 && (
-        <Group label="Excluded commands" count={view.excluded.length}>
+        <Group label={SANDBOX.excluded} count={view.excluded.length}>
           <Rows>
             {view.excluded.map((c) => (
               <Row key={c} main={<Mono>{c}</Mono>} />

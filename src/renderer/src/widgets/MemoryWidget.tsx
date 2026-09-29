@@ -6,7 +6,7 @@ import * as z from 'zod';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { GetMemoryDialogResponse } from '@shared/wire/control';
 import { prefillComposer } from '../composer';
-import { ADD_NOTE, FILE_MISSING, REVEAL, WIDGET_FOOT, WIDGET_TITLE } from './copy';
+import { MEMORY, SHARED, WIDGET_FOOT, WIDGET_TITLE } from './copy';
 import { Group, Mono, RevealButton, Row, Rows, TextButton } from './parts';
 import { useEngineRead } from './read';
 import { WidgetFrame } from './WidgetFrame';
@@ -22,7 +22,7 @@ export interface MemoryView {
 export function present(dialog: GetMemoryDialogResponse): MemoryView {
   const auto = StatusSchema.safeParse(dialog.auto_memory);
   return {
-    files: dialog.files.map((f) => ({ label: f.label, path: f.path, description: f.description, exists: f.exists, note: f.exists ? null : FILE_MISSING })),
+    files: dialog.files.map((f) => ({ label: f.label, path: f.path, description: f.description, exists: f.exists, note: f.exists ? null : MEMORY.missing })),
     folders: dialog.folders.map((f) => ({ label: f.label, path: f.path })),
     autoMemory: auto.success ? auto.data.status : null,
   };
@@ -35,8 +35,8 @@ export function MemoryBody({ view, appSessionId, close }: { view: MemoryView; ap
   };
   return (
     <div className="flex flex-col">
-      <Group label="Files">
-        <Rows label="Memory files">
+      <Group label={MEMORY.files}>
+        <Rows label={MEMORY.fileList}>
           {view.files.map((f) => (
             <Row
               key={f.path}
@@ -48,23 +48,23 @@ export function MemoryBody({ view, appSessionId, close }: { view: MemoryView; ap
                   {f.description && <span> · {f.description}</span>}
                 </>
               }
-              actions={f.exists ? <RevealButton path={f.path}>{REVEAL}</RevealButton> : null}
+              actions={f.exists ? <RevealButton path={f.path}>{SHARED.reveal}</RevealButton> : null}
             />
           ))}
         </Rows>
       </Group>
       {view.folders.length > 0 && (
-        <Group label="Folders">
-          <Rows label="Memory folders">
+        <Group label={MEMORY.folders}>
+          <Rows label={MEMORY.folderList}>
             {view.folders.map((f) => (
-              <Row key={f.path} main={f.label} detail={<Mono>{f.path}</Mono>} actions={<RevealButton path={f.path}>{REVEAL}</RevealButton>} />
+              <Row key={f.path} main={f.label} detail={<Mono>{f.path}</Mono>} actions={<RevealButton path={f.path}>{SHARED.reveal}</RevealButton>} />
             ))}
           </Rows>
         </Group>
       )}
-      {view.autoMemory && <p className="m-0 mt-2 text-ui-sm text-fg-muted">Auto memory · {view.autoMemory}</p>}
+      {view.autoMemory && <p className="m-0 mt-2 text-ui-sm text-fg-muted">{MEMORY.autoMemory(view.autoMemory)}</p>}
       <div className="mt-2">
-        <TextButton onClick={addNote}>{ADD_NOTE}</TextButton>
+        <TextButton onClick={addNote}>{MEMORY.addNote}</TextButton>
       </div>
     </div>
   );
