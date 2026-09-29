@@ -79,6 +79,8 @@ function fakeMain(initial: SettingsState['settings']['theme']) {
       // C5 start: the shell's snapshots (the record side above is C4's)
       case 'session.digests':
         return { digests: [] };
+      case 'engine.sessions': // the engine table at connect (debt wave 3)
+        return [];
       case 'session.launchMode':
         return { mode: 'index' };
       case 'attention.list':

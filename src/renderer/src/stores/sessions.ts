@@ -38,6 +38,7 @@ export interface SessionsState {
   applyDigests(digests: SessionDigest[]): void;
   applyDigest(digest: SessionDigest): void;
   applyStatus(event: EventPayload<'session.status'>): void;
+  applyStatuses(statuses: EngineSessionStatus[]): void; // C3's process table (`engine.sessions`) at connect
   setLoaded(): void;
   addUnstarted(appSessionId: AppSessionId, entry: UnstartedSession): void;
   dropUnstarted(appSessionId: AppSessionId): void;
@@ -152,6 +153,15 @@ export function createSessionsStore() {
       applyDigest: (digest) => keepDigests([digest]),
       applyStatus({ appSessionId, status }) {
         set({ engine: new Map(get().engine).set(appSessionId, status) });
+      },
+      // Statuses carry no revision. The table is read after the subscription, and the host sends its events and its
+      // answer down one channel, so a status that arrived before the table is no newer than it and one after it is
+      // newer: the table overwrites what it lists and keeps what it does not.
+      applyStatuses(statuses) {
+        if (statuses.length === 0) return;
+        const engine = new Map(get().engine);
+        for (const status of statuses) engine.set(status.appSessionId, status);
+        set({ engine });
       },
       setLoaded() {
         set({ loaded: true });
