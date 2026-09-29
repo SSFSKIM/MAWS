@@ -292,7 +292,7 @@ function Body() {
 }
 
 function ToolBody({ tab, session, pinned }: { tab: PanelTab; session: AppSessionId; pinned: boolean }) {
-  const tool = panelHost.tools().find((t) => t.id === tab.toolId);
+  const { tool } = tab;
   const ctx = useMemo<PanelToolContext>(
     () => ({
       appSessionId: session,
@@ -307,7 +307,6 @@ function ToolBody({ tab, session, pinned }: { tab: PanelTab; session: AppSession
     }),
     [session, pinned, tab.focusRequest, tab.setTitle, tab.id],
   );
-  if (!tool) return <div className="p-4 text-danger">No tool is registered as {tab.toolId}</div>;
   return <tool.render state={tab.state} ctx={ctx} />;
 }
 

@@ -16,6 +16,7 @@ export const REVIEW_TAB = 'review'; // the permanent placeholder tab, standing i
 export interface PanelTab {
   id: string;
   toolId: string;
+  tool: PanelTool<unknown, unknown>; // the registration the tab was created with; it outlives an unregistration
   state: unknown;
   home: AppSessionId; // the session whose tab list holds it while it is not pinned
   ordinal: number; // "Terminal 2"
@@ -46,15 +47,15 @@ const toolOf = (toolId: string): PanelTool<unknown, unknown> => {
 export const visibleTabs = (state: PanelState, session: AppSessionId): string[] => [...state.pinned, ...(state.sessionTabs[session] ?? [])];
 
 export function tabTitle(tab: PanelTab): string {
-  const tool = panelHost.tools().find((t) => t.id === tab.toolId);
-  return `${tool?.title ?? tab.toolId}${tab.ordinal > 1 ? ` ${tab.ordinal}` : ''}${tab.suffix ? ` · ${tab.suffix}` : ''}`;
+  return `${tab.tool.title}${tab.ordinal > 1 ? ` ${tab.ordinal}` : ''}${tab.suffix ? ` · ${tab.suffix}` : ''}`;
 }
 
 export const terminalOf = (tab: PanelTab | undefined): TerminalId | null =>
   tab?.toolId === TERMINAL_TOOL_ID ? (tab.state as TerminalTabState).terminalId : null;
 
 function createTab(toolId: string, id: string, home: AppSessionId, appSessionId: AppSessionId | null, params: unknown): PanelTab {
-  const state = toolOf(toolId).createState({ appSessionId, session: FAKE_SESSIONS[home] ?? null, instanceId: id, params });
+  const tool = toolOf(toolId);
+  const state = tool.createState({ appSessionId, session: FAKE_SESSIONS[home] ?? null, instanceId: id, params });
   const used = new Set(Object.values(get().tabs).filter((tab) => tab.toolId === toolId).map((tab) => tab.ordinal));
   let ordinal = 1;
   while (used.has(ordinal)) ordinal++;
@@ -62,7 +63,7 @@ function createTab(toolId: string, id: string, home: AppSessionId, appSessionId:
     const tab = get().tabs[id];
     if (tab && tab.suffix !== suffix) set((s) => ({ tabs: { ...s.tabs, [id]: { ...tab, suffix } } }));
   };
-  return { id, toolId, state, home, ordinal, suffix: null, focusRequest: 0, setTitle };
+  return { id, toolId, tool, state, home, ordinal, suffix: null, focusRequest: 0, setTitle };
 }
 
 function insert(tab: PanelTab, pin: boolean): void {
@@ -126,7 +127,7 @@ export function addTool(toolId: string, { appSessionId, params, pin = false, act
 export async function closeTab(id: string): Promise<boolean> {
   const tab = get().tabs[id];
   if (!tab) return true;
-  const tool = toolOf(tab.toolId);
+  const { tool } = tab;
   if (!(await tool.beforeClose(tab.state))) {
     if (visibleTabs(get(), get().session).includes(id)) selectTab(id);
     return false;
@@ -163,12 +164,10 @@ export function switchSession(next: AppSessionId): void {
   selectIn(next, target);
 }
 
-function closeToolTabs(toolId: string): void {
-  const tool = toolOf(toolId);
-  for (const tab of Object.values(get().tabs).filter((t) => t.toolId === toolId)) {
-    remove(tab.id);
-    tool.dispose(tab.state);
-  }
+// A tool was unregistered: each of its tabs closes the way the owner's close would (the Terminal tool kills its
+// shell in `beforeClose`), and a tab whose close is vetoed or fails stays, with its tool, so it can be retried.
+export async function closeToolTabs(toolId: string): Promise<void> {
+  await Promise.all(Object.values(get().tabs).filter((tab) => tab.toolId === toolId).map((tab) => closeTab(tab.id)));
 }
 
 export const panelHostImplementation: PanelHostImplementation = {
