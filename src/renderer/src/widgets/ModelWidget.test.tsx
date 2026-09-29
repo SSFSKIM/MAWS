@@ -11,7 +11,7 @@ import { createWidgetBackend, fixtureLine, RESPONSES, WidgetBackendError, type W
 import { registerSetupIntentHook, type SetupIntentHook } from '../composer';
 import { useSessions } from '../stores/sessions';
 import { useUsage } from '../stores/usage';
-import { acceptedModel, fastView, liveModel, presentModels, resetModelRequests, setModel, useModelRequests } from './model';
+import { acceptedModel, effortsOf, fastView, liveModel, presentModels, resetModelRequests, setModel, useModelRequests } from './model';
 import { modelWidget } from './ModelWidget';
 
 const ROOT = join(__dirname, '../../../..');
@@ -210,6 +210,16 @@ describe('an accepted control whose status arrived before its answer', () => {
     expect(useModelRequests.getState().model.has(ID)).toBe(false);
     act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: { ...status(), model: { requested: 'sonnet', resolved: 'claude-sonnet-5[1m]' } } }));
     expect(acceptedModel(useModelRequests.getState(), ID, status())).toBeUndefined();
+  });
+});
+
+describe('effortsOf', () => {
+  it('keeps the known levels an entry lists, and reads anything but a list of strings as none listed', () => {
+    expect(effortsOf({ supportedEffortLevels: ['low', 'bogus', 'max'] })).toEqual(['low', 'max']);
+    expect(effortsOf({})).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
+    expect(effortsOf({ supportedEffortLevels: 'lowhigh' as never })).toEqual(['low', 'medium', 'high', 'xhigh', 'max']); // no substring match
+    expect(effortsOf({ supportedEffortLevels: [1, 'high'] as never })).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
+    expect(effortsOf(undefined)).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
   });
 });
 

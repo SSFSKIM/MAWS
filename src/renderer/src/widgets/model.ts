@@ -5,6 +5,7 @@
 // rejected invoke as the separate transport branch. A control that the engine accepted is remembered until the status
 // moves, so the widget (and a passively mounted one, whose controls the harness runs) shows it as pending.
 import { create } from 'zustand';
+import * as z from 'zod';
 import { EffortSchema, type Effort } from '@shared/engine/launch-spec';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -33,8 +34,12 @@ export interface ModelEntryView {
 const EFFORTS = EffortSchema.options;
 
 // The levels an entry admits (every entry that lists them lists all five on 2.1.283); none listed: the whole vocabulary.
-export const effortsOf = (row: Pick<ModelRow, 'supportedEffortLevels'> | undefined): Effort[] =>
-  row?.supportedEffortLevels ? EFFORTS.filter((e) => row.supportedEffortLevels!.includes(e)) : [...EFFORTS];
+// Parsed here, since C10's catalogue entries pass the field through untyped: anything but a list of strings is none.
+const LevelsSchema = z.array(z.string()).optional();
+export const effortsOf = (row: { supportedEffortLevels?: unknown } | undefined): Effort[] => {
+  const levels = LevelsSchema.safeParse(row?.supportedEffortLevels);
+  return levels.success && levels.data ? EFFORTS.filter((e) => levels.data!.includes(e)) : [...EFFORTS];
+};
 
 export function presentModels(models: readonly ModelRow[]): { claude: ModelEntryView[]; gateway: ModelEntryView[] } {
   const view = (m: ModelRow): ModelEntryView => ({
