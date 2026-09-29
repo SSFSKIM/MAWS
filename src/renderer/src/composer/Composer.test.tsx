@@ -172,14 +172,32 @@ describe("composer DOM under C5's dispatcher", () => {
   it('keeps Enter in the editor from any request.accept handler, and ⌘Enter sends only from the editor', async () => {
     live(A);
     const accepted = vi.fn();
-    function Counter() {
-      const ref = useRef<HTMLDivElement>(null);
+    // a pane-scoped Enter owned by the pane that holds the composer: it would receive any Enter from inside it that C5's
+    // dispatcher does not refuse
+    function CountingPane({ children }: { children: ReactNode }) {
+      const ref = useRef<HTMLElement>(null);
       useKeyChord('request.accept', accepted, { within: ref });
-      return <div ref={ref} tabIndex={0} aria-label="counter" />;
+      return (
+        <section ref={ref} data-pane={0} aria-label="pane 0">
+          {children}
+        </section>
+      );
     }
-    mount([{ index: 0, id: A }], <Counter />);
+    render(
+      <QueryClientProvider client={queryClient}>
+        <CountingPane>
+          <Composer appSessionId={A} paneIndex={0} />
+        </CountingPane>
+      </QueryClientProvider>,
+    );
+    act(() => editorOf().focus());
     await key(editorOf(), { key: 'Enter' });
+    // a key whose target is inside the editor's sink but is no text entry and no button: only the sink refuses it
+    const sink = composerOf(0).querySelector<HTMLElement>('[data-key-sink="composer"]')!;
+    await key(sink, { key: 'Enter' });
     expect(accepted).not.toHaveBeenCalled();
+    await key(composerOf(0), { key: 'Enter' }); // the same key outside the sink, focus still in the pane: the pane's
+    expect(accepted).toHaveBeenCalledTimes(1);
     await type('from the button');
     act(() => primary().focus());
     await key(primary(), { key: 'Enter', metaKey: true });
@@ -207,6 +225,7 @@ describe("composer DOM under C5's dispatcher", () => {
     act(() => useAttention.setState({ bySession: new Map([[A, []]]), version: 2 }));
     await waitFor(() => expect(composerOf(0).querySelector('[data-composer-frame]')!.hasAttribute('hidden')).toBe(false));
     expect(editorOf().editor.getText()).toBe('a draft kept aside');
+    await waitFor(() => expect(editorOf().contains(document.activeElement)).toBe(true)); // focus is back in the editor
   });
 
   it('docks a foreign card ahead of any request, hides the editor the same way, and answers Enter through its own onAccept', async () => {
