@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, SessionId } from '@shared/graph/ids';
@@ -7,6 +8,7 @@ import { sessionIdFor, summary } from '../../../test/support/index-fixture';
 import { validateEventPayload } from '@shared/ipc/validate';
 import { SessionHarness } from '../../../test/support/session-harness';
 import { DOWN_RELAY } from '../../../test/support/session-host';
+import { storeLabel } from './record-actions';
 
 // The service is Electron-free (its handlers are service-register.ts's).
 vi.mock('electron', () => {
@@ -650,12 +652,19 @@ describe('session service', () => {
       expect(h.index.sessions.get(record.appId)).toBeNull();
     });
 
+    it("names the engine's store as the delete sheet says it: the config home the engine reads, `~`-abbreviated under the home directory", () => {
+      expect(storeLabel({})).toBe('~/.claude');
+      expect(storeLabel({ CLAUDE_CONFIG_DIR: join(homedir(), 'alt-config') })).toBe('~/alt-config');
+      expect(storeLabel({ CLAUDE_CONFIG_DIR: `${homedir()}adow/config` })).toBe(`${homedir()}adow/config`);
+      expect(storeLabel({ CLAUDE_CONFIG_DIR: '/private/tmp/c10/config' })).toBe('/private/tmp/c10/config');
+    });
+
     it('previews what a delete would move: the transcript, its subagent transcripts and its recordings, moving nothing', async () => {
       const { record, dir, transcript } = conversation();
       writeFileSync(join(dir, SID, 'subagents', 'agent-a1.jsonl'), '');
       writeFileSync(join(dir, SID, 'subagents', 'agent-a2.jsonl'), '');
       writeFileSync(join(dir, SID, 'subagents', 'agent-a2.meta.json'), '{}');
-      expect(await h.service.previewDeletion(record.appId)).toEqual({ transcript, subagents: 2, recordings: 1, paths: 4 });
+      expect(await h.service.previewDeletion(record.appId)).toEqual({ transcript, subagents: 2, recordings: 1, paths: 4, store: h.trust.configHome }); // the config home the engine reads
       expect(h.trashed).toEqual([]);
       expect(existsSync(join(h.userData, 'sessions', 'deletions', `${record.appId}.json`))).toBe(false);
     });

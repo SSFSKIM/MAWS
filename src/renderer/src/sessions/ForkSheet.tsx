@@ -12,7 +12,7 @@ import { useSessions } from '../stores/sessions';
 import { closeDialog } from './dialogs';
 import { forkSession } from './record-ops';
 import { Sheet, SheetForm } from './Sheet';
-import { FIELD, PRIMARY } from './ui';
+import { CHOICE, FIELD, PRIMARY } from './ui';
 import { defaultWorktreeName } from './useSetupIntent';
 
 export function ForkSheet({ appSessionId }: { appSessionId: AppSessionId }) {
@@ -75,11 +75,11 @@ export function ForkSheet({ appSessionId }: { appSessionId: AppSessionId }) {
           <legend className="mb-1 p-0">Branch</legend>
           <div className="flex gap-3">
             <label className="flex items-center gap-1.5 text-fg">
-              <input type="radio" name="branch-mode" checked={mode === 'new'} onChange={() => setMode('new')} />
+              <input type="radio" name="branch-mode" checked={mode === 'new'} onChange={() => setMode('new')} className={CHOICE} />
               New
             </label>
             <label className="flex items-center gap-1.5 text-fg">
-              <input type="radio" name="branch-mode" checked={mode === 'existing'} onChange={() => setMode('existing')} />
+              <input type="radio" name="branch-mode" checked={mode === 'existing'} onChange={() => setMode('existing')} className={CHOICE} />
               Existing
             </label>
           </div>

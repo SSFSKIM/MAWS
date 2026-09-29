@@ -435,7 +435,7 @@ const c10Commands = {
   // its recordings; every path); nothing moves
   'session.deletions.preview': {
     input: appSessionC10,
-    output: z.strictObject({ transcript: z.string().nullable(), subagents: z.number().int(), recordings: z.number().int(), paths: z.number().int() }),
+    output: z.strictObject({ transcript: z.string().nullable(), subagents: z.number().int(), recordings: z.number().int(), paths: z.number().int(), store: z.string() }), // store: the config home the engine reads, `~`-abbreviated under the home directory
     owner: 'main',
   },
 } as const satisfies Record<`session.${string}`, CommandSpec<z.ZodType, z.ZodType>>;

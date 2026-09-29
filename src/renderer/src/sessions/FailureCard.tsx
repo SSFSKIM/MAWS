@@ -5,7 +5,7 @@
 import { useState } from 'react';
 import type { SetupResources } from '@shared/sessions/setup';
 import type { SetupFailure } from './store';
-import { DANGER, PRIMARY, QUIET, SECONDARY } from './ui';
+import { CHOICE, DANGER, PRIMARY, QUIET, SECONDARY } from './ui';
 
 export const FAILURE_CARD_TITLE = 'The session did not start';
 
@@ -69,7 +69,7 @@ export function FailureCard({
       </ul>
       {discardable && (
         <label className="flex items-center gap-2 text-ui-sm text-fg">
-          <input type="checkbox" checked={acknowledged} onChange={(e) => setAcknowledged(e.target.checked)} />
+          <input type="checkbox" aria-label={`Discard ${changes}; this cannot be undone`} checked={acknowledged} onChange={(e) => setAcknowledged(e.target.checked)} className={CHOICE} />
           {`Discard ${changes}; this cannot be undone`}
         </label>
       )}

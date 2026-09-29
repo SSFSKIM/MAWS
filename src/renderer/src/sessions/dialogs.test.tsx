@@ -139,13 +139,30 @@ describe('cleanup dialog archives idle only', () => {
     await userEvent.click(within(dialog).getByRole('checkbox', { name: 'Delete branch' }));
     const confirmButton = within(dialog).getByRole('button', { name: 'Discard and remove and delete branch' });
     expect(confirmButton.hasAttribute('disabled')).toBe(true);
-    await userEvent.click(within(dialog).getByRole('checkbox', { name: 'Discard 1 uncommitted change; this cannot be undone' }));
+    expect(within(dialog).getByText('1 commit not on main is lost.')).toBeTruthy();
+    const discardAck = within(dialog).getByRole('checkbox', { name: 'Discard 1 uncommitted change; this cannot be undone' });
+    const unmergedAck = within(dialog).getByRole('checkbox', { name: 'Delete 1 commit not on main; this cannot be undone' });
+    // named by their own attribute, as the steps are, not only by the label around them
+    expect([discardAck, unmergedAck].map((c) => c.getAttribute('aria-label'))).toEqual(['Discard 1 uncommitted change; this cannot be undone', 'Delete 1 commit not on main; this cannot be undone']);
+    await userEvent.click(discardAck);
     expect(confirmButton.hasAttribute('disabled')).toBe(true);
-    await userEvent.click(within(dialog).getByRole('checkbox', { name: 'Delete 1 commit not on main; this cannot be undone' }));
+    await userEvent.click(unmergedAck);
     await userEvent.click(confirmButton);
     expect(await within(dialog).findByText(`Remove refused · changed: head moved to ${'b'.repeat(40)}`)).toBeTruthy();
     expect(fake.invoked('git.worktree.remove')).toEqual([{ repoRoot: REPO, path: WT, expect: { branch: 'worktree-accept-one', head: HEAD }, discard: true }]);
     expect(fake.invoked('git.worktree.deleteBranch')).toEqual([]);
+  });
+
+  it('says the unmerged commits a branch delete loses in the right number', async () => {
+    withMain({
+      'git.worktree.list': () => listed,
+      'git.worktree.status': () => worktreeStatus(),
+      'git.worktree.branch': () => branchStatus({ ahead: 2, merged: false }),
+    });
+    render(<SessionDialogs />);
+    act(() => openDialog({ kind: 'cleanup', target: { repoRoot: REPO, path: WT, branch: 'worktree-accept-one' } }));
+    const dialog = await screen.findByRole('dialog');
+    expect(await within(dialog).findByText('2 commits not on main are lost.')).toBeTruthy();
   });
 
   it('reopened after the checkout was removed, it still reaches the leftover branch (detached) from the record’s branch', async () => {
@@ -243,6 +260,8 @@ describe('dialogs', () => {
       { appSessionId: IDLE1, target: { kind: 'newWorktree', name: 'accept-fork', branch: { kind: 'new', name: 'worktree-accept-fork', base: 'HEAD' } }, message: null, rewindTo: null },
     ]));
     expect(await within(dialog).findByText('worktree path exists')).toBeTruthy();
+    // the branch radios paint with the accent token, not the system accent colour
+    for (const radio of [within(dialog).getByRole('radio', { name: 'New' }), within(dialog).getByRole('radio', { name: 'Existing' })]) expect(radio.classList.contains('accent-accent')).toBe(true);
   });
 
   it('rename routes through session.rename and states whose act named the title', async () => {
@@ -260,14 +279,15 @@ describe('dialogs', () => {
 
   it('delete names what moves and needs its acknowledgement before Enter acts; a partial delete is said with its next step', async () => {
     withMain({
-      'session.deletions.preview': () => ({ transcript: `${REPO}/x.jsonl`, subagents: 2, recordings: 1, paths: 5 }),
+      'session.deletions.preview': () => ({ transcript: `${REPO}/x.jsonl`, subagents: 2, recordings: 1, paths: 5, store: '/private/tmp/scratch/config' }),
       'session.delete': () => ({ status: 'partial', trashed: ['/a.cast'], failed: { path: '/b.json', error: 'EPERM' } }),
       'session.deletions.list': () => ({ manifests: [{ appSessionId: IDLE1, engineSessionId: null, paths: ['/a.cast', '/b.json'], trashed: ['/a.cast'], createdAt: '2026-09-29T10:00:00.000Z' }] }),
     });
     render(<SessionDialogs />);
     act(() => openDialog({ kind: 'delete', appSessionId: IDLE1 }));
     const dialog = await screen.findByRole('dialog', { name: 'Delete “Idle one”?' });
-    expect(await within(dialog).findByText(/Removes the transcript, its 2 subagent transcripts and 1 recording from ~\/.claude to the Trash/)).toBeTruthy();
+    expect(await within(dialog).findByText(/Removes the transcript, its 2 subagent transcripts and 1 recording from \/private\/tmp\/scratch\/config to the Trash/)).toBeTruthy();
+    expect(within(dialog).getByRole('checkbox', { name: 'Move the transcript to the Trash' }).getAttribute('aria-label')).toBe('Move the transcript to the Trash');
     const button = within(dialog).getByRole('button', { name: 'Delete' });
     expect(button.hasAttribute('disabled')).toBe(true);
     await userEvent.click(within(dialog).getByRole('checkbox', { name: 'Move the transcript to the Trash' }));
@@ -278,12 +298,13 @@ describe('dialogs', () => {
   });
 
   it('a live session is stopped and deleted', async () => {
-    withMain({ 'session.deletions.preview': () => ({ transcript: null, subagents: 0, recordings: 0, paths: 0 }), 'session.delete': () => ({ status: 'deleted', trashed: [] }) });
+    withMain({ 'session.deletions.preview': () => ({ transcript: null, subagents: 0, recordings: 0, paths: 0, store: '~/.claude' }), 'session.delete': () => ({ status: 'deleted', trashed: [] }) });
     useLayout.getState().openTab({ kind: 'session', appSessionId: LIVE });
     render(<SessionDialogs />);
     act(() => openDialog({ kind: 'delete', appSessionId: LIVE }));
     const dialog = await screen.findByRole('dialog');
     await userEvent.click(within(dialog).getByRole('checkbox', { name: 'Move the transcript to the Trash' }));
+    expect(await within(dialog).findByText(/^Removes what is left of the conversation from ~\/.claude to the Trash/)).toBeTruthy();
     await userEvent.click(within(dialog).getByRole('button', { name: 'Stop and delete' }));
     await waitFor(() => expect(fake.invoked('session.delete')).toEqual([{ appSessionId: LIVE, stopIfLive: true }]));
     await waitFor(() => expect(useLayout.getState().main.panes[0].tabs.some((t) => t.kind === 'session' && t.appSessionId === LIVE)).toBe(false));

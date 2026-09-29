@@ -1,5 +1,6 @@
 // Delete conversation, a small confirmation sheet (D-20; mockup 05 vignette 07 for the copy): the title, the directory,
-// what moves to the Trash (the transcript, its subagent transcripts, its recordings, from `session.deletions.preview`),
+// what moves to the Trash (the transcript, its subagent transcripts, its recordings, from `session.deletions.preview`,
+// which also names the store they move from: the config home the engine reads),
 // and the acknowledgement "Move the transcript to the Trash" before the button acts; "Stop and delete" for a live
 // session. A stop the host could not confirm and a delete that stopped half-way are said with their next step.
 import { useEffect, useState } from 'react';
@@ -10,7 +11,7 @@ import { useSessions } from '../stores/sessions';
 import { closeDialog } from './dialogs';
 import { deleteOutcomeWords, deleteSession, useRecord } from './record-ops';
 import { Sheet, SheetForm } from './Sheet';
-import { DANGER } from './ui';
+import { CHOICE, DANGER } from './ui';
 
 type Preview = CommandOutput<'session.deletions.preview'>;
 
@@ -21,7 +22,7 @@ export function deletionWords(preview: Preview): string {
   if (preview.subagents > 0) parts.push(`its ${count(preview.subagents, 'subagent transcript', 'subagent transcripts')}`);
   if (preview.recordings > 0) parts.push(count(preview.recordings, 'recording', 'recordings'));
   const what = parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(', ')} and ${parts.at(-1)}`;
-  return `${what} from ~/.claude to the Trash. The terminal cannot resume it afterwards either. Files the session edited stay where they are.`;
+  return `${what} from ${preview.store} to the Trash. The terminal cannot resume it afterwards either. Files the session edited stay where they are.`;
 }
 
 export function DeleteDialog({ appSessionId }: { appSessionId: AppSessionId }) {
@@ -65,7 +66,7 @@ export function DeleteDialog({ appSessionId }: { appSessionId: AppSessionId }) {
         <p className="m-0 text-fg-muted">{preview ? deletionWords(preview) : 'Reading what would move…'}</p>
         {live && <p className="m-0 text-ui-sm text-fg-muted">The session is running; it stops before anything moves.</p>}
         <label className="flex items-center gap-2 text-ui-sm text-fg">
-          <input type="checkbox" checked={acknowledged} onChange={(e) => setAcknowledged(e.target.checked)} />
+          <input type="checkbox" aria-label="Move the transcript to the Trash" checked={acknowledged} onChange={(e) => setAcknowledged(e.target.checked)} className={CHOICE} />
           Move the transcript to the Trash
         </label>
         {error && <p className="m-0 text-ui-sm text-danger">{error}</p>}

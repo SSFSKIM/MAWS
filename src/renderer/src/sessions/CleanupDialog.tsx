@@ -15,7 +15,7 @@ import type { CleanupTarget } from './dialogs';
 import { archiveSession } from './record-ops';
 import { holderWords } from './holder-words';
 import { Sheet, SheetForm } from './Sheet';
-import { DANGER, PRIMARY } from './ui';
+import { CHOICE, DANGER, PRIMARY } from './ui';
 
 interface Identity {
   repoRoot: string;
@@ -239,13 +239,13 @@ export function CleanupDialog({ target }: { target: CleanupTarget }) {
         </Step>
         <Step label="Discard changes and remove" checked={checked.discard} disabledReason={discardReason} onChange={toggle('discard')}>
           {state === 'dirty' ? `Throws away ${plural(changes, 'uncommitted change')}, then removes the checkout.` : 'Throws away uncommitted changes, then removes the checkout.'}
-          {steps.discard && <Ack checked={acks.discard} onChange={(v) => setAcks((a) => ({ ...a, discard: v }))}>{`Discard ${plural(changes, 'uncommitted change')}; this cannot be undone`}</Ack>}
+          {steps.discard && <Ack checked={acks.discard} onChange={(v) => setAcks((a) => ({ ...a, discard: v }))} label={`Discard ${plural(changes, 'uncommitted change')}; this cannot be undone`} />}
         </Step>
         {branch !== null && (
           <Step label="Delete branch" checked={checked.deleteBranch} disabledReason={branchReason} onChange={toggle('deleteBranch')}>
-            {branch.merged ? `Every commit is on ${branch.base}; still not undoable.` : `${plural(branch.ahead, 'commit')} not on ${branch.base} are lost.`}
+            {branch.merged ? `Every commit is on ${branch.base}; still not undoable.` : `${plural(branch.ahead, 'commit')} not on ${branch.base} ${branch.ahead === 1 ? 'is' : 'are'} lost.`}
             {checked.deleteBranch && unmerged && (
-              <Ack checked={acks.unmerged} onChange={(v) => setAcks((a) => ({ ...a, unmerged: v }))}>{`Delete ${plural(branch.ahead, 'commit')} not on ${branch.base}; this cannot be undone`}</Ack>
+              <Ack checked={acks.unmerged} onChange={(v) => setAcks((a) => ({ ...a, unmerged: v }))} label={`Delete ${plural(branch.ahead, 'commit')} not on ${branch.base}; this cannot be undone`} />
             )}
           </Step>
         )}
@@ -258,7 +258,7 @@ export function CleanupDialog({ target }: { target: CleanupTarget }) {
 function Step({ label, checked, disabledReason, onChange, children }: { label: string; checked: boolean; disabledReason: string | null; onChange(e: React.ChangeEvent<HTMLInputElement>): void; children: React.ReactNode }) {
   return (
     <div className="flex gap-2 rounded-md border border-border px-2.5 py-2">
-      <input type="checkbox" aria-label={label} checked={checked && disabledReason === null} disabled={disabledReason !== null} onChange={onChange} className="mt-0.5" />
+      <input type="checkbox" aria-label={label} checked={checked && disabledReason === null} disabled={disabledReason !== null} onChange={onChange} className={`mt-0.5 ${CHOICE}`} />
       <div className="flex min-w-0 flex-col gap-0.5 text-ui-sm">
         <span className={disabledReason === null ? 'text-fg' : 'text-fg-faint'}>{label}</span>
         <div className="text-fg-muted">{children}</div>
@@ -268,11 +268,11 @@ function Step({ label, checked, disabledReason, onChange, children }: { label: s
   );
 }
 
-function Ack({ checked, onChange, children }: { checked: boolean; onChange(v: boolean): void; children: React.ReactNode }) {
+function Ack({ checked, onChange, label }: { checked: boolean; onChange(v: boolean): void; label: string }) {
   return (
     <label className="mt-1 flex items-center gap-2 text-fg">
-      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
-      {children}
+      <input type="checkbox" aria-label={label} checked={checked} onChange={(e) => onChange(e.target.checked)} className={CHOICE} />
+      {label}
     </label>
   );
 }

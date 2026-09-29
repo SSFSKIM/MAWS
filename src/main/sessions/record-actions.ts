@@ -3,6 +3,7 @@
 // runs each inside the record's serialised operation; the holder is always a fresh read (holders.ts), never
 // `SessionRecord.holder`.
 import { randomUUID } from 'node:crypto';
+import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
@@ -79,11 +80,21 @@ export async function deleteRecord(
   return { status: 'deleted', trashed };
 }
 
-// `session.deletions.preview`: what `session.delete` would move, for its sheet; nothing moves.
-export async function previewDeletion(s: Setup, appSessionId: AppSessionId): Promise<{ transcript: string | null; subagents: number; recordings: number; paths: number }> {
+// The engine's store as the delete sheet names it: the config home the engine reads (C4's `resolveStorePaths` over the
+// environment the engine receives), `~`-abbreviated under the home directory C4 resolves `~/.claude` from, so a scratch
+// config home reads as itself.
+export function storeLabel(env: NodeJS.ProcessEnv): string {
+  const { configHome } = resolveStorePaths(env);
+  const home = homedir();
+  return configHome === home ? '~' : configHome.startsWith(`${home}/`) ? `~${configHome.slice(home.length)}` : configHome;
+}
+
+// `session.deletions.preview`: what `session.delete` would move, and the store it moves from, for its sheet; nothing moves.
+export async function previewDeletion(s: Setup, appSessionId: AppSessionId): Promise<{ transcript: string | null; subagents: number; recordings: number; paths: number; store: string }> {
   const record = recordOf(s, appSessionId);
-  if (record.engineSessionId === null) return { transcript: null, subagents: 0, recordings: 0, paths: 0 };
-  return describeConversation(projectDirOf(s, record), record.engineSessionId);
+  const store = storeLabel(s.env);
+  if (record.engineSessionId === null) return { transcript: null, subagents: 0, recordings: 0, paths: 0, store };
+  return { ...(await describeConversation(projectDirOf(s, record), record.engineSessionId)), store };
 }
 
 // The directory of the record's current transcript: its summary's path, else (a `/clear` rebind cleared it until the

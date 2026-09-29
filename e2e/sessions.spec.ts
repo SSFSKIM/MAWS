@@ -379,7 +379,7 @@ test.describe('sessions', () => {
     const gone = await recordOf(doomed);
     await menu(page, gone.appId, 'Delete conversation…');
     const sheet = page.getByRole('dialog', { name: /^Delete “/ });
-    await expect(sheet.getByText(/Removes the transcript and its 1 subagent transcript from ~\/.claude to the Trash/)).toBeVisible();
+    await expect(sheet.getByText(`Removes the transcript and its 1 subagent transcript from ${store.configHome} to the Trash`, { exact: false }), 'the store in use, the temp config home').toBeVisible();
     await page.keyboard.press('Enter'); // not yet: the acknowledgement is unchecked
     await expect(sheet).toBeVisible();
     await sheet.getByRole('checkbox', { name: 'Move the transcript to the Trash' }).check();

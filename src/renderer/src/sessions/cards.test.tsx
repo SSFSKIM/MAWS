@@ -378,7 +378,9 @@ describe('failure card', () => {
     expect(screen.getByText('MAWS quit before the session started')).toBeTruthy(); // after a restart, from the intent
     const discard = screen.getByRole('button', { name: 'Discard changes and remove' });
     expect(discard.hasAttribute('disabled')).toBe(true);
-    await userEvent.click(screen.getByRole('checkbox', { name: 'Discard 2 uncommitted changes; this cannot be undone' }));
+    const ack = screen.getByRole('checkbox', { name: 'Discard 2 uncommitted changes; this cannot be undone' });
+    expect(ack.getAttribute('aria-label'), 'named by its own attribute, not only by the label around it').toBe('Discard 2 uncommitted changes; this cannot be undone');
+    await userEvent.click(ack);
     await userEvent.click(discard);
     expect(fake.invoked('session.intent.resolveWorktree')).toEqual([{ appSessionId: ID, resolution: 'discard' }]);
     expect(await screen.findByText('Worktree accept-fail removed')).toBeTruthy(); // the resolution's own outcome
