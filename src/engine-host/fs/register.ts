@@ -26,11 +26,6 @@ export function registerFs(on: HostOn, emit: HostEmit, env: NodeJS.ProcessEnv = 
   on('fs.workflows', async ({ appSessionId }) => service.workflows(appSessionId as AppSessionId));
   on('fs.tasks', async ({ listId }) => service.tasks(listId));
   on('fs.readSpill', async (input) => service.readSpill(input));
-  // carried from C3 until rebase: C3's `session.events` answers live sessions from its ring and delegates to
-  // `eventsSnapshot` for the rest; until it lands, this answers every app session from disk. Disk-derived events carry
-  // `seq: null`, so `afterSeq` selects nothing and `lastSeq` is 0 (C4 execution document, Cross-child reconciliation).
-  on('session.events', async ({ appSessionId }) => ({ ...(await service.eventsSnapshot(appSessionId as AppSessionId, null)), lastSeq: 0 }));
-  // end carried from C3
   // Replay (M5): launched and controlled here, bound in the service's table and served by its snapshot seam. Journal
   // replay goes through C3's `Normalizer`, one per run.
   const replays = new ReplayHost({ emit, bindings: service, normalizer: engineNormalizer });

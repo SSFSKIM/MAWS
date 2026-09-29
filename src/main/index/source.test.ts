@@ -13,6 +13,7 @@ import type { Holder, TranscriptSummary } from '@shared/wire/store';
 import { sessionIdFor, summary, tempDir } from '../../../test/support/index-fixture';
 import { StoreFixture } from '../../../test/support/store-fixture';
 import { registerFs } from '../../engine-host/fs/register';
+import { registerEngineIpc } from '../../engine-host/ipc';
 import type { FsService } from '../../engine-host/fs/service';
 import { Index } from './index';
 import { IndexSessionSource, type ReadModelWriter, type SourceHost } from './source';
@@ -429,8 +430,9 @@ describe('IndexSessionSource folds the host\'s events into the index and feeds t
   });
 });
 
-// The real engine-host registration over a StoreFixture, wired in process: commands dispatch to the registered handlers
-// with their outputs validated, and events reach the source validated, in the order the host emitted them.
+// The real engine-host registration over a StoreFixture, wired in process as src/engine-host/index.ts wires it (C4's
+// filesystem service, and C3's IPC whose session.events answers a session with no process from it): commands dispatch
+// to the registered handlers with their outputs validated, and events reach the source validated, in emitted order.
 function inProcessHost(configHome: string) {
   const handlers = new Map<string, (input: unknown) => Promise<unknown>>();
   const listeners = new Map<string, Set<Listener>>();
@@ -462,7 +464,10 @@ function inProcessHost(configHome: string) {
   return {
     host,
     calls,
-    start: () => (service = registerFs(on, emit, { CLAUDE_CONFIG_DIR: configHome })),
+    start: () => {
+      const fs = (service = registerFs(on, emit, { CLAUDE_CONFIG_DIR: configHome }));
+      registerEngineIpc(on, emit, { userData: join(configHome, 'engine-host-user-data') /* removed with the fixture; nothing is launched */, replayEnabled: false, diskEvents: (id) => fs.eventsSnapshot(id, null) });
+    },
     stop: () => service?.stop(),
     listen: (name: EventName, listener: Listener) => host.onEvent(name as 'fs.sessionChanged', listener),
     // An event from elsewhere in the host (C3's `session.status`), through the same validated relay.

@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { SessionId } from '@shared/graph/ids';
+import type { AppSessionId, SessionId } from '@shared/graph/ids';
 import { createHostRuntime, type HostPort } from '@shared/host/runtime';
 import { FIXTURE_DIR, TRANSCRIPT_FIXTURE_DIR } from '../../../test/support/fixtures';
 import { StoreFixture } from '../../../test/support/store-fixture';
@@ -65,9 +65,12 @@ describe('the engine host serves fs.* through the host protocol', () => {
       value: { refreshedAt: expect.any(String), holders: [{ sessionId: S1, appSessionId: 'app-1', holder: { kind: 'terminal', pid: process.pid }, cwd: null }] },
     });
 
-    // Following: the temporary session.events handler answers through eventsSnapshot, and the events go out validated.
+    // Following: the snapshot seam C3's session.events delegates to (src/engine-host/ipc.ts, C4's block), and the events
+    // go out validated.
+    expect(await service!.eventsSnapshot('app-1' as AppSessionId, null)).toMatchObject({ complete: true, events: [expect.objectContaining({ kind: 'session.started' }), expect.objectContaining({ kind: 'turn.started' }), expect.objectContaining({ kind: 'user.message' })] });
+    // The filesystem service registers no session.events of its own any more: C3's handler is the one.
     fake.deliver({ t: 'req', id: '5', name: 'session.events', input: { appSessionId: 'app-1', afterSeq: null, limit: null } });
-    expect(await response('5')).toMatchObject({ ok: true, value: { lastSeq: 0, complete: true, events: [expect.objectContaining({ kind: 'session.started' }), expect.objectContaining({ kind: 'turn.started' }), expect.objectContaining({ kind: 'user.message' })] } });
+    expect(await response('5')).toMatchObject({ ok: false });
     expect(fake.posted).toContainEqual({ t: 'evt', name: 'session.eventBatch', payload: expect.objectContaining({ appSessionId: 'app-1' }) });
     expect(fake.posted).toContainEqual({ t: 'evt', name: 'fs.followState', payload: expect.objectContaining({ appSessionId: 'app-1', agentId: null, state: 'following', chainLength: 1 }) });
 
@@ -117,12 +120,11 @@ describe('the engine host serves fs.* through the host protocol', () => {
     await expect.poll(() => about(APP).some((m) => m.name === 'session.replay.progress' && (m.payload as { state: string }).state === 'done')).toBe(true);
     expect(fake.posted.findIndex((m) => m.t === 'evt' && m.name === 'session.replay.progress')).toBeGreaterThan(answeredAt);
 
-    fake.deliver({ t: 'req', id: 'r2', name: 'session.events', input: { appSessionId: APP, afterSeq: null, limit: null } });
-    const snapshot = (await response('r2')) as unknown as { value: { events: { sessionId: string }[]; complete: boolean } };
+    const snapshot = await service!.eventsSnapshot(APP as AppSessionId, null);
     const batched = about(APP).filter((m) => m.name === 'session.eventBatch').flatMap((m) => (m.payload as { events: unknown[] }).events);
-    expect(snapshot.value.complete).toBe(true);
-    expect(snapshot.value.events).toEqual(batched);
-    expect(new Set(snapshot.value.events.map((e) => e.sessionId))).toEqual(new Set([RP]));
+    expect(snapshot.complete).toBe(true);
+    expect(snapshot.events).toEqual(batched);
+    expect(new Set(snapshot.events.map((e) => e.sessionId))).toEqual(new Set([RP]));
 
     fake.deliver({ t: 'req', id: 'r3', name: 'session.replay.control', input: { appSessionId: APP, action: 'stop' } });
     expect(await response('r3')).toEqual({ t: 'res', id: 'r3', ok: true, value: undefined });
