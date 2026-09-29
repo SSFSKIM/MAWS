@@ -123,7 +123,8 @@ export async function setModel(input: { appSessionId: AppSessionId; model: strin
   const result = await ipc.invoke('session.setModel', input);
   if (!result.ok) return { ok: false, error: transportWords(result.error), caption: null };
   if (!result.value.ok) return { ok: false, error: (result.value.code && MODEL.code[result.value.code]) || MODEL.refused, caption: result.value.error };
-  rememberModel(input.appSessionId, { value: input.model, basis });
+  // remembered only while the status has not moved: a status that arrived before the answer already shows the model
+  if ((statusOf(input.appSessionId)?.model.requested ?? null) === basis) rememberModel(input.appSessionId, { value: input.model, basis });
   return { ok: true };
 }
 
@@ -138,7 +139,7 @@ export async function applyFlagSettings(input: { appSessionId: AppSessionId; set
   const basis = statusOf(input.appSessionId)?.fastMode.state ?? null;
   const result = await ipc.invoke('session.applyFlagSettings', input);
   if (!result.ok) return { ok: false, error: transportWords(result.error), caption: null };
-  if ('fastMode' in input.settings) rememberFast(input.appSessionId, { value: (input.settings.fastMode as boolean | null) ?? null, basis });
+  if ('fastMode' in input.settings && (statusOf(input.appSessionId)?.fastMode.state ?? null) === basis) rememberFast(input.appSessionId, { value: (input.settings.fastMode as boolean | null) ?? null, basis });
   return { ok: true };
 }
 

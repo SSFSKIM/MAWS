@@ -201,6 +201,18 @@ describe('an accepted control is remembered only until the status moves', () => 
   });
 });
 
+describe('an accepted control whose status arrived before its answer', () => {
+  it('is not remembered, so a status returning to the old model never revives it', async () => {
+    // the backend emits C3's status (requested: haiku) inside the command, before the answer resolves
+    expect(await setModel({ appSessionId: ID, model: 'haiku' })).toEqual({ ok: true });
+    const status = () => useSessions.getState().engine.get(ID)!;
+    expect(status().model.requested).toBe('haiku');
+    expect(useModelRequests.getState().model.has(ID)).toBe(false);
+    act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: { ...status(), model: { requested: 'sonnet', resolved: 'claude-sonnet-5[1m]' } } }));
+    expect(acceptedModel(useModelRequests.getState(), ID, status())).toBeUndefined();
+  });
+});
+
 describe('liveModel', () => {
   it('names the accepted model, pending until the init frame resolves it, and reads default and opus apart', () => {
     expect(liveModel(CATALOGUE, { requested: 'sonnet', resolved: 'claude-sonnet-5[1m]' })).toMatchObject({ id: 'sonnet', pending: false });
