@@ -4,10 +4,10 @@ import { defineConfig } from '@playwright/test';
 // no browser is installed. One worker: every test launches its own app, and the app owns real processes on this Mac.
 export default defineConfig({
   testDir: 'e2e',
-  // carried by C9 until the rebase over C6: the terminal spec drives the harness build, so it runs only under
-  // `pnpm e2e:terminal` (MAWS_HARNESS=1)
-  testIgnore: process.env.MAWS_HARNESS === '1' ? [] : ['terminal.spec.ts'],
-  // carried by C9 until the rebase over C6
+  // C6: the transcript spec drives the harness build, so it runs only under `pnpm e2e:transcript` (MAWS_HARNESS=1).
+  // C9 (inside C6's block, wave-2 ledger (d)): so does the terminal spec, under `pnpm e2e:terminal`.
+  testIgnore: process.env.MAWS_HARNESS === '1' ? [] : ['transcript.spec.ts', 'terminal.spec.ts'],
+  // end C6
   workers: 1,
   retries: 0,
   timeout: 60_000,

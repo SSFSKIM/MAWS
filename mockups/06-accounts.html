@@ -1,0 +1,495 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MAWS · Accounts, gateway, settings</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="tokens-light.css" id="theme-light">
+<script>
+/* Light is the default (D-4). `?theme=dark` drops the light override so the dark tokens under :root apply. */
+if (new URLSearchParams(location.search).get('theme') === 'dark') { document.getElementById('theme-light').remove(); document.documentElement.style.colorScheme = 'dark'; }
+</script>
+<style>
+/* Adopted from the MAWS mockup kit: quiet, dense chrome; light by default.
+   The plumbing surfaces of C11: accounts read from ClaudeUsage, the relay's
+   health, the auto-mode lane, settings at Codex density, and one engine-read
+   widget that sets the pattern for the palette list. Real-size crops. */
+* { box-sizing: border-box; }
+:root { color-scheme: light; --shadow: 0 8px 28px color-mix(in srgb, var(--bg) 70%, transparent), 0 1px 3px color-mix(in srgb, var(--fg) 10%, transparent); }
+body { padding: 40px 24px 72px; }
+main { width: 760px; max-width: 100%; margin: 0 auto; }
+button,input,textarea,summary { font: inherit; }
+button,a,input,textarea,summary { -webkit-tap-highlight-color: transparent; }
+button { color: var(--fg); background: transparent; border: 0; cursor: pointer; border-radius: var(--radius-sm); }
+button:hover { background: var(--bg-hover); }
+button:disabled { cursor: default; opacity: .45; }
+button:disabled:hover { background: transparent; }
+a { color: var(--fg); text-decoration: none; }
+a:hover { text-decoration: underline; }
+button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible,summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+input[type=radio],input[type=checkbox] { accent-color: var(--accent); margin: 0; }
+h1,h2,h3,p { margin: 0; }
+h1 { font-size: 21px; font-weight: 600; letter-spacing: -.45px; }
+h2 { font-size: 13px; font-weight: 550; }
+h3 { font-size: 13px; font-weight: 600; }
+code { font: 11px var(--font-mono); }
+.page-head { padding-bottom: 28px; border-bottom: 1px solid var(--border); margin-bottom: 32px; }
+.eyebrow { font-size: 11px; letter-spacing: .09em; text-transform: uppercase; color: var(--fg-muted); margin-bottom: 10px; }
+.page-head p { margin-top: 9px; color: var(--fg-muted); line-height: 1.6; }
+.vignette { margin: 0 0 40px; }
+figcaption { display: flex; align-items: baseline; gap: 12px; margin-bottom: 5px; }
+figcaption .number { color: var(--fg-muted); font: 11px var(--font-mono); }
+figcaption .dimension { margin-left: auto; color: var(--fg-muted); font-size: 11px; }
+.rationale { margin: 0 0 12px 32px; font-size: 11px; color: var(--fg-muted); line-height: 1.5; }
+.frame { border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--bg); overflow: hidden; }
+.small { font-size: 12px; }
+.label { font-size: 10px; text-transform: uppercase; letter-spacing: .075em; color: var(--fg-muted); font-weight: 600; }
+.row { display: flex; align-items: center; gap: 8px; }
+.between { justify-content: space-between; }
+.hint { font-size: 11px; color: var(--fg-muted); line-height: 1.5; }
+.btn { border: 1px solid var(--border-strong); border-radius: var(--radius-sm); padding: 7px 13px; background: var(--bg-hover); font-weight: 500; font-size: 12px; white-space: nowrap; }
+.btn.primary { background: var(--accent); color: var(--bg); border-color: var(--accent); font-weight: 650; }
+.btn.primary:hover { filter: brightness(1.08); }
+.btn.compact { padding: 4px 9px; font-size: 11px; }
+.text-action { color: var(--fg-muted); font-size: 11px; padding: 4px 6px; white-space: nowrap; }
+.text-action:hover { color: var(--fg); }
+.popover { background: var(--bg-overlay); border: 1px solid var(--border-strong); border-radius: var(--radius); box-shadow: var(--shadow); }
+.path { font: 11px var(--font-mono); color: var(--fg-muted); overflow-wrap: anywhere; }
+.divider { border-top: 1px solid var(--border); }
+.warn { color: var(--warning); }
+.ok { color: var(--success); }
+.danger-text { color: var(--danger); }
+.chip { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--border-strong); padding: 4px 8px; border-radius: 6px; font-size: 11px; color: var(--fg); background: var(--bg); white-space: nowrap; }
+.chip.muted { color: var(--fg-muted); border-color: var(--border); }
+.seg { display: flex; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--bg); padding: 3px; }
+.seg label { flex: 1; text-align: center; padding: 4px 6px; font-size: 11px; border-radius: 4px; cursor: pointer; white-space: nowrap; }
+.seg input { position: absolute; opacity: 0; }
+.seg label:has(input:checked) { background: var(--bg-active); color: var(--fg); box-shadow: inset 0 0 0 1px var(--border-strong); }
+.seg label:has(input:focus-visible) { outline: 2px solid var(--accent); }
+.switch { position: relative; width: 26px; height: 16px; display: inline-block; flex-shrink: 0; }
+.switch input { width: 100%; height: 100%; margin: 0; opacity: 0; position: absolute; z-index: 1; cursor: pointer; }
+.switch span { display: block; height: 16px; border-radius: 10px; background: var(--bg-active); border: 1px solid var(--border-strong); }
+.switch span::before { content: ''; display: block; width: 10px; height: 10px; margin: 2px; background: var(--fg-muted); border-radius: 50%; transition: transform .15s; }
+.switch input:checked+span { background: var(--accent); }
+.switch input:checked+span::before { transform: translateX(10px); background: var(--bg); }
+.switch input:focus-visible+span { outline: 2px solid var(--accent); outline-offset: 3px; }
+.input { height: 28px; padding: 0 8px; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--bg); color: var(--fg); font-size: 12px; width: 100%; }
+.input.mono { font: 12px var(--font-mono); }
+/* 01 — Accounts view, laid out like ClaudeUsage's panel: two columns at 3+ accounts, bars aligned across rows. */
+.view-head { display: flex; align-items: baseline; gap: 10px; padding: 16px 20px 0; }
+.view-head .meta { color: var(--fg-muted); font-size: 11px; }
+.view-head a { margin-left: auto; font-size: 12px; }
+.view-note { padding: 6px 20px 14px; font-size: 11px; color: var(--fg-muted); border-bottom: 1px solid var(--border); }
+.accounts { display: grid; grid-template-columns: 1fr 1fr; column-gap: 24px; padding: 6px 20px 0; }
+.account { padding: 14px 0 14px; }
+.account:nth-child(n+3) { border-top: 1px solid var(--border); }
+.acct-head { display: flex; align-items: center; gap: 7px; font-size: 13px; }
+.acct-head .dot { width: 7px; height: 7px; border-radius: 50%; border: 1px solid var(--fg-muted); flex-shrink: 0; }
+.acct-head .dot.on { background: var(--accent); border-color: var(--accent); }
+.acct-head .dot.warn { border-color: var(--warning); }
+.acct-head .email { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.account.routing .email { font-weight: 600; }
+.acct-head .plan { margin-left: auto; font-size: 11px; color: var(--fg-muted); white-space: nowrap; }
+.chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 7px; }
+.cap { display: inline-flex; align-items: center; gap: 4px; padding: 2px 7px; border-radius: 10px; background: var(--bg-active); font-size: 10px; color: var(--fg-muted); white-space: nowrap; }
+.cap.strong { color: var(--fg); }
+.limits { margin-top: 10px; display: grid; gap: 6px; }
+.limit { display: grid; grid-template-columns: 52px 96px 34px 52px; gap: 8px; align-items: center; font-size: 11px; }
+.limit .name { color: var(--fg-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.limit .bar { height: 6px; border-radius: 3px; background: var(--bg-active); overflow: hidden; }
+.limit .bar span { display: block; height: 100%; background: var(--fg-muted); border-radius: 3px; }
+.limit .bar span.full { background: var(--danger); }
+.limit .pct { text-align: right; font-weight: 500; font-variant-numeric: tabular-nums; }
+.limit .reset { text-align: right; color: var(--fg-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.account.dim .limits { opacity: .55; }
+.acct-line { margin-top: 8px; font-size: 11px; line-height: 1.5; }
+.acct-line.warn { color: var(--warning); }
+.acct-line.muted { color: var(--fg-muted); }
+.acct-line .why { color: var(--fg-muted); }
+.acct-actions { display: flex; gap: 4px; margin-top: 8px; margin-left: -6px; }
+.add-row { display: flex; align-items: center; gap: 10px; padding: 12px 20px; border-top: 1px solid var(--border); font-size: 12px; }
+.add-row .hint { margin-left: 2px; }
+.relay-foot { display: flex; align-items: center; gap: 8px; padding: 10px 20px; border-top: 1px solid var(--border); background: var(--bg-raised); font-size: 11px; color: var(--fg-muted); white-space: nowrap; }
+.relay-foot .glyph { color: var(--success); }
+.relay-foot .text-action { margin-left: auto; }
+/* 02 — strips. */
+.strips { padding: 16px 18px 6px; }
+.strip { display: flex; align-items: center; gap: 10px; padding: 9px 14px; border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 12px; margin-bottom: 14px; background: var(--bg-raised); }
+.strip .glyph { flex-shrink: 0; }
+.strip .text { min-width: 0; line-height: 1.5; }
+.strip .text .sub { display: block; font-size: 11px; color: var(--fg-muted); }
+.strip .actions { margin-left: auto; display: flex; gap: 6px; flex-shrink: 0; }
+.strip.quiet { color: var(--fg-muted); }
+.strip.quiet .glyph { color: var(--success); }
+.strip.alert { border-left: 2px solid var(--warning); }
+.strip.alert .glyph { color: var(--warning); }
+.strip.direct { border-left: 2px solid var(--info); }
+.strip.direct .glyph { color: var(--info); }
+.state-label { display: flex; align-items: center; gap: 10px; margin: 0 0 8px; font-size: 10px; color: var(--fg-muted); text-transform: uppercase; letter-spacing: .07em; font-weight: 600; }
+.state-label::after { content: ''; flex: 1; border-top: 1px solid var(--border); }
+.direct-pair { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 14px; align-items: start; }
+.context-strip { display: flex; flex-wrap: wrap; gap: 5px; margin: 0 0 8px; }
+.context-chip { display: flex; gap: 4px; align-items: center; border: 1px solid var(--border); padding: 4px 6px; border-radius: var(--radius-sm); font-size: 10px; color: var(--fg-muted); }
+.context-chip:first-child { color: var(--fg); }
+.context-chip.direct { color: var(--info); border-color: color-mix(in srgb, var(--info) 45%, transparent); }
+.confirm { padding: 14px 16px; }
+.confirm h3 { line-height: 1.4; }
+.confirm p { font-size: 12px; color: var(--fg-muted); line-height: 1.55; margin-top: 8px; }
+.confirm .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+/* 03 — Session info tool (380 px) and the model-picker note variant. */
+.info-pair { display: grid; grid-template-columns: 380px minmax(0, 1fr); gap: 14px; align-items: start; padding: 18px; }
+.panel { background: var(--bg-raised); border: 1px solid var(--border-strong); border-radius: var(--radius); overflow: hidden; }
+.panel-head { height: 38px; display: flex; align-items: center; gap: 8px; padding: 0 14px; border-bottom: 1px solid var(--border); font-size: 12px; }
+.panel-head .session { margin-left: auto; color: var(--fg-muted); font-size: 11px; }
+.kv-section { padding: 10px 14px 6px; }
+.kv-section + .kv-section { border-top: 1px solid var(--border); }
+.kv-section .label { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.kv-section .label .text-action { margin-left: auto; text-transform: none; letter-spacing: 0; font-weight: 400; padding: 2px 4px; }
+.kv { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 2px 10px; font-size: 12px; }
+.kv dt { color: var(--fg-muted); font-size: 11px; line-height: 20px; }
+.kv dd { margin: 0; line-height: 20px; min-width: 0; overflow-wrap: anywhere; }
+.kv dd .sub { display: block; font-size: 11px; color: var(--fg-muted); line-height: 16px; margin-bottom: 3px; }
+.kv dd code { font-size: 11px; }
+.lane { display: inline-flex; align-items: center; gap: 5px; }
+.lane::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--success); }
+.lane.local::before { background: var(--warning); }
+.widget-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 12px; border-bottom: 1px solid var(--border); }
+.widget-head code { color: var(--fg-muted); font: 11px var(--font-mono); }
+.group-label { padding: 12px 12px 6px; font-size: 10px; font-weight: 600; color: var(--fg-muted); text-transform: uppercase; letter-spacing: .07em; }
+.model-option { position: relative; padding: 7px 10px; display: flex; gap: 8px; margin: 1px 6px; cursor: pointer; border-radius: 5px; align-items: center; }
+.model-option:has(input:checked) { background: var(--accent-soft); }
+.model-option input { position: absolute; opacity: 0; }
+.model-check { width: 12px; color: transparent; }
+.model-option:has(input:checked) .model-check { color: var(--accent); }
+.model-option small { margin-left: auto; color: var(--fg-muted); font-size: 10px; }
+.model-text { font-size: 12px; }
+.gateway-caption { display: block; color: var(--fg-muted); font-size: 10px; margin-top: 3px; }
+.model-note { margin: 8px 12px 12px; padding: 9px 10px; border: 1px solid var(--border); border-left: 2px solid var(--warning); border-radius: 6px; font-size: 11px; line-height: 1.55; color: var(--fg); background: var(--bg); }
+.model-note strong { font-weight: 550; }
+/* 04 — Settings: one screen, section index, Codex-density rows. */
+.settings { display: grid; grid-template-columns: 148px minmax(0, 1fr); min-height: 400px; }
+.settings-index { border-right: 1px solid var(--border); background: var(--bg-raised); padding: 14px 8px; }
+.settings-index .title { padding: 0 8px 10px; font-size: 13px; font-weight: 600; }
+.settings-index button { display: block; width: 100%; text-align: left; padding: 6px 8px; font-size: 12px; color: var(--fg-muted); border-radius: 5px; }
+.settings-index button.active { background: var(--bg-active); color: var(--fg); }
+.settings-body { padding: 8px 20px 12px; }
+.section { padding: 12px 0 10px; }
+.section + .section { border-top: 1px solid var(--border); }
+.section h3 { display: flex; align-items: baseline; gap: 10px; margin-bottom: 4px; }
+.section h3 .hint { font-weight: 400; }
+.setting { display: grid; grid-template-columns: 168px minmax(0, 1fr); gap: 4px 12px; align-items: center; min-height: 34px; padding: 4px 0; font-size: 12px; }
+.setting .k { color: var(--fg-muted); font-size: 12px; }
+.setting .v { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+.setting .v .path { color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.setting .note { grid-column: 2; font-size: 11px; color: var(--fg-muted); line-height: 1.5; margin: -2px 0 2px; }
+.setting .seg { max-width: 260px; flex: 1; }
+.checks { display: flex; gap: 10px; flex-wrap: wrap; font-size: 12px; }
+.checks label { display: inline-flex; align-items: center; gap: 5px; }
+.keymap { border: 1px solid var(--border); border-radius: 6px; overflow: hidden; margin-top: 4px; }
+.key-row { display: grid; grid-template-columns: minmax(0, 1fr) 160px 76px; align-items: center; gap: 10px; padding: 0 10px; height: 30px; font-size: 12px; }
+.key-row kbd { white-space: nowrap; justify-self: start; }
+.key-row + .key-row { border-top: 1px solid var(--border); }
+.key-row kbd { font: 11px var(--font-ui); color: var(--fg); border: 1px solid var(--border-strong); border-radius: 4px; padding: 2px 6px; background: var(--bg); }
+.key-row .text-action { visibility: hidden; }
+.key-row:hover .text-action, .key-row.recording .text-action { visibility: visible; }
+.key-row.recording { background: var(--accent-soft); }
+.key-row.recording kbd { border-color: var(--accent); color: var(--fg-muted); }
+/* 05 — Palette and the Permissions & rules widget. */
+.palette-crop { padding: 18px 18px 0; }
+.widget-pair { display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.25fr); gap: 14px; align-items: end; }
+.palette { overflow: hidden; }
+.palette-search { padding: 13px 12px; border-bottom: 1px solid var(--border); }
+.palette-search code { margin-left: 8px; font-size: 12px; }
+.palette-search .muted:last-child { margin-left: auto; font-size: 10px; }
+.command { margin: 2px 6px; padding: 8px; border-radius: 5px; display: flex; gap: 7px; align-items: flex-start; width: calc(100% - 12px); text-align: left; }
+.command.active { background: var(--accent-soft); }
+.command code { font: 12px var(--font-mono); }
+.command .description { display: block; font-size: 11px; color: var(--fg-muted); margin-top: 4px; }
+.badge { margin-left: auto; font-size: 9px; color: var(--fg-muted); border: 1px solid var(--border-strong); padding: 2px 4px; border-radius: 4px; white-space: nowrap; }
+.active .badge { color: var(--fg); }
+.palette-footer { margin-top: 10px; padding: 10px 12px; border-top: 1px solid var(--border); }
+.rules-body { padding: 12px; }
+.mode-row { display: flex; align-items: center; gap: 10px; font-size: 12px; }
+.mode-row .seg { flex: 1; }
+.mode-line { margin: 6px 0 0; font-size: 11px; color: var(--fg-muted); }
+.refusal { margin-top: 8px; padding: 8px 10px; border: 1px solid var(--border); border-left: 2px solid var(--warning); border-radius: 6px; font-size: 11px; line-height: 1.5; background: var(--bg); }
+.refusal code { color: var(--fg-muted); }
+.rules-group { margin-top: 12px; }
+.rules-group .label { display: flex; gap: 6px; align-items: baseline; margin-bottom: 4px; }
+.rules-group .label .count { font-weight: 400; }
+.rule { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: baseline; padding: 4px 0; font-size: 12px; }
+.rule + .rule { border-top: 1px solid var(--border); }
+.rule code { font-size: 11px; color: var(--fg); }
+.rule .src { font-size: 10px; color: var(--fg-muted); white-space: nowrap; }
+.rule .src.session { color: var(--info); }
+.rule .why { grid-column: 1 / -1; font-size: 11px; color: var(--fg-muted); line-height: 1.45; margin-top: -2px; }
+.rules-foot { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--border); font-size: 11px; color: var(--fg-muted); }
+.rules-foot a { margin-left: auto; font-size: 11px; }
+.composer { background: var(--bg-raised); border: 1px solid var(--border-strong); border-radius: var(--radius); margin-top: 12px; padding: 12px; }
+.composer .context-strip { gap: 12px; font-size: 11px; color: var(--fg-muted); margin-bottom: 12px; }
+.composer textarea { width: 100%; height: 42px; resize: none; background: transparent; border: 0; color: var(--fg); padding: 0; font-size: 13px; }
+.composer-bottom { color: var(--fg-muted); }
+.composer-bottom button { color: var(--fg-muted); border-radius: 5px; padding: 2px 5px; }
+.send { margin-left: auto; background: var(--bg-active); }
+.statusline { display: flex; align-items: center; gap: 5px; min-height: 38px; color: var(--fg-muted); font-size: 11px; white-space: nowrap; }
+.statusline button { color: inherit; font-size: inherit; padding: 4px 2px; border-radius: 4px; }
+.statusline .path { margin-right: auto; font-size: 11px; }
+.statusline.wrap { flex-wrap: wrap; row-gap: 2px; padding: 6px 0 0; min-height: 0; }
+.statusline.wrap .path { flex-basis: 100%; margin: 0; }
+.statusline .info-text { color: var(--info); }
+.page-foot { color: var(--fg-muted); font-size: 11px; padding-top: 8px; }
+@media (max-width: 700px) {
+ body { padding: 24px 14px 40px; }
+ .dimension { display: none; }
+ .accounts, .direct-pair, .info-pair, .widget-pair { grid-template-columns: 1fr; }
+ .account:nth-child(n+2) { border-top: 1px solid var(--border); }
+ .settings { grid-template-columns: 1fr; }
+ .settings-index { border-right: 0; border-bottom: 1px solid var(--border); }
+ .setting { grid-template-columns: 1fr; }
+ .setting .note { grid-column: 1; }
+ .strip { flex-wrap: wrap; }
+ .strip .actions { margin-left: 0; }
+ .statusline { flex-wrap: wrap; white-space: normal; }
+}
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+</head>
+<body>
+<main>
+<header class="page-head">
+ <div class="eyebrow">MAWS / Interaction studies / 06</div>
+ <h1>Accounts, gateway, settings: the plumbing, kept quiet.</h1>
+ <p>Read from ClaudeUsage, never duplicated. Direct is the exception, said out loud. Settings at Codex density. One engine-read widget sets the pattern for the rest.</p>
+</header>
+
+<figure class="vignette" id="accounts">
+ <figcaption><span class="number">01</span><h2>Accounts view</h2><span class="dimension">760 px main tab · ClaudeUsage’s panel geometry</span></figcaption>
+ <p class="rationale">The relay’s accounts as ClaudeUsage lays them out: two columns, bars aligned so you glance rather than read. MAWS adds why one account is routing; sign-in stays in ClaudeUsage.</p>
+ <div class="frame">
+  <div class="view-head"><h3>Accounts</h3><span class="meta">read from ClaudeUsage · updated 12s ago</span><a href="#accounts" title="ClaudeUsage destination in the full app">Open ClaudeUsage ↗</a></div>
+  <p class="view-note">Usage includes all machines. Activity below is from this Mac. The relay picks the account whose weekly window resets soonest.</p>
+  <div class="accounts">
+   <section class="account routing" aria-label="alex@maws.dev">
+    <div class="acct-head"><span class="dot on" aria-hidden="true"></span><span class="email">alex@maws.dev</span><span class="plan">Max · 20×</span></div>
+    <div class="chips"><span class="cap strong">▣ This Mac</span><span class="cap">3 saved sessions</span><span class="cap strong">⚡ 41 requests · 84% cached · just now</span></div>
+    <div class="limits">
+     <div class="limit"><span class="name">5h</span><span class="bar" role="meter" aria-valuenow="74" aria-valuemin="0" aria-valuemax="100" aria-label="Five-hour usage"><span style="width:74%"></span></span><span class="pct">74%</span><span class="reset">2h 37m</span></div>
+     <div class="limit"><span class="name">Weekly</span><span class="bar" role="meter" aria-valuenow="82" aria-valuemin="0" aria-valuemax="100" aria-label="Weekly usage"><span style="width:82%"></span></span><span class="pct">82%</span><span class="reset">5d 21h</span></div>
+     <div class="limit"><span class="name">Fable</span><span class="bar" role="meter" aria-valuenow="86" aria-valuemin="0" aria-valuemax="100" aria-label="Fable weekly usage"><span style="width:86%"></span></span><span class="pct">86%</span><span class="reset">5d 21h</span></div>
+    </div>
+    <p class="acct-line warn">At this rate weekly runs out Friday 3 PM, before it resets.</p>
+    <p class="acct-line"><span class="ok" aria-hidden="true">✓</span> Routing here <span class="why">· weekly resets soonest of the four</span></p>
+    <div class="acct-actions"><button class="text-action">Remove in ClaudeUsage ↗</button></div>
+   </section>
+   <section class="account" aria-label="alex@personal.dev">
+    <div class="acct-head"><span class="dot" aria-hidden="true"></span><span class="email">alex@personal.dev</span><span class="plan">Max · 5×</span></div>
+    <div class="chips"><span class="cap">1 saved session</span><span class="cap">⚡ 6 requests · 91% cached · 8m ago</span></div>
+    <div class="limits">
+     <div class="limit"><span class="name">5h</span><span class="bar" role="meter" aria-valuenow="21" aria-valuemin="0" aria-valuemax="100" aria-label="Five-hour usage"><span style="width:21%"></span></span><span class="pct">21%</span><span class="reset">4h 02m</span></div>
+     <div class="limit"><span class="name">Weekly</span><span class="bar" role="meter" aria-valuenow="38" aria-valuemin="0" aria-valuemax="100" aria-label="Weekly usage"><span style="width:38%"></span></span><span class="pct">38%</span><span class="reset">6d 2h</span></div>
+    </div>
+    <p class="acct-line muted">Next in line · takes over when alex@maws.dev hits a limit or its window resets later than this one.</p>
+    <div class="acct-actions"><button class="text-action">Remove in ClaudeUsage ↗</button></div>
+   </section>
+   <section class="account dim" aria-label="ops@somersault.team, needs reauthentication">
+    <div class="acct-head"><span class="dot warn" aria-hidden="true"></span><span class="email">ops@somersault.team</span><span class="plan">Team · premium</span></div>
+    <div class="chips"><span class="cap">2 saved sessions</span></div>
+    <div class="limits">
+     <div class="limit"><span class="name">5h</span><span class="bar" role="meter" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100" aria-label="Five-hour usage, last known"><span style="width:0"></span></span><span class="pct">0%</span><span class="reset">—</span></div>
+     <div class="limit"><span class="name">Weekly</span><span class="bar" role="meter" aria-valuenow="12" aria-valuemin="0" aria-valuemax="100" aria-label="Weekly usage, last known"><span style="width:12%"></span></span><span class="pct">12%</span><span class="reset">6d 14h</span></div>
+    </div>
+    <p class="acct-line warn">Needs reauthentication · sign-in expired 2d ago. The relay skips it until it is reconnected; readings above are last known.</p>
+    <div class="acct-actions" style="margin-left:0;margin-top:9px"><button class="btn compact">Reconnect in ClaudeUsage ↗</button></div>
+   </section>
+   <section class="account" aria-label="jin@maws.dev">
+    <div class="acct-head"><span class="dot" aria-hidden="true"></span><span class="email">jin@maws.dev</span><span class="plan">Pro</span></div>
+    <div class="chips"><span class="cap">⌂ Studio Mac</span></div>
+    <div class="limits">
+     <div class="limit"><span class="name">5h</span><span class="bar" role="meter" aria-valuenow="100" aria-valuemin="0" aria-valuemax="100" aria-label="Five-hour usage"><span class="full" style="width:100%"></span></span><span class="pct">100%</span><span class="reset">41m</span></div>
+     <div class="limit"><span class="name">Weekly</span><span class="bar" role="meter" aria-valuenow="64" aria-valuemin="0" aria-valuemax="100" aria-label="Weekly usage"><span style="width:64%"></span></span><span class="pct">64%</span><span class="reset">6d 9h</span></div>
+    </div>
+    <p class="acct-line warn">5-hour limit reached · resets in 41m. Signed in on another machine; not routed from this Mac.</p>
+    <div class="acct-actions"><button class="text-action">Remove in ClaudeUsage ↗</button></div>
+   </section>
+  </div>
+  <div class="add-row"><a href="#accounts" title="Opens ClaudeUsage’s add-account row">Add account in ClaudeUsage ↗</a><span class="hint">Signs in without changing what this Mac is using.</span></div>
+  <div class="relay-foot"><span class="glyph" aria-hidden="true">⇄</span><span>Relay listening on 127.0.0.1:8641 · Last 10 min: 41 requests · response start median 1.2s, p95 3.8s · no errors</span><button class="text-action">Refresh</button></div>
+ </div>
+</figure>
+
+<figure class="vignette" id="relay-health">
+ <figcaption><span class="number">02</span><h2>Relay health and gateway status</h2><span class="dimension">Three states · banner host and session strip</span></figcaption>
+ <p class="rationale">Healthy is a quiet line you can find; unreachable is one banner for the whole app, not one per composer. A Direct session says so in its own strip because switching restarts it.</p>
+ <div class="frame strips">
+  <div class="state-label">Healthy · shown in Accounts and Session info, never as a banner</div>
+  <div class="strip quiet"><span class="glyph" aria-hidden="true">⇄</span><span class="text">Gateway · ClaudeUsage relay on 127.0.0.1:8641 · routing alex@maws.dev · checked every 30s</span><span class="actions"><button class="text-action">Accounts ↗</button></span></div>
+  <div class="state-label">Unreachable · app-wide banner, once</div>
+  <div class="strip alert" role="status"><span class="glyph" aria-hidden="true">△</span><span class="text">ClaudeUsage’s relay stopped answering 30s ago.<span class="sub">3 live sessions keep their process; their next request fails until it is back. New sessions will offer Direct.</span></span><span class="actions"><button class="btn compact primary">Open ClaudeUsage</button><button class="btn compact">Retry</button><button class="text-action" aria-label="Dismiss">×</button></span></div>
+  <div class="state-label">Session running Direct · strip above the composer</div>
+  <div class="direct-pair">
+   <div>
+    <div class="strip direct" style="margin-bottom:10px"><span class="glyph" aria-hidden="true">→</span><span class="text">Direct · engine’s own login<span class="sub">alex@maws.dev · not the relay · no gateway models · usage windows from the engine</span></span><span class="actions"><button class="btn compact">Switch to gateway…</button></span></div>
+    <div class="context-strip" aria-label="Session context"><span class="context-chip">MAWS</span><span class="context-chip">⎇ feat/usage-strip</span><span class="context-chip">Opus 5.5 · High</span><span class="context-chip">auto</span><span class="context-chip direct">Direct</span></div>
+    <div class="statusline wrap" aria-label="Session status"><span class="path">~/Developer/GitHub/MAWS</span><button>ctx 18% of 1M</button><span>·</span><button>5h 31% ↻3h10m</button><span>·</span><button>7d 40% ↻4d2h</button><span>·</span><button>$0.88</button><span>·</span><button>auto</button></div>
+   </div>
+   <section class="popover confirm" role="alertdialog" aria-label="Switch to gateway">
+    <h3>Switch this session to the gateway?</h3>
+    <p>The engine process restarts and resumes the same session: the transcript, queued messages and session grants are kept; a running turn is stopped first. Gateway models become available.</p>
+    <div class="actions"><button class="btn">Cancel</button><button class="btn primary">Restart routed</button></div>
+   </section>
+  </div>
+ </div>
+</figure>
+
+<figure class="vignette" id="session-info">
+ <figcaption><span class="number">03</span><h2>Session info with the auto-mode lane</h2><span class="dimension">380 px right-panel tool · model picker note</span></figcaption>
+ <p class="rationale">Which lane reviews tool calls decides whether auto mode costs anything. <code>get_status</code> says so; Session info repeats it in words, and the model picker warns before a GPT route is chosen.</p>
+ <div class="frame info-pair">
+  <section class="panel" aria-label="Session info">
+   <div class="panel-head"><h3 style="font-weight:550">Session info</h3><span class="session">Charter + research</span></div>
+   <div class="kv-section"><div class="label">Engine</div>
+    <dl class="kv"><dt>Version</dt><dd>2.1.283 · pinned</dd><dt>Binary</dt><dd><code>~/claude-code-bundle/2.1.283/claude</code></dd><dt>Session id</dt><dd><code>59505fdc-476a-4b4b-b0de-9a2f566a0f87</code></dd><dt>Process tree</dt><dd>412 MB <span class="sub">engine 252 · ptc 51 · advisor 107 · counts against the 9 × 420 MB budget</span></dd></dl>
+   </div>
+   <div class="kv-section"><div class="label">Model</div>
+    <dl class="kv"><dt>Main</dt><dd>Opus 5.5 · High</dd><dt>Subagents</dt><dd>opus <span class="sub">CLAUDE_CODE_SUBAGENT_MODEL, chosen at launch</span></dd><dt>Overrides</dt><dd><code>ANTHROPIC_DEFAULT_OPUS_MODEL</code> → claude-opus-5-5[1m] <span class="sub">passed through from your shell</span></dd></dl>
+   </div>
+   <div class="kv-section"><div class="label">Gateway</div>
+    <dl class="kv"><dt>Route</dt><dd>ClaudeUsage relay · <code>http://127.0.0.1:8641</code></dd><dt>Account</dt><dd>alex@maws.dev <span class="sub">weekly resets soonest · pinned for this session</span></dd><dt>Tool search</dt><dd>on <span class="sub">ENABLE_TOOL_SEARCH, needed behind a base URL</span></dd></dl>
+   </div>
+   <div class="kv-section"><div class="label">Permissions <button class="text-action">/permissions</button></div>
+    <dl class="kv"><dt>Mode</dt><dd>auto <span class="sub">effective, from the init frame</span></dd><dt>Auto-mode lane</dt><dd><span class="lane">Server</span> <span class="sub">reviews ride on the main request · no charge · model chosen server-side · 23 tool calls evaluated, none flagged</span></dd><dt>Rules</dt><dd>6 allow · 1 ask · 2 deny · 1 session grant</dd></dl>
+   </div>
+   <div class="kv-section"><div class="label">Context, usage, cost</div>
+    <dl class="kv"><dt>Context</dt><dd>412k of 1M · 41% · autocompact at 850k</dd><dt>Usage</dt><dd>5h 74% ↻2h37m · 7d 82% ↻5d21h <span class="sub">from ClaudeUsage, shared by every session</span></dd><dt>Cost</dt><dd>$3.41 this session · $0.42 since you last looked</dd></dl>
+   </div>
+   <div class="kv-section" style="padding-bottom:12px"><div class="label">Hooks and MCP</div>
+    <dl class="kv"><dt>Hooks</dt><dd>3 settings hooks · 2 plugin hooks</dd><dt>MCP</dt><dd>3 connected <span class="sub">ptc, advisor (stdio) · openaiDeveloperDocs (http)</span></dd></dl>
+   </div>
+  </section>
+  <div>
+   <section class="popover" aria-label="Model widget, gateway model selected">
+    <div class="widget-head"><h3>Model &amp; effort</h3><code>/model</code></div>
+    <div class="group-label">Gateway</div>
+    <label class="model-option"><input type="radio" name="model" checked><span class="model-check">✓</span><span class="model-text">gpt-6-astra<span class="gateway-caption">From gateway · auto mode supported</span></span></label>
+    <label class="model-option"><input type="radio" name="model"><span class="model-check">✓</span><span class="model-text">gpt-6-sol<span class="gateway-caption">From gateway</span></span></label>
+    <div class="model-note"><strong>Auto-mode reviews for this model run locally.</strong> A GPT route carries no Anthropic verdict, so the engine reviews each tool call itself on Sonnet 5 through alex@maws.dev. Those requests count against usage.</div>
+    <div class="group-label" style="padding-top:2px">Claude</div>
+    <label class="model-option"><input type="radio" name="model"><span class="model-check">✓</span><span class="model-text">Opus 5.5</span><small>1M</small></label>
+    <label class="model-option" style="margin-bottom:8px"><input type="radio" name="model"><span class="model-check">✓</span><span class="model-text">Haiku 4.5<span class="gateway-caption">Cannot hold auto mode · runs in default</span></span></label>
+   </section>
+   <section class="panel" style="margin-top:14px" aria-label="Session info, local lane variant">
+    <div class="panel-head"><h3 style="font-weight:550">Permissions</h3><span class="session">Quota reset recovery · gpt-6-astra</span></div>
+    <div class="kv-section" style="padding-bottom:10px">
+     <dl class="kv"><dt>Mode</dt><dd>auto <span class="sub">effective, from the init frame</span></dd><dt>Auto-mode lane</dt><dd><span class="lane local">Local</span> <span class="sub">Sonnet 5 through alex@maws.dev · counted as usage · 14 reviews this session · engine notice shown in the transcript</span></dd></dl>
+    </div>
+   </section>
+  </div>
+ </div>
+</figure>
+
+<figure class="vignette" id="settings">
+ <figcaption><span class="number">04</span><h2>Settings</h2><span class="dimension">760 px main tab · one screen, five sections</span></figcaption>
+ <p class="rationale">Rows, not panes. Every row says where its value comes from and what MAWS will not touch.</p>
+ <div class="frame settings">
+  <nav class="settings-index" aria-label="Settings sections">
+   <div class="title">Settings</div>
+   <button class="active">Engine</button><button>Gateway</button><button>Keyboard</button><button>Appearance</button><button>Notifications</button>
+   <p class="hint" style="padding:14px 8px 0">Stored in MAWS’s own Application Support folder. Nothing here writes into <code>~/.claude</code>.</p>
+  </nav>
+  <div class="settings-body">
+   <section class="section" id="engine">
+    <h3>Engine</h3>
+    <div class="setting"><span class="k">Binary</span><span class="v"><span class="path">/Users/alex/claude-code-bundle/2.1.283/claude</span><button class="text-action">Change…</button></span><span class="note">Absolute path, never resolved through PATH. Verified at every launch.</span></div>
+    <div class="setting"><span class="k">Pinned version</span><span class="v">2.1.283 <span class="chip muted">matches binary</span><button class="text-action">Re-pin…</button></span><span class="note">Each session records the version it ran on. A different binary at this path refuses to start sessions until you re-pin.</span></div>
+    <div class="setting"><span class="k">Config home</span><span class="v"><span class="path">~/.claude</span><span class="chip muted">read-only to MAWS</span></span><span class="note">The engine owns transcripts, settings and trust. MAWS reads them and keeps its own index elsewhere.</span></div>
+    <div class="setting"><span class="k">Subagent model</span><span class="v"><button class="chip">opus ⌄</button><span class="hint">default for new sessions</span></span><span class="note">Sets CLAUDE_CODE_SUBAGENT_MODEL per launch; Session info shows what a session actually got.</span></div>
+    <div class="setting"><span class="k">Shell environment</span><span class="v">captured from zsh at launch · 14 variables passed<button class="text-action">Recapture</button></span><span class="note">Allowlist only: PATH, HOME, locale, CLAUDE_*, ANTHROPIC_* and tool paths. Parent-session variables are never passed.</span></div>
+   </section>
+   <section class="section" id="gateway">
+    <h3>Gateway <span class="hint">D-19</span></h3>
+    <div class="setting"><span class="k">Default route</span><span class="v"><span class="seg" role="radiogroup" aria-label="Default route"><label><input type="radio" name="route" checked>ClaudeUsage relay</label><label><input type="radio" name="route">Direct</label></span><span class="hint">127.0.0.1:8641</span></span></div>
+    <div class="setting"><span class="k">Relay unreachable at launch</span><span class="v"><button class="chip">Ask each time ⌄</button><span class="hint">or: wait for the relay · run direct</span></span></div>
+    <div class="setting"><span class="k">Direct login</span><span class="v">engine’s own · alex@maws.dev · last verified 3d ago</span><span class="note">Only Direct sessions use it. MAWS never stores a token; ClaudeUsage holds the relay’s accounts. <a href="#settings">Sign in from a terminal ↗</a></span></div>
+    <div class="setting"><span class="k">Per-session Direct</span><span class="v"><label class="switch"><input type="checkbox" checked><span></span></label><span>Offer “Direct…” in the new-session sheet</span></span></div>
+   </section>
+   <section class="section" id="keyboard">
+    <h3>Keyboard <span class="hint">all bindings editable · ⇧Tab cycles permission mode as in the terminal</span></h3>
+    <div class="keymap" role="table" aria-label="Key bindings">
+     <div class="key-row"><span>New session</span><kbd>⌘ N</kbd><button class="text-action">Change</button></div>
+     <div class="key-row"><span>Command palette</span><kbd>⌘ K</kbd><button class="text-action">Change</button></div>
+     <div class="key-row"><span>Sidebar · Right panel</span><kbd>⌘ B · ⌘ ⇧ B</kbd><button class="text-action">Change</button></div>
+     <div class="key-row recording"><span>Next needs-you</span><kbd>Press keys… esc cancels</kbd><button class="text-action">Was ⌘ ⇧ J</button></div>
+     <div class="key-row"><span>Split · Close tab</span><kbd>⌘ \ · ⌘ W</kbd><button class="text-action">Change</button></div>
+     <div class="key-row"><span>Tabs · Cycle</span><kbd>⌘ 1…9 · ⌃ Tab</kbd><button class="text-action">Change</button></div>
+     <div class="key-row"><span>Send when multi-line</span><kbd>⌘ ↵</kbd><button class="text-action">Change</button></div>
+    </div>
+    <div class="row" style="margin-top:8px"><button class="text-action">Reset to defaults</button><span class="hint">Enter and Esc on a docked request are fixed.</span></div>
+   </section>
+   <section class="section" id="appearance">
+    <h3>Appearance</h3>
+    <div class="setting"><span class="k">Theme</span><span class="v"><span class="seg" role="radiogroup" aria-label="Theme"><label><input type="radio" name="theme" checked>Light</label><label><input type="radio" name="theme">Dark</label><label><input type="radio" name="theme">System</label></span><span class="hint">native chrome follows</span></span></div>
+    <div class="setting"><span class="k">Transcript text</span><span class="v"><button class="chip">15.5 px ⌄</button><span class="hint">chrome stays at 13 px</span></span></div>
+   </section>
+   <section class="section" id="notifications" style="padding-bottom:6px">
+    <h3>Notifications</h3>
+    <div class="setting"><span class="k">When a session needs you</span><span class="v"><label class="switch"><input type="checkbox" checked><span></span></label><span>Notify while MAWS is not focused</span><span class="chip muted">macOS: allowed</span></span></div>
+    <div class="setting"><span class="k">For</span><span class="v checks"><label><input type="checkbox" checked>questions</label><label><input type="checkbox" checked>plan reviews</label><label><input type="checkbox" checked>approvals</label><label><input type="checkbox" checked>errors</label><label><input type="checkbox">held peer messages</label></span></div>
+    <div class="setting"><span class="k">Sound</span><span class="v"><label class="switch"><input type="checkbox"><span></span></label><span class="hint">off</span></span></div>
+    <div class="setting"><span class="k">Near-limit banner</span><span class="v"><button class="chip">at 90% ⌄</button><span class="hint">once per window, account-wide</span></span></div>
+   </section>
+  </div>
+ </div>
+</figure>
+
+<figure class="vignette" id="permissions-widget">
+ <figcaption><span class="number">05</span><h2>Permissions &amp; rules from the slash palette</h2><span class="dimension">Palette · engine-read widget over the transcript</span></figcaption>
+ <p class="rationale">The pattern for every engine-read widget: the palette names the origin, the widget shows the engine’s own read (mode from the init frame, rules with their source file) and says what it will not edit.</p>
+ <div class="frame palette-crop">
+  <div class="widget-pair">
+   <section class="popover palette" aria-label="Slash command palette">
+    <div class="row palette-search"><span class="muted">⌕</span><code>/pe</code><span class="muted">Commands</span></div>
+    <div class="group-label">Engine</div>
+    <button class="command active"><span><code>/permissions</code><span class="description">Effective mode, allow and deny rules</span></span><span class="badge">Engine ↵</span></button>
+    <div class="group-label">Skills</div>
+    <button class="command"><span><code>/doperpowers:execspec</code><span class="description">Write and execute a spec</span></span><span class="badge">Skill</span></button>
+    <div class="group-label">MAWS</div>
+    <button class="command"><span><code>/pin</code><span class="description">Pin this session</span></span><span class="badge">MAWS</span></button>
+    <div class="palette-footer hint row between"><span>↑↓ · Enter · Esc</span><span>3 matches</span></div>
+   </section>
+   <section class="popover" aria-label="Permissions and rules widget">
+    <div class="widget-head"><h3>Permissions &amp; rules</h3><code>/permissions</code></div>
+    <div class="rules-body">
+     <div class="mode-row"><span class="hint" style="width:48px">Mode</span><span class="seg" role="radiogroup" aria-label="Permission mode"><label><input type="radio" name="mode">default</label><label><input type="radio" name="mode">acceptEdits</label><label><input type="radio" name="mode">plan</label><label><input type="radio" name="mode" checked>auto</label><label><input type="radio" name="mode">bypass</label></span></div>
+     <p class="mode-line">Effective <strong style="font-weight:550;color:var(--fg)">auto</strong> · from the init frame, never the selection · server lane</p>
+     <div class="refusal"><span class="warn" aria-hidden="true">△</span> When a change is refused the chip says why: <em>Couldn’t switch to auto</em> · <code>auto_mode_model</code> · this model can’t hold auto mode; still running in default.</div>
+     <div class="rules-group"><div class="label">Allow <span class="count">4</span></div>
+      <div class="rule"><code>Bash(git status:*)</code><span class="src">.claude/settings.json · project</span></div>
+      <div class="rule"><code>Bash(pnpm test:*)</code><span class="src">~/.claude/settings.json · user</span></div>
+      <div class="rule"><code>Read(//Users/alex/Developer/**)</code><span class="src">~/.claude/settings.json · user</span></div>
+      <div class="rule"><code>Bash(git status --short)</code><span class="src session">this session · grant</span><span class="why">Granted from an approval card; re-applied after a resume without a new prompt.</span></div>
+     </div>
+     <div class="rules-group"><div class="label">Ask <span class="count">1</span></div>
+      <div class="rule"><code>Bash(git push:*)</code><span class="src">.claude/settings.json · project</span><span class="why">Ask outranks allow: a prompt raised by this rule offers no “always allow”.</span></div>
+     </div>
+     <div class="rules-group"><div class="label">Deny <span class="count">2</span></div>
+      <div class="rule"><code>Bash(rm -rf:*)</code><span class="src">~/.claude/settings.json · user</span></div>
+      <div class="rule"><code>Read(.env)</code><span class="src">.claude/settings.json · project</span></div>
+     </div>
+     <div class="rules-group"><div class="label">Workspace</div>
+      <div class="rule"><code>~/Developer/GitHub/MAWS</code><span class="src">trusted</span></div>
+      <div class="rule"><code>~/Developer/GitHub/claude-code-bundle</code><span class="src">added this session</span></div>
+     </div>
+    </div>
+    <div class="rules-foot"><span>Read with <code>list_permission_rules</code> · rules are edited in their files</span><a href="#permissions-widget" style="white-space:nowrap">Open settings file ↗</a></div>
+   </section>
+  </div>
+  <div class="composer"><div class="row context-strip"><span>MAWS</span><span>⎇ feat/sidebar-drag</span><span>Opus 5.5 · High ⌄</span><span>auto</span></div><textarea aria-label="Message with slash command" spellcheck="false">/pe</textarea><div class="row composer-bottom"><button aria-label="Add attachment">＋</button><button aria-label="Add context">@</button><button class="send" aria-label="Send message">↑</button></div></div>
+  <div class="statusline"><span class="path">~/Developer/GitHub/MAWS</span><span>·</span><button>ctx 41% of 1M</button><span>·</span><button>5h 74% ↻2h37m</button><span>·</span><button>7d 82% ↻5d21h</button><span>·</span><button>$3.41</button><span>·</span><button>auto</button></div>
+ </div>
+</figure>
+<footer class="page-foot">Static interaction study · controls are interactive; nothing is written to ClaudeUsage or the engine. Append <code>?theme=dark</code> for the dark theme.</footer>
+</main>
+</body>
+</html>

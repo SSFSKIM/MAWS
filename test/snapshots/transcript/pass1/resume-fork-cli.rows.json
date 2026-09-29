@@ -1,0 +1,101 @@
+[
+  {
+    "at": "2026-09-28T09:24:31.589Z",
+    "id": "time:turn:80b33e70-4035-49f6-9853-d2d8a0028d9d",
+    "kind": "time",
+    "label": "Yesterday 9:24 AM",
+    "turnId": "turn:80b33e70-4035-49f6-9853-d2d8a0028d9d"
+  },
+  {
+    "at": "2026-09-28T09:24:31.589Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:80b33e70-4035-49f6-9853-d2d8a0028d9d",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "80b33e70-4035-49f6-9853-d2d8a0028d9d",
+    "steer": false,
+    "text": "What word did I ask you to remember? Reply with just that word.",
+    "turnId": "turn:80b33e70-4035-49f6-9853-d2d8a0028d9d"
+  },
+  {
+    "at": "2026-09-28T09:24:31.589Z",
+    "autoDenied": 0,
+    "denied": 0,
+    "endedAt": "2026-09-28T09:24:33.401Z",
+    "expanded": true,
+    "firstDeniedCell": null,
+    "id": "divider:turn:80b33e70-4035-49f6-9853-d2d8a0028d9d",
+    "kind": "divider",
+    "origin": "human",
+    "startedAt": "2026-09-28T09:24:31.625Z",
+    "state": "completed",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 0,
+        "exploration": 0,
+        "files": 0,
+        "mcp": 0,
+        "other": 0,
+        "skills": 0,
+        "web": 0
+      },
+      "childAgents": 0,
+      "costUsd": 0.034849700000000004,
+      "denials": [],
+      "durationMs": 1774,
+      "model": "claude-haiku-4-5-20251001",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 0,
+        "reviewed": 0
+      },
+      "terminalReason": "completed",
+      "toolCalls": 0,
+      "usage": {
+        "cacheCreationInputTokens": 84,
+        "cacheReadInputTokens": 22410,
+        "inputTokens": 10,
+        "outputTokens": 46,
+        "thinkingTokens": 37
+      }
+    },
+    "toolCalls": 0,
+    "turnId": "turn:80b33e70-4035-49f6-9853-d2d8a0028d9d"
+  },
+  {
+    "at": "2026-09-28T09:24:33.186Z",
+    "durationMs": 186,
+    "id": "think:msg_011CfVbWEPujAG1ZSSaiAeLT:0",
+    "kind": "thinking",
+    "live": false,
+    "messageUuid": "18ee3ddb-b36b-4f96-91bf-61015720f2a7",
+    "text": "The user is asking the same question again. From my memory file that I saved, the word is ZEBRA. I should reply with just that word.",
+    "turnId": "turn:80b33e70-4035-49f6-9853-d2d8a0028d9d"
+  },
+  {
+    "at": "2026-09-28T09:24:33.373Z",
+    "blockIndex": 1,
+    "id": "text:msg_011CfVbWEPujAG1ZSSaiAeLT:1",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "ZEBRA",
+    "messageUuid": "5f10505b-611f-4e30-876b-ebc66b328f09",
+    "model": "claude-haiku-4-5-20251001",
+    "phase": "answer",
+    "turnId": "turn:80b33e70-4035-49f6-9853-d2d8a0028d9d"
+  },
+  {
+    "at": "2026-09-28T09:24:33.926Z",
+    "attempt": null,
+    "id": "error:replay:journal:37:0",
+    "kind": "error",
+    "lostAttentionCount": 0,
+    "scope": "exit",
+    "severity": "notice",
+    "text": "Session process exited (unknown)",
+    "turnId": null
+  }
+]

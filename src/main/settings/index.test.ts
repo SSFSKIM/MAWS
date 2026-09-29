@@ -74,7 +74,7 @@ afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
 const invoke = (name: string, input?: unknown) =>
   electron.handlers.get(`maws:cmd:${name}`)!({ sender: electron.win.webContents, senderFrame: electron.win.webContents.mainFrame }, input);
-const state = (theme: string, resolvedTheme: string) => ({ settings: { version: 1, theme }, resolvedTheme });
+const state = (theme: string, resolvedTheme: string) => ({ settings: { version: 2, keymap: {}, notifications: { enabled: true, sound: false }, theme }, resolvedTheme });
 const changed = (theme: string, resolvedTheme: string) => ['maws:evt:settings.changed', state(theme, resolvedTheme)];
 const clearRecords = () => {
   electron.win.backgrounds = [];
@@ -98,7 +98,7 @@ describe('theme switching in main', () => {
     expect(electron.theme.themeSource).toBe('dark');
     expect(electron.win.backgrounds).toEqual(['#131313']);
     expect(electron.win.sent).toEqual([changed('dark', 'dark')]);
-    expect(readFileSync(file, 'utf8')).toBe('{"version":1,"theme":"dark"}');
+    expect(readFileSync(file, 'utf8')).toBe('{"version":2,"theme":"dark","keymap":{},"notifications":{"enabled":true,"sound":false}}');
     await expect(invoke('settings.get')).resolves.toEqual({ ok: true, value: state('dark', 'dark') });
   });
 
@@ -111,7 +111,7 @@ describe('theme switching in main', () => {
   });
 
   it('comes back with the persisted theme on the next start', () => {
-    writeFileSync(file, '{"version":1,"theme":"dark"}');
+    writeFileSync(file, '{"version":2,"theme":"dark","keymap":{},"notifications":{"enabled":true,"sound":false}}');
     const settings = startSettings(file);
     expect(electron.theme.themeSource).toBe('dark');
     expect(settings.state().resolvedTheme).toBe('dark');
@@ -119,7 +119,7 @@ describe('theme switching in main', () => {
   });
 
   it('system follows the OS, and an OS change re-emits settings.changed', () => {
-    writeFileSync(file, '{"version":1,"theme":"system"}');
+    writeFileSync(file, '{"version":2,"theme":"system","keymap":{},"notifications":{"enabled":true,"sound":false}}');
     electron.theme.osDark = true;
     const settings = startSettings(file);
     expect(electron.theme.themeSource).toBe('system');

@@ -6,7 +6,7 @@ const reactHooks = require('eslint-plugin-react-hooks');
 const tseslint = require('typescript-eslint');
 
 module.exports = defineConfig(
-  { ignores: ['.doperpowers/', 'out/', 'dist/', 'node_modules/', 'mockups/', 'research/', 'spikes/', 'test-results/', 'playwright-report/'] },
+  { ignores: ['.doperpowers/', 'out/', 'dist/', 'node_modules/', 'mockups/', 'research/', 'spikes/', 'plugins/', 'test-results/', 'playwright-report/'] },
   js.configs.recommended,
   tseslint.configs.recommended,
   {

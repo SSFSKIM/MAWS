@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { createHostRuntime, type HostPort } from './runtime';
+import { createHostRuntime, HostCommandError, type HostPort } from './runtime';
 
 // A fake MessagePortMain: what the runtime posts is recorded; `deliver` plays main posting a message to the host.
 function fakePort() {
@@ -66,6 +66,29 @@ describe('host runtime speaks the host protocol', () => {
     await fake.deliver({ t: 'req', id: '4', name: 'pty.write', input: { ptyId: 'p', data: 'x' } });
     expect(fake.posted).toEqual([{ t: 'res', id: '4', ok: false, error: { code: 'internal', message: 'unknown pty' } }]);
   });
+
+  // C3 start: typed errors through the host runtime (C3 execution document, Interfaces "Typed errors through the host
+  // runtime"): a HostCommandError keeps its code across the port; anything else still answers `internal`.
+  it('forwards a HostCommandError with its code intact, and a plain Error still answers internal', async () => {
+    const fake = fakePort();
+    createHostRuntime((on) => {
+      on('engine.ping', async () => {
+        throw new HostCommandError({ code: 'timeout', message: 'get_usage unanswered after 8 s' });
+      });
+    }).serve(fake.port);
+    await fake.deliver({ t: 'req', id: '9', name: 'engine.ping', input: undefined });
+    expect(fake.posted).toEqual([{ t: 'res', id: '9', ok: false, error: { code: 'timeout', message: 'get_usage unanswered after 8 s' } }]);
+
+    const plain = fakePort();
+    createHostRuntime((on) => {
+      on('engine.ping', async () => {
+        throw new Error('boom');
+      });
+    }).serve(plain.port);
+    await plain.deliver({ t: 'req', id: '10', name: 'engine.ping', input: undefined });
+    expect(plain.posted).toEqual([{ t: 'res', id: '10', ok: false, error: { code: 'internal', message: 'boom' } }]);
+  });
+  // C3 end
 
   it('refuses to answer with an output that fails the command’s schema', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});

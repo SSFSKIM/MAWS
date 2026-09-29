@@ -13,6 +13,7 @@ const fake = vi.hoisted(() => {
     },
     whenReady: () => Promise.resolve(),
     getPath: () => '/tmp/maws-lifecycle-test',
+    isPackaged: false,
     setPath: vi.fn(),
     commandLine: { appendSwitch: vi.fn() },
     quit: vi.fn(),
@@ -22,11 +23,47 @@ const fake = vi.hoisted(() => {
   return { listeners, windows, hosts, app, emit, createWindow: vi.fn(() => void windows.push({})) };
 });
 
-vi.mock('electron', () => ({ app: fake.app, BrowserWindow: { getAllWindows: () => fake.windows } }));
+vi.mock('electron', () => {
+  const display = { workArea: { x: 0, y: 0, width: 1440, height: 900 } };
+  return {
+    app: fake.app,
+    BrowserWindow: { getAllWindows: () => fake.windows },
+    screen: { getAllDisplays: () => [display], getPrimaryDisplay: () => display },
+  };
+});
 vi.mock('./hosts', () => ({ createHosts: () => fake.hosts }));
-vi.mock('./ipc/router', () => ({ installRouter: vi.fn() }));
+vi.mock('./ipc/router', () => ({ installRouter: vi.fn(), registerMainHandler: vi.fn() /* C3 */ }));
+// C3 start: main's attention service and its store, started from index.ts, are replaced like the other wired modules
+vi.mock('./attention/service', () => ({ startAttentionService: vi.fn() }));
+vi.mock('./attention/file-attention-store', () => ({ FileAttentionStore: vi.fn() }));
+// C3 end
 vi.mock('./settings', () => ({ startSettings: () => ({ state: () => ({ resolvedTheme: 'light' }) }) }));
 vi.mock('./window', () => ({ appUrl: 'file:///index.html', createWindow: fake.createWindow, installContentSecurityPolicy: vi.fn() }));
+// C4: the index and its session source are replaced too; the lifecycle only has to open, start and close them.
+const c4 = vi.hoisted(() => ({ close: vi.fn(), stopSource: vi.fn(), stopAttention: vi.fn(), started: 0 }));
+vi.mock('./index/index', () => ({ Index: class { close = c4.close; } }));
+vi.mock('./index/register', () => ({ registerIndexHandlers: vi.fn() }));
+vi.mock('./index/source', () => ({ IndexSessionSource: class { start = () => ((c4.started += 1), c4.stopSource); } }));
+vi.mock('./index/attention-service', () => ({ startIndexAttention: () => ({ stop: c4.stopAttention }) })); // C3's service over the index
+vi.mock('./ipc/events', () => ({ emit: vi.fn() }));
+vi.mock('./index/replay', () => ({ registerReplayHandlers: () => ({ dispose: vi.fn() }) }));
+vi.mock('./index/replay-fixtures', () => ({ appRoot: (path: string) => path, seedReplayFixtures: vi.fn() }));
+const git = vi.hoisted(() => ({ dispose: vi.fn(), registered: 0 }));
+vi.mock('./git/service', () => ({ GitService: class { dispose = git.dispose; } }));
+vi.mock('./git/register', () => ({ registerGitHandlers: () => void (git.registered += 1) }));
+// end C4
+// C5 start: the layout store, the external-link command and the read side
+vi.mock('./layout/store', () => ({ LayoutFileStore: class { flush() {} get() { return null; } set() {} }, registerLayoutHandlers: vi.fn(), dropPanelKeysOfRemovedSessions: vi.fn() }));
+vi.mock('./open-external', () => ({ registerOpenExternal: vi.fn() }));
+// The read model starts C4's index source and stops it with the sessions, at will-quit.
+vi.mock('./sessions', () => ({
+  startSessions: ({ indexSource }: { indexSource: { start(writer: unknown): () => void } }) => ({ model: {}, stop: indexSource.start({}) }),
+}));
+vi.mock('./menu', () => ({ startMenu: vi.fn(), registerMenuHandlers: vi.fn() }));
+vi.mock('./window-state', () => ({ restoreWindowState: vi.fn(() => null), trackWindowState: vi.fn() }));
+vi.mock('./attention', () => ({ startAttention: vi.fn() }));
+vi.mock('./lifecycle/quit-guard', () => ({ installQuitGuard: vi.fn(), askToQuit: vi.fn() }));
+// C5 end
 
 beforeAll(async () => {
   await import('./index');
@@ -56,5 +93,16 @@ describe('app lifecycle (macOS, D-11)', () => {
   it('stops the hosts on will-quit', () => {
     fake.emit('will-quit');
     expect(fake.hosts.stop).toHaveBeenCalledOnce();
+    // C4: the session source was started at ready and stops, with the index closed, at will-quit.
+    expect(c4.started).toBe(1);
+    expect(c4.stopSource).toHaveBeenCalledOnce();
+    expect(c4.close).toHaveBeenCalledOnce();
+    // The source reads the index, so it stops (C5's sessions.stop) before the index closes.
+    expect(c4.stopSource.mock.invocationCallOrder[0]).toBeLessThan(c4.close.mock.invocationCallOrder[0]);
+    expect(c4.stopAttention).toHaveBeenCalledOnce();
+    // M6: the git service's handlers were registered at ready, and its watches close at will-quit.
+    expect(git.registered).toBe(1);
+    expect(git.dispose).toHaveBeenCalledOnce();
+    // end C4
   });
 });

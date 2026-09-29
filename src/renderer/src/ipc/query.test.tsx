@@ -20,7 +20,7 @@ describe('useCommand', () => {
   });
 
   it('resolves to the validated command output', async () => {
-    const state = { settings: { version: 1, theme: 'dark' }, resolvedTheme: 'dark' };
+    const state = { settings: { version: 2, keymap: {}, notifications: { enabled: true, sound: false }, theme: 'dark' }, resolvedTheme: 'dark' };
     answer({ ok: true, value: state });
     const { result } = renderHook(() => useCommand('settings.get', undefined), { wrapper });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));

@@ -1,0 +1,45 @@
+[
+  {
+    "at": "2026-09-28T11:10:00.045Z",
+    "id": "time:turn:u-math-and-diagrams-002",
+    "kind": "time",
+    "label": "Yesterday 11:10 AM",
+    "turnId": "turn:u-math-and-diagrams-002"
+  },
+  {
+    "at": "2026-09-28T11:10:00.045Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:u-math-and-diagrams-002",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "u-math-and-diagrams-002",
+    "steer": false,
+    "text": "Show the frame budget as a formula and the batch path as a diagram.",
+    "turnId": "turn:u-math-and-diagrams-002"
+  },
+  {
+    "at": "2026-09-28T11:10:00.161Z",
+    "blockIndex": 0,
+    "id": "text:msg_mathanddiagrams_007:0",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "The frame budget, per interval:\n\n$$\n\\frac{1}{60}\\,\\mathrm{s} \\approx 16.7\\,\\mathrm{ms}, \\quad p_{95} \\le 17\\,\\mathrm{ms}\n$$\n\nHow a batch reaches the list:\n\n```mermaid\nflowchart LR\n  Engine --> Host --> Store --> List\n  List --> Reader\n```\n\nInline cost per delta stays under $2\\,\\mathrm{ms}$ only with the live buffer.",
+    "messageUuid": "a-math-and-diagrams-024",
+    "model": "claude-opus-5-5",
+    "phase": "answer",
+    "turnId": "turn:u-math-and-diagrams-002"
+  },
+  {
+    "at": "2026-09-28T11:10:00.357Z",
+    "attempt": null,
+    "id": "error:replay:journal:30:0",
+    "kind": "error",
+    "lostAttentionCount": 0,
+    "scope": "exit",
+    "severity": "notice",
+    "text": "Session process exited (unknown)",
+    "turnId": null
+  }
+]

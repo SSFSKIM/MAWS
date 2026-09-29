@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { HostState, MawsBridge, SettingsState } from '@shared/ipc/schema';
 
@@ -7,17 +7,37 @@ const HOSTS: Record<'engine.hostState' | 'pty.hostState', HostState> = {
   'pty.hostState': { state: 'ready', pid: 2222, restarts: 0, revision: 1 },
 };
 
+const GIT_STATUS = {
+  repoRoot: '/private/tmp/maws-accept',
+  gitDir: '/private/tmp/maws-accept/.git',
+  commonDir: '/private/tmp/maws-accept/.git',
+  isWorktree: false,
+  branch: 'main',
+  head: 'abcdef0123456789abcdef0123456789abcdef01',
+  upstream: 'origin/main',
+  remoteUrl: null,
+  ahead: 1,
+  behind: 0,
+  dirty: true,
+  files: [{ path: 'src/a.ts', oldPath: null, index: '.', worktree: 'M', untracked: false }],
+  stashCount: 0,
+  checkedAt: '2026-09-28T10:00:00.000Z',
+};
+
 // The page against a fake `window.maws` that behaves like main: `settings.set` answers the new state and emits
 // `settings.changed` first, as the router does; both hosts are ready; the PTY host answers a write to its shell with
 // the terminal's echo of the line and then the command's output, once the test calls `releaseShell` (a timer here
-// raced the test's "not yet" assertion on a loaded machine).
+// raced the test's "not yet" assertion on a loaded machine, C9 M5), and resolves `echoed` once both are delivered.
+// Since C9 the stream is binary: each chunk is bytes stamped with its stream offset.
 function fakeMain(initial: SettingsState['settings']['theme']) {
   let theme = initial;
   let releaseShell!: () => void;
   const shellReleased = new Promise<void>((resolve) => (releaseShell = resolve));
+  let markEchoed!: () => void;
+  const echoed = new Promise<void>((resolve) => (markEchoed = resolve));
   const listeners = new Map<string, Set<(payload: unknown) => void>>();
   const send = (name: string, payload: unknown) => listeners.get(name)?.forEach((l) => l(payload));
-  const state = () => ({ settings: { version: 1, theme }, resolvedTheme: theme === 'dark' ? 'dark' : 'light' });
+  const state = () => ({ settings: { version: 2, keymap: {}, notifications: { enabled: true, sound: false }, theme }, resolvedTheme: theme === 'dark' ? 'dark' : 'light' });
   const answer = (name: string, input: { theme: typeof theme; data: string }) => {
     switch (name) {
       case 'settings.set':
@@ -29,13 +49,54 @@ function fakeMain(initial: SettingsState['settings']['theme']) {
       case 'engine.hostState':
       case 'pty.hostState':
         return HOSTS[name];
+      case 'fs.state':
+        return {
+          configHome: '/Users/new/.claude',
+          watching: true,
+          projects: 1,
+          sessions: 1,
+          bound: 0,
+          followed: [],
+          holders: [],
+          lastScanAt: '2026-09-28T10:00:01.000Z',
+          lastScan: { projects: 3, sessions: 1, changed: 1, durationMs: 1234 },
+        };
+      case 'session.list':
+        return { sessions: [], revision: 1 };
+      case 'session.projects.list':
+        return { projects: [{ id: 'p1', name: 'maws-accept', directory: '/private/tmp/maws-accept', order: 0, createdAt: '2026-09-28T10:00:00.000Z' }], revision: 1 };
+      case 'session.replay.fixtures':
+        return { fixtures: [{ id: 'f1', name: 'workflow', kind: 'journal', path: '/repo/spikes/protocol-probe/fixtures/pass2/workflow.jsonl', sessionId: null, addedAt: '2026-09-28T10:00:00.000Z', lastPlayedAt: null }] };
+      case 'git.watch':
+        return GIT_STATUS;
+      case 'git.unwatch':
+        return undefined;
+      // C5 start: the shell's snapshots (the record side above is C4's)
+      case 'session.digests':
+        return { digests: [] };
+      case 'session.launchMode':
+        return { mode: 'index' };
+      case 'attention.list':
+        return [];
+      case 'attention.pendingNavigate':
+        return { navigate: null };
+      case 'layout.list':
+        return { keys: [] };
+      case 'layout.get':
+        return { value: null };
+      case 'layout.set':
+      case 'layout.setEnabledActions':
+      case 'session.setVisible':
+        return undefined;
+      // C5 end
       case 'pty.spawn':
         return { ptyId: 'p1', pid: 3333 };
       case 'pty.write':
         void shellReleased.then(() => {
-          const echoed = new TextEncoder().encode(`${input.data}\n`);
-          send('pty.data', { ptyId: 'p1', offset: 0, data: echoed });
-          send('pty.data', { ptyId: 'p1', offset: echoed.byteLength, data: new TextEncoder().encode('MAWS_ECHO_OK\r\n$ ') });
+          const line = new TextEncoder().encode(`${input.data}\n`);
+          send('pty.data', { ptyId: 'p1', offset: 0, data: line });
+          send('pty.data', { ptyId: 'p1', offset: line.byteLength, data: new TextEncoder().encode('MAWS_ECHO_OK\r\n$ ') });
+          markEchoed();
         });
         return undefined;
       default:
@@ -50,13 +111,19 @@ function fakeMain(initial: SettingsState['settings']['theme']) {
       return () => listeners.get(name)!.delete(listener);
     }),
   } as unknown as MawsBridge;
-  return { send, releaseShell };
+  current = { send };
+  return { send, echoed, releaseShell };
 }
 
+let current: { send(name: string, payload: unknown): void } | null = null;
+
+// The strip lives in the Diagnostics tab (C5 M4): the app opens, then Help › Diagnostics arrives from the menu.
 async function renderApp() {
   vi.resetModules(); // a fresh settings store per test
   const { App } = await import('./App');
   await act(async () => void render(<App />));
+  await act(async () => current!.send('layout.action', { action: 'diagnostics.open', arg: null }));
+  await act(async () => void (await new Promise((resolve) => setTimeout(resolve, 0))));
 }
 
 describe('theme in the page', () => {
@@ -118,6 +185,13 @@ describe('hosts in the diagnostics strip', () => {
     expect(pty()).toBe('pty host · ready · pid 4444');
   });
 
+  it('shows the shell data counts once the stores have loaded (C5 M1)', async () => {
+    fakeMain('light');
+    await renderApp();
+    await act(async () => void (await new Promise((resolve) => setTimeout(resolve, 0))));
+    expect(screen.getByRole('status', { name: 'shell data' }).textContent).toBe('sessions · 0 · needs you · 0 · layout · hydrated');
+  });
+
   it('runs the echo test and shows the output line with the shell’s pid', async () => {
     const main = fakeMain('light');
     await renderApp();
@@ -126,9 +200,75 @@ describe('hosts in the diagnostics strip', () => {
     // Until the shell answers, nothing in the strip may contain the marker a reader (or the smoke) looks for.
     expect(echo()).not.toBe('');
     expect(echo()).not.toContain('MAWS_ECHO_OK');
-    await act(async () => main.releaseShell());
-    // Polled rather than a fixed wait: the store decodes the answer asynchronously.
-    await vi.waitFor(() => expect(echo()).toBe('MAWS_ECHO_OK · shell pid 3333'), { timeout: 2_000, interval: 10 });
+    // Wait on the shell's answer itself, not a timing window: the store settles synchronously inside the second
+    // `pty.data` delivery, so its state is set before `echoed` resumes this callback and act renders it.
+    main.releaseShell();
+    await act(async () => void (await main.echoed));
     expect(window.maws.invoke).toHaveBeenCalledWith('pty.spawn', expect.objectContaining({ shell: '/bin/sh' }));
+    expect(echo()).toBe('MAWS_ECHO_OK · shell pid 3333');
+  });
+});
+
+describe('store section of the diagnostics strip', () => {
+  afterEach(() => {
+    cleanup();
+    delete (window as { maws?: MawsBridge }).maws;
+  });
+
+  it('shows the watched config home, the counts (projects from the index), and each record with its title, source, directory, pin and holder badge', async () => {
+    const main = fakeMain('light');
+    await renderApp();
+    expect(screen.getByRole('status', { name: 'store' }).textContent).toBe('store · /Users/new/.claude · watching');
+    expect(screen.getByRole('status', { name: 'store scan' }).textContent).toBe('projects 1 · sessions 1 · scan 1.2 s');
+    // Replay (M5): the fixtures the index lists, ready to start.
+    expect(within(screen.getByRole('combobox', { name: 'Replay fixture' })).getByRole('option').textContent).toBe('workflow · journal');
+
+    const record = {
+      appId: 'aaaaaaaa-1111-4111-8111-111111111111',
+      engineSessionId: '11111111-1111-4111-8111-111111111111',
+      projectId: 'p1',
+      directory: '/private/tmp/maws-accept',
+      additionalDirectories: [],
+      worktree: null,
+      branch: null,
+      title: { text: 'Remembering fruit', source: 'generated' },
+      pinned: false,
+      archived: false,
+      holder: { kind: 'terminal', pid: 78212 },
+      lastSeen: { messageUuid: null, at: null },
+      unread: false,
+      engineVersion: '2.1.283',
+      gateway: { routed: true, baseUrl: null, autoModeServer: 'unknown' },
+      model: { requested: null, resolved: null },
+      effort: null,
+      permissionMode: { requested: 'auto', effective: 'auto', refusal: null },
+      createdAt: '2026-09-28T10:00:00.000Z',
+      updatedAt: '2026-09-28T10:00:00.000Z',
+    };
+    await act(async () => {
+      main.send('session.changed', { record, cause: 'discovered', revision: 2 });
+      await new Promise((resolve) => setTimeout(resolve, 60));
+    });
+    const row = within(screen.getByRole('list', { name: 'Discovered sessions' })).getByRole('listitem');
+    expect(row.textContent).toBe('Remembering fruitgenerated/private/tmp/maws-acceptterminal · 78212FollowGit');
+
+    await act(async () => {
+      main.send('session.changed', { record: { ...record, pinned: true, holder: { kind: 'none' } }, cause: 'holder', revision: 3 });
+      await new Promise((resolve) => setTimeout(resolve, 60));
+    });
+    expect(row.textContent).toBe('pinRemembering fruitgenerated/private/tmp/maws-acceptFollowGit');
+
+    // Git (M6): the row's Git button watches its directory; the detail reads branch, ahead/behind and the dirty count,
+    // lists the files, and follows git.changed.
+    await act(async () => void fireEvent.click(within(row).getByRole('button', { name: 'Git' })));
+    expect(window.maws.invoke).toHaveBeenCalledWith('git.watch', { directory: '/private/tmp/maws-accept' });
+    expect(screen.getByRole('status', { name: 'git status' }).textContent).toBe('main · ahead 1 / behind 0 · dirty · 1 file');
+    const untracked = { path: '.c4-accept', oldPath: null, index: '?', worktree: '?', untracked: true };
+    act(() => main.send('git.changed', { repoRoot: GIT_STATUS.repoRoot, status: { ...GIT_STATUS, files: [...GIT_STATUS.files, untracked] }, reason: 'worktree' }));
+    expect(screen.getByRole('status', { name: 'git status' }).textContent).toBe('main · ahead 1 / behind 0 · dirty · 2 files');
+    expect(within(screen.getByRole('list', { name: 'Changed files' })).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['.M src/a.ts', '?? .c4-accept']);
+    await act(async () => void fireEvent.click(within(row).getByRole('button', { name: 'Git' })));
+    expect(window.maws.invoke).toHaveBeenCalledWith('git.unwatch', { directory: '/private/tmp/maws-accept' });
+    expect(screen.queryByRole('status', { name: 'git status' })).toBeNull();
   });
 });

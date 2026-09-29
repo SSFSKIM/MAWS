@@ -242,6 +242,31 @@ describe('host supervisor', () => {
     expect(log).toHaveBeenCalledOnce();
   });
 
+  // C3 start: main-side subscription to validated host events (wave-2 ledger (b); C3's attention service, C4's index)
+  it('onEvent hands each validated host event to its listeners by name, after relaying it, until unsubscribed', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { pty } = await startReady();
+    const seen: unknown[] = [];
+    const exits: unknown[] = [];
+    const off = supervisor.onEvent('pty.data', (payload) => seen.push(payload));
+    supervisor.onEvent('pty.exit', (payload) => exits.push(payload));
+    supervisor.onEvent('pty.data', () => {
+      throw new Error('a faulty listener');
+    });
+    emit.mockImplementation((name, payload) => (payload as { data?: unknown }).data !== 'invalid'); // main's emit refuses what fails X2
+    fromHost(pty, { t: 'evt', name: 'pty.data', payload: { ptyId: 'p1', data: 'hi' } });
+    fromHost(pty, { t: 'evt', name: 'pty.data', payload: { ptyId: 'p1', data: 'invalid' } });
+    await flush();
+    expect(seen).toEqual([{ ptyId: 'p1', data: 'hi' }]);
+    expect(exits).toEqual([]);
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('pty.data'), expect.any(Error));
+    off();
+    fromHost(pty, { t: 'evt', name: 'pty.data', payload: { ptyId: 'p1', data: 'again' } });
+    await flush();
+    expect(seen).toHaveLength(1);
+  });
+  // C3 end
+
   it('on a crash fails pending requests with host_unavailable, reports crashed, then restarts after 0.5 s', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     const { engine } = await startReady(101);

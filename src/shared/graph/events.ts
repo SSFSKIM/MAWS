@@ -145,6 +145,15 @@ export const SessionEventSchema = z.discriminatedUnion('kind', [
   event('permission.requested', {
     requestId: RequestIdSchema, toolUseId: ToolUseIdSchema, toolName: z.string(), displayName: nullableString(),
     input: z.unknown(), description: nullableString(), decisionReasonType: nullableString(), suggestions: z.array(z.unknown()), blockedPath: nullableString(),
+    // C3 start: C7's additive asks (C3 execution document, Decision Log "coordinator, C7's asks"): present only when
+    // the `can_use_tool` request carries the wire key, so a fixture recorded without them validates unchanged.
+    decisionReason: nullableString().optional(), // decision_reason
+    suppressAlwaysAllow: z.boolean().optional(), // suppress_always_allow_rule
+    defaultToNo: z.boolean().optional(), // default_to_no
+    matchedAskRule: z.strictObject({ source: z.string(), toolName: z.string(), ruleContent: nullableString() }).nullable().optional(), // matched_ask_rule
+    requiresUserInteraction: z.boolean().optional(), // requires_user_interaction
+    mcpServer: z.strictObject({ name: z.string(), source: z.string() }).nullable().optional(), // mcp_server (an object on the wire, SPEC 45)
+    // C3 end
   }),
   event('permission.resolved', {
     requestId: RequestIdSchema, toolUseId: ToolUseIdSchema, behavior: z.enum(['allow', 'deny']), message: nullableString(),
@@ -192,6 +201,8 @@ export const SessionEventSchema = z.discriminatedUnion('kind', [
     trigger: z.enum(['process_exit', 'host_restart', 'transport_error', 'user']), reason: nullableString(),
   }),
   event('notice.posted', { level: z.enum(['info', 'notice', 'suggestion', 'warning']), text: z.string(), key: nullableString() }),
+  // reason 'unknown' (C4): also synthesised by the disk backfill, once per follow, for a transcript no live process holds
+  // whose last turn never ended (SDK entrypoints write no turn_duration): the process is gone and nobody saw it go.
   event('process.exited', { code: z.number().nullable(), signal: nullableString(), reason: z.enum(['quit', 'stop', 'archive', 'crash', 'unknown']), lostAttentionCount: z.number() }),
   event('frame.unknown', { frameType: z.string(), subtype: nullableString() }),
 ]);

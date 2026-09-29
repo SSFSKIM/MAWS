@@ -9,3 +9,5 @@ spikes/**/fixtures/private/
 test-results/
 playwright-report/
 .claude/worktrees/
+
+mockups/.playwright-cli/

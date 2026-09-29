@@ -1,0 +1,38 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "mcp_tool",
+            "server": "plugin:cua:cua_repl",
+            "tool": "turn_ended",
+            "input": {
+              "hook_event_name": "Stop",
+              "session_id": "${session_id}",
+              "turn_id": "${prompt_id}"
+            },
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "mcp_tool",
+            "server": "plugin:cua:cua_repl",
+            "tool": "turn_ended",
+            "input": {
+              "hook_event_name": "SubagentStop",
+              "session_id": "${agent_id}",
+              "turn_id": "${prompt_id}"
+            },
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

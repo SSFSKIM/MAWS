@@ -2,6 +2,7 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { BrowserWindow, session } from 'electron';
+import type { WindowState } from '@shared/ipc/schema/layout';
 import { buildCsp } from './csp';
 import type { ResolvedTheme } from './settings/store';
 
@@ -10,16 +11,16 @@ export const THEME_BACKGROUND: Record<ResolvedTheme, string> = { light: '#faf9f6
 
 // electron-vite sets ELECTRON_RENDERER_URL under `electron-vite dev`; a build loads the page from disk.
 const devServerUrl = process.env.ELECTRON_RENDERER_URL ?? null;
-
-// carried by C9 until the rebase over C6 (wave-2 ledger d.13): MAWS_HARNESS=1 loads the harness page instead of the app
-const harness = process.env.MAWS_HARNESS === '1';
-const pageFile = harness ? 'harness.html' : 'index.html';
-const rendererFile = join(__dirname, '../renderer', pageFile);
-const devPageUrl = devServerUrl ? new URL(pageFile, devServerUrl.endsWith('/') ? devServerUrl : `${devServerUrl}/`).href : null;
-// carried by C9 until the rebase over C6 (wave-2 ledger d.13)
+const rendererFile = join(__dirname, '../renderer/index.html');
 
 // What the app window loads; the IPC router accepts invokes only from a top frame at this URL's origin.
-export const appUrl = devPageUrl ?? pathToFileURL(rendererFile).href;
+export const appUrl = devServerUrl ?? pathToFileURL(rendererFile).href;
+
+// C6: under MAWS_HARNESS=1 the window loads the development harness (harness.html, same origin) instead of the app.
+const harness = process.env.MAWS_HARNESS === '1';
+const pageFile = harness ? join(__dirname, '../renderer/harness.html') : rendererFile;
+const pageUrl = devServerUrl && harness ? new URL('harness.html', devServerUrl).href : devServerUrl;
+// end C6
 
 // C9 block begin: the fixed directories of the harness's fake sessions (Interfaces *Harness*), created here because
 // the sandboxed page cannot. (The harness needed no CSP additions once ghostty-web was discarded at the M1 verdict.)
@@ -39,7 +40,19 @@ export function installContentSecurityPolicy(): void {
   });
 }
 
-export function createWindow(theme: ResolvedTheme): BrowserWindow {
+// ---- C5: window chrome and restored placement ---------------------------------------------------------------------
+// The toolbar is the title bar (C5 execution document, "Window state"): the traffic lights are centred in its 44 px
+// (`--toolbar-h`), and the window opens where it was left (`window-state.ts` validates the saved bounds against the
+// displays before they get here). Maximized is applied just before the first show, so the window never flashes small.
+const TRAFFIC_LIGHTS = { x: 16, y: 15 };
+
+function placementOptions(placement: WindowState | null) {
+  if (!placement) return {};
+  return { ...placement.bounds, fullscreen: placement.fullscreen };
+}
+// ---- end C5 -----------------------------------------------------------------------------------------------------------
+
+export function createWindow(theme: ResolvedTheme, placement: WindowState | null = null): BrowserWindow {
   const win = new BrowserWindow({
     title: 'MAWS',
     width: 1440,
@@ -49,6 +62,8 @@ export function createWindow(theme: ResolvedTheme): BrowserWindow {
     show: false,
     backgroundColor: THEME_BACKGROUND[theme],
     titleBarStyle: 'hiddenInset',
+    trafficLightPosition: TRAFFIC_LIGHTS, // C5
+    ...placementOptions(placement), // C5
     webPreferences: {
       sandbox: true,
       contextIsolation: true,
@@ -60,10 +75,13 @@ export function createWindow(theme: ResolvedTheme): BrowserWindow {
 
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', (event) => event.preventDefault());
-  win.once('ready-to-show', () => win.show());
+  win.once('ready-to-show', () => {
+    if (placement?.maximized) win.maximize(); // C5
+    win.show();
+  });
 
-  if (devPageUrl) void win.loadURL(devPageUrl);
-  else void win.loadFile(rendererFile);
+  if (pageUrl) void win.loadURL(pageUrl);
+  else void win.loadFile(pageFile);
   return win;
 }
 

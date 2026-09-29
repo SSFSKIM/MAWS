@@ -55,7 +55,7 @@ const record = (): SessionRecord =>
     lastSeen: { messageUuid: null, at: null },
     unread: false,
     engineVersion: '2.1.283',
-    gateway: { routed: false },
+    gateway: { routed: false, baseUrl: null, autoModeServer: 'unknown' }, // C3: the X1 gateway extension
     model: { requested: null, resolved: 'claude-sonnet-5' },
     effort: null,
     permissionMode: { requested: 'default', effective: 'default', refusal: null },

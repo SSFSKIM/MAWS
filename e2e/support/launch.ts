@@ -1,8 +1,9 @@
 // Launches MAWS for an end-to-end test: the built app (`out/main/index.js` under the repo's Electron) by default, or
 // the executable named by MAWS_E2E_EXECUTABLE (the packaged `MAWS.app/Contents/MacOS/MAWS`). Every launch gets
-// MAWS_E2E=1 and a fresh `userData` under the OS temp directory, so nothing depends on or touches a real profile.
+// MAWS_E2E=1, a fresh `userData` under the OS temp directory and an empty engine store (`CLAUDE_CONFIG_DIR`), so nothing
+// depends on or touches a real profile.
 // Later children's end-to-end tests start from here, through the `maws` fixture of `test`.
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { _electron, test as base, type ElectronApplication, type Page } from '@playwright/test';
@@ -16,31 +17,47 @@ export interface MawsLaunch {
   userData: string;
   packaged: boolean;
   launchedAt: number; // Date.now() just before the process was started
-  cleanup(): Promise<void>; // closes the app if it is still open and removes the profile; throws if the app would not close
+  cleanup(): Promise<void>; // closes the app if it is still open and removes the profile it created; throws if the app would not close
 }
 
-// carried by C9 until the rebase over C3 (wave-2 ledger): extra environment variables for the app (C9's terminal
-// end-to-end passes MAWS_HARNESS=1), applied over the inherited environment and under MAWS_E2E and MAWS_USER_DATA
-export interface LaunchOptions {
+// C3 start: `env` adds variables to the launch's environment (MAWS_ENGINE_REPLAY=1 for C3's replay test; C5, C6 and
+// C9 reuse it, through the `mawsEnv` option below, instead of editing this file).
+export interface MawsLaunchOptions {
   env?: Record<string, string>;
 }
-// carried by C9 until the rebase over C3 (wave-2 ledger)
+// C3 end
 
-export async function launchMaws(options: LaunchOptions = {}): Promise<MawsLaunch> {
+// C5 start: relaunch over a profile. The shell smoke checks persistence by relaunching over the profile its first launch
+// wrote. A launch given `userData` runs over that directory instead of a fresh one and leaves it in place at cleanup;
+// whoever created it removes it.
+export interface ShellLaunchOptions extends MawsLaunchOptions {
+  userData?: string;
+}
+// C5 end
+
+export async function launchMaws(opts: ShellLaunchOptions = {}): Promise<MawsLaunch> {
   const executable = process.env.MAWS_E2E_EXECUTABLE ? resolve(REPO_ROOT, process.env.MAWS_E2E_EXECUTABLE) : null;
   if (executable && !existsSync(executable)) throw new Error(`MAWS_E2E_EXECUTABLE does not exist: ${executable} (run pnpm build:app)`);
   const main = join(REPO_ROOT, 'out/main/index.js');
   if (!executable && !existsSync(main)) throw new Error(`${main} does not exist (run pnpm build)`);
 
-  const userData = mkdtempSync(join(tmpdir(), 'maws-e2e-'));
+  const ownsUserData = opts.userData === undefined; // C5
+  const userData = opts.userData ?? mkdtempSync(join(tmpdir(), 'maws-e2e-')); // C5: an existing profile when given
+  // C5: a relaunch over a given profile still starts from an empty engine store, which C4's block below creates anew.
+  if (!ownsUserData) rmSync(join(userData, 'claude-config'), { recursive: true, force: true });
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) if (value !== undefined) env[key] = value;
   // A shell inherited from `electron-vite dev` or an editor must not turn the app into a dev-server client or a Node.
   delete env.ELECTRON_RENDERER_URL;
   delete env.ELECTRON_RUN_AS_NODE;
-  Object.assign(env, options.env); // carried by C9 until the rebase over C3 (wave-2 ledger)
   env.MAWS_E2E = '1';
   env.MAWS_USER_DATA = userData;
+  // C4 start: an empty engine store (C4 reads the config home the engine would), so the run never reads the owner's
+  // ~/.claude; a test's `env` may still name another.
+  env.CLAUDE_CONFIG_DIR = join(userData, 'claude-config');
+  mkdirSync(env.CLAUDE_CONFIG_DIR);
+  // C4 end
+  Object.assign(env, opts.env); // C3
 
   let app: ElectronApplication | null = null;
   let closed = false;
@@ -48,7 +65,7 @@ export async function launchMaws(options: LaunchOptions = {}): Promise<MawsLaunc
     try {
       if (app && !closed) await closeOrKill(app);
     } finally {
-      rmSync(userData, { recursive: true, force: true });
+      if (ownsUserData) rmSync(userData, { recursive: true, force: true }); // C5: a given profile is the caller's
     }
   };
 
@@ -68,11 +85,11 @@ export async function launchMaws(options: LaunchOptions = {}): Promise<MawsLaunc
 }
 
 // One launch per test, closed and removed at teardown; a teardown failure is reported beside the test's own result.
-// carried by C9 until the rebase over C3 (wave-2 ledger): `mawsEnv` is an option a spec sets with `test.use`
-export const test = base.extend<{ mawsEnv: Record<string, string>; maws: MawsLaunch }>({
-  mawsEnv: [{}, { option: true }],
+// C3: `test.use({ mawsEnv: { … } })` sets extra environment variables for a file's launches.
+export const test = base.extend<{ maws: MawsLaunch; mawsEnv: Record<string, string> }>({
+  mawsEnv: [{}, { option: true }], // C3
   maws: async ({ mawsEnv }, use) => {
-    const maws = await launchMaws({ env: mawsEnv });
+    const maws = await launchMaws({ env: mawsEnv }); // C3: the env option
     try {
       await use(maws);
     } finally {

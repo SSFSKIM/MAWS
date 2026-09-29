@@ -45,7 +45,7 @@ const invoke = (event: unknown, name: string, input?: unknown) => {
   return handler(event, input);
 };
 
-const LIGHT = { settings: { version: 1, theme: 'light' }, resolvedTheme: 'light' } as const;
+const LIGHT = { settings: { version: 2, keymap: {}, notifications: { enabled: true, sound: false }, theme: 'light' }, resolvedTheme: 'light' } as const;
 
 describe('main ipc router', () => {
   beforeEach(async () => {
@@ -61,8 +61,9 @@ describe('main ipc router', () => {
   it('dispatches a valid command from the app window to its main handler', async () => {
     const handler = vi.fn(() => LIGHT);
     router.registerMainHandler('settings.get', handler);
-    await expect(invoke(appWindow(), 'settings.get')).resolves.toEqual({ ok: true, value: LIGHT });
-    expect(handler).toHaveBeenCalledWith(undefined);
+    const event = appWindow();
+    await expect(invoke(event, 'settings.get')).resolves.toEqual({ ok: true, value: LIGHT });
+    expect(handler).toHaveBeenCalledWith(undefined, { sender: event.sender }); // the requesting window, for per-window state
   });
 
   it('answers settings.set({ theme: "sepia" }) with invalid_input and never calls the handler', async () => {
@@ -161,6 +162,20 @@ describe('main ipc router', () => {
     expect(log).toHaveBeenCalledOnce();
   });
 
+  // C4 (M5): session.replay.start fails with the host dispatch's own error (a `timeout` is not an `internal`).
+  it('answers the IpcError a handler fails with through CommandFailure, code and all, without logging it as a fault', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    router.registerMainHandler('settings.get', () => {
+      throw new router.CommandFailure({ code: 'timeout', message: 'engine-host did not answer session.replay.launch within 10 s' });
+    });
+    await expect(invoke(appWindow(), 'settings.get')).resolves.toEqual({
+      ok: false,
+      error: { code: 'timeout', message: 'engine-host did not answer session.replay.launch within 10 s' },
+    });
+    expect(log).not.toHaveBeenCalled();
+  });
+  // end C4
+
   // C9 block begin: pty.openLink, main-owned, through the one scheme-checked shell.openExternal
   it('opens an http(s) or mailto link from pty.openLink and refuses any other scheme with opened false', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -180,5 +195,50 @@ describe('main ipc router', () => {
     );
     router.registerMainHandler('settings.get', () => LIGHT);
     expect(() => router.registerMainHandler('settings.get', () => LIGHT)).toThrow('already registered');
+  });
+
+  describe('interceptCommand (C5 stub source seam)', () => {
+    it('is consulted before the main handler for exactly the intercepted name, and removed by its disposer', async () => {
+      const main = vi.fn(() => ({ digests: [] }));
+      const stub = vi.fn(() => ({ sessions: [], revision: 7 }));
+      router.registerMainHandler('session.digests', main);
+      const dispose = router.interceptCommand('session.list', stub);
+      await expect(invoke(appWindow(), 'session.list', {})).resolves.toEqual({ ok: true, value: { sessions: [], revision: 7 } });
+      await expect(invoke(appWindow(), 'session.digests')).resolves.toEqual({ ok: true, value: { digests: [] } });
+      expect(stub).toHaveBeenCalledWith({}, { sender: expect.anything() });
+      dispose();
+      await expect(invoke(appWindow(), 'session.list', {})).resolves.toMatchObject({ ok: false, error: { code: 'internal' } });
+    });
+
+    it('shadows a registered main handler and the host dispatcher alike', async () => {
+      const host = vi.fn(async () => ({ ok: true as const, value: { outcome: 'not_pending' as const } }));
+      await load(DEV_URL, host);
+      router.interceptCommand('session.answer', () => ({ outcome: 'delivered' }));
+      const answer = { kind: 'permission', decision: 'allow', scope: 'once' };
+      await expect(invoke(appWindow(), 'session.answer', { appSessionId: 'a', requestId: 'r', answer })).resolves.toEqual({
+        ok: true,
+        value: { outcome: 'delivered' },
+      });
+      expect(host).not.toHaveBeenCalled();
+      const handler = vi.fn(() => ({ sessions: [], revision: 0 }));
+      router.registerMainHandler('session.list', handler);
+      router.interceptCommand('session.list', () => ({ sessions: [], revision: 9 }));
+      await expect(invoke(appWindow(), 'session.list', {})).resolves.toMatchObject({ value: { revision: 9 } });
+      expect(handler).not.toHaveBeenCalled();
+    });
+
+    it('still checks the sender and the input first', async () => {
+      const stub = vi.fn(() => ({ sessions: [], revision: 0 }));
+      router.interceptCommand('session.list', stub);
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      await expect(invoke(appWindow('https://evil.example/'), 'session.list', {})).resolves.toMatchObject({ error: { code: 'forbidden_sender' } });
+      await expect(invoke(appWindow(), 'session.list', { includeArchived: 'yes' })).resolves.toMatchObject({ error: { code: 'invalid_input' } });
+      expect(stub).not.toHaveBeenCalled();
+    });
+
+    it('refuses a second interceptor for the same name', () => {
+      router.interceptCommand('attention.list', () => []);
+      expect(() => router.interceptCommand('attention.list', () => [])).toThrow('already intercepted');
+    });
   });
 });

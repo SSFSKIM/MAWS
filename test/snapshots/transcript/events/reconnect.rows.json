@@ -1,0 +1,73 @@
+[
+  {
+    "at": "2026-09-28T12:00:00.010Z",
+    "id": "time:turn:u-rc-1",
+    "kind": "time",
+    "label": "Yesterday 12:00 PM",
+    "turnId": "turn:u-rc-1"
+  },
+  {
+    "at": "2026-09-28T12:00:00.010Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:u-rc-1",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "u-rc-1",
+    "steer": false,
+    "text": "Reply OK.",
+    "turnId": "turn:u-rc-1"
+  },
+  {
+    "at": "2026-09-28T12:00:01.000Z",
+    "blockIndex": 0,
+    "id": "text:msg_rc_1:0",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "OK",
+    "messageUuid": "a-rc-1",
+    "model": "claude-opus-5-5",
+    "phase": "answer",
+    "turnId": "turn:u-rc-1"
+  },
+  {
+    "at": "2026-09-28T12:01:00.010Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:u-rc-2",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "u-rc-2",
+    "steer": false,
+    "text": "Still there?",
+    "turnId": "turn:u-rc-2"
+  },
+  {
+    "at": "2026-09-28T12:01:01.000Z",
+    "blockIndex": 0,
+    "id": "text:msg_rc_2:0",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "Yes.",
+    "messageUuid": "a-rc-2",
+    "model": "claude-opus-5-5",
+    "phase": "answer",
+    "turnId": "turn:u-rc-2"
+  },
+  {
+    "at": "2026-09-28T12:02:09.000Z",
+    "attempt": {
+      "max": 3,
+      "n": 3
+    },
+    "id": "reconnect:r11",
+    "kind": "error",
+    "lostAttentionCount": null,
+    "scope": "reconnect",
+    "severity": "error",
+    "text": "Could not reconnect · engine binary missing",
+    "turnId": null
+  }
+]

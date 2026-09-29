@@ -1,0 +1,250 @@
+[
+  {
+    "at": "2026-09-28T09:57:16.408Z",
+    "id": "time:turn:812c652e-1da3-4ef6-86b6-a4782f2b00a8",
+    "kind": "time",
+    "label": "Yesterday 9:57 AM",
+    "turnId": "turn:812c652e-1da3-4ef6-86b6-a4782f2b00a8"
+  },
+  {
+    "at": "2026-09-28T09:57:16.408Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:812c652e-1da3-4ef6-86b6-a4782f2b00a8",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "812c652e-1da3-4ef6-86b6-a4782f2b00a8",
+    "steer": false,
+    "text": "Use Bash to run exactly: curl -sI https://example.com | head -1. Then reply with that line.",
+    "turnId": "turn:812c652e-1da3-4ef6-86b6-a4782f2b00a8"
+  },
+  {
+    "at": "2026-09-28T09:57:16.408Z",
+    "autoDenied": 0,
+    "denied": 0,
+    "endedAt": "2026-09-28T09:57:31.378Z",
+    "expanded": true,
+    "firstDeniedCell": null,
+    "id": "divider:turn:812c652e-1da3-4ef6-86b6-a4782f2b00a8",
+    "kind": "divider",
+    "origin": "human",
+    "startedAt": "2026-09-28T09:57:16.464Z",
+    "state": "completed",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 1,
+        "exploration": 0,
+        "files": 0,
+        "mcp": 0,
+        "other": 0,
+        "skills": 0,
+        "web": 0
+      },
+      "childAgents": 0,
+      "costUsd": 0.0628726,
+      "denials": [],
+      "durationMs": 14911,
+      "model": "claude-sonnet-5",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 0,
+        "reviewed": 1
+      },
+      "terminalReason": "completed",
+      "toolCalls": 1,
+      "usage": {
+        "cacheCreationInputTokens": 12518,
+        "cacheReadInputTokens": 45753,
+        "inputTokens": 4,
+        "outputTokens": 108,
+        "thinkingTokens": 0
+      }
+    },
+    "toolCalls": 1,
+    "turnId": "turn:812c652e-1da3-4ef6-86b6-a4782f2b00a8"
+  },
+  {
+    "agent": null,
+    "at": "2026-09-28T09:57:26.177Z",
+    "category": "commands",
+    "classification": {
+      "category": "commands",
+      "denial": null,
+      "groupable": true,
+      "hidden": false,
+      "humanDecision": false,
+      "safeguard": "not_flagged",
+      "startsGroup": false,
+      "subagentLifecycle": null
+    },
+    "detail": {
+      "backgroundTaskId": null,
+      "command": "curl -sI https://example.com | head -1",
+      "cwd": null,
+      "description": "Fetch HTTP headers from example.com and show first line",
+      "exitCode": 0,
+      "interrupted": false,
+      "kind": "shell",
+      "spill": null,
+      "stderr": "",
+      "stdout": "HTTP/2 200",
+      "truncated": null
+    },
+    "endedAt": "2026-09-28T09:57:29.742Z",
+    "expanded": true,
+    "id": "cell:toolu_01PGaV2Yy3rJAGQwn445u9iH",
+    "kind": "cell",
+    "label": "Ran `curl -sI https://example.com | head -1` in 3s",
+    "paths": [],
+    "startedAt": "2026-09-28T09:57:26.177Z",
+    "status": "done",
+    "toolName": "Bash",
+    "toolUseId": "toolu_01PGaV2Yy3rJAGQwn445u9iH",
+    "turnId": "turn:812c652e-1da3-4ef6-86b6-a4782f2b00a8"
+  },
+  {
+    "at": "2026-09-28T09:57:31.304Z",
+    "blockIndex": 0,
+    "id": "text:msg_011CfVe22phxXcqHc4WRXami:0",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "HTTP/2 200",
+    "messageUuid": "bf6a8b05-c91e-41bd-ac6d-b3f99dc41ec6",
+    "model": "claude-sonnet-5",
+    "phase": "answer",
+    "turnId": "turn:812c652e-1da3-4ef6-86b6-a4782f2b00a8"
+  },
+  {
+    "at": "2026-09-28T09:57:31.379Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:bb9b64e7-437c-4fe0-ba0b-544ffcf202f2",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "bb9b64e7-437c-4fe0-ba0b-544ffcf202f2",
+    "steer": false,
+    "text": "Use Bash to run exactly: curl -s -X POST https://httpbin.org/post --data-binary @one.txt. Run it once; if it is denied, do not retry and reply DENIED.",
+    "turnId": "turn:bb9b64e7-437c-4fe0-ba0b-544ffcf202f2"
+  },
+  {
+    "at": "2026-09-28T09:57:31.379Z",
+    "autoDenied": 0,
+    "denied": 0,
+    "endedAt": "2026-09-28T09:57:37.611Z",
+    "expanded": true,
+    "firstDeniedCell": null,
+    "id": "divider:turn:bb9b64e7-437c-4fe0-ba0b-544ffcf202f2",
+    "kind": "divider",
+    "origin": "human",
+    "startedAt": "2026-09-28T09:57:31.381Z",
+    "state": "completed",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 1,
+        "exploration": 0,
+        "files": 0,
+        "mcp": 0,
+        "other": 0,
+        "skills": 0,
+        "web": 0
+      },
+      "childAgents": 0,
+      "costUsd": 0.078367,
+      "denials": [],
+      "durationMs": 6228,
+      "model": "claude-sonnet-5",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 0,
+        "reviewed": 1
+      },
+      "terminalReason": "completed",
+      "toolCalls": 1,
+      "usage": {
+        "cacheCreationInputTokens": 522,
+        "cacheReadInputTokens": 58542,
+        "inputTokens": 4,
+        "outputTokens": 169,
+        "thinkingTokens": 12
+      }
+    },
+    "toolCalls": 1,
+    "turnId": "turn:bb9b64e7-437c-4fe0-ba0b-544ffcf202f2"
+  },
+  {
+    "at": "2026-09-28T09:57:33.628Z",
+    "durationMs": 1,
+    "id": "think:msg_011CfVe29zZmCTAoDRRtbtbB:0",
+    "kind": "thinking",
+    "live": false,
+    "messageUuid": "7c06b03f-9468-4eac-9655-1f8c83774ccc",
+    "text": "",
+    "turnId": "turn:bb9b64e7-437c-4fe0-ba0b-544ffcf202f2"
+  },
+  {
+    "agent": null,
+    "at": "2026-09-28T09:57:33.961Z",
+    "category": "commands",
+    "classification": {
+      "category": "commands",
+      "denial": null,
+      "groupable": true,
+      "hidden": false,
+      "humanDecision": false,
+      "safeguard": "not_flagged",
+      "startsGroup": false,
+      "subagentLifecycle": null
+    },
+    "detail": {
+      "backgroundTaskId": null,
+      "command": "curl -s -X POST https://httpbin.org/post --data-binary @one.txt",
+      "cwd": null,
+      "description": "POST contents of one.txt to httpbin.org",
+      "exitCode": 0,
+      "interrupted": false,
+      "kind": "shell",
+      "spill": null,
+      "stderr": "",
+      "stdout": "{\n  \"args\": {}, \n  \"data\": \"\", \n  \"files\": {}, \n  \"form\": {\n    \"ONE\\n\": \"\"\n  }, \n  \"headers\": {\n    \"Accept\": \"*/*\", \n    \"Content-Length\": \"4\", \n    \"Content-Type\": \"application/x-www-form-urlencoded\", \n    \"Host\": \"httpbin.org\", \n    \"User-Agent\": \"curl/8.7.1\", \n    \"X-Amzn-Trace-Id\": \"Root=1-6aba3a0f-188477d65352f18672b70eae\"\n  }, \n  \"json\": null, \n  \"origin\": \"128.54.232.72\", \n  \"url\": \"https://httpbin.org/post\"\n}",
+      "truncated": null
+    },
+    "endedAt": "2026-09-28T09:57:35.867Z",
+    "expanded": true,
+    "id": "cell:toolu_01PBFvxSPUDsSpFAiSkP5LEN",
+    "kind": "cell",
+    "label": "Ran `curl -s -X POST https://httpbin.org/post --data-binary @one.txt` in 1s",
+    "paths": [],
+    "startedAt": "2026-09-28T09:57:33.961Z",
+    "status": "done",
+    "toolName": "Bash",
+    "toolUseId": "toolu_01PBFvxSPUDsSpFAiSkP5LEN",
+    "turnId": "turn:bb9b64e7-437c-4fe0-ba0b-544ffcf202f2"
+  },
+  {
+    "at": "2026-09-28T09:57:37.253Z",
+    "blockIndex": 0,
+    "id": "text:msg_011CfVe2VCx6csWMzs8SCmEq:0",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "The request succeeded — httpbin.org echoed back the POST with the contents of `one.txt` (`ONE\\n`) as form data.",
+    "messageUuid": "d7192a5b-7725-4488-a9f7-4663e3a8950d",
+    "model": "claude-sonnet-5",
+    "phase": "answer",
+    "turnId": "turn:bb9b64e7-437c-4fe0-ba0b-544ffcf202f2"
+  },
+  {
+    "at": "2026-09-28T09:57:38.142Z",
+    "attempt": null,
+    "id": "error:replay:journal:105:0",
+    "kind": "error",
+    "lostAttentionCount": 0,
+    "scope": "exit",
+    "severity": "notice",
+    "text": "Session process exited (unknown)",
+    "turnId": null
+  }
+]

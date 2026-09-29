@@ -1,54 +1,37 @@
-// carried by C9 until the rebase over C6 (wave-2 ledger d.13)
-// The harness entry: a second renderer page loaded instead of the app under MAWS_HARNESS=1, routed on
-// `location.hash`. C6 lands this router with `#transcript` as its default; C9 adds its routes as a block below.
-// Each page assigns `window.__maws_harness` on mount and wires its own settings and theme; one page per load.
-import { StrictMode, useSyncExternalStore, type ReactNode } from 'react';
+// The harness entry: a hash router over development pages. `#transcript` (the default) is C6's transcript harness;
+// C9 adds `#probe` and `#panel` (pages under harness/terminal/). One page is mounted per load, and each assigns
+// `window.__maws_harness` on mount.
+import { StrictMode, useEffect, useState, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import '../styles/app.css';
-
-function TranscriptPlaceholder() {
-  return <div className="p-4 text-fg-muted">Transcript harness (C6) lands with the rebase; use #probe.</div>;
-}
-
-// C9 block begin: terminal harness routes
-import { PanelHarness } from './terminal/PanelHarness';
-import { Probe } from './terminal/Probe';
-const C9_ROUTES: Record<string, () => ReactNode> = {
-  '#probe': () => <Probe />,
-  '#panel': () => <PanelHarness />,
-};
-// C9 block end
+import { Harness } from './Harness';
 
 const ROUTES: Record<string, () => ReactNode> = {
-  '#transcript': () => <TranscriptPlaceholder />,
-  ...C9_ROUTES,
+  transcript: () => <Harness />,
 };
 
-const subscribeHash = (cb: () => void) => {
-  window.addEventListener('hashchange', cb);
-  return () => window.removeEventListener('hashchange', cb);
-};
+// C9 block begin: the terminal harness pages (pages under harness/terminal/), routed as `#probe` and `#panel`
+import { PanelHarness } from './terminal/PanelHarness';
+import { Probe } from './terminal/Probe';
+ROUTES.probe = () => <Probe />;
+ROUTES.panel = () => <PanelHarness />;
+// C9 block end
 
-function Harness() {
-  const hash = useSyncExternalStore(subscribeHash, () => location.hash);
-  const route = ROUTES[hash] ?? ROUTES['#transcript']!;
-  return (
-    <div className="flex h-full flex-col">
-      <nav aria-label="harness pages" className="flex shrink-0 gap-3 border-b border-border py-1 pr-3 pl-20 text-ui-sm text-fg-muted [app-region:drag]">
-        {Object.keys(ROUTES).map((page) => (
-          <a key={page} href={page} className={`[app-region:no-drag] ${page === (ROUTES[hash] ? hash : "#transcript") ? "text-fg" : "hover:text-fg"}`}>
-            {page}
-          </a>
-        ))}
-      </nav>
-      <div className="min-h-0 flex-1">{route()}</div>
-    </div>
-  );
+const routeOf = () => location.hash.replace(/^#/, '') || 'transcript';
+
+function Router() {
+  const [route, setRoute] = useState(routeOf);
+  useEffect(() => {
+    const onHashChange = () => setRoute(routeOf());
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, []);
+  const page = ROUTES[route] ?? ROUTES.transcript;
+  return <div key={route} className="h-full">{page()}</div>;
 }
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <Harness />
+    <Router />
   </StrictMode>,
 );
-// carried by C9 until the rebase over C6 (wave-2 ledger d.13)

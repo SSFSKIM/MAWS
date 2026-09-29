@@ -1,0 +1,237 @@
+[
+  {
+    "at": "2026-09-28T10:01:37.168Z",
+    "id": "time:turn:cba09f87-9767-4699-879f-f2a7560dc79b",
+    "kind": "time",
+    "label": "Yesterday 10:01 AM",
+    "turnId": "turn:cba09f87-9767-4699-879f-f2a7560dc79b"
+  },
+  {
+    "at": "2026-09-28T10:01:37.168Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:cba09f87-9767-4699-879f-f2a7560dc79b",
+    "kind": "user",
+    "lines": 3,
+    "messageUuid": "cba09f87-9767-4699-879f-f2a7560dc79b",
+    "steer": false,
+    "text": "Step 1: use Bash with run_in_background true to run exactly: sleep 30 && echo BG_DONE > bg.txt\nStep 2: then use Bash in the foreground to run exactly: sleep 20\nStep 3: reply DONE.",
+    "turnId": "turn:cba09f87-9767-4699-879f-f2a7560dc79b"
+  },
+  {
+    "at": "2026-09-28T10:01:37.168Z",
+    "autoDenied": 0,
+    "denied": 0,
+    "endedAt": "2026-09-28T10:01:46.016Z",
+    "expanded": true,
+    "firstDeniedCell": null,
+    "id": "divider:turn:cba09f87-9767-4699-879f-f2a7560dc79b",
+    "kind": "divider",
+    "origin": "human",
+    "startedAt": "2026-09-28T10:01:37.217Z",
+    "state": "stopped",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 2,
+        "exploration": 0,
+        "files": 0,
+        "mcp": 0,
+        "other": 0,
+        "skills": 0,
+        "web": 0
+      },
+      "childAgents": 0,
+      "costUsd": 0.06523300000000001,
+      "denials": [
+        {
+          "cellId": "cell:toolu_011A76mf8b7vDVv6QLxyPQU8",
+          "disposition": "stopped",
+          "interruption": true,
+          "kind": "user-rejected"
+        }
+      ],
+      "durationMs": 8797,
+      "model": "claude-sonnet-5",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 0,
+        "reviewed": 2
+      },
+      "terminalReason": "aborted_tools",
+      "toolCalls": 2,
+      "usage": {
+        "cacheCreationInputTokens": 12744,
+        "cacheReadInputTokens": 45805,
+        "inputTokens": 4,
+        "outputTokens": 240,
+        "thinkingTokens": 18
+      }
+    },
+    "toolCalls": 2,
+    "turnId": "turn:cba09f87-9767-4699-879f-f2a7560dc79b"
+  },
+  {
+    "at": "2026-09-28T10:01:38.541Z",
+    "durationMs": 0,
+    "id": "think:msg_011CfVeLH6CjNGRaVxv28h17:0",
+    "kind": "thinking",
+    "live": false,
+    "messageUuid": "7de4f41f-0942-4e25-88d7-7f7324c30834",
+    "text": "",
+    "turnId": "turn:cba09f87-9767-4699-879f-f2a7560dc79b"
+  },
+  {
+    "agent": null,
+    "at": "2026-09-28T10:01:39.235Z",
+    "category": "commands",
+    "classification": {
+      "category": "commands",
+      "denial": null,
+      "groupable": true,
+      "hidden": false,
+      "humanDecision": false,
+      "safeguard": "not_flagged",
+      "startsGroup": false,
+      "subagentLifecycle": null
+    },
+    "detail": {
+      "backgroundTaskId": "bjvqmsw5i",
+      "command": "sleep 30 && echo BG_DONE > bg.txt",
+      "cwd": null,
+      "description": "Sleep 30s then write BG_DONE to bg.txt in background",
+      "exitCode": 0,
+      "interrupted": false,
+      "kind": "shell",
+      "spill": null,
+      "stderr": "",
+      "stdout": "",
+      "truncated": null
+    },
+    "endedAt": "2026-09-28T10:01:42.722Z",
+    "expanded": true,
+    "id": "cell:toolu_017Csv2uR4vG2H9hsDabBthf",
+    "kind": "cell",
+    "label": "Ran `sleep 30 && echo BG_DONE > bg.txt` in 3s",
+    "paths": [],
+    "startedAt": "2026-09-28T10:01:39.235Z",
+    "status": "done",
+    "toolName": "Bash",
+    "toolUseId": "toolu_017Csv2uR4vG2H9hsDabBthf",
+    "turnId": "turn:cba09f87-9767-4699-879f-f2a7560dc79b"
+  },
+  {
+    "agent": null,
+    "at": "2026-09-28T10:01:44.005Z",
+    "category": "commands",
+    "classification": {
+      "category": "commands",
+      "denial": {
+        "disposition": "stopped",
+        "interruption": true,
+        "kind": "user-rejected",
+        "reason": "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed."
+      },
+      "groupable": false,
+      "hidden": false,
+      "humanDecision": false,
+      "safeguard": "not_flagged",
+      "startsGroup": false,
+      "subagentLifecycle": null
+    },
+    "detail": {
+      "backgroundTaskId": null,
+      "command": "sleep 20",
+      "cwd": null,
+      "description": "Sleep for 20 seconds in foreground",
+      "exitCode": null,
+      "interrupted": false,
+      "kind": "shell",
+      "spill": null,
+      "stderr": "",
+      "stdout": "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed.",
+      "truncated": null
+    },
+    "endedAt": "2026-09-28T10:01:46.013Z",
+    "expanded": true,
+    "id": "cell:toolu_011A76mf8b7vDVv6QLxyPQU8",
+    "kind": "cell",
+    "label": "Stopped: `sleep 20`",
+    "paths": [],
+    "startedAt": "2026-09-28T10:01:44.005Z",
+    "status": "stopped",
+    "toolName": "Bash",
+    "toolUseId": "toolu_011A76mf8b7vDVv6QLxyPQU8",
+    "turnId": "turn:cba09f87-9767-4699-879f-f2a7560dc79b"
+  },
+  {
+    "at": "2026-09-28T10:02:12.749Z",
+    "autoDenied": 0,
+    "denied": 0,
+    "endedAt": "2026-09-28T10:02:14.415Z",
+    "expanded": true,
+    "firstDeniedCell": null,
+    "id": "divider:turn:ereplay:journal:78:1",
+    "kind": "divider",
+    "origin": "engine",
+    "startedAt": "2026-09-28T10:02:12.749Z",
+    "state": "completed",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 0,
+        "exploration": 0,
+        "files": 0,
+        "mcp": 0,
+        "other": 0,
+        "skills": 0,
+        "web": 0
+      },
+      "childAgents": 0,
+      "costUsd": 0.07396840000000002,
+      "denials": [],
+      "durationMs": 1667,
+      "model": "claude-sonnet-5",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 0,
+        "reviewed": 0
+      },
+      "terminalReason": "completed",
+      "toolCalls": 0,
+      "usage": {
+        "cacheCreationInputTokens": 572,
+        "cacheReadInputTokens": 29417,
+        "inputTokens": 2,
+        "outputTokens": 56,
+        "thinkingTokens": 0
+      }
+    },
+    "toolCalls": 0,
+    "turnId": "turn:ereplay:journal:78:1"
+  },
+  {
+    "at": "2026-09-28T10:02:14.020Z",
+    "blockIndex": 0,
+    "id": "text:msg_011CfVeNu5hnPGYWRYAoqngE:0",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "The foreground `sleep 20` was rejected by the user, so I stopped. The background task did complete (bg.txt was written). Let me know how you'd like to proceed.",
+    "messageUuid": "07192e64-5e51-44bf-af6b-7538e333af1c",
+    "model": "claude-sonnet-5",
+    "phase": "answer",
+    "turnId": "turn:ereplay:journal:78:1"
+  },
+  {
+    "at": "2026-09-28T10:02:20.271Z",
+    "attempt": null,
+    "id": "error:replay:journal:98:0",
+    "kind": "error",
+    "lostAttentionCount": 0,
+    "scope": "exit",
+    "severity": "notice",
+    "text": "Session process exited (unknown)",
+    "turnId": null
+  }
+]

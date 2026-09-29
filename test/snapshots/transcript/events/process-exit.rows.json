@@ -1,0 +1,112 @@
+[
+  {
+    "at": "2026-09-28T12:00:00.010Z",
+    "id": "time:turn:u-exit-1",
+    "kind": "time",
+    "label": "Yesterday 12:00 PM",
+    "turnId": "turn:u-exit-1"
+  },
+  {
+    "at": "2026-09-28T12:00:00.010Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:u-exit-1",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "u-exit-1",
+    "steer": false,
+    "text": "Run the release script.",
+    "turnId": "turn:u-exit-1"
+  },
+  {
+    "at": "2026-09-28T12:00:00.010Z",
+    "autoDenied": 0,
+    "denied": 0,
+    "endedAt": "2026-09-28T12:00:05.001Z",
+    "expanded": true,
+    "firstDeniedCell": null,
+    "id": "divider:turn:u-exit-1",
+    "kind": "divider",
+    "origin": "human",
+    "startedAt": "2026-09-28T12:00:00.000Z",
+    "state": "stopped",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 1,
+        "exploration": 0,
+        "files": 0,
+        "mcp": 0,
+        "other": 0,
+        "skills": 0,
+        "web": 0
+      },
+      "childAgents": 0,
+      "costUsd": null,
+      "denials": [],
+      "durationMs": null,
+      "model": "claude-opus-5-5",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 1,
+        "reviewed": 0
+      },
+      "terminalReason": null,
+      "toolCalls": 1,
+      "usage": null
+    },
+    "toolCalls": 1,
+    "turnId": "turn:u-exit-1"
+  },
+  {
+    "agent": null,
+    "at": "2026-09-28T12:00:01.010Z",
+    "category": "commands",
+    "classification": {
+      "category": "commands",
+      "denial": null,
+      "groupable": true,
+      "hidden": false,
+      "humanDecision": false,
+      "safeguard": "not_evaluated",
+      "startsGroup": false,
+      "subagentLifecycle": null
+    },
+    "detail": {
+      "backgroundTaskId": null,
+      "command": "./release.sh",
+      "cwd": null,
+      "description": "Run the release script",
+      "exitCode": null,
+      "interrupted": false,
+      "kind": "shell",
+      "spill": null,
+      "stderr": "",
+      "stdout": "",
+      "truncated": null
+    },
+    "endedAt": null,
+    "expanded": true,
+    "id": "cell:toolu_exit_1",
+    "kind": "cell",
+    "label": "Stopped `./release.sh` after 3s",
+    "paths": [],
+    "startedAt": "2026-09-28T12:00:01.010Z",
+    "status": "stopped",
+    "toolName": "Bash",
+    "toolUseId": "toolu_exit_1",
+    "turnId": "turn:u-exit-1"
+  },
+  {
+    "at": "2026-09-28T12:00:05.001Z",
+    "attempt": null,
+    "id": "error:x6",
+    "kind": "error",
+    "lostAttentionCount": 1,
+    "scope": "exit",
+    "severity": "error",
+    "text": "Session process exited (crash) · 1 approval lost",
+    "turnId": null
+  }
+]

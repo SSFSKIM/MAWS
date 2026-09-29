@@ -26,6 +26,10 @@ export interface HostSupervisor {
   dispatch: HostDispatch;
   snapshot(owner: HostOwner): HostState;
   onState(owner: HostOwner, listener: (state: HostState) => void): () => void;
+  // C3 start: main-side subscription to validated host events, beside onState (wave-2 ledger (b)); a listener runs after
+  // the event was relayed to the renderer, only for a payload that passed X2. C3's attention service and C4's index use it.
+  onEvent<N extends EventName>(name: N, listener: (payload: EventPayload<N>) => void): () => void;
+  // C3 end
 }
 
 export const REQUEST_TIMEOUT_MS = 10_000;
@@ -76,6 +80,18 @@ export function createHostSupervisor({ hosts: specs, emit }: HostSupervisorOptio
   }
   let started: Promise<void> | null = null;
   let stopped = false;
+  // C3 start
+  const eventListeners = new Map<EventName, Set<(payload: never) => void>>();
+  function notifyEvent(name: EventName, payload: unknown): void {
+    for (const listener of eventListeners.get(name) ?? []) {
+      try {
+        (listener as (p: unknown) => void)(payload);
+      } catch (error) {
+        console.error(`[hosts] a listener for ${name} failed`, error);
+      }
+    }
+  }
+  // C3 end
   let nextRequestId = 0;
 
   function transition(host: Host, next: Omit<HostState, 'revision'>): void {
@@ -162,7 +178,9 @@ export function createHostSupervisor({ hosts: specs, emit }: HostSupervisorOptio
         console.error(`[hosts] dropped ${host.owner}'s event ${name}: not in the event registry`);
         return;
       }
-      if (emit(name, payload as never) && name === 'pty.exit') host.ptys.delete((payload as { ptyId: string }).ptyId);
+      const relayed = emit(name, payload as never);
+      if (relayed && name === 'pty.exit') host.ptys.delete((payload as { ptyId: string }).ptyId);
+      if (relayed) notifyEvent(name, payload); // C3: emit validated it, and validators never transform
       return;
     }
     answer(host, message.data);
@@ -243,6 +261,16 @@ export function createHostSupervisor({ hosts: specs, emit }: HostSupervisorOptio
       hosts[owner].listeners.add(listener);
       return () => hosts[owner].listeners.delete(listener);
     },
+    // C3 start
+    onEvent(name, listener) {
+      const listeners = eventListeners.get(name) ?? new Set();
+      listeners.add(listener as (payload: never) => void);
+      eventListeners.set(name, listeners);
+      return () => {
+        listeners.delete(listener as (payload: never) => void);
+      };
+    },
+    // C3 end
   };
 }
 

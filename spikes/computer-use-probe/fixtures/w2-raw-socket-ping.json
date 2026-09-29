@@ -1,0 +1,58 @@
+[
+ {
+  "label": "ping-v5-then-listapps",
+  "at": 1790638193.262996,
+  "connected": true,
+  "exchanges": [
+   {
+    "sent": {
+     "jsonrpc": "2.0",
+     "id": 1,
+     "method": "ping",
+     "params": {
+      "clientApiVersion": "CodexComputerUseIPC-5"
+     }
+    },
+    "got": {
+     "closed": true,
+     "partial": ""
+    }
+   },
+   {
+    "sent": {
+     "jsonrpc": "2.0",
+     "id": 2,
+     "method": "request",
+     "params": {
+      "clientApiVersion": "CodexComputerUseIPC-5",
+      "deadlineUnixMilliseconds": 1790638203262,
+      "request": {},
+      "requestType": "ComputerUseIPCListAppsRequest"
+     }
+    },
+    "error": "BrokenPipeError(32, 'Broken pipe')"
+   }
+  ]
+ },
+ {
+  "label": "ping-v4",
+  "at": 1790638193.846842,
+  "connected": true,
+  "exchanges": [
+   {
+    "sent": {
+     "jsonrpc": "2.0",
+     "id": 1,
+     "method": "ping",
+     "params": {
+      "clientApiVersion": "CodexComputerUseIPC-4"
+     }
+    },
+    "got": {
+     "closed": true,
+     "partial": ""
+    }
+   }
+  ]
+ }
+]
