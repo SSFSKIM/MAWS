@@ -10,10 +10,10 @@ import { realpath } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import type { AppSessionId, SessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
-import type { CommandInput, CommandName, CommandOutput } from '@shared/ipc/schema';
 import { normalizePath } from '@shared/sessions/trust';
 import type { WorktreeOccupancy } from '@shared/sessions/worktree';
 import type { HostDispatch } from '../ipc/router';
+import { hostCall } from './context';
 
 export interface HolderDeps {
   dispatch: HostDispatch; // the engine host's `engine.sessions` and `fs.holders`
@@ -34,7 +34,7 @@ export async function holderAuthority(deps: HolderDeps, q: { engineSessionId: Se
   );
   if (reserved) return SELF;
   if (q.engineSessionId === null) return NONE; // no engine id: nothing the registry could name
-  const { holders } = await ask(deps.dispatch, 'fs.holders', { sessionIds: [q.engineSessionId], directories: null });
+  const { holders } = await hostCall(deps.dispatch, 'fs.holders', { sessionIds: [q.engineSessionId], directories: null });
   const first = holders[0];
   return first ? { holder: first.holder, live: 'foreign', source: 'registry' } : NONE;
 }
@@ -55,7 +55,7 @@ export async function occupancyOf(deps: HolderDeps, directory: string, opts: { n
   const known = new Set<string>(all.flatMap((r) => (r.engineSessionId === null ? [] : [r.engineSessionId])));
   const hereEngineIds = new Set<string>(here.flatMap((r) => (r.engineSessionId === null ? [] : [r.engineSessionId])));
 
-  const [live, registry] = await Promise.all([reservations(deps), ask(deps.dispatch, 'fs.holders', { sessionIds: null, directories: null })]);
+  const [live, registry] = await Promise.all([reservations(deps), hostCall(deps.dispatch, 'fs.holders', { sessionIds: null, directories: null })]);
   const cwds = await Promise.all(live.map((s) => canonicalPath(s.cwd)));
   const reserved = live.filter((s, i) => isHere(cwds[i]) || hereIds.has(s.appSessionId));
   const reservedIds = new Set<string>(live.flatMap((s) => (s.engineSessionId === null ? [s.appSessionId] : [s.appSessionId, s.engineSessionId])));
@@ -102,11 +102,5 @@ function within(path: string, dir: string): boolean {
 
 // The live reservations: every process-table entry whose process the OS has not yet reported exited.
 async function reservations(deps: HolderDeps) {
-  return (await ask(deps.dispatch, 'engine.sessions', undefined)).filter((s) => s.process !== 'exited');
-}
-
-async function ask<N extends CommandName>(dispatch: HostDispatch, name: N, input: CommandInput<N>): Promise<CommandOutput<N>> {
-  const result = await dispatch('engine-host', name, input);
-  if (!result.ok) throw new Error(result.error.message);
-  return result.value as CommandOutput<N>;
+  return (await hostCall(deps.dispatch, 'engine.sessions', undefined)).filter((s) => s.process !== 'exited');
 }

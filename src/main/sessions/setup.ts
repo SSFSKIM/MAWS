@@ -280,8 +280,12 @@ async function recordPartialWorktree(s: Setup, run: IntentRun, location: Extract
 
 type WorktreeResource = NonNullable<SetupResources['worktree']>;
 
-function keptWorktree(w: NonNullable<SetupIntent['progress']['worktree']>, newBranch: boolean, detail: string | null = null): WorktreeResource {
-  return { path: w.path, branch: w.branch, createdHere: w.createdHere, state: 'kept', detail, branchState: w.createdHere && newBranch ? 'kept' : 'none' };
+// The checkout an intent keeps, as the tab reports it (a relay failure, a launch that kept its transcript, a restart):
+// kept, its branch kept when this intent made it.
+export function retainedWorktree(intent: SetupIntent): WorktreeResource | null {
+  const w = intent.progress.worktree;
+  if (w === null) return null;
+  return { path: w.path, branch: w.branch, createdHere: w.createdHere, state: 'kept', detail: null, branchState: w.createdHere && createdNewBranch(intent) ? 'kept' : 'none' };
 }
 
 function createdNewBranch(intent: SetupIntent): boolean {
@@ -339,7 +343,7 @@ async function rollbackIntent(s: Setup, run: IntentRun, cwd: string | null, erro
       const record = s.sessions.get(appSessionId);
       // a record already bound to another id was rebound by a `/clear` in the first message: it stands as bound
       if (record !== null && record.engineSessionId === null) s.sessions.bindEngineId(appSessionId, p.engineSessionId);
-      const resources: SetupResources = { worktree: p.worktree ? keptWorktree(p.worktree, newBranch) : null, record: 'kept', transcript: 'kept' };
+      const resources: SetupResources = { worktree: retainedWorktree(intent), record: 'kept', transcript: 'kept' };
       await s.intents.remove(appSessionId);
       // the removal first: the renderer tells a failure without an intent as a record's (a toast; the session stays,
       // exited), and a failure told while it still held the intent would be hidden with the intent a moment later
@@ -361,7 +365,7 @@ async function rollbackIntent(s: Setup, run: IntentRun, cwd: string | null, erro
     let clearWorktree = false;
     if (p.worktree !== null) {
       if (error instanceof RelayFailure || !p.worktree.createdHere) {
-        worktree = keptWorktree(p.worktree, newBranch);
+        worktree = retainedWorktree(intent);
       } else {
         const repoRoot = intent.location.kind === 'directory' ? p.worktree.path : intent.location.repoRoot;
         const result = await removeCreatedWorktree(s, repoRoot, p.worktree, { newBranch, discard: false });

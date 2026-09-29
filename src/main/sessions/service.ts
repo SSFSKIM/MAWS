@@ -23,8 +23,8 @@ import { DeletionManifests, type DeletionManifest } from './delete-manifest';
 import { checkAdditionalDirectories, checkLocation, sessionDirectoryOf, trustDirectoryOf, type RuleVerdict } from './intent-rules';
 import { readSettings } from './launch-mapping';
 import { archiveRecord, deleteRecord, forkIntentOf, previewDeletion, renameRecord, revealablePath } from './record-actions';
-import { markInterrupted, reconcileIntent, retainedWorktree } from './recovery';
-import { removeCreatedWorktree, type Setup } from './setup';
+import { markInterrupted, reconcileIntent } from './recovery';
+import { removeCreatedWorktree, retainedWorktree, type Setup } from './setup';
 import { forkRefusal, guardIntentStart, guardResumeStart, type GuardContext, type Guarded } from './start-guards';
 import { trustKeyOf, trustStateOf } from './trust';
 

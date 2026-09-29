@@ -14,7 +14,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { SetupIntent } from '@shared/sessions/intent';
 import type { SetupResources } from '@shared/sessions/setup';
 import { hostCall, isUnknownSession, pathExists, transcriptPathOf } from './context';
-import type { Setup } from './setup';
+import { retainedWorktree, type Setup } from './setup';
 
 export type Reconciled = 'none' | 'handed_off' | 'not_started';
 
@@ -62,14 +62,6 @@ export async function markInterrupted(s: Setup, intent: SetupIntent): Promise<vo
   const next: SetupIntent = { ...intent, updatedAt: s.now(), progress: { ...p, lastFailure: { at: s.now(), phase, message: 'MAWS quit before the session started', resources } } };
   await s.intents.put(next);
   s.emit('session.intent.changed', { appSessionId: intent.appSessionId, intent: next });
-}
-
-// The checkout an intent keeps across a restart, as the tab reports it: kept, its branch kept when this intent made it.
-export function retainedWorktree(intent: SetupIntent): SetupResources['worktree'] {
-  const w = intent.progress.worktree;
-  if (w === null) return null;
-  const newBranch = intent.location.kind === 'newWorktree' && intent.location.branch.kind === 'new';
-  return { path: w.path, branch: w.branch, createdHere: w.createdHere, state: 'kept', detail: null, branchState: w.createdHere && newBranch ? 'kept' : 'none' };
 }
 
 async function queueHolds(s: Setup, appSessionId: AppSessionId): Promise<boolean> {
