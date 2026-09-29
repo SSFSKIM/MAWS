@@ -106,14 +106,16 @@ function McpServerRow({ server, appSessionId, ready, answer, refresh }: { server
 
   // Any later answer (a status move, a manual read) reconciles; until one arrives, the toggle's view holds.
   const view = toggled && toggled.basis === answer ? toggled : null;
-  const position = view?.position ?? positionOf(server.status);
+  const lastRead = positionOf(server.status); // the answer held is the last read that succeeded
+  const position = view?.position ?? lastRead;
+  const checked = (position === 'unconfirmed' ? lastRead : position) === 'on'; // role=switch has no "mixed": the doubt is in data-state and the line
   const settledLine = view?.line ?? (server.status === 'failed' ? MCP_ACTIONS.notConnected(server.error ?? server.status) : null);
   const line = last === 'reconnect' ? operationLine(reconnect.state, () => MCP_ACTIONS.reconnected) : toggle.state.phase === 'settled' ? settledLine : (operationLine(toggle.state, () => MCP_ACTIONS.done) ?? settledLine);
 
   const flip = async () => {
     setLast('toggle');
     setToggled(null);
-    const requested = position !== 'on';
+    const requested = !checked;
     asked.current = null;
     const outcome = await toggle.run({ serverName: server.name, enabled: requested });
     if (!outcome) return;
@@ -126,7 +128,7 @@ function McpServerRow({ server, appSessionId, ready, answer, refresh }: { server
         <button
           type="button"
           role="switch"
-          aria-checked={position === 'on'}
+          aria-checked={checked}
           aria-label={MCP_ACTIONS.enabled(server.name)}
           data-state={position}
           disabled={!ready || busy}

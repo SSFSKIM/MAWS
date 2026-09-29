@@ -107,6 +107,7 @@ describe('mcp toggle discloses persistence and reads its state back after either
     });
     await waitFor(async () => expect((await statusOf(DOCS)).textContent).toBe('Unconfirmed · Done'));
     expect((await serverSwitch(DOCS)).dataset.state).toBe('unconfirmed');
+    expect((await serverSwitch(DOCS)).getAttribute('aria-checked')).toBe('true'); // the last read's position (connected), not "off"
     const before = reads();
     fireEvent.click(within(await row(DOCS)).getByRole('button', { name: 'Read again' }));
     await waitFor(() => expect(reads()).toBe(before + 1));
