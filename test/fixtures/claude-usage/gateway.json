@@ -1,0 +1,13 @@
+{
+  "holdUnattended" : true,
+  "maxHoldSeconds" : 18000,
+  "pinIdleExpirySeconds" : 86400,
+  "port" : 8641,
+  "routingEnabled" : true,
+  "stickinessMargin" : 0.03,
+  "thresholds" : {
+    "fiveHour" : 1,
+    "scoped" : 1,
+    "sevenDay" : 1
+  }
+}
