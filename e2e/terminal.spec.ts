@@ -7,14 +7,19 @@
 import { expect, type ElectronApplication, type Page } from '@playwright/test';
 import { test } from './support/launch';
 
-// The parent-session variables a terminal must never inherit (§4.1) and two engine-launch ones (D-19), set to fake
-// values in the app's own environment so the exclusion is proven wherever the suite runs.
+// The parent-session variables a terminal must never inherit (§4.1), two engine-launch ones (D-19) and an Electron
+// switch a launcher sets (`ELECTRON_RENDERER_URL` itself would make the built app a dev-server client), set to fake
+// values in the app's own environment so the exclusion is proven wherever the suite runs; with the app's own
+// `MAWS_HARNESS` and `MAWS_E2E`, which a terminal must not pass on either. The launcher's `NODE_OPTIONS` is pinned in
+// `src/pty-host/env.test.ts` only: Playwright's Electron launcher deletes `NODE_OPTIONS` from the environment it is given,
+// so no launch here can carry one.
 const INHERITED = {
   CLAUDE_CODE_SESSION_ID: 'e2e-parent-session',
   CLAUDE_PID: '424242',
   CLAUDECODE: '1',
   ANTHROPIC_BASE_URL: 'http://127.0.0.1:9/e2e',
   ANTHROPIC_AUTH_TOKEN: 'e2e-token',
+  ELECTRON_MAWS_E2E_LAUNCHER: '1',
 };
 test.use({ mawsEnv: { MAWS_HARNESS: '1', ...INHERITED } });
 
@@ -273,7 +278,7 @@ test('opens a login shell in the session directory with the terminal environment
     await h.expectLine(id, 'P:MAWS');
     await h.expectLine(id, 'S:1');
     expect((await h.lines(id)).some((line) => /^L:.+/.test(line.trim())), 'a non-empty locale').toBe(true);
-    await h.run(id, `echo "N:$(env | grep -c -E '^(CLAUDE_CODE_SESSION_ID|CLAUDE_PID|CLAUDECODE|ANTHROPIC_BASE_URL|ANTHROPIC_AUTH_TOKEN|MAWS_USER_DATA)=')"`);
+    await h.run(id, `echo "N:$(env | grep -c -E '^(CLAUDE_CODE_SESSION_ID|CLAUDE_PID|CLAUDECODE|ANTHROPIC_BASE_URL|ANTHROPIC_AUTH_TOKEN|MAWS_[A-Z_]*|ELECTRON_MAWS_E2E_LAUNCHER)=')"`);
     await h.expectLine(id, 'N:0');
     const shell = process.env.SHELL ?? '/bin/zsh';
     await h.run(id, 'echo "0:$0"');

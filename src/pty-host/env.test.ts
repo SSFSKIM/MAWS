@@ -71,9 +71,31 @@ describe('pty host environment', () => {
     expect(terminalEnvironment({ PATH: '/bin', LC_CTYPE: 'ko_KR.UTF-8' }, { appVersion: '0' }).LC_CTYPE).toBe('ko_KR.UTF-8');
   });
 
-  it('drops the profile directory main sets for its hosts, so a MAWS started in a terminal never opens this one’s profile', () => {
-    const env = terminalEnvironment({ ...base, MAWS_USER_DATA: '/Users/owner/Library/Application Support/MAWS' }, { appVersion: '0' });
-    expect(env).not.toHaveProperty('MAWS_USER_DATA');
+  it('drops every MAWS_ switch, so a MAWS started in a terminal never opens this one’s profile, the harness or stub sessions', () => {
+    const own = {
+      MAWS_USER_DATA: '/Users/owner/Library/Application Support/MAWS',
+      MAWS_HARNESS: '1',
+      MAWS_SESSION_SOURCE: 'stub',
+      MAWS_ENGINE_REPLAY: '/tmp/journal',
+      MAWS_SCENARIO_CLOCK: 'fake',
+      MAWS_E2E: '1',
+    };
+    const env = terminalEnvironment({ ...base, ...own, NOT_MAWS_: 'kept' }, { appVersion: '0', launcher: {} });
+    for (const name of Object.keys(own)) expect(env).not.toHaveProperty(name);
+    expect(env.NOT_MAWS_).toBe('kept');
+  });
+
+  it('drops what the launcher set: every ELECTRON_ variable, and NODE_OPTIONS when it is the launcher’s value', () => {
+    const launcher = { ELECTRON_RENDERER_URL: 'http://localhost:5173', NODE_OPTIONS: '--require ./launcher-hook.js' };
+    const env = terminalEnvironment(
+      { ...base, ...launcher, ELECTRON_RUN_AS_NODE: '1', ELECTRON_ENABLE_LOGGING: '1', NOT_ELECTRON_: 'kept' },
+      { appVersion: '0', launcher },
+    );
+    for (const name of ['ELECTRON_RENDERER_URL', 'ELECTRON_RUN_AS_NODE', 'ELECTRON_ENABLE_LOGGING', 'NODE_OPTIONS']) expect(env).not.toHaveProperty(name);
+    expect(env.NOT_ELECTRON_).toBe('kept');
+    // the owner's own NODE_OPTIONS (set by the login shell's rc files, or with no launcher value at all) passes
+    expect(terminalEnvironment({ ...base, NODE_OPTIONS: '--max-old-space-size=8192' }, { appVersion: '0', launcher }).NODE_OPTIONS).toBe('--max-old-space-size=8192');
+    expect(terminalEnvironment({ ...base, NODE_OPTIONS: '--max-old-space-size=8192' }, { appVersion: '0', launcher: {} }).NODE_OPTIONS).toBe('--max-old-space-size=8192');
   });
 
   it('drops the capture shell’s own session state, so a terminal shell starts at level 1 as in Terminal.app', () => {

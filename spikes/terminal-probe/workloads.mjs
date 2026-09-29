@@ -67,6 +67,10 @@ export const workloads = {
     program: { shell: '/bin/sh', args: ['-c', widthScript, 'sh', ...widths.map((f) => f.text)] },
   },
   latency: { kind: 'program', title: 'input echo latency (cat)', measure: 'latency', program: { shell: '/bin/cat', args: [] } },
+  // The same echo with keystrokes `spacingMs` apart (slower than any human typing or key repeat), so no keystroke
+  // lands inside the host's 5 ms read-coalescing window that back-to-back keystrokes reach. Sampled by run.mjs through
+  // the page's probe API (spawn, type, snapshot), with the same echo test as the page's own sampler; recorded, not judged.
+  'latency-spaced': { kind: 'program', title: 'input echo latency, keystrokes 20 ms apart (cat)', spacingMs: 20, program: { shell: '/bin/cat', args: [] } },
   // Item 13 without model cost: a scroll region with inserted and deleted lines, checked against the expected screen.
   'scroll-region': {
     kind: 'program',
@@ -89,8 +93,9 @@ export const AUTOMATED_MEASUREMENTS = ['W1', 'W2', 'W3', 'width', 'latency'];
 // The transport gate closing M2 (item 9 judged): the three floods at full size on the binary stream with acks. Each
 // passes when its output bytes and line feeds are exact (checked by the page), its last line is right, its frame p95
 // is at most 50 ms; MB/s is recorded against a floor (below it is a finding, not a switch). Input echo latency
-// (item 16) is re-measured on the same transport, since the host now coalesces reads: p95 at most 30 ms.
-export const GATE_MEASUREMENTS = ['W1', 'W2', 'W3', 'latency'];
+// (item 16) is re-measured on the same transport, since the host now coalesces reads: p95 at most 30 ms; its spaced
+// variant is recorded beside it.
+export const GATE_MEASUREMENTS = ['W1', 'W2', 'W3', 'latency', 'latency-spaced'];
 export const GATE_ECHO_P95_MS = 30;
 export const GATE_CRITERIA = {
   // 50,000,000 bytes of 55-byte lines end 50 bytes into a line

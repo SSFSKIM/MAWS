@@ -1,14 +1,15 @@
 // The Terminal tool's render (C9 Residue *Persistence*, *Lifecycle and close*, *Copy, paste and links*): it lends the
 // registry a box to mount the terminal's container into while the tab is shown and gives it back when it is not, so
 // the emulator is never re-created; above the terminal it shows the bars of the lifecycle (exited, lost, could not
-// start), the lossy-reconnect notice, the worktree warning and the busy-close confirmation. Tokens only.
+// start), the lossy-reconnect notice, the worktree warning and the busy-close confirmation, and over it a note while
+// the shell starts. Tokens only.
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { useStore } from 'zustand';
 import type { SessionRecord } from '@shared/graph/session';
 import type { PanelToolContext } from '../../panel/tool';
 import { useTerminals } from '../../stores/terminals';
 import { terminals, type TerminalInfo } from '../../terminal/registry';
-import { ensureTerminal, type TerminalTabState } from './index';
+import { ensureTerminal, takeFocusRequest, type TerminalTabState } from './index';
 
 // Where a session runs: its worktree when it has one, else its directory (the worktree warning compares against it).
 export const sessionDirectory = (session: SessionRecord): string => session.worktree?.path ?? session.directory;
@@ -31,17 +32,28 @@ export function TerminalView({ state, ctx }: { state: TerminalTabState; ctx: Pan
     if (!id) ensureTerminal(state, { appSessionId, session });
   }, [id, state, appSessionId, session]);
 
-  // Mounting never takes focus (a restored or session-switched tab must not steal it from the composer); the host
-  // asks for focus through `focusRequest`.
+  // Whether the focus effect below focused the terminal since the mount effect last ran. StrictMode's simulated remount
+  // (dev builds) unmounts the container right after that focus, dropping it, and the request is already used up; the
+  // mount that follows carries it over. Any later run of the mount effect clears it.
+  const acted = useRef(false);
+
+  // Mounting never takes focus of its own accord (a restored or session-switched tab must not steal it from the
+  // composer); the host asks for focus through `focusRequest`.
   useEffect(() => {
+    const refocus = acted.current;
+    acted.current = false;
     if (!id || !visible) return;
-    terminals.mount(id, surfaceRef.current!);
+    terminals.mount(id, surfaceRef.current!, { focus: refocus });
     return () => terminals.unmount(id);
   }, [id, visible]);
 
+  // A request is honoured once, when it is new: one made while the tab had no terminal (a deferred tab) is used up
+  // then, so the terminal starting later does not replay it, and a remount under the same counter takes no focus.
   useEffect(() => {
-    if (id && focusRequest) terminals.focus(id);
-  }, [id, focusRequest]);
+    if (!takeFocusRequest(state, focusRequest) || !id) return;
+    terminals.focus(id);
+    acted.current = true;
+  }, [id, focusRequest, state]);
 
   useEffect(() => setTitle(title), [setTitle, title]);
 
@@ -113,6 +125,13 @@ export function TerminalView({ state, ctx }: { state: TerminalTabState; ctx: Pan
       ) : null}
       <div className="relative min-h-0 flex-1">
         <div ref={surfaceRef} data-testid="terminal-surface" onContextMenu={openContextMenu} className="absolute inset-0 overflow-hidden bg-[var(--term-bg)] p-1" />
+        {info?.status === 'starting' ? (
+          // Over the blank surface rather than a bar above it, so the terminal's size does not change when it goes. The
+          // first terminal after launch spends about half a second here while the host captures the login-shell environment.
+          <div role="status" className="pointer-events-none absolute left-2 top-1 text-ui-sm text-fg-muted">
+            Starting shell…
+          </div>
+        ) : null}
         {menu ? <ContextMenu at={menu} state={state} dismiss={() => setMenu(null)} /> : null}
       </div>
     </div>

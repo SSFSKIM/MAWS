@@ -34,10 +34,17 @@ const GATEWAY_MODEL_VARIABLE = /^ANTHROPIC_DEFAULT_[A-Z_]*MODEL$/;
 // sets all three for itself; Terminal.app starts one without them. (`PWD` is node-pty's: it sets it to the cwd.)
 const SHELL_SESSION_VARIABLES = ['SHLVL', 'OLDPWD', '_'] as const;
 
-// What main sets in its own environment for its hosts (C3: the engine host's profile directory travels this way), which
-// the PTY host inherits at fork and its login-shell capture passes on. A MAWS started in a terminal would otherwise open
-// this app's profile (`MAWS_USER_DATA` selects it) instead of its own.
-const APP_HOST_VARIABLES = ['MAWS_USER_DATA'] as const;
+// What the app's launcher and main put in the environment the hosts inherit at fork, which the PTY host's login-shell
+// capture would pass on to every terminal, dropped by prefix as the engine's allowlist does. `MAWS_` is the app's own
+// switches: main sets `MAWS_USER_DATA` for its hosts (C3: the engine host's profile directory travels this way), and a
+// launcher may set `MAWS_HARNESS`, `MAWS_SESSION_SOURCE`, `MAWS_ENGINE_REPLAY`, `MAWS_SCENARIO_CLOCK` or `MAWS_E2E`; a
+// MAWS started in a terminal would otherwise open this app's profile or load the harness or stub sessions. `ELECTRON_`
+// is Electron's (`ELECTRON_RENDERER_URL` from `electron-vite dev` makes a built MAWS a dev-server client and trips
+// `window.ts`'s dev-CSP guard; `ELECTRON_RUN_AS_NODE` turns any Electron app into Node). `NODE_OPTIONS` is dropped only
+// when it is the launcher's own value (as the host inherited it; Electron appends a space to it): the owner's rc files
+// set theirs again in the terminal's login shell, and a value of their own that differs from the launcher's passes.
+const LAUNCHER_PREFIXES = ['MAWS_', 'ELECTRON_'] as const;
+const LAUNCHER_VALUE_VARIABLES = ['NODE_OPTIONS'] as const;
 
 const LOCALE_VARIABLES = ['LANG', 'LC_ALL', 'LC_CTYPE'] as const;
 
@@ -52,13 +59,16 @@ export function baseEnvironment(
 
 export interface TerminalEnvironmentOptions {
   appVersion: string; // TERM_PROGRAM_VERSION
+  launcher?: NodeJS.ProcessEnv; // the environment the host inherited (default its own `process.env`)
 }
 
-export function terminalEnvironment(base: NodeJS.ProcessEnv, { appVersion }: TerminalEnvironmentOptions): Record<string, string> {
+export function terminalEnvironment(base: NodeJS.ProcessEnv, { appVersion, launcher = process.env }: TerminalEnvironmentOptions): Record<string, string> {
   const env: Record<string, string> = {};
-  const excluded = new Set<string>([...PARENT_SESSION_VARIABLES, ...ENGINE_LAUNCH_VARIABLES, ...SHELL_SESSION_VARIABLES, ...APP_HOST_VARIABLES]);
+  const excluded = new Set<string>([...PARENT_SESSION_VARIABLES, ...ENGINE_LAUNCH_VARIABLES, ...SHELL_SESSION_VARIABLES]);
+  const fromLauncher = (name: string, value: string) =>
+    LAUNCHER_PREFIXES.some((prefix) => name.startsWith(prefix)) || ((LAUNCHER_VALUE_VARIABLES as readonly string[]).includes(name) && launcher[name] === value);
   for (const [name, value] of Object.entries(base)) {
-    if (value !== undefined && !excluded.has(name) && !GATEWAY_MODEL_VARIABLE.test(name)) env[name] = value;
+    if (value !== undefined && !excluded.has(name) && !GATEWAY_MODEL_VARIABLE.test(name) && !fromLauncher(name, value)) env[name] = value;
   }
   env.TERM = 'xterm-256color';
   env.COLORTERM = 'truecolor';

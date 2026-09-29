@@ -1,5 +1,6 @@
 // The Terminal tool against a mocked registry (C9 M4 unit pins): the state factory, the close veto, the attach entry
 // point, and the view's mount, worktree warning, title suffix, lifecycle bars and context menu.
+import { StrictMode } from 'react';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -246,12 +247,39 @@ describe('terminal view', () => {
   it('mounts the terminal’s container while visible without taking focus, focuses on request, and detaches on unmount', () => {
     const state = newState();
     const { rerender, unmount } = render(<View state={state} ctx={context()} />);
-    expect(registry.terminals.mount).toHaveBeenCalledWith(state.terminalId, expect.any(HTMLElement));
+    expect(registry.terminals.mount).toHaveBeenCalledWith(state.terminalId, expect.any(HTMLElement), { focus: false });
     expect(registry.terminals.focus).not.toHaveBeenCalled();
     rerender(<View state={state} ctx={context({ focusRequest: 1 })} />);
     expect(registry.terminals.focus).toHaveBeenCalledWith(state.terminalId);
     unmount();
     expect(registry.terminals.unmount).toHaveBeenCalledWith(state.terminalId);
+  });
+
+  it('keeps a selected tab’s focus through StrictMode’s simulated remount', () => {
+    const state = newState();
+    render(
+      <StrictMode>
+        <View state={state} ctx={context({ focusRequest: 1 })} />
+      </StrictMode>,
+    );
+    // the first pass focuses and uses the request up; the remount that follows unmounts the container and mounts it
+    // again with the focus carried over, which the registry restores once the container is back in place
+    expect(registry.terminals.focus).toHaveBeenCalledOnce();
+    expect(registry.terminals.unmount).toHaveBeenCalledOnce();
+    expect(registry.terminals.mount).toHaveBeenLastCalledWith(state.terminalId, expect.any(HTMLElement), { focus: true });
+  });
+
+  it('does not replay a focus request made before the terminal started, nor one a remount carries over', () => {
+    const state = terminalTool.createState({ appSessionId: null, session: null, instanceId: 'terminal:8', params: {} });
+    const { rerender, unmount } = render(<View state={state} ctx={context({ appSessionId: null, session: null, focusRequest: 1 })} />);
+    rerender(<View state={state} ctx={context({ appSessionId: B, session: SESSION_B, focusRequest: 1 })} />);
+    expect(state.terminalId).toBe('t1');
+    expect(registry.terminals.focus).not.toHaveBeenCalled();
+    rerender(<View state={state} ctx={context({ appSessionId: B, session: SESSION_B, focusRequest: 2 })} />);
+    expect(registry.terminals.focus).toHaveBeenCalledOnce();
+    unmount();
+    render(<View state={state} ctx={context({ appSessionId: B, session: SESSION_B, focusRequest: 2 })} />);
+    expect(registry.terminals.focus).toHaveBeenCalledOnce();
   });
 
   it('asks for a session while it has none, and opens its terminal in the first session shown', () => {
@@ -263,7 +291,7 @@ describe('terminal view', () => {
     expect(registry.terminals.open).toHaveBeenCalledWith({ appSessionId: B, label: 'terminal:5', cwd: '/tmp/maws-harness/b' });
     expect(state.terminalId).toBe('t1');
     expect(screen.queryByRole('status', { name: 'terminal pending' })).toBeNull();
-    expect(registry.terminals.mount).toHaveBeenCalledWith('t1', expect.any(HTMLElement));
+    expect(registry.terminals.mount).toHaveBeenCalledWith('t1', expect.any(HTMLElement), { focus: false });
     rerender(<View state={state} ctx={context({ appSessionId: A, session: SESSION_A })} />);
     expect(registry.terminals.open).toHaveBeenCalledTimes(1);
   });
@@ -307,6 +335,19 @@ describe('terminal view', () => {
     expect(registry.terminals.respawn).toHaveBeenCalledWith(state.terminalId);
     fireEvent.click(screen.getByRole('button', { name: 'Close' }));
     expect(ctx.close).toHaveBeenCalled();
+  });
+
+  it('says the shell is starting over the surface until the terminal runs, without a bar that would resize it', () => {
+    const state = newState();
+    render(<View state={state} ctx={context()} />);
+    act(() => registry.patch(state.terminalId!, { status: 'starting' }));
+    // a live region whose visible text is all there is to it: no label that differs from what is shown
+    const starting = screen.getByText('Starting shell…');
+    expect(starting.getAttribute('role')).toBe('status');
+    expect(starting.hasAttribute('aria-label')).toBe(false);
+    expect(starting.parentElement).toBe(screen.getByTestId('terminal-surface').parentElement);
+    act(() => registry.patch(state.terminalId!, { status: 'running' }));
+    expect(screen.queryByText('Starting shell…')).toBeNull();
   });
 
   it('says why a terminal could not start', () => {

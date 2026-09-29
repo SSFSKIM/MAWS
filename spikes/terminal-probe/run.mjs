@@ -7,7 +7,7 @@
 // `shell.openExternal` stubbed to record the URL instead of opening a browser.
 //
 //   MAWS_HARNESS=1 pnpm build && node spikes/terminal-probe/run.mjs [--phase m1|m2-gate] [--renderer xterm|ghostty|both]
-//                [--steps smoke,measure,items,tui,exit-check,replay,links] [--keep-open]
+//                [--steps smoke,measure,items,tui,exit-check,replay,links] [--workloads latency,latency-spaced] [--keep-open]
 //   MAWS_CLAUDE_BIN / MAWS_CODEX_BIN override the TUI binaries.
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -43,6 +43,7 @@ for (let i = 2; i < process.argv.length; i++) {
 const phase = args.get('phase') ?? 'm1';
 const only = args.get('renderer'); // a renderer id, or unset for every candidate the page reports
 const steps = new Set((args.get('steps') ?? (phase === 'm2-gate' ? 'smoke,measure,links' : 'smoke,measure,items')).split(','));
+const measureOnly = args.get('workloads')?.split(','); // a subset of the phase's measurements, by id
 const bins = { claude: process.env.MAWS_CLAUDE_BIN ?? CLAUDE_BIN_DEFAULT, codex: process.env.MAWS_CODEX_BIN ?? CODEX_BIN_DEFAULT };
 
 for (const dir of ['results', 'evidence', 'recordings']) mkdirSync(join(here, dir), { recursive: true });
@@ -213,9 +214,66 @@ const restorationCheck = (preSnap, postSnap) => {
   };
 };
 
+// A spaced echo-latency workload (`spacingMs`): the page's own sampler types each character the moment the previous
+// echo is parsed; this one waits `spacingMs` first. Runs in the page (timing and polling there, no Playwright round
+// trip) over the probe API, with the page sampler's echo test (the cursor's line ends with what was typed) and its
+// nearest-rank percentiles.
+const spacedLatency = async (r, id, count = 100) => {
+  await probe.call('spawn', r, id, phase);
+  const samples = await page.evaluate(
+    async ([renderer, spacingMs, n]) => {
+      const probeApi = window.__maws_harness.probe;
+      const channel = new MessageChannel();
+      const yieldMacrotask = () =>
+        new Promise((resolve) => {
+          channel.port1.onmessage = () => resolve();
+          channel.port2.postMessage(null);
+        });
+      const cursorLine = () => {
+        const at = probeApi.snapshot(renderer, Number.MAX_SAFE_INTEGER);
+        const row = at.baseY + at.cursorY;
+        return probeApi.snapshot(renderer, row, row + 1).lines[0] ?? '';
+      };
+      const out = [];
+      let typed = '';
+      for (let i = 0; i < n; i++) {
+        if (typed.length >= 40) {
+          await probeApi.type(renderer, '\r');
+          await probeApi.idle(renderer, 150);
+          typed = '';
+        }
+        await new Promise((resolve) => setTimeout(resolve, spacingMs));
+        typed += String.fromCharCode(97 + (i % 26));
+        const started = performance.now();
+        void probeApi.type(renderer, typed.at(-1));
+        for (;;) {
+          await yieldMacrotask();
+          if (cursorLine().endsWith(typed)) break;
+          if (performance.now() - started > 5_000) throw new Error(`echo of ${JSON.stringify(typed)} never appeared`);
+        }
+        out.push(Math.round((performance.now() - started) * 100) / 100);
+      }
+      return out;
+    },
+    [r, workloads[id].spacingMs, count],
+  );
+  await probe.call('kill', r);
+  const rank = (p) => [...samples].sort((a, b) => a - b)[Math.max(1, Math.ceil((p / 100) * samples.length)) - 1];
+  return {
+    renderer: r,
+    workload: workloads[id].title,
+    phase,
+    spacingMs: workloads[id].spacingMs,
+    latency: { count: samples.length, p50: rank(50), p95: rank(95), max: Math.max(...samples) },
+    samples,
+    at: new Date().toISOString(),
+  };
+};
+
 // Item 9 at the gate: output bytes and line feeds exact (the page's byte-count check, `error` otherwise), the last
 // line right, frame p95 within 50 ms; MB/s against its floor, a finding when below.
 const judgeGate = (id, metrics) => {
+  if (workloads[id].spacingMs) return { judged: false, echoP95Ms: metrics.latency.p95 }; // recorded beside the gate's echo latency
   if (id === 'latency') {
     const echoP95Ok = metrics.latency?.p95 != null && metrics.latency.p95 <= GATE_ECHO_P95_MS;
     return { pass: echoP95Ok && metrics.error === undefined, echoP95Ok, echoP95Ms: metrics.latency?.p95 ?? null };
@@ -248,9 +306,9 @@ try {
   // ---- measure: W1, W2, W3, width, latency (+ scroll-region) per renderer; at the gate the three floods only ----
   if (steps.has('measure')) {
     for (const r of live) {
-      for (const id of phase === 'm2-gate' ? GATE_MEASUREMENTS : [...AUTOMATED_MEASUREMENTS, 'scroll-region']) {
+      for (const id of (phase === 'm2-gate' ? GATE_MEASUREMENTS : [...AUTOMATED_MEASUREMENTS, 'scroll-region']).filter((w) => !measureOnly || measureOnly.includes(w))) {
         log(r, id, 'running');
-        const metrics = await probe.call('run', id, r, phase);
+        const metrics = workloads[id].spacingMs ? await spacedLatency(r, id) : await probe.call('run', id, r, phase);
         if (phase === 'm2-gate') metrics.gate = judgeGate(id, metrics);
         writeResult(`${r}-${id}`, metrics);
         log(r, id, JSON.stringify({ bytes: metrics.bytes, expected: metrics.expectedBytes, seconds: metrics.seconds, mbps: metrics.mbps, framesP95: metrics.frames?.p95, over50: metrics.frames?.over50ms, latencyP95: metrics.latency?.p95, pausedSeen: metrics.pausedSeen, acks: metrics.acks, gate: metrics.gate, error: metrics.error }));
