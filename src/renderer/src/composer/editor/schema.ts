@@ -19,16 +19,20 @@ export const ComposerDocument = Document.extend({
 
 // Tiptap's mention node with the kind the serialiser needs (`@path` or `@agent-name`); deleted whole by Backspace.
 export const MentionNode = Mention.extend({
+  addOptions() {
+    return {
+      ...this.parent!(),
+      deleteTriggerWithBackspace: true,
+      renderText: ({ node }) => mentionText(node.attrs as { id: string; kind: 'file' | 'agent' }),
+      renderHTML: ({ node, options }) => ['span', options.HTMLAttributes, mentionText(node.attrs as { id: string; kind: 'file' | 'agent' })],
+    };
+  },
   addAttributes() {
     return {
       ...this.parent?.(),
       kind: { default: 'file', rendered: false },
     };
   },
-}).configure({
-  deleteTriggerWithBackspace: true,
-  renderText: ({ node }) => mentionText(node.attrs as { id: string; kind: 'file' | 'agent' }),
-  renderHTML: ({ node, options }) => ['span', options.HTMLAttributes, mentionText(node.attrs as { id: string; kind: 'file' | 'agent' })],
 });
 
 // A mention's text form: `@<path>` (quoted when the path holds whitespace, the terminal's form) or `@agent-<name>`, the

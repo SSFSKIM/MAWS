@@ -65,19 +65,32 @@ function trimTrailing(pieces: Piece[]): Piece[] {
 
 const typedText = (pieces: Piece[]) => pieces.map((p) => (p.kind === 'text' ? p.typed : p.kind === 'mention' ? p.text : '')).join('');
 
+// `!` and `#` at offset 0: a shell command is one paragraph of plain text; a memory note may name files.
+function modeOfPieces(pieces: Piece[], paragraphs: number, attachments: number): Serialized['mode'] {
+  const lead = typedText(pieces).charAt(0);
+  if (attachments > 0) return 'send';
+  if (lead === '!' && paragraphs === 1 && pieces.every((p) => p.kind === 'text')) return 'bash';
+  if (lead === '#' && pieces.every((p) => p.kind !== 'pasted')) return 'memory';
+  return 'send';
+}
+
+// The mode alone (the editor's decoration reads it on every change).
+export function modeOf(doc: JSONContent): Serialized['mode'] {
+  const { pieces, paragraphs } = piecesOf(doc);
+  return modeOfPieces(trimTrailing(pieces), paragraphs, attachmentsOf(doc).length);
+}
+
 export function serializeDraft(doc: JSONContent, ctx: SerializeContext): Serialized {
   const { pieces: raw, paragraphs } = piecesOf(doc);
   const pieces = trimTrailing(raw);
   const attachments = attachmentsOf(doc);
-  const hasAtoms = pieces.some((p) => p.kind !== 'text');
   const hasPasted = pieces.some((p) => p.kind === 'pasted');
   const typed = typedText(pieces);
 
-  // `!` and `#` at offset 0: a shell command is one paragraph of plain text; a memory note may name files.
-  const lead = typed.charAt(0);
-  if (attachments.length === 0 && ((lead === '!' && paragraphs === 1 && !hasAtoms) || (lead === '#' && !hasPasted))) {
+  const mode = modeOfPieces(pieces, paragraphs, attachments.length);
+  if (mode !== 'send') {
     const text = typed.slice(1).trim();
-    return { mode: lead === '!' ? 'bash' : 'memory', text, content: text, display: typed, pastedContents: {}, omitted: 0, empty: text === '' };
+    return { mode, text, content: text, display: typed, pastedContents: {}, omitted: 0, empty: text === '' };
   }
 
   const tagId = hasPasted ? pastedTagId(ctx.sessionId) : '';

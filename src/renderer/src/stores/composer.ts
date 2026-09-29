@@ -3,8 +3,8 @@
 // a pending prefill per session (the refusal dialog's Edit prompt, C6's edit-and-resubmit and C10's hand-back put the
 // document here; M4's Composer takes it when mounted, so a prefill made from an Overview card waits for the pane),
 // the requests a docked placement is showing (the transcript's request slot shows a pointer for those), and the focus
-// targets a mounted composer registers (the docked frame gives focus back through them). M3 and M4 add the editor's
-// own state beside these.
+// targets a mounted composer registers (the docked frame gives focus back through them). M3 adds the `#` target each
+// session remembers; M4 adds the composer's own state beside these.
 import { create } from 'zustand';
 import type { AppSessionId, MessageUuid, RequestId } from '@shared/graph/ids';
 
@@ -20,13 +20,21 @@ export interface FocusTarget {
   focusFrame(): void;
 }
 
+// Where `#` appends (C3's `session.memoryAppend` target): the memory dialog's project or user file, or a listed path.
+export interface MemoryTarget {
+  kind: 'user' | 'project' | 'path';
+  path: string | null;
+}
+export const DEFAULT_MEMORY_TARGET: MemoryTarget = Object.freeze({ kind: 'project', path: null }) as MemoryTarget;
+
 export interface ComposerState {
   prefills: ReadonlyMap<AppSessionId, Prefill>;
   docked: ReadonlyMap<AppSessionId, ReadonlyMap<RequestId, number>>; // how many docked placements show each request
   focusTargets: ReadonlyMap<AppSessionId, FocusTarget>;
+  memoryTargets: ReadonlyMap<AppSessionId, MemoryTarget>; // M3: the `#` target chosen per session
 }
 
-const initial = (): ComposerState => ({ prefills: new Map(), docked: new Map(), focusTargets: new Map() });
+const initial = (): ComposerState => ({ prefills: new Map(), docked: new Map(), focusTargets: new Map(), memoryTargets: new Map() });
 
 export const useComposerStore = create<ComposerState>()(initial);
 
@@ -89,4 +97,10 @@ export function registerFocusTarget(appSessionId: AppSessionId, target: FocusTar
       return { focusTargets };
     });
   };
+}
+
+export const memoryTargetOf = (state: ComposerState, appSessionId: AppSessionId): MemoryTarget => state.memoryTargets.get(appSessionId) ?? DEFAULT_MEMORY_TARGET;
+
+export function setMemoryTarget(appSessionId: AppSessionId, target: MemoryTarget): void {
+  useComposerStore.setState((s) => ({ memoryTargets: new Map(s.memoryTargets).set(appSessionId, target) }));
 }

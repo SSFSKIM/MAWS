@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, MessageUuid, RequestId } from '@shared/graph/ids';
-import { isDocked, markDocked, prefillComposer, registerFocusTarget, resetComposerStore, takePrefill, useComposerStore } from './composer';
+import { DEFAULT_MEMORY_TARGET, isDocked, markDocked, memoryTargetOf, prefillComposer, registerFocusTarget, resetComposerStore, setMemoryTarget, takePrefill, useComposerStore } from './composer';
 
 const A = 'app-a' as AppSessionId;
 const B = 'app-b' as AppSessionId;
@@ -39,5 +39,12 @@ describe('composer store seam', () => {
     expect(useComposerStore.getState().focusTargets.get(A)).toBe(second);
     offSecond();
     expect(useComposerStore.getState().focusTargets.has(A)).toBe(false);
+  });
+
+  it('remembers the # target per session, the project file by default', () => {
+    expect(memoryTargetOf(useComposerStore.getState(), A)).toEqual(DEFAULT_MEMORY_TARGET);
+    setMemoryTarget(A, { kind: 'path', path: '/repo/docs/CLAUDE.md' });
+    expect(memoryTargetOf(useComposerStore.getState(), A)).toEqual({ kind: 'path', path: '/repo/docs/CLAUDE.md' });
+    expect(memoryTargetOf(useComposerStore.getState(), B)).toEqual({ kind: 'project', path: null });
   });
 });
