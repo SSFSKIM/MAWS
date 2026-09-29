@@ -12,6 +12,9 @@ const registry = vi.hoisted(() => {
       infos = [];
       next = 0;
     },
+    remove(id: string) {
+      infos = infos.filter((info) => info.id !== id);
+    },
     terminals: {
       list: () => infos,
       host: (): HostState | null => ({ state: 'ready', pid: 1, restarts: 0, revision: 1 }),
@@ -26,7 +29,7 @@ const registry = vi.hoisted(() => {
         return info ? { info, renderer: null, container: document.createElement('div') } : undefined;
       },
       foreground: vi.fn(async () => ({ process: 'zsh', busy: false })),
-      close: vi.fn(async () => {}),
+      close: vi.fn(async (id: string): Promise<void> => void id),
     },
   };
 });
@@ -44,7 +47,7 @@ beforeEach(() => {
   registry.reset();
   vi.clearAllMocks();
   registry.terminals.foreground.mockImplementation(async () => ({ process: 'zsh', busy: false }));
-  registry.terminals.close.mockImplementation(async () => {});
+  registry.terminals.close.mockImplementation(async (id: string) => registry.remove(id)); // as the registry's close disposes
   usePanel.setState(initial, true);
   cleanups.push(mountPanelHost(panelHostImplementation));
 });
