@@ -15,7 +15,9 @@ export async function readTail(path: string, bytes: number, open: OpenFile = ope
   }
   try {
     const { size } = await handle.stat();
-    const start = Math.max(0, size - bytes);
+    // one byte before the tail too, so a tail that starts exactly on a line keeps it: the partial line is what precedes
+    // the first newline of the read, and when that byte is itself the newline there is none
+    const start = Math.max(0, size - bytes - 1);
     const buffer = Buffer.alloc(size - start);
     const { bytesRead } = await handle.read(buffer, 0, buffer.length, start);
     const text = buffer.subarray(0, bytesRead).toString('utf8');
