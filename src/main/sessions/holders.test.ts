@@ -148,6 +148,18 @@ describe('occupancy of a directory', () => {
     await expect(occupancyOf(deps, wt)).resolves.toEqual({ ...empty, foreign: 2, idle: 1, idleAppSessionIds: ['b'], liveAppSessionIds: ['a'] });
   });
 
+  // M6 live finding: the pinned 2.1.283 writes a registry record (`kind: 'interactive'`, `entrypoint: 'sdk-ts'`) for
+  // MAWS's own `-p` processes, which C4 answers as terminal holders; they are the reservations themselves.
+  it('does not count the registry record of a MAWS process as a second, foreign holder', async () => {
+    records.push(record('a', { directory: wt, engineSessionId: sid('eng-a') }), record('b', { directory: wt, engineSessionId: sid('eng-b') }));
+    host.reserve('a', wt, { engineSessionId: sid('eng-a') });
+    host.hold('eng-a', { kind: 'terminal', pid: 11 }, wt, 'a');
+    host.reserve('bootstrap-1', wt, { engineSessionId: sid('eng-bootstrap') });
+    host.hold('eng-bootstrap', { kind: 'terminal', pid: 12 }, wt);
+    host.hold('eng-b', { kind: 'terminal', pid: 13 }, wt, 'b'); // a real terminal holding the other record
+    await expect(occupancyOf(deps, wt)).resolves.toEqual({ ...empty, self: 2, foreign: 1, liveAppSessionIds: ['a', 'b'] });
+  });
+
   it('fails with C4’s message when the registry fails closed, never answering an empty directory', async () => {
     host.registryFailure = 'holder registry unreadable: EACCES';
     await expect(occupancyOf(deps, wt)).rejects.toThrow('holder registry unreadable: EACCES');

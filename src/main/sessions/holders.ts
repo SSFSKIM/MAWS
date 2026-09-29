@@ -64,6 +64,9 @@ export async function occupancyOf(deps: HolderDeps, directory: string, opts: { n
   let unbound = 0;
   const heldEngineIds = new Set<string>();
   for (const row of registry.holders) {
+    // The engine registers MAWS's own `-p` processes too (2.1.283: `kind: 'interactive'`, `entrypoint: 'sdk-ts'`); such
+    // a record is a reservation already counted as self, never a second holder.
+    if (reservedIds.has(row.sessionId)) continue;
     const inDirectory = row.cwd !== null && isHere(normalizePath(row.cwd));
     if (!inDirectory && !hereEngineIds.has(row.sessionId)) continue;
     heldEngineIds.add(row.sessionId);
