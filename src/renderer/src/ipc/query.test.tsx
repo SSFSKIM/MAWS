@@ -39,7 +39,7 @@ describe('useCommand', () => {
 
 describe('useCommand is for reads only', () => {
   it('allows exactly the read commands with a value to cache', () => {
-    expect([...QUERY_COMMANDS].sort()).toEqual(['engine.hostState', 'engine.ping', 'files.list', 'fs.workflows', 'pty.hostState', 'pty.ping', 'settings.get']); // fs.workflows: C8a; files.list: C8c
+    expect([...QUERY_COMMANDS].sort()).toEqual(['engine.hostState', 'engine.ping', 'fs.workflows', 'pty.hostState', 'pty.ping', 'settings.get']); // fs.workflows: C8a
   });
 
   // Compile-time: writes and void-output commands are not queries (checked by `pnpm typecheck`); they go through

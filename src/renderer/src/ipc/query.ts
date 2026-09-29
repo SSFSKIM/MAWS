@@ -19,7 +19,6 @@ export const QUERY_COMMANDS = [
   'pty.ping',
   'pty.hostState',
   'fs.workflows', // C8a: a disk-only session's workflow runs (the summary's Background work), invalidated on fs.workflowChanged
-  'files.list', // C8c: a directory of a session's own roots (the Files tool), invalidated on files.changed
 ] as const satisfies readonly ValueCommand[];
 export type QueryCommand = (typeof QUERY_COMMANDS)[number];
 
