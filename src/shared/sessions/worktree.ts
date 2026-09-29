@@ -70,16 +70,23 @@ export function defaultBranchName(name: string): string {
   return `worktree-${worktreeDirName(name)}`;
 }
 
-// null when valid, else the message the chip and the fork sheet show. The directory name keeps no '/', so only a whole
-// '..' could leave `.claude/worktrees/`; the rest keeps a name git and a shell read as one plain argument.
+const WORKTREE_NAME_MAX = 64;
+const WORKTREE_NAME_PART = /^[a-zA-Z0-9._-]+$/;
+
+// null when valid, else the message the chip and the fork sheet show. The engine's own rule (`iDe`, SPEC §47 11.2;
+// cli.pretty.js 892268 and 892296-892306), so MAWS's worktrees and the terminal's `--worktree`/`EnterWorktree` ones
+// share one naming space: at most 64 characters; per '/'-separated segment no '.' or '..' (either would resolve the
+// checkout to `.claude/worktrees` itself or above it), no '.git' in any case or with trailing dots, and only letters,
+// digits, '.', '_' and '-'. MAWS adds one refusal the engine lacks, a leading '-', so a name never reads as an option.
 export function validateWorktreeName(name: string): string | null {
   if (name.length === 0) return 'Worktree name is empty';
-  if (name.length > 100) return 'Worktree name is longer than 100 characters';
+  if (name.length > WORKTREE_NAME_MAX) return `Worktree name is longer than ${WORKTREE_NAME_MAX} characters`;
   if (name.startsWith('-')) return "Worktree name cannot start with '-'";
-  if (name.split('/').includes('..')) return "Worktree name cannot contain a '..' segment";
-  if (name.trim() !== name) return 'Worktree name cannot start or end with whitespace';
-  if (name.includes('\0')) return 'Worktree name cannot contain a NUL character';
-  if (name.includes('\\')) return "Worktree name cannot contain '\\'";
+  for (const part of name.split('/')) {
+    if (part === '.' || part === '..') return "Worktree name cannot contain a '.' or '..' segment";
+    if (part.toLowerCase().replace(/\.+$/, '') === '.git') return `Worktree name cannot contain '${part}', a name git reserves`;
+    if (!WORKTREE_NAME_PART.test(part)) return "Each '/'-separated part of a worktree name must be non-empty and use only letters, digits, '.', '_' and '-'";
+  }
   return null;
 }
 

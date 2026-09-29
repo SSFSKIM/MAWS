@@ -58,7 +58,10 @@ describe('worktree service over scratch repositories', () => {
       await expect(service.add({ repoRoot: repo.root, name: 'two', branch: newBranch('main') })).rejects.toThrow('branch exists');
       await expect(service.add({ repoRoot: repo.root, name: 'two', branch: newBranch('worktree-two', 'no-such-branch') })).rejects.toThrow('base not found: no-such-branch');
       await expect(service.add({ repoRoot: repo.root, name: 'two', branch: newBranch('worktree-two', '--orphan') })).rejects.toThrow('base not found: --orphan');
-      await expect(service.add({ repoRoot: repo.root, name: '../escape', branch: newBranch('worktree-x') })).rejects.toThrow("Worktree name cannot contain a '..' segment");
+      await expect(service.add({ repoRoot: repo.root, name: '../escape', branch: newBranch('worktree-x') })).rejects.toThrow("Worktree name cannot contain a '.' or '..' segment");
+      // '.' would be `.claude/worktrees` itself
+      await expect(service.add({ repoRoot: repo.root, name: '.', branch: newBranch('worktree-x') })).rejects.toThrow("Worktree name cannot contain a '.' or '..' segment");
+      await expect(service.add({ repoRoot: repo.root, name: '.git', branch: newBranch('worktree-x') })).rejects.toThrow("Worktree name cannot contain '.git', a name git reserves");
       await expect(service.add({ repoRoot: repo.root, name: '-rf', branch: newBranch('worktree-x') })).rejects.toThrow("Worktree name cannot start with '-'");
       await expect(service.add({ repoRoot: repo.root, name: 'two', branch: newBranch('bad..name') })).rejects.toThrow('invalid branch name: bad..name');
       expect(await repo.worktreePaths()).toEqual(before);

@@ -35,17 +35,32 @@ describe('worktree names (the engine’s convention, SPEC §47 11.1)', () => {
     expect(defaultBranchName('feat/login')).toBe('worktree-feat+login');
   });
 
-  it('accepts ordinary names and refuses what could escape the directory or confuse git', () => {
-    for (const ok of ['a', 'feat/login', '2026-09-29-abcd', 'x'.repeat(100), 'a..b', 'with space inside']) expect(validateWorktreeName(ok), ok).toBeNull();
+  // The engine's own rule (`iDe`, SPEC §47 11.2; cli.pretty.js 892268 and 892296-892306), so a name MAWS takes is one
+  // the terminal's `--worktree` and `EnterWorktree` take too; MAWS adds only the refusal of a leading '-'.
+  const PART = "Each '/'-separated part of a worktree name must be non-empty and use only letters, digits, '.', '_' and '-'";
+  it('accepts the names the engine accepts', () => {
+    for (const ok of ['a', 'feat/login', '2026-09-29-abcd', 'x'.repeat(64), 'a..b', '.hidden', 'v1.2_rc-3', 'a/b/c', '.gitignore', 'git']) expect(validateWorktreeName(ok), ok).toBeNull();
+  });
+
+  it('refuses an empty or over-long name and a leading dash', () => {
     expect(validateWorktreeName('')).toBe('Worktree name is empty');
-    expect(validateWorktreeName('x'.repeat(101))).toBe('Worktree name is longer than 100 characters');
+    expect(validateWorktreeName('x'.repeat(65))).toBe('Worktree name is longer than 64 characters');
     expect(validateWorktreeName('-rf')).toBe("Worktree name cannot start with '-'");
-    expect(validateWorktreeName('..')).toBe("Worktree name cannot contain a '..' segment");
-    expect(validateWorktreeName('a/../b')).toBe("Worktree name cannot contain a '..' segment");
-    expect(validateWorktreeName(' a')).toBe('Worktree name cannot start or end with whitespace');
-    expect(validateWorktreeName('a\n')).toBe('Worktree name cannot start or end with whitespace');
-    expect(validateWorktreeName('a\0b')).toBe('Worktree name cannot contain a NUL character');
-    expect(validateWorktreeName('a\\b')).toBe("Worktree name cannot contain '\\'");
+  });
+
+  it("refuses a '.' or '..' segment, which would resolve the checkout to the worktrees directory or above it", () => {
+    for (const bad of ['.', '..', 'a/./b', 'a/../b', '../escape', 'a/..']) expect(validateWorktreeName(bad), bad).toBe("Worktree name cannot contain a '.' or '..' segment");
+  });
+
+  it('refuses .git in any case and with trailing dots, as the engine does', () => {
+    expect(validateWorktreeName('.git')).toBe("Worktree name cannot contain '.git', a name git reserves");
+    expect(validateWorktreeName('a/.GIT')).toBe("Worktree name cannot contain '.GIT', a name git reserves");
+    expect(validateWorktreeName('.git.')).toBe("Worktree name cannot contain '.git.', a name git reserves");
+    expect(validateWorktreeName('.Git...')).toBe("Worktree name cannot contain '.Git...', a name git reserves");
+  });
+
+  it('refuses an empty segment and anything outside letters, digits, dot, underscore and dash', () => {
+    for (const bad of ['a//b', 'a/', '/a', 'with space', ' a', 'a\n', 'a\0b', 'a\\b', 'caf\u00e9', 'a:b', 'a~b', 'a+b']) expect(validateWorktreeName(bad), JSON.stringify(bad)).toBe(PART);
   });
 });
 
