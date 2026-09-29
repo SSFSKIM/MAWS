@@ -13,7 +13,6 @@ const Strings = z.array(z.string());
 const DependenciesSchema = z.looseObject({ errors: Strings.catch([]), warnings: Strings.catch([]) });
 const yes = (value: unknown) => (value === true ? SHARED.yes : value === false ? SHARED.no : '—');
 
-
 export interface SandboxView {
   line: string;
   rows: { label: string; value: string }[];
