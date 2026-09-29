@@ -33,8 +33,13 @@ export interface DraftPort {
   save(draft: Draft | null): void;
 }
 
+// How a submission was asked for: Enter and ⌘Enter send, ⌥Enter steers; the Composer's control adds its caret menu's
+// Queue and Interrupt and send (M4), which reach the caller's `onSubmit` through the same path as a key.
+export type SubmitHow = 'send' | 'steer' | 'queue' | 'interrupt_and_send';
+
 export interface EditorHandle {
   focus(): void;
+  submit(how: SubmitHow): void; // the submit control and its caret menu: as a key would (refused while one is in flight)
   insertText(text: string): void; // at the caret when focused, else at the end (C11's insertComposerText)
   doc(): ComposerDoc;
   serialize(): Serialized;
@@ -55,7 +60,7 @@ export interface ControllerInputs {
   catalog: SessionCatalog;
   widgets: ReadonlySet<string>;
   followUp: boolean;
-  onSubmit?(s: Serialized, how: 'send' | 'steer'): Promise<boolean>;
+  onSubmit?(s: Serialized, how: SubmitHow): Promise<boolean>;
   onPrefill?(prefill: Prefill): void;
   onDocChange?(doc: ComposerDoc): void;
   onEscape?(): boolean;
@@ -197,7 +202,7 @@ export class EditorController {
 
   // ---- behaviour ------------------------------------------------------------------------------------------------
 
-  async submit(how: 'send' | 'steer'): Promise<void> {
+  async submit(how: SubmitHow): Promise<void> {
     const editor = this.editor;
     const { appSessionId, sessionId, cwd, disabled } = this.inputs;
     if (!editor || disabled !== null || this.busy) return;
@@ -210,7 +215,7 @@ export class EditorController {
     editor.setEditable(false);
     let accepted: boolean;
     try {
-      accepted = await (this.inputs.onSubmit ? this.inputs.onSubmit(s, how) : submitSerialized(this.client, appSessionId, s, how, target));
+      accepted = await (this.inputs.onSubmit ? this.inputs.onSubmit(s, how) : submitSerialized(this.client, appSessionId, s, how === 'steer' ? 'steer' : 'send', target));
     } finally {
       this.busy = false;
       this.view.setBusy(false);
@@ -327,6 +332,7 @@ export class EditorController {
     const editor = () => this.editor!;
     return {
       focus: () => void editor().commands.focus(),
+      submit: (how) => void this.submit(how),
       insertText: (text) => {
         if (editor().isFocused) editor().chain().insertContent(text).run();
         else editor().chain().focus('end').insertContent(text).run();

@@ -19,12 +19,12 @@ import { useComposerStore, type Prefill } from '../../stores/composer';
 import { useTranscriptStore } from '../../transcript';
 import { slashWidget, useRegisteredWidgets } from '../mentions/widgets';
 import { ModeChrome } from '../modes/ModeChrome';
-import { EditorController, ipcDrafts, type ControllerInputs, type DraftPort, type EditorHandle } from './controller';
+import { EditorController, ipcDrafts, type ControllerInputs, type DraftPort, type EditorHandle, type SubmitHow } from './controller';
 import { emptyDoc, type ComposerDoc } from './doc';
 import { composerExtensions } from './extensions';
 import type { Serialized } from './serialize';
 
-export type { DraftPort, EditorHandle };
+export type { DraftPort, EditorHandle, SubmitHow };
 
 export interface EditorProps {
   appSessionId: AppSessionId;
@@ -34,10 +34,10 @@ export interface EditorProps {
   disabled?: string | null; // read-only, for this reason
   drafts?: DraftPort;
   // What a submission does, and whether it was accepted (the editor then clears and drops the draft). `how` is the
-  // chord: 'send' for Enter and ⌘Enter, 'steer' for ⌥Enter. Given, the editor dispatches nothing itself, so the
+  // chord: 'send' for Enter and ⌘Enter, 'steer' for ⌥Enter (the handle's `submit` adds the caret menu's). Given, the editor dispatches nothing itself, so the
   // Composer maps the chord through its submit state (⌥Enter with no turn open is a Send); absent, the default
   // (`submitSerialized`) sends, or steers with priority 'next'.
-  onSubmit?(s: Serialized, how: 'send' | 'steer'): Promise<boolean>;
+  onSubmit?(s: Serialized, how: SubmitHow): Promise<boolean>;
   onPrefill?(prefill: Prefill): void; // a prefill the editor took (the Composer keeps its `editing`)
   onDocChange?(doc: ComposerDoc): void;
   onEscape?(): boolean;

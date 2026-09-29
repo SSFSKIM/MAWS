@@ -59,7 +59,7 @@ const MESSAGES: Record<SendBound, string> = {
   content: 'the message is larger than 48 MiB',
 };
 const decodedBytes = (data: string) => Math.floor((data.length * 3) / 4) - (data.endsWith('==') ? 2 : data.endsWith('=') ? 1 : 0);
-const base64Of = (block: { source?: unknown }) => {
+const base64Of = (block: Readonly<Record<string, unknown>>) => {
   const source = block.source as { type?: unknown; data?: unknown } | undefined;
   return source?.type === 'base64' && typeof source.data === 'string' ? source.data : null;
 };

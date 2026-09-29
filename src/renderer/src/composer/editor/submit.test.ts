@@ -70,6 +70,28 @@ describe('the editor submits by mode and records history', () => {
     expect(toasts().slice(1)).toEqual(['1 pasted segment was unavailable and was left out', '2 pasted segments were unavailable and were left out']);
   });
 
+  it("runs a caller's dispatch between the same pre-check and after-acceptance steps, and offers Retry on its refusal", async () => {
+    const { bridge, calls } = client();
+    const dispatch = vi.fn(async () => null);
+    expect(await submitSerialized(bridge, APP, serialized({ omitted: 1 }), 'send', null, { dispatch, project: '/repo/new' })).toBe(true);
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    expect(calls).toEqual([['session.history.append', { appSessionId: APP, display: 'hi', pastedContents: {}, project: '/repo/new' }]]); // the default dispatch never ran
+    expect(toasts()).toEqual(['1 pasted segment was unavailable and was left out']);
+
+    expect(await submitSerialized(bridge, APP, serialized({ content: 'x'.repeat(1024 * 1024 + 1) }), 'send', null, { dispatch })).toBe(false);
+    expect(dispatch).toHaveBeenCalledTimes(1); // the pre-check refused before any dispatch
+
+    const retry = vi.fn();
+    expect(await submitSerialized(bridge, APP, serialized({}), 'send', null, { dispatch: async () => 'refused', retry })).toBe(false);
+    const refused = useNotices.getState().notices.at(-1)!;
+    expect(refused.text).toBe('refused');
+    expect(refused.actions.map((a) => a.label)).toEqual(['Retry']);
+    refused.actions[0].run();
+    expect(retry).toHaveBeenCalledTimes(1);
+    expect(useNotices.getState().notices.some((n) => n.id === refused.id)).toBe(false); // Retry takes its toast away
+    expect(calls.filter((c) => c[0] === 'session.history.append')).toHaveLength(1);
+  });
+
   it('does nothing for an empty draft', async () => {
     const { bridge, calls } = client();
     expect(await submitSerialized(bridge, APP, serialized({ empty: true }), 'send', null)).toBe(false);
