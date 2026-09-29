@@ -80,6 +80,10 @@ const registry = vi.hoisted(() => {
       foreground: vi.fn(async () => ({ process: 'zsh', busy: false })),
       close: vi.fn(async (id: string): Promise<void> => void id),
       respawn: vi.fn(async () => {}),
+      release: vi.fn((id: string) => {
+        infos = infos.filter((info) => info.id !== id);
+        publish();
+      }),
       adopt: vi.fn(async (accept?: (info: PtyInfo) => boolean, onListed?: (adopting: { label: string; id: string; attached: Promise<string | null> }[]) => void): Promise<string[]> => {
         void accept;
         onListed?.([]);
@@ -248,9 +252,9 @@ describe('re-adoption before a tab opens a shell', () => {
   });
 
   // What the registry's adopt does: once `list` answers, an entry under each accepted pty's label whose attach is under
-  // way; `attach(label)` answers that attach (a pty whose attach failed answers with no terminal).
+  // way; `attach(label)` answers the oldest unanswered attach under that label (a failed attach answers no terminal).
   function hostAdoption() {
-    const attaches = new Map<string, (ok: boolean) => void>();
+    const attaches = new Map<string, ((ok: boolean) => void)[]>();
     let list!: (labels: string[]) => void;
     registry.terminals.adopt.mockImplementationOnce(
       (accept = () => true, onListed) =>
@@ -260,7 +264,7 @@ describe('re-adoption before a tab opens a shell', () => {
               .filter((label) => accept({ label, appSessionId: A } as PtyInfo))
               .map((label) => {
                 const id = registry.terminals.open({ appSessionId: A, label, cwd: '/tmp/maws-harness/a' });
-                const attached = new Promise<string | null>((resolve) => attaches.set(label, (ok) => resolve(ok ? id : null)));
+                const attached = new Promise<string | null>((resolve) => attaches.set(label, [...(attaches.get(label) ?? []), (ok) => resolve(ok ? id : null)]));
                 return { label, id, attached };
               });
             registry.terminals.open.mockClear();
@@ -269,7 +273,7 @@ describe('re-adoption before a tab opens a shell', () => {
           };
         }),
     );
-    return { list: (labels: string[]) => list(labels), attach:(label: string, ok = true) => attaches.get(label)!(ok) };
+    return { list: (labels: string[]) => list(labels), attach: (label: string, ok = true) => attaches.get(label)!.shift()!(ok) };
   }
 
   it('opens nothing while the adoption is in flight, then takes the pty re-adopted under the tab’s label', async () => {
@@ -331,40 +335,61 @@ describe('re-adoption before a tab opens a shell', () => {
     await vi.waitFor(() => expect(restored.terminalId).toBe('t1'));
   });
 
-  it('bounds an attach that never answers: the stale handle is closed and never taken, and its tab opens a new shell', async () => {
-    expect(ADOPTION_TIMEOUT_MS).toBe(10_000);
+  it('bounds an attach that never answers above main’s 10 s: the shell is left running, the handle never taken, and its tab opens a new shell', async () => {
+    expect(ADOPTION_TIMEOUT_MS).toBe(12_000); // main's typed timeout (10 s) answers a stuck attach first
     vi.useFakeTimers();
     const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
     const host = hostAdoption();
     const adoption = adoptTerminals();
     const state = newState({ instanceId: 'terminal:stuck' });
-    registry.terminals.close.mockImplementationOnce(() => new Promise(() => {})); // even its kill hangs
     host.list(['terminal:stuck']);
     await vi.advanceTimersByTimeAsync(ADOPTION_TIMEOUT_MS - 1);
     expect(state.terminalId).toBeNull();
-    expect(registry.terminals.close).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1);
-    expect(registry.terminals.close).toHaveBeenCalledWith('t1');
+    expect(registry.terminals.release).toHaveBeenCalledWith('t1');
+    expect(registry.terminals.close).not.toHaveBeenCalled(); // no shell is killed for being slow
     await expect(adoption).resolves.toEqual([]);
-    expect(state.terminalId).toBe('t2'); // a new shell, not the handle still listed under its label
+    expect(state.terminalId).toBe('t2');
     expect(registry.terminals.open).toHaveBeenCalledWith({ appSessionId: A, label: 'terminal:stuck', cwd: '/tmp/maws-harness/a' });
     expect(logged).toHaveBeenCalledOnce();
     logged.mockRestore();
   });
 
-  it('bounds a list that never answers: every tab opens a new shell, and a list answering after adopts nothing', async () => {
+  it('bounds a list that never answers; a late list leaves a pty whose label has a new shell running and keeps any other adoptable', async () => {
     vi.useFakeTimers();
     const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
     const host = hostAdoption();
     const adoption = adoptTerminals();
     const state = newState({ instanceId: 'terminal:restored' });
+    const later = terminalTool.createState({ appSessionId: null, session: null, instanceId: 'terminal:later', params: {} }); // no session yet
     await vi.advanceTimersByTimeAsync(ADOPTION_TIMEOUT_MS);
     await expect(adoption).resolves.toEqual([]);
     expect(state.terminalId).toBe('t1');
-    host.list(['terminal:restored']);
-    expect(registry.terminals.list()).toHaveLength(1); // nothing re-created under the label its new shell took
-    expect(logged).toHaveBeenCalledOnce();
+    expect(later.terminalId).toBeNull();
+    host.list(['terminal:restored', 'terminal:later']); // accepted, as a list in time would be
+    expect(registry.terminals.release).toHaveBeenCalledWith('t2'); // terminal:restored already runs t1
+    expect(registry.terminals.close).not.toHaveBeenCalled();
+    terminalTool.open!(later, { cwd: '/tmp/maws-harness/a' }); // its session is shown now: it waits for the late attach
+    expect(later.terminalId).toBeNull();
+    host.attach('terminal:later');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(later.terminalId).toBe('t3');
+    expect(registry.terminals.open).not.toHaveBeenCalled();
     logged.mockRestore();
+  });
+
+  it('two ptys listed under one label: the tab waits for both attaches before it takes one', async () => {
+    const host = hostAdoption();
+    void adoptTerminals();
+    const state = newState({ instanceId: 'terminal:dup' });
+    host.list(['terminal:dup', 'terminal:dup']);
+    host.attach('terminal:dup');
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(state.terminalId).toBeNull(); // the second attach is still waited for
+    host.attach('terminal:dup');
+    await vi.waitFor(() => expect(state.terminalId).toBe('t1'));
+    expect(registry.terminals.open).not.toHaveBeenCalled();
   });
 });
 

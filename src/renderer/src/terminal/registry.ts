@@ -321,6 +321,13 @@ export class TerminalRegistry {
     this.dispose(entry);
   }
 
+  // Lets go of a terminal without ending its pty (a re-adopted one whose attach ran out of time): the handle is disposed
+  // and the pty runs on, for the next reload's adoption. An attach answering after the release restores nothing.
+  release(id: TerminalId): void {
+    const entry = this.entries.get(id);
+    if (entry) this.dispose(entry);
+  }
+
   // What runs in the foreground. Rejects when the host cannot answer: the tool then fails closed and asks before
   // closing, rather than reading a failure as "nothing is running".
   async foreground(id: TerminalId): Promise<{ process: string | null; busy: boolean }> {
