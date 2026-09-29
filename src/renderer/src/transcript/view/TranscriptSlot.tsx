@@ -22,9 +22,10 @@ export function TranscriptSlot({ appSessionId, agentId, className }: TranscriptS
   const source = ipcSource(appSessionId, agentId); // memoised per key
   const rewind = useMemo(() => (agentId === undefined ? ipcRewind(appSessionId) : undefined), [appSessionId, agentId]);
   // Where the session runs, from its record (its worktree's checkout when it has one): the engine's Bash input names no
-  // cwd, so a shell call shows this, labelled as the session's directory.
+  // cwd, so a shell call shows this, labelled as the session's directory. Not for a child agent's transcript: a
+  // worktree-isolated subagent's shell ran elsewhere.
   const sessionDirectory = useSessions((state) => {
-    const record = state.records.get(appSessionId);
+    const record = agentId === undefined ? state.records.get(appSessionId) : undefined;
     return record ? (record.worktree?.path ?? record.directory) : null;
   });
   return (
