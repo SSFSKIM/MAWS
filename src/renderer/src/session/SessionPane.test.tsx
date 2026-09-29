@@ -26,6 +26,10 @@ afterEach(() => {
   cleanup();
   delete (window as { maws?: MawsBridge }).maws;
   resetSlots();
+  // C7 start: a failing assertion must not leave the fake clock or the windows to the next test
+  vi.useRealTimers();
+  useUsage.setState({ windows: null });
+  // C7 end
 });
 
 describe('session pane', () => {
@@ -109,15 +113,13 @@ describe('status line', () => {
     // C7 start: the windows carry their reading time and reset countdown (mockup 04: `5h 74% ↻2h37m`)
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(Date.parse('2026-09-28T10:23:00Z'));
-    const window = (percent: number, resetsAt: string) => ({ percent, resetsAt, recordedAt: '2026-09-28T10:20:00Z' });
-    useUsage.setState({ windows: { fiveHour: window(74, '2026-09-28T13:00:00Z'), sevenDay: window(82, '2026-10-04T07:23:00Z'), scoped: [] } });
+    const usageWindow = (percent: number, resetsAt: string) => ({ percent, resetsAt, recordedAt: '2026-09-28T10:20:00Z' });
+    useUsage.setState({ windows: { fiveHour: usageWindow(74, '2026-09-28T13:00:00Z'), sevenDay: usageWindow(82, '2026-10-04T07:23:00Z'), scoped: [] } });
     const id = idOf('Charter + research'); // the scenario has it direct; routed, it shows the drain target's windows
     const direct = useSessions.getState().records.get(id)!;
     useSessions.setState({ records: new Map(useSessions.getState().records).set(id, { ...direct, gateway: { ...direct.gateway, routed: true } }) });
     render(<SessionPane appSessionId={id} paneIndex={0} />);
     expect(statusButtons().map((b) => b.textContent).slice(1)).toEqual(['ctx 41% of 200k', '5h 74% ↻2h37m', '7d 82% ↻5d21h', '$0.07', 'default']);
-    useUsage.setState({ windows: null });
-    vi.useRealTimers();
     // C7 end
   });
 
