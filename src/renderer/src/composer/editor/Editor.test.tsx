@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import type { Draft } from '@shared/ipc/schema/session';
+import { fakeClient } from '../../../../../test/support/fake-client';
 import { connectKeys } from '../../keymap/dispatcher';
 import { resetCatalogStore } from '../../stores/catalog';
 import { prefillComposer, resetComposerStore } from '../../stores/composer';
@@ -126,6 +127,51 @@ describe('the editor mounts over its draft, takes prefills and submits through t
     await act(async () => void content.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })));
     await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ content: 'see @zzz' }), 'send'));
     expect(handle.current?.doc().content).toHaveLength(1);
+  });
+
+  it('the @ menu holds Enter while its file search lags the query: never the half-typed token, never a stale row', async () => {
+    const fake = fakeClient();
+    window.maws = fake.client;
+    try {
+      const onSubmit = vi.fn<(s: Serialized, how: 'send' | 'steer') => Promise<boolean>>(async () => false);
+      const { port } = drafts(null);
+      const handle = createRef<EditorHandle>();
+      const { container } = render(<Editor appSessionId={APP} cwd="/repo" sessionId={null} drafts={port} client={client} onSubmit={onSubmit} handle={handle} />);
+      const content = contentOf(container);
+      content.focus();
+      const enter = () => act(async () => void content.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })));
+      const options = () => [...document.querySelectorAll('[role="option"]')].map((o) => [o.textContent, o.getAttribute('aria-disabled')]);
+      const answer = (paths: string[]) => act(() => fake.reply('git.lsFiles', { paths, truncated: false, source: 'git' }));
+
+      act(() => handle.current?.insertText('see @sr'));
+      await waitFor(() => expect(document.querySelector('.react-renderer')).not.toBeNull()); // the @ popup is open
+      await enter(); // before the first answer
+      expect(onSubmit).not.toHaveBeenCalled();
+      expect(handle.current?.serialize().display).toBe('see @sr');
+      expect(options()).toEqual([['Searching files…', 'true']]);
+      await waitFor(() => expect(fake.pending('git.lsFiles')).toBe(1));
+      await answer(['src/a.ts']);
+      expect(options()).toEqual([['src/a.ts', null]]);
+
+      act(() => handle.current?.insertText('c/b'));
+      await enter(); // at once, before the menu has even rendered the new query
+      expect(handle.current?.serialize().display).toBe('see @src/b'); // no stale row picked
+      await waitFor(() => expect(options()).toEqual([['Searching files…', 'true']])); // the previous query's rows are gone
+      await enter();
+      expect(handle.current?.serialize().display).toBe('see @src/b');
+      await waitFor(() => expect(fake.pending('git.lsFiles')).toBe(1));
+      await answer(['src/b.ts']);
+      await enter();
+      expect(handle.current?.serialize().display).toBe('see @src/b.ts');
+      expect(JSON.stringify(handle.current?.doc())).toContain('"id":"src/b.ts"'); // the chip, from the current query's row
+      expect(onSubmit).not.toHaveBeenCalled();
+      expect(fake.invoked('git.lsFiles')).toEqual([
+        { directory: '/repo', query: 'sr', limit: 30 },
+        { directory: '/repo', query: 'src/b', limit: 30 },
+      ]);
+    } finally {
+      delete (window as { maws?: MawsBridge }).maws;
+    }
   });
 
   it('a recalled bare slash command opens no palette: the arrows keep walking history and Enter sends', async () => {

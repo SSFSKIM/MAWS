@@ -69,7 +69,9 @@ export function suggestionRenderer(Component: PopupComponent, env: () => EditorE
 }
 
 // The keyboard of a list: arrows move over enabled and disabled rows alike, Enter and Tab choose the active row (a
-// disabled row stays put), Escape closes the popup without the key going anywhere else.
+// disabled row stays put), Escape closes the popup without the key going anywhere else. Rows are the ones rendered for
+// `props.query`; a key that arrives after the document moved on and before the list re-rendered is held, so no row
+// found for an older query is ever chosen.
 export function useListKeys<T extends PopupItem>(props: PopupProps, items: readonly T[]): { active: number; setActive(i: number): void; choose(item: T): void } {
   const [active, setActive] = useState(0);
   const [lastQuery, setLastQuery] = useState(props.query);
@@ -81,13 +83,18 @@ export function useListKeys<T extends PopupItem>(props: PopupProps, items: reado
   const choose = (item: T) => {
     if (!item.disabled) props.command(item);
   };
+  const stale = () => {
+    const live: unknown = props.pluginKey.getState(props.editor.state)?.query;
+    return typeof live === 'string' && live !== props.query;
+  };
   useImperativeHandle(props.ref, () => ({
-    hasRows: () => items.length > 0,
+    hasRows: () => items.length > 0 || stale(),
     onKeyDown(event) {
       if (event.key === 'Escape') {
         exitSuggestion(props.editor.view, props.pluginKey);
         return true;
       }
+      if (stale()) return ['ArrowDown', 'ArrowUp', 'Enter', 'Tab'].includes(event.key);
       if (items.length === 0) return false;
       if (event.key === 'ArrowDown') setActive((bounded + 1) % items.length);
       else if (event.key === 'ArrowUp') setActive((bounded - 1 + items.length) % items.length);
