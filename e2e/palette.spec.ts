@@ -37,6 +37,8 @@ async function reveal(page: Page, app: ElectronApplication, project: string): Pr
   await page.locator('[data-region="sidebar"] [data-kind="session"]').first().focus();
   await menu(app, 'palette.open');
   await expect(palette).toBeVisible();
+  // Under load the first keystrokes can land before the input takes focus; type only once it holds it.
+  await expect(palette.getByPlaceholder('Search sessions, projects and actions')).toBeFocused();
   await page.keyboard.type(project);
   await expect(palette.getByRole('group', { name: 'Projects' }).getByRole('option', { name: project })).toBeVisible();
   await page.keyboard.press('End');
