@@ -11,6 +11,7 @@ import { connectActions, connectKeys } from './keymap/dispatcher';
 import { connectVisibility } from './session/visibility';
 import { persistLayout } from './stores/layout';
 import { useSettings } from './stores/settings';
+import { connectTranscript } from './transcript/shell'; // C6
 
 export function App() {
   const resolvedTheme = useSettings((s) => s.state?.resolvedTheme);
@@ -24,6 +25,7 @@ export function App() {
   useEffect(() => connectActions(), []); // C5: menu actions in, the enabled set out
   useEffect(() => connectScenarioSessionCreator(), []); // C5: the stub's session creator in launch mode scenario
   useEffect(() => connectVisibility(), []); // C5: which sessions are on screen, for the unread rule
+  useEffect(() => connectTranscript(), []); // C6: the transcript slot and its path chips' file tabs
 
   // index.html ships data-theme="light" for the first paint; from then on main's resolved theme decides.
   useEffect(() => {

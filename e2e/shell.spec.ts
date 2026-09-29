@@ -246,7 +246,9 @@ async function firstInstance(maws: MawsLaunch): Promise<Saved> {
     await expect(fixTab).toHaveAttribute('aria-selected', 'true');
     await expect(fixTab.getByRole('img', { name: 'Needs approval' })).toHaveText('◐');
     const panel = main.getByRole('tabpanel');
-    await expect(panel.getByText('Transcript arrives with C6')).toBeVisible();
+    // C6 registers the transcript slot: the session's transcript is mounted in place of C5's fallback.
+    await expect(panel.locator('.transcript')).toHaveCount(1);
+    await expect(panel.getByText('Transcript arrives with C6')).toHaveCount(0);
     await expect(panel.getByText('Approval needed')).toBeVisible();
     await expect(panel.getByTestId('request-input')).toHaveText('git log --oneline');
     await expect(panel.getByText('Composer arrives with C7')).toBeVisible();
