@@ -105,6 +105,11 @@ export class SubagentsHandle {
     if (draft !== this.state.draft) this.update({ draft });
   };
 
+  // A relay's steer was answered: its text leaves the box, unless the draft now belongs to another agent.
+  clearDraftFor = (agentId: AgentId) => {
+    if (this.draftFor === agentId) this.setDraft('');
+  };
+
   setScrollTop = (scrollTop: number) => {
     if (scrollTop !== this.state.scrollTop) this.update({ scrollTop });
   };
@@ -113,9 +118,10 @@ export class SubagentsHandle {
 
   showMore = (section: 'active' | 'done', count: number) => this.update({ shown: { ...this.state.shown, [section]: count } });
 
-  // A pinned tab's session changed under it: that session's lists, with this tab's view, scroll and draft reset.
+  // A pinned tab's session changed under it: that session's lists, with this tab's view, scroll and draft reset. No
+  // session shown (the Overview) changes nothing: returning to the same session finds the tab as it was.
   follow = (appSessionId: AppSessionId | null) => {
-    if (appSessionId === this.state.appSessionId) return;
+    if (appSessionId === null || appSessionId === this.state.appSessionId) return;
     this.watch(appSessionId);
     this.draftFor = null;
     this.update({ appSessionId, view: LISTS, shown: { ...INITIAL_SHOWN }, scrollTop: 0, draft: '' });

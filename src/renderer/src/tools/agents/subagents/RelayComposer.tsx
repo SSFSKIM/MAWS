@@ -22,14 +22,15 @@ export interface DisabledReason {
 
 // Why the box is disabled, or null when a relay can go: what the graph knows of the agent first (known only from disk,
 // ended), then the parent (not live here), a relay still pending, and the background flag (a foreground child's parent
-// reads messages only after it returns; unknown when no start event was seen this launch).
+// reads messages only after it returns; unknown when no start event was seen this launch). Only an `asked` relay blocks
+// (controller, M2 review): a `forwarded` one rests there for the child's whole run on 2.1.283, and a send replaces it.
 export function relayDisabledReason({ node, status, relay, session }: { node: TaskNode | undefined; status: EngineSessionStatus | null; relay: Relay | undefined; session: string }): DisabledReason | null {
   const reason = (text: string, tooltip: string | null = null) => ({ text, tooltip });
   const { disabled } = RELAY_COPY;
   if (node?.status === 'unknown') return reason(disabled.diskOnly);
   if (node && isEnded(node.status)) return reason(node.status === 'stopped' ? disabled.stopped : node.status === 'exited' ? disabled.exited : disabled.finished);
   if (status === null) return reason(disabled.notRunningHere);
-  if (relay && isPending(relay.state)) return reason(disabled.pending);
+  if (relay?.state.kind === 'asked') return reason(disabled.pending);
   if (node?.isBackground === false) return reason(disabled.foreground(session), disabled.foregroundTooltip);
   if (node?.isBackground !== true) return reason(disabled.backgroundUnknown(session));
   return null;
@@ -63,11 +64,13 @@ interface Props {
   node: TaskNode | undefined;
   status: EngineSessionStatus | null;
   sessionTitle: string;
+  visible: boolean; // ctx.visible: the pending line's elapsed does not tick while the panel is collapsed
   draft: string; // the tool state's, so it survives the host's unmount
   onDraft(draft: string): void;
+  onSent(): void; // clears the draft if it is still this agent's (the owner may have moved on while the steer was out)
 }
 
-export function RelayComposer({ appSessionId, agentId, node, status, sessionTitle, draft, onDraft }: Props) {
+export function RelayComposer({ appSessionId, agentId, node, status, sessionTitle, visible, draft, onDraft, onSent }: Props) {
   const key = relayKey(appSessionId, agentId);
   const relay = useRelays((s) => s.relays.get(key));
   const [sending, setSending] = useState(false); // the steer is out and unanswered
@@ -75,7 +78,7 @@ export function RelayComposer({ appSessionId, agentId, node, status, sessionTitl
   const reason = relayDisabledReason({ node, status, relay, session: sessionTitle });
   const disabled = reason !== null || sending;
   const canSend = !disabled && draft.trim() !== '';
-  const now = useTicker(relay?.state.kind === 'asked' && relay.state.childEndedAt === null);
+  const now = useTicker(visible && relay?.state.kind === 'asked' && relay.state.childEndedAt === null);
   const line = relayLine(relay, now, sessionTitle, title);
 
   // O1: a relay the engine dropped puts its text back when the box is empty; a delivered one is cleared at once.
@@ -96,7 +99,7 @@ export function RelayComposer({ appSessionId, agentId, node, status, sessionTitl
     } finally {
       setSending(false);
     }
-    if (useRelays.getState().relays.get(key)?.state.kind !== 'failed') onDraft(''); // a refused steer keeps the draft
+    if (useRelays.getState().relays.get(key)?.state.kind !== 'failed') onSent(); // a refused steer keeps the draft
   };
 
   const edit = (next: string) => {

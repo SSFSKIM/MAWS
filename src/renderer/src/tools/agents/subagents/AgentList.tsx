@@ -11,7 +11,7 @@ import { SUBAGENTS_COPY } from '../copy';
 import { elapsedOf, formatElapsed } from '../model/elapsed';
 import { agentRows, emptyGraph, rowSecondLine, rowTitle, type AgentRow, type TaskGraph } from '../model/task-graph';
 import { useTaskGraph } from '../store';
-import { outcomeOf, refOf, useTicker } from './shared';
+import { outcomeOf, refOf, SLOW_TICK_MS, useTicker } from './shared';
 import type { ListSection, SubagentsHandle, SubagentsState } from './SubagentsTool';
 
 const EMPTY_GRAPH = emptyGraph();
@@ -37,8 +37,12 @@ export function AgentList({ appSessionId, handle, expanded, shown, scrollTop, ct
 
   const rows = useMemo(() => Object.fromEntries(SECTIONS.map((name) => [name, agentRows(graph, name)])) as Record<ListSection, AgentRow[]>, [graph]);
   const boundOf = (name: ListSection) => (name === 'disk' ? rows.disk.length : shown[name]);
-  const ticking = rows.active.slice(0, shown.active).some((row) => elapsedOf(graph.tasks.get(row.taskId)!, 0)?.live === true);
-  const now = useTicker(ticking && ctx.visible);
+  // Active's elapsed ticks once a second while a shown row is live; Done's `<ago>` on the slow tick while it is shown.
+  // Neither ticks while its section is collapsed or the tool hidden.
+  const ticking = expanded.active && rows.active.slice(0, shown.active).some((row) => elapsedOf(graph.tasks.get(row.taskId)!, 0)?.live === true);
+  const fast = useTicker(ticking && ctx.visible);
+  const slow = useTicker(expanded.done && rows.done.length > 0 && ctx.visible, SLOW_TICK_MS);
+  const now = Math.max(fast, slow);
 
   const scroller = useRef<HTMLDivElement>(null);
   const [restoreTo] = useState(scrollTop); // Back and a remount return to where the lists were

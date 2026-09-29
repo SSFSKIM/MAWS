@@ -156,7 +156,7 @@ describe('relay store', () => {
     expect(fake.listeners()).toBe(0);
   });
 
-  it('holds one pending relay per agent: a second send while one is in flight or pending sends nothing', async () => {
+  it('refuses a second send while the steer is in flight or asked, and replaces a forwarded relay with the next send', async () => {
     const first = relays.getState().send(A, LOOPER, 'one', false);
     await relays.getState().send(A, LOOPER, 'two', false);
     expect(fake.inputs.steer).toHaveLength(1);
@@ -164,7 +164,15 @@ describe('relay store', () => {
     await first;
     await relays.getState().send(A, LOOPER, 'three', false);
     expect(fake.inputs.steer).toHaveLength(1);
-    expect(relayOf(LOOPER)?.text).toBe('one');
+    expect(relayOf(LOOPER)).toMatchObject({ text: 'one', state: { kind: 'asked' } });
+    batch(between(150, 200)); // the parent's SendMessage: forwarded, where 2.1.283 leaves it
+    expect(stateOf(LOOPER)?.kind).toBe('forwarded');
+    const second = relays.getState().send(A, LOOPER, 'four', false);
+    expect(fake.inputs.steer).toHaveLength(2);
+    await fake.answer('steer', { messageUuid: 'second-uuid' });
+    await second;
+    expect(relayOf(LOOPER)).toMatchObject({ text: 'four', state: { kind: 'asked', messageUuid: 'second-uuid' } });
+    expect(fake.listeners()).toBe(1);
   });
 
   it('applies what arrived while the steer was in flight', async () => {

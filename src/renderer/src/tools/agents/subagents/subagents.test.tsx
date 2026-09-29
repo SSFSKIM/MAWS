@@ -18,7 +18,7 @@ import { itemFor, permission } from '../../../request-card/test-requests';
 import { useAttention } from '../../../stores/attention';
 import { useSessions } from '../../../stores/sessions';
 import { A as HOST_A, panelOf, resetPanelStores } from '../../../test-support/panel';
-import { ipcSource, useTranscriptStore, type SubagentRef } from '../../../transcript';
+import { ipcSource, registerTranscriptActions, useTranscriptStore, type SubagentRef } from '../../../transcript';
 import { builder, request, tool } from '../../../transcript/model/test-events';
 import { setAgentWorkClient } from '../client';
 import { fakeAgentWorkClient, type FakeAgentWorkClient } from '../fake-work-client';
@@ -86,9 +86,9 @@ const finished = (taskId: string, seq: number, over: Record<string, unknown> = {
 const dispatch = (issuer: string, toolUseId: string, seq: number) => event('tool.use', { toolUseId, toolName: 'Agent', input: {}, agentId: issuer }, { seq });
 const lastSeqOf = (events: SessionEvent[]) => Math.max(0, ...events.map((e) => e.seq ?? 0));
 
-function Mounted({ state, appSessionId = A, visible = true }: { state: SubagentsHandle; appSessionId?: AppSessionId; visible?: boolean }) {
-  const session = useSessions((s) => s.records.get(appSessionId) ?? null);
-  const engine = useSessions((s) => s.engine.get(appSessionId) ?? null);
+function Mounted({ state, appSessionId = A, visible = true }: { state: SubagentsHandle; appSessionId?: AppSessionId | null; visible?: boolean }) {
+  const session = useSessions((s) => (appSessionId ? (s.records.get(appSessionId) ?? null) : null));
+  const engine = useSessions((s) => (appSessionId ? (s.engine.get(appSessionId) ?? null) : null));
   const ctx: PanelToolContext = {
     appSessionId, session, status: engine, pinned: false, visible, focusRequest: 0, setTitle: () => {}, close: () => {}, openTool: panelHost.addTool,
   };
@@ -341,6 +341,7 @@ describe('drill-in', () => {
     const perm = permission({ requestId: request('r-child'), toolUseId: tool('b1'), toolName: 'Bash', displayName: 'Bash', input: { command: 'git status' }, agentId: child });
     const b = builder();
     b.turn('u1', 'Run git status');
+    b.text('m0', 0, 'Reading [a.ts](src/a.ts) first.'); // a path chip, which calls the registered openFile
     b.toolUse('b1', 'Bash', { command: 'git status' }, 'm1', 0);
     const { requestId, toolUseId, toolName, displayName, input, description, decisionReasonType, suggestions, blockedPath } = perm;
     b.emit('permission.requested', { requestId, toolUseId, toolName, displayName, input, description, decisionReasonType, suggestions, blockedPath });
@@ -350,6 +351,12 @@ describe('drill-in', () => {
     const drill = document.querySelector<HTMLElement>('[data-view="agent"]')!;
     await waitFor(() => expect(within(drill).getByRole('heading', { name: 'Bash' })).toBeTruthy());
     expect(within(drill).getAllByRole('button').some((button) => /Allow/.test(button.textContent ?? ''))).toBe(true);
+    // A callback another child registered (C8c's openFile, stubbed here) reaches the child transcript's rows.
+    const openFile = vi.fn();
+    const off = registerTranscriptActions({ openFile });
+    fireEvent.click(await within(drill).findByTitle('src/a.ts'));
+    expect(openFile).toHaveBeenCalledWith('src/a.ts', undefined);
+    off();
   });
 
   it('open({ agentId }) switches the view; a pending selection by tool-use id resolves on subagent.started', async () => {
@@ -491,6 +498,46 @@ describe('relay composer', () => {
     expect(box().disabled).toBe(false);
   });
 
+  it('a forwarded relay leaves the box open and its line up; the next send replaces it, and asked blocks again', async () => {
+    await mount({ events: [started('a1', 1)], params: { agentId: 'a1' as AgentId } });
+    fireEvent.change(box(), { target: { value: 'first' } });
+    fireEvent.click(sendButton());
+    await act(() => fake.answer('steer', { messageUuid: 'steer-one' }));
+    expect(box().placeholder).toBe('Waiting for the last relay');
+    push([event('tool.use', { toolUseId: 'tu-send', toolName: 'SendMessage', input: { to: 'a1', message: 'first' } }, { seq: 5 })]);
+    expect(line()).toBe(`${TITLE} sent it with SendMessage after 0 parent rounds · Agent a1 gets it at its next tool round`);
+    expect(box().disabled).toBe(false);
+    fireEvent.change(box(), { target: { value: 'second' } });
+    expect(line()).toMatch(/sent it with SendMessage/); // the forwarded line shows until the next send
+    fireEvent.click(sendButton());
+    expect(fake.inputs.steer.map(([, content]) => content)).toEqual([relayText({ agentId: 'a1' as AgentId, name: null }, 'first'), relayText({ agentId: 'a1' as AgentId, name: null }, 'second')]);
+    await act(() => fake.answer('steer', { messageUuid: 'steer-two' }));
+    expect(line()).toMatch(new RegExp(`^Asked ${TITLE} to relay`));
+    expect(box().disabled).toBe(true);
+  });
+
+  it('an answered steer clears the draft only while the draft is still this agent’s', async () => {
+    const { handle } = await mount({ events: [started('a1', 1), started('a2', 2)], params: { agentId: 'a1' as AgentId } });
+    fireEvent.change(box(), { target: { value: 'to a1' } });
+    fireEvent.click(sendButton());
+    act(() => subagentsTool.open!(handle, { agentId: 'a2' as AgentId }));
+    fireEvent.change(box(), { target: { value: 'to a2, half typed' } });
+    await act(() => fake.answer('steer', { messageUuid: 'steer-a1' }));
+    expect(handle.snapshot().draft).toBe('to a2, half typed');
+  });
+
+  it('the pending line’s elapsed does not tick while the tool is hidden', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
+    vi.setSystemTime(Date.parse(at(0)));
+    const { handle, rerender } = await mount({ events: [started('a1', 1)], params: { agentId: 'a1' as AgentId } });
+    fireEvent.change(box(), { target: { value: 'ping' } });
+    fireEvent.click(sendButton());
+    await act(() => fake.answer('steer', { messageUuid: 'steer-hidden' }));
+    expect(vi.getTimerCount()).toBe(2); // the header's elapsed and the line's
+    rerender(<Mounted state={handle} visible={false} />);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it('asked without the clause when the parent was idle', async () => {
     await mount({ events: [started('a1', 1)], params: { agentId: 'a1' as AgentId } });
     fireEvent.change(box(), { target: { value: 'ping' } });
@@ -585,7 +632,7 @@ describe('subagents tool', () => {
     expect(fake.listeners()).toBe(0);
   });
 
-  it('the elapsed ticker runs only while a shown agent is live and the tool is visible', async () => {
+  it('the one-second ticker runs only while a shown Active agent is live, Active expanded and the tool visible', async () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
     vi.setSystemTime(Date.parse(at(1)));
     const { handle, rerender } = await mount({ events: [started('a1', 1)] });
@@ -594,8 +641,36 @@ describe('subagents tool', () => {
     expect(vi.getTimerCount()).toBe(0);
     rerender(<Mounted state={handle} visible />);
     expect(vi.getTimerCount()).toBe(1);
-    push([finished('a1', 2)]);
+    fireEvent.click(within(section('active')!).getByRole('button', { name: 'Active · 1' })); // collapsed
     expect(vi.getTimerCount()).toBe(0);
+    fireEvent.click(within(section('active')!).getByRole('button', { name: 'Active · 1' }));
+    expect(vi.getTimerCount()).toBe(1);
+    push([finished('a1', 2, {}, at(2))]);
+    expect(vi.getTimerCount()).toBe(1); // only Done's slow tick now
+    act(() => vi.advanceTimersByTime(1000));
+    expect(vi.getTimerCount()).toBe(1);
+    rerender(<Mounted state={handle} visible={false} />);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('a Done row’s ago keeps advancing on the slow tick after the last live agent ends', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
+    vi.setSystemTime(Date.parse(at(0)));
+    await mount({ events: [started('a1', 1)] });
+    push([finished('a1', 2, {}, at(1))]);
+    expect(rowsOf('done')[0].line).toBe('finished · just now');
+    act(() => vi.advanceTimersByTime(90_000));
+    expect(rowsOf('done')[0].line).toBe('finished · 1m ago');
+  });
+
+  it('a pinned tab passing through the Overview keeps its view and draft', async () => {
+    const { handle, rerender } = await mount({ events: [started('a1', 1)], params: { agentId: 'a1' as AgentId } });
+    act(() => handle.setDraft('for A'));
+    rerender(<Mounted state={handle} appSessionId={null} />);
+    expect(screen.getByText('Open a session to see its subagents')).toBeTruthy();
+    rerender(<Mounted state={handle} appSessionId={A} />);
+    expect(handle.snapshot()).toMatchObject({ appSessionId: A, view: { kind: 'agent', agentId: 'a1' }, draft: 'for A' });
+    expect(document.querySelector('[data-view="agent"]')).not.toBeNull();
   });
 
   it('a pinned tool follows the shown session: that session’s lists, its view, scroll and draft reset', async () => {

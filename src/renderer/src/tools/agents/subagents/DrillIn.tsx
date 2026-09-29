@@ -96,7 +96,7 @@ export function DrillIn({ appSessionId, agentId, handle, draft, ctx }: Props) {
         </div>
       </header>
       <Transcript key={source.key ?? agentId} source={source} variant="child" actions={actions} renderRequest={renderRequest} className="min-h-0 flex-1" />
-      <RelayComposer appSessionId={appSessionId} agentId={agentId} node={node} status={ctx.status} sessionTitle={sessionTitle} draft={draft} onDraft={handle.setDraft} />
+      <RelayComposer appSessionId={appSessionId} agentId={agentId} node={node} status={ctx.status} sessionTitle={sessionTitle} visible={ctx.visible} draft={draft} onDraft={handle.setDraft} onSent={() => handle.clearDraftFor(agentId)} />
     </div>
   );
 }

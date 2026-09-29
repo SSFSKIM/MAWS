@@ -13,7 +13,7 @@ import { RELAY_COPY } from './copy';
 import { isPending, matchesReceipt, matchesSendMessage, parentRoundsBetween, relayText, type Relay } from './model/relay';
 
 export interface RelayStore {
-  relays: Map<string, Relay>; // key `appSessionId:agentId`; one pending relay per agent (the composer is disabled while one is pending)
+  relays: Map<string, Relay>; // key `appSessionId:agentId`; one relay per agent: a send is refused while it is `asked` (or its steer unanswered) and replaces a `forwarded` one
   send(appSessionId: AppSessionId, agent: { agentId: AgentId; name: string | null }, text: string, parentTurnOpen: boolean): Promise<void>;
   dismiss(key: string): void;
 }
@@ -123,7 +123,9 @@ export function createRelayStore() {
       async send(appSessionId, agent, text, parentTurnOpen) {
         const key = relayKey(appSessionId, agent.agentId);
         const existing = get().relays.get(key);
-        if (inFlight.has(key) || (existing && isPending(existing.state))) return;
+        // Only an unforwarded steer blocks (controller, M2 review): a second would race it. A `forwarded` relay rests there
+        // for the child's whole run on 2.1.283 (O3), so a new send replaces it.
+        if (inFlight.has(key) || existing?.state.kind === 'asked') return;
         const base = { appSessionId, agentId: agent.agentId, name: agent.name, text };
         const content = relayText(agent, text);
         const refusal = sendContentRefusal(content);

@@ -9,15 +9,17 @@ import { formatAgo } from '../model/elapsed';
 import { rowTitle, type TaskNode } from '../model/task-graph';
 import type { TaskGraphEntry } from '../store';
 
-// The wall clock, advanced once a second while `active` (a shown elapsed is live and the tool is visible); no timer
-// otherwise (mockup 03 shows seconds, so C5's 30-second `useNow` is not used).
-export function useTicker(active: boolean): number {
+// The wall clock, advanced every `periodMs` while `active`, with no timer otherwise. A live elapsed ticks once a second
+// (mockup 03 shows seconds); a finished agent's `<ago>` needs only the slow tick C5's `useNow` keeps (30 s), gated here
+// by the tool's visibility, which `useNow` cannot be.
+export const SLOW_TICK_MS = 30_000;
+export function useTicker(active: boolean, periodMs = 1000): number {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (!active) return;
-    const timer = setInterval(() => setNow(Date.now()), 1000);
+    const timer = setInterval(() => setNow(Date.now()), periodMs);
     return () => clearInterval(timer);
-  }, [active]);
+  }, [active, periodMs]);
   return now;
 }
 
