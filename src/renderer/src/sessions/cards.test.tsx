@@ -122,6 +122,31 @@ describe('trust card', () => {
     }
   });
 
+  it('a card whose continuation is running ignores Esc and Enter', async () => {
+    const disconnect = connectKeys();
+    try {
+      withMain({ 'session.intent.release': () => intent() }); // session.start waits for the test's answer
+      putIntent(intent());
+      render(<Docked />);
+      useSetup.getState().dock(ID, { kind: 'trust', trust: trustState(), message: MESSAGE });
+      const frame = await screen.findByRole('group', { name: 'Trust this folder?' });
+      act(() => frame.focus());
+      await userEvent.keyboard('{Enter}');
+      expect(fake.invoked('session.start')).toHaveLength(1); // Trust and start, not answered yet
+      // the continuation runs: the card is still docked (a start this window sent), and its keys are unbound
+      act(() => useSetup.getState().dock(ID, { kind: 'trust', trust: trustState(), message: MESSAGE }));
+      const running = await screen.findByRole('group', { name: 'Trust this folder?' });
+      act(() => running.focus());
+      await userEvent.keyboard('{Escape}');
+      await userEvent.keyboard('{Enter}');
+      expect(fake.invoked('session.intent.release'), 'Esc hands nothing back while main runs the start').toEqual([]);
+      expect(fake.invoked('session.start'), 'Enter starts nothing twice').toHaveLength(1);
+      expect(returned).toEqual([]);
+    } finally {
+      disconnect();
+    }
+  });
+
   it("Cancel on a resume's card, sent without a message, releases quietly (main answers null for a record's id)", async () => {
     withMain({ 'session.start': answer({ status: 'needs_trust', appSessionId: ID, trust: trustState() }), 'session.intent.release': () => null });
     render(<Docked />);
