@@ -4,6 +4,9 @@
 // editor scrolls); the toolbar below the box, outside its border. Nothing around it: no heading, no hint line. The
 // same component sits centred on an unstarted session and docked under the transcript (C5 places it); C5's column
 // sizes it at about two thirds of the pane capped near 720 px, and the frame caps itself there too for other hosts.
+// A docked card (a request, or C10's trust and relay-down cards) takes the place of the draft's parts, the attachment
+// strip, the box and the toolbar, under the same chip row (architect's ruling on M6, mockup 04): those parts stay
+// mounted and hidden, so the editor keeps its document, and they hide in the same commit the card mounts.
 import type { ReactNode, RefObject } from 'react';
 import type { Attachment } from '../editor/doc';
 import type { EditorHandle } from '../editor/controller';
@@ -20,20 +23,24 @@ export interface FrameProps {
   editorHandle: RefObject<EditorHandle | null>;
   editor: ReactNode; // M3's Editor (the only element under the composer key sink)
   submit: ReactNode; // the submit control, beside the editor and outside its sink
-  hidden?: boolean; // a docked card has the composer's place: the frame stays mounted (the editor keeps its state)
+  docked?: ReactNode; // a docked card, in the draft's place under the chip row; null or absent: the draft shows
   onOpen?(what: 'models' | 'rules'): void; // a chip showing an engine read opened: the composer reads it then, not per mount
 }
 
-export function Frame({ bindings, cwd, dirty, attachments, editorHandle, editor, submit, hidden = false, onOpen }: FrameProps) {
+export function Frame({ bindings, cwd, dirty, attachments, editorHandle, editor, submit, docked = null, onOpen }: FrameProps) {
+  const isDocked = docked !== null && docked !== undefined;
   return (
-    <div data-composer-frame hidden={hidden} className="mx-auto flex w-full max-w-[720px] min-w-0 flex-col gap-1">
+    <div data-composer-frame data-docked={isDocked || undefined} className="mx-auto flex w-full max-w-[720px] min-w-0 flex-col gap-1">
       <ChipRow bindings={bindings} cwd={cwd} dirty={dirty} onOpen={() => onOpen?.('rules')} />
-      <AttachmentStrip attachments={attachments} onRemove={(id) => editorHandle.current?.removeAttachment(id)} />
-      <div data-composer-box className="flex min-w-0 items-end gap-2 rounded-xl border border-border-strong bg-bg-raised py-1.5 pr-1.5 pl-2.5 focus-within:border-accent">
-        <div className="min-w-0 flex-1 py-0.5">{editor}</div>
-        {submit}
+      {docked}
+      <div data-composer-draft hidden={isDocked} className="flex min-w-0 flex-col gap-1">
+        <AttachmentStrip attachments={attachments} onRemove={(id) => editorHandle.current?.removeAttachment(id)} />
+        <div data-composer-box className="flex min-w-0 items-end gap-2 rounded-xl border border-border-strong bg-bg-raised py-1.5 pr-1.5 pl-2.5 focus-within:border-accent">
+          <div className="min-w-0 flex-1 py-0.5">{editor}</div>
+          {submit}
+        </div>
+        <Toolbar bindings={bindings} cwd={cwd} editor={editorHandle} onOpen={() => onOpen?.('models')} />
       </div>
-      <Toolbar bindings={bindings} cwd={cwd} editor={editorHandle} onOpen={() => onOpen?.('models')} />
     </div>
   );
 }

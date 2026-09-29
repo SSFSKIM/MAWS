@@ -229,14 +229,18 @@ describe("composer DOM under C5's dispatcher", () => {
     const item = itemFor(event, A);
     act(() => useAttention.setState({ bySession: new Map([[A, [item]]]), requests: new Map([[item.id, event]]), version: 1 }));
     const frame = await within(composerOf(0)).findByRole('group', { name: 'Approval needed' });
-    expect(composerOf(0).querySelector('[data-composer-frame]')!.hasAttribute('hidden')).toBe(true);
+    expect(composerOf(0).querySelector('[data-composer-draft]')!.hasAttribute('hidden')).toBe(true); // the box and the toolbar
+    const chips = within(composerOf(0)).getByRole('button', { name: /^Location/ });
+    expect(chips.closest('[hidden]')).toBeNull(); // the chip row stays, above the card (mockup 04)
+    expect(chips.compareDocumentPosition(frame) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(within(composerOf(0)).getByRole('toolbar', { name: 'Composer tools', hidden: true }).closest('[hidden]')).not.toBeNull();
     expect(editorOf().editor.getText()).toBe('a draft kept aside'); // mounted, hidden
     await waitFor(() => expect(document.activeElement).toBe(frame)); // the pane held focus
     expect(useComposerStore.getState().docked.get(A)?.has('req-a' as never)).toBe(true);
     await key(frame, { key: 'Enter' });
     await waitFor(() => expect(invoked('session.answer')).toHaveLength(1));
     act(() => useAttention.setState({ bySession: new Map([[A, []]]), version: 2 }));
-    await waitFor(() => expect(composerOf(0).querySelector('[data-composer-frame]')!.hasAttribute('hidden')).toBe(false));
+    await waitFor(() => expect(composerOf(0).querySelector('[data-composer-draft]')!.hasAttribute('hidden')).toBe(false));
     expect(editorOf().editor.getText()).toBe('a draft kept aside');
     await waitFor(() => expect(editorOf().contains(document.activeElement)).toBe(true)); // focus is back in the editor
   });
@@ -273,12 +277,12 @@ describe("composer DOM under C5's dispatcher", () => {
     const onAccept = vi.fn();
     const undock = dockCard(A, { id: 'c10:trust', render: () => <DockedCardFrame appSessionId={A} title="Trust this folder?" onAccept={onAccept} onDecline={null}>Trust?</DockedCardFrame> });
     const frame = await within(composerOf(0)).findByRole('group', { name: 'Trust this folder?' });
-    expect(composerOf(0).querySelector('[data-composer-frame]')!.hasAttribute('hidden')).toBe(true);
+    expect(composerOf(0).querySelector('[data-composer-draft]')!.hasAttribute('hidden')).toBe(true);
     act(() => frame.focus());
     await key(frame, { key: 'Enter' });
     expect(onAccept).toHaveBeenCalledTimes(1);
     act(() => undock());
-    await waitFor(() => expect(composerOf(0).querySelector('[data-composer-frame]')!.hasAttribute('hidden')).toBe(false));
+    await waitFor(() => expect(composerOf(0).querySelector('[data-composer-draft]')!.hasAttribute('hidden')).toBe(false));
     expect(editorOf().editor.getText()).toBe('still here');
   });
 

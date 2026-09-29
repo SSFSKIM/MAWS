@@ -2,8 +2,9 @@
 // "Unstarted sessions and the docked host"; M4): what C7 renders in C5's `composer` slot for a live, exited or
 // unstarted session. The queued list, then the frame: the chip row over the live or the intent binding, the attachment
 // strip, the box with M3's editor and the submit control, the toolbar. When a request or a docked card needs the
-// human, it takes the frame's place (the frame stays mounted and hidden, so the editor keeps its document, history and
-// undo) and the docked frame takes focus when the pane held it; when it retires, focus goes back to the editor.
+// human, it takes the place of the box and the toolbar under the chip row (they stay mounted and hidden, so the editor
+// keeps its document, history and undo) and the docked frame takes focus when the pane held it; when it retires, focus
+// goes back to the editor.
 //
 // Every submission ends in the editor's `onSubmit`, decided here through `submitState`: an unstarted session's first
 // send goes to C10's `start` under the synchronous `starting` gate; a live one sends (C3 decides sent or queued),
@@ -369,14 +370,19 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
         <RewindConfirm newerTurn={newerTurn} onConfirm={() => void confirmRewind(client, appSessionId, newerTurn ? newest : null)} onCancel={() => cancelRewind(appSessionId)} />
       )}
       {swap.notice && <RequestCard key={swap.notice.id} item={swap.notice} request={null} placement="docked" paneIndex={paneIndex} />}
-      {card ? (
-        <div key={`card:${card.id}`}>{card.render()}</div>
-      ) : swap.item ? (
-        <RequestCard key={swap.item.id} item={swap.item} request={requests.get(swap.item.id) ?? null} placement="docked" paneIndex={paneIndex} />
-      ) : null}
-      {docked && waiting > 0 && <p className="m-0 text-ui-sm text-fg-muted">{waiting === 1 ? '1 more waiting' : `${waiting} more waiting`}</p>}
       <Frame
-        hidden={docked}
+        docked={
+          docked ? (
+            <>
+              {card ? (
+                <div key={`card:${card.id}`}>{card.render()}</div>
+              ) : swap.item ? (
+                <RequestCard key={swap.item.id} item={swap.item} request={requests.get(swap.item.id) ?? null} placement="docked" paneIndex={paneIndex} />
+              ) : null}
+              {waiting > 0 && <p className="m-0 text-ui-sm text-fg-muted">{waiting === 1 ? '1 more waiting' : `${waiting} more waiting`}</p>}
+            </>
+          ) : null
+        }
         onOpen={(what) => setOpened((o) => (o[what] ? o : { ...o, [what]: true }))}
         bindings={bindings}
         cwd={cwd}

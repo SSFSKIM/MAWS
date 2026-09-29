@@ -539,6 +539,8 @@ test('an unstarted session binds the frame to the intent, holds a starting state
   const frame = p.getByRole('group', { name: 'Trust this folder?' });
   await expect(frame).toBeFocused();
   await expect(messageIn(page, 0)).toBeHidden();
+  await expect(p.getByRole('toolbar', { name: 'Composer tools' })).toBeHidden(); // the card takes the box's and the toolbar's place
+  await expect(p.getByRole('button', { name: `Location ${repo}` })).toBeVisible(); // under the same chip row (mockup 04)
   await page.keyboard.press('Enter');
   await expect.poll(() => cards(page, 'stubAccepts')).toBe(1);
   await cards(page, 'undockStub');
