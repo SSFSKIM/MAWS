@@ -289,7 +289,7 @@ describe('review store', () => {
 
   it('reads one diff per (directory, scope) however many hold it, with the input each scope takes', async () => {
     const main = diffMain();
-    const store = createReviewStore(main.bridge, { branchCommand: false });
+    const store = createReviewStore(main.bridge);
     const offs = [
       store.getState().hold({ directory: DIR, scope: 'uncommitted', base: null }),
       store.getState().hold({ directory: DIR, scope: 'uncommitted', base: null }),
@@ -317,7 +317,7 @@ describe('review store', () => {
       if (gate.held) await new Promise<void>((resolve) => (gate.release = resolve));
       return ok({ patch: APP_PATCH, files: APP_FILES });
     });
-    const store = createReviewStore(main.bridge, { branchCommand: false });
+    const store = createReviewStore(main.bridge);
     const off = store.getState().hold({ directory: DIR, scope: 'uncommitted', base: null });
     await vi.advanceTimersByTimeAsync(0);
     expect(main.callsOf('git.diff')).toHaveLength(1);
@@ -345,7 +345,7 @@ describe('review store', () => {
   it('keeps the last answer while a re-read runs, and says why a read failed', async () => {
     let fails = false;
     const main = installFakeMain((name) => (name === 'git.diff' ? (fails ? fail('unknown revision') : ok({ patch: APP_PATCH, files: APP_FILES })) : ok()));
-    const store = createReviewStore(main.bridge, { branchCommand: false });
+    const store = createReviewStore(main.bridge);
     const target = { directory: DIR, scope: 'uncommitted', base: null } as const;
     const off = store.getState().hold(target);
     await tick();
@@ -362,7 +362,7 @@ describe('review store', () => {
   it('past the scope cap keeps the file list only and fetches a file on selection', async () => {
     const big = APP_PATCH + 'x'.repeat(REVIEW_SCOPE_BYTES_CAP);
     const main = diffMain((input) => (input.path ? { patch: APP_PATCH, files: APP_FILES } : { patch: big, files: APP_FILES }));
-    const store = createReviewStore(main.bridge, { branchCommand: false });
+    const store = createReviewStore(main.bridge);
     const target = { directory: DIR, scope: 'uncommitted', base: null } as const;
     const off = store.getState().hold(target);
     await tick();
@@ -377,20 +377,26 @@ describe('review store', () => {
     off();
   });
 
-  it('says This branch arrives with C10 while git.worktree.branch is not in the registry', () => {
-    const main = diffMain();
-    const store = createReviewStore(main.bridge, { branchCommand: false });
+  it('says why This branch is unavailable when C10 answers no branch (null) or a detached main worktree (HEAD)', async () => {
+    const main = installFakeMain((name, input) =>
+      name === 'git.worktree.branch'
+        ? ok(input.branch === 'unborn' ? null : { repoRoot: input.repoRoot, branch: input.branch, head: 'abc', checkedOutAt: null, base: 'HEAD', ahead: 0, merged: true })
+        : ok(),
+    );
+    const store = createReviewStore(main.bridge);
+    store.getState().lookupBase('/repo', 'unborn'); // HEAD's branch with no commits: `rev-parse --verify refs/heads/unborn` fails
     store.getState().lookupBase('/repo', 'feature');
-    expect(baseOf(store.getState(), '/repo', 'feature')).toEqual({ status: 'unavailable', reason: 'Arrives with C10' });
-    expect(main.calls).toEqual([]);
+    await tick();
+    expect(baseOf(store.getState(), '/repo', 'unborn')).toEqual({ status: 'unavailable', reason: 'No commits on unborn yet' });
+    expect(baseOf(store.getState(), '/repo', 'feature')).toEqual({ status: 'unavailable', reason: 'The main worktree has no branch' });
   });
 
   it('asks git.worktree.branch again after a failed lookup, rather than keeping the failure', async () => {
     let fails = true;
     const main = installFakeMain((name, input) =>
-      (name as string) === 'git.worktree.branch' ? (fails ? fail('git busy') : ok({ repoRoot: input.repoRoot, branch: input.branch, head: 'abc', checkedOutAt: null, base: 'main', ahead: 1, merged: false })) : ok(),
+      name === 'git.worktree.branch' ? (fails ? fail('git busy') : ok({ repoRoot: input.repoRoot, branch: input.branch, head: 'abc', checkedOutAt: null, base: 'main', ahead: 1, merged: false })) : ok(),
     );
-    const store = createReviewStore(main.bridge, { branchCommand: true });
+    const store = createReviewStore(main.bridge);
     store.getState().lookupBase('/repo', 'feature');
     await tick();
     expect(baseOf(store.getState(), '/repo', 'feature')).toEqual({ status: 'unavailable', reason: 'git busy', failed: true });
@@ -403,9 +409,9 @@ describe('review store', () => {
 
   it('asks git.worktree.branch for the base once the command exists, and refuses the main worktree’s own branch', async () => {
     const main = installFakeMain((name, input) =>
-      (name as string) === 'git.worktree.branch' ? ok({ repoRoot: input.repoRoot, branch: input.branch, head: 'abc', checkedOutAt: null, base: 'main', ahead: 2, merged: false }) : ok(),
+      name === 'git.worktree.branch' ? ok({ repoRoot: input.repoRoot, branch: input.branch, head: 'abc', checkedOutAt: null, base: 'main', ahead: 2, merged: false }) : ok(),
     );
-    const store = createReviewStore(main.bridge, { branchCommand: true });
+    const store = createReviewStore(main.bridge);
     store.getState().lookupBase('/repo', 'feature');
     store.getState().lookupBase('/repo', 'feature');
     store.getState().lookupBase('/repo', 'main');
@@ -460,6 +466,8 @@ function reviewMain(options: ReviewMainOptions = {}) {
         return ok({ value: null });
       case 'fs.workflows':
         return ok({ runs: [] });
+      case 'git.worktree.branch': // C10: the main worktree is on main
+        return ok({ repoRoot: input.repoRoot, branch: input.branch, head: state.status.head, checkedOutAt: input.branch === 'main' ? '/repo' : null, base: 'main', ahead: 0, merged: true });
       default:
         return ok();
     }
@@ -536,7 +544,7 @@ describe('review tool', () => {
     await waitFor(() => expect(header()).toBe('3 files changed · +3 −0 · Uncommitted'));
     expect(chips()).toEqual([
       ['uncommitted', false, 'true', ''],
-      ['branch', true, 'false', 'Arrives with C10'],
+      ['branch', true, 'false', "Session runs on main, the main worktree's branch"],
       ['staged', false, 'false', ''],
     ]);
     expect(rows()).toEqual([
