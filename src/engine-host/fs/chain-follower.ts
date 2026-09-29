@@ -325,9 +325,10 @@ class FollowerCore {
     return { targetMessageUuid: next, precedingAssistantUuid };
   }
 
-  // Once a re-read has met another file, nothing more of this pass is delivered or counted as delivered: the reload
-  // that follows delivers every chain record not in `emitted`, in chain order, so none is lost or delivered ahead of a
-  // record before it.
+  // Once a re-read has met another file, no record's events from the rest of this pass are delivered or counted as
+  // delivered: the reload that follows delivers every chain record not in `emitted`, in chain order, so none is lost or
+  // delivered ahead of a record before it. Anchor- and branch-derived boundaries of the pass still go out: the chain
+  // keeps their cuts, and the reload reconciles against that chain.
   private emit(record: TranscriptRecord, uuid: MessageUuid): void {
     if (this.interrupted) return;
     this.produce(uuid, ...recordToEvents(record, this.ctx));
@@ -350,8 +351,8 @@ class FollowerCore {
     }
     const record = parseLine(await this.reader.read(skeleton.offset, skeleton.length));
     if (record !== null && record.uuid === uuid) this.emit(record, uuid);
-    // The file changed under the read (a rename-over): the record stays undelivered and the retry's stat sees the
-    // rewrite, whose reload delivers it (a reload in progress is abandoned and retried at once).
+    // The file changed under the read (a rename-over, or a rewrite in place): the record stays undelivered and the
+    // retry reloads the file, which delivers it (a reload in progress is abandoned and retried at once).
     else this.interrupted = true;
   }
 
@@ -553,15 +554,19 @@ export class ChainFollower {
   // whole before the interruption is the old file's and is delivered; nothing of the new file is ever read under the
   // old inode's cursor. 'absent': no file (not there yet, or gone); 'interrupted': every attempt was.
   private async sync(flushEachPage: boolean): Promise<'complete' | 'interrupted' | 'absent' | 'stopped'> {
+    let interrupted = false;
     for (let attempt = 0; attempt < SYNC_ATTEMPTS; attempt++) {
       const stat = await this.reader.stat();
       if (this.stopped) return 'stopped';
       if (stat === null) return 'absent';
       const core = this.core;
       // Nothing read yet (a start interrupted before its first byte): the new file is simply the file.
-      if (core.offset === 0 && core.skeletons.size === 0) core.ino = stat.ino;
+      const nothingRead = core.offset === 0 && core.skeletons.size === 0;
+      if (nothingRead) core.ino = stat.ino;
+      // After an interrupted attempt the file is reloaded whatever the stat says: a rewrite in place (same inode, same
+      // or greater size) looks unchanged to it, and the interrupted pass holds chain records it never delivered.
       let whole: boolean;
-      if (core.ino !== null && (stat.ino !== core.ino || stat.size < core.offset)) {
+      if (core.ino !== null && ((interrupted && !nothingRead) || stat.ino !== core.ino || stat.size < core.offset)) {
         whole = await this.reload(stat);
       } else {
         if (core.ino === null) core.ino = stat.ino;
@@ -571,6 +576,7 @@ export class ChainFollower {
       }
       if (this.stopped) return 'stopped';
       if (whole) return 'complete';
+      interrupted = true;
     }
     return 'interrupted';
   }

@@ -640,18 +640,23 @@ describe('survives torn tails and rewrites', () => {
   });
 });
 
-// A reader whose reads can be held open, so `stop` can land while a read is in flight.
-// A reader whose read at one armed offset first renames a rewrite over the file (the engine's GC), then reads the new
-// file there, as the fs reader would after reopening by path.
+// A reader whose read at one armed offset first rewrites the file, then reads the new bytes there: a rename-over (the
+// engine's GC; a new inode, as the fs reader would see after reopening by path) or an in-place rewrite (same inode).
 class RenameOverReader extends MemoryFileReader {
   renamed = false;
-  private armed: { offset: number; bytes: Buffer } | null = null;
+  private armed: { offset: number; bytes: Buffer; inPlace: boolean } | null = null;
   renameOverAt(offset: number, bytes: Buffer): void {
-    this.armed = { offset, bytes };
+    this.armed = { offset, bytes, inPlace: false };
+  }
+  rewriteInPlaceAt(offset: number, bytes: Buffer): void {
+    this.armed = { offset, bytes, inPlace: true };
   }
   override async read(offset: number, length: number): Promise<Buffer> {
     if (this.armed !== null && this.armed.offset === offset) {
-      this.replace(this.armed.bytes);
+      if (this.armed.inPlace) {
+        this.truncate(0);
+        this.append(this.armed.bytes);
+      } else this.replace(this.armed.bytes);
       this.armed = null;
       this.renamed = true;
     }
@@ -659,6 +664,7 @@ class RenameOverReader extends MemoryFileReader {
   }
 }
 
+// A reader whose reads can be held open, so `stop` can land while a read is in flight.
 class GatedReader extends MemoryFileReader {
   private release: (() => void) | null = null;
   hold(): void {
@@ -859,6 +865,33 @@ describe('retract-then-rejoin converges for a consumer that deduplicates by id a
     expect(follower.snapshot().chain).toEqual(['u1', 'u2', 'u4']);
     expect(follower.snapshot().emitted).toEqual(new Set(['u1', 'u2', 'u4'] as MessageUuid[]));
     // Nothing of the interrupted pass is delivered after the failed re-read; the reload delivers u2 then u4, in chain order.
+    expect(out.of('user.message').map((e) => e.id)).toEqual(['u1#1', 'u2#1', 'u3#1', 'u2@2#1', 'u4#1']);
+    expect(out.states().slice(-2)).toEqual(['reloading', 'following']);
+    expect(converge(follower, out)).toEqual(['u1', 'u2', 'u4']);
+  });
+
+  // Whole-branch review of the final wave: the retry's stat cannot be relied on to see the rewrite. A same-inode rewrite
+  // of equal length during the re-read leaves inode and size as they were; the interrupted pass still reloads.
+  it('a same-inode rewrite of equal length during the re-read of a rejoining record loses nothing either', async () => {
+    const record = (uuid: string, parent: string | null, n: number) => line({ type: 'user', uuid, parentUuid: parent, cwd: '/d', timestamp: at(n), message: { role: 'user', content: uuid } });
+    const mode = (pad: string) => line({ type: 'permission-mode', permissionMode: 'default', sessionId: 'S', pad });
+    const reader = new RenameOverReader(joined([record('u1', null, 0), mode(''), record('u2', 'u1', 1), record('u3', 'u1', 2)]));
+    const out = new Collector();
+    const follower = new ChainFollower(reader, 'S' as SessionId, null, out.sink, { holders: () => 1 });
+    await follower.start();
+    const u2 = follower.snapshot().skeletons.get('u2' as MessageUuid)!;
+    reader.append(joined([record('u4', 'u2', 3)]));
+    // The same records with u3 dropped and the bookkeeping line moved to the end, padded to the file's exact length, so
+    // u2 no longer sits at its offset while the inode and the size stay what the follower last saw.
+    const size = reader.size;
+    const body = joined([record('u1', null, 0), record('u2', 'u1', 1), record('u4', 'u2', 3)]);
+    const rewrite = Buffer.concat([body, joined([mode(' '.repeat(size - body.length - joined([mode('')]).length))])]);
+    expect(rewrite.length).toBe(size);
+    reader.rewriteInPlaceAt(u2.offset, rewrite);
+    await follower.poke();
+    expect(reader.renamed).toBe(true);
+    expect(await reader.stat()).toEqual({ ino: 1, size });
+    expect(follower.snapshot().chain).toEqual(['u1', 'u2', 'u4']);
     expect(out.of('user.message').map((e) => e.id)).toEqual(['u1#1', 'u2#1', 'u3#1', 'u2@2#1', 'u4#1']);
     expect(out.states().slice(-2)).toEqual(['reloading', 'following']);
     expect(converge(follower, out)).toEqual(['u1', 'u2', 'u4']);
