@@ -453,6 +453,15 @@ describe('unstarted send holds a starting state', () => {
     expect(invoked('session.drafts.get')).toEqual([]);
   });
 
+  it('restores no draft while C10 holds the first message (its intent may still carry the sent text)', async () => {
+    const draft = { doc: docOf([paragraph(textNode('the sent text'))]), attachments: [], updatedAt: '2026-09-29T10:00:00.000Z' };
+    stubIntent({ draft, message: { content: 'the sent text', display: 'the sent text' } });
+    mount([{ index: 0, id: A }]);
+    await waitFor(() => expect(primary().title).toBe('Your first message is with the setup above'));
+    await act(() => new Promise((resolve) => setTimeout(resolve, 0))); // the draft's load has answered
+    expect(editorOf().editor.getText()).toBe('');
+  });
+
   it('writes no draft while starting, and none after an accepted start (C10 holds the message and refuses a patch meanwhile)', async () => {
     const stub = stubIntent();
     mount([{ index: 0, id: A }]);

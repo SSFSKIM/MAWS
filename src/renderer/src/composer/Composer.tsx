@@ -9,6 +9,10 @@
 // send goes to C10's `start` under the synchronous `starting` gate; a live one sends (C3 decides sent or queued),
 // steers with priority `next` (⌥Enter or the Steer label), or interrupts and sends with `now` (the caret menu); `!` and
 // `#` run through their modes. ⌘. and ⌘L are not registered here: `ComposerAppKeys` holds the one app-level handler.
+//
+// Edit mode (M4b): a prefill with `editing` (a bubble's Edit, the refusal dialog's Edit prompt) shows the state line
+// above the frame; Send then forks through C10's provider, or asks to rewind this session and resend, and the state
+// line follows the resubmit (`resubmit-seam.ts`) until the edited text is sent.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
@@ -19,10 +23,12 @@ import { useKeyChord } from '../keymap/useKeyChord';
 import { RequestCard } from '../request-card/RequestCard';
 import { nextMode } from '../statusline';
 import { useAttention, selectPendingOf } from '../stores/attention';
-import { isStarting, memoryTargetOf, registerFocusTarget, setEditing, setStarting, useComposerStore } from '../stores/composer';
+import { editingOf, isStarting, memoryTargetOf, registerFocusTarget, resubmitRecordOf, setStarting, useComposerStore, type Editing, type ResubmitState } from '../stores/composer';
+import { useLayout } from '../stores/layout';
 import { toast } from '../stores/notices';
 import { useSessionQueue } from '../stores/queue';
 import { useSessions } from '../stores/sessions';
+import { useTranscriptStore } from '../transcript';
 import { useDockedCards } from './docked/registry';
 import { swapOf } from './docked/swap';
 import { attachmentsOf, emptyDoc, isMultiline, type ComposerDoc } from './editor/doc';
@@ -30,13 +36,27 @@ import { ipcDrafts, type DraftPort, type EditorHandle, type SubmitHow } from './
 import { Editor } from './editor/Editor';
 import { serializeDraft, type Serialized } from './editor/serialize';
 import { dispatchByMode, submitSerialized, type Dispatch } from './editor/submit';
+import { newestUserUuid } from './edit-prefill';
+import { EditModeLine, RewindConfirm } from './EditMode';
 import { endedBindings, intentBindings, liveBindings, workspaceDirectoriesOf, type FrameBindings } from './frame/bindings';
 import { Frame } from './frame/Frame';
 import { useGitWatch } from './frame/git-watch';
 import { QueueList } from './queue/QueueList';
+import { askToRewind, cancelRewind, confirmRewind, enterEditMode, keepEditing, leaveEditMode, resubmitProvider, resubmitSendFailed, resubmitSent, rewindAgain, takeAutoSend } from './resubmit-seam';
 import { locationPath, useSetupIntent, type SetupIntentHook } from './setup-intent';
-import { steerPriority, submitState } from './submit/submit-state';
+import { steerPriority, submitState, type SubmitDecision } from './submit/submit-state';
 import { SubmitControl } from './submit/SubmitControl';
+
+// Why Send waits while the resubmit is under way (null: it may go).
+const RESUBMIT_WAIT: Record<ResubmitState, string | null> = {
+  idle: null,
+  sent: null,
+  rewound_awaiting_send: null,
+  confirming: 'Confirm the rewind first',
+  rewinding: 'Rewinding…',
+  rewind_uncertain: 'Rewind unconfirmed · checking the transcript…',
+  rewind_unresolved: 'Choose how to continue above',
+};
 
 export interface ComposerProps {
   appSessionId: AppSessionId;
@@ -86,7 +106,8 @@ function useDraftPort(appSessionId: AppSessionId, hook: SetupIntentHook | null, 
   return useMemo(() => {
     const drafts = ipcDrafts(client, appSessionId);
     return {
-      load: async () => (current.current ? current.current.intent.draft : drafts.load()),
+      // While C10 holds an accepted first message its intent's draft may still be the sent text: nothing to restore.
+      load: async () => (current.current ? (current.current.intent.message !== null ? null : current.current.intent.draft) : drafts.load()),
       clearsOnSend: () => current.current === null, // C10 holds an accepted first message; its intent's draft is left alone
       save: (draft: Draft | null) => {
         const intent = current.current;
@@ -129,6 +150,10 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
   const [hover, setHover] = useState(false);
   const [boxFocused, setBoxFocused] = useState(false);
   const alt = useAltHeld();
+  const editing = useComposerStore((s) => editingOf(s, appSessionId));
+  const resubmit = useComposerStore((s) => resubmitRecordOf(s, appSessionId));
+  const newest = useTranscriptStore((s) => newestUserUuid(s.entries[appSessionId]?.rows ?? []));
+  const bypassRewind = useRef(false); // Send without rewinding: the next submission sends as it stands
 
   // ---- what the frame binds to ------------------------------------------------------------------------------------
   const cwd = setup ? locationPath(setup.intent.location) : (status?.cwd ?? record?.directory ?? '');
@@ -149,6 +174,13 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
     mode: draft.mode,
     steerHeld: alt && (hover || boxFocused),
   });
+  // In edit mode a non-empty prompt resubmits (a fork, or the explicit rewind): the control reads Send, and waits while
+  // the resubmit is under way.
+  const wait = RESUBMIT_WAIT[resubmit.state];
+  const shown: SubmitDecision =
+    editing && !unstarted && !draft.empty && draft.mode === 'send'
+      ? { ...decision, primary: 'send', label: 'Send', enabled: ready && wait === null, reason: wait ?? (ready ? null : decision.reason), secondaryStop: false, menu: [] }
+      : decision;
 
   // ---- the docked swap ---------------------------------------------------------------------------------------------
   const cards = useDockedCards(appSessionId);
@@ -188,6 +220,49 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
 
   // ---- submissions ---------------------------------------------------------------------------------------------
   const drafts = useDraftPort(appSessionId, setup, client);
+
+  // A submission in edit mode: the fork when C10 registered its provider; otherwise the explicit rewind's confirm, or,
+  // once rewound (or by the human's choice when the rewind stayed unconfirmed), `session.send` alone.
+  const resubmitSubmission = async (s: Serialized, edit: Editing, how: SubmitHow): Promise<boolean> => {
+    const provider = resubmitProvider();
+    if (provider) {
+      const fork = { opened: null as AppSessionId | null };
+      const dispatch: Dispatch = async () => {
+        try {
+          fork.opened = (await provider.forkFrom({ appSessionId, messageUuid: edit.messageUuid, content: s.content })).appSessionId;
+          return null;
+        } catch (error) {
+          return error instanceof Error ? error.message : String(error);
+        }
+      };
+      const accepted = await submitSerialized(client, appSessionId, s, 'send', null, { dispatch, retry: () => handle.current?.submit(how) });
+      if (accepted) resubmitSent(appSessionId);
+      if (accepted && fork.opened) useLayout.getState().openSession(fork.opened);
+      return accepted;
+    }
+    const { state } = resubmitRecordOf(useComposerStore.getState(), appSessionId);
+    const bypass = state === 'rewind_unresolved' && bypassRewind.current;
+    bypassRewind.current = false;
+    if (state === 'idle') {
+      askToRewind(appSessionId);
+      return false;
+    }
+    if (state !== 'rewound_awaiting_send' && !bypass) return false;
+    const dispatch: Dispatch = async () => {
+      const result = await client.invoke('session.send', { appSessionId, content: s.content });
+      if (result.ok) return null;
+      resubmitSendFailed(appSessionId);
+      return result.error.message;
+    };
+    const retry = () => {
+      bypassRewind.current = bypass;
+      handle.current?.submit(how);
+    };
+    const accepted = await submitSerialized(client, appSessionId, s, 'send', null, { dispatch, retry });
+    if (accepted) resubmitSent(appSessionId);
+    return accepted;
+  };
+
   const onSubmit = async (s: Serialized, how: SubmitHow): Promise<boolean> => {
     const retry = () => handle.current?.submit(how);
     if (setup) {
@@ -204,6 +279,8 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
         setStarting(appSessionId, false);
       }
     }
+    const edit = editingOf(useComposerStore.getState(), appSessionId);
+    if (edit && s.mode === 'send') return resubmitSubmission(s, edit, how);
     const decided = submitState({ status, intent: null, queue, empty: s.empty, mode: s.mode, steerHeld: how === 'steer' });
     if (!decided.enabled) return false;
     const target = memoryTargetOf(useComposerStore.getState(), appSessionId);
@@ -228,21 +305,45 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
       if (!result.ok) console.warn('[composer] session.interrupt failed', result.error);
     });
   const onPrimary = () => {
-    if (decision.primary === 'stop') return interrupt();
-    if (decision.primary === 'resume')
+    if (shown.primary === 'stop') return interrupt();
+    if (shown.primary === 'resume')
       return void client.invoke('session.queue.setPaused', { appSessionId, paused: false }).then((result) => {
         if (!result.ok) toast({ level: 'warning', text: result.error.message, actions: [], dismissible: true }); // as the queued list does
       });
-    handle.current?.submit(decision.primary === 'steer' ? 'steer' : 'send');
+    handle.current?.submit(shown.primary === 'steer' ? 'steer' : 'send');
   };
 
-  // The editor is read-only while C10 holds the first send (starting, or its message retained behind a card).
-  const editorDisabled = setup && (starting || messageHeld) ? decision.reason : null;
+  // Rewound by the human's own confirm: the edited text goes as part of that decision (once the editor is editable again).
+  useEffect(() => {
+    if (resubmit.state === 'rewound_awaiting_send' && resubmit.autoSend && takeAutoSend(appSessionId)) handle.current?.submit('send');
+  }, [appSessionId, resubmit]);
+
+  // The editor is read-only while C10 holds the first send (starting, or its message retained behind a card), and while
+  // a rewind is in flight or unconfirmed (what it resends is what the human confirmed).
+  const rewindHolds = editing !== null && (resubmit.state === 'rewinding' || resubmit.state === 'rewind_uncertain');
+  const editorDisabled = (setup && (starting || messageHeld) ? decision.reason : null) ?? (rewindHolds ? RESUBMIT_WAIT[resubmit.state] : null);
+  const newerTurn = editing !== null && newest !== null && newest !== editing.seenCursor;
   const sessionId = status?.engineSessionId ?? record?.engineSessionId ?? null;
 
   return (
     <section ref={rootRef} aria-label="Composer" data-composer={appSessionId} data-pane-index={paneIndex} className="flex min-w-0 flex-col gap-2">
       {!unstarted && <QueueList appSessionId={appSessionId} queue={queue} sessionId={sessionId} cwd={cwd} client={client} />}
+      {editing && (
+        <EditModeLine
+          resubmit={resubmit}
+          onLeave={() => leaveEditMode(appSessionId)}
+          onRetry={() => handle.current?.submit('send')}
+          onRewindAgain={() => void rewindAgain(client, appSessionId)}
+          onSendWithoutRewinding={() => {
+            bypassRewind.current = true;
+            handle.current?.submit('send');
+          }}
+          onKeepEditing={() => keepEditing(appSessionId)}
+        />
+      )}
+      {editing && resubmit.state === 'confirming' && (
+        <RewindConfirm newerTurn={newerTurn} onConfirm={() => void confirmRewind(client, appSessionId, newerTurn ? newest : null)} onCancel={() => cancelRewind(appSessionId)} />
+      )}
       {swap.notice && <RequestCard key={swap.notice.id} item={swap.notice} request={null} placement="docked" paneIndex={paneIndex} />}
       {card ? (
         <div key={`card:${card.id}`}>{card.render()}</div>
@@ -270,12 +371,13 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
               handle={handle}
               client={client}
               onDocChange={setDoc}
-              onPrefill={(prefill) => setEditing(appSessionId, prefill.editing)}
+              onPrefill={(prefill) => enterEditMode(appSessionId, prefill.editing)}
+              onEscape={() => editingOf(useComposerStore.getState(), appSessionId) !== null && leaveEditMode(appSessionId)}
               onSubmit={onSubmit}
             />
           </div>
         }
-        submit={<SubmitControl decision={decision} multiline={isMultiline(doc)} onPrimary={onPrimary} onStop={interrupt} onMenu={(id) => handle.current?.submit(id === 'steer' ? 'steer' : id)} onHover={setHover} />}
+        submit={<SubmitControl decision={shown} multiline={isMultiline(doc)} onPrimary={onPrimary} onStop={interrupt} onMenu={(id) => handle.current?.submit(id === 'steer' ? 'steer' : id)} onHover={setHover} />}
       />
     </section>
   );
