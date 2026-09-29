@@ -174,27 +174,39 @@ test.describe('the #panel harness: persistence and pins', () => {
   test('a pinned tab shows first for every session and unpins into the session’s list', async ({ maws }) => {
     const panel = await PanelPage.open(maws);
     expect(await panel.call('session')).toBe('A');
+    // B's own tab, opened before the pin exists, so the pin comes first in B's strip only by the pin rule.
+    const own = await panel.call('addTool', 'harness-stub', { appSessionId: 'B', activate: false });
     const stub = await panel.call('addTool', 'harness-stub');
     await panel.call('pin', stub);
     expect(await panel.tabs()).toEqual([expect.objectContaining({ id: stub, pinned: true, active: true })]);
     await expect(panel.stubLine).toContainText(`${stub} · A · pinned · visible`);
 
     await panel.call('switchSession', 'B');
-    // B holds no selection of its own yet (C5's rule), so its strip shows the pin first above the summary; selected in
-    // B, the same instance's context reads B.
-    expect(await panel.tabs()).toEqual([expect.objectContaining({ id: stub, pinned: true, active: false })]);
+    // B holds no selection of its own yet (C5's rule), so its strip shows the pin first, then B's own tab, above the
+    // summary; selected in B, the same instance's context reads B.
+    expect(await panel.ids()).toEqual([stub, own]);
+    expect(await panel.tabs()).toEqual([
+      expect.objectContaining({ id: stub, pinned: true, active: false }),
+      expect.objectContaining({ id: own, pinned: false, active: false }),
+    ]);
     await panel.call('selectTab', stub);
     await expect(panel.stubLine).toContainText(`${stub} · B · pinned · visible`);
 
-    await panel.call('pin', stub); // unpinned in B: the tab moves into B's own list
-    expect(await panel.tabs()).toEqual([expect.objectContaining({ id: stub, pinned: false, active: true })]);
+    await panel.call('pin', stub); // unpinned in B: the tab moves into B's own list, after B's tab
+    expect(await panel.tabs()).toEqual([
+      expect.objectContaining({ id: own, pinned: false, active: false }),
+      expect.objectContaining({ id: stub, pinned: false, active: true }),
+    ]);
     await expect(panel.stubLine).toContainText(`${stub} · B · unpinned · visible`);
     await panel.call('switchSession', 'A');
     expect(await panel.ids()).toEqual([]);
-    expect(await panel.stub('harness-stub', 'instances'), 'one instance throughout').toEqual([stub]);
+    expect(await panel.stub('harness-stub', 'instances'), 'one instance per tab throughout').toEqual([own, stub]);
 
     await expect.poll(() => panel.layout('panel.pinned')).toEqual([]);
-    await expect.poll(() => panel.panelOf('B')).toEqual({ tabs: [{ id: stub, toolId: 'harness-stub', pinned: false }], activeTabId: stub });
+    await expect.poll(() => panel.panelOf('B')).toEqual({
+      tabs: [own, stub].map((id) => ({ id, toolId: 'harness-stub', pinned: false })),
+      activeTabId: stub,
+    });
     panel.expectQuietConsole();
   });
 
@@ -261,6 +273,9 @@ test.describe('the #panel harness: persistence and pins', () => {
       await panel.call('selectTab', id);
       await panel.call('switchSession', 'B');
       await panel.call('selectTab', id);
+      // On disk before anything else changes B: persistence's 250 ms debounce would otherwise replace this write
+      // with the next one, and a later check of panel.B could pass on an older value.
+      await expect.poll(async () => (await panel.panelOf('B'))?.activeTabId).toBe(id);
       await panel.call('switchSession', 'A');
     };
     // B's selection after the pin left, in the harness and in layout.json.

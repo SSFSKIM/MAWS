@@ -9,8 +9,8 @@ export default defineConfig({
   testIgnore: process.env.MAWS_HARNESS === '1' ? [] : ['transcript.spec.ts', 'terminal.spec.ts'],
   // end C6
   // C8a start: so does the panel spec, under `pnpm e2e:panel` (its product-app cases pass MAWS_HARNESS=0 per launch).
-  // This replaces the list above outside the harness run, so it repeats C6's two names.
-  ...(process.env.MAWS_HARNESS === '1' ? {} : { testIgnore: ['transcript.spec.ts', 'terminal.spec.ts', 'panel.spec.ts'] }),
+  // A file runs when it matches `testMatch` and not `testIgnore`, so narrowing `testMatch` leaves C6's list whole.
+  ...(process.env.MAWS_HARNESS === '1' ? {} : { testMatch: /(?<!\/panel)\.spec\.ts$/ }),
   // C8a end
   workers: 1,
   retries: 0,
