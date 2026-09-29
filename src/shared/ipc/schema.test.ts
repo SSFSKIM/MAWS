@@ -336,4 +336,21 @@ describe('ipc schema validates both directions', () => {
     });
   });
   // C3 end
+
+  // C8a start: the panel summary's one layout key (C8a execution document, Interfaces *Layout key `summary.sections`*)
+  describe('C8a entries', () => {
+    it('takes summary.sections as a layout key, outside the panel namespace, and holds its value to its shape', () => {
+      const value = { version: 1, collapsed: ['sources', 'push'] };
+      expect(validateCommandInput('layout.get', { key: 'summary.sections' }).ok).toBe(true);
+      expect(validateCommandInput('layout.set', { key: 'summary.sections', value })).toEqual({ ok: true, value: { key: 'summary.sections', value } });
+      expect(validateCommandInput('layout.set', { key: 'summary.other', value }).ok).toBe(false);
+      expect(layout.SummarySectionsSchema.safeParse(value).success).toBe(true);
+      expect(layout.SummarySectionsSchema.safeParse({ version: 1, collapsed: [] }).success).toBe(true);
+      expect(layout.SummarySectionsSchema.safeParse({ version: 1, collapsed: ['files'] }).success).toBe(false);
+      expect(layout.SummarySectionsSchema.safeParse({ version: 2, collapsed: [] }).success).toBe(false);
+      expect(layout.SummarySectionsSchema.safeParse({ ...value, open: [] }).success).toBe(false);
+      expect(layout.SUMMARY_SECTIONS).toEqual(['environment', 'push', 'subagents', 'background', 'sources']);
+    });
+  });
+  // C8a end
 });
