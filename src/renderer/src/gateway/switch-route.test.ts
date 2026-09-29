@@ -321,6 +321,18 @@ describe('a switch toward the gateway checks the relay first', () => {
 });
 
 describe('the queue after a switch', () => {
+  it('a failure after the switch’s own interrupt resumes the queue it paused, once', async () => {
+    const s = setup({ turn: true, start: { status: 'held', appSessionId: READY, holder: { kind: 'terminal', pid: 4711 }, attach: null } });
+    for (const content of ['first queued', 'second queued']) await s.backend.answer('session.send', { appSessionId: READY, content });
+    const run = s.switcher.switchRoute(READY, 'direct');
+    await confirming(s);
+    s.switcher.answer(READY, CONFIRM);
+    expect(await run).toBe('failed');
+    expect(s.log).toContain('session.interrupt');
+    expect(s.log.filter((c) => c === 'session.queue.setPaused')).toHaveLength(1);
+    expect(await s.backend.answer('session.queue.list', { appSessionId: READY })).toMatchObject({ paused: false, pauseReason: null });
+  });
+
   it('a turn open and a running queue of two: the entries survive the restart and the queue resumes once at done', async () => {
     const s = setup({ turn: true });
     for (const content of ['first queued', 'second queued']) expect(await s.backend.answer('session.send', { appSessionId: READY, content })).toMatchObject({ disposition: 'queued' });

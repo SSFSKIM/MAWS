@@ -133,7 +133,21 @@ export function createRouteSwitcher(deps: SwitchDeps, store: GatewayStore) {
     // the guard above and never starts a second machine. The sheet renders only once the confirm is known.
     let state: SwitchState = { target, phase: 'confirming', confirm: null, error: null };
     put(id, state);
-    const fail = (error: string): SwitchOutcome => {
+    let queueRunning: boolean | null = null;
+    // The queue the switch's own interrupt paused, resumed: only when it ran before and is still paused for that (at
+    // done, on a cancel after the interrupt, and on every failure, since the process, or its resume, keeps the queue
+    // held otherwise). A no-op before the interrupt, when `queueRunning` is not read yet.
+    const resumeQueue = async () => {
+      if (!queueRunning) return;
+      const queue = await deps.client.invoke('session.queue.list', { appSessionId: id });
+      if (queue.ok && queue.value.paused && queue.value.pauseReason === 'interrupt') await deps.client.invoke('session.queue.setPaused', { appSessionId: id, paused: false });
+    };
+    const fail = async (error: string): Promise<SwitchOutcome> => {
+      try {
+        await resumeQueue();
+      } catch (resumeError) {
+        console.error('[gateway] the queue could not be resumed after a failed switch', resumeError);
+      }
       put(id, { ...state, phase: 'failed', error });
       return 'failed';
     };
@@ -148,14 +162,6 @@ export function createRouteSwitcher(deps: SwitchDeps, store: GatewayStore) {
       let confirm: SwitchConfirm = { target, backgroundTasks: fresh?.backgroundTasks ?? [], requiresModel: target === 'direct' && launching !== null && isGatewayModel(launching), model: null, effort: null };
       let error: string | null = null;
       let answer: SwitchAnswer | null = null;
-      let queueRunning: boolean | null = null;
-      // The queue the switch's own interrupt paused, resumed: only when it ran before and is still paused for that
-      // (at done, and on a cancel after the interrupt, since the process then keeps running with its queue held).
-      const resumeQueue = async () => {
-        if (!queueRunning) return;
-        const queue = await deps.client.invoke('session.queue.list', { appSessionId: id });
-        if (queue.ok && queue.value.paused && queue.value.pauseReason === 'interrupt') await deps.client.invoke('session.queue.setPaused', { appSessionId: id, paused: false });
-      };
 
       for (;;) {
         state = { target, phase: 'confirming', confirm, error };
