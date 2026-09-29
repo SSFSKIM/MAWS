@@ -24,9 +24,10 @@ const rowOfEntry = (entry: ModelCatalogueEntry): ModelRow => ({
   supportedEffortLevels: effortsOf({ supportedEffortLevels: entry.supportedEffortLevels }),
 });
 
-// The catalogue's Claude-group models (null while it is read, or while `enabled` is false: nothing is asked).
+// The catalogue's Claude-group models (null while it is read, or while `enabled` is false: nothing is asked), from the
+// direct route's cache: the host keys its catalogue by route, and a route left unnamed answers the latest one updated.
 export function useClaudeModels(enabled = true): readonly ModelRow[] | null {
-  const read = useCommand('engine.models', { refresh: false }, { staleTime: 60_000, enabled });
+  const read = useCommand('engine.models', { refresh: false, gateway: 'direct' }, { staleTime: 60_000, enabled });
   if (!read.data) return read.isError ? [] : null;
   const rows = read.data.models.map(rowOfEntry);
   const claude = new Set(presentModels(rows).claude.map((m) => m.value));
