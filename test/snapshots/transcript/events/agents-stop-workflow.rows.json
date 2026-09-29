@@ -1,0 +1,110 @@
+[
+  {
+    "at": "2026-09-28T09:59:23.181Z",
+    "id": "time:turn:a73c314a-b4c1-4d20-9392-aa124d10675c",
+    "kind": "time",
+    "label": "Yesterday 9:59 AM",
+    "turnId": "turn:a73c314a-b4c1-4d20-9392-aa124d10675c"
+  },
+  {
+    "at": "2026-09-28T09:59:23.181Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:a73c314a-b4c1-4d20-9392-aa124d10675c",
+    "kind": "user",
+    "lines": 6,
+    "messageUuid": "a73c314a-b4c1-4d20-9392-aa124d10675c",
+    "steer": false,
+    "text": "Call the Workflow tool once with this exact script as the script parameter, then reply STARTED:\n\nexport const meta = { name: 'maws-probe', description: 'Two echo agents in one phase', phases: [{ title: 'Echo' }] }\nphase('Echo')\nconst out = await parallel([() => agent('Reply with exactly ALPHA and nothing else.', {label: 'alpha', effort: 'low'}), () => agent('Reply with exactly BETA and nothing else.', {label: 'beta', effort: 'low'})])\nreturn out",
+    "turnId": "turn:a73c314a-b4c1-4d20-9392-aa124d10675c"
+  },
+  {
+    "at": "2026-09-28T09:59:23.181Z",
+    "autoDenied": 0,
+    "denied": 0,
+    "endedAt": "2026-09-28T09:59:28.942Z",
+    "expanded": true,
+    "firstDeniedCell": null,
+    "id": "divider:turn:a73c314a-b4c1-4d20-9392-aa124d10675c",
+    "kind": "divider",
+    "origin": "human",
+    "startedAt": "2026-09-28T09:59:23.227Z",
+    "state": "completed",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 0,
+        "exploration": 0,
+        "files": 0,
+        "mcp": 0,
+        "other": 0,
+        "skills": 0,
+        "web": 0
+      },
+      "childAgents": 1,
+      "costUsd": 0.0695518,
+      "denials": [],
+      "durationMs": 5713,
+      "model": "claude-sonnet-5",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 0,
+        "reviewed": 0
+      },
+      "terminalReason": "completed",
+      "toolCalls": 0,
+      "usage": {
+        "cacheCreationInputTokens": 13485,
+        "cacheReadInputTokens": 45899,
+        "inputTokens": 4,
+        "outputTokens": 356,
+        "thinkingTokens": 152
+      }
+    },
+    "toolCalls": 0,
+    "turnId": "turn:a73c314a-b4c1-4d20-9392-aa124d10675c"
+  },
+  {
+    "at": "2026-09-28T09:59:24.332Z",
+    "durationMs": 936,
+    "id": "think:msg_011CfVeAQDYqQo5Y6xUmVppd:0",
+    "kind": "thinking",
+    "live": false,
+    "messageUuid": "a4e0d926-012a-4879-9e1f-e45d295916f7",
+    "text": "",
+    "turnId": "turn:a73c314a-b4c1-4d20-9392-aa124d10675c"
+  },
+  {
+    "agents": [
+      {
+        "agentId": null,
+        "glyph": 3,
+        "kind": "workflow",
+        "name": "Two echo agents in one phase",
+        "subagentType": null,
+        "taskId": "wayue3on6",
+        "toolUseId": "toolu_01SawqFE14rcE7JMMJt8jBAg"
+      }
+    ],
+    "at": "2026-09-28T09:59:26.376Z",
+    "id": "subagent:wayue3on6",
+    "kind": "subagent",
+    "overflow": 0,
+    "sentence": "Two echo agents in one phase was stopped",
+    "status": "stopped",
+    "turnId": "turn:a73c314a-b4c1-4d20-9392-aa124d10675c"
+  },
+  {
+    "at": "2026-09-28T09:59:28.924Z",
+    "blockIndex": 0,
+    "id": "text:msg_011CfVeAmumd48awx4jRjgvC:0",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "STARTED",
+    "messageUuid": "06fd19d9-89a6-4aea-bf14-7a5edaddea15",
+    "model": "claude-sonnet-5",
+    "phase": "answer",
+    "turnId": "turn:a73c314a-b4c1-4d20-9392-aa124d10675c"
+  }
+]

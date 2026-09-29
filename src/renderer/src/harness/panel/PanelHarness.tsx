@@ -41,6 +41,11 @@ import { registerCodeTools } from '../../tools/code';
 import { CodeHarnessBlock } from '../code/CodeHarnessBlock';
 import { codeProbes } from '../code/codeProbes';
 // C8c end
+// C8b start
+import { connectAgentWorkEvents } from '../../ipc/events';
+import { AgentsHarnessBlock, installAgentsHarness } from '../agents/AgentsHarnessBlock';
+import { agentsProbes } from '../agents/agentsProbes';
+// C8b end
 
 // Registered once per page load, never on an effect's cleanup: a registration's disposer closes its tool's tabs.
 const disposers = new Map<string, () => void>();
@@ -74,6 +79,10 @@ function registerCodeHarness(): () => void {
 
 function bootstrap(): () => void {
   registerSlot('panelHost', PanelHost);
+  // C8b start: Subagents, Background work and the Log registered before the page's own tools, so the page's `log` stub
+  // yields to the real Log; the fake agent-work client and the drill-in's child source installed with them.
+  installAgentsHarness();
+  // C8b end
   registerHarnessTools();
   const offs = [
     registerShellActions(),
@@ -84,6 +93,9 @@ function bootstrap(): () => void {
     // C8c start
     registerCodeHarness(),
     // C8c end
+    // C8b start: a task list changed (the fake client's) refreshes its checklist, as App.tsx's C8b block does
+    connectAgentWorkEvents(),
+    // C8b end
   ];
   // Once per load (StrictMode replays effects; a second hydrate would replace the panel lists again).
   hydration ??= (async () => {
@@ -199,6 +211,9 @@ export function PanelHarness() {
       // C8c start
       code: codeProbes,
       // C8c end
+      // C8b start
+      agents: agentsProbes,
+      // C8b end
     };
     window.openTerminal = openTerminal; // C9: the console entry for C10's attach path
     return () => {
@@ -305,6 +320,9 @@ function DebugStrip() {
       ))}
       <p>no-session selection: {noSession ?? 'none'}</p>
       <TerminalDebugRows /> {/* C9 */}
+      {/* C8b start: the fed transcript with the agent tools' hand-offs, and the agent-tab stand-in */}
+      <AgentsHarnessBlock />
+      {/* C8b end */}
     </aside>
   );
 }

@@ -11,6 +11,9 @@ import type { TerminalsHarnessApi } from './terminal/terminals-api';
 // C8c start
 import type { CodeHarnessApi } from './code/api';
 // C8c end
+// C8b start
+import type { AgentsHarnessApi } from './agents/api';
+// C8b end
 
 declare global {
   interface MawsHarnessPages extends Partial<HarnessApi> {
@@ -24,6 +27,9 @@ declare global {
     // C8c start
     code?: CodeHarnessApi; // #panel: Review, Files and the viewer
     // C8c end
+    // C8b start
+    agents?: AgentsHarnessApi; // #panel: Subagents, Background work and the Log over the fake agent-work client
+    // C8b end
   }
   interface Window {
     __maws_harness?: MawsHarnessPages;

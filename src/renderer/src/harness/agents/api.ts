@@ -1,0 +1,107 @@
+// The `#panel` harness's agent-tool surface, `window.__maws_harness.agents` (C8b execution document, Interfaces
+// *Harness API*). Types only, so the e2e project can import them. Every read is of what the panel renders (the DOM of
+// the selected tool), so a case asserts what the owner would see; the calls go through the same controls a click does.
+// Beyond the document's list: `patchStatus` (the e2e cannot build a whole status), `reset` (a graph that has seen the
+// page's seeded status starts over for a disk-only case), `releaseThrough` (a recorded journal's
+// release counts measured from the fixture rather than guessed), `agentTab` and `childTranscript` (the
+// stand-in for C5's agent tab in the shared-attachment case), `transcriptCalls` (the adapters' taps) and fields the
+// views carry besides the document's (`line`, `meta`, `heading`, `noFile`, `end`).
+import type { EngineSessionStatus } from '@shared/engine/status';
+import type { SubagentEntry, WorkflowRun, FsReadSpillInput } from '@shared/ipc/schema/fs';
+import type { PersistedTask } from '@shared/wire/store';
+
+export type AgentsFakeId = 'A' | 'B';
+
+export interface AgentsHarnessCalls {
+  steer: { appSessionId: string; content: string; priority: string }[];
+  stopTask: { appSessionId: string; taskId: string }[];
+  readSpill: FsReadSpillInput[];
+}
+
+// One rendered agent row: `status` is the node's (the graph's word for it), `line` the row's second line as shown.
+export interface AgentRowView {
+  agentId: string;
+  title: string;
+  depth: number;
+  orphan: boolean;
+  status: string;
+  elapsed: string;
+  waiting: boolean;
+  line: string;
+}
+
+export interface SubagentsView {
+  active: AgentRowView[];
+  done: AgentRowView[];
+  disk: AgentRowView[];
+  headings: string[]; // the sections' headings as shown (`Active · 2`)
+  notes: string[]; // the lines above the sections (the disk-only header line, an unavailable read)
+  drillIn: {
+    agentId: string;
+    header: string; // the agent's title
+    meta: string; // `<model> · <elapsed> · <tokens>`
+    dispatchedBy: string;
+    rows: number; // the child transcript's rows as the store derives them
+    requestCards: number; // C7's inline request cards rendered in the child transcript
+    relay: { label: string; disabled: string | null; tooltip: string | null; pending: string | null };
+  } | null;
+}
+
+export interface BackgroundView {
+  workflows: { taskId: string; title: string; line: string; status: string; phases: { title: string; count: string; state: string }[]; table: { label: string; model: string; tokens: string; time: string }[]; stopping: boolean; error: string | null }[];
+  shells: { taskId: string; line: string; output: 'enabled' | 'disabled'; stopping: boolean; error: string | null }[];
+  monitors: { taskId: string; line: string }[];
+  tasks: { heading: string; label: string | null; rows: string[]; earlier: number; unavailable: string | null };
+  notes: string[]; // the disk-only sentence, `Nothing running`, an unavailable read
+  headings: string[];
+}
+
+export interface LogView {
+  title: string; // the tab's title as the strip shows it (`Log · <basename>`)
+  heading: string | null; // the header's title (the row's description or the cell's label)
+  path: string | null;
+  size: string | null;
+  pages: number;
+  offsets: number[]; // the rendered pages' read offsets
+  text: string;
+  end: boolean; // `End of file` shown
+  noFile: string | null; // the "no file reported" (or "not restored") note
+  refused: string | null;
+}
+
+export interface AgentsHarnessApi {
+  // Binds the fake client's wire half to the transcript `panel.loadTranscript(id, fixture)` loaded (call it right after,
+  // with the same fixture; the e2e's `load` helper does both), sets the session's status launch to the replayed ids'
+  // `journal` (and its background list empty: the fixture's frames are the facts), starts the task graph over, and
+  // watches the session. The block's column shows the fed transcript from then on.
+  feed(id: AgentsFakeId, fixture: string): Promise<void>;
+  reset(id: AgentsFakeId): void; // the session's task graph started over (as `feed` does first), the status's background list emptied
+  fakeFs(data: { sidecars?: SubagentEntry[]; runs?: WorkflowRun[]; tasks?: Record<string, PersistedTask[]>; spills?: Record<string, string> }): void;
+  fixtureFs(name: 'subagent-sidecars' | 'workflow-disk' | 'nested-agents-sidecars'): Promise<void>;
+  patchStatus(id: AgentsFakeId, patch: Partial<EngineSessionStatus>): void; // the current status (or A's live one) with the patch
+  releaseThrough(id: AgentsFakeId, seq: number): Promise<number>; // the fed fixture's unreleased events through `seq`, as panel.transcript(id).release(n) would; resolves with n
+  calls(): AgentsHarnessCalls;
+  answerStop(taskId: string, outcome: 'ok' | 'error'): void; // 'error' rejects with FAKE_STOP_REFUSAL's message
+
+  subagents(): SubagentsView | null; // the selected tab's Subagents body, else null
+  background(): BackgroundView | null;
+  log(): LogView | null;
+
+  clickRow(agentId: string): void;
+  back(): void;
+  typeRelay(text: string): void;
+  sendRelay(): Promise<void>; // resolves once the steer is answered (or the send refused)
+  stop(taskId: string): Promise<void>; // a Background row's Stop, or the drill-in's `Stop agent` confirmed; resolves once answered
+  output(taskId: string): void;
+  loadMore(): Promise<void>;
+  showEarlier(): Promise<void>;
+
+  instances(toolId: string): string[]; // the tab ids of the tool's live instances, in creation order (O2)
+  clickTranscriptSubagent(n: number): Promise<void>; // the n-th (1-based) agent control of the column's transcript, its turns expanded
+  clickTranscriptFullLog(n: number): Promise<void>; // the n-th "Open full log" of the column's transcript, its cells expanded
+  agentTab(agentId: string | null): void; // a second child transcript in the column over the same childSource (C5's agent tab)
+  childTranscript(agentId: string): { keys: string[]; sources: number; attaches: number; rows: number; drillInRows: number | null; agentTabRows: number | null };
+}
+
+// The message a stop answered 'error' rejects with (the card reads `Couldn't stop it: <message>`).
+export const FAKE_STOP_REFUSAL = 'the harness refused this stop';

@@ -351,9 +351,15 @@ test.describe('the #panel harness: persistence and pins', () => {
   });
 
   test('pins and session tabs round-trip a relaunch and log tabs do not', async () => {
+    // C8b start (a C8a test amended by C8b, ruling O2): the page's `log` stub yields to C8b's real Log, so the instances
+    // are read through `agents.instances('log')` and a Log opens in its no-file state (it reads nothing).
+    const NO_FILE_LOG = { params: { path: null, title: 'Log' } };
+    const logInstances = (panel: PanelPage) =>
+      panel.page.evaluate(() => (window as unknown as { __maws_harness: { agents: { instances(toolId: string): string[] } } }).__maws_harness.agents.instances('log'));
+    // C8b end
     // Home and back, a switch to B and back, collapse and reopen: the log tabs and their instances stay.
     const roundTrip = async (panel: PanelPage, logs: string[]) => {
-      const instances = await panel.stub('log', 'instances');
+      const instances = await logInstances(panel); // C8b: the real Log's instances (O2)
       await panel.call('showSummary');
       await panel.call('selectTab', logs[0]);
       await panel.call('switchSession', 'B');
@@ -361,7 +367,7 @@ test.describe('the #panel harness: persistence and pins', () => {
       await panel.call('collapse', true);
       await panel.call('collapse', false);
       expect(await panel.ids()).toEqual(expect.arrayContaining(logs));
-      expect(await panel.stub('log', 'instances')).toEqual(instances);
+      expect(await logInstances(panel)).toEqual(instances); // C8b (O2)
       expect(instances).toEqual(expect.arrayContaining(logs));
     };
 
@@ -369,7 +375,7 @@ test.describe('the #panel harness: persistence and pins', () => {
       let panel = await launch();
       const pin = await panel.call('addTool', 'harness-stub', { pin: true });
       const info = await panel.call('addTool', 'session-info');
-      const logs = [await panel.call('addTool', 'log'), await panel.call('addTool', 'log')];
+      const logs = [await panel.call('addTool', 'log', NO_FILE_LOG), await panel.call('addTool', 'log', NO_FILE_LOG)]; // C8b (O2)
       await roundTrip(panel, logs);
       // layout.json holds the log refs, so the relaunch has restored ones to drop.
       await expect.poll(async () => (await panel.panelOf('A'))?.tabs.map((tab) => tab.id)).toEqual([info, ...logs]);
@@ -392,7 +398,7 @@ test.describe('the #panel harness: persistence and pins', () => {
       expect((await panel.ids())[0], 'the pin is first in B too, under the same id').toBe(pin);
       await panel.call('switchSession', 'A');
 
-      const fresh = await panel.call('addTool', 'log'); // opened after the relaunch: an ordinary tab until closed
+      const fresh = await panel.call('addTool', 'log', NO_FILE_LOG); // opened after the relaunch: an ordinary tab until closed (C8b, O2)
       await roundTrip(panel, [fresh]);
       expect(await panel.ids()).toEqual([pin, info, fresh]);
       panel.expectQuietConsole();
@@ -454,7 +460,8 @@ test.describe('the #panel harness: strip, summary, R7 and themes', () => {
     await panel.region.getByRole('button', { name: 'Add a tool' }).click();
     // §5.6's order for the registered menu tools (Log and the harness's child transcript are `menu: false`).
     // C8c (a C8a test amended by C8c): the page registers C8c's Review and Files, as App.tsx does.
-    await expect(panel.page.getByRole('menuitem')).toHaveText(['Review', 'Terminal', 'Files', 'Session info', 'Stub']);
+    // C8b (a C8a test amended by C8b): and C8b's Subagents and Background work (its Log is `menu: false`).
+    await expect(panel.page.getByRole('menuitem')).toHaveText(['Subagents', 'Review', 'Terminal', 'Files', 'Background work', 'Session info', 'Stub']);
     await panel.page.getByRole('menuitem', { name: 'Terminal' }).click();
     const terminal = (await panel.tabs()).find((tab) => tab.toolId === 'terminal');
     expect(terminal?.id).toMatch(/^terminal:[0-9a-z]{8}$/);
@@ -592,8 +599,10 @@ test.describe('the #panel harness: strip, summary, R7 and themes', () => {
         const environment = panel.section('Environment');
         // C8c (a C8a test amended by C8c): Review is registered now, so its row opens it.
         await expect(environment.getByRole('button', { name: 'Review', exact: true }), 'Review is C8c’s').toBeEnabled();
-        await expect(panel.section('Subagents').getByRole('button', { name: 'Arrives with C8b' })).toBeDisabled();
-        await expect(panel.section('Background work').getByRole('button', { name: 'Arrives with C8b' })).toBeDisabled();
+        // C8b start (a C8a test amended by C8b): the page registers C8b's tools, whose sections fill themselves with Open.
+        await expect(panel.section('Subagents').getByRole('button', { name: 'Open' })).toBeEnabled();
+        await expect(panel.section('Background work').getByRole('button', { name: 'Open' })).toBeEnabled();
+        // C8b end
 
         await environment.getByRole('button', { name: 'Session info' }).click(); // the model row
         const info = (await panel.tabs()).find((tab) => tab.toolId === 'session-info');
@@ -618,11 +627,17 @@ test.describe('the #panel harness: strip, summary, R7 and themes', () => {
       panel.page.evaluate((how) => (window as unknown as PanelWindow).__maws_harness!.panel!.transcript('A')[how](), how);
     const cases = [
       ['transcript/exploration-and-web', { sources: EXPLORATION_SOURCES, glyphs: null }],
-      ['transcript/agents-and-messages', { sources: [], glyphs: expect.stringMatching(/^Survey src for TODOs, List the tests /) }],
+      // C8b (a C8a test amended by C8b): the glyphs are the task graph's, running agents first and then the finished ones
+      // newest end first (C8b M2), so the agent that ended last leads.
+      ['transcript/agents-and-messages', { sources: [], glyphs: expect.stringMatching(/^List the tests, Survey src for TODOs /) }],
     ] as const;
     for (const [fixture, expected] of cases) {
       await test.step(fixture, async () => {
         await panel.call('loadTranscript', 'A', fixture);
+        // C8b start (a C8a test amended by C8b): the Subagents section is C8b's, drawn from the task graph, which reads the
+        // loaded transcript's events once the fake agent-work client's wire is bound to it.
+        await panel.page.evaluate((fixture) => (window as unknown as { __maws_harness: { agents: { feed(id: 'A', fixture: string): Promise<void> } } }).__maws_harness.agents.feed('A', fixture), fixture);
+        // C8b end
         await expect.poll(read).toEqual(expected);
         const before = await read();
         await disclose('collapseAll');
@@ -735,9 +750,11 @@ test.describe('the #panel harness: strip, summary, R7 and themes', () => {
       const { page } = maws;
       // A placeholder tab (a ref whose tool is not registered) in B's list, written before the page hydrates it.
       // C8c (a C8a test amended by C8c): C8b's Subagents, since Review is registered now.
+      // C8b (a C8a test amended by C8b): the page registers every P0 tool now, so the placeholder is a tool outside the
+      // P0 table (§16's topology view), which the host names as not available.
       await page.waitForFunction(() => (window as unknown as { maws?: unknown }).maws !== undefined);
       await page.evaluate(async () => {
-        const value = { tabs: [{ id: 'subagents:placeholder', toolId: 'subagents', pinned: false }], activeTabId: null };
+        const value = { tabs: [{ id: 'topology:placeholder', toolId: 'topology', pinned: false }], activeTabId: null }; // C8b
         const result = await window.maws.invoke('layout.set', { key: 'panel.B', value });
         if (!result.ok) throw new Error(result.error.message);
       });
@@ -784,8 +801,8 @@ test.describe('the #panel harness: strip, summary, R7 and themes', () => {
             'a placeholder tab',
             async () => {
               await panel.call('switchSession', 'B');
-              await panel.tab('subagents:placeholder').getByRole('tab').click();
-              await expect(panel.region.getByRole('tabpanel')).toHaveText('Arrives with C8b');
+              await panel.tab('topology:placeholder').getByRole('tab').click(); // C8b
+              await expect(panel.region.getByRole('tabpanel')).toHaveText('topology is not available'); // C8b
             },
           ],
         ];
