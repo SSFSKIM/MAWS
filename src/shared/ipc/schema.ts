@@ -37,7 +37,7 @@ export {
   type ThemeSetting,
 } from './schema/settings';
 export type { IpcError } from './errors';
-// C5: the read side and the shapes the shell's stores consume.
+// C5 start: the read side and the shapes the shell's stores consume.
 export {
   ProjectRecordSchema,
   SESSION_PHASES,
@@ -49,6 +49,7 @@ export {
   type SessionPhase,
 } from './schema/session';
 export { ChordSchema } from './schema/settings';
+// C5 end
 
 export const commands = {
   ...session.commands,
