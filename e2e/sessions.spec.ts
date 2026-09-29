@@ -313,9 +313,10 @@ test.describe('sessions', () => {
   // M5, acceptance items 12 and 13's renderer half, with no engine and no real job: a synthetic registry record under
   // the temp config home (C4's recipe: the pid of this test runner, its `procStart` as the engine renders it), and a
   // login shell that is not a shell. The PTY host runs `$SHELL -l`; the case's `$SHELL` records the directory it
-  // started in and the first line the tab wrote to it, then only echoes: the attach command reaches `pty.spawn` and is
-  // never run (and the login-shell captures, which run `$SHELL -ilc`, fail over to the app's own environment).
-  test('foreign-live: a background job holds the session read-only, the fresh read answers held, Attach runs the pinned attach in the job’s directory once; a terminal holder gets no Attach', async () => {
+  // started in and every line written to it, running none (a `read` loop at its own prompt, which C9's foreground read
+  // calls idle): the attach command reaches `pty.spawn` and is never run (and the login-shell captures, which run
+  // `$SHELL -ilc`, fail over to the app's own environment).
+  test('foreign-live: a background job holds the session read-only, the fresh read answers held, Attach runs the pinned attach in the job’s directory in one tab, again at its prompt and after a reload; a terminal holder gets no Attach', async () => {
     const repo = await ScratchRepo.create();
     const store = await StoreFixture.create();
     const sid = '5e551011-0000-4000-8000-00000000000b';
@@ -325,7 +326,7 @@ test.describe('sessions', () => {
     const shellDir = mkdtempSync(join(tmpdir(), 'maws-e2e-shell-'));
     const reached = join(shellDir, 'reached.txt');
     const shell = join(shellDir, 'login-shell');
-    writeFileSync(shell, `#!/bin/sh\n[ "$1" = "-l" ] || exit 1\nIFS= read -r line\nprintf '%s\\n%s\\n' "$(pwd -P)" "$line" > '${reached}'\nexec cat\n`);
+    writeFileSync(shell, `#!/bin/sh\n[ "$1" = "-l" ] || exit 1\npwd -P > '${reached}'\nwhile IFS= read -r line; do printf '%s\\n' "$line" >> '${reached}'; done\n`);
     chmodSync(shell, 0o755);
     const launched = await launchCase({ fixtures: [], trusted: [repo.root], store, env: { SHELL: shell } });
     current = { ...launched, repos: [repo], dispose: async () => (await launched.maws.cleanup(), rmSync(shellDir, { recursive: true, force: true })) };
@@ -349,15 +350,24 @@ test.describe('sessions', () => {
     const notice = page.locator('[data-region="main"]').getByRole('note');
     await expect(notice).toContainText(`Live as background job · pid ${pid} · read-only`);
     await notice.getByRole('button', { name: 'Attach in a terminal tab' }).click();
-    await expect.poll(() => (existsSync(reached) ? readFileSync(reached, 'utf8') : ''), { timeout: 10_000 }).toBe(`${realpathSync(jobDir)}\n${command}\n`);
+    const reachedShell = () => (existsSync(reached) ? readFileSync(reached, 'utf8') : '');
+    await expect.poll(reachedShell, { timeout: 10_000 }).toBe(`${realpathSync(jobDir)}\n${command}\n`);
     const ptys = async () => value(await invoke(page, 'pty.list', undefined)).ptys.filter((p) => p.appSessionId === id && p.alive);
     const [pty] = await ptys();
     // the panel's list as C5 persists it (written a moment after the change)
     const panel = async () => value(await invoke(page, 'layout.get', { key: `panel.${id}` })).value as { tabs: { id: string; toolId: string }[]; activeTabId: string | null } | null;
     await expect.poll(panel, { message: 'one Terminal tab, selected, whose id is the pty’s label' }).toEqual({ tabs: [{ id: pty!.label, toolId: 'terminal', pinned: false }], activeTabId: pty!.label });
+    // the shell is at its prompt (the attach was left): a second Attach runs it again in the same tab
     await notice.getByRole('button', { name: 'Attach in a terminal tab' }).click();
-    await page.waitForTimeout(500);
-    expect((await ptys()).map((p) => p.ptyId), 'a second Attach shows the running one').toEqual([pty!.ptyId]);
+    await expect.poll(reachedShell, { timeout: 10_000 }).toBe(`${realpathSync(jobDir)}\n${command}\n${command}\n`);
+    expect((await ptys()).map((p) => p.ptyId), 'no second pty').toEqual([pty!.ptyId]);
+    // a reload keeps the tab and its shell (C9 re-adopts it under the tab id) and the layout remembers whose attach it is
+    await expect.poll(async () => value(await invoke(page, 'layout.get', { key: 'sessions.attachTabs' })).value).toEqual({ version: 1, tabs: [{ tabId: pty!.label, appSessionId: id, jobId: 'e6dcd828' }] });
+    await page.reload();
+    await notice.getByRole('button', { name: 'Attach in a terminal tab' }).click();
+    await expect.poll(reachedShell, { timeout: 10_000 }).toBe(`${realpathSync(jobDir)}\n${command}\n${command}\n${command}\n`);
+    expect((await ptys()).map((p) => p.ptyId), 'still the one pty after the reload').toEqual([pty!.ptyId]);
+    await expect.poll(panel).toEqual({ tabs: [{ id: pty!.label, toolId: 'terminal', pinned: false }], activeTabId: pty!.label });
 
     // an interactive terminal holds it now: held with no attach, and no Attach anywhere
     await store.removeRegistryRecord(pid);
