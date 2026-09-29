@@ -13,7 +13,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { OperationCommand, OperationEvent } from '../../src/shared/engine/operations';
 import { EngineSessionStatusSchema, type EngineSessionStatus } from '../../src/shared/engine/status';
-import type { QueuePauseReason } from '../../src/shared/engine/session-state-store';
+import type { QueueEntry, QueuePauseReason } from '../../src/shared/engine/session-state-store';
 import type { AutoModeRefusalCode, PermissionMode } from '../../src/shared/graph/enums';
 import type { IpcError } from '../../src/shared/ipc/errors';
 import { EventIdSchema, type AppSessionId, type EventId } from '../../src/shared/graph/ids';
@@ -230,13 +230,26 @@ export function createWidgetBackend(options: WidgetBackendOptions): WidgetBacken
   let turnSeq = 0;
   let opSeq = 0;
   let queueSeq = 0;
-  // The app queue's pause per session (C3's `QueueState` without entries): paused by the human, or by an interrupt.
-  const queues = new Map<AppSessionId, { paused: boolean; pauseReason: QueuePauseReason | null }>();
-  const queueOf = (status: EngineSessionStatus) => queues.get(status.appSessionId) ?? { paused: status.queue.paused, pauseReason: status.queue.paused ? ('user' as const) : null };
-  const setQueue = (status: EngineSessionStatus, paused: boolean, pauseReason: QueuePauseReason | null) => {
-    queues.set(status.appSessionId, { paused, pauseReason });
-    emitStatus(status.appSessionId, { queue: { ...statusOf(status.appSessionId).queue, paused } });
+  // The app queue per session (C3's `QueueState`): its pause (by the human, or by an interrupt) and the entries it holds.
+  // A send while a turn is open or the queue is paused is held as a `queued` entry; the backend has no engine to
+  // release one to, so held entries stay until the test ends (they survive a stop, as C3's state file keeps them).
+  type HeldQueue = { paused: boolean; pauseReason: QueuePauseReason | null; entries: QueueEntry[] };
+  const queues = new Map<AppSessionId, HeldQueue>();
+  const queueOf = (status: EngineSessionStatus): HeldQueue =>
+    queues.get(status.appSessionId) ?? { paused: status.queue.paused, pauseReason: status.queue.paused ? 'user' : null, entries: [] };
+  const setQueue = (status: EngineSessionStatus, patch: Partial<HeldQueue>) => {
+    const next = { ...queueOf(status), ...patch };
+    queues.set(status.appSessionId, next);
+    emitStatus(status.appSessionId, { queue: { length: next.entries.length, paused: next.paused } });
   };
+  function send(status: EngineSessionStatus, content: QueueEntry['content']): { messageUuid: null; disposition: 'sent' | 'queued'; queueId: string } {
+    const queueId = `queue-${++queueSeq}`;
+    const queue = queueOf(status);
+    if (status.turn === null && !queue.paused) return { messageUuid: null, disposition: 'sent', queueId };
+    const entry: QueueEntry = { queueId, appSessionId: status.appSessionId, content, createdAt: now(), state: 'queued', messageUuid: null, submittedAt: null, uncertain: false, steer: false };
+    setQueue(status, { entries: [...queue.entries, entry] });
+    return { messageUuid: null, disposition: 'queued', queueId };
+  }
 
   const statusOf = (appSessionId: AppSessionId | null): EngineSessionStatus => {
     const status = appSessionId === null ? undefined : statuses.get(appSessionId);
@@ -303,7 +316,7 @@ export function createWidgetBackend(options: WidgetBackendOptions): WidgetBacken
 
   // C3's interrupt: the app queue pauses first (`interrupt`), the engine is asked, and the turn ends after the answer.
   function interrupt(status: EngineSessionStatus): { stillQueued: string[]; cancelled: string[] } {
-    setQueue(status, true, 'interrupt');
+    setQueue(status, { paused: true, pauseReason: 'interrupt' });
     if (status.turn !== null) setTimeout(() => emitStatus(status.appSessionId, { turn: null, engineState: 'idle', activity: null }), 0);
     return { stillQueued: [], cancelled: [] };
   }
@@ -335,14 +348,17 @@ export function createWidgetBackend(options: WidgetBackendOptions): WidgetBacken
     if (command === 'session.status') return statusOf(appSessionIdOf(input));
     const status = statusOf(appSessionIdOf(input));
     if (command === 'session.catalog') return catalog;
-    if (command === 'session.queue.list') return { entries: [], ...queueOf(status) };
+    if (command === 'session.queue.list') {
+      const { entries, paused, pauseReason } = queueOf(status);
+      return { entries, paused, pauseReason };
+    }
     if (command === 'session.queue.setPaused') {
       const paused = (input as { paused: boolean }).paused;
-      return void setQueue(status, paused, paused ? 'user' : null);
+      return void setQueue(status, { paused, pauseReason: paused ? 'user' : null });
     }
     if (command === 'session.stop') return stop(status, (input as { reason: 'stop' | 'archive' }).reason);
     if (status.process !== 'ready') throw new WidgetBackendError({ code: 'internal', message: `${status.appSessionId} has no ready process` });
-    if (command === 'session.send') return { messageUuid: null, disposition: 'sent', queueId: `queue-${++queueSeq}` };
+    if (command === 'session.send') return send(status, (input as { content: QueueEntry['content'] }).content);
     if (command === 'session.interrupt') return interrupt(status);
     const subtype = SUBTYPE_OF[command];
     if (!subtype) throw new WidgetBackendError({ code: 'internal', message: `the widget backend does not answer ${command}` });

@@ -176,6 +176,17 @@ describe('the widget backend', () => {
     expect(await backend.answer('session.queue.list', { appSessionId: READY })).toMatchObject({ paused: true, pauseReason: 'user' });
   });
 
+  it('holds a send made while a turn is open as a queued entry, which queue.list answers and a stop keeps', async () => {
+    const { backend } = backendOf();
+    backend.emitTurnStarted(READY);
+    expect(await backend.answer('session.send', { appSessionId: READY, content: 'first' })).toMatchObject({ disposition: 'queued' });
+    expect(await backend.answer('session.send', { appSessionId: READY, content: 'second' })).toMatchObject({ disposition: 'queued' });
+    expect(backend.status(READY).queue).toEqual({ length: 2, paused: false });
+    await backend.answer('session.stop', { appSessionId: READY, reason: 'stop' });
+    const queue = (await backend.answer('session.queue.list', { appSessionId: READY })) as { entries: { content: unknown; state: string }[] };
+    expect(queue.entries.map((e) => [e.content, e.state])).toEqual([['first', 'queued'], ['second', 'queued']]);
+  });
+
   it('keeps the synthetic answers readable, each citing where its shape comes from', () => {
     for (const name of ['reload-plugins.json', 'mcp-reconnect.json', 'mcp-toggle.json', 'mcp-toggle-connect-failed.json', 'get-session-cost.json']) {
       expect(syntheticFixture(ROOT, name)._from, name).toMatch(/SPEC/);

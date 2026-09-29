@@ -284,14 +284,17 @@ describe('one switch in flight per session', () => {
 });
 
 describe('the queue after a switch', () => {
-  it('a turn open and a running queue: resumed once at done', async () => {
+  it('a turn open and a running queue of two: the entries survive the restart and the queue resumes once at done', async () => {
     const s = setup({ turn: true });
+    for (const content of ['first queued', 'second queued']) expect(await s.backend.answer('session.send', { appSessionId: READY, content })).toMatchObject({ disposition: 'queued' });
     const run = s.switcher.switchRoute(READY, 'direct');
     await confirming(s);
     s.switcher.answer(READY, CONFIRM);
     expect(await run).toBe('done');
     expect(s.log.filter((c) => c === 'session.queue.setPaused')).toHaveLength(1);
-    expect(await s.backend.answer('session.queue.list', { appSessionId: READY })).toMatchObject({ paused: false, pauseReason: null });
+    const queue = (await s.backend.answer('session.queue.list', { appSessionId: READY })) as { entries: { content: unknown }[]; paused: boolean; pauseReason: unknown };
+    expect(queue).toMatchObject({ paused: false, pauseReason: null });
+    expect(queue.entries.map((e) => e.content)).toEqual(['first queued', 'second queued']);
   });
 
   it('a cancel after the recheck returned to the sheet resumes the queue its interrupt paused, once', async () => {
