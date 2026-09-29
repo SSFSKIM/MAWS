@@ -201,7 +201,7 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
   const wait = RESUBMIT_WAIT[resubmit.state];
   const shown: SubmitDecision =
     editing && !unstarted && !draft.empty && draft.mode === 'send'
-      ? { ...decision, primary: 'send', label: 'Send', enabled: ready && wait === null, reason: wait ?? (ready ? null : decision.reason), secondaryStop: false, menu: [] }
+      ? { ...decision, primary: 'send', label: 'Send', enabled: ready && wait === null, reason: wait ?? (ready ? null : decision.reason), detail: null, secondaryStop: false, menu: [] }
       : decision;
 
   // ---- the docked swap ---------------------------------------------------------------------------------------------

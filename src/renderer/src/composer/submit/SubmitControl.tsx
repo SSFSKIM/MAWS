@@ -1,5 +1,6 @@
 // The submit control (C7 execution document, "Submit control and queue"): the primary button reads the decision's label
-// (Send, Queue, Steer, Stop, Resume, Run, Save to memory, Starting…) with its reason as the tooltip, a Stop beside it
+// (Send, Queue, Steer, Stop, Resume, Run, Save to memory, Starting…) with its reason, or what it does when the label
+// alone would not say (`!` while busy runs now, inside the turn), as the tooltip and description, a Stop beside it
 // while a turn runs under a message, and a caret menu with Queue, Steer and Interrupt and send while busy, each saying
 // what it does. It sits beside the editor and outside the composer key sink, so it is ordinary pane content for C5's
 // dispatcher. ⌥ held over the control, or while focus is in the box, turns Queue into Steer live.
@@ -37,7 +38,7 @@ function tooltip(d: SubmitDecision, multiline: boolean): string {
     case 'steer':
       return 'Adds this to the running turn at its next step (⌥Enter)';
     default:
-      return `${d.label} (${multiline ? '⌘Enter' : 'Enter'})`;
+      return `${d.detail ?? d.label} (${multiline ? '⌘Enter' : 'Enter'})`;
   }
 }
 
@@ -54,6 +55,7 @@ export function SubmitControl({ decision, multiline, onPrimary, onStop, onMenu, 
           type="button"
           data-submit-state={decision.primary}
           title={tooltip(decision, multiline)}
+          aria-description={decision.detail ?? undefined}
           disabled={!decision.enabled}
           onClick={onPrimary}
           className={`${PRIMARY} ${TONE[decision.primary]} ${decision.menu.length > 0 ? 'rounded-r-none' : ''}`}

@@ -30,6 +30,7 @@ export interface SubmitDecision {
   label: string;
   enabled: boolean;
   reason: string | null; // why it is disabled, when that is not just an empty editor
+  detail: string | null; // what the primary does, when its label alone would not say
   secondaryStop: boolean;
   menu: SubmitMenuItem[];
 }
@@ -38,6 +39,8 @@ export const STARTING = 'Session is starting…';
 export const MESSAGE_HELD = 'Your first message is with the setup above';
 export const ENDED = 'Session ended';
 export const NOT_YET = 'Available once the session starts';
+// `!` while busy (architect's ruling on M6): the engine runs it inside the turn and folds its output in.
+export const RUNS_NOW = 'Runs now; the model sees the output in this turn';
 
 export const isBusy = (status: EngineSessionStatus | null, entries: readonly QueueEntry[]): boolean =>
   (status?.turn ?? null) !== null || entries.some((e) => e.state === 'submitting' || e.state === 'released');
@@ -56,6 +59,7 @@ const decide = (primary: SubmitState, label: string, enabled: boolean, reason: s
   reason,
   secondaryStop,
   menu,
+  detail: null,
 });
 
 export function submitState(i: SubmitInput): SubmitDecision {
@@ -71,7 +75,7 @@ export function submitState(i: SubmitInput): SubmitDecision {
     return decide('send', 'Send', false, starting ? STARTING : ENDED);
   }
   const turnOpen = status.turn !== null;
-  if (mode === 'bash') return decide('send', 'Run', !empty, null, turnOpen);
+  if (mode === 'bash') return { ...decide('send', 'Run', !empty, null, turnOpen), detail: isBusy(status, queue.entries) ? RUNS_NOW : null };
   if (mode === 'memory') return decide('send', 'Save to memory', !empty, null, turnOpen);
   if (isBusy(status, queue.entries)) {
     if (empty) return decide('stop', 'Stop', true, null, false, busyMenu(false)); // the menu stays, each item waiting for text

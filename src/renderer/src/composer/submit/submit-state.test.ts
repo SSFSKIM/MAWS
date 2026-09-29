@@ -45,6 +45,13 @@ describe('submitState covers the five states, the caret menu and the unstarted r
     expect(submitState(input({ mode: 'bash', status: turning })).menu).toEqual([]);
   });
 
+  it('says what `!` does while busy: it runs now and the model sees the output in this turn (architect’s ruling on M6)', () => {
+    expect(submitState(input({ mode: 'bash', status: turning })).detail).toBe('Runs now; the model sees the output in this turn');
+    expect(submitState(input({ mode: 'bash', queue: { entries: [entry('submitting')], paused: false } })).detail).toBe('Runs now; the model sees the output in this turn');
+    expect(submitState(input({ mode: 'bash' })).detail).toBeNull(); // idle: Run is all there is to say
+    expect(submitState(input({ status: turning })).detail).toBeNull();
+  });
+
   it('reads busy from the open turn, or an entry in flight before the engine’s started', () => {
     expect(row({ status: turning, empty: true })).toEqual(['stop', 'Stop', true, null, false]);
     expect(row({ status: turning, steerHeld: true })).toEqual(['steer', 'Steer', true, null, true]);

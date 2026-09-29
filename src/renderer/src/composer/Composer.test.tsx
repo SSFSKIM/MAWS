@@ -299,6 +299,16 @@ describe("composer DOM under C5's dispatcher", () => {
     expect(editorOf().editor.getText()).toBe('one two three four');
   });
 
+  it('keeps `!` enabled while busy as Run, and the control says it runs now inside the turn', async () => {
+    busy(A);
+    mount([{ index: 0, id: A }]);
+    await type('!ls');
+    await waitFor(() => expect(primary().textContent).toBe('Run'));
+    expect(primary().disabled).toBe(false);
+    expect(primary().title).toBe('Runs now; the model sees the output in this turn (Enter)');
+    expect(primary().getAttribute('aria-description')).toBe('Runs now; the model sees the output in this turn');
+  });
+
   it('shows the engine’s effective mode with the refusal in words, and + dir adds to the engine’s directories', async () => {
     live(A, { status: { permissionMode: { requested: 'auto', effective: 'default', refusal: 'auto_mode_model' } } });
     mount([{ index: 0, id: A }]);
