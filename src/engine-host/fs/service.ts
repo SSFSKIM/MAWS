@@ -29,7 +29,7 @@ import { Follow, FsFileReader, SNAPSHOT_WAIT_MS } from './follow';
 import { HolderRegistry, type HolderDeps } from './holders';
 import type { StorePaths } from './paths';
 import { SubagentReader, subagentLookup } from './subagents';
-import { TaskReader } from './tasks';
+import { sanitizeListId, TaskReader } from './tasks';
 import { StoreWatcher, type StoreChange, type WatchFn } from './watcher';
 import { progressKey, WorkflowReader, workflowProgressEvent, workflowProgressId } from './workflows';
 
@@ -106,6 +106,9 @@ export class FsService {
   private readonly agentListing = new Map<SessionId, Promise<SubagentEntry[]>>(); // one listing at a time per session
   private readonly workflowReader = new WorkflowReader();
   private readonly taskReader: TaskReader;
+  // C8b start (M4 task 6): the lists a reader asked for, by sanitised id, announced again after a rescan of tasks/
+  private readonly readLists = new Set<string>();
+  // C8b end
   private replays: ReplaySnapshots | null = null;
 
   constructor(options: FsServiceOptions) {
@@ -302,6 +305,7 @@ export class FsService {
   }
 
   async tasks(listId: string): Promise<{ tasks: PersistedTask[] }> {
+    this.readLists.add(sanitizeListId(listId)); // C8b (M4 task 6)
     return { tasks: await this.taskReader.list(listId) };
   }
 
@@ -475,6 +479,11 @@ export class FsService {
           void this.enqueueScan(null, 'refresh').then(() => this.relocateFollows(), logScanFailure);
         } else if (change.root === 'sessions') void this.holders.refresh();
         else if (change.root === 'jobs') void this.holders.jobChanged(null);
+        // C8b start (M4 task 6): a rescan of tasks/ (the settle rescan after the root appears in a fresh config home, or
+        // a dropped FSEvents name) says nothing of which list changed, so every list read so far is announced; a
+        // checklist queried before its directory existed would otherwise keep its empty answer.
+        else if (change.root === 'tasks') for (const listId of this.readLists) this.send('fs.tasksChanged', { listId });
+        // C8b end
         return;
     }
   }
