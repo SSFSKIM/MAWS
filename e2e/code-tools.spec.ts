@@ -11,6 +11,7 @@ import type { PanelHarnessApi } from '../src/renderer/src/harness/panel/api';
 import type { CodeHarnessApi } from '../src/renderer/src/harness/code/api';
 import { buildCodeScratch, GENERATED_LINES, generatedLine, MARKER_LINE, SVG_TEXT, type CodeScratch } from './support/code-scratch';
 import { launchMaws, test, type MawsLaunch } from './support/launch';
+import { latencyBudgets, MEASURED_WAIT_MS } from './support/latency';
 import { CHARTER } from './support/panel-support';
 
 const REFUSAL = "path outside the session's directories";
@@ -623,15 +624,15 @@ test.describe('the product in stub mode over a scratch repository', () => {
   });
 
   test('a 20 MB file opens as a bounded head', async () => {
+    const within = latencyBudgets();
     await withProduct(async (p) => {
       const row = await reveal(p, 'big.log');
       const started = Date.now();
       await row.click();
       const viewer = p.page.locator(`[data-file-viewer][data-path="${p.scratch.path('big.log')}"]`);
-      await expect(notice(viewer)).toHaveText('Showing the first 1.0 MB of 20.0 MB', { timeout: 2_000 });
-      await expect(viewer.locator('[data-code-view] .cm-line').first()).toBeVisible({ timeout: Math.max(1, 2_000 - (Date.now() - started)) });
-      test.info().annotations.push({ type: 'big.log head shown after', description: `${Date.now() - started} ms` });
-      expect(Date.now() - started, 'the read completed within two seconds').toBeLessThan(2_000);
+      await expect(notice(viewer)).toHaveText('Showing the first 1.0 MB of 20.0 MB', { timeout: MEASURED_WAIT_MS });
+      await expect(viewer.locator('[data-code-view] .cm-line').first()).toBeVisible({ timeout: MEASURED_WAIT_MS });
+      within('big.log head shown after', Date.now() - started, 2_000, 'the read completed within two seconds');
       await expect(viewer.getByRole('button', { name: 'Load more' })).toBeVisible();
       await expect(viewer.getByRole('button', { name: 'Open externally' })).toBeVisible();
     });
@@ -640,6 +641,7 @@ test.describe('the product in stub mode over a scratch repository', () => {
   test('a 2 MB text file loads whole and jumps past the first chunk', async () => {
     // Line 30,000 edited in place (same length), so Review's hunk opens the viewer there.
     const marker = generatedLine(MARKER_LINE).replace("'target'", "'TARGET'");
+    const within = latencyBudgets();
     await withProduct(
       async (p) => {
         const review = await openReview(p);
@@ -648,9 +650,9 @@ test.describe('the product in stub mode over a scratch repository', () => {
         const started = Date.now();
         await review.locator('[data-open-file]').click(); // openFile(A, src/generated.ts, 30000)
         const viewer = p.page.locator(`[data-file-viewer][data-path="${p.scratch.path('src/generated.ts')}"]`);
-        await expectLandedOn(p.page, marker, 2_000);
-        await expect(notice(viewer)).toHaveCount(0, { timeout: Math.max(1, 2_000 - (Date.now() - started)) });
-        test.info().annotations.push({ type: 'generated.ts complete after', description: `${Date.now() - started} ms` });
+        await expectLandedOn(p.page, marker, MEASURED_WAIT_MS);
+        await expect(notice(viewer)).toHaveCount(0, { timeout: MEASURED_WAIT_MS });
+        within('generated.ts complete after', Date.now() - started, 2_000, 'the file loaded whole and landed within two seconds');
         const seen = await notices();
         expect(seen.some((text) => /^Loading .+ of 2\.1 MB$/.test(text)), `a Loading notice was shown: ${JSON.stringify(seen)}`).toBe(true);
         expect(seen.filter((text) => text.startsWith('Showing the first'))).toEqual([]);
@@ -710,16 +712,15 @@ test.describe('the product in stub mode over a scratch repository', () => {
   });
 
   test('Staged appears only when the index differs', async () => {
+    const within = latencyBudgets();
     await withProduct(async (p) => {
       const review = await openReview(p);
       const staged = review.locator('[data-chip="staged"]');
       await expect(staged).toBeVisible();
       p.scratch.git('reset', '--quiet');
       const reset = Date.now();
-      await expect.poll(() => staged.count(), { timeout: 5_000, intervals: [25] }).toBe(0);
-      const gone = Date.now() - reset;
-      test.info().annotations.push({ type: 'Staged gone after git reset', description: `${gone} ms` });
-      expect(gone, 'Staged gone within a second of the reset').toBeLessThanOrEqual(1_000);
+      await expect.poll(() => staged.count(), { timeout: MEASURED_WAIT_MS, intervals: [25] }).toBe(0);
+      within('Staged gone after git reset', Date.now() - reset, 1_000, 'Staged gone within a second of the reset');
       await expect(review.locator('[data-review-header]')).toHaveText('5 files changed · +3 −0 · Uncommitted');
       await expect(review.locator('[role="option"] button[data-path="src/staged.ts"]')).toHaveAttribute('data-kind', 'untracked');
     });
@@ -767,6 +768,7 @@ test.describe('the product in stub mode over a scratch repository', () => {
   });
 
   test('the viewer follows an edit to its file', async () => {
+    const within = latencyBudgets();
     await withProduct(async (p) => {
       await shortWindow(p); // so the code view scrolls
       const viewer = await openInViewer(p, 'src/app.ts');
@@ -781,10 +783,8 @@ test.describe('the product in stub mode over a scratch repository', () => {
       const path = p.scratch.path('src/app.ts');
       const started = Date.now();
       writeFileSync(path, `// a new first line\n${readFileSync(path, 'utf8')}`);
-      await expect.poll(async () => viewer.locator('.cm-content').textContent(), { timeout: 5_000, intervals: [25] }).toContain('// a new first line');
-      const updated = Date.now() - started;
-      test.info().annotations.push({ type: 'viewer updated after', description: `${updated} ms` });
-      expect(updated, 'the viewer updated within a second of the write').toBeLessThanOrEqual(1_000);
+      await expect.poll(async () => viewer.locator('.cm-content').textContent(), { timeout: MEASURED_WAIT_MS, intervals: [25] }).toContain('// a new first line');
+      within('viewer updated after', Date.now() - started, 1_000, 'the viewer updated within a second of the write');
       expect(await scroller.evaluate((el) => el.scrollTop), 'the scroll is kept').toBe(offset);
     });
   });
