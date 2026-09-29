@@ -1,6 +1,7 @@
 // The xterm.js adapter (C9 Interfaces *Terminal renderer adapter*, Residue *Renderer*, *WebGL policy*): xterm 6.0.0
 // with the fit, web-links, unicode-graphemes and serialize addons, and the WebGL addon held only while visible.
-// Nothing from xterm's proposed API beyond what the graphemes addon needs.
+// Nothing from xterm's proposed API beyond what the graphemes addon needs; one guarded internal call, the dated
+// exception of the M5 ruling (`scroll-up.ts`: `CSI S` rows into scrollback).
 import { FitAddon } from '@xterm/addon-fit';
 import { SerializeAddon } from '@xterm/addon-serialize';
 import { UnicodeGraphemesAddon } from '@xterm/addon-unicode-graphemes';
@@ -8,6 +9,7 @@ import { WebLinksAddon } from '@xterm/addon-web-links';
 import { WebglAddon } from '@xterm/addon-webgl';
 import { Terminal, type ITheme } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
+import { version as xtermVersion } from '@xterm/xterm/package.json';
 import {
   ansiNamed,
   type Acceleration,
@@ -17,6 +19,7 @@ import {
   type TerminalRenderer,
   type TerminalTheme,
 } from './renderer';
+import { installScrollUpIntoScrollback } from './scroll-up';
 
 const toXtermTheme = (theme: TerminalTheme): ITheme => ({
   background: theme.background,
@@ -56,6 +59,7 @@ export function createXtermRenderer(opts: RendererOptions): TerminalRenderer {
   terminal.loadAddon(new WebLinksAddon((ev, uri) => linkHandler(uri, ev)));
   terminal.loadAddon(serializer);
   terminal.attachCustomKeyEventHandler((ev) => keyFilter(ev));
+  installScrollUpIntoScrollback(terminal, { version: xtermVersion, refresh: () => terminal.refresh(0, terminal.rows - 1) });
   terminal.open(element);
 
   let acceleration: Acceleration = 'dom';
