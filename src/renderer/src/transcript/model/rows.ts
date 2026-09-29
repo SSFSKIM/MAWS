@@ -135,7 +135,7 @@ export interface Truncation {
 export interface Spill {
   path: string;
   bytes: number | null;
-  state: 'not_loaded' | 'loading' | 'loaded' | 'failed';
+  state: 'not_loaded' | 'loading' | 'loaded' | 'partial' | 'failed'; // partial (M5, additive): only the head was read (fs.readSpill truncated it at the 2 MB the loader reads)
   content: string | null;
 }
 

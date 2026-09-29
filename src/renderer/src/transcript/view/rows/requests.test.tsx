@@ -3,7 +3,7 @@
 import type { EventId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { loadEventFixture, loadJournal, loadSyntheticJournal } from '../../../../../../test/support/fixtures';
 import { useTranscriptStore } from '../../../stores/transcript';
 import { journalToEvents } from '../../dev/replay-stub';
@@ -41,20 +41,48 @@ describe('plan row', () => {
     expect(within(region).getAllByRole('listitem').map((item) => item.textContent)).toEqual(['Read the reducer.', 'Add the retraction case.', 'Extend the snapshot suite.']);
   });
 
-  it('a long plan is bounded and opens with Show more', async () => {
+  // happy-dom has no layout: the plan body's rendered height is stubbed (its collapsed box is 144 px).
+  function renderedPlanHeight(height: number) {
+    Object.defineProperty(HTMLElement.prototype, 'scrollHeight', { configurable: true, get(this: HTMLElement) { return this.hasAttribute('data-plan-body') ? height : 0; } });
+    Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
+      configurable: true,
+      get(this: HTMLElement) { return this.hasAttribute('data-plan-body') ? (this.hasAttribute('data-open') ? height : Math.min(height, 144)) : 0; },
+    });
+    onTestFinished(() => {
+      // The stubs shadow happy-dom's own (on Element.prototype); removing them restores it.
+      Reflect.deleteProperty(HTMLElement.prototype, 'scrollHeight');
+      Reflect.deleteProperty(HTMLElement.prototype, 'clientHeight');
+    });
+  }
+  async function planRow(plan: string) {
     const b = builder();
     b.turn('u1');
-    b.toolUse('p1', 'ExitPlanMode', { plan: ['# Plan', '', ...Array.from({ length: 12 }, (_, i) => `${i + 1}. Step ${i + 1}.`)].join('\n') });
+    b.toolUse('p1', 'ExitPlanMode', { plan });
     b.result('p1', 'approved');
     b.end(['u1']);
     const store = await expanded(b.events);
     renderRow(rowOf(store.rows(), 'plan'), { storeKey: store.key });
     const region = screen.getByRole('region', { name: 'Plan' });
-    const body = region.querySelector<HTMLElement>('[data-plan-body]')!;
+    return { region, body: region.querySelector<HTMLElement>('[data-plan-body]')! };
+  }
+
+  it('Show more follows the rendered height: a one-line plan that renders taller than 144 px is bounded and opens', async () => {
+    renderedPlanHeight(400);
+    const { region, body } = await planRow('# A plan with one tall diagram');
     expect(body.dataset.open).toBeUndefined();
+    expect(body.dataset.overflows).toBe('');
     fireEvent.click(within(region).getByRole('button', { name: 'Show more' }));
     expect(body.dataset.open).toBe('');
     expect(within(region).getByRole('button', { name: 'Show less' }).getAttribute('aria-expanded')).toBe('true');
+    fireEvent.click(within(region).getByRole('button', { name: 'Show less' }));
+    expect(body.dataset.open).toBeUndefined();
+  });
+
+  it('a twelve-step plan that renders within 144 px offers no Show more', async () => {
+    renderedPlanHeight(120);
+    const { region, body } = await planRow(['# Plan', '', ...Array.from({ length: 12 }, (_, i) => `${i + 1}. Step ${i + 1}.`)].join('\n'));
+    expect(body.dataset.overflows).toBeUndefined();
+    expect(within(region).queryByRole('button', { name: 'Show more' })).toBeNull();
   });
 
   it('a plan with no outcome reads Pending, and a short plan has nothing to show more of', async () => {
@@ -102,6 +130,26 @@ describe('question row', () => {
     const unanswered = await expanded(questions(false));
     view = renderRow(rowOf(unanswered.rows(), 'question'), { storeKey: unanswered.key });
     expect(view.container.textContent).toContain('Not answered');
+  });
+
+  it('a partially answered row says Not answered for each question without an answer, and only for those', async () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('q1', 'AskUserQuestion', {
+      questions: [
+        { question: 'Which colour?', header: 'Colour', multiSelect: false, options: [{ label: 'Red' }, { label: 'Blue' }] },
+        { question: 'Which fruits?', header: 'Fruits', multiSelect: true, options: [{ label: 'Apple' }, { label: 'Pear' }] },
+      ],
+    });
+    b.result('q1', 'answered', { structured: { answers: { 'Which colour?': 'Blue' } } });
+    b.end(['u1']);
+    const store = await expanded(b.events);
+    const view = renderRow(rowOf(store.rows(), 'question'), { storeKey: store.key });
+    const [colour, fruits] = [...view.container.querySelectorAll<HTMLElement>('[data-question]')];
+    expect([...colour.querySelectorAll('[data-chosen] [data-option-label]')].map((label) => label.textContent)).toEqual(['Blue']);
+    expect(colour.textContent).not.toContain('Not answered');
+    expect(fruits.querySelectorAll('[data-chosen]')).toHaveLength(0);
+    expect(fruits.textContent).toContain('Not answered');
   });
 });
 
@@ -217,6 +265,50 @@ describe('spilled result', () => {
     const output = view.container.querySelector('.transcript-output')!;
     expect(output.textContent).toContain('BUILD OK'); // the tail
     expect(output.querySelector('[data-omitted]')?.textContent).toMatch(/\d+ KB omitted/);
+  });
+
+  // A spill whose size the engine did not report (a generic tool's spill), larger than the 2 MB the loader reads.
+  async function unknownSizeSpill() {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('t1', 'mcp__big__dump', {});
+    b.result('t1', 'Output too large (3.1MB). Full output saved to: /cfg/tool-results/t1.txt', { spillPath: '/cfg/tool-results/t1.txt' });
+    b.end(['u1']);
+    const store = await storeWith(b.events);
+    useTranscriptStore.getState().expandAll(store.key, { cells: true });
+    const cellRow = () => store.rows().find((row) => row.kind === 'cell' || row.kind === 'group')!;
+    const spillOf = () => {
+      const row = cellRow();
+      const cell = row.kind === 'cell' ? row : row.kind === 'group' ? row.cells[0] : null;
+      return cell && 'spill' in cell.detail ? cell.detail.spill : null;
+    };
+    return { store, cellRow, spillOf };
+  }
+
+  it('an unknown-size spill answered truncated by fs.readSpill is partial: the head, then Showing the first 2 MB with Open full log', async () => {
+    const invoke = vi.fn(() => Promise.resolve({ ok: true, value: { content: 'head of the dump', bytes: 3_250_000, offset: 0, truncated: true } }));
+    (window as { maws?: MawsBridge }).maws = { invoke, on: vi.fn(() => () => {}) } as unknown as MawsBridge;
+    const { store, cellRow, spillOf } = await unknownSizeSpill();
+    expect(spillOf()).toMatchObject({ bytes: null, state: 'not_loaded' });
+    const actions = { ...spyActions(), loadSpill: DEFAULT_ACTIONS.loadSpill };
+    const view = renderRow(cellRow(), { storeKey: store.key, actions });
+    fireEvent.click(screen.getByRole('button', { name: 'Load full result' }));
+    await waitFor(() => expect(spillOf()?.state).toBe('partial'));
+    view.rerenderRow(cellRow());
+    expect(spillOf()?.content).toBe('head of the dump');
+    expect(view.container.textContent).toContain('head of the dump');
+    const marker = view.container.querySelector<HTMLElement>('.transcript-spill [data-omitted], [data-omitted]')!;
+    expect(marker.textContent).toContain('Showing the first 2 MB');
+    fireEvent.click(within(marker).getByRole('button', { name: 'Open full log' }));
+    expect(actions.openFullLog).toHaveBeenCalledTimes(1);
+  });
+
+  it('a caller’s own loadSpill that returns a cap-sized result is taken as partial too', async () => {
+    const { store, cellRow, spillOf } = await unknownSizeSpill();
+    const loadSpill = vi.fn(() => Promise.resolve('x'.repeat(2 * 1024 * 1024)));
+    renderRow(cellRow(), { storeKey: store.key, actions: { ...spyActions(), loadSpill } });
+    fireEvent.click(screen.getByRole('button', { name: 'Load full result' }));
+    await waitFor(() => expect(spillOf()?.state).toBe('partial'));
   });
 
   it('a failed load says why and offers Retry', async () => {

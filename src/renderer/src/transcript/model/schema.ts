@@ -17,7 +17,7 @@ export const ToolClassificationSchema = z.strictObject({
 });
 
 const TruncationSchema = z.strictObject({ shownHead: z.number(), shownTail: z.number(), omittedBytes: z.number() });
-const SpillSchema = z.strictObject({ path: z.string(), bytes: nullable(z.number()), state: z.enum(['not_loaded', 'loading', 'loaded', 'failed']), content: nullable(z.string()) });
+const SpillSchema = z.strictObject({ path: z.string(), bytes: nullable(z.number()), state: z.enum(['not_loaded', 'loading', 'loaded', 'partial', 'failed']), content: nullable(z.string()) });
 const HunkSchema = z.strictObject({ oldStart: z.number(), oldLines: z.number(), newStart: z.number(), newLines: z.number(), lines: z.array(z.string()) });
 const result = z.union([z.string(), z.array(ContentBlockSchema)]);
 

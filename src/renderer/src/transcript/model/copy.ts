@@ -302,7 +302,7 @@ export const DETAIL = {
 } as const;
 
 // A spilled result's loader (residue *Spilled results*).
-const sizeCopy = (bytes: number) => (bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / (1024 * 1024)).toFixed(1)} MB`);
+const sizeCopy = (bytes: number) => (bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${Number((bytes / (1024 * 1024)).toFixed(1))} MB`);
 export const SPILL = {
   load: (bytes: number | null) => (bytes === null ? 'Load full result' : `Load full result (${sizeCopy(bytes)})`),
   loading: 'Loading the full result…',

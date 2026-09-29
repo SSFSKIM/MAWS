@@ -2,16 +2,24 @@
 // `tool-results/`, and the detail shows the wire preview until the reader asks for the whole thing. The load goes
 // through `actions.loadSpill` (by default fs.readSpill, up to the first 2 MB) and its state lives in the store, where
 // the row reports it (`Spill.state`, `content`); the detail then shows the content with the same 64 KB cap as any
-// output. Past what was read, the rest is Open full log's (C8).
+// output. A read that stopped short (fs.readSpill said truncated, or the content fills the 2 MB read) is `partial`:
+// the head, marked as such, and the rest through Open full log (C8).
 import { useTranscriptStore } from '../../../stores/transcript';
 import { SPILL } from '../../model/copy';
 import type { Cell, Spill } from '../../model/rows';
-import { SPILL_READ_BYTES } from '../../source/ipc';
+import { SPILL_READ_BYTES, spillWasTruncated } from '../../source/ipc';
 import { useTranscriptContext } from '../context';
 import { Omitted } from './Truncated';
 
+// Whether the reader loaded the spill, all of it or its head.
+export const isRead = (spill: Spill | null): spill is Spill & { content: string } => (spill?.state === 'loaded' || spill?.state === 'partial') && spill.content !== null;
+
 // What a detail shows as the result: the loaded spill, else the wire preview.
-export const spilledOr = (spill: Spill | null, preview: string) => (spill?.state === 'loaded' && spill.content !== null ? spill.content : preview);
+export const spilledOr = (spill: Spill | null, preview: string) => (isRead(spill) ? spill.content : preview);
+
+// Content that fills the read is the head of something larger, whoever loaded it (a caller's own `loadSpill` included).
+const fillsTheRead = (content: string) =>
+  content.length >= SPILL_READ_BYTES || (content.length * 3 >= SPILL_READ_BYTES && new TextEncoder().encode(content).length >= SPILL_READ_BYTES);
 
 export function SpillLoader({ cell, spill }: { cell: Cell; spill: Spill }) {
   const { storeKey, actions } = useTranscriptContext();
@@ -20,7 +28,7 @@ export function SpillLoader({ cell, spill }: { cell: Cell; spill: Spill }) {
     const set = useTranscriptStore.getState().setSpill;
     set(storeKey, spill.path, { state: 'loading', error: null });
     actions.loadSpill(spill).then(
-      (content) => set(storeKey, spill.path, { state: 'loaded', content }),
+      (content) => set(storeKey, spill.path, { state: spillWasTruncated(spill.path) || fillsTheRead(content) ? 'partial' : 'loaded', content }),
       (reason: unknown) => set(storeKey, spill.path, { state: 'failed', content: null, error: reason instanceof Error ? reason.message : String(reason) }),
     );
   };
@@ -48,7 +56,9 @@ export function SpillLoader({ cell, spill }: { cell: Cell; spill: Spill }) {
           </button>
         </div>
       );
+    case 'partial':
+      return <Omitted cell={cell} text={SPILL.head(SPILL_READ_BYTES)} />;
     case 'loaded':
-      return spill.bytes !== null && spill.bytes > SPILL_READ_BYTES ? <Omitted cell={cell} text={SPILL.head(SPILL_READ_BYTES)} /> : null;
+      return null;
   }
 }

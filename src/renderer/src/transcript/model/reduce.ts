@@ -41,7 +41,7 @@ export interface TurnState {
   lastApiMessageId: ApiMessageId | null; // additive: the identity a delta with a null api message id takes
   // Additive (M5): how a child transcript's turn ended. A child's own slice carries no turn.ended; the parent's
   // `subagent.finished` or `task.notification` naming the child, which the child source delivers into the slice, closes
-  // its open turn with that outcome.
+  // its open turn with that outcome, and the parent's `process.exited` closes it as stopped.
   closedBy: 'completed' | 'failed' | 'stopped' | null;
 }
 
@@ -471,8 +471,16 @@ function apply(batch: Batch, event: SessionEvent): void {
       return;
     }
     case 'session.reconnect':
-    case 'process.exited':
+    case 'process.exited': {
+      // In a child transcript, the parent's process exiting ends the child with no finish to come: its open turn closes
+      // as stopped, and the exit is the parent's row, not the child's.
+      if (state.agentId !== null) {
+        const turn = batch.current();
+        if (turn) batch.closeChild(turn, 'stopped', event.at);
+        return;
+      }
       return batch.loose(event);
+    }
     default:
       return; // session lifecycle, accounting, snapshots and unknown frames: nothing the transcript shows
   }

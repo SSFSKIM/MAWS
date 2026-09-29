@@ -154,6 +154,7 @@ describe('child source provenance', () => {
     call.answer({ ok: true, value } as never);
   };
   const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+  const dividerOf = (key: string) => useTranscriptStore.getState().rows(key).find((row): row is Extract<Row, { kind: 'divider' }> => row.kind === 'divider')!;
 
   it('is memoised per key: the same source for the same app session and agent, another for another', () => {
     const fake = fakeClient();
@@ -313,7 +314,7 @@ describe('child source provenance', () => {
     expect(fake.listeners.get('session.eventBatch')?.size).toBe(0);
   });
 
-  it('relaunch of the parent with the child on disk: the live child’s exit resets the key and it re-hydrates from disk, no id twice', async () => {
+  it('relaunch of the parent with the child on disk: the exit closes the live child as stopped, resets the key, re-hydrates from disk, no id twice', async () => {
     const { parent, child } = live();
     const disk = onDisk(child);
     const fake = fakeClient();
@@ -323,10 +324,11 @@ describe('child source provenance', () => {
     await hydrated;
     expect([...useTranscriptStore.getState().entries[CHILD_KEY].state.seen]).toEqual(child.slice(0, 3).map((event) => event.id));
 
-    // The parent's process exits: the live child is over; the same source switches to disk and signals a reset.
-    const exit = builder('2026-09-28T10:00:09.000Z');
-    exit.emit('process.exited', { code: 0, signal: null, reason: 'quit', lostAttentionCount: 0 }, { id: 'exit' });
-    fake.emit('session.eventBatch', batch([child[3], ...exit.events]));
+    // The parent's process exits: no finish will come for the live child. The exit joins its slice and closes its turn
+    // as stopped; the same source switches to disk and signals a reset.
+    const exit = builder('2026-09-28T10:00:09.000Z').emit('process.exited', { code: 0, signal: null, reason: 'quit', lostAttentionCount: 0 }, { id: 'exit' });
+    fake.emit('session.eventBatch', batch([child[3], exit]));
+    expect(dividerOf(CHILD_KEY).state).toBe('stopped'); // in the live state, before the reset
     await Promise.resolve(); // the reset follows the batch that carried the end
     expect(useTranscriptStore.getState().entries[CHILD_KEY]).toMatchObject({ phase: 'hydrating' });
     expect(useTranscriptStore.getState().rows(CHILD_KEY)).toEqual([]); // the live id form is gone
@@ -337,10 +339,90 @@ describe('child source provenance', () => {
 
     const entry = useTranscriptStore.getState().entries[CHILD_KEY];
     expect(entry.phase).toBe('live');
-    expect([...entry.state.seen]).toEqual(disk.map((event) => event.id));
-    expect(entry.rows).toEqual(rowsOf(applyEvents(createState(null, AGENT), disk)));
+    expect([...entry.state.seen]).toEqual([...disk, exit].map((event) => event.id));
+    expect(entry.rows).toEqual(rowsOf(applyEvents(createState(null, AGENT), [...disk, exit])));
+    expect(dividerOf(CHILD_KEY).state).toBe('stopped'); // and again in the disk state
     expect(new Set(entry.rows.map((row) => row.id)).size).toBe(entry.rows.length);
     store.detach(CHILD_KEY);
+  });
+
+  it('after the switch to disk, live-form batches are ignored, those buffered during disk hydration included; disk-form events apply', async () => {
+    const { parent, child } = live();
+    const disk = onDisk(child);
+    const fake = fakeClient();
+    const store = useTranscriptStore.getState();
+    const hydrated = store.attach(CHILD_KEY, childSource(fake), { agentId: AGENT });
+    answer(fake, 'session.events', { events: [...parent, ...child.slice(0, 2)], lastSeq: 9, complete: true });
+    await hydrated;
+    const exit = builder('2026-09-28T10:00:09.000Z').emit('process.exited', { code: 0, signal: null, reason: 'quit', lostAttentionCount: 0 }, { id: 'exit' });
+    fake.emit('session.eventBatch', batch([exit]));
+    await Promise.resolve(); // reset: now hydrating from disk
+    // Pending live-form batches still in flight, interleaved with the disk follower's, while the backfill is pending.
+    fake.emit('session.eventBatch', batch([child[2], disk[2]]));
+    fake.emit('session.eventBatch', batch([child[3]]));
+    answer(fake, 'fs.agentEvents', { events: disk.slice(0, 2), complete: true });
+    await flush();
+    // And after hydration: live form ignored, disk form applied.
+    fake.emit('session.eventBatch', batch([child[3], disk[3]]));
+    const seen = [...useTranscriptStore.getState().entries[CHILD_KEY].state.seen];
+    expect(seen).toEqual([disk[0], disk[1], exit, disk[2], disk[3]].map((event) => event.id));
+    expect(seen.some((id) => id.startsWith('live:'))).toBe(false);
+    store.detach(CHILD_KEY);
+  });
+
+  it('a disk-backed child ignores live-form batches from the first hydration on', async () => {
+    const { parent, child } = live();
+    const disk = onDisk(child);
+    const fake = fakeClient();
+    const store = useTranscriptStore.getState();
+    const hydrated = store.attach(CHILD_KEY, childSource(fake), { agentId: AGENT });
+    fake.emit('session.eventBatch', batch([child[0], disk[0]])); // before the provenance is known
+    answer(fake, 'session.events', { events: parent.filter((event) => event.kind !== 'subagent.started'), lastSeq: 3, complete: true });
+    await flush();
+    fake.emit('session.eventBatch', batch([child[1], disk[1]])); // while the disk backfill is pending
+    answer(fake, 'fs.agentEvents', { events: disk.slice(0, 1), complete: true });
+    await hydrated;
+    fake.emit('session.eventBatch', batch([child[2], disk[2]]));
+    expect([...useTranscriptStore.getState().entries[CHILD_KEY].state.seen]).toEqual(disk.slice(0, 3).map((event) => event.id));
+    store.detach(CHILD_KEY);
+  });
+
+  it('mounting after a crash: an exit after the start in the parent’s snapshot is terminal, so the child is read from disk and reads stopped', async () => {
+    const { parent, child } = live();
+    const disk = onDisk(child);
+    const exit = builder('2026-09-28T10:00:09.000Z').emit('process.exited', { code: null, signal: 'SIGKILL', reason: 'crash', lostAttentionCount: 0 }, { id: 'crash' });
+    const fake = fakeClient();
+    const store = useTranscriptStore.getState();
+    const hydrated = store.attach(CHILD_KEY, childSource(fake), { agentId: AGENT });
+    answer(fake, 'session.events', { events: [...parent, ...child.slice(0, 2), exit], lastSeq: 9, complete: true });
+    await flush();
+    expect(fake.calls.map((call) => call.name)).toEqual(['session.events', 'fs.agentEvents']);
+    answer(fake, 'fs.agentEvents', { events: disk, complete: true });
+    await hydrated;
+    expect([...useTranscriptStore.getState().entries[CHILD_KEY].state.seen]).toEqual([...disk, exit].map((event) => event.id));
+    expect(dividerOf(CHILD_KEY).state).toBe('stopped');
+    store.detach(CHILD_KEY);
+  });
+
+  it('a start that only a disk transcript records (a disk-backed parent, no exit written) never selects the live stream', async () => {
+    const { parent, child } = live();
+    const fake = fakeClient();
+    const snapshot = childSource(fake).snapshot();
+    answer(fake, 'session.events', { events: parent.map((event) => ({ ...event, seq: null })), lastSeq: 0, complete: true });
+    await flush();
+    expect(fake.calls.map((call) => call.name)).toEqual(['session.events', 'fs.agentEvents']);
+    answer(fake, 'fs.agentEvents', { events: onDisk(child), complete: true });
+    await expect(snapshot).resolves.toEqual(onDisk(child));
+  });
+
+  it('an exit before the child started is no end of it: a child started after a relaunch is live', async () => {
+    const { parent, child } = live();
+    const exit = builder('2026-09-28T09:59:00.000Z').emit('process.exited', { code: 0, signal: null, reason: 'quit', lostAttentionCount: 0 }, { id: 'earlier' });
+    const fake = fakeClient();
+    const snapshot = childSource(fake).snapshot();
+    answer(fake, 'session.events', { events: [exit, ...parent, ...child.slice(0, 1)], lastSeq: 9, complete: true });
+    await expect(snapshot).resolves.toEqual(child.slice(0, 1));
+    expect(fake.calls.map((call) => call.name)).toEqual(['session.events']);
   });
 
   it('a live child’s own end (subagent.finished or a terminal task.notification for its task) switches it to disk too', async () => {

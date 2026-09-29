@@ -42,7 +42,7 @@ function QuestionItem({ question, answers }: { question: Question; answers: Reco
         })}
       </ul>
       {other.length > 0 && <div className="transcript-question-answer">{QUESTION.answer(other.join(', '))}</div>}
-      {answers === null && <div className="transcript-question-answer">{QUESTION.notAnswered}</div>}
+      {answers?.[question.question] === undefined && <div className="transcript-question-answer">{QUESTION.notAnswered}</div>}
     </div>
   );
 }

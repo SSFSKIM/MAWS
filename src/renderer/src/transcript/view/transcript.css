@@ -287,7 +287,8 @@ button.transcript-glyph-overflow:hover { color: var(--fg); background: var(--bg-
 .transcript-plan, .transcript-question { margin: 4px 0 10px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-raised); font-size: var(--text-ui); }
 .transcript-plan-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--border); color: var(--fg-muted); font-size: var(--text-ui-sm); }
 .transcript-plan-body { padding: 4px 12px; overflow-wrap: anywhere; }
-.transcript-plan-body[data-long]:not([data-open]) { max-height: 144px; overflow: hidden; mask-image: linear-gradient(to bottom, var(--fg) 70%, transparent); }
+.transcript-plan-body:not([data-open]) { max-height: 144px; overflow: hidden; }
+.transcript-plan-body[data-overflows]:not([data-open]) { mask-image: linear-gradient(to bottom, var(--fg) 70%, transparent); }
 .transcript-plan-more { margin: 0 12px 8px; }
 .transcript-question-item { padding: 10px 12px; }
 .transcript-question-item + .transcript-question-item { border-top: 1px solid var(--border); }

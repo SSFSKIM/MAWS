@@ -393,6 +393,14 @@ describe('child turn closure', () => {
     expect(find(childRows(child(status, end)), 'divider').state).toBe(state);
   });
 
+  it('the parent’s process.exited closes the child’s open turn as stopped, and is no row of the child’s', () => {
+    const events = child('completed', 'subagent.finished').slice(0, -1);
+    const exit = builder('2026-09-28T10:00:09.000Z').emit('process.exited', { code: null, signal: 'SIGKILL', reason: 'crash', lostAttentionCount: 0 }, { id: 'exit' });
+    const list = childRows([...events, exit]);
+    expect(find(list, 'divider')).toMatchObject({ state: 'stopped', endedAt: exit.at });
+    expect(kinds(list)).not.toContain('error');
+  });
+
   it('another agent’s finish closes nothing', () => {
     const events = child('completed', 'subagent.finished').map((event) => (event.kind === 'subagent.finished' ? { ...event, taskId: task('another') } : event));
     expect(find(childRows(events), 'divider').state).toBe('working');

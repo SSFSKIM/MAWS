@@ -46,27 +46,44 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
 // A child agent's source owns its provenance (Child source provenance): live while the child runs in the parent's
 // process (the parent's stream and snapshot, filtered by agent; no disk follower), disk otherwise (fs.agentEvents,
 // which starts following). The snapshot decides from the parent's lifecycle events for the child: live when the
-// parent's snapshot started it (`subagent.started` or `task.started`) with no finish after, so a drill-in opened before
-// the child's first event still follows the live stream; disk otherwise (it finished, or the parent is disk-backed).
-// In both, the parent's finish event naming the child joins the child's slice, where it closes the child's open turn
-// (reduce.ts). A live child that ends (its finish, or the parent's `process.exited`) switches to disk and signals a
-// reset, so the store rebuilds the key from the disk transcript and the live and disk id forms of the same events never
-// meet. Disk is final.
+// parent's live journal started it (`subagent.started` or `task.started`) and nothing ended it since (its finish, or
+// the parent's `process.exited`), so a drill-in opened before the child's first event still follows the live stream;
+// disk otherwise (it ended, or the parent is disk-backed). The parent's report that the child ended joins the child's
+// slice, where it closes the child's open turn (reduce.ts). A live child that ends switches to disk and signals a
+// reset, so the store rebuilds the key from the disk transcript. Disk is final.
+//
+// The same events reach `session.eventBatch` in two forms, the live journal's (with their row's `seq`) and the disk
+// transcript's (`seq: null`, ruling 5 of the wave-2 ledger), under different ids, so id deduplication cannot merge
+// them: the source passes only the form of its provenance. Batches that arrive before the provenance is known are held
+// and passed through that filter once it is.
 function childSource(client: MawsBridge, appSessionId: AppSessionId, agentId: AgentId): TranscriptSource {
   let provenance: 'undecided' | 'live' | 'disk' = 'undecided';
-  let finished: SessionEvent | null = null; // the parent's report that the child ended, for the disk slice
+  let ended: SessionEvent | null = null; // the parent's report that the child ended, for the disk slice
   const resets = new Set<() => void>();
-  const own = (event: SessionEvent) => event.agentId === agentId;
+  const subscribers = new Set<{ listener: (events: SessionEvent[]) => void; held: SessionEvent[][] }>();
   // For local agents the engine's task id and the sidecar's agent id carry the same string (C1 Interfaces, observed in
   // the fixtures); X1 keeps them as two types, so the comparison is on the strings.
   const names = (taskId: string) => taskId === (agentId as string);
   const starts = (event: SessionEvent) => (event.kind === 'subagent.started' || event.kind === 'task.started') && names(event.taskId);
   const finishes = (event: SessionEvent) => (event.kind === 'subagent.finished' || event.kind === 'task.notification') && names(event.taskId);
-  const ends = (event: SessionEvent) => finishes(event) || (event.kind === 'process.exited' && event.agentId === null);
+  const exits = (event: SessionEvent) => event.kind === 'process.exited' && event.agentId === null;
+  const liveForm = (event: SessionEvent) => event.seq !== null;
+  // What of a batch reaches the child's state under the current provenance: its own events in that form, the parent's
+  // finish for it, and while live the parent's exit.
+  const passes = (event: SessionEvent) =>
+    (event.agentId === agentId && liveForm(event) === (provenance === 'live')) || finishes(event) || (provenance === 'live' && exits(event));
+  const deliver = (subscriber: { listener: (events: SessionEvent[]) => void }, events: SessionEvent[]) => {
+    const passed = events.filter(passes);
+    if (passed.length > 0) subscriber.listener(passed);
+  };
+  const decide = (chosen: 'live' | 'disk') => {
+    provenance = chosen;
+    for (const subscriber of subscribers) for (const events of subscriber.held.splice(0)) deliver(subscriber, events);
+  };
   // The reset is signalled once the batch that carried the end has been delivered, so the store's new subscription can
-  // never receive that batch's live-form events a second time.
+  // never receive that batch a second time.
   const toDisk = () => {
-    provenance = 'disk';
+    decide('disk');
     queueMicrotask(() => {
       for (const listener of [...resets]) listener();
     });
@@ -75,29 +92,41 @@ function childSource(client: MawsBridge, appSessionId: AppSessionId, agentId: Ag
     key: `${appSessionId}:${agentId}`,
     agentId,
     subscribe(listener) {
-      return client.on('session.eventBatch', (batch) => {
+      const subscriber = { listener, held: [] as SessionEvent[][] };
+      subscribers.add(subscriber);
+      const off = client.on('session.eventBatch', (batch) => {
         if (batch.appSessionId !== appSessionId) return;
-        const events = batch.events.filter((event) => own(event) || finishes(event));
-        finished = events.findLast(finishes) ?? finished;
-        if (events.length > 0) listener(events);
-        if (provenance !== 'disk' && batch.events.some(ends)) toDisk();
+        if (provenance === 'undecided') subscriber.held.push(batch.events);
+        else deliver(subscriber, batch.events);
+        if (provenance === 'disk') return;
+        const end = batch.events.find((event) => finishes(event) || exits(event));
+        if (end) {
+          ended ??= end;
+          toDisk();
+        }
       });
+      return () => {
+        subscribers.delete(subscriber);
+        off();
+      };
     },
     async snapshot() {
       const onDisk = () => provenance === 'disk'; // read after the await: the child may have ended meanwhile
       if (!onDisk()) {
         const parent = valueOf(await client.invoke('session.events', { appSessionId, afterSeq: null, limit: null })).events;
         const started = parent.findLastIndex(starts);
-        const end = parent.findLastIndex(finishes);
-        if (end >= 0) finished = parent[end];
-        if (started >= 0 && end < started && !onDisk()) {
-          provenance = 'live';
-          return parent.filter(own);
+        // What ended the child: a finish after its start (or anywhere, when the snapshot never started it), or the
+        // parent's exit after its start (mounted after a crash).
+        const end = parent.findLastIndex((event, i) => finishes(event) || (started >= 0 && i > started && exits(event)));
+        if (end > started || (started < 0 && end >= 0)) ended ??= parent[end];
+        if (started >= 0 && end < started && liveForm(parent[started]) && !onDisk()) {
+          decide('live');
+          return parent.filter((event) => event.agentId === agentId && liveForm(event));
         }
       }
-      provenance = 'disk';
+      if (!onDisk()) decide('disk');
       const disk = valueOf(await client.invoke('fs.agentEvents', { appSessionId, agentId })).events;
-      return finished === null ? disk : [...disk, finished];
+      return ended === null ? disk : [...disk, ended];
     },
     onReset(listener) {
       resets.add(listener);
@@ -121,10 +150,17 @@ export function ipcSourceOver(client: MawsBridge, appSessionId: AppSessionId, ag
 
 export const ipcSource = (appSessionId: AppSessionId, agentId?: AgentId): TranscriptSource => ipcSourceOver(ipc, appSessionId, agentId);
 
-export const ipcLoadSpillOver =
-  (client: MawsBridge) =>
-  async (spill: Spill): Promise<string> =>
-    valueOf(await client.invoke('fs.readSpill', { path: spill.path, length: SPILL_READ_BYTES })).content;
+// Spills whose last read came back truncated (`fs.readSpill`'s flag). `loadSpill` answers only the content (its
+// callback shape is frozen), so the loader asks here whether what it got was the whole result.
+const truncatedSpills = new Set<string>();
+export const spillWasTruncated = (path: string) => truncatedSpills.has(path);
+
+export const ipcLoadSpillOver = (client: MawsBridge) => async (spill: Spill): Promise<string> => {
+  const read = valueOf(await client.invoke('fs.readSpill', { path: spill.path, length: SPILL_READ_BYTES }));
+  if (read.truncated) truncatedSpills.add(spill.path);
+  else truncatedSpills.delete(spill.path);
+  return read.content;
+};
 
 export const ipcLoadSpill = ipcLoadSpillOver(ipc);
 

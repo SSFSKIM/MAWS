@@ -3,7 +3,7 @@ import { resultText } from '../../model/cells';
 import { DETAIL } from '../../model/copy';
 import type { Cell, CellDetail } from '../../model/rows';
 import { json, ResultBlocks } from './McpDetail';
-import { spilledOr, SpillLoader } from './Spill';
+import { isRead, spilledOr, SpillLoader } from './Spill';
 import { Output } from './Truncated';
 
 type Generic = Extract<CellDetail, { kind: 'generic' }>;
@@ -17,7 +17,7 @@ export function GenericDetail({ cell, detail }: { cell: Cell; detail: Generic })
       <div className="transcript-detail-label">{DETAIL.input}</div>
       <Output text={input} />
       <div className="transcript-detail-label">{DETAIL.result}</div>
-      {detail.spill?.state === 'loaded' ? (
+      {isRead(detail.spill) ? (
         <Output text={spilledOr(detail.spill, '')} className={detail.isError ? 'transcript-stderr' : undefined} />
       ) : result !== null ? (
         result && <Output text={result} className={detail.isError ? 'transcript-stderr' : undefined} />
