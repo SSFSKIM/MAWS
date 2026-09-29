@@ -138,7 +138,7 @@ export function Editor(props: EditorProps) {
         }}
       >
         <ModeChrome appSessionId={appSessionId} mode={mode} empty={commandEmpty} />
-        <EditorContent editor={editor} className={`max-h-[40vh] overflow-y-auto text-ui text-fg ${mode === 'bash' ? 'font-mono' : ''} ${PLACEHOLDER}`} />
+        <EditorContent editor={editor} className={`max-h-44 overflow-y-auto text-ui text-fg ${mode === 'bash' ? 'font-mono' : ''} ${PLACEHOLDER}`} />
       </div>
     </>
   );

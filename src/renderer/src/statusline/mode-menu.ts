@@ -69,7 +69,7 @@ export const NOT_RUNNING = 'The session is not running';
 
 // A started session's binding: the effective mode from C3's status (the record's when no process is live) and
 // `session.setPermissionMode` for a ready process.
-export function liveModeBinding(record: SessionRecord, status: EngineSessionStatus | null, models: readonly ModelOption[] | null, client: MawsBridge = ipc): ModeBinding {
+export function liveModeBinding(record: Pick<SessionRecord, 'appId' | 'permissionMode' | 'model'>, status: EngineSessionStatus | null, models: readonly ModelOption[] | null, client: MawsBridge = ipc): ModeBinding {
   const mode = status?.permissionMode ?? record.permissionMode;
   return {
     value: mode.effective,

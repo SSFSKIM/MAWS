@@ -29,6 +29,8 @@ export const QUERY_COMMANDS = [
   'settings.usage',
   'git.lsFiles',
   'session.history.list',
+  'session.listPermissionRules', // M4: the + dir chip's workspace directories
+  'git.branches', // M4: the location chip's branch picker
   // C7 end
 ] as const satisfies readonly ValueCommand[];
 export type QueryCommand = (typeof QUERY_COMMANDS)[number];
