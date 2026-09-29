@@ -902,7 +902,9 @@ describe('review tool', () => {
     expect(hunkLabel()).toBe('Showing hunk 3 of 3');
     fireEvent.click(screen.getByText('Open file ↗'));
     expect(useLayout.getState().main.panes.flatMap((p) => p.tabs)).toContainEqual(expect.objectContaining({ kind: 'file', path: file, line: 4 })); // the third block's own numbers
-    expect(warn).not.toHaveBeenCalled();
+    // No warning from the diff view, save the store library's own timing note, which a loaded machine triggers.
+    const warned = warn.mock.calls.filter(([first]) => !(typeof first === 'string' && first.startsWith('[reactivity-store]')));
+    expect(warned).toEqual([]);
     warn.mockRestore();
   });
 
