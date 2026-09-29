@@ -104,6 +104,17 @@ describe('permissions widget: the mode segment (C7’s mode menu) over session.s
     expect(screen.getAllByRole('menuitemradio').every((item) => !(item as HTMLButtonElement).disabled || item.textContent?.startsWith('auto'))).toBe(true); // re-enabled
   });
 
+  it('keeps the segment when the rules read fails: the mode is the status, not the read', async () => {
+    useSessions.setState({ engine: new Map([[ID, backend.status(ID)]]) });
+    backend.script('session.listPermissionRules', () => {
+      throw new WidgetBackendError({ code: 'internal', message: 'list_permission_rules refused' });
+    });
+    mount();
+    await screen.findByText('list_permission_rules refused');
+    expect(screen.getByRole('menu', { name: 'Permission mode' })).toBeTruthy();
+    expect(checked()).toMatch(/^auto/);
+  });
+
   it('reads list_models for auto’s availability and list_permission_rules for the rules, each once', async () => {
     useSessions.setState({ engine: new Map([[ID, backend.status(ID)]]) });
     mount();

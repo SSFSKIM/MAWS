@@ -12,7 +12,7 @@ import type { ListPermissionRulesResponse } from '@shared/wire/control';
 import { ipc } from '../ipc/client';
 import { liveModeBinding, ModeMenu, MODE_REFUSAL_WORDS } from '../statusline';
 import { useSessions } from '../stores/sessions';
-import { PERMISSIONS, WIDGET_FOOT, WIDGET_TITLE } from './copy';
+import { FRAME, PERMISSIONS, WIDGET_FOOT, WIDGET_TITLE } from './copy';
 import { Group, Mono, parseEach, Row, Rows } from './parts';
 import { transportWords, useEngineRead } from './read';
 import { WidgetFrame } from './WidgetFrame';
@@ -38,6 +38,12 @@ export interface PermissionsView {
   grants: number; // the session's grant snapshot, re-applied after a resume (C3's status)
 }
 
+// The effective mode from the init frame, with the refusal in words (D-18).
+const modeOf = (status: Pick<EngineSessionStatus, 'permissionMode'>): NonNullable<PermissionsView['mode']> => ({
+  effective: status.permissionMode.effective,
+  refusal: status.permissionMode.refusal === null ? null : MODE_REFUSAL_WORDS[status.permissionMode.refusal],
+});
+
 export function present(state: ListPermissionRulesResponse['state'], status: Pick<EngineSessionStatus, 'permissionMode' | 'grants'> | null): PermissionsView {
   const ruleView = (r: ListPermissionRulesResponse['state']['rules'][number]): RuleView => {
     const description = DescriptionSchema.safeParse(r.description);
@@ -50,7 +56,7 @@ export function present(state: ListPermissionRulesResponse['state'], status: Pic
   };
   const added = directories(state.workspaceDirectories).filter((d) => d !== state.originalCwd);
   return {
-    mode: status && { effective: status.permissionMode.effective, refusal: status.permissionMode.refusal === null ? null : MODE_REFUSAL_WORDS[status.permissionMode.refusal] },
+    mode: status && modeOf(status),
     groups: BEHAVIORS.map((behavior) => ({ behavior, label: PERMISSIONS.group[behavior], rules: state.rules.filter((r) => r.behavior === behavior).map(ruleView) })),
     workspace: [{ path: state.originalCwd, note: PERMISSIONS.original }, ...added.map((path) => ({ path, note: PERMISSIONS.added }))],
     managedOnly: state.managedOnly,
@@ -58,21 +64,25 @@ export function present(state: ListPermissionRulesResponse['state'], status: Pic
   };
 }
 
-export function PermissionsBody({ view, mode }: { view: PermissionsView; mode?: ReactNode }) {
+// The effective mode, the session's grants and (the widget's) the mode segment, which words a refusal itself.
+export function ModeHeader({ mode, grants, segment }: { mode: NonNullable<PermissionsView['mode']>; grants: number; segment?: ReactNode }) {
+  return (
+    <div className="mb-2">
+      <p className="m-0">
+        {PERMISSIONS.effective} <strong className="font-semibold">{mode.effective}</strong> <span className="text-ui-sm text-fg-muted">· {PERMISSIONS.fromInit}</span>
+      </p>
+      {!segment && mode.refusal && <p className="m-0 mt-1 border-l-2 border-warning pl-2 text-ui-sm">{mode.refusal}</p>}
+      {grants > 0 && <p className="m-0 mt-1 text-ui-sm text-fg-muted">{PERMISSIONS.grants(grants)}</p>}
+      {segment && <div className="mt-1">{segment}</div>}
+    </div>
+  );
+}
+
+export function PermissionsBody({ view, withMode = true }: { view: PermissionsView; withMode?: boolean }) {
   const none = view.groups.every((g) => g.rules.length === 0);
   return (
     <div className="flex flex-col">
-      {view.mode && (
-        <div className="mb-2">
-          <p className="m-0">
-            {PERMISSIONS.effective} <strong className="font-semibold">{view.mode.effective}</strong> <span className="text-ui-sm text-fg-muted">· {PERMISSIONS.fromInit}</span>
-          </p>
-          {/* the mode menu words a refusal itself */}
-          {!mode && view.mode.refusal && <p className="m-0 mt-1 border-l-2 border-warning pl-2 text-ui-sm">{view.mode.refusal}</p>}
-          {view.grants > 0 && <p className="m-0 mt-1 text-ui-sm text-fg-muted">{PERMISSIONS.grants(view.grants)}</p>}
-          {mode && <div className="mt-1">{mode}</div>}
-        </div>
-      )}
+      {withMode && view.mode && <ModeHeader mode={view.mode} grants={view.grants} />}
       {none && <p className="m-0 text-ui-sm text-fg-muted">{PERMISSIONS.none}</p>}
       {view.groups
         .filter((g) => g.rules.length > 0)
@@ -137,12 +147,27 @@ function ModeSegment({ appSessionId, status }: { appSessionId: AppSessionId; sta
   return <ModeMenu binding={binding} />;
 }
 
+// The mode is C3's status and needs no read, so the segment shows while the rules read is loading, has failed, or (a
+// passive harness over a journal that never recorded `list_permission_rules`) never runs.
 export function PermissionsWidget({ appSessionId, close }: { appSessionId: AppSessionId; args: string; close(): void }) {
   const read = useEngineRead('session.listPermissionRules', { appSessionId });
   const status = useSessions((s) => s.engine.get(appSessionId) ?? null);
   return (
-    <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.permissions} command="permissions" foot={WIDGET_FOOT.permissions} state={read.state} error={read.error} close={close}>
-      {read.data && <PermissionsBody view={present(read.data.state, status)} mode={status && <ModeSegment appSessionId={appSessionId} status={status} />} />}
+    <WidgetFrame
+      appSessionId={appSessionId}
+      title={WIDGET_TITLE.permissions}
+      command="permissions"
+      foot={WIDGET_FOOT.permissions}
+      state={read.state === 'not_running' || !status ? read.state : 'ready'}
+      error={read.data ? read.error : null}
+      close={close}
+    >
+      {status && <ModeHeader mode={modeOf(status)} grants={status.grants.length} segment={<ModeSegment appSessionId={appSessionId} status={status} />} />}
+      {read.data ? (
+        <PermissionsBody view={present(read.data.state, status)} withMode={false} />
+      ) : (
+        <p className={`m-0 text-ui-sm ${read.state === 'error' ? 'text-danger' : 'text-fg-muted'}`}>{read.state === 'error' ? read.error : FRAME.reading}</p>
+      )}
     </WidgetFrame>
   );
 }
