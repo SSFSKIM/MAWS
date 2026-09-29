@@ -131,12 +131,13 @@ export function createViewerStore(client: MawsBridge) {
 
     const fail = (tabId: string, message: string, reason: 'open' | 'change') => {
       const entry = get().entries.get(tabId);
-      if (reason === 'change' && isNotFound(message) && entry?.status === 'ready') return patch(tabId, { removed: true });
-      patch(tabId, { status: 'error', error: message, kind: null, text: '', base64: null, loaded: 0, complete: false, epoch: (entry?.epoch ?? 0) + 1 });
+      if (reason === 'change' && isNotFound(message) && entry?.status === 'ready') return patch(tabId, { removed: true, loadingMore: false });
+      patch(tabId, { status: 'error', error: message, kind: null, text: '', base64: null, loaded: 0, complete: false, epoch: (entry?.epoch ?? 0) + 1, loadingMore: false });
     };
 
     // One load per tab at a time: a newer one (or the entry's removal) makes an older one's answers land nowhere. A
     // follow-the-file re-read (`change`) keeps the shown content until the new one is complete, then swaps it whole.
+    // Whatever a load patches ends a Load more it superseded (`loadingMore` false), whose answer then lands nowhere.
     const load = async (tabId: string, reason: 'open' | 'change') => {
       const entry = get().entries.get(tabId);
       if (!entry) return;
@@ -155,7 +156,7 @@ export function createViewerStore(client: MawsBridge) {
       const kind = kindOf({ name: path, mime: head.mime, bytes: head.bytes, encoding: head.encoding });
       const epoch = (get().entries.get(tabId)?.epoch ?? 0) + 1;
       const updated = (get().entries.get(tabId)?.updated ?? 0) + (reason === 'change' ? 1 : 0);
-      const base = { status: 'ready' as const, error: null, kind, mime: head.mime, encoding: head.encoding, bytes: head.bytes, removed: false, epoch, updated };
+      const base = { status: 'ready' as const, error: null, kind, mime: head.mime, encoding: head.encoding, bytes: head.bytes, removed: false, epoch, updated, loadingMore: false };
       // A markdown file opened at a line is shown as its source, where the line exists.
       const sourceView = kind === 'markdown' && get().entries.get(tabId)?.pendingJump != null ? true : undefined;
 
@@ -243,7 +244,8 @@ export function createViewerStore(client: MawsBridge) {
         patch(tabId, { loadingMore: true });
         const length = Math.min(FILES_READ_DEFAULT_LENGTH, CODE_CAP - entry.loaded);
         void settled(client.invoke('files.read', { appSessionId: entry.appSessionId, path: entry.path, offset: entry.loaded, length })).then((next) => {
-          if (generations.get(tabId) !== generation) return;
+          // A newer load, or one that replaced the text this read continues, superseded it and cleared `loadingMore`.
+          if (generations.get(tabId) !== generation || get().entries.get(tabId)?.epoch !== entry.epoch) return;
           if (!next.ok) return fail(tabId, next.error.message, 'open');
           const current = get().entries.get(tabId)!;
           patch(tabId, { text: current.text + next.value.content, loaded: next.value.offset + next.value.length, loadingMore: false });

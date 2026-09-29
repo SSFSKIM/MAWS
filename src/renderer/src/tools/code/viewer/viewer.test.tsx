@@ -309,6 +309,63 @@ describe('viewer', () => {
     expect(notice()).toBe('Showing the first 2.0 MB of 20.0 MB');
   });
 
+  // Gates the reads of a head at an offset, one call at a time, in the order they are asked for.
+  function gatedHead() {
+    const gates = new Map<number, ReturnType<typeof deferred<void>>[]>();
+    const gated = (offset: number) => {
+      const gate = deferred<void>();
+      gates.set(offset, [...(gates.get(offset) ?? []), gate]);
+      return gate;
+    };
+    const main = serve({ '/r/big.log': { generated: 20 * MiB, line: `${'log line '.repeat(28)}\n` } }, async (offset) => {
+      const gate = gates.get(offset)?.shift();
+      if (gate) await gate.promise;
+    });
+    return { main, gated };
+  }
+  const loadMore = () => screen.getByRole<HTMLButtonElement>('button', { name: 'Load more' });
+  const bigLog = () => useViewer.getState().entries.get('file:/r/big.log')!;
+
+  it('enables Load more again when a follow-the-file re-read supersedes its read, and the next Load more lands once', async () => {
+    const { main, gated } = gatedHead();
+    connect();
+    render(<FileViewer tab={fileTab('/r/big.log')} />);
+    await waitFor(() => expect(notice()).toBe('Showing the first 1.0 MB of 20.0 MB'));
+    const superseded = gated(MiB);
+    fireEvent.click(loadMore());
+    await waitFor(() => expect(loadMore().disabled).toBe(true));
+    act(() => main.emit('files.changed', { appSessionId: A, path: '/r/big.log', kind: 'changed' }));
+    await waitFor(() => expect(document.querySelector('[data-updated]')).not.toBeNull());
+    expect(loadMore().disabled).toBe(false);
+    fireEvent.click(loadMore());
+    await waitFor(() => expect(notice()).toBe('Showing the first 2.0 MB of 20.0 MB'));
+    await act(async () => superseded.resolve()); // its answer lands nowhere
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(bigLog()).toMatchObject({ loaded: 2 * MiB, loadingMore: false });
+    expect(bigLog().text).toHaveLength(2 * MiB);
+  });
+
+  it('drops a Load more answer whose text a re-read replaced while it was in flight', async () => {
+    const { main, gated } = gatedHead();
+    connect();
+    render(<FileViewer tab={fileTab('/r/big.log')} />);
+    await waitFor(() => expect(notice()).toBe('Showing the first 1.0 MB of 20.0 MB'));
+    const reread = gated(0);
+    act(() => main.emit('files.changed', { appSessionId: A, path: '/r/big.log', kind: 'changed' }));
+    await waitFor(() => expect(main.callsOf('files.read')).toHaveLength(2));
+    const outrun = gated(MiB);
+    fireEvent.click(loadMore()); // asked while the re-read is in flight: the same load, the old text
+    await waitFor(() => expect(loadMore().disabled).toBe(true));
+    await act(async () => reread.resolve());
+    await waitFor(() => expect(document.querySelector('[data-updated]')).not.toBeNull());
+    expect(loadMore().disabled).toBe(false);
+    fireEvent.click(loadMore());
+    await waitFor(() => expect(notice()).toBe('Showing the first 2.0 MB of 20.0 MB'));
+    await act(async () => outrun.resolve());
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(bigLog().text).toHaveLength(2 * MiB); // appended once, not twice
+  });
+
   it('shows File removed with the last content when the file goes during a re-read continuation', async () => {
     const text = 'b'.repeat(MiB + 10);
     let gone = false;
