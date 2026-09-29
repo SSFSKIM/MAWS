@@ -112,10 +112,13 @@ function useDelivery(item: AttentionItem, onAnswered: RequestCardProps['onAnswer
   return { phase, what, failed, submit };
 }
 
+// Text entry, as C5's dispatcher defines it (`keymap/dispatcher.ts`, `isTextEntry` and `BUTTON_LIKE_INPUTS`, which the
+// module does not export): an input that takes a keypress as text, a textarea, a select, or inside a contenteditable.
+const BUTTON_LIKE_INPUTS = new Set(['button', 'submit', 'reset', 'checkbox', 'radio', 'range', 'color', 'file', 'image']);
 const isTextEntry = (target: EventTarget | null) =>
   target instanceof HTMLTextAreaElement ||
   target instanceof HTMLSelectElement ||
-  (target instanceof HTMLInputElement && !['button', 'checkbox', 'radio'].includes(target.type)) ||
+  (target instanceof HTMLInputElement && !BUTTON_LIKE_INPUTS.has(target.type)) ||
   (target instanceof Element && target.closest('[contenteditable]:not([contenteditable="false"])') !== null);
 
 // A click counts only as the release of a pointer press on the same button (`detail` > 0): a keyboard- or
