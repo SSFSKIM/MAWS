@@ -5,9 +5,15 @@ import { StrictMode, useEffect, useState, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import '../styles/app.css';
 import { Harness } from './Harness';
+// C8a start
+import { PanelHarness } from './panel/PanelHarness';
+// C8a end
 
 const ROUTES: Record<string, () => ReactNode> = {
   transcript: () => <Harness />,
+  // C8a start
+  panel: () => <PanelHarness />, // the panel host over fake sessions (run under the harness scenario, ruling O1)
+  // C8a end
 };
 
 // C9 block begin: the terminal harness pages (pages under harness/terminal/), routed as `#probe` and `#panel`

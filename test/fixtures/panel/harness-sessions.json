@@ -1,0 +1,82 @@
+{
+  "_note": "The #panel harness scenario (C8a, ruling O1, 2026-09-29): two synthetic sessions, A a plain directory and B a worktree, served by main under MAWS_SESSION_SOURCE=stub:test/fixtures/panel/harness-sessions.json so its read model knows them and layout.set accepts panel.A and panel.B. The harness page builds its fake records from this file and seeds its stores itself.",
+  "version": 1,
+  "projects": [
+    { "id": "proj-harness", "name": "Harness", "directory": "/tmp/maws-harness", "order": 0, "createdAt": "2026-09-29T09:00:00.000Z" }
+  ],
+  "sessions": [
+    {
+      "appId": "A",
+      "engineSessionId": "00000000-0000-4000-8000-00000000000a",
+      "projectId": "proj-harness",
+      "directory": "/tmp/maws-harness/a",
+      "additionalDirectories": [],
+      "worktree": null,
+      "branch": null,
+      "title": { "text": "Harness A", "source": "user" },
+      "pinned": false,
+      "archived": false,
+      "holder": { "kind": "self" },
+      "lastSeen": { "messageUuid": null, "at": "2026-09-29T09:00:00.000Z" },
+      "unread": false,
+      "engineVersion": "2.1.283",
+      "gateway": { "routed": false, "baseUrl": null, "autoModeServer": "unknown" },
+      "model": { "requested": "opus", "resolved": "claude-opus-4-1" },
+      "effort": null,
+      "permissionMode": { "requested": "default", "effective": "default", "refusal": null },
+      "createdAt": "2026-09-29T09:00:00.000Z",
+      "updatedAt": "2026-09-29T09:00:00.000Z"
+    },
+    {
+      "appId": "B",
+      "engineSessionId": "00000000-0000-4000-8000-00000000000b",
+      "projectId": "proj-harness",
+      "directory": "/tmp/maws-harness/b",
+      "additionalDirectories": [],
+      "worktree": { "path": "/tmp/maws-harness/b", "branch": "harness" },
+      "branch": "harness",
+      "title": { "text": "Harness B", "source": "user" },
+      "pinned": false,
+      "archived": false,
+      "holder": { "kind": "self" },
+      "lastSeen": { "messageUuid": null, "at": "2026-09-29T09:00:00.000Z" },
+      "unread": false,
+      "engineVersion": "2.1.283",
+      "gateway": { "routed": false, "baseUrl": null, "autoModeServer": "unknown" },
+      "model": { "requested": "opus", "resolved": "claude-opus-4-1" },
+      "effort": null,
+      "permissionMode": { "requested": "default", "effective": "default", "refusal": null },
+      "createdAt": "2026-09-29T09:00:00.000Z",
+      "updatedAt": "2026-09-29T09:00:00.000Z"
+    }
+  ],
+  "digests": [
+    {
+      "appSessionId": "A",
+      "phase": "idle",
+      "activity": null,
+      "lastAssistantLine": null,
+      "turnStartedAt": null,
+      "lastTurnEndedAt": null,
+      "context": null,
+      "cost": null,
+      "childAgents": { "active": 2, "done": 1 },
+      "pendingRequests": 0
+    },
+    {
+      "appSessionId": "B",
+      "phase": "idle",
+      "activity": null,
+      "lastAssistantLine": null,
+      "turnStartedAt": null,
+      "lastTurnEndedAt": null,
+      "context": null,
+      "cost": null,
+      "childAgents": { "active": 0, "done": 0 },
+      "pendingRequests": 0
+    }
+  ],
+  "engine": [],
+  "attention": [],
+  "timeline": []
+}
