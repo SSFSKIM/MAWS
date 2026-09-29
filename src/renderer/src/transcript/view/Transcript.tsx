@@ -156,6 +156,12 @@ export function storeKeyOf(source: TranscriptSource): string {
 
 const renderRow = (row: Row) => <RowView row={row} />;
 
+// Focus is inside the transcript, or on nothing in particular (the page itself).
+const focusIsHereOrNowhere = (root: HTMLElement | null) => {
+  const active = document.activeElement;
+  return active === null || active === document.body || (root?.contains(active) ?? false);
+};
+
 export function Transcript({ source, variant, actions, rewind, renderRequest, onFollowChange, className, handle }: TranscriptProps) {
   const storeKey = storeKeyOf(source);
   const rows = useTranscriptStore((state) => state.entries[storeKey]?.rows ?? NO_ROWS);
@@ -175,10 +181,23 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
 
   useImperativeHandle(handle, () => listRef.current!, []);
 
+  // Whether the reader has scrolled, clicked, typed in the transcript or put focus elsewhere since the last jump they
+  // asked for: a jump re-resolved when a staged restart installs (`reissued`) then leaves them where they are.
+  const readerMoved = useRef(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const moved = useCallback(() => {
+    readerMoved.current = true;
+  }, []);
+
   // A jump (store.jumpTo): the store has already opened what holds the row; scroll it into place, then focus it once
   // the virtualiser has mounted it.
   useLayoutEffect(() => {
     if (!jump) return;
+    if (!jump.reissued) readerMoved.current = false;
+    else if (readerMoved.current || !focusIsHereOrNowhere(rootRef.current)) {
+      useTranscriptStore.getState().jumpHandled(storeKey, jump.nonce);
+      return;
+    }
     const index = rows.findIndex((row) => row.id === jump.rowId);
     if (index >= 0) listRef.current?.scrollToIndex(index, jump.align);
     const frame = requestAnimationFrame(() => {
@@ -210,7 +229,7 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
 
   return (
     <TranscriptProvider value={context}>
-      <div className={`transcript relative min-h-0 ${className ?? ''}`}>
+      <div ref={rootRef} className={`transcript relative min-h-0 ${className ?? ''}`} onWheel={moved} onTouchMove={moved} onPointerDown={moved} onKeyDown={moved}>
         <TranscriptList id={listElementId(idPrefix)} rows={rows} renderRow={renderRow} onFollowChange={followChange} handle={listRef} className="h-full" />
         {failed !== null && (
           <div className="transcript-failed" role="alert">
