@@ -112,7 +112,7 @@ describe('every widget renders its fixture response', () => {
   });
 
   it('diff: 0 files on the working tree; a null diff says why', () => {
-    expect(Diff.present(line<GetWorkspaceDiffResponse>('reads', 81))).toEqual({ line: '0 files · +0 −0 · working tree', files: [], skippedLarge: 0, restricted: 0 });
+    expect(Diff.present(line<GetWorkspaceDiffResponse>('reads', 81))).toEqual({ line: '0 files · +0 −0 · working tree', files: [], skippedLarge: 0, restricted: 0, scope: 'uncommitted' });
     expect(Diff.present({ diff: null }).line).toBe('No diff · not a git repository, or a merge, rebase or cherry-pick is in progress');
     const one = Diff.present({
       diff: {
