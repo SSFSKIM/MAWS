@@ -20,7 +20,7 @@ import { createBinaryProbe, VERSION_TIMEOUT_MS, type BinaryCheck } from './binar
 import * as controls from './controls';
 import { createLauncher } from './launcher';
 import { LaunchSpecConflict, mergeFlagSettings, RELAY_URL, type LaunchPlan } from './launch';
-import { memoryAppend } from './memory-append';
+import { memoryAppend, MemoryAppendBudgetSpent } from './memory-append';
 import { OperationTable } from './operations';
 import { ProcessTable } from './process-table';
 import { checkRelay as checkRelayHealth, RELAY_HEALTH_TIMEOUT_MS } from './relay-health';
@@ -76,12 +76,14 @@ export interface EngineIpc {
 
 const unknownSession = (id: string) => new HostCommandError({ code: 'internal', message: `unknown session ${id}` });
 
-// A bounded handler: the host's own deadline reaches the renderer as `timeout`, never as the router's.
-async function bounded<T>(run: () => Promise<T>): Promise<T> {
+// A bounded handler: the host's own deadline reaches the renderer as `timeout`, never as the router's; so does a
+// `#` append refused because its budget ran out before the write (M5 review).
+export async function bounded<T>(run: () => Promise<T>): Promise<T> {
   try {
     return await run();
   } catch (error) {
     if (error instanceof ControlTimeout) throw new HostCommandError({ code: 'timeout', message: `${error.subtype} unanswered after ${BOUNDED_BUDGET_S} s` });
+    if (error instanceof MemoryAppendBudgetSpent) throw new HostCommandError({ code: 'timeout', message: error.message });
     throw error;
   }
 }
@@ -189,7 +191,7 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
   handle('session.interrupt', async ({ appSessionId, cancelEngineQueued }) => bounded(() => sessionOf(appSessionId).interrupt({ cancelEngineQueued })));
   handle('session.answer', async ({ appSessionId, requestId, answer }) => ({ outcome: await sessionOf(appSessionId).answer(requestId as RequestId, answer as Parameters<EngineSession['answer']>[1]) }));
   handle('session.bash', async ({ appSessionId, command }) => sessionOf(appSessionId).bash(command));
-  handle('session.memoryAppend', async ({ appSessionId, text, target }) => bounded(() => memoryAppend(sessionOf(appSessionId), { text, target })));
+  handle('session.memoryAppend', async ({ appSessionId, text, target }) => bounded(() => memoryAppend(sessionOf(appSessionId), { text, target }, { budgetMs: BOUNDED_BUDGET_S * 1000 })));
 
   // -- mutations -------------------------------------------------------------------------------------------------------
   handle('session.setPermissionMode', async ({ appSessionId, mode }) =>

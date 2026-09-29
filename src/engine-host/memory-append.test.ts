@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { loadJournal } from '../../test/support/fixtures';
 import { handshakeResponder, scriptedSession } from './conformance/session-harness';
-import { memoryAppend } from './memory-append';
+import { memoryAppend, MemoryAppendBudgetSpent } from './memory-append';
 
 // pass1/reads seq 69's get_memory_dialog answer, its paths moved under a temp directory (the user file is never ~/.claude)
 const recorded = (loadJournal('pass1', 'reads').find((r) => r.seq === 69)!.frame as { response: { response: { files: { kind: string; path: string; exists: boolean }[]; folders: { path: string }[] } } }).response.response;
@@ -132,5 +132,28 @@ describe('memoryAppend (#)', () => {
     await expect(memoryAppend(s.session, { text: 'x', target: { kind: 'path', path: null } })).rejects.toThrow(/path/);
     await expect(readFile(outside, 'utf8')).rejects.toThrow();
   });
-});
 
+  // M5 review (Important 3): the bridge answers `timeout` at the host's 8 s budget, so nothing may change on disk after it.
+  it('refuses to create or append once the budget is spent while the dialog was read, and commits inside it', async () => {
+    let clock = 1_000;
+    const slow = scriptedSession({
+      responder: handshakeResponder({
+        get_memory_dialog: () => {
+          clock += 8_000; // the read took the whole budget
+          return { response: dialog() };
+        },
+      }),
+    });
+    await slow.session.start();
+    const now = () => clock;
+    const spent = memoryAppend(slow.session, { text: 'late', target: { kind: 'project', path: null } }, { budgetMs: 8_000, now });
+    await expect(spent).rejects.toBeInstanceOf(MemoryAppendBudgetSpent);
+    await expect(readFile(join(root, 'project', 'CLAUDE.md'), 'utf8')).rejects.toThrow(); // not even created
+    await expect(memoryAppend(slow.session, { text: 'late', target: { kind: 'user', path: null } }, { budgetMs: 8_000, now })).rejects.toBeInstanceOf(MemoryAppendBudgetSpent);
+    expect(await readFile(join(root, 'home', '.claude', 'CLAUDE.md'), 'utf8')).toBe('# user\n'); // unchanged
+
+    const quick = await session();
+    expect(await memoryAppend(quick.session, { text: 'in time', target: { kind: 'project', path: null } }, { budgetMs: 8_000, now: () => clock })).toEqual({ path: join(root, 'project', 'CLAUDE.md'), created: true });
+    expect(quick.transport.requestsOf('get_memory_dialog')).toHaveLength(1);
+  });
+});

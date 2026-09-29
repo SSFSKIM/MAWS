@@ -16,7 +16,8 @@ import type { BinaryCheck } from './binary-info';
 import { autoResponder, scriptedTransport, type ScriptedTransport } from './conformance/scripted-transport';
 import { handshakeResponder, INIT_RESPONSE } from './conformance/session-harness';
 import { REQUEST_TIMEOUT_MS } from './controls';
-import { DEADLINE_SHAPES, PRE_SPAWN_BOUND_MS, registerEngineIpc, type EngineIpcDeps } from './ipc';
+import { bounded, DEADLINE_SHAPES, PRE_SPAWN_BOUND_MS, registerEngineIpc, type EngineIpcDeps } from './ipc';
+import { MemoryAppendBudgetSpent } from './memory-append';
 import { ENGINE_BIN, ENGINE_VERSION, RELAY_URL } from './launch';
 import { LADDER_MS } from './session';
 import { FileSessionStateStore } from './store/file-session-state-store';
@@ -114,6 +115,10 @@ describe('x2 deadlines fit the bridge', () => {
     expect(posted.filter((m) => (m as { id?: string }).id === '2')).toEqual([{ t: 'res', id: '2', ok: false, error: { code: 'timeout', message: 'get_usage unanswered after 8 s' } }]);
     vi.useRealTimers();
     await ipc.table.shutdown({ graceMs: 0 });
+  });
+
+  it('a # append refused for its spent budget answers the typed timeout, like a control deadline', async () => {
+    await expect(bounded(async () => Promise.reject(new MemoryAppendBudgetSpent(8_000)))).rejects.toEqual(new HostCommandError({ code: 'timeout', message: '# ran past its 8 s budget; nothing was written' }));
   });
 
   it('a command for an unknown session throws the typed internal error naming it', async () => {

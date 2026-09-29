@@ -10,9 +10,9 @@
 // `O_NOFOLLOW`, so a symlink there, existing or dangling, is refused rather than followed. Nothing here calls a
 // path-based write on a caller-controlled path.
 import { constants } from 'node:fs';
-import { lstat, mkdir, open, realpath, type FileHandle } from 'node:fs/promises';
+import { lstat, mkdir, open, realpath, unlink, type FileHandle } from 'node:fs/promises';
 import { basename, dirname, join, resolve, sep } from 'node:path';
-import { getMemoryDialog } from './controls';
+import { getMemoryDialog, REQUEST_TIMEOUT_MS } from './controls';
 import type { EngineSession } from './session';
 
 export interface MemoryTarget { kind: 'user' | 'project' | 'path'; path: string | null }
@@ -21,17 +21,42 @@ type Dialog = { files: { kind: string; path: string }[]; folders: { path: string
 
 const OPEN_FLAGS = constants.O_WRONLY | constants.O_APPEND | constants.O_NOFOLLOW;
 
-export async function memoryAppend(session: EngineSession, args: { text: string; target: MemoryTarget }): Promise<{ path: string; created: boolean }> {
+// `session.memoryAppend` is bounded (M5 review): the bridge answers `timeout` when the handler's budget is spent, so the
+// append is committed only inside it: the dialog read gets what is left of the budget, and nothing is created or
+// appended once it is gone (a file created just before the deadline and not yet written is removed again).
+export class MemoryAppendBudgetSpent extends Error {
+  constructor(budgetMs: number) {
+    super(`# ran past its ${Math.round(budgetMs / 1000)} s budget; nothing was written`);
+    this.name = 'MemoryAppendBudgetSpent';
+  }
+}
+
+export async function memoryAppend(
+  session: EngineSession,
+  args: { text: string; target: MemoryTarget },
+  opts: { budgetMs?: number; now?: () => number } = {},
+): Promise<{ path: string; created: boolean }> {
+  const now = opts.now ?? Date.now;
+  const budgetMs = opts.budgetMs ?? REQUEST_TIMEOUT_MS.read;
+  const deadline = now() + budgetMs;
+  const withinBudget = () => {
+    if (now() >= deadline) throw new MemoryAppendBudgetSpent(budgetMs);
+  };
   const client = session.control;
   if (!client || session.status().process !== 'ready') throw new Error(`session ${session.status().appSessionId} is not ready`);
-  const dialog = await getMemoryDialog(client, {});
+  const dialog = await getMemoryDialog(client, {}, { timeoutMs: deadline - now() });
   const { path, open: where } = await confine(dialog, args.target);
+  withinBudget(); // before anything is created
   const { handle, created } = await openConfined(where, path);
   try {
+    withinBudget();
     await handle.appendFile(`\n- ${args.text}\n`);
-  } finally {
+  } catch (error) {
     await handle.close();
+    if (created && error instanceof MemoryAppendBudgetSpent) await unlink(where).catch(() => {});
+    throw error;
   }
+  await handle.close();
   return { path, created };
 }
 
