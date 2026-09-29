@@ -218,7 +218,7 @@ describe('event fixtures', () => {
     expect(ofKind(rowsOf(withAllExpanded(state)), 'thinking')[0]).toMatchObject({ id: 'think:msg_stream_1:0', live: false, durationMs: 500 });
   });
 
-  it('events/disk-null-origin (the C4-backfill pin, over a synthetic fixture until C4 lands): human turns only, each with a user row, the Agent call as a subagent row', () => {
+  it('events/disk-null-origin (a synthetic disk history; C4’s real backfill is pinned in disk.test.ts): human turns only, each with a user row, the Agent call as a subagent row', () => {
     const state = stateOf(loadEventFixture('disk-null-origin'));
     expect(state.order).toHaveLength(2);
     expect(state.order.map((id) => state.turns.get(id)!.origin)).toEqual(['human', 'human']);

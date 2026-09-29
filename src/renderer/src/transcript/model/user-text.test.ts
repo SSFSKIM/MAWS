@@ -1,5 +1,5 @@
 // The *Pasted content* rule (C7's contract, verbatim in the C6 execution document): extraction with the engine's own
-// grammar before anything markdown-shaped sees the text; the C4-backfill half of C7's test is pending until C4 lands.
+// grammar before anything markdown-shaped sees the text; the C4-backfill half of C7's test is in disk.test.ts.
 import { framePasted, PASTED_BLOCK } from '@shared/composer/pasted-content';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';

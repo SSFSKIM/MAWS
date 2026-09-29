@@ -11,7 +11,7 @@ import { glyphFor } from './glyphs';
 import { collectCells, groupItems, phrasesOf, type WorkItem } from './groups';
 import { cellId, rowId, turnId as turnIdOf } from './keys';
 import type { LiveBlock, TranscriptState, TranscriptUi, TurnState, TurnWork } from './reduce';
-import { isEngineOrigin, RECEIPT_APPLIED, type ReceiptUndo } from './reduce';
+import { isEngineOrigin, originOf, RECEIPT_APPLIED, type ReceiptUndo } from './reduce';
 import { TOOL_CATEGORIES, type Cell, type ChangedFile, type Row, type RowId, type SubagentRef, type SubagentStatus, type ToolCategory, type TurnId, type TurnSummary } from './rows';
 import { needsSeparator, separatorLabel } from './time';
 import { isInterruptionMarker, isLocalCommand, localCommandOutput, userTextOf } from './user-text';
@@ -244,6 +244,9 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
           items.push({ kind: 'row', row: localCommandRow(event, turn.id) });
         } else if (isInterruptionMarker(event.origin, event.content)) {
           // The engine's interrupt marker is never a bubble, whatever turn it landed in: the stopped divider says it.
+        } else if (originOf(event.origin) === 'engine') {
+          // The engine's own trigger (C4's disk `<task-notification>` record, origin 'task-notification'): an engine turn
+          // has no user row; its divider reads Continued and the subagent row says what finished.
         } else if (event.messageUuid !== null && turnIdOf.ofMessage(event.messageUuid) === turn.id && user === null && !dropped(event.messageUuid)) {
           user = userRow(event, rowId.user(event.messageUuid), true);
         } else if (turn.id === turnIdOf.ofEvent(event.id) && user === null && !event.isSynthetic) {

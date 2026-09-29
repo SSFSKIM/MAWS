@@ -596,11 +596,14 @@ function apply(batch: Batch, event: SessionEvent): void {
         return;
       }
       // A session's process exiting ends every turn the engine was running (no turn.ended will come for them); a
-      // prompt still waiting for its turn.started stays pending, and the exit is a loose row.
+      // prompt still waiting for its turn.started stays pending, and the exit is a loose row. An exit whose reason is
+      // unknown (C4's synthesised end of a holder-less transcript whose last turn never ended on disk: the process was
+      // not seen to go) is no evidence of a stop, so such a turn closes by the superseding start's rule.
       if (event.kind === 'process.exited') {
         for (const id of state.order) {
           const turn = state.turns.get(id)!;
-          if (turn.state === 'open' && turn.accepted) batch.closeUnended(batch.touch(id), 'stopped', event.at);
+          if (turn.state !== 'open' || !turn.accepted) continue;
+          batch.closeUnended(batch.touch(id), event.reason !== 'unknown' || wasInterrupted(turn) ? 'stopped' : 'completed', event.at);
         }
       }
       return batch.loose(event);

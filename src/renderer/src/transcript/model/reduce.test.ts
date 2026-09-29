@@ -270,6 +270,28 @@ describe('turn boundaries', () => {
     expect(rowsOf(state).filter((row) => row.kind === 'user' && row.steer)).toEqual([]);
   });
 
+  // Final rebase: C4 answers the ask for a holder-less session whose last turn never ended (SDK entrypoints write no
+  // turn_duration) with `process.exited { reason: 'unknown' }` at the last record: the process was not seen to go, so
+  // the exit is no evidence of a stop, and the turn closes by the superseding start's rule.
+  it('an exit whose reason is unknown closes the running turn as completed, or as stopped on interrupt evidence', () => {
+    const quiet = builder();
+    quiet.turn('u1');
+    quiet.toolUse('t1', 'Bash', { command: 'ls' });
+    quiet.result('t1', 'a.ts');
+    quiet.text('m1', 0, 'Done.');
+    quiet.emit('process.exited', { code: null, signal: null, reason: 'unknown', lostAttentionCount: 0 });
+    let state = reduce(quiet.events);
+    expect(state.turns.get(turnId.ofMessage(uuid('u1')))).toMatchObject({ state: 'closed', closedBy: 'completed' });
+    expect(find(rowsOf(state), 'divider')).toMatchObject({ state: 'completed' });
+    const denied = builder();
+    denied.turn('u1');
+    denied.toolUse('t1', 'Bash', { command: 'rm -rf x' });
+    denied.result('t1', 'User rejected tool use', { isError: true, denial: 'user-rejected' });
+    denied.emit('process.exited', { code: null, signal: null, reason: 'unknown', lostAttentionCount: 0 });
+    state = reduce(denied.events);
+    expect(state.turns.get(turnId.ofMessage(uuid('u1')))).toMatchObject({ state: 'closed', closedBy: 'stopped' });
+  });
+
   // Whole-branch review: C4's disk backfill emits turn.ended only from system/turn_duration, which an interrupted turn
   // lacks, and writes turn.started before the prompt's user.message.
   // Whole-branch review: C4's disk backfill emits turn.ended only from system/turn_duration, which SDK-entrypoint
@@ -502,6 +524,22 @@ describe('turn origin', () => {
     // Engine turns: no user row, and a divider even without a work area, so the reader sees whose turn it was.
     expect(kinds(list)).toEqual(['time', 'divider', 'assistant_text', 'user', 'assistant_text', 'divider', 'assistant_text']);
     expect(list.filter((row) => row.kind === 'divider').map((row) => { const d = row as Extract<Row, { kind: 'divider' }>; return dividerCopy({ ...d, durationMs: d.summary.durationMs ?? 0 }); })).toEqual(['Continued for 1s', 'Continued for 1s']);
+  });
+
+  // Final rebase: C4's backfill gives a disk `<task-notification>` user record its own turn.started and user.message,
+  // both with origin 'task-notification'; that message is the engine's trigger, never the owner's bubble.
+  it('an engine turn opened by a task-notification record shows no bubble for it: its divider reads Continued', () => {
+    const b = builder();
+    b.turn('u1');
+    b.text('m1', 0, 'Dispatched.');
+    b.end(['u1']);
+    b.emit('turn.started', { userMessageUuid: uuid('n1'), origin: 'task-notification' });
+    b.emit('user.message', { messageUuid: uuid('n1'), content: '<task-notification>\n<task-id>a1</task-id>\n<status>completed</status>\n</task-notification>', isReplay: false, isSynthetic: false, origin: 'task-notification', bash: null });
+    b.text('m2', 0, 'The agent finished.');
+    b.end(['n1'], { origin: null });
+    const list = rows(b.events);
+    expect(list.filter((row) => row.kind === 'user').map((row) => (row as Extract<Row, { kind: 'user' }>).text)).toEqual(['prompt u1']);
+    expect(find(list.filter((row) => row.turnId === turnId.ofMessage(uuid('n1'))), 'divider')).toMatchObject({ origin: 'engine' });
   });
 
   it('null on both events is human (C4 backfill), and a missing user message is not evidence', () => {
