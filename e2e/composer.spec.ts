@@ -496,7 +496,7 @@ test('an unstarted session binds the frame to the intent, holds a starting state
   await p.getByRole('button', { name: /^Permission mode/ }).click();
   await page.getByRole('menuitemradio', { name: /^plan/ }).click();
   await expect.poll(() => cards(page, 'patches')).toEqual([{ appSessionId: id, patch: { permissionMode: 'plan' } }]);
-  await expect(p.getByRole('button', { name: /^Permission mode/ })).toHaveText('plan');
+  await expect(p.getByRole('button', { name: /^Permission mode/ })).toHaveAttribute('aria-label', 'Permission mode plan');
 
   // `!` waits for the engine
   await messageIn(page, 0).click();
