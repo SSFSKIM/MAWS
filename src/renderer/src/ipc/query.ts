@@ -47,6 +47,7 @@ export const QUERY_COMMANDS = [
   'engine.relayHealth',
   'engine.models',
   'settings.claudeUsage.status',
+  'fs.state', // M5: the Settings tab's config home, as the engine host resolves it
   // C11 end
 ] as const satisfies readonly ValueCommand[];
 export type QueryCommand = (typeof QUERY_COMMANDS)[number];
