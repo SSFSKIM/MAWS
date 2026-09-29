@@ -45,7 +45,7 @@ vi.mock('./index/index', () => ({ Index: class { close = c4.close; } }));
 vi.mock('./index/register', () => ({ registerIndexHandlers: vi.fn() }));
 vi.mock('./index/source', () => ({ IndexSessionSource: class { start = () => ((c4.started += 1), c4.stopSource); } }));
 vi.mock('./index/attention-service', () => ({ startIndexAttention: () => ({ stop: c4.stopAttention }) })); // C3's service over the index
-vi.mock('./ipc/events', () => ({ emit: vi.fn() }));
+vi.mock('./ipc/events', () => ({ emit: vi.fn(), onEmitted: vi.fn(() => () => {}) })); // onEmitted: git.lsFiles' root set (C7 block)
 vi.mock('./index/replay', () => ({ registerReplayHandlers: () => ({ dispose: vi.fn() }) }));
 vi.mock('./index/replay-fixtures', () => ({ appRoot: (path: string) => path, seedReplayFixtures: vi.fn() }));
 const git = vi.hoisted(() => ({ dispose: vi.fn(), registered: 0 }));

@@ -30,9 +30,9 @@ import { restoreWindowState, trackWindowState } from './window-state';
 // C5 end
 // C7 start
 import type { AppSessionId } from '@shared/graph/ids';
-import type { SessionRecord } from '@shared/graph/session';
 import { pickFiles } from './files/pick';
-import { FileLister } from './git/ls-files';
+import { FileLister, listableRoots } from './git/ls-files';
+import { onEmitted } from './ipc/events';
 import { createGitRunner } from './git/runner';
 import { claudeConfigDir, PromptHistory } from './history/prompt-history';
 import { ClaudeUsageReader, claudeUsageDir } from './usage/claude-usage-reader';
@@ -158,18 +158,18 @@ app.whenReady().then(() => {
   });
   registerMainHandler('session.history.list', async ({ appSessionId, limit }) => ({ entries: await history.list(appSessionId as AppSessionId, limit) }));
   registerMainHandler('session.history.append', ({ appSessionId, display, pastedContents, project }) => history.append(appSessionId as AppSessionId, display, pastedContents, project ?? null));
-  // listable roots: the directories of every session the read model holds (both launch modes) or the index holds
-  // (archived included), and every indexed project's directory
+  // listable roots: the directories of every unarchived session the read model holds (both launch modes) or the index
+  // holds, and every indexed project's directory; read again after any session or project change main tells the renderer
   const roots = () => {
-    const directoriesOf = (r: SessionRecord) => [r.directory, ...r.additionalDirectories, ...(r.worktree ? [r.worktree.path] : [])];
-    const held = sessions.model.allRecords().flatMap(directoriesOf);
+    const held = sessions.model.allRecords();
     try {
-      return [...held, ...index.sessions.list({ includeArchived: true }).flatMap(directoriesOf), ...index.projects.list({ includeHidden: true }).map((p) => p.directory)];
+      return listableRoots([...held, ...index.sessions.list()], index.projects.list({ includeHidden: true }).map((p) => p.directory));
     } catch {
-      return held; // the index is unavailable
+      return listableRoots(held, []); // the index is unavailable
     }
   };
   const files = new FileLister({ run: createGitRunner(), roots });
+  for (const name of ['session.changed', 'session.removed', 'session.projects.changed'] as const) onEmitted(name, () => files.invalidateRoots());
   registerMainHandler('git.lsFiles', (input) => files.list(input));
   registerMainHandler('layout.pickFiles', (input, { sender }) =>
     pickFiles(input, {

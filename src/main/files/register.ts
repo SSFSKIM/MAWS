@@ -48,7 +48,7 @@ export function registerFilesHandlers(model: { record(appSessionId: AppSessionId
     const id = owner(sender);
     const epoch = epochOf(id);
     await files.watch(session(appSessionId), path, id);
-    if (sender.isDestroyed() || epochOf(id) !== epoch) files.unwatch(session(appSessionId), path, id); // released while in flight
+    if (sender.isDestroyed() || epochOf(id) !== epoch) await files.unwatch(session(appSessionId), path, id); // released while in flight
   });
   registerMainHandler('files.unwatch', ({ appSessionId, path }, { sender }) => files.unwatch(session(appSessionId), path, sender.id));
   registerMainHandler('files.openExternal', ({ appSessionId, path }) => files.openExternal(session(appSessionId), path));
