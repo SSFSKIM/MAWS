@@ -209,12 +209,13 @@ test('a Read request flagged requires_user_interaction offers no quick approval 
     { appSessionId: 'c7-flagged', placement: 'docked' },
     { appSessionId: 'c7-flagged', placement: 'hover' },
   ]);
-  const frame = page.getByRole('group', { name: 'Approval needed' });
+  const frame = page.getByRole('group', { name: 'Approval needed', exact: true }); // the hover card is "Approval needed: Read"
   await expect(frame.getByText(/Read needs its own approval surface, which MAWS does not have/)).toBeVisible();
   await expect(frame.getByRole('button', { name: 'Allow' })).toHaveCount(0);
   await expect(frame.getByRole('radiogroup')).toHaveCount(0);
   const hover = page.getByRole('dialog', { name: 'hover c7-flagged' });
   expect(await hover.getByRole('button').allTextContents()).toEqual(['Open session']);
+  await expect(hover.getByRole('group', { name: 'Approval needed: Read' })).toBeVisible();
 
   await frame.focus();
   await page.keyboard.press('Enter');
