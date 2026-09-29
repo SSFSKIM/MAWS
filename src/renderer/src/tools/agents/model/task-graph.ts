@@ -414,15 +414,39 @@ const snapshotStatus = (status: string | undefined): TaskStatus => (status === u
 // read made for the run, else a disk node keyed by the snapshot's task id (so a start that arrives later fills it), or by
 // the run id when the snapshot is not readable yet. The snapshot's status is a disk fact, taken only by a node the wire
 // has not described; its progress fills the node until the wire gives one.
+// A run's earlier node (read before its snapshot named the task) folds into the task-id node: its disk facts fill what
+// the target lacks, and it leaves the graph.
+function foldRunNode(draft: Draft, from: TaskNode, key: TaskId): void {
+  const target = draft.get(key)!;
+  const wireKnown = target.provenance.wire || target.provenance.snapshot;
+  const workflow = target.workflow ?? blankWorkflow();
+  draft.patch(key, {
+    ...(target.description === target.taskId && from.description !== from.taskId ? { description: from.description } : {}),
+    ...(!wireKnown && target.status === 'unknown' ? { status: from.status } : {}),
+    startedAt: target.startedAt ?? from.startedAt,
+    endedAt: target.endedAt ?? from.endedAt,
+    workflow: {
+      workflowName: workflow.workflowName ?? from.workflow?.workflowName ?? null,
+      progress: workflow.progress ?? from.workflow?.progress ?? null,
+      snapshot: workflow.snapshot ?? from.workflow?.snapshot ?? null,
+      runId: workflow.runId ?? from.workflow?.runId ?? null,
+    },
+    provenance: { disk: true },
+  });
+  draft.remove(from.taskId);
+}
+
 export function mergeRuns(graph: TaskGraph, runs: WorkflowRun[]): TaskGraph {
   const draft = new Draft(graph);
   for (const run of runs) {
     const snapshot = run.snapshot;
     const taskIdOfRun = snapshot?.taskId as TaskId | undefined;
-    const existing =
-      (taskIdOfRun !== undefined ? draft.get(taskIdOfRun) : undefined) ?? draft.nodes().find((n) => n.workflow?.runId === run.runId);
-    const key = existing?.taskId ?? taskIdOfRun ?? (run.runId as TaskId);
-    if (!existing) draft.put({ ...blankNode(key, 'workflow', 'unknown'), taskType: 'local_workflow', provenance: { wire: false, disk: true, snapshot: false } });
+    const byTask = taskIdOfRun !== undefined ? draft.get(taskIdOfRun) : undefined;
+    // The node an earlier read made for this run (keyed by the run id while its snapshot was unreadable, or by its task id).
+    const byRun = draft.nodes().find((n) => n.kind === 'workflow' && n.workflow?.runId === run.runId && n.taskId !== taskIdOfRun);
+    const key = byTask?.taskId ?? taskIdOfRun ?? byRun?.taskId ?? (run.runId as TaskId);
+    if (!draft.get(key)) draft.put({ ...blankNode(key, 'workflow', 'unknown'), taskType: 'local_workflow', provenance: { wire: false, disk: true, snapshot: false } });
+    if (byRun && byRun.taskId !== key) foldRunNode(draft, byRun, key); // one card per run, never a phantom beside the task's
     const current = draft.get(key)!;
     const workflow = current.workflow ?? blankWorkflow();
     const wireKnown = current.provenance.wire || current.provenance.snapshot;

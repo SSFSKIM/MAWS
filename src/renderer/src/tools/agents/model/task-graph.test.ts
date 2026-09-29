@@ -277,6 +277,28 @@ describe('task graph', () => {
       expect(mergeRuns(disk, [run])).toBe(disk);
     });
 
+    it('a run first read before its snapshot folds into the task-id node once the snapshot names it: one card, not a phantom', () => {
+      const snapshotOf = (status: string) => ({ runId: 'wf_run1', taskId: 'wtask1', status, workflowName: 'demo', summary: 'Demo run' });
+      const wire = graphOf([event('task.started', { taskId: 'wtask1', taskType: 'local_workflow', description: 'Demo run', workflowName: 'demo' })]);
+      const early = mergeRuns(wire, [{ runId: 'wf_run1', snapshot: null, journal: [] }]);
+      const read = mergeRuns(early, [{ runId: 'wf_run1', snapshot: snapshotOf('running'), journal: [] }]);
+      expect(workflows(read).map((n) => n.taskId)).toEqual(['wtask1']);
+      expect(node(read, 'wtask1')).toMatchObject({ status: 'running', provenance: { wire: true, disk: true } });
+      expect(node(read, 'wtask1').workflow?.runId).toBe('wf_run1');
+      expect(mergeRuns(read, [{ runId: 'wf_run1', snapshot: read.tasks.get(id('wtask1'))!.workflow!.snapshot, journal: [] }])).toBe(read);
+
+      const diskOnly = mergeRuns(mergeRuns(emptyGraph(), [{ runId: 'wf_run1', snapshot: null, journal: [] }]), [{ runId: 'wf_run1', snapshot: snapshotOf('completed'), journal: [] }]);
+      expect([...diskOnly.tasks.keys()]).toEqual(['wtask1']); // re-keyed under the task id, so a later start fills it
+      expect(node(diskOnly, 'wtask1')).toMatchObject({ status: 'completed', description: 'Demo run' });
+    });
+
+    it('a null-snapshot run whose runId an existing node already carries makes no new node', () => {
+      const [run] = workflowRunsOf();
+      const merged = mergeRuns(graphOf(replayed('pass2', 'workflow')), [run]);
+      const again = mergeRuns(merged, [{ runId: run.runId, snapshot: null, journal: [] }]);
+      expect(workflows(again).map((n) => n.taskId)).toEqual(['wayue3on6']);
+    });
+
     it('mergeRuns with a null snapshot adds a disk node with status unknown and the run’s runId', () => {
       const graph = mergeRuns(emptyGraph(), [{ runId: 'wf_new', snapshot: null, journal: [] }]);
       expect(node(graph, 'wf_new')).toMatchObject({ kind: 'workflow', status: 'unknown', startedAt: null });
