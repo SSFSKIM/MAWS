@@ -6,20 +6,24 @@
 import { useTranscriptStore, workingDurationMs } from '../../../stores/transcript';
 import { subagentActivity } from '../../model/activity';
 import { subagentDetail } from '../../model/copy';
+import { SUBAGENT_GLYPHS } from '../../model/glyphs';
 import type { Row, SubagentRef } from '../../model/rows';
 import { NO_ACTIONS, useDisclosure, useTranscriptContext } from '../context';
 import { useTicker } from './parts';
 
 type SubagentRowData = Extract<Row, { kind: 'subagent' }>;
 
-// Eight marks in the UI font, chosen by the model's hash of the task id (`SubagentRef.glyph`).
-const GLYPHS = ['✻', '❋', '✿', '✦', '❖', '✺', '✹', '❉'];
+// A child's glyph as its row shows it (one of the eight marks, by the model's hash of the task id), exported so C8's
+// summary shows the same mark.
+export function SubagentGlyph({ agent, className }: { agent: SubagentRef; className?: string }) {
+  return <span className={className}>{SUBAGENT_GLYPHS[agent.glyph % SUBAGENT_GLYPHS.length]}</span>;
+}
 const SHOWN = 4;
 const DONE = new Set<SubagentRowData['status']>(['finished', 'finished_with_errors', 'stopped']);
 
 function Glyph({ agent, open }: { agent: SubagentRef; open: ((ref: SubagentRef) => void) | null }) {
-  const mark = GLYPHS[agent.glyph % GLYPHS.length];
-  if (!open) return <span>{mark}</span>;
+  const mark = SUBAGENT_GLYPHS[agent.glyph % SUBAGENT_GLYPHS.length];
+  if (!open) return <SubagentGlyph agent={agent} />;
   return (
     <button type="button" className="transcript-glyph" aria-label={`Open ${agent.name}`} title={agent.name} onClick={() => open(agent)}>
       {mark}

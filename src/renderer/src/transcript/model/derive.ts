@@ -7,6 +7,7 @@ import type { AgentId, RequestId, TaskId, ToolUseId } from '@shared/graph/ids';
 import { presentationOf, tableRowOf } from './classify';
 import { cellOf, editCounts, filePathOf, hookCell, type HookRecord, type ToolRecord, type TurnContext } from './cells';
 import { agentMessageCopy, boundaryCopy, groupSummary, processExitCopy, reconnectCopy, retryCopy, subagentSentence } from './copy';
+import { glyphFor } from './glyphs';
 import { collectCells, groupItems, phrasesOf, type WorkItem } from './groups';
 import { cellId, rowId, turnId as turnIdOf } from './keys';
 import type { LiveBlock, TranscriptState, TranscriptUi, TurnState } from './reduce';
@@ -136,15 +137,17 @@ type Item =
 interface SubagentGroup { id: RowId; at: string; apiMessageId: string | null; refs: SubagentRef[]; statuses: Map<TaskId, SubagentStatus>; lastTool: Map<TaskId, string | null>; phase: string | null }
 interface Pending { kind: 'question' | 'plan'; use: Event<'tool.use'>; answers: Record<string, string> | null; outcome: RowOf<'plan'>['outcome']; feedback: string | null; requestId: RequestId | null }
 
-const glyphOf = (id: string) => {
-  let hash = 0;
-  for (let i = 0; i < id.length; i += 1) hash = (Math.imul(hash, 31) + id.charCodeAt(i)) | 0;
-  return Math.abs(hash) % 8;
-};
-
 const isAborted = (reason: string | null) => reason !== null && reason.startsWith('aborted');
 
-function deriveTurn(turn: TurnState, state: TranscriptState | null): { rows: Row[]; summary: TurnSummary; cells: Cell[] } {
+interface TurnDerivation {
+  rows: Row[]; // as disclosed by the reader's expansion state
+  summary: TurnSummary;
+  cells: Cell[]; // every cell of the work area, disclosed or not
+  files: ChangedFile[]; // the receipt's files
+  agents: (SubagentRef & { status: SubagentStatus })[]; // every child of the turn's subagent rows, with its own status
+}
+
+function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivation {
   const ui = state?.ui;
   const expanded = ui ? ui.expandedTurns.has(turn.id) || (turn.state === 'open' && !ui.collapsedTurns.has(turn.id)) : false;
   const context: TurnContext = { closed: turn.state === 'closed', terminalReason: turn.ended?.terminalReason ?? null, lastAt: turn.events.at(-1)?.at ?? turn.startedAt };
@@ -260,7 +263,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): { rows: Row
           const input = record(event.input);
           const group = subagentGroupFor(event.apiMessageId, event.at, rowId.subagent(event.toolUseId as string as TaskId));
           addRef(group, {
-            taskId: event.toolUseId as string as TaskId, agentId: null, toolUseId: event.toolUseId, name: str(input.description, event.toolName), glyph: glyphOf(event.toolUseId),
+            taskId: event.toolUseId as string as TaskId, agentId: null, toolUseId: event.toolUseId, name: str(input.description, event.toolName), glyph: glyphFor(event.toolUseId),
             kind: event.toolName === 'Workflow' ? 'workflow' : 'agent', subagentType: typeof input.subagent_type === 'string' ? input.subagent_type : null,
           });
         } else if (presentation === 'agent_message') {
@@ -310,11 +313,11 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): { rows: Row
           // The tool use's placeholder ref (keyed on the tool use id) becomes the task's ref.
           const at = group.refs.findIndex((ref) => ref.toolUseId === event.toolUseId);
           const ref = group.refs[at];
-          group.refs[at] = { ...ref, taskId: event.taskId, name: event.description, glyph: glyphOf(event.taskId), subagentType: event.kind === 'subagent.started' ? event.subagentType : ref.subagentType, kind: kind === 'local_workflow' ? 'workflow' : 'agent' };
+          group.refs[at] = { ...ref, taskId: event.taskId, name: event.description, glyph: glyphFor(event.taskId), subagentType: event.kind === 'subagent.started' ? event.subagentType : ref.subagentType, kind: kind === 'local_workflow' ? 'workflow' : 'agent' };
           byTask.set(event.taskId, group);
           if (at === 0) group.id = rowId.subagent(event.taskId);
         } else {
-          addRef(group, { taskId: event.taskId, agentId: null, toolUseId: event.toolUseId, name: event.description, glyph: glyphOf(event.taskId), kind: kind === 'local_workflow' ? 'workflow' : 'agent', subagentType: event.kind === 'subagent.started' ? event.subagentType : null });
+          addRef(group, { taskId: event.taskId, agentId: null, toolUseId: event.toolUseId, name: event.description, glyph: glyphFor(event.taskId), kind: kind === 'local_workflow' ? 'workflow' : 'agent', subagentType: event.kind === 'subagent.started' ? event.subagentType : null });
         }
         group.statuses.set(event.taskId, 'started');
         break;
@@ -485,7 +488,13 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): { rows: Row
       ...receiptFields(RECEIPT_APPLIED), // the reader's undo state is laid over in rowsOfTurn
     });
   }
-  return { rows, summary, cells };
+  const agents = subagents.flatMap((group) => group.refs.map((ref) => ({ ...ref, status: group.statuses.get(ref.taskId) ?? ('started' as const) })));
+  return { rows, summary, cells, files, agents };
+}
+
+// A turn's work whatever the reader disclosed (the activity projection's input, model/activity.ts).
+export function turnWork(turn: TurnState): Pick<TurnDerivation, 'cells' | 'files' | 'agents'> {
+  return deriveTurn(turn, null);
 }
 
 // ---------------------------------------------------------------------------------------------------------------------

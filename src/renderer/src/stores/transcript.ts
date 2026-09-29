@@ -5,6 +5,7 @@
 // no row, and the live row reads its buffer through `liveBuffer`, so a token re-renders one component.
 import { create } from 'zustand';
 import type { AgentId } from '@shared/graph/ids';
+import { turnActivity, type TurnActivity } from '../transcript/model/activity';
 import { expandedTurnRows, rowsOf } from '../transcript/model/derive';
 import { applyEvents, createState, RECEIPT_APPLIED, withReaderState, withUi, type ReceiptUndo, type SpillLoad, type TranscriptState, type TranscriptUi } from '../transcript/model/reduce';
 import type { CellId, Row, RowId, TurnId } from '../transcript/model/rows';
@@ -43,6 +44,7 @@ export interface TranscriptStore {
   drop(key: string): void; // release every attachment and forget the state
   rows(key: string): Row[];
   lastAssistantLine(key: string): string | null;
+  activity(key: string): TurnActivity[]; // what each turn did whatever the reader disclosed (C8's summary); stable while no turn changes
   jumpTo(key: string, id: RowId | CellId, options?: { align?: JumpRequest['align']; turnId?: TurnId }): void; // expands what holds the row, then the view scrolls and focuses; `turnId` names the owning turn when the caller knows it (the search then derives that turn alone)
   jumpHandled(key: string, nonce: number): void;
   setFollowing(key: string, following: boolean): void;
@@ -56,6 +58,7 @@ export interface TranscriptStore {
 }
 
 const NO_ROWS: Row[] = [];
+const NO_ACTIVITY: TurnActivity[] = [];
 
 // The buffer of a live text or thinking row: its block identity is the row id after the kind prefix (keys.ts).
 export function liveBuffer(entry: TranscriptEntry | undefined, row: Row): string | null {
@@ -244,6 +247,10 @@ export function createTranscriptStore() {
       },
 
       rows: (key) => entry(key)?.rows ?? NO_ROWS,
+      activity: (key) => {
+        const current = entry(key);
+        return current ? turnActivity(current.state) : NO_ACTIVITY;
+      },
 
       lastAssistantLine(key) {
         const current = entry(key);

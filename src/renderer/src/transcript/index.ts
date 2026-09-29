@@ -24,4 +24,10 @@ export { serializeRows } from './model/serialize';
 // C7: the request card and queued rows render markdown through the same sanitising pipeline (one renderer).
 export { Markdown } from './view/markdown/Markdown';
 
+// C8: what each turn did whatever the reader disclosed (also `useTranscriptStore.activity(key)`), and the subagent
+// glyphs as the rows show them.
+export { turnActivity, type TurnActivity } from './model/activity';
+export { glyphFor, SUBAGENT_GLYPHS } from './model/glyphs';
+export { SubagentGlyph } from './view/rows/Subagent';
+
 export type { Cell, CellDetail, CellId, Row, RowId, SubagentRef, ToolCategory, ToolClassification, TurnId, TurnSummary } from './model/rows';
