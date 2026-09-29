@@ -2,21 +2,22 @@ import { describe, expect, it } from 'vitest';
 import { EngineSessionStatusSchema } from '../../src/shared/engine/status';
 import { join } from 'node:path';
 import { TEST_FIXTURE_DIR } from './fixtures';
-import { loadScenario, parseScenario, ScenarioError } from './scenario';
+import { RELAY_URL as C3_RELAY_URL } from '../../src/engine-host/launch';
+import { loadScenario, parseScenario, RELAY_URL, ScenarioError } from './scenario';
 
 const NOW = Date.parse('2026-09-28T10:00:00.000Z');
 
 const record = (appId: string, over: Record<string, unknown> = {}) => ({
   appId, engineSessionId: `eng-${appId}`, projectId: null, directory: '/tmp/x', additionalDirectories: [], worktree: null, branch: null,
   title: { text: appId, source: 'user', _synthetic: true }, pinned: false, archived: false, holder: { kind: 'self' },
-  lastSeen: { messageUuid: null, at: null }, unread: false, engineVersion: '2.1.283', gateway: { routed: true },
+  lastSeen: { messageUuid: null, at: null }, unread: false, engineVersion: '2.1.283', gateway: { routed: true, baseUrl: 'http://127.0.0.1:8641', autoModeServer: 'unknown' },
   model: { requested: null, resolved: 'claude-opus' }, effort: null, permissionMode: { requested: 'auto', effective: 'auto', refusal: null },
   createdAt: '2026-09-28T09:00:00Z', updatedAt: '2026-09-28T09:00:00Z', _from: 'hand-written', ...over,
 });
 const turn = { origin: 'human', startedAt: '2026-09-28T09:59:00Z', userMessageUuids: [] };
 const file = (over: Record<string, unknown> = {}) => ({
   version: 1, projects: [], digests: [], attention: [], timeline: [],
-  sessions: [record('a'), record('b', { gateway: { routed: false }, effort: 'high' })],
+  sessions: [record('a'), record('b', { gateway: { routed: false, baseUrl: null, autoModeServer: 'enabled' }, effort: 'high' })],
   engine: [
     { appSessionId: 'a', process: 'ready', engineState: 'running', turn, pendingRequests: 0 },
     { appSessionId: 'b', process: 'ready', engineState: 'idle', turn: null, pendingRequests: 0 },
@@ -43,6 +44,7 @@ describe('scenario loader', () => {
     for (const status of [atLoad, replaced.engine]) {
       expect(EngineSessionStatusSchema.parse(status)).toEqual(status);
       expect(status).toMatchObject({
+        taskListId: null,
         cwd: charter.directory,
         pendingPlan: null,
         fastMode: { state: null, disabledReason: null },
@@ -73,7 +75,11 @@ describe('scenario loader', () => {
   it('converts the record’s gateway, never copies it', () => {
     const [a, b] = parseScenario(file(), NOW).engine;
     expect(a.gateway).toEqual({ mode: 'gateway', baseUrl: 'http://127.0.0.1:8641', verified: 'routed', autoModeServer: 'unknown', localLane: null });
-    expect(b.gateway).toEqual({ mode: 'direct', baseUrl: null, verified: 'direct', autoModeServer: 'unknown', localLane: null });
+    expect(b.gateway).toEqual({ mode: 'direct', baseUrl: null, verified: 'direct', autoModeServer: 'enabled', localLane: null }); // the record's
+  });
+
+  it('holds the relay URL C3 launches through', () => {
+    expect(RELAY_URL).toBe(C3_RELAY_URL);
   });
 
   it('fails the load naming the entry whose session has an effort that is not an effort level', () => {

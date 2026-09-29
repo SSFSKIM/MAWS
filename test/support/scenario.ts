@@ -91,11 +91,10 @@ function stripAnnotations(value: unknown): unknown {
 const pathOf = (path: readonly PropertyKey[]) =>
   path.reduce<string>((out, part) => (typeof part === 'number' ? `${out}[${part}]` : out ? `${out}.${String(part)}` : String(part)), '');
 
-// X1's record carries `gateway { routed }`, C3's status `{ mode, baseUrl, verified, … }`: converted, never copied, to the
-// two outcomes C3's verification produces for a verified launch.
+// X1's record carries `gateway { routed, baseUrl, autoModeServer }`, C3's status `{ mode, baseUrl, verified, … }`: the
+// scripted `routed` is converted, never copied, to the two outcomes C3's verification produces for a verified launch.
 function gatewayOf(record: SessionRecord): EngineSessionStatus['gateway'] {
-  const extended = record.gateway as { routed: boolean; autoModeServer?: EngineSessionStatus['gateway']['autoModeServer'] };
-  const autoModeServer = extended.autoModeServer ?? 'unknown';
+  const { autoModeServer } = record.gateway;
   return record.gateway.routed
     ? { mode: 'gateway', baseUrl: RELAY_URL, verified: 'routed', autoModeServer, localLane: null }
     : { mode: 'direct', baseUrl: null, verified: 'direct', autoModeServer, localLane: null };
@@ -110,6 +109,7 @@ export function expandEngine(compact: CompactEngine, record: SessionRecord, time
     pid: null,
     launchId: 'scenario',
     launchedAt: times.launchedAt,
+    taskListId: null,
     cwd: record.directory,
     pendingPlan: null,
     process: compact.process,

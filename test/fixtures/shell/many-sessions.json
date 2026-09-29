@@ -50,7 +50,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -89,7 +91,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -128,7 +132,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -167,7 +173,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -206,7 +214,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -245,7 +255,9 @@
    "unread": true,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -284,7 +296,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -323,7 +337,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -362,7 +378,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -401,7 +419,9 @@
    "unread": true,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -440,7 +460,9 @@
    "unread": true,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -479,7 +501,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -518,7 +542,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -557,7 +583,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -596,7 +624,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -635,7 +665,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -674,7 +706,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -713,7 +747,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -752,7 +788,9 @@
    "unread": true,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -791,7 +829,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -830,7 +870,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -869,7 +911,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -908,7 +952,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -947,7 +993,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -986,7 +1034,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -1025,7 +1075,9 @@
    "unread": true,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -1064,7 +1116,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -1103,7 +1157,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -1142,7 +1198,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -1181,7 +1239,9 @@
    "unread": true,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -1220,7 +1280,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -1259,7 +1321,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -1298,7 +1362,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -1337,7 +1403,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -1376,7 +1444,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -1415,7 +1485,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -1454,7 +1526,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -1493,7 +1567,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -1532,7 +1608,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -1571,7 +1649,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -1610,7 +1690,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -1649,7 +1731,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -1688,7 +1772,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -1727,7 +1813,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -1766,7 +1854,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -1805,7 +1895,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -1844,7 +1936,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -1883,7 +1977,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -1922,7 +2018,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -1961,7 +2059,9 @@
    "unread": true,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -2000,7 +2100,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -2039,7 +2141,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -2078,7 +2182,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -2117,7 +2223,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -2156,7 +2264,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -2195,7 +2305,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -2234,7 +2346,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -2273,7 +2387,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -2312,7 +2428,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -2351,7 +2469,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -2390,7 +2510,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -2429,7 +2551,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -2468,7 +2592,9 @@
    "unread": true,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -2507,7 +2633,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -2546,7 +2674,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -2585,7 +2715,9 @@
    "unread": true,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -2624,7 +2756,9 @@
    "unread": true,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -2663,7 +2797,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -2702,7 +2838,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -2741,7 +2879,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -2780,7 +2920,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -2819,7 +2961,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -2858,7 +3002,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -2897,7 +3043,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -2936,7 +3084,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -2975,7 +3125,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -3014,7 +3166,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -3053,7 +3207,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -3092,7 +3248,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -3131,7 +3289,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -3170,7 +3330,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -3209,7 +3371,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -3248,7 +3412,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -3287,7 +3453,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -3326,7 +3494,9 @@
    "unread": true,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -3365,7 +3535,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -3404,7 +3576,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -3443,7 +3617,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -3482,7 +3658,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -3521,7 +3699,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -3560,7 +3740,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -3599,7 +3781,9 @@
    "unread": true,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -3638,7 +3822,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -3677,7 +3863,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -3716,7 +3904,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -3755,7 +3945,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -3794,7 +3986,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -3833,7 +4027,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -3872,7 +4068,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -3911,7 +4109,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -3950,7 +4150,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -3989,7 +4191,9 @@
    "unread": true,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -4028,7 +4232,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -4067,7 +4273,9 @@
    "unread": true,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -4106,7 +4314,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -4145,7 +4355,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -4184,7 +4396,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -4223,7 +4437,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -4262,7 +4478,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -4301,7 +4519,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -4340,7 +4560,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -4379,7 +4601,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -4418,7 +4642,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -4457,7 +4683,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -4496,7 +4724,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -4535,7 +4765,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -4574,7 +4806,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -4613,7 +4847,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -4652,7 +4888,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -4691,7 +4929,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -4730,7 +4970,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -4769,7 +5011,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -4808,7 +5052,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -4847,7 +5093,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -4886,7 +5134,9 @@
    "unread": true,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -4925,7 +5175,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -4964,7 +5216,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -5003,7 +5257,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -5042,7 +5298,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -5081,7 +5339,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -5120,7 +5380,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -5159,7 +5421,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -5198,7 +5462,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -5237,7 +5503,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -5276,7 +5544,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -5315,7 +5585,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -5354,7 +5626,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -5393,7 +5667,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -5432,7 +5708,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -5471,7 +5749,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -5510,7 +5790,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -5549,7 +5831,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -5588,7 +5872,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -5627,7 +5913,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -5666,7 +5954,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -5705,7 +5995,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -5744,7 +6036,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -5783,7 +6077,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -5822,7 +6118,9 @@
    "unread": true,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -5861,7 +6159,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -5900,7 +6200,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -5939,7 +6241,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -5978,7 +6282,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -6017,7 +6323,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -6056,7 +6364,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -6095,7 +6405,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -6134,7 +6446,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -6173,7 +6487,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -6212,7 +6528,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -6251,7 +6569,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -6290,7 +6610,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -6329,7 +6651,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -6368,7 +6692,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -6407,7 +6733,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -6446,7 +6774,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -6485,7 +6815,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -6524,7 +6856,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -6563,7 +6897,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -6602,7 +6938,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -6641,7 +6979,9 @@
    "unread": true,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -6680,7 +7020,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -6719,7 +7061,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -6758,7 +7102,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -6797,7 +7143,9 @@
    "unread": true,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -6836,7 +7184,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -6875,7 +7225,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -6914,7 +7266,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -6953,7 +7307,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -6992,7 +7348,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -7031,7 +7389,9 @@
    "unread": true,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -7070,7 +7430,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -7109,7 +7471,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -7148,7 +7512,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -7187,7 +7553,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -7226,7 +7594,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -7265,7 +7635,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -7304,7 +7676,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -7343,7 +7717,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -7382,7 +7758,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -7421,7 +7799,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -7460,7 +7840,9 @@
    "unread": true,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -7499,7 +7881,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -7538,7 +7922,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -7577,7 +7963,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -7616,7 +8004,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -7655,7 +8045,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -7694,7 +8086,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -7733,7 +8127,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -7772,7 +8168,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -7811,7 +8209,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -7850,7 +8250,9 @@
    "unread": true,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -7889,7 +8291,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -7928,7 +8332,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -7967,7 +8373,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -8006,7 +8414,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -8045,7 +8455,9 @@
    "unread": true,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -8084,7 +8496,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -8123,7 +8537,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -8162,7 +8578,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -8201,7 +8619,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -8240,7 +8660,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -8279,7 +8701,9 @@
    "unread": true,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -8318,7 +8742,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -8357,7 +8783,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -8396,7 +8824,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -8435,7 +8865,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -8474,7 +8906,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -8513,7 +8947,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -8552,7 +8988,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -8591,7 +9029,9 @@
    "unread": true,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -8630,7 +9070,9 @@
    "unread": true,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -8669,7 +9111,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -8708,7 +9152,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -8747,7 +9193,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -8786,7 +9234,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -8825,7 +9275,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -8864,7 +9316,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -8903,7 +9357,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -8942,7 +9398,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -8981,7 +9439,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -9020,7 +9480,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -9059,7 +9521,9 @@
    "unread": true,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -9098,7 +9562,9 @@
    "unread": true,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -9137,7 +9603,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -9176,7 +9644,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -9215,7 +9685,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -9254,7 +9726,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -9293,7 +9767,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -9332,7 +9808,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -9371,7 +9849,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -9410,7 +9890,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -9449,7 +9931,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -9488,7 +9972,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -9527,7 +10013,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -9566,7 +10054,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -9605,7 +10095,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -9644,7 +10136,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -9683,7 +10177,9 @@
    "unread": true,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -9722,7 +10218,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -9761,7 +10259,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -9800,7 +10300,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -9839,7 +10341,9 @@
    "unread": true,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -9878,7 +10382,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -9917,7 +10423,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -9956,7 +10464,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -9995,7 +10505,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -10034,7 +10546,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -10073,7 +10587,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -10112,7 +10628,9 @@
    "unread": true,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -10151,7 +10669,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -10190,7 +10710,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -10229,7 +10751,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -10268,7 +10792,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -10307,7 +10833,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -10346,7 +10874,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -10385,7 +10915,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -10424,7 +10956,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -10463,7 +10997,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -10502,7 +11038,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -10541,7 +11079,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -10580,7 +11120,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -10619,7 +11161,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -10658,7 +11202,9 @@
    "unread": true,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -10697,7 +11243,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -10736,7 +11284,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -10775,7 +11325,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -10814,7 +11366,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -10853,7 +11407,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -10892,7 +11448,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -10931,7 +11489,9 @@
    "unread": true,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -10970,7 +11530,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -11009,7 +11571,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -11048,7 +11612,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -11087,7 +11653,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -11126,7 +11694,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -11165,7 +11735,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -11204,7 +11776,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -11243,7 +11817,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -11282,7 +11858,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -11321,7 +11899,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -11360,7 +11940,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -11399,7 +11981,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -11438,7 +12022,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -11477,7 +12063,9 @@
    "unread": true,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -11516,7 +12104,9 @@
    "unread": true,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -11555,7 +12145,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -11594,7 +12186,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -11633,7 +12227,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -11672,7 +12268,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -11711,7 +12309,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -11750,7 +12350,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -11789,7 +12391,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -11828,7 +12432,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -11867,7 +12473,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -11906,7 +12514,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -11945,7 +12555,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -11984,7 +12596,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -12023,7 +12637,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -12062,7 +12678,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -12101,7 +12719,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -12140,7 +12760,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -12179,7 +12801,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -12218,7 +12842,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -12257,7 +12883,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -12296,7 +12924,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -12335,7 +12965,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -12374,7 +13006,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -12413,7 +13047,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -12452,7 +13088,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -12491,7 +13129,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -12530,7 +13170,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -12569,7 +13211,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -12608,7 +13252,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -12647,7 +13293,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -12686,7 +13334,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -12725,7 +13375,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -12764,7 +13416,9 @@
    "unread": true,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -12803,7 +13457,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -12842,7 +13498,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -12881,7 +13539,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -12920,7 +13580,9 @@
    "unread": true,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -12959,7 +13621,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -12998,7 +13662,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -13037,7 +13703,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -13076,7 +13744,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -13115,7 +13785,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -13154,7 +13826,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -13193,7 +13867,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -13232,7 +13908,9 @@
    "unread": true,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -13271,7 +13949,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -13310,7 +13990,9 @@
    "unread": true,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -13349,7 +14031,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -13388,7 +14072,9 @@
    "unread": true,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -13427,7 +14113,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -13466,7 +14154,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -13505,7 +14195,9 @@
    "unread": true,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -13544,7 +14236,9 @@
    "unread": true,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -13583,7 +14277,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -13622,7 +14318,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -13661,7 +14359,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -13700,7 +14400,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -13739,7 +14441,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -13778,7 +14482,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -13817,7 +14523,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -13856,7 +14564,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -13895,7 +14605,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -13934,7 +14646,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",
@@ -13973,7 +14687,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -14012,7 +14728,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": true
+    "routed": true,
+    "baseUrl": "http://127.0.0.1:8641",
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "sonnet",
@@ -14051,7 +14769,9 @@
    "unread": false,
    "engineVersion": "2.1.283",
    "gateway": {
-    "routed": false
+    "routed": false,
+    "baseUrl": null,
+    "autoModeServer": "unknown"
    },
    "model": {
     "requested": "haiku",

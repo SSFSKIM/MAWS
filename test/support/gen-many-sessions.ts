@@ -62,7 +62,7 @@ projects.forEach((project, p) => {
       title: { text: `${pick(VERBS)} ${pick(NOUNS)} #${i + 1}`, source: 'user' },
       pinned: false, archived: false, holder: live ? { kind: 'self' } : { kind: 'none' },
       lastSeen: unread ? { messageUuid: null, at: null } : { messageUuid: null, at: iso(endedMs) },
-      unread, engineVersion: '2.1.283', gateway: { routed }, model, effort: null,
+      unread, engineVersion: '2.1.283', gateway: { routed, baseUrl: routed ? 'http://127.0.0.1:8641' : null, autoModeServer: 'unknown' }, model, effort: null,
       permissionMode: { requested: mode, effective: mode, refusal: null },
       createdAt: iso(createdMs), updatedAt: iso(endedMs),
     });

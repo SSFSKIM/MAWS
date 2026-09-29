@@ -56,6 +56,8 @@
       "engineVersion": "2.1.283",
       "gateway": {
         "routed": false,
+        "baseUrl": null,
+        "autoModeServer": "unknown",
         "_note": "pass-1 spawn row carries no routed flag: the pass-1 probe launched direct"
       },
       "model": {
@@ -99,6 +101,8 @@
       "engineVersion": "2.1.283",
       "gateway": {
         "routed": false,
+        "baseUrl": null,
+        "autoModeServer": "unknown",
         "_note": "pass-1 spawn row carries no routed flag: the pass-1 probe launched direct"
       },
       "model": {
@@ -144,6 +148,8 @@
       "engineVersion": "2.1.283",
       "gateway": {
         "routed": false,
+        "baseUrl": null,
+        "autoModeServer": "unknown",
         "_note": "pass-1 spawn row carries no routed flag: the pass-1 probe launched direct"
       },
       "model": {
@@ -186,7 +192,9 @@
       "unread": true,
       "engineVersion": "2.1.283",
       "gateway": {
-        "routed": true
+        "routed": true,
+        "baseUrl": "http://127.0.0.1:8641",
+        "autoModeServer": "unknown"
       },
       "model": {
         "requested": "sonnet",
@@ -228,7 +236,9 @@
       "unread": false,
       "engineVersion": "2.1.283",
       "gateway": {
-        "routed": true
+        "routed": true,
+        "baseUrl": "http://127.0.0.1:8641",
+        "autoModeServer": "unknown"
       },
       "model": {
         "requested": "sonnet",
@@ -272,7 +282,9 @@
       "unread": false,
       "engineVersion": "2.1.283",
       "gateway": {
-        "routed": true
+        "routed": true,
+        "baseUrl": "http://127.0.0.1:8641",
+        "autoModeServer": "unknown"
       },
       "model": {
         "requested": "sonnet",
@@ -314,7 +326,9 @@
       "unread": false,
       "engineVersion": "2.1.283",
       "gateway": {
-        "routed": true
+        "routed": true,
+        "baseUrl": "http://127.0.0.1:8641",
+        "autoModeServer": "unknown"
       },
       "model": {
         "requested": "sonnet",
@@ -357,6 +371,8 @@
       "engineVersion": "2.1.283",
       "gateway": {
         "routed": false,
+        "baseUrl": null,
+        "autoModeServer": "unknown",
         "_note": "pass-1 spawn row carries no routed flag: the pass-1 probe launched direct"
       },
       "model": {
@@ -399,7 +415,9 @@
       "unread": false,
       "engineVersion": "2.1.283",
       "gateway": {
-        "routed": true
+        "routed": true,
+        "baseUrl": "http://127.0.0.1:8641",
+        "autoModeServer": "unknown"
       },
       "model": {
         "requested": "sonnet",
@@ -441,7 +459,9 @@
       "unread": true,
       "engineVersion": "2.1.283",
       "gateway": {
-        "routed": true
+        "routed": true,
+        "baseUrl": "http://127.0.0.1:8641",
+        "autoModeServer": "unknown"
       },
       "model": {
         "requested": "sonnet",
@@ -484,6 +504,8 @@
       "engineVersion": "2.1.283",
       "gateway": {
         "routed": false,
+        "baseUrl": null,
+        "autoModeServer": "unknown",
         "_note": "pass-1 spawn row carries no routed flag: the pass-1 probe launched direct"
       },
       "model": {
