@@ -66,15 +66,26 @@ function useQueueActions(appSessionId: AppSessionId, client: MawsBridge) {
   };
 }
 
-// A submitting entry is in flight; C3 acknowledges within milliseconds, so it shows only once it has lasted.
-function SubmittingRow({ entry }: { entry: QueueEntry }) {
-  const [shown, setShown] = useState(false);
+// The submitting entries that have lasted 300 ms. Every Send passes through `submitting` and C3 acknowledges within
+// milliseconds, so a fresh one is not shown (nor does it make the list appear); a timer re-renders when one has lasted.
+function useLastingSubmissions(entries: readonly QueueEntry[]): ReadonlySet<string> {
+  const [lasting, setLasting] = useState<ReadonlySet<string>>(() => new Set());
+  const fresh = entries.filter((e) => e.state === 'submitting' && !lasting.has(e.queueId));
+  const key = fresh.map((e) => `${e.queueId}@${e.submittedAt ?? ''}`).join(' ');
   useEffect(() => {
-    const since = entry.submittedAt ? Date.parse(entry.submittedAt) : Date.now();
-    const timer = setTimeout(() => setShown(true), Math.max(0, SUBMITTING_VISIBLE_MS - (Date.now() - since)));
-    return () => clearTimeout(timer);
-  }, [entry.submittedAt]);
-  if (!shown) return null;
+    if (fresh.length === 0) return;
+    const timers = fresh.map((e) => {
+      const since = e.submittedAt ? Date.parse(e.submittedAt) : Date.now();
+      return setTimeout(() => setLasting((s) => new Set(s).add(e.queueId)), Math.max(0, SUBMITTING_VISIBLE_MS - (Date.now() - since)));
+    });
+    return () => timers.forEach(clearTimeout);
+    // `key` names exactly the fresh entries and their submission times
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+  return lasting;
+}
+
+function SubmittingRow({ entry }: { entry: QueueEntry }) {
   return (
     <li data-queue-state="submitting" className="flex min-w-0 items-center gap-2 px-2.5 py-1.5 text-fg-muted">
       <span aria-hidden className="size-3 shrink-0 animate-spin rounded-full border border-border-strong border-t-accent" />
@@ -87,7 +98,9 @@ function SubmittingRow({ entry }: { entry: QueueEntry }) {
 export function QueueList({ appSessionId, queue, sessionId, cwd, client = ipc }: QueueListProps) {
   const actions = useQueueActions(appSessionId, client);
   const [editing, setEditing] = useState<string | null>(null);
-  const listed = queue.entries.filter((e) => e.state !== 'released');
+  const lasting = useLastingSubmissions(queue.entries);
+  // what is shown decides whether the list is: queued entries (the uncertain head among them) and lasting submissions
+  const listed = queue.entries.filter((e) => e.state === 'queued' || (e.state === 'submitting' && lasting.has(e.queueId)));
   if (listed.length === 0) return null;
   const waiting = listed.filter((e) => e.state === 'queued').length;
   const uncertain = listed.some((e) => e.uncertain);

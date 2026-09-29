@@ -125,6 +125,19 @@ describe('queue list renders every entry state', () => {
     expect(screen.getByText('message q-1')).toBeTruthy();
   });
 
+  it('renders nothing for a fresh submitting entry, and its row once it has lasted 300 ms', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: false });
+    const now = new Date('2026-09-29T10:00:00.000Z');
+    vi.setSystemTime(now);
+    const { client } = bridge();
+    const { container } = render(<QueueList appSessionId={APP} queue={queue([entry('q-s', { state: 'submitting', submittedAt: now.toISOString() })])} sessionId={null} cwd="/repo" client={client} />);
+    expect(container.innerHTML).toBe(''); // every Send passes through submitting: no empty box flashes
+    await act(async () => void vi.advanceTimersByTime(299));
+    expect(container.innerHTML).toBe('');
+    await act(async () => void vi.advanceTimersByTime(1));
+    expect(screen.getByRole('region', { name: 'Queued messages' }).textContent).toContain('Sending…');
+  });
+
   it('renders nothing when nothing waits', () => {
     const { client } = bridge();
     const { container } = render(<QueueList appSessionId={APP} queue={queue([entry('q-0', { state: 'released' })], { paused: true, pauseReason: 'interrupt' })} sessionId={null} cwd="/repo" client={client} />);
