@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { AppSessionId, MessageUuid, SessionId } from '@shared/graph/ids';
+import type { AppSessionId, AttentionId, MessageUuid, RequestId, SessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import { SessionRecordSchema } from '@shared/graph/session';
 import { sessionIdFor, summary, tempDir } from '../../../test/support/index-fixture';
@@ -209,6 +209,21 @@ describe('session records in the index', () => {
       (id: AppSessionId) => index.sessions.update(id, { title: { text: 'Mine', source: 'user' } }),
       (id: AppSessionId) => index.sessions.markSeen(id, { messageUuid: null, at: '2026-09-28T10:00:00.000Z' }),
       (id: AppSessionId) => index.sessions.update(id, { archived: true }),
+      (id: AppSessionId) =>
+        index.attention.replaceForSession(id, [
+          {
+            id: 'att-1' as AttentionId,
+            appSessionId: id,
+            sessionId: null,
+            kind: 'permission',
+            request: { requestId: 'req-1' as RequestId, toolUseId: null, taskId: null, agentId: null },
+            summary: 'Allow?',
+            createdAt: '2026-09-28T10:00:00.000Z',
+            state: 'pending',
+            stateChangedAt: '2026-09-28T10:00:00.000Z',
+            expiresAt: null,
+          },
+        ]),
     ]) {
       const s2 = summary();
       const marked = index.sessions.upsertFromSummary(s2).record;
@@ -255,7 +270,8 @@ describe('session records in the index', () => {
 
     // B's first summary fills the record; A's custom title was the engine's, so the MAWS rename holds.
     const next = index.sessions.upsertFromSummary(summary({ sessionId: b, customTitle: null, lastRecordAt: '2026-09-28T11:00:00.000Z' }));
-    expect(next).toMatchObject({ created: false, record: { appId, title: { text: 'Named in MAWS', source: 'user' } } });
+    // A first sighting of the new transcript, not an advance: last_record_at was cleared with the old transcript's facts.
+    expect(next).toMatchObject({ created: false, advanced: false, record: { appId, title: { text: 'Named in MAWS', source: 'user' } } });
   });
 
   it('a rebind clears the old transcript\'s engine titles and text, so no two rows carry its title', () => {

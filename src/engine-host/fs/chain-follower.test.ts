@@ -351,6 +351,69 @@ describe('follows the leaf across a rewind', () => {
   });
 });
 
+// The M7 acceptance transcript (claude 2.1.284 in a terminal): APPLE, BANANA, `/rewind` to before BANANA, then a new
+// prompt. The interactive engine writes no `rewound` anchor; the new prompt's record simply parents onto the APPLE
+// turn's last record (`8eb6beb3`, its `turn_duration`). Lines 1–48 end at that turn; the file's later lines are the
+// same session's renames and a resume (item 7), all appended on the rewound chain.
+describe('a terminal rewind without an anchor', () => {
+  const TERMINAL = 'a76ad588-e4b4-4a99-bf4e-69287514916f' as SessionId;
+  const TERMINAL_LINES = linesOf(join(TRANSCRIPT_FIXTURE_DIR, 'rewind-terminal.jsonl'));
+  const BANANA_TURN = ['7b39835b', 'd567fa97', 'ad2a15d2', '873e11da', '832711e7', 'db3e5073'];
+  const follow = async (lines: string[], holders: number) => {
+    const out = new Collector();
+    const follower = new ChainFollower(new MemoryFileReader(joined(lines)), TERMINAL, null, out.sink, { holders: () => holders });
+    await follower.start();
+    return { follower, out };
+  };
+
+  it('with one live holder, a new prompt parented at a turn boundary is one boundary.rewind: no retraction, no notice', async () => {
+    const { follower, out } = await follow(TERMINAL_LINES.slice(0, 48), 1);
+    expect(out.of('boundary.rewind').map((e) => ({ ...e, targetMessageUuid: short(e.targetMessageUuid), precedingAssistantUuid: short(e.precedingAssistantUuid) }))).toEqual([
+      expect.objectContaining({ targetMessageUuid: '7b39835b', precedingAssistantUuid: '2de7ede4', prefillText: null }),
+    ]);
+    expect(out.of('boundary.retraction')).toEqual([]);
+    expect(out.of('notice.posted')).toEqual([]);
+    const state = follower.snapshot();
+    expect(state.chain).toHaveLength(26);
+    expect(short(state.leaf)).toBe('c25b804b');
+    expect(state.chain.map(short)).not.toEqual(expect.arrayContaining(['7b39835b']));
+    expectWellFormed(out.events());
+    // The whole file (the later renames and the resume extend the rewound chain): still exactly one boundary of any kind.
+    const whole = await follow(TERMINAL_LINES, 1);
+    expect(whole.out.of('boundary.rewind')).toHaveLength(1);
+    expect(whole.out.of('boundary.retraction')).toEqual([]);
+    expect(whole.out.of('notice.posted').filter((e) => e.key === 'transcript_branch')).toEqual([]);
+    expect(short(whole.follower.snapshot().leaf)).toBe('fa24f6e9');
+  });
+
+  it('with two live holders, or none, the same branch is a second writer: the retraction and the notice', async () => {
+    for (const holders of [2, 0]) {
+      const { follower, out } = await follow(TERMINAL_LINES.slice(0, 48), holders);
+      expect(out.of('boundary.rewind')).toEqual([]);
+      expect(out.of('boundary.retraction').map((e) => [e.reason, e.retractedMessageUuids.map(short)])).toEqual([['transcript_branch', BANANA_TURN]]);
+      expect(out.of('notice.posted').map((e) => e.key)).toEqual(['transcript_branch']);
+      expect(short(follower.snapshot().leaf)).toBe('c25b804b');
+    }
+  });
+
+  it('with one live holder, a prompt parented mid-turn is still a second writer', async () => {
+    // Re-parented onto the APPLE turn's first assistant record (its thinking block), which another assistant record follows.
+    const [boundary, inside] = [fullTerminal('8eb6beb3'), fullTerminal('77c649cb')];
+    const midTurn = TERMINAL_LINES.slice(0, 48).map((l) => (l.includes('"uuid":"040727ec') ? l.replace(`"parentUuid":"${boundary}"`, `"parentUuid":"${inside}"`) : l));
+    expect(midTurn[42]).toContain(`"parentUuid":"${inside}"`);
+    const { out } = await follow(midTurn, 1);
+    expect(out.of('boundary.rewind')).toEqual([]);
+    expect(out.of('boundary.retraction')).toHaveLength(1);
+    expect(out.of('notice.posted').map((e) => e.key)).toEqual(['transcript_branch']);
+  });
+
+  function fullTerminal(prefix: string): string {
+    const found = TERMINAL_LINES.map((l) => JSON.parse(l) as { uuid?: string }).find((r) => r.uuid?.startsWith(prefix));
+    if (!found?.uuid) throw new Error(`no record ${prefix}`);
+    return found.uuid;
+  }
+});
+
 describe('survives torn tails and rewrites', () => {
   const TORN = readFileSync(join(TRANSCRIPT_FIXTURE_DIR, 'torn-tail.jsonl'));
   const TORN_RECORDS = loadTranscriptFixture('torn-tail');

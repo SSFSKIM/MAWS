@@ -486,6 +486,47 @@ describe('a followed session backfills, then tails its transcript', () => {
     expect(delivered().slice(before).every((e) => e.sessionId === S1)).toBe(true);
   });
 
+  it('a rebind while the old follower is still starting: a snapshot asked right after never joins the old start', async () => {
+    await fixture.addTranscript(REWIND_DIR, REWIND, rewindLines);
+    await fixture.addTranscript('/work/cleared', S1, [JSON.stringify({ type: 'user', uuid: 'n1', parentUuid: null, cwd: '/work/cleared', message: { role: 'user', content: 'after the clear' } })]);
+    const fs = await start();
+    await fs.scan([]);
+    fs.bind([{ sessionId: REWIND, appSessionId: APP }]);
+    const old = fs.eventsSnapshot(APP, null); // its start is in flight (the agent listing is awaited first)
+    const rebinding = fs.bind([{ sessionId: S1 as SessionId, appSessionId: APP }]);
+    const fresh = await fs.eventsSnapshot(APP, null);
+    expect(fresh.events.flatMap((e) => (e.kind === 'user.message' ? [e.content] : []))).toEqual(['after the clear']);
+    await old;
+    await rebinding;
+    expect(fs.state().followed).toEqual([{ appSessionId: APP, agentId: null }]);
+    expect((await fs.eventsSnapshot(APP, null)).events.every((e) => e.sessionId === S1)).toBe(true);
+  });
+
+  it('reads a terminal rewind (no anchor) as boundary.rewind while one registry record holds the session, and as a second writer with none', async () => {
+    const TERMINAL = 'a76ad588-e4b4-4a99-bf4e-69287514916f' as SessionId;
+    const lines = readFileSync(join(TRANSCRIPT_FIXTURE_DIR, 'rewind-terminal.jsonl'), 'latin1').split('\n').filter((l) => l.length > 0).slice(0, 48);
+    await fixture.addTranscript('/private/tmp/maws-accept', TERMINAL, lines.slice(0, 42));
+    await fixture.addRegistryRecord(process.pid, { sessionId: TERMINAL, cwd: '/private/tmp/maws-accept', kind: 'interactive', startedAt: Date.now() });
+    const fs = await start();
+    await fs.scan([]);
+    fs.bind([{ sessionId: TERMINAL, appSessionId: APP }]);
+    await fs.eventsSnapshot(APP, null);
+    await fixture.appendBytes(fixture.transcriptPath(TERMINAL), Buffer.from(lines.slice(42).map((l) => `${l}\n`).join(''), 'latin1'));
+    await expect.poll(() => lastState()?.leafUuid).toMatch(/^c25b804b/);
+    expect(delivered().filter((e) => e.kind === 'boundary.rewind').map((e) => e.kind === 'boundary.rewind' && e.targetMessageUuid.slice(0, 8))).toEqual(['7b39835b']);
+    expect(delivered().filter((e) => e.kind === 'boundary.retraction' || e.kind === 'notice.posted')).toEqual([]);
+
+    // The same branch with nobody holding the session (the record gone): the second writer's retraction and notice.
+    const OTHER = 'app-terminal-unheld' as AppSessionId;
+    await fixture.removeRegistryRecord(process.pid);
+    await expect.poll(() => fs.state().holders.length).toBe(0);
+    await fs.unbind(APP);
+    fs.bind([{ sessionId: TERMINAL, appSessionId: OTHER }]);
+    const snapshot = await fs.eventsSnapshot(OTHER, null);
+    expect(snapshot.events.filter((e) => e.kind === 'boundary.rewind')).toEqual([]);
+    expect(snapshot.events.filter((e) => e.kind === 'notice.posted').map((e) => e.kind === 'notice.posted' && e.key)).toEqual(['transcript_branch']);
+  });
+
   it('follows an app session whose transcript does not exist yet, and picks it up when it appears', async () => {
     const fs = await start();
     fs.bind([{ sessionId: REWIND, appSessionId: APP }]);

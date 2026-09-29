@@ -82,6 +82,7 @@ export interface FollowOptions {
   agent: { agentId: AgentId; parentToolUseId: ParentToolUseId | null } | null;
   reader: FileReader;
   subagents?: SubagentLookup;
+  holders?: () => number; // the session's live holders now, for the terminal-rewind rule
   emit: HostEmit;
 }
 
@@ -124,7 +125,7 @@ export class Follow {
             return; // the watcher's re-summary carries head and tail facts to main
         }
       },
-      { subagents: options.subagents },
+      { subagents: options.subagents, holders: options.holders },
     );
     this.started = this.follower.start();
   }

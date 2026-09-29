@@ -192,9 +192,16 @@ export class FsService {
       this.bindings.bind(sessionId, appSessionId);
     }
     // The stale followers leave now, before anything awaits, so a snapshot asked the moment this returns follows the new
-    // transcript rather than answering the old one; followers still starting are dealt with once they have started.
-    const followed = new Set([...moved].filter((appSessionId) => this.dropStaleFollows(appSessionId)));
-    return Promise.all([...moved].map((appSessionId) => this.refollow(appSessionId, followed.has(appSessionId)))).then(() => undefined);
+    // transcript rather than answering or joining the old one. A follower still starting was started under the old id:
+    // its key is released at once, and when it resolves `ensureFollow` stops it instead of storing it.
+    return Promise.all(
+      [...moved].map((appSessionId) => {
+        const starts = [...this.starting].filter(([key]) => key.startsWith(`${appSessionId}\0`));
+        for (const [key] of starts) this.starting.delete(key);
+        const followed = this.dropStaleFollows(appSessionId) || starts.some(([key]) => key === followKey(appSessionId, null));
+        return this.refollow(appSessionId, followed, starts.map(([, starting]) => starting));
+      }),
+    ).then(() => undefined);
   }
 
   // Stops the followers of an app id that follow a transcript other than the one it is bound to now; answers whether
@@ -213,11 +220,10 @@ export class FsService {
 
   // Followers of an app id whose engine id changed describe a transcript that is no longer the app session's: they stop,
   // and the session's own is started again on the transcript the app id is bound to now, if any.
-  private async refollow(appSessionId: AppSessionId, followed: boolean): Promise<void> {
-    await Promise.allSettled([...this.starting].filter(([key]) => key.startsWith(`${appSessionId}\0`)).map(([, starting]) => starting));
-    const stillStarting = this.dropStaleFollows(appSessionId);
+  private async refollow(appSessionId: AppSessionId, followed: boolean, staleStarts: Promise<FollowEntry>[]): Promise<void> {
     const current = this.bindings.sessionIdOf(appSessionId);
-    if ((followed || stillStarting) && current !== null) await this.ensureFollow(appSessionId, null, () => this.followSession(appSessionId, current));
+    if (followed && current !== null) await this.ensureFollow(appSessionId, null, () => this.followSession(appSessionId, current));
+    await Promise.allSettled(staleStarts); // each stops itself on resolving (ensureFollow)
   }
 
   // Replay runs (M5) bind their ids here and answer the snapshot for them from the runner's materialised events.
@@ -321,17 +327,19 @@ export class FsService {
     if (existing) return Promise.resolve(existing);
     let starting = this.starting.get(key);
     if (!starting) {
+      // A follower whose app id was rebound while it started (fs.bind) follows a transcript that is no longer the app
+      // session's: it is stopped, not stored.
       starting = create().then((entry) => {
-        if (this.stopped) entry.follow.stop();
+        if (this.stopped || entry.sessionId !== this.bindings.sessionIdOf(appSessionId)) entry.follow.stop();
         else this.follows.set(key, entry);
         return entry;
       });
       this.starting.set(key, starting);
       const started = starting;
-      void started.then(
-        () => this.starting.delete(key),
-        () => this.starting.delete(key),
-      );
+      const release = () => {
+        if (this.starting.get(key) === started) this.starting.delete(key); // a start after a rebind holds the key now
+      };
+      void started.then(release, release);
     }
     return starting;
   }
@@ -358,6 +366,7 @@ export class FsService {
       agent,
       reader: this.openReader(() => location.path),
       subagents: subagentLookup(() => this.agents.get(sessionId) ?? [], this.subagentReader),
+      holders: () => this.holders.liveCount(sessionId),
       emit: this.send,
     });
     return { follow, sessionId, agentId: agent?.agentId ?? null, location, workflows: new Map(), workflowIds: new Map(), workflowWork: Promise.resolve() };

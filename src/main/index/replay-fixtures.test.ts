@@ -42,7 +42,7 @@ describe('replay fixtures in the index', () => {
     expect(journals.map((f) => f.path).sort()).toEqual(expected.sort());
     expect(journals.find((f) => f.path.endsWith('pass2/workflow.jsonl'))).toMatchObject({ name: 'workflow', lastPlayedAt: null });
     expect(journals.find((f) => f.name === 'subagent')?.sessionId).toBe('9a1d4262-0b43-46ad-acb9-5982f31d209c');
-    expect(transcripts.map((f) => f.name).sort()).toEqual(['rewind-real', 'subagent-parent', 'torn-tail']);
+    expect(transcripts.map((f) => f.name).sort()).toEqual(['rewind-real', 'rewind-terminal', 'subagent-parent', 'torn-tail']);
     expect(transcripts.find((f) => f.name === 'subagent-parent')?.sessionId).toBe('9a1d4262-0b43-46ad-acb9-5982f31d209c');
     for (const fixture of fixtures) expect(existsSync(fixture.path), fixture.path).toBe(true);
 

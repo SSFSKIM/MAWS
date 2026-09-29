@@ -10,13 +10,14 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, EventId, MessageUuid, ParentToolUseId, SessionId } from '@shared/graph/ids';
 import type { TranscriptSummary } from '@shared/wire/store';
 import { TranscriptRecordSchema, type TranscriptRecord } from '@shared/wire/transcript';
-import { createBackfillContext, eventBase, recordToEvents, type BackfillContext, type SubagentLookup } from './backfill';
+import { createBackfillContext, eventBase, recordToEvents, startsTurn, type BackfillContext, type SubagentLookup } from './backfill';
 
 export interface Skeleton {
   uuid: MessageUuid;
   parentUuid: MessageUuid | null;
   type: string;
   isProgress: boolean;
+  startsTurn: boolean; // a prompt that opens a turn (backfill's `startsTurn`): what the terminal-rewind rule reads boundaries by
   timestamp: string | null;
   offset: number; // byte position of the line (leading NULs included); re-reading [offset, offset + length) yields the record
   length: number;
@@ -57,6 +58,9 @@ export interface FileReader {
 
 export interface ChainFollowerOptions {
   subagents?: SubagentLookup; // the sidecar metas the backfill consults for `Agent` tool uses
+  // The live holders of this transcript's session now (the registry's live records naming it). Absent: none, so an
+  // unanchored branch is never read as a terminal rewind.
+  holders?: () => number;
 }
 
 const PAGE_BYTES = 1024 * 1024;
@@ -101,6 +105,7 @@ class FollowerCore {
   constructor(
     private readonly reader: FileReader,
     readonly ctx: BackfillContext,
+    private readonly holders: () => number = () => 0,
   ) {}
 
   // One chunk read at the cursor: dispatch every complete line, keep the remainder, advance the cursor.
@@ -141,6 +146,7 @@ class FollowerCore {
       parentUuid: typeof record.parentUuid === 'string' ? (record.parentUuid as MessageUuid) : null,
       type: record.type,
       isProgress: record.type === 'progress',
+      startsTurn: startsTurn(record),
       timestamp: typeof record.timestamp === 'string' ? record.timestamp : null,
       offset,
       length: lineBytes.length,
@@ -273,8 +279,11 @@ class FollowerCore {
     const newSet = new Set(newChain);
     const removed = this.chain.filter((member) => !newSet.has(member));
     for (const member of removed) this.emitted.delete(member);
+    const terminal = this.rewind === null ? this.terminalRewind(record, parent) : null;
     if (this.chain.length > 0) {
-      if (this.rewind?.phase === 'unanchored') {
+      if (terminal !== null) {
+        this.produce(null, { ...eventBase(this.ctx, `branch:${uuid}:rewind`), kind: 'boundary.rewind', ...terminal, prefillText: null });
+      } else if (this.rewind?.phase === 'unanchored') {
         const targetMessageUuid = removed.find((member) => this.skeletons.get(member)?.type === 'user') ?? null;
         if (targetMessageUuid !== null) {
           this.produce(null, { ...eventBase(this.ctx, `anchor:${this.rewind.anchorOffset}`), kind: 'boundary.rewind', targetMessageUuid, precedingAssistantUuid: this.rewind.leafUuid, prefillText: this.rewind.prefillText });
@@ -294,6 +303,23 @@ class FollowerCore {
       if (member === uuid) this.emit(record, uuid);
       else if (!this.emitted.has(member)) await this.reemit(member);
     }
+  }
+
+  // A terminal `/rewind` (the interactive engine, 2.1.284) writes no anchor: the next prompt simply parents onto the
+  // last record of the turn it rewound to. That shape is read as a rewind only when this record opens a turn, its
+  // parent is on the current chain with a turn-opening prompt right after it (so the parent ended a turn), an assistant
+  // record precedes the parent, and exactly one process holds the session now; otherwise it is the second writer's.
+  private terminalRewind(record: TranscriptRecord, parent: MessageUuid | null): { targetMessageUuid: MessageUuid; precedingAssistantUuid: MessageUuid } | null {
+    if (parent === null || !startsTurn(record) || !this.onChain.has(parent)) return null;
+    const at = this.chain.indexOf(parent);
+    const next = this.chain[at + 1];
+    if (next === undefined || this.skeletons.get(next)?.startsTurn !== true) return null;
+    const precedingAssistantUuid = this.chain
+      .slice(0, at + 1)
+      .reverse()
+      .find((member) => this.skeletons.get(member)?.type === 'assistant');
+    if (precedingAssistantUuid === undefined || this.holders() !== 1) return null;
+    return { targetMessageUuid: next, precedingAssistantUuid };
   }
 
   private emit(record: TranscriptRecord, uuid: MessageUuid): void {
@@ -451,7 +477,7 @@ export class ChainFollower {
   }
 
   private freshCore(): FollowerCore {
-    return new FollowerCore(this.reader, createBackfillContext({ sessionId: this.sessionId, agent: this.agent, subagents: this.options.subagents }));
+    return new FollowerCore(this.reader, createBackfillContext({ sessionId: this.sessionId, agent: this.agent, subagents: this.options.subagents }), this.options.holders);
   }
 
   private enqueue(task: () => Promise<void>): Promise<void> {

@@ -455,12 +455,13 @@ export class SessionStore {
   }
 
   // A record discovery made and nobody has touched: no live MAWS process, and none of the owner's own state (pin,
-  // archive, a MAWS title, a draft, a last-seen cursor), so yielding it to the process that writes its transcript loses
+  // archive, a MAWS title, a draft, attention items, a last-seen cursor), so yielding it to the process that writes its transcript loses
   // nothing. Anything else is refused rather than deleted.
   private bare(row: SessionRow): boolean {
     if ((JSON.parse(row.holder) as Holder).kind === 'self') return false;
     if (row.pinned === 1 || row.archived === 1 || row.title_override !== null || row.last_seen_uuid !== null || row.last_seen_at !== null) return false;
-    return this.db.get('SELECT 1 AS present FROM drafts WHERE app_session_id = ?', row.app_id) === null;
+    const owned = (table: 'drafts' | 'attention_items') => this.db.get(`SELECT 1 AS present FROM ${table} WHERE app_session_id = ?`, row.app_id) !== null;
+    return !owned('drafts') && !owned('attention_items'); // both would go with the row (ON DELETE CASCADE)
   }
 
   private deleteRow(existing: SessionRecord): void {

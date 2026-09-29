@@ -286,6 +286,17 @@ function systemEvents(record: TranscriptRecord, ctx: BackfillContext, base: Base
   }
 }
 
+// A prompt that opens a turn: a `user` record, not `isMeta`, whose content is text or blocks with no tool result (a
+// tool result continues the turn its tool use is in). The follower's terminal-rewind rule reads turn boundaries by it.
+export function startsTurn(record: TranscriptRecord): boolean {
+  if (record.type !== 'user' || record.isMeta === true) return false;
+  const content = messageContent(record);
+  if (typeof content === 'string') return true;
+  if (!Array.isArray(content)) return false;
+  const blocks = content.filter(isContentBlock);
+  return blocks.length > 0 && blocks.every((block) => block.type !== 'tool_result');
+}
+
 function messageContent(record: TranscriptRecord): unknown {
   return (record.message as { content?: unknown } | undefined)?.content;
 }

@@ -98,6 +98,12 @@ export class HolderRegistry {
     return this.held.get(sessionId)?.holder ?? NONE;
   }
 
+  // How many live processes hold this session, as last checked (one per pid, not the badge's newest-wins projection):
+  // the chain follower's terminal-rewind rule needs exactly one.
+  liveCount(sessionId: SessionId): number {
+    return this.live.filter((record) => record.sessionId === sessionId).length;
+  }
+
   // Every session with a live holder.
   holders(): { sessionId: SessionId; holder: Holder }[] {
     return [...this.held].map(([sessionId, { holder }]) => ({ sessionId, holder }));
