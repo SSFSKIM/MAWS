@@ -683,7 +683,7 @@ describe('plan outcomes map to the wire', () => {
     transport.push({ type: 'result', subtype: 'success', session_id: 's', is_error: false, duration_ms: 1, num_turns: 1, total_cost_usd: 0, usage: {}, permission_denials: [], terminal_reason: 'completed', origin: { kind: 'human' } });
     await flush();
     await flush();
-    const after = transport.writes.slice(before).filter((w) => !(w.type === 'control_request' && w.request.subtype === 'get_status'));
+    const after = transport.writes.slice(before).filter((w) => !(w.type === 'control_request' && ['get_status', 'get_context_usage'].includes(w.request.subtype)));
     expect(after).toMatchObject([
       { type: 'control_request', request: { subtype: 'set_permission_mode', mode: 'auto' } },
       { type: 'user', message: { content: '/clear' }, origin: { kind: 'human' } },

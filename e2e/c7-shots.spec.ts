@@ -66,12 +66,13 @@ const jsonl = (path: string) =>
     .split('\n')
     .map((line) => JSON.parse(line) as { seq: number; direction: string; at: string; frame: Record<string, unknown> });
 
-// One human turn, then two `get_context_usage` reads answered as reads.jsonl recorded them (one per theme's popover).
+// One human turn, then three `get_context_usage` reads answered as reads.jsonl recorded them: the one C3's session
+// issues at the turn's end (the status line's `ctx`), then one per theme's popover.
 function liveJournal(): string {
   const rows = jsonl(turnsJournal(scratch, 'shots-live', 1));
   const reads = jsonl(join(REPO_ROOT, 'spikes/protocol-probe/fixtures/reads.jsonl')).filter((r) => r.seq === 56 || r.seq === 57);
   let seq = rows.at(-1)!.seq;
-  for (let k = 0; k < 2; k++) for (const r of reads) rows.push({ ...r, seq: ++seq });
+  for (let k = 0; k < 3; k++) for (const r of reads) rows.push({ ...r, seq: ++seq });
   const path = join(scratch, 'shots-live.jsonl');
   writeFileSync(path, rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
   return path;

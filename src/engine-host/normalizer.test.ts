@@ -496,3 +496,34 @@ describe('normaliser: meta rows, system subtypes and the unknown', () => {
     expect(warn).toHaveBeenCalledWith(expect.objectContaining({ event: 'unknown_denial_kind' }));
   });
 });
+
+describe('normaliser: context.sample (debt wave 3)', () => {
+  // pass3/context-sample seq 51 and 53: the read C3's session issues at a turn's end, and the engine's answer
+  const journal = loadJournal('pass3', 'context-sample');
+  const request = journal.find((r) => r.seq === 51)!.frame as { request_id: string; request: { subtype: string } };
+  const recorded = (journal.find((r) => r.seq === 53)!.frame as { response: { response: Record<string, unknown> } }).response.response;
+  const answer = (payload: unknown, requestId = request.request_id) => inRow({ type: 'control_response', response: { subtype: 'success', request_id: requestId, response: payload } });
+
+  it("turns a get_context_usage answer into context.sample with the engine's figures", () => {
+    expect(request.request.subtype).toBe('get_context_usage');
+    const events = feed(make(), [outRow(request), answer(recorded)]);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      kind: 'context.sample', seq: 2, parentToolUseId: null, agentId: null,
+      totalTokens: 30304, maxTokens: 200000, percentage: 15, autoCompactThreshold: 167000, isAutoCompactEnabled: true, model: 'claude-haiku-4-5-20251001',
+    });
+  });
+
+  it('samples nothing from an error, an answer without the figures, or an answer to another read', () => {
+    expect(feed(make(), [outRow(request), inRow({ type: 'control_response', response: { subtype: 'error', request_id: request.request_id, error: 'boom' } })])).toEqual([]);
+    expect(feed(make(), [outRow(request), answer({})])).toEqual([]); // a replay's empty answer to a read it never recorded
+    const usage = { type: 'control_request', request_id: 'r-usage', request: { subtype: 'get_usage' } };
+    expect(feed(make(), [outRow(usage), answer(recorded, 'r-usage')])).toEqual([]);
+  });
+
+  it('a missing auto-compact threshold samples as null', () => {
+    const rest: Record<string, unknown> = { ...recorded };
+    delete rest.autoCompactThreshold;
+    expect(feed(make(), [outRow(request), answer(rest)])[0]).toMatchObject({ kind: 'context.sample', autoCompactThreshold: null });
+  });
+});

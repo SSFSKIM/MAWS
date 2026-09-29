@@ -22,7 +22,7 @@ import type { ControlRequestFrame, UserInputFrame } from '@shared/wire/frames';
 import type { JournalDirection, JournalRow } from '@shared/wire/journal';
 import { BashMode } from './bash-mode';
 import { DECLARED_DIALOG_KINDS, PermissionBroker } from './broker';
-import { endSession, getStatus, initialize, interrupt, setPermissionMode } from './controls';
+import { endSession, getContextUsage, getStatus, initialize, interrupt, setPermissionMode } from './controls';
 import { EMPTY_GRANTS, reapply, recordFromResponse, type GrantSnapshot } from './grants';
 import { HostHookRegistry } from './host-hooks';
 import { RELAY_URL, spawnMeta, type LaunchPlan } from './launch';
@@ -638,6 +638,7 @@ export class EngineSession {
         // the queue first: while a host sequence (clear and implement) still holds the session, it releases nothing
         this.queue.onTurnEnded(event).catch((error: unknown) => this.log(`queue release failed: ${messageOf(error)}`));
         if ((event.origin === 'human' || event.origin === null) && this.processState === 'ready') void this.verifyGateway();
+        if (this.processState === 'ready') void this.sampleContext();
         this.advanceClear('turn_ended');
       } else if (event.kind === 'command.lifecycle') {
         this.queue.onLifecycle(event);
@@ -673,6 +674,18 @@ export class EngineSession {
       this.notice('gateway:mismatch', this.plan.gateway === 'gateway' ? `This session is not routed through ClaudeUsage: get_status reports ${baseUrl ?? 'no custom base URL'}.` : `This direct session reports a custom base URL (${baseUrl}).`);
     }
     this.touch();
+  }
+
+  // The status line's `ctx` after every turn (debt wave 3): the engine's context read, whose answer the normaliser turns
+  // into `context.sample` from its journal row; a failed read samples nothing and the last sample stands.
+  private async sampleContext(): Promise<void> {
+    const client = this.client;
+    if (!client) return;
+    try {
+      await getContextUsage(client, { detail: 'summary' });
+    } catch (error) {
+      this.log(`get_context_usage failed: ${messageOf(error)}`);
+    }
   }
 
   // Plan outcome "clear context and implement" (Interfaces, Broker): after the plan turn's result, restore the pre-plan

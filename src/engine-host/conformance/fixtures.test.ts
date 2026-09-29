@@ -45,7 +45,8 @@ describe('normaliser replays every probe fixture into the X1 graph', () => {
     // home directory's session-only trust and its unattested control, the exact-key check, the read-only permission round trip)
     const c10 = ['fork-pinned-id-fork', 'fork-pinned-id-start', 'home-trust-session-only', 'home-trust-unattested', 'read-only-permission', 'trust-bootstrap-recorded', 'trust-exact-key'];
     // C10 end
-    expect(listJournals('pass3')).toEqual(['engine-turn-release', 'fork-worktree-fork', 'fork-worktree-resume-in-b', 'fork-worktree-start', 'plan-outcomes', 'rewind-files', 'steer-next', 'steer-now', 'steer-now-unheld', 'workspace-diff-branch', 'workspace-diff-dirty', ...c10].sort());
+    const wave3 = ['context-sample']; // debt wave 3: the turn-end context read
+    expect(listJournals('pass3')).toEqual(['engine-turn-release', 'fork-worktree-fork', 'fork-worktree-resume-in-b', 'fork-worktree-start', 'plan-outcomes', 'rewind-files', 'steer-next', 'steer-now', 'steer-now-unheld', 'workspace-diff-branch', 'workspace-diff-dirty', ...c10, ...wave3].sort());
   });
 
   for (const pass of FIXTURE_PASSES) {
@@ -334,6 +335,13 @@ describe('normaliser: per-fixture graph facts (C2 findings restated)', () => {
     for (const e of events) expect(SessionEventSchema.safeParse(e).success).toBe(true);
   });
 
+  it('pass3/context-sample (debt wave 3): the read after each turn yields context.sample with the figures the engine answered', async () => {
+    const { events } = await run('pass3', 'context-sample');
+    const samples = events.filter((e) => e.kind === 'context.sample');
+    expect(samples.map((e) => e.seq)).toEqual([53, 148]); // the answers to the reads at seq 51 and 146, each after its turn's result (seq 50, 145)
+    for (const sample of samples) expect(sample).toMatchObject({ totalTokens: 30304, maxTokens: 200000, percentage: 15, autoCompactThreshold: 167000, isAutoCompactEnabled: true, model: 'claude-haiku-4-5-20251001' });
+  });
+
   it("pass3/workspace-diff-*: every get_workspace_diff response parses with the typed schema (C8c's ask)", async () => {
     const dirty = await run('pass3', 'workspace-diff-dirty');
     const branch = await run('pass3', 'workspace-diff-branch');
@@ -512,6 +520,7 @@ describe('normaliser: per-fixture graph facts (C2 findings restated)', () => {
       'task.notification', 'task.started', 'task.updated', 'tasks.snapshot', 'tool.result', 'tool.safeguard', 'tool.use', 'turn.ended', 'turn.started',
       'usage.sample', 'user.message', 'workflow.progress',
       'notice.posted', // C10: the trust notice (pass2/trust-no-attestation, pass3/trust-exact-key)
+      'context.sample', // debt wave 3: a get_context_usage answer (pass1/reads seq 57, pass3/context-sample)
     ].sort());
     void kinds;
   });
