@@ -5,7 +5,7 @@
 // (`<CLAUDE_CODE_TMPDIR or /tmp>/claude-<uid>`, SPEC 20; C8's ask), is read, so the renderer cannot turn the command
 // into a general file reader; a symlink is judged by its target. Reads are bounded. Read-only: flag 'r' only.
 import { lstat, open, realpath, type FileHandle } from 'node:fs/promises';
-import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path';
+import { basename, dirname, isAbsolute, join, normalize, resolve, sep } from 'node:path';
 import type { FsReadSpillInput, FsReadSpillOutput } from '@shared/ipc/schema/fs';
 import type { StorePaths } from './paths';
 import { isMissing } from './sidecars';
@@ -14,7 +14,9 @@ export const SPILL_DEFAULT_LENGTH = 1024 * 1024;
 const OUTSIDE = 'path outside the engine store';
 
 export async function readSpill(paths: StorePaths, { path, offset = 0, length = SPILL_DEFAULT_LENGTH }: FsReadSpillInput): Promise<FsReadSpillOutput> {
-  if (!isAbsolute(path)) throw new Error(OUTSIDE);
+  // The engine reports spill paths clean and absolute; anything else is refused before the disk is touched, since the
+  // kernel resolves `/X/..` only when `/X` exists, so a `..` segment would reveal whether an outside name exists.
+  if (!isAbsolute(path) || normalize(path) !== path) throw new Error(OUTSIDE);
   const lexicalRoots = [paths.projects, paths.tasks, paths.jobs, paths.taskOutput].map((root) => resolve(root));
   const roots = [...lexicalRoots, ...(await Promise.all(lexicalRoots.map((root) => realpath(root).catch(() => null)))).filter((root) => root !== null)];
   let real: string;

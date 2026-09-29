@@ -135,6 +135,15 @@ describe('fs.readSpill reads engine artifacts by the path the engine reported', 
     } finally {
       await chmod(locked, 0o755);
     }
+    // A `..` segment is refused before the disk is touched: `/X/..` resolves only when `/X` exists, so an existing and a
+    // missing outside X must answer alike, for a present spill and a missing one.
+    const beside = dirname(outsideDir); // the store's config home and both X's lie in it
+    expect(spill.startsWith(beside)).toBe(true);
+    for (const x of [outsideDir, join(beside, 'no-such-dir')]) {
+      await expect(readSpill(fixture.paths, { path: `${x}/..${spill.slice(beside.length)}` })).rejects.toThrow(new RegExp(`^${OUTSIDE}$`));
+      await expect(readSpill(fixture.paths, { path: `${x}/..${join(dirname(spill), 'nosuch.txt').slice(beside.length)}` })).rejects.toThrow(new RegExp(`^${OUTSIDE}$`));
+    }
+    await expect(readSpill(fixture.paths, { path: `${dirname(spill)}/./gone.txt` })).rejects.toThrow(new RegExp(`^${OUTSIDE}$`));
     // A missing name under a missing in-store directory is still "not found".
     const deep = join(dirname(spill), 'missing-dir', 'gone.txt');
     await expect(readSpill(fixture.paths, { path: deep })).rejects.toThrow(`spill not found: ${deep}`);
