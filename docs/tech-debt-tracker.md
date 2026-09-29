@@ -2,6 +2,15 @@
 
 Real but non-blocking findings that were deliberately not fixed when found. Each entry names the owner child, the evidence, and what would close it. Items are removed when closed, with the closing commit noted in the charter's Decision Log if the closure changed a contract.
 
+## Schedule (owner's ruling 2026-09-28: debt is fixed in waves, not accumulated)
+
+After each merge the architect triages every row into one of three bins. A row never sits in the table without one.
+
+- **Wave 1**, dispatched right after C5 merges, one worker in an isolated worktree off master, one commit per row, `pnpm verify`, bounded review, merged before C6's rebase completes or rebased over it: the `App.test.tsx` flake; the `panel.<appSessionId>` key on `session.removed`; the 960 px clamp; the `will-quit` order; raw `<command-name>` titles; the `fs.readSpill` not-found oracle; the dropped-before-`started` queue release and its wording (before C7 builds on the queue); the replay transport's host-minted cancels; `session.memoryAppend` creating the folder; `INTERRUPT_MARKER` exported from C3; the git watcher's bounded items (counts tied to the requesting window, untracked directories); `SessionRecord.gateway.routed` as `boolean | null` (X1 amended: null is "unknown", the state of every discovered session; C11 reads it); C3 emitting the initial `starting` status before a launch's first rows (C5's second re-check, Minor).
+- **Wave 2**, dispatched right after C9 merges (its code is not on master before that): the X2 registry split by namespace for the preload and renderer bundles; `foreground.ts`'s basename fallback; `TerminalView`'s stale `focusRequest` counter; the first terminal's 0.5 s wait (start the env capture from main at launch); the spaced latency variant.
+- **Task lines in a child's brief** (the executor is told at dispatch, and the row closes with that child): C10 gets the `self` holder reset at app start (D-16), a read-only `can_use_tool` probe in M1 under the scratch home, and the re-run of C5's acceptance item 10 once `session.create` gives a replay run a record; C11 gets the palette reveal-focus reproduction and the powerline glyphs (a Nerd Font in the font setting); C8a gets nothing from this table today.
+- **Deferred with a reason**: the stopped-but-unarchived event rings (C12's memory budget decides the cap); OSC 8 after an exact reattach (a serialize-addon limit, by design); the C4 branch's intermediate commits that do not typecheck (history, nothing to fix; kept for anyone bisecting).
+
 | Logged | Owner | Item | Evidence | Closes when |
 |---|---|---|---|---|
 | 2026-09-28 | C1 | The renderer echo test `src/renderer/src/App.test.tsx` is flaky under full-suite load: fails intermittently, passes in isolation and on the untouched base. | Reported by C5's executor during M1 on `worktree-agent-a3f9c764b1656a780`; reproduced on the C1 base with the full suite. | The test waits on the echo through a deterministic signal instead of a timing window, or moves to the Playwright smoke where the real IPC round-trip is observed. Owner: C12 finish, unless a wave-2 child touches the file first. |
