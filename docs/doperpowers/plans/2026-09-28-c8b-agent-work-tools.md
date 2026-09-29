@@ -606,6 +606,15 @@ Ready to paste into the charter's C8 section under "**Residue decisions (C8b, 20
   - O2, adopted: C8b-marked lines in M4 read the Log round-trip case's instance ids through `agents.instances(toolId)` over the host's `instanceIds()`/`instanceOf`, its `addTool('log')` calls passing `{ params: { path: null, title: 'Log' } }`, its assertions unchanged; recorded as a C8a test amended by C8b under the `pins()` fix precedent; no page flag (Harness API, repository map, M4's Touches and decisions).
   Date/Author: 2026-09-29, the architect's rulings, applied by the refresh pass author.
 
+- Decision (execution pre-flight, 2026-09-29, the controller at master `1470504`), one line each:
+  - M1 runs as two executor tasks in order: task 1 is Gate G1 alone (the three scenarios, their fixtures, the sidecar copy, the C8b block of `fixtures.test.mjs` with the pass-3 integrity loop in C8c's stated form, since C8c has not merged at dispatch, and the verdicts in Surprises); task 2 is M1's code (the models, the stores, the client, `copy.ts`, the `events.ts` block), dispatched after task 1's verdicts are folded in, so `relayText`, `matchesReceipt` and the foreground reason are coded to R1 as the document orders. The milestone and its tick stay one.
+  - Every probe runs under a scratch `CLAUDE_CONFIG_DIR` (a fresh directory under `/tmp`, passed through the probe's `env`) with the relay's `ANTHROPIC_BASE_URL` and token as the shell carries them; any disk read of the probe's session (the receipt in `agent-<id>.jsonl`, R5's sidecar copy) resolves under that directory as `scenarios/subagent.mjs:7` does, never `homedir()/.claude` (pass 2's `transcriptPath` reads the owner's home and is not used). The owner's `~/.claude` and `~/.claude.json` are never written.
+  - `spikes/protocol-probe/findings-pass3-agent-work.md`: agents in this environment cannot create new `.md` files, so the findings' full text is written into Surprises & Discoveries under a heading naming the file, and the architect writes the file from it at merge; acceptance item 1 reads it there until then.
+  - Live acceptance item 4 is run as C7's was: Playwright over the built app with a scratch `CLAUDE_CONFIG_DIR` and scratch repositories through the relay (`e2e/support/c7-live.ts`, `test/live/support/live.ts`), never by driving the owner's desktop; the development-only `window.__maws_agents` still ships in the `App.tsx` block. What only a human can judge goes to the owner's hands list in Outcomes.
+  - Per-task and whole-branch reviews run on `general-purpose` agents on opus carrying the reviewer briefs (the gateway is rate limited), logged so in the ledger; the whole-branch review keeps the reviewer-medium brief and focus the verification call names.
+  Rationale: the probes precede tool code by the document's own order; the scratch-home rule and the no-desktop rule are the dispatch's; the `.md` restriction is environmental.
+  Date/Author: 2026-09-29, C8b controller.
+
 ## Outcomes & Retrospective
 
 Pending — written at finish.
