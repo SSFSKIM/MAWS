@@ -9,7 +9,7 @@ import { useSessions } from '../stores/sessions';
 import { useSessionWindows, useUsage, type UsageWindow, type Windows } from '../stores/usage'; // C7: the session's windows and their shapes
 // C7 start
 import { useDirectFallback } from '../statusline/direct-fallback';
-import { resetsInCompact, windowShown } from '../statusline/format';
+import { resetsInCompact, tokens, windowShown } from '../statusline/format'; // tokens: the one formatter, shared with the context popover
 import { ContextPopover, CostPopover, CwdPopover, ModePopover, UsagePopover } from '../statusline/popovers';
 import { USAGE_UNAVAILABLE } from '../statusline/UsagePopover';
 import { LINE_TICK_MS, useNow } from '../statusline/use-now';
@@ -25,8 +25,6 @@ export const REFUSAL_WORDS: Record<AutoModeRefusalCode, string> = {
 
 // macOS homes live under /Users/<name>; the renderer is told no home directory, and needs none for this.
 export const formatCwd = (directory: string): string => directory.replace(/^\/Users\/[^/]+(?=\/|$)/, '~');
-
-const tokens = (n: number) => (n >= 1_000_000 ? `${+(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : `${n}`);
 
 // C7 start: a window reads `5h 53% ↻3h46m` (mockup 04), `5h 0%` once its reset has passed with no new reading, and
 // `5h —` with no reading at all.
