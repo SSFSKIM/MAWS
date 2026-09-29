@@ -227,6 +227,7 @@ export const DIFF = {
 export const EXPORT = {
   copy: 'Copy',
   copied: 'Copied',
+  notCopied: (why: string) => `The export was not copied · ${why}`,
   saveAs: 'Save as…',
   saved: (path: string) => `Saved to ${path}`,
   notSaved: (why: string) => `The export was not saved · ${why}`,

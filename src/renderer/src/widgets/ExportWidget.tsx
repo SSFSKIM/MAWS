@@ -26,7 +26,11 @@ export function present(answer: ExportConversationResponse): ExportView {
 export function ExportBody({ view }: { view: ExportView }) {
   const [done, setDone] = useState<string | null>(null);
   const copy = async () => {
-    await navigator.clipboard.writeText(view.text);
+    try {
+      await navigator.clipboard.writeText(view.text);
+    } catch (error) {
+      return void toast({ level: 'warning', text: EXPORT.notCopied(error instanceof Error ? error.message : String(error)), actions: [], dismissible: true });
+    }
     setDone(EXPORT.copied);
   };
   const save = async () => {
