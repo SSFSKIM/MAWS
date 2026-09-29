@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -51,20 +51,38 @@ describe('memoryAppend (#)', () => {
     const s = await session();
     expect(await memoryAppend(s.session, { text: 'u', target: { kind: 'user', path: null } })).toEqual({ path: join(root, 'home', '.claude', 'CLAUDE.md'), created: false });
     expect(await readFile(join(root, 'home', '.claude', 'CLAUDE.md'), 'utf8')).toBe('# user\n\n- u\n');
-    await mkdir(join(root, 'auto-memory'), { recursive: true }); // a path target's directory must already exist
     const inFolder = join(root, 'auto-memory', 'notes.md');
     expect(await memoryAppend(s.session, { text: 'f', target: { kind: 'path', path: inFolder } })).toEqual({ path: inFolder, created: true });
     expect(await readFile(inFolder, 'utf8')).toBe('\n- f\n');
   });
 
-  it('appends to a plain nested file inside a listed folder whose directory exists, and refuses one whose directory does not', async () => {
+  it('appends to a plain nested file inside a listed folder, creating its missing folders', async () => {
     const s = await session();
     await mkdir(join(root, 'auto-memory', 'topics'), { recursive: true });
     const nested = join(root, 'auto-memory', 'topics', 'build.md');
     expect(await memoryAppend(s.session, { text: 'n', target: { kind: 'path', path: nested } })).toEqual({ path: nested, created: true });
     expect(await memoryAppend(s.session, { text: 'm', target: { kind: 'path', path: nested } })).toEqual({ path: nested, created: false });
     expect(await readFile(nested, 'utf8')).toBe('\n- n\n\n- m\n');
-    await expect(memoryAppend(s.session, { text: 'x', target: { kind: 'path', path: join(root, 'auto-memory', 'missing', 'x.md') } })).rejects.toThrow(/not in an existing directory/);
+    const deeper = join(root, 'auto-memory', 'missing', 'deeper', 'x.md');
+    expect(await memoryAppend(s.session, { text: 'x', target: { kind: 'path', path: deeper } })).toEqual({ path: deeper, created: true });
+    expect(await readFile(deeper, 'utf8')).toBe('\n- x\n');
+  });
+
+  it('creates no folder outside a listed folder: not through an in-folder link to outside, not through a dangling link, not beside the folder', async () => {
+    const s = await session();
+    const outside = join(root, 'outside-folders');
+    await mkdir(outside, { recursive: true });
+    await mkdir(join(root, 'auto-memory'), { recursive: true });
+    await symlink(outside, join(root, 'auto-memory', 'portal'));
+    await symlink(join(outside, 'later'), join(root, 'auto-memory', 'dangling'));
+    await expect(memoryAppend(s.session, { text: 'x', target: { kind: 'path', path: join(root, 'auto-memory', 'portal', 'new', 'x.md') } })).rejects.toThrow(/not in an existing directory/);
+    await expect(memoryAppend(s.session, { text: 'x', target: { kind: 'path', path: join(root, 'auto-memory', 'dangling', 'x.md') } })).rejects.toThrow(/not in an existing directory/);
+    await expect(memoryAppend(s.session, { text: 'x', target: { kind: 'path', path: join(root, 'beside', 'x.md') } })).rejects.toThrow(/not in an existing directory/);
+    await expect(readFile(join(outside, 'new', 'x.md'), 'utf8')).rejects.toThrow();
+    await expect(readFile(join(outside, 'later', 'x.md'), 'utf8')).rejects.toThrow();
+    await expect(readFile(join(root, 'beside', 'x.md'), 'utf8')).rejects.toThrow();
+    expect(await readdir(outside)).toEqual([]);
+    expect(await readdir(root)).not.toContain('beside');
   });
 
   // M4 review, re-review and re-review 2: nothing that is a link at the final component is followed, and a parent that
