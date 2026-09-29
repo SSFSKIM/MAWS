@@ -45,7 +45,7 @@ describe('normaliser replays every probe fixture into the X1 graph', () => {
     // home directory's session-only trust and its unattested control, the exact-key check, the read-only permission round trip)
     const c10 = ['fork-pinned-id-fork', 'fork-pinned-id-start', 'home-trust-session-only', 'home-trust-unattested', 'read-only-permission', 'trust-bootstrap-recorded', 'trust-exact-key'];
     // C10 end
-    const wave3 = ['context-sample']; // debt wave 3: the turn-end context read
+    const wave3 = ['context-sample', 'question-deny']; // debt wave 3: the turn-end context read, a question skipped by a deny
     expect(listJournals('pass3')).toEqual(['engine-turn-release', 'fork-worktree-fork', 'fork-worktree-resume-in-b', 'fork-worktree-start', 'plan-outcomes', 'rewind-files', 'steer-next', 'steer-now', 'steer-now-unheld', 'workspace-diff-branch', 'workspace-diff-dirty', ...c10, ...wave3].sort());
   });
 
@@ -223,6 +223,16 @@ describe('normaliser: per-fixture graph facts (C2 findings restated)', () => {
     expect(boundaries).toHaveLength(1);
     expect(boundaries[0]).toMatchObject({ seq: 140, targetMessageUuid: target, prefillText: 'Use the Edit tool to change notes.txt so it says BETA instead of ALPHA.', precedingAssistantUuid: '284cab33-7b4b-474a-8e6b-c6cc0f9f81c8' });
     expect(ofKind(events, 'turn.ended').map((e) => [e.seq, e.terminalReason])).toEqual([[70, 'completed'], [132, 'completed']]);
+  });
+
+  it('pass3/question-deny (debt wave 3): a plain deny skips the question tool, the model reads the denial and the turn completes', async () => {
+    const { events } = await run('pass3', 'question-deny');
+    const [requested] = ofKind(events, 'question.requested');
+    expect(requested).toMatchObject({ seq: 108, questions: [{ question: 'Red or Blue?' }] });
+    // X1 has no declined form: the skip is an answer with no answers, a real answer always names each question
+    expect(ofKind(events, 'question.answered')).toMatchObject([{ seq: 110, requestId: requested!.requestId, answers: {} }]);
+    expect(ofKind(events, 'tool.result').find((e) => e.toolUseId === requested!.toolUseId)).toMatchObject({ seq: 112, isError: true, content: 'Denied by the user in MAWS.', denial: 'permission-rule' });
+    expect(ofKind(events, 'turn.ended')).toMatchObject([{ seq: 154, result: 'success', isError: false, terminalReason: 'completed', resultText: 'SKIPPED' }]);
   });
 
   it('pass3/plan-outcomes: keep planning, implement, then clear and implement (live 3.20)', async () => {
