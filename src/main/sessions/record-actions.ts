@@ -12,7 +12,7 @@ import { EffortSchema } from '@shared/engine/launch-spec';
 import { resolveStorePaths, slugOf } from '../../engine-host/fs/paths';
 import type { ProjectStore } from '../index/projects';
 import { emptyProgress, hostCall, realOrSelf, reservationOf } from './context';
-import { enumerateConversation, type DeletionManifests } from './delete-manifest';
+import { describeConversation, enumerateConversation, type DeletionManifests } from './delete-manifest';
 import { canonicalPath, holderAuthority } from './holders';
 import type { Setup } from './setup-steps';
 
@@ -77,6 +77,13 @@ export async function deleteRecord(
   s.sessions.remove(appSessionId);
   await io.manifests.remove(appSessionId);
   return { status: 'deleted', trashed };
+}
+
+// `session.deletions.preview`: what `session.delete` would move, for its sheet; nothing moves.
+export async function previewDeletion(s: Setup, appSessionId: AppSessionId): Promise<{ transcript: string | null; subagents: number; recordings: number; paths: number }> {
+  const record = recordOf(s, appSessionId);
+  if (record.engineSessionId === null) return { transcript: null, subagents: 0, recordings: 0, paths: 0 };
+  return describeConversation(projectDirOf(s, record), record.engineSessionId);
 }
 
 // The directory of the record's current transcript: its summary's path, else (a `/clear` rebind cleared it until the

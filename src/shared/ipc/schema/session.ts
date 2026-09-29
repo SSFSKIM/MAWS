@@ -406,6 +406,13 @@ const c10Commands = {
   // `session.delete` again; "Keep" drops the manifest and leaves every file that did not move where it is
   'session.deletions.list': { input: z.void(), output: z.strictObject({ manifests: z.array(DeletionManifestSchema) }), owner: 'main' },
   'session.deletions.keep': { input: appSessionC10, output: z.void(), owner: 'main' },
+  // what `session.delete` would move, for its sheet (the transcript, null when already gone; its subagent transcripts;
+  // its recordings; every path); nothing moves
+  'session.deletions.preview': {
+    input: appSessionC10,
+    output: z.strictObject({ transcript: z.string().nullable(), subagents: z.number().int(), recordings: z.number().int(), paths: z.number().int() }),
+    owner: 'main',
+  },
 } as const satisfies Record<`session.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 const c10Events = {
   'session.setup': SetupEventSchema,

@@ -38,6 +38,20 @@ export async function enumerateConversation(projectDir: string, sessionId: Sessi
   return [...recordings, ...rest];
 }
 
+// What the delete sheet names before anything moves: the transcript (null when it is already gone), the subagent
+// transcripts in its sidecar (`<sessionId>/subagents/*.jsonl`), the recordings, and the number of paths in all.
+export async function describeConversation(projectDir: string, sessionId: SessionId): Promise<{ transcript: string | null; subagents: number; recordings: number; paths: number }> {
+  const paths = await enumerateConversation(projectDir, sessionId);
+  let subagents = 0;
+  try {
+    subagents = (await readdir(join(projectDir, sessionId, 'subagents'))).filter((name) => name.endsWith('.jsonl')).length;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
+  const transcript = join(projectDir, `${sessionId}.jsonl`);
+  return { transcript: paths.includes(transcript) ? transcript : null, subagents, recordings: paths.filter((p) => p.endsWith('.cast')).length, paths: paths.length };
+}
+
 // `<userData>/sessions/deletions/<appSessionId>.json`: what a delete meant to move and what it has moved.
 export interface DeletionManifest {
   appSessionId: AppSessionId;

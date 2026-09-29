@@ -544,6 +544,16 @@ describe('session service', () => {
       expect(h.index.sessions.get(record.appId)).toBeNull();
     });
 
+    it('previews what a delete would move: the transcript, its subagent transcripts and its recordings, moving nothing', async () => {
+      const { record, dir, transcript } = conversation();
+      writeFileSync(join(dir, SID, 'subagents', 'agent-a1.jsonl'), '');
+      writeFileSync(join(dir, SID, 'subagents', 'agent-a2.jsonl'), '');
+      writeFileSync(join(dir, SID, 'subagents', 'agent-a2.meta.json'), '{}');
+      expect(await h.service.previewDeletion(record.appId)).toEqual({ transcript, subagents: 2, recordings: 1, paths: 4 });
+      expect(h.trashed).toEqual([]);
+      expect(existsSync(join(h.userData, 'sessions', 'deletions', `${record.appId}.json`))).toBe(false);
+    });
+
     it('lists an interrupted deletion for the session tab, and Keep drops its manifest and leaves the conversation', async () => {
       const { record, dir, transcript } = conversation();
       expect(await h.service.listDeletions()).toEqual([]);

@@ -22,7 +22,7 @@ import { emptyProgress, HostError, hostCall, STOP_WAIT_MS, WATCHDOG_MS, type Ses
 import { DeletionManifests, type DeletionManifest } from './delete-manifest';
 import { checkAdditionalDirectories, checkLocation, sessionDirectoryOf, trustDirectoryOf, type RuleVerdict } from './intent-rules';
 import { readSettings } from './launch-mapping';
-import { archiveRecord, deleteRecord, forkIntentOf, renameRecord, revealablePath } from './record-actions';
+import { archiveRecord, deleteRecord, forkIntentOf, previewDeletion, renameRecord, revealablePath } from './record-actions';
 import { reconcileIntent, retainedWorktree } from './recovery';
 import { removeCreatedWorktree, type Setup } from './setup';
 import { forkRefusal, guardIntentStart, guardResumeStart, type GuardContext, type Guarded } from './start-guards';
@@ -445,16 +445,11 @@ export class SessionService {
     return this.serial(appSessionId, async () => deleteRecord(await this.ready(), { manifests: this.manifests, trash: this.deps.trash }, appSessionId, stopIfLive));
   }
 
-  // A delete interrupted half-way, offered in the session's tab: "Finish deleting" is `session.delete` again, "Keep"
-  // drops the manifest and leaves what did not move where it is.
-  async listDeletions(): Promise<DeletionManifest[]> {
-    await this.ready();
-    return this.manifests.list();
-  }
-
-  keepDeletion(appSessionId: AppSessionId): Promise<void> {
-    return this.serial(appSessionId, async () => this.manifests.remove(appSessionId));
-  }
+  // What a delete would move, for its sheet; a delete interrupted half-way, for the session's tab ("Finish deleting"
+  // is `session.delete` again; "Keep" drops the manifest and leaves what did not move where it is).
+  previewDeletion = async (appSessionId: AppSessionId) => previewDeletion(await this.ready(), appSessionId);
+  listDeletions = async (): Promise<DeletionManifest[]> => this.ready().then(() => this.manifests.list());
+  keepDeletion = (appSessionId: AppSessionId): Promise<void> => this.serial(appSessionId, () => this.manifests.remove(appSessionId));
 
   rename(appSessionId: AppSessionId, title: string): Promise<{ record: SessionRecord; via: 'engine' | 'override' }> {
     return this.serial(appSessionId, async () => renameRecord(await this.ready(), appSessionId, title));
