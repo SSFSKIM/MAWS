@@ -539,6 +539,8 @@ test('floods without loss while the page stays responsive', async ({ maws }) => 
 
     // W1 again with its tab hidden for its first stretch: a hidden terminal acknowledges at most 256 KiB per 250 ms,
     // so the host must pause the pty at the high watermark and hold it paused between ticks. Asserted.
+    await h.call('terminals', 'resetPausedSeen', id); // this phase proves its own pause, not the visible run's
+    expect(await pausedSeen()).toBe(false);
     await h.run(id, `${FOX}; echo W1-HIDDEN-$((6*7))`);
     await h.call('panel', 'selectTab', 'review');
     await expect.poll(pausedSeen, { timeout: 10_000, message: "W1's fox line pauses the pty at the high watermark" }).toBe(true);

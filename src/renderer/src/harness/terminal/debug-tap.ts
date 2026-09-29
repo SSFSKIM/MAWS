@@ -56,6 +56,11 @@ export function countersOf(ptyId: string | null | undefined): StreamCounters | n
 
 export const wasPausedSeen = (ptyId: string | null | undefined): boolean => !!ptyId && pausedSeen.has(ptyId);
 
+// Starts a new observation for one pty: a test phase that must prove its own pause clears what an earlier phase saw.
+export function resetPausedSeen(ptyId: string | null | undefined): void {
+  if (ptyId) pausedSeen.delete(ptyId);
+}
+
 export function ping(ev: { timeStamp: number }): void {
   const waited = Math.round((performance.now() - ev.timeStamp) * 10) / 10;
   const { pings } = useSamples.getState();

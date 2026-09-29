@@ -5,7 +5,7 @@ import type { PtyInfo } from '@shared/ipc/schema';
 import { ipc } from '../../ipc/client';
 import { terminals, type TerminalId, type TerminalInfo } from '../../terminal/registry';
 import type { TerminalProbe } from '../../terminal/renderer';
-import { countersOf, useSamples, wasPausedSeen, type Pings, type StreamCounters } from './debug-tap';
+import { countersOf, resetPausedSeen, useSamples, wasPausedSeen, type Pings, type StreamCounters } from './debug-tap';
 
 export interface TerminalsHarnessApi {
   ready(): Promise<TerminalId[]>; // resolves once the page has re-adopted its ptys (and opened what it opens on load)
@@ -22,6 +22,7 @@ export interface TerminalsHarnessApi {
   selection(id: TerminalId): string;
   counters(id: TerminalId): StreamCounters | null; // every pty.data byte of the terminal's current pty since the page loaded
   pausedSeen(id: TerminalId): boolean; // the host reported the terminal's pty paused in at least one 10 ms sample
+  resetPausedSeen(id: TerminalId): void; // forget earlier samples: the next `pausedSeen` reports pauses from now on
   pings(): Pings;
 }
 
@@ -54,6 +55,7 @@ export function createTerminalsApi(page: HarnessPage): TerminalsHarnessApi {
     selection: (id) => handle(id)?.renderer?.getSelection() ?? '',
     counters: (id) => countersOf(handle(id)?.info.ptyId),
     pausedSeen: (id) => wasPausedSeen(handle(id)?.info.ptyId),
+    resetPausedSeen: (id) => resetPausedSeen(handle(id)?.info.ptyId),
     pings: () => useSamples.getState().pings,
   };
 }
