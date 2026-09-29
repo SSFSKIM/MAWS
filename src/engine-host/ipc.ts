@@ -7,6 +7,7 @@
 // SessionStream. A command naming an `appSessionId` with no session answers the typed `internal` error.
 import type { AppSessionId, RequestId } from '@shared/graph/ids';
 import { AUTO_MODE_REFUSAL_CODES, type AutoModeRefusalCode } from '@shared/graph/enums';
+import { assertSafeAppSessionId } from '@shared/engine/app-session-id';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
 import type { SessionStateStore } from '@shared/engine/session-state-store';
 import type { RelayHealth } from '@shared/engine/relay-health';
@@ -150,6 +151,7 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
   handle('session.status', async ({ appSessionId }) => sessionOf(appSessionId).status());
   handle('session.events', async ({ appSessionId, afterSeq, limit }) => streamOf(appSessionId).snapshot(afterSeq, limit));
   handle('session.stop', async ({ appSessionId, reason }) => {
+    if (reason === 'archive') assertSafeAppSessionId(appSessionId); // archive deletes a directory named after it (M5 review)
     const result = await sessionOf(appSessionId).stop(reason);
     if (reason === 'archive') await store.forget(appSessionId as AppSessionId); // the state file and the journal directory
     return result;
@@ -164,6 +166,7 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
   });
   handle('session.steer', async ({ appSessionId, content }) => sessionOf(appSessionId).steer(content));
   handle('session.queue.list', async ({ appSessionId }) => {
+    assertSafeAppSessionId(appSessionId); // it may read a state file named after it
     const session = table.get(appSessionId as AppSessionId);
     if (session?.queue.recovered) return session.queue.state;
     // no queue loaded in this host (no reservation, or a launch that never became ready): the store's, verbatim, with

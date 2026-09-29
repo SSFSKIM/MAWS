@@ -9,6 +9,7 @@
 import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { AppSessionId } from '@shared/graph/ids';
+import { assertSafeAppSessionId } from '@shared/engine/app-session-id';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
 import type { RelayHealth } from '@shared/engine/relay-health';
 import type { SessionStateStore } from '@shared/engine/session-state-store';
@@ -51,6 +52,7 @@ export function createLauncher(deps: LauncherDeps): (spec: LaunchSpec) => Promis
   const refused = (reason: Extract<LaunchResult, { status: 'refused' }>['reason'], message: string): LaunchResult => ({ status: 'refused', reason, message });
 
   return async (spec) => {
+    assertSafeAppSessionId(spec.appSessionId); // before anything names a file after it (M5 review)
     if (spec.replay !== null && !deps.replayEnabled) return refused('replay_disabled', 'replay launches need MAWS_ENGINE_REPLAY=1');
     const liveNow = deps.table.get(spec.appSessionId);
     if (liveNow && liveNow.lifecycle !== 'exited') return refused('already_live', `process is ${liveNow.lifecycle}`);
@@ -94,5 +96,6 @@ export function createLauncher(deps: LauncherDeps): (spec: LaunchSpec) => Promis
 }
 
 export function journalDir(userData: string, appSessionId: AppSessionId): string {
+  assertSafeAppSessionId(appSessionId);
   return join(userData, 'engine-host', 'journal', appSessionId);
 }

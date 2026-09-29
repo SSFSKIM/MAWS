@@ -124,6 +124,37 @@ describe('x2 deadlines fit the bridge', () => {
 });
 
 describe('engine host X2 surface', () => {
+  // M5 review (Critical): appSessionId becomes a path component and archive deletes recursively, so a traversal-shaped id
+  // is refused before any filesystem access.
+  it('refuses a traversal-shaped appSessionId on launch, archive and queue.list with invalid_input, touching nothing on disk', async () => {
+    const { mkdirSync, readdirSync, writeFileSync, existsSync } = await import('node:fs');
+    const inside = join(userData, 'profile');
+    mkdirSync(inside);
+    writeFileSync(join(userData, 'victim.txt'), 'keep');
+    const spawn = vi.fn();
+    const host = engineHost({ userData: inside, spawn, binaryProbe: async () => OK_BINARY, checkRelay: async () => OK_RELAY, captureEnv: async () => ({ PATH: '/usr/bin' }) });
+    const invalid = new HostCommandError({ code: 'invalid_input', message: 'invalid appSessionId' });
+    // (an empty id never gets here: X1's schema refuses it at the router)
+    for (const bad of ['../..', '..', '.', '../victim', 'a/b', '.hidden', 'x'.repeat(129)]) {
+      await expect(host.handlers.get('session.launch')!({ spec: spec({ appSessionId: bad as AppSessionId }) }), bad).rejects.toEqual(invalid);
+      await expect(host.handlers.get('session.launch')!({ spec: replaySpec(bad, 'spikes/protocol-probe/fixtures/reads.jsonl') }), bad).rejects.toEqual(invalid);
+      await expect(host.handlers.get('session.stop')!({ appSessionId: bad, reason: 'archive' }), bad).rejects.toEqual(invalid);
+      await expect(host.handlers.get('session.queue.list')!({ appSessionId: bad }), bad).rejects.toEqual(invalid);
+    }
+    expect(spawn).not.toHaveBeenCalled();
+    expect(readdirSync(inside)).toEqual([]); // no journal, no state directory was created
+    expect(existsSync(join(userData, 'victim.txt'))).toBe(true);
+    // the store refuses on its own too (defence in depth)
+    const store = new FileSessionStateStore(inside);
+    await expect(store.forget('../..' as AppSessionId)).rejects.toEqual(invalid);
+    await expect(store.saveQueue('../x' as AppSessionId, { entries: [], paused: false })).rejects.toEqual(invalid);
+    expect(readdirSync(userData).sort()).toEqual(['profile', 'victim.txt']);
+    // an ordinary id with dots, dashes and underscores is fine
+    expect(await host.call('session.launch', { spec: replaySpec('app.v2_x-1', 'spikes/protocol-probe/fixtures/reads.jsonl') })).toMatchObject({ status: 'launching' });
+    await until(() => host.statuses('app.v2_x-1').some((st) => st.process === 'ready'), 'ready');
+    await host.ipc.table.shutdown({ graceMs: 0 });
+  });
+
   it('session.launch refuses a replay without MAWS_ENGINE_REPLAY, a protected settings key and a pinned id on a plain resume, without spawning', async () => {
     const spawn = vi.fn();
     const off = engineHost({ replayEnabled: false, spawn });

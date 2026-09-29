@@ -3,6 +3,7 @@
 // `{ version: 1, queue, grants, launchSpec }`, written to a temp file and renamed so a crash leaves the old file or the
 // new one, never half of either. Operations on one session run strictly in the order they were issued (one chain per
 // session, loads included), so a save issued at a process's exit is visible to the load of the resume that follows.
+import { assertSafeAppSessionId } from '@shared/engine/app-session-id';
 import { access, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import * as z from 'zod';
@@ -70,15 +71,23 @@ export class FileSessionStateStore implements SessionStateStore {
   forget(id: AppSessionId): Promise<void> {
     return this.run(id, async () => {
       await rm(this.fileOf(id), { force: true });
+      assertSafeAppSessionId(id);
       await rm(join(this.journalDir, id), { recursive: true, force: true });
     });
   }
 
   private fileOf(id: AppSessionId): string {
+    assertSafeAppSessionId(id);
     return join(this.stateDir, `${id}.json`);
   }
 
+  // Every operation passes here first: an id that is not one plain path component never reaches the filesystem (M5 review).
   private run<T>(id: AppSessionId, op: () => Promise<T>): Promise<T> {
+    try {
+      assertSafeAppSessionId(id);
+    } catch (error) {
+      return Promise.reject(error as Error);
+    }
     const previous = this.chains.get(id) ?? Promise.resolve();
     const next = previous.then(op, op);
     const settled = next.catch(() => {});
