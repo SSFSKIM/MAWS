@@ -22,7 +22,8 @@ export type LaneModelEntry = { value: string } | null;
 // `account`: who the local lane's requests are counted against, in words (the pinned or routing account, or the
 // engine's own login); `null` when not known.
 export function autoModeLane(status: EngineSessionStatus, entry: LaneModelEntry, reviews: Reviews | null, account: string | null = null): Lane {
-  const lane = (kind: LaneKind, sentence: string): Lane => ({ kind, sentence, reviews });
+  // the counts belong to a lane that reviews: none beside `off` or `unavailable`
+  const lane = (kind: LaneKind, sentence: string): Lane => ({ kind, sentence, reviews: kind === 'off' || kind === 'unavailable' ? null : reviews });
   const { effective, refusal } = status.permissionMode;
   // A refusal first: it is set exactly when the requested auto mode was not honoured, so the effective mode is another.
   if (refusal !== null) return lane('unavailable', MODE_REFUSAL_WORDS[refusal]);
@@ -38,9 +39,10 @@ export function autoModeLane(status: EngineSessionStatus, entry: LaneModelEntry,
 }
 
 // The session's tool calls the server lane evaluated, from C6's transcript: each tool use counted once, by its latest
-// verdict (a `tool.safeguard` event, or the verdict folded onto its result); null when no transcript is held.
+// verdict (a `tool.safeguard` event, or the verdict folded onto its result); null when no transcript is held or it
+// holds no turn yet (nothing to count is not "0 evaluated").
 export function reviewsOf(state: TranscriptState | undefined): Reviews | null {
-  if (!state) return null;
+  if (!state || state.order.length === 0) return null;
   const verdicts = new Map<string, 'not_flagged' | 'flagged'>();
   const note = (event: SessionEvent) => {
     if (event.kind === 'tool.safeguard') verdicts.set(event.toolUseId, event.verdict);

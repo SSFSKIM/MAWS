@@ -14,7 +14,10 @@ import { createWidgetBackend, fixtureLine, type WidgetBackend } from '../../../.
 import { panelHost } from '../../panel/host';
 import type { PanelToolContext } from '../../panel/tool';
 import { useSessions } from '../../stores/sessions';
+import { useTranscriptStore, type TranscriptEntry } from '../../stores/transcript';
 import { useUsage } from '../../stores/usage';
+import { applyEvents, createState } from '../../transcript/model/reduce';
+import { builder, tool } from '../../transcript/model/test-events';
 import { sessionInfoTool } from '.';
 
 const ROOT = join(__dirname, '../../../../..');
@@ -80,6 +83,24 @@ describe('session info renders the six sections', () => {
     await waitFor(() => expect(valueOf('Hooks')).toBe('1 settings hook · 0 plugin hooks'));
     await waitFor(() => expect(valueOf('MCP')).toMatch(/^3 connected · plugin:ptc:ptc \(stdio\), .*openaiDeveloperDocs \(http\)/));
     expect(within(screen.getByRole('region', { name: 'Permissions' })).getByRole('button', { name: '/permissions' })).toBeTruthy();
+  });
+
+  it('counts the reviews only while the transcript holds rows for the session', async () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('a', 'Bash', { command: 'ls' });
+    b.emit('tool.safeguard', { toolUseId: tool('a'), verdict: 'flagged', lane: 'server' });
+    const state = applyEvents(createState(null, null), b.events);
+    const entry = (rows: unknown[]) => ({ state, rows, phase: 'live', error: null, following: true, working: false, clock: null, jump: null }) as unknown as TranscriptEntry;
+    useTranscriptStore.setState({ entries: { [READY]: entry([{}]) } });
+    mount(ctxOf(READY));
+    await waitFor(() => expect(valueOf('Auto-mode lane')).toMatch(/ · 1 tool call evaluated, 1 flagged$/));
+    cleanup();
+    useTranscriptStore.setState({ entries: { [READY]: entry([]) } });
+    mount(ctxOf(READY));
+    await waitFor(() => expect(valueOf('Auto-mode lane')).toMatch(/^Server/));
+    expect(valueOf('Auto-mode lane')).not.toContain('evaluated');
+    useTranscriptStore.setState({ entries: {} });
   });
 
   it('names the overrides when the launch passed some, and the subagent model chosen at launch', () => {

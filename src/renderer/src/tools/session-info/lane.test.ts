@@ -87,14 +87,19 @@ describe('autoModeLane derives the lane from status and model', () => {
     expect(autoModeLane(status({ server: 'unknown' }), null, null)).toMatchObject({ kind: 'unknown', sentence: 'Not read yet' });
   });
 
-  it('carries the reviews it was given', () => {
-    expect(autoModeLane(status(), null, { evaluated: 3, flagged: 1 }).reviews).toEqual({ evaluated: 3, flagged: 1 });
+  it('carries the reviews it was given, never beside off or unavailable', () => {
+    const reviews = { evaluated: 3, flagged: 1 };
+    expect(autoModeLane(status(), null, reviews).reviews).toEqual(reviews);
+    expect(autoModeLane(status({ model: 'claude/astra' }), null, reviews).reviews).toEqual(reviews);
+    expect(autoModeLane(status({ effective: 'default' }), null, reviews)).toMatchObject({ kind: 'off', reviews: null });
+    expect(autoModeLane(status({ effective: 'default', refusal: 'auto_mode_model' }), null, reviews)).toMatchObject({ kind: 'unavailable', reviews: null });
   });
 });
 
 describe('reviewsOf counts the tool calls the server lane evaluated', () => {
-  it('is null without a transcript, and counts each tool use once by its latest verdict', () => {
+  it('is null without a transcript or with one that holds no turn, and counts each tool use once by its latest verdict', () => {
     expect(reviewsOf(undefined)).toBeNull();
+    expect(reviewsOf(createState(null, null))).toBeNull();
     const b = builder();
     b.turn('u1');
     b.toolUse('a', 'Bash', { command: 'ls' });

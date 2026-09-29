@@ -58,7 +58,8 @@ function SessionInfoBody({ appSessionId, visible, record }: { appSessionId: AppS
   const snapshot = useUsage((s) => s.snapshot);
   const directLogin = useGateway((s) => s.directLogin.get(appSessionId) ?? null);
   const models = useComposerStore((s) => listedModelsOf(s, appSessionId));
-  const transcript = useTranscriptStore((s) => s.entries[appSessionId]?.state);
+  // the transcript's state only while it holds rows for the session (the reviews count is omitted otherwise)
+  const transcript = useTranscriptStore((s) => (s.entries[appSessionId]?.rows.length ? s.entries[appSessionId].state : undefined));
   const now = useNow(POPOVER_TICK_MS);
   const windows = useSessionWindows(record, status);
 
