@@ -17,7 +17,12 @@
     // applyEvents, rowsOf) and journalToEvents; vitest's typecheck runs this project composite, which refuses a file
     // the include does not list
     "src/renderer/src/transcript/model/*.ts",
-    "src/renderer/src/transcript/dev/journal.ts"
+    "src/renderer/src/transcript/dev/journal.ts",
     // C8a end
+    // C8b start: test/support/agents-fixtures.test.ts checks the derived fixtures' tails through the agent tools' pure
+    // models (applyTaskEvents, matchesSendMessage, phasesOf) and their copy; listed for the same reason as C8a's
+    "src/renderer/src/tools/agents/model/*.ts",
+    "src/renderer/src/tools/agents/copy.ts"
+    // C8b end
   ]
 }
