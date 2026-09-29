@@ -37,14 +37,25 @@ describe('session pane', () => {
     const id = idOf('Fix sidebar drag');
     registerSlot('transcript', ({ appSessionId, agentId, paneIndex }) => <p>transcript {`${appSessionId} ${agentId} ${paneIndex}`}</p>);
     registerSlot('requestCard', ({ item, placement, paneIndex }) => <p>request {`${item.kind} ${placement} ${paneIndex}`}</p>);
-    registerSlot('composer', ({ appSessionId, paneIndex }) => <p>composer {`${appSessionId} ${paneIndex}`}</p>);
     render(<SessionPane appSessionId={id} paneIndex={1} />);
     expect(screen.getByText(`transcript ${id} null 1`)).toBeTruthy();
     const request = screen.getByText('request permission docked 1');
-    const composer = screen.getByText(`composer ${id} 1`);
+    const composer = screen.getByText('Composer arrives with C7'); // C7: the pane docks above C5's fallback composer only
     expect(request.compareDocumentPosition(composer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(statusButtons()).toHaveLength(6);
   });
+
+  // C7 start: a registered composer is the one docked swap: it docks the request in its own place, so the pane's slot
+  // docks nothing (two docked placements of one request would take focus and bind Enter twice).
+  it('leaves the docking to a registered composer', () => {
+    const id = idOf('Fix sidebar drag');
+    registerSlot('requestCard', ({ item, placement }) => <p>request {`${item.kind} ${placement}`}</p>);
+    registerSlot('composer', ({ appSessionId, paneIndex }) => <p>composer {`${appSessionId} ${paneIndex}`}</p>);
+    render(<SessionPane appSessionId={id} paneIndex={1} />);
+    expect(screen.getByText(`composer ${id} 1`)).toBeTruthy();
+    expect(screen.queryByText('request permission docked')).toBeNull();
+  });
+  // C7 end
 
   it('docks no request when nothing waits', () => {
     registerSlot('requestCard', () => <p>request</p>);

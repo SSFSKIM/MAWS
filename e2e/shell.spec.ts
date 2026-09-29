@@ -251,7 +251,7 @@ async function firstInstance(maws: MawsLaunch): Promise<Saved> {
     await expect(panel.getByText('Transcript arrives with C6')).toHaveCount(0);
     await expect(panel.getByText('Approval needed')).toBeVisible();
     await expect(panel.getByTestId('request-input')).toHaveText('git log --oneline');
-    await expect(panel.getByText('Composer arrives with C7')).toBeVisible();
+    await expect(panel.locator('[data-composer-frame]')).toBeAttached(); // C7: the composer fills its slot; its frame waits behind the docked card
     expect(await panel.getByRole('group', { name: 'Session status' }).getByRole('button').allTextContents()).toEqual([
       '/private/tmp/maws-probe-qqboLh',
       'ctx —',

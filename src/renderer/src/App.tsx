@@ -13,6 +13,7 @@ import { persistLayout } from './stores/layout';
 import { useSettings } from './stores/settings';
 import { connectTranscript } from './transcript/shell'; // C6
 // C7 start
+import { ComposerAppKeys, connectComposer } from './composer';
 import { connectRequestCard } from './request-card';
 import { connectStatusLine } from './statusline';
 // C7 end
@@ -33,6 +34,7 @@ export function App() {
   // C7 start: the X4 card in C5's requestCard slot (docked, card, hover) and C6's transcript request slot (inline)
   useEffect(() => connectRequestCard(), []);
   useEffect(() => connectStatusLine(), []); // the shared ClaudeUsage read and the near-limit banner, app-wide
+  useEffect(() => connectComposer(), []); // the composer in C5's composer slot
   // C7 end
 
   // index.html ships data-theme="light" for the first paint; from then on main's resolved theme decides.
@@ -43,6 +45,9 @@ export function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <Shell />
+      {/* C7 start: the one app-level ⌘. and ⌘L, resolving the focused pane's session */}
+      <ComposerAppKeys />
+      {/* C7 end */}
     </QueryClientProvider>
   );
 }
