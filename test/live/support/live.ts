@@ -55,7 +55,7 @@ export function redactJournal(text: string, env: Record<string, string> = string
 // to any path under the config home)
 // runs under a scratch CLAUDE_CONFIG_DIR only. A case declares the persisting controls it will issue; the host checks the
 // declaration before anything spawns and refuses an undeclared one at the call.
-export const PERSISTING_CONTROLS = ['set_cwd:trust', 'mcp_toggle', 'grant:local_settings', 'memory:user'] as const;
+export const PERSISTING_CONTROLS = ['set_cwd:trust', 'mcp_toggle', 'grant:local_settings', 'memory:user', 'launch:trust' /* C10: the launch attestation records trust as set_cwd's does */] as const;
 export type PersistingControl = (typeof PERSISTING_CONTROLS)[number];
 
 // `configHome`: the scratch CLAUDE_CONFIG_DIR, or null for the owner's own home.
@@ -73,8 +73,9 @@ export function ownerConfigHome(): string {
 // note persists into the config home when it targets the user memory file or any path under `configHome` (a
 // dialog-listed memory folder can live there: M6 re-review); both count as `memory:user`.
 export function persistingControlOf(command: string, input: unknown, configHome: string = ownerConfigHome()): PersistingControl | null {
-  const i = input as { trust?: unknown; answer?: { kind?: string; scope?: string }; target?: { kind?: string; path?: string | null } };
+  const i = input as { trust?: unknown; answer?: { kind?: string; scope?: string }; target?: { kind?: string; path?: string | null }; spec?: { trust?: unknown } };
   if (command === 'session.setCwd' && i.trust) return 'set_cwd:trust';
+  if (command === 'session.launch' && i.spec?.trust) return 'launch:trust'; // C10
   if (command === 'session.mcpToggle') return 'mcp_toggle';
   if (command === 'session.answer' && i.answer?.kind === 'permission' && i.answer.scope === 'local_settings') return 'grant:local_settings';
   if (command === 'session.memoryAppend' && i.target?.kind === 'user') return 'memory:user';
