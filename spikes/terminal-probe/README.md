@@ -19,7 +19,8 @@ node spikes/terminal-probe/run.mjs --phase m2-gate      # the transport gate clo
 pnpm dev:harness                                         # the page by hand: in DevTools, location.hash = '#probe' (or '#panel')
 ```
 
-Options: `--renderer xterm|ghostty|both`, `--steps smoke,measure,items,tui,exit-check,replay,links`, `--tui claude,codex`,
+Options: `--renderer xterm|ghostty|both`, `--steps smoke,measure,items,tui,exit-check,replay,links`, `--workloads <ids>` (a
+subset of the phase's measurements, such as `latency,latency-spaced`), `--tui claude,codex`,
 `--tui-renderer xterm|ghostty`, `--keep-open`. `MAWS_CLAUDE_BIN` and `MAWS_CODEX_BIN` override the TUI binaries
 (defaults in `workloads.mjs`). Both TUIs run in the scratch directory `/tmp/maws-harness/a`, which main creates, typed into the probe's shell
 (`$SHELL` spawned without `-l` in M1; since M2 the host starts the login shell, `$SHELL -l`, by default).

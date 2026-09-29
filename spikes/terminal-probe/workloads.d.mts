@@ -19,6 +19,7 @@ export interface ProgramWorkload {
   expectedBytes?: Record<Phase, number>;
   expectedOutputBytes?: Record<Phase, number>;
   expectedScreen?: string[];
+  spacingMs?: number; // a spaced echo-latency workload, sampled by run.mjs
 }
 export interface TypedWorkload {
   kind: 'typed';

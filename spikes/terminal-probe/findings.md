@@ -131,6 +131,14 @@ p50 0.3 ms is the coalescing window, reached only because the sampler types back
 the table (a scratch test under Node, not committed), back-to-back keystrokes echo at p50 5.14 / p95 6.10 ms while
 keystrokes 20 ms apart, slower than any human typing or key repeat, echo at p50 0.15 / p95 0.57 ms.
 
+The spaced variant through the page (workload `latency-spaced`, added in debt wave 2, 2026-09-29; recorded, not
+judged, and the 30 ms bound is unchanged): the same `cat`, 100 characters, each typed 20 ms after the previous echo was
+parsed, sampled by `run.mjs` in the page over the probe API with the page sampler's echo test. Three runs
+(`run.mjs --phase m2-gate --steps smoke,measure --workloads latency,latency-spaced`, load average about 24): p50 0.6,
+0.5, 0.6 ms; p95 0.9, 0.9, 0.9 ms; max 1.1, 2.3, 8.2 ms. The back-to-back sampler in the same runs read p50 5.1 to
+5.3 ms and p95 8.0 to 10.6 ms (maxima of 220 to 310 ms under that load; those runs' files were not kept). A keystroke
+typed at human speed reaches the screen in under a millisecond; the coalescing window costs only a burst.
+
 Before coalescing (the same gate on the first M2 commit, one `pty.data` per node-pty read; `results` since replaced),
 three runs read W1 19.27 / 17.60 / 18.12, W2 21.72 / 22.99 / 21.50 and W3 7.83 / 8.21 / 7.93 MB/s with frame p95 at
 9.1 to 9.3 ms, byte-exact, from 60,456 / 55,128 / 657,763 events (average 842 / 914 / 287 bytes); two instrumented runs
@@ -224,7 +232,8 @@ M5 acceptance run (the `#panel` Terminal tab, 189×40): `m5-09-codex-{frame,kore
 `results/`: `smoke.json`, `console.json` (both rewritten by the last gate run), `xterm-W1.json`, `xterm-W2.json`,
 `xterm-W3.json` (the M2 gate's third run, with its `gate` judgement), `xterm-W1-m1.json`, `xterm-W2-m1.json`,
 `xterm-W3-m1.json` (M1), `xterm-links-m2-gate.json` (the gate's item 6), `xterm-latency.json` (the gate's echo
-latency; M1's as `xterm-latency-m1.json`), `xterm-width.json`,
+latency; M1's as `xterm-latency-m1.json`), `xterm-latency-spaced.json` (its spaced variant, the third wave-2 run, with
+every sample), `xterm-width.json`,
 `xterm-scroll-region.json`, `xterm-items.json`, `xterm-tui-claude.json`, `xterm-tui-codex.json`,
 `xterm-replay-claude.json`, `xterm-replay-codex.json`, `xterm-exit-claude.json`, `xterm-exit-codex.json` (the
 item-1 reproductions: before/after lines and the program's screen-control sequence counts), `ghostty-W1.json`,
