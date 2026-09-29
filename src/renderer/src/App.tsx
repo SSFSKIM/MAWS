@@ -14,8 +14,9 @@ import { useSettings } from './stores/settings';
 import { connectTranscript } from './transcript/shell'; // C6
 // C8a start
 import { registerSlot } from './app/slots';
-import { connectPanelHost } from './panel/host';
+import { connectPanelHost, registerPanelTool } from './panel/host';
 import { PanelHost } from './panel/PanelHost';
+import { terminalTool } from './tools/terminal';
 // C8a end
 
 export function App() {
@@ -38,6 +39,9 @@ export function App() {
     registerSlot('panelHost', PanelHost);
     return connectPanelHost();
   }, []);
+  // Tool registration is the panel host's line (ruling O2). Never unregistered: a registration's disposer closes the
+  // tool's tabs, which StrictMode's effect replay would do on every mount.
+  useEffect(() => void registerPanelTool(terminalTool), []); // C9's Terminal
   // C8a end
 
   // index.html ships data-theme="light" for the first paint; from then on main's resolved theme decides.
