@@ -1,0 +1,101 @@
+[
+  {
+    "at": "2026-09-29T08:19:52.577Z",
+    "id": "time:turn:85367590-802a-4310-aec5-6cba774d6c08",
+    "kind": "time",
+    "label": "Today 8:19 AM",
+    "turnId": "turn:85367590-802a-4310-aec5-6cba774d6c08"
+  },
+  {
+    "at": "2026-09-29T08:19:52.577Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:85367590-802a-4310-aec5-6cba774d6c08",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "85367590-802a-4310-aec5-6cba774d6c08",
+    "steer": false,
+    "text": "Remember the word MANGO. Reply OK.",
+    "turnId": "turn:85367590-802a-4310-aec5-6cba774d6c08"
+  },
+  {
+    "at": "2026-09-29T08:19:52.577Z",
+    "autoDenied": 0,
+    "denied": 0,
+    "endedAt": "2026-09-29T08:19:53.756Z",
+    "expanded": true,
+    "firstDeniedCell": null,
+    "id": "divider:turn:85367590-802a-4310-aec5-6cba774d6c08",
+    "kind": "divider",
+    "origin": "human",
+    "startedAt": "2026-09-29T08:19:52.594Z",
+    "state": "completed",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 0,
+        "exploration": 0,
+        "files": 0,
+        "mcp": 0,
+        "other": 0,
+        "skills": 0,
+        "web": 0
+      },
+      "childAgents": 0,
+      "costUsd": 0.044253,
+      "denials": [],
+      "durationMs": 1157,
+      "model": "claude-haiku-4-5-20251001",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 0,
+        "reviewed": 0
+      },
+      "terminalReason": "completed",
+      "toolCalls": 0,
+      "usage": {
+        "cacheCreationInputTokens": 21498,
+        "cacheReadInputTokens": 0,
+        "inputTokens": 10,
+        "outputTokens": 55,
+        "thinkingTokens": 48
+      }
+    },
+    "toolCalls": 0,
+    "turnId": "turn:85367590-802a-4310-aec5-6cba774d6c08"
+  },
+  {
+    "at": "2026-09-29T08:19:53.252Z",
+    "durationMs": 481,
+    "id": "think:msg_011CfXQPCZ4R8kebC3rYuAbF:0",
+    "kind": "thinking",
+    "live": false,
+    "messageUuid": "e042328c-efc9-4ae3-bfc3-72a5df984982",
+    "text": "The user is asking me to remember the word \"MANGO\" and reply \"OK\". This seems like a simple request to demonstrate that I can acknowledge something. Let me respond with \"OK\" as requested.",
+    "turnId": "turn:85367590-802a-4310-aec5-6cba774d6c08"
+  },
+  {
+    "at": "2026-09-29T08:19:53.735Z",
+    "blockIndex": 1,
+    "id": "text:msg_011CfXQPCZ4R8kebC3rYuAbF:1",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "OK",
+    "messageUuid": "5680ed64-3347-4314-8c00-3bacfeed0f6e",
+    "model": "claude-haiku-4-5-20251001",
+    "phase": "answer",
+    "turnId": "turn:85367590-802a-4310-aec5-6cba774d6c08"
+  },
+  {
+    "at": "2026-09-29T08:19:53.984Z",
+    "attempt": null,
+    "id": "error:replay:journal:64:0",
+    "kind": "error",
+    "lostAttentionCount": 0,
+    "scope": "exit",
+    "severity": "notice",
+    "text": "Session process exited (unknown)",
+    "turnId": null
+  }
+]

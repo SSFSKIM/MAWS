@@ -1,0 +1,101 @@
+[
+  {
+    "at": "2026-09-29T08:19:54.356Z",
+    "id": "time:turn:e0b15a6d-10ba-4966-a896-af9a08dda7c0",
+    "kind": "time",
+    "label": "Today 8:19 AM",
+    "turnId": "turn:e0b15a6d-10ba-4966-a896-af9a08dda7c0"
+  },
+  {
+    "at": "2026-09-29T08:19:54.356Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:e0b15a6d-10ba-4966-a896-af9a08dda7c0",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "e0b15a6d-10ba-4966-a896-af9a08dda7c0",
+    "steer": false,
+    "text": "What word did I ask you to remember? Reply with just that word.",
+    "turnId": "turn:e0b15a6d-10ba-4966-a896-af9a08dda7c0"
+  },
+  {
+    "at": "2026-09-29T08:19:54.356Z",
+    "autoDenied": 0,
+    "denied": 0,
+    "endedAt": "2026-09-29T08:19:55.404Z",
+    "expanded": true,
+    "firstDeniedCell": null,
+    "id": "divider:turn:e0b15a6d-10ba-4966-a896-af9a08dda7c0",
+    "kind": "divider",
+    "origin": "human",
+    "startedAt": "2026-09-29T08:19:54.370Z",
+    "state": "completed",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 0,
+        "exploration": 0,
+        "files": 0,
+        "mcp": 0,
+        "other": 0,
+        "skills": 0,
+        "web": 0
+      },
+      "childAgents": 0,
+      "costUsd": 0.0469048,
+      "denials": [],
+      "durationMs": 1030,
+      "model": "claude-haiku-4-5-20251001",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 0,
+        "reviewed": 0
+      },
+      "terminalReason": "completed",
+      "toolCalls": 0,
+      "usage": {
+        "cacheCreationInputTokens": 136,
+        "cacheReadInputTokens": 21498,
+        "inputTokens": 10,
+        "outputTokens": 44,
+        "thinkingTokens": 35
+      }
+    },
+    "toolCalls": 0,
+    "turnId": "turn:e0b15a6d-10ba-4966-a896-af9a08dda7c0"
+  },
+  {
+    "at": "2026-09-29T08:19:55.097Z",
+    "durationMs": 284,
+    "id": "think:msg_011CfXQPLHtfjSBcJWuUBiqo:0",
+    "kind": "thinking",
+    "live": false,
+    "messageUuid": "d46f6253-5ba8-442d-84eb-37f97c4afd54",
+    "text": "The user asked me to remember the word \"MANGO\" in the previous message. They're now asking me to reply with just that word.",
+    "turnId": "turn:e0b15a6d-10ba-4966-a896-af9a08dda7c0"
+  },
+  {
+    "at": "2026-09-29T08:19:55.382Z",
+    "blockIndex": 1,
+    "id": "text:msg_011CfXQPLHtfjSBcJWuUBiqo:1",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "MANGO",
+    "messageUuid": "88eaaab2-45af-4ae1-8d0a-c8a5966bf9df",
+    "model": "claude-haiku-4-5-20251001",
+    "phase": "answer",
+    "turnId": "turn:e0b15a6d-10ba-4966-a896-af9a08dda7c0"
+  },
+  {
+    "at": "2026-09-29T08:19:55.793Z",
+    "attempt": null,
+    "id": "error:replay:journal:51:0",
+    "kind": "error",
+    "lostAttentionCount": 0,
+    "scope": "exit",
+    "severity": "notice",
+    "text": "Session process exited (unknown)",
+    "turnId": null
+  }
+]
