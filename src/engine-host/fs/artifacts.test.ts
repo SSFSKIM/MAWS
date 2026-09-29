@@ -104,6 +104,25 @@ describe('fs.readSpill reads engine artifacts by the path the engine reported', 
     await expect(readSpill(fixture.paths, { path: link })).rejects.toThrow(OUTSIDE);
   });
 
+  it('does not answer "not found" through an in-store symlink to an outside directory, so outside names cannot be probed', async () => {
+    const outsideDir = join(fixture.configHome, '..', 'outside-dir');
+    await mkdir(outsideDir, { recursive: true });
+    await writeFile(join(outsideDir, 'present.txt'), 'x');
+    const link = join(dirname(spill), 'portal');
+    await symlink(outsideDir, link);
+    // Present and absent outside names get the same refusal.
+    await expect(readSpill(fixture.paths, { path: join(link, 'present.txt') })).rejects.toThrow(OUTSIDE);
+    await expect(readSpill(fixture.paths, { path: join(link, 'absent.txt') })).rejects.toThrow(OUTSIDE);
+    await expect(readSpill(fixture.paths, { path: join(link, 'absent', 'deeper.txt') })).rejects.toThrow(OUTSIDE);
+    // A dangling in-store symlink could point anywhere: refused, not "not found".
+    const dangling = join(dirname(spill), 'dangling.txt');
+    await symlink(join(outsideDir, 'absent.txt'), dangling);
+    await expect(readSpill(fixture.paths, { path: dangling })).rejects.toThrow(OUTSIDE);
+    // A missing name under a missing in-store directory is still "not found".
+    const deep = join(dirname(spill), 'missing-dir', 'gone.txt');
+    await expect(readSpill(fixture.paths, { path: deep })).rejects.toThrow(`spill not found: ${deep}`);
+  });
+
   it('reports a spill that is gone by its path', async () => {
     const missing = join(dirname(spill), 'gone.txt');
     await expect(readSpill(fixture.paths, { path: missing })).rejects.toThrow(`spill not found: ${missing}`);
