@@ -66,6 +66,21 @@ describe('useEngineRead', () => {
     expect(reads('session.getSandboxDialog')).toBe(held);
   });
 
+  // C11 M6, live: /diff opened seconds after a turn that wrote a file showed the cached `0 files`: its read was fresh by
+  // age but answered before the turn. A read answered under an earlier status fact is read again when a widget opens.
+  it('reads again on open when the status moved since the cached answer, and not when it did not', async () => {
+    const first = renderHook(() => useEngineRead('session.getSandboxDialog', { appSessionId: ID }), { wrapper: wrapper() });
+    await waitFor(() => expect(first.result.current.state).toBe('ready'));
+    first.unmount();
+    const again = renderHook(() => useEngineRead('session.getSandboxDialog', { appSessionId: ID }), { wrapper: wrapper() });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(reads('session.getSandboxDialog'), 'nothing moved: the fresh answer serves').toBe(1);
+    again.unmount();
+    act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: { ...backend.status(ID), engineState: 'running' } }));
+    renderHook(() => useEngineRead('session.getSandboxDialog', { appSessionId: ID }), { wrapper: wrapper() });
+    await waitFor(() => expect(reads('session.getSandboxDialog')).toBe(2));
+  });
+
   it('is not running, and reads nothing, without a ready process', async () => {
     useSessions.setState({ engine: new Map([[ID, { ...backend.status(ID), process: 'exited' }]]) });
     const { result } = renderHook(() => useEngineRead('session.getSandboxDialog', { appSessionId: ID }), { wrapper: wrapper() });

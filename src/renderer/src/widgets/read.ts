@@ -39,6 +39,10 @@ export function readIntoCache<N extends SessionRead>(client: QueryClient, comman
 // A memory sample or a queue count does not.
 export const MOVES_READS = (s: EngineSessionStatus): string => `${s.launchId}|${s.process}|${s.turn?.id ?? ''}|${s.engineState}`;
 
+// The status fact each cached answer was read under (by query key), so a widget opened after the status moved reads
+// again even when the answer is fresh by age (C11 M6, live: `/diff` opened just after a turn showed the turn-start read).
+const readUnder = new Map<string, string | null>();
+
 export type ReadState = 'loading' | 'ready' | 'error' | 'not_running';
 
 export interface EngineRead<T> {
@@ -73,9 +77,17 @@ export function useEngineRead<N extends SessionRead>(command: N, input: CommandI
     const status = s.engine.get(appSessionId);
     return status ? refreshOn(status) : null;
   });
+  const key = engineReadKey(command, input);
+  const keyHash = JSON.stringify(key);
   const query = useQuery<CommandOutput<N>, IpcCommandError>({
-    queryKey: engineReadKey(command, input),
-    queryFn: () => fetchEngineRead(command, input),
+    queryKey: key,
+    queryFn: async () => {
+      const status = useSessions.getState().engine.get(appSessionId);
+      const fact = status ? refreshOn(status) : null;
+      const answer = await fetchEngineRead(command, input);
+      readUnder.set(keyHash, fact);
+      return answer;
+    },
     staleTime: READ_STALE_MS,
     enabled: active && ready && wanted,
     refetchInterval: active && ready && wanted && options.refetchIntervalMs !== undefined ? options.refetchIntervalMs : false,
@@ -83,7 +95,8 @@ export function useEngineRead<N extends SessionRead>(command: N, input: CommandI
   const { refetch } = query;
 
   // A read already in flight (the one `enabled` started when the process became ready) answers for the move too.
-  const seen = useRef(moved);
+  // On open, an answer read under an earlier fact counts as a move.
+  const seen = useRef(readUnder.has(keyHash) ? readUnder.get(keyHash)! : moved);
   useEffect(() => {
     if (seen.current === moved) return;
     seen.current = moved;
