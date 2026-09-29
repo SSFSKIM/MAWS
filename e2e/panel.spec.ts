@@ -266,12 +266,13 @@ test.describe('the #panel harness: persistence and pins', () => {
     panel.expectQuietConsole();
   });
 
+  // C11: the single-instance stand-in is `harness-single` now that Session info is C11's real tool on this page
   test('a restored singleton never shown is instantiated before it is re-targeted', async () => {
     await withProfile(async (launch) => {
       let panel = await launch();
-      const info = await panel.call('addTool', 'session-info'); // in A, shown
+      const info = await panel.call('addTool', 'harness-single'); // in A, shown
       await panel.call('switchSession', 'B'); // so B is what the relaunch shows
-      await expect.poll(() => panel.panelOf('A')).toEqual({ tabs: [{ id: info, toolId: 'session-info', pinned: false }], activeTabId: info });
+      await expect.poll(() => panel.panelOf('A')).toEqual({ tabs: [{ id: info, toolId: 'harness-single', pinned: false }], activeTabId: info });
       await expect.poll(() => panel.shownOnDisk()).toBe('session:B');
       panel.expectQuietConsole();
 
@@ -279,20 +280,20 @@ test.describe('the #panel harness: persistence and pins', () => {
         panel = await launch();
         expect(await panel.call('session')).toBe('B');
         const strip = await panel.tabs();
-        expect(await panel.stub('session-info', 'instances'), 'A was never shown: its tab has no instance').toEqual([]);
+        expect(await panel.stub('harness-single', 'instances'), 'A was never shown: its tab has no instance').toEqual([]);
         const opts = activate === false ? { appSessionId: 'A' as const, activate } : { appSessionId: 'A' as const };
-        expect(await panel.call('addTool', 'session-info', opts), 'the restored tab is re-targeted').toBe(info);
-        expect(await panel.stub('session-info', 'instances')).toEqual([info]);
-        expect(await panel.stub('session-info', 'opens')).toBe(1);
+        expect(await panel.call('addTool', 'harness-single', opts), 'the restored tab is re-targeted').toBe(info);
+        expect(await panel.stub('harness-single', 'instances')).toEqual([info]);
+        expect(await panel.stub('harness-single', 'opens')).toBe(1);
         if (activate === false) {
           expect(await panel.call('session')).toBe('B');
           expect(await panel.tabs(), 'B’s strip is unchanged').toEqual(strip);
-          expect((await panel.panelOf('A'))?.tabs.filter((tab) => tab.toolId === 'session-info')).toHaveLength(1);
+          expect((await panel.panelOf('A'))?.tabs.filter((tab) => tab.toolId === 'harness-single')).toHaveLength(1);
         } else {
           expect(await panel.call('session'), 'the main area switched to A').toBe('A');
           expect(await panel.active()).toBe(info);
           await expect(panel.stubLine).toContainText(`${info} · A · unpinned · visible`);
-          expect(await panel.stub('session-info', 'instances'), 'showing A created no second instance').toEqual([info]);
+          expect(await panel.stub('harness-single', 'instances'), 'showing A created no second instance').toEqual([info]);
         }
         panel.expectQuietConsole();
       }
@@ -402,7 +403,7 @@ test.describe('the #panel harness: persistence and pins', () => {
   test('Overview keeps the pin selection', async ({ maws }) => {
     const panel = await PanelPage.open(maws);
     const first = await panel.call('addTool', 'harness-stub', { pin: true });
-    const second = await panel.call('addTool', 'session-info', { pin: true });
+    const second = await panel.call('addTool', 'harness-single', { pin: true }); // C11: a stand-in, not Session info (C11's real tool)
     await panel.call('switchSession', null);
     expect(await panel.call('session')).toBeNull();
     await expect(panel.region.getByRole('button', { name: 'Open a session to add a tool' })).toBeDisabled();
@@ -470,6 +471,22 @@ test.describe('the #panel harness: strip, summary, R7 and themes', () => {
     await expect(panel.stubLine).toContainText(`${pin} · no session · pinned · visible`);
     panel.expectQuietConsole();
   });
+
+  // C11 start: Session info on the #panel page (C11 execution document, M4 refresh task "Session info on C8a's host").
+  // Main holds no engine process for the harness's sessions, so its reads fail quietly and the stores' values show.
+  test('Session info renders its six sections for the shown session, and asks for a session on the Overview', async ({ maws }) => {
+    const panel = await PanelPage.open(maws);
+    const info = await panel.call('addTool', 'session-info', { pin: true });
+    const body = panel.region.locator('[data-session-info="A"]');
+    for (const title of ['Engine', 'Model', 'Gateway', 'Permissions', 'Context, usage, cost', 'Hooks and MCP']) await expect(body.getByRole('region', { name: title })).toBeVisible();
+    const route = body.getByRole('term').filter({ hasText: /^Route$/ }).locator('xpath=following-sibling::dd[1]');
+    await expect(route, 'A runs direct in the harness scenario').toHaveText("Direct · engine's own login");
+    await panel.call('switchSession', null);
+    await panel.call('selectTab', info);
+    await expect(panel.region.getByText('Open a session to see its details')).toBeVisible();
+    panel.expectQuietConsole();
+  });
+  // C11 end
 
   test('state lives outside React across visibility, session switches and pins', async ({ maws }) => {
     const panel = await PanelPage.open(maws);
@@ -953,15 +970,16 @@ test.describe('the product host over a scenario derived from C5’s records', ()
       // C9's Terminal is registered from App.tsx (C8a's block, since C9 merged); every other P0 tool arrives with its child.
       // C8c (a C8a test amended by C8c): C8c's Review and Files are registered from App.tsx too.
       await expect(environment.getByRole('button', { name: 'Review', exact: true }), 'Review').toBeEnabled();
-      await expect(environment.getByRole('button', { name: 'Arrives with C11' }), 'the model row').toBeDisabled();
+      // C11 (a C8a test amended by C11): Session info is registered from App.tsx, so the model row opens it.
+      await expect(environment.getByRole('button', { name: 'Session info' }), 'the model row').toBeEnabled();
       await expect(summary.getByRole('region', { name: 'Subagents' }).getByRole('button', { name: 'Arrives with C8b' })).toBeDisabled();
       await expect(summary.getByRole('region', { name: 'Background work' }).getByRole('button', { name: 'Arrives with C8b' })).toBeDisabled();
       const disabled = await summary.locator('button:disabled').allTextContents();
-      expect(disabled).toHaveLength(3);
-      for (const text of disabled) expect(text).toMatch(/^Arrives with (C8b|C9|C11)$/);
+      expect(disabled).toHaveLength(2);
+      for (const text of disabled) expect(text).toMatch(/^Arrives with (C8b|C9)$/);
 
       await panel.getByRole('button', { name: 'Add a tool' }).click();
-      await expect(page.getByRole('menuitem'), '"+" offers the registered tools only').toHaveText(['Review', 'Terminal', 'Files']);
+      await expect(page.getByRole('menuitem'), '"+" offers the registered tools only').toHaveText(['Review', 'Terminal', 'Files', 'Session info']);
       await page.keyboard.press('Escape');
       expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
     });

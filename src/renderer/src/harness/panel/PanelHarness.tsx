@@ -41,15 +41,21 @@ import { registerCodeTools } from '../../tools/code';
 import { CodeHarnessBlock } from '../code/CodeHarnessBlock';
 import { codeProbes } from '../code/codeProbes';
 // C8c end
+// C11 start
+import { sessionInfoTool } from '../../tools/session-info';
+// C11 end
 
 // Registered once per page load, never on an effect's cleanup: a registration's disposer closes its tool's tabs.
 const disposers = new Map<string, () => void>();
 
 function registerHarnessTools(): void {
+  // C11 start: the real Session info, registered as App.tsx registers it, so the stand-in below yields to it
+  if (!panelHost.tools().some((t) => t.id === sessionInfoTool.id)) registerPanelTool(sessionInfoTool);
+  // C11 end
   const tools = [
     terminalTool, // C9's, registered here as App.tsx registers it (the stand-in fold, ruling O2)
     stubTool('harness-stub', { title: 'Stub' }), // the harness-only probe tool
-    stubTool('session-info', { title: 'Session info', multiInstance: false }),
+    stubTool('harness-single', { title: 'Single', multiInstance: false, menu: false }), // C11: the single-instance probe, in place of Session info's stand-in (C11's real tool, registered above)
     stubTool('log', { title: 'Log', menu: false, pinnable: false }), // the transient case
     childTranscriptTool, // harness-only: C6's child transcript inside the region (R7, M4)
   ];

@@ -38,6 +38,7 @@ import { connectGatewaySettings } from './gateway/store';
 import { GatewayDialogs } from './gateway/SwitchSheet';
 import { UsageFooter } from './gateway/UsageFooter';
 import { registerUsagePopoverFooter } from './statusline';
+import { sessionInfoTool } from './tools/session-info';
 import { registerAllWidgets } from './widgets';
 // C11 end
 
@@ -95,6 +96,10 @@ export function App() {
   // M4: the routing footer in C7's usage popover, and a Direct session's login from every get_status answer
   useEffect(() => registerUsagePopoverFooter(UsageFooter), []);
   useEffect(() => connectDirectLogin(queryClient), []);
+  // Session info in the panel's "+" menu, registered once and never unregistered, as C8a's block does
+  useEffect(() => {
+    registerPanelTool(sessionInfoTool);
+  }, []);
   // C11 end
 
   // index.html ships data-theme="light" for the first paint; from then on main's resolved theme decides.
