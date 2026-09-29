@@ -66,6 +66,8 @@ describe('read model snapshot matches events', () => {
   });
 
   it('sums cost across processes: a restart whose running total starts lower never lowers the session’s total', () => {
+    src.writer.applyEngineStatus(status(A, { process: 'ready' })); // a live process: the exit moves the phase too
+    emitted.length = 0;
     src.writer.fold(A, [ev('turn.started', {}), ev('turn.ended', { costUsd: 0.3 })]);
     src.writer.fold(A, [ev('process.exited', { reason: 'quit' })]);
     src.writer.fold(A, [ev('turn.started', {}), ev('turn.ended', { costUsd: 0.05 })]);
@@ -123,6 +125,108 @@ describe('read model snapshot matches events', () => {
     expect(model.digests()[0].phase).toBe('exited');
     expect(model.engineStatus(A)?.process).toBe('exited');
     expect(model.engineStatus(B)).toBeNull();
+  });
+});
+
+// Liveness (Interfaces, digest fold): the parent's phase, activity and turn times move only while the session has a live
+// process — an engine status in starting, initializing or ready, or a C4 replay run the host is playing.
+describe('digest liveness', () => {
+  let model: SessionReadModel;
+  let src: ReturnType<typeof source>;
+  const replayedTurn = () => [
+    ev('turn.started', { seq: null, at: '2026-09-20T08:00:00Z' }),
+    ev('tool.use', { seq: null, toolName: 'Bash', input: { command: 'ls' } }),
+    ev('context.sample', { seq: null, totalTokens: 1000, maxTokens: 200000, percentage: 0.5, autoCompactThreshold: null }),
+    ev('assistant.block.complete', { seq: null, block: { type: 'text', text: 'Replayed answer' } }),
+    ev('turn.ended', { seq: null, at: '2026-09-20T08:01:00Z' }),
+  ];
+  const seed = (phase: 'exited' | 'foreign') => {
+    const { revision: _r, ...d } = digest(A, { phase, lastAssistantLine: 'Seeded', lastTurnEndedAt: '2026-09-20T07:00:00Z' });
+    void _r;
+    src.writer.setDigest(d);
+  };
+  const current = () => model.digests().find((d) => d.appSessionId === A)!;
+
+  beforeEach(() => {
+    model = new SessionReadModel('index');
+    src = source();
+    model.register(src);
+    src.writer.observeRecord(record(A));
+  });
+
+  it('a seeded exited session receiving a replayed turn stays exited, with its last line and context updated', () => {
+    seed('exited');
+    src.writer.fold(A, replayedTurn());
+    expect(current()).toMatchObject({ phase: 'exited', activity: null, turnStartedAt: null, lastTurnEndedAt: '2026-09-20T07:00:00Z', lastAssistantLine: 'Replayed answer', context: { percent: 0.5 } });
+  });
+
+  it('a foreign session stays foreign', () => {
+    seed('foreign');
+    src.writer.fold(A, replayedTurn());
+    expect(current()).toMatchObject({ phase: 'foreign', activity: null, lastAssistantLine: 'Replayed answer' });
+  });
+
+  it('a session with a live engine status moves as before; an exited status stops it moving', () => {
+    seed('exited');
+    src.writer.applyEngineStatus(status(A, { process: 'ready', engineState: 'running', turn: humanTurn }));
+    src.writer.fold(A, [ev('turn.started', { at: '2026-09-28T10:00:00Z' }), ev('tool.use', { toolName: 'Grep', input: {} })]);
+    expect(current()).toMatchObject({ phase: 'working', activity: 'Searching', turnStartedAt: '2026-09-28T10:00:00Z' });
+    src.writer.applyEngineStatus(status(A, { process: 'exited', exit: { reason: 'quit' } }));
+    src.writer.fold(A, [ev('turn.started', { seq: null })]);
+    expect(current().phase).toBe('exited');
+  });
+
+  it('a C4 replay run the host is playing folds in full, and keeps its last state once done', () => {
+    seed('exited');
+    src.writer.observeReplay(A);
+    src.writer.fold(A, [ev('turn.started', { seq: null, at: '2026-09-28T10:00:00Z' }), ev('tool.use', { seq: null, toolName: 'Grep', input: {} })]);
+    expect(current()).toMatchObject({ phase: 'working', activity: 'Searching' });
+    src.writer.fold(A, [ev('turn.ended', { seq: null, at: '2026-09-28T10:01:00Z' })]);
+    expect(current()).toMatchObject({ phase: 'idle', activity: null, lastTurnEndedAt: '2026-09-28T10:01:00Z' });
+  });
+});
+
+// A seed (C4's digest for a session with no live process) knows no cost, context or, sometimes, last line: its nulls
+// keep what the fold holds, and its cost never lowers the session's total below what finished processes cost.
+describe('seeds over a folded session', () => {
+  let model: SessionReadModel;
+  let src: ReturnType<typeof source>;
+  const seedExited = (over: Partial<SessionDigest> = {}) => {
+    const { revision: _r, ...d } = digest(A, { phase: 'exited', ...over });
+    void _r;
+    src.writer.setDigest(d);
+  };
+  const current = () => model.digests().find((d) => d.appSessionId === A)!;
+
+  beforeEach(() => {
+    model = new SessionReadModel('index');
+    src = source();
+    model.register(src);
+    src.writer.observeRecord(record(A));
+    src.writer.applyEngineStatus(status(A, { process: 'ready' }));
+  });
+
+  it('a seed after a process exit keeps the finished process’s cost: 0.3, exit, seed, resume at 0.05 → 0.35', () => {
+    src.writer.fold(A, [ev('turn.started', {}), ev('turn.ended', { costUsd: 0.3 }), ev('process.exited', { reason: 'quit' })]);
+    seedExited(); // C4's seed: cost null
+    expect(current().cost?.totalUsd).toBe(0.3);
+    src.writer.fold(A, [ev('turn.started', {}), ev('turn.ended', { costUsd: 0.05 })]);
+    expect(current().cost?.totalUsd).toBe(0.35);
+  });
+
+  it('a seed’s cost never lowers the total below the ledger', () => {
+    src.writer.fold(A, [ev('turn.ended', { costUsd: 0.3 }), ev('process.exited', { reason: 'quit' })]);
+    seedExited({ cost: { totalUsd: 0.1, sinceSeenUsd: 0 } });
+    expect(current().cost?.totalUsd).toBe(0.3);
+  });
+
+  it('a seed’s null context and last line keep the folded ones', () => {
+    src.writer.fold(A, [
+      ev('context.sample', { totalTokens: 1000, maxTokens: 200000, percentage: 0.5, autoCompactThreshold: null }),
+      ev('assistant.block.complete', { block: { type: 'text', text: 'Folded line' } }),
+    ]);
+    seedExited({ context: null, lastAssistantLine: null });
+    expect(current()).toMatchObject({ phase: 'exited', lastAssistantLine: 'Folded line', context: { percent: 0.5 } });
   });
 });
 
@@ -205,14 +309,17 @@ describe('read model drops input for a session with no observed record', () => {
   it('a recreated session continues its digest revision where the removed one stopped', () => {
     const emitted: SessionDigest[] = [];
     model.on('digest', (d) => emitted.push(d));
+    const live = () => src.writer.applyEngineStatus(status(A, { process: 'ready' })); // the phase moves only for a live process
     src.writer.observeRecord(record(A));
+    live();
     src.writer.fold(A, [ev('turn.started', {})]);
     src.writer.fold(A, [ev('turn.ended', { costUsd: 0.2 })]);
     src.writer.observeRemoved(A);
     src.writer.observeRecord(record(A));
+    live();
     src.writer.fold(A, [ev('turn.started', {})]);
-    expect(emitted.map((d) => d.revision)).toEqual([1, 2, 3]);
-    expect(model.digests()).toMatchObject([{ appSessionId: A, phase: 'working', revision: 3 }]);
+    expect(emitted.map((d) => d.revision)).toEqual([1, 2, 3, 4, 5]);
+    expect(model.digests()).toMatchObject([{ appSessionId: A, phase: 'working', revision: 5 }]);
   });
 });
 

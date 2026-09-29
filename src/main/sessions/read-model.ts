@@ -29,6 +29,7 @@ export interface ReadModelWriter {
   fold(appSessionId: AppSessionId, events: SessionEvent[]): void; // the digest reducer over a `session.eventBatch`
   applyEngineStatus(s: EngineSessionStatus): void; // C3's session.status: phase facts, and the process and turn state the quit guard reads
   forgetEngineStatus(appSessionId: AppSessionId): void; // no process is owned any more (the scenario's `engine: null`)
+  observeReplay(appSessionId: AppSessionId): void; // C4's `session.replay.progress`: the host plays this session's events live
   observeAttention(appSessionId: AppSessionId, items: AttentionItem[]): void; // attention.changed
 }
 
@@ -51,6 +52,9 @@ export class SessionReadModel {
   private readonly lastRevision = new Map<AppSessionId, number>();
   private readonly seen = new Map<AppSessionId, Set<string>>();
   private readonly ledgers = new Map<AppSessionId, CostLedger>(); // cost across the session's processes (digest.ts)
+  // C4 replay runs seen this app run: the host plays their events as a live session's, with no engine status. A run
+  // stays live once seen, so its last batch (which may trail its `done` progress) still ends its turn.
+  private readonly replays = new Set<AppSessionId>();
   private readonly costAtSeen = new Map<AppSessionId, number>();
   private readonly statuses = new Map<AppSessionId, EngineSessionStatus>();
   private readonly attentionById = new Map<AppSessionId, AttentionItem[]>();
@@ -152,6 +156,12 @@ export class SessionReadModel {
     this.fire('digest', committed);
   }
 
+  // Liveness (digest.ts `foldEvents`): the process table's truth, as the quit guard reads it.
+  private live(appSessionId: AppSessionId): boolean {
+    const status = this.statuses.get(appSessionId);
+    return (status !== undefined && LIVE.has(status.process)) || this.replays.has(appSessionId);
+  }
+
   private current(appSessionId: AppSessionId): SessionDigest {
     return this.digestsById.get(appSessionId) ?? emptyDigest(appSessionId);
   }
@@ -166,6 +176,7 @@ export class SessionReadModel {
       this.digestsById.delete(appSessionId);
       this.seen.delete(appSessionId);
       this.ledgers.delete(appSessionId);
+      this.replays.delete(appSessionId);
       this.costAtSeen.delete(appSessionId);
       this.statuses.delete(appSessionId);
       this.attentionById.delete(appSessionId);
@@ -179,10 +190,24 @@ export class SessionReadModel {
       this.projects.delete(id);
     },
     setDigest: (d) => {
-      // A given `sinceSeenUsd` fixes the cost at which the session was last seen, so later samples stay consistent.
-      if (d.cost) this.costAtSeen.set(d.appSessionId, d.cost.totalUsd - d.cost.sinceSeenUsd);
-      this.ledgers.delete(d.appSessionId); // the given cost is the live process's running total from here
-      this.commit({ ...d, revision: 0 });
+      // A null cost, context or last line means the writer does not know it (C4's seed for a session with no live
+      // process knows neither cost nor context), so the folded value stands. A given cost becomes the live process's
+      // running total, unless it is below what the session's processes already cost (a seed after an exit).
+      const prev = this.digestsById.get(d.appSessionId);
+      const ledger = this.ledgers.get(d.appSessionId);
+      const keepCost = d.cost === null || (ledger !== undefined && d.cost.totalUsd < ledger.finishedUsd + ledger.runningUsd);
+      if (!keepCost && d.cost) {
+        // A given `sinceSeenUsd` fixes the cost at which the session was last seen, so later samples stay consistent.
+        this.costAtSeen.set(d.appSessionId, d.cost.totalUsd - d.cost.sinceSeenUsd);
+        this.ledgers.delete(d.appSessionId);
+      }
+      this.commit({
+        ...d,
+        cost: keepCost ? (prev?.cost ?? null) : d.cost,
+        context: d.context ?? prev?.context ?? null,
+        lastAssistantLine: d.lastAssistantLine ?? prev?.lastAssistantLine ?? null,
+        revision: 0,
+      });
     },
     // A status or batch for a session with no observed record is dropped (C10's trust bootstrap launches under the
     // session's id before the record exists): the model describes only sessions a source has listed.
@@ -192,13 +217,16 @@ export class SessionReadModel {
       if (!seen) this.seen.set(appSessionId, (seen = new Set()));
       let ledger = this.ledgers.get(appSessionId);
       if (!ledger) this.ledgers.set(appSessionId, (ledger = costLedger(this.current(appSessionId))));
-      this.commit(foldEvents(this.current(appSessionId), seen, events, ledger));
+      this.commit(foldEvents(this.current(appSessionId), seen, events, ledger, this.live(appSessionId)));
     },
     applyEngineStatus: (s) => {
       if (!this.records.has(s.appSessionId)) return;
       this.statuses.set(s.appSessionId, s);
       this.fire('engine', s.appSessionId, s);
       this.commit(applyStatusToDigest(this.current(s.appSessionId), s));
+    },
+    observeReplay: (appSessionId) => {
+      if (this.records.has(appSessionId)) this.replays.add(appSessionId);
     },
     forgetEngineStatus: (appSessionId) => {
       if (!this.statuses.delete(appSessionId)) return;

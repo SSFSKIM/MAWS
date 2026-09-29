@@ -25,13 +25,16 @@ export interface Sessions {
   stop(): void;
 }
 
-// C3's event batches and statuses on the re-emit path: the digest fold and the process table the quit guard reads.
+// C3's event batches and statuses on the re-emit path: the digest fold and the process table the quit guard reads;
+// C4's replay progress marks a replay run live for the fold.
 export function hostEventSource(hosts: Pick<HostSupervisor, 'onEvent'>): SessionSource {
   return {
     start(writer) {
       const offs = [
         hosts.onEvent('session.eventBatch', ({ appSessionId, events }) => writer.fold(appSessionId, events)),
         hosts.onEvent('session.status', ({ status }) => writer.applyEngineStatus(status)),
+        // C4's replay runs have no engine status; their progress says the host is playing the session's events live.
+        hosts.onEvent('session.replay.progress', ({ appSessionId }) => writer.observeReplay(appSessionId as AppSessionId)),
       ];
       return () => offs.forEach((off) => off());
     },

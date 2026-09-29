@@ -30,6 +30,19 @@ describe('read model snapshot matches events', () => {
     expect(listeners.size).toBe(0);
   });
 
+  it('folds a C4 replay run in full once the host reports its progress, with no engine status', () => {
+    const listeners = new Map<string, (payload: unknown) => void>();
+    const hosts = { onEvent: (name: string, listener: (payload: unknown) => void) => (listeners.set(name, listener), () => listeners.delete(name)) };
+    const model = new SessionReadModel('index');
+    model.register({ start: (writer) => (writer.observeRecord(record('r1')), () => {}) });
+    model.register(hostEventSource(hosts as never));
+    listeners.get('session.eventBatch')!({ appSessionId: 'r1', events: [ev('turn.started', { seq: null })] });
+    expect(model.digests()[0]?.phase ?? 'idle').toBe('idle'); // history: no live process yet
+    listeners.get('session.replay.progress')!({ appSessionId: 'r1', state: 'running', index: 0, total: 3, at: null, speed: 1, message: null });
+    listeners.get('session.eventBatch')!({ appSessionId: 'r1', events: [ev('turn.started', { seq: null }), ev('tool.use', { seq: null, toolName: 'Grep' })] });
+    expect(model.digests()).toMatchObject([{ appSessionId: 'r1' as AppSessionId, phase: 'working', activity: 'Searching' }]);
+  });
+
   it('sees attention.changed as emitted through main’s emit, in either launch mode', () => {
     for (const mode of ['index', 'scenario'] as const) {
       const model = new SessionReadModel(mode);

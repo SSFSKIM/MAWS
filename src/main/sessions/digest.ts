@@ -154,14 +154,26 @@ function foldWithLedger(prev: SessionDigest, event: SessionEvent, ledger: CostLe
 // Folds a batch, skipping ids already in `seen` (a backfill overlapping a snapshot, a repeated batch) and keeping the
 // last SEEN_WINDOW ids. `seen` and `ledger` are the caller's per-session state, mutated here; insertion order is age
 // order.
-export function foldEvents(prev: SessionDigest, seen: Set<string>, events: SessionEvent[], ledger: CostLedger = costLedger(prev)): SessionDigest {
+//
+// Liveness: `live` says the session has a live process (the read model's call: an engine status in starting,
+// initializing or ready, or a replay run the host plays). Without one the events are history — C4 following or
+// backfilling a transcript nobody here runs — and move only the last line, context, child agents and pending count,
+// never the phase, activity or turn times, so replayed history never turns a done or foreign session idle.
+export function foldEvents(
+  prev: SessionDigest,
+  seen: Set<string>,
+  events: SessionEvent[],
+  ledger: CostLedger = costLedger(prev),
+  live = true,
+): SessionDigest {
   let digest = prev;
   for (const event of events) {
     if (seen.has(event.id)) continue;
     seen.add(event.id);
     if (seen.size > SEEN_WINDOW) seen.delete(seen.values().next().value as string);
     Object.assign(ledger, foldCost(ledger, event));
-    digest = foldWithLedger(digest, event, ledger);
+    const next = foldWithLedger(digest, event, ledger);
+    digest = live ? next : { ...next, phase: digest.phase, activity: digest.activity, turnStartedAt: digest.turnStartedAt, lastTurnEndedAt: digest.lastTurnEndedAt };
   }
   return digest;
 }
