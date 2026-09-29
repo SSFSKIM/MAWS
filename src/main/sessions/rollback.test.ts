@@ -235,6 +235,63 @@ describe('rollback per resource', () => {
     expect(h.host.launches.map((l) => l.appSessionId)).toEqual([a]); // the refused start launched nothing
   });
 
+  it('two starts issued together for one new worktree: the second is refused before either adds, and the first’s checkout and branch stay', async () => {
+    const a = await create(worktree('race'));
+    const b = await create(worktree('race'));
+    h.host.script = () => ({ ready: false });
+    const [first, second] = await Promise.all([
+      h.service.startSession(a, { message: null, options: {} }),
+      h.service.startSession(b, { message: MESSAGE, options: {} }),
+    ]);
+    expect(first).toMatchObject({ status: 'starting' });
+    expect(['invalid', 'starting']).toContain((second as { status: string }).status);
+    if (second.status === 'invalid') expect(second.field).toBe('location');
+    await h.until(() => h.host.launches.length > 0);
+    await new Promise((resolve) => setTimeout(resolve, 100)); // anything B would have done has had its chance
+    expect(existsSync(managed('race'))).toBe(true);
+    expect(await repo.hasBranch('worktree-race')).toBe(true);
+    expect(h.host.launches.map((l) => l.appSessionId)).toEqual([a]);
+    expect(intentFile(h, b)!.progress.worktree).toBeNull();
+    expect(h.setupEvents(b)).toEqual([]);
+  });
+
+  it('a branch a terminal created between the guards and the add is refused, never read back as this attempt’s, and nothing is deleted', async () => {
+    const id = await create(worktree('terminal'));
+    const add = h.worktrees.add.bind(h.worktrees);
+    h.worktrees.add = async (input) => {
+      await runGit(repo.root, ['branch', 'worktree-terminal']); // the owner's terminal, in the window after the guards
+      return add(input);
+    };
+    await h.service.startSession(id, { message: MESSAGE, options: {} });
+    expect(await h.settled(id)).toMatchObject({ phase: 'failed', outcome: { kind: 'error', message: 'branch exists', resources: { worktree: null, record: 'none' } } });
+    expect(await repo.hasBranch('worktree-terminal')).toBe(true);
+    expect(intentFile(h, id)!.progress.worktree).toBeNull();
+  });
+
+  it('a failing post-checkout hook fails git’s own add: what it left is read back as this attempt’s and rolled back', async () => {
+    await hook('exit 1');
+    const id = await create(worktree('hookfail'));
+    await h.service.startSession(id, { message: MESSAGE, options: {} });
+    expect(await h.settled(id)).toMatchObject({
+      phase: 'failed',
+      outcome: { kind: 'error', resources: { worktree: { path: managed('hookfail'), createdHere: true, state: 'removed', branchState: 'deleted' }, record: 'none' } },
+    });
+    expect(existsSync(managed('hookfail'))).toBe(false);
+    expect(await repo.hasBranch('worktree-hookfail')).toBe(false);
+    expect(h.host.launches).toEqual([]);
+  });
+
+  it('a start arriving while another start of the same intent is still guarding is refused starting', async () => {
+    const id = await create(worktree('guarding'));
+    h.host.script = () => ({ ready: false });
+    const results = await Promise.allSettled([h.service.startSession(id, { message: null, options: {} }), h.service.startSession(id, { message: null, options: {} })]);
+    expect(results[0]).toMatchObject({ status: 'fulfilled', value: { status: 'starting' } });
+    expect(results[1]).toMatchObject({ status: 'rejected', reason: { reason: 'starting', message: `starting: a start is in flight for ${id}` } });
+    await h.until(() => h.host.launches.length > 0);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(h.host.launches).toHaveLength(1);
+  });
+
   it('trust follows the key: a decision for the repository does not carry to a plain directory', async () => {
     h.trust.write({}); // nothing trusted
     const id = await create(worktree('trust'));

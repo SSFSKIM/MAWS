@@ -28,6 +28,15 @@ export interface WorktreeServiceDeps {
   holders: HolderDeps; // occupancy: C3's process table, C4's fresh registry read, the index's records
 }
 
+// `add` failed in or after git's own `worktree add`, which may have created something (a caller reads git back); every
+// other `add` failure is a refusal decided before anything was created. `cause` is the runner's error (a timeout included).
+export class WorktreeAddFailed extends Error {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = 'WorktreeAddFailed';
+  }
+}
+
 export class WorktreeService {
   constructor(private readonly deps: WorktreeServiceDeps) {}
 
@@ -84,16 +93,26 @@ export class WorktreeService {
       if (existing !== null) throw new Error('branch exists');
       const base = branch.base;
       if (base === '' || base.startsWith('-') || (await this.resolve(root, `${base}^{commit}`)) === null) throw new Error(`base not found: ${base}`);
-      await this.git(root, ['worktree', 'add', '--no-track', '-b', branch.name, path, base]);
+      await this.invokeAdd(root, ['worktree', 'add', '--no-track', '-b', branch.name, path, base]);
     } else {
       if (existing === null) throw new Error('branch missing');
       const holder = entries.find((e) => e.branch === branch.name);
       if (holder) throw new Error(`branch checked out at ${holder.path}`);
-      await this.git(root, ['worktree', 'add', path, branch.name]);
+      await this.invokeAdd(root, ['worktree', 'add', path, branch.name]);
     }
     const created = await this.find(root, path);
-    if (created === null) throw new Error(`git worktree add did not list ${path}`);
+    if (created === null) throw new WorktreeAddFailed(`git worktree add did not list ${path}`);
     return created;
+  }
+
+  // git's own `worktree add`: a failure here may have left the branch (created before the checkout) or the checkout (a
+  // failing post-checkout hook), so it is told apart from the refusals above, which create nothing.
+  private async invokeAdd(root: string, args: string[]): Promise<void> {
+    try {
+      await this.git(root, args);
+    } catch (error) {
+      throw new WorktreeAddFailed(error instanceof Error ? error.message : String(error), { cause: error });
+    }
   }
 
   // The checkout, revalidated against the identity the caller captured. `--force` only with the acknowledged discard;

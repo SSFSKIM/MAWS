@@ -20,7 +20,8 @@ async function relay<T>(call: () => Promise<T>): Promise<T> {
   try {
     return await call();
   } catch (error) {
-    if (error instanceof GitTimeoutError) throw new CommandFailure(ipcError('timeout', error.message));
+    const timeout = error instanceof GitTimeoutError ? error : error instanceof Error && error.cause instanceof GitTimeoutError ? error.cause : null; // `add` wraps git's own failure
+    if (timeout !== null) throw new CommandFailure(ipcError('timeout', timeout.message));
     throw error;
   }
 }

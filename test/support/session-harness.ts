@@ -47,6 +47,7 @@ export class SessionHarness {
   hangRemove = false;
   host: FakeEngineHost;
   service!: SessionService;
+  worktrees!: WorktreeService; // the instance the service holds (a test may wrap its methods)
   private stopSource: () => void = () => {};
 
   constructor(private readonly opts: HarnessOptions = {}) {
@@ -66,7 +67,7 @@ export class SessionHarness {
     const source = new IndexSessionSource(this.index, this.host, { emit: (name, payload) => this.record(name, payload), tickMs: 1 });
     this.stopSource = source.start(noopWriter);
     const git = createGitRunner({ env: { PATH: process.env.PATH, HOME: this.home } });
-    const worktrees = new WorktreeService({ git, holders: { dispatch: this.host.dispatch, sessions: this.index.sessions } });
+    const worktrees = (this.worktrees = new WorktreeService({ git, holders: { dispatch: this.host.dispatch, sessions: this.index.sessions } }));
     this.service = new SessionService({
       index: this.index,
       host: { dispatch: this.host.dispatch, onEvent: this.host.onEvent },

@@ -16,7 +16,7 @@ import type { FirstMessage, Location, SetupIntent } from '@shared/sessions/inten
 import type { SetupEvent, SetupPhase, SetupResources } from '@shared/sessions/setup';
 import type { StartOptions } from '@shared/ipc/schema/session';
 import type { GitRun } from '../git/runner';
-import type { WorktreeService } from '../git/worktrees';
+import { WorktreeAddFailed, type WorktreeService } from '../git/worktrees';
 import type { SessionStore } from '../index/sessions';
 import type { HostDispatch } from '../ipc/router';
 import { attachCommand, bgRefusalOf } from './attach';
@@ -360,7 +360,9 @@ export async function runIntentSetup(s: Setup, appSessionId: AppSessionId, attem
         try {
           info = await s.worktrees.add({ repoRoot: location.repoRoot, name: location.name, branch: location.branch });
         } catch (error) {
-          await recordPartialWorktree(s, run, location);
+          // only git's own `worktree add` can have created something; a refusal before it (`worktree path exists`,
+          // `branch exists`) names what someone else made, which is never read back as this attempt's
+          if (error instanceof WorktreeAddFailed) await recordPartialWorktree(s, run, location);
           throw new SetupFailure('worktree', messageOf(error));
         }
         await run.progress({ worktree: { path: info.path, branch: info.branch, head: info.head, createdHere: true } });

@@ -14,6 +14,7 @@ import { dirname, join } from 'node:path';
 import type { AppSessionId, MessageUuid, ProjectId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import { isGatewayModel } from '@shared/sessions/models';
+import { worktreeDirName } from '@shared/sessions/worktree';
 import type { FirstMessage, ForkTarget, Location, SetupIntent, SetupIntentPatch } from '@shared/sessions/intent';
 import type { SetupResources, StartOutcome } from '@shared/sessions/setup';
 import type { TrustState } from '@shared/sessions/trust';
@@ -50,7 +51,7 @@ export class SessionService {
   private readyPromise: Promise<void> | null = null;
   private readonly locks = new Map<string, Promise<void>>();
   private readonly starting = new Set<string>(); // ids with a start in flight (guards through the end of the setup)
-  private readonly startingPaths = new Set<string>(); // new-worktree paths a start in flight will create
+  private readonly startingNames = new Set<string>(); // new-worktree directory names a start in flight holds (claimWorktreeName)
   private readonly resumeMessages = new Map<string, FirstMessage>(); // a resume's message, retained behind a card
   private readonly reconcileFailures = new Map<string, string>(); // ids whose start-time reconciliation failed
   private readonly manifests: DeletionManifests;
@@ -324,11 +325,20 @@ export class SessionService {
   // `session.start`: an intent's setup, or a record's resume. `starting` is the only answer after which phases stream.
   async startSession(appSessionId: AppSessionId, args: { message: FirstMessage | null; options: StartOptions }): Promise<StartOutcome> {
     await this.ready();
+    // Marked synchronously, before the guards' first await: a second start, a patch or a release of this id is refused
+    // `starting` from here on, and a new worktree's name is reserved against every other start, so two starts can
+    // never both pass their guards for one checkout.
     this.refuseWhileStarting(appSessionId);
-    const release = await this.lock(appSessionId);
+    this.starting.add(appSessionId);
+    const claim = this.claimWorktreeName(this.deps.intents.get(appSessionId));
+    let release: (() => void) | null = null;
     let handedOff = false;
     try {
-      if (this.starting.has(appSessionId)) throw new IntentRefused('starting', `starting: a start is in flight for ${appSessionId}`);
+      if (claim === 'taken') {
+        const location = this.intentOf(appSessionId).location as Extract<Location, { kind: 'newWorktree' }>;
+        return await this.rejectIntent(appSessionId, { status: 'invalid', appSessionId, field: 'location', message: `a worktree named ${location.name} is being created by another start` });
+      }
+      release = await this.lock(appSessionId);
       // a reconciliation that failed at start is re-run first, never the setup in its place
       const intentBefore = this.deps.intents.get(appSessionId);
       if (intentBefore !== null && this.reconcileFailures.has(appSessionId)) {
@@ -345,19 +355,56 @@ export class SessionService {
         [outcome, run] = await this.guardResume(record, args);
       }
       if (run === null) return outcome;
-      this.starting.add(appSessionId);
       handedOff = true;
+      const held = release;
       void run().finally(() => {
-        this.starting.delete(appSessionId);
-        release();
+        this.endStart(appSessionId, claim);
+        held();
       });
       return outcome;
     } finally {
-      if (!handedOff) release();
+      if (!handedOff) {
+        this.endStart(appSessionId, claim);
+        release?.();
+      }
     }
   }
 
+  // A new worktree an unretained intent would create, claimed by its directory name (every repository alike: two spellings
+  // of one repository must not both pass, and the name is known without an await). 'taken' when another start holds it.
+  private claimWorktreeName(intent: SetupIntent | null): string | null | 'taken' {
+    if (intent === null || intent.location.kind !== 'newWorktree' || intent.progress.worktree !== null) return null;
+    const key = worktreeDirName(intent.location.name);
+    if (this.startingNames.has(key)) return 'taken';
+    this.startingNames.add(key);
+    return key;
+  }
+
+  private endStart(appSessionId: AppSessionId, claim: string | null | 'taken'): void {
+    this.starting.delete(appSessionId);
+    if (claim !== null && claim !== 'taken') this.startingNames.delete(claim);
+  }
+
+  // A rejected guard hands the message back: C7's gate reads `intent.message`, so the editor unlocks the moment the
+  // answer lands; the draft is untouched.
+  private async rejectIntent<T extends StartOutcome | null>(appSessionId: AppSessionId, outcome: T): Promise<T> {
+    const intent = this.deps.intents.get(appSessionId);
+    if (intent !== null && intent.message !== null) await this.putIntent({ ...intent, message: null, updatedAt: this.now() });
+    return outcome;
+  }
+
   private async guardIntent(intentIn: SetupIntent, args: { message: FirstMessage | null; options: StartOptions }): Promise<[StartOutcome, (() => Promise<void>) | null]> {
+    try {
+      return await this.guardIntentOnce(intentIn, args);
+    } catch (error) {
+      // a guard that could not answer (the relay check, a fail-closed holder read, a git failure) hands the message back
+      // as a rejection does, then fails the command with its error
+      await this.rejectIntent(intentIn.appSessionId, null).catch(() => {});
+      throw error;
+    }
+  }
+
+  private async guardIntentOnce(intentIn: SetupIntent, args: { message: FirstMessage | null; options: StartOptions }): Promise<[StartOutcome, (() => Promise<void>) | null]> {
     const s = this.s;
     const appSessionId = intentIn.appSessionId;
     // the options and the message first, persisted and published (C7's gate closes on the published message); the
@@ -368,18 +415,10 @@ export class SessionService {
     intent = await this.bindTrust(intent, true, args.options.trust);
     intent = await this.putIntent(intent);
 
-    const reject = async (outcome: Rejection): Promise<[StartOutcome, null]> => {
-      // the hand-back: C7's gate reads `intent.message`, so the editor unlocks the moment this answer lands
-      await this.putIntent({ ...this.intentOf(appSessionId), message: null, updatedAt: this.now() });
-      return [outcome, null];
-    };
+    const reject = async (outcome: Rejection): Promise<[StartOutcome, null]> => [await this.rejectIntent(appSessionId, outcome), null];
     const verdict = await checkLocation(s, intent, { forStart: true });
     if (!verdict.ok) {
       return reject(verdict.kind === 'invalid' ? { status: 'invalid', appSessionId, field: verdict.field, message: verdict.message } : { status: 'missing_directory', appSessionId, directory: verdict.directory });
-    }
-    const target = intent.location.kind === 'newWorktree' ? await sessionDirectoryOf(s, intent.location) : null;
-    if (target !== null && intent.progress.worktree === null && this.startingPaths.has(await canonicalPath(target))) {
-      return reject({ status: 'invalid', appSessionId, field: 'location', message: `worktree path in use by another start: ${target}` });
     }
     const dirs = await checkAdditionalDirectories(intent, await sessionDirectoryOf(s, intent.location));
     if (!dirs.ok && dirs.kind === 'invalid') return reject({ status: 'invalid', appSessionId, field: dirs.field, message: dirs.message });
@@ -410,10 +449,7 @@ export class SessionService {
     if (progress.engineSessionId === null) progress = { ...progress, engineSessionId: randomUUID() as NonNullable<typeof progress.engineSessionId> };
     if (progress.bootstrap !== null && (await this.forgetQuietly(progress.bootstrap.appSessionId))) progress = { ...progress, bootstrap: null };
     if (progress !== intent.progress) await this.putIntent({ ...intent, progress, updatedAt: this.now() });
-    const worktreePath = target !== null && progress.worktree === null ? await canonicalPath(target) : null;
-    if (worktreePath !== null) this.startingPaths.add(worktreePath);
-    const run = () => runIntentSetup(s, appSessionId, { gateway, directFallback }).finally(() => worktreePath !== null && this.startingPaths.delete(worktreePath));
-    return [{ status: 'starting', appSessionId }, run];
+    return [{ status: 'starting', appSessionId }, () => runIntentSetup(s, appSessionId, { gateway, directFallback })];
   }
 
   // A fork is refused for a source that is gone, has no engine id, or has a turn open in MAWS (a copy taken mid-turn

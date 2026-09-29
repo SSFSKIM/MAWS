@@ -1,3 +1,4 @@
+import { execFile } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { existsSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -89,5 +90,16 @@ describe('main answers git.worktree.* through the router', () => {
       ok: false,
       error: { code: 'timeout', message: `git rev-parse timed out after 10 s in ${repo.root}` },
     });
+  });
+
+  it('answers timeout when git’s own worktree add is killed at its deadline', async () => {
+    const real = execFile as unknown as ExecFileFn;
+    const hungAdd: ExecFileFn = (file, args, options, callback) => {
+      if (!(args as string[]).includes('add')) return real(file, args, options, callback);
+      queueMicrotask(() => callback(Object.assign(new Error('Command failed'), { killed: true, signal: 'SIGTERM' as const, code: null }), '', ''));
+    };
+    await install({ execFile: hungAdd });
+    const result = await invoke('git.worktree.add', { repoRoot: repo.root, name: 'slow', branch: { kind: 'new', name: 'worktree-slow', base: 'HEAD' } });
+    expect(result).toMatchObject({ ok: false, error: { code: 'timeout', message: expect.stringContaining('git worktree timed out') } });
   });
 });
