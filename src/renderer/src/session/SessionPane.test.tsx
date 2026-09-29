@@ -37,6 +37,7 @@ describe('session pane', () => {
     const id = idOf('Fix sidebar drag');
     registerSlot('transcript', ({ appSessionId, agentId, paneIndex }) => <p>transcript {`${appSessionId} ${agentId} ${paneIndex}`}</p>);
     registerSlot('requestCard', ({ item, placement, paneIndex }) => <p>request {`${item.kind} ${placement} ${paneIndex}`}</p>);
+    // C7: no composer registered here (C5's stub composer registration removed): a registered composer docks the request itself (the C7 case below)
     render(<SessionPane appSessionId={id} paneIndex={1} />);
     expect(screen.getByText(`transcript ${id} null 1`)).toBeTruthy();
     const request = screen.getByText('request permission docked 1');
