@@ -25,6 +25,7 @@
     "dev:harness": "MAWS_HARNESS=1 electron-vite dev",
     "e2e:transcript": "MAWS_HARNESS=1 electron-vite build && MAWS_HARNESS=1 playwright test e2e/transcript.spec.ts",
     "e2e:requests": "MAWS_HARNESS=1 electron-vite build && MAWS_ENGINE_REPLAY=1 playwright test e2e/requests.spec.ts",
+    "e2e:composer": "MAWS_HARNESS=1 electron-vite build && MAWS_ENGINE_REPLAY=1 playwright test e2e/composer.spec.ts",
     "postinstall": "chmod +x node_modules/node-pty/prebuilds/darwin-arm64/spawn-helper && install-electron"
   },
   "dependencies": {

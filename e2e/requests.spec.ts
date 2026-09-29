@@ -13,8 +13,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test as base, type Page } from '@playwright/test';
 import type { SessionEvent } from '@shared/graph/events';
-import type { CommandInput, CommandName, CommandResult } from '@shared/ipc/schema';
 import type { CardsHarnessApi, HarnessPane } from '../src/renderer/src/harness/composer/api';
+import { invoke, launchReady, value } from './support/c7-replay';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 
 const HARNESS_BUILT = existsSync(join(REPO_ROOT, 'out/renderer/harness.html'));
@@ -56,23 +56,6 @@ const eventsOf = (page: Page, id: string) =>
   page.evaluate((appSessionId) => (window as unknown as CardsWindow).__c7.batches.filter((b) => b.appSessionId === appSessionId).flatMap((b) => b.events), id);
 const resolved = async <K extends SessionEvent['kind']>(page: Page, id: string, kind: K) =>
   (await eventsOf(page, id)).filter((e): e is Extract<SessionEvent, { kind: K }> => e.kind === kind);
-
-function invoke<N extends CommandName>(page: Page, name: N, input: CommandInput<N>): Promise<CommandResult<N>> {
-  return page.evaluate(([n, i]) => window.maws.invoke(n as never, i as never), [name, input] as const) as Promise<CommandResult<N>>;
-}
-function value<N extends CommandName>(result: CommandResult<N>) {
-  if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`);
-  return result.value;
-}
-
-async function launchReady(page: Page, appSessionId: string, replay: string): Promise<void> {
-  const spec = {
-    appSessionId, cwd: '/tmp/maws-e2e-replay', additionalDirectories: [], model: null, effort: null, permissionMode: null, gateway: 'gateway' as const, subagentModel: null,
-    resume: null, sessionId: null, trust: null, mcpConfig: null, extraSettings: null, maxBudgetUsd: null, replay,
-  };
-  expect(value(await invoke(page, 'session.launch', { spec }))).toMatchObject({ status: 'launching' });
-  await expect.poll(async () => value(await invoke(page, 'session.status', { appSessionId })).process).toBe('ready');
-}
 
 // The fixture's first recorded human prompt, sent as recorded (the replay holds at it).
 function firstPrompt(fixture: string): string {

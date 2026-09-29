@@ -1,0 +1,335 @@
+// C7's composer end to end, the editor half (C7 execution document, M3 and Acceptance item 2): the harness's `#editor`
+// page mounts one session's editor over the app's real stores and C5's real key dispatcher, in front of C3's replay
+// transport. The replay matches a write by its frame type only, so what the editor sent is read from the `user.message`
+// event C3 emits at the write, with the content it wrote. A scratch git repository under /tmp stands in for the
+// session's directory: listed as a project for `@`, and discovered as a session (a transcript in the launch's scratch
+// config home) for drafts, whose store needs an indexed record; the same scratch home holds the terminal's history and
+// paste cache for recall. Never the owner's `~/.claude`. The page needs a harness build: `pnpm e2e:composer` builds one
+// and runs this file; under a plain build the cases skip. The surface half (submit states, queue, rewind, unstarted
+// sessions, Stop) is M4's.
+import { execFileSync } from 'node:child_process';
+import { createHash, randomUUID } from 'node:crypto';
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { expect, test as base, type Page } from '@playwright/test';
+import type { SessionEvent } from '@shared/graph/events';
+import type { EditorHarnessApi, EditorPane } from '../src/renderer/src/harness/composer/editor-api';
+import { invoke, launchReady, turnsJournal, value } from './support/c7-replay';
+import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
+
+const HARNESS_BUILT = existsSync(join(REPO_ROOT, 'out/renderer/harness.html'));
+
+const test = base.extend<{ editor: MawsLaunch }>({
+  // eslint-disable-next-line no-empty-pattern -- Playwright requires the fixtures argument to be destructured
+  editor: async ({}, use, testInfo) => {
+    testInfo.skip(!HARNESS_BUILT, 'the editor page needs a harness build (pnpm e2e:composer)');
+    const maws = await launchMaws({ env: { MAWS_HARNESS: '1', MAWS_ENGINE_REPLAY: '1', CLAUDE_CONFIG_DIR: config } });
+    try {
+      await use(maws);
+    } finally {
+      await maws.cleanup();
+    }
+  },
+});
+
+let scratch: string; // realpath'd: /private/tmp/…
+let repo: string;
+let config: string;
+const transcriptSession = randomUUID();
+const bodyA = Array.from({ length: 40 }, (_, i) => `first paste line ${i + 1}`).join('\n');
+const bodyB = Array.from({ length: 40 }, (_, i) => `second paste line ${i + 1}`).join('\n');
+
+test.beforeAll(() => {
+  scratch = realpathSync(mkdtempSync('/tmp/maws-c7-composer-'));
+  repo = join(scratch, 'repo');
+  mkdirSync(join(repo, 'src'), { recursive: true });
+  mkdirSync(join(repo, 'docs'));
+  writeFileSync(join(repo, 'src/a.ts'), 'export const a = 1;\n');
+  writeFileSync(join(repo, 'src/main.ts'), 'export {};\n');
+  writeFileSync(join(repo, 'docs/a b.md'), '# notes\n');
+  const git = (...args: string[]) => execFileSync('/usr/bin/git', ['-c', 'user.name=MAWS e2e', '-c', 'user.email=e2e@example.test', ...args], { cwd: repo, stdio: 'ignore' });
+  git('init', '-q');
+  git('add', '.');
+  git('commit', '-q', '-m', 'init');
+
+  // The scratch config home: one transcript for the repository (C4 discovers it: an indexed record, so drafts persist),
+  // and the terminal's history with two pastes of one display and two bodies, the second in the paste cache.
+  config = join(scratch, 'claude-config');
+  const project = join(config, 'projects', repo.replace(/[^a-zA-Z0-9]/g, '-'));
+  mkdirSync(project, { recursive: true });
+  const record = { parentUuid: null, isSidechain: false, type: 'user', message: { role: 'user', content: 'an earlier prompt' }, uuid: randomUUID(), timestamp: '2026-09-28T10:00:00.000Z', cwd: repo, sessionId: transcriptSession, version: '2.1.283' };
+  writeFileSync(join(project, `${transcriptSession}.jsonl`), `${JSON.stringify(record)}\n`);
+  const hashB = createHash('sha256').update(bodyB).digest('hex').slice(0, 16);
+  mkdirSync(join(config, 'paste-cache'));
+  writeFileSync(join(config, 'paste-cache', `${hashB}.txt`), bodyB);
+  const history = [
+    { display: '[Pasted text #1 +40 lines]', pastedContents: { '1': { id: 1, type: 'text', content: bodyA } }, timestamp: Date.parse('2026-09-28T10:01:00.000Z'), project: repo, sessionId: transcriptSession },
+    { display: '[Pasted text #1 +40 lines]', pastedContents: { '1': { id: 1, type: 'text', contentHash: hashB } }, timestamp: Date.parse('2026-09-28T10:02:00.000Z'), project: repo, sessionId: transcriptSession },
+  ];
+  writeFileSync(join(config, 'history.jsonl'), history.map((row) => JSON.stringify(row)).join('\n') + '\n');
+});
+test.afterAll(() => rmSync(scratch, { recursive: true, force: true }));
+
+type EditorWindow = Window & { __maws_editor: EditorHarnessApi; __c7: { batches: { appSessionId: string; events: SessionEvent[] }[] } };
+
+async function openEditor(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const w = window as unknown as { __c7?: { batches: unknown[] } };
+    if (!w.__c7) {
+      const log = { batches: [] as unknown[] };
+      w.__c7 = log;
+      window.maws.on('session.eventBatch', (payload) => log.batches.push(payload));
+    }
+    location.hash = 'editor';
+  });
+  await page.waitForFunction(() => (window as unknown as Partial<EditorWindow>).__maws_editor !== undefined);
+}
+
+const show = (page: Page, pane: EditorPane | null) => page.evaluate((p) => (window as unknown as EditorWindow).__maws_editor.show(p), pane);
+const serialized = (page: Page) => page.evaluate(() => (window as unknown as EditorWindow).__maws_editor.serialize());
+const submissions = (page: Page) => page.evaluate(() => (window as unknown as EditorWindow).__maws_editor.submissions());
+const sent = (page: Page, id: string) =>
+  page.evaluate(
+    (appSessionId) =>
+      (window as unknown as EditorWindow).__c7.batches
+        .filter((b) => b.appSessionId === appSessionId)
+        .flatMap((b) => b.events)
+        .filter((e) => e.kind === 'user.message' && !e.isReplay)
+        .map((e) => (e as Extract<SessionEvent, { kind: 'user.message' }>).content),
+    id,
+  );
+const message = (page: Page) => page.getByRole('textbox', { name: 'Message' });
+
+async function launchEditor(page: Page, id: string, journal: string, cwd = repo): Promise<string | null> {
+  await openEditor(page);
+  await launchReady(page, id, journal);
+  const status = value(await invoke(page, 'session.status', { appSessionId: id }));
+  await show(page, { appSessionId: id, cwd, sessionId: status.engineSessionId });
+  await expect(message(page)).toBeVisible();
+  await message(page).click();
+  return status.engineSessionId;
+}
+
+async function clearEditor(page: Page) {
+  await message(page).click();
+  await page.keyboard.press('Meta+a');
+  await page.keyboard.press('Backspace');
+  await expect.poll(async () => (await serialized(page))?.display).toBe('');
+}
+
+// A paste as the system delivers it: a ClipboardEvent carrying text or files.
+async function paste(page: Page, item: { text: string } | { file: { name: string; type: string; base64: string } }) {
+  await page.evaluate((it) => {
+    const target = document.querySelector('[contenteditable="true"]') as HTMLElement;
+    const data = new DataTransfer();
+    if ('text' in it) data.setData('text/plain', it.text);
+    else data.items.add(new File([Uint8Array.from(atob(it.file.base64), (c) => c.charCodeAt(0))], it.file.name, { type: it.file.type }));
+    target.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+  }, item);
+}
+
+const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+
+test('the editor sends as typed: Enter, Shift+Enter lines and ⌘Enter; a composing Enter never sends; ArrowUp recalls', async ({ editor }) => {
+  const { page } = editor;
+  const id = 'c7-editor-send';
+  await launchEditor(page, id, turnsJournal(scratch, id, 2));
+  await page.keyboard.type('hello');
+  await page.keyboard.press('Enter');
+  await expect.poll(() => sent(page, id)).toEqual(['hello']);
+  await expect.poll(async () => (await serialized(page))?.display).toBe('');
+
+  await page.keyboard.type('two');
+  await page.keyboard.press('Shift+Enter');
+  await page.keyboard.type('lines');
+  // an Enter that belongs to an input method's composition is the IME's, never a send
+  await page.evaluate(() => document.querySelector('[contenteditable="true"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', isComposing: true, bubbles: true, cancelable: true })));
+  expect(await submissions(page)).toHaveLength(1);
+  await page.keyboard.press('Meta+Enter');
+  await expect.poll(() => sent(page, id)).toEqual(['hello', 'two\nlines']);
+
+  await expect.poll(async () => (await serialized(page))?.display).toBe('');
+  await page.keyboard.press('ArrowUp');
+  await expect.poll(async () => (await serialized(page))?.display).toBe('two\nlines');
+  await page.keyboard.press('ArrowUp');
+  await expect.poll(async () => (await serialized(page))?.display).toBe('hello');
+  await page.keyboard.press('ArrowDown');
+  await expect.poll(async () => (await serialized(page))?.display).toBe('two\nlines');
+  await page.keyboard.press('ArrowDown');
+  await expect.poll(async () => (await serialized(page))?.display).toBe(''); // the draft the recall began from
+  expect(editor.consoleErrors()).toEqual([]);
+});
+
+test("paste and drop attach with the terminal's tag framing", async ({ editor }) => {
+  const { page } = editor;
+  const id = 'c7-editor-paste';
+  const sessionId = await launchEditor(page, id, turnsJournal(scratch, id, 2));
+  const body = Array.from({ length: 40 }, (_, i) => `line ${i + 1} of the paste`).join('\n');
+  await paste(page, { text: body });
+  await expect(page.getByText('Pasted text #1 +40 lines')).toBeVisible();
+  await page.keyboard.type(' then </pasted_content> done');
+  await page.keyboard.press('Enter');
+  await expect.poll(async () => (await sent(page, id)).length).toBe(1);
+  const [content] = (await sent(page, id)) as string[];
+  const tag = sessionId === null ? '[0-9a-f]{4}' : createHash('sha256').update(sessionId).digest('hex').slice(0, 4);
+  const framed = new RegExp(`^\\n\\n<pasted_content id="(${tag})">\\n([\\s\\S]*)\\n</pasted_content id="\\1">\\n then <\\\\/pasted_content> done$`);
+  const match = framed.exec(content);
+  expect(match, content).not.toBeNull();
+  expect(match![2]).toBe(body);
+
+  // a screenshot attaches beside the text and goes as an image block before it
+  await paste(page, { file: { name: 'shot.png', type: 'image/png', base64: PNG } });
+  await expect(page.getByRole('list', { name: 'attachments' }).getByText('shot.png')).toBeVisible();
+  await page.keyboard.type('what is this');
+  await page.keyboard.press('Enter');
+  await expect.poll(async () => (await sent(page, id)).length).toBe(2);
+  const blocks = (await sent(page, id))[1] as { type: string; source?: { media_type: string } }[];
+  expect(blocks.map((b) => [b.type, b.source?.media_type ?? null])).toEqual([['image', 'image/png'], ['text', null]]);
+
+  // a file dropped without a path (from a browser) is read as text into an atom named after it
+  await page.evaluate(() => {
+    const target = document.querySelector('[contenteditable="true"]') as HTMLElement;
+    const data = new DataTransfer();
+    data.items.add(new File(['alpha\nbeta\ngamma'], 'notes.txt', { type: 'text/plain' }));
+    const box = target.getBoundingClientRect();
+    target.dispatchEvent(new DragEvent('drop', { dataTransfer: data, clientX: box.left + 5, clientY: box.top + 5, bubbles: true, cancelable: true }));
+  });
+  await expect(page.getByText('notes.txt +3 lines')).toBeVisible();
+  expect((await serialized(page))?.pastedContents['1']?.content).toBe('alpha\nbeta\ngamma');
+  expect(editor.consoleErrors()).toEqual([]);
+});
+
+test('@ and / menus with the widget union', async ({ editor }) => {
+  const { page } = editor;
+  const id = 'c7-editor-menus';
+  await openEditor(page);
+  value(await invoke(page, 'session.projects.add', { directory: repo })); // the scratch repository is a directory main lists
+  await launchEditor(page, id, turnsJournal(scratch, id, 1));
+  await page.keyboard.type('hi');
+  await page.keyboard.press('Enter'); // the turn's system/init completes the catalogue (skills, terminal-only commands)
+  await expect.poll(() => sent(page, id)).toEqual(['hi']);
+  await expect.poll(async () => (await serialized(page))?.display).toBe('');
+
+  await page.keyboard.type('@a.ts');
+  const mentions = page.getByRole('listbox', { name: 'Mention' });
+  await expect(mentions.getByRole('option', { name: 'src/a.ts' })).toBeVisible();
+  await page.keyboard.press('Enter');
+  await expect(mentions).toBeHidden();
+  await expect.poll(async () => (await serialized(page))?.content).toBe('@src/a.ts');
+  await clearEditor(page);
+
+  // `/` lists the catalogue with origin badges; a headless command goes in as text
+  await page.keyboard.type('/');
+  const commands = page.getByRole('listbox', { name: 'Commands' });
+  await expect(commands.getByRole('option').first()).toHaveAttribute('data-origin', 'engine');
+  await expect(commands.getByRole('option').first()).toContainText('Engine');
+  await page.keyboard.type('split');
+  await expect(commands.getByRole('option').first()).toHaveAttribute('data-origin', 'maws'); // MAWS's own actions are in the union
+  await expect(commands.getByRole('option').first()).toContainText('MAWS');
+  await clearEditor(page);
+  await page.keyboard.type('/');
+  for (const name of ['compact', 'model']) {
+    await page.keyboard.type(name);
+    await expect(commands.getByRole('option').first()).toContainText(`/${name}`);
+    await page.keyboard.press('Enter');
+    await expect.poll(async () => (await serialized(page))?.display).toBe(`/${name}`);
+    await clearEditor(page);
+    await page.keyboard.type('/');
+  }
+  // terminal-only and widget-only names are listed, disabled, and Enter leaves them be
+  for (const [name, origin] of [['doctor', 'engine'], ['permissions', 'widget']]) {
+    await page.keyboard.type(name);
+    const row = commands.getByRole('option').first();
+    await expect(row).toContainText(`/${name}`);
+    await expect(row).toHaveAttribute('data-origin', origin);
+    await expect(row).toHaveAttribute('aria-disabled', 'true');
+    await expect(row).toContainText('Opens a widget · arrives with C11');
+    await page.keyboard.press('Enter');
+    await expect(commands).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(commands).toBeHidden();
+    await clearEditor(page);
+    await page.keyboard.type('/');
+  }
+
+  // once widgets are registered for them, the same names open the widget
+  await page.evaluate(() => ['model', 'permissions'].forEach((name) => (window as unknown as EditorWindow).__maws_editor.registerWidget(name)));
+  for (const name of ['model', 'permissions']) {
+    await page.keyboard.type(name);
+    await expect(commands.getByRole('option').first()).toContainText(`/${name}`);
+    await page.keyboard.press('Enter');
+    const widget = page.getByRole('region', { name: `/${name} widget` });
+    await expect(widget).toBeVisible();
+    await widget.getByRole('button', { name: 'Close' }).click();
+    await message(page).click();
+    await clearEditor(page);
+    await page.keyboard.type('/');
+  }
+  expect(editor.consoleErrors()).toEqual([]);
+});
+
+test('history recalls with bodies: two pastes of one display come back as two entries', async ({ editor }) => {
+  const { page } = editor;
+  const id = 'c7-editor-history';
+  await launchEditor(page, id, turnsJournal(scratch, id, 0));
+  await page.keyboard.press('ArrowUp');
+  await expect.poll(async () => (await serialized(page))?.pastedContents['1']?.content).toBe(bodyB); // the newer, from the paste cache
+  await expect(page.getByText('Pasted text #1 +40 lines')).toBeVisible();
+  await page.keyboard.press('ArrowUp');
+  await expect.poll(async () => (await serialized(page))?.pastedContents['1']?.content).toBe(bodyA); // the older, inline
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ArrowDown');
+  await expect.poll(async () => (await serialized(page))?.display).toBe('');
+  expect(editor.consoleErrors()).toEqual([]);
+});
+
+test('bash mode runs through the engine', async ({ editor }) => {
+  const { page } = editor;
+  const id = 'c7-editor-bash';
+  await launchEditor(page, id, 'spikes/protocol-probe/fixtures/pass2/bash-context-echoed.jsonl', '/private/tmp');
+  await page.keyboard.type('!printf MAWS_BASH_8823');
+  await expect(page.locator('[data-key-sink="composer"]')).toHaveAttribute('data-mode', 'bash');
+  await expect(page.getByText('Bash', { exact: true })).toBeVisible();
+  await page.keyboard.press('Enter'); // seq 5: the bash_command write
+  await expect.poll(async () => (await sent(page, id)).some((c) => typeof c === 'string' && c.includes('<bash-input>printf MAWS_BASH_8823</bash-input>'))).toBe(true); // seq 9: C3's echo
+  const prompt = 'I just ran a shell command with the ! prefix. What exactly did it print? Reply with only the printed text, or NONE if you cannot see it.';
+  await expect.poll(async () => (await serialized(page))?.display).toBe('');
+  await page.keyboard.type(prompt);
+  await page.keyboard.press('Enter'); // seq 16
+  await expect.poll(() => sent(page, id)).toContain(prompt);
+  expect((await submissions(page)).map((s) => [s.mode, s.display, s.accepted])).toEqual([
+    ['bash', '!printf MAWS_BASH_8823', true],
+    ['send', prompt, true],
+  ]);
+  expect(editor.consoleErrors()).toEqual([]);
+});
+
+test('drafts survive a tab switch and a reload', async ({ editor }) => {
+  const { page } = editor;
+  await openEditor(page);
+  // the transcript in the scratch config home is discovered as an indexed session in the repository
+  let appId: string | null = null;
+  await expect
+    .poll(async () => {
+      const { sessions } = value(await invoke(page, 'session.list', {}));
+      appId = sessions.find((s) => s.engineSessionId === transcriptSession)?.appId ?? null;
+      return appId;
+    })
+    .not.toBeNull();
+  const pane = { appSessionId: appId!, cwd: repo, sessionId: transcriptSession };
+  await show(page, pane);
+  await message(page).click();
+  await page.keyboard.type('a draft to keep');
+  await expect.poll(async () => value(await invoke(page, 'session.drafts.get', { appSessionId: appId! }))).not.toBeNull(); // written 750 ms after the last key
+
+  await show(page, null);
+  await expect(message(page)).toBeHidden();
+  await show(page, pane);
+  await expect.poll(async () => (await serialized(page))?.display).toBe('a draft to keep');
+
+  await page.reload();
+  await openEditor(page);
+  await show(page, pane);
+  await expect.poll(async () => (await serialized(page))?.display).toBe('a draft to keep');
+  expect(editor.consoleErrors()).toEqual([]);
+});

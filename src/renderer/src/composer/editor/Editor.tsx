@@ -6,6 +6,7 @@
 // history. Mount one Editor per session (key it by the session): its draft and history are that session's. What a
 // submission does is the caller's (`onSubmit`); the default dispatches by mode (`submit.ts`). The frame around it, the
 // attachment strip and the submit control are the Composer's (M4), which drives the editor through its handle.
+import type { EditorView } from '@tiptap/pm/view';
 import { EditorContent, useEditor } from '@tiptap/react';
 import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type Ref } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -77,16 +78,18 @@ export function Editor(props: EditorProps) {
   const [controller] = useState(() => new EditorController(client, props.drafts ?? ipcDrafts(client, appSessionId), { setMode, setCommandEmpty, setWidget, setBusy }, inputs));
   useLayoutEffect(() => controller.update(inputs));
 
-  const editor = useEditor({
+  // Options that never change, so Tiptap's per-render comparison leaves the instance alone (a fresh extension list or
+  // props object on every render would have it reapply its options, and its view props, on every keystroke).
+  const [options] = useState(() => ({
     extensions: composerExtensions(() => controller.env()),
     content: emptyDoc(),
     immediatelyRender: true,
     editorProps: {
       attributes: { 'aria-label': 'Message', 'aria-multiline': 'true', role: 'textbox', class: 'min-h-6 px-1 py-0.5 outline-none' },
-      handleKeyDown: (view, event) => controller.keyDown(view, event),
+      handleKeyDown: (view: EditorView, event: KeyboardEvent) => controller.keyDown(view, event),
     },
-    onUpdate: ({ editor: e, transaction }) => controller.updated(e, transaction),
-  });
+  }));
+  const editor = useEditor({ ...options, onUpdate: ({ editor: e, transaction }) => controller.updated(e, transaction) });
   useLayoutEffect(() => controller.attach(editor), [controller, editor]);
   useEffect(() => controller.mount(), [controller, editor]);
   useEffect(() => controller.setDisabled(disabled), [controller, editor, disabled]);

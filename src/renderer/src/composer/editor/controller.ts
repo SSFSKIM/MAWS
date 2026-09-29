@@ -175,7 +175,7 @@ export class EditorController {
     let live = true;
     void this.drafts.load().then((draft) => {
       const doc = docOfDraft(draft);
-      if (live && doc && this.editor && isEmptyDoc(this.editor.getJSON())) this.setDoc(doc, { silently: true });
+      if (live && doc && this.editor && isEmptyDoc(this.editor.getJSON())) this.setDoc(doc, { silently: true, caret: null });
     });
     void this.refreshHistory();
     return () => {
@@ -189,7 +189,7 @@ export class EditorController {
     const taken = takePrefill(this.inputs.appSessionId);
     if (!taken) return;
     this.nav = { index: null, draft: null };
-    this.setDoc(prefillToDoc(taken), { silently: false });
+    this.setDoc(prefillToDoc(taken), { silently: false, caret: 'end' });
     this.inputs.onPrefill?.(taken);
   }
 
@@ -206,6 +206,7 @@ export class EditorController {
     const s = serializeDraft(editor.getJSON(), { sessionId, cwd });
     if (s.empty) return;
     const target = memoryTargetOf(useComposerStore.getState(), appSessionId);
+    const focused = editor.isFocused; // read-only while in flight drops focus; it comes back with the cleared editor
     this.busy = true;
     this.view.setBusy(true);
     editor.setEditable(false);
@@ -221,11 +222,13 @@ export class EditorController {
     this.writer.cancel();
     this.drafts.save(null);
     this.nav = { index: null, draft: null };
-    this.setDoc(emptyDoc(), { silently: true });
+    this.setDoc(emptyDoc(), { silently: true, caret: focused ? 'end' : null });
     void this.refreshHistory();
   }
 
-  private setDoc(doc: ComposerDoc, options: { silently: boolean }): void {
+  // Replaces the document; with a caret, also takes focus there at once (Tiptap's own focus waits a frame, and a key
+  // pressed in that frame would land outside the editor).
+  private setDoc(doc: ComposerDoc, options: { silently: boolean; caret: 'start' | 'end' | null }): void {
     const editor = this.editor;
     if (!editor) return;
     this.silent = options.silently;
@@ -234,7 +237,9 @@ export class EditorController {
     } finally {
       this.silent = false;
     }
-    editor.commands.focus('end');
+    if (options.caret === null) return;
+    editor.commands.focus(options.caret);
+    editor.view.focus();
   }
 
   private async refreshHistory(): Promise<void> {
@@ -254,8 +259,10 @@ export class EditorController {
     }
     const next = historyNavigation(this.nav, direction, this.recalls.length, doc);
     this.nav = next.nav;
-    if (next.show?.kind === 'entry') this.setDoc(recallDoc(this.recalls[next.show.index]), { silently: true });
-    else if (next.show?.kind === 'draft') this.setDoc(next.show.doc, { silently: true });
+    // The caret goes where the next press continues the walk: to the start going back, to the end going forward.
+    const caret = direction === 'up' ? 'start' : 'end';
+    if (next.show?.kind === 'entry') this.setDoc(recallDoc(this.recalls[next.show.index]), { silently: true, caret });
+    else if (next.show?.kind === 'draft') this.setDoc(next.show.doc, { silently: true, caret });
     return next.show !== null || navigating;
   }
 
@@ -325,7 +332,7 @@ export class EditorController {
       },
       doc: () => editor().getJSON(),
       serialize: () => serializeDraft(editor().getJSON(), { sessionId: this.inputs.sessionId, cwd: this.inputs.cwd }),
-      clear: () => this.setDoc(emptyDoc(), { silently: false }),
+      clear: () => this.setDoc(emptyDoc(), { silently: false, caret: null }),
       removeAttachment: (id) => this.setAttachments(attachmentsOf(editor().getJSON()).filter((a) => a.id !== id)),
       attachPicked: async (files) => {
         for (const file of files) {
