@@ -10,7 +10,7 @@ export interface EditorEnv {
   catalog: SessionCatalog;
   widgets: ReadonlySet<string>;
   placeholder: string;
-  files(files: File[]): void; // pasted or dropped files, classified and attached, mentioned or read as text
+  files(files: File[], at?: number): void; // pasted or dropped files (`at`: where a drop landed), attached, mentioned or read as text
   pasteText(text: string): boolean; // whether a pasted text became an atom
   openWidget(name: string, args: string): void;
 }

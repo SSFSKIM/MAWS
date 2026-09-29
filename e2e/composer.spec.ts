@@ -202,7 +202,10 @@ test("paste and drop attach with the terminal's tag framing", async ({ editor })
   const blocks = (await sent(page, id))[1] as { type: string; source?: { media_type: string } }[];
   expect(blocks.map((b) => [b.type, b.source?.media_type ?? null])).toEqual([['image', 'image/png'], ['text', null]]);
 
-  // a file dropped without a path (from a browser) is read as text into an atom named after it
+  // a file dropped without a path (from a browser) is read as text into an atom named after it, where it was dropped:
+  // at the start of the line, ahead of the text the caret sits after
+  await expect.poll(async () => (await serialized(page))?.display).toBe('');
+  await page.keyboard.type('end of line');
   await page.evaluate(() => {
     const target = document.querySelector('[contenteditable="true"]') as HTMLElement;
     const data = new DataTransfer();
@@ -212,6 +215,7 @@ test("paste and drop attach with the terminal's tag framing", async ({ editor })
   });
   await expect(page.getByText('notes.txt +3 lines')).toBeVisible();
   expect((await serialized(page))?.pastedContents['1']?.content).toBe('alpha\nbeta\ngamma');
+  expect((await serialized(page))?.display).toBe('[Pasted text #1 +3 lines]end of line');
   expect(editor.consoleErrors()).toEqual([]);
 });
 

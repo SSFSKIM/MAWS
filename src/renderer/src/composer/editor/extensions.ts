@@ -113,7 +113,7 @@ export function composerExtensions(env: () => EditorEnv): AnyExtension[] {
     FileHandler.configure({
       consumePasteEvent: true,
       onPaste: (_editor, files) => env().files(files),
-      onDrop: (_editor, files) => env().files(files),
+      onDrop: (_editor, files, pos) => env().files(files, pos),
     }),
     TextPaste(env),
     PastedNumbers,

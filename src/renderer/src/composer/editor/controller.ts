@@ -135,7 +135,7 @@ export class EditorController {
       catalog: catalog ?? EMPTY_CATALOG,
       widgets,
       placeholder: followUp ? 'Ask a follow-up…' : 'Do anything',
-      files: (files) => void this.addFiles(files),
+      files: (files, at) => void this.addFiles(files, at),
       pasteText: (text) => this.pasteText(text),
       openWidget: (name, args) => {
         if (slashWidget(name)) this.view.setWidget({ name, args });
@@ -316,7 +316,10 @@ export class EditorController {
     }
   }
 
-  async addFiles(files: File[]): Promise<void> {
+  // `at`: the document position a drop landed on (FileHandler answers 0 when it could not tell, never a place a chip
+  // can go, so the caret stays where it is then); mentions and read-in text go there, attachments to the strip.
+  async addFiles(files: File[], at?: number): Promise<void> {
+    if (at !== undefined && at > 0 && this.editor) this.editor.commands.setTextSelection(at);
     for (const file of files) {
       const action = classifyFile(file, this.client.pathForFile(file));
       if (action.kind === 'image') await this.attachImage(file.name, file, file.type);
