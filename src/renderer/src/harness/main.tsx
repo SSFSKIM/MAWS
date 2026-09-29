@@ -5,9 +5,15 @@ import { StrictMode, useEffect, useState, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import '../styles/app.css';
 import { Harness } from './Harness';
+// C7 start
+import { ComposerHarness } from './composer/ComposerHarness';
+// C7 end
 
 const ROUTES: Record<string, () => ReactNode> = {
   transcript: () => <Harness />,
+  // C7 start: the composer and request card page
+  composer: () => <ComposerHarness />,
+  // C7 end
 };
 
 const routeOf = () => location.hash.replace(/^#/, '') || 'transcript';
