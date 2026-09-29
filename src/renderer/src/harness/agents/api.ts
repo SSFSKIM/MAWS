@@ -5,8 +5,8 @@
 // `patchStatus` (the e2e cannot build a whole status), `reset` (a graph that has seen the
 // page's seeded status starts over for a disk-only case), `releaseThrough` (a recorded journal's
 // release counts measured from the fixture rather than guessed), `agentTab` and `childTranscript` (the
-// stand-in for C5's agent tab in the shared-attachment case), `transcriptCalls` (the adapters' taps) and fields the
-// views carry besides the document's (`line`, `meta`, `heading`, `noFile`, `end`).
+// stand-in for C5's agent tab in the shared-attachment case) and fields the views carry besides the document's
+// (`line`, `meta`, `heading`, `noFile`, `end`).
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { SubagentEntry, WorkflowRun, FsReadSpillInput } from '@shared/ipc/schema/fs';
 import type { PersistedTask } from '@shared/wire/store';
