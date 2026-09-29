@@ -4,13 +4,12 @@ import { createHosts } from './hosts';
 import { installRouter } from './ipc/router';
 import { startSettings } from './settings';
 import { appUrl, createWindow, installContentSecurityPolicy } from './window';
-// C3 start
-import { FileAttentionStore } from './attention/file-attention-store';
-import { startAttentionService } from './attention/service';
+// C3 start (the attention service's imports moved with its start into C4's block: src/main/index/attention-service.ts)
 import { emit } from './ipc/events';
 import { registerMainHandler } from './ipc/router';
 // C3 end
 // C4 start (emit comes with C3's imports)
+import { startIndexAttention } from './index/attention-service';
 import { Index } from './index/index';
 import { registerIndexHandlers } from './index/register';
 import { registerReplayHandlers } from './index/replay';
@@ -40,7 +39,7 @@ app.whenReady().then(() => {
   // C3 start: the engine host's userData travels in the environment it is forked with (the host protocol's hello carries
   // no fields), and main's attention service answers `attention.*` over the hosts' events (C3 execution document, M5).
   process.env.MAWS_USER_DATA = app.getPath('userData');
-  startAttentionService({ onEvent: (name, listener) => hosts.onEvent(name, listener), dispatch: hosts.dispatch, store: new FileAttentionStore(join(app.getPath('userData'), 'attention.json')), emit, register: registerMainHandler });
+  // (the attention service starts in C4's block below, over the index that now implements its store: C3's handover)
   // C3 end
 
   // C4 start: the index (<userData>/index.sqlite) answers the record side of session.*, and its session source folds the
@@ -50,6 +49,15 @@ app.whenReady().then(() => {
   registerIndexHandlers(index);
   const noReadModel: ReadModelWriter = { observeRecord() {}, observeRemoved() {}, observeProject() {}, observeProjectRemoved() {}, setDigest() {} };
   const stopSource = new IndexSessionSource(index, hosts, { emit }).start(noReadModel);
+  // C3's attention service, as C3 started it, with `Index.attention` as its store (C3's file store only when this app
+  // cannot read the index); an archive the index records retires the session's attention.
+  const attention = startIndexAttention(index, {
+    onEvent: (name, listener) => hosts.onEvent(name, listener),
+    dispatch: hosts.dispatch,
+    emit,
+    register: registerMainHandler,
+    fallbackFile: join(app.getPath('userData'), 'attention.json'),
+  });
   // Replay (M5): started here, run in the engine host; the fixtures table lists the checkout's probe journals and
   // transcripts (none in a packaged app).
   const replays = registerReplayHandlers(index, hosts);
@@ -60,6 +68,7 @@ app.whenReady().then(() => {
   app.on('will-quit', () => {
     git.dispose();
     replays.dispose();
+    attention.stop();
     stopSource();
     index.close();
   });

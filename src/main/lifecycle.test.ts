@@ -32,10 +32,11 @@ vi.mock('./attention/file-attention-store', () => ({ FileAttentionStore: vi.fn()
 vi.mock('./settings', () => ({ startSettings: () => ({ state: () => ({ resolvedTheme: 'light' }) }) }));
 vi.mock('./window', () => ({ appUrl: 'file:///index.html', createWindow: fake.createWindow, installContentSecurityPolicy: vi.fn() }));
 // C4: the index and its session source are replaced too; the lifecycle only has to open, start and close them.
-const c4 = vi.hoisted(() => ({ close: vi.fn(), stopSource: vi.fn(), started: 0 }));
+const c4 = vi.hoisted(() => ({ close: vi.fn(), stopSource: vi.fn(), stopAttention: vi.fn(), started: 0 }));
 vi.mock('./index/index', () => ({ Index: class { close = c4.close; } }));
 vi.mock('./index/register', () => ({ registerIndexHandlers: vi.fn() }));
 vi.mock('./index/source', () => ({ IndexSessionSource: class { start = () => ((c4.started += 1), c4.stopSource); } }));
+vi.mock('./index/attention-service', () => ({ startIndexAttention: () => ({ stop: c4.stopAttention }) })); // C3's service over the index
 vi.mock('./ipc/events', () => ({ emit: vi.fn() }));
 vi.mock('./index/replay', () => ({ registerReplayHandlers: () => ({ dispose: vi.fn() }) }));
 vi.mock('./index/replay-fixtures', () => ({ appRoot: (path: string) => path, seedReplayFixtures: vi.fn() }));
@@ -76,6 +77,7 @@ describe('app lifecycle (macOS, D-11)', () => {
     expect(c4.started).toBe(1);
     expect(c4.stopSource).toHaveBeenCalledOnce();
     expect(c4.close).toHaveBeenCalledOnce();
+    expect(c4.stopAttention).toHaveBeenCalledOnce();
     // M6: the git service's handlers were registered at ready, and its watches close at will-quit.
     expect(git.registered).toBe(1);
     expect(git.dispose).toHaveBeenCalledOnce();
