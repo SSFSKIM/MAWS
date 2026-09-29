@@ -1,0 +1,96 @@
+// `session.launch` (C3 execution document, X2 table, M5): the refusals, then one EngineSession reserved in the process
+// table. In order: a replay spec needs MAWS_ENGINE_REPLAY=1 (a packaged app cannot be pointed at a fixture); a live
+// reservation is refused `already_live`; a live launch checks the configured binary, the relay (gateway launches only)
+// and captures the login-shell environment, in parallel so the command stays inside the bridge's deadline; the plan is
+// built (a protected `--settings` key or a pinned id on a plain resume is `settings_conflict`); and the session is
+// reserved and started, answering at once with its status (readiness arrives as `session.status`). A replay launch
+// never touches the binary, the relay or the shell: nothing is spawned, the replay transport stands in for the process
+// with the handshake prelude, and the rest of the adapter runs as it would live.
+import { readFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import type { AppSessionId } from '@shared/graph/ids';
+import type { LaunchSpec } from '@shared/engine/launch-spec';
+import type { RelayHealth } from '@shared/engine/relay-health';
+import type { SessionStateStore } from '@shared/engine/session-state-store';
+import type { LaunchResult } from '@shared/ipc/schema/session';
+import { parseJournalRow, type JournalRow } from '@shared/wire/journal';
+import type { BinaryCheck } from './binary-info';
+import { JOURNAL_MAX_BYTES, JournalWriter } from './journal';
+import { buildLaunch, LaunchSpecConflict, RELAY_URL, type LaunchPlan } from './launch';
+import type { ProcessTable } from './process-table';
+import { replayEngine } from './replay-transport';
+import { EngineSession } from './session';
+import type { EngineTransport } from './transport';
+
+export const REPLAY_PRELUDE = 'test/fixtures/engine/replay-handshake.jsonl'; // relative to the launcher's cwd
+
+export interface LauncherDeps {
+  userData: string;
+  replayEnabled: boolean;
+  cwd: string; // resolves a relative replay path and the prelude
+  table: ProcessTable;
+  store: SessionStateStore;
+  binaryProbe: () => Promise<BinaryCheck>;
+  checkRelay: (force: boolean) => Promise<RelayHealth>;
+  captureEnv: () => Promise<Record<string, string>>;
+  spawn: (plan: LaunchPlan) => EngineTransport;
+  appVersion: string;
+  log: (message: string) => void;
+  wire: (session: EngineSession, plan: LaunchPlan, spec: LaunchSpec) => void; // attaches the session's listeners before it starts
+}
+
+function readJournal(path: string): JournalRow[] {
+  return readFileSync(path, 'utf8')
+    .split('\n')
+    .filter((line) => line.length > 0)
+    .map((line) => parseJournalRow(JSON.parse(line)));
+}
+
+export function createLauncher(deps: LauncherDeps): (spec: LaunchSpec) => Promise<LaunchResult> {
+  let prelude: JournalRow[] | null = null;
+  const refused = (reason: Extract<LaunchResult, { status: 'refused' }>['reason'], message: string): LaunchResult => ({ status: 'refused', reason, message });
+
+  return async (spec) => {
+    if (spec.replay !== null && !deps.replayEnabled) return refused('replay_disabled', 'replay launches need MAWS_ENGINE_REPLAY=1');
+    const liveNow = deps.table.get(spec.appSessionId);
+    if (liveNow && liveNow.lifecycle !== 'exited') return refused('already_live', `process is ${liveNow.lifecycle}`);
+
+    let captured: Record<string, string> = {};
+    let journal: JournalRow[] | null = null;
+    if (spec.replay !== null) {
+      journal = readJournal(resolve(deps.cwd, spec.replay)); // throws on a missing or malformed fixture: the command fails `internal`
+      prelude ??= readJournal(resolve(deps.cwd, REPLAY_PRELUDE));
+    } else {
+      const [binary, relay, env] = await Promise.all([deps.binaryProbe(), spec.gateway === 'gateway' ? deps.checkRelay(false) : Promise.resolve(null), deps.captureEnv()]);
+      if (binary.problem === 'missing') return refused('binary_missing', binary.error ?? `no engine binary at ${binary.path}`);
+      if (!binary.ok) return refused('binary_version', binary.error ?? `${binary.path} is not ${binary.expectedVersion}`);
+      if (relay && !relay.ok) return { status: 'relay_unreachable', health: relay };
+      captured = env;
+    }
+
+    let plan: LaunchPlan;
+    try {
+      plan = buildLaunch(spec, captured, { relayUrl: RELAY_URL });
+    } catch (error) {
+      if (error instanceof LaunchSpecConflict) return refused('settings_conflict', error.message);
+      throw error;
+    }
+
+    const replay = journal;
+    const spawn = replay !== null ? () => replayEngine(replay, { prelude: prelude! }) : deps.spawn;
+    const outcome = deps.table.reserve(spec.appSessionId, () => {
+      const session = new EngineSession({
+        spec, plan, spawn, store: deps.store, appVersion: deps.appVersion, log: (message) => deps.log(`${spec.appSessionId}: ${message}`),
+        journal: new JournalWriter(journalDir(deps.userData, spec.appSessionId), plan.launchId, { maxBytes: JOURNAL_MAX_BYTES }),
+      });
+      deps.wire(session, plan, spec);
+      return session;
+    });
+    if (outcome.status === 'refused') return outcome; // a launch that raced this one to the reservation
+    return { status: 'launching', session: outcome.session.status() };
+  };
+}
+
+export function journalDir(userData: string, appSessionId: AppSessionId): string {
+  return join(userData, 'engine-host', 'journal', appSessionId);
+}

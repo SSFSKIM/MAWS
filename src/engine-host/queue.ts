@@ -60,6 +60,11 @@ export class MessageQueue {
     return this.deps.turnOpen() || this.entries.some((e) => e.state !== 'queued');
   }
 
+  // recover() ran: until then the persisted queue is the store's, never this object's (`session.queue.list`, M5)
+  get recovered(): boolean {
+    return this.loaded;
+  }
+
   get isPaused(): boolean {
     return this.paused;
   }

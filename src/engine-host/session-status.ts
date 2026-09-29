@@ -4,7 +4,7 @@
 // the per-turn local auto-mode lane, C11's fast mode and plugin fields, MCP servers, background tasks, held peer
 // messages with their five-minute expiry, the memory sample, and C7's command catalogue. The session feeds it rows
 // after they were journaled and normalised; it writes nothing and emits no events.
-import { PERMISSION_MODES, type PermissionMode } from '@shared/graph/enums';
+import { PERMISSION_MODES, type AutoModeRefusalCode, type PermissionMode } from '@shared/graph/enums';
 import type { EventId, TaskId } from '@shared/graph/ids';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
 import type { EngineSessionStatus } from '@shared/engine/status';
@@ -35,6 +35,7 @@ export class SessionStatusTracker {
   requestedMode: PermissionMode;
   effectiveMode: PermissionMode;
   prePlanMode: PermissionMode | null = null;
+  refusal: AutoModeRefusalCode | null = null; // the engine's refusal of the last mode the human asked for (M5)
   resolvedModel: string | null = null;
   engineVersion: string | null = null;
   engineCwd: string | null = null; // system/init.cwd, the engine's canonical (realpath) working directory
@@ -68,7 +69,7 @@ export class SessionStatusTracker {
   snapshot(): TrackedStatus {
     return {
       engineState: this.engineState, activity: this.activity,
-      permissionMode: { requested: this.requestedMode, effective: this.effectiveMode, refusal: null }, prePlanMode: this.prePlanMode,
+      permissionMode: { requested: this.requestedMode, effective: this.effectiveMode, refusal: this.refusal }, prePlanMode: this.prePlanMode,
       gateway: { ...this.gateway, localLane: this.gateway.localLane && { ...this.gateway.localLane } }, resolvedModel: this.resolvedModel, engineVersion: this.engineVersion,
       fastMode: { ...this.fastMode }, plugins: this.plugins.map((p) => ({ ...p })), pluginErrors: this.pluginErrors.map((e) => ({ ...e })), pluginWarnings: this.pluginWarnings.map((w) => ({ ...w })),
       backgroundTasks: this.backgroundTasks.map((t) => ({ ...t })), mcpServers: this.mcpServers.map((s) => ({ ...s })), heldPeerMessages: this.heldPeerMessages.map((m) => ({ ...m })), memory: { ...this.memory },
@@ -93,6 +94,15 @@ export class SessionStatusTracker {
     if (mode === 'plan' && this.modeKnown && this.effectiveMode !== 'plan') this.prePlanMode = this.effectiveMode;
     this.effectiveMode = mode;
     this.modeKnown = true;
+    if (mode === this.requestedMode) this.refusal = null;
+  }
+
+  // A mode the human asked for through `session.setPermissionMode` (M5): requested, and refused or not; the effective
+  // mode follows the engine's answer when it names one, else the next frame that carries it.
+  requestMode(mode: PermissionMode, refusal: AutoModeRefusalCode | null, effective: string | null): void {
+    this.requestedMode = mode;
+    this.refusal = refusal;
+    if (effective !== null) this.setMode(effective);
   }
 
   // A main-lane turn.started: the local-lane observation belongs to the turn it was made in (C11's correction).

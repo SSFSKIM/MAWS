@@ -11,8 +11,9 @@ import { randomUUID } from 'node:crypto';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionEvent } from '@shared/graph/events';
 import type { MessageUuid, RequestId } from '@shared/graph/ids';
+import type { AutoModeRefusalCode, PermissionMode } from '@shared/graph/enums';
 import type { RequestAnswer } from '@shared/engine/answers';
-import type { LaunchSpec } from '@shared/engine/launch-spec';
+import type { Effort, LaunchSpec } from '@shared/engine/launch-spec';
 import type { QueueEntry, QueueState, SendContent, SessionStateStore } from '@shared/engine/session-state-store';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import { HookCallbackRequestSchema, type GetStatusResponse, type InitializeRequest, type InterruptResponse } from '@shared/wire/control';
@@ -123,6 +124,8 @@ export class EngineSession {
   private grants: GrantSnapshot;
   private clear: ClearAndImplement | null = null;
   private pendingPlan: string | null = null; // a clear_and_implement plan kept for retry after the mode restore failed
+  private requestedModel: string | null; // the launch spec's, until `session.setModel` (M5)
+  private requestedEffort: Effort | null; // the launch spec's, until `session.setEffort` (M5)
 
   constructor(private readonly opts: EngineSessionOptions) {
     this.spec = opts.spec;
@@ -131,6 +134,8 @@ export class EngineSession {
     this.store = opts.store ?? new MemorySessionStateStore();
     this.hooks = opts.hooks ?? new HostHookRegistry();
     this.grants = opts.grants ?? EMPTY_GRANTS;
+    this.requestedModel = opts.spec.model;
+    this.requestedEffort = opts.spec.effort;
     this.reconnect = opts.reconnect ?? (opts.spec.resume !== null && !opts.spec.resume.fork);
     this.log = opts.log ?? ((message) => console.warn(`[engine-host ${opts.spec.appSessionId}] ${message}`));
     this.exited = new Promise((resolve) => (this.resolveExited = resolve));
@@ -254,6 +259,20 @@ export class EngineSession {
     return this.killed;
   }
 
+  // The process's state alone (`status().process`, without building the whole status).
+  get lifecycle(): ProcessState {
+    return this.processState;
+  }
+
+  // What the human asked for through X2 once the engine accepted (or, for a mode, refused) it (M5): the status reports
+  // it as requested; the resolved model and the effective mode still come from the frames.
+  noteRequested(patch: { permissionMode?: { mode: PermissionMode; refusal: AutoModeRefusalCode | null; effective: string | null }; model?: string | null; effort?: Effort | null }): void {
+    if (patch.permissionMode) this.tracker.requestMode(patch.permissionMode.mode, patch.permissionMode.refusal, patch.permissionMode.effective);
+    if (patch.model !== undefined) this.requestedModel = patch.model;
+    if (patch.effort !== undefined) this.requestedEffort = patch.effort;
+    this.touch();
+  }
+
   // The process's control client (null before spawn), for the per-subtype calls later milestones build on (M4's
   // rewind, M5's reads); every request it writes goes through the session's journal and inbound gate.
   get control(): ControlClient | null {
@@ -297,7 +316,7 @@ export class EngineSession {
       process: this.processState, exit: this.exitInfo, engineState: tracked.engineState, activity: tracked.activity,
       // every open turn was opened by a turn.started the tracker saw, so its id is that event's
       turn: turn && turnId ? { id: turnId, origin: turn.origin, startedAt: turn.startedAt, acceptedAt: turn.acceptedAt, userMessageUuids: [...turn.userMessageUuids] } : null,
-      model: { requested: this.spec.model, resolved: tracked.resolvedModel }, effort: this.spec.effort,
+      model: { requested: this.requestedModel, resolved: tracked.resolvedModel }, effort: this.requestedEffort,
       permissionMode: tracked.permissionMode, prePlanMode: tracked.prePlanMode,
       gateway: { mode: this.plan.gateway, ...tracked.gateway },
       subagentModel: env.CLAUDE_CODE_SUBAGENT_MODEL ?? null,
