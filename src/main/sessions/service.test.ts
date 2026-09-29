@@ -322,6 +322,24 @@ describe('session service', () => {
       await expect(h.service.release(record.appId)).rejects.toMatchObject({ reason: 'unknown_intent' });
     });
 
+    // M5, acceptance item 13: the registry had no record yet when the guards read it, so the resume launched; the engine
+    // refuses a second writer to a `--bg` session, and that refusal is the same `held` a fresh read would have answered
+    it('a resume the engine refuses for a background job the fresh read missed fails held with the attach command; the record stays', async () => {
+      h.trustDirectory(h.work);
+      const record = recordAt(h.work);
+      h.host.script = () => ({ exit: { error: 'Error: Session x is running as a background session (e6dcd828). Run `claude attach e6dcd828` to open it' } });
+      expect(await h.service.startSession(record.appId, { message: OK_MESSAGE, options: {} })).toMatchObject({ status: 'starting' });
+      expect(await h.settled(record.appId)).toEqual({
+        appSessionId: record.appId,
+        phase: 'failed',
+        detail: null,
+        outcome: { kind: 'held', holder: { kind: 'background_job', pid: null, jobId: 'e6dcd828' }, attach: { jobId: 'e6dcd828', command: "'/opt/engine/2.1.283' attach e6dcd828" } },
+      });
+      expect(h.host.launches).toHaveLength(1);
+      expect(h.host.calledWith('session.send'), 'the message never reached the engine').toEqual([]);
+      expect(h.index.sessions.get(record.appId)).toMatchObject({ appId: record.appId, engineSessionId: SID, archived: false });
+    });
+
     it('a resume that fails after ready stops its process before telling the failure', async () => {
       h.trustDirectory(h.work);
       const record = recordAt(h.work);
