@@ -61,7 +61,7 @@ export class WorktreeService {
   // branch that base does not have.
   async branch(repoRoot: string, branch: string): Promise<BranchStatus | null> {
     const { root } = await this.mainRoot(repoRoot);
-    const head = await this.resolve(root, `refs/heads/${branch}`);
+    const head = await this.branchHead(root, branch);
     if (head === null) return null;
     const [entries, base] = await Promise.all([this.entries(root), this.baseOf(root)]);
     const baseRev = base === 'HEAD' ? 'HEAD' : `refs/heads/${base}`;
@@ -81,7 +81,7 @@ export class WorktreeService {
     const entries = await this.entries(root);
     if ((await exists(path)) || entries.some((e) => e.path === path)) throw new Error('worktree path exists');
     await this.requireBranchName(root, branch.name);
-    const existing = await this.resolve(root, `refs/heads/${branch.name}`);
+    const existing = await this.branchHead(root, branch.name);
     if (branch.kind === 'new') {
       if (existing !== null) throw new Error('branch exists');
       const base = branch.base;
@@ -202,6 +202,18 @@ export class WorktreeService {
   private async resolve(root: string, rev: string): Promise<string | null> {
     try {
       return (await this.git(root, ['rev-parse', '--verify', '--quiet', rev])).trim() || null;
+    } catch (error) {
+      if (error instanceof GitCommandError) return null;
+      throw error;
+    }
+  }
+
+  // The head of the local branch named exactly `name`, or null. `show-ref --verify` looks the full ref up as a ref,
+  // never as revision syntax: `rev-parse --verify refs/heads/main~1` would answer main's parent for a branch that does
+  // not exist.
+  private async branchHead(root: string, name: string): Promise<string | null> {
+    try {
+      return (await this.git(root, ['show-ref', '--verify', '--hash', `refs/heads/${name}`])).trim() || null;
     } catch (error) {
       if (error instanceof GitCommandError) return null;
       throw error;

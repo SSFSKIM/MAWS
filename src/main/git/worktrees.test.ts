@@ -166,6 +166,18 @@ describe('worktree service over scratch repositories', () => {
       await expect(service.branch(repo.root, 'nope')).resolves.toBeNull();
     });
 
+    it('reads a branch name as a name, never as revision syntax: main~1, main^{}, main@{0} are no branches', async () => {
+      await repo.commitIn(repo.root, 'second.txt'); // so main~1 names a commit
+      for (const name of ['main~1', 'main~0', 'main^{}', 'main@{0}', 'main^']) {
+        await expect(service.branch(repo.root, name), name).resolves.toBeNull();
+        await expect(service.deleteBranch({ repoRoot: repo.root, branch: name, expect: { head: await repo.head() }, acknowledgeUnmerged: true }), name).resolves.toMatchObject({
+          refused: 'missing',
+        });
+      }
+      expect(await repo.hasBranch('main')).toBe(true);
+      await expect(service.add({ repoRoot: repo.root, name: 'rev', branch: { kind: 'existing', name: 'main~1' } })).rejects.toThrow('invalid branch name: main~1');
+    });
+
     it('matches a worktree reached through a symlink by its realpath', async () => {
       const outside = repo.scratchDir();
       mkdirSync(join(outside, 'real'));
@@ -264,7 +276,7 @@ describe('worktree service over scratch repositories', () => {
       await service.remove({ repoRoot: repo.root, path: w.path, expect: { branch: w.branch, head: w.head }, discard: false });
       await service.deleteBranch({ repoRoot: repo.root, branch: 'worktree-all', expect: { head: w.head }, acknowledgeUnmerged: false });
       const subcommands = new Set(spawn.mock.calls.map(([, args]) => (args as string[])[2]));
-      expect([...subcommands].sort()).toEqual(['branch', 'check-ref-format', 'rev-list', 'rev-parse', 'status', 'symbolic-ref', 'worktree']);
+      expect([...subcommands].sort()).toEqual(['branch', 'check-ref-format', 'rev-list', 'rev-parse', 'show-ref', 'status', 'symbolic-ref', 'worktree']);
       const mutations = spawn.mock.calls.map(([, args]) => (args as string[]).slice(2)).filter((a) => a[0] === 'branch' || (a[0] === 'worktree' && a[1] !== 'list'));
       expect(mutations.map((a) => a.slice(0, 2).join(' '))).toEqual(['worktree add', 'worktree remove', 'worktree prune', 'branch -D']);
       expect(existsSync(exclude) ? readFileSync(exclude, 'utf8') : null).toBe(before);
