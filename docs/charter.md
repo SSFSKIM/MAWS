@@ -709,6 +709,8 @@ Explicitly out of scope for P0: bundle patches (D-1); Windows and Linux (D-11); 
 
 - 2026-09-28 (architect, C8b review round one): twenty-two findings, all accepted, three blocking (the R1 probe inherits pass 2's auto mode, under which no `can_use_tool` arrives, so the required delayed case cannot be produced; the probe does not decide the relay's enabled regime; the harness assumes a push-capable player and a relay store wired to it, neither of which C6's `replaySource` or C8a's `HarnessSession` provide). Rulings recorded in the C8 spec's Decision Log: the four flagged departures are local means and stand; the relay composer is enabled for background children of a live parent regardless of turn state and disabled for foreground children with the honest reason; `delivered` keys on the receipt in the child's live stream; workflow agents belong to their run's card; nesting binds across all lists; the relay addresses agents by id, naming only a real `name`; the pass-3 fixture loop is C8c's. New additive Ask of C4 relayed: `fs.readSpill` pages end on a character boundary and carry `length`. Fix wave dispatched on fable; a bounded second round follows on the changed passages.
 
+- 2026-09-28 (owner): the GPT gateway is rate limited; every review dispatch falls back to opus (a `general-purpose` agent carrying the reviewer brief verbatim and the read-only rule, logged in the ledger as "reviewed on opus, gateway rate limited") until the owner says otherwise; executors do not retry the gateway between milestones. The two Fable dispatches already running (C8c's bounded second round, C8b's fix wave) run to completion.
+
 ## 20. Outcomes and retrospective
 
 Pending. Closing is a recomposition check against §10, then the retrospective.
