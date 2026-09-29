@@ -608,6 +608,25 @@ describe('unstarted send holds a starting state', () => {
     expect(stub.start).toHaveBeenCalledWith({ content: 'after the failure', display: 'after the failure' });
   });
 
+  // The C7/C10 seam: a chip opened on the intent's frame reads nothing from the engine, so the live frame that replaces
+  // it at launch does not read either until a chip opens there; a read at launch would race C10's first message.
+  it('reads no engine lists at launch for a chip opened while unstarted, only when one opens on the live frame', async () => {
+    stubIntent();
+    mount([{ index: 0, id: A }]);
+    const user = userEvent.setup();
+    await user.click(within(composerOf(0)).getByRole('button', { name: /^Location/ }));
+    await user.keyboard('{Escape}');
+    await user.click(within(composerOf(0)).getByRole('button', { name: /^Permission mode/ }));
+    await user.keyboard('{Escape}');
+    live(A);
+    await waitFor(() => expect(within(composerOf(0)).getByRole('button', { name: 'Add a directory' }).hasAttribute('disabled')).toBe(false));
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+    expect(invoked('session.listPermissionRules')).toEqual([]);
+    expect(invoked('session.listModels')).toEqual([]);
+    await user.click(within(composerOf(0)).getByRole('button', { name: /^Location/ }));
+    await waitFor(() => expect(invoked('session.listPermissionRules')).toHaveLength(1));
+  });
+
   it('holds `!` and `#` until the session starts, and hides the queue', async () => {
     stubIntent();
     mount([{ index: 0, id: A }]);

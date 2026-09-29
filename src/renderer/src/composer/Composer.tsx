@@ -389,7 +389,9 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
             </>
           ) : null
         }
-        onOpen={(what) => setOpened((o) => (o[what] ? o : { ...o, [what]: true }))}
+        // C10 seam: only a chip opened on the live frame asks for the engine's lists (the intent's frame shows none of them),
+        // so the launch never reads what an unstarted chip opened, racing C10's first message
+        onOpen={(what) => !unstarted && setOpened((o) => (o[what] ? o : { ...o, [what]: true }))}
         bindings={bindings}
         cwd={cwd}
         dirty={repo?.dirty ?? false}
