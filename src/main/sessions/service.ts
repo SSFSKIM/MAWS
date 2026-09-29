@@ -68,8 +68,13 @@ export class SessionService {
   // every command wait for it.
   start(): Promise<void> {
     if (this.readyPromise) return this.readyPromise;
-    const reset = this.deps.index.sessions.resetSelfHolders();
-    if (reset > 0) this.log(`reset ${reset} stale self holder${reset === 1 ? '' : 's'} (D-16)`);
+    try {
+      const reset = this.deps.index.sessions.resetSelfHolders();
+      if (reset > 0) this.log(`reset ${reset} stale self holder${reset === 1 ? '' : 's'} (D-16)`);
+    } catch (error) {
+      // an index this app cannot write (a newer app's, opened read-only) answers every call with its reason; the app runs on
+      this.log(`the D-16 reset could not run: ${error instanceof Error ? error.message : String(error)}`);
+    }
     this.readyPromise = this.boot();
     return this.readyPromise;
   }
