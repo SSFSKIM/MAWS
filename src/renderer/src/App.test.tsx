@@ -199,6 +199,7 @@ describe('hosts in the diagnostics strip', () => {
     // `pty.data` delivery, so its state is set before `echoed` resumes this callback and act renders it.
     await act(async () => void (await main.echoed));
     expect(window.maws.invoke).toHaveBeenCalledWith('pty.spawn', expect.objectContaining({ shell: '/bin/sh' }));
+    expect(echo()).toBe('MAWS_ECHO_OK · shell pid 3333');
   });
 });
 
