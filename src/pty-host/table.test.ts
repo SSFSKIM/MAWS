@@ -10,6 +10,11 @@ import { createPtyTable, RING_BYTES, type PtyTable } from './table';
 // Every test here waits on real processes and floods, which a saturated machine slows well past vitest's 5 s default
 // (two full runs at a load average of 22 on 10 cores timed out here, C9 M3): each gets 20 s.
 vi.setConfig({ testTimeout: 20_000 });
+// Wait budgets. Every wait below times a real process (its start, its output, its exit, a flood's progress) and takes
+// this default, just under the per-test limit, so the per-test limit is the one that fires on a saturated machine
+// (a 10 s `exited` failed once at a load average of 130 to 158). The only shorter bound is the spec's pin that a flood
+// is paused within one second of its first byte: that measures the host's own flow control, not a process.
+const WAIT_MS = 18_000;
 const SESSION = 'app-session-1' as AppSessionId;
 const decoder = new TextDecoder();
 let labels = 0;
@@ -56,7 +61,7 @@ function harness(environment: Record<string, string> = terminalEnvironment(proce
     return out;
   };
   const text = (ptyId: string) => decoder.decode(bytes(ptyId));
-  const exited = (ptyId: string, timeout = 10_000) =>
+  const exited = (ptyId: string, timeout = WAIT_MS) =>
     vi.waitFor(
       () => {
         const exit = exits.get(ptyId);
@@ -65,7 +70,7 @@ function harness(environment: Record<string, string> = terminalEnvironment(proce
       },
       { timeout, interval: 20 },
     );
-  const until = (check: () => boolean, timeout = 10_000, what = 'the condition') =>
+  const until = (check: () => boolean, timeout = WAIT_MS, what = 'the condition') =>
     vi.waitFor(
       () => {
         if (!check()) throw new Error(`${what} did not hold`);
@@ -90,7 +95,7 @@ describe('pty host flow control pauses and resumes', () => {
     const h = harness();
     const { ptyId } = await h.table.spawn(spawnInput({ shell: '/bin/sh', args: ['-c', 'yes | head -c 5000000'] }));
     // The second is the flood's, not the process start's (the iutf8 wrapper and a loaded machine delay the first byte).
-    await h.until(() => (h.chunks.get(ptyId)?.length ?? 0) > 0, 5_000, 'the flood started');
+    await h.until(() => (h.chunks.get(ptyId)?.length ?? 0) > 0, WAIT_MS, 'the flood started');
     await h.until(() => h.table.list().ptys.find((p) => p.ptyId === ptyId)?.paused === true, 1_000, 'paused within one second');
     await new Promise((r) => setTimeout(r, 300)); // nothing more arrives while paused
     const largest = Math.max(...h.chunks.get(ptyId)!.map((c) => c.data.byteLength));
@@ -109,7 +114,7 @@ describe('pty host flow control pauses and resumes', () => {
   it('stays paused on an ack that leaves more than the low watermark outstanding', async () => {
     const h = harness();
     const { ptyId } = await h.table.spawn(spawnInput({ shell: '/bin/sh', args: ['-c', 'yes | head -c 5000000'] }));
-    await h.until(() => h.table.inspect(ptyId).flow.mode === 'paused', 1_000, 'paused');
+    await h.until(() => h.table.inspect(ptyId).flow.mode === 'paused', WAIT_MS, 'paused');
     const { total } = h.table.inspect(ptyId).flow;
     h.table.ack({ ptyId, offset: total - LOW_WATERMARK - 1 });
     expect(h.table.inspect(ptyId).flow).toMatchObject({ mode: 'paused', acked: total - LOW_WATERMARK - 1 });
@@ -122,7 +127,7 @@ describe('pty host flow control pauses and resumes', () => {
     try {
       const h = harness();
       const { ptyId } = await h.table.spawn(spawnInput({ shell: '/bin/sh', args: ['-c', 'printf ok; sleep 5'] }));
-      await h.until(() => h.text(ptyId).includes('ok'), 5_000, 'output');
+      await h.until(() => h.text(ptyId).includes('ok'), WAIT_MS, 'output');
       h.table.ack({ ptyId, offset: 1_000_000 });
       expect(h.table.inspect(ptyId).flow.acked).toBe(h.table.inspect(ptyId).flow.total);
       expect(warn).toHaveBeenCalledWith(expect.stringContaining('ack'));
@@ -163,14 +168,14 @@ describe('pty host ring buffer and attach offsets', () => {
     const h = harness();
     const { ptyId } = await h.table.spawn(spawnInput({ shell: '/bin/sh', args: [] }));
     h.table.write({ ptyId, data: "printf 'MAWS_%s\\n' ONE\r" });
-    await h.until(() => h.text(ptyId).includes('MAWS_ONE'), 5_000, 'first output');
+    await h.until(() => h.text(ptyId).includes('MAWS_ONE'), WAIT_MS, 'first output');
     await new Promise((r) => setTimeout(r, 200));
     const before = h.chunks.get(ptyId)!.length;
     const attach = h.table.attach({ ptyId });
     expect(attach.nextOffset).toBe(h.bytes(ptyId).byteLength);
     expect(attach.replay).toEqual(h.bytes(ptyId));
     h.table.write({ ptyId, data: "printf 'MAWS_%s\\n' TWO\r" });
-    await h.until(() => h.text(ptyId).includes('MAWS_TWO'), 5_000, 'second output');
+    await h.until(() => h.text(ptyId).includes('MAWS_TWO'), WAIT_MS, 'second output');
     const after = h.chunks.get(ptyId)!.slice(before);
     expect(after[0]!.offset).toBe(attach.nextOffset);
     for (const chunk of after) expect(chunk.offset).toBeGreaterThanOrEqual(attach.nextOffset);
@@ -181,7 +186,7 @@ describe('pty host checkpoint and replay window', () => {
   it('keeps the ring reaching back to the acknowledged offset while paused, so a checkpoint there is exact', async () => {
     const h = harness();
     const { ptyId } = await h.table.spawn(spawnInput({ shell: '/bin/sh', args: ['-c', 'yes | head -c 5000000'] }));
-    await h.until(() => h.table.inspect(ptyId).flow.mode === 'paused', 1_000, 'paused');
+    await h.until(() => h.table.inspect(ptyId).flow.mode === 'paused', WAIT_MS, 'paused');
     const partial = 100 * 1024;
     h.table.ack({ ptyId, offset: partial }); // still paused: more than 64 KiB outstanding
     await new Promise((r) => setTimeout(r, 200));
@@ -217,7 +222,7 @@ describe('pty host checkpoint and replay window', () => {
     try {
       const h = harness();
       const { ptyId } = await h.table.spawn(spawnInput({ shell: '/bin/sh', args: ['-c', "printf 'hello\\n'; sleep 0.5"] }));
-      await h.until(() => h.text(ptyId).includes('hello'), 5_000, 'output');
+      await h.until(() => h.text(ptyId).includes('hello'), WAIT_MS, 'output');
       const total = h.bytes(ptyId).byteLength;
       h.table.checkpoint({ ptyId, offset: 0, state: 'first' });
       h.table.checkpoint({ ptyId, offset: total, state: 'second' });
@@ -249,7 +254,7 @@ describe('pty host initial command runs under zsh and bash', () => {
     const { ptyId } = await h.table.spawn(
       spawnInput({ shell, command: `printf 'MAWS_INIT_%s\\n' OK; ${login} && printf 'MAWS_LOGIN_%s\\n' YES` }),
     );
-    await h.until(() => h.text(ptyId).includes('MAWS_INIT_OK') && h.text(ptyId).includes('MAWS_LOGIN_YES'), 15_000, 'the initial command ran');
+    await h.until(() => h.text(ptyId).includes('MAWS_INIT_OK') && h.text(ptyId).includes('MAWS_LOGIN_YES'), WAIT_MS, 'the initial command ran');
     expect(h.table.list().ptys.find((p) => p.ptyId === ptyId)).toMatchObject({ shell, alive: true });
   }, 20_000);
 });
@@ -259,10 +264,10 @@ describe('pty host foreground detection', () => {
     const h = harness();
     const { ptyId } = await h.table.spawn(spawnInput({ shell: '/bin/sh', args: [] }));
     h.table.write({ ptyId, data: "printf 'MAWS_%s\\n' READY\r" });
-    await h.until(() => h.text(ptyId).includes('MAWS_READY'), 5_000, 'the prompt');
+    await h.until(() => h.text(ptyId).includes('MAWS_READY'), WAIT_MS, 'the prompt');
     await expect(h.table.foreground({ ptyId })).resolves.toMatchObject({ busy: false });
     h.table.write({ ptyId, data: 'sleep 5\r' });
-    await vi.waitFor(async () => expect(await h.table.foreground({ ptyId })).toEqual({ process: 'sleep', busy: true }), { timeout: 5_000, interval: 50 });
+    await vi.waitFor(async () => expect(await h.table.foreground({ ptyId })).toEqual({ process: 'sleep', busy: true }), { timeout: WAIT_MS, interval: 50 });
   });
 
   it('reports nothing running for a dead pty', async () => {
@@ -285,7 +290,7 @@ describe('pty host tty has iutf8', () => {
   it('erases a whole multi-byte character in canonical mode', async () => {
     const h = harness();
     const { ptyId } = await h.table.spawn(spawnInput({ shell: '/bin/sh', args: ['-c', "stty -echo; printf 'MAWS_%s\\n' READY; head -n 1"] }));
-    await h.until(() => h.text(ptyId).includes('MAWS_READY'), 5_000, 'the reader');
+    await h.until(() => h.text(ptyId).includes('MAWS_READY'), WAIT_MS, 'the reader');
     h.table.write({ ptyId, data: '한\x7fa\n' });
     await h.exited(ptyId);
     const after = h.text(ptyId).split('MAWS_READY')[1]!;
@@ -330,7 +335,7 @@ describe('pty host coalesces reads into fewer events', () => {
     });
     tables.push(table);
     await table.spawn(spawnInput({ shell: '/bin/sh', args: ['-c', "printf 'MAWS_LAST'"] }));
-    await vi.waitFor(() => expect(events.at(-1)).toBe('pty.exit'), { timeout: 5_000, interval: 20 });
+    await vi.waitFor(() => expect(events.at(-1)).toBe('pty.exit'), { timeout: WAIT_MS, interval: 20 });
     expect(events.slice(0, -1).join('')).toContain('MAWS_LAST');
   });
 
@@ -367,7 +372,7 @@ describe('pty host environment', () => {
   it('defaults the shell to the environment’s SHELL, started with -l', async () => {
     const h = harness({ ...terminalEnvironment(process.env, { appVersion: '0' }), SHELL: '/bin/bash' });
     const { ptyId } = await h.table.spawn(spawnInput({ command: "shopt -q login_shell && printf 'MAWS_%s\\n' BASHLOGIN" }));
-    await h.until(() => h.text(ptyId).includes('MAWS_BASHLOGIN'), 15_000, 'a bash login shell');
+    await h.until(() => h.text(ptyId).includes('MAWS_BASHLOGIN'), WAIT_MS, 'a bash login shell');
     expect(h.table.list().ptys.find((p) => p.ptyId === ptyId)?.shell).toBe('/bin/bash');
   }, 20_000);
 });
@@ -428,7 +433,7 @@ describe('pty host lifecycle', () => {
     const h = harness();
     const { ptyId } = await h.table.spawn(spawnInput({ shell: '/bin/sh', args: [] }));
     h.table.write({ ptyId, data: "printf 'MAWS_%s_OK 한글\\n' PTY\r" });
-    await h.until(() => h.text(ptyId).includes('MAWS_PTY_OK 한글'), 5_000, 'output');
+    await h.until(() => h.text(ptyId).includes('MAWS_PTY_OK 한글'), WAIT_MS, 'output');
     for (const chunk of h.chunks.get(ptyId)!) expect(Object.getPrototypeOf(chunk.data)).toBe(Uint8Array.prototype); // exact-size copies, not pooled Buffers
   });
 });
