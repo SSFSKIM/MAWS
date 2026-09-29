@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import * as z from 'zod';
 import { FIXTURE_DIR, framesOf, listJournals, loadJournal, type FixturePass } from '../../../test/support/fixtures';
-import { listSyntheticJournals, loadSyntheticJournal, TRANSCRIPT_FIXTURE_DIR } from '../../../test/support/fixtures'; // [C6]
+import { listSyntheticJournals, loadSyntheticJournal, SYNTHETIC_TRANSCRIPT_DIR } from '../../../test/support/fixtures'; // [C6]
 import { parseJournalRow } from './journal';
 import {
   parseStdinFrame,
@@ -74,7 +74,7 @@ describe('wire frames round-trip every synthetic transcript journal', () => {
   for (const name of listSyntheticJournals()) {
     it(`transcript/${name}`, () => {
       const label = `transcript/${name}`;
-      const rawRows = readFileSync(join(TRANSCRIPT_FIXTURE_DIR, `${name}.jsonl`), 'utf8')
+      const rawRows = readFileSync(join(SYNTHETIC_TRANSCRIPT_DIR, `${name}.jsonl`), 'utf8')
         .split('\n')
         .filter((line) => line.length > 0)
         .map((line) => JSON.parse(line) as { seq: number });
