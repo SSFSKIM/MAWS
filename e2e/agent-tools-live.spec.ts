@@ -10,7 +10,8 @@
 // foreground dispatch really runs in the foreground (vii; the product's launch backgrounds every agent). Children run on haiku
 // (`subagentModel`), the parent on Sonnet. What the run measured is printed as `[c8b-live]` lines and written to
 // `<scratch>/observations.json`, the journals copied beside it. The owner's ~/.claude and ~/.claude.json are only read,
-// after the run, to check that nothing names it. Run on purpose only; it spends money (about a dollar):
+// after the run, to check that nothing names it. Run on purpose only; it spends money (about US$1.7–1.9
+// per full run, measured 2026-09-29):
 //   pnpm exec electron-vite build -c e2e/support/dev-surface.vite.config.mjs
 //   MAWS_C8B_LIVE=1 pnpm exec playwright test e2e/agent-tools-live.spec.ts
 // MAWS_C8B_LIVE_STEPS=i,ii,… runs a subset (setup always runs); MAWS_C8B_LIVE_KEEP=1 keeps the scratch clone and home.
@@ -309,6 +310,21 @@ class Session {
   }
 }
 
+// R6's order in a stop's task log (`Session.taskLog` lines): a snapshot that omits the task, then `task.updated` with
+// `killed`, then `task.notification` `stopped`.
+function expectStopOrder(order: string[], taskId: string): void {
+  const kinds = order.map((l) => l.split(' ')[1]);
+  const snapshot = kinds.indexOf('tasks.snapshot');
+  const updated = kinds.indexOf('task.updated');
+  const notification = kinds.indexOf('task.notification');
+  expect(snapshot, `a tasks.snapshot in ${JSON.stringify(order)}`).toBeGreaterThanOrEqual(0);
+  expect(order[snapshot], 'the snapshot omits the stopped task').not.toContain(taskId);
+  expect(snapshot).toBeLessThan(updated);
+  expect(order[updated]).toContain('"status":"killed"');
+  expect(updated).toBeLessThan(notification);
+  expect(order[notification]).toMatch(/ stopped$/);
+}
+
 const tabOf = (page: Page, name: string) => page.locator('[data-region="panel"] [role="tab"]').filter({ hasText: new RegExp(`^${name}`) });
 async function showTool(page: Page, name: 'Subagents' | 'Background work'): Promise<void> {
   if ((await tabOf(page, name).count()) > 0) {
@@ -385,15 +401,21 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
   const engineEnv: Record<string, string> = { TERM: 'xterm-256color', LANG: process.env.LANG ?? 'en_US.UTF-8' };
   for (const key of ['PATH', 'HOME', 'USER', 'SHELL', 'TMPDIR']) if (process.env[key]) engineEnv[key] = process.env[key]!;
   Object.assign(engineEnv, { CLAUDE_CONFIG_DIR: config, ANTHROPIC_BASE_URL: RELAY_URL, ANTHROPIC_AUTH_TOKEN: GATEWAY_AUTH_TOKEN });
-  const created = JSON.parse(
-    execFileSync(ENGINE_BIN, ['-p', 'Reply with exactly: C8B LIVE READY', '--model', 'sonnet', '--max-budget-usd', '0.5', '--output-format', 'json'], {
-      cwd: clone,
-      env: engineEnv,
-      encoding: 'utf8',
-      timeout: 180_000,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    }),
-  ) as { session_id: string; total_cost_usd: number };
+  let created: { session_id: string; total_cost_usd: number };
+  try {
+    created = JSON.parse(
+      execFileSync(ENGINE_BIN, ['-p', 'Reply with exactly: C8B LIVE READY', '--model', 'sonnet', '--max-budget-usd', '0.5', '--output-format', 'json'], {
+        cwd: clone,
+        env: engineEnv,
+        encoding: 'utf8',
+        timeout: 180_000,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      }),
+    ) as { session_id: string; total_cost_usd: number };
+  } catch (error) {
+    rmSync(scratch, { recursive: true, force: true }); // nothing was measured: the clone and the home go
+    throw error;
+  }
   note('created', { sessionId: created.session_id, costUsd: created.total_cost_usd });
 
   // Runs one lettered step; a failure is recorded and the run goes on to the next step, so one live run reports them all.
@@ -482,13 +504,16 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
     });
 
     await step('ii', 'the transcript row opens the drill-in; the agent tab shares its attachment', async () => {
-      const agentId = ids.first[0] ?? (await s.pull()).find((e) => e.kind === 'subagent.started')?.taskId;
-      if (!agentId) throw new Error('no agent to open (step i did not run)');
+      const opened = (await s.pull()).find((e) => e.kind === 'subagent.started' && (ids.first[0] === undefined || e.taskId === ids.first[0]));
+      if (!opened) throw new Error('no agent to open (step i did not run)');
+      const agentId = opened.taskId as string;
+      const description = opened.description as string;
       await agents(`(a) => a.transcript.getState().expandAll(${JSON.stringify(record.appId)})`);
       await sleep(500);
       // The transcript is virtualised: the turn that dispatched the agents sits above the fold, so the list is walked
-      // from its top until a subagent control is mounted, and that control is clicked as the owner would.
-      const found = await page.evaluate(async () => {
+      // from its top until this agent's control (its glyph, `Open <description>`) is mounted, and that is clicked as the
+      // owner would.
+      const found = await page.evaluate(async (want) => {
         const frame = () => new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
         const main = document.querySelector('[data-region="main"]')!;
         let el: HTMLElement | null = main.querySelector<HTMLElement>('[data-index]')?.parentElement ?? null;
@@ -498,24 +523,26 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
         for (let i = 0; i < 400; i += 1) {
           await frame();
           const controls = Array.from(main.querySelectorAll<HTMLButtonElement>('button.transcript-subagent-line, button.transcript-glyph'));
-          if (controls.length > 0) {
-            const labels = controls.map((c) => c.getAttribute('aria-label') ?? c.textContent?.trim() ?? '');
-            controls[0].click();
+          const labels = controls.map((c) => c.getAttribute('aria-label') ?? c.textContent?.trim() ?? '');
+          const index = labels.indexOf(want);
+          if (index >= 0) {
+            controls[index].click();
             return { labels, clicked: true };
           }
           if (el.scrollTop + el.clientHeight >= el.scrollHeight) break;
           el.scrollTop += Math.max(200, el.clientHeight / 2);
         }
         return { labels: [] as string[], clicked: false };
-      });
+      }, `Open ${description}`);
       if (!found.clicked) {
         await page.screenshot({ path: join(scratch, 'ii-main.png') }).catch(() => undefined);
-        throw new Error('no subagent control in the main transcript, walked from its top');
+        throw new Error(`no control "Open ${description}" in the main transcript, walked from its top`);
       }
       const labels = found.labels;
       await expect(tabOf(page, 'Subagents')).toHaveAttribute('aria-selected', 'true');
       await expect.poll(() => probe(page, (p) => p.subagents().drillIn?.header ?? null), { timeout: 10_000 }).not.toBeNull();
       const drill = await probe(page, (p) => p.subagents().drillIn);
+      expect(drill?.header, 'the drill-in is on the agent whose control was clicked').toBe(description);
       const key = `${record.appId}:${agentId}`;
       const childTools = s.events.filter((e) => e.kind === 'tool.use' && e.agentId === agentId).map((e) => e.toolName);
       const rowsBefore = await agents<number>(`(a) => a.transcript.getState().rows(${JSON.stringify(key)}).length`);
@@ -550,6 +577,8 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
       ids.perm = asked.agentId!;
       await expect.poll(() => probe(page, (p) => p.subagents().active.find((r) => r.waiting) ?? null), { timeout: 15_000 }).not.toBeNull();
       const row = (await probe(page, (p) => p.subagents().active)).find((r) => r.agentId === ids.perm);
+      expect(row?.waiting, 'the waiting agent’s row carries the badge').toBe(true);
+      expect(row?.line).toMatch(/^Approval needed · /);
       await panel.locator(`[data-agent-row="${ids.perm}"]`).click();
       const card = panel.locator('[data-view="agent"] [data-request-card]');
       await expect(card).toHaveCount(1, { timeout: 15_000 });
@@ -590,10 +619,11 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
       await expect.poll(() => probe(page, (p) => p.background().shells.find((r) => r.line.includes('stopped'))?.line ?? null), { timeout: 10_000 }).not.toBeNull();
       const rec = await probe(page, (p) => p.rec.stopping);
       const order = s.taskLog(stopFrom, taskId);
-      note('iv.stop', { stoppingSeen: rec[taskId] ?? null, line: (await probe(page, (p) => p.background().shells)).find((r) => r.taskId === taskId)?.line, order });
-      const kinds = order.map((l) => l.split(' ')[1]);
-      expect(kinds.indexOf('tasks.snapshot')).toBeLessThan(kinds.indexOf('task.updated'));
-      expect(kinds.indexOf('task.updated')).toBeLessThan(kinds.indexOf('task.notification'));
+      const stoppedLine = (await probe(page, (p) => p.background().shells)).find((r) => r.taskId === taskId)?.line;
+      note('iv.stop', { stoppingSeen: rec[taskId] ?? null, line: stoppedLine, order });
+      expect(rec[taskId], 'the shell’s row showed stopping…').toBeDefined();
+      expect(stoppedLine).toMatch(/ · stopped /);
+      expectStopOrder(order, taskId);
       await s.idle();
     });
 
@@ -607,7 +637,11 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
       const card = (await probe(page, (p) => p.background().workflows)).find((c) => c.taskId === taskId);
       const history = (await probe(page, (p) => p.rec.cards))[taskId] ?? [];
       note('v.run', { taskId, description: started.description, workflowName: started.workflowName, card, phaseHistory: history.map((h) => h.v), frames: s.events.filter((e) => e.kind === 'workflow.progress' && e.taskId === taskId).length });
-      expect(history.map((h) => h.v)).toContain('Echo 2/2');
+      const phases = history.map((h) => h.v).filter(Boolean);
+      expect(phases[0], 'the first phase row: Echo 0/2, or Queued before any agent started').toMatch(/^Echo (0\/2|· Queued)$/);
+      expect(phases.at(-1)).toBe('Echo 2/2');
+      // `Echo 1/2` is recorded, not asserted: two agents finishing inside one progress frame would skip it.
+      expect(card?.table.map((row) => row[2]), 'the table’s tokens').toEqual(card?.table.map(() => expect.stringMatching(/^\d+(\.\d)?[kM]?$/)));
       await s.idle();
       const again = await s.send(`Call the Workflow tool once with this exact script as the script parameter, then reply STARTED:\n\n${SLOW_WORKFLOW_SCRIPT}`);
       const slow = await s.until('the slow workflow’s task.started', (ev) => ev.find((e) => e.seq !== null && e.seq > again && e.kind === 'task.started' && e.taskType === 'local_workflow'));
@@ -621,10 +655,11 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
       await sleep(1_500);
       const stopped = (await probe(page, (p) => p.background().workflows)).find((c) => c.taskId === slowId);
       const order = s.taskLog(stopFrom, slowId);
-      note('v.stop', { taskId: slowId, card: stopped, stoppingSeen: (await probe(page, (p) => p.rec.stopping))[slowId] ?? null, order });
-      const kinds = order.map((l) => l.split(' ')[1]);
-      expect(kinds.indexOf('tasks.snapshot')).toBeLessThan(kinds.indexOf('task.updated'));
-      expect(kinds.indexOf('task.updated')).toBeLessThan(kinds.indexOf('task.notification'));
+      const stoppingSeen = (await probe(page, (p) => p.rec.stopping))[slowId];
+      note('v.stop', { taskId: slowId, card: stopped, stoppingSeen: stoppingSeen ?? null, order });
+      expect(stoppingSeen, 'the card showed stopping…').toBeDefined();
+      expect(stopped?.status).toBe('stopped');
+      expectStopOrder(order, slowId);
       await s.idle();
     });
 
@@ -688,6 +723,7 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
       const sleepUse = await s.until('the parent’s sleep 60', (ev) => ev.find((e) => e.seq !== null && e.seq > busyFrom && e.kind === 'tool.use' && e.agentId === null && e.toolName === 'Bash' && JSON.stringify(e.input).includes('sleep 60')), 120_000);
       const busyStatus = await s.status();
       const busy = await relay(ids.relayBusy, `RELAY-${RUN}-BUSY`, true);
+      expect(busy.resting, 'O3: the line rests at forwarded after delivery').toBe(busy.forwarded);
       const sleepReturned = s.events.find((e) => e.kind === 'tool.result' && e.toolUseId === sleepUse.toolUseId);
       note('vi.busy', { ...busy, parentTurnAtSend: busyStatus.turn, parentSleep: { startedAt: sleepUse.at, returnedAt: sleepReturned?.at ?? null } });
       await s.idle(300_000);
@@ -698,6 +734,7 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
       ids.relayIdle = idleAgent.taskId as string;
       await s.idle(180_000, 3_000);
       const idle = await relay(ids.relayIdle, `RELAY-${RUN}-IDLE`, false);
+      expect(idle.resting, 'O3: the line rests at forwarded after delivery').toBe(idle.forwarded);
       note('vi.idle', idle);
       writeFileSync(TMP.stop, '');
       await s.until('both relay agents finished', (ev) => [ids.relayBusy, ids.relayIdle].every((id) => ev.some((e) => e.kind === 'subagent.finished' && e.taskId === id)), 240_000);
@@ -791,7 +828,7 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
         if (STEPS.has('v')) await expect.poll(() => probe(p2, (p) => p.background().headings.join(' | ')), { timeout: 20_000 }).toMatch(/Workflow runs on disk · 2/);
         const bg = await probe(p2, (p) => p.background());
         note('x', { headings: lists.headings, notes: lists.notes, disk: lists.disk.map((r) => ({ agentId: r.agentId, title: r.title, line: r.line, depth: r.depth })), drillIn: drill, background: bg });
-        expect(lists.disk.every((r) => r.line === 'status unavailable' || /^stopped|^finished/.test(r.line))).toBe(true);
+        expect(lists.disk.map((r) => r.line)).toEqual(lists.disk.map(() => 'status unavailable'));
         expect(bg.notes).toContain('Shells and monitors are known only while the session runs here');
         expect(bg.tasks.label).toBe('session list');
       });
@@ -842,7 +879,8 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
     }
     for (const path of Object.values(TMP)) rmSync(path, { force: true });
     console.log(`[c8b-live] observations: ${join(scratch, 'observations.json')}`);
+    // Read only, and here so a run that failed part-way is checked too.
+    expect(ownerHomeNames(created.session_id, scratch)).toEqual([]);
   }
-  expect(ownerHomeNames(created.session_id, scratch)).toEqual([]);
   expect(failures).toEqual([]);
 });
