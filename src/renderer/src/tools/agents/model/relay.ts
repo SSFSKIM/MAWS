@@ -50,6 +50,11 @@ export function matchesReceipt(event: SessionEvent, relay: Relay): boolean {
   return false;
 }
 
+// A failed relay's text returns to the composer's box when the box is empty, never over a draft typed since (O1).
+export function restoreDraft(draft: string, relay: Relay | undefined): string {
+  return relay?.state.kind === 'failed' && draft.trim() === '' ? relay.text : draft;
+}
+
 // After this long in `asked` with the turn clause shown, the clause becomes the long-wait string: the parent reaches no
 // tool boundary while one call runs.
 export const RELAY_LONG_WAIT_MS = 30_000;
