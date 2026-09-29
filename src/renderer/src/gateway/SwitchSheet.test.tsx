@@ -75,6 +75,8 @@ describe('the switch sheet', () => {
     wrap(<SwitchSheet appSessionId={READY} confirm={{ target: 'gateway', backgroundTasks: [], requiresModel: false, model: null, effort: null }} error={null} answer={answer} />);
     const sheet = await screen.findByRole('alertdialog', { name: 'Switch this session to the gateway?' });
     expect(within(sheet).queryByRole('radiogroup')).toBeNull();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(backend.calls.filter((c) => c.command === 'session.listModels'), 'no catalogue read without a model to choose').toEqual([]);
     expect(within(sheet).getByText('Gateway models become available')).toBeTruthy();
     fireEvent.click(within(sheet).getByRole('button', { name: 'Cancel' }));
     expect(answer).toHaveBeenCalledWith(READY, null);

@@ -13,9 +13,9 @@ import { DIRECT_MODEL } from './copy';
 import { directChoice, preselected, useDirectModelPick } from './direct-model';
 import type { SwitchAnswer } from './switch-route';
 
-// The session's Claude-group models (null while the catalogue is read).
-export function useClaudeModels(appSessionId: AppSessionId): readonly ModelRow[] | null {
-  const read = useQuery({ queryKey: ['maws', 'gateway.directCatalogue', appSessionId], queryFn: () => directCatalogue(appSessionId), staleTime: 60_000 });
+// The session's Claude-group models (null while the catalogue is read, or while `enabled` is false: nothing is asked).
+export function useClaudeModels(appSessionId: AppSessionId, enabled = true): readonly ModelRow[] | null {
+  const read = useQuery({ queryKey: ['maws', 'gateway.directCatalogue', appSessionId], queryFn: () => directCatalogue(appSessionId), staleTime: 60_000, enabled });
   if (!read.data) return read.isError ? [] : null;
   const claude = new Set(presentModels(read.data).claude.map((m) => m.value));
   return read.data.filter((m) => claude.has(m.value));
@@ -32,8 +32,8 @@ export function useCurrentEffort(appSessionId: AppSessionId): Effort | null {
 // The chosen row: the human's pick, else (with `preselect`) `default` once the catalogue is read. The switch sheet asks
 // for an explicit pick, since the restart changes the session's model; `pickDirectModel`'s dialog, whose one act is the
 // choice, preselects.
-export function useDirectChoice(appSessionId: AppSessionId, initial: string | null, preselect: boolean) {
-  const models = useClaudeModels(appSessionId);
+export function useDirectChoice(appSessionId: AppSessionId, initial: string | null, preselect: boolean, enabled = true) {
+  const models = useClaudeModels(appSessionId, enabled);
   const effort = useCurrentEffort(appSessionId);
   const [picked, pick] = useState<string | null>(initial);
   const row = models === null ? null : (models.find((m) => m.value === picked) ?? (preselect ? preselected(models) : null));

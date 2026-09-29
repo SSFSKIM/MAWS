@@ -15,7 +15,7 @@ import { answerSwitch, switchButtonLabel, type SwitchAnswer } from './switch-rou
 const NO_MODEL: SwitchAnswer = { model: null, displayName: null, effort: null };
 
 export function SwitchSheet({ appSessionId, confirm, error, answer = answerSwitch }: { appSessionId: AppSessionId; confirm: SwitchConfirm; error: string | null; answer?: typeof answerSwitch }) {
-  const direct = useDirectChoice(appSessionId, confirm.model, false);
+  const direct = useDirectChoice(appSessionId, confirm.model, false, confirm.requiresModel); // no catalogue read without a model to choose
   const reply = confirm.requiresModel ? direct.answer : NO_MODEL;
   return (
     <AlertDialog.Root open onOpenChange={(open) => !open && answer(appSessionId, null)}>
