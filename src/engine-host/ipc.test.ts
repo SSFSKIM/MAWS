@@ -267,7 +267,12 @@ describe('engine host X2 surface', () => {
     expect(await host.call('session.catalog', { appSessionId: id as AppSessionId })).toMatchObject({ commands: expect.any(Array), revision: expect.any(Number) });
     expect(await host.call('session.stop', { appSessionId: id as AppSessionId, reason: 'archive' })).toMatchObject({ exited: true });
     expect(forget).toHaveBeenCalledExactlyOnceWith(id);
-    expect(host.ipc.table.get(id as AppSessionId)!.status().exit).toMatchObject({ reason: 'archive' });
+    expect(host.statuses(id).at(-1)!.exit).toMatchObject({ reason: 'archive' });
+    // released (whole-branch review): no table row, no stream, so the host keeps nothing of an archived session
+    expect((await host.call('engine.sessions', undefined)).some((s) => s.appSessionId === id)).toBe(false);
+    expect(host.ipc.table.get(id as AppSessionId)).toBeUndefined();
+    await expect(host.call('session.events', { appSessionId: id as AppSessionId, afterSeq: null, limit: null })).rejects.toThrow(`unknown session ${id}`);
+    await expect(host.call('session.status', { appSessionId: id as AppSessionId })).rejects.toThrow(`unknown session ${id}`);
     // the internal event main's attention service retires the session on (M5 review), after the session's last batch
     const names = host.emitted.filter((e) => (e.payload as { appSessionId?: string }).appSessionId === id).map((e) => e.name);
     expect(names.at(-1)).toBe('session.forgotten');
@@ -282,6 +287,27 @@ describe('engine host X2 surface', () => {
     expect(await host.call('session.stop', { appSessionId: ended as AppSessionId, reason: 'archive' })).toMatchObject({ exited: true });
     expect(forget).toHaveBeenLastCalledWith(ended);
     expect(host.emitted.at(-1)).toEqual({ name: 'session.forgotten', payload: { appSessionId: ended } });
+    expect((await host.call('engine.sessions', undefined)).map((s) => s.appSessionId)).toEqual([]);
+    await expect(host.call('session.events', { appSessionId: ended as AppSessionId, afterSeq: null, limit: null })).rejects.toThrow(`unknown session ${ended}`);
+  });
+
+  it('a relaunch replaces the exited launch\'s row and stream: engine.sessions lists the id once, session.events answers the new launch only', async () => {
+    const host = engineHost();
+    const id = 'app-relaunch';
+    const first = await host.call('session.launch', { spec: replaySpec(id, 'spikes/protocol-probe/fixtures/init.jsonl') });
+    await until(() => host.statuses(id).some((s) => s.process === 'ready'), 'ready');
+    await host.call('session.stop', { appSessionId: id as AppSessionId, reason: 'stop' });
+    const firstLaunch = (first as { session: EngineSessionStatus }).session.launchId;
+    const ofLaunch = async (launchId: string) => (await host.call('session.events', { appSessionId: id as AppSessionId, afterSeq: null, limit: null })).events.filter((e) => e.id.includes(`:${launchId}:`));
+    expect(await ofLaunch(firstLaunch)).toMatchObject([{ kind: 'process.exited', reason: 'stop' }]); // an exited session keeps its row and stream
+    const second = await host.call('session.launch', { spec: replaySpec(id, 'spikes/protocol-probe/fixtures/init.jsonl') });
+    const secondLaunch = (second as { session: EngineSessionStatus }).session.launchId;
+    expect(secondLaunch).not.toBe(firstLaunch);
+    await until(() => host.statuses(id).some((s) => s.launchId === secondLaunch && s.process === 'ready'), 'the second launch ready');
+    expect((await host.call('engine.sessions', undefined)).filter((s) => s.appSessionId === id).map((s) => s.launchId)).toEqual([secondLaunch]);
+    expect(await ofLaunch(firstLaunch)).toEqual([]);
+    await host.call('session.stop', { appSessionId: id as AppSessionId, reason: 'stop' });
+    expect((await ofLaunch(secondLaunch)).map((e) => e.kind)).toEqual(['process.exited']);
   });
 
   it('mutations report what the engine said: a refused mode with its code and the status requested/refusal, a model error, void setters', async () => {

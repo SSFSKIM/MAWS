@@ -154,11 +154,22 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
   handle('session.events', async ({ appSessionId, afterSeq, limit }) => streamOf(appSessionId).snapshot(afterSeq, limit));
   handle('session.stop', async ({ appSessionId, reason }) => {
     if (reason === 'archive') assertSafeAppSessionId(appSessionId); // archive deletes a directory named after it (M5 review)
-    const result = await sessionOf(appSessionId).stop(reason);
+    const session = sessionOf(appSessionId);
+    const result = await session.stop(reason);
     if (reason === 'archive') {
-      await store.forget(appSessionId as AppSessionId); // the state file and the journal directory
-      streams.get(appSessionId as AppSessionId)?.flush(); // the session's last events first
-      emit('session.forgotten', { appSessionId: appSessionId as AppSessionId }); // main's attention service retires it (M5 review)
+      const id = appSessionId as AppSessionId;
+      await store.forget(id); // the state file and the journal directory
+      streams.get(id)?.flush(); // the session's last events first
+      emit('session.forgotten', { appSessionId: id }); // main's attention service retires it (M5 review)
+      // the host keeps nothing of an archived session (whole-branch review): its row, stream and spec go at its exit
+      const release = () => {
+        if (table.get(id) !== session || !table.release(id)) return; // relaunched meanwhile: the new launch owns them
+        streams.get(id)?.dispose();
+        streams.delete(id);
+        specs.delete(id);
+      };
+      if (session.lifecycle === 'exited') release();
+      else void session.exited.then(release);
     }
     return result;
   });

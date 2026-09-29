@@ -207,13 +207,13 @@ describe('EngineSession: inbound requests, host hooks and exit', () => {
     expect(events.filter((e) => e.kind === 'permission.resolved')).toHaveLength(1);
     expect(lists.at(-1)).toMatchObject([{ state: 'delivered' }]);
     const rebuilt = new Normalizer({ appSessionId: spec().appSessionId, launchId: plan.launchId, sessionId: plan.sessionId });
-    expect(journal.rows.flatMap((row) => rebuilt.push(row))).toEqual(session.events());
+    expect(journal.rows.flatMap((row) => rebuilt.push(row))).toEqual(events);
   });
 
   it('inbound frames read while an answer\'s write is in flight wait for it: pending until the flush, then delivered, then confirmed', async () => {
     let release!: () => void;
     const gate = new Promise<void>((r) => (release = r));
-    const { session, transport, journal, lists, plan } = setup({ transport: { holdWrite: (f) => (f.type === 'control_response' ? gate : null) } });
+    const { session, transport, journal, lists, plan, events } = setup({ transport: { holdWrite: (f) => (f.type === 'control_response' ? gate : null) } });
     await session.start();
     transport.push({ type: 'control_request', request_id: 'r1', request: { subtype: 'can_use_tool', tool_name: 'Bash', input: { command: 'ls' }, tool_use_id: 'toolu_1' } });
     await flush();
@@ -230,7 +230,7 @@ describe('EngineSession: inbound requests, host hooks and exit', () => {
     const order = journal.rows.filter((r) => r.direction !== 'meta').slice(-2).map((r) => `${r.direction}:${(r.frame as { type: string }).type}`);
     expect(order).toEqual(['out:control_response', 'in:user']);
     const rebuilt = new Normalizer({ appSessionId: spec().appSessionId, launchId: plan.launchId, sessionId: plan.sessionId });
-    expect(journal.rows.flatMap((row) => rebuilt.push(row))).toEqual(session.events());
+    expect(journal.rows.flatMap((row) => rebuilt.push(row))).toEqual(events);
   });
 
   it('when that held write rejects: the item stays pending, write_failed is journaled before the held frame, and the exit counts it lost', async () => {
@@ -279,7 +279,7 @@ describe('EngineSession: inbound requests, host hooks and exit', () => {
     expect(rows.map((r) => r.direction)).toEqual(['out', 'in']);
     expect(events.filter((e) => e.kind === 'boundary.rewind')).toMatchObject([{ targetMessageUuid: 'u-2', prefillText: 'Also BANANA', precedingAssistantUuid: 'a-1', seq: rows[1]!.seq }]);
     const rebuilt = new Normalizer({ appSessionId: spec().appSessionId, launchId: plan.launchId, sessionId: plan.sessionId });
-    expect(journal.rows.flatMap((row) => rebuilt.push(row))).toEqual(session.events());
+    expect(journal.rows.flatMap((row) => rebuilt.push(row))).toEqual(events);
   });
 
   it('at stdout EOF a held request write settles before the response that arrived during it is journaled; the exit row comes last', async () => {

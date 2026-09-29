@@ -103,7 +103,6 @@ export class EngineSession {
   private readonly reconnect: boolean;
   private readonly log: (message: string) => void;
   private readonly listeners: { [K in keyof Listeners]: Set<Listeners[K]> } = { events: new Set(), status: new Set(), brokerItems: new Set(), queue: new Set(), exited: new Set() };
-  private readonly eventLog: SessionEvent[] = [];
   private readonly pendingWarnings: NormalizerWarning[] = [];
   private readonly stderrTail: string[] = [];
   private readonly launchedAt = new Date().toISOString();
@@ -293,10 +292,6 @@ export class EngineSession {
     this.touch();
   }
 
-  events(): SessionEvent[] {
-    return [...this.eventLog];
-  }
-
   brokerItems(): AttentionItem[] {
     return this.broker.snapshot();
   }
@@ -344,7 +339,6 @@ export class EngineSession {
     for (const w of this.pendingWarnings.splice(0)) this.record('meta', { event: w.event, rowSeq: w.seq, detail: w.detail }); // journaled and normalised like any row; they yield no events
     if (events.length > 0) {
       this.lastEventSeq = row.seq;
-      this.eventLog.push(...events);
       this.emit('events', events);
       this.react(events);
     }

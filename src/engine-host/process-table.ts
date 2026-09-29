@@ -4,7 +4,8 @@
 // writer on one engine session while the first is still dying. The table forwards every session's status to its
 // listeners, samples memory for all live processes with one `ps` every 10 s, and ends them all on shutdown. What would
 // keep a process alive is computed (`keepAliveReasons`) and never acted on: under the interim rule nothing exits a
-// process but stop, archive and shutdown (C12 decides otherwise later).
+// process but stop, archive and shutdown (C12 decides otherwise later). An exited row stays (its status and events still
+// answer) until the id is relaunched, which replaces it, or archived, which releases it.
 import { execFile } from 'node:child_process';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { EngineSessionStatus } from '@shared/engine/status';
@@ -89,6 +90,14 @@ export class ProcessTable {
     });
     void session.start();
     return { status: 'launching', session };
+  }
+
+  // Drops an exited row (an archive: whole-branch review), so the host keeps nothing of a session no one will relaunch;
+  // a row whose process has not exited stays, since it is still the reservation. True when a row was dropped.
+  release(appSessionId: AppSessionId): boolean {
+    const row = this.rows.get(appSessionId);
+    if (!row || row.status().process !== 'exited') return false;
+    return this.rows.delete(appSessionId);
   }
 
   get(appSessionId: AppSessionId): EngineSession | undefined {

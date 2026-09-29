@@ -140,6 +140,21 @@ describe('process table: change notification, shutdown and reservations', () => 
     expect(await table.shutdown({ graceMs: 5_000 })).toEqual({ stopped: 0, forced: 0 }); // idempotent
   });
 
+  it('release frees an exited row only: a live one stays reserved, an exited one leaves the table (archive, whole-branch review)', async () => {
+    const table = new ProcessTable({ ps: async () => '' });
+    const s = scriptedSession();
+    table.reserve('app-s' as AppSessionId, () => s.session);
+    await s.session.start();
+    expect(table.release('app-s' as AppSessionId)).toBe(false);
+    expect(table.get('app-s' as AppSessionId)).toBe(s.session);
+    s.transport.exit(0);
+    await s.session.exited;
+    expect(table.release('app-s' as AppSessionId)).toBe(true);
+    expect(table.get('app-s' as AppSessionId)).toBeUndefined();
+    expect(table.list()).toEqual([]);
+    expect(table.release('app-s' as AppSessionId)).toBe(false); // nothing left to release
+  });
+
   it('after a journal_failed exit the reservation is released and a resume for the same app session is accepted', async () => {
     const table = new ProcessTable({ ps: async () => '' });
     const first = scriptedSession();
