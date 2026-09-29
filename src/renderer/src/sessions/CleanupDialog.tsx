@@ -190,10 +190,10 @@ export function CleanupDialog({ target }: { target: CleanupTarget }) {
         if (!removed.ok) return setError(removed.error.message);
         if ('refused' in removed.value) return setError(`Remove refused · ${refusalWords(removed.value)}`);
       }
-      if (steps.deleteBranch && (identity.branch === null || identity.branchHead === null)) {
-        return setError('Delete branch not run: the branch appeared after this dialog opened; close and reopen it');
-      }
-      if (steps.deleteBranch && identity.branch !== null && identity.branchHead !== null) {
+      // the step is offered only for a branch, so `branch` is set here; its head is null when the read at open found
+      // no branch or failed, and the step's `expect` has nothing to hold git to
+      if (steps.deleteBranch && identity.branch !== null) {
+        if (identity.branchHead === null) return setError('Delete branch not run: the branch was not read when this dialog opened; close and reopen it');
         const deleted = await ipc.invoke('git.worktree.deleteBranch', { repoRoot: identity.repoRoot, branch: identity.branch, expect: { head: identity.branchHead }, acknowledgeUnmerged: acks.unmerged });
         if (!deleted.ok) return setError(deleted.error.message);
         if ('refused' in deleted.value) return setError(`Delete branch refused · ${refusalWords(deleted.value)}`);

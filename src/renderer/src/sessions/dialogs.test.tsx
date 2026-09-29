@@ -181,7 +181,7 @@ describe('cleanup dialog archives idle only', () => {
     await waitFor(() => expect(fake.invoked('git.worktree.remove')).toEqual([{ repoRoot: REPO, path: canonical, expect: { branch: 'worktree-accept-one', head: HEAD }, discard: false }]));
   });
 
-  it('says so when a checked Delete branch cannot run because the branch was not there when the dialog opened', async () => {
+  it('says so when a checked Delete branch cannot run because the branch was not read when the dialog opened', async () => {
     let branchReads = 0;
     withMain({
       'git.worktree.list': () => ({ ...listed, worktrees: [] }),
@@ -194,7 +194,7 @@ describe('cleanup dialog archives idle only', () => {
     await within(dialog).findByText(/· detached/);
     await userEvent.click(within(dialog).getByRole('checkbox', { name: 'Delete branch' }));
     await userEvent.click(within(dialog).getByRole('button', { name: 'Delete branch' }));
-    expect(await within(dialog).findByText(/Delete branch not run: the branch appeared after this dialog opened; close and reopen it/)).toBeTruthy();
+    expect(await within(dialog).findByText(/Delete branch not run: the branch was not read when this dialog opened; close and reopen it/)).toBeTruthy();
     expect(fake.invoked('git.worktree.deleteBranch')).toEqual([]);
   });
 
