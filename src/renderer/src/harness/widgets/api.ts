@@ -12,6 +12,6 @@ export interface WidgetsHarnessApi {
   open(name: string, args?: string): void; // the picker: a registered widget opened directly over the composer
   // One invoke of a widget's own read under the widget's own query key, its answer landing where a mounted widget reads.
   read(command: string, input: Record<string, unknown>): Promise<unknown>;
-  // A widget's control function with the arguments given verbatim (M3's controls; none in M2).
+  // A widget's control function with the arguments given verbatim: setModel, setEffort, applyFlagSettings, setPermissionMode.
   control(name: string, input: Record<string, unknown>): Promise<unknown>;
 }

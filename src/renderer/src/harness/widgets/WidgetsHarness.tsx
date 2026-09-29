@@ -1,9 +1,10 @@
 // The widgets harness page (`#widgets`; C11 execution document, M2 decisions and Acceptance item 2). Interactive: C7's
 // composer over one session with a widget picker beside it, over the app's real stores and X2, so typing `/` in the
 // composer and choosing a name opens C11's widget as the app does; under MAWS_WIDGET_BACKEND=fixtures main answers the
-// widgets' reads from the fixture-backed widget backend over C5's scenario records. Passive (C3's strict replay): every
-// engine-read widget mounted at once reading only the query cache, which the spec's scripted driver fills through
-// `read` with exactly the fixture's recorded frames, so nothing on the page writes to the replay on its own.
+// widgets' reads from the fixture-backed widget backend over C5's scenario records. Passive (C3's strict replay): the
+// engine-read widgets and the model and compact widgets mounted at once reading only the query cache and the status,
+// which the spec's scripted driver moves through `read` and `control` with exactly the fixture's recorded frames, so
+// nothing on the page writes to the replay on its own.
 // Main blocks navigation, so an end-to-end test drives the page through `window.__maws_widgets`; for manual use
 // `?session=<id>` shows a session (`&driver=replay` passively), `&widget=<name>` opens a widget and `?theme=dark`.
 import { QueryClientProvider } from '@tanstack/react-query';
@@ -18,6 +19,8 @@ import { useLayout } from '../../stores/layout';
 import { connectUsage } from '../../stores/usage';
 import { registerAllWidgets, WIDGETS } from '../../widgets';
 import { WIDGET_TITLE } from '../../widgets/copy';
+import { applyFlagSettings, setEffort, setModel } from '../../widgets/model';
+import { setPermissionMode } from '../../widgets/PermissionsWidget';
 import { readIntoCache, WidgetReadPolicyContext, type SessionRead } from '../../widgets/read';
 import type { WidgetsHarnessApi, WidgetsPane } from './api';
 
@@ -27,8 +30,13 @@ declare global {
   }
 }
 
-// The widgets whose body is one engine read (M2's fourteen), mounted together in passive mode.
-const ENGINE_READ: readonly WidgetCommandName[] = ['permissions', 'usage', 'context', 'config', 'plugins', 'mcp', 'sandbox', 'hooks', 'memory', 'skills', 'agents', 'status', 'diff', 'export'];
+// The widgets mounted together in passive mode: M2's fourteen engine-read widgets, and the model and compact widgets
+// (M3), whose reads (`list_models`, the summary `get_context_usage`) the replay-conformance driver issues.
+const PASSIVE: readonly WidgetCommandName[] = ['model', 'permissions', 'usage', 'context', 'compact', 'config', 'plugins', 'mcp', 'sandbox', 'hooks', 'memory', 'skills', 'agents', 'status', 'diff', 'export'];
+
+// The widgets' own control functions, for the scripted driver (`window.__maws_widgets.control`), called with the
+// recorded arguments verbatim; nothing else calls them through this table.
+const CONTROLS: Record<string, (input: never) => Promise<unknown>> = { setModel, setEffort, applyFlagSettings, setPermissionMode };
 
 function initial(): { pane: WidgetsPane; widget: { name: string; args: string } | null } {
   const params = new URLSearchParams(location.search);
@@ -84,7 +92,7 @@ function Passive({ appSessionId }: { appSessionId: AppSessionId }) {
   return (
     <WidgetReadPolicyContext.Provider value={{ mode: 'passive' }}>
       <main className="grid h-full grid-cols-3 content-start gap-4 overflow-auto bg-bg p-6 text-ui text-fg">
-        {ENGINE_READ.map((name) => {
+        {PASSIVE.map((name) => {
           const Widget = WIDGETS[name];
           return (
             <section key={name} aria-label={WIDGET_TITLE[name]} className="min-w-0 rounded-md border border-border bg-bg-raised p-2">
@@ -115,7 +123,7 @@ export function WidgetsHarness() {
       },
       open: (name, args = '') => setOpened({ name, args }),
       read: (command, input) => readIntoCache(queryClient, command as SessionRead, input as never),
-      control: (name) => Promise.reject(new Error(`no widget control named ${name}`)),
+      control: (name, input) => (CONTROLS[name] ? CONTROLS[name](input as never) : Promise.reject(new Error(`no widget control named ${name}`))),
     };
     return () => {
       offs.forEach((off) => off());

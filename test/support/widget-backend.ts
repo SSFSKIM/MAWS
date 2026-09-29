@@ -47,6 +47,7 @@ export const RESPONSES: Record<string, FixtureLine> = {
   reload_plugins: 'widgets/reload-plugins.json',
   mcp_reconnect: 'widgets/mcp-reconnect.json',
   mcp_toggle: 'widgets/mcp-toggle.json',
+  rename_session: 'reads#90', // success, no payload (the rename widget's C10 seam until C10's session.rename)
 };
 
 // `set_permission_mode { mode: 'auto' }` on a model the catalogue does not mark `supportsAutoMode`: the engine's refusal.
@@ -75,6 +76,7 @@ export const SUBTYPE_OF: Partial<Record<CommandName, string>> = {
   'session.reloadPlugins': 'reload_plugins',
   'session.mcpReconnect': 'mcp_reconnect',
   'session.mcpToggle': 'mcp_toggle',
+  'session.renameSession': 'rename_session',
 };
 
 // The launch's init facts every answered status carries (C3 reads them from `system/init`): the owner's eleven plugins,
@@ -320,6 +322,7 @@ export function createWidgetBackend(options: WidgetBackendOptions): WidgetBacken
     if (op) return operation(op, input as Record<string, unknown>, status);
     if (command === 'session.mcpStatus') return mcpStatus(status);
     if (subtype === 'set_model' || subtype === 'set_permission_mode' || subtype === 'apply_flag_settings') return control(command, input as Record<string, unknown>, status);
+    if (subtype === 'rename_session') return void fixtureLine(options.root, RESPONSES.rename_session); // no payload
     return fixtureLine(options.root, RESPONSES[subtype]);
   }
 
