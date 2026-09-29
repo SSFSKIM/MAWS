@@ -2,9 +2,9 @@
 // C5's real `PanelRegion`, inside C5's grid, over the two fake sessions of the harness scenario, with C9's real
 // Terminal tool and stub tools standing in for the other siblings' tools. The page composes itself as `App.tsx` does,
 // in this order: the slot, the shell actions (the region's maximize and hide), `persistLayout`, `connectPanelHost`
-// (persistence first: the barrier writes inside the hydration notification), then hydration over the profile's real
-// layout.json, all inside TanStack Query's provider. It never calls `connectShell`: nothing answers `session.list`
-// here, so it seeds the stores itself. Run it under `MAWS_SESSION_SOURCE=stub:test/fixtures/panel/harness-sessions.json`
+// (persistence first: the barrier writes inside the hydration notification), the summary's `connectPanelEvents`, then
+// hydration over the profile's real layout.json, all inside TanStack Query's provider. It never calls `connectShell`:
+// nothing answers `session.list` here, so it seeds the stores itself (M2's summary seams in `summaryProbes.ts`). Run it under `MAWS_SESSION_SOURCE=stub:test/fixtures/panel/harness-sessions.json`
 // (ruling O1), so main knows A and B. C9's page probes live in the C9 blocks (the stand-in fold, ruling O2).
 import { QueryClientProvider } from '@tanstack/react-query';
 import { useEffect } from 'react';
@@ -13,6 +13,7 @@ import { gridColumns, useWindowWidth } from '../../app/regions';
 import { registerShellActions } from '../../app/shell-actions';
 import { registerSlot } from '../../app/slots';
 import { ipc } from '../../ipc/client';
+import { connectPanelEvents } from '../../ipc/events';
 import { queryClient } from '../../ipc/query';
 import { runAction } from '../../keymap/actions-runtime';
 import { connectPanelHost, instanceIds, instanceOf, isRestoredLog, panelHost, pendingAdds, registerPanelTool, togglePinned, usePanelHost } from '../../panel/host';
@@ -26,6 +27,7 @@ import { useHarnessTheme } from '../terminal/useHarnessTheme';
 import type { FakeSessionId, PanelHarnessApi } from './api';
 import { FAKE_IDS, FAKE_RECORDS, fakeId, seedFakeSessions } from './fakeSessions';
 import { stubProbe, stubTool } from './stubTool';
+import { summaryProbes } from './summaryProbes';
 // C9 start
 import { openTerminal, TERMINAL_TOOL_ID, terminalTool } from '../../tools/terminal';
 import { adoptTerminals, connectTerminalProbes, createPanelTerminalsApi, inputGuard, keysApi, TerminalControls, TerminalDebugRows, terminalOf } from './terminalProbes';
@@ -56,6 +58,7 @@ function bootstrap(): () => void {
     registerShellActions(),
     persistLayout(ipc),
     connectPanelHost(),
+    connectPanelEvents(), // the summary's git.changed and fs.workflowChanged (M2)
     connectTerminalProbes(), // C9: after the shell's actions, so the page's `tab.next` wins
   ];
   // Once per load (StrictMode replays effects; a second hydrate would replace the panel lists again).
@@ -130,6 +133,7 @@ const api: PanelHarnessApi = {
         resolve();
       });
     }),
+  ...summaryProbes, // M2: setSession, setStatus, setDigest, loadTranscript, transcript
   // C9 start
   async ready() {
     const adopted = await (hydration ?? Promise.resolve([]));
