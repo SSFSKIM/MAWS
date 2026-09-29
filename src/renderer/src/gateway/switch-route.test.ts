@@ -95,7 +95,7 @@ function setup(opts: { model?: string; effort?: EngineSessionStatus['effort']; t
 
 const stateOf = (s: Setup) => s.store.getState().switching.get(READY);
 async function confirming(s: Setup) {
-  await vi.waitFor(() => expect(stateOf(s)?.phase).toBe('confirming'));
+  await vi.waitFor(() => expect(stateOf(s)).toMatchObject({ phase: 'confirming', confirm: expect.anything() })); // asking, its confirm known
   return stateOf(s)!;
 }
 const CONFIRM: SwitchAnswer = { model: null, displayName: null, effort: null };
@@ -252,6 +252,21 @@ describe('switchRoute names background work, requires a Direct model for a gatew
     expect(await none.switcher.switchRoute(READY, 'direct')).toBe('failed');
     expect(none.log).toEqual([]);
     expect(none.toasts).toEqual(['Switching routes arrives with C10']);
+  });
+});
+
+describe('one switch in flight per session', () => {
+  it('a second call made before the first awaits anything is refused, whichever target it names, and the first runs alone', async () => {
+    const s = setup();
+    const first = s.switcher.switchRoute(READY, 'direct');
+    const second = s.switcher.switchRoute(READY, 'gateway'); // the same tick: a double click, or both targets of an unrecorded route
+    expect(await second).toBe('failed');
+    expect(s.toasts).toEqual(['This session is already switching routes']);
+    expect(stateOf(s)).toMatchObject({ target: 'direct', phase: 'confirming' });
+    await confirming(s);
+    expect(s.log.filter((c) => c === 'session.status'), 'one machine read the status').toHaveLength(1);
+    expect(s.switcher.answer(READY, null)).toBe(true);
+    expect(await first).toBe('cancelled');
   });
 });
 

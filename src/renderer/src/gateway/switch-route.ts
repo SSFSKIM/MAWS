@@ -122,7 +122,10 @@ export function createRouteSwitcher(deps: SwitchDeps, store: GatewayStore) {
       return 'failed';
     }
 
+    // Claimed before the first await, so a second call (a double click, or both targets of an unrecorded route) meets
+    // the guard above and never starts a second machine. The sheet renders only once the confirm is known.
     let state: SwitchState = { target, phase: 'confirming', confirm: null, error: null };
+    put(id, state);
     const fail = (error: string): SwitchOutcome => {
       put(id, { ...state, phase: 'failed', error });
       return 'failed';

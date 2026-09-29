@@ -72,7 +72,7 @@ describe('routingFacts names the account and the switch — the footer', () => {
     fireEvent.click(within(footer).getByRole('button', { name: 'Session info' }));
     expect(addTool).toHaveBeenCalledWith('session-info', { appSessionId: READY });
     fireEvent.click(within(footer).getByRole('button', { name: 'Switch to Direct…' }));
-    await vi.waitFor(() => expect(useGateway.getState().switching.get(READY)?.phase).toBe('confirming'));
+    await vi.waitFor(() => expect(useGateway.getState().switching.get(READY)).toMatchObject({ phase: 'confirming', confirm: expect.anything() }));
     expect(answerSwitch(READY, null)).toBe(true);
   });
 
