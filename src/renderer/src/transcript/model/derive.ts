@@ -518,8 +518,9 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
 // read cell folds together keep their own names; thinking and hooks are no tool uses; child agents' calls live in
 // `children` and are not tool uses of the turn, though their completed edits are its edited files, as on the
 // receipt). A file counts as read or edited once its call completed without an error or a denial: a refused or failed
-// call touched nothing. An edit carries its cell's own detail (hunks, counts, change).
-const READS = new Set(['Read', 'Glob', 'Grep', 'LS', 'NotebookRead']);
+// call touched nothing. An edit carries its cell's own detail (hunks, counts, change). Only calls that read a file
+// count as reads: Grep's and Glob's `path` and LS's are search scopes (directories), so they are no files of the turn.
+const READS = new Set(['Read', 'NotebookRead']);
 const EDITS = new Set(['Edit', 'MultiEdit', 'Write', 'NotebookEdit']);
 
 function workOf(turn: TurnState, tools: Map<ToolUseId, ToolRecord>, cells: Cell[], subagents: SubagentGroup[]): TurnWork {

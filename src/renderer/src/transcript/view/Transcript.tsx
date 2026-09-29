@@ -136,6 +136,7 @@ export interface TranscriptProps {
   onFollowChange?: (following: boolean) => void;
   className?: string;
   handle?: Ref<TranscriptListHandle>; // additive: the list's imperative handle (the harness and tests)
+  sessionDirectory?: string | null; // additive: the session's directory, shown on a shell call whose input names no cwd
 }
 
 const NO_ROWS: Row[] = [];
@@ -156,7 +157,13 @@ export function storeKeyOf(source: TranscriptSource): string {
 
 const renderRow = (row: Row) => <RowView row={row} />;
 
-export function Transcript({ source, variant, actions, rewind, renderRequest, onFollowChange, className, handle }: TranscriptProps) {
+// Focus is inside the transcript, or on nothing in particular (the page itself).
+const focusIsHereOrNowhere = (root: HTMLElement | null) => {
+  const active = document.activeElement;
+  return active === null || active === document.body || (root?.contains(active) ?? false);
+};
+
+export function Transcript({ source, variant, actions, rewind, renderRequest, onFollowChange, className, handle, sessionDirectory }: TranscriptProps) {
   const storeKey = storeKeyOf(source);
   const rows = useTranscriptStore((state) => state.entries[storeKey]?.rows ?? NO_ROWS);
   const working = useTranscriptStore((state) => state.entries[storeKey]?.working ?? false);
@@ -175,10 +182,28 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
 
   useImperativeHandle(handle, () => listRef.current!, []);
 
+  // Whether the reader has scrolled, clicked, typed in the transcript or put focus elsewhere since the last jump they
+  // asked for: a jump re-resolved when a staged restart installs (`reissued`) then leaves them where they are. Only
+  // when this view handled that jump itself (`handledFocus`, the id it focused): a jump whose target the old rows did
+  // not hold (a notification opening an item the fresh history brings) was never shown, so it is performed.
+  const readerMoved = useRef(false);
+  const handledFocus = useRef<string | null>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const moved = useCallback(() => {
+    readerMoved.current = true;
+  }, []);
+
   // A jump (store.jumpTo): the store has already opened what holds the row; scroll it into place, then focus it once
   // the virtualiser has mounted it.
   useLayoutEffect(() => {
     if (!jump) return;
+    if (!jump.reissued) {
+      readerMoved.current = false;
+      handledFocus.current = jump.focus;
+    } else if (handledFocus.current === jump.focus && (readerMoved.current || !focusIsHereOrNowhere(rootRef.current))) {
+      useTranscriptStore.getState().jumpHandled(storeKey, jump.nonce);
+      return;
+    }
     const index = rows.findIndex((row) => row.id === jump.rowId);
     if (index >= 0) listRef.current?.scrollToIndex(index, jump.align);
     const frame = requestAnimationFrame(() => {
@@ -204,13 +229,13 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
 
   // Every row reads this context: it changes only with the props, never with the rows.
   const context = useMemo<TranscriptContextValue>(
-    () => ({ storeKey, variant, actions: { ...DEFAULT_ACTIONS, ...actions }, rewind: rewind ?? null, renderRequest: renderRequest ?? null, disclosures, idPrefix }),
-    [storeKey, variant, actions, rewind, renderRequest, disclosures, idPrefix],
+    () => ({ storeKey, variant, actions: { ...DEFAULT_ACTIONS, ...actions }, rewind: rewind ?? null, renderRequest: renderRequest ?? null, disclosures, idPrefix, sessionDirectory: sessionDirectory ?? null }),
+    [storeKey, variant, actions, rewind, renderRequest, disclosures, idPrefix, sessionDirectory],
   );
 
   return (
     <TranscriptProvider value={context}>
-      <div className={`transcript relative min-h-0 ${className ?? ''}`}>
+      <div ref={rootRef} className={`transcript relative min-h-0 ${className ?? ''}`} onWheel={moved} onTouchMove={moved} onPointerDown={moved} onKeyDown={moved}>
         <TranscriptList id={listElementId(idPrefix)} rows={rows} renderRow={renderRow} onFollowChange={followChange} handle={listRef} className="h-full" />
         {failed !== null && (
           <div className="transcript-failed" role="alert">

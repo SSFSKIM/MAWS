@@ -92,7 +92,7 @@ export interface SpillLoad {
 // What a turn did whatever the reader disclosed (the activity projection's per-turn part, model/activity.ts), computed
 // by the same per-turn derivation as its rows and memoised beside them.
 export interface TurnWork {
-  files: { path: string; use: 'read' | 'edited'; at: string; edit: Extract<CellDetail, { kind: 'edit' }> | null }[]; // one entry per completed use, first-seen order: exploration calls read, files calls edited (with the edit cell's own detail)
+  files: { path: string; use: 'read' | 'edited'; at: string; edit: Extract<CellDetail, { kind: 'edit' }> | null }[]; // one entry per completed use, first-seen order: Read and NotebookRead calls read (a search scope is no file), files calls edited (with the edit cell's own detail)
   tools: { name: string; category: ToolCategory; at: string; url: string | null; mcp: { server: string; tool: string } | null }[]; // one entry per tool use, each under its own name
   subagents: (SubagentRef & { status: SubagentStatus })[]; // one per child, with its own status
 }

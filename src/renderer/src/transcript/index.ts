@@ -7,9 +7,11 @@ export type { Player, TranscriptSource } from './source/types';
 export { ipcRewind, ipcSource } from './source/ipc';
 export { replaySource } from './source/replay';
 
-// The component, its props and the callbacks its caller supplies.
+// The component, its props and the callbacks its caller supplies. The heavy components (this one, TranscriptSlot and
+// Markdown) load as a chunk of their own the first time one renders (lazy.tsx), so the app's entry carries none of them.
 export type { RewindInterface, TranscriptActions } from './view/context';
-export { Transcript, type TranscriptProps } from './view/Transcript';
+export { Transcript } from './lazy';
+export type { TranscriptProps } from './view/Transcript';
 
 // The shell's transcript: the actions each child registers from its own block, merged over the defaults, and the slot
 // component that mounts one Transcript over the session's IPC source with them (registered into C5's slot at rebase).
@@ -18,7 +20,7 @@ export { registerRequestRenderer, registerTranscriptActions } from './view/regis
 // The merged registry read (the one TranscriptSlot uses), so a Transcript mounted elsewhere (C8b's drill-in, C5's agent
 // tab) passes `actions={useRegisteredActions()}` and gets every child's registered callbacks.
 export { registeredActions, useRegisteredActions } from './view/registry';
-export { TranscriptSlot } from './view/TranscriptSlot';
+export { TranscriptSlot } from './lazy';
 
 // The store: rows, summaries and jumpTo(rowId) for C5's Overview line and C8's drill-in.
 export { useTranscriptStore } from '../stores/transcript';
@@ -33,7 +35,7 @@ export { dividerCopy } from './model/copy';
 export { serializeRows } from './model/serialize';
 
 // C7: the request card and queued rows render markdown through the same sanitising pipeline (one renderer).
-export { Markdown } from './view/markdown/Markdown';
+export { Markdown } from './lazy';
 
 // C8: what each turn did whatever the reader disclosed (also `useTranscriptStore.activity(key)`), and the subagent
 // glyphs as the rows show them.

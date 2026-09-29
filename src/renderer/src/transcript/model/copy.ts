@@ -286,6 +286,9 @@ export const bashFooter = (exitCode: number | null) => (exitCode === null ? '' :
 // ---------------------------------------------------------------------------------------------------------------------
 // Cell detail and receipts
 
+// A mermaid fence whose diagram mermaid rejected (MermaidFence.tsx).
+export const DIAGRAM = { failed: 'Diagram could not be drawn' } as const;
+
 export const DETAIL = {
   copyCommand: 'Copy command',
   copyOutput: 'Copy output',
@@ -293,6 +296,7 @@ export const DETAIL = {
   openFullLog: 'Open full log',
   raw: 'Raw',
   cwd: 'cwd',
+  sessionDirectory: 'Session directory',
   input: 'Input',
   result: 'Result',
   noDiff: 'No diff recorded',
