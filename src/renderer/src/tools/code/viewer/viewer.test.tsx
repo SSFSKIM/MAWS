@@ -8,11 +8,15 @@ import { mimeOf } from '@shared/files/mime';
 import type { AppSessionId } from '@shared/graph/ids';
 import { FILES_READ_DEFAULT_LENGTH } from '@shared/ipc/schema/files';
 import { LAYOUT_DEFAULTS, type TabRef } from '@shared/ipc/schema/layout';
+import { record } from '../../../../../../test/support/builders';
 import { connectCodeEvents } from '../../../ipc/events';
 import { useLayout } from '../../../stores/layout';
+import { useSessions } from '../../../stores/sessions';
+import type { TranscriptEntry } from '../../../stores/transcript';
+import { useTranscriptStore, type TurnId } from '../../../transcript';
 import { deferred, fail, installFakeMain, ok } from '../../../test-support/code';
 import { useFiles } from '../files/store';
-import { codeTranscriptActions, normalizeLexically, openFile } from '../open-file';
+import { codeTranscriptActions, normalizeLexically, openFile, sessionOfTurn } from '../open-file';
 import { FLASH_CLASS } from './CodeView';
 import { FileViewer } from './FileViewer';
 import { CODE_CAP, dataUrl, externalKindOf, IMAGE_CAP, jumpTarget, kindOf, MARKDOWN_RENDER_CAP } from './kinds';
@@ -478,5 +482,19 @@ describe('open file', () => {
     useLayout.getState().openTab({ kind: 'session', appSessionId: B });
     codeTranscriptActions.openFile('/w/x.ts', 7);
     expect(useLayout.getState().main.panes[0].tabs.find((t) => t.kind === 'file')).toMatchObject({ path: '/w/x.ts', line: 7, appSessionId: B });
+  });
+
+  it("finds a turn's session by its transcript key, a child agent's key naming the session before its ':'", () => {
+    const turn = 'turn-1' as TurnId;
+    const holding = (key: string) =>
+      useTranscriptStore.setState({ entries: { [key]: { state: { turns: new Map([[turn, {}]]) } } as unknown as TranscriptEntry } });
+    useSessions.setState({ records: new Map([[A, record(A)]]) });
+    holding(`${A}:agent-1`);
+    expect(sessionOfTurn(turn)).toBe(A);
+    holding(A);
+    expect(sessionOfTurn(turn)).toBe(A);
+    holding(`${A}x`); // no ':': no shorter key is tried
+    expect(sessionOfTurn(turn)).toBeNull();
+    useTranscriptStore.setState({ entries: {} });
   });
 });

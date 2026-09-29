@@ -43,7 +43,7 @@ export function sessionOfTurn(turnId: TurnId): AppSessionId | null {
   const { records } = useSessions.getState();
   for (const key of Object.keys(entries)) {
     if (!entries[key].state.turns.has(turnId)) continue;
-    const candidates = [key, key.slice(0, key.indexOf(':'))] as AppSessionId[];
+    const candidates = (key.includes(':') ? [key, key.slice(0, key.indexOf(':'))] : [key]) as AppSessionId[];
     const found = candidates.find((id) => records.has(id));
     if (found) return found;
   }
