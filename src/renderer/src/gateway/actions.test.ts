@@ -65,6 +65,10 @@ describe('gateway actions pass the command validator', () => {
     expect(calls).toHaveLength(4);
     expect(error).toHaveBeenCalledTimes(2);
     error.mockRestore();
+    // a refused call is said in the app, not only in the console
+    const refusals = useNotices.getState().notices.filter((n) => n.level === 'warning');
+    expect(refusals).toHaveLength(2);
+    expect(refusals[0]).toMatchObject({ kind: 'toast', text: expect.stringMatching(/^ClaudeUsage could not be opened · .*settings\.claudeUsage\.open/) });
   });
 
   it('opens the singleton Settings tab (at a section by index) and the Accounts tab', () => {

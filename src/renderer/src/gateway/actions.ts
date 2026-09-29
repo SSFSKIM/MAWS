@@ -13,11 +13,12 @@ type SettingsSection = Extract<TabTarget, { kind: 'settings' }>['section'];
 export const SETTINGS_SECTIONS = ['engine', 'gateway', 'keyboard', 'appearance', 'notifications'] as const satisfies readonly NonNullable<SettingsSection>[];
 
 // The one hand-off call (the action here, the Accounts tab's four buttons in M5): activates ClaudeUsage and shows the
-// instruction naming the control in its panel. Answers null when main refused the call.
+// instruction naming the control in its panel. Answers null, with a warning toast, when main refused the call.
 export async function openClaudeUsage(intent: ClaudeUsageOpenIntent, client: MawsBridge = ipc): Promise<ClaudeUsageOpenResult | null> {
   const result = await client.invoke('settings.claudeUsage.open', intent);
   if (!result.ok) {
     console.error('[gateway] settings.claudeUsage.open failed', result.error);
+    toast({ level: 'warning', text: `ClaudeUsage could not be opened · ${result.error.message}`, actions: [], dismissible: true });
     return null;
   }
   const { opened, instruction } = result.value;
