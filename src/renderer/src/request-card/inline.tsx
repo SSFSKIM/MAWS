@@ -5,7 +5,7 @@
 // for a transcript with no composer (C8b's drill-in): always the full card, looked up in the named session.
 import type { ReactNode } from 'react';
 import type { AttentionItem } from '@shared/graph/attention';
-import type { AppSessionId, RequestId } from '@shared/graph/ids';
+import type { AppSessionId } from '@shared/graph/ids';
 import { isOpen } from '../attention/derive';
 import { useAttention } from '../stores/attention';
 import { isDocked, useComposerStore } from '../stores/composer';
@@ -16,17 +16,19 @@ import { RequestCard } from './RequestCard';
 type RequestSlot = Extract<Row, { kind: 'request_slot' }>;
 export type RequestRenderer = (slot: RequestSlot) => ReactNode;
 
-function findItem(bySession: ReadonlyMap<AppSessionId, AttentionItem[]>, requestId: RequestId, appSessionId: AppSessionId | null): AttentionItem | null {
+// The open item for a slot. The registered renderer is not told which session's Transcript renders the row (C6 hands
+// it the row alone, and the transcript's context is not public surface), so it searches every session. A request id is
+// the engine's `request_id`, a UUID per request live; two replays of one fixture, though, carry the same recorded ids
+// in two sessions (C3's replay maps only host-minted ids). The slot's tool use id narrows such a collision to the item
+// of the same tool use; an id shared by both stays ambiguous, and the first session's item wins.
+function findItem(bySession: ReadonlyMap<AppSessionId, AttentionItem[]>, slot: RequestSlot, appSessionId: AppSessionId | null): AttentionItem | null {
   const lists = appSessionId === null ? [...bySession.values()] : [bySession.get(appSessionId) ?? []];
-  for (const items of lists) {
-    const found = items.find((item) => item.request.requestId === requestId && isOpen(item));
-    if (found) return found;
-  }
-  return null;
+  const matches = lists.flatMap((items) => items.filter((item) => item.request.requestId === slot.requestId && isOpen(item)));
+  return matches.find((item) => slot.toolUseId !== null && item.request.toolUseId === slot.toolUseId) ?? matches[0] ?? null;
 }
 
 function SlotCard({ slot, appSessionId }: { slot: RequestSlot; appSessionId: AppSessionId | null }) {
-  const item = useAttention((s) => findItem(s.bySession, slot.requestId, appSessionId));
+  const item = useAttention((s) => findItem(s.bySession, slot, appSessionId));
   const docked = useComposerStore((s) => appSessionId === null && item !== null && isDocked(s, item.appSessionId, slot.requestId));
   if (!item) return null;
   if (docked) return <InlinePointer appSessionId={item.appSessionId} what={slot.toolName ?? slot.requestKind} />;
