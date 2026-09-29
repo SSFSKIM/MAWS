@@ -229,6 +229,19 @@ describe('switchRoute names background work, requires a Direct model for a gatew
     expect(stateOf(m)?.error).toBe('Restarted, but the route reads unverified (asked for Direct) · check Session info');
   });
 
+  it('a restart verified on the other route is a mismatch that fails at once, not after the ready bound', async () => {
+    const s = setup({ start: () => 'no_ready' });
+    const run = s.switcher.switchRoute(READY, 'direct');
+    await confirming(s);
+    s.switcher.answer(READY, CONFIRM);
+    await vi.waitFor(() => expect(s.starts).toHaveLength(1));
+    const at = Date.now();
+    s.backend.emitStatus(READY, { process: 'ready', launchId: 'launch-2', exit: null, gateway: { mode: 'gateway', baseUrl: 'http://127.0.0.1:8641', verified: 'routed', autoModeServer: 'enabled', localLane: null } });
+    expect(await run).toBe('failed');
+    expect(Date.now() - at, 'well inside the 400 ms bound').toBeLessThan(200);
+    expect(stateOf(s)?.error).toBe('Restarted, but the route reads unverified (asked for Direct) · check Session info');
+  });
+
   it('a restart that never becomes ready is failed after its bound', async () => {
     const s = setup({ start: () => 'no_ready' });
     const run = s.switcher.switchRoute(READY, 'direct');

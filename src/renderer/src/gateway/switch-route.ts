@@ -213,9 +213,10 @@ export function createRouteSwitcher(deps: SwitchDeps, store: GatewayStore) {
         const verdict = await awaitStatus<'ready' | 'mismatch'>(
           id,
           (s) => {
-            if (s.launchId === beforeLaunch || s.process !== 'ready') return undefined;
-            if (s.gateway.verified === 'mismatch') return 'mismatch';
-            return s.gateway.mode === target && (s.gateway.verified === 'routed' || s.gateway.verified === 'direct') ? 'ready' : undefined;
+            if (s.launchId === beforeLaunch || s.process !== 'ready' || s.gateway.verified === 'pending') return undefined;
+            // verified on the route asked for; a mismatch, or a verified launch on the other route, fails at once
+            const verified = s.gateway.verified === 'routed' || s.gateway.verified === 'direct';
+            return verified && s.gateway.mode === target ? 'ready' : 'mismatch';
           },
           timeouts.readyMs,
           (stop) => {
