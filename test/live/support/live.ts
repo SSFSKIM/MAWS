@@ -1,14 +1,15 @@
 // Support for the live suite (C3 execution document, Acceptance item 3; vitest project `live`, `MAWS_LIVE=1`): the
-// gate (MAWS_LIVE, the pinned binary answering its version, the relay answering /api/hello), scratch git repositories
-// like the probe's `scratch()`, the default live LaunchSpec (gateway, auto, Sonnet, `--max-budget-usd 0.50`), and a
-// raw process runner for the M1 case that speaks to the transport directly (the EngineSession-backed `withSession`
-// arrives with M3, when a session exists). Every process runs in a scratch directory under the OS temp dir, never in
-// the owner's projects.
+// gate (MAWS_LIVE, the pinned binary answering its version, the relay answering /api/hello), scratch repositories
+// like the probe's `scratch()`, the default live LaunchSpec (gateway, auto, Sonnet, `--max-budget-usd 0.50`), M1's raw
+// process runner, and the run's bookkeeping (cost per journal and the ledger with its cap, the frame inventory, turn
+// attribution, the pass-3 fixture export). The X2-driven host the numbered cases use is in live-host.ts. Every process
+// runs in a scratch directory under the OS temp dir, never in the owner's projects.
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { SessionEvent } from '@shared/graph/events';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
 import { LaunchSpecSchema } from '@shared/engine/launch-spec';
 import { captureShellEnvironment } from '@shared/host/shell-env';
@@ -85,6 +86,23 @@ export function journalCost(rows: JournalRow[]): { costUsd: number; turns: numbe
     if (typeof row.frame.num_turns === 'number' && row.frame.num_turns > 0) turns += 1;
   }
   return { costUsd: done + peak, turns };
+}
+
+// Turn attribution in a live graph (M6): a main-lane human turn opens at the host's write of its prompt, so the result
+// that closes it should name that prompt; one that names only other prompts means the engine ran something else first
+// (a `now` steer, a queued task notification) and the graph put the wrong reply under the prompt.
+export function turnAttribution(events: SessionEvent[]): string[] {
+  const out: string[] = [];
+  let open: { seq: number | null; uuid: string } | null = null;
+  for (const e of events) {
+    if (e.parentToolUseId !== null) continue;
+    if (e.kind === 'turn.started') open = e.origin === 'human' && e.userMessageUuid ? { seq: e.seq, uuid: e.userMessageUuid } : null;
+    else if (e.kind === 'turn.ended' && !e.isEchoReceipt) {
+      if (open && !e.userMessageUuids.includes(open.uuid as never)) out.push(`turn opened at seq ${open.seq} by ${open.uuid} closed at seq ${e.seq} by a result naming [${e.userMessageUuids.join(', ')}]`);
+      open = null;
+    }
+  }
+  return out;
 }
 
 // Every inbound frame type and `system` subtype a journal carries, with the seqs (M6 records what the live runs produce).

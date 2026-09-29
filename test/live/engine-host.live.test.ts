@@ -17,7 +17,7 @@ import { parseJournalRow, type JournalRow } from '@shared/wire/journal';
 import { getHooksListing } from '../../src/engine-host/controls';
 import { HostHookRegistry } from '../../src/engine-host/host-hooks';
 import { ENGINE_VERSION, RELAY_URL } from '../../src/engine-host/launch';
-import { exportFixture, frameInventory, LiveLedger, liveGate, liveSpec, withRawProcess, type LiveContext } from './support/live';
+import { exportFixture, frameInventory, LiveLedger, liveGate, liveSpec, turnAttribution, withRawProcess, type LiveContext } from './support/live';
 import { LiveHost, startDirectSession } from './support/live-host';
 
 const REPO_ROOT = resolve(__dirname, '../..');
@@ -50,6 +50,7 @@ async function releaseShared(): Promise<void> {
 const subtypeSeen = new Map<string, string>(); // system subtype → first `journal:seq`
 const typeSeen = new Map<string, string>();
 const unknownFrames: string[] = [];
+const misattributed: string[] = []; // reported, not asserted beyond 3.7 (the engine reorders prompts; see the M6 report)
 const exports: string[] = [];
 let gate: { skip: string } | LiveContext;
 
@@ -63,6 +64,7 @@ afterAll(async () => {
   console.log(`   system subtypes observed: ${[...subtypeSeen].map(([s, at]) => `${s} (${at})`).join(', ')}`);
   console.log(`   frame types observed: ${[...typeSeen].map(([s, at]) => `${s} (${at})`).join(', ')}`);
   console.log(`   frame.unknown: ${unknownFrames.length === 0 ? 'none' : unknownFrames.join('; ')}`);
+  console.log(`   turn attribution: ${misattributed.length === 0 ? 'every human turn closed by its own result' : misattributed.join('; ')}`);
   for (const line of exports) console.log(`   exported fixture: ${line}`);
   console.log(ledger.summary());
 });
@@ -92,6 +94,7 @@ function book(label: string, journalPath: string, events: SessionEvent[], sessio
   for (const [subtype, seqs] of systemSubtypes) if (!subtypeSeen.has(subtype)) subtypeSeen.set(subtype, `${journalPath}:${seqs[0]}`);
   for (const [type, seqs] of types) if (!typeSeen.has(type)) typeSeen.set(type, `${journalPath}:${seqs[0]}`);
   for (const e of ofKind(events, 'frame.unknown')) unknownFrames.push(`${journalPath}:${e.seq} ${e.frameType}/${e.subtype}`);
+  for (const line of turnAttribution(events)) misattributed.push(`${journalPath}: ${line}`);
   console.log(`   journal: ${journalPath} (total_cost_usd ${costUsd.toFixed(4)}, ${turns} turns)`);
   return rows;
 }

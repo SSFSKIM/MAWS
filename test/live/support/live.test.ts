@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { parseJournalRow, type JournalRow } from '@shared/wire/journal';
-import { exportFixture, frameInventory, journalCost, LiveLedger, liveSpec, PROVENANCE } from './live';
+import { exportFixture, frameInventory, journalCost, LiveLedger, liveSpec, PROVENANCE, turnAttribution } from './live';
 import { LiveHost } from './live-host';
 
 const REPO_ROOT = resolve(__dirname, '../../..');
@@ -85,6 +85,15 @@ describe('live suite bookkeeping', () => {
     await host.shutdown();
     expect(host.status(spec.appSessionId)).toMatchObject({ process: 'exited', exit: { reason: 'quit' } });
     rmSync(userData, { recursive: true, force: true, maxRetries: 10 });
+  });
+
+  it('turn attribution: a human turn is misattributed when the result closing it does not name the prompt that opened it', () => {
+    const started = (seq: number, origin: string, uuid: string | null) => ({ kind: 'turn.started', seq, parentToolUseId: null, origin, userMessageUuid: uuid });
+    const ended = (seq: number, uuids: string[], receipt = false) => ({ kind: 'turn.ended', seq, parentToolUseId: null, userMessageUuids: uuids, isEchoReceipt: receipt, origin: 'human' });
+    // the live 3.7 shape: the steer's result (72) closes the turn the queued prompt opened at 53
+    const events = [started(16, 'human', 'p1'), ended(48, ['p1']), started(53, 'human', 'after'), ended(72, ['steer']), started(78, 'engine', null), ended(92, ['after']), ended(95, [], true)];
+    expect(turnAttribution(events as never)).toEqual(['turn opened at seq 53 by after closed at seq 72 by a result naming [steer]']);
+    expect(turnAttribution([started(4, 'human', 'a'), ended(9, ['a']), started(10, 'engine', null), ended(12, [])] as never)).toEqual([]);
   });
 
   it('the ledger sums the run, prints the cost line, and refuses to go on past the cap', () => {
