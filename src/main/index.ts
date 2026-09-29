@@ -46,6 +46,8 @@ import { onEmitted } from './ipc/events';
 import { startEngineConfigure } from './settings/engine-configure';
 import { revealPath } from './settings/reveal';
 import { knownSessionDirectories } from './settings/session-directories';
+import { CommandFailure, interceptCommand } from './ipc/router';
+import { installWidgetBackend } from './widgets/fixture-backend';
 // C11 end
 
 // A fresh profile for the end-to-end smoke (and anyone else who wants one); must be set before the app is ready.
@@ -211,6 +213,9 @@ app.whenReady().then(() => {
       },
     }),
   );
+  // The widget e2e's engine stand-in: under MAWS_WIDGET_BACKEND=fixtures in launch mode scenario only (M2).
+  const stopWidgetBackend = installWidgetBackend({ env: process.env, packaged: app.isPackaged, appRoot: process.cwd(), intercept: interceptCommand, emit, fail: (error) => new CommandFailure(error) });
+  if (stopWidgetBackend) app.on('will-quit', stopWidgetBackend);
   // C11 end
 
   // The hosts belong to the app, not to a window or a page (§4.1): they start here, before any window exists, and
