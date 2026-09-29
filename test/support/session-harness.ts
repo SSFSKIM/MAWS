@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { AppSessionId, SessionId } from '../../src/shared/graph/ids';
 import type { EventName, EventPayload } from '../../src/shared/ipc/schema';
+import type { SetupIntent } from '../../src/shared/sessions/intent';
 import type { SetupEvent } from '../../src/shared/sessions/setup';
 import { slugOf } from '../../src/engine-host/fs/paths';
 import { createGitRunner } from '../../src/main/git/runner';
@@ -41,6 +42,9 @@ export class SessionHarness {
   readonly events: { name: string; payload: unknown }[] = [];
   readonly trashed: string[] = [];
   trashFails: ((path: string) => string | null) | null = null;
+  // A crash point: a write the gate matches never completes (the app died before it landed).
+  hangPut: ((intent: SetupIntent) => boolean) | null = null;
+  hangRemove = false;
   host: FakeEngineHost;
   service!: SessionService;
   private stopSource: () => void = () => {};
@@ -68,7 +72,7 @@ export class SessionHarness {
       host: { dispatch: this.host.dispatch, onEvent: this.host.onEvent },
       git,
       worktrees,
-      intents: new FileIntentStore(join(this.userData, 'sessions', 'intents')),
+      intents: this.gatedIntents(new FileIntentStore(join(this.userData, 'sessions', 'intents'))),
       bootstraps: new BootstrapNotes(join(this.userData, 'sessions', 'bootstraps')),
       userData: this.userData,
       env: this.env,
@@ -87,6 +91,14 @@ export class SessionHarness {
     });
   }
 
+  private gatedIntents(store: FileIntentStore): FileIntentStore {
+    const put = store.put.bind(store);
+    const remove = store.remove.bind(store);
+    store.put = (intent) => (this.hangPut?.(intent) ? new Promise(() => {}) : put(intent));
+    store.remove = (id) => (this.hangRemove ? new Promise(() => {}) : remove(id));
+    return store;
+  }
+
   private record<N extends EventName>(name: N, payload: EventPayload<N>): boolean {
     this.events.push({ name, payload });
     return true;
@@ -99,6 +111,8 @@ export class SessionHarness {
 
   // The app quits and starts again: nothing it ran survives but the disk.
   async restart(): Promise<void> {
+    this.hangPut = null;
+    this.hangRemove = false;
     this.service.dispose();
     this.stopSource();
     this.host = this.host.afterRestart();

@@ -55,6 +55,7 @@ export class FakeEngineHost {
   registryError: string | null = null;
   unfollowError: string | null = null;
   rewound = true;
+  launchHangs = false; // a crash point: `session.launch` never answers and nothing is reserved
   binaryPath = '/opt/engine/2.1.283';
   private readonly listeners = new Map<string, Set<(payload: unknown) => void>>();
   private hostState: HostState = { state: 'starting', pid: null, restarts: 0, revision: 0 };
@@ -217,6 +218,7 @@ export class FakeEngineHost {
   }
 
   private async launch(spec: LaunchSpec): Promise<LaunchResult> {
+    if (this.launchHangs) return new Promise(() => {});
     this.launches.push(spec);
     const script = this.script(spec);
     const answer = script.answer ?? 'launching';
