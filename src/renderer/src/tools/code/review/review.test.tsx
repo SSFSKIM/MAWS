@@ -533,6 +533,27 @@ describe('review tool', () => {
     expect(selectedPath()).toBe('src/staged.ts');
   });
 
+  it('reads the scope afresh when the tab is selected again, and not on its first mount', async () => {
+    openReview();
+    render(<TestHost />);
+    await waitFor(() => expect(rows()).toHaveLength(3));
+    const before = main.callsOf('git.diff').length;
+    act(() => panelHost.selectTab(panelOf(A)!.tabs[0].id)); // the host's focus request for the selected tab
+    await waitFor(() => expect(main.callsOf('git.diff')).toHaveLength(before + 1));
+  });
+
+  it('says a file past the cap is too large and offers it at its first changed line', async () => {
+    const lines = Array.from({ length: REVIEW_FILE_LINES_CAP + 1 }, (_, i) => `+line ${i}`);
+    const big = ['diff --git a/big.ts b/big.ts', 'index 1..2 100644', '--- a/big.ts', '+++ b/big.ts', `@@ -3,0 +4,${lines.length} @@`, ...lines, ''].join('\n');
+    main.state.uncommitted = { patch: big, files: [{ path: 'big.ts', oldPath: null, insertions: lines.length, deletions: 0, binary: false }] };
+    render(<TestHost />);
+    openReview();
+    await waitFor(() => expect(document.querySelector('[data-review-too-large]')?.textContent).toBe('Diff too large to display. Open the file'));
+    expect(document.querySelector('[data-review-body]')).toBeNull();
+    fireEvent.click(screen.getByText('Open the file'));
+    expect(useLayout.getState().main.panes.flatMap((p) => p.tabs)).toContainEqual(expect.objectContaining({ kind: 'file', path: '/repo/big.ts', line: 4 }));
+  });
+
   it('selects the first file when the selected one leaves the list', async () => {
     render(<TestHost />);
     openReview({ path: 'scratch.txt' });
