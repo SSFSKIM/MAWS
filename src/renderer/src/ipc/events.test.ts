@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
-import { digest, item, project, record } from '../../../../test/support/builders';
+import { digest, item, project, record, status } from '../../../../test/support/builders';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { registerTabRetention } from '../keymap/actions-runtime';
 import { createAttentionStore } from '../stores/attention';
@@ -121,6 +121,33 @@ describe('shell event subscription', () => {
       fake.event('session.removed', { appSessionId: 'a', revision: 4 });
       expect(stores.layout.getState().main.panes[0].tabs.map((t) => t.id)).toEqual(['overview']);
     });
+  });
+
+  it('after a reload, knows a live idle session from the engine table at connect, before any status event', async () => {
+    const first = setup();
+    first.fake.event('session.status', { appSessionId: 'a', status: status('a') });
+    expect(first.stores.sessions.getState().engine.get(A)?.process).toBe('ready');
+    first.disconnect();
+
+    // The reload: a fresh page's stores, connected again; the session is idle, so no status event comes.
+    const { fake, stores } = setup();
+    expect(fake.calls.indexOf('invoke engine.sessions')).toBeGreaterThan(fake.calls.indexOf('on session.status')); // subscribed first
+    await answerSnapshots(fake);
+    expect(stores.sessions.getState().engine.has(A)).toBe(false);
+    await fake.reply('engine.sessions', [status('a'), status('b', { process: 'exited' })]);
+    expect(stores.sessions.getState().engine.get(A)).toMatchObject({ process: 'ready', engineState: 'idle' });
+    expect(stores.sessions.getState().engine.get('b' as AppSessionId)?.process).toBe('exited');
+  });
+
+  it('the engine table overwrites the statuses it lists and keeps the others; a later event wins over it', async () => {
+    const { fake, stores } = setup();
+    fake.event('session.status', { appSessionId: 'a', status: status('a', { engineState: 'running' }) });
+    fake.event('session.status', { appSessionId: 'c', status: status('c') });
+    await fake.reply('engine.sessions', [status('a')]); // read after those events, so newer
+    expect(stores.sessions.getState().engine.get(A)?.engineState).toBe('idle');
+    expect(stores.sessions.getState().engine.has('c' as AppSessionId)).toBe(true);
+    fake.event('session.status', { appSessionId: 'a', status: status('a', { process: 'exited' }) });
+    expect(stores.sessions.getState().engine.get(A)?.process).toBe('exited');
   });
 
   it('ignores replies and events after disconnect', async () => {

@@ -99,6 +99,17 @@ describe('files watch', { timeout: 20_000 }, () => {
     await vi.waitFor(() => expect(emitted).toContainEqual({ appSessionId: A, path: join(dir, 'old.txt'), kind: 'removed' }), { timeout: 6000 });
   });
 
+  it('reports a removed child named as its watched parent as removed at its own path, beside the parent changed', async () => {
+    const twin = join(dir, 'dir'); // the parent's own basename, which FSEvents also uses for the parent's own events
+    writeFileSync(twin, 'twin');
+    age(twin);
+    await files.watch(A, dir, 1);
+    await quiet();
+    unlinkSync(twin);
+    await vi.waitFor(() => expect(emitted).toContainEqual({ appSessionId: A, path: twin, kind: 'removed' }), { timeout: 6000 });
+    expect(emitted).toContainEqual({ appSessionId: A, path: dir, kind: 'changed' });
+  });
+
   it('coalesces a burst of events per filename into one batch', async () => {
     await files.watch(A, dir, 1);
     await quiet();
@@ -124,13 +135,46 @@ describe('files watch', { timeout: 20_000 }, () => {
     await files.watch(A, dir, 1);
     await files.watch(A, dir, 1); // ref-counted: the same holder twice
     await files.watch(B, dir, 1);
-    files.unwatch(A, dir, 1);
-    files.unwatch(B, dir, 1);
+    await files.unwatch(A, dir, 1);
+    await files.unwatch(B, dir, 1);
     expect(watchers[0].close).not.toHaveBeenCalled();
-    files.unwatch(A, dir, 1);
+    await files.unwatch(A, dir, 1);
     expect(watchers[0].close).toHaveBeenCalledTimes(1);
     expect(files.watching()).toEqual([]);
-    files.unwatch(A, dir, 1); // an unknown hold is a no-op
+    await files.unwatch(A, dir, 1); // an unknown hold is a no-op
+  });
+
+  it('an unwatch in flight across its window’s release leaves the next page’s hold under the same key', async () => {
+    await files.watch(A, dir, 1);
+    let resume!: () => void;
+    const gate = new Promise<void>((resolve) => (resume = resolve));
+    const realpath = fs.promises.realpath.bind(fs.promises);
+    vi.spyOn(fs.promises, 'realpath').mockImplementationOnce((async (path: string) => {
+      await gate;
+      return realpath(path);
+    }) as typeof fs.promises.realpath);
+    const stale = files.unwatch(A, dir, 1); // the old page's, held at its realpath
+    files.release(1); // the window navigates
+    await files.watch(A, dir, 1); // the new page's hold, under the same (owner, session, path)
+    resume();
+    await stale;
+    expect(files.watching()).toEqual([dir]);
+    await files.unwatch(A, dir, 1); // the new page's own unwatch still drops it
+    expect(files.watching()).toEqual([]);
+  });
+
+  it('unwatch drops the hold on the directory the path names now when its realpath moved between two watches', async () => {
+    const asked = join(root, 'Case'); // APFS is case-insensitive: a case-only rename moves the realpath under the same path
+    mkdirSync(asked);
+    await files.watch(A, asked, 1); // keyed by …/Case
+    renameSync(asked, join(root, 'case'));
+    expect(realpathSync.native(asked)).toBe(join(root, 'case')); // the volume this suite relies on (realpath(3), as fs.promises)
+    await files.watch(A, asked, 1); // the same holder, now keyed by …/case
+    expect(files.watching().sort()).toEqual([asked, join(root, 'case')].sort());
+    await files.unwatch(A, asked, 1);
+    expect(files.watching()).toEqual([asked]); // the newer hold, on the directory the path names now, went
+    await files.unwatch(A, asked, 1);
+    expect(files.watching()).toEqual([]);
   });
 
   it('releases every hold of a window that closes or navigates', async () => {
