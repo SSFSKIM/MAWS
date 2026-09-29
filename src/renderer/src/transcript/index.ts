@@ -15,6 +15,9 @@ export { Transcript, type TranscriptProps } from './view/Transcript';
 // component that mounts one Transcript over the session's IPC source with them (registered into C5's slot at rebase).
 export { DEFAULT_ACTIONS } from './view/context';
 export { registerRequestRenderer, registerTranscriptActions } from './view/registry';
+// The merged registry read (the one TranscriptSlot uses), so a Transcript mounted elsewhere (C8b's drill-in, C5's agent
+// tab) passes `actions={useRegisteredActions()}` and gets every child's registered callbacks.
+export { registeredActions, useRegisteredActions } from './view/registry';
 export { TranscriptSlot } from './view/TranscriptSlot';
 
 // The store: rows, summaries and jumpTo(rowId) for C5's Overview line and C8's drill-in.
