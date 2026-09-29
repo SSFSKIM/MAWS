@@ -102,5 +102,20 @@ describe('the slash palette groups its rows by origin', () => {
     expect(command).toHaveBeenCalledTimes(1);
     expect(command.mock.calls[0][0].key).toBe('widget:status');
   });
+
+  it('keeps the chosen row in view, the one it opens on included', () => {
+    const shown: string[] = [];
+    const scroll = vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(function (this: Element) {
+      shown.push(this.textContent ?? '');
+    });
+    try {
+      const { key } = open('status');
+      expect(shown.at(-1)).toContain('/status');
+      key('ArrowDown');
+      expect(shown.at(-1)).toContain('/statusline');
+    } finally {
+      scroll.mockRestore();
+    }
+  });
 });
 // C11 end

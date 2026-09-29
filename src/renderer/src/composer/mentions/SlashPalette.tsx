@@ -4,7 +4,7 @@
 // registered widget opens; a headless command is inserted as `/<name> ` for the engine to parse from the prompt; a MAWS
 // action runs; an unavailable row stays listed and disabled with its hint.
 import type { Editor, Range } from '@tiptap/core';
-import { useMemo, useState, useSyncExternalStore } from 'react'; // C11: useState
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'; // C11: useEffect, useState
 import { enabledActions, runAction, subscribeActions } from '../../keymap/actions-runtime';
 import { mawsItems, ORIGIN_LABEL, ORIGIN_ORDER, slashItems, type SlashItem, type SlashOrigin } from './items'; // C11: ORIGIN_ORDER, SlashOrigin
 import { GroupLabel, Listbox, useListKeys, type PopupItem, type PopupProps } from './popup'; // C11: GroupLabel
@@ -75,8 +75,10 @@ export function SlashPalette(props: PopupProps) {
     setAimedAt(props.query);
     setActive(rows.indexOf(ranked[0]));
   }
-  if (rows.length === 0) return null;
   const optionId = (i: number) => `composer-slash-${i}`;
+  // the chosen row may sit in a group below the fold: keep it in view, on open and as the arrows move
+  useEffect(() => document.getElementById(optionId(active))?.scrollIntoView({ block: 'nearest' }), [active, rows]);
+  if (rows.length === 0) return null;
   return (
     <Listbox label="Commands" activeId={optionId(active)}>
       {groups.map((group) => (
