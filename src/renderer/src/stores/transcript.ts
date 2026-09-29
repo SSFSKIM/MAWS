@@ -14,7 +14,7 @@ import type { TranscriptSource } from '../transcript/source/types';
 
 export interface JumpRequest {
   rowId: RowId; // the list row to scroll to (the group holding a cell, or the row itself)
-  focus: string; // the id to focus: the row, or a cell inside it
+  focus: RowId | CellId; // the id to focus: the row, or a cell inside it
   align: 'start' | 'center' | 'end';
   nonce: number;
 }
@@ -191,7 +191,11 @@ export function createTranscriptStore() {
             const state = staged;
             staged = null; // later batches apply to the installed state
             attached.restartUi = null;
+            // A jump asked for during the round trip (C5 remounting a kept session at an attention item's row) was
+            // resolved against the old state; it is resolved again, by the id it targets, on the installed one.
+            const pending = entry(key)?.jump ?? null;
             put(key, { state, phase: 'live', clock: stagedAt > 0 ? { at: stagedAt, wall: Date.now() } : null, jump: null });
+            if (pending) get().jumpTo(key, pending.focus, { align: pending.align });
           } else put(key, { phase: 'live' });
         },
         (reason: unknown) => {

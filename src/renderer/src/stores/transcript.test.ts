@@ -297,6 +297,28 @@ describe('transcript store', () => {
     expect(store.getState().rows(KEY)).toBe(shown);
   });
 
+  // Whole-branch review round 3: C5 remounting a kept session to show an attention item's row asks for the jump during
+  // the staged restart; it must land once the fresh state is installed, not be dropped with the old state.
+  it('a jump requested during a staged restart lands on the installed state', async () => {
+    const store = createTranscriptStore();
+    const events = twoTurns().events;
+    await store.getState().attach(KEY, pushSource(events).source);
+    store.getState().detach(KEY);
+    let resolve: (events: SessionEvent[]) => void = () => {};
+    const deferred: TranscriptSource = { subscribe: () => () => {}, snapshot: () => new Promise((r) => (resolve = r)) };
+    const attached = store.getState().attach(KEY, deferred);
+    const target = cellId.tool(tool('t2'));
+    store.getState().jumpTo(KEY, target);
+    expect(store.getState().entries[KEY].jump).toMatchObject({ focus: target });
+    resolve(events.map((event) => ({ ...event, id: `disk:${event.id}` as EventId, seq: null })));
+    await attached;
+    const { rows, jump, phase } = store.getState().entries[KEY];
+    expect(phase).toBe('live');
+    const group = rows.find((row) => row.kind === 'group');
+    expect(group?.kind === 'group' && group.expanded && group.cells.some((cell) => cell.id === target)).toBe(true);
+    expect(jump).toMatchObject({ rowId: group!.id, focus: target, align: 'center' });
+  });
+
   it('drops a duplicate event id in a live batch', async () => {
     const b = twoTurns();
     const store = createTranscriptStore();
