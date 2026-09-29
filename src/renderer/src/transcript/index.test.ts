@@ -6,7 +6,7 @@ import * as surface from './index';
 describe('public surface', () => {
   it('exports exactly the frozen runtime names', () => {
     expect(Object.keys(surface).sort()).toEqual(
-      ['DEFAULT_ACTIONS', 'Markdown', 'SUBAGENT_GLYPHS', 'SubagentGlyph', 'Transcript', 'TranscriptSlot', 'registerTranscriptActions', 'applyEvents', 'classifyTool', 'dividerCopy', 'glyphFor', 'ipcRewind', 'ipcSource', 'replaySource', 'rowsOf', 'serializeRows', 'turnActivity', 'turnSummary', 'useTranscriptStore'].sort(),
+      ['DEFAULT_ACTIONS', 'Markdown', 'registerRequestRenderer', 'SUBAGENT_GLYPHS', 'SubagentGlyph', 'Transcript', 'TranscriptSlot', 'registerTranscriptActions', 'applyEvents', 'classifyTool', 'dividerCopy', 'glyphFor', 'ipcRewind', 'ipcSource', 'replaySource', 'rowsOf', 'serializeRows', 'turnActivity', 'turnSummary', 'useTranscriptStore'].sort(),
     );
   });
 });

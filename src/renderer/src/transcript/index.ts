@@ -14,7 +14,7 @@ export { Transcript, type TranscriptProps } from './view/Transcript';
 // The shell's transcript: the actions each child registers from its own block, merged over the defaults, and the slot
 // component that mounts one Transcript over the session's IPC source with them (registered into C5's slot at rebase).
 export { DEFAULT_ACTIONS } from './view/context';
-export { registerTranscriptActions } from './view/registry';
+export { registerRequestRenderer, registerTranscriptActions } from './view/registry';
 export { TranscriptSlot } from './view/TranscriptSlot';
 
 // The store: rows, summaries and jumpTo(rowId) for C5's Overview line and C8's drill-in.

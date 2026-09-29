@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { HostState, MawsBridge, SettingsState } from '@shared/ipc/schema';
 
@@ -192,9 +192,10 @@ describe('hosts in the diagnostics strip', () => {
     // Until the shell answers, nothing in the strip may contain the marker a reader (or the smoke) looks for.
     expect(echo()).not.toBe('');
     expect(echo()).not.toContain('MAWS_ECHO_OK');
-    await act(async () => void (await new Promise((resolve) => setTimeout(resolve, 10))));
+    // The fake shell answers on a timer after the spawn and write round trips; wait for the answer rather than a fixed
+    // 10 ms, which a loaded parallel run can outlast.
+    await waitFor(() => expect(echo()).toBe('MAWS_ECHO_OK · shell pid 3333'));
     expect(window.maws.invoke).toHaveBeenCalledWith('pty.spawn', expect.objectContaining({ shell: '/bin/sh' }));
-    expect(echo()).toBe('MAWS_ECHO_OK · shell pid 3333');
   });
 });
 

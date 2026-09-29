@@ -6,8 +6,8 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { DEFAULT_ACTIONS, registerTranscriptActions, TranscriptSlot, useTranscriptStore } from '../index';
-import { builder } from '../model/test-events';
+import { DEFAULT_ACTIONS, registerRequestRenderer, registerTranscriptActions, TranscriptSlot, useTranscriptStore } from '../index';
+import { builder, request, tool } from '../model/test-events';
 import { registeredActions } from './registry';
 
 const offsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetHeight')!;
@@ -97,5 +97,33 @@ describe('TranscriptSlot', () => {
     act(() => dispose());
     fireEvent.click(document.querySelector<HTMLElement>('[data-chip="path"]')!);
     expect(openFile).toHaveBeenCalledTimes(2);
+  });
+
+  it('docks the latest registered request renderer in a pending request’s slot; its disposer restores the previous one, then the placeholder', async () => {
+    const b = builder();
+    b.turn('u1', 'Ask me');
+    b.toolUse('q1', 'AskUserQuestion', { questions: [] });
+    b.emit('question.requested', { requestId: request('r1'), toolUseId: tool('q1'), questions: [] });
+    const invoke = vi.fn(() => Promise.resolve({ ok: true, value: { events: b.events, lastSeq: 3, complete: true } }));
+    (window as { maws?: MawsBridge }).maws = { invoke, on: vi.fn(() => () => {}) } as unknown as MawsBridge;
+    render(<TranscriptSlot appSessionId={'app-slot-request' as AppSessionId} />);
+    const slot = () => document.querySelector<HTMLElement>('[data-kind="request_slot"]');
+    await waitFor(() => expect(slot()?.textContent).toBe('Waiting for you · AskUserQuestion · answer in the composer'));
+
+    let disposeFirst = () => {};
+    let disposeSecond = () => {};
+    act(() => {
+      disposeFirst = registerRequestRenderer((row) => <div data-card="first">{`First card ${row.requestId}`}</div>);
+    });
+    expect(slot()?.textContent).toBe('First card r1');
+    act(() => {
+      disposeSecond = registerRequestRenderer((row) => <div data-card="second">{`Second card ${row.requestKind}`}</div>);
+    });
+    expect(slot()?.textContent).toBe('Second card question');
+    act(() => disposeSecond());
+    expect(slot()?.textContent).toBe('First card r1');
+    act(() => disposeFirst());
+    expect(slot()?.textContent).toBe('Waiting for you · AskUserQuestion · answer in the composer');
+    expect(slot()?.querySelector('[role="status"]')).not.toBeNull();
   });
 });
