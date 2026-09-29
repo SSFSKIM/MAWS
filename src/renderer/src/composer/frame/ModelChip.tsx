@@ -6,13 +6,12 @@ import { Popover } from 'radix-ui';
 import { useState } from 'react';
 import { EffortSchema, type Effort } from '@shared/engine/launch-spec';
 import type { ModelInfo } from '../setup-intent';
-import type { ChipBinding, ModelChoice } from './bindings';
+import { modelMatches, type ChipBinding, type ModelChoice } from './bindings';
 import { CHIP, ITEM, NOTE, POPOVER } from './chip-style';
 
 const EFFORTS = EffortSchema.options;
 
-// A live session reports the resolved model id; C3's list names it as an option's value or its `resolvedModel`.
-const matches = (option: ModelInfo, model: string | null) => model !== null && (option.value === model || (option as { resolvedModel?: string }).resolvedModel === model);
+const matches = modelMatches;
 const displayOf = (options: readonly ModelInfo[], model: string | null) => (model === null ? 'Default model' : (options.find((m) => matches(m, model))?.displayName ?? model));
 
 export function ModelChip({ binding, openWidget, onOpen }: { binding: ChipBinding<ModelChoice, ModelInfo>; openWidget: (() => boolean) | null; onOpen?(): void }) {

@@ -83,6 +83,15 @@ describe('the frame binds its chips to the setup intent or to the live session',
     expect(b.mode.value).toBe('auto');
   });
 
+  it('does not switch to the running model when it is re-picked by its option value', async () => {
+    const { client, invoke } = bridge({ 'session.setModel': { ok: true, value: { ok: true, error: null, code: null } } });
+    const s = { ...status(APP), model: { requested: 'sonnet', resolved: 'claude-sonnet-5' }, effort: 'medium' as const };
+    const models = [{ value: 'sonnet', resolvedModel: 'claude-sonnet-5', displayName: 'Sonnet', description: '' }];
+    const b = liveBindings(s, record(APP), { models }, client);
+    expect(await b.model.set({ model: 'sonnet', effort: 'medium' })).toEqual({ ok: true });
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
   it('refuses a model the engine refused, and every write while no process is ready', async () => {
     const { client } = bridge({ 'session.setModel': { ok: true, value: { ok: false, error: 'unknown model', code: 'invalid' } } });
     const b = liveBindings(status(APP), record(APP), {}, client);

@@ -41,6 +41,10 @@ export const NEW_WORKTREE_BRANCH = 'Choose New worktree to pick a branch';
 
 const refused = (error: string) => async (): Promise<HookResult> => ({ ok: false, error });
 
+// Whether a model option is the model named: a live session reports the resolved id, which C3's list names as an
+// option's value or its `resolvedModel`. The chip shows and checks through it; the binding switches only when it differs.
+export const modelMatches = (option: ModelInfo, model: string | null): boolean => model !== null && (option.value === model || (option as { resolvedModel?: string }).resolvedModel === model);
+
 // ---- unstarted: C10's setup intent ------------------------------------------------------------------------------
 
 export function intentBindings(hook: SetupIntentHook, gate: { starting: boolean }): FrameBindings {
@@ -114,7 +118,8 @@ export function liveBindings(status: EngineSessionStatus | null, record: Session
       disabled: writable,
       set: async (next) => {
         if (!ready) return { ok: false, error: NOT_RUNNING };
-        if (next.model !== current.model) {
+        const picked = reads.models?.find((m) => m.value === next.model);
+        if (next.model !== current.model && !(picked && modelMatches(picked, current.model))) {
           const result = await client.invoke('session.setModel', { appSessionId, model: next.model });
           if (!result.ok) return { ok: false, error: result.error.message };
           if (!result.value.ok) return { ok: false, error: result.value.error ?? 'The engine refused the model' };
