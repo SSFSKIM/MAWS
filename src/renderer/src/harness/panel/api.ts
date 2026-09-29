@@ -76,6 +76,7 @@ export interface PanelHarnessApi {
   // frames later, with the child's row count; expandAll() expands the child's entry, then two frames.
   child: { release(n: number): Promise<number>; expandAll(): Promise<void>; metrics(): PanelChildMetrics };
   setWidth(px: 280 | 380 | 640): void; // the panel's width through C5's setPanel (restored and shown); C5's clamp applies
+  collapseSidebar(on: boolean): void; // C5's sidebar column (the page's debug strip), so 640 renders as set in a window under 1420 px
   // C9 start: C9's page API, kept by the stand-in fold
   ready(): Promise<string[]>; // hydrated, the host's ptys re-adopted first; resolves with the re-adopted terminal ids
   session(): string | null; // the shown session

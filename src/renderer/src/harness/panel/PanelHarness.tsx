@@ -126,6 +126,7 @@ const api: PanelHarnessApi = {
       disposers.delete(toolId);
     }),
   setWidth: (px) => useLayout.getState().setPanel({ width: px, collapsed: false, maximized: false }),
+  collapseSidebar: (on) => useLayout.getState().setSidebar({ collapsed: on }),
   maximize: (on) => useLayout.getState().setPanel(on ? { maximized: true, collapsed: false } : { maximized: false }),
   collapse: (on) => useLayout.getState().setPanel(on ? { collapsed: true, maximized: false } : { collapsed: false }),
   setTheme: (theme) => void useSettings.getState().setTheme(theme),
