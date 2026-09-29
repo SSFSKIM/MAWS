@@ -32,6 +32,7 @@ function run(pass: FixturePass, name: string): Promise<ConformanceRun> {
 const ofKind = <K extends SessionEvent['kind']>(events: SessionEvent[], kind: K) => events.filter((e): e is Extract<SessionEvent, { kind: K }> => e.kind === kind);
 const kinds = (events: SessionEvent[]) => events.map((e) => e.kind);
 const idSuffix = (event: SessionEvent) => event.id.split(':').slice(-2).join(':');
+const text = (content: unknown): string => (typeof content === 'string' ? content : JSON.stringify(content));
 const seq = (event: SessionEvent | undefined): number => event?.seq ?? -1; // every live event has a row; -1 only if a pin's lookup missed
 
 describe('normaliser replays every probe fixture into the X1 graph', () => {
@@ -39,7 +40,8 @@ describe('normaliser replays every probe fixture into the X1 graph', () => {
     expect(listJournals('pass1')).toHaveLength(10);
     expect(listJournals('pass2')).toHaveLength(30);
     // C10's fork-worktree and C8c's workspace-diff probes (copied from master at 644ea7a)
-    expect(listJournals('pass3')).toEqual(['fork-worktree-fork', 'fork-worktree-resume-in-b', 'fork-worktree-start', 'workspace-diff-branch', 'workspace-diff-dirty']);
+    // and C3's own live recordings (M6: rewind-files from 3.12, plan-outcomes from 3.20)
+    expect(listJournals('pass3')).toEqual(['fork-worktree-fork', 'fork-worktree-resume-in-b', 'fork-worktree-start', 'plan-outcomes', 'rewind-files', 'workspace-diff-branch', 'workspace-diff-dirty']);
   });
 
   for (const pass of FIXTURE_PASSES) {
@@ -197,6 +199,52 @@ describe('normaliser: per-fixture graph facts (C2 findings restated)', () => {
     expect((rewinds[0]!.response as { reason: string }).reason).toBe('stale_target');
     const files = requests.find((r) => r.subtype === 'rewind_files');
     expect(RewindFilesResponseSchema.parse(files?.response)).toEqual({ canRewind: false, error: 'File rewinding is not enabled.' });
+  });
+
+  it('pass3/rewind-files: a real file restore (live 3.12): dry run, conversation rewind with its boundary, then the restore', async () => {
+    const { events, requests } = await run('pass3', 'rewind-files');
+    const target = '2af844ef-3dd0-4830-abe3-1f2a0e6baf36';
+    expect(requests.filter((r) => r.subtype.startsWith('rewind_')).map((r) => [r.seq, r.subtype])).toEqual([[137, 'rewind_files'], [139, 'rewind_conversation'], [141, 'rewind_files']]);
+    const [dry, conversation, restore] = requests.filter((r) => r.subtype.startsWith('rewind_'));
+    expect(RewindFilesResponseSchema.parse(dry!.response)).toEqual({ canRewind: true, filesChanged: [expect.stringMatching(/\/notes\.txt$/)], insertions: 1, deletions: 1 });
+    expect(RewindConversationResponseSchema.parse(conversation!.response)).toMatchObject({ rewound: true, targetMessageUuid: target });
+    expect(RewindFilesResponseSchema.parse(restore!.response)).toEqual({ canRewind: true, skippedLinks: 0 }); // the restore answers no counts
+    const boundaries = ofKind(events, 'boundary.rewind');
+    expect(boundaries).toHaveLength(1);
+    expect(boundaries[0]).toMatchObject({ seq: 140, targetMessageUuid: target, prefillText: 'Use the Edit tool to change notes.txt so it says BETA instead of ALPHA.', precedingAssistantUuid: '284cab33-7b4b-474a-8e6b-c6cc0f9f81c8' });
+    expect(ofKind(events, 'turn.ended').map((e) => [e.seq, e.terminalReason])).toEqual([[70, 'completed'], [132, 'completed']]);
+  });
+
+  it('pass3/plan-outcomes: keep planning, implement, then clear and implement (live 3.20)', async () => {
+    const { events, rows } = await run('pass3', 'plan-outcomes');
+    const requested = ofKind(events, 'plan.requested');
+    expect(requested.map((e) => e.seq)).toEqual([128, 246, 502]);
+    expect(ofKind(events, 'plan.resolved').map((e) => [e.seq, e.outcome, e.feedback])).toEqual([
+      [132, 'keep_planning', 'Also state that the file must end with a newline.'],
+      [250, 'implement', null],
+      [506, 'clear_and_implement', null],
+    ]);
+    // keep planning: the feedback is the tool result the model reads
+    expect(ofKind(events, 'tool.result').find((e) => e.toolUseId === requested[0]!.toolUseId)).toMatchObject({ seq: 134, isError: true, content: 'Also state that the file must end with a newline.' });
+    // implement: the engine restores the pre-plan mode itself (system/status at 252) and the next system/init reports it
+    expect(ofKind(events, 'session.init').find((e) => e.seq === 306)).toMatchObject({ permissionMode: 'auto' });
+    // clear and implement: the deny interrupts the turn, the host restores the mode, sends /clear, and the plan after its turn
+    const outs = rows.filter((r) => r.direction === 'out').map((r) => [r.seq, r.frame] as const);
+    expect(outs.find(([seq]) => seq === 506)?.[1]).toMatchObject({ response: { response: { behavior: 'deny', interrupt: true } } });
+    expect(ofKind(events, 'turn.ended').find((e) => e.seq === 510)).toMatchObject({ terminalReason: 'aborted_tools', userMessageUuids: ['1b740363-a57a-473a-97a1-72a75a272cc8'] });
+    expect(outs.find(([seq]) => seq === 512)?.[1]).toMatchObject({ request: { subtype: 'set_permission_mode', mode: 'auto' } });
+    expect(outs.find(([seq]) => seq === 518)?.[1]).toMatchObject({ type: 'user', message: { content: '/clear' } });
+    expect(ofKind(events, 'boundary.reset')).toMatchObject([{ seq: 521, trigger: 'clear', newConversationId: '4b753410-1ce5-4000-a1e5-72af5ac4ebc2' }]);
+    // /clear starts a fresh engine session: the next system/init names a new session id
+    expect(ofKind(events, 'session.init').find((e) => e.seq === 522)?.sessionId).toBe('ac8891c8-7968-455d-9e9b-d98f772f762a');
+    expect(ofKind(events, 'turn.ended').find((e) => e.seq === 524)).toMatchObject({ userMessageUuids: ['4c6e1bdb-4af7-467d-a602-4775821aaeff'], numTurns: 0, terminalReason: null, isEchoReceipt: false });
+    // the plan prompt (fixture seq 526; the harness journals it at 525, ahead of the get_status re-read written just before
+    // it, because a user frame's row is written at once and a control request's when its write resolves)
+    const implement = ofKind(events, 'turn.started').find((e) => e.userMessageUuid === '8e7fbc83-df00-48bf-a05a-6b1592924ec4');
+    expect(implement).toMatchObject({ origin: 'human' });
+    expect(implement!.seq).toBeGreaterThan(524);
+    expect(text(ofKind(events, 'user.message').find((e) => e.messageUuid === '8e7fbc83-df00-48bf-a05a-6b1592924ec4')?.content)).toMatch(/^Implement this plan:\n\n# Plan: create second\.txt/);
+    expect(ofKind(events, 'turn.ended').at(-1)).toMatchObject({ seq: 579, terminalReason: 'completed', userMessageUuids: ['8e7fbc83-df00-48bf-a05a-6b1592924ec4'] });
   });
 
   it("pass3/workspace-diff-*: every get_workspace_diff response parses with the typed schema (C8c's ask)", async () => {
@@ -371,8 +419,8 @@ describe('normaliser: per-fixture graph facts (C2 findings restated)', () => {
     for (const pass of FIXTURE_PASSES) for (const name of listJournals(pass)) for (const e of (await run(pass, name)).events) produced.add(e.kind);
     for (const kind of produced) expect(z.enum(SessionEventSchema.options.map((o) => o.shape.kind.value) as [string, ...string[]]).safeParse(kind).success).toBe(true);
     expect([...produced].sort()).toEqual([
-      'assistant.block.complete', 'assistant.block.delta', 'boundary.rewind', 'command.lifecycle', 'elicitation.requested', 'elicitation.resolved',
-      'hook.callback_requested', 'hook.callback_resolved', 'hook.finished', 'hook.started', 'permission.requested', 'permission.resolved', 'process.exited',
+      'assistant.block.complete', 'assistant.block.delta', 'boundary.reset', 'boundary.rewind', 'command.lifecycle', 'elicitation.requested', 'elicitation.resolved',
+      'hook.callback_requested', 'hook.callback_resolved', 'hook.finished', 'hook.started', 'permission.requested', 'permission.resolved', 'plan.requested', 'plan.resolved', 'process.exited',
       'question.answered', 'question.requested', 'session.commands', 'session.init', 'subagent.finished', 'subagent.progress', 'subagent.started',
       'task.notification', 'task.started', 'task.updated', 'tasks.snapshot', 'tool.result', 'tool.safeguard', 'tool.use', 'turn.ended', 'turn.started',
       'usage.sample', 'user.message', 'workflow.progress',

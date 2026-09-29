@@ -27,6 +27,13 @@ describe('live suite bookkeeping', () => {
     expect(journalCost([row(1, 'meta', { event: 'spawn' })])).toEqual({ costUsd: 0, turns: 0 });
   });
 
+  it('a figure that drops (the fresh session `/clear` starts) opens a new cumulative segment: the journal costs the sum of the peaks', () => {
+    // the live 3.20 journal: 0.2049 before /clear, the /clear receipt at 0, then 0.0372 in the cleared session
+    const rows = [row(1, 'in', result(0.1452, 7)), row(2, 'in', result(0.2049, 5)), row(3, 'in', result(0, 0)), row(4, 'in', result(0.0372, 2))];
+    expect(journalCost(rows).costUsd).toBeCloseTo(0.2421);
+    expect(journalCost(rows).turns).toBe(3);
+  });
+
   it('the frame inventory lists every inbound system subtype and frame type with the seqs that carried it', () => {
     const rows = [
       row(1, 'in', { type: 'system', subtype: 'init' }),

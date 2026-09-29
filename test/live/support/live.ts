@@ -65,18 +65,26 @@ const isMainResult = (row: JournalRow): row is JournalRow & { frame: { total_cos
   return row.direction === 'in' && frame?.type === 'result' && (frame.parent_tool_use_id ?? null) === null;
 };
 
-// What one process cost: the engine reports `total_cost_usd` cumulatively per process, so the last main-lane figure
-// (the largest) is the process's; turns are the main-lane results that were turns (not `!` echo receipts).
+// What one process cost: the engine reports `total_cost_usd` cumulatively per session, so the last main-lane figure
+// (the largest) is the process's; a figure that drops starts a new segment (`/clear` switches the process to a fresh
+// session whose figure starts at 0: a live 3.20 journal), and the journal costs the sum of its segments' peaks. Turns
+// are the main-lane results that were turns (not `!` echo receipts, not the `/clear` result).
 export function journalCost(rows: JournalRow[]): { costUsd: number; turns: number } {
-  let costUsd = 0;
+  let done = 0;
+  let peak = 0;
   let turns = 0;
   for (const row of rows) {
     if (!isMainResult(row)) continue;
     const cost = row.frame.total_cost_usd;
-    if (typeof cost === 'number' && cost > costUsd) costUsd = cost;
+    if (typeof cost === 'number') {
+      if (cost < peak) {
+        done += peak;
+        peak = cost;
+      } else peak = cost;
+    }
     if (typeof row.frame.num_turns === 'number' && row.frame.num_turns > 0) turns += 1;
   }
-  return { costUsd, turns };
+  return { costUsd: done + peak, turns };
 }
 
 // Every inbound frame type and `system` subtype a journal carries, with the seqs (M6 records what the live runs produce).
