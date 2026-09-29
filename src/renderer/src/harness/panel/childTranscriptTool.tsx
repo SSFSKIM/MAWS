@@ -3,7 +3,7 @@
 // session, exactly the seam C8b's drill-in mounts. The tool builds no source of its own. `childProbes` is
 // `window.__maws_harness.panel.child`: it steps the parent's player (the child's events arrive through childSource's
 // filter) and reads what R7 asserts about the container at each width.
-import type { RefObject } from 'react';
+import { useEffect, useSyncExternalStore, type RefObject } from 'react';
 import { Icon } from '../../app/IconButton';
 import type { PanelTool } from '../../panel/tool';
 import { useTranscriptStore } from '../../stores/transcript';
@@ -11,15 +11,61 @@ import { Transcript, type SubagentRef, type TranscriptSource } from '../../trans
 import { OVERSCAN, type TranscriptListHandle } from '../../transcript/view/Transcript';
 import type { HarnessSession } from '../player';
 import type { PanelChildMetrics, PanelHarnessApi } from './api';
-import { loadedSession } from './summaryProbes';
+import { loadedSession, onTranscriptLoaded } from './summaryProbes';
 
 export const CHILD_TOOL_ID = 'child';
 
-export interface ChildTabState {
-  session: HarnessSession | null; // the transcript loaded into the tab's session when the tab was created
-  ref: SubagentRef | null; // its first child agent, as the parent's activity names it
+// What the tab shows: the transcript loaded into its session, that transcript's first child agent (as the parent's
+// activity names it) and the child's source. An immutable snapshot, replaced when a load lands (the React Compiler
+// memoises a body on its inputs, so the body reads this through useSyncExternalStore, never the mutable state).
+export interface ChildView {
+  session: HarnessSession | null;
+  ref: SubagentRef | null;
   source: TranscriptSource | null;
-  handle: RefObject<TranscriptListHandle | null>;
+}
+const NOTHING: ChildView = { session: null, ref: null, source: null };
+
+export class ChildTabState {
+  readonly handle: RefObject<TranscriptListHandle | null> = { current: null };
+  private view: ChildView = NOTHING;
+  private readonly listeners = new Set<() => void>();
+
+  // A load into the tab's session rebinds it, selected or not.
+  private readonly offLoads = onTranscriptLoaded((appSessionId) => {
+    if (appSessionId === this.appSessionId) this.resolve();
+  });
+
+  constructor(readonly appSessionId: string | null) {}
+
+  subscribe = (listener: () => void) => {
+    this.listeners.add(listener);
+    return () => void this.listeners.delete(listener);
+  };
+  snapshot = () => this.view;
+
+  // Binds the tab to the transcript loaded into its session now: at creation, on open(), when a load lands and
+  // wherever the source is first needed. A tab created or restored before the load finds its child once it lands; a
+  // later load (which retired the previous player and its children's keys) rebinds it to the new one.
+  resolve(): ChildView {
+    const session = this.appSessionId ? loadedSession(this.appSessionId) : null;
+    if (session === this.view.session && (this.view.source !== null || session === null)) return this.view;
+    const ref = session ? firstChild(session) : null;
+    if (session === this.view.session && ref === null) return this.view;
+    this.release();
+    this.view = { session, ref, source: session && ref ? session.childSource(ref) : null };
+    this.listeners.forEach((listener) => listener());
+    return this.view;
+  }
+
+  // The child's entry leaves the store, so the next binding starts the child over.
+  private release(): void {
+    if (this.view.source?.key) useTranscriptStore.getState().drop(this.view.source.key);
+  }
+
+  dispose(): void {
+    this.offLoads();
+    this.release();
+  }
 }
 
 // The newest instance: what the probes act on (the tool is single-instance).
@@ -37,25 +83,30 @@ export const childTranscriptTool: PanelTool<ChildTabState> = {
   multiInstance: false,
   menu: false, // opened by the harness API only, so "+" lists what the product would
   createState(init) {
-    const session = init.appSessionId ? loadedSession(init.appSessionId) : null;
-    const ref = session ? firstChild(session) : null;
-    const state: ChildTabState = { session, ref, source: session && ref ? session.childSource(ref) : null, handle: { current: null } };
+    const state = new ChildTabState(init.appSessionId);
+    state.resolve();
     current = state;
     return state;
   },
+  open(state) {
+    state.resolve();
+    current = state;
+  },
   beforeClose: () => Promise.resolve(true),
   dispose(state) {
-    if (state.source?.key) useTranscriptStore.getState().drop(state.source.key); // the next tab starts the child over
+    state.dispose(); // the next tab starts the child over
     if (current === state) current = null;
   },
   render: ChildBody,
 };
 
 function ChildBody({ state }: { state: ChildTabState }) {
-  if (!state.source) {
+  const view = useSyncExternalStore(state.subscribe, state.snapshot);
+  useEffect(() => void state.resolve(), [state]); // wherever the source is first needed: here, on mount
+  if (!view.source) {
     return <p className="flex h-full items-center justify-center p-4 text-center text-ui text-fg-muted">Load a transcript with a child agent into this session first.</p>;
   }
-  return <Transcript source={state.source} variant="child" handle={state.handle} className="h-full" />;
+  return <Transcript key={view.source.key} source={view.source} variant="child" handle={state.handle} className="h-full" />;
 }
 
 function ChildIcon({ className }: { className?: string }) {
@@ -68,7 +119,8 @@ function ChildIcon({ className }: { className?: string }) {
 }
 
 const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-const childKey = () => current?.source?.key ?? null;
+const bound = () => current?.resolve() ?? null; // the source is resolved wherever it is first needed
+const childKey = () => bound()?.source?.key ?? null;
 const rowsOfChild = () => {
   const key = childKey();
   return key ? useTranscriptStore.getState().rows(key) : [];
@@ -79,8 +131,8 @@ const slotElement = () => document.getElementById('panel-host-body')?.parentElem
 
 export const childProbes: PanelHarnessApi['child'] = {
   async release(n) {
-    const session = current?.session;
-    if (!session) throw new Error('child: no child tab open');
+    const session = bound()?.session;
+    if (!session) throw new Error('child: no child tab open over a loaded transcript');
     for (let i = 0; i < n && !session.player.done; i += 1) session.player.step();
     await frame();
     await frame();

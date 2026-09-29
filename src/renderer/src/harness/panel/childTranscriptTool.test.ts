@@ -5,6 +5,8 @@ import { childTranscriptTool } from './childTranscriptTool';
 import { fakeId } from './fakeSessions';
 import { loadedSession, summaryProbes } from './summaryProbes';
 
+const playerKeys = () => Object.keys(useTranscriptStore.getState().entries).filter((key) => /^harness:\d+$/.test(key));
+
 const A = fakeId('A');
 const init = { appSessionId: A, session: null, instanceId: 'child:test', params: undefined };
 
@@ -27,10 +29,11 @@ describe('panel harness child transcript', () => {
     await summaryProbes.loadTranscript('A', 'events/panel-child', { releaseTo: PANEL_CHILD_TAIL.first });
     const session = loadedSession(A)!;
     const state = childTranscriptTool.createState(init);
-    expect(state.ref).toMatchObject({ toolUseId: 'toolu_01CYiK6ncgQLFUQ2iqC1b4oB', taskId: 'ad286defbc77bc090' });
-    const key = state.source!.key!;
+    expect(state.snapshot().ref).toMatchObject({ toolUseId: 'toolu_01CYiK6ncgQLFUQ2iqC1b4oB', taskId: 'ad286defbc77bc090' });
+    const { source } = state.snapshot();
+    const key = source!.key!;
     // The view attaches the child's source as the Transcript does (child variant: the agent's id).
-    await useTranscriptStore.getState().attach(key, state.source!, { agentId: state.source!.agentId });
+    await useTranscriptStore.getState().attach(key, source!, { agentId: source!.agentId });
     const rows = () => useTranscriptStore.getState().rows(key);
     // The player releases one event per step, the store applies each as its own batch; the generator applied each
     // batch at once. The counts agree.
@@ -47,6 +50,38 @@ describe('panel harness child transcript', () => {
 
   it('shows a line instead of a transcript when the session has no loaded transcript', () => {
     const state = childTranscriptTool.createState({ ...init, appSessionId: fakeId('B') });
-    expect(state.source).toBeNull();
+    expect(state.snapshot().source).toBeNull();
+  });
+
+  it('a tab created before the load finds its child once the load lands, through open() or the load itself (review)', async () => {
+    const B = fakeId('B');
+    const early = childTranscriptTool.createState({ ...init, appSessionId: B, instanceId: 'child:early' });
+    const heard = vi.fn();
+    const off = early.subscribe(heard);
+    expect(early.snapshot().source).toBeNull();
+    await summaryProbes.loadTranscript('B', 'events/panel-child', { releaseTo: PANEL_CHILD_TAIL.first });
+    expect(early.snapshot().ref, 'the load notifies the tab').toMatchObject({ toolUseId: 'toolu_01CYiK6ncgQLFUQ2iqC1b4oB' });
+    expect(heard).toHaveBeenCalled();
+    off();
+
+    const restored = childTranscriptTool.createState({ ...init, appSessionId: B, instanceId: 'child:restored' });
+    expect(restored.snapshot().source, 'created after the load: resolved at once').not.toBeNull();
+    const reopened = childTranscriptTool.createState({ ...init, appSessionId: fakeId('A'), instanceId: 'child:reopen' });
+    await summaryProbes.loadTranscript('A', 'events/panel-child', { releaseTo: PANEL_CHILD_TAIL.first });
+    childTranscriptTool.open!(reopened, undefined);
+    expect(reopened.snapshot().session, 'open() re-resolves to the latest load').toBe(loadedSession(fakeId('A')));
+    [early, restored, reopened].forEach((state) => childTranscriptTool.dispose(state));
+  });
+
+  it('a new load retires the previous player: its key and its children’s keys leave the store (review)', async () => {
+    const live = () => [fakeId('A'), fakeId('B')].flatMap((id) => loadedSession(id)?.key ?? []).sort();
+    await summaryProbes.loadTranscript('A', 'events/panel-child', { releaseTo: PANEL_CHILD_TAIL.first });
+    const first = loadedSession(fakeId('A'))!;
+    await summaryProbes.loadTranscript('A', 'events/panel-child', { releaseTo: PANEL_CHILD_TAIL.first });
+    expect(useTranscriptStore.getState().entries[first.key], 'the old player key is dropped').toBeUndefined();
+    expect(playerKeys().sort(), 'one player key per loaded session').toEqual(live());
+    // Two loads racing for one session leave only the one that landed last.
+    await Promise.all([summaryProbes.loadTranscript('A', 'events/panel-child'), summaryProbes.loadTranscript('A', 'events/panel-child')]);
+    expect(playerKeys().sort()).toEqual(live());
   });
 });
