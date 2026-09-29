@@ -89,7 +89,7 @@ describe('EngineSession: the handshake, journal-before-normalise and the gateway
     const { session, transport, journal, events } = setup({ spec: { trust: { accepted: true, directory: '/tmp/maws-session' } } });
     expect(session.status()).toMatchObject({ process: 'starting', cwd: '/tmp/maws-session', pendingPlan: null }); // from the reservation onward
     await session.start();
-    expect(shape(journal)).toEqual(['meta:spawn', 'out:control_request/initialize', 'in:control_response', 'meta:initialize', 'out:control_request/get_status', 'in:control_response', 'meta:status_check']);
+    expect(shape(journal)).toEqual(['meta:spawn', 'out:control_request/initialize', 'in:control_response', 'meta:initialize', 'out:control_request/get_status', 'in:control_response', 'meta:status_check', 'out:control_request/get_context_usage']); // the ready read for `ctx` (debt wave 3)
     expect(transport.requestsOf('initialize')[0]!.request).toEqual({
       subtype: 'initialize', supportedDialogKinds: ['auto_mode_server_fallback', 'refusal_fallback_prompt'], perTaskStopAffordance: true, workspaceTrust: { accepted: true, directory: '/tmp/maws-session' },
     });
@@ -161,7 +161,7 @@ describe('EngineSession: the handshake, journal-before-normalise and the gateway
   it('a resume journals reconnect rows, re-applies the grant snapshot before ready, and reports the grants', async () => {
     const { session, journal, transport, events } = setup({ spec: { resume: { sessionId: '44444444-4444-4444-8444-444444444444' as LaunchSpec['sessionId'] & string, fork: false }, sessionId: null }, session: { grants: { allow: ['Bash(touch granted.txt)'] } } });
     await session.start();
-    expect(shape(journal)).toEqual(['meta:reconnect', 'meta:spawn', 'out:control_request/initialize', 'in:control_response', 'meta:initialize', 'meta:reconnect', 'out:control_request/get_status', 'in:control_response', 'meta:status_check', 'out:control_request/apply_flag_settings', 'in:control_response']);
+    expect(shape(journal)).toEqual(['meta:reconnect', 'meta:spawn', 'out:control_request/initialize', 'in:control_response', 'meta:initialize', 'meta:reconnect', 'out:control_request/get_status', 'in:control_response', 'meta:status_check', 'out:control_request/apply_flag_settings', 'in:control_response', 'out:control_request/get_context_usage']); // then the ready read
     expect(transport.requestsOf('apply_flag_settings')[0]!.request).toEqual({ subtype: 'apply_flag_settings', settings: { permissions: { allow: ['Bash(touch granted.txt)'] } } });
     expect(events.map((e) => e.kind === 'session.reconnect' && e.phase)).toEqual(['attempting', 'reconnected']);
     expect(session.status()).toMatchObject({ process: 'ready', grants: ['Bash(touch granted.txt)'], keepAlive: ['grants'] });
@@ -569,6 +569,25 @@ describe('a stop before the process is spawned (whole-branch review)', () => {
   });
 });
 
+describe('late answers after the deadline (debt wave 3 review)', () => {
+  it("a host-issued read answering late posts no notice (nobody saw an error); a late mutation still says it may have applied", async () => {
+    vi.useFakeTimers();
+    const { session, transport, journal } = setup();
+    const starting = session.start();
+    await vi.advanceTimersByTimeAsync(0);
+    await starting;
+    expect(transport.requestsOf('get_context_usage')).toHaveLength(1); // the ready read, never answered by the responder
+    const setModel = session.control!.request('set_model', { model: 'opus' }).catch(() => 'timed out');
+    await vi.advanceTimersByTimeAsync(8_000);
+    expect(await setModel).toBe('timed out');
+    transport.answer('get_context_usage', { totalTokens: 1, maxTokens: 2, percentage: 50, isAutoCompactEnabled: true, model: 'm', categories: [] });
+    transport.answer('set_model');
+    await vi.advanceTimersByTimeAsync(0);
+    const notices = journal.rows.filter((r) => (r.frame as { event?: string }).event === 'notice').map((r) => (r.frame as { key: string }).key);
+    expect(notices.filter((k) => k.startsWith('late_response:'))).toEqual([`late_response:set_model:${transport.requestsOf('set_model')[0]!.request_id}`]);
+  });
+});
+
 describe('failed initialize terminates the process', () => {
   it('a queue recovery that fails is an initialization failure: init_failed, the ladder without end_session, the reservation held until the OS exit (M4 review)', async () => {
     vi.useFakeTimers();
@@ -683,7 +702,7 @@ describe('plan outcomes map to the wire', () => {
     transport.push({ type: 'result', subtype: 'success', session_id: 's', is_error: false, duration_ms: 1, num_turns: 1, total_cost_usd: 0, usage: {}, permission_denials: [], terminal_reason: 'completed', origin: { kind: 'human' } });
     await flush();
     await flush();
-    const after = transport.writes.slice(before).filter((w) => !(w.type === 'control_request' && w.request.subtype === 'get_status'));
+    const after = transport.writes.slice(before).filter((w) => !(w.type === 'control_request' && ['get_status', 'get_context_usage'].includes(w.request.subtype)));
     expect(after).toMatchObject([
       { type: 'control_request', request: { subtype: 'set_permission_mode', mode: 'auto' } },
       { type: 'user', message: { content: '/clear' }, origin: { kind: 'human' } },

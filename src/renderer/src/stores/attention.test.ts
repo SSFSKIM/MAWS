@@ -3,7 +3,8 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { item, record } from '../../../../test/support/builders';
 import { ev } from '../../../../test/support/events';
 import { fakeClient } from '../../../../test/support/fake-client';
-import { createAttentionStore, selectNeedsYou, selectPendingOf } from './attention';
+import { swapOf } from '../composer/docked/swap';
+import { createAttentionStore, REQUEST_RETRY_MS, selectNeedsYou, selectPendingOf } from './attention';
 
 const S = 's1' as AppSessionId;
 const older = item('s1', 'permission', '2026-09-28T09:00:00Z');
@@ -91,17 +92,61 @@ describe('the originating request of an item, fetched once', () => {
     expect(fake.invoked('attention.request')).toEqual([]);
   });
 
-  it('a failed fetch is not cached, so the next open asks again', async () => {
+  it('retries a failed read once, after REQUEST_RETRY_MS, and caches what the retry reads', async () => {
+    vi.useFakeTimers();
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const store = createAttentionStore();
     const fake = fakeClient();
-    const first = store.getState().loadRequest(fake.client, older);
-    await fake.fail('attention.request', 'no host');
-    await first;
-    expect(store.getState().requests.has(older.id)).toBe(false);
-    expect(warn).toHaveBeenCalledOnce();
-    void store.getState().loadRequest(fake.client, older);
+    const load = store.getState().loadRequest(fake.client, older);
+    void fake.fail('attention.request', 'no host'); // its settle is a timer, run below
+    await vi.advanceTimersByTimeAsync(REQUEST_RETRY_MS - 1);
+    expect(fake.pending('attention.request')).toBe(0);
+    void store.getState().loadRequest(fake.client, older); // shares the read under way, retry included
+    await vi.advanceTimersByTimeAsync(1);
     expect(fake.pending('attention.request')).toBe(1);
+    void fake.reply('attention.request', { event });
+    await vi.advanceTimersByTimeAsync(0);
+    await load;
+    expect(store.getState().requests.get(older.id)).toBe(event);
+    expect(store.getState().unreadable.size).toBe(0);
     warn.mockRestore();
+    vi.useRealTimers();
+  });
+
+  it('a read that fails twice is cached as unreadable, so the docked swap shows it as a notice instead of waiting', async () => {
+    vi.useFakeTimers();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const store = createAttentionStore();
+    const fake = fakeClient();
+    const load = store.getState().loadRequest(fake.client, older);
+    void fake.fail('attention.request', 'no host'); // its settle is a timer, run below
+    await vi.advanceTimersByTimeAsync(REQUEST_RETRY_MS);
+    void fake.fail('attention.request', 'still no host');
+    await vi.advanceTimersByTimeAsync(0);
+    await load;
+    expect(store.getState().requests.get(older.id)).toBeNull();
+    expect(store.getState().unreadable.get(older.id)).toBe('still no host');
+    expect(swapOf([older], store.getState().requests)).toMatchObject({ item: null, notice: older, unread: [] });
+    await store.getState().loadRequest(fake.client, older); // asks nothing more
+    expect(fake.invoked('attention.request')).toHaveLength(2);
+    warn.mockRestore();
+    vi.useRealTimers();
+  });
+
+  it('Retry forgets an unreadable read and asks again; an answered or retired item’s failure is forgotten', async () => {
+    const store = createAttentionStore();
+    const fake = fakeClient();
+    store.getState().applySnapshot([older, newer]);
+    store.setState({ requests: new Map([[older.id, null], [newer.id, null]]), unreadable: new Map([[older.id, 'no host'], [newer.id, 'no host']]) });
+    const retry = store.getState().retryRequest(fake.client, older);
+    expect(store.getState().requests.has(older.id)).toBe(false); // unread again: the docked swap waits for it
+    expect(store.getState().unreadable.has(older.id)).toBe(false);
+    await fake.reply('attention.request', { event });
+    await retry;
+    expect(store.getState().requests.get(older.id)).toBe(event);
+    store.getState().applyChanged({ appSessionId: S, items: [older, { ...newer, state: 'delivered' }] }); // newer answered
+    expect(store.getState().unreadable.size).toBe(0);
+    expect(store.getState().requests.has(newer.id)).toBe(false);
+    expect(store.getState().requests.get(older.id)).toBe(event); // a read request stays cached
   });
 });

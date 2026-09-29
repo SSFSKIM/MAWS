@@ -45,7 +45,8 @@ describe('normaliser replays every probe fixture into the X1 graph', () => {
     // home directory's session-only trust and its unattested control, the exact-key check, the read-only permission round trip)
     const c10 = ['fork-pinned-id-fork', 'fork-pinned-id-start', 'home-trust-session-only', 'home-trust-unattested', 'read-only-permission', 'trust-bootstrap-recorded', 'trust-exact-key'];
     // C10 end
-    expect(listJournals('pass3')).toEqual(['engine-turn-release', 'fork-worktree-fork', 'fork-worktree-resume-in-b', 'fork-worktree-start', 'plan-outcomes', 'rewind-files', 'steer-next', 'steer-now', 'steer-now-unheld', 'workspace-diff-branch', 'workspace-diff-dirty', ...c10].sort());
+    const wave3 = ['context-sample', 'interrupt-text', 'question-deny']; // debt wave 3: the turn-end context read, a text block cut by an interrupt, a question skipped by a deny
+    expect(listJournals('pass3')).toEqual(['engine-turn-release', 'fork-worktree-fork', 'fork-worktree-resume-in-b', 'fork-worktree-start', 'plan-outcomes', 'rewind-files', 'steer-next', 'steer-now', 'steer-now-unheld', 'workspace-diff-branch', 'workspace-diff-dirty', ...c10, ...wave3].sort());
   });
 
   for (const pass of FIXTURE_PASSES) {
@@ -224,6 +225,25 @@ describe('normaliser: per-fixture graph facts (C2 findings restated)', () => {
     expect(ofKind(events, 'turn.ended').map((e) => [e.seq, e.terminalReason])).toEqual([[70, 'completed'], [132, 'completed']]);
   });
 
+  it('pass3/interrupt-text (debt wave 3): the partial text block an interrupt cuts arrives with aborted: true, every other block complete', async () => {
+    const { events } = await run('pass3', 'interrupt-text');
+    const blocks = ofKind(events, 'assistant.block.complete');
+    expect(blocks.filter((e) => e.aborted).map((e) => [e.seq, e.blockIndex, e.block.type])).toEqual([[96, 1, 'text']]);
+    expect(blocks.find((e) => e.aborted)!.block).toMatchObject({ text: expect.stringContaining('History of Tea') as unknown });
+    expect(blocks.every((e) => e.supersedes === null)).toBe(true);
+    expect(ofKind(events, 'turn.ended').map((e) => e.terminalReason)).toEqual(['aborted_streaming', 'completed']);
+  });
+
+  it('pass3/question-deny (debt wave 3): a plain deny skips the question tool, the model reads the denial and the turn completes', async () => {
+    const { events } = await run('pass3', 'question-deny');
+    const [requested] = ofKind(events, 'question.requested');
+    expect(requested).toMatchObject({ seq: 108, questions: [{ question: 'Red or Blue?' }] });
+    // X1 has no declined form: the skip is an answer with no answers, a real answer always names each question
+    expect(ofKind(events, 'question.answered')).toMatchObject([{ seq: 110, requestId: requested!.requestId, answers: {} }]);
+    expect(ofKind(events, 'tool.result').find((e) => e.toolUseId === requested!.toolUseId)).toMatchObject({ seq: 112, isError: true, content: 'Denied by the user in MAWS.', denial: 'permission-rule' });
+    expect(ofKind(events, 'turn.ended')).toMatchObject([{ seq: 154, result: 'success', isError: false, terminalReason: 'completed', resultText: 'SKIPPED' }]);
+  });
+
   it('pass3/plan-outcomes: keep planning, implement, then clear and implement (live 3.20)', async () => {
     const { events, rows } = await run('pass3', 'plan-outcomes');
     const requested = ofKind(events, 'plan.requested');
@@ -332,6 +352,13 @@ describe('normaliser: per-fixture graph facts (C2 findings restated)', () => {
     expect(ofKind(events, 'user.message')).toMatchObject([{ messageUuid: 'pu', origin: 'peer' }]);
     expect(ofKind(events, 'turn.ended')).toMatchObject([{ origin: 'peer' }]);
     for (const e of events) expect(SessionEventSchema.safeParse(e).success).toBe(true);
+  });
+
+  it('pass3/context-sample (debt wave 3): the read after each turn yields context.sample with the figures the engine answered', async () => {
+    const { events } = await run('pass3', 'context-sample');
+    const samples = events.filter((e) => e.kind === 'context.sample');
+    expect(samples.map((e) => e.seq)).toEqual([53, 148]); // the answers to the reads at seq 51 and 146, each after its turn's result (seq 50, 145)
+    for (const sample of samples) expect(sample).toMatchObject({ totalTokens: 30304, maxTokens: 200000, percentage: 15, autoCompactThreshold: 167000, isAutoCompactEnabled: true, model: 'claude-haiku-4-5-20251001' });
   });
 
   it("pass3/workspace-diff-*: every get_workspace_diff response parses with the typed schema (C8c's ask)", async () => {
@@ -512,6 +539,7 @@ describe('normaliser: per-fixture graph facts (C2 findings restated)', () => {
       'task.notification', 'task.started', 'task.updated', 'tasks.snapshot', 'tool.result', 'tool.safeguard', 'tool.use', 'turn.ended', 'turn.started',
       'usage.sample', 'user.message', 'workflow.progress',
       'notice.posted', // C10: the trust notice (pass2/trust-no-attestation, pass3/trust-exact-key)
+      'context.sample', // debt wave 3: a get_context_usage answer (pass1/reads seq 57, pass3/context-sample)
     ].sort());
     void kinds;
   });

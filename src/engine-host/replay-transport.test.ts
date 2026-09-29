@@ -117,14 +117,51 @@ describe('replay transport plays a fixture and advances on the adapter\'s writes
     const transport = replayEngine(journal, { prelude });
     const it = transport.frames[Symbol.asyncIterator]();
     await it.next();
-    const write = transport.write({ type: 'control_request', request_id: 'M-1', request: { subtype: 'get_usage' } });
+    const write = transport.write({ type: 'control_request', request_id: 'M-1', request: { subtype: 'set_model', model: 'opus' } });
     const item = (await it.next()).value as TransportItem;
     expect(item.frame).toBeNull();
-    expect(item.error).toMatchObject({ kind: 'replay_mismatch', replay: { expected: 'seq 2 user', got: 'control_request/get_usage' } });
+    expect(item.error).toMatchObject({ kind: 'replay_mismatch', replay: { expected: 'seq 2 user', got: 'control_request/set_model' } });
     await expect(write).rejects.toThrow(/replay mismatch/);
     expect((await it.next()).done).toBe(true);
     await expect(transport.exited).resolves.toEqual({ code: null, signal: null });
     await expect(transport.write({ type: 'control_request', request_id: 'M-2', request: { subtype: 'get_usage' } })).rejects.toThrow();
+  });
+
+  it('answers a read the fixture never recorded with an empty success, announced first, and keeps holding at the recorded row', async () => {
+    const journal = [
+      row(1, 'in', { type: 'system', subtype: 'status', status: null }),
+      row(2, 'out', { type: 'user', uuid: 'rec-u', message: { role: 'user', content: 'hi' }, parent_tool_use_id: null }),
+      row(3, 'in', { type: 'command_lifecycle', command_uuid: 'rec-u', state: 'queued' }),
+      row(4, 'meta', { event: 'exit', code: 0, signal: null }),
+    ];
+    const transport = replayEngine(journal, { prelude });
+    const it = transport.frames[Symbol.asyncIterator]();
+    await it.next();
+    for (const subtype of ['get_usage', 'list_models', 'list_permission_rules', 'get_context_usage']) {
+      await expect(transport.write({ type: 'control_request', request_id: `M-${subtype}`, request: { subtype } })).resolves.toBeUndefined();
+      const note = (await it.next()).value as TransportItem;
+      expect(note.frame).toBeNull();
+      expect(note.error).toMatchObject({ kind: 'replay_unrecorded_read', read: { subtype, requestId: `M-${subtype}` } });
+      expect(frameOf((await it.next()).value as TransportItem)).toEqual({ type: 'control_response', response: { subtype: 'success', request_id: `M-${subtype}`, response: {} } });
+    }
+    expect(transport.holding?.seq).toBe(2);
+    void transport.write({ type: 'user', uuid: 'MINT-U', message: { role: 'user', content: 'hi' }, parent_tool_use_id: null });
+    expect(frameOf((await it.next()).value as TransportItem)).toMatchObject({ type: 'command_lifecycle', command_uuid: 'MINT-U' });
+    expect((await it.next()).done).toBe(true);
+    await expect(transport.exited).resolves.toEqual({ code: 0, signal: null });
+  });
+
+  it('a recorded read is matched and replayed, never answered empty', async () => {
+    const journal = [
+      row(1, 'out', { type: 'control_request', request_id: 'rec-1', request: { subtype: 'get_usage' } }),
+      row(2, 'in', { type: 'control_response', response: { subtype: 'success', request_id: 'rec-1', response: { recorded: true } } }),
+      row(3, 'meta', { event: 'exit', code: 0, signal: null }),
+    ];
+    const transport = replayEngine(journal, { prelude });
+    void transport.write({ type: 'control_request', request_id: 'M-1', request: { subtype: 'get_usage' } });
+    const items = await take(transport.frames, 5);
+    expect(items.map((i) => i.error)).toEqual([null]);
+    expect(frameOf(items[0]!)).toMatchObject({ response: { request_id: 'M-1', response: { recorded: true } } });
   });
 
   it('replays stderr rows, reports the exit row\'s code and signal, and ends a row-less tail on kill', async () => {
@@ -156,9 +193,9 @@ describe('replay transport plays a fixture and advances on the adapter\'s writes
     const transport = replayEngine([row(1, 'in', { type: 'system', subtype: 'status', status: null })], { prelude });
     const it = transport.frames[Symbol.asyncIterator]();
     await it.next();
-    const write = transport.write({ type: 'control_request', request_id: 'M-1', request: { subtype: 'get_usage' } });
+    const write = transport.write({ type: 'control_request', request_id: 'M-1', request: { subtype: 'set_model', model: 'opus' } });
     const item = (await it.next()).value as TransportItem;
-    expect(item.error).toMatchObject({ kind: 'replay_mismatch', replay: { expected: 'end of journal', got: 'control_request/get_usage' } });
+    expect(item.error).toMatchObject({ kind: 'replay_mismatch', replay: { expected: 'end of journal', got: 'control_request/set_model' } });
     await expect(write).rejects.toThrow(/replay mismatch/);
     expect((await it.next()).done).toBe(true);
     await expect(transport.exited).resolves.toEqual({ code: null, signal: null });

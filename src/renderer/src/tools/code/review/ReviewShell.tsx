@@ -177,13 +177,22 @@ function hunksOf(file: ReviewFile, target: DiffTarget | null, fetched: Pick<Revi
   return load?.status === 'ok' ? (load.file?.hunks ?? []) : null;
 }
 
+// A file's patch header: its own, or the one fetched for it when its scope is past the cap (what a binary's viewed mark
+// signs: its `index` line names both blobs, so a new blob drops the mark within the cap or past it).
+function headerOf(file: ReviewFile, target: DiffTarget | null, fetched: Pick<ReviewStore, 'files'>): string | null {
+  if (file.header !== null || target === null) return file.header;
+  const load = fileDiffOf(fetched, target, file.path);
+  return load?.status === 'ok' ? (load.file?.header ?? null) : null;
+}
+
 function FileList({ files, selected, ui, viewedKey: key, target }: { files: readonly ReviewFile[]; selected: string | null; ui: StoreApi<ReviewUi>; viewedKey: string; target: DiffTarget | null }) {
   const marks = useStore(ui, (s) => s.viewed);
   const fetched = useReview((s) => s.files);
   return (
     <ul role="listbox" aria-label={REVIEW_COPY.title} className="max-h-[40%] shrink-0 overflow-y-auto border-b border-border py-1">
       {files.map((file) => {
-        const viewed = isViewed(marks, key, file.path, viewedSignature(file, hunksOf(file, target, { files: fetched })));
+        const signed = { kind: file.kind, header: headerOf(file, target, { files: fetched }) };
+        const viewed = isViewed(marks, key, file.path, viewedSignature(signed, hunksOf(file, target, { files: fetched })));
         return (
           <li key={file.path} role="option" aria-selected={file.path === selected}>
             <button
@@ -215,19 +224,21 @@ function FileSection({ file, files, ui, appSessionId, data, viewedKey: key }: { 
   const current = useStore(ui, (s) => s.hunk);
   const marks = useStore(ui, (s) => s.viewed);
   const wrap = useViewer((s) => s.wrap);
-  // A scope past its cap fetches the selected file's hunks on selection.
+  // A scope past its cap fetches the selected file's hunks on selection, and a binary's header (what its mark signs).
   const target = data.target;
-  const fetch = file.hunks === null && file.kind !== 'untracked' && file.kind !== 'binary' && target !== null;
+  const binary = file.kind === 'binary';
+  const fetch = target !== null && (binary ? file.header === null : file.hunks === null && file.kind !== 'untracked');
   const fetched = useReview((s) => (fetch && target ? fileDiffOf(s, target, file.path) : undefined));
   // Keyed on the scope's diff too: a re-read of the scope drops the per-file loads, and the selected file asks again.
   const scopeDiff = useReview((s) => (fetch && target ? diffOf(s, target) : undefined));
   useEffect(() => {
     if (fetch && target) useReview.getState().loadFile(target, file.path);
   }, [fetch, target, file.path, scopeDiff]);
-  const hunks = useMemo(() => file.hunks ?? (fetched?.status === 'ok' ? (fetched.file?.hunks ?? []) : null), [file.hunks, fetched]);
+  const hunks = useMemo(() => (binary ? null : (file.hunks ?? (fetched?.status === 'ok' ? (fetched.file?.hunks ?? []) : null))), [binary, file.hunks, fetched]);
+  const header = file.header ?? (fetched?.status === 'ok' ? (fetched.file?.header ?? null) : null);
   // Stable while the file's hunks are, so the diff body does not re-parse on every render.
   const blocks = useMemo(() => (hunks === null ? [] : blocksOf(hunks, file.hunks === null ? [hunks.length] : file.blocks)), [hunks, file.hunks, file.blocks]);
-  const signature = viewedSignature(file, hunks);
+  const signature = viewedSignature({ kind: file.kind, header }, hunks);
   const large = hunks !== null && tooLarge({ hunks });
   const count = hunks === null || large ? 0 : hunks.length;
   const hunk = Math.min(current, Math.max(0, count - 1));
@@ -245,7 +256,7 @@ function FileSection({ file, files, ui, appSessionId, data, viewedKey: key }: { 
         <span data-review-file-header className="min-w-0 flex-1 truncate text-ui-sm text-fg" title={file.path}>
           {REVIEW_COPY.fileHeader(file.path, kindLabel(file))}
         </span>
-        {file.kind === 'binary' || (file.kind !== 'untracked' && hunks !== null) ? (
+        {(binary ? header !== null : file.kind !== 'untracked' && hunks !== null) ? (
           <button type="button" className={toggle} aria-pressed={viewed} onClick={() => ui.setState((s) => toggleViewed(s, key, file.path, signature))}>
             {viewed ? REVIEW_COPY.viewed : REVIEW_COPY.markViewed}
           </button>

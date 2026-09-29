@@ -6,6 +6,7 @@
 // (the owner's trackpad reaches Playwright's window on this Mac), and the count is reported as an annotation.
 import { expect, type ElectronApplication, type Page } from '@playwright/test';
 import { test } from './support/launch';
+import { latencyBudgets, MEASURED_WAIT_MS } from './support/latency';
 
 // The parent-session variables a terminal must never inherit (§4.1), two engine-launch ones (D-19) and an Electron
 // switch a launcher sets (`ELECTRON_RENDERER_URL` itself would make the built app a dev-server client), set to fake
@@ -219,7 +220,7 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // Waits, frame by frame, until a buffer line reads `text` (trimmed), or with `null` until any line is non-empty (the
 // terminal may have no renderer yet). The page's CSP allows no eval, so the matcher travels as data.
-async function untilLine(h: Harness, id: TerminalId, text: string | null, timeout = 10_000): Promise<void> {
+async function untilLine(h: Harness, id: TerminalId, text: string | null, timeout = MEASURED_WAIT_MS): Promise<void> {
   await h.page.waitForFunction(
     ([id, text]) => {
       const probe = (window as unknown as HarnessWindow).__maws_harness!.terminals!.probe!(id) as { line(row: number): string; lineCount(): number } | null;
@@ -248,6 +249,7 @@ function isAlive(pid: number): boolean {
 }
 
 test('opens a login shell in the session directory with the terminal environment', async ({ maws }) => {
+  const within = latencyBudgets();
   const h = await harnessOf(maws);
   const { page } = maws;
   const A = (await h.sessions()).A;
@@ -267,13 +269,11 @@ test('opens a login shell in the session directory with the terminal environment
   // left of the host's one-time login-shell environment capture; it is held to three seconds and its number logged.
   await hostReady(h);
   const cold = await openFromMenu();
-  test.info().annotations.push({ type: 'coldPromptMs', description: String(cold.ms) });
-  expect(cold.ms, 'the first terminal after launch shows a prompt within three seconds').toBeLessThanOrEqual(3_000);
+  within('coldPromptMs', cold.ms, 3_000, 'the first terminal after launch shows a prompt within three seconds');
   await h.prompt(cold.id);
   // A terminal opened in the running app: two seconds from the click.
   const warm = await openFromMenu();
-  test.info().annotations.push({ type: 'promptMs', description: String(warm.ms) });
-  expect(warm.ms, 'a prompt appears within two seconds').toBeLessThanOrEqual(2_000);
+  within('promptMs', warm.ms, 2_000, 'a prompt appears within two seconds');
   const id = warm.id;
   await h.prompt(id);
 
@@ -394,6 +394,7 @@ test('asks before closing a busy terminal', async ({ maws }) => {
 });
 
 test('shows terminal lost on host crash and respawns after restart', async ({ maws }) => {
+  const within = latencyBudgets();
   const h = await harnessOf(maws);
   const { app, page } = maws;
   const { id } = await h.addTerminal();
@@ -416,8 +417,7 @@ test('shows terminal lost on host crash and respawns after restart', async ({ ma
   await app.evaluate((_electron, pid) => process.kill(pid, 'SIGKILL'), host.value.pid);
   await sawDisabled;
   const lostMs = Date.now() - killedAt;
-  test.info().annotations.push({ type: 'lostMs', description: String(lostMs) });
-  expect(lostMs, 'the tab shows the lost bar within two seconds').toBeLessThan(2_000);
+  within('lostMs', lostMs, 2_000, 'the tab shows the lost bar within two seconds');
   expect((await h.info(id))!.status).toBe('lost');
 
   const status = h.bar('terminal status');
@@ -529,6 +529,7 @@ test('reconnects lossily with a notice when no checkpoint reaches the ring', asy
 
 test('floods without loss while the page stays responsive', async ({ maws }) => {
   test.setTimeout(600_000);
+  const within = latencyBudgets();
   const h = await harnessOf(maws);
   const { tabId, id } = await h.addTerminal();
   await h.prompt(id);
@@ -555,15 +556,14 @@ test('floods without loss while the page stays responsive', async ({ maws }) => 
 
     // W1 again with its tab hidden from its first byte: the summary is shown (C9's Review placeholder, folded into C8a's host) before the command is written to
     // the pty (through `pty.write`, which needs no focus), and a hidden terminal acknowledges at most 256 KiB per
-    // 250 ms, so the host must pause the pty at the high watermark and hold it paused between ticks. Asserted after a
-    // full second hidden.
+    // 250 ms, so the host must pause the pty at the high watermark and hold it paused between ticks. Waited for while
+    // hidden (the output reaches the watermark in about a second on a quiet machine, later under load).
     await h.call('terminals', 'resetPausedSeen', id); // this phase proves its own pause, not the visible run's
     expect(await pausedSeen()).toBe(false);
     await h.call('panel', 'selectTab', 'review');
     await expect.poll(async () => (await h.info(id))!.visible, { message: 'the terminal is hidden' }).toBe(false);
     await h.run(id, `${FOX}; echo W1-HIDDEN-$((6*7))`);
-    await sleep(1_000);
-    expect(await pausedSeen(), "W1's fox line pauses the pty at the high watermark").toBe(true);
+    await expect.poll(pausedSeen, { timeout: 30_000, message: "W1's fox line pauses the pty at the high watermark" }).toBe(true);
     await h.call('panel', 'selectTab', tabId);
     await ends('W1-HIDDEN-42');
     await h.idle(id, 500);
@@ -626,7 +626,7 @@ test('floods without loss while the page stays responsive', async ({ maws }) => 
     expect(end.count).toBe(SCROLLBACK + end.rows);
     expect(pings.count, 'every Ping click registered').toBe(clicks);
     expect(clicks).toBeGreaterThan(0);
-    expect(pings.maxMs, 'a click waits under 100 ms').toBeLessThan(100);
+    within('pingMaxMs', pings.maxMs, 100, 'a click waits under 100 ms');
   });
 });
 
@@ -678,8 +678,9 @@ test('copies a selection and opens links externally', async ({ maws }) => {
   await page.mouse.down();
   await page.mouse.move(to.x, to.y, { steps: 8 });
   await page.mouse.up();
+  // Waited for: under load the renderer may take the drag's last moves after the release has returned.
+  await expect.poll(async () => (await h.call<string>('terminals', 'selection', id)).length, { message: 'the selection spans two rows' }).toBeGreaterThan(wrapped.cols);
   const selection = await h.call<string>('terminals', 'selection', id);
-  expect(selection.length, 'the selection spans two rows').toBeGreaterThan(wrapped.cols);
   await page.keyboard.press('Meta+KeyC');
   await expect.poll(() => app.evaluate(({ clipboard }) => clipboard.readText())).toBe(selection);
   await page.getByLabel('paste target').click();
@@ -813,6 +814,7 @@ test('falls back to the DOM renderer on context loss and returns to WebGL on nex
 });
 
 test('openTerminal runs the attach command', async ({ maws }) => {
+  const within = latencyBudgets();
   const h = await harnessOf(maws);
   const { page } = maws;
   const { A, B } = await h.sessions();
@@ -842,11 +844,9 @@ test('openTerminal runs the attach command', async ({ maws }) => {
   // As in the first test: the first attach after launch within three seconds (logged), one in the running app within two.
   await hostReady(h);
   const cold = await attach('MAWS_ATTACH_OK');
-  test.info().annotations.push({ type: 'coldAttachMs', description: String(cold.ms) });
-  expect(cold.ms, 'the first attach after launch runs within three seconds').toBeLessThanOrEqual(3_000);
+  within('coldAttachMs', cold.ms, 3_000, 'the first attach after launch runs within three seconds');
   const warm = await attach('MAWS_ATTACH_AGAIN');
-  test.info().annotations.push({ type: 'attachMs', description: String(warm.ms) });
-  expect(warm.ms, 'the attach command runs within two seconds').toBeLessThanOrEqual(2_000);
+  within('attachMs', warm.ms, 2_000, 'the attach command runs within two seconds');
 
   // For a session other than the one shown: the panel shows that session, with the new tab selected and visible.
   expect(await h.call<string>('panel', 'session')).toBe(A);

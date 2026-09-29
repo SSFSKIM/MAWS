@@ -51,6 +51,13 @@ export interface TerminalHandle {
   readonly container: HTMLElement;
 }
 
+// A pty `adopt` claimed: its handle exists under the pty's label; `attached` answers once the screen is restored.
+export interface Adopting {
+  label: string;
+  id: TerminalId;
+  attached: Promise<TerminalId | null>;
+}
+
 export interface TerminalInit {
   appSessionId: AppSessionId;
   label: string;
@@ -210,16 +217,25 @@ export class TerminalRegistry {
   }
 
   // Re-adopts the host's ptys after a reload: for each one the page accepts, a handle that claims the pty before it
-  // asks for the attach, then restores the screen exactly or lossily. Resolves with the adopted ids.
-  async adopt(accept: (info: PtyInfo) => boolean = () => true): Promise<TerminalId[]> {
+  // asks for the attach, then restores the screen exactly or lossily. Resolves with the adopted ids. `onListed` hears,
+  // once `pty.list` has answered (with nothing when it failed), each handle created and its attach still under way.
+  async adopt(accept: (info: PtyInfo) => boolean = () => true, onListed?: (adopting: Adopting[]) => void): Promise<TerminalId[]> {
     this.start();
     const listed = await this.deps.ipc.invoke('pty.list', undefined);
     if (!listed.ok) {
       console.error('[terminal] pty.list failed', listed.error);
+      onListed?.([]);
       return [];
     }
     const known = new Set([...this.entries.values()].map((entry) => entry.info.ptyId));
-    const ids = await Promise.all(listed.value.ptys.filter((info) => !known.has(info.ptyId) && accept(info)).map((info) => this.adoptOne(info)));
+    const adopting = listed.value.ptys
+      .filter((info) => !known.has(info.ptyId) && accept(info))
+      .map((info) => {
+        const entry = this.claimAdopted(info);
+        return { label: info.label, id: entry.info.id, attached: this.attachAdopted(entry, info) };
+      });
+    onListed?.(adopting);
+    const ids = await Promise.all(adopting.map(({ attached }) => attached));
     return ids.filter((id): id is TerminalId => id !== null);
   }
 
@@ -303,6 +319,13 @@ export class TerminalRegistry {
       if (!result.ok && !ptyGone(result.error)) throw new Error(`pty.kill failed: ${result.error.message}`);
     }
     this.dispose(entry);
+  }
+
+  // Lets go of a terminal without ending its pty (a re-adopted one whose attach ran out of time): the handle is disposed
+  // and the pty runs on, for the next reload's adoption. An attach answering after the release restores nothing.
+  release(id: TerminalId): void {
+    const entry = this.entries.get(id);
+    if (entry) this.dispose(entry);
   }
 
   // What runs in the foreground. Rejects when the host cannot answer: the tool then fails closed and asks before
@@ -459,11 +482,15 @@ export class TerminalRegistry {
     }
   }
 
-  private async adoptOne(info: PtyInfo): Promise<TerminalId | null> {
+  private claimAdopted(info: PtyInfo): Entry {
     const entry = this.createEntry({ appSessionId: info.appSessionId, label: info.label, cwd: info.cwd }, info.alive ? 'running' : deadStatus(info.exit));
     // The claim precedes the request: events the host emits after its snapshot wait in the entry's held list.
     this.byPty.set(info.ptyId, entry);
     this.update(entry, { ptyId: info.ptyId, pid: info.pid, exit: info.exit });
+    return entry;
+  }
+
+  private async attachAdopted(entry: Entry, info: PtyInfo): Promise<TerminalId | null> {
     const [attached, renderer] = await Promise.all([this.deps.ipc.invoke('pty.attach', { ptyId: info.ptyId }), entry.ready]);
     if (!attached.ok) {
       console.error(`[terminal] pty.attach failed for ${info.ptyId}`, attached.error);

@@ -1,13 +1,13 @@
 // EngineSession (charter §4.1, §4.2, §4.4, §4.6; C3 execution document, Interfaces, M3 and M4): the object that wires
 // one engine process — transport, control client, normaliser, permission broker, the app queue and `!` mode — runs the
 // initialize handshake, the gateway verification read, grant re-application on a resume and queue recovery, and ends
-// the process through the termination ladder. Its one invariant: every row is journaled before it is normalised, and
+// the process through the termination ladder (session-ladder.ts). Its one invariant: every row is journaled before it is normalised, and
 // the normaliser is the only source of events. Every stdout frame, every frame we write (through `record`, which the
 // one OutboundWriter per process also uses), every stderr line, and the `meta` rows the host writes (spawn,
 // initialize, status check, init_failed, reconnect, queue, notices, the normaliser's own warnings, exit) pass through
 // `record`, which journals the row and then normalises it; nothing here builds an event. What the frames say about the
-// process lives in SessionStatusTracker (session-status.ts); the queue in MessageQueue (queue.ts).
-import { randomUUID } from 'node:crypto';
+// process lives in SessionStatusTracker (session-status.ts); the queue in MessageQueue (queue.ts); the plan outcome
+// "clear context and implement" in ClearAndImplementSequence (session-clear.ts).
 import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionEvent } from '@shared/graph/events';
 import type { MessageUuid, RequestId } from '@shared/graph/ids';
@@ -18,11 +18,11 @@ import type { QueueEntry, QueueState, SendContent, SessionStateStore } from '@sh
 import type { RelayHealth } from '@shared/engine/relay-health';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import { HookCallbackRequestSchema, type GetStatusResponse, type InitializeRequest, type InterruptResponse } from '@shared/wire/control';
-import type { ControlRequestFrame, UserInputFrame } from '@shared/wire/frames';
+import type { ControlRequestFrame } from '@shared/wire/frames';
 import type { JournalDirection, JournalRow } from '@shared/wire/journal';
 import { BashMode } from './bash-mode';
 import { DECLARED_DIALOG_KINDS, PermissionBroker } from './broker';
-import { endSession, getStatus, initialize, interrupt, setPermissionMode } from './controls';
+import { endSession, getContextUsage, getStatus, initialize, interrupt, requestClassOf } from './controls';
 import { EMPTY_GRANTS, reapply, recordFromResponse, type GrantSnapshot } from './grants';
 import { HostHookRegistry } from './host-hooks';
 import { RELAY_URL, spawnMeta, type LaunchPlan } from './launch';
@@ -31,19 +31,18 @@ import { JournalClosed, OutboundWriter } from './outbound-writer';
 import { keepAliveReasons } from './process-table';
 import { MessageQueue, type SteerPriority } from './queue';
 import { ControlClient, ControlError } from './rpc';
+import { ClearAndImplementSequence } from './session-clear';
+import { LADDER_MS, TerminationLadder, type ExitReason, type ExitSummary, type StopResult } from './session-ladder';
 import { SessionStatusTracker, type Catalog } from './session-status';
 import { MemorySessionStateStore } from './store/memory-session-state-store';
 import type { EngineTransport, TransportItem, TransportProblem } from './transport';
 
 export { HostHookRegistry } from './host-hooks';
 export type { Catalog } from './session-status';
-
-// The termination ladder's waits (Exit policy): the end_session grace, then SIGTERM, then SIGKILL; 7 s worst case.
-export const LADDER_MS = { endSession: 3_000, term: 3_000, kill: 1_000 } as const;
+export { LADDER_MS, type ExitReason, type ExitSummary, type StopResult } from './session-ladder';
 // How long stdout's end waits for a write still in flight before failing it and ending the process (M3 re-review 3).
 export const EOF_WRITE_WAIT_MS = 3_000;
 const STDERR_TAIL_LINES = 20;
-const TERMINAL_LIFECYCLE = new Set(['completed', 'cancelled', 'discarded', 'refused']);
 
 // What the session journals through: JournalWriter satisfies it; tests use an in-memory journal.
 export interface SessionJournal {
@@ -67,9 +66,6 @@ export interface EngineSessionOptions {
   log?: (message: string) => void;
 }
 
-export type ExitReason = 'quit' | 'stop' | 'archive' | 'crash' | 'unknown';
-export interface ExitSummary { code: number | null; signal: string | null; reason: ExitReason; lostAttentionCount: number }
-export interface StopResult { exited: boolean; code: number | null; signal: string | null }
 export interface SendResult { messageUuid: MessageUuid | null; disposition: 'sent' | 'queued'; queueId: string; entry: QueueEntry }
 
 interface Listeners {
@@ -85,10 +81,6 @@ interface Listeners {
 type ProcessState = EngineSessionStatus['process'];
 type Frame = Record<string, unknown> & { type?: unknown; subtype?: unknown };
 
-// `delivered` settles when the deny response's write settles: the operation is staged before the write so a `result`
-// racing the write continuation finds it, and the sequence waits on delivery before sending anything (M3 review).
-interface ClearAndImplement { phase: 'awaiting_result' | 'clearing' | 'awaiting_clear'; plan: string; clearUuid: MessageUuid | null; delivered: Promise<boolean> }
-
 export class EngineSession {
   readonly exited: Promise<ExitSummary>;
   readonly queue: MessageQueue;
@@ -102,6 +94,8 @@ export class EngineSession {
   private readonly broker: PermissionBroker;
   private readonly tracker: SessionStatusTracker;
   private readonly bashMode: BashMode;
+  private readonly ladder: TerminationLadder;
+  private readonly clearAndImplement: ClearAndImplementSequence;
   private readonly reconnect: boolean;
   private readonly log: (message: string) => void;
   private readonly listeners: { [K in keyof Listeners]: Set<Listeners[K]> } = { events: new Set(), status: new Set(), brokerItems: new Set(), queue: new Set(), exited: new Set(), catalog: new Set() /* C7 */, models: new Set() /* C10 */ };
@@ -120,14 +114,10 @@ export class EngineSession {
   private stopReason: 'stop' | 'archive' | 'quit' | null = null;
   private handshakeDone = false;
   private initFailed = false;
-  private ladder: Promise<StopResult> | null = null;
-  private killed = false; // the ladder reached SIGKILL
   private journalClosed = false;
   private lastEventSeq = 0;
   private lastStatusSignature = '';
   private grants: GrantSnapshot;
-  private clear: ClearAndImplement | null = null;
-  private pendingPlan: string | null = null; // a clear_and_implement plan kept for retry after the mode restore failed
   private requestedModel: string | null; // the launch spec's, until `session.setModel` (M5)
   private requestedEffort: Effort | null; // the launch spec's, until `session.setEffort` (M5)
   private publishedCatalogRevision = 0; // C7: the tracker's catalogue revision last published (0: nothing yet)
@@ -170,6 +160,30 @@ export class EngineSession {
       sessionId: () => this.normalizer.state.sessionId,
       isExiting: () => this.processState === 'exiting' || this.processState === 'exited',
     });
+    this.ladder = new TerminationLadder({
+      exited: this.exited,
+      hasExited: () => this.processState === 'exited',
+      markExiting: () => this.setProcess('exiting'),
+      endSession: () => {
+        if (!this.handshakeDone || !this.client) return false;
+        endSession(this.client, { reason: this.stopReason ?? 'stop' }).catch(() => {}); // the exit is the answer that matters
+        return true;
+      },
+      stopResult: () => this.stopResult(),
+    });
+    this.clearAndImplement = new ClearAndImplementSequence({
+      client: () => this.client,
+      isReady: () => this.processState === 'ready',
+      prePlanMode: () => this.tracker.prePlanMode,
+      write: (frame) => {
+        const writer = this.writer;
+        if (!writer) throw new Error('no engine process');
+        return writer.write(frame);
+      },
+      notice: (key, text) => this.notice(key, text),
+      touch: () => this.touch(),
+      log: this.log,
+    });
     const writeFrame = (frame: Parameters<OutboundWriter['write']>[0]) => (this.writer ? this.writer.write(frame) : Promise.reject(new Error('no engine process')));
     this.queue = new MessageQueue({
       appSessionId: opts.spec.appSessionId,
@@ -178,7 +192,7 @@ export class EngineSession {
       meta: (frame) => this.record('meta', frame),
       // a host sequence that writes its own prompts (clear and implement) holds the queue like an open turn, and so does a
       // prompt written but not yet started (a `now` steer preempts the running turn and runs next: M6 live 3.7)
-      turnOpen: () => this.processState !== 'exited' && (this.normalizer.state.currentTurn !== null || this.normalizer.state.unstartedPrompts.size > 0 || this.clear !== null),
+      turnOpen: () => this.processState !== 'exited' && (this.normalizer.state.currentTurn !== null || this.normalizer.state.unstartedPrompts.size > 0 || this.clearAndImplement.holding),
       canWrite: () => this.processState === 'ready',
       onChange: (queue) => {
         this.emit('queue', queue);
@@ -238,24 +252,7 @@ export class EngineSession {
   async answer(requestId: RequestId, answer: RequestAnswer): Promise<'delivered' | 'not_pending' | 'write_failed'> {
     const item = this.broker.item(requestId);
     if (answer.kind !== 'plan' || answer.outcome !== 'clear_and_implement' || item?.kind !== 'plan' || item.attention.state !== 'pending') return this.broker.answer(requestId, answer);
-    const plan = (item.request.request.input as { plan?: unknown } | undefined)?.plan;
-    let settle!: (ok: boolean) => void;
-    const staged: ClearAndImplement = { phase: 'awaiting_result', plan: typeof plan === 'string' ? plan : '', clearUuid: null, delivered: new Promise((resolve) => (settle = resolve)) };
-    const previous = { clear: this.clear, pendingPlan: this.pendingPlan };
-    this.clear = staged;
-    this.pendingPlan = null;
-    let outcome: Awaited<ReturnType<PermissionBroker['answer']>> = 'write_failed';
-    try {
-      outcome = await this.broker.answer(requestId, answer);
-      return outcome;
-    } finally {
-      settle(outcome === 'delivered');
-      if (outcome !== 'delivered' && this.clear === staged && staged.phase === 'awaiting_result') {
-        this.clear = previous.clear; // rolled back: the engine never received the deny
-        this.pendingPlan = previous.pendingPlan;
-      }
-      this.touch();
-    }
+    return this.clearAndImplement.stage((item.request.request.input as { plan?: unknown } | undefined)?.plan, () => this.broker.answer(requestId, answer));
   }
 
   // Ends the process through the termination ladder; `graceMs` (the end_session wait) is capped at 3 s. Before the
@@ -273,7 +270,7 @@ export class EngineSession {
 
   // True once the termination ladder had to send SIGKILL (engine.shutdown's `forced` count).
   get forcedKill(): boolean {
-    return this.killed;
+    return this.ladder.killed;
   }
 
   // The process's state alone (`status().process`, without building the whole status).
@@ -325,7 +322,7 @@ export class EngineSession {
     return {
       appSessionId: this.spec.appSessionId, engineSessionId, pid: this.transport?.pid ?? null, launchId: this.plan.launchId, launchedAt: this.launchedAt,
       taskListId: env.CLAUDE_CODE_TASK_LIST_ID ?? engineSessionId ?? null, // C8's ask: the list the engine's task tools read (SPEC 20)
-      cwd: this.spec.cwd, pendingPlan: this.pendingPlan,
+      cwd: this.spec.cwd, pendingPlan: this.clearAndImplement.pendingPlan,
       process: this.processState, exit: this.exitInfo, engineState: tracked.engineState, activity: tracked.activity,
       // every open turn was opened by a turn.started the tracker saw, so its id is that event's
       turn: turn && turnId ? { id: turnId, origin: turn.origin, startedAt: turn.startedAt, acceptedAt: turn.acceptedAt, userMessageUuids: [...turn.userMessageUuids] } : null,
@@ -402,9 +399,12 @@ export class EngineSession {
     const client = new ControlClient(transport, { row: (direction, frame) => this.record(direction, frame) }, this.plan.launchId, { warn: this.log, writer });
     this.client = client;
     client.onInbound((req) => this.inbound(req));
-    client.onLateResponse((late) =>
-      this.record('meta', { event: 'notice', level: 'warning', key: `late_response:${late.subtype}:${late.requestId}`, text: `${late.subtype} answered after its deadline; it may have applied after the error you saw.` }),
-    );
+    // A late read applied nothing, and a host-issued one (the gateway and context reads) showed no error to anyone: only a
+    // late mutation gets the notice (debt wave 3 review).
+    client.onLateResponse((late) => {
+      if (requestClassOf(late.subtype) === 'read') return;
+      this.record('meta', { event: 'notice', level: 'warning', key: `late_response:${late.subtype}:${late.requestId}`, text: `${late.subtype} answered after its deadline; it may have applied after the error you saw.` });
+    });
     const reading = this.readLoop(transport);
     const draining = this.stderrLoop(transport);
     void Promise.all([reading, draining])
@@ -452,7 +452,9 @@ export class EngineSession {
       this.initializeFailed(new Error(`the session's queue could not be recovered: ${messageOf(error)}`));
       return;
     }
-    if (this.processState === 'initializing') this.setProcess('ready');
+    if (this.processState !== 'initializing') return;
+    this.setProcess('ready');
+    void this.sampleContext(); // `ctx` from the start, a resume's whole context included, not only after the first turn
   }
 
   // The grant snapshot (unless the caller passed one) and the launch spec, from and to the SessionStateStore.
@@ -570,6 +572,9 @@ export class EngineSession {
       case 'replay_mismatch':
         this.record('meta', { event: 'replay_mismatch', message: problem.message, ...(problem.replay ?? {}) });
         return;
+      case 'replay_unrecorded_read': // not a problem: the replay answered a read its fixture never recorded (no event)
+        this.record('meta', { event: 'replay_unrecorded_read', message: problem.message, ...(problem.read ?? {}) });
+        return;
       case 'line_budget':
         this.record('meta', { event: 'transport_error', message: problem.message, code: 'line_budget', length: problem.length });
         void this.terminate(false); // the transport already killed the process; the ladder marks it exiting
@@ -635,10 +640,11 @@ export class EngineSession {
         // the queue first: while a host sequence (clear and implement) still holds the session, it releases nothing
         this.queue.onTurnEnded(event).catch((error: unknown) => this.log(`queue release failed: ${messageOf(error)}`));
         if ((event.origin === 'human' || event.origin === null) && this.processState === 'ready') void this.verifyGateway();
-        this.advanceClear('turn_ended');
+        if (this.processState === 'ready') void this.sampleContext();
+        this.clearAndImplement.turnEnded();
       } else if (event.kind === 'command.lifecycle') {
         this.queue.onLifecycle(event);
-        if (this.clear?.clearUuid === event.commandUuid && TERMINAL_LIFECYCLE.has(event.state)) this.advanceClear('clear_done');
+        this.clearAndImplement.commandLifecycle(event.commandUuid, event.state);
       }
     }
   }
@@ -672,49 +678,16 @@ export class EngineSession {
     this.touch();
   }
 
-  // Plan outcome "clear context and implement" (Interfaces, Broker): after the plan turn's result, restore the pre-plan
-  // mode, send `/clear`, and once /clear's turn has ended (or its command finished) send the plan as a new prompt.
-  private advanceClear(trigger: 'turn_ended' | 'clear_done'): void {
-    const clear = this.clear;
-    if (!clear) return;
-    if (clear.phase === 'awaiting_result' && trigger === 'turn_ended') {
-      clear.phase = 'clearing';
-      void this.runClear(clear);
-    } else if (clear.phase === 'awaiting_clear') {
-      this.clear = null;
-      this.writeUser(`Implement this plan:\n\n${clear.plan}`).catch((error: unknown) => this.log(`plan prompt not written: ${messageOf(error)}`));
-    }
-  }
-
-  private async runClear(clear: ClearAndImplement): Promise<void> {
+  // The status line's `ctx` once ready and after every turn (debt wave 3): the engine's context read, whose answer the normaliser turns
+  // into `context.sample` from its journal row; a failed read samples nothing and the last sample stands.
+  private async sampleContext(): Promise<void> {
     const client = this.client;
-    const abandon = () => {
-      if (this.clear === clear) this.clear = null;
-    };
-    if (!(await clear.delivered) || !client || this.processState !== 'ready') return abandon();
+    if (!client) return;
     try {
-      await setPermissionMode(client, { mode: this.tracker.prePlanMode ?? 'default' });
+      await getContextUsage(client, { detail: 'summary' });
     } catch (error) {
-      // Stop here: sending /clear and the plan would run it in plan mode. The plan stays on the status for a retry.
-      this.notice('plan:mode_restore_failed', `The mode before plan mode could not be restored: ${messageOf(error)}`);
-      abandon();
-      this.pendingPlan = clear.plan;
-      this.touch();
-      return;
+      this.log(`get_context_usage failed: ${messageOf(error)}`);
     }
-    if (this.clear !== clear || this.processState !== 'ready') return;
-    const uuid = randomUUID() as MessageUuid;
-    clear.clearUuid = uuid;
-    clear.phase = 'awaiting_clear';
-    await this.writeUser('/clear', uuid).catch((error: unknown) => this.log(`/clear not written: ${messageOf(error)}`));
-  }
-
-  private async writeUser(content: UserInputFrame['message']['content'], uuid: MessageUuid = randomUUID() as MessageUuid): Promise<MessageUuid> {
-    const writer = this.writer;
-    if (!writer) throw new Error('no engine process');
-    const frame: UserInputFrame = { type: 'user', uuid, message: { role: 'user', content }, parent_tool_use_id: null, origin: { kind: 'human' } };
-    await writer.write(frame); // journaled once the bytes reached the pipe, `write_failed` otherwise (M3 review)
-    return uuid;
   }
 
   private readyClient(): ControlClient {
@@ -744,38 +717,9 @@ export class EngineSession {
     if (this.reconnect) this.record('meta', { event: 'reconnect', phase: 'failed', attempt: 1, maxAttempts: 1, trigger: 'user', reason: detail });
   }
 
-  // One ladder per process, memoised; with no process yet there is nothing to memoise (whole-branch review).
-  private terminate(endSessionFirst: boolean, graceMs: number = LADDER_MS.endSession): Promise<StopResult> {
-    const transport = this.transport;
-    if (!transport) return Promise.resolve(this.stopResult());
-    this.ladder ??= this.runLadder(transport, endSessionFirst, graceMs);
-    return this.ladder;
-  }
-
-  private async runLadder(transport: EngineTransport, endSessionFirst: boolean, graceMs: number): Promise<StopResult> {
-    if (this.processState === 'exited') return this.stopResult();
-    this.setProcess('exiting');
-    if (endSessionFirst && this.handshakeDone && this.client) {
-      endSession(this.client, { reason: this.stopReason ?? 'stop' }).catch(() => {}); // the exit is the answer that matters
-      if (await this.waitExit(graceMs)) return this.stopResult();
-    }
-    transport.endInput();
-    transport.kill('SIGTERM');
-    if (await this.waitExit(LADDER_MS.term)) return this.stopResult();
-    this.killed = true;
-    transport.kill('SIGKILL');
-    await this.waitExit(LADDER_MS.kill);
-    return this.stopResult();
-  }
-
-  private waitExit(ms: number): Promise<boolean> {
-    return Promise.race([
-      this.exited.then(() => true),
-      new Promise<boolean>((resolve) => {
-        const timer = setTimeout(() => resolve(false), ms);
-        (timer as { unref?: () => void }).unref?.();
-      }),
-    ]);
+  // The process's one ladder (session-ladder.ts); with no process yet it answers the stop result at once.
+  private terminate(endSessionFirst: boolean, graceMs?: number): Promise<StopResult> {
+    return this.ladder.terminate(this.transport, endSessionFirst, graceMs);
   }
 
   private stopResult(): StopResult {
@@ -791,7 +735,7 @@ export class EngineSession {
     const reason: ExitReason = this.stopReason ?? (this.initFailed ? 'crash' : exit.code === 0 && exit.signal === null ? 'unknown' : 'crash');
     const { lost } = this.broker.processExited();
     this.client?.close('the process exited');
-    this.clear = null;
+    this.clearAndImplement.processExited();
     this.bashMode.processExited();
     this.tracker.dispose();
     // A process that never became ready never loaded the queue: nothing of this launch is in it to retire.
