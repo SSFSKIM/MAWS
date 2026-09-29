@@ -270,7 +270,7 @@ describe('background work', () => {
     await mount({ events: upTo(workflow, 93) });
     fireEvent.click(within(card('wayue3on6')).getByRole('button', { name: /alpha/ }));
     const [, options] = openTool.mock.calls.at(-1) as [string, { params: SubagentsParams }];
-    const pinned = subagentsTool.createState({ appSessionId: 'X' as AppSessionId, session: null, instanceId: 'subagents:pinned', params: undefined });
+    const pinned = subagentsTool.createState({ appSessionId: 'X' as AppSessionId, session: null, instanceId: 'subagents:pinned', params: undefined as unknown as SubagentsParams }); // a restored tab's params
     act(() => subagentsTool.open!(pinned, options.params)); // the host's retarget of a single-instance tab passes the params alone
     expect(pinned.snapshot()).toMatchObject({ appSessionId: A, view: { kind: 'agent', agentId: 'a014f6be436bed86b' } });
     subagentsTool.dispose?.(pinned);
