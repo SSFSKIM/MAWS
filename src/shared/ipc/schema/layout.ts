@@ -93,8 +93,25 @@ export const LayoutKeySchema = z.union([
   // C8a start
   z.literal('summary.sections'),
   // C8a end
+  // C7 start
+  z.literal('usage.banners'),
+  // C7 end
 ]);
 export type LayoutKey = z.infer<typeof LayoutKeySchema>;
+
+// C7 start: the composer's file picker and the near-limit banners' dismissals (C7 execution document, Interfaces "X2
+// additions"). A picked file carries its bytes (base64) only for an image up to 20 MiB or a PDF up to 32 MiB; anything
+// else is answered by path alone (the renderer then mentions it). `kind: 'directory'` answers the chosen directory with
+// mediaType `inode/directory` and no data. Key `usage.banners`: the dismissed banner keys, newest last.
+export const PickedFileSchema = z.strictObject({ path: z.string(), name: z.string(), bytes: z.number().int(), mediaType: z.string().nullable(), data: z.string().nullable() });
+export type PickedFile = z.infer<typeof PickedFileSchema>;
+export const PickFilesInputSchema = z.strictObject({ kind: z.enum(['files', 'photos', 'directory']), directory: z.string().nullable(), multiple: z.boolean() });
+export type PickFilesInput = z.infer<typeof PickFilesInputSchema>;
+export const UsageBannersSchema = z.array(z.string()).max(50);
+const c7Commands = {
+  'layout.pickFiles': { input: PickFilesInputSchema, output: z.strictObject({ files: z.array(PickedFileSchema) }), owner: 'main' },
+} as const satisfies Record<`layout.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
+// C7 end
 
 export const commands = {
   'layout.get':          { input: z.strictObject({ key: LayoutKeySchema }), output: z.strictObject({ value: z.unknown().nullable() }), owner: 'main' },
@@ -104,6 +121,7 @@ export const commands = {
   // The actions the page has a handler for (the whole set, replace): the application menu enables exactly these, so an
   // action whose child has not landed renders disabled in the menu as it does in the page (src/main/menu.ts).
   'layout.setEnabledActions': { input: z.strictObject({ actions: z.array(z.enum(ACTION_IDS)) }), output: z.void(), owner: 'main' },
+  ...c7Commands, // C7
 } as const satisfies Record<`layout.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {

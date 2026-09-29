@@ -1,0 +1,57 @@
+[
+  {
+    "credentialOwnership": "appManaged",
+    "displayName": "Account 1",
+    "email": "1@example.test",
+    "lastSeenActive": "2026-09-08T03:39:24Z",
+    "needsReauthentication": false,
+    "organizationUUID": "00000000-0000-4000-8000-000000000001",
+    "planLabel": "Max",
+    "rateLimitTier": "default_claude_max_20x",
+    "uuid": "477e393c-5c1a-4413-a3e6-7f5d1ed72cc3"
+  },
+  {
+    "credentialOwnership": "appManaged",
+    "displayName": "Account 2",
+    "email": "2@example.test",
+    "lastSeenActive": "2026-09-28T19:18:42Z",
+    "needsReauthentication": false,
+    "organizationUUID": "00000000-0000-4000-8000-000000000002",
+    "planLabel": "Max",
+    "rateLimitTier": "default_claude_max_20x",
+    "uuid": "fa95bd34-0db9-44ae-be00-4f2b7387054b"
+  },
+  {
+    "credentialOwnership": "appManaged",
+    "displayName": "Account 3",
+    "email": "3@example.test",
+    "lastSeenActive": "2026-09-10T10:09:11Z",
+    "needsReauthentication": false,
+    "organizationUUID": "00000000-0000-4000-8000-000000000003",
+    "planLabel": "Max",
+    "rateLimitTier": "default_claude_max_20x",
+    "uuid": "2aca3c4b-1e77-4091-908b-d183f6b0f092"
+  },
+  {
+    "credentialOwnership": "appManaged",
+    "displayName": "Account 4",
+    "email": "4@example.test",
+    "lastSeenActive": "2026-09-11T14:41:03Z",
+    "needsReauthentication": false,
+    "organizationUUID": "00000000-0000-4000-8000-000000000004",
+    "planLabel": "Max",
+    "rateLimitTier": "default_claude_max_20x",
+    "uuid": "aa9db20d-af2c-4718-ba6f-5cea946b4974"
+  },
+  {
+    "credentialOwnership": "appManaged",
+    "displayName": "Account 5",
+    "email": "5@example.test",
+    "lastSeenActive": "2026-09-29T01:00:23Z",
+    "needsReauthentication": false,
+    "organizationUUID": "00000000-0000-4000-8000-000000000005",
+    "planLabel": "Max",
+    "rateLimitTier": "default_claude_max_20x",
+    "uuid": "c07e5b82-c428-48ae-b904-9c1a4b26ec25"
+  }
+]

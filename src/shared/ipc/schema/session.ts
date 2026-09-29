@@ -13,7 +13,7 @@ import { EffortSchema, LaunchSpecSchema } from '../../engine/launch-spec';
 import { OperationEventSchema, OperationReceiptSchema } from '../../engine/operations';
 import { RelayHealthSchema } from '../../engine/relay-health';
 import { RewindFilesOutcomeSchema, RewindOutcomeSchema } from '../../engine/rewind-outcome';
-import { QueueEntrySchema, QueueStateSchema, SendContentSchema } from '../../engine/session-state-store';
+import { QueueEntrySchema, QueuePauseReasonSchema, QueueStateSchema, SendContentSchema } from '../../engine/session-state-store'; // C7: QueuePauseReasonSchema
 import { EngineSessionStatusSchema } from '../../engine/status';
 import {
   ExportConversationResponseSchema,
@@ -39,6 +39,9 @@ import {
 import { ProjectIdSchema, SessionIdSchema } from '@shared/graph/ids';
 import { SessionRecordSchema } from '@shared/graph/session';
 // C4 end
+// C7 start: the composer's prompt history shapes (C7 execution document, Interfaces "X2 additions")
+import { HistoryEntrySchema, PastedContentSchema } from '../../composer/history-entry';
+// C7 end
 import type { CommandSpec } from './common';
 
 // C3 start
@@ -125,7 +128,7 @@ const c3Commands = {
 const c3Events = {
   'session.eventBatch': z.strictObject({ appSessionId: AppSessionIdSchema, events: z.array(SessionEventSchema).max(500) }), // batched per session every 16 ms; C4 emits the same for backfill and replay
   'session.status': z.strictObject({ appSessionId: AppSessionIdSchema, status: EngineSessionStatusSchema }),
-  'session.queue': z.strictObject({ appSessionId: AppSessionIdSchema, entries: z.array(QueueEntrySchema), paused: z.boolean() }),
+  'session.queue': z.strictObject({ appSessionId: AppSessionIdSchema, entries: z.array(QueueEntrySchema), paused: z.boolean(), pauseReason: QueuePauseReasonSchema.nullable().optional() }), // C7: pauseReason
   'session.brokerItems': z.strictObject({ appSessionId: AppSessionIdSchema, items: z.array(AttentionItemSchema) }), // internal: main's attention service
   'session.operation': OperationEventSchema,
   'session.forgotten': z.strictObject({ appSessionId: AppSessionIdSchema }), // internal (M5 review): archived or forgotten, live or exited; main's attention service retires the session
@@ -297,14 +300,39 @@ const c5Events = {
 } as const satisfies Record<`session.${string}`, z.ZodType>;
 // C5 end --------------------------------------------------------------------------------------------------------------
 
+// C7 start: the composer's additions (C7 execution document, Interfaces "X2 additions"). `session.catalogChanged` is the
+// engine host's publication of C3's per-launch catalogue (the same `CatalogSchema` `session.catalog` answers), emitted
+// whole whenever its revision moves; `revision` restarts with every launch, so a consumer keys it by `launchId`.
+// `session.history.*` is main's: MAWS's own `<userData>/prompt-history.jsonl` and, read-only, the terminal's history.
+const c7Commands = {
+  'session.history.list': {
+    input: z.strictObject({ appSessionId: AppSessionIdSchema, limit: z.number().int().positive().max(500) }),
+    output: z.strictObject({ entries: z.array(HistoryEntrySchema) }),
+    owner: 'main',
+  },
+  'session.history.append': {
+    // project: the directory an unstarted session will run in (its setup intent's location); main files the row under it
+    // only when the session has no record yet, so the first prompt of a new session is recalled there once it starts
+    input: z.strictObject({ appSessionId: AppSessionIdSchema, display: z.string().min(1).max(65_536) /* a prompt as typed; the bodies ride in pastedContents */, pastedContents: z.record(z.string(), PastedContentSchema), project: z.string().nullable().optional() }),
+    output: z.void(),
+    owner: 'main',
+  },
+} as const satisfies Record<`session.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
+const c7Events = {
+  'session.catalogChanged': z.strictObject({ appSessionId: AppSessionIdSchema, launchId: z.string(), catalog: CatalogSchema }),
+} as const satisfies Record<`session.${string}`, z.ZodType>;
+// C7 end --------------------------------------------------------------------------------------------------------------
+
 export const commands = {
   ...c3Commands, // C3
   ...c4Commands, // C4
   ...c5Commands, // C5
+  ...c7Commands, // C7
 } as const satisfies Record<`session.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {
   ...c3Events, // C3
   ...c4Events, // C4
   ...c5Events, // C5
+  ...c7Events, // C7
 } as const satisfies Record<`session.${string}`, z.ZodType>;

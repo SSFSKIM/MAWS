@@ -138,6 +138,36 @@ describe('normaliser: ids, turns and the human prompt bubble', () => {
     expect(events[6]).toMatchObject({ kind: 'turn.started', origin: 'human', userMessageUuid: 'u-9' });
   });
 
+  // C7 start: the C7 M6 live run (a `!` sent while a turn ran, then `/compact`): the engine folds the echo into the
+  // running turn, whose result names it, and sends no receipt of its own; the next empty result is a local command's.
+  it('a ! echo written during a turn joins that turn, so a later empty result closes its own turn and is no receipt', () => {
+    const n = make();
+    const echo = { type: 'user', uuid: 'e-1', shouldQuery: false, parent_tool_use_id: null, origin: { kind: 'human' }, message: { role: 'user', content: '<bash-input>echo X</bash-input>\n<bash-stdout>X</bash-stdout>' } };
+    const events = feed(n, [
+      outRow(userOut('u-1')), startedIn('u-1'), inRow(initFrame), outRow(echo), startedIn('e-1'),
+      inRow(result({ num_turns: 6, user_message_uuids: ['u-1', 'e-1'] })), // the turn the echo joined
+      outRow(userOut('u-2', { message: { role: 'user', content: '/compact' } })), startedIn('u-2'), inRow(initFrame),
+      inRow(result({ num_turns: 0, terminal_reason: null, result: undefined, user_message_uuids: ['u-2'] })), // /compact's own result
+    ]);
+    expect(n.state.pendingEcho).toBeNull();
+    expect(only(events, 'turn.ended').map((e) => [e.userMessageUuids, e.isEchoReceipt])).toEqual([[['u-1', 'e-1'], false], [['u-2'], false]]);
+    expect(n.state.currentTurn).toBeNull();
+  });
+
+  it("an empty result naming the pending echo and another prompt closes that prompt's turn and is no receipt", () => {
+    const n = make();
+    const echo = { type: 'user', uuid: 'e-1', shouldQuery: false, parent_tool_use_id: null, origin: { kind: 'human' }, message: { role: 'user', content: '<bash-input>echo X</bash-input>\n<bash-stdout>X</bash-stdout>' } };
+    const events = feed(n, [
+      outRow(echo),
+      outRow(userOut('u-2', { message: { role: 'user', content: '/compact' } })), startedIn('u-2'),
+      inRow(result({ num_turns: 0, terminal_reason: null, result: undefined, user_message_uuids: ['e-1', 'u-2'] })),
+    ]);
+    expect(only(events, 'turn.ended').map((e) => [e.userMessageUuids, e.isEchoReceipt])).toEqual([[['e-1', 'u-2'], false]]);
+    expect(n.state.currentTurn).toBeNull(); // /compact's turn closed
+    expect(n.state.pendingEcho).toBeNull(); // and the echo it named waits no longer
+  });
+  // C7 end
+
   it('bash-tagged replayed user frames fill the bash field with the tags stripped', () => {
     const n = make();
     const events = feed(n, [

@@ -82,6 +82,18 @@ export type GitChanged = z.infer<typeof GitChangedSchema>;
 
 const DirectorySchema = z.strictObject({ directory: z.string() });
 
+// C7 start: the composer's `@` file source (C7 execution document, Interfaces "X2 additions"): the files under
+// `directory` (`git ls-files --cached --others --exclude-standard`, or a bounded walk outside a repository), fuzzy-
+// filtered by `query` and ranked, relative to `directory`; refused for a directory no session or project names.
+export const LsFilesInputSchema = z.strictObject({ directory: z.string(), query: z.string().max(256), limit: z.number().int().positive().max(200) });
+export type LsFilesInput = z.infer<typeof LsFilesInputSchema>;
+export const LsFilesSchema = z.strictObject({ paths: z.array(z.string()), truncated: z.boolean(), source: z.enum(['git', 'walk']) });
+export type LsFiles = z.infer<typeof LsFilesSchema>;
+const c7Commands = {
+  'git.lsFiles': { input: LsFilesInputSchema, output: LsFilesSchema, owner: 'main' },
+} as const satisfies Record<`git.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
+// C7 end
+
 export const commands = {
   'git.status': { input: DirectorySchema, output: GitStatusSchema, owner: 'main' },
   'git.branches': { input: DirectorySchema, output: GitBranchesSchema, owner: 'main' },
@@ -89,6 +101,7 @@ export const commands = {
   'git.log': { input: GitLogInputSchema, output: GitLogSchema, owner: 'main' },
   'git.watch': { input: DirectorySchema, output: GitStatusSchema, owner: 'main' }, // idempotent; ref-counted per repoRoot
   'git.unwatch': { input: DirectorySchema, output: z.void(), owner: 'main' },
+  ...c7Commands, // C7
 } as const satisfies Record<`git.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {

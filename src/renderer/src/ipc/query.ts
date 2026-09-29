@@ -19,6 +19,20 @@ export const QUERY_COMMANDS = [
   'pty.ping',
   'pty.hostState',
   'fs.workflows', // C8a: a disk-only session's workflow runs (the summary's Background work), invalidated on fs.workflowChanged
+  // C7 start: the composer's, the request card's and the status line's reads (C7 execution document, Repository map)
+  'attention.request',
+  'session.catalog',
+  'session.listModels',
+  'session.getContextUsage',
+  'session.getUsage',
+  'session.getMemoryDialog',
+  'session.getSessionCost',
+  'settings.usage',
+  'git.lsFiles',
+  'session.history.list',
+  'session.listPermissionRules', // M4: the + dir chip's workspace directories
+  'git.branches', // M4: the location chip's branch picker
+  // C7 end
 ] as const satisfies readonly ValueCommand[];
 export type QueryCommand = (typeof QUERY_COMMANDS)[number];
 

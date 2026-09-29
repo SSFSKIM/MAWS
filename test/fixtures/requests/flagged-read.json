@@ -1,0 +1,17 @@
+{
+  "description": "A can_use_tool request for a read-only tool flagged requires_user_interaction: no quick approval in any placement, the hover offers Open session only. Synthetic: no probe fixture produces one.",
+  "source": "SPEC 45 §45.19.1 (requires_user_interaction: one-tap Approve/Deny must not be offered)",
+  "frame": {
+    "type": "control_request",
+    "request_id": "req-flagged-read-1",
+    "request": {
+      "subtype": "can_use_tool",
+      "tool_name": "Read",
+      "display_name": "Read",
+      "input": { "file_path": "/tmp/maws-c7-scratch/README.md" },
+      "description": "Read README.md",
+      "tool_use_id": "toolu_flagged_read_1",
+      "requires_user_interaction": true
+    }
+  }
+}

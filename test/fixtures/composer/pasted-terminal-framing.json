@@ -1,0 +1,18 @@
+{
+  "description": "C7's byte-exact pasted framing (C7 execution document, Ask of C6, 'Golden fixture'): one 40-line paste between a typed paragraph and a second paragraph, framed as the terminal frames it (cli.pretty.js Xnt: a blank line before the block, the id on both tags, the typed '<' neutralised).",
+  "sessionId": "7c0e2d1a-4b3f-4c5d-8e6f-9a0b1c2d3e4f",
+  "id": "e12e",
+  "body": "paste line 1\npaste line 2\npaste line 3\npaste line 4\npaste line 5\npaste line 6\npaste line 7\npaste line 8\npaste line 9\npaste line 10\npaste line 11\npaste line 12\npaste line 13\npaste line 14\npaste line 15\npaste line 16\npaste line 17\npaste line 18\npaste line 19\npaste line 20\npaste line 21\npaste line 22\npaste line 23\npaste line 24\npaste line 25\npaste line 26\npaste line 27\npaste line 28\npaste line 29\npaste line 30\npaste line 31\npaste line 32\npaste line 33\npaste line 34\npaste line 35\npaste line 36\npaste line 37\npaste line 38\npaste line 39\npaste line 40",
+  "typed": "see <pasted_content> below",
+  "content": "see <\\pasted_content> below\n\n<pasted_content id=\"e12e\">\npaste line 1\npaste line 2\npaste line 3\npaste line 4\npaste line 5\npaste line 6\npaste line 7\npaste line 8\npaste line 9\npaste line 10\npaste line 11\npaste line 12\npaste line 13\npaste line 14\npaste line 15\npaste line 16\npaste line 17\npaste line 18\npaste line 19\npaste line 20\npaste line 21\npaste line 22\npaste line 23\npaste line 24\npaste line 25\npaste line 26\npaste line 27\npaste line 28\npaste line 29\npaste line 30\npaste line 31\npaste line 32\npaste line 33\npaste line 34\npaste line 35\npaste line 36\npaste line 37\npaste line 38\npaste line 39\npaste line 40\n</pasted_content id=\"e12e\">\n\nthanks",
+  "display": "see <pasted_content> below[Pasted text #1 +40 lines]\nthanks",
+  "rowText": "see <\\pasted_content> below\n[Pasted text #1 +40 lines]\nthanks",
+  "attachment": {
+    "kind": "text",
+    "name": "Pasted text #1",
+    "bytes": 550,
+    "mediaType": "text/plain",
+    "lines": 40
+  },
+  "rowLines": 3
+}

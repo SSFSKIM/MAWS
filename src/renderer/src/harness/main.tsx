@@ -8,12 +8,20 @@ import { Harness } from './Harness';
 // C8a start
 import { PanelHarness } from './panel/PanelHarness';
 // C8a end
+// C7 start
+import { ComposerHarness } from './composer/ComposerHarness';
+import { EditorHarness } from './composer/EditorHarness';
+// C7 end
 
 const ROUTES: Record<string, () => ReactNode> = {
   transcript: () => <Harness />,
   // C8a start
   panel: () => <PanelHarness />, // the panel host over fake sessions (run under the harness scenario, ruling O1)
   // C8a end
+  // C7 start: the composer and request card page; the editor page (M3)
+  composer: () => <ComposerHarness />,
+  editor: () => <EditorHarness />,
+  // C7 end
 };
 
 // C9 block begin: the terminal probe page (harness/terminal/), routed as `#probe`; its `#panel` stand-in was folded
