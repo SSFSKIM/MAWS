@@ -1,7 +1,7 @@
 // C10's entries in C5's action registries (C10 execution document, "Actions registered into C5"): ⌘N and the palette's
 // `session.new`, the per-session entries C5's menus, hover actions and toolbar menu render through
 // `runSessionAction`, and the per-project entries its project menu renders through `runProjectAction`. "Add project"
-// (`registerAddProject` over C7's `layout.pickFiles`) and Attach arrive with M4b and M5.
+// (`registerAddProject` over C7's `layout.pickFiles`) arrives with M4b.
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import { registerSessionAction } from '../app/session-actions';
 import { ipc } from '../ipc/client';
@@ -10,6 +10,7 @@ import { registerProjectAction } from '../sidebar/project-actions';
 import { useLayout } from '../stores/layout';
 import { toast } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
+import { attachOrSay } from './attach';
 import { cleanupTargetOf } from './CleanupDialog';
 import { confirm, openDialog } from './dialogs';
 import { archiveSession, forkInPlace } from './record-ops';
@@ -96,6 +97,7 @@ export function registerSessionActions(): () => void {
     registerSessionAction('archive', (id) => openDialog({ kind: 'archive', appSessionId: id })),
     registerSessionAction('deleteConversation', (id) => openDialog({ kind: 'delete', appSessionId: id })),
     registerSessionAction('removeWorktree', removeWorktree),
+    registerSessionAction('attach', (id) => attachOrSay(id)),
     registerProjectAction('removeProject', removeProject),
     registerProjectAction('archiveSessions', archiveProjectSessions),
     registerProjectAction('revealInFinder', revealProject),

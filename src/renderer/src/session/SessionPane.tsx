@@ -70,7 +70,8 @@ function StartedPane({ record, paneIndex }: { record: SessionRecord; paneIndex: 
           <SessionTabNotes appSessionId={id} />
           {/* C10 end */}
           {foreign ? (
-            <HolderNotice holder={holder} />
+            // C10: the notice carries the session's id for its actions
+            <HolderNotice appSessionId={id} holder={holder} />
           ) : (
             // eslint-disable-next-line react-hooks/static-components -- registered once at composition, not created in render
             <Composer appSessionId={id} paneIndex={paneIndex} />

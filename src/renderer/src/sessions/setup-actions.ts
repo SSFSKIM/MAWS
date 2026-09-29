@@ -10,6 +10,7 @@ import type { SetupResources, StartOutcome } from '@shared/sessions/setup';
 import { ipc } from '../ipc/client';
 import { toast } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
+import { attachOrSay, type KnownJob } from './attach';
 import { confirm } from './dialogs';
 import { isStarting, useSetup } from './store';
 
@@ -161,7 +162,16 @@ export async function resumeSession(appSessionId: AppSessionId, message: FirstMe
   }
   dockFor(appSessionId, outcome, message);
   const refusal = refusalOf(outcome);
-  if (refusal !== null) toast({ level: outcome.status === 'held' ? 'warning' : 'danger', text: refusal, actions: [], dismissible: true });
+  if (refusal === null) return;
+  if (outcome.status === 'held') heldToast(appSessionId, outcome.holder, outcome.attach);
+  else toast({ level: 'danger', text: refusal, actions: [], dismissible: true });
+}
+
+// A session held elsewhere, in words, with the job's Attach when there is a job to attach to (M5): from a `held`
+// answer, or from the engine's own refusal that failed a setup.
+export function heldToast(appSessionId: AppSessionId, holder: SessionRecord['holder'], attach: KnownJob | null): void {
+  const actions = attach === null ? [] : [{ label: 'Attach', run: () => void attachOrSay(appSessionId, attach) }];
+  toast({ level: 'warning', text: `Held by ${holderWords(holder)}`, actions, dismissible: true });
 }
 
 // ---- closing an unstarted tab ------------------------------------------------------------------------------------

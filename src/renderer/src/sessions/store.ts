@@ -14,6 +14,7 @@ import type { SetupEvent } from '@shared/sessions/setup';
 import type { TrustState } from '@shared/sessions/trust';
 import { ipc } from '../ipc/client';
 import { toast } from '../stores/notices';
+import { heldToast } from './setup-actions';
 
 // A card a start answered with and that waits for the human, with the first message it docked with (the intent's
 // retained message, or a resume's), which its continuation runs with and a refusal hands back. A failed setup's card
@@ -157,8 +158,12 @@ export function connectSetup(client: MawsBridge = ipc, store: typeof useSetup = 
     client.on('session.setup', (e) => {
       if (!live) return;
       store.getState().applySetup(e);
-      // a resume that failed after it started has no card: its reason is a toast (the record stays, exited)
-      if (e.phase === 'failed' && e.outcome?.kind === 'error' && !store.getState().intents.has(e.appSessionId)) toast({ level: 'danger', text: e.outcome.message, actions: [], dismissible: true });
+      // a resume that failed after it started has no card: its reason is a toast (the record stays, exited); the
+      // engine's own refusal (a job took the session after MAWS's read) names the holder and offers its Attach
+      if (e.phase === 'failed' && !store.getState().intents.has(e.appSessionId)) {
+        if (e.outcome?.kind === 'error') toast({ level: 'danger', text: e.outcome.message, actions: [], dismissible: true });
+        else if (e.outcome?.kind === 'held') heldToast(e.appSessionId, e.outcome.holder, e.outcome.attach);
+      }
     }),
   ];
   const unavailable = (error: unknown) => {

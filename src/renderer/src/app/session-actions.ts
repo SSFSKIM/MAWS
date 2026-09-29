@@ -21,6 +21,9 @@ export const SESSION_ACTIONS = {
   archive: 'Archive',
   deleteConversation: 'Delete conversation…',
   removeWorktree: 'Remove worktree…',
+  // C10 start: a background job's session, opened in a terminal tab running the engine's `claude attach` (job holders only)
+  attach: 'Attach in a terminal tab',
+  // C10 end
 } as const;
 export type SessionActionId = keyof typeof SESSION_ACTIONS;
 export const SESSION_ACTION_IDS = Object.keys(SESSION_ACTIONS) as SessionActionId[];
@@ -33,9 +36,14 @@ function isForeign(record: SessionRecord): boolean {
 // The actions a session's menus offer, whoever renders them (the sidebar's context menu and hover actions, the
 // toolbar's session menu): a foreign-live session only Open, and "Remove worktree…" only with a worktree.
 export function sessionActionsFor(record: SessionRecord): SessionActionId[] {
+  // C10 start: a background job with a known id is attached beside Open; nothing else holds a job to attach to
+  if (record.holder.kind === 'background_job' && record.holder.jobId !== null) return ['open', 'attach'];
+  // C10 end
   if (isForeign(record)) return ['open'];
   const offered = SESSION_ACTION_IDS.filter((id) => id !== 'removeWorktree' || record.worktree !== null);
-  // C10 start: Resume only for a session no process holds (a MAWS-live one has nothing to resume)
+  // C10 start: Attach is a job holder's alone (above); Resume only for a session no process holds (a MAWS-live one has
+  // nothing to resume)
+  offered.splice(offered.indexOf('attach'), 1);
   if (record.holder.kind === 'self') return offered.filter((id) => id !== 'resume');
   // C10 end
   return offered;
