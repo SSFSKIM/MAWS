@@ -266,6 +266,7 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
     const { state } = resubmitRecordOf(useComposerStore.getState(), appSessionId);
     const bypass = state === 'rewind_unresolved' && bypassRewind.current;
     bypassRewind.current = false;
+    if (useSessions.getState().engine.get(appSessionId)?.process !== 'ready') return false; // as the control says: nothing to rewind or send to
     if (state === 'idle') {
       askToRewind(appSessionId);
       return false;

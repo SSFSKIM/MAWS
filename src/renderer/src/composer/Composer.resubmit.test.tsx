@@ -292,6 +292,31 @@ describe('edit-and-resubmit in the composer', () => {
     expect(editingOf(useComposerStore.getState(), A)).toEqual({ messageUuid: 'u-2', seenCursor: 'u-2' });
   });
 
+  it('Enter in edit mode does nothing while the process is not ready, as the control says (no confirm, no send)', async () => {
+    mount();
+    await editFirst();
+    act(() => useSessions.setState({ engine: new Map([[A, status(A, { process: 'starting' })]]) }));
+    await waitFor(() => expect(primary().disabled).toBe(true));
+    await key(editor(), { key: 'Enter' });
+    await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(resubmitOf(useComposerStore.getState(), A)).toBe('idle');
+
+    // rewound, confirmed by the transcript (Send is the human's), then the process leaves: Enter sends nothing
+    act(() => useSessions.setState({ engine: new Map([[A, status(A)]]) }));
+    await confirmRewind();
+    await fake.fail('session.rewind');
+    const confirm = builder('2026-09-28T11:00:00.000Z');
+    confirm.emit('boundary.rewind', { targetMessageUuid: u('u-1'), precedingAssistantUuid: null, prefillText: 'first prompt' });
+    liveEvent(confirm.events.map((e) => ({ ...e, id: 'boundary-ready' }) as SessionEvent));
+    await waitFor(() => expect(resubmitOf(useComposerStore.getState(), A)).toBe('rewound_awaiting_send'));
+    act(() => useSessions.setState({ engine: new Map([[A, status(A, { process: 'exited' })]]) }));
+    await waitFor(() => expect(editor().editor.isEditable).toBe(true));
+    await key(editor(), { key: 'Enter' });
+    await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+    expect(fake.invoked('session.send')).toEqual([]);
+  });
+
   it('keeps edit mode in the draft: entering it writes the edit into the draft document, leaving it writes it out', async () => {
     mount();
     await editFirst();
