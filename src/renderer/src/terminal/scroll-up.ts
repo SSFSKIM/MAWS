@@ -5,6 +5,8 @@
 // buffer with the region's top at row 1, this handler scrolls `Ps` times through xterm's own line-feed scroll
 // (`BufferService.scroll`, the one internal call, against the exact pin 6.0.0) with SU's erase attributes; everywhere
 // else it returns `false` and xterm's handler runs. Shared by the browser adapter and the headless pins.
+// Reported upstream as https://github.com/xtermjs/xterm.js/issues/6195: an xterm bump checks whether it is fixed
+// there, and if so this handler and its exception in C9's Interfaces go.
 
 interface AttributeData {
   bg: number;

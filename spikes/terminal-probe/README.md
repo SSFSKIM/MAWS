@@ -44,7 +44,7 @@ page saw it (`chunks`, `acks`, `maxUnparsed`, `maxUnacked`, `pausedSeen` from `p
   Screenshots are **not redacted**: they show local paths and, in TUI frames, local session ids and usage lines, never
   credentials.
 - `recordings/<tui>.rec`: `script -r` recordings of the item-11 runs, redacted with `redact-recording.mjs`.
-- `upstream-xterm-scrollup.md`: the draft report of xterm.js's `CSI S` behaviour (M5; not filed, the owner decides).
+- `upstream-xterm-scrollup.md`: the report of xterm.js's `CSI S` behaviour (M5), filed as https://github.com/xtermjs/xterm.js/issues/6195.
 - `findings.md`: the tables, the numbers and the verdict.
 
 ## What the page exposes

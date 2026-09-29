@@ -1,4 +1,6 @@
-# Draft upstream report for xtermjs/xterm.js (not filed; the owner decides)
+# Filed as https://github.com/xtermjs/xterm.js/issues/6195
+
+The report as filed on 2026-09-29 (title and body below).
 
 **Title:** SU (`CSI Ps S`) in a scroll region anchored at the top row discards the scrolled-out rows instead of adding them to scrollback
 
