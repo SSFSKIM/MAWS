@@ -137,4 +137,14 @@ describe('the editor mounts over its draft, takes prefills and submits through t
     await waitFor(() => expect([...container.querySelectorAll('[data-pasted]')].map((el) => el.textContent)).toEqual(['Pasted text #1 +1 lines', 'notes.txt +1 lines', 'Pasted text #3 +1 lines']));
     expect(handle.current?.serialize().display).toBe('[Pasted text #1 +1 lines] and [Pasted text #2 +1 lines][Pasted text #3 +1 lines]');
   });
+
+  it('carries the attachments with the document it restores, and drops them with the document it clears', async () => {
+    const shot = { id: 'a1', kind: 'image' as const, name: 'shot.png', mediaType: 'image/png', bytes: 4, data: 'iVBO', persisted: true };
+    const { port } = drafts({ doc: docOf([paragraph(textNode('look'))], [shot]), attachments: [], updatedAt: '2026-09-29T00:00:00.000Z' });
+    const handle = createRef<EditorHandle>();
+    render(<Editor appSessionId={APP} cwd="/repo" sessionId={null} drafts={port} client={client} handle={handle} />);
+    await waitFor(() => expect(handle.current?.serialize().display).toBe('look [Image #1]'));
+    act(() => handle.current?.clear());
+    expect(handle.current?.serialize()).toMatchObject({ display: '', empty: true });
+  });
 });

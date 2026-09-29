@@ -240,6 +240,8 @@ export class EditorController {
     this.silent = options.silently;
     try {
       editor.commands.setContent(doc, { emitUpdate: true });
+      // `setContent` replaces the content and keeps the document node's own attributes: the strip goes with it here
+      editor.view.dispatch(editor.state.tr.setDocAttribute('attachments', attachmentsOf(doc)));
     } finally {
       this.silent = false;
     }
