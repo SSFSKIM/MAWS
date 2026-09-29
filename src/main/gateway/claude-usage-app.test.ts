@@ -36,6 +36,14 @@ describe('claude-usage launcher opens by bundle id and reports not_installed', (
     expect(result.instruction).toMatch(/^ClaudeUsage is not installed/);
   });
 
+  it.each([
+    ['current macOS', 'LSCopyApplicationURLsForBundleIdentifier() failed while trying to determine the application with bundle identifier com.haegi.ClaudeUsage.\n'],
+    ['older macOS', 'Unable to find application with bundle identifier com.haegi.ClaudeUsage\n'],
+  ])('reads the %s stderr of an unknown bundle id as not_installed', async (_, stderr) => {
+    const { app } = harness({ run: async () => Promise.reject(exitError(1, stderr)) });
+    expect(await app.open({ intent: 'panel' })).toMatchObject({ opened: false, reason: 'not_installed' });
+  });
+
   it('answers launch_failed for any other failure: another exit, a timeout, a missing /usr/bin/open', async () => {
     for (const error of [exitError(1, 'LSOpenURLsWithRole() failed with error -10810'), Object.assign(new Error('timed out'), { killed: true, signal: 'SIGTERM' }), Object.assign(new Error('spawn ENOENT'), { code: 'ENOENT' })]) {
       const { app } = harness({ run: async () => Promise.reject(error) });

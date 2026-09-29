@@ -10,6 +10,9 @@ export { CLAUDE_USAGE_BUNDLE_ID };
 export const OPEN_TIMEOUT_MS = 5_000;
 export const MDFIND_TIMEOUT_MS = 5_000;
 export const INSTALLED_TTL_MS = 60_000;
+// What `open -b` prints for a bundle id no application has: current macOS names the LaunchServices call (observed on
+// this Mac, 2026-09-29); older releases printed "Unable to find application".
+const NOT_INSTALLED = ['LSCopyApplicationURLsForBundleIdentifier() failed', 'Unable to find application'];
 
 export interface ClaudeUsageAppDeps {
   run(file: string, args: string[], timeoutMs: number): Promise<{ stdout: string }>; // execFile; rejects with `code` and `stderr`
@@ -75,7 +78,7 @@ export function createClaudeUsageApp(deps: ClaudeUsageAppDeps): ClaudeUsageApp {
         await deps.run('/usr/bin/open', ['-b', CLAUDE_USAGE_BUNDLE_ID], OPEN_TIMEOUT_MS);
       } catch (error) {
         const { code, stderr } = error as { code?: unknown; stderr?: unknown };
-        reason = typeof code === 'number' && code !== 0 && String(stderr).includes('Unable to find application') ? 'not_installed' : 'launch_failed';
+        reason = typeof code === 'number' && code !== 0 && NOT_INSTALLED.some((phrase) => String(stderr).includes(phrase)) ? 'not_installed' : 'launch_failed';
       }
       if (reason !== 'launch_failed') remember(reason === null);
       return { opened: reason === null, reason, instruction: instruction(intent, reason) };
