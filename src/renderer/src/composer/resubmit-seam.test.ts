@@ -20,7 +20,9 @@ import {
   resubmitProvider,
   resubmitSendFailed,
   resubmitSent,
+  restoreEditMode,
   rewindAgain,
+  settleRestoredEdit,
   takeAutoSend,
 } from './resubmit-seam';
 
@@ -227,6 +229,36 @@ describe('resubmit state never repeats a rewind and reconciles an uncertain one'
     expect(record().state).toBe('idle');
     expect(toasts()).toEqual(['The conversation was rewound; your edited text is in the editor']);
     await settle();
+  });
+
+  it('an edit restored after a reload: target_not_found means the earlier rewind applied, so edit mode ends and says so; a fresh edit keeps it', async () => {
+    restoreEditMode(A, { messageUuid: u('u-1'), seenCursor: u('u-2') });
+    expect(record().state).toBe('idle');
+    askToRewind(A);
+    const outcome = confirmRewind(client, A, null);
+    rewinds[0].answer(refused('target_not_found'));
+    expect(await outcome).toBe('refused');
+    expect(editingOf(useComposerStore.getState(), A)).toBeNull();
+    expect(toasts()).toEqual(['The conversation was rewound; your edited text is in the editor']);
+
+    useNotices.setState({ notices: [] });
+    const fresh = confirmed().outcome; // a new edit is not a restored one
+    rewinds[1].answer(refused('target_not_found'));
+    await fresh;
+    expect(editingOf(useComposerStore.getState(), A)).not.toBeNull();
+    expect(toasts()).toEqual([expect.stringContaining('target_not_found')]);
+  });
+
+  it('a restored edit whose message the hydrated transcript no longer holds ends at once; one it holds stays', () => {
+    restoreEditMode(A, { messageUuid: u('u-1'), seenCursor: u('u-1') });
+    settleRestoredEdit(A, true);
+    expect(editingOf(useComposerStore.getState(), A)).not.toBeNull();
+    settleRestoredEdit(A, false);
+    expect(editingOf(useComposerStore.getState(), A)).toBeNull();
+    expect(toasts()).toEqual(['The conversation was rewound; your edited text is in the editor']);
+    enterEditMode(A, { messageUuid: u('u-1'), seenCursor: u('u-1') });
+    settleRestoredEdit(A, false); // not restored: the transcript is not consulted
+    expect(editingOf(useComposerStore.getState(), A)).not.toBeNull();
   });
 
   it('a provider is null until one registers; its disposer removes only itself', () => {

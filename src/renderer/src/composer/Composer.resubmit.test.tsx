@@ -292,6 +292,73 @@ describe('edit-and-resubmit in the composer', () => {
     expect(editingOf(useComposerStore.getState(), A)).toEqual({ messageUuid: 'u-2', seenCursor: 'u-2' });
   });
 
+  it('keeps edit mode in the draft: entering it writes the edit into the draft document, leaving it writes it out', async () => {
+    mount();
+    await editFirst();
+    const drafted = () => fake.invoked('session.drafts.set').at(-1) as { draft: { doc: { attrs: Record<string, unknown> } } | null } | undefined;
+    await waitFor(() => expect(drafted()?.draft?.doc.attrs.editing).toEqual({ messageUuid: 'u-1', seenCursor: 'u-2' }), { timeout: 2_000 });
+    act(() => editor().focus());
+    await key(editor(), { key: 'Escape' });
+    await waitFor(() => expect(drafted()?.draft?.doc.attrs.editing).toBeNull(), { timeout: 2_000 });
+    expect(drafted()?.draft?.doc).toMatchObject({ content: [{ content: [{ text: 'first prompt' }] }] });
+  });
+
+  describe('after a reload (edit mode restored from the draft)', () => {
+    const editedDraft = { doc: { type: 'doc', attrs: { attachments: [], editing: { messageUuid: 'u-1', seenCursor: 'u-2' } }, content: [{ type: 'paragraph', content: [{ type: 'text', text: 'first prompt, edited' }] }] }, attachments: [], updatedAt: '2026-09-29T12:00:00.000Z' };
+    beforeEach(() => {
+      fake = fakeClient({
+        'session.queue.list': { entries: [], paused: false, pauseReason: null },
+        'session.history.list': { entries: [] },
+        'session.drafts.get': editedDraft,
+        'session.drafts.set': undefined,
+        'session.history.append': undefined,
+        'session.events': () => ({ events: sessionEvents, lastSeq: sessionEvents.length, complete: true }),
+      });
+      window.maws = fake.client;
+    });
+    // The store as a reload leaves it: nothing in memory, the transcript hydrating again from its source.
+    async function reloaded() {
+      resetComposerStore();
+      for (const key of Object.keys(useTranscriptStore.getState().entries)) useTranscriptStore.getState().drop(key);
+      mount();
+      await act(() => useTranscriptStore.getState().attach(A, ipcSource(A)));
+    }
+
+    it('restores edit mode at idle when the edited message is still in the transcript, and Send confirms against it', async () => {
+      await reloaded();
+      await waitFor(() => expect(editor().editor.getText()).toBe('first prompt, edited'));
+      await waitFor(() => expect(line()?.textContent).toContain('Editing an earlier message'));
+      expect(editingOf(useComposerStore.getState(), A)).toEqual({ messageUuid: 'u-1', seenCursor: 'u-2' });
+      expect(resubmitOf(useComposerStore.getState(), A)).toBe('idle');
+      await confirmRewind();
+      expect(fake.invoked('session.rewind')).toEqual([{ appSessionId: A, targetMessageUuid: 'u-1', lastSeenMessageUuid: 'u-2', files: false }]);
+    });
+
+    it('leaves edit mode, text kept, when the transcript shows the rewind already applied', async () => {
+      const b = transcriptOf();
+      b.emit('boundary.rewind', { targetMessageUuid: u('u-1'), precedingAssistantUuid: null, prefillText: 'first prompt' });
+      sessionEvents = b.events;
+      await reloaded();
+      await waitFor(() => expect(toasts()).toEqual(['The conversation was rewound; your edited text is in the editor']));
+      expect(line()).toBeNull();
+      expect(editingOf(useComposerStore.getState(), A)).toBeNull();
+      expect(editor().editor.getText()).toBe('first prompt, edited');
+      expect(fake.invoked('session.rewind')).toEqual([]);
+    });
+
+    it('a target_not_found refusal after the reload leaves edit mode with the same copy, text kept', async () => {
+      await reloaded();
+      await waitFor(() => expect(line()?.textContent).toContain('Editing an earlier message'));
+      await confirmRewind();
+      await fake.reply('session.rewind', { rewound: false, reason: 'target_not_found', error: 'target not found', prefillText: null, precedingAssistantUuid: null, files: null });
+      await waitFor(() => expect(line()).toBeNull());
+      expect(toasts()).toEqual(['The conversation was rewound; your edited text is in the editor']);
+      expect(editingOf(useComposerStore.getState(), A)).toBeNull();
+      expect(editor().editor.getText()).toBe('first prompt, edited');
+      expect(fake.invoked('session.send')).toEqual([]);
+    });
+  });
+
   it('a prefill with no edit leaves edit mode (C10 handing back a first message)', async () => {
     mount();
     await editFirst();

@@ -1,5 +1,5 @@
 // The composer document's schema (C7 execution document, "Document model and serialisation"): Document with its
-// `attachments` attribute, Paragraph, Text, HardBreak, the mention node (Tiptap's, with a `kind`) and the pasted atom.
+// `attachments` attribute (and M4b's `editing`, the edit mode a draft carries across a reload), Paragraph, Text, HardBreak, the mention node (Tiptap's, with a `kind`) and the pasted atom.
 // No marks, no headings, no lists: the model reads markdown from the text. These are the extensions every editor of the
 // composer shares, the headless ones in tests included; `extensions.ts` adds the interactive behaviour on top.
 import { mergeAttributes, Node, type AnyExtension } from '@tiptap/core';
@@ -13,7 +13,7 @@ import { PASTED, type PastedAttrs } from './doc';
 
 export const ComposerDocument = Document.extend({
   addAttributes() {
-    return { attachments: { default: [], rendered: false } };
+    return { attachments: { default: [], rendered: false }, editing: { default: null, rendered: false } };
   },
 });
 

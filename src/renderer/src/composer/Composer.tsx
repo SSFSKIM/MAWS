@@ -12,7 +12,8 @@
 //
 // Edit mode (M4b): a prefill with `editing` (a bubble's Edit, the refusal dialog's Edit prompt) shows the state line
 // above the frame; Send then forks through C10's provider, or asks to rewind this session and resend, and the state
-// line follows the resubmit (`resubmit-seam.ts`) until the edited text is sent.
+// line follows the resubmit (`resubmit-seam.ts`) until the edited text is sent. The edit rides in the draft document,
+// so a reload restores edit mode, which the session's hydrated transcript then confirms or ends.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
@@ -31,7 +32,7 @@ import { useSessions } from '../stores/sessions';
 import { useTranscriptStore } from '../transcript';
 import { useDockedCards } from './docked/registry';
 import { swapOf } from './docked/swap';
-import { attachmentsOf, emptyDoc, isMultiline, type ComposerDoc } from './editor/doc';
+import { attachmentsOf, editingOfDoc, emptyDoc, isMultiline, type ComposerDoc } from './editor/doc';
 import { ipcDrafts, type DraftPort, type EditorHandle, type SubmitHow } from './editor/controller';
 import { Editor } from './editor/Editor';
 import { serializeDraft, type Serialized } from './editor/serialize';
@@ -42,7 +43,21 @@ import { endedBindings, intentBindings, liveBindings, workspaceDirectoriesOf, ty
 import { Frame } from './frame/Frame';
 import { useGitWatch } from './frame/git-watch';
 import { QueueList } from './queue/QueueList';
-import { askToRewind, cancelRewind, confirmRewind, enterEditMode, keepEditing, leaveEditMode, resubmitProvider, resubmitSendFailed, resubmitSent, rewindAgain, takeAutoSend } from './resubmit-seam';
+import {
+  askToRewind,
+  cancelRewind,
+  confirmRewind,
+  enterEditMode,
+  keepEditing,
+  leaveEditMode,
+  restoreEditMode,
+  resubmitProvider,
+  resubmitSendFailed,
+  resubmitSent,
+  rewindAgain,
+  settleRestoredEdit,
+  takeAutoSend,
+} from './resubmit-seam';
 import { locationPath, useSetupIntent, type SetupIntentHook } from './setup-intent';
 import { steerPriority, submitState, type SubmitDecision } from './submit/submit-state';
 import { SubmitControl } from './submit/SubmitControl';
@@ -153,6 +168,14 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
   const editing = useComposerStore((s) => editingOf(s, appSessionId));
   const resubmit = useComposerStore((s) => resubmitRecordOf(s, appSessionId));
   const newest = useTranscriptStore((s) => newestUserUuid(s.entries[appSessionId]?.rows ?? []));
+  const restored = useComposerStore((s) => s.restoredEdits.has(appSessionId));
+  // Whether the hydrated transcript still holds the edited message; null until it can tell (not attached, hydrating, or
+  // empty: a transcript the source could not fill says nothing about a rewind, whose own boundary row would be there).
+  const targetHeld = useTranscriptStore((s) => {
+    const entry = s.entries[appSessionId];
+    if (!editing || entry?.phase !== 'live' || entry.rows.length === 0) return null;
+    return entry.rows.some((r) => r.kind === 'user' && r.messageUuid === editing.messageUuid);
+  });
   const bypassRewind = useRef(false); // Send without rewinding: the next submission sends as it stands
 
   // ---- what the frame binds to ------------------------------------------------------------------------------------
@@ -313,6 +336,13 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
     handle.current?.submit(shown.primary === 'steer' ? 'steer' : 'send');
   };
 
+  // The edit mode into the document, so the draft carries it across a reload.
+  useEffect(() => handle.current?.setEditing(editing), [editing]);
+  // An edit restored after a reload, against the hydrated transcript: its message gone means it was rewound meanwhile.
+  useEffect(() => {
+    if (restored && targetHeld !== null) settleRestoredEdit(appSessionId, targetHeld);
+  }, [appSessionId, restored, targetHeld]);
+
   // Rewound by the human's own confirm: the edited text goes as part of that decision (once the editor is editable again).
   useEffect(() => {
     if (resubmit.state === 'rewound_awaiting_send' && resubmit.autoSend && takeAutoSend(appSessionId)) handle.current?.submit('send');
@@ -372,6 +402,10 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
               client={client}
               onDocChange={setDoc}
               onPrefill={(prefill) => enterEditMode(appSessionId, prefill.editing)}
+              onRestore={(restoredDoc) => {
+                const carried = editingOfDoc(restoredDoc);
+                if (carried && !unstarted && editingOf(useComposerStore.getState(), appSessionId) === null) restoreEditMode(appSessionId, carried);
+              }}
               onEscape={() => editingOf(useComposerStore.getState(), appSessionId) !== null && leaveEditMode(appSessionId)}
               onSubmit={onSubmit}
             />

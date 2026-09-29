@@ -60,9 +60,10 @@ export interface ComposerState {
   starting: ReadonlySet<AppSessionId>; // M4: an unstarted session's first send is with C10's `start`
   editing: ReadonlyMap<AppSessionId, Editing>; // M4: edit mode, entered by a prefill with `editing`
   resubmit: ReadonlyMap<AppSessionId, Resubmit>; // M4b: absent is IDLE_RESUBMIT
+  restoredEdits: ReadonlySet<AppSessionId>; // M4b: edit modes restored from a draft (a reload), until the edit ends
 }
 
-const initial = (): ComposerState => ({ prefills: new Map(), docked: new Map(), focusTargets: new Map(), memoryTargets: new Map(), starting: new Set(), editing: new Map(), resubmit: new Map() });
+const initial = (): ComposerState => ({ prefills: new Map(), docked: new Map(), focusTargets: new Map(), memoryTargets: new Map(), starting: new Set(), editing: new Map(), resubmit: new Map(), restoredEdits: new Set() });
 
 export const useComposerStore = create<ComposerState>()(initial);
 

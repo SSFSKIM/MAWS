@@ -41,6 +41,7 @@ export interface EditorProps {
   onPrefill?(prefill: Prefill): void; // a prefill the editor took (the Composer keeps its `editing`)
   onDocChange?(doc: ComposerDoc): void;
   onEscape?(): boolean;
+  onRestore?(doc: ComposerDoc): void; // a stored draft was restored
   handle?: Ref<EditorHandle>;
   client?: MawsBridge;
 }
@@ -79,6 +80,7 @@ export function Editor(props: EditorProps) {
     onPrefill: props.onPrefill,
     onDocChange: props.onDocChange,
     onEscape: props.onEscape,
+    onRestore: props.onRestore,
   };
   const [controller] = useState(() => new EditorController(client, props.drafts ?? ipcDrafts(client, appSessionId), { setMode, setCommandEmpty, setWidget, setBusy }, inputs));
   useLayoutEffect(() => controller.update(inputs));

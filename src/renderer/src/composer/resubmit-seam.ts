@@ -17,6 +17,11 @@
 // any retry is offered; a send that fails after a rewind retries the send alone. Timers and subscriptions live here,
 // per session, not in a component, so the flow outlives a tab switch; the session's event batches are subscribed only
 // while the rewind is uncertain or unresolved.
+//
+// Edit mode also survives a reload: the edit rides in the draft document (`doc.attrs.editing`) and is restored at
+// `idle`. A restored edit whose message the hydrated transcript no longer holds, or whose rewind the engine answers
+// `target_not_found`, was rewound before the reload: edit mode ends and the text stays as the draft. Send after a reload
+// always starts again at `confirming`, a fresh human decision, so no rewind repeats on its own.
 import type { ContentBlock } from '@shared/graph/events';
 import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
@@ -74,6 +79,19 @@ interface Flight {
 }
 const flights = new Map<AppSessionId, Flight>();
 
+export const REWOUND_COPY = 'The conversation was rewound; your edited text is in the editor';
+
+function markRestored(appSessionId: AppSessionId, restored: boolean): void {
+  if (useComposerStore.getState().restoredEdits.has(appSessionId) === restored) return;
+  useComposerStore.setState((s) => {
+    const restoredEdits = new Set(s.restoredEdits);
+    if (restored) restoredEdits.add(appSessionId);
+    else restoredEdits.delete(appSessionId);
+    return { restoredEdits };
+  });
+}
+const isRestored = (appSessionId: AppSessionId): boolean => useComposerStore.getState().restoredEdits.has(appSessionId);
+
 // Ends whatever the session's flow was waiting on (its timer, its subscriptions, an answer still in flight).
 function dispose(appSessionId: AppSessionId): Flight {
   const flight = flights.get(appSessionId) ?? { generation: 0, offs: [] };
@@ -99,8 +117,32 @@ function rewound(appSessionId: AppSessionId, autoSend: boolean): void {
 // A prefill the composer took: edit mode for its message (or none), whatever the last edit was doing forgotten.
 export function enterEditMode(appSessionId: AppSessionId, editing: Editing | null): void {
   dispose(appSessionId);
+  markRestored(appSessionId, false);
   setEditing(appSessionId, editing);
   setResubmit(appSessionId, 'idle');
+}
+
+// A draft that carried an edit, restored after a reload: edit mode again, at `idle` (whatever was in flight is the
+// transcript's to tell).
+export function restoreEditMode(appSessionId: AppSessionId, editing: Editing): void {
+  enterEditMode(appSessionId, editing);
+  markRestored(appSessionId, true);
+}
+
+// The rewind applied before the reload: edit mode ends, the edited text stays in the editor as the draft.
+function leaveRewound(appSessionId: AppSessionId): void {
+  dispose(appSessionId);
+  markRestored(appSessionId, false);
+  setEditing(appSessionId, null);
+  setResubmit(appSessionId, 'idle');
+  toast({ level: 'info', text: REWOUND_COPY, actions: [], dismissible: true });
+}
+
+// A restored edit against the hydrated transcript: gone from its rows means rewound. Only an idle restored edit is
+// settled here; once the human has sent, the engine's answer decides.
+export function settleRestoredEdit(appSessionId: AppSessionId, messageHeld: boolean): void {
+  if (!isRestored(appSessionId) || messageHeld || record(appSessionId).state !== 'idle' || !editingOf(useComposerStore.getState(), appSessionId)) return;
+  leaveRewound(appSessionId);
 }
 
 // Esc or the state line's ×. Refused while the rewind is in flight or unconfirmed (the editor is read-only then).
@@ -108,9 +150,10 @@ export function leaveEditMode(appSessionId: AppSessionId): boolean {
   const { state } = record(appSessionId);
   if (state === 'rewinding' || state === 'rewind_uncertain') return false;
   dispose(appSessionId);
+  markRestored(appSessionId, false);
   setEditing(appSessionId, null);
   setResubmit(appSessionId, 'idle');
-  if (state === 'rewound_awaiting_send') toast({ level: 'info', text: 'The conversation was rewound; your edited text is in the editor', actions: [], dismissible: true });
+  if (state === 'rewound_awaiting_send') toast({ level: 'info', text: REWOUND_COPY, actions: [], dismissible: true });
   return true;
 }
 
@@ -147,6 +190,7 @@ export function keepEditing(appSessionId: AppSessionId): void {
 // The edited text was sent (after a rewind, or without one by the human's choice): edit mode ends.
 export function resubmitSent(appSessionId: AppSessionId): void {
   dispose(appSessionId);
+  markRestored(appSessionId, false);
   setEditing(appSessionId, null);
   setResubmit(appSessionId, 'idle');
 }
@@ -186,6 +230,10 @@ async function issueRewind(client: MawsBridge, appSessionId: AppSessionId): Prom
   if (result.ok && result.value.rewound) {
     rewound(appSessionId, true);
     return 'rewound';
+  }
+  if (result.ok && result.value.reason === 'target_not_found' && isRestored(appSessionId)) {
+    leaveRewound(appSessionId); // the target left the conversation: the rewind made before the reload applied
+    return 'refused';
   }
   if (result.ok) {
     dispose(appSessionId);

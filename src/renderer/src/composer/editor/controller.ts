@@ -11,13 +11,13 @@ import type { MawsBridge } from '@shared/ipc/schema';
 import type { PickedFile } from '@shared/ipc/schema/layout';
 import type { Draft } from '@shared/ipc/schema/session';
 import { EMPTY_CATALOG, type SessionCatalog } from '../../stores/catalog';
-import { memoryTargetOf, takePrefill, useComposerStore, type Prefill } from '../../stores/composer';
+import { memoryTargetOf, takePrefill, useComposerStore, type Editing, type Prefill } from '../../stores/composer';
 import { toast } from '../../stores/notices';
 import { useTranscriptStore } from '../../transcript';
 import { popupTakesKeys } from '../mentions/popup';
 import { slashWidget } from '../mentions/widgets';
 import { downscaleImage, fileBase64, imageRefusal, markPersisted } from './attachments';
-import { atomId, attachmentsOf, emptyDoc, isMultiline, mentionNode, pastedNode, textNode, type Attachment, type ComposerDoc } from './doc';
+import { atomId, attachmentsOf, editingOfDoc, emptyDoc, isMultiline, mentionNode, pastedNode, textNode, type Attachment, type ComposerDoc } from './doc';
 import { createDraftWriter, docOfDraft, isEmptyDoc, type DraftWriter } from './drafts';
 import type { EditorEnv } from './env';
 import { suggesting } from './extensions';
@@ -52,6 +52,7 @@ export interface EditorHandle {
   openSlash(): void; // the "+" menu's Slash commands: the palette at `/`
   openMention(): void; // the toolbar's `@`: the `@` menu at the caret (after a space, the terminal's trigger rule)
   openWidget(name: string): boolean; // whether a widget is registered for the name
+  setEditing(editing: Editing | null): void; // M4b: the edit mode the document (and so the draft) carries
 }
 
 // What the controller reads from the component, refreshed after every render.
@@ -68,6 +69,7 @@ export interface ControllerInputs {
   onPrefill?(prefill: Prefill): void;
   onDocChange?(doc: ComposerDoc): void;
   onEscape?(): boolean;
+  onRestore?(doc: ComposerDoc): void; // a draft was restored into the editor (M4b: it may carry an edit mode)
 }
 
 // The component's state the controller sets.
@@ -105,6 +107,7 @@ export class EditorController {
   private readonly writer: DraftWriter;
   private silent = false;
   private busy = false;
+  private loaded = false; // the stored draft has been read (a change before then must not write over it)
   private nav: HistoryNav = { index: null, draft: null };
   private recalls: Recall[] = [];
   private listed: HistoryEntry[] = [];
@@ -182,7 +185,11 @@ export class EditorController {
     let live = true;
     void this.drafts.load().then((draft) => {
       const doc = docOfDraft(draft);
-      if (live && doc && this.editor && isEmptyDoc(this.editor.getJSON())) this.setDoc(doc, { silently: true, caret: null });
+      if (live && doc && this.editor && isEmptyDoc(this.editor.getJSON())) {
+        this.setDoc(doc, { silently: true, caret: null });
+        this.inputs.onRestore?.(doc);
+      }
+      this.loaded = true;
     });
     void this.refreshHistory();
     return () => {
@@ -244,8 +251,8 @@ export class EditorController {
     this.silent = options.silently;
     try {
       editor.commands.setContent(doc, { emitUpdate: true });
-      // `setContent` replaces the content and keeps the document node's own attributes: the strip goes with it here
-      editor.view.dispatch(editor.state.tr.setDocAttribute('attachments', attachmentsOf(doc)));
+      // `setContent` replaces the content and keeps the document node's own attributes: the strip and the edit go with it here
+      editor.view.dispatch(editor.state.tr.setDocAttribute('attachments', attachmentsOf(doc)).setDocAttribute('editing', editingOfDoc(doc)));
     } finally {
       this.silent = false;
     }
@@ -335,6 +342,21 @@ export class EditorController {
     }
   }
 
+  // The edit mode into the document, written into the draft as any change is; before the draft has been read, or while
+  // a submission is in flight (whose answer replaces the document), it changes the document without a write.
+  private setEditing(editing: Editing | null): void {
+    const editor = this.editor;
+    if (!editor || this.busy) return;
+    const current = editingOfDoc(editor.getJSON());
+    if (current?.messageUuid === editing?.messageUuid && current?.seenCursor === editing?.seenCursor) return;
+    this.silent = !this.loaded;
+    try {
+      editor.view.dispatch(editor.state.tr.setDocAttribute('editing', editing));
+    } finally {
+      this.silent = false;
+    }
+  }
+
   handle(): EditorHandle {
     const editor = () => this.editor!;
     return {
@@ -371,6 +393,7 @@ export class EditorController {
         this.view.setWidget({ name, args: '' });
         return true;
       },
+      setEditing: (editing) => this.setEditing(editing),
     };
   }
 }
