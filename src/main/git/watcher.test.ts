@@ -278,7 +278,7 @@ describe('the repository watcher debounces, coalesces and backs off', () => {
   it('keeps facts for at most INNER_CAP files beneath untracked directories, and a touched file beyond them counts as a change', async () => {
     const fake = fakeWatch();
     const current = status({ dirty: true, files: [{ path: 'node_modules/', oldPath: null, index: '?', worktree: '?', untracked: true }] });
-    const statFile = vi.fn(async (_path: string) => ({ size: 1, mtimeMs: 1 }));
+    const statFile = vi.fn<(path: string) => Promise<{ size: number; mtimeMs: number }>>(async () => ({ size: 1, mtimeMs: 1 }));
     const emitted: GitChanged[] = [];
     const watcher = new GitWatcher({ status: async () => current, emit: (e) => emitted.push(e), watch: fake.watch, statFile });
     await watcher.watch(ROOT);
