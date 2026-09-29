@@ -64,6 +64,9 @@ vi.mock('./window-state', () => ({ restoreWindowState: vi.fn(() => null), trackW
 vi.mock('./attention', () => ({ startAttention: vi.fn() }));
 vi.mock('./lifecycle/quit-guard', () => ({ installQuitGuard: vi.fn(), askToQuit: vi.fn() }));
 // C5 end
+// C11 start: the engine host's binary configuration follows the settings, which this test replaces
+vi.mock('./settings/engine-configure', () => ({ startEngineConfigure: () => () => {} }));
+// C11 end
 
 beforeAll(async () => {
   await import('./index');
