@@ -359,6 +359,11 @@ export class EngineSession {
 
   private async run(): Promise<void> {
     await this.loadState();
+    // The launch's first status (`starting`) goes out before its first row (a resume's `reconnect`, the spawn row, a
+    // spawn failure's exit), so a consumer folding events only under a live status never sees a launch's events
+    // against no status or the previous launch's `exited` (C5's second re-check). Emitted after the state load's await,
+    // where the first status went before, so the launch command's answer still goes out ahead of it.
+    this.touch();
     if (this.stopReason !== null || this.processState === 'exited') {
       this.handleExit({ code: null, signal: null }); // stopped while the state loaded: never spawn (idempotent)
       return;

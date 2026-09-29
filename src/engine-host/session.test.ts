@@ -475,6 +475,34 @@ describe('EngineSession: inbound requests, host hooks and exit', () => {
   });
 });
 
+describe('every event of a launch follows a live status (C5\'s second re-check)', () => {
+  // status and events in the order the session emitted them, as one timeline
+  function timeline(session: EngineSession) {
+    const seen: string[] = [];
+    session.on('status', (status) => seen.push(`status:${status.process}`));
+    session.on('events', (batch) => seen.push(...batch.map((e) => (e.kind === 'session.reconnect' ? `event:reconnect/${e.phase}` : `event:${e.kind}`))));
+    return seen;
+  }
+
+  it('a resume\'s reconnect attempting row is preceded by a starting status', async () => {
+    const { session } = setup({ spec: { resume: { sessionId: '44444444-4444-4444-8444-444444444444' as LaunchSpec['sessionId'] & string, fork: false }, sessionId: null } });
+    const seen = timeline(session);
+    await session.start();
+    expect(seen[0]).toBe('status:starting');
+    expect(seen.indexOf('event:reconnect/attempting')).toBeGreaterThan(0);
+    expect(seen.slice(0, seen.indexOf('event:reconnect/attempting')).every((s) => s === 'status:starting')).toBe(true);
+    const processes = seen.filter((s, i) => s.startsWith('status:') && s !== seen.slice(0, i).findLast((p) => p.startsWith('status:')));
+    expect(processes).toEqual(['status:starting', 'status:initializing', 'status:ready']);
+  });
+
+  it('a synchronous spawn failure yields starting then exited, the spawn error between them', async () => {
+    const { session } = setup({ session: { spawn: () => { throw new Error('ENOENT: no such binary'); } } });
+    const seen = timeline(session);
+    await session.start();
+    expect(seen).toEqual(['status:starting', 'event:error.raised', 'event:error.raised', 'event:process.exited', 'status:exited']);
+  });
+});
+
 describe('a stop before the process is spawned (whole-branch review)', () => {
   // the launch is reserved and `run()` is awaiting the stored grants when the stop arrives
   function gatedStart() {

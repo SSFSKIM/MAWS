@@ -63,6 +63,28 @@ describe('replay transport plays a fixture and advances on the adapter\'s writes
     expect(frameOf(items[2]!)).toMatchObject({ user_message_uuids: ['MINT-U'], user_message_uuid: 'MINT-U' });
   });
 
+  it('matches a recorded control_cancel_request for a host-minted request by the id this run minted for it, and still refuses a cancel of another id', async () => {
+    // a journal the host wrote under launch AAAAAAAA, replayed under launch BBBBBBBB
+    const journal = [
+      row(1, 'out', { type: 'control_request', request_id: 'AAAAAAAA-3', request: { subtype: 'get_usage' } }),
+      row(2, 'out', { type: 'control_cancel_request', request_id: 'AAAAAAAA-3' }),
+      row(3, 'meta', { event: 'exit', code: 0, signal: null }),
+    ];
+    const transport = replayEngine(journal, { prelude });
+    const request = transport.write({ type: 'control_request', request_id: 'BBBBBBBB-3', request: { subtype: 'get_usage' } });
+    const cancel = transport.write({ type: 'control_cancel_request', request_id: 'BBBBBBBB-3' } as StdinFrame);
+    expect(await take(transport.frames, 1)).toEqual([]); // no replay_mismatch: both writes matched, then the exit
+    await expect(Promise.all([request, cancel])).resolves.toBeDefined();
+    await expect(transport.exited).resolves.toEqual({ code: 0, signal: null });
+
+    const other = replayEngine(journal, { prelude });
+    void other.write({ type: 'control_request', request_id: 'BBBBBBBB-3', request: { subtype: 'get_usage' } });
+    const wrong = other.write({ type: 'control_cancel_request', request_id: 'BBBBBBBB-4' } as StdinFrame);
+    const [item] = await take(other.frames, 1);
+    expect(item!.error).toMatchObject({ kind: 'replay_mismatch' });
+    await expect(wrong).rejects.toThrow('replay mismatch');
+  });
+
   it('answers initialize and get_status from the prelude when the fixture\'s next out row is not that request', async () => {
     const journal = [
       row(1, 'out', { type: 'user', uuid: 'u', message: { role: 'user', content: 'hi' }, parent_tool_use_id: null }),

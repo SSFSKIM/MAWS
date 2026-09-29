@@ -6,6 +6,7 @@
 import type { ContentBlock, EventBase, SessionEvent } from '@shared/graph/events';
 import type { AgentId, ApiMessageId, EventId, MessageUuid, ParentToolUseId, SessionId, TaskId, ToolUseId } from '@shared/graph/ids';
 import type { AgentMeta, TranscriptRecord } from '@shared/wire/transcript';
+import { INTERRUPT_MARKER } from '../normalizer-support';
 
 // The three engine strings that name a spilled result (SPEC 12.12 and 20.10); the structured field wins when present.
 export const SPILL_MARKER = /(?:Full output saved to|were saved to|was saved to):? (\/\S+?\.(?:txt|json))\b/;
@@ -303,10 +304,9 @@ export function startsTurn(record: TranscriptRecord): boolean {
 }
 
 // The marker the engine writes after an interrupt (`[Request interrupted by user]`, `… for tool use`): C3's
-// `INTERRUPT_MARKER` (normalizer-support.ts), tested on the string content or on the joined text of the record's
-// non-result blocks when all of them are text (the array form is the common one on disk). C3's normaliser tags it
-// `origin: 'interrupt-marker'` on the wire; the backfill does the same, and it opens no turn.
-const INTERRUPT_MARKER = /^\[Request interrupted by user[^\]]*\]$/;
+// `INTERRUPT_MARKER`, tested on the string content or on the joined text of the record's non-result blocks when all of
+// them are text (the array form is the common one on disk). C3's normaliser tags it `origin: 'interrupt-marker'` on the
+// wire; the backfill does the same, and it opens no turn.
 function isInterruptMarker(record: TranscriptRecord): boolean {
   if (record.type !== 'user') return false;
   const content = messageContent(record);

@@ -4,8 +4,8 @@
 // realpath lies under `<configHome>/projects/`, `tasks/` or `jobs/`, or under the engine's task-output root
 // (`<CLAUDE_CODE_TMPDIR or /tmp>/claude-<uid>`, SPEC 20; C8's ask), is read, so the renderer cannot turn the command
 // into a general file reader; a symlink is judged by its target. Reads are bounded. Read-only: flag 'r' only.
-import { open, realpath, type FileHandle } from 'node:fs/promises';
-import { isAbsolute, resolve, sep } from 'node:path';
+import { lstat, open, realpath, type FileHandle } from 'node:fs/promises';
+import { basename, dirname, isAbsolute, join, normalize, resolve, sep } from 'node:path';
 import type { FsReadSpillInput, FsReadSpillOutput } from '@shared/ipc/schema/fs';
 import type { StorePaths } from './paths';
 import { isMissing } from './sidecars';
@@ -14,16 +14,21 @@ export const SPILL_DEFAULT_LENGTH = 1024 * 1024;
 const OUTSIDE = 'path outside the engine store';
 
 export async function readSpill(paths: StorePaths, { path, offset = 0, length = SPILL_DEFAULT_LENGTH }: FsReadSpillInput): Promise<FsReadSpillOutput> {
-  if (!isAbsolute(path)) throw new Error(OUTSIDE);
+  // The engine reports spill paths clean and absolute; anything else is refused before the disk is touched, since the
+  // kernel resolves `/X/..` only when `/X` exists, so a `..` segment would reveal whether an outside name exists.
+  if (!isAbsolute(path) || normalize(path) !== path) throw new Error(OUTSIDE);
   const lexicalRoots = [paths.projects, paths.tasks, paths.jobs, paths.taskOutput].map((root) => resolve(root));
   const roots = [...lexicalRoots, ...(await Promise.all(lexicalRoots.map((root) => realpath(root).catch(() => null)))).filter((root) => root !== null)];
   let real: string;
   try {
     real = await realpath(path);
   } catch (error) {
-    // A path that does not exist is refused as outside unless it would lie inside, so the command says nothing about
-    // what exists elsewhere on disk.
-    if (isMissing(error)) throw new Error(within(resolve(path), roots) ? `spill not found: ${path}` : OUTSIDE, { cause: error });
+    // Any path that does not resolve is refused as outside unless it would lie inside, so the command says nothing about
+    // what exists elsewhere on disk, whatever the error. "Inside" is judged by the realpath of the deepest existing
+    // ancestor (C8c's `files.*` rule), walked on the path as given so the kernel resolves every link and `..`; an
+    // in-store symlink to an outside directory cannot be used to test outside names.
+    if (!(await missingWithin(path, roots))) throw new Error(OUTSIDE, { cause: error });
+    if (isMissing(error)) throw new Error(`spill not found: ${path}`, { cause: error });
     throw error;
   }
   if (!within(real, roots)) throw new Error(OUTSIDE);
@@ -69,6 +74,33 @@ function utf8Cut(page: Buffer): { end: number; missing: number } {
   const size = lead < 0x80 ? 1 : (lead & 0xe0) === 0xc0 ? 2 : (lead & 0xf0) === 0xe0 ? 3 : (lead & 0xf8) === 0xf0 ? 4 : 0;
   if (size === 0 || start + size <= page.length) return whole; // complete, or not a sequence at all
   return { end: start, missing: start + size - page.length };
+}
+
+// Whether an absolute path that does not resolve would lie under a root once its deepest existing ancestor is resolved.
+// Not inside: a component that exists without resolving (a dangling symlink could point anywhere), a missing part that
+// holds `.` or `..` (the kernel would not resolve it either), or an ancestor that fails with anything but ENOENT or
+// ENOTDIR (EACCES, ELOOP: what failed may lie outside).
+async function missingWithin(path: string, roots: readonly string[]): Promise<boolean> {
+  let ancestor = path;
+  const tail: string[] = [];
+  for (;;) {
+    const parent = dirname(ancestor);
+    if (parent === ancestor) return false;
+    tail.unshift(basename(ancestor));
+    ancestor = parent;
+    const real = await realpath(ancestor).then(
+      (resolved) => resolved,
+      (error: unknown) => (isMissing(error) || (error as NodeJS.ErrnoException).code === 'ENOTDIR' ? null : false),
+    );
+    if (real === false) return false;
+    if (real === null) continue;
+    if (tail.some((part) => part === '.' || part === '..')) return false;
+    const dangling = await lstat(join(ancestor, tail[0])).then(
+      () => true,
+      () => false,
+    );
+    return !dangling && within(join(real, ...tail), roots);
+  }
 }
 
 function within(path: string, roots: readonly string[]): boolean {

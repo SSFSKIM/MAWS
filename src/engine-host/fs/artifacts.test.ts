@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -104,9 +104,55 @@ describe('fs.readSpill reads engine artifacts by the path the engine reported', 
     await expect(readSpill(fixture.paths, { path: link })).rejects.toThrow(OUTSIDE);
   });
 
+  it('does not answer "not found" through an in-store symlink to an outside directory, so outside names cannot be probed', async () => {
+    const outsideDir = join(fixture.configHome, '..', 'outside-dir');
+    await mkdir(outsideDir, { recursive: true });
+    await writeFile(join(outsideDir, 'present.txt'), 'x');
+    const link = join(dirname(spill), 'portal');
+    await symlink(outsideDir, link);
+    // Present and absent outside names get the same refusal.
+    await expect(readSpill(fixture.paths, { path: join(link, 'present.txt') })).rejects.toThrow(OUTSIDE);
+    await expect(readSpill(fixture.paths, { path: join(link, 'absent.txt') })).rejects.toThrow(OUTSIDE);
+    await expect(readSpill(fixture.paths, { path: join(link, 'absent', 'deeper.txt') })).rejects.toThrow(OUTSIDE);
+    // A dangling in-store symlink could point anywhere: refused, not "not found".
+    const dangling = join(dirname(spill), 'dangling.txt');
+    await symlink(join(outsideDir, 'absent.txt'), dangling);
+    await expect(readSpill(fixture.paths, { path: dangling })).rejects.toThrow(OUTSIDE);
+    // `..` after the link is resolved by the kernel beside the link's target, not collapsed lexically back into the
+    // store: present and absent names beside the target get the same refusal (raw strings, since join() normalises).
+    await writeFile(join(outsideDir, '..', 'secret.txt'), 'x');
+    await expect(readSpill(fixture.paths, { path: `${link}/../secret.txt` })).rejects.toThrow(OUTSIDE);
+    await expect(readSpill(fixture.paths, { path: `${link}/../nosuch.txt` })).rejects.toThrow(OUTSIDE);
+    // A path through an outside regular file (ENOTDIR) answers as a path through an outside name that is missing.
+    await expect(readSpill(fixture.paths, { path: join(link, 'present.txt', 'x') })).rejects.toThrow(new RegExp(`^${OUTSIDE}$`));
+    await expect(readSpill(fixture.paths, { path: join(link, 'absent.txt', 'x') })).rejects.toThrow(new RegExp(`^${OUTSIDE}$`));
+    // An unreadable outside directory (EACCES) answers the same too.
+    const locked = join(outsideDir, 'locked');
+    await mkdir(join(locked, 'inner'), { recursive: true });
+    await chmod(locked, 0o000);
+    try {
+      await expect(readSpill(fixture.paths, { path: join(link, 'locked', 'inner', 'x.txt') })).rejects.toThrow(new RegExp(`^${OUTSIDE}$`));
+    } finally {
+      await chmod(locked, 0o755);
+    }
+    // A `..` segment is refused before the disk is touched: `/X/..` resolves only when `/X` exists, so an existing and a
+    // missing outside X must answer alike, for a present spill and a missing one.
+    const beside = dirname(outsideDir); // the store's config home and both X's lie in it
+    expect(spill.startsWith(beside)).toBe(true);
+    for (const x of [outsideDir, join(beside, 'no-such-dir')]) {
+      await expect(readSpill(fixture.paths, { path: `${x}/..${spill.slice(beside.length)}` })).rejects.toThrow(new RegExp(`^${OUTSIDE}$`));
+      await expect(readSpill(fixture.paths, { path: `${x}/..${join(dirname(spill), 'nosuch.txt').slice(beside.length)}` })).rejects.toThrow(new RegExp(`^${OUTSIDE}$`));
+    }
+    await expect(readSpill(fixture.paths, { path: `${dirname(spill)}/./gone.txt` })).rejects.toThrow(new RegExp(`^${OUTSIDE}$`));
+    // A missing name under a missing in-store directory is still "not found".
+    const deep = join(dirname(spill), 'missing-dir', 'gone.txt');
+    await expect(readSpill(fixture.paths, { path: deep })).rejects.toThrow(`spill not found: ${deep}`);
+  });
+
   it('reports a spill that is gone by its path', async () => {
     const missing = join(dirname(spill), 'gone.txt');
     await expect(readSpill(fixture.paths, { path: missing })).rejects.toThrow(`spill not found: ${missing}`);
+    await expect(readSpill(fixture.paths, { path: join(spill, 'x') })).rejects.toMatchObject({ code: 'ENOTDIR' }); // inside: the error as it is
     await mkdir(join(dirname(spill), 'dir.txt'));
     await expect(readSpill(fixture.paths, { path: join(dirname(spill), 'dir.txt') })).rejects.toThrow('not a file');
   });

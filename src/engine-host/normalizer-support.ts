@@ -53,7 +53,7 @@ export function bashPartOf(content: string | ContentBlock[]): BashPart | null {
 // (`pass2/per-task-stop-on` seq 65; `… for tool use` in `per-task-stop-off` seq 71). Null for every other frame.
 export type EngineUserMarker = { origin: 'local-command'; content: string } | { origin: 'interrupt-marker'; content: string | ContentBlock[] };
 const LOCAL_COMMAND_STDOUT = /^<local-command-stdout>([\s\S]*)<\/local-command-stdout>\s*$/;
-const INTERRUPT_MARKER = /^\[Request interrupted by user[^\]]*\]$/;
+export const INTERRUPT_MARKER = /^\[Request interrupted by user[^\]]*\]$/;
 export function engineUserMarkerOf(content: string | ContentBlock[]): EngineUserMarker | null {
   const text = typeof content === 'string' ? content : content.length === 1 && content[0]!.type === 'text' && typeof content[0]!.text === 'string' ? content[0]!.text : null;
   if (text === null) return null;
