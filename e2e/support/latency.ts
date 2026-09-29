@@ -1,6 +1,7 @@
-// An acceptance's latency bound in an end-to-end case (`test/support/latency-budget.ts` says when one is asserted). Call
+// An acceptance's latency bound in an end-to-end case (`test/support/latency-budget.ts` says which ceiling holds). Call
 // `latencyBudgets()` when the test starts, so the load it reads is the machine the case ran on; each bound then records
-// its number as an annotation and is asserted, or, on a loaded machine, annotated as not asserted.
+// its number as an annotation and is asserted, or, on a loaded machine, held to the loose ceiling with the reason
+// annotated and printed, so the list reporter shows it.
 import { expect, test } from '@playwright/test';
 import { budgetVerdict, machineLoad, type MachineLoad } from '../../test/support/latency-budget';
 
@@ -12,8 +13,11 @@ export function latencyBudgets(machine: MachineLoad = machineLoad()): (label: st
   return (label, ms, budget, message) => {
     const info = test.info();
     info.annotations.push({ type: label, description: `${ms} ms` });
-    const verdict = budgetVerdict(label, ms, budget, machine);
-    if (verdict.assert) expect(ms, message).toBeLessThanOrEqual(budget);
-    else info.annotations.push({ type: 'latency bound not asserted', description: verdict.reason });
+    const { ceiling, reason } = budgetVerdict(label, ms, budget, machine);
+    if (reason !== null) {
+      info.annotations.push({ type: 'latency bound loosened under load', description: reason });
+      console.log(`[latency] ${reason}`);
+    }
+    expect(ms, message).toBeLessThanOrEqual(ceiling);
   };
 }
