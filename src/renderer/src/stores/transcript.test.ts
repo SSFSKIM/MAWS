@@ -250,6 +250,53 @@ describe('transcript store', () => {
     expect(store.getState().rows(KEY).filter((row) => row.kind === 'user')).toHaveLength(2);
   });
 
+  // Whole-branch review: a key started over keeps showing its old rows for the whole snapshot round trip (a tab switch
+  // back is not an empty transcript), installs the new history once it has applied, and keeps the old rows if the
+  // snapshot fails.
+  it('a restarted key keeps its old rows until the fresh snapshot has applied, and keeps them if it fails', async () => {
+    const store = createTranscriptStore();
+    const first = twoTurns().events;
+    await store.getState().attach(KEY, pushSource(first).source);
+    store.getState().detach(KEY);
+    const old = store.getState().rows(KEY);
+    expect(old.length).toBeGreaterThan(0);
+
+    const renamed = first.map((event) => ({ ...event, id: `disk:${event.id}` as EventId, seq: null }));
+    let resolve: (events: SessionEvent[]) => void = () => {};
+    let listener: ((events: SessionEvent[]) => void) | null = null;
+    const deferred: TranscriptSource = {
+      subscribe(l) {
+        listener = l;
+        return () => (listener = null);
+      },
+      snapshot: () => new Promise((r) => (resolve = r)),
+    };
+    const attached = store.getState().attach(KEY, deferred);
+    expect(store.getState().rows(KEY)).toBe(old);
+    expect(store.getState().entries[KEY].phase).toBe('hydrating');
+    const later = builder('2026-09-28T12:00:00.000Z');
+    later.turn('u9');
+    later.text('m9', 0, 'Arrived while hydrating');
+    later.end(['u9']);
+    const push = listener as ((events: SessionEvent[]) => void) | null;
+    push?.(later.events.map((event) => ({ ...event, id: `late:${event.id}` as EventId }))); // buffered
+    expect(store.getState().rows(KEY)).toBe(old);
+    resolve(renamed);
+    await attached;
+    const entry = store.getState().entries[KEY];
+    expect(entry.phase).toBe('live');
+    expect([...entry.state.seen]).toEqual([...renamed.map((event) => event.id), ...later.events.map((event) => `late:${event.id}`)]);
+    expect(entry.state.order).toHaveLength(3);
+    expect(store.getState().rows(KEY)).not.toBe(old);
+    store.getState().detach(KEY);
+
+    const shown = store.getState().rows(KEY);
+    const failing: TranscriptSource = { subscribe: () => () => {}, snapshot: () => Promise.reject(new Error('session.events failed')) };
+    await store.getState().attach(KEY, failing);
+    expect(store.getState().entries[KEY]).toMatchObject({ phase: 'failed' });
+    expect(store.getState().rows(KEY)).toBe(shown);
+  });
+
   it('drops a duplicate event id in a live batch', async () => {
     const b = twoTurns();
     const store = createTranscriptStore();

@@ -146,6 +146,10 @@ interface Attached {
   attachment: Attachment | null;
   settled: Promise<void>;
   offReset: (() => void) | null;
+  // Set while the key is being started over: each hydration builds a fresh state (with this ui, what the reader had
+  // opened) and installs it only once its snapshot has applied, so the old rows stay on screen until then, and stay if
+  // the snapshot fails (a retry stages afresh).
+  restartUi: TranscriptUi | null;
 }
 
 export function createTranscriptStore() {
@@ -162,20 +166,33 @@ export function createTranscriptStore() {
     // recorded on the key (hydrate.ts has already unsubscribed and cleared its buffer) and `retry` starts over.
     const hydrate = (key: string, attached: Attached): Promise<void> => {
       attached.attachment?.detach();
+      let staged: TranscriptState | null = attached.restartUi === null ? null : { ...createState(null, attached.agentId), ui: attached.restartUi };
+      let stagedAt = 0;
       const attachment = attachSource(attached.source, {
         apply(events) {
+          if (staged !== null) {
+            staged = applyEvents(staged, events);
+            stagedAt = Math.max(stagedAt, ...events.slice(-1).map((event) => Date.parse(event.at)));
+            return;
+          }
           const current = entry(key)!;
           const next = applyEvents(current.state, events);
           const at = Math.max(current.clock?.at ?? 0, ...events.slice(-1).map((event) => Date.parse(event.at)));
           put(key, { state: keepFinishedTurnsOpen(current.state, next, current.following), clock: { at, wall: Date.now() } });
         },
-        has: (id) => entry(key)?.state.seen.has(id) ?? false,
+        has: (id) => (staged !== null ? staged.seen.has(id) : (entry(key)?.state.seen.has(id) ?? false)),
       });
       attached.attachment = attachment;
       const current = () => attachments.get(key) === attached && attached.attachment === attachment;
       attached.settled = attachment.hydrated.then(
         () => {
-          if (current()) put(key, { phase: 'live' });
+          if (!current()) return;
+          if (staged !== null) {
+            const state = staged;
+            staged = null; // later batches apply to the installed state
+            attached.restartUi = null;
+            put(key, { state, phase: 'live', clock: stagedAt > 0 ? { at: stagedAt, wall: Date.now() } : null, jump: null });
+          } else put(key, { phase: 'live' });
         },
         (reason: unknown) => {
           if (!current()) return;
@@ -221,19 +238,17 @@ export function createTranscriptStore() {
         if (!kept) {
           const state = createState(null, options.agentId ?? null);
           set({ entries: { ...get().entries, [key]: { state, rows: rowsOf(state), phase: 'hydrating', error: null, following: true, working: false, clock: null, jump: null } } });
-        } else {
-          // Starting the key over (no holder left): the snapshot is the whole history, and after an exit or a child's
-          // finish nobody observed it may carry the other id form (disk uuids for live ids), which id deduplication
-          // cannot recognise. The reducer state starts over; what the reader opened is kept, keyed by ids that resolve
-          // again when the history is in the same form.
-          const state = { ...createState(null, options.agentId ?? null), ui: kept.state.ui };
-          put(key, { state, phase: 'hydrating', error: null, clock: null, jump: null });
-        }
-        const attached: Attached = { source, agentId: options.agentId ?? null, count: 1, attachment: null, settled: Promise.resolve(), offReset: null };
+        } else put(key, { phase: 'hydrating', error: null });
+        // Starting a kept key over (no holder left): the snapshot is the whole history, and after an exit or a child's
+        // finish nobody observed it may carry the other id form (disk uuids for live ids), which id deduplication
+        // cannot recognise. The reducer state starts over in a staged state installed once the snapshot has applied;
+        // what the reader opened is kept, keyed by ids that resolve again when the history is in the same form.
+        const attached: Attached = { source, agentId: options.agentId ?? null, count: 1, attachment: null, settled: Promise.resolve(), offReset: null, restartUi: kept ? kept.state.ui : null };
         attachments.set(key, attached);
         // A reset (a child source switching from its live stream to its disk transcript): the key starts over.
         attached.offReset = source.onReset?.(() => {
           if (attachments.get(key) !== attached) return;
+          attached.restartUi = null; // an explicit reset empties the key at once
           const state = createState(null, attached.agentId);
           put(key, { state, phase: 'hydrating', error: null, clock: null, jump: null });
           hydrate(key, attached);
