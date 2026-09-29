@@ -1,17 +1,23 @@
 // One X3 row → its component, in the transcript's reading column. The wrapper carries the row's element id (the
 // divider's aria-controls names work-area rows by it), its kind and turn for tests and the harness, and is focusable
-// so a jump can land on it.
+// so a jump can land on it. A row of a rewound branch the reader revealed is muted and marked not in context.
+import { useTranscriptStore } from '../../../stores/transcript';
+import { NOT_IN_CONTEXT } from '../../model/copy';
 import type { Row } from '../../model/rows';
 import { rowElementId, useTranscriptContext } from '../context';
 import { AgentMessageRow } from './AgentMessage';
 import { AssistantTextRow } from './AssistantText';
 import { BashRow } from './Bash';
+import { BoundaryRow } from './Boundary';
 import { CellRow } from './Cell';
 import { DividerRow } from './Divider';
+import { ErrorRow } from './Error';
 import { GroupRow } from './Group';
 import { LocalCommandRow } from './LocalCommand';
-import { PlaceholderRow } from './Placeholder';
+import { PlanRow } from './Plan';
+import { QuestionRow } from './Question';
 import { ReceiptRow } from './Receipt';
+import { RequestSlotRow } from './RequestSlot';
 import { SubagentRow } from './Subagent';
 import { ThinkingRow } from './Thinking';
 import { TimeRow } from './Time';
@@ -31,14 +37,23 @@ function body(row: Row) {
     case 'agent_message': return <AgentMessageRow row={row} />;
     case 'bash': return <BashRow row={row} />;
     case 'local_command': return <LocalCommandRow row={row} />;
-    default: return <PlaceholderRow row={row} />;
+    case 'plan': return <PlanRow row={row} />;
+    case 'question': return <QuestionRow row={row} />;
+    case 'request_slot': return <RequestSlotRow row={row} />;
+    case 'boundary': return <BoundaryRow row={row} />;
+    case 'error': return <ErrorRow row={row} />;
   }
 }
 
+// The first row a turn shows: where a revealed branch's turn says it is not in context.
+const opensTurn = (row: Row) => row.kind === 'user' || (row.kind === 'divider' && row.origin === 'engine');
+
 export function RowView({ row }: { row: Row }) {
-  const { idPrefix } = useTranscriptContext();
+  const { idPrefix, storeKey } = useTranscriptContext();
+  const muted = useTranscriptStore((state) => row.turnId !== null && (state.entries[storeKey]?.state.hidden?.turns.includes(row.turnId) ?? false));
   return (
-    <div id={rowElementId(idPrefix, row.id)} className="transcript-row" data-kind={row.kind} data-turn-id={row.turnId ?? undefined} tabIndex={-1}>
+    <div id={rowElementId(idPrefix, row.id)} className="transcript-row" data-kind={row.kind} data-turn-id={row.turnId ?? undefined} data-muted={muted ? '' : undefined} tabIndex={-1}>
+      {muted && opensTurn(row) && <div className="transcript-not-in-context">{NOT_IN_CONTEXT}</div>}
       {body(row)}
     </div>
   );

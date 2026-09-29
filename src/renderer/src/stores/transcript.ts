@@ -34,9 +34,13 @@ export { RECEIPT_APPLIED, type ReceiptUndo, type SpillLoad };
 
 export interface TranscriptStore {
   entries: Record<string, TranscriptEntry>;
-  attach(key: string, source: TranscriptSource, options?: { agentId?: AgentId | null }): Promise<void>; // resolves when hydrated, or when hydration failed (phase 'failed')
+  // Resolves when hydrated, or when hydration failed (phase 'failed'). Attachments are counted: the same source attached
+  // again (a second surface over one ipcSource, or the view over the source its owner attached) shares the attachment,
+  // and each `detach` releases one; the last unsubscribes. A source's reset clears the key and hydrates it again.
+  attach(key: string, source: TranscriptSource, options?: { agentId?: AgentId | null }): Promise<void>;
+  retry(key: string): Promise<void>; // hydrate a failed key again from its source, keeping its attachments
   detach(key: string): void;
-  drop(key: string): void; // detach and forget the state
+  drop(key: string): void; // release every attachment and forget the state
   rows(key: string): Row[];
   lastAssistantLine(key: string): string | null;
   jumpTo(key: string, id: RowId | CellId, options?: { align?: JumpRequest['align']; turnId?: TurnId }): void; // expands what holds the row, then the view scrolls and focuses; `turnId` names the owning turn when the caller knows it (the search then derives that turn alone)
@@ -121,12 +125,54 @@ function keepFinishedTurnsOpen(previous: TranscriptState, next: TranscriptState,
   return withUi(next, ui);
 }
 
+// Per key: the source it follows, how many holders attached it, the current hydration (null once it failed) and its
+// settlement (what `attach` resolves), and the source's reset subscription.
+interface Attached {
+  source: TranscriptSource;
+  agentId: AgentId | null;
+  count: number;
+  attachment: Attachment | null;
+  settled: Promise<void>;
+  offReset: (() => void) | null;
+}
+
 export function createTranscriptStore() {
-  // Per key: the live attachment, the source it follows and its settled hydration (what `attach` resolves).
-  const attachments = new Map<string, { attachment: Attachment; source: TranscriptSource; settled: Promise<void> }>();
+  const attachments = new Map<string, Attached>();
   let nonce = 0;
   return create<TranscriptStore>()((set, get) => {
     const entry = (key: string) => get().entries[key] as TranscriptEntry | undefined;
+    const release = (attached: Attached) => {
+      attached.attachment?.detach();
+      attached.attachment = null;
+      attached.offReset?.();
+    };
+    // The hydration protocol (source/hydrate.ts) over the key's current state. Resolves either way; a failure is
+    // recorded on the key (hydrate.ts has already unsubscribed and cleared its buffer) and `retry` starts over.
+    const hydrate = (key: string, attached: Attached): Promise<void> => {
+      attached.attachment?.detach();
+      const attachment = attachSource(attached.source, {
+        apply(events) {
+          const current = entry(key)!;
+          const next = applyEvents(current.state, events);
+          const at = Math.max(current.clock?.at ?? 0, ...events.slice(-1).map((event) => Date.parse(event.at)));
+          put(key, { state: keepFinishedTurnsOpen(current.state, next, current.following), clock: { at, wall: Date.now() } });
+        },
+        has: (id) => entry(key)?.state.seen.has(id) ?? false,
+      });
+      attached.attachment = attachment;
+      const current = () => attachments.get(key) === attached && attached.attachment === attachment;
+      attached.settled = attachment.hydrated.then(
+        () => {
+          if (current()) put(key, { phase: 'live' });
+        },
+        (reason: unknown) => {
+          if (!current()) return;
+          attached.attachment = null;
+          put(key, { phase: 'failed', error: reason instanceof Error ? reason.message : String(reason) });
+        },
+      );
+      return attached.settled;
+    };
     const put = (key: string, patch: Partial<TranscriptEntry>) => {
       const current = entry(key);
       if (!current) return;
@@ -150,47 +196,48 @@ export function createTranscriptStore() {
       entries: {},
 
       attach(key, source, options = {}) {
-        // The same source attached again (the view mounting over a source its owner attached first) keeps the
-        // attachment: detaching would drop the batches it buffered while hydrating, which the source never resends.
+        // The same source attached again keeps the attachment: detaching would drop the batches it buffered while
+        // hydrating, which the source never resends.
         const existing = attachments.get(key);
-        if (existing?.source === source) return existing.settled;
-        existing?.attachment.detach();
+        if (existing?.source === source) {
+          existing.count += 1;
+          return existing.settled;
+        }
+        if (existing) release(existing);
         if (!entry(key)) {
           const state = createState(null, options.agentId ?? null);
           set({ entries: { ...get().entries, [key]: { state, rows: rowsOf(state), phase: 'hydrating', error: null, following: true, working: false, clock: null, jump: null } } });
         } else put(key, { phase: 'hydrating', error: null });
-        const attachment = attachSource(source, {
-          apply(events) {
-            const current = entry(key)!;
-            const next = applyEvents(current.state, events);
-            const at = Math.max(current.clock?.at ?? 0, ...events.slice(-1).map((event) => Date.parse(event.at)));
-            put(key, { state: keepFinishedTurnsOpen(current.state, next, current.following), clock: { at, wall: Date.now() } });
-          },
-          has: (id) => entry(key)?.state.seen.has(id) ?? false,
-        });
-        const current = () => attachments.get(key)?.attachment === attachment;
-        // Resolves either way; a failure is recorded on the key (hydrate.ts has already unsubscribed and cleared its buffer).
-        const settled = attachment.hydrated.then(
-          () => {
-            if (current()) put(key, { phase: 'live' });
-          },
-          (reason: unknown) => {
-            if (!current()) return;
-            attachments.delete(key);
-            put(key, { phase: 'failed', error: reason instanceof Error ? reason.message : String(reason) });
-          },
-        );
-        attachments.set(key, { attachment, source, settled });
-        return settled;
+        const attached: Attached = { source, agentId: options.agentId ?? null, count: 1, attachment: null, settled: Promise.resolve(), offReset: null };
+        attachments.set(key, attached);
+        // A reset (a child source switching from its live stream to its disk transcript): the key starts over.
+        attached.offReset = source.onReset?.(() => {
+          if (attachments.get(key) !== attached) return;
+          const state = createState(null, attached.agentId);
+          put(key, { state, phase: 'hydrating', error: null, clock: null, jump: null });
+          hydrate(key, attached);
+        }) ?? null;
+        return hydrate(key, attached);
+      },
+
+      retry(key) {
+        const attached = attachments.get(key);
+        if (!attached || attached.attachment) return attached?.settled ?? Promise.resolve();
+        put(key, { phase: 'hydrating', error: null });
+        return hydrate(key, attached);
       },
 
       detach(key) {
-        attachments.get(key)?.attachment.detach();
+        const attached = attachments.get(key);
+        if (!attached || --attached.count > 0) return;
+        release(attached);
         attachments.delete(key);
       },
 
       drop(key) {
-        get().detach(key);
+        const attached = attachments.get(key);
+        if (attached) release(attached);
+        attachments.delete(key);
         const entries = { ...get().entries };
         delete entries[key];
         set({ entries });

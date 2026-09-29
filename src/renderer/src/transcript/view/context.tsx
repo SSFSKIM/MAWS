@@ -4,6 +4,7 @@
 // scrolling out of the virtualised list and back.
 import { createContext, useContext, useState, useSyncExternalStore, type ReactNode } from 'react';
 import type { Cell, Row, Spill, SubagentRef, TurnId } from '../model/rows';
+import { ipcLoadSpill, ipcOpenExternal } from '../source/ipc';
 
 export interface TranscriptActions {
   openSubagent(ref: SubagentRef): void; // C8: Subagents tool with that agent selected
@@ -12,7 +13,7 @@ export interface TranscriptActions {
   openFile(path: string, line?: number): void; // C5: the layout store action openTab({ kind: 'file', path, line })
   openExternal(url: string): void; // C5: layout.openExternal
   editAndResubmit(row: Extract<Row, { kind: 'user' }>): void; // C7: prefill the composer; forks history (§4.2)
-  loadSpill(spill: Spill): Promise<string>; // C4: fs.readSpill (the default adapter lands with the IPC source, M5)
+  loadSpill(spill: Spill): Promise<string>; // C4: fs.readSpill; default adapter provided (DEFAULT_ACTIONS)
 }
 
 export interface RewindInterface {
@@ -26,6 +27,9 @@ export const NO_ACTIONS: TranscriptActions = {
   openSubagent: noop, openFullLog: noop, reviewChanges: noop, openFile: noop, openExternal: noop, editAndResubmit: noop,
   loadSpill: () => Promise.reject(new Error('loadSpill: no adapter supplied')),
 };
+// What a Transcript does for an action its caller did not supply: the two X2 commands C6 can call itself (a spilled
+// result through fs.readSpill, a link through layout.openExternal); the rest belong to C5, C7 and C8 and do nothing.
+export const DEFAULT_ACTIONS: TranscriptActions = { ...NO_ACTIONS, loadSpill: ipcLoadSpill, openExternal: ipcOpenExternal };
 
 // Open/closed flags by id, kept per mounted transcript rather than in a row's own state.
 export class Disclosures {

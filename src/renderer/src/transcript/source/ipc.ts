@@ -1,5 +1,5 @@
 // The transcript's X2 adapters (C6 execution document, Public surface and "X2 surface C6 consumes"), one call each:
-// `ipcSource` follows a session (or one child agent) under the store's hydration protocol, the default `loadSpill`
+// `ipcSource` follows a session (or one child agent, choosing its provenance) under the store's hydration protocol, the default `loadSpill`
 // reads a spilled result, `ipcRewind` backs the receipt's Undo, `ipcOpenExternal` opens a markdown link. Each has an
 // `…Over(client)` form so tests drive it with a fake X2 client; the plain forms use the app's validated client.
 import type { SessionEvent } from '@shared/graph/events';
@@ -22,29 +22,91 @@ const valueOf = <N extends CommandName>(result: CommandResult<N>): CommandOutput
 };
 
 // `session.eventBatch` carries every event of an app session, a followed child's own slice included (C4 emits it with
-// `agentId` set). A child transcript takes its agent's events; the parent takes its own and the child traffic it
-// indexes under the parent tool use (`parentToolUseId` set), never a child's slice, which would render as top-level.
-const belongsTo = (agentId: AgentId | undefined) =>
-  agentId === undefined ? (event: SessionEvent) => event.agentId === null || event.parentToolUseId !== null : (event: SessionEvent) => event.agentId === agentId;
+// `agentId` set). The parent takes its own events and the child traffic it indexes under the parent tool use
+// (`parentToolUseId` set), never a child's slice, which would render as top-level.
+const ofParent = (event: SessionEvent) => event.agentId === null || event.parentToolUseId !== null;
 
-export function ipcSourceOver(client: MawsBridge, appSessionId: AppSessionId, agentId?: AgentId): TranscriptSource {
-  const belongs = belongsTo(agentId);
+function sessionSource(client: MawsBridge, appSessionId: AppSessionId): TranscriptSource {
   return {
-    key: agentId === undefined ? appSessionId : `${appSessionId}:${agentId}`,
-    agentId,
+    key: appSessionId,
     subscribe(listener) {
       return client.on('session.eventBatch', (batch) => {
         if (batch.appSessionId !== appSessionId) return;
-        const events = batch.events.filter(belongs);
+        const events = batch.events.filter(ofParent);
         if (events.length > 0) listener(events);
       });
     },
     // The store orders and deduplicates by event id (ruling 5 of the wave-2 ledger); `lastSeq` is C3's own cursor.
     async snapshot() {
-      if (agentId === undefined) return valueOf(await client.invoke('session.events', { appSessionId, afterSeq: null, limit: null })).events;
-      return valueOf(await client.invoke('fs.agentEvents', { appSessionId, agentId })).events;
+      return valueOf(await client.invoke('session.events', { appSessionId, afterSeq: null, limit: null })).events;
     },
   };
+}
+
+// A child agent's source owns its provenance (Child source provenance): live while the child runs in the parent's
+// process (the parent's stream and snapshot, filtered by agent; no disk follower), disk otherwise (fs.agentEvents,
+// which starts following). The snapshot decides: live when the parent's snapshot holds the child's events. A live child
+// that ends (its own `subagent.finished` or `task.notification`, or the parent's `process.exited`) switches to disk
+// and signals a reset, so the store rebuilds the key from the disk transcript and the live and disk id forms of the
+// same events never meet. Disk is final.
+function childSource(client: MawsBridge, appSessionId: AppSessionId, agentId: AgentId): TranscriptSource {
+  let provenance: 'undecided' | 'live' | 'disk' = 'undecided';
+  const resets = new Set<() => void>();
+  const own = (event: SessionEvent) => event.agentId === agentId;
+  // For local agents the engine's task id and the sidecar's agent id carry the same string (C1 Interfaces, observed in
+  // the fixtures); X1 keeps them as two types, so the comparison is on the strings.
+  const ends = (event: SessionEvent) =>
+    (event.kind === 'process.exited' && event.agentId === null) ||
+    ((event.kind === 'subagent.finished' || event.kind === 'task.notification') && (event.taskId as string) === (agentId as string));
+  // The reset is signalled once the batch that carried the end has been delivered, so the store's new subscription can
+  // never receive that batch's live-form events a second time.
+  const toDisk = () => {
+    provenance = 'disk';
+    queueMicrotask(() => {
+      for (const listener of [...resets]) listener();
+    });
+  };
+  return {
+    key: `${appSessionId}:${agentId}`,
+    agentId,
+    subscribe(listener) {
+      return client.on('session.eventBatch', (batch) => {
+        if (batch.appSessionId !== appSessionId) return;
+        const events = batch.events.filter(own);
+        if (events.length > 0) listener(events);
+        if (provenance !== 'disk' && batch.events.some(ends)) toDisk();
+      });
+    },
+    async snapshot() {
+      const onDisk = () => provenance === 'disk'; // read after the await: the child may have ended meanwhile
+      if (!onDisk()) {
+        const live = valueOf(await client.invoke('session.events', { appSessionId, afterSeq: null, limit: null })).events.filter(own);
+        if (live.length > 0 && !onDisk()) {
+          provenance = 'live';
+          return live;
+        }
+      }
+      provenance = 'disk';
+      return valueOf(await client.invoke('fs.agentEvents', { appSessionId, agentId })).events;
+    },
+    onReset(listener) {
+      resets.add(listener);
+      return () => resets.delete(listener);
+    },
+  };
+}
+
+// One source per key and client: C5's agent tab and C8's drill-in mount the same source, hence one attachment and one
+// state in the store.
+const sources = new WeakMap<MawsBridge, Map<string, TranscriptSource>>();
+
+export function ipcSourceOver(client: MawsBridge, appSessionId: AppSessionId, agentId?: AgentId): TranscriptSource {
+  const key = agentId === undefined ? appSessionId : `${appSessionId}:${agentId}`;
+  let known = sources.get(client);
+  if (!known) sources.set(client, (known = new Map()));
+  let source = known.get(key);
+  if (!source) known.set(key, (source = agentId === undefined ? sessionSource(client, appSessionId) : childSource(client, appSessionId, agentId)));
+  return source;
 }
 
 export const ipcSource = (appSessionId: AppSessionId, agentId?: AgentId): TranscriptSource => ipcSourceOver(ipc, appSessionId, agentId);

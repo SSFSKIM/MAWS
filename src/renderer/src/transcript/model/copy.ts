@@ -239,6 +239,9 @@ export const PLAN_OUTCOME_BADGE = { implement: 'Implemented', clear_and_implemen
 export const planBadge = (outcome: keyof typeof PLAN_OUTCOME_BADGE | null, feedback: string | null) =>
   outcome === null ? 'Pending' : outcome === 'keep_planning' && feedback ? `${PLAN_OUTCOME_BADGE.keep_planning}: ${feedback}` : PLAN_OUTCOME_BADGE[outcome];
 
+export const PLAN = { heading: 'Plan', showMore: 'Show more', showLess: 'Show less' } as const;
+export const QUESTION = { heading: 'Question', chosen: 'Chosen', notAnswered: 'Not answered', answer: (text: string) => `Answer: ${text}` } as const;
+
 export const requestSlotPlaceholder = (subject: string) => `Waiting for you · ${subject} · answer in the composer`;
 
 export type BoundaryCopyInput =
@@ -260,9 +263,14 @@ export function boundaryCopy(input: BoundaryCopyInput): string {
     case 'retraction':
       return `Response retracted · ${input.reason}${input.fallbackModel ? ` · switched to ${input.fallbackModel}` : ''}`;
     case 'rewind':
-      return `Rewound to here · ${plural(input.hiddenRows, 'message')} hidden · ${input.revealed ? 'Hide' : 'Show'}`;
+      return `${rewindLabel(input.hiddenRows)} · ${REWIND_TOGGLE[input.revealed ? 'hide' : 'show']}`;
   }
 }
+
+// The rewind boundary's line without its toggle, and the toggle (the row renders the toggle as a button).
+export const rewindLabel = (hiddenRows: number) => `Rewound to here · ${plural(hiddenRows, 'message')} hidden`;
+export const REWIND_TOGGLE = { show: 'Show', hide: 'Hide' } as const;
+export const NOT_IN_CONTEXT = 'Not in context'; // a revealed rewound branch: the model no longer has it
 
 export const retryCopy = (attempt: number, max: number | null, status: number | null, error: string) =>
   `Retrying (${attempt}/${max ?? '?'}) · ${status === null ? '' : `${status} `}${error}`;
@@ -292,6 +300,19 @@ export const DETAIL = {
   linesOmitted: (lines: number) => `${plural(lines, 'line')} omitted`,
   hookOutcome: (outcome: string, exitCode: number | null) => (exitCode === null ? outcome : `${outcome} · exit ${exitCode}`),
 } as const;
+
+// A spilled result's loader (residue *Spilled results*).
+const sizeCopy = (bytes: number) => (bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / (1024 * 1024)).toFixed(1)} MB`);
+export const SPILL = {
+  load: (bytes: number | null) => (bytes === null ? 'Load full result' : `Load full result (${sizeCopy(bytes)})`),
+  loading: 'Loading the full result…',
+  head: (shownBytes: number) => `Showing the first ${sizeCopy(shownBytes)}`,
+  failed: (reason: string) => `Could not load the full result · ${reason}`,
+  retry: 'Retry',
+} as const;
+
+// A transcript whose history could not be loaded (the store's failed hydration phase).
+export const HYDRATION = { failed: (reason: string) => `Could not load this transcript · ${reason}`, retry: 'Retry' } as const;
 
 export const RECEIPT = {
   heading: (files: number) => `${plural(files, 'file')} changed`,

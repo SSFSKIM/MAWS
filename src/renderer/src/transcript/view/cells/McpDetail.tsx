@@ -5,6 +5,7 @@ import { TRUNCATE_OVER } from '../../model/cells';
 import { DETAIL } from '../../model/copy';
 import type { Cell, CellDetail } from '../../model/rows';
 import { useDisclosure } from '../context';
+import { spilledOr, SpillLoader } from './Spill';
 import { CappedMarkdown, Omitted, Output } from './Truncated';
 
 type Mcp = Extract<CellDetail, { kind: 'mcp' }>;
@@ -63,11 +64,14 @@ export function McpDetail({ cell, detail }: { cell: Cell; detail: Mcp }) {
       </div>
       {raw ? (
         <Output text={rawText} />
+      ) : detail.spill?.state === 'loaded' ? (
+        <Output text={spilledOr(detail.spill, '')} />
       ) : typeof detail.result === 'string' ? (
         detail.result && <CappedMarkdown text={detail.result} />
       ) : (
         <ResultBlocks cell={cell} blocks={detail.result} />
       )}
+      {detail.spill && !raw && <SpillLoader cell={cell} spill={detail.spill} />}
     </div>
   );
 }

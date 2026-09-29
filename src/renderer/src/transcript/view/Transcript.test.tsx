@@ -3,7 +3,9 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { useTranscriptStore } from '../../stores/transcript';
 import { cellId, rowId, turnId } from '../model/keys';
-import { BASH_RESULT, builder, tool, uuid } from '../model/test-events';
+import { loadJournal } from '../../../../../test/support/fixtures';
+import { journalToEvents } from '../dev/replay-stub';
+import { BASH_RESULT, builder, request, tool, uuid } from '../model/test-events';
 import type { TranscriptSource } from '../source/types';
 import { Transcript } from './Transcript';
 
@@ -95,5 +97,53 @@ describe('Transcript', () => {
     const controls = open.getAttribute('aria-controls')!.split(' ');
     expect(controls.length).toBeGreaterThan(0);
     for (const id of controls) expect(document.getElementById(id), `#${id} is in the DOM`).not.toBeNull();
+  });
+
+  it('a history that failed to load says why and offers Retry, which hydrates it', async () => {
+    let attempts = 0;
+    const source: TranscriptSource = {
+      key: `transcript-test-${++keys}`,
+      subscribe: () => () => {},
+      snapshot: () => (++attempts === 1 ? Promise.reject(new Error('engine-host is not running')) : Promise.resolve(deniedThenAnswer())),
+    };
+    render(<Transcript source={source} variant="session" />);
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('Could not load this transcript · engine-host is not running');
+    fireEvent.click(within(alert).getByRole('button', { name: 'Retry' }));
+    await waitFor(() => expect(useTranscriptStore.getState().entries[source.key!].phase).toBe('live'));
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(document.querySelectorAll('[data-kind="user"]')).toHaveLength(2);
+  });
+
+  it('docks C7’s card through renderRequest in a pending request’s slot', async () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('q1', 'AskUserQuestion', { questions: [] });
+    b.emit('question.requested', { requestId: request('r1'), toolUseId: tool('q1'), questions: [] });
+    const source = sourceOf(b.events);
+    render(<Transcript source={source} variant="session" renderRequest={(slot) => <div data-card="">{`Card ${slot.requestKind}`}</div>} />);
+    await waitFor(() => expect(document.querySelector('[data-card]')?.textContent).toBe('Card question'));
+    expect(document.querySelector('[data-kind="request_slot"]')?.textContent).toBe('Card question');
+  });
+
+  it('pass2/rewind: Show reveals the hidden branch muted and not in context, Hide removes it, and the boundary stays put', async () => {
+    const key = await mounted(journalToEvents(loadJournal('pass2', 'rewind')));
+    const boundaryId = useTranscriptStore.getState().rows(key).find((row) => row.kind === 'boundary')!.id;
+    const place = () => {
+      const element = document.querySelector<HTMLElement>(`[data-row-id="${boundaryId}"]`)!;
+      return { transform: element.style.transform, index: useTranscriptStore.getState().rows(key).findIndex((row) => row.id === boundaryId) };
+    };
+    const before = place();
+    expect(document.querySelectorAll('[data-muted]')).toHaveLength(0);
+    const boundary = document.querySelector<HTMLElement>(`[data-row-id="${boundaryId}"]`)!;
+    fireEvent.click(within(boundary).getByRole('button', { name: 'Show' }));
+    await waitFor(() => expect(document.querySelectorAll('[data-muted]').length).toBeGreaterThan(0));
+    const muted = [...document.querySelectorAll<HTMLElement>('[data-muted]')];
+    expect(muted.map((row) => row.dataset.kind)).toEqual(['user', 'assistant_text']);
+    expect(muted[0].textContent).toContain('Not in context');
+    expect(place()).toEqual(before);
+    fireEvent.click(within(document.querySelector<HTMLElement>(`[data-row-id="${boundaryId}"]`)!).getByRole('button', { name: 'Hide' }));
+    await waitFor(() => expect(document.querySelectorAll('[data-muted]')).toHaveLength(0));
+    expect(place()).toEqual(before);
   });
 });

@@ -1,6 +1,7 @@
 // The transcript (C6 execution document, Public surface; residue *Virtualisation and anchoring*): `Transcript` attaches
 // its source to the store under a key, derives nothing itself, and renders the store's rows through the virtualised
-// `TranscriptList` with one component per row kind, plus the "Jump to latest" control.
+// `TranscriptList` with one component per row kind, plus the "Jump to latest" control, and says so with a Retry when
+// the source's history could not be loaded (the store's failed hydration phase).
 //
 // TanStack Virtual in chat mode: stable X3 keys, `anchorTo: 'end'` (a change at either edge keeps the row under the
 // reader where it was), `followOnAppend` (a reader at the end stays pinned as rows arrive), measured rows in normal
@@ -12,9 +13,10 @@ import 'katex/dist/katex.min.css';
 import 'streamdown/styles.css';
 import type { AgentId } from '@shared/graph/ids';
 import { useTranscriptStore } from '../../stores/transcript';
+import { HYDRATION } from '../model/copy';
 import type { Row, RowKind } from '../model/rows';
 import type { TranscriptSource } from '../source/types';
-import { listElementId, NO_ACTIONS, rowElementId, TranscriptProvider, useDisclosures, type RewindInterface, type TranscriptActions, type TranscriptContextValue } from './context';
+import { DEFAULT_ACTIONS, listElementId, rowElementId, TranscriptProvider, useDisclosures, type RewindInterface, type TranscriptActions, type TranscriptContextValue } from './context';
 import { RowView } from './rows/Row';
 import './transcript.css';
 
@@ -159,6 +161,7 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
   const rows = useTranscriptStore((state) => state.entries[storeKey]?.rows ?? NO_ROWS);
   const working = useTranscriptStore((state) => state.entries[storeKey]?.working ?? false);
   const jump = useTranscriptStore((state) => state.entries[storeKey]?.jump ?? null);
+  const failed = useTranscriptStore((state) => (state.entries[storeKey]?.phase === 'failed' ? (state.entries[storeKey].error ?? '') : null));
   const [following, setFollowing] = useState(true);
   const listRef = useRef<TranscriptListHandle>(null);
   const disclosures = useDisclosures();
@@ -201,7 +204,7 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
 
   // Every row reads this context: it changes only with the props, never with the rows.
   const context = useMemo<TranscriptContextValue>(
-    () => ({ storeKey, variant, actions: { ...NO_ACTIONS, ...actions }, rewind: rewind ?? null, renderRequest: renderRequest ?? null, disclosures, idPrefix }),
+    () => ({ storeKey, variant, actions: { ...DEFAULT_ACTIONS, ...actions }, rewind: rewind ?? null, renderRequest: renderRequest ?? null, disclosures, idPrefix }),
     [storeKey, variant, actions, rewind, renderRequest, disclosures, idPrefix],
   );
 
@@ -209,6 +212,14 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
     <TranscriptProvider value={context}>
       <div className={`transcript relative min-h-0 ${className ?? ''}`}>
         <TranscriptList id={listElementId(idPrefix)} rows={rows} renderRow={renderRow} onFollowChange={followChange} handle={listRef} className="h-full" />
+        {failed !== null && (
+          <div className="transcript-failed" role="alert">
+            <span>{HYDRATION.failed(failed)}</span>
+            <button type="button" className="transcript-button" onClick={() => void useTranscriptStore.getState().retry(storeKey)}>
+              {HYDRATION.retry}
+            </button>
+          </div>
+        )}
         {!following && (
           <button type="button" className="transcript-jump" onClick={() => listRef.current?.scrollToEnd()}>
             Jump to latest

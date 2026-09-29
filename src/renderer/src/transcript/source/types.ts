@@ -8,6 +8,9 @@ export interface TranscriptSource {
   snapshot(): Promise<SessionEvent[]>; // everything so far; called once, after subscribe
   readonly key?: string; // additive: the store key (`appSessionId`, or `appSessionId:agentId`); absent, the transcript keys the source object
   readonly agentId?: AgentId; // additive: set on a child's source
+  // Additive (child source provenance): the source's history changed form (a live child switched to its disk
+  // transcript), so the store clears the key's state and runs the hydration protocol again.
+  onReset?(listener: () => void): () => void;
 }
 
 export interface Player {

@@ -2,6 +2,7 @@
 // transcript context with spy actions. Not a test file itself.
 import type { SessionEvent } from '@shared/graph/events';
 import { render } from '@testing-library/react';
+import type { ReactNode } from 'react';
 import { vi } from 'vitest';
 import { useTranscriptStore } from '../../../stores/transcript';
 import type { Row } from '../../model/rows';
@@ -37,9 +38,12 @@ export function spyActions(): TranscriptActions {
   };
 }
 
-export function renderRow(row: Row, options: { storeKey?: string; actions?: TranscriptActions; rewind?: RewindInterface } = {}) {
+export function renderRow(
+  row: Row,
+  options: { storeKey?: string; actions?: TranscriptActions; rewind?: RewindInterface; renderRequest?: (slot: Extract<Row, { kind: 'request_slot' }>) => ReactNode } = {},
+) {
   const actions = options.actions ?? spyActions();
-  const value = { storeKey: options.storeKey ?? '', variant: 'session' as const, actions, rewind: options.rewind ?? null, renderRequest: null, disclosures: new Disclosures(), idPrefix: 't' };
+  const value = { storeKey: options.storeKey ?? '', variant: 'session' as const, actions, rewind: options.rewind ?? null, renderRequest: options.renderRequest ?? null, disclosures: new Disclosures(), idPrefix: 't' };
   const view = render(
     <TranscriptProvider value={value}>
       <RowView row={row} />
