@@ -2,7 +2,7 @@
 // spike (acceptance item 1): a five-hundred-turn synthetic transcript streams its last turn at sixty delta batches a
 // second while the reader, scrolled far up, expands old work; the reader must not be moved, frames must hold, and
 // "Jump to latest" must resume follow mode. The others pin follow mode, the divider collapse, the theme switch, the
-// denial jump (acceptance item 4) and expanded old work over every fixture.
+// denial jump (acceptance item 4), the child transcript (acceptance item 9) and expanded old work over every fixture.
 // Runs only under `pnpm e2e:transcript`, which builds with MAWS_HARNESS=1 first (playwright.config.ts).
 import { expect, test as base, type Page } from '@playwright/test';
 import type { HarnessApi, HarnessMetrics } from '../src/renderer/src/harness/api';
@@ -369,8 +369,43 @@ test('the denied count jumps to the standalone denied cell', async ({ harness })
   expect(harness.consoleErrors()).toEqual([]);
 });
 
+// Acceptance item 9: the drill-in is this same Transcript with `variant: 'child'` over the child's own events (C8's
+// panel does this through the public surface; the harness stands in for it).
+test('child transcript renders the subagent\u2019s events only', async ({ harness }) => {
+  const { page } = harness;
+  await harnessReady(page);
+  await blockHumanInput(page);
+  await loadAll(page, 'pass1/subagent');
+  await page.evaluate(() => (window as unknown as HarnessWindow).__maws_harness.expandAll({ cells: true }));
+  await settle(page, 300);
+
+  // The parent: one subagent row for both agents, none of the children's own rows (their Read calls and answers).
+  const parent = page.locator('.transcript').first();
+  const subagent = parent.locator('[data-kind="subagent"]');
+  await expect(subagent).toHaveCount(1);
+  const CHILD_READS = ['cell:toolu_01WHcNPsuUXRb5uAumPGpTyF', 'cell:toolu_01Vadxauaer5nCja9in7PkB8'];
+  for (const id of CHILD_READS) await expect(parent.locator(`[data-cell-id="${id}"]`)).toHaveCount(0);
+
+  // Opening the first agent is C8's call (a toast here); "Show child" mounts the child transcript beside the parent.
+  await subagent.getByRole('button', { name: 'Open Read and report one.txt content' }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'openSubagent ad286defbc77bc090' })).toBeVisible();
+  await page.getByRole('button', { name: 'Show child · Read and report one.txt content' }).click();
+  const child = page.locator('[data-harness-child]');
+  await expect(child.locator('.transcript')).toHaveCount(1);
+  await expect(child.locator(`[data-cell-id="${CHILD_READS[0]}"]`)).toHaveCount(1);
+  await expect(child.locator(`[data-cell-id="${CHILD_READS[0]}"] button`).first()).toHaveText(/^Read /);
+  await expect(child.locator('[data-kind="assistant_text"]')).toHaveText(['ONE']);
+  // Only that agent's events: not the other agent's Read, not the parent's prompt, sentence or answers.
+  await expect(child.locator(`[data-cell-id="${CHILD_READS[1]}"]`)).toHaveCount(0);
+  await expect(child.locator('[data-kind="user"], [data-kind="subagent"]')).toHaveCount(0);
+  // The parent is unchanged by the drill-in.
+  await expect(subagent).toHaveCount(1);
+  for (const id of CHILD_READS) await expect(parent.locator(`[data-cell-id="${id}"]`)).toHaveCount(0);
+  expect(harness.consoleErrors()).toEqual([]);
+});
+
 // Expand-old-work over the fixtures: every turn, group and cell of every journal and event fixture opened, the list
-// walked a viewport at a time so every row mounts, no work-area row left to a placeholder, no console error.
+// walked a viewport at a time so every row mounts, no row of those kinds left empty, no console error.
 test('every fixture renders its whole work area expanded', async ({ harness }) => {
   test.setTimeout(300_000);
   const { page } = harness;
@@ -378,7 +413,7 @@ test('every fixture renders its whole work area expanded', async ({ harness }) =
   await blockHumanInput(page);
   const fixtures = (await fixtureNames(page)).filter((name) => !name.startsWith('synthetic/'));
   expect(fixtures.length).toBeGreaterThan(40);
-  const WORK_KINDS = ['group', 'cell', 'receipt', 'subagent', 'agent_message', 'bash'];
+  const WORK_KINDS = ['group', 'cell', 'receipt', 'subagent', 'agent_message', 'bash', 'plan', 'question', 'boundary', 'error'];
   const seen = new Map<string, number>();
   for (const fixture of fixtures) {
     await loadAll(page, fixture);
@@ -387,7 +422,7 @@ test('every fixture renders its whole work area expanded', async ({ harness }) =
     const walked = await page.evaluate(async (workKinds) => {
       const scroller = document.querySelector<HTMLElement>('[data-transcript-scroller]')!;
       const kinds: Record<string, number> = {};
-      const placeholders: string[] = [];
+      const empty: string[] = [];
       const rows = new Set<string>();
       const frame = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       scroller.scrollTop = 0;
@@ -399,15 +434,15 @@ test('every fixture renders its whole work area expanded', async ({ harness }) =
           rows.add(id);
           const kind = row.querySelector<HTMLElement>('[data-kind]')?.dataset.kind ?? '';
           kinds[kind] = (kinds[kind] ?? 0) + 1;
-          if (workKinds.includes(kind) && row.querySelector('.transcript-placeholder')) placeholders.push(id);
+          if (workKinds.includes(kind) && (row.querySelector('[data-kind]')?.childElementCount ?? 0) === 0) empty.push(id);
         }
         if (scroller.scrollTop >= scroller.scrollHeight - scroller.clientHeight - 1) break;
         scroller.scrollTop += scroller.clientHeight;
         await frame();
       }
-      return { kinds, placeholders, rows: rows.size };
+      return { kinds, empty, rows: rows.size };
     }, WORK_KINDS);
-    expect(walked.placeholders, `${fixture}: work-area rows render their own components`).toEqual([]);
+    expect(walked.empty, `${fixture}: every row renders its component`).toEqual([]);
     expect(walked.rows, `${fixture}: rows rendered`).toBeGreaterThan(0);
     for (const [kind, n] of Object.entries(walked.kinds)) seen.set(kind, (seen.get(kind) ?? 0) + n);
     expect(harness.consoleErrors(), `${fixture}: no console errors`).toEqual([]);

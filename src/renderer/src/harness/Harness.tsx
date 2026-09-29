@@ -1,9 +1,14 @@
 // The transcript harness page (`#transcript`): plays a fixture into the real Transcript at an adjustable speed, with a
 // fixture picker, playback controls, "expand all old work", a theme toggle, a metrics overlay, and toasts naming every
-// action the transcript calls (C7 and C8 are absent here), and assigns `window.__maws_harness` for Playwright.
-import { useEffect, useRef, useState } from 'react';
+// action the transcript calls (C7 and C8 are absent here), and assigns `window.__maws_harness` for Playwright. Two
+// examples of what C7 and C8 do with the public surface: "Request cards" docks an example card in every pending
+// request's slot through `renderRequest`, and after a subagent row is opened, "Show child" mounts a second Transcript
+// with `variant: 'child'` over that agent's own events (C8's drill-in).
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useTranscriptStore } from '../stores/transcript';
 import { rowId } from '../transcript/model/keys';
+import type { Row, SubagentRef } from '../transcript/model/rows';
+import type { TranscriptSource } from '../transcript/source/types';
 import type { TranscriptActions, RewindInterface } from '../transcript/view/context';
 import { Transcript, type TranscriptListHandle } from '../transcript/view/Transcript';
 import type { HarnessApi, HarnessMetrics } from './api';
@@ -36,6 +41,9 @@ export function Harness() {
   };
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<{ text: string; n: number } | null>(null);
+  const [opened, setOpened] = useState<SubagentRef | null>(null); // the last subagent row the transcript opened
+  const [child, setChild] = useState<{ ref: SubagentRef; source: TranscriptSource } | null>(null);
+  const [cards, setCards] = useState(false);
   const sessionRef = useRef<HarnessSession | null>(null);
   const listRef = useRef<TranscriptListHandle>(null);
   const frames = useRef(new FrameMetrics());
@@ -53,6 +61,8 @@ export function Harness() {
       sessionRef.current = next;
       setFixture(name);
       setSession(next);
+      setOpened(null);
+      setChild(null);
       setError(null);
       await painted();
       return { ms: performance.now() - started, rows: next.rows().length, events: next.eventCount };
@@ -143,7 +153,7 @@ export function Harness() {
   };
 
   // Every callback the transcript makes shows as a toast naming it (stable, so the transcript's context never changes).
-  const [{ actions, rewind }] = useState(() => toastCallbacks((text) => setToast((previous) => ({ text, n: (previous?.n ?? 0) + 1 }))));
+  const [{ actions, rewind }] = useState(() => toastCallbacks((text) => setToast((previous) => ({ text, n: (previous?.n ?? 0) + 1 })), setOpened));
 
   return (
     <div className="relative flex h-full flex-col bg-bg text-fg">
@@ -168,10 +178,28 @@ export function Harness() {
         <HarnessButton onClick={() => run(() => api().step())}>Step</HarnessButton>
         <HarnessButton onClick={() => run(() => api().expandAll())}>Expand all old work</HarnessButton>
         <HarnessButton onClick={toggleTheme}>Theme</HarnessButton>
+        <label className="flex items-center gap-1 text-fg-muted">
+          <input type="checkbox" checked={cards} onChange={(event) => setCards(event.target.checked)} />
+          Request cards
+        </label>
+        {session && opened && child?.ref !== opened && (
+          <HarnessButton onClick={() => setChild({ ref: opened, source: session.childSource(opened) })}>Show child · {opened.name}</HarnessButton>
+        )}
         {error && <span className="text-danger">{error}</span>}
       </div>
       {session ? (
-        <Transcript key={session.id} source={session.source} variant="session" actions={actions} rewind={rewind} handle={listRef} className="flex-1" />
+        <div className="flex min-h-0 flex-1">
+          <Transcript key={session.id} source={session.source} variant="session" actions={actions} rewind={rewind} renderRequest={cards ? exampleRequestCard : undefined} handle={listRef} className="min-w-0 flex-1" />
+          {child && (
+            <section className="flex w-[44%] min-w-0 flex-col border-l border-border" aria-label="Child transcript" data-harness-child="">
+              <div className="flex items-center justify-between border-b border-border bg-bg-raised px-3 py-1 text-ui-sm text-fg-muted">
+                <span>Child · {child.ref.name}</span>
+                <HarnessButton onClick={() => setChild(null)}>Close child</HarnessButton>
+              </div>
+              <Transcript key={child.source.key} source={child.source} variant="child" actions={actions} className="min-h-0 flex-1" />
+            </section>
+          )}
+        </div>
       ) : (
         <div className="flex flex-1 items-center justify-center text-fg-muted">Choose a fixture and load it.</div>
       )}
@@ -185,10 +213,23 @@ export function Harness() {
   );
 }
 
-function toastCallbacks(say: (text: string) => void): { actions: TranscriptActions; rewind: RewindInterface } {
+// C7's card stands here as an example: what the slot renders when `renderRequest` is supplied.
+function exampleRequestCard(slot: Extract<Row, { kind: 'request_slot' }>): ReactNode {
+  return (
+    <div className="rounded-md border border-accent bg-bg-raised px-3 py-2 text-ui text-fg" data-harness-request-card="">
+      Request card (C7) · {slot.requestKind}
+      {slot.toolName ? ` · ${slot.toolName}` : ''}
+    </div>
+  );
+}
+
+function toastCallbacks(say: (text: string) => void, open: (ref: SubagentRef) => void): { actions: TranscriptActions; rewind: RewindInterface } {
   return {
     actions: {
-      openSubagent: (ref) => say(`openSubagent ${ref.agentId ?? ref.taskId}`),
+      openSubagent: (ref) => {
+        say(`openSubagent ${ref.agentId ?? ref.taskId}`);
+        open(ref);
+      },
       openFullLog: (cell) => say(`openFullLog ${cell.id}`),
       reviewChanges: (turn, path) => say(`reviewChanges ${turn}${path ? ` ${path}` : ''}`),
       openFile: (path, line) => say(`openFile ${path}${line ? `:${line}` : ''}`),
