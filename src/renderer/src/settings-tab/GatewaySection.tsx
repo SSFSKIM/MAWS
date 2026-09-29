@@ -46,7 +46,9 @@ export function GatewaySection({ settings }: { settings: Settings }) {
 }
 
 function DirectLogin() {
-  // The last Direct session whose get_status was read (the gateway store keeps one per session; the newest is last).
+  // A Direct session's login as its get_status last reported it (the gateway store keeps one per session). Every Direct
+  // session runs on the same engine login, so any entry names it; the Map keeps first-insertion order (a re-read does not
+  // move a session), so the last entry is the session first read most recently, not necessarily the freshest reading.
   const login = useGateway((s) => [...s.directLogin.values()].at(-1) ?? null);
   const [copied, setCopied] = useState(false);
   const copy = async () => {
