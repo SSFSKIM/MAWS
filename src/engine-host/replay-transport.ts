@@ -126,11 +126,15 @@ export function replayEngine(journal: JournalRow[], opts: { prelude: JournalRow[
     return null;
   };
 
-  // The next `out` row at or after the cursor, without side effects (used to decide a prelude answer at write time).
+  // The `out` row a write made now would be matched against, without side effects (used at write time to decide whether
+  // a request was recorded): the one past those the writes still waiting will claim, since each waiting write takes the
+  // next out row in order. Two same-subtype reads written back to back against one recorded row: the first claims it,
+  // the second is unrecorded (debt wave 3 review).
   const nextOut = (): JournalRow | null => {
+    let skip = waiters.length;
     for (let i = cursor; i < rows.length; i += 1) {
       const row = rows[i]!;
-      if (row.direction === 'out') return row;
+      if (row.direction === 'out' && skip-- === 0) return row;
       if (row.direction === 'meta' && (row.frame as Frame).event === 'exit') return null;
     }
     return null;

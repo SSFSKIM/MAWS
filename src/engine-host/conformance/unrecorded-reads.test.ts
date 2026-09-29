@@ -3,7 +3,7 @@
 // is answered empty and journaled as `meta replay_unrecorded_read`, and the replay goes on; a write it never recorded
 // still ends the run (replay-transport.test.ts).
 import { describe, expect, it } from 'vitest';
-import { getUsage, listModels, listPermissionRules } from '../controls';
+import { getContextUsage, getUsage, listModels, listPermissionRules } from '../controls';
 import { ControlError } from '../rpc';
 import { replayedSession } from './session-harness';
 
@@ -42,5 +42,27 @@ describe('replay: a read the fixture never recorded', () => {
     expect(run.events.filter((e) => e.kind === 'error.raised')).toEqual([]);
     expect(run.events.some((e) => e.kind === 'turn.ended')).toBe(true);
     expect(run.rebuilt()).toEqual(run.events);
+  });
+
+  it('two same-subtype reads written back to back against one recorded row: the first takes the recording, the second is unrecorded', async () => {
+    const outcomes: unknown[] = [];
+    const run = await replayedSession('pass1', 'reads', (row, { session, ready, transport }) => {
+      const frame = row.frame as Held;
+      if (frame.type === 'user') void ready().then(() => session.send(frame.message!.content));
+      else if (frame.request?.subtype === 'get_usage') void getUsage(session.control!, {});
+      else if (frame.request?.subtype === 'get_context_usage') {
+        // held at the recorded read (seq 56): a turn-end read and a popover's, in the same tick
+        const control = session.control!;
+        for (let i = 0; i < 2; i++) void getContextUsage(control, { detail: 'summary' }).then((r) => outcomes.push(r), (error: unknown) => outcomes.push(error));
+      } else transport.kill('SIGTERM');
+    });
+
+    const meta = run.journal.rows.filter((r) => r.direction === 'meta').map((r) => r.frame as { event: string; subtype?: string });
+    expect(meta.filter((m) => m.event === 'replay_mismatch')).toEqual([]);
+    expect(outcomes).toHaveLength(2);
+    expect(outcomes.filter((o) => o instanceof ControlError)).toHaveLength(1); // the second: an empty answer that fails its schema
+    expect(outcomes.find((o) => !(o instanceof ControlError))).toMatchObject({ totalTokens: 30433, maxTokens: 200000 }); // the first: reads.jsonl seq 57
+    const recordedAnswer = run.events.filter((e) => e.kind === 'context.sample' && e.totalTokens === 30433);
+    expect(recordedAnswer).toHaveLength(1);
   });
 });
