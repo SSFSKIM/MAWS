@@ -11,7 +11,7 @@ import { createWidgetBackend, fixtureLine, RESPONSES, WidgetBackendError, type W
 import { registerSetupIntentHook, type SetupIntentHook } from '../composer';
 import { useSessions } from '../stores/sessions';
 import { useUsage } from '../stores/usage';
-import { fastView, liveModel, presentModels, resetModelRequests } from './model';
+import { acceptedModel, fastView, liveModel, presentModels, resetModelRequests, setModel, useModelRequests } from './model';
 import { modelWidget } from './ModelWidget';
 
 const ROOT = join(__dirname, '../../../..');
@@ -185,6 +185,19 @@ describe('mutations render C3’s result branches and ipc errors separately', ()
     mount('fast', 'on');
     await screen.findByRole('switch', { name: 'Fast mode' });
     await waitFor(() => expect(screen.getByRole('button', { name: 'Turn on fast mode' })).toBeTruthy());
+  });
+});
+
+describe('an accepted control is remembered only until the status moves', () => {
+  it('bridges the gap before C3’s status event, then gives way to the status, even when the status later returns to the old model', async () => {
+    backend.script('session.setModel', () => ({ ok: true, error: null, code: null })); // accepted, with no status event yet
+    expect(await setModel({ appSessionId: ID, model: 'haiku' })).toEqual({ ok: true });
+    const status = () => useSessions.getState().engine.get(ID)!;
+    expect(acceptedModel(useModelRequests.getState(), ID, status())).toBe('haiku');
+    act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: { ...status(), model: { requested: 'haiku', resolved: 'claude-sonnet-5[1m]' } } }));
+    expect(acceptedModel(useModelRequests.getState(), ID, status())).toBeUndefined();
+    act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: { ...status(), model: { requested: 'sonnet', resolved: 'claude-sonnet-5[1m]' } } }));
+    expect(acceptedModel(useModelRequests.getState(), ID, status())).toBeUndefined(); // the memory is gone, not revived
   });
 });
 

@@ -96,9 +96,22 @@ interface ModelRequests {
   fast: ReadonlyMap<AppSessionId, Requested<boolean | null>>;
 }
 export const useModelRequests = create<ModelRequests>()(() => ({ model: new Map(), fast: new Map() }));
-const remember = <K extends keyof ModelRequests>(key: K, id: AppSessionId, entry: ModelRequests[K] extends ReadonlyMap<AppSessionId, infer E> ? E : never) =>
-  useModelRequests.setState((s) => ({ [key]: new Map(s[key] as Map<AppSessionId, unknown>).set(id, entry) }) as Partial<ModelRequests>);
+const rememberModel = (id: AppSessionId, entry: Requested<string | null>) => useModelRequests.setState((s) => ({ model: new Map(s.model).set(id, entry) }));
+const rememberFast = (id: AppSessionId, entry: Requested<boolean | null>) => useModelRequests.setState((s) => ({ fast: new Map(s.fast).set(id, entry) }));
 export const resetModelRequests = () => useModelRequests.setState({ model: new Map(), fast: new Map() });
+
+// A memory ends as soon as its session's status moves off the basis, whether or not a widget is open, so a model asked
+// for and later asked away from is never shown again from here.
+const settled = <T>(held: ReadonlyMap<AppSessionId, Requested<T>>, fact: (status: EngineSessionStatus) => string | null, engine: ReadonlyMap<AppSessionId, EngineSessionStatus>) => {
+  const kept = new Map([...held].filter(([id, entry]) => engine.has(id) && entry.basis === fact(engine.get(id)!)));
+  return kept.size === held.size ? held : kept;
+};
+useSessions.subscribe(({ engine }) => {
+  const { model, fast } = useModelRequests.getState();
+  if (model.size === 0 && fast.size === 0) return;
+  const next = { model: settled(model, (s) => s.model.requested, engine), fast: settled(fast, (s) => s.fastMode.state, engine) };
+  if (next.model !== model || next.fast !== fast) useModelRequests.setState(next);
+});
 
 const statusOf = (id: AppSessionId): EngineSessionStatus | null => useSessions.getState().engine.get(id) ?? null;
 
@@ -110,7 +123,7 @@ export async function setModel(input: { appSessionId: AppSessionId; model: strin
   const result = await ipc.invoke('session.setModel', input);
   if (!result.ok) return { ok: false, error: transportWords(result.error), caption: null };
   if (!result.value.ok) return { ok: false, error: (result.value.code && MODEL.code[result.value.code]) || MODEL.refused, caption: result.value.error };
-  remember('model', input.appSessionId, { value: input.model, basis });
+  rememberModel(input.appSessionId, { value: input.model, basis });
   return { ok: true };
 }
 
@@ -125,7 +138,7 @@ export async function applyFlagSettings(input: { appSessionId: AppSessionId; set
   const basis = statusOf(input.appSessionId)?.fastMode.state ?? null;
   const result = await ipc.invoke('session.applyFlagSettings', input);
   if (!result.ok) return { ok: false, error: transportWords(result.error), caption: null };
-  if ('fastMode' in input.settings) remember('fast', input.appSessionId, { value: (input.settings.fastMode as boolean | null) ?? null, basis });
+  if ('fastMode' in input.settings) rememberFast(input.appSessionId, { value: (input.settings.fastMode as boolean | null) ?? null, basis });
   return { ok: true };
 }
 
