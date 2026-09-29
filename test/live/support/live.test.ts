@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { parseJournalRow, type JournalRow } from '@shared/wire/journal';
-import { assertConfigHomeSafe, exportFixture, frameInventory, journalCost, LiveLedger, liveSpec, persistingControlOf, PROVENANCE, turnAttribution } from './live';
+import { assertConfigHomeSafe, exportFixture, frameInventory, journalCost, LiveLedger, liveSpec, ownerConfigHome, persistingControlOf, PROVENANCE, turnAttribution } from './live';
 import { LiveHost } from './live-host';
 
 const REPO_ROOT = resolve(__dirname, '../../..');
@@ -113,6 +113,14 @@ describe('live suite bookkeeping', () => {
     expect(persistingControlOf('session.answer', { appSessionId: 'a', requestId: 'r', answer: { kind: 'permission', decision: 'allow', scope: 'session' } })).toBeNull(); // 3.9's grant: destination session
     expect(persistingControlOf('session.memoryAppend', { appSessionId: 'a', text: 't', target: { kind: 'user', path: null } })).toBe('memory:user');
     expect(persistingControlOf('session.memoryAppend', { appSessionId: 'a', text: 't', target: { kind: 'project', path: null } })).toBeNull(); // the scratch repo's CLAUDE.md
+    // a dialog-listed memory folder can live under the config home (M6 re-review): a path target there persists too
+    const home = '/Users/x/.claude';
+    const pathTarget = (path: string) => ({ appSessionId: 'a', text: 't', target: { kind: 'path', path } });
+    expect(persistingControlOf('session.memoryAppend', pathTarget('/Users/x/.claude/projects/-tmp-s/memory/notes.md'), home)).toBe('memory:user');
+    expect(persistingControlOf('session.memoryAppend', pathTarget('/Users/x/.claude/../.claude/CLAUDE.md'), home)).toBe('memory:user');
+    expect(persistingControlOf('session.memoryAppend', pathTarget('/tmp/maws-live-scratch-a/notes.md'), home)).toBeNull();
+    expect(persistingControlOf('session.memoryAppend', pathTarget('/Users/x/.claude-other/notes.md'), home)).toBeNull();
+    expect(persistingControlOf('session.memoryAppend', pathTarget(join(ownerConfigHome(), 'memory', 'n.md')))).toBe('memory:user'); // the default: the owner's home
     expect(persistingControlOf('session.getSettings', { appSessionId: 'a' })).toBeNull();
   });
 

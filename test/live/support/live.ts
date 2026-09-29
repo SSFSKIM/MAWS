@@ -7,8 +7,8 @@
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { homedir, tmpdir } from 'node:os';
+import { isAbsolute, join, relative, resolve } from 'node:path';
 import type { SessionEvent } from '@shared/graph/events';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
 import { LaunchSpecSchema } from '@shared/engine/launch-spec';
@@ -51,7 +51,8 @@ export function redactJournal(text: string, env: Record<string, string> = string
 
 // The config-home rule (coordinator, live-acceptance rule for every executor): a case under the owner's config home
 // observes the owner's real configuration and may only read; a control the engine persists into the config home
-// (`set_cwd` trust into `.claude.json`, an MCP toggle, a grant to a settings file, a `#` note to the user's CLAUDE.md)
+// (`set_cwd` trust into `.claude.json`, an MCP toggle, a grant to a settings file, a `#` note to the user's CLAUDE.md or
+// to any path under the config home)
 // runs under a scratch CLAUDE_CONFIG_DIR only. A case declares the persisting controls it will issue; the host checks the
 // declaration before anything spawns and refuses an undeclared one at the call.
 export const PERSISTING_CONTROLS = ['set_cwd:trust', 'mcp_toggle', 'grant:local_settings', 'memory:user'] as const;
@@ -63,14 +64,27 @@ export function assertConfigHomeSafe(plan: { configHome: string | null; controls
   throw new Error(`live case refused before spawning: ${plan.controls.join(', ')} would persist into the owner's config home; run it under a scratch CLAUDE_CONFIG_DIR`);
 }
 
-// The persisting control an X2 call would issue, or null for everything that leaves the config home as it was.
-export function persistingControlOf(command: string, input: unknown): PersistingControl | null {
-  const i = input as { trust?: unknown; answer?: { kind?: string; scope?: string }; target?: { kind?: string } };
+// The owner's config home: what the engine reads and writes when no scratch CLAUDE_CONFIG_DIR is set.
+export function ownerConfigHome(): string {
+  return process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), '.claude');
+}
+
+// The persisting control an X2 call would issue, or null for everything that leaves the config home as it was. A `#`
+// note persists into the config home when it targets the user memory file or any path under `configHome` (a
+// dialog-listed memory folder can live there: M6 re-review); both count as `memory:user`.
+export function persistingControlOf(command: string, input: unknown, configHome: string = ownerConfigHome()): PersistingControl | null {
+  const i = input as { trust?: unknown; answer?: { kind?: string; scope?: string }; target?: { kind?: string; path?: string | null } };
   if (command === 'session.setCwd' && i.trust) return 'set_cwd:trust';
   if (command === 'session.mcpToggle') return 'mcp_toggle';
   if (command === 'session.answer' && i.answer?.kind === 'permission' && i.answer.scope === 'local_settings') return 'grant:local_settings';
   if (command === 'session.memoryAppend' && i.target?.kind === 'user') return 'memory:user';
+  if (command === 'session.memoryAppend' && i.target?.kind === 'path' && typeof i.target.path === 'string' && isUnder(i.target.path, configHome)) return 'memory:user';
   return null;
+}
+
+function isUnder(path: string, dir: string): boolean {
+  const rel = relative(resolve(dir), resolve(path));
+  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
 }
 
 // A scratch config home: an empty user settings layer, so the owner's `~/.claude.json` and settings are never written.

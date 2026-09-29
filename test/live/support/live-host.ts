@@ -15,7 +15,7 @@ import type { IpcError } from '@shared/ipc/errors';
 import type { CommandInput, CommandName, CommandOutput, EventName } from '@shared/ipc/schema';
 import { captureShellEnvironment } from '@shared/host/shell-env';
 import { registerEngineIpc, type EngineIpc, type EngineIpcDeps } from '../../../src/engine-host/ipc';
-import { assertConfigHomeSafe, persistingControlOf, type PersistingControl } from './live';
+import { assertConfigHomeSafe, ownerConfigHome, persistingControlOf, type PersistingControl } from './live';
 import { HostHookRegistry } from '../../../src/engine-host/host-hooks';
 import { JOURNAL_MAX_BYTES, JournalWriter } from '../../../src/engine-host/journal';
 import { buildLaunch, RELAY_URL } from '../../../src/engine-host/launch';
@@ -48,6 +48,7 @@ export class LiveHost {
   private counter = 0;
 
   private readonly controls: ReadonlySet<PersistingControl>;
+  private readonly configHome: string; // the home the guard checks `#` path targets against
 
   // `configHome`: a scratch CLAUDE_CONFIG_DIR every process of this host runs under (null: the owner's own home);
   // `controls`: the persisting controls the case will issue, checked against the home before anything spawns.
@@ -55,6 +56,7 @@ export class LiveHost {
     const { configHome = null, controls = [], ...ipcDeps } = deps;
     assertConfigHomeSafe({ configHome, controls });
     this.controls = new Set(controls);
+    this.configHome = configHome ?? ownerConfigHome();
     const captureEnv = configHome === null ? ipcDeps.captureEnv : async () => ({ ...(await (ipcDeps.captureEnv ?? (() => captureShellEnvironment()))()), CLAUDE_CONFIG_DIR: configHome });
     let ipc!: EngineIpc;
     const runtime = createHostRuntime((on, emit) => (ipc = registerEngineIpc(on, emit, { replayEnabled: false, appVersion: '0.0.0-live', ...ipcDeps, ...(captureEnv ? { captureEnv } : {}) })));
@@ -79,7 +81,7 @@ export class LiveHost {
 
   // A command through the runtime, as main would send it; the answer as the runtime posted it.
   async callRaw<N extends CommandName>(name: N, input: CommandInput<N>): Promise<CallResult<N>> {
-    const control = persistingControlOf(name, input);
+    const control = persistingControlOf(name, input, this.configHome);
     if (control !== null && !this.controls.has(control)) throw new Error(`live case issued ${control}, which it has not declared; declare it and run under a scratch config home`);
     const id = String(++this.counter);
     const started = Date.now();
