@@ -802,6 +802,20 @@ describe('review tool', () => {
     errors.mockRestore();
   });
 
+  it('draws a block again once its diff changes after the diff view could not parse it', async () => {
+    const { default: ReviewView } = await import('./ReviewView');
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const view = (blocks: string[][]) => (
+      <ReviewView file={{ path: 'a.ts', oldPath: null, blocks }} mode="unified" wrap={false} hunk={0} navigate={0} initialScrollTop={0} onHunk={() => {}} onLeave={() => {}} />
+    );
+    const { rerender } = render(view([['@@ -1,1 +1,1 @@\nnot a diff line']]));
+    await waitFor(() => expect(bodyText()).toContain('Diff unavailable: Malformed diff, empty hunk'));
+    rerender(view([['@@ -1 +1 @@\n-before\n+after']]));
+    await waitFor(() => expect(bodyText()).toContain('after'));
+    expect(bodyText()).not.toContain('Diff unavailable');
+    errors.mockRestore();
+  });
+
   it('shows a child agent’s edit from its own activity entry', async () => {
     const b = builder();
     b.turn('u1');

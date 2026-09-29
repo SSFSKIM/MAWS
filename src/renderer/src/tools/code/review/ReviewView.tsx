@@ -149,14 +149,19 @@ export default function ReviewView({ file, mode, wrap, hunk, navigate, initialSc
 
 // The diff view throws while rendering a diff its parser rejects; uncaught, that would unmount the whole window (M4:
 // found over a fixture's unprefixed context lines). One block says so instead, and tries again when its diff changes.
-class BlockBoundary extends Component<{ block: unknown; children: ReactNode }, { error: string | null; block: unknown }> {
-  state = { error: null, block: this.props.block };
+interface BlockBoundaryState {
+  error: string | null; // the diff view's message for this block, or null while it draws
+  block: unknown; // the block the error belongs to
+}
 
-  static getDerivedStateFromError(error: unknown): Partial<{ error: string }> {
+class BlockBoundary extends Component<{ block: unknown; children: ReactNode }, BlockBoundaryState> {
+  state: BlockBoundaryState = { error: null, block: this.props.block };
+
+  static getDerivedStateFromError(error: unknown): Partial<BlockBoundaryState> {
     return { error: error instanceof Error ? error.message : String(error) };
   }
 
-  static getDerivedStateFromProps(props: { block: unknown }, state: { error: string | null; block: unknown }) {
+  static getDerivedStateFromProps(props: { block: unknown }, state: BlockBoundaryState): Partial<BlockBoundaryState> | null {
     return props.block === state.block ? null : { error: null, block: props.block };
   }
 
