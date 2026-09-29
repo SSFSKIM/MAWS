@@ -50,6 +50,7 @@ export class MessageQueue {
   private loaded = false; // recover() ran: before it the queue owns nothing and must never overwrite the stored one
   private readonly ackTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly started = new Set<string>(); // queue ids whose submission the engine started
+  private readonly saving = new Set<Promise<void>>(); // store saves not yet settled
   private readonly log: (message: string) => void;
 
   constructor(private readonly deps: MessageQueueDeps) {
@@ -296,6 +297,12 @@ export class MessageQueue {
     for (const queueId of [...this.ackTimers.keys()]) this.clearAck(queueId);
   }
 
+  // Resolves once no save is in flight, including one a settling save's continuation issued (the session's exit waits
+  // on it, so an archive's forget runs after the last write: nothing recreates the state file).
+  async settled(): Promise<void> {
+    while (this.saving.size > 0) await Promise.allSettled([...this.saving]);
+  }
+
   // ---------------------------------------------------------------------------------------------------------------------
 
   private settleAfterExit(): void {
@@ -426,7 +433,11 @@ export class MessageQueue {
   // Saved through the store, then announced with what was saved; a failed save rejects and announces nothing.
   private async persist(): Promise<void> {
     const snapshot = this.state;
-    await this.deps.store.saveQueue(this.deps.appSessionId, snapshot);
+    const save = this.deps.store.saveQueue(this.deps.appSessionId, snapshot);
+    this.saving.add(save);
+    const done = () => void this.saving.delete(save);
+    save.then(done, done);
+    await save;
     try {
       this.deps.onChange(snapshot);
     } catch (error) {

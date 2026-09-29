@@ -439,6 +439,29 @@ describe('EngineSession: inbound requests, host hooks and exit', () => {
     expect(clean.session.status().exit?.reason).toBe('unknown');
   });
 
+  it("the exit settles only once its store writes have landed: stop resolves after the queue save that retires the released entry, so an archive's forget comes last", async () => {
+    const store = new MemorySessionStateStore();
+    const save = store.saveQueue.bind(store);
+    let slow = false;
+    store.saveQueue = async (id, queue) => {
+      if (slow) await new Promise((r) => setTimeout(r, 30)); // a slow disk at the exit
+      return save(id, queue);
+    };
+    const { session, transport } = setup({ session: { store }, responder: defaultResponder({ end_session: () => null }) });
+    await session.start();
+    const { messageUuid } = await session.send('hi');
+    transport.push({ type: 'command_lifecycle', command_uuid: messageUuid, state: 'queued', uuid: 'lc-q', session_id: 's' });
+    await flush();
+    expect((await store.loadQueue('app-s' as AppSessionId)).entries).toMatchObject([{ state: 'released' }]);
+    slow = true;
+    const stopping = session.stop('archive');
+    await flush();
+    transport.exit(0);
+    expect(await stopping).toEqual({ exited: true, code: 0, signal: null });
+    expect((await store.loadQueue('app-s' as AppSessionId)).entries).toEqual([]); // the exit's save landed before stop answered
+    expect(await session.stop('archive')).toEqual({ exited: true, code: 0, signal: null });
+  });
+
   it('stop writes end_session and reports the exit as stop', async () => {
     const { session, transport } = setup({ responder: defaultResponder({ end_session: () => null }) });
     await session.start();

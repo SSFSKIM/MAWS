@@ -105,6 +105,7 @@ export class EngineSession {
   private readonly listeners: { [K in keyof Listeners]: Set<Listeners[K]> } = { events: new Set(), status: new Set(), brokerItems: new Set(), queue: new Set(), exited: new Set() };
   private readonly pendingWarnings: NormalizerWarning[] = [];
   private readonly stderrTail: string[] = [];
+  private readonly storeWrites = new Set<Promise<void>>();
   private readonly launchedAt = new Date().toISOString();
 
   private transport: EngineTransport | null = null;
@@ -154,7 +155,7 @@ export class EngineSession {
         const next = recordFromResponse(this.grants, updates);
         if (next === this.grants) return;
         this.grants = next;
-        this.store.saveGrants(this.spec.appSessionId, next).catch((error: unknown) => this.log(`grants not saved: ${messageOf(error)}`));
+        this.storeWrite(this.store.saveGrants(this.spec.appSessionId, next), 'grants');
         this.opts.onGrants?.(next);
         this.touch();
       },
@@ -253,7 +254,7 @@ export class EngineSession {
   // process is spawned there is nothing to ladder: the reason is recorded, `run()` sees it and ends the session with no
   // process (a stop before `start()` ends it at once), and the answer is that exit (whole-branch review).
   stop(reason: 'stop' | 'archive' | 'quit' = 'stop', opts: { graceMs?: number } = {}): Promise<StopResult> {
-    if (this.processState === 'exited') return Promise.resolve(this.stopResult());
+    if (this.processState === 'exited') return this.exited.then(() => this.stopResult()); // its store writes settled too
     this.stopReason ??= reason;
     if (!this.transport) {
       if (this.starting === null) this.handleExit({ code: null, signal: null });
@@ -444,7 +445,7 @@ export class EngineSession {
         this.log(`grants not loaded: ${messageOf(error)}`);
       }
     }
-    this.store.saveLaunchSpec(this.spec.appSessionId, this.spec).catch((error: unknown) => this.log(`launch spec not saved: ${messageOf(error)}`));
+    this.storeWrite(this.store.saveLaunchSpec(this.spec.appSessionId, this.spec), 'launch spec');
   }
 
   // Causal order (M3 re-review): a frame read while one of our writes is in flight may be the engine's reply to it,
@@ -767,8 +768,22 @@ export class EngineSession {
     this.journalClosed = true;
     void this.journal.close();
     const summary: ExitSummary = { code: exit.code, signal: exit.signal, reason, lostAttentionCount: lost };
-    this.resolveExited(summary);
-    this.emit('exited', summary);
+    // `exited` (and so `stop()`) settles once the exit's store writes have landed, so an archive's `forget` is the last
+    // write and nothing recreates the state file after it (fix-wave follow-up)
+    void (async () => {
+      await queueSettled.catch(() => {});
+      await this.queue.settled();
+      while (this.storeWrites.size > 0) await Promise.allSettled([...this.storeWrites]);
+      this.resolveExited(summary);
+      this.emit('exited', summary);
+    })();
+  }
+
+  // A store write the exit waits for (grants, the launch spec); a failure is logged, never thrown.
+  private storeWrite(write: Promise<void>, what: string): void {
+    const tracked = write.catch((error: unknown) => this.log(`${what} not saved: ${messageOf(error)}`));
+    this.storeWrites.add(tracked);
+    void tracked.then(() => this.storeWrites.delete(tracked));
   }
 
   // ---------------------------------------------------------------------------------------------------------------------

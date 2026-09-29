@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -289,6 +290,26 @@ describe('engine host X2 surface', () => {
     expect(host.emitted.at(-1)).toEqual({ name: 'session.forgotten', payload: { appSessionId: ended } });
     expect((await host.call('engine.sessions', undefined)).map((s) => s.appSessionId)).toEqual([]);
     await expect(host.call('session.events', { appSessionId: ended as AppSessionId, afterSeq: null, limit: null })).rejects.toThrow(`unknown session ${ended}`);
+  });
+
+  it('archive with a released entry outstanding: once session.stop resolves, the state file and the journal directory are gone and nothing written at the exit brings them back', async () => {
+    const store = new FileSessionStateStore(userData);
+    const host = engineHost({ store });
+    const id = 'app-archive-released';
+    await host.call('session.launch', { spec: replaySpec(id, 'spikes/protocol-probe/fixtures/permission-roundtrip.jsonl') });
+    await until(() => host.statuses(id).some((s) => s.process === 'ready'), 'ready');
+    await host.call('session.send', { appSessionId: id as AppSessionId, content: 'Use Bash to run exactly git log --oneline. Then say DONE.' });
+    await until(() => host.events(id).some((e) => e.kind === 'permission.requested'), 'permission.requested');
+    await until(() => host.emitted.some((e) => e.name === 'session.queue' && (e.payload as { entries: { state: string }[] }).entries.some((q) => q.state === 'released')), 'the entry released');
+    const stateFile = join(userData, 'engine-host', 'state', `${id}.json`);
+    const journalDir = join(userData, 'engine-host', 'journal', id);
+    expect(existsSync(stateFile)).toBe(true);
+    await host.call('session.stop', { appSessionId: id as AppSessionId, reason: 'archive' });
+    expect(existsSync(stateFile)).toBe(false);
+    expect(existsSync(journalDir)).toBe(false);
+    for (let i = 0; i < 20; i += 1) await new Promise((r) => setTimeout(r, 10)); // every write the exit started has had its turn
+    expect(existsSync(stateFile)).toBe(false);
+    expect(existsSync(journalDir)).toBe(false);
   });
 
   it('a relaunch replaces the exited launch\'s row and stream: engine.sessions lists the id once, session.events answers the new launch only', async () => {

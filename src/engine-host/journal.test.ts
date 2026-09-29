@@ -109,7 +109,7 @@ describe('transport frames and journals', () => {
       expect(secondSeqs[0]).toBe(firstSeqs.at(-1)! + 1);
       expect([...firstSeqs, ...secondSeqs]).toEqual(Array.from({ length: 130 }, (_, i) => i + 1));
       expect(writer.currentPath).toBe(second);
-    });
+    }, 20_000); // it writes 128 MiB: the 5 s default flaked under a concurrent typecheck (fix wave)
 
     it('refuses rows after close', async () => {
       const writer = new JournalWriter(join(root, 'app-1'), 'abcdefgh', { maxBytes: JOURNAL_MAX_BYTES });
