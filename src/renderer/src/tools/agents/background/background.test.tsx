@@ -463,13 +463,18 @@ describe('task checklist', () => {
     expect(tasksCalls).toEqual(['sess-1', 'sess-1']);
   });
 
-  it('a failed read says why; an empty list reads No tasks; useCommand is never called', async () => {
+  it('a failed read says why; an empty list says the engine is not creating task lists; useCommand is never called', async () => {
     lists['sess-1'] = new Error('permission denied');
     await mount({ status: live({ taskListId: 'sess-1' }) });
     await waitFor(() => expect(within(checklist()).getByText('Tasks unavailable: permission denied')).toBeTruthy());
     unmountAll();
+    // The architect's ruling (2026-09-29): TaskCreate is off on the current models unless the launch enables TODO tools,
+    // so an empty list is the engine not creating one, not an empty plan. The launch's environment is not on any renderer
+    // surface, so the line that would say TODO tools are off is not shown.
     await mount({ status: live({ taskListId: 'empty' }) });
-    await waitFor(() => expect(within(checklist()).getByText('No tasks')).toBeTruthy());
+    await waitFor(() => expect(within(checklist()).getByText('The engine is not creating task lists in this session')).toBeTruthy());
+    expect(within(checklist()).queryByText('No tasks')).toBeNull();
+    expect(within(checklist()).queryByText('TODO tools are off in this launch')).toBeNull();
     expect(query.useCommand).not.toHaveBeenCalled();
   });
 });

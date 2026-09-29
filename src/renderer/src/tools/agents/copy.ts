@@ -110,7 +110,9 @@ export const BACKGROUND_COPY = {
   sessionList: 'session list',
   tasksNoListId: 'Tasks unavailable until the engine reports its list',
   tasksUnavailable: (message: string) => `Tasks unavailable: ${message}`,
-  noTasks: 'No tasks',
+  // an empty list: TaskCreate is off on the current models unless the launch enables TODO tools (the architect's ruling,
+  // 2026-09-29), so the engine is not creating one; a live and a disk-only session read the same
+  noTaskLists: 'The engine is not creating task lists in this session',
   shellsDiskOnly: 'Shells and monitors are known only while the session runs here',
   runsOnDisk: (n: number) => `Workflow runs on disk · ${n}`,
   nothingRunning: 'Nothing running',

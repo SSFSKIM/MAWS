@@ -34,7 +34,7 @@ export function TaskChecklist({ status, session, expanded, onToggle, showEarlier
   if (listId === null) body = <Note>{BACKGROUND_COPY.tasksNoListId}</Note>;
   else if (tasks.error) body = <Note danger>{BACKGROUND_COPY.tasksUnavailable(tasks.error.message)}</Note>;
   else if (list === null) body = null; // the first read is in flight
-  else if (list.total === 0) body = <Note>{BACKGROUND_COPY.noTasks}</Note>;
+  else if (list.total === 0) body = <Note>{BACKGROUND_COPY.noTaskLists}</Note>;
   else {
     body = (
       <>
