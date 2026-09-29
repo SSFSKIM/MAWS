@@ -13,7 +13,7 @@ import { launchMaws, REPO_ROOT, test } from './support/launch';
 
 test.skip(process.env.MAWS_PANEL_LIVE !== '1', 'the live check runs only under MAWS_PANEL_LIVE=1');
 
-const GITHUB_REMOTE = 'https://github.com/SSFSKIM/MAWS.git'; // the scratch clone's remote, in GitHub's form; this checkout has no remote
+const ASSUMED_REPOSITORY = 'SSFSKIM/MAWS'; // used only when this checkout has no GitHub remote of its own
 const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8', env: { ...process.env, GIT_CONFIG_NOSYSTEM: '1' } }).trim();
 const tryGit = (cwd: string, ...args: string[]) => {
   try {
@@ -49,12 +49,27 @@ function expectedPush(dir: string): string {
   return `${ahead > 0 ? `${ahead} ahead of ${upstream}` : `Up to date with ${upstream}`}${behind > 0 ? ` · ${behind} behind` : ''}`;
 }
 
+// `<owner>/<repo>` of a GitHub remote in any of its forms (git@github.com:o/r.git, ssh://git@github.com/o/r.git,
+// https://github.com/o/r(.git)), else null.
+function githubRepository(remote: string | null): string | null {
+  const match = remote && /^(?:git@github\.com:|ssh:\/\/git@github\.com\/|https:\/\/github\.com\/)([^/]+)\/([^/]+?)(?:\.git)?\/?$/.exec(remote);
+  return match ? `${match[1]}/${match[2]}` : null;
+}
+
 test('live: the summary over this repository matches git', async () => {
   const scratch = realpathSync(mkdtempSync(join(tmpdir(), 'maws-panel-live-')));
   const branch = git(REPO_ROOT, 'rev-parse', '--abbrev-ref', 'HEAD');
+  // The clone's remote: this checkout's own GitHub repository when it has one, else an assumed one (annotated).
+  const origin = tryGit(REPO_ROOT, 'remote', 'get-url', 'origin');
+  const derived = githubRepository(origin);
+  const repository = derived ?? ASSUMED_REPOSITORY;
+  test.info().annotations.push({
+    type: 'GitHub repository',
+    description: derived ? `${repository}, from this checkout's origin (${origin})` : `${repository}, assumed: this checkout has ${origin ? `a non-GitHub origin (${origin})` : 'no origin remote'}`,
+  });
   const clone = join(scratch, 'clone');
   git(scratch, 'clone', '--quiet', '--branch', branch, REPO_ROOT, clone);
-  git(clone, 'remote', 'set-url', 'origin', GITHUB_REMOTE);
+  git(clone, 'remote', 'set-url', 'origin', `https://github.com/${repository}.git`);
   const plain = join(scratch, 'not-a-repository');
   mkdirSync(plain);
 
@@ -97,7 +112,7 @@ test('live: the summary over this repository matches git', async () => {
       await open('Fix sidebar drag');
       await expect(section('Push state')).toContainText(expectedPush(clone)); // up to date with origin/<branch>
       await section('Push state').getByRole('button', { name: 'Open on GitHub' }).click();
-      await expect.poll(() => app.evaluate(() => (globalThis as { __opened?: string[] }).__opened)).toEqual([`https://github.com/SSFSKIM/MAWS/tree/${branch}`]);
+      await expect.poll(() => app.evaluate(() => (globalThis as { __opened?: string[] }).__opened)).toEqual([`https://github.com/${repository}/tree/${branch}`]);
       observed.openOnGitHub = (await app.evaluate(() => (globalThis as { __opened?: string[] }).__opened))?.[0];
 
       writeFileSync(join(clone, 'panel-live-note.txt'), 'scratch\n');

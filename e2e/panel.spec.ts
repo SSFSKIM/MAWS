@@ -802,6 +802,9 @@ test.describe('the #panel harness: strip, summary, R7 and themes', () => {
   test('a Terminal tab works at the default side-column width', async ({ maws }) => {
     const panel = await PanelPage.open(maws);
     const { page, app } = maws;
+    // As in R7: with the page's sidebar collapsed, C5's clamp cannot narrow the panel in a small window, so the default
+    // width and the 640 px refit below render as set.
+    await panel.call('collapseSidebar', true);
     expect((await panel.region.boundingBox())!.width, 'the product default, C5’s --panel-w').toBe(380);
     await panel.region.getByRole('button', { name: 'Add a tool' }).click();
     await page.getByRole('menuitem', { name: 'Terminal' }).click();
