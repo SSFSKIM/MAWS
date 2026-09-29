@@ -28,6 +28,10 @@ import { registerOpenExternal } from './open-external';
 import { startSessions } from './sessions';
 import { restoreWindowState, trackWindowState } from './window-state';
 // C5 end
+// C10 start (registerMainHandler comes with C3's imports)
+import { createGitRunner } from './git/runner';
+import { trustStateOf } from './sessions/trust';
+// C10 end
 
 // A fresh profile for the end-to-end smoke (and anyone else who wants one); must be set before the app is ready.
 if (process.env.MAWS_USER_DATA) app.setPath('userData', process.env.MAWS_USER_DATA);
@@ -101,6 +105,7 @@ app.whenReady().then(() => {
   // C4 start: registered after C5's will-quit above, so the index source has stopped before the index it reads closes
   app.on('will-quit', () => index.close());
   // C4 end
+
   // The application menu from the action table, rebuilt on settings and on the page's registered handlers.
   registerMenuHandlers(startMenu({ settings: () => settings.state().settings, emit }));
   // Window bounds persist under `window.main`; a window opens where the last one was left, if that is still on screen.
@@ -108,6 +113,11 @@ app.whenReady().then(() => {
     restoreWindowState(layout.get('window.main'), screen.getAllDisplays().map((d) => d.workArea), screen.getPrimaryDisplay().workArea);
   const tracked = (win: BrowserWindow) => trackWindowState(win, (state) => layout.set('window.main', state));
   // ---- end C5 ----
+
+  // C10 start: the trust check (M1): whether the pinned engine would find a directory trusted, read from the engine's own
+  // global config (read only; CLAUDE_CONFIG_DIR honoured as the engine honours it). The session service joins in M3.
+  registerMainHandler('session.trust.check', ({ directory }) => trustStateOf(directory, { git: createGitRunner(), env: process.env }));
+  // C10 end
 
   // The hosts belong to the app, not to a window or a page (§4.1): they start here, before any window exists, and
   // `start()` is idempotent, so opening a window again forks nothing and a reload never reaches them.

@@ -39,6 +39,9 @@ import {
 import { ProjectIdSchema, SessionIdSchema } from '@shared/graph/ids';
 import { SessionRecordSchema } from '@shared/graph/session';
 // C4 end
+// C10 start (AppSessionIdSchema comes with C3's imports above)
+import { TrustStateSchema } from '../../sessions/trust';
+// C10 end
 import type { CommandSpec } from './common';
 
 // C3 start
@@ -297,10 +300,22 @@ const c5Events = {
 } as const satisfies Record<`session.${string}`, z.ZodType>;
 // C5 end --------------------------------------------------------------------------------------------------------------
 
+// C10 start -----------------------------------------------------------------------------------------------------------
+// Sessions, worktrees and trust (C10 execution document, "X2 additions"). M1 lands the trust check (main: the trust
+// reader over the engine's global config, read only) and `session.forget` (the engine host: the state file and the
+// journal, then `session.forgotten`; refused `already_live` while a process is reserved); the lifecycle commands and
+// the `session.setup` and `session.intent.changed` events join this block in M3.
+const c10Commands = {
+  'session.trust.check': { input: z.strictObject({ directory: z.string() }), output: TrustStateSchema, owner: 'main' },
+  'session.forget': { input: z.strictObject({ appSessionId: AppSessionIdSchema }), output: z.void(), owner: 'engine-host' },
+} as const satisfies Record<`session.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
+// C10 end -------------------------------------------------------------------------------------------------------------
+
 export const commands = {
   ...c3Commands, // C3
   ...c4Commands, // C4
   ...c5Commands, // C5
+  ...c10Commands, // C10
 } as const satisfies Record<`session.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {
