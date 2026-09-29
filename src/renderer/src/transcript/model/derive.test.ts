@@ -332,7 +332,7 @@ describe('time separators', () => {
     b.text('m4', 0, 'Four');
     b.end([], { origin: 'task-notification' });
     const list = rows(b.events);
-    expect(kinds(list)).toEqual(['time', 'user', 'assistant_text', 'user', 'assistant_text', 'time', 'user', 'assistant_text', 'time', 'assistant_text']);
+    expect(kinds(list)).toEqual(['time', 'user', 'assistant_text', 'user', 'assistant_text', 'time', 'user', 'assistant_text', 'time', 'divider', 'assistant_text']); // the engine turn's divider
     expect(find(list, 'time', 0)).toMatchObject({ id: rowId.time(turnId.ofMessage(uuid('u1'))), label: 'Today 10:00 AM' });
     expect(find(list, 'time', 1).label).toBe('Today 11:31 AM');
   });

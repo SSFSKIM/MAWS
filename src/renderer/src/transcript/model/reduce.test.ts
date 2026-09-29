@@ -1,5 +1,6 @@
 import type { SessionEvent } from '@shared/graph/events';
 import { describe, expect, it } from 'vitest';
+import { dividerCopy } from './copy';
 import { rowsOf, withAllExpanded } from './derive';
 import { rowId, turnId } from './keys';
 import { applyEvents, createState } from './reduce';
@@ -213,7 +214,9 @@ describe('turn origin', () => {
     const state = reduce(b.events);
     expect(state.order.map((id) => state.turns.get(id)!.origin)).toEqual(['engine', 'human', 'engine']);
     const list = rows(b.events);
-    expect(kinds(list)).toEqual(['time', 'assistant_text', 'user', 'assistant_text', 'assistant_text']); // engine turns: no user row
+    // Engine turns: no user row, and a divider even without a work area, so the reader sees whose turn it was.
+    expect(kinds(list)).toEqual(['time', 'divider', 'assistant_text', 'user', 'assistant_text', 'divider', 'assistant_text']);
+    expect(list.filter((row) => row.kind === 'divider').map((row) => { const d = row as Extract<Row, { kind: 'divider' }>; return dividerCopy({ ...d, durationMs: d.summary.durationMs ?? 0 }); })).toEqual(['Continued for 1s', 'Continued for 1s']);
   });
 
   it('null on both events is human (C4 backfill), and a missing user message is not evidence', () => {

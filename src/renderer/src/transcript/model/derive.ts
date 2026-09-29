@@ -476,7 +476,9 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
   const dividerState: RowOf<'divider'>['state'] = turn.state === 'open' ? 'working' : turn.closedBy !== null ? turn.closedBy : isAborted(turn.ended?.terminalReason ?? null) ? 'stopped' : turn.ended?.isError ? 'failed' : turn.ended ? 'completed' : 'stopped';
   const rows: Row[] = [];
   if (user) rows.push(user);
-  if (workRows.length > 0) {
+  // The divider summarises a work area; an engine turn always has one, because with no user row it is what tells the
+  // reader the engine continued on its own ("Continued for …"; pass2/workflow's engine turn is a single answer).
+  if (workRows.length > 0 || turn.origin === 'engine') {
     const denied = denials.filter((d) => d.disposition === 'denied');
     const firstDenied = denials.find((d) => d.disposition !== 'stopped')?.cellId ?? null;
     rows.push({

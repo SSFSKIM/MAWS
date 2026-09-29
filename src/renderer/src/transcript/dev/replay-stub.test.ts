@@ -212,6 +212,9 @@ describe('fixture gates through the model', () => {
     expect(subagent).toHaveLength(1);
     expect(subagent[0].agents[0]).toMatchObject({ kind: 'workflow', taskId: 'wayue3on6', name: 'Two echo agents in one phase' });
     expect(subagent[0].status).toBe('finished');
+    // The engine turn is a single answer with no work area; its divider still says the engine continued (M6).
+    expect(ofKind(rows, 'divider').map((row) => [row.turnId, row.origin, row.toolCalls])).toEqual([[state.order[0], 'human', 0], [state.order[1], 'engine', 0]]);
+    expect(ofKind(rows, 'user').map((row) => row.turnId)).toEqual([state.order[0]]);
   });
 
   it('pass2/rewind: a rewind boundary after the second turn hiding rows', () => {
