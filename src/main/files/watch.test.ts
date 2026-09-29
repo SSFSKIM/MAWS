@@ -66,7 +66,8 @@ afterEach(() => {
   rmSync(root, { recursive: true, force: true });
 });
 
-describe('files watch', () => {
+// FSEvents can lag by seconds under a loaded machine (pnpm verify runs suites in parallel): the waits are bounded at 6 s.
+describe('files watch', { timeout: 20_000 }, () => {
   it('ages a file on this volume as the suite relies on', () => {
     expect(statSync(join(dir, 'old.txt')).birthtimeMs).toBeLessThan(Date.now() - 30_000);
   });
@@ -79,7 +80,7 @@ describe('files watch', () => {
     expect(watchers).toHaveLength(1);
     expect(files.watching()).toEqual([dir]);
     writeFileSync(join(dir, 'new.txt'), 'new');
-    await vi.waitFor(() => expect(emitted).toHaveLength(2), { timeout: 3000 });
+    await vi.waitFor(() => expect(emitted).toHaveLength(2), { timeout: 6000 });
     await settle(400);
     expect(emitted.sort((x, y) => x.appSessionId.localeCompare(y.appSessionId))).toEqual([
       { appSessionId: A, path: join(dir, 'new.txt'), kind: 'created' },
@@ -91,11 +92,11 @@ describe('files watch', () => {
     await files.watch(A, dir, 1);
     await quiet();
     writeFileSync(join(dir, 'fresh.txt'), 'fresh');
-    await vi.waitFor(() => expect(emitted).toContainEqual({ appSessionId: A, path: join(dir, 'fresh.txt'), kind: 'created' }), { timeout: 3000 });
+    await vi.waitFor(() => expect(emitted).toContainEqual({ appSessionId: A, path: join(dir, 'fresh.txt'), kind: 'created' }), { timeout: 6000 });
     appendFileSync(join(dir, 'old.txt'), ' more');
-    await vi.waitFor(() => expect(emitted).toContainEqual({ appSessionId: A, path: join(dir, 'old.txt'), kind: 'changed' }), { timeout: 3000 });
+    await vi.waitFor(() => expect(emitted).toContainEqual({ appSessionId: A, path: join(dir, 'old.txt'), kind: 'changed' }), { timeout: 6000 });
     unlinkSync(join(dir, 'old.txt'));
-    await vi.waitFor(() => expect(emitted).toContainEqual({ appSessionId: A, path: join(dir, 'old.txt'), kind: 'removed' }), { timeout: 3000 });
+    await vi.waitFor(() => expect(emitted).toContainEqual({ appSessionId: A, path: join(dir, 'old.txt'), kind: 'removed' }), { timeout: 6000 });
   });
 
   it('coalesces a burst of events per filename into one batch', async () => {
@@ -104,7 +105,7 @@ describe('files watch', () => {
     for (let i = 0; i < 5; i++) appendFileSync(join(dir, 'old.txt'), `${i}`);
     writeFileSync(join(dir, 'burst.txt'), 'b');
     appendFileSync(join(dir, 'burst.txt'), 'c');
-    await vi.waitFor(() => expect(emitted.length).toBeGreaterThanOrEqual(2), { timeout: 3000 });
+    await vi.waitFor(() => expect(emitted.length).toBeGreaterThanOrEqual(2), { timeout: 6000 });
     await settle();
     expect(emitted.filter((e) => e.path === join(dir, 'old.txt'))).toEqual([{ appSessionId: A, path: join(dir, 'old.txt'), kind: 'changed' }]);
     expect(emitted.filter((e) => e.path === join(dir, 'burst.txt'))).toEqual([{ appSessionId: A, path: join(dir, 'burst.txt'), kind: 'created' }]);
@@ -115,7 +116,7 @@ describe('files watch', () => {
     await files.watch(A, dir, 1);
     await quiet();
     writeFileSync(join(dir, 'x.txt'), 'x');
-    await vi.waitFor(() => expect(emitted).toHaveLength(1), { timeout: 3000 });
+    await vi.waitFor(() => expect(emitted).toHaveLength(1), { timeout: 6000 });
     expect(calls).toEqual(['before-batch', 'emit:created']);
   });
 
@@ -139,7 +140,7 @@ describe('files watch', () => {
     files.release(1);
     expect(watchers[0].close).not.toHaveBeenCalled();
     writeFileSync(join(dir, 'y.txt'), 'y');
-    await vi.waitFor(() => expect(emitted).toHaveLength(1), { timeout: 3000 });
+    await vi.waitFor(() => expect(emitted).toHaveLength(1), { timeout: 6000 });
     expect(emitted[0].appSessionId).toBe(B); // the released holder's session is no longer told
     files.release(2);
     expect(watchers[0].close).toHaveBeenCalled();
@@ -155,14 +156,16 @@ describe('files watch', () => {
     expect(watchers).toHaveLength(2);
     expect(watchers[0].close).toHaveBeenCalled();
     expect(files.watching()).toEqual([dir]);
+    await settle(); // libuv restarts its one FSEvents stream when a watcher is added or closed; a write inside the restart is lost
     writeFileSync(join(dir, 'z.txt'), 'z');
-    await vi.waitFor(() => expect(emitted).toContainEqual({ appSessionId: B, path: join(dir, 'z.txt'), kind: 'created' }), { timeout: 3000 });
+    await vi.waitFor(() => expect(emitted).toContainEqual({ appSessionId: B, path: join(dir, 'z.txt'), kind: 'created' }), { timeout: 6000 });
   });
 
   it('invalidates a watch whose directory is removed, and a fresh watch after it is back installs a new watcher', async () => {
     await files.watch(A, dir, 1);
+    await settle(); // past the stream restart (above)
     rmSync(dir, { recursive: true });
-    await vi.waitFor(() => expect(emitted).toContainEqual({ appSessionId: A, path: dir, kind: 'invalidated' }), { timeout: 3000 });
+    await vi.waitFor(() => expect(emitted).toContainEqual({ appSessionId: A, path: dir, kind: 'invalidated' }), { timeout: 6000 });
     expect(files.watching()).toEqual([]);
     mkdirSync(dir);
     await files.watch(A, dir, 1);

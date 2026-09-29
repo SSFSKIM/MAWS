@@ -1,23 +1,29 @@
 // The `files.*` service (C8c execution document, Interfaces "The open-first boundary"; the C8 spec's K1): list, read,
 // watch and open a session's own files, every one confined to the session's allowlist (`allowlist.ts`).
 //
-// The boundary opens before it trusts: after a pre-check by realpath (step 1) it opens the path as given with
-// `O_RDONLY | O_NOFOLLOW | O_NONBLOCK` (step 3; `O_DIRECTORY` too for a directory), `fstat`s the descriptor (4), then
-// confirms the opened object by a fresh realpath under a root whose `stat` names the descriptor's `(dev, ino)` (5), and
-// only then judges its type (5b), so no type is ever named for an object outside. `read` serves from the descriptor.
-// `list` and `watch` cannot (Node has no `fdopendir`, and `fs.watch` takes a path), so a listing stays private until a
-// confirmation after its last metadata read, and a watch is confirmed after its install and before every batch.
+// The boundary opens before it trusts: a pre-check (step 1) resolves the path to its in-root realpath `real0` and
+// refuses a path that ends in a symlink; step 3 opens `real0` with `O_RDONLY | O_NONBLOCK | O_NOFOLLOW_ANY`
+// (`O_DIRECTORY` too for a directory), so the kernel refuses a symlink anywhere on the path and the descriptor names an
+// object reached through `real0`'s own directories; it `fstat`s the descriptor (4), confirms the opened object again
+// by a fresh realpath under a root whose `stat` names the descriptor's `(dev, ino)` (5), and only then judges its type
+// (5b), so no type is ever named for an object outside. `read` serves from the descriptor. `list` and `watch` cannot
+// (Node has no `fdopendir`, and `fs.watch` takes a path), so a listing stays private until a confirmation after its
+// last metadata read, and a watch is confirmed after its install and before every batch.
 //
-// The recorded limits, per operation: `read` none by race (a swap before the open is refused at step 5 whether it
-// stands or was restored); hard links inside a root are the file itself, accepted by design. `list`: a swap-and-restore
-// between `readdir` and the final confirmation can let outside names and metadata (never contents) into the answer.
-// `watch`: a swap-and-restore between the install and its confirmation attaches the watcher outside until a batch's
-// confirmation catches a standing swap, or forwards outside filenames if it was restored; a swap between a batch's
-// confirmation and its per-name `lstat` classifies that batch's kinds from outside metadata. `openExternal` is
-// path-checked immediately before `shell.openPath`, with no descriptor guarantee.
+// The recorded limits, per operation: `read` none by race, because the open cannot traverse a symlink, so no
+// substitution by symlink is ever followed, and step 5 refuses anything else that changed between the open and the
+// confirmation (the reading that step 5 alone closed it was wrong: its `realpath` and `stat` are two path steps an
+// ancestor flipping symlink, directory, symlink can straddle; M1 review); hard links inside a root, and a directory
+// renamed into a root, are in the tree when opened, accepted by design. `list`: a swap-and-restore between `readdir` and
+// the final confirmation can let outside names and metadata (never contents) into the answer. `watch`: a
+// swap-and-restore between the install and its confirmation attaches the watcher outside until a batch's confirmation
+// catches a standing swap, or forwards outside filenames if it was restored; a swap between a batch's confirmation and
+// its per-name `lstat` classifies that batch's kinds from outside metadata. `openExternal` is path-checked immediately
+// before `shell.openPath`, with no descriptor guarantee, and hands the OS only a regular, non-executable file whose
+// extension macOS opens rather than launches.
 import fs, { type BigIntStats } from 'node:fs';
 import type { FileHandle } from 'node:fs/promises';
-import { basename, dirname, isAbsolute, join, normalize } from 'node:path';
+import { basename, dirname, extname, isAbsolute, join, normalize } from 'node:path';
 import type { AppSessionId } from '@shared/graph/ids';
 import {
   BINARY_SNIFF_BYTES,
@@ -32,7 +38,7 @@ import {
 } from '@shared/ipc/schema/files';
 import { rootsOf, under, type AllowlistRecord } from './allowlist';
 import { fileMime, isTextMime } from './mime';
-import { sameIdentity, WatchTable, type Identity } from './watch';
+import { sameIdentity, WatchTable, type Identity, type Installation } from './watch';
 
 export type BoundaryPoint = 'before-open' | 'after-open' | 'after-readdir' | 'after-watch-install' | 'before-batch';
 export interface BoundaryHooks {
@@ -62,8 +68,21 @@ export interface FilesService {
 
 export const FILES_REFUSAL = "path outside the session's directories";
 
-const { O_RDONLY, O_NOFOLLOW, O_NONBLOCK, O_DIRECTORY } = fs.constants;
-const OPEN_FLAGS = O_RDONLY | O_NOFOLLOW | O_NONBLOCK;
+const { O_RDONLY, O_NONBLOCK, O_DIRECTORY } = fs.constants;
+// macOS only (MAWS is macOS only; macOS 11 and later): refuse a symlink anywhere on the path the kernel walks, not only
+// in its last component. Node's fs.constants does not carry it, so it is passed through numerically; a test asserts the
+// kernel honours it, so a port to a platform that ignores the bit fails loudly instead of silently losing the guard.
+// It replaces O_NOFOLLOW rather than joining it: macOS answers EINVAL for the two together (measured, Node 22.23.2 on
+// macOS 26.6.2), and O_NOFOLLOW_ANY alone refuses a symlink in the last component with ELOOP as well.
+export const O_NOFOLLOW_ANY = 0x20000000;
+export const OPEN_FLAGS = O_RDONLY | O_NONBLOCK | O_NOFOLLOW_ANY;
+
+// Extensions macOS launches or installs rather than opens in a viewer (lower case; compared case-insensitively).
+const LAUNCHED_EXTENSIONS = new Set([
+  '.app', '.command', '.tool', '.terminal', '.workflow', '.action', '.pkg', '.mpkg', '.scpt', '.scptd', '.applescript', '.jar',
+  '.webloc', '.inetloc', '.fileloc', '.url', '.shortcut', '.prefpane', '.saver', '.kext', '.plugin', '.bundle', '.dmg',
+  '.mobileconfig', '.osax', '.appex',
+]);
 
 class Refusal extends Error {
   constructor() {
@@ -102,18 +121,24 @@ export function createFilesService({ records, hooks, emit = () => {}, openPath, 
       throw await missing(path, roots, error);
     }
     if (!roots.some((root) => under(root, real0))) throw new Refusal();
+    // P0 opens no symlink (K1): a path that ends in one is refused even when its target lies inside, since step 3
+    // opens real0, which is the target.
+    const own = await fs.promises.lstat(path).catch(() => null);
+    if (!own || own.isSymbolicLink()) throw new Refusal();
     return { roots, real0 };
   }
 
   // Steps 2 to 5b for a regular file (`read`) or a directory (`list`, `watch`). The caller closes the handle.
   async function openConfirmed(appSessionId: AppSessionId, path: string, kind: 'file' | 'dir'): Promise<Confirmed> {
-    const { roots } = await precheck(appSessionId, path);
+    const { roots, real0 } = await precheck(appSessionId, path);
     await at('before-open', path);
     let handle: FileHandle;
     try {
-      handle = await fs.promises.open(path, kind === 'dir' ? OPEN_FLAGS | O_DIRECTORY : OPEN_FLAGS);
+      // real0 with O_NOFOLLOW_ANY: the descriptor names an object reached through no symlink at all, beneath a root that
+      // is itself a realpath, so the open is a containment check of its own and step 5 a second one.
+      handle = await fs.promises.open(real0, kind === 'dir' ? OPEN_FLAGS | O_DIRECTORY : OPEN_FLAGS);
     } catch (error) {
-      // ELOOP (the final component became a symlink), ENOTDIR, EISDIR and the rest: no descriptor exists to confirm,
+      // ELOOP (a component of real0 became a symlink), ENOTDIR, EISDIR and the rest: no descriptor exists to confirm,
       // so no type is named; ENOENT says `not found` only under the leak rule.
       throw errno(error) === 'ENOENT' ? await missing(path, roots, error) : new Refusal();
     }
@@ -134,7 +159,9 @@ export function createFilesService({ records, hooks, emit = () => {}, openPath, 
     if (path === undefined) return listRoots(appSessionId);
     const { handle, stat, real, roots } = await openConfirmed(appSessionId, path, 'dir');
     try {
-      const names = await fs.promises.readdir(real);
+      const names = await fs.promises.readdir(real).catch(async () => {
+        throw await afterConfirmed(path, roots);
+      });
       await at('after-readdir', path);
       // Private until the final confirmation below; an entry whose lstat or readlink fails is dropped unnamed.
       const collected = (await Promise.all(names.map((name) => entryAt(real, name)))).filter((entry) => entry !== null);
@@ -192,7 +219,12 @@ export function createFilesService({ records, hooks, emit = () => {}, openPath, 
       const existing = watches.identityOf(real);
       if (existing && sameIdentity(existing, identity)) return watches.join(real, holder);
       if (existing) watches.invalidateReal(real); // the directory at this realpath is not the one being watched
-      const installation = watches.install(real, identity);
+      let installation: Installation;
+      try {
+        installation = watches.install(real, identity);
+      } catch {
+        throw await afterConfirmed(path, roots);
+      }
       try {
         await at('after-watch-install', path);
         await confirm(path, roots, stat);
@@ -215,6 +247,12 @@ export function createFilesService({ records, hooks, emit = () => {}, openPath, 
 
   async function openExternal(appSessionId: AppSessionId, path: string): Promise<FilesOpenExternalOutput> {
     const { real0 } = await precheck(appSessionId, path);
+    // "Open externally" shows a document in its viewer; it never runs a program an agent wrote into the tree. The
+    // object is in-root (step 1), so naming it in the message leaks nothing.
+    const target = await fs.promises.lstat(real0).catch(() => null);
+    if (!target || !target.isFile() || (target.mode & 0o111) !== 0 || LAUNCHED_EXTENSIONS.has(extname(real0).toLowerCase())) {
+      throw new Error(`not opened outside MAWS: ${path}`);
+    }
     if (env.MAWS_E2E === '1' && env.MAWS_E2E_OPEN_LOG) {
       await fs.promises.appendFile(env.MAWS_E2E_OPEN_LOG, `${real0}\n`);
       return { opened: true, message: null };
@@ -269,6 +307,18 @@ function kindOf(stat: fs.Stats): FilesEntry['kind'] {
 // lies under a root and no component exists without resolving (a dangling symlink could point anywhere); otherwise
 // the refusal, so the command says nothing about what exists elsewhere. C4's rule in `readSpill`
 // (src/engine-host/fs/artifacts.ts), walked on the path as given so the kernel resolves every link.
+// A path-based step after step 5 (`readdir`, `fs.watch`) failed: Node's message names the path and says whether
+// something exists there, so it is never surfaced. The path is resolved again: gone, it answers the leak rule (`not
+// found` only inside); still resolving, the refusal, whatever it now names.
+async function afterConfirmed(path: string, roots: readonly string[]): Promise<Error> {
+  try {
+    await fs.promises.realpath(path);
+  } catch (error) {
+    return missing(path, roots, error);
+  }
+  return new Refusal();
+}
+
 async function missing(path: string, roots: readonly string[], error: unknown): Promise<Error> {
   const code = errno(error);
   if ((code === 'ENOENT' || code === 'ENOTDIR') && (await missingWithin(path, roots))) return new Error(`not found: ${path}`);

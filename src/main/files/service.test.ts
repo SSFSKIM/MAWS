@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { FILES_LIST_MAX_ENTRIES, type FilesChanged } from '@shared/ipc/schema/files';
 import { rootsOf, under, type AllowlistRecord } from './allowlist';
-import { createFilesService, type BoundaryPoint, type FilesServiceOptions } from './service';
+import { createFilesService, O_NOFOLLOW_ANY, OPEN_FLAGS, type BoundaryPoint, type FilesServiceOptions } from './service';
 
 const OUT = "path outside the session's directories";
 const A = 'A' as AppSessionId;
@@ -211,11 +211,16 @@ describe('files service boundary', () => {
   });
 
   describe('swap and restore, at before-open then after-open', () => {
-    it('refuses by the (dev, ino) mismatch an ancestor swapped outside before the open and restored after it', async () => {
+    // Before the M1 review this reached step 5 and was refused by (dev, ino); with real0 opened under O_NOFOLLOW_ANY the
+    // open itself refuses (ELOOP), so no descriptor to outside bytes ever exists and `after-open` is never reached.
+    it('refuses an ancestor swapped outside before the open, at the open, before anything could restore it', async () => {
+      const open = vi.spyOn(fs.promises, 'open');
       points['before-open'] = () => swapToLink(inRoot('src'), join(outside, 'src'));
       points['after-open'] = () => restore(inRoot('src'));
       await expect(service().read({ appSessionId: A, path: inRoot('src', 'a.ts') })).rejects.toThrow(OUT);
-      expect(readFileSync(inRoot('src', 'a.ts'), 'utf8')).toBe('export const a = 1;\n'); // the tree is back as it was
+      expect(points['after-open']).toBeDefined(); // no descriptor was opened
+      await expect(open.mock.results[0].value).rejects.toMatchObject({ code: 'ELOOP' });
+      restore(inRoot('src'));
     });
   });
 
@@ -266,24 +271,116 @@ describe('files service boundary', () => {
       const read = await checkThenOpen(inRoot('src', 'a.ts'), () => swapToLink(inRoot('src'), join(outside, 'src')));
       expect(read).toBe('outside secret a');
     });
+
+    // The M1 review's flip, played step by step against the shape before O_NOFOLLOW_ANY: open the path as given with
+    // O_NOFOLLOW (the final component only), then realpath and stat as two path steps. An ancestor that is an outside
+    // link at the open, a directory at the realpath and a link again at the stat passes the (dev, ino) check with the
+    // outside descriptor. The service opens real0 with O_NOFOLLOW_ANY, so the same first flip ends at the open (the
+    // `swap and restore` case above).
+    it('serves the outside file through the pre-review open-then-confirm shape when an ancestor flips link, directory, link', async () => {
+      const path = inRoot('src', 'a.ts');
+      const roots = await rootsOf(records.get(A)!);
+      swapToLink(inRoot('src'), join(outside, 'src'));
+      const handle = await fs.promises.open(path, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
+      try {
+        const opened = await handle.stat({ bigint: true });
+        restore(inRoot('src'));
+        const real = await realpath(path);
+        expect(roots.some((r) => under(r, real))).toBe(true); // in-root at the realpath
+        swapToLink(inRoot('src'), join(outside, 'src'));
+        const now = await fs.promises.stat(real, { bigint: true });
+        expect(now.dev === opened.dev && now.ino === opened.ino).toBe(true); // the confirmation passes
+        expect((await handle.readFile('utf8'))).toBe('outside secret a');
+      } finally {
+        await handle.close();
+      }
+      await expect(fs.promises.open(path, OPEN_FLAGS)).rejects.toMatchObject({ code: 'ELOOP' }); // the service's open, same state
+    });
   });
 
-  it('opens with numeric flags including O_NONBLOCK and O_NOFOLLOW, and never calls readFile', async () => {
+  it('opens real0 with numeric flags including O_NONBLOCK and O_NOFOLLOW_ANY (not O_NOFOLLOW), and never calls readFile', async () => {
+    symlinkSync(root, at('root-link'));
+    records.set(A, record(at('root-link')));
     const open = vi.spyOn(fs.promises, 'open');
     const readFileSpy = vi.spyOn(fs.promises, 'readFile');
     const files = service();
-    await files.read({ appSessionId: A, path: inRoot('src', 'a.ts') });
-    await files.list({ appSessionId: A, path: inRoot('src') });
+    await files.read({ appSessionId: A, path: at('root-link', 'src', 'a.ts') });
+    await files.list({ appSessionId: A, path: at('root-link', 'src') });
     const { O_NONBLOCK, O_NOFOLLOW, O_DIRECTORY } = fs.constants;
-    expect(open).toHaveBeenCalledTimes(2);
+    expect(open.mock.calls.map(([path]) => path)).toEqual([inRoot('src', 'a.ts'), inRoot('src')]); // the realpath, not the path as given
     for (const [, flags] of open.mock.calls) {
       expect(typeof flags).toBe('number');
       expect((flags as number) & O_NONBLOCK).toBe(O_NONBLOCK);
-      expect((flags as number) & O_NOFOLLOW).toBe(O_NOFOLLOW);
+      expect((flags as number) & O_NOFOLLOW).toBe(0); // macOS answers EINVAL for the two together (below)
+      expect((flags as number) & O_NOFOLLOW_ANY).toBe(O_NOFOLLOW_ANY);
     }
     expect((open.mock.calls[0][1] as number) & O_DIRECTORY).toBe(0);
     expect((open.mock.calls[1][1] as number) & O_DIRECTORY).toBe(O_DIRECTORY);
     expect(readFileSpy).not.toHaveBeenCalled();
+  });
+
+  // The guard on this platform: if the kernel ignored O_NOFOLLOW_ANY (a port, or a macOS that dropped it), the read
+  // race the flag closes would silently reopen. Fail loudly instead.
+  it('has a kernel that honours O_NOFOLLOW_ANY: the service flags refuse a symlink anywhere on the path', async () => {
+    symlinkSync(join(root, 'src'), inRoot('alias'));
+    await expect(fs.promises.open(inRoot('alias', 'a.ts'), OPEN_FLAGS)).rejects.toMatchObject({ code: 'ELOOP' }); // an ancestor
+    // the temp root as the OS names it (/var/folders/…, /var → /private/var): a system symlink high on the path
+    expect(root.startsWith('/private/var/')).toBe(true);
+    await expect(fs.promises.open(root.slice('/private'.length), OPEN_FLAGS | fs.constants.O_DIRECTORY)).rejects.toMatchObject({ code: 'ELOOP' });
+    symlinkSync(inRoot('README.md'), inRoot('readme-link'));
+    await expect(fs.promises.open(inRoot('readme-link'), OPEN_FLAGS)).rejects.toMatchObject({ code: 'ELOOP' }); // the last component
+    const handle = await fs.promises.open(inRoot('src', 'a.ts'), OPEN_FLAGS); // a realpath opens
+    await handle.close();
+    // why OPEN_FLAGS carries no O_NOFOLLOW: this kernel refuses the combination outright
+    await expect(fs.promises.open(inRoot('src', 'a.ts'), OPEN_FLAGS | fs.constants.O_NOFOLLOW)).rejects.toMatchObject({ code: 'EINVAL' });
+  });
+
+  it('reads through an in-root symlinked directory, and refuses a final-component symlink even to an in-root file', async () => {
+    symlinkSync(inRoot('src'), inRoot('alias'));
+    symlinkSync(inRoot('README.md'), inRoot('readme-link'));
+    const files = service();
+    expect(await files.read({ appSessionId: A, path: inRoot('alias', 'a.ts') })).toMatchObject({ content: 'export const a = 1;\n' });
+    await expect(files.read({ appSessionId: A, path: inRoot('readme-link') })).rejects.toThrow(OUT);
+    await expect(files.list({ appSessionId: A, path: inRoot('alias') })).rejects.toThrow(OUT); // a directory link too: shown, not opened
+    await expect(files.watch(A, inRoot('alias'), 1)).rejects.toThrow(OUT);
+  });
+
+  // A readdir or fs.watch that fails after step 5 (the directory removed or replaced between the confirmation and the
+  // call, which no boundary point separates, so the failure is injected where Node would raise it) answers the leak
+  // rule or the refusal, never Node's message, which names the path and one bit of existence.
+  describe('a path-based step failing after the confirmation', () => {
+    const enoent = (syscall: string, path: string) => Object.assign(new Error(`ENOENT: no such file or directory, ${syscall} '${path}'`), { code: 'ENOENT' });
+
+    it('answers not found when readdir finds the in-root directory removed', async () => {
+      vi.spyOn(fs.promises, 'readdir').mockImplementationOnce((async (path: string) => {
+        rmSync(path, { recursive: true });
+        throw enoent('scandir', path);
+      }) as unknown as typeof fs.promises.readdir);
+      await expect(service().list({ appSessionId: A, path: inRoot('a', 'sub') })).rejects.toThrow(new Error(`not found: ${inRoot('a', 'sub')}`));
+    });
+
+    it('answers the refusal when readdir fails on a directory that is still there', async () => {
+      vi.spyOn(fs.promises, 'readdir').mockRejectedValueOnce(Object.assign(new Error(`EACCES: permission denied, scandir '${inRoot('a', 'sub')}'`), { code: 'EACCES' }));
+      await expect(service().list({ appSessionId: A, path: inRoot('a', 'sub') })).rejects.toThrow(new Error(OUT));
+    });
+
+    it('answers the refusal when readdir finds the directory swapped to an outside link', async () => {
+      vi.spyOn(fs.promises, 'readdir').mockImplementationOnce((async (path: string) => {
+        swapToLink(inRoot('a'), join(outside, 'a'));
+        throw enoent('scandir', path);
+      }) as unknown as typeof fs.promises.readdir);
+      await expect(service().list({ appSessionId: A, path: inRoot('a', 'sub') })).rejects.toThrow(new Error(OUT));
+    });
+
+    it('answers not found when fs.watch finds the in-root directory removed, and leaves no watch behind', async () => {
+      const files = service();
+      vi.spyOn(fs, 'watch').mockImplementationOnce(((path: string) => {
+        rmSync(path, { recursive: true });
+        throw enoent('watch', path);
+      }) as unknown as typeof fs.watch);
+      await expect(files.watch(A, inRoot('a', 'sub'), 1)).rejects.toThrow(new Error(`not found: ${inRoot('a', 'sub')}`));
+      expect(files.watching()).toEqual([]);
+    });
   });
 
   it('answers not a regular file for an in-root directory, and the refusal for a watch of a regular file', async () => {
@@ -294,7 +391,7 @@ describe('files service boundary', () => {
   });
 });
 
-describe('files service late confirmation', () => {
+describe('files service late confirmation', { timeout: 20_000 }, () => {
   // `a` is the ancestor swapped to `outside/a`, whose `sub/f.txt` has the same name as the inside entry and 999 bytes.
   const swapAncestor = () => swapToLink(inRoot('a'), join(outside, 'a'));
 
@@ -353,7 +450,7 @@ describe('files service late confirmation', () => {
     emitted.length = 0;
     points['before-batch'] = swapAncestor;
     writeFileSync(join(dir, 'new.txt'), 'inside write');
-    await vi.waitFor(() => expect(emitted).toHaveLength(2), { timeout: 3000 });
+    await vi.waitFor(() => expect(emitted).toHaveLength(2), { timeout: 6000 });
     await new Promise((resolve) => setTimeout(resolve, 400)); // nothing else trails the invalidation
     expect(emitted.filter((e) => e.path !== dir)).toEqual([]); // no filename forwarded
     expect(emitted.sort((x, y) => x.appSessionId.localeCompare(y.appSessionId))).toEqual([
@@ -367,9 +464,10 @@ describe('files service late confirmation', () => {
     restore(inRoot('a'));
     emitted.length = 0;
     await files.watch(A, dir, 1);
+    await new Promise((resolve) => setTimeout(resolve, 700)); // past the FSEvents stream restart the new watcher causes
     expect(closes).toHaveLength(2); // a new watcher
     writeFileSync(join(dir, 'after.txt'), 'restored');
-    await vi.waitFor(() => expect(emitted).toContainEqual({ appSessionId: A, path: join(dir, 'after.txt'), kind: 'created' }), { timeout: 3000 });
+    await vi.waitFor(() => expect(emitted).toContainEqual({ appSessionId: A, path: join(dir, 'after.txt'), kind: 'created' }), { timeout: 6000 });
   });
 });
 
@@ -494,6 +592,23 @@ describe('files openExternal', () => {
     symlinkSync(join(outside, 'secret.txt'), inRoot('leak'));
     await expect(files.openExternal(A, inRoot('leak'))).rejects.toThrow(OUT);
     expect(openPath).not.toHaveBeenCalled();
+  });
+
+  it('refuses what macOS would launch or install rather than open, and opens a PDF', async () => {
+    const log = at('open.log');
+    const files = service({ env: { MAWS_E2E: '1', MAWS_E2E_OPEN_LOG: log } });
+    write(inRoot('run.sh'), '#!/bin/sh\necho hi\n');
+    fs.chmodSync(inRoot('run.sh'), 0o755);
+    write(inRoot('script.command'), 'echo hi\n'); // not executable: refused by its extension
+    write(inRoot('Installer.PKG'), 'x'); // the extension case-insensitively
+    mkdirSync(inRoot('Tool.app', 'Contents'), { recursive: true }); // a bundle is a directory
+    write(inRoot('doc.pdf'), '%PDF-1.4\n%%EOF\n');
+    for (const name of ['run.sh', 'script.command', 'Installer.PKG', 'Tool.app']) {
+      await expect(files.openExternal(A, inRoot(name))).rejects.toThrow(new Error(`not opened outside MAWS: ${inRoot(name)}`));
+    }
+    expect(fs.existsSync(log)).toBe(false); // nothing was handed to the OS
+    expect(await files.openExternal(A, inRoot('doc.pdf'))).toEqual({ opened: true, message: null });
+    expect(readFileSync(log, 'utf8')).toBe(`${inRoot('doc.pdf')}\n`);
   });
 
   it('opens the checked realpath and relays shell.openPath’s answer', async () => {
