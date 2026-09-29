@@ -16,7 +16,7 @@ node spikes/terminal-probe/run.mjs --steps tui           # the real TUIs (one sh
 node spikes/terminal-probe/run.mjs --steps exit-check    # item 1 for each TUI: start, then /exit or /quit (no model usage)
 node spikes/terminal-probe/run.mjs --steps replay        # script -p of recordings/*.rec into each renderer
 node spikes/terminal-probe/run.mjs --phase m2-gate      # the transport gate closing M2: smoke, full W1-W3 and echo latency (judged), links through pty.openLink
-MAWS_HARNESS=1 pnpm dev                                  # the page by hand: click #probe in the harness nav
+pnpm dev:harness                                         # the page by hand: in DevTools, location.hash = '#probe' (or '#panel')
 ```
 
 Options: `--renderer xterm|ghostty|both`, `--steps smoke,measure,items,tui,exit-check,replay,links`, `--tui claude,codex`,

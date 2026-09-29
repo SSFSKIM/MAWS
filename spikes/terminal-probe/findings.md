@@ -190,7 +190,7 @@ the execution document counts one prompt row short (first line 9962, not 9961, a
 
 Manual items pending the owner (M5), exact steps:
 
-1. IME composition (item 4): on `#probe` (`MAWS_HARNESS=1 pnpm dev`, click `#probe`, click `shell`), switch the input
+1. IME composition (item 4): on `#probe` (`pnpm dev:harness`, `location.hash = '#probe'` in DevTools, click `shell`), switch the input
    source to 2-Set Korean, type `한글 입력` at the prompt and watch the composition underline; press Enter; then click
    `claude` (or type the absolute path at the prompt), type `한글 입력` in the composer, then switch to Japanese
    Hiragana and type `にほんご`. Expected: the composition underline shows while composing, the committed text is exact
