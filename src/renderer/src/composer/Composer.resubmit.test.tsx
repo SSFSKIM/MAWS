@@ -225,6 +225,20 @@ describe('edit-and-resubmit in the composer', () => {
     expect(fake.invoked('session.rewind')).toHaveLength(1);
   });
 
+  it('a boundary that reached the transcript before the rejection confirms the rewind at once', async () => {
+    mount();
+    await editFirst();
+    await confirmRewind();
+    const confirm = builder('2026-09-28T11:00:00.000Z');
+    confirm.emit('boundary.rewind', { targetMessageUuid: u('u-1'), precedingAssistantUuid: null, prefillText: 'first prompt' });
+    liveEvent(confirm.events.map((e) => ({ ...e, id: 'boundary-early' }) as SessionEvent)); // the late answer's boundary, first
+    await waitFor(() => expect(useTranscriptStore.getState().rows(A).some((r) => r.kind === 'user' && r.messageUuid === 'u-1')).toBe(false));
+    await fake.fail('session.rewind', 'rewind_conversation unanswered after 8 s');
+    await waitFor(() => expect(line()?.textContent).toContain('Rewound · send your edited message'));
+    expect(resubmitOf(useComposerStore.getState(), A)).toBe('rewound_awaiting_send');
+    expect(fake.invoked('session.send')).toEqual([]);
+  });
+
   it('unresolved after the window: Send without rewinding sends and never rewinds; Keep editing returns the editor', async () => {
     setRewindWindow(20);
     mount();

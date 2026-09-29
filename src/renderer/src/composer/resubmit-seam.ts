@@ -101,6 +101,14 @@ function dispose(appSessionId: AppSessionId): Flight {
   return flight;
 }
 
+// The session's hydrated transcript already shows the rewind to `target`: a rewind boundary row, and the target's own
+// row gone from the rows (C6's rewind boundary names no target; the rewind takes the target's turn out of the rows).
+function transcriptShowsRewind(appSessionId: AppSessionId, target: MessageUuid): boolean {
+  const entry = useTranscriptStore.getState().entries[appSessionId];
+  if (!entry || entry.phase !== 'live') return false;
+  return entry.rows.some((r) => r.kind === 'boundary' && r.boundaryKind === 'rewind') && !entry.rows.some((r) => r.kind === 'user' && r.messageUuid === target);
+}
+
 const record = (appSessionId: AppSessionId): Resubmit => resubmitRecordOf(useComposerStore.getState(), appSessionId);
 const ready = (appSessionId: AppSessionId): boolean => useSessions.getState().engine.get(appSessionId)?.process === 'ready';
 
@@ -246,7 +254,12 @@ async function issueRewind(client: MawsBridge, appSessionId: AppSessionId): Prom
     exited(appSessionId);
     return 'stale';
   }
-  // Neither C3's `timeout` nor C1's nor an `internal` failure proves the rewind unapplied: the transcript decides.
+  // Neither C3's `timeout` nor C1's nor an `internal` failure proves the rewind unapplied: the transcript decides, and
+  // its boundary may already be there (a late answer can arrive before the rejection).
+  if (transcriptShowsRewind(appSessionId, editing.messageUuid)) {
+    rewound(appSessionId, false);
+    return 'rewound';
+  }
   setResubmit(appSessionId, 'rewind_uncertain');
   flight.offs.push(
     client.on('session.eventBatch', ({ appSessionId: id, events }) => {
