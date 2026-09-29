@@ -454,6 +454,20 @@ describe('relay composer', () => {
     expect(sendButton().disabled).toBe(true);
   });
 
+  it('shows the disabled reason as a line when a kept draft hides the placeholder', async () => {
+    const reason = () => document.querySelector('[data-part="relay-reason"]')?.textContent ?? null;
+    const { handle } = await mount({ events: [started('a1', 1)], params: { agentId: 'a1' as AgentId } });
+    act(() => handle.setDraft('half a thought'));
+    expect(reason()).toBeNull(); // enabled: no reason
+    push([finished('a1', 2)]);
+    expect(box().disabled).toBe(true);
+    expect(box().value).toBe('half a thought');
+    expect(reason()).toBe('This agent has finished');
+    act(() => handle.setDraft(''));
+    expect(reason()).toBeNull(); // the placeholder says it
+    expect(box().placeholder).toBe('This agent has finished');
+  });
+
   it('gives a foreground child’s reason its tooltip', async () => {
     await mount({ events: [started('a1', 1, { isBackground: false })], params: { agentId: 'a1' as AgentId } });
     expect(box().title).toBe('A message sent now would resume the finished agent instead of reaching this one');

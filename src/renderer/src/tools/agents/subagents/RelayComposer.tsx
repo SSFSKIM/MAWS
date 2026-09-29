@@ -135,6 +135,12 @@ export function RelayComposer({ appSessionId, agentId, node, status, sessionTitl
           onChange={(e) => edit(e.target.value)}
           className="block w-full resize-none bg-transparent text-ui text-fg outline-accent placeholder:text-fg-muted focus-visible:outline-2 disabled:cursor-not-allowed"
         />
+        {/* a kept draft hides the placeholder, so the reason the box is closed shows as a line of its own */}
+        {reason !== null && draft !== '' && (
+          <p data-part="relay-reason" title={reason.tooltip ?? undefined} className="text-ui-sm text-fg-muted">
+            {reason.text}
+          </p>
+        )}
         <div className="flex justify-end">
           <button
             type="button"
