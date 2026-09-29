@@ -10,7 +10,7 @@ const sh=(c,a)=>{try{return execFileSync(c,a,{encoding:'utf8'}).trim();}catch(e)
 // An RTF document, so the Format menu's font commands apply and the result is verifiable on disk.
 writeFileSync(DOC,'{\\rtf1\\ansi{\\fonttbl\\f0\\fswiss Helvetica;}\\f0\\fs28 First line of the probe.\\par Second line stays plain.\\par}');
 execFileSync('open',['-g','-a','TextEdit',DOC]);await new Promise(r=>setTimeout(r,2500));
-const mcp={mcpServers:{cua_repl:{type:'stdio',command:process.execPath,args:[root+'cua-shim.mjs'],env:{CUA_SHIM_CODEX_HOME:HOME,CUA_SHIM_LOG:root+'fixtures/'+NAME+'.shim.jsonl'}}}};
+const mcp={mcpServers:{cua_repl:{type:'stdio',command:process.execPath,args:[root+'../../plugins/cua/cua-shim.mjs'],env:{CUA_SHIM_CODEX_HOME:HOME,CUA_SHIM_LOG:root+'fixtures/'+NAME+'.shim.jsonl'}}}};
 const settings={hooks:{Stop:[{hooks:[{type:'mcp_tool',server:'cua_repl',tool:'turn_ended',input:{hook_event_name:'Stop',session_id:'${session_id}',turn_id:'${prompt_id}'},timeout:30}]}]}};
 const p=new Probe(NAME,{dir:'../computer-use-probe/fixtures/',bin:BIN,model:process.env.PROBE_MODEL||'sonnet',cwd:mkdtempSync('/tmp/maws-cc-cwd-'),flags:['--mcp-config',JSON.stringify(mcp),'--settings',JSON.stringify(settings),'--include-hook-events','--max-budget-usd','4.00']});
 const counts={elicitations:0,accepted:0,escalations:0,allowed:0,toolUses:[],images:0,hookEvents:[]};

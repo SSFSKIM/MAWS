@@ -9,7 +9,7 @@ for(const k of Object.keys(process.env))if(/^CMUX_/.test(k)||['CLAUDE_CODE_SESSI
 const BIN='/Users/new/.local/share/claude/versions/2.1.283', HOME='/tmp/maws-cu-probe/cc-home', DOC='/tmp/maws-cu-probe/textedit-probe.txt', NAME=process.env.PROBE_NAME||'w3-claude-code-host';
 const sh=(c,a)=>{try{return execFileSync(c,a,{encoding:'utf8'}).trim();}catch(e){return 'ERR '+e.message.split('\n')[0];}};
 writeFileSync(DOC,'MAWS computer-use probe document.\n');execFileSync('open',['-g','-a','TextEdit',DOC]);await new Promise(r=>setTimeout(r,2500));
-const mcp={mcpServers:{cua_repl:{type:'stdio',command:process.execPath,args:[root+'cua-shim.mjs'],env:{CUA_SHIM_CODEX_HOME:HOME,CUA_SHIM_LOG:root+'fixtures/'+NAME+'.shim.jsonl'}}}};
+const mcp={mcpServers:{cua_repl:{type:'stdio',command:process.execPath,args:[root+'../../plugins/cua/cua-shim.mjs'],env:{CUA_SHIM_CODEX_HOME:HOME,CUA_SHIM_LOG:root+'fixtures/'+NAME+'.shim.jsonl'}}}};
 const p=new Probe(NAME,{dir:'../computer-use-probe/fixtures/',bin:BIN,model:process.env.PROBE_MODEL||'sonnet',cwd:mkdtempSync('/tmp/maws-cc-cwd-'),flags:['--mcp-config',JSON.stringify(mcp),'--max-budget-usd','3.00']});
 const counts={elicitations:0,accepted:0,escalations:0,allowed:0,toolUses:[],images:0};
 p.on('elicitation',r=>{counts.elicitations++;const ok=/TextEdit/.test(r.message);if(ok)counts.accepted++;p.note({event:'elicitation',accept:ok,message:r.message,server:r.mcp_server_name});return ok?{action:'accept',content:{}}:{action:'decline'};});

@@ -21,13 +21,23 @@
 //      CUA_SHIM_LOG (JSONL journal path; unset = no journal), CUA_SHIM_PLUGIN_MCP (override the plugin .mcp.json path),
 //      CUA_SHIM_HOST_NOTES (replacement text for the host notes; "none" disables them).
 import {spawn} from 'node:child_process';
-import {readFileSync,mkdirSync,appendFileSync} from 'node:fs';
+import {readFileSync,readdirSync,existsSync,mkdirSync,appendFileSync} from 'node:fs';
 import {homedir} from 'node:os';
 import {randomUUID} from 'node:crypto';
 import {createInterface} from 'node:readline';
 
 const env=process.env;
-const PLUGIN_MCP=env.CUA_SHIM_PLUGIN_MCP||homedir()+'/.codex/plugins/cache/openai-bundled/unified-computer-use/26.924.22138/.mcp.json';
+// Codex Desktop writes the launch recipe into its plugin cache, one directory per app version; take the newest.
+function findPluginMcp(){
+ if(env.CUA_SHIM_PLUGIN_MCP)return env.CUA_SHIM_PLUGIN_MCP;
+ const dir=homedir()+'/.codex/plugins/cache/openai-bundled/unified-computer-use';
+ let versions=[];try{versions=readdirSync(dir).filter(v=>existsSync(`${dir}/${v}/.mcp.json`));}catch{}
+ versions.sort((a,b)=>a.localeCompare(b,undefined,{numeric:true}));
+ if(!versions.length)fail(`no computer-use launch recipe under ${dir}. Install ChatGPT.app 26.917 or newer, enable Computer Use once in its settings, then retry.`);
+ return `${dir}/${versions.at(-1)}/.mcp.json`;
+}
+function fail(message){process.stderr.write(`cua-shim: ${message}\n`);process.exit(1);}
+const PLUGIN_MCP=findPluginMcp();
 const CODEX_HOME=env.CUA_SHIM_CODEX_HOME||'/tmp/maws-cu-probe/codex-home';
 const SESSION=env.CUA_SHIM_SESSION_ID||env.CLAUDE_CODE_SESSION_ID||randomUUID();
 const MODEL=env.CUA_SHIM_MODEL||'claude';
@@ -46,6 +56,7 @@ const HOST_NOTES=env.CUA_SHIM_HOST_NOTES==='none'?'':(env.CUA_SHIM_HOST_NOTES??`
 - Do not drive the same app through osascript or other tools while a cua session is open.`);
 
 const plugin=JSON.parse(readFileSync(PLUGIN_MCP,'utf8')).mcpServers.cua_repl;
+if(!existsSync(plugin.command))fail(`${plugin.command} is missing; the recipe in ${PLUGIN_MCP} points at a ChatGPT.app that is not installed.`);
 const modules=plugin.env.NODE_REPL_NODE_MODULE_DIRS;
 mkdirSync(CODEX_HOME,{recursive:true});
 const childEnv={...env,...plugin.env,CODEX_HOME,NODE_REPL_TRUSTED_CODE_PATHS:`${CODEX_HOME}:${modules}`,CUA_REPL_ENABLED_SURFACES:SURFACES,NODE_REPL_DISABLE_ANALYTICS:'1'};

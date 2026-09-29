@@ -1,0 +1,19 @@
+{
+  "name": "maws",
+  "description": "Plugins from the MAWS workstation project",
+  "owner": {
+    "name": "SSFSKIM"
+  },
+  "plugins": [
+    {
+      "name": "cua",
+      "description": "Native macOS computer use for Claude Code through OpenAI's Codex computer-use stack (requires ChatGPT.app with Computer Use enabled)",
+      "version": "0.1.0",
+      "source": "./plugins/cua",
+      "author": {
+        "name": "SSFSKIM"
+      },
+      "license": "MIT"
+    }
+  ]
+}

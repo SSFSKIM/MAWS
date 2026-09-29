@@ -14,6 +14,6 @@ await run('w3-shim-unit',async p=>{
  await js('bind','globalThis.app = await cua.getApp("TextEdit");');
  await js('state and shot','const s = await app.getAXStateAndScreenshot({disableDiffing:true}); nodeRepl.write(`bytes=${s.screenshot?.length}`);');
  await js('quit','await app.pressKey("super+q");');
-},{command:process.execPath,args:[root+'cua-shim.mjs'],env:{CUA_SHIM_CODEX_HOME:HOME,CUA_SHIM_LOG:root+'fixtures/w3-shim-unit.shim.jsonl',CUA_SHIM_SESSION_ID:'shim-unit-s1'},capabilities:{elicitation:{}}});
+},{command:process.execPath,args:[root+'../../plugins/cua/cua-shim.mjs'],env:{CUA_SHIM_CODEX_HOME:HOME,CUA_SHIM_LOG:root+'fixtures/w3-shim-unit.shim.jsonl',CUA_SHIM_SESSION_ID:'shim-unit-s1'},capabilities:{elicitation:{}}});
 console.log('approvals written:',existsSync(HOME+'/computer-use/sessions')?readdirSync(HOME+'/computer-use/sessions').map(f=>f+' → '+readFileSync(HOME+'/computer-use/sessions/'+f,'utf8').trim()):'none');
 console.log('TextEdit running:',execFileSync('osascript',['-e','tell application "System Events" to (name of processes whose name is "TextEdit")'],{encoding:'utf8'}).trim()||'no');
