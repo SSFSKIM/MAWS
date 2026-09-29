@@ -30,10 +30,21 @@ import { connectCodeEvents } from './ipc/events';
 import { codeTranscriptActions, registerCodeTools } from './tools/code';
 import { registerTranscriptActions as registerCodeTranscriptActions } from './transcript';
 // C8c end
+// C10 start
+import { registerSetupIntentHook } from './composer/setup-intent';
+import { connectSessions } from './sessions/connect';
+import { SessionDialogs } from './sessions/SessionDialogs';
+import { useSetupIntent } from './sessions/useSetupIntent';
+// C10 end
 // C8b start
 import { connectAgentWorkEvents } from './ipc/events';
 import { agentsDevSurface, agentTranscriptActions, registerAgentTools } from './tools/agents';
 // C8b end
+
+// C10 start: C7's composer binds an unstarted session's chips and Send through C10's hook; registered at module load,
+// before any composer renders, so the function the composer calls as a hook is fixed for the page's life (C7's rule)
+registerSetupIntentHook(useSetupIntent);
+// C10 end
 
 export function App() {
   const resolvedTheme = useSettings((s) => s.state?.resolvedTheme);
@@ -80,6 +91,10 @@ export function App() {
   useEffect(() => connectCodeEvents(), []);
   useEffect(() => registerCodeTranscriptActions(codeTranscriptActions), []);
   // C8c end
+  // C10 start: the setup store and C5's tab retention at once (before hydration's snapshots answer); in launch mode
+  // `index`, the newSession slot, the session creator, the close guard, the unstarted title and the session actions
+  useEffect(() => connectSessions(), []);
+  // C10 end
   // C8b start: the agent tools (Subagents, Background work and the Log). Registration is never undone (a registration's
   // disposer closes the tool's tabs, which StrictMode's effect replay would do); the transcript's subagent rows open
   // Subagents (a workflow's, Background work) and its "Open full log" opens the Log (openFullLog); a task list changed
@@ -103,6 +118,9 @@ export function App() {
       {/* C7 start: the one app-level ⌘. and ⌘L, resolving the focused pane's session */}
       <ComposerAppKeys />
       {/* C7 end */}
+      {/* C10 start: the small sheets (rename, fork, archive, delete, cleanup, archived sessions) */}
+      <SessionDialogs />
+      {/* C10 end */}
     </QueryClientProvider>
   );
 }

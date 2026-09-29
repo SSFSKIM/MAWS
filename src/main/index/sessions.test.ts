@@ -148,6 +148,29 @@ describe('session records in the index', () => {
     expect(changes).toEqual([]);
   });
 
+  // C10 start: D-16's start-time reset (C10 execution document, Session service "D-16 reset")
+  it('resetSelfHolders clears every self holder to none, leaves foreign holders alone, and announces each record once', () => {
+    const held = summary();
+    const foreign = summary();
+    const a = index.sessions.upsertFromSummary(held).record;
+    const b = index.sessions.createForLaunch({ ...LAUNCH, appSessionId: randomUUID() as AppSessionId }).record;
+    const c = index.sessions.upsertFromSummary(foreign).record;
+    index.sessions.applyEngineStatus(a.appId, { holder: { kind: 'self' } });
+    index.sessions.applyEngineStatus(b.appId, { holder: { kind: 'self' } });
+    index.sessions.setHolder(foreign.sessionId, { kind: 'background_job', pid: 7, jobId: 'abcd1234' });
+    index.sessions.update(b.appId, { archived: true });
+    changes.length = 0;
+    expect(index.sessions.resetSelfHolders()).toBe(2);
+    expect(index.sessions.get(a.appId)!.holder).toEqual({ kind: 'none' });
+    expect(index.sessions.get(b.appId)!.holder).toEqual({ kind: 'none' }); // archived records too: nothing is held at start
+    expect(index.sessions.get(c.appId)!.holder).toEqual({ kind: 'background_job', pid: 7, jobId: 'abcd1234' });
+    expect(changes.map(([record, cause]) => [record.appId, cause]).sort()).toEqual([[a.appId, 'holder'], [b.appId, 'holder']].sort());
+    changes.length = 0;
+    expect(index.sessions.resetSelfHolders()).toBe(0);
+    expect(changes).toEqual([]);
+  });
+  // C10 end
+
   it('upserts 4,000 synthetic summaries inside one transaction in under 500 ms of CPU time', () => {
     const summaries = Array.from({ length: 4_000 }, (_, i) => summary({ sessionId: sessionIdFor(i + 1), customTitle: i % 3 === 0 ? `t${i}` : null }));
     // The bound is on the work the upserts cost (this process's CPU time; vitest runs each file in its own process), so

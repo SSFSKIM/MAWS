@@ -151,6 +151,7 @@ export function expandEngine(compact: CompactEngine, record: SessionRecord, time
     journalPath: '',
     hostHooks: [],
     lastEventSeq: 0,
+    trust: { attested: false, recorded: null }, // C10: a scenario session attests nothing
   };
   const parsed = EngineSessionStatusSchema.safeParse(status);
   if (!parsed.success) throw new ScenarioError(`${where}: ${pathOf(parsed.error.issues[0].path)}: ${parsed.error.issues[0].message}`);

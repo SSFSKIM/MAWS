@@ -113,7 +113,7 @@ describe('ipc schema validates both directions', () => {
 
     // C4 (M6): the read-only git service, owned by main.
     it('carries the C4 git.* entries, every command owned by main, with the diff and log bounds', () => {
-      expect(Object.keys(git.commands).sort()).toEqual(['git.branches', 'git.diff', 'git.log', 'git.lsFiles' /* C7 */, 'git.status', 'git.unwatch', 'git.watch']);
+      expect(Object.keys(git.commands).filter((name) => !name.startsWith('git.worktree.')) /* C10: its block is pinned below */.sort()).toEqual(['git.branches', 'git.diff', 'git.log', 'git.lsFiles' /* C7 */, 'git.status', 'git.unwatch', 'git.watch']);
       for (const spec of Object.values(git.commands)) expect(spec.owner).toBe('main');
       expect(Object.keys(git.events)).toEqual(['git.changed']);
       expect(validateCommandInput('git.diff', { directory: '/r', scope: 'all', base: 'main', path: 'a.ts', context: 20 }).ok).toBe(true);
@@ -123,6 +123,26 @@ describe('ipc schema validates both directions', () => {
       expect(validateCommandInput('git.log', { directory: '/r', limit: 500 }).ok).toBe(true);
     });
     // end C4
+
+    // C10 start: the worktree service's git.worktree.* entries (C10 execution document, Interfaces "Worktrees"), owner main.
+    it('carries the C10 git.worktree.* entries, every command owned by main, with the cleanup ladder’s refusals', () => {
+      const c10 = Object.keys(git.commands).filter((name) => name.startsWith('git.worktree.'));
+      expect(c10.sort()).toEqual(['git.worktree.add', 'git.worktree.branch', 'git.worktree.deleteBranch', 'git.worktree.list', 'git.worktree.remove', 'git.worktree.status']);
+      for (const name of c10) expect(git.commands[name as keyof typeof git.commands].owner, name).toBe('main');
+      const add = (branch: unknown) => validateCommandInput('git.worktree.add', { repoRoot: '/r', name: 'a', branch }).ok;
+      expect(add({ kind: 'new', name: 'worktree-a', base: 'HEAD' })).toBe(true);
+      expect(add({ kind: 'existing', name: 'b' })).toBe(true);
+      expect(add({ kind: 'existing', name: 'b', base: 'HEAD' })).toBe(false);
+      const remove = { repoRoot: '/r', path: '/r/.claude/worktrees/a', expect: { branch: null, head: 'abc' }, discard: false };
+      expect(validateCommandInput('git.worktree.remove', remove).ok).toBe(true);
+      expect(validateCommandInput('git.worktree.remove', { ...remove, expect: { head: 'abc' } }).ok).toBe(false);
+      expect(validateCommandOutput('git.worktree.remove', { removed: true, prunedOnly: false }).ok).toBe(true);
+      expect(validateCommandOutput('git.worktree.remove', { refused: 'changed', detail: 'head moved' }).ok).toBe(true);
+      expect(validateCommandOutput('git.worktree.deleteBranch', { refused: 'unmerged', detail: '1 commit not on main' }).ok).toBe(true);
+      expect(validateCommandOutput('git.worktree.deleteBranch', { deleted: true }).ok).toBe(false);
+      expect(validateCommandOutput('git.worktree.status', null).ok).toBe(true);
+    });
+    // C10 end
 
     // C5 start: the shell's own entries (C5 execution document, Interfaces "X2"); the sibling entries it consumes are
     // pinned by C3's and C4's cases above.
@@ -274,7 +294,7 @@ describe('ipc schema validates both directions', () => {
       gateway: { mode: 'gateway', baseUrl: null, verified: 'pending', autoModeServer: 'unknown', localLane: null },
       subagentModel: null, modelOverrides: {}, engineVersion: null, fileCheckpointing: true, fastMode: { state: null, disabledReason: null },
       plugins: [], pluginErrors: [], pluginWarnings: [], backgroundTasks: [], grants: [], mcpServers: [], heldPeerMessages: [], pendingRequests: 0,
-      queue: { length: 0, paused: false }, keepAlive: [], memory: { rssKiB: null, treeRssKiB: null, sampledAt: null }, journalPath: '/j', hostHooks: [], lastEventSeq: 0,
+      queue: { length: 0, paused: false }, keepAlive: [], memory: { rssKiB: null, treeRssKiB: null, sampledAt: null }, journalPath: '/j', hostHooks: [], lastEventSeq: 0, trust: { attested: false, recorded: null } /* C10 */,
     };
 
     it('registers every command and event of the X2 tables, owner engine-host but attention.* (owner main, ruling 1)', () => {
@@ -459,4 +479,15 @@ describe('ipc schema validates both directions', () => {
     });
   });
   // C7 end
+  // C10 start: the attach tabs' layout key (C10 execution document, M5)
+  describe('C10 layout entries', () => {
+    it('takes sessions.attachTabs as a layout key, outside the panel namespace, and holds its value to its shape', () => {
+      const value = { version: 1, tabs: [{ tabId: 'terminal:abc', appSessionId: 'a1111111-1111-4111-8111-111111111111', jobId: 'e6dcd828' }] };
+      expect(validateCommandInput('layout.set', { key: 'sessions.attachTabs', value })).toEqual({ ok: true, value: { key: 'sessions.attachTabs', value } });
+      expect(layout.AttachTabsSchema.safeParse(value).success).toBe(true);
+      expect(layout.AttachTabsSchema.safeParse({ version: 1, tabs: [{ ...value.tabs[0], command: 'x' }] }).success).toBe(false);
+      expect(layout.AttachTabsSchema.safeParse({ version: 2, tabs: [] }).success).toBe(false);
+    });
+  });
+  // C10 end
 });

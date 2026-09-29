@@ -56,7 +56,7 @@ function value<N extends CommandName>(result: CommandResult<N>) {
 
 const spec = (appSessionId: string, replay: string) => ({
   appSessionId, cwd: '/tmp/maws-e2e-replay', additionalDirectories: [], model: null, effort: null, permissionMode: null, gateway: 'gateway' as const, subagentModel: null,
-  resume: null, sessionId: null, trust: null, mcpConfig: null, extraSettings: null, maxBudgetUsd: null, replay,
+  resume: null, sessionId: null, trust: null, mcpConfig: null, extraSettings: null, maxBudgetUsd: null, replay, inheritGrantsFrom: null /* C10 */,
 });
 
 async function launchReady(page: Page, id: string, replay: string): Promise<void> {

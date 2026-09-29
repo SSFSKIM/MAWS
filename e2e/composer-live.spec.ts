@@ -585,8 +585,8 @@ test('bash, memory, paste, history recall, the palette, the status line and + di
     await test.step('+ dir through flag settings', async () => {
       const extra = join(scratch.root, 'extra-dir');
       mkdirSync(extra, { recursive: true });
-      await maws.app.evaluate(({ dialog }, dir) => {
-        dialog.showOpenDialog = (async () => ({ canceled: false, filePaths: [dir] })) as typeof dialog.showOpenDialog;
+      await maws.app.evaluate((_electron, dir) => {
+        process.env.MAWS_E2E_PICK_PATHS = dir; // C10: main's e2e pick seam answers it; no native panel under MAWS_E2E
       }, extra);
       const before = value(await invoke(page, 'session.listPermissionRules', { appSessionId: m.id as never }));
       await pane.getByRole('button', { name: 'Add a directory' }).click();

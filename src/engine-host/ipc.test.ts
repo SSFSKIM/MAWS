@@ -41,7 +41,7 @@ afterEach(async () => {
 function spec(overrides: Partial<LaunchSpec> = {}): LaunchSpec {
   return LaunchSpecSchema.parse({
     appSessionId: 'app-ipc', cwd: '/tmp/maws-ipc', additionalDirectories: [], model: null, effort: null, permissionMode: null, gateway: 'gateway', subagentModel: null,
-    resume: null, sessionId: null, trust: null, mcpConfig: null, extraSettings: null, maxBudgetUsd: null, replay: null, ...overrides,
+    resume: null, sessionId: null, trust: null, mcpConfig: null, extraSettings: null, maxBudgetUsd: null, inheritGrantsFrom: null /* C10 */, replay: null, ...overrides,
   });
 }
 

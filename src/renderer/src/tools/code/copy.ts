@@ -56,10 +56,10 @@ export const REVIEW_COPY = {
   header: (files: number, added: number, removed: number, scope: string) => `${plural(files, 'file')} changed · +${added} −${removed} · ${scope}`,
   // A disabled chip's reason, as its tooltip.
   mainWorktreeBranch: (branch: string) => `Session runs on ${branch}, the main worktree's branch`,
-  arrivesWithC10: 'Arrives with C10',
   detachedHead: 'Detached HEAD',
   indexMatchesHead: 'Index matches HEAD',
-  noMainBranch: 'The main worktree has no branch', // C10 answered no branch to compare against (M3's decision)
+  noMainBranch: 'The main worktree has no branch', // C10 answered a detached main worktree (base `HEAD`)
+  noCommits: (branch: string) => `No commits on ${branch} yet`, // C10 answered null: the branch does not resolve
   // Empty scopes
   noUncommitted: 'No uncommitted changes',
   nothingOnBranch: (branch: string, base: string) => `Nothing on ${branch} beyond ${base}`,

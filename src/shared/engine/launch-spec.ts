@@ -24,5 +24,10 @@ export const LaunchSpecSchema = z.strictObject({
   extraSettings: z.record(z.string(), z.unknown()).nullable(), // merged into --settings after the host's own keys (tests: ask rules, enableWorkflows)
   maxBudgetUsd: z.number().positive().nullable(), // --max-budget-usd (live tests; C11 may expose)
   replay: z.string().nullable(), // fixture path for ReplayTransport; refused unless MAWS_ENGINE_REPLAY=1
+  // C10 start (additive X6, flagged to the coordinator): a fork carries the grants the human issued for the conversation
+  // it copies. When set and the session's own snapshot is empty, start() loads the named session's snapshot, saves it
+  // as this session's, and re-applies it in the resume rung (C10 execution document, Interfaces "X6 extensions").
+  inheritGrantsFrom: AppSessionIdSchema.nullable(),
+  // C10 end
 });
 export type LaunchSpec = z.infer<typeof LaunchSpecSchema>;

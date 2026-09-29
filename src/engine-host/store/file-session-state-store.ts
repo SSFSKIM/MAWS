@@ -11,7 +11,11 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { LaunchSpecSchema, type LaunchSpec } from '@shared/engine/launch-spec';
 import { GrantSnapshotSchema, QueueStateSchema, type GrantSnapshot, type QueueState, type SessionStateStore, type StoredQueue } from '@shared/engine/session-state-store';
 
-const StateFileSchema = z.strictObject({ version: z.literal(1), queue: QueueStateSchema, grants: GrantSnapshotSchema, launchSpec: LaunchSpecSchema.nullable() });
+// C10 start: a launch spec stored before C10's additive `inheritGrantsFrom` (X6) still parses, and reads as null there;
+// without this a state file from an earlier build would be moved aside as unreadable, taking its queue and grants
+const StoredLaunchSpecSchema = LaunchSpecSchema.extend({ inheritGrantsFrom: LaunchSpecSchema.shape.inheritGrantsFrom.optional() });
+// C10 end
+const StateFileSchema = z.strictObject({ version: z.literal(1), queue: QueueStateSchema, grants: GrantSnapshotSchema, launchSpec: StoredLaunchSpecSchema.nullable() /* C10 */ });
 type StateFile = z.infer<typeof StateFileSchema>;
 
 const empty = (): StateFile => ({ version: 1, queue: { entries: [], paused: false }, grants: { allow: [] }, launchSpec: null });
@@ -59,7 +63,10 @@ export class FileSessionStateStore implements SessionStateStore {
   }
 
   loadLaunchSpec(id: AppSessionId): Promise<LaunchSpec | null> {
-    return this.run(id, async () => (await this.read(id)).launchSpec);
+    return this.run(id, async () => {
+      const { launchSpec } = await this.read(id);
+      return launchSpec && { ...launchSpec, inheritGrantsFrom: launchSpec.inheritGrantsFrom ?? null }; // C10: a pre-C10 spec
+    });
   }
 
   saveLaunchSpec(id: AppSessionId, spec: LaunchSpec): Promise<void> {

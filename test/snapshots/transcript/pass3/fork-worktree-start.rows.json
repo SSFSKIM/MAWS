@@ -1,10 +1,21 @@
 [
   {
-    "at": "2026-09-28T19:40:10.635Z",
-    "id": "time:turn:e9320a4e-25c8-41f4-98e4-97a4b773ff98",
+    "at": "2026-09-28T19:40:10.634Z",
+    "id": "time:error:replay:journal:6:0",
     "kind": "time",
     "label": "Yesterday 7:40 PM",
-    "turnId": "turn:e9320a4e-25c8-41f4-98e4-97a4b773ff98"
+    "turnId": null
+  },
+  {
+    "at": "2026-09-28T19:40:10.634Z",
+    "attempt": null,
+    "id": "error:replay:journal:6:0",
+    "kind": "error",
+    "lostAttentionCount": null,
+    "scope": "notice",
+    "severity": "notice",
+    "text": "Ignoring 1 permissions.allow entry from .claude/settings.json: this workspace has not been trusted. Run Claude Code interactively here once and accept the trust dialog, or set projects[\"/private/tmp/maws-probe-7w5Mj0\"].hasTrustDialogAccepted: true in /Users/new/.claude.json.",
+    "turnId": null
   },
   {
     "at": "2026-09-28T19:40:10.635Z",

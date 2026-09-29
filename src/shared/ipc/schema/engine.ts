@@ -4,6 +4,9 @@ import * as z from 'zod';
 import { RelayHealthSchema } from '../../engine/relay-health';
 import { EngineSessionStatusSchema } from '../../engine/status';
 // C3 end
+// C10 start
+import { ModelCatalogueSchema } from '../../sessions/models';
+// C10 end
 import { HostPingSchema, HostStateSchema, type CommandSpec } from './common';
 
 // C3 start: the engine host level (C3 execution document, Interfaces "X2 — commands and events"): the binary, the
@@ -22,11 +25,19 @@ export const C3_ENGINE_COMMANDS = Object.keys(c3Commands) as (keyof typeof c3Com
 export const C3_ENGINE_EVENTS: string[] = []; // the engine host's events are per session (`session.*`)
 // C3 end
 
+// C10 start: the model catalogue before any session exists (C10 execution document, X2 additions; Interfaces
+// "Catalogue cache"). Owner engine-host: `refresh` asks the most recently launched ready session's `list_models`.
+const c10Commands = {
+  'engine.models': { input: z.strictObject({ refresh: z.boolean() }), output: ModelCatalogueSchema, owner: 'engine-host' },
+} as const;
+// C10 end
+
 export const commands = {
   'engine.ping': { input: z.void(), output: HostPingSchema, owner: 'engine-host' },
   // Snapshot command, answered by the supervisor in main so a crashed host still reports; same name as the event.
   'engine.hostState': { input: z.void(), output: HostStateSchema, owner: 'main' },
   ...c3Commands, // C3
+  ...c10Commands, // C10
 } as const satisfies Record<`engine.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {

@@ -64,6 +64,13 @@ vi.mock('./window-state', () => ({ restoreWindowState: vi.fn(() => null), trackW
 vi.mock('./attention', () => ({ startAttention: vi.fn() }));
 vi.mock('./lifecycle/quit-guard', () => ({ installQuitGuard: vi.fn(), askToQuit: vi.fn() }));
 // C5 end
+// C10 start: the session service (and the login-shell capture it reads the engine's environment from) is replaced; the
+// lifecycle only has to construct, register and start it without a real shell or index
+const c10 = vi.hoisted(() => ({ started: 0 }));
+vi.mock('@shared/host/shell-env', () => ({ captureShellEnvironment: () => Promise.resolve({}) }));
+vi.mock('./sessions/service', () => ({ SessionService: class { start = async () => void (c10.started += 1); } }));
+vi.mock('./sessions/service-register', () => ({ registerSessionServiceHandlers: vi.fn(), engineHostSettled: vi.fn() }));
+// C10 end
 
 beforeAll(async () => {
   await import('./index');
@@ -104,5 +111,6 @@ describe('app lifecycle (macOS, D-11)', () => {
     expect(git.registered).toBe(1);
     expect(git.dispose).toHaveBeenCalledOnce();
     // end C4
+    expect(c10.started).toBe(1); // C10: the session service started once, at ready
   });
 });

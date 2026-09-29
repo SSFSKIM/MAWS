@@ -33,6 +33,10 @@ import { MAX_LINE_CHARS, spawnEngine, type EngineTransport } from './transport';
 // C4 start
 import type { SessionEvent } from '@shared/graph/events';
 // C4 end
+// C10 start
+import type { ModelCatalogue } from '@shared/sessions/models';
+import { ModelsCache } from './models-cache';
+// C10 end
 
 export type DeadlineShape = 'immediate' | 'bounded' | 'operation';
 type C3Command = (typeof C3_SESSION_COMMANDS)[number] | (typeof C3_ENGINE_COMMANDS)[number];
@@ -52,6 +56,10 @@ export const DEADLINE_SHAPES: Record<C3Command, DeadlineShape> = {
   'session.exportConversation': 'bounded', 'session.getStatus': 'bounded', 'session.mcpStatus': 'bounded', 'session.listModels': 'bounded', 'session.getSessionCost': 'bounded',
   'session.getBinaryVersion': 'bounded',
 };
+
+// C10 start: C10's engine-host commands (C10 execution document, X2 additions); each handler names its deadline shape
+type C10Command = 'engine.models' | 'session.forget';
+// C10 end
 
 // The longest wait before a live launch spawns: its three checks run in parallel, each under its own timeout.
 export const PRE_SPAWN_BOUND_MS = Math.max(SHELL_CAPTURE_TIMEOUT_MS + SHELL_CAPTURE_GRACE_MS, VERSION_TIMEOUT_MS, RELAY_HEALTH_TIMEOUT_MS);
@@ -106,6 +114,11 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
   const operations = new OperationTable((event) => emit('session.operation', event));
   const binaryProbe = deps.binaryProbe ?? createBinaryProbe();
   const relayCheck = deps.checkRelay ?? ((force: boolean) => checkRelayHealth(RELAY_URL, undefined, { force }));
+  // C10 start: the model catalogue, updated from every initialize response and every list_models answer
+  const models = new ModelsCache(deps.userData, { warn: log });
+  const modelsLoaded = models.load();
+  const updateModels = (list: readonly unknown[]) => void modelsLoaded.then(() => models.update(list));
+  // C10 end
 
   const launch = createLauncher({
     userData: deps.userData,
@@ -132,6 +145,7 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
       session.on('queue', (queue) => stream.queue(queue));
       session.on('brokerItems', (items) => stream.brokerItems(items));
       session.on('catalog', (catalog) => stream.catalog(catalog)); // C7: session.catalogChanged
+      session.on('models', updateModels); // C10
     },
   });
 
@@ -319,9 +333,66 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
   handle('session.exportConversation', read('export_conversation'));
   handle('session.getStatus', read('get_status'));
   handle('session.mcpStatus', read('mcp_status'));
-  handle('session.listModels', read('list_models'));
+  // C10 start: every list_models answer also refreshes the catalogue cache
+  handle('session.listModels', async (input) => {
+    const answer = await read('list_models')(input);
+    updateModels(answer.models);
+    return answer;
+  });
+  // C10 end
   handle('session.getSessionCost', read('get_session_cost'));
   handle('session.getBinaryVersion', read('get_binary_version'));
+
+  // C10 start -----------------------------------------------------------------------------------------------------------
+  const handleC10 = <N extends C10Command>(name: N, handler: (input: CommandInput<N>) => Promise<CommandOutput<N>>) => on(name, handler);
+
+  // The catalogue before any session exists: with `refresh`, the most recently launched ready session's list_models
+  // (a failure falls back to what is cached, logged); otherwise the cache, else the built-in list. Bounded: its one
+  // control round trip runs under `bounded`.
+  handleC10('engine.models', async ({ refresh }): Promise<ModelCatalogue> => {
+    await modelsLoaded;
+    const asked = refresh
+      ? table
+          .list()
+          .filter((session) => session.lifecycle === 'ready' && session.control)
+          .sort((a, b) => b.status().launchedAt.localeCompare(a.status().launchedAt))[0]
+      : undefined;
+    if (asked?.control) {
+      try {
+        const answer = await bounded(() => controls.listModels(asked.control!, {}));
+        await models.update(answer.models);
+        return { ...models.answer(), source: 'live' };
+      } catch (error) {
+        log(`engine.models: list_models failed (${error instanceof Error ? error.message : String(error)}); answering the cache`);
+      }
+    }
+    return models.answer();
+  });
+
+  // The whole erase behind delete conversation: the state file and the journal directory, then `session.forgotten` so
+  // main's attention service retires the id. Refused while a process is reserved; the host keeps nothing afterwards.
+  // Immediate: no control round trip, answered once the erase is flushed.
+  handleC10('session.forget', async ({ appSessionId }) => {
+    assertSafeAppSessionId(appSessionId); // it deletes a file and a directory named after it
+    const id = appSessionId as AppSessionId;
+    const session = table.get(id);
+    const state = session?.status().process;
+    if (session && state !== 'exited') throw new HostCommandError({ code: 'internal', message: `already_live: process is ${state}` });
+    // `exited` is set at the exit row, before the exit's queue and store saves land; `session.exited` settles after them
+    // (session.ts handleExit), so waiting on it keeps a late save from recreating the state file erased below
+    if (session) await session.exited;
+    // a different row under the id is a relaunch; a row merely released meanwhile (a concurrent forget, the archive's
+    // release) is not, and the erase below is idempotent
+    const now = table.get(id);
+    if (now && now !== session) throw new HostCommandError({ code: 'internal', message: `already_live: ${id} was relaunched` });
+    table.release(id);
+    streams.get(id)?.dispose();
+    streams.delete(id);
+    specs.delete(id);
+    await store.forget(id);
+    emit('session.forgotten', { appSessionId: id });
+  });
+  // C10 end -------------------------------------------------------------------------------------------------------------
 
   return { table };
 }

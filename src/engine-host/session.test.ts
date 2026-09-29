@@ -32,7 +32,7 @@ const DIRECT_STATUS = { sections: [{ title: 'Session', rows: [{ label: 'Login', 
 function spec(overrides: Partial<LaunchSpec> = {}): LaunchSpec {
   return LaunchSpecSchema.parse({
     appSessionId: 'app-s', cwd: '/tmp/maws-session', additionalDirectories: [], model: 'sonnet', effort: null, permissionMode: null, gateway: 'gateway', subagentModel: null,
-    resume: null, sessionId: '33333333-3333-4333-8333-333333333333', trust: null, mcpConfig: null, extraSettings: null, maxBudgetUsd: null, replay: null, ...overrides,
+    resume: null, sessionId: '33333333-3333-4333-8333-333333333333', trust: null, mcpConfig: null, extraSettings: null, maxBudgetUsd: null, inheritGrantsFrom: null /* C10 */, replay: null, ...overrides,
   });
 }
 

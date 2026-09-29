@@ -3,6 +3,10 @@
 // repository watcher that emits `git.changed` with the fresh status. Owner `main` for every command. Nothing here
 // stages, commits, stashes, checks out, fetches or touches a worktree's existence (C10 and P1 own mutation).
 import * as z from 'zod';
+// C10 start
+import { BranchChoiceSchema } from '../../sessions/intent';
+import { BranchStatusSchema, CleanupRefusalSchema, WorktreeInfoSchema, WorktreeStatusSchema } from '../../sessions/worktree';
+// C10 end
 import type { CommandSpec } from './common';
 
 // One entry of `git status --porcelain=v2`: `index` and `worktree` are the X and Y characters of the record's XY field
@@ -93,6 +97,44 @@ const c7Commands = {
   'git.lsFiles': { input: LsFilesInputSchema, output: LsFilesSchema, owner: 'main' },
 } as const satisfies Record<`git.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 // C7 end
+// C10 start: the worktree service (C10 execution document, Interfaces "Worktrees"; charter §4.5). Every git mutation MAWS
+// makes is one of these, in C10's own module (src/main/git/worktrees.ts), beside C4's read-only service. Owner main. The
+// cleanup ladder's four operations are separate: archive is `session.archive` per id, then `remove` (the checkout, with
+// the identity the dialog captured as `expect`) and `deleteBranch` (with its head as `expect`), each answering a
+// refusal rather than acting when the fresh read disagrees.
+const RepoRootSchema = z.strictObject({ repoRoot: z.string() });
+export const GitWorktreeListSchema = z.strictObject({ repoRoot: z.string(), commonDir: z.string(), worktrees: z.array(WorktreeInfoSchema) });
+export type GitWorktreeList = z.infer<typeof GitWorktreeListSchema>;
+export const GitWorktreeAddInputSchema = z.strictObject({ repoRoot: z.string(), name: z.string(), branch: BranchChoiceSchema });
+export type GitWorktreeAddInput = z.infer<typeof GitWorktreeAddInputSchema>;
+export const GitWorktreeRemoveInputSchema = z.strictObject({
+  repoRoot: z.string(),
+  path: z.string(),
+  expect: z.strictObject({ branch: z.string().nullable(), head: z.string() }),
+  discard: z.boolean(), // `worktree remove --force`: the dialog's acknowledged discard of uncommitted changes
+});
+export type GitWorktreeRemoveInput = z.infer<typeof GitWorktreeRemoveInputSchema>;
+export const GitWorktreeRemovedSchema = z.union([z.strictObject({ removed: z.literal(true), prunedOnly: z.boolean() }), CleanupRefusalSchema]);
+export type GitWorktreeRemoved = z.infer<typeof GitWorktreeRemovedSchema>;
+export const GitWorktreeDeleteBranchInputSchema = z.strictObject({
+  repoRoot: z.string(),
+  branch: z.string(),
+  expect: z.strictObject({ head: z.string() }),
+  acknowledgeUnmerged: z.boolean(),
+});
+export type GitWorktreeDeleteBranchInput = z.infer<typeof GitWorktreeDeleteBranchInputSchema>;
+export const GitBranchDeletedSchema = z.union([z.strictObject({ deleted: z.literal(true), wasMerged: z.boolean() }), CleanupRefusalSchema]);
+export type GitBranchDeleted = z.infer<typeof GitBranchDeletedSchema>;
+
+const c10Commands = {
+  'git.worktree.list': { input: RepoRootSchema, output: GitWorktreeListSchema, owner: 'main' },
+  'git.worktree.status': { input: z.strictObject({ repoRoot: z.string(), path: z.string() }), output: WorktreeStatusSchema.nullable(), owner: 'main' }, // null: not listed
+  'git.worktree.branch': { input: z.strictObject({ repoRoot: z.string(), branch: z.string() }), output: BranchStatusSchema.nullable(), owner: 'main' }, // null: no such local branch
+  'git.worktree.add': { input: GitWorktreeAddInputSchema, output: WorktreeInfoSchema, owner: 'main' },
+  'git.worktree.remove': { input: GitWorktreeRemoveInputSchema, output: GitWorktreeRemovedSchema, owner: 'main' },
+  'git.worktree.deleteBranch': { input: GitWorktreeDeleteBranchInputSchema, output: GitBranchDeletedSchema, owner: 'main' },
+} as const satisfies Record<`git.worktree.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
+// C10 end
 
 export const commands = {
   'git.status': { input: DirectorySchema, output: GitStatusSchema, owner: 'main' },
@@ -102,6 +144,7 @@ export const commands = {
   'git.watch': { input: DirectorySchema, output: GitStatusSchema, owner: 'main' }, // idempotent; ref-counted per repoRoot
   'git.unwatch': { input: DirectorySchema, output: z.void(), owner: 'main' },
   ...c7Commands, // C7
+  ...c10Commands, // C10
 } as const satisfies Record<`git.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {

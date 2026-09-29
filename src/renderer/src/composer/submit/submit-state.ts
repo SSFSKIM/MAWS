@@ -10,7 +10,7 @@ export type SubmitState = 'send' | 'queue' | 'steer' | 'stop' | 'resume';
 
 export interface SubmitInput {
   status: EngineSessionStatus | null;
-  intent: { starting: boolean; messageHeld: boolean } | null; // non-null while the session is unstarted (C10's hook answers)
+  intent: { starting: boolean; messageHeld: boolean; phase?: string | null } | null; // non-null while the session is unstarted (C10's hook answers); phase: C10's running setup phase in words
   queue: { entries: readonly QueueEntry[]; paused: boolean };
   empty: boolean;
   mode: 'send' | 'bash' | 'memory';
@@ -64,8 +64,8 @@ const decide = (primary: SubmitState, label: string, enabled: boolean, reason: s
 
 export function submitState(i: SubmitInput): SubmitDecision {
   const { status, intent, queue, empty, mode } = i;
-  if (status === null && intent !== null) {
-    if (intent.starting) return decide('send', 'Starting…', false, STARTING);
+  if (intent !== null) { // C10: the caller answers the intent while unstarted, even beside a failed setup's exited status
+    if (intent.starting || (intent.phase ?? null) !== null) return decide('send', 'Starting…', false, intent.phase ?? STARTING); // C10: the setup phase is the reason
     if (intent.messageHeld) return decide('send', 'Send', false, MESSAGE_HELD);
     if (mode !== 'send') return decide('send', 'Send', false, NOT_YET);
     return decide('send', 'Send', !empty);
