@@ -1,0 +1,595 @@
+[
+  {
+    "at": "2026-09-28T10:40:00.045Z",
+    "id": "time:turn:u-denials-002",
+    "kind": "time",
+    "label": "Yesterday 10:40 AM",
+    "turnId": "turn:u-denials-002"
+  },
+  {
+    "at": "2026-09-28T10:40:00.045Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:u-denials-002",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "u-denials-002",
+    "steer": false,
+    "text": "Run git push --force, then rm -rf build, then curl the deploy hook. Report what happened.",
+    "turnId": "turn:u-denials-002"
+  },
+  {
+    "at": "2026-09-28T10:40:00.045Z",
+    "autoDenied": 2,
+    "denied": 1,
+    "endedAt": "2026-09-28T10:40:03.729Z",
+    "expanded": true,
+    "firstDeniedCell": "cell:toolu_synth_deny_1",
+    "id": "divider:turn:u-denials-002",
+    "kind": "divider",
+    "origin": "human",
+    "startedAt": "2026-09-28T10:40:00.100Z",
+    "state": "completed",
+    "summary": {
+      "autoDenied": 2,
+      "byCategory": {
+        "commands": 3,
+        "exploration": 0,
+        "files": 0,
+        "mcp": 0,
+        "other": 0,
+        "skills": 0,
+        "web": 0
+      },
+      "childAgents": 0,
+      "costUsd": 0.0123,
+      "denials": [
+        {
+          "cellId": "cell:toolu_synth_deny_1",
+          "disposition": "denied",
+          "interruption": false,
+          "kind": "user-rejected"
+        },
+        {
+          "cellId": "cell:toolu_synth_deny_2",
+          "disposition": "auto_denied",
+          "interruption": false,
+          "kind": "automode-blocked"
+        },
+        {
+          "cellId": "cell:toolu_synth_deny_3",
+          "disposition": "auto_denied",
+          "interruption": false,
+          "kind": "automode-parsing-error"
+        }
+      ],
+      "durationMs": 3584,
+      "model": "claude-opus-5-5",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 3,
+        "reviewed": 0
+      },
+      "terminalReason": "completed",
+      "toolCalls": 3,
+      "usage": {
+        "cacheCreationInputTokens": 0,
+        "cacheReadInputTokens": 21000,
+        "inputTokens": 12,
+        "outputTokens": 240,
+        "thinkingTokens": null
+      }
+    },
+    "toolCalls": 3,
+    "turnId": "turn:u-denials-002"
+  },
+  {
+    "at": "2026-09-28T10:40:00.161Z",
+    "durationMs": 24,
+    "id": "think:msg_denials_007:0",
+    "kind": "thinking",
+    "live": false,
+    "messageUuid": "a-denials-013",
+    "text": "Three risky commands; each may be refused.",
+    "turnId": "turn:u-denials-002"
+  },
+  {
+    "agent": null,
+    "at": "2026-09-28T10:40:00.247Z",
+    "category": "commands",
+    "classification": {
+      "category": "commands",
+      "denial": {
+        "disposition": "denied",
+        "interruption": false,
+        "kind": "user-rejected",
+        "reason": "Never force-push main."
+      },
+      "groupable": false,
+      "hidden": false,
+      "humanDecision": true,
+      "safeguard": "not_evaluated",
+      "startsGroup": false,
+      "subagentLifecycle": null
+    },
+    "detail": {
+      "backgroundTaskId": null,
+      "command": "git push --force origin main",
+      "cwd": null,
+      "description": "Force-push main",
+      "exitCode": null,
+      "interrupted": false,
+      "kind": "shell",
+      "spill": null,
+      "stderr": "",
+      "stdout": "Never force-push main.",
+      "truncated": null
+    },
+    "endedAt": "2026-09-28T10:40:02.831Z",
+    "expanded": true,
+    "id": "cell:toolu_synth_deny_1",
+    "kind": "cell",
+    "label": "Denied: `git push --force origin main` · Never force-push main.",
+    "paths": [],
+    "startedAt": "2026-09-28T10:40:00.247Z",
+    "status": "denied",
+    "toolName": "Bash",
+    "toolUseId": "toolu_synth_deny_1",
+    "turnId": "turn:u-denials-002"
+  },
+  {
+    "agent": null,
+    "at": "2026-09-28T10:40:03.063Z",
+    "category": "commands",
+    "classification": {
+      "category": "commands",
+      "denial": {
+        "disposition": "auto_denied",
+        "interruption": false,
+        "kind": "automode-blocked",
+        "reason": "Auto mode blocked this command: destructive deletion outside the workspace allowlist."
+      },
+      "groupable": false,
+      "hidden": false,
+      "humanDecision": false,
+      "safeguard": "not_evaluated",
+      "startsGroup": false,
+      "subagentLifecycle": null
+    },
+    "detail": {
+      "backgroundTaskId": null,
+      "command": "rm -rf build",
+      "cwd": null,
+      "description": "Remove the build directory",
+      "exitCode": null,
+      "interrupted": false,
+      "kind": "shell",
+      "spill": null,
+      "stderr": "",
+      "stdout": "Auto mode blocked this command: destructive deletion outside the workspace allowlist.",
+      "truncated": null
+    },
+    "endedAt": "2026-09-28T10:40:03.117Z",
+    "expanded": true,
+    "id": "cell:toolu_synth_deny_2",
+    "kind": "cell",
+    "label": "Auto mode blocked: `rm -rf build` · Auto mode blocked this command: destructive deletion outside the workspace allowlist.",
+    "paths": [],
+    "startedAt": "2026-09-28T10:40:03.063Z",
+    "status": "denied",
+    "toolName": "Bash",
+    "toolUseId": "toolu_synth_deny_2",
+    "turnId": "turn:u-denials-002"
+  },
+  {
+    "agent": null,
+    "at": "2026-09-28T10:40:03.357Z",
+    "category": "commands",
+    "classification": {
+      "category": "commands",
+      "denial": {
+        "disposition": "auto_denied",
+        "interruption": false,
+        "kind": "automode-parsing-error",
+        "reason": "Auto mode could not parse the classifier response."
+      },
+      "groupable": false,
+      "hidden": false,
+      "humanDecision": false,
+      "safeguard": "not_evaluated",
+      "startsGroup": false,
+      "subagentLifecycle": null
+    },
+    "detail": {
+      "backgroundTaskId": null,
+      "command": "curl -X POST https://deploy.example.com/hook",
+      "cwd": null,
+      "description": "Trigger the deploy hook",
+      "exitCode": null,
+      "interrupted": false,
+      "kind": "shell",
+      "spill": null,
+      "stderr": "",
+      "stdout": "Auto mode could not parse the classifier response.",
+      "truncated": null
+    },
+    "endedAt": "2026-09-28T10:40:03.411Z",
+    "expanded": true,
+    "id": "cell:toolu_synth_deny_3",
+    "kind": "cell",
+    "label": "Auto mode blocked: `curl -X POST https://deploy.example.com/hook` · review unreadable",
+    "paths": [],
+    "startedAt": "2026-09-28T10:40:03.357Z",
+    "status": "denied",
+    "toolName": "Bash",
+    "toolUseId": "toolu_synth_deny_3",
+    "turnId": "turn:u-denials-002"
+  },
+  {
+    "at": "2026-09-28T10:40:03.627Z",
+    "blockIndex": 0,
+    "id": "text:msg_denials_045:0",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "None of the three ran: you denied the force-push, auto mode blocked the deletion, and the deploy hook could not be reviewed.",
+    "messageUuid": "a-denials-054",
+    "model": "claude-opus-5-5",
+    "phase": "answer",
+    "turnId": "turn:u-denials-002"
+  },
+  {
+    "at": "2026-09-28T10:40:03.759Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:u-denials-059",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "u-denials-059",
+    "steer": false,
+    "text": "Count to 100 slowly with one Bash call per number.",
+    "turnId": "turn:u-denials-059"
+  },
+  {
+    "at": "2026-09-28T10:40:03.759Z",
+    "autoDenied": 0,
+    "denied": 0,
+    "endedAt": "2026-09-28T10:40:04.010Z",
+    "expanded": true,
+    "firstDeniedCell": null,
+    "id": "divider:turn:u-denials-059",
+    "kind": "divider",
+    "origin": "human",
+    "startedAt": "2026-09-28T10:40:03.814Z",
+    "state": "stopped",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 1,
+        "exploration": 0,
+        "files": 0,
+        "mcp": 0,
+        "other": 0,
+        "skills": 0,
+        "web": 0
+      },
+      "childAgents": 0,
+      "costUsd": 0.0123,
+      "denials": [
+        {
+          "cellId": "cell:toolu_synth_deny_4",
+          "disposition": "stopped",
+          "interruption": true,
+          "kind": "user-rejected"
+        }
+      ],
+      "durationMs": 151,
+      "model": "claude-opus-5-5",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 1,
+        "reviewed": 0
+      },
+      "terminalReason": "aborted_streaming",
+      "toolCalls": 1,
+      "usage": {
+        "cacheCreationInputTokens": 0,
+        "cacheReadInputTokens": 21000,
+        "inputTokens": 12,
+        "outputTokens": 240,
+        "thinkingTokens": null
+      }
+    },
+    "toolCalls": 1,
+    "turnId": "turn:u-denials-059"
+  },
+  {
+    "agent": null,
+    "at": "2026-09-28T10:40:03.891Z",
+    "category": "commands",
+    "classification": {
+      "category": "commands",
+      "denial": {
+        "disposition": "stopped",
+        "interruption": true,
+        "kind": "user-rejected",
+        "reason": "User rejected tool use"
+      },
+      "groupable": false,
+      "hidden": false,
+      "humanDecision": false,
+      "safeguard": "not_evaluated",
+      "startsGroup": false,
+      "subagentLifecycle": null
+    },
+    "detail": {
+      "backgroundTaskId": null,
+      "command": "sleep 1; echo 1",
+      "cwd": null,
+      "description": "Count 1",
+      "exitCode": null,
+      "interrupted": false,
+      "kind": "shell",
+      "spill": null,
+      "stderr": "",
+      "stdout": "User rejected tool use",
+      "truncated": null
+    },
+    "endedAt": "2026-09-28T10:40:03.975Z",
+    "expanded": true,
+    "id": "cell:toolu_synth_deny_4",
+    "kind": "cell",
+    "label": "Stopped: `sleep 1; echo 1`",
+    "paths": [],
+    "startedAt": "2026-09-28T10:40:03.891Z",
+    "status": "stopped",
+    "toolName": "Bash",
+    "toolUseId": "toolu_synth_deny_4",
+    "turnId": "turn:u-denials-059"
+  },
+  {
+    "at": "2026-09-28T10:40:04.040Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:u-denials-077",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "u-denials-077",
+    "steer": false,
+    "text": "Try the three deploy steps again.",
+    "turnId": "turn:u-denials-077"
+  },
+  {
+    "at": "2026-09-28T10:40:04.040Z",
+    "autoDenied": 0,
+    "denied": 0,
+    "endedAt": "2026-09-28T10:40:05.084Z",
+    "expanded": true,
+    "firstDeniedCell": null,
+    "id": "divider:turn:u-denials-077",
+    "kind": "divider",
+    "origin": "human",
+    "startedAt": "2026-09-28T10:40:04.095Z",
+    "state": "completed",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 3,
+        "exploration": 0,
+        "files": 0,
+        "mcp": 0,
+        "other": 0,
+        "skills": 0,
+        "web": 0
+      },
+      "childAgents": 0,
+      "costUsd": 0.0123,
+      "denials": [
+        {
+          "cellId": "cell:toolu_synth_deny_5",
+          "disposition": "stopped",
+          "interruption": false,
+          "kind": "automode-unavailable"
+        },
+        {
+          "cellId": "cell:toolu_synth_deny_6",
+          "disposition": "stopped",
+          "interruption": false,
+          "kind": "interrupted"
+        },
+        {
+          "cellId": "cell:toolu_synth_deny_7",
+          "disposition": "stopped",
+          "interruption": false,
+          "kind": "cancelled"
+        }
+      ],
+      "durationMs": 944,
+      "model": "claude-opus-5-5",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 3,
+        "reviewed": 0
+      },
+      "terminalReason": "completed",
+      "toolCalls": 3,
+      "usage": {
+        "cacheCreationInputTokens": 0,
+        "cacheReadInputTokens": 21000,
+        "inputTokens": 12,
+        "outputTokens": 240,
+        "thinkingTokens": null
+      }
+    },
+    "toolCalls": 3,
+    "turnId": "turn:u-denials-077"
+  },
+  {
+    "agent": null,
+    "at": "2026-09-28T10:40:04.172Z",
+    "category": "commands",
+    "classification": {
+      "category": "commands",
+      "denial": {
+        "disposition": "stopped",
+        "interruption": false,
+        "kind": "automode-unavailable",
+        "reason": "Auto mode is unavailable for this session."
+      },
+      "groupable": false,
+      "hidden": false,
+      "humanDecision": false,
+      "safeguard": "not_evaluated",
+      "startsGroup": false,
+      "subagentLifecycle": null
+    },
+    "detail": {
+      "backgroundTaskId": null,
+      "command": "./deploy.sh stage",
+      "cwd": null,
+      "description": "Deploy to staging",
+      "exitCode": null,
+      "interrupted": false,
+      "kind": "shell",
+      "spill": null,
+      "stderr": "",
+      "stdout": "Auto mode is unavailable for this session.",
+      "truncated": null
+    },
+    "endedAt": "2026-09-28T10:40:04.226Z",
+    "expanded": true,
+    "id": "cell:toolu_synth_deny_5",
+    "kind": "cell",
+    "label": "Stopped: `./deploy.sh stage` · auto mode unavailable",
+    "paths": [],
+    "startedAt": "2026-09-28T10:40:04.172Z",
+    "status": "stopped",
+    "toolName": "Bash",
+    "toolUseId": "toolu_synth_deny_5",
+    "turnId": "turn:u-denials-077"
+  },
+  {
+    "agent": null,
+    "at": "2026-09-28T10:40:04.458Z",
+    "category": "commands",
+    "classification": {
+      "category": "commands",
+      "denial": {
+        "disposition": "stopped",
+        "interruption": false,
+        "kind": "interrupted",
+        "reason": "Tool execution interrupted."
+      },
+      "groupable": false,
+      "hidden": false,
+      "humanDecision": false,
+      "safeguard": "not_evaluated",
+      "startsGroup": false,
+      "subagentLifecycle": null
+    },
+    "detail": {
+      "backgroundTaskId": null,
+      "command": "./deploy.sh prod",
+      "cwd": null,
+      "description": "Deploy to production",
+      "exitCode": null,
+      "interrupted": false,
+      "kind": "shell",
+      "spill": null,
+      "stderr": "",
+      "stdout": "Tool execution interrupted.",
+      "truncated": null
+    },
+    "endedAt": "2026-09-28T10:40:04.512Z",
+    "expanded": true,
+    "id": "cell:toolu_synth_deny_6",
+    "kind": "cell",
+    "label": "Stopped: `./deploy.sh prod`",
+    "paths": [],
+    "startedAt": "2026-09-28T10:40:04.458Z",
+    "status": "stopped",
+    "toolName": "Bash",
+    "toolUseId": "toolu_synth_deny_6",
+    "turnId": "turn:u-denials-077"
+  },
+  {
+    "agent": null,
+    "at": "2026-09-28T10:40:04.744Z",
+    "category": "commands",
+    "classification": {
+      "category": "commands",
+      "denial": {
+        "disposition": "stopped",
+        "interruption": false,
+        "kind": "cancelled",
+        "reason": "Tool call cancelled."
+      },
+      "groupable": false,
+      "hidden": false,
+      "humanDecision": false,
+      "safeguard": "not_evaluated",
+      "startsGroup": false,
+      "subagentLifecycle": null
+    },
+    "detail": {
+      "backgroundTaskId": null,
+      "command": "./deploy.sh verify",
+      "cwd": null,
+      "description": "Verify the deploy",
+      "exitCode": null,
+      "interrupted": false,
+      "kind": "shell",
+      "spill": null,
+      "stderr": "",
+      "stdout": "Tool call cancelled.",
+      "truncated": null
+    },
+    "endedAt": "2026-09-28T10:40:04.798Z",
+    "expanded": true,
+    "id": "cell:toolu_synth_deny_7",
+    "kind": "cell",
+    "label": "Stopped: `./deploy.sh verify`",
+    "paths": [],
+    "startedAt": "2026-09-28T10:40:04.744Z",
+    "status": "stopped",
+    "toolName": "Bash",
+    "toolUseId": "toolu_synth_deny_7",
+    "turnId": "turn:u-denials-077"
+  },
+  {
+    "at": "2026-09-28T10:40:05.014Z",
+    "blockIndex": 0,
+    "id": "text:msg_denials_112:0",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "All three steps stopped before running.",
+    "messageUuid": "a-denials-117",
+    "model": "claude-opus-5-5",
+    "phase": "answer",
+    "turnId": "turn:u-denials-077"
+  },
+  {
+    "at": "2026-09-28T10:40:05.129Z",
+    "command": "git status --short",
+    "cwd": null,
+    "exitCode": 0,
+    "id": "bash:t-denials-123",
+    "kind": "bash",
+    "stderr": "",
+    "stdout": " M src/app.ts\n?? build/",
+    "turnId": null
+  },
+  {
+    "at": "2026-09-28T10:40:05.204Z",
+    "attempt": null,
+    "id": "error:replay:journal:123:0",
+    "kind": "error",
+    "lostAttentionCount": 0,
+    "scope": "exit",
+    "severity": "notice",
+    "text": "Session process exited (unknown)",
+    "turnId": null
+  }
+]

@@ -83,9 +83,16 @@ describe('stub source plays a timeline', () => {
     expect(answer.event).toMatchObject({ kind: 'permission.requested', toolName: 'Bash' });
     expect(h.call('attention.request', { appSessionId: FIX, requestId: 'nope' })).toEqual({ event: null });
     expect([...h.handlers.keys()].sort()).toEqual([
-      'attention.list', 'attention.request', 'session.answer', 'session.get', 'session.list', 'session.projects.list', 'session.update',
+      'attention.list', 'attention.request', 'session.answer', 'session.events', 'session.get', 'session.list', 'session.projects.list', 'session.update',
     ]);
   });
+
+  // C6: a stub session's transcript hydrates to an empty history instead of the load-failure banner.
+  it('answers session.events for its sessions with an empty history, and refuses an id it does not hold', () => {
+    expect(h.call('session.events', { appSessionId: FIX, afterSeq: null, limit: null })).toEqual({ events: [], lastSeq: 0, complete: true });
+    expect(() => h.call('session.events', { appSessionId: 'nope', afterSeq: null, limit: null })).toThrow('unknown app session: nope');
+  });
+  // end C6
 
   it('drives the timeline on the manual clock through the main-process global', () => {
     expect(scenarioGlobal()?.now()).toBe(0);

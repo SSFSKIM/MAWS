@@ -1,0 +1,95 @@
+// X3 classification (C6 execution document, "X3 — classification"): tool name → category, presentation and the
+// overrides, total over MCP, plugin and future tools. The table is the contract; `presentationOf` says which tool
+// names are rows of another kind rather than cells.
+import type { DenialKind, SafeguardVerdict } from '@shared/graph/enums';
+import type { ToolCategory, ToolClassification } from './rows';
+
+export type Presentation = 'cell' | 'subagent' | 'agent_message' | 'question' | 'plan';
+
+const ROW_KIND_TOOLS: Record<string, Presentation> = {
+  Agent: 'subagent', Task: 'subagent', Workflow: 'subagent',
+  SendMessage: 'agent_message',
+  AskUserQuestion: 'question',
+  ExitPlanMode: 'plan',
+};
+
+export function presentationOf(toolName: string): Presentation {
+  return Object.hasOwn(ROW_KIND_TOOLS, toolName) ? ROW_KIND_TOOLS[toolName] : 'cell';
+}
+
+interface TableRow { category: ToolCategory; groupable: boolean; hidden: boolean }
+const grouped = (category: ToolCategory, hidden = false): TableRow => ({ category, groupable: true, hidden });
+const standalone = (category: ToolCategory): TableRow => ({ category, groupable: false, hidden: false });
+
+const TABLE: Record<string, TableRow> = {
+  Skill: grouped('skills'), ToolSearch: grouped('skills'),
+  Read: grouped('exploration'), Glob: grouped('exploration'), LS: grouped('exploration'), LSP: grouped('exploration'), NotebookRead: grouped('exploration'),
+  Grep: grouped('exploration'),
+  Edit: grouped('files'), MultiEdit: grouped('files'), Write: grouped('files'), NotebookEdit: grouped('files'),
+  Bash: grouped('commands'), BashOutput: grouped('commands'), KillShell: grouped('commands'), Monitor: grouped('commands'),
+  WebFetch: grouped('web'), WebSearch: grouped('web'),
+  EnterPlanMode: grouped('other', true), EnterWorktree: grouped('other', true), ExitWorktree: grouped('other', true),
+  TodoWrite: grouped('other', true), TaskCreate: grouped('other', true), TaskUpdate: grouped('other', true), TaskList: grouped('other', true),
+  TaskGet: grouped('other', true), TaskOutput: grouped('other', true), TaskStop: grouped('other', true),
+  SendUserFile: standalone('other'),
+};
+
+export const MCP_TOOL = /^mcp__([^_].*?)__(.+)$/;
+
+export function tableRowOf(toolName: string): TableRow {
+  if (MCP_TOOL.test(toolName)) return grouped('mcp');
+  return Object.hasOwn(TABLE, toolName) ? TABLE[toolName] : grouped('other');
+}
+
+export interface ClassifyContext {
+  denial: { kind: DenialKind; reason: string | null } | null;
+  terminalReason: string | null; // the turn's, once it closed
+  turnClosed: boolean;
+  humanDecision: boolean;
+  safeguard: SafeguardVerdict;
+  imageResult: boolean;
+  isError: boolean;
+}
+
+export const isAbortedReason = (terminalReason: string | null) => terminalReason !== null && terminalReason.startsWith('aborted');
+
+// The denial table under Derivation, one row per DENIAL_KINDS member. The interruption case needs the terminal reason,
+// so it is decided when the turn closes; until then a user-rejected denial reads as denied.
+export function denialDisposition(kind: DenialKind, terminalReason: string | null, turnClosed: boolean): { disposition: 'denied' | 'auto_denied' | 'stopped'; interruption: boolean } {
+  switch (kind) {
+    case 'user-rejected':
+      return turnClosed && isAbortedReason(terminalReason) ? { disposition: 'stopped', interruption: true } : { disposition: 'denied', interruption: false };
+    case 'permission-rule':
+      return { disposition: 'denied', interruption: false };
+    case 'automode-blocked':
+    case 'automode-parsing-error':
+      return { disposition: 'auto_denied', interruption: false };
+    case 'automode-unavailable':
+    case 'interrupted':
+    case 'cancelled':
+      return { disposition: 'stopped', interruption: false };
+  }
+}
+
+// Total over tool names; `startsGroup` is the group state machine's (derive.ts) and starts false here.
+export function classifyTool(toolName: string, _input: unknown, context: ClassifyContext): ToolClassification {
+  const row = tableRowOf(toolName);
+  let groupable = row.groupable;
+  let denial: ToolClassification['denial'] = null;
+  if (context.denial) {
+    groupable = false;
+    denial = { kind: context.denial.kind, reason: context.denial.reason, ...denialDisposition(context.denial.kind, context.terminalReason, context.turnClosed) };
+  }
+  if (context.humanDecision) groupable = false;
+  if (context.imageResult) groupable = false;
+  return {
+    groupable,
+    hidden: row.hidden,
+    category: row.category,
+    denial,
+    subagentLifecycle: null,
+    startsGroup: false,
+    safeguard: context.safeguard,
+    humanDecision: context.humanDecision,
+  };
+}

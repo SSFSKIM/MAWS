@@ -1,0 +1,45 @@
+[
+  {
+    "at": "2026-09-28T10:07:20.284Z",
+    "id": "time:turn:2d681dda-7cc9-4980-9f06-9adb2ba4597d",
+    "kind": "time",
+    "label": "Yesterday 10:07 AM",
+    "turnId": "turn:2d681dda-7cc9-4980-9f06-9adb2ba4597d"
+  },
+  {
+    "at": "2026-09-28T10:07:20.284Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:2d681dda-7cc9-4980-9f06-9adb2ba4597d",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "2d681dda-7cc9-4980-9f06-9adb2ba4597d",
+    "steer": false,
+    "text": "What word did I ask you to remember? Reply with just that word, then the word SECOND.",
+    "turnId": "turn:2d681dda-7cc9-4980-9f06-9adb2ba4597d"
+  },
+  {
+    "at": "2026-09-28T10:07:20.959Z",
+    "blockIndex": 0,
+    "id": "text:msg_011CfVema1dSS7TULCi7gq4E:0",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "KIWI SECOND",
+    "messageUuid": "d2b59c9d-71c4-47df-bb0d-f609aa203709",
+    "model": "claude-sonnet-5",
+    "phase": "answer",
+    "turnId": "turn:2d681dda-7cc9-4980-9f06-9adb2ba4597d"
+  },
+  {
+    "at": "2026-09-28T10:07:23.178Z",
+    "attempt": null,
+    "id": "error:replay:journal:20:0",
+    "kind": "error",
+    "lostAttentionCount": 0,
+    "scope": "exit",
+    "severity": "notice",
+    "text": "Session process exited (unknown)",
+    "turnId": null
+  }
+]

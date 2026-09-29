@@ -1,0 +1,139 @@
+[
+  {
+    "at": "2026-09-28T09:21:49.996Z",
+    "id": "time:turn:6ffe2781-e332-43ac-b218-09fb29e670de",
+    "kind": "time",
+    "label": "Yesterday 9:21 AM",
+    "turnId": "turn:6ffe2781-e332-43ac-b218-09fb29e670de"
+  },
+  {
+    "at": "2026-09-28T09:21:49.996Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:6ffe2781-e332-43ac-b218-09fb29e670de",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "6ffe2781-e332-43ac-b218-09fb29e670de",
+    "steer": false,
+    "text": "Use Bash to run exactly git log --oneline. Then say DONE.",
+    "turnId": "turn:6ffe2781-e332-43ac-b218-09fb29e670de"
+  },
+  {
+    "at": "2026-09-28T09:21:49.996Z",
+    "autoDenied": 0,
+    "denied": 0,
+    "endedAt": null,
+    "expanded": true,
+    "firstDeniedCell": null,
+    "id": "divider:turn:6ffe2781-e332-43ac-b218-09fb29e670de",
+    "kind": "divider",
+    "origin": "human",
+    "startedAt": "2026-09-28T09:21:50.042Z",
+    "state": "working",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 1,
+        "exploration": 0,
+        "files": 0,
+        "mcp": 0,
+        "other": 0,
+        "skills": 0,
+        "web": 0
+      },
+      "childAgents": 0,
+      "costUsd": null,
+      "denials": [],
+      "durationMs": null,
+      "model": "claude-haiku-4-5-20251001",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 1,
+        "reviewed": 0
+      },
+      "terminalReason": null,
+      "toolCalls": 1,
+      "usage": null
+    },
+    "toolCalls": 1,
+    "turnId": "turn:6ffe2781-e332-43ac-b218-09fb29e670de"
+  },
+  {
+    "activeLabel": "Running `git log --oneline` for 0s",
+    "at": "2026-09-28T09:21:50.809Z",
+    "cells": [
+      {
+        "agent": null,
+        "category": "other",
+        "classification": {
+          "category": "other",
+          "denial": null,
+          "groupable": true,
+          "hidden": true,
+          "humanDecision": false,
+          "safeguard": "not_evaluated",
+          "startsGroup": false,
+          "subagentLifecycle": null
+        },
+        "detail": {
+          "durationMs": 462,
+          "kind": "thinking",
+          "text": "The user wants me to run `git log --oneline` and then say DONE. This is straightforward."
+        },
+        "endedAt": "2026-09-28T09:21:50.809Z",
+        "expanded": true,
+        "id": "cell:think:msg_011CfVbJKTBQYfwR82Y76xFE:0",
+        "label": "Thought for 0s",
+        "paths": [],
+        "startedAt": "2026-09-28T09:21:50.809Z",
+        "status": "done",
+        "toolName": "thinking",
+        "toolUseId": null
+      },
+      {
+        "agent": null,
+        "category": "commands",
+        "classification": {
+          "category": "commands",
+          "denial": null,
+          "groupable": true,
+          "hidden": false,
+          "humanDecision": false,
+          "safeguard": "not_evaluated",
+          "startsGroup": true,
+          "subagentLifecycle": null
+        },
+        "detail": {
+          "backgroundTaskId": null,
+          "command": "git log --oneline",
+          "cwd": null,
+          "description": "Show commit history in one-line format",
+          "exitCode": null,
+          "interrupted": false,
+          "kind": "shell",
+          "spill": null,
+          "stderr": "",
+          "stdout": "",
+          "truncated": null
+        },
+        "endedAt": null,
+        "expanded": true,
+        "id": "cell:toolu_01RWDevVWYVi2Tn3y58pxRS3",
+        "label": "Running `git log --oneline` for 0s",
+        "paths": [],
+        "startedAt": "2026-09-28T09:21:51.804Z",
+        "status": "running",
+        "toolName": "Bash",
+        "toolUseId": "toolu_01RWDevVWYVi2Tn3y58pxRS3"
+      }
+    ],
+    "expanded": true,
+    "icon": "commands",
+    "id": "group:cell:think:msg_011CfVbJKTBQYfwR82Y76xFE:0",
+    "kind": "group",
+    "state": "active",
+    "summary": "Ran `git log --oneline`",
+    "turnId": "turn:6ffe2781-e332-43ac-b218-09fb29e670de"
+  }
+]

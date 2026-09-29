@@ -1,0 +1,172 @@
+[
+  {
+    "at": "2026-09-28T10:00:55.770Z",
+    "id": "time:turn:b39196e7-b323-49c9-9cab-5b313f49bc83",
+    "kind": "time",
+    "label": "Yesterday 10:00 AM",
+    "turnId": "turn:b39196e7-b323-49c9-9cab-5b313f49bc83"
+  },
+  {
+    "at": "2026-09-28T10:00:55.770Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:b39196e7-b323-49c9-9cab-5b313f49bc83",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "b39196e7-b323-49c9-9cab-5b313f49bc83",
+    "steer": false,
+    "text": "Use Bash to run exactly: git status --short. Then reply OK.",
+    "turnId": "turn:b39196e7-b323-49c9-9cab-5b313f49bc83"
+  },
+  {
+    "at": "2026-09-28T10:00:55.770Z",
+    "autoDenied": 0,
+    "denied": 0,
+    "endedAt": "2026-09-28T10:01:01.549Z",
+    "expanded": true,
+    "firstDeniedCell": null,
+    "id": "divider:turn:b39196e7-b323-49c9-9cab-5b313f49bc83",
+    "kind": "divider",
+    "origin": "human",
+    "startedAt": "2026-09-28T10:00:55.807Z",
+    "state": "completed",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 1,
+        "exploration": 0,
+        "files": 0,
+        "mcp": 0,
+        "other": 0,
+        "skills": 0,
+        "web": 0
+      },
+      "childAgents": 0,
+      "costUsd": 0.0625828,
+      "denials": [],
+      "durationMs": 5740,
+      "model": "claude-sonnet-5",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 0,
+        "reviewed": 1
+      },
+      "terminalReason": "completed",
+      "toolCalls": 1,
+      "usage": {
+        "cacheCreationInputTokens": 12534,
+        "cacheReadInputTokens": 45744,
+        "inputTokens": 4,
+        "outputTokens": 79,
+        "thinkingTokens": 0
+      }
+    },
+    "toolCalls": 1,
+    "turnId": "turn:b39196e7-b323-49c9-9cab-5b313f49bc83"
+  },
+  {
+    "activeLabel": null,
+    "at": "2026-09-28T10:00:57.487Z",
+    "cells": [
+      {
+        "agent": null,
+        "category": "commands",
+        "classification": {
+          "category": "commands",
+          "denial": null,
+          "groupable": true,
+          "hidden": false,
+          "humanDecision": false,
+          "safeguard": "not_flagged",
+          "startsGroup": true,
+          "subagentLifecycle": null
+        },
+        "detail": {
+          "backgroundTaskId": null,
+          "command": "git status --short",
+          "cwd": null,
+          "description": "Show short git status",
+          "exitCode": 0,
+          "interrupted": false,
+          "kind": "shell",
+          "spill": null,
+          "stderr": "",
+          "stdout": "",
+          "truncated": null
+        },
+        "endedAt": "2026-09-28T10:01:00.894Z",
+        "expanded": true,
+        "id": "cell:toolu_01Pw5t8WFEWy8m7zrSCNnca1",
+        "label": "Ran `git status --short` in 3s",
+        "paths": [],
+        "startedAt": "2026-09-28T10:00:57.487Z",
+        "status": "done",
+        "toolName": "Bash",
+        "toolUseId": "toolu_01Pw5t8WFEWy8m7zrSCNnca1"
+      },
+      {
+        "agent": null,
+        "category": "commands",
+        "classification": {
+          "category": "commands",
+          "denial": null,
+          "groupable": true,
+          "hidden": false,
+          "humanDecision": false,
+          "safeguard": "not_evaluated",
+          "startsGroup": false,
+          "subagentLifecycle": null
+        },
+        "detail": {
+          "event": "PostToolUse",
+          "exitCode": 0,
+          "kind": "hook",
+          "name": "PostToolUse:Bash",
+          "outcome": "success",
+          "stderr": "",
+          "stdout": "MAWS_POSTHOOK\n"
+        },
+        "endedAt": "2026-09-28T10:01:00.893Z",
+        "expanded": true,
+        "id": "cell:hook:2fb18f8d-6da2-4d27-b7c5-5e55be53e312",
+        "label": "Hook PostToolUse · PostToolUse:Bash",
+        "paths": [],
+        "startedAt": "2026-09-28T10:01:00.888Z",
+        "status": "done",
+        "toolName": "hook",
+        "toolUseId": null
+      }
+    ],
+    "expanded": true,
+    "icon": "commands",
+    "id": "group:cell:toolu_01Pw5t8WFEWy8m7zrSCNnca1",
+    "kind": "group",
+    "state": "completed",
+    "summary": "Ran `git status --short`, ran 1 hook",
+    "turnId": "turn:b39196e7-b323-49c9-9cab-5b313f49bc83"
+  },
+  {
+    "at": "2026-09-28T10:01:01.509Z",
+    "blockIndex": 0,
+    "id": "text:msg_011CfVeHbjncAVFRXZrmuHk1:0",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "OK",
+    "messageUuid": "5fc09e73-3bdf-4ecf-9924-0cfeaf37e839",
+    "model": "claude-sonnet-5",
+    "phase": "answer",
+    "turnId": "turn:b39196e7-b323-49c9-9cab-5b313f49bc83"
+  },
+  {
+    "at": "2026-09-28T10:01:02.083Z",
+    "attempt": null,
+    "id": "error:replay:journal:47:0",
+    "kind": "error",
+    "lostAttentionCount": 0,
+    "scope": "exit",
+    "severity": "notice",
+    "text": "Session process exited (unknown)",
+    "turnId": null
+  }
+]

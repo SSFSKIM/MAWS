@@ -1,0 +1,56 @@
+[
+  {
+    "at": "2026-09-28T10:09:01.704Z",
+    "id": "time:bash:bdffd491-e03f-4c10-aaf8-bbe3eb5078a5",
+    "kind": "time",
+    "label": "Yesterday 10:09 AM",
+    "turnId": null
+  },
+  {
+    "at": "2026-09-28T10:09:01.704Z",
+    "command": "printf MAWS_BASH_8823",
+    "cwd": null,
+    "exitCode": 0,
+    "id": "bash:bdffd491-e03f-4c10-aaf8-bbe3eb5078a5",
+    "kind": "bash",
+    "stderr": "",
+    "stdout": "MAWS_BASH_8823",
+    "turnId": null
+  },
+  {
+    "at": "2026-09-28T10:09:06.717Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:a37362a6-a117-4985-b0f9-cae7bfad6114",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "a37362a6-a117-4985-b0f9-cae7bfad6114",
+    "steer": false,
+    "text": "I just ran a shell command with the ! prefix. What exactly did it print? Reply with only the printed text, or NONE if you cannot see it.",
+    "turnId": "turn:a37362a6-a117-4985-b0f9-cae7bfad6114"
+  },
+  {
+    "at": "2026-09-28T10:09:07.630Z",
+    "blockIndex": 0,
+    "id": "text:msg_011CfVeuQuRQzJp6ZPRkehXB:0",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "MAWS_BASH_8823",
+    "messageUuid": "9dbfa020-a64c-44cc-8d66-663c4bf5e27c",
+    "model": "claude-sonnet-5",
+    "phase": "answer",
+    "turnId": "turn:a37362a6-a117-4985-b0f9-cae7bfad6114"
+  },
+  {
+    "at": "2026-09-28T10:09:08.435Z",
+    "attempt": null,
+    "id": "error:replay:journal:32:0",
+    "kind": "error",
+    "lostAttentionCount": 0,
+    "scope": "exit",
+    "severity": "notice",
+    "text": "Session process exited (unknown)",
+    "turnId": null
+  }
+]

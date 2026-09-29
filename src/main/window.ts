@@ -15,6 +15,12 @@ const rendererFile = join(__dirname, '../renderer/index.html');
 // What the app window loads; the IPC router accepts invokes only from a top frame at this URL's origin.
 export const appUrl = devServerUrl ?? pathToFileURL(rendererFile).href;
 
+// C6: under MAWS_HARNESS=1 the window loads the development harness (harness.html, same origin) instead of the app.
+const harness = process.env.MAWS_HARNESS === '1';
+const pageFile = harness ? join(__dirname, '../renderer/harness.html') : rendererFile;
+const pageUrl = devServerUrl && harness ? new URL('harness.html', devServerUrl).href : devServerUrl;
+// end C6
+
 export function installContentSecurityPolicy(): void {
   if (devServerUrl && __MAWS_DEV_CSP_NONCE__ === null) {
     throw new Error('ELECTRON_RENDERER_URL is set but main was built without the dev CSP nonce');
@@ -65,8 +71,8 @@ export function createWindow(theme: ResolvedTheme, placement: WindowState | null
     win.show();
   });
 
-  if (devServerUrl) void win.loadURL(devServerUrl);
-  else void win.loadFile(rendererFile);
+  if (pageUrl) void win.loadURL(pageUrl);
+  else void win.loadFile(pageFile);
   return win;
 }
 

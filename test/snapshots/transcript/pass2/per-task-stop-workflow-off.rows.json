@@ -1,0 +1,160 @@
+[
+  {
+    "at": "2026-09-28T10:03:22.463Z",
+    "id": "time:turn:504399e2-3e09-4d3f-b266-6e7d8bfddc35",
+    "kind": "time",
+    "label": "Yesterday 10:03 AM",
+    "turnId": "turn:504399e2-3e09-4d3f-b266-6e7d8bfddc35"
+  },
+  {
+    "at": "2026-09-28T10:03:22.463Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:504399e2-3e09-4d3f-b266-6e7d8bfddc35",
+    "kind": "user",
+    "lines": 8,
+    "messageUuid": "504399e2-3e09-4d3f-b266-6e7d8bfddc35",
+    "steer": false,
+    "text": "Step 1: call the Workflow tool with this exact script:\n\nexport const meta = { name: 'maws-stop-probe', description: 'One slow agent', phases: [{ title: 'Wait' }] }\nphase('Wait')\nreturn await agent('Use Bash to run exactly: sleep 25 && echo WF_DONE > wf.txt . Then reply DONE.', {label: 'sleeper', effort: 'low'})\n\nStep 2: then use Bash in the foreground to run exactly: sleep 20\nStep 3: reply DONE.",
+    "turnId": "turn:504399e2-3e09-4d3f-b266-6e7d8bfddc35"
+  },
+  {
+    "at": "2026-09-28T10:03:22.463Z",
+    "autoDenied": 0,
+    "denied": 0,
+    "endedAt": "2026-09-28T10:03:30.352Z",
+    "expanded": true,
+    "firstDeniedCell": null,
+    "id": "divider:turn:504399e2-3e09-4d3f-b266-6e7d8bfddc35",
+    "kind": "divider",
+    "origin": "human",
+    "startedAt": "2026-09-28T10:03:22.477Z",
+    "state": "stopped",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 1,
+        "exploration": 0,
+        "files": 0,
+        "mcp": 0,
+        "other": 0,
+        "skills": 0,
+        "web": 0
+      },
+      "childAgents": 1,
+      "costUsd": 0.1104186,
+      "denials": [
+        {
+          "cellId": "cell:toolu_01TXA17ye1W5MKoWoPbVY8ic",
+          "disposition": "stopped",
+          "interruption": true,
+          "kind": "user-rejected"
+        }
+      ],
+      "durationMs": 7873,
+      "model": "claude-sonnet-5",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 1,
+        "reviewed": 0
+      },
+      "terminalReason": "aborted_streaming",
+      "toolCalls": 1,
+      "usage": {
+        "cacheCreationInputTokens": 12556,
+        "cacheReadInputTokens": 16673,
+        "inputTokens": 2,
+        "outputTokens": 183,
+        "thinkingTokens": 15
+      }
+    },
+    "toolCalls": 1,
+    "turnId": "turn:504399e2-3e09-4d3f-b266-6e7d8bfddc35"
+  },
+  {
+    "at": "2026-09-28T10:03:23.634Z",
+    "durationMs": 0,
+    "id": "think:msg_011CfVeU3Dz4eBHmnND4u2Q5:0",
+    "kind": "thinking",
+    "live": false,
+    "messageUuid": "2fd38510-0a2a-46cc-ae33-8922501a149d",
+    "text": "",
+    "turnId": "turn:504399e2-3e09-4d3f-b266-6e7d8bfddc35"
+  },
+  {
+    "agents": [
+      {
+        "agentId": null,
+        "glyph": 0,
+        "kind": "workflow",
+        "name": "One slow agent",
+        "subagentType": null,
+        "taskId": "w98jm1qvu",
+        "toolUseId": "toolu_015NB2ABQ8yQzDfsWdDkp9eE"
+      }
+    ],
+    "at": "2026-09-28T10:03:24.374Z",
+    "id": "subagent:w98jm1qvu",
+    "kind": "subagent",
+    "overflow": 0,
+    "sentence": "One slow agent was stopped",
+    "status": "stopped",
+    "turnId": "turn:504399e2-3e09-4d3f-b266-6e7d8bfddc35"
+  },
+  {
+    "agent": null,
+    "at": "2026-09-28T10:03:28.342Z",
+    "category": "commands",
+    "classification": {
+      "category": "commands",
+      "denial": {
+        "disposition": "stopped",
+        "interruption": true,
+        "kind": "user-rejected",
+        "reason": "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed."
+      },
+      "groupable": false,
+      "hidden": false,
+      "humanDecision": false,
+      "safeguard": "not_evaluated",
+      "startsGroup": false,
+      "subagentLifecycle": null
+    },
+    "detail": {
+      "backgroundTaskId": null,
+      "command": "sleep 20",
+      "cwd": null,
+      "description": null,
+      "exitCode": null,
+      "interrupted": false,
+      "kind": "shell",
+      "spill": null,
+      "stderr": "",
+      "stdout": "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed.",
+      "truncated": null
+    },
+    "endedAt": "2026-09-28T10:03:30.350Z",
+    "expanded": true,
+    "id": "cell:toolu_01TXA17ye1W5MKoWoPbVY8ic",
+    "kind": "cell",
+    "label": "Stopped: `sleep 20`",
+    "paths": [],
+    "startedAt": "2026-09-28T10:03:28.342Z",
+    "status": "stopped",
+    "toolName": "Bash",
+    "toolUseId": "toolu_01TXA17ye1W5MKoWoPbVY8ic",
+    "turnId": "turn:504399e2-3e09-4d3f-b266-6e7d8bfddc35"
+  },
+  {
+    "at": "2026-09-28T10:04:32.579Z",
+    "attempt": null,
+    "id": "error:replay:journal:87:0",
+    "kind": "error",
+    "lostAttentionCount": 0,
+    "scope": "exit",
+    "severity": "error",
+    "text": "Session process exited (crash)",
+    "turnId": null
+  }
+]

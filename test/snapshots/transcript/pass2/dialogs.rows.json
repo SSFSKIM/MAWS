@@ -1,0 +1,220 @@
+[
+  {
+    "at": "2026-09-28T10:01:16.981Z",
+    "id": "time:turn:515ffadf-0558-4de5-81bf-e2cba9fe5605",
+    "kind": "time",
+    "label": "Yesterday 10:01 AM",
+    "turnId": "turn:515ffadf-0558-4de5-81bf-e2cba9fe5605"
+  },
+  {
+    "at": "2026-09-28T10:01:16.981Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:515ffadf-0558-4de5-81bf-e2cba9fe5605",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "515ffadf-0558-4de5-81bf-e2cba9fe5605",
+    "steer": false,
+    "text": "Call the mcp__maws-elicit__ask_color tool once, then reply with the color it returned.",
+    "turnId": "turn:515ffadf-0558-4de5-81bf-e2cba9fe5605"
+  },
+  {
+    "at": "2026-09-28T10:01:16.981Z",
+    "autoDenied": 0,
+    "denied": 0,
+    "endedAt": "2026-09-28T10:01:25.290Z",
+    "expanded": true,
+    "firstDeniedCell": null,
+    "id": "divider:turn:515ffadf-0558-4de5-81bf-e2cba9fe5605",
+    "kind": "divider",
+    "origin": "human",
+    "startedAt": "2026-09-28T10:01:17.024Z",
+    "state": "completed",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 0,
+        "exploration": 0,
+        "files": 0,
+        "mcp": 1,
+        "other": 0,
+        "skills": 1,
+        "web": 0
+      },
+      "childAgents": 0,
+      "costUsd": 0.0701146,
+      "denials": [],
+      "durationMs": 8264,
+      "model": "claude-sonnet-5",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 1,
+        "reviewed": 1
+      },
+      "terminalReason": "completed",
+      "toolCalls": 2,
+      "usage": {
+        "cacheCreationInputTokens": 12725,
+        "cacheReadInputTokens": 75073,
+        "inputTokens": 6,
+        "outputTokens": 165,
+        "thinkingTokens": 24
+      }
+    },
+    "toolCalls": 2,
+    "turnId": "turn:515ffadf-0558-4de5-81bf-e2cba9fe5605"
+  },
+  {
+    "activeLabel": null,
+    "at": "2026-09-28T10:01:19.647Z",
+    "cells": [
+      {
+        "agent": null,
+        "category": "other",
+        "classification": {
+          "category": "other",
+          "denial": null,
+          "groupable": true,
+          "hidden": true,
+          "humanDecision": false,
+          "safeguard": "not_evaluated",
+          "startsGroup": false,
+          "subagentLifecycle": null
+        },
+        "detail": {
+          "durationMs": 0,
+          "kind": "thinking",
+          "text": ""
+        },
+        "endedAt": "2026-09-28T10:01:19.647Z",
+        "expanded": true,
+        "id": "cell:think:msg_011CfVeJoDd2KdQdTjTDeM4u:0",
+        "label": "Thought for 0s",
+        "paths": [],
+        "startedAt": "2026-09-28T10:01:19.647Z",
+        "status": "done",
+        "toolName": "thinking",
+        "toolUseId": null
+      },
+      {
+        "agent": null,
+        "category": "skills",
+        "classification": {
+          "category": "skills",
+          "denial": null,
+          "groupable": true,
+          "hidden": false,
+          "humanDecision": false,
+          "safeguard": "not_evaluated",
+          "startsGroup": true,
+          "subagentLifecycle": null
+        },
+        "detail": {
+          "input": {
+            "max_results": 1,
+            "query": "select:mcp__maws-elicit__ask_color"
+          },
+          "isError": false,
+          "kind": "generic",
+          "result": [
+            {
+              "tool_name": "mcp__maws-elicit__ask_color",
+              "type": "tool_reference"
+            }
+          ],
+          "spill": null,
+          "structured": {
+            "matches": [
+              "mcp__maws-elicit__ask_color"
+            ],
+            "query": "select:mcp__maws-elicit__ask_color",
+            "total_deferred_tools": 16
+          },
+          "truncated": null
+        },
+        "endedAt": "2026-09-28T10:01:20.065Z",
+        "expanded": true,
+        "id": "cell:toolu_016h47VUh2tj8pGf7PQMovaM",
+        "label": "Loaded 1 tool",
+        "paths": [],
+        "startedAt": "2026-09-28T10:01:20.060Z",
+        "status": "done",
+        "toolName": "ToolSearch",
+        "toolUseId": "toolu_016h47VUh2tj8pGf7PQMovaM"
+      },
+      {
+        "agent": null,
+        "category": "mcp",
+        "classification": {
+          "category": "mcp",
+          "denial": null,
+          "groupable": true,
+          "hidden": false,
+          "humanDecision": false,
+          "safeguard": "not_flagged",
+          "startsGroup": false,
+          "subagentLifecycle": null
+        },
+        "detail": {
+          "input": {},
+          "kind": "mcp",
+          "result": [
+            {
+              "text": "ELICITED {\"action\":\"accept\",\"content\":{\"color\":\"teal\"}} clientCaps {\"roots\":{\"listChanged\":true},\"elicitation\":{}}",
+              "type": "text"
+            }
+          ],
+          "server": "maws-elicit",
+          "spill": null,
+          "structured": [
+            {
+              "text": "ELICITED {\"action\":\"accept\",\"content\":{\"color\":\"teal\"}} clientCaps {\"roots\":{\"listChanged\":true},\"elicitation\":{}}",
+              "type": "text"
+            }
+          ],
+          "tool": "ask_color"
+        },
+        "endedAt": "2026-09-28T10:01:23.833Z",
+        "expanded": true,
+        "id": "cell:toolu_017qf2Wt8JjN7eavDRS6hWXm",
+        "label": "Used maws-elicit",
+        "paths": [],
+        "startedAt": "2026-09-28T10:01:21.492Z",
+        "status": "done",
+        "toolName": "mcp__maws-elicit__ask_color",
+        "toolUseId": "toolu_017qf2Wt8JjN7eavDRS6hWXm"
+      }
+    ],
+    "expanded": true,
+    "icon": "mcp",
+    "id": "group:cell:think:msg_011CfVeJoDd2KdQdTjTDeM4u:0",
+    "kind": "group",
+    "state": "completed",
+    "summary": "Used maws-elicit, loaded 1 tool",
+    "turnId": "turn:515ffadf-0558-4de5-81bf-e2cba9fe5605"
+  },
+  {
+    "at": "2026-09-28T10:01:25.245Z",
+    "blockIndex": 0,
+    "id": "text:msg_011CfVeKHnb4YDbyTorSWFZj:0",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "The color returned was **teal**.",
+    "messageUuid": "05a65659-6791-4681-b1ac-ee71edf8ed1c",
+    "model": "claude-sonnet-5",
+    "phase": "answer",
+    "turnId": "turn:515ffadf-0558-4de5-81bf-e2cba9fe5605"
+  },
+  {
+    "at": "2026-09-28T10:01:25.872Z",
+    "attempt": null,
+    "id": "error:replay:journal:60:0",
+    "kind": "error",
+    "lostAttentionCount": 0,
+    "scope": "exit",
+    "severity": "notice",
+    "text": "Session process exited (unknown)",
+    "turnId": null
+  }
+]

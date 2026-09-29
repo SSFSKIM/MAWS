@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import * as z from 'zod';
 import { FIXTURE_DIR, framesOf, listJournals, loadJournal, type FixturePass } from '../../../test/support/fixtures';
+import { listSyntheticJournals, loadSyntheticJournal, SYNTHETIC_TRANSCRIPT_DIR } from '../../../test/support/fixtures'; // [C6]
 import { parseJournalRow } from './journal';
 import {
   parseStdinFrame,
@@ -59,6 +60,42 @@ describe('wire frames round-trip every probe fixture', () => {
     }
   }
 });
+
+// [C6] The synthetic journals under test/fixtures/transcript/ use the X8 row format and must pass the same validators
+// before the presentation-model snapshot suite takes a snapshot of them.
+describe('wire frames round-trip every synthetic transcript journal', () => {
+  it('finds the eleven synthetic journals', () => {
+    expect(listSyntheticJournals()).toEqual([
+      'agents-and-messages', 'attachments-and-images', 'boundaries', 'denials', 'edit-and-receipt',
+      'exploration-and-web', 'idle-drop', 'long-output', 'math-and-diagrams', 'mockup-turn', 'plan-outcomes',
+    ]);
+  });
+
+  for (const name of listSyntheticJournals()) {
+    it(`transcript/${name}`, () => {
+      const label = `transcript/${name}`;
+      const rawRows = readFileSync(join(SYNTHETIC_TRANSCRIPT_DIR, `${name}.jsonl`), 'utf8')
+        .split('\n')
+        .filter((line) => line.length > 0)
+        .map((line) => JSON.parse(line) as { seq: number });
+      const failures: string[] = [];
+      const check = (seq: number, parse: () => unknown, input: unknown) => {
+        try {
+          expect(parse()).toEqual(input);
+        } catch (error) {
+          failures.push(describeFailure(label, seq, error));
+        }
+      };
+      for (const raw of rawRows) check(raw.seq, () => parseJournalRow(raw), raw);
+      const rows = loadSyntheticJournal(name);
+      for (const { seq, frame } of framesOf(rows, 'in')) check(seq, () => parseStdoutFrame(frame), frame);
+      for (const { seq, frame } of framesOf(rows, 'out')) check(seq, () => parseStdinFrame(frame), frame);
+      expect(rows.length).toBeGreaterThan(0);
+      expect(failures).toEqual([]);
+    });
+  }
+});
+// [/C6]
 
 // Value pins on the parsed frames: the pass-2 facts the events derive from (M2 "Proves"), asserted through the typed schemas.
 describe('wire frames carry the pass-2 facts the events derive from', () => {

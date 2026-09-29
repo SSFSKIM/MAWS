@@ -1,0 +1,395 @@
+[
+  {
+    "at": "2026-09-28T10:00:00.045Z",
+    "id": "time:turn:u-edit-and-receipt-002",
+    "kind": "time",
+    "label": "Yesterday 10:00 AM",
+    "turnId": "turn:u-edit-and-receipt-002"
+  },
+  {
+    "at": "2026-09-28T10:00:00.045Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:u-edit-and-receipt-002",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "u-edit-and-receipt-002",
+    "steer": false,
+    "text": "Rename `measure` to `measureRows` in src/app.ts and src/store.ts, add a helper in src/util/rows.ts, then run the tests and show me the diff summary.",
+    "turnId": "turn:u-edit-and-receipt-002"
+  },
+  {
+    "at": "2026-09-28T10:00:00.045Z",
+    "autoDenied": 0,
+    "denied": 0,
+    "endedAt": "2026-09-28T10:00:05.932Z",
+    "expanded": true,
+    "firstDeniedCell": null,
+    "id": "divider:turn:u-edit-and-receipt-002",
+    "kind": "divider",
+    "origin": "human",
+    "startedAt": "2026-09-28T10:00:00.100Z",
+    "state": "completed",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 1,
+        "exploration": 1,
+        "files": 3,
+        "mcp": 0,
+        "other": 0,
+        "skills": 0,
+        "web": 0
+      },
+      "childAgents": 0,
+      "costUsd": 0.0123,
+      "denials": [],
+      "durationMs": 5787,
+      "model": "claude-opus-5-5",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 5,
+        "reviewed": 0
+      },
+      "terminalReason": "completed",
+      "toolCalls": 5,
+      "usage": {
+        "cacheCreationInputTokens": 0,
+        "cacheReadInputTokens": 21000,
+        "inputTokens": 12,
+        "outputTokens": 240,
+        "thinkingTokens": null
+      }
+    },
+    "toolCalls": 5,
+    "turnId": "turn:u-edit-and-receipt-002"
+  },
+  {
+    "activeLabel": null,
+    "at": "2026-09-28T10:00:00.161Z",
+    "cells": [
+      {
+        "agent": null,
+        "category": "other",
+        "classification": {
+          "category": "other",
+          "denial": null,
+          "groupable": true,
+          "hidden": true,
+          "humanDecision": false,
+          "safeguard": "not_evaluated",
+          "startsGroup": false,
+          "subagentLifecycle": null
+        },
+        "detail": {
+          "durationMs": 48,
+          "kind": "thinking",
+          "text": "Two files reference measure. Read app.ts first to see the export, then edit both, add the helper, and run the tests."
+        },
+        "endedAt": "2026-09-28T10:00:00.161Z",
+        "expanded": true,
+        "id": "cell:think:msg_editandreceipt_007:0",
+        "label": "Thought for 0s",
+        "paths": [],
+        "startedAt": "2026-09-28T10:00:00.161Z",
+        "status": "done",
+        "toolName": "thinking",
+        "toolUseId": null
+      },
+      {
+        "agent": null,
+        "category": "exploration",
+        "classification": {
+          "category": "exploration",
+          "denial": null,
+          "groupable": true,
+          "hidden": false,
+          "humanDecision": false,
+          "safeguard": "not_evaluated",
+          "startsGroup": true,
+          "subagentLifecycle": null
+        },
+        "detail": {
+          "files": [
+            {
+              "path": "/tmp/maws-synth-edit-and-receipt/src/app.ts",
+              "range": null
+            }
+          ],
+          "kind": "read",
+          "preview": "     1\timport { store } from './store';\n     2\t\n     3\texport function measure(rows: number[]): number {\n     4\t  return rows.reduce((a, b) => a + b, 0);\n     5\t}\n     6\t\n     7\texport const total = measure(store.rows);\n     8\t",
+          "truncated": null
+        },
+        "endedAt": "2026-09-28T10:00:00.325Z",
+        "expanded": true,
+        "id": "cell:toolu_synth_edit_read1",
+        "label": "Read /tmp/maws-synth-edit-and-receipt/src/app.ts",
+        "paths": [
+          "/tmp/maws-synth-edit-and-receipt/src/app.ts"
+        ],
+        "startedAt": "2026-09-28T10:00:00.271Z",
+        "status": "done",
+        "toolName": "Read",
+        "toolUseId": "toolu_synth_edit_read1"
+      },
+      {
+        "agent": null,
+        "category": "files",
+        "classification": {
+          "category": "files",
+          "denial": null,
+          "groupable": true,
+          "hidden": false,
+          "humanDecision": false,
+          "safeguard": "not_evaluated",
+          "startsGroup": false,
+          "subagentLifecycle": null
+        },
+        "detail": {
+          "added": 1,
+          "change": "update",
+          "filePath": "/tmp/maws-synth-edit-and-receipt/src/app.ts",
+          "hunks": [
+            {
+              "lines": [
+                "import { store } from './store';",
+                "",
+                "-export function measure(rows: number[]): number {",
+                "+export function measureRows(rows: number[]): number {",
+                "  return rows.reduce((a, b) => a + b, 0);",
+                "}"
+              ],
+              "newLines": 5,
+              "newStart": 1,
+              "oldLines": 5,
+              "oldStart": 1
+            }
+          ],
+          "kind": "edit",
+          "removed": 1
+        },
+        "endedAt": "2026-09-28T10:00:00.643Z",
+        "expanded": true,
+        "id": "cell:toolu_synth_edit_edit1",
+        "label": "Edited /tmp/maws-synth-edit-and-receipt/src/app.ts +1 −1",
+        "paths": [
+          "/tmp/maws-synth-edit-and-receipt/src/app.ts"
+        ],
+        "startedAt": "2026-09-28T10:00:00.589Z",
+        "status": "done",
+        "toolName": "Edit",
+        "toolUseId": "toolu_synth_edit_edit1"
+      },
+      {
+        "agent": null,
+        "category": "files",
+        "classification": {
+          "category": "files",
+          "denial": null,
+          "groupable": true,
+          "hidden": false,
+          "humanDecision": false,
+          "safeguard": "not_evaluated",
+          "startsGroup": false,
+          "subagentLifecycle": null
+        },
+        "detail": {
+          "added": 3,
+          "change": "update",
+          "filePath": "/tmp/maws-synth-edit-and-receipt/src/store.ts",
+          "hunks": [
+            {
+              "lines": [
+                "-import { measure } from './app';",
+                "+import { measureRows } from './app';",
+                " export const store = { rows: [1, 2, 3] };",
+                "-export const a = measure([1]);",
+                "-export const b = measure([2]);",
+                "+export const a = measureRows([1]);",
+                "+export const b = measureRows([2]);"
+              ],
+              "newLines": 4,
+              "newStart": 1,
+              "oldLines": 4,
+              "oldStart": 1
+            }
+          ],
+          "kind": "edit",
+          "removed": 3
+        },
+        "endedAt": "2026-09-28T10:00:00.969Z",
+        "expanded": true,
+        "id": "cell:toolu_synth_edit_multi1",
+        "label": "Edited /tmp/maws-synth-edit-and-receipt/src/store.ts +3 −3",
+        "paths": [
+          "/tmp/maws-synth-edit-and-receipt/src/store.ts"
+        ],
+        "startedAt": "2026-09-28T10:00:00.915Z",
+        "status": "done",
+        "toolName": "MultiEdit",
+        "toolUseId": "toolu_synth_edit_multi1"
+      },
+      {
+        "agent": null,
+        "category": "files",
+        "classification": {
+          "category": "files",
+          "denial": null,
+          "groupable": true,
+          "hidden": false,
+          "humanDecision": false,
+          "safeguard": "not_evaluated",
+          "startsGroup": false,
+          "subagentLifecycle": null
+        },
+        "detail": {
+          "added": 3,
+          "change": "create",
+          "filePath": "/tmp/maws-synth-edit-and-receipt/src/util/rows.ts",
+          "hunks": [
+            {
+              "lines": [
+                "+export function rowsOf(list: number[]): number[] {",
+                "+  return list.filter((row) => row > 0);",
+                "+}"
+              ],
+              "newLines": 3,
+              "newStart": 1,
+              "oldLines": 0,
+              "oldStart": 0
+            }
+          ],
+          "kind": "edit",
+          "removed": 0
+        },
+        "endedAt": "2026-09-28T10:00:01.279Z",
+        "expanded": true,
+        "id": "cell:toolu_synth_edit_write1",
+        "label": "Created /tmp/maws-synth-edit-and-receipt/src/util/rows.ts",
+        "paths": [
+          "/tmp/maws-synth-edit-and-receipt/src/util/rows.ts"
+        ],
+        "startedAt": "2026-09-28T10:00:01.225Z",
+        "status": "done",
+        "toolName": "Write",
+        "toolUseId": "toolu_synth_edit_write1"
+      }
+    ],
+    "expanded": true,
+    "icon": "files",
+    "id": "group:cell:think:msg_editandreceipt_007:0",
+    "kind": "group",
+    "state": "completed",
+    "summary": "Edited 3 files, read app.ts",
+    "turnId": "turn:u-edit-and-receipt-002"
+  },
+  {
+    "at": "2026-09-28T10:00:01.495Z",
+    "blockIndex": 0,
+    "id": "text:msg_editandreceipt_068:0",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "Edits applied; running the suite.",
+    "messageUuid": "a-edit-and-receipt-073",
+    "model": "claude-opus-5-5",
+    "phase": "commentary",
+    "turnId": "turn:u-edit-and-receipt-002"
+  },
+  {
+    "agent": null,
+    "at": "2026-09-28T10:00:01.573Z",
+    "category": "commands",
+    "classification": {
+      "category": "commands",
+      "denial": null,
+      "groupable": true,
+      "hidden": false,
+      "humanDecision": false,
+      "safeguard": "not_evaluated",
+      "startsGroup": false,
+      "subagentLifecycle": null
+    },
+    "detail": {
+      "backgroundTaskId": null,
+      "command": "pnpm test",
+      "cwd": null,
+      "description": "Run the unit tests",
+      "exitCode": 0,
+      "interrupted": false,
+      "kind": "shell",
+      "spill": null,
+      "stderr": "",
+      "stdout": " RUN  v5.0.2 /tmp/maws-synth-edit-and-receipt\n\n ✓ src/app.test.ts (3 tests) 12ms\n ✓ src/store.test.ts (2 tests) 8ms\n\n Test Files  2 passed (2)\n      Tests  5 passed (5)\n   Duration  412ms",
+      "truncated": null
+    },
+    "endedAt": "2026-09-28T10:00:05.542Z",
+    "expanded": true,
+    "id": "cell:toolu_synth_edit_bash1",
+    "kind": "cell",
+    "label": "Ran `pnpm test` in 3s",
+    "paths": [],
+    "startedAt": "2026-09-28T10:00:01.573Z",
+    "status": "done",
+    "toolName": "Bash",
+    "toolUseId": "toolu_synth_edit_bash1",
+    "turnId": "turn:u-edit-and-receipt-002"
+  },
+  {
+    "at": "2026-09-28T10:00:05.758Z",
+    "blockIndex": 0,
+    "id": "text:msg_editandreceipt_084:0",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "Renamed `measure` to `measureRows` in both files and added the helper. Tests pass (5/5).\n\n```ts\n// src/util/rows.ts\nexport function rowsOf(list: number[]): number[] {\n  return list.filter((row) => row > 0);\n}\n```\n\nSummary of the diff:\n\n| File | Change |\n| --- | --- |\n| `src/app.ts` | +1 −1 |\n| `src/store.ts` | +3 −3 |\n| `src/util/rows.ts` | new, +3 |",
+    "messageUuid": "a-edit-and-receipt-102",
+    "model": "claude-opus-5-5",
+    "phase": "answer",
+    "turnId": "turn:u-edit-and-receipt-002"
+  },
+  {
+    "added": 7,
+    "at": "2026-09-28T10:00:05.932Z",
+    "canReapply": false,
+    "canUndo": false,
+    "files": [
+      {
+        "added": 1,
+        "cellId": "cell:toolu_synth_edit_edit1",
+        "change": "update",
+        "path": "/tmp/maws-synth-edit-and-receipt/src/app.ts",
+        "removed": 1
+      },
+      {
+        "added": 3,
+        "cellId": "cell:toolu_synth_edit_multi1",
+        "change": "update",
+        "path": "/tmp/maws-synth-edit-and-receipt/src/store.ts",
+        "removed": 3
+      },
+      {
+        "added": 3,
+        "cellId": "cell:toolu_synth_edit_write1",
+        "change": "create",
+        "path": "/tmp/maws-synth-edit-and-receipt/src/util/rows.ts",
+        "removed": 0
+      }
+    ],
+    "id": "receipt:turn:u-edit-and-receipt-002",
+    "kind": "receipt",
+    "removed": 4,
+    "state": "applied",
+    "turnId": "turn:u-edit-and-receipt-002"
+  },
+  {
+    "at": "2026-09-28T10:00:05.962Z",
+    "attempt": null,
+    "id": "error:replay:journal:103:0",
+    "kind": "error",
+    "lostAttentionCount": 0,
+    "scope": "exit",
+    "severity": "notice",
+    "text": "Session process exited (unknown)",
+    "turnId": null
+  }
+]

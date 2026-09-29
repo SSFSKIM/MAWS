@@ -1,6 +1,14 @@
 @import "tailwindcss";
 @import "./tokens.css";
 
+/* C6: Streamdown and its plugins ship Tailwind class names in their dist; Tailwind must scan them (hoisted node_modules). */
+@source "../../../../node_modules/streamdown/dist/*.js";
+@source "../../../../node_modules/@streamdown/math/dist/*.js";
+@source "../../../../node_modules/@streamdown/mermaid/dist/*.js";
+/* C6: Tailwind's `dark:` variant follows MAWS's theme attribute (C1's signal), so Streamdown's dual themes switch with it. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+/* end C6 */
+
 /* Tailwind's default palette and scales are removed: palette classes compile to nothing and only X7 tokens exist. */
 @theme {
   --color-*: initial;
@@ -46,6 +54,19 @@
   --radius-sm: var(--radius-sm);
   --radius-md: var(--radius);
   --radius-lg: var(--radius-lg);
+
+  /* C6: the shadcn names Streamdown's dist paints with, bridged to X7 tokens (--color-border already maps --border). */
+  --color-background: var(--bg);
+  --color-foreground: var(--fg);
+  --color-muted: var(--bg-raised);
+  --color-muted-foreground: var(--fg-muted);
+  --color-primary: var(--accent);
+  --color-primary-foreground: var(--bg);
+  --color-sidebar: var(--bg-raised); /* code, table and diagram frames and their copy/fullscreen toolbar (bg-sidebar, border-sidebar) */
+  --radius-xl: var(--radius-lg);
+  --text-sm: var(--text-ui);
+  --text-xs: var(--text-ui-sm);
+  /* end C6 */
 }
 
 @layer base {

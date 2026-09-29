@@ -1,0 +1,655 @@
+[
+  {
+    "at": "2026-09-28T11:20:00.045Z",
+    "id": "time:turn:u-mockup-turn-002",
+    "kind": "time",
+    "label": "Yesterday 11:20 AM",
+    "turnId": "turn:u-mockup-turn-002"
+  },
+  {
+    "at": "2026-09-28T11:20:00.045Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:u-mockup-turn-002",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "u-mockup-turn-002",
+    "steer": false,
+    "text": "The sidebar drag handle jitters when the window is narrow. Find the cause, fix it, and run the checks.",
+    "turnId": "turn:u-mockup-turn-002"
+  },
+  {
+    "at": "2026-09-28T11:20:00.045Z",
+    "autoDenied": 0,
+    "denied": 1,
+    "endedAt": "2026-09-28T11:20:04.105Z",
+    "expanded": true,
+    "firstDeniedCell": "cell:toolu_synth_mock_7",
+    "id": "divider:turn:u-mockup-turn-002",
+    "kind": "divider",
+    "origin": "human",
+    "startedAt": "2026-09-28T11:20:00.100Z",
+    "state": "completed",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 5,
+        "exploration": 4,
+        "files": 3,
+        "mcp": 0,
+        "other": 0,
+        "skills": 0,
+        "web": 0
+      },
+      "childAgents": 0,
+      "costUsd": 0.0123,
+      "denials": [
+        {
+          "cellId": "cell:toolu_synth_mock_7",
+          "disposition": "denied",
+          "interruption": false,
+          "kind": "permission-rule"
+        }
+      ],
+      "durationMs": 3960,
+      "model": "claude-opus-5-5",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 11,
+        "reviewed": 0
+      },
+      "terminalReason": "completed",
+      "toolCalls": 12,
+      "usage": {
+        "cacheCreationInputTokens": 0,
+        "cacheReadInputTokens": 21000,
+        "inputTokens": 12,
+        "outputTokens": 240,
+        "thinkingTokens": null
+      }
+    },
+    "toolCalls": 12,
+    "turnId": "turn:u-mockup-turn-002"
+  },
+  {
+    "activeLabel": null,
+    "at": "2026-09-28T11:20:00.161Z",
+    "cells": [
+      {
+        "agent": null,
+        "category": "other",
+        "classification": {
+          "category": "other",
+          "denial": null,
+          "groupable": true,
+          "hidden": true,
+          "humanDecision": false,
+          "safeguard": "not_evaluated",
+          "startsGroup": false,
+          "subagentLifecycle": null
+        },
+        "detail": {
+          "durationMs": 56,
+          "kind": "thinking",
+          "text": "Jitter on drag usually means the layout store writes before the pointer settles. Read the drag hook and search for the store write."
+        },
+        "endedAt": "2026-09-28T11:20:00.161Z",
+        "expanded": true,
+        "id": "cell:think:msg_mockupturn_007:0",
+        "label": "Thought for 0s",
+        "paths": [],
+        "startedAt": "2026-09-28T11:20:00.161Z",
+        "status": "done",
+        "toolName": "thinking",
+        "toolUseId": null
+      },
+      {
+        "agent": null,
+        "category": "exploration",
+        "classification": {
+          "category": "exploration",
+          "denial": null,
+          "groupable": true,
+          "hidden": false,
+          "humanDecision": false,
+          "safeguard": "not_evaluated",
+          "startsGroup": true,
+          "subagentLifecycle": null
+        },
+        "detail": {
+          "files": [
+            {
+              "path": "/tmp/maws-synth-mockup-turn/src/layout/useSidebarDrag.ts",
+              "range": null
+            },
+            {
+              "path": "/tmp/maws-synth-mockup-turn/src/layout/store.ts",
+              "range": null
+            }
+          ],
+          "kind": "read",
+          "preview": "     1\texport function useSidebarDrag() {\n     2\t  const onMove = (e: PointerEvent) => setWidth(e.clientX);\n     3\t  return { onMove };\n     4\t}\n     5\t\n     1\texport const setWidth = (w: number) => layout.set({ width: w });\n     2\t",
+          "truncated": null
+        },
+        "endedAt": "2026-09-28T11:20:00.619Z",
+        "expanded": true,
+        "id": "cell:reads:toolu_synth_mock_1",
+        "label": "Read 2 files",
+        "paths": [
+          "/tmp/maws-synth-mockup-turn/src/layout/useSidebarDrag.ts",
+          "/tmp/maws-synth-mockup-turn/src/layout/store.ts"
+        ],
+        "startedAt": "2026-09-28T11:20:00.279Z",
+        "status": "done",
+        "toolName": "Read",
+        "toolUseId": "toolu_synth_mock_1"
+      },
+      {
+        "agent": null,
+        "category": "exploration",
+        "classification": {
+          "category": "exploration",
+          "denial": null,
+          "groupable": true,
+          "hidden": false,
+          "humanDecision": false,
+          "safeguard": "not_evaluated",
+          "startsGroup": false,
+          "subagentLifecycle": null
+        },
+        "detail": {
+          "kind": "search",
+          "matches": null,
+          "output": "src/layout/useSidebarDrag.ts:2: setWidth(e.clientX)\nsrc/layout/store.ts:1: export const setWidth",
+          "query": "setWidth",
+          "scope": "src",
+          "truncated": null
+        },
+        "endedAt": "2026-09-28T11:20:00.897Z",
+        "expanded": true,
+        "id": "cell:toolu_synth_mock_3",
+        "label": "Searched for `setWidth` in src",
+        "paths": [],
+        "startedAt": "2026-09-28T11:20:00.843Z",
+        "status": "done",
+        "toolName": "Grep",
+        "toolUseId": "toolu_synth_mock_3"
+      },
+      {
+        "agent": null,
+        "category": "exploration",
+        "classification": {
+          "category": "exploration",
+          "denial": null,
+          "groupable": true,
+          "hidden": false,
+          "humanDecision": false,
+          "safeguard": "not_evaluated",
+          "startsGroup": false,
+          "subagentLifecycle": null
+        },
+        "detail": {
+          "kind": "search",
+          "matches": null,
+          "output": "src/layout/sidebar.css",
+          "query": "src/layout/*.css",
+          "scope": null,
+          "truncated": null
+        },
+        "endedAt": "2026-09-28T11:20:01.175Z",
+        "expanded": true,
+        "id": "cell:toolu_synth_mock_4",
+        "label": "Searched for `src/layout/*.css`",
+        "paths": [],
+        "startedAt": "2026-09-28T11:20:01.121Z",
+        "status": "done",
+        "toolName": "Glob",
+        "toolUseId": "toolu_synth_mock_4"
+      }
+    ],
+    "expanded": true,
+    "icon": "exploration",
+    "id": "group:cell:think:msg_mockupturn_007:0",
+    "kind": "group",
+    "state": "completed",
+    "summary": "Read 2 files, searched for `setWidth`, searched for `src/layout/*.css`",
+    "turnId": "turn:u-mockup-turn-002"
+  },
+  {
+    "at": "2026-09-28T11:20:01.391Z",
+    "blockIndex": 0,
+    "id": "text:msg_mockupturn_055:0",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "Found it: the pointer handler writes the store on every move without clamping to the minimum width, and the CSS has no `min-width`. Fixing both.",
+    "messageUuid": "a-mockup-turn-064",
+    "model": "claude-opus-5-5",
+    "phase": "commentary",
+    "turnId": "turn:u-mockup-turn-002"
+  },
+  {
+    "activeLabel": null,
+    "at": "2026-09-28T11:20:01.525Z",
+    "cells": [
+      {
+        "agent": null,
+        "category": "files",
+        "classification": {
+          "category": "files",
+          "denial": null,
+          "groupable": true,
+          "hidden": false,
+          "humanDecision": false,
+          "safeguard": "not_evaluated",
+          "startsGroup": true,
+          "subagentLifecycle": null
+        },
+        "detail": {
+          "added": 2,
+          "change": "update",
+          "filePath": "/tmp/maws-synth-mockup-turn/src/layout/useSidebarDrag.ts",
+          "hunks": [
+            {
+              "lines": [
+                "export function useSidebarDrag() {",
+                "-  const onMove = (e: PointerEvent) => setWidth(e.clientX);",
+                "+  const MIN_WIDTH = 180;",
+                "+  const onMove = (e: PointerEvent) => setWidth(Math.max(MIN_WIDTH, e.clientX));",
+                "  return { onMove };",
+                "}"
+              ],
+              "newLines": 5,
+              "newStart": 1,
+              "oldLines": 4,
+              "oldStart": 1
+            }
+          ],
+          "kind": "edit",
+          "removed": 1
+        },
+        "endedAt": "2026-09-28T11:20:01.579Z",
+        "expanded": true,
+        "id": "cell:toolu_synth_mock_5",
+        "label": "Edited /tmp/maws-synth-mockup-turn/src/layout/useSidebarDrag.ts +2 −1",
+        "paths": [
+          "/tmp/maws-synth-mockup-turn/src/layout/useSidebarDrag.ts"
+        ],
+        "startedAt": "2026-09-28T11:20:01.525Z",
+        "status": "done",
+        "toolName": "Edit",
+        "toolUseId": "toolu_synth_mock_5"
+      },
+      {
+        "agent": null,
+        "category": "files",
+        "classification": {
+          "category": "files",
+          "denial": null,
+          "groupable": true,
+          "hidden": false,
+          "humanDecision": false,
+          "safeguard": "not_evaluated",
+          "startsGroup": false,
+          "subagentLifecycle": null
+        },
+        "detail": {
+          "added": 1,
+          "change": "update",
+          "filePath": "/tmp/maws-synth-mockup-turn/src/layout/store.ts",
+          "hunks": [
+            {
+              "lines": [
+                "-export const setWidth = (w: number) => layout.set({ width: w });",
+                "+export const setWidth = (w: number) => layout.set({ width: Math.round(w) });"
+              ],
+              "newLines": 1,
+              "newStart": 1,
+              "oldLines": 1,
+              "oldStart": 1
+            }
+          ],
+          "kind": "edit",
+          "removed": 1
+        },
+        "endedAt": "2026-09-28T11:20:01.881Z",
+        "expanded": true,
+        "id": "cell:toolu_synth_mock_6",
+        "label": "Edited /tmp/maws-synth-mockup-turn/src/layout/store.ts +1 −1",
+        "paths": [
+          "/tmp/maws-synth-mockup-turn/src/layout/store.ts"
+        ],
+        "startedAt": "2026-09-28T11:20:01.827Z",
+        "status": "done",
+        "toolName": "Edit",
+        "toolUseId": "toolu_synth_mock_6"
+      }
+    ],
+    "expanded": true,
+    "icon": "files",
+    "id": "group:cell:toolu_synth_mock_5",
+    "kind": "group",
+    "state": "completed",
+    "summary": "Edited 2 files",
+    "turnId": "turn:u-mockup-turn-002"
+  },
+  {
+    "agent": null,
+    "at": "2026-09-28T11:20:02.113Z",
+    "category": "commands",
+    "classification": {
+      "category": "commands",
+      "denial": {
+        "disposition": "denied",
+        "interruption": false,
+        "kind": "permission-rule",
+        "reason": "Permission denied by rule: Bash(rm -rf:*) is denied in this project."
+      },
+      "groupable": false,
+      "hidden": false,
+      "humanDecision": false,
+      "safeguard": "not_evaluated",
+      "startsGroup": false,
+      "subagentLifecycle": null
+    },
+    "detail": {
+      "backgroundTaskId": null,
+      "command": "rm -rf node_modules/.vite",
+      "cwd": null,
+      "description": "Clear the Vite cache",
+      "exitCode": null,
+      "interrupted": false,
+      "kind": "shell",
+      "spill": null,
+      "stderr": "",
+      "stdout": "Permission denied by rule: Bash(rm -rf:*) is denied in this project.",
+      "truncated": null
+    },
+    "endedAt": "2026-09-28T11:20:02.167Z",
+    "expanded": true,
+    "id": "cell:toolu_synth_mock_7",
+    "kind": "cell",
+    "label": "Denied: `rm -rf node_modules/.vite` · Permission denied by rule: Bash(rm -rf:*) is denied in this project.",
+    "paths": [],
+    "startedAt": "2026-09-28T11:20:02.113Z",
+    "status": "denied",
+    "toolName": "Bash",
+    "toolUseId": "toolu_synth_mock_7",
+    "turnId": "turn:u-mockup-turn-002"
+  },
+  {
+    "agent": null,
+    "at": "2026-09-28T11:20:02.415Z",
+    "category": "files",
+    "classification": {
+      "category": "files",
+      "denial": null,
+      "groupable": true,
+      "hidden": false,
+      "humanDecision": false,
+      "safeguard": "not_evaluated",
+      "startsGroup": false,
+      "subagentLifecycle": null
+    },
+    "detail": {
+      "added": 1,
+      "change": "update",
+      "filePath": "/tmp/maws-synth-mockup-turn/src/layout/sidebar.css",
+      "hunks": [
+        {
+          "lines": [
+            " .sidebar {",
+            "+  min-width: 180px;",
+            "   width: var(--sidebar-width);",
+            " }"
+          ],
+          "newLines": 4,
+          "newStart": 1,
+          "oldLines": 3,
+          "oldStart": 1
+        }
+      ],
+      "kind": "edit",
+      "removed": 0
+    },
+    "endedAt": "2026-09-28T11:20:02.469Z",
+    "expanded": true,
+    "id": "cell:toolu_synth_mock_8",
+    "kind": "cell",
+    "label": "Edited /tmp/maws-synth-mockup-turn/src/layout/sidebar.css +1 −0",
+    "paths": [
+      "/tmp/maws-synth-mockup-turn/src/layout/sidebar.css"
+    ],
+    "startedAt": "2026-09-28T11:20:02.415Z",
+    "status": "done",
+    "toolName": "Edit",
+    "toolUseId": "toolu_synth_mock_8",
+    "turnId": "turn:u-mockup-turn-002"
+  },
+  {
+    "at": "2026-09-28T11:20:02.685Z",
+    "blockIndex": 0,
+    "id": "text:msg_mockupturn_111:0",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "Running the checks.",
+    "messageUuid": "a-mockup-turn-115",
+    "model": "claude-opus-5-5",
+    "phase": "commentary",
+    "turnId": "turn:u-mockup-turn-002"
+  },
+  {
+    "activeLabel": null,
+    "at": "2026-09-28T11:20:02.755Z",
+    "cells": [
+      {
+        "agent": null,
+        "category": "commands",
+        "classification": {
+          "category": "commands",
+          "denial": null,
+          "groupable": true,
+          "hidden": false,
+          "humanDecision": false,
+          "safeguard": "not_evaluated",
+          "startsGroup": true,
+          "subagentLifecycle": null
+        },
+        "detail": {
+          "backgroundTaskId": null,
+          "command": "pnpm test",
+          "cwd": null,
+          "description": "Run the unit tests",
+          "exitCode": 0,
+          "interrupted": false,
+          "kind": "shell",
+          "spill": null,
+          "stderr": "",
+          "stdout": " Test Files  14 passed (14)\n      Tests  212 passed (212)",
+          "truncated": null
+        },
+        "endedAt": "2026-09-28T11:20:02.809Z",
+        "expanded": true,
+        "id": "cell:toolu_synth_mock_9",
+        "label": "Ran `pnpm test` in 0s",
+        "paths": [],
+        "startedAt": "2026-09-28T11:20:02.755Z",
+        "status": "done",
+        "toolName": "Bash",
+        "toolUseId": "toolu_synth_mock_9"
+      },
+      {
+        "agent": null,
+        "category": "commands",
+        "classification": {
+          "category": "commands",
+          "denial": null,
+          "groupable": true,
+          "hidden": false,
+          "humanDecision": false,
+          "safeguard": "not_evaluated",
+          "startsGroup": false,
+          "subagentLifecycle": null
+        },
+        "detail": {
+          "backgroundTaskId": null,
+          "command": "pnpm lint",
+          "cwd": null,
+          "description": "Lint",
+          "exitCode": 0,
+          "interrupted": false,
+          "kind": "shell",
+          "spill": null,
+          "stderr": "",
+          "stdout": "",
+          "truncated": null
+        },
+        "endedAt": "2026-09-28T11:20:03.095Z",
+        "expanded": true,
+        "id": "cell:toolu_synth_mock_10",
+        "label": "Ran `pnpm lint` in 0s",
+        "paths": [],
+        "startedAt": "2026-09-28T11:20:03.041Z",
+        "status": "done",
+        "toolName": "Bash",
+        "toolUseId": "toolu_synth_mock_10"
+      },
+      {
+        "agent": null,
+        "category": "commands",
+        "classification": {
+          "category": "commands",
+          "denial": null,
+          "groupable": true,
+          "hidden": false,
+          "humanDecision": false,
+          "safeguard": "not_evaluated",
+          "startsGroup": false,
+          "subagentLifecycle": null
+        },
+        "detail": {
+          "backgroundTaskId": null,
+          "command": "pnpm typecheck",
+          "cwd": null,
+          "description": "Typecheck",
+          "exitCode": 0,
+          "interrupted": false,
+          "kind": "shell",
+          "spill": null,
+          "stderr": "",
+          "stdout": "",
+          "truncated": null
+        },
+        "endedAt": "2026-09-28T11:20:03.381Z",
+        "expanded": true,
+        "id": "cell:toolu_synth_mock_11",
+        "label": "Ran `pnpm typecheck` in 0s",
+        "paths": [],
+        "startedAt": "2026-09-28T11:20:03.327Z",
+        "status": "done",
+        "toolName": "Bash",
+        "toolUseId": "toolu_synth_mock_11"
+      },
+      {
+        "agent": null,
+        "category": "commands",
+        "classification": {
+          "category": "commands",
+          "denial": null,
+          "groupable": true,
+          "hidden": false,
+          "humanDecision": false,
+          "safeguard": "not_evaluated",
+          "startsGroup": false,
+          "subagentLifecycle": null
+        },
+        "detail": {
+          "backgroundTaskId": null,
+          "command": "git diff --stat",
+          "cwd": null,
+          "description": "Show the change summary",
+          "exitCode": 0,
+          "interrupted": false,
+          "kind": "shell",
+          "spill": null,
+          "stderr": "",
+          "stdout": " src/layout/useSidebarDrag.ts | 3 ++-\n src/layout/store.ts          | 2 +-\n src/layout/sidebar.css       | 1 +\n 3 files changed, 5 insertions(+), 2 deletions(-)",
+          "truncated": null
+        },
+        "endedAt": "2026-09-28T11:20:03.667Z",
+        "expanded": true,
+        "id": "cell:toolu_synth_mock_12",
+        "label": "Ran `git diff --stat` in 0s",
+        "paths": [],
+        "startedAt": "2026-09-28T11:20:03.613Z",
+        "status": "done",
+        "toolName": "Bash",
+        "toolUseId": "toolu_synth_mock_12"
+      }
+    ],
+    "expanded": true,
+    "icon": "commands",
+    "id": "group:cell:toolu_synth_mock_9",
+    "kind": "group",
+    "state": "completed",
+    "summary": "Ran 4 commands",
+    "turnId": "turn:u-mockup-turn-002"
+  },
+  {
+    "at": "2026-09-28T11:20:03.883Z",
+    "blockIndex": 0,
+    "id": "text:msg_mockupturn_155:0",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "The jitter came from two things: the drag handler wrote every pointer position straight into the layout store, so sub-pixel values fought the CSS width, and nothing clamped the sidebar to a minimum. I clamped the pointer value to `MIN_WIDTH` in `useSidebarDrag.ts`, rounded the stored width in `store.ts`, and added `min-width: 180px` to `sidebar.css`.\n\nTests, lint and typecheck pass. The Vite cache clear was denied by a project rule, which is fine: the dev server picks the change up without it.",
+    "messageUuid": "a-mockup-turn-179",
+    "model": "claude-opus-5-5",
+    "phase": "answer",
+    "turnId": "turn:u-mockup-turn-002"
+  },
+  {
+    "added": 4,
+    "at": "2026-09-28T11:20:04.105Z",
+    "canReapply": false,
+    "canUndo": false,
+    "files": [
+      {
+        "added": 2,
+        "cellId": "cell:toolu_synth_mock_5",
+        "change": "update",
+        "path": "/tmp/maws-synth-mockup-turn/src/layout/useSidebarDrag.ts",
+        "removed": 1
+      },
+      {
+        "added": 1,
+        "cellId": "cell:toolu_synth_mock_6",
+        "change": "update",
+        "path": "/tmp/maws-synth-mockup-turn/src/layout/store.ts",
+        "removed": 1
+      },
+      {
+        "added": 1,
+        "cellId": "cell:toolu_synth_mock_8",
+        "change": "update",
+        "path": "/tmp/maws-synth-mockup-turn/src/layout/sidebar.css",
+        "removed": 0
+      }
+    ],
+    "id": "receipt:turn:u-mockup-turn-002",
+    "kind": "receipt",
+    "removed": 2,
+    "state": "applied",
+    "turnId": "turn:u-mockup-turn-002"
+  },
+  {
+    "at": "2026-09-28T11:20:04.135Z",
+    "attempt": null,
+    "id": "error:replay:journal:173:0",
+    "kind": "error",
+    "lostAttentionCount": 0,
+    "scope": "exit",
+    "severity": "notice",
+    "text": "Session process exited (unknown)",
+    "turnId": null
+  }
+]
