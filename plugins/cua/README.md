@@ -16,9 +16,13 @@ talks to it, and it launches ChatGPT.app's own `cua_repl` server exactly as Code
 ## Install
 
 ```sh
-claude plugin marketplace add /Users/new/Developer/GitHub/MAWS   # registers the "maws" marketplace
-claude plugin install cua@maws
+claude plugin marketplace add SSFSKIM/cua
+claude plugin install cua@cua
 ```
+
+(Inside a MAWS checkout, the repo root is also a local marketplace: `claude plugin marketplace add <path to MAWS>`
+then `claude plugin install cua@maws`. The plugin's source of truth is `plugins/cua` in MAWS, published to
+`github.com/SSFSKIM/cua` with `git subtree push --prefix plugins/cua`.)
 
 Then allow the tools in your settings so each call does not prompt: `"mcp__plugin_cua_cua_repl__*"` under
 `permissions.allow`. App approvals ("Allow Computer Use to use X?") are separate and still appear once per app per

@@ -12,8 +12,7 @@
       "source": "./plugins/cua",
       "author": {
         "name": "SSFSKIM"
-      },
-      "license": "MIT"
+      }
     }
   ]
 }

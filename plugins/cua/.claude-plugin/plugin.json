@@ -5,11 +5,12 @@
   "author": {
     "name": "SSFSKIM"
   },
-  "license": "MIT",
   "mcpServers": {
     "cua_repl": {
       "command": "node",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/cua-shim.mjs"],
+      "args": [
+        "${CLAUDE_PLUGIN_ROOT}/cua-shim.mjs"
+      ],
       "env": {
         "CUA_SHIM_CODEX_HOME": "${CLAUDE_PLUGIN_DATA}/codex-home"
       }
