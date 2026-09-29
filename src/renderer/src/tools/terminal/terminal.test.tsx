@@ -24,6 +24,10 @@ const registry = vi.hoisted(() => {
       host = { state: 'ready', pid: 1, restarts: 0, revision: 1 };
       next = 0;
     },
+    remove(id: string) {
+      infos = infos.filter((info) => info.id !== id);
+      publish();
+    },
     patch(id: string, patch: Partial<TerminalInfo>) {
       infos = infos.map((info) => (info.id === id ? { ...info, ...patch } : info));
       publish();
@@ -70,7 +74,7 @@ const registry = vi.hoisted(() => {
       unmount: vi.fn(),
       focus: vi.fn(),
       foreground: vi.fn(async () => ({ process: 'zsh', busy: false })),
-      close: vi.fn(async () => {}),
+      close: vi.fn(async (id: string): Promise<void> => void id),
       respawn: vi.fn(async () => {}),
     },
   };
@@ -115,7 +119,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   // clearAllMocks keeps implementations a test replaced; every test starts from an idle shell and a close that works
   registry.terminals.foreground.mockImplementation(async () => ({ process: 'zsh', busy: false }));
-  registry.terminals.close.mockImplementation(async () => {});
+  // a close that works disposes the handle, as the registry's does
+  registry.terminals.close.mockImplementation(async (id: string) => registry.remove(id));
 });
 afterEach(() => cleanup());
 
@@ -202,10 +207,25 @@ describe('terminal tool close', () => {
     expect(registry.terminals.close).toHaveBeenCalledTimes(2);
   });
 
-  it('never kills on dispose (the close already did)', () => {
+  it('ends a still-running terminal on dispose (a host removing a session’s tabs asks nobody), once', () => {
     const state = newState();
     terminalTool.dispose(state);
-    expect(registry.terminals.close).not.toHaveBeenCalled();
+    terminalTool.dispose(state);
+    expect(registry.terminals.close.mock.calls).toEqual([[state.terminalId]]);
+  });
+
+  it('kills nothing on dispose after a completed beforeClose, and logs a dispose kill that fails', async () => {
+    const closed = newState();
+    await expect(terminalTool.beforeClose(closed)).resolves.toBe(true);
+    terminalTool.dispose(closed);
+    expect(registry.terminals.close).toHaveBeenCalledTimes(1);
+
+    const failing = newState({ instanceId: 'terminal:2' });
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    registry.terminals.close.mockRejectedValueOnce(new Error('pty.kill failed: EPERM'));
+    terminalTool.dispose(failing);
+    await vi.waitFor(() => expect(logged).toHaveBeenCalledOnce());
+    logged.mockRestore();
   });
 });
 

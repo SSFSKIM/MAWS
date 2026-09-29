@@ -38,7 +38,7 @@ export interface PanelTool<S, P = void> {
   createState(init: PanelToolInit<P>): S; // once per tab
   open?(state: S, params: P): void; // addTool on an existing single-instance tab re-targets it
   beforeClose(state: S): Promise<boolean>; // false vetoes; the tool shows its own confirmation and calls ctx.close() later
-  dispose(state: S): void;
+  dispose(state: S): void; // also runs without beforeClose (a host removing a deleted session's tabs): ends what still runs
   render: ComponentType<{ state: S; ctx: PanelToolContext }>;
   summary?: ComponentType<{ appSessionId: AppSessionId; open(params?: P): void }>; // a section of the resting summary
 }

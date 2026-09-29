@@ -104,11 +104,18 @@ async function beforeClose(state: TerminalTabState): Promise<boolean> {
   return true;
 }
 
-// The shell is already gone: every host close runs `beforeClose` first, which closed it (a host closing a tool's tabs
-// because the tool was unregistered also closes each through `closeTab`, and a vetoed or failed close keeps the tab).
-// The tab's own state holds nothing else to release.
+// The backstop: a host may dispose a tab without asking (C8a removes a deleted session's tabs without `beforeClose`), so
+// a terminal still in the registry is ended here, fire-and-forget, the failure only logged since no tab is left to show
+// it. After a completed `beforeClose` the registry no longer has the terminal and nothing is killed; a second dispose
+// of the same state does nothing. The owner's own close keeps `beforeClose`'s contract (ask when busy, veto a failed kill).
+const disposed = new WeakSet<TerminalTabState>();
 function dispose(state: TerminalTabState): void {
-  state.ui.setState({ confirmClose: false, process: null, closeError: null });
+  if (disposed.has(state)) return;
+  disposed.add(state);
+  const { terminalId } = state.ui.getState();
+  state.ui.setState({ confirmClose: false, process: null, confirmed: false, closeError: null });
+  if (!terminalId || !terminals.get(terminalId)) return;
+  terminals.close(terminalId).catch((error: unknown) => console.error(`[terminal] could not end ${terminalId} on dispose`, error));
 }
 
 export const terminalTool: PanelTool<TerminalTabState, TerminalParams> = {
