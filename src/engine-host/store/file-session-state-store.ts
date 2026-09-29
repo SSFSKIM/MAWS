@@ -66,14 +66,23 @@ export class FileSessionStateStore implements SessionStateStore {
     return this.update(id, (file) => ({ ...file, launchSpec: LaunchSpecSchema.parse(spec) }));
   }
 
-  // Archive: the state file and the session's journal directory (Interfaces, Journal: "`SessionStateStore.forget`
-  // deletes the session's directory").
+  // Archive: the session's journal directory only. The state file with the queue and the grant snapshot survives, so an
+  // unarchived session resumes with them (charter §12 C10: "archive keeps the store file, delete forgets it").
+  forgetJournal(id: AppSessionId): Promise<void> {
+    return this.run(id, () => this.removeJournal(id));
+  }
+
+  // The whole erase: the state file and the session's journal directory (C10's delete conversation), never an archive.
   forget(id: AppSessionId): Promise<void> {
     return this.run(id, async () => {
       await rm(this.fileOf(id), { force: true });
-      assertSafeAppSessionId(id);
-      await rm(join(this.journalDir, id), { recursive: true, force: true });
+      await this.removeJournal(id);
     });
+  }
+
+  private async removeJournal(id: AppSessionId): Promise<void> {
+    assertSafeAppSessionId(id);
+    await rm(join(this.journalDir, id), { recursive: true, force: true });
   }
 
   private fileOf(id: AppSessionId): string {

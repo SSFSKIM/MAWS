@@ -104,4 +104,19 @@ describe('FileSessionStateStore', () => {
     await expect(readdir(journalDir)).rejects.toThrow();
     expect(await store.loadGrants(ID)).toEqual({ allow: [] });
   });
+
+  it('forgetJournal (archive) deletes the session\'s journal directory and keeps the state file with its queue and grants', async () => {
+    const store = new FileSessionStateStore(userData);
+    const queue = { entries: [entry()], paused: true };
+    await store.saveQueue(ID, queue);
+    await store.saveGrants(ID, { allow: ['Bash'] });
+    const journalDir = join(userData, 'engine-host', 'journal', ID);
+    await mkdir(journalDir, { recursive: true });
+    await writeFile(join(journalDir, 'L1.jsonl'), '');
+    await store.forgetJournal(ID);
+    await expect(readdir(journalDir)).rejects.toThrow();
+    expect(await readdir(join(userData, 'engine-host', 'state'))).toEqual([`${ID}.json`]);
+    expect(await store.loadQueue(ID)).toEqual({ ...queue, corrupt: null });
+    expect(await store.loadGrants(ID)).toEqual({ allow: ['Bash'] });
+  });
 });

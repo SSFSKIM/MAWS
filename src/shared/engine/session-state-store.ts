@@ -45,5 +45,6 @@ export interface SessionStateStore {
   saveGrants(appSessionId: AppSessionId, grants: GrantSnapshot): Promise<void>;
   loadLaunchSpec(appSessionId: AppSessionId): Promise<LaunchSpec | null>; // the last spec, so a resume can reuse cwd, model, gateway
   saveLaunchSpec(appSessionId: AppSessionId, spec: LaunchSpec): Promise<void>;
-  forget(appSessionId: AppSessionId): Promise<void>;
+  forgetJournal(appSessionId: AppSessionId): Promise<void>; // archive (charter §12 C10): the journal only; the state file with the queue and grants survives
+  forget(appSessionId: AppSessionId): Promise<void>; // the whole erase, state file and journal (C10's delete conversation)
 }

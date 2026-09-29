@@ -171,7 +171,9 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
     const result = await session.stop(reason);
     if (reason === 'archive') {
       const id = appSessionId as AppSessionId;
-      await store.forget(id); // the state file and the journal directory
+      // the journal directory only; the state file with the queue and the grant snapshot survives an archive so an
+      // unarchived session resumes with them, charter §12 C10
+      await store.forgetJournal(id);
       streams.get(id)?.flush(); // the session's last events first
       emit('session.forgotten', { appSessionId: id }); // main's attention service retires it (M5 review)
       // the host keeps nothing of an archived session (whole-branch review): its row, stream and spec go at its exit

@@ -1,6 +1,7 @@
 // An in-memory SessionStateStore: the default for an EngineSession constructed without a store (the conformance
 // suites and unit tests), and a test double for the file adapter. Values are cloned in and out so a caller mutating
 // what it saved or loaded never changes what is stored.
+import { assertSafeAppSessionId } from '@shared/engine/app-session-id';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
 import type { GrantSnapshot, QueueState, SessionStateStore, StoredQueue } from '@shared/engine/session-state-store';
@@ -30,6 +31,10 @@ export class MemorySessionStateStore implements SessionStateStore {
   }
   async saveLaunchSpec(id: AppSessionId, spec: LaunchSpec): Promise<void> {
     this.specs.set(id, structuredClone(spec));
+  }
+  // keeps no journal: nothing to delete, but the id is still checked as the file store checks it
+  async forgetJournal(id: AppSessionId): Promise<void> {
+    assertSafeAppSessionId(id);
   }
   async forget(id: AppSessionId): Promise<void> {
     this.queues.delete(id);

@@ -153,6 +153,7 @@ describe('engine host X2 surface', () => {
     // the store refuses on its own too (defence in depth)
     const store = new FileSessionStateStore(inside);
     await expect(store.forget('../..' as AppSessionId)).rejects.toEqual(invalid);
+    await expect(store.forgetJournal('../..' as AppSessionId)).rejects.toEqual(invalid);
     await expect(store.saveQueue('../x' as AppSessionId, { entries: [], paused: false })).rejects.toEqual(invalid);
     expect(readdirSync(userData).sort()).toEqual(['profile', 'victim.txt']);
     // an ordinary id with dots, dashes and underscores is fine
@@ -258,16 +259,19 @@ describe('engine host X2 surface', () => {
     await expect(host.call('session.queue.list', { appSessionId: 'app-none' as AppSessionId })).rejects.toThrow('unknown session app-none');
   });
 
-  it('archive stops the process and forgets the session\'s state and journal', async () => {
+  it('archive stops the process and forgets the session\'s journal, keeping its state', async () => {
     const store = new MemorySessionStateStore();
     const forget = vi.spyOn(store, 'forget');
+    const forgetJournal = vi.spyOn(store, 'forgetJournal');
     const host = engineHost({ store });
     const id = 'app-archive';
     await host.call('session.launch', { spec: replaySpec(id, 'spikes/protocol-probe/fixtures/reads.jsonl') });
     await until(() => host.statuses(id).some((s) => s.process === 'ready'), 'ready');
     expect(await host.call('session.catalog', { appSessionId: id as AppSessionId })).toMatchObject({ commands: expect.any(Array), revision: expect.any(Number) });
     expect(await host.call('session.stop', { appSessionId: id as AppSessionId, reason: 'archive' })).toMatchObject({ exited: true });
-    expect(forget).toHaveBeenCalledExactlyOnceWith(id);
+    expect(forgetJournal).toHaveBeenCalledExactlyOnceWith(id);
+    expect(forget).not.toHaveBeenCalled(); // archive keeps the store file, delete forgets it (charter §12 C10)
+    expect(store.specs.has(id as AppSessionId)).toBe(true);
     expect(host.statuses(id).at(-1)!.exit).toMatchObject({ reason: 'archive' });
     // released (whole-branch review): no table row, no stream, so the host keeps nothing of an archived session
     expect((await host.call('engine.sessions', undefined)).some((s) => s.appSessionId === id)).toBe(false);
@@ -286,13 +290,14 @@ describe('engine host X2 surface', () => {
     await host.call('session.stop', { appSessionId: ended as AppSessionId, reason: 'stop' });
     expect(host.emitted.some((e) => e.name === 'session.forgotten' && (e.payload as { appSessionId: string }).appSessionId === ended)).toBe(false);
     expect(await host.call('session.stop', { appSessionId: ended as AppSessionId, reason: 'archive' })).toMatchObject({ exited: true });
-    expect(forget).toHaveBeenLastCalledWith(ended);
+    expect(forgetJournal).toHaveBeenLastCalledWith(ended);
+    expect(forget).not.toHaveBeenCalled();
     expect(host.emitted.at(-1)).toEqual({ name: 'session.forgotten', payload: { appSessionId: ended } });
     expect((await host.call('engine.sessions', undefined)).map((s) => s.appSessionId)).toEqual([]);
     await expect(host.call('session.events', { appSessionId: ended as AppSessionId, afterSeq: null, limit: null })).rejects.toThrow(`unknown session ${ended}`);
   });
 
-  it('archive with a released entry outstanding: once session.stop resolves, the state file and the journal directory are gone and nothing written at the exit brings them back', async () => {
+  it('archive with a released entry outstanding: once session.stop resolves, the journal directory is gone and nothing written at the exit brings it back, while the state file is kept (charter §12 C10)', async () => {
     const store = new FileSessionStateStore(userData);
     const host = engineHost({ store });
     const id = 'app-archive-released';
@@ -304,12 +309,14 @@ describe('engine host X2 surface', () => {
     const stateFile = join(userData, 'engine-host', 'state', `${id}.json`);
     const journalDir = join(userData, 'engine-host', 'journal', id);
     expect(existsSync(stateFile)).toBe(true);
+    expect(existsSync(journalDir)).toBe(true);
     await host.call('session.stop', { appSessionId: id as AppSessionId, reason: 'archive' });
-    expect(existsSync(stateFile)).toBe(false);
+    expect(existsSync(stateFile)).toBe(true);
     expect(existsSync(journalDir)).toBe(false);
     for (let i = 0; i < 20; i += 1) await new Promise((r) => setTimeout(r, 10)); // every write the exit started has had its turn
-    expect(existsSync(stateFile)).toBe(false);
+    expect(existsSync(stateFile)).toBe(true);
     expect(existsSync(journalDir)).toBe(false);
+    expect((await store.loadLaunchSpec(id as AppSessionId))?.appSessionId).toBe(id);
   });
 
   it('a relaunch replaces the exited launch\'s row and stream: engine.sessions lists the id once, session.events answers the new launch only', async () => {
