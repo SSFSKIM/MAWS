@@ -311,6 +311,17 @@ describe('session records in the index', () => {
     expect(bindings).toEqual([[record.appId, engineId]]);
   });
 
+  // C3's ask (gateway filled for disk sessions): the transcript records no base URL or auto-mode server, so a session
+  // discovered on disk carries null and 'unknown' until a verified status of a live process fills them, and what a
+  // status filled stays through later summaries (and restarts: they are columns).
+  it('a discovered session has no gateway facts until a status fills them; a later summary keeps them', () => {
+    const s = summary();
+    const { record } = index.sessions.upsertFromSummary(s);
+    expect(record.gateway).toMatchObject({ baseUrl: null, autoModeServer: 'unknown' });
+    index.sessions.applyEngineStatus(record.appId, { gateway: { routed: true, baseUrl: 'http://127.0.0.1:8641', autoModeServer: 'enabled' } });
+    expect(index.sessions.upsertFromSummary({ ...s, size: s.size + 1 }).record.gateway).toEqual({ routed: true, baseUrl: 'http://127.0.0.1:8641', autoModeServer: 'enabled' });
+  });
+
   it('markSeen moves lastSeen and clears unread; setUnread and setPinned set their flags', () => {
     const { record } = index.sessions.upsertFromSummary(summary());
     expect(index.sessions.setUnread(record.appId, true).unread).toBe(true);
