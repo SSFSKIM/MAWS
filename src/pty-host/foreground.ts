@@ -17,19 +17,43 @@ export interface Foreground {
   busy: boolean;
 }
 
-export async function foregroundOf(target: ForegroundTarget): Promise<Foreground> {
+// Runs a probe program and answers its exit code and stdout, or null when it could not run (missing, timed out).
+export type ProbeRunner = (file: string, args: string[]) => Promise<{ code: number; stdout: string } | null>;
+
+// Three readings, most exact first: the terminal's foreground group from `ps`; when `ps` fails, the shell's children
+// from `pgrep` (a foreground job is always a descendant of the shell, so a shell with no children holds the terminal
+// itself); when that fails too or the shell has children (a background job, a prompt's helper), the name rule, which
+// errs toward asking before close.
+export async function foregroundOf(target: ForegroundTarget, run: ProbeRunner = runProbe): Promise<Foreground> {
   const process = target.process || null;
-  const group = await foregroundGroup(target.pid);
-  const busy = group === null ? process !== null && process !== basename(target.shell) : group !== target.pid;
-  return { process, busy };
+  const group = await foregroundGroup(target.pid, run);
+  if (group !== null) return { process, busy: group !== target.pid };
+  if ((await hasChildren(target.pid, run)) === false) return { process, busy: false };
+  return { process, busy: process !== null && process !== basename(target.shell) };
 }
 
 // The foreground process group of the shell's terminal (`ps`'s `tpgid`), or null when it cannot be read.
-function foregroundGroup(pid: number): Promise<number | null> {
+async function foregroundGroup(pid: number, run: ProbeRunner): Promise<number | null> {
+  const result = await run('/bin/ps', ['-o', 'tpgid=', '-p', String(pid)]);
+  if (!result || result.code !== 0) return null;
+  const group = Number.parseInt(result.stdout.trim(), 10);
+  return Number.isInteger(group) && group > 0 ? group : null;
+}
+
+// Whether the shell has child processes (`pgrep -P`: exit 0 some, exit 1 none), or null when that cannot be read.
+async function hasChildren(pid: number, run: ProbeRunner): Promise<boolean | null> {
+  const result = await run('/usr/bin/pgrep', ['-P', String(pid)]);
+  if (!result) return null;
+  return result.code === 0 ? true : result.code === 1 ? false : null;
+}
+
+export function runProbe(file: string, args: string[]): ReturnType<ProbeRunner> {
   return new Promise((resolve) => {
-    execFile('/bin/ps', ['-o', 'tpgid=', '-p', String(pid)], { encoding: 'utf8', timeout: 2_000 }, (error, stdout) => {
-      const group = Number.parseInt(stdout.trim(), 10);
-      resolve(error || !Number.isInteger(group) || group <= 0 ? null : group);
+    execFile(file, args, { encoding: 'utf8', timeout: 2_000 }, (error, stdout) => {
+      if (!error) return resolve({ code: 0, stdout });
+      const code = (error as { code?: unknown }).code;
+      // a timeout kills the probe (`killed`), and a probe that never started reports a string code such as ENOENT
+      resolve(typeof code === 'number' && !error.killed ? { code, stdout } : null);
     });
   });
 }
