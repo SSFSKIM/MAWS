@@ -16,7 +16,9 @@ export interface ResumeFields {
   extraSettings: Record<string, unknown> | null;
 }
 
-// A live turn run from the launcher is capped (the M6 acceptance's budget).
+// A live turn run from the launcher is capped (the M6 acceptance's budget). The engine's cap is the conversation's
+// cumulative cost, the restored cost of a resumed session included, so a resume's cap is its restored cost plus the case's
+// allowance; the flag is not adjusted (C11 M6, closing the C3/C11 tracker row of 2026-09-29).
 export const RESUME_BUDGET_USD = 0.5;
 
 export function resumeSpec(record: Resumable, fields: ResumeFields): LaunchSpec {
