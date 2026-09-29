@@ -1,5 +1,5 @@
 // The M2 pins over the synthetic journals, the event fixtures and the seeded transcript (C6 execution document,
-// M2 "Proves"). The probe-journal pins live beside the replay stub.
+// M2 "Proves"). The probe-journal pins live in journals.test.ts.
 import type { SessionEvent } from '@shared/graph/events';
 import { afterEach, describe, expect, it } from 'vitest';
 import { loadEventFixture, loadSyntheticJournal } from '../../../../../test/support/fixtures';

@@ -1,6 +1,6 @@
 // The harness's fixture catalogue. Journals are bundled lazily as raw text (harness builds only): the probe's pass-1
-// root journals and pass-2 journals (never the gitignored `private/` owner data; sidecars and `workflow-disk/` are
-// transcripts, not journals) and C6's synthetic journals, played through the replay stub; C6's X1 event fixtures
+// root journals, pass-2 and pass-3 journals (never the gitignored `private/` owner data; sidecars and `workflow-disk/`
+// are transcripts, not journals) and C6's synthetic journals, played through C3's normaliser; C6's X1 event fixtures
 // (`events/<name>`) for shapes C3 has not fixed on the wire; and the seeded synthetic transcript (`synthetic/<turns>`).
 import { SessionEventSchema, type SessionEvent } from '@shared/graph/events';
 import { parseJournalRow } from '@shared/wire/journal';
@@ -10,6 +10,7 @@ import { journalToEvents } from '../transcript/dev/journal';
 // Vite requires each glob's options as a literal.
 const pass1 = import.meta.glob<string>(['../../../../spikes/protocol-probe/fixtures/*.jsonl', '!**/fixtures/private/**'], { query: '?raw', import: 'default' });
 const pass2 = import.meta.glob<string>(['../../../../spikes/protocol-probe/fixtures/pass2/*.jsonl', '!**/fixtures/private/**'], { query: '?raw', import: 'default' });
+const pass3 = import.meta.glob<string>(['../../../../spikes/protocol-probe/fixtures/pass3/*.jsonl', '!**/fixtures/private/**'], { query: '?raw', import: 'default' });
 const transcript = import.meta.glob<string>('../../../../test/fixtures/transcript/*.jsonl', { query: '?raw', import: 'default' });
 const events = import.meta.glob<string>('../../../../test/fixtures/transcript/events/*.events.jsonl', { query: '?raw', import: 'default' });
 
@@ -52,6 +53,7 @@ const LOADERS = new Map<string, Loader>([
   ['synthetic/500', () => Promise.resolve(synthetic(500))],
   ...journals('pass1', pass1),
   ...journals('pass2', pass2),
+  ...journals('pass3', pass3),
   ...journals('transcript', transcript),
   ...eventFixtures,
 ]);
