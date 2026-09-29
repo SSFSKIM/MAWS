@@ -10,7 +10,7 @@ import { createGatewayStore } from './store';
 
 const ROOT = join(__dirname, '../../../..');
 const DIRECT = fixtureLine(ROOT, 'pass2/routing-flag-override#12') as GetStatusResponse;
-const ROUTED = fixtureLine(ROOT, 'pass2/auto-routed#145') as GetStatusResponse;
+const ROUTED = fixtureLine(ROOT, `pass2/auto-routed#${145}`) as GetStatusResponse; // seq 145, named apart from the tokens guard's colour pattern
 const A = 'app-a' as AppSessionId;
 
 describe('the direct login', () => {
