@@ -60,7 +60,7 @@ export interface FilesService {
   list(input: { appSessionId: AppSessionId; path?: string }): Promise<FilesListOutput>;
   read(input: FilesReadInput): Promise<FilesReadOutput>;
   watch(appSessionId: AppSessionId, path: string, owner: number): Promise<void>;
-  unwatch(appSessionId: AppSessionId, path: string, owner: number): void;
+  unwatch(appSessionId: AppSessionId, path: string, owner: number): Promise<void>;
   openExternal(appSessionId: AppSessionId, path: string): Promise<FilesOpenExternalOutput>;
   release(owner: number): void; // everything a window holds, when it closes or navigates
   watching(): string[];
@@ -266,7 +266,11 @@ export function createFilesService({ records, hooks, emit = () => {}, openPath, 
     list,
     read,
     watch,
-    unwatch: (appSessionId, path, owner) => watches.unwatch({ owner, appSessionId, path }),
+    // the hold on the directory the path names now (the realpath a watch of it would be keyed by), else the first found
+    unwatch: async (appSessionId, path, owner) => {
+      const real = isAbsolute(path) ? await fs.promises.realpath(path).catch(() => null) : null;
+      watches.unwatch({ owner, appSessionId, path }, real);
+    },
     openExternal,
     release: (owner) => watches.release(owner),
     watching: () => watches.watching(),

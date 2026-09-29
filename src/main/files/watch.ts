@@ -107,10 +107,13 @@ export class WatchTable {
     if (entry) this.invalidate(entry);
   }
 
-  // Removes one hold on the watch `holder` named; closes the watcher when none remains. Unknown holds are no-ops.
-  unwatch(holder: Holder): void {
+  // Removes one hold on the watch `holder` named; closes the watcher when none remains. Unknown holds are no-ops. The same
+  // holder can hold two entries when its path's realpath moved between two watches; the hold on `real`, the entry the
+  // path names now, goes first, else the first one found.
+  unwatch(holder: Holder, real: string | null): void {
     const key = holderKey(holder);
-    for (const entry of this.entries.values()) {
+    const named = real === null ? undefined : this.entries.get(real);
+    for (const entry of named?.holders.has(key) ? [named] : this.entries.values()) {
       const held = entry.holders.get(key);
       if (!held) continue;
       if (--held.count === 0) entry.holders.delete(key);

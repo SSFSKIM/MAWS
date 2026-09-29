@@ -135,13 +135,27 @@ describe('files watch', { timeout: 20_000 }, () => {
     await files.watch(A, dir, 1);
     await files.watch(A, dir, 1); // ref-counted: the same holder twice
     await files.watch(B, dir, 1);
-    files.unwatch(A, dir, 1);
-    files.unwatch(B, dir, 1);
+    await files.unwatch(A, dir, 1);
+    await files.unwatch(B, dir, 1);
     expect(watchers[0].close).not.toHaveBeenCalled();
-    files.unwatch(A, dir, 1);
+    await files.unwatch(A, dir, 1);
     expect(watchers[0].close).toHaveBeenCalledTimes(1);
     expect(files.watching()).toEqual([]);
-    files.unwatch(A, dir, 1); // an unknown hold is a no-op
+    await files.unwatch(A, dir, 1); // an unknown hold is a no-op
+  });
+
+  it('unwatch drops the hold on the directory the path names now when its realpath moved between two watches', async () => {
+    const asked = join(root, 'Case'); // APFS is case-insensitive: a case-only rename moves the realpath under the same path
+    mkdirSync(asked);
+    await files.watch(A, asked, 1); // keyed by …/Case
+    renameSync(asked, join(root, 'case'));
+    expect(realpathSync.native(asked)).toBe(join(root, 'case')); // the volume this suite relies on (realpath(3), as fs.promises)
+    await files.watch(A, asked, 1); // the same holder, now keyed by …/case
+    expect(files.watching().sort()).toEqual([asked, join(root, 'case')].sort());
+    await files.unwatch(A, asked, 1);
+    expect(files.watching()).toEqual([asked]); // the newer hold, on the directory the path names now, went
+    await files.unwatch(A, asked, 1);
+    expect(files.watching()).toEqual([]);
   });
 
   it('releases every hold of a window that closes or navigates', async () => {
