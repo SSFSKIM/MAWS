@@ -92,8 +92,7 @@ describe('summary derivations', () => {
         '/tmp/maws-synth-exploration-and-web/src/model/rows.ts',
         '/tmp/maws-synth-exploration-and-web/src/model/reduce.ts',
         '/tmp/maws-synth-exploration-and-web/src/model/derive.ts',
-        'src',
-      ]);
+      ]); // the Grep scope `src` is a directory, not a file source (C6 excludes search scopes from TurnWork.files)
       expect(sources[0]).toMatchObject({ kind: 'mcp', server: 'docs', tool: 'search' });
       expect(sources[1]).toMatchObject({ kind: 'web', host: 'tanstack.com' });
       const times = sources.map((s) => s.at);
