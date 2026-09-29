@@ -37,6 +37,15 @@ import { createGitRunner } from './git/runner';
 import { claudeConfigDir, PromptHistory } from './history/prompt-history';
 import { ClaudeUsageReader, claudeUsageDir } from './usage/claude-usage-reader';
 // C7 end
+// C11 start
+import { shell } from 'electron';
+import type { CommandResult } from '@shared/ipc/schema';
+import { saveTextFile } from './files/save-text';
+import { createClaudeUsageApp, execRunner } from './gateway/claude-usage-app';
+import { onEmitted } from './ipc/events';
+import { startEngineConfigure } from './settings/engine-configure';
+import { revealPath } from './settings/reveal';
+// C11 end
 
 // A fresh profile for the end-to-end smoke (and anyone else who wants one); must be set before the app is ready.
 if (process.env.MAWS_USER_DATA) app.setPath('userData', process.env.MAWS_USER_DATA);
@@ -165,6 +174,52 @@ app.whenReady().then(() => {
   );
   app.on('will-quit', () => usage.stop());
   // C7 end
+
+  // C11 start: the plumbing of settings v3 (C11 execution document, M1). The engine host's binary configuration follows
+  // settings.engine; ClaudeUsage's hand-off and status; the reveal guard; the export's Save as….
+  const stopEngineConfigure = startEngineConfigure({
+    settings: () => settings.state().settings,
+    onSettingsChanged: (listener) => onEmitted('settings.changed', (state) => listener(state.settings)),
+    hostState: () => hosts.snapshot('engine-host'),
+    onHostState: (listener) => hosts.onState('engine-host', listener),
+    dispatch: (config) => hosts.dispatch('engine-host', 'engine.configure', config) as Promise<CommandResult<'engine.configure'>>,
+  });
+  app.on('will-quit', stopEngineConfigure);
+  // Under the end-to-end harness nothing may activate the owner's ClaudeUsage: `open` answers as if it had.
+  const e2e = process.env.MAWS_E2E === '1';
+  const claudeUsage = createClaudeUsageApp({
+    run: (file, args, timeoutMs) => (e2e && file === '/usr/bin/open' ? Promise.resolve({ stdout: '' }) : execRunner(file, args, timeoutMs)),
+    relayRunning: async () => {
+      const health = await hosts.dispatch('engine-host', 'engine.relayHealth', { force: true });
+      return health.ok && (health.value as { ok: boolean }).ok;
+    },
+    dataDirPresent: async () => (await usage.snapshot([])).available,
+  });
+  registerMainHandler('settings.claudeUsage.status', () => claudeUsage.status());
+  registerMainHandler('settings.claudeUsage.open', (intent) => claudeUsage.open(intent));
+  // every session record's directories, archived included, from the read model and the index
+  const sessionDirectories = () => {
+    const directoriesOf = (r: SessionRecord) => [r.directory, ...r.additionalDirectories, ...(r.worktree ? [r.worktree.path] : [])];
+    const held = sessions.model.allRecords().flatMap(directoriesOf);
+    try {
+      return [...held, ...index.sessions.list({ includeArchived: true }).flatMap(directoriesOf)];
+    } catch {
+      return held; // the index is unavailable
+    }
+  };
+  registerMainHandler('settings.reveal', ({ path }) =>
+    revealPath(path, { configHome: () => claudeConfigDir(process.env, home), sessionDirectories, showItemInFolder: (p) => shell.showItemInFolder(p) }),
+  );
+  registerMainHandler('layout.saveTextFile', (input, { sender }) =>
+    saveTextFile(input, {
+      downloads: app.getPath('downloads'),
+      showSaveDialog: (options) => {
+        const win = BrowserWindow.fromWebContents(sender);
+        return win ? dialog.showSaveDialog(win, options) : dialog.showSaveDialog(options);
+      },
+    }),
+  );
+  // C11 end
 
   // The hosts belong to the app, not to a window or a page (§4.1): they start here, before any window exists, and
   // `start()` is idempotent, so opening a window again forks nothing and a reload never reaches them.

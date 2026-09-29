@@ -60,6 +60,7 @@ export {
   type ClaudeUsageStatus,
   type NotificationKinds,
 } from './schema/settings';
+export { EngineBinaryConfigSchema, type EngineBinaryConfig } from './schema/engine';
 // C11 end
 
 export const commands = {
