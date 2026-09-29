@@ -1,7 +1,7 @@
 // Main's read-only git service (C4 execution document, Interfaces "Git service" and M6; charter §4.5): status,
 // branches, diff and log for any directory inside a repository or linked worktree, and the ref-counted repository
-// watcher. Only these subcommands ever run: `rev-parse`, `status`, `stash list`, `remote get-url`, `for-each-ref`,
-// `diff`, `log`. Nothing stages, commits, stashes, checks out, fetches, or adds or removes a worktree (C10 and P1 own
+// watcher. Only these subcommands ever run: `rev-parse`, `status`, `stash list`, `remote` (the list), `remote get-url`,
+// `for-each-ref`, `diff`, `log`. Nothing stages, commits, stashes, checks out, fetches, or adds or removes a worktree (C10 and P1 own
 // mutation); worktrees under `<repo>/.claude/worktrees/` need no special case, `rev-parse` reports them as linked.
 // Paths in answers are relative to the repository root, and a `path` argument is read the same way.
 import { isAbsolute } from 'node:path';
@@ -108,17 +108,23 @@ export class GitService {
     this.watcher.dispose();
   }
 
-  // The upstream's remote URL as configured, without user-info; null without an upstream, for a local upstream, or when
-  // the remote has no URL. Never a fetch. A timeout still fails the status.
+  // The remote's URL as configured, without user-info: the upstream's remote, or with no upstream `origin` (else the sole
+  // remote) so a branch not yet pushed still names its repository. Null for a local upstream, when no remote qualifies,
+  // or when the remote has no URL. Never a fetch. A timeout still fails the status.
   private async remoteUrl(repoRoot: string, upstream: string | null): Promise<string | null> {
-    const remote = upstreamRemote(upstream);
-    if (remote === null) return null;
     try {
+      const remote = upstream === null ? await this.defaultRemote(repoRoot) : upstreamRemote(upstream);
+      if (remote === null) return null;
       return withoutUserInfo((await this.run(repoRoot, ['remote', 'get-url', remote])).trim()) || null;
     } catch (error) {
       if (error instanceof GitTimeoutError) throw error;
       return null;
     }
+  }
+
+  private async defaultRemote(repoRoot: string): Promise<string | null> {
+    const remotes = (await this.run(repoRoot, ['remote'])).split('\n').filter((line) => line !== '');
+    return remotes.includes('origin') ? 'origin' : remotes.length === 1 ? remotes[0] : null;
   }
 }
 
