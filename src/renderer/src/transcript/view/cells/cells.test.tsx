@@ -225,24 +225,27 @@ describe('the 64 KB DOM cap on every detail output branch', () => {
     expect(actions.openFullLog).toHaveBeenCalledWith(expect.objectContaining({ id: 'cell:t1' }));
   });
 
-  it('MCP blocks whose aggregate exceeds the cap render until the budget is spent, then one marker and Open full log', async () => {
-    const blocks = Array.from({ length: 12 }, (_, i) => ({ type: 'text', text: `BLOCK${i} ${'x'.repeat(10 * 1024)}` }));
+  it('MCP blocks whose aggregate exceeds the cap show their head and tail around one marker, with Open full log', async () => {
+    const blocks = Array.from({ length: 12 }, (_, i) => ({ type: 'text', text: `BLOCK${i}: ${'x'.repeat(10 * 1024)}` }));
     const { cell, actions } = await expandedCell((b) => {
       b.toolUse('t1', 'mcp__docs__search', { query: 'q' });
       b.result('t1', blocks);
       withLs(b);
     }, 'cell:t1');
     const text = cell.textContent ?? '';
-    expect(text).toContain('BLOCK0');
-    expect(text).not.toContain('BLOCK11');
+    // 32 KB of head (three blocks) and 16 KB of tail (one), the marker between them.
+    const shown = blocks.map((_, i) => `BLOCK${i}:`).filter((name) => text.includes(name));
+    expect(shown).toEqual(['BLOCK0:', 'BLOCK1:', 'BLOCK2:', 'BLOCK11:']);
+    expect(text.indexOf('BLOCK2:')).toBeLessThan(text.search(/\d+ KB omitted/));
+    expect(text.search(/\d+ KB omitted/)).toBeLessThan(text.indexOf('BLOCK11:'));
     expect(text.length).toBeLessThan(80 * 1024);
     expect(cell.querySelectorAll('[data-omitted]')).toHaveLength(1);
-    expect(text).toMatch(/\d+ KB omitted/);
+    expect(text).toContain('80 KB omitted');
     fireEvent.click(within(cell).getByRole('button', { name: 'Open full log' }));
     expect(actions.openFullLog).toHaveBeenCalledWith(expect.objectContaining({ id: 'cell:t1' }));
   });
 
-  it('an oversized structuredPatch renders hunks until the budget is spent, then N lines omitted and Open full log', async () => {
+  it('an oversized structuredPatch shows its head and tail lines around N lines omitted, with Open full log', async () => {
     const lines = Array.from({ length: 4000 }, (_, i) => `+const line${i} = ${'y'.repeat(30)};`);
     const hunk = { oldStart: 1, oldLines: 0, newStart: 1, newLines: lines.length, lines };
     const { cell, actions } = await expandedCell((b) => {
@@ -250,10 +253,17 @@ describe('the 64 KB DOM cap on every detail output branch', () => {
       b.result('t1', 'ok', { structured: { type: 'create', filePath: '/p/big.ts', structuredPatch: [hunk], originalFile: null } });
       withLs(b);
     }, 'cell:t1');
-    const rendered = cell.querySelectorAll('[data-diff]').length;
-    expect(rendered).toBeGreaterThan(0);
-    expect(rendered).toBeLessThan(lines.length);
-    expect(cell.querySelector('[data-omitted]')?.textContent).toContain(`${lines.length - rendered} lines omitted`);
+    const rendered = Array.from(cell.querySelectorAll('[data-diff]'));
+    expect(rendered.length).toBeLessThan(lines.length);
+    const numbers = rendered.map((line) => Number(line.querySelector('[data-line-number]')!.textContent));
+    const gap = numbers.findIndex((n, i) => i > 0 && n !== numbers[i - 1] + 1);
+    expect(numbers[0]).toBe(1); // the head from the first line
+    expect(numbers.at(-1)).toBe(lines.length); // the tail to the last, numbered where it is in the file
+    expect(gap).toBeGreaterThan(numbers.length / 2); // a head twice the tail
+    const marker = cell.querySelector('[data-omitted]')!;
+    expect(marker.textContent).toContain(`${lines.length - rendered.length} lines omitted`);
+    expect(rendered[gap - 1].compareDocumentPosition(marker) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(marker.compareDocumentPosition(rendered[gap]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     fireEvent.click(within(cell).getByRole('button', { name: 'Open full log' }));
     expect(actions.openFullLog).toHaveBeenCalledWith(expect.objectContaining({ id: 'cell:t1' }));
   });
