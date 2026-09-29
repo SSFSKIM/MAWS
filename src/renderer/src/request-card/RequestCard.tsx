@@ -10,12 +10,14 @@
 //
 // The card imports the docked frame from its own module, never `composer/index.ts`, so no editor code reaches it.
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type MouseEvent, type PointerEvent } from 'react';
+import { ATTENTION_HEADINGS, type AttentionTone } from '@shared/attention/headings';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { RequestAnswer } from '@shared/engine/answers';
 import type { SessionEvent } from '@shared/graph/events';
 import { useNow } from '../app/use-now';
 import { DockedCardFrame } from '../composer/docked/DockedCardFrame';
 import { ipc } from '../ipc/client';
+import { BUTTON_LIKE_INPUTS } from '../keymap/dispatcher';
 import { useKeyChord } from '../keymap/useKeyChord';
 import { needsYouAge } from '../sidebar/derive';
 import { useAttention } from '../stores/attention';
@@ -48,20 +50,9 @@ export interface RequestCardProps {
   onAnswered?: (outcome: 'delivered' | 'not_pending' | 'write_failed') => void;
 }
 
-type Tone = 'warning' | 'info' | 'danger';
-// The kind line (C5's copy, so the Needs-you row, the hover and the card read alike); docked, the frame's title.
-const HEADINGS: Record<AttentionItem['kind'], { char: string; tone: Tone; text: string }> = {
-  permission: { char: '◐', tone: 'warning', text: 'Approval needed' },
-  question: { char: '?', tone: 'warning', text: 'Question' },
-  plan: { char: '◇', tone: 'info', text: 'Plan review' },
-  dialog: { char: '◐', tone: 'warning', text: 'Dialog' },
-  elicitation: { char: '◐', tone: 'warning', text: 'Input requested' },
-  auto_mode_unavailable: { char: '!', tone: 'danger', text: 'Auto mode unavailable' },
-  error: { char: '!', tone: 'danger', text: 'Error' },
-  interrupted: { char: '!', tone: 'danger', text: 'Interrupted' },
-  held_peer_message: { char: '✉', tone: 'info', text: 'Held message' },
-};
-const TONE: Record<Tone, string> = { warning: 'text-warning', info: 'text-info', danger: 'text-danger' };
+// The kind line (C5's table, so the Needs-you row, the hover and the card read alike); docked, the frame's title.
+export const HEADINGS = ATTENTION_HEADINGS;
+const TONE: Record<AttentionTone, string> = { warning: 'text-warning', info: 'text-info', danger: 'text-danger' };
 const NOT_PENDING_MS = 2_000;
 
 type Phase = 'pending' | 'answering' | 'delivered' | 'not_pending' | 'closed';
@@ -112,9 +103,9 @@ function useDelivery(item: AttentionItem, onAnswered: RequestCardProps['onAnswer
   return { phase, what, failed, submit };
 }
 
-// Text entry, as C5's dispatcher defines it (`keymap/dispatcher.ts`, `isTextEntry` and `BUTTON_LIKE_INPUTS`, which the
-// module does not export): an input that takes a keypress as text, a textarea, a select, or inside a contenteditable.
-const BUTTON_LIKE_INPUTS = new Set(['button', 'submit', 'reset', 'checkbox', 'radio', 'range', 'color', 'file', 'image']);
+// Text entry, as C5's dispatcher defines it (`keymap/dispatcher.ts`, whose `BUTTON_LIKE_INPUTS` this reads): an input
+// that takes a keypress as text, a textarea, a select, or inside a contenteditable.
+export { BUTTON_LIKE_INPUTS };
 const isTextEntry = (target: EventTarget | null) =>
   target instanceof HTMLTextAreaElement ||
   target instanceof HTMLSelectElement ||

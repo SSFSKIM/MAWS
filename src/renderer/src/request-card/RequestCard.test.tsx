@@ -7,7 +7,7 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
-import { connectKeys } from '../keymap/dispatcher';
+import { BUTTON_LIKE_INPUTS, connectKeys } from '../keymap/dispatcher';
 import { bindingsOf } from '../keymap/useKeyChord';
 import { useAttention } from '../stores/attention';
 import { resetComposerStore, useComposerStore } from '../stores/composer';
@@ -15,7 +15,8 @@ import { useNotices } from '../stores/notices';
 import { resetShellStores } from '../test-support/shell-stores';
 import { ipcSource, useTranscriptStore } from '../transcript';
 import { builder, uuid } from '../transcript/model/test-events';
-import { RequestCard, type Placement } from './RequestCard';
+import { HEADINGS as PREVIEW_HEADINGS } from '../sidebar/RequestPreview';
+import { BUTTON_LIKE_INPUTS as CARD_INPUTS, HEADINGS, RequestCard, type Placement } from './RequestCard';
 import { fixtureRequest, itemFor, permission, syntheticRequest, type RequestEvent } from './test-requests';
 
 const APP = 'app-test' as AppSessionId;
@@ -90,6 +91,11 @@ const reapply = fixtureRequest('pass2', 'grant-reapply-start', 30);
 const question = fixtureRequest('pass1', 'question-roundtrip', 137);
 const elicitation = fixtureRequest('pass2', 'dialogs', 41);
 const plan: RequestEvent = { ...permission(), kind: 'plan.requested', plan: '# Plan\n\n1. Split the parser\n2. Test it', input: {} } as never;
+
+it('reads C5’s kind lines and button-like inputs, the same objects, not copies', () => {
+  expect(HEADINGS).toBe(PREVIEW_HEADINGS);
+  expect(CARD_INPUTS).toBe(BUTTON_LIKE_INPUTS);
+});
 
 describe('dialog variants answer the two declared kinds and leave an undeclared kind pending', () => {
   it('the refusal fallback offers Retry with the fallback model, Edit prompt and Cancel, each with its pinned result', async () => {
