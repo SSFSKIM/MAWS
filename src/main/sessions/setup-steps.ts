@@ -3,6 +3,7 @@
 // replay seam's next fixture, a quiet stop, the engine's own refusal read as `held`).
 import { randomUUID } from 'node:crypto';
 import type { AppSessionId, MessageUuid, SessionId } from '@shared/graph/ids';
+import type { SessionRecord } from '@shared/graph/session';
 import type { RelayHealth } from '@shared/engine/relay-health';
 import type { SetupEvent, SetupPhase } from '@shared/sessions/setup';
 import type { GitRun } from '../git/runner';
@@ -63,13 +64,19 @@ export class RelayFailure extends Error {
   }
 }
 
-// The engine's own refusal to resume a session a `--bg` job holds (authoritative over MAWS's holder read).
+// The engine's own refusal to resume a session a `--bg` job holds (authoritative over MAWS's holder read), or a holder
+// MAWS's own read found after the guards (`holding`: a resume's recheck once its trust bootstrap ran).
 export class HeldFailure extends Error {
   constructor(
     readonly jobId: string | null,
     text: string,
+    readonly holder: SessionRecord['holder'] | null = null,
   ) {
     super(text);
+  }
+
+  static holding(holder: SessionRecord['holder']): HeldFailure {
+    return new HeldFailure(holder.kind === 'background_job' ? holder.jobId : null, `held by ${holder.kind}`, holder);
   }
 }
 
@@ -110,7 +117,7 @@ export async function heldOutcome(s: Setup, failure: HeldFailure): Promise<Extra
     const binary = await hostCall(s.dispatch, 'engine.binaryInfo', undefined).catch(() => null);
     if (binary) attach = { jobId: failure.jobId, command: attachCommand(binary.path, failure.jobId) };
   }
-  return { kind: 'held', holder: { kind: 'background_job', pid: null, jobId: failure.jobId }, attach };
+  return { kind: 'held', holder: failure.holder ?? { kind: 'background_job', pid: null, jobId: failure.jobId }, attach };
 }
 
 // The newest user message the launched session reports, for a fork's rewind (C3 passes it as the human's last seen).

@@ -9,6 +9,7 @@ import type { FirstMessage } from '@shared/sessions/intent';
 import type { SetupEvent, SetupResources } from '@shared/sessions/setup';
 import type { StartOptions } from '@shared/ipc/schema/session';
 import { hostCall, pathExists, transcriptPathOf } from './context';
+import { holderAuthority } from './holders';
 import { LaunchWatch } from './launch-watch';
 import { resumeLaunchSpec } from './launch-mapping';
 import { runBootstrap } from './setup';
@@ -36,6 +37,11 @@ export async function runResume(
         trustKey: trust.trustKey,
         note: { put: (bootstrapId, at) => s.bootstraps.put({ bootstrapId, appSessionId, at }), clear: (bootstrapId) => s.bootstraps.remove(bootstrapId) },
       });
+      // the bootstrap took seconds: a terminal or a job that resumed the conversation meanwhile is found before MAWS
+      // becomes its second writer (the guards' read is that old)
+      const verdict = await holderAuthority({ dispatch: s.dispatch, sessions: s.sessions }, { engineSessionId: record.engineSessionId, appSessionId });
+      if (verdict.live === 'foreign') throw HeldFailure.holding(verdict.holder);
+      if (verdict.live === 'self') throw new SetupFailure('launching', 'the session is already running in MAWS');
     }
     setupEvent(s, appSessionId, 'launching', 'Starting');
     // disk-to-live: C4's follower fed the exited session's tab from its transcript; C3's stream takes over

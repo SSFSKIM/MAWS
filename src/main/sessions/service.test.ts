@@ -446,6 +446,26 @@ describe('session service', () => {
       expect(readdirSync(join(h.userData, 'sessions', 'bootstraps'))).toEqual([]);
     });
 
+    // the bootstrap takes seconds: a terminal that resumed the conversation meanwhile is found before MAWS launches
+    it('rechecks the holder after a resume’s trust bootstrap and fails held, launching nothing more, with the message handed back', async () => {
+      const record = recordAt(h.work);
+      h.host.script = (spec) => ({
+        onReady: () => {
+          if (spec.appSessionId !== record.appId) h.host.hold(SID, { kind: 'terminal', pid: 77 }, h.work); // during the bootstrap
+        },
+      });
+      await h.service.startSession(record.appId, { message: OK_MESSAGE, options: { trust: 'accepted' } });
+      expect(await h.settled(record.appId)).toMatchObject({ phase: 'failed', outcome: { kind: 'held', holder: { kind: 'terminal', pid: 77 }, attach: null } });
+      expect(h.host.launches.map((l) => l.appSessionId === record.appId)).toEqual([false]); // the bootstrap only
+      expect(h.host.calledWith('fs.unfollow')).toEqual([]);
+      expect(h.host.calledWith('session.send')).toEqual([]);
+      h.host.disk.registry.length = 0; // the terminal quit
+      h.trustDirectory(h.work);
+      await h.service.startSession(record.appId, { message: null, options: {} });
+      expect(await h.settled(record.appId, 2)).toMatchObject({ phase: 'ready', outcome: { firstTurn: 'none' } });
+      expect(h.host.calledWith('session.send')).toEqual([]);
+    });
+
     it('a failed unfollow fails the resume before anything launches', async () => {
       h.trustDirectory(h.work);
       const record = recordAt(h.work);
