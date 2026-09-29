@@ -1,10 +1,12 @@
 // The `#panel` harness page (C8a execution document, M1; Interfaces *Harness bootstrap*): the product's panel host in
 // C5's real `PanelRegion`, inside C5's grid, over the two fake sessions of the harness scenario, with C9's real
-// Terminal tool and stub tools standing in for the other siblings' tools. The page composes itself as `App.tsx` does,
-// in this order: the slot, the shell actions (the region's maximize and hide), `persistLayout`, `connectPanelHost`
-// (persistence first: the barrier writes inside the hydration notification), the summary's `connectPanelEvents`, then
-// hydration over the profile's real layout.json, all inside TanStack Query's provider. It never calls `connectShell`:
-// nothing answers `session.list` here, so it seeds the stores itself (M2's summary seams in `summaryProbes.ts`). Run it under `MAWS_SESSION_SOURCE=stub:test/fixtures/panel/harness-sessions.json`
+// Terminal tool, stub tools standing in for the other siblings' tools, and (M4) the harness-only `child` tool that
+// mounts C6's child transcript inside the region for R7, beside the width and maximize controls. The page composes
+// itself as `App.tsx` does, in this order: the slot, the shell actions (the region's maximize and hide),
+// `persistLayout`, `connectPanelHost` (persistence first: the barrier writes inside the hydration notification), the
+// summary's `connectPanelEvents`, then hydration over the profile's real layout.json, all inside TanStack Query's
+// provider. It never calls `connectShell`: nothing answers `session.list` here, so it seeds the stores itself (M2's
+// summary seams in `summaryProbes.ts`). Run it under `MAWS_SESSION_SOURCE=stub:test/fixtures/panel/harness-sessions.json`
 // (ruling O1), so main knows A and B. C9's page probes live in the C9 blocks (the stand-in fold, ruling O2).
 import { QueryClientProvider } from '@tanstack/react-query';
 import { useEffect } from 'react';
@@ -25,6 +27,7 @@ import { useSessions } from '../../stores/sessions';
 import { useSettings } from '../../stores/settings';
 import { useHarnessTheme } from '../terminal/useHarnessTheme';
 import type { FakeSessionId, PanelHarnessApi } from './api';
+import { childProbes, childTranscriptTool } from './childTranscriptTool';
 import { FAKE_IDS, FAKE_RECORDS, fakeId, seedFakeSessions } from './fakeSessions';
 import { stubProbe, stubTool } from './stubTool';
 import { summaryProbes } from './summaryProbes';
@@ -42,6 +45,7 @@ function registerHarnessTools(): void {
     stubTool('harness-stub', { title: 'Stub' }), // the harness-only probe tool
     stubTool('session-info', { title: 'Session info', multiInstance: false }),
     stubTool('log', { title: 'Log', menu: false, pinnable: false }), // the transient case
+    childTranscriptTool, // harness-only: C6's child transcript inside the region (R7, M4)
   ];
   for (const tool of tools) {
     if (disposers.has(tool.id) || panelHost.tools().some((t) => t.id === tool.id)) continue; // a real tool of that id wins
@@ -121,6 +125,7 @@ const api: PanelHarnessApi = {
       disposers.get(toolId)?.();
       disposers.delete(toolId);
     }),
+  setWidth: (px) => useLayout.getState().setPanel({ width: px, collapsed: false, maximized: false }),
   maximize: (on) => useLayout.getState().setPanel(on ? { maximized: true, collapsed: false } : { maximized: false }),
   collapse: (on) => useLayout.getState().setPanel(on ? { collapsed: true, maximized: false } : { collapsed: false }),
   setTheme: (theme) => void useSettings.getState().setTheme(theme),
@@ -134,6 +139,7 @@ const api: PanelHarnessApi = {
       });
     }),
   ...summaryProbes, // M2: setSession, setStatus, setDigest, loadTranscript, transcript
+  child: childProbes, // M4: R7
   // C9 start
   async ready() {
     const adopted = await (hydration ?? Promise.resolve([]));
@@ -212,6 +218,7 @@ function Controls() {
       </div>
       <TerminalControls /> {/* C9 */}
       <span className="flex-1" />
+      <WidthControls />
       <button type="button" className={buttonClass} onClick={() => runAction('panel.toggle')}>
         {collapsed ? 'Show panel' : 'Hide panel'}
       </button>
@@ -219,6 +226,24 @@ function Controls() {
         theme: {resolvedTheme ?? '…'}
       </button>
     </header>
+  );
+}
+
+// The panel's three widths and maximize (R7), through C5's store as the region's own controls write it.
+const WIDTHS = [280, 380, 640] as const;
+function WidthControls() {
+  const { width, maximized, collapsed } = useLayout((s) => s.regions.panel);
+  return (
+    <div role="group" aria-label="panel width" className="flex gap-1">
+      {WIDTHS.map((px) => (
+        <button key={px} type="button" aria-pressed={!maximized && !collapsed && width === px} className={buttonClass} onClick={() => api.setWidth(px)}>
+          {px}
+        </button>
+      ))}
+      <button type="button" aria-pressed={maximized} className={buttonClass} onClick={() => api.maximize(!maximized)}>
+        max
+      </button>
+    </div>
   );
 }
 
