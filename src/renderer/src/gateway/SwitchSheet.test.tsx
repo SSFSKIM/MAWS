@@ -13,7 +13,9 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { loadScenario } from '../../../../test/support/scenario';
 import { createWidgetBackend, type WidgetBackend } from '../../../../test/support/widget-backend';
+import { useSetup } from '../sessions/store';
 import { useSessions } from '../stores/sessions';
+import { intent } from '../test-support/setup-intents';
 import { directChoice, pickDirectModel } from './direct-model';
 import { GatewayDialogs, SwitchSheet } from './SwitchSheet';
 import type { SwitchConfirm } from './store';
@@ -114,5 +116,20 @@ describe('pickDirectModel', () => {
     const cancelled = pickDirectModel(READY);
     fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Cancel' }));
     expect(await cancelled).toBeNull();
+  });
+
+  // An unstarted session has neither a status nor a record: its current effort is its intent's, and a level the chosen
+  // model does not admit is lowered as it is for a record (C10's relay card, Run direct on a gateway model).
+  it("on an intent-only session, lowers the intent's effort the chosen model does not admit", async () => {
+    const UNSTARTED = intent().appSessionId as AppSessionId;
+    useSetup.setState({ intents: new Map([[UNSTARTED, intent({ model: 'claude/astra', effort: 'max' })]]) });
+    backend.script('engine.models', () => ({ models: [{ value: 'sonnet', displayName: 'Sonnet 5', supportsAutoMode: true, supportedEffortLevels: ['low', 'medium', 'high'] }], source: 'cached', at: null }));
+    wrap(<GatewayDialogs />);
+    const picked = pickDirectModel(UNSTARTED);
+    const dialog = await screen.findByRole('dialog', { name: 'Choose a Claude model' });
+    await waitFor(() => expect(within(dialog).getByRole('radio', { checked: true }).firstChild?.textContent).toBe('Sonnet 5'));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Use this model' }));
+    expect(await picked).toEqual({ model: 'sonnet', effort: 'high' });
+    useSetup.setState({ intents: new Map() });
   });
 });

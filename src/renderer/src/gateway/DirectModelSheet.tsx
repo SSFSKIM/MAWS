@@ -7,6 +7,7 @@ import { EffortSchema, type Effort } from '@shared/engine/launch-spec';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { ModelCatalogueEntry } from '@shared/sessions/models';
 import { useCommand } from '../ipc/query';
+import { useSetup } from '../sessions/store';
 import { useSessions } from '../stores/sessions';
 import { effortsOf, presentModels, type ModelRow } from '../widgets/model';
 import { DIRECT_MODEL } from './copy';
@@ -34,12 +35,13 @@ export function useClaudeModels(enabled = true): readonly ModelRow[] | null {
   return rows.filter((m) => claude.has(m.value));
 }
 
-// The effort the session runs at now (the status's, else the record's), for the chosen entry's admitted levels.
+// The effort the session runs at, or will start at, for the chosen entry's admitted levels: the status's, else the
+// record's, else (an unstarted session, which has neither) its setup intent's.
 export function useCurrentEffort(appSessionId: AppSessionId): Effort | null {
-  return useSessions((s) => {
-    const parsed = EffortSchema.safeParse(s.engine.get(appSessionId)?.effort ?? s.records.get(appSessionId)?.effort ?? null);
-    return parsed.success ? parsed.data : null;
-  });
+  const live = useSessions((s) => s.engine.get(appSessionId)?.effort ?? s.records.get(appSessionId)?.effort ?? null);
+  const intended = useSetup((s) => s.intents.get(appSessionId)?.effort ?? null);
+  const parsed = EffortSchema.safeParse(live ?? intended);
+  return parsed.success ? parsed.data : null;
 }
 
 // The chosen row: the human's pick, else (with `preselect`) `default` once the catalogue is read. The switch sheet asks
