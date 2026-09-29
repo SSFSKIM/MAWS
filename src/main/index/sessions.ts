@@ -8,7 +8,7 @@
 // a rename made in MAWS is an override kept apart (`title_override`), together with the engine's custom title at the
 // moment it was set, and a later summary whose custom title differs from that clears the override: the later explicit
 // act wins in either direction. Projection: override, else custom title (`user`), else AI title (`generated`), else first
-// prompt (`none`), else an empty title.
+// prompt (`none`) less the engine's slash-command wrappers (`promptTitle`), else an empty title.
 import { randomUUID } from 'node:crypto';
 import type { AppSessionId, MessageUuid, ProjectId, SessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
@@ -88,11 +88,23 @@ export interface BindingChange {
 
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+// A slash command's prompt is the engine's markup, not words: `<command-name>/clear</command-name>` with its
+// `<command-message>` and `<command-args>`, and a local command's `<local-command-stdout>` (and siblings). Each element
+// goes whole, an unclosed one (a prompt cut at the summary's cap) to the end; what is left, with its whitespace
+// collapsed, is the prompt's title, or null when nothing readable remains.
+const COMMAND_MARKUP = /<(command-name|command-message|command-args|local-command-stdout|local-command-stderr|local-command-caveat)>[\s\S]*?(?:<\/\1>|$)/g;
+
+export function promptTitle(prompt: string): string | null {
+  const text = prompt.replace(COMMAND_MARKUP, ' ').replace(/\s+/g, ' ').trim();
+  return text === '' ? null : text;
+}
+
 function titleOf(row: SessionRow): SessionRecord['title'] {
   if (row.title_override !== null) return JSON.parse(row.title_override) as SessionRecord['title'];
   if (row.custom_title) return { text: row.custom_title, source: 'user' };
   if (row.ai_title) return { text: row.ai_title, source: 'generated' };
-  if (row.first_prompt) return { text: row.first_prompt, source: 'none' };
+  const prompt = row.first_prompt ? promptTitle(row.first_prompt) : null;
+  if (prompt) return { text: prompt, source: 'none' };
   return { text: '', source: 'none' };
 }
 

@@ -7,6 +7,7 @@ import type { SessionRecord } from '@shared/graph/session';
 import { SessionRecordSchema } from '@shared/graph/session';
 import { sessionIdFor, summary, tempDir } from '../../../test/support/index-fixture';
 import { Index } from './index';
+import { promptTitle } from './sessions';
 
 const LAUNCH = {
   directory: '/nowhere/launch',
@@ -111,6 +112,21 @@ describe('session records in the index', () => {
     it('falls back from custom to AI title to first prompt to an empty title', () => {
       const { record } = index.sessions.upsertFromSummary(summary({ firstPrompt: null }));
       expect(titleOf(record.appId)).toEqual({ text: '', source: 'none' });
+    });
+
+    it('never offers a slash command’s markup as a title, only the words around it', () => {
+      // As the engine writes a `/clear` prompt (spikes/protocol-probe fixtures): nothing readable, so the empty title.
+      const clear = '<command-name>/clear</command-name>\n            <command-message>clear</command-message>\n            <command-args></command-args>';
+      const { record } = index.sessions.upsertFromSummary(summary({ customTitle: null, aiTitle: null, firstPrompt: clear }));
+      expect(titleOf(record.appId)).toEqual({ text: '', source: 'none' });
+      const stdout = '<local-command-stdout>Set model to opus</local-command-stdout>';
+      expect(promptTitle(stdout)).toBeNull();
+      expect(promptTitle(`<command-name>/review</command-name>\n<command-args>PR 12</command-args>\n  Look at the   sidebar drag first`)).toBe('Look at the sidebar drag first');
+      expect(promptTitle('<command-name>/init</command-name>\n<command-message>init is analyzing your codebase…')).toBeNull(); // cut at the cap
+      expect(promptTitle('Why does <div> wrap here?')).toBe('Why does <div> wrap here?');
+      // An AI title still wins over a readable prompt, and a readable prompt is kept as it stands.
+      const titled = index.sessions.upsertFromSummary(summary({ sessionId: sessionIdFor(2), customTitle: null, aiTitle: null, firstPrompt: 'Fix the drag' }));
+      expect(titleOf(titled.record.appId)).toEqual({ text: 'Fix the drag', source: 'none' });
     });
   });
 
