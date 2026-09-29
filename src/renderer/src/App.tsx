@@ -14,6 +14,7 @@ import { useSettings } from './stores/settings';
 import { connectTranscript } from './transcript/shell'; // C6
 // C8a start
 import { registerSlot } from './app/slots';
+import { connectPanelEvents } from './ipc/events';
 import { connectPanelHost, registerPanelTool } from './panel/host';
 import { PanelHost } from './panel/PanelHost';
 import { adoptTerminals, terminalTool } from './tools/terminal';
@@ -39,6 +40,7 @@ export function App() {
     registerSlot('panelHost', PanelHost);
     return connectPanelHost();
   }, []);
+  useEffect(() => connectPanelEvents(), []); // the summary's git.changed and fs.workflowChanged
   // Tool registration is the panel host's line (ruling O2). Never unregistered: a registration's disposer closes the
   // tool's tabs, which StrictMode's effect replay would do on every mount.
   useEffect(() => {
