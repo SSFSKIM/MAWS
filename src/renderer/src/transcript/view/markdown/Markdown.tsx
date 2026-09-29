@@ -32,7 +32,7 @@ export function Markdown({ markdown: text, live }: MarkdownProps) {
         parseIncompleteMarkdown={live}
         plugins={mermaidLoaded ? PLUGINS_WITH_DIAGRAMS : PLUGINS}
         dir="auto"
-        className="transcript-prose"
+        className={live ? 'transcript-prose transcript-prose-live' : 'transcript-prose'}
       >
         {markdown}
       </Streamdown>

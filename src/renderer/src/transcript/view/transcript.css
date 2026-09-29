@@ -97,6 +97,9 @@ button.transcript-chip:hover { background: var(--bg-hover); }
 .transcript-prose > [dir]:last-child > :is(p, h1, h2, h3, h4, h5, h6):last-child::after,
 .transcript-prose > [dir]:last-child > :is(ul, ol):last-child > li:last-child::after,
 .transcript-prose > [dir]:last-child > blockquote:last-child > p:last-child::after { content: var(--streamdown-caret); }
+/* Streamdown sets no caret while the last block is a code block or a table (`--streamdown-caret` unset); a live answer
+   still shows one, on a line of its own at the foot of that block. */
+.transcript-prose-live > [dir]:last-child > :is([data-streamdown="code-block"], [data-streamdown="table-wrapper"]):last-child::after { content: "▋"; line-height: 1; }
 /* A mermaid fence's diagram draws hidden behind its code, and replaces it once drawn (MermaidFence.tsx) */
 .transcript-mermaid { position: relative; }
 .transcript-mermaid:not([data-drawn]) { overflow: hidden; }

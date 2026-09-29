@@ -406,6 +406,20 @@ test('the streaming caret follows the last word of a one-paragraph answer', asyn
     return { wrapper: getComputedStyle(block, '::after').content, tag: paragraph.tagName, paragraph: getComputedStyle(paragraph, '::after').content };
   });
   expect(caret).toEqual({ wrapper: 'none', tag: 'P', paragraph: '" ▋"' });
+  // A live answer whose last block is a code block or a table, where Streamdown sets no caret, shows ours at its foot.
+  const blockCaret = await prose.evaluate((element) =>
+    ['code-block', 'table-wrapper'].map((kind) => {
+      const wrapper = element.appendChild(document.createElement('div'));
+      wrapper.dir = 'ltr';
+      wrapper.style.display = 'contents';
+      const block = wrapper.appendChild(document.createElement('div'));
+      block.dataset.streamdown = kind;
+      const content = getComputedStyle(block, '::after').content;
+      wrapper.remove();
+      return content;
+    }),
+  );
+  expect(blockCaret).toEqual(['"▋"', '"▋"']);
   // Complete, the caret is gone.
   for (let i = 0; i < 4; i += 1) await page.evaluate(() => (window as unknown as HarnessWindow).__maws_harness.step());
   await expect(prose).not.toHaveAttribute('style', /--streamdown-caret/);
