@@ -63,7 +63,7 @@ async function archiveProjectSessions(projectId: ProjectId): Promise<void> {
   if (!project || ids.length === 0) return;
   const yes = await confirm({
     title: `Archive ${ids.length} ${ids.length === 1 ? 'session' : 'sessions'} in ${project.name}?`,
-    body: 'Running sessions stop; transcripts stay under ~/.claude and every session can be unarchived from Archived sessions.',
+    body: 'Running sessions stop; transcripts stay where Claude Code keeps them, and every session can be unarchived from Archived sessions.',
     confirmLabel: 'Archive',
     destructive: false,
   });

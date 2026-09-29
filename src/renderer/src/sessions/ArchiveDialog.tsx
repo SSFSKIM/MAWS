@@ -47,7 +47,7 @@ export function ArchiveDialog({ appSessionId }: { appSessionId: AppSessionId }) 
     <Sheet title={`Archive “${record.title.text}”?`}>
       <SheetForm focusSubmit canSubmit={!busy} onSubmit={() => void submit()} submitLabel="Archive" submitClass={PRIMARY}>
         <p className="m-0 text-fg-muted">
-          Ends its engine process and hides it{project ? ` from ${project}` : ''}. The transcript stays under ~/.claude; resume it from Archived sessions or with claude
+          Ends its engine process and hides it{project ? ` from ${project}` : ''}. The transcript stays where Claude Code keeps it; resume it from Archived sessions or with claude
           --resume in the terminal. The worktree is not touched.
         </p>
         <BackgroundWorkDisclosure appSessionId={appSessionId} />

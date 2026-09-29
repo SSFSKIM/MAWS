@@ -89,6 +89,14 @@ describe('the session and project entries', () => {
     expect(useDialogs.getState().open).toEqual({ kind: 'archived', projectId: P1 });
   });
 
+  it('Archive sessions asks first, and names no config home it cannot know (CLAUDE_CONFIG_DIR may move it)', async () => {
+    useSessions.setState({ projects: new Map([[P1, project('p1', 0, { name: 'maws' })]]), records: new Map([[A, record(A, { projectId: P1 })]]) });
+    act(() => runProjectAction('archiveSessions', P1));
+    await waitFor(() => expect(useDialogs.getState().open).toMatchObject({ kind: 'confirm', title: 'Archive 1 session in maws?' }));
+    const { body } = useDialogs.getState().open as { body: string };
+    expect(body).toBe('Running sessions stop; transcripts stay where Claude Code keeps them, and every session can be unarchived from Archived sessions.');
+  });
+
   it('Add project picks a directory with the native chooser and adds it; a cancelled chooser adds nothing', async () => {
     let picked = [{ path: '/work/repo', name: 'repo', bytes: 0, mediaType: 'inode/directory', data: null }];
     fake = fakeClient({ 'layout.pickFiles': () => ({ files: picked }), 'session.projects.add': ({ directory }: { directory: string }) => project('p9', 3, { directory }) });

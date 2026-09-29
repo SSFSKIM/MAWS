@@ -321,6 +321,8 @@ describe('dialogs', () => {
     const dialog = await screen.findByRole('dialog', { name: 'Archive “Working here”?' });
     expect(within(dialog).getByText('1 background task is still running and will be stopped:')).toBeTruthy();
     expect(within(dialog).getByText('bun test --watch')).toBeTruthy();
+    // the config home is the engine's (CLAUDE_CONFIG_DIR may move it), so the copy names none
+    expect(dialog.textContent).toContain('The transcript stays where Claude Code keeps it; resume it from Archived sessions or with claude --resume in the terminal.');
     await userEvent.keyboard('{Enter}');
     await waitFor(() => expect(fake.invoked('session.archive')).toEqual([{ appSessionId: LIVE }]));
     expect(await screen.findByRole('dialog', { name: 'Clean up worktree accept-one' })).toBeTruthy();
