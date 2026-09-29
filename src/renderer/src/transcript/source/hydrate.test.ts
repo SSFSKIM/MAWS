@@ -84,4 +84,24 @@ describe('hydration', () => {
     expect(applied).toEqual(all.map((e) => e.id));
     handle.detach();
   });
+
+  it('an id repeated inside one batch reaches the sink once', async () => {
+    const b = builder();
+    b.turn('u1');
+    b.text('m1', 0, 'One');
+    b.end(['u1']);
+    const all = b.events;
+    const fake = fakeSource([all[0], all[0]]);
+    const applied: string[] = [];
+    const handle = attachSource(fake.source, {
+      apply: (events) => applied.push(...events.map((e) => e.id)),
+      has: (id) => applied.includes(id as string),
+    });
+    fake.push([all[1], all[1]]); // buffered
+    fake.resolve();
+    await handle.hydrated;
+    fake.push([all[2], all[3], all[2]]); // live
+    expect(applied).toEqual(all.map((e) => e.id));
+    handle.detach();
+  });
 });

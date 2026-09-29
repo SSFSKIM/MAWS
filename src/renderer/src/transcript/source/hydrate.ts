@@ -21,7 +21,8 @@ export function attachSource(source: TranscriptSource, sink: HydrationSink): Att
   let phase: 'hydrating' | 'draining' | 'live' | 'detached' = 'hydrating';
   const buffer: SessionEvent[][] = [];
   const applyNew = (events: SessionEvent[]) => {
-    const fresh = events.filter((event) => !sink.has(event.id));
+    const inBatch = new Set<EventId>(); // an id repeated inside one batch is not yet in the sink when filtered
+    const fresh = events.filter((event) => !sink.has(event.id) && !inBatch.has(event.id) && inBatch.add(event.id));
     if (fresh.length > 0) sink.apply(fresh);
   };
   const unsubscribe = source.subscribe((events) => {
