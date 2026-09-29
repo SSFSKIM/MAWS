@@ -19,9 +19,10 @@
 // while the rewind is uncertain or unresolved.
 //
 // Edit mode also survives a reload: the edit rides in the draft document (`doc.attrs.editing`) and is restored at
-// `idle`. A restored edit whose message the hydrated transcript no longer holds, or whose rewind the engine answers
-// `target_not_found`, was rewound before the reload: edit mode ends and the text stays as the draft. Send after a reload
-// always starts again at `confirming`, a fresh human decision, so no rewind repeats on its own.
+// `idle`. A restored edit whose message the hydrated transcript no longer holds was rewound before the reload: edit mode
+// ends and the text stays as the draft. Send after a reload always starts again at `confirming`, a fresh human
+// decision, so no rewind repeats on its own. Any rewind the engine answers `target_not_found` (reload or not) finds its
+// target gone, so edit mode ends the same way.
 import type { ContentBlock } from '@shared/graph/events';
 import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
@@ -239,8 +240,8 @@ async function issueRewind(client: MawsBridge, appSessionId: AppSessionId): Prom
     rewound(appSessionId, true);
     return 'rewound';
   }
-  if (result.ok && result.value.reason === 'target_not_found' && isRestored(appSessionId)) {
-    leaveRewound(appSessionId); // the target left the conversation: the rewind made before the reload applied
+  if (result.ok && result.value.reason === 'target_not_found') {
+    leaveRewound(appSessionId); // the target left the conversation (an earlier rewind applied): confirming again could only loop
     return 'refused';
   }
   if (result.ok) {

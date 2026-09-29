@@ -147,7 +147,7 @@ describe('resubmit state never repeats a rewind and reconciles an uncertain one'
     });
   }
 
-  it('with no boundary for the window the rewind is unresolved; Rewind again issues exactly one more, whose refusal returns to idle with the reason', async () => {
+  it('with no boundary for the window the rewind is unresolved; Rewind again issues exactly one more, whose target_not_found means the first applied: edit mode ends, text kept', async () => {
     vi.useFakeTimers();
     const { outcome } = confirmed();
     rewinds[0].answer(failed('timeout'));
@@ -163,8 +163,8 @@ describe('resubmit state never repeats a rewind and reconciles an uncertain one'
     rewinds[1].answer(refused('target_not_found'));
     expect(await again).toBe('refused');
     expect(record().state).toBe('idle');
-    expect(editingOf(useComposerStore.getState(), A)).not.toBeNull();
-    expect(toasts()).toEqual([expect.stringContaining('target_not_found')]);
+    expect(editingOf(useComposerStore.getState(), A)).toBeNull(); // confirming again could only loop
+    expect(toasts()).toEqual(['The conversation was rewound; your edited text is in the editor']);
   });
 
   it('a boundary while unresolved confirms the rewind; Keep editing returns to idle', async () => {
@@ -231,7 +231,7 @@ describe('resubmit state never repeats a rewind and reconciles an uncertain one'
     await settle();
   });
 
-  it('an edit restored after a reload: target_not_found means the earlier rewind applied, so edit mode ends and says so; a fresh edit keeps it', async () => {
+  it('target_not_found always means the target left the conversation: edit mode ends and says so, restored edit or fresh', async () => {
     restoreEditMode(A, { messageUuid: u('u-1'), seenCursor: u('u-2') });
     expect(record().state).toBe('idle');
     askToRewind(A);
@@ -242,11 +242,11 @@ describe('resubmit state never repeats a rewind and reconciles an uncertain one'
     expect(toasts()).toEqual(['The conversation was rewound; your edited text is in the editor']);
 
     useNotices.setState({ notices: [] });
-    const fresh = confirmed().outcome; // a new edit is not a restored one
+    const fresh = confirmed().outcome; // a new edit, not a restored one
     rewinds[1].answer(refused('target_not_found'));
     await fresh;
-    expect(editingOf(useComposerStore.getState(), A)).not.toBeNull();
-    expect(toasts()).toEqual([expect.stringContaining('target_not_found')]);
+    expect(editingOf(useComposerStore.getState(), A)).toBeNull();
+    expect(toasts()).toEqual(['The conversation was rewound; your edited text is in the editor']);
   });
 
   it('a restored edit whose message the hydrated transcript no longer holds ends at once; one it holds stays', () => {
