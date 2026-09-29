@@ -38,6 +38,7 @@ export const SWITCH = {
   restart: { direct: 'Restart direct', gateway: 'Restart routed' } satisfies Record<Route, string>,
   cancel: 'Cancel',
   newWork: 'New background work started since you confirmed · check the list again',
+  checking: 'Checking the session…', // confirming, before the sheet: the fresh status read
   phase: {
     confirming: 'Waiting for your answer',
     interrupting: 'Stopping the running turn…',

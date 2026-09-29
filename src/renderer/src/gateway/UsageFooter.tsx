@@ -50,7 +50,7 @@ function Footer({ appSessionId, record, status }: { appSessionId: AppSessionId; 
       ))}
       {busy && (
         <p role="status" className="m-0 text-ui-sm text-fg-muted">
-          {SWITCH.phase[switching.phase]}
+          {switching.phase === 'confirming' && switching.confirm === null ? SWITCH.checking : SWITCH.phase[switching.phase]}
         </p>
       )}
       {switching?.phase === 'failed' && (

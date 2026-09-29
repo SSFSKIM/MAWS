@@ -88,6 +88,15 @@ describe('routingFacts names the account and the switch — the footer', () => {
     expect(within(footer).queryByRole('button', { name: 'Open ClaudeUsage ↗' })).toBeNull();
   });
 
+  it('while the switch reads the status before its sheet, the footer says it is checking, not waiting for an answer', () => {
+    useGateway.setState({ switching: new Map([[READY, { target: 'direct', phase: 'confirming', confirm: null, error: null }]]) });
+    const footer = popover();
+    expect(within(footer).getByRole('status').textContent).toBe('Checking the session…');
+    cleanup();
+    useGateway.setState({ switching: new Map([[READY, { target: 'direct', phase: 'confirming', confirm: { target: 'direct', backgroundTasks: [], requiresModel: false, model: null, effort: null }, error: null }]]) });
+    expect(within(popover()).getByRole('status').textContent).toBe('Waiting for your answer');
+  });
+
   it('an exited session whose route was never recorded names the default and offers both', () => {
     useSessions.setState({ engine: new Map(), records: new Map([[READY, { ...record, gateway: { ...record.gateway, routed: null } }]]) });
     const footer = popover(null);
