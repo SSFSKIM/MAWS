@@ -123,6 +123,28 @@ describe("request renderer registers through C6's seam", () => {
     expect(screen.queryByRole('heading', { name: 'Edit' })).toBeNull();
   });
 
+  it('a docked notice for an unreadable request leaves the transcript its card, whose Retry reads it again', async () => {
+    const item = itemFor(bash, APP);
+    useAttention.setState({ requests: new Map([[item.id, null]]), unreadable: new Map([[item.id, 'no host']]) });
+    const slotRow = { id: 'slot:r1', turnId: null, at: bash.at, kind: 'request_slot', requestId: 'r1', toolUseId: 'b1', requestKind: 'permission', toolName: 'Bash', requestedAt: bash.at } as never;
+    const { renderSessionRequest } = await import('./inline');
+    render(
+      <>
+        <div data-testid="docked">
+          <RequestCard item={item} request={null} placement="docked" paneIndex={null} />
+        </div>
+        <div data-testid="inline">{renderSessionRequest(slotRow)}</div>
+      </>,
+    );
+    const inline = screen.getByTestId('inline');
+    expect(inline.textContent).not.toContain('answer below'); // no pointer to a notice with nothing to answer
+    expect(inline.querySelector('[role="alert"]')?.textContent).toBe('The request could not be readRetry');
+    act(() => inline.querySelector<HTMLButtonElement>('[role="alert"] button')!.click());
+    await waitFor(() => expect(useAttention.getState().requests.get(item.id)).toMatchObject({ requestId: 'r1' }));
+    expect(useAttention.getState().unreadable.has(item.id)).toBe(false);
+    await waitFor(() => expect(inline.textContent).toContain('answer below')); // read now: the docked card shows it
+  });
+
   it('renderInlineRequest always renders the full card, docked or not', async () => {
     const render1 = renderInlineRequest(APP);
     const slotRow = { id: 'slot:r1', turnId: null, at: bash.at, kind: 'request_slot', requestId: 'r1', toolUseId: 'b1', requestKind: 'permission', toolName: 'Bash', requestedAt: bash.at } as never;

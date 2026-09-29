@@ -68,21 +68,27 @@ function useQueueActions(appSessionId: AppSessionId, client: MawsBridge) {
 
 // The submitting entries that have lasted 300 ms. Every Send passes through `submitting` and C3 acknowledges within
 // milliseconds, so a fresh one is not shown (nor does it make the list appear); a timer re-renders when one has lasted.
+// A submission is its entry and its `submittedAt` (each submission stamps a new one), so an entry reverted to queued and
+// submitted again waits its 300 ms again; the set keeps only the submissions still under way.
+const submission = (e: QueueEntry) => `${e.queueId}@${e.submittedAt ?? ''}`;
 function useLastingSubmissions(entries: readonly QueueEntry[]): ReadonlySet<string> {
   const [lasting, setLasting] = useState<ReadonlySet<string>>(() => new Set());
-  const fresh = entries.filter((e) => e.state === 'submitting' && !lasting.has(e.queueId));
-  const key = fresh.map((e) => `${e.queueId}@${e.submittedAt ?? ''}`).join(' ');
+  const submitting = entries.filter((e) => e.state === 'submitting');
+  const fresh = submitting.filter((e) => !lasting.has(submission(e)));
+  const key = fresh.map(submission).join(' ');
+  const current = submitting.map(submission).join(' ');
   useEffect(() => {
     if (fresh.length === 0) return;
+    const under = new Set(current.split(' '));
     const timers = fresh.map((e) => {
       const since = e.submittedAt ? Date.parse(e.submittedAt) : Date.now();
-      return setTimeout(() => setLasting((s) => new Set(s).add(e.queueId)), Math.max(0, SUBMITTING_VISIBLE_MS - (Date.now() - since)));
+      return setTimeout(() => setLasting((s) => new Set([...s].filter((t) => under.has(t))).add(submission(e))), Math.max(0, SUBMITTING_VISIBLE_MS - (Date.now() - since)));
     });
     return () => timers.forEach(clearTimeout);
-    // `key` names exactly the fresh entries and their submission times
+    // `key` names exactly the fresh submissions; `current` is read with them
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
-  return lasting;
+  return new Set(submitting.filter((e) => lasting.has(submission(e))).map((e) => e.queueId));
 }
 
 function SubmittingRow({ entry }: { entry: QueueEntry }) {

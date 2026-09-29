@@ -8,7 +8,7 @@ import { connectKeys } from '../keymap/dispatcher';
 import { bindChord } from '../keymap/useKeyChord';
 import { FakeRenderer } from './renderer.fake';
 import type { TerminalTheme } from './renderer';
-import { TerminalRegistry } from './registry';
+import { TerminalRegistry, type Adopting } from './registry';
 import { alignReplay, explicitModes, INITIAL_STREAM } from './replay';
 
 const A = 'session-a' as AppSessionId;
@@ -388,6 +388,29 @@ describe('terminal registry reattaches without a gap', () => {
     await settle();
     expect(registry.get(id)!.info).toMatchObject({ status: 'exited', exit: { exitCode: 3, signal: null } });
     expect((registry.get(id)!.renderer as FakeRenderer).writes).toEqual(['bye']);
+  });
+
+  it('tells onListed each claimed handle once pty.list answers, before any attach does; release lets one go without a kill', async () => {
+    const registry = makeRegistry();
+    const kept = ptyInfo({ ptyId: 'pty-kept' as PtyId, label: 'terminal:kept' });
+    const slow = ptyInfo({ ptyId: 'pty-slow' as PtyId, label: 'terminal:slow' });
+    ipc.handlers['pty.list'] = () => ({ ptys: [kept, slow, ptyInfo({ ptyId: 'pty-other' as PtyId, appSessionId: 'diagnostics' as AppSessionId, label: 'echo' })] });
+    const held = new Map([kept, slow].map((info) => [info.ptyId, deferred<PtyAttach>()]));
+    ipc.handlers['pty.attach'] = (input) => held.get((input as { ptyId: PtyId }).ptyId)!.promise;
+    const heard: Adopting[][] = [];
+    const adopted = registry.adopt((info) => info.appSessionId === A, (adopting) => heard.push(adopting));
+    await settle();
+    expect(heard.map((adopting) => adopting.map(({ label }) => label))).toEqual([['terminal:kept', 'terminal:slow']]);
+    const [first, second] = heard[0];
+    expect(registry.get(first.id)?.info.label).toBe('terminal:kept'); // the handle exists before its attach answers
+    registry.release(second.id);
+    expect(registry.get(second.id)).toBeUndefined();
+    expect(ipc.inputs('pty.kill')).toEqual([]);
+    held.get(kept.ptyId)!.resolve({ info: kept, checkpoint: null, replay: new Uint8Array(0), replayFrom: 0, nextOffset: 0 });
+    held.get(slow.ptyId)!.resolve({ info: slow, checkpoint: null, replay: new Uint8Array(0), replayFrom: 0, nextOffset: 0 });
+    await expect(first.attached).resolves.toBe(first.id);
+    await expect(second.attached).resolves.toBeNull(); // released before its attach answered: nothing restored
+    await expect(adopted).resolves.toEqual([first.id]);
   });
 
   it('adopts only what the page accepts, and a dead pty as exited with its screen', async () => {
