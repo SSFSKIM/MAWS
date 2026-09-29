@@ -1,0 +1,6 @@
+{
+ "_from": "SPEC-derived; no fixture recorded get_session_cost. SPEC 45:4190 and :7740-7747 declare one field, `text`, the pre-rendered /usage block (src/shared/wire/control.ts GetSessionCostResponseSchema).",
+ "response": {
+  "text": "Total cost:            $0.1483\nTotal duration (API):  18.7s\nTotal duration (wall): 18.9s\nTotal code changes:    0 lines added, 0 lines removed"
+ }
+}

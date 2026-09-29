@@ -1,0 +1,4 @@
+{
+ "_from": "SPEC-derived; no fixture recorded mcp_toggle. SPEC 45 §45.17:4211 answers no payload, so the operation completes with value null. The engine records the toggle for the project in ~/.claude.json before it connects or cleans up (cli.pretty.js 2.1.283:583734, 583780; SPEC 31:6556).",
+ "response": null
+}

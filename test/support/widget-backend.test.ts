@@ -1,9 +1,10 @@
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { EngineSessionStatusSchema } from '../../src/shared/engine/status';
 import type { AppSessionId } from '../../src/shared/graph/ids';
 import { loadScenario } from './scenario';
-import { createWidgetBackend, fixtureLine, RESPONSES, WidgetBackendError, WIDGET_BACKEND_COMMANDS } from './widget-backend';
+import { createWidgetBackend, fixtureLine, RESPONSES, syntheticFixture, WidgetBackendError, WIDGET_BACKEND_COMMANDS } from './widget-backend';
 
 const ROOT = join(__dirname, '../..');
 const scenario = () => loadScenario(join(ROOT, 'test/fixtures/shell/nine-sessions.json'), Date.parse('2026-09-29T12:00:00Z'));
@@ -89,12 +90,92 @@ describe('the widget backend', () => {
     const off = bridge.on('session.operation', (event) => heard.push(event));
     expect(await bridge.invoke('session.getSandboxDialog', { appSessionId: READY })).toMatchObject({ ok: true, value: { mode: 'disabled', supported: true } });
     expect(await bridge.invoke('session.getStatus', { appSessionId: 'nobody' })).toEqual({ ok: false, error: { code: 'internal', message: 'unknown app session: nobody' } });
-    expect(await bridge.invoke('session.send', { appSessionId: READY, content: 'x' })).toMatchObject({ ok: false, error: { code: 'host_unavailable' } });
+    expect(await bridge.invoke('session.bash', { appSessionId: READY, command: 'ls' })).toMatchObject({ ok: false, error: { code: 'host_unavailable' } });
     const event = { appSessionId: READY, opId: 'op-1', command: 'session.reloadPlugins' as const, late: false, outcome: { ok: true as const, value: {} } };
     backend.emitOperation(event);
     off();
     backend.emitOperation(event);
     expect(heard).toEqual([event]);
     expect(WIDGET_BACKEND_COMMANDS).toContain('session.mcpStatus');
+  });
+
+  // M3: the controls and the operations
+  it("moves the status as C3's host does after an accepted control, and answers C3's result values", async () => {
+    const { backend, emitted } = backendOf();
+    expect(await backend.answer('session.setModel', { appSessionId: READY, model: 'haiku' })).toEqual({ ok: true, error: null, code: null });
+    expect(backend.status(READY).model).toEqual({ requested: 'haiku', resolved: 'claude-sonnet-5[1m]' });
+    // haiku carries no supportsAutoMode: the engine's refusal of seq 156, the effective mode kept
+    expect(await backend.answer('session.setPermissionMode', { appSessionId: READY, mode: 'auto' })).toEqual({
+      effective: 'auto',
+      refusal: 'auto_mode_model',
+      error: 'Cannot set permission mode to auto: auto mode unavailable for this model',
+    });
+    expect(await backend.answer('session.setPermissionMode', { appSessionId: READY, mode: 'default' })).toEqual({ effective: 'default', refusal: null, error: null });
+    expect(await backend.answer('session.setPermissionMode', { appSessionId: READY, mode: 'auto' })).toMatchObject({ effective: 'default', refusal: 'auto_mode_model' });
+    expect(backend.status(READY).permissionMode).toEqual({ requested: 'auto', effective: 'default', refusal: 'auto_mode_model' });
+    await backend.answer('session.setModel', { appSessionId: READY, model: 'claude/astra' });
+    expect(await backend.answer('session.setPermissionMode', { appSessionId: READY, mode: 'auto' })).toEqual({ effective: 'auto', refusal: null, error: null }); // seq 165
+    expect(await backend.answer('session.setEffort', { appSessionId: READY, effort: 'high' })).toBeUndefined();
+    expect(backend.status(READY).effort).toBe('high');
+    expect(await backend.answer('session.applyFlagSettings', { appSessionId: READY, settings: { fastMode: true } })).toBeUndefined();
+    expect(backend.status(READY).fastMode).toEqual({ state: 'off', disabledReason: 'sdk_opt_in_required' }); // the next init frame reports it
+    expect(backend.calls.map((c) => c.subtype)).toEqual(['set_model', 'set_permission_mode', 'set_permission_mode', 'set_permission_mode', 'set_model', 'set_permission_mode', 'apply_flag_settings', 'apply_flag_settings']);
+    expect(emitted.filter((e) => e.name === 'session.status')).toHaveLength(7);
+  });
+
+  it('answers an operation with its receipt and completes it on session.operation, at once or when settled', async () => {
+    const { backend, emitted } = backendOf();
+    const operations = () => emitted.filter((e) => e.name === 'session.operation').map((e) => e.payload as { opId: string; outcome: unknown });
+    const { opId } = (await backend.answer('session.reloadPlugins', { appSessionId: READY })) as { opId: string };
+    await vi.waitFor(() => expect(operations()).toHaveLength(1));
+    expect(operations()[0]).toMatchObject({ opId, outcome: { ok: true, value: { error_count: 0 } } });
+    const value = (operations()[0].outcome as { value: { commands: unknown[]; agents: unknown[]; plugins: unknown[] } }).value;
+    expect([value.commands.length, value.agents.length, value.plugins.length]).toEqual([52, 5, 11]);
+
+    backend.holdOperations(true);
+    backend.scriptOutcome('session.mcpToggle', () => ({ ok: false, error: { code: 'engine_error', message: 'Server not found: x', engineCode: null } }));
+    await backend.answer('session.mcpToggle', { appSessionId: READY, serverName: 'x', enabled: false });
+    await new Promise((r) => setTimeout(r, 5));
+    expect(operations()).toHaveLength(1);
+    expect(backend.settleOperations()).toBe(1);
+    expect(operations()[1].outcome).toEqual({ ok: false, error: { code: 'engine_error', message: 'Server not found: x', engineCode: null } });
+  });
+
+  it('answers mcp_status with the toggles the engine accepted', async () => {
+    const { backend } = backendOf();
+    backend.holdOperations(true);
+    await backend.answer('session.mcpToggle', { appSessionId: READY, serverName: 'openaiDeveloperDocs', enabled: false });
+    const before = (await backend.answer('session.mcpStatus', { appSessionId: READY })) as { mcpServers: { name: string; status: string }[] };
+    expect(before.mcpServers.find((s) => s.name === 'openaiDeveloperDocs')?.status).toBe('connected'); // not yet completed
+    backend.settleOperations();
+    const after = (await backend.answer('session.mcpStatus', { appSessionId: READY })) as { mcpServers: { name: string; status: string }[] };
+    expect(after.mcpServers.map((s) => s.status)).toEqual(['connected', 'connected', 'disabled']);
+  });
+
+  it('answers the compact widget’s prompt and the app queue', async () => {
+    const { backend } = backendOf();
+    expect(await backend.answer('session.send', { appSessionId: READY, content: '/compact' })).toMatchObject({ disposition: 'sent' });
+    expect(await backend.answer('session.queue.list', { appSessionId: READY })).toEqual({ entries: [], paused: false, pauseReason: null });
+    expect(backend.calls.at(-2)).toEqual({ command: 'session.send', subtype: null, input: { appSessionId: READY, content: '/compact' } });
+  });
+
+  it('keeps the synthetic answers readable, each citing where its shape comes from', () => {
+    for (const name of ['reload-plugins.json', 'mcp-reconnect.json', 'mcp-toggle.json', 'mcp-toggle-connect-failed.json', 'get-session-cost.json']) {
+      expect(syntheticFixture(ROOT, name)._from, name).toMatch(/SPEC/);
+    }
+    const failed = syntheticFixture(ROOT, 'mcp-toggle-connect-failed.json') as { operation: unknown; mcp_status: { mcpServers: { name: string; status: string; error?: string }[] } };
+    expect(failed.operation).toEqual({ ok: false, error: { code: 'engine_error', message: 'Connection failed', engineCode: null } });
+    expect(failed.mcp_status.mcpServers.find((s) => s.name === 'openaiDeveloperDocs')).toMatchObject({ status: 'failed', error: 'Connection failed' });
+  });
+});
+
+describe('the auto-routed-controls replay fixture', () => {
+  it('is pass2/auto-routed verbatim under a C11 provenance row, without the unissuable fork_conversation pair (seq 146-147)', () => {
+    const lines = (path: string) => readFileSync(join(ROOT, path), 'utf8').split('\n').filter((l) => l.length > 0);
+    const source = lines('spikes/protocol-probe/fixtures/pass2/auto-routed.jsonl');
+    const derived = lines('test/fixtures/engine/auto-routed-controls.jsonl');
+    const provenance = JSON.parse(derived[0]) as { seq: number; direction: string; frame: { event: string; source: string; omittedSeqs: number[] } };
+    expect(provenance).toMatchObject({ seq: 0, direction: 'meta', frame: { event: 'provenance', source: 'spikes/protocol-probe/fixtures/pass2/auto-routed.jsonl', omittedSeqs: [146, 147] } });
+    expect(derived.slice(1)).toEqual(source.filter((l) => ![146, 147].includes((JSON.parse(l) as { seq: number }).seq)));
   });
 });

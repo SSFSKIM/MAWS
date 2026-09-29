@@ -1,0 +1,4 @@
+{
+ "_from": "SPEC-derived; no fixture recorded mcp_reconnect. SPEC 45 §45.17:4210 answers no payload, so the operation completes with value null (C3: OperationEvent.outcome { ok: true, value: null } for the two MCP commands).",
+ "response": null
+}

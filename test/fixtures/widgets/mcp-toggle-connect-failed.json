@@ -1,0 +1,134 @@
+{
+ "_from": "SPEC-derived: an enable that persisted and did not connect. mcp_toggle { enabled: true } writes enabledMcpServers first (CVe(u, !0, ...) at cli.pretty.js 2.1.283:583734) and only then connects; a failed result becomes the control error (Ht, :583769-583776), so the operation fails after the write. The mcp_status that follows is pass2/real-settings.jsonl seq 63 with openaiDeveloperDocs reported `failed` with its error (not `disabled`): persisted on, not connected.",
+ "operation": {
+  "ok": false,
+  "error": {
+   "code": "engine_error",
+   "message": "Connection failed",
+   "engineCode": null
+  }
+ },
+ "mcp_status": {
+  "mcpServers": [
+   {
+    "name": "plugin:ptc:ptc",
+    "status": "connected",
+    "serverInfo": {
+     "name": "ptc",
+     "version": ""
+    },
+    "config": {
+     "type": "stdio",
+     "command": "/Users/new/.claude/plugins/cache/ptc-tool/ptc/0.5.0/bin/ptc-launch",
+     "args": []
+    },
+    "scope": "dynamic",
+    "source": "plugin",
+    "tools": [
+     {
+      "name": "exec",
+      "annotations": {}
+     },
+     {
+      "name": "wait",
+      "annotations": {}
+     },
+     {
+      "name": "interrupt",
+      "annotations": {}
+     },
+     {
+      "name": "restart",
+      "annotations": {}
+     },
+     {
+      "name": "kernels",
+      "annotations": {}
+     },
+     {
+      "name": "peek",
+      "annotations": {}
+     }
+    ]
+   },
+   {
+    "name": "plugin:chatgpt-advisor:advisor",
+    "status": "connected",
+    "serverInfo": {
+     "name": "chatgpt-advisor",
+     "version": "0.1.0"
+    },
+    "config": {
+     "type": "stdio",
+     "command": "node",
+     "args": [
+      "/Users/new/.claude/skills/chatgpt-advisor/server/mcp-server.mjs"
+     ]
+    },
+    "scope": "dynamic",
+    "source": "plugin",
+    "tools": [
+     {
+      "name": "advisor_ask",
+      "annotations": {}
+     },
+     {
+      "name": "advisor_poll",
+      "annotations": {}
+     },
+     {
+      "name": "advisor_status",
+      "annotations": {}
+     }
+    ]
+   },
+   {
+    "name": "openaiDeveloperDocs",
+    "status": "failed",
+    "serverInfo": {
+     "name": "openai-docs-mcp",
+     "version": "1.0.0"
+    },
+    "config": {
+     "type": "http",
+     "url": "https://developers.openai.com/mcp"
+    },
+    "scope": "user",
+    "source": "user",
+    "tools": [
+     {
+      "name": "search_openai_docs",
+      "annotations": {
+       "readOnly": true
+      }
+     },
+     {
+      "name": "list_openai_docs",
+      "annotations": {
+       "readOnly": true
+      }
+     },
+     {
+      "name": "fetch_openai_doc",
+      "annotations": {
+       "readOnly": true
+      }
+     },
+     {
+      "name": "list_api_endpoints",
+      "annotations": {
+       "readOnly": true
+      }
+     },
+     {
+      "name": "get_openapi_spec",
+      "annotations": {
+       "readOnly": true
+      }
+     }
+    ],
+    "error": "Connection failed"
+   }
+  ]
+ }
+}
