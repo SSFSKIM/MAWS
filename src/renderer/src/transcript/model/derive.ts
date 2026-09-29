@@ -494,17 +494,17 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
       ...receiptFields(RECEIPT_APPLIED), // the reader's undo state is laid over in rowsOfTurn
     });
   }
-  return { rows, summary, cells, work: workOf(tools, cells, subagents) };
+  return { rows, summary, cells, work: workOf(turn, tools, cells, subagents) };
 }
 
 // What the turn did whatever was disclosed, one entry per tool use from the turn's tool records (so the calls a merged
 // read cell folds together keep their own names; thinking and hooks are no tool uses; child agents' calls live in
-// `children` and never reach here). A file counts as read or edited once its call completed without an error or a
+// `children` and are not tool uses of the turn, though their completed edits are its edited files, as on the receipt). A file counts as read or edited once its call completed without an error or a
 // denial: a refused or failed call touched nothing. An edit carries its cell's own detail (hunks, counts, change).
 const READS = new Set(['Read', 'Glob', 'Grep', 'LS', 'NotebookRead']);
 const EDITS = new Set(['Edit', 'MultiEdit', 'Write', 'NotebookEdit']);
 
-function workOf(tools: Map<ToolUseId, ToolRecord>, cells: Cell[], subagents: SubagentGroup[]): TurnWork {
+function workOf(turn: TurnState, tools: Map<ToolUseId, ToolRecord>, cells: Cell[], subagents: SubagentGroup[]): TurnWork {
   const edits = new Map(cells.flatMap((cell) => (cell.detail.kind === 'edit' && cell.toolUseId !== null ? [[cell.toolUseId, cell.detail] as const] : [])));
   const files: TurnWork['files'] = [];
   const used: TurnWork['tools'] = [];
@@ -518,6 +518,10 @@ function workOf(tools: Map<ToolUseId, ToolRecord>, cells: Cell[], subagents: Sub
     const kind = READS.has(use.toolName) ? 'read' : EDITS.has(use.toolName) ? 'edited' : null;
     if (path && completed && kind) files.push({ path, use: kind, at: use.at, edit: kind === 'edited' ? (edits.get(use.toolUseId) ?? null) : null });
   }
+  // The child agents' completed edits the receipt attributes to the turn are edited files of the turn too (C8c), merged
+  // in time order; they are not tool uses of the turn (a child's calls live in its own transcript).
+  const children = childEdits(turn).map(({ use, edit }) => ({ path: filePathOf(record(use.input)) || edit.filePath, use: 'edited' as const, at: use.at, edit }));
+  if (children.length > 0) files.splice(0, files.length, ...[...files, ...children].sort((a, b) => Date.parse(a.at) - Date.parse(b.at)));
   const agents = subagents.flatMap((group) => group.refs.map((ref) => ({ ...ref, status: group.statuses.get(ref.taskId) ?? ('started' as const) })));
   return { files, tools: used, subagents: agents };
 }
@@ -575,6 +579,14 @@ function changedFiles(cells: Cell[], turn: TurnState): ChangedFile[] {
   // Successful `files` results only: a failed, denied, stopped or still-running edit changed nothing to receipt.
   for (const cell of cells) if (cell.detail.kind === 'edit' && cell.status === 'done') files.push({ path: cell.detail.filePath, change: cell.detail.change, added: cell.detail.added, removed: cell.detail.removed, cellId: cell.id });
   // Child-agent edits are attributed to the turn (the receipt names them; no cell is rendered for them).
+  for (const { use, edit } of childEdits(turn)) files.push({ path: edit.filePath, change: edit.change, added: edit.added, removed: edit.removed, cellId: cellId.tool(use.toolUseId) });
+  return byPath(files);
+}
+
+// The completed `files` calls of the turn's child agents, each with the edit detail its cell would carry (the
+// receipt's child entries and the activity projection's, so the two name the same files).
+function childEdits(turn: TurnState): { use: Event<'tool.use'>; edit: Extract<Cell['detail'], { kind: 'edit' }> }[] {
+  const out: { use: Event<'tool.use'>; edit: Extract<Cell['detail'], { kind: 'edit' }> }[] = [];
   for (const events of turn.children.values()) {
     const uses = new Map(events.filter((e): e is Event<'tool.use'> => e.kind === 'tool.use' && tableRowOf(e.toolName).category === 'files').map((e) => [e.toolUseId, e]));
     for (const event of events) {
@@ -582,11 +594,11 @@ function changedFiles(cells: Cell[], turn: TurnState): ChangedFile[] {
       const use = uses.get(event.toolUseId);
       if (!use) continue;
       const input = record(use.input);
-      const counts = editCounts(use.toolName, input, event.structured);
-      files.push({ path: str(record(event.structured).filePath, filePathOf(input)), change: counts.change, added: counts.added, removed: counts.removed, cellId: cellId.tool(use.toolUseId) });
+      const { hunks, added, removed, change } = editCounts(use.toolName, input, event.structured);
+      out.push({ use, edit: { kind: 'edit', filePath: str(record(event.structured).filePath, filePathOf(input)), change, hunks, added, removed } });
     }
   }
-  return byPath(files);
+  return out;
 }
 
 // A receipt names each file once: later edits of a path add their counts to its first entry, which keeps its cell;

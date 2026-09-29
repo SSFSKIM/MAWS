@@ -8,7 +8,7 @@ import { loadJournal, loadSyntheticJournal } from '../../../../test/support/fixt
 import { journalToEvents } from './dev/replay-stub';
 import { glyphFor, SUBAGENT_GLYPHS, SubagentGlyph, turnActivity, useTranscriptStore } from './index';
 import { turnDerivations } from './model/derive';
-import { BASH_RESULT, builder, task, tool } from './model/test-events';
+import { api, BASH_RESULT, builder, parent, task, tool, uuid } from './model/test-events';
 import type { TranscriptSource } from './source/types';
 
 let keys = 0;
@@ -84,6 +84,34 @@ describe('turn activity', () => {
       ['mcp__linear__get_issue', 'mcp', null, { server: 'linear', tool: 'get_issue' }],
     ]);
     expect(turn.subagents).toEqual([expect.objectContaining({ taskId: 'agent-1', name: 'Look around', status: 'started', glyph: glyphFor(task('agent-1')) })]);
+  });
+
+  // C8c (M6): the projection's edited set equals the receipt's file list, so a child agent's completed edit, which the
+  // receipt attributes to the turn, is an edited file of the turn with its own edit detail.
+  it('lists a child agent’s completed edit as an edited file of the turn, with its edit detail, expanded or collapsed', async () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('a1', 'Agent', { description: 'Fix it', prompt: 'fix' }, 'm1', 0);
+    b.emit('subagent.started', { taskId: task('agent-1'), toolUseId: tool('a1'), description: 'Fix it', subagentType: 'general-purpose', isBackground: false, spawnDepth: 1, prompt: 'fix' });
+    const child = { parentToolUseId: parent('a1') };
+    b.emit('tool.use', { toolUseId: tool('c1'), toolName: 'Edit', input: { file_path: '/p/child.ts', old_string: 'a', new_string: 'b' }, apiMessageId: api('mc'), messageUuid: uuid('mc-u0') }, child);
+    const hunk = { oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: ['-a', '+b'] };
+    b.emit('tool.result', { toolUseId: tool('c1'), content: 'ok' as never, isError: false, structured: { filePath: '/p/child.ts', structuredPatch: [hunk], userModified: false }, spillPath: null, denial: null, safeguard: 'not_evaluated', messageUuid: uuid('c1-result') }, child);
+    b.emit('tool.use', { toolUseId: tool('c2'), toolName: 'Edit', input: { file_path: '/p/refused.ts', old_string: 'a', new_string: 'b' }, apiMessageId: api('mc'), messageUuid: uuid('mc-u1') }, child);
+    b.emit('tool.result', { toolUseId: tool('c2'), content: 'no' as never, isError: true, structured: null, spillPath: null, denial: 'permission-rule', safeguard: 'not_evaluated', messageUuid: uuid('c2-result') }, child);
+    b.emit('subagent.finished', { taskId: task('agent-1'), status: 'completed', summary: 'done', outputFile: null, reason: null });
+    b.text('m2', 0, 'Done.');
+    b.end(['u1']);
+    const { key, activity } = await attached(b.events);
+    const collapsed = activity();
+    const receipt = useTranscriptStore.getState().rows(key).find((row) => row.kind === 'receipt');
+    expect(receipt?.kind === 'receipt' && receipt.files.map((file) => file.path)).toEqual(['/p/child.ts']);
+    expect(collapsed[0].files).toEqual([
+      { path: '/p/child.ts', use: 'edited', at: b.events.find((event) => event.kind === 'tool.use' && event.toolUseId === 'c1')!.at, edit: { kind: 'edit', filePath: '/p/child.ts', change: 'update', hunks: [hunk], added: 1, removed: 1 } },
+    ]);
+    const snapshot = JSON.parse(JSON.stringify(collapsed));
+    useTranscriptStore.getState().expandAll(key, { cells: true });
+    expect(JSON.parse(JSON.stringify(activity()))).toEqual(snapshot);
   });
 
   it('a refused or failed call touched no file: it is a tool use, not a file entry', async () => {
