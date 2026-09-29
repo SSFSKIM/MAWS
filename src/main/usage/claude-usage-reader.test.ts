@@ -1,7 +1,7 @@
 import { appendFileSync, cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { UsageSnapshotSchema, type UsageSnapshot } from '@shared/usage/types';
 import { TEST_FIXTURE_DIR } from '../../../test/support/fixtures';
 import { ClaudeUsageReader, claudeUsageDir } from './claude-usage-reader';
@@ -19,6 +19,7 @@ beforeEach(() => {
   scratch = mkdtempSync(join(tmpdir(), 'maws-usage-'));
 });
 afterEach(() => {
+  vi.useRealTimers();
   for (const reader of readers.splice(0)) reader.stop();
   rmSync(scratch, { recursive: true, force: true });
 });
@@ -34,13 +35,6 @@ function copy(): string {
   return dir;
 }
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
-async function until(check: () => boolean, what: string, ms = 2_000) {
-  const start = Date.now();
-  while (!check()) {
-    if (Date.now() - start > ms) throw new Error(`timed out waiting for ${what}`);
-    await wait(10);
-  }
-}
 
 describe('claude-usage reader parses the fixture directory', () => {
   it('answers every account with its newest window per key, the drain target and the pins, redacted as committed', async () => {
@@ -116,26 +110,47 @@ describe('claude-usage reader parses the fixture directory', () => {
     expect(drain.windows.fiveHour!.percent).toBe(53);
   });
 
-  it('emits settings.usageChanged once within a second of a history rewrite, with pinsFor for the last ids asked; an identical rewrite emits nothing', async () => {
+  it('emits settings.usageChanged once, 500 ms after a history rewrite (within the second), with pinsFor for the last ids asked; an identical rewrite emits nothing', async () => {
     const dir = copy();
     const emitted: UsageSnapshot[] = [];
     const r = reader(dir, emitted);
     r.start();
     await r.snapshot([PINNED_TO_DRAIN]);
     await wait(100); // the watchers are armed
+    // The watcher's events are real file-system events; only the debounce's clock is faked, so the test holds the
+    // debounce until it has seen the rewrite's events, then steps it past 500 ms.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const tick = () => new Promise<void>((resolve) => setImmediate(resolve));
+    const realUntil = async (check: () => boolean, what: string) => {
+      const deadline = Date.now() + 2_000;
+      while (!check()) {
+        if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
+        await tick();
+      }
+    };
+    const debounceArmed = async () => {
+      await realUntil(() => vi.getTimerCount() > 0, 'the rewrite to reach the watcher');
+      const settle = Date.now() + 100;
+      await realUntil(() => Date.now() >= settle, 'the rewrite\'s other events'); // they re-arm the same debounce
+    };
     const file = join(dir, 'history', `${DRAIN}.jsonl`);
-    const text = readFileSync(file, 'utf8');
-    writeFileSync(file, `${text}${JSON.stringify({ limitKey: 'session', percent: 60, recordedAt: '2026-09-29T07:40:00Z', resetsAt: '2026-09-29T11:20:00Z' })}\n`);
-    const started = Date.now();
-    await until(() => emitted.length > 0, 'settings.usageChanged');
-    expect(Date.now() - started).toBeLessThan(1_000);
-    await wait(700); // the debounce coalesced every event of the rewrite into one
+    writeFileSync(file, `${readFileSync(file, 'utf8')}${JSON.stringify({ limitKey: 'session', percent: 60, recordedAt: '2026-09-29T07:40:00Z', resetsAt: '2026-09-29T11:20:00Z' })}\n`);
+    await debounceArmed();
+    await vi.advanceTimersByTimeAsync(499);
+    expect(vi.getTimerCount()).toBe(1); // still debouncing: no read has started, so nothing can have been emitted
+    expect(emitted).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1);
+    await realUntil(() => emitted.length > 0, 'settings.usageChanged');
+    await r.refresh(); // a further read of the same files publishes nothing
     expect(emitted).toHaveLength(1);
+    expect(vi.getTimerCount()).toBe(0);
     expect(emitted[0]!.accounts.find((a) => a.uuid === DRAIN)!.windows.fiveHour!.percent).toBe(60);
     expect(emitted[0]!.pinsFor).toEqual({ [PINNED_TO_DRAIN]: DRAIN });
 
     writeFileSync(file, readFileSync(file, 'utf8')); // the same bytes again
-    await wait(1_200);
+    await debounceArmed();
+    await vi.advanceTimersByTimeAsync(500);
+    await r.refresh(); // shares the debounced read in flight, so both have compared once this settles
     expect(emitted).toHaveLength(1);
   });
 });
