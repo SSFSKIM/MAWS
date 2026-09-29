@@ -65,10 +65,11 @@ export class PromptHistory {
     return kept.reverse().map((row) => ({ display: row.display, at: new Date(row.timestamp).toISOString(), source: row.source, sessionId: row.sessionId, pastedContents: row.pastedContents }));
   }
 
-  // One line in the terminal's record shape; the terminal's own file and cache are never opened for writing.
-  async append(appSessionId: AppSessionId, display: string, pastedContents: Record<string, PastedContent>): Promise<void> {
+  // One line in the terminal's record shape; the terminal's own file and cache are never opened for writing. `project`
+  // is the caller's for a session with no record yet (an unstarted session's intended directory); a record decides.
+  async append(appSessionId: AppSessionId, display: string, pastedContents: Record<string, PastedContent>, project: string | null = null): Promise<void> {
     const record = this.opts.session(appSessionId);
-    const line = `${JSON.stringify({ display, pastedContents, timestamp: (this.opts.now ?? Date.now)(), project: record?.directory ?? null, sessionId: record?.engineSessionId ?? null })}\n`;
+    const line = `${JSON.stringify({ display, pastedContents, timestamp: (this.opts.now ?? Date.now)(), project: record?.directory ?? project, sessionId: record?.engineSessionId ?? null })}\n`;
     await mkdir(dirname(this.opts.file), { recursive: true });
     const handle = await this.open(this.opts.file, 'a');
     try {

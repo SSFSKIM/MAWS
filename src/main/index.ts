@@ -136,7 +136,7 @@ app.whenReady().then(() => {
     },
   });
   registerMainHandler('session.history.list', async ({ appSessionId, limit }) => ({ entries: await history.list(appSessionId as AppSessionId, limit) }));
-  registerMainHandler('session.history.append', ({ appSessionId, display, pastedContents }) => history.append(appSessionId as AppSessionId, display, pastedContents));
+  registerMainHandler('session.history.append', ({ appSessionId, display, pastedContents, project }) => history.append(appSessionId as AppSessionId, display, pastedContents, project ?? null));
   // listable roots: the directories of every session the read model holds (both launch modes) or the index holds
   // (archived included), and every indexed project's directory
   const roots = () => {

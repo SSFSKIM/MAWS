@@ -99,6 +99,14 @@ describe('prompt history merges MAWS and terminal sources with bodies', () => {
     expect(recalled.at(-1)).toMatchObject({ source: 'maws', display: 'see [Pasted text #1 +40 lines] and [Image #2]', pastedContents: pasted });
   });
 
+  it("files an unstarted session's prompt under the project it names, and a known session's under its record", async () => {
+    const h = history({ now: () => at('2026-09-28T11:00:00.000Z') });
+    await h.append('app-unstarted' as AppSessionId, 'first prompt of a new session', {}, '/repo/intended');
+    await h.append(APP, 'a live prompt', {}, '/somewhere/else'); // the record decides
+    const lines = readFileSync(file, 'utf8').trim().split('\n').map((l) => JSON.parse(l) as { project: string | null });
+    expect(lines.map((l) => l.project)).toEqual(['/repo/intended', PROJECT]);
+  });
+
   it('tolerates a torn last line and a missing terminal file; a session with no record reads every project', async () => {
     writeFileSync(join(configDir, 'history.jsonl'), `${readFileSync(join(TEST_FIXTURE_DIR, 'history', 'terminal-history.jsonl'), 'utf8')}{"display":"torn`);
     expect(await history().list(APP, 200)).toHaveLength(4);

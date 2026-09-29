@@ -311,7 +311,9 @@ const c7Commands = {
     owner: 'main',
   },
   'session.history.append': {
-    input: z.strictObject({ appSessionId: AppSessionIdSchema, display: z.string().min(1).max(65_536) /* a prompt as typed; the bodies ride in pastedContents */, pastedContents: z.record(z.string(), PastedContentSchema) }),
+    // project: the directory an unstarted session will run in (its setup intent's location); main files the row under it
+    // only when the session has no record yet, so the first prompt of a new session is recalled there once it starts
+    input: z.strictObject({ appSessionId: AppSessionIdSchema, display: z.string().min(1).max(65_536) /* a prompt as typed; the bodies ride in pastedContents */, pastedContents: z.record(z.string(), PastedContentSchema), project: z.string().nullable().optional() }),
     output: z.void(),
     owner: 'main',
   },

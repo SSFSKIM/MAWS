@@ -368,6 +368,10 @@ describe('ipc schema validates both directions', () => {
       expect(validateCommandInput('session.history.append', { ...append, display: 'x'.repeat(65_536) }).ok).toBe(true); // a long prompt as typed
       expect(validateCommandInput('session.history.append', { ...append, display: 'x'.repeat(65_537) }).ok).toBe(false);
       expect(validateCommandInput('session.history.append', { ...append, pastedContents: { '1': { ...text, type: 'file' } } }).ok).toBe(false);
+      // an unstarted session's append names the intended project (M4); main uses it only when the session has no record
+      expect(validateCommandInput('session.history.append', { ...append, project: '/repo' }).ok).toBe(true);
+      expect(validateCommandInput('session.history.append', { ...append, project: null }).ok).toBe(true);
+      expect(validateCommandInput('session.history.append', { ...append, project: 7 }).ok).toBe(false);
       const entry = { display: 'hello', at: '2026-09-28T10:00:00.000Z', source: 'terminal', sessionId: null, pastedContents: { '1': { ...text, content: null, contentHash: 'c5ddbb6e32f0ffa0' } } };
       expect(validateCommandOutput('session.history.list', { entries: [entry] }).ok).toBe(true);
       expect(validateCommandOutput('session.history.list', { entries: [{ ...entry, source: 'cloud' }] }).ok).toBe(false);
