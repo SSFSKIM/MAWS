@@ -950,14 +950,17 @@ test.describe('the product host over a scenario derived from C5’s records', ()
       // C9's Terminal is registered from App.tsx (C8a's block, since C9 merged); every other P0 tool arrives with its child.
       await expect(environment.getByRole('button', { name: 'Arrives with C8c' }), 'Review').toBeDisabled();
       await expect(environment.getByRole('button', { name: 'Arrives with C11' }), 'the model row').toBeDisabled();
-      await expect(summary.getByRole('region', { name: 'Subagents' }).getByRole('button', { name: 'Arrives with C8b' })).toBeDisabled();
+      // C8b start: Subagents registers with C8b's M2 and fills its own section (its Open enabled); Background work
+      // still arrives with C8b's M3.
+      await expect(summary.getByRole('region', { name: 'Subagents' }).getByRole('button', { name: 'Open' })).toBeEnabled();
+      // C8b end
       await expect(summary.getByRole('region', { name: 'Background work' }).getByRole('button', { name: 'Arrives with C8b' })).toBeDisabled();
       const disabled = await summary.locator('button:disabled').allTextContents();
-      expect(disabled).toHaveLength(4);
+      expect(disabled).toHaveLength(3); // C8b: Subagents' is no longer among them
       for (const text of disabled) expect(text).toMatch(/^Arrives with (C8b|C8c|C9|C11)$/);
 
       await panel.getByRole('button', { name: 'Add a tool' }).click();
-      await expect(page.getByRole('menuitem'), '"+" offers the registered tools only').toHaveText(['Terminal']);
+      await expect(page.getByRole('menuitem'), '"+" offers the registered tools only').toHaveText(['Subagents', 'Terminal']); // C8b: Subagents first by MENU_ORDER
       await page.keyboard.press('Escape');
       expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
     });

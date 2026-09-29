@@ -25,6 +25,10 @@ import { connectRequestCard } from './request-card';
 import { connectStatusLine } from './statusline';
 import { registerTranscriptActions } from './transcript';
 // C7 end
+// C8b start
+import { connectAgentWorkEvents } from './ipc/events';
+import { agentsDevSurface, agentTranscriptActions, registerAgentTools } from './tools/agents';
+// C8b end
 
 export function App() {
   const resolvedTheme = useSettings((s) => s.state?.resolvedTheme);
@@ -62,6 +66,16 @@ export function App() {
   useEffect(() => connectComposer(), []); // the composer in C5's composer slot
   useEffect(() => registerTranscriptActions({ editAndResubmit: editAndResubmitRow }), []); // a bubble's Edit prefills the composer in edit mode
   // C7 end
+  // C8b start: the agent tools. Registration is never undone (a registration's disposer closes the tool's tabs, which
+  // StrictMode's effect replay would do); the transcript's subagent rows open Subagents; a task list changed on disk
+  // refreshes its checklist; development builds expose the stores the live acceptance reads.
+  useEffect(() => registerAgentTools(), []);
+  useEffect(() => registerTranscriptActions(agentTranscriptActions), []);
+  useEffect(() => connectAgentWorkEvents(), []);
+  useEffect(() => {
+    if (import.meta.env.DEV) window.__maws_agents = agentsDevSurface();
+  }, []);
+  // C8b end
 
   // index.html ships data-theme="light" for the first paint; from then on main's resolved theme decides.
   useEffect(() => {
