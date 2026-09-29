@@ -8,7 +8,7 @@ import type { SessionRecord } from '@shared/graph/session';
 import type { PanelToolContext } from '../../panel/tool';
 import { useTerminals } from '../../stores/terminals';
 import { terminals, type TerminalInfo } from '../../terminal/registry';
-import { ensureTerminal, type TerminalTabState } from './index';
+import { ensureTerminal, takeFocusRequest, type TerminalTabState } from './index';
 
 // Where a session runs: its worktree when it has one, else its directory (the worktree warning compares against it).
 export const sessionDirectory = (session: SessionRecord): string => session.worktree?.path ?? session.directory;
@@ -39,9 +39,11 @@ export function TerminalView({ state, ctx }: { state: TerminalTabState; ctx: Pan
     return () => terminals.unmount(id);
   }, [id, visible]);
 
+  // A request is honoured once, when it is new: one made while the tab had no terminal (a deferred tab) is used up
+  // then, so the terminal starting later does not replay it, and a remount under the same counter takes no focus.
   useEffect(() => {
-    if (id && focusRequest) terminals.focus(id);
-  }, [id, focusRequest]);
+    if (takeFocusRequest(state, focusRequest) && id) terminals.focus(id);
+  }, [id, focusRequest, state]);
 
   useEffect(() => setTitle(title), [setTitle, title]);
 

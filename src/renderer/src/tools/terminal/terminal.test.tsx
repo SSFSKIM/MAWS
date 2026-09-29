@@ -254,6 +254,19 @@ describe('terminal view', () => {
     expect(registry.terminals.unmount).toHaveBeenCalledWith(state.terminalId);
   });
 
+  it('does not replay a focus request made before the terminal started, nor one a remount carries over', () => {
+    const state = terminalTool.createState({ appSessionId: null, session: null, instanceId: 'terminal:8', params: {} });
+    const { rerender, unmount } = render(<View state={state} ctx={context({ appSessionId: null, session: null, focusRequest: 1 })} />);
+    rerender(<View state={state} ctx={context({ appSessionId: B, session: SESSION_B, focusRequest: 1 })} />);
+    expect(state.terminalId).toBe('t1');
+    expect(registry.terminals.focus).not.toHaveBeenCalled();
+    rerender(<View state={state} ctx={context({ appSessionId: B, session: SESSION_B, focusRequest: 2 })} />);
+    expect(registry.terminals.focus).toHaveBeenCalledOnce();
+    unmount();
+    render(<View state={state} ctx={context({ appSessionId: B, session: SESSION_B, focusRequest: 2 })} />);
+    expect(registry.terminals.focus).toHaveBeenCalledOnce();
+  });
+
   it('asks for a session while it has none, and opens its terminal in the first session shown', () => {
     const state = terminalTool.createState({ appSessionId: null, session: null, instanceId: 'terminal:5', params: {} });
     const { rerender } = render(<View state={state} ctx={context({ appSessionId: null, session: null })} />);

@@ -33,6 +33,7 @@ export interface TerminalTabState {
   readonly instanceId: string; // the terminal's label, which is how a reloaded page re-adopts it
   params: TerminalParams;
   owner: AppSessionId | null; // the session the tab was opened for, when known
+  focusSeen: number; // the last X5 `focusRequest` the view acted on or used up (the counter outlives the view's mounts)
 }
 
 // Starts the tab's terminal if it has none: the one the registry re-adopted under this tab's label after a reload, or
@@ -53,6 +54,13 @@ export function ensureTerminal(state: TerminalTabState, shown: { appSessionId: A
   return terminalId;
 }
 
+// Whether X5's `focusRequest` counter carries a request the tab has not yet acted on or used up; marks it seen.
+export function takeFocusRequest(state: TerminalTabState, request: number): boolean {
+  if (request <= state.focusSeen) return false;
+  state.focusSeen = request;
+  return true;
+}
+
 function createState({ appSessionId, session, instanceId, params }: PanelToolInit<TerminalParams>): TerminalTabState {
   const ui = createStore<TerminalTabUi>()(() => ({ confirmClose: false, process: null, confirmed: false, closeError: null, terminalId: null }));
   const state: TerminalTabState = {
@@ -63,6 +71,7 @@ function createState({ appSessionId, session, instanceId, params }: PanelToolIni
     instanceId,
     params: { ...params },
     owner: appSessionId ?? session?.appId ?? null,
+    focusSeen: 0,
   };
   ensureTerminal(state, { appSessionId, session });
   return state;
