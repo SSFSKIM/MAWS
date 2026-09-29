@@ -11,7 +11,7 @@ import type { HostState, MawsBridge } from '@shared/ipc/schema';
 import { record } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
 import { runSessionAction, sessionActionsFor } from '../app/session-actions';
-import { instanceOf, panelHost, registerPanelTool } from '../panel/host';
+import { instanceOf, panelHost, registerPanelTool, resetPanelHost } from '../panel/host';
 import { HolderNotice } from '../session/HolderNotice';
 import { useLayout } from '../stores/layout';
 import { useNotices } from '../stores/notices';
@@ -154,7 +154,7 @@ describe('held outcomes and the attach command', () => {
     registry.foreground.busy = false; // the owner left the attach with the TUI's key: the shell's prompt
     act(() => panelHost.showSummary());
     await userEvent.click(attachButton());
-    await waitFor(() => expect(fake.invoked('pty.write')).toEqual([{ ptyId: 'pty-t1', data: `${COMMAND}\n` }]));
+    await waitFor(() => expect(fake.invoked('pty.write')).toEqual([{ ptyId: 'pty-t1', data: `\x15${COMMAND}\n` }])); // ^U first: whatever was half-typed at the prompt is dropped
     expect(useLayout.getState().panelBySession.get(A)?.activeTabId).toBe(first);
     expect(opened(), 'the attach re-ran in the same tab').toHaveLength(1);
 
@@ -187,6 +187,65 @@ describe('held outcomes and the attach command', () => {
     await waitFor(() => expect(useLayout.getState().panelBySession.get(A)?.activeTabId).toBe(first));
     expect(opened()).toHaveLength(1);
     expect(fake.invoked('layout.get')).toEqual([{ key: 'sessions.attachTabs' }, { key: 'sessions.attachTabs' }]);
+  });
+
+  it('after a reload, before the page has re-adopted the tab’s shell or shown the tab, Attach shows the listed tab rather than opening a second', async () => {
+    renderNotice(held(JOB));
+    await userEvent.click(attachButton());
+    await waitFor(() => expect(opened()).toHaveLength(1));
+    const first = opened()[0]!.label;
+    // a reload: the page forgets the key, the panel host has no instance yet, and C9 has not re-adopted the pty
+    forgetAttachTabs();
+    resetPanelHost();
+    offs.push(registerPanelTool(terminalTool));
+    registry.reset();
+    act(() => panelHost.showSummary());
+    expect(instanceOf(first)).toBeUndefined();
+    await userEvent.click(attachButton());
+    await waitFor(() => expect(useLayout.getState().panelBySession.get(A)?.activeTabId).toBe(first));
+    expect(opened(), 'no second attach tab').toHaveLength(1);
+    expect(fake.invoked('pty.write')).toEqual([]);
+  });
+
+  it('a failed read of the key is not taken for "no tabs": a later Attach reads it again and keeps what it holds', async () => {
+    const B = 'b2222222-2222-4222-8222-222222222222' as AppSessionId;
+    persisted = { version: 1, tabs: [{ tabId: 'terminal:other', appSessionId: B, jobId: 'aaaa1111' }] };
+    useLayout.getState().setPanelTabs(B, { tabs: [{ id: 'terminal:other', toolId: 'terminal', pinned: false }], activeTabId: null });
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    answerWith({ 'layout.get': null });
+    renderNotice(held(JOB));
+    await userEvent.click(attachButton());
+    await fake.fail('layout.get', 'layout.json unreadable'); // the lookup's read
+    await fake.fail('layout.get', 'layout.json unreadable'); // remember's own read: still unreadable, so nothing is written
+    await waitFor(() => expect(opened()).toHaveLength(1));
+    expect(fake.invoked('layout.set'), 'an unread key is never overwritten').toEqual([]);
+    expect(error).toHaveBeenCalledWith('[sessions] layout.get sessions.attachTabs failed', expect.objectContaining({ message: 'layout.json unreadable' }));
+    error.mockRestore();
+    registry.exit(registry.terminals.list()[0]!.id);
+    await userEvent.click(attachButton());
+    await fake.reply('layout.get', { value: persisted }); // read again, not the cached failure
+    await waitFor(() => expect(opened()).toHaveLength(2));
+    expect(persisted).toEqual({
+      version: 1,
+      tabs: [
+        { tabId: 'terminal:other', appSessionId: B, jobId: 'aaaa1111' },
+        { tabId: opened()[1]!.label, appSessionId: A, jobId: 'e6dcd828' },
+      ],
+    });
+  });
+
+  it('two Attaches for different sessions at once both keep their tab in the key', async () => {
+    const B = 'b2222222-2222-4222-8222-222222222222' as AppSessionId;
+    const ENGINE_B = 'e2222222-2222-4222-8222-222222222222' as SessionId;
+    holders.push({ sessionId: ENGINE_B, appSessionId: B, holder: { kind: 'background_job', pid: 4343, jobId: 'bbbb2222' }, cwd: '/work/b' });
+    const a = record(A, { engineSessionId: ENGINE, directory: '/work/repo', holder: JOB });
+    const b = record(B, { engineSessionId: ENGINE_B, directory: '/work/b', holder: { kind: 'background_job', pid: 4343, jobId: 'bbbb2222' } });
+    useSessions.setState({ records: new Map([[A, a], [B, b]]) });
+    const { attachToJob } = await import('./attach');
+    const [ra, rb] = await act(() => Promise.all([attachToJob(A), attachToJob(B)]));
+    expect([ra.ok, rb.ok]).toEqual([true, true]);
+    const tabs = (persisted as { tabs: { appSessionId: string; jobId: string }[] }).tabs.map((t) => [t.appSessionId, t.jobId]).sort();
+    expect(tabs).toEqual([[A, 'e6dcd828'], [B, 'bbbb2222']].sort());
   });
 
   it('opens a new tab once the one it opened was closed', async () => {

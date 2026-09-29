@@ -18,14 +18,14 @@ import type { SessionRecord } from '@shared/graph/session';
 import { AttachTabsSchema, type AttachTab } from '@shared/ipc/schema/layout';
 import { attachCommand } from '@shared/sessions/attach';
 import { ipc } from '../ipc/client';
-import { instanceOf, panelHost } from '../panel/host';
+import { panelHost } from '../panel/host';
 import { useLayout } from '../stores/layout';
 import { activeTab, sessionOfTab } from '../stores/layout-model';
 import { toast } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
 import { terminals, type TerminalId } from '../terminal/registry';
 import { openTerminal } from '../tools/terminal';
-import { holderWords } from './holder-words';
+import { toastHeld } from './holder-words';
 
 export const ATTACH_TABS_KEY = 'sessions.attachTabs';
 
@@ -39,48 +39,64 @@ const inFlight = new Map<AppSessionId, Promise<AttachResult>>();
 
 // ---- the remembered tabs -----------------------------------------------------------------------------------------
 
-let remembered: Promise<AttachTab[]> | null = null;
+let remembered: AttachTab[] | null = null; // the key as last read or written; never a failed read
+let reading: Promise<AttachTab[] | null> | null = null;
 
-function rememberedTabs(): Promise<AttachTab[]> {
-  remembered ??= ipc.invoke('layout.get', { key: ATTACH_TABS_KEY }).then((result) => {
+// The remembered tabs, or null when main could not read the key (not the same as "none": nothing is written over it).
+function rememberedTabs(): Promise<AttachTab[] | null> {
+  if (remembered !== null) return Promise.resolve(remembered);
+  reading ??= ipc.invoke('layout.get', { key: ATTACH_TABS_KEY }).then((result) => {
+    reading = null;
     if (!result.ok) {
       console.error(`[sessions] layout.get ${ATTACH_TABS_KEY} failed`, result.error);
-      return [];
+      return null;
     }
     const parsed = result.value.value === null ? null : AttachTabsSchema.safeParse(result.value.value);
     if (parsed && !parsed.success) console.warn(`[sessions] ${ATTACH_TABS_KEY} is not a valid value; no attach tabs remembered`);
-    return parsed?.success ? parsed.data.tabs : [];
+    remembered = parsed?.success ? parsed.data.tabs : [];
+    return remembered;
   });
-  return remembered;
+  return reading;
 }
 
 // Whether the layout still lists the tab: the session's own panel list, or the pins.
 const tabListed = (tabId: string, appSessionId: AppSessionId): boolean =>
   useLayout.getState().panelTabsOf(appSessionId).some((t) => t.id === tabId) || useLayout.getState().panelPinned.some((t) => t.id === tabId);
 
-// Records the job's tab, dropping every entry whose tab the layout no longer lists, and writes the key.
-async function remember(entry: AttachTab): Promise<void> {
-  const tabs = [...(await rememberedTabs()).filter((t) => (t.appSessionId !== entry.appSessionId || t.jobId !== entry.jobId) && tabListed(t.tabId, t.appSessionId as AppSessionId)), entry];
-  remembered = Promise.resolve(tabs);
-  const written = await ipc.invoke('layout.set', { key: ATTACH_TABS_KEY, value: { version: 1, tabs } });
-  if (!written.ok) console.error(`[sessions] layout.set ${ATTACH_TABS_KEY} failed`, written.error);
+// Records the job's tab, dropping every entry whose tab the layout no longer lists, and writes the key. Writes run one
+// after another (each reads what the one before wrote), so two Attaches at once both keep their tab; a key main
+// could not read is left as it is.
+let writes: Promise<void> = Promise.resolve();
+function remember(entry: AttachTab): Promise<void> {
+  const run = writes.then(async () => {
+    const current = await rememberedTabs();
+    if (current === null) return; // logged by the read
+    const tabs = [...current.filter((t) => (t.appSessionId !== entry.appSessionId || t.jobId !== entry.jobId) && tabListed(t.tabId, t.appSessionId as AppSessionId)), entry];
+    remembered = tabs;
+    const written = await ipc.invoke('layout.set', { key: ATTACH_TABS_KEY, value: { version: 1, tabs } });
+    if (!written.ok) console.error(`[sessions] layout.set ${ATTACH_TABS_KEY} failed`, written.error);
+  });
+  writes = run.catch(() => {});
+  return run;
 }
 
 // Tests: the page's memory as a reload leaves it (the key is read again on the next Attach).
 export function forgetAttachTabs(): void {
   remembered = null;
+  reading = null;
 }
 
 // ---- the tab's state ---------------------------------------------------------------------------------------------
 
-// What the job's remembered tab holds: nothing to reuse (the tab closed, or its shell ended), a terminal not started
-// yet (a tab waiting for its shell), or a running terminal.
+// What the job's remembered tab holds: nothing to reuse (the layout no longer lists the tab, or its shell ended), a
+// terminal not there yet (a listed tab whose shell the page has not started or re-adopted, as just after a reload),
+// or a running terminal.
 type TabState = { kind: 'gone' } | { kind: 'pending' } | { kind: 'running'; terminalId: TerminalId };
 
 function tabState(tabId: string, appSessionId: AppSessionId): TabState {
   if (!tabListed(tabId, appSessionId)) return { kind: 'gone' };
   const terminal = terminals.list().find((info) => info.label === tabId);
-  if (terminal === undefined) return instanceOf(tabId) ? { kind: 'pending' } : { kind: 'gone' };
+  if (terminal === undefined) return { kind: 'pending' };
   if (terminal.status === 'running') return { kind: 'running', terminalId: terminal.id };
   return terminal.status === 'starting' ? { kind: 'pending' } : { kind: 'gone' };
 }
@@ -95,11 +111,12 @@ async function atPrompt(terminalId: TerminalId): Promise<boolean> {
   }
 }
 
-// The command typed at the prompt, followed by a newline, as C9's spawn writes it.
+// The command typed at the prompt, followed by a newline, as C9's spawn writes it; a ^U first clears whatever the owner
+// had half-typed there, so the line is the attach and nothing else.
 async function typeCommand(terminalId: TerminalId, command: string): Promise<string | null> {
   const ptyId = terminals.get(terminalId)?.info.ptyId;
   if (!ptyId) return 'the terminal has no shell to run the attach in';
-  const written = await ipc.invoke('pty.write', { ptyId, data: `${command}\n` });
+  const written = await ipc.invoke('pty.write', { ptyId, data: `\x15${command}\n` });
   return written.ok ? null : written.error.message;
 }
 
@@ -140,7 +157,7 @@ async function attach(appSessionId: AppSessionId, known: KnownJob | null): Promi
   if (!record) return { ok: false, error: 'This session is not in the sidebar any more' };
   const job = await jobOf(record, known);
   if ('error' in job) return { ok: false, error: job.error };
-  const existing = (await rememberedTabs()).find((t) => t.appSessionId === appSessionId && t.jobId === job.jobId)?.tabId;
+  const existing = ((await rememberedTabs()) ?? []).find((t) => t.appSessionId === appSessionId && t.jobId === job.jobId)?.tabId;
   const state = existing === undefined ? ({ kind: 'gone' } as const) : tabState(existing, appSessionId);
   if (existing !== undefined && state.kind === 'pending') {
     showTab(appSessionId, existing);
@@ -184,6 +201,5 @@ export async function attachOrSay(appSessionId: AppSessionId, known: KnownJob | 
 // A session held elsewhere, in words, with the job's Attach when there is a job to attach to: from a `held` answer, or
 // from the engine's own refusal that failed a resume (the setup store is handed this at composition).
 export function heldToast(appSessionId: AppSessionId, holder: SessionRecord['holder'], attach: KnownJob | null): void {
-  const actions = attach === null ? [] : [{ label: 'Attach', run: () => void attachOrSay(appSessionId, attach) }];
-  toast({ level: 'warning', text: `Held by ${holderWords(holder)}`, actions, dismissible: true });
+  toastHeld(holder, attach === null ? [] : [{ label: 'Attach', run: () => void attachOrSay(appSessionId, attach) }]);
 }

@@ -15,7 +15,7 @@ import type { SetupEvent } from '@shared/sessions/setup';
 import type { TrustState } from '@shared/sessions/trust';
 import { ipc } from '../ipc/client';
 import { toast } from '../stores/notices';
-import { holderWords } from './holder-words';
+import { toastHeld } from './holder-words';
 
 // A card a start answered with and that waits for the human, with the first message it docked with (the intent's
 // retained message, or a resume's), which its continuation runs with and a refusal hands back. A failed setup's card
@@ -155,7 +155,7 @@ export function failureOf(s: Pick<SetupState, 'invoking' | 'phases' | 'intents' 
 // this store's imports; without it the holder is still named.
 type SessionHolder = SessionRecord['holder'];
 export type HeldNotice = (appSessionId: AppSessionId, holder: SessionHolder, attach: { jobId: string; command: string } | null) => void;
-const nameHolder: HeldNotice = (_appSessionId, holder) => toast({ level: 'warning', text: `Held by ${holderWords(holder)}`, actions: [], dismissible: true });
+const nameHolder: HeldNotice = (_appSessionId, holder) => toastHeld(holder);
 
 // Subscribes, then loads the intent snapshot and the interrupted deletions. `ready` resolves once the intents are known
 // (answered or failed: a page with no answerer starts empty rather than holding hydration forever).
