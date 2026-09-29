@@ -63,7 +63,9 @@ describe('layout.saveTextFile writes then renames', () => {
   it('refuses a defaultName with a path separator before opening any dialog', async () => {
     const showSaveDialog = vi.fn<SaveDialog>();
     for (const defaultName of ['../x.txt', 'a/b.txt', 'a\\b.txt']) {
-      await expect(saveTextFile({ defaultName, text: 'x' }, { showSaveDialog, downloads: dir })).rejects.toThrow(/path separator/);
+      await expect(saveTextFile({ defaultName, text: 'x' }, { showSaveDialog, downloads: dir })).rejects.toMatchObject({
+        error: { code: 'invalid_input', message: expect.stringContaining('path separator') }, // CommandFailure: the router answers it as is
+      });
     }
     expect(showSaveDialog).not.toHaveBeenCalled();
   });

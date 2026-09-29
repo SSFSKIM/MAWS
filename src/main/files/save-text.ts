@@ -4,6 +4,8 @@
 import { rm, rename, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import type { SaveDialogOptions } from 'electron';
+import { ipcError } from '@shared/ipc/errors';
+import { CommandFailure } from '../ipc/router';
 
 export type SaveDialog = (options: SaveDialogOptions) => Promise<{ canceled: boolean; filePath?: string }>;
 
@@ -14,7 +16,7 @@ export interface SaveTextDeps {
 }
 
 export async function saveTextFile(input: { defaultName: string; text: string }, deps: SaveTextDeps): Promise<{ saved: true; path: string } | { saved: false }> {
-  if (/[/\\]/.test(input.defaultName)) throw new Error(`the default file name has a path separator: ${input.defaultName}`);
+  if (/[/\\]/.test(input.defaultName)) throw new CommandFailure(ipcError('invalid_input', `the default file name has a path separator: ${input.defaultName}`));
   const { canceled, filePath } = await deps.showSaveDialog({ defaultPath: join(deps.downloads, input.defaultName) });
   if (canceled || !filePath) return { saved: false };
   const fs = deps.fs ?? { writeFile: (path: string, text: string) => writeFile(path, text, 'utf8'), rename };
