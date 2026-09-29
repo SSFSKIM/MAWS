@@ -166,7 +166,7 @@ describe('edit prompt restores the initiating prompt', () => {
       messageUuid: uuid('u-1'),
       content: [
         { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'iVBORw0KGgo=' } },
-        { type: 'text', text: `fix the build\n\n<pasted_content id="1a2b">\n${body}\n</pasted_content id="1a2b">\n` },
+        { type: 'text', text: `fix the <\\pasted_content> build\n\n<pasted_content id="1a2b">\n${body}\n</pasted_content id="1a2b">\n` }, // a typed tag, neutralised
       ],
       isReplay: false,
       isSynthetic: false,
@@ -182,7 +182,7 @@ describe('edit prompt restores the initiating prompt', () => {
     await waitFor(() => expect(answers()).toEqual([{ kind: 'dialog', behavior: 'completed', result: 'edit_prompt' }]));
     await waitFor(() => expect(useComposerStore.getState().prefills.get(APP)).toBeDefined());
     const prefill = useComposerStore.getState().prefills.get(APP)!;
-    expect(prefill.text).toMatch(/^fix the build\n\[Pasted text #1 \+3 lines\]/);
+    expect(prefill.text).toMatch(/^fix the <pasted_content> build\[Pasted text #1 \+3 lines\]/); // as typed, as history recall has it
     expect(prefill.pasted).toEqual([{ name: 'Pasted text #1', text: body }]);
     expect(prefill.images).toEqual([{ name: expect.any(String), mediaType: 'image/png', data: 'iVBORw0KGgo=' }]);
     expect(prefill.editing).toEqual({ messageUuid: 'u-1', seenCursor: 'u-1' });

@@ -1,11 +1,13 @@
 // A user row as the composer's edit-mode prefill (C7 execution document, "Edit-and-resubmit and the fork seam", and
-// the refusal dialog's Edit prompt): the row's text with its pasted placeholders in place, its pasted bodies (C6's
-// `text` attachments, placeholder order) and its images that carry a data URL, and the edit's two anchors, the message
-// it resubmits against and the seen cursor. Both ways into edit mode (a bubble's Edit, the refusal dialog's Edit prompt)
+// the refusal dialog's Edit prompt): the row's text as typed (history recall's and the queue edit's reading: no extra
+// newline before a pasted block, a typed tag un-neutralised) with its pasted placeholders in place, its pasted bodies
+// (C6's `text` attachments, placeholder order) and its images that carry a data URL, and the edit's two anchors, the
+// message it resubmits against and the seen cursor. Both ways into edit mode (a bubble's Edit, the refusal dialog's Edit prompt)
 // build their prefill here, so they land in edit mode the same way. Pure.
 import type { MessageUuid } from '@shared/graph/ids';
 import type { Prefill } from '../stores/composer';
 import type { Row } from '../transcript';
+import { typedFromRowText } from './editor/recall';
 
 export type UserRow = Extract<Row, { kind: 'user' }>;
 
@@ -21,7 +23,7 @@ export function rowPrefill(row: UserRow & { messageUuid: MessageUuid }, seenCurs
     const parts = a.kind === 'image' && a.dataUrl !== null ? dataUrlParts(a.dataUrl) : null;
     return parts ? [{ name: a.name, mediaType: a.mediaType ?? parts.mediaType, data: parts.data }] : [];
   });
-  return { text: row.text, pasted, images, editing: { messageUuid: row.messageUuid, seenCursor } };
+  return { text: typedFromRowText(row.text), pasted, images, editing: { messageUuid: row.messageUuid, seenCursor } };
 }
 
 // The seen cursor's source: the newest user message the transcript holds (any origin: a queued prompt or an
