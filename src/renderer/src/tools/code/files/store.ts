@@ -85,7 +85,9 @@ export function createFilesStore(client: MawsBridge, options: { graceMs?: number
       inflight.set(key, flight);
       const at = generation;
       void settled(client.invoke('files.list', path === null ? { appSessionId } : { appSessionId, path })).then((result) => {
-        if (at !== generation) return;
+        // The flight is the key's token: a key dropped meanwhile (its watch released after the grace, or invalidated) no
+        // longer holds it, and its late answer is not put back.
+        if (at !== generation || inflight.get(key) !== flight) return;
         inflight.delete(key);
         put(key, result.ok ? { status: 'ok', value: result.value } : { status: 'error', message: result.error.message });
         if (flight.again) list(appSessionId, path);
@@ -141,6 +143,7 @@ export function createFilesStore(client: MawsBridge, options: { graceMs?: number
               held.grace = null;
               if (held.count > 0 || watched.get(key) !== held) return;
               watched.delete(key);
+              inflight.delete(key);
               drop(key); // unwatched, so no longer kept current: listed afresh on the next expand
               void held.ready.then(() => {
                 if (held.state === 'installed') void settled(client.invoke('files.unwatch', { appSessionId, path }));
@@ -159,6 +162,7 @@ export function createFilesStore(client: MawsBridge, options: { graceMs?: number
           for (const [key, w] of watched) {
             if (w.appSessionId !== event.appSessionId || !sameFile(event.path, w.path)) continue;
             const listed = get().listings.has(key);
+            inflight.delete(key); // a listing read before the invalidation lands nowhere
             if (w.count > 0) {
               if (listed) put(key, { status: 'loading' });
               w.listAfter = listed;

@@ -203,14 +203,31 @@ function TreeList({
     overscan: 12,
   });
   // The scroll offset lives in the tool's state across unmounts (the host mounts only the selected tab): restored once
-  // per mount, written back on unmount.
+  // per mount, written back on unmount. A tab hidden past the watch grace comes back with its directories unlisted, so
+  // the scroller clamps the offset to the rows there are; the offset is then pending, re-applied as the rows arrive
+  // until the content reaches it once, and dropped if the owner scrolls first. Unmounted while pending, it keeps it.
+  const pending = useRef<number | null>(null);
   useLayoutEffect(() => {
     const el = scroller.current!;
-    el.scrollTop = viewOf(ui.getState(), appSessionId).scrollTop;
-    return () => patchView(ui, appSessionId, () => ({ scrollTop: el.scrollTop }));
+    const saved = viewOf(ui.getState(), appSessionId).scrollTop;
+    el.scrollTop = saved;
+    pending.current = el.scrollTop < saved ? saved : null;
+    return () => {
+      const kept = pending.current ?? el.scrollTop;
+      patchView(ui, appSessionId, () => ({ scrollTop: kept }));
+    };
   }, [ui, appSessionId]);
+  const total = virtualizer.getTotalSize();
+  useLayoutEffect(() => {
+    const want = pending.current;
+    if (want === null) return;
+    const el = scroller.current!;
+    el.scrollTop = want;
+    if (el.scrollTop >= want) pending.current = null;
+  }, [total]);
+  const scrolledByOwner = () => void (pending.current = null);
   return (
-    <div ref={scroller} data-files-scroller className="min-h-0 flex-1 overflow-auto">
+    <div ref={scroller} data-files-scroller onWheel={scrolledByOwner} onPointerDown={scrolledByOwner} onKeyDown={scrolledByOwner} className="min-h-0 flex-1 overflow-auto">
       <div role="tree" aria-label={FILES_COPY.title} className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
         {virtualizer.getVirtualItems().map((item) => {
           const row = rows[item.index];

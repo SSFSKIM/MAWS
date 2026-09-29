@@ -193,6 +193,27 @@ describe('files store', () => {
     expect(useFiles.getState().holders(S, '/r')).toBe(0);
   });
 
+  it('does not put back a listing whose answer arrives after the grace dropped it', async () => {
+    vi.useFakeTimers();
+    const gate = deferred<void>();
+    installFakeMain(async (name, input) => {
+      if (name === 'files.list') {
+        await gate.promise;
+        return answer({ root: '/r', path: input.path, entries: [], truncated: false });
+      }
+      return answer();
+    });
+    const hold = useFiles.getState().watch(S, '/r');
+    await vi.advanceTimersByTimeAsync(0); // installed
+    useFiles.getState().list(S, '/r'); // in flight, held at the gate
+    hold.release();
+    await vi.advanceTimersByTimeAsync(WATCH_GRACE_MS);
+    expect(useFiles.getState().listing(S, '/r')).toBeUndefined();
+    gate.resolve();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(useFiles.getState().listing(S, '/r')).toBeUndefined();
+  });
+
   it('unwatches a watch whose grace ran out while main was still installing it, once the install answers', async () => {
     vi.useFakeTimers();
     const gate = deferred<void>();
@@ -392,6 +413,46 @@ describe('files tool', () => {
     fireEvent.click(item('r'));
     expect(await screen.findByText('app.ts')).toBeTruthy(); // src is still expanded
     await waitFor(() => expect(useFiles.getState().holders(A, '/r/src')).toBe(1));
+  });
+
+  it('returns to its scroll offset when a tab hidden past the grace lists its directories again', async () => {
+    const many = Array.from({ length: 100 }, (_, i) => file(`/r/src/f${String(i).padStart(3, '0')}.ts`));
+    main = mainWith({ ...REPO, '/r/src': many });
+    // A scroller that clamps as a browser does: never past its content (the tree's height) less its 600 px viewport.
+    const own = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollTop');
+    const scrollTop = own ?? Object.getOwnPropertyDescriptor(Element.prototype, 'scrollTop')!;
+    const offsets = new WeakMap<Element, number>();
+    Object.defineProperty(HTMLElement.prototype, 'scrollTop', {
+      configurable: true,
+      get(this: HTMLElement) {
+        return this.hasAttribute('data-files-scroller') ? (offsets.get(this) ?? 0) : scrollTop.get!.call(this);
+      },
+      set(this: HTMLElement, value: number) {
+        if (!this.hasAttribute('data-files-scroller')) return scrollTop.set!.call(this, value);
+        const content = parseFloat((this.firstElementChild as HTMLElement | null)?.style.height ?? '0') || 0;
+        offsets.set(this, Math.max(0, Math.min(value, content - 600)));
+      },
+    });
+    try {
+      render(<TestHost />);
+      openTool();
+      fireEvent.click(await screen.findByText('r'));
+      fireEvent.click(await screen.findByText('src'));
+      await screen.findByText('f000.ts');
+      const scroller = () => document.querySelector('[data-files-scroller]') as HTMLElement;
+      act(() => void (scroller().scrollTop = 1200));
+      expect(scroller().scrollTop).toBe(1200);
+      const id = panelOf(A)!.tabs[0].id;
+      act(() => panelHost.showSummary()); // hidden
+      // …past the grace: the unwatched directories' listings are gone, the roots' stays.
+      act(() => useFiles.setState((s) => ({ listings: new Map([...s.listings].filter(([key]) => key.endsWith('\n'))) })));
+      act(() => panelHost.selectTab(id));
+      await screen.findByText('src');
+      await waitFor(() => expect(scroller().scrollTop).toBe(1200));
+    } finally {
+      if (own) Object.defineProperty(HTMLElement.prototype, 'scrollTop', own);
+      else delete (HTMLElement.prototype as { scrollTop?: number }).scrollTop;
+    }
   });
 
   it('keeps the selection through a refresh caused by files.changed, and re-lists and re-watches an invalidated directory', async () => {
