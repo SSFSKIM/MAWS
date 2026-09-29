@@ -68,7 +68,7 @@ export function WorkflowCard({ node, now, live, selected, collapsed, stopError, 
           {phases.length === 0 ? (
             <p className="text-ui-sm text-fg-muted">{BACKGROUND_COPY.phasesPending}</p>
           ) : (
-            phases.map((phase) => <Phase key={phase.index} phase={phase} now={now} onOpenAgent={onOpenAgent} />)
+            phases.map((phase) => <Phase key={phase.index} phase={phase} now={running ? now : null} onOpenAgent={onOpenAgent} />)
           )}
         </div>
       )}
@@ -82,7 +82,8 @@ export function WorkflowCard({ node, now, live, selected, collapsed, stopError, 
   );
 }
 
-function Phase({ phase, now, onOpenAgent }: { phase: WorkflowPhase; now: number; onOpenAgent: (agentId: AgentId) => void }) {
+// `now` is null once the run ended: an agent the run left unfinished has no time that still counts.
+function Phase({ phase, now, onOpenAgent }: { phase: WorkflowPhase; now: number | null; onOpenAgent: (agentId: AgentId) => void }) {
   const rows = agentTableOf(phase);
   const label = phase.state === 'queued' ? BACKGROUND_COPY.phaseQueued(phase.title) : BACKGROUND_COPY.phase(phase.title, phase.done, phase.total);
   const columns = BACKGROUND_COPY.columns;
@@ -112,14 +113,15 @@ function Phase({ phase, now, onOpenAgent }: { phase: WorkflowPhase; now: number;
   );
 }
 
-// The engine's own count once the agent reports one; a running agent's time from its start; nothing otherwise.
-function timeOf(row: WorkflowAgentTableRow, startedAt: number | null, now: number): string {
+// The engine's own count once the agent reports one; a running agent's time from its start while the run runs; nothing
+// otherwise.
+function timeOf(row: WorkflowAgentTableRow, startedAt: number | null, now: number | null): string {
   if (row.durationMs !== null) return formatElapsed(row.durationMs);
-  if (row.state !== 'done' && startedAt !== null) return formatElapsed(now - startedAt);
+  if (row.state !== 'done' && startedAt !== null && now !== null) return formatElapsed(now - startedAt);
   return '';
 }
 
-function AgentRow({ row, startedAt, now, onOpenAgent }: { row: WorkflowAgentTableRow; startedAt: number | null; now: number; onOpenAgent: (agentId: AgentId) => void }) {
+function AgentRow({ row, startedAt, now, onOpenAgent }: { row: WorkflowAgentTableRow; startedAt: number | null; now: number | null; onOpenAgent: (agentId: AgentId) => void }) {
   const mark =
     row.state === 'done' ? (
       <span role="img" aria-label={row.state} className="text-success">
@@ -127,7 +129,7 @@ function AgentRow({ row, startedAt, now, onOpenAgent }: { row: WorkflowAgentTabl
           <path d="M3.5 8.5l3 3 6-7" />
         </Icon>
       </span>
-    ) : startedAt !== null ? (
+    ) : startedAt !== null && now !== null ? (
       <span role="img" aria-label={row.state} className="size-2.5 shrink-0 animate-spin rounded-full border border-border-strong border-t-accent" />
     ) : null;
   const label = (

@@ -127,6 +127,7 @@ export const LOG_COPY = {
   notRestored: 'This log was not restored. Reopen it from its row',
   copyPath: 'Copy path',
   copied: 'Copied',
+  copyFailed: "Couldn't copy the path",
 } as const;
 
 // The summary card's Subagents and Background work sections, filled by the tools' `summary` components.

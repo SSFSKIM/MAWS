@@ -13,7 +13,7 @@ import { openLog } from '../log/LogTool';
 import { elapsedOf } from '../model/elapsed';
 import { emptyGraph, monitors, shells, workflows, type TaskNode } from '../model/task-graph';
 import { useTaskGraph } from '../store';
-import { useTicker } from '../subagents/shared';
+import { SLOW_TICK_MS, useTicker } from '../subagents/shared';
 import { AGENT_TOOL_IDS } from '../tool-ids';
 import { BackgroundSummary } from './BackgroundSummary';
 import { Group, type BackgroundSection } from './Group';
@@ -117,9 +117,10 @@ export class BackgroundHandle {
     if (!result.ok && this.state.appSessionId === appSessionId) this.update({ stopErrors: new Map(this.state.stopErrors).set(taskId, result.message) });
   };
 
-  // A pinned tab's session changed under it: that session's work, with the selection, scroll and stop errors reset.
+  // A pinned tab's session changed under it: that session's work, with the selection, scroll and stop errors reset. No
+  // session shown (the Overview) changes nothing: returning to the same session finds the tab as it was (as Subagents).
   follow = (appSessionId: AppSessionId | null) => {
-    if (appSessionId === this.state.appSessionId) return;
+    if (appSessionId === null || appSessionId === this.state.appSessionId) return;
     this.watch(appSessionId);
     this.update({ appSessionId, selected: null, collapsedRuns: new Set(), showEarlierTasks: false, scrollTop: 0, stopErrors: new Map() });
   };
@@ -162,21 +163,28 @@ function BackgroundView({ appSessionId, handle, snapshot, own, ctx }: ViewProps)
   const selected = own ? snapshot.selected : null;
   const stopErrors = own ? snapshot.stopErrors : new Map<string, string>();
 
-  const ticking = [...flows, ...shellNodes, ...monitorNodes].some((n) => elapsedOf(n, 0)?.live === true);
-  const now = useTicker(ticking && ctx.visible);
+  const expanded = snapshot.expanded;
+  // A running task's elapsed (and a running workflow's agent times) tick once a second; an ended shell's or monitor's
+  // `<ago>` on the slow tick. Neither ticks while its section is collapsed or the tool hidden.
+  const shown = [...(expanded.has('workflows') ? flows : []), ...(expanded.has('shells') ? shellNodes : []), ...(expanded.has('monitors') ? monitorNodes : [])];
+  const fast = useTicker(ctx.visible && shown.some((n) => n.status === 'running' && (n.kind === 'workflow' || elapsedOf(n, 0)?.live === true)));
+  const slow = useTicker(ctx.visible && shown.some((n) => n.kind !== 'workflow' && n.status !== 'running' && n.endedAt !== null), SLOW_TICK_MS);
+  const now = Math.max(fast, slow);
 
   const scroller = useRef<HTMLDivElement>(null);
   const [restoreTo] = useState(own ? snapshot.scrollTop : 0);
   useLayoutEffect(() => {
     if (scroller.current) scroller.current.scrollTop = restoreTo;
   }, [restoreTo]);
+  // Scrolls to the selected card on each open, and once it appears when the open came before the graph knew it (a
+  // fresh tab opened from a workflow row).
   const reveal = own ? snapshot.reveal : 0;
+  const present = selected !== null && shown.some((n) => n.taskId === selected);
   useEffect(() => {
-    if (selected === null || reveal === 0) return;
-    scroller.current?.querySelector<HTMLElement>(`[data-task-id="${CSS.escape(selected)}"]`)?.scrollIntoView?.({ block: 'nearest' });
-  }, [selected, reveal]);
+    if (!present || reveal === 0) return;
+    scroller.current?.querySelector<HTMLElement>(`[data-task-id="${CSS.escape(selected!)}"]`)?.scrollIntoView?.({ block: 'nearest' });
+  }, [selected, reveal, present]);
 
-  const expanded = snapshot.expanded;
   const openAgent = (agentId: AgentId) => ctx.openTool(AGENT_TOOL_IDS.subagents, { appSessionId, params: { agentId } });
   const running = (nodes: TaskNode[]) => nodes.filter((n) => n.status === 'running').length;
   const nothing = live && flows.length === 0 && shellNodes.length === 0 && monitorNodes.length === 0;

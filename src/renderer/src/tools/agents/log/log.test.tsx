@@ -6,17 +6,17 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, ToolUseId } from '@shared/graph/ids';
 import type { FsReadSpillInput, FsReadSpillOutput } from '@shared/ipc/schema/fs';
-import { instanceOf, panelHost, usePanelHost } from '../../../panel/host';
+import { instanceOf, panelHost, setTitle, usePanelHost } from '../../../panel/host';
 import type { PanelToolContext } from '../../../panel/tool';
 import { useLayout } from '../../../stores/layout';
 import { useSessions } from '../../../stores/sessions';
 import { A, B, panelOf, resetPanelStores } from '../../../test-support/panel';
-import { registerTranscriptActions, type Cell, type CellDetail, type CellId } from '../../../transcript';
+import { createState, registerTranscriptActions, useTranscriptStore, type Cell, type CellDetail, type CellId } from '../../../transcript';
 import { setAgentWorkClient } from '../client';
 import { fakeAgentWorkClient } from '../fake-work-client';
 import { agentTranscriptActions, registerAgentTools } from '../index';
 import { LOG_PAGE_BYTES, LOG_WINDOW_PAGES, pageWindow } from './log-model';
-import { logTool, openLog, type LogHandle, type LogParams } from './LogTool';
+import { COPY_FEEDBACK_MS, logTool, openLog, type LogHandle, type LogParams } from './LogTool';
 
 const PATH = '/private/tmp/claude-501/proj/sess/tasks/b53no4rmo.output';
 
@@ -266,6 +266,8 @@ describe('log tool: openLog and openFullLog', () => {
     act(() => agentTranscriptActions.openFullLog(cell(mcp, 'docs · search')));
     expect(logTabs(A).map((t) => logOf(t.id).path)).toEqual(['/Users/me/.claude/projects/p/s/tool-results/a.txt', '/Users/me/.claude/projects/p/s/tool-results/b.txt']);
     expect(usePanelHost.getState().titles[logTabs(A)[1].id] ?? null).toBeNull(); // the body sets the title when it renders
+    for (const tab of logTabs(A)) render(<HostedBody tabId={tab.id} />);
+    expect(logTabs(A).map((t) => usePanelHost.getState().titles[t.id])).toEqual(['a.txt', 'b.txt']);
   });
 
   it('openFullLog on a truncated shell cell without a spill opens the no-file state', () => {
@@ -289,5 +291,64 @@ describe('log tool: openLog and openFullLog', () => {
     act(() => useLayout.setState({ main: { ...useLayout.getState().main, panes: [{ tabs: [], activeTabId: null }] } as never }));
     expect(() => agentTranscriptActions.openFullLog(cell(shell({ spill: spillOf(PATH) })))).not.toThrow();
     expect(logTabs(A)).toEqual([]);
+  });
+
+  // No focused pane: the session is the one whose transcript indexes the cell's tool use; a child's key names its parent.
+  function unfocusWithTranscript(key: string): void {
+    act(() => useLayout.setState({ main: { ...useLayout.getState().main, panes: [{ tabs: [], activeTabId: null }] } as never }));
+    const state = createState(null, null);
+    state.index.toolUses.set('toolu_1' as ToolUseId, 'turn-1' as never);
+    useTranscriptStore.setState({ entries: { [key]: { state } as never } });
+  }
+  afterEach(() => useTranscriptStore.setState({ entries: {} }));
+
+  it('openFullLog falls back to the session transcript that holds the cell when no pane is focused', () => {
+    unfocusWithTranscript(A);
+    act(() => agentTranscriptActions.openFullLog(cell(shell({ spill: spillOf(PATH) }))));
+    expect(logTabs(A).map((t) => logOf(t.id).path)).toEqual([PATH]);
+  });
+
+  it('openFullLog falls back to a child transcript’s key, which names its parent session', () => {
+    unfocusWithTranscript(`${B}:a425e926e506edeb1`);
+    act(() => agentTranscriptActions.openFullLog(cell(shell({ spill: spillOf(PATH) }))));
+    expect(logTabs(B).map((t) => logOf(t.id).path)).toEqual([PATH]);
+    expect(logTabs(A)).toEqual([]);
+  });
+});
+
+// The body of a hosted Log tab, its title going to the host as ToolBody sends it.
+function HostedBody({ tabId }: { tabId: string }) {
+  const ctx: PanelToolContext = {
+    appSessionId: A, session: null, status: null, pinned: false, visible: true, focusRequest: 0, setTitle: (suffix) => setTitle(tabId, suffix), close: () => {},
+    openTool: panelHost.addTool,
+  };
+  const Body = logTool.render;
+  return <Body state={instanceOf(tabId)!.state as LogHandle} ctx={ctx} />;
+}
+
+describe('log tool: Copy path', () => {
+  const copyButton = () => screen.getByRole('button', { name: 'Copy path' });
+  afterEach(() => {
+    vi.useRealTimers();
+    Reflect.deleteProperty(navigator, 'clipboard');
+  });
+
+  it('says Copied, then returns to Copy path after a moment', async () => {
+    const writeText = vi.fn(async () => {});
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    await mount({ path: PATH, title: 'x' });
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    await act(async () => void fireEvent.click(copyButton()));
+    expect(writeText).toHaveBeenCalledWith(PATH);
+    expect(copyButton().title).toBe('Copied');
+    act(() => vi.advanceTimersByTime(COPY_FEEDBACK_MS));
+    expect(copyButton().title).toBe('Copy path');
+  });
+
+  it('says so when the clipboard refuses', async () => {
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText: async () => Promise.reject(new Error('denied')) }, configurable: true });
+    await mount({ path: PATH, title: 'x' });
+    await act(async () => void fireEvent.click(copyButton()));
+    expect(copyButton().title).toBe("Couldn't copy the path");
   });
 });

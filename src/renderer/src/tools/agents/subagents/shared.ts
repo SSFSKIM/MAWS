@@ -11,14 +11,20 @@ import type { TaskGraphEntry } from '../store';
 
 // The wall clock, advanced every `periodMs` while `active`, with no timer otherwise. A live elapsed ticks once a second
 // (mockup 03 shows seconds); a finished agent's `<ago>` needs only the slow tick C5's `useNow` keeps (30 s), gated here
-// by the tool's visibility, which `useNow` cannot be.
+// by the tool's visibility, which `useNow` cannot be. The clock is read again whenever the ticker (re)activates, so a
+// list shown again does not read a stale time for a whole period.
 export const SLOW_TICK_MS = 30_000;
 export function useTicker(active: boolean, periodMs = 1000): number {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (!active) return;
-    const timer = setInterval(() => setNow(Date.now()), periodMs);
-    return () => clearInterval(timer);
+    const tick = () => setNow(Date.now());
+    const first = setTimeout(tick, 0); // the clock as the ticker (re)activates, off the effect's own pass
+    const timer = setInterval(tick, periodMs);
+    return () => {
+      clearTimeout(first);
+      clearInterval(timer);
+    };
   }, [active, periodMs]);
   return now;
 }

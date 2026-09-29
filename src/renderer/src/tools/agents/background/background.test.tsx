@@ -22,6 +22,7 @@ import { setAgentWorkClient, type AgentWorkClient } from '../client';
 import { fakeAgentWorkClient, type FakeAgentWorkClient } from '../fake-work-client';
 import { openLog } from '../log/LogTool';
 import { useTaskGraph } from '../store';
+import { SLOW_TICK_MS } from '../subagents/shared';
 import { BackgroundSummary } from './BackgroundSummary';
 import { backgroundTool, type BackgroundHandle, type BackgroundParams } from './BackgroundTool';
 
@@ -172,13 +173,61 @@ describe('background work', () => {
     const wf = card('wayue3on6');
     expect(within(wf).getByRole('heading').textContent).toBe('Two echo agents in one phase');
     const line = wf.querySelector('[data-part="line"]')?.textContent;
-    expect(line).toMatch(/^workflow maws-probe · .+ · 2 agents · /);
+    expect(line).toMatch(/^workflow maws-probe · .+ · 2 agents · tokens unavailable$/); // no row has reported tokens at seq 82
     expect(phases('wayue3on6')).toEqual(['Echo 0/2']);
     expect(Array.from(wf.querySelectorAll('th')).map((th) => th.textContent)).toEqual(['Agent', 'Model', 'Tokens', 'Time']);
     push(upTo(workflow, 93).filter((e) => (e.seq ?? 0) > 82));
     expect(phases('wayue3on6')).toEqual(['Echo 2/2']);
     expect(tableRows('wayue3on6').map((cells) => cells[0])).toEqual(['alpha', 'beta']);
     expect(tableRows('wayue3on6').every((cells) => cells[2] !== '' && cells[3] !== '')).toBe(true); // Tokens and Time filled
+    expect(card('wayue3on6').querySelector('[data-part="line"]')?.textContent).toMatch(/ · 17\.7k tokens$/); // alpha's 8,861 + beta's 8,857
+  });
+
+  it('a run that ended leaves an unfinished agent’s time blank, with no spinner', async () => {
+    const progress = [
+      { type: 'workflow_phase', index: 1, title: 'Wait' },
+      { type: 'workflow_agent', index: 1, label: 'slow', phaseIndex: 1, state: 'running', startedAt: Date.parse(T) },
+    ];
+    await mount({
+      events: [
+        event('task.started', { taskId: 'wf1', taskType: 'local_workflow', description: 'One slow agent', workflowName: 'demo' }, { seq: 1, at: T }),
+        event('workflow.progress', { taskId: 'wf1', workflowName: 'demo', progress }, { seq: 2 }),
+        event('task.notification', { taskId: 'wf1', status: 'stopped' }, { seq: 3 }),
+      ],
+    });
+    expect(tableRows('wf1')).toEqual([['slow', '', '', '']]);
+    expect(card('wf1').querySelector('[role="img"]')).toBeNull();
+  });
+
+  it('an ended shell’s ago advances on the slow tick while shown, and reads the clock again when shown again', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'setTimeout', 'clearTimeout', 'Date'] });
+    vi.setSystemTime(Date.parse('2026-09-28T10:03:00.000Z')); // five seconds after the shell's notification (seq 71)
+    const { handle, rerender } = await mount({ events: upTo(stopOn, 71) });
+    const line = () => document.querySelector('[data-shell="b53no4rmo"] [data-part="line"]')?.textContent;
+    expect(line()).toBe('Sleep 30s then write BG_DONE to bg.txt · completed just now');
+    act(() => vi.advanceTimersByTime(4 * SLOW_TICK_MS));
+    expect(line()).toBe('Sleep 30s then write BG_DONE to bg.txt · completed 2m ago');
+    rerender(<Mounted state={handle} visible={false} />);
+    vi.setSystemTime(Date.now() + 10 * 60_000); // ten minutes pass while the tool is hidden: no timer runs
+    rerender(<Mounted state={handle} visible />);
+    act(() => vi.advanceTimersByTime(0));
+    expect(line()).toBe('Sleep 30s then write BG_DONE to bg.txt · completed 12m ago');
+  });
+
+  it('open({ taskId }) on a fresh tab scrolls to the card once the graph shows it', async () => {
+    const scrolled: string[] = [];
+    const original = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = function (this: HTMLElement) {
+      scrolled.push(this.dataset.taskId ?? '');
+    };
+    try {
+      await mount({ events: [], params: { taskId: 'wayue3on6' } });
+      expect(scrolled).toEqual([]);
+      push(upTo(workflow, 82));
+      expect(scrolled).toEqual(['wayue3on6']);
+    } finally {
+      HTMLElement.prototype.scrollIntoView = original;
+    }
   });
 
   it('reads Phase · Queued only while no agent of the phase has started, and an untitled phase as Phase <index>', async () => {
@@ -304,6 +353,14 @@ describe('background work', () => {
     expect(fake.calls.filter((c) => c === 'off eventBatch')).toHaveLength(1);
   });
 
+  it('no session shown (the Overview) leaves a pinned tab as it was', async () => {
+    const { handle } = await mount({ events: upTo(workflow, 82), params: { taskId: 'wayue3on6' } });
+    const before = handle.snapshot();
+    act(() => handle.follow(null));
+    expect(handle.snapshot()).toBe(before);
+    expect(fake.calls).not.toContain('off eventBatch');
+  });
+
   it('dispose releases the store’s watch', async () => {
     const { handle, unmount } = await mount({ events: [] });
     unmount();
@@ -337,6 +394,18 @@ describe('background work', () => {
     });
     expect(summary().textContent).toContain('1 workflow run on disk');
     expect(summary().textContent).toContain('Shells and monitors are known only while the session runs here');
+  });
+
+  it('the summary of a disk-only session whose runs could not be read says why', async () => {
+    seedSessions(null);
+    render(<BackgroundSummary appSessionId={A} open={vi.fn()} />);
+    await act(async () => {
+      await fake.answer('subagents', []);
+      await fake.fail('workflows', 'unknown app session');
+    });
+    const text = document.querySelector<HTMLElement>('[data-summary="background"]')!.textContent;
+    expect(text).toContain('Workflow runs unavailable: unknown app session');
+    expect(text).toContain('Shells and monitors are known only while the session runs here');
   });
 });
 
