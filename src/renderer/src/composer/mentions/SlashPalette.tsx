@@ -4,13 +4,14 @@
 // registered widget opens; a headless command is inserted as `/<name> ` for the engine to parse from the prompt; a MAWS
 // action runs; an unavailable row stays listed and disabled with its hint.
 import type { Editor, Range } from '@tiptap/core';
-import { useMemo } from 'react';
-import { isActionEnabled, runAction } from '../../keymap/actions-runtime';
+import { useMemo, useSyncExternalStore } from 'react';
+import { enabledActions, runAction, subscribeActions } from '../../keymap/actions-runtime';
 import { mawsItems, ORIGIN_LABEL, slashItems, type SlashItem } from './items';
 import { Listbox, useListKeys, type PopupItem, type PopupProps } from './popup';
 import { rankItems, rememberChosen } from './rank';
 
 const ROW_LIMIT = 40;
+const enabledKey = () => enabledActions().join(' '); // a string, so an unchanged set is an unchanged snapshot
 type Row = PopupItem & { item: SlashItem };
 
 function rowOf(item: SlashItem, openWidget: (name: string) => void): Row {
@@ -51,7 +52,8 @@ function rowOf(item: SlashItem, openWidget: (name: string) => void): Row {
 
 export function SlashPalette(props: PopupProps) {
   const { catalog, widgets, openWidget } = props.ctx;
-  const all = useMemo(() => slashItems(catalog, widgets, mawsItems(isActionEnabled)), [catalog, widgets]);
+  const enabled = useSyncExternalStore(subscribeActions, enabledKey); // the MAWS rows follow action registrations
+  const all = useMemo(() => slashItems(catalog, widgets, mawsItems((id) => enabled.split(' ').includes(id))), [catalog, widgets, enabled]);
   const rows = useMemo(() => rankItems(props.query, all).slice(0, ROW_LIMIT).map((item) => rowOf(item, (name) => openWidget(name, ''))), [all, props.query, openWidget]);
   const { active, setActive, choose } = useListKeys(props, rows);
   if (rows.length === 0) return null;
