@@ -14,4 +14,6 @@ export interface WidgetsHarnessApi {
   read(command: string, input: Record<string, unknown>): Promise<unknown>;
   // A widget's control function with the arguments given verbatim: setModel, setEffort, applyFlagSettings, setPermissionMode.
   control(name: string, input: Record<string, unknown>): Promise<unknown>;
+  // M4: the calls the page's stand-in for C10's `session.start` received (the route switch's restart), in order.
+  starts(): { appSessionId: string; options: Record<string, unknown> }[];
 }

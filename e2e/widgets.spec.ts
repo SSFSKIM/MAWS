@@ -394,6 +394,113 @@ test.describe('interactive', () => {
     await expect(rows.nth(1)).toContainText('SDK wire inventory');
     await expect(rows.nth(1).getByRole('button', { name: 'Resume' })).toBeDisabled(); // C10's
   });
+
+  // ---- M4: Session info and the route switch, beside the composer on the same page ------------------------------------
+  // Session info is C11's panel tool rendered for the shown session; the routing footer is C11's in C7's usage popover
+  // body. C10's `session.start` does not exist on this branch: the page stands in for it (it records the call and
+  // answers `starting`), and the case moves the backend's status to ready on the new route as C10's launch would.
+
+  test('Session info renders the six sections and derives the lane from the status and the model', async ({ backend }) => {
+    const { page, app } = backend;
+    await openPage(page, { appSessionId: READY, mode: 'interactive' });
+    const info = page.locator(`[data-session-info="${READY}"]`);
+    for (const title of ['Engine', 'Model', 'Gateway', 'Permissions', 'Context, usage, cost', 'Hooks and MCP']) await expect(info.getByRole('region', { name: title })).toBeVisible();
+    await expect(valueOf(info, 'Route')).toHaveText('Gateway · ClaudeUsage relay · http://127.0.0.1:8641');
+    await expect(valueOf(info, 'Context')).toHaveText('30,433 of 200,000 · 15% · autocompact at 167,000');
+    const lane = valueOf(info, 'Auto-mode lane');
+    const SERVER = 'Server · reviews ride on the main request · no charge · model chosen server-side';
+    await expect(lane, 'the scenario status on Sonnet, get_status reading Enabled (auto-routed seq 145)').toHaveText(SERVER);
+
+    await page.evaluate((id) => (window as unknown as WidgetsWindow).__maws_widgets.control('setModel', { appSessionId: id, model: 'claude/astra' }), READY);
+    await expect(lane).toHaveText('Local (expected) · a GPT route carries no Anthropic verdict');
+
+    // C3's observation in the open turn (the unavailable-safeguard verdict or the billing notice)
+    await app.evaluate((_, id) => {
+      const b = (globalThis as unknown as BackendGlobal).__maws_widget_backend;
+      const turn = b.emitTurnStarted(id as never);
+      b.emitStatus(id as never, { gateway: { ...b.status(id as never).gateway, localLane: { observedInTurn: turn, at: new Date().toISOString() } } });
+    }, READY);
+    await expect(lane).toHaveText(/^Local · Sonnet 5 through .+ · counted as usage · the engine's notice is in the transcript$/);
+
+    // the next turn on Sonnet: C3 cleared the observation at its turn.started
+    await app.evaluate((_, id) => void (globalThis as unknown as BackendGlobal).__maws_widget_backend.emitTurnStarted(id as never), READY);
+    await page.evaluate((id) => (window as unknown as WidgetsWindow).__maws_widgets.control('setModel', { appSessionId: id, model: 'sonnet' }), READY);
+    await expect(lane).toHaveText(SERVER);
+    expect(backend.consoleErrors()).toEqual([]);
+  });
+
+  const TWO_TASKS = [
+    { taskId: 'task-1', taskType: 'local_agent', description: 'Sleep 120 s', ambient: false },
+    { taskId: 'task-2', taskType: 'local_workflow', description: 'Index the repository', ambient: false },
+  ];
+  // The session on a gateway alias with two background tasks, as the switch case starts it.
+  const onAstraWithWork = (maws: MawsLaunch) =>
+    maws.app.evaluate(
+      (_, [id, tasks]) => void (globalThis as unknown as BackendGlobal).__maws_widget_backend.emitStatus(id as never, { model: { requested: 'claude/astra', resolved: 'claude/astra' }, backgroundTasks: tasks as never }),
+      [READY, TWO_TASKS] as const,
+    );
+  const LIFECYCLE = ['session.status', 'session.interrupt', 'session.stop', 'session.queue.list', 'session.queue.setPaused'];
+
+  test('the switch names background work, requires a Claude model, then re-reads, stops and starts direct in order', async ({ backend }) => {
+    const { page, app } = backend;
+    await openPage(page, { appSessionId: READY, mode: 'interactive' });
+    await onAstraWithWork(backend);
+    const usage = page.getByRole('region', { name: 'Account usage' });
+    await expect(usage).toContainText("Routed through ClaudeUsage's relay");
+    await usage.getByRole('button', { name: 'Switch to Direct…' }).click();
+
+    const sheet = page.getByRole('alertdialog', { name: 'Switch this session to Direct?' });
+    await expect(sheet.getByRole('list', { name: 'Background work' }).getByRole('listitem')).toHaveText(['Sleep 120 s', 'Index the repository']);
+    const confirm = sheet.getByRole('button', { name: 'Stop them and switch' });
+    await expect(confirm, 'a Claude model first').toBeDisabled();
+    await sheet.getByRole('radio', { name: /^Sonnet 5/ }).click();
+    await expect(confirm).toBeEnabled();
+    const before = (await commandsOf(backend)).length;
+    await confirm.click();
+
+    await expect.poll(() => page.evaluate(() => (window as unknown as WidgetsWindow).__maws_widgets.starts())).toEqual([{ appSessionId: READY, options: { gateway: 'direct', model: 'sonnet' } }]);
+    const lifecycle = (await commandsOf(backend)).slice(before).map((c) => c.command).filter((c) => LIFECYCLE.includes(c));
+    expect(lifecycle, 'no turn was open: no interrupt').not.toContain('session.interrupt');
+    expect(lifecycle.filter((c) => c === 'session.stop')).toHaveLength(1);
+    expect(lifecycle.indexOf('session.status'), 'the recheck precedes the stop').toBeLessThan(lifecycle.indexOf('session.stop'));
+
+    // C10's launch, stood in for: the process ready on the direct route with the chosen model
+    await app.evaluate((_, id) => {
+      const b = (globalThis as unknown as BackendGlobal).__maws_widget_backend;
+      b.emitStatus(id as never, {
+        process: 'ready', exit: null, launchId: 'launch-2', backgroundTasks: [], model: { requested: 'sonnet', resolved: 'claude-sonnet-5[1m]' },
+        gateway: { mode: 'direct', baseUrl: null, verified: 'direct', autoModeServer: 'enabled', localLane: null },
+      });
+    }, READY);
+    await expect(page.getByText('Settings idle probe restarted direct · on Sonnet 5')).toBeVisible();
+    await expect(usage.getByRole('button', { name: 'Switch to gateway…' })).toBeVisible();
+    await expect(usage).toContainText("Direct · engine's own login");
+    await expect(valueOf(page.locator(`[data-session-info="${READY}"]`), 'Route')).toHaveText(/^Direct · engine's own login/);
+    expect(backend.consoleErrors()).toEqual([]);
+  });
+
+  test('work that started after the confirm returns the switch to its sheet naming it, and nothing is stopped', async ({ backend }) => {
+    const { page, app } = backend;
+    await openPage(page, { appSessionId: READY, mode: 'interactive' });
+    await onAstraWithWork(backend);
+    await page.getByRole('region', { name: 'Account usage' }).getByRole('button', { name: 'Switch to Direct…' }).click();
+    const sheet = page.getByRole('alertdialog', { name: 'Switch this session to Direct?' });
+    await sheet.getByRole('radio', { name: /^Sonnet 5/ }).click();
+    // a third task between the confirm and the stop
+    await app.evaluate(
+      (_, [id, tasks]) => void (globalThis as unknown as BackendGlobal).__maws_widget_backend.emitStatus(id as never, { backgroundTasks: tasks as never }),
+      [READY, [...TWO_TASKS, { taskId: 'task-3', taskType: 'local_agent', description: 'A third agent', ambient: false }]] as const,
+    );
+    await sheet.getByRole('button', { name: 'Stop them and switch' }).click();
+    const again = page.getByRole('alertdialog', { name: 'Switch this session to Direct?' });
+    await expect(again.getByRole('list', { name: 'Background work' }).getByRole('listitem')).toHaveText(['Sleep 120 s', 'Index the repository', 'A third agent']);
+    await expect(again.getByRole('alert')).toHaveText('New background work started since you confirmed · check the list again');
+    expect((await commandsOf(backend)).map((c) => c.command)).not.toContain('session.stop');
+    await again.getByRole('button', { name: 'Cancel' }).click();
+    await expect(again).toBeHidden();
+    expect((await commandsOf(backend)).map((c) => c.command)).not.toContain('session.stop');
+    expect(await page.evaluate(() => (window as unknown as WidgetsWindow).__maws_widgets.starts())).toEqual([]);
+  });
 });
 
 test.describe('replay conformance', () => {

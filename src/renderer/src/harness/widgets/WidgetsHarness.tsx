@@ -10,6 +10,17 @@
 import { QueryClientProvider } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
+import { ToastHost } from '../../app/ToastHost';
+import { provideSessionStart, type StartOptions } from '../../gateway/c10-seam';
+import { connectDirectLogin } from '../../gateway/direct-login';
+import { GatewayDialogs } from '../../gateway/SwitchSheet';
+import { UsageFooter } from '../../gateway/UsageFooter';
+import { registerUsagePopoverFooter } from '../../statusline';
+import { UsagePopoverBody } from '../../statusline/UsagePopover';
+import { useSessions } from '../../stores/sessions';
+import { sessionInfoTool } from '../../tools/session-info';
+import { panelHost } from '../../panel/host';
+import type { PanelToolContext } from '../../panel/tool';
 import { Composer, ComposerAppKeys, WIDGET_COMMANDS, type WidgetCommandName } from '../../composer';
 import { slashWidget, useRegisteredWidgets } from '../../composer/mentions/widgets';
 import { connectShell } from '../../ipc/events';
@@ -33,6 +44,32 @@ declare global {
 // The widgets mounted together in passive mode: M2's fourteen engine-read widgets, and the model and compact widgets
 // (M3), whose reads (`list_models`, the summary `get_context_usage`) the replay-conformance driver issues.
 const PASSIVE: readonly WidgetCommandName[] = ['model', 'permissions', 'usage', 'context', 'compact', 'config', 'plugins', 'mcp', 'sandbox', 'hooks', 'memory', 'skills', 'agents', 'status', 'diff', 'export'];
+
+// M4: the page's stand-in for C10's `session.start` (the route switch's restart; C10 seam): it records the call and
+// answers `starting`; the spec then moves the backend's status to ready on the new route, as C10's launch would.
+const starts: { appSessionId: string; options: StartOptions }[] = [];
+const standInStart = { start: async (appSessionId: AppSessionId, options: StartOptions) => (starts.push({ appSessionId, options }), { status: 'starting' as const }), onSetupFailure: () => () => {} };
+
+// M4: the session's routing facts as C7's usage popover shows them (its body with C11's footer), and C11's Session info
+// tool as C8a's host renders it for the shown session, beside the composer.
+function RoutePane({ appSessionId }: { appSessionId: AppSessionId }) {
+  const record = useSessions((s) => s.records.get(appSessionId) ?? null);
+  const status = useSessions((s) => s.engine.get(appSessionId) ?? null);
+  const [state] = useState(() => sessionInfoTool.createState({ appSessionId, session: record, instanceId: 'session-info:harness', params: undefined }));
+  if (!record) return null;
+  const ctx: PanelToolContext = { appSessionId, session: record, status, pinned: false, visible: true, focusRequest: 0, setTitle: () => {}, close: () => {}, openTool: panelHost.addTool };
+  const Info = sessionInfoTool.render;
+  return (
+    <aside className="flex min-w-0 flex-col gap-3">
+      <section aria-label="Account usage" className="rounded-md border border-border bg-bg-raised">
+        <UsagePopoverBody record={record} status={status} />
+      </section>
+      <section aria-label="Session info" className="max-h-[32rem] rounded-md border border-border bg-bg-raised">
+        <Info state={state} ctx={ctx} />
+      </section>
+    </aside>
+  );
+}
 
 // The widgets' own control functions, for the scripted driver (`window.__maws_widgets.control`), called with the
 // recorded arguments verbatim; nothing else calls them through this table.
@@ -72,11 +109,12 @@ function OpenedWidget({ appSessionId, name, args, close }: { appSessionId: AppSe
 
 function Interactive({ appSessionId, opened, open, close }: { appSessionId: AppSessionId; opened: { name: string; args: string } | null; open(name: string): void; close(): void }) {
   return (
-    <main className="grid h-full grid-cols-[minmax(0,1fr)_12rem] gap-6 overflow-auto bg-bg p-6 text-ui text-fg">
+    <main className="grid h-full grid-cols-[minmax(0,1fr)_22rem_12rem] gap-6 overflow-auto bg-bg p-6 text-ui text-fg">
       <section data-pane={0} aria-label="pane 0" onFocusCapture={() => useLayout.getState().focusPane(0)} className="mt-auto flex min-w-0 flex-col gap-3">
         {opened && <OpenedWidget appSessionId={appSessionId} name={opened.name} args={opened.args} close={close} />}
         <Composer key={appSessionId} appSessionId={appSessionId} paneIndex={0} />
       </section>
+      <RoutePane appSessionId={appSessionId} />
       <nav aria-label="Widget picker" className="flex flex-col gap-1 self-start">
         {WIDGET_COMMANDS.map(({ name }) => (
           <button key={name} type="button" onClick={() => open(name)} className="rounded-sm border border-border px-2 py-0.5 text-left text-ui-sm text-fg-muted hover:bg-bg-hover">
@@ -114,7 +152,7 @@ export function WidgetsHarness() {
     const theme = new URLSearchParams(location.search).get('theme');
     if (theme === 'dark' || theme === 'light') document.documentElement.dataset.theme = theme;
     mirrorLayout(start.pane);
-    const offs = [connectShell(), connectKeys(), connectUsage(), registerAllWidgets()];
+    const offs = [connectShell(), connectKeys(), connectUsage(), registerAllWidgets(), registerUsagePopoverFooter(UsageFooter), connectDirectLogin(queryClient), provideSessionStart(standInStart)];
     window.__maws_widgets = {
       show: (next) => {
         mirrorLayout(next);
@@ -124,6 +162,7 @@ export function WidgetsHarness() {
       open: (name, args = '') => setOpened({ name, args }),
       read: (command, input) => readIntoCache(queryClient, command as SessionRead, input as never),
       control: (name, input) => (CONTROLS[name] ? CONTROLS[name](input as never) : Promise.reject(new Error(`no widget control named ${name}`))),
+      starts: () => starts.map((call) => ({ appSessionId: call.appSessionId, options: { ...call.options } })),
     };
     return () => {
       offs.forEach((off) => off());
@@ -142,6 +181,8 @@ export function WidgetsHarness() {
         <Interactive key={appSessionId} appSessionId={appSessionId} opened={opened} open={(name) => setOpened({ name, args: '' })} close={() => setOpened(null)} />
       )}
       <ComposerAppKeys />
+      <GatewayDialogs />
+      <ToastHost />
     </QueryClientProvider>
   );
 }
