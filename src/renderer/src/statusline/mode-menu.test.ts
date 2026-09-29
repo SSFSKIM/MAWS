@@ -43,6 +43,18 @@ describe('mode menu', () => {
     expect(fake.invoked('session.setPermissionMode')).toEqual([{ appSessionId: 'a' as AppSessionId, mode: 'auto' }]);
   });
 
+  // C11 start: the transport branch in words (C11's widgets set the mode through this binding too)
+  it('a rejected invoke moves nothing and says the engine did not answer, or why the host refused', async () => {
+    const fake = fakeClient();
+    const binding = liveModeBinding(record('a'), status('a'), models, fake.client);
+    const timedOut = binding.set('plan');
+    await fake.fail('session.setPermissionMode'); // code internal
+    expect(await timedOut).toEqual({ ok: false, error: 'failed · showing the last value it reported' });
+    const bridge = { invoke: async () => ({ ok: false, error: { code: 'timeout', message: 'set_permission_mode unanswered after 8 s' } }), on: () => () => {} } as unknown as Parameters<typeof liveModeBinding>[3];
+    expect(await liveModeBinding(record('a'), status('a'), models, bridge).set('plan')).toEqual({ ok: false, error: 'The engine did not answer · showing the last value it reported' });
+  });
+  // C11 end
+
   it('a session with no ready process offers no change', () => {
     const exited = { ...status('a'), process: 'exited' as const };
     expect(liveModeBinding(record('a'), exited, models).disabled).toBe('The session is not running');

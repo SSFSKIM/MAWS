@@ -3,6 +3,7 @@
 // Backticks in a sentence mark code, which the frame renders in mono.
 import type { WidgetCommandName } from '../composer';
 import { NOT_RUNNING } from '../statusline/mode-menu';
+import { LAST_VALUE, NO_ANSWER } from './transport';
 
 export interface WidgetFoot {
   readWith: string; // the engine's read or control, by its wire name
@@ -61,7 +62,7 @@ export const WIDGET_FOOT: Record<WidgetCommandName, WidgetFoot> = {
 };
 
 // The frame.
-export const FRAME = { reading: 'Reading…', noAnswer: 'The engine did not answer', lastValue: 'showing the last value it reported', readWith: 'Read with', close: (title: string) => `Close ${title}` };
+export const FRAME = { reading: 'Reading…', noAnswer: NO_ANSWER, lastValue: LAST_VALUE, readWith: 'Read with', close: (title: string) => `Close ${title}` };
 
 // Words several widgets share.
 export const SHARED = { none: 'none', on: 'on', off: 'off', yes: 'yes', no: 'no', reveal: 'Reveal', revealRefused: 'Finder was not opened for this path' };

@@ -8,6 +8,7 @@ import type { EngineSessionStatus } from '@shared/engine/status';
 import type { MawsBridge } from '@shared/ipc/schema';
 import type { ListModelsResponse } from '@shared/wire/control';
 import { ipc } from '../ipc/client';
+import { transportWords } from '../widgets/transport'; // C11
 
 type ModelOption = ListModelsResponse['models'][number]; // C3's `session.listModels` entry
 
@@ -79,7 +80,7 @@ export function liveModeBinding(record: Pick<SessionRecord, 'appId' | 'permissio
     autoUnavailable: autoUnavailableReason(models, status?.model ?? record.model),
     async set(next) {
       const result = await client.invoke('session.setPermissionMode', { appSessionId: record.appId, mode: next });
-      if (!result.ok) return { ok: false, error: result.error.message };
+      if (!result.ok) return { ok: false, error: transportWords(result.error) }; // C11: a rejected invoke in words, the mode kept
       // C3's host answers a refusal with the control error's message beside its code: the code's words come first
       if (result.value.refusal !== null) return { ok: false, error: MODE_REFUSAL_WORDS[result.value.refusal] };
       if (result.value.error !== null) return { ok: false, error: result.value.error };

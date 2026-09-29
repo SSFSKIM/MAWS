@@ -8,13 +8,13 @@ import * as z from 'zod';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { PermissionMode } from '@shared/graph/enums';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { ListPermissionRulesResponse } from '@shared/wire/control';
-import { ipc } from '../ipc/client';
-import { liveModeBinding, ModeMenu, MODE_REFUSAL_WORDS } from '../statusline';
+import type { SessionRecord } from '@shared/graph/session';
+import type { ListModelsResponse, ListPermissionRulesResponse } from '@shared/wire/control';
+import { liveModeBinding, ModeMenu, MODE_REFUSAL_WORDS, NOT_RUNNING } from '../statusline';
 import { useSessions } from '../stores/sessions';
 import { FRAME, PERMISSIONS, WIDGET_FOOT, WIDGET_TITLE } from './copy';
 import { Group, Mono, parseEach, Row, Rows } from './parts';
-import { transportWords, useEngineRead } from './read';
+import { useEngineRead } from './read';
 import { WidgetFrame } from './WidgetFrame';
 
 const DescriptionSchema = z.looseObject({ prefix: z.string(), emphasis: z.string().optional() });
@@ -124,26 +124,25 @@ export function PermissionsBody({ view, withMode = true }: { view: PermissionsVi
   );
 }
 
-// The segment's control (and the harness's `control('setPermissionMode', …)`): C3's `{ effective, refusal, error }`
-// with the refusal in C7's words, and a rejected invoke as the transport branch, which moves nothing.
-export async function setPermissionMode(input: { appSessionId: AppSessionId; mode: PermissionMode }): Promise<{ ok: true } | { ok: false; error: string }> {
-  const result = await ipc.invoke('session.setPermissionMode', input);
-  if (!result.ok) return { ok: false, error: transportWords(result.error) };
-  if (result.value.refusal !== null) return { ok: false, error: MODE_REFUSAL_WORDS[result.value.refusal] };
-  if (result.value.error !== null) return { ok: false, error: result.value.error };
-  return { ok: true };
+// C7's live binding for a session (the chip's and the status line's, so all three read the same effective mode, word
+// refusals and a rejected invoke alike, and set through the same `session.setPermissionMode`).
+const bindingOf = (appSessionId: AppSessionId, record: SessionRecord | null, status: EngineSessionStatus, models: ListModelsResponse['models'] | null) =>
+  liveModeBinding(record ?? { appId: appSessionId, permissionMode: status.permissionMode, model: status.model }, status, models);
+
+// The harness's `control('setPermissionMode', …)`: C7's binding's own `set`, over the session as the stores hold it.
+export function setPermissionMode(input: { appSessionId: AppSessionId; mode: PermissionMode }): Promise<{ ok: true } | { ok: false; error: string }> {
+  const { records, engine } = useSessions.getState();
+  const status = engine.get(input.appSessionId);
+  if (!status) return Promise.resolve({ ok: false, error: NOT_RUNNING });
+  return bindingOf(input.appSessionId, records.get(input.appSessionId) ?? null, status, null).set(input.mode);
 }
 
-// C7's mode menu over C7's live binding (the chip's and the status line's, so all three read the same effective mode
-// and word refusals alike); the models it checks auto against come through the widget's own read, which a passive
-// harness does not issue.
+// C7's mode menu over that binding; the models it checks auto against come through the widget's own read, which a
+// passive harness does not issue (C7's useLiveModeBinding reads them whenever the process is ready).
 function ModeSegment({ appSessionId, status }: { appSessionId: AppSessionId; status: EngineSessionStatus }) {
   const record = useSessions((s) => s.records.get(appSessionId) ?? null);
   const models = useEngineRead('session.listModels', { appSessionId });
-  const binding = useMemo(
-    () => ({ ...liveModeBinding(record ?? { appId: appSessionId, permissionMode: status.permissionMode, model: status.model }, status, models.data?.models ?? null), set: (mode: PermissionMode) => setPermissionMode({ appSessionId, mode }) }),
-    [record, appSessionId, status, models.data],
-  );
+  const binding = useMemo(() => bindingOf(appSessionId, record, status, models.data?.models ?? null), [record, appSessionId, status, models.data]);
   return <ModeMenu binding={binding} />;
 }
 

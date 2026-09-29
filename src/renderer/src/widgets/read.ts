@@ -8,7 +8,7 @@ import { useQuery, type QueryClient } from '@tanstack/react-query';
 import { createContext, useContext, useEffect, useRef } from 'react';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { CommandInput, CommandOutput, IpcError } from '@shared/ipc/schema';
+import type { CommandInput, CommandOutput } from '@shared/ipc/schema';
 import { ipc } from '../ipc/client';
 import { IpcCommandError, type QueryCommand } from '../ipc/query';
 import { useSessions } from '../stores/sessions';
@@ -114,4 +114,4 @@ export function useEngineRead<N extends SessionRead>(command: N, input: CommandI
 
 // A control's transport branch (Interfaces "Transport and timeout errors are the separate branch"): a rejected invoke
 // infers nothing; the control keeps the value the engine last reported and says why.
-export const transportWords = (error: IpcError): string => `${error.code === 'timeout' ? FRAME.noAnswer : error.message} · ${FRAME.lastValue}`;
+export { transportWords } from './transport';
