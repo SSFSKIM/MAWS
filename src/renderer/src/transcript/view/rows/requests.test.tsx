@@ -6,7 +6,7 @@ import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-libra
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { loadEventFixture, loadJournal, loadSyntheticJournal } from '../../../../../../test/support/fixtures';
 import { useTranscriptStore } from '../../../stores/transcript';
-import { journalToEvents } from '../../dev/replay-stub';
+import { journalToEvents } from '../../dev/journal';
 import { rowId } from '../../model/keys';
 import type { Row } from '../../model/rows';
 import { api, builder, request, tool, uuid } from '../../model/test-events';

@@ -1,7 +1,7 @@
 [
   {
     "at": "2026-09-28T10:11:36.222Z",
-    "id": "time:error:j14#0",
+    "id": "time:error:replay:journal:14:0",
     "kind": "time",
     "label": "Yesterday 10:11 AM",
     "turnId": null
@@ -9,7 +9,7 @@
   {
     "at": "2026-09-28T10:11:36.222Z",
     "attempt": null,
-    "id": "error:j14#0",
+    "id": "error:replay:journal:14:0",
     "kind": "error",
     "lostAttentionCount": 0,
     "scope": "exit",

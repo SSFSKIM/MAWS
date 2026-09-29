@@ -108,7 +108,7 @@
   {
     "at": "2026-09-28T09:56:27.890Z",
     "attempt": null,
-    "id": "error:j68#0",
+    "id": "error:replay:journal:68:0",
     "kind": "error",
     "lostAttentionCount": 0,
     "scope": "exit",

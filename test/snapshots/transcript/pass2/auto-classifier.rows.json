@@ -239,7 +239,7 @@
   {
     "at": "2026-09-28T09:57:38.142Z",
     "attempt": null,
-    "id": "error:j105#0",
+    "id": "error:replay:journal:105:0",
     "kind": "error",
     "lostAttentionCount": 0,
     "scope": "exit",

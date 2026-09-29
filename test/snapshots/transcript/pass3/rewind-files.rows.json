@@ -1,0 +1,452 @@
+[
+  {
+    "at": "2026-09-29T01:26:29.572Z",
+    "id": "time:turn:f64e9148-f98a-4092-b4d7-178a326216ae",
+    "kind": "time",
+    "label": "Today 1:26 AM",
+    "turnId": "turn:f64e9148-f98a-4092-b4d7-178a326216ae"
+  },
+  {
+    "at": "2026-09-29T01:26:29.572Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:f64e9148-f98a-4092-b4d7-178a326216ae",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "f64e9148-f98a-4092-b4d7-178a326216ae",
+    "steer": false,
+    "text": "Use the Write tool to create notes.txt containing exactly the word ALPHA.",
+    "turnId": "turn:f64e9148-f98a-4092-b4d7-178a326216ae"
+  },
+  {
+    "at": "2026-09-29T01:26:29.572Z",
+    "autoDenied": 0,
+    "denied": 0,
+    "endedAt": "2026-09-29T01:26:35.083Z",
+    "expanded": true,
+    "firstDeniedCell": null,
+    "id": "divider:turn:f64e9148-f98a-4092-b4d7-178a326216ae",
+    "kind": "divider",
+    "origin": "human",
+    "startedAt": "2026-09-29T01:26:29.592Z",
+    "state": "completed",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 0,
+        "exploration": 0,
+        "files": 1,
+        "mcp": 0,
+        "other": 0,
+        "skills": 0,
+        "web": 0
+      },
+      "childAgents": 0,
+      "costUsd": 0.1314874,
+      "denials": [],
+      "durationMs": 5489,
+      "model": "claude-sonnet-5-5",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 0,
+        "reviewed": 1
+      },
+      "terminalReason": "completed",
+      "toolCalls": 1,
+      "usage": {
+        "cacheCreationInputTokens": 14076,
+        "cacheReadInputTokens": 49997,
+        "inputTokens": 4,
+        "outputTokens": 184,
+        "thinkingTokens": 0
+      }
+    },
+    "toolCalls": 1,
+    "turnId": "turn:f64e9148-f98a-4092-b4d7-178a326216ae"
+  },
+  {
+    "agent": null,
+    "at": "2026-09-29T01:26:31.361Z",
+    "category": "files",
+    "classification": {
+      "category": "files",
+      "denial": null,
+      "groupable": true,
+      "hidden": false,
+      "humanDecision": false,
+      "safeguard": "not_flagged",
+      "startsGroup": false,
+      "subagentLifecycle": null
+    },
+    "detail": {
+      "added": 1,
+      "change": "create",
+      "filePath": "/private/var/folders/c1/l4z5k02n2779byvnymzxsvth0000gn/T/maws-live-scratch-AqsCfi/notes.txt",
+      "hunks": [],
+      "kind": "edit",
+      "removed": 0
+    },
+    "endedAt": "2026-09-29T01:26:31.377Z",
+    "expanded": true,
+    "id": "cell:toolu_01YNg5Q4iVxAXQ5u9gzdDhRe",
+    "kind": "cell",
+    "label": "Created /private/var/folders/c1/l4z5k02n2779byvnymzxsvth0000gn/T/maws-live-scratch-AqsCfi/notes.txt",
+    "paths": [
+      "/private/var/folders/c1/l4z5k02n2779byvnymzxsvth0000gn/T/maws-live-scratch-AqsCfi/notes.txt"
+    ],
+    "startedAt": "2026-09-29T01:26:31.361Z",
+    "status": "done",
+    "toolName": "Write",
+    "toolUseId": "toolu_01YNg5Q4iVxAXQ5u9gzdDhRe",
+    "turnId": "turn:f64e9148-f98a-4092-b4d7-178a326216ae"
+  },
+  {
+    "at": "2026-09-29T01:26:34.843Z",
+    "blockIndex": 0,
+    "id": "text:msg_011CfWrsBrggc8ioDXykJR7a:0",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "\nto human\n\nI created `notes.txt` in the working directory containing exactly `ALPHA`, with no trailing newline. I didn't commit it.\n",
+    "messageUuid": "284cab33-7b4b-474a-8e6b-c6cc0f9f81c8",
+    "model": "claude-sonnet-5-5",
+    "phase": "commentary",
+    "turnId": "turn:f64e9148-f98a-4092-b4d7-178a326216ae"
+  },
+  {
+    "activeLabel": null,
+    "at": "2026-09-29T01:26:34.844Z",
+    "cells": [
+      {
+        "agent": null,
+        "category": "commands",
+        "classification": {
+          "category": "commands",
+          "denial": null,
+          "groupable": true,
+          "hidden": false,
+          "humanDecision": false,
+          "safeguard": "not_evaluated",
+          "startsGroup": true,
+          "subagentLifecycle": null
+        },
+        "detail": {
+          "event": "MessageDisplay",
+          "exitCode": 0,
+          "kind": "hook",
+          "name": "MessageDisplay",
+          "outcome": "success",
+          "stderr": "",
+          "stdout": "{\n  \"hookSpecificOutput\": {\n    \"hookEventName\": \"MessageDisplay\",\n    \"displayContent\": \"\\n\\u001b[1;36mto human\\u001b[0m\\n\\nI created `notes.txt` in the working directory containing exactly `ALPHA`, with no trailing newline. I didn't commit it.\\n\"\n  }\n}\n"
+        },
+        "endedAt": "2026-09-29T01:26:34.879Z",
+        "expanded": true,
+        "id": "cell:hook:d614fcaf-c1ab-4eaf-9d15-0fc9d5904acc",
+        "label": "Hook MessageDisplay · MessageDisplay",
+        "paths": [],
+        "startedAt": "2026-09-29T01:26:34.844Z",
+        "status": "done",
+        "toolName": "hook",
+        "toolUseId": null
+      },
+      {
+        "agent": null,
+        "category": "commands",
+        "classification": {
+          "category": "commands",
+          "denial": null,
+          "groupable": true,
+          "hidden": false,
+          "humanDecision": false,
+          "safeguard": "not_evaluated",
+          "startsGroup": false,
+          "subagentLifecycle": null
+        },
+        "detail": {
+          "event": "Stop",
+          "exitCode": 0,
+          "kind": "hook",
+          "name": "Stop",
+          "outcome": "success",
+          "stderr": "",
+          "stdout": ""
+        },
+        "endedAt": "2026-09-29T01:26:35.080Z",
+        "expanded": true,
+        "id": "cell:hook:60df9713-2a5a-4eb1-8af5-956e0c585a35",
+        "label": "Hook Stop · Stop",
+        "paths": [],
+        "startedAt": "2026-09-29T01:26:34.899Z",
+        "status": "done",
+        "toolName": "hook",
+        "toolUseId": null
+      }
+    ],
+    "expanded": true,
+    "icon": "commands",
+    "id": "group:cell:hook:d614fcaf-c1ab-4eaf-9d15-0fc9d5904acc",
+    "kind": "group",
+    "state": "completed",
+    "summary": "Ran 2 hooks",
+    "turnId": "turn:f64e9148-f98a-4092-b4d7-178a326216ae"
+  },
+  {
+    "added": 1,
+    "at": "2026-09-29T01:26:35.083Z",
+    "canReapply": false,
+    "canUndo": false,
+    "files": [
+      {
+        "added": 1,
+        "cellId": "cell:toolu_01YNg5Q4iVxAXQ5u9gzdDhRe",
+        "change": "create",
+        "path": "/private/var/folders/c1/l4z5k02n2779byvnymzxsvth0000gn/T/maws-live-scratch-AqsCfi/notes.txt",
+        "removed": 0
+      }
+    ],
+    "id": "receipt:turn:f64e9148-f98a-4092-b4d7-178a326216ae",
+    "kind": "receipt",
+    "removed": 0,
+    "state": "applied",
+    "turnId": "turn:f64e9148-f98a-4092-b4d7-178a326216ae"
+  },
+  {
+    "at": "2026-09-29T01:26:40.348Z",
+    "boundaryKind": "rewind",
+    "detail": "Use the Edit tool to change notes.txt so it says BETA instead of ALPHA.",
+    "hiddenRows": 2,
+    "id": "boundary:replay:journal:140:0",
+    "kind": "boundary",
+    "revealed": true,
+    "text": "Rewound to here · 2 messages hidden · Hide",
+    "turnId": null
+  },
+  {
+    "at": "2026-09-29T01:26:35.093Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:2af844ef-3dd0-4830-abe3-1f2a0e6baf36",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "2af844ef-3dd0-4830-abe3-1f2a0e6baf36",
+    "steer": false,
+    "text": "Use the Edit tool to change notes.txt so it says BETA instead of ALPHA.",
+    "turnId": "turn:2af844ef-3dd0-4830-abe3-1f2a0e6baf36"
+  },
+  {
+    "at": "2026-09-29T01:26:35.093Z",
+    "autoDenied": 0,
+    "denied": 0,
+    "endedAt": "2026-09-29T01:26:40.329Z",
+    "expanded": true,
+    "firstDeniedCell": null,
+    "id": "divider:turn:2af844ef-3dd0-4830-abe3-1f2a0e6baf36",
+    "kind": "divider",
+    "origin": "human",
+    "startedAt": "2026-09-29T01:26:35.095Z",
+    "state": "completed",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 0,
+        "exploration": 0,
+        "files": 1,
+        "mcp": 0,
+        "other": 0,
+        "skills": 0,
+        "web": 0
+      },
+      "childAgents": 0,
+      "costUsd": 0.1523314,
+      "denials": [],
+      "durationMs": 5211,
+      "model": "claude-sonnet-5-5",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 0,
+        "reviewed": 1
+      },
+      "terminalReason": "completed",
+      "toolCalls": 1,
+      "usage": {
+        "cacheCreationInputTokens": 459,
+        "cacheReadInputTokens": 65380,
+        "inputTokens": 4,
+        "outputTokens": 204,
+        "thinkingTokens": 0
+      }
+    },
+    "toolCalls": 1,
+    "turnId": "turn:2af844ef-3dd0-4830-abe3-1f2a0e6baf36"
+  },
+  {
+    "agent": null,
+    "at": "2026-09-29T01:26:37.630Z",
+    "category": "files",
+    "classification": {
+      "category": "files",
+      "denial": null,
+      "groupable": true,
+      "hidden": false,
+      "humanDecision": false,
+      "safeguard": "not_flagged",
+      "startsGroup": false,
+      "subagentLifecycle": null
+    },
+    "detail": {
+      "added": 1,
+      "change": "update",
+      "filePath": "/private/var/folders/c1/l4z5k02n2779byvnymzxsvth0000gn/T/maws-live-scratch-AqsCfi/notes.txt",
+      "hunks": [
+        {
+          "lines": [
+            "-ALPHA",
+            "\\ No newline at end of file",
+            "+BETA",
+            "\\ No newline at end of file"
+          ],
+          "newLines": 1,
+          "newStart": 1,
+          "oldLines": 1,
+          "oldStart": 1
+        }
+      ],
+      "kind": "edit",
+      "removed": 1
+    },
+    "endedAt": "2026-09-29T01:26:37.641Z",
+    "expanded": false,
+    "id": "cell:toolu_01DP37egM8LuxdG4hQ3zgjnh",
+    "kind": "cell",
+    "label": "Edited /private/var/folders/c1/l4z5k02n2779byvnymzxsvth0000gn/T/maws-live-scratch-AqsCfi/notes.txt +1 −1",
+    "paths": [
+      "/private/var/folders/c1/l4z5k02n2779byvnymzxsvth0000gn/T/maws-live-scratch-AqsCfi/notes.txt"
+    ],
+    "startedAt": "2026-09-29T01:26:37.630Z",
+    "status": "done",
+    "toolName": "Edit",
+    "toolUseId": "toolu_01DP37egM8LuxdG4hQ3zgjnh",
+    "turnId": "turn:2af844ef-3dd0-4830-abe3-1f2a0e6baf36"
+  },
+  {
+    "at": "2026-09-29T01:26:40.090Z",
+    "blockIndex": 0,
+    "id": "text:msg_011CfWrsabRV9G69oq84F4a4:0",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "\nto human\n\n`notes.txt` now contains `BETA` instead of `ALPHA`. It's still uncommitted.\n",
+    "messageUuid": "4a6c3b68-3ede-49dc-9017-83129784a76b",
+    "model": "claude-sonnet-5-5",
+    "phase": "commentary",
+    "turnId": "turn:2af844ef-3dd0-4830-abe3-1f2a0e6baf36"
+  },
+  {
+    "activeLabel": null,
+    "at": "2026-09-29T01:26:40.092Z",
+    "cells": [
+      {
+        "agent": null,
+        "category": "commands",
+        "classification": {
+          "category": "commands",
+          "denial": null,
+          "groupable": true,
+          "hidden": false,
+          "humanDecision": false,
+          "safeguard": "not_evaluated",
+          "startsGroup": true,
+          "subagentLifecycle": null
+        },
+        "detail": {
+          "event": "MessageDisplay",
+          "exitCode": 0,
+          "kind": "hook",
+          "name": "MessageDisplay",
+          "outcome": "success",
+          "stderr": "",
+          "stdout": "{\n  \"hookSpecificOutput\": {\n    \"hookEventName\": \"MessageDisplay\",\n    \"displayContent\": \"\\n\\u001b[1;36mto human\\u001b[0m\\n\\n`notes.txt` now contains `BETA` instead of `ALPHA`. It's still uncommitted.\\n\"\n  }\n}\n"
+        },
+        "endedAt": "2026-09-29T01:26:40.126Z",
+        "expanded": false,
+        "id": "cell:hook:f6acb7c5-eee1-4f6e-8ad5-ffe17a68a31d",
+        "label": "Hook MessageDisplay · MessageDisplay",
+        "paths": [],
+        "startedAt": "2026-09-29T01:26:40.092Z",
+        "status": "done",
+        "toolName": "hook",
+        "toolUseId": null
+      },
+      {
+        "agent": null,
+        "category": "commands",
+        "classification": {
+          "category": "commands",
+          "denial": null,
+          "groupable": true,
+          "hidden": false,
+          "humanDecision": false,
+          "safeguard": "not_evaluated",
+          "startsGroup": false,
+          "subagentLifecycle": null
+        },
+        "detail": {
+          "event": "Stop",
+          "exitCode": 0,
+          "kind": "hook",
+          "name": "Stop",
+          "outcome": "success",
+          "stderr": "",
+          "stdout": ""
+        },
+        "endedAt": "2026-09-29T01:26:40.304Z",
+        "expanded": false,
+        "id": "cell:hook:47365d3a-e25d-401c-9c1e-eeb7d037c001",
+        "label": "Hook Stop · Stop",
+        "paths": [],
+        "startedAt": "2026-09-29T01:26:40.129Z",
+        "status": "done",
+        "toolName": "hook",
+        "toolUseId": null
+      }
+    ],
+    "expanded": false,
+    "icon": "commands",
+    "id": "group:cell:hook:f6acb7c5-eee1-4f6e-8ad5-ffe17a68a31d",
+    "kind": "group",
+    "state": "completed",
+    "summary": "Ran 2 hooks",
+    "turnId": "turn:2af844ef-3dd0-4830-abe3-1f2a0e6baf36"
+  },
+  {
+    "added": 1,
+    "at": "2026-09-29T01:26:40.329Z",
+    "canReapply": false,
+    "canUndo": false,
+    "files": [
+      {
+        "added": 1,
+        "cellId": "cell:toolu_01DP37egM8LuxdG4hQ3zgjnh",
+        "change": "update",
+        "path": "/private/var/folders/c1/l4z5k02n2779byvnymzxsvth0000gn/T/maws-live-scratch-AqsCfi/notes.txt",
+        "removed": 1
+      }
+    ],
+    "id": "receipt:turn:2af844ef-3dd0-4830-abe3-1f2a0e6baf36",
+    "kind": "receipt",
+    "removed": 1,
+    "state": "applied",
+    "turnId": "turn:2af844ef-3dd0-4830-abe3-1f2a0e6baf36"
+  },
+  {
+    "at": "2026-09-29T01:26:41.062Z",
+    "attempt": null,
+    "id": "error:replay:journal:145:0",
+    "kind": "error",
+    "lostAttentionCount": 0,
+    "scope": "exit",
+    "severity": "notice",
+    "text": "Session process exited (quit)",
+    "turnId": null
+  }
+]

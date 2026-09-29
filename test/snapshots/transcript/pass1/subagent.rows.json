@@ -133,7 +133,7 @@
     "endedAt": "2026-09-28T09:22:13.826Z",
     "expanded": true,
     "firstDeniedCell": null,
-    "id": "divider:turn:ej355#1",
+    "id": "divider:turn:ereplay:journal:355:1",
     "kind": "divider",
     "origin": "engine",
     "startedAt": "2026-09-28T09:22:12.445Z",
@@ -170,7 +170,7 @@
       }
     },
     "toolCalls": 0,
-    "turnId": "turn:ej355#1"
+    "turnId": "turn:ereplay:journal:355:1"
   },
   {
     "at": "2026-09-28T09:22:12.953Z",
@@ -180,7 +180,7 @@
     "live": false,
     "messageUuid": "601fa964-aa9c-4db2-aa24-146bd55b02b1",
     "text": "The first agent has completed and returned \"ONE\" as the content of one.txt. Now I need to wait for the second agent (ae75ba6ce5d866acc) which is running in the background. Let me wait for that notification.",
-    "turnId": "turn:ej355#1"
+    "turnId": "turn:ereplay:journal:355:1"
   },
   {
     "at": "2026-09-28T09:22:13.521Z",
@@ -192,7 +192,7 @@
     "messageUuid": "2e68b5bc-3a83-4d1d-9cde-267fc80fa2c5",
     "model": "claude-haiku-4-5-20251001",
     "phase": "answer",
-    "turnId": "turn:ej355#1"
+    "turnId": "turn:ereplay:journal:355:1"
   },
   {
     "at": "2026-09-28T09:22:13.829Z",
@@ -201,7 +201,7 @@
     "endedAt": "2026-09-28T09:22:15.234Z",
     "expanded": true,
     "firstDeniedCell": null,
-    "id": "divider:turn:ej425#1",
+    "id": "divider:turn:ereplay:journal:425:1",
     "kind": "divider",
     "origin": "engine",
     "startedAt": "2026-09-28T09:22:13.829Z",
@@ -238,7 +238,7 @@
       }
     },
     "toolCalls": 0,
-    "turnId": "turn:ej425#1"
+    "turnId": "turn:ereplay:journal:425:1"
   },
   {
     "at": "2026-09-28T09:22:14.351Z",
@@ -248,7 +248,7 @@
     "live": false,
     "messageUuid": "0707bb22-bd76-46da-ac4e-cfa9d99ea633",
     "text": "Perfect! Both agents have now completed:\n- First agent: one.txt contains \"ONE\"\n- Second agent: two.txt contains \"TWO\"\n\nNow I need to summarize this in one line as the user requested.",
-    "turnId": "turn:ej425#1"
+    "turnId": "turn:ereplay:journal:425:1"
   },
   {
     "at": "2026-09-28T09:22:14.948Z",
@@ -260,12 +260,12 @@
     "messageUuid": "5fe8e26b-1f38-4083-8117-f064a4b1dd85",
     "model": "claude-haiku-4-5-20251001",
     "phase": "answer",
-    "turnId": "turn:ej425#1"
+    "turnId": "turn:ereplay:journal:425:1"
   },
   {
     "at": "2026-09-28T09:22:15.769Z",
     "attempt": null,
-    "id": "error:j487#0",
+    "id": "error:replay:journal:487:0",
     "kind": "error",
     "lostAttentionCount": 0,
     "scope": "exit",

@@ -153,7 +153,7 @@
     "endedAt": "2026-09-28T10:04:50.606Z",
     "expanded": true,
     "firstDeniedCell": null,
-    "id": "divider:turn:ej95#1",
+    "id": "divider:turn:ereplay:journal:95:1",
     "kind": "divider",
     "origin": "engine",
     "startedAt": "2026-09-28T10:04:48.239Z",
@@ -190,7 +190,7 @@
       }
     },
     "toolCalls": 0,
-    "turnId": "turn:ej95#1"
+    "turnId": "turn:ereplay:journal:95:1"
   },
   {
     "at": "2026-09-28T10:04:49.548Z",
@@ -202,12 +202,12 @@
     "messageUuid": "84b86bba-0caf-42eb-a577-56802f066816",
     "model": "claude-sonnet-5",
     "phase": "answer",
-    "turnId": "turn:ej95#1"
+    "turnId": "turn:ereplay:journal:95:1"
   },
   {
     "at": "2026-09-28T10:05:44.989Z",
     "attempt": null,
-    "id": "error:j131#0",
+    "id": "error:replay:journal:131:0",
     "kind": "error",
     "lostAttentionCount": 0,
     "scope": "exit",

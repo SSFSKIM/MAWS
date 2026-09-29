@@ -384,7 +384,7 @@
   {
     "at": "2026-09-28T09:22:24.891Z",
     "attempt": null,
-    "id": "error:j238#0",
+    "id": "error:replay:journal:238:0",
     "kind": "error",
     "lostAttentionCount": 0,
     "scope": "exit",

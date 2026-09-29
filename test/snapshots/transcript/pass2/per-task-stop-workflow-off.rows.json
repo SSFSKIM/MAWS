@@ -149,7 +149,7 @@
   {
     "at": "2026-09-28T10:04:32.579Z",
     "attempt": null,
-    "id": "error:j87#0",
+    "id": "error:replay:journal:87:0",
     "kind": "error",
     "lostAttentionCount": 0,
     "scope": "exit",

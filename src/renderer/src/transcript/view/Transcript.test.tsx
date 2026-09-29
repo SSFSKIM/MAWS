@@ -4,7 +4,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { useTranscriptStore } from '../../stores/transcript';
 import { cellId, rowId, turnId } from '../model/keys';
 import { loadJournal } from '../../../../../test/support/fixtures';
-import { journalToEvents } from '../dev/replay-stub';
+import { journalToEvents } from '../dev/journal';
 import { BASH_RESULT, builder, request, tool, uuid } from '../model/test-events';
 import type { TranscriptSource } from '../source/types';
 import { Transcript } from './Transcript';

@@ -5,7 +5,7 @@ import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { loadJournal, loadSyntheticJournal } from '../../../../../../test/support/fixtures';
 import { useTranscriptStore } from '../../../stores/transcript';
-import { journalToEvents } from '../../dev/replay-stub';
+import { journalToEvents } from '../../dev/journal';
 import type { Row, TurnId } from '../../model/rows';
 import { BASH_RESULT, builder, parent, task, tool, uuid } from '../../model/test-events';
 import { NO_ACTIONS, type RewindInterface } from '../context';

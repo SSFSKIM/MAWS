@@ -5,7 +5,7 @@ import type { TaskId } from '@shared/graph/ids';
 import { render } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { loadJournal, loadSyntheticJournal } from '../../../../test/support/fixtures';
-import { journalToEvents } from './dev/replay-stub';
+import { journalToEvents } from './dev/journal';
 import { glyphFor, SUBAGENT_GLYPHS, SubagentGlyph, turnActivity, useTranscriptStore } from './index';
 import { turnDerivations } from './model/derive';
 import { api, BASH_RESULT, builder, parent, task, tool, uuid } from './model/test-events';

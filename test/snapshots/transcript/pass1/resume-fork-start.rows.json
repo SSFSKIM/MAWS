@@ -218,7 +218,7 @@
   {
     "at": "2026-09-28T09:22:32.277Z",
     "attempt": null,
-    "id": "error:j335#0",
+    "id": "error:replay:journal:335:0",
     "kind": "error",
     "lostAttentionCount": 0,
     "scope": "exit",

@@ -1,5 +1,5 @@
 // Presentation-model snapshots (C6 execution document, residue *Testing*; M2 decisions): one file per probe fixture
-// of both passes, per synthetic journal, per event fixture and for synthetic/500, holding the `Row[]` of `rowsOf`
+// of the three passes (through C3's normaliser since the rebase), per synthetic journal, per event fixture and for synthetic/500, holding the `Row[]` of `rowsOf`
 // with every turn, group and cell expanded, keys sorted, timestamps as they are, `structured` and `input` verbatim.
 // Time labels are pinned (now, locale, zone) so a snapshot never depends on the machine. A mismatch names the first
 // differing row and field; `pnpm test -- -u src/renderer/src/transcript/model` accepts an intended change.
@@ -7,9 +7,9 @@ import { SessionEventSchema, type SessionEvent } from '@shared/graph/events';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { listEventFixtures, listJournals, listSyntheticJournals, loadEventFixture, loadJournal, loadSyntheticJournal } from '../../../../../test/support/fixtures';
+import { FIXTURE_PASSES, listEventFixtures, listJournals, listSyntheticJournals, loadEventFixture, loadJournal, loadSyntheticJournal } from '../../../../../test/support/fixtures';
 import { synthesise } from '../../../../../test/support/synth-transcript';
-import { journalToEvents } from '../dev/replay-stub';
+import { journalToEvents } from '../dev/journal';
 import { rowsOf, withAllExpanded } from './derive';
 import { applyEvents, createState } from './reduce';
 import type { Row } from './rows';
@@ -66,7 +66,7 @@ async function snapshot(file: string, events: SessionEvent[]): Promise<Row[]> {
 }
 
 describe('presentation model snapshots', () => {
-  for (const pass of ['pass1', 'pass2'] as const) {
+  for (const pass of FIXTURE_PASSES) {
     for (const name of listJournals(pass)) {
       it(`${pass}/${name}`, async () => {
         const rows = await snapshot(`${pass}/${name}`, journalToEvents(loadJournal(pass, name)));

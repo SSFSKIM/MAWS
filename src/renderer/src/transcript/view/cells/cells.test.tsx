@@ -4,7 +4,7 @@ import { cleanup, fireEvent, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { loadJournal } from '../../../../../../test/support/fixtures';
 import { useTranscriptStore } from '../../../stores/transcript';
-import { journalToEvents } from '../../dev/replay-stub';
+import { journalToEvents } from '../../dev/journal';
 import { cellId } from '../../model/keys';
 import type { Cell, Row } from '../../model/rows';
 import { BASH_RESULT, builder, tool, type Builder } from '../../model/test-events';

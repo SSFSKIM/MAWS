@@ -172,7 +172,7 @@
     "endedAt": "2026-09-28T10:02:14.415Z",
     "expanded": true,
     "firstDeniedCell": null,
-    "id": "divider:turn:ej78#1",
+    "id": "divider:turn:ereplay:journal:78:1",
     "kind": "divider",
     "origin": "engine",
     "startedAt": "2026-09-28T10:02:12.749Z",
@@ -209,7 +209,7 @@
       }
     },
     "toolCalls": 0,
-    "turnId": "turn:ej78#1"
+    "turnId": "turn:ereplay:journal:78:1"
   },
   {
     "at": "2026-09-28T10:02:14.020Z",
@@ -221,12 +221,12 @@
     "messageUuid": "07192e64-5e51-44bf-af6b-7538e333af1c",
     "model": "claude-sonnet-5",
     "phase": "answer",
-    "turnId": "turn:ej78#1"
+    "turnId": "turn:ereplay:journal:78:1"
   },
   {
     "at": "2026-09-28T10:02:20.271Z",
     "attempt": null,
-    "id": "error:j98#0",
+    "id": "error:replay:journal:98:0",
     "kind": "error",
     "lostAttentionCount": 0,
     "scope": "exit",

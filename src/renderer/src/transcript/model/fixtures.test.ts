@@ -4,7 +4,7 @@ import type { SessionEvent } from '@shared/graph/events';
 import { afterEach, describe, expect, it } from 'vitest';
 import { loadEventFixture, loadSyntheticJournal } from '../../../../../test/support/fixtures';
 import { synthesise } from '../../../../../test/support/synth-transcript';
-import { journalToEvents } from '../dev/replay-stub';
+import { journalToEvents } from '../dev/journal';
 import { rowsOf, withAllExpanded } from './derive';
 import { rowId } from './keys';
 import { applyEvents, createState } from './reduce';

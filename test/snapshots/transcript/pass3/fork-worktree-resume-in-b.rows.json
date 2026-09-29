@@ -1,0 +1,101 @@
+[
+  {
+    "at": "2026-09-28T19:40:19.467Z",
+    "id": "time:turn:749c3b48-a14b-4202-bef8-367df45c4fa3",
+    "kind": "time",
+    "label": "Yesterday 7:40 PM",
+    "turnId": "turn:749c3b48-a14b-4202-bef8-367df45c4fa3"
+  },
+  {
+    "at": "2026-09-28T19:40:19.467Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:749c3b48-a14b-4202-bef8-367df45c4fa3",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "749c3b48-a14b-4202-bef8-367df45c4fa3",
+    "steer": false,
+    "text": "Reply with exactly OK",
+    "turnId": "turn:749c3b48-a14b-4202-bef8-367df45c4fa3"
+  },
+  {
+    "at": "2026-09-28T19:40:19.467Z",
+    "autoDenied": 0,
+    "denied": 0,
+    "endedAt": "2026-09-28T19:40:20.392Z",
+    "expanded": true,
+    "firstDeniedCell": null,
+    "id": "divider:turn:749c3b48-a14b-4202-bef8-367df45c4fa3",
+    "kind": "divider",
+    "origin": "human",
+    "startedAt": "2026-09-28T19:40:19.469Z",
+    "state": "completed",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 0,
+        "exploration": 0,
+        "files": 0,
+        "mcp": 0,
+        "other": 0,
+        "skills": 0,
+        "web": 0
+      },
+      "childAgents": 0,
+      "costUsd": 0.0527272,
+      "denials": [],
+      "durationMs": 921,
+      "model": "claude-haiku-4-5-20251001",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 0,
+        "reviewed": 0
+      },
+      "terminalReason": "completed",
+      "toolCalls": 0,
+      "usage": {
+        "cacheCreationInputTokens": 119,
+        "cacheReadInputTokens": 22261,
+        "inputTokens": 10,
+        "outputTokens": 29,
+        "thinkingTokens": 22
+      }
+    },
+    "toolCalls": 0,
+    "turnId": "turn:749c3b48-a14b-4202-bef8-367df45c4fa3"
+  },
+  {
+    "at": "2026-09-28T19:40:20.144Z",
+    "durationMs": 225,
+    "id": "think:msg_011CfWQTp5qQ3mC3ApQ5iENg:0",
+    "kind": "thinking",
+    "live": false,
+    "messageUuid": "01fbdb2a-add8-444f-adcd-ecdd81a4a360",
+    "text": "The user is asking me to reply with exactly \"OK\". This is straightforward.",
+    "turnId": "turn:749c3b48-a14b-4202-bef8-367df45c4fa3"
+  },
+  {
+    "at": "2026-09-28T19:40:20.371Z",
+    "blockIndex": 1,
+    "id": "text:msg_011CfWQTp5qQ3mC3ApQ5iENg:1",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "OK",
+    "messageUuid": "55b21b70-52e7-44bc-9b23-1d51aa8d99e5",
+    "model": "claude-haiku-4-5-20251001",
+    "phase": "answer",
+    "turnId": "turn:749c3b48-a14b-4202-bef8-367df45c4fa3"
+  },
+  {
+    "at": "2026-09-28T19:40:20.915Z",
+    "attempt": null,
+    "id": "error:replay:journal:37:0",
+    "kind": "error",
+    "lostAttentionCount": 0,
+    "scope": "exit",
+    "severity": "notice",
+    "text": "Session process exited (unknown)",
+    "turnId": null
+  }
+]

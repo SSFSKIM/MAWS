@@ -5,7 +5,7 @@
 import { SessionEventSchema, type SessionEvent } from '@shared/graph/events';
 import { parseJournalRow } from '@shared/wire/journal';
 import { synthesise } from '../../../../test/support/synth-transcript';
-import { journalToEvents } from '../transcript/dev/replay-stub';
+import { journalToEvents } from '../transcript/dev/journal';
 
 // Vite requires each glob's options as a literal.
 const pass1 = import.meta.glob<string>(['../../../../spikes/protocol-probe/fixtures/*.jsonl', '!**/fixtures/private/**'], { query: '?raw', import: 'default' });

@@ -108,7 +108,7 @@
     "at": "2026-09-28T10:20:01.250Z",
     "direction": "to_child",
     "from": null,
-    "id": "agentmsg:j57#1",
+    "id": "agentmsg:replay:journal:57:1",
     "kind": "agent_message",
     "text": "Sent message to ad1synthagent0001: Skip node_modules entirely.",
     "to": null,
@@ -133,7 +133,7 @@
     "endedAt": "2026-09-28T10:20:03.414Z",
     "expanded": true,
     "firstDeniedCell": null,
-    "id": "divider:turn:ej85#1",
+    "id": "divider:turn:ereplay:journal:85:1",
     "kind": "divider",
     "origin": "engine",
     "startedAt": "2026-09-28T10:20:03.289Z",
@@ -170,7 +170,7 @@
       }
     },
     "toolCalls": 0,
-    "turnId": "turn:ej85#1"
+    "turnId": "turn:ereplay:journal:85:1"
   },
   {
     "at": "2026-09-28T10:20:03.320Z",
@@ -182,12 +182,12 @@
     "messageUuid": "a-agents-and-messages-097",
     "model": "claude-opus-5-5",
     "phase": "answer",
-    "turnId": "turn:ej85#1"
+    "turnId": "turn:ereplay:journal:85:1"
   },
   {
     "at": "2026-09-28T10:20:03.444Z",
     "attempt": null,
-    "id": "error:j98#0",
+    "id": "error:replay:journal:98:0",
     "kind": "error",
     "lostAttentionCount": 0,
     "scope": "exit",
