@@ -11,7 +11,7 @@ What C11 does not do: build the palette itself or the popover shell it opens in 
 ## Progress
 
 - [x] (2026-09-29, reviewed clean on opus at c1d8283) M1 — Settings v3 and the plumbing: schema, migration and defaults; `engine.configure` (binary path and pinned version to the host); the ClaudeUsage launcher and status; `settings.reveal`; `layout.saveTextFile`; the action-table entries; the gateway store with the relay monitor; the `gateway.openClaudeUsage` handler registered into C5
-- [ ] M2 — Widget frame and the engine-read widgets: registration of all twenty names through `registerSlashWidget`, `WidgetFrame`, and the read-only widgets (permissions, usage, context, config, plugins, mcp, sandbox, hooks, memory, skills, agents, status, diff, export) over replayed fixtures in the `#widgets` harness
+- [x] (2026-09-29, reviewed clean on opus at 44dae56; nine Minors carried into M3) M2 — Widget frame and the engine-read widgets: registration of all twenty names through `registerSlashWidget`, `WidgetFrame`, and the read-only widgets (permissions, usage, context, config, plugins, mcp, sandbox, hooks, memory, skills, agents, status, diff, export) over replayed fixtures in the `#widgets` harness
 - [ ] M3 — The mutating widgets: model, effort, fast (with the auto-mode-lane warning), compact, rename, resume; plugins reload and MCP reconnect and toggle as operations; C7's model chip opens the widget
 - [ ] M4 — Session info tool (X5) with the auto-mode lane; the usage popover's routing footer through C7's seam; the Direct switch with its notice; the relay-down handler and the launch policy behind C10's card
 - [ ] M5 — Accounts tab and Settings tab (engine, gateway, keyboard map editor, appearance, notifications); the app-wide relay banner
