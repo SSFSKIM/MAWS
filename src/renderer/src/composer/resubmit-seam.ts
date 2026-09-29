@@ -19,7 +19,7 @@
 // while the rewind is uncertain or unresolved.
 //
 // Edit mode also survives a reload: the edit rides in the draft document (`doc.attrs.editing`) and is restored at
-// `idle`. A restored edit whose rewind the hydrated transcript shows (its boundary, the message gone) was rewound
+// `idle`. A restored edit whose rewind the hydrated transcript shows (a boundary naming its message, or a rewind to an earlier one) was rewound
 // before the reload: edit mode ends and the text stays as the draft. A message merely absent keeps edit mode; Send then
 // confirms, and the engine's `target_not_found` ends it the same way. Send after a reload always starts again at `confirming`, a fresh human
 // decision, so no rewind repeats on its own. Any rewind the engine answers `target_not_found` (reload or not) finds its
@@ -30,7 +30,8 @@ import type { MawsBridge } from '@shared/ipc/schema';
 import { editingOf, prefillComposer, resubmitRecordOf, setEditing, setResubmit, useComposerStore, type Editing, type Resubmit } from '../stores/composer';
 import { toast } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
-import { useTranscriptStore, type Row } from '../transcript';
+import type { TranscriptEntry } from '../stores/transcript';
+import { useTranscriptStore } from '../transcript';
 import { focusedSession } from './ComposerAppKeys';
 import { newestUserUuid, rowPrefill, type UserRow } from './edit-prefill';
 
@@ -103,21 +104,21 @@ function dispose(appSessionId: AppSessionId): Flight {
   return flight;
 }
 
-// Rows that may show the rewind to `target`: a rewind boundary row, and the target's own row gone (the rewind takes the
-// target's turn out of the rows). C6's boundary row names no target, so this is the cheap pre-check a selector runs;
-// `transcriptShowsRewind` decides, against the boundary events' own targets. Absence alone proves nothing: a resumed
-// launch's transcript begins after earlier launches' messages. Pure.
-export function rowsShowRewind(rows: readonly Row[], target: MessageUuid): boolean {
-  return rows.some((r) => r.kind === 'boundary' && r.boundaryKind === 'rewind') && !rows.some((r) => r.kind === 'user' && r.messageUuid === target);
+// A hydrated transcript shows the edited message `target` rewound: a `boundary.rewind` names it (a rewind boundary is
+// always a loose event of the transcript state; C6's row names no target), or a rewind to an earlier message hid the
+// turn holding it (a hidden turn stays in `turns` but leaves `order`; a folded one leaves both). A rewind to any later
+// message, or one this launch's transcript cannot place, proves nothing: a resumed launch's transcript begins after
+// earlier launches' messages. Pure; a selector runs it, so a later boundary naming the target flips it.
+export function entryShowsRewind(entry: TranscriptEntry | undefined, target: MessageUuid): boolean {
+  if (entry?.phase !== 'live') return false;
+  const { loose, index, turns, order } = entry.state;
+  const rewinds = loose.filter((event) => event.kind === 'boundary.rewind');
+  if (rewinds.some((event) => event.targetMessageUuid === target)) return true;
+  const turn = index.messages.get(target);
+  return rewinds.length > 0 && turn !== undefined && turns.has(turn) && !order.includes(turn);
 }
 
-// The session's hydrated transcript shows the rewind to `target`: a `boundary.rewind` naming it (a rewind boundary is
-// always a loose event of the transcript state), and its row gone. A boundary to any other message proves nothing.
-export function transcriptShowsRewind(appSessionId: AppSessionId, target: MessageUuid): boolean {
-  const entry = useTranscriptStore.getState().entries[appSessionId];
-  if (entry?.phase !== 'live' || !rowsShowRewind(entry.rows, target)) return false;
-  return entry.state.loose.some((event) => event.kind === 'boundary.rewind' && event.targetMessageUuid === target);
-}
+export const transcriptShowsRewind = (appSessionId: AppSessionId, target: MessageUuid): boolean => entryShowsRewind(useTranscriptStore.getState().entries[appSessionId], target);
 
 const record = (appSessionId: AppSessionId): Resubmit => resubmitRecordOf(useComposerStore.getState(), appSessionId);
 const ready = (appSessionId: AppSessionId): boolean => useSessions.getState().engine.get(appSessionId)?.process === 'ready';
@@ -156,9 +157,9 @@ function leaveRewound(appSessionId: AppSessionId): void {
   toast({ level: 'info', text: REWOUND_COPY, actions: [], dismissible: true });
 }
 
-// A restored edit against the hydrated transcript (`rowsShowRewind` over its rows, the caller's pre-check): rewound to
-// the edit's own target ends it. Only an idle restored edit is settled here; once the human has sent, the engine's
-// answer decides.
+// A restored edit against the hydrated transcript (the caller's selector runs `entryShowsRewind`; checked again here
+// against the store as it now stands): its message rewound ends it. Only an idle restored edit is settled here; once
+// the human has sent, the engine's answer decides.
 export function settleRestoredEdit(appSessionId: AppSessionId, rewoundInTranscript: boolean): void {
   const editing = editingOf(useComposerStore.getState(), appSessionId);
   if (!isRestored(appSessionId) || !rewoundInTranscript || record(appSessionId).state !== 'idle' || !editing) return;

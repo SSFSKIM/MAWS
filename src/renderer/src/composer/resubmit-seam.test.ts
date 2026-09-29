@@ -8,7 +8,8 @@ import { editingOf, prefillComposer, resetComposerStore, resubmitRecordOf, setEd
 import { useNotices } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
 import { useTranscriptStore, type TranscriptEntry } from '../stores/transcript';
-import type { Row } from '../transcript';
+import { applyEvents, createState } from '../transcript';
+import { builder, uuid } from '../transcript/model/test-events';
 import { resetShellStores } from '../test-support/shell-stores';
 import {
   askToRewind,
@@ -24,7 +25,7 @@ import {
   resubmitSent,
   restoreEditMode,
   rewindAgain,
-  rowsShowRewind,
+  entryShowsRewind,
   settleRestoredEdit,
   takeAutoSend,
   transcriptShowsRewind,
@@ -254,45 +255,52 @@ describe('resubmit state never repeats a rewind and reconciles an uncertain one'
     expect(toasts()).toEqual(['The conversation was rewound; your edited text is in the editor']);
   });
 
-  // The hydrated transcript of this launch: a user row, and the rewind boundaries it holds (rows and loose events).
-  function hydrated(...targets: string[]) {
-    const rows = [{ kind: 'user', messageUuid: 'u-2' }, ...targets.map(() => ({ kind: 'boundary', boundaryKind: 'rewind' }))] as unknown as Row[];
-    const loose = targets.map((target) => ({ kind: 'boundary.rewind', targetMessageUuid: target }));
-    useTranscriptStore.setState({ entries: { [A]: { phase: 'live', rows, state: { loose } } as unknown as TranscriptEntry } });
+  // This launch's hydrated transcript, through C6's own model: three turns (u1, u2, u3), then the rewinds named.
+  function transcript(...rewinds: string[]): TranscriptEntry {
+    const b = builder();
+    for (const turn of ['u1', 'u2', 'u3']) {
+      b.turn(turn);
+      b.end([turn]);
+    }
+    for (const target of rewinds) b.emit('boundary.rewind', { targetMessageUuid: target.startsWith('u-') ? u(target) : uuid(target), precedingAssistantUuid: null, prefillText: null });
+    const state = applyEvents(createState(null, null), b.events);
+    return { phase: 'live', rows: [], state } as unknown as TranscriptEntry;
   }
+  const hydrated = (...rewinds: string[]) => useTranscriptStore.setState({ entries: { [A]: transcript(...rewinds) } });
 
   it('a restored edit whose rewind the hydrated transcript shows ends at once; otherwise it stays', () => {
-    restoreEditMode(A, { messageUuid: u('u-1'), seenCursor: u('u-1') });
-    hydrated('u-1');
+    restoreEditMode(A, { messageUuid: uuid('u2'), seenCursor: uuid('u3') });
+    hydrated('u2');
     settleRestoredEdit(A, false);
     expect(editingOf(useComposerStore.getState(), A)).not.toBeNull();
     settleRestoredEdit(A, true);
     expect(editingOf(useComposerStore.getState(), A)).toBeNull();
     expect(toasts()).toEqual(['The conversation was rewound; your edited text is in the editor']);
-    enterEditMode(A, { messageUuid: u('u-1'), seenCursor: u('u-1') });
+    enterEditMode(A, { messageUuid: uuid('u2'), seenCursor: uuid('u3') });
     settleRestoredEdit(A, true); // not restored: the transcript is not consulted
     expect(editingOf(useComposerStore.getState(), A)).not.toBeNull();
   });
 
   it('a restored edit to an earlier launch’s message stays when this launch rewound to another message', () => {
     restoreEditMode(A, { messageUuid: u('u-1'), seenCursor: u('u-1') });
-    hydrated('u-9'); // the rows pass the pre-check (a rewind boundary, u-1 absent); the boundary names another target
-    expect(rowsShowRewind(useTranscriptStore.getState().entries[A]!.rows, u('u-1'))).toBe(true);
+    hydrated('u2');
     expect(transcriptShowsRewind(A, u('u-1'))).toBe(false);
     settleRestoredEdit(A, true);
     expect(editingOf(useComposerStore.getState(), A)).not.toBeNull();
     expect(toasts()).toEqual([]);
-    hydrated('u-9', 'u-1');
-    expect(transcriptShowsRewind(A, u('u-1'))).toBe(true);
   });
 
-  it('rows show a rewind only with its boundary and the target gone; absence alone is not a rewind', () => {
-    const user = (uuid: string) => ({ kind: 'user', messageUuid: uuid }) as unknown as Row;
-    const boundary = { kind: 'boundary', boundaryKind: 'rewind' } as unknown as Row;
-    expect(rowsShowRewind([user('u-2'), boundary], u('u-1'))).toBe(true);
-    expect(rowsShowRewind([user('u-7')], u('u-1'))).toBe(false); // a resumed launch's transcript begins later
-    expect(rowsShowRewind([user('u-1'), boundary], u('u-1'))).toBe(false); // an earlier rewind, to another message
-    expect(rowsShowRewind([], u('u-1'))).toBe(false);
+  it('what the selector reads flips when a later boundary names the edit’s own target, over an earlier rewind', () => {
+    expect(entryShowsRewind(transcript('u2'), u('u-1'))).toBe(false); // a rewind boundary shown, to another message
+    expect(entryShowsRewind(transcript('u2', 'u-1'), u('u-1'))).toBe(true);
+    expect(entryShowsRewind(undefined, u('u-1'))).toBe(false);
+    expect(entryShowsRewind({ ...transcript('u-1'), phase: 'hydrating' }, u('u-1'))).toBe(false);
+  });
+
+  it('a rewind to a message before the edited one ends the edit (its message is off the chain); one after it does not', () => {
+    expect(entryShowsRewind(transcript('u1'), uuid('u2'))).toBe(true); // u2's turn hidden with u1's
+    expect(entryShowsRewind(transcript('u3'), uuid('u2'))).toBe(false); // u2 still on the chain
+    expect(entryShowsRewind(transcript(), uuid('u2'))).toBe(false);
   });
 
   it('a provider is null until one registers; its disposer removes only itself', () => {
