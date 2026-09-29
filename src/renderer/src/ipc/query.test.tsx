@@ -39,7 +39,8 @@ describe('useCommand', () => {
 
 describe('useCommand is for reads only', () => {
   it('allows exactly the read commands with a value to cache', () => {
-    expect([...QUERY_COMMANDS].sort()).toEqual(['engine.hostState', 'engine.ping', 'fs.workflows', 'pty.hostState', 'pty.ping', 'settings.get']); // fs.workflows: C8a
+    const c7 = ['attention.request', 'git.branches', 'git.lsFiles', 'session.catalog', 'session.getContextUsage', 'session.getMemoryDialog', 'session.getSessionCost', 'session.getUsage', 'session.history.list', 'session.listModels', 'session.listPermissionRules', 'settings.usage']; // C7
+    expect([...QUERY_COMMANDS].sort()).toEqual(['engine.hostState', 'engine.ping', 'fs.workflows', 'pty.hostState', 'pty.ping', 'settings.get', ...c7].sort());
   });
 
   // Compile-time: writes and void-output commands are not queries (checked by `pnpm typecheck`); they go through

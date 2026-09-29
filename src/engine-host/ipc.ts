@@ -145,6 +145,7 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
       session.on('status', (status) => stream.status(status));
       session.on('queue', (queue) => stream.queue(queue));
       session.on('brokerItems', (items) => stream.brokerItems(items));
+      session.on('catalog', (catalog) => stream.catalog(catalog)); // C7: session.catalogChanged
       session.on('models', updateModels); // C10
     },
   });
@@ -219,8 +220,8 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
     // no queue loaded in this host (no reservation, or a launch that never became ready): the store's, verbatim, with
     // no recovery transition (C10's restart reconciliation)
     if (await store.exists(appSessionId as AppSessionId)) {
-      const { entries, paused } = await store.loadQueue(appSessionId as AppSessionId);
-      return { entries, paused };
+      const { entries, paused, pauseReason } = await store.loadQueue(appSessionId as AppSessionId); // C7: pauseReason
+      return pauseReason === undefined ? { entries, paused } : { entries, paused, pauseReason }; // C7: absent in a state file older than the field
     }
     if (session) return session.queue.state;
     throw unknownSession(appSessionId);

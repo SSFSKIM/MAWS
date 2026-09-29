@@ -28,10 +28,18 @@ import { registerOpenExternal } from './open-external';
 import { startSessions } from './sessions';
 import { restoreWindowState, trackWindowState } from './window-state';
 // C5 end
-// C10 start (emit comes with C3's imports)
+// C7 start
+import type { AppSessionId } from '@shared/graph/ids';
+import type { SessionRecord } from '@shared/graph/session';
+import { pickFiles } from './files/pick';
+import { FileLister } from './git/ls-files';
+import { createGitRunner } from './git/runner';
+import { claudeConfigDir, PromptHistory } from './history/prompt-history';
+import { ClaudeUsageReader, claudeUsageDir } from './usage/claude-usage-reader';
+// C7 end
+// C10 start (emit comes with C3's imports, createGitRunner with C7's)
 import { shell } from 'electron';
 import { captureShellEnvironment } from '@shared/host/shell-env';
-import { createGitRunner } from './git/runner';
 import { WorktreeService } from './git/worktrees';
 import { registerWorktreeHandlers } from './git/worktrees-register';
 import { BootstrapNotes, FileIntentStore } from './sessions/intents';
@@ -122,6 +130,53 @@ app.whenReady().then(() => {
   const tracked = (win: BrowserWindow) => trackWindowState(win, (state) => layout.set('window.main', state));
   // ---- end C5 ----
 
+  // C7 start: the composer's main services (C7 execution document, M1): ClaudeUsage's files for the status line (read
+  // only), the prompt history (MAWS's own file; the terminal's read only), the `@` menu's file listing and the picker.
+  const home = app.getPath('home');
+  const usage = new ClaudeUsageReader({ dir: claudeUsageDir(process.env, home), emit: (snapshot) => void emit('settings.usageChanged', snapshot) });
+  usage.start();
+  registerMainHandler('settings.usage', ({ engineSessionIds }) => usage.snapshot(engineSessionIds));
+  // a session's record from the read model (both launch modes), else the index; none for an unstarted session
+  const recordOf = (appSessionId: AppSessionId) => {
+    try {
+      return sessions.model.record(appSessionId) ?? index.sessions.get(appSessionId);
+    } catch {
+      return null; // the index is unavailable
+    }
+  };
+  const history = new PromptHistory({
+    file: join(app.getPath('userData'), 'prompt-history.jsonl'),
+    configDir: claudeConfigDir(process.env, home),
+    session: (appSessionId) => {
+      const record = recordOf(appSessionId);
+      return record && { directory: record.directory, engineSessionId: record.engineSessionId };
+    },
+  });
+  registerMainHandler('session.history.list', async ({ appSessionId, limit }) => ({ entries: await history.list(appSessionId as AppSessionId, limit) }));
+  registerMainHandler('session.history.append', ({ appSessionId, display, pastedContents, project }) => history.append(appSessionId as AppSessionId, display, pastedContents, project ?? null));
+  // listable roots: the directories of every session the read model holds (both launch modes) or the index holds
+  // (archived included), and every indexed project's directory
+  const roots = () => {
+    const directoriesOf = (r: SessionRecord) => [r.directory, ...r.additionalDirectories, ...(r.worktree ? [r.worktree.path] : [])];
+    const held = sessions.model.allRecords().flatMap(directoriesOf);
+    try {
+      return [...held, ...index.sessions.list({ includeArchived: true }).flatMap(directoriesOf), ...index.projects.list({ includeHidden: true }).map((p) => p.directory)];
+    } catch {
+      return held; // the index is unavailable
+    }
+  };
+  const files = new FileLister({ run: createGitRunner(), roots });
+  registerMainHandler('git.lsFiles', (input) => files.list(input));
+  registerMainHandler('layout.pickFiles', (input, { sender }) =>
+    pickFiles(input, {
+      showOpenDialog: (options) => {
+        const win = BrowserWindow.fromWebContents(sender);
+        return win ? dialog.showOpenDialog(win, options) : dialog.showOpenDialog(options);
+      },
+    }),
+  );
+  app.on('will-quit', () => usage.stop());
+  // C7 end
   // C10 start: the worktree service (M2): git.worktree.*, every git mutation MAWS makes, with occupancy from holder
   // authority (C3's process table and C4's fresh registry read through the engine host, the index's records).
   const worktrees = new WorktreeService({ git: createGitRunner(), holders: { dispatch: hosts.dispatch, sessions: index.sessions } });

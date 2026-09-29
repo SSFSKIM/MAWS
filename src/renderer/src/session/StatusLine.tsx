@@ -1,25 +1,35 @@
 // The status line under the composer (§5.5; residue *Status line container*): the six fields in order, cwd, context,
 // the 5-hour and 7-day windows, cost and the effective permission mode, from the record, the digest and the usage
-// store, with `—` where nothing is known. Each field is a button whose popover C7 supplies; until then they are inert
-// (no `aria-haspopup`). The near-limit banner is not here but in the banner host, once per window.
+// store, with `—` where nothing is known. Each field is a button whose popover C7 supplies (Radix gives each its
+// `aria-haspopup`). The near-limit banner is not here but in the banner host, once per window.
 import type { AutoModeRefusalCode } from '@shared/graph/enums';
 import type { SessionRecord } from '@shared/graph/session';
 import type { SessionDigest } from '@shared/ipc/schema';
 import { useSessions } from '../stores/sessions';
-import { useUsage, type UsageState } from '../stores/usage';
+import { useSessionWindows, useUsage, type UsageWindow, type Windows } from '../stores/usage'; // C7: the session's windows and their shapes
+// C7 start
+import { useDirectFallback } from '../statusline/direct-fallback';
+import { resetsInCompact, tokens, windowShown } from '../statusline/format'; // tokens: the one formatter, shared with the context popover
+import { MODE_REFUSAL_WORDS } from '../statusline/mode-menu';
+import { ContextPopover, CostPopover, CwdPopover, ModePopover, UsagePopover } from '../statusline/popovers';
+import { USAGE_UNAVAILABLE } from '../statusline/UsagePopover';
+import { LINE_TICK_MS, useNow } from '../statusline/use-now';
+// C7 end
 
-export const REFUSAL_WORDS: Record<AutoModeRefusalCode, string> = {
-  auto_mode_settings: 'Auto mode refused: settings do not allow it',
-  auto_mode_circuit_breaker: 'Auto mode refused: paused after repeated classifier failures',
-  auto_mode_fast_mode: 'Auto mode refused: not available in fast mode',
-  auto_mode_model: 'Auto mode refused: this model does not support it',
-  auto_mode_unavailable: 'Auto mode refused: auto mode is unavailable',
-};
+// C7: the refusal in the words the mode chip and the mode menu use (C7 execution document, "Composer frame" Mode)
+export const REFUSAL_WORDS: Record<AutoModeRefusalCode, string> = MODE_REFUSAL_WORDS;
 
 // macOS homes live under /Users/<name>; the renderer is told no home directory, and needs none for this.
 export const formatCwd = (directory: string): string => directory.replace(/^\/Users\/[^/]+(?=\/|$)/, '~');
 
-const tokens = (n: number) => (n >= 1_000_000 ? `${+(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : `${n}`);
+// C7 start: a window reads `5h 53% ↻3h46m` (mockup 04), `5h 0%` once its reset has passed with no new reading, and
+// `5h —` with no reading at all.
+function windowField(label: string, window: UsageWindow | null, now: number): string {
+  if (!window) return `${label} —`;
+  const shown = windowShown(window, now);
+  return shown.reset ? `${label} 0%` : `${label} ${Math.round(shown.percent)}% ↻${resetsInCompact(shown.resetInMs!)}`;
+}
+// C7 end
 
 export interface StatusFields {
   cwd: string;
@@ -31,7 +41,7 @@ export interface StatusFields {
   refusal: string | null; // the refusal in words when the requested mode was refused
 }
 
-export function statusFields(record: SessionRecord, digest: SessionDigest | null, windows: UsageState['windows']): StatusFields {
+export function statusFields(record: SessionRecord, digest: SessionDigest | null, windows: Windows | null, now: number = Date.now() /* C7 */): StatusFields {
   const context = digest?.context ?? null;
   let ctx = 'ctx —';
   if (context) {
@@ -43,8 +53,8 @@ export function statusFields(record: SessionRecord, digest: SessionDigest | null
   return {
     cwd: formatCwd(record.directory),
     ctx,
-    fiveHour: windows ? `5h ${Math.round(windows.fiveHour.percent)}%` : '5h —',
-    sevenDay: windows ? `7d ${Math.round(windows.sevenDay.percent)}%` : '7d —',
+    fiveHour: windowField('5h', windows?.fiveHour ?? null, now), // C7
+    sevenDay: windowField('7d', windows?.sevenDay ?? null, now), // C7
     cost: digest?.cost ? `$${digest.cost.totalUsd.toFixed(2)}` : '$—',
     mode: effective,
     refusal: refusal ? REFUSAL_WORDS[refusal] : null,
@@ -55,38 +65,56 @@ const FIELD = 'rounded-sm px-1 -mx-1 text-fg-muted outline-accent hover:bg-bg-ho
 
 export function StatusLine({ record }: { record: SessionRecord }) {
   const digest = useSessions((s) => s.digests.get(record.appId) ?? null);
-  const windows = useUsage((s) => s.windows);
-  const f = statusFields(record, digest, windows);
+  // C7 start: the session's own windows (its pinned account's, the drain target's, or a direct session's engine read)
+  const status = useSessions((s) => s.engine.get(record.appId) ?? null);
+  const shown = useSessionWindows(record, status);
+  const unavailable = useUsage((s) => shown.source !== 'direct' && s.snapshot?.available === false);
+  useDirectFallback(record.appId, status);
+  const now = useNow(LINE_TICK_MS);
+  const f = statusFields(record, digest, shown.windows, now);
+  // C7 end
   const dot = <span aria-hidden>·</span>;
   return (
     <div role="group" aria-label="Session status" className="flex flex-wrap items-center gap-x-1.5 gap-y-1 pb-2 text-ui-sm text-fg-muted tabular-nums">
-      <button type="button" title={record.directory} className={`basis-full truncate text-left font-mono ${FIELD}`}>
-        {f.cwd}
-      </button>
-      <button type="button" className={FIELD}>
-        {f.ctx}
-      </button>
+      <CwdPopover record={record /* C7 */}>
+        <button type="button" title={record.directory} className={`basis-full truncate text-left font-mono ${FIELD}`}>
+          {f.cwd}
+        </button>
+      </CwdPopover>
+      <ContextPopover record={record /* C7 */}>
+        <button type="button" className={FIELD}>
+          {f.ctx}
+        </button>
+      </ContextPopover>
       {dot}
-      <button type="button" className={FIELD}>
-        {f.fiveHour}
-      </button>
+      <UsagePopover record={record} status={status /* C7 */}>
+        <button type="button" title={unavailable ? USAGE_UNAVAILABLE : undefined /* C7 */} className={FIELD}>
+          {f.fiveHour}
+        </button>
+      </UsagePopover>
       {dot}
-      <button type="button" className={FIELD}>
-        {f.sevenDay}
-      </button>
+      <UsagePopover record={record} status={status /* C7 */}>
+        <button type="button" title={unavailable ? USAGE_UNAVAILABLE : undefined /* C7 */} className={FIELD}>
+          {f.sevenDay}
+        </button>
+      </UsagePopover>
       {dot}
-      <button type="button" className={FIELD}>
-        {f.cost}
-      </button>
+      <CostPopover record={record /* C7 */}>
+        <button type="button" className={FIELD}>
+          {f.cost}
+        </button>
+      </CostPopover>
       {dot}
-      <button type="button" title={f.refusal ?? undefined} className={`inline-flex items-center gap-1 ${FIELD}`}>
-        {f.refusal && (
-          <span role="img" aria-label="Warning" className="text-warning">
-            ⚠
-          </span>
-        )}
-        {f.mode}
-      </button>
+      <ModePopover record={record /* C7 */}>
+        <button type="button" title={f.refusal ?? undefined} className={`inline-flex items-center gap-1 ${FIELD}`}>
+          {f.refusal && (
+            <span role="img" aria-label="Warning" className="text-warning">
+              ⚠
+            </span>
+          )}
+          {f.mode}
+        </button>
+      </ModePopover>
     </div>
   );
 }

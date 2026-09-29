@@ -14,7 +14,7 @@
 import { randomUUID } from 'node:crypto';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
-import { SendContentSchema, type QueueEntry, type QueueState, type SendContent, type SessionStateStore } from '@shared/engine/session-state-store';
+import { SendContentSchema, type QueueEntry, type QueuePauseReason, type QueueState, type SendContent, type SessionStateStore } from '@shared/engine/session-state-store';
 import type { UserInputFrame } from '@shared/wire/frames';
 
 export const ACK_TIMEOUT_MS = 5_000;
@@ -22,7 +22,7 @@ const DROPPED_BEFORE_START: ReadonlySet<string> = new Set(['cancelled', 'discard
 
 export type ReleaseTrigger = 'send' | 'turn_ended' | 'resume' | 'dropped';
 export type SteerPriority = 'now' | 'next';
-export type PauseReason = 'user' | 'interrupt' | 'write_failed' | 'uncertain' | 'exit' | 'engine_turn';
+export type PauseReason = QueuePauseReason; // C7: the whole closed set the queue journals (QUEUE_PAUSE_REASONS)
 export type ExitKind = 'quit' | 'stop' | 'archive' | 'crash' | 'unknown';
 
 export interface MessageQueueDeps {
@@ -47,6 +47,7 @@ export class QueueEntryError extends Error {
 export class MessageQueue {
   private entries: QueueEntry[] = [];
   private paused = false;
+  private pauseReason: PauseReason | null = null; // C7: set with every pause, cleared on resume; null for a paused queue loaded from a state file older than the field
   private loaded = false; // recover() ran: before it the queue owns nothing and must never overwrite the stored one
   private readonly ackTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly started = new Set<string>(); // queue ids whose submission the engine started
@@ -58,7 +59,7 @@ export class MessageQueue {
   }
 
   get state(): QueueState {
-    return structuredClone({ entries: this.entries, paused: this.paused });
+    return structuredClone({ entries: this.entries, paused: this.paused, pauseReason: this.pauseReason }); // C7: pauseReason
   }
 
   // A turn is open, or an entry is `submitting`, or a `released` entry's turn has not ended.
@@ -85,13 +86,11 @@ export class MessageQueue {
     const loaded = await this.deps.store.loadQueue(this.deps.appSessionId);
     this.entries = loaded.entries;
     this.paused = loaded.paused;
+    this.pauseReason = loaded.paused ? (loaded.pauseReason ?? null) : null; // C7
     this.loaded = true;
     if (loaded.corrupt !== null) {
       // the state file was unreadable and kept aside: never a silent empty queue (M4 review)
-      if (!this.paused) {
-        this.paused = true;
-        this.journal({ event: 'queue', action: 'pause', reason: 'state_corrupt' });
-      }
+      if (!this.paused) this.pauseFor('state_corrupt'); // C7: through pauseFor
       this.notice(`state:corrupt:${this.deps.appSessionId}`, `This session's saved queue and grants could not be read; the file was kept at ${loaded.corrupt} and the session started without them.`);
     }
     this.settleAfterExit();
@@ -149,11 +148,14 @@ export class MessageQueue {
   async setPaused(paused: boolean): Promise<void> {
     if (paused) return this.pause('user');
     if (this.paused) {
+      const reason = this.pauseReason; // C7
       this.paused = false;
+      this.pauseReason = null; // C7
       try {
         await this.persist();
       } catch (error) {
         this.paused = true; // still paused on disk: stay paused, release nothing
+        this.pauseReason = reason; // C7
         throw error;
       }
       this.journal({ event: 'queue', action: 'resume', reason: 'user' });
@@ -163,8 +165,7 @@ export class MessageQueue {
 
   async pause(reason: PauseReason): Promise<void> {
     if (this.paused) return;
-    this.paused = true;
-    this.journal({ event: 'queue', action: 'pause', reason });
+    this.pauseFor(reason); // C7: through pauseFor
     await this.persist();
   }
 
@@ -231,10 +232,7 @@ export class MessageQueue {
       const pause = event.state === 'refused' && !this.paused && this.queuedCount > 0;
       const text = `The engine ${event.state} a message before starting it, so it was not answered. Re-send it if you still want an answer.`;
       this.notice(`queue:dropped:${entry.queueId}`, pause ? `${text} The queue is paused; resume it to send the next message.` : text);
-      if (pause) {
-        this.paused = true;
-        this.journal({ event: 'queue', action: 'pause', reason: 'refused' });
-      }
+      if (pause) this.pauseFor('refused'); // C7: through pauseFor
       void this.persist()
         .catch((error: unknown) => this.log(`retirement not saved: ${messageOf(error)}`)) // a stale released entry on disk retires at the next recovery
         .then(() => this.releaseHead('dropped'))
@@ -278,8 +276,7 @@ export class MessageQueue {
       await this.submit(head, 'turn_ended', 'engine_turn');
       return;
     }
-    this.paused = true;
-    this.journal({ event: 'queue', action: 'pause', reason: 'engine_turn' });
+    this.pauseFor('engine_turn'); // C7: through pauseFor
     this.heldNotice(head);
     await this.persist().catch((error: unknown) => this.log(`hold not saved: ${messageOf(error)}`));
   }
@@ -300,10 +297,7 @@ export class MessageQueue {
     if (!this.loaded) return Promise.resolve(); // the process never reached recovery: the stored queue stays as it was
     this.settleAfterExit();
     // only when something is left to hold back: a paused empty queue would silently hold the resumed session's next queue
-    if ((reason === 'crash' || reason === 'unknown') && !this.paused && this.entries.length > 0) {
-      this.paused = true;
-      this.journal({ event: 'queue', action: 'pause', reason: 'exit' });
-    }
+    if ((reason === 'crash' || reason === 'unknown') && !this.paused && this.entries.length > 0) this.pauseFor('exit'); // C7: through pauseFor
     return this.persist();
   }
 
@@ -334,10 +328,7 @@ export class MessageQueue {
       }
     }
     this.entries = [...uncertain, ...kept];
-    if (uncertain.length > 0 && !this.paused) {
-      this.paused = true;
-      this.journal({ event: 'queue', action: 'pause', reason: 'uncertain' });
-    }
+    if (uncertain.length > 0 && !this.paused) this.pauseFor('uncertain'); // C7: through pauseFor
   }
 
   private async releaseHead(trigger: ReleaseTrigger): Promise<void> {
@@ -375,8 +366,7 @@ export class MessageQueue {
         this.log(`submission ${entry.queueId} not written: ${error instanceof Error ? error.message : String(error)}`);
         this.revert(entry);
         if (!this.paused) {
-          this.paused = true;
-          this.journal({ event: 'queue', action: 'pause', reason: failReason });
+          this.pauseFor(failReason); // C7: through pauseFor
           if (failReason === 'engine_turn') this.heldNotice(entry);
         }
         await this.persist().catch((e: unknown) => this.log(`revert not saved: ${messageOf(e)}`));
@@ -387,6 +377,14 @@ export class MessageQueue {
     return true;
   }
 
+  // C7 start: the one place a pause happens, so the reason the state carries is always the one the journal names.
+  private pauseFor(reason: PauseReason): void {
+    this.paused = true;
+    this.pauseReason = reason;
+    this.journal({ event: 'queue', action: 'pause', reason });
+  }
+  // C7 end
+
   private revert(entry: QueueEntry): void {
     Object.assign(entry, { state: 'queued', messageUuid: null, submittedAt: null, steer: false });
   }
@@ -395,10 +393,7 @@ export class MessageQueue {
   // warning says so; nothing is announced as durable unless a later save of that state lands.
   private async storeFailed(entry: QueueEntry, error: unknown): Promise<void> {
     this.log(`queue not saved: ${messageOf(error)}`);
-    if (!this.paused) {
-      this.paused = true;
-      this.journal({ event: 'queue', action: 'pause', reason: 'store_failed' });
-    }
+    if (!this.paused) this.pauseFor('store_failed'); // C7: through pauseFor
     this.notice(`queue:store_failed:${entry.queueId}`, `A message could not be saved (${messageOf(error)}), so it was not sent and the queue is paused. Resume to try again.`);
     await this.persist().catch(() => {});
   }

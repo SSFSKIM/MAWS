@@ -14,6 +14,12 @@ import { EngineSession, HostHookRegistry, type EngineSessionOptions } from './se
 import { MemoryJournal, scriptedTransport, type ScriptedTransport } from './conformance/scripted-transport';
 import { replayedSession } from './conformance/session-harness';
 import { MemorySessionStateStore } from './store/memory-session-state-store';
+// C7 start
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { loadJournal, TEST_FIXTURE_DIR } from '../../test/support/fixtures';
+import type { Catalog } from './session';
+// C7 end
 
 const prelude = loadEngineJournal('replay-handshake');
 const responseOf = (seq: number) => (prelude.find((r) => r.seq === seq)!.frame as { response: { response: Record<string, unknown> } }).response.response;
@@ -933,3 +939,112 @@ describe('EngineSession status: taskListId', () => {
   });
 });
 
+
+// C7 start: the catalogue publication over C3's per-launch catalogue state (C7 execution document, Interfaces "Catalogue
+// protocol"), and the pins that read C3's six permission.requested fields through a live session (C7 M1).
+describe('catalog answers and publishes from handshake state (C7)', () => {
+  const frameAt = (pass: 'pass2', name: string, seq: number) => loadJournal(pass, name).find((r) => r.seq === seq)!.frame as Record<string, unknown>;
+  const responseAt = (pass: 'pass2', name: string, seq: number) => (frameAt(pass, name, seq) as { response: { response: Record<string, unknown> } }).response.response;
+  const names = (list: unknown[]) => list.map((c) => (c as { name: string }).name);
+
+  it('pass2/auto-routed: revision 1 at the initialize response, 2 at the first system/init, nothing for an identical init; each publication is the whole catalogue', async () => {
+    const init = responseAt('pass2', 'auto-routed', 4);
+    const { session, transport } = setup({ responder: defaultResponder({ initialize: () => ({ response: init }) }) });
+    const published: Catalog[] = [];
+    session.on('catalog', (catalog) => published.push(catalog));
+    await session.start();
+    expect(published.map((c) => c.revision)).toEqual([1]);
+    transport.push(frameAt('pass2', 'auto-routed', 9));
+    await flush();
+    transport.push(frameAt('pass2', 'auto-routed', 48)); // the next turn's init: identical catalogue fields
+    await flush();
+    expect(published.map((c) => c.revision)).toEqual([1, 2]);
+    const catalog = published.at(-1)!;
+    expect(catalog).toEqual(session.catalog());
+    expect(catalog.commands).toHaveLength(52);
+    expect(names(catalog.commands)[0]).toBe('deep-research');
+    expect(catalog.agents).toHaveLength(5);
+    expect(catalog.skills).toHaveLength(18);
+    expect(catalog.terminalSlashCommands).toEqual(['doctor', 'color', 'focus', 'reload-plugins']);
+    // a commands_changed that changes the list bumps it once more; an identical one publishes nothing
+    const changed = [...(init.commands as unknown[]), { name: 'maws-probe', description: 'Added', argumentHint: '', builtin: false }];
+    transport.push({ type: 'system', subtype: 'commands_changed', session_id: 's', commands: changed });
+    transport.push({ type: 'system', subtype: 'commands_changed', session_id: 's', commands: changed });
+    await flush();
+    expect(published.map((c) => c.revision)).toEqual([1, 2, 3]);
+    expect(names(published.at(-1)!.commands).at(-1)).toBe('maws-probe');
+    published[2]!.commands.length = 0; // a listener cannot reach into the session's state
+    expect(session.catalog().commands).toHaveLength(53);
+  });
+
+  it('pass2/prewarm: commands_changed before the initialize response publishes, its identical repeats do not, then the response and the first init', async () => {
+    const rows = loadJournal('pass2', 'prewarm');
+    const early = rows.filter((r) => (r.frame as { subtype?: string }).subtype === 'commands_changed').map((r) => r.frame);
+    expect(early).toHaveLength(3); // seq 3, 7, 8: the same 52 commands, all before the initialize response at seq 12
+    const init = responseAt('pass2', 'prewarm', 12);
+    const engine: { transport?: ScriptedTransport } = {}; // the responder runs at start, once setup has returned the transport
+    const { session, transport } = setup({
+      responder: defaultResponder({
+        initialize: () => {
+          for (const frame of early) engine.transport!.push(frame);
+          return { response: init };
+        },
+      }),
+    });
+    engine.transport = transport;
+    const published: Catalog[] = [];
+    session.on('catalog', (catalog) => published.push(catalog));
+    await session.start();
+    transport.push(frameAt('pass2', 'prewarm', 17));
+    await flush();
+    expect(published.map((c) => c.revision)).toEqual([1, 2, 3]);
+    expect(published[0]).toMatchObject({ commands: expect.any(Array), agents: [], skills: [], terminalSlashCommands: [] });
+    expect(published[1]!.agents).toHaveLength(5); // the response adds the agents to the same commands
+    expect(published[2]!.skills).toHaveLength(18);
+  });
+});
+
+describe("permission.requested carries C3's optional fields through a live session (C7)", () => {
+  const request = (name: string) => (JSON.parse(readFileSync(join(TEST_FIXTURE_DIR, 'requests', `${name}.json`), 'utf8')) as { frame: Record<string, unknown> }).frame;
+  const canUseTool = (id: string, extra: Record<string, unknown>) => ({
+    type: 'control_request', request_id: id,
+    request: { subtype: 'can_use_tool', tool_name: 'Bash', display_name: 'Bash', input: { command: 'git log --oneline' }, tool_use_id: `toolu_${id}`, decision_reason_type: 'rule', ...extra },
+  });
+  const requested = (events: SessionEvent[]) => events.filter((e): e is Extract<SessionEvent, { kind: 'permission.requested' }> => e.kind === 'permission.requested');
+
+  it('pass2/grant-askrule-start seq 27 is a rule request with no ask rule; a synthetic one carries matched_ask_rule and default_to_no', async () => {
+    const { session, transport, events } = setup();
+    await session.start();
+    transport.push(loadJournal('pass2', 'grant-askrule-start').find((r) => r.seq === 27)!.frame);
+    transport.push(canUseTool('ask-1', { matched_ask_rule: { source: 'flagSettings', toolName: 'Bash', ruleContent: 'git log:*' }, default_to_no: true }));
+    await flush();
+    const [recorded, synthetic] = requested(events);
+    expect(recorded).toMatchObject({ toolName: 'Bash', decisionReasonType: 'rule' });
+    expect('matchedAskRule' in recorded!).toBe(false);
+    expect(synthetic).toMatchObject({ matchedAskRule: { source: 'flagSettings', toolName: 'Bash', ruleContent: 'git log:*' }, defaultToNo: true });
+  });
+
+  it('test/fixtures/requests/mcp-permission.json names its server and needs its own surface; a string mcp_server projects to null', async () => {
+    const { session, transport, events } = setup();
+    await session.start();
+    transport.push(request('mcp-permission'));
+    transport.push(canUseTool('mcp-str', { tool_name: 'mcp__github__create_issue', mcp_server: 'github' }));
+    await flush();
+    const [mcp, malformed] = requested(events);
+    expect(mcp).toMatchObject({ toolName: 'mcp__github__create_issue', mcpServer: { name: 'github', source: 'user' }, requiresUserInteraction: true });
+    expect(malformed!.mcpServer).toBeNull();
+    expect(events.some((e) => e.kind === 'notice.posted' && /mcp_server/.test(JSON.stringify(e)))).toBe(false); // C3's landed projection: no warning
+  });
+
+  it('the synthetic dialog fixtures normalise as the kinds they name, payloads untouched', async () => {
+    const { session, transport, events } = setup();
+    await session.start();
+    for (const name of ['refusal-fallback-dialog', 'auto-mode-fallback-dialog', 'undeclared-dialog', 'flagged-read']) transport.push(request(name));
+    await flush();
+    const dialogs = events.filter((e): e is Extract<SessionEvent, { kind: 'dialog.requested' }> => e.kind === 'dialog.requested');
+    expect(dialogs.map((d) => d.dialogKind)).toEqual(['refusal_fallback_prompt', 'auto_mode_server_fallback', 'cost_threshold']);
+    expect(dialogs[0]!.payload).toEqual((request('refusal-fallback-dialog').request as { payload: unknown }).payload);
+    expect(requested(events)).toMatchObject([{ toolName: 'Read', requiresUserInteraction: true }]);
+  });
+});
+// C7 end

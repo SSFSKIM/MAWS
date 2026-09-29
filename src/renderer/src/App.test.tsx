@@ -94,6 +94,14 @@ function fakeMain(initial: SettingsState['settings']['theme']) {
       case 'session.setVisible':
         return undefined;
       // C5 end
+      // C7 start: the status line's shared ClaudeUsage read (none installed here); its dismissed banners come through
+      // `layout.get` above. The composer's slot and key registrations make no call on mount (no session is open). With
+      // the terminal registry's restore read answered too, no mount call reaches the rejecting default (C7 M4a review).
+      case 'settings.usage':
+        return { available: false, dataDir: '/nowhere', readAt: '2026-09-28T10:00:00.000Z', error: 'absent', drainTarget: null, drainTargetIsManual: false, accounts: [], pinsFor: {} };
+      case 'pty.list':
+        return { ptys: [] };
+      // C7 end
       // C10 start: no unstarted sessions, no interrupted deletes
       case 'session.intent.list':
         return { intents: [] };
@@ -280,3 +288,19 @@ describe('store section of the diagnostics strip', () => {
     expect(screen.queryByRole('status', { name: 'git status' })).toBeNull();
   });
 });
+
+// C7 start
+describe("C7's registrations from the app", () => {
+  afterEach(() => {
+    cleanup();
+    delete (window as { maws?: MawsBridge }).maws;
+  });
+
+  it("registers the composer's edit-and-resubmit adapter as the transcript's editAndResubmit", async () => {
+    fakeMain('light');
+    await renderApp();
+    const [{ registeredActions }, { editAndResubmitRow }] = await Promise.all([import('./transcript'), import('./composer')]);
+    expect(registeredActions().editAndResubmit).toBe(editAndResubmitRow);
+  });
+});
+// C7 end

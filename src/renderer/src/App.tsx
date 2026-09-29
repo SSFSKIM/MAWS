@@ -19,6 +19,12 @@ import { connectPanelHost, registerPanelTool } from './panel/host';
 import { PanelHost } from './panel/PanelHost';
 import { adoptTerminals, terminalTool } from './tools/terminal';
 // C8a end
+// C7 start
+import { ComposerAppKeys, connectComposer, editAndResubmitRow } from './composer';
+import { connectRequestCard } from './request-card';
+import { connectStatusLine } from './statusline';
+import { registerTranscriptActions } from './transcript';
+// C7 end
 // C10 start
 import { connectSessions } from './sessions/connect';
 import { SessionDialogs } from './sessions/SessionDialogs';
@@ -54,6 +60,12 @@ export function App() {
     void adoptTerminals();
   }, []);
   // C8a end
+  // C7 start: the X4 card in C5's requestCard slot (docked, card, hover) and C6's transcript request slot (inline)
+  useEffect(() => connectRequestCard(), []);
+  useEffect(() => connectStatusLine(), []); // the shared ClaudeUsage read and the near-limit banner, app-wide
+  useEffect(() => connectComposer(), []); // the composer in C5's composer slot
+  useEffect(() => registerTranscriptActions({ editAndResubmit: editAndResubmitRow }), []); // a bubble's Edit prefills the composer in edit mode
+  // C7 end
   // C10 start: the setup store and C5's tab retention at once (before hydration's snapshots answer); in launch mode
   // `index`, the newSession slot, the session creator, the close guard, the unstarted title and the session actions
   useEffect(() => connectSessions(), []);
@@ -67,6 +79,9 @@ export function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <Shell />
+      {/* C7 start: the one app-level ⌘. and ⌘L, resolving the focused pane's session */}
+      <ComposerAppKeys />
+      {/* C7 end */}
       {/* C10 start: the small sheets (rename, fork, archive, delete, cleanup, archived sessions) */}
       <SessionDialogs />
       {/* C10 end */}

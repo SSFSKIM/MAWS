@@ -91,7 +91,7 @@ describe('queue release never follows an engine-initiated turn', () => {
     expect(ofKind(run.events, 'turn.ended').map((e) => e.origin)).toEqual(['human', 'task-notification']);
     expect(userOuts(run.journal.rows)).toHaveLength(1);
     expect(releases(run.journal.rows)).toEqual(['send']);
-    expect(run.session.queue.state).toEqual({ entries: [], paused: false });
+    expect(run.session.queue.state).toEqual({ entries: [], paused: false, pauseReason: null }); // C7: pauseReason
     expect(metaRows(run.journal.rows, 'queue').filter((r) => r.action === 'pause')).toEqual([]);
     expect(ofKind(run.events, 'notice.posted')).toEqual([]);
   });
@@ -311,7 +311,7 @@ describe('queue submission survives a crash around delivery', () => {
     expect(noticeRow).toBeLessThan(run.journal.rows.findIndex((r) => (r.frame as { event?: string }).event === 'exit'));
     expect(run.session.queue.busy).toBe(false);
     await flush();
-    expect(await store.loadQueue(id)).toEqual({ entries: [], paused: false, corrupt: null });
+    expect(await store.loadQueue(id)).toEqual({ entries: [], paused: false, pauseReason: null, corrupt: null }); // C7: pauseReason
     expect(sent).toBeDefined();
 
     const resumed = scriptedSession({ spec: { appSessionId: id, resume: { sessionId: '44444444-4444-4444-8444-444444444444' as never, fork: false }, sessionId: null }, session: { store } });

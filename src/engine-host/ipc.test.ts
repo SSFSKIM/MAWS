@@ -420,3 +420,49 @@ describe('session.events for an app session with no process here answers from di
   });
 });
 // C4 end
+
+// C7 start: the catalogue's publication and the queue's pause reason through the host's handlers (C7 M1)
+describe('catalog answers and publishes from handshake state through the host (C7)', () => {
+  type Changed = { appSessionId: string; launchId: string; catalog: { revision: number; commands: unknown[] } };
+  const changes = (host: ReturnType<typeof engineHost>, id: string) =>
+    host.emitted.filter((e) => e.name === 'session.catalogChanged' && (e.payload as Changed).appSessionId === id).map((e) => e.payload as Changed);
+
+  it('session.catalog is refused internal before any process, and published whole per launch, restarting at revision 1 with the new launchId', async () => {
+    const host = engineHost();
+    const id = 'app-catalog';
+    await expect(host.handlers.get('session.catalog')!({ appSessionId: id })).rejects.toEqual(new HostCommandError({ code: 'internal', message: `unknown session ${id}` }));
+    const first = (await host.call('session.launch', { spec: replaySpec(id, 'spikes/protocol-probe/fixtures/init.jsonl') })) as { session: EngineSessionStatus };
+    await until(() => host.statuses(id).some((s) => s.process === 'ready'), 'ready');
+    expect(changes(host, id).map((c) => [c.launchId, c.catalog.revision])).toEqual([[first.session.launchId, 1]]);
+    expect(changes(host, id)[0]!.catalog).toEqual(await host.call('session.catalog', { appSessionId: id as AppSessionId }));
+    expect(changes(host, id)[0]!.catalog.commands).toHaveLength((INIT_RESPONSE.commands as unknown[]).length);
+    // the publication follows the events that caused it, like every per-session event
+    const names = host.emitted.filter((e) => (e.payload as { appSessionId?: string }).appSessionId === id).map((e) => e.name);
+    expect(names.indexOf('session.catalogChanged')).toBeGreaterThan(names.indexOf('session.eventBatch'));
+    await host.call('session.stop', { appSessionId: id as AppSessionId, reason: 'stop' });
+
+    const second = (await host.call('session.launch', { spec: replaySpec(id, 'spikes/protocol-probe/fixtures/init.jsonl') })) as { session: EngineSessionStatus };
+    await until(() => changes(host, id).length === 2, 'the second launch\'s catalogue');
+    expect(changes(host, id).map((c) => [c.launchId, c.catalog.revision])).toEqual([[first.session.launchId, 1], [second.session.launchId, 1]]);
+    expect(second.session.launchId).not.toBe(first.session.launchId);
+    await host.call('session.stop', { appSessionId: id as AppSessionId, reason: 'stop' });
+  });
+
+  it("session.queue and session.queue.list carry the pause reason; a state file older than the field lists none", async () => {
+    const store = new FileSessionStateStore(userData);
+    await store.saveQueue('app-legacy' as AppSessionId, { entries: [], paused: true });
+    const host = engineHost({ store });
+    expect(await host.call('session.queue.list', { appSessionId: 'app-legacy' as AppSessionId })).toEqual({ entries: [], paused: true });
+    const id = 'app-pause';
+    await host.call('session.launch', { spec: replaySpec(id, 'spikes/protocol-probe/fixtures/init.jsonl') });
+    await until(() => host.statuses(id).some((s) => s.process === 'ready'), 'ready');
+    await host.call('session.queue.setPaused', { appSessionId: id as AppSessionId, paused: true });
+    expect(await host.call('session.queue.list', { appSessionId: id as AppSessionId })).toEqual({ entries: [], paused: true, pauseReason: 'user' });
+    const last = host.emitted.filter((e) => e.name === 'session.queue' && (e.payload as { appSessionId: string }).appSessionId === id).at(-1)!.payload;
+    expect(last).toEqual({ appSessionId: id, entries: [], paused: true, pauseReason: 'user' });
+    await host.call('session.queue.setPaused', { appSessionId: id as AppSessionId, paused: false });
+    expect(await host.call('session.queue.list', { appSessionId: id as AppSessionId })).toEqual({ entries: [], paused: false, pauseReason: null });
+    await host.call('session.stop', { appSessionId: id as AppSessionId, reason: 'stop' });
+  });
+});
+// C7 end

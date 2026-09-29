@@ -1,0 +1,5 @@
+{"display":"first terminal prompt","pastedContents":{},"timestamp":1790586000000,"project":"/tmp/maws-c7-history-project","sessionId":"8f7e6d5c-4b3a-4291-8807-a6b5c4d3e2f1"}
+{"display":"a prompt in another project","pastedContents":{},"timestamp":1790586060000,"project":"/tmp/maws-c7-other-project","sessionId":"8f7e6d5c-4b3a-4291-8807-a6b5c4d3e2f1"}
+{"display":"[Pasted text #1 +40 lines]","pastedContents":{"1":{"id":1,"type":"text","contentHash":"c5ddbb6e32f0ffa0"}},"timestamp":1790586120000,"project":"/tmp/maws-c7-history-project","sessionId":"8f7e6d5c-4b3a-4291-8807-a6b5c4d3e2f1"}
+{"display":"inline paste [Pasted text #1 +3 lines]","pastedContents":{"1":{"id":1,"type":"text","content":"a\nb\nc"}},"timestamp":1790586180000,"project":"/tmp/maws-c7-history-project","sessionId":"8f7e6d5c-4b3a-4291-8807-a6b5c4d3e2f1"}
+{"display":"lost paste [Pasted text #1 +2 lines]","pastedContents":{"1":{"id":1,"type":"text","contentHash":"0123456789abcdef"}},"timestamp":1790586240000,"project":"/tmp/maws-c7-history-project","sessionId":"8f7e6d5c-4b3a-4291-8807-a6b5c4d3e2f1"}

@@ -10,6 +10,7 @@ import type { AttentionItem } from '@shared/graph/attention';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import { useSlot } from '../app/slots';
+import { FALLBACKS } from '../app/slot-fallbacks'; // C7
 import { waitingItem } from '../attention/derive';
 import { ipc } from '../ipc/client';
 import { selectPendingOf, useAttention } from '../stores/attention';
@@ -55,7 +56,7 @@ function StartedPane({ record, paneIndex }: { record: SessionRecord; paneIndex: 
   // A docked request is the session's oldest actionable item (the one its Needs-you row shows); held peer messages
   // are not requests.
   const waiting = waitingItem(pending);
-  const docked = !foreign && waiting?.tier === 1 ? waiting.oldest : null;
+  const docked = !foreign && waiting?.tier === 1 && Composer === FALLBACKS.composer ? waiting.oldest : null; // C7: a registered composer is the one docked swap (it docks the request itself)
 
   return (
     <div className="flex h-full flex-col">

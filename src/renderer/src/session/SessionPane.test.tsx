@@ -1,5 +1,5 @@
 import { act, cleanup, render, screen, within } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'; // C7: vi
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge, SessionDigest } from '@shared/ipc/schema';
 import { digest, record } from '../../../../test/support/builders';
@@ -26,6 +26,10 @@ afterEach(() => {
   cleanup();
   delete (window as { maws?: MawsBridge }).maws;
   resetSlots();
+  // C7 start: a failing assertion must not leave the fake clock or the windows to the next test
+  vi.useRealTimers();
+  useUsage.setState({ windows: null });
+  // C7 end
 });
 
 describe('session pane', () => {
@@ -33,14 +37,26 @@ describe('session pane', () => {
     const id = idOf('Fix sidebar drag');
     registerSlot('transcript', ({ appSessionId, agentId, paneIndex }) => <p>transcript {`${appSessionId} ${agentId} ${paneIndex}`}</p>);
     registerSlot('requestCard', ({ item, placement, paneIndex }) => <p>request {`${item.kind} ${placement} ${paneIndex}`}</p>);
-    registerSlot('composer', ({ appSessionId, paneIndex }) => <p>composer {`${appSessionId} ${paneIndex}`}</p>);
+    // C7: no composer registered here (C5's stub composer registration removed): a registered composer docks the request itself (the C7 case below)
     render(<SessionPane appSessionId={id} paneIndex={1} />);
     expect(screen.getByText(`transcript ${id} null 1`)).toBeTruthy();
     const request = screen.getByText('request permission docked 1');
-    const composer = screen.getByText(`composer ${id} 1`);
+    const composer = screen.getByText('Composer arrives with C7'); // C7: the pane docks above C5's fallback composer only
     expect(request.compareDocumentPosition(composer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(statusButtons()).toHaveLength(6);
   });
+
+  // C7 start: a registered composer is the one docked swap: it docks the request in its own place, so the pane's slot
+  // docks nothing (two docked placements of one request would take focus and bind Enter twice).
+  it('leaves the docking to a registered composer', () => {
+    const id = idOf('Fix sidebar drag');
+    registerSlot('requestCard', ({ item, placement }) => <p>request {`${item.kind} ${placement}`}</p>);
+    registerSlot('composer', ({ appSessionId, paneIndex }) => <p>composer {`${appSessionId} ${paneIndex}`}</p>);
+    render(<SessionPane appSessionId={id} paneIndex={1} />);
+    expect(screen.getByText(`composer ${id} 1`)).toBeTruthy();
+    expect(screen.queryByText('request permission docked')).toBeNull();
+  });
+  // C7 end
 
   it('docks no request when nothing waits', () => {
     registerSlot('requestCard', () => <p>request</p>);
@@ -108,14 +124,21 @@ describe('status line', () => {
     render(<SessionPane appSessionId={idOf('Fix sidebar drag')} paneIndex={0} />);
     expect(statusButtons().map((b) => b.textContent)).toEqual(['/private/tmp/maws-probe-qqboLh', 'ctx —', '5h —', '7d —', '$—', 'auto']);
     expect(statusButtons()[0].className).toContain('font-mono');
-    expect(statusButtons().every((b) => !b.hasAttribute('aria-haspopup'))).toBe(true);
+    expect(statusButtons().every((b) => b.getAttribute('aria-haspopup') === 'dialog')).toBe(true); // C7: every field opens its popover
   });
 
   it('shows context of the model’s window, the usage windows and the total cost', () => {
-    useUsage.setState({ windows: { fiveHour: { percent: 74, resetsAt: '2026-09-28T13:00:00Z' }, sevenDay: { percent: 82, resetsAt: '2026-10-01T00:00:00Z' } } });
-    render(<SessionPane appSessionId={idOf('Charter + research')} paneIndex={0} />);
-    expect(statusButtons().map((b) => b.textContent).slice(1)).toEqual(['ctx 41% of 200k', '5h 74%', '7d 82%', '$0.07', 'default']);
-    useUsage.setState({ windows: null });
+    // C7 start: the windows carry their reading time and reset countdown (mockup 04: `5h 74% ↻2h37m`)
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(Date.parse('2026-09-28T10:23:00Z'));
+    const usageWindow = (percent: number, resetsAt: string) => ({ percent, resetsAt, recordedAt: '2026-09-28T10:20:00Z' });
+    useUsage.setState({ windows: { fiveHour: usageWindow(74, '2026-09-28T13:00:00Z'), sevenDay: usageWindow(82, '2026-10-04T07:23:00Z'), scoped: [] } });
+    const id = idOf('Charter + research'); // the scenario has it direct; routed, it shows the drain target's windows
+    const direct = useSessions.getState().records.get(id)!;
+    useSessions.setState({ records: new Map(useSessions.getState().records).set(id, { ...direct, gateway: { ...direct.gateway, routed: true } }) });
+    render(<SessionPane appSessionId={id} paneIndex={0} />);
+    expect(statusButtons().map((b) => b.textContent).slice(1)).toEqual(['ctx 41% of 200k', '5h 74% ↻2h37m', '7d 82% ↻5d21h', '$0.07', 'default']);
+    // C7 end
   });
 
   it('marks context past the auto-compact threshold', () => {
@@ -131,7 +154,7 @@ describe('status line', () => {
     render(<SessionPane appSessionId={A} paneIndex={0} />);
     const mode = statusButtons()[5];
     expect(mode.textContent).toContain('default');
-    expect(mode.getAttribute('title')).toBe('Auto mode refused: this model does not support it');
+    expect(mode.getAttribute('title')).toBe('This model does not support auto mode'); // C7: the mode chip's words
     expect(within(mode).getByRole('img', { name: 'Warning' })).toBeTruthy();
   });
 

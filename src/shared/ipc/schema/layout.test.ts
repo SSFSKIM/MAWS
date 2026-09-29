@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { commands, LAYOUT_DEFAULTS, LayoutKeySchema, LayoutMainSchema, LayoutRegionsSchema, PanelPinnedSchema, TabRefSchema, tabId } from './layout';
+import { commands, LAYOUT_DEFAULTS, LayoutKeySchema, LayoutMainSchema, LayoutRegionsSchema, PanelPinnedSchema, TabRefSchema, tabId, UsageBannersSchema } from './layout'; // C7: UsageBannersSchema
 
 describe('layout value shapes', () => {
   it('validates its own defaults', () => {
@@ -12,10 +12,10 @@ describe('layout value shapes', () => {
   });
 
   it('accepts the key grammar and nothing else', () => {
-    for (const key of ['regions', 'main.tabs', 'panel.pinned', 'panel.app-1', 'window.main']) {
+    for (const key of ['regions', 'main.tabs', 'panel.pinned', 'panel.app-1', 'window.main', 'usage.banners' /* C7 */]) {
       expect(LayoutKeySchema.safeParse(key).success, key).toBe(true);
     }
-    for (const key of ['main', 'panel.', 'panel.a.b', 'window.other', 'x']) expect(LayoutKeySchema.safeParse(key).success, key).toBe(false);
+    for (const key of ['main', 'panel.', 'panel.a.b', 'window.other', 'x', 'usage.other' /* C7 */]) expect(LayoutKeySchema.safeParse(key).success, key).toBe(false);
   });
 
   it('derives deterministic tab ids', () => {
@@ -46,6 +46,15 @@ describe('layout value shapes', () => {
       'layout.list': 'main',
       'layout.openExternal': 'main',
       'layout.setEnabledActions': 'main',
+      'layout.pickFiles': 'main', // C7
     });
   });
+
+  // C7 start: the dismissed near-limit banner keys (C7 execution document, Status line popovers and usage)
+  it('holds usage.banners to fifty string keys', () => {
+    expect(UsageBannersSchema.safeParse(['usage:a1:session:2026-09-28T16:09:59Z']).success).toBe(true);
+    expect(UsageBannersSchema.safeParse(Array.from({ length: 51 }, (_, i) => `k${i}`)).success).toBe(false);
+    expect(UsageBannersSchema.safeParse([1]).success).toBe(false);
+  });
+  // C7 end
 });
