@@ -435,6 +435,66 @@ describe('EngineSession: inbound requests, host hooks and exit', () => {
   });
 });
 
+describe('a stop before the process is spawned (whole-branch review)', () => {
+  // the launch is reserved and `run()` is awaiting the stored grants when the stop arrives
+  function gatedStart() {
+    let open!: () => void;
+    const gate = new Promise<void>((r) => (open = r));
+    const store = new MemorySessionStateStore();
+    const loadGrants = store.loadGrants.bind(store);
+    store.loadGrants = async (id) => {
+      await gate;
+      return loadGrants(id);
+    };
+    let spawned = 0;
+    const s = setup({ session: { store } });
+    const spawnedNow = () => spawned;
+    const spawn = s.session['opts'].spawn;
+    s.session['opts'].spawn = (plan) => ((spawned += 1), spawn(plan));
+    return { ...s, open, spawned: spawnedNow };
+  }
+
+  it('run() never spawns: the session exits stop with no process, the reservation is free, and a later stop answers the same exit', async () => {
+    const { session, journal, open, spawned, events } = gatedStart();
+    const table = new ProcessTable({ ps: async () => '' });
+    table.reserve('app-s' as AppSessionId, () => session);
+    await flush();
+    const stopping = session.stop('archive');
+    open();
+    expect(await stopping).toEqual({ exited: true, code: null, signal: null });
+    await session.start();
+    expect(spawned()).toBe(0);
+    expect(session.status()).toMatchObject({ process: 'exited', pid: null, exit: { code: null, signal: null, reason: 'archive' } });
+    expect(metaEvents(journal)).toEqual(['exit']); // no spawn row, no init_failed: nothing was started
+    expect(events.map((e) => e.kind)).toEqual(['process.exited']);
+    expect(await session.stop('stop')).toEqual({ exited: true, code: null, signal: null });
+    expect(await table.shutdown({ graceMs: 3_000 })).toEqual({ stopped: 0, forced: 0 });
+    expect(table.reserve('app-s' as AppSessionId, () => setup().session)).toMatchObject({ status: 'launching' });
+  });
+
+  it('a stop before start() ends the session at once; start() then spawns nothing', async () => {
+    const { session, spawned, open } = gatedStart();
+    expect(await session.stop('stop')).toEqual({ exited: true, code: null, signal: null });
+    open();
+    await session.start();
+    expect(spawned()).toBe(0);
+    expect(session.status().exit).toMatchObject({ reason: 'stop' });
+  });
+
+  it('no stop is memoised as a no-op: a stop after the spawn still runs the ladder', async () => {
+    const { session, transport, open } = gatedStart();
+    const starting = session.start();
+    open();
+    await starting;
+    expect(session.lifecycle).toBe('ready');
+    const stopping = session.stop('stop');
+    await flush();
+    expect(transport.requestsOf('end_session')).toHaveLength(1);
+    transport.exit(0);
+    expect(await stopping).toEqual({ exited: true, code: 0, signal: null });
+  });
+});
+
 describe('failed initialize terminates the process', () => {
   it('a queue recovery that fails is an initialization failure: init_failed, the ladder without end_session, the reservation held until the OS exit (M4 review)', async () => {
     vi.useFakeTimers();

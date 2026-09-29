@@ -249,10 +249,16 @@ export class EngineSession {
     }
   }
 
-  // Ends the process through the termination ladder; `graceMs` (the end_session wait) is capped at 3 s.
+  // Ends the process through the termination ladder; `graceMs` (the end_session wait) is capped at 3 s. Before the
+  // process is spawned there is nothing to ladder: the reason is recorded, `run()` sees it and ends the session with no
+  // process (a stop before `start()` ends it at once), and the answer is that exit (whole-branch review).
   stop(reason: 'stop' | 'archive' | 'quit' = 'stop', opts: { graceMs?: number } = {}): Promise<StopResult> {
     if (this.processState === 'exited') return Promise.resolve(this.stopResult());
     this.stopReason ??= reason;
+    if (!this.transport) {
+      if (this.starting === null) this.handleExit({ code: null, signal: null });
+      return this.exited.then(() => this.stopResult());
+    }
     return this.terminate(true, Math.min(opts.graceMs ?? LADDER_MS.endSession, LADDER_MS.endSession));
   }
 
@@ -347,6 +353,10 @@ export class EngineSession {
 
   private async run(): Promise<void> {
     await this.loadState();
+    if (this.stopReason !== null || this.processState === 'exited') {
+      this.handleExit({ code: null, signal: null }); // stopped while the state loaded: never spawn (idempotent)
+      return;
+    }
     if (this.reconnect) this.record('meta', { event: 'reconnect', phase: 'attempting', attempt: 1, maxAttempts: 1, trigger: 'user', reason: null });
     this.record('meta', spawnMeta(this.plan, { appVersion: this.opts.appVersion ?? 'unknown' }));
     if (this.opts.relayHealth) this.record('meta', { event: 'relay_health', ...this.opts.relayHealth });
@@ -678,14 +688,16 @@ export class EngineSession {
     if (this.reconnect) this.record('meta', { event: 'reconnect', phase: 'failed', attempt: 1, maxAttempts: 1, trigger: 'user', reason: detail });
   }
 
+  // One ladder per process, memoised; with no process yet there is nothing to memoise (whole-branch review).
   private terminate(endSessionFirst: boolean, graceMs: number = LADDER_MS.endSession): Promise<StopResult> {
-    this.ladder ??= this.runLadder(endSessionFirst, graceMs);
+    const transport = this.transport;
+    if (!transport) return Promise.resolve(this.stopResult());
+    this.ladder ??= this.runLadder(transport, endSessionFirst, graceMs);
     return this.ladder;
   }
 
-  private async runLadder(endSessionFirst: boolean, graceMs: number): Promise<StopResult> {
-    const transport = this.transport;
-    if (!transport || this.processState === 'exited') return this.stopResult();
+  private async runLadder(transport: EngineTransport, endSessionFirst: boolean, graceMs: number): Promise<StopResult> {
+    if (this.processState === 'exited') return this.stopResult();
     this.setProcess('exiting');
     if (endSessionFirst && this.handshakeDone && this.client) {
       endSession(this.client, { reason: this.stopReason ?? 'stop' }).catch(() => {}); // the exit is the answer that matters
