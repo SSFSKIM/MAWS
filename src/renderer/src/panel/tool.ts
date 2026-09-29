@@ -4,15 +4,10 @@
 // Host rules every tool relies on: `createState` runs once per tab and its result is kept across visibility changes,
 // panel collapse and session switches under a pin; unselected tools are unmounted; `beforeClose` can veto a close.
 import type { ComponentType } from 'react';
+import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { panelHost } from './host';
-
-// carried by C9 until the rebase over C3: C3 lands `EngineSessionStatus` (its process table); the harness passes null
-export interface EngineSessionStatus {
-  readonly placeholder: 'EngineSessionStatus lands with C3';
-}
-// carried by C9 until the rebase over C3
 
 export interface PanelToolInit<P = void> {
   appSessionId: AppSessionId | null; // null when opened with no session shown (pinned tools only)
