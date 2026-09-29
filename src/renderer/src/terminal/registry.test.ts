@@ -871,6 +871,19 @@ describe('terminal font from the root --font-mono', () => {
     const { renderer } = await openRunning(makeRegistry());
     expect(renderer.options.font.family).toBe('"Other", monospace');
   });
+
+  it('a renderer still being created when the font changes gets the new font once it attaches (M5 fix wave)', async () => {
+    const registry = makeRegistry();
+    await openRunning(registry, 'first'); // the registry has handed a font out
+    const id = registry.open({ appSessionId: A, label: 'second', cwd: '/tmp/a' });
+    registry.mount(id, parent()); // its renderer is being created with the font of this moment
+    currentFont = { ...MONO, family: '"Changed", monospace' };
+    ipc.emit('settings.changed', { settings: { ...SETTINGS_DEFAULTS_V3, appearance: { monoFont: 'Changed' } }, resolvedTheme: 'light' });
+    await settle();
+    const renderer = registry.get(id)!.renderer as FakeRenderer;
+    expect(renderer.options.font.family).toBe('mono');
+    expect(renderer.font.family).toBe('"Changed", monospace');
+  });
 });
 // C11 end
 

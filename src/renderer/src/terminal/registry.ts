@@ -370,6 +370,7 @@ export class TerminalRegistry {
     entry.ready = this.deps.createRenderer(options).then(
       (renderer) => {
         this.attachRenderer(entry, renderer);
+        if (entry.renderer) this.catchUpFont(entry, options.font); // C11
         return entry.renderer;
       },
       (error: unknown) => {
@@ -743,10 +744,17 @@ export class TerminalRegistry {
     if (key === this.fontKey) return;
     this.fontKey = key;
     for (const entry of this.entries.values()) {
-      if (!entry.renderer) continue;
+      if (!entry.renderer) continue; // still being created: catchUpFont gives it the font once it attaches
       entry.renderer.setFont(next);
       this.scheduleFit(entry); // another family measures another cell: the grid and the pty follow
     }
+  }
+
+  // A renderer created with a font that has moved on while it was being created.
+  private catchUpFont(entry: Entry, created: TerminalFont): void {
+    if (this.fontKey === null || this.fontKey === JSON.stringify(created)) return;
+    entry.renderer!.setFont(JSON.parse(this.fontKey) as TerminalFont);
+    this.scheduleFit(entry);
   }
   // C11 end
 
