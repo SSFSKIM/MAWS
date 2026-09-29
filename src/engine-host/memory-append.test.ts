@@ -152,6 +152,18 @@ describe('memoryAppend (#)', () => {
     await expect(memoryAppend(slow.session, { text: 'late', target: { kind: 'user', path: null } }, { budgetMs: 8_000, now })).rejects.toBeInstanceOf(MemoryAppendBudgetSpent);
     expect(await readFile(join(root, 'home', '.claude', 'CLAUDE.md'), 'utf8')).toBe('# user\n'); // unchanged
 
+    // the budget runs out between the read and the write (after the file was opened, just before the commit): no bytes
+    // land, a file this call created is removed, and an existing file is left as it was (M5 re-review)
+    const atCommit = await session();
+    const clockAt = (spentFromCall: number) => {
+      let calls = 0;
+      return () => (++calls >= spentFromCall ? 20_000 : 1_000); // calls: deadline, read budget, before open, before commit
+    };
+    await expect(memoryAppend(atCommit.session, { text: 'late', target: { kind: 'project', path: null } }, { budgetMs: 8_000, now: clockAt(4) })).rejects.toBeInstanceOf(MemoryAppendBudgetSpent);
+    await expect(readFile(join(root, 'project', 'CLAUDE.md'), 'utf8')).rejects.toThrow();
+    await expect(memoryAppend(atCommit.session, { text: 'late', target: { kind: 'user', path: null } }, { budgetMs: 8_000, now: clockAt(4) })).rejects.toBeInstanceOf(MemoryAppendBudgetSpent);
+    expect(await readFile(join(root, 'home', '.claude', 'CLAUDE.md'), 'utf8')).toBe('# user\n');
+
     const quick = await session();
     expect(await memoryAppend(quick.session, { text: 'in time', target: { kind: 'project', path: null } }, { budgetMs: 8_000, now: () => clock })).toEqual({ path: join(root, 'project', 'CLAUDE.md'), created: true });
     expect(quick.transport.requestsOf('get_memory_dialog')).toHaveLength(1);

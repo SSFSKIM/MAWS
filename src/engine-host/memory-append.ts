@@ -9,7 +9,7 @@
 // the target is a file the dialog lists, followed once through its own real path), and the final component is opened
 // `O_NOFOLLOW`, so a symlink there, existing or dangling, is refused rather than followed. Nothing here calls a
 // path-based write on a caller-controlled path.
-import { constants } from 'node:fs';
+import { constants, writeSync } from 'node:fs';
 import { lstat, mkdir, open, realpath, unlink, type FileHandle } from 'node:fs/promises';
 import { basename, dirname, join, resolve, sep } from 'node:path';
 import { getMemoryDialog, REQUEST_TIMEOUT_MS } from './controls';
@@ -23,7 +23,8 @@ const OPEN_FLAGS = constants.O_WRONLY | constants.O_APPEND | constants.O_NOFOLLO
 
 // `session.memoryAppend` is bounded (M5 review): the bridge answers `timeout` when the handler's budget is spent, so the
 // append is committed only inside it: the dialog read gets what is left of the budget, and nothing is created or
-// appended once it is gone (a file created just before the deadline and not yet written is removed again).
+// appended once it is gone (a file created just before the deadline and not yet written is removed again); the append
+// itself is a synchronous write right after the last check.
 export class MemoryAppendBudgetSpent extends Error {
   constructor(budgetMs: number) {
     super(`# ran past its ${Math.round(budgetMs / 1000)} s budget; nothing was written`);
@@ -49,8 +50,11 @@ export async function memoryAppend(
   withinBudget(); // before anything is created
   const { handle, created } = await openConfined(where, path);
   try {
+    // The last check and the commit are one synchronous step (M5 re-review): no async write can still be in flight
+    // when the bridge has answered `timeout`.
     withinBudget();
-    await handle.appendFile(`\n- ${args.text}\n`);
+    const bytes = Buffer.from(`\n- ${args.text}\n`);
+    for (let written = 0; written < bytes.length; ) written += writeSync(handle.fd, bytes, written);
   } catch (error) {
     await handle.close();
     if (created && error instanceof MemoryAppendBudgetSpent) await unlink(where).catch(() => {});
