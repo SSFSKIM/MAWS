@@ -10,6 +10,9 @@ import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
 import { useSettings } from '../stores/settings';
 import { StoreDiagnostics } from './StoreDiagnostics';
+// C7 start
+import { ResumeLauncher } from '../composer/dev/ResumeLauncher';
+// C7 end
 
 const THEMES: { value: ThemeSetting; label: string }[] = [
   { value: 'light', label: 'Light' },
@@ -75,6 +78,9 @@ export function Diagnostics() {
       {/* C4: the engine's store as the filesystem state service sees it, on a row of its own */}
       <StoreDiagnostics />
       {/* end C4 */}
+      {/* C7 start: resume a record live (dev builds only, until C10's unstarted-session path) */}
+      {import.meta.env.DEV && <ResumeLauncher />}
+      {/* C7 end */}
     </section>
   );
 }

@@ -1,20 +1,22 @@
-// C7's replay launches for its end-to-end specs: one shared `LaunchSpec` builder (C10 is about to make new X6 fields
-// mandatory, so no C7 spec lists the fields itself; the rebase is a change here), the bridge helpers, and the journal
-// builder that puts synthetic turns behind C3's handshake prelude.
+// C7's replay launches for its end-to-end specs: every `LaunchSpec` spreads from C7's one list of launch fields
+// (`src/shared/composer/launch-defaults.ts`, which the Diagnostics launcher uses too; C10 is about to make new X6 fields
+// mandatory, and the rebase is a change there), the bridge helpers, and the journal builders that put synthetic turns
+// behind C3's handshake prelude.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, type Page } from '@playwright/test';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandInput, CommandName, CommandResult } from '@shared/ipc/schema';
+import { launchDefaults } from '../../src/shared/composer/launch-defaults';
 import { REPO_ROOT } from './launch';
 
-const BASE: Omit<LaunchSpec, 'appSessionId' | 'replay'> = {
-  cwd: '/tmp/maws-e2e-replay', additionalDirectories: [], model: null, effort: null, permissionMode: null, gateway: 'gateway', subagentModel: null,
-  resume: null, sessionId: null, trust: null, mcpConfig: null, extraSettings: null, maxBudgetUsd: null,
-};
-
-export const replaySpec = (appSessionId: string, replay: string, over: Partial<LaunchSpec> = {}): LaunchSpec => ({ ...BASE, ...over, appSessionId: appSessionId as AppSessionId, replay });
+export const replaySpec = (appSessionId: string, replay: string, over: Partial<LaunchSpec> = {}): LaunchSpec => ({
+  ...launchDefaults(appSessionId as AppSessionId, '/tmp/maws-e2e-replay'),
+  ...over,
+  appSessionId: appSessionId as AppSessionId,
+  replay,
+});
 
 export function invoke<N extends CommandName>(page: Page, name: N, input: CommandInput<N>): Promise<CommandResult<N>> {
   return page.evaluate(([n, i]) => window.maws.invoke(n as never, i as never), [name, input] as const) as Promise<CommandResult<N>>;
