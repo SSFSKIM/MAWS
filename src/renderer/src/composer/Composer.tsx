@@ -86,6 +86,7 @@ function useDraftPort(appSessionId: AppSessionId, hook: SetupIntentHook | null, 
     const drafts = ipcDrafts(client, appSessionId);
     return {
       load: async () => (current.current ? current.current.intent.draft : drafts.load()),
+      clearsOnSend: () => current.current === null, // C10 holds an accepted first message; its intent's draft is left alone
       save: (draft: Draft | null) => {
         const intent = current.current;
         if (!intent) return drafts.save(draft);

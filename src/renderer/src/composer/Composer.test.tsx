@@ -421,6 +421,40 @@ describe('unstarted send holds a starting state', () => {
     expect(invoked('session.drafts.get')).toEqual([]);
   });
 
+  it('writes no draft while starting, and none after an accepted start (C10 holds the message and refuses a patch meanwhile)', async () => {
+    const stub = stubIntent();
+    mount([{ index: 0, id: A }]);
+    await waitFor(() => expect(editorOf()).toBeTruthy());
+    vi.useFakeTimers();
+    await type('sent before the pause'); // a draft write is pending (750 ms)
+    act(() => void vi.advanceTimersByTime(300));
+    act(() => editorOf().focus());
+    await key(editorOf(), { key: 'Enter' });
+    expect(stub.start).toHaveBeenCalledTimes(1);
+    act(() => void vi.advanceTimersByTime(2_000));
+    expect(stub.patch).not.toHaveBeenCalled(); // the submission cancelled the pending write
+    act(() => stub.set({ message: { content: 'sent before the pause', display: 'sent before the pause' } }));
+    await stub.answer({ ok: true });
+    act(() => void vi.advanceTimersByTime(2_000));
+    expect(editorOf().editor.getText()).toBe('');
+    expect(stub.patch).not.toHaveBeenCalled(); // no `patch({ draft: null })`: the intent's draft is left alone
+  });
+
+  it('writes the kept text again after a refused start', async () => {
+    const stub = stubIntent();
+    mount([{ index: 0, id: A }]);
+    await waitFor(() => expect(editorOf()).toBeTruthy());
+    vi.useFakeTimers();
+    await type('kept');
+    act(() => editorOf().focus());
+    await key(editorOf(), { key: 'Enter' });
+    await stub.answer({ ok: false, error: 'invalid: bad location' });
+    expect(stub.patch).not.toHaveBeenCalled();
+    act(() => void vi.advanceTimersByTime(800));
+    expect(stub.patch).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(stub.patch.mock.calls[0][0])).toContain('kept');
+  });
+
   it('holds `!` and `#` until the session starts, and hides the queue', async () => {
     stubIntent();
     mount([{ index: 0, id: A }]);

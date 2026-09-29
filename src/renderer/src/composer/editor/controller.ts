@@ -31,6 +31,9 @@ import { submitSerialized } from './submit';
 export interface DraftPort {
   load(): Promise<Draft | null>;
   save(draft: Draft | null): void;
+  // Whether an accepted submission clears the stored draft (C4's drafts: yes). C10's intent while unstarted: no, the
+  // accepted first message is C10's to hold and the intent refuses a patch while its start runs (M4).
+  clearsOnSend?(): boolean;
 }
 
 // How a submission was asked for: Enter and ⌘Enter send, ⌥Enter steers; the Composer's control adds its caret menu's
@@ -214,6 +217,7 @@ export class EditorController {
     this.busy = true;
     this.view.setBusy(true);
     editor.setEditable(false);
+    this.writer.cancel(); // no draft write runs while a submission is in flight (an unstarted session's start forbids one)
     let accepted: boolean;
     try {
       accepted = await (this.inputs.onSubmit ? this.inputs.onSubmit(s, how) : submitSerialized(this.client, appSessionId, s, how === 'steer' ? 'steer' : 'send', target));
@@ -222,9 +226,11 @@ export class EditorController {
       this.view.setBusy(false);
       editor.setEditable(this.inputs.disabled === null);
     }
-    if (!accepted) return;
-    this.writer.cancel();
-    this.drafts.save(null);
+    if (!accepted) {
+      this.writer.change(editor.getJSON()); // the kept text is written again after the pause
+      return;
+    }
+    if (this.drafts.clearsOnSend?.() ?? true) this.drafts.save(null);
     this.nav = { index: null, draft: null };
     this.setDoc(emptyDoc(), { silently: true, caret: focused ? 'end' : null });
     void this.refreshHistory();
