@@ -18,7 +18,8 @@ import type { CardsHarnessApi, HarnessPane } from '../src/renderer/src/harness/c
 import { invoke, launchReady, queueInterruptJournal, value } from './support/c7-replay';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 
-const HARNESS_BUILT = existsSync(join(REPO_ROOT, 'out/renderer/harness.html'));
+// A packaged app is built without the harness (`pnpm build:app`), whatever `out/` holds now.
+const HARNESS_BUILT = !process.env.MAWS_E2E_EXECUTABLE && existsSync(join(REPO_ROOT, 'out/renderer/harness.html'));
 
 const test = base.extend<{ cards: MawsLaunch }>({
   // eslint-disable-next-line no-empty-pattern -- Playwright requires the fixtures argument to be destructured

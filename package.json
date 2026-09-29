@@ -20,7 +20,7 @@
     "e2e": "playwright test",
     "e2e:packaged": "MAWS_E2E_EXECUTABLE=${MAWS_E2E_EXECUTABLE:-dist/mac-arm64/MAWS.app/Contents/MacOS/MAWS} playwright test",
     "build:app": "electron-vite build && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dir",
-    "verify": "pnpm typecheck && pnpm lint && pnpm test && pnpm build && pnpm e2e && pnpm build:app && pnpm e2e:packaged && pnpm e2e:transcript && pnpm e2e:terminal && pnpm e2e:panel",
+    "verify": "pnpm typecheck && pnpm lint && pnpm test && pnpm build && pnpm e2e && pnpm build:app && pnpm e2e:packaged && pnpm e2e:transcript && pnpm e2e:terminal && pnpm e2e:panel && pnpm e2e:c7",
     "rebuild:native": "electron-rebuild -f -w node-pty",
     "dev:harness": "MAWS_HARNESS=1 electron-vite dev",
     "e2e:transcript": "MAWS_HARNESS=1 electron-vite build && MAWS_HARNESS=1 playwright test e2e/transcript.spec.ts",
@@ -28,6 +28,7 @@
     "e2e:panel": "MAWS_HARNESS=1 electron-vite build && MAWS_HARNESS=1 playwright test e2e/panel.spec.ts",
     "e2e:requests": "MAWS_HARNESS=1 electron-vite build && MAWS_ENGINE_REPLAY=1 playwright test e2e/requests.spec.ts",
     "e2e:composer": "MAWS_HARNESS=1 electron-vite build && MAWS_ENGINE_REPLAY=1 playwright test e2e/composer.spec.ts",
+    "e2e:c7": "MAWS_HARNESS=1 electron-vite build && MAWS_ENGINE_REPLAY=1 playwright test e2e/requests.spec.ts e2e/composer.spec.ts",
     "postinstall": "chmod +x node_modules/node-pty/prebuilds/darwin-arm64/spawn-helper && install-electron"
   },
   "dependencies": {
