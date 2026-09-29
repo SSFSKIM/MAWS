@@ -633,5 +633,32 @@ describe('panel host transitions', () => {
       await act(() => panelHost.closeTab('p:pin00000'));
       expect(panelOf(B)!.activeTabId).toBe(expected);
     });
+
+    it.each(['close', 'unregister'] as const)(
+      '%s of a pin selected in B while the shown session holds no list creates no list and moves B through one identity updatePanelTabs',
+      async (how) => {
+        connect();
+        const [off] = register(probeTool('p').tool, probeTool('q').tool);
+        useLayout.setState({
+          panelPinned: [ref('p:pin00000', true), ref('q:pin00001', true)],
+          panelBySession: new Map([[B, { tabs: [], activeTabId: 'p:pin00000' }]]),
+        });
+        render(<TestHost />); // A is shown and has no list of its own
+        const spies = spyLayout();
+        if (how === 'close') await act(() => panelHost.closeTab('p:pin00000'));
+        else {
+          act(() => off());
+          await settle();
+        }
+        expect([...useLayout.getState().panelBySession.keys()]).toEqual([B]);
+        const toB = spies.updatePanelTabs.mock.calls.filter(([target]) => target === B);
+        expect(toB).toHaveLength(1);
+        const refs = [ref('q:x')];
+        expect(toB[0][1](refs)).toBe(refs);
+        expect(toB[0][2]).toEqual({ activeTabId: 'q:pin00001' });
+        expect(panelOf(B)!.activeTabId).toBe('q:pin00001');
+        expect(pinIds()).toEqual(['q:pin00001']);
+      },
+    );
   });
 });
