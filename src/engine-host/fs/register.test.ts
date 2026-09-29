@@ -2,7 +2,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SessionId } from '@shared/graph/ids';
 import { createHostRuntime, type HostPort } from '@shared/host/runtime';
-import { TRANSCRIPT_FIXTURE_DIR } from '../../../test/support/fixtures';
+import { FIXTURE_DIR, TRANSCRIPT_FIXTURE_DIR } from '../../../test/support/fixtures';
 import { StoreFixture } from '../../../test/support/store-fixture';
 import { registerFs } from './register';
 import type { FsService } from './service';
@@ -133,6 +133,15 @@ describe('the engine host serves fs.* through the host protocol', () => {
       fake.deliver({ t: 'req', id, name: 'fs.unfollow', input: { appSessionId: APP, agentId: null } });
       return (await response(id)).ok;
     }).toBe(false); // unbound once stopped
+
+    // A journal plays through C3's Normalizer, as registered: the run's own normalised events, not a frame per row.
+    const JOURNAL_APP = 'app-replay-journal';
+    fake.deliver({ t: 'req', id: 'r6', name: 'session.replay.launch', input: { appSessionId: JOURNAL_APP, sessionId: RP, source: { kind: 'journal', path: join(FIXTURE_DIR, 'subagent.jsonl') }, speed: 'instant' } });
+    expect(await response('r6')).toMatchObject({ ok: true });
+    await expect.poll(() => about(JOURNAL_APP).some((m) => m.name === 'session.replay.progress' && (m.payload as { state: string }).state === 'done')).toBe(true);
+    const played = about(JOURNAL_APP).filter((m) => m.name === 'session.eventBatch').flatMap((m) => (m.payload as { events: { kind: string; id: string }[] }).events);
+    expect(played.filter((e) => e.kind === 'assistant.block.complete').length).toBeGreaterThan(0);
+    expect(played.filter((e) => e.kind === 'frame.unknown' && e.id.startsWith('row:'))).toEqual([]);
 
     const missing = join(TRANSCRIPT_FIXTURE_DIR, 'missing.jsonl');
     fake.deliver({ t: 'req', id: 'r5', name: 'session.replay.launch', input: { appSessionId: 'app-failed', sessionId: RP, source: { kind: 'journal', path: missing }, speed: 1 } });

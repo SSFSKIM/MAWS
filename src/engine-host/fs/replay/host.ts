@@ -24,7 +24,7 @@ export interface ReplayBindings {
 export interface ReplayHostDeps {
   emit: HostEmit;
   bindings: ReplayBindings;
-  normalizer: (sessionId: SessionId) => RowNormalizer; // C3's Normalizer, or the stand-in until it lands
+  normalizer: (sessionId: SessionId, appSessionId: AppSessionId) => RowNormalizer; // one per run: C3's Normalizer (engineNormalizer) in the app, a stand-in in tests
   readSource?: SourceReader;
   maxGapMs?: number;
 }
@@ -60,7 +60,7 @@ export class ReplayHost {
       });
       this.runs.set(appSessionId, runner);
       // The runner's first progress and first row follow this answer by a turn of the event loop.
-      void ('rows' in loaded ? runner.runJournal(loaded.rows, this.deps.normalizer(sessionId)) : runner.runTranscript(loaded.records, loaded.subagents));
+      void ('rows' in loaded ? runner.runJournal(loaded.rows, this.deps.normalizer(sessionId, appSessionId)) : runner.runTranscript(loaded.records, loaded.subagents));
       return { totalRows: loaded.totalRows, spanMs: loaded.spanMs };
     } finally {
       this.launching.delete(appSessionId);

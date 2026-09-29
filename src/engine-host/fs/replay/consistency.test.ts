@@ -9,6 +9,7 @@ import { FIXTURE_DIR, loadJournal, loadTranscript, loadTranscriptFixture } from 
 import { projectEvents, projectWire } from '../../../../test/support/wire-projection';
 import { createBackfillContext, recordToEvents } from '../backfill';
 import { ReplayClock } from './clock';
+import { engineNormalizer } from './normalizer';
 import { ReplayRunner } from './runner';
 
 // The paired probe session 9a1d4262-…: the pass-1 wire journal, the parent transcript the engine wrote for it, and the
@@ -80,5 +81,43 @@ describe('journal replay and transcript backfill agree', () => {
     expect(disk).not.toEqual(wire);
     expect(disk.toolUses).not.toEqual(wire.toolUses);
     expect(disk.assistantBlocks).toEqual(wire.assistantBlocks); // the comparator sees the one field that changed
+  });
+});
+
+// The M5 follow-up (pending until C3 landed): the same comparison with C3's `Normalizer` on the journal side, as the
+// running app wires it (register.ts), instead of the raw-frame projection.
+describe('replay through the normaliser agrees with backfill', () => {
+  const APP = 'app-consistency' as AppSessionId;
+
+  async function normalised(): Promise<SessionEvent[]> {
+    const events: SessionEvent[] = [];
+    await runner((batch) => void events.push(...batch)).runJournal(loadJournal('pass1', 'subagent'), engineNormalizer(RUN, APP));
+    return events;
+  }
+
+  it('the parent conversation: C3\'s normaliser over the journal at instant speed projects as the backfill of subagent-parent.jsonl', async () => {
+    const events = await normalised();
+    const wire = projectEvents(events.filter((event) => event.parentToolUseId === null));
+    const disk = projectEvents(await replayedTranscript(loadTranscriptFixture('subagent-parent')));
+    expect(wire).toEqual(disk);
+    expect(wire.userMessages).toHaveLength(1);
+    expect(wire.assistantBlocks).toHaveLength(9);
+    expect(wire.toolUses.map((use) => use.name)).toEqual(['Agent', 'Agent']);
+    expect(wire.toolResults).toHaveLength(2);
+    // Real normalised events, not the stand-in's frame.unknown per row.
+    expect(events.every((event) => event.sessionId === RUN)).toBe(true);
+    expect(events.some((event) => event.kind === 'frame.unknown' && event.id.startsWith('row:'))).toBe(false);
+  });
+
+  it('each child: the events C3\'s normaliser attributes to its parent tool use project as its sidecar\'s backfill', async () => {
+    const events = await normalised();
+    for (const agentId of SIDECARS) {
+      const { toolUseId, events: backfill } = sidecarBackfill(agentId);
+      const wire = projectEvents(events.filter((event) => event.parentToolUseId === toolUseId));
+      expect(wire, agentId).toEqual(projectEvents(backfill));
+      expect(wire.assistantBlocks, agentId).toHaveLength(4);
+      expect(wire.toolUses.map((use) => use.name), agentId).toEqual(['Read']);
+      expect(wire.toolResults, agentId).toHaveLength(1);
+    }
   });
 });

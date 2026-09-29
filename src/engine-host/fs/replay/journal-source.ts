@@ -1,6 +1,6 @@
 // The journal source of a replay (X8; C4 execution document, "Replay engine"): a probe journal read whole and validated
 // row by row before anything plays, so a launch that fails emits nothing. Also the shared read of any replay source,
-// and the stand-in row normaliser the host wires while C3's `Normalizer` is not in the tree.
+// and a stand-in row normaliser for tests of the runner and host (the app wires C3's, `engineNormalizer`).
 import { readFile } from 'node:fs/promises';
 import type { SessionEvent } from '@shared/graph/events';
 import type { EventId, ParentToolUseId, SessionId } from '@shared/graph/ids';
@@ -53,9 +53,9 @@ export async function loadJournalSource(path: string, read?: SourceReader): Prom
   return { rows, totalRows: played.length, spanMs: Number.isNaN(spanMs) ? 0 : spanMs };
 }
 
-// Until C3's `Normalizer` lands on this branch, journal replay goes through this: one `frame.unknown` per `in` row
-// (named by the frame's type and subtype, attributed by its `parent_tool_use_id`) and nothing for `out` rows, so the
-// controls and progress are real end to end. C4 execution document, Interfaces "Replay engine"; M7 records the state.
+// The stand-in the replay ran through until C3's `Normalizer` landed, kept for tests that need only the controls and
+// progress: one `frame.unknown` per `in` row (named by the frame's type and subtype, attributed by its
+// `parent_tool_use_id`) and nothing for `out` rows.
 export function frameUnknownNormalizer(sessionId: SessionId): RowNormalizer {
   return {
     normalize(row: JournalRow): SessionEvent[] {
