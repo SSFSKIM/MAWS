@@ -4,6 +4,7 @@ import type { AppSessionId, TaskId } from '@shared/graph/ids';
 import { status } from '../../../../../test/support/builders';
 import { createSessionsStore } from '../../stores/sessions';
 import { setAgentWorkClient } from './client';
+import { applyTaskEvents, emptyGraph } from './model/task-graph';
 import { createTaskGraphStore, STOP_SETTLE_MS } from './store';
 import { event, replayed, sidecarsOf, upTo } from '../../../../../test/support/agents-events';
 import { fakeAgentWorkClient, flush, type FakeAgentWorkClient } from './fake-work-client';
@@ -208,6 +209,32 @@ describe('task graph store', () => {
       await snapshot(upTo(pass1, 296));
       expect(entry().phase).toBe('disk');
       expect(graph().tasks.size).toBe(0);
+    });
+
+    it('a failed snapshot applies the held and later batches but keeps the cursor, so the next watch re-reads the whole launch', async () => {
+      setStatus(live());
+      const release = store.getState().watch(A);
+      const earlier = event('subagent.started', { taskId: 'early' }, { seq: 1 });
+      const held = [event('subagent.started', { taskId: 'a' }, { seq: 5 }), event('subagent.finished', { taskId: 'a' }, { seq: 6 })];
+      const later = event('subagent.started', { taskId: 'b' }, { seq: 7 });
+      fake.batch('A', held);
+      await fake.fail('events', 'journal unreadable');
+      expect(entry()).toMatchObject({ phase: 'failed', error: 'journal unreadable', lastSeq: null });
+      expect(nodeOf('a')?.status).toBe('completed'); // later facts are still facts
+      fake.batch('A', [later]);
+      expect(nodeOf('b')?.status).toBe('running');
+      expect(entry().lastSeq).toBeNull();
+      release();
+      store.getState().watch(A);
+      expect(fake.calls.filter((c) => c.startsWith('events'))).toEqual(['events A null', 'events A null']);
+      const launch = [earlier, ...held, later];
+      await snapshot(launch, 7);
+      expect(entry()).toMatchObject({ phase: 'live', error: null, lastSeq: 7 });
+      expect(graph().tasks).toEqual(applyTaskEvents(emptyGraph(), launch).tasks); // the full replay converges on the same graph
+      expect(nodeOf('early')?.status).toBe('running');
+      const settled = graph();
+      fake.batch('A', launch); // a replay of what the cursor has passed changes nothing
+      expect(graph()).toBe(settled);
     });
 
     it('keeps the sidecars’ error and the runs’ error apart', async () => {

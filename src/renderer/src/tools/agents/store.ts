@@ -66,6 +66,7 @@ interface Watch {
   held: SessionEvent[][] | null; // batches that arrived while the snapshot was being read
   generation: number; // bumped per snapshot read, at the last release and when the status goes, so a stale answer is dropped
   cursorN: number; // the cursor's place within row `lastSeq`: +Infinity after a snapshot (whole rows), else the last event's n
+  frozen: { lastSeq: number | null; cursorN: number } | null; // after a failed snapshot: the cursor stays here, so the next watch re-reads the launch
   status: EngineSessionStatus | null; // the latest applied: the stop's absence check reads it alone
   settle: Map<TaskId, ReturnType<typeof setTimeout>>;
   workflowTimer: ReturnType<typeof setTimeout> | null;
@@ -76,7 +77,7 @@ export function createTaskGraphStore({ sessions = useSessions }: { sessions?: ty
   const watches = new Map<AppSessionId, Watch>();
   const watchOf = (id: AppSessionId): Watch => {
     let w = watches.get(id);
-    if (!w) watches.set(id, (w = { watchers: 0, offs: [], wire: false, held: null, generation: 0, cursorN: Infinity, status: null, settle: new Map(), workflowTimer: null, initializing: false }));
+    if (!w) watches.set(id, (w = { watchers: 0, offs: [], wire: false, held: null, generation: 0, cursorN: Infinity, frozen: null, status: null, settle: new Map(), workflowTimer: null, initializing: false }));
     return w;
   };
 
@@ -161,6 +162,7 @@ export function createTaskGraphStore({ sessions = useSessions }: { sessions?: ty
         lastSeq = snapshotLastSeq;
         cursorN = Infinity;
       }
+      if (w.frozen) ({ lastSeq, cursorN } = w.frozen); // the events apply; the cursor does not pass what no snapshot covered
       w.cursorN = cursorN;
       write(id, { graph: applyTaskEvents(e.graph, accepted), lastSeq });
       settleEnded(id);
@@ -184,6 +186,7 @@ export function createTaskGraphStore({ sessions = useSessions }: { sessions?: ty
       w.wire = true;
       w.held = [];
       const generation = ++w.generation;
+      w.frozen = null;
       write(id, { phase: 'loading' });
       const replayHeld = () => {
         const held = w.held ?? [];
@@ -204,7 +207,10 @@ export function createTaskGraphStore({ sessions = useSessions }: { sessions?: ty
           (error: unknown) => {
             if (w.generation !== generation) return;
             write(id, { phase: 'failed', error: messageOf(error) });
-            replayHeld(); // later facts are still facts
+            // Later facts are still facts, but the launch's earlier events are missing: the cursor stays where the
+            // snapshot would have started, so the next watch re-reads the whole launch and the reducer converges on it.
+            w.frozen = { lastSeq: read(id).lastSeq, cursorN: w.cursorN };
+            replayHeld();
           },
         );
     };
