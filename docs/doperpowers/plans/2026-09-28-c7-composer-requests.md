@@ -15,7 +15,7 @@ What C7 does not do: allocate, launch, start or resume sessions (C10's `session.
 - [x] (2026-09-29, 0a92672..95f66c5, review fixes 341fc86..52eb26e and c570d0b..b0d261b; reviewed on opus, gateway rate limited: three Important fixed and re-reviewed; e2e:composer 6/6, repeat 18/18) M3 — Editor: Tiptap document model, attachments, paste and drop with the terminal's tag framing (golden: C6's fixture), `@` menu, `/` palette shell with the widget union, drafts, history recall with bodies, `!` and `#` modes
 - [x] (2026-09-29; M4a 1db7c49..8c3a2f7 with review fixes 60d9fcd..a70a8c6; M4b 31d5dcf..587c444 with the reload rework and review fixes 587c444..854d3f7 and re-review fixes 474ab23..dcfdc73; each reviewed on opus, gateway rate limited, Important findings fixed and re-reviewed) M4 — Composer surface: the frame (chip row, box, toolbar) with live and intent bindings, submit control with the starting state, queue list, docked card frame (X4 and C10's cards), edit-and-resubmit with the rewind state machine (failed, exited and uncertain rewinds), one app-level Stop and Focus handler, slot registration, the real-composer request gate
 - [x] (2026-09-29, 471b1b6..79451e3, review fixes 101f7bc..9859259; reviewed on opus, gateway rate limited: two Important fixed and re-reviewed; statusline.spec 4/4 with --repeat-each=2 at 9859259) M5 — Status line popovers, usage windows, direct-session fallback, near-limit banner
-- [ ] M6 — Live acceptance with C3 (controlled default-mode grant case) and the mockup checklist; the integrated request suite rerun
+- [x] (2026-09-29, 9e984d0..7b662c2; live 9/9 plus the Haiku case; `pnpm verify` exit 0 at 7b662c2; whole-branch review on opus, gateway rate limited, fixes e363ff9..7081ff2 re-reviewed correct; `pnpm verify` at 7081ff2 green through `e2e:transcript` and failed one C9 `e2e:terminal` case on a worker teardown timeout at load average ~74, rerun pending) M6 — Live acceptance with C3 (controlled default-mode grant case) and the mockup checklist; the integrated request suite rerun
 
 ## Terms
 
@@ -841,6 +841,8 @@ Ready to paste into the charter's C7 section under "**Residue decisions (C7, 202
   Date/Author: 2026-09-29, C7 controller from M6's report.
 - Decision (architect's rulings on M6, 2026-09-29): (1) the C3 normaliser fix stays where it is, C7-marked, with its live-frame unit test; the C3 document's Decision Log carries the line. (2) `!` while busy stays enabled with `Run` (injecting shell output into a running turn is a feature and the engine refuses nothing); the control and its tooltip say `Runs now; the model sees the output in this turn`. (3) `context.sample` has no producer; that is C3's, a tracker row for debt wave 3; the status line reads `—` until then. (4) Fixed in C7's final fix wave: the chip row stays above a docked card (the card replaces only the box and toolbar), and the model chip shows a display name from a per-session cache after the first `listModels` (a tracker row switches it to C10's host-side `engine.models` when C10 lands). Left as they are: the scope hint (the mockup's `Tab changes scope` is wrong for a card that selects with digits) and the palette's group headings (C11 owns the palette; recorded in the residue as an ask of C11). The duplicated live replies on a resumed session (C4/C6) and `--max-budget-usd` counting a resumed session's restored cost (C3/C11) are tracker rows.
   Date/Author: 2026-09-29, C7 controller (rulings: architect).
+- Decision (whole-branch review, 2026-09-29, reviewed on opus, gateway rate limited): fixed in the final wave (e363ff9..7081ff2): the request card keys itself by its item, so an unkeyed placement (C5's Overview and hover cards) never carries delivery state or a picked scope to the next request (P1); a docked request retiring behind the next hands focus to the next frame (P2); a history recall opens no `@` or `/` popup (P2); the normaliser's receipt rule requires every uuid an empty result names to be the pending echo; an edit prefill reads the row's text as typed; a request main no longer holds goes to notices for every kind; the bypass confirm focuses Cancel; the `@` menu holds keys while its search lags the query; plus the architect's three M6 rulings. Logged as tracker rows: the copies of C5's `HEADINGS` and button-like input set, a restored edit ending on an unrelated rewind boundary, `git.lsFiles` roots recomputed per keystroke, and small bounded leftovers. Dismissed: pasted-number decorations rebuilt per transaction (bounded walk, `Decoration.eq` keeps node views), the `toHaveCount(1)` hardening (already present), extracting `resubmitSubmission` (it closes over the composer's own state).
+  Date/Author: 2026-09-29, C7 controller from the whole-branch review.
 - Decision (integration, 2026-09-29, architect's ruling): master is merged into the C7 branch, never rebased, now or at the end, so every SHA this document and its reviews cite stays valid; the first merge (51227b5) brought C9, C8a and debt wave 2, with sibling blocks first and C7's after in `App.tsx`, the harness routes, `QUERY_COMMANDS`, `LayoutKeySchema`, the schema tests, `package.json` scripts and the tracker.
   Date/Author: 2026-09-29, C7 controller (ruling: architect).
 - Decision (M5 execution, 2026-09-29, dispatched ahead of M4 since it consumes only M1): (1) the mode menu is shared: `ModeMenu({ binding, onDone })`, `useLiveModeBinding(record)`, `liveModeBinding(record, status, models)` and `nextMode(current, autoAvailable)` (the ⇧Tab cycle) exported from `statusline/index.ts`; `ModeBinding` is a `ChipBinding<PermissionMode | null, PermissionMode>` plus `refusal` and `autoUnavailable`, and M4 declares `FrameBindings.mode: ModeBinding` and builds the toolbar's ModeChip on `ModeMenu`; the menu is a `menuitemradio` list (a Radix RadioGroup would change the mode while arrowing). (2) Dismissed banner keys are read and written through `layout.get`/`layout.set` of `usage.banners` directly, because C5's layout store persists only `regions`, `main.tabs` and `panel.*`; a dismissal is detected from C5's notices store, so neither the banner host nor the layout store changed. (3) The banner key rounds `resetsAt` to the minute (the fixture shows one window's reset moving by a second, `07:49:59Z` then `07:50:00Z`, which would post twice); a showing banner's countdown refreshes each minute and the banner leaves, not as a dismissal, when its window resets. (4) `connectStatusLine` is wired from `App.tsx`'s C7 block, not `ipc/events.ts`; on `settings.usageChanged` the event's pins merge with the held ones and `settings.usage` is asked again. (5) A session is direct when its engine status says `direct`, or, with no process, when its record says `routed: false`. (6) The cost popover shows the engine's `get_session_cost` text, since C6's transcript store keeps no `usage.sample`. (7) The line reads mockup 04's countdown form (`5h 53% ↻3h46m`) and `0%` after a reset with no new reading; `Updated <ago>` measures the shown account's newest `recordedAt`. (8) `statusline.spec.ts` runs on the plain build (so `pnpm e2e` and `verify` include it); every e2e launch points `MAWS_CLAUDE_USAGE_DIR` at a missing directory unless a spec sets its own, so no run reads the owner's real ClaudeUsage folder. The direct fallback is proven by unit tests over the pinned schema only; M6's live Direct session is its first real reading. (9) `nearLimitBanners` is pure and stateless (C11 may call it without side effects), so M5's pin "the same snapshot twice yields the second set empty" is held by the banner adapter's posted-this-run set and pinned there (M5 review).
@@ -848,4 +850,51 @@ Ready to paste into the charter's C7 section under "**Residue decisions (C7, 202
 
 ## Outcomes & Retrospective
 
-Pending — written at finish.
+**What shipped (2026-09-29).** The owner can talk to a session. Under the transcript sits a Tiptap editor, pinned at 3.31.3. It handles:
+- the terminal's exact pasted framing, recoverable from the JSONL;
+- images and PDFs as content blocks under the new per-kind send bounds (text 1 MiB, image 5 MiB, document 32 MiB, whole 48 MiB);
+- `@` files, agents and skills;
+- a `/` palette over the engine's catalogue, the widget catalogue and MAWS actions;
+- `!` and `#`;
+- drafts;
+- ArrowUp history through MAWS's own file and the terminal's, bodies included.
+
+The composer is one compact frame in Claude Desktop's anatomy: the chip row, the box with the submit control, and the toolbar. The submit control has five states and a caret menu: Steer `'next'`, Interrupt and send `'now'`. Above the frame sits a queue list that follows C3's entry states and pause reasons. A docked request replaces the box and toolbar under the chip row. The single app-level ⌘. and ⌘L resolve the focused pane. An unstarted session binds the frame to C10's setup intent through `registerSetupIntentHook`, with a synchronous starting gate. Edit-and-resubmit runs the fork seam for C10, plus an explicit-rewind state machine that never repeats a rewind on its own, reconciles an unconfirmed one against the transcript, and survives a reload.
+
+The X4 request card is one component in four placements. It covers five kinds and the Notice, with these rules:
+- the quick-approval policy applies everywhere;
+- Enter and Esc work only from the focus owner under C5's dispatcher;
+- only the two declared dialog kinds are answered;
+- delivery states are shown.
+
+The status line gains six popovers. The 5h and 7d windows come from a shared read of ClaudeUsage's files, with the engine's `get_usage` for Direct sessions. The near-limit banner shows once per window across reloads.
+
+Main gained `session.history.*`, `settings.usage`, `layout.pickFiles` and `git.lsFiles`. The engine host publishes `session.catalogChanged`. `pathForFile` is on the bridge.
+
+**Against the purpose.** Acceptance items 1 to 5 were observed, as recorded in Progress, the Decision Log (M6 execution) and Surprises (M6 live). The live run exercised every labelled behaviour through the relay on the pinned binary, under a scratch config home, for about $5 in total.
+
+Known gaps, each owned elsewhere:
+- **Context field.** The status line's `ctx` reads `—` until C3 emits `context.sample` (a tracker row for debt wave 3). The context popover works.
+- **Resumed sessions.** A resumed session renders live replies twice (C4/C6 row).
+- **Direct sessions.** Real windows could not be read under the scratch-home rule.
+- **Declared dialogs.** No producer of either declared dialog kind appeared live, so the synthetic journals remain the proof.
+
+**What went well.**
+- The pure cores carried the hard logic and pinned it cheaply: `serializeDraft`, `submitState`, `swapOf`, the rewind machine, `nearLimitBanners` and the send-cap function the schema and the pre-check share.
+- Reviews on opus found real defects at every milestone, and each came with a failing test:
+  - M2: a stale transcript read.
+  - M3: Enter in a multi-line document, and lost blank lines.
+  - M4a: an empty "Sending" box flashing on every send.
+  - M4b: a prefill abandoning an unreconciled rewind.
+  - Whole branch: card state carried across items in an unkeyed placement.
+- Dispatching M5 ahead of M4 overlapped work without collisions.
+- Merging master instead of rebasing kept every cited SHA valid.
+
+**What to carry forward.**
+- **Test every seam against the landed answer shape.** Faked shapes hid three defects, each with a test that passed for the wrong reason:
+  - the mode refusal words, because the fake answered what the host never sends;
+  - the near-limit threshold, because the fake read the wrong level;
+  - the key-sink test, whose `within` never contained the editor.
+- **Split large milestones early.** M4 needed splitting after planning, and its halves drew the most review rounds.
+- **Engine-host behaviour only shows up in a live run.** The live run found a C3 turn-accounting bug that no fixture covered: a `!` during a turn left later local commands' turns open. Replays only prove what was recorded.
+- **Owner data moves.** ClaudeUsage's accounts moved between writing and execution, so pins should read committed fixtures with times shifted to the test's clock.
