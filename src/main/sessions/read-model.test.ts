@@ -179,11 +179,16 @@ describe('digest liveness', () => {
   it('a crash through C3’s stop ladder reads failed with the final turn’s end: exiting is still live for the fold', () => {
     src.writer.applyEngineStatus(status(A, { process: 'ready', engineState: 'running', turn: humanTurn }));
     src.writer.fold(A, [ev('turn.started', { at: '2026-09-28T10:00:00Z' })]);
+    expect(model.midTurnCount()).toBe(1);
     src.writer.applyEngineStatus(status(A, { process: 'exiting', engineState: 'running', turn: humanTurn }));
+    // The two sets part here: the quit guard's excludes exiting although the status still holds a turn...
+    expect(model.midTurnCount()).toBe(0);
     src.writer.fold(A, [ev('turn.ended', { at: '2026-09-28T10:01:00Z', isError: true, terminalReason: 'max_turns' }), ev('process.exited', { reason: 'crash' })]);
+    // ...while the fold's includes it, so the final turn's end still lands before the exit status arrives.
+    expect(current().lastTurnEndedAt).toBe('2026-09-28T10:01:00Z');
+    expect(model.midTurnCount()).toBe(0);
     src.writer.applyEngineStatus(status(A, { process: 'exited', exit: { reason: 'crash' } }));
     expect(current()).toMatchObject({ phase: 'failed', lastTurnEndedAt: '2026-09-28T10:01:00Z' });
-    expect(model.midTurnCount()).toBe(0); // the quit guard's set is unchanged: exiting never counts
   });
 
   it('the same crash under ready reads failed', () => {
