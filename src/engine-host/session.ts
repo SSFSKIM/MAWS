@@ -78,6 +78,7 @@ interface Listeners {
   brokerItems: (items: AttentionItem[]) => void;
   queue: (queue: QueueState) => void;
   exited: (summary: ExitSummary) => void;
+  catalog: (catalog: Catalog) => void; // C7: the whole catalogue, whenever its revision moved
 }
 
 type ProcessState = EngineSessionStatus['process'];
@@ -102,7 +103,7 @@ export class EngineSession {
   private readonly bashMode: BashMode;
   private readonly reconnect: boolean;
   private readonly log: (message: string) => void;
-  private readonly listeners: { [K in keyof Listeners]: Set<Listeners[K]> } = { events: new Set(), status: new Set(), brokerItems: new Set(), queue: new Set(), exited: new Set() };
+  private readonly listeners: { [K in keyof Listeners]: Set<Listeners[K]> } = { events: new Set(), status: new Set(), brokerItems: new Set(), queue: new Set(), exited: new Set(), catalog: new Set() }; // C7: catalog
   private readonly pendingWarnings: NormalizerWarning[] = [];
   private readonly stderrTail: string[] = [];
   private readonly storeWrites = new Set<Promise<void>>();
@@ -128,6 +129,7 @@ export class EngineSession {
   private pendingPlan: string | null = null; // a clear_and_implement plan kept for retry after the mode restore failed
   private requestedModel: string | null; // the launch spec's, until `session.setModel` (M5)
   private requestedEffort: Effort | null; // the launch spec's, until `session.setEffort` (M5)
+  private publishedCatalogRevision = 0; // C7: the tracker's catalogue revision last published (0: nothing yet)
 
   constructor(private readonly opts: EngineSessionOptions) {
     this.spec = opts.spec;
@@ -421,6 +423,7 @@ export class EngineSession {
     this.record('meta', { event: 'initialize', current_permission_mode: init.current_permission_mode, session_state: init.session_state ?? null, hooks_applied: init.hooks_applied ?? null, workspace_trust_recorded: init.workspace_trust_recorded ?? null });
     if (this.reconnect) this.record('meta', { event: 'reconnect', phase: 'reconnected', attempt: 1, maxAttempts: 1, trigger: 'user', reason: null });
     this.tracker.initialize(init);
+    this.publishCatalog(); // C7
 
     await this.verifyGateway();
     if (this.spec.resume !== null && this.grants.allow.length > 0 && this.processState === 'initializing') {
@@ -498,6 +501,7 @@ export class EngineSession {
       const row = this.record('in', item.frame);
       const frame = item.frame as Frame;
       this.tracker.observe(frame, typeof frame.timestamp === 'string' ? frame.timestamp : row.at);
+      if (frame.type === 'system') this.publishCatalog(); // C7: only system/init and system/commands_changed move the catalogue
       this.broker.observe(item.frame);
       this.bashMode.observe(item.frame);
       this.client?.observe(item.frame);
@@ -798,6 +802,17 @@ export class EngineSession {
     this.processState = state;
     this.touch();
   }
+
+  // C7 start: the catalogue's publication (C7 execution document, Interfaces "Catalogue protocol"): after the tracker took
+  // the initialize response or a system frame, the whole catalogue goes out once per revision it moved to; an identical
+  // frame moves nothing (the tracker's rule), so nothing is published for it. The journal is never re-parsed.
+  private publishCatalog(): void {
+    const catalog = this.tracker.catalog();
+    if (catalog.revision === this.publishedCatalogRevision) return;
+    this.publishedCatalogRevision = catalog.revision;
+    this.emit('catalog', catalog);
+  }
+  // C7 end
 
   // Emits `status` when anything but the event counter changed.
   private touch(): void {

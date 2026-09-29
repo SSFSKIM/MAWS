@@ -131,6 +131,7 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
       session.on('status', (status) => stream.status(status));
       session.on('queue', (queue) => stream.queue(queue));
       session.on('brokerItems', (items) => stream.brokerItems(items));
+      session.on('catalog', (catalog) => stream.catalog(catalog)); // C7: session.catalogChanged
     },
   });
 

@@ -1,0 +1,22 @@
+{
+  "description": "A request_user_dialog of the declared kind auto_mode_server_fallback, its payload as the binary builds it for a gateway session (MBt with gatewayHost, then helpUrl); answered continue or interrupt. Synthetic: no probe fixture produces one.",
+  "source": "cli.pretty.js:927997 (UOe: { gatewayHost?, title, paragraphs, helpUrl } → continue | interrupt | cancelled, default cancelled), :927892–927895 (MBt, the copy), :927963 (eMn adds helpUrl), :928004–928019 (DBt, the consumer); SPEC 45 §45.22.13",
+  "frame": {
+    "type": "control_request",
+    "request_id": "req-auto-fallback-1",
+    "request": {
+      "subtype": "request_user_dialog",
+      "dialog_kind": "auto_mode_server_fallback",
+      "payload": {
+        "gatewayHost": "127.0.0.1:8641",
+        "title": "We're changing auto mode to no longer charge for classifier requests in Claude Code.",
+        "paragraphs": [
+          "However, this session isn't eligible because your requests go through 127.0.0.1:8641, which isn't compatible with this update.",
+          "Nothing breaks: auto mode keeps working, and its classifier requests are billed as before.",
+          "To fix it and access the new version of auto mode, ask your gateway to implement: https://code.claude.com/docs/en/auto-mode-classifier-billing"
+        ],
+        "helpUrl": "https://code.claude.com/docs/en/auto-mode-classifier-billing"
+      }
+    }
+  }
+}

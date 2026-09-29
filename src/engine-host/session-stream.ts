@@ -13,6 +13,7 @@ import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, RequestId, SessionId } from '@shared/graph/ids';
 import type { QueueState } from '@shared/engine/session-state-store';
+import type { Catalog } from './session-status'; // C7
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { EventsSnapshot } from '@shared/ipc/schema/session';
 import type { HostEmit } from '@shared/host/runtime';
@@ -92,6 +93,14 @@ export class SessionStream {
     this.flush();
     this.opts.emit('session.queue', { appSessionId: this.opts.appSessionId, entries: queue.entries, paused: queue.paused, pauseReason: queue.pauseReason ?? null }); // C7: pauseReason
   }
+
+  // C7 start: the launch's catalogue, whole, as `session.catalogChanged` (after the events that caused it, like every other
+  // per-session event); `launchId` keys the revision, which restarts with every launch.
+  catalog(catalog: Catalog): void {
+    this.flush();
+    this.opts.emit('session.catalogChanged', { appSessionId: this.opts.appSessionId, launchId: this.opts.launchId, catalog });
+  }
+  // C7 end
 
   brokerItems(items: AttentionItem[]): void {
     this.flush();
