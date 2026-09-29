@@ -680,6 +680,17 @@ test('copies a selection and opens links externally', async ({ maws }) => {
   await h.type(id, '\r');
   await h.expectLine(id, 'PASTED-42');
 
+  // ⌘A selects the terminal's buffer and sends the shell nothing. xterm answers ⌘A in its keydown handler and cancels
+  // the event, and on macOS Chromium gives the page a ⌘ chord before the application menu, which sees only what the
+  // page leaves unhandled, so the Edit menu's selectAll role does not take it (Playwright's keys do not pass the
+  // native menu; that half is read from Chromium's and Electron's source, C9 rebase pass).
+  await h.idle(id);
+  const quiet = await h.counters(id);
+  await page.keyboard.press('Meta+KeyA');
+  await expect.poll(() => h.call<string>('terminals', 'selection', id)).toContain('PASTED-42');
+  await sleep(300);
+  expect((await h.counters(id)).bytes, 'the shell received nothing, so printed nothing').toBe(quiet.bytes);
+
   // An OSC 8 link and a bare URL: a plain click opens nothing, a ⌘-click opens each through main.
   await h.run(id, `clear; printf '\\e]8;;https://example.com\\e\\\\example\\e]8;;\\e\\\\\\n'; printf 'https://example.org\\n'`);
   await h.idle(id);
