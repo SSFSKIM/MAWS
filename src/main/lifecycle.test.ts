@@ -97,6 +97,8 @@ describe('app lifecycle (macOS, D-11)', () => {
     expect(c4.started).toBe(1);
     expect(c4.stopSource).toHaveBeenCalledOnce();
     expect(c4.close).toHaveBeenCalledOnce();
+    // The source reads the index, so it stops (C5's sessions.stop) before the index closes.
+    expect(c4.stopSource.mock.invocationCallOrder[0]).toBeLessThan(c4.close.mock.invocationCallOrder[0]);
     expect(c4.stopAttention).toHaveBeenCalledOnce();
     // M6: the git service's handlers were registered at ready, and its watches close at will-quit.
     expect(git.registered).toBe(1);

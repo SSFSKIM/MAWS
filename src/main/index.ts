@@ -77,7 +77,7 @@ app.whenReady().then(() => {
     git.dispose();
     replays.dispose();
     attention.stop();
-    index.close();
+    // (the index closes at will-quit after C5's block below, once the read model has stopped the source that reads it)
   });
   // C4 end
 
@@ -93,6 +93,9 @@ app.whenReady().then(() => {
     layout.flush();
     sessions.stop();
   });
+  // C4 start: registered after C5's will-quit above, so the index source has stopped before the index it reads closes
+  app.on('will-quit', () => index.close());
+  // C4 end
   // The application menu from the action table, rebuilt on settings and on the page's registered handlers.
   registerMenuHandlers(startMenu({ settings: () => settings.state().settings, emit }));
   // Window bounds persist under `window.main`; a window opens where the last one was left, if that is still on screen.
