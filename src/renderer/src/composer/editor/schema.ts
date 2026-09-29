@@ -2,7 +2,7 @@
 // `attachments` attribute, Paragraph, Text, HardBreak, the mention node (Tiptap's, with a `kind`) and the pasted atom.
 // No marks, no headings, no lists: the model reads markdown from the text. These are the extensions every editor of the
 // composer shares, the headless ones in tests included; `extensions.ts` adds the interactive behaviour on top.
-import { Node, type AnyExtension } from '@tiptap/core';
+import { mergeAttributes, Node, type AnyExtension } from '@tiptap/core';
 import Document from '@tiptap/extension-document';
 import HardBreak from '@tiptap/extension-hard-break';
 import { Mention } from '@tiptap/extension-mention';
@@ -30,7 +30,7 @@ export const MentionNode = Mention.extend({
   addAttributes() {
     return {
       ...this.parent?.(),
-      kind: { default: 'file', rendered: false },
+      kind: { default: 'file', parseHTML: (el) => (el.getAttribute('data-kind') === 'agent' ? 'agent' : 'file'), renderHTML: (a) => ({ 'data-kind': a.kind as string }) },
     };
   },
 });
@@ -55,20 +55,26 @@ export const PastedNode = Node.create({
   inline: true,
   atom: true,
   selectable: true,
+  // Every attribute rides in the HTML ProseMirror copies, so a chip cut and pasted within the editor comes back whole.
   addAttributes() {
+    // `attr` as the HTML attribute `data-<html>`; a null value is left out and parses back as null
+    const data = (attr: string, html: string, parse: (value: string | null) => unknown) => ({
+      parseHTML: (el: HTMLElement) => parse(el.getAttribute(`data-${html}`)),
+      renderHTML: (attrs: Record<string, unknown>) => (attrs[attr] === null ? {} : { [`data-${html}`]: String(attrs[attr]) }),
+    });
     return {
-      id: { default: '', rendered: false },
-      kind: { default: 'text', rendered: false },
-      name: { default: '', rendered: false },
-      lines: { default: 0, rendered: false },
-      text: { default: null, rendered: false },
+      id: { default: '', ...data('id', 'atom-id', (v) => v ?? '') },
+      kind: { default: 'text', ...data('kind', 'kind', (v) => (v === 'image' || v === 'pdf' ? v : 'text')) },
+      name: { default: '', ...data('name', 'name', (v) => v ?? '') },
+      lines: { default: 0, ...data('lines', 'lines', (v) => Number(v ?? 0)) },
+      text: { default: null, ...data('text', 'text', (v) => v) },
     };
   },
   parseHTML() {
     return [{ tag: 'span[data-pasted]' }];
   },
-  renderHTML({ node }) {
-    return ['span', { 'data-pasted': '' }, node.attrs.name as string];
+  renderHTML({ node, HTMLAttributes }) {
+    return ['span', mergeAttributes({ 'data-pasted': '' }, HTMLAttributes), node.attrs.name as string];
   },
   renderText({ node }) {
     return `[${node.attrs.name as string}]`;

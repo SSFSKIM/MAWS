@@ -1,7 +1,7 @@
-import { getSchema } from '@tiptap/core';
+import { generateHTML, generateJSON, getSchema } from '@tiptap/core';
 import { EditorState, TextSelection } from '@tiptap/pm/state';
 import { describe, expect, it } from 'vitest';
-import { docOf, paragraph, textNode } from './doc';
+import { docOf, mentionNode, paragraph, pastedNode, textNode } from './doc';
 import { handlesPlainText, plainTextSlice } from './clipboard';
 import { schemaExtensions } from './schema';
 import { serializeDraft } from './serialize';
@@ -32,5 +32,22 @@ describe('a short plain-text paste goes in line for line', () => {
     expect(handlesPlainText({ html: '' })).toBe(true);
     expect(handlesPlainText({ html: '<p>from a web page</p>' })).toBe(true);
     expect(handlesPlainText({ html: '<p data-pm-slice="1 1 []">copied in the editor</p>' })).toBe(false);
+  });
+});
+
+describe('a copied chip pastes back whole', () => {
+  it('carries every atom and mention attribute through the HTML ProseMirror copies', () => {
+    const doc = docOf([
+      paragraph(
+        textNode('see '),
+        pastedNode({ id: 'p1', kind: 'text', name: 'Pasted text #1', lines: 3, text: 'a\n<b>\n"c"' }),
+        pastedNode({ id: 'p2', kind: 'image', name: 'Image #2', lines: 0, text: null }),
+        mentionNode({ id: 'docs/a b.md', label: 'docs/a b.md', kind: 'file' }),
+        mentionNode({ id: 'Explore', label: 'Explore', kind: 'agent' }),
+      ),
+    ]);
+    const back = generateJSON(generateHTML(doc, schemaExtensions()), schemaExtensions());
+    expect(back.content).toEqual(doc.content);
+    expect(serializeDraft(back, ctx)).toEqual(serializeDraft(doc, ctx));
   });
 });

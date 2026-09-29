@@ -19,7 +19,7 @@ import { suggestionRenderer, type PopupItem } from '../mentions/popup';
 import { SlashPalette } from '../mentions/SlashPalette';
 import { MentionView } from './nodes/Mention';
 import { PastedView } from './nodes/Pasted';
-import { plainTextSlice } from './clipboard';
+import { handlesPlainText, plainTextSlice } from './clipboard';
 import type { EditorEnv } from './env';
 import { ComposerDocument, MentionNode, PastedNode } from './schema';
 
@@ -32,6 +32,7 @@ export const suggesting = (editor: Editor): boolean => Boolean(atKey.getState(ed
 const run = ({ editor, range, props }: { editor: Editor; range: Range; props: PopupItem }) => props.apply(editor, range);
 
 // The text paste rule: a long plain-text paste becomes a pasted atom; a short one goes in line for line, blank lines kept.
+// The editor's own copied slice is ProseMirror's to paste (its chips come back with their attributes).
 const TextPaste = (env: () => EditorEnv) =>
   Extension.create({
     name: 'composerTextPaste',
@@ -44,7 +45,7 @@ const TextPaste = (env: () => EditorEnv) =>
               const data = event.clipboardData;
               if (!data || data.files.length > 0) return false;
               const text = data.getData('text/plain');
-              if (text === '') return false;
+              if (text === '' || !handlesPlainText({ html: data.getData('text/html') })) return false;
               if (env().pasteText(text)) return true;
               view.dispatch(view.state.tr.replaceSelection(plainTextSlice(view.state.schema, text)).scrollIntoView());
               return true;
