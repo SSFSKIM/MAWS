@@ -51,15 +51,16 @@ function SessionInfoBody({ appSessionId, visible, record }: { appSessionId: AppS
   const rules = useEngineRead('session.listPermissionRules', input, read);
   const hooks = useEngineRead('session.getHooksListing', input, read);
   const mcp = useEngineRead('session.mcpStatus', input, read);
-  // Nothing emits context.sample yet (tracker, C3 row 2026-09-29), so the context row reads the engine's summary.
-  const context = useEngineRead('session.getContextUsage', { appSessionId, detail: 'summary' }, read);
+  // C3 samples the context at ready and after every turn into the digest (debt wave 3); the engine's summary is read
+  // only while no sample has arrived (a session C3 has not sampled yet, or one whose digest predates the sampling).
+  const context = useEngineRead('session.getContextUsage', { appSessionId, detail: 'summary' }, { ...read, enabled: visible && !digest?.context });
   const binary = useCommand('engine.binaryInfo', undefined, { enabled: visible, staleTime: 60_000 });
   const settings = useSettings((s) => s.state?.settings) ?? SETTINGS_DEFAULTS_V3;
   const snapshot = useUsage((s) => s.snapshot);
   const directLogin = useGateway((s) => s.directLogin.get(appSessionId) ?? null);
-  // the model's catalogue entry: the session's own list_models answer when C7 read one, else C10's engine.models cache
+  // the model's catalogue entry, when C7 listed the session's models (the lane reads only its value, which the status
+  // names anyway)
   const models = useComposerStore((s) => listedModelsOf(s, appSessionId));
-  const catalogue = useCommand('engine.models', { refresh: false }, { enabled: visible, staleTime: 60_000 });
   // the transcript's state only while it holds rows for the session (the reviews count is omitted otherwise)
   const transcript = useTranscriptStore((s) => (s.entries[appSessionId]?.rows.length ? s.entries[appSessionId].state : undefined));
   const now = useNow(POPOVER_TICK_MS);
@@ -70,8 +71,7 @@ function SessionInfoBody({ appSessionId, visible, record }: { appSessionId: AppS
   if (status) {
     const server = status.gateway.autoModeServer === 'unknown' ? serverRow(statusRead.data?.sections) : null;
     const laneStatus = server ? { ...status, gateway: { ...status.gateway, autoModeServer: server } } : status;
-    const id = status.model.requested ?? status.model.resolved;
-    const entry = rowOf(models ?? [], id) ?? catalogue.data?.models.find((m) => m.value === id) ?? null;
+    const entry = rowOf(models ?? [], status.model.requested ?? status.model.resolved) ?? null;
     const account = facts.route === 'direct' ? INFO.direct : (facts.account?.email ?? null);
     lane = autoModeLane(laneStatus, entry, reviewsOf(transcript), account);
   }

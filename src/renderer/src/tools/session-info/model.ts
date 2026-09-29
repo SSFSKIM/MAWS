@@ -14,6 +14,8 @@ import { directLoginOf } from '../../gateway/direct-login';
 import type { DirectLogin, RoutingFacts } from '../../gateway/routing-facts';
 import { present as presentContext } from '../../widgets/ContextWidget';
 import { present as presentMcp } from '../../widgets/McpWidget';
+import { CONTEXT } from '../../widgets/copy';
+import { num } from '../../widgets/parts';
 import { INFO, LANE } from './copy';
 import type { Lane } from './lane';
 
@@ -108,7 +110,13 @@ function permissionsSection({ record, status, lane, reads }: SessionInfoInput): 
 }
 
 function usageSection({ digest, windows, now, reads }: SessionInfoInput): InfoSection {
-  const context = reads.context ? presentContext(reads.context).line : digest?.context ? INFO.contextPercent(Math.round(digest.context.percent)) : NONE;
+  // C3's sample (the digest, at ready and after every turn) first; the engine's summary only before one arrived
+  const sampled = digest?.context;
+  const context = sampled
+    ? CONTEXT.line(num(sampled.totalTokens), num(sampled.maxTokens), Math.round(sampled.percent), sampled.autoCompactThreshold === null ? null : num(sampled.autoCompactThreshold))
+    : reads.context
+      ? presentContext(reads.context).line
+      : NONE;
   const meter = (label: string, w: NonNullable<SessionWindows['windows']>['fiveHour']) => {
     if (!w) return null;
     const shown = windowShown(w, now);

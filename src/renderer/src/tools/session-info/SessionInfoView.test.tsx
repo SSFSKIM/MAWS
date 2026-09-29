@@ -85,6 +85,18 @@ describe('session info renders the six sections', () => {
     expect(within(screen.getByRole('region', { name: 'Permissions' })).getByRole('button', { name: '/permissions' })).toBeTruthy();
   });
 
+  // Debt wave 3: C3 samples the context at ready and after every turn (`context.sample` → the digest), so the row reads
+  // the digest and asks the engine only while no sample has arrived.
+  it('reads the context from the digest once C3 has sampled it, with no read of its own', async () => {
+    const digest = { appSessionId: READY, context: { percent: 21.4, totalTokens: 42_812, maxTokens: 200_000, autoCompactThreshold: 167_000 } };
+    useSessions.setState({ digests: new Map([[READY, digest as never]]) });
+    mount(ctxOf(READY));
+    expect(valueOf('Context')).toBe('42,812 of 200,000 · 21% · autocompact at 167,000');
+    await waitFor(() => expect(valueOf('Rules')).toMatch(/^1 allow/)); // the other reads answered meanwhile
+    expect(backend.calls.filter((c) => c.command === 'session.getContextUsage')).toEqual([]);
+    expect(backend.calls.filter((c) => c.command === 'engine.models'), 'the lane reads the listed models only').toEqual([]);
+  });
+
   it('counts the reviews only while the transcript holds rows for the session', async () => {
     const b = builder();
     b.turn('u1');

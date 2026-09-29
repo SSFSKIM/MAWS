@@ -61,7 +61,6 @@ export const INFO = {
   // Context, usage, cost
   context: 'Context',
   contextLine: (used: string, max: string, percent: number, threshold: string | null) => `${used} of ${max} · ${percent}%${threshold === null ? '' : ` · autocompact at ${threshold}`}`,
-  contextPercent: (percent: number) => `${percent}%`,
   usage: 'Usage',
   fromClaudeUsage: 'from ClaudeUsage, shared by every session',
   fromEngine: 'from the engine',
