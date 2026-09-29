@@ -13,6 +13,7 @@ import type { FirstMessage, SetupIntent } from '@shared/sessions/intent';
 import type { SetupEvent } from '@shared/sessions/setup';
 import type { TrustState } from '@shared/sessions/trust';
 import { ipc } from '../ipc/client';
+import { toast } from '../stores/notices';
 
 // A card a start answered with and that waits for the human, with the first message it docked with (the intent's
 // retained message, or a resume's), which its continuation runs with and a refusal hands back. A failed setup's card
@@ -135,10 +136,12 @@ export function isStarting(s: Pick<SetupState, 'invoking' | 'phases'>, appSessio
   return s.invoking.has(appSessionId) || (phase !== undefined && RUNNING.has(phase));
 }
 
-// The failure the tab's card shows: the latest `failed` event's error, else (after a restart, or before any event) the
-// retained intent's last failure. None while a start runs or a card waits, or once the human went back to editing.
+// The failure the tab's card shows, while the setup's intent is retained: the latest `failed` event's error, else
+// (after a restart, or before any event) the intent's last failure. None while a start runs or a card waits, or once
+// the human went back to editing. A failure without an intent is a record's (a resume, or a launch that kept its
+// transcript): an exited session with the engine's own notice, not a card (Rollback (1)).
 export function failureOf(s: Pick<SetupState, 'invoking' | 'phases' | 'intents' | 'cards' | 'dismissed'>, appSessionId: AppSessionId): SetupFailure | null {
-  if (isStarting(s, appSessionId) || s.cards.has(appSessionId) || s.dismissed.has(appSessionId)) return null;
+  if (!s.intents.has(appSessionId) || isStarting(s, appSessionId) || s.cards.has(appSessionId) || s.dismissed.has(appSessionId)) return null;
   // the stored objects themselves, so a selector over this answer is stable between renders
   const event = s.phases.get(appSessionId);
   if (event?.phase === 'failed' && event.outcome?.kind === 'error') return event.outcome;
@@ -151,7 +154,12 @@ export function connectSetup(client: MawsBridge = ipc, store: typeof useSetup = 
   let live = true;
   const offs = [
     client.on('session.intent.changed', (e) => live && store.getState().applyIntentChanged(e)),
-    client.on('session.setup', (e) => live && store.getState().applySetup(e)),
+    client.on('session.setup', (e) => {
+      if (!live) return;
+      store.getState().applySetup(e);
+      // a resume that failed after it started has no card: its reason is a toast (the record stays, exited)
+      if (e.phase === 'failed' && e.outcome?.kind === 'error' && !store.getState().intents.has(e.appSessionId)) toast({ level: 'danger', text: e.outcome.message, actions: [], dismissible: true });
+    }),
   ];
   const unavailable = (error: unknown) => {
     console.warn('[sessions] session.intent.list unavailable; no unstarted sessions', error);

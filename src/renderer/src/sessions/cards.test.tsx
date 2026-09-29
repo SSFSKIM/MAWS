@@ -11,7 +11,7 @@ import { FailureCard } from './FailureCard';
 import { RelayCard } from './RelayCard';
 import { SetupCard } from './SetupCard';
 import { registerMessageReturn, startIntent } from './setup-actions';
-import { useSetup } from './store';
+import { connectSetup, useSetup } from './store';
 import { TrustCard } from './TrustCard';
 
 let fake: FakeClient;
@@ -173,6 +173,16 @@ describe('failure card', () => {
     expect(fake.invoked('session.intent.resolveWorktree')).toEqual([{ appSessionId: ID, resolution: 'keep' }]);
     await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
     expect(fake.invoked('session.start')).toEqual([{ appSessionId: ID, message: null, options: {} }]);
+  });
+
+  it('a record’s failed resume is no card but a toast; the record stays an exited session', async () => {
+    withMain({ 'session.intent.list': () => ({ intents: [] }), 'session.deletions.list': () => ({ manifests: [] }) });
+    const connection = connectSetup(fake.client);
+    render(<SetupCard appSessionId={ID} />);
+    act(() => fake.event('session.setup', { appSessionId: ID, phase: 'failed', detail: null, outcome: { kind: 'error', message: 'the engine exited (code 1)', resources: resources({ record: 'kept' }) } }));
+    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
+    expect(useNotices.getState().notices.map((n) => n.text)).toEqual(['the engine exited (code 1)']);
+    connection.disconnect();
   });
 
   it('Discard changes and remove needs its acknowledgement; Back to editing returns the message and releases it', async () => {
