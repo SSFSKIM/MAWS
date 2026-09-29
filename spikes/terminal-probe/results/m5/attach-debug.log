@@ -1,0 +1,91 @@
+$ playwright test -g 'openTerminal runs' --reporter=list
+
+Running 1 test using 1 worker
+
+  pw:api => electron.launch started +0ms
+  pw:api <= electron.launch succeeded +641ms
+  pw:api   "commit" event fired +172ms
+  pw:api   "commit" event fired +20ms
+  pw:api   navigated to "file:///Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a6f3eb0835c0683ff/out/renderer/harness.html" +0ms
+  pw:api <= electronApplication.firstWindow succeeded +4ms
+  pw:api => page.consoleMessages started +1ms
+  pw:api <= page.consoleMessages succeeded +0ms
+  pw:api => page.pageErrors started +4ms
+  pw:api <= page.pageErrors succeeded +1ms
+  pw:api => page.waitForFunction started +2ms
+  pw:api   "domcontentloaded" event fired +35ms
+  pw:api   "load" event fired +1ms
+  pw:api <= page.waitForFunction succeeded +111ms
+  pw:api => page.evaluate started +1ms
+  pw:api   navigated to "file:///Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a6f3eb0835c0683ff/out/renderer/harness.html#panel" +1ms
+  pw:api <= page.evaluate succeeded +1ms
+  pw:api => page.waitForFunction started +1ms
+  pw:api <= page.waitForFunction succeeded +11ms
+  pw:api => page.evaluate started +1ms
+  pw:api <= page.evaluate succeeded +3ms
+  pw:api => page.evaluate started +2ms
+  pw:api <= page.evaluate succeeded +2ms
+  pw:api => Expect "toHaveText" started +7ms
+  pw:api Expect "toHaveText" getByLabel('pty host state') with timeout 15000ms +0ms
+  pw:api waiting for getByLabel('pty host state') +1ms
+  pw:api <= Expect "toHaveText" succeeded +72ms
+  pw:api => page.evaluate started +1ms
+  pw:api <= page.evaluate succeeded +12ms
+  pw:api => page.evaluate started +1ms
+  pw:api <= page.evaluate succeeded +5ms
+  pw:api => page.waitForFunction started +1ms
+  pw:api   "networkidle" event fired +504ms
+  pw:api <= page.waitForFunction succeeded +2s
+  pw:api => page.evaluate started +1ms
+  pw:api <= page.evaluate succeeded +5ms
+  pw:api => page.evaluate started +103ms
+  pw:api <= page.evaluate succeeded +1ms
+  pw:api => page.evaluate started +1ms
+  pw:api <= page.evaluate succeeded +5ms
+  pw:api => page.evaluate started +0ms
+  pw:api <= page.evaluate succeeded +16ms
+  pw:api => page.waitForFunction started +1ms
+  pw:api <= page.waitForFunction succeeded +783ms
+  pw:api => page.evaluate started +2ms
+  pw:api <= page.evaluate succeeded +1ms
+  pw:api => page.evaluate started +103ms
+  pw:api <= page.evaluate succeeded +1ms
+  pw:api => page.evaluate started +0ms
+  pw:api <= page.evaluate succeeded +1ms
+  pw:api => page.evaluate started +0ms
+  pw:api <= page.evaluate succeeded +3ms
+  pw:api => page.evaluate started +0ms
+  pw:api <= page.evaluate succeeded +2ms
+  pw:api => Expect "toHaveAttribute" started +2ms
+  pw:api Expect "toHaveAttribute" getByRole('group', { name: 'session' }).getByRole('button', { name: 'Session B' }) with timeout 5000ms +0ms
+  pw:api waiting for getByRole('group', { name: 'session' }).getByRole('button', { name: 'Session B' }) +0ms
+  pw:api <= Expect "toHaveAttribute" succeeded +14ms
+  pw:api => Expect "toBeVisible" started +2ms
+  pw:api Expect "toBeVisible" locator('[role="tab"][data-tab-id="terminal:26e9768e"]') with timeout 5000ms +1ms
+  pw:api waiting for locator('[role="tab"][data-tab-id="terminal:26e9768e"]') +0ms
+  pw:api <= Expect "toBeVisible" succeeded +4ms
+  pw:api => Expect "toHaveAttribute" started +2ms
+  pw:api Expect "toHaveAttribute" locator('[role="tab"][data-tab-id="terminal:26e9768e"]') with timeout 5000ms +1ms
+  pw:api waiting for locator('[role="tab"][data-tab-id="terminal:26e9768e"]') +0ms
+  pw:api <= Expect "toHaveAttribute" succeeded +12ms
+  pw:api => page.evaluate started +1ms
+  pw:api <= page.evaluate succeeded +1ms
+  pw:api => its terminal is mounted on screen started +1ms
+  pw:api its terminal is mounted on screen locator('[data-terminal-id="00000000-0000-0000-0000-000000000000"]') with timeout 5000ms +0ms
+  pw:api waiting for locator('[data-terminal-id="00000000-0000-0000-0000-000000000000"]') +0ms
+  pw:api <= its terminal is mounted on screen succeeded +2ms
+  pw:api => page.evaluate started +0ms
+  pw:api <= page.evaluate succeeded +2ms
+  pw:api => page.evaluate started +101ms
+  pw:api <= page.evaluate succeeded +2ms
+  pw:api => page.evaluate started +252ms
+  pw:api <= page.evaluate succeeded +2ms
+  pw:api => page.evaluate started +502ms
+  pw:api <= page.evaluate succeeded +1ms
+  pw:api => page.evaluate started +1ms
+  pw:api <= page.evaluate succeeded +1ms
+  pw:api => electronApplication.close started +3ms
+  pw:api <= electronApplication.close succeeded +190ms
+  ✓  1 e2e/terminal.spec.ts:784:5 › openTerminal runs the attach command (5.4s)
+
+  1 passed (5.9s)

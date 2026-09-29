@@ -1,0 +1,27 @@
+start 2026-09-28 19:09:36 -0700
+19:09  up  7:11, 24 users, load averages: 9.78 11.42 17.62
+$ playwright test --reporter=list,json
+
+Running 15 tests using 1 worker
+
+  ✓   1 e2e/smoke.spec.ts:13:5 › preload bundle has no external runtime imports (5ms)
+  ✓   2 e2e/smoke.spec.ts:22:5 › MAWS opens light, hosts answer, pty echoes, survives reload and window close, theme switches, exits clean (1.6s)
+  ✓   3 e2e/terminal.spec.ts:236:5 › opens a login shell in the session directory with the terminal environment (4.7s)
+  ✓   4 e2e/terminal.spec.ts:287:5 › keeps its buffer and process across tab switches (9.8s)
+  ✓   5 e2e/terminal.spec.ts:319:5 › pinned tab keeps its shell across sessions and warns about the worktree (5.3s)
+  ✓   6 e2e/terminal.spec.ts:350:5 › asks before closing a busy terminal (5.2s)
+  ✓   7 e2e/terminal.spec.ts:380:5 › shows terminal lost on host crash and respawns after restart (6.9s)
+  ✓   8 e2e/terminal.spec.ts:450:5 › re-adopts a live pty after reload exactly (11.2s)
+  ✓   9 e2e/terminal.spec.ts:486:5 › reconnects lossily with a notice when no checkpoint reaches the ring (11.5s)
+  ✓  10 e2e/terminal.spec.ts:514:5 › floods without loss while the page stays responsive (40.0s)
+  -  11 e2e/terminal.spec.ts:613:6 › keeps Enter and Escape from the app's request handlers
+  ✓  12 e2e/terminal.spec.ts:637:5 › copies a selection and opens links externally (7.2s)
+  ✓  13 e2e/terminal.spec.ts:703:5 › recolours on theme change without literals (4.1s)
+  ✓  14 e2e/terminal.spec.ts:761:5 › falls back to the DOM renderer on context loss and returns to WebGL on next show (6.4s)
+  ✓  15 e2e/terminal.spec.ts:784:5 › openTerminal runs the attach command (4.2s)
+
+  1 skipped
+  14 passed (2.0m)
+exit 0
+end 2026-09-28 19:11:35 -0700
+19:11  up  7:13, 24 users, load averages: 17.31 13.35 17.53
