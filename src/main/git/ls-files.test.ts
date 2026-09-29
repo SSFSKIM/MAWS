@@ -83,7 +83,9 @@ describe('git lsFiles filters and falls back', () => {
     const l = lister(() => [join(repo.root, 'src')]);
     await expect(l.list({ directory: repo.root, query: '', limit: 30 })).rejects.toThrow(/not a directory of any session or project/);
     await expect(l.list({ directory: join(repo.root, 'src', '..'), query: '', limit: 30 })).rejects.toThrow(/not a directory of any session or project/);
-    await expect(l.list({ directory: `${repo.root}/src-other`, query: '', limit: 30 })).rejects.toThrow();
+    await repo.write('src-other/x.ts', 'x\n'); // a sibling sharing the root's name as a prefix
+    await expect(l.list({ directory: `${repo.root}/src-other`, query: '', limit: 30 })).rejects.toThrow(/not a directory of any session or project/);
+    await expect(l.list({ directory: `${repo.root}/missing`, query: '', limit: 30 })).rejects.toThrow(/ENOENT/);
     await expect(lister(() => []).list({ directory: plain, query: '', limit: 30 })).rejects.toThrow(/not a directory of any session or project/);
     expect((await l.list({ directory: join(repo.root, 'src'), query: '', limit: 30 })).paths).toContain('main.ts');
   });
