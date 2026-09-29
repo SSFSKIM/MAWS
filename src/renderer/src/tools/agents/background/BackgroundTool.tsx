@@ -185,7 +185,8 @@ function BackgroundView({ appSessionId, handle, snapshot, own, ctx }: ViewProps)
     scroller.current?.querySelector<HTMLElement>(`[data-task-id="${CSS.escape(selected!)}"]`)?.scrollIntoView?.({ block: 'nearest' });
   }, [selected, reveal, present]);
 
-  const openAgent = (agentId: AgentId) => ctx.openTool(AGENT_TOOL_IDS.subagents, { appSessionId, params: { agentId } });
+  // the selection names its session, so a pinned Subagents tab still on another session follows this one first
+  const openAgent = (agentId: AgentId) => ctx.openTool(AGENT_TOOL_IDS.subagents, { appSessionId, params: { agentId, appSessionId } });
   const running = (nodes: TaskNode[]) => nodes.filter((n) => n.status === 'running').length;
   const nothing = live && flows.length === 0 && shellNodes.length === 0 && monitorNodes.length === 0;
 

@@ -23,6 +23,7 @@ import { fakeAgentWorkClient, type FakeAgentWorkClient } from '../fake-work-clie
 import { openLog } from '../log/LogTool';
 import { useTaskGraph } from '../store';
 import { SLOW_TICK_MS } from '../subagents/shared';
+import { subagentsTool, type SubagentsParams } from '../subagents/SubagentsTool';
 import { BackgroundSummary } from './BackgroundSummary';
 import { backgroundTool, type BackgroundHandle, type BackgroundParams } from './BackgroundTool';
 
@@ -254,7 +255,7 @@ describe('background work', () => {
     await mount({ events: upTo(workflow, 93) });
     const alpha = within(card('wayue3on6')).getByRole('button', { name: /alpha/ });
     fireEvent.click(alpha);
-    expect(openTool).toHaveBeenCalledWith('subagents', { appSessionId: A, params: { agentId: expect.any(String) } });
+    expect(openTool).toHaveBeenCalledWith('subagents', { appSessionId: A, params: { agentId: expect.any(String), appSessionId: A } });
     unmountAll();
     await mount({
       events: [
@@ -263,6 +264,16 @@ describe('background work', () => {
       ],
     });
     expect(within(card('wf1')).queryByRole('button', { name: /queued-one/ })).toBeNull();
+  });
+
+  it('a per-agent row opens its drill-in on a pinned Subagents tab still holding another session, keeping the selection', async () => {
+    await mount({ events: upTo(workflow, 93) });
+    fireEvent.click(within(card('wayue3on6')).getByRole('button', { name: /alpha/ }));
+    const [, options] = openTool.mock.calls.at(-1) as [string, { params: SubagentsParams }];
+    const pinned = subagentsTool.createState({ appSessionId: 'X' as AppSessionId, session: null, instanceId: 'subagents:pinned', params: undefined });
+    act(() => subagentsTool.open!(pinned, options.params)); // the host's retarget of a single-instance tab passes the params alone
+    expect(pinned.snapshot()).toMatchObject({ appSessionId: A, view: { kind: 'agent', agentId: 'a014f6be436bed86b' } });
+    subagentsTool.dispose?.(pinned);
   });
 
   it('lists a background shell from per-task-stop-on with Output enabled from the result text, before the notification', async () => {
