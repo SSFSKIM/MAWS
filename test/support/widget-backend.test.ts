@@ -11,7 +11,8 @@ const scenario = () => loadScenario(join(ROOT, 'test/fixtures/shell/nine-session
 const READY = 'app-7412a115' as AppSessionId; // ready, idle, routed
 const backendOf = () => {
   const emitted: { name: string; payload: unknown }[] = [];
-  const backend = createWidgetBackend({ root: ROOT, statuses: scenario().engine, emit: (name, payload) => void emitted.push({ name, payload }), now: () => '2026-09-29T12:00:01.000Z' });
+  const { engine, sessions } = scenario();
+  const backend = createWidgetBackend({ root: ROOT, statuses: engine, records: sessions, emit: (name, payload) => void emitted.push({ name, payload }), now: () => '2026-09-29T12:00:01.000Z' });
   return { backend, emitted };
 };
 
@@ -185,6 +186,42 @@ describe('the widget backend', () => {
     await backend.answer('session.stop', { appSessionId: READY, reason: 'stop' });
     const queue = (await backend.answer('session.queue.list', { appSessionId: READY })) as { entries: { content: unknown; state: string }[] };
     expect(queue.entries.map((e) => [e.content, e.state])).toEqual([['first', 'queued'], ['second', 'queued']]);
+  });
+
+  // The C10 integration: C10's resume and rename, answered over the scenario's records.
+  it("resumes a stopped session on the route asked for, ready on a new launch with the options' model, and refuses a live one", async () => {
+    const { backend } = backendOf();
+    const before = backend.status(READY);
+    expect(await backend.answer('session.start', { appSessionId: READY, message: null, options: { gateway: 'direct' } })).toEqual({ status: 'already_live', appSessionId: READY });
+    await backend.answer('session.stop', { appSessionId: READY, reason: 'stop' });
+    expect(await backend.answer('session.start', { appSessionId: READY, message: null, options: { gateway: 'direct', model: 'sonnet', effort: 'high' } })).toEqual({ status: 'starting', appSessionId: READY });
+    await vi.waitFor(() => expect(backend.status(READY).process).toBe('ready'));
+    const after = backend.status(READY);
+    expect(after.launchId).not.toBe(before.launchId);
+    expect(after).toMatchObject({ exit: null, model: { requested: 'sonnet' }, effort: 'high', gateway: { mode: 'direct', baseUrl: null, verified: 'direct', localLane: null } });
+    expect(EngineSessionStatusSchema.safeParse(after).success).toBe(true);
+    expect(backend.calls.filter((c) => c.command === 'session.start').map((c) => c.input)).toHaveLength(2);
+  });
+
+  it("resumes on the record's last route when the options name none", async () => {
+    const { backend } = backendOf();
+    await backend.answer('session.stop', { appSessionId: READY, reason: 'stop' });
+    await backend.answer('session.start', { appSessionId: READY, message: null, options: {} });
+    await vi.waitFor(() => expect(backend.status(READY).process).toBe('ready'));
+    expect(backend.status(READY).gateway).toMatchObject({ mode: 'gateway', verified: 'routed', baseUrl: 'http://127.0.0.1:8641' });
+  });
+
+  it('renames through the engine while ready and by override otherwise, answering the renamed record', async () => {
+    const { backend } = backendOf();
+    expect(await backend.answer('session.rename', { appSessionId: READY, title: ' New title ' })).toMatchObject({ via: 'engine', record: { appId: READY, title: { text: 'New title', source: 'user' } } });
+    await backend.answer('session.stop', { appSessionId: READY, reason: 'stop' });
+    expect(await backend.answer('session.rename', { appSessionId: READY, title: 'Later' })).toMatchObject({ via: 'override', record: { title: { text: 'Later' } } });
+  });
+
+  it('emits a setup phase', () => {
+    const { backend, emitted } = backendOf();
+    backend.emitSetup({ appSessionId: READY, phase: 'failed', detail: null, outcome: { kind: 'error', message: 'x', resources: { worktree: null, record: 'kept', transcript: 'kept' } } });
+    expect(emitted.at(-1)).toMatchObject({ name: 'session.setup', payload: { phase: 'failed', outcome: { kind: 'error' } } });
   });
 
   it('keeps the synthetic answers readable, each citing where its shape comes from', () => {

@@ -26,7 +26,7 @@ export interface WidgetBackendInstall {
 export function installWidgetBackend(deps: WidgetBackendInstall): (() => void) | null {
   if (deps.env.MAWS_WIDGET_BACKEND !== 'fixtures' || launchMode(deps.env, deps.packaged) !== 'scenario') return null;
   const scenario = loadScenario(scenarioPath(deps.env, { packaged: deps.packaged, appRoot: deps.appRoot }));
-  const backend = createWidgetBackend({ root: deps.appRoot, statuses: scenario.engine, emit: deps.emit });
+  const backend = createWidgetBackend({ root: deps.appRoot, statuses: scenario.engine, records: scenario.sessions, emit: deps.emit });
   const offs = backend.commands.map((name: CommandName) =>
     deps.intercept(name, async (input) => {
       try {

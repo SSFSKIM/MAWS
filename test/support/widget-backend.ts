@@ -7,7 +7,9 @@
 // requested model, the effort, the permission mode with its refusal), and an operation answers its receipt and then
 // completes on `session.operation`, at once or when a test settles the held ones. Every status it answers or emits is
 // C3's landed shape, parsed with the shared `EngineSessionStatusSchema` first, so a missing field fails here rather
-// than in a widget. The same module is the widget unit tests' bridge stub (`bridge()`) and, under
+// than in a widget. C10's main-side commands the widgets and the route switch call are answered too, over the
+// scenario's records: `session.start` (a resume that comes up ready on the route asked for, as C10's launch would) and
+// `session.rename` (the record renamed). The same module is the widget unit tests' bridge stub (`bridge()`) and, under
 // MAWS_WIDGET_BACKEND=fixtures, main's interceptor over C5's scenario records (`src/main/index.ts`, C11 block).
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -15,6 +17,9 @@ import type { OperationCommand, OperationEvent } from '../../src/shared/engine/o
 import { EngineSessionStatusSchema, type EngineSessionStatus } from '../../src/shared/engine/status';
 import type { QueueEntry, QueuePauseReason } from '../../src/shared/engine/session-state-store';
 import type { AutoModeRefusalCode, PermissionMode } from '../../src/shared/graph/enums';
+import type { SessionRecord } from '../../src/shared/graph/session';
+import type { StartOptions } from '../../src/shared/ipc/schema/session';
+import type { SetupEvent, StartOutcome } from '../../src/shared/sessions/setup';
 import type { IpcError } from '../../src/shared/ipc/errors';
 import { EventIdSchema, type AppSessionId, type EventId } from '../../src/shared/graph/ids';
 import type { CommandName, CommandResult, EventName, EventPayload, MawsBridge } from '../../src/shared/ipc/schema';
@@ -48,7 +53,7 @@ export const RESPONSES: Record<string, FixtureLine> = {
   reload_plugins: 'widgets/reload-plugins.json',
   mcp_reconnect: 'widgets/mcp-reconnect.json',
   mcp_toggle: 'widgets/mcp-toggle.json',
-  rename_session: 'reads#90', // success, no payload (the rename widget's C10 seam until C10's session.rename)
+  rename_session: 'reads#90', // success, no payload (C10's session.rename of a ready session runs it through the engine)
 };
 
 // `set_permission_mode { mode: 'auto' }` on a model the catalogue does not mark `supportsAutoMode`: the engine's refusal.
@@ -89,8 +94,9 @@ export const CATALOG_LINES = { initialize: 'pass2/auto-routed#4', init: 'pass2/a
 
 // Host-local commands the backend answers besides the table: the status, the catalogue, a prompt (the compact widget's
 // `/compact`, a user message and no control), the app queue, and (M4, the route switch) the interrupt, the queue's
-// pause and the stop, each moving the status and the queue as C3's host does.
-const LOCAL_COMMANDS = ['session.status', 'session.catalog', 'session.send', 'session.queue.list', 'session.queue.setPaused', 'session.interrupt', 'session.stop'] as const satisfies readonly CommandName[];
+// pause and the stop, each moving the status and the queue as C3's host does, and C10's resume (`session.start`) and
+// rename (`session.rename`).
+const LOCAL_COMMANDS = ['session.status', 'session.catalog', 'session.send', 'session.queue.list', 'session.queue.setPaused', 'session.interrupt', 'session.stop', 'session.start', 'session.rename'] as const satisfies readonly CommandName[];
 
 export const WIDGET_BACKEND_COMMANDS: readonly CommandName[] = [...LOCAL_COMMANDS, ...(Object.keys(SUBTYPE_OF) as CommandName[])];
 
@@ -181,6 +187,7 @@ export type OperationOutcome = OperationEvent['outcome'];
 export interface WidgetBackendOptions {
   root: string; // the repository root the fixture lines are under
   statuses: readonly EngineSessionStatus[]; // the sessions it answers for; a ready one gains the init facts
+  records?: readonly SessionRecord[]; // their records (C10's resume reads the last route; a rename answers the record)
   emit?: <N extends EventName>(name: N, payload: EventPayload<N>) => void;
   now?: () => string;
 }
@@ -197,6 +204,7 @@ export interface WidgetBackend {
   emitStatus(appSessionId: AppSessionId, patch: Partial<EngineSessionStatus>): EngineSessionStatus;
   emitTurnStarted(appSessionId: AppSessionId): EventId; // opens a turn with a fresh id in C3's EventId form
   emitOperation(event: OperationEvent): void;
+  emitSetup(event: SetupEvent): void; // a phase of C10's setup (a resume that failed after it started)
   bridge(): MawsBridge; // an X2 bridge over `answer` and the emitted events, for unit tests
 }
 
@@ -218,7 +226,7 @@ export function createWidgetBackend(options: WidgetBackendOptions): WidgetBacken
   const catalog = catalogOf(options.root);
   const models = (fixtureLine(options.root, RESPONSES.list_models) as { models: ModelRow[] }).models;
   const statuses = new Map<AppSessionId, EngineSessionStatus>();
-  // The status C3 would hold for the session. C10's `trust` field joins here at the C10 integration.
+  // The status C3 would hold for the session (C10's `trust` arrives with the scenario's statuses).
   const shaped = (status: EngineSessionStatus): EngineSessionStatus => EngineSessionStatusSchema.parse(status);
   for (const status of options.statuses) statuses.set(status.appSessionId, shaped(status.process === 'ready' ? { ...status, ...facts } : status));
   const scripts = new Map<CommandName, ScriptedAnswer>();
@@ -230,6 +238,8 @@ export function createWidgetBackend(options: WidgetBackendOptions): WidgetBacken
   let turnSeq = 0;
   let opSeq = 0;
   let queueSeq = 0;
+  let launchSeq = 0;
+  const records = new Map<AppSessionId, SessionRecord>((options.records ?? []).map((r) => [r.appId, r]));
   // The app queue per session (C3's `QueueState`): its pause (by the human, or by an interrupt) and the entries it holds.
   // A send while a turn is open or the queue is paused is held as a `queued` entry; the backend has no engine to
   // release one to, so held entries stay until the test ends (they survive a stop, as C3's state file keeps them).
@@ -327,6 +337,36 @@ export function createWidgetBackend(options: WidgetBackendOptions): WidgetBacken
     return { exited: true, code: 0, signal: null };
   }
 
+  // C10's resume of a session with no process (`session.start { message: null }`): `starting`, then the process on a new
+  // launch, ready on the route asked for (else the record's last one, else the gateway: the default), verified, with the
+  // model and effort the options override. A live session answers `already_live`, as C10's guards do.
+  const LIVE = new Set<EngineSessionStatus['process']>(['starting', 'initializing', 'ready', 'exiting']);
+  function start(status: EngineSessionStatus, input: { options: StartOptions }): StartOutcome {
+    const id = status.appSessionId;
+    if (LIVE.has(status.process)) return { status: 'already_live', appSessionId: id };
+    const routed = records.get(id)?.gateway.routed ?? null;
+    const mode = input.options.gateway ?? (routed === false ? 'direct' : 'gateway');
+    const launchId = `launch-backend-${++launchSeq}`;
+    const model = input.options.model === undefined ? status.model : { requested: input.options.model, resolved: input.options.model };
+    const effort = input.options.effort === undefined ? status.effort : input.options.effort;
+    setTimeout(() => emitStatus(id, { process: 'initializing', launchId, launchedAt: now(), exit: null, pid: 4242 }), 0);
+    setTimeout(() => {
+      const gateway = { mode, baseUrl: mode === 'gateway' ? 'http://127.0.0.1:8641' : null, verified: mode === 'gateway' ? ('routed' as const) : ('direct' as const), autoModeServer: 'enabled' as const, localLane: null };
+      emitStatus(id, { ...facts, process: 'ready', model, effort, gateway });
+    }, 5);
+    return { status: 'starting', appSessionId: id };
+  }
+
+  // C10's rename: through the engine while the process is ready, the record's override otherwise; answers the record.
+  function rename(status: EngineSessionStatus, title: string): { record: SessionRecord; via: 'engine' | 'override' } {
+    const record = records.get(status.appSessionId);
+    if (!record) throw new WidgetBackendError({ code: 'internal', message: `no record for ${status.appSessionId}` });
+    if (status.process === 'ready') fixtureLine(options.root, RESPONSES.rename_session);
+    const renamed: SessionRecord = { ...record, title: { text: title.trim(), source: 'user' } };
+    records.set(record.appId, renamed);
+    return { record: renamed, via: status.process === 'ready' ? 'engine' : 'override' };
+  }
+
   // `mcp_status` as the engine would answer after the toggles it accepted.
   function mcpStatus(status: EngineSessionStatus): unknown {
     const answer = fixtureLine(options.root, RESPONSES.mcp_status) as { mcpServers: Record<string, unknown>[] };
@@ -357,6 +397,8 @@ export function createWidgetBackend(options: WidgetBackendOptions): WidgetBacken
       return void setQueue(status, { paused, pauseReason: paused ? 'user' : null });
     }
     if (command === 'session.stop') return stop(status, (input as { reason: 'stop' | 'archive' }).reason);
+    if (command === 'session.start') return start(status, input as { options: StartOptions });
+    if (command === 'session.rename') return rename(status, (input as { title: string }).title);
     if (status.process !== 'ready') throw new WidgetBackendError({ code: 'internal', message: `${status.appSessionId} has no ready process` });
     if (command === 'session.send') return send(status, (input as { content: QueueEntry['content'] }).content);
     if (command === 'session.interrupt') return interrupt(status);
@@ -413,6 +455,9 @@ export function createWidgetBackend(options: WidgetBackendOptions): WidgetBacken
     },
     emitOperation(event) {
       emit('session.operation', event);
+    },
+    emitSetup(event) {
+      emit('session.setup', event);
     },
     bridge() {
       return {
