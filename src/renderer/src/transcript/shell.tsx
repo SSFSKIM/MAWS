@@ -19,6 +19,9 @@ import { registerTranscriptActions } from './view/registry';
 // holds a live process for it (`exiting` included) or a C4 replay run plays it, so a phase of a running process says
 // the session is live, and `exited`, `failed`, `foreign` or no digest at all say it is not. A disk-backed session with
 // no live process then shows no working divider ticking from the wall clock (the store's `setLive`).
+// Edge (2026-09-28, final-pass review): C5 also sets `failed` on a failed `turn.ended` while the process lives
+// (`src/main/sessions/digest.ts`, the `turn.ended` case), so a background subagent's detail line still running after a
+// failed turn stops ticking until the next phase change; kept, since the turn itself has closed.
 const LIVE_PHASES: ReadonlySet<SessionPhase> = new Set(['starting', 'working', 'waiting', 'idle']);
 const useLive = (appSessionId: AppSessionId) => useSessions((state) => LIVE_PHASES.has(state.digests.get(appSessionId)?.phase as SessionPhase));
 
@@ -27,7 +30,10 @@ const useLive = (appSessionId: AppSessionId) => useSessions((state) => LIVE_PHAS
 export const ShellTranscript: Slots['transcript'] = ({ appSessionId, agentId }) => {
   const key = ipcSource(appSessionId, agentId ?? undefined).key!;
   const live = useLive(appSessionId);
-  useEffect(() => void useTranscriptStore.getState().setLive(key, live), [key, live]);
+  useEffect(() => {
+    useTranscriptStore.getState().setLive(key, live);
+    return () => useTranscriptStore.getState().setLive(key, null); // a closed tab says nothing more about the key
+  }, [key, live]);
   return <TranscriptSlot appSessionId={appSessionId} agentId={agentId ?? undefined} className="h-full" />;
 };
 

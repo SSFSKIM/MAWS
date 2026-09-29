@@ -10,7 +10,7 @@ import { resetSlots, useSlot } from '../app/slots';
 import { SessionPane } from '../session/SessionPane';
 import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
-import { useTranscriptStore } from '../stores/transcript';
+import { ticks, useTranscriptStore } from '../stores/transcript';
 import { resetShellStores } from '../test-support/shell-stores';
 import { builder } from './model/test-events';
 import { connectTranscript, ShellTranscript } from './shell';
@@ -85,6 +85,16 @@ describe('the transcript slot', () => {
     act(() => useSessions.getState().applyDigest(digest(APP, { phase: 'working', revision: 100 })));
     render(<ShellTranscript appSessionId={APP} agentId={CHILD} paneIndex={0} />);
     expect(live(`${APP}:${CHILD}`)).toBe(true);
+  });
+
+  it('forgets the key’s liveness when the tab closes, so a later mount elsewhere ticks again', () => {
+    const APP = 'app-shell-4' as AppSessionId;
+    window.maws = fakeClient().client;
+    const view = render(<ShellTranscript appSessionId={APP} agentId={null} paneIndex={0} />);
+    expect(useTranscriptStore.getState().live[APP]).toBe(false);
+    view.unmount();
+    expect(APP in useTranscriptStore.getState().live).toBe(false);
+    expect(ticks(useTranscriptStore.getState(), APP)).toBe(true);
   });
 
   it('a path chip opens C5’s file tab; links keep the default layout.openExternal', async () => {

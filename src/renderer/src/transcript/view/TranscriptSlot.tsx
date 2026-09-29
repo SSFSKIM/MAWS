@@ -2,7 +2,7 @@
 // child agent's when `agentId` is given), with the actions every child registered merged over the defaults and the
 // latest registered request-card renderer (C7's), re-rendered when either changes. A session transcript gets the
 // receipt's rewind over `session.rewindFiles`; a child's does not (its turns are not the session's prompts, so there is
-// nothing to rewind to). Registering this component into C5's `transcript` slot is a rebase step, once C5 is on master.
+// nothing to rewind to). C5's `transcript` slot renders it through `transcript/shell.tsx`, registered from `App.tsx`.
 import type { AgentId, AppSessionId } from '@shared/graph/ids';
 import { useMemo } from 'react';
 import { ipcRewind, ipcSource } from '../source/ipc';
