@@ -24,6 +24,7 @@ export function ModeChip({ binding, onOpen }: { binding: ModeBinding; onOpen?():
           </span>
         )}
         {binding.value ?? 'default'}
+        <span aria-hidden className="shrink-0 text-fg-faint">⌄</span>
       </Popover.Trigger>
       <Popover.Portal>
         <Popover.Content aria-label="Permission mode" side="top" align="end" sideOffset={6} collisionPadding={8} className={`${POPOVER} w-72`}>

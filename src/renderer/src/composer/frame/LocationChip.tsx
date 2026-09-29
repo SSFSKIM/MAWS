@@ -119,12 +119,13 @@ export function LocationChip({ location, branch, directories, dirty, onOpen }: L
       <Popover.Trigger aria-label={`Location ${path}`} title={location.disabled ? `${path} · ${location.disabled}` : path} className={`${CHIP} font-mono`}>
         <span className="truncate">{formatCwd(path)}</span>
         <span className="shrink-0 text-fg-faint">·</span>
-        <span className="shrink-0 truncate">{branch.value ?? '—'}</span>
+        <span className="shrink-0 truncate">{branch.value === null ? '—' : `⎇ ${branch.value}`}</span>
         {dirty && (
           <span aria-label="uncommitted changes" className="shrink-0 text-warning">
             ●
           </span>
         )}
+        <span aria-hidden className="shrink-0 text-fg-faint">⌄</span>
       </Popover.Trigger>
       <Popover.Portal>
         <Popover.Content aria-label="Location" side="top" align="start" sideOffset={6} collisionPadding={8} className={`${POPOVER} flex w-80 flex-col gap-1`}>

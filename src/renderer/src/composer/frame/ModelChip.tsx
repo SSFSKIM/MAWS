@@ -42,6 +42,7 @@ export function ModelChip({ binding, openWidget, onOpen }: { binding: ChipBindin
     >
       <Popover.Trigger aria-label={`Model ${label}`} title={binding.disabled ?? 'Model and effort'} className={CHIP}>
         {label}
+        <span aria-hidden className="shrink-0 text-fg-faint">⌄</span>
       </Popover.Trigger>
       <Popover.Portal>
         <Popover.Content aria-label="Model" side="top" align="end" sideOffset={6} collisionPadding={8} className={`${POPOVER} flex w-72 flex-col gap-1`}>
