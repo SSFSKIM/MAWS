@@ -103,7 +103,7 @@ describe('queue release never follows an engine-initiated turn', () => {
     expect(t.queue.state.entries).toMatchObject([{ content: 'two', state: 'submitting' }]);
   });
 
-  it('a submission the engine cancels, discards or refuses before it started is retired interrupted at that lifecycle, so the queue is not left busy (whole-branch review; pass1/queue-and-interrupt seq 191)', async () => {
+  it('a submission the engine cancels, discards or refuses before it started is retired at that lifecycle with its own notice, and the next queued message is released (whole-branch review; pass1/queue-and-interrupt seq 191)', async () => {
     for (const state of ['cancelled', 'discarded', 'refused'] as const) {
       const t = await harness();
       const { entry } = await t.queue.send('one');
@@ -112,12 +112,33 @@ describe('queue release never follows an engine-initiated turn', () => {
       t.queue.onLifecycle(lifecycle(entry.messageUuid!, state));
       t.h.turn = false; // the normaliser stopped waiting on the dropped prompt: no turn is open
       await flush();
-      expect(t.queue.state.entries).toMatchObject([{ content: 'two', state: 'queued' }]);
-      expect(t.queue.busy, state).toBe(false);
-      expect(notices(t.rows)).toEqual([`queue:interrupted:${entry.queueId}`]);
-      expect((await t.store.loadQueue(ID)).entries.map((e) => e.content)).toEqual(['two']);
-      expect(t.writes.map((w) => w.message.content)).toEqual(['one']); // nothing re-sent, nothing released at the drop
+      await flush();
+      expect(t.queue.state.entries).toMatchObject([{ content: 'two', state: 'submitting' }]);
+      expect(notices(t.rows)).toEqual([`queue:dropped:${entry.queueId}`]);
+      expect(t.rows.find((r) => r.event === 'notice')!.text).toContain(`The engine ${state} a message before starting it`);
+      expect((await t.store.loadQueue(ID)).entries.map((e) => [e.content, e.state])).toEqual([['two', 'submitting']]);
+      expect(t.writes.map((w) => w.message.content)).toEqual(['one', 'two']); // the dropped one is not re-sent; the next goes
+      expect(queueRows(t.rows)).toEqual(['release:send', 'release:dropped']);
     }
+    // a paused queue (an interrupt pauses before it cancels) releases nothing at the drop
+    const paused = await harness();
+    const { entry: sent } = await paused.queue.send('one');
+    await paused.queue.send('two');
+    await paused.queue.pause('interrupt');
+    paused.queue.onLifecycle(lifecycle(sent.messageUuid!, 'cancelled'));
+    paused.h.turn = false;
+    await flush();
+    await flush();
+    expect(paused.queue.state.entries).toMatchObject([{ content: 'two', state: 'queued' }]);
+    expect(paused.writes.map((w) => w.message.content)).toEqual(['one']);
+    // a drop while another turn is open releases nothing into it; that turn's end does
+    const open = await harness();
+    const { entry: dropped } = await open.queue.send('one');
+    await open.queue.send('two');
+    open.queue.onLifecycle(lifecycle(dropped.messageUuid!, 'cancelled'));
+    await flush();
+    await flush();
+    expect(open.writes.map((w) => w.message.content)).toEqual(['one']);
     // dropped at its first lifecycle, still submitting: the same
     const first = await harness();
     const { entry } = await first.queue.send('one');

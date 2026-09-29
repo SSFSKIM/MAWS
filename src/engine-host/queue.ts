@@ -2,9 +2,9 @@
 // interrupt", M4). Every send is an entry: submitted at once when the session is not busy, queued otherwise, so two
 // quick sends at an idle engine serialise. A submission is persisted as `submitting` with its minted uuid before the
 // `user` frame is written, becomes `released` at the engine's `command_lifecycle` for that uuid, and leaves the list
-// at the `turn.ended` naming it, at a lifecycle that drops it before it started, or at the process's exit (the last two
-// retire it `interrupted`, never re-sent). The release rule: a
-// main-lane, non-receipt `turn.ended` submits the head while the queue is not paused and the session is idle, so nothing
+// at the `turn.ended` naming it, at a lifecycle that drops it before it started (retired `dropped`, never re-sent), or at
+// the process's exit (retired `interrupted`, never re-sent). The release rule: a
+// main-lane, non-receipt `turn.ended` submits the head, and so does a drop before start (no turn.ended will follow it), while the queue is not paused and the session is idle, so nothing
 // is ever released into a running turn, an engine-initiated one (`task-notification`) included, nor while a prompt the
 // host wrote (a steer) waits for the engine to start it; after an engine turn a
 // head that cannot go (not ready, write failed) pauses the queue with an info notice. A submission a crash interrupted comes back as the
@@ -20,7 +20,7 @@ import type { UserInputFrame } from '@shared/wire/frames';
 export const ACK_TIMEOUT_MS = 5_000;
 const DROPPED_BEFORE_START: ReadonlySet<string> = new Set(['cancelled', 'discarded', 'refused']);
 
-export type ReleaseTrigger = 'send' | 'turn_ended' | 'resume';
+export type ReleaseTrigger = 'send' | 'turn_ended' | 'resume' | 'dropped';
 export type SteerPriority = 'now' | 'next';
 export type PauseReason = 'user' | 'interrupt' | 'write_failed' | 'uncertain' | 'exit' | 'engine_turn';
 export type ExitKind = 'quit' | 'stop' | 'archive' | 'crash' | 'unknown';
@@ -213,8 +213,10 @@ export class MessageQueue {
 
   // submitting → released: the engine acknowledges every stdin user frame with command_lifecycle (pass2/dialogs 5–6).
   // A submission the engine drops before it started (`cancelled`, `discarded`, `refused`: pass1/queue-and-interrupt
-  // seq 191) will never be named by a turn.ended, so it is retired `interrupted` there, with the exit's notice, and no
-  // longer holds the queue busy (whole-branch review). Once started, its turn.ended retires it.
+  // seq 191) will never be named by a turn.ended, so it is retired there with its own notice, no longer holds the queue
+  // busy (whole-branch review), and the head is released under the usual gates (not paused, idle, ready): no turn.ended
+  // will come to release it. An interrupt pauses the queue first, so the drops it causes release nothing. Once started,
+  // its turn.ended retires it.
   onLifecycle(event: Extract<SessionEvent, { kind: 'command.lifecycle' }>): void {
     const entry = this.entries.find((e) => e.state !== 'queued' && e.messageUuid === event.commandUuid);
     if (!entry) return; // a steer, the plan sequence's frames, or an entry already retired (a late `cancelled`)
@@ -223,8 +225,11 @@ export class MessageQueue {
       this.entries = this.entries.filter((e) => e !== entry);
       this.clearAck(entry.queueId);
       this.started.delete(entry.queueId);
-      this.interruptedNotice(entry);
-      this.persist().catch((error: unknown) => this.log(`retirement not saved: ${messageOf(error)}`)); // a stale released entry on disk retires at the next recovery
+      this.notice(`queue:dropped:${entry.queueId}`, `The engine ${event.state} a message before starting it, so it was not answered. Re-send it if you still want an answer.`);
+      void this.persist()
+        .catch((error: unknown) => this.log(`retirement not saved: ${messageOf(error)}`)) // a stale released entry on disk retires at the next recovery
+        .then(() => this.releaseHead('dropped'))
+        .catch((error: unknown) => this.log(`release after a drop failed: ${messageOf(error)}`));
       return;
     }
     if (entry.state !== 'submitting') return;

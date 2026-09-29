@@ -142,7 +142,7 @@ describe('queue release never follows an engine-initiated turn', () => {
     expect(userOuts(s.journal.rows).map((f) => f.message.content)).toEqual(['Count to 30 slowly.', 'After counting, reply exactly QUEUED.']);
   });
 
-  it('pass1/queue-and-interrupt cut to the queued prompt (seq 146, 150) and the interrupt (190-192), plus one recorded send: the submission the engine cancels before it started (seq 191) retires interrupted there, so the next send goes at once', async () => {
+  it('pass1/queue-and-interrupt cut to the queued prompt (seq 146, 150) and the interrupt (190-192), plus one recorded send: the submission the engine cancels before it started (seq 191) retires there with its own notice, so the next send goes at once', async () => {
     const againRow = { seq: 9_002, direction: 'out' as const, at: '2026-09-28T10:00:00.000Z', frame: { type: 'user', uuid: 'recorded-again', message: { role: 'user', content: 'again' }, parent_tool_use_id: null, origin: { kind: 'human' } } };
     const cut = (rows: JournalRow[]) => [...rows.filter((r) => r.seq <= 3 || [146, 150, 190, 191, 192].includes(r.seq)), againRow];
     let afterInterrupt: { cancelled: number; busy: boolean; entries: QueueEntry[]; disposition: string | null } | null = null;
@@ -162,8 +162,9 @@ describe('queue release never follows an engine-initiated turn', () => {
     const cancelled = run.journal.rows.findIndex((r) => (r.frame as { type?: string; state?: string; command_uuid?: string }).type === 'command_lifecycle' && (r.frame as { state: string }).state === 'cancelled');
     expect((run.journal.rows[cancelled]!.frame as { command_uuid: string }).command_uuid).toBe(submitted!.uuid);
     const notice = run.journal.rows[cancelled + 1]!.frame as { event: string; key: string };
-    expect(notice).toMatchObject({ event: 'notice', key: expect.stringMatching(/^queue:interrupted:/) }); // at the lifecycle, not at the exit
-    expect(ofKind(run.events, 'notice.posted').filter((e) => e.key?.startsWith('queue:interrupted:'))).toHaveLength(1);
+    expect(notice).toMatchObject({ event: 'notice', key: expect.stringMatching(/^queue:dropped:/) }); // at the lifecycle, not at the exit
+    expect(ofKind(run.events, 'notice.posted').filter((e) => e.key?.startsWith('queue:dropped:'))).toHaveLength(1);
+    expect(ofKind(run.events, 'notice.posted').filter((e) => e.key?.startsWith('queue:interrupted:'))).toEqual([]); // the live session did not end
     expect(userOuts(run.journal.rows).map((f) => f.message.content)).toEqual([contentOf(run.fixture, 146), 'again']);
     expect(run.rebuilt()).toEqual(run.events);
   });
@@ -179,6 +180,37 @@ describe('queue release never follows an engine-initiated turn', () => {
     // not folded into the open turn: the steer waits unstarted and holds the queue until its own turn ends (coordinator ruling after M6 live 3.7)
     expect(s.session.status().turn?.userMessageUuids ?? []).not.toContain(messageUuid);
     expect(s.session.queue.busy).toBe(true);
+  });
+});
+
+describe('a submission the engine drops before it started releases the next queued message', () => {
+  it('the drop retires the entry with its own notice, then the head goes and opens its own turn', async () => {
+    const s = scriptedSession();
+    const statuses: { turn: unknown; queue: unknown }[] = [];
+    s.session.on('status', (status) => statuses.push({ turn: status.turn, queue: status.queue }));
+    await s.session.start();
+    const lifecycle = (uuid: string, state: string) => s.transport.push({ type: 'command_lifecycle', command_uuid: uuid, state, uuid: `lc-${uuid}-${state}`, session_id: 's' });
+    const first = await s.session.send('first');
+    const second = await s.session.send('second');
+    expect([first.disposition, second.disposition]).toEqual(['sent', 'queued']);
+    lifecycle(first.messageUuid!, 'queued');
+    lifecycle(first.messageUuid!, 'cancelled'); // not an interrupt of ours: the queue is not paused
+    await flush();
+    await flush();
+    const outs = userOuts(s.journal.rows);
+    expect(outs.map((f) => f.message.content)).toEqual(['first', 'second']);
+    const cancelledRow = s.journal.rows.findIndex((r) => (r.frame as { state?: string }).state === 'cancelled');
+    const releaseRow = s.journal.rows.findIndex((r) => (r.frame as { event?: string; trigger?: string }).event === 'queue' && (r.frame as { trigger?: string }).trigger === 'dropped');
+    expect(releaseRow).toBeGreaterThan(cancelledRow);
+    const tail = s.events.slice(s.events.findIndex((e) => e.kind === 'command.lifecycle' && e.state === 'cancelled'));
+    expect(tail.map((e) => (e.kind === 'notice.posted' ? `notice:${e.key!.split(':').slice(0, 2).join(':')}` : e.kind))).toEqual(['command.lifecycle', 'notice:queue:dropped', 'user.message']); // the notice, then the released head
+    expect(ofKind(s.events, 'turn.started')).toEqual([]);
+    expect(s.session.status().queue).toEqual({ length: 0, paused: false }); // nothing left waiting: the head is submitting
+    expect(statuses.at(-1)).toEqual({ turn: null, queue: { length: 0, paused: false } });
+
+    lifecycle(outs[1]!.uuid, 'started');
+    await flush();
+    expect(ofKind(s.events, 'turn.started').map((e) => e.userMessageUuid)).toEqual([outs[1]!.uuid]);
   });
 });
 
