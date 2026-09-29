@@ -14,6 +14,8 @@ The study came in two waves:
   - `06-codex-cli-host-contract.md`: what the Codex CLI does as the MCP host, and how Claude Code compares
 - **Wave 2** was live experiments from a neutral MCP client standing in for Claude Code: `spikes/computer-use-probe/findings.md`,
   with fixtures in `spikes/computer-use-probe/fixtures/`.
+- **Wave 3** built the shim (`spikes/computer-use-probe/cua-shim.mjs`) and ran a real Claude Code 2.1.283 host through it:
+  `findings.md` §5–7 and `spikes/computer-use-probe/README.md`.
 
 Where the two disagree, wave 2 wins; §9 lists the corrections. **[V]** marks a claim that was observed live or read in
 code. **[I]** marks one inferred from binary strings, symbols or disassembly.
@@ -260,24 +262,23 @@ What this does not settle:
   requirement row.
 - The gate is OpenAI's policy, and one release could tighten it, for example to require a Codex ancestor. The Zed
   entry shows OpenAI already allowlists specific third-party harnesses by signature.
-- Whether OpenAI's terms allow using these bundled components from another agent is a non-technical question these
-  tests cannot answer.
+
 
 ## 8. What a host must provide
 
-Condensed from 06 §1 and updated with wave 2. The "Claude Code 2.1.283" column is verified from its local spec
-(`~/claude-code-bundle/2.1.283/SPEC/`) but not yet run, except where a row says "verified live": there the neutral
-client advertised what Claude Code advertises.
+Condensed from 06 §1, updated with waves 2 and 3. "W3" marks rows verified under a real Claude Code 2.1.283 headless
+host with the shim (`spikes/computer-use-probe/findings.md` §6–7); the rest of the Claude Code column comes from its
+local spec (`~/claude-code-bundle/2.1.283/SPEC/`).
 
 | Requirement | Why | Codex | Claude Code 2.1.283 |
 |---|---|---|---|
-| Launch `cua_node/bin/node …/cua-repl.mjs` with the plugin env, outside any sandbox, with a start budget of about 120 s | Trust gate (§7); the service socket | yes | yes. stdio servers run unsandboxed; set `MCP_TIMEOUT` |
-| Advertise an **elicitation** capability (bare `elicitation:{}` is enough) and answer `elicitation/create` during a call | Every app operation asks; with no elicitation capability, `createElicitation` throws before the persisted-approval check (W2 §2) | yes (relays to UI) | yes, **verified live** for the capability: a client advertising bare `elicitation:{}`, Claude Code's default, received the approval request (W2 §2). Headless: a `control_request` of subtype `elicitation` |
-| Send `x-codex-turn-metadata.session_id` in `tools/call._meta` and return `_meta.persist` in the elicitation reply | Without the session id, every app operation prompted even though the reply carried `persist` (W2 §3). Every run sent `persist`, so whether it is required is untested | yes | **no**. Needs a small MCP shim between Claude Code and `cua-repl.mjs` to inject both |
-| Turn image blocks into model image input, keeping order | Screenshots | yes; images are exempt from the token limit | yes; images count 1,600 tokens each, and a large text block can cut later images |
+| Launch `cua_node/bin/node …/cua-repl.mjs` with the plugin env, outside any sandbox, with a start budget of about 120 s | Trust gate (§7); the service socket | yes | yes, **W3**: the shim spawns the same command; it initialized well inside the default 30 s `MCP_TIMEOUT` |
+| Advertise an **elicitation** capability (bare `elicitation:{}` is enough) and answer `elicitation/create` during a call | Every app operation asks; with no elicitation capability, `createElicitation` throws before the persisted-approval check (W2 §2) | yes (relays to UI) | yes, **W3**: Claude Code advertised `elicitation:{}`; headless, the request arrived as a `control_request` of subtype `elicitation` and the `{action, content}` answer went through |
+| Send `x-codex-turn-metadata.session_id` in `tools/call._meta` and return `_meta.persist` in the elicitation reply | Without the session id, every app operation prompted even though the reply carried `persist` (W2 §3). Every run sent `persist`, so whether it is required is untested | yes | **no**, but **W3**: the shim injects both, taking the session id from `CLAUDE_CODE_SESSION_ID`, which Claude Code sets in the server's environment; one prompt per app per session |
+| Turn image blocks into model image input, keeping order | Screenshots | yes; images are exempt from the token limit | yes, **W3**: the screenshot reached the model as `image/jpeg` (the shim corrects the label), followed by Claude Code's saved-file note. Images count 1,600 tokens each, and a large text block can cut later images |
 | Keep the model's coordinates in the screenshot's pixel space | Coordinate clicks are in screenshot pixels (§4) | yes, when the model accepts the `original` detail the cell requests: up to 6,000 px (06 §2) | **partly**. Images above 2,000 px (a window wider than 1,000 pt on a 2× display) are downscaled, with a text note giving the coordinate multiplier (06 H4). Coordinate clicks then need that multiplier; element-index addressing is unaffected |
-| Keep `js` directly visible | Tool quality | `omit_tools_from` | set `alwaysLoad: true` (otherwise it is deferred behind ToolSearch) |
-| Call hidden `turn_ended` at turn end or interrupt | Releases per-turn state | Stop, SubagentStop and Interrupt hooks | `mcp_tool` hooks on Stop, SubagentStop and StopFailure; there is no interrupt hook, but it sends `notifications/cancelled` |
+| Keep `js` directly visible | Tool quality | `omit_tools_from` | **W3**: the shim marks `js` and `js_reset` with `_meta["anthropic/alwaysLoad"]`; both appeared in the initial tool list and no `ToolSearch` call was made. No host config needed |
+| Call hidden `turn_ended` at turn end or interrupt | Releases per-turn state | Stop, SubagentStop and Interrupt hooks | **W3** for Stop: an `mcp_tool` hook (`server: cua_repl`, `tool: turn_ended`, `${session_id}`, `${prompt_id}`) reached the wire and returned `{}`. SubagentStop and StopFailure untested; there is no interrupt hook, but Claude Code sends `notifications/cancelled` (untested here) |
 
 Two things are **not** requirements, as wave 2 showed. The `js` description is 1,511 characters, and the API document
 arrives in the first result, so Claude Code's 2,048-character description cap is harmless. And no "Run JavaScript"
@@ -343,11 +344,15 @@ approval is raised without Codex turn metadata.
 
 Four routes are now concrete:
 
-1. **Host OpenAI's `cua_repl` under Claude Code.** Technically proven from a neutral client, and Claude Code's default
-   elicitation capability is enough (§8). To match Codex's approval behavior it needs a thin MCP shim that injects the
-   session metadata and `persist`. It would also inherit the user's Codex "always" approvals (§6 [I]). Its risks are
-   non-technical (OpenAI's terms) and structural (OpenAI can tighten the gate or the protocol,
-   `CodexComputerUseIPC-5`, in any weekly release).
+1. **Host OpenAI's `cua_repl` under Claude Code.** **Done and proven (wave 3).** The owner chose this route on
+   2026-09-28. `spikes/computer-use-probe/cua-shim.mjs`, a stdio MCP proxy of about 100 lines, launches OpenAI's
+   server exactly as Codex does and supplies what Codex's host would: session metadata on each call, `persist` on
+   accepted approvals, the real image MIME type, and the `anthropic/alwaysLoad` marker. Under a real Claude Code
+   2.1.283 headless host (Sonnet), two TextEdit tasks completed end to end, including menu-bar navigation, a
+   screenshot to the model, one approval prompt per app per session, and a Stop → `turn_ended` hook; each run cost
+   under $0.50 (W3 §6–7). Usage is in `spikes/computer-use-probe/README.md`. It inherits the user's Codex "always"
+   approvals (§6 [I]). The structural risk stands: OpenAI can tighten the gate or the protocol,
+   `CodexComputerUseIPC-5`, in any weekly release, so the shim must be re-verified per ChatGPT.app update.
 2. **Delegate GUI work to a Codex agent.** Claude hands a GUI task to Codex through `codex app-server`, as the
    `codex-companion` "amigo" verb already does. This is the sanctioned path, but a GPT model performs the GUI steps.
 3. **Build MAWS's own controller** with its own TCC identity, using this architecture as the template:
@@ -363,6 +368,6 @@ Four routes are now concrete:
 4. **Speak the service's socket protocol directly.** MAWS-authored JS speaks `CodexComputerUseIPC-5` on the socket,
    run by a relay `node` under an OpenAI `node` parent, bypassing `node_repl` and its elicitation. Wave 2's
    `sock-client.mjs` completed `ping` and `ListApps` this way (§6). MAWS would then own consent itself, and whether
-   the service enforces approval for app operations without the policy step is untested (03 E4). Coupling to a private
-   protocol and the terms question weigh more heavily here than on route 1: MAWS would depend on the wire encodings
-   directly, and would drive OpenAI's service with its consent layer bypassed.
+   the service enforces approval for app operations without the policy step is untested (03 E4). Coupling weighs
+   more heavily here than on route 1: MAWS would depend on the wire encodings directly, and would drive OpenAI's
+   service with its consent layer bypassed. With route 1 working, this route is a fallback only.

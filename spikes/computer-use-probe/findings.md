@@ -202,9 +202,82 @@ build. The client answers `tools/list` (10 tools) and fails per call with `-1000
    (31 apps; §1, `w2-auth-discriminate.json`). This bypasses `node_repl` and its elicitation; whether the service
    enforces per-app approval without the policy step is untested (report 03, E4).
 
+## Wave 3: Claude Code hosting OpenAI's cua_repl through a shim
+
+Goal set by the owner after wave 2: let Claude Code use Codex computer use. Route 1 from README §11, with the shim
+`cua-shim.mjs` (see `README.md` in this folder for usage). Same envelope: a throwaway TextEdit document in `/tmp`.
+
+### 5. The shim under the neutral client (`w3-shim-unit.mjs`, fixtures `w3-shim-unit*.jsonl`)
+
+The client sent what Claude Code sends: bare `elicitation:{}`, `_meta:{"claudecode/toolUseId"}` on calls, and
+`{action, content}` replies with no `_meta`. Observed [V]:
+- `tools/list` came back as `js`, `js_reset` (each with `_meta["anthropic/alwaysLoad"]: true`) and `turn_ended`
+  (`_meta.ui.visibility: []`); `js_add_node_module_dir` was removed.
+- Every `tools/call` reached `node_repl` with `callId`, `threadId`, `sessionId` and `x-codex-turn-metadata`
+  (`turn_id` = the Claude tool-use id).
+- The accepted approval was forwarded as `{action:"accept", content:{}, _meta:{persist:"session"}}`; one prompt for
+  `getApp`, none for the two later calls; `sessions/shim-unit-s1.toml` written under the shim's `CODEX_HOME`.
+- The screenshot reached the client as `image/jpeg` (the shim sniffed the JPEG magic and relabeled it).
+
+### 6. Claude Code 2.1.283 headless, run 1 (`w3-claude-code-host.mjs`, fixture `w3-claude-code-host*.jsonl`)
+
+Claude Code 2.1.283 in `-p --input-format stream-json --output-format stream-json --permission-prompt-tool stdio`
+(the MAWS wiring, through `spikes/protocol-probe/harness.mjs`), model Sonnet, `--strict-mcp-config` with the shim as
+the only server, no settings files. The harness accepted only approvals whose message named TextEdit and allowed only
+`mcp__cua_repl__*` tools. The prompt gave the goal, not the API: read the document, append " Hello from Claude Code."
+at the end, save, screenshot and describe, quit.
+
+Result [V]: `success` in 6 turns, 5 `js` calls, 29.6 s, $0.39.
+- `system/init` listed `mcp__cua_repl__js` and `mcp__cua_repl__js_reset` directly; no `ToolSearch` call occurred. So
+  the `anthropic/alwaysLoad` marker the shim injects is enough; no host config is needed.
+- Claude Code advertised `capabilities: {roots:{listChanged:true}, elicitation:{}}` and
+  `clientInfo {name:"claude-code", version:"2.1.283"}` (shim journal).
+- The elicitation arrived as `control_request` subtype `elicitation` (`mcp_server_name: "cua_repl"`, `mode: "form"`,
+  empty schema); one prompt, then the approval persisted as `sessions/<claude session id>.toml`. The shim took the
+  session id from `CLAUDE_CODE_SESSION_ID` in the server's environment, which Claude Code sets at spawn.
+- The first `js` result delivered OpenAI's 18,789-character API document plus the AX tree; the model learned the API
+  from it and wrote correct code on the first try (`cua.getApp`, `click(2)`, `pressKey("super+Down")`, `typeText`,
+  `pressKey("super+s")`, `getAXState`, `getScreenshot`, `listApps`).
+- The screenshot reached the model as an `image/jpeg` block, followed by Claude Code's `[Image: source: …]` note
+  pointing at the persisted file.
+- On disk afterwards: `MAWS computer-use probe document.\n Hello from Claude Code.`; TextEdit not running.
+- 5 `can_use_tool` escalations (one per call), all allowed by the harness; in interactive Claude Code these would be
+  permission prompts unless `mcp__cua_repl__js` is allowed in settings.
+
+### 7. Claude Code 2.1.283 headless, run 2 (`w3-claude-code-host-2.mjs`, fixture `w3-claude-code-host-2*.jsonl`)
+
+A harder in-envelope task on an RTF document: select the first line, make it bold through the menu bar (Format > Font >
+Bold), confirm through AX, save, quit, report the menu items used. Plus a `Stop` hook of type `mcp_tool` registered
+through `--settings` that calls `cua_repl.turn_ended` with `${session_id}` and `${prompt_id}`.
+
+Result [V]: `success` in 13 turns, 12 `js` calls, 66 s, $0.43.
+- Menu navigation through AX indices worked on the Korean menu bar: the model clicked 포맷 (Format), then 서체 (Font),
+  then 볼드체 (Bold), after `selectText(2, "First line of the probe.")`. The saved RTF carries `\b` on the first line
+  and `\b0` before the second.
+- The `Stop` hook fired once and reached the wire as `tools/call turn_ended {hook_event_name:"Stop", session_id:<claude
+  session id>, turn_id:<prompt_id>}`, answered `{}`; the hook reported success. `mcp_tool` hooks against a
+  `--mcp-config` server therefore work for the cleanup contract (06 H14).
+- A gotcha surfaced and the model recovered on its own: after `super+q`, a check through the stale app handle called
+  `get_app_state`, which relaunches the app if needed (03 §2.3). TextEdit came back with an Open panel, which blocked
+  `super+q`; the model read the tree, clicked the panel's 취소 (Cancel) button (index 72) and quit again. Seven of the
+  twelve calls were this recovery. The model instructions for MAWS should say: after quitting an app, drop its handle
+  and verify with `cua.listApps()`.
+- No screenshot was taken in this run (the model relied on AX alone), so `imagesToModel` was 0.
+
+### What wave 3 settles
+
+- Route 1 works end to end under a real Claude Code 2.1.283 host, headless, with a 100-line shim and no changes to
+  Claude Code, OpenAI's binaries or the user's `~/.codex`. Both tasks completed; total cost under $1.
+- Of README §8's rows, these are now verified live under Claude Code: launch and start budget (the shim initialized in
+  well under a second); bare `elicitation:{}` end to end including the headless `control_request`; session metadata and
+  `persist` (supplied by the shim); image blocks to the model with correct MIME; `js` directly visible through
+  `anthropic/alwaysLoad`; `turn_ended` through a Stop `mcp_tool` hook.
+- Still open from §8: the coordinate multiplier on downscaled screenshots (both windows here were small), the
+  interrupt path (`notifications/cancelled` was not exercised), and `SubagentStop`.
+
 ## Not tested
 
-- A real Claude Code 2.1.283 host (stream-json `elicitation` control requests, ToolSearch deferral, `mcp_tool` hooks).
+- Under Claude Code: an interrupt mid-call (`notifications/cancelled`), `SubagentStop`, interactive-mode dialogs, and a downscaled (>2000 px) screenshot's coordinate multiplier.
 - The Esc/overlay path and `userIntervened`.
 - Screen-lock behavior.
 - The Apple Event control plane (`SkCu/SndR`).
