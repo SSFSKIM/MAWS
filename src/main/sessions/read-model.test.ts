@@ -176,6 +176,29 @@ describe('digest liveness', () => {
     expect(current().phase).toBe('exited');
   });
 
+  it('a crash through C3’s stop ladder reads failed with the final turn’s end: exiting is still live for the fold', () => {
+    src.writer.applyEngineStatus(status(A, { process: 'ready', engineState: 'running', turn: humanTurn }));
+    src.writer.fold(A, [ev('turn.started', { at: '2026-09-28T10:00:00Z' })]);
+    src.writer.applyEngineStatus(status(A, { process: 'exiting', engineState: 'running', turn: humanTurn }));
+    src.writer.fold(A, [ev('turn.ended', { at: '2026-09-28T10:01:00Z', isError: true, terminalReason: 'max_turns' }), ev('process.exited', { reason: 'crash' })]);
+    src.writer.applyEngineStatus(status(A, { process: 'exited', exit: { reason: 'crash' } }));
+    expect(current()).toMatchObject({ phase: 'failed', lastTurnEndedAt: '2026-09-28T10:01:00Z' });
+    expect(model.midTurnCount()).toBe(0); // the quit guard's set is unchanged: exiting never counts
+  });
+
+  it('the same crash under ready reads failed', () => {
+    src.writer.applyEngineStatus(status(A, { process: 'ready', engineState: 'running', turn: humanTurn }));
+    src.writer.fold(A, [ev('turn.started', {}), ev('turn.ended', { at: '2026-09-28T10:01:00Z' }), ev('process.exited', { reason: 'crash' })]);
+    src.writer.applyEngineStatus(status(A, { process: 'exited', exit: { reason: 'crash' } }));
+    expect(current()).toMatchObject({ phase: 'failed', lastTurnEndedAt: '2026-09-28T10:01:00Z' });
+  });
+
+  it('without a live process a backfilled child start does not show an active child', () => {
+    seed('exited');
+    src.writer.fold(A, [ev('subagent.started', { seq: null })]);
+    expect(current().childAgents).toEqual({ active: 0, done: 0 });
+  });
+
   it('a C4 replay run the host is playing folds in full, and keeps its last state once done', () => {
     seed('exited');
     src.writer.observeReplay(A);

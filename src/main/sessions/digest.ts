@@ -156,9 +156,10 @@ function foldWithLedger(prev: SessionDigest, event: SessionEvent, ledger: CostLe
 // order.
 //
 // Liveness: `live` says the session has a live process (the read model's call: an engine status in starting,
-// initializing or ready, or a replay run the host plays). Without one the events are history — C4 following or
-// backfilling a transcript nobody here runs — and move only the last line, context, child agents and pending count,
-// never the phase, activity or turn times, so replayed history never turns a done or foreign session idle.
+// initializing, ready or exiting, or a replay run the host plays). Without one the events are history — C4 following or
+// backfilling a transcript nobody here runs — and move only the last line, context and pending count, never the
+// phase, activity, turn times or child agents, so replayed history never turns a done or foreign session idle or
+// gives it an active child.
 export function foldEvents(
   prev: SessionDigest,
   seen: Set<string>,
@@ -173,7 +174,9 @@ export function foldEvents(
     if (seen.size > SEEN_WINDOW) seen.delete(seen.values().next().value as string);
     Object.assign(ledger, foldCost(ledger, event));
     const next = foldWithLedger(digest, event, ledger);
-    digest = live ? next : { ...next, phase: digest.phase, activity: digest.activity, turnStartedAt: digest.turnStartedAt, lastTurnEndedAt: digest.lastTurnEndedAt };
+    digest = live
+      ? next
+      : { ...next, phase: digest.phase, activity: digest.activity, turnStartedAt: digest.turnStartedAt, lastTurnEndedAt: digest.lastTurnEndedAt, childAgents: digest.childAgents };
   }
   return digest;
 }

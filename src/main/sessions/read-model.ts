@@ -41,6 +41,7 @@ interface ReadModelEvents {
 }
 
 const LIVE = new Set<EngineSessionStatus['process']>(['starting', 'initializing', 'ready']);
+const FOLD_LIVE = new Set<EngineSessionStatus['process']>([...LIVE, 'exiting']);
 const LAUNCHING = new Set<EngineSessionStatus['process']>(['starting', 'initializing']);
 
 export class SessionReadModel {
@@ -156,10 +157,11 @@ export class SessionReadModel {
     this.fire('digest', committed);
   }
 
-  // Liveness (digest.ts `foldEvents`): the process table's truth, as the quit guard reads it.
+  // Liveness (digest.ts `foldEvents`): the process table's truth. Unlike the quit guard's set it includes `exiting`: C3's
+  // stop ladder sets it before the process dies, and the final turn end and the exit are journalled after it.
   private live(appSessionId: AppSessionId): boolean {
     const status = this.statuses.get(appSessionId);
-    return (status !== undefined && LIVE.has(status.process)) || this.replays.has(appSessionId);
+    return (status !== undefined && FOLD_LIVE.has(status.process)) || this.replays.has(appSessionId);
   }
 
   private current(appSessionId: AppSessionId): SessionDigest {
