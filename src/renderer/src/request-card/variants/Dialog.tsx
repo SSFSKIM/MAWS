@@ -18,10 +18,11 @@ import { initiatingPrompt } from '../initiating-prompt';
 import { declaredDialog, type AutoModeServerFallbackPayload, type RefusalFallbackPayload } from './dialog-kinds';
 import type { VariantProps } from './types';
 
-// The session's transcript as the store holds it; hydrated for the read when no view has it (an Overview card).
+// The session's transcript as the store holds it, attached for the read: `ipcSource` is memoised per key, so a mounted
+// view's attachment is shared (counted, already hydrated), and with no holder the key hydrates again from the source.
+// A kept `live` entry alone is not current: the store keeps it after its last holder detaches, and stops following.
 async function captureInitiatingPrompt(appSessionId: AppSessionId): Promise<Prefill | null> {
   const read = () => initiatingPrompt(useTranscriptStore.getState().rows(appSessionId), useTranscriptStore.getState().activity(appSessionId));
-  if (useTranscriptStore.getState().entries[appSessionId]?.phase === 'live') return read();
   await useTranscriptStore.getState().attach(appSessionId, ipcSource(appSessionId));
   try {
     return read();

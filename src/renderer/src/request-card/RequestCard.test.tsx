@@ -13,15 +13,15 @@ import { useAttention } from '../stores/attention';
 import { resetComposerStore, useComposerStore } from '../stores/composer';
 import { useNotices } from '../stores/notices';
 import { resetShellStores } from '../test-support/shell-stores';
-import { useTranscriptStore } from '../transcript';
+import { ipcSource, useTranscriptStore } from '../transcript';
 import { builder, uuid } from '../transcript/model/test-events';
-import type { TranscriptSource } from '../transcript/source/types';
 import { RequestCard, type Placement } from './RequestCard';
 import { fixtureRequest, itemFor, permission, syntheticRequest, type RequestEvent } from './test-requests';
 
 const APP = 'app-test' as AppSessionId;
 let fake: FakeClient;
 let outcome: 'delivered' | 'not_pending' | 'write_failed' = 'delivered';
+let sessionEvents: SessionEvent[] = []; // what `session.events` answers for APP (the transcript's IPC source)
 let disconnect: () => void;
 
 beforeEach(() => {
@@ -29,7 +29,8 @@ beforeEach(() => {
   resetComposerStore();
   useNotices.setState({ notices: [] });
   outcome = 'delivered';
-  fake = fakeClient({ 'session.answer': () => ({ outcome }) });
+  sessionEvents = [];
+  fake = fakeClient({ 'session.answer': () => ({ outcome }), 'session.events': () => ({ events: sessionEvents, lastSeq: sessionEvents.length, complete: true }) });
   window.maws = fake.client;
   disconnect = connectKeys();
 });
@@ -152,10 +153,8 @@ describe('dialog variants answer the two declared kinds and leave an undeclared 
 });
 
 describe('edit prompt restores the initiating prompt', () => {
-  async function transcript(events: SessionEvent[]) {
-    const source: TranscriptSource = { subscribe: () => () => {}, snapshot: () => Promise.resolve(events) };
-    await act(() => useTranscriptStore.getState().attach(APP, source));
-  }
+  // The session's history as its IPC source answers it; the card hydrates from that source for the read.
+  const transcript = (events: SessionEvent[]) => void (sessionEvents = events);
 
   it('captures the newest human prompt with its pasted body and image, answers edit_prompt, and prefills after delivery', async () => {
     const b = builder();
@@ -175,7 +174,7 @@ describe('edit prompt restores the initiating prompt', () => {
       bash: null,
     });
     b.text('msg-r', 0, 'I will not do that.'); // the retracted assistant rows follow the prompt
-    await transcript(b.events);
+    transcript(b.events);
 
     outcome = 'delivered';
     mount(refusal, 'inline');
@@ -189,10 +188,25 @@ describe('edit prompt restores the initiating prompt', () => {
     expect(prefill.editing).toEqual({ messageUuid: 'u-1', seenCursor: 'u-1' });
   });
 
+  it('reads the prompt as the source holds it now, not a view mounted earlier and since closed', async () => {
+    const b = builder();
+    b.turn('u-1', 'first prompt');
+    b.end(['u-1']);
+    transcript([...b.events]);
+    await act(() => useTranscriptStore.getState().attach(APP, ipcSource(APP))); // a view mounted, then closed:
+    act(() => useTranscriptStore.getState().detach(APP)); // the store keeps its entry, and stops following
+    b.turn('u-2', 'the newer prompt');
+    transcript([...b.events]);
+    mount(refusal, 'inline');
+    fireEvent.click(screen.getByRole('button', { name: 'Edit prompt' }));
+    await waitFor(() => expect(useComposerStore.getState().prefills.get(APP)).toBeDefined());
+    expect(useComposerStore.getState().prefills.get(APP)).toMatchObject({ text: 'the newer prompt', editing: { messageUuid: 'u-2', seenCursor: 'u-2' } });
+  });
+
   it('prefills nothing until the answer is delivered', async () => {
     const b = builder();
     b.turn('u-1', 'fix the build');
-    await transcript(b.events);
+    transcript(b.events);
     outcome = 'write_failed';
     mount(refusal, 'inline');
     fireEvent.click(screen.getByRole('button', { name: 'Edit prompt' }));
@@ -203,7 +217,7 @@ describe('edit prompt restores the initiating prompt', () => {
   it('with no human prompt in the transcript the answer is still delivered and says there is nothing to edit', async () => {
     const b = builder();
     b.turn('p-1', 'a message from a peer', 'peer');
-    await transcript(b.events);
+    transcript(b.events);
     mount(refusal, 'inline');
     fireEvent.click(screen.getByRole('button', { name: 'Edit prompt' }));
     await waitFor(() => expect(answers()).toEqual([{ kind: 'dialog', behavior: 'completed', result: 'edit_prompt' }]));
