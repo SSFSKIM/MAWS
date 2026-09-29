@@ -11,7 +11,9 @@ export const MIGRATIONS: readonly Migration[] = [
     version: 1,
     // The five tables of §4.4 as amended: what the engine does not hold. `sessions.summary` (beyond the document's
     // column list, advisory) keeps the last TranscriptSummary whole, so `SessionStore.summaries()` answers what discovery
-    // said without a column per fact; the named columns stay for queries and the Title rule.
+    // said without a column per fact; the named columns stay for queries and the Title rule. `sessions.removed_at` marks
+    // an archive made by `fs.sessionRemoved` (not the owner's), which a returning transcript lifts (whole-branch review;
+    // v1 is unshipped, so it is part of v1).
     sql: `
 CREATE TABLE projects (id TEXT PRIMARY KEY, directory TEXT NOT NULL UNIQUE, name TEXT NOT NULL, slug TEXT NOT NULL,
   origin TEXT NOT NULL CHECK (origin IN ('user','discovered')), hidden INTEGER NOT NULL DEFAULT 0, sort_order INTEGER NOT NULL DEFAULT 0,
@@ -23,7 +25,7 @@ CREATE TABLE sessions (app_id TEXT PRIMARY KEY, engine_session_id TEXT UNIQUE, p
   engine_version TEXT, gateway_routed INTEGER NOT NULL DEFAULT 1, gateway_base_url TEXT, gateway_auto_mode_server TEXT NOT NULL DEFAULT 'unknown',
   model_requested TEXT, model_resolved TEXT, effort TEXT, pm_requested TEXT NOT NULL DEFAULT 'auto', pm_effective TEXT NOT NULL DEFAULT 'auto', pm_refusal TEXT,
   transcript_path TEXT, transcript_size INTEGER, transcript_mtime_ms REAL, first_record_at TEXT, last_record_at TEXT, last_assistant_text TEXT, first_prompt TEXT,
-  summary TEXT,
+  summary TEXT, removed_at TEXT,
   kind TEXT NOT NULL DEFAULT 'engine' CHECK (kind IN ('engine','replay')), created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE INDEX sessions_project ON sessions(project_id, archived, last_record_at DESC);
 CREATE TABLE attention_items (id TEXT PRIMARY KEY, app_session_id TEXT NOT NULL REFERENCES sessions(app_id) ON DELETE CASCADE, session_id TEXT,

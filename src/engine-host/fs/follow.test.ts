@@ -503,6 +503,35 @@ describe('a followed session backfills, then tails its transcript', () => {
     expect((await fs.eventsSnapshot(APP, null)).events.every((e) => e.sessionId === S1)).toBe(true);
   });
 
+  // Whole-branch review: the first start resolves while a later start (after A → B → A) holds its key and names the
+  // same transcript. Only the start that owns the key may store its follower; the displaced one is stopped, not stored
+  // (stored, it would be overwritten by the owner's and keep running unreachable).
+  it('a rebind A → B → A while the first follower is still starting stores only the last start; the first is stopped', async () => {
+    await fixture.addTranscript(REWIND_DIR, REWIND, rewindLines);
+    await fixture.addTranscript('/work/cleared', S1, [JSON.stringify({ type: 'user', uuid: 'n1', parentUuid: null, cwd: '/work/cleared', message: { role: 'user', content: 'after the clear' } })]);
+    const fs = await start();
+    await fs.scan([]);
+    fs.bind([{ sessionId: REWIND, appSessionId: APP }]);
+    const first = fs.eventsSnapshot(APP, null); // start 1 on A, in flight
+    const toB = fs.bind([{ sessionId: S1 as SessionId, appSessionId: APP }]); // start 2 on B
+    const backToA = fs.bind([{ sessionId: REWIND, appSessionId: APP }]); // start 3 on A
+    const stale = await first;
+    await Promise.all([toB, backToA]);
+    await settled();
+    // Three followers started; two were stopped (B's by the move back, the first A's on resolving), one stands.
+    const states = events('fs.followState').filter((s) => s.appSessionId === APP).map((s) => s.state);
+    expect(states.filter((s) => s === 'backfilling')).toHaveLength(3);
+    expect(states.filter((s) => s === 'stopped')).toHaveLength(2);
+    expect(stale.events).toEqual([]); // the displaced start answered from a stopped follower
+    expect(fs.state().followed).toEqual([{ appSessionId: APP, agentId: null }]);
+    const now = await fs.eventsSnapshot(APP, null);
+    expect(now.complete).toBe(true);
+    expect(now.events.every((e) => e.sessionId === REWIND)).toBe(true);
+    // Unfollowing stops the one that stands, and nothing is left running: no follower of the app id reports again.
+    await fs.unfollow(APP, null);
+    expect(events('fs.followState').filter((s) => s.appSessionId === APP && s.state === 'stopped')).toHaveLength(3);
+  });
+
   it('reads a terminal rewind (no anchor) as boundary.rewind with one registry holder or none, and as a second writer with two', async () => {
     const TERMINAL = 'a76ad588-e4b4-4a99-bf4e-69287514916f' as SessionId;
     const lines = readFileSync(join(TRANSCRIPT_FIXTURE_DIR, 'rewind-terminal.jsonl'), 'latin1').split('\n').filter((l) => l.length > 0).slice(0, 48);

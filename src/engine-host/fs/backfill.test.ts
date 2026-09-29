@@ -5,7 +5,7 @@ import { SessionEventSchema, type SessionEvent } from '@shared/graph/events';
 import type { AgentId, ParentToolUseId, SessionId } from '@shared/graph/ids';
 import { AgentMetaSchema, currentChain, parseTranscriptRecord, type TranscriptRecord } from '@shared/wire/transcript';
 import { FIXTURE_DIR, loadTranscript, loadTranscriptFixture } from '../../../test/support/fixtures';
-import { createBackfillContext, recordToEvents, SPILL_MARKER, type BackfillContext, type SubagentLookup } from './backfill';
+import { createBackfillContext, recordToEvents, SPILL_MARKER, startsTurn, type BackfillContext, type SubagentLookup } from './backfill';
 
 const SESSION = 'S' as SessionId;
 const SIDECAR_DIR = join(FIXTURE_DIR, 'subagent-sidecars');
@@ -153,6 +153,36 @@ describe('transcript records map to X1 events', () => {
     const compactions = only(events, 'boundary.compaction');
     expect(compactions[0]).toMatchObject({ trigger: 'auto', preTokens: 150000, postTokens: null, logicalParentUuid: 's3', historical: true, at: at(4) });
     expect(compactions[1]).toMatchObject({ trigger: 'manual', preTokens: 0, logicalParentUuid: null, at: at(4) }); // no timestamp: the previous event's `at`
+  });
+
+  // C6's second whole-branch-review ask: the marker the engine writes after an interrupt is an ordinary `user` record on
+  // disk; it belongs to the interrupted turn, as C3's normaliser tags it on the wire, and opens none.
+  it('an interrupt marker, string or array form, is a user.message tagged interrupt-marker that opens no turn', () => {
+    const events = mapAll([
+      rec({ type: 'user', uuid: 'u1', parentUuid: null, cwd: '/d', timestamp: at(0), message: { role: 'user', content: 'go' } }),
+      rec({ type: 'user', uuid: 'm1', parentUuid: 'u1', timestamp: at(1), message: { role: 'user', content: '[Request interrupted by user]' } }),
+      rec({ type: 'user', uuid: 'm2', parentUuid: 'm1', timestamp: at(2), message: { role: 'user', content: [{ type: 'text', text: '[Request interrupted by user for tool use]' }] } }),
+      rec({ type: 'user', uuid: 'm3', parentUuid: 'm2', timestamp: at(3), message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't1', content: 'stopped', is_error: true }, { type: 'text', text: '[Request interrupted by user for tool use]' }] } }),
+      rec({ type: 'user', uuid: 'u2', parentUuid: 'm3', timestamp: at(4), message: { role: 'user', content: 'Not a marker: [Request interrupted by user]' } }),
+    ]);
+    expect(only(events, 'turn.started').map((e) => e.userMessageUuid)).toEqual(['u1', 'u2']);
+    expect(only(events, 'user.message').map((e) => [e.messageUuid, e.origin, e.isSynthetic])).toEqual([
+      ['u1', null, false], ['m1', 'interrupt-marker', false], ['m2', 'interrupt-marker', false], ['m3', 'interrupt-marker', false], ['u2', null, false],
+    ]);
+    expect(only(events, 'tool.result').map((e) => e.toolUseId)).toEqual(['t1']);
+    expect(startsTurn(rec({ type: 'user', uuid: 'm1', parentUuid: 'u1', message: { role: 'user', content: '[Request interrupted by user]' } }))).toBe(false);
+  });
+
+  it('the marker-carrying transcript from the owner\'s store: the turn count does not grow at the marker', () => {
+    const records = currentChain(loadTranscriptFixture('interrupt-marker')).chain;
+    const markerAt = records.findIndex((record) => JSON.stringify(record.message ?? null).includes('[Request interrupted by user]'));
+    expect(records[markerAt].uuid).toMatch(/^ae320688/);
+    const ctx = createBackfillContext({ sessionId: SESSION, agent: null });
+    const before = mapAll(records.slice(0, markerAt), ctx);
+    const atMarker = mapAll([records[markerAt]], ctx);
+    expect(only(before, 'turn.started').map((e) => e.userMessageUuid?.slice(0, 8))).toEqual(['1354a3a3']);
+    expect(kinds(atMarker)).toEqual(['user.message']);
+    expect(atMarker[0]).toMatchObject({ origin: 'interrupt-marker', isSynthetic: false, content: [{ type: 'text', text: '[Request interrupted by user]' }] });
   });
 });
 

@@ -68,7 +68,9 @@ export class GitService {
       if (scope !== 'all') throw new Error("base applies to scope 'all' only");
     }
     const range = base !== undefined ? [`${base}...HEAD`] : scope === 'staged' ? ['--cached'] : scope === 'all' ? ['HEAD'] : [];
-    const common = ['diff', '--no-color', '--no-ext-diff', '--no-textconv'];
+    // `git diff` refreshes a stale stat cache and rewrites the index through `index.lock` whatever GIT_OPTIONAL_LOCKS
+    // says (probed on Apple Git 2.50.1; `git status` honours it); `diff.autoRefreshIndex=false` turns that write off.
+    const common = ['-c', 'diff.autoRefreshIndex=false', 'diff', '--no-color', '--no-ext-diff', '--no-textconv'];
     const [patch, numstat] = await Promise.all([
       this.run(directory, [...common, `-U${context ?? 3}`, ...range, ...pathspec(path)]),
       this.run(directory, [...common, '--numstat', '-z', ...range, ...pathspec(path)]),

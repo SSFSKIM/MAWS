@@ -325,23 +325,22 @@ export class FsService {
     const key = followKey(appSessionId, agentId);
     const existing = this.follows.get(key);
     if (existing) return Promise.resolve(existing);
-    let starting = this.starting.get(key);
-    if (!starting) {
-      // A follower whose app id was rebound while it started (fs.bind) follows a transcript that is no longer the app
-      // session's: it is stopped, not stored.
-      starting = create().then((entry) => {
-        if (this.stopped || entry.sessionId !== this.bindings.sessionIdOf(appSessionId)) entry.follow.stop();
-        else this.follows.set(key, entry);
-        return entry;
-      });
-      this.starting.set(key, starting);
-      const started = starting;
-      const release = () => {
-        if (this.starting.get(key) === started) this.starting.delete(key); // a start after a rebind holds the key now
-      };
-      void started.then(release, release);
-    }
-    return starting;
+    const pending = this.starting.get(key);
+    if (pending) return pending;
+    // A start stores its follower only while it still owns its key: a rebind (fs.bind) releases the key, so a start
+    // it displaced is stopped, not stored — even when a later rebind names the same transcript again (A → B → A), whose
+    // own start holds the key now and stores its follower.
+    const started: Promise<FollowEntry> = create().then((entry) => {
+      if (this.stopped || this.starting.get(key) !== started || entry.sessionId !== this.bindings.sessionIdOf(appSessionId)) entry.follow.stop();
+      else this.follows.set(key, entry);
+      return entry;
+    });
+    this.starting.set(key, started);
+    const release = () => {
+      if (this.starting.get(key) === started) this.starting.delete(key); // a start after a rebind holds the key now
+    };
+    void started.then(release, release);
+    return started;
   }
 
   // The session's own transcript, with its agents listed first so the backfill's `Agent` tool uses find their metas,

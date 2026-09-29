@@ -56,6 +56,7 @@ interface SessionRow {
   last_assistant_text: string | null;
   first_prompt: string | null;
   summary: string | null;
+  removed_at: string | null; // set when fs.sessionRemoved archived the record (not the owner); cleared when it returns
   kind: 'engine' | 'replay';
   created_at: string;
   updated_at: string;
@@ -213,6 +214,12 @@ export class SessionStore {
         return { record: this.require(appId), created: true, advanced: false };
       }
 
+      // A transcript back after its removal (a relocation: removed, then seen at its new path) lifts the archive the
+      // removal made; an archive the owner made is theirs and stays.
+      if (existing.removed_at !== null) {
+        facts.archived = false;
+        facts.removed_at = null;
+      }
       // A terminal `/rename` after a MAWS rename wins: the override yields once the engine's custom title moves.
       if (existing.title_override !== null && summary.customTitle !== existing.title_override_engine_title) {
         facts.title_override = null;
@@ -225,12 +232,16 @@ export class SessionStore {
     });
   }
 
-  // `fs.sessionRemoved`: the transcript is gone (retention sweep, quarantine). The record stays, archived, with no path.
+  // `fs.sessionRemoved`: the transcript is gone (retention sweep, quarantine, the first half of a relocation). The
+  // record stays, archived, with no path; `removed_at` marks the archive as the removal's, so a transcript that comes
+  // back lifts it. A record the owner had archived already keeps the owner's archive, unmarked.
   markTranscriptRemoved(sessionId: SessionId): SessionRecord | null {
     return this.db.transaction(() => {
       const existing = this.db.get<SessionRow>('SELECT * FROM sessions WHERE engine_session_id = ?', sessionId);
       if (!existing) return null;
-      if (this.write(existing, { archived: true, transcript_path: null })) this.changed(existing.app_id as AppSessionId, 'facts');
+      const values: Record<string, Value> = { archived: true, transcript_path: null };
+      if (existing.archived === 0) values.removed_at = new Date().toISOString();
+      if (this.write(existing, values)) this.changed(existing.app_id as AppSessionId, 'facts');
       return this.require(existing.app_id as AppSessionId);
     });
   }
@@ -353,7 +364,10 @@ export class SessionStore {
         values.title_override = patch.title === null ? null : JSON.stringify({ text: patch.title.text, source: patch.title.source });
         values.title_override_engine_title = patch.title === null ? null : existing.custom_title;
       }
-      if (patch.archived !== undefined) values.archived = patch.archived;
+      if (patch.archived !== undefined) {
+        values.archived = patch.archived;
+        values.removed_at = null; // the owner's act owns the flag from now on
+      }
       if (patch.worktree !== undefined) {
         values.worktree_path = patch.worktree?.path ?? null;
         values.worktree_branch = patch.worktree?.branch ?? null;

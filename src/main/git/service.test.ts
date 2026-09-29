@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { statSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GitStatusSchema } from '@shared/ipc/schema/git';
@@ -116,6 +117,25 @@ describe('git service answers status, branches, diff and log', () => {
     expect(all.patch).toContain('@@ -1,0 +2,2 @@');
   });
 
+  // Final-wave probe (2026-09-29, Apple Git 2.50.1): `git diff` over a stale stat cache refreshes and rewrites the
+  // index through `index.lock` even under GIT_OPTIONAL_LOCKS=0, which `git status` honours and `git diff` does not;
+  // `diff.autoRefreshIndex=false` is the switch it reads.
+  it('never rewrites the index: a diff over a stale stat cache leaves .git/index untouched and still shows the real edit', async () => {
+    await repo.write('NOTES.md', 'notes\n');
+    await repo.git('add', 'NOTES.md');
+    await repo.git('commit', '-q', '-m', 'notes');
+    await repo.write('README.md', 'hello\nworld\n');
+    await repo.setMtime('NOTES.md', Math.floor(Date.now() / 1000) + 60); // stat-dirty, content clean
+    const index = statSync(join(repo.root, '.git', 'index'));
+    for (const scope of ['worktree', 'all'] as const) {
+      const diff = await service.diff({ directory: repo.root, scope });
+      expect(diff.patch).toContain('+world');
+      expect(diff.files.map((f) => f.path)).toEqual(['README.md']);
+    }
+    const after = statSync(join(repo.root, '.git', 'index'));
+    expect([after.ino, after.mtimeMs]).toEqual([index.ino, index.mtimeMs]);
+  });
+
   it('diffs a path alone, a rename with its source, and a binary file', async () => {
     await repo.write('other.txt', 'one\n');
     await repo.write('logo.bin', 'a\0b');
@@ -195,7 +215,11 @@ describe('git invocation is read-only', () => {
       expect(options).toMatchObject({ timeout: 10_000, maxBuffer: 64 * 1024 * 1024 });
       // Exactly this environment: the caller's GIT_DIR (or any other git variable) never reaches the child.
       expect(options.env).toEqual({ PATH: '/usr/bin:/bin', HOME: '/Users/nobody', GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0', LC_ALL: 'C' });
-      subcommands.add(args[2] === 'stash' || args[2] === 'remote' ? `${args[2]} ${args[3]}` : args[2]);
+      // The one configuration a call carries: every diff turns off its index refresh, which would write the index.
+      const rest = args[2] === '-c' ? args.slice(4) : args.slice(2);
+      if (rest[0] === 'diff') expect(args.slice(2, 4)).toEqual(['-c', 'diff.autoRefreshIndex=false']);
+      else expect(args[2]).not.toBe('-c');
+      subcommands.add(rest[0] === 'stash' || rest[0] === 'remote' ? `${rest[0]} ${rest[1]}` : rest[0]);
     }
     expect([...subcommands].sort()).toEqual(['diff', 'for-each-ref', 'log', 'remote get-url', 'rev-parse', 'stash list', 'status']);
   });

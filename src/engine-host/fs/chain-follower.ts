@@ -18,6 +18,7 @@ export interface Skeleton {
   type: string;
   isProgress: boolean;
   startsTurn: boolean; // a prompt that opens a turn (backfill's `startsTurn`): what the terminal-rewind rule reads boundaries by
+  endsTurn: boolean; // a `system/turn_duration` record, the one disk record that ends a turn (backfill's `turn.ended`)
   timestamp: string | null;
   offset: number; // byte position of the line (leading NULs included); re-reading [offset, offset + length) yields the record
   length: number;
@@ -147,6 +148,7 @@ class FollowerCore {
       type: record.type,
       isProgress: record.type === 'progress',
       startsTurn: startsTurn(record),
+      endsTurn: record.type === 'system' && record.subtype === 'turn_duration',
       timestamp: typeof record.timestamp === 'string' ? record.timestamp : null,
       offset,
       length: lineBytes.length,
@@ -323,7 +325,11 @@ class FollowerCore {
     return { targetMessageUuid: next, precedingAssistantUuid };
   }
 
+  // Once a re-read has met another file, nothing more of this pass is delivered or counted as delivered: the reload
+  // that follows delivers every chain record not in `emitted`, in chain order, so none is lost or delivered ahead of a
+  // record before it.
   private emit(record: TranscriptRecord, uuid: MessageUuid): void {
+    if (this.interrupted) return;
     this.produce(uuid, ...recordToEvents(record, this.ctx));
     this.emitted.add(uuid);
   }
@@ -337,18 +343,16 @@ class FollowerCore {
   // their bytes are not fetched).
   private async reemit(uuid: MessageUuid): Promise<void> {
     const skeleton = this.skeletons.get(uuid);
-    if (skeleton === undefined) return;
+    if (skeleton === undefined || this.interrupted) return;
     if (skeleton.type === 'attachment') {
       this.emitted.add(uuid);
       return;
     }
     const record = parseLine(await this.reader.read(skeleton.offset, skeleton.length));
     if (record !== null && record.uuid === uuid) this.emit(record, uuid);
-    else {
-      // The file changed under the read; the next poke's stat sees the rewrite (a reload in progress retries at once).
-      this.emitted.add(uuid);
-      this.interrupted = true;
-    }
+    // The file changed under the read (a rename-over): the record stays undelivered and the retry's stat sees the
+    // rewrite, whose reload delivers it (a reload in progress is abandoned and retried at once).
+    else this.interrupted = true;
   }
 
   // The engine re-points a record whose parent is a progress record to that record's parent (SPEC 35.12.3).
@@ -360,6 +364,29 @@ class FollowerCore {
       current = skeleton.parentUuid;
     }
     return current;
+  }
+
+  // The synthesised end of a transcript nobody is writing whose last turn on the chain never ended (C6's ask): the
+  // process is gone and was not seen to go, so `process.exited { reason: 'unknown' }` at the last record's time, where a
+  // synthetic `turn.ended` would invent a result. Null when the chain's last turn ended or none started.
+  unendedTurnExit(): SessionEvent | null {
+    for (let i = this.chain.length - 1; i >= 0; i--) {
+      const skeleton = this.skeletons.get(this.chain[i]);
+      if (skeleton?.endsTurn) return null;
+      if (!skeleton?.startsTurn) continue;
+      const at = (this.leaf === null ? null : this.skeletons.get(this.leaf)?.timestamp) ?? this.ctx.lastAt;
+      return {
+        ...eventBase(this.ctx, `session:${this.ctx.sessionId}:exited`),
+        at,
+        agentId: null,
+        kind: 'process.exited',
+        code: null,
+        signal: null,
+        reason: 'unknown',
+        lostAttentionCount: 0,
+      };
+    }
+    return null;
   }
 
   // The rewind continuation walk: from `parent` up through the skeletons to the announced leaf without crossing a
@@ -407,6 +434,7 @@ export class ChainFollower {
   // delivered carries `<base>@<g>`, so the delivery log never holds an id twice and a consumer deduplicates by id alone.
   private readonly deliveries = new Map<string, number>();
   private startedDelivered = false; // `session.started` goes out at most once per follow
+  private backfillEnded = false; // the first complete read of this follow has happened
 
   constructor(
     private readonly reader: FileReader,
@@ -426,7 +454,10 @@ export class ChainFollower {
       this.report('backfilling');
       try {
         const outcome = await this.sync(true);
-        if (outcome === 'complete' || outcome === 'absent') this.report('following'); // a missing file waits, following
+        if (outcome === 'complete' || outcome === 'absent') {
+          this.endBackfill(); // a missing file ends it too: a transcript that appears later is being written now
+          this.report('following'); // a missing file waits, following
+        }
       } catch (error) {
         this.report('error', messageOf(error));
       }
@@ -437,7 +468,10 @@ export class ChainFollower {
     return this.enqueue(async () => {
       if (this.stopped) return;
       try {
-        if ((await this.sync(false)) === 'complete') this.report('following');
+        if ((await this.sync(false)) === 'complete') {
+          this.endBackfill(); // a start whose every read was interrupted ends its backfill here
+          this.report('following');
+        }
       } catch (error) {
         this.report('error', messageOf(error));
       }
@@ -453,6 +487,18 @@ export class ChainFollower {
     this.deliveries.clear();
     this.startedDelivered = false;
     this.report('stopped');
+  }
+
+  // After the backfill's last record, once per follow: a session's own transcript that no live process holds and whose
+  // last turn never ended (SDK entrypoints write no `turn_duration`) gets the synthesised exit. A holder that appears
+  // later changes nothing here; the live producer (C3) owns the session's ending from then on. An agent's transcript
+  // carries none: the process is its parent session's.
+  private endBackfill(): void {
+    if (this.backfillEnded || this.stopped) return;
+    this.backfillEnded = true;
+    if (this.agent !== null || (this.options.holders?.() ?? 0) > 0) return;
+    const exit = this.core.unendedTurnExit();
+    if (exit !== null) this.deliver([{ source: null, group: 0, event: exit }]);
   }
 
   snapshot(): FollowerState {

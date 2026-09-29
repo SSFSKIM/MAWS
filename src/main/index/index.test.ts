@@ -42,6 +42,14 @@ describe('the index opens, migrates and refuses what it cannot own', () => {
     expect(index.applied).toEqual([1]);
     expect(MIGRATIONS).toHaveLength(1);
     expect(inspect(path)).toEqual({ version: 1, tables: ['attention_items', 'drafts', 'projects', 'replay_fixtures', 'sessions'], mode: 'wal' });
+    // v1 is unshipped, so the removal mark (whole-branch review) is part of it rather than a v2.
+    const db = new DatabaseSync(path, { readOnly: true });
+    try {
+      const columns = (db.prepare('PRAGMA table_info(sessions)').all() as { name: string; type: string; notnull: number }[]).map((c) => [c.name, c.type, c.notnull]);
+      expect(columns).toContainEqual(['removed_at', 'TEXT', 0]);
+    } finally {
+      db.close();
+    }
   });
 
   it('opening it again runs no migration and keeps its rows', () => {

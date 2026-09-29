@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { SessionEventSchema, type SessionEvent } from '@shared/graph/events';
-import type { SessionId } from '@shared/graph/ids';
+import type { AgentId, MessageUuid, SessionId } from '@shared/graph/ids';
 import { currentChain } from '@shared/wire/transcript';
 import { loadSyntheticTranscript, loadTranscriptFixture, TEST_FIXTURE_DIR, TRANSCRIPT_FIXTURE_DIR } from '../../../test/support/fixtures';
 import { MemoryFileReader } from '../../../test/support/memory-reader';
@@ -55,10 +55,12 @@ function expectWellFormed(events: SessionEvent[]): void {
   }
 }
 
+// A follow of a session some process is writing (one live holder): what these suites exercise. The holder-less end
+// of a backfill has its own suite below.
 async function started(bytes: Buffer, sessionId: SessionId = SESSION): Promise<{ reader: MemoryFileReader; follower: ChainFollower; out: Collector }> {
   const reader = new MemoryFileReader(bytes);
   const out = new Collector();
-  const follower = new ChainFollower(reader, sessionId, null, out.sink);
+  const follower = new ChainFollower(reader, sessionId, null, out.sink, { holders: () => 1 });
   await follower.start();
   return { reader, follower, out };
 }
@@ -423,6 +425,83 @@ describe('a terminal rewind without an anchor', () => {
   }
 });
 
+// C6's whole-branch-review ask: SDK-entrypoint sessions write no `turn_duration`, so a backfilled session nobody is
+// running would otherwise end on a turn that never ends. The follower states the one true fact it has instead.
+describe('a holder-less transcript whose last turn never ended', () => {
+  const SDK = '6eff2bf4-616c-40b7-9928-f60df666cdfe' as SessionId;
+  const SDK_LINES = linesOf(join(TRANSCRIPT_FIXTURE_DIR, 'sdk-unended.jsonl'));
+  const follow = async (bytes: Buffer, sessionId: SessionId, holders: number | null, agent: ConstructorParameters<typeof ChainFollower>[2] = null) => {
+    const reader = new MemoryFileReader(bytes);
+    const out = new Collector();
+    const follower = new ChainFollower(reader, sessionId, agent, out.sink, holders === null ? {} : { holders: () => holders });
+    await follower.start();
+    return { reader, follower, out };
+  };
+
+  it('ends its backfill with one process.exited { reason: unknown } at the last record, and never again in that follow', async () => {
+    const { reader, follower, out } = await follow(joined(SDK_LINES), SDK, 0);
+    const events = out.events();
+    expectWellFormed(events);
+    expect(out.of('turn.started')).toHaveLength(1);
+    expect(out.of('turn.ended')).toEqual([]);
+    const leafAt = follower.snapshot().skeletons.get(follower.snapshot().leaf!)!.timestamp;
+    expect(leafAt).toBe('2026-09-27T07:00:30.639Z');
+    expect(events.at(-1)).toEqual({
+      id: `session:${SDK}:exited`, sessionId: SDK, at: leafAt, seq: null, agentId: null, parentToolUseId: null,
+      kind: 'process.exited', code: null, signal: null, reason: 'unknown', lostAttentionCount: 0,
+    });
+    // Delivered after the backfill's records and before `following`.
+    const order = out.received.flatMap((e) => (e.t === 'state' ? [e.state] : e.t === 'events' && e.events.some((x) => x.kind === 'process.exited') ? ['exited'] : []));
+    expect(order).toEqual(['backfilling', 'exited', 'following']);
+    // A later append and a later poke deliver nothing to undo it, and no second exit.
+    reader.append(joined([line({ type: 'user', uuid: 'later', parentUuid: follower.snapshot().leaf, timestamp: at(9), message: { role: 'user', content: 'again' } })]));
+    await follower.poke();
+    await follower.poke();
+    expect(out.of('process.exited')).toHaveLength(1);
+    expect(follower.materialized().filter((e) => e.kind === 'process.exited')).toHaveLength(1);
+  });
+
+  it('unsupplied holders count as none', async () => {
+    const { out } = await follow(joined(SDK_LINES), SDK, null);
+    expect(out.of('process.exited')).toHaveLength(1);
+  });
+
+  it('emits nothing while a live holder has it: the live producer (C3) or the terminal owns its ending', async () => {
+    expect((await follow(joined(SDK_LINES), SDK, 1)).out.of('process.exited')).toEqual([]);
+    // The anchored (headless, no turn_duration) and the terminal fixtures, each with a live holder.
+    expect((await follow(joined(REWIND_LINES), SESSION, 1)).out.of('process.exited')).toEqual([]);
+    const terminal = linesOf(join(TRANSCRIPT_FIXTURE_DIR, 'rewind-terminal.jsonl'));
+    expect((await follow(joined(terminal), 'a76ad588-e4b4-4a99-bf4e-69287514916f' as SessionId, 1)).out.of('process.exited')).toEqual([]);
+  });
+
+  it('emits nothing when the last turn ended, or when no turn ever started', async () => {
+    const ended = joined([
+      line({ type: 'user', uuid: 'u1', parentUuid: null, cwd: '/d', timestamp: at(0), message: { role: 'user', content: 'go' } }),
+      line({ type: 'assistant', uuid: 'a1', parentUuid: 'u1', timestamp: at(1), message: { id: 'm1', model: 'x', content: [{ type: 'text', text: 'ok' }] } }),
+      line({ type: 'system', subtype: 'turn_duration', uuid: 's1', parentUuid: 'a1', durationMs: 5, timestamp: at(2) }),
+      line({ type: 'attachment', uuid: 'x1', parentUuid: 's1', timestamp: at(3), attachment: { type: 'prompt_snapshot' } }),
+    ]);
+    expect((await follow(ended, 'S' as SessionId, 0)).out.of('process.exited')).toEqual([]);
+    const noTurn = joined([line({ type: 'attachment', uuid: 'x1', parentUuid: null, cwd: '/d', timestamp: at(0), attachment: { type: 'environment' } })]);
+    expect((await follow(noTurn, 'S' as SessionId, 0)).out.of('process.exited')).toEqual([]);
+    expect((await follow(Buffer.alloc(0), 'S' as SessionId, 0)).out.of('process.exited')).toEqual([]);
+  });
+
+  it('an interrupt marker does not end the turn it belongs to: the interrupted session still exits', async () => {
+    const MARKER = '68646e1f-b5ba-4d72-bdae-3fd5f7f3ec46' as SessionId;
+    const { out } = await follow(joined(linesOf(join(TRANSCRIPT_FIXTURE_DIR, 'interrupt-marker.jsonl'))), MARKER, 0);
+    expect(out.of('turn.started')).toHaveLength(1);
+    expect(out.of('user.message').map((e) => e.origin)).toEqual([null, 'interrupt-marker']);
+    expect(out.of('process.exited').map((e) => e.id)).toEqual([`session:${MARKER}:exited`]);
+  });
+
+  it("an agent's own transcript (a sidecar follow) carries no process exit", async () => {
+    const { out } = await follow(joined(SDK_LINES), SDK, 0, { agentId: 'a1' as AgentId, parentToolUseId: null });
+    expect(out.of('turn.started')).toHaveLength(1);
+    expect(out.of('process.exited')).toEqual([]);
+  });
+});
+
 describe('survives torn tails and rewrites', () => {
   const TORN = readFileSync(join(TRANSCRIPT_FIXTURE_DIR, 'torn-tail.jsonl'));
   const TORN_RECORDS = loadTranscriptFixture('torn-tail');
@@ -562,6 +641,24 @@ describe('survives torn tails and rewrites', () => {
 });
 
 // A reader whose reads can be held open, so `stop` can land while a read is in flight.
+// A reader whose read at one armed offset first renames a rewrite over the file (the engine's GC), then reads the new
+// file there, as the fs reader would after reopening by path.
+class RenameOverReader extends MemoryFileReader {
+  renamed = false;
+  private armed: { offset: number; bytes: Buffer } | null = null;
+  renameOverAt(offset: number, bytes: Buffer): void {
+    this.armed = { offset, bytes };
+  }
+  override async read(offset: number, length: number): Promise<Buffer> {
+    if (this.armed !== null && this.armed.offset === offset) {
+      this.replace(this.armed.bytes);
+      this.armed = null;
+      this.renamed = true;
+    }
+    return super.read(offset, length);
+  }
+}
+
 class GatedReader extends MemoryFileReader {
   private release: (() => void) | null = null;
   hold(): void {
@@ -607,7 +704,7 @@ describe('stop cancels work in flight', () => {
   it('during poke: a read held across stop delivers nothing and clears what was materialised', async () => {
     const reader = new GatedReader(ONE);
     const out = new Collector();
-    const follower = new ChainFollower(reader, 'S' as SessionId, null, out.sink);
+    const follower = new ChainFollower(reader, 'S' as SessionId, null, out.sink, { holders: () => 1 });
     await follower.start();
     expect(follower.materialized()).toHaveLength(3);
     reader.append(TWO);
@@ -739,6 +836,31 @@ describe('retract-then-rejoin converges for a consumer that deduplicates by id a
     // u2's second delivery carries the occurrence id.
     expect(out.of('user.message').map((e) => [e.id, e.messageUuid])).toEqual([['u1#1', 'u1'], ['u2#1', 'u2'], ['u3#1', 'u3'], ['u2@2#1', 'u2'], ['u4#1', 'u4']]);
     expect(out.of('turn.started').map((e) => e.id)).toEqual(['u1', 'u2', 'u3', 'u2@2', 'u4']);
+    expect(converge(follower, out)).toEqual(['u1', 'u2', 'u4']);
+  });
+
+  // Whole-branch review: a GC rename-over racing a branch flip. The rejoining record's by-offset re-read meets the new
+  // file; the record must not count as delivered, so the reload that follows delivers it.
+  it('a rename-over during the re-read of a rejoining record loses nothing: the reload delivers it', async () => {
+    const record = (uuid: string, parent: string | null, n: number) => line({ type: 'user', uuid, parentUuid: parent, cwd: '/d', timestamp: at(n), message: { role: 'user', content: uuid } });
+    const mode = line({ type: 'permission-mode', permissionMode: 'default', sessionId: 'S' });
+    const reader = new RenameOverReader(joined([record('u1', null, 0), mode, record('u2', 'u1', 1), record('u3', 'u1', 2)]));
+    const out = new Collector();
+    const follower = new ChainFollower(reader, 'S' as SessionId, null, out.sink, { holders: () => 1 });
+    await follower.start();
+    expect(follower.snapshot().chain).toEqual(['u1', 'u3']);
+    const u2 = follower.snapshot().skeletons.get('u2' as MessageUuid)!;
+    // u4 flips the branch back onto u2, whose line is re-read by offset; the engine's GC renames a rewrite over the
+    // file (the bookkeeping line and the abandoned u3 dropped, so u2 sits elsewhere) just before that read.
+    reader.append(joined([record('u4', 'u2', 3)]));
+    reader.renameOverAt(u2.offset, joined([record('u1', null, 0), record('u2', 'u1', 1), record('u4', 'u2', 3)]));
+    await follower.poke();
+    expect(reader.renamed).toBe(true);
+    expect(follower.snapshot().chain).toEqual(['u1', 'u2', 'u4']);
+    expect(follower.snapshot().emitted).toEqual(new Set(['u1', 'u2', 'u4'] as MessageUuid[]));
+    // Nothing of the interrupted pass is delivered after the failed re-read; the reload delivers u2 then u4, in chain order.
+    expect(out.of('user.message').map((e) => e.id)).toEqual(['u1#1', 'u2#1', 'u3#1', 'u2@2#1', 'u4#1']);
+    expect(out.states().slice(-2)).toEqual(['reloading', 'following']);
     expect(converge(follower, out)).toEqual(['u1', 'u2', 'u4']);
   });
 

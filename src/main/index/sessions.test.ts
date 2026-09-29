@@ -330,6 +330,34 @@ describe('session records in the index', () => {
     expect(index.sessions.markTranscriptRemoved(sessionIdFor(12345))).toBeNull();
   });
 
+  // Whole-branch review: a relocation arrives as `fs.sessionRemoved` then `fs.sessionChanged` for the same session.
+  it('a transcript that reappears after its removal is un-archived; the owner\'s own archive is not', () => {
+    const s = summary();
+    const { record } = index.sessions.upsertFromSummary(s);
+    index.sessions.markTranscriptRemoved(s.sessionId);
+    const back = index.sessions.upsertFromSummary({ ...s, transcriptPath: '/moved/elsewhere.jsonl' });
+    expect(back.record).toMatchObject({ appId: record.appId, archived: false });
+    expect(index.sessions.list().map((r) => r.appId)).toEqual([record.appId]);
+    // A second removal and return behave the same (the mark is cleared on return, set again on removal).
+    index.sessions.markTranscriptRemoved(s.sessionId);
+    expect(index.sessions.upsertFromSummary(s).record.archived).toBe(false);
+
+    // The owner archived it: a removal and a return leave it archived.
+    index.sessions.update(record.appId, { archived: true });
+    index.sessions.markTranscriptRemoved(s.sessionId);
+    expect(index.sessions.upsertFromSummary(s).record.archived).toBe(true);
+    // The owner archived it while its transcript was gone: the owner's act, kept on return.
+    index.sessions.update(record.appId, { archived: false });
+    index.sessions.markTranscriptRemoved(s.sessionId);
+    index.sessions.update(record.appId, { archived: true });
+    expect(index.sessions.upsertFromSummary(s).record.archived).toBe(true);
+    // An archived record the owner never touched stays archived through summaries that do not follow a removal.
+    const other = summary({ sessionId: sessionIdFor(7) });
+    const created = index.sessions.upsertFromSummary(other).record;
+    index.sessions.update(created.appId, { archived: true });
+    expect(index.sessions.upsertFromSummary({ ...other, size: other.size + 1 }).record.archived).toBe(true);
+  });
+
   it('createReplay makes a kind replay record titled by the tool; remove deletes it and reports removed', () => {
     const appId = randomUUID() as AppSessionId;
     const record = index.sessions.createReplay({ appId, sessionId: 'rp_1' as SessionId, title: 'workflow' });

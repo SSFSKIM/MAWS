@@ -99,7 +99,7 @@ export class HolderRegistry {
   }
 
   // How many live processes hold this session, as last checked (one per pid, not the badge's newest-wins projection):
-  // the chain follower's terminal-rewind rule needs exactly one.
+  // the chain follower's terminal-rewind rule reads a terminal rewind only while at most one process holds it.
   liveCount(sessionId: SessionId): number {
     return this.live.filter((record) => record.sessionId === sessionId).length;
   }

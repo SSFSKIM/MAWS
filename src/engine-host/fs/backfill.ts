@@ -106,11 +106,16 @@ type Base = () => EventBase;
 function userEvents(record: TranscriptRecord, uuid: MessageUuid, ctx: BackfillContext, base: Base, events: SessionEvent[]): void {
   const content = messageContent(record);
   const isMeta = record.isMeta === true;
+  const marker = isInterruptMarker(record);
   const turn = (origin: string | null): void => {
-    if (isMeta) return;
+    if (isMeta || marker) return; // the marker belongs to the turn it interrupted
     ctx.lastTurnUserUuid = uuid;
     events.push({ ...base(), kind: 'turn.started', userMessageUuid: uuid, origin });
   };
+  if (typeof content === 'string' && marker) {
+    events.push({ ...base(), kind: 'user.message', messageUuid: uuid, content, isReplay: false, isSynthetic: isMeta, origin: 'interrupt-marker', bash: null });
+    return;
+  }
   if (typeof content === 'string') {
     const notification = parseTaskNotification(content);
     const origin = notification === null ? null : 'task-notification'; // X1's engine-initiated origin
@@ -141,7 +146,7 @@ function userEvents(record: TranscriptRecord, uuid: MessageUuid, ctx: BackfillCo
   const others = blocks.filter((block) => block.type !== 'tool_result');
   if (others.length > 0) {
     turn(null);
-    events.push({ ...base(), kind: 'user.message', messageUuid: uuid, content: others, isReplay: false, isSynthetic: isMeta, origin: null, bash: null });
+    events.push({ ...base(), kind: 'user.message', messageUuid: uuid, content: others, isReplay: false, isSynthetic: isMeta, origin: marker ? 'interrupt-marker' : null, bash: null });
   }
   const structured = record.toolUseResult ?? null;
   const persisted = (structured as { persistedOutputPath?: unknown } | null)?.persistedOutputPath;
@@ -286,15 +291,32 @@ function systemEvents(record: TranscriptRecord, ctx: BackfillContext, base: Base
   }
 }
 
-// A prompt that opens a turn: a `user` record, not `isMeta`, whose content is text or blocks with no tool result (a
-// tool result continues the turn its tool use is in). The follower's terminal-rewind rule reads turn boundaries by it.
+// A prompt that opens a turn: a `user` record, not `isMeta`, not an interrupt marker, whose content is text or blocks
+// with no tool result (a tool result continues the turn its tool use is in). The follower reads turn boundaries by it.
 export function startsTurn(record: TranscriptRecord): boolean {
-  if (record.type !== 'user' || record.isMeta === true) return false;
+  if (record.type !== 'user' || record.isMeta === true || isInterruptMarker(record)) return false;
   const content = messageContent(record);
   if (typeof content === 'string') return true;
   if (!Array.isArray(content)) return false;
   const blocks = content.filter(isContentBlock);
   return blocks.length > 0 && blocks.every((block) => block.type !== 'tool_result');
+}
+
+// The marker the engine writes after an interrupt (`[Request interrupted by user]`, `… for tool use`): C3's
+// `INTERRUPT_MARKER` (normalizer-support.ts), tested on the string content or on the joined text of the record's
+// non-result blocks when all of them are text (the array form is the common one on disk). C3's normaliser tags it
+// `origin: 'interrupt-marker'` on the wire; the backfill does the same, and it opens no turn.
+const INTERRUPT_MARKER = /^\[Request interrupted by user[^\]]*\]$/;
+function isInterruptMarker(record: TranscriptRecord): boolean {
+  if (record.type !== 'user') return false;
+  const content = messageContent(record);
+  let text: string | null = null;
+  if (typeof content === 'string') text = content;
+  else if (Array.isArray(content)) {
+    const others = content.filter(isContentBlock).filter((block) => block.type !== 'tool_result');
+    if (others.length > 0 && others.every((block) => block.type === 'text' && typeof block.text === 'string')) text = others.map((block) => block.text as string).join('');
+  }
+  return text !== null && INTERRUPT_MARKER.test(text.trim());
 }
 
 function messageContent(record: TranscriptRecord): unknown {
