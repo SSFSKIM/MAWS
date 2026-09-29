@@ -341,11 +341,13 @@ describe('terminal view', () => {
     const state = newState();
     render(<View state={state} ctx={context()} />);
     act(() => registry.patch(state.terminalId!, { status: 'starting' }));
-    const starting = screen.getByRole('status', { name: 'terminal starting' });
-    expect(starting.textContent).toBe('Starting shell…');
+    // a live region whose visible text is all there is to it: no label that differs from what is shown
+    const starting = screen.getByText('Starting shell…');
+    expect(starting.getAttribute('role')).toBe('status');
+    expect(starting.hasAttribute('aria-label')).toBe(false);
     expect(starting.parentElement).toBe(screen.getByTestId('terminal-surface').parentElement);
     act(() => registry.patch(state.terminalId!, { status: 'running' }));
-    expect(screen.queryByRole('status', { name: 'terminal starting' })).toBeNull();
+    expect(screen.queryByText('Starting shell…')).toBeNull();
   });
 
   it('says why a terminal could not start', () => {

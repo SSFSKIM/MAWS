@@ -128,7 +128,7 @@ export function TerminalView({ state, ctx }: { state: TerminalTabState; ctx: Pan
         {info?.status === 'starting' ? (
           // Over the blank surface rather than a bar above it, so the terminal's size does not change when it goes. The
           // first terminal after launch spends about half a second here while the host captures the login-shell environment.
-          <div role="status" aria-label="terminal starting" className="pointer-events-none absolute left-2 top-1 text-ui-sm text-fg-muted">
+          <div role="status" className="pointer-events-none absolute left-2 top-1 text-ui-sm text-fg-muted">
             Starting shell…
           </div>
         ) : null}
