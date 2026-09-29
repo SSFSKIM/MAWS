@@ -507,6 +507,20 @@ describe('edit-and-resubmit in the composer', () => {
       await waitFor(() => expect(fake.invoked('session.rewind')).toEqual([{ appSessionId: A, targetMessageUuid: 'u-1', lastSeenMessageUuid: 'u-2', files: false }]));
     });
 
+    it("keeps edit mode when the message is merely absent: a resumed launch's transcript begins after it, with no rewind boundary", async () => {
+      const resumed = builder('2026-09-28T11:00:00.000Z'); // this launch's own history only
+      resumed.turn('u-7', 'a prompt of the resumed launch');
+      resumed.end(['u-7']);
+      sessionEvents = resumed.events;
+      await reloaded();
+      await waitFor(() => expect(useTranscriptStore.getState().entries[A]?.phase).toBe('live'));
+      await waitFor(() => expect(line()?.textContent).toContain('Editing an earlier message'));
+      await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+      expect(line()).not.toBeNull();
+      expect(editingOf(useComposerStore.getState(), A)).toEqual({ messageUuid: 'u-1', seenCursor: 'u-2' });
+      expect(toasts()).toEqual([]);
+    });
+
     it('judges the edited message gone only once the transcript has hydrated, never while it is not loaded or loading', async () => {
       fake = fakeClient({
         'session.queue.list': { entries: [], paused: false, pauseReason: null },

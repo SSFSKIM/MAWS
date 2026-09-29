@@ -7,6 +7,7 @@ import { fakeClient, type FakeClient } from '../../../../test/support/fake-clien
 import { editingOf, prefillComposer, resetComposerStore, resubmitRecordOf, setEditing, useComposerStore } from '../stores/composer';
 import { useNotices } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
+import type { Row } from '../transcript';
 import { resetShellStores } from '../test-support/shell-stores';
 import {
   askToRewind,
@@ -22,6 +23,7 @@ import {
   resubmitSent,
   restoreEditMode,
   rewindAgain,
+  rowsShowRewind,
   settleRestoredEdit,
   takeAutoSend,
 } from './resubmit-seam';
@@ -249,16 +251,25 @@ describe('resubmit state never repeats a rewind and reconciles an uncertain one'
     expect(toasts()).toEqual(['The conversation was rewound; your edited text is in the editor']);
   });
 
-  it('a restored edit whose message the hydrated transcript no longer holds ends at once; one it holds stays', () => {
+  it('a restored edit whose rewind the hydrated transcript shows ends at once; otherwise it stays', () => {
     restoreEditMode(A, { messageUuid: u('u-1'), seenCursor: u('u-1') });
-    settleRestoredEdit(A, true);
-    expect(editingOf(useComposerStore.getState(), A)).not.toBeNull();
     settleRestoredEdit(A, false);
+    expect(editingOf(useComposerStore.getState(), A)).not.toBeNull();
+    settleRestoredEdit(A, true);
     expect(editingOf(useComposerStore.getState(), A)).toBeNull();
     expect(toasts()).toEqual(['The conversation was rewound; your edited text is in the editor']);
     enterEditMode(A, { messageUuid: u('u-1'), seenCursor: u('u-1') });
-    settleRestoredEdit(A, false); // not restored: the transcript is not consulted
+    settleRestoredEdit(A, true); // not restored: the transcript is not consulted
     expect(editingOf(useComposerStore.getState(), A)).not.toBeNull();
+  });
+
+  it('rows show a rewind only with its boundary and the target gone; absence alone is not a rewind', () => {
+    const user = (uuid: string) => ({ kind: 'user', messageUuid: uuid }) as unknown as Row;
+    const boundary = { kind: 'boundary', boundaryKind: 'rewind' } as unknown as Row;
+    expect(rowsShowRewind([user('u-2'), boundary], u('u-1'))).toBe(true);
+    expect(rowsShowRewind([user('u-7')], u('u-1'))).toBe(false); // a resumed launch's transcript begins later
+    expect(rowsShowRewind([user('u-1'), boundary], u('u-1'))).toBe(false); // an earlier rewind, to another message
+    expect(rowsShowRewind([], u('u-1'))).toBe(false);
   });
 
   it('a provider is null until one registers; its disposer removes only itself', () => {

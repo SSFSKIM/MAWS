@@ -52,6 +52,7 @@ import {
   leaveEditMode,
   restoreEditMode,
   resubmitProvider,
+  rowsShowRewind,
   resubmitSendFailed,
   resubmitSent,
   rewindAgain,
@@ -169,12 +170,11 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
   const resubmit = useComposerStore((s) => resubmitRecordOf(s, appSessionId));
   const newest = useTranscriptStore((s) => (editing ? newestUserUuid(s.entries[appSessionId]?.rows ?? []) : null)); // the reconfirm's only reader
   const restored = useComposerStore((s) => s.restoredEdits.has(appSessionId));
-  // Whether the hydrated transcript still holds the edited message; null until it can tell (not attached, hydrating, or
-  // empty: a transcript the source could not fill says nothing about a rewind, whose own boundary row would be there).
-  const targetHeld = useTranscriptStore((s) => {
+  // Whether the hydrated transcript shows the rewind to the edited message (its boundary, the message gone); false while
+  // it cannot tell (not attached, or hydrating).
+  const rewoundInTranscript = useTranscriptStore((s) => {
     const entry = s.entries[appSessionId];
-    if (!editing || entry?.phase !== 'live' || entry.rows.length === 0) return null;
-    return entry.rows.some((r) => r.kind === 'user' && r.messageUuid === editing.messageUuid);
+    return editing !== null && entry?.phase === 'live' && rowsShowRewind(entry.rows, editing.messageUuid);
   });
 
   // ---- what the frame binds to ------------------------------------------------------------------------------------
@@ -335,10 +335,10 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
   // replacing document's own edit (none for a recall), so after any change the document is brought back to what the
   // state line shows; the controller writes only a difference.
   useEffect(() => handle.current?.setEditing(editing), [editing, doc]);
-  // An edit restored after a reload, against the hydrated transcript: its message gone means it was rewound meanwhile.
+  // An edit restored after a reload, against the hydrated transcript: the rewind shown there means it applied meanwhile.
   useEffect(() => {
-    if (restored && targetHeld !== null) settleRestoredEdit(appSessionId, targetHeld);
-  }, [appSessionId, restored, targetHeld]);
+    if (restored) settleRestoredEdit(appSessionId, rewoundInTranscript);
+  }, [appSessionId, restored, rewoundInTranscript]);
 
   // Rewound by the human's own confirm: the edited text goes as part of that decision (once the editor is editable again).
   useEffect(() => {
