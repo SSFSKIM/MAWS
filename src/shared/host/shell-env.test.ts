@@ -19,7 +19,9 @@ function fakeShell(body: string): string {
   return path;
 }
 
-describe('login-shell environment capture (X6)', () => {
+// Real shells under a loaded full suite can take seconds to start: each capture gets the production 5 s timeout and each
+// case room for two of them (M5 review).
+describe('login-shell environment capture (X6)', { timeout: 15_000 }, () => {
   it('parses NUL-separated pairs so multi-line values and = in values survive', () => {
     const text = 'PATH=/a:/b\0MULTI=line one\nline two\0EQ=a=b=c\0\0EMPTY=\0';
     expect(parseNulSeparatedEnv(text)).toEqual({ PATH: '/a:/b', MULTI: 'line one\nline two', EQ: 'a=b=c', EMPTY: '' });
@@ -54,22 +56,22 @@ describe('login-shell environment capture (X6)', () => {
 
   it('falls back when the shell prints no PATH', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const env = await captureShellEnvironment({ shell: fakeShell('printf "ONLY=x\\0"'), timeoutMs: 1000, fallback: { PATH: '/fallback' }, cache: false });
+    const env = await captureShellEnvironment({ shell: fakeShell('printf "ONLY=x\\0"'), timeoutMs: SHELL_CAPTURE_TIMEOUT_MS, fallback: { PATH: '/fallback' }, cache: false });
     expect(env).toEqual({ PATH: '/fallback' });
     expect(warn.mock.calls[0]![0]).toMatch(/no PATH/);
   });
 
   it('falls back when the shell does not exist', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const env = await captureShellEnvironment({ shell: join(dir, 'missing'), timeoutMs: 1000, fallback: { PATH: '/fallback' }, cache: false });
+    const env = await captureShellEnvironment({ shell: join(dir, 'missing'), timeoutMs: SHELL_CAPTURE_TIMEOUT_MS, fallback: { PATH: '/fallback' }, cache: false });
     expect(env).toEqual({ PATH: '/fallback' });
     expect(warn).toHaveBeenCalledOnce();
   });
 
   it('captures once per host start: the default call is memoised', async () => {
     const shell = fakeShell('printf "MAWS_ONCE=%s\\0PATH=/x\\0" "$$"');
-    const first = await captureShellEnvironment({ shell, timeoutMs: 1000 });
-    const second = await captureShellEnvironment({ shell, timeoutMs: 1000 });
+    const first = await captureShellEnvironment({ shell, timeoutMs: SHELL_CAPTURE_TIMEOUT_MS });
+    const second = await captureShellEnvironment({ shell, timeoutMs: SHELL_CAPTURE_TIMEOUT_MS });
     expect(second).toBe(first);
     expect(first.MAWS_ONCE).toMatch(/^\d+$/);
     expect(SHELL_CAPTURE_TIMEOUT_MS).toBe(5_000);
