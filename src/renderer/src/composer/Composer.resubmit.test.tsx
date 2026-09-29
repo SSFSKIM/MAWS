@@ -23,6 +23,7 @@ import { builder } from '../transcript/model/test-events';
 import { Composer } from './Composer';
 import { newestUserUuid } from './edit-prefill';
 import { resetDockedCards } from './docked/registry';
+import { DRAFT_DELAY_MS } from './editor/drafts';
 import { editAndResubmitRow, registerResubmitProvider, setRewindWindow } from './resubmit-seam';
 
 // The newest-message read passes through, counted: the composer reads it only in edit mode.
@@ -413,15 +414,25 @@ describe('edit-and-resubmit in the composer', () => {
     expect(docEdit()).toEqual({ messageUuid: 'u-1', seenCursor: 'u-2' });
   });
 
-  it('a replaced document carries only its own edit: a recall in edit mode gets the edit back, a recall outside it none', async () => {
+  it('a replaced document carries only its own edit: history walks freely in edit mode, keeping the edit and writing no draft; a recall outside it has none', async () => {
     mount();
     await editFirst();
+    vi.useFakeTimers();
     act(() => void editor().editor.commands.clearContent());
+    await act(() => vi.advanceTimersByTimeAsync(DRAFT_DELAY_MS)); // the cleared editor's own draft write
+    const writes = fake.invoked('session.drafts.set').length;
     act(() => editor().focus());
-    await key(editor(), { key: 'ArrowUp' }); // recalls the newest prompt; the recalled document has no edit of its own
-    await waitFor(() => expect(editor().editor.getText()).toBe('second prompt'));
-    await waitFor(() => expect(docEdit()).toEqual({ messageUuid: 'u-1', seenCursor: 'u-2' })); // still editing u-1, as the line says
+    await key(editor(), { key: 'ArrowUp' }); // the newest prompt; a recalled document has no edit of its own
+    expect(editor().editor.getText()).toBe('second prompt');
+    await key(editor(), { key: 'ArrowUp' });
+    expect(editor().editor.getText()).toBe('first prompt');
+    await key(editor(), { key: 'ArrowDown' });
+    expect(editor().editor.getText()).toBe('second prompt');
+    expect(docEdit()).toEqual({ messageUuid: 'u-1', seenCursor: 'u-2' }); // still editing u-1, as the line says
     expect(line()).not.toBeNull();
+    await act(() => vi.advanceTimersByTimeAsync(DRAFT_DELAY_MS * 2));
+    expect(fake.invoked('session.drafts.set')).toHaveLength(writes); // walking history writes no draft
+    vi.useRealTimers();
 
     await key(editor(), { key: 'Escape' });
     await waitFor(() => expect(line()).toBeNull());

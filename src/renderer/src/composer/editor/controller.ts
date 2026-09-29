@@ -279,8 +279,10 @@ export class EditorController {
     }
     const next = historyNavigation(this.nav, direction, this.recalls.length, doc);
     this.nav = next.nav;
-    if (next.show?.kind === 'entry') this.setDoc(recallDoc(this.recalls[next.show.index]), { silently: true, caret: 'end' });
-    else if (next.show?.kind === 'draft') this.setDoc(next.show.doc, { silently: true, caret: 'end' });
+    // What is shown carries the edit mode the editor is in (M4b), so walking history changes no edit and so is no edit.
+    const carrying = (shown: ComposerDoc): ComposerDoc => ({ ...shown, attrs: { ...shown.attrs, editing: editingOfDoc({ attrs: editor.state.doc.attrs }) } });
+    if (next.show?.kind === 'entry') this.setDoc(carrying(recallDoc(this.recalls[next.show.index])), { silently: true, caret: 'end' });
+    else if (next.show?.kind === 'draft') this.setDoc(carrying(next.show.doc), { silently: true, caret: 'end' });
     return next.show !== null || navigating;
   }
 
