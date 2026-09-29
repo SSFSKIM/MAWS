@@ -1,7 +1,7 @@
 // An activity group: one header line (its category icon, the summary phrase, or while its turn works the live label of
 // what is running) that opens into a bounded scroller of cells (224 px, `overscroll-behavior: contain`, reachable by
 // keyboard), each cell a disclosure of its own. A running command's label ticks from the store's clock.
-import { useTranscriptStore, workingDurationMs } from '../../../stores/transcript';
+import { ticks, useTranscriptStore, workingDurationMs } from '../../../stores/transcript';
 import { activeGroupLabel } from '../../model/copy';
 import type { Row } from '../../model/rows';
 import { CellLine } from '../cells/CellLine';
@@ -13,10 +13,11 @@ type GroupRowData = Extract<Row, { kind: 'group' }>;
 
 function useHeader(row: GroupRowData, storeKey: string): string {
   const running = row.state === 'active' ? row.cells.find((cell) => cell.status === 'running' && cell.toolName === 'Bash') : undefined;
-  const now = useTicker(running !== undefined);
+  const live = useTranscriptStore((state) => ticks(state, storeKey));
+  const now = useTicker(running !== undefined && live);
   if (row.state === 'completed') return row.summary;
   if (running?.detail.kind !== 'shell') return row.activeLabel ?? row.summary;
-  const elapsedMs = workingDurationMs(useTranscriptStore.getState().entries[storeKey], running.startedAt, now);
+  const elapsedMs = workingDurationMs(useTranscriptStore.getState().entries[storeKey], running.startedAt, now, live);
   return activeGroupLabel({ toolName: 'Bash', input: { command: running.detail.command }, elapsedMs });
 }
 

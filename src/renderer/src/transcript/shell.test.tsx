@@ -1,10 +1,10 @@
 // C6's registration into C5's shell: the `transcript` slot resolves to the real transcript, a session tab renders its
 // rows over the session's IPC source (not C5's fallback), and a path chip opens C5's file tab.
-import { cleanup, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import type { AppSessionId } from '@shared/graph/ids';
+import type { AgentId, AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
-import { record } from '../../../../test/support/builders';
+import { digest, record } from '../../../../test/support/builders';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { resetSlots, useSlot } from '../app/slots';
 import { SessionPane } from '../session/SessionPane';
@@ -67,6 +67,24 @@ describe('the transcript slot', () => {
     expect(fake.invoked('session.events')).toEqual([{ appSessionId: APP, afterSeq: null, limit: null }]);
     expect(document.querySelector('[data-kind="assistant_text"]')?.textContent).toContain('See the file');
     expect(screen.queryByText('Transcript arrives with C6')).toBeNull();
+  });
+
+  it('tells the store whether the session’s process is live, from C5’s digest (the read model’s liveness rule)', () => {
+    const APP = 'app-shell-3' as AppSessionId;
+    const CHILD = 'agent-1' as AgentId;
+    window.maws = fakeClient().client;
+    const live = (key: string) => useTranscriptStore.getState().live[key];
+    const view = render(<ShellTranscript appSessionId={APP} agentId={null} paneIndex={0} />);
+    expect(live(APP)).toBe(false); // no digest: no live process known
+    for (const [phase, expected] of [['working', true], ['waiting', true], ['idle', true], ['starting', true], ['exited', false], ['failed', false], ['foreign', false]] as const) {
+      act(() => useSessions.getState().applyDigest(digest(APP, { phase, revision: (useSessions.getState().digests.get(APP)?.revision ?? 0) + 1 })));
+      expect(live(APP), phase).toBe(expected);
+    }
+    view.unmount();
+    // A child agent runs in its parent's process.
+    act(() => useSessions.getState().applyDigest(digest(APP, { phase: 'working', revision: 100 })));
+    render(<ShellTranscript appSessionId={APP} agentId={CHILD} paneIndex={0} />);
+    expect(live(`${APP}:${CHILD}`)).toBe(true);
   });
 
   it('a path chip opens C5’s file tab; links keep the default layout.openExternal', async () => {

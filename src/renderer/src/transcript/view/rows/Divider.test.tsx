@@ -74,5 +74,21 @@ describe('divider row', () => {
       act(() => vi.advanceTimersByTime(3000));
       expect(screen.getByRole('button', { name: /Working for/ }).textContent).toContain(`Working for 1m ${String(Math.floor(elapsed / 1000) - 57).padStart(2, '0')}s`);
     });
+
+    // C5's liveness rule: without a live process the events are history, so nothing ticks from the wall clock.
+    it('with no live process (the shell said so) stays at the last event’s time, and ticks again once live', async () => {
+      const b = deniedTurn(false);
+      const store = await storeWith(b.events);
+      const divider = rowOf(store.rows(), 'divider');
+      const elapsed = Math.floor((Date.parse(b.events.at(-1)!.at) - Date.parse(divider.startedAt)) / 1000) - 60;
+      act(() => useTranscriptStore.getState().setLive(store.key, false));
+      renderRow(divider, { storeKey: store.key });
+      act(() => vi.advanceTimersByTime(5000));
+      expect(screen.getByRole('button', { name: /Working for/ }).textContent).toContain(`Working for 1m ${String(elapsed).padStart(2, '0')}s`);
+      act(() => useTranscriptStore.getState().setLive(store.key, true));
+      act(() => vi.advanceTimersByTime(1000));
+      expect(screen.getByRole('button', { name: /Working for/ }).textContent).toContain(`Working for 1m ${String(elapsed + 6).padStart(2, '0')}s`);
+      act(() => useTranscriptStore.getState().setLive(store.key, null));
+    });
   });
 });

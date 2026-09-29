@@ -35,6 +35,10 @@ export { RECEIPT_APPLIED, type ReceiptUndo, type SpillLoad };
 
 export interface TranscriptStore {
   entries: Record<string, TranscriptEntry>;
+  // Whether the process producing a key's events is live, as the shell knows it (C5's digest, under its read model's
+  // liveness rule); absent when nobody said (the harness, a replay source), where a working turn ticks as before.
+  live: Record<string, boolean>;
+  setLive(key: string, live: boolean | null): void; // null forgets what was said
   // Resolves when hydrated, or when hydration failed (phase 'failed'). Attachments are counted: the same source attached
   // again (a second surface over one ipcSource, or the view over the source its owner attached) shares the attachment,
   // and each `detach` releases one; the last unsubscribes. A source's reset clears the key and hydrates it again.
@@ -73,12 +77,18 @@ export function liveBlockBuffer(entry: TranscriptEntry | undefined, turnId: Turn
 }
 
 // How long a working turn has run: event time up to the latest event, then wall time since it arrived, so a live
-// session and a replay (whose events are old) both tick from what the transcript last heard.
-export function workingDurationMs(entry: TranscriptEntry | undefined, startedAt: string, now: number): number {
+// session and a replay (whose events are old) both tick from what the transcript last heard. With no live process
+// (`live` false: a disk-backed session nobody here runs, C5's liveness rule) the events are history and the duration
+// stays at the latest event's time: nothing ticks from the wall clock.
+export function workingDurationMs(entry: TranscriptEntry | undefined, startedAt: string, now: number, live = true): number {
   const started = Date.parse(startedAt);
+  if (!live) return Math.max(0, (entry?.clock?.at ?? started) - started);
   if (!entry?.clock) return Math.max(0, now - started);
   return Math.max(0, entry.clock.at - started + (now - entry.clock.wall));
 }
+
+// Whether a key's working turn may tick from the wall clock: unless the shell said its process is not live.
+export const ticks = (store: TranscriptStore, key: string) => store.live[key] !== false;
 
 const isExpanded = (state: TranscriptState, id: TurnId) =>
   state.ui.expandedTurns.has(id) || (state.turns.get(id)?.state === 'open' && !state.ui.collapsedTurns.has(id));
@@ -234,6 +244,15 @@ export function createTranscriptStore() {
 
     return {
       entries: {},
+      live: {},
+
+      setLive(key, live) {
+        if ((get().live[key] ?? null) === live) return;
+        const next = { ...get().live };
+        if (live === null) delete next[key];
+        else next[key] = live;
+        set({ live: next });
+      },
 
       attach(key, source, options = {}) {
         // The same source attached again keeps the attachment: detaching would drop the batches it buffered while

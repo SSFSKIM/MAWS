@@ -3,7 +3,7 @@
 // rendered in the parent. With C8's `openSubagent` supplied, a one-agent row is a button and each glyph of a grouped
 // row opens its agent (past four, through `+N`). Each child's status is its own: a failed child drops its detail line
 // while the others keep ticking.
-import { useTranscriptStore, workingDurationMs } from '../../../stores/transcript';
+import { ticks, useTranscriptStore, workingDurationMs } from '../../../stores/transcript';
 import { subagentActivity } from '../../model/activity';
 import { subagentDetail } from '../../model/copy';
 import { SUBAGENT_GLYPHS } from '../../model/glyphs';
@@ -57,14 +57,15 @@ export function SubagentRow({ row }: { row: SubagentRowData }) {
   const { storeKey, actions } = useTranscriptContext();
   const turn = useTranscriptStore((state) => (row.turnId === null ? undefined : state.entries[storeKey]?.state.turns.get(row.turnId)));
   const working = !DONE.has(row.status);
-  const now = useTicker(working);
+  const live = useTranscriptStore((state) => ticks(state, storeKey));
+  const now = useTicker(working && live);
   const open = actions.openSubagent === NO_ACTIONS.openSubagent ? null : actions.openSubagent;
   const details =
     working && turn
       ? row.agents.flatMap((ref) => {
           const activity = subagentActivity(turn, ref);
           if (activity.finished) return [];
-          return [{ ref, text: subagentDetail(ref.name, activity.lastTool, workingDurationMs(useTranscriptStore.getState().entries[storeKey], row.at, now)) }];
+          return [{ ref, text: subagentDetail(ref.name, activity.lastTool, workingDurationMs(useTranscriptStore.getState().entries[storeKey], row.at, now, live)) }];
         })
       : [];
   const single = open && row.agents.length === 1 ? row.agents[0] : null;

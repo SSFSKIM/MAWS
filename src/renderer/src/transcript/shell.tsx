@@ -3,16 +3,33 @@
 // transcript's path chips open C5's file tab through the layout store. `openExternal` needs no registration: the default
 // actions already route links to `layout.openExternal`. Called once from `App.tsx`; a later registration (C8c's
 // `openFile`) wins over this one.
+import { useEffect } from 'react';
+import type { AppSessionId } from '@shared/graph/ids';
+import type { SessionPhase } from '@shared/ipc/schema/session';
 import type { Slots } from '../app/slots';
 import { registerSlot } from '../app/slots';
 import { useLayout } from '../stores/layout';
+import { useSessions } from '../stores/sessions';
+import { useTranscriptStore } from '../stores/transcript';
+import { ipcSource } from './source/ipc';
 import { TranscriptSlot } from './view/TranscriptSlot';
 import { registerTranscriptActions } from './view/registry';
 
-// The slot's props onto TranscriptSlot's: C5 passes `agentId: null` for a session tab.
-export const ShellTranscript: Slots['transcript'] = ({ appSessionId, agentId }) => (
-  <TranscriptSlot appSessionId={appSessionId} agentId={agentId ?? undefined} className="h-full" />
-);
+// C5's liveness rule, as its digest carries it: main's read model moves a session's phase only while C3's process table
+// holds a live process for it (`exiting` included) or a C4 replay run plays it, so a phase of a running process says
+// the session is live, and `exited`, `failed`, `foreign` or no digest at all say it is not. A disk-backed session with
+// no live process then shows no working divider ticking from the wall clock (the store's `setLive`).
+const LIVE_PHASES: ReadonlySet<SessionPhase> = new Set(['starting', 'working', 'waiting', 'idle']);
+const useLive = (appSessionId: AppSessionId) => useSessions((state) => LIVE_PHASES.has(state.digests.get(appSessionId)?.phase as SessionPhase));
+
+// The slot's props onto TranscriptSlot's (C5 passes `agentId: null` for a session tab), with the session's liveness
+// told to the store under the source's key; a child agent runs in its parent's process.
+export const ShellTranscript: Slots['transcript'] = ({ appSessionId, agentId }) => {
+  const key = ipcSource(appSessionId, agentId ?? undefined).key!;
+  const live = useLive(appSessionId);
+  useEffect(() => void useTranscriptStore.getState().setLive(key, live), [key, live]);
+  return <TranscriptSlot appSessionId={appSessionId} agentId={agentId ?? undefined} className="h-full" />;
+};
 
 // A path chip: C5's file tab at that line. The chip's session is not known to a registered action, and a file tab's
 // identity is its path alone (C5's `tabId`), so the tab carries none.

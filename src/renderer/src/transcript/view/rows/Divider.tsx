@@ -5,7 +5,7 @@
 // auto-mode verdict appears there, never on a cell line). A working turn's duration ticks.
 import { Popover } from 'radix-ui';
 import { useEffect, useState } from 'react';
-import { useTranscriptStore, workingDurationMs, type TranscriptEntry } from '../../../stores/transcript';
+import { ticks, useTranscriptStore, workingDurationMs, type TranscriptEntry } from '../../../stores/transcript';
 import { dividerCopy, turnSummaryCopy } from '../../model/copy';
 import { turnPhrases } from '../../model/derive';
 import type { CellId, Row, TurnId } from '../../model/rows';
@@ -16,17 +16,19 @@ type DividerRowData = Extract<Row, { kind: 'divider' }>;
 
 const completedMs = (row: DividerRowData) => row.summary.durationMs ?? (row.endedAt === null ? 0 : Date.parse(row.endedAt) - Date.parse(row.startedAt));
 
-// A working turn's duration, re-read from the store once a second.
+// A working turn's duration, re-read from the store once a second while its process is live; without one (C5's
+// liveness rule) it is the latest event's time, following the events as they arrive and never the wall clock.
 function useDuration(row: DividerRowData, storeKey: string): number {
   const working = row.state === 'working';
-  const read = () => workingDurationMs(useTranscriptStore.getState().entries[storeKey], row.startedAt, Date.now());
-  const [ms, setMs] = useState(read);
+  const frozen = useTranscriptStore((state) => (working && !ticks(state, storeKey) ? workingDurationMs(state.entries[storeKey], row.startedAt, 0, false) : null));
+  const [ms, setMs] = useState(() => workingDurationMs(useTranscriptStore.getState().entries[storeKey], row.startedAt, Date.now()));
+  const ticking = working && frozen === null;
   useEffect(() => {
-    if (!working) return;
+    if (!ticking) return;
     const timer = setInterval(() => setMs(workingDurationMs(useTranscriptStore.getState().entries[storeKey], row.startedAt, Date.now())), 1000);
     return () => clearInterval(timer);
-  }, [working, storeKey, row.startedAt]);
-  return working ? ms : completedMs(row);
+  }, [ticking, storeKey, row.startedAt]);
+  return working ? (frozen ?? ms) : completedMs(row);
 }
 
 export function DividerRow({ row }: { row: DividerRowData }) {
