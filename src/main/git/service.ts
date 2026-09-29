@@ -1,7 +1,7 @@
 // Main's read-only git service (C4 execution document, Interfaces "Git service" and M6; charter §4.5): status,
 // branches, diff and log for any directory inside a repository or linked worktree, and the ref-counted repository
-// watcher. Only these subcommands ever run: `rev-parse`, `status`, `stash list`, `remote` (the list), `remote get-url`,
-// `for-each-ref`, `diff`, `log`. Nothing stages, commits, stashes, checks out, fetches, or adds or removes a worktree (C10 and P1 own
+// watcher. Only these subcommands ever run: `rev-parse`, `status`, `stash list`, `remote get-url`, `config --get-regexp`
+// (remote URLs only), `for-each-ref`, `diff`, `log`. Nothing stages, commits, stashes, checks out, fetches, or adds or removes a worktree (C10 and P1 own
 // mutation); worktrees under `<repo>/.claude/worktrees/` need no special case, `rev-parse` reports them as linked.
 // Paths in answers are relative to the repository root, and a `path` argument is read the same way.
 import { isAbsolute } from 'node:path';
@@ -113,18 +113,31 @@ export class GitService {
   // or when the remote has no URL. Never a fetch. A timeout still fails the status.
   private async remoteUrl(repoRoot: string, upstream: string | null): Promise<string | null> {
     try {
-      const remote = upstream === null ? await this.defaultRemote(repoRoot) : upstreamRemote(upstream);
-      if (remote === null) return null;
-      return withoutUserInfo((await this.run(repoRoot, ['remote', 'get-url', remote])).trim()) || null;
+      let url: string | null;
+      if (upstream === null) url = await this.defaultRemoteUrl(repoRoot);
+      else {
+        const remote = upstreamRemote(upstream);
+        url = remote === null ? null : (await this.run(repoRoot, ['remote', 'get-url', remote])).trim();
+      }
+      return url ? withoutUserInfo(url) : null;
     } catch (error) {
       if (error instanceof GitTimeoutError) throw error;
       return null;
     }
   }
 
-  private async defaultRemote(repoRoot: string): Promise<string | null> {
-    const remotes = (await this.run(repoRoot, ['remote'])).split('\n').filter((line) => line !== '');
-    return remotes.includes('origin') ? 'origin' : remotes.length === 1 ? remotes[0] : null;
+  // With no upstream (C10's worktree branches, before a push), one read of every remote's configured URL answers both
+  // which remote and its URL: `origin`'s, else the only remote's. As configured, so an `insteadOf` rewrite that
+  // `remote get-url` would apply is not; git exits 1 when no remote has a URL.
+  private async defaultRemoteUrl(repoRoot: string): Promise<string | null> {
+    const urls = new Map<string, string>();
+    for (const entry of (await this.run(repoRoot, ['config', '-z', '--get-regexp', '^remote\\..*\\.url$'])).split('\0')) {
+      const newline = entry.indexOf('\n');
+      if (newline === -1) continue;
+      const name = entry.slice('remote.'.length, newline - '.url'.length);
+      if (!urls.has(name)) urls.set(name, entry.slice(newline + 1)); // a remote's first URL, as `remote get-url` answers
+    }
+    return urls.get('origin') ?? (urls.size === 1 ? [...urls.values()][0] : null);
   }
 }
 

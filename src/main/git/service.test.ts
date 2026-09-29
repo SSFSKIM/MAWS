@@ -81,7 +81,12 @@ describe('git service answers status, branches, diff and log', () => {
     await repo.git('remote', 'add', 'fork', 'https://github.com/someone/fork.git');
     expect(await service.status(repo.root)).toMatchObject({ upstream: null, remoteUrl: 'https://github.com/someone/fork.git' }); // the sole remote
     await repo.git('remote', 'add', 'origin', 'https://github.com/owner/repo.git');
-    expect(await service.status(repo.root)).toMatchObject({ upstream: null, remoteUrl: 'https://github.com/owner/repo.git' }); // origin wins
+    // One spawn answers which remote and its URL: rev-parse, status and stash list, then the one config read.
+    const spawn = vi.fn(execFile as unknown as ExecFileFn);
+    const counted = new GitService({ env: repo.serviceEnv(), execFile: spawn });
+    expect(await counted.status(repo.root)).toMatchObject({ upstream: null, remoteUrl: 'https://github.com/owner/repo.git' }); // origin wins
+    expect(spawn.mock.calls.map(([, args]) => args[2])).toEqual(['rev-parse', 'status', 'stash', 'config']);
+    counted.dispose();
     await repo.git('remote', 'add', 'third', 'https://example.com/third.git');
     await repo.git('remote', 'remove', 'origin');
     expect((await service.status(repo.root)).remoteUrl).toBeNull(); // two remotes, neither origin
