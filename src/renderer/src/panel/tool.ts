@@ -1,8 +1,7 @@
-// X5, the right panel's tool contract. Owner: C8 (C8a lands the product host). Written by C9 from C8's "X5, final"
-// (`docs/doperpowers/plans/2026-09-28-c8-right-panel.md`) so that C8a adopts this file instead of C9 adapting later;
-// until C8a lands, the `#panel` harness (`harness/terminal/PanelHarness.tsx`) is the host that honours it.
-// Host rules every tool relies on: `createState` runs once per tab and its result is kept across visibility changes,
-// panel collapse and session switches under a pin; unselected tools are unmounted; `beforeClose` can veto a close.
+// X5, canonical (C8 spec *X5, final*; C8a execution document, Interfaces): what a right-panel tool declares and what
+// the host hands it. Owned by C8a; C8b, C8c, C9 and C11 register tools against these names through `registerPanelTool`
+// (`host.ts`). A tool's live state is its `S`, created once per tab and kept by the host outside React; everything a
+// tool shows is re-derived from its context or an external owner, since a tab persists only as `PanelTabRef`.
 import type { ComponentType } from 'react';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -10,23 +9,23 @@ import type { SessionRecord } from '@shared/graph/session';
 import type { panelHost } from './host';
 
 export interface PanelToolInit<P = void> {
-  appSessionId: AppSessionId | null; // null when opened with no session shown (pinned tools only)
-  session: SessionRecord | null; // the X1 record: directory, additionalDirectories, worktree, holder
-  instanceId: string; // the tab id; the Terminal tool uses it as the terminal's label
-  params: P; // tool-specific open parameters
+  appSessionId: AppSessionId | null; // the target session; null only for a pinned tool opened with no session shown
+  session: SessionRecord | null; // C5's X1 record for it: directory, additionalDirectories, worktree, holder
+  instanceId: string; // the PanelTabRef.id; C9 uses it as the terminal label
+  params: P; // the addTool call's params; `undefined` for a tab restored from layout.json (every P is void or all-optional)
 }
 
 export interface PanelToolContext {
-  appSessionId: AppSessionId | null; // the session the panel shows; changes under a pinned tab
+  appSessionId: AppSessionId | null; // the shown session; changes under a pinned tab; null on Overview, Diagnostics, Accounts, Settings
   session: SessionRecord | null;
-  status: EngineSessionStatus | null; // C3's status when the session is live in this app; null for a disk-only session
+  status: EngineSessionStatus | null; // C3's status when the shown session is live in this app
   pinned: boolean;
-  visible: boolean; // selected and the panel is not collapsed
-  // Increments when the host wants the tool to take focus (tab selection, panel opened). One counter per tab that only
-  // grows and lives as long as the tab's state (across unmounts), so a tool can remember the last value it acted on.
+  visible: boolean; // this tab is selected and regions.panel.collapsed is false
+  // Increments on selection and on the collapsed → open transition while selected. One counter per tab that only grows
+  // and lives as long as the tab's state (across unmounts), so a tool can remember the last value it acted on.
   focusRequest: number;
   setTitle(suffix: string | null): void; // "Terminal · claude"
-  close(): void; // runs beforeClose, then dispose
+  close(): void; // panelHost.closeTab(instanceId): beforeClose, then dispose
   openTool: typeof panelHost.addTool; // a tool opening another
 }
 
@@ -36,11 +35,11 @@ export interface PanelTool<S, P = void> {
   icon: ComponentType<{ className?: string }>;
   pinnable: boolean;
   multiInstance: boolean;
-  menu?: boolean; // offered from "+"; default true
-  createState(init: PanelToolInit<P>): S; // once per tab
-  open?(state: S, params: P): void; // addTool on an existing single-instance tab re-targets it
-  beforeClose(state: S): Promise<boolean>; // false vetoes; the tool shows its own confirmation and calls ctx.close() later
-  dispose(state: S): void; // also runs without beforeClose (a host removing a deleted session's tabs): ends what still runs
+  menu?: boolean; // offered from "+"; default true; false for Log
+  createState(init: PanelToolInit<P>): S;
+  open?(state: S, params: P): void; // addTool on an existing single-instance tab re-targets it (a restored tab never shown gets its createState first)
+  beforeClose(state: S): Promise<boolean>; // false vetoes; the tool shows its own inline confirmation and calls ctx.close() later, and its next beforeClose passes
+  dispose(state: S): void; // releases everything the instance owns, a running process included: the host disposes without beforeClose when reconciliation finds the ref gone (a removed session; ruling O4, 2026-09-29)
   render: ComponentType<{ state: S; ctx: PanelToolContext }>;
-  summary?: ComponentType<{ appSessionId: AppSessionId; open(params?: P): void }>; // a section of the resting summary
+  summary?: ComponentType<{ appSessionId: AppSessionId; open(params?: P): void }>;
 }

@@ -5,13 +5,14 @@
 import type { HarnessApi } from './api';
 import type { openTerminal } from '../tools/terminal';
 import type { ProbeApi } from './terminal/Probe';
-import type { KeyCounts, PanelHarnessApi } from './terminal/PanelHarness';
+import type { PanelHarnessApi } from './panel/api'; // C8a: the product host's #panel page (C9's stand-in folded in)
+import type { KeyCounts } from './panel/terminalProbes';
 import type { TerminalsHarnessApi } from './terminal/terminals-api';
 
 declare global {
   interface MawsHarnessPages extends Partial<HarnessApi> {
     // #transcript (C6): load, play, pause, step, turnId, expandAll, expandTurn, scrollToTurn, metrics
-    page?: string; // which C9 page is mounted: 'probe', 'panel'
+    page?: string; // which page is mounted: 'probe' (C9), 'panel' (C8a, with C9's probes)
     terminals?: TerminalsHarnessApi; // #probe and #panel
     probe?: ProbeApi; // #probe
     panel?: PanelHarnessApi; // #panel

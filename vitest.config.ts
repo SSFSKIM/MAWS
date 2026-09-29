@@ -1,5 +1,8 @@
 import { resolve } from 'node:path';
 import { configDefaults, defineConfig } from 'vitest/config';
+// C8a start
+import react from '@vitejs/plugin-react';
+// C8a end
 
 const alias = { '@shared': resolve(__dirname, 'src/shared') };
 // Renderer suites that drive a real emulator without a DOM (C9: `@xterm/headless` round trips) run under Node.
@@ -51,6 +54,19 @@ export default defineConfig({
         },
       },
       ...liveProjects, // C3
+      // C8a start: the panel host's suites again under the React Compiler, as electron-vite builds the app, so a render
+      // that reads mutable module state (the instance map, a tool's state) without selecting it is caught in a test.
+      {
+        resolve: { alias },
+        plugins: [react({ babel: { plugins: ['babel-plugin-react-compiler'] } })],
+        test: {
+          name: 'renderer-compiled',
+          environment: 'happy-dom',
+          include: ['src/renderer/src/panel/**/*.test.tsx', 'src/renderer/src/app/Shell.panel.test.tsx'], // M3: the host inside C5's Shell
+          env: { MAWS_REACT_COMPILER: '1' },
+        },
+      },
+      // C8a end
     ],
   },
 });

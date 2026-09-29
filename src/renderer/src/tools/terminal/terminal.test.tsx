@@ -6,8 +6,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { HostState } from '@shared/ipc/schema';
-import { mountPanelHost, type PanelHostImplementation } from '../../panel/host';
+import { instanceOf, panelHost, registerPanelTool } from '../../panel/host';
 import type { PanelToolContext } from '../../panel/tool';
+import { useLayout } from '../../stores/layout';
+import { useSessions } from '../../stores/sessions';
+import { resetPanelStores } from '../../test-support/panel';
 import type { TerminalInfo } from '../../terminal/registry';
 
 const registry = vi.hoisted(() => {
@@ -77,13 +80,14 @@ const registry = vi.hoisted(() => {
       foreground: vi.fn(async () => ({ process: 'zsh', busy: false })),
       close: vi.fn(async (id: string): Promise<void> => void id),
       respawn: vi.fn(async () => {}),
+      adopt: vi.fn(async (): Promise<string[]> => []),
     },
   };
 });
 
 vi.mock('../../terminal/registry', () => ({ terminals: registry.terminals }));
 
-const { openTerminal, terminalTool, TERMINAL_TOOL_ID } = await import('./index');
+const { adoptTerminals, openTerminal, resetTerminalAdoption, terminalTool, TERMINAL_TOOL_ID } = await import('./index');
 
 const A = 'A' as AppSessionId;
 const B = 'B' as AppSessionId;
@@ -230,16 +234,106 @@ describe('terminal tool close', () => {
   });
 });
 
+// C8a's ruling (2026-09-29): a restored tab waits for the page's re-adoption, so it reattaches to its running pty.
+describe('re-adoption before a tab opens a shell', () => {
+  beforeEach(() => resetTerminalAdoption());
+  afterEach(() => resetTerminalAdoption());
+
+  it('opens nothing while the adoption is in flight, then takes the pty re-adopted under the tab’s label', async () => {
+    let answer!: (ids: string[]) => void;
+    registry.terminals.adopt.mockImplementationOnce(() => new Promise((resolve) => (answer = resolve)));
+    const adoption = adoptTerminals();
+    const state = newState({ instanceId: 'terminal:restored' });
+    expect(state.terminalId).toBeNull();
+    expect(registry.terminals.open).not.toHaveBeenCalled();
+    // What the registry's adopt does for a live pty: an entry under the pty's label.
+    registry.terminals.open({ appSessionId: A, label: 'terminal:restored', cwd: '/tmp/maws-harness/a' });
+    registry.terminals.open.mockClear();
+    answer(['t1']);
+    await adoption;
+    await vi.waitFor(() => expect(state.terminalId).toBe('t1'));
+    expect(registry.terminals.open).not.toHaveBeenCalled();
+  });
+
+  it('a tab disposed while the adoption is in flight opens nothing and releases the shell re-adopted under its label', async () => {
+    let answer!: (ids: string[]) => void;
+    registry.terminals.adopt.mockImplementationOnce(() => new Promise((resolve) => (answer = resolve)));
+    const adoption = adoptTerminals();
+    const state = newState({ instanceId: 'terminal:gone' });
+    terminalTool.dispose(state); // closed (beforeClose saw no terminal), reconciled or unregistered before adoption answered
+    registry.terminals.open({ appSessionId: A, label: 'terminal:gone', cwd: '/tmp/maws-harness/a' }); // what adopt re-created
+    registry.terminals.open.mockClear();
+    answer(['t1']);
+    await adoption;
+    await vi.waitFor(() => expect(registry.terminals.close).toHaveBeenCalledWith('t1'));
+    expect(registry.terminals.open).not.toHaveBeenCalled();
+    expect(state.terminalId).toBeNull();
+  });
+
+  it('opens its own shell once the adoption answers without a pty for it, and after a failed adoption', async () => {
+    let answer!: (ids: string[]) => void;
+    registry.terminals.adopt.mockImplementationOnce(() => new Promise((resolve) => (answer = resolve)));
+    const adoption = adoptTerminals();
+    const state = newState({ instanceId: 'terminal:new' });
+    answer([]);
+    await adoption;
+    await vi.waitFor(() => expect(state.terminalId).toBe('t1'));
+    expect(registry.terminals.open).toHaveBeenCalledOnce();
+
+    resetTerminalAdoption();
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    registry.terminals.adopt.mockRejectedValueOnce(new Error('pty host gone'));
+    await adoptTerminals();
+    expect(logged).toHaveBeenCalledOnce();
+    logged.mockRestore();
+    expect(newState({ instanceId: 'terminal:after' }).terminalId).toBe('t2');
+  });
+});
+
 describe('openTerminal', () => {
   it('asks the panel host for a Terminal tab with the cwd and command as params', () => {
-    const host: PanelHostImplementation = { addTool: vi.fn(() => 'terminal:7'), selectTab: vi.fn(), closeTab: vi.fn(async () => true), showSummary: vi.fn(), closeToolTabs: vi.fn() };
-    const unmount = mountPanelHost(host);
+    // C8a's host replaced C9's stand-in seam (the stand-in fold, ruling O2): the call is observed on `panelHost` itself.
+    const addTool = vi.spyOn(panelHost, 'addTool').mockReturnValue('terminal:7');
     try {
       expect(openTerminal({ appSessionId: A, cwd: '/tmp/maws-harness/a', command: 'printf MAWS_ATTACH_OK\\n' })).toBe('terminal:7');
-      expect(host.addTool).toHaveBeenCalledWith('terminal', { appSessionId: A, params: { cwd: '/tmp/maws-harness/a', command: 'printf MAWS_ATTACH_OK\\n' } });
+      expect(addTool).toHaveBeenCalledWith('terminal', { appSessionId: A, params: { cwd: '/tmp/maws-harness/a', command: 'printf MAWS_ATTACH_OK\\n' } });
     } finally {
-      unmount();
+      addTool.mockRestore();
     }
+  });
+});
+
+// Ported from C9's stand-in host test (harness/terminal/panel-state.test.ts) onto C8a's host by the stand-in fold:
+// unregistering the Terminal tool closes its tabs through the tool's own close path.
+describe('the panel host unregistering the Terminal tool', () => {
+  beforeEach(() => {
+    resetPanelStores();
+    useSessions.setState({ records: new Map([[A, SESSION_A]]) }); // the tab's session, whose directory its shell starts in
+  });
+  const terminalRefs = () => useLayout.getState().panelTabsOf(A).filter((ref) => ref.toolId === TERMINAL_TOOL_ID);
+
+  it('kills a terminal’s shell through the tool’s close path', async () => {
+    const unregister = registerPanelTool(terminalTool);
+    panelHost.addTool('terminal', { appSessionId: A, activate: false });
+    expect(terminalRefs()).toHaveLength(1);
+    unregister();
+    await vi.waitFor(() => expect(terminalRefs()).toEqual([]));
+    expect(registry.terminals.foreground).toHaveBeenCalledWith('t1');
+    expect(registry.terminals.close).toHaveBeenCalledWith('t1');
+  });
+
+  it('keeps a tab whose close failed, and closes it on a retry', async () => {
+    const unregister = registerPanelTool(terminalTool);
+    const tabId = panelHost.addTool('terminal', { appSessionId: A, activate: false });
+    registry.terminals.close.mockRejectedValueOnce(new Error('pty.kill failed: EPERM'));
+    unregister();
+    await vi.waitFor(() => expect(registry.terminals.close).toHaveBeenCalledTimes(1));
+    await Promise.resolve();
+    expect(terminalRefs().map((ref) => ref.id)).toEqual([tabId]);
+    expect((instanceOf(tabId)!.state as { ui: { getState(): { closeError: string | null } } }).ui.getState().closeError).toBe('pty.kill failed: EPERM');
+    await expect(panelHost.closeTab(tabId)).resolves.toBe(true);
+    expect(terminalRefs()).toEqual([]);
+    expect(registry.terminals.close).toHaveBeenCalledTimes(2);
   });
 });
 

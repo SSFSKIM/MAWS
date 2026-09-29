@@ -107,7 +107,7 @@ export function createLayoutStore() {
     const pins = (next: PanelTabRef[], requested?: string | null) => {
       const before = get().panelPinned;
       const panelPinned = samePins(before, next) ? before : next;
-      return { panelPinned, panelActiveNoSession: pinSelection(before, panelPinned, get().panelActiveNoSession, requested) };
+      return { panelPinned, panelActiveNoSession: requested === null ? null : pinSelection(before, panelPinned, get().panelActiveNoSession, requested) };
     };
     return {
       regions: LAYOUT_DEFAULTS.regions,
