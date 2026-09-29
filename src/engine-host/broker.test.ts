@@ -163,6 +163,20 @@ describe('permission broker states and the approvals-lost rule', () => {
     await expect(broker.answer(rid('r1'), { kind: 'question', answers: {} })).rejects.toThrow(/permission/);
   });
 
+  it('skips a question with a plain permission deny, written as pass3/question-deny recorded it; no other cross-kind answer', async () => {
+    const journal = loadJournal('pass3', 'question-deny');
+    const request = journal.find((r) => r.seq === 108)!.frame as ControlRequestFrame;
+    const recorded = journal.find((r) => r.seq === 110)!.frame as { response: { response: unknown } };
+    expect(request.request).toMatchObject({ subtype: 'can_use_tool', tool_name: 'AskUserQuestion' });
+    const { broker, responses } = setup();
+    broker.accept(request);
+    for (const refused of [{ kind: 'permission', decision: 'allow', scope: 'once' }, { kind: 'permission', decision: 'deny_and_stop' }, { kind: 'plan', outcome: 'implement', feedback: null }] as const) {
+      await expect(broker.answer(rid(request.request_id), refused)).rejects.toThrow(/question request/);
+    }
+    expect(await broker.answer(rid(request.request_id), { kind: 'permission', decision: 'deny' })).toBe('delivered');
+    expect(responses.map((r) => r.response)).toEqual([recorded.response.response]);
+  });
+
   it('re-accepts the requests an initialize response carries in pending_permission_requests, once', () => {
     const { broker, last } = setup();
     const envelope = { type: 'control_response', response: { subtype: 'success', request_id: 'init-1', response: {}, pending_permission_requests: [canUseTool('r9')], pending_user_dialog_requests: [] } };

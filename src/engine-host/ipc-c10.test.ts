@@ -23,9 +23,9 @@ afterEach(async () => {
   await rm(userData, { recursive: true, force: true, maxRetries: 10 });
 });
 
-const spec = (appSessionId: string, replay: string): LaunchSpec =>
+const spec = (appSessionId: string, replay: string, gateway: 'gateway' | 'direct' = 'gateway'): LaunchSpec =>
   LaunchSpecSchema.parse({
-    appSessionId, cwd: '/tmp/maws-ipc-c10', additionalDirectories: [], model: null, effort: null, permissionMode: null, gateway: 'gateway', subagentModel: null,
+    appSessionId, cwd: '/tmp/maws-ipc-c10', additionalDirectories: [], model: null, effort: null, permissionMode: null, gateway, subagentModel: null,
     resume: null, sessionId: null, trust: null, mcpConfig: null, extraSettings: null, maxBudgetUsd: null, replay, inheritGrantsFrom: null,
   });
 
@@ -78,6 +78,26 @@ describe('engine.models', () => {
     expect(answered.models.map((m) => m.value)).toContain('claude/sol');
     expect((await host.call('engine.models', { refresh: false })).source).toBe('cached'); // the live answer is the cache now
     await host.ipc.table.shutdown({ graceMs: 0 });
+  });
+
+  it('keys the catalogue by route: a Direct launch and a relay launch do not overwrite each other, and a restart keeps both (debt wave 3)', async () => {
+    const host = engineHost();
+    const direct = 'app-models-direct' as AppSessionId;
+    await host.call('session.launch', { spec: spec(direct, 'spikes/protocol-probe/fixtures/pass2/auto-unrouted.jsonl', 'direct') });
+    await until(() => host.ipc.table.get(direct)?.lifecycle === 'ready', 'ready');
+    const relay = 'app-models-relay' as AppSessionId;
+    await host.call('session.launch', { spec: spec(relay, 'spikes/protocol-probe/fixtures/reads.jsonl') });
+    await until(() => host.ipc.table.get(relay)?.lifecycle === 'ready', 'ready');
+    const values = async (input: { refresh: boolean; gateway?: 'gateway' | 'direct' }) => (await host.call('engine.models', input)).models.map((m) => m.value);
+    for (let i = 0; i < 100 && !(await values({ refresh: false, gateway: 'direct' })).includes('claude-fable-5-1[1m]'); i++) await new Promise((r) => setTimeout(r, 5));
+    expect(await values({ refresh: false, gateway: 'direct' })).toContain('claude-fable-5-1[1m]');
+    expect(await values({ refresh: false, gateway: 'direct' })).not.toContain('claude/astra');
+    expect(await values({ refresh: false, gateway: 'gateway' })).toContain('claude/astra');
+    expect(await values({ refresh: false })).toContain('claude/astra'); // no route named: the newest, the relay launch's
+    await host.ipc.table.shutdown({ graceMs: 0 });
+
+    const restarted = engineHost();
+    expect(await restarted.call('engine.models', { refresh: false, gateway: 'direct' })).toMatchObject({ source: 'cached', models: expect.arrayContaining([expect.objectContaining({ value: 'claude-fable-5-1[1m]' })]) as unknown });
   });
 });
 

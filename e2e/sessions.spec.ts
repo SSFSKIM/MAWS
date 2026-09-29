@@ -80,18 +80,8 @@ async function launchCase(opts: { fixtures: string[]; trusted: string[]; userDat
     ...(opts.userData ? { userData: opts.userData } : {}),
   });
   await expect(maws.page.locator('[data-region="main"]')).toBeVisible();
-  await pageReportsHidden(maws.page);
   await collectSetup(maws.page);
   return { maws, page: maws.page, store, trash, dispose: () => maws.cleanup() };
-}
-
-// The page reports itself hidden. The cases route Direct (below), and C7's status line reads a direct session's usage
-// windows from the engine (`get_usage`) at each turn's end and whenever the page becomes visible, but only while the
-// page is visible; the replayed fixtures recorded no such read, and C3's replay transport ends a run on any write it
-// did not record (a `replay_mismatch`, the session exiting as a crash). Nothing the cases assert reads the page's
-// visibility but C5's unread rule, which none of them checks.
-async function pageReportsHidden(page: Page): Promise<void> {
-  await page.evaluate(() => Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' }));
 }
 
 async function addProject(page: Page, directory: string): Promise<{ id: string; name: string }> {
