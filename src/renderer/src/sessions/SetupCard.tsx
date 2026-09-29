@@ -64,7 +64,7 @@ export function SetupCard({ appSessionId }: { appSessionId: AppSessionId }) {
     const accept = () => void continueSetup(appSessionId, { trust: 'accepted' }, card.message);
     const decline = () => void releaseMessage(appSessionId, card.message);
     return (
-      <DockedCardFrame appSessionId={appSessionId} title={TRUST_CARD_TITLE} onAccept={busy ? null : accept} onDecline={decline}>
+      <DockedCardFrame appSessionId={appSessionId} title={TRUST_CARD_TITLE} onAccept={busy ? null : accept} onDecline={busy ? null : decline}>
         <TrustCard trust={card.trust} busy={busy} onAccept={accept} onStartWithoutTrusting={() => void continueSetup(appSessionId, { trust: 'declined' }, card.message)} onDecline={decline} />
       </DockedCardFrame>
     );
@@ -136,7 +136,7 @@ function RelayHost({ appSessionId, card, busy }: { appSessionId: AppSessionId; c
   const decline = () => void releaseMessage(appSessionId, card.message);
 
   return (
-    <DockedCardFrame appSessionId={appSessionId} title={RELAY_CARD_TITLE} onAccept={busy || gatewayModel ? null : direct} onDecline={decline}>
+    <DockedCardFrame appSessionId={appSessionId} title={RELAY_CARD_TITLE} onAccept={busy || gatewayModel ? null : direct} onDecline={busy ? null : decline}>
       <RelayCard health={health} policy={RELAY_POLICY} now={now} gatewayModel={gatewayModel} openClaudeUsage={null} onAccept={direct} onDecline={decline} onRecheck={() => void recheck()} />
     </DockedCardFrame>
   );

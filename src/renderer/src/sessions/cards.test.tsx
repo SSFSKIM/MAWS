@@ -10,6 +10,7 @@ import { health, ID, intent, MESSAGE, putIntent, REPO, resetSetupStore, resource
 import { FailureCard } from './FailureCard';
 import { RelayCard } from './RelayCard';
 import { connectSetupDock } from './SetupCard';
+import { connectKeys } from '../keymap/dispatcher';
 import { resetDockedCards, useDockedCards } from '../composer/docked/registry';
 import { registerMessageReturn } from './message-return';
 import { resumeSession, startIntent } from './setup-actions';
@@ -98,6 +99,27 @@ describe('trust card', () => {
     expect(fake.calls.filter((c) => c.startsWith('invoke')).at(-1)).toBe('invoke session.intent.release');
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Trust and start' })).toBeNull());
     expect(dockedIds(), 'undocked').toBe('');
+  });
+
+  it("answers Enter and Esc through C7's frame: Enter trusts and starts, Esc cancels and hands the message back", async () => {
+    const disconnect = connectKeys();
+    try {
+      withMain({ 'session.start': answer({ status: 'needs_trust', appSessionId: ID, trust: trustState() }), 'session.intent.release': () => intent() });
+      putIntent(intent());
+      render(<Docked />);
+      await act(() => startIntent(ID, MESSAGE));
+      const frame = screen.getByRole('group', { name: 'Trust this folder?' });
+      act(() => frame.focus());
+      await userEvent.keyboard('{Enter}');
+      expect(fake.invoked('session.start').at(-1)).toEqual({ appSessionId: ID, message: null, options: { trust: 'accepted' } });
+      await waitFor(() => expect(screen.getByRole('group', { name: 'Trust this folder?' })).toBeTruthy()); // the answer docked it again
+      act(() => screen.getByRole('group', { name: 'Trust this folder?' }).focus());
+      await userEvent.keyboard('{Escape}');
+      await waitFor(() => expect(fake.invoked('session.intent.release')).toEqual([{ appSessionId: ID }]));
+      expect(returned).toEqual([MESSAGE]);
+    } finally {
+      disconnect();
+    }
   });
 
   it("Cancel on a resume's card, sent without a message, releases quietly (main answers null for a record's id)", async () => {
