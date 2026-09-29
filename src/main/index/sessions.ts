@@ -39,7 +39,7 @@ interface SessionRow {
   last_seen_at: string | null;
   unread: number;
   engine_version: string | null;
-  gateway_routed: number;
+  gateway_routed: number | null; // null: never verified (a discovered session)
   gateway_base_url: string | null;
   gateway_auto_mode_server: string;
   model_requested: string | null;
@@ -124,7 +124,7 @@ function toRecord(row: SessionRow): SessionRecord {
     lastSeen: { messageUuid: row.last_seen_uuid as MessageUuid | null, at: row.last_seen_at },
     unread: row.unread === 1,
     engineVersion: row.engine_version,
-    gateway: { routed: row.gateway_routed === 1, baseUrl: row.gateway_base_url, autoModeServer: row.gateway_auto_mode_server as SessionRecord['gateway']['autoModeServer'] },
+    gateway: { routed: row.gateway_routed === null ? null : row.gateway_routed === 1, baseUrl: row.gateway_base_url, autoModeServer: row.gateway_auto_mode_server as SessionRecord['gateway']['autoModeServer'] },
     model: { requested: row.model_requested, resolved: row.model_resolved },
     effort: row.effort,
     permissionMode: {

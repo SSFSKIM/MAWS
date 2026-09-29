@@ -49,7 +49,7 @@ describe('session records in the index', () => {
       directory: '/nowhere/at/all',
       title: { text: 'hello', source: 'none' },
       holder: { kind: 'none' },
-      gateway: { routed: true, baseUrl: null, autoModeServer: 'unknown' },
+      gateway: { routed: null, baseUrl: null, autoModeServer: 'unknown' }, // unknown: no verification ran
       pinned: false,
       archived: false,
       unread: false,

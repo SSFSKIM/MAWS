@@ -37,8 +37,9 @@ export const SessionRecordSchema = z.strictObject({
   engineVersion: z.string().nullable(),
   // C3 start: the auto-mode lanes in the session record (C3 execution document, "X1 extension"; additive, flagged to the
   // coordinator): `baseUrl` from get_status's `Anthropic base URL` row, `autoModeServer` from its `Auto mode server` row.
-  // C4 fills `null` / `unknown` for sessions it discovers on disk.
-  gateway: z.strictObject({ routed: z.boolean(), baseUrl: z.string().nullable(), autoModeServer: z.enum(['enabled', 'disabled', 'unknown']) }),
+  // `routed` is C3's verification (`get_status`'s base URL against the relay's) and null until one ran: the state of every
+  // session MAWS discovered on disk and did not launch (X1 amended, wave 1). C4 fills `null` / `null` / `unknown` for those.
+  gateway: z.strictObject({ routed: z.boolean().nullable(), baseUrl: z.string().nullable(), autoModeServer: z.enum(['enabled', 'disabled', 'unknown']) }),
   // C3 end
   model: z.strictObject({ requested: z.string().nullable(), resolved: z.string().nullable() }),
   effort: z.string().nullable(),

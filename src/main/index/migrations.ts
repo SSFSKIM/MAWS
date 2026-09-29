@@ -37,4 +37,17 @@ CREATE TABLE replay_fixtures (id TEXT PRIMARY KEY, name TEXT NOT NULL, kind TEXT
   added_at TEXT NOT NULL, last_played_at TEXT);
 `,
   },
+  {
+    version: 2,
+    // X1's `gateway.routed` becomes `boolean | null`, null meaning no verification ran (a session discovered on disk, not
+    // launched by MAWS). SQLite cannot drop a NOT NULL in place, so the column is rebuilt. A v1 row keeps its value only
+    // where a verification wrote it: false (direct or mismatch; v1's default was 1), or true beside the verified base URL.
+    // A true with no base URL is v1's default, now unknown.
+    sql: `
+ALTER TABLE sessions ADD COLUMN gateway_routed_v2 INTEGER;
+UPDATE sessions SET gateway_routed_v2 = CASE WHEN gateway_routed = 0 OR gateway_base_url IS NOT NULL THEN gateway_routed END;
+ALTER TABLE sessions DROP COLUMN gateway_routed;
+ALTER TABLE sessions RENAME COLUMN gateway_routed_v2 TO gateway_routed;
+`,
+  },
 ];

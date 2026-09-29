@@ -35,21 +35,41 @@ describe('the index opens, migrates and refuses what it cannot own', () => {
     }
   };
 
-  it('a fresh index has user_version 1 and the five tables, in WAL mode', () => {
+  it('a fresh index has user_version 2 and the five tables, in WAL mode', () => {
     const path = join(dir.path, 'index.sqlite');
     const index = open(path);
     expect(index.readOnly).toBe(false);
-    expect(index.applied).toEqual([1]);
-    expect(MIGRATIONS).toHaveLength(1);
-    expect(inspect(path)).toEqual({ version: 1, tables: ['attention_items', 'drafts', 'projects', 'replay_fixtures', 'sessions'], mode: 'wal' });
+    expect(index.applied).toEqual([1, 2]);
+    expect(MIGRATIONS).toHaveLength(2);
+    expect(inspect(path)).toEqual({ version: 2, tables: ['attention_items', 'drafts', 'projects', 'replay_fixtures', 'sessions'], mode: 'wal' });
     // v1 is unshipped, so the removal mark (whole-branch review) is part of it rather than a v2.
     const db = new DatabaseSync(path, { readOnly: true });
     try {
       const columns = (db.prepare('PRAGMA table_info(sessions)').all() as { name: string; type: string; notnull: number }[]).map((c) => [c.name, c.type, c.notnull]);
       expect(columns).toContainEqual(['removed_at', 'TEXT', 0]);
+      expect(columns).toContainEqual(['gateway_routed', 'INTEGER', 0]); // v2: null is unknown
     } finally {
       db.close();
     }
+  });
+
+  it('v2 makes a v1 default routed flag unknown and keeps the ones a verification wrote', () => {
+    const path = join(dir.path, 'index.sqlite');
+    const raw = new DatabaseSync(path);
+    raw.exec(MIGRATIONS[0].sql);
+    raw.exec('PRAGMA user_version = 1');
+    const insert = raw.prepare(
+      "INSERT INTO sessions (app_id, directory, gateway_routed, gateway_base_url, created_at, updated_at) VALUES (?, '/w', ?, ?, 't', 't')",
+    );
+    insert.run('discovered', 1, null); // v1's default for a session found on disk
+    insert.run('routed', 1, 'http://127.0.0.1:8641');
+    insert.run('direct', 0, null);
+    raw.close();
+
+    const index = open(path);
+    expect(index.applied).toEqual([2]);
+    const routed = (appId: string) => index.sessions.get(appId as AppSessionId)?.gateway.routed;
+    expect([routed('discovered'), routed('routed'), routed('direct')]).toEqual([null, true, false]);
   });
 
   it('opening it again runs no migration and keeps its rows', () => {
@@ -75,9 +95,9 @@ describe('the index opens, migrates and refuses what it cannot own', () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     const index = open(path);
     expect(index.readOnly).toBe(true);
-    expect(index.unavailable).toBe('user_version 99 is newer than this app knows (1)');
+    expect(index.unavailable).toBe('user_version 99 is newer than this app knows (2)');
     expect(error).toHaveBeenCalledWith(expect.stringContaining('user_version 99'));
-    const message = 'index unavailable: user_version 99 is newer than this app knows (1)';
+    const message = 'index unavailable: user_version 99 is newer than this app knows (2)';
     expect(() => index.sessions.list()).toThrow(message);
     expect(() => index.sessions.get('x' as AppSessionId)).toThrow(message);
     expect(() => index.sessions.setPinned('x' as AppSessionId, true)).toThrow(message);
@@ -109,13 +129,13 @@ describe('the index opens, migrates and refuses what it cannot own', () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     const index = open(path);
     expect(index.readOnly).toBe(false);
-    expect(index.applied).toEqual([1]);
+    expect(index.applied).toEqual([1, 2]);
     const aside = readdirSync(dir.path).filter((name) => /^index\.sqlite\.broken-\d+$/.test(name));
     expect(aside).toHaveLength(1);
     expect(readFileSync(join(dir.path, aside[0]), 'utf8')).toBe(garbage);
     expect(error).toHaveBeenCalledWith(expect.stringContaining(aside[0]));
     expect(existsSync(path)).toBe(true);
-    expect(inspect(path).version).toBe(1);
+    expect(inspect(path).version).toBe(2);
   });
 
   it('a transient failure at open (another connection holds the lock) throws and leaves the file untouched', () => {
