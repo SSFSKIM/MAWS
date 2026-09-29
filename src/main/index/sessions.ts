@@ -421,26 +421,46 @@ export class SessionStore {
     });
   }
 
-  // A live process's engine id binds its app session. Another record holding that id is one of two things: the record
-  // discovery made for the process's own new transcript, seen before the status naming it (it yields: removed, its
-  // transcript facts moving to this record), or another MAWS process's session (`self`), a conflict that is refused. A
-  // record already bound to a different id is rebinding (`/clear`): the transcript facts it held belong to the old
-  // transcript, which stays in the index as a record of its own, and the app session describes the new one once its
-  // summary arrives. The engine's custom title noted at a MAWS rename is forgotten: a new transcript's title is not a
-  // later terminal rename.
+  // A live process's engine id binds its app session. Another record holding that id yields only when it is bare (the
+  // record discovery made for the process's own new transcript, seen before the status naming it: removed, its
+  // transcript facts moving to this record); another MAWS process's session, or a record carrying the owner's state, is
+  // refused. A record already bound to a different id is rebinding (`/clear`): the transcript facts and engine titles
+  // it held belong to the old transcript, which stays in the index as a record of its own, and the app session
+  // describes the new one once its summary arrives. The engine's custom title noted at a MAWS rename is forgotten: a new
+  // transcript's title is not a later terminal rename.
   private bindRow(existing: SessionRow, sessionId: SessionId, cause: ChangeCause): void {
     if (existing.engine_session_id === sessionId) return;
     const other = this.db.get<SessionRow>('SELECT * FROM sessions WHERE engine_session_id = ?', sessionId);
-    if (other && (JSON.parse(other.holder) as Holder).kind === 'self') throw new Error(`engine session ${sessionId} is already bound to app session ${other.app_id}`);
+    if (other && !this.bare(other)) throw new Error(`engine session ${sessionId} is already bound to app session ${other.app_id}`);
     if (other) this.deleteRow(toRecord(other));
     const rebinding = existing.engine_session_id !== null;
     const previous = rebinding && existing.summary !== null ? (JSON.parse(existing.summary) as TranscriptSummary) : null;
-    const forgotten = { transcript_path: null, transcript_size: null, transcript_mtime_ms: null, summary: null, title_override_engine_title: null };
+    const forgotten = {
+      transcript_path: null,
+      transcript_size: null,
+      transcript_mtime_ms: null,
+      summary: null,
+      title_override_engine_title: null,
+      custom_title: null,
+      ai_title: null,
+      first_prompt: null,
+      last_assistant_text: null,
+      last_record_at: null,
+    };
     this.write(existing, { engine_session_id: sessionId, ...(rebinding ? forgotten : {}) });
     this.changed(existing.app_id as AppSessionId, cause);
     this.bindingChanged(existing.app_id as AppSessionId);
     if (previous !== null) this.upsertFromSummary(previous);
     if (other?.summary) this.upsertFromSummary(JSON.parse(other.summary) as TranscriptSummary);
+  }
+
+  // A record discovery made and nobody has touched: no live MAWS process, and none of the owner's own state (pin,
+  // archive, a MAWS title, a draft, a last-seen cursor), so yielding it to the process that writes its transcript loses
+  // nothing. Anything else is refused rather than deleted.
+  private bare(row: SessionRow): boolean {
+    if ((JSON.parse(row.holder) as Holder).kind === 'self') return false;
+    if (row.pinned === 1 || row.archived === 1 || row.title_override !== null || row.last_seen_uuid !== null || row.last_seen_at !== null) return false;
+    return this.db.get('SELECT 1 AS present FROM drafts WHERE app_session_id = ?', row.app_id) === null;
   }
 
   private deleteRow(existing: SessionRecord): void {

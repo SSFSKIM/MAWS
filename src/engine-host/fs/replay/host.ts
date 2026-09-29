@@ -17,7 +17,7 @@ import { loadTranscriptSource } from './transcript-source';
 // The filesystem service's bindings (FsService satisfies it): a replay's ids are bound like a session's, so the
 // snapshot command and every `fs.*` command know the app id.
 export interface ReplayBindings {
-  bind(bindings: readonly { sessionId: SessionId; appSessionId: AppSessionId }[]): void;
+  bind(bindings: readonly { sessionId: SessionId; appSessionId: AppSessionId }[]): Promise<void>; // the pairs are in place when it returns; the promise is the followers moving
   unbind(appSessionId: AppSessionId): Promise<void>;
 }
 
@@ -50,7 +50,7 @@ export class ReplayHost {
       const loaded = source.kind === 'journal' ? await loadJournalSource(source.path, this.deps.readSource) : await loadTranscriptSource(source.path, this.deps.readSource);
       // The one moment a cancel can have arrived: from here to the runner's start nothing awaits.
       if (this.cancelled.has(appSessionId)) throw new Error(`replay launch cancelled: ${appSessionId}`);
-      this.deps.bindings.bind([{ sessionId, appSessionId }]);
+      void this.deps.bindings.bind([{ sessionId, appSessionId }]); // fresh ids: nothing follows them, so nothing to wait for
       const runner = new ReplayRunner({
         appSessionId,
         sessionId,

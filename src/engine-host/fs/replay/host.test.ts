@@ -26,7 +26,7 @@ function harness(read?: (path: string) => Promise<Buffer>) {
   };
   const bound = new Map<AppSessionId, SessionId>();
   const bindings: ReplayBindings = {
-    bind: (pairs) => pairs.forEach(({ sessionId, appSessionId }) => bound.set(appSessionId, sessionId)),
+    bind: async (pairs) => pairs.forEach(({ sessionId, appSessionId }) => bound.set(appSessionId, sessionId)),
     unbind: vi.fn(async (appSessionId: AppSessionId) => void bound.delete(appSessionId)),
   };
   const host = new ReplayHost({ emit, bindings, normalizer: frameUnknownNormalizer, readSource: read });

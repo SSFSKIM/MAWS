@@ -37,7 +37,7 @@ function bridged(readSource?: SourceReader) {
   };
   const bound = new Map<AppSessionId, SessionId>();
   const bindings: ReplayBindings = {
-    bind: (pairs) => pairs.forEach(({ sessionId, appSessionId }) => bound.set(appSessionId, sessionId)),
+    bind: async (pairs) => pairs.forEach(({ sessionId, appSessionId }) => bound.set(appSessionId, sessionId)),
     unbind: async (appSessionId) => void bound.delete(appSessionId),
   };
   const replays = new ReplayHost({ emit, bindings, normalizer: frameUnknownNormalizer, readSource });

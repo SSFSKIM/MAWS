@@ -191,23 +191,33 @@ export class FsService {
       if (displaced !== null && displaced !== appSessionId) moved.add(displaced);
       this.bindings.bind(sessionId, appSessionId);
     }
-    return Promise.all([...moved].map((appSessionId) => this.refollow(appSessionId))).then(() => undefined);
+    // The stale followers leave now, before anything awaits, so a snapshot asked the moment this returns follows the new
+    // transcript rather than answering the old one; followers still starting are dealt with once they have started.
+    const followed = new Set([...moved].filter((appSessionId) => this.dropStaleFollows(appSessionId)));
+    return Promise.all([...moved].map((appSessionId) => this.refollow(appSessionId, followed.has(appSessionId)))).then(() => undefined);
   }
 
-  // Followers of an app id whose engine id changed describe a transcript that is no longer the app session's: they stop,
-  // and the session's own is started again on the transcript the app id is bound to now, if any.
-  private async refollow(appSessionId: AppSessionId): Promise<void> {
-    const mine = (key: string) => key.startsWith(`${appSessionId}\0`);
-    await Promise.allSettled([...this.starting].filter(([key]) => mine(key)).map(([, starting]) => starting));
+  // Stops the followers of an app id that follow a transcript other than the one it is bound to now; answers whether
+  // the session's own follower was among them.
+  private dropStaleFollows(appSessionId: AppSessionId): boolean {
     const current = this.bindings.sessionIdOf(appSessionId);
     let followed = false;
     for (const [key, entry] of this.follows) {
-      if (!mine(key) || entry.sessionId === current) continue;
+      if (!key.startsWith(`${appSessionId}\0`) || entry.sessionId === current) continue;
       followed ||= entry.agentId === null;
       this.follows.delete(key);
       entry.follow.stop();
     }
-    if (followed && current !== null) await this.ensureFollow(appSessionId, null, () => this.followSession(appSessionId, current));
+    return followed;
+  }
+
+  // Followers of an app id whose engine id changed describe a transcript that is no longer the app session's: they stop,
+  // and the session's own is started again on the transcript the app id is bound to now, if any.
+  private async refollow(appSessionId: AppSessionId, followed: boolean): Promise<void> {
+    await Promise.allSettled([...this.starting].filter(([key]) => key.startsWith(`${appSessionId}\0`)).map(([, starting]) => starting));
+    const stillStarting = this.dropStaleFollows(appSessionId);
+    const current = this.bindings.sessionIdOf(appSessionId);
+    if ((followed || stillStarting) && current !== null) await this.ensureFollow(appSessionId, null, () => this.followSession(appSessionId, current));
   }
 
   // Replay runs (M5) bind their ids here and answer the snapshot for them from the runner's materialised events.

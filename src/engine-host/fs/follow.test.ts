@@ -461,7 +461,12 @@ describe('a followed session backfills, then tails its transcript', () => {
     await fs.eventsSnapshot(APP, null);
     const before = delivered().length;
 
-    await fs.bind([{ sessionId: S1 as SessionId, appSessionId: APP }]);
+    // A snapshot asked the moment bind returns, before its promise settles, never answers the old transcript.
+    const rebinding = fs.bind([{ sessionId: S1 as SessionId, appSessionId: APP }]);
+    const early = await fs.eventsSnapshot(APP, null);
+    expect(early.events.every((e) => e.sessionId === S1)).toBe(true);
+    expect(early.events.flatMap((e) => (e.kind === 'user.message' ? [e.content] : []))).toEqual(['after the clear']);
+    await rebinding;
     expect(fs.state()).toMatchObject({ bound: 1, followed: [{ appSessionId: APP, agentId: null }] });
     const states = events('fs.followState').filter((s) => s.appSessionId === APP).map((s) => s.state);
     expect(states).toContain('stopped');

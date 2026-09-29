@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId, MessageUuid, SessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
@@ -129,12 +130,15 @@ describe('session records in the index', () => {
     // The bound is on the work the upserts cost (this process's CPU time; vitest runs each file in its own process), so
     // a loaded machine's scheduling does not decide it.
     const cpu = process.cpuUsage();
+    const started = performance.now();
     index.transaction(() => {
       for (const s of summaries) index.sessions.upsertFromSummary(s);
     });
     const spent = process.cpuUsage(cpu);
+    const elapsed = performance.now() - started;
     expect(index.sessions.list()).toHaveLength(4_000);
     expect((spent.user + spent.system) / 1000).toBeLessThan(500);
+    expect(elapsed).toBeLessThan(2000); // a sanity bound on the wall clock, as M5's instant pin keeps
   });
 
   it('createForLaunch takes a caller-supplied UUID v4 and answers exists with the first record on a collision', () => {
@@ -192,6 +196,27 @@ describe('session records in the index', () => {
       [record.appId, 'live'],
     ]);
 
+    // A record carrying the owner's own state (an exited MAWS session with a pin, say: holder `none`) never yields.
+    const exited = summary();
+    const kept = index.sessions.upsertFromSummary(exited).record;
+    index.sessions.setPinned(kept.appId, true);
+    const claimant = index.sessions.createForLaunch(LAUNCH).record;
+    expect(() => index.sessions.bindEngineId(claimant.appId, exited.sessionId)).toThrow(/already bound/);
+    expect(index.sessions.get(kept.appId)).toMatchObject({ engineSessionId: exited.sessionId, pinned: true });
+    // Nor does one with a draft, a MAWS title, or a last-seen cursor.
+    for (const mark of [
+      (id: AppSessionId) => index.drafts.set(id, { doc: { type: 'doc' }, attachments: [], updatedAt: '2026-09-28T10:00:00.000Z' }),
+      (id: AppSessionId) => index.sessions.update(id, { title: { text: 'Mine', source: 'user' } }),
+      (id: AppSessionId) => index.sessions.markSeen(id, { messageUuid: null, at: '2026-09-28T10:00:00.000Z' }),
+      (id: AppSessionId) => index.sessions.update(id, { archived: true }),
+    ]) {
+      const s2 = summary();
+      const marked = index.sessions.upsertFromSummary(s2).record;
+      mark(marked.appId);
+      expect(() => index.sessions.bindEngineId(claimant.appId, s2.sessionId)).toThrow(/already bound/);
+      expect(index.sessions.get(marked.appId)?.engineSessionId).toBe(s2.sessionId);
+    }
+
     // Two MAWS processes claiming one engine session is a conflict to surface, not to merge.
     const other = index.sessions.createForLaunch(LAUNCH).record;
     index.sessions.applyEngineStatus(other.appId, { holder: { kind: 'self' } });
@@ -230,7 +255,21 @@ describe('session records in the index', () => {
 
     // B's first summary fills the record; A's custom title was the engine's, so the MAWS rename holds.
     const next = index.sessions.upsertFromSummary(summary({ sessionId: b, customTitle: null, lastRecordAt: '2026-09-28T11:00:00.000Z' }));
-    expect(next).toMatchObject({ created: false, advanced: true, record: { appId, title: { text: 'Named in MAWS', source: 'user' } } });
+    expect(next).toMatchObject({ created: false, record: { appId, title: { text: 'Named in MAWS', source: 'user' } } });
+  });
+
+  it('a rebind clears the old transcript\'s engine titles and text, so no two rows carry its title', () => {
+    const { record } = index.sessions.createForLaunch(LAUNCH);
+    const a = summary({ customTitle: 'Old custom', aiTitle: 'Old AI', firstPrompt: 'old prompt', lastAssistantText: 'old reply' });
+    index.sessions.bindEngineId(record.appId, a.sessionId);
+    index.sessions.upsertFromSummary(a);
+    const rebound = index.sessions.bindEngineId(record.appId, sessionIdFor(80));
+    expect(rebound.title).toEqual({ text: '', source: 'none' });
+    expect(index.sessions.list().filter((r) => r.title.text === 'Old custom').map((r) => r.engineSessionId)).toEqual([a.sessionId]);
+    const reader = new DatabaseSync(join(dir.path, 'index.sqlite'), { readOnly: true });
+    const row = { ...reader.prepare('SELECT custom_title, ai_title, first_prompt, last_assistant_text, last_record_at FROM sessions WHERE app_id = ?').get(record.appId) };
+    reader.close();
+    expect(row).toEqual({ custom_title: null, ai_title: null, first_prompt: null, last_assistant_text: null, last_record_at: null });
   });
 
   it('applyEngineStatus updates the engine id, holder, gateway, model and permission mode', () => {
