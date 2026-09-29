@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, SessionId } from '@shared/graph/ids';
 import type { SetupIntent } from '@shared/sessions/intent';
 import { sessionIdFor, summary } from '../../../test/support/index-fixture';
+import { validateEventPayload } from '@shared/ipc/validate';
 import { SessionHarness } from '../../../test/support/session-harness';
 import { DOWN_RELAY } from '../../../test/support/session-host';
 
@@ -179,7 +180,9 @@ describe('session service', () => {
       expect(await h.service.startSession(id, { message: null, options: {} })).toMatchObject({ status: 'starting' });
       await h.settled(id);
       expect(h.host.launches[0]!.gateway).toBe('direct');
-      expect(JSON.stringify(h.events.filter((e) => e.name === 'session.eventBatch'))).toContain('relay:direct_fallback');
+      const notices = h.events.filter((e) => e.name === 'session.eventBatch');
+      expect(JSON.stringify(notices)).toContain('relay:direct_fallback');
+      for (const notice of notices) expect(validateEventPayload('session.eventBatch', notice.payload).ok).toBe(true); // what main's emit sends
       // a gateway model cannot be served direct: the relay card, as under `ask`
       const gatewayModel = await create();
       await h.service.patch(gatewayModel, { model: 'claude/astra' });
