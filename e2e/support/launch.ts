@@ -57,6 +57,10 @@ export async function launchMaws(opts: ShellLaunchOptions = {}): Promise<MawsLau
   env.CLAUDE_CONFIG_DIR = join(userData, 'claude-config');
   mkdirSync(env.CLAUDE_CONFIG_DIR);
   // C4 end
+  // C7 start: no ClaudeUsage data (a directory that does not exist), so the status line never reads the owner's
+  // ~/Library/Application Support/ClaudeUsage; statusline.spec.ts names its own copy of the fixture.
+  env.MAWS_CLAUDE_USAGE_DIR = join(userData, 'claude-usage');
+  // C7 end
   Object.assign(env, opts.env); // C3
 
   let app: ElectronApplication | null = null;
