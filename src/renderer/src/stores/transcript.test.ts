@@ -273,6 +273,10 @@ describe('transcript store', () => {
       b.toolUse('t1', 'Bash', { command: 'cat big.log' }, 'm1', 0);
       b.result('t1', 'head…', { structured: { ...BASH_RESULT('head…'), persistedOutputSize: 188_416 }, spillPath: '/cfg/tool-results/t1.txt' });
       b.end(['u1']);
+      b.turn('u2');
+      b.toolUse('t2', 'Bash', { command: 'ls' }, 'm2', 0);
+      b.result('t2', 'a', { structured: BASH_RESULT('a') });
+      b.end(['u2']);
       const store = createTranscriptStore();
       await store.getState().attach(KEY, pushSource(b.events).source);
       store.getState().expandAll(KEY, { cells: true });
@@ -281,8 +285,11 @@ describe('transcript store', () => {
         return row?.kind === 'cell' && row.detail.kind === 'shell' ? row.detail.spill : null;
       };
       expect(spill()).toEqual({ path: '/cfg/tool-results/t1.txt', bytes: 188_416, state: 'not_loaded', content: null });
+      const before = store.getState().rows(KEY);
       store.getState().setSpill(KEY, '/cfg/tool-results/t1.txt', { state: 'loading' });
       expect(spill()).toMatchObject({ state: 'loading', content: null });
+      // Only the spilled cell's row is rebuilt; the other turn's cell keeps its reference.
+      expect(store.getState().rows(KEY).filter((row, i) => row !== before[i] && row.kind !== 'time').map((row) => row.id)).toEqual(['cell:t1']);
       store.getState().setSpill(KEY, '/cfg/tool-results/t1.txt', { state: 'loaded', content: 'the whole log' });
       expect(spill()).toMatchObject({ state: 'loaded', content: 'the whole log' });
       store.getState().setSpill(KEY, '/cfg/tool-results/t1.txt', { state: 'failed', content: null, error: 'path outside the engine store' });

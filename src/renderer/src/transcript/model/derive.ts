@@ -521,7 +521,7 @@ function overlay(ui: TranscriptUi, rows: Row[]): Row[] {
       const undo = ui.receipts.get(row.id);
       if (undo) replace(i, { ...row, ...receiptFields(undo) });
     } else if (ui.spills.size > 0 && row.kind === 'cell') {
-      replace(i, { ...row, ...withSpillLoad(row, ui.spills) } as Row);
+      replace(i, withSpillLoad(row, ui.spills) as Row); // a standalone cell's row is the cell with `kind: 'cell'`
     } else if (ui.spills.size > 0 && row.kind === 'group') {
       const cells = row.cells.map((cell) => withSpillLoad(cell, ui.spills));
       if (cells.some((cell, n) => cell !== row.cells[n])) replace(i, { ...row, cells });
