@@ -46,7 +46,7 @@ function body(row: Row) {
 }
 
 // The first row a turn shows: where a revealed branch's turn says it is not in context.
-const opensTurn = (row: Row) => row.kind === 'user' || (row.kind === 'divider' && row.origin === 'engine');
+const opensTurn = (row: Row) => row.kind === 'user' || (row.kind === 'divider' && row.origin !== 'human'); // engine and peer turns open with their divider
 
 export function RowView({ row }: { row: Row }) {
   const { idPrefix, storeKey } = useTranscriptContext();

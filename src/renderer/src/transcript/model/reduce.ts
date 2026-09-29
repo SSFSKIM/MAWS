@@ -250,6 +250,7 @@ class Batch {
   // `turns`, its retained events (the prompt's message) join the running turn at this point, so its bubble renders
   // there in event order as a steer, and its uuid names the running turn, so the result naming both closes it.
   fold(pending: TurnState, into: TurnId): void {
+    if (!this.state.order.includes(pending.id)) return; // hidden by a rewind: it stays in its hidden branch, unfolded
     const target = this.touch(into);
     for (const event of pending.events) {
       this.push(target, event);
@@ -334,6 +335,14 @@ function apply(batch: Batch, event: SessionEvent): void {
         if (existing.accepted || existing.state !== 'open') return;
         const running = state.current === null ? null : state.turns.get(state.current)!;
         if (running !== null && running.id !== id && running.state === 'open' && running.accepted) return batch.fold(existing, running.id);
+        // Run order over write position: if a turn opened after this prompt was written and has run since, the
+        // prompt's turn moves to the end of `order` as it starts (with nothing in between it stays where written).
+        const order = state.order.indexOf(id);
+        if (order >= 0 && state.order.slice(order + 1).some((later) => state.turns.get(later)!.accepted)) {
+          const moved = batch.order();
+          moved.splice(order, 1);
+          moved.push(id);
+        }
         const turn = batch.touch(id);
         turn.accepted = true;
         turn.startedAt = event.at;
@@ -390,8 +399,8 @@ function apply(batch: Batch, event: SessionEvent): void {
         return;
       }
       // *Turn boundaries on this engine*: a prompt with no turn yet is a pending turn of its own, after the running one
-      // (nothing folds into a running turn); with no turn running it is current, so a disk turn that never carries a
-      // `turn.started` still gathers its answer.
+      // (a `now` prompt never folds; a `next` prompt folds at its `started`); with no turn running it is current, so a
+      // disk turn that never carries a `turn.started` still gathers its answer.
       const id = event.messageUuid === null ? turnIdOf.ofEvent(event.id) : turnIdOf.ofMessage(event.messageUuid);
       const turn = batch.open(id, 'human', event.at, false);
       if (event.messageUuid !== null) index.messages.set(event.messageUuid, id);

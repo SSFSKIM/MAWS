@@ -146,4 +146,25 @@ describe('Transcript', () => {
     await waitFor(() => expect(document.querySelectorAll('[data-muted]')).toHaveLength(0));
     expect(place()).toEqual(before);
   });
+
+  // A turn the owner did not start opens with its divider (no user row), a peer turn as much as an engine turn.
+  it('a revealed peer turn without a user row says Not in context on its divider', async () => {
+    const b = builder();
+    b.turn('u1');
+    b.text('m1', 0, 'One');
+    b.end(['u1']);
+    b.turn('u2');
+    b.text('m2', 0, 'Two');
+    b.end(['u2']);
+    b.emit('turn.started', { userMessageUuid: null, origin: null });
+    b.text('m3', 0, 'Peer again');
+    b.end([], { origin: 'peer' });
+    b.emit('boundary.rewind', { targetMessageUuid: uuid('u2'), precedingAssistantUuid: uuid('m1-u0'), prefillText: 'prompt u2' });
+    const key = await mounted(b.events);
+    const boundaryId = useTranscriptStore.getState().rows(key).find((row) => row.kind === 'boundary')!.id;
+    fireEvent.click(within(document.querySelector<HTMLElement>(`[data-row-id="${boundaryId}"]`)!).getByRole('button', { name: 'Show' }));
+    await waitFor(() => expect(document.querySelectorAll('[data-muted]').length).toBeGreaterThan(0));
+    const labelled = [...document.querySelectorAll<HTMLElement>('[data-muted]')].filter((row) => row.textContent?.includes('Not in context')).map((row) => row.dataset.kind);
+    expect(labelled).toEqual(['user', 'divider']);
+  });
 });

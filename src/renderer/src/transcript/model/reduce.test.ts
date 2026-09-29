@@ -68,7 +68,8 @@ describe('turn boundaries', () => {
   });
 
   // *Turn boundaries on this engine* (C3's live acceptance): the bubble shows at the write, the turn is accepted at
-  // `command_lifecycle started`, nothing folds into a running turn, and a prompt the engine drops closes without work.
+  // `command_lifecycle started`, a `now` prompt never folds (a `next` prompt folds at its `started`), and a prompt the
+  // engine drops closes without work.
   const prompt = (b: ReturnType<typeof builder>, u: string, text = `prompt ${u}`) =>
     b.emit('user.message', { messageUuid: uuid(u), content: text, isReplay: false, isSynthetic: false, origin: 'human', bash: null });
 
@@ -167,6 +168,47 @@ describe('turn boundaries', () => {
     expect(state.order).toEqual([turnId.ofMessage(uuid('u1')), turnId.ofMessage(uuid('u2'))]);
     expect(state.current).toBe(turnId.ofMessage(uuid('u2')));
     expect(rowsOf(state).filter((row) => row.kind === 'user').map((row) => (row as Extract<Row, { kind: 'user' }>).steer)).toEqual([false, false]);
+  });
+
+  it('a pending prompt hidden by a rewind stays unfolded when its started arrives inside an open turn', () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('t1', 'Bash', { command: 'sleep 1' });
+    prompt(b, 'u2', 'queued');
+    b.emit('boundary.rewind', { targetMessageUuid: uuid('u2'), precedingAssistantUuid: null, prefillText: 'queued' });
+    b.emit('turn.started', { userMessageUuid: uuid('u2'), origin: 'human' });
+    const state = reduce(b.events);
+    const [one, two] = [turnId.ofMessage(uuid('u1')), turnId.ofMessage(uuid('u2'))];
+    expect(state.order).toEqual([one]);
+    expect(state.hidden?.turns).toEqual([two]);
+    expect(state.turns.has(two)).toBe(true);
+    expect(state.turns.get(one)!.events.some((event) => event.kind === 'user.message' && event.messageUuid === uuid('u2'))).toBe(false);
+  });
+
+  // The ordering ruling: at acceptance a pending prompt keeps its written place unless another turn opened after it
+  // was written and has run since, in which case it moves to the end, so the transcript reads in run order.
+  it('a prompt accepted after another turn ran in between moves to the end of order; with nothing in between it stays', () => {
+    const b = builder();
+    prompt(b, 'p');
+    b.emit('turn.started', { userMessageUuid: null, origin: 'engine' });
+    b.text('e1', 0, 'The engine continued');
+    b.end([], { origin: 'task-notification' });
+    const engine = b.events.find((event) => event.kind === 'turn.started')!;
+    b.emit('turn.started', { userMessageUuid: uuid('p'), origin: 'human' });
+    b.text('m1', 0, 'Answer to p');
+    let state = reduce(b.events);
+    expect(state.order).toEqual([turnId.ofEvent(engine.id), turnId.ofMessage(uuid('p'))]);
+    expect(state.current).toBe(turnId.ofMessage(uuid('p')));
+    expect(find(rowsOf(state), 'assistant_text', 1)).toMatchObject({ turnId: turnId.ofMessage(uuid('p')), markdown: 'Answer to p' });
+
+    const quiet = builder();
+    quiet.turn('u0');
+    quiet.text('m0', 0, 'Earlier');
+    quiet.end(['u0']);
+    prompt(quiet, 'q');
+    quiet.emit('turn.started', { userMessageUuid: uuid('q'), origin: 'human' });
+    state = reduce(quiet.events);
+    expect(state.order).toEqual([turnId.ofMessage(uuid('u0')), turnId.ofMessage(uuid('q'))]);
   });
 
   it('a cancel naming a pending prompt marks its bubble dropped and closes its turn without work; later lifecycles change nothing', () => {
@@ -361,6 +403,18 @@ describe('ANSI escapes in assistant text', () => {
     b.turn('u1');
     b.thinking('m1', 0, 'plain \u001b[2mthought\u001b[0m');
     expect(find(rows(b.events), 'thinking').text).toBe('plain thought');
+  });
+
+  it('an OSC hyperlink split across deltas never leaves its parameters in the live row', () => {
+    const b = builder();
+    b.turn('u1');
+    const piece = (text: string) =>
+      b.emit('assistant.block.delta', { apiMessageId: api('m9'), blockIndex: 0, blockType: 'text', textDelta: text, thinkingDelta: null, inputJsonDelta: null, userMessageUuid: null });
+    piece('See \u001b]8;;https://ex');
+    piece('ample.com\u001b\\docs');
+    piece('\u001b]8;;\u001b\\ now.');
+    const state = reduce(b.events);
+    expect(find(rowsOf(state), 'assistant_text')).toMatchObject({ live: true, markdown: 'See docs now.' });
   });
 });
 
