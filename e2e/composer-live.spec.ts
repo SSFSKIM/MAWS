@@ -556,10 +556,16 @@ test('bash, memory, paste, history recall, the palette, the status line and + di
       // C11 end
       await page.waitForTimeout(5_000);
       await idle(page, m.id);
-      const answer = framesOf(rowsOf(m.journalPath), 'in')
-        .filter(({ frame }) => frame.type === 'assistant' && (frame.message as { model?: string } | undefined)?.model === '<synthetic>')
-        .map(({ seq, frame }) => ({ seq, text: JSON.stringify(frame.message?.content) }))
+      // C11 start: the widget sets the model with the set_model control, not a `/model` prompt answered by a synthetic
+      // assistant frame, so the observation is that control's request and the engine's answer to it
+      const setModelRequest = framesOf(rowsOf(m.journalPath), 'out')
+        .filter(({ frame }) => frame.type === 'control_request' && (frame.request as { subtype?: string } | undefined)?.subtype === 'set_model')
         .at(-1);
+      const setModelAnswer = framesOf(rowsOf(m.journalPath), 'in').find(
+        ({ frame }) => frame.type === 'control_response' && (frame.response as { request_id?: string } | undefined)?.request_id === setModelRequest?.frame.request_id,
+      );
+      const setModel = { request: setModelRequest ? { seq: setModelRequest.seq, request: setModelRequest.frame.request } : null, answer: setModelAnswer ? { seq: setModelAnswer.seq, response: setModelAnswer.frame.response } : null };
+      // C11 end
       const modelAfter = await pane.getByRole('button', { name: /^Model / }).getAttribute('aria-label');
       const statusAfter = (await statusOf(page, m.id)).model;
       // the engine applies the model from its next turn: one more prompt, then its init and the chip
@@ -568,7 +574,7 @@ test('bash, memory, paste, history recall, the palette, the status line and + di
       await idle(page, m.id);
       const lastInit = framesOf(rowsOf(m.journalPath), 'in').filter(({ frame }) => frame.type === 'system' && frame.subtype === 'init').at(-1)?.frame.model;
       const modelNextTurn = await pane.getByRole('button', { name: /^Model / }).getAttribute('aria-label');
-      observe('misc.palette', { compactRow, compact, modelRow, modelBefore, answer, modelAfter, statusAfter, lastInit, modelNextTurn, statusNextTurn: (await statusOf(page, m.id)).model });
+      observe('misc.palette', { compactRow, compact, modelRow, modelBefore, setModel /* C11: was the synthetic answer */, modelAfter, statusAfter, lastInit, modelNextTurn, statusNextTurn: (await statusOf(page, m.id)).model });
     });
 
     await test.step('requesting auto after Haiku', async () => {
