@@ -4,7 +4,7 @@
 // loose rows placed after the turn they followed and time separators inserted by the thresholds in time.ts.
 import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, RequestId, TaskId, ToolUseId } from '@shared/graph/ids';
-import { presentationOf, tableRowOf } from './classify';
+import { MCP_TOOL, presentationOf, tableRowOf } from './classify';
 import { cellOf, editCounts, filePathOf, hookCell, type HookRecord, type ToolRecord, type TurnContext } from './cells';
 import { agentMessageCopy, boundaryCopy, groupSummary, processExitCopy, reconnectCopy, retryCopy, subagentSentence } from './copy';
 import { glyphFor } from './glyphs';
@@ -492,23 +492,32 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
       ...receiptFields(RECEIPT_APPLIED), // the reader's undo state is laid over in rowsOfTurn
     });
   }
-  return { rows, summary, cells, work: workOf(cells, files, tools, subagents) };
+  return { rows, summary, cells, work: workOf(tools, cells, subagents) };
 }
 
-// What the turn did whatever was disclosed. Tools are counted per call from the tool records, so the calls a merged
-// read cell folds together (`Read`, `LS`, `NotebookRead`) each count under their own name; thinking and hook cells are
-// no tool calls; child agents' calls live in `children` and never reach here.
-function workOf(cells: Cell[], files: ChangedFile[], tools: Map<ToolUseId, ToolRecord>, subagents: SubagentGroup[]): TurnWork {
-  const filesRead = new Set<string>();
-  for (const cell of cells) if (cell.detail.kind === 'read') for (const file of cell.detail.files) filesRead.add(file.path);
-  const counts = new Map<string, { name: string; category: ToolCategory; count: number }>();
-  for (const { use } of tools.values()) {
-    const tool = counts.get(use.toolName) ?? { name: use.toolName, category: tableRowOf(use.toolName).category, count: 0 };
-    tool.count += 1;
-    counts.set(use.toolName, tool);
+// What the turn did whatever was disclosed, one entry per tool use from the turn's tool records (so the calls a merged
+// read cell folds together keep their own names; thinking and hooks are no tool uses; child agents' calls live in
+// `children` and never reach here). A file counts as read or edited once its call completed without an error or a
+// denial: a refused or failed call touched nothing. An edit carries its cell's own detail (hunks, counts, change).
+const READS = new Set(['Read', 'Glob', 'Grep', 'LS', 'NotebookRead']);
+const EDITS = new Set(['Edit', 'MultiEdit', 'Write', 'NotebookEdit']);
+
+function workOf(tools: Map<ToolUseId, ToolRecord>, cells: Cell[], subagents: SubagentGroup[]): TurnWork {
+  const edits = new Map(cells.flatMap((cell) => (cell.detail.kind === 'edit' && cell.toolUseId !== null ? [[cell.toolUseId, cell.detail] as const] : [])));
+  const files: TurnWork['files'] = [];
+  const used: TurnWork['tools'] = [];
+  for (const { use, result } of tools.values()) {
+    const input = record(use.input);
+    const { category } = tableRowOf(use.toolName);
+    const mcp = MCP_TOOL.exec(use.toolName);
+    used.push({ name: use.toolName, category, at: use.at, url: use.toolName === 'WebFetch' && typeof input.url === 'string' ? input.url : null, mcp: mcp ? { server: mcp[1], tool: mcp[2] } : null });
+    const path = filePathOf(input);
+    const completed = result !== null && !result.isError && result.denial === null;
+    const kind = READS.has(use.toolName) ? 'read' : EDITS.has(use.toolName) ? 'edited' : null;
+    if (path && completed && kind) files.push({ path, use: kind, at: use.at, edit: kind === 'edited' ? (edits.get(use.toolUseId) ?? null) : null });
   }
   const agents = subagents.flatMap((group) => group.refs.map((ref) => ({ ...ref, status: group.statuses.get(ref.taskId) ?? ('started' as const) })));
-  return { filesRead: [...filesRead], filesEdited: files, tools: [...counts.values()], subagents: agents };
+  return { files, tools: used, subagents: agents };
 }
 
 // A turn's work, read from the per-turn memo (derived with its rows if the memo is stale).

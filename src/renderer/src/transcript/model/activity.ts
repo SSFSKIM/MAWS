@@ -24,32 +24,34 @@ export function subagentActivity(turn: TurnState, ref: SubagentRef): SubagentAct
   return { lastTool, finished };
 }
 
-// What a turn did, whatever the reader disclosed (C8's ask, Public surface): the files it read and edited, the tools it
-// used, its children. The disclosed rows drop cells and subagent rows when a turn collapses; this projection does not.
-// A selector over the per-turn derivation: the work is computed with the turn's rows and memoised beside them
-// (derive.ts, `turnWork`); here it gains the turn's identity and is kept per turn id and version, so a ui change that
-// re-derives the rows leaves the entry as it was.
+// What a turn did, whatever the reader disclosed (C8's ask, Public surface; the shape of C8a's proposal under C6's
+// names): the files it read and edited and the tools it used, one entry per use, and its children. The disclosed rows
+// drop cells and subagent rows when a turn collapses; this projection does not. A selector over the per-turn
+// derivation: the work is computed with the turn's rows and memoised beside them (derive.ts, `turnWork`), and each
+// entry is kept on the `TurnState` reference, which a turn keeps until an event changes it, so a ui change recomputes
+// nothing.
 export interface TurnActivity extends TurnWork {
   turnId: TurnId;
   origin: 'human' | 'engine';
   state: TurnState['state'];
+  startedAt: string;
+  endedAt: string | null;
 }
 
-// Both memos hang off the lineage's shared per-turn memo map, so every state of one lineage shares them.
-const byTurn = new WeakMap<TranscriptState['memo'], Map<TurnId, { version: number; activity: TurnActivity }>>();
+const byTurn = new WeakMap<TurnState, TurnActivity>();
+// The list, per lineage (its shared per-turn memo map): the same array while no turn changed.
 const lists = new WeakMap<TranscriptState['memo'], TurnActivity[]>();
 
 // One entry per turn in `state.order`; an unchanged turn keeps its entry, and an unchanged list is the same array.
 export function turnActivity(state: TranscriptState): TurnActivity[] {
-  let memo = byTurn.get(state.memo);
-  if (!memo) byTurn.set(state.memo, (memo = new Map()));
   const list = state.order.map((id) => {
     const turn = state.turns.get(id)!;
-    let entry = memo.get(id);
-    if (!entry || entry.version !== turn.version) {
-      memo.set(id, (entry = { version: turn.version, activity: { turnId: turn.id, origin: turn.origin, state: turn.state, ...turnWork(state, turn) } }));
+    let activity = byTurn.get(turn);
+    if (!activity) {
+      activity = { turnId: turn.id, origin: turn.origin, state: turn.state, startedAt: turn.startedAt, endedAt: turn.endedAt, ...turnWork(state, turn) };
+      byTurn.set(turn, activity);
     }
-    return entry.activity;
+    return activity;
   });
   const previous = lists.get(state.memo);
   if (previous && previous.length === list.length && previous.every((entry, i) => entry === list[i])) return previous;

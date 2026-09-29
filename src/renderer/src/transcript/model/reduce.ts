@@ -7,7 +7,7 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, ApiMessageId, EventId, MessageUuid, RequestId, SessionId, TaskId, ToolUseId } from '@shared/graph/ids';
 import { toolUseOf } from '@shared/graph/ids';
 import { rowId, turnId as turnIdOf } from './keys';
-import type { ChangedFile, Row, RowId, Spill, SubagentRef, SubagentStatus, ToolCategory, TurnId } from './rows';
+import type { CellDetail, Row, RowId, Spill, SubagentRef, SubagentStatus, ToolCategory, TurnId } from './rows';
 import { isInterruptionMarker, isLocalCommand } from './user-text';
 
 type Event<K extends SessionEvent['kind']> = Extract<SessionEvent, { kind: K }>;
@@ -79,9 +79,8 @@ export interface SpillLoad {
 // What a turn did whatever the reader disclosed (the activity projection's per-turn part, model/activity.ts), computed
 // by the same per-turn derivation as its rows and memoised beside them.
 export interface TurnWork {
-  filesRead: string[]; // paths in first-seen order, each once
-  filesEdited: ChangedFile[]; // the receipt's files, with its counts
-  tools: { name: string; category: ToolCategory; count: number }[]; // one entry per tool name, a call each, first-seen order
+  files: { path: string; use: 'read' | 'edited'; at: string; edit: Extract<CellDetail, { kind: 'edit' }> | null }[]; // one entry per completed use, first-seen order: exploration calls read, files calls edited (with the edit cell's own detail)
+  tools: { name: string; category: ToolCategory; at: string; url: string | null; mcp: { server: string; tool: string } | null }[]; // one entry per tool use, each under its own name
   subagents: (SubagentRef & { status: SubagentStatus })[]; // one per child, with its own status
 }
 
