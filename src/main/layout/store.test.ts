@@ -5,7 +5,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { record } from '../../../test/support/builders';
 import { SessionReadModel, type ReadModelWriter } from '../sessions/read-model';
-import { dropPanelKeysOfRemovedSessions, LayoutFileStore } from './store';
+import { dropPanelKeysOfRemovedSessions, LayoutFileStore, PANEL_DROP_DELAY_MS, registerLayoutHandlers } from './store';
+
+const handlers = vi.hoisted(() => new Map<string, (input: unknown) => unknown>());
+vi.mock('../ipc/router', () => ({ registerMainHandler: (name: string, handler: (input: unknown) => unknown) => void handlers.set(name, handler) }));
 
 // A disk that fills up on demand: while `diskFull` is set, every write the store makes fails with ENOSPC.
 const disk = vi.hoisted(() => ({ full: false }));
@@ -103,7 +106,9 @@ describe('layout file store', () => {
 });
 
 describe('a removed session’s panel key', () => {
-  it('leaves layout.json when the read model sees the session removed, and only that key', () => {
+  beforeEach(() => vi.useFakeTimers());
+
+  it('leaves layout.json once the renderer has heard the removal, and only that key', () => {
     const store = new LayoutFileStore(file);
     const model = new SessionReadModel('index');
     let writer!: ReadModelWriter;
@@ -119,10 +124,42 @@ describe('a removed session’s panel key', () => {
     expect(store.get('panel.app-a')).toEqual(panel);
 
     writer.observeRemoved('app-a' as AppSessionId);
+    expect(store.get('panel.app-a')).toEqual(panel); // the source's tick has not told the renderer yet
+    vi.advanceTimersByTime(PANEL_DROP_DELAY_MS);
     expect(store.list().sort()).toEqual(['panel.app-b', 'panel.pinned']);
     expect(Object.keys(JSON.parse(readFileSync(file, 'utf8'))).sort()).toEqual(['panel.app-b', 'panel.pinned']);
     writer.observeRemoved('app-c' as AppSessionId); // no key of its own: nothing to write
+    vi.advanceTimersByTime(PANEL_DROP_DELAY_MS);
     expect(new LayoutFileStore(file).list().sort()).toEqual(['panel.app-b', 'panel.pinned']);
+  });
+
+  it('keeps the key of a session removed and recreated under the same id before the delete falls due', () => {
+    const store = new LayoutFileStore(file);
+    const model = new SessionReadModel('index');
+    let writer!: ReadModelWriter;
+    model.register({ start: (w) => ((writer = w), () => {}) });
+    const stop = dropPanelKeysOfRemovedSessions(model, store);
+    store.set('panel.app-a', { tabs: [], activeTabId: null });
+    writer.observeRecord(record('app-a'));
+    writer.observeRemoved('app-a' as AppSessionId);
+    writer.observeRecord(record('app-a')); // createForLaunch with the caller's id, within one tick
+    vi.advanceTimersByTime(PANEL_DROP_DELAY_MS);
+    expect(store.get('panel.app-a')).not.toBeNull();
+    writer.observeRemoved('app-a' as AppSessionId);
+    stop(); // stopping cancels a delete not yet due
+    vi.advanceTimersByTime(PANEL_DROP_DELAY_MS);
+    expect(store.get('panel.app-a')).not.toBeNull();
+  });
+
+  it('layout.set refuses a panel key of a session main does not know, so a write in flight at removal cannot recreate it', () => {
+    const store = new LayoutFileStore(file);
+    registerLayoutHandlers(store, (id) => id === 'app-a');
+    const set = handlers.get('layout.set')!;
+    set({ key: 'panel.app-a', value: { tabs: [], activeTabId: null } });
+    expect(() => set({ key: 'panel.app-gone', value: { tabs: [], activeTabId: null } })).toThrow(/no such session/);
+    set({ key: 'panel.pinned', value: [] });
+    set({ key: 'regions', value: {} });
+    expect(store.list().sort()).toEqual(['panel.app-a', 'panel.pinned', 'regions']);
   });
 
   it('a failed delete is logged, never thrown into the read model', () => {
@@ -134,7 +171,8 @@ describe('a removed session’s panel key', () => {
     dropPanelKeysOfRemovedSessions(model, store);
     store.set('panel.app-a', { tabs: [], activeTabId: null });
     disk.full = true;
-    expect(() => writer.observeRemoved('app-a' as AppSessionId)).not.toThrow();
+    writer.observeRemoved('app-a' as AppSessionId);
+    expect(() => vi.advanceTimersByTime(PANEL_DROP_DELAY_MS)).not.toThrow();
     expect(String(error.mock.calls[0][0])).toContain('panel.app-a');
   });
 });

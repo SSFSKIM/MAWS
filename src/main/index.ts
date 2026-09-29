@@ -83,11 +83,11 @@ app.whenReady().then(() => {
 
   // ---- C5: layout store and the read side (launch mode, read model, stub source in scenario mode) ----
   const layout = new LayoutFileStore(join(app.getPath('userData'), 'layout.json'));
-  registerLayoutHandlers(layout);
   registerOpenExternal();
   // A relative scenario path is the repository's: the working directory of `pnpm dev`, `pnpm dev:stub` and the smoke's
   // launch alike (`app.getAppPath()` is `out/main` when the built app is launched by file, as the smoke does).
   const sessions = startSessions({ env: process.env, packaged: app.isPackaged, appRoot: process.cwd(), hosts, indexSource });
+  registerLayoutHandlers(layout, (appSessionId) => sessions.model.record(appSessionId) !== null);
   dropPanelKeysOfRemovedSessions(sessions.model, layout);
   app.on('will-quit', () => {
     layout.flush();
