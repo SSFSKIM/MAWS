@@ -68,6 +68,10 @@ const registrations = new Map<string, symbol>(); // the current registration of 
 let pending: PendingAdd[] = [];
 let restoredLogs = new Set<string>();
 let barrierPassed = false; // the barrier runs once per module lifetime (an HMR reload of this file starts again)
+// A pending add whose reservation landed on another tab at the barrier (two scopes' reservations of one single-instance
+// tool meeting on one restored pin): its caller's id resolves to that tab.
+const aliases = new Map<string, string>();
+const resolveId = (tabId: string): string => aliases.get(tabId) ?? tabId;
 let mounted: Pick<PanelHostProps, 'appSessionId' | 'onChange' | 'onTogglePinned'> | null = null;
 
 const LOG_TOOL = 'log';
@@ -89,7 +93,7 @@ const allRefs = (state: LayoutState = layout()): PanelTabRef[] => [...state.pane
 
 // ---- instances ---------------------------------------------------------------------------------------------------------
 
-export const instanceOf = (tabId: string): Instance | undefined => instances.get(tabId);
+export const instanceOf = (tabId: string): Instance | undefined => instances.get(resolveId(tabId));
 export const instanceIds = (): string[] => [...instances.keys()];
 
 function createInstance(ref: PanelTabRef, tool: AnyTool, init: PanelToolInit<unknown>): Instance {
@@ -355,6 +359,7 @@ function passBarrier(): void {
     const tool = usePanelHost.getState().tools.get(entry.toolId);
     if (!tool) continue; // unregistered while it waited
     const tabId = applyAdd({ tool, target: entry.appSessionId, params: entry.params, pin: entry.pin, activate: entry.activate }, entry.id, restored);
+    if (tabId !== entry.id) aliases.set(entry.id, tabId);
     for (const queued of entry.opens) {
       if (queued.appSessionId !== null && !known(queued.appSessionId)) continue;
       const instance = instances.get(tabId);
@@ -418,7 +423,8 @@ export function setMountedHost(props: Pick<PanelHostProps, 'appSessionId' | 'onC
 
 // The pin glyph: C5 moves the ref between the lists; unpinning takes it out of every other session's list, so their
 // selections are repaired.
-export function togglePinned(tabId: string): void {
+export function togglePinned(id: string): void {
+  const tabId = resolveId(id);
   const shown = shownSession();
   if (shown === null) return;
   const toggle = () => {
@@ -465,7 +471,8 @@ export function registerPanelTool<S, P>(tool: PanelTool<S, P>): () => void {
 
 export const panelHost = {
   addTool,
-  selectTab(tabId: string): void {
+  selectTab(id: string): void {
+    const tabId = resolveId(id);
     const at = locate(tabId);
     if (!at) return;
     const shown = shownSession();
@@ -473,7 +480,8 @@ export const panelHost = {
     writeRefs(owner, (refs) => refs, tabId);
     if (owner === shown) requestFocus(tabId);
   },
-  closeTab(tabId: string): Promise<boolean> {
+  closeTab(id: string): Promise<boolean> {
+    const tabId = resolveId(id);
     const instance = instances.get(tabId);
     if (!instance) {
       removeRefs(new Set([tabId]));
@@ -520,6 +528,7 @@ export function resetPanelHost(): void {
   pending = [];
   restoredLogs = new Set();
   barrierPassed = false;
+  aliases.clear();
   mounted = null;
   usePanelHost.setState(initialState());
 }

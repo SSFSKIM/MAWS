@@ -587,6 +587,29 @@ describe('panel host transitions', () => {
       expect(panelOf(B)!.activeTabId).toBe('t:pin00000');
       expect(spies.updatePanelTabs.mock.calls.filter(([target]) => target === B)).toEqual([]);
     });
+
+    it('a reservation that lands on another reservation’s tab at the barrier resolves to that tab for selectTab and closeTab', async () => {
+      connect();
+      const { tool, probe } = probeTool('session-info', { multiInstance: false });
+      register(tool);
+      const bridge = heldBridge(persisted({ 'panel.pinned': [ref('session-info:restored', true)] }));
+      let first = '';
+      let second = '';
+      await hydrateHeld(bridge, () => {
+        // Two scopes (A's own list; the pins, from B), so two reservations; both reach the one restored pin.
+        first = panelHost.addTool('session-info', { appSessionId: A, params: 'p1', activate: false });
+        second = panelHost.addTool('session-info', { appSessionId: B, pin: true, params: 'p2', activate: false });
+        expect(second).not.toBe(first);
+      });
+      expect(pinIds()).toEqual([first]);
+      expect(probe.created).toEqual([expect.objectContaining({ instanceId: first, params: 'p1' })]);
+      expect(probe.opens).toEqual([{ id: first, params: 'p2' }]);
+      act(() => panelHost.selectTab(second));
+      expect(panelOf(A)!.activeTabId).toBe(first);
+      await act(async () => void expect(await panelHost.closeTab(second)).toBe(true));
+      expect(pinIds()).toEqual([]);
+      expect(probe.disposed).toEqual([first]);
+    });
   });
 
   describe('selection repair when a pin leaves', () => {
