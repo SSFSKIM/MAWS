@@ -157,6 +157,20 @@ describe('main ipc router', () => {
     expect(log).toHaveBeenCalledOnce();
   });
 
+  // C4 (M5): session.replay.start fails with the host dispatch's own error (a `timeout` is not an `internal`).
+  it('answers the IpcError a handler fails with through CommandFailure, code and all, without logging it as a fault', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    router.registerMainHandler('settings.get', () => {
+      throw new router.CommandFailure({ code: 'timeout', message: 'engine-host did not answer session.replay.launch within 10 s' });
+    });
+    await expect(invoke(appWindow(), 'settings.get')).resolves.toEqual({
+      ok: false,
+      error: { code: 'timeout', message: 'engine-host did not answer session.replay.launch within 10 s' },
+    });
+    expect(log).not.toHaveBeenCalled();
+  });
+  // end C4
+
   it('refuses a handler for a host-owned command or a second handler for the same command', () => {
     expect(() => router.registerMainHandler('engine.ping' as never, () => ({}) as never)).toThrow(
       'engine.ping is owned by engine-host, not main',

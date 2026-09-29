@@ -13,6 +13,8 @@ import { registerMainHandler } from './ipc/router';
 // C4 start (emit comes with C3's imports)
 import { Index } from './index/index';
 import { registerIndexHandlers } from './index/register';
+import { registerReplayHandlers } from './index/replay';
+import { appRoot, seedReplayFixtures } from './index/replay-fixtures';
 import { IndexSessionSource, type ReadModelWriter } from './index/source';
 // C4 end
 
@@ -46,7 +48,12 @@ app.whenReady().then(() => {
   registerIndexHandlers(index);
   const noReadModel: ReadModelWriter = { observeRecord() {}, observeRemoved() {}, observeProject() {}, observeProjectRemoved() {}, setDigest() {} };
   const stopSource = new IndexSessionSource(index, hosts, { emit }).start(noReadModel);
+  // Replay (M5): started here, run in the engine host; the fixtures table lists the checkout's probe journals and
+  // transcripts (none in a packaged app).
+  const replays = registerReplayHandlers(index, hosts);
+  if (index.unavailable === null) seedReplayFixtures(index.fixtures, appRoot(app.getAppPath()));
   app.on('will-quit', () => {
+    replays.dispose();
     stopSource();
     index.close();
   });

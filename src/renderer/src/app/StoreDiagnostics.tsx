@@ -3,9 +3,10 @@
 // it is watched, the counts (projects from the index's project list, sessions and scan time from the store scan), and
 // one row per session record from the index (`session.list`, M4) with its title and its source, its directory, a pin,
 // and its holder badge. A row can be followed (M3): the detail then reads the chain (`chain N · leaf <uuid8>`) and the
-// last twenty events. C5 replaces it as the user-facing surface.
+// last twenty events. Replay controls (M5) start a fixture and drive its run. C5 replaces it as the user-facing surface.
 import { useEffect, useMemo } from 'react';
 import type { FsState } from '@shared/ipc/schema/fs';
+import { ReplayDiagnostics } from './ReplayDiagnostics';
 import {
   describeEvent,
   describeFollow,
@@ -38,6 +39,7 @@ export function StoreDiagnostics() {
           {describeScan(scan, projects?.length ?? null)}
         </output>
       </div>
+      <ReplayDiagnostics />
       {followed && <FollowDetail followed={followed} title={followedRecord ? titleOf(followedRecord) : followed.appSessionId} />}
       <ul aria-label="Discovered sessions" className="max-h-96 overflow-auto">
         {rows.map((record) => {

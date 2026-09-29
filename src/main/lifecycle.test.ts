@@ -37,6 +37,8 @@ vi.mock('./index/index', () => ({ Index: class { close = c4.close; } }));
 vi.mock('./index/register', () => ({ registerIndexHandlers: vi.fn() }));
 vi.mock('./index/source', () => ({ IndexSessionSource: class { start = () => ((c4.started += 1), c4.stopSource); } }));
 vi.mock('./ipc/events', () => ({ emit: vi.fn() }));
+vi.mock('./index/replay', () => ({ registerReplayHandlers: () => ({ dispose: vi.fn() }) }));
+vi.mock('./index/replay-fixtures', () => ({ appRoot: (path: string) => path, seedReplayFixtures: vi.fn() }));
 // end C4
 
 beforeAll(async () => {

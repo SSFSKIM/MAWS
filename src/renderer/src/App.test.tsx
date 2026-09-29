@@ -42,6 +42,8 @@ function fakeMain(initial: SettingsState['settings']['theme']) {
         return { sessions: [], revision: 1 };
       case 'session.projects.list':
         return { projects: [{ id: 'p1', name: 'maws-accept', directory: '/private/tmp/maws-accept', order: 0, createdAt: '2026-09-28T10:00:00.000Z' }], revision: 1 };
+      case 'session.replay.fixtures':
+        return { fixtures: [{ id: 'f1', name: 'workflow', kind: 'journal', path: '/repo/spikes/protocol-probe/fixtures/pass2/workflow.jsonl', sessionId: null, addedAt: '2026-09-28T10:00:00.000Z', lastPlayedAt: null }] };
       case 'pty.spawn':
         return { ptyId: 'p1', pid: 3333 };
       case 'pty.write':
@@ -155,6 +157,8 @@ describe('store section of the diagnostics strip', () => {
     await renderApp();
     expect(screen.getByRole('status', { name: 'store' }).textContent).toBe('store · /Users/new/.claude · watching');
     expect(screen.getByRole('status', { name: 'store scan' }).textContent).toBe('projects 1 · sessions 1 · scan 1.2 s');
+    // Replay (M5): the fixtures the index lists, ready to start.
+    expect(within(screen.getByRole('combobox', { name: 'Replay fixture' })).getByRole('option').textContent).toBe('workflow · journal');
 
     const record = {
       appId: 'aaaaaaaa-1111-4111-8111-111111111111',
