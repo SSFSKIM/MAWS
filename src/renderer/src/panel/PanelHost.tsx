@@ -32,7 +32,9 @@ export function PanelHost({ appSessionId, tabs, activeTabId, onChange, onToggleP
   return (
     <div className="flex h-full min-h-0 flex-col">
       <TabStrip appSessionId={appSessionId} tabs={shown} activeTabId={active?.id ?? null} onChange={onChange} bodyId={PANEL_BODY_ID} />
-      <div id={PANEL_BODY_ID} role="tabpanel" aria-label={active ? undefined : 'Session overview'} className="min-h-0 flex-1 overflow-auto">
+      {/* A long unbreakable token (a path, a URL) wraps rather than scrolling the narrow column sideways (R7: a child
+          transcript's prose at 280 px); `overflow-wrap` inherits, and text a tool sets `nowrap` or `pre` is unaffected. */}
+      <div id={PANEL_BODY_ID} role="tabpanel" aria-label={active ? undefined : 'Session overview'} className="min-h-0 flex-1 overflow-auto wrap-anywhere">
         {active ? <ToolBody key={active.id} tab={active} appSessionId={appSessionId} /> : <Summary appSessionId={appSessionId} />}
       </div>
     </div>
