@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, MessageUuid, RequestId } from '@shared/graph/ids';
-import { DEFAULT_MEMORY_TARGET, isDocked, markDocked, memoryTargetOf, prefillComposer, registerFocusTarget, resetComposerStore, setMemoryTarget, takePrefill, useComposerStore } from './composer';
+import { DEFAULT_MEMORY_TARGET, editingOf, insertComposerText, isDocked, isStarting, markDocked, memoryTargetOf, prefillComposer, registerFocusTarget, resetComposerStore, resubmitOf, setEditing, setMemoryTarget, setResubmit, setStarting, takePrefill, useComposerStore } from './composer';
 
 const A = 'app-a' as AppSessionId;
 const B = 'app-b' as AppSessionId;
@@ -31,8 +31,8 @@ describe('composer store seam', () => {
   });
 
   it('keeps the focus target a composer registers, and its disposer removes only its own', () => {
-    const first = { focusEditor: vi.fn(), focusFrame: vi.fn() };
-    const second = { focusEditor: vi.fn(), focusFrame: vi.fn() };
+    const first = { focusEditor: vi.fn(), focusFrame: vi.fn(), insertText: vi.fn() };
+    const second = { focusEditor: vi.fn(), focusFrame: vi.fn(), insertText: vi.fn() };
     const offFirst = registerFocusTarget(A, first);
     const offSecond = registerFocusTarget(A, second);
     offFirst();
@@ -46,5 +46,33 @@ describe('composer store seam', () => {
     setMemoryTarget(A, { kind: 'path', path: '/repo/docs/CLAUDE.md' });
     expect(memoryTargetOf(useComposerStore.getState(), A)).toEqual({ kind: 'path', path: '/repo/docs/CLAUDE.md' });
     expect(memoryTargetOf(useComposerStore.getState(), B)).toEqual({ kind: 'project', path: null });
+  });
+
+  it('keeps the M4 state per session: starting, edit mode and the resubmit state', () => {
+    setStarting(A, true);
+    expect([isStarting(useComposerStore.getState(), A), isStarting(useComposerStore.getState(), B)]).toEqual([true, false]);
+    setStarting(A, false);
+    expect(isStarting(useComposerStore.getState(), A)).toBe(false);
+    setEditing(A, { messageUuid: 'u-1' as MessageUuid, seenCursor: 'u-2' as MessageUuid });
+    expect(editingOf(useComposerStore.getState(), A)).toEqual({ messageUuid: 'u-1', seenCursor: 'u-2' });
+    setEditing(A, null);
+    expect(editingOf(useComposerStore.getState(), A)).toBeNull();
+    expect(resubmitOf(useComposerStore.getState(), A)).toBe('idle');
+    setResubmit(A, 'rewound_awaiting_send');
+    expect(resubmitOf(useComposerStore.getState(), A)).toBe('rewound_awaiting_send');
+    setResubmit(A, 'idle');
+    expect(useComposerStore.getState().resubmit.has(A)).toBe(false);
+  });
+
+  it('inserts text through the mounted composer of the session', () => {
+    const target = { focusEditor: vi.fn(), focusFrame: vi.fn(), insertText: vi.fn() };
+    const off = registerFocusTarget(A, target);
+    insertComposerText(A, '@agent-Explore ');
+    expect(target.insertText).toHaveBeenCalledWith('@agent-Explore ');
+    off();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    insertComposerText(A, 'nowhere');
+    expect(warn).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
   });
 });

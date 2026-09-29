@@ -108,7 +108,7 @@ describe('docked frame hosts a foreign card', () => {
 
   it('takes focus on mount when its pane held focus, and returns it to the composer on unmount', () => {
     const focusEditor = vi.fn();
-    registerFocusTarget(A, { focusEditor, focusFrame: () => {} });
+    registerFocusTarget(A, { focusEditor, focusFrame: () => {}, insertText: () => {} });
     function Host() {
       const [docked, setDocked] = useState(false);
       return (
@@ -131,7 +131,7 @@ describe('docked frame hosts a foreign card', () => {
 
   it('does not take focus when another pane held it, and gives nothing back on unmount', () => {
     const focusEditor = vi.fn();
-    registerFocusTarget(A, { focusEditor, focusFrame: () => {} });
+    registerFocusTarget(A, { focusEditor, focusFrame: () => {}, insertText: () => {} });
     const { rerender } = render(
       <>
         <Pane index={0}>{null}</Pane>

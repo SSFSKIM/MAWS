@@ -4,7 +4,9 @@
 // document here; M4's Composer takes it when mounted, so a prefill made from an Overview card waits for the pane),
 // the requests a docked placement is showing (the transcript's request slot shows a pointer for those), and the focus
 // targets a mounted composer registers (the docked frame gives focus back through them). M3 adds the `#` target each
-// session remembers; M4 adds the composer's own state beside these.
+// session remembers; M4 adds the composer's own state beside these: the synchronous `starting` gate of an unstarted
+// session's first send, the edit mode a prefill with `editing` enters, and the resubmit state the edit-and-resubmit
+// flow (M4b) drives, each per session so they outlive a tab switch.
 import { create } from 'zustand';
 import type { AppSessionId, MessageUuid, RequestId } from '@shared/graph/ids';
 
@@ -18,7 +20,18 @@ export interface Prefill {
 export interface FocusTarget {
   focusEditor(): void;
   focusFrame(): void;
+  insertText(text: string): void; // at the editor's caret, at the end when it is not focused (C11's insertComposerText)
 }
+
+// Edit mode: the message an edited prefill resubmits against, and the transcript's newest user uuid when the edit began.
+export interface Editing {
+  messageUuid: MessageUuid;
+  seenCursor: MessageUuid | null;
+}
+
+// Where edit-and-resubmit stands (C7 execution document, "Edit-and-resubmit and the fork seam"); M4b drives it. Every
+// state keeps the draft; only `sent` clears it.
+export type ResubmitState = 'idle' | 'confirming' | 'rewinding' | 'rewind_uncertain' | 'rewind_unresolved' | 'rewound_awaiting_send' | 'sent';
 
 // Where `#` appends (C3's `session.memoryAppend` target): the memory dialog's project or user file, or a listed path.
 export interface MemoryTarget {
@@ -32,9 +45,12 @@ export interface ComposerState {
   docked: ReadonlyMap<AppSessionId, ReadonlyMap<RequestId, number>>; // how many docked placements show each request
   focusTargets: ReadonlyMap<AppSessionId, FocusTarget>;
   memoryTargets: ReadonlyMap<AppSessionId, MemoryTarget>; // M3: the `#` target chosen per session
+  starting: ReadonlySet<AppSessionId>; // M4: an unstarted session's first send is with C10's `start`
+  editing: ReadonlyMap<AppSessionId, Editing>; // M4: edit mode, entered by a prefill with `editing`
+  resubmit: ReadonlyMap<AppSessionId, ResubmitState>; // M4b: absent is 'idle'
 }
 
-const initial = (): ComposerState => ({ prefills: new Map(), docked: new Map(), focusTargets: new Map(), memoryTargets: new Map() });
+const initial = (): ComposerState => ({ prefills: new Map(), docked: new Map(), focusTargets: new Map(), memoryTargets: new Map(), starting: new Set(), editing: new Map(), resubmit: new Map() });
 
 export const useComposerStore = create<ComposerState>()(initial);
 
@@ -103,4 +119,48 @@ export const memoryTargetOf = (state: ComposerState, appSessionId: AppSessionId)
 
 export function setMemoryTarget(appSessionId: AppSessionId, target: MemoryTarget): void {
   useComposerStore.setState((s) => ({ memoryTargets: new Map(s.memoryTargets).set(appSessionId, target) }));
+}
+
+// ---- M4: the composer's own per-session state ------------------------------------------------------------------------
+
+export const isStarting = (state: ComposerState, appSessionId: AppSessionId): boolean => state.starting.has(appSessionId);
+
+// Set synchronously before C10's `start` is awaited, cleared when it settles: a second submission in the same tick reads it.
+export function setStarting(appSessionId: AppSessionId, on: boolean): void {
+  if (useComposerStore.getState().starting.has(appSessionId) === on) return;
+  useComposerStore.setState((s) => {
+    const starting = new Set(s.starting);
+    if (on) starting.add(appSessionId);
+    else starting.delete(appSessionId);
+    return { starting };
+  });
+}
+
+export const editingOf = (state: ComposerState, appSessionId: AppSessionId): Editing | null => state.editing.get(appSessionId) ?? null;
+
+export function setEditing(appSessionId: AppSessionId, editing: Editing | null): void {
+  useComposerStore.setState((s) => {
+    const next = new Map(s.editing);
+    if (editing) next.set(appSessionId, editing);
+    else next.delete(appSessionId);
+    return { editing: next };
+  });
+}
+
+export const resubmitOf = (state: ComposerState, appSessionId: AppSessionId): ResubmitState => state.resubmit.get(appSessionId) ?? 'idle';
+
+export function setResubmit(appSessionId: AppSessionId, state: ResubmitState): void {
+  useComposerStore.setState((s) => {
+    const resubmit = new Map(s.resubmit);
+    if (state === 'idle') resubmit.delete(appSessionId);
+    else resubmit.set(appSessionId, state);
+    return { resubmit };
+  });
+}
+
+// C11's ask: text at the caret of the session's mounted composer (at the end when it is not focused), the document kept.
+export function insertComposerText(appSessionId: AppSessionId, text: string): void {
+  const target = useComposerStore.getState().focusTargets.get(appSessionId);
+  if (target) target.insertText(text);
+  else console.warn(`[composer] insertComposerText: no composer is mounted for ${appSessionId}`);
 }
