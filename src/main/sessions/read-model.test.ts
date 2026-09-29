@@ -376,3 +376,18 @@ describe('stub source plays a timeline', () => {
     expect(src.stop).toHaveBeenCalledOnce();
   });
 });
+
+// C7 start: every record the model holds, whichever source observed it (main's git.lsFiles roots, C7 M1 review)
+describe('the read model lists its records (C7)', () => {
+  it('answers every observed record, scenario sources included, and forgets a removed one', () => {
+    const model = new SessionReadModel('scenario');
+    const src = source();
+    model.registerScenario(src);
+    src.writer.observeRecord(record(A));
+    src.writer.observeRecord(record(B, { additionalDirectories: ['/extra'] }));
+    expect(model.allRecords().map((r) => [r.appId, r.directory, r.additionalDirectories])).toEqual([[A, '/work/app-a', []], [B, '/work/app-b', ['/extra']]]);
+    src.writer.observeRemoved(A);
+    expect(model.allRecords().map((r) => r.appId)).toEqual([B]);
+  });
+});
+// C7 end

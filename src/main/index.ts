@@ -29,6 +29,7 @@ import { restoreWindowState, trackWindowState } from './window-state';
 // C5 end
 // C7 start
 import type { AppSessionId } from '@shared/graph/ids';
+import type { SessionRecord } from '@shared/graph/session';
 import { pickFiles } from './files/pick';
 import { FileLister } from './git/ls-files';
 import { createGitRunner } from './git/runner';
@@ -136,13 +137,15 @@ app.whenReady().then(() => {
   });
   registerMainHandler('session.history.list', async ({ appSessionId, limit }) => ({ entries: await history.list(appSessionId as AppSessionId, limit) }));
   registerMainHandler('session.history.append', ({ appSessionId, display, pastedContents }) => history.append(appSessionId as AppSessionId, display, pastedContents));
-  // listable roots: every indexed session's directories (archived included) and every project's directory
+  // listable roots: the directories of every session the read model holds (both launch modes) or the index holds
+  // (archived included), and every indexed project's directory
   const roots = () => {
+    const directoriesOf = (r: SessionRecord) => [r.directory, ...r.additionalDirectories, ...(r.worktree ? [r.worktree.path] : [])];
+    const held = sessions.model.allRecords().flatMap(directoriesOf);
     try {
-      const records = index.sessions.list({ includeArchived: true });
-      return [...records.flatMap((r) => [r.directory, ...r.additionalDirectories, ...(r.worktree ? [r.worktree.path] : [])]), ...index.projects.list({ includeHidden: true }).map((p) => p.directory)];
+      return [...held, ...index.sessions.list({ includeArchived: true }).flatMap(directoriesOf), ...index.projects.list({ includeHidden: true }).map((p) => p.directory)];
     } catch {
-      return []; // the index is unavailable
+      return held; // the index is unavailable
     }
   };
   const files = new FileLister({ run: createGitRunner(), roots });

@@ -113,6 +113,12 @@ export class SessionReadModel {
     return this.projects.get(id) ?? null;
   }
 
+  // C7 start: every record held, whichever source observed it (C7's git.lsFiles roots in main, scenario sessions included)
+  allRecords(): SessionRecord[] {
+    return [...this.records.values()];
+  }
+  // C7 end
+
   attention(appSessionId: AppSessionId): AttentionItem[] {
     return this.attentionById.get(appSessionId) ?? [];
   }
