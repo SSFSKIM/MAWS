@@ -14,6 +14,10 @@ import { ipc } from './client';
 import { useGit } from '../stores/git';
 import { queryClient } from './query';
 // C8a end
+// C8c start
+import { useFiles } from '../tools/code/files/store';
+import { useViewer } from '../tools/code/viewer/viewer-store';
+// C8c end
 // C8b start
 import { agentWorkClient, type AgentWorkClient } from '../tools/agents/client';
 // C8b end
@@ -93,6 +97,16 @@ export function connectPanelEvents(client: MawsBridge = ipc): () => void {
 }
 // C8a end
 
+// C8c start: the code tools' pushed facts (C8c execution document, Repository map). Mounted by App.tsx's C8c block:
+// main's `files.changed` into the Files tool's listings and watches, then into the file viewer's tabs (in that order,
+// so an `invalidated` directory is being re-watched before the viewer waits on it).
+export function connectCodeEvents(client: MawsBridge = ipc): () => void {
+  return client.on('files.changed', (event) => {
+    useFiles.getState().applyChanged(event);
+    useViewer.getState().applyChanged(event);
+  });
+}
+// C8c end
 // C8b start: the agent tools' one pushed fact outside their stores (C8b execution document, Repository map). A task
 // list changed on disk invalidates the checklist's query for that list id (C4 names the list by its sanitised directory,
 // the key the checklist queries). Mounted by App.tsx's C8b block and by the `#panel` harness; the task-graph and relay
