@@ -94,6 +94,9 @@ export default defineConfig({
             // C8c start: the code tools render under the host's rule too (a tool's state is a store handle)
             'src/renderer/src/tools/code/**/*.test.tsx',
             // C8c end
+            // C8b start: the agent tools' component suites, whose tools render from store handles as the panel's do
+            'src/renderer/src/tools/agents/**/*.test.tsx',
+            // C8b end
           ],
           env: { MAWS_REACT_COMPILER: '1' },
         },

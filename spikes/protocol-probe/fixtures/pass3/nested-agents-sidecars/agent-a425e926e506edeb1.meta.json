@@ -1,0 +1,1 @@
+{"agentType":"general-purpose","description":"Inner reads one.txt","toolUseId":"toolu_012rAuJDibGrcgfnNbY8TGbL","parentAgentId":"a38d4aebfaea9f6b1","spawnDepth":2,"requestShape":"foreground","requestNonInteractive":true,"model":"haiku"}

@@ -1,0 +1,390 @@
+[
+  {
+    "at": "2026-09-29T15:33:45.840Z",
+    "id": "time:turn:3b554458-484d-4333-bae1-a226650ae08b",
+    "kind": "time",
+    "label": "Today 3:33 PM",
+    "turnId": "turn:3b554458-484d-4333-bae1-a226650ae08b"
+  },
+  {
+    "at": "2026-09-29T15:33:45.840Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:3b554458-484d-4333-bae1-a226650ae08b",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "3b554458-484d-4333-bae1-a226650ae08b",
+    "steer": false,
+    "text": "Run exactly \"sleep 120 && echo DONE > bg.txt\" with Bash, run_in_background true; reply STARTED.",
+    "turnId": "turn:3b554458-484d-4333-bae1-a226650ae08b"
+  },
+  {
+    "at": "2026-09-29T15:33:45.840Z",
+    "autoDenied": 0,
+    "denied": 0,
+    "endedAt": "2026-09-29T15:33:50.490Z",
+    "expanded": true,
+    "firstDeniedCell": null,
+    "id": "divider:turn:3b554458-484d-4333-bae1-a226650ae08b",
+    "kind": "divider",
+    "origin": "human",
+    "startedAt": "2026-09-29T15:33:45.860Z",
+    "state": "completed",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 1,
+        "exploration": 0,
+        "files": 0,
+        "mcp": 0,
+        "other": 0,
+        "skills": 0,
+        "web": 0
+      },
+      "childAgents": 0,
+      "costUsd": 0.24662679999999998,
+      "denials": [],
+      "durationMs": 4617,
+      "model": "claude-sonnet-5-5",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 0,
+        "reviewed": 1
+      },
+      "terminalReason": "completed",
+      "toolCalls": 1,
+      "usage": {
+        "cacheCreationInputTokens": 29122,
+        "cacheReadInputTokens": 28814,
+        "inputTokens": 4,
+        "outputTokens": 130,
+        "thinkingTokens": 0
+      }
+    },
+    "toolCalls": 1,
+    "turnId": "turn:3b554458-484d-4333-bae1-a226650ae08b"
+  },
+  {
+    "agent": null,
+    "at": "2026-09-29T15:33:47.595Z",
+    "category": "commands",
+    "classification": {
+      "category": "commands",
+      "denial": null,
+      "groupable": true,
+      "hidden": false,
+      "humanDecision": false,
+      "safeguard": "not_flagged",
+      "startsGroup": false,
+      "subagentLifecycle": null
+    },
+    "detail": {
+      "backgroundTaskId": "ba3cr5gnx",
+      "command": "sleep 120 && echo DONE > bg.txt",
+      "cwd": null,
+      "description": "Sleep then write DONE to bg.txt",
+      "exitCode": 0,
+      "interrupted": false,
+      "kind": "shell",
+      "spill": null,
+      "stderr": "",
+      "stdout": "",
+      "truncated": null
+    },
+    "endedAt": "2026-09-29T15:33:49.840Z",
+    "expanded": true,
+    "id": "cell:toolu_01ADVdMxLsbLibjw1MgLepqS",
+    "kind": "cell",
+    "label": "Ran `sleep 120 && echo DONE > bg.txt` in 2s",
+    "paths": [],
+    "startedAt": "2026-09-29T15:33:47.595Z",
+    "status": "done",
+    "toolName": "Bash",
+    "toolUseId": "toolu_01ADVdMxLsbLibjw1MgLepqS",
+    "turnId": "turn:3b554458-484d-4333-bae1-a226650ae08b"
+  },
+  {
+    "at": "2026-09-29T15:33:50.469Z",
+    "blockIndex": 0,
+    "id": "text:msg_011CfXyUWrscCYMnJ7C2ogz1:0",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "STARTED",
+    "messageUuid": "435298f9-ea22-4ef5-be1f-5e378b24360c",
+    "model": "claude-sonnet-5-5",
+    "phase": "answer",
+    "turnId": "turn:3b554458-484d-4333-bae1-a226650ae08b"
+  },
+  {
+    "at": "2026-09-29T15:33:55.852Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:e4fd229a-e799-4d3d-88cb-7ffe1dfd542f",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "e4fd229a-e799-4d3d-88cb-7ffe1dfd542f",
+    "steer": false,
+    "text": "Dispatch one general-purpose Agent in the background, model haiku, named \"sleeper\": run \"sleep 90\" with Bash then reply SLOW. Reply STARTED.",
+    "turnId": "turn:e4fd229a-e799-4d3d-88cb-7ffe1dfd542f"
+  },
+  {
+    "at": "2026-09-29T15:33:55.852Z",
+    "autoDenied": 0,
+    "denied": 0,
+    "endedAt": "2026-09-29T15:34:00.523Z",
+    "expanded": true,
+    "firstDeniedCell": null,
+    "id": "divider:turn:e4fd229a-e799-4d3d-88cb-7ffe1dfd542f",
+    "kind": "divider",
+    "origin": "human",
+    "startedAt": "2026-09-29T15:33:55.855Z",
+    "state": "completed",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 0,
+        "exploration": 0,
+        "files": 0,
+        "mcp": 0,
+        "other": 0,
+        "skills": 0,
+        "web": 0
+      },
+      "childAgents": 1,
+      "costUsd": 0.27238719999999994,
+      "denials": [],
+      "durationMs": 4665,
+      "model": "claude-sonnet-5-5",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 0,
+        "reviewed": 0
+      },
+      "terminalReason": "completed",
+      "toolCalls": 0,
+      "usage": {
+        "cacheCreationInputTokens": 1066,
+        "cacheReadInputTokens": 58682,
+        "inputTokens": 4,
+        "outputTokens": 274,
+        "thinkingTokens": 43
+      }
+    },
+    "toolCalls": 0,
+    "turnId": "turn:e4fd229a-e799-4d3d-88cb-7ffe1dfd542f"
+  },
+  {
+    "agents": [
+      {
+        "agentId": "ac2bd8a00d8e492f4",
+        "glyph": 3,
+        "kind": "agent",
+        "name": "Sleep 90 seconds",
+        "subagentType": "general-purpose",
+        "taskId": "ac2bd8a00d8e492f4",
+        "toolUseId": "toolu_017zQBUStgMSzXP8qvF7pwxt"
+      }
+    ],
+    "at": "2026-09-29T15:33:57.727Z",
+    "id": "subagent:ac2bd8a00d8e492f4",
+    "kind": "subagent",
+    "overflow": 0,
+    "sentence": "Sleep 90 seconds was stopped",
+    "status": "stopped",
+    "turnId": "turn:e4fd229a-e799-4d3d-88cb-7ffe1dfd542f"
+  },
+  {
+    "at": "2026-09-29T15:34:00.508Z",
+    "durationMs": 0,
+    "id": "think:msg_011CfXyVBdkvBvCCqkQHqqoF:0",
+    "kind": "thinking",
+    "live": false,
+    "messageUuid": "88a27eca-a460-45d1-a531-788b7fb0fe3a",
+    "text": "",
+    "turnId": "turn:e4fd229a-e799-4d3d-88cb-7ffe1dfd542f"
+  },
+  {
+    "at": "2026-09-29T15:34:00.510Z",
+    "blockIndex": 1,
+    "id": "text:msg_011CfXyVBdkvBvCCqkQHqqoF:1",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "STARTED. The Agent tool has no name parameter, so the agent couldn't be named \"sleeper\". It is running in the background on haiku.",
+    "messageUuid": "77a93eb7-5ce5-4ad8-bf18-8b605a7290b4",
+    "model": "claude-sonnet-5-5",
+    "phase": "answer",
+    "turnId": "turn:e4fd229a-e799-4d3d-88cb-7ffe1dfd542f"
+  },
+  {
+    "at": "2026-09-29T15:34:03.991Z",
+    "autoDenied": 0,
+    "denied": 0,
+    "endedAt": "2026-09-29T15:34:05.552Z",
+    "expanded": true,
+    "firstDeniedCell": null,
+    "id": "divider:turn:ereplay:journal:143:1",
+    "kind": "divider",
+    "origin": "engine",
+    "startedAt": "2026-09-29T15:34:03.991Z",
+    "state": "completed",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 0,
+        "exploration": 0,
+        "files": 0,
+        "mcp": 0,
+        "other": 0,
+        "skills": 0,
+        "web": 0
+      },
+      "childAgents": 0,
+      "costUsd": 0.28434079999999995,
+      "denials": [],
+      "durationMs": 1564,
+      "model": "claude-sonnet-5-5",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 0,
+        "reviewed": 0
+      },
+      "terminalReason": "completed",
+      "toolCalls": 0,
+      "usage": {
+        "cacheCreationInputTokens": 561,
+        "cacheReadInputTokens": 30188,
+        "inputTokens": 2,
+        "outputTokens": 71,
+        "thinkingTokens": 0
+      }
+    },
+    "toolCalls": 0,
+    "turnId": "turn:ereplay:journal:143:1"
+  },
+  {
+    "at": "2026-09-29T15:34:04.996Z",
+    "blockIndex": 0,
+    "id": "text:msg_011CfXyVZPCbn9h2VdJXUrjM:0",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "The sleeper agent was stopped before it finished, so it never replied SLOW. The earlier background `sleep 120` task was stopped too, so `bg.txt` was never written. Tell me if you want either one run again.",
+    "messageUuid": "7bb71337-896d-4f0e-93a3-09333852da9c",
+    "model": "claude-sonnet-5-5",
+    "phase": "answer",
+    "turnId": "turn:ereplay:journal:143:1"
+  },
+  {
+    "at": "2026-09-29T15:34:09.904Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:1b21fa19-adda-4fd4-9a79-e6cd27f88468",
+    "kind": "user",
+    "lines": 5,
+    "messageUuid": "1b21fa19-adda-4fd4-9a79-e6cd27f88468",
+    "steer": false,
+    "text": "Call the Workflow tool once with this exact script, then reply STARTED:\n\nexport const meta = { name: 'maws-stop-task', description: 'One slow agent', phases: [{ title: 'Wait' }] }\nphase('Wait')\nreturn await agent('Run \"sleep 90\" with Bash, then reply SLOW.', { label: 'slow', effort: 'low' })",
+    "turnId": "turn:1b21fa19-adda-4fd4-9a79-e6cd27f88468"
+  },
+  {
+    "at": "2026-09-29T15:34:09.904Z",
+    "autoDenied": 0,
+    "denied": 0,
+    "endedAt": "2026-09-29T15:34:14.358Z",
+    "expanded": true,
+    "firstDeniedCell": null,
+    "id": "divider:turn:1b21fa19-adda-4fd4-9a79-e6cd27f88468",
+    "kind": "divider",
+    "origin": "human",
+    "startedAt": "2026-09-29T15:34:09.906Z",
+    "state": "completed",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 0,
+        "exploration": 0,
+        "files": 0,
+        "mcp": 0,
+        "other": 0,
+        "skills": 0,
+        "web": 0
+      },
+      "childAgents": 1,
+      "costUsd": 0.31064339999999996,
+      "denials": [],
+      "durationMs": 4445,
+      "model": "claude-sonnet-5-5",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 0,
+        "reviewed": 0
+      },
+      "terminalReason": "completed",
+      "toolCalls": 0,
+      "usage": {
+        "cacheCreationInputTokens": 1157,
+        "cacheReadInputTokens": 61753,
+        "inputTokens": 4,
+        "outputTokens": 234,
+        "thinkingTokens": 82
+      }
+    },
+    "toolCalls": 0,
+    "turnId": "turn:1b21fa19-adda-4fd4-9a79-e6cd27f88468"
+  },
+  {
+    "at": "2026-09-29T15:34:11.384Z",
+    "durationMs": 898,
+    "id": "think:msg_011CfXyVztNtRDdwg7fjN2zk:0",
+    "kind": "thinking",
+    "live": false,
+    "messageUuid": "aaf01378-994e-41c0-83ab-d784c7f40c66",
+    "text": "",
+    "turnId": "turn:1b21fa19-adda-4fd4-9a79-e6cd27f88468"
+  },
+  {
+    "agents": [
+      {
+        "agentId": null,
+        "glyph": 0,
+        "kind": "workflow",
+        "name": "One slow agent",
+        "subagentType": null,
+        "taskId": "wkmzd07jp",
+        "toolUseId": "toolu_01KZBcpNypx9RMPRzuX56XF7"
+      }
+    ],
+    "at": "2026-09-29T15:34:12.284Z",
+    "id": "subagent:wkmzd07jp",
+    "kind": "subagent",
+    "overflow": 0,
+    "sentence": "One slow agent was stopped",
+    "status": "stopped",
+    "turnId": "turn:1b21fa19-adda-4fd4-9a79-e6cd27f88468"
+  },
+  {
+    "at": "2026-09-29T15:34:14.358Z",
+    "blockIndex": 0,
+    "id": "text:msg_011CfXyWFmKiqonNdeTM1fCb:0",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "STARTED",
+    "messageUuid": "d6d76ba1-35ef-4965-acd2-89528308fc2a",
+    "model": "claude-sonnet-5-5",
+    "phase": "answer",
+    "turnId": "turn:1b21fa19-adda-4fd4-9a79-e6cd27f88468"
+  },
+  {
+    "at": "2026-09-29T15:34:28.608Z",
+    "attempt": null,
+    "id": "error:replay:journal:255:0",
+    "kind": "error",
+    "lostAttentionCount": 0,
+    "scope": "exit",
+    "severity": "notice",
+    "text": "Session process exited (unknown)",
+    "turnId": null
+  }
+]

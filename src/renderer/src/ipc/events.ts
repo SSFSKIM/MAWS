@@ -18,6 +18,9 @@ import { queryClient } from './query';
 import { useFiles } from '../tools/code/files/store';
 import { useViewer } from '../tools/code/viewer/viewer-store';
 // C8c end
+// C8b start
+import { agentWorkClient, type AgentWorkClient } from '../tools/agents/client';
+// C8b end
 
 export interface ShellStores {
   sessions: typeof useSessions;
@@ -107,3 +110,11 @@ export function connectCodeEvents(client: MawsBridge = ipc): () => void {
   });
 }
 // C8c end
+// C8b start: the agent tools' one pushed fact outside their stores (C8b execution document, Repository map). A task
+// list changed on disk invalidates the checklist's query for that list id (C4 names the list by its sanitised directory,
+// the key the checklist queries). Mounted by App.tsx's C8b block and by the `#panel` harness; the task-graph and relay
+// stores subscribe to their own inputs, and the status comes from C5's useSessions.
+export function connectAgentWorkEvents(client: AgentWorkClient = agentWorkClient()): () => void {
+  return client.onTasksChanged(({ listId }) => void queryClient.invalidateQueries({ queryKey: ['fs.tasks', listId] }));
+}
+// C8b end
