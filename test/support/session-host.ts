@@ -50,7 +50,7 @@ export class FakeEngineHost {
   relay: RelayHealth = OK_RELAY;
   script: (spec: LaunchSpec) => LaunchScript = () => ({});
   stopExits = true; // false: session.stop answers { exited: false } and the process lingers until exitNow()
-  send: 'answer' | 'hang' | 'persist-then-hang' = 'answer';
+  send: 'answer' | 'hang' | 'persist-then-hang' | 'refuse' = 'answer';
   queueListError: string | null = null;
   registryError: string | null = null;
   unfollowError: string | null = null;
@@ -188,6 +188,7 @@ export class FakeEngineHost {
           messageUuid: randomUUID() as QueueEntry['messageUuid'], submittedAt: T0, uncertain: false, steer: false,
         };
         if (this.send === 'hang') return new Promise(() => {});
+        if (this.send === 'refuse') throw new Error('send refused');
         this.disk.stores.add(id);
         this.disk.queues.set(id, [...(this.disk.queues.get(id) ?? []), entry]);
         if (this.send === 'persist-then-hang') return new Promise(() => {});
