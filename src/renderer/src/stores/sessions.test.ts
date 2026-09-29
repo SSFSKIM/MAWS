@@ -1,0 +1,166 @@
+import { describe, expect, it } from 'vitest';
+import type { AppSessionId, ProjectId } from '@shared/graph/ids';
+import { digest, humanTurn, project, record, status } from '../../../../test/support/builders';
+import { createSessionsStore, selectProjectOrder, selectSessionsOf, selectSortedSessions } from './sessions';
+
+const A = 'a' as AppSessionId;
+const B = 'b' as AppSessionId;
+const titled = (id: string, text: string) => record(id, { title: { text, source: 'user' } });
+
+describe('sessions store reconciles snapshots with events by revision', () => {
+  it('keeps an event newer than a snapshot that answers late', () => {
+    const store = createSessionsStore();
+    store.getState().applyChanged({ record: titled('a', 'from event'), cause: 'update', revision: 5 });
+    store.getState().applyList({ sessions: [titled('a', 'from snapshot'), titled('b', 'only in snapshot')], revision: 4 });
+    expect(store.getState().records.get(A)?.title.text).toBe('from event');
+    expect(store.getState().records.get(B)?.title.text).toBe('only in snapshot');
+    expect(store.getState().revision).toBe(5);
+  });
+
+  it('takes a snapshot newer than the events that raced it', () => {
+    const store = createSessionsStore();
+    store.getState().applyChanged({ record: titled('a', 'old event'), cause: 'update', revision: 2 });
+    store.getState().applyList({ sessions: [titled('a', 'snapshot')], revision: 3 });
+    expect(store.getState().records.get(A)?.title.text).toBe('snapshot');
+  });
+
+  it('does not resurrect a session removed after the snapshot was taken, and drops one the snapshot no longer has', () => {
+    const store = createSessionsStore();
+    store.getState().applyChanged({ record: titled('b', 'b'), cause: 'discovered', revision: 1 });
+    store.getState().applyRemoved({ appSessionId: A, revision: 6 });
+    store.getState().applyList({ sessions: [titled('a', 'a')], revision: 5 });
+    expect([...store.getState().records.keys()]).toEqual([]);
+  });
+
+  it('does not resurrect a record a newer snapshot left out when its older change arrives late', () => {
+    const store = createSessionsStore();
+    store.getState().applyChanged({ record: titled('a', 'a'), cause: 'discovered', revision: 1 });
+    store.getState().applyList({ sessions: [], revision: 5 });
+    expect(store.getState().records.has(A)).toBe(false);
+    expect(store.getState().applyChanged({ record: titled('a', 'late'), cause: 'facts', revision: 2 })).toBe(false);
+    expect(store.getState().records.has(A)).toBe(false);
+  });
+
+  it('still takes per-record events newer than the snapshot, for held and new sessions alike', () => {
+    const store = createSessionsStore();
+    store.getState().applyList({ sessions: [titled('a', 'a')], revision: 5 });
+    expect(store.getState().applyChanged({ record: titled('a', 'renamed'), cause: 'update', revision: 6 })).toBe(true);
+    expect(store.getState().applyChanged({ record: titled('b', 'new'), cause: 'discovered', revision: 7 })).toBe(true);
+    expect(store.getState().applyChanged({ record: titled('a', 'older'), cause: 'update', revision: 6 })).toBe(false);
+    expect([...store.getState().records.values()].map((r) => r.title.text)).toEqual(['renamed', 'new']);
+  });
+
+  it('reports whether a removal was accepted, refusing one older than what it knows', () => {
+    const store = createSessionsStore();
+    store.getState().applyList({ sessions: [titled('a', 'a')], revision: 5 });
+    expect(store.getState().applyRemoved({ appSessionId: A, revision: 3 })).toBe(false);
+    expect(store.getState().records.has(A)).toBe(true);
+    expect(store.getState().applyRemoved({ appSessionId: B, revision: 4 })).toBe(false); // unknown and not newer than the snapshot
+    expect(store.getState().applyRemoved({ appSessionId: A, revision: 6 })).toBe(true);
+    expect(store.getState().records.has(A)).toBe(false);
+  });
+
+  it('replaces the project list when the newer of snapshot and event says so', () => {
+    const store = createSessionsStore();
+    store.getState().applyProjects({ projects: [project('p2', 0)], revision: 7 });
+    store.getState().applyProjects({ projects: [project('p1', 0)], revision: 6 });
+    expect([...store.getState().projects.keys()]).toEqual(['p2']);
+  });
+
+  it('keeps the higher revision of each digest, snapshot or event', () => {
+    const store = createSessionsStore();
+    store.getState().applyDigest(digest('a', { phase: 'working', revision: 3 }));
+    store.getState().applyDigests([digest('a', { phase: 'idle', revision: 2 }), digest('b', { revision: 1 })]);
+    expect(store.getState().digests.get(A)?.phase).toBe('working');
+    expect(store.getState().digests.get(B)).toBeDefined();
+  });
+
+  it('keeps C3’s engine statuses by session', () => {
+    const store = createSessionsStore();
+    store.getState().applyStatus({ appSessionId: A, status: status('a', { engineState: 'running', turn: humanTurn }) });
+    expect(store.getState().engine.get(A)?.engineState).toBe('running');
+  });
+
+  it('forgets a removed session’s digest and engine status, and takes the recreated session’s digests', () => {
+    const store = createSessionsStore();
+    store.getState().applyChanged({ record: record('a'), cause: 'discovered', revision: 1 });
+    store.getState().applyDigest(digest('a', { phase: 'working', revision: 2 }));
+    store.getState().applyStatus({ appSessionId: A, status: status('a', { engineState: 'running', turn: humanTurn }) });
+    expect(store.getState().applyRemoved({ appSessionId: A, revision: 2 })).toBe(true);
+    expect(store.getState().digests.has(A)).toBe(false);
+    expect(store.getState().engine.has(A)).toBe(false);
+    // A digest from before the removal that arrives late stays out; main's counter continues for the recreated session.
+    store.getState().applyDigest(digest('a', { phase: 'working', revision: 2 }));
+    expect(store.getState().digests.has(A)).toBe(false);
+    store.getState().applyChanged({ record: record('a'), cause: 'discovered', revision: 3 });
+    store.getState().applyDigest(digest('a', { phase: 'idle', revision: 3 }));
+    expect(store.getState().digests.get(A)).toMatchObject({ phase: 'idle', revision: 3 });
+  });
+
+  it('forgets the digest and engine status of a session a newer snapshot no longer lists', () => {
+    const store = createSessionsStore();
+    store.getState().applyChanged({ record: record('a'), cause: 'discovered', revision: 1 });
+    store.getState().applyDigest(digest('a', { revision: 4 }));
+    store.getState().applyStatus({ appSessionId: A, status: status('a') });
+    store.getState().applyList({ sessions: [], revision: 2 });
+    expect(store.getState().digests.has(A)).toBe(false);
+    expect(store.getState().engine.has(A)).toBe(false);
+  });
+
+  it('bumps recordsVersion on every record write and not otherwise', () => {
+    const store = createSessionsStore();
+    const v0 = store.getState().recordsVersion;
+    store.getState().applyChanged({ record: record('a'), cause: 'update', revision: 1 });
+    store.getState().applyDigest(digest('a'));
+    expect(store.getState().recordsVersion).toBe(v0 + 1);
+  });
+});
+
+describe('sessions selectors', () => {
+  const store = createSessionsStore();
+  store.getState().applyProjects({ projects: [project('p2', 1), project('p1', 0)], revision: 1 });
+  store.getState().applyList({
+    sessions: [
+      record('x', { projectId: 'p1' as ProjectId }),
+      record('y', { projectId: 'p1' as ProjectId, archived: true }),
+      record('z', { projectId: null, unread: true }),
+    ],
+    revision: 1,
+  });
+
+  it('orders projects and lists a project’s unarchived sessions, memoised', () => {
+    expect(selectProjectOrder(store.getState()).map((p) => p.id)).toEqual(['p1', 'p2']);
+    const inP1 = selectSessionsOf(store.getState(), 'p1' as ProjectId);
+    expect(inP1.map((r) => r.appId)).toEqual(['x']);
+    expect(selectSessionsOf(store.getState(), 'p1' as ProjectId)).toBe(inP1);
+    expect(selectSessionsOf(store.getState(), null).map((r) => r.appId)).toEqual(['z']);
+  });
+
+  it('sorts a project’s sessions for the sidebar', () => {
+    expect(selectSortedSessions(store.getState(), null, 'priority', []).map((r) => r.appId)).toEqual(['z']);
+  });
+});
+
+describe('unstarted sessions', () => {
+  const P = 'p' as ProjectId;
+
+  it('holds an unstarted session until its record arrives through an event', () => {
+    const store = createSessionsStore();
+    store.getState().addUnstarted(A, { projectId: P, createdAt: '2026-09-28T10:00:00Z' });
+    expect(store.getState().unstarted.get(A)).toEqual({ projectId: P, createdAt: '2026-09-28T10:00:00Z' });
+    store.getState().applyChanged({ record: titled('b', 'another'), cause: 'discovered', revision: 1 });
+    expect(store.getState().unstarted.has(A)).toBe(true);
+    store.getState().applyChanged({ record: titled('a', 'started'), cause: 'live', revision: 2 });
+    expect(store.getState().unstarted.has(A)).toBe(false);
+  });
+
+  it('drops an unstarted session a snapshot lists, and on request', () => {
+    const store = createSessionsStore();
+    store.getState().addUnstarted(A, { projectId: null, createdAt: '2026-09-28T10:00:00Z' });
+    store.getState().addUnstarted(B, { projectId: null, createdAt: '2026-09-28T10:00:00Z' });
+    store.getState().applyList({ sessions: [titled('a', 'started')], revision: 1 });
+    expect([...store.getState().unstarted.keys()]).toEqual([B]);
+    store.getState().dropUnstarted(B);
+    expect(store.getState().unstarted.size).toBe(0);
+  });
+});

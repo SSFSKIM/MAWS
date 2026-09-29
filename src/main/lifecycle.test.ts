@@ -13,6 +13,7 @@ const fake = vi.hoisted(() => {
     },
     whenReady: () => Promise.resolve(),
     getPath: () => '/tmp/maws-lifecycle-test',
+    isPackaged: false,
     setPath: vi.fn(),
     commandLine: { appendSwitch: vi.fn() },
     quit: vi.fn(),
@@ -22,7 +23,14 @@ const fake = vi.hoisted(() => {
   return { listeners, windows, hosts, app, emit, createWindow: vi.fn(() => void windows.push({})) };
 });
 
-vi.mock('electron', () => ({ app: fake.app, BrowserWindow: { getAllWindows: () => fake.windows } }));
+vi.mock('electron', () => {
+  const display = { workArea: { x: 0, y: 0, width: 1440, height: 900 } };
+  return {
+    app: fake.app,
+    BrowserWindow: { getAllWindows: () => fake.windows },
+    screen: { getAllDisplays: () => [display], getPrimaryDisplay: () => display },
+  };
+});
 vi.mock('./hosts', () => ({ createHosts: () => fake.hosts }));
 vi.mock('./ipc/router', () => ({ installRouter: vi.fn(), registerMainHandler: vi.fn() /* C3 */ }));
 // C3 start: main's attention service and its store, started from index.ts, are replaced like the other wired modules
@@ -44,6 +52,18 @@ const git = vi.hoisted(() => ({ dispose: vi.fn(), registered: 0 }));
 vi.mock('./git/service', () => ({ GitService: class { dispose = git.dispose; } }));
 vi.mock('./git/register', () => ({ registerGitHandlers: () => void (git.registered += 1) }));
 // end C4
+// C5 start: the layout store, the external-link command and the read side
+vi.mock('./layout/store', () => ({ LayoutFileStore: class { flush() {} get() { return null; } set() {} }, registerLayoutHandlers: vi.fn() }));
+vi.mock('./open-external', () => ({ registerOpenExternal: vi.fn() }));
+// The read model starts C4's index source and stops it with the sessions, at will-quit.
+vi.mock('./sessions', () => ({
+  startSessions: ({ indexSource }: { indexSource: { start(writer: unknown): () => void } }) => ({ model: {}, stop: indexSource.start({}) }),
+}));
+vi.mock('./menu', () => ({ startMenu: vi.fn(), registerMenuHandlers: vi.fn() }));
+vi.mock('./window-state', () => ({ restoreWindowState: vi.fn(() => null), trackWindowState: vi.fn() }));
+vi.mock('./attention', () => ({ startAttention: vi.fn() }));
+vi.mock('./lifecycle/quit-guard', () => ({ installQuitGuard: vi.fn(), askToQuit: vi.fn() }));
+// C5 end
 
 beforeAll(async () => {
   await import('./index');

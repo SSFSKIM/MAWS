@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, dialog, screen } from 'electron';
 import { createHosts } from './hosts';
 import { installRouter } from './ipc/router';
 import { startSettings } from './settings';
@@ -14,10 +14,19 @@ import { Index } from './index/index';
 import { registerIndexHandlers } from './index/register';
 import { registerReplayHandlers } from './index/replay';
 import { appRoot, seedReplayFixtures } from './index/replay-fixtures';
-import { IndexSessionSource, type ReadModelWriter } from './index/source';
+import { IndexSessionSource } from './index/source';
 import { registerGitHandlers } from './git/register';
 import { GitService } from './git/service';
 // C4 end
+// C5 start (emit comes with C3's imports)
+import { startAttention } from './attention';
+import { LayoutFileStore, registerLayoutHandlers } from './layout/store';
+import { askToQuit, installQuitGuard } from './lifecycle/quit-guard';
+import { registerMenuHandlers, startMenu } from './menu';
+import { registerOpenExternal } from './open-external';
+import { startSessions } from './sessions';
+import { restoreWindowState, trackWindowState } from './window-state';
+// C5 end
 
 // A fresh profile for the end-to-end smoke (and anyone else who wants one); must be set before the app is ready.
 if (process.env.MAWS_USER_DATA) app.setPath('userData', process.env.MAWS_USER_DATA);
@@ -43,12 +52,11 @@ app.whenReady().then(() => {
   // C3 end
 
   // C4 start: the index (<userData>/index.sqlite) answers the record side of session.*, and its session source folds the
-  // engine host's store events into it once the host is ready. Until C5's read model registers the source, nothing
-  // main-side reads what it writes, so its writer drops every observation.
+  // engine host's store events into it once the host is ready. C5's read model starts the source (its block below:
+  // SessionReadModel.register, which refuses it in launch mode scenario) and stops it at will-quit.
   const index = new Index(join(app.getPath('userData'), 'index.sqlite'));
   registerIndexHandlers(index);
-  const noReadModel: ReadModelWriter = { observeRecord() {}, observeRemoved() {}, observeProject() {}, observeProjectRemoved() {}, setDigest() {} };
-  const stopSource = new IndexSessionSource(index, hosts, { emit }).start(noReadModel);
+  const indexSource = new IndexSessionSource(index, hosts, { emit });
   // C3's attention service, as C3 started it, with `Index.attention` as its store (C3's file store only when this app
   // cannot read the index); an archive the index records retires the session's attention.
   const attention = startIndexAttention(index, {
@@ -69,18 +77,60 @@ app.whenReady().then(() => {
     git.dispose();
     replays.dispose();
     attention.stop();
-    stopSource();
     index.close();
   });
   // C4 end
+
+  // ---- C5: layout store and the read side (launch mode, read model, stub source in scenario mode) ----
+  const layout = new LayoutFileStore(join(app.getPath('userData'), 'layout.json'));
+  registerLayoutHandlers(layout);
+  registerOpenExternal();
+  // A relative scenario path is the repository's: the working directory of `pnpm dev`, `pnpm dev:stub` and the smoke's
+  // launch alike (`app.getAppPath()` is `out/main` when the built app is launched by file, as the smoke does).
+  const sessions = startSessions({ env: process.env, packaged: app.isPackaged, appRoot: process.cwd(), hosts, indexSource });
+  app.on('will-quit', () => {
+    layout.flush();
+    sessions.stop();
+  });
+  // The application menu from the action table, rebuilt on settings and on the page's registered handlers.
+  registerMenuHandlers(startMenu({ settings: () => settings.state().settings, emit }));
+  // Window bounds persist under `window.main`; a window opens where the last one was left, if that is still on screen.
+  const placement = () =>
+    restoreWindowState(layout.get('window.main'), screen.getAllDisplays().map((d) => d.workArea), screen.getPrimaryDisplay().workArea);
+  const tracked = (win: BrowserWindow) => trackWindowState(win, (state) => layout.set('window.main', state));
+  // ---- end C5 ----
 
   // The hosts belong to the app, not to a window or a page (§4.1): they start here, before any window exists, and
   // `start()` is idempotent, so opening a window again forks nothing and a reload never reaches them.
   const openWindow = () => {
     void hosts.start();
-    createWindow(settings.state().resolvedTheme);
+    const win = createWindow(settings.state().resolvedTheme, placement()); // C5: restored placement
+    tracked(win); // C5: tracked placement
+    return win; // C5: the notifier re-creates the window through here
   };
   openWindow();
+
+  // ---- C5: notifications, dock badge and the quit guard ----
+  startAttention(sessions.model, { settings: () => settings.state().settings, openWindow });
+  installQuitGuard(sessions.model, {
+    ask: (count) =>
+      askToQuit(count, {
+        env: process.env,
+        show: (options) => {
+          const win = BrowserWindow.getFocusedWindow();
+          return win ? dialog.showMessageBox(win, options) : dialog.showMessageBox(options);
+        },
+      }),
+    // C3's engine host stops its sessions within the grace; a host that cannot answer (not started, or a build without
+    // C3's command) has nothing to stop.
+    shutdownEngine: async () => {
+      const result = await hosts.dispatch('engine-host', 'engine.shutdown', { graceMs: 5000 });
+      if (!result.ok && result.error.code !== 'unknown_command' && result.error.code !== 'host_unavailable') {
+        console.warn('[quit-guard] engine.shutdown failed', result.error);
+      }
+    },
+  });
+  // ---- end C5 ----
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) openWindow();
   });

@@ -83,6 +83,7 @@ Owner process vocabulary is C1's `Owner`: `main`, `engine-host`, `pty-host`. "De
 | `session.digests` | command | main | C5 | C5 renderer | void → `{ digests: SessionDigest[] }` | agreed |
 | `session.digest` | event | main | C5 | C5 renderer | `SessionDigest` (`appSessionId`, phase, activity, lastAssistantLine, context, cost, childAgents, pendingRequests, revision) | agreed; key renamed `appId` → `appSessionId` (ruling 1) |
 | `session.setVisible` | command | main | C5 | C5 renderer (read model forwards to `SessionSource.onSetVisible`) | `{ appSessionId, visible }` → void | agreed; C5's ask for an index API `sessions.setVisible` is settled as `SessionSource.onSetVisible` (d.5) |
+| `session.launchMode` | command | main | C5 | C5 renderer (scenario session creator) | void → `{ mode: 'index' | 'scenario' }` | added-for-consumer (C5 M3, 2026-09-28): the page registers the stub's session creator only in scenario mode |
 | `session.drafts.get` | command | main | C4 | ; C7 | `{ appSessionId }` → `Draft | null` | agreed |
 | `session.drafts.set` | command | main | C4 | ; C7 | `{ appSessionId, draft }` → void | agreed |
 | `session.replay.start` | command | main | C4 | C4 diagnostics; C12 | `{ source, speed }` → `{ appSessionId, sessionId, totalRows, spanMs }` | agreed; main allocates the ids and the `kind: 'replay'` record, dispatches `session.replay.launch`, and removes the record again on any dispatch error, rethrowing it (C4 fix wave, finding 4) |
@@ -119,11 +120,13 @@ Owner process vocabulary is C1's `Owner`: `main`, `engine-host`, `pty-host`. "De
 | `attention.request` | command | main | C3 | C5 hover card and Overview card; C7 | `{ appSessionId, requestId }` → `{ event: SessionEvent | null }` | conflict-resolved: C5 proposed owner engine-host; main answers by dispatching `session.pendingRequest` (ruling 1); defined in C3's `attention.ts` beside `list` and `changed` |
 | `attention.notified` | event | main | C5 | C5 renderer (fallback toast), C5 smoke | `{ appSessionId, attentionId, delivery: 'os' | 'fallback', at }` | agreed |
 | `attention.navigate` | event | main | C5 | C5 renderer | `{ appSessionId, attentionId | null, source: 'notification' | 'menu' }` | agreed |
+| `attention.pendingNavigate` | command | main | C5 | C5 renderer | void → `{ navigate: AttentionNavigate | null }`, cleared on read; the navigation main queued while no page had subscribed | added-for-consumer (C5 M5 fix wave, 2026-09-28): a notification click that re-creates the window cannot be delivered on `did-finish-load` |
 | `layout.get` | command | main | C5 | C5 renderer | `{ key }` → `{ value: unknown | null }` | conflict-resolved: C5 had assigned these to C4's index and C4 had dropped them; C5 owns them over `<userData>/layout.json` (ruling 10) |
 | `layout.set` | command | main | C5 | C5 renderer | `{ key, value }` → void | conflict-resolved: as `layout.get` |
 | `layout.list` | command | main | C5 | C5 renderer, C5 acceptance | void → `{ keys: string[] }` | conflict-resolved: as `layout.get` |
 | `layout.openExternal` | command | main | C5 | C6 markdown links, C5; C9's `pty.openLink` shares its helper | `{ url }` → void; `http`, `https`, `mailto` only | agreed (ruling 4) |
 | `layout.action` | event | main | C5 | C5 renderer | `{ action: ActionId, arg: number | null }` | agreed |
+| `layout.setEnabledActions` | command | main | C5 | C5 renderer (action registry) | `{ actions: ActionId[] }` → void; the renderer's registered-handler set, main rebuilds the menu with the rest disabled | added-for-consumer (C5 M2, 2026-09-28): the document asked for a menu rebuild on registry change without a carrier |
 | `pty.hostState` | command + event | main | C1 | C9 registry | `HostState` | agreed |
 | `pty.ping` | command | pty-host | C1 | C1 smoke | void → `HostPing` | agreed |
 | `pty.spawn` | command | pty-host | C9 (replaces C1's) | C9 registry, C1 smoke (migrated by C9 M2) | `{ appSessionId, label, cwd, cols, rows, shell?, args?, command? }` → `{ ptyId, pid }`; `env` removed | agreed (C1 handed `pty.*` to C9); migration stated in C9 M2 (ruling 9) |

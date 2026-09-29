@@ -6,6 +6,7 @@ import { AttentionItemSchema } from '../../graph/attention';
 import { SessionEventSchema } from '../../graph/events';
 import { AppSessionIdSchema, RequestIdSchema } from '../../graph/ids';
 // C3 end
+import { AttentionIdSchema } from '../../graph/ids'; // C5
 import type { CommandSpec } from './common';
 
 // C3 start: the Needs-you surface (C3 execution document, Interfaces "Broker" and "X2"): every session's merged items,
@@ -22,10 +23,29 @@ export const C3_ATTENTION_COMMANDS = Object.keys(c3Commands) as (keyof typeof c3
 export const C3_ATTENTION_EVENTS = Object.keys(c3Events) as (keyof typeof c3Events)[];
 // C3 end
 
+// C5 start: the notifier's events and the queued navigation (C5 execution document, Interfaces "X2 — attention.*"). Owner
+// main.
+// A notification click (or a menu item): the renderer opens the session.
+export const AttentionNavigateSchema = z.strictObject({ appSessionId: AppSessionIdSchema, attentionId: AttentionIdSchema.nullable(), source: z.enum(['notification', 'menu']) });
+export type AttentionNavigate = z.infer<typeof AttentionNavigateSchema>;
+const c5Commands = {
+  // Snapshot in C1's pattern: the navigation main queued while no page could hear it, cleared on read. The renderer
+  // subscribes to `attention.navigate` first, then calls this once; the call also tells main this page is listening.
+  'attention.pendingNavigate': { input: z.void(), output: z.strictObject({ navigate: AttentionNavigateSchema.nullable() }), owner: 'main' },
+} as const satisfies Record<`attention.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
+const c5Events = {
+  // A notification was posted (or would have been: `fallback`, the unsigned-binary case); also what the smoke observes.
+  'attention.notified': z.strictObject({ appSessionId: AppSessionIdSchema, attentionId: AttentionIdSchema, delivery: z.enum(['os', 'fallback']), at: z.string() }),
+  'attention.navigate': AttentionNavigateSchema,
+} as const satisfies Record<`attention.${string}`, z.ZodType>;
+// C5 end
+
 export const commands = {
   ...c3Commands, // C3
+  ...c5Commands, // C5
 } as const satisfies Record<`attention.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {
   ...c3Events, // C3
+  ...c5Events, // C5
 } as const satisfies Record<`attention.${string}`, z.ZodType>;

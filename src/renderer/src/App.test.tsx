@@ -31,7 +31,7 @@ function fakeMain(initial: SettingsState['settings']['theme']) {
   let theme = initial;
   const listeners = new Map<string, Set<(payload: unknown) => void>>();
   const send = (name: string, payload: unknown) => listeners.get(name)?.forEach((l) => l(payload));
-  const state = () => ({ settings: { version: 1, theme }, resolvedTheme: theme === 'dark' ? 'dark' : 'light' });
+  const state = () => ({ settings: { version: 2, keymap: {}, notifications: { enabled: true, sound: false }, theme }, resolvedTheme: theme === 'dark' ? 'dark' : 'light' });
   const answer = (name: string, input: { theme: typeof theme; data: string }) => {
     switch (name) {
       case 'settings.set':
@@ -65,6 +65,24 @@ function fakeMain(initial: SettingsState['settings']['theme']) {
         return GIT_STATUS;
       case 'git.unwatch':
         return undefined;
+      // C5 start: the shell's snapshots (the record side above is C4's)
+      case 'session.digests':
+        return { digests: [] };
+      case 'session.launchMode':
+        return { mode: 'index' };
+      case 'attention.list':
+        return [];
+      case 'attention.pendingNavigate':
+        return { navigate: null };
+      case 'layout.list':
+        return { keys: [] };
+      case 'layout.get':
+        return { value: null };
+      case 'layout.set':
+      case 'layout.setEnabledActions':
+      case 'session.setVisible':
+        return undefined;
+      // C5 end
       case 'pty.spawn':
         return { ptyId: 'p1', pid: 3333 };
       case 'pty.write':
@@ -85,13 +103,19 @@ function fakeMain(initial: SettingsState['settings']['theme']) {
       return () => listeners.get(name)!.delete(listener);
     }),
   } as unknown as MawsBridge;
+  current = { send };
   return { send };
 }
 
+let current: { send(name: string, payload: unknown): void } | null = null;
+
+// The strip lives in the Diagnostics tab (C5 M4): the app opens, then Help › Diagnostics arrives from the menu.
 async function renderApp() {
   vi.resetModules(); // a fresh settings store per test
   const { App } = await import('./App');
   await act(async () => void render(<App />));
+  await act(async () => current!.send('layout.action', { action: 'diagnostics.open', arg: null }));
+  await act(async () => void (await new Promise((resolve) => setTimeout(resolve, 0))));
 }
 
 describe('theme in the page', () => {
@@ -151,6 +175,13 @@ describe('hosts in the diagnostics strip', () => {
     expect(pty()).toBe('pty host · restarting');
     act(() => main.send('pty.hostState', { state: 'ready', pid: 4444, restarts: 1, revision: 4 }));
     expect(pty()).toBe('pty host · ready · pid 4444');
+  });
+
+  it('shows the shell data counts once the stores have loaded (C5 M1)', async () => {
+    fakeMain('light');
+    await renderApp();
+    await act(async () => void (await new Promise((resolve) => setTimeout(resolve, 0))));
+    expect(screen.getByRole('status', { name: 'shell data' }).textContent).toBe('sessions · 0 · needs you · 0 · layout · hydrated');
   });
 
   it('runs the echo test and shows the output line with the shell’s pid', async () => {
