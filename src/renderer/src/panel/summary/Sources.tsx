@@ -23,7 +23,16 @@ export function Sources({ appSessionId, directory }: { appSessionId: AppSessionI
   const phase = useTranscriptStore((s) => s.entries[appSessionId]?.phase);
   const activity = useSessionActivity(appSessionId);
   const sources = useMemo(() => (activity ? sourcesOf(activity) : null), [activity]);
-  const note = phase === undefined ? SUMMARY_COPY.openSession : phase === 'hydrating' ? SUMMARY_COPY.loading : sources?.length ? null : SUMMARY_COPY.noSources;
+  const note =
+    phase === undefined
+      ? SUMMARY_COPY.openSession
+      : phase === 'hydrating'
+        ? SUMMARY_COPY.loading
+        : phase === 'failed'
+          ? SUMMARY_COPY.sourcesUnavailable // never inferred as "no sources"
+          : sources?.length
+            ? null
+            : SUMMARY_COPY.noSources;
   return (
     <Section id="sources">
       {note ? (

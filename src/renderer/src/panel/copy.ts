@@ -59,6 +59,7 @@ export const SUMMARY_COPY = {
   noSources: 'No sources yet',
   openSession: 'Open the session to list its sources',
   loading: 'Loading…',
+  sourcesUnavailable: 'Sources unavailable', // the transcript's hydration failed (C6's phase 'failed')
   sourceOnly: 'Source only',
 } as const;
 

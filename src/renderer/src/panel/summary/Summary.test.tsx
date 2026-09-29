@@ -230,15 +230,26 @@ describe('summary card', () => {
 
   it('Sources and the glyph line are the same after every turn is toggled and after expandAll', async () => {
     await live();
-    await attachTranscript('agents-and-messages');
-    await mount();
-    const read = () => ({ sources: section('Sources').textContent, glyphs: screen.getByTestId('agent-glyphs').textContent });
-    const before = read();
-    const store = useTranscriptStore.getState;
-    act(() => store().entries[A].state.order.forEach((turn) => store().toggleTurn(A, turn)));
-    expect(read()).toEqual(before);
-    act(() => store().expandAll(A, { cells: true }));
-    expect(read()).toEqual(before);
+    // exploration-and-web for the Sources rows (nine of them), agents-and-messages for the glyph line (its only
+    // file and search calls are the children's own, which are not the session's sources).
+    for (const [fixture, rows, glyphs] of [
+      ['exploration-and-web', 9, null],
+      ['agents-and-messages', 0, '✻✿'],
+    ] as const) {
+      await attachTranscript(fixture);
+      const view = await mount();
+      const read = () => ({ sources: within(section('Sources')).queryAllByRole('listitem').map((row) => row.textContent), glyphs: screen.queryByTestId('agent-glyphs')?.textContent ?? null });
+      const before = read();
+      expect(before.sources, fixture).toHaveLength(rows);
+      expect(before.glyphs, fixture).toBe(glyphs);
+      const store = useTranscriptStore.getState;
+      act(() => store().entries[A].state.order.forEach((turn) => store().toggleTurn(A, turn)));
+      expect(read(), fixture).toEqual(before);
+      act(() => store().expandAll(A, { cells: true }));
+      expect(read(), fixture).toEqual(before);
+      view.unmount();
+      store().drop(A);
+    }
   });
 
   it('asks for the session when its transcript was never mounted here, and says when there is nothing yet', async () => {
@@ -248,6 +259,16 @@ describe('summary card', () => {
     await act(() => useTranscriptStore.getState().attach(A, { subscribe: () => () => {}, snapshot: () => Promise.resolve([]) }));
     await mount();
     expect(within(section('Sources')).getByText('No sources yet')).toBeTruthy();
+  });
+
+  it('says Sources unavailable when the transcript’s hydration failed, never No sources yet', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    await act(() => useTranscriptStore.getState().attach(A, { subscribe: () => () => {}, snapshot: () => Promise.reject(new Error('history unreadable')) }));
+    expect(useTranscriptStore.getState().entries[A]?.phase).toBe('failed');
+    await mount();
+    expect(within(section('Sources')).getByText('Sources unavailable')).toBeTruthy();
+    expect(within(section('Sources')).queryByText('No sources yet')).toBeNull();
+    error.mockRestore();
   });
 
   it('collapsing a section hides its rows and writes summary.sections with that id once after the debounce', async () => {
