@@ -83,8 +83,8 @@ export function createRelayStore() {
           return;
         }
         if (ended !== null && state.childEndedAt === null) return put(key, { ...relay, state: { ...state, childEndedAt: ended } });
-        if (e.kind === 'tool.use' && matchesSendMessage(e, relay)) {
-          const parentRounds = parentRoundsBetween(w?.rounds ?? [], state.sentSeq ?? -Infinity, e.seq === null ? Infinity : e.seq + 1);
+        if (e.kind === 'tool.use' && e.seq !== null && matchesSendMessage(e, relay)) { // (b) is the live parent's row; the receipt below takes either form (O3)
+          const parentRounds = parentRoundsBetween(w?.rounds ?? [], state.sentSeq ?? -Infinity, e.seq + 1);
           put(key, { ...relay, state: { kind: 'forwarded', messageUuid: state.messageUuid, sentAt: state.sentAt, toolUseId: e.toolUseId, forwardedAt: e.at, parentRounds, childEndedAt: state.childEndedAt } });
         }
         return;
@@ -101,7 +101,7 @@ export function createRelayStore() {
       for (const e of events) {
         if (e.agentId === null && e.seq !== null) w.lastSeq = w.lastSeq === null ? e.seq : Math.max(w.lastSeq, e.seq);
         if (w.inFlight > 0) w.buffered.push(e);
-        if (e.kind === 'assistant.block.complete' && e.agentId === null && e.block.type === 'tool_use') w.rounds.push(e);
+        if (e.kind === 'assistant.block.complete' && e.agentId === null && e.seq !== null && e.block.type === 'tool_use') w.rounds.push(e);
         for (const [key] of ofSession(id)) step(key, e);
       }
       tidy(id);

@@ -66,6 +66,15 @@ describe('relay store', () => {
     expect(stateOf(WALKER)?.kind).toBe('asked');
   });
 
+  it('takes the parent’s SendMessage and its rounds in the live form only', async () => {
+    await send(LOOPER, 'Say PING', IDLE_UUID);
+    const disk = (e: SessionEvent) => ({ ...e, seq: null, id: `disk-${e.id}` }) as SessionEvent;
+    batch(between(150, 200).map(disk));
+    expect(stateOf(LOOPER)?.kind).toBe('asked');
+    batch(between(150, 200));
+    expect(stateOf(LOOPER)).toMatchObject({ kind: 'forwarded', parentRounds: 2 });
+  });
+
   it('moves to delivered on a receipt in the child’s stream, live or disk form', async () => {
     await send(LOOPER, 'Say PING', IDLE_UUID);
     batch(between(150, 200));
