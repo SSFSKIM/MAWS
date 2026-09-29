@@ -101,6 +101,25 @@ describe('useEngineRead', () => {
     expect(settings.result.current.error).toBe('get_settings is not available on this connection');
   });
 
+  it("keeps the last value when a refetch fails, and says so: a timeout as the engine's silence, a refusal in its words", async () => {
+    const { result } = renderHook(() => useEngineRead('session.getWorkspaceDiff', { appSessionId: ID }), { wrapper: wrapper() });
+    await waitFor(() => expect(result.current.state).toBe('ready'));
+    expect(result.current.error).toBeNull();
+    const off = backend.script('session.getWorkspaceDiff', () => {
+      throw new WidgetBackendError({ code: 'timeout', message: 'get_workspace_diff unanswered after 8 s' });
+    });
+    act(() => result.current.refetch());
+    await waitFor(() => expect(result.current.error).toBe('The engine did not answer · showing the last value it reported'));
+    expect(result.current.state).toBe('ready');
+    expect(result.current.data).toMatchObject({ diff: expect.anything() });
+    off();
+    backend.script('session.getWorkspaceDiff', () => {
+      throw new WidgetBackendError({ code: 'internal', message: 'the diff read failed' });
+    });
+    act(() => result.current.refetch());
+    await waitFor(() => expect(result.current.error).toBe('the diff read failed · showing the last value it reported'));
+  });
+
   it('in passive mode issues nothing and renders what the harness read into the cache under its key', async () => {
     const { result } = renderHook(() => useEngineRead('session.getContextUsage', { appSessionId: ID, detail: 'full' }), { wrapper: wrapper({ mode: 'passive' }) });
     await new Promise((r) => setTimeout(r, 10));

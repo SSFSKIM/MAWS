@@ -47,6 +47,17 @@ describe('WidgetFrame', () => {
     expect(screen.queryByText('the body')).toBeNull();
   });
 
+  it('keeps the body of a ready read and says, in one line above it, that a later read failed', () => {
+    render(
+      <WidgetFrame appSessionId={ID} title="Hooks" command="hooks" foot={foot} state="ready" error="The engine did not answer · showing the last value it reported" close={() => {}}>
+        <p>the body</p>
+      </WidgetFrame>,
+    );
+    expect(screen.getByText('the body')).toBeTruthy();
+    expect(screen.getByRole('status').textContent).toBe('The engine did not answer · showing the last value it reported');
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
   it('takes focus when it opens; Esc closes it and hands the keyboard back to the composer', () => {
     const close = vi.fn();
     const focusEditor = vi.fn();

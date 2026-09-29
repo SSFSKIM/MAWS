@@ -60,7 +60,7 @@ export const WIDGET_FOOT: Record<WidgetCommandName, WidgetFoot> = {
 };
 
 // The frame.
-export const FRAME = { reading: 'Reading…', noAnswer: 'The engine did not answer', readWith: 'Read with', close: (title: string) => `Close ${title}` };
+export const FRAME = { reading: 'Reading…', noAnswer: 'The engine did not answer', lastValue: 'showing the last value it reported', readWith: 'Read with', close: (title: string) => `Close ${title}` };
 
 // The widgets M3 builds, registered now so every name opens something.
 export const PENDING = 'This widget arrives with the next C11 milestone.';

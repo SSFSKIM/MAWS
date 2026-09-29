@@ -33,7 +33,7 @@ export interface WidgetFrameProps {
   command: string; // the palette name, shown as `/name`
   foot: WidgetFoot;
   state: ReadState;
-  error: string | null;
+  error: string | null; // in place of the body when state is 'error'; above the kept body when 'ready' (a later read failed)
   close(): void;
   children?: ReactNode;
 }
@@ -53,7 +53,17 @@ export function WidgetFrame({ appSessionId, title, command, foot, state, error, 
         {error}
       </p>
     );
-  else body = children;
+  else
+    body = (
+      <>
+        {error !== null && (
+          <p role="status" className="m-0 mb-1 text-ui-sm text-warning">
+            {error}
+          </p>
+        )}
+        {children}
+      </>
+    );
 
   return (
     <div

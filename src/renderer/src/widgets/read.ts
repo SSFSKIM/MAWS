@@ -44,7 +44,7 @@ export type ReadState = 'loading' | 'ready' | 'error' | 'not_running';
 export interface EngineRead<T> {
   state: ReadState;
   data: T | undefined;
-  error: string | null; // the refusal in words; a timeout reads as the engine's silence
+  error: string | null; // the refusal in words; a timeout reads as the engine's silence; with data, that it is the last value
   refetch(): void;
 }
 
@@ -52,10 +52,13 @@ export interface EngineReadOptions {
   refreshOn?: (status: EngineSessionStatus) => string; // the status facts whose change refetches; MOVES_READS by default
 }
 
-const errorWords = (error: IpcCommandError | null): string | null => {
+export const errorWords = (error: IpcCommandError | null): string | null => {
   if (error === null) return null;
   return error.error.code === 'timeout' ? `${FRAME.noAnswer} · ${error.message}` : error.message;
 };
+
+// A failed read after an answer: the answer stays, and one line says the engine's later answer is missing.
+const staleWords = (error: IpcCommandError): string => `${error.error.code === 'timeout' ? FRAME.noAnswer : error.message} · ${FRAME.lastValue}`;
 
 export function useEngineRead<N extends SessionRead>(command: N, input: CommandInput<N>, options: EngineReadOptions = {}): EngineRead<CommandOutput<N>> {
   const active = useContext(WidgetReadPolicyContext).mode === 'active';
@@ -94,5 +97,6 @@ export function useEngineRead<N extends SessionRead>(command: N, input: CommandI
   else if (query.data !== undefined) state = 'ready';
   else if (query.isError) state = 'error';
   else state = 'loading';
-  return { state, data: query.data, error: errorWords(query.error), refetch: () => void refetch() };
+  const error = query.data !== undefined && query.error ? staleWords(query.error) : errorWords(query.error);
+  return { state, data: query.data, error, refetch: () => void refetch() };
 }
