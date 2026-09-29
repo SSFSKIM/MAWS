@@ -93,6 +93,17 @@ describe('main answers files.* through the router', () => {
     expect(release).toHaveBeenCalledTimes(2);
   });
 
+  it('releases a watch still in flight when its window navigates, instead of adopting it after the release', async () => {
+    const { files } = await install();
+    const answer = invoke('files.watch', { appSessionId: 'A', path: join(root, 'repo', 'src') }); // in flight: its first step awaits the disk
+    sender.emit('did-navigate'); // the reload releases this window's holds before the watch is adopted
+    expect(await answer).toEqual({ ok: true, value: undefined });
+    expect(files.watching()).toEqual([]);
+    // a watch issued after the navigation (the reloaded page's) is kept
+    await invoke('files.watch', { appSessionId: 'A', path: join(root, 'repo', 'src') });
+    expect(files.watching()).toEqual([join(root, 'repo', 'src')]);
+  });
+
   it('opens an allowed file through shell.openPath and answers its error text', async () => {
     const openPath = vi.fn<(path: string) => Promise<string>>(async () => 'no application');
     await install(openPath);

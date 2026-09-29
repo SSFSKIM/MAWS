@@ -18,10 +18,17 @@ export interface FilesHandlerDeps {
 export function registerFilesHandlers(model: { record(appSessionId: AppSessionId): AllowlistRecord | null }, deps: FilesHandlerDeps): FilesService {
   const files = createFilesService({ records: (appSessionId) => model.record(appSessionId), ...deps });
   const followed = new WeakSet<WebContents>();
+  // Each release starts a new epoch for its window, so a watch in flight when its window navigated or closed is
+  // dropped when it completes rather than held by a page that can no longer unwatch it.
+  const epochs = new Map<number, number>();
+  const epochOf = (id: number) => epochs.get(id) ?? 0;
   const owner = (sender: WebContents) => {
     if (!followed.has(sender)) {
       followed.add(sender);
-      const release = () => files.release(sender.id);
+      const release = () => {
+        epochs.set(sender.id, epochOf(sender.id) + 1);
+        files.release(sender.id);
+      };
       sender.once('destroyed', release);
       sender.on('did-navigate', release);
     }
@@ -30,7 +37,12 @@ export function registerFilesHandlers(model: { record(appSessionId: AppSessionId
   const session = (id: string) => id as AppSessionId;
   registerMainHandler('files.list', ({ appSessionId, path }) => files.list({ appSessionId: session(appSessionId), path }));
   registerMainHandler('files.read', (input) => files.read({ ...input, appSessionId: session(input.appSessionId) }));
-  registerMainHandler('files.watch', ({ appSessionId, path }, { sender }) => files.watch(session(appSessionId), path, owner(sender)));
+  registerMainHandler('files.watch', async ({ appSessionId, path }, { sender }) => {
+    const id = owner(sender);
+    const epoch = epochOf(id);
+    await files.watch(session(appSessionId), path, id);
+    if (epochOf(id) !== epoch) files.unwatch(session(appSessionId), path, id); // released while in flight
+  });
   registerMainHandler('files.unwatch', ({ appSessionId, path }, { sender }) => files.unwatch(session(appSessionId), path, sender.id));
   registerMainHandler('files.openExternal', ({ appSessionId, path }) => files.openExternal(session(appSessionId), path));
   return files;
