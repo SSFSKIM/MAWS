@@ -4,6 +4,13 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { revealPath } from './reveal';
 
+// The real realpath, counted, so a test can see how many paths the guard resolves.
+const fsCalls = vi.hoisted(() => ({ realpath: [] as string[] }));
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>();
+  return { ...actual, realpath: (path: string) => (fsCalls.realpath.push(path), actual.realpath(path)) };
+});
+
 // A fake home: ~/.claude with settings.json, ~/.ssh/id_rsa beside it, a session directory with a file, and a directory
 // no session names. realpathSync: macOS's tmpdir is itself behind a symlink (/var → /private/var).
 let home: string;
@@ -62,6 +69,13 @@ describe('settings.reveal refuses paths outside the guard', () => {
       expect(await revealPath(path, deps(show)), path).toEqual({ revealed: false });
     }
     expect(show).not.toHaveBeenCalled();
+  });
+
+  it('resolves each distinct root once, however many sessions share it', async () => {
+    fsCalls.realpath.length = 0;
+    const many = { ...deps(), sessionDirectories: () => [session, extra, session, session, extra] };
+    expect(await revealPath(join(session, 'CLAUDE.md'), many)).toEqual({ revealed: true });
+    expect(fsCalls.realpath.sort()).toEqual([join(session, 'CLAUDE.md'), configHome, extra, session].sort());
   });
 
   it('reveals a root itself, and survives a root that does not exist', async () => {

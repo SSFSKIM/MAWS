@@ -16,7 +16,7 @@ export async function revealPath(path: string, deps: RevealDeps): Promise<{ reve
   if (!isAbsolute(path)) return { revealed: false };
   const real = await resolved(path);
   if (real === null) return { revealed: false }; // nothing there to show
-  const roots = await Promise.all([deps.configHome(), ...deps.sessionDirectories()].map(resolved));
+  const roots = await Promise.all([...new Set([deps.configHome(), ...deps.sessionDirectories()])].map(resolved)); // many sessions share a directory
   if (!roots.some((root) => root !== null && within(root, real))) return { revealed: false };
   deps.showItemInFolder(real);
   return { revealed: true };
