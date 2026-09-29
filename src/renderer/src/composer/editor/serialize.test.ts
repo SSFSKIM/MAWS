@@ -40,6 +40,14 @@ describe('serializeDraft maps docs to user content', () => {
     expect(s).toMatchObject({ mode: 'send', text: 'a\nb\nc', content: 'a\nb\nc', display: 'a\nb\nc', omitted: 0, empty: false, pastedContents: {} });
   });
 
+  it('ignores the edit mode a document carries (M4b): nothing of it reaches the content, the display or the history', () => {
+    const plain = real(docOf([paragraph(textNode('the edited prompt'))], [png]));
+    const edited = real({ ...plain, attrs: { ...plain.attrs, editing: { messageUuid: 'u-1', seenCursor: 'u-2' } } });
+    expect(edited.attrs?.editing).toEqual({ messageUuid: 'u-1', seenCursor: 'u-2' }); // the schema keeps it
+    expect(serializeDraft(edited, ctx)).toEqual(serializeDraft(plain, ctx));
+    expect(JSON.stringify(serializeDraft(edited, ctx))).not.toContain('u-1');
+  });
+
   it('renders mentions in their text forms', () => {
     const doc = docOf([paragraph(textNode('read '), mentionNode({ id: 'docs/a b.md', label: 'a b.md', kind: 'file' }), textNode(' then '), mentionNode({ id: 'src/a.ts', label: 'src/a.ts', kind: 'file' }), textNode(' with '), mentionNode({ id: 'Explore', label: 'Explore', kind: 'agent' }))]);
     const s = serializeDraft(real(doc), ctx);

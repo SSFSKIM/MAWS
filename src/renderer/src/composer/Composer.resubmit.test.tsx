@@ -82,7 +82,7 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-type TiptapElement = HTMLElement & { editor: { commands: { insertContent(text: string): boolean; clearContent(): boolean }; getText(): string; isEditable: boolean } };
+type TiptapElement = HTMLElement & { editor: { commands: { insertContent(text: string): boolean; clearContent(): boolean }; getText(): string; getJSON(): { attrs?: Record<string, unknown> }; isEditable: boolean } };
 const pane = () => screen.getByRole('region', { name: 'pane 0' });
 const editor = () => within(pane()).getByRole('textbox', { name: 'Message', hidden: true }) as TiptapElement;
 const primary = () => pane().querySelector<HTMLButtonElement>('[data-submit-state]')!;
@@ -92,6 +92,9 @@ const rewound = { rewound: true, reason: null, error: null, prefillText: 'second
 const sent = { messageUuid: null, disposition: 'sent', queueId: 'q-1' };
 const rowOf = (uuid: string) => useTranscriptStore.getState().rows(A).find((r): r is Extract<Row, { kind: 'user' }> => r.kind === 'user' && r.messageUuid === uuid)!;
 const toasts = () => useNotices.getState().notices.map((n) => n.text);
+const drafted = () => fake.invoked('session.drafts.set').at(-1) as { draft: { doc: { attrs: Record<string, unknown>; content?: unknown } } | null } | undefined;
+const draftedEdit = () => drafted()?.draft?.doc.attrs.editing;
+const docEdit = () => editor().editor.getJSON().attrs?.editing ?? null;
 const liveEvent = (events: SessionEvent[]) => act(() => fake.event('session.eventBatch', { appSessionId: A, events }));
 
 function mount(extra: ReactNode = null) {
@@ -365,15 +368,68 @@ describe('edit-and-resubmit in the composer', () => {
     expect(fake.invoked('session.send')).toEqual([]);
   });
 
-  it('keeps edit mode in the draft: entering it writes the edit into the draft document, leaving it writes it out', async () => {
+  it('keeps edit mode in the draft: entering it writes the edit, and every way out of edit mode writes a draft without it', async () => {
+    const edit = { messageUuid: 'u-1', seenCursor: 'u-2' };
+    const wait = { timeout: 2_000 };
     mount();
     await editFirst();
-    const drafted = () => fake.invoked('session.drafts.set').at(-1) as { draft: { doc: { attrs: Record<string, unknown> } } | null } | undefined;
-    await waitFor(() => expect(drafted()?.draft?.doc.attrs.editing).toEqual({ messageUuid: 'u-1', seenCursor: 'u-2' }), { timeout: 2_000 });
+    await waitFor(() => expect(draftedEdit()).toEqual(edit), wait);
     act(() => editor().focus());
-    await key(editor(), { key: 'Escape' });
-    await waitFor(() => expect(drafted()?.draft?.doc.attrs.editing).toBeNull(), { timeout: 2_000 });
+    await key(editor(), { key: 'Escape' }); // Esc
+    await waitFor(() => expect(draftedEdit()).toBeNull(), wait);
     expect(drafted()?.draft?.doc).toMatchObject({ content: [{ content: [{ text: 'first prompt' }] }] });
+
+    await editFirst();
+    await waitFor(() => expect(draftedEdit()).toEqual(edit), wait);
+    await userEvent.setup().click(within(line()!).getByRole('button', { name: 'Leave edit mode' })); // ×
+    await waitFor(() => expect(draftedEdit()).toBeNull(), wait);
+
+    await editFirst();
+    await waitFor(() => expect(draftedEdit()).toEqual(edit), wait);
+    act(() => prefillComposer(A, { text: 'handed back', editing: null })); // a prefill with no edit
+    await waitFor(() => expect(drafted()?.draft?.doc.content).toMatchObject([{ content: [{ text: 'handed back' }] }]), wait);
+    expect(draftedEdit()).toBeNull();
+
+    await editFirst(); // a successful resend: the next draft carries no edit
+    await confirmRewind();
+    await fake.reply('session.rewind', rewound);
+    await waitFor(() => expect(fake.pending('session.send')).toBe(1));
+    await fake.reply('session.send', sent);
+    await waitFor(() => expect(editor().editor.getText()).toBe(''));
+    expect(docEdit()).toBeNull();
+    act(() => void editor().editor.commands.insertContent('a new message'));
+    await waitFor(() => expect(drafted()?.draft?.doc.content).toMatchObject([{ content: [{ text: 'a new message' }] }]), wait);
+    expect(draftedEdit()).toBeNull();
+  }, 15_000); // five draft writes, 750 ms apart at the least
+
+  it('Keep editing stays in edit mode, and the draft keeps the edit with it', async () => {
+    setRewindWindow(20);
+    mount();
+    await editFirst();
+    await confirmRewind();
+    await fake.fail('session.rewind');
+    await userEvent.setup().click(await within(pane()).findByRole('button', { name: 'Keep editing' }));
+    await waitFor(() => expect(line()?.textContent).toContain('Editing an earlier message'));
+    expect(docEdit()).toEqual({ messageUuid: 'u-1', seenCursor: 'u-2' });
+  });
+
+  it('a replaced document carries only its own edit: a recall in edit mode gets the edit back, a recall outside it none', async () => {
+    mount();
+    await editFirst();
+    act(() => void editor().editor.commands.clearContent());
+    act(() => editor().focus());
+    await key(editor(), { key: 'ArrowUp' }); // recalls the newest prompt; the recalled document has no edit of its own
+    await waitFor(() => expect(editor().editor.getText()).toBe('second prompt'));
+    await waitFor(() => expect(docEdit()).toEqual({ messageUuid: 'u-1', seenCursor: 'u-2' })); // still editing u-1, as the line says
+    expect(line()).not.toBeNull();
+
+    await key(editor(), { key: 'Escape' });
+    await waitFor(() => expect(line()).toBeNull());
+    await waitFor(() => expect(docEdit()).toBeNull());
+    act(() => void editor().editor.commands.clearContent());
+    await key(editor(), { key: 'ArrowUp' });
+    await waitFor(() => expect(editor().editor.getText()).not.toBe(''));
+    expect(docEdit()).toBeNull();
   });
 
   describe('after a reload (edit mode restored from the draft)', () => {
@@ -397,12 +453,14 @@ describe('edit-and-resubmit in the composer', () => {
       await act(() => useTranscriptStore.getState().attach(A, ipcSource(A)));
     }
 
-    it('restores edit mode at idle when the edited message is still in the transcript, and Send confirms against it', async () => {
+    it('restores edit mode at idle when the edited message is still in the transcript, issues nothing on mount, and Send confirms against it', async () => {
       await reloaded();
       await waitFor(() => expect(editor().editor.getText()).toBe('first prompt, edited'));
       await waitFor(() => expect(line()?.textContent).toContain('Editing an earlier message'));
       expect(editingOf(useComposerStore.getState(), A)).toEqual({ messageUuid: 'u-1', seenCursor: 'u-2' });
       expect(resubmitOf(useComposerStore.getState(), A)).toBe('idle');
+      expect(fake.invoked('session.rewind')).toEqual([]);
+      expect(fake.invoked('session.send')).toEqual([]);
       await confirmRewind();
       expect(fake.invoked('session.rewind')).toEqual([{ appSessionId: A, targetMessageUuid: 'u-1', lastSeenMessageUuid: 'u-2', files: false }]);
     });
@@ -415,6 +473,61 @@ describe('edit-and-resubmit in the composer', () => {
       await waitFor(() => expect(toasts()).toEqual(['The conversation was rewound; your edited text is in the editor']));
       expect(line()).toBeNull();
       expect(editingOf(useComposerStore.getState(), A)).toBeNull();
+      expect(editor().editor.getText()).toBe('first prompt, edited');
+      expect(fake.invoked('session.rewind')).toEqual([]);
+    });
+
+    it('the persisted seen cursor survives: a newer message in the hydrated transcript asks again, and the rewind carries it', async () => {
+      fake = fakeClient({
+        'session.queue.list': { entries: [], paused: false, pauseReason: null },
+        'session.history.list': { entries: [] },
+        'session.drafts.get': { ...editedDraft, doc: { ...editedDraft.doc, attrs: { attachments: [], editing: { messageUuid: 'u-1', seenCursor: 'u-1' } } } },
+        'session.drafts.set': undefined,
+        'session.history.append': undefined,
+        'session.events': () => ({ events: sessionEvents, lastSeq: sessionEvents.length, complete: true }),
+      });
+      window.maws = fake.client;
+      await reloaded();
+      await waitFor(() => expect(editingOf(useComposerStore.getState(), A)).toEqual({ messageUuid: 'u-1', seenCursor: 'u-1' }));
+      await key(editor(), { key: 'Enter' });
+      const dialog = await screen.findByRole('alertdialog');
+      expect(dialog.textContent).toContain('A newer turn started after you began editing. Rewinding discards it too. Rewind anyway?');
+      await userEvent.setup().click(within(dialog).getByRole('button', { name: 'Rewind anyway' }));
+      await waitFor(() => expect(fake.invoked('session.rewind')).toEqual([{ appSessionId: A, targetMessageUuid: 'u-1', lastSeenMessageUuid: 'u-2', files: false }]));
+    });
+
+    it('judges the edited message gone only once the transcript has hydrated, never while it is not loaded or loading', async () => {
+      fake = fakeClient({
+        'session.queue.list': { entries: [], paused: false, pauseReason: null },
+        'session.history.list': { entries: [] },
+        'session.drafts.get': editedDraft,
+        'session.drafts.set': undefined,
+        'session.history.append': undefined,
+      }); // session.events answered below
+      window.maws = fake.client;
+      resetComposerStore();
+      for (const k of Object.keys(useTranscriptStore.getState().entries)) useTranscriptStore.getState().drop(k);
+      mount();
+      await waitFor(() => expect(line()?.textContent).toContain('Editing an earlier message')); // no transcript at all
+      void act(() => void useTranscriptStore.getState().attach(A, ipcSource(A)));
+      await waitFor(() => expect(fake.pending('session.events')).toBe(1));
+      expect(useTranscriptStore.getState().entries[A]?.phase).toBe('hydrating');
+      expect(line()).not.toBeNull(); // loading: nothing is judged
+      const b = transcriptOf();
+      b.emit('boundary.rewind', { targetMessageUuid: u('u-1'), precedingAssistantUuid: null, prefillText: 'first prompt' });
+      await act(() => fake.reply('session.events', { events: b.events, lastSeq: b.events.length, complete: true }));
+      await waitFor(() => expect(line()).toBeNull());
+      expect(toasts()).toEqual(['The conversation was rewound; your edited text is in the editor']);
+    });
+
+    it('a reload during an unconfirmed rewind: edit mode is back at idle, and the late boundary then ends it with the text kept', async () => {
+      await reloaded();
+      await waitFor(() => expect(line()?.textContent).toContain('Editing an earlier message'));
+      const late = builder('2026-09-28T11:00:00.000Z');
+      late.emit('boundary.rewind', { targetMessageUuid: u('u-1'), precedingAssistantUuid: null, prefillText: 'first prompt' });
+      liveEvent(late.events.map((e) => ({ ...e, id: 'boundary-after-reload' }) as SessionEvent));
+      await waitFor(() => expect(line()).toBeNull());
+      expect(toasts()).toEqual(['The conversation was rewound; your edited text is in the editor']);
       expect(editor().editor.getText()).toBe('first prompt, edited');
       expect(fake.invoked('session.rewind')).toEqual([]);
     });

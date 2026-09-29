@@ -348,7 +348,7 @@ export class EditorController {
   private setEditing(editing: Editing | null): void {
     const editor = this.editor;
     if (!editor || this.busy) return;
-    const current = editingOfDoc(editor.getJSON());
+    const current = editingOfDoc({ attrs: editor.state.doc.attrs });
     if (current?.messageUuid === editing?.messageUuid && current?.seenCursor === editing?.seenCursor) return;
     this.silent = !this.loaded;
     try {

@@ -331,8 +331,10 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
     handle.current?.submit(shown.primary === 'steer' ? 'steer' : 'send');
   };
 
-  // The edit mode into the document, so the draft carries it across a reload.
-  useEffect(() => handle.current?.setEditing(editing), [editing]);
+  // The edit mode into the document, so the draft carries it across a reload. Every replacement of the document sets the
+  // replacing document's own edit (none for a recall), so after any change the document is brought back to what the
+  // state line shows; the controller writes only a difference.
+  useEffect(() => handle.current?.setEditing(editing), [editing, doc]);
   // An edit restored after a reload, against the hydrated transcript: its message gone means it was rewound meanwhile.
   useEffect(() => {
     if (restored && targetHeld !== null) settleRestoredEdit(appSessionId, targetHeld);
