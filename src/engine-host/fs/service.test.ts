@@ -234,6 +234,25 @@ describe('filesystem state service: discovery, sidecars and holders', () => {
     expect(fs.state().sessions).toBe(1);
   });
 
+  // C8b start (M4 task 6, the live acceptance's finding): a fresh config home has no tasks/, so its watch opens up to
+  // MISSING_RETRY_MS after the engine first writes a list there; the writes before it are covered only by the root's
+  // settle rescan, which must announce the lists a reader asked for, or a checklist keeps its empty first answer.
+  it('a rescan of tasks/ announces fs.tasksChanged for every list read so far, by its sanitised id', async () => {
+    const listeners = new Map<string, (event: string, filename: string | null) => void>();
+    const watch: WatchFn = (path, _options, listener) => {
+      listeners.set(path, listener);
+      return Object.assign(new EventEmitter(), { close: vi.fn() });
+    };
+    const fs = await start(watch);
+    await settled();
+    await fs.tasks('team list');
+    await fs.tasks(S1);
+    clear();
+    listeners.get(fixture.paths.tasks)!('rename', null);
+    await expect.poll(() => events('fs.tasksChanged').map((e) => e.listId).sort(), { timeout: 1_000 }).toEqual([S1, 'team-list'].sort());
+  });
+  // C8b end
+
   describe('a scan whose listing is overtaken by the watcher', () => {
     // A fake watch the test fires by hand, and a listing the test releases by hand: the scan's `list()` is taken before
     // the watcher's news and resolves after it, which is the interleaving a slow readdir pass over the real store has.

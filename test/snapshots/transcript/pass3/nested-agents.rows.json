@@ -1,0 +1,131 @@
+[
+  {
+    "at": "2026-09-29T15:35:19.829Z",
+    "id": "time:turn:d157117c-0a34-49ab-bbf5-24815f33a51d",
+    "kind": "time",
+    "label": "Today 3:35 PM",
+    "turnId": "turn:d157117c-0a34-49ab-bbf5-24815f33a51d"
+  },
+  {
+    "at": "2026-09-29T15:35:19.829Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:d157117c-0a34-49ab-bbf5-24815f33a51d",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "d157117c-0a34-49ab-bbf5-24815f33a51d",
+    "steer": false,
+    "text": "Dispatch one general-purpose Agent, model sonnet, named \"outer\". Its task: dispatch a general-purpose Agent, model haiku, named \"inner\", to read one.txt and report its line, wait for it, then report inner's answer. Reply DONE with both answers.",
+    "turnId": "turn:d157117c-0a34-49ab-bbf5-24815f33a51d"
+  },
+  {
+    "at": "2026-09-29T15:35:19.829Z",
+    "autoDenied": 0,
+    "denied": 0,
+    "endedAt": "2026-09-29T15:35:35.103Z",
+    "expanded": true,
+    "firstDeniedCell": null,
+    "id": "divider:turn:d157117c-0a34-49ab-bbf5-24815f33a51d",
+    "kind": "divider",
+    "origin": "human",
+    "startedAt": "2026-09-29T15:35:19.845Z",
+    "state": "completed",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 0,
+        "exploration": 0,
+        "files": 0,
+        "mcp": 0,
+        "other": 0,
+        "skills": 0,
+        "web": 0
+      },
+      "childAgents": 2,
+      "costUsd": 0.2972879,
+      "denials": [],
+      "durationMs": 15255,
+      "model": "claude-sonnet-5-5",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 0,
+        "reviewed": 0
+      },
+      "terminalReason": "completed",
+      "toolCalls": 0,
+      "usage": {
+        "cacheCreationInputTokens": 12832,
+        "cacheReadInputTokens": 45066,
+        "inputTokens": 4,
+        "outputTokens": 438,
+        "thinkingTokens": 0
+      }
+    },
+    "toolCalls": 0,
+    "turnId": "turn:d157117c-0a34-49ab-bbf5-24815f33a51d"
+  },
+  {
+    "agents": [
+      {
+        "agentId": "a38d4aebfaea9f6b1",
+        "glyph": 7,
+        "kind": "agent",
+        "name": "Outer agent dispatching inner",
+        "subagentType": "general-purpose",
+        "taskId": "a38d4aebfaea9f6b1",
+        "toolUseId": "toolu_01E8qY6SJUkZaEFiPKhdtqAE"
+      }
+    ],
+    "at": "2026-09-29T15:35:23.763Z",
+    "id": "subagent:a38d4aebfaea9f6b1",
+    "kind": "subagent",
+    "overflow": 0,
+    "sentence": "Outer agent dispatching inner finished",
+    "status": "finished",
+    "turnId": "turn:d157117c-0a34-49ab-bbf5-24815f33a51d"
+  },
+  {
+    "agents": [
+      {
+        "agentId": null,
+        "glyph": 1,
+        "kind": "agent",
+        "name": "Inner reads one.txt",
+        "subagentType": "general-purpose",
+        "taskId": "a425e926e506edeb1",
+        "toolUseId": "toolu_012rAuJDibGrcgfnNbY8TGbL"
+      }
+    ],
+    "at": "2026-09-29T15:35:26.729Z",
+    "id": "subagent:a425e926e506edeb1",
+    "kind": "subagent",
+    "overflow": 0,
+    "sentence": "Inner reads one.txt finished",
+    "status": "finished",
+    "turnId": "turn:d157117c-0a34-49ab-bbf5-24815f33a51d"
+  },
+  {
+    "at": "2026-09-29T15:35:35.090Z",
+    "blockIndex": 0,
+    "id": "text:msg_011CfXyc7joBnDXueBQGYWFx:0",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "DONE\n\n- **outer** (sonnet): dispatched inner and waited for it. The Agent tool has no `name` parameter, so inner ran unnamed (agent ID `a425e926e506edeb1`).\n- **inner** (haiku): `one.txt` contains one line, `ONE`. Inner also noted an empty second line after it.",
+    "messageUuid": "3097d00e-0835-4cc7-8cc6-45f79bcc93ce",
+    "model": "claude-sonnet-5-5",
+    "phase": "answer",
+    "turnId": "turn:d157117c-0a34-49ab-bbf5-24815f33a51d"
+  },
+  {
+    "at": "2026-09-29T15:35:38.286Z",
+    "attempt": null,
+    "id": "error:replay:journal:164:0",
+    "kind": "error",
+    "lostAttentionCount": 0,
+    "scope": "exit",
+    "severity": "notice",
+    "text": "Session process exited (unknown)",
+    "turnId": null
+  }
+]

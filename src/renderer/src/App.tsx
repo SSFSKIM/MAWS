@@ -36,6 +36,10 @@ import { connectSessions } from './sessions/connect';
 import { SessionDialogs } from './sessions/SessionDialogs';
 import { useSetupIntent } from './sessions/useSetupIntent';
 // C10 end
+// C8b start
+import { connectAgentWorkEvents } from './ipc/events';
+import { agentsDevSurface, agentTranscriptActions, registerAgentTools } from './tools/agents';
+// C8b end
 // C11 start
 import { registerGatewayActions } from './gateway/actions';
 import { connectDirectLogin } from './gateway/direct-login';
@@ -104,6 +108,17 @@ export function App() {
   // `index`, the newSession slot, the session creator, the close guard, the unstarted title and the session actions
   useEffect(() => connectSessions(), []);
   // C10 end
+  // C8b start: the agent tools (Subagents, Background work and the Log). Registration is never undone (a registration's
+  // disposer closes the tool's tabs, which StrictMode's effect replay would do); the transcript's subagent rows open
+  // Subagents (a workflow's, Background work) and its "Open full log" opens the Log (openFullLog); a task list changed
+  // on disk refreshes its checklist; development builds expose the stores the live acceptance reads.
+  useEffect(() => registerAgentTools(), []);
+  useEffect(() => registerTranscriptActions(agentTranscriptActions), []);
+  useEffect(() => connectAgentWorkEvents(), []);
+  useEffect(() => {
+    if (import.meta.env.DEV) window.__maws_agents = agentsDevSurface();
+  }, []);
+  // C8b end
   // C11 start: Settings…, Accounts and Open ClaudeUsage in the action table; the gateway store follows the settings; the
   // relay monitor's app-wide banner while a routed session is live; a widget for every name of the slash palette
   useEffect(() => registerGatewayActions(), []);
