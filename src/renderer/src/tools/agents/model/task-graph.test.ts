@@ -14,10 +14,13 @@ import {
   monitors,
   parseOutputPath,
   removeTask,
+  rowSecondLine,
+  rowTitle,
   setStopping,
   shells,
   workflows,
   type TaskGraph,
+  type TaskNode,
 } from './task-graph';
 
 const id = (s: string) => s as TaskId;
@@ -43,6 +46,7 @@ describe('task graph', () => {
       expect(one.toolUseId).toBe('toolu_01CYiK6ncgQLFUQ2iqC1b4oB');
       expect(one.usage).toEqual({ totalTokens: 10899, toolUses: 1, durationMs: 1436 });
       expect(one.lastToolName).toBe('Read');
+      expect(one).toMatchObject({ description: 'Read and report one.txt content', activity: 'Reading one.txt' }); // progress never overwrites the description
       expect(one.agent).toMatchObject({ subagentType: 'general-purpose', spawnDepth: 1, parentAgentId: null });
       expect(node(graph, TWO).startedAt).toBe('2026-09-28T09:22:10.298Z');
       expect(graph.byToolUse.get('toolu_01A8AmiXuRTeJwjQEsaPE2DM' as ToolUseId)).toBe(TWO);
@@ -280,6 +284,26 @@ describe('task graph', () => {
     });
   });
 
+  describe('a row’s title and second line (controller, open item 13)', () => {
+    const events = replayed('pass1', 'subagent');
+    const named = (n: TaskNode, name: string): TaskNode => ({ ...n, agent: { ...n.agent!, name } });
+
+    it('reads the dispatch description as the title and the activity beneath it, then the outcome', () => {
+      const started = node(graphOf(upTo(events, 172)), 'ad286defbc77bc090');
+      expect([rowTitle(started), rowSecondLine(started)]).toEqual(['Read and report one.txt content', 'Working']);
+      const working = node(graphOf(upTo(events, 224)), 'ad286defbc77bc090');
+      expect([rowTitle(working), rowSecondLine(working)]).toEqual(['Read and report one.txt content', 'Reading one.txt']);
+      const done = node(graphOf(events), 'ad286defbc77bc090');
+      expect(rowSecondLine(done)).toBe('ONE');
+    });
+
+    it('under a real name, the description is the second line when there is no summary or activity', () => {
+      const started = named(node(graphOf(upTo(events, 172)), 'ad286defbc77bc090'), 'reader');
+      expect([rowTitle(started), rowSecondLine(started)]).toEqual(['reader', 'Read and report one.txt content']);
+      expect(rowSecondLine({ ...started, activity: 'Reading one.txt' })).toBe('Reading one.txt');
+    });
+  });
+
   describe('agentRows: one nesting rule across the three sections', () => {
     const start = (taskId: string, seq: number, toolUseId: string) => event('subagent.started', { taskId, agentId: taskId, toolUseId, description: taskId }, { seq });
     const issue = (by: string, toolUseId: string, seq: number) => event('tool.use', { toolName: 'Agent', toolUseId, agentId: by }, { seq });
@@ -352,7 +376,7 @@ describe('task graph', () => {
   describe('pins', () => {
     it('a subagent.progress for an unknown task creates a node rather than dropping the fact', () => {
       const graph = graphOf([event('subagent.progress', { taskId: 'aUnseen', agentId: 'aUnseen', description: 'Reading', usage: { totalTokens: 5, toolUses: 1, durationMs: 900 } })]);
-      expect(node(graph, 'aUnseen')).toMatchObject({ kind: 'agent', status: 'running', startedAt: null, isBackground: null, description: 'Reading' });
+      expect(node(graph, 'aUnseen')).toMatchObject({ kind: 'agent', status: 'running', startedAt: null, isBackground: null, description: 'aUnseen', activity: 'Reading' });
       expect(node(graph, 'aUnseen').provenance).toEqual({ wire: true, disk: false, snapshot: false });
     });
 

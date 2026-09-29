@@ -8,6 +8,7 @@ import type { SessionEvent } from '@shared/graph/events';
 import { toolUseOf, type AgentId, type TaskId, type ToolUseId } from '@shared/graph/ids';
 import type { SubagentEntry, WorkflowRun } from '@shared/ipc/schema/fs';
 import type { WorkflowSnapshot } from '@shared/wire/store';
+import { SUBAGENTS_COPY } from '../copy';
 
 export type TaskKind = 'agent' | 'workflow' | 'shell' | 'monitor' | 'other'; // local_agent, local_workflow, local_bash, /^monitor/, the rest
 export type TaskStatus = 'running' | 'completed' | 'failed' | 'stopped' | 'exited' | 'unknown';
@@ -38,13 +39,14 @@ export interface TaskNode {
   kind: TaskKind;
   taskType: string | null;
   toolUseId: ToolUseId | null;
-  description: string; // the name: task.started/subagent.started description, else the sidecar's description, else the task id
+  description: string; // the name: task.started/subagent.started description, else the sidecar's description, else the task id; progress never overwrites it
   status: TaskStatus;
   stopping: boolean; // stopping: session.stopTask sent, no terminal event yet
   startedAt: string | null; // the start event's `at`; null when the task was only ever seen in a snapshot or on disk
   endedAt: string | null; // task.updated.patch.endTime as ISO, else the terminal event's `at`
   usage: { totalTokens: number; toolUses: number; durationMs: number } | null; // subagent.progress, latest
   lastToolName: string | null;
+  activity: string | null; // the latest subagent.progress description: what the agent is doing now ("Reading one.txt"), not its dispatch description
   summary: string | null;
   reason: string | null;
   outputFile: string | null;
@@ -87,7 +89,7 @@ const blankWorkflow = (): WorkflowFacts => ({ workflowName: null, progress: null
 function blankNode(taskId: TaskId, kind: TaskKind, status: TaskStatus): TaskNode {
   return {
     taskId, kind, taskType: null, toolUseId: null, description: taskId, status, stopping: false, startedAt: null, endedAt: null, usage: null,
-    lastToolName: null, summary: null, reason: null, outputFile: null, isBackground: null,
+    lastToolName: null, activity: null, summary: null, reason: null, outputFile: null, isBackground: null,
     agent: kind === 'agent' ? blankAgent() : null, workflow: kind === 'workflow' ? blankWorkflow() : null,
     provenance: { wire: false, disk: false, snapshot: false },
   };
@@ -260,7 +262,7 @@ function applyEvent(draft: Draft, e: SessionEvent): void {
       return;
     case 'subagent.progress': {
       if (!draft.get(e.taskId)) draft.put({ ...blankNode(e.taskId, 'agent', 'running'), taskType: 'local_agent', provenance: { wire: true, disk: false, snapshot: false } });
-      draft.patch(e.taskId, { usage: e.usage, lastToolName: e.lastToolName, summary: e.summary, description: e.description || draft.get(e.taskId)!.description, provenance: { wire: true } });
+      draft.patch(e.taskId, { usage: e.usage, lastToolName: e.lastToolName, summary: e.summary, activity: e.description || draft.get(e.taskId)!.activity, provenance: { wire: true } });
       return;
     }
     case 'task.updated': {
@@ -463,6 +465,15 @@ export interface AgentRow {
   depth: number;
   parentTaskId: TaskId | null;
   orphan: boolean; // orphan: the parent is known but sits in another section, or is unknown to the graph; depth 0 then
+}
+
+// A row's title and second line, one rule for the lists, the drill-in and the summaries (controller, 2026-09-29, M1 task
+// 2's open item 13): the title is the sidecar's real name, else the dispatch description; the second line is the latest
+// summary, else the current activity, else the description when the title is a name, else `Working`.
+const present = (text: string | null | undefined) => (text ? text : null);
+export const rowTitle = (node: TaskNode): string => present(node.agent?.name) ?? node.description;
+export function rowSecondLine(node: TaskNode): string {
+  return present(node.summary) ?? present(node.activity) ?? (present(node.agent?.name) ? node.description : null) ?? SUBAGENTS_COPY.working;
 }
 
 export const sectionOf = (n: TaskNode): AgentSection => (n.status === 'running' ? 'active' : n.status === 'unknown' ? 'disk' : 'done');
