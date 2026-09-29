@@ -41,7 +41,8 @@ describe('main answers git.worktree.* through the router', () => {
   });
 
   async function install(options: { execFile?: ExecFileFn } = {}) {
-    const { WorktreeService, registerWorktreeHandlers } = await import('./worktrees');
+    const { WorktreeService } = await import('./worktrees');
+    const { registerWorktreeHandlers } = await import('./worktrees-register');
     const { installRouter } = await import('../ipc/router');
     const { createGitRunner } = await import('./runner'); // the same module instance as the service's, for its error classes
     const host = new FakeHolderHost();

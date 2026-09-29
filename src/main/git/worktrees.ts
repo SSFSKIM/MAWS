@@ -10,7 +10,6 @@
 // too); every path is matched against `git worktree list` as an NFC realpath on both sides.
 import { lstat } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join } from 'node:path';
-import { ipcError } from '@shared/ipc/errors';
 import type {
   GitBranchDeleted,
   GitWorktreeAddInput,
@@ -20,10 +19,9 @@ import type {
   GitWorktreeRemoveInput,
 } from '@shared/ipc/schema/git';
 import { validateWorktreeName, worktreeDirName, type BranchStatus, type WorktreeInfo, type WorktreeStatus } from '@shared/sessions/worktree';
-import { CommandFailure, registerMainHandler } from '../ipc/router';
 import { canonicalPath, occupancyOf, type HolderDeps } from '../sessions/holders';
 import { parseStatus } from './porcelain';
-import { GitCommandError, GitTimeoutError, type GitRun } from './runner';
+import { GitCommandError, type GitRun } from './runner';
 
 export interface WorktreeServiceDeps {
   git: GitRun;
@@ -231,26 +229,6 @@ export class WorktreeService {
 
   private git(directory: string, args: string[]): Promise<string> {
     return this.deps.git(directory, args);
-  }
-}
-
-// Main's handlers for `git.worktree.*`: a git call killed at its 10 s timeout answers `timeout`, as C4's `git.*` do;
-// a refusal decided before acting is `internal` with its named message (`worktree path exists`, `base not found: …`).
-export function registerWorktreeHandlers(service: WorktreeService): void {
-  registerMainHandler('git.worktree.list', ({ repoRoot }) => relay(() => service.list(repoRoot)));
-  registerMainHandler('git.worktree.status', ({ repoRoot, path }) => relay(() => service.status(repoRoot, path)));
-  registerMainHandler('git.worktree.branch', ({ repoRoot, branch }) => relay(() => service.branch(repoRoot, branch)));
-  registerMainHandler('git.worktree.add', (input) => relay(() => service.add(input)));
-  registerMainHandler('git.worktree.remove', (input) => relay(() => service.remove(input)));
-  registerMainHandler('git.worktree.deleteBranch', (input) => relay(() => service.deleteBranch(input)));
-}
-
-async function relay<T>(call: () => Promise<T>): Promise<T> {
-  try {
-    return await call();
-  } catch (error) {
-    if (error instanceof GitTimeoutError) throw new CommandFailure(ipcError('timeout', error.message));
-    throw error;
   }
 }
 

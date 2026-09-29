@@ -30,7 +30,8 @@ import { restoreWindowState, trackWindowState } from './window-state';
 // C5 end
 // C10 start (registerMainHandler comes with C3's imports)
 import { createGitRunner } from './git/runner';
-import { registerWorktreeHandlers, WorktreeService } from './git/worktrees';
+import { WorktreeService } from './git/worktrees';
+import { registerWorktreeHandlers } from './git/worktrees-register';
 import { trustStateOf } from './sessions/trust';
 // C10 end
 

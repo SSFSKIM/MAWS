@@ -12,8 +12,10 @@ import { emptyRepository, ScratchRepo } from '../../../test/support/scratch-repo
 import { createGitRunner, type ExecFileFn } from './runner';
 import { WorktreeService } from './worktrees';
 
-// worktrees.ts registers its handlers through main's router, which imports Electron; nothing here reaches it.
-vi.mock('electron', () => ({ ipcMain: { handle: () => {} }, BrowserWindow: { fromWebContents: () => null } }));
+// The service is Electron-free (its handlers are worktrees-register.ts's): any import of Electron from here fails.
+vi.mock('electron', () => {
+  throw new Error('WorktreeService must not load Electron');
+});
 
 const sid = (s: string) => s as SessionId;
 
