@@ -38,11 +38,17 @@ export function pushState(status: GitStatus): PushState {
 // `git@github.com:o/r.git`, `ssh://git@github.com/o/r.git` and `https://github.com/o/r(.git)` name one repository.
 const GITHUB_REMOTE = /^(?:git@github\.com:|ssh:\/\/git@github\.com\/|https:\/\/github\.com\/)([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/;
 
-export function githubUrl(remoteUrl: string | null, branch: string | null): string | null {
+// The page of the branch the upstream names (`origin/feature` → `/tree/feature`, whatever the local branch is called:
+// that is the one that exists on GitHub), or the repository's root with no upstream, where a branch page would be a
+// 404. Each path segment is encoded; a `/` in the branch stays a separator. The remote is taken to be the upstream's
+// first segment, as git names it (`<remote>/<branch>`).
+export function githubUrl(remoteUrl: string | null, upstream: string | null): string | null {
   const match = remoteUrl === null ? null : GITHUB_REMOTE.exec(remoteUrl);
   if (!match) return null;
   const repo = `https://github.com/${match[1]}/${match[2]}`;
-  return branch === null ? repo : `${repo}/tree/${branch}`;
+  if (upstream === null) return repo;
+  const branch = upstream.slice(upstream.indexOf('/') + 1);
+  return `${repo}/tree/${branch.split('/').map(encodeURIComponent).join('/')}`;
 }
 
 export interface BackgroundCounts {

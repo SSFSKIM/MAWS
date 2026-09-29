@@ -47,11 +47,20 @@ describe('summary derivations', () => {
   });
 
   describe('githubUrl', () => {
-    it('converts the SSH, ssh:// and HTTPS forms, with and without .git, and appends the branch', () => {
+    it('converts the SSH, ssh:// and HTTPS forms, with and without .git, and appends the upstream’s branch', () => {
       for (const remote of ['git@github.com:o/r.git', 'git@github.com:o/r', 'ssh://git@github.com/o/r.git', 'ssh://git@github.com/o/r', 'https://github.com/o/r.git', 'https://github.com/o/r']) {
         expect(githubUrl(remote, null), remote).toBe('https://github.com/o/r');
-        expect(githubUrl(remote, 'feat/x'), remote).toBe('https://github.com/o/r/tree/feat/x');
+        expect(githubUrl(remote, 'origin/feat/x'), remote).toBe('https://github.com/o/r/tree/feat/x');
       }
+    });
+
+    it('links the branch the upstream names, not the local one; the repository root with no upstream; each segment encoded', () => {
+      // A local `work` tracking `origin/feature`: the status's upstream is what exists on GitHub.
+      expect(githubUrl('git@github.com:o/r.git', 'origin/feature')).toBe('https://github.com/o/r/tree/feature');
+      expect(githubUrl('git@github.com:o/r.git', 'upstream/main')).toBe('https://github.com/o/r/tree/main');
+      // Not pushed: a /tree/<branch> link would be a 404.
+      expect(githubUrl('git@github.com:o/r.git', null)).toBe('https://github.com/o/r');
+      expect(githubUrl('git@github.com:o/r.git', 'origin/fix#12/a b')).toBe('https://github.com/o/r/tree/fix%2312/a%20b');
     });
 
     it('answers null for another host, another shape, or no remote', () => {

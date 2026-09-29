@@ -1,5 +1,5 @@
 // Push state (ruling 5): `N ahead of <upstream>`, `Up to date with <upstream>` or `Not pushed`, and "Open on GitHub"
-// when the upstream's remote is GitHub's. Hidden with no status (Environment says why) and on a detached head, where
+// when the upstream's remote is GitHub's, on the upstream's branch (derive.ts `githubUrl`). Hidden with no status (Environment says why) and on a detached head, where
 // ahead and upstream mean nothing.
 import { ipc } from '../../ipc/client';
 import { useGit } from '../../stores/git';
@@ -11,7 +11,7 @@ export function PushState({ directory }: { directory: string }) {
   const status = useGit((s) => s.entries.get(directory)?.status ?? null);
   if (!status || status.branch === null) return null;
   const push = pushState(status);
-  const url = githubUrl(status.remoteUrl, status.branch);
+  const url = githubUrl(status.remoteUrl, status.upstream);
   const text =
     push.kind === 'not_pushed'
       ? SUMMARY_COPY.notPushed
