@@ -99,6 +99,17 @@ describe('files watch', { timeout: 20_000 }, () => {
     await vi.waitFor(() => expect(emitted).toContainEqual({ appSessionId: A, path: join(dir, 'old.txt'), kind: 'removed' }), { timeout: 6000 });
   });
 
+  it('reports a removed child named as its watched parent as removed at its own path, beside the parent changed', async () => {
+    const twin = join(dir, 'dir'); // the parent's own basename, which FSEvents also uses for the parent's own events
+    writeFileSync(twin, 'twin');
+    age(twin);
+    await files.watch(A, dir, 1);
+    await quiet();
+    unlinkSync(twin);
+    await vi.waitFor(() => expect(emitted).toContainEqual({ appSessionId: A, path: twin, kind: 'removed' }), { timeout: 6000 });
+    expect(emitted).toContainEqual({ appSessionId: A, path: dir, kind: 'changed' });
+  });
+
   it('coalesces a burst of events per filename into one batch', async () => {
     await files.watch(A, dir, 1);
     await quiet();
