@@ -58,18 +58,37 @@ describe('the index opens, migrates and refuses what it cannot own', () => {
     const raw = new DatabaseSync(path);
     raw.exec(MIGRATIONS[0].sql);
     raw.exec('PRAGMA user_version = 1');
+    const columnsOf = (db: DatabaseSync) => (db.prepare('PRAGMA table_info(sessions)').all() as { name: string }[]).map((c) => c.name).sort();
+    const v1Columns = columnsOf(raw);
     const insert = raw.prepare(
       "INSERT INTO sessions (app_id, directory, gateway_routed, gateway_base_url, created_at, updated_at) VALUES (?, '/w', ?, ?, 't', 't')",
     );
     insert.run('discovered', 1, null); // v1's default for a session found on disk
     insert.run('routed', 1, 'http://127.0.0.1:8641');
     insert.run('direct', 0, null);
+    insert.run('mismatch', 0, 'http://127.0.0.1:9999'); // verified, but not through the relay
+    raw.exec("UPDATE sessions SET custom_title = 'Kept', pinned = 1, gateway_auto_mode_server = 'enabled', engine_session_id = 'e-routed' WHERE app_id = 'routed'");
     raw.close();
 
     const index = open(path);
     expect(index.applied).toEqual([2]);
     const routed = (appId: string) => index.sessions.get(appId as AppSessionId)?.gateway.routed;
-    expect([routed('discovered'), routed('routed'), routed('direct')]).toEqual([null, true, false]);
+    expect([routed('discovered'), routed('routed'), routed('direct'), routed('mismatch')]).toEqual([null, true, false, false]);
+    // The rebuild touches only the flag: every other column, its values and the project index survive.
+    expect(index.sessions.get('routed' as AppSessionId)).toMatchObject({
+      engineSessionId: 'e-routed',
+      title: { text: 'Kept', source: 'user' },
+      pinned: true,
+      gateway: { routed: true, baseUrl: 'http://127.0.0.1:8641', autoModeServer: 'enabled' },
+    });
+    const db = new DatabaseSync(path, { readOnly: true });
+    try {
+      expect(columnsOf(db)).toEqual(v1Columns);
+      const indexes = (db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'sessions'").all() as { name: string }[]).map((i) => i.name);
+      expect(indexes).toContain('sessions_project');
+    } finally {
+      db.close();
+    }
   });
 
   it('opening it again runs no migration and keeps its rows', () => {
