@@ -35,6 +35,9 @@ export function DockedCardFrame({ appSessionId, title, onAccept, onDecline, chil
       const now = document.activeElement;
       if (now !== null && now !== document.body && !frame.contains(now)) return;
       const target = useComposerStore.getState().focusTargets.get(appSessionId);
+      // The composer's editor is still hidden in this commit (its Frame's `hidden` clears in the same commit this
+      // frame unmounts). The return works because `focusEditor` is Tiptap's `commands.focus()`, which defers to the
+      // next frame, after the Frame is visible again; a synchronous focus here would land on a hidden element.
       if (target) target.focusEditor();
       else if (before?.isConnected && !frame.contains(before)) before.focus();
     };

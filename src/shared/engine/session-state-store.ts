@@ -31,8 +31,8 @@ export type QueueState = z.infer<typeof QueueStateSchema>;
 // load found one, so the queue can say so instead of starting silently empty (M4 review).
 export type StoredQueue = QueueState & { corrupt: string | null };
 
-// What `session.send`, `session.steer` and `session.queue.edit` accept (M4: content over 1 MiB is refused at the
-// schema; the renderer attaches files instead, C7). Measured as the UTF-8 length of the JSON the frame would carry.
+// What `session.send`, `session.steer` and `session.queue.edit` accept. C7: bounded per text, image, document and
+// whole message (the C7 block below); this 1 MiB is the text bound (a string, or the text blocks together). // C7
 export const MAX_SEND_CONTENT_BYTES = 1024 * 1024;
 const encoder = new TextEncoder();
 // C7 start: the send cap relaxed to four bounds (C7 execution document, Decision Log "architect's ruling, 2026-09-29, on
