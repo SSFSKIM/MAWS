@@ -17,14 +17,18 @@ export interface AttentionState {
   notificationDelivery: 'os' | 'fallback' | null;
   pendingReplacements: Map<AppSessionId, AttentionItem[]> | null; // non-null only while attention.list is outstanding
   // The originating `*.requested` event of an item (`attention.request`), fetched once per item for the previews; null
-  // for an item with no broker request.
+  // for an item with no broker request, and for one whose read failed twice (then also in `unreadable`), so the docked
+  // swap shows it as a notice instead of waiting for a read that will not come.
   requests: Map<AttentionId, SessionEvent | null>;
+  unreadable: Map<AttentionId, string>; // why an item's request could not be read
   beginSnapshot(): void;
   applySnapshot(items: AttentionItem[]): void;
   applyChanged(change: EventPayload<'attention.changed'>): void;
   applyNotified(notified: EventPayload<'attention.notified'>): void;
-  loadRequest(client: MawsBridge, item: AttentionItem): Promise<void>; // once per item; a failure is not cached
+  loadRequest(client: MawsBridge, item: AttentionItem): Promise<void>; // once per item; a failed read is retried once
 }
+
+export const REQUEST_RETRY_MS = 1_000; // the wait before a failed `attention.request` read is retried, once
 
 export function createAttentionStore() {
   const inFlight = new Map<AttentionId, Promise<void>>();
@@ -35,6 +39,7 @@ export function createAttentionStore() {
     notificationDelivery: null,
     pendingReplacements: null,
     requests: new Map(),
+    unreadable: new Map(),
     beginSnapshot() {
       set({ pendingReplacements: new Map() });
     },
@@ -65,11 +70,20 @@ export function createAttentionStore() {
       }
       let pending = inFlight.get(item.id);
       if (!pending) {
-        pending = client.invoke('attention.request', { appSessionId: item.appSessionId, requestId }).then((result) => {
+        const read = () => client.invoke('attention.request', { appSessionId: item.appSessionId, requestId });
+        pending = (async () => {
+          let result = await read();
+          if (!result.ok) {
+            console.warn(`[attention] attention.request ${item.id} unavailable; retrying once`, result.error);
+            await new Promise((resolve) => setTimeout(resolve, REQUEST_RETRY_MS));
+            result = await read();
+          }
           inFlight.delete(item.id);
-          if (result.ok) keep(result.value.event);
-          else console.warn(`[attention] attention.request ${item.id} unavailable`, result.error);
-        });
+          if (result.ok) return keep(result.value.event);
+          console.warn(`[attention] attention.request ${item.id} unavailable`, result.error);
+          set({ unreadable: new Map(get().unreadable).set(item.id, result.error.message) });
+          keep(null);
+        })();
         inFlight.set(item.id, pending);
       }
       return pending;

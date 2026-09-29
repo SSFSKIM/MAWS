@@ -172,6 +172,7 @@ export function RequestCard(props: RequestCardProps) {
 
 function RequestCardFor({ item, request: given, placement, onAnswered }: RequestCardProps) {
   const fetched = useAttention((s) => s.requests.get(item.id));
+  const unreadable = useAttention((s) => s.unreadable.get(item.id) ?? null);
   useEffect(() => {
     if (given === null) void useAttention.getState().loadRequest(ipc, item);
   }, [given, item]);
@@ -311,6 +312,11 @@ function RequestCardFor({ item, request: given, placement, onAnswered }: Request
         </div>
       )}
       {body}
+      {request === null && unreadable !== null && (
+        <p role="alert" className="m-0 text-danger" title={unreadable}>
+          Couldn't read this request here; answer it in the transcript
+        </p>
+      )}
       {request?.kind === 'permission.requested' && record && !collapsed && (
         <p className="m-0 truncate font-mono text-ui-sm text-fg-muted" title={record.directory}>
           {record.directory}

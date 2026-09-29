@@ -35,7 +35,8 @@ export function swapOf(items: readonly AttentionItem[], requests: ReadonlyMap<At
       continue;
     }
     if (asks && request === null) {
-      // main's broker no longer holds it: the card can only show its notice, so it never takes the editor's place
+      // main's broker no longer holds it, or its read failed twice (the store's `unreadable`): the card can only show its
+      // notice (with the failure), so it never takes the editor's place
       notices.push(item);
       continue;
     }

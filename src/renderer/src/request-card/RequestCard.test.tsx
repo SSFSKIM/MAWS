@@ -414,6 +414,15 @@ describe('request card placements and delivery states', () => {
     expect(useAttention.getState().requests.get(item.id)).toEqual(reapply);
   });
 
+  it('a request the store could not read shows its notice with the failure instead of loading', () => {
+    const item = itemFor(reapply, APP);
+    useAttention.setState({ requests: new Map([[item.id, null]]), unreadable: new Map([[item.id, 'no host']]) });
+    render(<RequestCard item={item} request={null} placement="docked" paneIndex={null} />);
+    expect(screen.queryByText('Loading the request…')).toBeNull();
+    expect(screen.getByRole('alert').textContent).toBe("Couldn't read this request here; answer it in the transcript");
+    expect(screen.getByText(item.summary)).toBeTruthy();
+  });
+
   describe('the hover placement', () => {
     it('offers Approve and Deny for an unflagged Read, answering by pointer only', async () => {
       const { item } = mount(unflaggedRead, 'hover');

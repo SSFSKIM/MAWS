@@ -34,6 +34,7 @@ export function fillStores(scenario: Scenario, opts: { loaded?: boolean } = {}):
     version: useAttention.getState().version + 1,
     pendingReplacements: null,
     requests: new Map(),
+    unreadable: new Map(),
   });
 }
 
