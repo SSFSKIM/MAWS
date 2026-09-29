@@ -89,8 +89,9 @@ async function confine(dialog: Dialog, target: MemoryTarget, beforeCreate: () =>
 }
 
 // Creates the missing folders of `dir` when its would-be real path lies at or inside a listed folder's (itself resolved
-// the same way, so a listed folder that does not exist yet can be created); otherwise creates nothing and leaves the
-// refusal to the check that follows.
+// the same way). When a listed folder is missing, every missing component between the deepest existing ancestor and
+// `dir` is created, so the listed folder and its own missing ancestors below that ancestor are created too. Otherwise
+// creates nothing and leaves the refusal to the check that follows.
 async function createFolder(dir: string, folders: { path: string }[], beforeCreate: () => void): Promise<void> {
   const target = await resolveMissing(dir);
   if (!target || target.missing.length === 0) return;
