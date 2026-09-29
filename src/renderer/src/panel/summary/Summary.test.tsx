@@ -220,7 +220,7 @@ describe('summary card', () => {
     const rows = within(sources).getAllByRole('listitem').map((row) => row.textContent);
     expect(rows[0]).toBe('docs · searchSource only');
     expect(rows[1]).toContain('tanstack.com/virtual/latest/docs/api/virtualizer');
-    expect(rows).toHaveLength(9);
+    expect(rows).toHaveLength(8);
     await user.click(within(sources).getByRole('button', { name: /reduce\.ts/ }));
     expect(openTab).toHaveBeenCalledWith({ kind: 'file', path: '/tmp/maws-synth-exploration-and-web/src/model/reduce.ts', line: null, appSessionId: A });
     await user.click(within(sources).getByRole('button', { name: /tanstack\.com/ }));
@@ -230,10 +230,10 @@ describe('summary card', () => {
 
   it('Sources and the glyph line are the same after every turn is toggled and after expandAll', async () => {
     await live();
-    // exploration-and-web for the Sources rows (nine of them), agents-and-messages for the glyph line (its only
+    // exploration-and-web for the Sources rows (eight of them), agents-and-messages for the glyph line (its only
     // file and search calls are the children's own, which are not the session's sources).
     for (const [fixture, rows, glyphs] of [
-      ['exploration-and-web', 9, null],
+      ['exploration-and-web', 8, null],
       ['agents-and-messages', 0, '✻✿'],
     ] as const) {
       await attachTranscript(fixture);

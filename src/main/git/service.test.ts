@@ -76,6 +76,27 @@ describe('git service answers status, branches, diff and log', () => {
     expect((await service.branches(repo.root)).branches).toEqual([{ name: 'main', upstream: 'origin/main', isCurrent: true }]);
   });
 
+  it('without an upstream, reports origin, else the sole remote, else null; an upstream keeps its own remote', async () => {
+    // The fixture writes its own temporary repository's config; nothing is fetched.
+    await repo.git('remote', 'add', 'fork', 'https://github.com/someone/fork.git');
+    expect(await service.status(repo.root)).toMatchObject({ upstream: null, remoteUrl: 'https://github.com/someone/fork.git' }); // the sole remote
+    await repo.git('remote', 'add', 'origin', 'https://github.com/owner/repo.git');
+    // One spawn answers which remote and its URL: rev-parse, status and stash list, then the one config read.
+    const spawn = vi.fn(execFile as unknown as ExecFileFn);
+    const counted = new GitService({ env: repo.serviceEnv(), execFile: spawn });
+    expect(await counted.status(repo.root)).toMatchObject({ upstream: null, remoteUrl: 'https://github.com/owner/repo.git' }); // origin wins
+    expect(spawn.mock.calls.map(([, args]) => args[2])).toEqual(['rev-parse', 'status', 'stash', 'config']);
+    counted.dispose();
+    await repo.git('remote', 'add', 'third', 'https://example.com/third.git');
+    await repo.git('remote', 'remove', 'origin');
+    expect((await service.status(repo.root)).remoteUrl).toBeNull(); // two remotes, neither origin
+    await repo.addBareRemote(); // origin again, and main tracks origin/main
+    await repo.git('config', 'branch.main.remote', 'fork'); // main now tracks fork/main (a ref never fetched)
+    const tracked = await service.status(repo.root);
+    expect(tracked.upstream).toBe('fork/main');
+    expect(tracked.remoteUrl).toBe('https://github.com/someone/fork.git');
+  });
+
   it('strips user-info from the remote URL before it leaves main', async () => {
     await repo.addBareRemote();
     // The fixture rewrites its own temporary repository's config; nothing is fetched.

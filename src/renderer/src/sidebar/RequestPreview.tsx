@@ -7,8 +7,8 @@
 // the buttons stay focusable and labelled, but a click a key synthesised (Enter or Space on a focused button) answers
 // nothing, because keyboard approval belongs to the focused session pane or Overview card alone (§5.1, binding).
 import { useRef, useState, type MouseEvent, type PointerEvent } from 'react';
-import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionEvent } from '@shared/graph/events';
+import { ATTENTION_HEADINGS, type AttentionTone } from '@shared/attention/headings';
 import { isReadOnlyRequest } from '@shared/attention/read-only-tools';
 import type { RequestAnswer } from '@shared/engine/answers';
 import type { Slots } from '../app/slots';
@@ -19,19 +19,8 @@ import { useSessions } from '../stores/sessions';
 import { isOpen } from '../attention/derive';
 import { needsYouAge } from './derive';
 
-type Tone = 'warning' | 'info' | 'danger';
-const HEADINGS: Record<AttentionItem['kind'], { char: string; tone: Tone; text: string }> = {
-  permission: { char: '◐', tone: 'warning', text: 'Approval needed' },
-  question: { char: '?', tone: 'warning', text: 'Question' },
-  plan: { char: '◇', tone: 'info', text: 'Plan review' },
-  dialog: { char: '◐', tone: 'warning', text: 'Dialog' },
-  elicitation: { char: '◐', tone: 'warning', text: 'Input requested' },
-  auto_mode_unavailable: { char: '!', tone: 'danger', text: 'Auto mode unavailable' },
-  error: { char: '!', tone: 'danger', text: 'Error' },
-  interrupted: { char: '!', tone: 'danger', text: 'Interrupted' },
-  held_peer_message: { char: '✉', tone: 'info', text: 'Held message' },
-};
-const TONE: Record<Tone, string> = { warning: 'text-warning', info: 'text-info', danger: 'text-danger' };
+export const HEADINGS = ATTENTION_HEADINGS; // the one table C7's card reads too
+const TONE: Record<AttentionTone, string> = { warning: 'text-warning', info: 'text-info', danger: 'text-danger' };
 
 const FILE_TOOLS = new Set(['Read', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'NotebookRead', 'LS']);
 const PLAN_LINES = 6;

@@ -445,8 +445,7 @@ const EXPLORATION_SOURCES = [
   'mcp: docs · searchSource only',
   'https://tanstack.com/virtual/latest/docs/api/virtualizer',
   ...['time', 'copy', 'keys', 'rows', 'reduce', 'derive'].map((name) => `/tmp/maws-synth-exploration-and-web/src/model/${name}.ts`),
-  'src', // a Grep's search scope, which C6 records as a read (a tracker row, C6's)
-];
+]; // the Grep's search scope `src` is no source: C6 lists only file reads
 const EDIT_SOURCES = ['src/util/rows.ts', 'src/store.ts', 'src/app.ts'].map((path) => `/tmp/maws-synth-edit-and-receipt/${path}`);
 
 test.describe('the #panel harness: strip, summary, R7 and themes', () => {

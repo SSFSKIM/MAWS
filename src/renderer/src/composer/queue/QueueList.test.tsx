@@ -138,6 +138,25 @@ describe('queue list renders every entry state', () => {
     expect(screen.getByRole('region', { name: 'Queued messages' }).textContent).toContain('Sending…');
   });
 
+  it('an entry reverted to queued and submitted again waits its 300 ms again', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: false });
+    const first = new Date('2026-09-29T10:00:00.000Z');
+    vi.setSystemTime(first);
+    const { client } = bridge();
+    const at = (entries: QueueEntry[]) => <QueueList appSessionId={APP} queue={queue(entries)} sessionId={null} cwd="/repo" client={client} />;
+    const { rerender } = render(at([entry('q-s', { state: 'submitting', submittedAt: first.toISOString() })]));
+    await act(async () => void vi.advanceTimersByTime(300));
+    expect(screen.queryByText('Sending…')).toBeTruthy();
+    rerender(at([entry('q-s')])); // reverted: queued again
+    expect(screen.queryByText('Sending…')).toBeNull();
+    const again = new Date(first.getTime() + 5_000);
+    vi.setSystemTime(again);
+    rerender(at([entry('q-s', { state: 'submitting', submittedAt: again.toISOString() })]));
+    expect(screen.queryByText('Sending…')).toBeNull(); // a new submission: fresh, not shown
+    await act(async () => void vi.advanceTimersByTime(300));
+    expect(screen.queryByText('Sending…')).toBeTruthy();
+  });
+
   it('renders nothing when nothing waits', () => {
     const { client } = bridge();
     const { container } = render(<QueueList appSessionId={APP} queue={queue([entry('q-0', { state: 'released' })], { paused: true, pauseReason: 'interrupt' })} sessionId={null} cwd="/repo" client={client} />);

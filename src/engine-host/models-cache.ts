@@ -1,8 +1,11 @@
 // The model catalogue cache behind `engine.models` (C10 execution document, Interfaces "Catalogue cache"): an
 // unstarted session's model chip runs before any session exists, and X6 only lets a live session answer `list_models`,
-// so the engine host keeps the latest catalogue it saw (every `initialize` response's `models`, every `list_models`
-// answer) at `<userData>/engine-host/models.json` (`{ at, models }`, temp-then-rename), as the terminal's own `/model`
-// shows after one launch. Before any catalogue it answers the built-in list.
+// so the engine host keeps the catalogues it saw (every `initialize` response's `models`, every `list_models` answer)
+// at `<userData>/engine-host/models.json` (`{ entries: { [key]: { at, models } } }`, temp-then-rename), as the
+// terminal's own `/model` shows after one launch. A catalogue is specific to the launch that answered it, so each is
+// kept under the key of what varies between launches, the binary version and the route (`modelsKey`): a Direct launch
+// and a relay launch no longer overwrite each other's lists (debt wave 3). Before any catalogue for a key it answers the
+// built-in list.
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import * as z from 'zod';
@@ -11,14 +14,22 @@ import { BUILTIN_MODELS, ModelCatalogueEntrySchema, type ModelCatalogue } from '
 // The built-in list is shared (the renderer shows it when the host cannot answer at all).
 export { BUILTIN_MODELS };
 
-const CacheFileSchema = z.strictObject({ at: z.string(), models: z.array(ModelCatalogueEntrySchema) });
+const EntrySchema = z.strictObject({ at: z.string(), models: z.array(ModelCatalogueEntrySchema) });
+const CacheFileSchema = z.strictObject({ entries: z.record(z.string(), EntrySchema) });
+type Entry = z.infer<typeof EntrySchema>;
 type CacheFile = z.infer<typeof CacheFileSchema>;
+
+// What a launch's catalogue depends on that the launch plan carries: the binary and the route (the relay and a Direct
+// launch resolve the aliases differently).
+export function modelsKey(engineVersion: string, gateway: 'gateway' | 'direct'): string {
+  return `${engineVersion}/${gateway}`;
+}
 
 export class ModelsCache {
   private readonly file: string;
   private readonly now: () => string;
   private readonly warn: (message: string) => void;
-  private cached: CacheFile | null = null;
+  private cached: CacheFile = { entries: {} };
   private writing: Promise<void> = Promise.resolve();
 
   constructor(userData: string, opts: { now?: () => string; warn?: (message: string) => void } = {}) {
@@ -37,27 +48,32 @@ export class ModelsCache {
       return;
     }
     try {
-      this.cached ??= CacheFileSchema.parse(JSON.parse(text));
+      const loaded = CacheFileSchema.parse(JSON.parse(text));
+      if (Object.keys(this.cached.entries).length === 0) this.cached = loaded; // an update that landed first wins
     } catch (error) {
       this.warn(`${this.file} is not a catalogue (${error instanceof Error ? error.message.split('\n')[0] : String(error)}); answering the built-in list`);
     }
   }
 
-  // A catalogue the engine answered: the entries that are catalogue entries, kept and written; an empty list changes nothing.
-  async update(models: readonly unknown[]): Promise<void> {
+  // A catalogue the engine answered for a launch under `key`: the entries that are catalogue entries, kept under that
+  // key and written; an empty list changes nothing.
+  async update(key: string, models: readonly unknown[]): Promise<void> {
     const entries = models.flatMap((raw) => {
       const parsed = ModelCatalogueEntrySchema.safeParse(raw);
       return parsed.success ? [parsed.data] : [];
     });
     if (entries.length === 0) return;
-    const next: CacheFile = { at: this.now(), models: entries };
+    const others = Object.fromEntries(Object.entries(this.cached.entries).filter(([k]) => k !== key));
+    const next: CacheFile = { entries: { ...others, [key]: { at: this.now(), models: entries } } }; // the newest last
     this.cached = next;
     this.writing = this.writing.then(() => this.write(next)).catch((error: unknown) => this.warn(`${this.file} not written: ${error instanceof Error ? error.message : String(error)}`));
     await this.writing;
   }
 
-  answer(): ModelCatalogue {
-    return this.cached ? { models: this.cached.models, source: 'cached', at: this.cached.at } : { models: [...BUILTIN_MODELS], source: 'builtin', at: null };
+  // The catalogue kept under `key`; with no key (a caller that does not name its route), the most recently updated.
+  answer(key?: string): ModelCatalogue {
+    const entry: Entry | undefined = key !== undefined ? this.cached.entries[key] : Object.values(this.cached.entries).at(-1);
+    return entry ? { models: entry.models, source: 'cached', at: entry.at } : { models: [...BUILTIN_MODELS], source: 'builtin', at: null };
   }
 
   private async write(file: CacheFile): Promise<void> {

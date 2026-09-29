@@ -34,7 +34,7 @@ describe('divider row', () => {
     jumpTo.mockRestore();
   });
 
-  it('toggles the work area: its rows join and leave the list, and aria-controls names the list while open', async () => {
+  it('toggles the work area: its rows join and leave the list, and aria-controls names the work area’s rows while open', async () => {
     const store = await storeWith(deniedTurn().events);
     const view = renderRow(rowOf(store.rows(), 'divider'), { storeKey: store.key });
     expect(screen.getByRole('button', { name: /Worked for/ }).hasAttribute('aria-controls')).toBe(false);
@@ -45,9 +45,11 @@ describe('divider row', () => {
     const divider = rowOf(expanded, 'divider');
     expect(divider.expanded).toBe(true);
     view.rerenderRow(divider);
-    // The work-area rows are virtual (some are never in the DOM), so the reference is the list, which always is
-    // (Transcript.test.tsx asserts the element exists).
-    expect(screen.getByRole('button', { name: /Worked for/ }).getAttribute('aria-controls')).toBe('t-list');
+    // The work area's rows by their element ids (`t` is the test's id prefix): the denied call and the run call, not
+    // the answer after them.
+    const work = expanded.slice(expanded.indexOf(divider) + 1).filter((row) => row.kind !== 'time');
+    expect(work.map((row) => row.kind)).toEqual(['cell', 'cell', 'assistant_text']);
+    expect(screen.getByRole('button', { name: /Worked for/ }).getAttribute('aria-controls')).toBe(work.slice(0, 2).map((row) => `t-${row.id}`).join(' '));
     fireEvent.click(screen.getByRole('button', { name: /Worked for/ }));
     expect(store.rows()).toHaveLength(before);
   });

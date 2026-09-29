@@ -17,6 +17,9 @@ export interface JumpRequest {
   focus: RowId | CellId; // the id to focus: the row, or a cell inside it
   align: 'start' | 'center' | 'end';
   nonce: number;
+  // Additive: the jump re-resolved when a staged restart installed its state (the reader asked for it before). The view
+  // moves the reader to it only if they have not moved on since.
+  reissued?: boolean;
 }
 
 export interface TranscriptEntry {
@@ -211,7 +214,7 @@ export function createTranscriptStore() {
             const pending = attached.stagedJump ?? entry(key)?.jump ?? null;
             attached.stagedJump = null;
             put(key, { state, phase: 'live', clock: stagedAt > 0 ? { at: stagedAt, wall: Date.now() } : null, jump: null });
-            if (pending) get().jumpTo(key, pending.focus, { align: pending.align });
+            if (pending) jump(key, pending.focus, { align: pending.align }, true);
           } else put(key, { phase: 'live' });
         },
         (reason: unknown) => {
@@ -240,6 +243,25 @@ export function createTranscriptStore() {
       put(key, { state: withUi(current.state, ui) });
     };
     const toggle = <T>(values: Set<T>, value: T) => (values.has(value) ? values.delete(value) : values.add(value));
+    // `jumpTo`, and the re-resolution of a staged jump at install (`reissued`).
+    const jump = (key: string, id: RowId | CellId, options: { align?: JumpRequest['align']; turnId?: TurnId }, reissued: boolean) => {
+      const current = entry(key);
+      if (!current) return;
+      const request = (rowId: RowId): JumpRequest => ({ rowId, focus: id, align: options.align ?? 'center', nonce: ++nonce, ...(reissued ? { reissued } : {}) });
+      const attached = attachments.get(key);
+      if (attached?.restartUi) attached.stagedJump = { focus: id, align: options.align ?? 'center' }; // staging: resolved again at install
+      const visible = locate(current.rows, id);
+      if (visible && (!visible.group || (visible.group.kind === 'group' && visible.group.expanded))) {
+        put(key, { jump: request(visible.row.id) });
+        return;
+      }
+      const found = visible ?? (options.turnId ? locate(expandedTurnRows(current.state, options.turnId), id) : null) ?? locate(allExpandedRows(current.state), id);
+      if (!found) return;
+      const ui = copyUi(current.state.ui, found.row.turnId === null ? 'all' : [found.row.turnId]);
+      if (found.row.turnId !== null && !isExpanded(current.state, found.row.turnId)) expandTurn(ui, found.row.turnId);
+      if (found.group) ui.expandedGroups.add(found.group.id);
+      put(key, { state: withUi(current.state, ui), jump: request(found.row.id) });
+    };
     const scoped = (turn: TurnId | null): TurnId[] | 'all' => (turn === null ? 'all' : [turn]);
 
     return {
@@ -323,24 +345,7 @@ export function createTranscriptStore() {
         return text.split('\n').map((line) => line.trim()).findLast((line) => line.length > 0) ?? null;
       },
 
-      jumpTo(key, id, options = {}) {
-        const current = entry(key);
-        if (!current) return;
-        const request = (rowId: RowId): JumpRequest => ({ rowId, focus: id, align: options.align ?? 'center', nonce: ++nonce });
-        const attached = attachments.get(key);
-        if (attached?.restartUi) attached.stagedJump = { focus: id, align: options.align ?? 'center' }; // staging: resolved again at install
-        const visible = locate(current.rows, id);
-        if (visible && (!visible.group || (visible.group.kind === 'group' && visible.group.expanded))) {
-          put(key, { jump: request(visible.row.id) });
-          return;
-        }
-        const found = visible ?? (options.turnId ? locate(expandedTurnRows(current.state, options.turnId), id) : null) ?? locate(allExpandedRows(current.state), id);
-        if (!found) return;
-        const ui = copyUi(current.state.ui, found.row.turnId === null ? 'all' : [found.row.turnId]);
-        if (found.row.turnId !== null && !isExpanded(current.state, found.row.turnId)) expandTurn(ui, found.row.turnId);
-        if (found.group) ui.expandedGroups.add(found.group.id);
-        put(key, { state: withUi(current.state, ui), jump: request(found.row.id) });
-      },
+      jumpTo: (key, id, options = {}) => jump(key, id, options, false),
 
       jumpHandled(key, handled) {
         if (entry(key)?.jump?.nonce === handled) put(key, { jump: null });

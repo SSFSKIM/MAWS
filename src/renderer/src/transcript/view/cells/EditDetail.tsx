@@ -1,8 +1,8 @@
 // An edit's detail: the file as a chip that opens it at the first changed line, and the engine's structuredPatch hunks
 // as diff lines with line numbers and the add and del backgrounds (`--diff-add-bg`, `--diff-del-bg`). No third-party
-// diff component: C8's Review owns that. The diff is bounded like any output: hunks render until 64 KB of line text is
-// spent (a single line past 64 KB is itself capped), then "N lines omitted" and Open full log.
-import { TRUNCATE_OVER } from '../../model/cells';
+// diff component: C8's Review owns that. The diff is bounded like any output: past 64 KB of line text, its head and tail
+// lines around "N lines omitted" and Open full log (a single line past 64 KB is itself capped).
+import { partsTruncationOf } from '../../model/cells';
 import { baseName, DETAIL } from '../../model/copy';
 import type { Cell, CellDetail, Hunk } from '../../model/rows';
 import { useActions } from '../context';
@@ -27,24 +27,42 @@ function linesOf(hunk: Hunk): DiffLine[] {
   });
 }
 
-// The hunks' lines up to the budget (the first line always), and how many lines were left out.
-function budgeted(hunks: Hunk[]): { hunks: DiffLine[][]; omitted: number } {
-  let used = 0;
-  let omitted = 0;
-  const shown: DiffLine[][] = [];
-  for (const hunk of hunks) {
-    const lines: DiffLine[] = [];
-    for (const line of linesOf(hunk)) {
-      if (omitted > 0 || (used > 0 && used + line.text.length + 1 > TRUNCATE_OVER)) {
-        omitted += 1;
-        continue;
-      }
-      used += line.text.length + 1;
-      lines.push(line);
-    }
-    if (lines.length > 0) shown.push(lines);
-  }
-  return { hunks: shown, omitted };
+// The hunks' lines, bounded as a whole (`partsTruncationOf` over line lengths): past the budget, the head lines and the
+// tail lines, each kept in its hunk, with how many lines were left out between them.
+type Budgeted = { head: DiffLine[][]; omitted: number; tail: DiffLine[][] };
+function budgeted(hunks: Hunk[]): Budgeted {
+  const all = hunks.flatMap((hunk, h) => linesOf(hunk).map((line) => ({ h, line })));
+  const cut = partsTruncationOf(all.map(({ line }) => line.text.length + 1));
+  const byHunk = (lines: typeof all) => {
+    const grouped: DiffLine[][] = [];
+    lines.forEach(({ h, line }, i) => {
+      if (i > 0 && lines[i - 1].h === h) grouped[grouped.length - 1].push(line);
+      else grouped.push([line]);
+    });
+    return grouped;
+  };
+  if (!cut) return { head: byHunk(all), omitted: 0, tail: [] };
+  return { head: byHunk(all.slice(0, cut.head)), omitted: all.length - cut.head - cut.tail, tail: byHunk(all.slice(all.length - cut.tail)) };
+}
+
+function DiffHunk({ lines }: { lines: DiffLine[] }) {
+  return (
+    <div className="transcript-diff-hunk">
+      {lines.map((line, i) => (
+        <div key={i} className="transcript-diff-line" data-diff={line.kind}>
+          <span className="transcript-diff-number" data-line-number="">
+            {line.number ?? ''}
+          </span>
+          <span className="transcript-diff-sign" aria-hidden="true">
+            {line.sign}
+          </span>
+          <span>
+            <Truncated text={line.text} />
+          </span>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 export function EditDetail({ cell, detail }: { cell: Cell; detail: Edit }) {
@@ -59,24 +77,13 @@ export function EditDetail({ cell, detail }: { cell: Cell; detail: Edit }) {
         <p className="transcript-detail-note">{DETAIL.noDiff}</p>
       ) : (
         <div className="transcript-diff">
-          {diff.hunks.map((lines, h) => (
-            <div key={h} className="transcript-diff-hunk">
-              {lines.map((line, i) => (
-                <div key={i} className="transcript-diff-line" data-diff={line.kind}>
-                  <span className="transcript-diff-number" data-line-number="">
-                    {line.number ?? ''}
-                  </span>
-                  <span className="transcript-diff-sign" aria-hidden="true">
-                    {line.sign}
-                  </span>
-                  <span>
-                    <Truncated text={line.text} />
-                  </span>
-                </div>
-              ))}
-            </div>
+          {diff.head.map((lines, h) => (
+            <DiffHunk key={h} lines={lines} />
           ))}
           {diff.omitted > 0 && <Omitted cell={cell} text={DETAIL.linesOmitted(diff.omitted)} />}
+          {diff.tail.map((lines, h) => (
+            <DiffHunk key={`tail:${h}`} lines={lines} />
+          ))}
         </div>
       )}
     </div>

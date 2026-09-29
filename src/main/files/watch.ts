@@ -107,10 +107,13 @@ export class WatchTable {
     if (entry) this.invalidate(entry);
   }
 
-  // Removes one hold on the watch `holder` named; closes the watcher when none remains. Unknown holds are no-ops.
-  unwatch(holder: Holder): void {
+  // Removes one hold on the watch `holder` named; closes the watcher when none remains. Unknown holds are no-ops. The same
+  // holder can hold two entries when its path's realpath moved between two watches; the hold on `real`, the entry the
+  // path names now, goes first, else the first one found.
+  unwatch(holder: Holder, real: string | null): void {
     const key = holderKey(holder);
-    for (const entry of this.entries.values()) {
+    const named = real === null ? undefined : this.entries.get(real);
+    for (const entry of named?.holders.has(key) ? [named] : this.entries.values()) {
       const held = entry.holders.get(key);
       if (!held) continue;
       if (--held.count === 0) entry.holders.delete(key);
@@ -165,20 +168,21 @@ export class WatchTable {
       this.invalidate(entry);
       return;
     }
-    const changes = await Promise.all(names.map((name) => this.classify(entry.real, name)));
+    const changes = (await Promise.all(names.map((name) => this.classify(entry.real, name)))).flat();
     if (entry.closed) return;
     for (const change of changes) for (const appSessionId of sessionsOf(entry)) this.options.emit({ appSessionId, ...change });
   }
 
-  private async classify(real: string, name: string): Promise<Omit<FilesChanged, 'appSessionId'>> {
-    if (name === '') return { path: real, kind: 'changed' };
+  // Classified by the full path the name gives under the directory: present, it is that child created or changed;
+  // absent, that child removed. FSEvents names an event on the watched directory itself by the directory's own basename
+  // (measured: a watch installed just after a write replays `change <basename>`), so an absent child bearing that name
+  // may be either; both are reported, the child removed and the directory changed, so neither reading is lost.
+  private async classify(real: string, name: string): Promise<Omit<FilesChanged, 'appSessionId'>[]> {
+    if (name === '') return [{ path: real, kind: 'changed' }];
     const path = join(real, name);
     const stat = await fs.promises.lstat(path).catch(() => null);
-    // FSEvents names an event on the watched directory itself by the directory's own basename (measured: a watch
-    // installed just after a write replays `change <basename>`), so a name that is no child and is the directory's
-    // own is the directory changing, not a child removed.
-    if (!stat) return name === basename(real) ? { path: real, kind: 'changed' } : { path, kind: 'removed' };
-    return { path, kind: stat.birthtimeMs >= Date.now() - this.createdWithinMs ? 'created' : 'changed' };
+    if (stat) return [{ path, kind: stat.birthtimeMs >= Date.now() - this.createdWithinMs ? 'created' : 'changed' }];
+    return name === basename(real) ? [{ path, kind: 'removed' }, { path: real, kind: 'changed' }] : [{ path, kind: 'removed' }];
   }
 
   private invalidate(entry: Entry): void {

@@ -1,7 +1,7 @@
 // An MCP call's detail: the server and tool, the result blocks (text through the shared markdown pipeline, inline data
 // images, anything else as JSON), and a Raw toggle showing the input, result and structured content as JSON.
 import type { ContentBlock } from '@shared/graph/events';
-import { TRUNCATE_OVER } from '../../model/cells';
+import { partsTruncationOf } from '../../model/cells';
 import { DETAIL } from '../../model/copy';
 import type { Cell, CellDetail } from '../../model/rows';
 import { useDisclosure } from '../context';
@@ -26,25 +26,24 @@ export function ResultBlock({ block }: { block: ContentBlock }) {
 // What a block puts into the DOM: its text, or its JSON; an inline image is an attribute, bounded by its own box.
 const sizeOf = (block: ContentBlock) => (block.type === 'text' && typeof block.text === 'string' ? block.text.length : block.type === 'image' ? 0 : json(block).length);
 
-// A result made of blocks, bounded as a whole (residue *Bounded surfaces and truncation*): blocks render until the
-// 64 KB budget is spent (the first always, capped on its own), then one omitted marker with Open full log. The full
-// result stays on the cell for copy and the full log.
+// A result made of blocks, bounded as a whole (residue *Bounded surfaces and truncation*): past the 64 KB budget, the
+// head blocks and the tail blocks (`partsTruncationOf`, each block capped on its own) around one omitted marker with
+// Open full log. The full result stays on the cell for copy and the full log.
 export function ResultBlocks({ cell, blocks }: { cell: Cell; blocks: ContentBlock[] }) {
-  let used = 0;
-  let shown = 0;
-  for (const block of blocks) {
-    const size = sizeOf(block);
-    if (shown > 0 && used + size > TRUNCATE_OVER) break;
-    used += size;
-    shown += 1;
-  }
-  const omitted = blocks.slice(shown).reduce((bytes, block) => bytes + sizeOf(block), 0);
+  const sizes = blocks.map(sizeOf);
+  const cut = partsTruncationOf(sizes);
+  if (!cut) return blocks.map((block, i) => <ResultBlock key={i} block={block} />);
+  const tailFrom = blocks.length - cut.tail;
+  const omitted = sizes.slice(cut.head, tailFrom).reduce((bytes, size) => bytes + size, 0);
   return (
     <>
-      {blocks.slice(0, shown).map((block, i) => (
+      {blocks.slice(0, cut.head).map((block, i) => (
         <ResultBlock key={i} block={block} />
       ))}
-      {shown < blocks.length && <Omitted cell={cell} text={DETAIL.omitted(omitted)} />}
+      {tailFrom > cut.head && <Omitted cell={cell} text={DETAIL.omitted(omitted)} />}
+      {blocks.slice(tailFrom).map((block, i) => (
+        <ResultBlock key={tailFrom + i} block={block} />
+      ))}
     </>
   );
 }

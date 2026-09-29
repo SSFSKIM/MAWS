@@ -10,12 +10,14 @@
 //
 // The card imports the docked frame from its own module, never `composer/index.ts`, so no editor code reaches it.
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type MouseEvent, type PointerEvent } from 'react';
+import { ATTENTION_HEADINGS, type AttentionTone } from '@shared/attention/headings';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { RequestAnswer } from '@shared/engine/answers';
 import type { SessionEvent } from '@shared/graph/events';
 import { useNow } from '../app/use-now';
 import { DockedCardFrame } from '../composer/docked/DockedCardFrame';
 import { ipc } from '../ipc/client';
+import { BUTTON_LIKE_INPUTS } from '../keymap/dispatcher';
 import { useKeyChord } from '../keymap/useKeyChord';
 import { needsYouAge } from '../sidebar/derive';
 import { useAttention } from '../stores/attention';
@@ -48,20 +50,9 @@ export interface RequestCardProps {
   onAnswered?: (outcome: 'delivered' | 'not_pending' | 'write_failed') => void;
 }
 
-type Tone = 'warning' | 'info' | 'danger';
-// The kind line (C5's copy, so the Needs-you row, the hover and the card read alike); docked, the frame's title.
-const HEADINGS: Record<AttentionItem['kind'], { char: string; tone: Tone; text: string }> = {
-  permission: { char: '◐', tone: 'warning', text: 'Approval needed' },
-  question: { char: '?', tone: 'warning', text: 'Question' },
-  plan: { char: '◇', tone: 'info', text: 'Plan review' },
-  dialog: { char: '◐', tone: 'warning', text: 'Dialog' },
-  elicitation: { char: '◐', tone: 'warning', text: 'Input requested' },
-  auto_mode_unavailable: { char: '!', tone: 'danger', text: 'Auto mode unavailable' },
-  error: { char: '!', tone: 'danger', text: 'Error' },
-  interrupted: { char: '!', tone: 'danger', text: 'Interrupted' },
-  held_peer_message: { char: '✉', tone: 'info', text: 'Held message' },
-};
-const TONE: Record<Tone, string> = { warning: 'text-warning', info: 'text-info', danger: 'text-danger' };
+// The kind line (C5's table, so the Needs-you row, the hover and the card read alike); docked, the frame's title.
+export const HEADINGS = ATTENTION_HEADINGS;
+const TONE: Record<AttentionTone, string> = { warning: 'text-warning', info: 'text-info', danger: 'text-danger' };
 const NOT_PENDING_MS = 2_000;
 
 type Phase = 'pending' | 'answering' | 'delivered' | 'not_pending' | 'closed';
@@ -112,9 +103,9 @@ function useDelivery(item: AttentionItem, onAnswered: RequestCardProps['onAnswer
   return { phase, what, failed, submit };
 }
 
-// Text entry, as C5's dispatcher defines it (`keymap/dispatcher.ts`, `isTextEntry` and `BUTTON_LIKE_INPUTS`, which the
-// module does not export): an input that takes a keypress as text, a textarea, a select, or inside a contenteditable.
-const BUTTON_LIKE_INPUTS = new Set(['button', 'submit', 'reset', 'checkbox', 'radio', 'range', 'color', 'file', 'image']);
+// Text entry, as C5's dispatcher defines it (`keymap/dispatcher.ts`, whose `BUTTON_LIKE_INPUTS` this reads): an input
+// that takes a keypress as text, a textarea, a select, or inside a contenteditable.
+export { BUTTON_LIKE_INPUTS };
 const isTextEntry = (target: EventTarget | null) =>
   target instanceof HTMLTextAreaElement ||
   target instanceof HTMLSelectElement ||
@@ -172,6 +163,7 @@ export function RequestCard(props: RequestCardProps) {
 
 function RequestCardFor({ item, request: given, placement, onAnswered }: RequestCardProps) {
   const fetched = useAttention((s) => s.requests.get(item.id));
+  const unreadable = useAttention((s) => s.unreadable.get(item.id) ?? null);
   useEffect(() => {
     if (given === null) void useAttention.getState().loadRequest(ipc, item);
   }, [given, item]);
@@ -185,9 +177,11 @@ function RequestCardFor({ item, request: given, placement, onAnswered }: Request
   const { phase, what, failed, submit } = useDelivery(item, onAnswered);
   const pointer = usePointerOnly();
 
-  // The requests a docked placement shows: the transcript's slot then renders a pointer to it.
+  // The requests a docked placement shows: the transcript's slot then renders a pointer to it. A notice with no request
+  // read (unreadable, or no longer held) shows nothing to answer, so the transcript keeps its own card.
   const { requestId } = item.request;
-  useEffect(() => (placement === 'docked' && requestId !== null ? markDocked(item.appSessionId, requestId) : undefined), [placement, item.appSessionId, requestId]);
+  const shown = request !== null;
+  useEffect(() => (placement === 'docked' && requestId !== null && shown ? markDocked(item.appSessionId, requestId) : undefined), [placement, item.appSessionId, requestId, shown]);
 
   // The variant's Enter, Esc and digit actions, and whether it has each (a key it lacks stays unbound).
   const keys = useRef<CardKeys>({ accept: null, decline: null });
@@ -284,8 +278,10 @@ function RequestCardFor({ item, request: given, placement, onAnswered }: Request
     }
   }
 
+  // Hover, the card sits in C5's dialog named for the session; the card itself is named for its request and tool.
+  const named = hover ? { role: 'group', 'aria-label': title === null ? heading.text : `${heading.text}: ${title}` } : {};
   const content = (
-    <div ref={rootRef} data-request-card={item.id} aria-busy={busy} className={`flex flex-col gap-3 text-fg ${placement === 'docked' || placement === 'inline' ? 'text-ui' : 'text-ui-sm'}`}>
+    <div ref={rootRef} data-request-card={item.id} aria-busy={busy} {...named} className={`flex flex-col gap-3 text-fg ${placement === 'docked' || placement === 'inline' ? 'text-ui' : 'text-ui-sm'}`}>
       {!framed && (
         <div className={`flex items-center gap-1.5 ${TONE[heading.tone]}`}>
           <span aria-hidden>{heading.char}</span>
@@ -309,6 +305,14 @@ function RequestCardFor({ item, request: given, placement, onAnswered }: Request
         </div>
       )}
       {body}
+      {request === null && unreadable !== null && (
+        <div role="alert" className="flex items-center gap-2 text-danger">
+          <span className="flex-1" title={unreadable}>
+            The request could not be read
+          </span>
+          <CardButton onClick={() => void useAttention.getState().retryRequest(ipc, item)}>Retry</CardButton>
+        </div>
+      )}
       {request?.kind === 'permission.requested' && record && !collapsed && (
         <p className="m-0 truncate font-mono text-ui-sm text-fg-muted" title={record.directory}>
           {record.directory}

@@ -51,12 +51,13 @@ export async function endAsStop(p){try{await p.request('end_session',{reason:'st
 
 // One launch: C3's setting sources, no strict MCP config, default mode, the pinned id, the scratch env; throws when
 // the scenario body failed or the engine exited non-zero, so a recording that did not assert what it claims fails loudly.
-export async function launch(name,{cwd,env,sessionId=randomUUID(),flags=[],model='haiku'},body){
+// `provenance` overrides the row's fields for a scenario another child records with these helpers (debt wave 3).
+export async function launch(name,{cwd,env,sessionId=randomUUID(),flags=[],model='haiku',provenance={}},body){
  const {configHome,globalConfig}=assertScratch({...process.env,...env});
  for(const k of SCRUB)delete process.env[k];
  let failure;
  const p=await harnessRun(name,async p=>{
-  p.note({event:'provenance',...PROVENANCE,scrubbedEnv:SCRUB,configHome,globalConfig,pinnedSessionId:sessionId});
+  p.note({event:'provenance',...PROVENANCE,...provenance,scrubbedEnv:SCRUB,configHome,globalConfig,pinnedSessionId:sessionId});
   p.on('request_user_dialog',r=>{p.note({event:'dialog_seen',kind:r.dialog_kind});return {behavior:'completed',result:'continue'};});
   try{await body(p,{configHome,globalConfig,sessionId});}catch(e){failure=e;throw e;}
  },{cwd,env,bin:BIN,dir:'fixtures/pass3/',model,settingSources:'user,project,local',strictMcp:false,mode:'default',flags:['--session-id',sessionId,...flags]});

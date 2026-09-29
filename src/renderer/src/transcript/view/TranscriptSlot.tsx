@@ -5,14 +5,38 @@
 // nothing to rewind to). C5's `transcript` slot renders it through `transcript/shell.tsx`, registered from `App.tsx`.
 import type { AgentId, AppSessionId } from '@shared/graph/ids';
 import { useMemo } from 'react';
+import { useSessions } from '../../stores/sessions';
 import { ipcRewind, ipcSource } from '../source/ipc';
 import { useRegisteredActions, useRegisteredRequestRenderer } from './registry';
 import { Transcript } from './Transcript';
 
-export function TranscriptSlot({ appSessionId, agentId, className }: { appSessionId: AppSessionId; agentId?: AgentId; className?: string }) {
+export interface TranscriptSlotProps {
+  appSessionId: AppSessionId;
+  agentId?: AgentId;
+  className?: string;
+}
+
+export function TranscriptSlot({ appSessionId, agentId, className }: TranscriptSlotProps) {
   const actions = useRegisteredActions();
   const renderRequest = useRegisteredRequestRenderer(); // C7's card; the placeholder until it registers
   const source = ipcSource(appSessionId, agentId); // memoised per key
   const rewind = useMemo(() => (agentId === undefined ? ipcRewind(appSessionId) : undefined), [appSessionId, agentId]);
-  return <Transcript source={source} variant={agentId === undefined ? 'session' : 'child'} actions={actions} rewind={rewind} renderRequest={renderRequest} className={className} />;
+  // Where the session runs, from its record (its worktree's checkout when it has one): the engine's Bash input names no
+  // cwd, so a shell call shows this, labelled as the session's directory. Not for a child agent's transcript: a
+  // worktree-isolated subagent's shell ran elsewhere.
+  const sessionDirectory = useSessions((state) => {
+    const record = agentId === undefined ? state.records.get(appSessionId) : undefined;
+    return record ? (record.worktree?.path ?? record.directory) : null;
+  });
+  return (
+    <Transcript
+      source={source}
+      variant={agentId === undefined ? 'session' : 'child'}
+      actions={actions}
+      rewind={rewind}
+      renderRequest={renderRequest}
+      className={className}
+      sessionDirectory={sessionDirectory}
+    />
+  );
 }

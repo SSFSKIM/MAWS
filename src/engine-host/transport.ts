@@ -15,11 +15,12 @@ const PARSE_ERROR_PREVIEW_CHARS = 4_096;
 const CLOSE_AFTER_EXIT_GRACE_MS = 2_000;
 
 export interface TransportProblem {
-  kind: 'parse_error' | 'line_budget' | 'spawn_error' | 'replay_mismatch'; // replay_mismatch: the replay transport only (M2)
+  kind: 'parse_error' | 'line_budget' | 'spawn_error' | 'replay_mismatch' | 'replay_unrecorded_read'; // replay_*: the replay transport only (M2; debt wave 3)
   message: string;
-  length: number; // characters of the offending line (0 for a spawn error or a replay mismatch)
+  length: number; // characters of the offending line (0 for a spawn error or a replay item)
   typeGuess: string | null; // the `"type"` a malformed line seemed to carry
   replay?: { expected: string; got: string }; // the held out row and the unrecorded write, for the `meta replay_mismatch` row
+  read?: { subtype: string; requestId: string }; // the unrecorded read the replay answered empty, for the `meta replay_unrecorded_read` row
 }
 
 // One stdout line: a parsed frame, or a problem with the raw preview. `raw` is the whole line for a frame and at most

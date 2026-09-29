@@ -38,6 +38,18 @@ const SHOWN_TAIL = 16 * 1024;
 export const truncationOf = (text: string): Truncation | null =>
   text.length > TRUNCATE_OVER ? { shownHead: SHOWN_HEAD, shownTail: SHOWN_TAIL, omittedBytes: text.length - SHOWN_HEAD - SHOWN_TAIL } : null;
 
+// The same bound for output made of parts (MCP result blocks, diff lines), which render whole: past the cap, the parts
+// that fit the head budget (the first always) and those that fit the tail budget from the end (the last always), the
+// rest omitted between them. `head` and `tail` count parts; null when everything fits.
+export function partsTruncationOf(sizes: readonly number[]): { head: number; tail: number } | null {
+  if (sizes.reduce((total, size) => total + size, 0) <= TRUNCATE_OVER) return null;
+  let head = 0;
+  for (let used = 0; head < sizes.length && (head === 0 || used + sizes[head] <= SHOWN_HEAD); head += 1) used += sizes[head];
+  let tail = 0;
+  for (let used = 0; head + tail < sizes.length && (tail === 0 || used + sizes[sizes.length - 1 - tail] <= SHOWN_TAIL); tail += 1) used += sizes[sizes.length - 1 - tail];
+  return { head, tail };
+}
+
 const record = (value: unknown): Record<string, unknown> => (typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {});
 const str = (value: unknown, fallback = ''): string => (typeof value === 'string' ? value : fallback);
 const num = (value: unknown): number | null => (typeof value === 'number' ? value : null);

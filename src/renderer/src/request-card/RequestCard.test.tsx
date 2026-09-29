@@ -7,7 +7,7 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
-import { connectKeys } from '../keymap/dispatcher';
+import { BUTTON_LIKE_INPUTS, connectKeys } from '../keymap/dispatcher';
 import { bindingsOf } from '../keymap/useKeyChord';
 import { useAttention } from '../stores/attention';
 import { resetComposerStore, useComposerStore } from '../stores/composer';
@@ -15,7 +15,8 @@ import { useNotices } from '../stores/notices';
 import { resetShellStores } from '../test-support/shell-stores';
 import { ipcSource, useTranscriptStore } from '../transcript';
 import { builder, uuid } from '../transcript/model/test-events';
-import { RequestCard, type Placement } from './RequestCard';
+import { HEADINGS as PREVIEW_HEADINGS } from '../sidebar/RequestPreview';
+import { BUTTON_LIKE_INPUTS as CARD_INPUTS, HEADINGS, RequestCard, type Placement } from './RequestCard';
 import { fixtureRequest, itemFor, permission, syntheticRequest, type RequestEvent } from './test-requests';
 
 const APP = 'app-test' as AppSessionId;
@@ -90,6 +91,11 @@ const reapply = fixtureRequest('pass2', 'grant-reapply-start', 30);
 const question = fixtureRequest('pass1', 'question-roundtrip', 137);
 const elicitation = fixtureRequest('pass2', 'dialogs', 41);
 const plan: RequestEvent = { ...permission(), kind: 'plan.requested', plan: '# Plan\n\n1. Split the parser\n2. Test it', input: {} } as never;
+
+it('reads C5’s kind lines and button-like inputs, the same objects, not copies', () => {
+  expect(HEADINGS).toBe(PREVIEW_HEADINGS);
+  expect(CARD_INPUTS).toBe(BUTTON_LIKE_INPUTS);
+});
 
 describe('dialog variants answer the two declared kinds and leave an undeclared kind pending', () => {
   it('the refusal fallback offers Retry with the fallback model, Edit prompt and Cancel, each with its pinned result', async () => {
@@ -414,9 +420,21 @@ describe('request card placements and delivery states', () => {
     expect(useAttention.getState().requests.get(item.id)).toEqual(reapply);
   });
 
+  it('a request the store could not read shows its notice with the failure instead of loading', () => {
+    const item = itemFor(reapply, APP);
+    useAttention.setState({ requests: new Map([[item.id, null]]), unreadable: new Map([[item.id, 'no host']]) });
+    render(<RequestCard item={item} request={null} placement="docked" paneIndex={null} />);
+    expect(screen.queryByText('Loading the request…')).toBeNull();
+    expect(screen.getByRole('alert').textContent).toBe('The request could not be readRetry');
+    expect(useComposerStore.getState().docked.get(APP)).toBeUndefined(); // nothing docked: the transcript keeps its card
+    expect(screen.getByText(item.summary)).toBeTruthy();
+  });
+
   describe('the hover placement', () => {
     it('offers Approve and Deny for an unflagged Read, answering by pointer only', async () => {
-      mount(unflaggedRead, 'hover');
+      const { item } = mount(unflaggedRead, 'hover');
+      // named for its request and tool, so a reader of the hover dialog (named for the session) finds the approval
+      expect(screen.getByRole('group', { name: 'Approval needed: Read' }).dataset.requestCard).toBe(item.id);
       const approve = screen.getByRole('button', { name: 'Approve' });
       expect(screen.getByRole('button', { name: 'Deny' })).toBeTruthy();
       expect(screen.getByRole('button', { name: 'Open session' })).toBeTruthy();
