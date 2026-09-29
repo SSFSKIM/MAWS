@@ -7,7 +7,7 @@
 // mounted passively, and a scripted driver issuing exactly the fixture's recorded frames in order through
 // `window.__maws_widgets.read` (the widgets' own query under their own keys) and `window.maws.invoke`; the replay ends
 // on any unrecorded write, so its reaching the fixture's `meta exit` is the proof nothing else was written.
-// M2 holds the read half of the interactive group and the `reads.jsonl` case; M3 adds the mutating half and
+// M2 holds the read half of the interactive group and the `reads.jsonl` case; M3 the mutating half and
 // `auto-routed-controls`.
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -26,6 +26,7 @@ const HARNESS_BUILT = !process.env.MAWS_E2E_EXECUTABLE && existsSync(join(REPO_R
 const SCENARIO = 'stub:test/fixtures/shell/nine-sessions.json';
 const READY = 'app-7412a115'; // ready, idle, routed through the relay
 const READS = 'spikes/protocol-probe/fixtures/reads.jsonl';
+const CONTROLS = 'test/fixtures/engine/auto-routed-controls.jsonl'; // pass2/auto-routed without the unissuable fork_conversation pair
 const NAMES = ['model', 'effort', 'fast', 'permissions', 'usage', 'config', 'plugins', 'mcp', 'sandbox', 'hooks', 'memory', 'skills', 'agents', 'status', 'compact', 'context', 'rename', 'resume', 'export', 'diff'];
 
 const test = base.extend<{ backend: MawsLaunch; replay: MawsLaunch }>({
@@ -73,6 +74,17 @@ const widget = (page: Page, name: string): Locator => page.locator(`[data-widget
 const valueOf = (scope: Locator, label: string): Locator => scope.getByRole('term').filter({ hasText: new RegExp(`^${label}$`) }).locator('xpath=following-sibling::dd[1]');
 const pick = (page: Page, name: string) => page.evaluate((n) => (window as unknown as WidgetsWindow).__maws_widgets.open(n), name);
 const calls = (maws: MawsLaunch) => maws.app.evaluate(() => (globalThis as unknown as { __maws_widget_backend: WidgetBackend }).__maws_widget_backend.calls.map((c) => ({ subtype: c.subtype, input: c.input })));
+// M3: the log with each call's X2 command (a prompt and a rename are no controls of the table), and the backend's handle.
+const commandsOf = (maws: MawsLaunch) => maws.app.evaluate(() => (globalThis as unknown as { __maws_widget_backend: WidgetBackend }).__maws_widget_backend.calls.map((c) => ({ command: c.command, input: c.input })));
+type BackendGlobal = { __maws_widget_backend: WidgetBackend };
+const holdOperations = (maws: MawsLaunch, held: boolean) => maws.app.evaluate((_, on) => (globalThis as unknown as BackendGlobal).__maws_widget_backend.holdOperations(on), held);
+const settleOperations = (maws: MawsLaunch) => maws.app.evaluate(() => (globalThis as unknown as BackendGlobal).__maws_widget_backend.settleOperations());
+const typeCommand = async (page: Page, text: string) => {
+  await page.getByRole('textbox', { name: 'Message' }).click();
+  await page.keyboard.type(text); // the space after the name closes the palette
+  await expect(page.getByRole('listbox', { name: 'Commands' })).toBeHidden();
+  await page.keyboard.press('Enter'); // the line's widget opens with its argument
+};
 
 test.describe('interactive', () => {
   test('every name opens a widget from the palette, none listed as unavailable', async ({ backend }) => {
@@ -207,9 +219,246 @@ test.describe('interactive', () => {
     await expect(message).toContainText('/deep-research');
     expect(backend.consoleErrors()).toEqual([]);
   });
+
+  // ---- M3: the mutating half ----------------------------------------------------------------------------------------
+
+  test('model widget groups and warns; the chip opens it; the fast switch writes apply_flag_settings after its warning', async ({ backend }) => {
+    const { page } = backend;
+    await openPage(page, { appSessionId: READY, mode: 'interactive' });
+    await page.getByRole('button', { name: /^Model / }).click(); // C7's chip opens the registered widget
+    const model = widget(page, 'model');
+    await expect(model.getByRole('radiogroup', { name: 'Claude models' }).getByRole('radio')).toHaveCount(5); // pass2/auto-routed seq 143
+    await expect(model.getByRole('radiogroup', { name: 'Gateway models' }).getByRole('radio')).toHaveCount(7);
+    await expect(model.getByRole('radio', { name: /^Haiku/ })).toContainText('Cannot hold auto mode · runs in default');
+    await model.getByRole('radio', { name: /^astra/ }).click(); // the session is in auto
+    await expect(model.getByRole('note')).toContainText('Auto-mode reviews for this model run locally. A GPT route carries no Anthropic verdict');
+
+    await model.getByRole('radio', { name: /^Opus/ }).click();
+    await model.getByRole('button', { name: 'Apply' }).click();
+    const fast = model.getByRole('switch', { name: 'Fast mode' });
+    await expect(fast).toBeEnabled(); // opus has fast mode
+    await fast.click();
+    await expect(model).toContainText('Fast mode disables the auto-mode server lane: reviews then run locally on Sonnet 5 and count against usage');
+    expect((await calls(backend)).filter((c) => c.subtype === 'apply_flag_settings')).toEqual([]); // nothing before the answer
+    await model.getByRole('button', { name: 'Turn on fast mode' }).click();
+    await expect.poll(async () => (await calls(backend)).filter((c) => c.subtype === 'apply_flag_settings')).toEqual([{ subtype: 'apply_flag_settings', input: { appSessionId: READY, settings: { fastMode: true } } }]);
+    const log = await calls(backend);
+    expect(log).toContainEqual({ subtype: 'set_model', input: { appSessionId: READY, model: 'opus' } });
+    expect(log.filter((c) => c.subtype === 'list_models')).toHaveLength(1);
+    expect(backend.consoleErrors()).toEqual([]);
+  });
+
+  test('arguments prefill: /model haiku, /effort high, /compact focus on tests, /rename New title', async ({ backend }) => {
+    const { page } = backend;
+    await openPage(page, { appSessionId: READY, mode: 'interactive' });
+    await expect(page.getByRole('textbox', { name: 'Message' })).toBeVisible();
+
+    await typeCommand(page, '/model haiku');
+    await expect(widget(page, 'model').getByRole('radio', { name: /^Haiku/ })).toHaveAttribute('aria-checked', 'true');
+    await page.keyboard.press('Escape');
+
+    await typeCommand(page, '/effort high');
+    const effort = widget(page, 'effort');
+    await expect(effort.getByRole('radiogroup', { name: 'Effort levels' }).getByRole('radio', { name: 'high', exact: true })).toHaveAttribute('aria-checked', 'true');
+    await effort.getByRole('button', { name: 'Apply' }).click();
+    await expect.poll(async () => (await commandsOf(backend)).filter((c) => c.command === 'session.setEffort')).toEqual([{ command: 'session.setEffort', input: { appSessionId: READY, effort: 'high' } }]);
+    await page.keyboard.press('Escape');
+
+    await typeCommand(page, '/compact focus on tests');
+    const compact = widget(page, 'compact');
+    await expect(compact.getByRole('textbox', { name: 'Instructions' })).toHaveValue('focus on tests');
+    await compact.getByRole('button', { name: 'Compact now' }).click();
+    await expect(compact).toBeHidden(); // closes on send
+    expect((await commandsOf(backend)).filter((c) => c.command === 'session.send')).toEqual([{ command: 'session.send', input: { appSessionId: READY, content: '/compact focus on tests' } }]);
+
+    await typeCommand(page, '/rename New title');
+    await expect(widget(page, 'rename').getByRole('status')).toHaveText('Renamed · New title');
+    expect((await commandsOf(backend)).filter((c) => c.command === 'session.renameSession')).toEqual([{ command: 'session.renameSession', input: { appSessionId: READY, title: 'New title' } }]);
+    expect(backend.consoleErrors()).toEqual([]);
+  });
+
+  test('permissions mode refusal: haiku, then auto, reads the refusal with the mode still default', async ({ backend }) => {
+    const { page } = backend;
+    await openPage(page, { appSessionId: READY, mode: 'interactive' });
+    await pick(page, 'permissions');
+    const permissions = widget(page, 'permissions');
+    const segment = permissions.getByRole('menu', { name: 'Permission mode' });
+    await segment.getByRole('menuitemradio', { name: /^default/ }).click();
+    await expect(segment.getByRole('menuitemradio', { checked: true })).toContainText('default');
+
+    await pick(page, 'model');
+    await widget(page, 'model').getByRole('radio', { name: /^Haiku/ }).click();
+    await widget(page, 'model').getByRole('button', { name: 'Apply' }).click();
+    await expect(widget(page, 'model').getByRole('radio', { name: /^Haiku/ })).toHaveAttribute('aria-checked', 'true');
+
+    await pick(page, 'permissions');
+    await widget(page, 'permissions').getByRole('menuitemradio', { name: /^auto/ }).click();
+    await expect(widget(page, 'permissions').getByRole('alert')).toHaveText('This model does not support auto mode'); // seq 156, as C3 maps it
+    await expect(widget(page, 'permissions').getByRole('menuitemradio', { checked: true })).toContainText('default');
+    const log = await calls(backend);
+    expect(log.filter((c) => c.subtype === 'set_permission_mode').map((c) => c.input)).toEqual([
+      { appSessionId: READY, mode: 'default' },
+      { appSessionId: READY, mode: 'auto' },
+    ]);
+    expect(log).toContainEqual({ subtype: 'list_permission_rules', input: { appSessionId: READY } });
+  });
+
+  test('mcp reconnect and plugins reload run as operations', async ({ backend }) => {
+    const { page } = backend;
+    await openPage(page, { appSessionId: READY, mode: 'interactive' });
+    await holdOperations(backend, true);
+
+    await pick(page, 'plugins');
+    await widget(page, 'plugins').getByRole('button', { name: 'Reload' }).click();
+    await expect(widget(page, 'plugins').getByRole('status')).toHaveText('Working…');
+    await expect.poll(() => settleOperations(backend)).toBe(1);
+    await expect(widget(page, 'plugins').getByRole('status')).toHaveText('Reloaded · 52 commands · 5 agents · 11 plugins · 0 errors');
+
+    await pick(page, 'mcp');
+    const docs = widget(page, 'mcp').getByRole('listitem').filter({ hasText: 'openaiDeveloperDocs' });
+    await docs.getByRole('button', { name: 'Reconnect' }).click();
+    await expect(docs.getByRole('status')).toHaveText('Working…');
+    const before = (await calls(backend)).filter((c) => c.subtype === 'mcp_status').length;
+    await expect.poll(() => settleOperations(backend)).toBe(1);
+    await expect(docs.getByRole('status')).toHaveText('Reconnected');
+    await expect.poll(async () => (await calls(backend)).filter((c) => c.subtype === 'mcp_status').length).toBe(before + 1); // read again on completion
+    expect((await calls(backend)).find((c) => c.subtype === 'mcp_reconnect')?.input).toEqual({ appSessionId: READY, serverName: 'openaiDeveloperDocs' });
+  });
+
+  test('mcp toggle discloses ~/.claude.json and reads its state back after either outcome', async ({ backend }) => {
+    const { page, app } = backend;
+    await openPage(page, { appSessionId: READY, mode: 'interactive' });
+    await pick(page, 'mcp');
+    const row = (name: string) => widget(page, 'mcp').getByRole('listitem').filter({ hasText: name });
+    const docs = row('openaiDeveloperDocs');
+    const mcpReads = async () => (await calls(backend)).filter((c) => c.subtype === 'mcp_status').length;
+
+    // Toggle off: the persistence beside the switch, one read after the outcome, the switch from that read
+    await expect(docs).toContainText('Recorded by the engine for this project in ~/.claude.json');
+    await holdOperations(backend, true);
+    await docs.getByRole('switch').click();
+    await expect(docs.getByRole('status')).toHaveText('Working…');
+    const before = await mcpReads();
+    await expect.poll(() => settleOperations(backend)).toBe(1);
+    await expect(docs.getByRole('switch')).toHaveAttribute('aria-checked', 'false');
+    await expect.poll(mcpReads).toBe(before + 1);
+    expect((await calls(backend)).find((c) => c.subtype === 'mcp_toggle')?.input).toEqual({ appSessionId: READY, serverName: 'openaiDeveloperDocs', enabled: false });
+    await holdOperations(backend, false);
+
+    // a refusal before the write: the switch where the read puts it, with the error's words
+    const ptc = row('plugin:ptc:ptc');
+    await app.evaluate(() => (globalThis as unknown as BackendGlobal).__maws_widget_backend.scriptOutcome('session.mcpToggle', () => ({ ok: false, error: { code: 'engine_error', message: 'Server not found: x', engineCode: null } })));
+    await ptc.getByRole('switch').click();
+    await expect(ptc.getByRole('status')).toHaveText('Server not found: x · engine_error');
+    await expect(ptc.getByRole('switch')).toHaveAttribute('aria-checked', 'true');
+
+    // an enable that persisted and did not connect (mcp-toggle-connect-failed.json): on, not connected
+    const failed = JSON.parse(readFileSync(join(REPO_ROOT, 'test/fixtures/widgets/mcp-toggle-connect-failed.json'), 'utf8')) as { operation: unknown; mcp_status: unknown };
+    await app.evaluate((_, f) => {
+      const backend = (globalThis as unknown as BackendGlobal).__maws_widget_backend;
+      backend.scriptOutcome('session.mcpToggle', () => {
+        backend.script('session.mcpStatus', () => f.mcp_status);
+        return f.operation as never;
+      });
+    }, failed);
+    await docs.getByRole('switch').click(); // off → on
+    await expect(docs.getByRole('status')).toHaveText('On · not connected · Connection failed');
+    await expect(docs.getByRole('switch')).toHaveAttribute('aria-checked', 'true');
+
+    // the read-back rejects: Unconfirmed with the outcome's words, and Read again reads once more
+    const advisor = row('plugin:chatgpt-advisor:advisor');
+    await app.evaluate(() => {
+      const backend = (globalThis as unknown as BackendGlobal).__maws_widget_backend;
+      backend.scriptOutcome('session.mcpToggle', () => {
+        backend.script('session.mcpStatus', () => {
+          throw new Error('mcp_status unanswered after 8 s');
+        });
+        return { ok: true, value: null };
+      });
+    });
+    await advisor.getByRole('switch').click();
+    await expect(advisor.getByRole('status')).toHaveText('Unconfirmed · Done');
+    await expect(advisor.getByRole('switch')).toHaveAttribute('data-state', 'unconfirmed');
+    const reads = await mcpReads();
+    await advisor.getByRole('button', { name: 'Read again' }).click();
+    await expect.poll(mcpReads).toBe(reads + 1);
+  });
+
+  test('resume lists the project’s sessions', async ({ backend }) => {
+    const { page } = backend;
+    await openPage(page, { appSessionId: READY, mode: 'interactive' });
+    await pick(page, 'resume');
+    const rows = widget(page, 'resume').getByRole('list', { name: 'Sessions of this project' }).getByRole('listitem');
+    await expect(rows).toHaveCount(2); // nine-sessions' proj-claude-usage-menubar, without this session
+    await expect(rows.nth(0)).toContainText('Usage reset countdown');
+    await expect(rows.nth(1)).toContainText('SDK wire inventory');
+    await expect(rows.nth(1).getByRole('button', { name: 'Resume' })).toBeDisabled(); // C10's
+  });
 });
 
 test.describe('replay conformance', () => {
+  test('auto-routed-controls: the driver issues the recorded frames and the widgets render the answers', async ({ replay }) => {
+    const { page } = replay;
+    const id = 'c11-widgets-controls';
+    await openPage(page, null);
+    await launchReady(page, id, CONTROLS);
+    await page.evaluate((p) => (window as unknown as WidgetsWindow).__maws_widgets.show(p), { appSessionId: id, mode: 'passive' as const });
+    const events = () => page.evaluate((sid) => (window as unknown as WidgetsWindow).__c11.batches.filter((b) => b.appSessionId === sid).flatMap((b) => b.events), id);
+    const ended = async () => (await events()).filter((e) => e.kind === 'turn.ended').length;
+    const read = (command: string, input: Record<string, unknown> = {}) => page.evaluate(([c, i]) => (window as unknown as WidgetsWindow).__maws_widgets.read(c, i), [command, { appSessionId: id, ...input }] as const);
+    const control = (name: string, input: Record<string, unknown>) => page.evaluate(([n, i]) => (window as unknown as WidgetsWindow).__maws_widgets.control(n, i), [name, { appSessionId: id, ...input }] as const);
+
+    // the three prompts, each after the previous turn ended, and the escalated Bash call allowed as recorded
+    value(await invoke(page, 'session.send', { appSessionId: id, content: 'Use Bash to run exactly: git status --short. Then reply OK.' })); // seq 6
+    await expect.poll(ended).toBe(1);
+    value(await invoke(page, 'session.send', { appSessionId: id, content: 'Use Bash to run exactly: git log --oneline -1. Then reply OK.' })); // seq 44
+    await expect.poll(async () => (await events()).some((e) => e.kind === 'permission.requested')).toBe(true); // seq 67, the escalation of seq 68
+    const requested = (await events()).find((e) => e.kind === 'permission.requested') as Extract<SessionEvent, { kind: 'permission.requested' }>;
+    expect(value(await invoke(page, 'session.answer', { appSessionId: id, requestId: requested.requestId, answer: { kind: 'permission', decision: 'allow', scope: 'once' } }))).toEqual({ outcome: 'delivered' }); // seq 69
+    await expect.poll(ended).toBe(2);
+    value(await invoke(page, 'session.send', { appSessionId: id, content: 'Use Bash to run exactly: git push --force origin main. Do not retry or run anything else. If it is blocked or fails, reply BLOCKED.' })); // seq 83
+    await expect.poll(ended).toBe(3);
+
+    const model = widget(page, 'model');
+    const permissions = widget(page, 'permissions');
+    const checkedMode = permissions.getByRole('menuitemradio', { checked: true });
+    await read('session.getUsage'); // seq 139
+    await expect(widget(page, 'usage')).toContainText('rate_limits_available: false');
+    await read('session.listModels'); // seq 142
+    await expect(model.getByRole('radiogroup', { name: 'Claude models' }).getByRole('radio')).toHaveCount(5);
+    await expect(model.getByRole('radiogroup', { name: 'Gateway models' }).getByRole('radio')).toHaveCount(7);
+    await read('session.getStatus'); // seq 144
+    await expect(valueOf(widget(page, 'status').getByRole('region', { name: 'Environment' }), 'Auto mode server')).toHaveText('Enabled');
+
+    await control('setPermissionMode', { mode: 'default' }); // seq 148
+    await expect(checkedMode).toContainText('default');
+    await control('setModel', { model: 'haiku' }); // seq 151
+    await expect(model.getByRole('radio', { name: /^Haiku/ })).toHaveAttribute('aria-checked', 'true');
+    await control('setPermissionMode', { mode: 'auto' }); // seq 155: refused
+    await expect(permissions).toContainText('This model does not support auto mode');
+    await expect(checkedMode).toContainText('default');
+    await control('setPermissionMode', { mode: 'default' }); // seq 158
+    await control('setModel', { model: 'claude/astra' }); // seq 161
+    await expect(model.getByRole('radio', { name: /^astra/ })).toHaveAttribute('aria-checked', 'true');
+    await control('setPermissionMode', { mode: 'auto' }); // seq 164
+    await expect(checkedMode).toContainText('auto');
+    await expect(model.getByRole('note')).toContainText('Auto-mode reviews for this model run locally.'); // a gateway model in auto
+    await control('setPermissionMode', { mode: 'default' }); // seq 167
+    await control('setModel', { model: 'opus' }); // seq 171
+    await control('applyFlagSettings', { settings: { fastMode: true } }); // seq 175
+    await expect(model.getByRole('switch', { name: 'Fast mode' }).locator('xpath=following-sibling::span[1]')).toHaveText('set · the next init frame confirms it');
+    await read('session.getStatus'); // seq 177
+    await expect(valueOf(widget(page, 'status').getByRole('region', { name: 'Environment' }), 'Auto mode server')).toHaveText('Disabled');
+    await control('setPermissionMode', { mode: 'auto' }); // seq 179
+    await control('applyFlagSettings', { settings: { fastMode: null } }); // seq 182, the recorded argument verbatim
+    await control('setModel', { model: 'sonnet' }); // seq 185
+
+    await expect.poll(async () => value(await invoke(page, 'session.status', { appSessionId: id })).process).toBe('exited'); // the meta exit, seq 189
+    const status = value(await invoke(page, 'session.status', { appSessionId: id }));
+    expect(readFileSync(status.journalPath, 'utf8')).not.toContain('replay_mismatch');
+    expect(replay.consoleErrors()).toEqual([]);
+  });
+
   test('reads: the driver issues the recorded frames and the widgets render the answers', async ({ replay }) => {
     const { page } = replay;
     const id = 'c11-widgets-reads';
@@ -224,7 +473,8 @@ test.describe('replay conformance', () => {
 
     await read('session.getUsage', {}); // seq 52
     await expect(widget(page, 'usage')).toContainText('rate_limits_available: false');
-    await read('session.getContextUsage', { detail: 'summary' }); // seq 56: the compact widget's read (M3 renders it)
+    await read('session.getContextUsage', { detail: 'summary' }); // seq 56: the compact widget's read
+    await expect(widget(page, 'compact')).toContainText('30,433 of 200,000 · 15% · autocompact at 167,000');
     await read('session.getSettings', {}); // seq 59
     await expect(widget(page, 'config')).toContainText('No settings in effect beyond the defaults');
     await expect(widget(page, 'config')).toContainText('claude-haiku-4-5-20251001');
