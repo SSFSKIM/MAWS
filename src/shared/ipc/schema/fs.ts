@@ -81,7 +81,15 @@ export const FsReadSpillInputSchema = z.strictObject({
   length: z.number().int().positive().max(8 * 1024 * 1024).optional(),
 });
 export type FsReadSpillInput = z.infer<typeof FsReadSpillInputSchema>;
-export const FsReadSpillOutputSchema = z.strictObject({ content: z.string(), bytes: z.number().int(), offset: z.number().int(), truncated: z.boolean() });
+// `bytes` is the file's size; `length` the bytes this page consumed, so the next page starts at `offset + length` (a page
+// ends on a UTF-8 character boundary unless it reaches the file's end; C8b's ask).
+export const FsReadSpillOutputSchema = z.strictObject({
+  content: z.string(),
+  bytes: z.number().int(),
+  offset: z.number().int(),
+  length: z.number().int(),
+  truncated: z.boolean(),
+});
 export type FsReadSpillOutput = z.infer<typeof FsReadSpillOutputSchema>;
 
 export const FOLLOW_STATES = ['backfilling', 'following', 'reloading', 'stopped', 'error'] as const;

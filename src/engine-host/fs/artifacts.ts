@@ -40,10 +40,26 @@ export async function readSpill(paths: StorePaths, { path, offset = 0, length = 
       if (bytesRead === 0) break;
       filled += bytesRead;
     }
-    return { content: buffer.subarray(0, filled).toString('utf8'), bytes: info.size, offset, truncated: offset + filled < info.size };
+    const atEnd = offset + filled >= info.size;
+    const consumed = atEnd ? filled : completeUtf8Length(buffer.subarray(0, filled));
+    return { content: buffer.subarray(0, consumed).toString('utf8'), bytes: info.size, offset, length: consumed, truncated: offset + consumed < info.size };
   } finally {
     await file.close();
   }
+}
+
+// The longest prefix of `page` that does not end inside a UTF-8 sequence, so a character cut by the requested length is
+// decoded whole on the next page instead of as U+FFFD on both. A page whose only character is cut (a request shorter
+// than one character) is answered whole, since an empty page would never advance a pager; bytes that are not valid
+// UTF-8 are left as they are.
+function completeUtf8Length(page: Buffer): number {
+  let start = page.length - 1;
+  while (start >= 0 && page.length - start <= 4 && (page[start] & 0xc0) === 0x80) start--; // back over continuation bytes
+  if (start < 0 || page.length - start > 4) return page.length;
+  const lead = page[start];
+  const size = lead < 0x80 ? 1 : (lead & 0xe0) === 0xc0 ? 2 : (lead & 0xf0) === 0xe0 ? 3 : (lead & 0xf8) === 0xf0 ? 4 : 0;
+  if (size === 0 || start + size <= page.length) return page.length; // complete, or not a sequence at all
+  return start > 0 ? start : page.length;
 }
 
 function within(path: string, roots: readonly string[]): boolean {

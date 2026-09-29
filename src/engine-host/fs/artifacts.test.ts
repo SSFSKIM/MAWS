@@ -22,10 +22,37 @@ describe('fs.readSpill reads engine artifacts by the path the engine reported', 
   });
 
   it('reads a spill whole, or a bounded window of it with truncated set and bytes the file size', async () => {
-    expect(await readSpill(fixture.paths, { path: spill })).toEqual({ content: 'x'.repeat(3000), bytes: 3000, offset: 0, truncated: false });
-    expect(await readSpill(fixture.paths, { path: spill, length: 1000 })).toEqual({ content: 'x'.repeat(1000), bytes: 3000, offset: 0, truncated: true });
-    expect(await readSpill(fixture.paths, { path: spill, offset: 2500, length: 1000 })).toEqual({ content: 'x'.repeat(500), bytes: 3000, offset: 2500, truncated: false });
+    expect(await readSpill(fixture.paths, { path: spill })).toEqual({ content: 'x'.repeat(3000), bytes: 3000, offset: 0, length: 3000, truncated: false });
+    expect(await readSpill(fixture.paths, { path: spill, length: 1000 })).toEqual({ content: 'x'.repeat(1000), bytes: 3000, offset: 0, length: 1000, truncated: true });
+    expect(await readSpill(fixture.paths, { path: spill, offset: 2500, length: 1000 })).toEqual({ content: 'x'.repeat(500), bytes: 3000, offset: 2500, length: 500, truncated: false });
     expect(SPILL_DEFAULT_LENGTH).toBe(1024 * 1024);
+  });
+
+  it('ends a page on a UTF-8 character boundary and answers the bytes it consumed, so the next page starts at offset + length (C8b\'s ask)', async () => {
+    // 'ab' then '€' (E2 82 AC) at bytes 2..4, then 'cd': a 4-byte request cuts the euro sign after its second byte.
+    const text = await fixture.addSidecar(S1, 'tool-results/utf8.txt', 'ab€cd');
+    const first = await readSpill(fixture.paths, { path: text, length: 4 });
+    expect(first).toEqual({ content: 'ab', bytes: 7, offset: 0, length: 2, truncated: true });
+    const second = await readSpill(fixture.paths, { path: text, offset: first.offset + first.length, length: 4 });
+    expect(second).toEqual({ content: '€c', bytes: 7, offset: 2, length: 4, truncated: true });
+    const third = await readSpill(fixture.paths, { path: text, offset: second.offset + second.length, length: 4 });
+    expect(third).toEqual({ content: 'd', bytes: 7, offset: 6, length: 1, truncated: false });
+    for (const page of [first, second, third]) expect(page.content).not.toContain('�');
+    // Four-byte and two-byte sequences are backed up the same way.
+    const wide = await fixture.addSidecar(S1, 'tool-results/wide.txt', 'a😀é');
+    expect(await readSpill(fixture.paths, { path: wide, length: 3 })).toMatchObject({ content: 'a', length: 1 });
+    expect(await readSpill(fixture.paths, { path: wide, offset: 1, length: 5 })).toMatchObject({ content: '😀', length: 4 });
+  });
+
+  it('never backs up the file\'s tail, and never answers an empty page for a request shorter than one character', async () => {
+    // A file that itself ends mid-character (an engine write in progress): the tail page keeps every byte.
+    const torn = await fixture.addSidecar(S1, 'tool-results/torn.txt', '');
+    await writeFile(torn, Buffer.from([0x61, 0x62, 0xe2, 0x82])); // 'ab' and the first two bytes of '€'
+    expect(await readSpill(fixture.paths, { path: torn })).toMatchObject({ bytes: 4, length: 4, truncated: false, content: 'ab�' });
+    expect(await readSpill(fixture.paths, { path: torn, length: 4 })).toMatchObject({ length: 4, truncated: false });
+    // One byte of a three-byte character: backing up would consume nothing and a pager would never advance.
+    const euro = await fixture.addSidecar(S1, 'tool-results/euro.txt', '€x');
+    expect(await readSpill(fixture.paths, { path: euro, length: 1 })).toMatchObject({ offset: 0, length: 1, truncated: true });
   });
 
   it('reads task outputs and job files, the other two roots', async () => {
@@ -44,7 +71,7 @@ describe('fs.readSpill reads engine artifacts by the path the engine reported', 
       const output = join(tmp, `claude-${uid}`, '-private-tmp-maws-probe2-1RzDNs', S1, 'tasks', 'wayue3on6.output');
       await mkdir(dirname(output), { recursive: true });
       await writeFile(output, 'workflow done');
-      expect(await readSpill(paths, { path: output })).toEqual({ content: 'workflow done', bytes: 13, offset: 0, truncated: false });
+      expect(await readSpill(paths, { path: output })).toEqual({ content: 'workflow done', bytes: 13, offset: 0, length: 13, truncated: false });
 
       await writeFile(join(tmp, 'outside.txt'), 'no');
       await expect(readSpill(paths, { path: join(tmp, `claude-${uid}`, '..', 'outside.txt') })).rejects.toThrow(OUTSIDE);
