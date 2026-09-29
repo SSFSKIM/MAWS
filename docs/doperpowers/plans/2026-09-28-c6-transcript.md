@@ -369,7 +369,18 @@ export interface TranscriptProps {
 export const Transcript: React.FC<TranscriptProps>;
 export { useTranscriptStore } from '../stores/transcript';     // rows, summaries and jumpTo(rowId) for C5's Overview line and C8's drill-in
 export { classifyTool, applyEvents, rowsOf, turnSummary, dividerCopy, serializeRows } ;
-export { Markdown } from './view/markdown/Markdown';    // C7: the request card and queued rows render markdown through the same sanitising pipeline (one renderer, no second stack)
+export { Markdown } from './view/markdown/Markdown';
+// C8 ask (2026-09-28, additive): a memoised, disclosure-independent projection over the transcript state, so C8a's resting summary (Sources and Subagents) reads the turn's activity whether its work is expanded or collapsed. A selector over the per-turn derivation, not a second derivation.
+export interface TurnActivity { turnId: TurnId; origin: 'human' | 'engine'; state: TurnState['state'];
+  filesRead: string[]; filesEdited: ChangedFile[];                       // paths in first-seen order; edits carry the receipt's counts
+  tools: { name: string; category: ToolCategory; count: number }[];      // every tool cell of the turn, child-agent cells excluded, in first-seen order
+  subagents: (SubagentRef & { status: SubagentStatus })[] }             // one per child, glyph as the row shows it, terminal state as derived
+export function turnActivity(state: TranscriptState): TurnActivity[];     // memoised per (turn id, turn version); order = state.order
+export const SUBAGENT_GLYPHS: readonly string[];                          // the eight marks, indexed by glyphFor
+export function glyphFor(taskId: TaskId): number;                         // the 32-bit hash the subagent row uses
+export const SubagentGlyph: React.FC<{ ref: SubagentRef; className?: string }>;   // the row's glyph, for C8's summary
+export type { TurnActivity };
+// `useTranscriptStore` exposes `activity(key)` over the same projection.    // C7: the request card and queued rows render markdown through the same sanitising pipeline (one renderer, no second stack)
 export type { Row, Cell, CellDetail, TurnSummary, ToolClassification, ToolCategory, SubagentRef, TurnId, RowId, CellId };
 ```
 
@@ -816,6 +827,8 @@ If `pnpm dev:harness` shows fixtures missing: the renderer's `server.fs.allow` m
   Date/Author: 2026-09-28, C6 controller.
 - Decision: M5 pre-review fix wave landed (10ae179, 4a322ba): provenance from the parent's lifecycle events; the parent's finish event joins the child slice and closes the child's open turn through a new additive `TurnState.closedBy` (the event renders no row); for a disk child the source remembers the finish event and appends it to `fs.agentEvents`; a finished child's turn collapses like any closed turn. Remaining gap ruled: a parent `process.exited` that resets a live child also joins the slice and closes the child's open turn as `stopped` (rule added under Child source provenance); fixed with the M5 review's findings.
   Date/Author: 2026-09-28, C6 controller.
+- Decision: Second C8 ask (coordinator, 2026-09-28, additive to the public surface): `turnActivity(state)` (memoised per turn version; per turn the files read and edited, the tools used, and the subagent refs with glyph and terminal state, independent of disclosure) and the glyph exports (`SUBAGENT_GLYPHS`, `glyphFor`, `SubagentGlyph`), plus `useTranscriptStore.activity(key)`, so C8a's resting summary does not empty when the human collapses a completed turn (the disclosed `rows` drop cells and subagent rows). Written into Public surface; implemented in M5's fix round 2.
+  Date/Author: 2026-09-28, C6 controller (from the coordinator).
 
 ## Outcomes & Retrospective
 
