@@ -100,3 +100,27 @@ for(const file of readdirSync(dir3).filter(f=>f.endsWith('.jsonl')))test('pass3/
  assert.equal(rows.find(r=>r.frame.event==='exit')?.frame.code,0);assert.equal(pending.size,0);
 });
 // C8c end
+// C8b start: the three pass-3 agent-work probes (docs/doperpowers/plans/2026-09-28-c8b-agent-work-tools.md, R1, R5, R6).
+const load3=n=>readFileSync(new URL(n+'.jsonl',dir3),'utf8').trim().split('\n').map(JSON.parse);
+const notes=(rows,event)=>rows.filter(r=>r.direction==='meta'&&r.frame.event===event).map(r=>r.frame);
+test('pass3 relay-to-child: the parent SendMessages the child by id, the child receives it, and the held Bash defers the busy case',()=>{const r=load3('relay-to-child');
+ assert.equal(notes(r,'relay_hold_missing').length,0);assert.equal(notes(r,'relay_child_gone').length,0);assert.equal(notes(r,'relay_hold_armed').length,1);
+ const child=notes(r,'relay_child').find(n=>n.case==='background');assert.equal(child.is_backgrounded,true);
+ const sends=ins(r,f=>f.type==='assistant'&&!f.parent_tool_use_id).flatMap(x=>x.frame.message.content).filter(b=>b.type==='tool_use'&&b.name==='SendMessage');
+ assert.ok(sends.filter(b=>b.input.to===child.task_id).length>=2);
+ // 2.1.283 forwards no receipt frame: the child's transcript holds a queued_command attachment with the coordinator origin
+ for(const kase of ['idle','busy']){const rc=notes(r,'relay_child_receipt').find(n=>n.case===kase);assert.ok(rc.live===true||(rc.form==='attachment:queued_command'&&rc.line.origin?.kind==='coordinator'),kase+' receipt live or on disk');}
+ const held=notes(r,'relay_held')[0];assert.ok(held.secondsAfterSendMessage>=15);assert.deepEqual(held.receiptWhileHeld,[]);
+ assert.ok(notes(r,'relay_busy_receipt_after_release')[0].afterRelease);
+ assert.equal(notes(r,'relay_foreground')[0].when,'after-child-returned');});
+test('pass3 nested-agents: the grandchild starts on the parent wire at depth 2 and its sidecar names the child as parent',()=>{const r=load3('nested-agents');
+ const started=ins(r,f=>f.subtype==='task_started'&&f.task_type==='local_agent').map(x=>x.frame);assert.deepEqual(started.map(f=>f.spawn_depth),[1,2]);
+ const meta=JSON.parse(readFileSync(new URL('nested-agents-sidecars/agent-'+started[1].task_id+'.meta.json',dir3),'utf8'));assert.equal(meta.parentAgentId,started[0].task_id);
+ const issued=ins(r,f=>f.type==='assistant'&&f.parent_tool_use_id===started[0].tool_use_id).flatMap(x=>x.frame.message.content).some(b=>b.type==='tool_use'&&b.id===started[1].tool_use_id);assert.ok(issued);});
+test('pass3 stop-task: each stop emits the snapshot without the task, killed, then stopped, all before the stop_task response',()=>{const r=load3('stop-task');
+ const stops=notes(r,'stop_response');assert.deepEqual(stops.map(s=>s.kind),['shell','agent','workflow']);
+ for(const s of stops){assert.equal(s.subtype,'success');const seq=ins(r,f=>f.type==='system'&&(f.subtype==='task_updated'||f.subtype==='task_notification')&&f.task_id===s.task_id);
+  const notification=seq.find(x=>x.frame.subtype==='task_notification');assert.equal(notification.frame.status,'stopped');assert.equal(seq.find(x=>x.frame.subtype==='task_updated').frame.patch.status,'killed');
+  assert.ok(notification.seq<s.seq);const snap=ins(r,f=>f.subtype==='background_tasks_changed').filter(x=>x.seq<seq[0].seq).at(-1);assert.ok(!snap.frame.tasks.some(t=>t.task_id===s.task_id));}
+ assert.equal(notes(r,'stop_missing')[0].subtype,'success');assert.deepEqual(notes(r,'stop_missing')[0].framesAfter,[]);});
+// C8b end
