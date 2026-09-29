@@ -29,9 +29,21 @@ export interface Editing {
   seenCursor: MessageUuid | null;
 }
 
-// Where edit-and-resubmit stands (C7 execution document, "Edit-and-resubmit and the fork seam"); M4b drives it. Every
-// state keeps the draft; only `sent` clears it.
+// Where edit-and-resubmit stands (C7 execution document, "Edit-and-resubmit and the fork seam"); M4b drives it from
+// `composer/resubmit-seam.ts`. Every state keeps the draft; only `sent` clears it (and `sent` is left at once: the
+// accepted send clears edit mode and the record returns to `idle`).
 export type ResubmitState = 'idle' | 'confirming' | 'rewinding' | 'rewind_uncertain' | 'rewind_unresolved' | 'rewound_awaiting_send' | 'sent';
+
+// The state with what its banner says: `exited` (idle after the engine exited mid-rewind), `sendFailed` (rewound, and
+// the send that followed failed), `autoSend` (rewound by the human's own confirm: the composer sends the edited text
+// as part of that decision; a rewind confirmed only later by the transcript waits for Send).
+export interface Resubmit {
+  state: ResubmitState;
+  exited: boolean;
+  sendFailed: boolean;
+  autoSend: boolean;
+}
+export const IDLE_RESUBMIT: Resubmit = Object.freeze({ state: 'idle', exited: false, sendFailed: false, autoSend: false }) as Resubmit;
 
 // Where `#` appends (C3's `session.memoryAppend` target): the memory dialog's project or user file, or a listed path.
 export interface MemoryTarget {
@@ -47,7 +59,7 @@ export interface ComposerState {
   memoryTargets: ReadonlyMap<AppSessionId, MemoryTarget>; // M3: the `#` target chosen per session
   starting: ReadonlySet<AppSessionId>; // M4: an unstarted session's first send is with C10's `start`
   editing: ReadonlyMap<AppSessionId, Editing>; // M4: edit mode, entered by a prefill with `editing`
-  resubmit: ReadonlyMap<AppSessionId, ResubmitState>; // M4b: absent is 'idle'
+  resubmit: ReadonlyMap<AppSessionId, Resubmit>; // M4b: absent is IDLE_RESUBMIT
 }
 
 const initial = (): ComposerState => ({ prefills: new Map(), docked: new Map(), focusTargets: new Map(), memoryTargets: new Map(), starting: new Set(), editing: new Map(), resubmit: new Map() });
@@ -147,13 +159,16 @@ export function setEditing(appSessionId: AppSessionId, editing: Editing | null):
   });
 }
 
-export const resubmitOf = (state: ComposerState, appSessionId: AppSessionId): ResubmitState => state.resubmit.get(appSessionId) ?? 'idle';
+export const resubmitRecordOf = (state: ComposerState, appSessionId: AppSessionId): Resubmit => state.resubmit.get(appSessionId) ?? IDLE_RESUBMIT;
+export const resubmitOf = (state: ComposerState, appSessionId: AppSessionId): ResubmitState => resubmitRecordOf(state, appSessionId).state;
 
-export function setResubmit(appSessionId: AppSessionId, state: ResubmitState): void {
+// Replaces the session's record: a bare state, or a state with the flags it carries (every flag not given is false).
+export function setResubmit(appSessionId: AppSessionId, next: ResubmitState | (Partial<Resubmit> & { state: ResubmitState })): void {
+  const record: Resubmit = { ...IDLE_RESUBMIT, ...(typeof next === 'string' ? { state: next } : next) };
   useComposerStore.setState((s) => {
     const resubmit = new Map(s.resubmit);
-    if (state === 'idle') resubmit.delete(appSessionId);
-    else resubmit.set(appSessionId, state);
+    if (record.state === 'idle' && !record.exited) resubmit.delete(appSessionId);
+    else resubmit.set(appSessionId, record);
     return { resubmit };
   });
 }

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, MessageUuid, RequestId } from '@shared/graph/ids';
-import { DEFAULT_MEMORY_TARGET, editingOf, insertComposerText, isDocked, isStarting, markDocked, memoryTargetOf, prefillComposer, registerFocusTarget, resetComposerStore, resubmitOf, setEditing, setMemoryTarget, setResubmit, setStarting, takePrefill, useComposerStore } from './composer';
+import { DEFAULT_MEMORY_TARGET, editingOf, IDLE_RESUBMIT, insertComposerText, isDocked, isStarting, markDocked, memoryTargetOf, prefillComposer, registerFocusTarget, resetComposerStore, resubmitOf, resubmitRecordOf, setEditing, setMemoryTarget, setResubmit, setStarting, takePrefill, useComposerStore } from './composer';
 
 const A = 'app-a' as AppSessionId;
 const B = 'app-b' as AppSessionId;
@@ -60,8 +60,14 @@ describe('composer store seam', () => {
     expect(resubmitOf(useComposerStore.getState(), A)).toBe('idle');
     setResubmit(A, 'rewound_awaiting_send');
     expect(resubmitOf(useComposerStore.getState(), A)).toBe('rewound_awaiting_send');
+    expect(resubmitRecordOf(useComposerStore.getState(), A)).toEqual({ state: 'rewound_awaiting_send', exited: false, sendFailed: false, autoSend: false });
+    setResubmit(A, { state: 'rewound_awaiting_send', sendFailed: true });
+    expect(resubmitRecordOf(useComposerStore.getState(), A)).toMatchObject({ state: 'rewound_awaiting_send', sendFailed: true });
+    setResubmit(A, { state: 'idle', exited: true }); // an idle state that still says something is kept
+    expect(resubmitRecordOf(useComposerStore.getState(), A)).toMatchObject({ state: 'idle', exited: true });
     setResubmit(A, 'idle');
     expect(useComposerStore.getState().resubmit.has(A)).toBe(false);
+    expect(resubmitRecordOf(useComposerStore.getState(), B)).toEqual(IDLE_RESUBMIT);
   });
 
   it('inserts text through the mounted composer of the session', () => {
