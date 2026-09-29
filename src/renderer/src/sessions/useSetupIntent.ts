@@ -7,6 +7,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { ModelCatalogue, ModelCatalogueEntry } from '@shared/sessions/models';
 import { autoModeNote, BUILTIN_MODELS } from '@shared/sessions/models';
 import type { FirstMessage, Location, SetupIntent, SetupIntentPatch } from '@shared/sessions/intent';
+import type { SetupEvent } from '@shared/sessions/setup';
 import { defaultBranchName, type WorktreeInfo } from '@shared/sessions/worktree';
 import type { ModelInfo, SetupIntentHook as ComposerSetupIntentHook } from '../composer/setup-intent';
 import { ipc } from '../ipc/client';
@@ -28,6 +29,7 @@ export interface SetupIntentOptions {
 export interface SetupIntentHook extends ComposerSetupIntentHook {
   intent: SetupIntent;
   options: SetupIntentOptions;
+  phase: string | null; // the running setup's phase in words: C7's submit control shows it as its disabled-state reason
   patch(p: SetupIntentPatch): Promise<HookResult>;
   start(first: FirstMessage): Promise<HookResult>;
 }
@@ -75,6 +77,22 @@ export function noteFor(catalogue: ModelCatalogue, intent: Pick<SetupIntent, 'mo
   const value = intent.model ?? 'default';
   const entry: ModelCatalogueEntry | null = catalogue.models.find((m) => m.value === value) ?? (intent.model === null ? null : { value: intent.model, displayName: intent.model });
   return autoModeNote(entry, intent.permissionMode);
+}
+
+// The running setup's phase as the composer says it (Interfaces, "The unstarted session": `Creating worktree <name>` ·
+// `Trusting <key>` · `Starting`, from the event's own detail; the bootstrap's "Trust recorded for …" is the log's, so
+// the phase still reads as trusting the key the decision answered). Null before a phase and once the setup ended.
+export function phaseText(event: SetupEvent | undefined, intent: Pick<SetupIntent, 'trustKey'>): string | null {
+  switch (event?.phase) {
+    case 'worktree':
+      return `${event.detail ?? 'Creating worktree'}…`;
+    case 'trusting':
+      return `${event.detail?.startsWith('Trusting ') ? event.detail : intent.trustKey !== null ? `Trusting ${intent.trustKey}` : 'Trusting'}…`;
+    case 'launching':
+      return `${event.detail ?? 'Starting'}…`;
+    default:
+      return null;
+  }
 }
 
 // ---- options: read when the tab mounts and again when the location's repository changes ------------------------
@@ -166,17 +184,19 @@ function useSetupOptions(
 export function useSetupIntent(appSessionId: AppSessionId): SetupIntentHook | null {
   const intent = useSetup((s) => s.intents.get(appSessionId) ?? null);
   const started = useSessions((s) => s.records.has(appSessionId) && s.engine.has(appSessionId));
+  const event = useSetup((s) => s.phases.get(appSessionId));
   const { options, trustError, recheck } = useSetupOptions(appSessionId, intent);
   return useMemo(() => {
     if (intent === null || started) return null;
     return {
       intent,
       options,
+      phase: phaseText(event, intent),
       patch: (p) => patchIntent(appSessionId, p),
       start: async (first) => {
         const error = trustError === null ? null : await recheck();
         return error !== null ? { ok: false, error } : startIntent(appSessionId, first);
       },
     };
-  }, [appSessionId, intent, started, options, trustError, recheck]);
+  }, [appSessionId, intent, started, event, options, trustError, recheck]);
 }

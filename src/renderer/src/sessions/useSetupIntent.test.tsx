@@ -94,6 +94,25 @@ describe('setup intent hook', () => {
     expect(result.current!.options.models[1]).toEqual({ value: 'haiku', displayName: 'Haiku', supportsAutoMode: false });
   });
 
+  it('answers the running setup’s phase in words (the composer’s disabled-state reason), and null otherwise', async () => {
+    withMain();
+    putIntent(intent({ location: { kind: 'newWorktree', repoRoot: REPO, name: 'one', branch: { kind: 'new', name: 'worktree-one', base: 'HEAD' } }, trust: 'accepted', trustKey: REPO }));
+    const { result } = renderHook(() => useSetupIntent(ID));
+    expect(result.current!.phase).toBeNull();
+    const phase = (p: 'worktree' | 'trusting' | 'launching' | 'ready' | 'failed', detail: string | null) =>
+      act(() => useSetup.getState().applySetup({ appSessionId: ID, phase: p, detail, outcome: p === 'failed' ? { kind: 'error', message: 'no', resources: { worktree: null, record: 'none', transcript: 'none' } } : null }));
+    phase('worktree', 'Creating worktree one');
+    expect(result.current!.phase).toBe('Creating worktree one…');
+    phase('trusting', `Trusting ${REPO}`);
+    expect(result.current!.phase).toBe(`Trusting ${REPO}…`);
+    phase('trusting', `Trust recorded for ${REPO} (bootstrap 0291b0f3-0e02-426c-a4f2-869e4f48ab7e)`);
+    expect(result.current!.phase, 'the bootstrap’s record is the log’s, not the reason’s').toBe(`Trusting ${REPO}…`);
+    phase('launching', 'Starting');
+    expect(result.current!.phase).toBe('Starting…');
+    phase('failed', null);
+    expect(result.current!.phase).toBeNull();
+  });
+
   it('shows the built-in catalogue when the host cannot answer', async () => {
     withMain({ 'engine.models': undefined });
     putIntent(intent());

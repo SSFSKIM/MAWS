@@ -197,7 +197,7 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
   const messageHeld = setup !== null && setup.intent.message !== null;
   const decision = submitState({
     status,
-    intent: unstarted ? { starting, messageHeld } : null,
+    intent: unstarted ? { starting, messageHeld, phase: setup.phase ?? null } : null, // C10: the setup phase
     queue,
     empty: draft.empty,
     mode: draft.mode,
