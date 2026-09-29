@@ -207,7 +207,7 @@ export function createFilesService({ records, hooks, emit = () => {}, openPath, 
         return watches.join(real, holder);
       }
       if (raced) watches.invalidateReal(real);
-      installation.adopt(holder);
+      if (!installation.adopt(holder)) throw new Refusal();
     } finally {
       await handle.close();
     }

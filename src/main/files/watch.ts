@@ -50,7 +50,7 @@ interface Entry {
 
 // A watcher installed but not yet adopted: the service confirms the directory, then adopts it or closes it.
 export interface Installation {
-  adopt(holder: Holder): void;
+  adopt(holder: Holder): boolean; // false when the watch failed a confirmation before it was adopted
   close(): void;
 }
 
@@ -92,8 +92,10 @@ export class WatchTable {
     entry.watcher.on('error', () => this.invalidate(entry)); // the directory went away under the watcher, or its stream failed
     return {
       adopt: (holder) => {
+        if (entry.closed) return false; // a batch confirmation or a watcher error invalidated it while the caller confirmed
         this.entries.set(real, entry);
         this.hold(entry, holder);
+        return true;
       },
       close: () => this.close(entry),
     };
