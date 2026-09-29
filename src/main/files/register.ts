@@ -15,22 +15,29 @@ export interface FilesHandlerDeps {
   env?: NodeJS.ProcessEnv;
 }
 
-export function registerFilesHandlers(model: { record(appSessionId: AppSessionId): AllowlistRecord | null }, deps: FilesHandlerDeps): FilesService {
+// The service, plus the per-window epochs (for tests and diagnostics: a closed window leaves no entry behind).
+export type FilesHandlers = FilesService & { readonly epochs: ReadonlyMap<number, number> };
+
+export function registerFilesHandlers(model: { record(appSessionId: AppSessionId): AllowlistRecord | null }, deps: FilesHandlerDeps): FilesHandlers {
   const files = createFilesService({ records: (appSessionId) => model.record(appSessionId), ...deps });
   const followed = new WeakSet<WebContents>();
-  // Each release starts a new epoch for its window, so a watch in flight when its window navigated or closed is
-  // dropped when it completes rather than held by a page that can no longer unwatch it.
+  // Each navigation starts a new epoch for its window, so a watch in flight when its window navigated is dropped when it
+  // completes rather than held by a page that can no longer unwatch it; a closed window's epoch is pruned, and a watch
+  // in flight when it closed is dropped because its sender is destroyed.
   const epochs = new Map<number, number>();
   const epochOf = (id: number) => epochs.get(id) ?? 0;
   const owner = (sender: WebContents) => {
     if (!followed.has(sender)) {
       followed.add(sender);
-      const release = () => {
-        epochs.set(sender.id, epochOf(sender.id) + 1);
-        files.release(sender.id);
-      };
-      sender.once('destroyed', release);
-      sender.on('did-navigate', release);
+      const id = sender.id; // read now: a destroyed webContents' properties may no longer answer
+      sender.once('destroyed', () => {
+        epochs.delete(id);
+        files.release(id);
+      });
+      sender.on('did-navigate', () => {
+        epochs.set(id, epochOf(id) + 1);
+        files.release(id);
+      });
     }
     return sender.id;
   };
@@ -41,9 +48,9 @@ export function registerFilesHandlers(model: { record(appSessionId: AppSessionId
     const id = owner(sender);
     const epoch = epochOf(id);
     await files.watch(session(appSessionId), path, id);
-    if (epochOf(id) !== epoch) files.unwatch(session(appSessionId), path, id); // released while in flight
+    if (sender.isDestroyed() || epochOf(id) !== epoch) files.unwatch(session(appSessionId), path, id); // released while in flight
   });
   registerMainHandler('files.unwatch', ({ appSessionId, path }, { sender }) => files.unwatch(session(appSessionId), path, sender.id));
   registerMainHandler('files.openExternal', ({ appSessionId, path }) => files.openExternal(session(appSessionId), path));
-  return files;
+  return Object.assign(files, { epochs: epochs as ReadonlyMap<number, number> });
 }
