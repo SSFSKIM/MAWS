@@ -81,3 +81,22 @@ test('pass2 routing: user settings env routes an unrouted process; empty flag-se
  assert.match(load2('routing-user-settings').find(r=>r.frame.event==='routing').frame.baseUrl,/^http:\/\/127\.0\.0\.1/);
  assert.equal(load2('routing-flag-override').find(r=>r.frame.event==='routing').frame.baseUrl,null);
  const h=load2('auto-haiku');assert.equal(h.find(r=>r.frame.event==='init_summary').frame.current_permission_mode,'default');assert.equal(h.find(r=>r.frame.event==='mode_result').frame.error_code,'auto_mode_model');});
+// C8c start: pass-3 fixtures (C2's R4 workspace-diff and worktree captures, C3's live captures). Integrity for every
+// file, as pass 2 checks it; the typed get_workspace_diff shapes are C3's (src/engine-host/conformance/fixtures.test.ts).
+const dir3=new URL('./fixtures/pass3/',import.meta.url);
+for(const file of readdirSync(dir3).filter(f=>f.endsWith('.jsonl')))test('pass3/'+file+' is ordered NDJSON with correlated replies, provenance and no secrets',()=>{
+ const text=readFileSync(new URL(file,dir3),'utf8');assert.ok(!text.includes('sk-ant-'));if(secret&&secret.length>=8)assert.ok(!text.includes(secret));
+ // the probe numbers rows from 1, C3's live relay captures from 0 (their provenance row); either base, then no gap
+ // and the engine echoes a host's can_use_tool answer back on its stdout (C3's plan-outcomes): an `in` response that
+ // repeats, byte for byte, the `out` response which already closed its request is an echo, not an orphan
+ const rows=text.trim().split('\n').map(JSON.parse);assert.ok([0,1].includes(rows[0].seq));let seq=rows[0].seq-1;const pending=new Set();const answered=new Map();
+ for(const row of rows){assert.equal(row.seq,++seq);assert.ok(['in','out','meta','stderr'].includes(row.direction));const f=row.frame;
+  if(f.type==='control_request')pending.add(row.direction+':'+f.request_id);
+  if(f.type==='control_response'){const key=(row.direction==='in'?'out':'in')+':'+f.response.request_id;
+   if(pending.delete(key))answered.set(row.direction+':'+f.response.request_id,JSON.stringify(f));
+   else assert.equal(answered.get((row.direction==='in'?'out':'in')+':'+f.response.request_id),JSON.stringify(f),'response has pending request '+key);}
+  assert.notEqual(f.event,'parse_error');assert.notEqual(f.event,'scenario_error');}
+ const prov=rows.find(r=>r.frame.event==='provenance')?.frame;assert.equal(prov.charter,'docs/charter.md');assert.ok(['C2','C3'].includes(prov.child));assert.match(prov.pin,/^[0-9a-f]{40}$/);
+ assert.equal(rows.find(r=>r.frame.event==='exit')?.frame.code,0);assert.equal(pending.size,0);
+});
+// C8c end

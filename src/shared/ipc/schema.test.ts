@@ -16,9 +16,12 @@ import { C3_ENGINE_COMMANDS, C3_ENGINE_EVENTS } from './schema/engine';
 import { C3_SESSION_COMMANDS, C3_SESSION_EVENTS } from './schema/session';
 import { OPERATION_COMMANDS } from '../engine/operations';
 // C3 end
+// C8c start
+import * as files from './schema/files';
+// C8c end
 
 // One entry per namespace, checked against NAMESPACES at compile time and at run time.
-const modules = { session, engine, fs, git, pty, layout, attention, settings } satisfies Record<
+const modules = { session, engine, fs, git, pty, layout, attention, settings, files /* C8c */ } satisfies Record<
   Namespace,
   { commands: object; events: object }
 >;
@@ -149,6 +152,32 @@ describe('ipc schema validates both directions', () => {
       for (const name of ['session.digest', 'attention.notified', 'attention.navigate', 'layout.action']) expect(Object.hasOwn(events, name), name).toBe(true);
     });
     // C5 end
+
+    // C8c start: the read-only files.* service over a session's own directories, owned by main.
+    it('carries the C8c files.* entries, every command owned by main, with the read bounds', () => {
+      expect(Object.keys(files.commands).sort()).toEqual(['files.list', 'files.openExternal', 'files.read', 'files.unwatch', 'files.watch']);
+      for (const spec of Object.values(files.commands)) expect(spec.owner).toBe('main');
+      expect(Object.keys(files.events)).toEqual(['files.changed']);
+      const read = (extra: object) => validateCommandInput('files.read', { appSessionId: 'a', path: '/r/a.ts', ...extra }).ok;
+      expect(read({})).toBe(true);
+      expect(read({ offset: 0, length: files.FILES_READ_MAX_LENGTH })).toBe(true);
+      expect(read({ length: files.FILES_READ_MAX_LENGTH + 1 })).toBe(false);
+      expect(read({ length: 0 })).toBe(false);
+      expect(read({ offset: -1 })).toBe(false);
+      expect(read({ offset: 1.5 })).toBe(false);
+      expect(validateCommandInput('files.list', { appSessionId: 'a' }).ok).toBe(true);
+      expect(validateCommandInput('files.list', { appSessionId: 'a', path: '/r', depth: 2 }).ok).toBe(false);
+      expect(validateCommandInput('files.watch', { appSessionId: 'a' }).ok).toBe(false);
+      const out = { encoding: 'utf8', content: 'x', bytes: 1, offset: 0, length: 1, truncated: false, mime: 'text/plain' };
+      expect(validateCommandOutput('files.read', out)).toEqual({ ok: true, value: out });
+      expect(validateCommandOutput('files.read', { ...out, encoding: 'latin1' }).ok).toBe(false);
+      const entry = { name: 'a', path: '/r/a', kind: 'other', size: 0, mtimeMs: 1, target: null };
+      expect(validateCommandOutput('files.list', { root: '/r', path: '/r', entries: [entry], truncated: false }).ok).toBe(true);
+      expect(validateCommandOutput('files.openExternal', { opened: false, message: 'no app' }).ok).toBe(true);
+      expect(validateEventPayload('files.changed', { appSessionId: 'a', path: '/r', kind: 'invalidated' }).ok).toBe(true);
+      expect(validateEventPayload('files.changed', { appSessionId: 'a', path: '/r', kind: 'renamed' }).ok).toBe(false);
+    });
+    // C8c end
 
     it('names channels by kind so a command and an event of the same name never share one', () => {
       expect(commandChannel('engine.hostState')).toBe('maws:cmd:engine.hostState');

@@ -37,8 +37,11 @@ import { createGitRunner } from './git/runner';
 import { claudeConfigDir, PromptHistory } from './history/prompt-history';
 import { ClaudeUsageReader, claudeUsageDir } from './usage/claude-usage-reader';
 // C7 end
-// C10 start (emit comes with C3's imports, createGitRunner with C7's)
+// C8c start (emit comes with C3's imports)
 import { shell } from 'electron';
+import { registerFilesHandlers } from './files/register';
+// C8c end
+// C10 start (emit comes with C3's imports, createGitRunner with C7's, shell with C8c's)
 import { captureShellEnvironment } from '@shared/host/shell-env';
 import { WorktreeService } from './git/worktrees';
 import { registerWorktreeHandlers } from './git/worktrees-register';
@@ -179,6 +182,14 @@ app.whenReady().then(() => {
   );
   app.on('will-quit', () => usage.stop());
   // C7 end
+  // C8c start: files.* over each session's own directories (the allowlist is read from the read model, which C4's index
+  // fills in launch mode index and the stub in scenario); watches are released per window inside the handlers.
+  const filesService = registerFilesHandlers(sessions.model, {
+    emit: (payload) => void emit('files.changed', payload),
+    openPath: (path) => shell.openPath(path),
+  });
+  app.on('will-quit', () => filesService.dispose());
+  // C8c end
   // C10 start: the worktree service (M2): git.worktree.*, every git mutation MAWS makes, with occupancy from holder
   // authority (C3's process table and C4's fresh registry read through the engine host, the index's records).
   const worktrees = new WorktreeService({ git: createGitRunner(), holders: { dispatch: hosts.dispatch, sessions: index.sessions } });

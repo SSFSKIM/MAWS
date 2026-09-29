@@ -1,0 +1,112 @@
+diff --git a/assets/logo.png b/assets/logo.png
+index b437676..d863aa2 100644
+Binary files a/assets/logo.png and b/assets/logo.png differ
+diff --git a/src/big.ts b/src/big.ts
+index 858a0a6..4a55494 100644
+--- a/src/big.ts
++++ b/src/big.ts
+@@ -117,7 +117,7 @@ export const value0116 = { id: 116, label: 'line 116', enabled: true };
+ export const value0117 = { id: 117, label: 'line 117', enabled: false };
+ export const value0118 = { id: 118, label: 'line 118', enabled: true };
+ export const value0119 = { id: 119, label: 'line 119', enabled: false };
+-export const value0120 = { id: 120, label: 'line 120', enabled: true };
++export const value0120 = { id: 120, label: 'line 120', visible: true };
+ export const value0121 = { id: 121, label: 'line 121', enabled: false };
+ export const value0122 = { id: 122, label: 'line 122', enabled: true };
+ export const value0123 = { id: 123, label: 'line 123', enabled: false };
+@@ -607,7 +607,7 @@ export const value0606 = { id: 606, label: 'line 606', enabled: true };
+ export const value0607 = { id: 607, label: 'line 607', enabled: false };
+ export const value0608 = { id: 608, label: 'line 608', enabled: true };
+ export const value0609 = { id: 609, label: 'line 609', enabled: false };
+-export const value0610 = { id: 610, label: 'line 610', enabled: true };
++export const value0610 = { id: 610, label: 'line 610', visible: true };
+ export const value0611 = { id: 611, label: 'line 611', enabled: false };
+ export const value0612 = { id: 612, label: 'line 612', enabled: true };
+ export const value0613 = { id: 613, label: 'line 613', enabled: false };
+@@ -1097,7 +1097,7 @@ export const value1096 = { id: 1096, label: 'line 1096', enabled: true };
+ export const value1097 = { id: 1097, label: 'line 1097', enabled: false };
+ export const value1098 = { id: 1098, label: 'line 1098', enabled: true };
+ export const value1099 = { id: 1099, label: 'line 1099', enabled: false };
+-export const value1100 = { id: 1100, label: 'line 1100', enabled: true };
++export const value1100 = { id: 1100, label: 'line 1100', visible: true };
+ export const value1101 = { id: 1101, label: 'line 1101', enabled: false };
+ export const value1102 = { id: 1102, label: 'line 1102', enabled: true };
+ export const value1103 = { id: 1103, label: 'line 1103', enabled: false };
+@@ -1587,7 +1587,7 @@ export const value1586 = { id: 1586, label: 'line 1586', enabled: true };
+ export const value1587 = { id: 1587, label: 'line 1587', enabled: false };
+ export const value1588 = { id: 1588, label: 'line 1588', enabled: true };
+ export const value1589 = { id: 1589, label: 'line 1589', enabled: false };
+-export const value1590 = { id: 1590, label: 'line 1590', enabled: true };
++export const value1590 = { id: 1590, label: 'line 1590', visible: true };
+ export const value1591 = { id: 1591, label: 'line 1591', enabled: false };
+ export const value1592 = { id: 1592, label: 'line 1592', enabled: true };
+ export const value1593 = { id: 1593, label: 'line 1593', enabled: false };
+@@ -2078,6 +2078,8 @@ export const value2077 = { id: 2077, label: 'line 2077', enabled: false };
+ export const value2078 = { id: 2078, label: 'line 2078', enabled: true };
+ export const value2079 = { id: 2079, label: 'line 2079', enabled: false };
+ export const value2080 = { id: 2080, label: 'line 2080', enabled: true };
++// inserted after line 2080
++export const inserted2080 = true;
+ export const value2081 = { id: 2081, label: 'line 2081', enabled: false };
+ export const value2082 = { id: 2082, label: 'line 2082', enabled: true };
+ export const value2083 = { id: 2083, label: 'line 2083', enabled: false };
+@@ -2567,7 +2569,7 @@ export const value2566 = { id: 2566, label: 'line 2566', enabled: true };
+ export const value2567 = { id: 2567, label: 'line 2567', enabled: false };
+ export const value2568 = { id: 2568, label: 'line 2568', enabled: true };
+ export const value2569 = { id: 2569, label: 'line 2569', enabled: false };
+-export const value2570 = { id: 2570, label: 'line 2570', enabled: true };
++export const value2570 = { id: 2570, label: 'line 2570', visible: true };
+ export const value2571 = { id: 2571, label: 'line 2571', enabled: false };
+ export const value2572 = { id: 2572, label: 'line 2572', enabled: true };
+ export const value2573 = { id: 2573, label: 'line 2573', enabled: false };
+@@ -3057,7 +3059,7 @@ export const value3056 = { id: 3056, label: 'line 3056', enabled: true };
+ export const value3057 = { id: 3057, label: 'line 3057', enabled: false };
+ export const value3058 = { id: 3058, label: 'line 3058', enabled: true };
+ export const value3059 = { id: 3059, label: 'line 3059', enabled: false };
+-export const value3060 = { id: 3060, label: 'line 3060', enabled: true };
++export const value3060 = { id: 3060, label: 'line 3060', visible: true };
+ export const value3061 = { id: 3061, label: 'line 3061', enabled: false };
+ export const value3062 = { id: 3062, label: 'line 3062', enabled: true };
+ export const value3063 = { id: 3063, label: 'line 3063', enabled: false };
+@@ -3547,7 +3549,6 @@ export const value3546 = { id: 3546, label: 'line 3546', enabled: true };
+ export const value3547 = { id: 3547, label: 'line 3547', enabled: false };
+ export const value3548 = { id: 3548, label: 'line 3548', enabled: true };
+ export const value3549 = { id: 3549, label: 'line 3549', enabled: false };
+-export const value3550 = { id: 3550, label: 'line 3550', enabled: true };
+ export const value3551 = { id: 3551, label: 'line 3551', enabled: false };
+ export const value3552 = { id: 3552, label: 'line 3552', enabled: true };
+ export const value3553 = { id: 3553, label: 'line 3553', enabled: false };
+@@ -4037,7 +4038,7 @@ export const value4036 = { id: 4036, label: 'line 4036', enabled: true };
+ export const value4037 = { id: 4037, label: 'line 4037', enabled: false };
+ export const value4038 = { id: 4038, label: 'line 4038', enabled: true };
+ export const value4039 = { id: 4039, label: 'line 4039', enabled: false };
+-export const value4040 = { id: 4040, label: 'line 4040', enabled: true };
++export const value4040 = { id: 4040, label: 'line 4040', visible: true };
+ export const value4041 = { id: 4041, label: 'line 4041', enabled: false };
+ export const value4042 = { id: 4042, label: 'line 4042', enabled: true };
+ export const value4043 = { id: 4043, label: 'line 4043', enabled: false };
+@@ -4527,7 +4528,7 @@ export const value4526 = { id: 4526, label: 'line 4526', enabled: true };
+ export const value4527 = { id: 4527, label: 'line 4527', enabled: false };
+ export const value4528 = { id: 4528, label: 'line 4528', enabled: true };
+ export const value4529 = { id: 4529, label: 'line 4529', enabled: false };
+-export const value4530 = { id: 4530, label: 'line 4530', enabled: true };
++export const value4530 = { id: 4530, label: 'line 4530', visible: true };
+ export const value4531 = { id: 4531, label: 'line 4531', enabled: false };
+ export const value4532 = { id: 4532, label: 'line 4532', enabled: true };
+ export const value4533 = { id: 4533, label: 'line 4533', enabled: false };
+diff --git a/src/helpers.ts b/src/math-helpers.ts
+similarity index 99%
+rename from src/helpers.ts
+rename to src/math-helpers.ts
+index 0728125..da291d8 100644
+--- a/src/helpers.ts
++++ b/src/math-helpers.ts
+@@ -7,7 +7,7 @@ export function helper5(input: number): number { return input * 5; }
+ export function helper6(input: number): number { return input * 6; }
+ export function helper7(input: number): number { return input * 7; }
+ export function helper8(input: number): number { return input * 8; }
+-export function helper9(input: number): number { return input * 9; }
++export function helper9(input: number): number { return input * 90; }
+ export function helper10(input: number): number { return input * 10; }
+ export function helper11(input: number): number { return input * 11; }
+ export function helper12(input: number): number { return input * 12; }

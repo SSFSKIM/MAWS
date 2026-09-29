@@ -25,6 +25,11 @@ import { connectRequestCard } from './request-card';
 import { connectStatusLine } from './statusline';
 import { registerTranscriptActions } from './transcript';
 // C7 end
+// C8c start
+import { connectCodeEvents } from './ipc/events';
+import { codeTranscriptActions, registerCodeTools } from './tools/code';
+import { registerTranscriptActions as registerCodeTranscriptActions } from './transcript';
+// C8c end
 // C10 start
 import { registerSetupIntentHook } from './composer/setup-intent';
 import { connectSessions } from './sessions/connect';
@@ -73,6 +78,15 @@ export function App() {
   useEffect(() => connectComposer(), []); // the composer in C5's composer slot
   useEffect(() => registerTranscriptActions({ editAndResubmit: editAndResubmitRow }), []); // a bubble's Edit prefills the composer in edit mode
   // C7 end
+  // C8c start: Review, Files, the file viewer and the diff tab, registered once and never unregistered, as C8a's block
+  // does (a registration's disposer closes the tool's tabs); main's files.changed; and the transcript's two callbacks
+  // (K3), registered after C6's `connectTranscript` so they win over its file-tab default.
+  useEffect(() => {
+    registerCodeTools();
+  }, []);
+  useEffect(() => connectCodeEvents(), []);
+  useEffect(() => registerCodeTranscriptActions(codeTranscriptActions), []);
+  // C8c end
   // C10 start: the setup store and C5's tab retention at once (before hydration's snapshots answer); in launch mode
   // `index`, the newSession slot, the session creator, the close guard, the unstarted title and the session actions
   useEffect(() => connectSessions(), []);
