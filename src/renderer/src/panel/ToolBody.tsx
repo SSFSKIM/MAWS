@@ -1,0 +1,38 @@
+// The selected tab's body (C8a execution document, M1): the instance's `render` with a context built for this render
+// from the host's props and stores, or the placeholder of a tool that is not registered. Only the selected tab is
+// mounted; a tool keeps whatever view state it would miss (a scroll offset) in its state and restores it on mount.
+import type { AppSessionId } from '@shared/graph/ids';
+import type { PanelTabRef } from '@shared/ipc/schema/layout';
+import { useLayout } from '../stores/layout';
+import { useSessions } from '../stores/sessions';
+import { arrivesWith } from './copy';
+import { instanceOf, panelHost, setTitle, usePanelHost } from './host';
+import type { PanelToolContext } from './tool';
+
+export function ToolBody({ tab, appSessionId }: { tab: PanelTabRef; appSessionId: AppSessionId | null }) {
+  // The instance map is module state; `version` makes this read reactive.
+  const instance = usePanelHost((s) => (s.version >= 0 ? instanceOf(tab.id) : undefined));
+  const registered = usePanelHost((s) => s.tools.has(tab.toolId));
+  const focusRequest = usePanelHost((s) => s.focus[tab.id] ?? 0);
+  const collapsed = useLayout((s) => s.regions.panel.collapsed);
+  const session = useSessions((s) => (appSessionId ? (s.records.get(appSessionId) ?? null) : null));
+  const status = useSessions((s) => (appSessionId ? (s.engine.get(appSessionId) ?? null) : null));
+
+  if (!instance) {
+    // A registered tool's instance is created before paint (PanelHost's layout effect); a placeholder has none.
+    return registered ? null : <p className="flex h-full items-center justify-center p-4 text-center text-ui text-fg-muted">{arrivesWith(tab.toolId)}</p>;
+  }
+  const ctx: PanelToolContext = {
+    appSessionId,
+    session,
+    status,
+    pinned: tab.pinned,
+    visible: !collapsed,
+    focusRequest,
+    setTitle: (suffix) => setTitle(tab.id, suffix),
+    close: () => void panelHost.closeTab(tab.id),
+    openTool: panelHost.addTool,
+  };
+  const Render = instance.tool.render;
+  return <Render state={instance.state} ctx={ctx} />;
+}
