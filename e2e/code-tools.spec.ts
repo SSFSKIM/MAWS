@@ -427,8 +427,9 @@ function flashedLine(page: Page): Promise<{ text: string; at: number; atTop: boo
 
 // Landed: the line flashed and centred, in the viewport's middle third, or as near it as the document allows (a line
 // in the first or last half-screen cannot reach the middle: the scroller then rests at that end with the line in view).
-async function expectLandedOn(page: Page, text: string): Promise<void> {
-  await expect.poll(async () => (await flashedLine(page))?.text, { timeout: 2_000, message: `the flashed line reads ${text}` }).toBe(text);
+// `within` is a case's own time bound, where its acceptance sets one; otherwise the default expect timeout.
+async function expectLandedOn(page: Page, text: string, within?: number): Promise<void> {
+  await expect.poll(async () => (await flashedLine(page))?.text, { ...(within === undefined ? {} : { timeout: within }), message: `the flashed line reads ${text}` }).toBe(text);
   const { at, atTop, atBottom } = (await flashedLine(page))!;
   expect(at, 'in view').toBeGreaterThan(0);
   expect(at, 'in view').toBeLessThan(1);
@@ -647,7 +648,7 @@ test.describe('the product in stub mode over a scratch repository', () => {
         const started = Date.now();
         await review.locator('[data-open-file]').click(); // openFile(A, src/generated.ts, 30000)
         const viewer = p.page.locator(`[data-file-viewer][data-path="${p.scratch.path('src/generated.ts')}"]`);
-        await expectLandedOn(p.page, marker);
+        await expectLandedOn(p.page, marker, 2_000);
         await expect(notice(viewer)).toHaveCount(0, { timeout: Math.max(1, 2_000 - (Date.now() - started)) });
         test.info().annotations.push({ type: 'generated.ts complete after', description: `${Date.now() - started} ms` });
         const seen = await notices();
@@ -713,10 +714,12 @@ test.describe('the product in stub mode over a scratch repository', () => {
       const review = await openReview(p);
       const staged = review.locator('[data-chip="staged"]');
       await expect(staged).toBeVisible();
-      const started = Date.now();
       p.scratch.git('reset', '--quiet');
-      await expect(staged).toHaveCount(0, { timeout: 5_000 });
-      test.info().annotations.push({ type: 'Staged gone after git reset', description: `${Date.now() - started} ms` });
+      const reset = Date.now();
+      await expect.poll(() => staged.count(), { timeout: 5_000, intervals: [25] }).toBe(0);
+      const gone = Date.now() - reset;
+      test.info().annotations.push({ type: 'Staged gone after git reset', description: `${gone} ms` });
+      expect(gone, 'Staged gone within a second of the reset').toBeLessThanOrEqual(1_000);
       await expect(review.locator('[data-review-header]')).toHaveText('5 files changed · +3 −0 · Uncommitted');
       await expect(review.locator('[role="option"] button[data-path="src/staged.ts"]')).toHaveAttribute('data-kind', 'untracked');
     });
@@ -754,6 +757,7 @@ test.describe('the product in stub mode over a scratch repository', () => {
         return el.scrollTop;
       });
       test.info().annotations.push({ type: 'diff body offset before the change', description: `${offset} px` });
+      expect(offset, 'the diff body scrolled, so keeping the offset means something').toBeGreaterThan(0);
       writeFileSync(p.scratch.path('README.md'), `${readFileSync(p.scratch.path('README.md'), 'utf8')}One more line.\n`);
       await expect(review.locator('[role="option"] button[data-path="README.md"]')).toBeVisible({ timeout: 5_000 });
       await expect(review.locator('[role="option"][aria-selected="true"] button[data-path="src/app.ts"]')).toBeVisible();
@@ -773,11 +777,14 @@ test.describe('the product in stub mode over a scratch repository', () => {
         el.scrollTop = Math.min(40, el.scrollHeight - el.clientHeight);
         return el.scrollTop;
       });
+      expect(offset, 'the code view scrolled, so keeping the offset means something').toBeGreaterThan(0);
       const path = p.scratch.path('src/app.ts');
       const started = Date.now();
       writeFileSync(path, `// a new first line\n${readFileSync(path, 'utf8')}`);
-      await expect.poll(async () => viewer.locator('.cm-content').textContent(), { timeout: 5_000 }).toContain('// a new first line');
-      test.info().annotations.push({ type: 'viewer updated after', description: `${Date.now() - started} ms` });
+      await expect.poll(async () => viewer.locator('.cm-content').textContent(), { timeout: 5_000, intervals: [25] }).toContain('// a new first line');
+      const updated = Date.now() - started;
+      test.info().annotations.push({ type: 'viewer updated after', description: `${updated} ms` });
+      expect(updated, 'the viewer updated within a second of the write').toBeLessThanOrEqual(1_000);
       expect(await scroller.evaluate((el) => el.scrollTop), 'the scroll is kept').toBe(offset);
     });
   });
