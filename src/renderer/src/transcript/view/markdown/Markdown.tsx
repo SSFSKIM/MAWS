@@ -12,7 +12,12 @@ import { holdBackTable } from './streaming';
 const PLUGINS = { code, math };
 const PLUGINS_WITH_DIAGRAMS = { code, math, renderers: [{ language: 'mermaid', component: MermaidFence }] };
 
-export function Markdown({ markdown: text, live }: { markdown: string; live: boolean }) {
+export interface MarkdownProps {
+  markdown: string;
+  live: boolean;
+}
+
+export function Markdown({ markdown: text, live }: MarkdownProps) {
   const markdown = useMemo(() => (live ? holdBackTable(text) : text), [text, live]);
   const fences = useMemo(() => mermaidFences(markdown), [markdown]);
   useMermaidLoader(fences.closed);

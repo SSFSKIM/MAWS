@@ -9,7 +9,13 @@ import { ipcRewind, ipcSource } from '../source/ipc';
 import { useRegisteredActions, useRegisteredRequestRenderer } from './registry';
 import { Transcript } from './Transcript';
 
-export function TranscriptSlot({ appSessionId, agentId, className }: { appSessionId: AppSessionId; agentId?: AgentId; className?: string }) {
+export interface TranscriptSlotProps {
+  appSessionId: AppSessionId;
+  agentId?: AgentId;
+  className?: string;
+}
+
+export function TranscriptSlot({ appSessionId, agentId, className }: TranscriptSlotProps) {
   const actions = useRegisteredActions();
   const renderRequest = useRegisteredRequestRenderer(); // C7's card; the placeholder until it registers
   const source = ipcSource(appSessionId, agentId); // memoised per key

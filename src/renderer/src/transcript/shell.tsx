@@ -12,7 +12,7 @@ import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
 import { useTranscriptStore } from '../stores/transcript';
 import { ipcSource } from './source/ipc';
-import { TranscriptSlot } from './view/TranscriptSlot';
+import { TranscriptSlot } from './lazy';
 import { registerTranscriptActions } from './view/registry';
 
 // C5's liveness rule, as its digest carries it: main's read model moves a session's phase only while C3's process table
