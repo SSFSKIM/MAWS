@@ -125,7 +125,8 @@ describe('handoff recovery', () => {
     it('after the answer, before progress.send', async () => {
       h.hangPut = (intent) => intent.progress.send !== null;
       await start();
-      await h.until(() => (h.host.disk.queues.get(id) ?? []).length > 0);
+      await h.until(() => h.gateReached); // the run is held at the write of progress.send: C3 has answered
+      expect((h.host.disk.queues.get(id) ?? []).length).toBeGreaterThan(0);
       await bound();
       const pin = pinOf();
       expect(intentFile(h, id)!.progress.send).toBeNull();
@@ -138,7 +139,8 @@ describe('handoff recovery', () => {
     it('after progress.send, before the intent is removed', async () => {
       h.hangRemove = true;
       await start();
-      await h.until(() => intentFile(h, id)?.progress.send != null);
+      await h.until(() => h.gateReached); // the run is held at the intent's removal, progress.send on disk
+      expect(intentFile(h, id)!.progress.send).not.toBeNull();
       await bound();
       const pin = pinOf();
       const transcript = transcriptOf(pin);

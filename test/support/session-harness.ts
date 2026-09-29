@@ -42,9 +42,26 @@ export class SessionHarness {
   readonly events: { name: string; payload: unknown }[] = [];
   readonly trashed: string[] = [];
   trashFails: ((path: string) => string | null) | null = null;
-  // A crash point: a write the gate matches never completes (the app died before it landed).
-  hangPut: ((intent: SetupIntent) => boolean) | null = null;
-  hangRemove = false;
+  // A crash point: a write the gate matches never completes (the app died before it landed). The gate belongs to one
+  // boot's intent store: after `restart()` the old run stays hung at it for good (a dead app writes nothing more), and
+  // the new boot starts with an open gate. `gateReached` says the old run got there, which is the crash point itself;
+  // the intent file on disk is not, because a rename is visible before the writer's continuation runs.
+  private gate = new CrashGate();
+  get hangPut(): CrashGate['hangPut'] {
+    return this.gate.hangPut;
+  }
+  set hangPut(match: CrashGate['hangPut']) {
+    this.gate.hangPut = match;
+  }
+  get hangRemove(): boolean {
+    return this.gate.hangRemove;
+  }
+  set hangRemove(hang: boolean) {
+    this.gate.hangRemove = hang;
+  }
+  get gateReached(): boolean {
+    return this.gate.reached;
+  }
   host: FakeEngineHost;
   service!: SessionService;
   worktrees!: WorktreeService; // the instance the service holds (a test may wrap its methods)
@@ -73,7 +90,7 @@ export class SessionHarness {
       host: { dispatch: this.host.dispatch, onEvent: this.host.onEvent },
       git,
       worktrees,
-      intents: this.gatedIntents(new FileIntentStore(join(this.userData, 'sessions', 'intents'))),
+      intents: gatedIntents(new FileIntentStore(join(this.userData, 'sessions', 'intents')), this.gate),
       bootstraps: new BootstrapNotes(join(this.userData, 'sessions', 'bootstraps')),
       userData: this.userData,
       env: this.env,
@@ -92,14 +109,6 @@ export class SessionHarness {
     });
   }
 
-  private gatedIntents(store: FileIntentStore): FileIntentStore {
-    const put = store.put.bind(store);
-    const remove = store.remove.bind(store);
-    store.put = (intent) => (this.hangPut?.(intent) ? new Promise(() => {}) : put(intent));
-    store.remove = (id) => (this.hangRemove ? new Promise(() => {}) : remove(id));
-    return store;
-  }
-
   private record<N extends EventName>(name: N, payload: EventPayload<N>): boolean {
     this.events.push({ name, payload });
     return true;
@@ -112,8 +121,7 @@ export class SessionHarness {
 
   // The app quits and starts again: nothing it ran survives but the disk.
   async restart(): Promise<void> {
-    this.hangPut = null;
-    this.hangRemove = false;
+    this.gate = new CrashGate(); // the old store keeps its own, still closed
     this.service.dispose();
     this.stopSource();
     this.host = this.host.afterRestart();
@@ -176,3 +184,22 @@ export class SessionHarness {
 }
 
 export const idOf = (s: string) => s as AppSessionId;
+
+// One boot's crash point: a matching `put`, or any `remove`, never completes; `reached` once one was held there.
+class CrashGate {
+  hangPut: ((intent: SetupIntent) => boolean) | null = null;
+  hangRemove = false;
+  reached = false;
+}
+
+function gatedIntents(store: FileIntentStore, gate: CrashGate): FileIntentStore {
+  const put = store.put.bind(store);
+  const remove = store.remove.bind(store);
+  const hold = () => {
+    gate.reached = true;
+    return new Promise<never>(() => {});
+  };
+  store.put = (intent) => (gate.hangPut?.(intent) ? hold() : put(intent));
+  store.remove = (id) => (gate.hangRemove ? hold() : remove(id));
+  return store;
+}
