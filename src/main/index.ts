@@ -37,6 +37,10 @@ import { createGitRunner } from './git/runner';
 import { claudeConfigDir, PromptHistory } from './history/prompt-history';
 import { ClaudeUsageReader, claudeUsageDir } from './usage/claude-usage-reader';
 // C7 end
+// C8c start (emit comes with C3's imports)
+import { shell } from 'electron';
+import { registerFilesHandlers } from './files/register';
+// C8c end
 
 // A fresh profile for the end-to-end smoke (and anyone else who wants one); must be set before the app is ready.
 if (process.env.MAWS_USER_DATA) app.setPath('userData', process.env.MAWS_USER_DATA);
@@ -165,6 +169,14 @@ app.whenReady().then(() => {
   );
   app.on('will-quit', () => usage.stop());
   // C7 end
+  // C8c start: files.* over each session's own directories (the allowlist is read from the read model, which C4's index
+  // fills in launch mode index and the stub in scenario); watches are released per window inside the handlers.
+  const filesService = registerFilesHandlers(sessions.model, {
+    emit: (payload) => void emit('files.changed', payload),
+    openPath: (path) => shell.openPath(path),
+  });
+  app.on('will-quit', () => filesService.dispose());
+  // C8c end
 
   // The hosts belong to the app, not to a window or a page (§4.1): they start here, before any window exists, and
   // `start()` is idempotent, so opening a window again forks nothing and a reload never reaches them.

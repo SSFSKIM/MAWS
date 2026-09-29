@@ -5,9 +5,21 @@ import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'electron-vite';
 import type { Rollup } from 'vite';
+// C8c start
+import { createRequire } from 'node:module';
+// C8c end
 
 const alias = { '@shared': resolve(__dirname, 'src/shared') };
 const { version } = JSON.parse(readFileSync(resolve(__dirname, 'package.json'), 'utf8')) as { version: string };
+
+// C8c start: `lowlight` aliased to a grammar-less build (ruled 2026-09-29, the C8c document's M1 fold (2)): the diff
+// view's core would otherwise ship every highlight.js grammar, unused since Review highlights through shiki. The shim
+// takes lowlight's engine through `lowlight-engine`, its `lib/index.js`, which the package's exports do not name.
+Object.assign(alias, {
+  lowlight: resolve(__dirname, 'src/renderer/src/tools/code/review/lowlight-no-grammars.mjs'),
+  'lowlight-engine': resolve(createRequire(__filename).resolve('lowlight'), '../lib/index.js'),
+});
+// C8c end
 
 // zod 4.6.5's sources carry explanatory comments beside `@__PURE__` annotations that Rollup reports as
 // INVALID_ANNOTATION on every bundle that includes zod (the preload and the renderer). Harmless; dropped so a real

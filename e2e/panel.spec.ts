@@ -453,7 +453,8 @@ test.describe('the #panel harness: strip, summary, R7 and themes', () => {
 
     await panel.region.getByRole('button', { name: 'Add a tool' }).click();
     // §5.6's order for the registered menu tools (Log and the harness's child transcript are `menu: false`).
-    await expect(panel.page.getByRole('menuitem')).toHaveText(['Terminal', 'Session info', 'Stub']);
+    // C8c (a C8a test amended by C8c): the page registers C8c's Review and Files, as App.tsx does.
+    await expect(panel.page.getByRole('menuitem')).toHaveText(['Review', 'Terminal', 'Files', 'Session info', 'Stub']);
     await panel.page.getByRole('menuitem', { name: 'Terminal' }).click();
     const terminal = (await panel.tabs()).find((tab) => tab.toolId === 'terminal');
     expect(terminal?.id).toMatch(/^terminal:[0-9a-z]{8}$/);
@@ -589,7 +590,8 @@ test.describe('the #panel harness: strip, summary, R7 and themes', () => {
 
       await test.step('every row opens its tool or names the child that brings it', async () => {
         const environment = panel.section('Environment');
-        await expect(environment.getByRole('button', { name: 'Arrives with C8c' }), 'Review is C8c’s').toBeDisabled();
+        // C8c (a C8a test amended by C8c): Review is registered now, so its row opens it.
+        await expect(environment.getByRole('button', { name: 'Review', exact: true }), 'Review is C8c’s').toBeEnabled();
         await expect(panel.section('Subagents').getByRole('button', { name: 'Arrives with C8b' })).toBeDisabled();
         await expect(panel.section('Background work').getByRole('button', { name: 'Arrives with C8b' })).toBeDisabled();
 
@@ -732,9 +734,10 @@ test.describe('the #panel harness: strip, summary, R7 and themes', () => {
     await withRepository(async (repo) => {
       const { page } = maws;
       // A placeholder tab (a ref whose tool is not registered) in B's list, written before the page hydrates it.
+      // C8c (a C8a test amended by C8c): C8b's Subagents, since Review is registered now.
       await page.waitForFunction(() => (window as unknown as { maws?: unknown }).maws !== undefined);
       await page.evaluate(async () => {
-        const value = { tabs: [{ id: 'review:placeholder', toolId: 'review', pinned: false }], activeTabId: null };
+        const value = { tabs: [{ id: 'subagents:placeholder', toolId: 'subagents', pinned: false }], activeTabId: null };
         const result = await window.maws.invoke('layout.set', { key: 'panel.B', value });
         if (!result.ok) throw new Error(result.error.message);
       });
@@ -781,8 +784,8 @@ test.describe('the #panel harness: strip, summary, R7 and themes', () => {
             'a placeholder tab',
             async () => {
               await panel.call('switchSession', 'B');
-              await panel.tab('review:placeholder').getByRole('tab').click();
-              await expect(panel.region.getByRole('tabpanel')).toHaveText('Arrives with C8c');
+              await panel.tab('subagents:placeholder').getByRole('tab').click();
+              await expect(panel.region.getByRole('tabpanel')).toHaveText('Arrives with C8b');
             },
           ],
         ];
@@ -948,16 +951,17 @@ test.describe('the product host over a scenario derived from C5’s records', ()
       const environment = summary.getByRole('region', { name: 'Environment' });
       await expect(environment).toContainText('⎇ main');
       // C9's Terminal is registered from App.tsx (C8a's block, since C9 merged); every other P0 tool arrives with its child.
-      await expect(environment.getByRole('button', { name: 'Arrives with C8c' }), 'Review').toBeDisabled();
+      // C8c (a C8a test amended by C8c): C8c's Review and Files are registered from App.tsx too.
+      await expect(environment.getByRole('button', { name: 'Review', exact: true }), 'Review').toBeEnabled();
       await expect(environment.getByRole('button', { name: 'Arrives with C11' }), 'the model row').toBeDisabled();
       await expect(summary.getByRole('region', { name: 'Subagents' }).getByRole('button', { name: 'Arrives with C8b' })).toBeDisabled();
       await expect(summary.getByRole('region', { name: 'Background work' }).getByRole('button', { name: 'Arrives with C8b' })).toBeDisabled();
       const disabled = await summary.locator('button:disabled').allTextContents();
-      expect(disabled).toHaveLength(4);
-      for (const text of disabled) expect(text).toMatch(/^Arrives with (C8b|C8c|C9|C11)$/);
+      expect(disabled).toHaveLength(3);
+      for (const text of disabled) expect(text).toMatch(/^Arrives with (C8b|C9|C11)$/);
 
       await panel.getByRole('button', { name: 'Add a tool' }).click();
-      await expect(page.getByRole('menuitem'), '"+" offers the registered tools only').toHaveText(['Terminal']);
+      await expect(page.getByRole('menuitem'), '"+" offers the registered tools only').toHaveText(['Review', 'Terminal', 'Files']);
       await page.keyboard.press('Escape');
       expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
     });
