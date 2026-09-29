@@ -616,7 +616,7 @@ test('floods without loss while the page stays responsive', async ({ maws }) => 
   });
 });
 
-test.skip("keeps Enter and Escape from the app's request handlers", { annotation: { type: 'skip', description: 'runs after the rebase over C5' } }, async ({ maws }) => {
+test("keeps Enter and Escape from the app's request handlers", async ({ maws }) => {
   const h = await harnessOf(maws);
   const { page } = maws;
   const counts = () => h.call<{ accept: number; decline: number; tabNext: number }>('keys', 'counts');

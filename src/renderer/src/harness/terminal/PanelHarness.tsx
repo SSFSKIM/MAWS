@@ -7,6 +7,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { create } from 'zustand';
 import type { AppSessionId } from '@shared/graph/ids';
+import { registerAction } from '../../keymap/actions-runtime';
+import { connectKeys } from '../../keymap/dispatcher';
+import { useKeyChord } from '../../keymap/useKeyChord';
 import { mountPanelHost, panelHost, registerPanelTool, type AddToolOptions } from '../../panel/host';
 import type { PanelToolContext } from '../../panel/tool';
 import { useSettings } from '../../stores/settings';
@@ -37,7 +40,7 @@ import { useHarnessTheme } from './useHarnessTheme';
 registerPanelTool(terminalTool);
 
 // The fake docked card's counters: what C5's dispatcher delivered to the card's `request.accept` and
-// `request.decline` handlers and to the page's `tab.next` handler. They stay at zero until the dispatcher is mounted.
+// `request.decline` handlers, and what reached the page's `tab.next` action (the terminal forwards ⌃Tab to it).
 export interface KeyCounts {
   accept: number;
   decline: number;
@@ -138,8 +141,15 @@ export function PanelHarness() {
     window.__maws_harness = { page: 'panel', panel: panelApi, terminals: terminalsApi, keys: { counts: () => ({ ...useKeys.getState() }) }, openTerminal };
     window.openTerminal = openTerminal;
     const unmount = mountPanelHost(panelHostImplementation);
+    // C5's key dispatcher, as the app mounts it, and the page's `tab.next` action in place of the shell's tab cycle.
+    const disconnectKeys = connectKeys();
+    const offTabNext = registerAction('tab.next', () => countKey('tabNext'));
     void ready();
-    return unmount;
+    return () => {
+      offTabNext();
+      disconnectKeys();
+      unmount();
+    };
   }, []);
 
   return (
@@ -160,11 +170,11 @@ function Header() {
   const setTheme = useSettings((s) => s.setTheme);
   const pings = useSamples((s) => s.pings);
   const keys = useKeys();
-  // C5's dispatcher mounts on this page after the rebase over C5 (wave-2 ledger, keymap dispatcher row): the card's
-  // `useKeyChord('request.accept' | 'request.decline', () => countKey('accept' | 'decline'), { within: card })` and a
-  // `tab.next` handler calling `countKey('tabNext')`. Until then nothing counts, and the end-to-end test that reads
-  // these counters is skipped by name.
+  // The stand-in for a pending request docked beside the terminal: it answers Enter and Escape only while it holds
+  // focus (C5's focused-pane rule), which is what the terminal's Enter must never reach.
   const card = useRef<HTMLDivElement>(null);
+  useKeyChord('request.accept', () => countKey('accept'), { within: card });
+  useKeyChord('request.decline', () => countKey('decline'), { within: card });
   return (
     <header className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-border bg-bg-raised px-3 py-2 text-ui-sm">
       <span className="font-mono text-fg-faint">#panel</span>

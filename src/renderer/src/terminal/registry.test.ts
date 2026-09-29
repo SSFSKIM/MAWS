@@ -4,6 +4,8 @@
 import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandName, EventName, EventPayload, HostState, MawsBridge, PtyAttach, PtyId, PtyInfo } from '@shared/ipc/schema';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { connectKeys } from '../keymap/dispatcher';
+import { bindChord } from '../keymap/useKeyChord';
 import { FakeRenderer } from './renderer.fake';
 import type { TerminalTheme } from './renderer';
 import { TerminalRegistry } from './registry';
@@ -663,6 +665,44 @@ describe('terminal key filter', () => {
     expect(renderer.key('keydown', { key: 'Enter', code: 'Enter' })).toBe(true);
     expect(renderer.key('keydown', { key: 'k', code: 'KeyK', metaKey: true })).toBe(false);
     expect(runAction).toHaveBeenCalledTimes(2);
+  });
+});
+
+// The marker contract with C5's dispatcher (wave-2 ledger, keymap dispatcher row), isolated from the dispatcher's other
+// refusals: the terminal sits inside the element a pane-scoped binding answers for (a docked card's pane, or a panel
+// that hosts both), and the key comes from a focused element that is neither text entry nor a button, so only the
+// container's `data-key-sink` stands between a shell's Enter and the request's accept.
+describe('terminal key-sink marker', () => {
+  it('keeps Enter and Escape inside a terminal from a pane-scoped binding around it', async () => {
+    const registry = makeRegistry();
+    const pane = parent();
+    const id = registry.open({ appSessionId: A, label: 't1', cwd: '/tmp/a' });
+    registry.mount(id, pane);
+    await settle();
+    const focusable = registry.get(id)!.renderer!.element;
+    focusable.tabIndex = 0;
+    const fired: string[] = [];
+    const within = { current: pane };
+    const offs = [
+      bindChord({ id: 'request.accept', within, run: () => fired.push('accept') }),
+      bindChord({ id: 'request.decline', within, run: () => fired.push('decline') }),
+      connectKeys(window, () => ({})),
+    ];
+    const press = (key: string) => {
+      focusable.focus();
+      focusable.dispatchEvent(new KeyboardEvent('keydown', { key, code: key, bubbles: true, cancelable: true }));
+    };
+    try {
+      press('Enter');
+      press('Escape');
+      expect(fired).toEqual([]);
+      // Control: the same element without the marker is the binding's, so the marker is what refused above.
+      delete registry.get(id)!.container.dataset.keySink;
+      press('Enter');
+      expect(fired).toEqual(['accept']);
+    } finally {
+      offs.forEach((off) => off());
+    }
   });
 });
 
