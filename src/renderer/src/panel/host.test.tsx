@@ -216,6 +216,17 @@ describe('panel host registry and instances', () => {
     act(() => useLayout.getState().setPanel({ collapsed: false }));
     expect(screen.getByTestId(`body:${first}`).textContent).toMatch(/visible · focus 3$/);
   });
+
+  it('connected after hydration (an HMR reload of the module), captures the restored Log set, once', () => {
+    register(probeTool('log', { pinnable: false }).tool, probeTool('t').tool);
+    useLayout.setState({ panelBySession: new Map([[A, { tabs: [ref('log:aaaaaaaa'), ref('t:aaaaaaaa')], activeTabId: null }]]) });
+    connect();
+    expect([...restoredLogIds()]).toEqual(['log:aaaaaaaa']);
+    cleanups.pop()!();
+    act(() => void panelHost.addTool('log', { appSessionId: A, activate: false })); // opened in this launch
+    connect();
+    expect([...restoredLogIds()]).toEqual(['log:aaaaaaaa']);
+  });
 });
 
 describe('panel host transitions', () => {

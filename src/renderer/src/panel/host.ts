@@ -67,6 +67,7 @@ const instances = new Map<string, Instance>();
 const registrations = new Map<string, symbol>(); // the current registration of each tool id
 let pending: PendingAdd[] = [];
 let restoredLogs = new Set<string>();
+let barrierPassed = false; // the barrier runs once per module lifetime (an HMR reload of this file starts again)
 let mounted: Pick<PanelHostProps, 'appSessionId' | 'onChange' | 'onTogglePinned'> | null = null;
 
 const LOG_TOOL = 'log';
@@ -342,6 +343,7 @@ function addTool<P>(toolId: string, opts: AddToolOptions<P>): string {
 // ---- the barrier -------------------------------------------------------------------------------------------------------
 
 function passBarrier(): void {
+  barrierPassed = true;
   const l = layout();
   const restored = new Set(allRefs(l).map((t) => t.id));
   restoredLogs = new Set(allRefs(l).flatMap((t) => (t.toolId === LOG_TOOL ? [t.id] : [])));
@@ -382,7 +384,9 @@ export function connectPanelHost(): () => void {
       if (selected !== null) requestFocus(selected);
     }
   });
-  if (layout().hydrated && pending.length > 0) passBarrier();
+  // Connected after hydration (an HMR reload of this module): the barrier runs now, once, so the restored-Log set is
+  // captured and anything pending lands.
+  if (layout().hydrated && !barrierPassed) passBarrier();
   return off;
 }
 
@@ -515,6 +519,7 @@ export function resetPanelHost(): void {
   registrations.clear();
   pending = [];
   restoredLogs = new Set();
+  barrierPassed = false;
   mounted = null;
   usePanelHost.setState(initialState());
 }
