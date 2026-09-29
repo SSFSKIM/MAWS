@@ -898,6 +898,8 @@ If `pnpm dev:harness` shows fixtures missing: the renderer's `server.fs.allow` m
   Date/Author: 2026-09-28, C6 controller.
 - Decision: Whole-branch fix round 2 re-review (opus stand-in): the staging fix is resolved; the interrupt-evidence rule did not hold for C4's disk output because the marker record gets its own `turn.started` before its `user.message`, so the interrupted turn closed as `completed` before the marker was retained and the marker rendered as a bubble in its own turn. Round 3 fixes on C6: a turn whose only message is an interrupt marker folds back onto the turn before it (closure `stopped`, the marker's turn removed), and derive never renders a marker as a user row; a `jumpTo` requested during a staged restart is carried across the install. Ask of C4 sent up: tag the record `interrupt-marker` and emit no `turn.started` for it, as the spec asks of C3.
   Date/Author: 2026-09-28, C6 controller.
+- Decision: Whole-branch review closed "correct" at 2edeb45 after three fix rounds (six, two and two findings; opus stand-in for reviewer-medium, gateway rate limited). One P3 stays open and lands in the rebase task: a jump the view handled during a staged restart is undone by the install (the installed `ui` is the one taken at attach), so the last jump requested while staging is re-resolved at install or its expansions are laid onto the staged `ui`. The reviewer also confirmed the fold's behaviour under C4's `turn_duration`-after-marker (7 of 144) and before-marker (28) orders, the untouched live C3 path, and the message-first order (whose bare "Working" divider at session end is the recorded residue plus the C4 ask).
+  Date/Author: 2026-09-28, C6 controller.
 
 ## Outcomes & Retrospective
 
