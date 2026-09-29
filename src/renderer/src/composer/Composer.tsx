@@ -20,6 +20,7 @@ import { RequestCard } from '../request-card/RequestCard';
 import { nextMode } from '../statusline';
 import { useAttention, selectPendingOf } from '../stores/attention';
 import { isStarting, memoryTargetOf, registerFocusTarget, setEditing, setStarting, useComposerStore } from '../stores/composer';
+import { toast } from '../stores/notices';
 import { useSessionQueue } from '../stores/queue';
 import { useSessions } from '../stores/sessions';
 import { useDockedCards } from './docked/registry';
@@ -228,7 +229,10 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
     });
   const onPrimary = () => {
     if (decision.primary === 'stop') return interrupt();
-    if (decision.primary === 'resume') return void client.invoke('session.queue.setPaused', { appSessionId, paused: false });
+    if (decision.primary === 'resume')
+      return void client.invoke('session.queue.setPaused', { appSessionId, paused: false }).then((result) => {
+        if (!result.ok) toast({ level: 'warning', text: result.error.message, actions: [], dismissible: true }); // as the queued list does
+      });
     handle.current?.submit(decision.primary === 'steer' ? 'steer' : 'send');
   };
 

@@ -169,6 +169,19 @@ describe("composer DOM under C5's dispatcher", () => {
     expect(within(composerOf(0)).getByRole('button', { name: 'Stop' })).toBeTruthy(); // Stop beside it
   });
 
+  it('resumes a paused queue from the control, and says so when the host refuses', async () => {
+    live(A);
+    mount([{ index: 0, id: A }]);
+    await waitFor(() => expect(fake.pending('session.queue.list')).toBe(0));
+    const queued: QueueEntry = { queueId: 'q-1', appSessionId: A, content: 'later', createdAt: '2026-09-29T10:00:00.000Z', state: 'queued', messageUuid: null, submittedAt: null, uncertain: false, steer: false };
+    act(() => fake.event('session.queue', { appSessionId: A, entries: [queued], paused: true, pauseReason: 'interrupt' }));
+    await waitFor(() => expect(primary().textContent).toBe('Resume'));
+    await userEvent.setup().click(primary());
+    await waitFor(() => expect(fake.pending('session.queue.setPaused')).toBe(1));
+    await fake.fail('session.queue.setPaused', 'the queue store is unavailable');
+    await waitFor(() => expect(useNotices.getState().notices.map((n) => n.text)).toEqual(['the queue store is unavailable']));
+  });
+
   it('keeps Enter in the editor from any request.accept handler, and ⌘Enter sends only from the editor', async () => {
     live(A);
     const accepted = vi.fn();
