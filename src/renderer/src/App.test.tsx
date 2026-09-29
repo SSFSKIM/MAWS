@@ -7,6 +7,23 @@ const HOSTS: Record<'engine.hostState' | 'pty.hostState', HostState> = {
   'pty.hostState': { state: 'ready', pid: 2222, restarts: 0, revision: 1 },
 };
 
+const GIT_STATUS = {
+  repoRoot: '/private/tmp/maws-accept',
+  gitDir: '/private/tmp/maws-accept/.git',
+  commonDir: '/private/tmp/maws-accept/.git',
+  isWorktree: false,
+  branch: 'main',
+  head: 'abcdef0123456789abcdef0123456789abcdef01',
+  upstream: 'origin/main',
+  remoteUrl: null,
+  ahead: 1,
+  behind: 0,
+  dirty: true,
+  files: [{ path: 'src/a.ts', oldPath: null, index: '.', worktree: 'M', untracked: false }],
+  stashCount: 0,
+  checkedAt: '2026-09-28T10:00:00.000Z',
+};
+
 // The page against a fake `window.maws` that behaves like main: `settings.set` answers the new state and emits
 // `settings.changed` first, as the router does; both hosts are ready; the PTY host answers a write to its shell with
 // the terminal's echo of the line and then the command's output.
@@ -44,6 +61,10 @@ function fakeMain(initial: SettingsState['settings']['theme']) {
         return { projects: [{ id: 'p1', name: 'maws-accept', directory: '/private/tmp/maws-accept', order: 0, createdAt: '2026-09-28T10:00:00.000Z' }], revision: 1 };
       case 'session.replay.fixtures':
         return { fixtures: [{ id: 'f1', name: 'workflow', kind: 'journal', path: '/repo/spikes/protocol-probe/fixtures/pass2/workflow.jsonl', sessionId: null, addedAt: '2026-09-28T10:00:00.000Z', lastPlayedAt: null }] };
+      case 'git.watch':
+        return GIT_STATUS;
+      case 'git.unwatch':
+        return undefined;
       case 'pty.spawn':
         return { ptyId: 'p1', pid: 3333 };
       case 'pty.write':
@@ -187,12 +208,25 @@ describe('store section of the diagnostics strip', () => {
       await new Promise((resolve) => setTimeout(resolve, 60));
     });
     const row = within(screen.getByRole('list', { name: 'Discovered sessions' })).getByRole('listitem');
-    expect(row.textContent).toBe('Remembering fruitgenerated/private/tmp/maws-acceptterminal · 78212Follow');
+    expect(row.textContent).toBe('Remembering fruitgenerated/private/tmp/maws-acceptterminal · 78212FollowGit');
 
     await act(async () => {
       main.send('session.changed', { record: { ...record, pinned: true, holder: { kind: 'none' } }, cause: 'holder', revision: 3 });
       await new Promise((resolve) => setTimeout(resolve, 60));
     });
-    expect(row.textContent).toBe('pinRemembering fruitgenerated/private/tmp/maws-acceptFollow');
+    expect(row.textContent).toBe('pinRemembering fruitgenerated/private/tmp/maws-acceptFollowGit');
+
+    // Git (M6): the row's Git button watches its directory; the detail reads branch, ahead/behind and the dirty count,
+    // lists the files, and follows git.changed.
+    await act(async () => void fireEvent.click(within(row).getByRole('button', { name: 'Git' })));
+    expect(window.maws.invoke).toHaveBeenCalledWith('git.watch', { directory: '/private/tmp/maws-accept' });
+    expect(screen.getByRole('status', { name: 'git status' }).textContent).toBe('main · ahead 1 / behind 0 · dirty · 1 file');
+    const untracked = { path: '.c4-accept', oldPath: null, index: '?', worktree: '?', untracked: true };
+    act(() => main.send('git.changed', { repoRoot: GIT_STATUS.repoRoot, status: { ...GIT_STATUS, files: [...GIT_STATUS.files, untracked] }, reason: 'worktree' }));
+    expect(screen.getByRole('status', { name: 'git status' }).textContent).toBe('main · ahead 1 / behind 0 · dirty · 2 files');
+    expect(within(screen.getByRole('list', { name: 'Changed files' })).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['.M src/a.ts', '?? .c4-accept']);
+    await act(async () => void fireEvent.click(within(row).getByRole('button', { name: 'Git' })));
+    expect(window.maws.invoke).toHaveBeenCalledWith('git.unwatch', { directory: '/private/tmp/maws-accept' });
+    expect(screen.queryByRole('status', { name: 'git status' })).toBeNull();
   });
 });

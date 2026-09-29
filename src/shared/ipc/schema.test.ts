@@ -100,6 +100,18 @@ describe('ipc schema validates both directions', () => {
       expect(validateCommandInput('session.replay.control', { appSessionId: 'a', speed: 'instant' }).ok).toBe(true);
       expect(validateCommandInput('session.replay.control', { appSessionId: 'a', action: 'rewind' }).ok).toBe(false);
     });
+
+    // C4 (M6): the read-only git service, owned by main.
+    it('carries the C4 git.* entries, every command owned by main, with the diff and log bounds', () => {
+      expect(Object.keys(git.commands).sort()).toEqual(['git.branches', 'git.diff', 'git.log', 'git.status', 'git.unwatch', 'git.watch']);
+      for (const spec of Object.values(git.commands)) expect(spec.owner).toBe('main');
+      expect(Object.keys(git.events)).toEqual(['git.changed']);
+      expect(validateCommandInput('git.diff', { directory: '/r', scope: 'all', base: 'main', path: 'a.ts', context: 20 }).ok).toBe(true);
+      expect(validateCommandInput('git.diff', { directory: '/r', scope: 'everything' }).ok).toBe(false);
+      expect(validateCommandInput('git.diff', { directory: '/r', scope: 'all', context: 21 }).ok).toBe(false);
+      expect(validateCommandInput('git.log', { directory: '/r', limit: 0 }).ok).toBe(false);
+      expect(validateCommandInput('git.log', { directory: '/r', limit: 500 }).ok).toBe(true);
+    });
     // end C4
 
     it('names channels by kind so a command and an event of the same name never share one', () => {

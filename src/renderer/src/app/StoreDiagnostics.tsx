@@ -3,10 +3,13 @@
 // it is watched, the counts (projects from the index's project list, sessions and scan time from the store scan), and
 // one row per session record from the index (`session.list`, M4) with its title and its source, its directory, a pin,
 // and its holder badge. A row can be followed (M3): the detail then reads the chain (`chain N · leaf <uuid8>`) and the
-// last twenty events. Replay controls (M5) start a fixture and drive its run. C5 replaces it as the user-facing surface.
+// last twenty events. Replay controls (M5) start a fixture and drive its run. A row's Git button (M6) shows its
+// directory's branch, ahead/behind and changed files. C5 replaces it as the user-facing surface.
 import { useEffect, useMemo } from 'react';
 import type { FsState } from '@shared/ipc/schema/fs';
+import { GitDiagnostics } from './GitDiagnostics';
 import { ReplayDiagnostics } from './ReplayDiagnostics';
+import { useGitDiagnostics } from '../stores/git-diagnostics';
 import {
   describeEvent,
   describeFollow,
@@ -24,6 +27,7 @@ export function StoreDiagnostics() {
   const records = useStoreDiagnostics((s) => s.records);
   const projects = useStoreDiagnostics((s) => s.projects);
   const followed = useStoreDiagnostics((s) => s.followed);
+  const gitDirectory = useGitDiagnostics((s) => s.directory);
   const rows = useMemo(() => rowsOf(records), [records]);
 
   useEffect(() => useStoreDiagnostics.getState().connect(), []);
@@ -41,10 +45,13 @@ export function StoreDiagnostics() {
       </div>
       <ReplayDiagnostics />
       {followed && <FollowDetail followed={followed} title={followedRecord ? titleOf(followedRecord) : followed.appSessionId} />}
+      <GitDiagnostics />
       <ul aria-label="Discovered sessions" className="max-h-96 overflow-auto">
         {rows.map((record) => {
           const badge = describeHolder(record.holder);
           const isFollowed = followed?.appSessionId === record.appId;
+          const directory = record.worktree?.path ?? record.directory;
+          const isGitShown = directory !== '' && gitDirectory === directory;
           return (
             <li key={record.appId} className="flex h-(--row-h) items-center gap-3 border-b border-border px-3 last:border-b-0">
               {record.pinned && (
@@ -64,6 +71,15 @@ export function StoreDiagnostics() {
                 className="shrink-0 rounded-sm border border-border px-2 text-fg hover:bg-bg-hover aria-pressed:bg-bg-active disabled:text-fg-faint"
               >
                 {isFollowed ? 'Unfollow' : 'Follow'}
+              </button>
+              <button
+                type="button"
+                aria-pressed={isGitShown}
+                disabled={directory === ''}
+                onClick={() => void useGitDiagnostics.getState().select(isGitShown ? null : directory)}
+                className="shrink-0 rounded-sm border border-border px-2 text-fg hover:bg-bg-hover aria-pressed:bg-bg-active disabled:text-fg-faint"
+              >
+                Git
               </button>
             </li>
           );

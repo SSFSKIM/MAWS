@@ -39,6 +39,9 @@ vi.mock('./index/source', () => ({ IndexSessionSource: class { start = () => ((c
 vi.mock('./ipc/events', () => ({ emit: vi.fn() }));
 vi.mock('./index/replay', () => ({ registerReplayHandlers: () => ({ dispose: vi.fn() }) }));
 vi.mock('./index/replay-fixtures', () => ({ appRoot: (path: string) => path, seedReplayFixtures: vi.fn() }));
+const git = vi.hoisted(() => ({ dispose: vi.fn(), registered: 0 }));
+vi.mock('./git/service', () => ({ GitService: class { dispose = git.dispose; } }));
+vi.mock('./git/register', () => ({ registerGitHandlers: () => void (git.registered += 1) }));
 // end C4
 
 beforeAll(async () => {
@@ -73,6 +76,9 @@ describe('app lifecycle (macOS, D-11)', () => {
     expect(c4.started).toBe(1);
     expect(c4.stopSource).toHaveBeenCalledOnce();
     expect(c4.close).toHaveBeenCalledOnce();
+    // M6: the git service's handlers were registered at ready, and its watches close at will-quit.
+    expect(git.registered).toBe(1);
+    expect(git.dispose).toHaveBeenCalledOnce();
     // end C4
   });
 });

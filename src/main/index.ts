@@ -16,6 +16,8 @@ import { registerIndexHandlers } from './index/register';
 import { registerReplayHandlers } from './index/replay';
 import { appRoot, seedReplayFixtures } from './index/replay-fixtures';
 import { IndexSessionSource, type ReadModelWriter } from './index/source';
+import { registerGitHandlers } from './git/register';
+import { GitService } from './git/service';
 // C4 end
 
 // A fresh profile for the end-to-end smoke (and anyone else who wants one); must be set before the app is ready.
@@ -52,7 +54,11 @@ app.whenReady().then(() => {
   // transcripts (none in a packaged app).
   const replays = registerReplayHandlers(index, hosts);
   if (index.unavailable === null) seedReplayFixtures(index.fixtures, appRoot(app.getAppPath()));
+  // The read-only git service (M6): git.* for any directory in a repository, and git.changed for watched roots.
+  const git = new GitService({ emit: (change) => void emit('git.changed', change) });
+  registerGitHandlers(git);
   app.on('will-quit', () => {
+    git.dispose();
     replays.dispose();
     stopSource();
     index.close();
