@@ -279,6 +279,17 @@ describe('a registered widget named at Enter opens with its argument', () => {
     expect(opened(container)).toBeNull();
   });
 
+  it('sends a multi-line draft that starts with a widget name as text: nothing after the first line is lost', async () => {
+    const onSubmit = vi.fn(async () => true);
+    const { port } = drafts({ doc: docOf([paragraph(textNode('/model haiku'), hardBreak(), textNode('and the rest of the note'))]), attachments: [], updatedAt: '2026-09-29T00:00:00.000Z' });
+    const handle = createRef<EditorHandle>();
+    const { container } = render(<Editor appSessionId={APP} cwd="/repo" sessionId={null} drafts={port} client={client} onSubmit={onSubmit} handle={handle} />);
+    await waitFor(() => expect(handle.current?.serialize().display).toBe('/model haiku\nand the rest of the note'));
+    act(() => handle.current?.submit('send')); // ⌘Enter's path: a multi-line document never sends on a plain Enter
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ display: '/model haiku\nand the rest of the note' }), 'send'));
+    expect(opened(container)).toBeNull();
+  });
+
   it('opens a widget through the handle with an argument', async () => {
     const handle = createRef<EditorHandle>();
     const { container } = render(<Editor appSessionId={APP} cwd="/repo" sessionId={null} drafts={drafts(null).port} client={client} handle={handle} />);

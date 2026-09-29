@@ -222,7 +222,9 @@ export class EditorController {
     if (s.empty) return;
     // C11 start: a typed `/<name> <args>` naming a registered widget opens it with its argument, as choosing the row does
     // (a registered widget wins over the headless text path); the document and its draft clear as a palette choice's do.
-    const plain = s.mode === 'send' && typeof s.content === 'string' && Object.keys(s.pastedContents).length === 0 && editingOfDoc({ attrs: editor.state.doc.attrs }) === null;
+    // Only a one-line document: a multi-line draft that starts with a widget's name is a message, and sends as text.
+    const plain =
+      s.mode === 'send' && typeof s.content === 'string' && Object.keys(s.pastedContents).length === 0 && !isMultiline(editor.getJSON()) && editingOfDoc({ attrs: editor.state.doc.attrs }) === null;
     const typed = plain ? /^\/(\S+)(?:\s+([\s\S]*))?$/.exec(s.display.trim()) : null;
     if (typed && slashWidget(typed[1])) {
       this.writer.cancel();
