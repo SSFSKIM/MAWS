@@ -2,6 +2,7 @@ import { FitAddon } from '@xterm/addon-fit';
 import type { ITerminalOptions } from '@xterm/xterm';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { RendererOptions } from './renderer';
+import { installScrollUpIntoScrollback } from './scroll-up';
 import { createXtermRenderer } from './xterm';
 
 const recorded = vi.hoisted(() => [] as ITerminalOptions[]);
@@ -57,6 +58,27 @@ describe('xterm adapter', () => {
     expect(linkHandler.allowNonHttpProtocols).toBe(true);
     linkHandler.activate(new MouseEvent('mouseup'), 'mailto:owner@example.com', { start: { x: 1, y: 1 }, end: { x: 1, y: 1 } });
     expect(opened).toEqual(['mailto:owner@example.com']);
+    renderer.dispose();
+  });
+
+  // The M5 ruling's guard, against the shipped build: an xterm bump that moves the internals fails here instead of
+  // silently falling back to discarding the rows (the headless pins cover the behaviour on @xterm/headless).
+  it('finds the internals its CSI S handler needs on the shipped xterm, and keeps scrolled-out rows', async () => {
+    const warn = vi.spyOn(console, 'warn');
+    const { Terminal } = await vi.importActual<typeof import('@xterm/xterm')>('@xterm/xterm');
+    const { version } = await import('@xterm/xterm/package.json');
+    expect(version).toBe('6.0.0');
+    const bare = new Terminal();
+    expect(installScrollUpIntoScrollback(bare, { version })).toBe(true);
+    bare.dispose();
+
+    const renderer = createXtermRenderer(options);
+    expect(warn.mock.calls.filter(([message]) => String(message).includes('CSI S'))).toEqual([]);
+    const lines = Array.from({ length: 30 }, (_, i) => `${i + 1}`);
+    await new Promise<void>((resolve) => renderer.write(`${lines.join('\r\n')}\r\n\x1b[1;23r\x1b[5S\x1b[r`, resolve));
+    const probe = renderer.probe();
+    const buffer = Array.from({ length: probe.lineCount() }, (_, i) => probe.line(i).trim());
+    expect(lines.filter((line) => !buffer.includes(line))).toEqual([]);
     renderer.dispose();
   });
 });

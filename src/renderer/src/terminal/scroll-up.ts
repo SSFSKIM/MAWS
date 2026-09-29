@@ -54,8 +54,9 @@ export function installScrollUpIntoScrollback(
   terminal.parser.registerCsiHandler({ final: 'S' }, (params) => {
     const buffer = bufferService.buffer;
     if (buffer !== bufferService.buffers.normal || buffer.scrollTop !== 0) return false;
-    const first = params[0] ?? 0;
-    if (typeof first !== 'number') return false; // sub-parameters: not an SU we know; xterm decides
+    // `toArray()` places a parameter's sub-parameters after it, so the first entry is always a number; like xterm's own
+    // SU, sub-parameters are ignored.
+    const first = (params[0] as number | undefined) ?? 0;
     // Beyond the region's height every further step only scrolls blank rows (tmux clamps the same way).
     const count = Math.min(first || 1, buffer.scrollBottom - buffer.scrollTop + 1);
     const erase = internals.eraseAttrData();
