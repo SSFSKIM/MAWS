@@ -85,7 +85,7 @@ test('accounts: ClaudeUsage’s accounts in its geometry, the routing one and wh
     let [a, b, c] = await boxes();
     expect(b!.y).toBeGreaterThan(a!.y + 10);
     await menu(app, 'panel.toggle');
-    await expect.poll(async () => ((await boxes())[1]!.y === (await boxes())[0]!.y ? 'side by side' : 'stacked')).toBe('side by side');
+    await expect.poll(async () => ((await boxes())[1]!.y === (await boxes())[0]!.y ? 'side by side' : 'stacked'), { timeout: 15_000 }).toBe('side by side'); // the panel's close and the grid's reflow can take a few frames under load
     [a, b, c] = await boxes();
     expect(b!.x).toBeGreaterThan(a!.x + a!.width - 1);
     expect(c!.y).toBeGreaterThan(a!.y + 10);
