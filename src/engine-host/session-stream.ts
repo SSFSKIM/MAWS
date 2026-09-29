@@ -36,7 +36,6 @@ export interface SessionStreamOptions {
 export class SessionStream {
   private readonly ring: SessionEvent[] = [];
   private evictedThrough: number | null = null; // the seq of the last event the ring dropped
-  private lastSeq = 0;
   private pending: SessionEvent[] = [];
   private timer: ReturnType<typeof setTimeout> | null = null;
   private readonly requests = new Map<string, SessionEvent>();
@@ -50,10 +49,7 @@ export class SessionStream {
   }
 
   events(batch: SessionEvent[]): void {
-    for (const event of batch) {
-      if (REQUESTED_KINDS.has(event.kind)) this.requests.set((event as { requestId: string }).requestId, event);
-      if (event.seq !== null) this.lastSeq = event.seq;
-    }
+    for (const event of batch) if (REQUESTED_KINDS.has(event.kind)) this.requests.set((event as { requestId: string }).requestId, event);
     this.ring.push(...batch);
     if (this.ring.length > this.ringSize + Math.floor(this.ringSize / 5)) { // trims in chunks, never one shift per event
       const dropped = this.ring.splice(0, this.ring.length - this.ringSize);
@@ -116,7 +112,7 @@ export class SessionStream {
         complete = false;
       }
     }
-    return { events, lastSeq: events.at(-1)?.seq ?? afterSeq ?? (complete ? this.lastSeq : 0), complete };
+    return { events, lastSeq: events.at(-1)?.seq ?? afterSeq ?? 0, complete }; // the cursor for the next call
   }
 
   dispose(): void {

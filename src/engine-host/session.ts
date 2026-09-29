@@ -15,6 +15,7 @@ import type { AutoModeRefusalCode, PermissionMode } from '@shared/graph/enums';
 import type { RequestAnswer } from '@shared/engine/answers';
 import type { Effort, LaunchSpec } from '@shared/engine/launch-spec';
 import type { QueueEntry, QueueState, SendContent, SessionStateStore } from '@shared/engine/session-state-store';
+import type { RelayHealth } from '@shared/engine/relay-health';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import { HookCallbackRequestSchema, type GetStatusResponse, type InitializeRequest, type InterruptResponse } from '@shared/wire/control';
 import type { ControlRequestFrame, UserInputFrame } from '@shared/wire/frames';
@@ -61,6 +62,7 @@ export interface EngineSessionOptions {
   grants?: GrantSnapshot; // the snapshot to re-apply on a resume; loaded from the store when absent
   onGrants?: (snapshot: GrantSnapshot) => void; // every change, after it was handed to the store
   reconnect?: boolean; // journal session.reconnect rows; default: a non-fork resume
+  relayHealth?: RelayHealth; // the check that let a gateway launch spawn (M5): journaled after the spawn row
   appVersion?: string;
   log?: (message: string) => void;
 }
@@ -352,6 +354,7 @@ export class EngineSession {
     await this.loadState();
     if (this.reconnect) this.record('meta', { event: 'reconnect', phase: 'attempting', attempt: 1, maxAttempts: 1, trigger: 'user', reason: null });
     this.record('meta', spawnMeta(this.plan, { appVersion: this.opts.appVersion ?? 'unknown' }));
+    if (this.opts.relayHealth) this.record('meta', { event: 'relay_health', ...this.opts.relayHealth });
     let transport: EngineTransport;
     try {
       transport = this.opts.spawn(this.plan);

@@ -251,6 +251,10 @@ describe('engine host X2 surface', () => {
     const id = 'app-ipc' as AppSessionId;
     await host.call('session.launch', { spec: spec({ permissionMode: 'default', effort: 'high' }) });
     await until(() => host.statuses(id).some((s) => s.process === 'ready'), 'ready');
+    const { readFileSync } = await import('node:fs');
+    const journalRows = readFileSync(host.ipc.table.get(id)!.status().journalPath, 'utf8').trim().split('\n').map((line) => JSON.parse(line) as { direction: string; frame: Record<string, unknown> });
+    expect(journalRows.slice(0, 2).map((r) => r.frame.event)).toEqual(['spawn', 'relay_health']); // the check that let a gateway launch spawn
+    expect(journalRows[1]!.frame).toEqual({ event: 'relay_health', ...OK_RELAY });
 
     expect(await host.call('session.setPermissionMode', { appSessionId: id, mode: 'auto' })).toEqual({ effective: 'default', refusal: 'auto_mode_model', error: 'auto mode is unavailable for this model' });
     expect(host.ipc.table.get(id)!.status().permissionMode).toEqual({ requested: 'auto', effective: 'default', refusal: 'auto_mode_model' });

@@ -57,6 +57,7 @@ export function createLauncher(deps: LauncherDeps): (spec: LaunchSpec) => Promis
 
     let captured: Record<string, string> = {};
     let journal: JournalRow[] | null = null;
+    let relayHealth: RelayHealth | undefined;
     if (spec.replay !== null) {
       journal = readJournal(resolve(deps.cwd, spec.replay)); // throws on a missing or malformed fixture: the command fails `internal`
       prelude ??= readJournal(resolve(deps.cwd, REPLAY_PRELUDE));
@@ -66,6 +67,7 @@ export function createLauncher(deps: LauncherDeps): (spec: LaunchSpec) => Promis
       if (!binary.ok) return refused('binary_version', binary.error ?? `${binary.path} is not ${binary.expectedVersion}`);
       if (relay && !relay.ok) return { status: 'relay_unreachable', health: relay };
       captured = env;
+      relayHealth = relay ?? undefined;
     }
 
     let plan: LaunchPlan;
@@ -80,7 +82,7 @@ export function createLauncher(deps: LauncherDeps): (spec: LaunchSpec) => Promis
     const spawn = replay !== null ? () => replayEngine(replay, { prelude: prelude! }) : deps.spawn;
     const outcome = deps.table.reserve(spec.appSessionId, () => {
       const session = new EngineSession({
-        spec, plan, spawn, store: deps.store, appVersion: deps.appVersion, log: (message) => deps.log(`${spec.appSessionId}: ${message}`),
+        spec, plan, spawn, store: deps.store, appVersion: deps.appVersion, relayHealth, log: (message) => deps.log(`${spec.appSessionId}: ${message}`),
         journal: new JournalWriter(journalDir(deps.userData, spec.appSessionId), plan.launchId, { maxBytes: JOURNAL_MAX_BYTES }),
       });
       deps.wire(session, plan, spec);

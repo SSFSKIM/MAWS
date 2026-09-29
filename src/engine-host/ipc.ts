@@ -95,6 +95,7 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
   const specs = new Map<AppSessionId, LaunchSpec>();
   const operations = new OperationTable((event) => emit('session.operation', event));
   const binaryProbe = deps.binaryProbe ?? createBinaryProbe();
+  const relayCheck = deps.checkRelay ?? ((force: boolean) => checkRelayHealth(RELAY_URL, undefined, { force }));
 
   const launch = createLauncher({
     userData: deps.userData,
@@ -103,7 +104,7 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
     table,
     store,
     binaryProbe,
-    checkRelay: deps.checkRelay ?? ((force) => checkRelayHealth(RELAY_URL, undefined, { force })),
+    checkRelay: relayCheck,
     captureEnv: deps.captureEnv ?? (() => captureShellEnvironment()),
     spawn: deps.spawn ?? ((plan) => spawnEngine(plan, { maxLineChars: MAX_LINE_CHARS })),
     appVersion: deps.appVersion ?? 'unknown',
@@ -140,7 +141,7 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
     const { path, expectedVersion, version, ok, error } = await binaryProbe(); // `problem` is the launcher's, not X2's
     return { path, expectedVersion, version, ok, error };
   });
-  handle('engine.relayHealth', async ({ force }) => (deps.checkRelay ?? ((f: boolean) => checkRelayHealth(RELAY_URL, undefined, { force: f })))(force));
+  handle('engine.relayHealth', async ({ force }) => relayCheck(force));
   handle('engine.sessions', async () => table.list().map((session) => session.status()));
   handle('engine.shutdown', async ({ graceMs }) => table.shutdown({ graceMs }));
 
