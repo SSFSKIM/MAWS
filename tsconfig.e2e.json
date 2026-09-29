@@ -1,6 +1,7 @@
 {
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
+    "skipLibCheck": false,
     "lib": ["ES2023", "DOM"],
     "types": ["node"]
   },
