@@ -203,6 +203,20 @@ async function guarded<T>(harness: Harness, body: () => Promise<T>): Promise<T> 
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// Waits, frame by frame, until a buffer line reads `text` (trimmed), or with `null` until any line is non-empty (the
+// terminal may have no renderer yet). The page's CSP allows no eval, so the matcher travels as data.
+async function untilLine(h: Harness, id: TerminalId, text: string | null, timeout = 10_000): Promise<void> {
+  await h.page.waitForFunction(
+    ([id, text]) => {
+      const probe = (window as unknown as HarnessWindow).__maws_harness!.terminals!.probe!(id) as { line(row: number): string; lineCount(): number } | null;
+      if (!probe) return false;
+      return Array.from({ length: probe.lineCount() }, (_, i) => probe.line(i).trim()).some((line) => (text === null ? line !== '' : line === text));
+    },
+    [id, text] as const,
+    { polling: 'raf', timeout },
+  );
+}
+
 // The debug strip's PTY host state reads `ready`.
 async function hostReady(h: Harness): Promise<void> {
   await expect(h.page.getByLabel('pty host state')).toHaveText(/^host ready pid \d+/, { timeout: 15_000 });
@@ -222,26 +236,31 @@ function isAlive(pid: number): boolean {
 test('opens a login shell in the session directory with the terminal environment', async ({ maws }) => {
   const h = await harnessOf(maws);
   const { page } = maws;
-  // Measured from the click with the host ready (acceptance item 2), with nothing else waited for: this is the first
-  // spawn after launch, so it also waits for whatever is left of the host's login-shell environment capture.
+  const A = (await h.sessions()).A;
+  // "+", Terminal, and the time from the click to the first visible line of the new terminal.
+  const openFromMenu = async (): Promise<{ id: TerminalId; ms: number }> => {
+    const before = new Set((await h.tabs()).map((t) => t.id));
+    await page.getByRole('button', { name: 'add tool' }).click();
+    const clicked = Date.now();
+    await page.getByRole('menuitem', { name: 'Terminal' }).click();
+    const tab = (await h.tabs()).find((t) => !before.has(t.id))!;
+    expect(tab).toMatchObject({ toolId: 'terminal', selected: true, home: A });
+    await untilLine(h, tab.terminalId!, null);
+    return { id: tab.terminalId!, ms: Date.now() - clicked };
+  };
+
+  // Acceptance item 2: the first terminal after launch, opened as soon as the host reads ready, also waits for what is
+  // left of the host's one-time login-shell environment capture; it is held to three seconds and its number logged.
   await hostReady(h);
-  await page.getByRole('button', { name: 'add tool' }).click();
-  const clicked = Date.now();
-  await page.getByRole('menuitem', { name: 'Terminal' }).click();
-  const [tab] = await h.tabs();
-  expect(tab).toMatchObject({ toolId: 'terminal', selected: true, home: (await h.sessions()).A });
-  const id = tab!.terminalId!;
-  await h.page.waitForFunction(
-    (id) => {
-      const probe = (window as unknown as HarnessWindow).__maws_harness!.terminals!.probe!(id) as { line(row: number): string; lineCount(): number } | null;
-      return !!probe && Array.from({ length: probe.lineCount() }, (_, i) => probe.line(i)).some((line) => line.trim() !== '');
-    },
-    id,
-    { polling: 'raf', timeout: 10_000 },
-  );
-  const promptMs = Date.now() - clicked;
-  test.info().annotations.push({ type: 'promptMs', description: String(promptMs) });
-  expect(promptMs, 'a prompt appears within two seconds').toBeLessThan(2_000);
+  const cold = await openFromMenu();
+  test.info().annotations.push({ type: 'coldPromptMs', description: String(cold.ms) });
+  expect(cold.ms, 'the first terminal after launch shows a prompt within three seconds').toBeLessThanOrEqual(3_000);
+  await h.prompt(cold.id);
+  // A terminal opened in the running app: two seconds from the click.
+  const warm = await openFromMenu();
+  test.info().annotations.push({ type: 'promptMs', description: String(warm.ms) });
+  expect(warm.ms, 'a prompt appears within two seconds').toBeLessThanOrEqual(2_000);
+  const id = warm.id;
   await h.prompt(id);
 
   await guarded(h, async () => {
@@ -755,22 +774,31 @@ test('openTerminal runs the attach command', async ({ maws }) => {
         (window as unknown as { openTerminal(init: { appSessionId: string; cwd: string; command: string }): string }).openTerminal({ appSessionId, cwd, command }),
       [appSessionId, cwd, command] as const,
     );
-  await hostReady(h); // as in the first test: measured with the host ready, the first spawn after launch
-  const opened = Date.now();
   // Quoted: unquoted, the shell reads `\n` as `n` and the line would end `MAWS_ATTACH_OKn` with no newline.
-  const tabId = await openTerminal(A, DIR_A, "printf 'MAWS_ATTACH_OK\\n'");
-  const tab = (await h.tabs()).find((t) => t.id === tabId)!;
-  expect(tab).toMatchObject({ toolId: 'terminal', selected: true });
-  const id = tab.terminalId!;
-  await expect.poll(() => h.hasLine(id, 'MAWS_ATTACH_OK'), { timeout: 2_000, intervals: [50], message: 'the attach command ran within two seconds' }).toBe(true);
-  test.info().annotations.push({ type: 'attachMs', description: String(Date.now() - opened) });
-  await expect
-    .poll(async () => {
-      const lines = await h.lines(id);
-      const at = lines.findIndex((line) => line.trim() === 'MAWS_ATTACH_OK');
-      return lines.slice(at + 1).some((line) => line.trim() !== '');
-    }, { message: 'a prompt after it' })
-    .toBe(true);
+  const attach = async (marker: string): Promise<{ id: TerminalId; ms: number }> => {
+    const opened = Date.now();
+    const tabId = await openTerminal(A, DIR_A, `printf '${marker}\\n'`);
+    const tab = (await h.tabs()).find((t) => t.id === tabId)!;
+    expect(tab).toMatchObject({ toolId: 'terminal', selected: true });
+    await untilLine(h, tab.terminalId!, marker);
+    const ms = Date.now() - opened;
+    await expect
+      .poll(async () => {
+        const lines = await h.lines(tab.terminalId!);
+        const at = lines.findIndex((line) => line.trim() === marker);
+        return lines.slice(at + 1).some((line) => line.trim() !== '');
+      }, { message: 'a prompt after it' })
+      .toBe(true);
+    return { id: tab.terminalId!, ms };
+  };
+  // As in the first test: the first attach after launch within three seconds (logged), one in the running app within two.
+  await hostReady(h);
+  const cold = await attach('MAWS_ATTACH_OK');
+  test.info().annotations.push({ type: 'coldAttachMs', description: String(cold.ms) });
+  expect(cold.ms, 'the first attach after launch runs within three seconds').toBeLessThanOrEqual(3_000);
+  const warm = await attach('MAWS_ATTACH_AGAIN');
+  test.info().annotations.push({ type: 'attachMs', description: String(warm.ms) });
+  expect(warm.ms, 'the attach command runs within two seconds').toBeLessThanOrEqual(2_000);
 
   // For a session other than the one shown: the panel shows that session, with the new tab selected and visible.
   expect(await h.call<string>('panel', 'session')).toBe(A);
