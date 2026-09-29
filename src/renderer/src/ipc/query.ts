@@ -33,8 +33,8 @@ export const QUERY_COMMANDS = [
   'session.listPermissionRules', // M4: the + dir chip's workspace directories
   'git.branches', // M4: the location chip's branch picker
   // C7 end
-  // C11 start: the widgets' engine reads, Session info's and the Settings tab's (C11 execution document, Repository map);
-  // C10's engine.models joins at the C10 integration
+  // C11 start: the widgets' engine reads, Session info's and the Settings tab's (C11 execution document, Repository map),
+  // and C10's model catalogue, which the Direct model choice and Session info's lane read before any process
   'session.getSettings',
   'session.getHooksListing',
   'session.getSandboxDialog',
@@ -45,6 +45,7 @@ export const QUERY_COMMANDS = [
   'session.mcpStatus',
   'engine.binaryInfo',
   'engine.relayHealth',
+  'engine.models',
   'settings.claudeUsage.status',
   // C11 end
 ] as const satisfies readonly ValueCommand[];
