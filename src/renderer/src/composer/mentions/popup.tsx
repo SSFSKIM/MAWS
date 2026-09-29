@@ -115,7 +115,7 @@ export function Listbox({ label, activeId, children }: { label: string; activeId
       role="listbox"
       aria-label={label}
       aria-activedescendant={activeId}
-      className="max-h-80 w-[min(28rem,80vw)] overflow-y-auto rounded-md border border-border-strong bg-bg-overlay p-1 text-ui text-fg shadow-lg"
+      className="max-h-80 w-[min(28rem,80vw)] overflow-y-auto rounded-md border border-border-strong bg-bg-overlay p-1 text-ui text-fg"
       onMouseDown={(event) => event.preventDefault()} // keep focus (and the selection) in the editor
     >
       {children}
