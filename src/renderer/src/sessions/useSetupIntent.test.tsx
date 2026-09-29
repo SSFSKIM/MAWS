@@ -115,6 +115,18 @@ describe('setup intent hook', () => {
     expect(fake.invoked('engine.models')).toEqual([{ refresh: false }, { refresh: false }]);
   });
 
+  // C7 calls the hook from every composer: a started session's has no intent and reads nothing
+  it('reads no catalogue for an id without an intent, and reads it once the intent arrives', async () => {
+    withMain();
+    const { result } = renderHook(() => useSetupIntent(ID));
+    await act(async () => {});
+    expect(result.current).toBeNull();
+    expect(fake.invoked('engine.models'), 'a started session’s composer asks nothing').toEqual([]);
+    act(() => putIntent(intent()));
+    await waitFor(() => expect(result.current!.options.models.map((m) => m.value)).toEqual(['default', 'haiku', 'claude/astra']));
+    expect(fake.invoked('engine.models')).toEqual([{ refresh: false }]);
+  });
+
   it('notes a model that cannot hold auto mode, and a gateway model’s local auto lane', async () => {
     withMain();
     putIntent(intent({ model: 'haiku', permissionMode: 'auto' }));

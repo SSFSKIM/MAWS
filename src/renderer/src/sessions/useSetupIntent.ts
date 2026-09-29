@@ -119,13 +119,16 @@ function useSetupOptions(
   const [catalogue, setCatalogue] = useState<ModelCatalogue>(BUILTIN_FALLBACK);
   const [worktreeName] = useState(() => defaultWorktreeName());
 
+  // Only an unstarted session reads it: C7 calls this hook from every composer, and a started session's has no intent.
+  const unstarted = intent !== null;
   useEffect(() => {
+    if (!unstarted) return;
     let live = true;
     void readCatalogue().then((c) => live && setCatalogue(c));
     return () => {
       live = false;
     };
-  }, []);
+  }, [unstarted]);
 
   // The repository is read again only when the base directory moves to another repository or out of one; a move
   // between two locations of one repository keeps what was read.
