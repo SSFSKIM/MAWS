@@ -60,6 +60,7 @@ import { createClaudeUsageApp, execRunner } from './gateway/claude-usage-app';
 import { onEmitted } from './ipc/events';
 import { startEngineConfigure } from './settings/engine-configure';
 import { revealPath } from './settings/reveal';
+import { sessionSettingsOf } from './settings/session-settings';
 import { knownSessionDirectories } from './settings/session-directories';
 import { CommandFailure, interceptCommand } from './ipc/router';
 import { installWidgetBackend } from './widgets/fixture-backend';
@@ -224,6 +225,7 @@ app.whenReady().then(() => {
     trash: trashFor(process.env, (path) => shell.trashItem(path)), // the e2e seam (MAWS_E2E_TRASH_DIR) or the Trash
     reveal: (path) => shell.showItemInFolder(path),
     replay: ReplaySeam.fromEnv(process.env, process.cwd()), // the e2e seam (MAWS_E2E_REPLAY_FIXTURES)
+    settings: () => sessionSettingsOf(settings.state().settings), // C11: the route, the relay policy and the subagent model from settings v3
   });
   registerSessionServiceHandlers(sessionService);
   sessionService.start().catch((error: unknown) => console.error('[sessions] the session service failed to start:', error));
