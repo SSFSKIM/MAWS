@@ -26,7 +26,7 @@ export function duration(ms: number): string {
   return `${Math.floor(seconds / 3600)}h ${String(Math.floor((seconds % 3600) / 60)).padStart(2, '0')}m`;
 }
 
-export type SeparatorSubject = 'human' | 'engine' | 'loose';
+export type SeparatorSubject = 'human' | 'engine' | 'peer' | 'loose';
 
 // Codex's thresholds: an hour before a human turn, ten minutes before an engine turn or a loose row. The first row of
 // a transcript always gets a separator.

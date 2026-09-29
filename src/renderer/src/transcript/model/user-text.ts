@@ -83,9 +83,10 @@ export const isLocalCommand = (origin: string | null, content: string | ContentB
 // The engine's own marker for an interrupted request (C3 tags it `origin: 'interrupt-marker'`): no row and no turn; the
 // divider's stopped state already says it.
 export const INTERRUPT_MARKER = '[Request interrupted by user]';
+export const INTERRUPT_MARKERS: readonly string[] = [INTERRUPT_MARKER, '[Request interrupted by user for tool use]']; // the engine's two (M6: the second, untagged, in `pass2/per-task-stop-off` seq 71)
 
 export function isInterruptionMarker(origin: string | null, content: string | ContentBlock[]): boolean {
   if (origin === 'interrupt-marker') return true;
   const text = typeof content === 'string' ? content : content.length === 1 && content[0].type === 'text' ? String(content[0].text ?? '') : '';
-  return text.trim() === INTERRUPT_MARKER; // the complete marker only: a prompt that begins with it and continues is a bubble
+  return INTERRUPT_MARKERS.includes(text.trim()); // a complete marker only: a prompt that begins with one and continues is a bubble
 }

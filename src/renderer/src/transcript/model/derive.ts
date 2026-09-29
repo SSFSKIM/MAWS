@@ -14,7 +14,7 @@ import type { LiveBlock, TranscriptState, TranscriptUi, TurnState, TurnWork } fr
 import { isEngineOrigin, RECEIPT_APPLIED, type ReceiptUndo } from './reduce';
 import { TOOL_CATEGORIES, type Cell, type ChangedFile, type Row, type RowId, type SubagentRef, type SubagentStatus, type ToolCategory, type TurnId, type TurnSummary } from './rows';
 import { needsSeparator, separatorLabel } from './time';
-import { isInterruptionMarker, isLocalCommand, localCommandOutput, userTextOf } from './user-text';
+import { isLocalCommand, localCommandOutput, userTextOf } from './user-text';
 
 type Event<K extends SessionEvent['kind']> = Extract<SessionEvent, { kind: K }>;
 type RowOf<K extends Row['kind']> = Extract<Row, { kind: K }>;
@@ -48,7 +48,7 @@ function flatten(state: TranscriptState): Row[] {
     if (placement === undefined) continue; // unplaced: nothing to render
     looseAfter.set(placement, [...(looseAfter.get(placement) ?? []), event]);
   }
-  const emit = (rows: Row[], subject: 'human' | 'engine' | 'loose', separator: RowId) => {
+  const emit = (rows: Row[], subject: 'human' | 'engine' | 'peer' | 'loose', separator: RowId) => {
     if (rows.length === 0) return;
     if (needsSeparator(previousAt, rows[0].at, subject)) out.push({ id: separator, turnId: subject === 'loose' ? null : rows[0].turnId, at: rows[0].at, kind: 'time', label: separatorLabel(rows[0].at) });
     out.push(...rows);
@@ -128,7 +128,6 @@ function rowsOfTurn(state: TranscriptState, turn: TurnState): Row[] {
 // What the walk over a turn's events produces before grouping: cells and rows in event order.
 type Item =
   | WorkItem
-  | { kind: 'steer'; row: RowOf<'user'> } // outside the work area, in event order with the answer
   // Placeholders the walk leaves and the resolution pass fills, once every event of the turn has been seen.
   | { kind: 'tool'; toolUseId: ToolUseId }
   | { kind: 'hook'; hookId: string }
@@ -176,20 +175,18 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
   let retryAt: string | null = null; // the first api.retry's time: the in-place row keeps its position
   const agentIds = new Map<ToolUseId, AgentId>();
 
-  const cancelled = new Set<string>(); // steers a `command.lifecycle` cancelled, discarded or refused
+  // *Turn boundaries on this engine*: the reducer retains a `command.lifecycle` on a turn only when it dropped that
+  // turn's pending prompt, so its presence is the dropped mark. `steer` stays on the row, reserved, always false.
+  let openerDropped = false;
   for (const event of turn.events) {
     if (event.kind === 'boundary.retraction') for (const uuid of event.retractedMessageUuids) retracted.add(uuid);
     if (event.kind === 'assistant.block.complete' && event.supersedes) superseded.add(event.supersedes);
-    if (event.kind === 'command.lifecycle') cancelled.add(event.commandUuid);
+    if (event.kind === 'command.lifecycle') openerDropped = true;
   }
   const dropped = (messageUuid: string | null) => messageUuid !== null && (retracted.has(messageUuid) || superseded.has(messageUuid));
-  const openerDropped = turn.ended?.terminalReason === 'cancelled'; // an idle prompt dropped before its init
-  // A steer the closing result named was consumed: a late lifecycle cannot un-send it (consumption, not timing).
-  const consumed = new Set<string>(turn.ended?.userMessageUuids ?? []);
-  const userRow = (event: Event<'user.message'>, id: RowId, editable: boolean, steer: boolean): RowOf<'user'> => {
+  const userRow = (event: Event<'user.message'>, id: RowId, editable: boolean): RowOf<'user'> => {
     const text = userTextOf(event.content);
-    const isDropped = steer ? event.messageUuid !== null && cancelled.has(event.messageUuid) && !consumed.has(event.messageUuid) : openerDropped;
-    return { id, turnId: turn.id, at: event.at, kind: 'user', messageUuid: event.messageUuid, text: text.text, attachments: text.attachments, lines: text.lines, editable, steer, dropped: isDropped };
+    return { id, turnId: turn.id, at: event.at, kind: 'user', messageUuid: event.messageUuid, text: text.text, attachments: text.attachments, lines: text.lines, editable, steer: false, dropped: openerDropped };
   };
 
   const blockRow = (block: LiveBlock, at: string): Item | null => {
@@ -232,12 +229,10 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
         } else if (isLocalCommand(event.origin, event.content)) {
           items.push({ kind: 'row', row: localCommandRow(event, turn.id) });
         } else if (event.messageUuid !== null && turnIdOf.ofMessage(event.messageUuid) === turn.id && user === null && !dropped(event.messageUuid)) {
-          user = userRow(event, rowId.user(event.messageUuid), true, false);
+          user = userRow(event, rowId.user(event.messageUuid), true);
         } else if (turn.id === turnIdOf.ofEvent(event.id) && user === null && !event.isSynthetic) {
-          user = userRow(event, rowId.userOfEvent(event.id), false, false);
-        } else if (!event.isSynthetic && !isInterruptionMarker(event.origin, event.content) && !dropped(event.messageUuid)) {
-          items.push({ kind: 'steer', row: userRow(event, event.messageUuid === null ? rowId.userOfEvent(event.id) : rowId.user(event.messageUuid), true, true) });
-        }
+          user = userRow(event, rowId.userOfEvent(event.id), false);
+        } // any other message in a turn renders no row: every prompt is a turn of its own
         break;
       }
       case 'assistant.block.delta': {
@@ -426,7 +421,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
   // Resolve the placeholders now that every event of the turn has been seen: tool and hook cells, question and plan
   // rows, subagent rows. The retry row updates in place: the last api.retry event's text at the first one's position.
   const retryRow = retry;
-  const resolved: (WorkItem | Extract<Item, { kind: 'steer' }>)[] = [];
+  const resolved: WorkItem[] = [];
   for (const item of items) {
     switch (item.kind) {
       case 'tool': {
@@ -461,8 +456,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
   const answer: Row[] = [];
   const workItems: WorkItem[] = [];
   resolved.forEach((item, i) => {
-    if (item.kind === 'steer') answer.push(item.row); // steers and answer in event order, outside the work area
-    else if (item.kind === 'text' && i > lastWork) answer.push({ ...item.row, phase: 'answer' });
+    if (item.kind === 'text' && i > lastWork) answer.push({ ...item.row, phase: 'answer' });
     else if (item.kind === 'text') workItems.push({ kind: 'text', row: { ...item.row, phase: 'commentary' } });
     else if (item.kind === 'thinking' && i > lastWork) workItems.push({ kind: 'row', row: item.row }); // after the last tool use: a row, not a cell of the last group
     else workItems.push(item);
@@ -476,9 +470,10 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
   const dividerState: RowOf<'divider'>['state'] = turn.state === 'open' ? 'working' : turn.closedBy !== null ? turn.closedBy : isAborted(turn.ended?.terminalReason ?? null) ? 'stopped' : turn.ended?.isError ? 'failed' : turn.ended ? 'completed' : 'stopped';
   const rows: Row[] = [];
   if (user) rows.push(user);
-  // The divider summarises a work area; an engine turn always has one, because with no user row it is what tells the
-  // reader the engine continued on its own ("Continued for …"; pass2/workflow's engine turn is a single answer).
-  if (workRows.length > 0 || turn.origin === 'engine') {
+  // The divider summarises a work area. A turn the owner did not start (engine, peer) always has one, because it is
+  // what tells the reader whose turn it was ("Continued for …"; pass2/workflow's engine turn is a single answer); a
+  // turn the engine accepted has one while it runs ("Working"), and a pending prompt has none until it starts.
+  if (workRows.length > 0 || turn.origin !== 'human' || (turn.state === 'open' && turn.accepted)) {
     const denied = denials.filter((d) => d.disposition === 'denied');
     const firstDenied = denials.find((d) => d.disposition !== 'stopped')?.cellId ?? null;
     rows.push({

@@ -37,7 +37,7 @@ export type Row = RowBase &
     | { kind: 'user'; messageUuid: MessageUuid | null; text: string; attachments: Attachment[]; lines: number; editable: boolean; steer: boolean; dropped: boolean } // steer: sent while its turn was running (joins that turn, no turn of its own); dropped: the engine never ran it
     | { kind: 'assistant_text'; messageUuid: MessageUuid | null; blockIndex: number; markdown: string; live: boolean; phase: 'answer' | 'commentary'; model: string | null }
     | {
-        kind: 'divider'; state: 'working' | 'completed' | 'stopped' | 'failed'; origin: 'human' | 'engine'; startedAt: string; endedAt: string | null;
+        kind: 'divider'; state: 'working' | 'completed' | 'stopped' | 'failed'; origin: 'human' | 'engine' | 'peer'; startedAt: string; endedAt: string | null;
         toolCalls: number; denied: number; autoDenied: number; firstDeniedCell: CellId | null; expanded: boolean; summary: TurnSummary;
       }
     | { kind: 'group'; state: 'active' | 'completed'; cells: Cell[]; summary: string; activeLabel: string | null; icon: ToolCategory; expanded: boolean }

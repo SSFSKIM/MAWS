@@ -8,6 +8,7 @@ import type { AgentId, ApiMessageId, EventId, MessageUuid, RequestId, SessionId,
 import { toolUseOf } from '@shared/graph/ids';
 import { rowId, turnId as turnIdOf } from './keys';
 import type { CellDetail, Row, RowId, Spill, SubagentRef, SubagentStatus, ToolCategory, TurnId } from './rows';
+import { appendStripped, stripAnsi } from './ansi';
 import { isInterruptionMarker, isLocalCommand } from './user-text';
 
 type Event<K extends SessionEvent['kind']> = Extract<SessionEvent, { kind: K }>;
@@ -27,9 +28,11 @@ export interface LiveBlock {
   model: string | null;
 }
 
+export type TurnOrigin = 'human' | 'engine' | 'peer';
+
 export interface TurnState {
   id: TurnId;
-  origin: 'human' | 'engine';
+  origin: TurnOrigin; // peer (C3, 2026-09-28): a turn a peer session's message started, its own value
   state: 'open' | 'closed';
   startedAt: string;
   endedAt: string | null;
@@ -43,6 +46,10 @@ export interface TurnState {
   // `subagent.finished` or `task.notification` naming the child, which the child source delivers into the slice, closes
   // its open turn with that outcome, and the parent's `process.exited` closes it as stopped.
   closedBy: 'completed' | 'failed' | 'stopped' | null;
+  // Additive (M6, *Turn boundaries on this engine*): the engine accepted the turn (its `turn.started` arrived, or it
+  // was opened by the engine's own output). A prompt's `user.message` arrives at the write and opens its turn pending
+  // (`false`): its bubble shows, it has no divider, and it never receives another turn's events until it starts.
+  accepted: boolean;
 }
 
 export interface TranscriptUi {
@@ -147,10 +154,12 @@ export function withReaderState(state: TranscriptState, patch: Partial<Pick<Tran
 
 export const blockIdentityOf = (apiMessageId: ApiMessageId, blockIndex: number) => `${apiMessageId}:${blockIndex}`;
 export const isEngineOrigin = (origin: string | null) => origin !== null && origin !== 'human';
+// *Turn origin*: positive evidence only; `peer` is its own value, any other non-human origin is the engine's.
+export const originOf = (origin: string | null): TurnOrigin => (origin === 'peer' ? 'peer' : isEngineOrigin(origin) ? 'engine' : 'human');
 
 const BLOCK_TYPES = new Set(['text', 'thinking', 'tool_use']);
 const blockTypeOf = (type: string): LiveBlock['blockType'] | null => (BLOCK_TYPES.has(type) ? (type as LiveBlock['blockType']) : null);
-const blockContent = (block: { type: string; text?: unknown; thinking?: unknown }) => String(block.type === 'text' ? (block.text ?? '') : (block.thinking ?? ''));
+const blockContent = (block: { type: string; text?: unknown; thinking?: unknown }) => stripAnsi(String(block.type === 'text' ? (block.text ?? '') : (block.thinking ?? '')));
 const liveRowId = (type: LiveBlock['blockType'], api: ApiMessageId, index: number): RowId =>
   type === 'text' ? rowId.text(api, index) : type === 'thinking' ? rowId.think(api, index) : (`tooluse:${blockIdentityOf(api, index)}` as RowId);
 
@@ -199,8 +208,8 @@ class Batch {
     return this.state.current === null ? null : this.touch(this.state.current);
   }
 
-  open(id: TurnId, origin: 'human' | 'engine', at: string): TurnState {
-    const turn: TurnState = { id, origin, state: 'open', startedAt: at, endedAt: null, events: [], children: new Map(), live: new Map(), ended: null, version: 0, lastApiMessageId: null, closedBy: null };
+  open(id: TurnId, origin: TurnOrigin, at: string, accepted = true): TurnState {
+    const turn: TurnState = { id, origin, state: 'open', startedAt: at, endedAt: null, events: [], children: new Map(), live: new Map(), ended: null, version: 0, lastApiMessageId: null, closedBy: null, accepted };
     this.state.turns.set(id, turn);
     this.order().push(id);
     this.touched.add(id);
@@ -232,8 +241,17 @@ class Batch {
     turn.state = 'closed';
     turn.ended = ended;
     turn.endedAt = ended.at;
-    if (isEngineOrigin(ended.origin)) turn.origin = 'engine';
+    if (originOf(ended.origin) !== 'human') turn.origin = originOf(ended.origin);
     this.push(turn, ended);
+    this.advance(turn.id);
+  }
+
+  // A pending prompt the engine dropped before it started: its turn closes without work, the lifecycle event retained
+  // (derive.ts reads it to mark the bubble dropped).
+  drop(turn: TurnState, lifecycle: Event<'command.lifecycle'>): void {
+    turn.state = 'closed';
+    turn.endedAt = lifecycle.at;
+    this.push(turn, lifecycle);
     this.advance(turn.id);
   }
 
@@ -246,11 +264,12 @@ class Batch {
     this.advance(turn.id);
   }
 
-  // After a turn closes, the next open turn in order (a queued prompt) becomes current.
+  // After a turn closes, the next accepted open turn in order becomes current; a pending prompt waits for its own
+  // `turn.started`, so the events in between (an engine-initiated turn among them) never land in it.
   advance(closed: TurnId): void {
     if (this.state.current !== closed) return;
     const from = this.state.order.indexOf(closed) + 1;
-    const next = this.state.order.slice(from).find((id) => this.state.turns.get(id)!.state === 'open');
+    const next = this.state.order.slice(from).find((id) => this.state.turns.get(id)!.state === 'open' && this.state.turns.get(id)!.accepted);
     this.state.current = next ?? null;
   }
 }
@@ -292,8 +311,21 @@ function apply(batch: Batch, event: SessionEvent): void {
     case 'turn.started': {
       if (event.userMessageUuid !== null && state.echoUuids.has(event.userMessageUuid)) return;
       const id = event.userMessageUuid === null ? turnIdOf.ofEvent(event.id) : turnIdOf.ofMessage(event.userMessageUuid);
-      if (state.turns.has(id)) return;
-      const turn = batch.open(id, isEngineOrigin(event.origin) ? 'engine' : 'human', event.at);
+      const existing = state.turns.get(id);
+      if (existing) {
+        // *Turn boundaries on this engine*: the started of a pending prompt opens its turn in place (no second turn,
+        // no second user row); the turn gains its divider and becomes the one receiving the engine's output.
+        if (existing.accepted || existing.state !== 'open') return;
+        const turn = batch.touch(id);
+        turn.accepted = true;
+        turn.startedAt = event.at;
+        if (originOf(event.origin) !== 'human') turn.origin = originOf(event.origin);
+        batch.push(turn, event);
+        const current = state.current === null ? null : state.turns.get(state.current)!;
+        if (current === null || !current.accepted) state.current = id;
+        return;
+      }
+      const turn = batch.open(id, originOf(event.origin), event.at);
       batch.push(turn, event);
       return;
     }
@@ -307,14 +339,12 @@ function apply(batch: Batch, event: SessionEvent): void {
       return;
     }
     case 'command.lifecycle': {
-      // *Steers and dropped prompts*: a cancel naming a steer marks that steer's row dropped and nothing else, before or
-      // after the turn's result (derive.ts skips a steer the closing `turn.ended.userMessageUuids` named: consumed). One
-      // naming a turn's opening prompt is a no-op here (an idle drop arrives as `turn.ended { terminalReason:
-      // 'cancelled' }` from the wire; after a result it changes nothing). The reducer never closes a turn on a lifecycle.
+      // *Turn boundaries on this engine*: a cancel naming a pending prompt drops it (its bubble reads Not sent) and
+      // closes its turn without work. Naming a turn the engine accepted, or one already closed, it changes nothing.
       if (event.state !== 'cancelled' && event.state !== 'discarded' && event.state !== 'refused') return;
-      const owner = index.messages.get(event.commandUuid);
-      if (owner === undefined || turnIdOf.ofMessage(event.commandUuid) === owner) return;
-      pushRouted(owner);
+      const pending = state.turns.get(turnIdOf.ofMessage(event.commandUuid));
+      if (!pending || pending.accepted || pending.state !== 'open') return;
+      batch.drop(batch.touch(pending.id), event);
       return;
     }
     case 'user.message': {
@@ -337,14 +367,11 @@ function apply(batch: Batch, event: SessionEvent): void {
         batch.push(turn, event);
         return;
       }
-      const current = batch.current();
-      if (current) {
-        // A steer: a prompt sent while this turn runs joins it (its uuid belongs to the turn; no turn of its own).
-        if (event.messageUuid !== null) index.messages.set(event.messageUuid, current.id);
-        return batch.push(current, event);
-      }
+      // *Turn boundaries on this engine*: a prompt with no turn yet is a pending turn of its own, after the running one
+      // (nothing folds into a running turn); with no turn running it is current, so a disk turn that never carries a
+      // `turn.started` still gathers its answer.
       const id = event.messageUuid === null ? turnIdOf.ofEvent(event.id) : turnIdOf.ofMessage(event.messageUuid);
-      const turn = batch.open(id, 'human', event.at);
+      const turn = batch.open(id, 'human', event.at, false);
       if (event.messageUuid !== null) index.messages.set(event.messageUuid, id);
       batch.push(turn, event);
       return;
@@ -359,11 +386,11 @@ function apply(batch: Batch, event: SessionEvent): void {
       const identity = blockIdentityOf(apiMessageId, event.blockIndex);
       const entry = turn.live.get(identity);
       if (entry) {
-        if (!entry.completed) turn.live.set(identity, { ...entry, buffer: entry.buffer + piece });
+        if (!entry.completed) turn.live.set(identity, { ...entry, buffer: type === 'tool_use' ? entry.buffer + piece : appendStripped(entry.buffer, piece) });
         return;
       }
       turn.live.set(identity, {
-        apiMessageId, blockIndex: event.blockIndex, blockType: type, buffer: piece, rowId: liveRowId(type, apiMessageId, event.blockIndex), completed: false,
+        apiMessageId, blockIndex: event.blockIndex, blockType: type, buffer: type === 'tool_use' ? piece : appendStripped('', piece), rowId: liveRowId(type, apiMessageId, event.blockIndex), completed: false,
         markerEventId: type === 'tool_use' ? null : event.id, completeEventId: null, completedAt: null, messageUuid: null, model: null,
       });
       if (type !== 'tool_use') batch.push(turn, event); // the row appears now: a structural change

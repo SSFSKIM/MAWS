@@ -29,7 +29,7 @@
     "id": "divider:turn:a5bf8381-f5c0-4394-88a8-4b04c12e4911",
     "kind": "divider",
     "origin": "human",
-    "startedAt": "2026-09-28T09:22:18.973Z",
+    "startedAt": "2026-09-28T09:22:19.024Z",
     "state": "stopped",
     "summary": {
       "autoDenied": 0,
@@ -285,9 +285,9 @@
     "kind": "user",
     "lines": 1,
     "messageUuid": "99662785-5122-45a7-a68f-d734959a0c52",
-    "steer": true,
+    "steer": false,
     "text": "After counting, reply exactly QUEUED.",
-    "turnId": "turn:a5bf8381-f5c0-4394-88a8-4b04c12e4911"
+    "turnId": "turn:99662785-5122-45a7-a68f-d734959a0c52"
   },
   {
     "at": "2026-09-28T09:22:23.032Z",
@@ -312,7 +312,7 @@
     "id": "divider:turn:e88214f8-3ba3-4b4c-8e64-3be1595fcac0",
     "kind": "divider",
     "origin": "human",
-    "startedAt": "2026-09-28T09:22:23.032Z",
+    "startedAt": "2026-09-28T09:22:23.034Z",
     "state": "completed",
     "summary": {
       "autoDenied": 0,

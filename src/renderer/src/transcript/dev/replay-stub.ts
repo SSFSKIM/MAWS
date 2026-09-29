@@ -18,7 +18,7 @@ const bool = (value: unknown): boolean => value === true;
 
 const BASH_INPUT = /^<bash-input>([\s\S]*?)<\/bash-input>$/;
 const LOCAL_COMMAND = /^\s*<local-command-(stdout|caveat)>[\s\S]*<\/local-command-\1>\s*$/;
-const INTERRUPT_MARKER = '[Request interrupted by user]';
+const INTERRUPT_MARKERS = ['[Request interrupted by user]', '[Request interrupted by user for tool use]']; // the engine's two markers
 const BASH_OUTPUT = /^<bash-stdout>([\s\S]*?)<\/bash-stdout><bash-stderr>([\s\S]*?)<\/bash-stderr><bash-exit-code>(-?\d+)<\/bash-exit-code>$/;
 
 const NOTICE_LEVELS = new Set(['info', 'notice', 'suggestion', 'warning']);
@@ -42,9 +42,7 @@ export interface StubOptions { sessionId?: SessionId }
 export function journalToEvents(rows: JournalRow[], options: StubOptions = {}): SessionEvent[] {
   const events: SessionEvent[] = [];
   let sessionId: SessionId | null = options.sessionId ?? null;
-  let open = false; // a turn is open: after our querying user frame or an engine-initiated init, until its result
-  let openedBy: string | null = null; // the prompt uuid that opened the current turn, until its system/init accepts it
-  let initSeen = false; // a system/init arrived since the current turn opened
+  let open = false; // a turn is open: from its prompt's `command_lifecycle started` or an engine-initiated init, until its result
   let pendingEcho = false; // a shouldQuery:false frame went out and its receipt has not arrived
   const promptUuids = new Set<string>(); // our own prompts; the engine's inbound replay of one yields nothing
   const currentApi = new Map<string, string>(); // parent key → api message id of the message being streamed
@@ -87,13 +85,8 @@ export function journalToEvents(rows: JournalRow[], options: StubOptions = {}): 
             return;
           }
           if (uuid) promptUuids.add(uuid);
-          // A prompt sent while a turn runs is a steer: its message joins that turn, no turn.started of its own.
-          if (!open) {
-            put('turn.started', { userMessageUuid: uuid as MessageUuid | null, origin: 'human' });
-            open = true;
-            openedBy = uuid;
-            initSeen = false;
-          }
+          // C3's mapping (*Turn boundaries on this engine*): the bubble at the write; the turn opens when the engine
+          // accepts the prompt (`command_lifecycle started`, below).
           put('user.message', { messageUuid: uuid as MessageUuid | null, content, isReplay: false, isSynthetic: false, origin: str(rec(frame.origin).kind) ?? 'human', bash: null });
           return;
         }
@@ -145,7 +138,7 @@ export function journalToEvents(rows: JournalRow[], options: StubOptions = {}): 
     // Stdout (`in`) frames.
     switch (frame.type) {
       case 'system':
-        return systemFrame(frame, put, { get open() { return open; }, set open(v) { open = v; }, get pendingEcho() { return pendingEcho; }, accept() { initSeen = true; } }, tasks, agentByToolUse);
+        return systemFrame(frame, put, { get open() { return open; }, set open(v) { open = v; }, get pendingEcho() { return pendingEcho; } }, tasks, agentByToolUse);
       case 'assistant': {
         const message = rec(frame.message);
         const apiMessageId = (str(message.id) ?? '') as ApiMessageId;
@@ -179,7 +172,7 @@ export function journalToEvents(rows: JournalRow[], options: StubOptions = {}): 
           });
           return;
         }
-        if (content.length === 1 && content[0].type === 'text' && content[0].text === INTERRUPT_MARKER) {
+        if (content.length === 1 && content[0].type === 'text' && INTERRUPT_MARKERS.includes(String(content[0].text))) {
           put('user.message', { messageUuid: uuid as MessageUuid | null, content, isReplay: bool(frame.isReplay), isSynthetic: bool(frame.isSynthetic), origin: 'interrupt-marker', bash: null });
           return;
         }
@@ -250,10 +243,7 @@ export function journalToEvents(rows: JournalRow[], options: StubOptions = {}): 
           origin: str(rec(frame.origin).kind), resultIndex: num(frame.result_index), isEchoReceipt,
         });
         if (isEchoReceipt) pendingEcho = false;
-        else {
-          open = false;
-          openedBy = null;
-        }
+        else open = false;
         return;
       }
       case 'control_request': {
@@ -299,19 +289,12 @@ export function journalToEvents(rows: JournalRow[], options: StubOptions = {}): 
       case 'command_lifecycle': {
         const state = frame.state as Payload<'command.lifecycle'>['state'];
         const commandUuid = (str(frame.command_uuid) ?? '') as MessageUuid;
-        // An idle prompt dropped before its init: the lifecycle row becomes the turn's `turn.ended` (C3's narrow rule;
-        // *Steers and dropped prompts*). A cancel naming a steer, or one after the result, stays a lifecycle event.
-        if ((state === 'cancelled' || state === 'discarded' || state === 'refused') && open && !initSeen && openedBy !== null && commandUuid === openedBy) {
-          put('turn.ended', {
-            result: 'cancelled', isError: false, terminalReason: 'cancelled', resultText: null, durationMs: 0, numTurns: 0, costUsd: 0,
-            usage: { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, thinkingTokens: null },
-            permissionDenials: [], errors: [], userMessageUuids: [commandUuid], origin: 'human', resultIndex: null, isEchoReceipt: false,
-          });
-          open = false;
-          openedBy = null;
-          return;
-        }
         put('command.lifecycle', { commandUuid, state });
+        // The engine accepted one of our prompts (never the `!` echo): its turn starts here.
+        if (state === 'started' && promptUuids.has(commandUuid)) {
+          put('turn.started', { userMessageUuid: commandUuid, origin: 'human' });
+          open = true;
+        }
         return;
       }
       case 'tool_progress':
@@ -326,7 +309,7 @@ export function journalToEvents(rows: JournalRow[], options: StubOptions = {}): 
   return events;
 }
 
-interface TurnFlags { open: boolean; readonly pendingEcho: boolean; accept(): void } // accept: a system/init arrived for the open turn
+interface TurnFlags { open: boolean; readonly pendingEcho: boolean }
 type Put = <K extends SessionEvent['kind']>(kind: K, payload: Payload<K>) => void;
 
 function systemFrame(frame: Frame, put: Put, turn: TurnFlags, tasks: Map<string, { taskType: string; workflowName: string | null }>, agentByToolUse: Map<string, string>): void {
@@ -344,7 +327,6 @@ function systemFrame(frame: Frame, put: Put, turn: TurnFlags, tasks: Map<string,
         put('turn.started', { userMessageUuid: null, origin: 'engine' });
         turn.open = true;
       }
-      turn.accept();
       return;
     }
     case 'task_started': {

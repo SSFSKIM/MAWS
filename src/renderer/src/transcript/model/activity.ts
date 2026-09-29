@@ -32,7 +32,7 @@ export function subagentActivity(turn: TurnState, ref: SubagentRef): SubagentAct
 // nothing.
 export interface TurnActivity extends TurnWork {
   turnId: TurnId;
-  origin: 'human' | 'engine';
+  origin: 'human' | 'engine' | 'peer';
   state: TurnState['state'];
   startedAt: string;
   endedAt: string | null;

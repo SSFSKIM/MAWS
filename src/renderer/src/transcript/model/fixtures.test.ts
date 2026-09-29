@@ -168,16 +168,12 @@ describe('synthetic journals', () => {
     expect(cells[1].detail).toMatchObject({ kind: 'shell', truncated: null });
   });
 
-  it('transcript/idle-drop: a prompt dropped before its init closes on the cancelled turn.ended derived from its lifecycle row', () => {
+  it('transcript/idle-drop: a prompt the engine drops before it starts stays a bubble, dropped, and its turn closes without work', () => {
     const events = journal('idle-drop');
-    const ended = events.find((e) => e.kind === 'turn.ended') as Extract<SessionEvent, { kind: 'turn.ended' }>;
+    // No turn.started (the engine never accepted it) and no synthetic turn.ended: the lifecycle event is the drop.
+    expect(events.some((e) => e.kind === 'turn.started' || e.kind === 'turn.ended')).toBe(false);
     const lifecycle = loadSyntheticJournal('idle-drop').find((row) => (row.frame as { type?: string; state?: string }).type === 'command_lifecycle' && (row.frame as { state?: string }).state === 'cancelled')!;
-    expect(ended).toMatchObject({
-      seq: lifecycle.seq, at: lifecycle.at, result: 'cancelled', isError: false, terminalReason: 'cancelled', resultText: null, durationMs: 0, numTurns: 0, costUsd: 0,
-      usage: { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, thinkingTokens: null }, permissionDenials: [], errors: [], origin: 'human', resultIndex: null, isEchoReceipt: false,
-    });
-    expect(ended.userMessageUuids).toHaveLength(1);
-    expect(events.some((e) => e.kind === 'command.lifecycle' && e.state === 'cancelled')).toBe(false);
+    expect(events.find((e) => e.kind === 'command.lifecycle' && e.state === 'cancelled')).toMatchObject({ seq: lifecycle.seq, at: lifecycle.at });
     const state = stateOf(events);
     expect(state.order).toHaveLength(1);
     expect(state.turns.get(state.order[0])!.state).toBe('closed');

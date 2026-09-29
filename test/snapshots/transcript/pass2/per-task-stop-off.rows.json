@@ -29,7 +29,7 @@
     "id": "divider:turn:cba09f87-9767-4699-879f-f2a7560dc79b",
     "kind": "divider",
     "origin": "human",
-    "startedAt": "2026-09-28T10:01:37.168Z",
+    "startedAt": "2026-09-28T10:01:37.217Z",
     "state": "stopped",
     "summary": {
       "autoDenied": 0,
@@ -163,19 +163,6 @@
     "status": "stopped",
     "toolName": "Bash",
     "toolUseId": "toolu_011A76mf8b7vDVv6QLxyPQU8",
-    "turnId": "turn:cba09f87-9767-4699-879f-f2a7560dc79b"
-  },
-  {
-    "at": "2026-09-28T10:01:46.014Z",
-    "attachments": [],
-    "dropped": false,
-    "editable": true,
-    "id": "user:2dd8ab02-9206-4cdb-a266-680982d8c4fc",
-    "kind": "user",
-    "lines": 1,
-    "messageUuid": "2dd8ab02-9206-4cdb-a266-680982d8c4fc",
-    "steer": true,
-    "text": "[Request interrupted by user for tool use]",
     "turnId": "turn:cba09f87-9767-4699-879f-f2a7560dc79b"
   },
   {

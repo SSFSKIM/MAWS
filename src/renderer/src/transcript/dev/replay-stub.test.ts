@@ -11,6 +11,8 @@ import { journalToEvents } from './replay-stub';
 
 const events = (pass: FixturePass, name: string) => journalToEvents(loadJournal(pass, name));
 const stateOf = (pass: FixturePass, name: string) => applyEvents(createState(null, null), events(pass, name));
+const journalState = (pass: FixturePass, name: string, throughSeq: number) =>
+  applyEvents(createState(null, null), events(pass, name).filter((event) => event.seq !== null && event.seq <= throughSeq));
 const rowsFor = (pass: FixturePass, name: string) => rowsOf(withAllExpanded(stateOf(pass, name)));
 const ofKind = <K extends Row['kind']>(rows: Row[], kind: K) => rows.filter((row): row is Extract<Row, { kind: K }> => row.kind === kind);
 const cellsOf = (rows: Row[]) => rows.flatMap((row) => (row.kind === 'group' ? row.cells : row.kind === 'cell' ? [row] : []));
@@ -39,8 +41,10 @@ describe('replay stub: every journal of both passes yields valid X1 events', () 
 describe('replay stub: the querying-user mapping', () => {
   it('pass1/permission-roundtrip: three human turns from the out frames, each with its bubble, no replay duplicates', () => {
     const list = events('pass1', 'permission-roundtrip');
+    const users0Uuid = '6ffe2781-e332-43ac-b218-09fb29e670de';
     const starts = list.filter((e): e is Extract<SessionEvent, { kind: 'turn.started' }> => e.kind === 'turn.started');
-    expect(starts.map((e) => [e.seq, e.origin])).toEqual([[4, 'human'], [94, 'human'], [192, 'human']]);
+    // The bubble at the out frame, the turn at the engine's `command_lifecycle started` for that uuid (C3's mapping).
+    expect(starts.map((e) => [e.seq, e.origin, e.userMessageUuid])).toEqual([[6, 'human', users0Uuid], [97, 'human', expect.any(String)], [195, 'human', expect.any(String)]]);
     const users = list.filter((e): e is Extract<SessionEvent, { kind: 'user.message' }> => e.kind === 'user.message');
     expect(users.map((e) => e.seq)).toEqual([4, 94, 192]);
     expect(users[0]).toMatchObject({ messageUuid: '6ffe2781-e332-43ac-b218-09fb29e670de', origin: 'human', isReplay: false, isSynthetic: false, bash: null });
@@ -54,9 +58,11 @@ describe('replay stub: the querying-user mapping', () => {
     const list = events('pass1', 'queue-and-interrupt');
     const users = list.filter((e): e is Extract<SessionEvent, { kind: 'user.message' }> => e.kind === 'user.message');
     expect(users.filter((e) => e.messageUuid === 'a5bf8381-f5c0-4394-88a8-4b04c12e4911')).toHaveLength(1);
-    // The steer at seq 146 is a user.message with no turn.started of its own; the two turns start at seq 4 and 199.
-    expect(list.filter((e) => e.kind === 'turn.started').map((e) => e.seq)).toEqual([4, 199]);
+    // Each turn starts at its prompt's `command_lifecycle started` (seq 6 and 202); the prompt queued at seq 146 never
+    // starts (cancelled at seq 191), so it is a user.message with no turn.started.
+    expect(list.filter((e) => e.kind === 'turn.started').map((e) => e.seq)).toEqual([6, 202]);
     expect(list.filter((e) => e.seq === 146).map((e) => e.kind)).toEqual(['user.message']);
+    expect(list.filter((e) => e.kind === 'turn.ended').every((e) => e.kind === 'turn.ended' && e.terminalReason !== 'cancelled')).toBe(true);
     expect(list.find((e) => e.seq === 191)).toMatchObject({ kind: 'command.lifecycle', state: 'cancelled', commandUuid: '99662785-5122-45a7-a68f-d734959a0c52' });
     expect(users.find((e) => e.seq === 235)).toMatchObject({ bash: { part: 'input', command: 'printf BASH_MODE_OK' }, isReplay: true });
     expect(users.find((e) => e.seq === 236)).toMatchObject({ bash: { part: 'output', stdout: 'BASH_MODE_OK', stderr: '', exitCode: 0 } });
@@ -72,14 +78,16 @@ describe('replay stub: the querying-user mapping', () => {
     expect(list.find((e) => e.seq === 9)).toMatchObject({ origin: 'bash_echo', isSynthetic: true, isReplay: false, bash: null, messageUuid: '36328998-c3a9-46c4-af5c-79c755aa1f39' });
     expect(at(12)).toEqual(['session.init']);
     expect(list.find((e) => e.seq === 13)).toMatchObject({ kind: 'turn.ended', isEchoReceipt: true });
-    expect(at(16)).toEqual(['turn.started', 'user.message']);
+    expect(at(11)).toEqual(['command.lifecycle']); // the echo's own started opens nothing
+    expect(at(16)).toEqual(['user.message']);
+    expect(at(18)).toEqual(['command.lifecycle', 'turn.started']);
     expect(at(21)).toEqual([]); // the engine's inbound replay of seq 16
   });
 
   it('pass1/subagent: a system/init with no turn open is an engine turn; task frames become subagent events', () => {
     const list = events('pass1', 'subagent');
     const starts = list.filter((e): e is Extract<SessionEvent, { kind: 'turn.started' }> => e.kind === 'turn.started');
-    expect(starts.map((e) => [e.seq, e.origin])).toEqual([[4, 'human'], [355, 'engine'], [425, 'engine']]);
+    expect(starts.map((e) => [e.seq, e.origin])).toEqual([[6, 'human'], [355, 'engine'], [425, 'engine']]);
     expect(list.filter((e) => e.kind === 'subagent.started').map((e) => e.seq)).toEqual([172, 217]);
     expect(list.filter((e) => e.kind === 'subagent.finished').map((e) => e.seq)).toEqual([335, 365]);
     expect(list.find((e) => e.seq === 335)).toMatchObject({ kind: 'subagent.finished', taskId: 'ad286defbc77bc090', status: 'completed', summary: 'ONE' });
@@ -184,24 +192,30 @@ describe('fixture gates through the model', () => {
     expect(ofKind(rowsFor('pass1', 'question-roundtrip'), 'request_slot')).toHaveLength(0);
   });
 
-  it('pass1/queue-and-interrupt: one bash row with exit 0, a stopped divider, four stopped cells, two human turns and the dropped steer', () => {
+  it('pass1/queue-and-interrupt: one bash row with exit 0, a stopped divider, four stopped cells, and three turns, the queued prompt pending then dropped', () => {
     const state = stateOf('pass1', 'queue-and-interrupt');
-    expect(state.order).toEqual(['turn:a5bf8381-f5c0-4394-88a8-4b04c12e4911', 'turn:e88214f8-3ba3-4b4c-8e64-3be1595fcac0']);
-    expect(state.order.map((id) => state.turns.get(id)!.origin)).toEqual(['human', 'human']);
+    const QUEUED = 'turn:99662785-5122-45a7-a68f-d734959a0c52';
+    expect(state.order).toEqual(['turn:a5bf8381-f5c0-4394-88a8-4b04c12e4911', QUEUED, 'turn:e88214f8-3ba3-4b4c-8e64-3be1595fcac0']);
+    expect(state.order.map((id) => state.turns.get(id)!.origin)).toEqual(['human', 'human', 'human']);
+    expect(state.order.map((id) => state.turns.get(id)!.state)).toEqual(['closed', 'closed', 'closed']);
     const rows = rowsFor('pass1', 'queue-and-interrupt');
     const bash = ofKind(rows, 'bash');
     expect(bash).toHaveLength(1);
     expect(bash[0]).toMatchObject({ command: 'printf BASH_MODE_OK', stdout: 'BASH_MODE_OK', exitCode: 0, turnId: null });
     const dividers = ofKind(rows, 'divider');
+    expect(dividers.map((row) => row.turnId)).toEqual([state.order[0], state.order[2]]); // the dropped prompt did no work
     expect(dividers[0]).toMatchObject({ state: 'stopped', denied: 0, autoDenied: 0, firstDeniedCell: null });
     expect(cellsOf(rows).filter((cell) => cell.status === 'stopped')).toHaveLength(4);
     const users = ofKind(rows, 'user');
     expect(users.map((row) => row.text.slice(0, 8))).toEqual(['Count to', 'After co', 'Counting']);
-    expect(users[1]).toMatchObject({ id: 'user:99662785-5122-45a7-a68f-d734959a0c52', turnId: state.order[0], steer: true, dropped: true });
+    expect(users[1]).toMatchObject({ id: 'user:99662785-5122-45a7-a68f-d734959a0c52', turnId: QUEUED, steer: false, dropped: true });
     expect(users[0]).toMatchObject({ steer: false, dropped: false });
-    expect(users[2]).toMatchObject({ turnId: state.order[1], steer: false, dropped: false });
-    // The steer sits outside the work area: still there with the turn collapsed.
-    expect(ofKind(rowsOf(state), 'user')).toHaveLength(3);
+    expect(users[2]).toMatchObject({ turnId: state.order[2], steer: false, dropped: false });
+    // Pending then dropped: after the queue write (seq 146) the prompt is a turn of its own with its bubble and no
+    // divider while the first turn still runs.
+    const pending = rowsOf(journalState('pass1', 'queue-and-interrupt', 146));
+    expect(pending.filter((row) => row.turnId === QUEUED).map((row) => row.kind)).toEqual(['user']);
+    expect(ofKind(pending, 'user').find((row) => row.turnId === QUEUED)).toMatchObject({ dropped: false });
   });
 
   it('pass2/workflow: a workflow subagent row and an engine turn', () => {

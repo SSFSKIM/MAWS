@@ -29,7 +29,7 @@
     "id": "divider:turn:531078df-e314-4293-9167-94e372fb3b29",
     "kind": "divider",
     "origin": "human",
-    "startedAt": "2026-09-28T09:58:21.765Z",
+    "startedAt": "2026-09-28T09:58:21.771Z",
     "state": "completed",
     "summary": {
       "autoDenied": 0,
@@ -120,7 +120,7 @@
     "id": "text:msg_011CfVe6MSF7RNo5xyRDoWfr:0",
     "kind": "assistant_text",
     "live": false,
-    "markdown": "\n\u001b[1;36mto human\u001b[0m\n\nOK\n",
+    "markdown": "\nto human\n\nOK\n",
     "messageUuid": "159692af-5fd4-477f-9731-39bae9d72545",
     "model": "claude-sonnet-5",
     "phase": "answer",

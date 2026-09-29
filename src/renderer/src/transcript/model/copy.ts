@@ -23,7 +23,7 @@ const list = (names: string[]) => (names.length <= 1 ? (names[0] ?? '') : `${nam
 
 export interface DividerCopyInput {
   state: 'working' | 'completed' | 'stopped' | 'failed';
-  origin: 'human' | 'engine';
+  origin: 'human' | 'engine' | 'peer';
   durationMs: number;
   toolCalls: number;
   denied: number;
@@ -34,7 +34,7 @@ function verb(state: DividerCopyInput['state'], origin: DividerCopyInput['origin
   const t = duration(durationMs);
   switch (state) {
     case 'working': return durationMs < 1000 ? 'Working' : `Working for ${t}`;
-    case 'completed': return origin === 'engine' ? `Continued for ${t}` : `Worked for ${t}`;
+    case 'completed': return origin === 'engine' ? `Continued for ${t}` : origin === 'peer' ? `Peer session worked for ${t}` : `Worked for ${t}`;
     case 'stopped': return `You stopped after ${t}`;
     case 'failed': return `Failed after ${t}`;
   }
