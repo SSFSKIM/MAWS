@@ -40,8 +40,8 @@ describe('normaliser replays every probe fixture into the X1 graph', () => {
     expect(listJournals('pass1')).toHaveLength(10);
     expect(listJournals('pass2')).toHaveLength(30);
     // C10's fork-worktree and C8c's workspace-diff probes (copied from master at 644ea7a)
-    // and C3's own live recordings (M6: rewind-files from 3.12, plan-outcomes from 3.20, steer-now from 3.7, engine-turn-release from 3.10, steer-next from the fix wave's live check)
-    expect(listJournals('pass3')).toEqual(['engine-turn-release', 'fork-worktree-fork', 'fork-worktree-resume-in-b', 'fork-worktree-start', 'plan-outcomes', 'rewind-files', 'steer-next', 'steer-now', 'workspace-diff-branch', 'workspace-diff-dirty']);
+    // and C3's own live recordings (M6: rewind-files from 3.12, plan-outcomes from 3.20, steer-now from 3.7's passing rerun and steer-now-unheld from its first run, engine-turn-release from 3.10, steer-next from the fix wave's live check)
+    expect(listJournals('pass3')).toEqual(['engine-turn-release', 'fork-worktree-fork', 'fork-worktree-resume-in-b', 'fork-worktree-start', 'plan-outcomes', 'rewind-files', 'steer-next', 'steer-now', 'steer-now-unheld', 'workspace-diff-branch', 'workspace-diff-dirty']);
   });
 
   for (const pass of FIXTURE_PASSES) {
@@ -258,8 +258,26 @@ describe('normaliser: per-fixture graph facts (C2 findings restated)', () => {
       e.kind === 'turn.started' ? `start ${e.seq} ${e.origin} ${e.userMessageUuid ?? '-'}` : `end ${e.seq} ${(e as Extract<SessionEvent, { kind: 'turn.ended' }>).origin} ${(e as Extract<SessionEvent, { kind: 'turn.ended' }>).userMessageUuids.join(',') || '-'}`,
     );
 
-  it("pass3/steer-now (live 3.7): a now steer preempts the running turn and its reply is attributed to the steer's own turn, the queued prompt's to its own", async () => {
+  it("pass3/steer-now (live 3.7's passing rerun): a now steer preempts the running turn, the queued prompt is held until the steer's own result, and each reply keeps its own turn", async () => {
     const { events, rows } = await run('pass3', 'steer-now');
+    const [count, steer, after] = ['7aa791e4-4261-41a4-9ef3-e1590591dd3c', 'e80149ac-ba3a-486a-8d42-b07a6f987698', '03797d66-6388-4e77-beb2-6f0007014054'];
+    expect((rows.find((r) => r.seq === 46)!.frame as { priority?: string }).priority).toBe('now');
+    expect(turnLog(events)).toEqual([
+      `start 19 human ${count}`, `end 48 human ${count}`, // preempted: aborted_streaming, naming only the counting prompt
+      `start 51 human ${steer}`, `end 69 human ${steer}`, // the steer's own started opens its own turn
+      `start 77 human ${after}`, `end 92 human ${after}`,
+    ]);
+    expect(ofKind(events, 'turn.ended').map((e) => e.terminalReason)).toEqual(['aborted_streaming', 'completed', 'completed']);
+    expect(ofKind(events, 'turn.ended')[1]!.resultText).toContain('STEERED');
+    expect(ofKind(events, 'turn.ended')[2]!.resultText).toContain('AFTER');
+    // the hold: the queued prompt's release (seq 74) comes after the steer's result (69), never while the steer is unstarted
+    const releases = rows.filter((r) => r.direction === 'meta' && (r.frame as { event?: string; action?: string }).event === 'queue' && (r.frame as { action?: string }).action === 'release');
+    expect(releases.map((r) => [r.seq, (r.frame as { trigger: string }).trigger])).toEqual([[15, 'send'], [74, 'turn_ended']]);
+    expect(ofKind(events, 'user.message').filter((e) => e.origin === 'human').map((e) => [e.seq, e.messageUuid])).toEqual([[16, count], [46, steer], [75, after]]);
+  });
+
+  it("pass3/steer-now-unheld (live 3.7's first run, queue rows from before the hold): a prompt written while the now steer is unstarted still gets its own turn, as does the steer", async () => {
+    const { events, rows } = await run('pass3', 'steer-now-unheld');
     const [count, steer, after] = ['07d1e738-414a-4630-a243-a1ee35210326', '55744f27-09fb-4141-89d5-5f0adfddffca', '6ebd79ba-a46b-4442-ac6a-716532177882'];
     expect((rows.find((r) => r.seq === 46)!.frame as { priority?: string }).priority).toBe('now');
     expect(turnLog(events)).toEqual([

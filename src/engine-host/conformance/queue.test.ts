@@ -211,7 +211,7 @@ describe('a now steer holds the queue until its own turn ends (coordinator rulin
     const queued = await s.session.send('Reply with exactly AFTER');
     expect(queued.disposition).toBe('queued');
     const { messageUuid: steer } = await s.session.steer('Stop counting and reply STEERED');
-    // the live shape (pass3/steer-now seq 48 → 54 → 55): the running turn ends preempted, its command is cancelled, the steer starts
+    // the live shape (pass3/steer-now seq 48 → 50 → 51): the running turn ends preempted, its command is cancelled, the steer starts
     result([first.messageUuid!], { terminal_reason: 'aborted_streaming', result: '' });
     await flush();
     expect(userOuts(s.journal.rows).map((f) => f.message.content)).toEqual(['Count to 8 slowly.', 'Stop counting and reply STEERED']); // nothing released
