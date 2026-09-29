@@ -39,6 +39,10 @@ export interface TurnState {
   ended: Event<'turn.ended'> | null;
   version: number; // bumps on every structural change; derive.ts memoises rows per (id, version, uiVersion)
   lastApiMessageId: ApiMessageId | null; // additive: the identity a delta with a null api message id takes
+  // Additive (M5): how a child transcript's turn ended. A child's own slice carries no turn.ended; the parent's
+  // `subagent.finished` or `task.notification` naming the child, which the child source delivers into the slice, closes
+  // its open turn with that outcome.
+  closedBy: 'completed' | 'failed' | 'stopped' | null;
 }
 
 export interface TranscriptUi {
@@ -187,7 +191,7 @@ class Batch {
   }
 
   open(id: TurnId, origin: 'human' | 'engine', at: string): TurnState {
-    const turn: TurnState = { id, origin, state: 'open', startedAt: at, endedAt: null, events: [], children: new Map(), live: new Map(), ended: null, version: 0, lastApiMessageId: null };
+    const turn: TurnState = { id, origin, state: 'open', startedAt: at, endedAt: null, events: [], children: new Map(), live: new Map(), ended: null, version: 0, lastApiMessageId: null, closedBy: null };
     this.state.turns.set(id, turn);
     this.order().push(id);
     this.touched.add(id);
@@ -221,6 +225,15 @@ class Batch {
     turn.endedAt = ended.at;
     if (isEngineOrigin(ended.origin)) turn.origin = 'engine';
     this.push(turn, ended);
+    this.advance(turn.id);
+  }
+
+  // A child transcript's turn, closed by the parent's report that the child ended (not retained: no row of its own).
+  closeChild(turn: TurnState, outcome: 'completed' | 'failed' | 'stopped', at: string): void {
+    turn.state = 'closed';
+    turn.closedBy = outcome;
+    turn.endedAt = at;
+    turn.version += 1;
     this.advance(turn.id);
   }
 
@@ -380,10 +393,20 @@ function apply(batch: Batch, event: SessionEvent): void {
       pushRouted(owner);
       return;
     }
-    case 'subagent.progress':
     case 'subagent.finished':
+    case 'task.notification': {
+      // In a child transcript, the parent's report that this child ended closes its open turn. For local agents the
+      // task id and the agent id carry the same string (C1 Interfaces).
+      if (state.agentId !== null && (event.taskId as string) === (state.agentId as string)) {
+        const turn = batch.current();
+        if (turn) batch.closeChild(turn, event.status, event.at);
+        return;
+      }
+      if (!pushRouted(index.tasks.get(event.taskId))) batch.loose(event, false);
+      return;
+    }
+    case 'subagent.progress':
     case 'task.updated':
-    case 'task.notification':
     case 'workflow.progress': {
       if (!pushRouted(index.tasks.get(event.taskId))) batch.loose(event, false);
       return;

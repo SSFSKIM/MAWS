@@ -395,6 +395,8 @@ test('child transcript renders the subagent\u2019s events only', async ({ harnes
   await expect(child.locator(`[data-cell-id="${CHILD_READS[0]}"]`)).toHaveCount(1);
   await expect(child.locator(`[data-cell-id="${CHILD_READS[0]}"] button`).first()).toHaveText(/^Read /);
   await expect(child.locator('[data-kind="assistant_text"]')).toHaveText(['ONE']);
+  // The parent reported the child finished, so the child's divider has settled rather than ticking "Working for …".
+  await expect(child.locator('[data-kind="divider"] button[aria-expanded]').first()).toHaveText(/^Worked for /);
   // Only that agent's events: not the other agent's Read, not the parent's prompt, sentence or answers.
   await expect(child.locator(`[data-cell-id="${CHILD_READS[1]}"]`)).toHaveCount(0);
   await expect(child.locator('[data-kind="user"], [data-kind="subagent"]')).toHaveCount(0);

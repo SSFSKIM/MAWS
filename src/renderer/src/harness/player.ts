@@ -46,15 +46,20 @@ export class HarnessSession {
 
   // A child agent's own transcript (the drill-in C8 builds over `ipcSource(appSessionId, agentId)`), here over the
   // fixture: the child's events released so far (the parent's state indexes them under the parent tool use), then
-  // the child's later events as the player releases them. Its events are top-level in its own state.
+  // the child's later events as the player releases them. Its events are top-level in its own state. Like ipcSource's
+  // child source, it also delivers the parent's report that the child ended, which closes the child's turn.
   childSource(ref: SubagentRef): TranscriptSource {
     const agentId = ref.agentId ?? (ref.taskId as string as AgentId);
     const toolUseId = ref.toolUseId;
     const ofChild = (event: SessionEvent) => event.parentToolUseId !== null && (toolUseId === null ? event.agentId === agentId : toolUseOf(event.parentToolUseId) === toolUseId);
+    const finishes = (event: SessionEvent) => (event.kind === 'subagent.finished' || event.kind === 'task.notification') && (event.taskId as string) === (agentId as string);
     const released = (): SessionEvent[] => {
       const state = useTranscriptStore.getState().entries[this.key]?.state;
-      const owner = toolUseId === null ? undefined : state?.index.toolUses.get(toolUseId);
-      return (owner !== undefined && toolUseId !== null && state?.turns.get(owner)?.children.get(toolUseId)) || [];
+      if (!state) return [];
+      const owner = toolUseId === null ? undefined : state.index.toolUses.get(toolUseId);
+      const own = (owner !== undefined && toolUseId !== null && state.turns.get(owner)?.children.get(toolUseId)) || [];
+      const finish = [...state.turns.values()].flatMap((turn) => turn.events).findLast(finishes);
+      return finish ? [...own, finish] : own;
     };
     return {
       key: `${this.key}:${agentId}`,
@@ -62,7 +67,7 @@ export class HarnessSession {
       snapshot: () => Promise.resolve(released()),
       subscribe: (listener) =>
         this.player.subscribe((batch: SessionEvent[]) => {
-          const events = batch.filter(ofChild);
+          const events = batch.filter((event) => ofChild(event) || (event.parentToolUseId === null && finishes(event)));
           if (events.length > 0) listener(events);
         }),
     };

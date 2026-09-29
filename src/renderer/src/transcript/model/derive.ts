@@ -466,7 +466,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): { rows: Row
   const files = changedFiles(cells, turn);
   const summary = summaryOf(turn, cells, subagents, model);
   const denials = summary.denials;
-  const dividerState: RowOf<'divider'>['state'] = turn.state === 'open' ? 'working' : isAborted(turn.ended?.terminalReason ?? null) ? 'stopped' : turn.ended?.isError ? 'failed' : turn.ended ? 'completed' : 'stopped';
+  const dividerState: RowOf<'divider'>['state'] = turn.state === 'open' ? 'working' : turn.closedBy !== null ? turn.closedBy : isAborted(turn.ended?.terminalReason ?? null) ? 'stopped' : turn.ended?.isError ? 'failed' : turn.ended ? 'completed' : 'stopped';
   const rows: Row[] = [];
   if (user) rows.push(user);
   if (workRows.length > 0) {

@@ -10,7 +10,10 @@ import { useTranscriptStore } from '../../stores/transcript';
 import { rowsOf } from '../model/derive';
 import { turnId } from '../model/keys';
 import { applyEvents, createState } from '../model/reduce';
+import type { Row } from '../model/rows';
 import { builder, tool, uuid } from '../model/test-events';
+import { Disclosures, NO_ACTIONS, TranscriptProvider } from '../view/context';
+import { RowView } from '../view/rows/Row';
 import { Transcript } from '../view/Transcript';
 import { ipcLoadSpillOver, ipcRewindOver, ipcSourceOver } from './ipc';
 
@@ -141,6 +144,9 @@ describe('child source provenance', () => {
   // The same child backfilled from its agent-*.jsonl: disk ids (uuids), no parent tool use.
   const onDisk = (child: SessionEvent[]) => child.map((event) => ({ ...event, id: `disk:${event.id.slice('live:'.length)}` as EventId, seq: null, parentToolUseId: null }));
   const childSource = (fake: ReturnType<typeof fakeClient>) => ipcSourceOver(fake.client, APP, AGENT);
+  // The parent's report that a child ended (a top-level event of the parent's stream).
+  const finish = (agentId: string, at: string, status: 'completed' | 'failed' | 'stopped') =>
+    builder(at).emit('subagent.finished', { taskId: agentId as TaskId, status, summary: null, outputFile: null, reason: null }, { id: `finish:${agentId}:${status}` });
   const answer = (fake: ReturnType<typeof fakeClient>, name: string, value: unknown) => {
     const call = fake.calls.find((candidate) => candidate.name === name && !candidate.answered);
     if (!call) throw new Error(`no pending ${name}`);
@@ -173,12 +179,12 @@ describe('child source provenance', () => {
     expect(received).toEqual([child.slice(2).map((event) => event.id)]);
   });
 
-  it('disk: a child the parent’s snapshot does not hold is read with fs.agentEvents (which starts following)', async () => {
+  it('disk: a child the parent never started in its snapshot (a disk-backed parent) is read with fs.agentEvents, which starts following', async () => {
     const { parent, child } = live();
     const disk = onDisk(child);
     const fake = fakeClient();
     const snapshot = childSource(fake).snapshot();
-    answer(fake, 'session.events', { events: parent, lastSeq: 3, complete: true });
+    answer(fake, 'session.events', { events: parent.filter((event) => event.kind !== 'subagent.started'), lastSeq: 3, complete: true });
     await flush();
     expect(fake.calls.map((call) => [call.name, call.input])).toEqual([
       ['session.events', { appSessionId: APP, afterSeq: null, limit: null }],
@@ -186,6 +192,64 @@ describe('child source provenance', () => {
     ]);
     answer(fake, 'fs.agentEvents', { events: disk, complete: true });
     await expect(snapshot).resolves.toEqual(disk);
+  });
+
+  it('disk: a child that finished is read with fs.agentEvents, and the parent’s finish event joins its slice', async () => {
+    const { parent, child } = live();
+    const disk = onDisk(child);
+    const finished = finish(AGENT, '2026-09-28T10:00:08.000Z', 'failed');
+    const fake = fakeClient();
+    const snapshot = childSource(fake).snapshot();
+    answer(fake, 'session.events', { events: [...parent, ...child, finished], lastSeq: 9, complete: true });
+    await flush();
+    expect(fake.calls.map((call) => call.name)).toEqual(['session.events', 'fs.agentEvents']);
+    answer(fake, 'fs.agentEvents', { events: disk, complete: true });
+    await expect(snapshot).resolves.toEqual([...disk, finished]);
+  });
+
+  it('a drill-in opened before the child’s first event follows the live stream and never reads fs.agentEvents while the child runs', async () => {
+    const { parent, child } = live();
+    const fake = fakeClient();
+    const hydrated = useTranscriptStore.getState().attach(CHILD_KEY, childSource(fake), { agentId: AGENT });
+    answer(fake, 'session.events', { events: parent, lastSeq: 3, complete: true }); // started, no child event yet
+    await hydrated;
+    expect(useTranscriptStore.getState().entries[CHILD_KEY].phase).toBe('live');
+    fake.emit('session.eventBatch', batch(child.slice(0, 2)));
+    fake.emit('session.eventBatch', batch(child.slice(2)));
+    await flush();
+    expect(fake.calls.map((call) => call.name)).toEqual(['session.events']);
+    expect([...useTranscriptStore.getState().entries[CHILD_KEY].state.seen]).toEqual(child.map((event) => event.id));
+    useTranscriptStore.getState().detach(CHILD_KEY);
+  });
+
+  it('the parent’s finish event settles the child’s divider: Worked for …, through the reset to disk as before', async () => {
+    const { parent, child } = live();
+    const disk = onDisk(child);
+    const fake = fakeClient();
+    const store = useTranscriptStore.getState();
+    const hydrated = store.attach(CHILD_KEY, childSource(fake), { agentId: AGENT });
+    answer(fake, 'session.events', { events: [...parent, ...child], lastSeq: 9, complete: true });
+    await hydrated;
+    const divider = () => useTranscriptStore.getState().rows(CHILD_KEY).find((row): row is Extract<Row, { kind: 'divider' }> => row.kind === 'divider')!;
+    expect(divider().state).toBe('working');
+    const finished = finish(AGENT, '2026-09-28T10:00:08.000Z', 'completed');
+    fake.emit('session.eventBatch', batch([finished]));
+    expect(divider().state).toBe('completed'); // delivered into the slice before the reset
+    await flush();
+    expect(fake.calls.map((call) => call.name)).toEqual(['session.events', 'fs.agentEvents']); // the reset still follows the batch that ended the child
+    answer(fake, 'fs.agentEvents', { events: disk, complete: true });
+    await flush();
+    expect(useTranscriptStore.getState().entries[CHILD_KEY].phase).toBe('live');
+    expect([...useTranscriptStore.getState().entries[CHILD_KEY].state.seen]).toEqual([...disk, finished].map((event) => event.id));
+    expect(divider().state).toBe('completed');
+    const view = render(
+      <TranscriptProvider value={{ storeKey: CHILD_KEY, variant: 'child', actions: NO_ACTIONS, rewind: null, renderRequest: null, disclosures: new Disclosures(), idPrefix: 't' }}>
+        <RowView row={divider()} />
+      </TranscriptProvider>,
+    );
+    expect(view.container.querySelector('button[aria-expanded]')?.textContent).toMatch(/^Worked for /);
+    view.unmount();
+    store.detach(CHILD_KEY);
   });
 
   it('main tab first, then the drill-in: the second attach shares the one attachment and state, and outlives the first', async () => {

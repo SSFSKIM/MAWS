@@ -45,19 +45,24 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
 
 // A child agent's source owns its provenance (Child source provenance): live while the child runs in the parent's
 // process (the parent's stream and snapshot, filtered by agent; no disk follower), disk otherwise (fs.agentEvents,
-// which starts following). The snapshot decides: live when the parent's snapshot holds the child's events. A live child
-// that ends (its own `subagent.finished` or `task.notification`, or the parent's `process.exited`) switches to disk
-// and signals a reset, so the store rebuilds the key from the disk transcript and the live and disk id forms of the
-// same events never meet. Disk is final.
+// which starts following). The snapshot decides from the parent's lifecycle events for the child: live when the
+// parent's snapshot started it (`subagent.started` or `task.started`) with no finish after, so a drill-in opened before
+// the child's first event still follows the live stream; disk otherwise (it finished, or the parent is disk-backed).
+// In both, the parent's finish event naming the child joins the child's slice, where it closes the child's open turn
+// (reduce.ts). A live child that ends (its finish, or the parent's `process.exited`) switches to disk and signals a
+// reset, so the store rebuilds the key from the disk transcript and the live and disk id forms of the same events never
+// meet. Disk is final.
 function childSource(client: MawsBridge, appSessionId: AppSessionId, agentId: AgentId): TranscriptSource {
   let provenance: 'undecided' | 'live' | 'disk' = 'undecided';
+  let finished: SessionEvent | null = null; // the parent's report that the child ended, for the disk slice
   const resets = new Set<() => void>();
   const own = (event: SessionEvent) => event.agentId === agentId;
   // For local agents the engine's task id and the sidecar's agent id carry the same string (C1 Interfaces, observed in
   // the fixtures); X1 keeps them as two types, so the comparison is on the strings.
-  const ends = (event: SessionEvent) =>
-    (event.kind === 'process.exited' && event.agentId === null) ||
-    ((event.kind === 'subagent.finished' || event.kind === 'task.notification') && (event.taskId as string) === (agentId as string));
+  const names = (taskId: string) => taskId === (agentId as string);
+  const starts = (event: SessionEvent) => (event.kind === 'subagent.started' || event.kind === 'task.started') && names(event.taskId);
+  const finishes = (event: SessionEvent) => (event.kind === 'subagent.finished' || event.kind === 'task.notification') && names(event.taskId);
+  const ends = (event: SessionEvent) => finishes(event) || (event.kind === 'process.exited' && event.agentId === null);
   // The reset is signalled once the batch that carried the end has been delivered, so the store's new subscription can
   // never receive that batch's live-form events a second time.
   const toDisk = () => {
@@ -72,7 +77,8 @@ function childSource(client: MawsBridge, appSessionId: AppSessionId, agentId: Ag
     subscribe(listener) {
       return client.on('session.eventBatch', (batch) => {
         if (batch.appSessionId !== appSessionId) return;
-        const events = batch.events.filter(own);
+        const events = batch.events.filter((event) => own(event) || finishes(event));
+        finished = events.findLast(finishes) ?? finished;
         if (events.length > 0) listener(events);
         if (provenance !== 'disk' && batch.events.some(ends)) toDisk();
       });
@@ -80,14 +86,18 @@ function childSource(client: MawsBridge, appSessionId: AppSessionId, agentId: Ag
     async snapshot() {
       const onDisk = () => provenance === 'disk'; // read after the await: the child may have ended meanwhile
       if (!onDisk()) {
-        const live = valueOf(await client.invoke('session.events', { appSessionId, afterSeq: null, limit: null })).events.filter(own);
-        if (live.length > 0 && !onDisk()) {
+        const parent = valueOf(await client.invoke('session.events', { appSessionId, afterSeq: null, limit: null })).events;
+        const started = parent.findLastIndex(starts);
+        const end = parent.findLastIndex(finishes);
+        if (end >= 0) finished = parent[end];
+        if (started >= 0 && end < started && !onDisk()) {
           provenance = 'live';
-          return live;
+          return parent.filter(own);
         }
       }
       provenance = 'disk';
-      return valueOf(await client.invoke('fs.agentEvents', { appSessionId, agentId })).events;
+      const disk = valueOf(await client.invoke('fs.agentEvents', { appSessionId, agentId })).events;
+      return finished === null ? disk : [...disk, finished];
     },
     onReset(listener) {
       resets.add(listener);

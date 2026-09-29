@@ -360,3 +360,41 @@ describe('turn summary', () => {
     expect(summary.denials).toEqual([{ kind: 'permission-rule', cellId: 'cell:t3', disposition: 'denied', interruption: false }]);
   });
 });
+
+// A child's own slice carries no turn.ended; the parent's finish event naming the child, delivered into the slice by
+// the child source, closes the child's open turn so its divider settles (Child source provenance, M5 fix round 1).
+describe('child turn closure', () => {
+  const AGENT = 'ad286defbc77bc090';
+  function child(status: 'completed' | 'failed' | 'stopped', end: 'subagent.finished' | 'task.notification') {
+    const b = builder();
+    b.toolUse('c1', 'Read', { file_path: '/p/one.txt' }, 'c1', 0);
+    b.result('c1', 'ONE');
+    b.text('c2', 0, 'ONE');
+    b.tick(2000);
+    if (end === 'subagent.finished') b.emit('subagent.finished', { taskId: task(AGENT), status, summary: 'ONE', outputFile: null, reason: null });
+    else b.emit('task.notification', { taskId: task(AGENT), toolUseId: tool('t1'), status, summary: 'ONE', outputFile: null, reason: null });
+    return b.events;
+  }
+  const childRows = (events: SessionEvent[]) => rowsOf(withAllExpanded(applyEvents(createState(null, AGENT as never), events)));
+
+  it('is working until the parent reports the child finished, then reads the finish', () => {
+    const events = child('completed', 'subagent.finished');
+    expect(find(childRows(events.slice(0, -1)), 'divider').state).toBe('working');
+    const list = childRows(events);
+    expect(find(list, 'divider')).toMatchObject({ state: 'completed', origin: 'human', endedAt: events.at(-1)!.at });
+    expect(kinds(list)).not.toContain('subagent'); // the finish event is no row of the child's own
+  });
+
+  it.each([
+    ['completed', 'task.notification', 'completed'],
+    ['failed', 'subagent.finished', 'failed'],
+    ['stopped', 'task.notification', 'stopped'],
+  ] as const)('%s via %s settles the divider as %s', (status, end, state) => {
+    expect(find(childRows(child(status, end)), 'divider').state).toBe(state);
+  });
+
+  it('another agent’s finish closes nothing', () => {
+    const events = child('completed', 'subagent.finished').map((event) => (event.kind === 'subagent.finished' ? { ...event, taskId: task('another') } : event));
+    expect(find(childRows(events), 'divider').state).toBe('working');
+  });
+});
