@@ -138,9 +138,13 @@ function RelayHost({ appSessionId, card, busy }: { appSessionId: AppSessionId; c
   };
   const direct = () => void runDirect(appSessionId, card.message, gatewayModel); // C11: a gateway model takes a Claude model first (pickDirectModel)
   const decline = () => void releaseMessage(appSessionId, card.message);
+  // C11 start: Enter runs Run direct on a gateway model too (C10 refused it there, `busy || gatewayModel`): it asks for a
+  // Claude model first
+  const accept = busy ? null : direct;
+  // C11 end
 
   return (
-    <DockedCardFrame appSessionId={appSessionId} title={RELAY_CARD_TITLE} onAccept={busy ? null : direct} onDecline={busy ? null : decline}>
+    <DockedCardFrame appSessionId={appSessionId} title={RELAY_CARD_TITLE} onAccept={accept} onDecline={busy ? null : decline}>
       {/* C11: gatewayModel={false}: with pickDirectModel in place a gateway model no longer blocks Run direct, it asks for a Claude model first */}
       <RelayCard health={health} policy={policy} now={now} gatewayModel={false} openClaudeUsage={openClaudeUsage} onAccept={direct} onDecline={decline} onRecheck={() => void recheck()} />
     </DockedCardFrame>
