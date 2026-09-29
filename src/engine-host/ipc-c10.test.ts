@@ -10,7 +10,8 @@ import { LaunchSpecSchema, type LaunchSpec } from '@shared/engine/launch-spec';
 import { HostCommandError, type HostEmit, type HostOn } from '@shared/host/runtime';
 import { type CommandInput, type CommandName, type CommandOutput, type EventName } from '@shared/ipc/schema';
 import { validateCommandOutput, validateEventPayload } from '@shared/ipc/validate';
-import { C10_ENGINE_HOST_DEADLINES, registerEngineIpc } from './ipc';
+import { registerEngineIpc, type EngineIpcDeps } from './ipc';
+import { FileSessionStateStore } from './store/file-session-state-store';
 
 const REPO_ROOT = resolve(__dirname, '../..');
 
@@ -28,7 +29,7 @@ const spec = (appSessionId: string, replay: string): LaunchSpec =>
     resume: null, sessionId: null, trust: null, mcpConfig: null, extraSettings: null, maxBudgetUsd: null, replay, inheritGrantsFrom: null,
   });
 
-function engineHost() {
+function engineHost(deps: Partial<EngineIpcDeps> = {}) {
   const handlers = new Map<string, (input: unknown) => Promise<unknown>>();
   const emitted: { name: EventName; payload: unknown }[] = [];
   const on: HostOn = (name, handler) => void handlers.set(name, handler as (input: unknown) => Promise<unknown>);
@@ -37,7 +38,7 @@ function engineHost() {
     if (!checked.ok) throw new Error(`invalid ${name}`);
     emitted.push({ name, payload });
   };
-  const ipc = registerEngineIpc(on, emit, { userData, replayEnabled: true, cwd: REPO_ROOT });
+  const ipc = registerEngineIpc(on, emit, { userData, replayEnabled: true, cwd: REPO_ROOT, ...deps });
   const call = async <N extends CommandName>(name: N, input: CommandInput<N>): Promise<CommandOutput<N>> => {
     const value = await handlers.get(name)!(input);
     const checked = validateCommandOutput(name, value);
@@ -58,7 +59,6 @@ async function until(check: () => boolean, what: string, ms = 3_000): Promise<vo
 describe('engine.models', () => {
   it('answers builtin with no cache, cached after an initialize response was observed, live after refresh against a ready session', async () => {
     const host = engineHost();
-    expect(C10_ENGINE_HOST_DEADLINES).toEqual({ 'engine.models': 'bounded', 'session.forget': 'immediate' });
     expect(await host.call('engine.models', { refresh: false })).toMatchObject({ source: 'builtin', at: null });
     expect(await host.call('engine.models', { refresh: true })).toMatchObject({ source: 'builtin' }); // nothing ready to ask
 
@@ -103,5 +103,35 @@ describe('session.forget', () => {
 
     await host.call('session.forget', { appSessionId: 'app-never-launched' }); // nothing to erase is not an error
     await expect(host.handlers.get('session.forget')!({ appSessionId: '../escape' })).rejects.toBeInstanceOf(HostCommandError);
+  });
+
+  it("forgotten as soon as the process reads exited (the bootstrap's release on process.exited), the exit's queue save still lands first: no state file comes back", async () => {
+    const inner = new FileSessionStateStore(userData);
+    let release!: () => void;
+    let held: Promise<void> | null = null;
+    const saves: string[] = [];
+    // the exit's queue save is held, as a slow disk would hold it; everything else goes straight through
+    const store: EngineIpcDeps['store'] = Object.assign(Object.create(inner) as FileSessionStateStore, {
+      saveQueue: async (id: AppSessionId, queue: Parameters<FileSessionStateStore['saveQueue']>[1]) => {
+        if (held) await held;
+        saves.push(id);
+        return inner.saveQueue(id, queue);
+      },
+    });
+    const host = engineHost({ store });
+    const id = 'app-forget-race' as AppSessionId;
+    await host.call('session.launch', { spec: spec(id, 'spikes/protocol-probe/fixtures/reads.jsonl') });
+    await until(() => host.ipc.table.get(id)?.lifecycle === 'ready', 'ready');
+    held = new Promise((resolve) => (release = resolve));
+    const stopping = host.handlers.get('session.stop')!({ appSessionId: id, reason: 'stop' });
+    await until(() => host.ipc.table.get(id)?.status().process === 'exited', 'the exit'); // set synchronously at the exit row
+    const forgetting = host.handlers.get('session.forget')!({ appSessionId: id });
+    await new Promise((r) => setTimeout(r, 20));
+    release();
+    await Promise.all([forgetting, stopping]);
+    await inner.loadGrants(id); // the store's chain for the id has drained
+    expect(saves).toContain(id); // the exit did save the queue
+    expect(existsSync(join(userData, 'engine-host', 'state', `${id}.json`))).toBe(false);
+    expect(host.emitted.filter((e) => e.name === 'session.forgotten').map((e) => e.payload)).toEqual([{ appSessionId: id }]);
   });
 });

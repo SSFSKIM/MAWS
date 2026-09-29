@@ -376,6 +376,10 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
     const session = table.get(id);
     const state = session?.status().process;
     if (session && state !== 'exited') throw new HostCommandError({ code: 'internal', message: `already_live: process is ${state}` });
+    // `exited` is set at the exit row, before the exit's queue and store saves land; `session.exited` settles after them
+    // (session.ts handleExit), so waiting on it keeps a late save from recreating the state file erased below
+    if (session) await session.exited;
+    if (table.get(id) !== session) throw new HostCommandError({ code: 'internal', message: `already_live: ${id} was relaunched` });
     table.release(id);
     streams.get(id)?.dispose();
     streams.delete(id);
