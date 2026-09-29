@@ -116,6 +116,59 @@ describe('turn boundaries', () => {
     expect(list.filter((row) => row.kind === 'user')).toHaveLength(2);
   });
 
+  // `priority: 'next'` (C3's live run): the engine takes a queued prompt at the next tool boundary of the running turn,
+  // its `started` arrives inside that open turn, and one result names both prompts.
+  it('a started inside an open turn folds the pending prompt into it: one turn, a steer bubble, no second divider', () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('t1', 'Bash', { command: 'sleep 1' });
+    prompt(b, 'u2', 'also check the logs');
+    let state = reduce(b.events);
+    const [one, two] = [turnId.ofMessage(uuid('u1')), turnId.ofMessage(uuid('u2'))];
+    expect(state.order).toEqual([one, two]); // pending until the engine takes it
+    b.result('t1', 'ok');
+    b.emit('turn.started', { userMessageUuid: uuid('u2'), origin: 'human' });
+    b.toolUse('t2', 'Bash', { command: 'tail log' });
+    b.result('t2', 'ok');
+    b.text('m1', 0, 'Both done');
+    state = applyEvents(state, b.events.slice(-6));
+    expect(state.order).toEqual([one]);
+    expect(state.turns.has(two)).toBe(false);
+    expect(state.current).toBe(one);
+    let list = rowsOf(state); // open: expanded
+    expect(list.filter((row) => row.kind === 'divider')).toHaveLength(1);
+    const users = list.filter((row): row is Extract<Row, { kind: 'user' }> => row.kind === 'user');
+    expect(users.map((row) => [row.id, row.turnId, row.steer, row.dropped])).toEqual([
+      [rowId.user(uuid('u1')), one, false, false],
+      [rowId.user(uuid('u2')), one, true, false],
+    ]);
+    b.end(['u1', 'u2']); // one result names both prompts
+    state = applyEvents(state, [b.events.at(-1)!]);
+    expect(state.turns.get(one)!.state).toBe('closed');
+    expect(state.current).toBeNull();
+    list = rowsOf(state); // closed and collapsed: the steer bubble stays, outside the work area
+    expect(kinds(list)).toEqual(['time', 'user', 'divider', 'user', 'assistant_text']);
+    expect(find(list, 'user', 1)).toMatchObject({ steer: true, text: 'also check the logs' });
+    // The engine's inbound replay of the folded prompt adds nothing.
+    const before = rowsOf(state);
+    state = applyEvents(state, [prompt(b, 'u2', 'also check the logs')]);
+    expect(rowsOf(state)).toEqual(before);
+    expect(state.order).toEqual([one]);
+  });
+
+  it('a started with no turn open still opens the pending turn in place', () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('t1', 'Bash', { command: 'sleep 1' });
+    prompt(b, 'u2', 'now');
+    b.end(['u1'], { terminalReason: 'aborted_streaming' });
+    b.emit('turn.started', { userMessageUuid: uuid('u2'), origin: 'human' });
+    const state = reduce(b.events);
+    expect(state.order).toEqual([turnId.ofMessage(uuid('u1')), turnId.ofMessage(uuid('u2'))]);
+    expect(state.current).toBe(turnId.ofMessage(uuid('u2')));
+    expect(rowsOf(state).filter((row) => row.kind === 'user').map((row) => (row as Extract<Row, { kind: 'user' }>).steer)).toEqual([false, false]);
+  });
+
   it('a cancel naming a pending prompt marks its bubble dropped and closes its turn without work; later lifecycles change nothing', () => {
     const b = builder();
     b.turn('u1');

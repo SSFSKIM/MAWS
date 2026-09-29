@@ -14,7 +14,7 @@ import type { LiveBlock, TranscriptState, TranscriptUi, TurnState, TurnWork } fr
 import { isEngineOrigin, RECEIPT_APPLIED, type ReceiptUndo } from './reduce';
 import { TOOL_CATEGORIES, type Cell, type ChangedFile, type Row, type RowId, type SubagentRef, type SubagentStatus, type ToolCategory, type TurnId, type TurnSummary } from './rows';
 import { needsSeparator, separatorLabel } from './time';
-import { isLocalCommand, localCommandOutput, userTextOf } from './user-text';
+import { isInterruptionMarker, isLocalCommand, localCommandOutput, userTextOf } from './user-text';
 
 type Event<K extends SessionEvent['kind']> = Extract<SessionEvent, { kind: K }>;
 type RowOf<K extends Row['kind']> = Extract<Row, { kind: K }>;
@@ -132,7 +132,8 @@ type Item =
   | { kind: 'tool'; toolUseId: ToolUseId }
   | { kind: 'hook'; hookId: string }
   | { kind: 'request'; toolUseId: ToolUseId }
-  | { kind: 'subagents'; group: SubagentGroup };
+  | { kind: 'subagents'; group: SubagentGroup }
+  | { kind: 'steer'; row: RowOf<'user'> }; // a prompt folded into this turn: outside the work area, in event order with the answer
 
 interface SubagentGroup { id: RowId; at: string; apiMessageId: string | null; refs: SubagentRef[]; statuses: Map<TaskId, SubagentStatus>; lastTool: Map<TaskId, string | null>; phase: string | null }
 interface Pending { kind: 'question' | 'plan'; use: Event<'tool.use'>; answers: Record<string, string> | null; outcome: RowOf<'plan'>['outcome']; feedback: string | null; requestId: RequestId | null }
@@ -176,7 +177,8 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
   const agentIds = new Map<ToolUseId, AgentId>();
 
   // *Turn boundaries on this engine*: the reducer retains a `command.lifecycle` on a turn only when it dropped that
-  // turn's pending prompt, so its presence is the dropped mark. `steer` stays on the row, reserved, always false.
+  // turn's pending prompt, so its presence is the dropped mark. A prompt the engine folded into this turn
+  // (`priority: 'next'`) is the turn's only other prompt message: a steer bubble, which is never dropped.
   let openerDropped = false;
   for (const event of turn.events) {
     if (event.kind === 'boundary.retraction') for (const uuid of event.retractedMessageUuids) retracted.add(uuid);
@@ -184,9 +186,9 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
     if (event.kind === 'command.lifecycle') openerDropped = true;
   }
   const dropped = (messageUuid: string | null) => messageUuid !== null && (retracted.has(messageUuid) || superseded.has(messageUuid));
-  const userRow = (event: Event<'user.message'>, id: RowId, editable: boolean): RowOf<'user'> => {
+  const userRow = (event: Event<'user.message'>, id: RowId, editable: boolean, steer = false): RowOf<'user'> => {
     const text = userTextOf(event.content);
-    return { id, turnId: turn.id, at: event.at, kind: 'user', messageUuid: event.messageUuid, text: text.text, attachments: text.attachments, lines: text.lines, editable, steer: false, dropped: openerDropped };
+    return { id, turnId: turn.id, at: event.at, kind: 'user', messageUuid: event.messageUuid, text: text.text, attachments: text.attachments, lines: text.lines, editable, steer, dropped: !steer && openerDropped };
   };
 
   const blockRow = (block: LiveBlock, at: string): Item | null => {
@@ -232,7 +234,9 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
           user = userRow(event, rowId.user(event.messageUuid), true);
         } else if (turn.id === turnIdOf.ofEvent(event.id) && user === null && !event.isSynthetic) {
           user = userRow(event, rowId.userOfEvent(event.id), false);
-        } // any other message in a turn renders no row: every prompt is a turn of its own
+        } else if (!event.isSynthetic && !isInterruptionMarker(event.origin, event.content) && !dropped(event.messageUuid)) {
+          items.push({ kind: 'steer', row: userRow(event, event.messageUuid === null ? rowId.userOfEvent(event.id) : rowId.user(event.messageUuid), true, true) });
+        }
         break;
       }
       case 'assistant.block.delta': {
@@ -421,7 +425,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
   // Resolve the placeholders now that every event of the turn has been seen: tool and hook cells, question and plan
   // rows, subagent rows. The retry row updates in place: the last api.retry event's text at the first one's position.
   const retryRow = retry;
-  const resolved: WorkItem[] = [];
+  const resolved: (WorkItem | Extract<Item, { kind: 'steer' }>)[] = [];
   for (const item of items) {
     switch (item.kind) {
       case 'tool': {
@@ -456,7 +460,8 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
   const answer: Row[] = [];
   const workItems: WorkItem[] = [];
   resolved.forEach((item, i) => {
-    if (item.kind === 'text' && i > lastWork) answer.push({ ...item.row, phase: 'answer' });
+    if (item.kind === 'steer') answer.push(item.row); // folded prompts and the answer in event order, outside the work area
+    else if (item.kind === 'text' && i > lastWork) answer.push({ ...item.row, phase: 'answer' });
     else if (item.kind === 'text') workItems.push({ kind: 'text', row: { ...item.row, phase: 'commentary' } });
     else if (item.kind === 'thinking' && i > lastWork) workItems.push({ kind: 'row', row: item.row }); // after the last tool use: a row, not a cell of the last group
     else workItems.push(item);

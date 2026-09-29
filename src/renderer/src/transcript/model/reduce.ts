@@ -246,6 +246,21 @@ class Batch {
     this.advance(turn.id);
   }
 
+  // A pending prompt the engine took into the running turn (`priority: 'next'`): the pending turn leaves `order` and
+  // `turns`, its retained events (the prompt's message) join the running turn at this point, so its bubble renders
+  // there in event order as a steer, and its uuid names the running turn, so the result naming both closes it.
+  fold(pending: TurnState, into: TurnId): void {
+    const target = this.touch(into);
+    for (const event of pending.events) {
+      this.push(target, event);
+      if (event.kind === 'user.message' && event.messageUuid !== null) this.state.index.messages.set(event.messageUuid, into);
+    }
+    const order = this.order();
+    order.splice(order.indexOf(pending.id), 1);
+    this.state.turns.delete(pending.id);
+    for (const [eventId, placed] of this.state.placement) if (placed === pending.id) this.state.placement.set(eventId, into);
+  }
+
   // A pending prompt the engine dropped before it started: its turn closes without work, the lifecycle event retained
   // (derive.ts reads it to mark the bubble dropped).
   drop(turn: TurnState, lifecycle: Event<'command.lifecycle'>): void {
@@ -313,9 +328,12 @@ function apply(batch: Batch, event: SessionEvent): void {
       const id = event.userMessageUuid === null ? turnIdOf.ofEvent(event.id) : turnIdOf.ofMessage(event.userMessageUuid);
       const existing = state.turns.get(id);
       if (existing) {
-        // *Turn boundaries on this engine*: the started of a pending prompt opens its turn in place (no second turn,
-        // no second user row); the turn gains its divider and becomes the one receiving the engine's output.
+        // *Turn boundaries on this engine*: the started of a pending prompt opens its turn in place when no turn is
+        // open (no second turn, no second user row; it gains its divider and receives the engine's output), and folds
+        // the prompt into the open turn when one is (`priority: 'next'`: taken at the next tool boundary).
         if (existing.accepted || existing.state !== 'open') return;
+        const running = state.current === null ? null : state.turns.get(state.current)!;
+        if (running !== null && running.id !== id && running.state === 'open' && running.accepted) return batch.fold(existing, running.id);
         const turn = batch.touch(id);
         turn.accepted = true;
         turn.startedAt = event.at;
@@ -326,6 +344,8 @@ function apply(batch: Batch, event: SessionEvent): void {
         return;
       }
       const turn = batch.open(id, originOf(event.origin), event.at);
+      const current = state.current === null ? null : state.turns.get(state.current)!;
+      if (current !== null && !current.accepted) state.current = id; // the engine runs this turn, not a waiting prompt
       batch.push(turn, event);
       return;
     }
@@ -360,6 +380,8 @@ function apply(batch: Batch, event: SessionEvent): void {
         pushRouted(null, false); // retained on the turn, no row of its own
         return;
       }
+      // A prompt already placed (an inbound replay of it, or of one folded into another turn) adds nothing.
+      if (event.messageUuid !== null && index.messages.has(event.messageUuid)) return;
       const own = event.messageUuid === null ? undefined : state.turns.get(turnIdOf.ofMessage(event.messageUuid));
       if (own) {
         const turn = batch.touch(own.id);
