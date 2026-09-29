@@ -31,19 +31,66 @@ const reportsOnOwnAgent = (event: SessionEvent) => event.agentId !== null && 'ta
 const ofParent = (event: SessionEvent) => event.agentId === null || event.parentToolUseId !== null || reportsOnOwnAgent(event);
 const ownOf = (agentId: AgentId) => (event: SessionEvent) => event.agentId === agentId && !reportsOnOwnAgent(event);
 
+// A session's events can reach `session.eventBatch` in both forms at once: a disk follower started by an earlier read
+// (C4's backfill: `seq: null`, ids from the transcript's uuids) keeps delivering what a resumed launch's live journal
+// also delivers (its row's `seq`, ids under the app session id), under different ids, so id deduplication cannot merge
+// them. Live wins: once the attachment has seen a live-form event (the snapshot's or a batch's), disk-form events are
+// dropped; the disk history before the launch has already arrived by then. Batches that arrive before the snapshot
+// answers are held and passed through that filter once it has, so a follower's copy delivered during the round trip
+// drops too. An event the app synthesises (`seq: null`, its id also under the app session id, as C10's route notice)
+// is neither form's copy of the other and always passes.
 function sessionSource(client: MawsBridge, appSessionId: AppSessionId): TranscriptSource {
+  const liveForm = (event: SessionEvent) => event.seq !== null;
+  // Relies on a convention: main's synthesised events use ids under `<appSessionId>:` (C10's route notice), as C3's live ids do.
+  const diskForm = (event: SessionEvent) => event.seq === null && !event.id.startsWith(`${appSessionId}:`);
+  // Per subscription (the store subscribes once per attachment, then snapshots): whether it has seen the live form, the
+  // batches that arrived before its snapshot answered, and its filter. A snapshot serves the subscription made just
+  // before it, so a second subscription or a stale snapshot never delivers into another's listener.
+  interface Subscription {
+    live: boolean;
+    held: SessionEvent[][] | null;
+    pass(batch: SessionEvent[]): void;
+  }
+  let latest: Subscription | null = null;
   return {
     key: appSessionId,
     subscribe(listener) {
-      return client.on('session.eventBatch', (batch) => {
+      const subscription: Subscription = {
+        live: false,
+        held: [],
+        pass(batch) {
+          const events = batch.filter((event) => {
+            if (liveForm(event)) subscription.live = true;
+            return ofParent(event) && !(subscription.live && diskForm(event));
+          });
+          if (events.length > 0) listener(events);
+        },
+      };
+      latest = subscription;
+      const off = client.on('session.eventBatch', (batch) => {
         if (batch.appSessionId !== appSessionId) return;
-        const events = batch.events.filter(ofParent);
-        if (events.length > 0) listener(events);
+        if (subscription.held) subscription.held.push(batch.events);
+        else subscription.pass(batch.events);
       });
+      return () => {
+        off();
+        subscription.held = null;
+        subscription.pass = () => {};
+        if (latest === subscription) latest = null;
+      };
     },
-    // The store orders and deduplicates by event id (ruling 5 of the wave-2 ledger); `lastSeq` is C3's own cursor.
+    // The store orders and deduplicates by event id (ruling 5 of the wave-2 ledger); `lastSeq` is C3's own cursor. The
+    // held batches are passed before the snapshot returns, while the store still buffers.
     async snapshot() {
-      return valueOf(await client.invoke('session.events', { appSessionId, afterSeq: null, limit: null })).events;
+      const subscription = latest;
+      const { events } = valueOf(await client.invoke('session.events', { appSessionId, afterSeq: null, limit: null }));
+      if (subscription) {
+        if (events.some(liveForm)) subscription.live = true;
+        const waiting = subscription.held ?? [];
+        subscription.held = null;
+        for (const batch of waiting) subscription.pass(batch);
+      }
+      return events;
     },
   };
 }

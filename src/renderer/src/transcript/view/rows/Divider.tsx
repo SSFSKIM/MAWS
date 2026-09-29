@@ -1,6 +1,6 @@
 // The work divider: one line that summarises a turn's work area and folds it (Copy: divider). A button with
-// aria-expanded and, while open, aria-controls naming the list that holds the work-area rows (they are virtual, so
-// no row is guaranteed to be in the DOM; the list always is); the denied and auto-denied counts are links to the first
+// aria-expanded and, while open, aria-controls naming the work area's rows by their element ids (they are virtual, so
+// only the mounted ones resolve; an id with no element is ignored); the denied and auto-denied counts are links to the first
 // such cell (the store's jumpTo expands and scrolls); a trailing control opens the turn summary popover (§19: the
 // auto-mode verdict appears there, never on a cell line). A working turn's duration ticks.
 import { Popover } from 'radix-ui';
@@ -9,7 +9,7 @@ import { ticks, useTranscriptStore, workingDurationMs, type TranscriptEntry } fr
 import { dividerCopy, turnSummaryCopy } from '../../model/copy';
 import { turnPhrases } from '../../model/derive';
 import type { CellId, Row, TurnId } from '../../model/rows';
-import { listElementId, useTranscriptContext } from '../context';
+import { rowElementId, useTranscriptContext } from '../context';
 import { Chevron } from './parts';
 
 type DividerRowData = Extract<Row, { kind: 'divider' }>;
@@ -31,9 +31,27 @@ function useDuration(row: DividerRowData, storeKey: string): number {
   return working ? (frozen ?? ms) : completedMs(row);
 }
 
+// The rows of an open work area: those after its divider up to the turn's answer (its folded prompts, the answer text,
+// the receipt; derive.ts places them after the work rows), time separators skipped.
+function workAreaRowIds(rows: readonly Row[], divider: DividerRowData): string[] {
+  const ids: string[] = [];
+  for (let i = rows.findIndex((candidate) => candidate.id === divider.id) + 1; i > 0 && i < rows.length; i += 1) {
+    const row = rows[i];
+    if (row.kind === 'time') continue;
+    if (row.turnId !== divider.turnId || row.kind === 'user' || row.kind === 'receipt' || (row.kind === 'assistant_text' && row.phase === 'answer')) break;
+    ids.push(row.id);
+  }
+  return ids;
+}
+
 export function DividerRow({ row }: { row: DividerRowData }) {
   const { storeKey, idPrefix } = useTranscriptContext();
   const durationMs = useDuration(row, storeKey);
+  // A string, so the divider re-renders only when the work area's rows change, not with every batch.
+  const controls = useTranscriptStore((state) => {
+    const rows = row.expanded ? state.entries[storeKey]?.rows : undefined;
+    return rows ? workAreaRowIds(rows, row).map((id) => rowElementId(idPrefix, id)).join(' ') : '';
+  });
   const store = useTranscriptStore.getState();
   const label = dividerCopy({ state: row.state, origin: row.origin, durationMs, toolCalls: row.toolCalls, denied: 0, autoDenied: 0 });
   const firstOf = (disposition: 'denied' | 'auto_denied') => row.summary.denials.find((denial) => denial.disposition === disposition)?.cellId ?? null;
@@ -43,7 +61,7 @@ export function DividerRow({ row }: { row: DividerRowData }) {
         type="button"
         className="transcript-disclosure"
         aria-expanded={row.expanded}
-        aria-controls={row.expanded ? listElementId(idPrefix) : undefined}
+        aria-controls={controls || undefined}
         onClick={() => store.toggleTurn(storeKey, row.turnId!)}
       >
         <Chevron />

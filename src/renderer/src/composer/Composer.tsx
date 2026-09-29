@@ -49,11 +49,11 @@ import {
   cancelRewind,
   confirmRewind,
   enterEditMode,
+  entryShowsRewind,
   keepEditing,
   leaveEditMode,
   restoreEditMode,
   resubmitProvider,
-  rowsShowRewind,
   resubmitSendFailed,
   resubmitSent,
   rewindAgain,
@@ -177,11 +177,11 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
   const resubmit = useComposerStore((s) => resubmitRecordOf(s, appSessionId));
   const newest = useTranscriptStore((s) => (editing ? newestUserUuid(s.entries[appSessionId]?.rows ?? []) : null)); // the reconfirm's only reader
   const restored = useComposerStore((s) => s.restoredEdits.has(appSessionId));
-  // Whether the hydrated transcript shows the rewind to the edited message (its boundary, the message gone); false while
-  // it cannot tell (not attached, or hydrating).
+  // Whether the hydrated transcript shows the edited message rewound (a boundary naming it, or its turn hidden by a rewind
+  // to an earlier message); false while it cannot tell (not attached, or hydrating).
   const rewoundInTranscript = useTranscriptStore((s) => {
     const entry = s.entries[appSessionId];
-    return editing !== null && entry?.phase === 'live' && rowsShowRewind(entry.rows, editing.messageUuid);
+    return editing !== null && entryShowsRewind(entry, editing.messageUuid);
   });
 
   // ---- what the frame binds to ------------------------------------------------------------------------------------

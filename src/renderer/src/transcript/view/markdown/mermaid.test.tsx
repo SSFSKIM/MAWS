@@ -3,9 +3,11 @@
 // cannot lay out in happy-dom, and what is under test is which fences reach it. Every case starts from a fresh module
 // graph, so the load-once state never leaks between cases.
 import { cleanup, render, waitFor } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const rendered: string[] = [];
+// While set, mermaid's layout waits for the test to release it.
+let gate: PromiseWithResolvers<void> | null = null;
 // Called once per fresh plugins module when it loads mermaid (vi.resetModules leaves mocked modules cached, so the
 // factory itself runs once; plugin creation is the per-graph signal).
 const loaded = vi.fn();
@@ -19,6 +21,8 @@ vi.mock('@streamdown/mermaid', () => {
         initialize: () => {},
         render: async (_id: string, source: string) => {
           rendered.push(source);
+          await gate?.promise;
+          if (source.includes('BROKEN')) throw new Error('Parse error on line 2');
           return { svg: '<svg data-fake-diagram="true"></svg>' };
         },
       }),
@@ -33,10 +37,26 @@ async function freshMarkdown() {
   return (await import('./Markdown')).Markdown;
 }
 
-afterEach(cleanup);
+// Streamdown lays a diagram out once its block has been in view for 300 ms (an IntersectionObserver, which happy-dom
+// never fires): every block is in view here.
+class InView {
+  constructor(private readonly callback: (entries: { isIntersecting: boolean; target: Element }[], observer: InView) => void) {}
+  observe(target: Element) {
+    this.callback([{ isIntersecting: true, target }], this);
+  }
+  takeRecords = () => [];
+  unobserve() {}
+  disconnect() {}
+}
+beforeEach(() => vi.stubGlobal('IntersectionObserver', InView));
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 50));
-const diagrams = (root: HTMLElement) => root.querySelectorAll('[data-streamdown="mermaid-block"]').length;
+// Drawn diagrams, and the mermaid fences showing as code (a closed fence's diagram draws hidden until its SVG is in).
+const diagrams = (root: HTMLElement) => root.querySelectorAll('.transcript-mermaid[data-drawn] [data-streamdown="mermaid-block"]').length;
 const mermaidCode = (root: HTMLElement) => root.querySelectorAll('[data-streamdown="code-block"][data-language="mermaid"]').length;
 
 const CLOSED = 'Plan:\n\n```mermaid\nflowchart LR\n  A --> B\n```\n\nNext';
@@ -87,6 +107,29 @@ describe('mermaid fences', () => {
     await waitFor(() => expect(diagrams(container)).toBe(1));
     expect(mermaidCode(container)).toBe(1);
     expect(rendered.some((source) => source.includes('C --> D'))).toBe(false);
+  });
+
+  it('shows a closed fence as its code until mermaid has drawn it, never an empty frame', async () => {
+    const Markdown = await freshMarkdown();
+    gate = Promise.withResolvers<void>();
+    const { container } = render(<Markdown markdown={CLOSED} live={false} />);
+    await waitFor(() => expect(rendered).toHaveLength(1)); // mermaid is laying it out
+    expect(diagrams(container)).toBe(0);
+    expect(mermaidCode(container)).toBe(1);
+    expect(container.querySelector('.transcript-mermaid:not([data-drawn]) > .transcript-mermaid-diagram')).not.toBeNull(); // hidden (transcript.css)
+    gate.resolve();
+    gate = null;
+    await waitFor(() => expect(diagrams(container)).toBe(1));
+    expect(mermaidCode(container)).toBe(0);
+  });
+
+  it('keeps a fence mermaid rejected as its code, with one muted line saying the diagram could not be drawn', async () => {
+    const Markdown = await freshMarkdown();
+    const { container } = render(<Markdown markdown={CLOSED.replace('A --> B', 'BROKEN -->')} live={false} />);
+    await waitFor(() => expect(container.querySelector('.transcript-mermaid-failed')?.textContent).toBe('Diagram could not be drawn'));
+    expect(diagrams(container)).toBe(0);
+    expect(mermaidCode(container)).toBe(1);
+    expect(container.textContent).not.toContain('Mermaid Error');
   });
 
   it('draws every fence of a completed answer', async () => {

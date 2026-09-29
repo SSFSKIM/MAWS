@@ -19,7 +19,7 @@ import type { C3_SESSION_COMMANDS } from '@shared/ipc/schema/session';
 import { createBinaryProbe, VERSION_TIMEOUT_MS, type BinaryCheck } from './binary-info';
 import * as controls from './controls';
 import { createLauncher } from './launcher';
-import { LaunchSpecConflict, mergeFlagSettings, RELAY_URL, type LaunchPlan } from './launch';
+import { getBinaryConfig, LaunchSpecConflict, mergeFlagSettings, RELAY_URL, type LaunchPlan } from './launch';
 // C11 start
 import { setBinaryConfig } from './launch';
 // C11 end
@@ -38,7 +38,7 @@ import type { SessionEvent } from '@shared/graph/events';
 // C4 end
 // C10 start
 import type { ModelCatalogue } from '@shared/sessions/models';
-import { ModelsCache } from './models-cache';
+import { ModelsCache, modelsKey } from './models-cache';
 // C10 end
 
 export type DeadlineShape = 'immediate' | 'bounded' | 'operation';
@@ -117,10 +117,15 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
   const operations = new OperationTable((event) => emit('session.operation', event));
   const binaryProbe = deps.binaryProbe ?? createBinaryProbe();
   const relayCheck = deps.checkRelay ?? ((force: boolean) => checkRelayHealth(RELAY_URL, undefined, { force }));
-  // C10 start: the model catalogue, updated from every initialize response and every list_models answer
+  // C10 start: the model catalogue, updated from every initialize response and every list_models answer, each under
+  // its launch's key (binary version and route: debt wave 3)
   const models = new ModelsCache(deps.userData, { warn: log });
   const modelsLoaded = models.load();
-  const updateModels = (list: readonly unknown[]) => void modelsLoaded.then(() => models.update(list));
+  const modelKeys = new Map<AppSessionId, string>();
+  const updateModels = (id: AppSessionId, list: readonly unknown[]) => {
+    const key = modelKeys.get(id);
+    if (key !== undefined) void modelsLoaded.then(() => models.update(key, list));
+  };
   // C10 end
 
   const launch = createLauncher({
@@ -148,7 +153,8 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
       session.on('queue', (queue) => stream.queue(queue));
       session.on('brokerItems', (items) => stream.brokerItems(items));
       session.on('catalog', (catalog) => stream.catalog(catalog)); // C7: session.catalogChanged
-      session.on('models', updateModels); // C10
+      modelKeys.set(spec.appSessionId, modelsKey(plan.engineVersion, plan.gateway)); // C10
+      session.on('models', (list) => updateModels(spec.appSessionId, list)); // C10
     },
   });
 
@@ -213,6 +219,7 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
         streams.get(id)?.dispose();
         streams.delete(id);
         specs.delete(id);
+        modelKeys.delete(id); // C10
       };
       if (session.lifecycle === 'exited') release();
       else void session.exited.then(release);
@@ -352,7 +359,7 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
   // C10 start: every list_models answer also refreshes the catalogue cache
   handle('session.listModels', async (input) => {
     const answer = await read('list_models')(input);
-    updateModels(answer.models);
+    updateModels(input.appSessionId as AppSessionId, answer.models);
     return answer;
   });
   // C10 end
@@ -362,27 +369,30 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
   // C10 start -----------------------------------------------------------------------------------------------------------
   const handleC10 = <N extends C10Command>(name: N, handler: (input: CommandInput<N>) => Promise<CommandOutput<N>>) => on(name, handler);
 
-  // The catalogue before any session exists: with `refresh`, the most recently launched ready session's list_models
-  // (a failure falls back to what is cached, logged); otherwise the cache, else the built-in list. Bounded: its one
-  // control round trip runs under `bounded`.
-  handleC10('engine.models', async ({ refresh }): Promise<ModelCatalogue> => {
+  // The catalogue before any session exists, for the route the caller names (the launch's binary version and that
+  // route key the cache; with no route, the most recent catalogue of any): with `refresh`, the most recently launched
+  // ready session's list_models among that route's (a failure falls back to what is cached, logged); otherwise the
+  // cache, else the built-in list. Bounded: its one control round trip runs under `bounded`.
+  handleC10('engine.models', async ({ refresh, gateway }): Promise<ModelCatalogue> => {
     await modelsLoaded;
+    const key = gateway === undefined ? undefined : modelsKey(getBinaryConfig().expectedVersion, gateway);
     const asked = refresh
       ? table
           .list()
-          .filter((session) => session.lifecycle === 'ready' && session.control)
+          .filter((session) => session.lifecycle === 'ready' && session.control && (key === undefined || modelKeys.get(session.status().appSessionId) === key))
           .sort((a, b) => b.status().launchedAt.localeCompare(a.status().launchedAt))[0]
       : undefined;
     if (asked?.control) {
+      const askedKey = modelKeys.get(asked.status().appSessionId)!;
       try {
         const answer = await bounded(() => controls.listModels(asked.control!, {}));
-        await models.update(answer.models);
-        return { ...models.answer(), source: 'live' };
+        await models.update(askedKey, answer.models);
+        return { ...models.answer(askedKey), source: 'live' };
       } catch (error) {
         log(`engine.models: list_models failed (${error instanceof Error ? error.message : String(error)}); answering the cache`);
       }
     }
-    return models.answer();
+    return models.answer(key);
   });
 
   // The whole erase behind delete conversation: the state file and the journal directory, then `session.forgotten` so
@@ -405,6 +415,7 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
     streams.get(id)?.dispose();
     streams.delete(id);
     specs.delete(id);
+    modelKeys.delete(id);
     await store.forget(id);
     emit('session.forgotten', { appSessionId: id });
   });

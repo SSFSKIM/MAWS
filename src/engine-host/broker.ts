@@ -127,7 +127,7 @@ export class PermissionBroker {
   async answer(requestId: RequestId, answer: RequestAnswer): Promise<'delivered' | 'not_pending' | 'write_failed'> {
     const entry = this.items.get(requestId);
     if (!entry || entry.attention.state !== 'pending' || entry.answering) return 'not_pending';
-    if (answerKindOf(entry.kind) !== answer.kind) throw new BrokerAnswerMismatch(`request ${requestId} is a ${entry.kind} request; a ${answer.kind} answer cannot resolve it`);
+    if (answerKindOf(entry.kind) !== answer.kind && !isQuestionSkip(entry.kind, answer)) throw new BrokerAnswerMismatch(`request ${requestId} is a ${entry.kind} request; a ${answer.kind} answer cannot resolve it`);
     if (entry.kind === 'dialog' && !DECLARED_DIALOG_KINDS.includes(String(entry.request.request.dialog_kind))) {
       throw new BrokerAnswerMismatch(`request ${requestId} asks for a "${String(entry.request.request.dialog_kind)}" dialog, which MAWS did not declare; it cannot be answered`);
     }
@@ -295,6 +295,13 @@ function shapeOf(req: ControlRequestFrame): { kind: BrokerItemKind; toolUseId: T
 
 function answerKindOf(kind: BrokerItemKind): RequestAnswer['kind'] {
   return kind;
+}
+
+// A question skipped: the plain permission deny the terminal's Escape writes for the engine's question tool, which the
+// engine takes as a declined question and the turn goes on (pass3/question-deny seq 110 to 154; debt wave 3). It is
+// written as any permission deny; no other cross-kind answer is admitted.
+function isQuestionSkip(kind: BrokerItemKind, answer: RequestAnswer): boolean {
+  return kind === 'question' && answer.kind === 'permission' && answer.decision === 'deny';
 }
 
 interface Wire {

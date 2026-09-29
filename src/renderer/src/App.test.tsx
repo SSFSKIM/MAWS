@@ -80,6 +80,8 @@ function fakeMain(initial: SettingsState['settings']['theme']) {
       // C5 start: the shell's snapshots (the record side above is C4's)
       case 'session.digests':
         return { digests: [] };
+      case 'engine.sessions': // the engine table at connect (debt wave 3)
+        return [];
       case 'session.launchMode':
         return { mode: 'index' };
       case 'attention.list':
@@ -96,13 +98,15 @@ function fakeMain(initial: SettingsState['settings']['theme']) {
         return undefined;
       // C5 end
       // C7 start: the status line's shared ClaudeUsage read (none installed here); its dismissed banners come through
-      // `layout.get` above. The composer's slot and key registrations make no call on mount (no session is open). With
-      // the terminal registry's restore read answered too, no mount call reaches the rejecting default (C7 M4a review).
+      // `layout.get` above. The composer's slot and key registrations make no call on mount (no session is open).
       case 'settings.usage':
         return { available: false, dataDir: '/nowhere', readAt: '2026-09-28T10:00:00.000Z', error: 'absent', drainTarget: null, drainTargetIsManual: false, accounts: [], pinsFor: {} };
+      // C7 end
+      // C9 start: the page's terminal re-adoption reads the host's ptys on mount (none here), so no mount call reaches
+      // the rejecting default (C7 M4a review)
       case 'pty.list':
         return { ptys: [] };
-      // C7 end
+      // C9 end
       // C10 start: no unstarted sessions, no interrupted deletes
       case 'session.intent.list':
         return { intents: [] };

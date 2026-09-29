@@ -40,7 +40,7 @@ export function connectActions(client: MawsBridge = ipc): () => void {
 
 const RENDERER_ACTIONS = ACTION_IDS.filter((id) => ACTIONS[id].sink === 'renderer');
 // Inputs that take a keypress as a click, not as text: they are buttons, refused as buttons are.
-const BUTTON_LIKE_INPUTS = new Set(['button', 'submit', 'reset', 'checkbox', 'radio', 'range', 'color', 'file', 'image']);
+export const BUTTON_LIKE_INPUTS: ReadonlySet<string> = new Set(['button', 'submit', 'reset', 'checkbox', 'radio', 'range', 'color', 'file', 'image']);
 // A Radix menu, dialog or popover while open (their content carries the role and `data-state="open"`).
 const OPEN_OVERLAY = ['menu', 'dialog', 'alertdialog'].map((role) => `[role="${role}"][data-state="open"]`).join(', ');
 

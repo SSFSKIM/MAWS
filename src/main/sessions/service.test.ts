@@ -415,9 +415,11 @@ describe('session service', () => {
       expect(real).toMatchObject({ resume: { sessionId: SID, fork: false }, sessionId: null, model: 'opus', cwd: h.work, additionalDirectories: [extra], trust: { accepted: true, directory: h.work }, inheritGrantsFrom: null });
       const bootstrap = h.host.launches.find((l) => l.appSessionId !== record.appId)!;
       expect(bootstrap.resume).toBeNull();
-      const order = h.host.calls.map((c) => c.name).filter((n) => n === 'fs.unfollow' || n === 'session.launch');
-      expect(order).toEqual(['session.launch', 'fs.unfollow', 'session.launch']); // the bootstrap, the handover, the resume
-      expect(h.host.calledWith('fs.unfollow')).toEqual([{ appSessionId: record.appId, agentId: null }]);
+      const order = () => h.host.calls.map((c) => c.name).filter((n) => n === 'fs.unfollow' || n === 'session.launch');
+      // the bootstrap, the handover, the resume, then the index source's own unfollow at the tick after the resume's
+      // first status (a follow a read restarted between the handover and the launch stops there too; debt wave 3)
+      await expect.poll(order).toEqual(['session.launch', 'fs.unfollow', 'session.launch', 'fs.unfollow']);
+      expect(h.host.calledWith('fs.unfollow')).toEqual([{ appSessionId: record.appId, agentId: null }, { appSessionId: record.appId, agentId: null }]);
       // the bootstrap touched nothing of the conversation's record
       expect(h.index.sessions.get(record.appId)).toMatchObject({ engineSessionId: SID, model: { requested: 'opus' } });
       expect(readdirSync(join(h.userData, 'sessions', 'bootstraps'))).toEqual([]);

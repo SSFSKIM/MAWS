@@ -1,7 +1,7 @@
 import type { SessionEvent } from '@shared/graph/events';
 import type { EventId } from '@shared/graph/ids';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, onTestFinished } from 'vitest';
 import { useTranscriptStore } from '../../stores/transcript';
 import { cellId, rowId, turnId } from '../model/keys';
 import { loadJournal } from '../../../../../test/support/fixtures';
@@ -93,6 +93,64 @@ describe('Transcript', () => {
     const cell = document.querySelector<HTMLElement>(`[data-cell-id="${target}"]`);
     expect(cell).not.toBeNull();
     expect(cell!.contains(document.activeElement)).toBe(true);
+  });
+
+  // The same jump when the reader moved on during the round trip: the re-resolved jump leaves them where they are,
+  // whether they put focus elsewhere or scrolled the transcript.
+  for (const [how, moveOn] of [
+    ['focused another control', (outside: HTMLElement) => outside.focus()],
+    ['scrolled the transcript', () => {
+      fireEvent.wheel(document.querySelector('[data-transcript-scroller]')!, { deltaY: 400 });
+      (document.activeElement as HTMLElement | null)?.blur();
+    }],
+  ] as const) {
+    it(`a jump re-resolved at install does not take the reader back once they ${how}`, async () => {
+      const events = deniedThenAnswer();
+      const key = `transcript-test-${++keys}`;
+      const outside = document.body.appendChild(document.createElement('button'));
+      onTestFinished(() => outside.remove());
+      const first = render(<Transcript source={{ key, subscribe: () => () => {}, snapshot: () => Promise.resolve(events) }} variant="session" />);
+      await waitFor(() => expect(useTranscriptStore.getState().entries[key]?.phase).toBe('live'));
+      first.unmount();
+      let resolve: (events: SessionEvent[]) => void = () => {};
+      render(<Transcript source={{ key, subscribe: () => () => {}, snapshot: () => new Promise((r) => (resolve = r)) }} variant="session" />);
+      await waitFor(() => expect(useTranscriptStore.getState().entries[key].phase).toBe('hydrating'));
+      const target = cellId.tool(tool('t1'));
+      act(() => useTranscriptStore.getState().jumpTo(key, target));
+      await waitFor(() => expect(useTranscriptStore.getState().entries[key].jump).toBeNull());
+      expect(document.querySelector(`[data-cell-id="${target}"]`)!.contains(document.activeElement)).toBe(true);
+      act(() => moveOn(outside));
+      const focused = document.activeElement;
+      await act(async () => resolve(events.map((event) => ({ ...event, id: `disk:${event.id}` as EventId, seq: null }))));
+      await waitFor(() => expect(useTranscriptStore.getState().entries[key].phase).toBe('live'));
+      await waitFor(() => expect(useTranscriptStore.getState().entries[key].jump).toBeNull());
+      await new Promise((r) => requestAnimationFrame(r));
+      expect(document.activeElement).toBe(focused);
+      expect(document.querySelector(`[data-cell-id="${target}"]`)).not.toBeNull(); // what the jump opened stays open
+    });
+  }
+
+  // A jump whose target the old rows did not hold (a notification opening an item the fresh history brings) was never
+  // shown, so the re-resolved jump is performed even though focus sits outside the transcript.
+  it('a jump this view never handled lands at install, focus elsewhere notwithstanding', async () => {
+    const events = deniedThenAnswer();
+    const later = events.findIndex((event) => event.kind === 'turn.started' && event.userMessageUuid === uuid('u2'));
+    const key = `transcript-test-${++keys}`;
+    const outside = document.body.appendChild(document.createElement('button'));
+    onTestFinished(() => outside.remove());
+    const first = render(<Transcript source={{ key, subscribe: () => () => {}, snapshot: () => Promise.resolve(events.slice(later)) }} variant="session" />);
+    await waitFor(() => expect(useTranscriptStore.getState().entries[key]?.phase).toBe('live'));
+    first.unmount();
+    let resolve: (events: SessionEvent[]) => void = () => {};
+    render(<Transcript source={{ key, subscribe: () => () => {}, snapshot: () => new Promise((r) => (resolve = r)) }} variant="session" />);
+    await waitFor(() => expect(useTranscriptStore.getState().entries[key].phase).toBe('hydrating'));
+    const target = cellId.tool(tool('t1'));
+    act(() => useTranscriptStore.getState().jumpTo(key, target)); // absent from the old rows: nothing to show yet
+    expect(useTranscriptStore.getState().entries[key].jump).toBeNull();
+    act(() => outside.focus());
+    await act(async () => resolve(events.map((event) => ({ ...event, id: `disk:${event.id}` as EventId, seq: null }))));
+    await waitFor(() => expect(useTranscriptStore.getState().entries[key].phase).toBe('live'));
+    await waitFor(() => expect(document.querySelector(`[data-cell-id="${target}"]`)?.contains(document.activeElement)).toBe(true));
   });
 
   it('the denied count of a collapsed turn opens its work area and focuses the standalone denied cell itself', async () => {

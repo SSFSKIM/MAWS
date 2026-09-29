@@ -54,6 +54,7 @@ export interface TranscriptContextValue {
   renderRequest: ((slot: Extract<Row, { kind: 'request_slot' }>) => ReactNode) | null;
   disclosures: Disclosures;
   idPrefix: string; // unique per mounted transcript: row element ids are `<idPrefix>-<rowId>`
+  sessionDirectory?: string | null; // additive: where the session runs (its record's), for a shell call that names no cwd
 }
 
 const TranscriptContext = createContext<TranscriptContextValue>({

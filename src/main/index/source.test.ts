@@ -333,6 +333,7 @@ describe('IndexSessionSource folds the host\'s events into the index and feeds t
       model: { requested: null, resolved: 'claude-opus-5' },
     });
     await settle();
+    // No fs.unfollow: an id unbound until this status was never followed from disk (liveStatus).
     expect(fake.calls).toEqual([{ name: 'fs.bind', input: { bindings: [{ sessionId: engineId, appSessionId: record.appId }] } }]);
     expect(events('session.changed').at(-1)).toMatchObject({ cause: 'live', record: { appId: record.appId } });
 
@@ -346,6 +347,27 @@ describe('IndexSessionSource folds the host\'s events into the index and feeds t
     expect(index.sessions.get(record.appId)?.holder).toEqual({ kind: 'none' });
     // A status for an app session the index has no row for is ignored, not a crash.
     expect(() => fake.fire('session.status', { appSessionId: randomUUID() as AppSessionId, status: status(randomUUID() as AppSessionId) })).not.toThrow();
+  });
+
+  it('a host restart forgets which ids were live: a relaunch after it stops the disk follow again, with no exit seen', async () => {
+    const fake = scriptedHost();
+    begin(fake.host);
+    const { record } = index.sessions.createForLaunch({ directory: '/x', additionalDirectories: [], worktree: null, model: { requested: null, resolved: null }, effort: null, permissionMode: { requested: 'default', effective: 'default', refusal: null } });
+    const engineId = sessionIdFor(32);
+    index.sessions.bindEngineId(record.appId, engineId);
+    const unfollows = () => fake.calls.filter((c) => c.name === 'fs.unfollow').length;
+    fake.fire('session.status', { appSessionId: record.appId, status: status(record.appId, { engineSessionId: engineId }) });
+    await settle();
+    expect(unfollows()).toBe(1);
+    fake.fire('session.status', { appSessionId: record.appId, status: status(record.appId, { engineSessionId: engineId }) });
+    await settle();
+    expect(unfollows()).toBe(1); // the same run
+    // The host crashes and comes back; its process went with it and no `exited` status was ever sent.
+    fake.setState('crashed');
+    fake.setState('ready');
+    fake.fire('session.status', { appSessionId: record.appId, status: status(record.appId, { engineSessionId: engineId, process: 'starting' }) });
+    await settle();
+    expect(unfollows()).toBe(2);
   });
 
   describe('the unread rule', () => {
@@ -576,6 +598,47 @@ describe('IndexSessionSource against the real filesystem state service', () => {
     await fixture.appendLines(fixture.transcriptPath(A), [JSON.stringify({ type: 'custom-title', customTitle: 'Old, renamed later', sessionId: A })]);
     await expect.poll(() => index.sessions.get(history.appId)?.title.text, { timeout: 3_000 }).toBe('Old, renamed later');
     expect(index.sessions.get(app)?.title.text).not.toBe('Old, renamed later');
+  });
+
+  it('read then resume: the disk follow a session.events read started stops when C3 reports the same app id live, once per run', async () => {
+    const line = (uuid: string, parent: string | null, content: string) => JSON.stringify(user(uuid, parent, '/work/r', content));
+    await fixture.addTranscript('/work/r', S[0], [line('r1', null, 'before the resume')]);
+    const batches: EventPayload<'session.eventBatch'>[] = [];
+    wired.listen('session.eventBatch', (payload) => batches.push(payload as EventPayload<'session.eventBatch'>));
+    wired.start();
+    begin();
+    await expect.poll(() => index.sessions.getByEngineId(S[0])?.appId ?? null, { timeout: 3_000 }).not.toBeNull();
+    const app = index.sessions.getByEngineId(S[0])!.appId;
+    await expect.poll(() => wired.calls.some((c) => c.name === 'fs.bind'), { timeout: 3_000 }).toBe(true);
+    const ask = async <T,>(name: CommandName, input: unknown): Promise<T> => {
+      const answer = await wired.host.dispatch('engine-host', name, input as never);
+      if (!answer.ok) throw new Error(answer.error.message);
+      return answer.value as T;
+    };
+    const followed = async () => (await ask<{ followed: { appSessionId: string }[] }>('fs.state', undefined)).followed.filter((f) => f.appSessionId === app);
+    const saidOnDisk = () => batches.filter((b) => b.appSessionId === app).flatMap((b) => b.events).filter((e) => e.kind === 'user.message').map((e) => (e as { content: unknown }).content);
+
+    // The read: nothing runs the session, so session.events follows its transcript, and an appended line arrives.
+    await ask('session.events', { appSessionId: app, afterSeq: null, limit: 1000 });
+    await expect.poll(followed, { timeout: 3_000 }).toEqual([{ appSessionId: app, agentId: null }]);
+    await fixture.appendLines(fixture.transcriptPath(S[0]), [line('r2', 'r1', 'still on disk')]);
+    await expect.poll(saidOnDisk, { timeout: 3_000 }).toContain('still on disk');
+
+    // The resume: C3 reports the same app id live; the follow stops, and what the process writes comes live only.
+    wired.fire('session.status', { appSessionId: app, status: status(app, { engineSessionId: S[0], process: 'starting' }) });
+    await expect.poll(followed, { timeout: 3_000 }).toEqual([]);
+    await fixture.appendLines(fixture.transcriptPath(S[0]), [line('r3', 'r2', 'written by the live process')]);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    expect(saidOnDisk()).not.toContain('written by the live process');
+
+    // Once per run: later statuses of the same process send nothing; an exit and a relaunch stop a follow again.
+    const unfollows = () => wired.calls.filter((c) => c.name === 'fs.unfollow').length;
+    wired.fire('session.status', { appSessionId: app, status: status(app, { engineSessionId: S[0], process: 'ready' }) });
+    wired.fire('session.status', { appSessionId: app, status: status(app, { engineSessionId: S[0], process: 'exited' }) });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(unfollows()).toBe(1);
+    wired.fire('session.status', { appSessionId: app, status: status(app, { engineSessionId: S[0], process: 'starting' }) });
+    await expect.poll(unfollows, { timeout: 3_000 }).toBe(2);
   });
 
   it('unbindEngineId sends fs.unbind, and a following fs.scan re-attributes that transcript to no app id: the source allocates a fresh record', async () => {

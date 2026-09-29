@@ -295,7 +295,7 @@ const fixtureNames = (page: Page) =>
 async function loadAll(page: Page, fixture: string) {
   await load(page, fixture);
   await play(page, 0);
-  await expect.poll(async () => (await metrics(page)).batches, { message: `${fixture} released` }).toBeGreaterThan(0);
+  await expect.poll(async () => (await metrics(page)).batches, { message: `${fixture} released`, timeout: 20_000 }).toBeGreaterThan(0);
   await settle(page, 300);
 }
 
@@ -369,6 +369,64 @@ test('the denied count jumps to the standalone denied cell', async ({ harness })
   expect(harness.consoleErrors()).toEqual([]);
 });
 
+// A long unbreakable token (a path, a URL) in answer or commentary prose wraps inside a narrow transcript instead of
+// scrolling it sideways (R7 measured 80 px of horizontal overflow at 280 px before the prose wrapped).
+test('a long token in prose wraps in a narrow transcript', async ({ harness }) => {
+  const { page } = harness;
+  await harnessReady(page);
+  await loadAll(page, 'transcript/edit-and-receipt');
+  const overflow = await page.evaluate(async () => {
+    const scroller = document.querySelector<HTMLElement>('[data-transcript-scroller]')!;
+    scroller.closest<HTMLElement>('.transcript')!.style.flex = '0 0 280px'; // the harness lays it out as flex-1
+    const token = `/tmp/${'averylongdirectoryname/'.repeat(12)}file.ts`; // no hyphen: nothing to break at
+    const paragraphs = ['.transcript-answer p', '.transcript-commentary p'].map((selector) => scroller.querySelector(selector)).filter((p) => p !== null);
+    for (const paragraph of paragraphs) paragraph.append(document.createTextNode(` ${token}`));
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    return { width: scroller.clientWidth, paragraphs: paragraphs.length, overflow: scroller.scrollWidth - scroller.clientWidth };
+  });
+  expect(overflow.width, 'the transcript is narrow').toBeLessThanOrEqual(280);
+  expect(overflow.paragraphs, 'the fixture shows answer prose').toBeGreaterThan(0);
+  expect(overflow.overflow, 'no horizontal overflow').toBeLessThanOrEqual(0);
+  expect(harness.consoleErrors()).toEqual([]);
+});
+
+// The streaming caret sits after the last word of the answer, inside its paragraph, not on a line of its own below it.
+test('the streaming caret follows the last word of a one-paragraph answer', async ({ harness }) => {
+  const { page } = harness;
+  await harnessReady(page);
+  await load(page, 'events/streaming-block');
+  // Up to the answer's first delta (s5): the text block is live.
+  for (let i = 0; i < 6; i += 1) await page.evaluate(() => (window as unknown as HarnessWindow).__maws_harness.step());
+  const prose = page.locator('[data-kind="assistant_text"] .transcript-prose');
+  await expect(prose).toHaveCount(1);
+  await expect(prose).toHaveAttribute('style', /--streamdown-caret/);
+  const caret = await prose.evaluate((element) => {
+    const block = element.lastElementChild!; // the block's wrapper
+    const paragraph = block.lastElementChild!;
+    return { wrapper: getComputedStyle(block, '::after').content, tag: paragraph.tagName, paragraph: getComputedStyle(paragraph, '::after').content };
+  });
+  expect(caret).toEqual({ wrapper: 'none', tag: 'P', paragraph: '" ▋"' });
+  // A live answer whose last block is a code block or a table, where Streamdown sets no caret, shows ours at its foot.
+  const blockCaret = await prose.evaluate((element) =>
+    ['code-block', 'table-wrapper'].map((kind) => {
+      const wrapper = element.appendChild(document.createElement('div'));
+      wrapper.dir = 'ltr';
+      wrapper.style.display = 'contents';
+      const block = wrapper.appendChild(document.createElement('div'));
+      block.dataset.streamdown = kind;
+      const content = getComputedStyle(block, '::after').content;
+      wrapper.remove();
+      return content;
+    }),
+  );
+  expect(blockCaret).toEqual(['"▋"', '"▋"']);
+  // Complete, the caret is gone.
+  for (let i = 0; i < 4; i += 1) await page.evaluate(() => (window as unknown as HarnessWindow).__maws_harness.step());
+  await expect(prose).not.toHaveAttribute('style', /--streamdown-caret/);
+  expect(await prose.evaluate((element) => getComputedStyle(element.querySelector('p')!, '::after').content)).toBe('none');
+  expect(harness.consoleErrors()).toEqual([]);
+});
+
 // Acceptance item 9: the drill-in is this same Transcript with `variant: 'child'` over the child's own events (C8's
 // panel does this through the public surface; the harness stands in for it).
 test('child transcript renders the subagent\u2019s events only', async ({ harness }) => {
@@ -411,14 +469,17 @@ test('child transcript renders the subagent\u2019s events only', async ({ harnes
 });
 
 // Expand-old-work over the fixtures: every turn, group and cell of every journal and event fixture opened, the list
-// walked a viewport at a time so every row mounts, no row of those kinds left empty, no console error.
+// walked a viewport at a time so every row mounts, no row of those kinds left empty, no console error. A loaded machine
+// (inside `pnpm verify`) slows the walk several times over, so the case has time per fixture rather than one budget for
+// the whole walk, and every wait inside a fixture is on its settled state and bounded (a hang fails naming it).
+const PER_FIXTURE_MS = 20_000;
 test('every fixture renders its whole work area expanded', async ({ harness }) => {
-  test.setTimeout(300_000);
   const { page } = harness;
   await harnessReady(page);
   await blockHumanInput(page);
   const fixtures = (await fixtureNames(page)).filter((name) => !name.startsWith('synthetic/'));
   expect(fixtures.length).toBeGreaterThan(40);
+  test.setTimeout(60_000 + fixtures.length * PER_FIXTURE_MS);
   const WORK_KINDS = ['group', 'cell', 'receipt', 'subagent', 'agent_message', 'bash', 'plan', 'question', 'boundary', 'error'];
   const seen = new Map<string, number>();
   for (const fixture of fixtures) {
@@ -430,9 +491,19 @@ test('every fixture renders its whole work area expanded', async ({ harness }) =
       const kinds: Record<string, number> = {};
       const empty: string[] = [];
       const rows = new Set<string>();
-      const frame = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      // After a scroll, until the mounted rows are the same two frames running: a slow page mounts them late.
+      const mounted = async () => {
+        const deadline = performance.now() + 10_000;
+        const ids = () => Array.from(scroller.querySelectorAll<HTMLElement>('[data-row-id]'), (row) => row.dataset.rowId).join(' ');
+        let last = '';
+        for (let now = ids(); now !== last || now === ''; now = ids()) {
+          if (performance.now() > deadline) throw new Error(`rows still mounting 10 s after a scroll (at ${scroller.scrollTop} px)`);
+          last = now;
+          await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        }
+      };
       scroller.scrollTop = 0;
-      await frame();
+      await mounted();
       for (let guard = 0; guard < 400; guard += 1) {
         for (const row of Array.from(scroller.querySelectorAll<HTMLElement>('[data-row-id]'))) {
           const id = row.dataset.rowId!;
@@ -444,10 +515,12 @@ test('every fixture renders its whole work area expanded', async ({ harness }) =
         }
         if (scroller.scrollTop >= scroller.scrollHeight - scroller.clientHeight - 1) break;
         scroller.scrollTop += scroller.clientHeight;
-        await frame();
+        await mounted();
       }
       return { kinds, empty, rows: rows.size };
-    }, WORK_KINDS);
+    }, WORK_KINDS).catch((error: Error) => {
+      throw new Error(`${fixture}: ${error.message}`, { cause: error });
+    });
     expect(walked.empty, `${fixture}: every row renders its component`).toEqual([]);
     expect(walked.rows, `${fixture}: rows rendered`).toBeGreaterThan(0);
     for (const [kind, n] of Object.entries(walked.kinds)) seen.set(kind, (seen.get(kind) ?? 0) + n);

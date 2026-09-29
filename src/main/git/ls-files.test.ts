@@ -2,9 +2,10 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { SessionRecord } from '@shared/graph/session';
 import { LsFilesSchema } from '@shared/ipc/schema/git';
 import { GitFixture } from '../../../test/support/git-fixture';
-import { FileLister, WALK_MAX_ENTRIES } from './ls-files';
+import { FileLister, listableRoots, WALK_MAX_ENTRIES } from './ls-files';
 import { createGitRunner } from './runner';
 
 let repo: GitFixture;
@@ -88,5 +89,40 @@ describe('git lsFiles filters and falls back', () => {
     await expect(l.list({ directory: `${repo.root}/missing`, query: '', limit: 30 })).rejects.toThrow(/ENOENT/);
     await expect(lister(() => []).list({ directory: plain, query: '', limit: 30 })).rejects.toThrow(/not a directory of any session or project/);
     expect((await l.list({ directory: join(repo.root, 'src'), query: '', limit: 30 })).paths).toContain('main.ts');
+  });
+
+  it('reads and realpaths the roots once until invalidated, and again when a directory falls outside them', async () => {
+    const other = realpathSync(mkdtempSync(join(tmpdir(), 'maws-root-')));
+    try {
+      let current = [repo.root, repo.root, join(repo.root, 'src')];
+      const roots = vi.fn(() => current);
+      const l = lister(roots);
+      for (const query of ['m', 'ma', 'mai']) await l.list({ directory: repo.root, query, limit: 30 });
+      expect(roots).toHaveBeenCalledTimes(1); // not per keystroke
+      // A root added since the set was read is found on the miss, without waiting for the change.
+      current = [repo.root, other];
+      await l.list({ directory: other, query: '', limit: 30 });
+      expect(roots).toHaveBeenCalledTimes(2);
+      // A root that went (a session archived) stays listable only until main invalidates the set.
+      current = [other];
+      await l.list({ directory: repo.root, query: '', limit: 30 });
+      expect(roots).toHaveBeenCalledTimes(2);
+      l.invalidateRoots();
+      await expect(l.list({ directory: repo.root, query: '', limit: 30 })).rejects.toThrow(/not a directory of any session or project/);
+      await l.list({ directory: other, query: 'x', limit: 30 });
+      expect(roots).toHaveBeenCalledTimes(4); // the invalidated read, and the refusal's re-read; then the set holds
+    } finally {
+      rmSync(other, { recursive: true, force: true });
+    }
+  });
+
+  it('lists the directories of unarchived sessions and of projects, once each', () => {
+    const record = (directory: string, archived: boolean, extra: Partial<SessionRecord> = {}) => ({ directory, archived, additionalDirectories: [], worktree: null, ...extra }) as unknown as SessionRecord;
+    const sessions = [
+      record('/a', false, { additionalDirectories: ['/a/lib', '/shared'], worktree: { path: '/a/.claude/worktrees/w' } as SessionRecord['worktree'] }),
+      record('/b', false, { additionalDirectories: ['/shared'] }),
+      record('/archived', true, { additionalDirectories: ['/archived-extra'] }),
+    ];
+    expect(listableRoots(sessions, ['/p', '/a'])).toEqual(['/a', '/a/lib', '/shared', '/a/.claude/worktrees/w', '/b', '/p']);
   });
 });

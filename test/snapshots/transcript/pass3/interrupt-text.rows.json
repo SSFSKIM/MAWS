@@ -1,0 +1,182 @@
+[
+  {
+    "at": "2026-09-29T19:09:49.894Z",
+    "id": "time:turn:7a273738-bfa2-41ce-92ea-9f576294a851",
+    "kind": "time",
+    "label": "Today 7:09 PM",
+    "turnId": "turn:7a273738-bfa2-41ce-92ea-9f576294a851"
+  },
+  {
+    "at": "2026-09-29T19:09:49.894Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:7a273738-bfa2-41ce-92ea-9f576294a851",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "7a273738-bfa2-41ce-92ea-9f576294a851",
+    "steer": false,
+    "text": "Without using any tools, write a 500-word essay on the history of tea, as plain prose paragraphs.",
+    "turnId": "turn:7a273738-bfa2-41ce-92ea-9f576294a851"
+  },
+  {
+    "at": "2026-09-29T19:09:49.894Z",
+    "autoDenied": 0,
+    "denied": 0,
+    "endedAt": "2026-09-29T19:09:51.645Z",
+    "expanded": true,
+    "firstDeniedCell": null,
+    "id": "divider:turn:7a273738-bfa2-41ce-92ea-9f576294a851",
+    "kind": "divider",
+    "origin": "human",
+    "startedAt": "2026-09-29T19:09:49.912Z",
+    "state": "stopped",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 0,
+        "exploration": 0,
+        "files": 0,
+        "mcp": 0,
+        "other": 0,
+        "skills": 0,
+        "web": 0
+      },
+      "childAgents": 0,
+      "costUsd": 0.000977,
+      "denials": [],
+      "durationMs": 1731,
+      "model": "claude-haiku-4-5-20251001",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 0,
+        "reviewed": 0
+      },
+      "terminalReason": "aborted_streaming",
+      "toolCalls": 0,
+      "usage": {
+        "cacheCreationInputTokens": 0,
+        "cacheReadInputTokens": 0,
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "thinkingTokens": 0
+      }
+    },
+    "toolCalls": 0,
+    "turnId": "turn:7a273738-bfa2-41ce-92ea-9f576294a851"
+  },
+  {
+    "at": "2026-09-29T19:09:50.550Z",
+    "durationMs": 855,
+    "id": "think:msg_011CfYFwrja2DHkckGebdvYn:0",
+    "kind": "thinking",
+    "live": false,
+    "messageUuid": "4a17bff0-7986-451e-8129-5f87d834fad0",
+    "text": "The user is asking me to write a 500-word essay on the history of tea without using any tools. This is a straightforward writing task that doesn't require me to interact with files, run commands, or use any of the available tools. I should just write the essay directly as plain prose in my response.\n\nLet me write a comprehensive essay on the history of tea covering its origins, spread, and evolution.",
+    "turnId": "turn:7a273738-bfa2-41ce-92ea-9f576294a851"
+  },
+  {
+    "at": "2026-09-29T19:09:51.407Z",
+    "blockIndex": 1,
+    "id": "text:msg_011CfYFwrja2DHkckGebdvYn:1",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "# The History of Tea\n\nTea is one of the world's most consumed beverages, second only to water in terms of global popularity",
+    "messageUuid": "8d6c353a-2abc-44e5-a609-07f4c5b7feaa",
+    "model": "claude-haiku-4-5-20251001",
+    "phase": "answer",
+    "turnId": "turn:7a273738-bfa2-41ce-92ea-9f576294a851"
+  },
+  {
+    "at": "2026-09-29T19:09:51.646Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:56d2908c-c8c7-4cbe-bdde-000d0da6fdf9",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "56d2908c-c8c7-4cbe-bdde-000d0da6fdf9",
+    "steer": false,
+    "text": "Reply with exactly OK",
+    "turnId": "turn:56d2908c-c8c7-4cbe-bdde-000d0da6fdf9"
+  },
+  {
+    "at": "2026-09-29T19:09:51.646Z",
+    "autoDenied": 0,
+    "denied": 0,
+    "endedAt": "2026-09-29T19:09:52.532Z",
+    "expanded": true,
+    "firstDeniedCell": null,
+    "id": "divider:turn:56d2908c-c8c7-4cbe-bdde-000d0da6fdf9",
+    "kind": "divider",
+    "origin": "human",
+    "startedAt": "2026-09-29T19:09:51.647Z",
+    "state": "completed",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 0,
+        "exploration": 0,
+        "files": 0,
+        "mcp": 0,
+        "other": 0,
+        "skills": 0,
+        "web": 0
+      },
+      "childAgents": 0,
+      "costUsd": 0.0037128,
+      "denials": [],
+      "durationMs": 884,
+      "model": "claude-haiku-4-5-20251001",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 0,
+        "reviewed": 0
+      },
+      "terminalReason": "completed",
+      "toolCalls": 0,
+      "usage": {
+        "cacheCreationInputTokens": 205,
+        "cacheReadInputTokens": 21508,
+        "inputTokens": 10,
+        "outputTokens": 33,
+        "thinkingTokens": 26
+      }
+    },
+    "toolCalls": 0,
+    "turnId": "turn:56d2908c-c8c7-4cbe-bdde-000d0da6fdf9"
+  },
+  {
+    "at": "2026-09-29T19:09:52.229Z",
+    "durationMs": 289,
+    "id": "think:msg_011CfYFwyuRUjYWcGvwaUEbk:0",
+    "kind": "thinking",
+    "live": false,
+    "messageUuid": "1bb6832c-8844-41fc-9623-8a1e1f40bd96",
+    "text": "The user interrupted my essay and is asking me to reply with exactly \"OK\". I should do that.",
+    "turnId": "turn:56d2908c-c8c7-4cbe-bdde-000d0da6fdf9"
+  },
+  {
+    "at": "2026-09-29T19:09:52.519Z",
+    "blockIndex": 1,
+    "id": "text:msg_011CfYFwyuRUjYWcGvwaUEbk:1",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "OK",
+    "messageUuid": "de04ae5f-1a9b-400e-bbd9-ea0795d901c2",
+    "model": "claude-haiku-4-5-20251001",
+    "phase": "answer",
+    "turnId": "turn:56d2908c-c8c7-4cbe-bdde-000d0da6fdf9"
+  },
+  {
+    "at": "2026-09-29T19:09:52.759Z",
+    "attempt": null,
+    "id": "error:replay:journal:143:0",
+    "kind": "error",
+    "lostAttentionCount": 0,
+    "scope": "exit",
+    "severity": "notice",
+    "text": "Session process exited (unknown)",
+    "turnId": null
+  }
+]

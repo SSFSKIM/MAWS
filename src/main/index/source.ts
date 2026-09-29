@@ -2,10 +2,10 @@
 // d.7, d.14): folds the engine host's `fs.*` events and C3's `session.status` into the index, feeds C5's read model
 // through its writer, tells the renderer (`session.changed`, `session.removed`, `session.projects.changed`, coalesced per
 // tick with the index's revision), and keeps the host's `appSessionId ↔ sessionId` bindings in step with the index
-// (`fs.bind` for every id it allocates or binds, `fs.unbind` for every id it clears). Whenever the engine host becomes
-// ready (at start, and after a restart that lost its bindings) it re-sends every binding, scans with what the index
-// already holds, and folds the registry's holders once, since the host's start-up holder events predate the
-// subscription. It also runs the unread rule, from the visible set C5 reports through `onSetVisible`.
+// (`fs.bind` for every id it allocates or binds, `fs.unbind` for every id it clears, `fs.unfollow` for an id that goes
+// live). Whenever the engine host becomes ready (at start, and after a restart that lost its bindings) it re-sends every
+// binding, scans with what the index already holds, and folds the registry's holders once, since the host's start-up
+// holder events predate the subscription. It also runs the unread rule, from the visible set C5 reports through `onSetVisible`.
 import type { AppSessionId, ProjectId, SessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { CommandInput, CommandName, CommandOutput, EventName, EventPayload } from '@shared/ipc/schema';
@@ -44,6 +44,8 @@ export class IndexSessionSource implements SessionSource {
   private projectsRevision: number | null = null; // the latest project change waiting for the tick
   private shownProjects = new Set<ProjectId>();
   private bindingQueue: BindingChange[] = [];
+  private readonly live = new Set<AppSessionId>(); // app ids with a process in the engine host, from session.status
+  private unfollows: AppSessionId[] = []; // disk follows to stop at the tick (liveStatus)
   private hostWork: Promise<unknown> = Promise.resolve(); // bindings go to the host in the order the index made them
   private syncs: Promise<unknown> = Promise.resolve();
   private timer: ReturnType<typeof setTimeout> | null = null;
@@ -87,14 +89,17 @@ export class IndexSessionSource implements SessionSource {
         this.write('fs.holderChanged', () => this.index.sessions.setHolder(sessionId, holder));
       }),
       this.host.onEvent('session.status', ({ appSessionId, status }) => {
-        if (this.index.sessions.get(appSessionId) === null) return; // not a record the index holds (yet)
+        const record = this.index.sessions.get(appSessionId);
+        if (record === null) return; // not a record the index holds (yet)
         // C3's patch leaves the holder out once the process has exited, the index's call: nothing holds it then (a
         // terminal that resumes it arrives as fs.holderChanged, which a `self` holder would have refused).
         const patch = toSessionRecordPatch(status);
         if (status.process === 'exited') patch.holder = { kind: 'none' };
         this.write('session.status', () => this.index.sessions.applyEngineStatus(appSessionId, patch));
+        this.liveStatus(appSessionId, status.process === 'exited', record.engineSessionId !== null);
       }),
       this.host.onState('engine-host', (state) => {
+        this.live.clear(); // a host that went away took its processes with it
         if (state.state === 'ready') void this.sync();
       }),
     ];
@@ -107,6 +112,7 @@ export class IndexSessionSource implements SessionSource {
       this.timer = null;
       this.pending.clear();
       this.bindingQueue = [];
+      this.unfollows = [];
       this.writer = null;
     };
   }
@@ -136,6 +142,22 @@ export class IndexSessionSource implements SessionSource {
       if (this.visible.has(record.appId)) this.markSeen(record, summary);
       else this.index.sessions.setUnread(record.appId, true);
     });
+  }
+
+  // A process this app runs is the session's live source from its first status to its exit: a disk follow of the same
+  // app id (a `session.events` read before the launch, then a resume of that id) stops then, once per run, so disk and
+  // live events never both flow for one id. Only an id bound before the status can have been followed (the host follows
+  // bound ids only); the unfollow goes out at the tick, in order after the bindings.
+  private liveStatus(appSessionId: AppSessionId, exited: boolean, wasBound: boolean): void {
+    if (exited) {
+      this.live.delete(appSessionId);
+      return;
+    }
+    if (this.live.has(appSessionId)) return;
+    this.live.add(appSessionId);
+    if (!wasBound || this.index.unavailable !== null) return;
+    this.unfollows.push(appSessionId);
+    this.schedule();
   }
 
   private markSeen(record: SessionRecord, summary = this.index.sessions.summaryOf(record.appId)): void {
@@ -281,6 +303,9 @@ export class IndexSessionSource implements SessionSource {
         batch.t === 'bind' ? this.command('fs.bind', { bindings: batch.bindings }) : this.command('fs.unbind', { appSessionId: batch.appSessionId }),
       );
     }
+    const unfollows = this.unfollows;
+    this.unfollows = [];
+    for (const appSessionId of unfollows) this.hostWork = this.hostWork.then(() => this.command('fs.unfollow', { appSessionId, agentId: null }));
   }
 
   private async command<N extends CommandName>(name: N, input: CommandInput<N>): Promise<CommandOutput<N> | null> {

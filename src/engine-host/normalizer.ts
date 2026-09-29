@@ -12,7 +12,7 @@ import * as z from 'zod';
 import { PERMISSION_MODES, type PermissionMode } from '@shared/graph/enums';
 import type { EventPayload, SessionEvent } from '@shared/graph/events';
 import type { AgentId, ApiMessageId, AppSessionId, EventId, MessageUuid, ParentToolUseId, RequestId, SessionId, TaskId, ToolUseId } from '@shared/graph/ids';
-import { RewindConversationResponseSchema } from '@shared/wire/control';
+import { GetContextUsageResponseSchema, RewindConversationResponseSchema } from '@shared/wire/control';
 import {
   ControlRequestFrameSchema,
   parseStdinFrame,
@@ -296,7 +296,13 @@ export class Normalizer {
         blockIndex = this.state.completedBlocks.get(apiMessageId) ?? 0;
       }
       this.state.completedBlocks.set(apiMessageId, blockIndex + 1);
-      out.emit({ kind: 'assistant.block.complete', messageUuid, apiMessageId, blockIndex, block, model: frame.message.model, supersedes: null, aborted: false, userMessageUuids }, attribution);
+      // `aborted`: the wire's `aborted: true`, set on the partial text block the engine flushes when an interrupt cuts
+      // its stream (pass3/interrupt-text seq 96; an interrupted tool_use or thinking block is never flushed). `supersedes`
+      // stays null: the wire's `supersedes` (SPEC 45, refusal fallback) is an array naming every block frame of the
+      // refused attempt, on the first frame of the replacement only, which X1's single `MessageUuid | null` cannot carry
+      // (no fixture records one; tracker row, debt wave 3). The engine's `model_refusal_fallback` frame still yields
+      // `boundary.retraction`.
+      out.emit({ kind: 'assistant.block.complete', messageUuid, apiMessageId, blockIndex, block, model: frame.message.model, supersedes: null, aborted: (frame as { aborted?: unknown }).aborted === true, userMessageUuids }, attribution);
       if (block.type === 'tool_use') {
         out.emit({ kind: 'tool.use', toolUseId: String(block.id) as ToolUseId, toolName: String(block.name), input: block.input, apiMessageId, messageUuid }, attribution);
       }
@@ -393,7 +399,8 @@ export class Normalizer {
   // ---------------------------------------------------------------------------------------------------------------------
   // Inbound requests and our answers live in normalizer-controls.ts
 
-  // The engine's answer to one of our requests: none as events, except the successful conversation rewind.
+  // The engine's answer to one of our requests: none as events, except the successful conversation rewind and a context
+  // read (whoever asked: the host at each turn's end, or C7's context popover).
   private inboundResponse(frame: ControlResponseFrame, out: Emitter, attribution: Attribution): void {
     // Any response envelope may re-deliver the engine's still-open requests (SPEC 45 ControlResponseEnvelope); those we
     // do not already hold become their *.requested events here, as the broker re-accepts them from the same row.
@@ -417,11 +424,27 @@ export class Normalizer {
       return;
     }
     // C10 end
+    if (sent.subtype === 'get_context_usage') {
+      this.contextSample(frame, out, attribution);
+      return;
+    }
     if (sent.subtype !== 'rewind_conversation' || frame.response.subtype !== 'success') return;
     const parsed = RewindConversationResponseSchema.safeParse(frame.response.response);
     if (!parsed.success || !parsed.data.rewound) return;
     const target = parsed.data.targetMessageUuid ?? (sent.request as { target_message_uuid?: unknown }).target_message_uuid;
     out.emit({ kind: 'boundary.rewind', targetMessageUuid: String(target) as MessageUuid, precedingAssistantUuid: (parsed.data.precedingAssistantUuid ?? null) as MessageUuid | null, prefillText: parsed.data.prefillText ?? null }, attribution);
+  }
+
+  // `context.sample` from a successful `get_context_usage` answer (reads.jsonl seq 57): the engine's own count and window,
+  // the figures the result frame does not carry (it has the API usage of the last request and the model's
+  // `contextWindow`, but neither the engine's total nor the auto-compact threshold). An answer without them (an error,
+  // a replay's empty answer to a read it never recorded) samples nothing.
+  private contextSample(frame: ControlResponseFrame, out: Emitter, attribution: Attribution): void {
+    if (frame.response.subtype !== 'success') return;
+    const parsed = GetContextUsageResponseSchema.safeParse(frame.response.response);
+    if (!parsed.success) return;
+    const { totalTokens, maxTokens, percentage, autoCompactThreshold, isAutoCompactEnabled, model } = parsed.data;
+    out.emit({ kind: 'context.sample', totalTokens, maxTokens, percentage, autoCompactThreshold: autoCompactThreshold ?? null, isAutoCompactEnabled, model }, attribution);
   }
 
   // C10 start: the held trust line as the session's warning, once

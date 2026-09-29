@@ -193,7 +193,25 @@ describe('turn activity', () => {
     b.end(['u1']);
     const { activity } = await attached(b.events);
     expect(activity()[0].tools.map((tool) => tool.name)).toEqual(['Read', 'LS', 'NotebookRead', 'Read']);
-    expect(activity()[0].files.map((file) => file.path)).toEqual(['/p/a.ts', '/p', '/p/n.ipynb', '/p/b.ts']);
+    expect(activity()[0].files.map((file) => file.path)).toEqual(['/p/a.ts', '/p/n.ipynb', '/p/b.ts']);
+  });
+
+  it('lists no search scope as a file: Grep, Glob and LS name directories, so only the file reads count', async () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('g1', 'Grep', { pattern: 'x', path: 'src' }, 'm1', 0);
+    b.result('g1', 'src/a.ts');
+    b.toolUse('g2', 'Glob', { pattern: '**/*.ts', path: '/p/src' }, 'm1', 1);
+    b.result('g2', '/p/src/a.ts');
+    b.toolUse('l1', 'LS', { path: '/p' }, 'm1', 2);
+    b.result('l1', 'src');
+    b.toolUse('r1', 'Read', { file_path: '/p/src/a.ts' }, 'm1', 3);
+    b.result('r1', 'a');
+    b.text('m2', 0, 'Done.');
+    b.end(['u1']);
+    const { activity } = await attached(b.events);
+    expect(activity()[0].tools.map((tool) => tool.name)).toEqual(['Grep', 'Glob', 'LS', 'Read']);
+    expect(activity()[0].files.map(({ path, use }) => [path, use])).toEqual([['/p/src/a.ts', 'read']]);
   });
 
   it('reads the per-turn derivation the rows already made: no second derivation, the same entry while the turn is unchanged', async () => {
