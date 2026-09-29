@@ -21,10 +21,24 @@ export interface NearLimitBanner {
 }
 
 // ClaudeUsage records a window's `resetsAt` from the rate-limit headers, which move by a second between readings
-// (`07:49:59Z`, then `07:50:00Z`); the key rounds it to the minute so one window keeps one key.
+// (`07:49:59Z`, then `07:50:00Z`). One window is an account, a limit key and reset times within 90 s of each other;
+// its key carries the first reset time seen for it, and a later reading finds that key again by the same tolerance,
+// in this run (the posted keys) and after a reload (the dismissed keys in `usage.banners`).
+export const SAME_WINDOW_MS = 90_000;
+
 export function bannerKey(accountUuid: string, limitKey: string, resetsAt: string): string {
-  const minute = new Date(Math.round(Date.parse(resetsAt) / 60_000) * 60_000).toISOString().replace('.000Z', 'Z');
-  return `usage:${accountUuid}:${limitKey}:${minute}`;
+  return `usage:${accountUuid}:${limitKey}:${new Date(Date.parse(resetsAt)).toISOString().replace(/\.\d{3}Z$/, 'Z')}`;
+}
+
+const KEY = /^usage:([^:]+):([^:]+):(.+)$/;
+
+// The key among `known` that names this window, if any.
+function knownKey(known: readonly string[], accountUuid: string, limitKey: string, resetsAt: string): string | undefined {
+  const at = Date.parse(resetsAt);
+  return known.find((key) => {
+    const m = KEY.exec(key);
+    return m !== null && m[1] === accountUuid && m[2] === limitKey && Math.abs(Date.parse(m[3]) - at) <= SAME_WINDOW_MS;
+  });
 }
 
 // C11's `settings.usage.nearLimitPercent` (50–100) once C11 lands it; 90 until then. `settings` is SettingsState's
@@ -34,12 +48,12 @@ export function thresholdFrom(settings: unknown): number {
   return typeof percent === 'number' && percent >= 50 && percent <= 100 ? percent : DEFAULT_NEAR_LIMIT_PERCENT;
 }
 
-// Every banner the snapshot warrants at `now`, less the `dismissed` keys. Pure.
-export function nearLimitBanners(snapshot: UsageSnapshot, dismissed: Iterable<string>, opts: { thresholdPercent?: number; now?: number } = {}): NearLimitBanner[] {
+// Every banner the snapshot warrants at `now`, each keyed by the `known` key that already names its window, else by
+// its own reset time. Pure.
+export function nearLimitWindows(snapshot: UsageSnapshot, known: readonly string[], opts: { thresholdPercent?: number; now?: number } = {}): NearLimitBanner[] {
   if (!snapshot.available) return [];
   const threshold = opts.thresholdPercent ?? DEFAULT_NEAR_LIMIT_PERCENT;
   const now = opts.now ?? Date.now();
-  const skip = new Set(dismissed);
   const banners: NearLimitBanner[] = [];
   for (const account of snapshot.accounts) {
     const windows: [string, string, UsageWindow | null][] = [
@@ -51,12 +65,17 @@ export function nearLimitBanners(snapshot: UsageSnapshot, dismissed: Iterable<st
       if (!window || window.percent < threshold) continue;
       const left = Date.parse(window.resetsAt) - now;
       if (!(left > 0)) continue;
-      const key = bannerKey(account.uuid, limitKey, window.resetsAt);
-      if (skip.has(key)) continue;
+      const key = knownKey(known, account.uuid, limitKey, window.resetsAt) ?? bannerKey(account.uuid, limitKey, window.resetsAt);
       banners.push({ key, text: `${label} window at ${Math.round(window.percent)}% for ${account.email} · resets in ${resetsIn(left)}` });
     }
   }
   return banners;
+}
+
+// Every banner the snapshot warrants at `now`, less the windows `dismissed` names. Pure.
+export function nearLimitBanners(snapshot: UsageSnapshot, dismissed: Iterable<string>, opts: { thresholdPercent?: number; now?: number } = {}): NearLimitBanner[] {
+  const skip = [...dismissed];
+  return nearLimitWindows(snapshot, skip, opts).filter((b) => !skip.includes(b.key));
 }
 
 export interface NearLimitDeps {
@@ -82,7 +101,10 @@ export function connectNearLimitBanners(deps: NearLimitDeps = { client: ipc, usa
   const evaluate = () => {
     const snapshot = usage.getState().snapshot;
     if (!live || dismissed === null || !snapshot) return;
-    const current = nearLimitBanners(snapshot, dismissed, { thresholdPercent: thresholdFrom(settings.getState().state?.settings ?? null), now: Date.now() });
+    // keyed by what this run posted and what was dismissed, so a jittered reset time finds its window's key again
+    const skip = dismissed;
+    const opts = { thresholdPercent: thresholdFrom(settings.getState().state?.settings ?? null), now: Date.now() };
+    const current = nearLimitWindows(snapshot, [...posted, ...skip], opts).filter((b) => !skip.includes(b.key));
     const onScreen = shown();
     for (const { key, text } of current) {
       const held = notices.getState().notices.find((n) => n.id === key);

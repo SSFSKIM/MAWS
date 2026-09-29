@@ -5,7 +5,7 @@ import { connectUsage } from '../stores/usage';
 import { connectNearLimitBanners } from './near-limit';
 
 export { registerUsagePopoverFooter, type UsagePopoverFooter } from './footer';
-export { nearLimitBanners, thresholdFrom, bannerKey, type NearLimitBanner } from './near-limit';
+export { nearLimitBanners, nearLimitWindows, thresholdFrom, bannerKey, type NearLimitBanner } from './near-limit';
 export { windowsFor, useSessionWindows, type SessionWindows, type Windows } from '../stores/usage';
 export { ModeMenu, useLiveModeBinding } from './ModeMenu';
 export { liveModeBinding, nextMode, autoUnavailableReason, MODE_OPTIONS, MODE_REFUSAL_WORDS, NOT_RUNNING, type ModeBinding, type ModeOption } from './mode-menu';

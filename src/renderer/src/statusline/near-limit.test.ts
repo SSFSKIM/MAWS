@@ -51,9 +51,15 @@ describe('near-limit banner posts once per window', () => {
     expect(nearLimitBanners(MIXED, dismissed, { now: NOW }).map((b) => b.key)).toEqual([bannerKey('a2', 'weekly_all', at(26 * HOUR))]);
   });
 
-  it('keys a window by its reset time to the minute, so a second of jitter in ClaudeUsage’s resetsAt is the same window', () => {
-    expect(bannerKey('aa9db20d', 'session', '2026-09-29T07:49:59Z')).toBe('usage:aa9db20d:session:2026-09-29T07:50:00Z');
-    expect(bannerKey('aa9db20d', 'session', '2026-09-29T07:50:00Z')).toBe('usage:aa9db20d:session:2026-09-29T07:50:00Z');
+  it('treats reset times within 90 s as one window: a dismissed key still names it when ClaudeUsage’s resetsAt moves', () => {
+    const jittered = (resetsAt: string) => snapshot([account('a1', 'one@example.test', { fiveHour: { percent: 95, resetsAt, recordedAt: at(0) } })]);
+    // the fixture's own jitter (07:49:59Z, then 07:50:00Z), and one straddling a half minute
+    expect(nearLimitBanners(jittered('2026-09-29T09:50:00Z'), ['usage:a1:session:2026-09-29T09:49:59Z'], { now: NOW })).toEqual([]);
+    expect(nearLimitBanners(jittered('2026-09-29T09:50:31Z'), ['usage:a1:session:2026-09-29T09:50:29Z'], { now: NOW })).toEqual([]);
+    // two minutes apart is another window, and another account or limit is never the same one
+    expect(nearLimitBanners(jittered('2026-09-29T09:52:00Z'), ['usage:a1:session:2026-09-29T09:50:00Z'], { now: NOW }).map((b) => b.key)).toEqual(['usage:a1:session:2026-09-29T09:52:00Z']);
+    expect(nearLimitBanners(jittered('2026-09-29T09:50:00Z'), ['usage:a2:session:2026-09-29T09:50:00Z', 'usage:a1:weekly_all:2026-09-29T09:50:00Z'], { now: NOW })).toHaveLength(1);
+    expect(bannerKey('aa9db20d', 'session', '2026-09-29T07:49:59.000Z')).toBe('usage:aa9db20d:session:2026-09-29T07:49:59Z');
   });
 
   it('reads the threshold from settings.usage.nearLimitPercent within 50 to 100, else 90', () => {
@@ -109,6 +115,24 @@ describe('near-limit banner posts once per window: the notices adapter', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(next.banners().map((b) => b.id)).toEqual([bannerKey('a2', 'weekly_all', at(26 * HOUR))]);
     next.off();
+  });
+
+  it('a window whose reset time moves by a second keeps its first key: one banner, refreshed in place, and after a dismissal and a reload none', async () => {
+    const reading = (resetsAt: string) => snapshot([account('a4', 'four@example.test', { fiveHour: { percent: 99, resetsAt, recordedAt: at(0) } })]);
+    const first = setup();
+    first.usage.getState().applySnapshot(reading('2026-09-29T09:49:59Z'));
+    await vi.advanceTimersByTimeAsync(0);
+    first.usage.getState().applySnapshot(reading('2026-09-29T09:50:00Z'));
+    expect(first.banners().map((b) => b.id)).toEqual(['usage:a4:session:2026-09-29T09:49:59Z']);
+    first.notices.getState().dismiss('usage:a4:session:2026-09-29T09:49:59Z');
+    await vi.advanceTimersByTimeAsync(0);
+    first.off();
+
+    const reloaded = setup(['usage:a4:session:2026-09-29T09:49:59Z']);
+    reloaded.usage.getState().applySnapshot(reading('2026-09-29T09:50:00Z'));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(reloaded.banners()).toEqual([]);
+    reloaded.off();
   });
 
   it('keeps usage.banners to the newest fifty keys', async () => {
