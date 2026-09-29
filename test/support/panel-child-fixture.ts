@@ -26,12 +26,9 @@ const UNITS_PER_BATCH = 20;
 const STEP_MS = 300;
 const EVENTS_PER_UNIT = 4; // the Read's tool_use block and tool.use, its tool.result, the text block
 
-// Recorded by the generator's test (`panel-child fixture is reproducible` measures them again).
-export const PANEL_CHILD_TAIL = {
-  first: 333,
-  batches: [80, 80, 83],
-  rows: [46, 86, 128],
-} as const;
+// Recorded in a module of its own, so the e2e imports the numbers without the generator's imports; the generator's test
+// (`panel-child fixture is reproducible`) measures them again.
+export { PANEL_CHILD_TAIL } from './panel-child-tail';
 
 // Paths of this repository the child reads, in turn; a fixed list, so the fixture never changes with the tree.
 const PATHS = [
