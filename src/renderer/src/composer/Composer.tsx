@@ -97,12 +97,12 @@ function useDraftPort(appSessionId: AppSessionId, hook: SetupIntentHook | null, 
   }, [appSessionId, client]);
 }
 
-// The live chips' reads: C3's models and permission rules while the process is ready, and the branch list for the
-// location popover.
-function useLiveReads(appSessionId: AppSessionId, ready: boolean, directory: string | null, git: { branch: string | null } | null) {
-  const models = useCommand('session.listModels', { appSessionId }, { enabled: ready, staleTime: 60_000 });
-  const rules = useCommand('session.listPermissionRules', { appSessionId }, { enabled: ready, staleTime: 10_000 });
-  const branches = useCommand('git.branches', { directory: directory ?? '' }, { enabled: directory !== null && git !== null, staleTime: 30_000 });
+// The live chips' reads: C3's models and permission rules, each a control request to the engine, read once a chip that
+// shows it has opened (never per mount), and the branch list for the location popover.
+function useLiveReads(appSessionId: AppSessionId, want: { models: boolean; rules: boolean }, directory: string | null, git: { branch: string | null } | null) {
+  const models = useCommand('session.listModels', { appSessionId }, { enabled: want.models, staleTime: 60_000 });
+  const rules = useCommand('session.listPermissionRules', { appSessionId }, { enabled: want.rules, staleTime: 10_000 });
+  const branches = useCommand('git.branches', { directory: directory ?? '' }, { enabled: want.rules && directory !== null && git !== null, staleTime: 30_000 });
   return {
     models: models.data?.models ?? null,
     directories: rules.data ? workspaceDirectoriesOf(rules.data.state.workspaceDirectories) : null,
@@ -131,7 +131,9 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
   // ---- what the frame binds to ------------------------------------------------------------------------------------
   const cwd = setup ? locationPath(setup.intent.location) : (status?.cwd ?? record?.directory ?? '');
   const repo = useGitWatch(setup ? null : cwd || null, client);
-  const reads = useLiveReads(appSessionId, status?.process === 'ready', setup ? null : cwd || null, repo);
+  const [opened, setOpened] = useState({ models: false, rules: false });
+  const ready = status?.process === 'ready';
+  const reads = useLiveReads(appSessionId, { models: ready && opened.models, rules: ready && opened.rules }, setup ? null : cwd || null, repo);
   const bindings: FrameBindings = setup ? intentBindings(setup, { starting }) : status || record ? liveBindings(status, record, reads, client) : endedBindings();
 
   // ---- the submit control's state ------------------------------------------------------------------------------
@@ -245,6 +247,7 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
       {docked && waiting > 0 && <p className="m-0 text-ui-sm text-fg-muted">{waiting === 1 ? '1 more waiting' : `${waiting} more waiting`}</p>}
       <Frame
         hidden={docked}
+        onOpen={(what) => setOpened((o) => (o[what] ? o : { ...o, [what]: true }))}
         bindings={bindings}
         cwd={cwd}
         dirty={repo?.dirty ?? false}

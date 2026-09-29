@@ -4,16 +4,23 @@
 // engine behind them (C3's replay under MAWS_ENGINE_REPLAY=1). Main blocks navigation, so an end-to-end test cannot
 // change the query within a launch: it launches its replay through `window.maws` and tells the page what to show
 // through `window.__maws_cards`. `?session=<appSessionId>&placement=<placement>` sets pane 0 on load for manual use,
-// and `?theme=dark` the theme. M3 and M4 add the editor and the composer to this page.
+// and `?theme=dark` the theme. M3's editor has its own page (`#editor`). M4 adds the composer as a pane kind, over the
+// layout store's panes (so the one app-level ⌘. and ⌘L resolve the focused pane as they do in the shell), with C10's
+// setup intent stubbed (`intent-stub.ts`) and a stub card docked through `dockCard`.
+import { QueryClientProvider } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { AppSessionId } from '@shared/graph/ids';
+import { Composer, ComposerAppKeys, DockedCardFrame, dockCard } from '../../composer';
 import { connectShell } from '../../ipc/events';
+import { queryClient } from '../../ipc/query';
 import { connectKeys } from '../../keymap/dispatcher';
 import { useKeyChord } from '../../keymap/useKeyChord';
 import { RequestCard } from '../../request-card';
 import { selectPendingOf, useAttention } from '../../stores/attention';
+import { useLayout } from '../../stores/layout';
 import type { CardsHarnessApi, HarnessPane, HarnessPlacement } from './api';
+import { setStubIntent, stubLog } from './intent-stub';
 
 declare global {
   interface Window {
@@ -72,15 +79,53 @@ function initialPanes(): [HarnessPane, HarnessPane] {
   return [session ? { appSessionId: session, placement: placement && PLACEMENTS.includes(placement) ? placement : 'docked' } : null, null];
 }
 
+// A stub card another child would dock (C10's trust card): the docked frame's chrome, focus and keys around it.
+function StubCard({ appSessionId, onAccept }: { appSessionId: AppSessionId; onAccept(): void }) {
+  return (
+    <DockedCardFrame appSessionId={appSessionId} title="Trust this folder?" onAccept={onAccept} onDecline={null}>
+      <p className="m-0">A stub card docked through dockCard.</p>
+    </DockedCardFrame>
+  );
+}
+
+// M4: the layout store's panes mirror the page's composer panes, so ComposerAppKeys resolves the focused pane's session.
+function mirrorLayout(panes: [HarnessPane, HarnessPane]) {
+  const tabsOf = (pane: HarnessPane) =>
+    pane !== null && 'composer' in pane
+      ? { tabs: [{ id: `session:${pane.composer}`, kind: 'session' as const, appSessionId: pane.composer as AppSessionId, pinned: false }], activeTabId: `session:${pane.composer}` }
+      : { tabs: [{ id: 'overview' as const, kind: 'overview' as const, pinned: true as const }], activeTabId: 'overview' };
+  useLayout.setState((s) => ({ main: { ...s.main, panes: [tabsOf(panes[0]), tabsOf(panes[1])], focusedPane: s.main.focusedPane } }));
+}
+
 export function ComposerHarness() {
   const [panes, setPanes] = useState(initialPanes);
   const counted = useRef(0);
+  const stub = useRef<{ accepts: number; undock: (() => void) | null }>({ accepts: 0, undock: null });
 
   useEffect(() => {
     const theme = new URLSearchParams(location.search).get('theme');
     if (theme === 'dark' || theme === 'light') document.documentElement.dataset.theme = theme;
     const offs = [connectShell(), connectKeys()];
-    window.__maws_cards = { show: (next) => setPanes(next), counted: () => counted.current };
+    window.__maws_cards = {
+      show: (next) => {
+        mirrorLayout(next);
+        setPanes(next);
+      },
+      counted: () => counted.current,
+      intent: (appSessionId, intent) => setStubIntent(appSessionId, intent as Parameters<typeof setStubIntent>[1]),
+      starts: () => [...stubLog.starts],
+      answerStart: (result) => stubLog.pending.shift()?.(result),
+      patches: () => [...stubLog.patches],
+      dockStub: (appSessionId) => {
+        stub.current.undock?.();
+        stub.current.undock = dockCard(appSessionId as AppSessionId, { id: 'harness:stub', render: () => <StubCard appSessionId={appSessionId as AppSessionId} onAccept={() => void (stub.current.accepts += 1)} /> });
+      },
+      undockStub: () => {
+        stub.current.undock?.();
+        stub.current.undock = null;
+      },
+      stubAccepts: () => stub.current.accepts,
+    };
     return () => {
       offs.forEach((off) => off());
       delete window.__maws_cards;
@@ -88,22 +133,29 @@ export function ComposerHarness() {
   }, []);
 
   return (
-    <main className="grid h-full grid-cols-2 gap-6 overflow-auto bg-bg p-6 text-ui text-fg">
-      {panes.map((pane, i) => {
-        const index = i as 0 | 1;
-        return (
-          <section key={i} data-pane={index} aria-label={`pane ${index}`} className="flex min-w-0 flex-col gap-3">
-            <button type="button" className="self-start rounded-sm border border-border px-2 py-0.5 text-ui-sm text-fg-muted">
-              pane {index}
-            </button>
-            {pane === null ? null : 'counter' in pane ? (
-              <CounterPane onCount={() => void (counted.current += 1)} />
-            ) : (
-              <RequestPane appSessionId={pane.appSessionId as AppSessionId} placement={pane.placement} index={index} />
-            )}
-          </section>
-        );
-      })}
-    </main>
+    <QueryClientProvider client={queryClient}>
+      <main className="grid h-full grid-cols-2 gap-6 overflow-auto bg-bg p-6 text-ui text-fg">
+        {panes.map((pane, i) => {
+          const index = i as 0 | 1;
+          return (
+            <section key={i} data-pane={index} aria-label={`pane ${index}`} onFocusCapture={() => useLayout.getState().focusPane(index)} className="flex min-w-0 flex-col gap-3">
+              <button type="button" className="self-start rounded-sm border border-border px-2 py-0.5 text-ui-sm text-fg-muted">
+                pane {index}
+              </button>
+              {pane === null ? null : 'counter' in pane ? (
+                <CounterPane onCount={() => void (counted.current += 1)} />
+              ) : 'composer' in pane ? (
+                <div className="mt-auto">
+                  <Composer key={pane.composer} appSessionId={pane.composer as AppSessionId} paneIndex={index} />
+                </div>
+              ) : (
+                <RequestPane appSessionId={pane.appSessionId as AppSessionId} placement={pane.placement} index={index} />
+              )}
+            </section>
+          );
+        })}
+      </main>
+      <ComposerAppKeys />
+    </QueryClientProvider>
   );
 }

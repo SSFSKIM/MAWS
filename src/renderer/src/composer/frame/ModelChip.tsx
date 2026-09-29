@@ -15,7 +15,7 @@ const EFFORTS = EffortSchema.options;
 const matches = (option: ModelInfo, model: string | null) => model !== null && (option.value === model || (option as { resolvedModel?: string }).resolvedModel === model);
 const displayOf = (options: readonly ModelInfo[], model: string | null) => (model === null ? 'Default model' : (options.find((m) => matches(m, model))?.displayName ?? model));
 
-export function ModelChip({ binding, openWidget }: { binding: ChipBinding<ModelChoice, ModelInfo>; openWidget: (() => boolean) | null }) {
+export function ModelChip({ binding, openWidget, onOpen }: { binding: ChipBinding<ModelChoice, ModelInfo>; openWidget: (() => boolean) | null; onOpen?(): void }) {
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -37,6 +37,7 @@ export function ModelChip({ binding, openWidget }: { binding: ChipBinding<ModelC
       open={open}
       onOpenChange={(next) => {
         if (next && openWidget?.()) return; // C11's widget takes the chip
+        if (next) onOpen?.();
         setOpen(next);
       }}
     >

@@ -13,9 +13,10 @@ export interface ToolbarProps {
   bindings: Pick<FrameBindings, 'mode' | 'model'>;
   cwd: string;
   editor: RefObject<EditorHandle | null>;
+  onOpen?(): void; // the mode and model menus read the engine's models when they open
 }
 
-export function Toolbar({ bindings, cwd, editor }: ToolbarProps) {
+export function Toolbar({ bindings, cwd, editor, onOpen }: ToolbarProps) {
   return (
     <div role="toolbar" aria-label="Composer tools" className="flex min-w-0 items-center gap-0.5">
       <PlusMenu cwd={cwd} editor={editor} />
@@ -29,8 +30,8 @@ export function Toolbar({ bindings, cwd, editor }: ToolbarProps) {
         </svg>
       </button>
       <span className="flex-1" />
-      <ModeChip binding={bindings.mode} />
-      <ModelChip binding={bindings.model} openWidget={() => editor.current?.openWidget('model') ?? false} />
+      <ModeChip binding={bindings.mode} onOpen={onOpen} />
+      <ModelChip binding={bindings.model} onOpen={onOpen} openWidget={() => editor.current?.openWidget('model') ?? false} />
     </div>
   );
 }

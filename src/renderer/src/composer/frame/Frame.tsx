@@ -21,18 +21,19 @@ export interface FrameProps {
   editor: ReactNode; // M3's Editor (the only element under the composer key sink)
   submit: ReactNode; // the submit control, beside the editor and outside its sink
   hidden?: boolean; // a docked card has the composer's place: the frame stays mounted (the editor keeps its state)
+  onOpen?(what: 'models' | 'rules'): void; // a chip showing an engine read opened: the composer reads it then, not per mount
 }
 
-export function Frame({ bindings, cwd, dirty, attachments, editorHandle, editor, submit, hidden = false }: FrameProps) {
+export function Frame({ bindings, cwd, dirty, attachments, editorHandle, editor, submit, hidden = false, onOpen }: FrameProps) {
   return (
     <div data-composer-frame hidden={hidden} className="mx-auto flex w-full max-w-[720px] min-w-0 flex-col gap-1">
-      <ChipRow bindings={bindings} cwd={cwd} dirty={dirty} />
+      <ChipRow bindings={bindings} cwd={cwd} dirty={dirty} onOpen={() => onOpen?.('rules')} />
       <AttachmentStrip attachments={attachments} onRemove={(id) => editorHandle.current?.removeAttachment(id)} />
       <div data-composer-box className="flex min-w-0 items-end gap-2 rounded-xl border border-border-strong bg-bg-raised py-1.5 pr-1.5 pl-2.5 focus-within:border-accent">
         <div className="min-w-0 flex-1 py-0.5">{editor}</div>
         {submit}
       </div>
-      <Toolbar bindings={bindings} cwd={cwd} editor={editorHandle} />
+      <Toolbar bindings={bindings} cwd={cwd} editor={editorHandle} onOpen={() => onOpen?.('models')} />
     </div>
   );
 }

@@ -247,11 +247,18 @@ describe("composer DOM under C5's dispatcher", () => {
     mount([{ index: 0, id: A }]);
     const chip = within(composerOf(0)).getByRole('button', { name: /^Permission mode default/ });
     expect(chip.getAttribute('aria-label')).toBe('Permission mode default · This model does not support auto mode');
-    await waitFor(() => expect(invoked('session.listPermissionRules')).toHaveLength(1));
+    expect(invoked('session.listPermissionRules')).toEqual([]); // no engine read on mount
+    expect(invoked('session.listModels')).toEqual([]);
+    const user = userEvent.setup();
+    await user.click(within(composerOf(0)).getByRole('button', { name: /^Location/ }));
+    await waitFor(() => expect(invoked('session.listPermissionRules')).toHaveLength(1)); // read as the popover opens
     await waitFor(() => expect(within(composerOf(0)).getByRole('button', { name: 'Add a directory' }).textContent).toBe('+ dir · 1'));
-    await userEvent.setup().click(within(composerOf(0)).getByRole('button', { name: 'Add a directory' }));
+    await user.keyboard('{Escape}');
+    await user.click(within(composerOf(0)).getByRole('button', { name: 'Add a directory' }));
     await waitFor(() => expect(invoked('session.applyFlagSettings')).toEqual([{ appSessionId: A, settings: { permissions: { additionalDirectories: ['/work/app-a/extra', '/work/picked'] } } }]));
-    await waitFor(() => expect(invoked('session.listPermissionRules')).toHaveLength(2)); // re-read afterwards
+    await waitFor(() => expect(invoked('session.listPermissionRules')).toHaveLength(3)); // read at the change, and again afterwards
+    await user.click(chip);
+    await waitFor(() => expect(invoked('session.listModels')).toHaveLength(1)); // the mode menu reads the models as it opens
   });
 });
 

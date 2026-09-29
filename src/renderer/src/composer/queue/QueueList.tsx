@@ -68,13 +68,12 @@ function useQueueActions(appSessionId: AppSessionId, client: MawsBridge) {
 
 // A submitting entry is in flight; C3 acknowledges within milliseconds, so it shows only once it has lasted.
 function SubmittingRow({ entry }: { entry: QueueEntry }) {
-  const since = entry.submittedAt ? Date.parse(entry.submittedAt) : Date.now();
-  const [shown, setShown] = useState(() => Date.now() - since >= SUBMITTING_VISIBLE_MS);
+  const [shown, setShown] = useState(false);
   useEffect(() => {
-    if (shown) return;
+    const since = entry.submittedAt ? Date.parse(entry.submittedAt) : Date.now();
     const timer = setTimeout(() => setShown(true), Math.max(0, SUBMITTING_VISIBLE_MS - (Date.now() - since)));
     return () => clearTimeout(timer);
-  }, [shown, since]);
+  }, [entry.submittedAt]);
   if (!shown) return null;
   return (
     <li data-queue-state="submitting" className="flex min-w-0 items-center gap-2 px-2.5 py-1.5 text-fg-muted">

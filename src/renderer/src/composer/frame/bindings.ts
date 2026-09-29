@@ -82,7 +82,9 @@ export function intentBindings(hook: SetupIntentHook, gate: { starting: boolean 
 type ModelOption = ListModelsResponse['models'][number];
 
 // What the live chips read beside the status and the record: C3's `listModels`, the engine's workspace directories,
-// C4's branch and branch list, and a refresh of the rules after a directory was added.
+// C4's branch and branch list, and a refresh of the rules after a directory was added. The two engine reads are control
+// requests, so the composer makes them only when a chip that shows them opens (never per mount: many open sessions
+// would each ask the engine, and a replayed engine refuses any request its journal did not record).
 export interface LiveReads {
   models?: readonly ModelOption[] | null;
   directories?: readonly string[] | null;
@@ -129,9 +131,15 @@ export function liveBindings(status: EngineSessionStatus | null, record: Session
       value: directories,
       options: [],
       disabled: writable,
+      // The engine's own list is read at the moment of the change (the chip's value may be the record's, or stale), and
+      // the new directories are added to it: flag settings replace the list, so nothing the engine holds is dropped.
       set: async (next) => {
         if (!ready) return { ok: false, error: NOT_RUNNING };
-        const result = await client.invoke('session.applyFlagSettings', { appSessionId, settings: { permissions: { additionalDirectories: next } } });
+        const rules = await client.invoke('session.listPermissionRules', { appSessionId });
+        if (!rules.ok) return { ok: false, error: rules.error.message };
+        const held = workspaceDirectoriesOf(rules.value.state.workspaceDirectories);
+        const additionalDirectories = [...held, ...next.filter((d) => !held.includes(d))];
+        const result = await client.invoke('session.applyFlagSettings', { appSessionId, settings: { permissions: { additionalDirectories } } });
         if (!result.ok) return { ok: false, error: result.error.message };
         reads.refresh?.();
         return { ok: true };

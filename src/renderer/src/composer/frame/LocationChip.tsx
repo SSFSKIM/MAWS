@@ -15,6 +15,7 @@ export interface LocationChipProps {
   branch: ChipBinding<string | null, string>;
   directories: readonly string[];
   dirty: boolean;
+  onOpen?(): void; // the popover lists the engine's directories: read them when it opens
 }
 
 const sameLocation = (a: Location, b: Location) => a.kind === b.kind && locationPath(a) === locationPath(b);
@@ -93,7 +94,7 @@ function BranchPicker({ branch }: { branch: ChipBinding<string | null, string> }
   );
 }
 
-export function LocationChip({ location, branch, directories, dirty }: LocationChipProps) {
+export function LocationChip({ location, branch, directories, dirty, onOpen }: LocationChipProps) {
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
@@ -108,7 +109,13 @@ export function LocationChip({ location, branch, directories, dirty }: LocationC
     setCopied(text);
   };
   return (
-    <Popover.Root open={open} onOpenChange={setOpen}>
+    <Popover.Root
+      open={open}
+      onOpenChange={(next) => {
+        if (next) onOpen?.();
+        setOpen(next);
+      }}
+    >
       <Popover.Trigger aria-label={`Location ${path}`} title={location.disabled ? `${path} · ${location.disabled}` : path} className={`${CHIP} font-mono`}>
         <span className="truncate">{formatCwd(path)}</span>
         <span className="shrink-0 text-fg-faint">·</span>

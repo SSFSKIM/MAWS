@@ -6,11 +6,17 @@ import { useState } from 'react';
 import { ModeMenu, MODE_REFUSAL_WORDS, type ModeBinding } from '../../statusline';
 import { CHIP, POPOVER } from './chip-style';
 
-export function ModeChip({ binding }: { binding: ModeBinding }) {
+export function ModeChip({ binding, onOpen }: { binding: ModeBinding; onOpen?(): void }) {
   const [open, setOpen] = useState(false);
   const refusal = binding.refusal ? MODE_REFUSAL_WORDS[binding.refusal] : null;
   return (
-    <Popover.Root open={open} onOpenChange={setOpen}>
+    <Popover.Root
+      open={open}
+      onOpenChange={(next) => {
+        if (next) onOpen?.();
+        setOpen(next);
+      }}
+    >
       <Popover.Trigger aria-label={`Permission mode ${binding.value ?? 'default'}${refusal ? ` · ${refusal}` : ''}`} title={refusal ?? binding.disabled ?? 'Permission mode'} className={`${CHIP} font-mono`}>
         {refusal && (
           <span aria-hidden className="text-warning">

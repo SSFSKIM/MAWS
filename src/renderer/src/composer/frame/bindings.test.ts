@@ -61,7 +61,8 @@ describe('the frame binds its chips to the setup intent or to the live session',
   });
 
   it('applies a live session’s model, effort and directories through C3, and keeps location and branch read-only', async () => {
-    const { client, invoke } = bridge({ 'session.setModel': { ok: true, value: { ok: true, error: null, code: null } } });
+    const rulesAnswer = { ok: true, value: { state: { rules: [], workspaceDirectories: ['/a', '/held'], originalCwd: '/work/app-1', managedOnly: false } } };
+    const { client, invoke } = bridge({ 'session.setModel': { ok: true, value: { ok: true, error: null, code: null } }, 'session.listPermissionRules': rulesAnswer });
     const s = { ...status(APP), cwd: '/work/app-1', model: { requested: 'sonnet', resolved: 'claude-sonnet' }, effort: 'medium' as const };
     const refresh = vi.fn();
     const b = liveBindings(s, record(APP), { models: null, directories: ['/a'], branch: 'main', branches: ['main'], refresh }, client);
@@ -75,7 +76,8 @@ describe('the frame binds its chips to the setup intent or to the live session',
     expect(invoke.mock.calls).toEqual([
       ['session.setModel', { appSessionId: APP, model: 'haiku' }],
       ['session.setEffort', { appSessionId: APP, effort: 'high' }],
-      ['session.applyFlagSettings', { appSessionId: APP, settings: { permissions: { additionalDirectories: ['/a', '/b'] } } }],
+      ['session.listPermissionRules', { appSessionId: APP }], // read at the change: the engine's list, not the chip's
+      ['session.applyFlagSettings', { appSessionId: APP, settings: { permissions: { additionalDirectories: ['/a', '/held', '/b'] } } }],
     ]);
     expect(refresh).toHaveBeenCalledTimes(1); // the chip re-reads the rules afterwards
     expect(b.mode.value).toBe('auto');
