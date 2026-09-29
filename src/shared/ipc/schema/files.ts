@@ -18,8 +18,10 @@ export const BINARY_SNIFF_BYTES = 8192;
 // Whether `files.openExternal` hands a file of this name to the OS (and the viewer offers the button): an allowlist of
 // the document and media kinds MAWS opens outside on purpose, because any installed app can register to launch a file
 // it is asked to open (Python Launcher for `.py`), so a list of what not to open is incomplete by construction.
-// main's service also requires a regular file with no execute bit.
-const EXTERNAL_DOCUMENTS = new Set(['doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'odt', 'ods', 'odp', 'rtf', 'pages', 'numbers', 'key', 'epub']);
+// main's service also requires a regular file with no execute bit. Plain-text logs and tables are in (a viewer past the
+// text cap hands them out); legacy Office (`.doc`, `.xls`, `.ppt`) is out, since it carries VBA or XLM macros and an
+// agent-written file has no quarantine attribute for Office's macro block to act on.
+const EXTERNAL_DOCUMENTS = new Set(['docx', 'xlsx', 'pptx', 'odt', 'ods', 'odp', 'rtf', 'pages', 'numbers', 'key', 'epub', 'txt', 'log', 'csv', 'tsv']);
 export function opensExternally(name: string): boolean {
   const mime = mimeOf(name);
   if (mime === 'application/pdf' || mime === 'text/html' || /^(image|audio|video)\//.test(mime)) return true;

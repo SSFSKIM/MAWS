@@ -608,14 +608,15 @@ describe('files openExternal', () => {
     write(inRoot('data.bin'), Buffer.from([1, 0, 2]));
     write(inRoot('run.sh'), '#!/bin/sh\necho hi\n');
     write(inRoot('script.command'), 'echo hi\n');
+    write(inRoot('legacy.doc'), 'x'); // legacy Office: macros, and no quarantine attribute for Office's block to act on
     write(inRoot('movie.mp4'), 'x');
     fs.chmodSync(inRoot('movie.mp4'), 0o755); // an allowed kind with an execute bit is still refused
     mkdirSync(inRoot('Bundle.pdf')); // an allowed name on a directory is still refused
-    for (const name of ['tool.py', 'archive.zip', 'data.bin', 'run.sh', 'script.command', 'movie.mp4', 'Bundle.pdf']) {
+    for (const name of ['tool.py', 'archive.zip', 'data.bin', 'run.sh', 'script.command', 'movie.mp4', 'Bundle.pdf', 'legacy.doc']) {
       await expect(files.openExternal(A, inRoot(name))).rejects.toThrow(new Error(`not opened outside MAWS: ${inRoot(name)}`));
     }
     expect(fs.existsSync(log)).toBe(false); // nothing was handed to the OS
-    const open = ['doc.pdf', 'page.html', 'clip.mp4', 'report.DOCX'];
+    const open = ['doc.pdf', 'page.html', 'clip.mp4', 'report.DOCX', 'server.log'];
     for (const name of open) {
       write(inRoot(name), 'x');
       expect(await files.openExternal(A, inRoot(name))).toEqual({ opened: true, message: null });
