@@ -78,6 +78,22 @@ describe('the index opens, migrates and refuses what it cannot own', () => {
     expect(inspect(path).version).toBe(99);
   });
 
+  it('a newer-version database is left exactly as found: its DELETE journal mode kept, no -wal or -shm, the bytes identical', () => {
+    const path = join(dir.path, 'index.sqlite');
+    const raw = new DatabaseSync(path);
+    raw.exec('CREATE TABLE sessions (id INTEGER PRIMARY KEY); PRAGMA user_version = 99');
+    raw.close();
+    const before = readFileSync(path);
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const index = open(path);
+    expect(index.unavailable).not.toBeNull();
+    index.close();
+    opened.pop();
+    expect(readdirSync(dir.path)).toEqual(['index.sqlite']);
+    expect(readFileSync(path).equals(before)).toBe(true);
+    expect(inspect(path)).toMatchObject({ version: 99, mode: 'delete' });
+  });
+
   it('a file SQLite reports as not a database is moved aside as index.sqlite.broken-<epoch>, never deleted, and a fresh index is created', () => {
     const path = join(dir.path, 'index.sqlite');
     const garbage = 'this is not a database, but it is sixteen bytes and more of text';

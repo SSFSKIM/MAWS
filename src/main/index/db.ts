@@ -149,6 +149,14 @@ export function openDb(path: string, migrations: readonly Migration[]): Db {
     return new Db(readOnly, [], reason);
   }
 
+  // Only a database of a version this app knows is changed: WAL, synchronous, foreign keys.
+  try {
+    db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON');
+  } catch (error) {
+    db.close();
+    throw error;
+  }
+
   const pending = migrations.slice(version);
   if (pending.length > 0) {
     db.exec('BEGIN IMMEDIATE');
@@ -168,11 +176,13 @@ export function openDb(path: string, migrations: readonly Migration[]): Db {
   );
 }
 
-// Opens with the index's pragmas and reads the schema version.
+// Opens the file and reads its schema version, changing nothing: `busy_timeout` is a property of this connection, and
+// every pragma that writes (the journal mode above all) waits until the version is known to be this app's. Reading
+// `user_version` is also what surfaces SQLITE_NOTADB / SQLITE_CORRUPT for a file that is not a database.
 function probe(path: string): { db: DatabaseSync; version: number } {
   const db = new DatabaseSync(path);
   try {
-    db.exec('PRAGMA busy_timeout = 2000; PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON');
+    db.exec('PRAGMA busy_timeout = 2000');
     const { user_version } = db.prepare('PRAGMA user_version').get() as { user_version: number };
     return { db, version: user_version };
   } catch (error) {
