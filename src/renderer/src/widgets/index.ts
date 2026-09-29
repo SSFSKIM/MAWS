@@ -3,6 +3,7 @@
 // block and the `#widgets` harness; the answer removes every registration it made.
 import { registerSlashWidget, WIDGET_COMMANDS, type SlashWidget, type WidgetCommandName } from '../composer';
 import { AgentsWidget } from './AgentsWidget';
+import { CompactWidget } from './CompactWidget';
 import { ConfigWidget } from './ConfigWidget';
 import { ContextWidget } from './ContextWidget';
 import { WIDGET_TITLE } from './copy';
@@ -11,18 +12,20 @@ import { ExportWidget } from './ExportWidget';
 import { HooksWidget } from './HooksWidget';
 import { McpWidget } from './McpWidget';
 import { MemoryWidget } from './MemoryWidget';
-import { pendingWidget } from './PendingWidget';
+import { modelWidget } from './ModelWidget';
 import { PermissionsWidget } from './PermissionsWidget';
 import { PluginsWidget } from './PluginsWidget';
+import { RenameWidget } from './RenameWidget';
+import { ResumeWidget } from './ResumeWidget';
 import { SandboxWidget } from './SandboxWidget';
 import { SkillsWidget } from './SkillsWidget';
 import { StatusWidget } from './StatusWidget';
 import { UsageWidget } from './UsageWidget';
 
 export const WIDGETS: Record<WidgetCommandName, SlashWidget['component']> = {
-  model: pendingWidget('model'),
-  effort: pendingWidget('effort'),
-  fast: pendingWidget('fast'),
+  model: modelWidget('model'),
+  effort: modelWidget('effort'),
+  fast: modelWidget('fast'),
   permissions: PermissionsWidget,
   usage: UsageWidget,
   config: ConfigWidget,
@@ -34,10 +37,10 @@ export const WIDGETS: Record<WidgetCommandName, SlashWidget['component']> = {
   skills: SkillsWidget,
   agents: AgentsWidget,
   status: StatusWidget,
-  compact: pendingWidget('compact'),
+  compact: CompactWidget,
   context: ContextWidget,
-  rename: pendingWidget('rename'),
-  resume: pendingWidget('resume'),
+  rename: RenameWidget,
+  resume: ResumeWidget,
   export: ExportWidget,
   diff: DiffWidget,
 };

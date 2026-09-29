@@ -61,6 +61,12 @@ describe('every widget renders its fixture response', () => {
     context: '30,433 of 200,000 · 15% · autocompact at 167,000',
     export: '2026-09-28-022217-reply-with-exactly-ok.txt',
     diff: '0 files · +0 −0 · working tree',
+    model: 'From gateway',
+    effort: 'Engine default',
+    fast: 'Fast mode is for Opus', // the scenario session is on Sonnet
+    compact: '30,433 of 200,000 · 15% · autocompact at 167,000',
+    resume: 'Usage reset countdown',
+    rename: 'New title',
   };
 
   it.each(NAMES)('%s opens with its body and its foot', async (name) => {
