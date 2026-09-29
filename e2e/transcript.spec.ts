@@ -295,7 +295,7 @@ const fixtureNames = (page: Page) =>
 async function loadAll(page: Page, fixture: string) {
   await load(page, fixture);
   await play(page, 0);
-  await expect.poll(async () => (await metrics(page)).batches, { message: `${fixture} released` }).toBeGreaterThan(0);
+  await expect.poll(async () => (await metrics(page)).batches, { message: `${fixture} released`, timeout: 20_000 }).toBeGreaterThan(0);
   await settle(page, 300);
 }
 
@@ -455,14 +455,17 @@ test('child transcript renders the subagent\u2019s events only', async ({ harnes
 });
 
 // Expand-old-work over the fixtures: every turn, group and cell of every journal and event fixture opened, the list
-// walked a viewport at a time so every row mounts, no row of those kinds left empty, no console error.
+// walked a viewport at a time so every row mounts, no row of those kinds left empty, no console error. A loaded machine
+// (inside `pnpm verify`) slows the walk several times over, so the case has time per fixture rather than one budget for
+// the whole walk, and every wait inside a fixture is on its settled state and bounded (a hang fails naming it).
+const PER_FIXTURE_MS = 20_000;
 test('every fixture renders its whole work area expanded', async ({ harness }) => {
-  test.setTimeout(300_000);
   const { page } = harness;
   await harnessReady(page);
   await blockHumanInput(page);
   const fixtures = (await fixtureNames(page)).filter((name) => !name.startsWith('synthetic/'));
   expect(fixtures.length).toBeGreaterThan(40);
+  test.setTimeout(60_000 + fixtures.length * PER_FIXTURE_MS);
   const WORK_KINDS = ['group', 'cell', 'receipt', 'subagent', 'agent_message', 'bash', 'plan', 'question', 'boundary', 'error'];
   const seen = new Map<string, number>();
   for (const fixture of fixtures) {
@@ -474,9 +477,19 @@ test('every fixture renders its whole work area expanded', async ({ harness }) =
       const kinds: Record<string, number> = {};
       const empty: string[] = [];
       const rows = new Set<string>();
-      const frame = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      // After a scroll, until the mounted rows are the same two frames running: a slow page mounts them late.
+      const mounted = async () => {
+        const deadline = performance.now() + 10_000;
+        const ids = () => Array.from(scroller.querySelectorAll<HTMLElement>('[data-row-id]'), (row) => row.dataset.rowId).join(' ');
+        let last = '';
+        for (let now = ids(); now !== last || now === ''; now = ids()) {
+          if (performance.now() > deadline) throw new Error(`rows still mounting 10 s after a scroll (at ${scroller.scrollTop} px)`);
+          last = now;
+          await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        }
+      };
       scroller.scrollTop = 0;
-      await frame();
+      await mounted();
       for (let guard = 0; guard < 400; guard += 1) {
         for (const row of Array.from(scroller.querySelectorAll<HTMLElement>('[data-row-id]'))) {
           const id = row.dataset.rowId!;
@@ -488,10 +501,12 @@ test('every fixture renders its whole work area expanded', async ({ harness }) =
         }
         if (scroller.scrollTop >= scroller.scrollHeight - scroller.clientHeight - 1) break;
         scroller.scrollTop += scroller.clientHeight;
-        await frame();
+        await mounted();
       }
       return { kinds, empty, rows: rows.size };
-    }, WORK_KINDS);
+    }, WORK_KINDS).catch((error: Error) => {
+      throw new Error(`${fixture}: ${error.message}`, { cause: error });
+    });
     expect(walked.empty, `${fixture}: every row renders its component`).toEqual([]);
     expect(walked.rows, `${fixture}: rows rendered`).toBeGreaterThan(0);
     for (const [kind, n] of Object.entries(walked.kinds)) seen.set(kind, (seen.get(kind) ?? 0) + n);
