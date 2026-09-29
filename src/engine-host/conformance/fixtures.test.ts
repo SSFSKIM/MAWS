@@ -40,8 +40,8 @@ describe('normaliser replays every probe fixture into the X1 graph', () => {
     expect(listJournals('pass1')).toHaveLength(10);
     expect(listJournals('pass2')).toHaveLength(30);
     // C10's fork-worktree and C8c's workspace-diff probes (copied from master at 644ea7a)
-    // and C3's own live recordings (M6: rewind-files from 3.12, plan-outcomes from 3.20, steer-now from 3.7, engine-turn-release from 3.10)
-    expect(listJournals('pass3')).toEqual(['engine-turn-release', 'fork-worktree-fork', 'fork-worktree-resume-in-b', 'fork-worktree-start', 'plan-outcomes', 'rewind-files', 'steer-now', 'workspace-diff-branch', 'workspace-diff-dirty']);
+    // and C3's own live recordings (M6: rewind-files from 3.12, plan-outcomes from 3.20, steer-now from 3.7, engine-turn-release from 3.10, steer-next from the fix wave's live check)
+    expect(listJournals('pass3')).toEqual(['engine-turn-release', 'fork-worktree-fork', 'fork-worktree-resume-in-b', 'fork-worktree-start', 'plan-outcomes', 'rewind-files', 'steer-next', 'steer-now', 'workspace-diff-branch', 'workspace-diff-dirty']);
   });
 
   for (const pass of FIXTURE_PASSES) {
@@ -272,6 +272,17 @@ describe('normaliser: per-fixture graph facts (C2 findings restated)', () => {
     expect(ofKind(events, 'turn.ended')[2]!.resultText).toContain('AFTER');
     // the prompts show at the write: the bubbles at 16, 46, 53
     expect(ofKind(events, 'user.message').filter((e) => e.origin === 'human').map((e) => [e.seq, e.messageUuid])).toEqual([[16, count], [46, steer], [53, after]]);
+  });
+
+  it('pass3/steer-next (fix wave live check): a next steer folds into the running turn at a tool boundary and the one result names both prompts', async () => {
+    const { events, rows } = await run('pass3', 'steer-next');
+    const [count, next] = ['fe091b0d-b28b-41a8-aed3-39585769623d', '42a15931-3c9a-4267-a6b2-09fa5697735d'];
+    expect((rows.find((r) => r.seq === 46)!.frame as { priority?: string }).priority).toBe('next');
+    expect(ofKind(events, 'command.lifecycle').filter((e) => e.commandUuid === next).map((e) => [e.seq, e.state])).toEqual([[47, 'queued'], [71, 'started'], [238, 'completed']]);
+    expect(turnLog(events)).toEqual([`start 19 human ${count}`, `end 239 human ${count},${next}`]); // its started (71) joins the open turn
+    const reply = ofKind(events, 'assistant.block.complete').find((e) => e.parentToolUseId === null && JSON.stringify(e.block).includes('NEXT_OK'));
+    expect(reply!.seq).toBeGreaterThan(71); // answered mid-turn, after its started
+    expect(ofKind(events, 'turn.ended')[0]!.resultText).toContain('COUNTED');
   });
 
   it('pass3/engine-turn-release (live 3.10): a pending task-notification turn runs ahead of a prompt released at idle, and each reply keeps its own turn', async () => {

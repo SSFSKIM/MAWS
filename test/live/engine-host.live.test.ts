@@ -397,8 +397,16 @@ describe('engine host live', () => {
       const firstEnd = mainTurnsEnded(events).find((t) => t.userMessageUuids.includes(first.messageUuid!))!;
       console.log(`   first turn ended seq ${firstEnd.seq} ${firstEnd.terminalReason}; next answered seq ${answered.seq} ${JSON.stringify(answered.resultText)}`);
       expect(frame.frame.priority).toBe('next');
-      expect(answered.resultText).toContain('NEXT_OK');
-      expect(turnAttribution(events)).toEqual([]); // each reply under its own prompt's turn, whatever the engine chose
+      // observed (first live run, journal live-bfacd45b/ta23iwcd.jsonl): `next` folds into the running turn at its next
+      // tool boundary: its `started` arrives mid-turn, the model answers it there and goes on, and the one result names both
+      const nextStarted = ofKind(events, 'command.lifecycle').find((e) => e.commandUuid === next && e.state === 'started')!;
+      const reply = ofKind(events, 'assistant.block.complete').find((e) => e.parentToolUseId === null && seqOf(e) > seqOf(nextStarted) && JSON.stringify(e.block).includes('NEXT_OK'));
+      console.log(`   next started seq ${nextStarted.seq} inside the turn opened at ${ofKind(events, 'turn.started')[0]?.seq}; NEXT_OK block seq ${reply?.seq}`);
+      expect(answered.userMessageUuids).toEqual([first.messageUuid, next]);
+      expect(seqOf(nextStarted)).toBeLessThan(seqOf(answered));
+      expect(reply).toBeDefined();
+      expect(ofKind(events, 'turn.started').filter((e) => e.parentToolUseId === null)).toHaveLength(1); // no turn of its own
+      expect(turnAttribution(events)).toEqual([]);
     });
     exportTo('steer-next', journalPath, g);
   }, LONG_CASE_MS);
