@@ -168,6 +168,15 @@ describe('synthetic journals', () => {
     expect(cells[1].detail).toMatchObject({ kind: 'shell', truncated: null });
   });
 
+  // C3's normaliser reads the engine's persisted Bash output (`tool_use_result.persistedOutputPath`) as the spill path.
+  it('transcript/long-output: a persisted Bash output is a spill the detail can load', () => {
+    const cells = cellsOf(rowsFor(journal('long-output')));
+    expect(cells[1].detail).toMatchObject({
+      kind: 'shell',
+      spill: { path: '/Users/owner/.claude/projects/-Users-owner-app/00000000-c6c6-4000-8000-longoutput00/tool-results/toolu_synth_long_2.txt', state: 'not_loaded' },
+    });
+  });
+
   it('transcript/idle-drop: a prompt the engine drops before it starts stays a bubble, dropped, and its turn closes without work', () => {
     const events = journal('idle-drop');
     // No turn.started (the engine never accepted it) and no synthetic turn.ended: the lifecycle event is the drop.

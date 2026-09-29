@@ -130,7 +130,12 @@
           "exitCode": 0,
           "interrupted": false,
           "kind": "shell",
-          "spill": null,
+          "spill": {
+            "bytes": null,
+            "content": null,
+            "path": "/Users/owner/.claude/projects/-Users-owner-app/00000000-c6c6-4000-8000-longoutput00/tool-results/toolu_synth_long_2.txt",
+            "state": "not_loaded"
+          },
           "stderr": "",
           "stdout": "[1/1200] compiling src/app.ts\n[2/1200] compiling src/store.ts\n\n… output truncated; the full 184 KB result was saved to tool-results/toolu_synth_long_2.txt",
           "truncated": null
