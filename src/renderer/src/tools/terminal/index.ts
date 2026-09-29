@@ -2,6 +2,7 @@
 // the registry (plus its close confirmation), so the shell, its emulator and its scrollback outlive every tab switch,
 // panel close and session switch under a pin; and `openTerminal`, C10's entry point for "attach in a terminal tab".
 import type { AppSessionId } from '@shared/graph/ids';
+import type { SessionRecord } from '@shared/graph/session';
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import { panelHost } from '../../panel/host';
 import type { PanelTool, PanelToolInit } from '../../panel/tool';
@@ -23,23 +24,55 @@ export interface TerminalTabUi {
   process: string | null; // what runs in the foreground; null when the host could not say
   confirmed: boolean;
   closeError: string | null;
+  terminalId: TerminalId | null; // null until the tab has a session and a directory to start in
 }
 
 export interface TerminalTabState {
-  readonly terminalId: TerminalId;
+  readonly terminalId: TerminalId | null; // the registry's terminal, once started (reads `ui`)
   readonly ui: StoreApi<TerminalTabUi>;
+  readonly instanceId: string; // the terminal's label, which is how a reloaded page re-adopts it
+  params: TerminalParams;
+  owner: AppSessionId | null; // the session the tab was opened for, when known
+}
+
+// Starts the tab's terminal if it has none: the one the registry re-adopted under this tab's label after a reload, or
+// a new one in `params.cwd`, else the session's directory. A tab with no session yet (X5 allows a pinned tab to be
+// restored while Overview is shown) stays pending; its view asks for a session and calls this again when one is shown.
+export function ensureTerminal(state: TerminalTabState, shown: { appSessionId: AppSessionId | null; session: SessionRecord | null }): TerminalId | null {
+  const current = state.ui.getState().terminalId;
+  if (current) return current;
+  const adopted = terminals.list().find((info) => info.label === state.instanceId);
+  const owner = state.owner ?? shown.appSessionId ?? shown.session?.appId ?? null;
+  const cwd = state.params.cwd ?? (shown.session ? sessionDirectory(shown.session) : undefined);
+  let terminalId: TerminalId | null = adopted?.id ?? null;
+  if (!terminalId && owner && cwd) {
+    const { command } = state.params;
+    terminalId = terminals.open({ appSessionId: owner, label: state.instanceId, cwd, ...(command ? { command } : {}) });
+  }
+  if (terminalId) state.ui.setState({ terminalId });
+  return terminalId;
 }
 
 function createState({ appSessionId, session, instanceId, params }: PanelToolInit<TerminalParams>): TerminalTabState {
-  const ui = createStore<TerminalTabUi>()(() => ({ confirmClose: false, process: null, confirmed: false, closeError: null }));
-  // After a reload the registry has already re-adopted this tab's shell under its label (the tab id).
-  const adopted = terminals.list().find((info) => info.label === instanceId);
-  if (adopted) return { terminalId: adopted.id, ui };
-  const owner = appSessionId ?? session?.appId ?? null;
-  const cwd = params?.cwd ?? (session ? sessionDirectory(session) : undefined);
-  if (!owner || !cwd) throw new Error('a terminal needs a session to belong to and a directory to start in');
-  const terminalId = terminals.open({ appSessionId: owner, label: instanceId, cwd, ...(params?.command ? { command: params.command } : {}) });
-  return { terminalId, ui };
+  const ui = createStore<TerminalTabUi>()(() => ({ confirmClose: false, process: null, confirmed: false, closeError: null, terminalId: null }));
+  const state: TerminalTabState = {
+    get terminalId() {
+      return ui.getState().terminalId;
+    },
+    ui,
+    instanceId,
+    params: { ...params },
+    owner: appSessionId ?? session?.appId ?? null,
+  };
+  ensureTerminal(state, { appSessionId, session });
+  return state;
+}
+
+// New parameters for a tab (X5's re-targeting); a tab still waiting for its terminal starts it with them.
+function open(state: TerminalTabState, params: TerminalParams): void {
+  if (state.terminalId) return;
+  state.params = { ...state.params, ...params };
+  ensureTerminal(state, { appSessionId: null, session: null });
 }
 
 // A running terminal asks before it closes when a program other than the shell is in the foreground, and when the
@@ -47,11 +80,12 @@ function createState({ appSessionId, session, instanceId, params }: PanelToolIni
 // and the handle disposed before the host may remove the tab, so a kill that fails keeps the tab with the reason
 // instead of leaving a shell running behind no tab.
 async function beforeClose(state: TerminalTabState): Promise<boolean> {
-  const { confirmed } = state.ui.getState();
-  if (!confirmed && terminals.get(state.terminalId)?.info.status === 'running') {
+  const { confirmed, terminalId } = state.ui.getState();
+  if (!terminalId) return true; // never started: nothing runs
+  if (!confirmed && terminals.get(terminalId)?.info.status === 'running') {
     let foreground: { process: string | null; busy: boolean };
     try {
-      foreground = await terminals.foreground(state.terminalId);
+      foreground = await terminals.foreground(terminalId);
     } catch {
       foreground = { process: null, busy: true };
     }
@@ -61,7 +95,7 @@ async function beforeClose(state: TerminalTabState): Promise<boolean> {
     }
   }
   try {
-    await terminals.close(state.terminalId);
+    await terminals.close(terminalId);
   } catch (error) {
     state.ui.setState({ closeError: error instanceof Error ? error.message : String(error) });
     return false;
@@ -70,8 +104,9 @@ async function beforeClose(state: TerminalTabState): Promise<boolean> {
   return true;
 }
 
-// The shell is already gone (`beforeClose` closed it); the tab's own state holds nothing else to release. A tab the
-// host removes without asking (its tool unregistered) leaves its shell to the registry, which re-adopts it on reload.
+// The shell is already gone: every host close runs `beforeClose` first, which closed it (a host closing a tool's tabs
+// because the tool was unregistered also closes each through `closeTab`, and a vetoed or failed close keeps the tab).
+// The tab's own state holds nothing else to release.
 function dispose(state: TerminalTabState): void {
   state.ui.setState({ confirmClose: false, process: null, closeError: null });
 }
@@ -83,6 +118,7 @@ export const terminalTool: PanelTool<TerminalTabState, TerminalParams> = {
   pinnable: true,
   multiInstance: true,
   createState,
+  open,
   beforeClose,
   dispose,
   render: TerminalView,

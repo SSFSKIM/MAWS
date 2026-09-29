@@ -17,7 +17,7 @@ export interface PanelHostImplementation {
   selectTab(tabId: string): void;
   closeTab(tabId: string): Promise<boolean>; // runs the tool's beforeClose; false when it vetoed
   showSummary(): void;
-  closeToolTabs(toolId: string): void; // the tool was unregistered: its tabs close without asking
+  closeToolTabs(toolId: string): void; // the tool was unregistered: closes each tab through `closeTab` (`beforeClose` runs; a vetoed or failed close keeps the tab)
 }
 
 // Tools are stored without their state and params types: the host only moves a tool's state between its own calls.

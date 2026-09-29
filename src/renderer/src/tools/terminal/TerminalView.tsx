@@ -8,7 +8,7 @@ import type { SessionRecord } from '@shared/graph/session';
 import type { PanelToolContext } from '../../panel/tool';
 import { useTerminals } from '../../stores/terminals';
 import { terminals, type TerminalInfo } from '../../terminal/registry';
-import type { TerminalTabState } from './index';
+import { ensureTerminal, type TerminalTabState } from './index';
 
 // Where a session runs: its worktree when it has one, else its directory (the worktree warning compares against it).
 export const sessionDirectory = (session: SessionRecord): string => session.worktree?.path ?? session.directory;
@@ -17,23 +17,30 @@ const bar = 'flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b borde
 const barButton = 'rounded-sm border border-border px-2 py-0.5 text-fg hover:bg-bg-hover disabled:text-fg-faint disabled:hover:bg-transparent';
 
 export function TerminalView({ state, ctx }: { state: TerminalTabState; ctx: PanelToolContext }) {
-  const id = state.terminalId;
+  const confirm = useStore(state.ui);
+  const id = confirm.terminalId;
   const info = useTerminals((s) => s.terminals.find((terminal) => terminal.id === id)) ?? null;
   const hostReady = useTerminals((s) => s.host?.state === 'ready');
-  const confirm = useStore(state.ui);
   const surfaceRef = useRef<HTMLDivElement>(null);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
-  const { setTitle, visible, focusRequest } = ctx;
+  const { setTitle, visible, focusRequest, appSessionId, session } = ctx;
   const title = info?.title ?? null;
 
+  // A tab restored with no session starts its terminal in the first session shown.
   useEffect(() => {
-    if (!visible) return;
-    terminals.mount(id, surfaceRef.current!, { focus: true });
+    if (!id) ensureTerminal(state, { appSessionId, session });
+  }, [id, state, appSessionId, session]);
+
+  // Mounting never takes focus (a restored or session-switched tab must not steal it from the composer); the host
+  // asks for focus through `focusRequest`.
+  useEffect(() => {
+    if (!id || !visible) return;
+    terminals.mount(id, surfaceRef.current!);
     return () => terminals.unmount(id);
   }, [id, visible]);
 
   useEffect(() => {
-    if (focusRequest) terminals.focus(id);
+    if (id && focusRequest) terminals.focus(id);
   }, [id, focusRequest]);
 
   useEffect(() => setTitle(title), [setTitle, title]);
@@ -83,6 +90,11 @@ export function TerminalView({ state, ctx }: { state: TerminalTabState; ctx: Pan
           </button>
         </div>
       ) : null}
+      {id ? null : (
+        <div role="status" aria-label="terminal pending" className={`${bar} text-fg-muted`}>
+          Open a session to start a terminal
+        </div>
+      )}
       {info ? <StatusBar info={info} hostReady={hostReady} close={ctx.close} /> : null}
       {info?.reconnect === 'lossy' ? (
         <div role="status" aria-label="reconnect notice" className={`${bar} text-fg-muted`}>
@@ -138,7 +150,7 @@ function StatusBar({ info, hostReady, close }: { info: TerminalInfo; hostReady: 
 
 function ContextMenu({ at, state, dismiss }: { at: { x: number; y: number }; state: TerminalTabState; dismiss(): void }) {
   const ref = useRef<HTMLDivElement>(null);
-  const renderer = terminals.get(state.terminalId)?.renderer ?? null;
+  const renderer = (state.terminalId && terminals.get(state.terminalId)?.renderer) || null;
 
   useEffect(() => {
     const outside = (ev: Event) => {

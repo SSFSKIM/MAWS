@@ -138,8 +138,18 @@ describe('terminal tool state', () => {
     expect(registry.terminals.open).not.toHaveBeenCalled();
   });
 
-  it('refuses to create a terminal with neither a session nor a cwd', () => {
-    expect(() => terminalTool.createState({ appSessionId: null, session: null, instanceId: 'terminal:1', params: {} })).toThrow(/a terminal needs a session to belong to and a directory to start in/);
+  it('defers the terminal of a tab created with no session (a pinned tab restored on Overview) instead of throwing', () => {
+    const state = terminalTool.createState({ appSessionId: null, session: null, instanceId: 'terminal:1', params: {} });
+    expect(state.terminalId).toBeNull();
+    expect(registry.terminals.open).not.toHaveBeenCalled();
+  });
+
+  it('completes a deferred terminal through open() once it has a directory', () => {
+    const state = terminalTool.createState({ appSessionId: A, session: null, instanceId: 'terminal:1', params: {} });
+    expect(state.terminalId).toBeNull();
+    terminalTool.open!(state, { cwd: '/elsewhere', command: 'claude --bg attach 1' });
+    expect(registry.terminals.open).toHaveBeenCalledWith({ appSessionId: A, label: 'terminal:1', cwd: '/elsewhere', command: 'claude --bg attach 1' });
+    expect(state.terminalId).toBe('t1');
   });
 
   it('is the multi-instance, pinnable tool with id terminal', () => {
@@ -173,7 +183,7 @@ describe('terminal tool close', () => {
 
   it('does not ask for a terminal that no longer runs, nor after the owner confirmed, and closes both', async () => {
     const exited = newState();
-    registry.patch(exited.terminalId, { status: 'exited' });
+    registry.patch(exited.terminalId!, { status: 'exited' });
     await expect(terminalTool.beforeClose(exited)).resolves.toBe(true);
     const confirmed = newState({ instanceId: 'terminal:2' });
     confirmed.ui.setState({ confirmed: true });
@@ -213,14 +223,35 @@ describe('openTerminal', () => {
 });
 
 describe('terminal view', () => {
-  it('mounts the terminal’s container while visible, focuses on request, and detaches on unmount', () => {
+  it('mounts the terminal’s container while visible without taking focus, focuses on request, and detaches on unmount', () => {
     const state = newState();
     const { rerender, unmount } = render(<View state={state} ctx={context()} />);
-    expect(registry.terminals.mount).toHaveBeenCalledWith(state.terminalId, expect.any(HTMLElement), { focus: true });
+    expect(registry.terminals.mount).toHaveBeenCalledWith(state.terminalId, expect.any(HTMLElement));
+    expect(registry.terminals.focus).not.toHaveBeenCalled();
     rerender(<View state={state} ctx={context({ focusRequest: 1 })} />);
     expect(registry.terminals.focus).toHaveBeenCalledWith(state.terminalId);
     unmount();
     expect(registry.terminals.unmount).toHaveBeenCalledWith(state.terminalId);
+  });
+
+  it('asks for a session while it has none, and opens its terminal in the first session shown', () => {
+    const state = terminalTool.createState({ appSessionId: null, session: null, instanceId: 'terminal:5', params: {} });
+    const { rerender } = render(<View state={state} ctx={context({ appSessionId: null, session: null })} />);
+    expect(screen.getByRole('status', { name: 'terminal pending' }).textContent).toBe('Open a session to start a terminal');
+    expect(registry.terminals.mount).not.toHaveBeenCalled();
+    rerender(<View state={state} ctx={context({ appSessionId: B, session: SESSION_B })} />);
+    expect(registry.terminals.open).toHaveBeenCalledWith({ appSessionId: B, label: 'terminal:5', cwd: '/tmp/maws-harness/b' });
+    expect(state.terminalId).toBe('t1');
+    expect(screen.queryByRole('status', { name: 'terminal pending' })).toBeNull();
+    expect(registry.terminals.mount).toHaveBeenCalledWith('t1', expect.any(HTMLElement));
+    rerender(<View state={state} ctx={context({ appSessionId: A, session: SESSION_A })} />);
+    expect(registry.terminals.open).toHaveBeenCalledTimes(1);
+  });
+
+  it('closes a tab whose terminal never started without asking', async () => {
+    const state = terminalTool.createState({ appSessionId: null, session: null, instanceId: 'terminal:6', params: {} });
+    await expect(terminalTool.beforeClose(state)).resolves.toBe(true);
+    expect(registry.terminals.close).not.toHaveBeenCalled();
   });
 
   it('warns exactly when the shown session runs somewhere other than the terminal’s cwd, and offers a new terminal there', () => {
@@ -242,7 +273,7 @@ describe('terminal view', () => {
     const ctx = context();
     render(<View state={state} ctx={ctx} />);
     expect(ctx.setTitle).toHaveBeenLastCalledWith(null);
-    act(() => registry.patch(state.terminalId, { title: 'vim notes.md' }));
+    act(() => registry.patch(state.terminalId!, { title: 'vim notes.md' }));
     expect(ctx.setTitle).toHaveBeenLastCalledWith('vim notes.md');
   });
 
@@ -250,7 +281,7 @@ describe('terminal view', () => {
     const state = newState();
     const ctx = context();
     render(<View state={state} ctx={ctx} />);
-    act(() => registry.patch(state.terminalId, { status: 'exited', exit: { exitCode: 1, signal: null } }));
+    act(() => registry.patch(state.terminalId!, { status: 'exited', exit: { exitCode: 1, signal: null } }));
     expect(screen.getByRole('status', { name: 'terminal status' }).textContent).toContain('Process exited (code 1)');
     fireEvent.click(screen.getByRole('button', { name: 'New terminal' }));
     expect(registry.terminals.respawn).toHaveBeenCalledWith(state.terminalId);
@@ -261,7 +292,7 @@ describe('terminal view', () => {
   it('says why a terminal could not start', () => {
     const state = newState();
     render(<View state={state} ctx={context()} />);
-    act(() => registry.patch(state.terminalId, { status: 'exited', exit: null, error: 'the shell could not start: posix_spawnp failed' }));
+    act(() => registry.patch(state.terminalId!, { status: 'exited', exit: null, error: 'the shell could not start: posix_spawnp failed' }));
     expect(screen.getByRole('status', { name: 'terminal status' }).textContent).toContain('The shell could not start: posix_spawnp failed');
   });
 
@@ -270,7 +301,7 @@ describe('terminal view', () => {
     render(<View state={state} ctx={context()} />);
     act(() => {
       registry.setHost({ state: 'restarting', pid: null, restarts: 1, revision: 2 });
-      registry.patch(state.terminalId, { status: 'lost', exit: { exitCode: null, signal: null } });
+      registry.patch(state.terminalId!, { status: 'lost', exit: { exitCode: null, signal: null } });
     });
     expect(screen.getByRole('status', { name: 'terminal status' }).textContent).toContain('Terminal lost, the terminal service restarted');
     expect((screen.getByRole('button', { name: 'New terminal' }) as HTMLButtonElement).disabled).toBe(true);
@@ -281,7 +312,7 @@ describe('terminal view', () => {
   it('shows the lossy reconnect notice', () => {
     const state = newState();
     render(<View state={state} ctx={context()} />);
-    act(() => registry.patch(state.terminalId, { reconnect: 'lossy' }));
+    act(() => registry.patch(state.terminalId!, { reconnect: 'lossy' }));
     expect(screen.getByRole('status', { name: 'reconnect notice' }).textContent).toBe('Reconnected; earlier output was not kept');
   });
 
