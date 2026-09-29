@@ -9,9 +9,12 @@ const HOSTS: Record<'engine.hostState' | 'pty.hostState', HostState> = {
 
 // The page against a fake `window.maws` that behaves like main: `settings.set` answers the new state and emits
 // `settings.changed` first, as the router does; both hosts are ready; the PTY host answers a write to its shell with
-// the terminal's echo of the line and then the command's output.
+// the terminal's echo of the line and then the command's output, once the test calls `releaseShell` (a timer here
+// raced the test's "not yet" assertion on a loaded machine).
 function fakeMain(initial: SettingsState['settings']['theme']) {
   let theme = initial;
+  let releaseShell!: () => void;
+  const shellReleased = new Promise<void>((resolve) => (releaseShell = resolve));
   const listeners = new Map<string, Set<(payload: unknown) => void>>();
   const send = (name: string, payload: unknown) => listeners.get(name)?.forEach((l) => l(payload));
   const state = () => ({ settings: { version: 1, theme }, resolvedTheme: theme === 'dark' ? 'dark' : 'light' });
@@ -29,7 +32,7 @@ function fakeMain(initial: SettingsState['settings']['theme']) {
       case 'pty.spawn':
         return { ptyId: 'p1', pid: 3333 };
       case 'pty.write':
-        setTimeout(() => {
+        void shellReleased.then(() => {
           const echoed = new TextEncoder().encode(`${input.data}\n`);
           send('pty.data', { ptyId: 'p1', offset: 0, data: echoed });
           send('pty.data', { ptyId: 'p1', offset: echoed.byteLength, data: new TextEncoder().encode('MAWS_ECHO_OK\r\n$ ') });
@@ -47,7 +50,7 @@ function fakeMain(initial: SettingsState['settings']['theme']) {
       return () => listeners.get(name)!.delete(listener);
     }),
   } as unknown as MawsBridge;
-  return { send };
+  return { send, releaseShell };
 }
 
 async function renderApp() {
@@ -116,14 +119,15 @@ describe('hosts in the diagnostics strip', () => {
   });
 
   it('runs the echo test and shows the output line with the shell’s pid', async () => {
-    fakeMain('light');
+    const main = fakeMain('light');
     await renderApp();
     const echo = () => screen.getByRole('status', { name: 'echo test' }).textContent;
     await act(async () => void fireEvent.click(screen.getByRole('button', { name: 'Spawn echo test' })));
     // Until the shell answers, nothing in the strip may contain the marker a reader (or the smoke) looks for.
     expect(echo()).not.toBe('');
     expect(echo()).not.toContain('MAWS_ECHO_OK');
-    // Polled rather than a fixed wait: under a loaded parallel run the fake shell's answer can take longer than 10 ms.
+    await act(async () => main.releaseShell());
+    // Polled rather than a fixed wait: the store decodes the answer asynchronously.
     await vi.waitFor(() => expect(echo()).toBe('MAWS_ECHO_OK · shell pid 3333'), { timeout: 2_000, interval: 10 });
     expect(window.maws.invoke).toHaveBeenCalledWith('pty.spawn', expect.objectContaining({ shell: '/bin/sh' }));
   });
