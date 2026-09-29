@@ -1,8 +1,8 @@
 // An MCP elicitation's `requested_schema` as form fields, table-driven by JSON-schema `type` (C7 execution document,
 // M2 decisions): string → text input, number and integer → number input, boolean → checkbox, `enum` → select;
 // `required` enforced; `title` and `description` as the label and hint. A property the table cannot map (a nested
-// object, an array, no type) makes the form unsupported: the card then offers Decline and Cancel only and names the
-// field. Pure.
+// object, an array, no type) makes the form unsupported: the card then offers Decline as its only action and names
+// the field. Pure.
 export type FieldKind = 'string' | 'number' | 'integer' | 'boolean' | 'enum';
 
 export interface FormField {

@@ -255,6 +255,20 @@ describe('request card placements and delivery states', () => {
     await waitFor(() => expect(answers()).toEqual([{ kind: 'elicitation', action: 'accept', content: { color: 'teal' } }]));
   });
 
+  it('an elicitation whose schema the form cannot map leaves Decline as the only action; Esc cancels nothing', async () => {
+    const nested = { ...elicitation, payload: { ...(elicitation.payload as object), requested_schema: { type: 'object', properties: { address: { type: 'object' } } } } } as RequestEvent;
+    mount(nested, 'docked');
+    expect(screen.getByText(/MAWS cannot show this form: address/)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Accept' })).toBeNull();
+    expect((screen.getByRole('button', { name: 'Cancel' }) as HTMLButtonElement).disabled).toBe(true);
+    focusOn(frame());
+    await press('{Escape}');
+    await press('{Enter}');
+    expect(answers()).toEqual([]);
+    fireEvent.click(screen.getByRole('button', { name: 'Decline' }));
+    await waitFor(() => expect(answers()).toEqual([{ kind: 'elicitation', action: 'decline' }]));
+  });
+
   it("the plan's Clear context and implement confirms once and sends clear_and_implement with no feedback", async () => {
     mount(plan, 'inline');
     const user = userEvent.setup();

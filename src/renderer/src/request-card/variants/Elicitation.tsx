@@ -1,6 +1,6 @@
 // The elicitation body (C7 execution document, Request card): the server's message; for `mode: 'form'` a form from
 // `requested_schema` (elicitation-form.ts), for `mode: 'url'` the link with Open. Accept (Enter) sends the form's
-// content; Decline and Cancel (Esc) send nothing else. A schema the form cannot map leaves Decline and Cancel only.
+// content; Decline and Cancel (Esc) send nothing else. A schema the form cannot map leaves Decline as the only action.
 import { useEffect, useState } from 'react';
 import { ipc } from '../../ipc/client';
 import { toAnswer } from '../answers';
@@ -63,7 +63,8 @@ export function ElicitationBody({ request, busy, submit, bindKeys }: VariantProp
   };
   const decline = () => submit(toAnswer({ kind: 'elicitation', action: 'decline' }), 'Declined');
   const cancel = () => submit(toAnswer({ kind: 'elicitation', action: 'cancel' }), 'Cancelled');
-  useEffect(() => bindKeys({ accept: form.ok ? accept : null, decline: cancel }));
+  // A form MAWS cannot show leaves Decline as the one answer (M2 decisions): no Accept, no Cancel, no key.
+  useEffect(() => bindKeys({ accept: form.ok ? accept : null, decline: form.ok ? cancel : null }));
 
   return (
     <div className="flex flex-col gap-3">
@@ -99,7 +100,7 @@ export function ElicitationBody({ request, busy, submit, bindKeys }: VariantProp
       )}
       <Controls>
         <Muted className="mr-auto">{request.mcpServerName}</Muted>
-        <CardButton disabled={busy} onClick={cancel}>
+        <CardButton disabled={busy || !form.ok} onClick={cancel}>
           Cancel
         </CardButton>
         <CardButton disabled={busy} onClick={decline}>
