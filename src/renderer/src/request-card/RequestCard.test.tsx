@@ -425,7 +425,8 @@ describe('request card placements and delivery states', () => {
     useAttention.setState({ requests: new Map([[item.id, null]]), unreadable: new Map([[item.id, 'no host']]) });
     render(<RequestCard item={item} request={null} placement="docked" paneIndex={null} />);
     expect(screen.queryByText('Loading the request…')).toBeNull();
-    expect(screen.getByRole('alert').textContent).toBe("Couldn't read this request here; answer it in the transcript");
+    expect(screen.getByRole('alert').textContent).toBe('The request could not be readRetry');
+    expect(useComposerStore.getState().docked.get(APP)).toBeUndefined(); // nothing docked: the transcript keeps its card
     expect(screen.getByText(item.summary)).toBeTruthy();
   });
 

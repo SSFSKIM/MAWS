@@ -177,9 +177,11 @@ function RequestCardFor({ item, request: given, placement, onAnswered }: Request
   const { phase, what, failed, submit } = useDelivery(item, onAnswered);
   const pointer = usePointerOnly();
 
-  // The requests a docked placement shows: the transcript's slot then renders a pointer to it.
+  // The requests a docked placement shows: the transcript's slot then renders a pointer to it. A notice with no request
+  // read (unreadable, or no longer held) shows nothing to answer, so the transcript keeps its own card.
   const { requestId } = item.request;
-  useEffect(() => (placement === 'docked' && requestId !== null ? markDocked(item.appSessionId, requestId) : undefined), [placement, item.appSessionId, requestId]);
+  const shown = request !== null;
+  useEffect(() => (placement === 'docked' && requestId !== null && shown ? markDocked(item.appSessionId, requestId) : undefined), [placement, item.appSessionId, requestId, shown]);
 
   // The variant's Enter, Esc and digit actions, and whether it has each (a key it lacks stays unbound).
   const keys = useRef<CardKeys>({ accept: null, decline: null });
@@ -304,9 +306,12 @@ function RequestCardFor({ item, request: given, placement, onAnswered }: Request
       )}
       {body}
       {request === null && unreadable !== null && (
-        <p role="alert" className="m-0 text-danger" title={unreadable}>
-          Couldn't read this request here; answer it in the transcript
-        </p>
+        <div role="alert" className="flex items-center gap-2 text-danger">
+          <span className="flex-1" title={unreadable}>
+            The request could not be read
+          </span>
+          <CardButton onClick={() => void useAttention.getState().retryRequest(ipc, item)}>Retry</CardButton>
+        </div>
       )}
       {request?.kind === 'permission.requested' && record && !collapsed && (
         <p className="m-0 truncate font-mono text-ui-sm text-fg-muted" title={record.directory}>

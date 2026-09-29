@@ -132,4 +132,21 @@ describe('the originating request of an item, fetched once', () => {
     warn.mockRestore();
     vi.useRealTimers();
   });
+
+  it('Retry forgets an unreadable read and asks again; an answered or retired item’s failure is forgotten', async () => {
+    const store = createAttentionStore();
+    const fake = fakeClient();
+    store.getState().applySnapshot([older, newer]);
+    store.setState({ requests: new Map([[older.id, null], [newer.id, null]]), unreadable: new Map([[older.id, 'no host'], [newer.id, 'no host']]) });
+    const retry = store.getState().retryRequest(fake.client, older);
+    expect(store.getState().requests.has(older.id)).toBe(false); // unread again: the docked swap waits for it
+    expect(store.getState().unreadable.has(older.id)).toBe(false);
+    await fake.reply('attention.request', { event });
+    await retry;
+    expect(store.getState().requests.get(older.id)).toBe(event);
+    store.getState().applyChanged({ appSessionId: S, items: [older, { ...newer, state: 'delivered' }] }); // newer answered
+    expect(store.getState().unreadable.size).toBe(0);
+    expect(store.getState().requests.has(newer.id)).toBe(false);
+    expect(store.getState().requests.get(older.id)).toBe(event); // a read request stays cached
+  });
 });

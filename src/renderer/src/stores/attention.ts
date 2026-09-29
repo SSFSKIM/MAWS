@@ -20,15 +20,31 @@ export interface AttentionState {
   // for an item with no broker request, and for one whose read failed twice (then also in `unreadable`), so the docked
   // swap shows it as a notice instead of waiting for a read that will not come.
   requests: Map<AttentionId, SessionEvent | null>;
-  unreadable: Map<AttentionId, string>; // why an item's request could not be read
+  unreadable: Map<AttentionId, string>; // why an item's request could not be read; forgotten once the item is not pending
   beginSnapshot(): void;
   applySnapshot(items: AttentionItem[]): void;
   applyChanged(change: EventPayload<'attention.changed'>): void;
   applyNotified(notified: EventPayload<'attention.notified'>): void;
   loadRequest(client: MawsBridge, item: AttentionItem): Promise<void>; // once per item; a failed read is retried once
+  retryRequest(client: MawsBridge, item: AttentionItem): Promise<void>; // an unreadable item's read, asked again (the card's Retry)
 }
 
 export const REQUEST_RETRY_MS = 1_000; // the wait before a failed `attention.request` read is retried, once
+
+// The unreadable items no longer pending (answered or retired) are forgotten, with the null their read left cached.
+function forgetSettled(state: Pick<AttentionState, 'requests' | 'unreadable'>, bySession: Map<AppSessionId, AttentionItem[]>): Partial<AttentionState> {
+  if (state.unreadable.size === 0) return {};
+  const pending = new Set([...bySession.values()].flatMap((items) => items.filter((item) => item.state === 'pending').map((item) => item.id)));
+  const settled = [...state.unreadable.keys()].filter((id) => !pending.has(id));
+  if (settled.length === 0) return {};
+  const requests = new Map(state.requests);
+  const unreadable = new Map(state.unreadable);
+  for (const id of settled) {
+    requests.delete(id);
+    unreadable.delete(id);
+  }
+  return { requests, unreadable };
+}
 
 export function createAttentionStore() {
   const inFlight = new Map<AttentionId, Promise<void>>();
@@ -47,7 +63,7 @@ export function createAttentionStore() {
       const bySession = new Map<AppSessionId, AttentionItem[]>();
       for (const item of items) bySession.set(item.appSessionId, [...(bySession.get(item.appSessionId) ?? []), item]);
       for (const [appSessionId, replacement] of get().pendingReplacements ?? []) bySession.set(appSessionId, replacement);
-      set({ bySession, version: get().version + 1, loaded: true, pendingReplacements: null });
+      set({ bySession, version: get().version + 1, loaded: true, pendingReplacements: null, ...forgetSettled(get(), bySession) });
     },
     applyChanged({ appSessionId, items }) {
       const buffer = get().pendingReplacements;
@@ -55,7 +71,8 @@ export function createAttentionStore() {
         set({ pendingReplacements: new Map(buffer).set(appSessionId, items) });
         return;
       }
-      set({ bySession: new Map(get().bySession).set(appSessionId, items), version: get().version + 1 });
+      const bySession = new Map(get().bySession).set(appSessionId, items);
+      set({ bySession, version: get().version + 1, ...forgetSettled(get(), bySession) });
     },
     applyNotified({ delivery }) {
       set({ notificationDelivery: delivery });
@@ -87,6 +104,15 @@ export function createAttentionStore() {
         inFlight.set(item.id, pending);
       }
       return pending;
+    },
+    retryRequest(client, item) {
+      if (!get().unreadable.has(item.id)) return get().loadRequest(client, item);
+      const requests = new Map(get().requests);
+      const unreadable = new Map(get().unreadable);
+      requests.delete(item.id);
+      unreadable.delete(item.id);
+      set({ requests, unreadable });
+      return get().loadRequest(client, item);
     },
   }));
 }
