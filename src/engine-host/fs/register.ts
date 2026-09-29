@@ -7,6 +7,8 @@ import type { AgentId, AppSessionId } from '@shared/graph/ids';
 import type { HostEmit, HostOn } from '@shared/host/runtime';
 import type { FsHoldersQuery, FsScanKnown } from '@shared/ipc/schema/fs';
 import { resolveStorePaths } from './paths';
+import { ReplayHost } from './replay/host';
+import { frameUnknownNormalizer } from './replay/journal-source';
 import { FsService } from './service';
 
 export function registerFs(on: HostOn, emit: HostEmit, env: NodeJS.ProcessEnv = process.env): FsService {
@@ -29,6 +31,13 @@ export function registerFs(on: HostOn, emit: HostEmit, env: NodeJS.ProcessEnv = 
   // `seq: null`, so `afterSeq` selects nothing and `lastSeq` is 0 (C4 execution document, Cross-child reconciliation).
   on('session.events', async ({ appSessionId }) => ({ ...(await service.eventsSnapshot(appSessionId as AppSessionId, null)), lastSeq: 0 }));
   // end carried from C3
+  // Replay (M5): launched and controlled here, bound in the service's table and served by its snapshot seam. Journal
+  // replay goes through C3's `Normalizer` once it is in the tree; until then through the stand-in that emits one
+  // `frame.unknown` per `in` row (M7 records which was wired).
+  const replays = new ReplayHost({ emit, bindings: service, normalizer: frameUnknownNormalizer });
+  service.serveReplays(replays);
+  on('session.replay.launch', async (input) => replays.launch(input as Parameters<ReplayHost['launch']>[0]));
+  on('session.replay.control', async (input) => replays.control(input as Parameters<ReplayHost['control']>[0]));
   service.start().catch((error: unknown) => console.error('[fs] the filesystem state service failed to start:', error instanceof Error ? error.message : error));
   return service;
 }

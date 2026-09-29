@@ -1,6 +1,8 @@
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SessionId } from '@shared/graph/ids';
 import { createHostRuntime, type HostPort } from '@shared/host/runtime';
+import { TRANSCRIPT_FIXTURE_DIR } from '../../../test/support/fixtures';
 import { StoreFixture } from '../../../test/support/store-fixture';
 import { registerFs } from './register';
 import type { FsService } from './service';
@@ -92,5 +94,49 @@ describe('the engine host serves fs.* through the host protocol', () => {
     expect(await response('14')).toEqual({ t: 'res', id: '14', ok: true, value: undefined });
     fake.deliver({ t: 'req', id: '15', name: 'fs.subagents', input: { appSessionId: 'app-1' } });
     expect(await response('15')).toMatchObject({ ok: false, error: { code: 'internal', message: 'unknown app session: app-1' } });
+  });
+
+  // C4 (M5): replay runs in the same host, bound in the same table, served by the same snapshot seam.
+  it('launches, serves and stops a replay through the host protocol; a failed launch posts only its error', async () => {
+    const fake = fakePort();
+    createHostRuntime((on, emit) => {
+      service = registerFs(on, emit, { CLAUDE_CONFIG_DIR: fixture.configHome });
+    }).serve(fake.port);
+    const response = async (id: string) => {
+      await expect.poll(() => fake.posted.some((m) => m.t === 'res' && m.id === id)).toBe(true);
+      return fake.posted.find((m) => m.t === 'res' && m.id === id)!;
+    };
+    const about = (appSessionId: string) => fake.posted.filter((m) => m.t === 'evt' && (m.payload as { appSessionId?: string }).appSessionId === appSessionId);
+    const APP = 'app-replay';
+    const RP = 'rp_11111111-1111-4111-8111-111111111111';
+    const source = { kind: 'transcript', path: join(TRANSCRIPT_FIXTURE_DIR, 'subagent-parent.jsonl') };
+
+    fake.deliver({ t: 'req', id: 'r1', name: 'session.replay.launch', input: { appSessionId: APP, sessionId: RP, source, speed: 'instant' } });
+    expect(await response('r1')).toMatchObject({ ok: true, value: { totalRows: expect.any(Number), spanMs: expect.any(Number) } });
+    const answeredAt = fake.posted.findIndex((m) => m.t === 'res' && m.id === 'r1');
+    await expect.poll(() => about(APP).some((m) => m.name === 'session.replay.progress' && (m.payload as { state: string }).state === 'done')).toBe(true);
+    expect(fake.posted.findIndex((m) => m.t === 'evt' && m.name === 'session.replay.progress')).toBeGreaterThan(answeredAt);
+
+    fake.deliver({ t: 'req', id: 'r2', name: 'session.events', input: { appSessionId: APP, afterSeq: null, limit: null } });
+    const snapshot = (await response('r2')) as unknown as { value: { events: { sessionId: string }[]; complete: boolean } };
+    const batched = about(APP).filter((m) => m.name === 'session.eventBatch').flatMap((m) => (m.payload as { events: unknown[] }).events);
+    expect(snapshot.value.complete).toBe(true);
+    expect(snapshot.value.events).toEqual(batched);
+    expect(new Set(snapshot.value.events.map((e) => e.sessionId))).toEqual(new Set([RP]));
+
+    fake.deliver({ t: 'req', id: 'r3', name: 'session.replay.control', input: { appSessionId: APP, action: 'stop' } });
+    expect(await response('r3')).toEqual({ t: 'res', id: 'r3', ok: true, value: undefined });
+    expect(about(APP).at(-1)).toMatchObject({ name: 'session.replay.progress', payload: { state: 'stopped' } });
+    let attempt = 0;
+    await expect.poll(async () => {
+      const id = `r4-${++attempt}`;
+      fake.deliver({ t: 'req', id, name: 'fs.unfollow', input: { appSessionId: APP, agentId: null } });
+      return (await response(id)).ok;
+    }).toBe(false); // unbound once stopped
+
+    const missing = join(TRANSCRIPT_FIXTURE_DIR, 'missing.jsonl');
+    fake.deliver({ t: 'req', id: 'r5', name: 'session.replay.launch', input: { appSessionId: 'app-failed', sessionId: RP, source: { kind: 'journal', path: missing }, speed: 1 } });
+    expect(await response('r5')).toMatchObject({ ok: false, error: { code: 'internal', message: `replay source not found: ${missing}` } });
+    expect(about('app-failed')).toEqual([]);
   });
 });

@@ -51,6 +51,11 @@ export interface FsServiceOptions {
   startScanFallbackMs?: number;
 }
 
+// The replay runs' side of the snapshot seam (ReplayHost): null for an app id no run has.
+export interface ReplaySnapshots {
+  snapshot(appSessionId: AppSessionId): { events: SessionEvent[]; complete: boolean } | null;
+}
+
 type ScanMode =
   | 'command' // fs.scan: every transcript not skipped by `known` is emitted, changed or not (main asked for it)
   | 'refresh'; // fallback and rescans: only what changed since the host or main last looked is emitted; before main's
@@ -101,6 +106,7 @@ export class FsService {
   private readonly agentListing = new Map<SessionId, Promise<SubagentEntry[]>>(); // one listing at a time per session
   private readonly workflowReader = new WorkflowReader();
   private readonly taskReader: TaskReader;
+  private replays: ReplaySnapshots | null = null;
 
   constructor(options: FsServiceOptions) {
     this.paths = options.paths;
@@ -176,6 +182,11 @@ export class FsService {
     for (const { sessionId, appSessionId } of bindings) this.bindings.bind(sessionId, appSessionId);
   }
 
+  // Replay runs (M5) bind their ids here and answer the snapshot for them from the runner's materialised events.
+  serveReplays(replays: ReplaySnapshots): void {
+    this.replays = replays;
+  }
+
   // `fs.unbind` (C10's ask, M4): main cleared the record's engine id, so the pair goes and whatever followed the session
   // under that app id stops; later events for the engine id carry no app id until main binds it again. An app id main
   // never bound (or already unbound) is a no-op, not an error.
@@ -200,6 +211,8 @@ export class FsService {
   // `session.eventBatch`, and the deterministic ids make the overlap harmless. `complete` is true once backfilled.
   async eventsSnapshot(appSessionId: AppSessionId, agentId: AgentId | null): Promise<{ events: SessionEvent[]; complete: boolean }> {
     if (agentId !== null) return this.agentEvents(appSessionId, agentId);
+    const replay = this.replays?.snapshot(appSessionId);
+    if (replay) return replay;
     const sessionId = this.sessionOf(appSessionId);
     const entry = await this.ensureFollow(appSessionId, null, () => this.followSession(appSessionId, sessionId));
     return snapshotOf(entry.follow);

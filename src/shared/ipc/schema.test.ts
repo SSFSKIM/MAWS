@@ -81,6 +81,25 @@ describe('ipc schema validates both directions', () => {
       expect(validateCommandInput('session.update', { appSessionId: 'a', patch: { title: { text: 'x', source: 'generated' } } }).ok).toBe(false); // MAWS never sets generated
       expect(validateCommandInput('session.update', { appSessionId: 'a', patch: { title: null } }).ok).toBe(true);
     });
+
+    // C4 (M5): replay, started in main and run in the engine host.
+    it('carries the C4 session.replay.* entries with their owners and the speed and source bounds', () => {
+      expect(commands['session.replay.start'].owner).toBe('main');
+      expect(commands['session.replay.fixtures'].owner).toBe('main');
+      expect(commands['session.replay.launch'].owner).toBe('engine-host');
+      expect(commands['session.replay.control'].owner).toBe('engine-host');
+      expect(Object.hasOwn(events, 'session.replay.progress')).toBe(true);
+      const start = (source: unknown, speed: unknown) => validateCommandInput('session.replay.start', { source, speed }).ok;
+      expect(start({ kind: 'journal', path: '/f/workflow.jsonl' }, 5)).toBe(true);
+      expect(start({ kind: 'transcript', path: '/f/t.jsonl' }, 'instant')).toBe(true);
+      expect(start({ kind: 'journal', path: '/f/workflow.jsonl' }, 0.25)).toBe(true);
+      expect(start({ kind: 'journal', path: '/f/workflow.jsonl' }, 0.2)).toBe(false);
+      expect(start({ kind: 'journal', path: '/f/workflow.jsonl' }, 51)).toBe(false);
+      expect(start({ kind: 'journal', path: 'relative.jsonl' }, 1)).toBe(false);
+      expect(start({ kind: 'wire', path: '/f/x.jsonl' }, 1)).toBe(false);
+      expect(validateCommandInput('session.replay.control', { appSessionId: 'a', speed: 'instant' }).ok).toBe(true);
+      expect(validateCommandInput('session.replay.control', { appSessionId: 'a', action: 'rewind' }).ok).toBe(false);
+    });
     // end C4
 
     it('names channels by kind so a command and an event of the same name never share one', () => {

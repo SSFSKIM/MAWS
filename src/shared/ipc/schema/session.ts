@@ -139,6 +139,8 @@ export const C3_SESSION_EVENTS = Object.keys(c3Events) as (keyof typeof c3Events
 // The record side of the index in main (C4 execution document, Interfaces "X2 additions", `session.ts`): records,
 // projects and drafts, owner main. Every command naming an app session id with no index row fails with `internal`
 // `unknown app session: <id>`, except `session.get`, which answers null (an unstarted tab has an id and no row yet).
+// Replay (M5): `session.replay.start` and `.fixtures` in main, `.launch` and `.control` in the engine host, which runs
+// the replay (`.control` for an id the host knows nothing of is a no-op), and its `session.replay.progress`.
 
 // C5's project shape (C5 execution document, "Main modules"), defined here and imported by C5: the `projects` row
 // projected, `order` being its sort order.
@@ -184,6 +186,26 @@ export const ReplayFixtureSchema = z.strictObject({
 });
 export type ReplayFixture = z.infer<typeof ReplayFixtureSchema>;
 
+// Replay (M5; X8): a probe journal or a transcript JSONL, by absolute path, at 0.25× to 50× or everything at once.
+export const ReplaySourceSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('journal'), path: z.string().refine((path) => path.startsWith('/'), 'an absolute path') }),
+  z.strictObject({ kind: z.literal('transcript'), path: z.string().refine((path) => path.startsWith('/'), 'an absolute path') }),
+]);
+export type ReplaySource = z.infer<typeof ReplaySourceSchema>;
+export const SpeedSchema = z.union([z.number().min(0.25).max(50), z.literal('instant')]);
+export type Speed = z.infer<typeof SpeedSchema>;
+export const REPLAY_STATES = ['running', 'paused', 'done', 'stopped', 'error'] as const;
+export const ReplayProgressSchema = z.strictObject({
+  appSessionId: AppSessionIdSchema,
+  state: z.enum(REPLAY_STATES),
+  index: z.number().int(), // rows (journal) or chain records (transcript) played so far
+  total: z.number().int(),
+  at: z.string().nullable(), // the recorded time of the last row played
+  speed: SpeedSchema,
+  message: z.string().nullable(),
+});
+export type ReplayProgress = z.infer<typeof ReplayProgressSchema>;
+
 export const SESSION_CHANGE_CAUSES = ['discovered', 'facts', 'holder', 'update', 'live', 'replay'] as const;
 export type SessionChangeCause = (typeof SESSION_CHANGE_CAUSES)[number];
 
@@ -209,6 +231,26 @@ const c4Commands = {
   'session.projects.remove': { input: z.strictObject({ id: ProjectIdSchema }), output: z.void(), owner: 'main' },
   'session.drafts.get': { input: appSession, output: DraftSchema.nullable(), owner: 'main' },
   'session.drafts.set': { input: z.strictObject({ appSessionId: AppSessionIdSchema, draft: DraftSchema.nullable() }), output: z.void(), owner: 'main' },
+  // Main allocates the ids and the `kind: 'replay'` record, then dispatches session.replay.launch; a failed launch
+  // removes the record again and fails with the launch's error (a `timeout` also cancels the launch on the host).
+  'session.replay.start': {
+    input: z.strictObject({ source: ReplaySourceSchema, speed: SpeedSchema }),
+    output: z.strictObject({ appSessionId: AppSessionIdSchema, sessionId: SessionIdSchema, totalRows: z.number().int(), spanMs: z.number() }),
+    owner: 'main',
+  },
+  // The host-side start: loads and validates the source and binds the ids before any event; fails `internal` otherwise.
+  'session.replay.launch': {
+    input: z.strictObject({ appSessionId: AppSessionIdSchema, sessionId: SessionIdSchema, source: ReplaySourceSchema, speed: SpeedSchema }),
+    output: z.strictObject({ totalRows: z.number().int(), spanMs: z.number() }),
+    owner: 'engine-host',
+  },
+  // Also main's cancel of a launch in flight; an id the host knows nothing of is a no-op.
+  'session.replay.control': {
+    input: z.strictObject({ appSessionId: AppSessionIdSchema, action: z.enum(['pause', 'resume', 'stop']).optional(), speed: SpeedSchema.optional() }),
+    output: z.void(),
+    owner: 'engine-host',
+  },
+  'session.replay.fixtures': { input: z.void(), output: z.strictObject({ fixtures: z.array(ReplayFixtureSchema) }), owner: 'main' },
 } as const satisfies Record<`session.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 // `revision` is one index-wide counter bumped on every session or project change; a consumer keeps the higher of
 // snapshot and event (C5's rule).
@@ -217,6 +259,8 @@ const c4Events = {
   'session.removed': z.strictObject({ appSessionId: AppSessionIdSchema, revision: z.number().int() }),
   // the whole list, for C5's project tree (wave-2 ledger, d.6)
   'session.projects.changed': z.strictObject({ projects: z.array(ProjectRecordSchema), revision: z.number().int() }),
+  // every 25 rows and on every state or speed change of a replay run
+  'session.replay.progress': ReplayProgressSchema,
 } as const satisfies Record<`session.${string}`, z.ZodType>;
 // C4 end --------------------------------------------------------------------------------------------------------------
 
