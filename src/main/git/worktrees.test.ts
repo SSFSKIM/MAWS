@@ -128,6 +128,15 @@ describe('worktree service over scratch repositories', () => {
       await expect(service.status(repo.root, w.path)).resolves.toMatchObject({ state: 'busy', occupancy: { self: 1, unbound: 0 } });
     });
 
+    it('is busy for a process in a subdirectory, and a linked worktree’s process leaves the main checkout alone', async () => {
+      const w = await service.add({ repoRoot: repo.root, name: 'sub', branch: newBranch('worktree-sub') });
+      mkdirSync(join(w.path, 'src'));
+      host.hold('eng-sub', { kind: 'terminal', pid: 78 }, join(w.path, 'src'));
+      await expect(service.status(repo.root, w.path)).resolves.toMatchObject({ state: 'busy', occupancy: { unbound: 1 } });
+      // (the main checkout is dirty here, not busy: `.claude/` is untracked until the engine writes its info/exclude block)
+      await expect(service.status(repo.root, repo.root)).resolves.toMatchObject({ state: 'dirty', occupancy: { unbound: 0 } });
+    });
+
     it('names idle and live sessions here: three records, one of them reserved', async () => {
       const w = await service.add({ repoRoot: repo.root, name: 'o', branch: newBranch('worktree-o') });
       records.push(

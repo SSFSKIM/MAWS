@@ -97,10 +97,23 @@ describe('occupancy of a directory', () => {
 
   const empty = { self: 0, foreign: 0, unbound: 0, idle: 0, archived: 0, idleAppSessionIds: [], liveAppSessionIds: [] };
 
-  it('is empty for a directory nobody is in, and asks the registry by the directory', async () => {
+  it('is empty for a directory nobody is in, and reads every live registry holder fresh', async () => {
     records.push(record('app-x', { directory: join(temp, 'elsewhere') }));
+    host.hold('eng-elsewhere', { kind: 'terminal', pid: 70 }, join(temp, 'elsewhere'));
     await expect(occupancyOf(deps, wt)).resolves.toEqual(empty);
-    expect(host.queries).toEqual([{ sessionIds: [], directories: [wt] }]);
+    expect(host.queries).toEqual([{ sessionIds: null, directories: null }]);
+  });
+
+  it('counts processes and records in a subdirectory, but not inside a nested worktree the caller names', async () => {
+    mkdirSync(join(wt, 'src'));
+    mkdirSync(join(wt, 'nested', 'deep'), { recursive: true });
+    host.hold('eng-sub', { kind: 'terminal', pid: 71 }, join(temp, 'link', 'src')); // `cd src && claude`
+    host.reserve('in-sub', join(wt, 'src'));
+    host.hold('eng-nested', { kind: 'terminal', pid: 72 }, join(wt, 'nested', 'deep'));
+    host.reserve('in-nested', join(wt, 'nested'));
+    records.push(record('sub', { directory: join(wt, 'src'), engineSessionId: sid('eng-sub-record') }), record('nest', { directory: join(wt, 'nested') }));
+    await expect(occupancyOf(deps, wt, { nested: [join(wt, 'nested')] })).resolves.toEqual({ ...empty, self: 1, unbound: 1, idle: 1, idleAppSessionIds: ['sub'] });
+    await expect(occupancyOf(deps, join(temp, 'wtx'))).resolves.toEqual(empty); // a sibling sharing the prefix is not under it
   });
 
   it('counts a registry holder whose cwd is the directory and whose session the index has not seen as unbound', async () => {
@@ -125,7 +138,6 @@ describe('occupancy of a directory', () => {
     host.reserve('a', wt, { engineSessionId: sid('eng-a') });
     const answer = await occupancyOf(deps, join(temp, 'link'));
     expect(answer).toEqual({ ...empty, self: 1, idle: 2, archived: 1, idleAppSessionIds: ['b', 'c'], liveAppSessionIds: ['a'] });
-    expect(host.queries[0].sessionIds?.sort()).toEqual(['eng-a', 'eng-b', 'eng-d']);
   });
 
   it('counts a registry holder of a record here as foreign and names the record live', async () => {

@@ -42,11 +42,16 @@ export class WorktreeService {
   // (`prunable`) has nothing to inspect: no changes, and its occupancy is still asked, since a process can outlive it.
   async status(repoRoot: string, path: string): Promise<WorktreeStatus | null> {
     const { root } = await this.mainRoot(repoRoot);
-    const entry = await this.find(root, path);
-    if (entry === null) return null;
+    requireAbsolute(path);
+    const target = await canonicalPath(path);
+    const entries = await this.entries(root);
+    const entry = entries.find((e) => e.path === target);
+    if (entry === undefined) return null;
+    // a worktree inside this one (the main checkout holds `.claude/worktrees/*`) answers for its own processes
+    const nested = entries.filter((e) => e.path.startsWith(`${entry.path}/`)).map((e) => e.path);
     const [dirty, occupancy] = await Promise.all([
       entry.prunable ? { tracked: 0, untracked: 0 } : this.changes(entry.path),
-      occupancyOf(this.deps.holders, entry.path),
+      occupancyOf(this.deps.holders, entry.path, { nested }),
     ]);
     const busy = processes(occupancy) > 0 || entry.locked;
     return { ...entry, dirty, occupancy, state: busy ? 'busy' : dirty.tracked + dirty.untracked > 0 ? 'dirty' : 'clean' };

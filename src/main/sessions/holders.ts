@@ -39,29 +39,32 @@ export async function holderAuthority(deps: HolderDeps, q: { engineSessionId: Se
   return first ? { holder: first.holder, live: 'foreign', source: 'registry' } : NONE;
 }
 
-// One directory (the worktree cleanup's `occupancy`). Records "here" are the index's records whose `directory` or
-// `worktree.path` is the directory; they are stored as realpaths (C4), so only the directory asked about is resolved.
-export async function occupancyOf(deps: HolderDeps, directory: string): Promise<WorktreeOccupancy> {
+// One directory (the worktree cleanup's `occupancy`). "Here" is the directory or anything under it (a terminal's
+// `cd src && claude` runs inside the checkout a removal would delete), except under a `nested` directory the caller
+// names (another worktree inside this one: the main checkout holds `.claude/worktrees/*`), which answers for itself.
+// Records count when their `directory` or `worktree.path` is here; C4 stores both as realpaths, so only the directories
+// asked about and the processes' cwds are resolved. The registry is read whole (a handful of live processes), because
+// C4's directory filter is an exact match.
+export async function occupancyOf(deps: HolderDeps, directory: string, opts: { nested?: readonly string[] } = {}): Promise<WorktreeOccupancy> {
   const dir = await canonicalPath(directory);
+  const nested = await Promise.all((opts.nested ?? []).map(canonicalPath));
+  const isHere = (path: string) => within(path, dir) && !nested.some((n) => within(path, n));
   const all = deps.sessions.list({ includeArchived: true });
-  const here = all.filter((r) => isHere(r.directory, dir) || (r.worktree !== null && isHere(r.worktree.path, dir)));
+  const here = all.filter((r) => isHere(normalizePath(r.directory)) || (r.worktree !== null && isHere(normalizePath(r.worktree.path))));
   const hereIds = new Set<string>(here.map((r) => r.appId));
   const known = new Set<string>(all.flatMap((r) => (r.engineSessionId === null ? [] : [r.engineSessionId])));
   const hereEngineIds = new Set<string>(here.flatMap((r) => (r.engineSessionId === null ? [] : [r.engineSessionId])));
 
-  const [live, registry] = await Promise.all([
-    reservations(deps),
-    ask(deps.dispatch, 'fs.holders', { sessionIds: [...hereEngineIds], directories: [dir] }),
-  ]);
+  const [live, registry] = await Promise.all([reservations(deps), ask(deps.dispatch, 'fs.holders', { sessionIds: null, directories: null })]);
   const cwds = await Promise.all(live.map((s) => canonicalPath(s.cwd)));
-  const reserved = live.filter((s, i) => cwds[i] === dir || hereIds.has(s.appSessionId));
+  const reserved = live.filter((s, i) => isHere(cwds[i]) || hereIds.has(s.appSessionId));
   const reservedIds = new Set<string>(live.flatMap((s) => (s.engineSessionId === null ? [s.appSessionId] : [s.appSessionId, s.engineSessionId])));
 
   let foreign = 0;
   let unbound = 0;
   const heldEngineIds = new Set<string>();
   for (const row of registry.holders) {
-    const inDirectory = row.cwd !== null && normalizePath(row.cwd) === dir;
+    const inDirectory = row.cwd !== null && isHere(normalizePath(row.cwd));
     if (!inDirectory && !hereEngineIds.has(row.sessionId)) continue;
     heldEngineIds.add(row.sessionId);
     if (row.appSessionId !== null || known.has(row.sessionId)) foreign += 1;
@@ -89,8 +92,9 @@ export async function canonicalPath(path: string): Promise<string> {
   }
 }
 
-function isHere(path: string, dir: string): boolean {
-  return normalizePath(path) === dir;
+// `path` is `dir` or lies under it; both canonical.
+function within(path: string, dir: string): boolean {
+  return path === dir || path.startsWith(dir === '/' ? dir : `${dir}/`);
 }
 
 // The live reservations: every process-table entry whose process the OS has not yet reported exited.
