@@ -56,6 +56,7 @@ export function PluginsWidget({ appSessionId, close }: { appSessionId: AppSessio
   const status = useSessions((s) => s.engine.get(appSessionId) ?? null);
   return (
     <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.plugins} command="plugins" foot={WIDGET_FOOT.plugins} state={status ? 'ready' : 'not_running'} error={null} close={close}>
+      {status && status.process !== 'ready' && <p className="m-0 mb-1 text-ui-sm text-fg-muted">{PLUGINS.lastReported}</p>}
       {status && <PluginsBody view={present(status)} />}
     </WidgetFrame>
   );

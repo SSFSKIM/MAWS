@@ -2,6 +2,7 @@
 // Interfaces "Widgets"). A foot reads `Read with <control> · <what is edited elsewhere>`; the sentences are the table's.
 // Backticks in a sentence mark code, which the frame renders in mono.
 import type { WidgetCommandName } from '../composer';
+import { NOT_RUNNING } from '../statusline/mode-menu';
 
 export interface WidgetFoot {
   readWith: string; // the engine's read or control, by its wire name
@@ -156,7 +157,7 @@ export const CONFIG = {
 };
 
 // Plugins.
-export const PLUGINS = { none: 'The engine loaded no plugins', problems: 'Problems', problemList: 'Plugin problems', loaded: 'Loaded', loadedList: 'Loaded plugins' };
+export const PLUGINS = { lastReported: `${NOT_RUNNING} · the plugins it last reported`, none: 'The engine loaded no plugins', problems: 'Problems', problemList: 'Plugin problems', loaded: 'Loaded', loadedList: 'Loaded plugins' };
 
 // MCP.
 export const MCP = { none: 'No MCP servers', list: 'MCP servers', scope: (scope: string) => `scope ${scope}`, from: (source: string) => `from ${source}`, tools: (n: number) => `${n} tool${n === 1 ? '' : 's'}` };
