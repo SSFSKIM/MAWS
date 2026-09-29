@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, SessionId } from '@shared/graph/ids';
@@ -158,6 +158,29 @@ describe('handoff recovery', () => {
     await afterRestart(null);
     expect(intentFile(h, id)).toBeNull();
     expect(h.index.sessions.get(id)!.engineSessionId).toBe(cleared);
+  });
+
+  it('a failed reconciliation reports the worktree the intent retains', async () => {
+    h.host.script = () => ({ ready: false });
+    await start();
+    await h.until(() => intentFile(h, id)?.progress.launch != null);
+    await bound();
+    // the intent retains a checkout (as a start into an existing worktree records it)
+    const path = join(h.userData, 'sessions', 'intents', `${id}.json`);
+    const retained = { path: h.work, branch: 'feature', head: 'a'.repeat(40), createdHere: false };
+    writeFileSync(path, JSON.stringify({ ...intentFile(h, id)!, progress: { ...intentFile(h, id)!.progress, worktree: retained } }));
+    const original = h.host.afterRestart.bind(h.host);
+    h.host.afterRestart = () => {
+      const next = original();
+      next.queueListError = 'state file is corrupt';
+      return next;
+    };
+    await h.restart();
+    expect(intentFile(h, id)!.progress.lastFailure!.resources).toEqual({
+      worktree: { path: h.work, branch: 'feature', createdHere: false, state: 'kept', detail: null, branchState: 'none' },
+      record: 'kept',
+      transcript: 'none',
+    });
   });
 
   it('a store the host cannot read leaves intent and record as they are, surfaces the error, and Retry reconciles again', async () => {

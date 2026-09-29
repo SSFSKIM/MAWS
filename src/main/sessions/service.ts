@@ -27,7 +27,7 @@ import { DeletionManifests, enumerateConversation } from './delete-manifest';
 import { canonicalPath, holderAuthority } from './holders';
 import { checkAdditionalDirectories, checkLocation, sessionDirectoryOf, trustDirectoryOf, type RuleVerdict } from './intent-rules';
 import { readSettings } from './launch-mapping';
-import { reconcileIntent } from './recovery';
+import { reconcileIntent, retainedWorktree } from './recovery';
 import { removeCreatedWorktree, runIntentSetup, runResume, type Setup } from './setup';
 import { trustKeyOf, trustStateOf } from './trust';
 
@@ -263,12 +263,15 @@ export class SessionService {
   }
 
   // `session.intent.release`: the hand-back after a cancelled card or "Back to editing"; the draft is untouched.
-  async release(appSessionId: AppSessionId): Promise<SetupIntent> {
+  // A record's id releases the message a resume retained behind its card and answers null; an id with neither an intent
+  // nor a retained message is unknown.
+  async release(appSessionId: AppSessionId): Promise<SetupIntent | null> {
     this.refuseWhileStarting(appSessionId);
     return this.serial(appSessionId, async () => {
       await this.ready();
-      const intent = this.intentOf(appSessionId);
       this.refuseWhileStarting(appSessionId);
+      if (this.deps.intents.get(appSessionId) === null && this.resumeMessages.delete(appSessionId)) return null;
+      const intent = this.intentOf(appSessionId);
       return this.putIntent({ ...intent, message: null, updatedAt: this.now() });
     });
   }
@@ -464,6 +467,15 @@ export class SessionService {
   }
 
   private async guardResume(record: SessionRecord, args: { message: FirstMessage | null; options: StartOptions }): Promise<[StartOutcome, (() => Promise<void>) | null]> {
+    try {
+      return await this.guardResumeOnce(record, args);
+    } catch (error) {
+      this.resumeMessages.delete(record.appId); // a guard that could not answer hands the message back
+      throw error;
+    }
+  }
+
+  private async guardResumeOnce(record: SessionRecord, args: { message: FirstMessage | null; options: StartOptions }): Promise<[StartOutcome, (() => Promise<void>) | null]> {
     const s = this.s;
     const appSessionId = record.appId;
     if (args.message !== null) this.resumeMessages.set(appSessionId, args.message);
@@ -664,7 +676,7 @@ export class SessionService {
       this.reconcileFailures.set(intent.appSessionId, message);
       const current = this.deps.intents.get(intent.appSessionId);
       if (current !== null) {
-        const resources: SetupResources = { worktree: null, record: 'kept', transcript: 'none' };
+        const resources: SetupResources = { worktree: retainedWorktree(current), record: 'kept', transcript: 'none' };
         await this.putIntent({ ...current, updatedAt: this.now(), progress: { ...current.progress, lastFailure: { at: this.now(), phase: 'launching', message, resources } } }).catch(() => {});
       }
       return message;

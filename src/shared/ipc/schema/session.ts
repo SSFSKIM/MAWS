@@ -356,8 +356,9 @@ const c10Commands = {
   // refused `invalid_input` naming the field; `internal` `starting` while a start is in flight, `retained_worktree` for a
   // location patch while a failed attempt's checkout is retained
   'session.intent.patch': { input: z.strictObject({ appSessionId: AppSessionIdSchema, patch: SetupIntentPatchSchema }), output: SetupIntentSchema, owner: 'main' },
-  // the hand-back: `message` cleared, `draft` untouched
-  'session.intent.release': { input: appSessionC10, output: SetupIntentSchema, owner: 'main' },
+  // the hand-back: `message` cleared, `draft` untouched; for a record's id, the message a resume retained behind its card
+  // is dropped and the answer is null
+  'session.intent.release': { input: appSessionC10, output: SetupIntentSchema.nullable(), owner: 'main' },
   'session.intent.discard': {
     input: appSessionC10,
     output: z.strictObject({ leftover: z.strictObject({ worktree: z.strictObject({ path: z.string(), branch: z.string().nullable() }) }).nullable() }),

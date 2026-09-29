@@ -39,17 +39,19 @@ export async function reconcileIntent(s: Setup, intent: SetupIntent): Promise<Re
   }
 
   s.sessions.remove(appSessionId);
-  const w = intent.progress.worktree;
-  const newBranch = intent.location.kind === 'newWorktree' && intent.location.branch.kind === 'new';
-  const resources: SetupResources = {
-    worktree: w === null ? null : { path: w.path, branch: w.branch, createdHere: w.createdHere, state: 'kept', detail: null, branchState: w.createdHere && newBranch ? 'kept' : 'none' },
-    record: 'removed',
-    transcript: 'none',
-  };
+  const resources: SetupResources = { worktree: retainedWorktree(intent), record: 'removed', transcript: 'none' };
   const next: SetupIntent = { ...intent, updatedAt: s.now(), progress: { ...intent.progress, lastFailure: { at: s.now(), phase: 'launching', message: 'MAWS quit before the session started', resources } } };
   await s.intents.put(next);
   s.emit('session.intent.changed', { appSessionId, intent: next });
   return 'not_started';
+}
+
+// The checkout an intent keeps across a restart, as the tab reports it: kept, its branch kept when this intent made it.
+export function retainedWorktree(intent: SetupIntent): SetupResources['worktree'] {
+  const w = intent.progress.worktree;
+  if (w === null) return null;
+  const newBranch = intent.location.kind === 'newWorktree' && intent.location.branch.kind === 'new';
+  return { path: w.path, branch: w.branch, createdHere: w.createdHere, state: 'kept', detail: null, branchState: w.createdHere && newBranch ? 'kept' : 'none' };
 }
 
 async function queueHolds(s: Setup, appSessionId: AppSessionId): Promise<boolean> {

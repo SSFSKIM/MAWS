@@ -600,6 +600,7 @@ export async function runResume(
 ): Promise<void> {
   const appSessionId = record.appId;
   let watch: LaunchWatch | null = null;
+  let launched = false;
   try {
     const trust = await trustStateOf(record.directory, { git: s.git, env: s.env });
     const attestation = input.decision === 'accepted' ? { accepted: true as const, directory: trust.trustKey } : null;
@@ -627,6 +628,7 @@ export async function runResume(
     const answer = await hostCall(s.dispatch, 'session.launch', { spec });
     if (answer.status === 'relay_unreachable') throw new RelayFailure(answer.health);
     if (answer.status === 'refused') throw new SetupFailure('launching', `${answer.reason}: ${answer.message}`);
+    launched = true;
     const end = await watch.untilReady();
     if (end.kind === 'timeout') throw new WatchdogFailure();
     if (end.kind === 'exited') throw exitFailure(end.errors);
@@ -640,7 +642,8 @@ export async function runResume(
     setupEvent(s, appSessionId, 'ready', null, { kind: 'ready', engineSessionId: engineSessionId as SessionId, firstTurn });
   } catch (error) {
     if (!(error instanceof SetupFailure) && !(error instanceof RelayFailure) && !(error instanceof HeldFailure)) s.log(`resume of ${appSessionId} failed: ${messageOf(error)}`);
-    if (error instanceof WatchdogFailure) await stopQuietly(s, appSessionId);
+    // a process this resume launched (still starting, or ready with its message refused) stops before the failure is told
+    if (launched) await stopQuietly(s, appSessionId);
     const transcript = record.engineSessionId !== null && (await pathExists(await transcriptPathOf(s.env, record.directory, record.engineSessionId)));
     const resources: SetupResources = { worktree: null, record: 'kept', transcript: transcript ? 'kept' : 'none' };
     const outcome: SetupEvent['outcome'] =

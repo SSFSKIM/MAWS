@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { validateCommandInput } from '../validate';
+import { validateCommandInput, validateCommandOutput } from '../validate';
 import { SessionDigestSchema, SessionPatchSchema } from './session';
 import { ArchiveOutcomeSchema, commands, DeleteOutcomeSchema, events } from './session'; // C10
 
@@ -50,6 +50,11 @@ describe('C10 session lifecycle entries', () => {
     expect(start({ appSessionId: ID, message: null, options: { gateway: 'direct', trust: 'accepted', model: null, effort: 'high' } })).toBe(true);
     expect(start({ appSessionId: ID, message: null, options: { trust: 'maybe' } })).toBe(false);
     expect(start({ appSessionId: ID, message: null, options: { cwd: '/x' } })).toBe(false);
+  });
+
+  it('answers a release with the intent, or null for a record whose resume message it handed back', () => {
+    expect(validateCommandOutput('session.intent.release', null).ok).toBe(true);
+    expect(validateCommandOutput('session.intent.release', { appSessionId: ID }).ok).toBe(false);
   });
 
   it('resolves a retained worktree by discarding or keeping it, nothing else', () => {

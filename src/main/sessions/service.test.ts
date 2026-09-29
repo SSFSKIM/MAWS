@@ -244,13 +244,25 @@ describe('session service', () => {
       const untrusted = await create(h.dir('untrusted'));
       await h.service.startSession(untrusted, { message: OK_MESSAGE, options: {} });
       expect(intentFile(h, untrusted)?.message).toEqual(OK_MESSAGE);
-      expect((await h.service.release(untrusted)).message).toBeNull();
-      // while a start is in flight: refused
+      expect((await h.service.release(untrusted))?.message).toBeNull();
+      // while a start is in flight: refused, naming why
       h.host.script = () => ({ ready: false });
       await h.service.startSession(id, { message: OK_MESSAGE, options: {} });
-      await expect(h.service.release(id)).rejects.toMatchObject({ reason: 'starting' });
-      await expect(h.service.patch(id, { model: 'opus' })).rejects.toMatchObject({ reason: 'starting' });
-      await expect(h.service.startSession(id, { message: null, options: {} })).rejects.toMatchObject({ reason: 'starting' });
+      const inFlight = { reason: 'starting', message: `starting: a start is in flight for ${id}` };
+      await expect(h.service.release(id)).rejects.toMatchObject(inFlight);
+      await expect(h.service.patch(id, { model: 'opus' })).rejects.toMatchObject(inFlight);
+      await expect(h.service.startSession(id, { message: null, options: {} })).rejects.toMatchObject(inFlight);
+    });
+
+    it('a guard that cannot answer hands the message back before its error propagates', async () => {
+      h.trustDirectory(h.work);
+      const id = await create();
+      await h.service.patch(id, { draft: DRAFT });
+      h.host.relayError = 'relay check failed: EPIPE';
+      await expect(h.service.startSession(id, { message: OK_MESSAGE, options: {} })).rejects.toThrow('relay check failed: EPIPE');
+      expect(intentFile(h, id)).toMatchObject({ message: null, draft: DRAFT });
+      expect(h.events.filter((e) => e.name === 'session.intent.changed').at(-1)?.payload).toMatchObject({ appSessionId: id, intent: { message: null } });
+      expect(h.host.launches).toEqual([]);
     });
 
     it('discard removes the intent and forgets its journal when no record stands on it', async () => {
@@ -289,23 +301,50 @@ describe('session service', () => {
       expect(h.host.launches).toEqual([]);
     });
 
-    it('refuses the guarded start with the registry’s own message when the registry cannot be read', async () => {
+    it('refuses the guarded start with the registry’s own message when the registry cannot be read, and keeps no message', async () => {
       const record = recordAt(h.work);
       h.host.registryError = 'holder registry unreadable: EACCES';
-      await expect(h.service.startSession(record.appId, { message: null, options: {} })).rejects.toThrow('holder registry unreadable: EACCES');
+      await expect(h.service.startSession(record.appId, { message: OK_MESSAGE, options: {} })).rejects.toThrow('holder registry unreadable: EACCES');
+      h.host.registryError = null;
+      await h.service.startSession(record.appId, { message: null, options: { trust: 'declined' } });
+      expect(await h.settled(record.appId)).toMatchObject({ phase: 'ready', outcome: { firstTurn: 'none' } });
+      expect(h.host.calledWith('session.send')).toEqual([]);
+    });
+
+    it('a resume’s message retained behind the trust card is handed back by release, and the next plain resume sends nothing', async () => {
+      const record = recordAt(h.work);
+      expect(await h.service.startSession(record.appId, { message: OK_MESSAGE, options: {} })).toMatchObject({ status: 'needs_trust' });
+      expect(await h.service.release(record.appId)).toBeNull();
+      await h.service.startSession(record.appId, { message: null, options: { trust: 'declined' } });
+      expect(await h.settled(record.appId)).toMatchObject({ phase: 'ready', outcome: { firstTurn: 'none' } });
+      expect(h.host.calledWith('session.send')).toEqual([]);
+      // an id with neither an intent nor a retained message
+      await expect(h.service.release(record.appId)).rejects.toMatchObject({ reason: 'unknown_intent' });
+    });
+
+    it('a resume that fails after ready stops its process before telling the failure', async () => {
+      h.trustDirectory(h.work);
+      const record = recordAt(h.work);
+      h.host.send = 'refuse';
+      await h.service.startSession(record.appId, { message: OK_MESSAGE, options: {} });
+      expect(await h.settled(record.appId)).toMatchObject({ phase: 'failed', outcome: { kind: 'error', message: 'send refused', resources: { record: 'kept' } } });
+      expect(h.host.calledWith('session.stop')).toEqual([{ appSessionId: record.appId, reason: 'stop' }]);
+      expect(h.host.table.get(record.appId)!.process).toBe('exited');
     });
 
     it('resumes with resume.fork false, the record’s directories and model, attesting the key; unfollows once before the launch', async () => {
       const extra = h.dir('extra');
-      const record = recordAt(h.work);
-      h.index.transaction(() => h.index.sessions.applyEngineStatus(record.appId, { model: { requested: 'opus', resolved: null } }));
-      const withDirs = { ...record, additionalDirectories: [extra] };
-      void withDirs;
+      // a session MAWS launched with an additional directory (`--add-dir` is not persisted by the engine: the record is)
+      const created = h.index.sessions.createForLaunch({
+        directory: h.work, additionalDirectories: [extra], worktree: null, model: { requested: 'opus', resolved: null }, effort: null, permissionMode: { requested: 'default', effective: 'default', refusal: null },
+      });
+      if (!created.ok) throw new Error('no record');
+      const record = h.index.sessions.bindEngineId(created.record.appId, SID);
       h.host.script = () => ({});
       expect(await h.service.startSession(record.appId, { message: OK_MESSAGE, options: { trust: 'accepted' } })).toMatchObject({ status: 'starting' });
       expect(await h.settled(record.appId)).toMatchObject({ phase: 'ready', outcome: { firstTurn: 'sent' } });
       const real = h.host.launches.find((l) => l.appSessionId === record.appId)!;
-      expect(real).toMatchObject({ resume: { sessionId: SID, fork: false }, sessionId: null, model: 'opus', cwd: h.work, trust: { accepted: true, directory: h.work }, inheritGrantsFrom: null });
+      expect(real).toMatchObject({ resume: { sessionId: SID, fork: false }, sessionId: null, model: 'opus', cwd: h.work, additionalDirectories: [extra], trust: { accepted: true, directory: h.work }, inheritGrantsFrom: null });
       const bootstrap = h.host.launches.find((l) => l.appSessionId !== record.appId)!;
       expect(bootstrap.resume).toBeNull();
       const order = h.host.calls.map((c) => c.name).filter((n) => n === 'fs.unfollow' || n === 'session.launch');

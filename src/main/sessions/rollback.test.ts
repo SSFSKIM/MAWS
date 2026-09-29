@@ -235,6 +235,21 @@ describe('rollback per resource', () => {
     expect(h.host.launches.map((l) => l.appSessionId)).toEqual([a]); // the refused start launched nothing
   });
 
+  it('patch refuses a new worktree the rules refuse, naming the location: a bad name, a taken path, a branch that exists, is missing or is checked out', async () => {
+    const id = await create({ kind: 'directory', path: repo.root });
+    const refused = (location: Location) => h.service.patch(id, { location });
+    await expect(refused(worktree('-bad'))).rejects.toMatchObject({ reason: 'invalid', field: 'location', message: "location: Worktree name cannot start with '-'" });
+    await repo.addManagedWorktree('taken');
+    await expect(refused({ ...worktree('taken'), branch: { kind: 'new', name: 'worktree-other', base: 'HEAD' } })).rejects.toMatchObject({ field: 'location', message: 'location: worktree path exists' });
+    await expect(refused({ ...worktree('fresh'), branch: { kind: 'new', name: 'main', base: 'HEAD' } })).rejects.toMatchObject({ field: 'location', message: 'location: branch exists' });
+    await expect(refused({ ...worktree('fresh'), branch: { kind: 'existing', name: 'nope' } })).rejects.toMatchObject({ field: 'location', message: 'location: branch missing' });
+    await expect(refused({ ...worktree('fresh'), branch: { kind: 'existing', name: 'worktree-taken' } })).rejects.toMatchObject({
+      field: 'location',
+      message: `location: branch checked out at ${managed('taken')}`,
+    });
+    expect(await refused(worktree('fresh'))).toMatchObject({ location: { kind: 'newWorktree', name: 'fresh' } });
+  });
+
   it('two starts issued together for one new worktree: the second is refused before either adds, and the first’s checkout and branch stay', async () => {
     const a = await create(worktree('race'));
     const b = await create(worktree('race'));

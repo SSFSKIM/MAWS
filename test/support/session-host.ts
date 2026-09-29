@@ -53,6 +53,7 @@ export class FakeEngineHost {
   send: 'answer' | 'hang' | 'persist-then-hang' | 'refuse' = 'answer';
   queueListError: string | null = null;
   registryError: string | null = null;
+  relayError: string | null = null; // engine.relayHealth cannot answer at all
   unfollowError: string | null = null;
   rewound = true;
   launchHangs: boolean | ((spec: LaunchSpec) => boolean) = false; // a crash point: `session.launch` never answers and nothing is reserved
@@ -141,6 +142,7 @@ export class FakeEngineHost {
       case 'engine.binaryInfo':
         return { path: this.binaryPath, expectedVersion: '2.1.283', version: '2.1.283', ok: true, error: null };
       case 'engine.relayHealth':
+        if (this.relayError !== null) throw new Error(this.relayError);
         return this.relay;
       case 'fs.holders': {
         if (this.registryError !== null) throw new Error(this.registryError);
