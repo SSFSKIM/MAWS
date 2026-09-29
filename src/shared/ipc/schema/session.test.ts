@@ -36,7 +36,7 @@ describe('C10 session lifecycle entries', () => {
   it('registers every C10 name with its owner, and the two events', () => {
     const main = [
       'session.archive', 'session.create', 'session.delete', 'session.fork', 'session.intent.discard', 'session.intent.get', 'session.intent.list',
-      'session.intent.patch', 'session.intent.release', 'session.rename', 'session.revealPath', 'session.start', 'session.trust.check',
+      'session.intent.patch', 'session.intent.release', 'session.intent.resolveWorktree', 'session.rename', 'session.revealPath', 'session.start', 'session.trust.check',
     ] as const;
     for (const name of main) expect(commands[name].owner, name).toBe('main');
     expect(commands['session.forget'].owner).toBe('engine-host');
@@ -50,6 +50,13 @@ describe('C10 session lifecycle entries', () => {
     expect(start({ appSessionId: ID, message: null, options: { gateway: 'direct', trust: 'accepted', model: null, effort: 'high' } })).toBe(true);
     expect(start({ appSessionId: ID, message: null, options: { trust: 'maybe' } })).toBe(false);
     expect(start({ appSessionId: ID, message: null, options: { cwd: '/x' } })).toBe(false);
+  });
+
+  it('resolves a retained worktree by discarding or keeping it, nothing else', () => {
+    const resolve = (resolution: unknown) => validateCommandInput('session.intent.resolveWorktree', { appSessionId: ID, resolution }).ok;
+    expect(resolve('discard')).toBe(true);
+    expect(resolve('keep')).toBe(true);
+    expect(resolve('force')).toBe(false);
   });
 
   it('bounds a rename to a non-empty title of at most 200 characters', () => {

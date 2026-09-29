@@ -43,7 +43,7 @@ import { SessionRecordSchema } from '@shared/graph/session';
 // SessionRecordSchema with C4's)
 import { SessionHolderSchema } from '@shared/graph/session';
 import { FirstMessageSchema, ForkTargetSchema, LocationSchema, SetupIntentPatchSchema, SetupIntentSchema, TrustDecisionSchema } from '../../sessions/intent';
-import { SetupEventSchema, StartOutcomeSchema } from '../../sessions/setup';
+import { SetupEventSchema, SetupResourcesSchema, StartOutcomeSchema } from '../../sessions/setup';
 import { TrustStateSchema } from '../../sessions/trust';
 // C10 end
 import type { CommandSpec } from './common';
@@ -361,6 +361,13 @@ const c10Commands = {
   'session.intent.discard': {
     input: appSessionC10,
     output: z.strictObject({ leftover: z.strictObject({ worktree: z.strictObject({ path: z.string(), branch: z.string().nullable() }) }).nullable() }),
+    owner: 'main',
+  },
+  // the failure card's resolutions of a checkout a failed attempt created and kept: "Discard changes and remove" (the
+  // acknowledged discard, then the branch step) or "Keep the worktree" (the location becomes that existing worktree)
+  'session.intent.resolveWorktree': {
+    input: z.strictObject({ appSessionId: AppSessionIdSchema, resolution: z.enum(['discard', 'keep']) }),
+    output: z.strictObject({ intent: SetupIntentSchema, worktree: SetupResourcesSchema.shape.worktree.unwrap() }),
     owner: 'main',
   },
   // an intent: its setup; a record: a resume
