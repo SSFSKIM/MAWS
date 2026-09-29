@@ -63,6 +63,26 @@ describe('session service', () => {
       const other = h.dir('other');
       expect(await h.service.patch(id, { location: { kind: 'directory', path: other } })).toMatchObject({ trust: 'unanswered', trustKey: null });
     });
+
+    // A's bootstrap recorded trust, the launch failed; the decision is reset, the location moves to B, B is accepted:
+    // B's bootstrap must still run (a recorded A never stands for B)
+    it('a decision reset to unanswered forgets the recorded trust, so accepting another key runs its bootstrap', async () => {
+      const id = await create();
+      h.host.script = (spec) => (spec.appSessionId === id ? { answer: { refused: 'binary_missing', message: 'no engine binary' } } : {});
+      await h.service.startSession(id, { message: OK_MESSAGE, options: { trust: 'accepted' } });
+      expect(await h.settled(id)).toMatchObject({ phase: 'failed' });
+      expect(intentFile(h, id)!.progress.trustRecorded).toBe(true);
+      expect(await h.service.patch(id, { trust: 'unanswered' })).toMatchObject({ trust: 'unanswered', trustKey: null, progress: { trustRecorded: false } });
+      const other = h.dir('other');
+      await h.service.patch(id, { location: { kind: 'directory', path: other } });
+      h.host.script = () => ({});
+      const before = h.host.launches.length;
+      await h.service.startSession(id, { message: null, options: { trust: 'accepted' } });
+      expect(await h.settled(id, 2)).toMatchObject({ phase: 'ready' });
+      const launched = h.host.launches.slice(before);
+      expect(launched.map((l) => l.appSessionId === id)).toEqual([false, true]); // B's bootstrap, then the real launch
+      expect(launched[0]).toMatchObject({ cwd: other, trust: { accepted: true, directory: other } });
+    });
   });
 
   describe('session service setup table', () => {

@@ -247,13 +247,15 @@ export class SessionService {
   }
 
   // A decision answers one trust key: when the effective key moved (a location change), the decision resets before
-  // anything else, so a decision for A never attests B; a decision given now is bound to the key as it is now.
+  // anything else, so a decision for A never attests B; a decision given now is bound to the key as it is now. The
+  // recorded trust belongs to the key it was recorded for: whenever the bound key moves (to null included), it goes.
   private async bindTrust(intent: SetupIntent, locationChanged: boolean, decision: SetupIntent['trust'] | undefined): Promise<SetupIntent> {
     if (!locationChanged && decision === undefined) return intent;
     const key = (await trustKeyOf(trustDirectoryOf(intent.location), this.s.git)).trustKey;
     let next = intent;
-    if (next.trustKey !== null && next.trustKey !== key) next = { ...next, trust: 'unanswered', trustKey: null, progress: { ...next.progress, trustRecorded: false } };
+    if (next.trustKey !== null && next.trustKey !== key) next = { ...next, trust: 'unanswered', trustKey: null };
     if (decision !== undefined) next = { ...next, trust: decision, trustKey: decision === 'unanswered' ? null : key };
+    if (next.trustKey !== intent.trustKey && next.progress.trustRecorded) next = { ...next, progress: { ...next.progress, trustRecorded: false } };
     return next;
   }
 
