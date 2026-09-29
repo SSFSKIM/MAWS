@@ -15,7 +15,7 @@ export function Section({ id, children }: { id: SummarySection; children: ReactN
   const contentId = `panel-summary-${id}`;
   return (
     <section aria-label={title} className="border-b border-border">
-      <h3 className="sticky top-0 z-10 bg-bg">
+      <h3 className="sticky top-0 z-10 bg-bg-raised">{/* the panel region's own background (PanelRegion.tsx) */}
         <button
           type="button"
           aria-expanded={!collapsed}
