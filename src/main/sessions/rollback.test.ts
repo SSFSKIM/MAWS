@@ -231,7 +231,8 @@ describe('rollback per resource', () => {
     await h.until(() => existsSync(managed('same')));
     const second = await h.service.startSession(b, { message: MESSAGE, options: {} });
     expect(second).toMatchObject({ status: 'invalid', field: 'location' });
-    expect(h.host.launches).toHaveLength(1);
+    await h.until(() => h.host.launches.length > 0);
+    expect(h.host.launches.map((l) => l.appSessionId)).toEqual([a]); // the refused start launched nothing
   });
 
   it('trust follows the key: a decision for the repository does not carry to a plain directory', async () => {
