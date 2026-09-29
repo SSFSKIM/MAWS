@@ -48,6 +48,7 @@ describe('layout value shapes', () => {
       'layout.setEnabledActions': 'main',
       'layout.pickFiles': 'main', // C7
       'layout.saveTextFile': 'main', // C11
+      'layout.captureChords': 'main', // C11 (M5 fix wave: the chord capture sets the menu aside)
     });
   });
 
