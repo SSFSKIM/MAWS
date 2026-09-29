@@ -269,6 +269,29 @@ class Batch {
     for (const [eventId, placed] of this.state.placement) if (placed === pending.id) this.state.placement.set(eventId, into);
   }
 
+  // *Local-command and interrupt-marker messages*, on disk: C4's backfill gives the marker (an ordinary user record) a
+  // turn.started of its own before its message, which closed the interrupted turn as completed and opened a turn for
+  // the marker. When the marker's message arrives and that turn holds nothing but its start, the marker turn goes (out
+  // of `order` and `turns`, loose placements re-pointed), the marker is retained on the turn before it, and that turn,
+  // closed without a turn.ended of its own, reads stopped. Returns whether it folded.
+  foldMarkerBack(marker: Event<'user.message'>): boolean {
+    if (marker.messageUuid === null) return false;
+    const id = turnIdOf.ofMessage(marker.messageUuid);
+    const own = this.state.turns.get(id);
+    const at = this.state.order.indexOf(id);
+    if (!own || own.state !== 'open' || at < 1 || own.events.some((event) => event.kind !== 'turn.started')) return false;
+    const before = this.state.order[at - 1];
+    if (this.state.turns.get(before)!.state !== 'closed') return false;
+    this.order().splice(at, 1);
+    this.state.turns.delete(id);
+    for (const [eventId, placed] of this.state.placement) if (placed === id) this.state.placement.set(eventId, before);
+    if (this.state.current === id) this.state.current = null;
+    const interrupted = this.touch(before);
+    this.push(interrupted, marker);
+    if (interrupted.ended === null) interrupted.closedBy = 'stopped';
+    return true;
+  }
+
   // A pending prompt the engine dropped before it started: its turn closes without work, the lifecycle event retained
   // (derive.ts reads it to mark the bubble dropped).
   drop(turn: TurnState, lifecycle: Event<'command.lifecycle'>): void {
@@ -403,6 +426,7 @@ function apply(batch: Batch, event: SessionEvent): void {
         return;
       }
       if (event.isSynthetic || isInterruptionMarker(event.origin, event.content)) {
+        if (!event.isSynthetic && batch.foldMarkerBack(event)) return;
         pushRouted(null, false); // retained on the turn, no row of its own
         return;
       }

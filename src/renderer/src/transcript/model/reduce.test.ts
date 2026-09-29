@@ -279,6 +279,61 @@ describe('turn boundaries', () => {
     expect(state.turns.get(turnId.ofMessage(uuid('u1')))).toMatchObject({ state: 'closed', closedBy: 'stopped' });
   });
 
+  // Whole-branch review round 3: on disk the interrupt marker is an ordinary user record, which C4's backfill gives a
+  // turn.started of its own before its user.message (array text content). It folds back onto the interrupted turn.
+  const diskPrompt = (b: ReturnType<typeof builder>, u: string, content: string | { type: string; text: string }[]) => {
+    b.emit('turn.started', { userMessageUuid: uuid(u), origin: null });
+    b.emit('user.message', { messageUuid: uuid(u), content: content as never, isReplay: false, isSynthetic: false, origin: null, bash: null });
+  };
+
+  it('a disk interrupt marker with its own turn.started folds back onto the interrupted turn: stopped, no marker bubble', () => {
+    for (const marker of ['[Request interrupted by user]', '[Request interrupted by user for tool use]']) {
+      const b = builder();
+      diskPrompt(b, 'u1', 'Count slowly');
+      b.toolUse('t1', 'Bash', { command: 'sleep 9' });
+      diskPrompt(b, 'im', [{ type: 'text', text: marker }]);
+      diskPrompt(b, 'u2', 'Next prompt');
+      b.text('m2', 0, 'Next answer');
+      const state = reduce(b.events);
+      const [one, two] = [turnId.ofMessage(uuid('u1')), turnId.ofMessage(uuid('u2'))];
+      expect(state.order).toEqual([one, two]);
+      expect(state.turns.has(turnId.ofMessage(uuid('im')))).toBe(false);
+      expect(state.turns.get(one)).toMatchObject({ state: 'closed', closedBy: 'stopped' });
+      const list = rowsOf(withAllExpanded(state));
+      expect(find(list, 'divider')).toMatchObject({ turnId: one, state: 'stopped' });
+      expect(list.filter((row) => row.kind === 'user').map((row) => [row.turnId, (row as Extract<Row, { kind: 'user' }>).text])).toEqual([[one, 'Count slowly'], [two, 'Next prompt']]);
+      expect(find(list, 'assistant_text')).toMatchObject({ turnId: two, markdown: 'Next answer' });
+    }
+  });
+
+  it('a marker that cannot fold back (nothing before it) still never renders as a user row', () => {
+    const b = builder();
+    diskPrompt(b, 'im', [{ type: 'text', text: '[Request interrupted by user]' }]);
+    expect(rowsOf(withAllExpanded(reduce(b.events))).filter((row) => row.kind === 'user')).toEqual([]);
+  });
+
+  it('the message-first order still retains the marker on the running turn, which the next prompt closes as stopped', () => {
+    const b = builder();
+    diskPrompt(b, 'u1', 'Count slowly');
+    b.toolUse('t1', 'Bash', { command: 'sleep 9' });
+    b.emit('user.message', { messageUuid: uuid('im'), content: [{ type: 'text', text: '[Request interrupted by user]' }], isReplay: false, isSynthetic: false, origin: null, bash: null });
+    diskPrompt(b, 'u2', 'Next prompt');
+    const state = reduce(b.events);
+    expect(state.order).toEqual([turnId.ofMessage(uuid('u1')), turnId.ofMessage(uuid('u2'))]);
+    expect(state.turns.get(turnId.ofMessage(uuid('u1')))).toMatchObject({ state: 'closed', closedBy: 'stopped' });
+    expect(rowsOf(state).filter((row) => row.kind === 'user')).toHaveLength(2);
+  });
+
+  it('a prompt that merely begins with the marker text, started first, is a prompt with its bubble', () => {
+    const b = builder();
+    diskPrompt(b, 'u1', 'Count slowly');
+    b.text('m1', 0, 'One, two');
+    diskPrompt(b, 'u2', '[Request interrupted by user] please continue anyway');
+    const state = reduce(b.events);
+    expect(state.order).toEqual([turnId.ofMessage(uuid('u1')), turnId.ofMessage(uuid('u2'))]);
+    expect(find(rowsOf(state), 'user', 1)).toMatchObject({ turnId: turnId.ofMessage(uuid('u2')), text: '[Request interrupted by user] please continue anyway' });
+  });
+
   it('a cancel naming a pending prompt marks its bubble dropped and closes its turn without work; later lifecycles change nothing', () => {
     const b = builder();
     b.turn('u1');

@@ -242,6 +242,8 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
           if (at >= 0) items[at] = { kind: 'row', row: withBashOutput((items[at] as { row: RowOf<'bash'> }).row, event) };
         } else if (isLocalCommand(event.origin, event.content)) {
           items.push({ kind: 'row', row: localCommandRow(event, turn.id) });
+        } else if (isInterruptionMarker(event.origin, event.content)) {
+          // The engine's interrupt marker is never a bubble, whatever turn it landed in: the stopped divider says it.
         } else if (event.messageUuid !== null && turnIdOf.ofMessage(event.messageUuid) === turn.id && user === null && !dropped(event.messageUuid)) {
           user = userRow(event, rowId.user(event.messageUuid), true);
         } else if (turn.id === turnIdOf.ofEvent(event.id) && user === null && !event.isSynthetic) {
