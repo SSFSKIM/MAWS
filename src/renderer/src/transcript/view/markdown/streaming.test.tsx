@@ -8,7 +8,7 @@ const LEAD = 'Results:\n\n';
 
 describe('holdBackTable', () => {
   it('holds a trailing header, and a header with its delimiter row still arriving', () => {
-    for (const tail of ['|', '| Row | Hei', '| Row | Height |', '| Row | Height |\n', '| Row | Height |\n| --', '| Row | Height |\n| --- | --- |']) {
+    for (const tail of ['|', '| Row | Hei', '| Row | Height |', '| Row | Height |\n', '| Row | Height |\n| --', '| Row | Height |\n|', '| Row | Height |\n| :', '| Row | Height |\n| --- | :', '| Row | Height |\n| --- | --- |']) {
       expect(holdBackTable(LEAD + tail), JSON.stringify(tail)).toBe(LEAD.trimEnd() + '\n');
     }
   });
