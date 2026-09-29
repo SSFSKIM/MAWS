@@ -84,6 +84,7 @@ function SessionInfoBody({ appSessionId, visible, record }: { appSessionId: AppS
     facts,
     directLogin,
     lane,
+    models: models ?? null,
     windows,
     now,
     reads: { status: statusRead.data ?? null, rules: rules.data ?? null, hooks: hooks.data ?? null, mcp: mcp.data ?? null, context: context.data ?? null },

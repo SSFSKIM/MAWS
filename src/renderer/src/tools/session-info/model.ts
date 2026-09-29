@@ -14,7 +14,8 @@ import { directLoginOf } from '../../gateway/direct-login';
 import type { DirectLogin, RoutingFacts } from '../../gateway/routing-facts';
 import { present as presentContext } from '../../widgets/ContextWidget';
 import { present as presentMcp } from '../../widgets/McpWidget';
-import { CONTEXT } from '../../widgets/copy';
+import { CONTEXT, MODEL } from '../../widgets/copy';
+import { liveModel, type ModelRow } from '../../widgets/model';
 import { num } from '../../widgets/parts';
 import { INFO, LANE } from './copy';
 import type { Lane } from './lane';
@@ -31,6 +32,7 @@ export interface SessionInfoInput {
   facts: RoutingFacts;
   directLogin: DirectLogin | null;
   lane: Lane | null; // null without a status
+  models: readonly ModelRow[] | null; // the session's listed catalogue, when C7 read one (an alias matched to its resolved id)
   windows: SessionWindows;
   now: number;
   reads: {
@@ -62,12 +64,16 @@ function engineSection({ record, status, binary, pinnedVersion }: SessionInfoInp
   };
 }
 
-function modelSection({ record, status }: SessionInfoInput): InfoSection {
+function modelSection({ record, status, models }: SessionInfoInput): InfoSection {
   const model = status?.model ?? record.model;
   const effort = status ? status.effort : record.effort;
-  const name = model.resolved ?? model.requested;
+  // A set_model the engine accepted and no init frame has confirmed yet: the requested model, pending in the model
+  // widget's words, as the lane reads it. Without the catalogue an alias cannot be matched to its resolved id, so the
+  // resolved one shows (a set_model from this app always listed the catalogue first).
+  const pending = status !== null && models !== null && liveModel(models, status.model).pending;
+  const name = pending ? model.requested : (model.resolved ?? model.requested);
   const rows: InfoRow[] = [
-    { label: INFO.main, value: name === null ? NONE : effort ? `${name} · ${effort}` : name },
+    { label: INFO.main, value: name === null ? NONE : effort ? `${name} · ${effort}` : name, note: pending ? MODEL.pending : undefined },
     status?.subagentModel ? { label: INFO.subagents, value: status.subagentModel, note: INFO.subagentChosen } : { label: INFO.subagents, value: status ? INFO.engineDefault : NONE },
   ];
   const overrides = Object.entries(status?.modelOverrides ?? {});

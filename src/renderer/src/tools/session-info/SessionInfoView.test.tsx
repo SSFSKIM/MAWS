@@ -13,6 +13,7 @@ import { loadScenario } from '../../../../../test/support/scenario';
 import { createWidgetBackend, fixtureLine, type WidgetBackend } from '../../../../../test/support/widget-backend';
 import { panelHost } from '../../panel/host';
 import type { PanelToolContext } from '../../panel/tool';
+import { rememberListedModels, useComposerStore, type ListedModel } from '../../stores/composer';
 import { useSessions } from '../../stores/sessions';
 import { useTranscriptStore, type TranscriptEntry } from '../../stores/transcript';
 import { useUsage } from '../../stores/usage';
@@ -95,6 +96,24 @@ describe('session info renders the six sections', () => {
     await waitFor(() => expect(valueOf('Rules')).toMatch(/^1 allow/)); // the other reads answered meanwhile
     expect(backend.calls.filter((c) => c.command === 'session.getContextUsage')).toEqual([]);
     expect(backend.calls.filter((c) => c.command === 'engine.models'), 'the lane reads the listed models only').toEqual([]);
+  });
+
+  // Whole-branch review: after a set_model the engine accepted and before the next init frame, the Main row names the
+  // requested model, pending in the model widget's words, as the lane does; once the frame resolves it, the resolved id.
+  it('names the requested model as pending until an init frame resolves it, agreeing with the lane', async () => {
+    const catalogue = (fixtureLine(ROOT, 'pass2/auto-routed#143') as { models: ListedModel[] }).models;
+    rememberListedModels(READY, catalogue);
+    const status = backend.status(READY);
+    useSessions.setState({ engine: new Map([[READY, { ...status, model: { requested: 'claude/astra', resolved: 'claude-sonnet-5[1m]' } }]]) });
+    mount(ctxOf(READY));
+    expect(valueOf('Main')).toMatch(/^claude\/astra( · \w+)? · set · the next init frame confirms it$/);
+    expect(valueOf('Auto-mode lane')).toMatch(/^Local \(expected\)/);
+    cleanup();
+    useSessions.setState({ engine: new Map([[READY, { ...status, model: { requested: 'sonnet', resolved: 'claude-sonnet-5[1m]' } }]]) });
+    mount(ctxOf(READY));
+    expect(valueOf('Main')).not.toContain('set · the next init frame confirms it'); // the alias resolved: confirmed
+    expect(valueOf('Main')).toMatch(/^claude-sonnet-5\[1m\]/);
+    useComposerStore.setState({ models: new Map() });
   });
 
   it('counts the reviews only while the transcript holds rows for the session', async () => {
