@@ -5,7 +5,9 @@
 // transcripts the case needs, a throwaway profile, and scratch repositories under the temp root. No engine runs; the
 // owner's `~/.claude`, `~/.claude.json` and checkouts are never read or written, and Delete's Trash move lands in a
 // temp directory (`MAWS_E2E_TRASH_DIR`, main's e2e seam), never the owner's `~/.Trash`.
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, type Page } from '@playwright/test';
 import type { CommandInput, CommandName, CommandResult } from '@shared/ipc/schema';
@@ -63,14 +65,15 @@ interface Case {
   dispose(): Promise<void>;
 }
 
-// One launch over a temp config home trusting `trusted`, with the case's replay fixtures in launch order.
-async function launchCase(opts: { fixtures: string[]; trusted: string[]; userData?: string; store?: StoreFixture }): Promise<Omit<Case, 'repos'>> {
+// One launch over a temp config home trusting `trusted`, with the case's replay fixtures in launch order; `env` adds to
+// the launch's environment.
+async function launchCase(opts: { fixtures: string[]; trusted: string[]; userData?: string; store?: StoreFixture; env?: Record<string, string> }): Promise<Omit<Case, 'repos'>> {
   const store = opts.store ?? (await StoreFixture.create());
   writeFileSync(join(store.configHome, '.claude.json'), `${JSON.stringify({ projects: Object.fromEntries(opts.trusted.map((key) => [key, { hasTrustDialogAccepted: true }])) }, null, 2)}\n`);
   const trash = join(store.configHome, 'e2e-trash');
   mkdirSync(trash, { recursive: true });
   const maws = await launchMaws({
-    env: { MAWS_ENGINE_REPLAY: '1', MAWS_E2E_REPLAY_FIXTURES: opts.fixtures.join(','), CLAUDE_CONFIG_DIR: store.configHome, MAWS_E2E_TRASH_DIR: trash },
+    env: { MAWS_ENGINE_REPLAY: '1', MAWS_E2E_REPLAY_FIXTURES: opts.fixtures.join(','), CLAUDE_CONFIG_DIR: store.configHome, MAWS_E2E_TRASH_DIR: trash, ...opts.env },
     ...(opts.userData ? { userData: opts.userData } : {}),
   });
   await expect(maws.page.locator('[data-region="main"]')).toBeVisible();
@@ -305,6 +308,69 @@ test.describe('sessions', () => {
     expect(readdirSync(launched.trash).sort(), 'the transcript and its sidecar arrived in the e2e Trash').toEqual([doomed, `${doomed}.jsonl`].sort());
     expect(readdirSync(join(launched.trash, doomed, 'subagents'))).toEqual(['agent-a1.jsonl']);
     expect(value(await invoke(page, 'session.get', { appSessionId: gone.appId }))).toBeNull();
+  });
+
+  // M5, acceptance items 12 and 13's renderer half, with no engine and no real job: a synthetic registry record under
+  // the temp config home (C4's recipe: the pid of this test runner, its `procStart` as the engine renders it), and a
+  // login shell that is not a shell. The PTY host runs `$SHELL -l`; the case's `$SHELL` records the directory it
+  // started in and the first line the tab wrote to it, then only echoes: the attach command reaches `pty.spawn` and is
+  // never run (and the login-shell captures, which run `$SHELL -ilc`, fail over to the app's own environment).
+  test('foreign-live: a background job holds the session read-only, the fresh read answers held, Attach runs the pinned attach in the job’s directory once; a terminal holder gets no Attach', async () => {
+    const repo = await ScratchRepo.create();
+    const store = await StoreFixture.create();
+    const sid = '5e551011-0000-4000-8000-00000000000b';
+    await store.addTranscript(repo.root, sid, [{ type: 'user', uuid: `u-${sid}`, parentUuid: null, cwd: repo.root, sessionId: sid, timestamp: '2026-09-29T10:00:00.000Z', message: { role: 'user', content: 'Wait; I will attach.' } }]);
+    const jobDir = join(repo.root, 'job-cwd'); // a job may run somewhere other than the session's directory (a worktree)
+    mkdirSync(jobDir);
+    const shellDir = mkdtempSync(join(tmpdir(), 'maws-e2e-shell-'));
+    const reached = join(shellDir, 'reached.txt');
+    const shell = join(shellDir, 'login-shell');
+    writeFileSync(shell, `#!/bin/sh\n[ "$1" = "-l" ] || exit 1\nIFS= read -r line\nprintf '%s\\n%s\\n' "$(pwd -P)" "$line" > '${reached}'\nexec cat\n`);
+    chmodSync(shell, 0o755);
+    const launched = await launchCase({ fixtures: [], trusted: [repo.root], store, env: { SHELL: shell } });
+    current = { ...launched, repos: [repo], dispose: async () => (await launched.maws.cleanup(), rmSync(shellDir, { recursive: true, force: true })) };
+    const { page } = launched;
+    await expect.poll(async () => value(await invoke(page, 'session.list', {})).sessions.some((r) => r.engineSessionId === sid), { timeout: 20_000 }).toBe(true);
+    const id = value(await invoke(page, 'session.list', {})).sessions.find((r) => r.engineSessionId === sid)!.appId;
+
+    const pid = process.pid;
+    const procStart = execFileSync('/bin/ps', ['-o', 'lstart=', '-p', String(pid)], { env: { LC_ALL: 'C', TZ: 'UTC' }, encoding: 'utf8' }).trim();
+    await store.addRegistryRecord(pid, { pid, sessionId: sid, cwd: jobDir, kind: 'bg', jobId: 'e6dcd828', procStart, status: 'busy' });
+    const job = { kind: 'background_job', pid, jobId: 'e6dcd828' };
+    const pinned = value(await invoke(page, 'engine.binaryInfo', undefined)).path;
+    const command = `'${pinned}' attach e6dcd828`;
+    expect(value(await invoke(page, 'session.start', { appSessionId: id, message: null, options: {} })), 'the fresh read, whatever the sidebar shows yet').toEqual({ status: 'held', appSessionId: id, holder: job, attach: { jobId: 'e6dcd828', command } });
+    await expect.poll(async () => value(await invoke(page, 'session.get', { appSessionId: id }))!.holder, { timeout: 2_000, message: 'foreign-live in the sidebar within two seconds' }).toEqual(job);
+
+    await row(page, id).click({ button: 'right' });
+    await expect(page.getByRole('menuitem')).toHaveText(['Open', 'Attach in a terminal tab']);
+    await page.keyboard.press('Escape');
+    await row(page, id).click();
+    const notice = page.locator('[data-region="main"]').getByRole('note');
+    await expect(notice).toContainText(`Live as background job · pid ${pid} · read-only`);
+    await notice.getByRole('button', { name: 'Attach in a terminal tab' }).click();
+    await expect.poll(() => (existsSync(reached) ? readFileSync(reached, 'utf8') : ''), { timeout: 10_000 }).toBe(`${realpathSync(jobDir)}\n${command}\n`);
+    const ptys = async () => value(await invoke(page, 'pty.list', undefined)).ptys.filter((p) => p.appSessionId === id && p.alive);
+    const [pty] = await ptys();
+    // the panel's list as C5 persists it (written a moment after the change)
+    const panel = async () => value(await invoke(page, 'layout.get', { key: `panel.${id}` })).value as { tabs: { id: string; toolId: string }[]; activeTabId: string | null } | null;
+    await expect.poll(panel, { message: 'one Terminal tab, selected, whose id is the pty’s label' }).toEqual({ tabs: [{ id: pty!.label, toolId: 'terminal', pinned: false }], activeTabId: pty!.label });
+    await notice.getByRole('button', { name: 'Attach in a terminal tab' }).click();
+    await page.waitForTimeout(500);
+    expect((await ptys()).map((p) => p.ptyId), 'a second Attach shows the running one').toEqual([pty!.ptyId]);
+
+    // an interactive terminal holds it now: held with no attach, and no Attach anywhere
+    await store.removeRegistryRecord(pid);
+    await store.addRegistryRecord(pid, { pid, sessionId: sid, cwd: repo.root, kind: 'interactive', procStart, status: 'idle' });
+    expect(value(await invoke(page, 'session.start', { appSessionId: id, message: null, options: {} }))).toEqual({ status: 'held', appSessionId: id, holder: { kind: 'terminal', pid }, attach: null });
+    await expect(notice).toContainText(`Live in Terminal · pid ${pid} · read-only`, { timeout: 5_000 });
+    await expect(notice.getByRole('button', { name: 'Attach in a terminal tab' })).toHaveCount(0);
+    await expect(notice.getByRole('button', { name: 'Fork a copy' })).toBeVisible();
+    await row(page, id).click({ button: 'right' });
+    await expect(page.getByRole('menuitem')).toHaveText(['Open']);
+    await page.keyboard.press('Escape');
+    await store.removeRegistryRecord(pid);
+    expect(launched.maws.consoleErrors()).toEqual([]);
   });
 
   test('an unstarted tab with a draft survives a relaunch', async () => {
