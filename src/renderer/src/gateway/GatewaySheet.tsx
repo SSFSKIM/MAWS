@@ -1,7 +1,9 @@
 // The gateway's small confirmation sheets (the route switch's confirm and `pickDirectModel`'s choice) in C10's sheet
 // geometry and buttons (D-20: dialogs follow Claude Desktop's small confirmation sheets as C10 uses them): a Radix
-// Dialog whose body is a form, so Enter runs the default action while it can, and Escape, the overlay and Cancel close
-// it through `onClose`. C10's own `Sheet`/`SheetForm` close through C10's dialog store (`closeDialog`) and take no close
+// Dialog whose body is a form that submits only while it can, and Escape, the overlay and Cancel close it through
+// `onClose`. It opens with focus on its first control, which is Cancel when the sheet holds no list: the sheets hold no
+// text field, so Enter never confirms on its own, and stopping a session's process takes a deliberate press of the
+// confirm button. C10's own `Sheet`/`SheetForm` close through C10's dialog store (`closeDialog`) and take no close
 // callback, so a sheet whose answer is owed to a caller (the switch's machine, `pickDirectModel`'s promise) cannot be
 // told it was dismissed there; this is the same sheet with that callback.
 import { Dialog } from 'radix-ui';

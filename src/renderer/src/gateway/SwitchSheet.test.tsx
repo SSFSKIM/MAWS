@@ -75,11 +75,12 @@ describe('the switch sheet', () => {
     expect(backend.calls.filter((c) => c.command === 'engine.models').map((c) => c.input), "the direct route's catalogue").toEqual([{ refresh: false, gateway: 'direct' }]);
   });
 
-  it('Enter confirms a sheet that can be confirmed; Escape answers null', async () => {
+  it('opens on Cancel (a switch stops a process), answers the reply when its form is submitted, and null on Escape', async () => {
     const answer = vi.fn(() => true);
     useSessions.setState((s) => ({ engine: new Map(s.engine).set(READY, { ...s.engine.get(READY)!, backgroundTasks: [] }) }));
     wrap(<SwitchSheet appSessionId={READY} confirm={{ target: 'direct', backgroundTasks: [], requiresModel: false, model: null, effort: null }} error={null} answer={answer} />);
     const sheet = await screen.findByRole('dialog', { name: 'Switch this session to Direct?' });
+    await waitFor(() => expect(document.activeElement).toBe(within(sheet).getByRole('button', { name: 'Cancel' })));
     const button = within(sheet).getByRole('button', { name: 'Restart direct' });
     fireEvent.submit(button.closest('form')!);
     expect(answer).toHaveBeenCalledWith(READY, { model: null, displayName: null, effort: null, backgroundTasks: [] });
