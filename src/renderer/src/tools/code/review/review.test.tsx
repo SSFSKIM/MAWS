@@ -3,7 +3,7 @@
 // store.
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SessionEvent } from '@shared/graph/events';
 import type { GitStatus } from '@shared/ipc/schema/git';
@@ -21,7 +21,7 @@ import { api, builder, parent, task, tool, uuid } from '../../../transcript/mode
 import { codeTranscriptActions } from '../open-file';
 import { useViewer } from '../viewer/viewer-store';
 import { DiffTab, resetDiffTabs } from './DiffTab';
-import { baseOf, createReviewStore, diffOf, fileDiffOf, REVIEW_REFRESH_MS, useReview } from './review-store';
+import { baseOf, createReviewStore, diffOf, fileDiffOf, REVIEW_REFRESH_MS, useReview, useReviewData } from './review-store';
 import { reviewTool } from './ReviewTool';
 import type { ReviewParams } from './review-model';
 import {
@@ -219,6 +219,8 @@ describe('review model', () => {
       ['scratch.txt', 'untracked', 0, 0, null, '/repo/scratch.txt'],
     ]);
     expect(rows[2].oldPath).toBe('src/helpers.ts');
+    expect(rows.map((r) => r.blocks)).toEqual([[], [10], [1], []]); // a git scope's file is one block
+    expect(rows[0].header).toContain('Binary files'); // a binary is signed over its header
     expect(totals(rows)).toEqual({ files: 4, added: 11, removed: 10 });
     expect(gitScopeFiles({ scope: 'staged', repoRoot: '/repo', files, patch, status }).map((r) => r.path)).not.toContain('scratch.txt');
     // past the scope cap: the list without hunks until each file is fetched
@@ -247,7 +249,10 @@ describe('review model', () => {
       ['/p/gone.ts', 'deleted', 0, 2, null],
     ]);
     expect(rows[0].hunks).toEqual(['@@ -1,1 +1,2 @@\n-x\n+y', '@@ -1,1 +1,2 @@\n+z\n+w']);
+    expect(rows[0].blocks).toEqual([1, 1]); // one block per edit, each numbered against its own version
+    expect(rows[1].blocks).toEqual([1]);
     expect(rows[2].hunks).toEqual([]);
+    expect(rows[2].blocks).toEqual([]);
   });
 
   it('shows Staged while a tracked entry’s index differs from HEAD, never for an untracked one', () => {
@@ -374,6 +379,22 @@ describe('review store', () => {
     expect(main.calls).toEqual([]);
   });
 
+  it('asks git.worktree.branch again after a failed lookup, rather than keeping the failure', async () => {
+    let fails = true;
+    const main = installFakeMain((name, input) =>
+      (name as string) === 'git.worktree.branch' ? (fails ? fail('git busy') : ok({ repoRoot: input.repoRoot, branch: input.branch, head: 'abc', checkedOutAt: null, base: 'main', ahead: 1, merged: false })) : ok(),
+    );
+    const store = createReviewStore(main.bridge, { branchCommand: true });
+    store.getState().lookupBase('/repo', 'feature');
+    await tick();
+    expect(baseOf(store.getState(), '/repo', 'feature')).toEqual({ status: 'unavailable', reason: 'git busy', failed: true });
+    fails = false;
+    store.getState().lookupBase('/repo', 'feature');
+    await tick();
+    expect(main.calls).toHaveLength(2);
+    expect(baseOf(store.getState(), '/repo', 'feature')).toEqual({ status: 'ok', base: 'main' });
+  });
+
   it('asks git.worktree.branch for the base once the command exists, and refuses the main worktree’s own branch', async () => {
     const main = installFakeMain((name, input) =>
       (name as string) === 'git.worktree.branch' ? ok({ repoRoot: input.repoRoot, branch: input.branch, head: 'abc', checkedOutAt: null, base: 'main', ahead: 2, merged: false }) : ok(),
@@ -412,8 +433,10 @@ interface ReviewMainOptions {
   status?: GitStatus;
   uncommitted?: { patch: string; files: typeof APP_FILES };
 }
+type DiffAnswer = { patch: string; files: typeof APP_FILES };
 function reviewMain(options: ReviewMainOptions = {}) {
-  const state = {
+  const state: { status: GitStatus; uncommitted: DiffAnswer; perFile: Record<string, DiffAnswer> } = {
+    perFile: {},
     status: options.status ?? DIRTY,
     uncommitted: options.uncommitted ?? {
       patch: APP_PATCH + STAGED_PATCH,
@@ -425,6 +448,7 @@ function reviewMain(options: ReviewMainOptions = {}) {
       case 'git.watch':
         return ok(state.status);
       case 'git.diff':
+        if (typeof input.path === 'string') return ok(state.perFile[input.path] ?? { patch: '', files: [] });
         return ok(input.scope === 'staged' ? { patch: STAGED_PATCH, files: [{ path: 'src/staged.ts', oldPath: null, insertions: 1, deletions: 0, binary: false }] } : state.uncommitted);
       case 'layout.get':
         return ok({ value: null });
@@ -444,6 +468,35 @@ const rows = () => [...document.querySelectorAll<HTMLButtonElement>('[role="opti
 const row = (path: string) => document.querySelector<HTMLButtonElement>(`[role="option"] button[data-path="${path}"]`)!;
 const selectedPath = () => document.querySelector('[role="option"][aria-selected="true"] button')?.getAttribute('data-path') ?? null;
 const bodyText = () => document.querySelector('[data-review-body]')?.textContent ?? null;
+const hunkLabel = () => document.querySelector('[data-review-hunk]')?.textContent ?? null;
+
+// happy-dom lays nothing out: the diff body gets a clamped scroller of a given height whose rows stand `rowHeight`
+// apart, and a scroll event on every change of its offset, as a browser gives.
+function layOut(body: Element, { rowHeight, clientHeight }: { rowHeight: number; clientHeight: number }): () => void {
+  const el = body as HTMLElement;
+  const rowsOf = () => [...el.querySelectorAll('tr')];
+  let top = 0;
+  Object.defineProperty(el, 'clientHeight', { configurable: true, get: () => clientHeight });
+  Object.defineProperty(el, 'scrollHeight', { configurable: true, get: () => rowsOf().length * rowHeight });
+  Object.defineProperty(el, 'scrollTop', {
+    configurable: true,
+    get: () => top,
+    set: (value: number) => {
+      const next = Math.max(0, Math.min(value, el.scrollHeight - clientHeight));
+      if (next === top) return;
+      top = next;
+      el.dispatchEvent(new Event('scroll'));
+    },
+  });
+  const original = Element.prototype.getBoundingClientRect;
+  const box = (y: number) => ({ top: y, bottom: y + rowHeight, left: 0, right: 0, width: 0, height: rowHeight, x: 0, y, toJSON: () => ({}) }) as DOMRect;
+  Element.prototype.getBoundingClientRect = function (this: Element) {
+    if (this === el) return box(0);
+    const index = this.tagName === 'TR' ? rowsOf().indexOf(this as HTMLTableRowElement) : -1;
+    return index >= 0 ? box(index * rowHeight - top) : original.call(this);
+  };
+  return () => void (Element.prototype.getBoundingClientRect = original);
+}
 const openReview = (params?: ReviewParams) => act(() => void panelHost.addTool('review', { appSessionId: A, params }));
 
 async function attachTranscript(events: SessionEvent[]) {
@@ -537,9 +590,10 @@ describe('review tool', () => {
     openReview();
     render(<TestHost />);
     await waitFor(() => expect(rows()).toHaveLength(3));
-    const before = main.callsOf('git.diff').length;
+    await act(() => new Promise((resolve) => setTimeout(resolve, REVIEW_REFRESH_MS + 50)));
+    expect(main.callsOf('git.diff')).toHaveLength(2); // C8a's git store's and Review's own: the mount's focus request read nothing more
     act(() => panelHost.selectTab(panelOf(A)!.tabs[0].id)); // the host's focus request for the selected tab
-    await waitFor(() => expect(main.callsOf('git.diff')).toHaveLength(before + 1));
+    await waitFor(() => expect(main.callsOf('git.diff')).toHaveLength(3));
   });
 
   it('says a file past the cap is too large and offers it at its first changed line', async () => {
@@ -594,8 +648,63 @@ describe('review tool', () => {
     await waitFor(() => expect(document.querySelector('[data-review-body] .split-diff-view')).not.toBeNull());
     expect(hunkRows()).toBe(2);
     expect(useViewer.getState().wrap).toBe(false);
+    expect(document.querySelector('[data-review-body] [class*="-diff-view-wrap"]')).toBeNull();
     fireEvent.click(screen.getByText('Wrap'));
     expect(useViewer.getState().wrap).toBe(true);
+    await waitFor(() => expect(document.querySelector('[data-review-body] [class*="-diff-view-wrap"]')).not.toBeNull()); // DiffView received it
+  });
+
+  it('keeps a hunk it jumped to when the hunk cannot reach the top of the scroller', async () => {
+    openReview();
+    render(<TestHost />);
+    await waitFor(() => expect(bodyText()).toContain('@@ -12,3 +13,4 @@'));
+    const body = document.querySelector('[data-review-body]')!;
+    const restore = layOut(body, { rowHeight: 20, clientHeight: 150 }); // the second hunk's row lies below the last offset
+    try {
+      fireEvent.click(screen.getByLabelText('Next hunk'));
+      await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+      const el = body as HTMLElement;
+      expect(el.scrollTop).toBeGreaterThan(0);
+      expect(el.scrollTop).toBe(el.scrollHeight - el.clientHeight); // clamped short of the second hunk's row
+      expect(hunkLabel()).toBe('Showing hunk 2 of 2');
+      expect(screen.getByLabelText('Next hunk')).toHaveProperty('disabled', true);
+      fireEvent.click(screen.getByText('Open file ↗'));
+      expect(useLayout.getState().main.panes.flatMap((p) => p.tabs)).toContainEqual(expect.objectContaining({ kind: 'file', path: '/repo/src/app.ts', line: 14 }));
+      act(() => void ((body as HTMLElement).scrollTop = 0)); // scrolling by hand still moves the counter
+      expect(hunkLabel()).toBe('Showing hunk 1 of 2');
+    } finally {
+      restore();
+    }
+  });
+
+  it('past the scope cap, fetches the selected file again after a refresh, and ticks it viewed in the list', async () => {
+    main.state.uncommitted = { patch: APP_PATCH + 'x'.repeat(REVIEW_SCOPE_BYTES_CAP), files: APP_FILES };
+    main.state.perFile = { 'src/app.ts': { patch: APP_PATCH, files: APP_FILES } };
+    openReview();
+    render(<TestHost />);
+    await waitFor(() => expect(hunkLabel()).toBe('Showing hunk 1 of 2'));
+    fireEvent.click(screen.getByText('Mark viewed'));
+    expect(row('src/app.ts').dataset.viewed).toBe('true');
+    act(() => main.emit('git.changed', { repoRoot: '/repo', status: statusOf({ ...DIRTY }), reason: 'worktree' }));
+    await waitFor(() => expect(main.callsOf('git.diff').filter((input) => input.path === 'src/app.ts')).toHaveLength(2));
+    await waitFor(() => expect(hunkLabel()).toBe('Showing hunk 1 of 2'));
+    expect(row('src/app.ts').dataset.viewed).toBe('true');
+  });
+
+  it('marks a binary file viewed over its header, and drops the mark when the header changes', async () => {
+    const binary = (index: string) => ({
+      patch: `diff --git a/logo.png b/logo.png\nindex ${index} 100644\nBinary files a/logo.png and b/logo.png differ\n`,
+      files: [{ path: 'logo.png', oldPath: null, insertions: 0, deletions: 0, binary: true }],
+    });
+    main.state.uncommitted = binary('1..2');
+    openReview();
+    render(<TestHost />);
+    await waitFor(() => expect(document.querySelector('[data-review-file-header]')?.textContent).toBe('logo.png · Binary'));
+    fireEvent.click(screen.getByText('Mark viewed'));
+    expect(row('logo.png').dataset.viewed).toBe('true');
+    main.state.uncommitted = binary('1..3');
+    act(() => main.emit('git.changed', { repoRoot: '/repo', status: statusOf({ ...DIRTY }), reason: 'worktree' }));
+    await waitFor(() => expect(row('logo.png').dataset.viewed).toBeUndefined());
   });
 
   it('keeps viewed marks across unmounts and drops a mark when the file’s hunks change', async () => {
@@ -680,6 +789,55 @@ describe('review tool', () => {
     expect(useLayout.getState().main.panes.flatMap((p) => p.tabs)).toContainEqual(expect.objectContaining({ kind: 'file', path: '/repo/child.ts', line: 3 }));
   });
 
+  it('draws each edit of a file as its own block: a Write, an overlapping Edit, and a later edit above', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const b = builder();
+    b.turn('u1');
+    const file = '/repo/two.ts';
+    const lines = Array.from({ length: 12 }, (_, i) => `l${i + 1}`);
+    const edit = (id: string, name: string, input: Record<string, unknown>, hunk: { oldStart: number; oldLines: number; newStart: number; newLines: number; lines: string[] }, extra = {}) => {
+      b.toolUse(id, name, { file_path: file, ...input }, `m-${id}`, 0);
+      b.result(id, 'ok', { structured: { filePath: file, structuredPatch: [hunk], userModified: false, ...extra } });
+    };
+    edit('w1', 'Write', { content: `${lines.join('\n')}\n` }, { oldStart: 1, oldLines: 0, newStart: 1, newLines: 12, lines: lines.map((l) => `+${l}`) }, { type: 'create', originalFile: null });
+    edit('e1', 'Edit', { old_string: 'l8', new_string: 'EIGHT' }, { oldStart: 7, oldLines: 5, newStart: 7, newLines: 5, lines: [' l7', '-l8', '+EIGHT', ' l9', ' l10', ' l11'] });
+    edit('e2', 'Edit', { old_string: 'l3', new_string: 'l3\nABOVE' }, { oldStart: 2, oldLines: 3, newStart: 2, newLines: 4, lines: [' l2', ' l3', '+ABOVE', ' l4'] });
+    b.text('m9', 0, 'Done.');
+    b.end(['u1']);
+    main.state.status = statusOf({ dirty: false });
+    await attachTranscript(b.events);
+    const receipt = receiptRow();
+    if (receipt?.kind !== 'receipt') throw new Error('no receipt');
+    render(<TestHost />);
+    openReview({ scope: 'turn', turnId: receipt.turnId! });
+    await waitFor(() => expect(document.querySelectorAll('[data-review-block]')).toHaveLength(3));
+    await waitFor(() => expect(hunkLabel()).toBe('Showing hunk 1 of 3'));
+    for (const text of ['+l12', '+EIGHT', '+ABOVE']) expect(bodyText()).toContain(text); // every edit's hunk drawn
+    fireEvent.click(screen.getByLabelText('Next hunk'));
+    fireEvent.click(screen.getByLabelText('Next hunk'));
+    expect(hunkLabel()).toBe('Showing hunk 3 of 3');
+    fireEvent.click(screen.getByText('Open file ↗'));
+    expect(useLayout.getState().main.panes.flatMap((p) => p.tabs)).toContainEqual(expect.objectContaining({ kind: 'file', path: file, line: 4 })); // the third block's own numbers
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it('recomputes Last turn only when the turn itself changes', async () => {
+    let push: (batch: SessionEvent[]) => void = () => {};
+    const events = journalToEvents(loadSyntheticJournal('edit-and-receipt'));
+    await act(() => useTranscriptStore.getState().attach(A, { subscribe: (listener) => ((push = listener), () => {}), snapshot: () => Promise.resolve(events) }));
+    const receipt = receiptRow();
+    if (receipt?.kind !== 'receipt') throw new Error('no receipt');
+    const { result } = renderHook(() => useReviewData({ appSessionId: A, directory: '/repo', scope: 'turn', turnId: receipt.turnId! }));
+    const before = result.current.list;
+    expect(before.phase).toBe('ready');
+    const next = builder('2026-09-28T11:00:00.000Z');
+    next.turn('u-next');
+    act(() => push(next.events)); // another turn starts and streams
+    expect(useTranscriptStore.getState().entries[A].state.order).toHaveLength(2);
+    expect(result.current.list).toBe(before);
+  });
+
   it('says the turn is not loaded when the transcript store holds no such turn', async () => {
     render(<TestHost />);
     openReview({ scope: 'turn', turnId: T });
@@ -694,9 +852,11 @@ describe('review tool', () => {
     openReview();
     await waitFor(() => expect(rows()).toHaveLength(3));
     fireEvent.click(row('src/staged.ts'));
+    const shell = document.querySelector('[data-review]');
     openReview();
     await waitFor(() => expect(chipOf('uncommitted')?.getAttribute('aria-pressed')).toBe('true'));
     expect(selectedPath()).toBe('src/staged.ts');
+    expect(document.querySelector('[data-review]')).toBe(shell); // re-targeted in place, never unmounted
     expect(panelOf(A)?.tabs).toHaveLength(1);
     act(() => codeTranscriptActions.reviewChanges(receipt.turnId!, receipt.files[2].path));
     await waitFor(() => expect(chipOf('turn')?.getAttribute('aria-pressed')).toBe('true'));
@@ -705,12 +865,11 @@ describe('review tool', () => {
   });
 
   it('fills Environment’s change line with the staged count, and opens Review from it', async () => {
-    const withDiff = { ...DIRTY };
     render(<TestHost />);
     await waitFor(() => expect(screen.getByTestId('change-line').textContent).toBe('+3 −0 across 3 files · 1 untracked · 1 staged'));
-    expect(withDiff.files).toHaveLength(3);
     fireEvent.click(screen.getByTestId('change-line'));
     await waitFor(() => expect(header()).toBe('3 files changed · +3 −0 · Uncommitted'));
+    expect(rows().map((r) => r[0])).toEqual(['src/app.ts', 'src/staged.ts', 'scratch.txt']);
   });
 });
 
@@ -741,6 +900,20 @@ describe('review diff tab', () => {
     render(<DiffTab tab={diffTab('uncommitted @ /etc/hosts')} />);
     await waitFor(() => expect(document.querySelector('[data-review-refused]')?.textContent).toBe("Refused: path outside the session's directories/etc/hosts"));
     expect(screen.queryByText('Open file ↗')).toBeNull();
+  });
+
+  it('forgets a closed tab’s view: reopened, it starts again from its ref', async () => {
+    const ref = 'uncommitted @ src/staged.ts';
+    act(() => useLayout.getState().openTab({ kind: 'diff', appSessionId: A, ref }));
+    const tab = useLayout.getState().main.panes[0].tabs.find((t) => t.kind === 'diff')!;
+    const { unmount } = render(<DiffTab tab={tab as ReturnType<typeof diffTab>} />);
+    await waitFor(() => expect(selectedPath()).toBe('src/staged.ts'));
+    fireEvent.click(row('src/app.ts'));
+    unmount();
+    act(() => useLayout.getState().closeTab(tab.id));
+    act(() => useLayout.getState().openTab({ kind: 'diff', appSessionId: A, ref }));
+    render(<DiffTab tab={tab as ReturnType<typeof diffTab>} />);
+    await waitFor(() => expect(selectedPath()).toBe('src/staged.ts'));
   });
 
   it('says why a ref does not parse or names a turn not loaded', async () => {

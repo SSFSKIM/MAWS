@@ -4,7 +4,7 @@
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { TurnId } from '../../../transcript';
-import { hunksSignature, type ReviewFile, type ReviewParams, type ReviewScope } from './review-model';
+import type { ReviewParams, ReviewScope } from './review-model';
 
 export type ReviewMode = 'unified' | 'split';
 
@@ -81,15 +81,14 @@ export function selectFile(path: string): Partial<ReviewUi> {
 
 export const viewedKey = (directory: string, scope: ReviewScope, turnId: TurnId | null) => `${directory}\0${scope}${scope === 'turn' ? `\0${turnId ?? ''}` : ''}`;
 
-// Marked, and the hunks are what they were when marked (a stale mark is worse than none).
-export function isViewed(viewed: ReviewUi['viewed'], key: string, file: ReviewFile): boolean {
-  const mark = viewed.get(key)?.get(file.path);
-  return mark !== undefined && mark === hunksSignature(file.hunks ?? []);
+// Marked, and the file is what it was when marked (`viewedSignature`; a stale mark is worse than none).
+export function isViewed(viewed: ReviewUi['viewed'], key: string, path: string, signature: string): boolean {
+  return viewed.get(key)?.get(path) === signature;
 }
 
-export function toggleViewed(ui: ReviewUi, key: string, file: ReviewFile): Partial<ReviewUi> {
+export function toggleViewed(ui: ReviewUi, key: string, path: string, signature: string): Partial<ReviewUi> {
   const marks = new Map(ui.viewed.get(key) ?? []);
-  if (isViewed(ui.viewed, key, file)) marks.delete(file.path);
-  else marks.set(file.path, hunksSignature(file.hunks ?? []));
+  if (isViewed(ui.viewed, key, path, signature)) marks.delete(path);
+  else marks.set(path, signature);
   return { viewed: new Map(ui.viewed).set(key, marks) };
 }

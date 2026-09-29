@@ -45,7 +45,8 @@ export type ScopeDiff =
   | { status: 'ok'; files: GitDiffFile[]; patch: ReadonlyMap<string, PatchFile> | null } // patch null past the scope cap
   | { status: 'error'; message: string };
 export type FileDiff = { status: 'loading' } | { status: 'ok'; file: PatchFile | null } | { status: 'error'; message: string };
-export type BaseLookup = { status: 'loading' } | { status: 'ok'; base: string } | { status: 'unavailable'; reason: string };
+// `failed`: the call itself failed; not kept, so the next lookup asks again.
+export type BaseLookup = { status: 'loading' } | { status: 'ok'; base: string } | { status: 'unavailable'; reason: string; failed?: true };
 
 export interface ReviewStore {
   diffs: ReadonlyMap<string, ScopeDiff>; // by diffKey
@@ -185,7 +186,8 @@ export function createReviewStore(
 
       lookupBase(repoRoot, branch) {
         const key = baseKey(repoRoot, branch);
-        if (get().bases.has(key)) return;
+        const known = get().bases.get(key);
+        if (known && !(known.status === 'unavailable' && known.failed)) return;
         if (!branchCommand) {
           set((s) => ({ bases: mapWith(s.bases, key, { status: 'unavailable', reason: REVIEW_COPY.arrivesWithC10 }) }));
           return;
@@ -196,7 +198,7 @@ export function createReviewStore(
         void settled(call).then((result) => {
           const value = result.ok ? (result.value as { base?: unknown } | null) : null;
           const next: BaseLookup = !result.ok
-            ? { status: 'unavailable', reason: result.error.message }
+            ? { status: 'unavailable', reason: result.error.message, failed: true }
             : typeof value?.base !== 'string' || value.base === 'HEAD'
               ? { status: 'unavailable', reason: REVIEW_COPY.noMainBranch }
               : value.base === branch
@@ -306,14 +308,15 @@ export function useReviewData(input: { appSessionId: AppSessionId; directory: st
   useEffect(() => (target ? useReview.getState().hold(target) : undefined), [target]);
   const diff = useReview((s) => (target ? diffOf(s, target) : undefined));
 
-  const entries = useTranscriptStore((s) => (scope === 'turn' ? s.entries : null));
+  // Last turn: the store key holding the turn, then the turn's activity entry, which C6 keeps while the turn is
+  // unchanged, so another turn streaming recomputes nothing here; the receipt is read with it.
+  const turnKey = useTranscriptStore((s) => (scope === 'turn' && turnId !== null ? turnKeyOf(s.entries, appSessionId, turnId) : null));
+  const activity = useTranscriptStore((s): TurnActivity | null => (turnKey !== null ? (s.activity(turnKey).find((a) => a.turnId === turnId) ?? null) : null));
   const turn = useMemo(() => {
-    if (!entries || turnId === null) return null;
-    const key = turnKeyOf(entries, appSessionId, turnId);
-    if (key === null) return null;
-    const activity: TurnActivity | null = useTranscriptStore.getState().activity(key).find((a) => a.turnId === turnId) ?? null;
-    return { receipt: receiptOf(entries[key].rows, turnId), activity };
-  }, [entries, appSessionId, turnId]);
+    if (turnKey === null || turnId === null) return null;
+    const entry = useTranscriptStore.getState().entries[turnKey];
+    return entry ? { receipt: receiptOf(entry.rows, turnId), activity } : null;
+  }, [turnKey, turnId, activity]);
 
   const list = useMemo<ReviewList>(() => {
     if (scope === null) return { phase: 'pending' };

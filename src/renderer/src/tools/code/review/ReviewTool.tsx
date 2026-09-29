@@ -42,16 +42,18 @@ export function ReviewIcon({ className }: { className?: string }) {
 function ReviewBody({ state, ctx }: { state: ReviewState; ctx: PanelToolContext }) {
   const { ui } = state;
   const shown = ctx.appSessionId;
-  // A pinned tool shown for another session starts over there; an open() waiting is applied after that. The shell
-  // renders only once both are settled, so no read is made for a scope about to change.
-  const synced = useStore(ui, (s) => s.session === shown && s.request === null);
+  // A pinned tool shown for another session starts over there; an open() waiting is applied after that. A new session
+  // renders nothing until then, so no read is made for its old scope; the same session keeps its shell mounted while
+  // an open() re-targets it (the shell decides no default while the request waits).
+  const synced = useStore(ui, (s) => s.session === shown);
+  const requested = useStore(ui, (s) => s.request !== null);
   useEffect(() => {
     const current = ui.getState();
     const next: Partial<ReviewUi> = current.session === shown ? {} : forSession(shown);
     const merged = { ...current, ...next };
     if (merged.request) Object.assign(next, applyRequest(merged, merged.request));
     if (Object.keys(next).length > 0) ui.setState(next);
-  }, [ui, shown, synced]);
+  }, [ui, shown, synced, requested]);
 
   if (shown === null || ctx.session === null) {
     return <p className="flex h-full items-center justify-center p-4 text-center text-ui text-fg-muted">{REVIEW_COPY.noSession}</p>;

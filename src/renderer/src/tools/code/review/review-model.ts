@@ -225,6 +225,8 @@ export interface ReviewFile {
   added: number;
   removed: number;
   hunks: string[] | null; // null: none to show (untracked, binary), or not fetched yet (a scope past its cap)
+  blocks: number[]; // how many of `hunks` each diff block holds, in order: one block for a git scope's file, one per edit for Last turn
+  header: string | null; // the patch block's lines before its hunks (what a binary's viewed mark signs)
 }
 
 const joinPath = (root: string, path: string): string => (path.startsWith('/') ? path : `${root.replace(/\/+$/, '')}/${path}`);
@@ -249,13 +251,15 @@ export function gitScopeFiles(input: {
       added: file.binary ? 0 : file.insertions,
       removed: file.binary ? 0 : file.deletions,
       hunks: kind === 'binary' ? null : input.patch ? (split?.hunks ?? []) : null,
+      blocks: kind !== 'binary' && split && split.hunks.length > 0 ? [split.hunks.length] : [],
+      header: split?.header ?? null,
     };
   });
   if (input.scope === 'uncommitted' && input.status) {
     const listed = new Set(rows.map((row) => row.path));
     for (const entry of input.status.files) {
       if (!entry.untracked || listed.has(entry.path)) continue;
-      rows.push({ path: entry.path, oldPath: null, openPath: joinPath(input.repoRoot, entry.path), kind: 'untracked', added: 0, removed: 0, hunks: null });
+      rows.push({ path: entry.path, oldPath: null, openPath: joinPath(input.repoRoot, entry.path), kind: 'untracked', added: 0, removed: 0, hunks: null, blocks: [], header: null });
     }
   }
   return rows;
@@ -264,20 +268,47 @@ export function gitScopeFiles(input: {
 const RECEIPT_KIND: Record<ChangedFile['change'], ReviewFileKind> = { create: 'added', update: 'modified', delete: 'deleted' };
 
 // Last turn: the receipt's files, counts and kinds; each file's hunks from the turn's `edited` activity entries joined
-// on the edit's own `filePath` (as the receipt reads it), several edits of one file concatenated in their order.
+// on the edit's own `filePath` (as the receipt reads it), one block per edit in their order, since each edit's hunks
+// are numbered against the file as that edit found it (amended 2026-09-29, M3 review).
 export function turnScopeFiles(receipt: readonly ChangedFile[], activity: TurnActivity | null): ReviewFile[] {
-  const hunksOf = new Map<string, string[]>();
+  const edits = new Map<string, string[][]>();
   for (const entry of activity?.files ?? []) {
-    if (entry.use !== 'edited' || !entry.edit) continue;
-    const list = hunksOf.get(entry.edit.filePath) ?? [];
-    list.push(...entry.edit.hunks.map(hunkText));
-    hunksOf.set(entry.edit.filePath, list);
+    if (entry.use !== 'edited' || !entry.edit || entry.edit.hunks.length === 0) continue;
+    const list = edits.get(entry.edit.filePath) ?? [];
+    list.push(entry.edit.hunks.map(hunkText));
+    edits.set(entry.edit.filePath, list);
   }
   return receipt.map((file) => {
     const kind = RECEIPT_KIND[file.change];
-    return { path: file.path, oldPath: null, openPath: kind === 'deleted' ? null : file.path, kind, added: file.added, removed: file.removed, hunks: hunksOf.get(file.path) ?? [] };
+    const blocks = edits.get(file.path) ?? [];
+    return {
+      path: file.path,
+      oldPath: null,
+      openPath: kind === 'deleted' ? null : file.path,
+      kind,
+      added: file.added,
+      removed: file.removed,
+      hunks: blocks.flat(),
+      blocks: blocks.map((block) => block.length),
+      header: null,
+    };
   });
 }
+
+// `hunks` cut into its blocks.
+export function blocksOf(hunks: readonly string[], sizes: readonly number[]): string[][] {
+  const out: string[][] = [];
+  let at = 0;
+  for (const size of sizes) {
+    out.push(hunks.slice(at, at + size));
+    at += size;
+  }
+  return out;
+}
+
+// What a viewed mark signs: a binary's header (its `index` line names both blobs), else the hunks drawn.
+export const viewedSignature = (file: Pick<ReviewFile, 'kind' | 'header'>, hunks: readonly string[] | null): string =>
+  hunksSignature(file.kind === 'binary' ? [file.header ?? ''] : (hunks ?? []));
 
 // The receipt row of a turn in a transcript's rows.
 export function receiptOf(rows: readonly Row[], turnId: TurnId): Extract<Row, { kind: 'receipt' }> | null {

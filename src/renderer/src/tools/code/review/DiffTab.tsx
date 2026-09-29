@@ -14,14 +14,22 @@ import { createReviewUi, type ReviewUi } from './view-state';
 
 type DiffTabRef = Extract<TabRef, { kind: 'diff' }>;
 
-// One view state per diff tab, created on first render and dropped once the layout no longer holds the tab.
+// One view state per diff tab, created on first render and dropped as soon as the layout no longer holds the tab, so a
+// tab closed and opened again starts from its ref.
 const views = new Map<string, StoreApi<ReviewUi>>();
+let following: (() => void) | null = null;
+
+function prune(): void {
+  const open = new Set(useLayout.getState().main.panes.flatMap((pane) => pane.tabs.map((t) => t.id)));
+  for (const id of views.keys()) if (!open.has(id)) views.delete(id);
+}
 
 function viewOf(tab: DiffTabRef, ref: NonNullable<ReturnType<typeof parseRef>>): StoreApi<ReviewUi> {
+  following ??= useLayout.subscribe((state, prev) => {
+    if (state.main !== prev.main) prune();
+  });
   let view = views.get(tab.id);
   if (!view) {
-    const open = new Set(useLayout.getState().main.panes.flatMap((pane) => pane.tabs.map((t) => t.id)));
-    for (const id of views.keys()) if (!open.has(id)) views.delete(id);
     view = createReviewUi({ session: tab.appSessionId });
     view.setState({ scope: ref.scope, turnId: ref.turnId, selected: ref.path });
     views.set(tab.id, view);

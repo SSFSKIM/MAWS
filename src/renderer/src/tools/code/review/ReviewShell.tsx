@@ -5,7 +5,7 @@
 // stylesheet and the highlighter) loads on first use under the `Loading` fallback (ruled 2026-09-29, O2), while the
 // list and the header draw at once. Review reads no file bytes (K4): an untracked file is a row without hunks that
 // offers the viewer.
-import { lazy, Suspense, useEffect, useRef } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef } from 'react';
 import { useStore } from 'zustand';
 import type { StoreApi } from 'zustand/vanilla';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -14,8 +14,8 @@ import { REFUSAL, REVIEW_COPY } from '../copy';
 import { openFile } from '../open-file';
 import { useViewer } from '../viewer/viewer-store';
 import '../code.css';
-import { defaultScope, firstChangedLine, tooLarge, totals, type ReviewFile, type ReviewScope } from './review-model';
-import { fileDiffOf, useReview, useReviewData, type ReviewData } from './review-store';
+import { blocksOf, defaultScope, firstChangedLine, tooLarge, totals, viewedSignature, type ReviewFile, type ReviewScope } from './review-model';
+import { diffOf, fileDiffOf, useReview, useReviewData, type DiffTarget, type ReviewData, type ReviewStore } from './review-store';
 import { decide, isViewed, selectFile, selectScope, toggleViewed, viewedKey, type ReviewUi } from './view-state';
 
 const ReviewView = lazy(() => import('./ReviewView'));
@@ -43,16 +43,17 @@ export function ReviewShell({ appSessionId, directory, ui, chips, focusRequest =
   const scope = useStore(ui, (s) => s.scope);
   const turnId = useStore(ui, (s) => s.turnId);
   const redecide = useStore(ui, (s) => s.redecide);
+  const requested = useStore(ui, (s) => s.request !== null); // an open() the tool applies next: decide nothing before it
   const data = useReviewData({ appSessionId, directory, scope, turnId });
   const files = data.list.phase === 'ready' ? data.list.files : null;
 
   // The default scope, once the status and This branch's availability are known (a new tool, a pinned tool's new
   // session, an open() with no scope), or once the watch failed; never on a later change, so a chosen scope stays.
   useEffect(() => {
-    if (scope !== null && redecide === null) return;
+    if (requested || (scope !== null && redecide === null)) return;
     if (data.status === null ? !data.gitFailed : !data.branch.settled) return;
     ui.setState((s) => decide(s, defaultScope(data.status, data.branch.base !== null)));
-  }, [scope, redecide, data.status, data.gitFailed, data.branch, ui]);
+  }, [requested, scope, redecide, data.status, data.gitFailed, data.branch, ui]);
 
   // The selection follows the list: a requested path is matched by its identity or its absolute path; a file gone from
   // a refreshed list gives way to the first; a path outside the repository stays, to be shown refused.
@@ -91,7 +92,7 @@ export function ReviewShell({ appSessionId, directory, ui, chips, focusRequest =
         </p>
       ) : files ? (
         <>
-          <FileList files={files} selected={file?.path ?? null} ui={ui} viewedKey={key} />
+          <FileList files={files} selected={file?.path ?? null} ui={ui} viewedKey={key} target={data.target} />
           {file ? <FileSection file={file} files={files} ui={ui} appSessionId={appSessionId} data={data} viewedKey={key} /> : null}
           {refused && selected !== null ? <RefusedPath path={selected} /> : null}
         </>
@@ -169,12 +170,20 @@ function CheckIcon() {
   );
 }
 
-function FileList({ files, selected, ui, viewedKey: key }: { files: readonly ReviewFile[]; selected: string | null; ui: StoreApi<ReviewUi>; viewedKey: string }) {
+// A file's hunks: its own, or those fetched for it when its scope is past the cap.
+function hunksOf(file: ReviewFile, target: DiffTarget | null, fetched: Pick<ReviewStore, 'files'>): string[] | null {
+  if (file.hunks !== null || target === null) return file.hunks;
+  const load = fileDiffOf(fetched, target, file.path);
+  return load?.status === 'ok' ? (load.file?.hunks ?? []) : null;
+}
+
+function FileList({ files, selected, ui, viewedKey: key, target }: { files: readonly ReviewFile[]; selected: string | null; ui: StoreApi<ReviewUi>; viewedKey: string; target: DiffTarget | null }) {
   const marks = useStore(ui, (s) => s.viewed);
+  const fetched = useReview((s) => s.files);
   return (
     <ul role="listbox" aria-label={REVIEW_COPY.title} className="max-h-[40%] shrink-0 overflow-y-auto border-b border-border py-1">
       {files.map((file) => {
-        const viewed = isViewed(marks, key, file);
+        const viewed = isViewed(marks, key, file.path, viewedSignature(file, hunksOf(file, target, { files: fetched })));
         return (
           <li key={file.path} role="option" aria-selected={file.path === selected}>
             <button
@@ -210,11 +219,15 @@ function FileSection({ file, files, ui, appSessionId, data, viewedKey: key }: { 
   const target = data.target;
   const fetch = file.hunks === null && file.kind !== 'untracked' && file.kind !== 'binary' && target !== null;
   const fetched = useReview((s) => (fetch && target ? fileDiffOf(s, target, file.path) : undefined));
+  // Keyed on the scope's diff too: a re-read of the scope drops the per-file loads, and the selected file asks again.
+  const scopeDiff = useReview((s) => (fetch && target ? diffOf(s, target) : undefined));
   useEffect(() => {
     if (fetch && target) useReview.getState().loadFile(target, file.path);
-  }, [fetch, target, file.path]);
-  const hunks = file.hunks ?? (fetched?.status === 'ok' ? (fetched.file?.hunks ?? []) : null);
-  const shown = hunks === null ? file : { ...file, hunks };
+  }, [fetch, target, file.path, scopeDiff]);
+  const hunks = useMemo(() => file.hunks ?? (fetched?.status === 'ok' ? (fetched.file?.hunks ?? []) : null), [file.hunks, fetched]);
+  // Stable while the file's hunks are, so the diff body does not re-parse on every render.
+  const blocks = useMemo(() => (hunks === null ? [] : blocksOf(hunks, file.hunks === null ? [hunks.length] : file.blocks)), [hunks, file.hunks, file.blocks]);
+  const signature = viewedSignature(file, hunks);
   const large = hunks !== null && tooLarge({ hunks });
   const count = hunks === null || large ? 0 : hunks.length;
   const hunk = Math.min(current, Math.max(0, count - 1));
@@ -224,7 +237,7 @@ function FileSection({ file, files, ui, appSessionId, data, viewedKey: key }: { 
   const open = (line: number | null) => file.openPath !== null && openFile(appSessionId, file.openPath, line);
   const goHunk = (next: number) => ui.setState((s) => ({ hunk: next, navigate: s.navigate + 1 }));
   const goFile = (next: ReviewFile) => ui.setState((s) => ({ ...selectFile(next.path), navigate: s.navigate + 1 }));
-  const viewed = isViewed(marks, key, shown);
+  const viewed = isViewed(marks, key, file.path, signature);
 
   return (
     <section data-review-file={file.path} className="flex min-h-0 flex-1 flex-col">
@@ -232,8 +245,8 @@ function FileSection({ file, files, ui, appSessionId, data, viewedKey: key }: { 
         <span data-review-file-header className="min-w-0 flex-1 truncate text-ui-sm text-fg" title={file.path}>
           {REVIEW_COPY.fileHeader(file.path, kindLabel(file))}
         </span>
-        {file.kind !== 'untracked' && hunks !== null ? (
-          <button type="button" className={toggle} aria-pressed={viewed} onClick={() => ui.setState((s) => toggleViewed(s, key, shown))}>
+        {file.kind === 'binary' || (file.kind !== 'untracked' && hunks !== null) ? (
+          <button type="button" className={toggle} aria-pressed={viewed} onClick={() => ui.setState((s) => toggleViewed(s, key, file.path, signature))}>
             {viewed ? REVIEW_COPY.viewed : REVIEW_COPY.markViewed}
           </button>
         ) : null}
@@ -303,7 +316,7 @@ function FileSection({ file, files, ui, appSessionId, data, viewedKey: key }: { 
         <Suspense fallback={<Loading />}>
           <ReviewView
             key={file.path}
-            file={{ path: file.path, oldPath: file.oldPath, hunks }}
+            file={{ path: file.path, oldPath: file.oldPath, blocks }}
             mode={mode}
             wrap={wrap}
             hunk={hunk}
