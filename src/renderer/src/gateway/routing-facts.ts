@@ -21,7 +21,8 @@ export interface RoutingFacts {
   refusal: string | null; // why no switch is offered, when a reason is worth saying (held elsewhere, archived)
 }
 
-function refusalOf(record: SessionRecord): string | null {
+// Why a session's route cannot be switched from here (held elsewhere, archived); null when it can.
+export function switchRefusal(record: SessionRecord): string | null {
   if (record.archived) return ROUTE.archived;
   if (record.holder.kind === 'terminal' || record.holder.kind === 'background_job') return ROUTE.held(ROUTE.holders[record.holder.kind]);
   return null;
@@ -55,7 +56,7 @@ export function routingFacts(record: SessionRecord, status: EngineSessionStatus 
     line = record.gateway.routed ? ROUTE.lastRouted : ROUTE.lastDirect;
   }
 
-  const refusal = refusalOf(record);
+  const refusal = switchRefusal(record);
   // D-19: the relay is the default, so `Switch to gateway…` is always offered; `offerDirect` hides only the other.
   const offered: Route[] = route === 'gateway' ? ['direct'] : route === 'direct' ? ['gateway'] : ['gateway', 'direct'];
   const targets = refusal !== null ? [] : offered.filter((t) => t === 'gateway' || settings.gateway.offerDirect);
