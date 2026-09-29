@@ -950,17 +950,17 @@ test.describe('the product host over a scenario derived from C5’s records', ()
       // C9's Terminal is registered from App.tsx (C8a's block, since C9 merged); every other P0 tool arrives with its child.
       await expect(environment.getByRole('button', { name: 'Arrives with C8c' }), 'Review').toBeDisabled();
       await expect(environment.getByRole('button', { name: 'Arrives with C11' }), 'the model row').toBeDisabled();
-      // C8b start: Subagents registers with C8b's M2 and fills its own section (its Open enabled); Background work
-      // still arrives with C8b's M3.
+      // C8b start: Subagents (M2) and Background work (M3) register from C8b's block and fill their own sections, each
+      // with its Open enabled; the Log registers too but is never offered from "+" (menu: false).
       await expect(summary.getByRole('region', { name: 'Subagents' }).getByRole('button', { name: 'Open' })).toBeEnabled();
+      await expect(summary.getByRole('region', { name: 'Background work' }).getByRole('button', { name: 'Open' })).toBeEnabled();
       // C8b end
-      await expect(summary.getByRole('region', { name: 'Background work' }).getByRole('button', { name: 'Arrives with C8b' })).toBeDisabled();
       const disabled = await summary.locator('button:disabled').allTextContents();
-      expect(disabled).toHaveLength(3); // C8b: Subagents' is no longer among them
+      expect(disabled).toHaveLength(2); // C8b: neither Subagents' nor Background work's is among them
       for (const text of disabled) expect(text).toMatch(/^Arrives with (C8b|C8c|C9|C11)$/);
 
       await panel.getByRole('button', { name: 'Add a tool' }).click();
-      await expect(page.getByRole('menuitem'), '"+" offers the registered tools only').toHaveText(['Subagents', 'Terminal']); // C8b: Subagents first by MENU_ORDER
+      await expect(page.getByRole('menuitem'), '"+" offers the registered tools only').toHaveText(['Subagents', 'Terminal', 'Background work']); // C8b: by MENU_ORDER; Log is menu: false
       await page.keyboard.press('Escape');
       expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
     });
