@@ -1,5 +1,5 @@
 import { act, cleanup, render, screen, within } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'; // C7: vi
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge, SessionDigest } from '@shared/ipc/schema';
 import { digest, record } from '../../../../test/support/builders';
@@ -102,14 +102,23 @@ describe('status line', () => {
     render(<SessionPane appSessionId={idOf('Fix sidebar drag')} paneIndex={0} />);
     expect(statusButtons().map((b) => b.textContent)).toEqual(['/private/tmp/maws-probe-qqboLh', 'ctx —', '5h —', '7d —', '$—', 'auto']);
     expect(statusButtons()[0].className).toContain('font-mono');
-    expect(statusButtons().every((b) => !b.hasAttribute('aria-haspopup'))).toBe(true);
+    expect(statusButtons().every((b) => b.getAttribute('aria-haspopup') === 'dialog')).toBe(true); // C7: every field opens its popover
   });
 
   it('shows context of the model’s window, the usage windows and the total cost', () => {
-    useUsage.setState({ windows: { fiveHour: { percent: 74, resetsAt: '2026-09-28T13:00:00Z' }, sevenDay: { percent: 82, resetsAt: '2026-10-01T00:00:00Z' } } });
-    render(<SessionPane appSessionId={idOf('Charter + research')} paneIndex={0} />);
-    expect(statusButtons().map((b) => b.textContent).slice(1)).toEqual(['ctx 41% of 200k', '5h 74%', '7d 82%', '$0.07', 'default']);
+    // C7 start: the windows carry their reading time and reset countdown (mockup 04: `5h 74% ↻2h37m`)
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(Date.parse('2026-09-28T10:23:00Z'));
+    const window = (percent: number, resetsAt: string) => ({ percent, resetsAt, recordedAt: '2026-09-28T10:20:00Z' });
+    useUsage.setState({ windows: { fiveHour: window(74, '2026-09-28T13:00:00Z'), sevenDay: window(82, '2026-10-04T07:23:00Z'), scoped: [] } });
+    const id = idOf('Charter + research'); // the scenario has it direct; routed, it shows the drain target's windows
+    const direct = useSessions.getState().records.get(id)!;
+    useSessions.setState({ records: new Map(useSessions.getState().records).set(id, { ...direct, gateway: { ...direct.gateway, routed: true } }) });
+    render(<SessionPane appSessionId={id} paneIndex={0} />);
+    expect(statusButtons().map((b) => b.textContent).slice(1)).toEqual(['ctx 41% of 200k', '5h 74% ↻2h37m', '7d 82% ↻5d21h', '$0.07', 'default']);
     useUsage.setState({ windows: null });
+    vi.useRealTimers();
+    // C7 end
   });
 
   it('marks context past the auto-compact threshold', () => {

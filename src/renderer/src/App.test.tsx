@@ -85,6 +85,10 @@ function fakeMain(initial: SettingsState['settings']['theme']) {
       case 'session.setVisible':
         return undefined;
       // C5 end
+      // C7 start: the status line's shared ClaudeUsage read (none installed here)
+      case 'settings.usage':
+        return { available: false, dataDir: '/nowhere', readAt: '2026-09-28T10:00:00.000Z', error: 'absent', drainTarget: null, drainTargetIsManual: false, accounts: [], pinsFor: {} };
+      // C7 end
       case 'pty.spawn':
         return { ptyId: 'p1', pid: 3333 };
       case 'pty.write':
