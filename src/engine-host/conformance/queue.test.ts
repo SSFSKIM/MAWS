@@ -163,7 +163,7 @@ describe('queue release never follows an engine-initiated turn', () => {
     expect((run.journal.rows[cancelled]!.frame as { command_uuid: string }).command_uuid).toBe(submitted!.uuid);
     const notice = run.journal.rows[cancelled + 1]!.frame as { event: string; key: string };
     expect(notice).toMatchObject({ event: 'notice', key: expect.stringMatching(/^queue:interrupted:/) }); // at the lifecycle, not at the exit
-    expect(ofKind(run.events, 'notice.posted').filter((e) => e.key.startsWith('queue:interrupted:'))).toHaveLength(1);
+    expect(ofKind(run.events, 'notice.posted').filter((e) => e.key?.startsWith('queue:interrupted:'))).toHaveLength(1);
     expect(userOuts(run.journal.rows).map((f) => f.message.content)).toEqual([contentOf(run.fixture, 146), 'again']);
     expect(run.rebuilt()).toEqual(run.events);
   });
