@@ -530,7 +530,7 @@ describe('engine host live', () => {
         finding = `rewind_files dry run answered ${JSON.stringify(dry.message)}${variant ? ' with fileCheckpointingEnabled: true as well' : ''}`;
         return;
       }
-      expect(dry).toEqual({ ok: true, enabled: true, dryRun: true, changedFiles: [notes], insertions: 1, deletions: 1, skippedLinks: null });
+      expect(dry).toEqual({ ok: true, enabled: true, message: null, dryRun: true, changedFiles: [notes], insertions: 1, deletions: 1, skippedLinks: null });
       const out = await host.call('session.rewind', { appSessionId: s.id, targetMessageUuid: second.messageUuid!, lastSeenMessageUuid: second.messageUuid!, files: true });
       const boundary = await s.wait('boundary.rewind', 'the boundary', () => true, 5_000);
       const onDisk = readFileSync(notes, 'utf8');

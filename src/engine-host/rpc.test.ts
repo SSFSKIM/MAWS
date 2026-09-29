@@ -240,6 +240,22 @@ describe('control client ids, timeouts, cancellation', () => {
     expect(journal.rows.map((r) => r.direction)).toEqual(['out', 'out']);
   });
 
+  it("the engine's --replay-user-messages echo of our own answer is consumed silently; a stranger still warns (M6)", async () => {
+    const { transport } = fakeTransport();
+    const warn = vi.fn();
+    const client = new ControlClient(transport, fakeJournal(), 'LAUNCH01', { warn });
+    const answer = { behavior: 'allow', updatedInput: { command: 'git log --oneline' } };
+    await client.respond('ae9d76b0' as never, answer);
+    await client.respondError('b2dd2089' as never, 'no such dialog');
+    // the live run's shape (a live 3.3 journal: our answer out, then the same envelope in)
+    client.observe(success('ae9d76b0', answer));
+    client.observe({ type: 'control_response', response: { subtype: 'error', request_id: 'b2dd2089', error: 'no such dialog' } });
+    expect(warn).not.toHaveBeenCalled();
+    client.observe(success('ae9d76b0', answer)); // a second echo of the same answer is not expected
+    client.observe(success('never-sent'));
+    expect(warn.mock.calls.map(([m]) => m)).toEqual(['control_response for unknown request ae9d76b0', 'control_response for unknown request never-sent']);
+  });
+
   it('dispatches inbound requests and cancellations to their handlers and ignores other frames', () => {
     const { transport } = fakeTransport();
     const client = new ControlClient(transport, fakeJournal(), 'LAUNCH01');

@@ -16,6 +16,7 @@ export { REQUEST_TIMEOUT_MS };
 export type { RequestClass };
 
 export const LATE_TABLE_MS = 60_000;
+const ANSWERED_KEPT = 1_000; // answers awaiting their echo; an echo follows its answer within milliseconds
 
 export type { JournalSink };
 export { writeFailedMeta } from './outbound-writer';
@@ -73,6 +74,10 @@ export class ControlClient {
   private readonly inboundHandlers: ((req: ControlRequestFrame) => void)[] = [];
   private readonly cancelHandlers: ((requestId: RequestId) => void)[] = [];
   private readonly lateHandlers: ((late: LateResponse) => void)[] = [];
+  // Inbound requests we answered, whose answer the engine echoes back on stdout under `--replay-user-messages` ("under
+  // it the transport also echoes inbound control_response frames", SPEC A4 glossary; first seen live in M6, 3.3's
+  // journal, our answer out then the same envelope in). The echo is consumed here, once, instead of warning as unknown.
+  private readonly answered = new Set<string>();
   private closed: string | null = null;
   private readonly warn: (message: string) => void;
   readonly writer: OutboundWriter;
@@ -166,10 +171,12 @@ export class ControlClient {
   // answer note), so a failed write leaves nothing behind; `flushed` runs right after that row, before any inbound
   // frame the session held during the write is processed.
   respond(requestId: RequestId, response: unknown, opts: WriteOptions = {}): Promise<void> {
+    this.noteAnswered(requestId);
     return this.writer.write({ type: 'control_response', response: { subtype: 'success', request_id: requestId, response } }, opts);
   }
 
   respondError(requestId: RequestId, error: string): Promise<void> {
+    this.noteAnswered(requestId);
     return this.writer.write({ type: 'control_response', response: { subtype: 'error', request_id: requestId, error } });
   }
 
@@ -203,6 +210,7 @@ export class ControlClient {
         for (const handler of this.lateHandlers) handler({ requestId: envelope.request_id as RequestId, subtype: late.subtype, response: envelope });
         return;
       }
+      if (this.answered.delete(envelope.request_id)) return; // the echo of our own answer
       this.warn(`control_response for unknown request ${envelope.request_id}`);
     } else if (f.type === 'control_request') {
       for (const handler of this.inboundHandlers) handler(frame as ControlRequestFrame);
@@ -230,6 +238,11 @@ export class ControlClient {
     if (entry.timer) clearTimeout(entry.timer);
     if (entry.signal && entry.onAbort) entry.signal.removeEventListener('abort', entry.onAbort);
     return entry;
+  }
+
+  private noteAnswered(requestId: string): void {
+    this.answered.add(requestId);
+    if (this.answered.size > ANSWERED_KEPT) this.answered.delete(this.answered.values().next().value!); // oldest first
   }
 
   private park(requestId: string, subtype: string): void {
