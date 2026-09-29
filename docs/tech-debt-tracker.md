@@ -13,7 +13,6 @@ After each merge the architect triages every row into one of three bins. A row n
 
 | Logged | Owner | Item | Evidence | Closes when |
 |---|---|---|---|---|
-| 2026-09-28 | C5 | `panel.<appSessionId>` layout key is never deleted from `layout.json` when its session is removed. | C5 hand-back residue 3 (branch e014fd1; still open at the rebase hand-back 84214e2). | C8a deletes the key on `session.removed` and pins it. |
 | 2026-09-28 | C5 | Palette "reveal project" may lose focus to the dialog close; not reproduced. | C5 hand-back residue 4. | Reproduced and fixed, or closed as not reproducible after C7's palette work lands. |
 | 2026-09-28 | C5 | 960 px minimum window with a 480 px sidebar and a 640 px panel leaves the main area 0 px wide. | C5 hand-back residue 5. | Region bounds clamp against the window width (C12 finish). |
 | 2026-09-28 | C5 | `will-quit` order: C4's block closes the index before C5's `sessions.stop()` stops the index source that reads it; harmless while both are synchronous. | C5 rebase re-check, Minor left as debt (84214e2). | The source stops from the same `will-quit` handler that closes the index, or the index close is moved after `sessions.stop()`; C10's execution (it edits both blocks) or C12 finish. |

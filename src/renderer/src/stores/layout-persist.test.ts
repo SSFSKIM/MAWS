@@ -113,6 +113,16 @@ describe('layout persistence', () => {
     ]);
   });
 
+  it('drops a pending write of a removed session’s panel key, which main deletes', async () => {
+    const { store, hydrate, sets } = setup({ 'panel.app-a': { tabs: [{ id: 't1', toolId: 'files', pinned: false }], activeTabId: 't1' } });
+    await hydrate((id) => id === A);
+    store.getState().updatePanelTabs(A, (refs) => [...refs, { id: 't2', toolId: 'terminal', pinned: false }]);
+    store.getState().dropSession(A); // session.removed before the write went out
+    vi.advanceTimersByTime(1000);
+    window.dispatchEvent(new Event('beforeunload'));
+    expect(sets().filter((s) => s.key.startsWith('panel.'))).toEqual([]);
+  });
+
   it('flushes a pending write on beforeunload', async () => {
     const { store, hydrate, sets } = setup();
     await hydrate();

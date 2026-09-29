@@ -20,7 +20,7 @@ import { GitService } from './git/service';
 // C4 end
 // C5 start (emit comes with C3's imports)
 import { startAttention } from './attention';
-import { LayoutFileStore, registerLayoutHandlers } from './layout/store';
+import { dropPanelKeysOfRemovedSessions, LayoutFileStore, registerLayoutHandlers } from './layout/store';
 import { askToQuit, installQuitGuard } from './lifecycle/quit-guard';
 import { registerMenuHandlers, startMenu } from './menu';
 import { registerOpenExternal } from './open-external';
@@ -88,6 +88,7 @@ app.whenReady().then(() => {
   // A relative scenario path is the repository's: the working directory of `pnpm dev`, `pnpm dev:stub` and the smoke's
   // launch alike (`app.getAppPath()` is `out/main` when the built app is launched by file, as the smoke does).
   const sessions = startSessions({ env: process.env, packaged: app.isPackaged, appRoot: process.cwd(), hosts, indexSource });
+  dropPanelKeysOfRemovedSessions(sessions.model, layout);
   app.on('will-quit', () => {
     layout.flush();
     sessions.stop();

@@ -2,7 +2,10 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'n
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { LayoutFileStore } from './store';
+import type { AppSessionId } from '@shared/graph/ids';
+import { record } from '../../../test/support/builders';
+import { SessionReadModel, type ReadModelWriter } from '../sessions/read-model';
+import { dropPanelKeysOfRemovedSessions, LayoutFileStore } from './store';
 
 // A disk that fills up on demand: while `diskFull` is set, every write the store makes fails with ENOSPC.
 const disk = vi.hoisted(() => ({ full: false }));
@@ -96,5 +99,42 @@ describe('layout file store', () => {
     const store = new LayoutFileStore(file);
     disk.full = true;
     expect(() => store.set('regions', { width: 240 })).toThrow(/ENOSPC/);
+  });
+});
+
+describe('a removed session’s panel key', () => {
+  it('leaves layout.json when the read model sees the session removed, and only that key', () => {
+    const store = new LayoutFileStore(file);
+    const model = new SessionReadModel('index');
+    let writer!: ReadModelWriter;
+    model.register({ start: (w) => ((writer = w), () => {}) });
+    dropPanelKeysOfRemovedSessions(model, store);
+    const panel = { tabs: [{ id: 't1', toolId: 'files', pinned: false }], activeTabId: 't1' };
+    store.set('panel.app-a', panel);
+    store.set('panel.app-b', panel);
+    store.set('panel.pinned', []);
+    writer.observeRecord(record('app-a'));
+    writer.observeRecord(record('app-b'));
+    writer.observeRecord(record('app-a', { pinned: true })); // a change is not a removal
+    expect(store.get('panel.app-a')).toEqual(panel);
+
+    writer.observeRemoved('app-a' as AppSessionId);
+    expect(store.list().sort()).toEqual(['panel.app-b', 'panel.pinned']);
+    expect(Object.keys(JSON.parse(readFileSync(file, 'utf8'))).sort()).toEqual(['panel.app-b', 'panel.pinned']);
+    writer.observeRemoved('app-c' as AppSessionId); // no key of its own: nothing to write
+    expect(new LayoutFileStore(file).list().sort()).toEqual(['panel.app-b', 'panel.pinned']);
+  });
+
+  it('a failed delete is logged, never thrown into the read model', () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const store = new LayoutFileStore(file);
+    const model = new SessionReadModel('index');
+    let writer!: ReadModelWriter;
+    model.register({ start: (w) => ((writer = w), () => {}) });
+    dropPanelKeysOfRemovedSessions(model, store);
+    store.set('panel.app-a', { tabs: [], activeTabId: null });
+    disk.full = true;
+    expect(() => writer.observeRemoved('app-a' as AppSessionId)).not.toThrow();
+    expect(String(error.mock.calls[0][0])).toContain('panel.app-a');
   });
 });
