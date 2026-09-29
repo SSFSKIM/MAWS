@@ -4,7 +4,7 @@ import { GitChangedSchema, type GitChanged, type GitStatus } from '@shared/ipc/s
 import { GitFixture } from '../../../test/support/git-fixture';
 import { GitTimeoutError } from './runner';
 import { GitService } from './service';
-import { classifyCommonPath, classifyGitPath, classifyRootPath, GitWatcher, type WatchFn } from './watcher';
+import { classifyCommonPath, classifyGitPath, classifyRootPath, GitWatcher, INNER_CAP, type WatchFn } from './watcher';
 
 const ROOT = '/repo';
 
@@ -270,6 +270,31 @@ describe('the repository watcher debounces, coalesces and backs off', () => {
     await vi.advanceTimersByTimeAsync(300);
     expect(emitted).toHaveLength(quiet + 2);
     fake.fire(ROOT, 'elsewhere.txt'); // not beneath an untracked directory and not listed: nothing moved
+    await vi.advanceTimersByTimeAsync(300);
+    expect(emitted).toHaveLength(quiet + 2);
+    watcher.dispose();
+  });
+
+  it('keeps facts for at most INNER_CAP files beneath untracked directories, and a touched file beyond them counts as a change', async () => {
+    const fake = fakeWatch();
+    const current = status({ dirty: true, files: [{ path: 'node_modules/', oldPath: null, index: '?', worktree: '?', untracked: true }] });
+    const statFile = vi.fn(async (_path: string) => ({ size: 1, mtimeMs: 1 }));
+    const emitted: GitChanged[] = [];
+    const watcher = new GitWatcher({ status: async () => current, emit: (e) => emitted.push(e), watch: fake.watch, statFile });
+    await watcher.watch(ROOT);
+    await vi.advanceTimersByTimeAsync(300);
+    const file = (i: number) => `node_modules/pkg/f${i}.js`;
+    for (let i = 0; i <= INNER_CAP; i++) fake.fire(ROOT, file(i));
+    statFile.mockClear();
+    const quiet = emitted.length;
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(statFile.mock.calls.filter(([path]) => String(path).includes('/pkg/'))).toHaveLength(INNER_CAP); // the last is not kept
+    expect(emitted).toHaveLength(quiet + 1);
+
+    fake.fire(ROOT, file(0)); // kept, unchanged: silent
+    await vi.advanceTimersByTimeAsync(300);
+    expect(emitted).toHaveLength(quiet + 1);
+    fake.fire(ROOT, file(INNER_CAP)); // beyond the cap: cannot be judged, so it is a change
     await vi.advanceTimersByTimeAsync(300);
     expect(emitted).toHaveLength(quiet + 2);
     watcher.dispose();

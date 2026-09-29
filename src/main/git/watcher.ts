@@ -7,7 +7,8 @@
 // listed file, so a second content write to an already-dirty file emits although its porcelain line is unchanged (C8a's
 // ask), while a save that leaves bytes and mtime as they were is silent. An untracked directory is one porcelain line
 // (`dir/`) whose own mtime moves only when its entries do, so each file an event touched beneath it joins the
-// projection too, for as long as the directory stays listed untracked. Watches are ref-counted per root by the
+// projection too, for as long as the directory stays listed untracked, up to INNER_CAP files per root; a touched file
+// beyond the cap is not kept and counts as a change. Watches are ref-counted per root by the
 // directories each owner (the requesting window) passed, and an owner's are released together when it goes; the first
 // watch of a root emits its status as `initial`.
 import { watch as fsWatch } from 'node:fs';
@@ -35,6 +36,7 @@ export interface GitWatcherDeps {
 }
 
 const DEBOUNCE_MS = 250;
+export const INNER_CAP = 2_000; // files beneath untracked directories whose facts a root keeps (an unignored node_modules)
 const MAX_WAIT_MS = 1000; // the longest a debounce window runs from its first event
 const BACKOFF_MS = 5000; // after a status timeout, until a status succeeds
 // When several kinds of path changed in one window, the event names the weightiest; HEAD moving outranks them all.
@@ -247,12 +249,12 @@ export class GitWatcher {
     root.touched = new Set();
     try {
       const status = await this.deps.status(root.root);
-      const inner = await this.innerFacts(root, status, touched);
+      const { inner, overflow } = await this.innerFacts(root, status, touched);
       const projection = await this.project(status, inner);
       root.inner = inner;
       root.backoff = false;
       root.failing = false;
-      if (root.closed || projection === root.last.projection) return;
+      if (root.closed || (projection === root.last.projection && !overflow)) return;
       const previous = root.last.status;
       const headMoved = status.head !== previous.head || status.branch !== previous.branch;
       root.last = { status, projection };
@@ -275,13 +277,26 @@ export class GitWatcher {
   }
 
   // The files beneath the status's untracked directories: those already known that are still beneath one, and those
-  // the events touched, read afresh.
-  private async innerFacts(root: Root, status: GitStatus, touched: Set<string>): Promise<Map<string, FileFacts | null>> {
+  // the events touched, read afresh (in parallel), while the root keeps fewer than INNER_CAP. `overflow`: a touched file
+  // beyond the cap, whose change cannot be judged, so the pass emits.
+  private async innerFacts(root: Root, status: GitStatus, touched: Set<string>): Promise<{ inner: Map<string, FileFacts | null>; overflow: boolean }> {
     const dirs = status.files.filter((file) => file.untracked && file.path.endsWith('/')).map((file) => file.path);
     const beneath = (rel: string) => dirs.some((dir) => rel.startsWith(dir));
     const inner = new Map([...root.inner].filter(([rel]) => beneath(rel)));
-    for (const rel of touched) if (beneath(rel)) inner.set(rel, await this.statFile(join(status.repoRoot, rel)));
-    return inner;
+    const read: string[] = [];
+    let room = INNER_CAP - inner.size;
+    let overflow = false;
+    for (const rel of touched) {
+      if (!beneath(rel)) continue;
+      if (inner.has(rel)) read.push(rel);
+      else if (room > 0) {
+        read.push(rel);
+        room--;
+      } else overflow = true;
+    }
+    const facts = await Promise.all(read.map((rel) => this.statFile(join(status.repoRoot, rel))));
+    read.forEach((rel, i) => inner.set(rel, facts[i]));
+    return { inner, overflow };
   }
 
   // What a change is judged by: every status fact except the time it was read, plus each listed file's size and mtime
