@@ -1,7 +1,8 @@
 // The composer's prompt history (C7 execution document, Interfaces "X2 additions", `session.history.*`): MAWS's own
 // `<userData>/prompt-history.jsonl`, appended here in the terminal's record shape (`{ display, pastedContents,
 // timestamp, project, sessionId }`), merged with the terminal's `<CLAUDE_CONFIG_DIR>/history.jsonl`, which is only ever
-// read (D-12). Both are read as their last 512 KiB; a torn line is skipped. Rows are this project's (the session
+// read (D-12). The terminal's is read as its last 512 KiB, MAWS's (whose bodies are inline) as its last 8 MiB; a torn
+// line is skipped. Rows are this project's (the session
 // record's directory; every project's when the session has no record yet), merged oldest first by time, de-duplicated
 // on the display and the pasted bodies (the newest copy stays), and capped at the newest `limit`.
 // Pasted bodies: MAWS stores them inline; a terminal row carries its body inline (up to 1024 characters) or as a
@@ -15,7 +16,8 @@ import type { HistoryEntry, PastedContent } from '@shared/composer/history-entry
 import type { AppSessionId } from '@shared/graph/ids';
 import { jsonLines, readTail, type OpenFile } from '../files/read-tail';
 
-export const HISTORY_TAIL_BYTES = 512 * 1024;
+export const HISTORY_TAIL_BYTES = 512 * 1024; // the terminal's file: bodies past 1024 characters live in its paste cache
+export const OWN_HISTORY_TAIL_BYTES = 8 * 1024 * 1024; // MAWS's own file keeps bodies inline (up to 1 MiB each)
 const PASTE_HASH = /^[0-9a-f]{16}$/;
 
 export function claudeConfigDir(env: NodeJS.ProcessEnv, home: string): string {
@@ -48,7 +50,7 @@ export class PromptHistory {
 
   async list(appSessionId: AppSessionId, limit: number): Promise<HistoryEntry[]> {
     const project = this.opts.session(appSessionId)?.directory ?? null;
-    const [own, terminal] = await Promise.all([this.rows(this.opts.file, 'maws'), this.rows(join(this.opts.configDir, 'history.jsonl'), 'terminal')]);
+    const [own, terminal] = await Promise.all([this.rows(this.opts.file, 'maws', OWN_HISTORY_TAIL_BYTES), this.rows(join(this.opts.configDir, 'history.jsonl'), 'terminal', HISTORY_TAIL_BYTES)]);
     const merged = [...terminal, ...own].filter((row) => project === null || row.project === project).sort((a, b) => a.timestamp - b.timestamp);
     const seen = new Set<string>();
     const kept: Row[] = [];
@@ -76,8 +78,8 @@ export class PromptHistory {
     }
   }
 
-  private async rows(path: string, source: Row['source']): Promise<Row[]> {
-    const text = await readTail(path, HISTORY_TAIL_BYTES, this.open);
+  private async rows(path: string, source: Row['source'], tailBytes: number): Promise<Row[]> {
+    const text = await readTail(path, tailBytes, this.open);
     return jsonLines(text ?? '').flatMap((value) => {
       const r = value as { display?: unknown; timestamp?: unknown; project?: unknown; sessionId?: unknown; pastedContents?: unknown };
       if (typeof r.display !== 'string' || typeof r.timestamp !== 'number' || !Number.isFinite(r.timestamp)) return [];

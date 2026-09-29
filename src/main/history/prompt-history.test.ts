@@ -107,6 +107,17 @@ describe('prompt history merges MAWS and terminal sources with bodies', () => {
     expect(await history().list(APP, 200)).toEqual([]);
   });
 
+  it("keeps MAWS's own large pastes: its file is read further back than the terminal's", async () => {
+    const big = 'x'.repeat(700 * 1024); // past the terminal's 512 KiB tail
+    maws([
+      { display: 'older [Pasted text #1 +1 lines]', pastedContents: { '1': { id: 1, type: 'text', content: big, contentHash: null, mediaType: null, filename: null } }, timestamp: at('2026-09-28T09:10:00.000Z'), project: PROJECT, sessionId: null },
+      { display: 'newer', pastedContents: {}, timestamp: at('2026-09-28T09:20:00.000Z'), project: PROJECT, sessionId: null },
+    ]);
+    const own = (await history().list(APP, 200)).filter((e) => e.source === 'maws');
+    expect(own.map((e) => e.display)).toEqual(['older [Pasted text #1 +1 lines]', 'newer']);
+    expect(own[0]!.pastedContents['1']!.content).toBe(big);
+  });
+
   it('reads the configuration directory from CLAUDE_CONFIG_DIR, else ~/.claude', () => {
     expect(claudeConfigDir({ CLAUDE_CONFIG_DIR: '/scratch/claude' }, '/Users/x')).toBe('/scratch/claude');
     expect(claudeConfigDir({}, '/Users/x')).toBe('/Users/x/.claude');
