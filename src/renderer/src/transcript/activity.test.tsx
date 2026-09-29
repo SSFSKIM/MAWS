@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { loadJournal } from '../../../../test/support/fixtures';
 import { journalToEvents } from './dev/replay-stub';
 import { glyphFor, SUBAGENT_GLYPHS, SubagentGlyph, turnActivity, useTranscriptStore } from './index';
+import { turnDerivations } from './model/derive';
 import { BASH_RESULT, builder, task, tool } from './model/test-events';
 import type { TranscriptSource } from './source/types';
 
@@ -100,6 +101,37 @@ describe('turn activity', () => {
     push(finish.events);
     expect(activity()[0]).not.toBe(first);
     expect(activity()[0].subagents).toEqual([expect.objectContaining({ taskId: 'agent-1', status: 'finished_with_errors' })]);
+  });
+
+  it('counts each call of a merged read cell under its own tool name', async () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('r1', 'Read', { file_path: '/p/a.ts' }, 'm1', 0);
+    b.result('r1', 'a');
+    b.toolUse('l1', 'LS', { path: '/p' }, 'm1', 1);
+    b.result('l1', 'a.ts\nb.ts');
+    b.toolUse('n1', 'NotebookRead', { notebook_path: '/p/n.ipynb' }, 'm1', 2);
+    b.result('n1', '{}');
+    b.toolUse('r2', 'Read', { file_path: '/p/b.ts' }, 'm1', 3);
+    b.result('r2', 'b');
+    b.text('m2', 0, 'Done.');
+    b.end(['u1']);
+    const { activity } = await attached(b.events);
+    expect(activity()[0].tools).toEqual([
+      { name: 'Read', category: 'exploration', count: 2 },
+      { name: 'LS', category: 'exploration', count: 1 },
+      { name: 'NotebookRead', category: 'exploration', count: 1 },
+    ]);
+  });
+
+  it('reads the per-turn derivation the rows already made: no second derivation, the same entry while the turn is unchanged', async () => {
+    const { key, activity } = await attached(work().events);
+    useTranscriptStore.getState().rows(key); // the store derived the rows when the batch applied
+    const before = turnDerivations.count;
+    const first = activity()[0];
+    expect(turnDerivations.count).toBe(before);
+    useTranscriptStore.getState().toggleTurn(key, first.turnId); // a ui change re-derives the turn's rows...
+    expect(activity()[0]).toBe(first); // ...and the entry stays
   });
 
   it('excludes child-agent cells: pass1/subagent lists the parent’s agents, not their Read calls', async () => {

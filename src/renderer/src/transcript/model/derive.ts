@@ -10,7 +10,7 @@ import { agentMessageCopy, boundaryCopy, groupSummary, processExitCopy, reconnec
 import { glyphFor } from './glyphs';
 import { collectCells, groupItems, phrasesOf, type WorkItem } from './groups';
 import { cellId, rowId, turnId as turnIdOf } from './keys';
-import type { LiveBlock, TranscriptState, TranscriptUi, TurnState } from './reduce';
+import type { LiveBlock, TranscriptState, TranscriptUi, TurnState, TurnWork } from './reduce';
 import { isEngineOrigin, RECEIPT_APPLIED, type ReceiptUndo } from './reduce';
 import { TOOL_CATEGORIES, type Cell, type ChangedFile, type Row, type RowId, type SubagentRef, type SubagentStatus, type ToolCategory, type TurnId, type TurnSummary } from './rows';
 import { needsSeparator, separatorLabel } from './time';
@@ -115,7 +115,8 @@ export function withAllExpanded(state: TranscriptState): TranscriptState {
 function rowsOfTurn(state: TranscriptState, turn: TurnState): Row[] {
   let memo = state.memo.get(turn.id);
   if (!memo || memo.version !== turn.version || memo.uiVersion !== state.ui.version) {
-    memo = { version: turn.version, uiVersion: state.ui.version, rows: deriveTurn(turn, state).rows };
+    const derived = deriveTurn(turn, state);
+    memo = { version: turn.version, uiVersion: state.ui.version, rows: derived.rows, work: derived.work };
     state.memo.set(turn.id, memo);
   }
   const { receipts, spills } = state.ui;
@@ -143,11 +144,14 @@ interface TurnDerivation {
   rows: Row[]; // as disclosed by the reader's expansion state
   summary: TurnSummary;
   cells: Cell[]; // every cell of the work area, disclosed or not
-  files: ChangedFile[]; // the receipt's files
-  agents: (SubagentRef & { status: SubagentStatus })[]; // every child of the turn's subagent rows, with its own status
+  work: TurnWork; // what the turn did, disclosed or not
 }
 
+// How many per-turn derivations ran (instrumentation: the memo tests pin that readers of the memo derive nothing).
+export const turnDerivations = { count: 0 };
+
 function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivation {
+  turnDerivations.count += 1;
   const ui = state?.ui;
   const expanded = ui ? ui.expandedTurns.has(turn.id) || (turn.state === 'open' && !ui.collapsedTurns.has(turn.id)) : false;
   const context: TurnContext = { closed: turn.state === 'closed', terminalReason: turn.ended?.terminalReason ?? null, lastAt: turn.events.at(-1)?.at ?? turn.startedAt };
@@ -488,13 +492,29 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
       ...receiptFields(RECEIPT_APPLIED), // the reader's undo state is laid over in rowsOfTurn
     });
   }
-  const agents = subagents.flatMap((group) => group.refs.map((ref) => ({ ...ref, status: group.statuses.get(ref.taskId) ?? ('started' as const) })));
-  return { rows, summary, cells, files, agents };
+  return { rows, summary, cells, work: workOf(cells, files, tools, subagents) };
 }
 
-// A turn's work whatever the reader disclosed (the activity projection's input, model/activity.ts).
-export function turnWork(turn: TurnState): Pick<TurnDerivation, 'cells' | 'files' | 'agents'> {
-  return deriveTurn(turn, null);
+// What the turn did whatever was disclosed. Tools are counted per call from the tool records, so the calls a merged
+// read cell folds together (`Read`, `LS`, `NotebookRead`) each count under their own name; thinking and hook cells are
+// no tool calls; child agents' calls live in `children` and never reach here.
+function workOf(cells: Cell[], files: ChangedFile[], tools: Map<ToolUseId, ToolRecord>, subagents: SubagentGroup[]): TurnWork {
+  const filesRead = new Set<string>();
+  for (const cell of cells) if (cell.detail.kind === 'read') for (const file of cell.detail.files) filesRead.add(file.path);
+  const counts = new Map<string, { name: string; category: ToolCategory; count: number }>();
+  for (const { use } of tools.values()) {
+    const tool = counts.get(use.toolName) ?? { name: use.toolName, category: tableRowOf(use.toolName).category, count: 0 };
+    tool.count += 1;
+    counts.set(use.toolName, tool);
+  }
+  const agents = subagents.flatMap((group) => group.refs.map((ref) => ({ ...ref, status: group.statuses.get(ref.taskId) ?? ('started' as const) })));
+  return { filesRead: [...filesRead], filesEdited: files, tools: [...counts.values()], subagents: agents };
+}
+
+// A turn's work, read from the per-turn memo (derived with its rows if the memo is stale).
+export function turnWork(state: TranscriptState, turn: TurnState): TurnWork {
+  rowsOfTurn(state, turn);
+  return state.memo.get(turn.id)!.work;
 }
 
 // ---------------------------------------------------------------------------------------------------------------------

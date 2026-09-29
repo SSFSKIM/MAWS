@@ -415,6 +415,30 @@ describe('child source provenance', () => {
     await expect(snapshot).resolves.toEqual(onDisk(child));
   });
 
+  it('a stream batch carrying an exit from before the child’s start (a replay or backfill of the earlier run) switches nothing', async () => {
+    const { parent, child } = live();
+    const earlier = builder('2026-09-28T09:59:00.000Z').emit('process.exited', { code: 0, signal: null, reason: 'quit', lostAttentionCount: 0 }, { id: 'earlier' });
+    const fake = fakeClient();
+    const source = childSource(fake);
+    const resets = vi.fn();
+    source.onReset!(resets);
+    const store = useTranscriptStore.getState();
+    const hydrated = store.attach(CHILD_KEY, source, { agentId: AGENT });
+    fake.emit('session.eventBatch', batch([earlier])); // buffered: the provenance is not known yet
+    answer(fake, 'session.events', { events: [earlier, ...parent], lastSeq: 9, complete: true }); // the exit, then this child's start
+    await hydrated;
+    fake.emit('session.eventBatch', batch([earlier, child[0]])); // the same old exit again, live
+    await flush();
+    expect(resets).not.toHaveBeenCalled();
+    expect(fake.calls.map((call) => call.name)).toEqual(['session.events']);
+    expect([...useTranscriptStore.getState().entries[CHILD_KEY].state.seen]).toEqual([child[0].id]);
+    // A new exit, after the start, still ends the child.
+    fake.emit('session.eventBatch', batch([builder('2026-09-28T10:00:09.000Z').emit('process.exited', { code: 0, signal: null, reason: 'quit', lostAttentionCount: 0 }, { id: 'later' })]));
+    await flush();
+    expect(resets).toHaveBeenCalledTimes(1);
+    store.detach(CHILD_KEY);
+  });
+
   it('an exit before the child started is no end of it: a child started after a relaunch is live', async () => {
     const { parent, child } = live();
     const exit = builder('2026-09-28T09:59:00.000Z').emit('process.exited', { code: 0, signal: null, reason: 'quit', lostAttentionCount: 0 }, { id: 'earlier' });

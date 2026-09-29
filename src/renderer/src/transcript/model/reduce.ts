@@ -7,7 +7,7 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, ApiMessageId, EventId, MessageUuid, RequestId, SessionId, TaskId, ToolUseId } from '@shared/graph/ids';
 import { toolUseOf } from '@shared/graph/ids';
 import { rowId, turnId as turnIdOf } from './keys';
-import type { Row, RowId, Spill, TurnId } from './rows';
+import type { ChangedFile, Row, RowId, Spill, SubagentRef, SubagentStatus, ToolCategory, TurnId } from './rows';
 import { isInterruptionMarker, isLocalCommand } from './user-text';
 
 type Event<K extends SessionEvent['kind']> = Extract<SessionEvent, { kind: K }>;
@@ -76,10 +76,20 @@ export interface SpillLoad {
   error: string | null;
 }
 
+// What a turn did whatever the reader disclosed (the activity projection's per-turn part, model/activity.ts), computed
+// by the same per-turn derivation as its rows and memoised beside them.
+export interface TurnWork {
+  filesRead: string[]; // paths in first-seen order, each once
+  filesEdited: ChangedFile[]; // the receipt's files, with its counts
+  tools: { name: string; category: ToolCategory; count: number }[]; // one entry per tool name, a call each, first-seen order
+  subagents: (SubagentRef & { status: SubagentStatus })[]; // one per child, with its own status
+}
+
 export interface MemoEntry {
   version: number;
   uiVersion: number;
   rows: Row[];
+  work: TurnWork;
   overlay?: { receipts: TranscriptUi['receipts']; spills: TranscriptUi['spills']; rows: Row[] }; // the reader state laid over `rows` (derive.ts)
 }
 
