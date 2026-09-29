@@ -34,7 +34,7 @@ async function replaySession(pass: FixturePass, name: string, opts: { human?: (i
   const fixture = loadJournal(pass, name);
   const spec = LaunchSpecSchema.parse({
     appSessionId: `replay-${name}`, cwd: '/tmp/maws-replay', additionalDirectories: [], model: null, effort: null, permissionMode: null, gateway: 'gateway', subagentModel: null,
-    resume: null, sessionId: null, trust: null, mcpConfig: null, extraSettings: null, maxBudgetUsd: null, replay: `${pass}/${name}`,
+    resume: null, sessionId: null, trust: null, mcpConfig: null, extraSettings: null, maxBudgetUsd: null, inheritGrantsFrom: null /* C10 */, replay: `${pass}/${name}`,
   });
   const plan = buildLaunch(spec, { PATH: '/usr/bin', HOME: '/Users/x' }, { relayUrl: RELAY_URL, engineVersion: ENGINE_VERSION });
   const journal = new MemoryJournal();

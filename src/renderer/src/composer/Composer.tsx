@@ -161,7 +161,9 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
   const record = useSessions((s) => s.records.get(appSessionId) ?? null);
   const status = useSessionStatus(appSessionId, client);
   // Unstarted while C10 has an intent and C3 no status; the binding swaps when the status appears, without a remount.
-  const setup = status === null ? hook : null;
+  // C10: also while there is no record (C5's pane rule): a failed setup keeps its tab, and C3 the failed launch's
+  // exited status for the id.
+  const setup = status === null || record === null ? hook : null;
   const unstarted = setup !== null;
   const queue = useSessionQueue(appSessionId, client);
   const starting = useComposerStore((s) => isStarting(s, appSessionId));
@@ -195,7 +197,7 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
   const messageHeld = setup !== null && setup.intent.message !== null;
   const decision = submitState({
     status,
-    intent: unstarted ? { starting, messageHeld } : null,
+    intent: unstarted ? { starting, messageHeld, phase: setup.phase ?? null } : null, // C10: the setup phase
     queue,
     empty: draft.empty,
     mode: draft.mode,
@@ -387,7 +389,9 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
             </>
           ) : null
         }
-        onOpen={(what) => setOpened((o) => (o[what] ? o : { ...o, [what]: true }))}
+        // C10 seam: only a chip opened on the live frame asks for the engine's lists (the intent's frame shows none of them),
+        // so the launch never reads what an unstarted chip opened, racing C10's first message
+        onOpen={(what) => !unstarted && setOpened((o) => (o[what] ? o : { ...o, [what]: true }))}
         bindings={bindings}
         cwd={cwd}
         dirty={repo?.dirty ?? false}

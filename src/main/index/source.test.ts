@@ -95,7 +95,7 @@ const status = (appSessionId: AppSessionId, over: Partial<EngineSessionStatus> =
     subagentModel: null, modelOverrides: {}, engineVersion: '2.1.283', fileCheckpointing: true,
     fastMode: { state: null, disabledReason: null }, plugins: [], pluginErrors: [], pluginWarnings: [],
     backgroundTasks: [], grants: [], mcpServers: [], heldPeerMessages: [], pendingRequests: 0, queue: { length: 0, paused: false }, keepAlive: [],
-    memory: { rssKiB: null, treeRssKiB: null, sampledAt: null }, journalPath: '/j', hostHooks: [], lastEventSeq: 0, ...over,
+    memory: { rssKiB: null, treeRssKiB: null, sampledAt: null }, journalPath: '/j', hostHooks: [], lastEventSeq: 0, trust: { attested: false, recorded: null } /* C10 */, ...over,
   });
 
 describe('IndexSessionSource folds the host\'s events into the index and feeds the read model', () => {

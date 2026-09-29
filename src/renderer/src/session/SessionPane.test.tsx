@@ -80,11 +80,17 @@ describe('session pane', () => {
     expect(screen.queryByText('request')).toBeNull();
   });
 
-  it('a background-job holder offers a disabled "Attach in a terminal tab"', () => {
+  // C10 (M5): the notice's actions are C10's HolderActions, pinned in `sessions/HolderActions.test.tsx`
+  it('a background-job holder with a known id offers "Attach in a terminal tab"; one without an id only "Fork a copy"', () => {
+    useSessions.setState({ records: new Map([[A, record('app-a', { holder: { kind: 'background_job', pid: 42, jobId: 'e6dcd828' } })]]) });
+    const { unmount } = render(<SessionPane appSessionId={A} paneIndex={0} />);
+    expect(screen.getByText('Live as background job · pid 42 · read-only')).toBeTruthy();
+    expect((screen.getByRole('button', { name: 'Attach in a terminal tab' }) as HTMLButtonElement).disabled).toBe(false);
+    unmount();
     useSessions.setState({ records: new Map([[A, record('app-a', { holder: { kind: 'background_job', pid: 42, jobId: null } })]]) });
     render(<SessionPane appSessionId={A} paneIndex={0} />);
-    expect(screen.getByText('Live as background job · pid 42 · read-only')).toBeTruthy();
-    expect((screen.getByRole('button', { name: 'Attach in a terminal tab' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByRole('button', { name: 'Attach in a terminal tab' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Fork a copy' })).toBeTruthy();
   });
 
   it('an unstarted session (no record) shows the newSession slot above the composer and nothing else', () => {

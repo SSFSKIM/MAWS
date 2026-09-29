@@ -44,6 +44,9 @@ export type HookResult = { ok: true } | { ok: false; error: string };
 export interface SetupIntentHook {
   intent: SetupIntent;
   options: { locations: Location[]; branches: string[]; models: ModelInfo[]; autoModeNote: string | null };
+  // C10: the running setup's phase in words ("Creating worktree <name>…", "Trusting <key>…", "Starting…"), the submit
+  // control's disabled-state reason while it runs; null (or absent) otherwise.
+  phase?: string | null;
   patch(p: SetupIntentPatch): Promise<HookResult>;
   start(first: FirstMessage): Promise<HookResult>; // ok for starting, needs_trust and relay_unreachable; not ok for invalid, missing_directory, refused
 }

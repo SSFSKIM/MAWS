@@ -29,6 +29,21 @@ describe('submitState covers the five states, the caret menu and the unstarted r
     expect(row({ status: null, intent, mode: 'memory' })[3]).toBe('Available once the session starts');
   });
 
+  it("shows C10's setup phase as the disabled-state reason while the setup runs, ahead of the held message", () => {
+    const intent = { starting: false, messageHeld: true };
+    expect(row({ status: null, intent: { ...intent, phase: 'Creating worktree one…' } })).toEqual(['send', 'Starting…', false, 'Creating worktree one…', false]);
+    expect(row({ status: null, intent: { ...intent, phase: 'Trusting /repo…' } })[3]).toBe('Trusting /repo…');
+    expect(row({ status: null, intent: { ...intent, starting: true, phase: 'Starting…' } })[3]).toBe('Starting…');
+    expect(row({ status: null, intent: { ...intent, phase: null } })[3]).toBe('Your first message is with the setup above');
+  });
+
+  it('reads the intent whenever the caller answers one, even beside an exited status (C10: a failed setup keeps its tab and C3 its exited status)', () => {
+    const intent = { starting: false, messageHeld: false };
+    const exited = { ...idle, process: 'exited' as const };
+    expect(row({ status: exited, intent })).toEqual(['send', 'Send', true, null, false]);
+    expect(row({ status: exited, intent: { ...intent, messageHeld: true } })[3]).toBe('Your first message is with the setup above');
+  });
+
   it('refuses while no process is ready: starting, or ended (resume is C10’s)', () => {
     expect(row({ status: null })).toEqual(['send', 'Send', false, 'Session ended', false]);
     expect(row({ status: { ...idle, process: 'initializing' } })).toEqual(['send', 'Send', false, 'Session is starting…', false]);

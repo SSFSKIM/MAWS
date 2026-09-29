@@ -9,5 +9,6 @@ export function launchDefaults(appSessionId: AppSessionId, cwd: string): LaunchS
   return {
     appSessionId, cwd, additionalDirectories: [], model: null, effort: null, permissionMode: null, gateway: 'gateway', subagentModel: null,
     resume: null, sessionId: null, trust: null, mcpConfig: null, extraSettings: null, maxBudgetUsd: null, replay: null,
+    inheritGrantsFrom: null, // C10: no grant snapshot inherited (X6)
   };
 }

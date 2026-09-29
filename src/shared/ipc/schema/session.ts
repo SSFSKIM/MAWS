@@ -42,6 +42,13 @@ import { SessionRecordSchema } from '@shared/graph/session';
 // C7 start: the composer's prompt history shapes (C7 execution document, Interfaces "X2 additions")
 import { HistoryEntrySchema, PastedContentSchema } from '../../composer/history-entry';
 // C7 end
+// C10 start (AppSessionIdSchema, MessageUuidSchema, EffortSchema come with C3's imports above; ProjectIdSchema and
+// SessionRecordSchema with C4's)
+import { SessionHolderSchema } from '@shared/graph/session';
+import { FirstMessageSchema, ForkTargetSchema, LocationSchema, SetupIntentPatchSchema, SetupIntentSchema, TrustDecisionSchema } from '../../sessions/intent';
+import { SetupEventSchema, SetupResourcesSchema, StartOutcomeSchema } from '../../sessions/setup';
+import { TrustStateSchema } from '../../sessions/trust';
+// C10 end
 import type { CommandSpec } from './common';
 
 // C3 start
@@ -322,12 +329,128 @@ const c7Events = {
   'session.catalogChanged': z.strictObject({ appSessionId: AppSessionIdSchema, launchId: z.string(), catalog: CatalogSchema }),
 } as const satisfies Record<`session.${string}`, z.ZodType>;
 // C7 end --------------------------------------------------------------------------------------------------------------
+// C10 start -----------------------------------------------------------------------------------------------------------
+// Sessions, worktrees and trust (C10 execution document, "X2 additions"): the trust check (main: the trust reader over
+// the engine's global config, read only), `session.forget` (the engine host: the state file and the journal, then
+// `session.forgotten`; refused `already_live` while a process is reserved), and main's session service: the setup
+// intent of an unstarted session, start (a setup, or a record's resume), fork, archive, delete and rename. A command
+// answers synchronously only what is fast; a setup's phases stream as `session.setup` after `starting`.
+
+// What `session.archive` answers: archived, refused for a foreign holder, or (`onlyIfIdle`, the cleanup dialog's step)
+// skipped for a session live at the recheck, nothing stopped.
+export const ArchiveOutcomeSchema = z.union([
+  z.strictObject({ archived: z.literal(true) }),
+  z.strictObject({ status: z.literal('held'), holder: SessionHolderSchema }),
+  z.strictObject({ status: z.literal('skipped_live'), holder: SessionHolderSchema }),
+]);
+export type ArchiveOutcome = z.infer<typeof ArchiveOutcomeSchema>;
+
+// What `session.delete` answers: the conversation moved to the Trash whole, or a refusal with nothing moved, or a stop
+// the host could not confirm (nothing moved), or a failure half-way (the transcript last, so the conversation stays
+// discoverable; a retry re-enumerates).
+export const DeleteOutcomeSchema = z.discriminatedUnion('status', [
+  z.strictObject({ status: z.literal('deleted'), trashed: z.array(z.string()) }),
+  z.strictObject({ status: z.literal('held'), holder: SessionHolderSchema }),
+  z.strictObject({ status: z.literal('live') }),
+  z.strictObject({ status: z.literal('stop_unconfirmed'), detail: z.string() }),
+  z.strictObject({ status: z.literal('partial'), trashed: z.array(z.string()), failed: z.strictObject({ path: z.string(), error: z.string() }) }),
+]);
+export type DeleteOutcome = z.infer<typeof DeleteOutcomeSchema>;
+
+// `model` and `effort` are a resume's overrides for that launch (C11's route switch); an intent's chips own them.
+export const StartOptionsSchema = z.strictObject({
+  gateway: z.enum(['gateway', 'direct']).optional(),
+  trust: TrustDecisionSchema.optional(),
+  model: z.string().nullable().optional(),
+  effort: EffortSchema.nullable().optional(),
+});
+export type StartOptions = z.infer<typeof StartOptionsSchema>;
+
+// What a delete meant to move and what it has moved, in move order (the transcript last).
+export const DeletionManifestSchema = z.strictObject({
+  appSessionId: AppSessionIdSchema,
+  engineSessionId: SessionIdSchema.nullable(),
+  paths: z.array(z.string()),
+  trashed: z.array(z.string()),
+  createdAt: z.string(),
+});
+export type DeletionManifestView = z.infer<typeof DeletionManifestSchema>;
+
+const appSessionC10 = z.strictObject({ appSessionId: AppSessionIdSchema });
+const c10Commands = {
+  'session.trust.check': { input: z.strictObject({ directory: z.string() }), output: TrustStateSchema, owner: 'main' },
+  'session.forget': { input: appSessionC10, output: z.void(), owner: 'engine-host' },
+  // the unstarted session: an app id and a persisted intent, nothing launched
+  'session.create': {
+    input: z.strictObject({ projectId: ProjectIdSchema.nullable(), location: LocationSchema.nullable() }),
+    output: z.strictObject({ appSessionId: AppSessionIdSchema, intent: SetupIntentSchema }),
+    owner: 'main',
+  },
+  'session.intent.get': { input: appSessionC10, output: SetupIntentSchema.nullable(), owner: 'main' },
+  'session.intent.list': { input: z.void(), output: z.strictObject({ intents: z.array(SetupIntentSchema) }), owner: 'main' },
+  // refused `invalid_input` naming the field; `internal` `starting` while a start is in flight, `retained_worktree` for a
+  // location patch while a failed attempt's checkout is retained
+  'session.intent.patch': { input: z.strictObject({ appSessionId: AppSessionIdSchema, patch: SetupIntentPatchSchema }), output: SetupIntentSchema, owner: 'main' },
+  // the hand-back: `message` cleared, `draft` untouched; for a record's id, the message a resume retained behind its card
+  // is dropped and the answer is null
+  'session.intent.release': { input: appSessionC10, output: SetupIntentSchema.nullable(), owner: 'main' },
+  'session.intent.discard': {
+    input: appSessionC10,
+    output: z.strictObject({ leftover: z.strictObject({ worktree: z.strictObject({ path: z.string(), branch: z.string().nullable() }) }).nullable() }),
+    owner: 'main',
+  },
+  // the failure card's resolutions of a checkout a failed attempt created and kept: "Discard changes and remove" (the
+  // acknowledged discard, then the branch step) or "Keep the worktree" (the location becomes that existing worktree)
+  'session.intent.resolveWorktree': {
+    input: z.strictObject({ appSessionId: AppSessionIdSchema, resolution: z.enum(['discard', 'keep']) }),
+    output: z.strictObject({ intent: SetupIntentSchema, worktree: SetupResourcesSchema.shape.worktree.unwrap() }),
+    owner: 'main',
+  },
+  // an intent: its setup; a record: a resume
+  'session.start': {
+    input: z.strictObject({ appSessionId: AppSessionIdSchema, message: FirstMessageSchema.nullable(), options: StartOptionsSchema }),
+    output: StartOutcomeSchema,
+    owner: 'main',
+  },
+  // the outcome's appSessionId is the fork's once it is allocated
+  'session.fork': {
+    input: z.strictObject({ appSessionId: AppSessionIdSchema, target: ForkTargetSchema, message: FirstMessageSchema.nullable(), rewindTo: MessageUuidSchema.nullable() }),
+    output: StartOutcomeSchema,
+    owner: 'main',
+  },
+  'session.archive': { input: z.strictObject({ appSessionId: AppSessionIdSchema, onlyIfIdle: z.boolean().optional() }), output: ArchiveOutcomeSchema, owner: 'main' },
+  'session.delete': { input: z.strictObject({ appSessionId: AppSessionIdSchema, stopIfLive: z.boolean() }), output: DeleteOutcomeSchema, owner: 'main' },
+  // validators never transform: the service trims; a title that is only whitespace is refused here
+  'session.rename': {
+    input: z.strictObject({ appSessionId: AppSessionIdSchema, title: z.string().max(200).refine((title) => title.trim().length > 0, 'a title is not empty') }),
+    output: z.strictObject({ record: SessionRecordSchema, via: z.enum(['engine', 'override']) }),
+    owner: 'main',
+  },
+  'session.revealPath': { input: z.strictObject({ path: z.string() }), output: z.void(), owner: 'main' },
+  // (M4a) a delete interrupted half-way, found at start, offered in the session's tab: "Finish deleting" is
+  // `session.delete` again; "Keep" drops the manifest and leaves every file that did not move where it is
+  'session.deletions.list': { input: z.void(), output: z.strictObject({ manifests: z.array(DeletionManifestSchema) }), owner: 'main' },
+  'session.deletions.keep': { input: appSessionC10, output: z.void(), owner: 'main' },
+  // what `session.delete` would move, for its sheet (the transcript, null when already gone; its subagent transcripts;
+  // its recordings; every path); nothing moves
+  'session.deletions.preview': {
+    input: appSessionC10,
+    output: z.strictObject({ transcript: z.string().nullable(), subagents: z.number().int(), recordings: z.number().int(), paths: z.number().int(), store: z.string() }), // store: the config home the engine reads, `~`-abbreviated under the home directory
+    owner: 'main',
+  },
+} as const satisfies Record<`session.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
+const c10Events = {
+  'session.setup': SetupEventSchema,
+  'session.intent.changed': z.strictObject({ appSessionId: AppSessionIdSchema, intent: SetupIntentSchema.nullable() }), // null when discarded or bound
+} as const satisfies Record<`session.${string}`, z.ZodType>;
+// C10 end -------------------------------------------------------------------------------------------------------------
 
 export const commands = {
   ...c3Commands, // C3
   ...c4Commands, // C4
   ...c5Commands, // C5
   ...c7Commands, // C7
+  ...c10Commands, // C10
 } as const satisfies Record<`session.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {
@@ -335,4 +458,5 @@ export const events = {
   ...c4Events, // C4
   ...c5Events, // C5
   ...c7Events, // C7
+  ...c10Events, // C10
 } as const satisfies Record<`session.${string}`, z.ZodType>;

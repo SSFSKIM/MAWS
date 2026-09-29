@@ -416,6 +416,7 @@ function stubIntent(over: Partial<SetupIntentHook['intent']> = {}) {
   const state = {
     intent: { location: { kind: 'directory' as const, path: '/repo' }, additionalDirectories: [], model: null, effort: null, permissionMode: null, message: null, draft: null, ...over } as SetupIntentHook['intent'],
     listeners: new Set<() => void>(),
+    phase: null as string | null,
   };
   const patch = vi.fn<(p: SetupIntentPatch) => Promise<HookResult>>(async () => ({ ok: true }));
   const start = vi.fn(() => new Promise<HookResult>((resolve) => (resolveStart = resolve)));
@@ -425,10 +426,14 @@ function stubIntent(over: Partial<SetupIntentHook['intent']> = {}) {
   };
   function useStub(): SetupIntentHook {
     useStubTick(state.listeners);
-    return { intent: state.intent, options: { locations: [state.intent.location], branches: [], models: [], autoModeNote: null }, patch, start };
+    return { intent: state.intent, options: { locations: [state.intent.location], branches: [], models: [], autoModeNote: null }, phase: state.phase, patch, start };
   }
   registerSetupIntentHook((id) => (id === A ? useStub() : null)); // a hook, registered as C10's is
-  return { patch, start, set, answer: (r: HookResult) => act(async () => resolveStart?.(r)) };
+  const setPhase = (phase: string | null) => {
+    state.phase = phase;
+    state.listeners.forEach((l) => l());
+  };
+  return { patch, start, set, setPhase, answer: (r: HookResult) => act(async () => resolveStart?.(r)) };
 }
 
 function useStubTick(listeners: Set<() => void>): [number, () => void] {
@@ -559,6 +564,67 @@ describe('unstarted send holds a starting state', () => {
     act(() => void vi.advanceTimersByTime(800));
     expect(stub.patch).toHaveBeenCalledTimes(1);
     expect(JSON.stringify(stub.patch.mock.calls[0][0])).toContain('kept');
+  });
+
+  it("shows C10's setup phases on the submit control while the setup runs, then the held message's reason", async () => {
+    const stub = stubIntent();
+    mount([{ index: 0, id: A }]);
+    await type('go');
+    await key(editorOf(), { key: 'Enter' });
+    act(() => stub.set({ message: { content: 'go', display: 'go' } }));
+    await stub.answer({ ok: true });
+    for (const phase of ['Creating worktree one…', 'Trusting /repo…', 'Starting…']) {
+      act(() => stub.setPhase(phase));
+      await waitFor(() => expect(primary().title).toBe(phase));
+      expect(primary().textContent).toBe('Starting…');
+      expect(primary().disabled).toBe(true);
+    }
+    act(() => stub.setPhase(null));
+    await waitFor(() => expect(primary().title).toBe('Your first message is with the setup above'));
+  });
+
+  // C10's M6 finding: a failed setup keeps its tab and its intent, and C3 keeps the failed launch's exited status for
+  // the id; with no record the tab is still unstarted (C5's pane rule), so the composer stays bound to the intent.
+  it('binds the intent on a failed setup’s retained tab (an exited status, no record): editable chips, Send, and its draft in the intent', async () => {
+    const stub = stubIntent();
+    const s = useSessions.getState();
+    useSessions.setState({ engine: new Map(s.engine).set(A, { ...status(A), process: 'exited' }) });
+    mount([{ index: 0, id: A }]);
+    await waitFor(() => expect(editorOf()).toBeTruthy());
+    const location = within(composerOf(0)).getByRole('button', { name: /^Location/ });
+    expect(location.title).toBe('/repo');
+    expect(within(composerOf(0)).getByRole('button', { name: 'Add a directory' }).hasAttribute('disabled')).toBe(false);
+    vi.useFakeTimers();
+    await type('after the failure');
+    expect(primary().textContent).toBe('Send');
+    expect(primary().disabled).toBe(false);
+    act(() => void vi.advanceTimersByTime(800));
+    expect(stub.patch).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(stub.patch.mock.calls[0][0])).toContain('after the failure');
+    expect(invoked('session.drafts.set')).toEqual([]);
+    vi.useRealTimers();
+    act(() => editorOf().focus());
+    await key(editorOf(), { key: 'Enter' });
+    expect(stub.start).toHaveBeenCalledWith({ content: 'after the failure', display: 'after the failure' });
+  });
+
+  // The C7/C10 seam: a chip opened on the intent's frame reads nothing from the engine, so the live frame that replaces
+  // it at launch does not read either until a chip opens there; a read at launch would race C10's first message.
+  it('reads no engine lists at launch for a chip opened while unstarted, only when one opens on the live frame', async () => {
+    stubIntent();
+    mount([{ index: 0, id: A }]);
+    const user = userEvent.setup();
+    await user.click(within(composerOf(0)).getByRole('button', { name: /^Location/ }));
+    await user.keyboard('{Escape}');
+    await user.click(within(composerOf(0)).getByRole('button', { name: /^Permission mode/ }));
+    await user.keyboard('{Escape}');
+    live(A);
+    await waitFor(() => expect(within(composerOf(0)).getByRole('button', { name: 'Add a directory' }).hasAttribute('disabled')).toBe(false));
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+    expect(invoked('session.listPermissionRules')).toEqual([]);
+    expect(invoked('session.listModels')).toEqual([]);
+    await user.click(within(composerOf(0)).getByRole('button', { name: /^Location/ }));
+    await waitFor(() => expect(invoked('session.listPermissionRules')).toHaveLength(1));
   });
 
   it('holds `!` and `#` until the session starts, and hides the queue', async () => {

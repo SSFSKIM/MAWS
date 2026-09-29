@@ -2,14 +2,13 @@
 // (directory, scope) however many surfaces hold it (the panel's Review and a diff tab over the same scope share it),
 // re-read 250 ms after the last new status C8a's git store takes for the directory (its `git.changed`), one read in
 // flight per key; a scope past REVIEW_SCOPE_BYTES_CAP keeps its file list and fetches one file at a time; and This
-// branch's base from C10's `git.worktree.branch`, looked up only once that command is in the X2 registry, so its
-// arrival lights the chip without a change here. Last turn reads no git: its files come from the transcript store.
+// branch's base from C10's `git.worktree.branch`. Last turn reads no git: its files come from the transcript store.
 //
 // The status and the watch that keeps it current are C8a's `useGit`; the surfaces hold its watch while mounted.
 import { useEffect, useMemo } from 'react';
 import { create, type StoreApi, type UseBoundStore } from 'zustand';
 import type { AppSessionId } from '@shared/graph/ids';
-import { commands, type CommandName, type CommandResult, type MawsBridge } from '@shared/ipc/schema';
+import { type CommandName, type CommandResult, type MawsBridge } from '@shared/ipc/schema';
 import type { GitDiff, GitDiffFile, GitStatus } from '@shared/ipc/schema/git';
 import { ipc } from '../../../ipc/client';
 import { useGit } from '../../../stores/git';
@@ -28,10 +27,6 @@ import {
 } from './review-model';
 
 export const REVIEW_REFRESH_MS = 250; // trailing, like C8a's GIT_DIFF_DELAY_MS
-
-// C10's command, not on master when C8c landed (charter C10): typed here as its document defines it.
-export const BRANCH_COMMAND = 'git.worktree.branch';
-export const branchCommandRegistered = (): boolean => BRANCH_COMMAND in commands;
 
 export type GitScope = Exclude<ReviewScope, 'turn'>;
 export interface DiffTarget {
@@ -101,9 +96,8 @@ function mapWithout<K, V>(map: ReadonlyMap<K, V>, drop: (key: K) => boolean): Ma
 
 export function createReviewStore(
   client: MawsBridge,
-  options: { branchCommand?: boolean; git?: typeof useGit } = {},
+  options: { git?: typeof useGit } = {},
 ): UseBoundStore<StoreApi<ReviewStore>> {
-  const branchCommand = options.branchCommand ?? branchCommandRegistered();
   const held = new Map<string, Held>();
   const fileLoads = new Set<string>();
 
@@ -188,22 +182,19 @@ export function createReviewStore(
         const key = baseKey(repoRoot, branch);
         const known = get().bases.get(key);
         if (known && !(known.status === 'unavailable' && known.failed)) return;
-        if (!branchCommand) {
-          set((s) => ({ bases: mapWith(s.bases, key, { status: 'unavailable', reason: REVIEW_COPY.arrivesWithC10 }) }));
-          return;
-        }
         set((s) => ({ bases: mapWith(s.bases, key, { status: 'loading' }) }));
-        // Untyped until C10's schema lands in the registry; its answer is `BranchStatus | null` (C10's document).
-        const call = client.invoke(BRANCH_COMMAND as CommandName, { repoRoot, branch } as never) as Promise<CommandResult<CommandName>>;
-        void settled(call).then((result) => {
-          const value = result.ok ? (result.value as { base?: unknown } | null) : null;
+        // C10's answer: null when `refs/heads/<branch>` does not resolve, which for the branch HEAD names means it has no
+        // commits yet; `base` is the main worktree's branch, `HEAD` when that is detached.
+        void settled(client.invoke('git.worktree.branch', { repoRoot, branch })).then((result) => {
           const next: BaseLookup = !result.ok
             ? { status: 'unavailable', reason: result.error.message, failed: true }
-            : typeof value?.base !== 'string' || value.base === 'HEAD'
-              ? { status: 'unavailable', reason: REVIEW_COPY.noMainBranch }
-              : value.base === branch
-                ? { status: 'unavailable', reason: REVIEW_COPY.mainWorktreeBranch(branch) }
-                : { status: 'ok', base: value.base };
+            : result.value === null
+              ? { status: 'unavailable', reason: REVIEW_COPY.noCommits(branch) }
+              : result.value.base === 'HEAD'
+                ? { status: 'unavailable', reason: REVIEW_COPY.noMainBranch }
+                : result.value.base === branch
+                  ? { status: 'unavailable', reason: REVIEW_COPY.mainWorktreeBranch(branch) }
+                  : { status: 'ok', base: result.value.base };
           set((s) => ({ bases: mapWith(s.bases, key, next) }));
         });
       },
@@ -244,11 +235,11 @@ export const useReview = createReviewStore(ipc, { git: useGit });
 
 const NOT_A_REPOSITORY = 'not a git repository'; // C4's message (src/main/git/runner.ts), as C8a's Environment reads it
 
-export interface BranchAvailability {
-  settled: boolean; // known: available or not, with the reason
-  base: string | null;
-  reason: string | null; // the disabled chip's tooltip
-}
+// Settled: known, available with its base or unavailable with the reason (the disabled chip's tooltip).
+export type BranchAvailability =
+  | { settled: false; base: null; reason: null }
+  | { settled: true; base: string; reason: null }
+  | { settled: true; base: null; reason: string };
 
 export type ReviewList =
   | { phase: 'pending' }
@@ -329,7 +320,7 @@ export function useReviewData(input: { appSessionId: AppSessionId; directory: st
       if (gitError) return { phase: 'unavailable', message: REVIEW_COPY.unavailable(gitError) };
       return { phase: 'pending' };
     }
-    if (scope === 'branch' && branch.settled && branch.base === null) return { phase: 'unavailable', message: branch.reason ?? REVIEW_COPY.arrivesWithC10 };
+    if (scope === 'branch' && branch.settled && branch.base === null) return { phase: 'unavailable', message: branch.reason };
     if (!diff || diff.status === 'loading') return { phase: 'pending' };
     if (diff.status === 'error') return { phase: 'unavailable', message: REVIEW_COPY.unavailable(diff.message) };
     return { phase: 'ready', files: gitScopeFiles({ scope, repoRoot: status.repoRoot, files: diff.files, patch: diff.patch, status }) };

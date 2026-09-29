@@ -35,6 +35,7 @@ export function liveStatus(record: SessionRecord): EngineSessionStatus {
     ],
     grants: [], mcpServers: [], heldPeerMessages: [], pendingRequests: 0, queue: { length: 0, paused: false }, keepAlive: ['background_tasks'],
     memory: { rssKiB: null, treeRssKiB: null, sampledAt: null }, journalPath: '', hostHooks: [], lastEventSeq: 0,
+    trust: { attested: false, recorded: null }, // C10's X6 field
   });
 }
 
