@@ -84,16 +84,22 @@ describe('replay clock paces recorded rows in real time', () => {
   });
 
   it("'instant' bypasses the timers: rows fire one per turn of the event loop, whatever the recorded gaps", async () => {
-    vi.useRealTimers();
+    // Timers and the clock are faked and never advanced, while the event loop's turns (setImmediate) stay real: the
+    // rows can only complete if no timer paces them, which no machine load can change.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] });
     const clock = new ReplayClock({ speed: 'instant', maxGapMs: 2000 });
-    const started = performance.now();
-    const fired: number[] = [];
+    const fired: { at: number; turn: number }[] = [];
+    let turn = 0;
+    const count = () => setImmediate(() => ((turn += 1), fired.length < 3 && count()));
+    count();
     await new Promise<void>((resolve) => {
-      for (const at of [0, 60_000, 120_000]) clock.schedule(at, () => fired.push(at));
+      for (const at of [0, 60_000, 120_000]) clock.schedule(at, () => fired.push({ at, turn }));
       clock.schedule(180_000, () => resolve());
+      expect(fired).toEqual([]); // never synchronously inside schedule
     });
-    expect(fired).toEqual([0, 60_000, 120_000]);
-    expect(performance.now() - started).toBeLessThan(100);
+    expect(fired.map((f) => f.at)).toEqual([0, 60_000, 120_000]);
+    expect(new Set(fired.map((f) => f.turn)).size).toBe(3); // one row per turn
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it('switching to instant mid-gap fires the waiting row at once; switching back paces from there', () => {

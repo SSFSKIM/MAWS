@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ReplayFixtureSchema } from '@shared/ipc/schema/session';
@@ -51,6 +51,16 @@ describe('replay fixtures in the index', () => {
     expect(index.fixtures.list()).toEqual(fixtures);
     seedReplayFixtures(index.fixtures, join(dir.path, 'no-checkout'));
     expect(index.fixtures.list()).toEqual(fixtures);
+  });
+
+  it('classifies a probe-tree file by its physical first line: a corrupt line 1 is not a journal, whatever follows', () => {
+    const probe = join(dir.path, 'checkout/spikes/protocol-probe/fixtures');
+    mkdirSync(probe, { recursive: true });
+    const row = (seq: number) => JSON.stringify({ seq, direction: 'in', at: '2026-09-28T10:00:00.000Z', frame: { type: 'system', session_id: 'S' } });
+    writeFileSync(join(probe, 'corrupt-first.jsonl'), `{"seq":1,"direction":"in","at":\n${row(2)}\n${row(3)}\n`);
+    writeFileSync(join(probe, 'blank-first.jsonl'), `\n${row(1)}\n`); // launch skips blank lines, so this one plays
+    seedReplayFixtures(index.fixtures, join(dir.path, 'checkout'));
+    expect(index.fixtures.list().map((f) => f.name)).toEqual(['blank-first']);
   });
 
   it('finds the checkout above the app path the app was started with', () => {

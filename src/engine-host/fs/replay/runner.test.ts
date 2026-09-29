@@ -96,6 +96,38 @@ describe('replay runner plays a journal through the normaliser', () => {
     expect(runner.materialized()).toEqual(events());
   });
 
+  it("'instant' yields after every batch: a record whose events cross the 500 boundary leaves its remainder for the next turn", async () => {
+    const rows = [...Array.from({ length: 499 }, (_, i) => row(i + 1, i)), row(500, 499, 'in', { type: 'assistant', twoEvents: true }), ...Array.from({ length: 3 }, (_, i) => row(501 + i, 500 + i))];
+    const normalizer: RowNormalizer = {
+      normalize: (r) => ((r.frame as { twoEvents?: boolean }).twoEvents ? [unknownEvent(r), { ...unknownEvent(r), id: `row:${r.seq}#1` as EventId }] : [unknownEvent(r)]),
+    };
+    // Two batches emitted in one turn of the event loop would share a turn number.
+    let turn = 0;
+    let turning = false;
+    const turns: number[] = [];
+    const sizes: number[] = [];
+    const clock = new ReplayClock({ speed: 'instant' });
+    const runner = new ReplayRunner({
+      appSessionId: APP,
+      sessionId: RUN,
+      clock,
+      emit: (events) => {
+        if (!turning) {
+          turning = true;
+          turn += 1;
+          setImmediate(() => (turning = false));
+        }
+        turns.push(turn);
+        sizes.push(events.length);
+      },
+      progress: () => {},
+    });
+    await runner.runJournal(rows, normalizer);
+    expect(sizes).toEqual([500, 4]);
+    expect(new Set(turns).size).toBe(turns.length);
+    expect(runner.materialized().map((e) => e.id).slice(498, 501)).toEqual(['row:499', 'row:500', 'row:500#1']);
+  });
+
   it('paces rows by their recorded time, and the first progress follows the start by a turn of the event loop', async () => {
     vi.useFakeTimers();
     const { runner, events, progress } = harness(1);
@@ -173,7 +205,7 @@ describe('replay runner plays a transcript through the backfill', () => {
   it('emits the backfill mapping of the chain under the run\'s session id, every event with seq null', async () => {
     const records = loadTranscriptFixture('subagent-parent');
     const { runner, events, progress } = harness('instant');
-    await runner.runTranscript(records);
+    await runner.runTranscript(records, null);
     const chain = currentChain(records).chain;
     const ctx = createBackfillContext({ sessionId: RUN, agent: null });
     const expected = chain.flatMap((record) => recordToEvents(parseTranscriptRecord({ ...record, sessionId: RUN }), ctx));
@@ -193,7 +225,7 @@ describe('replay runner plays a transcript through the backfill', () => {
       const user = (uuid: string, parentUuid: string | null, timestamp?: string) =>
         parseTranscriptRecord({ type: 'user', uuid, parentUuid, cwd: '/w', sessionId: 'orig', ...(timestamp ? { timestamp } : {}), message: { role: 'user', content: uuid } });
       const { runner, events } = harness(1);
-      const done = runner.runTranscript([user('u1', null, '2026-09-28T10:00:00.000Z'), user('u2', 'u1'), user('u3', 'u2', '2026-09-28T10:00:01.500Z')]);
+      const done = runner.runTranscript([user('u1', null, '2026-09-28T10:00:00.000Z'), user('u2', 'u1'), user('u3', 'u2', '2026-09-28T10:00:01.500Z')], null);
       await vi.advanceTimersByTimeAsync(1);
       const messages = () => events().filter((e) => e.kind === 'user.message').map((e) => (e as { messageUuid: string }).messageUuid);
       expect(messages()).toEqual(['u1', 'u2']);

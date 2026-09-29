@@ -1,14 +1,19 @@
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { AppSessionId, SessionId } from '@shared/graph/ids';
+import type { SessionEvent } from '@shared/graph/events';
+import type { AgentId, AppSessionId, SessionId } from '@shared/graph/ids';
 import type { HostEmit } from '@shared/host/runtime';
 import type { EventName, EventPayload } from '@shared/ipc/schema';
 import { validateEventPayload } from '@shared/ipc/validate';
-import { FIXTURE_DIR, loadJournal, TRANSCRIPT_FIXTURE_DIR } from '../../../../test/support/fixtures';
+import { AgentMetaSchema, currentChain } from '@shared/wire/transcript';
+import { FIXTURE_DIR, loadJournal, loadTranscript, loadTranscriptFixture, TRANSCRIPT_FIXTURE_DIR } from '../../../../test/support/fixtures';
+import { createBackfillContext, recordToEvents } from '../backfill';
 import { ReplayHost, type ReplayBindings } from './host';
 import { frameUnknownNormalizer } from './journal-source';
 
 const WORKFLOW = { kind: 'journal', path: join(FIXTURE_DIR, 'pass2/workflow.jsonl') } as const;
+const SIDECARS = ['ad286defbc77bc090', 'ae75ba6ce5d866acc'];
 const app = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}` as AppSessionId;
 const run = (n: number) => `rp_00000000-0000-4000-8000-${String(n).padStart(12, '0')}` as SessionId;
 
@@ -57,6 +62,34 @@ describe('the engine host launches, controls and serves replay runs', () => {
     expect(h.bound.get(app(1))).toBe(run(1));
     // A finished run keeps serving its events until it is stopped.
     expect(h.host.snapshot(app(1))).toEqual({ events: batches.filter((batch) => batch.appSessionId === app(1)).flatMap((batch) => batch.events), complete: true });
+  });
+
+  it('a transcript replay resolves its sibling <sessionId>/subagents/ and emits the backfill\'s subagent.started and subagent.finished', async () => {
+    const h = harness();
+    const path = join(TRANSCRIPT_FIXTURE_DIR, 'subagent-parent.jsonl');
+    await h.host.launch({ appSessionId: app(8), sessionId: run(8), source: { kind: 'transcript', path }, speed: 'instant' });
+    await until(h, app(8), 'done');
+    const events = h.of('session.eventBatch').filter((b) => b.appSessionId === app(8)).flatMap((b) => b.events);
+    const subagentEvents = (list: SessionEvent[]) => list.filter((e) => e.kind === 'subagent.started' || e.kind === 'subagent.finished');
+    // The disk backfill of the same chain, with the probe's own sidecars (spikes/…/subagent-sidecars) as its lookup.
+    const metas = SIDECARS.map((agentId) => ({
+      agentId: agentId as AgentId,
+      meta: AgentMetaSchema.parse(JSON.parse(readFileSync(join(FIXTURE_DIR, `subagent-sidecars/agent-${agentId}.meta.json`), 'utf8'))),
+      prompt: String((loadTranscript(`subagent-sidecars/agent-${agentId}.jsonl`)[0].message as { content: unknown }).content),
+    }));
+    const ctx = createBackfillContext({ sessionId: run(8), agent: null, subagents: { byToolUseId: (id) => metas.find((m) => m.meta.toolUseId === id) ?? null } });
+    const backfill = currentChain(loadTranscriptFixture('subagent-parent')).chain.flatMap((record) => recordToEvents(record, ctx));
+    expect(subagentEvents(events)).toEqual(subagentEvents(backfill));
+    expect(subagentEvents(events).map((e) => [e.kind, (e as { taskId: string }).taskId])).toEqual([
+      ['subagent.started', SIDECARS[0]],
+      ['subagent.started', SIDECARS[1]],
+      ['subagent.finished', SIDECARS[0]],
+      ['subagent.finished', SIDECARS[1]],
+    ]);
+    // A transcript with no sibling directory replays without them.
+    await h.host.launch({ appSessionId: app(9), sessionId: run(9), source: { kind: 'transcript', path: join(TRANSCRIPT_FIXTURE_DIR, 'rewind-real.jsonl') }, speed: 'instant' });
+    await until(h, app(9), 'done');
+    expect(subagentEvents(h.of('session.eventBatch').filter((b) => b.appSessionId === app(9)).flatMap((b) => b.events))).toEqual([]);
   });
 
   it('refuses a second launch of an app id that is already running', async () => {

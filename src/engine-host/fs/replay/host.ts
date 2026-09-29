@@ -60,7 +60,7 @@ export class ReplayHost {
       });
       this.runs.set(appSessionId, runner);
       // The runner's first progress and first row follow this answer by a turn of the event loop.
-      void ('rows' in loaded ? runner.runJournal(loaded.rows, this.deps.normalizer(sessionId)) : runner.runTranscript(loaded.records));
+      void ('rows' in loaded ? runner.runJournal(loaded.rows, this.deps.normalizer(sessionId)) : runner.runTranscript(loaded.records, loaded.subagents));
       return { totalRows: loaded.totalRows, spanMs: loaded.spanMs };
     } finally {
       this.launching.delete(appSessionId);

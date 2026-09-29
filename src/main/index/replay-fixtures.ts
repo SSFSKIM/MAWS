@@ -52,8 +52,9 @@ export class ReplayFixtureStore {
 
 // Seeding (M5): every probe journal under `<root>/spikes/protocol-probe/fixtures/**` and every transcript under
 // `<root>/test/fixtures/transcripts/` that exists, by absolute path, named by its file's stem. A probe-tree file is a
-// journal when its first line is an X8 row (the tree also holds sidecar transcripts and a workflow's own journal, which
-// are not). The session id is the first one the file's head names. Idempotent by path, so it runs at every open; a
+// journal when its physical first line (the first non-blank one, which a launch reads first) is an X8 row: a corrupt
+// line 1 is not a journal, since its launch would fail there, and the tree also holds sidecar transcripts and a
+// workflow's own journal, which are not journals either. The session id is the first one the file's head names. Idempotent by path, so it runs at every open; a
 // packaged app, whose root holds neither tree, seeds nothing.
 const HEAD_BYTES = 64 * 1024;
 
@@ -61,7 +62,7 @@ export function seedReplayFixtures(store: ReplayFixtureStore, root: string): voi
   for (const path of jsonlUnder(join(root, 'spikes/protocol-probe/fixtures'), true)) {
     const lines = headLines(path);
     if (lines.length === 0 || !JournalRowSchema.safeParse(lines[0]).success) continue;
-    const frames = lines.map((line) => (line as { frame?: { session_id?: unknown } }).frame);
+    const frames = lines.map((line) => (line as { frame?: { session_id?: unknown } } | undefined)?.frame);
     store.add({ name: basename(path, '.jsonl'), kind: 'journal', path, sessionId: firstString(frames.map((frame) => frame?.session_id)) });
   }
   for (const path of jsonlUnder(join(root, 'test/fixtures/transcripts'), false)) {
@@ -95,7 +96,8 @@ function jsonlUnder(dir: string, recursive: boolean): string[] {
     .sort();
 }
 
-// The whole lines of the file's first 64 KiB that parse; an unreadable file has none.
+// The non-blank whole lines of the file's first 64 KiB, in order, each parsed or `undefined` where it does not parse
+// (so the first entry is the line a launch would read first); an unreadable file has none.
 function headLines(path: string): unknown[] {
   let head: string;
   try {
@@ -112,10 +114,11 @@ function headLines(path: string): unknown[] {
   const lines = head.split('\n');
   if (!head.endsWith('\n')) lines.pop(); // a line the window cut
   return lines.flatMap((line) => {
+    if (line.trim() === '') return [];
     try {
-      return line.trim() === '' ? [] : [JSON.parse(line.replace(/^\0+/, '')) as unknown];
+      return [JSON.parse(line.replace(/^\0+/, '')) as unknown];
     } catch {
-      return [];
+      return [undefined];
     }
   });
 }

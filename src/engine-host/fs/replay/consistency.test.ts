@@ -30,7 +30,7 @@ async function replayedRows(): Promise<JournalRow[]> {
 // The transcript through the runner's transcript source (the backfill mapping over the chain).
 async function replayedTranscript(records: TranscriptRecord[]): Promise<SessionEvent[]> {
   const events: SessionEvent[] = [];
-  await runner((batch) => void events.push(...batch)).runTranscript(records);
+  await runner((batch) => void events.push(...batch)).runTranscript(records, null);
   return events;
 }
 

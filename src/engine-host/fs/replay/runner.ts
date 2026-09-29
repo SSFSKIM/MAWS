@@ -2,7 +2,8 @@
 // graph under a run's fresh ids, paced by the clock. A journal's `in` and `out` rows go through the row normaliser (C3's
 // `Normalizer`, which needs the `out` control requests to close its request table), each frame's `session_id` rewritten
 // to the run's id first; a transcript's chain goes through C4's backfill mapping. Events leave through `emit` — one
-// batch per row, or in `'instant'` up to REPLAY_BATCH events per turn of the event loop — and are kept as the run's
+// batch per row, or in `'instant'` one batch of at most REPLAY_BATCH events per turn of the event loop, never two in one
+// turn (a row crossing the boundary leaves its remainder for the next turn) — and are kept as the run's
 // materialised list for the snapshot command. Progress is reported every PROGRESS_EVERY rows and on every state or
 // speed change; the first report follows the start by a turn of the event loop, so it never precedes the launch's answer.
 import type { SessionEvent } from '@shared/graph/events';
@@ -10,7 +11,7 @@ import type { AppSessionId, SessionId } from '@shared/graph/ids';
 import type { ReplayProgress, Speed } from '@shared/ipc/schema/session';
 import type { JournalRow } from '@shared/wire/journal';
 import { currentChain, type TranscriptRecord } from '@shared/wire/transcript';
-import { createBackfillContext, recordToEvents } from '../backfill';
+import { createBackfillContext, recordToEvents, type SubagentLookup } from '../backfill';
 import type { ReplayClock } from './clock';
 
 // Satisfied by C3's `Normalizer` (src/engine-host/normalizer.ts: pure JournalRow → SessionEvent[]).
@@ -45,6 +46,7 @@ export class ReplayRunner {
   private lastIso: string | null = null;
   private message: string | null = null;
   private readonly events: SessionEvent[] = [];
+  private carry: SessionEvent[] = []; // a boundary-crossing row's events beyond the last batch, for the next turn
   private finish: () => void = () => {};
 
   constructor(private readonly deps: ReplayRunnerDeps) {}
@@ -65,8 +67,10 @@ export class ReplayRunner {
     return this.play(units);
   }
 
-  runTranscript(records: TranscriptRecord[]): Promise<void> {
-    const ctx = createBackfillContext({ sessionId: this.deps.sessionId, agent: null });
+  // `subagents` is the source's sibling sidecar listing (`<dir>/<sessionId>/subagents/`), so `Agent` tool uses map to
+  // subagent.started/finished exactly as the transcript's backfill maps them; null for a transcript without one.
+  runTranscript(records: TranscriptRecord[], subagents: SubagentLookup | null): Promise<void> {
+    const ctx = createBackfillContext({ sessionId: this.deps.sessionId, agent: null, subagents: subagents ?? undefined });
     let iso: string | null = null;
     const units = currentChain(records).chain.map((record): Unit => {
       if (typeof record.timestamp === 'string' && !Number.isNaN(Date.parse(record.timestamp))) iso = record.timestamp;
@@ -118,18 +122,24 @@ export class ReplayRunner {
 
   private next(): void {
     if (this.phase !== 'running' && this.phase !== 'paused') return;
-    if (this.index >= this.units.length) {
+    if (this.index >= this.units.length && this.carry.length === 0) {
       this.end('done');
       return;
     }
-    this.deps.clock.schedule(this.units[this.index].at, () => this.step());
+    // A carried remainder goes out on the next turn, due with the row it came from.
+    const at = this.carry.length > 0 ? this.units[this.index - 1].at : this.units[this.index].at;
+    this.deps.clock.schedule(at, () => this.step());
   }
 
-  // One row at a speed; at 'instant', rows until a batch is full.
+  // One batch per turn: at a speed, one row's events; at 'instant', rows until REPLAY_BATCH events have gathered. A
+  // row whose events cross the boundary leaves the rest in `carry`, which the next turn sends first.
   private step(): void {
     const instant = this.deps.clock.speed === 'instant';
-    const batch: SessionEvent[] = [];
-    do {
+    const batch = this.carry;
+    this.carry = [];
+    const carried = batch.length > 0;
+    let played = false;
+    while (this.index < this.units.length && (instant ? batch.length < REPLAY_BATCH : !carried && !played)) {
       const unit = this.units[this.index];
       try {
         batch.push(...unit.events());
@@ -140,14 +150,17 @@ export class ReplayRunner {
         this.end('error');
         return;
       }
+      played = true;
       this.index += 1;
       this.lastIso = unit.iso;
       if (this.index % PROGRESS_EVERY === 0 && this.index < this.units.length) this.report();
-    } while (instant && this.index < this.units.length && batch.length < REPLAY_BATCH);
-    this.send(batch);
+    }
+    this.carry = batch.slice(REPLAY_BATCH);
+    this.send(batch.slice(0, REPLAY_BATCH));
     this.next();
   }
 
+  // At most one batch on the normal path; the error path flushes what it holds in batches.
   private send(events: SessionEvent[]): void {
     for (let i = 0; i < events.length; i += REPLAY_BATCH) {
       const batch = events.slice(i, i + REPLAY_BATCH);
