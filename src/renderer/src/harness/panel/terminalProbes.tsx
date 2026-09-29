@@ -10,8 +10,8 @@ import { connectKeys } from '../../keymap/dispatcher';
 import { useKeyChord } from '../../keymap/useKeyChord';
 import { instanceIds, instanceOf } from '../../panel/host';
 import { useTerminals } from '../../stores/terminals';
-import { terminals, type TerminalId } from '../../terminal/registry';
-import { TERMINAL_TOOL_ID, type TerminalTabState } from '../../tools/terminal';
+import type { TerminalId } from '../../terminal/registry';
+import { adoptTerminals as adoptPtys, TERMINAL_TOOL_ID, type TerminalTabState } from '../../tools/terminal';
 import { counterText, countersOf, ping, tap, useSamples, wasPausedSeen } from '../terminal/debug-tap';
 import { armInputGuard, type InputGuard } from '../terminal/input-guard';
 import { createTerminalsApi, type TerminalsHarnessApi } from '../terminal/terminals-api';
@@ -34,13 +34,11 @@ export function terminalOf(tabId: string): TerminalId | null {
 }
 const tabOfTerminal = (id: TerminalId) => instanceIds().find((tabId) => terminalOf(tabId) === id);
 
-// After a reload, the host's ptys for the page's sessions are re-adopted before the layout hydrates, so a restored
-// Terminal tab's `createState` finds its shell under its label instead of opening a second one.
-let adoption: Promise<TerminalId[]> | null = null;
+// After a reload, the host's ptys for the page's sessions are re-adopted, through the Terminal tool's one adoption (which
+// a restored tab waits for), before the layout hydrates.
 export function adoptTerminals(accept: (appSessionId: string) => boolean): Promise<TerminalId[]> {
   tap();
-  adoption ??= terminals.adopt((info) => accept(info.appSessionId));
-  return adoption;
+  return adoptPtys((info) => accept(info.appSessionId));
 }
 
 // C5's key dispatcher, as the app mounts it, and the page's `tab.next` in place of the shell's tab cycle (registered

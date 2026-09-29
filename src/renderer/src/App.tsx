@@ -16,7 +16,7 @@ import { connectTranscript } from './transcript/shell'; // C6
 import { registerSlot } from './app/slots';
 import { connectPanelHost, registerPanelTool } from './panel/host';
 import { PanelHost } from './panel/PanelHost';
-import { terminalTool } from './tools/terminal';
+import { adoptTerminals, terminalTool } from './tools/terminal';
 // C8a end
 
 export function App() {
@@ -41,7 +41,12 @@ export function App() {
   }, []);
   // Tool registration is the panel host's line (ruling O2). Never unregistered: a registration's disposer closes the
   // tool's tabs, which StrictMode's effect replay would do on every mount.
-  useEffect(() => void registerPanelTool(terminalTool), []); // C9's Terminal
+  useEffect(() => {
+    registerPanelTool(terminalTool); // C9's Terminal
+    // After a renderer reload the PTY host still runs the shells of the restored Terminal tabs: re-adopt them. A tab
+    // restored before this answers waits for it (`ensureTerminal`), so it reattaches rather than starting a second shell.
+    void adoptTerminals();
+  }, []);
   // C8a end
 
   // index.html ships data-theme="light" for the first paint; from then on main's resolved theme decides.

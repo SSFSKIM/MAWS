@@ -80,13 +80,14 @@ const registry = vi.hoisted(() => {
       foreground: vi.fn(async () => ({ process: 'zsh', busy: false })),
       close: vi.fn(async (id: string): Promise<void> => void id),
       respawn: vi.fn(async () => {}),
+      adopt: vi.fn(async (): Promise<string[]> => []),
     },
   };
 });
 
 vi.mock('../../terminal/registry', () => ({ terminals: registry.terminals }));
 
-const { openTerminal, terminalTool, TERMINAL_TOOL_ID } = await import('./index');
+const { adoptTerminals, openTerminal, resetTerminalAdoption, terminalTool, TERMINAL_TOOL_ID } = await import('./index');
 
 const A = 'A' as AppSessionId;
 const B = 'B' as AppSessionId;
@@ -230,6 +231,47 @@ describe('terminal tool close', () => {
     terminalTool.dispose(failing);
     await vi.waitFor(() => expect(logged).toHaveBeenCalledOnce());
     logged.mockRestore();
+  });
+});
+
+// C8a's ruling (2026-09-29): a restored tab waits for the page's re-adoption, so it reattaches to its running pty.
+describe('re-adoption before a tab opens a shell', () => {
+  beforeEach(() => resetTerminalAdoption());
+  afterEach(() => resetTerminalAdoption());
+
+  it('opens nothing while the adoption is in flight, then takes the pty re-adopted under the tab’s label', async () => {
+    let answer!: (ids: string[]) => void;
+    registry.terminals.adopt.mockImplementationOnce(() => new Promise((resolve) => (answer = resolve)));
+    const adoption = adoptTerminals();
+    const state = newState({ instanceId: 'terminal:restored' });
+    expect(state.terminalId).toBeNull();
+    expect(registry.terminals.open).not.toHaveBeenCalled();
+    // What the registry's adopt does for a live pty: an entry under the pty's label.
+    registry.terminals.open({ appSessionId: A, label: 'terminal:restored', cwd: '/tmp/maws-harness/a' });
+    registry.terminals.open.mockClear();
+    answer(['t1']);
+    await adoption;
+    await vi.waitFor(() => expect(state.terminalId).toBe('t1'));
+    expect(registry.terminals.open).not.toHaveBeenCalled();
+  });
+
+  it('opens its own shell once the adoption answers without a pty for it, and after a failed adoption', async () => {
+    let answer!: (ids: string[]) => void;
+    registry.terminals.adopt.mockImplementationOnce(() => new Promise((resolve) => (answer = resolve)));
+    const adoption = adoptTerminals();
+    const state = newState({ instanceId: 'terminal:new' });
+    answer([]);
+    await adoption;
+    await vi.waitFor(() => expect(state.terminalId).toBe('t1'));
+    expect(registry.terminals.open).toHaveBeenCalledOnce();
+
+    resetTerminalAdoption();
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    registry.terminals.adopt.mockRejectedValueOnce(new Error('pty host gone'));
+    await adoptTerminals();
+    expect(logged).toHaveBeenCalledOnce();
+    logged.mockRestore();
+    expect(newState({ instanceId: 'terminal:after' }).terminalId).toBe('t2');
   });
 });
 

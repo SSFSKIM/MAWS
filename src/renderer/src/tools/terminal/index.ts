@@ -3,6 +3,7 @@
 // panel close and session switch under a pin; and `openTerminal`, C10's entry point for "attach in a terminal tab".
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
+import type { PtyInfo } from '@shared/ipc/schema';
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import { panelHost } from '../../panel/host';
 import type { PanelTool, PanelToolInit } from '../../panel/tool';
@@ -36,12 +37,39 @@ export interface TerminalTabState {
   focusSeen: number; // the last X5 `focusRequest` the view acted on or used up (the counter outlives the view's mounts)
 }
 
+// Re-adoption after a renderer reload (C8a's ruling, 2026-09-29): the page starts it once, before any tab could want a
+// shell, and until it has answered no terminal opens, so a restored tab reattaches to the pty still running under its
+// label (the checkpoint reattach) instead of starting a second shell. The panel host restores tabs when the layout
+// hydrates, which C5 drives, so the order is enforced here rather than by starting adoption first.
+let adoption: Promise<TerminalId[]> | null = null;
+let adoptionSettled = false;
+export function adoptTerminals(accept?: (info: PtyInfo) => boolean): Promise<TerminalId[]> {
+  adoption ??= terminals
+    .adopt(accept)
+    .catch((error: unknown) => {
+      console.error('[terminal] re-adoption failed; tabs open new shells', error);
+      return [];
+    })
+    .finally(() => void (adoptionSettled = true));
+  return adoption;
+}
+// Tests: forget the page's adoption.
+export function resetTerminalAdoption(): void {
+  adoption = null;
+  adoptionSettled = false;
+}
+
 // Starts the tab's terminal if it has none: the one the registry re-adopted under this tab's label after a reload, or
 // a new one in `params.cwd`, else the session's directory. A tab with no session yet (X5 allows a pinned tab to be
 // restored while Overview is shown) stays pending; its view asks for a session and calls this again when one is shown.
+// While the page's adoption is in flight the tab also stays pending and is retried when it answers.
 export function ensureTerminal(state: TerminalTabState, shown: { appSessionId: AppSessionId | null; session: SessionRecord | null }): TerminalId | null {
   const current = state.ui.getState().terminalId;
   if (current) return current;
+  if (adoption && !adoptionSettled) {
+    void adoption.then(() => ensureTerminal(state, shown));
+    return null;
+  }
   const adopted = terminals.list().find((info) => info.label === state.instanceId);
   const owner = state.owner ?? shown.appSessionId ?? shown.session?.appId ?? null;
   const cwd = state.params.cwd ?? (shown.session ? sessionDirectory(shown.session) : undefined);
