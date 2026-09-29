@@ -217,6 +217,10 @@ describe('ipc schema validates both directions', () => {
       expect(validateCommandInput('engine.shutdown', { graceMs: 5000 }).ok).toBe(true);
       expect(validateCommandInput('engine.sessions', undefined).ok).toBe(true);
       expect(validateCommandInput('session.stop', { appSessionId: 'app-1', reason: 'quit' }).ok).toBe(false);
+      // `#` text is capped at 64 KiB so its synchronous commit is bounded by construction (M5 re-review)
+      const note = (text: string) => validateCommandInput('session.memoryAppend', { appSessionId: 'app-1', text, target: { kind: 'project', path: null } });
+      expect(note('x'.repeat(65_536)).ok).toBe(true);
+      expect(note('x'.repeat(65_537))).toMatchObject({ ok: false, error: { code: 'invalid_input' } });
     });
 
     it('types the launch answer as launching, relay_unreachable or refused with the five reasons', () => {

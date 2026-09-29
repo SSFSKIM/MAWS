@@ -79,7 +79,7 @@ const c3Commands = {
   'session.interrupt': host(input({ cancelEngineQueued: z.boolean() }), z.strictObject({ stillQueued: z.array(z.string()), cancelled: z.array(z.string()) })),
   'session.answer': host(input({ requestId: RequestIdSchema, answer: RequestAnswerSchema }), z.strictObject({ outcome: z.enum(['delivered', 'not_pending', 'write_failed']) })),
   'session.bash': host(input({ command: z.string().min(1) }), z.strictObject({ commandUuid: MessageUuidSchema })),
-  'session.memoryAppend': host(input({ text: z.string().min(1), target: MemoryTargetSchema }), z.strictObject({ path: z.string(), created: z.boolean() })),
+  'session.memoryAppend': host(input({ text: z.string().min(1).max(65_536) /* 64 KiB: the synchronous commit stays bounded (M5 re-review) */, target: MemoryTargetSchema }), z.strictObject({ path: z.string(), created: z.boolean() })),
   // mutations
   'session.setPermissionMode': host(input({ mode: PermissionModeSchema }), z.strictObject({ effective: PermissionModeSchema, refusal: AutoModeRefusalCodeSchema.nullable(), error: z.string().nullable() })),
   'session.setModel': host(input({ model: z.string().nullable() }), z.strictObject({ ok: z.boolean(), error: z.string().nullable(), code: z.string().nullable() })),
