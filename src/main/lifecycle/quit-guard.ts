@@ -8,7 +8,9 @@
 // the existing path; otherwise it asks Quit, Quit when idle or Cancel. Quit stops the engine host's sessions
 // (`engine.shutdown`) and quits; Quit when idle holds the quit, publishes the waiting report for the page's banner,
 // re-reads it on every status change and every 2 s, and quits at zero. Foreign-live sessions and the owner's terminals
-// outside MAWS are never waited on (the statuses and the pty table are MAWS's own). The end-to-end smoke answers
+// outside MAWS are never waited on (the statuses and the pty table are MAWS's own). Quitting is one flight: once it
+// starts, outside quits stay held and any report, question or wait still out is inert until the one final app.quit()
+// (review fix). The end-to-end smoke answers
 // without a dialog. The `Restart` wording waits for P1's updater.
 // C12 end
 import { app, type MessageBoxOptions } from 'electron';
@@ -129,14 +131,22 @@ export interface QuitGuard {
 }
 
 export function installQuitGuard(model: Pick<SessionReadModel, 'midTurnCount' | 'engineStatuses' | 'on'>, deps: QuitGuardDeps): QuitGuard {
-  let disarmed = false;
+  let disarmed = false; // set only right before the one final app.quit()
+  let quitting: Promise<void> | null = null; // the one quit in flight: outside quits stay held, outstanding work is inert
   let asking = false; // a report or a question is under way
   let wait: { report: BusyReport; stop: () => void } | null = null; // each wait is its own object: a cancelled one's reads are inert
   const report = () => busyReport(model, deps.pty);
 
-  const quit = () => {
+  const finalQuit = () => {
     disarmed = true;
     app.quit();
+  };
+  // nothing busy: the existing quit path stops the hosts
+  const quit = () => {
+    if (quitting) return;
+    stopWaiting();
+    quitting = Promise.resolve();
+    finalQuit();
   };
   const stopWaiting = () => {
     if (!wait) return;
@@ -144,15 +154,18 @@ export function installQuitGuard(model: Pick<SessionReadModel, 'midTurnCount' | 
     wait = null;
     deps.publish(null);
   };
-  const quitNow = async () => {
+  const quitNow = (): Promise<void> => {
+    if (quitting) return quitting;
     stopWaiting();
-    disarmed = true;
-    try {
-      await deps.shutdownEngine();
-    } catch (error) {
-      console.error('[quit-guard] stopping the engine failed; quitting anyway', error);
-    }
-    app.quit();
+    quitting = (async () => {
+      try {
+        await deps.shutdownEngine();
+      } catch (error) {
+        console.error('[quit-guard] stopping the engine failed; quitting anyway', error);
+      }
+      finalQuit();
+    })();
+    return quitting;
   };
   const startWaiting = (first: BusyReport) => {
     if (wait) {
@@ -170,7 +183,6 @@ export function installQuitGuard(model: Pick<SessionReadModel, 'midTurnCount' | 
         .then((next) => {
           if (wait !== mine || again) return;
           if (total(next) === 0) {
-            stopWaiting();
             quit();
           } else {
             mine.report = next;
@@ -195,20 +207,19 @@ export function installQuitGuard(model: Pick<SessionReadModel, 'midTurnCount' | 
   app.on('before-quit', (event) => {
     if (disarmed) return;
     event.preventDefault();
-    if (asking) return;
+    if (asking || quitting) return;
     asking = true;
     const started = Date.now();
     void report()
       .then(async (r) => {
+        if (quitting) return;
         deps.log?.(`quit-report: ${Date.now() - started} ms · ${logParts(r)}`);
-        if (total(r) === 0) {
-          stopWaiting();
-          return quit();
-        }
+        if (total(r) === 0) return quit();
         const answer = await deps.ask(r).catch((error: unknown) => {
           console.error('[quit-guard] the quit question failed; treating it as Cancel', error);
           return 'cancel' as const;
         });
+        if (quitting) return; // the banner's Quit now answered first
         if (answer === 'quit') await quitNow();
         else if (answer === 'when_idle') startWaiting(r);
         // Cancel keeps the app, and leaves a wait already under way as it was (the banner has its own Cancel)

@@ -379,6 +379,59 @@ function deferredPty() {
   return { pty, state, lists, answer: async (index: number, ptys = [{ ptyId: 't', alive: true }]) => (lists[index]!(ptys), await settle(), await settle()) };
 }
 
+// review fix: quitting is one flight; the guard keeps holding outside quits until its one final app.quit()
+describe('quitting happens once', () => {
+  function deferredShutdown() {
+    let finish!: () => void;
+    const shutdownEngine = vi.fn(() => new Promise<void>((resolve) => (finish = resolve)));
+    return { shutdownEngine, finish: async () => (finish(), await settle()) };
+  }
+
+  it('a second ⌘Q while the engine is being stopped is held, asks nothing and stops nothing twice', async () => {
+    const s = deferredShutdown();
+    const ask = vi.fn(async () => 'quit' as const);
+    guardDeps(modelWith(midTurn(1)), { ask, shutdownEngine: s.shutdownEngine });
+    electron.app.attempt();
+    await settle();
+    expect(s.shutdownEngine).toHaveBeenCalledOnce();
+    expect(electron.app.attempt()).toBe(false); // still held during the shutdown
+    await settle();
+    expect(ask).toHaveBeenCalledOnce();
+    expect(s.shutdownEngine).toHaveBeenCalledOnce();
+    expect(electron.app.quits).toBe(0);
+    await s.finish();
+    expect(electron.app.quits).toBe(1);
+  });
+
+  it('two Quit now answers before the shutdown ends start one shutdown and one quit', async () => {
+    const s = deferredShutdown();
+    const control = guardDeps(modelWith([status('a', { backgroundTasks: [TASK] })]), { ask: async () => 'when_idle', shutdownEngine: s.shutdownEngine });
+    electron.app.attempt();
+    await settle();
+    control.quitNow();
+    control.quitNow();
+    await settle();
+    expect(s.shutdownEngine).toHaveBeenCalledOnce();
+    await s.finish();
+    expect(electron.app.quits).toBe(1);
+  });
+
+  it('a question still open when Quit now runs is inert once answered', async () => {
+    const s = deferredShutdown();
+    let answer!: (a: 'when_idle') => void;
+    const publish = vi.fn();
+    const control = guardDeps(modelWith([status('a', { backgroundTasks: [TASK] })]), { ask: () => new Promise((resolve) => (answer = resolve)), shutdownEngine: s.shutdownEngine, publish });
+    electron.app.attempt();
+    await settle(); // the question is open
+    control.quitNow();
+    answer('when_idle');
+    await settle();
+    expect(publish).not.toHaveBeenCalledWith(expect.objectContaining({ backgroundWork: 1 })); // no wait begins
+    await s.finish();
+    expect(electron.app.quits).toBe(1);
+  });
+});
+
 // review fix: nothing is decided on session counts older than the terminal read
 describe('the report is fresh when it decides', () => {
   it('a session that turns busy while the terminals are read is asked about, not quit over', async () => {
