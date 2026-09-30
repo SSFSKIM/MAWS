@@ -8,6 +8,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { ModelCatalogueEntry } from '@shared/sessions/models';
 import { useCommand } from '../ipc/query';
 import { useSetup } from '../sessions/store';
+import { baseDirectoryOf } from '../sessions/useSetupIntent';
 import { useSessions } from '../stores/sessions';
 import { effortsOf, presentModels, type ModelRow } from '../widgets/model';
 import { DIRECT_MODEL } from './copy';
@@ -27,8 +28,9 @@ const rowOfEntry = (entry: ModelCatalogueEntry): ModelRow => ({
 
 // The catalogue's Claude-group models (null while it is read, or while `enabled` is false: nothing is asked), from the
 // direct route's cache: the host keys its catalogue by route, and a route left unnamed answers the latest one updated.
-export function useClaudeModels(enabled = true): readonly ModelRow[] | null {
-  const read = useCommand('engine.models', { refresh: false, gateway: 'direct' }, { staleTime: 60_000, enabled });
+// With the session's directory, whose settings may set a model environment of its own (debt wave 5).
+export function useClaudeModels(enabled = true, cwd: string | null = null): readonly ModelRow[] | null {
+  const read = useCommand('engine.models', cwd === null ? { refresh: false, gateway: 'direct' } : { refresh: false, gateway: 'direct', cwd }, { staleTime: 60_000, enabled });
   if (!read.data) return read.isError ? [] : null;
   const rows = read.data.models.map(rowOfEntry);
   const claude = new Set(presentModels(rows).claude.map((m) => m.value));
@@ -44,11 +46,21 @@ export function useCurrentEffort(appSessionId: AppSessionId): Effort | null {
   return parsed.success ? parsed.data : null;
 }
 
+// The directory the session runs in, or will start in: the status's, else the record's, else its setup intent's.
+export function useSessionDirectory(appSessionId: AppSessionId): string | null {
+  const known = useSessions((s) => s.engine.get(appSessionId)?.cwd || s.records.get(appSessionId)?.directory || null);
+  const intended = useSetup((s) => {
+    const intent = s.intents.get(appSessionId);
+    return intent ? baseDirectoryOf(intent.location) : null;
+  });
+  return known ?? intended;
+}
+
 // The chosen row: the human's pick, else (with `preselect`) `default` once the catalogue is read. The switch sheet asks
 // for an explicit pick, since the restart changes the session's model; `pickDirectModel`'s dialog, whose one act is the
 // choice, preselects.
 export function useDirectChoice(appSessionId: AppSessionId, initial: string | null, preselect: boolean, enabled = true) {
-  const models = useClaudeModels(enabled);
+  const models = useClaudeModels(enabled, useSessionDirectory(appSessionId));
   const effort = useCurrentEffort(appSessionId);
   const [picked, pick] = useState<string | null>(initial);
   const row = models === null ? null : (models.find((m) => m.value === picked) ?? (preselect ? preselected(models) : null));
