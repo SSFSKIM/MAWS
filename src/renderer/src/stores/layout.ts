@@ -38,7 +38,9 @@ export interface LayoutState {
   focusedCardAppId: AppSessionId | null;
   // The item a notification click (`attention.navigate`) asked to be shown, for C6's transcript to jump to and clear.
   focusRequest: { appSessionId: AppSessionId; attentionId: AttentionId } | null;
-  hydrate(client: MawsBridge, known: (appSessionId: AppSessionId) => boolean): Promise<void>;
+  // `settle` runs once the reads are in, before `known` is first asked and the early changes are captured (debt wave 5:
+  // the shell drains its batched record events there, and the removals that makes are replayed with the rest).
+  hydrate(client: MawsBridge, known: (appSessionId: AppSessionId) => boolean, settle?: () => void): Promise<void>;
   openTab(ref: TabTarget, opts?: { pane?: model.PaneTarget; activate?: boolean }): void;
   openSession(appSessionId: AppSessionId, opts?: { split?: boolean }): void;
   closeTab(id: string): void;
@@ -120,7 +122,7 @@ export function createLayoutStore() {
       focusedCardAppId: null,
       focusRequest: null,
 
-      async hydrate(client, known) {
+      async hydrate(client, known, settle) {
         const absent: LayoutKey[] = []; // keys layout.json does not hold yet (not keys that failed to read)
         const read = async <T>(key: LayoutKey, schema: z.ZodType<T>, fallback: T): Promise<T> => {
           const result = await client.invoke('layout.get', { key });
@@ -149,6 +151,7 @@ export function createLayoutStore() {
           read('panel.pinned', PanelPinnedSchema, LAYOUT_DEFAULTS.panelPinned),
           ...panelIds.map((id) => read(`panel.${id}`, PanelSessionStateSchema.nullable(), null)),
         ]);
+        settle?.();
         const panelBySession = new Map<AppSessionId, PanelSessionState>();
         panelIds.forEach((id, i) => {
           const state = panels[i];

@@ -194,7 +194,43 @@ describe('shell event subscription', () => {
       expect(stores.sessions.getState().indexing).toBeNull();
     });
 
-    it('until the layout has hydrated, events apply as they arrive: a session the snapshot missed and a newer change restored keeps its saved tab', async () => {
+    // The layout's reads held open, so events can land while hydration waits for them.
+    async function heldLayout(sessions: string[]) {
+      const fake = fakeClient();
+      const stores = { sessions: createSessionsStore(), attention: createAttentionStore(), layout: createLayoutStore() };
+      stores.layout.setState({ hydrated: false });
+      connectShell(fake.client, stores, { batchMs: 60_000 }); // a window that never closes by itself in the test
+      await fake.reply('session.list', { sessions: sessions.map((id) => record(id)), revision: 1 });
+      await fake.reply('session.projects.list', { projects: [project('p1', 0)], revision: 1 });
+      await fake.reply('session.digests', { digests: [] });
+      await fake.reply('attention.list', []);
+      const answerLayout = async (tabs: string[]) => {
+        await fake.reply('layout.list', { keys: ['main.tabs'] });
+        const main = { ...LAYOUT_DEFAULTS.main, panes: [{ tabs: [...LAYOUT_DEFAULTS.main.panes[0].tabs, ...tabs.map((id) => ({ id: `session:${id}`, kind: 'session', appSessionId: id, pinned: false }))], activeTabId: 'overview' }] };
+        for (const value of [null, main, null]) await fake.reply('layout.get', { value }); // regions, main.tabs, panel.pinned
+      };
+      return { fake, stores, answerLayout };
+    }
+
+    it('hydration judges saved tabs against the events still in their window: a session the snapshot missed and a newer change restored keeps its tab', async () => {
+      const { fake, stores, answerLayout } = await heldLayout([]);
+      fake.event('session.changed', { record: record('a'), cause: 'discovered', revision: 2 });
+      await answerLayout(['a']);
+      expect(stores.layout.getState().hydrated).toBe(true);
+      expect(stores.layout.getState().main.panes[0].tabs.map((t) => t.id)).toEqual(['overview', 'session:a']);
+    });
+
+    it('a removal drained by hydration is replayed with the early changes: a session opened during hydration and then removed has no tab', async () => {
+      const { fake, stores, answerLayout } = await heldLayout(['a']);
+      stores.layout.getState().openSession(A);
+      fake.event('session.removed', { appSessionId: 'a', revision: 2 });
+      await answerLayout([]);
+      expect(stores.layout.getState().hydrated).toBe(true);
+      expect(stores.sessions.getState().records.has(A)).toBe(false);
+      expect(stores.layout.getState().main.panes[0].tabs.map((t) => t.id)).toEqual(['overview']);
+    });
+
+    it('a snapshot reply applies after the window’s events that preceded it', async () => {
       const { fake, stores } = setup(60_000); // a window that never closes on its own during the test
       fake.event('session.changed', { record: record('a'), cause: 'discovered', revision: 2 });
       await fake.reply('session.list', { sessions: [], revision: 1 });
