@@ -255,12 +255,17 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
   handle('session.interrupt', async ({ appSessionId, cancelEngineQueued }) => bounded(() => sessionOf(appSessionId).interrupt({ cancelEngineQueued })));
   handle('session.answer', async ({ appSessionId, requestId, answer }) => ({ outcome: await sessionOf(appSessionId).answer(requestId as RequestId, answer as Parameters<EngineSession['answer']>[1]) }));
   handle('session.bash', async ({ appSessionId, command }) => sessionOf(appSessionId).bash(command));
-  handle('session.memoryAppend', async ({ appSessionId, text, target }) => bounded(() => memoryAppend(sessionOf(appSessionId), { text, target }, { budgetMs: BOUNDED_BUDGET_S * 1000 })));
+  handle('session.memoryAppend', async ({ appSessionId, text, target }) => {
+    const session = sessionOf(appSessionId);
+    session.markUsed(); // C12: a `#` note is use
+    return bounded(() => memoryAppend(session, { text, target }, { budgetMs: BOUNDED_BUDGET_S * 1000 }));
+  });
 
   // -- mutations -------------------------------------------------------------------------------------------------------
   handle('session.setPermissionMode', async ({ appSessionId, mode }) =>
     bounded(async () => {
       const { session, client } = ready(appSessionId);
+      session.markUsed(); // C12: a mode change is use, whatever the engine answers
       try {
         const response = await controls.setPermissionMode(client, { mode });
         session.noteRequested({ permissionMode: { mode, refusal: null, effective: response.mode } });
@@ -277,6 +282,7 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
   handle('session.setModel', async ({ appSessionId, model }) =>
     bounded(async () => {
       const { session, client } = ready(appSessionId);
+      session.markUsed(); // C12
       try {
         await controls.setModel(client, { model });
       } catch (error) {
@@ -290,12 +296,17 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
   handle('session.setEffort', async ({ appSessionId, effort }) =>
     bounded(async () => {
       const { session, client } = ready(appSessionId);
+      session.markUsed(); // C12
       await controls.applyFlagSettings(client, { settings: { effortLevel: effort } }); // null clears (M6 observes the live answer)
       session.noteRequested({ effort });
     }),
   );
   handle('session.setThinking', async ({ appSessionId, maxThinkingTokens, display }) =>
-    bounded(async () => void (await controls.setMaxThinkingTokens(ready(appSessionId).client, { max_thinking_tokens: maxThinkingTokens, display }))),
+    bounded(async () => {
+      const { session, client } = ready(appSessionId);
+      session.markUsed(); // C12
+      await controls.setMaxThinkingTokens(client, { max_thinking_tokens: maxThinkingTokens, display });
+    }),
   );
   handle('session.applyFlagSettings', async ({ appSessionId, settings }) =>
     bounded(async () => {

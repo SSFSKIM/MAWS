@@ -390,6 +390,36 @@ describe('engine host X2 surface', () => {
     transport.exit(0);
     expect(await stopping).toEqual({ stopped: 1, forced: 0 });
   });
+
+  // C12 start
+  it('a mode, model, effort or thinking change marks the session used, whatever the engine answers (the budget\'s least-recently-used order, C12)', async () => {
+    const transport: ScriptedTransport = scriptedTransport({
+      onWrite: (frame, t) => {
+        if (frame.type !== 'control_request') return;
+        const reply = (response: object) => queueMicrotask(() => t.push({ type: 'control_response', response: { request_id: frame.request_id, ...response } }));
+        const r = frame.request as { subtype: string; mode?: string };
+        if (r.subtype === 'set_permission_mode') reply({ subtype: 'success', response: { mode: r.mode } });
+        else if (r.subtype === 'set_model') reply({ subtype: 'error', error: 'unknown model', error_code: 'bad_model' });
+        else if (r.subtype === 'apply_flag_settings' || r.subtype === 'set_max_thinking_tokens') reply({ subtype: 'success' });
+        else autoResponder(handshakeResponder())(frame, t);
+      },
+    });
+    const host = engineHost({ spawn: () => transport, binaryProbe: async () => OK_BINARY, checkRelay: async () => OK_RELAY, captureEnv: async () => ({ PATH: '/usr/bin' }) });
+    const id = 'app-ipc' as AppSessionId;
+    await host.call('session.launch', { spec: spec() });
+    await until(() => host.statuses(id).some((s) => s.process === 'ready'), 'ready');
+    const used = vi.spyOn(host.ipc.table.get(id)!, 'markUsed');
+    await host.call('session.setPermissionMode', { appSessionId: id, mode: 'acceptEdits' });
+    await host.call('session.setModel', { appSessionId: id, model: 'nonesuch' });
+    await host.call('session.setEffort', { appSessionId: id, effort: 'low' });
+    await host.call('session.setThinking', { appSessionId: id, maxThinkingTokens: 4096, display: 'summarized' });
+    expect(used).toHaveBeenCalledTimes(4);
+    const stopping = host.call('session.stop', { appSessionId: id, reason: 'stop' });
+    await until(() => transport.requestsOf('end_session').length === 1, 'end_session');
+    transport.exit(0);
+    await stopping;
+  });
+  // C12 end
 });
 
 // C4 start: the one seam into C4's filesystem state service (C4 execution document, Architecture and Cross-child

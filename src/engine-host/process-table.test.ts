@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import { handshakeResponder, scriptedSession } from './conformance/session-harness';
-import { keepAliveReasons, parsePsTree, ProcessTable } from './process-table';
+import { parsePsTree, ProcessTable } from './process-table';
 import { EngineSession } from './session';
 
 const flush = () => new Promise((r) => setImmediate(r));
@@ -12,11 +12,6 @@ afterEach(() => {
 });
 
 describe('keep-alive reasons', () => {
-  it('names every reason §4.4 lists as amended, in a fixed order, and none for an idle process', () => {
-    expect(keepAliveReasons({ turnOpen: false, backgroundTasks: 0, heldPeerMessages: 0 })).toEqual([]);
-    expect(keepAliveReasons({ turnOpen: true, backgroundTasks: 1, heldPeerMessages: 1 })).toEqual(['turn', 'background_tasks', 'held_peer_message']);
-  });
-
   it('a session reports background_tasks after background_tasks_changed with one task and drops it when the list empties (pass1/subagent seq 171, 363)', async () => {
     const s = scriptedSession();
     await s.session.start();

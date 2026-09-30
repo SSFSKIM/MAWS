@@ -3,9 +3,8 @@
 // exit (the session reads `exited`), never at an error, so a retry after a failed handshake cannot start a second
 // writer on one engine session while the first is still dying. The table forwards every session's status to its
 // listeners, samples memory for all live processes with one `ps` every 10 s, and ends them all on shutdown. What would
-// keep a process alive is computed (`keepAliveReasons`) and never acted on: under the interim rule nothing exits a
-// process but stop, archive and shutdown (C12 decides otherwise later). An exited row stays (its status and events still
-// answer) until the id is relaunched, which replaces it, or archived, which releases it.
+// keep a process alive is each status's `keepAlive` (C12: the budget's hard reasons, budget.ts). An exited row stays
+// (its status and events still answer) until the id is relaunched, which replaces it, or archived, which releases it.
 import { execFile } from 'node:child_process';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { EngineSessionStatus } from '@shared/engine/status';
@@ -14,18 +13,6 @@ import type { EngineSession } from './session';
 export const MEMORY_SAMPLE_MS = 10_000;
 
 export type ReserveOutcome = { status: 'launching'; session: EngineSession } | { status: 'refused'; reason: 'already_live'; message: string };
-type KeepAlive = EngineSessionStatus['keepAlive'][number];
-
-// §4.4's list as amended (2026-09-29), in a fixed order: a running turn, background tasks or workflows, a held peer
-// message. Session grants and connected MCP servers no longer keep a process (C12).
-export function keepAliveReasons(s: { turnOpen: boolean; backgroundTasks: number; heldPeerMessages: number }): KeepAlive[] {
-  const reasons: KeepAlive[] = [];
-  if (s.turnOpen) reasons.push('turn');
-  if (s.backgroundTasks > 0) reasons.push('background_tasks');
-  if (s.heldPeerMessages > 0) reasons.push('held_peer_message');
-  return reasons;
-}
-
 // `ps -axo pid=,ppid=,rss=` output (the probe's processTree): own and whole-tree RSS in KiB under a root pid.
 export function parsePsTree(output: string): { sample(pid: number): { rssKiB: number; treeRssKiB: number } | null } {
   const rss = new Map<number, number>();
