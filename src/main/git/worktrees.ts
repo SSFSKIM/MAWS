@@ -52,18 +52,39 @@ const RUNTIME_EXCLUDE_PATTERNS = [
 ];
 export const RUNTIME_EXCLUDE_BLOCK = [RUNTIME_EXCLUDE_MARKER, ...RUNTIME_EXCLUDE_PATTERNS, ''].join('\n');
 
-async function ensureRuntimeExclude(commonDir: string): Promise<void> {
+export interface ExcludeFs {
+  readFile(file: string, encoding: 'utf8'): Promise<string>;
+  appendFile(file: string, data: string): Promise<void>;
+  mkdir(dir: string, opts: { recursive: true }): Promise<unknown>;
+}
+const NODE_FS: ExcludeFs = { readFile, appendFile, mkdir };
+
+// One write at a time per common dir (the service's `mainRoot` canonicalises it), so two creations in one repository
+// never both find no marker and append two blocks (re-review of f0ea3676): each read, check and append runs after the
+// previous one for that directory settled. The chain entry is dropped once it is the last.
+const excludeChains = new Map<string, Promise<void>>();
+export function ensureRuntimeExclude(commonDir: string, fs: ExcludeFs = NODE_FS): Promise<void> {
+  const next = (excludeChains.get(commonDir) ?? Promise.resolve()).then(() => writeRuntimeExclude(commonDir, fs));
+  excludeChains.set(commonDir, next);
+  void next.then(() => {
+    if (excludeChains.get(commonDir) === next) excludeChains.delete(commonDir);
+  });
+  return next;
+}
+
+// Never rejects: a failure is logged and leaves the created worktree alone.
+async function writeRuntimeExclude(commonDir: string, fs: ExcludeFs): Promise<void> {
   const file = join(commonDir, 'info', 'exclude');
   try {
     let text = '';
     try {
-      text = await readFile(file, 'utf8');
+      text = await fs.readFile(file, 'utf8');
       if (text.includes(RUNTIME_EXCLUDE_MARKER)) return;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-      await mkdir(join(commonDir, 'info'), { recursive: true });
+      await fs.mkdir(join(commonDir, 'info'), { recursive: true });
     }
-    await appendFile(file, (text !== '' && !text.endsWith('\n') ? '\n' : '') + RUNTIME_EXCLUDE_BLOCK);
+    await fs.appendFile(file, (text !== '' && !text.endsWith('\n') ? '\n' : '') + RUNTIME_EXCLUDE_BLOCK);
   } catch (error) {
     console.warn(`[worktrees] the runtime exclude block was not written to ${file}: ${error instanceof Error ? error.message : String(error)}`);
   }

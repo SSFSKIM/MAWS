@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'; // C12: mkdtempSync, realpathSync, statSync
+import { tmpdir } from 'node:os'; // C12
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SessionId } from '@shared/graph/ids';
@@ -10,7 +11,7 @@ import { runGit } from '../../../test/support/git-fixture';
 import { FakeHolderHost } from '../../../test/support/holder-host';
 import { emptyRepository, ScratchRepo } from '../../../test/support/scratch-repo';
 import { createGitRunner, type ExecFileFn } from './runner';
-import { RUNTIME_EXCLUDE_BLOCK, RUNTIME_EXCLUDE_MARKER, WorktreeService } from './worktrees'; // C12: the exclude block
+import { ensureRuntimeExclude, RUNTIME_EXCLUDE_BLOCK, RUNTIME_EXCLUDE_MARKER, WorktreeService, type ExcludeFs } from './worktrees'; // C12: the exclude block
 
 // The service is Electron-free (its handlers are worktrees-register.ts's): any import of Electron from here fails.
 vi.mock('electron', () => {
@@ -122,6 +123,60 @@ describe('worktree service over scratch repositories', () => {
         await service.add({ repoRoot: first.path, name: 'c', branch: newBranch('worktree-c') });
         expect(count(read(), RUNTIME_EXCLUDE_MARKER)).toBe(1);
         expect(count(read(), '**/.claude/worktrees/')).toBe(1);
+      });
+
+      // re-review of f0ea3676: the read, the marker check and the append are one step per common dir
+      it('two writes started before either appends end with one block: the second reads only after the first appended', async () => {
+        const dir = join(repo.root, 'fake-common');
+        let text = '';
+        const calls: string[] = [];
+        let release!: () => void;
+        const firstRead = new Promise<void>((r) => (release = r));
+        const fs: ExcludeFs = {
+          readFile: async () => {
+            calls.push('read');
+            if (calls.filter((c) => c === 'read').length === 1) await firstRead;
+            return text;
+          },
+          appendFile: async (_file, data) => {
+            calls.push('append');
+            text += data;
+          },
+          mkdir: async () => undefined,
+        };
+        const both = Promise.all([ensureRuntimeExclude(dir, fs), ensureRuntimeExclude(dir, fs)]);
+        await new Promise((r) => setTimeout(r, 10));
+        expect(calls).toEqual(['read']); // the second is queued behind the first, not reading
+        release();
+        await both;
+        expect(calls).toEqual(['read', 'append', 'read']);
+        expect(text).toBe(RUNTIME_EXCLUDE_BLOCK);
+      });
+
+      it('two concurrent creations in one repository leave one block', async () => {
+        await Promise.all([
+          service.add({ repoRoot: repo.root, name: 'x', branch: newBranch('worktree-x') }),
+          service.add({ repoRoot: repo.root, name: 'y', branch: newBranch('worktree-y') }),
+        ]);
+        expect(count(read(), RUNTIME_EXCLUDE_MARKER)).toBe(1);
+      });
+
+      it('writes to the common dir’s info/exclude when the git dir is separate from the checkout', async () => {
+        const base = realpathSync(mkdtempSync(join(tmpdir(), 'maws-sep-')));
+        try {
+          const work = join(base, 'work');
+          const gitDir = join(base, 'gitdir');
+          await runGit(base, ['init', '-q', '-b', 'main', `--separate-git-dir=${gitDir}`, work]);
+          writeFileSync(join(work, 'a.txt'), 'a\n');
+          await runGit(work, ['add', 'a.txt']);
+          await runGit(work, ['commit', '-q', '-m', 'a']);
+          await service.add({ repoRoot: work, name: 'sep', branch: newBranch('worktree-sep') });
+          expect(readFileSync(join(gitDir, 'info', 'exclude'), 'utf8')).toContain(RUNTIME_EXCLUDE_BLOCK);
+          expect(statSync(join(work, '.git')).isFile()).toBe(true); // the checkout's .git is still git's pointer file
+          expect(existsSync(join(work, '.git', 'info'))).toBe(false);
+        } finally {
+          rmSync(base, { recursive: true, force: true });
+        }
       });
 
       it('a refused add writes nothing', async () => {
