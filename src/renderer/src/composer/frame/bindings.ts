@@ -32,7 +32,7 @@ export interface ModelChoice {
 export interface FrameBindings {
   location: ChipBinding<Location, Location>; // the chip row's LocationChip
   branch: ChipBinding<string | null, string>; // inside the location chip's popover
-  model: ChipBinding<ModelChoice, ModelInfo> & { names?: readonly ModelInfo[] }; // the toolbar's ModelChip (effort inside); names: the session's last listed models, for the chip's label before this mount has read them
+  model: ChipBinding<ModelChoice, ModelInfo> & { names?: readonly ModelInfo[] }; // the toolbar's ModelChip (effort inside); names: the route's catalogue, for the chip's label before this mount has listed the models
   mode: ModeBinding; // the toolbar's ModeChip, on the shared mode menu (M5)
   directories: ChipBinding<string[]>; // AddDirChip
 }
@@ -93,7 +93,7 @@ type ModelOption = ListModelsResponse['models'][number];
 // would each ask the engine, and a replayed engine refuses any request its journal did not record).
 export interface LiveReads {
   models?: readonly ModelOption[] | null;
-  modelNames?: readonly ModelOption[] | null; // the session's last listed models, remembered past any read
+  modelNames?: readonly ModelInfo[] | null; // the route's model catalogue (`engine.models`), naming the model before any list is read
   directories?: readonly string[] | null;
   branch?: string | null;
   branches?: readonly string[];

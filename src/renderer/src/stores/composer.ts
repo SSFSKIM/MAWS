@@ -7,7 +7,7 @@
 // session remembers; M4 adds the composer's own state beside these: the synchronous `starting` gate of an unstarted
 // session's first send, the edit mode a prefill with `editing` enters, and the resubmit state the edit-and-resubmit
 // flow (M4b) drives, each per session so they outlive a tab switch. The final fixes add the models each session's
-// engine last listed, so the model chip names its model once any reader has asked (the ask itself stays lazy).
+// engine last listed (C11's Session info and widgets read them; the model chip names its model from `engine.models`).
 import { create } from 'zustand';
 import type { AppSessionId, MessageUuid, RequestId } from '@shared/graph/ids';
 import type { ListModelsResponse } from '@shared/wire/control';
@@ -214,7 +214,7 @@ export function openComposerWidget(appSessionId: AppSessionId, name: string, arg
 }
 // C11 end
 
-// The session's listed models, kept past any one read (a C10 `engine.models` source replaces this once it lands).
+// The session's listed models, kept past any one read (the model chip's name comes from C10's `engine.models`).
 export const listedModelsOf = (state: ComposerState, appSessionId: AppSessionId): readonly ListedModel[] | null => state.models.get(appSessionId) ?? null;
 
 export function rememberListedModels(appSessionId: AppSessionId, models: readonly ListedModel[]): void {
