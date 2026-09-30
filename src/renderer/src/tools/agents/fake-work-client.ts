@@ -55,6 +55,7 @@ export function fakeAgentWorkClient(): FakeAgentWorkClient {
     readSpill: () => Promise.reject(new Error('no spills in this fake')),
     events: (appSessionId, afterSeq) => call('events', `events ${appSessionId} ${afterSeq}`, [appSessionId, afterSeq]),
     agentEvents: (appSessionId, agentId) => call('agentEvents', `agentEvents ${appSessionId} ${agentId}`, [appSessionId, agentId]),
+    unfollowAgent: async (appSessionId, agentId) => void calls.push(`unfollow ${appSessionId} ${agentId}`),
     steer: (appSessionId, content, priority) => call('steer', `steer ${appSessionId}`, [appSessionId, content, priority]),
     stopTask: (appSessionId, taskId) => call('stopTask', `stopTask ${taskId}`, [appSessionId, taskId]),
     onEventBatch: (listener) => listen(batches, 'eventBatch', listener),

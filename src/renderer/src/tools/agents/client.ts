@@ -19,6 +19,7 @@ export interface AgentWorkClient {
   readSpill(input: FsReadSpillInput): Promise<FsReadSpillOutput>;
   events(appSessionId: AppSessionId, afterSeq: number | null): Promise<EventsSnapshot>; // session.events { afterSeq, limit: null }
   agentEvents(appSessionId: AppSessionId, agentId: AgentId): Promise<SessionEvent[]>; // fs.agentEvents: a child's transcript so far, following it (later events on session.eventBatch); debt wave 4, the relay's receipt
+  unfollowAgent(appSessionId: AppSessionId, agentId: AgentId): Promise<void>; // fs.unfollow for that child only: releases the follow agentEvents started
   steer(appSessionId: AppSessionId, content: string, priority: 'next'): Promise<{ messageUuid: MessageUuid }>; // the relay never sends 'now'
   stopTask(appSessionId: AppSessionId, taskId: TaskId): Promise<void>; // bounded, 8 s
   onEventBatch(listener: (batch: { appSessionId: AppSessionId; events: SessionEvent[] }) => void): () => void;
@@ -40,6 +41,7 @@ export function createAgentWorkClient(bridge: MawsBridge): AgentWorkClient {
     readSpill: async (input) => valueOf(await bridge.invoke('fs.readSpill', input)),
     events: async (appSessionId, afterSeq) => valueOf(await bridge.invoke('session.events', { appSessionId, afterSeq, limit: null })),
     agentEvents: async (appSessionId, agentId) => valueOf(await bridge.invoke('fs.agentEvents', { appSessionId, agentId })).events,
+    unfollowAgent: async (appSessionId, agentId) => valueOf(await bridge.invoke('fs.unfollow', { appSessionId, agentId })),
     steer: async (appSessionId, content, priority) => valueOf(await bridge.invoke('session.steer', { appSessionId, content, priority })),
     stopTask: async (appSessionId, taskId) => valueOf(await bridge.invoke('session.stopTask', { appSessionId, taskId })),
     onEventBatch: (listener) => bridge.on('session.eventBatch', listener),

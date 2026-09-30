@@ -6,6 +6,7 @@ import { createBackfillContext, recordToEvents } from '../../../../engine-host/f
 import { setAgentWorkClient } from './client';
 import { relayText, restoreDraft } from './model/relay';
 import { createRelayStore, relayKey } from './relay-store';
+import { useTranscriptStore } from '../../stores/transcript';
 import { event, recordedReceiptRecord, replayed } from '../../../../../test/support/agents-events';
 import { fakeAgentWorkClient, type FakeAgentWorkClient } from './fake-work-client';
 
@@ -132,6 +133,36 @@ describe('relay store', () => {
       expect(stateOf(LOOPER)?.kind).toBe('forwarded');
     });
 
+    const unfollows = () => fake.calls.filter((c) => c.startsWith('unfollow '));
+
+    it('releases the follow once delivered, or once the child ends, and not while its drill-in holds the transcript', async () => {
+      await send(LOOPER, 'Say PING in your next inbox line', IDLE_UUID);
+      batch(between(150, 200));
+      await fake.answer('agentEvents', []);
+      expect(unfollows()).toEqual([]);
+      batch(receipt('idle'));
+      expect(unfollows()).toEqual([`unfollow A ${LOOPER.agentId}`]);
+
+      await send(LOOPER, 'Say PONG in your next inbox line', 'be019ba5-e49d-4ce6-8116-9a893ac8520f', true);
+      batch(between(285, 320));
+      await fake.answer('agentEvents', []);
+      batch([event('subagent.finished', { taskId: LOOPER.agentId, agentId: LOOPER.agentId }, { seq: 321 })]);
+      expect(relayOf(LOOPER)).toBeUndefined();
+      expect(unfollows()).toHaveLength(2);
+
+      useTranscriptStore.setState((s) => ({ entries: { ...s.entries, [relayKey(A, LOOPER.agentId)]: {} as never } }));
+      try {
+        await send(LOOPER, 'Say PING in your next inbox line', 'third', true);
+        batch(between(150, 200).map((e) => ({ ...e, seq: e.seq! + 1000 })));
+        await fake.answer('agentEvents', []);
+        batch([event('subagent.finished', { taskId: LOOPER.agentId, agentId: LOOPER.agentId }, { seq: 1300 })]);
+        expect(relayOf(LOOPER)).toBeUndefined();
+        expect(unfollows()).toHaveLength(2); // the drill-in's entry keeps the shared follower
+      } finally {
+        useTranscriptStore.getState().drop(relayKey(A, LOOPER.agentId));
+      }
+    });
+
     it('a follow the host refuses leaves the relay forwarded; a relay forwarded to an ended child follows nothing', async () => {
       await send(LOOPER, 'Say PING in your next inbox line', IDLE_UUID);
       batch(between(150, 200));
@@ -141,6 +172,9 @@ describe('relay store', () => {
       batch(between(454, 547));
       expect(stateOf(WALKER)).toMatchObject({ kind: 'forwarded', childEndedAt: '2026-09-29T15:49:19.672Z' });
       expect(fake.inputs.agentEvents).toEqual([['A', LOOPER.agentId]]);
+      batch([event('subagent.finished', { taskId: LOOPER.agentId, agentId: LOOPER.agentId }, { seq: 548 })]);
+      expect(relayOf(LOOPER)).toBeUndefined();
+      expect(unfollows()).toEqual([]); // the refused follow has nothing to release
     });
   });
 
