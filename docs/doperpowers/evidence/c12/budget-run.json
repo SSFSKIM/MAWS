@@ -1,0 +1,993 @@
+{
+  "scratch": {
+    "root": "/private/tmp/maws-c12-m3-1790743220",
+    "config": "/private/tmp/maws-c12-m3-1790743220/config",
+    "userData": "/private/tmp/maws-c12-m3-1790743220/userData",
+    "repositories": {
+      "A": "/private/tmp/maws-c12-m3-1790743220/A",
+      "B": "/private/tmp/maws-c12-m3-1790743220/B"
+    }
+  },
+  "ownerFileCheck": {
+    "before": [],
+    "after": []
+  },
+  "pinLs": {
+    "before": "-rwxr-xr-x@ 1 new  staff  225036032  9월 25 15:10 /Users/new/.local/share/claude/versions/2.1.283",
+    "after": "-rwxr-xr-x@ 1 new  staff  225036032  9월 25 15:10 /Users/new/.local/share/claude/versions/2.1.283"
+  },
+  "sessions": {
+    "A1": "b2ae60ba-92a4-4fb7-9504-955b28a5f9d8",
+    "A2": "423888be-f63c-4002-8064-b1035b8e66c2",
+    "B1": "76259f8e-69bf-4487-baa4-f9f27bb9c80f",
+    "B3": "f4b8b22c-6bb9-4363-8416-1f38bd6a6e7a",
+    "B4": "d942bc97-14c5-42c6-bcda-f8e9ff998535",
+    "B5": "7621beb2-e969-492f-a13f-e1c363ea2d2f",
+    "B6": "961f6453-be50-4b12-a47a-6e46bdc5bd41",
+    "B7": "59471f2d-2785-42c8-8dac-b4f317b1d8c0",
+    "B2": "eee4b592-c92b-49df-b8aa-69e47c569842"
+  },
+  "mcpServersA": {
+    "A1": [
+      {
+        "name": "c12-plain",
+        "status": "connected",
+        "source": "user"
+      },
+      {
+        "name": "c12-kernel",
+        "status": "connected",
+        "source": "project"
+      }
+    ],
+    "A2": [
+      {
+        "name": "c12-plain",
+        "status": "connected",
+        "source": "user"
+      },
+      {
+        "name": "c12-kernel",
+        "status": "connected",
+        "source": "project"
+      }
+    ]
+  },
+  "grant": {
+    "ruleStrings": [
+      "Bash(touch c12-before.txt)"
+    ],
+    "mcpServers": [
+      {
+        "name": "c12-plain",
+        "status": "connected",
+        "source": "user"
+      }
+    ]
+  },
+  "queueB3": {
+    "length": 1,
+    "paused": true
+  },
+  "backgroundB2": {
+    "tasks": [
+      {
+        "taskId": "bscw66u7i",
+        "taskType": "local_bash",
+        "description": "Sleep for 900 seconds in background",
+        "ambient": false
+      }
+    ],
+    "sleepPids": [
+      16055
+    ],
+    "inTree": true,
+    "anywhere": [
+      {
+        "pid": 16055,
+        "ppid": 16053
+      }
+    ]
+  },
+  "budgetBefore": {
+    "limitKiB": 8388608,
+    "totalKiB": 2915712,
+    "sampledAt": "2026-09-30T04:41:20.187Z",
+    "over": false,
+    "overWithoutCandidate": false,
+    "candidates": 4,
+    "settling": 0,
+    "releasing": null,
+    "blocked": [
+      {
+        "appSessionId": "b2ae60ba-92a4-4fb7-9504-955b28a5f9d8",
+        "reasons": [
+          "stateful_mcp"
+        ]
+      },
+      {
+        "appSessionId": "423888be-f63c-4002-8064-b1035b8e66c2",
+        "reasons": [
+          "stateful_mcp"
+        ]
+      },
+      {
+        "appSessionId": "f4b8b22c-6bb9-4363-8416-1f38bd6a6e7a",
+        "reasons": [
+          "queued_messages"
+        ]
+      },
+      {
+        "appSessionId": "d942bc97-14c5-42c6-bcda-f8e9ff998535",
+        "reasons": [
+          "turn",
+          "pending_request"
+        ]
+      },
+      {
+        "appSessionId": "eee4b592-c92b-49df-b8aa-69e47c569842",
+        "reasons": [
+          "background_tasks"
+        ]
+      }
+    ],
+    "lastRelease": null
+  },
+  "treesBefore": {
+    "at": "2026-09-30T04:41:23.755Z",
+    "liveTrees": 9,
+    "sumKiB": 2915712,
+    "sumMiB": 2847.4,
+    "psSumKiB": 2915568,
+    "psSumMiB": 2847.2,
+    "perTree": [
+      {
+        "label": "A1",
+        "appSessionId": "b2ae60ba-92a4-4fb7-9504-955b28a5f9d8",
+        "process": "ready",
+        "exitReason": null,
+        "pid": 13504,
+        "treeRssKiB": 357216,
+        "sampledAt": "2026-09-30T04:41:20.187Z",
+        "keepAlive": [
+          "stateful_mcp"
+        ],
+        "ps": {
+          "treeRssKiB": 357216,
+          "processes": 3,
+          "commands": [
+            "2.1.283",
+            "node",
+            "node"
+          ]
+        }
+      },
+      {
+        "label": "A2",
+        "appSessionId": "423888be-f63c-4002-8064-b1035b8e66c2",
+        "process": "ready",
+        "exitReason": null,
+        "pid": 13656,
+        "treeRssKiB": 355104,
+        "sampledAt": "2026-09-30T04:41:20.187Z",
+        "keepAlive": [
+          "stateful_mcp"
+        ],
+        "ps": {
+          "treeRssKiB": 355104,
+          "processes": 3,
+          "commands": [
+            "2.1.283",
+            "node",
+            "node"
+          ]
+        }
+      },
+      {
+        "label": "B1",
+        "appSessionId": "76259f8e-69bf-4487-baa4-f9f27bb9c80f",
+        "process": "ready",
+        "exitReason": null,
+        "pid": 13891,
+        "treeRssKiB": 316640,
+        "sampledAt": "2026-09-30T04:41:20.187Z",
+        "keepAlive": [],
+        "ps": {
+          "treeRssKiB": 316496,
+          "processes": 2,
+          "commands": [
+            "2.1.283",
+            "node"
+          ]
+        }
+      },
+      {
+        "label": "B2",
+        "appSessionId": "eee4b592-c92b-49df-b8aa-69e47c569842",
+        "process": "ready",
+        "exitReason": null,
+        "pid": 15591,
+        "treeRssKiB": 324624,
+        "sampledAt": "2026-09-30T04:41:20.187Z",
+        "keepAlive": [
+          "background_tasks"
+        ],
+        "ps": {
+          "treeRssKiB": 324624,
+          "processes": 4,
+          "commands": [
+            "2.1.283",
+            "node",
+            "zsh",
+            "sleep"
+          ]
+        }
+      },
+      {
+        "label": "B3",
+        "appSessionId": "f4b8b22c-6bb9-4363-8416-1f38bd6a6e7a",
+        "process": "ready",
+        "exitReason": null,
+        "pid": 14461,
+        "treeRssKiB": 309664,
+        "sampledAt": "2026-09-30T04:41:20.187Z",
+        "keepAlive": [
+          "queued_messages"
+        ],
+        "ps": {
+          "treeRssKiB": 309664,
+          "processes": 2,
+          "commands": [
+            "2.1.283",
+            "node"
+          ]
+        }
+      },
+      {
+        "label": "B4",
+        "appSessionId": "d942bc97-14c5-42c6-bcda-f8e9ff998535",
+        "process": "ready",
+        "exitReason": null,
+        "pid": 14921,
+        "treeRssKiB": 310496,
+        "sampledAt": "2026-09-30T04:41:20.187Z",
+        "keepAlive": [
+          "turn",
+          "pending_request"
+        ],
+        "ps": {
+          "treeRssKiB": 310496,
+          "processes": 2,
+          "commands": [
+            "2.1.283",
+            "node"
+          ]
+        }
+      },
+      {
+        "label": "B5",
+        "appSessionId": "7621beb2-e969-492f-a13f-e1c363ea2d2f",
+        "process": "ready",
+        "exitReason": null,
+        "pid": 15043,
+        "treeRssKiB": 312768,
+        "sampledAt": "2026-09-30T04:41:20.187Z",
+        "keepAlive": [],
+        "ps": {
+          "treeRssKiB": 312768,
+          "processes": 2,
+          "commands": [
+            "2.1.283",
+            "node"
+          ]
+        }
+      },
+      {
+        "label": "B6",
+        "appSessionId": "961f6453-be50-4b12-a47a-6e46bdc5bd41",
+        "process": "ready",
+        "exitReason": null,
+        "pid": 15203,
+        "treeRssKiB": 314256,
+        "sampledAt": "2026-09-30T04:41:20.187Z",
+        "keepAlive": [],
+        "ps": {
+          "treeRssKiB": 314256,
+          "processes": 2,
+          "commands": [
+            "2.1.283",
+            "node"
+          ]
+        }
+      },
+      {
+        "label": "B7",
+        "appSessionId": "59471f2d-2785-42c8-8dac-b4f317b1d8c0",
+        "process": "ready",
+        "exitReason": null,
+        "pid": 15474,
+        "treeRssKiB": 314944,
+        "sampledAt": "2026-09-30T04:41:20.187Z",
+        "keepAlive": [],
+        "ps": {
+          "treeRssKiB": 314944,
+          "processes": 2,
+          "commands": [
+            "2.1.283",
+            "node"
+          ]
+        }
+      }
+    ]
+  },
+  "firstRelease": {
+    "limitMiB": 2547,
+    "sumMiB": 2847,
+    "setAt": "2026-09-30T04:41:23.768Z",
+    "exitAt": "2026-09-30T04:41:23.960Z",
+    "secondsAfterSet": 0.192,
+    "release": {
+      "limitKiB": 2608128,
+      "totalKiB": 2915712
+    }
+  },
+  "budgetAfter": {
+    "limitKiB": 2608128,
+    "totalKiB": 2598992,
+    "sampledAt": "2026-09-30T04:41:50.190Z",
+    "over": false,
+    "overWithoutCandidate": false,
+    "candidates": 3,
+    "settling": 0,
+    "releasing": null,
+    "blocked": [
+      {
+        "appSessionId": "b2ae60ba-92a4-4fb7-9504-955b28a5f9d8",
+        "reasons": [
+          "stateful_mcp"
+        ]
+      },
+      {
+        "appSessionId": "423888be-f63c-4002-8064-b1035b8e66c2",
+        "reasons": [
+          "stateful_mcp"
+        ]
+      },
+      {
+        "appSessionId": "f4b8b22c-6bb9-4363-8416-1f38bd6a6e7a",
+        "reasons": [
+          "queued_messages"
+        ]
+      },
+      {
+        "appSessionId": "d942bc97-14c5-42c6-bcda-f8e9ff998535",
+        "reasons": [
+          "turn",
+          "pending_request"
+        ]
+      },
+      {
+        "appSessionId": "eee4b592-c92b-49df-b8aa-69e47c569842",
+        "reasons": [
+          "background_tasks"
+        ]
+      }
+    ],
+    "lastRelease": {
+      "appSessionId": "76259f8e-69bf-4487-baa4-f9f27bb9c80f",
+      "at": "2026-09-30T04:41:23.774Z",
+      "totalKiB": 2915712
+    }
+  },
+  "treesAfter": {
+    "at": "2026-09-30T04:41:52.171Z",
+    "liveTrees": 8,
+    "sumKiB": 2598992,
+    "sumMiB": 2538.1,
+    "psSumKiB": 2599168,
+    "psSumMiB": 2538.3,
+    "perTree": [
+      {
+        "label": "A1",
+        "appSessionId": "b2ae60ba-92a4-4fb7-9504-955b28a5f9d8",
+        "process": "ready",
+        "exitReason": null,
+        "pid": 13504,
+        "treeRssKiB": 357248,
+        "sampledAt": "2026-09-30T04:41:50.190Z",
+        "keepAlive": [
+          "stateful_mcp"
+        ],
+        "ps": {
+          "treeRssKiB": 357248,
+          "processes": 3,
+          "commands": [
+            "2.1.283",
+            "node",
+            "node"
+          ]
+        }
+      },
+      {
+        "label": "A2",
+        "appSessionId": "423888be-f63c-4002-8064-b1035b8e66c2",
+        "process": "ready",
+        "exitReason": null,
+        "pid": 13656,
+        "treeRssKiB": 355104,
+        "sampledAt": "2026-09-30T04:41:50.190Z",
+        "keepAlive": [
+          "stateful_mcp"
+        ],
+        "ps": {
+          "treeRssKiB": 355104,
+          "processes": 3,
+          "commands": [
+            "2.1.283",
+            "node",
+            "node"
+          ]
+        }
+      },
+      {
+        "label": "B1",
+        "appSessionId": "76259f8e-69bf-4487-baa4-f9f27bb9c80f",
+        "process": "exited",
+        "exitReason": "budget",
+        "pid": 13891,
+        "treeRssKiB": null,
+        "sampledAt": "2026-09-30T04:41:20.187Z",
+        "keepAlive": [],
+        "ps": null
+      },
+      {
+        "label": "B2",
+        "appSessionId": "eee4b592-c92b-49df-b8aa-69e47c569842",
+        "process": "ready",
+        "exitReason": null,
+        "pid": 15591,
+        "treeRssKiB": 325024,
+        "sampledAt": "2026-09-30T04:41:50.190Z",
+        "keepAlive": [
+          "background_tasks"
+        ],
+        "ps": {
+          "treeRssKiB": 325104,
+          "processes": 4,
+          "commands": [
+            "2.1.283",
+            "node",
+            "zsh",
+            "sleep"
+          ]
+        }
+      },
+      {
+        "label": "B3",
+        "appSessionId": "f4b8b22c-6bb9-4363-8416-1f38bd6a6e7a",
+        "process": "ready",
+        "exitReason": null,
+        "pid": 14461,
+        "treeRssKiB": 309648,
+        "sampledAt": "2026-09-30T04:41:50.190Z",
+        "keepAlive": [
+          "queued_messages"
+        ],
+        "ps": {
+          "treeRssKiB": 309648,
+          "processes": 2,
+          "commands": [
+            "2.1.283",
+            "node"
+          ]
+        }
+      },
+      {
+        "label": "B4",
+        "appSessionId": "d942bc97-14c5-42c6-bcda-f8e9ff998535",
+        "process": "ready",
+        "exitReason": null,
+        "pid": 14921,
+        "treeRssKiB": 310448,
+        "sampledAt": "2026-09-30T04:41:50.190Z",
+        "keepAlive": [
+          "turn",
+          "pending_request"
+        ],
+        "ps": {
+          "treeRssKiB": 310448,
+          "processes": 2,
+          "commands": [
+            "2.1.283",
+            "node"
+          ]
+        }
+      },
+      {
+        "label": "B5",
+        "appSessionId": "7621beb2-e969-492f-a13f-e1c363ea2d2f",
+        "process": "ready",
+        "exitReason": null,
+        "pid": 15043,
+        "treeRssKiB": 312624,
+        "sampledAt": "2026-09-30T04:41:50.190Z",
+        "keepAlive": [],
+        "ps": {
+          "treeRssKiB": 312720,
+          "processes": 2,
+          "commands": [
+            "2.1.283",
+            "node"
+          ]
+        }
+      },
+      {
+        "label": "B6",
+        "appSessionId": "961f6453-be50-4b12-a47a-6e46bdc5bd41",
+        "process": "ready",
+        "exitReason": null,
+        "pid": 15203,
+        "treeRssKiB": 314096,
+        "sampledAt": "2026-09-30T04:41:50.190Z",
+        "keepAlive": [],
+        "ps": {
+          "treeRssKiB": 314096,
+          "processes": 2,
+          "commands": [
+            "2.1.283",
+            "node"
+          ]
+        }
+      },
+      {
+        "label": "B7",
+        "appSessionId": "59471f2d-2785-42c8-8dac-b4f317b1d8c0",
+        "process": "ready",
+        "exitReason": null,
+        "pid": 15474,
+        "treeRssKiB": 314800,
+        "sampledAt": "2026-09-30T04:41:50.190Z",
+        "keepAlive": [],
+        "ps": {
+          "treeRssKiB": 314800,
+          "processes": 2,
+          "commands": [
+            "2.1.283",
+            "node"
+          ]
+        }
+      }
+    ]
+  },
+  "releases": [
+    {
+      "label": "B1",
+      "appSessionId": "76259f8e-69bf-4487-baa4-f9f27bb9c80f",
+      "at": "2026-09-30T04:41:23.774Z",
+      "totalKiB": 2915712,
+      "totalMiB": 2847.4
+    }
+  ],
+  "releasedSurfaces": {
+    "released": [
+      "B1"
+    ],
+    "markTitle": "Released at 21:41 to stay under the 2.5 GB memory budget · Send resumes it",
+    "sessionInfo": {
+      "process": "Released at 21:41 to stay under 2.5 GB",
+      "memoryBudget": "2.5 GB of 2.5 GB · 8 sessions"
+    },
+    "attention": {
+      "before": [
+        "d942bc97-14c5-42c6-bcda-f8e9ff998535:aaeaa201-6fdf-47d9-ae60-397eb7ab1b14"
+      ],
+      "after": [
+        "d942bc97-14c5-42c6-bcda-f8e9ff998535:aaeaa201-6fdf-47d9-ae60-397eb7ab1b14"
+      ]
+    },
+    "notified": {
+      "before": 2,
+      "after": 2
+    },
+    "screenshots": [
+      "docs/doperpowers/evidence/c12/c12-live-released-light.png",
+      "docs/doperpowers/evidence/c12/c12-live-released-dark.png"
+    ]
+  },
+  "resume": {
+    "sendAt": "2026-09-30T04:41:52.615Z",
+    "readySeconds": 0.634,
+    "userFrameSeconds": 0.535,
+    "journalPath": "$C12/userData/engine-host/journal/76259f8e-69bf-4487-baa4-f9f27bb9c80f/4c5ug7wm.jsonl",
+    "reconnect": [
+      {
+        "event": "reconnect",
+        "phase": "attempting",
+        "attempt": 1,
+        "maxAttempts": 1,
+        "trigger": "process_exit",
+        "reason": null
+      },
+      {
+        "event": "reconnect",
+        "phase": "reconnected",
+        "attempt": 1,
+        "maxAttempts": 1,
+        "trigger": "process_exit",
+        "reason": null
+      }
+    ],
+    "spawnResume": true,
+    "userFrames": 1,
+    "canUseTool": 0,
+    "bashCommands": [
+      "touch c12-before.txt"
+    ],
+    "grantsAfter": [
+      "Bash(touch c12-before.txt)"
+    ],
+    "screenshots": [
+      "docs/doperpowers/evidence/c12/c12-live-resumed-light.png",
+      "docs/doperpowers/evidence/c12/c12-live-resumed-dark.png"
+    ]
+  },
+  "noCandidate": {
+    "limitMiB": 1518,
+    "protectedMiB": 1618.6,
+    "setAt": "2026-09-30T04:41:57.591Z",
+    "bannerSeconds": 43.031,
+    "banner": "Memory budget exceeded · 5 sessions hold work MAWS will not stop",
+    "budget": {
+      "limitKiB": 1554432,
+      "totalKiB": 1661040,
+      "sampledAt": "2026-09-30T04:42:50.196Z",
+      "over": true,
+      "overWithoutCandidate": true,
+      "candidates": 0,
+      "settling": 0,
+      "releasing": null,
+      "blocked": [
+        {
+          "appSessionId": "b2ae60ba-92a4-4fb7-9504-955b28a5f9d8",
+          "reasons": [
+            "stateful_mcp"
+          ]
+        },
+        {
+          "appSessionId": "423888be-f63c-4002-8064-b1035b8e66c2",
+          "reasons": [
+            "stateful_mcp"
+          ]
+        },
+        {
+          "appSessionId": "f4b8b22c-6bb9-4363-8416-1f38bd6a6e7a",
+          "reasons": [
+            "queued_messages"
+          ]
+        },
+        {
+          "appSessionId": "d942bc97-14c5-42c6-bcda-f8e9ff998535",
+          "reasons": [
+            "turn",
+            "pending_request"
+          ]
+        },
+        {
+          "appSessionId": "eee4b592-c92b-49df-b8aa-69e47c569842",
+          "reasons": [
+            "background_tasks"
+          ]
+        }
+      ],
+      "lastRelease": {
+        "appSessionId": "76259f8e-69bf-4487-baa4-f9f27bb9c80f",
+        "at": "2026-09-30T04:42:20.193Z",
+        "totalKiB": 1978768
+      }
+    },
+    "releases": [
+      {
+        "label": "B5",
+        "appSessionId": "7621beb2-e969-492f-a13f-e1c363ea2d2f",
+        "at": "2026-09-30T04:41:57.595Z",
+        "totalKiB": 2598992
+      },
+      {
+        "label": "B6",
+        "appSessionId": "961f6453-be50-4b12-a47a-6e46bdc5bd41",
+        "at": "2026-09-30T04:42:00.192Z",
+        "totalKiB": 2605376
+      },
+      {
+        "label": "B7",
+        "appSessionId": "59471f2d-2785-42c8-8dac-b4f317b1d8c0",
+        "at": "2026-09-30T04:42:10.192Z",
+        "totalKiB": 2293552
+      },
+      {
+        "label": "B1",
+        "appSessionId": "76259f8e-69bf-4487-baa4-f9f27bb9c80f",
+        "at": "2026-09-30T04:42:20.193Z",
+        "totalKiB": 1978768
+      }
+    ],
+    "trees": {
+      "at": "2026-09-30T04:42:51.711Z",
+      "liveTrees": 5,
+      "sumKiB": 1661040,
+      "sumMiB": 1622.1,
+      "psSumKiB": 1661056,
+      "psSumMiB": 1622.1,
+      "perTree": [
+        {
+          "label": "A1",
+          "appSessionId": "b2ae60ba-92a4-4fb7-9504-955b28a5f9d8",
+          "process": "ready",
+          "exitReason": null,
+          "pid": 13504,
+          "treeRssKiB": 357632,
+          "sampledAt": "2026-09-30T04:42:50.196Z",
+          "keepAlive": [
+            "stateful_mcp"
+          ],
+          "ps": {
+            "treeRssKiB": 357584,
+            "processes": 3,
+            "commands": [
+              "2.1.283",
+              "node",
+              "node"
+            ]
+          }
+        },
+        {
+          "label": "A2",
+          "appSessionId": "423888be-f63c-4002-8064-b1035b8e66c2",
+          "process": "ready",
+          "exitReason": null,
+          "pid": 13656,
+          "treeRssKiB": 355568,
+          "sampledAt": "2026-09-30T04:42:50.196Z",
+          "keepAlive": [
+            "stateful_mcp"
+          ],
+          "ps": {
+            "treeRssKiB": 355568,
+            "processes": 3,
+            "commands": [
+              "2.1.283",
+              "node",
+              "node"
+            ]
+          }
+        },
+        {
+          "label": "B1",
+          "appSessionId": "76259f8e-69bf-4487-baa4-f9f27bb9c80f",
+          "process": "exited",
+          "exitReason": "budget",
+          "pid": 18029,
+          "treeRssKiB": null,
+          "sampledAt": "2026-09-30T04:42:20.192Z",
+          "keepAlive": [],
+          "ps": null
+        },
+        {
+          "label": "B2",
+          "appSessionId": "eee4b592-c92b-49df-b8aa-69e47c569842",
+          "process": "ready",
+          "exitReason": null,
+          "pid": 15591,
+          "treeRssKiB": 326784,
+          "sampledAt": "2026-09-30T04:42:50.196Z",
+          "keepAlive": [
+            "background_tasks"
+          ],
+          "ps": {
+            "treeRssKiB": 326784,
+            "processes": 4,
+            "commands": [
+              "2.1.283",
+              "node",
+              "zsh",
+              "sleep"
+            ]
+          }
+        },
+        {
+          "label": "B3",
+          "appSessionId": "f4b8b22c-6bb9-4363-8416-1f38bd6a6e7a",
+          "process": "ready",
+          "exitReason": null,
+          "pid": 14461,
+          "treeRssKiB": 310112,
+          "sampledAt": "2026-09-30T04:42:50.196Z",
+          "keepAlive": [
+            "queued_messages"
+          ],
+          "ps": {
+            "treeRssKiB": 310144,
+            "processes": 2,
+            "commands": [
+              "2.1.283",
+              "node"
+            ]
+          }
+        },
+        {
+          "label": "B4",
+          "appSessionId": "d942bc97-14c5-42c6-bcda-f8e9ff998535",
+          "process": "ready",
+          "exitReason": null,
+          "pid": 14921,
+          "treeRssKiB": 310944,
+          "sampledAt": "2026-09-30T04:42:50.196Z",
+          "keepAlive": [
+            "turn",
+            "pending_request"
+          ],
+          "ps": {
+            "treeRssKiB": 310976,
+            "processes": 2,
+            "commands": [
+              "2.1.283",
+              "node"
+            ]
+          }
+        },
+        {
+          "label": "B5",
+          "appSessionId": "7621beb2-e969-492f-a13f-e1c363ea2d2f",
+          "process": "exited",
+          "exitReason": "budget",
+          "pid": 15043,
+          "treeRssKiB": null,
+          "sampledAt": "2026-09-30T04:41:50.190Z",
+          "keepAlive": [],
+          "ps": null
+        },
+        {
+          "label": "B6",
+          "appSessionId": "961f6453-be50-4b12-a47a-6e46bdc5bd41",
+          "process": "exited",
+          "exitReason": "budget",
+          "pid": 15203,
+          "treeRssKiB": null,
+          "sampledAt": "2026-09-30T04:42:00.191Z",
+          "keepAlive": [],
+          "ps": null
+        },
+        {
+          "label": "B7",
+          "appSessionId": "59471f2d-2785-42c8-8dac-b4f317b1d8c0",
+          "process": "exited",
+          "exitReason": "budget",
+          "pid": 15474,
+          "treeRssKiB": null,
+          "sampledAt": "2026-09-30T04:42:10.192Z",
+          "keepAlive": [],
+          "ps": null
+        }
+      ]
+    },
+    "screenshots": [
+      "docs/doperpowers/evidence/c12/c12-live-banner-light.png",
+      "docs/doperpowers/evidence/c12/c12-live-banner-dark.png"
+    ]
+  },
+  "blockedSheet": {
+    "listed": [
+      "A1 READY reply\nstateful server c12-kernel\nStop…",
+      "A2 READY reply\nstateful server c12-kernel\nStop…",
+      "Foreground sleep 20 command\n1 queued message\nStop…",
+      "Creating c12-b4.txt with touch\nmid-turn · waiting for you\nStop…",
+      "Background sleep 900 command\n1 background task\nStop…"
+    ],
+    "disclosure": "1 background task is still running and will be stopped:\n\nSleep for 900 seconds in background",
+    "unchangedAfterCancel": true,
+    "screenshots": [
+      "docs/doperpowers/evidence/c12/c12-live-blocked-sheet-light.png",
+      "docs/doperpowers/evidence/c12/c12-live-blocked-sheet-dark.png",
+      "docs/doperpowers/evidence/c12/c12-live-stop-sheet-light.png",
+      "docs/doperpowers/evidence/c12/c12-live-stop-sheet-dark.png"
+    ]
+  },
+  "stopB2": {
+    "exit": {
+      "code": 0,
+      "signal": null,
+      "reason": "stop",
+      "at": "2026-09-30T04:42:55.026Z",
+      "release": null
+    },
+    "sleepPidsGone": [
+      16055
+    ],
+    "othersUnchanged": true
+  },
+  "stoppedSend": {
+    "disabled": true,
+    "title": "Session ended"
+  },
+  "settingsField": {
+    "typed": "12.5",
+    "memoryBudgetMiB": 12800
+  },
+  "consoleErrors": [],
+  "journalsDir": "$C12/userData/engine-host/journal",
+  "spend": {
+    "upperBoundUsd": 0.4315,
+    "perSessionUsd": 0.3545,
+    "journals": [
+      {
+        "appSessionId": "423888be-f63c-4002-8064-b1035b8e66c2",
+        "file": "5mxrukbv.jsonl",
+        "costUsd": 0.022945
+      },
+      {
+        "appSessionId": "59471f2d-2785-42c8-8dac-b4f317b1d8c0",
+        "file": "2fd5sbqr.jsonl",
+        "costUsd": 0.022905000000000002
+      },
+      {
+        "appSessionId": "7621beb2-e969-492f-a13f-e1c363ea2d2f",
+        "file": "zb5chtvc.jsonl",
+        "costUsd": 0.022905000000000002
+      },
+      {
+        "appSessionId": "76259f8e-69bf-4487-baa4-f9f27bb9c80f",
+        "file": "4c5ug7wm.jsonl",
+        "costUsd": 0.09231999999999999
+      },
+      {
+        "appSessionId": "76259f8e-69bf-4487-baa4-f9f27bb9c80f",
+        "file": "w3vfciac.jsonl",
+        "costUsd": 0.07702999999999999
+      },
+      {
+        "appSessionId": "961f6453-be50-4b12-a47a-6e46bdc5bd41",
+        "file": "tg4an6vs.jsonl",
+        "costUsd": 0.027969
+      },
+      {
+        "appSessionId": "b2ae60ba-92a4-4fb7-9504-955b28a5f9d8",
+        "file": "c7jlew6l.jsonl",
+        "costUsd": 0.0682426
+      },
+      {
+        "appSessionId": "d942bc97-14c5-42c6-bcda-f8e9ff998535",
+        "file": "4rn6l7ut.jsonl",
+        "costUsd": 0.029848
+      },
+      {
+        "appSessionId": "eee4b592-c92b-49df-b8aa-69e47c569842",
+        "file": "3yf2jsb7.jsonl",
+        "costUsd": 0.0375392
+      },
+      {
+        "appSessionId": "f4b8b22c-6bb9-4363-8416-1f38bd6a6e7a",
+        "file": "gsm4ovyx.jsonl",
+        "costUsd": 0.029800999999999998
+      }
+    ]
+  },
+  "m3SpendAcrossRuns": {
+    "note": "M3 took four live runs, each under a fresh scratch root; each figure is that run's journal upper bound (the sum of every process's largest result.total_cost_usd). Runs 1 to 3 stopped at spec or product defects fixed before run 4, which wrote this file.",
+    "runsUsd": [
+      0.2898,
+      0.329,
+      0.4375,
+      0.4315
+    ],
+    "totalUsd": 1.4878,
+    "limitUsd": 5
+  },
+  "figures": {
+    "trees": 9,
+    "sumMiB": 2847.4,
+    "psSumMiB": 2847.2,
+    "budgetMiB": 2547,
+    "releases": 1,
+    "resumeSeconds": 0.634
+  }
+}
