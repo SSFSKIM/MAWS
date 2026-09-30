@@ -797,7 +797,7 @@ describe('the custody gate', () => {
   const SID = sessionIdFor(0xc12);
   let h: SessionHarness;
   let repo: ScratchRepo;
-  let verdict: () => Promise<typeof REFUSAL | null>;
+  let verdict: () => Promise<{ reason: string; message: string } | null>;
   beforeEach(async () => {
     verdict = async () => REFUSAL;
     h = await new SessionHarness({ launchGate: () => verdict() }).start();
@@ -828,6 +828,15 @@ describe('the custody gate', () => {
     expect(h.host.launches).toEqual([]);
     expect(h.host.calledWith('fs.unfollow')).toEqual([]);
     expect(h.index.sessions.get(record.appId)).toMatchObject({ engineSessionId: SID });
+  });
+
+  it('a gate that ran out of time fails the setup with the host’s state named, launching nothing', async () => {
+    const message = 'The engine host is starting and did not take the engine configuration within 30 s. Try again once it is ready, or restart MAWS.';
+    verdict = async () => ({ reason: 'host_unavailable', message });
+    const { appSessionId: id } = await h.service.create({ projectId: null, location: { kind: 'directory', path: h.work } });
+    await h.service.startSession(id, { message: OK_MESSAGE, options: {} });
+    expect(await h.settled(id)).toMatchObject({ phase: 'failed', outcome: { kind: 'error', message: `host_unavailable: ${message}`, resources: { record: 'none' } } });
+    expect(h.host.launches).toEqual([]);
   });
 
   it('holds a setup until the gate answers, and a passing gate lets the launch go', async () => {

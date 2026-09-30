@@ -1,7 +1,8 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'; // C12: afterEach, beforeEach
 import type { CommandResult, HostState, Settings } from '@shared/ipc/schema';
 import { SETTINGS_DEFAULTS_V4 } from '@shared/settings/defaults';
-import { startEngineConfigure, type EngineConfigureDeps } from './engine-configure';
+import { CONFIGURE_WAIT_MS, startEngineConfigure, type EngineConfigureDeps } from './engine-configure'; // C12: CONFIGURE_WAIT_MS
+import { REQUEST_TIMEOUT_MS, RESTART_BACKOFF_MS } from '../hosts/supervisor'; // C12
 import type { Custody } from '../engine/custody'; // C12
 
 const INFO = { path: '/Users/new/.local/share/claude/versions/2.1.283', expectedVersion: '2.1.283', version: '2.1.283', ok: true, error: null };
@@ -285,6 +286,62 @@ describe('custody: main configures the host with the copy MAWS keeps', () => {
     h.moveHost('ready');
     expect(h.dispatch).toHaveBeenCalledExactlyOnceWith({ binaryPath: null, expectedVersion: '2.1.283' });
     await h.configure.applied();
+  });
+});
+
+// The waits are bounded (M4 review fix): a host that never becomes ready, or a copy still being made, refuses the launch
+// and fails `applied` after CONFIGURE_WAIT_MS with words naming what was waited on, instead of leaving a setup at
+// "Starting" or the Settings tab waiting for good.
+describe('the gate and applied give up after CONFIGURE_WAIT_MS', () => {
+  const ok = (version: string): Custody => ({ state: 'ok', path: `/u/engine/${version}/claude`, manifest: { version, sha256: 'x', size: 1, source: '/s', copiedAt: 't' } });
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it('is 30 s, well past the supervisor’s longest restart backoff and its 10 s request timeout', () => {
+    expect(CONFIGURE_WAIT_MS).toBe(30_000);
+    expect(CONFIGURE_WAIT_MS).toBeGreaterThan(Math.max(...RESTART_BACKOFF_MS) + REQUEST_TIMEOUT_MS);
+  });
+
+  it('a host still starting: the gate refuses naming its state, and applied rejects the same way', async () => {
+    const h = harness('starting', undefined, async (version) => ok(version));
+    const gate = h.configure.launchGate();
+    const applied = h.configure.applied();
+    applied.catch(() => {}); // asserted below, after the clock moves
+    await vi.advanceTimersByTimeAsync(CONFIGURE_WAIT_MS - 1);
+    let answered = false;
+    void gate.then(() => (answered = true));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(answered).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(gate).resolves.toEqual({ status: 'refused', reason: 'host_unavailable', message: 'The engine host is starting and did not take the engine configuration within 30 s. Try again once it is ready, or restart MAWS.' });
+    await expect(applied).rejects.toThrow('The engine host is starting and did not take the engine configuration within 30 s.');
+  });
+
+  it('a host restarting when the first push never went out is named as restarting', async () => {
+    const h = harness('restarting', undefined, async (version) => ok(version));
+    const gate = h.configure.launchGate();
+    await vi.advanceTimersByTimeAsync(CONFIGURE_WAIT_MS);
+    await expect(gate).resolves.toMatchObject({ reason: 'host_unavailable', message: expect.stringContaining('The engine host is restarting') });
+  });
+
+  it('a copy still being made is named as such, whatever the host', async () => {
+    const h = harness('ready', undefined, () => new Promise<Custody>(() => {}));
+    const gate = h.configure.launchGate();
+    const applied = h.configure.applied();
+    applied.catch(() => {});
+    await vi.advanceTimersByTimeAsync(CONFIGURE_WAIT_MS);
+    await expect(gate).resolves.toEqual({ status: 'refused', reason: 'binary_missing', message: "MAWS's copy of Claude Code 2.1.283 was not ready within 30 s. Try again in a moment, or restart MAWS." });
+    await expect(applied).rejects.toThrow("MAWS's copy of Claude Code 2.1.283 was not ready within 30 s.");
+  });
+
+  it('a host that becomes ready within the bound answers as before, with no refusal', async () => {
+    const h = harness('starting', undefined, async (version) => ok(version));
+    const gate = h.configure.launchGate();
+    await vi.advanceTimersByTimeAsync(CONFIGURE_WAIT_MS - 1_000);
+    h.moveHost('ready');
+    await vi.advanceTimersByTimeAsync(0);
+    await expect(gate).resolves.toBeNull();
+    await expect(h.configure.applied()).resolves.toBeUndefined();
   });
 });
 // C12 end
