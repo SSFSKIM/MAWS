@@ -21,7 +21,15 @@ describe('knownSessionDirectories', () => {
   it('answers the read model alone, with a warning, when the index is unavailable', () => {
     const warn = vi.fn();
     const index = { sessions: { list: () => { throw new Error('index unavailable: SQLITE_CANTOPEN'); } } };
-    expect(knownSessionDirectories({ allRecords: () => [held] }, index, warn)).toEqual(['/r/a', '/r/docs']);
+    expect(knownSessionDirectories({ allRecords: () => [held] }, index, { warn })).toEqual(['/r/a', '/r/docs']);
     expect(warn).toHaveBeenCalledExactlyOnceWith('[settings] session directories without the index', expect.any(Error));
+  });
+
+  // Debt wave 4: C7's `@` listing roots read the same walk, unarchived only (from the read model as from the index)
+  it('leaves archived sessions out on request, from the read model and the index alike', () => {
+    const list = vi.fn(() => [worktree]);
+    const heldArchived = { ...archived, directory: '/r/held-archived' };
+    expect(knownSessionDirectories({ allRecords: () => [held, heldArchived] }, { sessions: { list } }, { includeArchived: false })).toEqual(['/r/a', '/r/docs', '/r/b', '/r/b-wt']);
+    expect(list).toHaveBeenCalledExactlyOnceWith({ includeArchived: false });
   });
 });

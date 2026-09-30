@@ -6,6 +6,7 @@ import type { SessionRecord } from '@shared/graph/session';
 import { LsFilesSchema } from '@shared/ipc/schema/git';
 import { GitFixture } from '../../../test/support/git-fixture';
 import { FileLister, listableRoots, WALK_MAX_ENTRIES } from './ls-files';
+import { knownSessionDirectories } from '../settings/session-directories';
 import { createGitRunner } from './runner';
 
 let repo: GitFixture;
@@ -123,6 +124,8 @@ describe('git lsFiles filters and falls back', () => {
       record('/b', false, { additionalDirectories: ['/shared'] }),
       record('/archived', true, { additionalDirectories: ['/archived-extra'] }),
     ];
-    expect(listableRoots(sessions, ['/p', '/a'])).toEqual(['/a', '/a/lib', '/shared', '/a/.claude/worktrees/w', '/b', '/p']);
+    // debt wave 4: main's `roots` reads the sessions through C11's `knownSessionDirectories`, unarchived only
+    const unarchived = knownSessionDirectories({ allRecords: () => sessions.slice(0, 1) }, { sessions: { list: () => sessions.slice(1) } }, { includeArchived: false });
+    expect(listableRoots(unarchived, ['/p', '/a'])).toEqual(['/a', '/a/lib', '/shared', '/a/.claude/worktrees/w', '/b', '/p']);
   });
 });
