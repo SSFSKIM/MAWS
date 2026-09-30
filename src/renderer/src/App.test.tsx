@@ -116,6 +116,9 @@ function fakeMain(initial: SettingsState['settings']['theme']) {
       // C12 start: the memory budget's snapshot at connect (under budget, nothing held)
       case 'engine.budget':
         return { limitKiB: 8_388_608, totalKiB: 0, sampledAt: null, over: false, overWithoutCandidate: false, candidates: 0, settling: 0, releasing: null, blocked: [], lastRelease: null };
+      // M4: Quit when idle's snapshot at connect (main is not waiting)
+      case 'layout.quitWait':
+        return { waiting: null };
       // C12 end
       case 'pty.spawn':
         return { ptyId: 'p1', pid: 3333 };
