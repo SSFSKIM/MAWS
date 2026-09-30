@@ -86,6 +86,7 @@ export function createRelayStore() {
         if (e.kind === 'tool.use' && e.seq !== null && matchesSendMessage(e, relay)) { // (b) is the live parent's row; the receipt below takes either form (O3)
           const parentRounds = parentRoundsBetween(w?.rounds ?? [], state.sentSeq ?? -Infinity, e.seq + 1);
           put(key, { ...relay, state: { kind: 'forwarded', messageUuid: state.messageUuid, sentAt: state.sentAt, toolUseId: e.toolUseId, forwardedAt: e.at, parentRounds, childEndedAt: state.childEndedAt } });
+          if (state.childEndedAt === null) followChild(key, relay);
         }
         return;
       }
@@ -93,6 +94,21 @@ export function createRelayStore() {
       // A forwarded relay's agent ended: the rows in both transcripts are the record. Not for one forwarded to an agent
       // that had already ended, which the forward resumes and whose resume start is the receipt.
       if (ended !== null && state.childEndedAt === null) put(key, null);
+    };
+
+    // Debt wave 4: a live child's receipt reaches no wire on 2.1.283 (O3); it is the `queued_command` attachment its
+    // transcript gains at its next tool round, which C4 surfaces as the child's disk-form `user.message`. Nothing follows
+    // a live child's transcript otherwise (its drill-in reads the parent's stream), so a relay forwarded to a running
+    // child follows it: the answer carries what was written already, and the follower's later events arrive on the
+    // session's batches this store watches. The follower stays with the session's others (a drill-in may share it).
+    const followChild = (key: string, relay: Relay) => {
+      agentWorkClient()
+        .agentEvents(relay.appSessionId, relay.agentId)
+        .then((events) => {
+          for (const e of events) step(key, e);
+          tidy(relay.appSessionId);
+        })
+        .catch(() => {}); // not yet listed, or no meta: the relay rests at forwarded, as before
     };
 
     const onBatch = (id: AppSessionId, events: SessionEvent[]) => {

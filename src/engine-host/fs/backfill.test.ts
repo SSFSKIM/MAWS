@@ -5,6 +5,7 @@ import { SessionEventSchema, type SessionEvent } from '@shared/graph/events';
 import type { AgentId, ParentToolUseId, SessionId } from '@shared/graph/ids';
 import { AgentMetaSchema, currentChain, parseTranscriptRecord, type TranscriptRecord } from '@shared/wire/transcript';
 import { FIXTURE_DIR, loadTranscript, loadTranscriptFixture } from '../../../test/support/fixtures';
+import { recordedReceiptRecord } from '../../../test/support/agents-events';
 import { createBackfillContext, recordToEvents, SPILL_MARKER, startsTurn, type BackfillContext, type SubagentLookup } from './backfill';
 
 const SESSION = 'S' as SessionId;
@@ -183,6 +184,31 @@ describe('transcript records map to X1 events', () => {
     expect(only(before, 'turn.started').map((e) => e.userMessageUuid?.slice(0, 8))).toEqual(['1354a3a3']);
     expect(kinds(atMarker)).toEqual(['user.message']);
     expect(atMarker[0]).toMatchObject({ origin: 'interrupt-marker', isSynthetic: false, content: [{ type: 'text', text: '[Request interrupted by user]' }] });
+  });
+});
+
+// Debt wave 4: the relay's receipt in a live child's transcript (pass3/relay-to-child, R1's idle and busy cases).
+describe("a coordinator's queued_command attachment in a child's transcript", () => {
+  const child = (agentId: string) => createBackfillContext({ sessionId: SESSION, agent: { agentId: agentId as AgentId, parentToolUseId: 'toolu_019WWfE6Ry9diHmJymKAtX7Q' as ParentToolUseId } });
+
+  it.each(['idle', 'busy'] as const)('the recorded %s receipt is a synthetic user.message with the relayed text, opening no turn', (kase) => {
+    const record = recordedReceiptRecord(kase);
+    const events = mapAll([rec(record)], child(record.agentId as string));
+    const messages = only(events, 'user.message');
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toMatchObject({
+      id: `stand-in-receipt-${kase}`, messageUuid: `stand-in-receipt-${kase}`, content: kase === 'idle' ? 'Say PING in your next inbox line' : 'Say PONG in your next inbox line',
+      isSynthetic: true, origin: 'coordinator', agentId: record.agentId, parentToolUseId: 'toolu_019WWfE6Ry9diHmJymKAtX7Q', seq: null, at: record.timestamp,
+    });
+    expect(only(events, 'turn.started')).toEqual([]);
+  });
+
+  it('stays unshown in the main transcript, and for any other attachment or origin', () => {
+    const record = recordedReceiptRecord('idle');
+    expect(only(mapAll([rec(record)]), 'user.message')).toEqual([]);
+    const attachment = record.attachment as Record<string, unknown>;
+    const variants = [{ ...attachment, origin: { kind: 'human' } }, { ...attachment, type: 'environment' }, { ...attachment, prompt: undefined }];
+    for (const variant of variants) expect(only(mapAll([rec({ ...record, attachment: variant })], child(record.agentId as string)), 'user.message')).toEqual([]);
   });
 });
 

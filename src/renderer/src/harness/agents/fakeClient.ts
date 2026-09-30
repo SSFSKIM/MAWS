@@ -123,6 +123,7 @@ export function createFakeAgentWorkClient(init: { session: AppSessionId } & Part
       if (bound) return Promise.resolve(bound.wire.snapshot(afterSeq));
       return new Promise((resolve) => waiting.set(appSessionId, [...(waiting.get(appSessionId) ?? []), (wire) => resolve(wire.snapshot(afterSeq))]));
     },
+    agentEvents: async () => [], // the harness's children have no disk transcript; a receipt comes on the wire it plays
     async steer(appSessionId, content, priority) {
       recorded.steer.push({ appSessionId, content, priority });
       steers += 1;

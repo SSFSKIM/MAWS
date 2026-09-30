@@ -8,7 +8,7 @@ import type { SubagentEntry } from '@shared/ipc/schema/fs';
 import type { AgentWorkClient } from './client';
 
 type Pending = { resolve: (value: unknown) => void; reject: (error: Error) => void };
-type Answerable = 'events' | 'subagents' | 'workflows' | 'steer' | 'stopTask';
+type Answerable = 'events' | 'agentEvents' | 'subagents' | 'workflows' | 'steer' | 'stopTask';
 
 export interface FakeAgentWorkClient {
   client: AgentWorkClient;
@@ -30,8 +30,8 @@ export async function flush(): Promise<void> {
 
 export function fakeAgentWorkClient(): FakeAgentWorkClient {
   const calls: string[] = [];
-  const waiting: Record<Answerable, Pending[]> = { events: [], subagents: [], workflows: [], steer: [], stopTask: [] };
-  const inputs: Record<Answerable, unknown[][]> = { events: [], subagents: [], workflows: [], steer: [], stopTask: [] };
+  const waiting: Record<Answerable, Pending[]> = { events: [], agentEvents: [], subagents: [], workflows: [], steer: [], stopTask: [] };
+  const inputs: Record<Answerable, unknown[][]> = { events: [], agentEvents: [], subagents: [], workflows: [], steer: [], stopTask: [] };
   const batches = new Set<(batch: { appSessionId: AppSessionId; events: SessionEvent[] }) => void>();
   const subagents = new Set<(payload: { appSessionId: AppSessionId; agents: SubagentEntry[] }) => void>();
   const workflowsChanged = new Set<(payload: { appSessionId: AppSessionId; runId: string }) => void>();
@@ -54,6 +54,7 @@ export function fakeAgentWorkClient(): FakeAgentWorkClient {
     tasks: async () => [],
     readSpill: () => Promise.reject(new Error('no spills in this fake')),
     events: (appSessionId, afterSeq) => call('events', `events ${appSessionId} ${afterSeq}`, [appSessionId, afterSeq]),
+    agentEvents: (appSessionId, agentId) => call('agentEvents', `agentEvents ${appSessionId} ${agentId}`, [appSessionId, agentId]),
     steer: (appSessionId, content, priority) => call('steer', `steer ${appSessionId}`, [appSessionId, content, priority]),
     stopTask: (appSessionId, taskId) => call('stopTask', `stopTask ${taskId}`, [appSessionId, taskId]),
     onEventBatch: (listener) => listen(batches, 'eventBatch', listener),
