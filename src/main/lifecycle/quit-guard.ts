@@ -1,9 +1,10 @@
 // Quitting with turns in flight asks first (D-16; C5 execution document, "Quit guard"; residue *Quit coordination*).
 // Mid-turn is counted from C3's engine statuses in the read model (`midTurnCount`), never from the folded digest.
 // C12 start: the widened question (C12 execution document, Interfaces "The quit question"; charter §3 P0 quit line as
-// aligned by D8). The report counts sessions mid-turn, launching or otherwise working (host work in flight, or the engine running or waiting,
-// with no turn), sessions running background tasks or workflows that are not counted so, and terminals whose shell has a foreground command (C9's `pty.foreground`, asked in parallel, an
-// unanswered probe counted busy as C9's close check does). `before-quit` must prevent synchronously and the report is
+// aligned by D8). The report counts sessions mid-turn, launching or otherwise working (host work in flight, or the
+// engine running or waiting, with no turn), sessions running background tasks or workflows that are not counted so,
+// and terminals whose shell has a foreground command (C9's `pty.foreground`, asked in parallel, an unanswered probe
+// counted busy as C9's close check does). `before-quit` must prevent synchronously and the report is
 // asynchronous, so the guard always holds the quit while it computes the report: all zero, it disarms and quits through
 // the existing path; otherwise it asks Quit, Quit when idle or Cancel. Quit stops the engine host's sessions
 // (`engine.shutdown`) and quits; Quit when idle holds the quit, publishes the waiting report for the page's banner,
