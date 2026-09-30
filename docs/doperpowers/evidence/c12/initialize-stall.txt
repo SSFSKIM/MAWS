@@ -1,0 +1,91 @@
+C12 M6: the two resumes that stalled at `initialize` (evidence for a later C3 spike)
+====================================================================================
+
+Context: the pre-run's §10.4 test (e2e/c12-prerun.spec.ts, `ensureLive`) resumes the deep session from its sidebar row
+(right-click › Resume, C10's resume path) on the owner build (dist/mac-arm64/MAWS.app, unsigned, launched by Playwright
+with MAWS_E2E=1). Twice in four such launches the process never answered (the M6 report's "two of five" counted the session's first launch in §10.2, which was not a resume; four is the right count): the test waited 120 s for `ready`, then the
+app's cleanup stopped it. The session was the deep session: app id 229dfe14-3cff-4326-876b-6d29f1743cce, engine session
+d13ad955-203c-4748-9494-53bfa54788d5. Times below are UTC (the run logs print local time, UTC−7).
+
+What survives: the scratch root /private/tmp/maws-c12-prerun-1790765266 was removed at the end of M6, so neither wire
+journal survives and no copy was taken. What follows is from the journal rows printed during the run (quoted in the
+M6 executor's working log), the Playwright run logs (/private/tmp/c12-m6-run-104.log and -104c.log, Playwright output
+only, no engine output), and the host's source. No owner data is in this file.
+
+Stall 1 (the first §10.4 run, log c12-m6-run-104.log, test started 10:58 UTC)
+------------------------------------------------------------------------------
+- Journal: <scratch>/userData/engine-host/journal/229dfe14-3cff-4326-876b-6d29f1743cce/osxywrh5.jsonl (gone). It held
+  exactly five rows, all printed at the time: meta `reconnect {phase: attempting, attempt 1/1, trigger: user}`; meta
+  `spawn`; meta `relay_health {ok: true, status 200, latencyMs 1, checkedAt 10:58:36.964Z}`; out `control_request
+  {request_id: osxywrh5-1, subtype: initialize, supportedDialogKinds: [auto_mode_server_fallback,
+  refusal_fallback_prompt], perTaskStopAffordance: true}`; meta `exit {code: null, signal: SIGTERM, reason: stop,
+  lostAttentionCount: 0, peakTreeRssKiB: null, budget: null}`. No `in` row at all: not the initialize response, not the
+  SessionStart hook frames the engine sends first.
+- Spawn: bin /Users/new/.local/share/claude/versions/2.1.283 (the installer's source file, not a custody copy: custody is
+  bypassed under MAWS_E2E=1); args `-p --input-format stream-json --output-format stream-json --verbose
+  --permission-prompt-tool stdio --include-partial-messages --forward-subagent-text --replay-user-messages
+  --include-hook-events --setting-sources user,project,local --model sonnet --permission-mode auto --resume
+  d13ad955-203c-4748-9494-53bfa54788d5 --settings {"dialogExpiry":"never"}`; launchId osxywrh5.
+- Environment: the spawn row records variable names only (`envKeys`), never values; this launch's list was printed only in
+  part (it began ANTHROPIC_AUTH_TOKEN, ANTHROPIC_BASE_URL, ANTHROPIC_DEFAULT_FABLE_MODEL, …) and comes from the same
+  launch path as stall 2, whose full list is below.
+- cwd: /private/tmp/maws-c12-prerun-1790765266/repos/deep/.claude/worktrees/deep-q8jv (the deep session's worktree).
+- stderr: not captured anywhere that survives. The host reads the engine's stderr into an in-memory tail of its last
+  lines (src/engine-host/session.ts:623-625) and uses it only in a failure's detail (:788); a stop exit does not
+  surface it, and the journal carries no stderr rows.
+- Seconds since the previous exit: between 96 and 157 s. The previous launch of this session (journal b74ljr5z.jsonl,
+  the §10.2 test, run log c12-m6-run-102b.log) ended when that test's app closed, after the file's last write at 10:56
+  (mtime minute) and before the run log's end at 10:57:01; the Resume's relay check is 10:58:36.964.
+
+Stall 2 (the third §10.4 run, MAWS_C12_PRERUN_PIECES=Terminal, log c12-m6-run-104c.log, test started 11:04 UTC)
+--------------------------------------------------------------------------------------------------------------
+- Journal: <scratch>/userData/engine-host/journal/229dfe14-3cff-4326-876b-6d29f1743cce/moyz6bsv.jsonl (gone). Its first
+  three rows were printed: meta `reconnect {phase: attempting, attempt 1/1, trigger: user}`; meta `spawn`; meta
+  `relay_health {ok: true, status 200, latencyMs 5, checkedAt 11:04:12.564Z}`. The rest was not printed; the test's
+  failure was the same 120 s wait for `ready` at the same line (ensureLive's poll), and the app's cleanup ended it.
+- Spawn: the same binary (/Users/new/.local/share/claude/versions/2.1.283, the source, custody bypassed) and the same
+  args as stall 1; launchId moyz6bsv.
+- Environment (names, as the spawn row lists them; values where the host sets them and they are not secret):
+  ANTHROPIC_AUTH_TOKEN (the relay's non-secret marker claudeusage-local-gateway, launch.ts GATEWAY_AUTH_TOKEN),
+  ANTHROPIC_BASE_URL=http://127.0.0.1:8641, ANTHROPIC_DEFAULT_FABLE_MODEL, ANTHROPIC_DEFAULT_OPUS_MODEL,
+  ANTHROPIC_DEFAULT_SONNET_MODEL, CLAUDE_CODE_DISABLE_1M_CONTEXT, CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS=1,
+  CLAUDE_CODE_ENABLE_FUNCTION_HOOKS, CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY, CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING=1,
+  CLAUDE_CODE_ENTRYPOINT=sdk-ts, CLAUDE_CODE_FORK_SUBAGENT=true, CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS,
+  CLAUDE_CODE_MAX_CONTEXT_TOKENS, CLAUDE_CODE_MAX_SUBAGENTS_PER_SESSION, CLAUDE_CODE_SUBAGENT_MODEL=haiku,
+  CLAUDE_CONFIG_DIR=/private/tmp/maws-c12-prerun-1790765266/config, CLAUDE_MODEL, ENABLE_TOOL_SEARCH=true, GIT_EDITOR,
+  HOME, HOMEBREW_CELLAR, HOMEBREW_PREFIX, HOMEBREW_REPOSITORY, LANG, LOGNAME, PATH, SHELL, SSH_AUTH_SOCK, TERM=dumb,
+  TMPDIR, USER, XDG_DATA_DIRS. The unvalued names come from MAWS's capture of the owner's login shell
+  (captureShellEnvironment, filtered by launch.ts's allowlist); their values are not recorded.
+- cwd: the same worktree, /private/tmp/maws-c12-prerun-1790765266/repos/deep/.claude/worktrees/deep-q8jv.
+- stderr: as stall 1, not captured anywhere that survives.
+- Seconds since the previous exit: about 62 to 70 s. The previous launch (journal v6fsandq.jsonl, the second §10.4 run,
+  which passed its turns: relay, Review, workflow) ended at that test's cleanup, before its run log's end at 11:03:10;
+  the Resume's relay check is 11:04:12.564.
+
+The launches that did not stall
+-------------------------------
+Of the four row Resumes of this session, two answered at once: v6fsandq (the second §10.4 run, about 11:01) and
+65dpzxou (the fourth, about 11:09). Other resumes in the pre-run, of other sessions, did not stall either: the §10.1
+north `-p` session from its row in §10.5 (ready in 1.96 s) and the released X1 by Send in §10.6 (ready in 0.92 s). Between stall 1 and the second run, a terminal `claude -p --resume` of the same
+session (below) also ran. No pattern was found in the gap since the previous exit (stall 1: 96-157 s; stall 2: 62-70 s;
+the passing 65dpzxou followed the stalled moyz6bsv's exit by about 3 min, with the standalone probes between).
+
+The standalone reproduction
+---------------------------
+- Binary: the same installer file, /Users/new/.local/share/claude/versions/2.1.283, by absolute path.
+- Config dir: the same scratch home, CLAUDE_CONFIG_DIR=/private/tmp/maws-c12-prerun-1790765266/config; cwd the same
+  worktree; the same args as the spawn row, with --permission-mode auto and --resume d13ad955-….
+- Runner: a node script (/private/tmp/c12-init-probe.mjs, outside the repository) that spawned the engine with the host's
+  constructed keys set to the values above (CLAUDE_CODE_ENTRYPOINT=sdk-ts, FORK_SUBAGENT=true, SDK_FILE_CHECKPOINTING=1,
+  EMIT_SESSION_STATE_EVENTS=1, TERM=dumb, SUBAGENT_MODEL=haiku, the relay URL and marker, ENABLE_TOOL_SEARCH=true) over
+  the executor's own shell environment filtered by the same allowlist (not MAWS's login-shell capture), wrote the same
+  `initialize` request, and printed every stdout frame and stderr line.
+- Result: five tries between about 11:06 and 11:08 UTC; each answered SessionStart:resume hook_started/hook_response and
+  the initialize control_response within 433 to 576 ms; stderr empty. Earlier, at about 10:59-11:00, a print-mode
+  `claude -p --resume d13ad955-… --model sonnet --output-format json 'Reply with exactly: OK'` in the same worktree,
+  scratch home and binary (env: PATH, HOME, USER, TMPDIR, LANG, the scratch CLAUDE_CONFIG_DIR, the relay URL and marker,
+  ANTHROPIC_DEFAULT_SONNET_MODEL) answered in one turn (US$0.23); its only stderr line was the engine's own
+  `[claude-code:unrecognized_model] {"model":"claude-sonnet-5-5[1m]","query_source":"sdk"}` notice.
+- Not reproduced: the stall. Differences left between the stalled launches and the reproduction: the parent (the
+  packaged Electron app's engine host versus a node script), the environment's captured values (the owner's login shell
+  versus the executor's filtered shell), and timing relative to the previous process's exit.
