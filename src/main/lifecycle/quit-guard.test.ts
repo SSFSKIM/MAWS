@@ -31,7 +31,7 @@ const electron = vi.hoisted(() => {
 vi.mock('electron', () => ({ app: electron.app, BrowserWindow: { getAllWindows: () => [] }, ipcMain: { handle: vi.fn() } })); // C12: the sessions feed's imports
 
 const { SessionReadModel } = await import('../sessions/read-model');
-const { askToQuit, busyReport, installQuitGuard, quitQuestion, SHUTDOWN_BOUND_MS } = await import('./quit-guard');
+const { askToQuit, busyReport, installQuitGuard, KILL_PS_TIMEOUT_MS, quitQuestion, SHUTDOWN_BOUND_MS } = await import('./quit-guard');
 const { hostEventSource } = await import('../sessions'); // C12
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -55,6 +55,7 @@ function modelWith(statuses: EngineSessionStatus[]) {
   return Object.assign(model, { apply: (s: EngineSessionStatus) => writer.applyEngineStatus(s) });
 }
 const midTurn = (n: number) => Array.from({ length: n }, (_, i) => status(`s${i}` as AppSessionId, { process: 'ready', engineState: 'running', turn: humanTurn }));
+const noEngines = { hostPid: () => null, ps: async () => '', kill: () => {} };
 const noTerminals = { list: async () => [], foreground: async () => ({ busy: false }), hostGone: () => false };
 
 beforeEach(() => electron.app.reset());
@@ -199,6 +200,7 @@ describe('the quit guard', () => {
       ask: vi.fn(async (): Promise<'quit' | 'cancel' | 'when_idle'> => 'cancel'),
       shutdownEngine: vi.fn(async () => {}),
       publish: vi.fn(),
+      engines: noEngines,
       ...over,
     };
     return { deps, control: installQuitGuard(model, deps) };
@@ -396,7 +398,7 @@ describe('quit when idle', () => {
 });
 
 function guardDeps(model: ReturnType<typeof modelWith>, over: Partial<Parameters<typeof installQuitGuard>[1]>) {
-  return installQuitGuard(model, { pty: noTerminals, ask: async () => 'cancel', shutdownEngine: vi.fn(async () => {}), publish: () => {}, ...over });
+  return installQuitGuard(model, { pty: noTerminals, ask: async () => 'cancel', shutdownEngine: vi.fn(async () => {}), publish: () => {}, engines: noEngines, ...over });
 }
 
 // A pty host whose every `pty.list` answers when the test says; one terminal, busy while `busy` is true.
@@ -508,6 +510,80 @@ describe('the quit waits for the engines to exit, bounded', () => {
       error.mockRestore();
       vi.useRealTimers();
     }
+  });
+});
+
+// Debt wave 6: killing the engine host at will-quit drops the ladder's SIGKILL rung, so main sends it at the bound, to
+// the engine pids its statuses name that are still the engine host's children.
+describe('past the bound, main sends the ladder\'s SIGKILL rung', () => {
+  const HOST = 500;
+  const statuses = [
+    { ...status('a', { process: 'ready' }), pid: 101 }, // ignores end_session, SIGTERM and its stdin
+    { ...status('b', { process: 'exiting' }), pid: 102 }, // mid-ladder
+    { ...status('c', { process: 'ready' }), pid: 103 }, // exited meanwhile; its pid now another process's
+    { ...status('d', { process: 'exited' }), pid: 104 },
+    { ...status('e', { process: 'starting' }), pid: null },
+  ];
+  const PS = [`${HOST} 1`, `101 ${HOST}`, `102 ${HOST}`, '103 1', `104 ${HOST}`, `105 ${HOST}`, `201 101`].join('\n');
+
+  async function quitPastTheBound(engines: Partial<NonNullable<Parameters<typeof installQuitGuard>[1]['engines']>>) {
+    vi.useFakeTimers();
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const order: string[] = [];
+    const kill = vi.fn((pid: number) => void order.push(`kill ${pid}`));
+    const quit = electron.app.quit;
+    electron.app.quit = () => (order.push('quit'), quit());
+    try {
+      const shutdownEngine = vi.fn(() => new Promise<void>(() => {})); // a host that never finishes its ladder
+      guardDeps(modelWith(statuses), { ask: async () => 'quit', shutdownEngine, engines: { hostPid: () => HOST, ps: async () => PS, kill, ...engines } });
+      electron.app.attempt();
+      await vi.advanceTimersByTimeAsync(SHUTDOWN_BOUND_MS - 1);
+      expect(kill).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      await vi.advanceTimersByTimeAsync(KILL_PS_TIMEOUT_MS);
+      return { kill, order, error };
+    } finally {
+      electron.app.quit = quit;
+      error.mockRestore();
+      vi.useRealTimers();
+    }
+  }
+
+  it('SIGKILLs the live and exiting engines still the host\'s children, then quits once', async () => {
+    const { order } = await quitPastTheBound({});
+    expect(order).toEqual(['kill 101', 'kill 102', 'quit']);
+    expect(electron.app.quits).toBe(1);
+  });
+
+  it('a process listing that fails or never answers kills nothing and still quits', async () => {
+    expect((await quitPastTheBound({ ps: async () => Promise.reject(new Error('ps: fork failed')) })).order).toEqual(['quit']);
+    electron.app.reset();
+    expect((await quitPastTheBound({ ps: () => new Promise<string>(() => {}) })).order).toEqual(['quit']);
+    expect(electron.app.quits).toBe(1);
+  });
+
+  it('a host with no pid kills nothing; a kill that throws (the engine exited meanwhile) does not stop the rest', async () => {
+    expect((await quitPastTheBound({ hostPid: () => null })).order).toEqual(['quit']);
+    electron.app.reset();
+    const killed: number[] = [];
+    await quitPastTheBound({
+      kill: (pid) => {
+        if (pid === 101) throw Object.assign(new Error('kill ESRCH'), { code: 'ESRCH' });
+        killed.push(pid);
+      },
+    });
+    expect(killed).toEqual([102]);
+    expect(electron.app.quits).toBe(1);
+  });
+
+  it('a shutdown that answers within the bound kills nothing', async () => {
+    const kill = vi.fn();
+    guardDeps(modelWith(statuses), { ask: async () => 'quit', engines: { hostPid: () => HOST, ps: async () => PS, kill } });
+    electron.app.attempt();
+    await settle();
+    await settle();
+    expect(electron.app.quits).toBe(1);
+    expect(kill).not.toHaveBeenCalled();
   });
 });
 
