@@ -47,7 +47,8 @@ export interface TaskNode {
   usage: { totalTokens: number; toolUses: number; durationMs: number } | null; // subagent.progress, latest
   lastToolName: string | null;
   activity: string | null; // the latest subagent.progress description: what the agent is doing now ("Reading one.txt"), not its dispatch description
-  summary: string | null;
+  summary: string | null; // the engine's, as sent (a handed-back agent's is a pointer to its report: outcomeSummary)
+  report: string | null; // the report a background agent handed back through `SubagentHandback`, as the parent received it
   reason: string | null;
   outputFile: string | null;
   isBackground: boolean | null; // the start event's, then task.updated.patch.isBackground; null for a node with no start event
@@ -89,7 +90,7 @@ const blankWorkflow = (): WorkflowFacts => ({ workflowName: null, progress: null
 function blankNode(taskId: TaskId, kind: TaskKind, status: TaskStatus): TaskNode {
   return {
     taskId, kind, taskType: null, toolUseId: null, description: taskId, status, stopping: false, startedAt: null, endedAt: null, usage: null,
-    lastToolName: null, activity: null, summary: null, reason: null, outputFile: null, isBackground: null,
+    lastToolName: null, activity: null, summary: null, report: null, reason: null, outputFile: null, isBackground: null,
     agent: kind === 'agent' ? blankAgent() : null, workflow: kind === 'workflow' ? blankWorkflow() : null,
     provenance: { wire: false, disk: false, snapshot: false },
   };
@@ -320,15 +321,48 @@ function applyEvent(draft: Draft, e: SessionEvent): void {
     case 'process.exited':
       if (e.agentId === null) exitInto(draft, e.at);
       return;
+    case 'user.message': {
+      const handback = e.agentId === null && e.origin === 'peer' ? handbackOf(e.content) : null; // a peer message only: the same markup typed or quoted by the human is no report
+      if (handback && draft.get(handback.taskId)) draft.patch(handback.taskId, { report: handback.report });
+      return;
+    }
     default:
       return;
   }
 }
 
+// A background agent's report, as 2.1.283 delivers it to the parent (C8b live acceptance journal, seq 207: a peer user
+// frame, `origin.kind: 'peer'`, `handback: true`): `Another Claude session sent a message:\n<agent-message
+// from="<agent id>">\n[Subagent hand-back] … The report follows:\n` then the report with every line indented two
+// spaces, then `\n</agent-message>` and the engine's trailer. The agent id is the task id (C1 Interfaces).
+const AGENT_MESSAGE = /<agent-message from="([^"]+)">\n([\s\S]*?)\n<\/agent-message>/;
+const HANDBACK_FRAME = /^\[Subagent hand-back\][^\n]*The report follows:\n/;
+
+function handbackOf(content: string | { type: string; [key: string]: unknown }[]): { taskId: TaskId; report: string } | null {
+  const message = AGENT_MESSAGE.exec(textOf(content));
+  const frame = message ? HANDBACK_FRAME.exec(message[2]) : null;
+  if (!message || !frame) return null;
+  const report = message[2].slice(frame[0].length).split('\n').map((line) => line.replace(/^ {2}/, '')).join('\n');
+  return { taskId: message[1] as TaskId, report };
+}
+
+// The engine's pointer in place of a handed-back agent's summary (`task_notification.summary`, 2.1.283's `zTo`: `This
+// agent's report was delivered to you as a message from "<id>" (its SubagentHandback call)…`, with an auto-mode
+// variant), and its two siblings that say no report came (`VTo`, `qTo`): none of them is the agent's outcome.
+const POINTER = /^(This agent's report was delivered to you as a message from "|This agent has not reported yet: |The subagent ended without delivering a report through )/;
+
+// What a Done row says the agent did: the engine's summary, or for a handed-back agent the first line of the report the
+// parent received (null until it has, or when none came).
+export function outcomeSummary(node: TaskNode): string | null {
+  if (!node.summary || !POINTER.test(node.summary)) return node.summary || null;
+  const line = node.report?.split('\n').find((text) => text.trim() !== '');
+  return line?.trim() ?? null;
+}
+
 // The kinds the reducer reads; every other kind returns the same graph (turn.* of any origin among them).
 export const TASK_EVENT_KINDS: ReadonlySet<SessionEvent['kind']> = new Set([
   'subagent.started', 'subagent.progress', 'subagent.finished', 'task.started', 'task.updated', 'task.notification', 'tasks.snapshot',
-  'workflow.progress', 'tool.use', 'tool.result', 'process.exited',
+  'workflow.progress', 'tool.use', 'tool.result', 'process.exited', 'user.message',
 ]);
 
 export function applyTaskEvents(graph: TaskGraph, events: SessionEvent[]): TaskGraph {
@@ -497,7 +531,7 @@ export interface AgentRow {
 const present = (text: string | null | undefined) => (text ? text : null);
 export const rowTitle = (node: TaskNode): string => present(node.agent?.name) ?? node.description;
 export function rowSecondLine(node: TaskNode): string {
-  return present(node.summary) ?? present(node.activity) ?? (present(node.agent?.name) ? node.description : null) ?? SUBAGENTS_COPY.working;
+  return outcomeSummary(node) ?? present(node.activity) ?? (present(node.agent?.name) ? node.description : null) ?? SUBAGENTS_COPY.working;
 }
 
 export const sectionOf = (n: TaskNode): AgentSection => (n.status === 'running' ? 'active' : n.status === 'unknown' ? 'disk' : 'done');

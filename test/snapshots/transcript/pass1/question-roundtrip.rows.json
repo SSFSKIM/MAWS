@@ -15,6 +15,7 @@
     "kind": "user",
     "lines": 1,
     "messageUuid": "3807c712-5d96-4ba4-9e71-908ac237f8e4",
+    "placeholders": [],
     "steer": false,
     "text": "Call AskUserQuestion once with two questions: choose Red or Blue (include a short preview for each option), and choose fruits Apple and Pear (multiSelect true). After receiving answers, repeat them briefly.",
     "turnId": "turn:3807c712-5d96-4ba4-9e71-908ac237f8e4"

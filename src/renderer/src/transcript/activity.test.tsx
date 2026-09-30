@@ -214,6 +214,39 @@ describe('turn activity', () => {
     expect(activity()[0].files.map(({ path, use }) => [path, use])).toEqual([['/p/src/a.ts', 'read']]);
   });
 
+  it('counts a Grep whose result names its path as a single file as a read of that file, and never a directory scope', async () => {
+    // The structured results are 2.1.283's Grep `data` shapes (files_with_matches, count, content); filenames are
+    // relative to the session's cwd (session.started), absolute outside it.
+    const b = builder();
+    b.emit('session.started', { cwd: '/p', engineVersion: null, resumedFrom: null, forked: false });
+    b.turn('u1');
+    const grep = (id: string, input: Record<string, unknown>, structured: Record<string, unknown>) => {
+      b.toolUse(id, 'Grep', { pattern: 'x', ...input }, 'm1', 0);
+      b.result(id, 'r', { structured });
+    };
+    grep('f1', { path: '/p/src/a.ts' }, { mode: 'files_with_matches', filenames: ['src/a.ts'], numFiles: 1 });
+    grep('f2', { path: '/p/src' }, { mode: 'files_with_matches', filenames: ['src/b.ts'], numFiles: 1 });
+    grep('f3', { path: 'lib' }, { mode: 'files_with_matches', filenames: ['lib/x/lib'], numFiles: 1 });
+    grep('f4', { path: '/p/lib' }, { mode: 'files_with_matches', filenames: ['lib/lib'], numFiles: 1 }); // a directory and its same-named child
+    grep('f5', { path: '/elsewhere/h.ts' }, { mode: 'files_with_matches', filenames: ['/elsewhere/h.ts'], numFiles: 1 }); // outside the cwd: absolute
+    grep('c1', { path: 'src/c.ts', output_mode: 'count' }, { mode: 'count', numFiles: 1, filenames: [], content: 'src/c.ts:3', numMatches: 3 });
+    grep('c2', { path: 'src', output_mode: 'count' }, { mode: 'count', numFiles: 1, filenames: [], content: 'src/c.ts:3', numMatches: 3 });
+    grep('n1', { path: '/p/src/d.ts', output_mode: 'content', '-C': 1 }, { mode: 'content', numFiles: 0, filenames: [], content: '4-a\n5:x\n6-b\n--\n9:x', numLines: 5 });
+    grep('n2', { path: '/p/src', output_mode: 'content' }, { mode: 'content', numFiles: 0, filenames: [], content: 'src/d.ts:5:x', numLines: 1 });
+    grep('n3', { path: '/p/2026-notes', output_mode: 'content' }, { mode: 'content', numFiles: 0, filenames: [], content: '2026-notes/a.md:5:x', numLines: 1 }); // digits then a hyphen: still a directory
+    grep('z1', { path: '/p/src/f.ts' }, { mode: 'files_with_matches', filenames: [], numFiles: 0 });
+    b.toolUse('e1', 'Grep', { pattern: 'x', path: '/p/src/g.ts' }, 'm1', 0);
+    b.result('e1', 'boom', { isError: true, structured: { mode: 'files_with_matches', filenames: ['src/g.ts'], numFiles: 1 } });
+    b.text('m2', 0, 'Done.');
+    b.end(['u1']);
+    const { activity } = await attached(b.events);
+    expect(activity()[0].files.map(({ path, use }) => [path, use])).toEqual([
+      ['/p/src/a.ts', 'read'],
+      ['/elsewhere/h.ts', 'read'],
+      ['src/c.ts', 'read'],
+    ]); // content mode proves nothing (n1, n2, n3); nor does a search with no match (z1) or a failed one (e1)
+  });
+
   it('reads the per-turn derivation the rows already made: no second derivation, the same entry while the turn is unchanged', async () => {
     const { key, activity } = await attached(work().events);
     useTranscriptStore.getState().rows(key); // the store derived the rows when the batch applied

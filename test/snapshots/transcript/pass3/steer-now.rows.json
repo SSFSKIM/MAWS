@@ -15,6 +15,7 @@
     "kind": "user",
     "lines": 1,
     "messageUuid": "7aa791e4-4261-41a4-9ef3-e1590591dd3c",
+    "placeholders": [],
     "steer": false,
     "text": "Count to 8 with separate Bash sleep 1 calls: for each number n from 1 to 8, make exactly one Bash call `sleep 1 && echo n`, one call at a time, never in parallel. Then reply COUNTED.",
     "turnId": "turn:7aa791e4-4261-41a4-9ef3-e1590591dd3c"
@@ -155,6 +156,7 @@
     "kind": "user",
     "lines": 1,
     "messageUuid": "e80149ac-ba3a-486a-8d42-b07a6f987698",
+    "placeholders": [],
     "steer": false,
     "text": "Stop counting and reply STEERED",
     "turnId": "turn:e80149ac-ba3a-486a-8d42-b07a6f987698"
@@ -303,6 +305,7 @@
     "kind": "user",
     "lines": 1,
     "messageUuid": "03797d66-6388-4e77-beb2-6f0007014054",
+    "placeholders": [],
     "steer": false,
     "text": "Reply with exactly AFTER",
     "turnId": "turn:03797d66-6388-4e77-beb2-6f0007014054"

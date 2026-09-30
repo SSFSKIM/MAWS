@@ -15,6 +15,7 @@
     "kind": "user",
     "lines": 3,
     "messageUuid": "77244027-54d4-46df-9794-2c1b36b8b601",
+    "placeholders": [],
     "steer": false,
     "text": "Step 1: use Bash with run_in_background true to run exactly: sleep 30 && echo BG_DONE > bg.txt\nStep 2: then use Bash in the foreground to run exactly: sleep 20\nStep 3: reply DONE.",
     "turnId": "turn:77244027-54d4-46df-9794-2c1b36b8b601"

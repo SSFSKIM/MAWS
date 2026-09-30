@@ -15,6 +15,7 @@
     "kind": "user",
     "lines": 1,
     "messageUuid": "531078df-e314-4293-9167-94e372fb3b29",
+    "placeholders": [],
     "steer": false,
     "text": "Use Bash to run exactly: git status --short && sleep 4. Then reply OK.",
     "turnId": "turn:531078df-e314-4293-9167-94e372fb3b29"

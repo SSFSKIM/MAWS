@@ -2,10 +2,9 @@
 // their data URLs, files as chips, pasted blocks as chips that expand to their text), a collapse past 20 lines, and
 // copy and edit affordances (residues *Images and attachments*, *Bounded surfaces and truncation*, *Copy and export*;
 // *Pasted content* under Derivation). A dropped prompt carries a quiet `Not sent`.
-import { PASTED_PLACEHOLDER } from '@shared/composer/pasted-content';
 import { NOT_SENT } from '../../model/copy';
 import type { Attachment, Row } from '../../model/rows';
-import { untaggedUserText } from '../../model/user-text';
+import { placeholdersOf, untaggedUserText } from '../../model/user-text';
 import { useActions, useDisclosure } from '../context';
 import { Markdown } from '../markdown/Markdown';
 import { Chevron, clockTime, copyText } from './parts';
@@ -15,18 +14,15 @@ type Segment = { kind: 'text'; text: string } | { kind: 'pasted'; n: number; lin
 
 const COLLAPSE_LINES = 20;
 
-// The text split at the placeholders the model put in place of pasted blocks; a placeholder-shaped string with no
-// matching attachment stays text.
+// The text split at the placeholders the model put in place of pasted blocks (the places it recorded); a
+// placeholder-shaped string the human typed stays text.
 function segmentsOf(row: UserRowData): Segment[] {
-  const pasted = new Map(row.attachments.filter((a) => a.kind === 'text').map((a) => [a.name, a]));
   const segments: Segment[] = [];
   let from = 0;
-  for (const match of row.text.matchAll(PASTED_PLACEHOLDER)) {
-    const attachment = pasted.get(`Pasted text #${match[1]}`);
-    if (!attachment) continue;
-    segments.push({ kind: 'text', text: row.text.slice(from, match.index) });
-    segments.push({ kind: 'pasted', n: Number(match[1]), lines: Number(/\+(\d+) lines/.exec(match[0])![1]), attachment });
-    from = match.index + match[0].length;
+  for (const placeholder of placeholdersOf(row.text, row.attachments, row.placeholders)) {
+    segments.push({ kind: 'text', text: row.text.slice(from, placeholder.from) });
+    segments.push({ kind: 'pasted', n: placeholder.n, lines: placeholder.lines, attachment: placeholder.attachment });
+    from = placeholder.to;
   }
   segments.push({ kind: 'text', text: row.text.slice(from) });
   return segments.filter((segment) => segment.kind === 'pasted' || segment.text.trim().length > 0);
@@ -69,7 +65,7 @@ export function UserRow({ row }: { row: UserRowData }) {
       <div className="transcript-user-actions">
         {row.dropped && <span className="transcript-not-sent">{NOT_SENT}</span>}
         <span>{clockTime(row.at)}</span>
-        <button type="button" onClick={() => copyText(untaggedUserText(row.text, row.attachments))}>
+        <button type="button" onClick={() => copyText(untaggedUserText(row.text, row.attachments, row.placeholders))}>
           Copy
         </button>
         {row.editable && (

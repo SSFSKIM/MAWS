@@ -15,6 +15,7 @@
     "kind": "user",
     "lines": 1,
     "messageUuid": "u-exit-1",
+    "placeholders": [],
     "steer": false,
     "text": "Run the release script.",
     "turnId": "turn:u-exit-1"

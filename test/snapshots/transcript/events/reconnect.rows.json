@@ -15,6 +15,7 @@
     "kind": "user",
     "lines": 1,
     "messageUuid": "u-rc-1",
+    "placeholders": [],
     "steer": false,
     "text": "Reply OK.",
     "turnId": "turn:u-rc-1"
@@ -40,6 +41,7 @@
     "kind": "user",
     "lines": 1,
     "messageUuid": "u-rc-2",
+    "placeholders": [],
     "steer": false,
     "text": "Still there?",
     "turnId": "turn:u-rc-2"

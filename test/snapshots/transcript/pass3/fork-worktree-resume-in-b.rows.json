@@ -15,6 +15,7 @@
     "kind": "user",
     "lines": 1,
     "messageUuid": "749c3b48-a14b-4202-bef8-367df45c4fa3",
+    "placeholders": [],
     "steer": false,
     "text": "Reply with exactly OK",
     "turnId": "turn:749c3b48-a14b-4202-bef8-367df45c4fa3"

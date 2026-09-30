@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import type { AgentId, TaskId, ToolUseId } from '@shared/graph/ids';
 import type { SessionEvent } from '@shared/graph/events';
 import { after, event, replayed, sidecarsOf, upTo, workflowRunsOf } from '../../../../../../test/support/agents-events';
+import { loadEngineJournal } from '../../../../../../test/support/fixtures';
+import { journalToEvents } from '../../../transcript/dev/journal';
 import {
   agentRows,
   applySnapshot,
@@ -12,6 +14,7 @@ import {
   mergeRuns,
   mergeSidecars,
   monitors,
+  outcomeSummary,
   parseOutputPath,
   removeTask,
   rowSecondLine,
@@ -317,6 +320,31 @@ describe('task graph', () => {
       expect([rowTitle(working), rowSecondLine(working)]).toEqual(['Read and report one.txt content', 'Reading one.txt']);
       const done = node(graphOf(events), 'ad286defbc77bc090');
       expect(rowSecondLine(done)).toBe('ONE');
+    });
+
+    // Debt wave 4 (C8b live acceptance, owner's hands 4): a background agent that hands its report back through
+    // `SubagentHandback` ends with a `task_notification.summary` that only points at the report. The three frames are
+    // recorded (C8b's live run, journal adckoc4i seq 160, 207 and 364: the start, the peer message carrying the
+    // report, the notification), replayed through C3's normaliser.
+    it('shows a handed-back agent’s report, not the engine’s pointer to it, as its outcome', () => {
+      const recorded = journalToEvents(loadEngineJournal('handback-pointer'));
+      const AGENT = 'a6a89722837fede78';
+      const graph = graphOf(recorded);
+      const done = node(graph, AGENT);
+      expect(done.status).toBe('completed');
+      expect(done.summary).toMatch(/^This agent's report was delivered to you as a message from "a6a89722837fede78"/);
+      expect(outcomeSummary(done)).toBe('Files under /private/tmp/maws-c8b-live-4xJWci/maws/mockups (47 files total):');
+      expect(rowSecondLine(done)).toBe(outcomeSummary(done));
+      expect(done.report?.split('\n')[2]).toBe('**Root level (8 files):**'); // the report's two-space indent removed
+      // Before the report reaches the parent, or when none came, the pointer is no outcome.
+      const unreported = node(graphOf(recorded.filter((e) => e.kind !== 'user.message')), AGENT);
+      expect(outcomeSummary(unreported)).toBeNull();
+      expect(rowSecondLine(unreported)).not.toMatch(/report was delivered/);
+      // The same markup in a human's message (a pasted or quoted hand-back) is no report.
+      const quoted = recorded.map((e) => (e.kind === 'user.message' ? { ...e, origin: 'human' } : e));
+      expect(node(graphOf(quoted), AGENT).report).toBeNull();
+      // An ordinary summary is the outcome as sent.
+      expect(outcomeSummary(node(graphOf(events), 'ad286defbc77bc090'))).toBe('ONE');
     });
 
     it('under a real name, the description is the second line when there is no summary or activity', () => {

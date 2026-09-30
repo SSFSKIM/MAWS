@@ -15,6 +15,7 @@
     "kind": "user",
     "lines": 2,
     "messageUuid": "c2e05100-85c8-4bca-9a3e-34d63ada8fe5",
+    "placeholders": [],
     "steer": false,
     "text": "Use Bash to run exactly: touch granted.txt\nThen reply DONE.",
     "turnId": "turn:c2e05100-85c8-4bca-9a3e-34d63ada8fe5"

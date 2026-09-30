@@ -15,6 +15,7 @@
     "kind": "user",
     "lines": 1,
     "messageUuid": "6ffe2781-e332-43ac-b218-09fb29e670de",
+    "placeholders": [],
     "steer": false,
     "text": "Use Bash to run exactly git log --oneline. Then say DONE.",
     "turnId": "turn:6ffe2781-e332-43ac-b218-09fb29e670de"

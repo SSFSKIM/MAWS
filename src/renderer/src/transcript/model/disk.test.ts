@@ -9,7 +9,10 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, SessionId } from '@shared/graph/ids';
 import { AgentMetaSchema } from '@shared/wire/transcript';
 import { ChainFollower } from '../../../../engine-host/fs/chain-follower';
-import { TEST_FIXTURE_DIR, TRANSCRIPT_FIXTURE_DIR } from '../../../../../test/support/fixtures';
+import { loadJournal, TEST_FIXTURE_DIR, TRANSCRIPT_FIXTURE_DIR } from '../../../../../test/support/fixtures';
+import { journalToEvents } from '../dev/journal';
+
+const SNAPSHOT_DIR = join(__dirname, '../../../../../test/snapshots/transcript');
 import { MemoryFileReader } from '../../../../../test/support/memory-reader';
 import { rowsOf } from './derive';
 import { applyEvents, createState, type TranscriptState } from './reduce';
@@ -111,5 +114,30 @@ describe('C4 backfill through the transcript model', () => {
     expect(disk).toHaveLength(1);
     expect(disk[0]).toEqual({ ...live[0], at: disk[0].at });
     expect(disk[0].attachments.map((a) => [a.kind, a.name, a.text?.split('\n').length])).toEqual([['text', 'Pasted text #1', 40]]);
+  });
+});
+
+// Debt wave 4 (C8b live acceptance, owner's hands 2): the live main transcript repeated assistant text under later
+// "Continued for…"/"Working for…" dividers and drew one row over another. Reproduced over the live run's recorded
+// journal and its disk transcript: when a session's disk-form copies (C4's follower) and live-form events (C3's
+// stream) both reach the model, each assistant block derives its row under both copies of its turn with one row id
+// (`text:<api message id>:<index>`), so the flat list held duplicate ids, which the virtualiser keys by (repeated
+// DOM, rows stacked over each other), and the copied turns added empty dividers. Pinned here over the same recorded
+// session in both forms: pass 1's `subagent` journal and its disk transcript (`subagent-parent`).
+describe('one session in both event forms', () => {
+  it('shows each row once: a copy of a row already shown is dropped, and a turn made only of copies shows nothing', async () => {
+    const SESSION = '9a1d4262-0b43-46ad-acb9-5982f31d209c';
+    const disk = await backfillFixture('subagent-parent', SESSION, sidecars(SESSION));
+    const live = journalToEvents(loadJournal('pass1', 'subagent'));
+    const alone = rowsOf(stateOf(disk));
+    for (const events of [[...disk, ...live], [...live, ...disk]]) {
+      const rows = rowsOf(stateOf(events));
+      const ids = rows.map((row) => row.id);
+      expect(ids.filter((id, i) => ids.indexOf(id) !== i), 'no row id twice').toEqual([]);
+      const texts = ofKind(rows, 'assistant_text').map((row) => row.id);
+      expect(texts).toEqual([...new Set(texts)]);
+      expect(ofKind(rows, 'divider')).toHaveLength(ofKind(alone, 'divider').length); // no divider of a copied turn
+    }
+    await expect(`${JSON.stringify(rowsOf(stateOf([...disk, ...live])).map((row) => [row.kind, row.id]), null, 1)}\n`).toMatchFileSnapshot(join(SNAPSHOT_DIR, 'both-forms-subagent.rows.json'));
   });
 });

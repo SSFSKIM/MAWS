@@ -51,7 +51,15 @@ function flatten(state: TranscriptState, before: Map<RowId, Row>, times: Map<Row
     if (placement === undefined) continue; // unplaced: nothing to render
     looseAfter.set(placement, [...(looseAfter.get(placement) ?? []), event]);
   }
-  const emit = (rows: Row[], subject: 'human' | 'engine' | 'peer' | 'loose', separator: RowId) => {
+  // Row ids are unique in the flat list (the virtualiser keys by them). One session's history can reach the model in
+  // both event forms (C4's disk follower and C3's live stream carry the same blocks under different event ids), and then
+  // a block derives its row, with one id, under both copies of its turn: the first shown wins, and a turn whose rows
+  // were all copies shows nothing, not even its divider (debt wave 4, the C8b live run's repeated rows).
+  const shown = new Set<RowId>();
+  const emit = (all: Row[], subject: 'human' | 'engine' | 'peer' | 'loose', separator: RowId) => {
+    const rows = all.some((row) => shown.has(row.id)) ? all.filter((row) => !shown.has(row.id)) : all;
+    if (rows !== all && rows.every((row) => row.kind === 'divider')) return;
+    for (const row of rows) shown.add(row.id);
     if (rows.length === 0) return;
     if (needsSeparator(previousAt, rows[0].at, subject)) {
       const label = separatorLabel(rows[0].at);
@@ -200,7 +208,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
   const dropped = (messageUuid: string | null) => messageUuid !== null && (retracted.has(messageUuid) || superseded.has(messageUuid));
   const userRow = (event: Event<'user.message'>, id: RowId, editable: boolean, steer = false): RowOf<'user'> => {
     const text = userTextOf(event.content);
-    return { id, turnId: turn.id, at: event.at, kind: 'user', messageUuid: event.messageUuid, text: text.text, attachments: text.attachments, lines: text.lines, editable, steer, dropped: !steer && openerDropped };
+    return { id, turnId: turn.id, at: event.at, kind: 'user', messageUuid: event.messageUuid, text: text.text, attachments: text.attachments, placeholders: text.placeholders, lines: text.lines, editable, steer, dropped: !steer && openerDropped };
   };
 
   const blockRow = (block: LiveBlock, at: string): Item | null => {
@@ -511,7 +519,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
       ...receiptFields(RECEIPT_APPLIED), // the reader's undo state is laid over in rowsOfTurn
     });
   }
-  return { rows, summary, cells, work: workOf(turn, tools, cells, subagents) };
+  return { rows, summary, cells, work: workOf(turn, tools, cells, subagents, state?.cwd ?? null) };
 }
 
 // What the turn did whatever was disclosed, one entry per tool use from the turn's tool records (so the calls a merged
@@ -519,11 +527,50 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
 // `children` and are not tool uses of the turn, though their completed edits are its edited files, as on the
 // receipt). A file counts as read or edited once its call completed without an error or a denial: a refused or failed
 // call touched nothing. An edit carries its cell's own detail (hunks, counts, change). Only calls that read a file
-// count as reads: Grep's and Glob's `path` and LS's are search scopes (directories), so they are no files of the turn.
+// count as reads: Glob's and LS's `path` are search scopes (directories), so they are no files of the turn; Grep's is
+// one too unless its result shows it named a single file (grepFileScope).
 const READS = new Set(['Read', 'NotebookRead']);
 const EDITS = new Set(['Edit', 'MultiEdit', 'Write', 'NotebookEdit']);
 
-function workOf(turn: TurnState, tools: Map<ToolUseId, ToolRecord>, cells: Cell[], subagents: SubagentGroup[]): TurnWork {
+// Whether a Grep's `path` was a file, read from the engine's structured result (2.1.283's Grep: `{ mode, filenames,
+// content, … }`): in `files_with_matches` mode the one filename is the scope itself; in `count` mode the one `path:N`
+// line names it. Only a path the result names proves anything: `content` mode's lines (`12:text` for a file,
+// `dir/a.ts:12:text` for a directory, and a directory's own path may start with digits) and a search with no match
+// prove nothing, so the scope stays out (a directory must never count as a file read).
+function grepFileScope(input: Record<string, unknown>, structured: unknown, cwd: string | null): string | null {
+  const scope = str(input.path).replace(/\/+$/, '');
+  if (!scope) return null;
+  const s = record(structured);
+  const names = (filename: string) => samePath(scope, filename, cwd);
+  const filenames = Array.isArray(s.filenames) ? s.filenames.filter((name): name is string => typeof name === 'string') : [];
+  const lines = str(s.content).split('\n').filter((line) => line !== '');
+  const mode = str(s.mode, 'files_with_matches');
+  if (mode === 'files_with_matches') return filenames.length === 1 && names(filenames[0]) ? scope : null;
+  if (mode === 'count') return lines.length === 1 && /:\d+$/.test(lines[0]) && names(lines[0].slice(0, lines[0].lastIndexOf(':'))) ? scope : null;
+  return null;
+}
+
+// Whether the engine's filename is the scope itself. Grep prints a path relative to the session's cwd (absolute outside
+// it), so both are resolved against the cwd (the session's latest `session.started`/`session.init`); without one, only
+// two spellings of the same form compare, and an absolute and a relative path prove nothing.
+function samePath(scope: string, filename: string, cwd: string | null): boolean {
+  const absolute = (path: string) => path.startsWith('/');
+  if (absolute(scope) !== absolute(filename) && cwd === null) return false;
+  const resolve = (path: string) => normalise(absolute(path) || cwd === null ? path : `${cwd}/${path}`);
+  return resolve(scope) === resolve(filename);
+}
+
+function normalise(path: string): string {
+  const parts: string[] = [];
+  for (const part of path.split('/')) {
+    if (part === '' || part === '.') continue;
+    if (part === '..') parts.pop();
+    else parts.push(part);
+  }
+  return `${path.startsWith('/') ? '/' : ''}${parts.join('/')}`;
+}
+
+function workOf(turn: TurnState, tools: Map<ToolUseId, ToolRecord>, cells: Cell[], subagents: SubagentGroup[], cwd: string | null): TurnWork {
   const edits = new Map(cells.flatMap((cell) => (cell.detail.kind === 'edit' && cell.toolUseId !== null ? [[cell.toolUseId, cell.detail] as const] : [])));
   const files: TurnWork['files'] = [];
   const used: TurnWork['tools'] = [];
@@ -532,9 +579,10 @@ function workOf(turn: TurnState, tools: Map<ToolUseId, ToolRecord>, cells: Cell[
     const { category } = tableRowOf(use.toolName);
     const mcp = MCP_TOOL.exec(use.toolName);
     used.push({ name: use.toolName, category, at: use.at, url: use.toolName === 'WebFetch' && typeof input.url === 'string' ? input.url : null, mcp: mcp ? { server: mcp[1], tool: mcp[2] } : null });
-    const path = filePathOf(input);
     const completed = result !== null && !result.isError && result.denial === null;
-    const kind = READS.has(use.toolName) ? 'read' : EDITS.has(use.toolName) ? 'edited' : null;
+    const grepFile = use.toolName === 'Grep' && completed ? grepFileScope(input, result.structured, cwd) : null;
+    const path = grepFile ?? filePathOf(input);
+    const kind = READS.has(use.toolName) || grepFile !== null ? 'read' : EDITS.has(use.toolName) ? 'edited' : null;
     if (path && completed && kind) files.push({ path, use: kind, at: use.at, edit: kind === 'edited' ? (edits.get(use.toolUseId) ?? null) : null });
   }
   // The child agents' completed edits the receipt attributes to the turn are edited files of the turn too (C8c), merged

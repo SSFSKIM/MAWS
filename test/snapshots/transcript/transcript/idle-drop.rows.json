@@ -15,6 +15,7 @@
     "kind": "user",
     "lines": 1,
     "messageUuid": "u-idle-drop-002",
+    "placeholders": [],
     "steer": false,
     "text": "Summarise the last release notes.",
     "turnId": "turn:u-idle-drop-002"

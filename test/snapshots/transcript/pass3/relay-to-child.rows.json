@@ -15,6 +15,7 @@
     "kind": "user",
     "lines": 1,
     "messageUuid": "85754b17-c295-4cfd-a516-f72de1de14a1",
+    "placeholders": [],
     "steer": false,
     "text": "Dispatch one general-purpose Agent in the background (run_in_background true), model haiku, without a name. Its task: repeat rounds until the file stop.txt exists, and never stop on your own before that, however many rounds it takes. Each round: Read one.txt, then run exactly this with Bash: sleep 4; echo \"round N\" >> rounds.txt; test -f stop.txt && echo STOP || echo GO (N the round number). When it prints STOP, reply FINISHED. If you receive a message, append its text to inbox.txt with Bash before your next round. Reply STARTED as soon as it is dispatched.",
     "turnId": "turn:85754b17-c295-4cfd-a516-f72de1de14a1"
@@ -106,6 +107,7 @@
     "kind": "user",
     "lines": 1,
     "messageUuid": "2fb7478b-2a11-4ae1-8e85-588fd92bd1d3",
+    "placeholders": [],
     "steer": false,
     "text": "Relay to agent a7aea42f9bed9b3ea with SendMessage, verbatim, then continue what you were doing: Say PING in your next inbox line",
     "turnId": "turn:2fb7478b-2a11-4ae1-8e85-588fd92bd1d3"
@@ -236,6 +238,7 @@
     "kind": "user",
     "lines": 1,
     "messageUuid": "973fefba-82be-4059-9266-a70593597680",
+    "placeholders": [],
     "steer": false,
     "text": "Run \"sleep 45\" with Bash, then reply DONE.",
     "turnId": "turn:973fefba-82be-4059-9266-a70593597680"
@@ -344,6 +347,7 @@
     "kind": "user",
     "lines": 1,
     "messageUuid": "be019ba5-e49d-4ce6-8116-9a893ac8520f",
+    "placeholders": [],
     "steer": true,
     "text": "Relay to agent a7aea42f9bed9b3ea with SendMessage, verbatim, then continue what you were doing: Say PONG in your next inbox line",
     "turnId": "turn:973fefba-82be-4059-9266-a70593597680"
@@ -369,6 +373,7 @@
     "kind": "user",
     "lines": 1,
     "messageUuid": "2bd7dd49-6474-4c08-9f1f-8659a3ed8fd8",
+    "placeholders": [],
     "steer": false,
     "text": "Dispatch one general-purpose Agent in the foreground (not in the background), model haiku, named \"walker\": Read one.txt, then run \"sleep 20\" with Bash, then reply the file's line. Wait for it and reply its answer.",
     "turnId": "turn:2bd7dd49-6474-4c08-9f1f-8659a3ed8fd8"
@@ -488,6 +493,7 @@
     "kind": "user",
     "lines": 1,
     "messageUuid": "e58f0d75-f2f8-428b-b42d-c725406929a5",
+    "placeholders": [],
     "steer": true,
     "text": "Relay to agent accea5ba03e220b64 (named \"walker\") with SendMessage, verbatim, then continue what you were doing: Say PANG in your next inbox line",
     "turnId": "turn:2bd7dd49-6474-4c08-9f1f-8659a3ed8fd8"

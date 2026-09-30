@@ -15,6 +15,7 @@
     "kind": "user",
     "lines": 1,
     "messageUuid": "3b554458-484d-4333-bae1-a226650ae08b",
+    "placeholders": [],
     "steer": false,
     "text": "Run exactly \"sleep 120 && echo DONE > bg.txt\" with Bash, run_in_background true; reply STARTED.",
     "turnId": "turn:3b554458-484d-4333-bae1-a226650ae08b"
@@ -125,6 +126,7 @@
     "kind": "user",
     "lines": 1,
     "messageUuid": "e4fd229a-e799-4d3d-88cb-7ffe1dfd542f",
+    "placeholders": [],
     "steer": false,
     "text": "Dispatch one general-purpose Agent in the background, model haiku, named \"sleeper\": run \"sleep 90\" with Bash then reply SLOW. Reply STARTED.",
     "turnId": "turn:e4fd229a-e799-4d3d-88cb-7ffe1dfd542f"
@@ -284,6 +286,7 @@
     "kind": "user",
     "lines": 5,
     "messageUuid": "1b21fa19-adda-4fd4-9a79-e6cd27f88468",
+    "placeholders": [],
     "steer": false,
     "text": "Call the Workflow tool once with this exact script, then reply STARTED:\n\nexport const meta = { name: 'maws-stop-task', description: 'One slow agent', phases: [{ title: 'Wait' }] }\nphase('Wait')\nreturn await agent('Run \"sleep 90\" with Bash, then reply SLOW.', { label: 'slow', effort: 'low' })",
     "turnId": "turn:1b21fa19-adda-4fd4-9a79-e6cd27f88468"

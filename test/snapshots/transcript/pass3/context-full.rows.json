@@ -15,6 +15,7 @@
     "kind": "user",
     "lines": 1,
     "messageUuid": "642951f0-2f1d-41ed-b0a8-83c1ee66e4c2",
+    "placeholders": [],
     "steer": false,
     "text": "Reply with exactly OK",
     "turnId": "turn:642951f0-2f1d-41ed-b0a8-83c1ee66e4c2"
@@ -96,6 +97,7 @@
     "kind": "user",
     "lines": 1,
     "messageUuid": "11a82fa5-5f4e-4513-a655-b0e4bc59ec56",
+    "placeholders": [],
     "steer": false,
     "text": "Use the Read tool to read big1.txt in full (no offset or limit) and reply with only its final line.",
     "turnId": "turn:11a82fa5-5f4e-4513-a655-b0e4bc59ec56"
@@ -226,6 +228,7 @@
     "kind": "user",
     "lines": 1,
     "messageUuid": "55932f34-c1cc-44a6-8a9d-504562ac7ba8",
+    "placeholders": [],
     "steer": false,
     "text": "Use the Read tool to read big2.txt in full (no offset or limit) and reply with only its final line.",
     "turnId": "turn:55932f34-c1cc-44a6-8a9d-504562ac7ba8"
@@ -356,6 +359,7 @@
     "kind": "user",
     "lines": 1,
     "messageUuid": "e0a4fb9c-adc3-4155-80be-fd960a3ed19a",
+    "placeholders": [],
     "steer": false,
     "text": "Use the Read tool to read big3.txt in full (no offset or limit) and reply with only its final line.",
     "turnId": "turn:e0a4fb9c-adc3-4155-80be-fd960a3ed19a"
@@ -486,6 +490,7 @@
     "kind": "user",
     "lines": 1,
     "messageUuid": "563ef4c6-c80b-41c2-b6fb-473424304fd7",
+    "placeholders": [],
     "steer": false,
     "text": "Use the Read tool to read big4.txt in full (no offset or limit) and reply with only its final line.",
     "turnId": "turn:563ef4c6-c80b-41c2-b6fb-473424304fd7"

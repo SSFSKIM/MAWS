@@ -240,7 +240,7 @@ export const planBadge = (outcome: keyof typeof PLAN_OUTCOME_BADGE | null, feedb
   outcome === null ? 'Pending' : outcome === 'keep_planning' && feedback ? `${PLAN_OUTCOME_BADGE.keep_planning}: ${feedback}` : PLAN_OUTCOME_BADGE[outcome];
 
 export const PLAN = { heading: 'Plan', showMore: 'Show more', showLess: 'Show less' } as const;
-export const QUESTION = { heading: 'Question', chosen: 'Chosen', notAnswered: 'Not answered', answer: (text: string) => `Answer: ${text}` } as const;
+export const QUESTION = { heading: 'Question', chosen: 'Chosen', notAnswered: 'Not answered', skipped: 'Skipped', answer: (text: string) => `Answer: ${text}` } as const;
 
 export const requestSlotPlaceholder = (subject: string) => `Waiting for you · ${subject} · answer in the composer`;
 

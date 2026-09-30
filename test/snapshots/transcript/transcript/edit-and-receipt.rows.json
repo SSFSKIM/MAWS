@@ -15,6 +15,7 @@
     "kind": "user",
     "lines": 1,
     "messageUuid": "u-edit-and-receipt-002",
+    "placeholders": [],
     "steer": false,
     "text": "Rename `measure` to `measureRows` in src/app.ts and src/store.ts, add a helper in src/util/rows.ts, then run the tests and show me the diff summary.",
     "turnId": "turn:u-edit-and-receipt-002"

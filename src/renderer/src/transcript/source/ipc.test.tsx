@@ -15,7 +15,7 @@ import { builder, tool, uuid } from '../model/test-events';
 import { Disclosures, NO_ACTIONS, TranscriptProvider } from '../view/context';
 import { RowView } from '../view/rows/Row';
 import { Transcript } from '../view/Transcript';
-import { ipcLoadSpillOver, ipcRewindOver, ipcSourceOver } from './ipc';
+import { ipcLoadSpillOver, ipcRewindOver, ipcSourceOver, KNOWN_WAIT_MS } from './ipc';
 import type { TranscriptSource } from './types';
 
 const APP = 'app-1' as AppSessionId;
@@ -42,6 +42,8 @@ function fakeClient() {
 }
 
 const batch = (events: SessionEvent[], appSessionId = APP) => ({ appSessionId, events });
+// The sources' own `session.eventBatch` listeners: less the one the page keeps per client for app-synthesised events.
+const subscriptions = (fake: ReturnType<typeof fakeClient>) => (fake.listeners.get('session.eventBatch')?.size ?? 0) - 1;
 
 // A session source subscribed and past an empty snapshot, as the store drives it (batches before the snapshot are held).
 async function subscribed(fake: ReturnType<typeof fakeClient>, source: TranscriptSource, listener: (events: SessionEvent[]) => void) {
@@ -98,7 +100,7 @@ describe('ipcSource', () => {
     const hydrated = store.attach(source.key!, source);
 
     // Subscribed first; the snapshot is one `session.events` call.
-    expect(fake.listeners.get('session.eventBatch')?.size).toBe(1);
+    expect(subscriptions(fake)).toBe(1);
     expect(fake.calls.map((call) => [call.name, call.input])).toEqual([['session.events', { appSessionId: APP, afterSeq: null, limit: null }]]);
 
     fake.emit('session.eventBatch', batch(all.slice(2, 4))); // before the snapshot: buffered; the snapshot carries both
@@ -166,7 +168,8 @@ describe('ipcSource', () => {
     fake.calls[1].answer({ ok: true, value: { events: liveForm, lastSeq: liveForm.length, complete: true } } as never);
     await again;
     fake.emit('session.eventBatch', batch(diskForm.slice(1)));
-    expect([...useTranscriptStore.getState().entries[APP].state.seen]).toEqual(liveForm.map((event) => event.id));
+    // the app's notice, which no snapshot carries, comes back from the page's copy at its place in time (the last)
+    expect([...useTranscriptStore.getState().entries[APP].state.seen]).toEqual([...liveForm, notice].map((event) => event.id));
     store.detach(source.key!);
   });
 
@@ -232,7 +235,113 @@ describe('ipcSource', () => {
     fake.calls[0].answer({ ok: false, error: { code: 'host_unavailable', message: 'engine-host is not running' } });
     await hydrated;
     expect(useTranscriptStore.getState().entries[APP]).toMatchObject({ phase: 'failed', error: 'engine-host is not running' });
-    expect(fake.listeners.get('session.eventBatch')?.size).toBe(0);
+    expect(subscriptions(fake)).toBe(0);
+  });
+
+  // C10 · C6 (debt wave 4): C10's `relay:direct_fallback` notice is posted once as a batch (main's `directFallbackNotice`
+  // frame) and stored nowhere, so a snapshot never carries it. The page keeps it, and a hydration after it (a first
+  // attach, a Retry) shows it as a notice row at its place in time, once.
+  it('shows a route notice main posted before the transcript hydrated, before the turn it preceded, again after a Retry', async () => {
+    const fake = fakeClient();
+    const source = ipcSourceOver(fake.client, APP);
+    const b = builder();
+    b.turn('u1');
+    b.text('m1', 0, 'Hello');
+    b.end(['u1']);
+    const noticeAt = new Date(Date.parse(b.events[0].at) - 50).toISOString(); // posted between the launch and the first send
+    const notice = {
+      id: `${APP}:c10:relay-fallback:1` as EventId, sessionId: 'unknown', at: noticeAt, seq: null, agentId: null, parentToolUseId: null,
+      kind: 'notice.posted', level: 'warning', key: 'relay:direct_fallback', text: 'The relay was unreachable, so this session started on the direct route.',
+    } as unknown as SessionEvent;
+    fake.emit('session.eventBatch', batch([notice]));
+    fake.emit('session.eventBatch', batch(b.events.slice(0, 2), 'app-other' as AppSessionId)); // not synthesised for APP: never kept
+    const store = useTranscriptStore.getState();
+    const answer = { ok: true, value: { events: b.events, lastSeq: b.events.length - 1, complete: true } } as never;
+    const hydrated = store.attach(APP, source);
+    fake.calls[0].answer(answer);
+    await hydrated;
+    const noticeRows = () => useTranscriptStore.getState().entries[APP].rows.filter((row) => row.kind === 'error' && row.severity === 'notice');
+    expect(noticeRows().map((row) => row.kind === 'error' && row.text)).toEqual(['The relay was unreachable, so this session started on the direct route.']);
+    const kinds = useTranscriptStore.getState().entries[APP].rows.map((row) => row.kind);
+    expect(kinds.indexOf('error'), 'before the turn it preceded').toBeLessThan(kinds.indexOf('user'));
+
+    // A later hydration of the key (a reset, as a Retry or a reopened tab) still carries it, once.
+    store.detach(APP);
+    const again = store.attach(APP, source);
+    fake.emit('session.eventBatch', batch([notice])); // the same notice held and passed too: deduplicated by id
+    fake.calls[1].answer(answer);
+    await again;
+    expect(noticeRows()).toHaveLength(1);
+  });
+
+  // C6 · C10 (debt wave 4): a session started through "+" shows its pane when main records it, before C3's launch has
+  // wired its stream and before its engine id is bound, so the first read is refused. The source asks again at the
+  // session's first sign of life instead of failing the key.
+  describe('a session the engine host does not know yet', () => {
+    const UNKNOWN = { ok: false, error: { code: 'internal', message: `unknown app session: ${APP}` } } as const;
+    const EMPTY = { ok: true, value: { events: [], lastSeq: 0, complete: true } } as never;
+    const settle = () => act(async () => {});
+
+    it('stays hydrating through the refusal and reads again at the session’s status, then goes live', async () => {
+      const fake = fakeClient();
+      const source = ipcSourceOver(fake.client, APP);
+      const hydrated = useTranscriptStore.getState().attach(APP, source);
+      fake.calls[0].answer(UNKNOWN);
+      await settle();
+      expect(fake.calls).toHaveLength(1);
+      expect(useTranscriptStore.getState().entries[APP]).toMatchObject({ phase: 'hydrating', error: null });
+      fake.emit('session.status', { appSessionId: 'another' as AppSessionId, status: {} as never });
+      await settle();
+      expect(fake.calls, 'another session’s sign wakes nothing').toHaveLength(1);
+      fake.emit('session.status', { appSessionId: APP, status: {} as never });
+      await settle();
+      expect(fake.calls.map((call) => call.name)).toEqual(['session.events', 'session.events']);
+      const events = builder();
+      events.turn('u1');
+      fake.calls[1].answer({ ok: true, value: { events: events.events, lastSeq: events.events.length - 1, complete: true } } as never);
+      await hydrated;
+      expect(useTranscriptStore.getState().entries[APP].phase).toBe('live');
+      expect(useTranscriptStore.getState().entries[APP].rows.some((row) => row.kind === 'user')).toBe(true);
+      expect(fake.listeners.get('session.status')?.size, 'the wait stopped listening').toBe(0);
+    });
+
+    it('reads again at once when the sign arrived while the refusal was on its way (a batch, or the record bound)', async () => {
+      for (const sign of ['batch', 'record'] as const) {
+        const fake = fakeClient();
+        const hydrated = useTranscriptStore.getState().attach(APP, ipcSourceOver(fake.client, APP));
+        if (sign === 'batch') fake.emit('session.eventBatch', batch([]));
+        else fake.emit('session.changed', { record: { appId: APP } as never, cause: 'live' as never, revision: 1 });
+        fake.calls[0].answer(UNKNOWN);
+        await settle();
+        expect(fake.calls, sign).toHaveLength(2);
+        fake.calls[1].answer(EMPTY);
+        await hydrated;
+        expect(useTranscriptStore.getState().entries[APP].phase).toBe('live');
+        useTranscriptStore.getState().drop(APP);
+      }
+    });
+
+    it('gives up at once when the key detaches while it waits, and fails the key when no sign comes in time', async () => {
+      const fake = fakeClient();
+      const store = useTranscriptStore.getState();
+      const source = ipcSourceOver(fake.client, APP);
+      const first = store.attach(APP, source);
+      fake.calls[0].answer(UNKNOWN);
+      await settle();
+      store.detach(APP);
+      await first;
+      expect(fake.calls).toHaveLength(1);
+      expect(fake.listeners.get('session.status')?.size, 'nothing left listening').toBe(0);
+
+      vi.useFakeTimers();
+      onTestFinished(() => void vi.useRealTimers());
+      const second = store.attach(APP, source);
+      fake.calls[1].answer(UNKNOWN);
+      await vi.advanceTimersByTimeAsync(KNOWN_WAIT_MS);
+      await second;
+      expect(fake.calls).toHaveLength(2);
+      expect(useTranscriptStore.getState().entries[APP]).toMatchObject({ phase: 'failed', error: `unknown app session: ${APP}` });
+    });
   });
 });
 
@@ -398,13 +507,13 @@ describe('child source provenance', () => {
     expect(rows.length).toBeGreaterThan(0);
     await store.attach(CHILD_KEY, childSource(fake), { agentId: AGENT }); // the drill-in mounts over the same source
     expect(fake.calls.map((call) => call.name)).toEqual(['session.events']); // no second snapshot
-    expect(fake.listeners.get('session.eventBatch')?.size).toBe(1);
+    expect(subscriptions(fake)).toBe(1);
     expect(useTranscriptStore.getState().rows(CHILD_KEY)).toBe(rows);
     store.detach(CHILD_KEY); // the tab closes; the drill-in still follows
     fake.emit('session.eventBatch', batch(child.slice(2)));
     expect(useTranscriptStore.getState().entries[CHILD_KEY].state.seen.has(child.at(-1)!.id)).toBe(true);
     store.detach(CHILD_KEY);
-    expect(fake.listeners.get('session.eventBatch')?.size).toBe(0);
+    expect(subscriptions(fake)).toBe(0);
   });
 
   it('both mounted at once: one attachment, one state, the same rows in both transcripts', async () => {
@@ -433,7 +542,7 @@ describe('child source provenance', () => {
       </>,
     );
     expect(fake.calls.map((call) => call.name)).toEqual(['session.events']);
-    expect(fake.listeners.get('session.eventBatch')?.size).toBe(1);
+    expect(subscriptions(fake)).toBe(1);
     await act(async () => {
       answer(fake, 'session.events', { events: [...parent, ...child], lastSeq: 9, complete: true });
       await flush();
@@ -445,7 +554,7 @@ describe('child source provenance', () => {
     expect(rowIds('tab')).toEqual(state.rows.map((row) => row.id));
     expect(rowIds('drill-in')).toEqual(rowIds('tab'));
     view.unmount();
-    expect(fake.listeners.get('session.eventBatch')?.size).toBe(0);
+    expect(subscriptions(fake)).toBe(0);
   });
 
   // Whole-branch review: a drill-in open while the child ran, closed, and reopened after it finished. Unobserved, the

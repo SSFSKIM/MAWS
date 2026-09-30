@@ -15,6 +15,7 @@
     "kind": "user",
     "lines": 1,
     "messageUuid": "u-spill-1",
+    "placeholders": [],
     "steer": false,
     "text": "Dump the whole build log.",
     "turnId": "turn:u-spill-1"

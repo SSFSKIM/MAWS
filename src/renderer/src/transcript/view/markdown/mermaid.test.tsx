@@ -132,6 +132,37 @@ describe('mermaid fences', () => {
     expect(container.textContent).not.toContain('Mermaid Error');
   });
 
+  // Debt wave 4: completeness is per fence, from the parser (remark), not a line scan of the whole text.
+  it('sees a closed fence inside a blockquote or a list item as CommonMark does: loads the module and draws it', async () => {
+    const Markdown = await freshMarkdown();
+    const quoted = 'Note:\n\n> ```mermaid\n> flowchart LR\n>   Q --> R\n> ```\n\nAfter';
+    const { container } = render(<Markdown markdown={quoted} live={false} />);
+    await waitFor(() => expect(loaded).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(diagrams(container)).toBe(1));
+    const listed = render(<Markdown markdown={'Steps:\n\n1. Draw:\n\n   ```mermaid\n   flowchart LR\n     L --> M\n   ```\n2. Done'} live={false} />);
+    await waitFor(() => expect(diagrams(listed.container)).toBe(1));
+    expect(rendered.some((source) => source.includes('Q --> R'))).toBe(true);
+    expect(rendered.some((source) => source.includes('L --> M'))).toBe(true);
+  });
+
+  it('keeps a quoted fence that the blockquote ended before it closed as code', async () => {
+    const Markdown = await freshMarkdown();
+    const first = render(<Markdown markdown={CLOSED} live={false} />);
+    await waitFor(() => expect(diagrams(first.container)).toBe(1));
+    const { container } = render(<Markdown markdown={'> ```mermaid\n> flowchart LR\n>   S --> T\n\nOutside the quote'} live={false} />);
+    await settle();
+    expect(diagrams(container)).toBe(0);
+    expect(mermaidCode(container)).toBe(1);
+    expect(rendered.some((source) => source.includes('S --> T'))).toBe(false);
+  });
+
+  it('answers two identical fences apart: the closed one draws while its unterminated twin stays code', async () => {
+    const Markdown = await freshMarkdown();
+    const { container } = render(<Markdown markdown={`${CLOSED}\n\n${OPEN.replace('C --> D', 'A --> B')}`} live={false} />);
+    await waitFor(() => expect(diagrams(container)).toBe(1));
+    expect(mermaidCode(container)).toBe(1);
+  });
+
   it('draws every fence of a completed answer', async () => {
     const Markdown = await freshMarkdown();
     const { container } = render(<Markdown markdown={`${CLOSED}\n\n${CLOSED.replace('A --> B', 'E --> F')}`} live={false} />);

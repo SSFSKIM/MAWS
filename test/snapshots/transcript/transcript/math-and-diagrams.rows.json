@@ -15,6 +15,7 @@
     "kind": "user",
     "lines": 1,
     "messageUuid": "u-math-and-diagrams-002",
+    "placeholders": [],
     "steer": false,
     "text": "Show the frame budget as a formula and the batch path as a diagram.",
     "turnId": "turn:u-math-and-diagrams-002"

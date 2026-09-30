@@ -15,6 +15,7 @@
     "kind": "user",
     "lines": 1,
     "messageUuid": "7a273738-bfa2-41ce-92ea-9f576294a851",
+    "placeholders": [],
     "steer": false,
     "text": "Without using any tools, write a 500-word essay on the history of tea, as plain prose paragraphs.",
     "turnId": "turn:7a273738-bfa2-41ce-92ea-9f576294a851"
@@ -96,6 +97,7 @@
     "kind": "user",
     "lines": 1,
     "messageUuid": "56d2908c-c8c7-4cbe-bdde-000d0da6fdf9",
+    "placeholders": [],
     "steer": false,
     "text": "Reply with exactly OK",
     "turnId": "turn:56d2908c-c8c7-4cbe-bdde-000d0da6fdf9"

@@ -1,28 +1,27 @@
 // The renderer for `mermaid` fences once the mermaid module has loaded (plugins.ts): a fence whose closing fence is
 // present renders as a diagram, any other renders as code, so a diagram never draws from partial source. Completeness
-// comes from Streamdown's incomplete-block flag (the last block of a streaming answer) and from the surface's own text
-// (the trailing fence that never closed, live or not). The fence is re-rendered through a nested Streamdown, with the
-// mermaid plugin for a diagram and without it for code, so both keep Streamdown's own blocks and controls.
+// comes from Streamdown's incomplete-block flag (the last block of a streaming answer) and from the fence's own parse
+// (plugins.ts marks a fence that never closed, live or not, in its metastring). The fence is re-rendered through a
+// nested Streamdown, with the mermaid plugin for a diagram and without it for code, so both keep Streamdown's own
+// blocks and controls.
 //
 // A closed fence keeps showing as code until its diagram has drawn: Streamdown's diagram block is an empty frame while
 // mermaid lays it out (about a third of a second, longer for the first diagram of a page load), so the diagram renders
 // hidden beside the code and replaces it once its SVG is in place. A diagram mermaid cannot draw stays as its code, with
 // a muted line saying so.
-import { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Streamdown, type CustomRendererProps } from 'streamdown';
 import { DIAGRAM } from '../../model/copy';
 import { STREAMDOWN_OPTIONS } from './options';
-import { code, useMermaidPlugin } from './plugins';
-
-// The source of the surface's trailing unterminated mermaid fence, or null (Markdown.tsx provides it).
-export const OpenMermaidFence = createContext<string | null>(null);
+import { code, openFenceOf, useMermaidLoader, useMermaidPlugin } from './plugins';
 
 const CODE_ONLY = { code };
 
-export function MermaidFence({ code: source, isIncomplete, meta }: CustomRendererProps) {
+export function MermaidFence({ code: source, isIncomplete, meta: marked }: CustomRendererProps) {
   const mermaid = useMermaidPlugin();
-  const open = useContext(OpenMermaidFence);
-  const complete = !isIncomplete && (open === null || open.trimEnd() !== source.trimEnd());
+  const { open, meta } = openFenceOf(marked);
+  const complete = !isIncomplete && !open;
+  useMermaidLoader(complete);
   const opening = `\`\`\`mermaid${meta ? ` ${meta}` : ''}`;
   const fenced = complete ? `${opening}\n${source}\n\`\`\`` : `${opening}\n${source}`;
   const diagram = complete && mermaid !== null;

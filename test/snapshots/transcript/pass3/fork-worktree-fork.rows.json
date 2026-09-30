@@ -15,6 +15,7 @@
     "kind": "user",
     "lines": 1,
     "messageUuid": "1884e142-0cfb-41d1-ab66-0a92c8421d13",
+    "placeholders": [],
     "steer": false,
     "text": "What word did I ask you to remember? Reply with just that word.",
     "turnId": "turn:1884e142-0cfb-41d1-ab66-0a92c8421d13"

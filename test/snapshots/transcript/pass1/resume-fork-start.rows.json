@@ -15,6 +15,7 @@
     "kind": "user",
     "lines": 1,
     "messageUuid": "49f5aef7-fe2c-4ee3-aad7-8a75d08ed50b",
+    "placeholders": [],
     "steer": false,
     "text": "Remember the word ZEBRA. Reply OK.",
     "turnId": "turn:49f5aef7-fe2c-4ee3-aad7-8a75d08ed50b"

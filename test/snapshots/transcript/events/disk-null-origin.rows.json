@@ -15,6 +15,7 @@
     "kind": "user",
     "lines": 1,
     "messageUuid": "u-disk-1",
+    "placeholders": [],
     "steer": false,
     "text": "Dispatch an agent to read one.txt and report its content.",
     "turnId": "turn:u-disk-1"
@@ -116,6 +117,7 @@
     "kind": "user",
     "lines": 1,
     "messageUuid": "u-disk-2",
+    "placeholders": [],
     "steer": false,
     "text": "Thanks. Now say DONE.",
     "turnId": "turn:u-disk-2"

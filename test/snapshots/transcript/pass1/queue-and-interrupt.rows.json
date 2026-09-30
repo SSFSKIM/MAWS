@@ -15,6 +15,7 @@
     "kind": "user",
     "lines": 1,
     "messageUuid": "a5bf8381-f5c0-4394-88a8-4b04c12e4911",
+    "placeholders": [],
     "steer": false,
     "text": "Count to 30 slowly. For each number use a separate Bash call sleep 1; echo NUMBER. Start now.",
     "turnId": "turn:a5bf8381-f5c0-4394-88a8-4b04c12e4911"
@@ -285,6 +286,7 @@
     "kind": "user",
     "lines": 1,
     "messageUuid": "99662785-5122-45a7-a68f-d734959a0c52",
+    "placeholders": [],
     "steer": false,
     "text": "After counting, reply exactly QUEUED.",
     "turnId": "turn:99662785-5122-45a7-a68f-d734959a0c52"
@@ -298,6 +300,7 @@
     "kind": "user",
     "lines": 1,
     "messageUuid": "e88214f8-3ba3-4b4c-8e64-3be1595fcac0",
+    "placeholders": [],
     "steer": false,
     "text": "Counting is cancelled. Reply exactly RESUMED.",
     "turnId": "turn:e88214f8-3ba3-4b4c-8e64-3be1595fcac0"
