@@ -8,9 +8,9 @@ import type { StdinFrame } from '@shared/wire/frames';
 import { loadEngineJournal } from '../../test/support/fixtures';
 import { buildLaunch, ENGINE_VERSION, RELAY_URL } from './launch';
 import { Normalizer } from './normalizer';
-import { getUsage, rewindConversation } from './controls';
+import { getUsage, REQUEST_TIMEOUT_MS, rewindConversation } from './controls';
 import { ProcessTable } from './process-table';
-import { EngineSession, HostHookRegistry, type EngineSessionOptions } from './session';
+import { EngineSession, FIRST_OUTPUT_MS, HostHookRegistry, type EngineSessionOptions } from './session';
 import { MemoryJournal, scriptedTransport, type ScriptedTransport } from './conformance/scripted-transport';
 import { replayedSession } from './conformance/session-harness';
 import { MemorySessionStateStore } from './store/memory-session-state-store';
@@ -614,29 +614,22 @@ describe('failed initialize terminates the process', () => {
     expect(table.reserve('app-s' as AppSessionId, () => setup().session)).toMatchObject({ status: 'launching' });
   });
 
-  // C3 corrective (2026-09-30 ledger): the handshake's own 30 s bound, where the long class's 120 s let a silent resume sit
-  it('a resume whose initialize never answers: exiting at the 30 s handshake bound with the stderr tail in the reason, SIGTERM with stdin closed and no end_session, SIGKILL 3 s later, exited crash only at the real exit; the reservation holds until then and a new launch takes it after', async () => {
+  it('an initialize that never answers: exiting at the long deadline, SIGTERM with stdin closed, SIGKILL 3 s later, exited only at the real exit; the reservation holds until then', async () => {
     vi.useFakeTimers();
     const table = new ProcessTable();
-    const resume = { resume: { sessionId: '44444444-4444-4444-8444-444444444444' as LaunchSpec['sessionId'] & string, fork: false }, sessionId: null };
     let first!: ReturnType<typeof setup>;
     const reserved = table.reserve(spec().appSessionId, () => {
-      first = setup({ spec: resume, responder: defaultResponder({ initialize: () => null }) });
+      first = setup({ responder: defaultResponder({ initialize: () => null }) });
       first.transport.pushStderr('warming up');
       return first.session;
     });
     expect(reserved.status).toBe('launching');
-    await vi.advanceTimersByTimeAsync(29_999);
+    await vi.advanceTimersByTimeAsync(119_999);
     expect(first.session.status().process).toBe('initializing');
-    expect(first.transport.calls).toEqual([]);
     await vi.advanceTimersByTimeAsync(1);
     expect(first.session.status().process).toBe('exiting');
-    const raised = first.events.filter((e) => e.kind === 'error.raised') as { scope: string; code: string | null; message: string }[];
-    expect(raised).toMatchObject([{ scope: 'process', code: 'timeout' }]);
-    expect(raised[0]!.message).toBe('initialize unanswered after 30 s\nwarming up');
-    const reconnects = first.events.filter((e) => e.kind === 'session.reconnect') as { phase: string; reason: string | null }[];
-    expect(reconnects.map((e) => e.phase)).toEqual(['attempting', 'failed']);
-    expect(reconnects[1]!.reason).toBe('initialize unanswered after 30 s\nwarming up');
+    expect(first.events.filter((e) => e.kind === 'error.raised')).toMatchObject([{ scope: 'process', code: 'timeout' }]);
+    expect((first.events.find((e) => e.kind === 'error.raised') as { message: string }).message).toContain('warming up');
     expect(first.transport.calls).toEqual(['endInput', 'kill:SIGTERM']);
     expect(first.transport.requestsOf('end_session')).toHaveLength(0); // the handshake never completed: no end_session rung
     await vi.advanceTimersByTimeAsync(2_999);
@@ -650,10 +643,57 @@ describe('failed initialize terminates the process', () => {
     first.transport.exit(null, 'SIGKILL');
     await vi.advanceTimersByTimeAsync(0);
     expect(first.session.status()).toMatchObject({ process: 'exited', exit: { reason: 'crash', signal: 'SIGKILL' } });
+    expect(metaEvents(first.journal)).toEqual(['spawn', 'init_failed', 'exit']);
+    const again = table.reserve(spec().appSessionId, () => setup().session);
+    expect(again.status).toBe('launching');
+  });
+
+  // C3 corrective (2026-09-30 ledger): the C12 pre-run's stalled resumes wrote nothing at all, not even stderr, and sat
+  // at the long class's 120 s; an engine that has said nothing 30 s after its spawn is failed then
+  it('a resume whose engine writes nothing at all: init_failed at 30 s (no_output), the ladder without end_session, exited crash only at the real exit, and a new launch takes the row', async () => {
+    vi.useFakeTimers();
+    const table = new ProcessTable();
+    const resume = { resume: { sessionId: '44444444-4444-4444-8444-444444444444' as LaunchSpec['sessionId'] & string, fork: false }, sessionId: null };
+    let first!: ReturnType<typeof setup>;
+    table.reserve(spec().appSessionId, () => (first = setup({ spec: resume, responder: defaultResponder({ initialize: () => null }) })).session);
+    await vi.advanceTimersByTimeAsync(FIRST_OUTPUT_MS - 1);
+    expect(first.session.status().process).toBe('initializing');
+    expect(first.transport.calls).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(first.session.status().process).toBe('exiting');
+    const raised = first.events.filter((e) => e.kind === 'error.raised') as { scope: string; code: string | null; message: string }[];
+    expect(raised).toMatchObject([{ scope: 'process', code: 'no_output' }]);
+    expect(raised[0]!.message).toBe('the engine wrote nothing in the 30 s after it started; initialize was not answered');
+    const reconnects = first.events.filter((e) => e.kind === 'session.reconnect') as { phase: string; reason: string | null }[];
+    expect(reconnects.map((e) => e.phase)).toEqual(['attempting', 'failed']);
+    expect(reconnects[1]!.reason).toBe(raised[0]!.message);
+    expect(first.transport.calls).toEqual(['endInput', 'kill:SIGTERM']);
+    expect(first.transport.requestsOf('end_session')).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(first.transport.calls).toEqual(['endInput', 'kill:SIGTERM', 'kill:SIGKILL']);
+    expect(table.reserve(spec().appSessionId, () => setup().session)).toEqual({ status: 'refused', reason: 'already_live', message: 'process is exiting' });
+    first.transport.exit(null, 'SIGKILL');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(first.session.status()).toMatchObject({ process: 'exited', exit: { reason: 'crash', signal: 'SIGKILL' } });
     expect(metaEvents(first.journal)).toEqual(['reconnect', 'spawn', 'init_failed', 'reconnect', 'exit']);
     expect(first.events.at(-1)).toMatchObject({ kind: 'process.exited', reason: 'crash' });
-    const again = table.reserve(spec().appSessionId, () => setup({ spec: resume }).session);
-    expect(again.status).toBe('launching');
+    expect(table.reserve(spec().appSessionId, () => setup({ spec: resume }).session).status).toBe('launching');
+  });
+
+  it('an engine that has written anything (a hook frame, a stderr line) is past the silence bound: its initialize keeps the long deadline', async () => {
+    vi.useFakeTimers();
+    for (const speak of ['frame', 'stderr'] as const) {
+      const { session, transport } = setup({ responder: defaultResponder({ initialize: () => null }) });
+      if (speak === 'stderr') transport.pushStderr('loading plugins');
+      void session.start();
+      await vi.advanceTimersByTimeAsync(0);
+      if (speak === 'frame') transport.push({ type: 'system', subtype: 'hook_started', hook_id: 'h1', hook_name: 'SessionStart:resume', hook_event: 'SessionStart', uuid: 'u1', session_id: 's' });
+      await vi.advanceTimersByTimeAsync(FIRST_OUTPUT_MS + 60_000);
+      expect(session.status().process, speak).toBe('initializing');
+      expect(transport.calls, speak).toEqual([]);
+      await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS.long - FIRST_OUTPUT_MS - 60_000);
+      expect(session.status().process, speak).toBe('exiting');
+    }
   });
 
   it('an initialize answered with an error takes the same ladder and ends crash even when the process exits 0 on stdin end', async () => {

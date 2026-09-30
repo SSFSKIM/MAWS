@@ -45,7 +45,7 @@ export interface SessionServiceDeps {
   log?: (message: string) => void;
 }
 
-export const WATCHDOG_MS = 150_000; // a launch with no status for this long fails (C3's own initialize deadline is 30 s since the 2026-09-30 corrective)
+export const WATCHDOG_MS = 150_000; // a launch with no status for this long fails (C3's own initialize deadline is 120 s, and 30 s for an engine that writes nothing at all)
 export const STOP_WAIT_MS = 10_000; // a bootstrap stop answered { exited: false } waits this long for the exit
 
 // A refusal the engine host answered (`{ ok: false }`), thrown with its code and message.

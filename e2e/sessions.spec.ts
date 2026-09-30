@@ -404,18 +404,18 @@ test.describe('sessions', () => {
     expect(value(await invoke(page, 'session.get', { appSessionId: gone.appId }))).toBeNull();
   });
 
-  // C3 corrective (2026-09-30 ledger): a resume whose engine never answers `initialize` fails at the handshake's 30 s
-  // bound, not at the long class's 120 s; the reason (the timeout and the engine's stderr tail) reaches the owner, and
-  // the row offers Resume again. The engine is a stub under the Engine setting's binary path: it answers `--version` as
-  // the pin and otherwise writes one stderr line and never reads its stdin.
-  test('a resume whose engine never answers initialize fails at 30 s with its stderr in the reason, and the row can be resumed again', async () => {
+  // C3 corrective (2026-09-30 ledger): a resume whose engine writes nothing at all (the C12 pre-run's stall) fails at the
+  // 30 s first-output bound, not at the long class's 120 s; the reason reaches the owner, and the row offers Resume
+  // again. The engine is a stub under the Engine setting's binary path: it answers `--version` as the pin and otherwise
+  // writes nothing and never reads its stdin.
+  test('a resume whose engine writes nothing fails at 30 s with the reason shown, and the row can be resumed again', async () => {
     test.setTimeout(150_000);
     const repo = await ScratchRepo.create();
     const store = await StoreFixture.create();
     const sid = '5e551011-0000-4000-8000-0000000000c3';
     await store.addTranscript(repo.root, sid, [{ type: 'user', uuid: `u-${sid}`, parentUuid: null, cwd: repo.root, sessionId: sid, timestamp: '2026-09-30T10:00:00.000Z', message: { role: 'user', content: 'resume me' } }]);
     const stub = join(store.configHome, 'stub-engine.sh');
-    writeFileSync(stub, '#!/bin/sh\nif [ "$1" = "--version" ]; then echo "2.1.283 (Claude Code)"; exit 0; fi\necho "stub engine: holding initialize" >&2\nexec sleep 300\n');
+    writeFileSync(stub, '#!/bin/sh\nif [ "$1" = "--version" ]; then echo "2.1.283 (Claude Code)"; exit 0; fi\nexec sleep 300\n');
     chmodSync(stub, 0o755);
     const launched = await launchCase({ fixtures: [], trusted: [repo.root], store });
     current = { ...launched, repos: [repo] };
@@ -431,9 +431,8 @@ test.describe('sessions', () => {
     expect(failedAfterMs).toBeLessThan(60_000);
     const failure = (await setupOf(page, record.appId)).find((e) => e.phase === 'failed')!;
     expect(failure.outcome).toMatchObject({ kind: 'error' });
-    expect(failure.outcome!.message).toContain('initialize unanswered after 30 s');
-    expect(failure.outcome!.message, 'the engine’s stderr tail rides in the reason').toContain('stub engine: holding initialize');
-    await expect(page.getByText('initialize unanswered after 30 s', { exact: false }).first(), 'the owner sees the reason').toBeVisible();
+    expect(failure.outcome!.message).toContain('the engine wrote nothing in the 30 s after it started');
+    await expect(page.getByText('the engine wrote nothing in the 30 s after it started', { exact: false }).first(), 'the owner sees the reason').toBeVisible();
     const rows = journal(maws, record.appId).filter((r) => r.direction === 'meta').map((r) => r.frame.event);
     expect(rows).toEqual(['reconnect', 'spawn', 'init_failed', 'reconnect', 'exit']);
     expect(value(await invoke(page, 'session.status', { appSessionId: record.appId }))).toMatchObject({ process: 'exited', exit: { reason: 'crash' } });

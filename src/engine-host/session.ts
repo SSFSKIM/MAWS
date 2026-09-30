@@ -44,6 +44,12 @@ export type { Catalog } from './session-status';
 export { LADDER_MS, type ExitReason, type ExitSummary, type StopResult } from './session-ladder';
 // How long stdout's end waits for a write still in flight before failing it and ending the process (M3 re-review 3).
 export const EOF_WRITE_WAIT_MS = 3_000;
+// C3 corrective (2026-09-30 ledger): how long a starting engine may say nothing at all (no stdout frame, no stderr line)
+// before the launch is failed. A healthy start writes within half a second; the C12 pre-run's stalled resumes wrote
+// nothing for 120 s, dying of SIGTERM's default action, so before the engine had even installed its signal handler.
+// An engine that has written anything keeps the long class's initialize deadline, since SessionStart hooks, which the
+// engine runs before it reads `initialize`, may legitimately take minutes and announce themselves with `hook_started`.
+export const FIRST_OUTPUT_MS = 30_000;
 const STDERR_TAIL_LINES = 20;
 
 // What the session journals through: JournalWriter satisfies it; tests use an in-memory journal.
@@ -127,6 +133,7 @@ export class EngineSession {
   private lastUsedAt: string;
   // C12 end
   private handshakeDone = false;
+  private silence: ReturnType<typeof setTimeout> | null = null; // C3 corrective: the first-output bound, until anything is read
   private initFailed = false;
   private journalClosed = false;
   private lastEventSeq = 0;
@@ -480,6 +487,10 @@ export class EngineSession {
       .catch((error: unknown) => this.log(`exit not handled: ${messageOf(error)}`));
     this.setProcess('initializing');
     this.touch();
+    this.silence = setTimeout(() => {
+      this.silence = null;
+      this.initializeFailed(new ControlError('initialize', `${this.plan.launchId}-1` as RequestId, `the engine wrote nothing in the ${FIRST_OUTPUT_MS / 1000} s after it started; initialize was not answered`, 'no_output'));
+    }, FIRST_OUTPUT_MS);
 
     const request: InitializeRequest = { supportedDialogKinds: [...DECLARED_DIALOG_KINDS], perTaskStopAffordance: true };
     const hooks = this.hooks.forInitialize();
@@ -556,6 +567,7 @@ export class EngineSession {
   // never paused, so the child can always write) and are processed, in arrival order, right after that row.
   private async readLoop(transport: EngineTransport): Promise<void> {
     for await (const item of transport.frames) {
+      this.heard();
       if (this.writer?.busy || this.held.length > 0) this.held.push(item);
       else this.processItem(item);
     }
@@ -621,6 +633,7 @@ export class EngineSession {
 
   private async stderrLoop(transport: EngineTransport): Promise<void> {
     for await (const line of transport.stderr) {
+      this.heard();
       this.stderrTail.push(line);
       if (this.stderrTail.length > STDERR_TAIL_LINES) this.stderrTail.shift();
       try {
@@ -775,6 +788,13 @@ export class EngineSession {
   // ---------------------------------------------------------------------------------------------------------------------
   // Failure, the ladder and exit
 
+  // The engine wrote something: the first-output bound is met (C3 corrective).
+  private heard(): void {
+    if (this.silence === null) return;
+    clearTimeout(this.silence);
+    this.silence = null;
+  }
+
   // A failed initialize (error response, ControlTimeout, transport error before the response): `init_failed` with the
   // stderr seen so far, then the ladder without its end_session rung; `exited { crash }` only at the real exit.
   private initializeFailed(error: unknown): void {
@@ -804,6 +824,7 @@ export class EngineSession {
   // process `exited` and the reservation free.
   private handleExit(exit: { code: number | null; signal: NodeJS.Signals | null }): void {
     if (this.processState === 'exited') return;
+    this.heard(); // C3 corrective: the bound ends with the process
     if (!this.handshakeDone && !this.initFailed && this.stopReason === null) this.writeInitFailed('the process exited before answering initialize', 'exited');
     const reason: ExitReason = this.stopReason ?? (this.initFailed ? 'crash' : exit.code === 0 && exit.signal === null ? 'unknown' : 'crash');
     const { lost } = this.broker.processExited();

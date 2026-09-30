@@ -99,26 +99,19 @@ describe('control client ids, timeouts, cancellation', () => {
     expect(warn).toHaveBeenCalledTimes(1);
   });
 
-  it('per-class deadlines: initialize 30 s (C3 corrective), long requests 120 s, interrupt 8 s, and timeoutMs overrides', async () => {
-    expect(REQUEST_TIMEOUT_MS.handshake).toBe(30_000);
+  it('per-class deadlines: long requests wait 120 s, interrupt 8 s, and timeoutMs overrides', async () => {
     const { transport } = fakeTransport();
     const client = new ControlClient(transport, fakeJournal(), 'LAUNCH01');
     const init = client.request('initialize', {}).catch((e: unknown) => e);
-    const title = client.request('generate_session_title', { description: 'x', persist: false }).catch((e: unknown) => e);
     const interrupt = client.request('interrupt', { reason: 'user-cancel' }).catch((e: unknown) => e);
     const custom = client.request('get_status', {}, { timeoutMs: 1_000 }).catch((e: unknown) => e);
     await vi.advanceTimersByTimeAsync(1_000);
     expect(await custom).toBeInstanceOf(ControlTimeout);
     await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS.interrupt - 1_000);
     expect(await interrupt).toBeInstanceOf(ControlTimeout);
-    expect(client.pending).toBe(2);
-    await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS.handshake - REQUEST_TIMEOUT_MS.interrupt);
-    const initError = (await init) as ControlTimeout;
-    expect(initError).toBeInstanceOf(ControlTimeout);
-    expect(initError.message).toBe('initialize unanswered after 30 s');
     expect(client.pending).toBe(1);
-    await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS.long - REQUEST_TIMEOUT_MS.handshake);
-    expect(await title).toBeInstanceOf(ControlTimeout);
+    await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS.long - REQUEST_TIMEOUT_MS.interrupt);
+    expect(await init).toBeInstanceOf(ControlTimeout);
   });
 
   it('an error response with error_code auto_mode_model rejects with ControlError.code', async () => {
