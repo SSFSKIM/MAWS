@@ -31,7 +31,7 @@ const electron = vi.hoisted(() => {
 vi.mock('electron', () => ({ app: electron.app, BrowserWindow: { getAllWindows: () => [] }, ipcMain: { handle: vi.fn() } })); // C12: the sessions feed's imports
 
 const { SessionReadModel } = await import('../sessions/read-model');
-const { askToQuit, busyReport, installQuitGuard, quitQuestion } = await import('./quit-guard');
+const { askToQuit, busyReport, installQuitGuard, quitQuestion, SHUTDOWN_BOUND_MS } = await import('./quit-guard');
 const { hostEventSource } = await import('../sessions'); // C12
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -204,12 +204,12 @@ describe('the quit guard', () => {
     return { deps, control: installQuitGuard(model, deps) };
   }
 
-  it('holds even with nothing busy, then quits without asking once the report is all zero', async () => {
+  it('holds even with nothing busy, then stops the engine and quits without asking once the report is all zero', async () => {
     const { deps } = guard(modelWith([status('idle')]));
     expect(electron.app.attempt()).toBe(false); // before-quit must prevent synchronously
     await settle();
     expect(deps.ask).not.toHaveBeenCalled();
-    expect(deps.shutdownEngine).not.toHaveBeenCalled(); // the existing quit path stops the hosts
+    expect(deps.shutdownEngine).toHaveBeenCalledOnce(); // an idle ready engine is ended before the app goes (no orphan)
     expect(electron.app.quits).toBe(1);
   });
 
@@ -311,7 +311,7 @@ describe('quit when idle', () => {
     await settle();
     expect(publish).toHaveBeenLastCalledWith(null);
     expect(electron.app.quits).toBe(1);
-    expect(shutdownEngine).not.toHaveBeenCalled(); // nothing was busy any more
+    expect(shutdownEngine).toHaveBeenCalledOnce(); // nothing busy any more, but the idle engines still end first
   });
 
   // whole-branch review (P1): the turn that ran a long `!` command ends, the command does not; the wait holds for it
@@ -461,6 +461,53 @@ describe('quitting happens once', () => {
     expect(publish).not.toHaveBeenCalledWith(expect.objectContaining({ backgroundWork: 1 })); // no wait begins
     await s.finish();
     expect(electron.app.quits).toBe(1);
+  });
+});
+
+// tracker row (C12): a quit with nothing busy used to go straight to will-quit, whose host stop left each idle engine
+// alive, orphaned, until it read its stdin's end. Every quit now waits for the host's shutdown (the ladder's exit rung),
+// bounded, before the one final app.quit().
+describe('the quit waits for the engines to exit, bounded', () => {
+  it('a quit with nothing busy does not proceed until the shutdown answers, and holds outside quits meanwhile', async () => {
+    let finish!: () => void;
+    const shutdownEngine = vi.fn(() => new Promise<void>((resolve) => (finish = resolve)));
+    guardDeps(modelWith([status('idle')]), { shutdownEngine });
+    electron.app.attempt();
+    await settle();
+    expect(shutdownEngine).toHaveBeenCalledOnce();
+    expect(electron.app.quits).toBe(0);
+    expect(electron.app.attempt()).toBe(false); // a second ⌘Q is held and starts nothing
+    await settle();
+    expect(shutdownEngine).toHaveBeenCalledOnce();
+    finish();
+    await settle();
+    expect(electron.app.quits).toBe(1);
+  });
+
+  it('quits at the bound when the shutdown never answers, once, and a later answer changes nothing', async () => {
+    vi.useFakeTimers();
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      let finish!: () => void;
+      const shutdownEngine = vi.fn(() => new Promise<void>((resolve) => (finish = resolve)));
+      guardDeps(modelWith(midTurn(1)), { ask: async () => 'quit', shutdownEngine });
+      electron.app.attempt();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(shutdownEngine).toHaveBeenCalledOnce();
+      await vi.advanceTimersByTimeAsync(SHUTDOWN_BOUND_MS - 1);
+      expect(electron.app.quits).toBe(0);
+      expect(electron.app.attempt()).toBe(false); // still one flight
+      await vi.advanceTimersByTimeAsync(1);
+      expect(electron.app.quits).toBe(1);
+      expect(String(error.mock.calls[0]![0])).toContain('[quit-guard]');
+      finish();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(electron.app.quits).toBe(1);
+      expect(shutdownEngine).toHaveBeenCalledOnce();
+    } finally {
+      error.mockRestore();
+      vi.useRealTimers();
+    }
   });
 });
 

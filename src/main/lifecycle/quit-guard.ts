@@ -5,14 +5,15 @@
 // engine running or waiting, with no turn), sessions running background tasks or workflows that are not counted so,
 // and terminals whose shell has a foreground command (C9's `pty.foreground`, asked in parallel, an unanswered probe
 // counted busy as C9's close check does). `before-quit` must prevent synchronously and the report is
-// asynchronous, so the guard always holds the quit while it computes the report: all zero, it disarms and quits through
-// the existing path; otherwise it asks Quit, Quit when idle or Cancel. Quit stops the engine host's sessions
-// (`engine.shutdown`) and quits; Quit when idle holds the quit, publishes the waiting report for the page's banner,
-// re-reads it on every status change and every 2 s, and quits at zero. Foreign-live sessions and the owner's terminals
-// outside MAWS are never waited on (the statuses and the pty table are MAWS's own). Quitting is one flight: once it
-// starts, outside quits stay held and any report, question or wait still out is inert until the one final app.quit()
-// (review fix). The end-to-end smoke answers
-// without a dialog. The `Restart` wording waits for P1's updater.
+// asynchronous, so the guard always holds the quit while it computes the report: all zero, it quits; otherwise it asks
+// Quit, Quit when idle or Cancel. Quit quits; Quit when idle holds the quit, publishes the waiting report for the page's
+// banner, re-reads it on every status change and every 2 s, and quits at zero. Every quit first stops the engine host's
+// sessions (`engine.shutdown`, each through its ladder) and waits for that answer, bounded by SHUTDOWN_BOUND_MS, before
+// the final app.quit(): will-quit then kills the hosts, and an engine still running there would outlive the app.
+// Foreign-live sessions and the owner's terminals outside MAWS are never waited on (the statuses and the pty table are
+// MAWS's own). Quitting is one flight: once it starts, outside quits stay held and any report, question or wait still
+// out is inert until the one final app.quit() (review fix). The end-to-end smoke answers without a dialog. The
+// `Restart` wording waits for P1's updater.
 // C12 end
 import { app, type MessageBoxOptions } from 'electron';
 import type { EngineSessionStatus } from '@shared/engine/status';
@@ -25,6 +26,12 @@ export interface BusyReport { midTurn: number; backgroundWork: number; busyTermi
 
 export const PROBE_TIMEOUT_MS = 2_000; // per terminal, and for the list
 export const WAIT_POLL_MS = 2_000;
+// How long a quit waits for engine.shutdown. The host's ladder (session-ladder.ts) writes end_session and waits 3 s for
+// the exit, then closes stdin and sends SIGTERM (2.1.283's own handler exits 143: pass3/sigterm-disposition.mjs), then
+// SIGKILL at 6 s. 5 s covers the end_session rung and 2 s of the SIGTERM rung, so only an engine that ignores both
+// loses its SIGKILL rung; past the bound will-quit kills the engine host, the engines are orphaned with their stdin
+// closed, and they end on its end of input, as every quit with nothing busy ended them before (1 to 3 s after the app).
+export const SHUTDOWN_BOUND_MS = 5_000;
 
 export interface QuitPty {
   list(): Promise<readonly { ptyId: string; alive: boolean }[]>;
@@ -148,27 +155,21 @@ export function installQuitGuard(model: Pick<SessionReadModel, 'midTurnCount' | 
     disarmed = true;
     app.quit();
   };
-  // nothing busy: the existing quit path stops the hosts
-  const quit = () => {
-    if (quitting) return;
-    stopWaiting();
-    quitting = Promise.resolve();
-    finalQuit();
-  };
   const stopWaiting = () => {
     if (!wait) return;
     wait.stop();
     wait = null;
     deps.publish(null);
   };
-  const quitNow = (): Promise<void> => {
+  // Every quit, busy or not: the engines end through their ladders, bounded, then the one final app.quit()
+  const quit = (): Promise<void> => {
     if (quitting) return quitting;
     stopWaiting();
     quitting = (async () => {
       try {
-        await deps.shutdownEngine();
+        await within(deps.shutdownEngine(), SHUTDOWN_BOUND_MS);
       } catch (error) {
-        console.error('[quit-guard] stopping the engine failed; quitting anyway', error);
+        console.error('[quit-guard] stopping the engine failed or ran past its bound; quitting anyway', error);
       }
       finalQuit();
     })();
@@ -198,7 +199,7 @@ export function installQuitGuard(model: Pick<SessionReadModel, 'midTurnCount' | 
         .then((next) => {
           if (wait !== mine || again) return;
           if (total(next) === 0) {
-            quit();
+            void quit();
           } else {
             mine.report = next;
             deps.publish(next);
@@ -235,7 +236,7 @@ export function installQuitGuard(model: Pick<SessionReadModel, 'midTurnCount' | 
           return 'cancel' as const;
         });
         if (quitting) return; // the banner's Quit now answered first
-        if (answer === 'quit') await quitNow();
+        if (answer === 'quit') await quit();
         else if (answer === 'when_idle') startWaiting(r);
         // Cancel keeps the app, and leaves a wait already under way as it was (the banner has its own Cancel)
       })
@@ -246,7 +247,7 @@ export function installQuitGuard(model: Pick<SessionReadModel, 'midTurnCount' | 
 
   return {
     waiting: () => wait?.report ?? null,
-    quitNow: () => void quitNow(),
+    quitNow: () => void quit(),
     cancelWait: stopWaiting,
   };
 }
