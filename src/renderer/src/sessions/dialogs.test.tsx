@@ -10,7 +10,8 @@ import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
 import { REPO, resetSetupStore } from '../test-support/setup-intents';
 import { resetShellStores } from '../test-support/shell-stores';
-import { closeDialog, openDialog } from './dialogs';
+import { closeDialog, openDialog, useDialogs } from './dialogs';
+import { Sheet, SheetForm } from './Sheet';
 import { cleanupTargetOf, confirmLabel } from './CleanupDialog';
 import { SessionDialogs, DeletionNotice } from './SessionDialogs';
 import { useSetup } from './store';
@@ -351,5 +352,36 @@ describe('dialogs', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Keep' }));
     expect(fake.invoked('session.deletions.keep')).toEqual([{ appSessionId: IDLE1 }]);
     await waitFor(() => expect(screen.queryByRole('note')).toBeNull());
+  });
+});
+
+// Debt wave 4: a sheet whose answer is owed to a caller (C11's gateway sheets) closes through its own callback
+describe('the sheet’s close seam', () => {
+  it('Cancel and Escape reach `onClose`, leaving C10’s dialog store alone; without it Cancel closes the store’s dialog', async () => {
+    const heard: string[] = [];
+    act(() => openDialog({ kind: 'rename', appSessionId: IDLE1 }));
+    const { unmount } = render(
+      <Sheet title="Owed" onClose={() => heard.push('close')} data-probe="owed">
+        <SheetForm canSubmit onSubmit={() => heard.push('submit')} submitLabel="Go" submitClass="" cancelLabel="Not now">
+          <p>body</p>
+        </SheetForm>
+      </Sheet>,
+    );
+    const sheet = screen.getByRole('dialog', { name: 'Owed' });
+    expect(sheet.dataset.probe).toBe('owed');
+    await userEvent.click(within(sheet).getByRole('button', { name: 'Not now' }));
+    await userEvent.keyboard('{Escape}');
+    expect(heard).toEqual(['close', 'close']);
+    expect(useDialogs.getState().open, 'the store’s dialog is not the owed sheet’s').not.toBeNull();
+    unmount();
+    render(
+      <Sheet title="Plain">
+        <SheetForm canSubmit onSubmit={() => {}} submitLabel="Go" submitClass="">
+          <p>body</p>
+        </SheetForm>
+      </Sheet>,
+    );
+    await userEvent.click(within(screen.getByRole('dialog', { name: 'Plain' })).getByRole('button', { name: 'Cancel' }));
+    expect(useDialogs.getState().open).toBeNull();
   });
 });

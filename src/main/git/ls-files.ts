@@ -10,7 +10,6 @@ import type { Dirent } from 'node:fs';
 import { readdir, realpath } from 'node:fs/promises';
 import { join } from 'node:path';
 import { rankPaths } from '@shared/composer/fuzzy';
-import type { SessionRecord } from '@shared/graph/session';
 import type { LsFiles, LsFilesInput } from '@shared/ipc/schema/git';
 import { NotARepositoryError, type GitRun } from './runner';
 
@@ -25,16 +24,10 @@ export interface FileListerOptions {
   walkMaxEntries?: number;
 }
 
-// The directories a session names (its own, its additional ones, its worktree's), for every unarchived session, and every
-// project's directory, once each.
-export function listableRoots(sessions: Iterable<SessionRecord>, projectDirectories: Iterable<string>): string[] {
-  const roots = new Set<string>();
-  for (const r of sessions) {
-    if (r.archived) continue;
-    for (const directory of [r.directory, ...r.additionalDirectories, ...(r.worktree ? [r.worktree.path] : [])]) roots.add(directory);
-  }
-  for (const directory of projectDirectories) roots.add(directory);
-  return [...roots];
+// The directories every unarchived session names (`knownSessionDirectories`: its own, its additional ones, its
+// worktree's) and every project's directory, once each.
+export function listableRoots(sessionDirectories: Iterable<string>, projectDirectories: Iterable<string>): string[] {
+  return [...new Set([...sessionDirectories, ...projectDirectories])];
 }
 
 interface Listing {

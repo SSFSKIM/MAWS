@@ -174,12 +174,13 @@ app.whenReady().then(() => {
   // listable roots: the directories of every unarchived session the read model holds (both launch modes) or the index
   // holds, and every indexed project's directory; read again after any session or project change main tells the renderer
   const roots = () => {
-    const held = sessions.model.allRecords();
+    let projectDirectories: string[] = [];
     try {
-      return listableRoots([...held, ...index.sessions.list()], index.projects.list({ includeHidden: true }).map((p) => p.directory));
+      projectDirectories = index.projects.list({ includeHidden: true }).map((p) => p.directory);
     } catch {
-      return listableRoots(held, []); // the index is unavailable
+      // the projects are unavailable; the session walk falls back to the read model on its own (with a warning)
     }
+    return listableRoots(knownSessionDirectories(sessions.model, index, { includeArchived: false }), projectDirectories); // debt wave 4: C11's walk
   };
   const files = new FileLister({ run: createGitRunner(), roots });
   for (const name of ['session.changed', 'session.removed', 'session.projects.changed'] as const) onEmitted(name, () => files.invalidateRoots());
