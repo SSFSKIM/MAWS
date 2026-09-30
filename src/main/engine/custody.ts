@@ -73,7 +73,9 @@ async function readManifest(path: string): Promise<CustodyManifest | null> {
 }
 
 // null when the copy is the pin's as its manifest recorded it; a copy with no readable manifest cannot be told from an
-// altered one.
+// altered one. The full hash runs at every start: measured 2026-09-29 (C12 M4 task 3) on the owner's Mac, 2.1.283's
+// 225,036,032 bytes hash in 207 to 259 ms, well under the one second past which the document would compare size and
+// mtime at start and hash in the background instead.
 async function verify(path: string, version: string): Promise<'missing' | 'mismatch' | null> {
   let size: number;
   try {
