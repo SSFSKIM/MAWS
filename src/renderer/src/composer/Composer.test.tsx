@@ -14,13 +14,14 @@ import { connectKeys } from '../keymap/dispatcher';
 import { bindingsOf, useKeyChord } from '../keymap/useKeyChord';
 import { itemFor, permission } from '../request-card/test-requests';
 import { useAttention } from '../stores/attention';
-import { insertComposerText, isStarting, prefillComposer, resetComposerStore, useComposerStore } from '../stores/composer';
+import { insertComposerText, isStarting, prefillComposer, resetComposerStore, setupPhaseOf, useComposerStore } from '../stores/composer';
 import { useLayout } from '../stores/layout';
 import { useNotices } from '../stores/notices';
 import { resetQueueStore } from '../stores/queue';
 import { useSessions } from '../stores/sessions';
 import { resetShellStores } from '../test-support/shell-stores';
 import { resetCatalogStore } from '../stores/catalog';
+import { StatusLine } from '../session/StatusLine';
 import { Composer } from './Composer';
 import { ComposerAppKeys } from './ComposerAppKeys';
 import { DockedCardFrame } from './docked/DockedCardFrame';
@@ -53,6 +54,12 @@ beforeEach(() => {
     'session.interrupt': { stillQueued: [], cancelled: [] },
     'session.listModels': { models: [{ value: 'sonnet', resolvedModel: 'claude-sonnet', displayName: 'Sonnet', description: 'fast' }] },
     'session.listPermissionRules': rules,
+    // C10's catalogue per route (`engine.models`): an entry names a resolved id through `resolvedModel`, as initialize's do
+    'engine.models': (input: { gateway?: string }) => ({
+      models: [{ value: 'sonnet', resolvedModel: 'claude-sonnet', displayName: input.gateway === 'direct' ? 'Sonnet (Direct)' : 'Sonnet (relay)' }],
+      source: 'cached',
+      at: '2026-09-29T09:00:00.000Z',
+    }),
     'session.applyFlagSettings': undefined,
     'session.answer': { outcome: 'delivered' },
     'layout.pickFiles': { files: [{ path: '/work/picked', name: 'picked', bytes: 0, mediaType: 'inode/directory', data: null }] },
@@ -303,19 +310,32 @@ describe("composer DOM under C5's dispatcher", () => {
     expect(editorOf().editor.getText()).toBe('one two three four');
   });
 
-  it('the model chip shows the resolved id until the first listModels, then the display name, which outlives the mount', async () => {
-    live(A, { status: { model: { requested: null, resolved: 'claude-sonnet' } } });
+  it('the model chip names its model from the route’s engine.models catalogue before any menu opens, and never lists models on mount', async () => {
+    const direct = { mode: 'direct' as const, baseUrl: null, verified: 'direct' as const, autoModeServer: 'unknown' as const, localLane: null };
+    live(A, { status: { model: { requested: null, resolved: 'claude-sonnet' }, gateway: direct } });
     const view = mount([{ index: 0, id: A }]);
     const chip = () => within(composerOf(0)).getByRole('button', { name: /^Model / });
-    expect(chip().getAttribute('aria-label')).toBe('Model claude-sonnet');
-    expect(invoked('session.listModels')).toEqual([]); // lazy: no read on mount
-    await userEvent.setup().click(chip());
-    await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model Sonnet'));
+    await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model Sonnet (Direct)'));
+    expect(invoked('engine.models')).toContainEqual({ refresh: false, gateway: 'direct' }); // the session's own route
+    expect(invoked('session.listModels')).toEqual([]); // the engine is not asked on mount
     view.unmount();
-    queryClient.clear(); // nothing left in the query cache: the name is the session's own
+    // an exited session names it from the route its record kept
+    useSessions.setState({ engine: new Map(), records: new Map([[A, record(A, { model: { requested: null, resolved: 'claude-sonnet' } })]]) });
     mount([{ index: 0, id: A }]);
-    expect(chip().getAttribute('aria-label')).toBe('Model Sonnet');
-    expect(invoked('session.listModels')).toHaveLength(1);
+    await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model Sonnet (relay)'));
+    expect(invoked('engine.models')).toContainEqual({ refresh: false, gateway: 'gateway' });
+  });
+
+  it('renews the route’s catalogue when the process becomes ready, not at each mount of a ready session', async () => {
+    live(A, { status: { process: 'initializing' } });
+    const view = mount([{ index: 0, id: A }]);
+    await waitFor(() => expect(invoked('engine.models')).toHaveLength(1));
+    live(A); // ready: the launch's initialize has updated the route's catalogue
+    await waitFor(() => expect(invoked('engine.models')).toHaveLength(2));
+    view.unmount();
+    mount([{ index: 0, id: A }]); // a tab switch back: the cached catalogue stands
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(invoked('engine.models')).toHaveLength(2);
   });
 
   it('keeps `!` enabled while busy as Run, and the control says it runs now inside the turn', async () => {
@@ -411,7 +431,7 @@ describe('one Stop handler for every pane', () => {
 });
 
 // A stub of C10's hook over a small mutable intent: `start` answers when the test says.
-function stubIntent(over: Partial<SetupIntentHook['intent']> = {}) {
+function stubIntent(over: Partial<SetupIntentHook['intent']> = {}, options: Partial<SetupIntentHook['options']> = {}) {
   let resolveStart: ((r: HookResult) => void) | null = null;
   const state = {
     intent: { location: { kind: 'directory' as const, path: '/repo' }, additionalDirectories: [], model: null, effort: null, permissionMode: null, message: null, draft: null, ...over } as SetupIntentHook['intent'],
@@ -426,7 +446,7 @@ function stubIntent(over: Partial<SetupIntentHook['intent']> = {}) {
   };
   function useStub(): SetupIntentHook {
     useStubTick(state.listeners);
-    return { intent: state.intent, options: { locations: [state.intent.location], branches: [], models: [], autoModeNote: null }, phase: state.phase, patch, start };
+    return { intent: state.intent, options: { locations: [state.intent.location], branches: [], models: [], autoModeNote: null, ...options }, phase: state.phase, patch, start };
   }
   registerSetupIntentHook((id) => (id === A ? useStub() : null)); // a hook, registered as C10's is
   const setPhase = (phase: string | null) => {
@@ -583,6 +603,28 @@ describe('unstarted send holds a starting state', () => {
     await waitFor(() => expect(primary().title).toBe('Your first message is with the setup above'));
   });
 
+  it('the setup phase is the status line’s activity: alone under the frame before the record exists, then the status line’s first field', async () => {
+    const stub = stubIntent();
+    const view = mount([{ index: 0, id: A }]);
+    const setup = () => within(composerOf(0)).queryByRole('status', { name: 'Setup' });
+    expect(setup()).toBeNull(); // nothing at rest: the unstarted tab is the heading and the frame
+    act(() => stub.setPhase('Creating worktree one…'));
+    await waitFor(() => expect(setup()?.textContent).toBe('Creating worktree one…'));
+    act(() => stub.setPhase(null));
+    await waitFor(() => expect(setup()).toBeNull());
+    view.unmount();
+    // the record exists from the launch, before C3's first status: the status line carries the phase, the frame does not
+    useSessions.setState({ records: new Map([[A, record(A)]]), engine: new Map() });
+    mount([{ index: 0, id: A }], <StatusLine record={record(A)} />);
+    act(() => stub.setPhase('Starting…'));
+    const line = () => screen.getByRole('group', { name: 'Session status' });
+    await waitFor(() => expect(within(line()).getByRole('status', { name: 'Setup' }).textContent).toBe('Starting…'));
+    expect(setup()).toBeNull();
+    act(() => stub.setPhase(null));
+    await waitFor(() => expect(within(line()).queryByRole('status', { name: 'Setup' })).toBeNull());
+    expect(setupPhaseOf(useComposerStore.getState(), A)).toBeNull();
+  });
+
   // C10's M6 finding: a failed setup keeps its tab and its intent, and C3 keeps the failed launch's exited status for
   // the id; with no record the tab is still unstarted (C5's pane rule), so the composer stays bound to the intent.
   it('binds the intent on a failed setup’s retained tab (an exited status, no record): editable chips, Send, and its draft in the intent', async () => {
@@ -625,6 +667,33 @@ describe('unstarted send holds a starting state', () => {
     expect(invoked('session.listModels')).toEqual([]);
     await user.click(within(composerOf(0)).getByRole('button', { name: /^Location/ }));
     await waitFor(() => expect(invoked('session.listPermissionRules')).toHaveLength(1));
+  });
+
+  it('the location chip names the directory (the path in the popover); a new worktree starts from a chosen branch; an existing worktree shows its branch and sessions', async () => {
+    const repo = '/Users/owner/code/repo';
+    const existing = `${repo}/.claude/worktrees/older`;
+    const template = { kind: 'newWorktree' as const, repoRoot: repo, name: 'next', branch: { kind: 'new' as const, name: 'worktree-next', base: 'HEAD' } };
+    const stub = stubIntent({ location: { kind: 'directory', path: repo } }, { locations: [{ kind: 'directory', path: repo }, { kind: 'existingWorktree', repoRoot: repo, path: existing }, template], branches: ['main', 'feature'] });
+    const invoke = fake.client.invoke.bind(fake.client);
+    const worktrees = { repoRoot: repo, commonDir: `${repo}/.git`, worktrees: [{ repoRoot: repo, path: existing, branch: 'worktree-older', head: 'abc', isMain: false, locked: false, prunable: false, managed: true }] };
+    fake.client.invoke = ((name, input) => (name === 'git.worktree.list' ? Promise.resolve({ ok: true, value: worktrees }) : invoke(name, input))) as MawsBridge['invoke'];
+    useSessions.setState({ records: new Map([['s-1' as AppSessionId, record('s-1', { directory: existing, worktree: { path: existing, branch: 'worktree-older' } })], ['s-2' as AppSessionId, record('s-2', { directory: existing, worktree: { path: existing, branch: 'worktree-older' }, archived: true })]]) });
+    mount([{ index: 0, id: A }]);
+    const chip = within(composerOf(0)).getByRole('button', { name: `Location ${repo}` });
+    expect(chip.textContent).toMatch(/^repo·/); // the name; the path is the tooltip and the popover's first line
+    expect(chip.title).toBe(repo);
+    const user = userEvent.setup();
+    await user.click(chip);
+    const popover = screen.getByRole('dialog', { name: 'Location' });
+    expect(within(popover).getByText('/Users/owner/code/repo')).toBeTruthy();
+    const older = within(popover).getByRole('menuitemradio', { name: /Existing worktree/ });
+    await waitFor(() => expect(older.textContent).toBe('Existing worktreeolder · ⎇ worktree-older · 1 session'));
+    expect(older.title).toBe(existing);
+    const from = within(popover).getByRole('combobox', { name: 'Start from' }) as HTMLSelectElement;
+    expect([...from.options].map((o) => o.value)).toEqual(['HEAD', 'main', 'feature']);
+    await user.selectOptions(from, 'feature');
+    await user.click(within(popover).getByRole('button', { name: 'Use' }));
+    expect(stub.patch).toHaveBeenCalledWith({ location: { ...template, branch: { kind: 'new', name: 'worktree-next', base: 'feature' } } });
   });
 
   it('holds `!` and `#` until the session starts, and hides the queue', async () => {

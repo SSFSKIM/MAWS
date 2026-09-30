@@ -117,7 +117,7 @@ export const TranscriptSummarySchema = z.strictObject({
   lastRecordAt: z.string().nullable(),
   customTitle: z.string().nullable(), // last `custom-title` / `ai-title` in the tail, else `custom-title.json` (folded in by M2), else head
   aiTitle: z.string().nullable(),
-  firstPrompt: z.string().nullable(), // last `last-prompt.lastPrompt` in the tail, else the first user text
+  firstPrompt: z.string().nullable(), // the first user text in the head, else the earliest `last-prompt.lastPrompt` the windows hold (debt wave 4)
   lastAssistantText: z.string().nullable(), // the last assistant text block in the tail, first 200 characters
   gitBranch: z.string().nullable(),
   engineVersion: z.string().nullable(),

@@ -13,7 +13,7 @@ const DEFAULTS: Partial<Record<EventKind, Record<string, unknown>>> = {
   },
   'assistant.block.delta': { apiMessageId: null, blockIndex: 0, blockType: 'thinking', textDelta: null, thinkingDelta: '…', inputJsonDelta: null, userMessageUuid: null },
   'assistant.block.complete': {
-    messageUuid: 'm1', apiMessageId: 'msg_1', blockIndex: 0, block: { type: 'text', text: '' }, model: 'claude', supersedes: null, aborted: false, userMessageUuids: [],
+    messageUuid: 'm1', apiMessageId: 'msg_1', blockIndex: 0, block: { type: 'text', text: '' }, model: 'claude', supersedes: [], aborted: false, userMessageUuids: [],
   },
   'user.message': { messageUuid: null, content: '', isReplay: false, isSynthetic: false, origin: null, bash: null },
   'tool.use': { toolUseId: 'toolu_1', toolName: 'Bash', input: {}, apiMessageId: null, messageUuid: null },

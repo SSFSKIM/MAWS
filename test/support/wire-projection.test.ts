@@ -41,7 +41,7 @@ describe('the wire projection reads the core of a conversation from raw frames',
       { ...base, id: 'u1' as EventId, kind: 'user.message', messageUuid: 'u1' as MessageUuid, content: [{ type: 'text', text: 'hello' }], isReplay: false, isSynthetic: false, origin: null, bash: null },
       // An engine-initiated task notification is a `system/task_notification` frame on the wire, not a user frame.
       { ...base, id: 'n1' as EventId, kind: 'user.message', messageUuid: 'n1' as MessageUuid, content: '<task-notification>…', isReplay: false, isSynthetic: false, origin: 'task-notification', bash: null },
-      { ...base, id: 'a1' as EventId, kind: 'assistant.block.complete', messageUuid: 'a1' as MessageUuid, apiMessageId: null, blockIndex: 0, block: { type: 'thinking' }, model: null, supersedes: null, aborted: false, userMessageUuids: [] },
+      { ...base, id: 'a1' as EventId, kind: 'assistant.block.complete', messageUuid: 'a1' as MessageUuid, apiMessageId: null, blockIndex: 0, block: { type: 'thinking' }, model: null, supersedes: [], aborted: false, userMessageUuids: [] },
       { ...base, id: 't1' as EventId, kind: 'tool.use', toolUseId: 'toolu_1' as ToolUseId, toolName: 'Agent', input: {}, apiMessageId: null, messageUuid: 'a1' as MessageUuid },
     ] as SessionEvent[];
     expect(projectEvents(events)).toEqual({

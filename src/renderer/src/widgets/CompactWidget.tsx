@@ -5,18 +5,22 @@
 // end) and while messages wait in C3's queue, which a send never overtakes, naming why a paused queue paused.
 import { useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
+import { contextTotal } from '@shared/wire/control';
 import { PAUSED_COPY } from '../composer/queue/QueueList';
 import { useSessionQueue } from '../stores/queue';
 import { useSessions } from '../stores/sessions';
 import { ipc } from '../ipc/client';
 import { present as presentContext } from './ContextWidget';
-import { COMPACT, FRAME, WIDGET_FOOT, WIDGET_TITLE } from './copy';
+import { COMPACT, CONTEXT, FRAME, WIDGET_FOOT, WIDGET_TITLE } from './copy';
+import { num } from './parts';
 import { MOVES_READS, useEngineRead } from './read';
 import { WidgetFrame } from './WidgetFrame';
 
 export function CompactWidget({ appSessionId, args, close }: { appSessionId: AppSessionId; args: string; close(): void }) {
   const read = useEngineRead('session.getContextUsage', { appSessionId, detail: 'summary' });
   const status = useSessions((s) => s.engine.get(appSessionId) ?? null);
+  // C3's sample (the status line's `ctx`) first; the read's own figures, corrected as C3 corrects them, before one arrives
+  const sampled = useSessions((s) => s.digests.get(appSessionId)?.context ?? null);
   const queue = useSessionQueue(appSessionId);
   const [instructions, setInstructions] = useState(args.trim());
   const [sending, setSending] = useState(false);
@@ -43,7 +47,13 @@ export function CompactWidget({ appSessionId, args, close }: { appSessionId: App
   return (
     <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.compact} command="compact" foot={WIDGET_FOOT.compact} state={read.state === 'not_running' ? 'not_running' : 'ready'} error={null} close={close}>
       <div className="flex flex-col gap-2">
-        <p className="m-0 text-fg-muted">{read.data ? presentContext(read.data).line : (read.error ?? FRAME.reading)}</p>
+        <p className="m-0 text-fg-muted">
+          {sampled
+            ? CONTEXT.line(num(sampled.totalTokens), num(sampled.maxTokens), Math.round(sampled.percent), sampled.autoCompactThreshold === null ? null : num(sampled.autoCompactThreshold))
+            : read.data
+              ? presentContext({ ...read.data, ...contextTotal(read.data) }).line
+              : (read.error ?? FRAME.reading)}
+        </p>
         <label className="flex flex-col gap-1 text-ui-sm">
           <span className="text-fg-muted">{COMPACT.instructions}</span>
           <textarea

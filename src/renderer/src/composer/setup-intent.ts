@@ -19,8 +19,8 @@ export type Location =
   | { kind: 'existingWorktree'; repoRoot: string; path: string };
 
 type ModelOption = ListModelsResponse['models'][number]; // C3's landed `session.listModels` entry
-// A model the chip offers: C10 fills value, displayName, supportsAutoMode and supportsFastMode from `engine.models`; an
-// absent supportedEffortLevels offers every effort level.
+// A model the chip offers: C10 fills value, displayName, supportsAutoMode, supportsFastMode and supportedEffortLevels
+// from `engine.models` (each as the catalogue entry carries it); an absent supportedEffortLevels offers every effort level.
 export type ModelInfo = Pick<ModelOption, 'value' | 'displayName'> & Partial<Pick<ModelOption, 'description' | 'supportedEffortLevels' | 'supportsAutoMode' | 'supportsFastMode'>>;
 
 export interface FirstMessage {

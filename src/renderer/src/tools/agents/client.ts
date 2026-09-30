@@ -4,7 +4,7 @@
 // `session.eventBatch`, the only wire inputs of the task-graph store and the relay store). The product uses the
 // validated bridge; the `#panel` harness and the tests install a fake with `setAgentWorkClient`. C6's `ipcSource` is
 // not behind this seam: the drill-in mounts it as it is (K2).
-import type { AppSessionId, MessageUuid, TaskId } from '@shared/graph/ids';
+import type { AgentId, AppSessionId, MessageUuid, TaskId } from '@shared/graph/ids';
 import type { SessionEvent } from '@shared/graph/events';
 import type { CommandName, CommandResult, EventPayload, MawsBridge } from '@shared/ipc/schema';
 import type { FsReadSpillInput, FsReadSpillOutput, SubagentEntry, WorkflowRun } from '@shared/ipc/schema/fs';
@@ -18,6 +18,8 @@ export interface AgentWorkClient {
   tasks(listId: string): Promise<PersistedTask[]>;
   readSpill(input: FsReadSpillInput): Promise<FsReadSpillOutput>;
   events(appSessionId: AppSessionId, afterSeq: number | null): Promise<EventsSnapshot>; // session.events { afterSeq, limit: null }
+  agentEvents(appSessionId: AppSessionId, agentId: AgentId): Promise<SessionEvent[]>; // fs.agentEvents: a child's transcript so far, following it (later events on session.eventBatch); debt wave 4, the relay's receipt
+  unfollowAgent(appSessionId: AppSessionId, agentId: AgentId): Promise<void>; // fs.unfollow for that child only: releases the follow agentEvents started
   steer(appSessionId: AppSessionId, content: string, priority: 'next'): Promise<{ messageUuid: MessageUuid }>; // the relay never sends 'now'
   stopTask(appSessionId: AppSessionId, taskId: TaskId): Promise<void>; // bounded, 8 s
   onEventBatch(listener: (batch: { appSessionId: AppSessionId; events: SessionEvent[] }) => void): () => void;
@@ -38,6 +40,8 @@ export function createAgentWorkClient(bridge: MawsBridge): AgentWorkClient {
     tasks: async (listId) => valueOf(await bridge.invoke('fs.tasks', { listId })).tasks,
     readSpill: async (input) => valueOf(await bridge.invoke('fs.readSpill', input)),
     events: async (appSessionId, afterSeq) => valueOf(await bridge.invoke('session.events', { appSessionId, afterSeq, limit: null })),
+    agentEvents: async (appSessionId, agentId) => valueOf(await bridge.invoke('fs.agentEvents', { appSessionId, agentId })).events,
+    unfollowAgent: async (appSessionId, agentId) => valueOf(await bridge.invoke('fs.unfollow', { appSessionId, agentId })),
     steer: async (appSessionId, content, priority) => valueOf(await bridge.invoke('session.steer', { appSessionId, content, priority })),
     stopTask: async (appSessionId, taskId) => valueOf(await bridge.invoke('session.stopTask', { appSessionId, taskId })),
     onEventBatch: (listener) => bridge.on('session.eventBatch', listener),

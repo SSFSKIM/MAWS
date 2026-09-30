@@ -13,6 +13,7 @@ import { resetsInCompact, tokens, windowShown } from '../statusline/format'; // 
 import { MODE_REFUSAL_WORDS } from '../statusline/mode-menu';
 import { ContextPopover, CostPopover, CwdPopover, ModePopover, UsagePopover } from '../statusline/popovers';
 import { USAGE_UNAVAILABLE } from '../statusline/UsagePopover';
+import { SetupActivity, useSetupPhase } from '../statusline/SetupActivity'; // the setup's phase while the session is unstarted
 import { LINE_TICK_MS, useNow } from '../statusline/use-now';
 // C7 end
 
@@ -72,6 +73,7 @@ export function StatusLine({ record }: { record: SessionRecord }) {
   useDirectFallback(record.appId, status);
   const now = useNow(LINE_TICK_MS);
   const f = statusFields(record, digest, shown.windows, now);
+  const setupPhase = useSetupPhase(record.appId);
   // C7 end
   const dot = <span aria-hidden>·</span>;
   return (
@@ -81,6 +83,14 @@ export function StatusLine({ record }: { record: SessionRecord }) {
           {f.cwd}
         </button>
       </CwdPopover>
+      {/* C7 start: the running setup's phase, while a started tab's first launch is still under C10's setup */}
+      {setupPhase !== null && (
+        <>
+          <SetupActivity phase={setupPhase} />
+          {dot}
+        </>
+      )}
+      {/* C7 end */}
       <ContextPopover record={record /* C7 */}>
         <button type="button" className={FIELD}>
           {f.ctx}

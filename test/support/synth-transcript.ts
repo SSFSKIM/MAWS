@@ -90,14 +90,14 @@ export function synthesise({ turns, seed, streamLast = false }: SynthOptions): S
       tick(15, 60);
     }
     emit('assistant.block.complete', {
-      messageUuid: `${api}-u${index}` as MessageUuid, apiMessageId: api, blockIndex: index, model: MODEL, supersedes: null, aborted: false,
+      messageUuid: `${api}-u${index}` as MessageUuid, apiMessageId: api, blockIndex: index, model: MODEL, supersedes: [], aborted: false,
       userMessageUuids: [], block: type === 'text' ? { type: 'text', text } : { type: 'thinking', thinking: text, signature: '' },
     });
   };
 
   const toolCall = (api: ApiMessageId, index: number, id: ToolUseId, name: string, input: Record<string, unknown>, result: { content: string; structured: unknown; denial?: 'permission-rule' }) => {
     emit('assistant.block.complete', {
-      messageUuid: `${api}-u${index}` as MessageUuid, apiMessageId: api, blockIndex: index, model: MODEL, supersedes: null, aborted: false,
+      messageUuid: `${api}-u${index}` as MessageUuid, apiMessageId: api, blockIndex: index, model: MODEL, supersedes: [], aborted: false,
       userMessageUuids: [], block: { type: 'tool_use', id, name, input },
     });
     emit('tool.use', { toolUseId: id, toolName: name, input, apiMessageId: api, messageUuid: `${api}-u${index}` as MessageUuid });
@@ -182,7 +182,7 @@ export function synthesise({ turns, seed, streamLast = false }: SynthOptions): S
         const childApi = `msg_${turn}_c${a}_${step}` as ApiMessageId;
         if (step % 3 === 2) {
           emit('assistant.block.complete', {
-            messageUuid: `${childApi}-u0` as MessageUuid, apiMessageId: childApi, blockIndex: 0, model: MODEL, supersedes: null, aborted: false,
+            messageUuid: `${childApi}-u0` as MessageUuid, apiMessageId: childApi, blockIndex: 0, model: MODEL, supersedes: [], aborted: false,
             userMessageUuids: [], block: { type: 'text', text: sentence(5, 12) },
           });
           step += 1;
@@ -255,7 +255,7 @@ export function synthesise({ turns, seed, streamLast = false }: SynthOptions): S
       }
       clock += STREAM_BATCH_INTERVAL_MS;
       emit('assistant.block.complete', {
-        messageUuid: `${api}-u0` as MessageUuid, apiMessageId: api, blockIndex: 0, model: MODEL, supersedes: null, aborted: false,
+        messageUuid: `${api}-u0` as MessageUuid, apiMessageId: api, blockIndex: 0, model: MODEL, supersedes: [], aborted: false,
         userMessageUuids: [], block: { type: 'text', text },
       });
     } else block(api, 0, 'text', answer(turn, random.int(1, 2)), [12, 30]);

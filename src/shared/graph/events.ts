@@ -118,7 +118,9 @@ export const SessionEventSchema = z.discriminatedUnion('kind', [
   }),
   event('assistant.block.complete', {
     messageUuid: MessageUuidSchema, apiMessageId: ApiMessageIdSchema, blockIndex: z.number(), block: ContentBlockSchema, model: z.string(),
-    supersedes: MessageUuidSchema.nullable(), aborted: z.boolean(), userMessageUuids: z.array(MessageUuidSchema),
+    // the message uuids this block replaces (SPEC 45, refusal fallback: every block frame of the refused attempt, on the
+    // first frame of the replacement only); empty on every other block (debt wave 4: was one uuid or null)
+    supersedes: z.array(MessageUuidSchema), aborted: z.boolean(), userMessageUuids: z.array(MessageUuidSchema),
   }),
   event('user.message', {
     messageUuid: MessageUuidSchema.nullable(), content: z.union([z.string(), z.array(ContentBlockSchema)]), isReplay: z.boolean(),

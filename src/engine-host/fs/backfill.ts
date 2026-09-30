@@ -93,7 +93,9 @@ export function recordToEvents(record: TranscriptRecord, ctx: BackfillContext): 
     case 'system':
       systemEvents(record, ctx, base, events);
       break;
-    case 'attachment': // context injections: on the chain, nothing to show
+    case 'attachment': // context injections: on the chain, nothing to show, except a relay's receipt in a child
+      coordinatorMessage(record, uuid, ctx, base, events);
+      break;
     case 'progress': // never on the chain; the follower keeps only its skeleton
       break;
     default:
@@ -103,6 +105,20 @@ export function recordToEvents(record: TranscriptRecord, ctx: BackfillContext): 
 }
 
 type Base = () => EventBase;
+
+// Debt wave 4 (C8b's receipt ask): a message SendMessage queued for a live child reaches the child's transcript only as
+// a `queued_command` attachment with the coordinator origin, written at the child's next tool round, which the model
+// reads as a system reminder (pass3/relay-to-child seq 232 and 351, the recorded line: `attachment { type, prompt,
+// source_uuid, origin: { kind: 'coordinator' }, isMeta: true }`). It becomes the child's synthetic `user.message` with
+// the prompt as its content, as the resumed child's own `isMeta` user record already does, so C8b's relay sees the
+// receipt; a synthetic message opens no turn and renders no row. Other attachments, and any attachment in the main
+// transcript (no probe records one there), stay unshown.
+function coordinatorMessage(record: TranscriptRecord, uuid: MessageUuid, ctx: BackfillContext, base: Base, events: SessionEvent[]): void {
+  if (ctx.agentId === null) return;
+  const attachment = record.attachment as { type?: unknown; prompt?: unknown; origin?: { kind?: unknown } } | undefined;
+  if (attachment?.type !== 'queued_command' || attachment.origin?.kind !== 'coordinator' || typeof attachment.prompt !== 'string') return;
+  events.push({ ...base(), kind: 'user.message', messageUuid: uuid, content: attachment.prompt, isReplay: false, isSynthetic: true, origin: 'coordinator', bash: null });
+}
 
 function userEvents(record: TranscriptRecord, uuid: MessageUuid, ctx: BackfillContext, base: Base, events: SessionEvent[]): void {
   const content = messageContent(record);
@@ -205,7 +221,7 @@ function assistantEvents(record: TranscriptRecord, uuid: MessageUuid, ctx: Backf
       blockIndex: apiBlockIndex === null ? i : apiBlockIndex + i,
       block,
       model,
-      supersedes: null,
+      supersedes: [],
       aborted: false,
       userMessageUuids: [],
     });

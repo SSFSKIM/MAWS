@@ -202,7 +202,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
   let openerDropped = false;
   for (const event of turn.events) {
     if (event.kind === 'boundary.retraction') for (const uuid of event.retractedMessageUuids) retracted.add(uuid);
-    if (event.kind === 'assistant.block.complete' && event.supersedes) superseded.add(event.supersedes);
+    if (event.kind === 'assistant.block.complete') for (const uuid of event.supersedes) superseded.add(uuid);
     if (event.kind === 'command.lifecycle') openerDropped = true;
   }
   const dropped = (messageUuid: string | null) => messageUuid !== null && (retracted.has(messageUuid) || superseded.has(messageUuid));

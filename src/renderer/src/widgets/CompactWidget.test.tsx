@@ -39,10 +39,19 @@ const mount = (args = '', close = vi.fn()) => {
 const compactNow = () => screen.getByRole('button', { name: 'Compact now' });
 
 describe('compact widget', () => {
-  it("shows the context numbers from get_context_usage's summary", async () => {
+  // Debt wave 4: the engine's summary total is floored by its overhead estimate until the measured input passes it
+  // (pass1/reads seq 57 answered 30,433, 15 %, over a measured 21,507), so the widget agrees with the status line's ctx.
+  it("shows get_context_usage's summary corrected as C3 corrects its sample, before a sample arrives", async () => {
     mount();
-    await screen.findByText('30,433 of 200,000 · 15% · autocompact at 167,000');
+    await screen.findByText('21,508 of 200,000 · 11% · autocompact at 167,000');
     expect(backend.calls.find((c) => c.subtype === 'get_context_usage')?.input).toEqual({ appSessionId: ID, detail: 'summary' });
+  });
+
+  it("shows C3's sample (the status line's ctx) once one arrived", async () => {
+    useSessions.setState({ digests: new Map([[ID, { appSessionId: ID, context: { percent: 21.4, totalTokens: 42_812, maxTokens: 200_000, autoCompactThreshold: 167_000 } } as never]]) });
+    mount();
+    await screen.findByText('42,812 of 200,000 · 21% · autocompact at 167,000');
+    useSessions.setState({ digests: new Map() });
   });
 
   it('sends /compact with the typed instructions as the next session.send, and closes', async () => {

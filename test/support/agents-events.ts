@@ -26,7 +26,7 @@ const DEFAULTS: Partial<Record<EventKind, Record<string, unknown>>> = {
   'tool.result': { toolUseId: 'toolu_1', content: '', isError: false, structured: null, spillPath: null, denial: null, safeguard: 'not_evaluated', messageUuid: null },
   'user.message': { messageUuid: null, content: '', isReplay: false, isSynthetic: false, origin: null, bash: null },
   'assistant.block.complete': {
-    messageUuid: 'm1', apiMessageId: 'msg_1', blockIndex: 0, block: { type: 'text', text: '' }, model: 'claude', supersedes: null, aborted: false, userMessageUuids: [],
+    messageUuid: 'm1', apiMessageId: 'msg_1', blockIndex: 0, block: { type: 'text', text: '' }, model: 'claude', supersedes: [], aborted: false, userMessageUuids: [],
   },
   'command.lifecycle': { commandUuid: 'cmd-1', state: 'queued' },
   'turn.started': { userMessageUuid: null, origin: 'human' },
@@ -52,6 +52,30 @@ export function event(kind: EventKind, fields: Record<string, unknown> = {}, opt
 
 export function replayed(pass: FixturePass, name: string): SessionEvent[] {
   return journalToEvents(loadJournal(pass, name));
+}
+
+// Debt wave 4: the `queued_command` attachment R1's probe read from the live child's transcript after each relay
+// (relay-to-child.jsonl's `relay_child_receipt` notes, seq 232 for idle and 351 for busy), rebuilt as the record C4's
+// follower reads: the recorded type, timestamp, sidechain flag, agent, attachment type, prompt, origin and meta flag,
+// with its key sets checked against the recorded ones. The values the note did not keep (uuids, cwd, branch, the
+// rendered reminder) are stand-ins.
+export function recordedReceiptRecord(kase: 'idle' | 'busy'): Record<string, unknown> {
+  const rows = loadJournal('pass3', 'relay-to-child');
+  type Line = { type: string; timestamp: string; isMeta: boolean; userType: string; isSidechain: boolean; origin: { kind: string }; keys: string[]; attachmentType: string; attachmentKeys: string[]; text: string };
+  const note = rows.map((r) => r.frame as { event?: string; case?: string; line?: Line }).find((f) => f.event === 'relay_child_receipt' && f.case === kase);
+  const child = rows.map((r) => r.frame as { event?: string; case?: string; task_id?: string }).find((f) => f.event === 'relay_child' && f.case === 'background');
+  if (!note?.line || !child?.task_id) throw new Error(`agents-events: relay-to-child records no ${kase} receipt`);
+  const line = note.line;
+  const record: Record<string, unknown> = {
+    parentUuid: `stand-in-parent-${kase}`, isSidechain: line.isSidechain, agentId: child.task_id,
+    attachment: { type: line.attachmentType, prompt: line.text, source_uuid: `stand-in-source-${kase}`, origin: line.origin, isMeta: line.isMeta },
+    type: line.type, uuid: `stand-in-receipt-${kase}`, timestamp: line.timestamp, rendered: [], userType: line.userType, entrypoint: 'sdk-ts',
+    cwd: '/private/tmp/maws-probe2-stand-in', sessionId: '56c1ba30-803a-4d00-b548-f24e6778324f', version: '2.1.283', gitBranch: 'HEAD',
+  };
+  if (JSON.stringify(Object.keys(record)) !== JSON.stringify(line.keys) || JSON.stringify(Object.keys(record.attachment as object)) !== JSON.stringify(line.attachmentKeys)) {
+    throw new Error('agents-events: the rebuilt receipt record drifted from the recorded keys');
+  }
+  return record;
 }
 
 export const upTo = (events: SessionEvent[], seq: number) => events.filter((e) => e.seq !== null && e.seq <= seq);

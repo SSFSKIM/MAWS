@@ -12,7 +12,7 @@ import * as z from 'zod';
 import { PERMISSION_MODES, type PermissionMode } from '@shared/graph/enums';
 import type { EventPayload, SessionEvent } from '@shared/graph/events';
 import type { AgentId, ApiMessageId, AppSessionId, EventId, MessageUuid, ParentToolUseId, RequestId, SessionId, TaskId, ToolUseId } from '@shared/graph/ids';
-import { GetContextUsageResponseSchema, RewindConversationResponseSchema } from '@shared/wire/control';
+import { contextTotal, GetContextUsageResponseSchema, RewindConversationResponseSchema } from '@shared/wire/control';
 import {
   ControlRequestFrameSchema,
   parseStdinFrame,
@@ -286,6 +286,8 @@ export class Normalizer {
     const apiMessageId = frame.message.id as ApiMessageId;
     const messageUuid = frame.uuid as MessageUuid;
     const userMessageUuids = attribution.parentToolUseId === null ? [...(this.state.currentTurn?.userMessageUuids ?? [])] : [];
+    const wireSupersedes = (frame as { supersedes?: unknown }).supersedes;
+    const supersedes = Array.isArray(wireSupersedes) ? wireSupersedes.filter((u): u is string => typeof u === 'string').map((u) => u as MessageUuid) : [];
     for (const block of frame.message.content) {
       let blockIndex: number;
       const streamed = lane && lane.apiMessageId === apiMessageId ? lane.started.shift() : undefined;
@@ -298,11 +300,11 @@ export class Normalizer {
       this.state.completedBlocks.set(apiMessageId, blockIndex + 1);
       // `aborted`: the wire's `aborted: true`, set on the partial text block the engine flushes when an interrupt cuts
       // its stream (pass3/interrupt-text seq 96; an interrupted tool_use or thinking block is never flushed). `supersedes`
-      // stays null: the wire's `supersedes` (SPEC 45, refusal fallback) is an array naming every block frame of the
-      // refused attempt, on the first frame of the replacement only, which X1's single `MessageUuid | null` cannot carry
-      // (no fixture records one; tracker row, debt wave 3). The engine's `model_refusal_fallback` frame still yields
+      // is the wire's list as sent (SPEC 45, refusal fallback: every block frame of the refused attempt, on the first
+      // frame of the replacement only; `cli.pretty.js` `H0e`), empty when the frame has none. No fixture records a
+      // refusal fallback yet (debt wave 4, a synthetic pin). The engine's `model_refusal_fallback` frame still yields
       // `boundary.retraction`.
-      out.emit({ kind: 'assistant.block.complete', messageUuid, apiMessageId, blockIndex, block, model: frame.message.model, supersedes: null, aborted: (frame as { aborted?: unknown }).aborted === true, userMessageUuids }, attribution);
+      out.emit({ kind: 'assistant.block.complete', messageUuid, apiMessageId, blockIndex, block, model: frame.message.model, supersedes, aborted: (frame as { aborted?: unknown }).aborted === true, userMessageUuids }, attribution);
       if (block.type === 'tool_use') {
         out.emit({ kind: 'tool.use', toolUseId: String(block.id) as ToolUseId, toolName: String(block.name), input: block.input, apiMessageId, messageUuid }, attribution);
       }
@@ -443,7 +445,8 @@ export class Normalizer {
     if (frame.response.subtype !== 'success') return;
     const parsed = GetContextUsageResponseSchema.safeParse(frame.response.response);
     if (!parsed.success) return;
-    const { totalTokens, maxTokens, percentage, autoCompactThreshold, isAutoCompactEnabled, model } = parsed.data;
+    const { maxTokens, autoCompactThreshold, isAutoCompactEnabled, model } = parsed.data;
+    const { totalTokens, percentage } = contextTotal(parsed.data);
     out.emit({ kind: 'context.sample', totalTokens, maxTokens, percentage, autoCompactThreshold: autoCompactThreshold ?? null, isAutoCompactEnabled, model }, attribution);
   }
 

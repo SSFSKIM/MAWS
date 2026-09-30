@@ -61,33 +61,52 @@ function firstLine(block: { type: string } & Record<string, unknown>): string | 
 
 // The engine reports cost as the process's running total (`result.total_cost_usd`; the probe's pass2/rewind results read
 // 0.0555, 0.0614, 0.0674), so a sample replaces the process's total rather than adding to it. A session outlives its
-// processes: a resumed process starts its total again at zero, so the session's cost is every finished process's final
-// total plus the live process's running total. A synthesised `turn.ended` (`seq: null`, C4's backfill from disk, where
-// no accounting is recorded per turn) carries no cost and leaves the ledger alone.
+// processes, and the engine carries its cost across them: at exit it records the running total in the transcript
+// (2.1.283's `cost-state` entry) and a resumed process restores it, so the resumed total continues the conversation's
+// (resume-fork-start ends at 0.02668, the resume of the same id, resume-fork-no-replay, reads 0.02951 after one short
+// turn, and the next resume 0.03220). The restored part is the previous process's final total: the session's cost is
+// what every finished process added beyond what it restored, plus what the live one has added. A process that restored
+// nothing (it was resumed while the previous one still ran, pass2/resume-live-second) shows as a first total below the
+// restored figure, and counts from zero. Not covered: a process killed before it could record its total (SIGKILL)
+// leaves an older `cost-state` to restore, which the ledger cannot tell apart; and a fork restores its source's total
+// (resume-fork-cli), so a forked session starts at its source's cost. A synthesised `turn.ended` (`seq: null`, C4's
+// backfill from disk, where no accounting is recorded per turn) carries no cost and leaves the ledger alone.
 export interface CostLedger {
-  finishedUsd: number; // the final totals of the processes that exited
-  runningUsd: number; // the live process's running total
+  finishedUsd: number; // what the processes that exited added beyond what each restored
+  restoredUsd: number; // the live process's restored part: the previous process's final total
+  runningUsd: number; // the live process's running total, restored part included
+  awaitingFirst: boolean; // a process exited and its successor has reported no total yet
 }
 
-// A session's ledger when its fold begins: a cost already on the digest (scripted by the stub, or seeded) is the live
-// process's running total.
-export const costLedger = (d: SessionDigest): CostLedger => ({ finishedUsd: 0, runningUsd: d.cost?.totalUsd ?? 0 });
+// A session's ledger when its fold begins: a cost already on the digest (scripted by the stub, seeded, or folded before
+// main restarted) is the live process's running total, all of it its own.
+export const costLedger = (d: SessionDigest): CostLedger => ({ finishedUsd: 0, restoredUsd: 0, runningUsd: d.cost?.totalUsd ?? 0, awaitingFirst: false });
+
+// The session's cost the ledger holds.
+export const costOf = (ledger: CostLedger) => ledger.finishedUsd + ledger.runningUsd - ledger.restoredUsd;
+
+// A process's running total: the first one after an exit tells whether the process restored its predecessor's.
+const sample = (ledger: CostLedger, totalUsd: number): CostLedger => ({
+  ...ledger,
+  restoredUsd: ledger.awaitingFirst && totalUsd < ledger.restoredUsd ? 0 : ledger.restoredUsd,
+  runningUsd: totalUsd,
+  awaitingFirst: false,
+});
 
 export function foldCost(ledger: CostLedger, event: SessionEvent): CostLedger {
   if (event.agentId !== null || event.parentToolUseId !== null) return ledger; // a child's cost is inside the parent's total
   switch (event.kind) {
     case 'turn.ended':
-      return event.isEchoReceipt || event.seq === null ? ledger : { ...ledger, runningUsd: event.costUsd };
+      return event.isEchoReceipt || event.seq === null ? ledger : sample(ledger, event.costUsd);
     case 'usage.sample':
-      return { ...ledger, runningUsd: event.costUsd };
+      return sample(ledger, event.costUsd);
     case 'process.exited':
-      return { finishedUsd: ledger.finishedUsd + ledger.runningUsd, runningUsd: 0 };
+      return { finishedUsd: costOf(ledger), restoredUsd: ledger.runningUsd, runningUsd: ledger.runningUsd, awaitingFirst: true };
     default:
       return ledger;
   }
 }
 
-const costOf = (ledger: CostLedger) => ledger.finishedUsd + ledger.runningUsd;
 const withCost = (d: SessionDigest, totalUsd: number): SessionDigest => ({ ...d, cost: { totalUsd, sinceSeenUsd: d.cost?.sinceSeenUsd ?? 0 } });
 
 // One event on its own: the digest's cost is taken as its process's running total (`foldEvents` carries the ledger).
@@ -130,7 +149,8 @@ function foldWithLedger(prev: SessionDigest, event: SessionEvent, ledger: CostLe
           percent: event.percentage,
           totalTokens: Math.round(event.totalTokens),
           maxTokens: Math.round(event.maxTokens),
-          autoCompactThreshold: event.autoCompactThreshold === null ? null : Math.round(event.autoCompactThreshold),
+          // no threshold applies when the engine reports autocompact off (debt wave 4), whatever figure it still sends
+          autoCompactThreshold: !event.isAutoCompactEnabled || event.autoCompactThreshold === null ? null : Math.round(event.autoCompactThreshold),
         },
       };
     case 'usage.sample':

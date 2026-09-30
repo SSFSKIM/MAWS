@@ -2,7 +2,8 @@
 // verdicts (1)-(6); the architect's rulings O1 and O3). The drill-in composer asks the parent, by one `'next'` steer,
 // to `SendMessage` the child; three observables are kept apart: (a) the steer answered, (b) the parent's `SendMessage`
 // row naming the child, (c) the child's own stream showing the message. On engine 2.1.283 a live child's receipt never
-// reaches a host surface, so `forwarded` is where the line rests; a resumed child's receipt is its resume start.
+// reaches the wire: its receipt is the `queued_command` attachment in its transcript, which C4 surfaces as a disk-form
+// `user.message` once the relay store follows the child (debt wave 4); a resumed child's receipt is its resume start.
 import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, AppSessionId, MessageUuid, ToolUseId } from '@shared/graph/ids';
 
