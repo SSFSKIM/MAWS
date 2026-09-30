@@ -1,0 +1,101 @@
+[
+  {
+    "at": "2026-09-30T00:07:27.577Z",
+    "id": "time:turn:d10b532d-d7d8-456c-a346-967374b2be7b",
+    "kind": "time",
+    "label": "Sep 30, 2026 12:07 AM",
+    "turnId": "turn:d10b532d-d7d8-456c-a346-967374b2be7b"
+  },
+  {
+    "at": "2026-09-30T00:07:27.577Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:d10b532d-d7d8-456c-a346-967374b2be7b",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "d10b532d-d7d8-456c-a346-967374b2be7b",
+    "steer": false,
+    "text": "Reply with exactly OK",
+    "turnId": "turn:d10b532d-d7d8-456c-a346-967374b2be7b"
+  },
+  {
+    "at": "2026-09-30T00:07:27.577Z",
+    "autoDenied": 0,
+    "denied": 0,
+    "endedAt": "2026-09-30T00:07:28.609Z",
+    "expanded": true,
+    "firstDeniedCell": null,
+    "id": "divider:turn:d10b532d-d7d8-456c-a346-967374b2be7b",
+    "kind": "divider",
+    "origin": "human",
+    "startedAt": "2026-09-30T00:07:27.589Z",
+    "state": "completed",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 0,
+        "exploration": 0,
+        "files": 0,
+        "mcp": 0,
+        "other": 0,
+        "skills": 0,
+        "web": 0
+      },
+      "childAgents": 0,
+      "costUsd": 0.044168,
+      "denials": [],
+      "durationMs": 1015,
+      "model": "claude-haiku-4-5-20251001",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 0,
+        "reviewed": 0
+      },
+      "terminalReason": "completed",
+      "toolCalls": 0,
+      "usage": {
+        "cacheCreationInputTokens": 21506,
+        "cacheReadInputTokens": 0,
+        "inputTokens": 10,
+        "outputTokens": 42,
+        "thinkingTokens": 35
+      }
+    },
+    "toolCalls": 0,
+    "turnId": "turn:d10b532d-d7d8-456c-a346-967374b2be7b"
+  },
+  {
+    "at": "2026-09-30T00:07:28.264Z",
+    "durationMs": 324,
+    "id": "think:msg_011CfYeeED5gfhes3owvZQ4B:0",
+    "kind": "thinking",
+    "live": false,
+    "messageUuid": "6d32723a-a53a-467b-b68f-8ce4fe78018b",
+    "text": "The user is asking me to reply with exactly \"OK\". This is a straightforward request. I should respond with just \"OK\" as requested.",
+    "turnId": "turn:d10b532d-d7d8-456c-a346-967374b2be7b"
+  },
+  {
+    "at": "2026-09-30T00:07:28.589Z",
+    "blockIndex": 1,
+    "id": "text:msg_011CfYeeED5gfhes3owvZQ4B:1",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "OK",
+    "messageUuid": "e2df0d33-715a-4615-af43-8d2ab112c8d4",
+    "model": "claude-haiku-4-5-20251001",
+    "phase": "answer",
+    "turnId": "turn:d10b532d-d7d8-456c-a346-967374b2be7b"
+  },
+  {
+    "at": "2026-09-30T00:07:28.811Z",
+    "attempt": null,
+    "id": "error:replay:journal:52:0",
+    "kind": "error",
+    "lostAttentionCount": 0,
+    "scope": "exit",
+    "severity": "notice",
+    "text": "Session process exited (unknown)",
+    "turnId": null
+  }
+]
