@@ -1476,10 +1476,17 @@ test('C8 item 9: Attach adds the Terminal tab and activates its session (a claud
     let started = '';
     try {
       started = execFileSync(ENGINE_BIN_PATH, ['--bg', '--model', 'sonnet', 'Reply with exactly the words BG READY, then stop.'], { cwd: repo, env, encoding: 'utf8', timeout: 120_000 });
-    } finally {
-      // the id is on the first line even when the call fails after printing it
+    } catch (error) {
+      // a non-zero exit or a timeout after the job id was printed: the id is recovered from the captured stdout, so the
+      // outer cleanup stops the job, and the original failure goes on
+      const stdout = (error as { stdout?: string | Buffer }).stdout;
+      started = typeof stdout === 'string' ? stdout : (stdout?.toString('utf8') ?? '');
       jobId = /backgrounded\W+([0-9a-f]{6,12})/.exec(plain(started))?.[1] ?? null;
+      out.bgStarted = plain(started).split('\n').slice(0, 4);
+      out.jobId = jobId;
+      throw error;
     }
+    jobId = /backgrounded\W+([0-9a-f]{6,12})/.exec(plain(started))?.[1] ?? null;
     out.bgStarted = plain(started).split('\n').slice(0, 4);
     out.jobId = jobId;
     expect(jobId, 'claude --bg printed its job id').not.toBeNull();
