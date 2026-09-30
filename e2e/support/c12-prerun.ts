@@ -210,8 +210,15 @@ export async function ptyEngine(config: string, cwd: string, args: string[], log
     writeFileSync(logTo, screen());
     throw new Error(`the terminal never showed ${what}:\n${screen().slice(-1500)}`);
   };
-  await waitFor(/for shortcuts|❯/, 60_000, 'its prompt');
-  await pause(1_500);
+  // The caller holds no handle until this returns, so a failure before then ends the engine here.
+  try {
+    await waitFor(/for shortcuts|❯/, 60_000, 'its prompt');
+    await pause(1_500);
+  } catch (error) {
+    term.kill();
+    await Promise.race([exited, pause(5_000)]);
+    throw error;
+  }
   const projectDir = join(config, 'projects', realpathSync(cwd).replace(/[^a-zA-Z0-9]/g, '-'));
   const sessionId = (): string => {
     const resumed = args.indexOf('--resume');

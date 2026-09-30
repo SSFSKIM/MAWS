@@ -1426,6 +1426,9 @@ test('§10.10 light is the default on a fresh profile; dark switches cleanly and
 
 // ---- C8 item 9 -----------------------------------------------------------------------------------------------------
 
+// eslint-disable-next-line no-control-regex -- the CLI's colour escapes are what this strips
+const plain = (text: string) => text.replace(/\x1b\[[0-9;]*m/g, '').trim();
+
 test('C8 item 9: Attach adds the Terminal tab and activates its session (a claude --bg job under the scratch home)', async () => {
   test.skip(REALSTORE, 'the real-store run takes only its own case');
   const repo = scratchRepo(scratch.root, 'bgjob');
@@ -1433,30 +1436,48 @@ test('C8 item 9: Attach adds the Terminal tab and activates its session (a claud
   const northOne = state.get('10.1.northOne.appId');
   const env = terminalEnv(scratch.config);
   const since = Date.now();
-  const started = execFileSync(ENGINE_BIN_PATH, ['--bg', '--model', 'sonnet', 'Reply with exactly the words BG READY, then stop.'], { cwd: repo, env, encoding: 'utf8', timeout: 120_000 });
-  const jobId = /\b([0-9a-f]{6,12})\b/.exec(started)?.[1] ?? null;
-  const out: Record<string, unknown> = { bgStarted: started.trim().split('\n').slice(0, 4), jobId };
-  const maws = await open();
-  const { page } = maws;
+  const out: Record<string, unknown> = {};
+  let jobId: string | null = null;
   let bg: SessionRecord | undefined;
+  // The job is started inside the outer try, and its stop sits in the outer finally, so it is stopped whether or not
+  // the app launched, the attach passed or the app's cleanup succeeded.
   try {
-    await expect.poll(async () => (bg = (await records(page)).find((r) => r.directory === repo && r.holder.kind === 'background_job')) !== undefined, { timeout: 60_000 }).toBe(true);
-    if (northOne) await rowOf(page, northOne).click(); // another session is focused before the attach
-    await rowOf(page, bg!.appId).click({ button: 'right' });
-    const items = await page.getByRole('menuitem').allTextContents();
-    await page.getByRole('menuitem', { name: 'Attach in a terminal tab' }).click();
-    await expect(page.locator(`[data-tab-id="session:${bg!.appId}"]`)).toHaveAttribute('aria-selected', 'true', { timeout: 15_000 });
-    await expect(tabOf(page, 'Terminal').first()).toHaveAttribute('aria-selected', 'true', { timeout: 15_000 });
-    await expect.poll(async () => value(await invoke(page, 'pty.list', undefined)).ptys.some((p) => p.appSessionId === bg!.appId && p.alive), { timeout: 15_000 }).toBe(true);
-    out.attach = { rowMenu: items, sessionTabActivated: true, terminalTabActive: true, screenshots: await shoot(page, 'c8-attach') };
-    out.consoleErrors = maws.consoleErrors();
-  } finally {
-    rec.note('c8.attach', out);
-    await maws.cleanup();
-    if (jobId) {
-      out.stopped = execFileSync(ENGINE_BIN_PATH, ['stop', jobId], { cwd: repo, env, encoding: 'utf8', timeout: 60_000 }).trim();
-      rec.note('c8.attach', out);
+    let started = '';
+    try {
+      started = execFileSync(ENGINE_BIN_PATH, ['--bg', '--model', 'sonnet', 'Reply with exactly the words BG READY, then stop.'], { cwd: repo, env, encoding: 'utf8', timeout: 120_000 });
+    } finally {
+      // the id is on the first line even when the call fails after printing it
+      jobId = /backgrounded\W+([0-9a-f]{6,12})/.exec(plain(started))?.[1] ?? null;
     }
+    out.bgStarted = plain(started).split('\n').slice(0, 4);
+    out.jobId = jobId;
+    expect(jobId, 'claude --bg printed its job id').not.toBeNull();
+    const maws = await open();
+    const { page } = maws;
+    try {
+      await expect.poll(async () => (bg = (await records(page)).find((r) => r.directory === repo && r.holder.kind === 'background_job')) !== undefined, { timeout: 60_000 }).toBe(true);
+      if (northOne) await rowOf(page, northOne).click(); // another session is focused before the attach
+      await rowOf(page, bg!.appId).click({ button: 'right' });
+      const items = await page.getByRole('menuitem').allTextContents();
+      await page.getByRole('menuitem', { name: 'Attach in a terminal tab' }).click();
+      await expect(page.locator(`[data-tab-id="session:${bg!.appId}"]`)).toHaveAttribute('aria-selected', 'true', { timeout: 15_000 });
+      await expect(tabOf(page, 'Terminal').first()).toHaveAttribute('aria-selected', 'true', { timeout: 15_000 });
+      await expect.poll(async () => value(await invoke(page, 'pty.list', undefined)).ptys.some((p) => p.appSessionId === bg!.appId && p.alive), { timeout: 15_000 }).toBe(true);
+      out.attach = { rowMenu: items, sessionTabActivated: true, terminalTabActive: true, screenshots: await shoot(page, 'c8-attach') };
+      out.consoleErrors = maws.consoleErrors();
+    } finally {
+      rec.note('c8.attach', out);
+      await maws.cleanup();
+    }
+  } finally {
+    if (jobId) {
+      try {
+        out.stopped = plain(execFileSync(ENGINE_BIN_PATH, ['stop', jobId], { cwd: repo, env, encoding: 'utf8', timeout: 60_000 }));
+      } catch (error) {
+        out.stopFailed = error instanceof Error ? error.message.split('\n')[0] : String(error);
+      }
+    }
+    rec.note('c8.attach', out);
     if (bg?.engineSessionId) terminalCost('c8 attach --bg job (estimate)', transcriptUsdEstimate(transcriptFile(scratch.config, repo, bg.engineSessionId), since));
   }
 });
