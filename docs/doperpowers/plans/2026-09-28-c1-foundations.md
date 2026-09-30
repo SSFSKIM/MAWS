@@ -221,7 +221,7 @@ export type EventPayload =
   | { kind: 'assistant.block.delta'; apiMessageId: ApiMessageId | null; blockIndex: number; blockType: string;
       textDelta: string | null; thinkingDelta: string | null; inputJsonDelta: string | null; userMessageUuid: MessageUuid | null }
   | { kind: 'assistant.block.complete'; messageUuid: MessageUuid; apiMessageId: ApiMessageId; blockIndex: number;
-      block: ContentBlock; model: string; supersedes: MessageUuid | null; aborted: boolean; userMessageUuids: MessageUuid[] }
+      block: ContentBlock; model: string; supersedes: MessageUuid[]; aborted: boolean; userMessageUuids: MessageUuid[] }  // supersedes became a list in debt wave 4 (2026-09-29, charter §13 X1); empty when the wire names none
   | { kind: 'user.message'; messageUuid: MessageUuid | null; content: string | ContentBlock[]; isReplay: boolean;
       isSynthetic: boolean; origin: string | null;
       bash: null | { part: 'input'; command: string } | { part: 'output'; stdout: string; stderr: string; exitCode: number } }
