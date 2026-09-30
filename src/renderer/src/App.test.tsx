@@ -113,6 +113,10 @@ function fakeMain(initial: SettingsState['settings']['theme']) {
       case 'session.deletions.list':
         return { manifests: [] };
       // C10 end
+      // C12 start: the memory budget's snapshot at connect (under budget, nothing held)
+      case 'engine.budget':
+        return { limitKiB: 8_388_608, totalKiB: 0, sampledAt: null, over: false, overWithoutCandidate: false, candidates: 0, settling: 0, releasing: null, blocked: [], lastRelease: null };
+      // C12 end
       case 'pty.spawn':
         return { ptyId: 'p1', pid: 3333 };
       case 'pty.write':
