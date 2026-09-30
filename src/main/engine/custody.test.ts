@@ -168,6 +168,12 @@ describe('where custody copies from, and when it runs at all', () => {
     expect(custodySourceDir({ MAWS_ENGINE_SOURCE_DIR: '/private/tmp/s/source' }, true)).toBe(INSTALLER);
     expect(custodySourceDir({ MAWS_E2E: '1', MAWS_ENGINE_SOURCE_DIR: 'relative/source' }, false)).toBeNull(); // never a relative path
   });
+
+  it('an invalid override is ignored, never a bypass: an ordinary run keeps the installer source (review fix)', () => {
+    expect(custodySourceDir({ MAWS_ENGINE_SOURCE_DIR: './source' }, false)).toBe(INSTALLER);
+    expect(custodySourceDir({ MAWS_ENGINE_SOURCE_DIR: 'relative/source' }, false)).toBe(INSTALLER);
+    expect(custodySourceDir({ MAWS_ENGINE_SOURCE_DIR: '' }, false)).toBe(INSTALLER);
+  });
 });
 
 function readdir(path: string): string[] {

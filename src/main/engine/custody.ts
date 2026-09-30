@@ -33,10 +33,11 @@ export function custodyPath(userData: string, version: string): string {
 }
 
 // Where custody copies from, or null when it does not run. The installer's directory is ENGINE_BIN's; an unpackaged run
-// may name a scratch one (the custody spec); MAWS_E2E and replay otherwise leave the host on ENGINE_BIN.
+// may name a scratch one by absolute path (the custody spec); MAWS_E2E and replay otherwise leave the host on
+// ENGINE_BIN. An override that is not an absolute path is ignored, never read as a bypass.
 export function custodySourceDir(env: Record<string, string | undefined>, packaged: boolean): string | null {
   const override = packaged ? undefined : env.MAWS_ENGINE_SOURCE_DIR;
-  if (override !== undefined && override !== '') return isAbsolute(override) ? override : null;
+  if (override !== undefined && isAbsolute(override)) return override;
   if (env.MAWS_E2E === '1' || env.MAWS_ENGINE_REPLAY === '1') return null;
   return dirname(ENGINE_BIN);
 }
