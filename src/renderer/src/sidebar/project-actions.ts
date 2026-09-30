@@ -13,6 +13,9 @@ export const PROJECT_ACTIONS = {
   // C10 start: a project's archived sessions, a dialog list (C5 hides archived rows and gains no section)
   archivedSessions: 'Archived sessions…',
   // C10 end
+  // C12 start: every worktree of the project's repository (D4), the lasting entry point to the cleanup ladder
+  worktrees: 'Worktrees…',
+  // C12 end
 } as const;
 export type ProjectActionId = keyof typeof PROJECT_ACTIONS;
 export const PROJECT_ACTION_IDS = Object.keys(PROJECT_ACTIONS) as ProjectActionId[];

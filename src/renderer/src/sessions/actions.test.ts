@@ -44,7 +44,7 @@ describe('the session and project entries', () => {
   });
 
   it('retires the project-level "Add directory…" and adds "Archived sessions…"', () => {
-    expect(PROJECT_ACTION_IDS).toEqual(['archiveSessions', 'removeProject', 'revealInFinder', 'archivedSessions']);
+    expect(PROJECT_ACTION_IDS).toEqual(['archiveSessions', 'removeProject', 'revealInFinder', 'archivedSessions', 'worktrees']); // C12: Worktrees…
     expect(Object.values(PROJECT_ACTIONS)).not.toContain('Add directory…');
   });
 

@@ -35,13 +35,22 @@ export interface ConfirmRequest {
   destructive: boolean;
 }
 
+// C12 start: the Worktrees… dialog (C12 execution document, Interfaces "Worktrees dialog"). A cleanup it opens returns
+// to it when that cleanup closes, which mounts it afresh and so reads the repository again.
+export interface WorktreesDialogRef {
+  kind: 'worktrees';
+  projectId: ProjectId;
+}
+// C12 end
+
 export type OpenDialog =
   | { kind: 'rename'; appSessionId: AppSessionId }
   | { kind: 'fork'; appSessionId: AppSessionId }
   | { kind: 'archive'; appSessionId: AppSessionId }
   | { kind: 'delete'; appSessionId: AppSessionId }
-  | { kind: 'cleanup'; target: CleanupTarget }
+  | { kind: 'cleanup'; target: CleanupTarget; returnTo?: WorktreesDialogRef } // C12: returnTo, the dialog a close goes back to
   | { kind: 'archived'; projectId: ProjectId }
+  | WorktreesDialogRef // C12
   | ({ kind: 'confirm'; answer(yes: boolean): void } & ConfirmRequest);
 
 export const useDialogs = create<{ open: OpenDialog | null }>()(() => ({ open: null }));
@@ -54,7 +63,7 @@ export function openDialog(dialog: OpenDialog): void {
 
 export function closeDialog(): void {
   const previous = useDialogs.getState().open;
-  useDialogs.setState({ open: null });
+  useDialogs.setState({ open: previous?.kind === 'cleanup' ? (previous.returnTo ?? null) : null }); // C12: returnTo
   if (previous?.kind === 'confirm') previous.answer(false);
 }
 

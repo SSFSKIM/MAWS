@@ -14,6 +14,9 @@ import { deleteOutcomeWords, deleteSession } from './record-ops';
 import { RenameDialog } from './RenameDialog';
 import { Sheet, SheetForm } from './Sheet';
 import { useSetup } from './store';
+// C12 start
+import { WorktreesDialog } from './WorktreesDialog';
+// C12 end
 import { DANGER, PRIMARY, SECONDARY } from './ui';
 
 export function SessionDialogs() {
@@ -33,6 +36,10 @@ export function SessionDialogs() {
       return <CleanupDialog key={open.target.path} target={open.target} />;
     case 'archived':
       return <ArchivedSessionsDialog key={open.projectId} projectId={open.projectId} />;
+    // C12 start: the project menu's Worktrees… (a cleanup it opens returns here, mounting it afresh)
+    case 'worktrees':
+      return <WorktreesDialog key={open.projectId} projectId={open.projectId} />;
+    // C12 end
     case 'confirm':
       return (
         <Sheet title={open.title}>
