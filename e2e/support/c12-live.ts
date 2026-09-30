@@ -8,6 +8,7 @@
 // by the owner-file check.
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { ENGINE_BIN, ENGINE_VERSION, RELAY_URL } from '../../src/engine-host/launch';
 import { assertConfigHomeSafe } from '../../test/live/support/live';
@@ -82,7 +83,8 @@ export function ownerFileCheck(root: string): string[] {
   return found;
 }
 
-export const lsPin = (): string => execFileSync('/bin/ls', ['-l', ENGINE_BIN], { encoding: 'utf8' }).trim();
+// The pin's `ls -l`, with the home directory written `~` so the evidence carries no owner path.
+export const lsPin = (): string => execFileSync('/bin/ls', ['-l', ENGINE_BIN], { encoding: 'utf8' }).trim().replace(homedir(), '~');
 
 // One `ps -axo pid=,ppid=,rss=,command=` read: every process's parent, resident size and command line.
 export interface PsRow { pid: number; ppid: number; rssKiB: number; command: string }

@@ -13,8 +13,8 @@
     "after": []
   },
   "pinLs": {
-    "before": "-rwxr-xr-x@ 1 new  staff  225036032  9월 25 15:10 /Users/new/.local/share/claude/versions/2.1.283",
-    "after": "-rwxr-xr-x@ 1 new  staff  225036032  9월 25 15:10 /Users/new/.local/share/claude/versions/2.1.283"
+    "before": "-rwxr-xr-x@ 1 new  staff  225036032  9월 25 15:10 ~/.local/share/claude/versions/2.1.283",
+    "after": "-rwxr-xr-x@ 1 new  staff  225036032  9월 25 15:10 ~/.local/share/claude/versions/2.1.283"
   },
   "sessions": {
     "A1": "b2ae60ba-92a4-4fb7-9504-955b28a5f9d8",
