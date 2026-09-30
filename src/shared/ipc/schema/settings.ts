@@ -27,6 +27,13 @@ const EngineSettingsSchema = z.strictObject({
   binaryPath: AbsolutePathSchema.nullable(), // null = C3's ENGINE_BIN
   pinnedVersion: z.string(), // what engine.binaryInfo must report; a mismatch refuses launches (binary_version) until re-pinned
   subagentModel: z.string().nullable(), // the default CLAUDE_CODE_SUBAGENT_MODEL for new sessions; null = the captured shell's value
+  // C12 start: version 4, the memory budget (C12 execution document, Interfaces "Settings, version 4"; charter §4.4).
+  // memoryBudgetMiB: the limit on the sum of the engine process trees; null = 25% of physical memory.
+  // statefulMcpServers: MCP server names, exactly as system/init reports them, whose state dies with their process; a
+  // connected or connecting one keeps its session live under the budget.
+  memoryBudgetMiB: z.number().int().min(512).nullable(),
+  statefulMcpServers: z.array(z.string().min(1).max(200)).max(64),
+  // C12 end
 });
 const GatewaySettingsSchema = z.strictObject({
   defaultRoute: z.enum(['gateway', 'direct']), // D-19: 'gateway'; seeds C10's intent.gateway
@@ -39,7 +46,7 @@ const NotificationSettingsSchema = z.strictObject({ enabled: z.boolean(), sound:
 // C11 end
 
 export const SettingsSchema = z.strictObject({
-  version: z.literal(3), // C11: version 3
+  version: z.literal(4), // C11: version 3; C12: version 4 (engine.memoryBudgetMiB, engine.statefulMcpServers)
   theme: ThemeSettingSchema,
   // Overrides only; null unbinds; absent means the default. `partialRecord`, because zod 4's enum-keyed `record` is
   // exhaustive and would reject `{}` and every single override; unknown keys are still rejected.

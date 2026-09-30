@@ -5,12 +5,12 @@ import * as z from 'zod';
 import { ACTION_IDS } from '../keymap/actions';
 import { ChordSchema, SettingsSchema, ThemeSettingSchema, type Settings, type SettingsPatch } from '../ipc/schema/settings';
 
-export const SETTINGS_DEFAULTS_V3: Settings = {
-  version: 3,
+export const SETTINGS_DEFAULTS_V4: Settings = {
+  version: 4, // C12
   theme: 'light', // light-first (D-4, charter §10 item 10)
   keymap: {},
   notifications: { enabled: true, sound: false, kinds: { approvals: true, questions: true, planReviews: true, errors: true, heldPeerMessages: false } },
-  engine: { binaryPath: null, pinnedVersion: '2.1.283', subagentModel: null }, // C3's ENGINE_VERSION
+  engine: { binaryPath: null, pinnedVersion: '2.1.283', subagentModel: null, memoryBudgetMiB: null, statefulMcpServers: [] /* C12 */ }, // C3's ENGINE_VERSION
   gateway: { defaultRoute: 'gateway', relayUnreachable: 'ask', offerDirect: true }, // D-19
   usage: { nearLimitPercent: 90 },
   appearance: { monoFont: null },
@@ -25,7 +25,14 @@ const SettingsV2Schema = z.strictObject({
   notifications: z.strictObject({ enabled: z.boolean(), sound: z.boolean() }),
 });
 
-const defaults = (): Settings => structuredClone(SETTINGS_DEFAULTS_V3);
+// C12 start: C11's version 3, as it wrote it: version 4's sections less the budget's two engine fields
+const SettingsV3Schema = SettingsSchema.extend({
+  version: z.literal(3),
+  engine: SettingsSchema.shape.engine.omit({ memoryBudgetMiB: true, statefulMcpServers: true }),
+});
+// C12 end
+
+const defaults = (): Settings => structuredClone(SETTINGS_DEFAULTS_V4);
 
 // v1 → v2 (C5's step: no keymap overrides, the notification defaults) → v3 (the sections C11 adds, with their
 // defaults). A version 3 object is validated and returned as it is; anything else (another version, an invalid file of
@@ -42,6 +49,13 @@ export function migrateSettings(raw: unknown): Settings {
       const base = defaults();
       return { ...base, theme: v2.theme, keymap: v2.keymap, notifications: { ...v2.notifications, kinds: base.notifications.kinds } };
     }
+    // C12 start: v3 → v4, the budget's defaults (25% of physical memory, no stateful servers)
+    case 3: {
+      const v3 = SettingsV3Schema.parse(raw);
+      const { engine } = defaults();
+      return { ...v3, version: 4, engine: { ...v3.engine, memoryBudgetMiB: engine.memoryBudgetMiB, statefulMcpServers: engine.statefulMcpServers } };
+    }
+    // C12 end
     default:
       return SettingsSchema.parse(raw);
   }

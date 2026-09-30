@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MawsBridge, Settings } from '@shared/ipc/schema';
-import { SETTINGS_DEFAULTS_V3 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V4 } from '@shared/settings/defaults';
 import { useGateway } from '../gateway/store';
 import { useAttention } from '../stores/attention';
 import { useNotices } from '../stores/notices';
@@ -14,7 +14,7 @@ import { SettingsView } from './SettingsView';
 
 let b: SettingsBridge;
 
-function renderView(initial: Settings = SETTINGS_DEFAULTS_V3, section: Parameters<typeof SettingsView>[0]['section'] = null) {
+function renderView(initial: Settings = SETTINGS_DEFAULTS_V4, section: Parameters<typeof SettingsView>[0]['section'] = null) {
   b = settingsBridge(initial);
   window.maws = b.bridge;
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -207,7 +207,7 @@ describe('settings tab writes one field per row', () => {
     vi.spyOn(HTMLElement.prototype, 'scrollIntoView').mockImplementation(function (this: HTMLElement) {
       scrolled.push(this.getAttribute('aria-labelledby') ?? '');
     });
-    renderView(SETTINGS_DEFAULTS_V3, 'keyboard');
+    renderView(SETTINGS_DEFAULTS_V4, 'keyboard');
     expect(scrolled.at(-1)).toMatch(/keyboard/);
     expect(within(screen.getByRole('navigation', { name: 'Settings sections' })).getByRole('button', { name: 'Keyboard' }).getAttribute('aria-current')).toBe('true');
   });

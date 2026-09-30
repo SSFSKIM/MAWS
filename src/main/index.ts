@@ -1,4 +1,5 @@
 import { join } from 'node:path';
+import { totalmem } from 'node:os'; // C12: the default memory budget
 import { app, BrowserWindow, dialog, screen } from 'electron';
 import { createHosts } from './hosts';
 import { installRouter } from './ipc/router';
@@ -240,6 +241,10 @@ app.whenReady().then(() => {
     hostState: () => hosts.snapshot('engine-host'),
     onHostState: (listener) => hosts.onState('engine-host', listener),
     dispatch: (config) => hosts.dispatch('engine-host', 'engine.configure', config) as Promise<CommandResult<'engine.configure'>>,
+    // C12 start: the memory budget's policy from settings v4
+    dispatchPolicy: (policy) => hosts.dispatch('engine-host', 'engine.policy.set', policy) as Promise<CommandResult<'engine.policy.set'>>,
+    totalMemBytes: totalmem(),
+    // C12 end
   });
   app.on('will-quit', stopEngineConfigure);
   // Under the end-to-end harness nothing may activate the owner's ClaudeUsage: `open` answers as if it had.
