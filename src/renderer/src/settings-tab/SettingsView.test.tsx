@@ -79,11 +79,15 @@ describe('settings tab writes one field per row', () => {
   it('Engine: Change… stores the picked absolute path and configures the host; a mismatch says sessions will refuse', async () => {
     renderView();
     b.answers['layout.pickFiles'] = () => ({ files: [{ path: '/opt/claude/2.1.290/claude', name: 'claude', bytes: 10, mediaType: null, data: null }] });
-    b.answers['engine.configure'] = (input) => ({ ...BINARY, path: (input as { binaryPath: string }).binaryPath, version: '2.1.290', ok: false, error: 'binary reports 2.1.290, expected 2.1.283' });
+    // C12: main configures the host; the tab awaits settings.engineApplied and re-reads the binary as the host now holds it
+    b.answers['engine.binaryInfo'] = () => {
+      const { binaryPath, pinnedVersion } = settings().engine;
+      return binaryPath === null ? BINARY : { ...BINARY, path: binaryPath, expectedVersion: pinnedVersion, version: '2.1.290', ok: pinnedVersion === '2.1.290', error: pinnedVersion === '2.1.290' ? null : 'binary reports 2.1.290, expected 2.1.283' };
+    };
     fireEvent.click(await within(row('Binary')).findByRole('button', { name: 'Change…' }));
     await vi.waitFor(() => expect(b.sets).toEqual([{ engine: { binaryPath: '/opt/claude/2.1.290/claude' } }]));
     expect(b.calls.find((c) => c.name === 'layout.pickFiles')!.input).toEqual({ kind: 'files', directory: null, multiple: false });
-    await vi.waitFor(() => expect(b.calls).toContainEqual({ name: 'engine.configure', input: { binaryPath: '/opt/claude/2.1.290/claude', expectedVersion: '2.1.283' } }));
+    await vi.waitFor(() => expect(b.calls).toContainEqual({ name: 'settings.engineApplied', input: undefined })); // C12
     expect(await within(row('Binary')).findByText('/opt/claude/2.1.290/claude')).toBeTruthy();
     expect(within(row('Binary')).getByText('does not match the pinned version · sessions will refuse to start until you re-pin')).toBeTruthy();
     expect(within(row('Pinned version')).getByText('binary reports 2.1.290')).toBeTruthy();
@@ -95,7 +99,9 @@ describe('settings tab writes one field per row', () => {
     expect(sheet.textContent).toContain('Upgrading the engine is a deliberate re-probe: the fixtures and conformance tests were recorded on 2.1.283.');
     fireEvent.click(within(sheet).getByRole('button', { name: 'Re-pin to 2.1.290' }));
     await vi.waitFor(() => expect(b.sets.at(-1)).toEqual({ engine: { pinnedVersion: '2.1.290' } }));
-    await vi.waitFor(() => expect(b.calls.at(-1)).toEqual({ name: 'engine.configure', input: { binaryPath: '/opt/claude/2.1.290/claude', expectedVersion: '2.1.290' } }));
+    const afterWrite = () => b.calls.slice(b.calls.findLastIndex((c) => c.name === 'settings.set') + 1).map((c) => c.name); // C12
+    await vi.waitFor(() => expect(afterWrite().slice(0, 2)).toEqual(['settings.engineApplied', 'engine.binaryInfo'])); // C12
+    expect(b.calls.map((c) => c.name)).not.toContain('engine.configure'); // C12: main is its only sender
 
     // Use default puts the binary path back to C3's default
     fireEvent.click(within(row('Binary')).getByRole('button', { name: 'Use default' }));

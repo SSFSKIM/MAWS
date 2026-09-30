@@ -18,6 +18,7 @@ import { Index } from '../../src/main/index/index';
 import { IndexSessionSource } from '../../src/main/index/source';
 import { BootstrapNotes, FileIntentStore } from '../../src/main/sessions/intents';
 import { SessionService } from '../../src/main/sessions/service';
+import type { SessionServiceDeps } from '../../src/main/sessions/context'; // C12
 import type { C10Settings } from '../../src/main/sessions/launch-mapping';
 import type { ReplaySeam } from '../../src/main/sessions/replay-seam';
 import { FakeEngineHost } from './session-host';
@@ -30,6 +31,7 @@ export interface HarnessOptions {
   replay?: ReplaySeam | null;
   watchdogMs?: number;
   stopWaitMs?: number;
+  launchGate?: SessionServiceDeps['launchGate']; // C12: main's custody gate
 }
 
 export class SessionHarness {
@@ -104,6 +106,7 @@ export class SessionHarness {
       reveal: () => {},
       replay: this.opts.replay ?? null,
       settings: this.opts.settings,
+      launchGate: this.opts.launchGate, // C12
       timing: { watchdogMs: this.opts.watchdogMs ?? 2_000, stopWaitMs: this.opts.stopWaitMs ?? 200 },
       log: () => {},
     });

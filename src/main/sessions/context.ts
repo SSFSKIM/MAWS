@@ -17,6 +17,10 @@ import type { HostDispatch } from '../ipc/router';
 import type { C10Settings } from './launch-mapping';
 import type { BootstrapNotes, IntentStore } from './intents';
 import type { ReplaySeam } from './replay-seam';
+import type { LaunchResult } from '@shared/ipc/schema/session'; // C12
+
+// C12: main's custody gate (C12 execution document, Interfaces "Engine custody"): null, or the refusal a launch answers
+export type LaunchGate = () => Promise<Extract<LaunchResult, { status: 'refused' }> | null>;
 
 export type Emit = <N extends EventName>(name: N, payload: EventPayload<N>) => boolean;
 export type HostEvents = <N extends EventName>(name: N, listener: (payload: EventPayload<N>) => void) => () => void;
@@ -35,6 +39,7 @@ export interface SessionServiceDeps {
   reveal: (path: string) => void; // shell.showItemInFolder
   replay?: ReplaySeam | null; // the e2e seam (MAWS_E2E_REPLAY_FIXTURES)
   settings?: () => C10Settings;
+  launchGate?: LaunchGate; // C12: consulted when a setup or a resume begins; absent, every launch may go
   timing?: { watchdogMs?: number; stopWaitMs?: number };
   now?: () => string;
   log?: (message: string) => void;

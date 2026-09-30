@@ -1,7 +1,7 @@
 // The Engine section (C11 execution document, Interfaces "Settings tab" Engine; mockup 06 vignette 04): the binary MAWS
-// launches and the version it is pinned to (both reach the engine host through `engine.configure`, which main also
-// pushes on every change), the engine's config home (read-only to MAWS), and the subagent model new sessions launch
-// with.
+// launches and the version it is pinned to (both reach the engine host through `engine.configure`, which main pushes on
+// every change; C12: main alone, and this section awaits `settings.engineApplied`), the engine's config home (read-only
+// to MAWS), and the subagent model new sessions launch with.
 import { useQueryClient } from '@tanstack/react-query';
 import { useId, useState } from 'react';
 import type { Settings } from '@shared/ipc/schema';
@@ -15,6 +15,7 @@ import { homeAbbreviated } from '../tools/session-info/model';
 import { ENGINE } from './copy';
 import { Chip, INPUT, Setting, TEXT_ACTION, useCommittedDraft, writeSettings } from './parts';
 import { MemoryBudget, StatefulServers } from './BudgetSettings'; // C12
+import { CUSTODY_KEY, CustodySetting } from './CustodySetting'; // C12
 
 const BINARY_INFO_KEY = ['maws', 'engine.binaryInfo', undefined];
 
@@ -25,15 +26,18 @@ export function EngineSection({ settings }: { settings: Settings }) {
   const pin = settings.engine.pinnedVersion;
   const binary = info.data ?? null;
 
-  // The host answers `engine.binaryInfo`'s shape for the configuration it now holds; that answer is what the rows show.
-  const configure = async (engine: Settings['engine']) => {
-    const result = await ipc.invoke('engine.configure', { binaryPath: engine.binaryPath, expectedVersion: engine.pinnedVersion });
-    if (result.ok) client.setQueryData<BinaryInfo>(BINARY_INFO_KEY, result.value);
-    else toast({ level: 'warning', text: result.error.message, actions: [], dismissible: true });
-  };
+  // C12 start: main is the only sender of `engine.configure` (C12 execution document, Interfaces "Engine custody",
+  // Configure). A write is followed by `settings.engineApplied`, which answers once main's push for it has landed (custody
+  // for a new pin included, its error custody's or the push's), then the rows re-read what the host now holds.
   const writeEngine = async (patch: Partial<Settings['engine']>) => {
-    if (await writeSettings({ engine: patch })) await configure({ ...settings.engine, ...patch });
+    if (!(await writeSettings({ engine: patch }))) return;
+    const applied = await ipc.invoke('settings.engineApplied', undefined);
+    if (!applied.ok) toast({ level: 'warning', text: applied.error.message, actions: [], dismissible: true });
+    const reread = await ipc.invoke('engine.binaryInfo', undefined);
+    if (reread.ok) client.setQueryData<BinaryInfo>(BINARY_INFO_KEY, reread.value);
+    void client.invalidateQueries({ queryKey: CUSTODY_KEY });
   };
+  // C12 end
   const change = async () => {
     const picked = await ipc.invoke('layout.pickFiles', { kind: 'files', directory: null, multiple: false });
     if (!picked.ok) {
@@ -69,6 +73,7 @@ export function EngineSection({ settings }: { settings: Settings }) {
           {ENGINE.repin}
         </button>
       </Setting>
+      <CustodySetting settings={settings} /> {/* C12 */}
       <ConfigHome />
       <SubagentModel settings={settings} />
       {/* C12 start: the memory budget and the stateful MCP servers (settings v4) */}

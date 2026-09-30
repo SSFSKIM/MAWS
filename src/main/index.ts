@@ -66,6 +66,9 @@ import { knownSessionDirectories } from './settings/session-directories';
 import { CommandFailure, interceptCommand } from './ipc/router';
 import { installWidgetBackend } from './widgets/fixture-backend';
 // C11 end
+// C12 start
+import { custodySourceDir, ensureCustody } from './engine/custody';
+// C12 end
 
 // A fresh profile for the end-to-end smoke (and anyone else who wants one); must be set before the app is ready.
 if (process.env.MAWS_USER_DATA) app.setPath('userData', process.env.MAWS_USER_DATA);
@@ -228,6 +231,7 @@ app.whenReady().then(() => {
     reveal: (path) => shell.showItemInFolder(path),
     replay: ReplaySeam.fromEnv(process.env, process.cwd()), // the e2e seam (MAWS_E2E_REPLAY_FIXTURES)
     settings: () => sessionSettingsOf(settings.state().settings), // C11: the route, the relay policy and the subagent model from settings v3
+    launchGate: () => engineConfigure.launchGate(), // C12: main refuses a launch when MAWS's copy of the engine is gone or altered
   });
   registerSessionServiceHandlers(sessionService);
   sessionService.start().catch((error: unknown) => console.error('[sessions] the session service failed to start:', error));
@@ -235,7 +239,10 @@ app.whenReady().then(() => {
 
   // C11 start: the plumbing of settings v3 (C11 execution document, M1). The engine host's binary configuration follows
   // settings.engine; ClaudeUsage's hand-off and status; the reveal guard; the export's Save as….
-  const stopEngineConfigure = startEngineConfigure({
+  // C12: custody of the pinned engine (C12 execution document, Interfaces "Engine custody"): none under MAWS_E2E and
+  // replay unless an unpackaged run names MAWS_ENGINE_SOURCE_DIR
+  const custodySource = custodySourceDir(process.env, app.isPackaged); // C12
+  const engineConfigure = startEngineConfigure({ // C12: the coordinator (C11's stopEngineConfigure is its stop)
     settings: () => settings.state().settings,
     onSettingsChanged: (listener) => onEmitted('settings.changed', (state) => listener(state.settings)),
     hostState: () => hosts.snapshot('engine-host'),
@@ -244,9 +251,14 @@ app.whenReady().then(() => {
     // C12 start: the memory budget's policy from settings v4
     dispatchPolicy: (policy) => hosts.dispatch('engine-host', 'engine.policy.set', policy) as Promise<CommandResult<'engine.policy.set'>>,
     totalMemBytes: totalmem(),
+    custody: custodySource === null ? undefined : (version) => ensureCustody({ userData: app.getPath('userData'), version, sourceDir: custodySource }),
     // C12 end
   });
-  app.on('will-quit', stopEngineConfigure);
+  app.on('will-quit', engineConfigure.stop); // C12: .stop
+  // C12 start: the Settings tab's reads of the configuration main holds for it
+  registerMainHandler('settings.engineCustody', () => engineConfigure.custody());
+  registerMainHandler('settings.engineApplied', () => engineConfigure.applied());
+  // C12 end
   // Under the end-to-end harness nothing may activate the owner's ClaudeUsage: `open` answers as if it had.
   const e2e = process.env.MAWS_E2E === '1';
   const claudeUsage = createClaudeUsageApp({

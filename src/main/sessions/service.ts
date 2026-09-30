@@ -94,6 +94,7 @@ export class SessionService {
       env,
       replay: this.deps.replay ?? null,
       settings: this.deps.settings ?? readSettings,
+      launchGate: this.deps.launchGate ?? (async () => null), // C12
       now: this.now,
       log: this.log,
       watchdogMs: this.deps.timing?.watchdogMs ?? WATCHDOG_MS,
