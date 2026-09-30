@@ -50,10 +50,14 @@ export function nextNeedsYou(rows: NeedsYouRow[], currentAppId: AppSessionId | n
   return rows.find((row) => row.appSessionId !== currentAppId) ?? rows[0] ?? null;
 }
 
-// Who holds a foreign-live session (D-12), as a row or card names it; null for any other holder.
+// Who holds a foreign-live session (D-12), as a row or card names it; null for any other holder. A background job reads
+// by the short id `claude --bg` printed (`bg · <short>`, as C10's toasts name it), its pid only when no id is known.
 export function holderLine(record: SessionRecord): string | null {
   const { holder } = record;
   if (holder.kind === 'terminal') return `Terminal · pid ${holder.pid}`;
-  if (holder.kind === 'background_job') return holder.pid === null ? 'Background job' : `Background job · pid ${holder.pid}`;
+  if (holder.kind === 'background_job') {
+    if (holder.jobId !== null) return `bg · ${holder.jobId}`;
+    return holder.pid === null ? 'Background job' : `bg · pid ${holder.pid}`;
+  }
   return null;
 }

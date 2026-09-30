@@ -88,6 +88,28 @@ describe('sidebar renders eleven sessions', () => {
     expect(within(menu).getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['Open']);
   });
 
+  // Debt wave 4 (C5 row): a worktree session's row carries its branch chip; a background job reads by its short id.
+  it('shows a worktree session’s branch chip and a background job’s short id', () => {
+    const drag = idOf('Fix sidebar drag');
+    const probe = idOf('Somersault terminal run');
+    fillStores({
+      ...nine,
+      sessions: nine.sessions.map((r) =>
+        r.appId === drag
+          ? { ...r, worktree: { path: '/work/maws/.claude/worktrees/accept-one', branch: 'worktree-accept-one' } }
+          : r.appId === probe
+            ? { ...r, holder: { kind: 'background_job' as const, pid: 4242, jobId: 'e6dcd828' } }
+            : r,
+      ),
+    });
+    render(<Sidebar />);
+    const chips = screen.getAllByTestId('session-row-branch');
+    expect(chips.map((chip) => [chip.closest('[role="treeitem"]')!.getAttribute('aria-label'), chip.textContent])).toEqual([
+      ['Fix sidebar drag', '⎇ worktree-accept-one'],
+    ]);
+    expect(within(row('Somersault terminal run')).getByText('bg · e6dcd828')).toBeTruthy();
+  });
+
   it('offers §5.1’s session actions in a session’s context menu, disabled until a handler registers', async () => {
     offs.push(registerSessionAction('open', vi.fn()));
     render(<Sidebar />);
