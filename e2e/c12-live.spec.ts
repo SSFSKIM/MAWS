@@ -106,13 +106,29 @@ async function trees(page: Page, labels: Map<string, string>) {
       return {
         label: labels.get(s.appSessionId)!, appSessionId: s.appSessionId, process: s.process, exitReason: s.exit?.reason ?? null, pid: s.pid,
         treeRssKiB: live(s) ? s.memory.treeRssKiB : null, sampledAt: s.memory.sampledAt, keepAlive: s.keepAlive,
-        ps: tree === null ? null : { treeRssKiB: tree.rssKiB, processes: tree.pids.length, commands: tree.commands },
+        ps: tree === null ? null : { treeRssKiB: tree.rssKiB, processes: tree.pids.length, commands: tree.commands, mcpServers: tree.mcpServers },
       };
     })
     .sort((a, b) => a.label.localeCompare(b.label));
   const sumKiB = perTree.reduce((s, t) => s + (t.treeRssKiB ?? 0), 0);
   const psSumKiB = perTree.reduce((s, t) => s + (t.ps?.treeRssKiB ?? 0), 0);
   return { at: new Date().toISOString(), liveTrees: perTree.filter((t) => t.treeRssKiB !== null).length, sumKiB, sumMiB: mib(sumKiB), psSumKiB, psSumMiB: mib(psSumKiB), perTree };
+}
+
+// The host's figures against the independent `ps` read: every live tree measured on both sides and within
+// PS_TOLERANCE of each other (the host's sample is up to one period older than the read), the sums likewise, and each
+// tree carrying the stdio MCP children its repository gives it (A: c12-plain and c12-kernel; B: c12-plain).
+const PS_TOLERANCE = 0.05;
+function checkTrees(t: Awaited<ReturnType<typeof trees>>): void {
+  const near = (a: number, b: number) => Math.abs(a - b) <= PS_TOLERANCE * Math.max(a, b);
+  for (const tree of t.perTree.filter((p) => p.treeRssKiB !== null)) {
+    expect(tree.treeRssKiB!, `${tree.label}'s tree measured by the host`).toBeGreaterThan(0);
+    expect(tree.ps?.treeRssKiB ?? 0, `${tree.label}'s tree measured by ps`).toBeGreaterThan(0);
+    expect(near(tree.treeRssKiB!, tree.ps!.treeRssKiB), `${tree.label}: host ${tree.treeRssKiB} KiB against ps ${tree.ps!.treeRssKiB} KiB`).toBe(true);
+    expect(tree.ps!.mcpServers, `${tree.label}'s stdio MCP children`).toBe(tree.label.startsWith('A') ? 2 : 1);
+  }
+  expect(t.sumKiB).toBeGreaterThan(0);
+  expect(near(t.sumKiB, t.psSumKiB), `the sum: host ${t.sumKiB} KiB against ps ${t.psSumKiB} KiB`).toBe(true);
 }
 
 async function shoot(page: Page, name: string): Promise<string[]> {
@@ -314,6 +330,7 @@ test('nine sessions under a memory budget: releases, the released surfaces, Send
       const t = await trees(page, labels);
       record('treesBefore', t);
       expect(t.liveTrees).toBe(9);
+      checkTrees(t);
       expect(b.candidates, 'B1 and B5 to B7 are candidates').toBe(4);
     });
 
@@ -344,6 +361,7 @@ test('nine sessions under a memory budget: releases, the released surfaces, Send
       const releases = [...new Map(events.filter((e) => e.lastRelease !== null).map((e) => [`${e.lastRelease!.appSessionId}@${e.lastRelease!.at}`, e.lastRelease!])).values()].map((r) => ({ label: labels.get(r.appSessionId), ...r, totalMiB: mib(r.totalKiB) }));
       record('budgetAfter', await budget(page));
       record('treesAfter', after);
+      checkTrees(after);
       record('releases', releases);
       expect(releases[0]?.label).toBe('B1');
       await oneAtATime(page, releases);
@@ -444,12 +462,15 @@ test('nine sessions under a memory budget: releases, the released surfaces, Send
       for (const l of protectedLabels) titles[l] = await titleOf(page, ids[l]!);
       const events = await budgetEvents(page);
       await oneAtATime(page, events.filter((e) => e.lastRelease !== null && Date.parse(e.lastRelease.at) >= at).map((e) => e.lastRelease!));
+      const lowTrees = await trees(page, labels);
       record('noCandidate', {
         limitMiB: lowMiB, protectedMiB: mib(protectedKiB), setAt: new Date(at).toISOString(), bannerSeconds: (bannerAt - at) / 1000,
         banner: await banner.locator('span').first().innerText(), budget: await budget(page),
         releases: [...new Map(events.filter((e) => e.lastRelease !== null && Date.parse(e.lastRelease.at) >= at).map((e) => [`${e.lastRelease!.appSessionId}@${e.lastRelease!.at}`, e.lastRelease!])).values()].map((r) => ({ label: labels.get(r.appSessionId), ...r })),
-        trees: await trees(page, labels), screenshots: await shoot(page, 'banner'),
+        trees: lowTrees, screenshots: await shoot(page, 'banner'),
       });
+      expect(lowTrees.liveTrees, 'the five protected trees stay live').toBe(5);
+      checkTrees(lowTrees);
     });
 
     await test.step('Review… lists the five with their reasons; Stop… on B2 discloses its task; Cancel stops nothing', async () => {

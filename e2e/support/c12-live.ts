@@ -96,18 +96,21 @@ export function psRead(): PsRow[] {
 
 // A process and every descendant in one read, summed as C3's sampler sums them (the same definition, computed here
 // independently of `process-table.ts`).
-export function treeOf(rows: readonly PsRow[], pid: number): { rssKiB: number; pids: number[]; commands: string[] } {
+export function treeOf(rows: readonly PsRow[], pid: number): { rssKiB: number; pids: number[]; commands: string[]; mcpServers: number } {
   const children = new Map<number, PsRow[]>();
   for (const row of rows) children.set(row.ppid, [...(children.get(row.ppid) ?? []), row]);
   const root = rows.find((r) => r.pid === pid);
-  if (!root) return { rssKiB: 0, pids: [], commands: [] };
+  if (!root) return { rssKiB: 0, pids: [], commands: [], mcpServers: 0 };
   const tree: PsRow[] = [];
   for (const queue = [root]; queue.length > 0; ) {
     const next = queue.shift()!;
     tree.push(next);
     queue.push(...(children.get(next.pid) ?? []));
   }
-  return { rssKiB: tree.reduce((sum, r) => sum + r.rssKiB, 0), pids: tree.map((r) => r.pid), commands: tree.map((r) => basename(r.command.split(' ')[0] ?? '')) };
+  return {
+    rssKiB: tree.reduce((sum, r) => sum + r.rssKiB, 0), pids: tree.map((r) => r.pid), commands: tree.map((r) => basename(r.command.split(' ')[0] ?? '')),
+    mcpServers: tree.filter((r) => r.command.includes(MCP_SERVER)).length, // the stand-in's stdio processes in this tree
+  };
 }
 
 // What the run spent: every journal under the profile, each process's largest main-lane `total_cost_usd`. A resumed
