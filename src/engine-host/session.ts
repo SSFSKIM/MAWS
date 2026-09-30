@@ -489,7 +489,13 @@ export class EngineSession {
     this.touch();
     this.silence = setTimeout(() => {
       this.silence = null;
-      this.initializeFailed(new ControlError('initialize', `${this.plan.launchId}-1` as RequestId, `the engine wrote nothing in the ${FIRST_OUTPUT_MS / 1000} s after it started; initialize was not answered`, 'no_output'));
+      try {
+        this.initializeFailed(new ControlError('initialize', `${this.plan.launchId}-1` as RequestId, `the engine wrote nothing in the ${FIRST_OUTPUT_MS / 1000} s after it started; initialize was not answered`, 'no_output'));
+      } catch (error) {
+        // a timer has no caller to take the throw: the journal refused the init_failed row, and the ladder still runs
+        this.log(`init_failed not journaled: ${messageOf(error)}; ending the process`);
+        void this.terminate(false);
+      }
     }, FIRST_OUTPUT_MS);
 
     const request: InitializeRequest = { supportedDialogKinds: [...DECLARED_DIALOG_KINDS], perTaskStopAffordance: true };

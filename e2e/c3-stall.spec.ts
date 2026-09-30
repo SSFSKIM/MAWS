@@ -7,8 +7,8 @@
 //   export C3=/private/tmp/maws-c3-stall/h4 && mkdir -p $C3/config $C3/userData && printf '{}\n' > $C3/config/settings.json
 //   pnpm build && MAWS_C3_STALL=1 CLAUDE_CONFIG_DIR=$C3/config MAWS_USER_DATA=$C3/userData pnpm e2e e2e/c3-stall.spec.ts
 import { execFileSync } from 'node:child_process';
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -25,9 +25,21 @@ const WAIT_MS = Number(process.env.MAWS_C3_STALL_WAIT_MS ?? '45000');
 const TURN = process.env.MAWS_C3_STALL_TURN !== '0';
 const MAX_USD = Number(process.env.MAWS_C3_STALL_MAX_USD ?? '3');
 
-const config = process.env.CLAUDE_CONFIG_DIR ?? '';
-const userData = process.env.MAWS_USER_DATA ?? '';
-const root = ON ? dirname(resolve(config)) : '';
+// Both homes are required and must be siblings under one scratch root whose path is plain (no spaces or shell
+// metacharacters: the sentinel hook's command embeds it), checked before anything launches: an empty MAWS_USER_DATA
+// would open the owner's own MAWS profile.
+const SCRATCH_ROOT = /^\/private\/tmp\/maws-c3-stall(\/[A-Za-z0-9._-]+)*$/;
+function scratchHomes(): { config: string; userData: string; root: string } {
+  const rawConfig = process.env.CLAUDE_CONFIG_DIR ?? '';
+  const rawUserData = process.env.MAWS_USER_DATA ?? '';
+  if (rawConfig === '' || rawUserData === '') throw new Error('export CLAUDE_CONFIG_DIR and MAWS_USER_DATA under one /private/tmp/maws-c3-stall root first');
+  const config = realpathSync(rawConfig);
+  const userData = realpathSync(rawUserData);
+  const root = dirname(config);
+  if (!SCRATCH_ROOT.test(root) || dirname(userData) !== root) throw new Error(`the scratch must be one plain /private/tmp/maws-c3-stall root holding both homes: CLAUDE_CONFIG_DIR=${config}, MAWS_USER_DATA=${userData}`);
+  return { config, userData, root };
+}
+const { config, userData, root } = ON ? scratchHomes() : { config: '', userData: '', root: '' };
 const out = (name: string) => join(root, name);
 const log = (row: Record<string, unknown>) => {
   appendFileSync(out('h4-run.jsonl'), `${JSON.stringify({ at: new Date().toISOString(), ...row })}\n`);
@@ -158,7 +170,6 @@ function capture(dir: string, pid: number): void {
 }
 
 test('the deep session resumed from its row in a fresh app launch, repeatedly', async () => {
-  expect(root.startsWith('/private/tmp/maws-c3-stall'), `the scratch must sit under /private/tmp/maws-c3-stall (CLAUDE_CONFIG_DIR=${config})`).toBe(true);
   expect(ownerFileCheck(root), 'no scratch path in the owner’s ~/.claude.json before').toEqual([]);
   const state = stateOf(root);
   let id = state.get('deep.appId');

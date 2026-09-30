@@ -680,6 +680,19 @@ describe('failed initialize terminates the process', () => {
     expect(table.reserve(spec().appSessionId, () => setup({ spec: resume }).session).status).toBe('launching');
   });
 
+  it('a journal that refuses the silent launch’s init_failed row throws nothing out of the timer, and the ladder still ends the process (review fix)', async () => {
+    vi.useFakeTimers();
+    const { session, transport, journal, logs } = setup({ responder: defaultResponder({ initialize: () => null }) });
+    void session.start();
+    await vi.advanceTimersByTimeAsync(0);
+    journal.failOnce = (direction, frame) => direction === 'meta' && (frame as { event?: string }).event === 'init_failed';
+    await vi.advanceTimersByTimeAsync(FIRST_OUTPUT_MS);
+    expect(transport.calls).toEqual(['endInput', 'kill:SIGTERM']);
+    expect(session.status().process).toBe('exiting');
+    expect(logs.some((m) => m.startsWith('init_failed not journaled: ENOSPC'))).toBe(true);
+    expect(journal.rows.some((r) => (r.frame as { event?: string }).event === 'init_failed')).toBe(false);
+  });
+
   it('an engine that has written anything (a hook frame, a stderr line) is past the silence bound: its initialize keeps the long deadline', async () => {
     vi.useFakeTimers();
     for (const speak of ['frame', 'stderr'] as const) {
