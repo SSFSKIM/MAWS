@@ -66,9 +66,11 @@ function firstLine(block: { type: string } & Record<string, unknown>): string | 
 // (resume-fork-start ends at 0.02668, the resume of the same id, resume-fork-no-replay, reads 0.02951 after one short
 // turn, and the next resume 0.03220). The restored part is the previous process's final total: the session's cost is
 // what every finished process added beyond what it restored, plus what the live one has added. A process that restored
-// nothing (it was resumed while the previous one still ran, pass2/resume-live-second, or that one never recorded its
-// total) shows as a first total below the restored figure, and counts from zero. A synthesised `turn.ended` (`seq:
-// null`, C4's backfill from disk, where no accounting is recorded per turn) carries no cost and leaves the ledger alone.
+// nothing (it was resumed while the previous one still ran, pass2/resume-live-second) shows as a first total below the
+// restored figure, and counts from zero. Not covered: a process killed before it could record its total (SIGKILL)
+// leaves an older `cost-state` to restore, which the ledger cannot tell apart; and a fork restores its source's total
+// (resume-fork-cli), so a forked session starts at its source's cost. A synthesised `turn.ended` (`seq: null`, C4's
+// backfill from disk, where no accounting is recorded per turn) carries no cost and leaves the ledger alone.
 export interface CostLedger {
   finishedUsd: number; // what the processes that exited added beyond what each restored
   restoredUsd: number; // the live process's restored part: the previous process's final total
@@ -80,7 +82,8 @@ export interface CostLedger {
 // main restarted) is the live process's running total, all of it its own.
 export const costLedger = (d: SessionDigest): CostLedger => ({ finishedUsd: 0, restoredUsd: 0, runningUsd: d.cost?.totalUsd ?? 0, awaitingFirst: false });
 
-const costOf = (ledger: CostLedger) => ledger.finishedUsd + ledger.runningUsd - ledger.restoredUsd;
+// The session's cost the ledger holds.
+export const costOf = (ledger: CostLedger) => ledger.finishedUsd + ledger.runningUsd - ledger.restoredUsd;
 
 // A process's running total: the first one after an exit tells whether the process restored its predecessor's.
 const sample = (ledger: CostLedger, totalUsd: number): CostLedger => ({

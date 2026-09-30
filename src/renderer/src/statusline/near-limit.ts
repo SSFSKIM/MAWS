@@ -156,9 +156,14 @@ export function connectNearLimitBanners(deps: NearLimitDeps = { client: ipc, usa
     });
   };
 
+  // Recorded at the window's latest reading when it has drifted from its key, so a reload before the next reading finds it.
   const recordDismissal = (key: string) => {
-    if (dismissed === null || dismissed.includes(key)) return;
-    writeDismissed([...dismissed, key]);
+    if (dismissed === null) return;
+    const at = lastSeen.get(key);
+    const anchored = at !== undefined && Math.abs(at - keyTime(key)) > SAME_WINDOW_MS / 2 ? reanchored(key, at) : key;
+    if (dismissed.includes(anchored)) return;
+    if (at !== undefined) lastSeen.set(anchored, at);
+    writeDismissed([...dismissed, anchored]);
   };
 
   const offNotices = notices.subscribe((state, before) => {

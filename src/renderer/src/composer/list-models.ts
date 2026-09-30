@@ -4,7 +4,7 @@
 // C10's host-side catalogue (`engine.models`, one per route, answered from the host's cache without asking any
 // engine), which names the model chip's model from the first render, before any menu has opened.
 import { useQueryClient } from '@tanstack/react-query';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
@@ -23,6 +23,8 @@ export function useListModels(appSessionId: AppSessionId, enabled: boolean): rea
 
 export type Route = 'gateway' | 'direct';
 
+const CATALOGUE = ['maws', 'engine.models'];
+
 // The route whose catalogue names a session's models: the running process's own, else the one its record kept; null
 // when neither says (a discovered session), and `engine.models` answers the most recently updated catalogue.
 export function routeOf(status: EngineSessionStatus | null, record: SessionRecord | null): Route | null {
@@ -32,12 +34,16 @@ export function routeOf(status: EngineSessionStatus | null, record: SessionRecor
 }
 
 // The route's catalogue. A launch updates its route's catalogue at `initialize`, so the read is renewed when the
-// session's process becomes ready (a relay's `claude/*` aliases arrive with the first routed launch).
+// session's process becomes ready (a relay's `claude/*` aliases arrive with the first routed launch): on the change to
+// ready only, not at every mount of an already-ready session's composer.
 export function useModelCatalogue(route: Route | null, ready: boolean): readonly ModelCatalogueEntry[] | null {
   const read = useCommand('engine.models', route === null ? { refresh: false } : { refresh: false, gateway: route }, { staleTime: 60_000 });
   const client = useQueryClient();
+  const wasReady = useRef(ready);
   useEffect(() => {
-    if (ready) void client.invalidateQueries({ queryKey: ['maws', 'engine.models'] });
+    // a first read still in flight would be reused by a bare invalidation and settle with the pre-launch catalogue
+    if (ready && !wasReady.current) void client.cancelQueries({ queryKey: CATALOGUE }).then(() => client.invalidateQueries({ queryKey: CATALOGUE }));
+    wasReady.current = ready;
   }, [ready, client]);
   return read.data?.models ?? null;
 }

@@ -195,6 +195,7 @@ export function LocationChip({ location, branch, directories, dirty, onOpen }: L
                     role="menuitemradio"
                     aria-checked={sameLocation(option, location.value)}
                     title={locationPath(option)}
+                    aria-description={locationPath(option)}
                     disabled={location.disabled !== null}
                     onClick={() => void choose(option)}
                     className={ITEM}

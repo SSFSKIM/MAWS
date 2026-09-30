@@ -326,6 +326,18 @@ describe("composer DOM under C5's dispatcher", () => {
     expect(invoked('engine.models')).toContainEqual({ refresh: false, gateway: 'gateway' });
   });
 
+  it('renews the route’s catalogue when the process becomes ready, not at each mount of a ready session', async () => {
+    live(A, { status: { process: 'initializing' } });
+    const view = mount([{ index: 0, id: A }]);
+    await waitFor(() => expect(invoked('engine.models')).toHaveLength(1));
+    live(A); // ready: the launch's initialize has updated the route's catalogue
+    await waitFor(() => expect(invoked('engine.models')).toHaveLength(2));
+    view.unmount();
+    mount([{ index: 0, id: A }]); // a tab switch back: the cached catalogue stands
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(invoked('engine.models')).toHaveLength(2);
+  });
+
   it('keeps `!` enabled while busy as Run, and the control says it runs now inside the turn', async () => {
     busy(A);
     mount([{ index: 0, id: A }]);

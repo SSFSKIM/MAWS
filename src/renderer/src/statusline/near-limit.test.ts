@@ -159,6 +159,25 @@ describe('near-limit banner posts once per window: the notices adapter', () => {
     reloaded.off();
   });
 
+  it('a banner dismissed after its window drifted is recorded at its latest reading, so a reload at once still finds it', async () => {
+    const reading = (resetsAt: string) => snapshot([account('a6', 'six@example.test', { fiveHour: { percent: 99, resetsAt, recordedAt: at(0) } })]);
+    const first = setup();
+    for (const resetsAt of ['2026-09-29T09:50:00Z', '2026-09-29T09:51:00Z', '2026-09-29T09:52:00Z']) {
+      first.usage.getState().applySnapshot(reading(resetsAt));
+      await vi.advanceTimersByTimeAsync(0);
+    }
+    first.notices.getState().dismiss('usage:a6:session:2026-09-29T09:50:00Z');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(first.fake.invoked('layout.set')).toEqual([{ key: 'usage.banners', value: ['usage:a6:session:2026-09-29T09:52:00Z'] }]);
+    first.off();
+
+    const reloaded = setup(['usage:a6:session:2026-09-29T09:52:00Z']);
+    reloaded.usage.getState().applySnapshot(reading('2026-09-29T09:52:00Z'));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(reloaded.banners()).toEqual([]);
+    reloaded.off();
+  });
+
   it('keeps usage.banners to the newest fifty keys', async () => {
     const old = Array.from({ length: 50 }, (_, i) => `usage:old:${i}`);
     const { usage, notices, fake, off } = setup(old);
