@@ -8,7 +8,7 @@ import type { EventName, EventPayload } from '@shared/ipc/schema';
 import { validateEventPayload } from '@shared/ipc/validate';
 import { StoreFixture } from '../../../test/support/store-fixture';
 import { Discovery, type ListedTranscript } from './discovery';
-import { FsService, START_SCAN_FALLBACK_MS } from './service';
+import { FsService, READ_LISTS_CAP, START_SCAN_FALLBACK_MS } from './service';
 import { DEBOUNCE_MS, SETTLE_MS, type WatchFn } from './watcher';
 
 const S1 = '11111111-1111-4111-8111-111111111111' as SessionId;
@@ -252,6 +252,29 @@ describe('filesystem state service: discovery, sidecars and holders', () => {
     await expect.poll(() => events('fs.tasksChanged').map((e) => e.listId).sort(), { timeout: 1_000 }).toEqual([S1, 'team-list'].sort());
   });
   // C8b end
+
+  // Debt wave 4: the lists a rescan announces are bounded to the most recently read READ_LISTS_CAP; a re-read refreshes
+  // a list's place, so the least recently read is the one dropped.
+  it('a rescan of tasks/ announces at most READ_LISTS_CAP lists, the most recently read', async () => {
+    const listeners = new Map<string, (event: string, filename: string | null) => void>();
+    const watch: WatchFn = (path, _options, listener) => {
+      listeners.set(path, listener);
+      return Object.assign(new EventEmitter(), { close: vi.fn() });
+    };
+    const fs = await start(watch);
+    await settled();
+    const ids = Array.from({ length: READ_LISTS_CAP + 2 }, (_, i) => `list-${i}`);
+    for (const id of ids.slice(0, READ_LISTS_CAP)) await fs.tasks(id);
+    await fs.tasks('list-0'); // list-0 is now the most recent, list-1 the least
+    for (const id of ids.slice(READ_LISTS_CAP)) await fs.tasks(id); // two more: list-1 and list-2 drop out
+    clear();
+    listeners.get(fixture.paths.tasks)!('rename', null);
+    await expect.poll(() => events('fs.tasksChanged').length, { timeout: 1_000 }).toBe(READ_LISTS_CAP);
+    const announced = new Set(events('fs.tasksChanged').map((e) => e.listId));
+    expect(announced.has('list-0')).toBe(true);
+    expect(announced.has('list-1') || announced.has('list-2')).toBe(false);
+    expect(ids.slice(3).every((id) => announced.has(id))).toBe(true);
+  });
 
   describe('a scan whose listing is overtaken by the watcher', () => {
     // A fake watch the test fires by hand, and a listing the test releases by hand: the scan's `list()` is taken before

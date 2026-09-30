@@ -40,6 +40,10 @@ export const PROGRESS_EVERY = 100;
 export const START_SCAN_FALLBACK_MS = 3_000;
 // The floor under coalesced or dropped FSEvents for followed files (residue *Watcher mechanism*): each is stat'ed.
 export const RECONCILE_MS = 30_000;
+// The task lists a rescan of tasks/ announces again: the most recently read, so the set is bounded over the host's
+// lifetime (debt wave 4). A list read longer ago than this misses only a rescan's announcement; reading it again
+// re-admits it, and a watched change to it is announced either way.
+export const READ_LISTS_CAP = 256;
 
 export interface FsServiceOptions {
   paths: StorePaths;
@@ -106,7 +110,8 @@ export class FsService {
   private readonly agentListing = new Map<SessionId, Promise<SubagentEntry[]>>(); // one listing at a time per session
   private readonly workflowReader = new WorkflowReader();
   private readonly taskReader: TaskReader;
-  // C8b start (M4 task 6): the lists a reader asked for, by sanitised id, announced again after a rescan of tasks/
+  // C8b start (M4 task 6): the lists a reader asked for, by sanitised id, announced again after a rescan of tasks/;
+  // insertion-ordered as least to most recently read, at most READ_LISTS_CAP (debt wave 4)
   private readonly readLists = new Set<string>();
   // C8b end
   private replays: ReplaySnapshots | null = null;
@@ -305,7 +310,11 @@ export class FsService {
   }
 
   async tasks(listId: string): Promise<{ tasks: PersistedTask[] }> {
-    this.readLists.add(sanitizeListId(listId)); // C8b (M4 task 6)
+    // C8b (M4 task 6), bounded in debt wave 4: re-inserted as the most recent, the least recent dropped past the cap
+    const id = sanitizeListId(listId);
+    this.readLists.delete(id);
+    this.readLists.add(id);
+    if (this.readLists.size > READ_LISTS_CAP) this.readLists.delete(this.readLists.values().next().value!);
     return { tasks: await this.taskReader.list(listId) };
   }
 
