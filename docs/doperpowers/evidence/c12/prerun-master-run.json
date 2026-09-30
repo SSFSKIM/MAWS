@@ -1,0 +1,1766 @@
+{
+  "about": "C12 §10 pre-run re-run on master ea42f326 (prerun-master.txt beside this file): the records e2e/c12-prerun.spec.ts wrote under the scratch roots, and the per-piece gate log (1-min/5-min/15-min load right before, relay code, the pin before and after, the owner-file checks before and after). Screenshot paths inside \"run\" name files that were not committed with this run (they stay outside the repository, see prerun-master.txt).",
+  "scratchRoots": {
+    "main": "/private/tmp/maws-c12-prerun-1790785989",
+    "monitorRerun": "/private/tmp/maws-c12-prerun-1790786875"
+  },
+  "pieces": {
+    "10.1": {
+      "loadRightBefore": [
+        "7.26",
+        "9.15",
+        "10.62"
+      ],
+      "relay": "200",
+      "exit": 0,
+      "pinBefore": "-rwxr-xr-x@ 1 new  staff  225036032  9월 25 15:10 ~/.local/share/claude/versions/2.1.283",
+      "pinAfter": "-rwxr-xr-x@ 1 new  staff  225036032  9월 25 15:10 ~/.local/share/claude/versions/2.1.283",
+      "ownerCheckBefore": {
+        "claudeJsonScratchKeys": []
+      },
+      "ownerCheckAfter": {
+        "claudeJsonScratchKeys": [],
+        "underDotClaude": {
+          "filesModifiedDuringPiece": 4,
+          "ofThemThisAgentsOwnSession": 1,
+          "scratchNamedPaths": [],
+          "nonTranscriptFilesMentioningScratch": [],
+          "transcriptsWithScratchCwd": [],
+          "newTranscripts": []
+        },
+        "pass": true
+      }
+    },
+    "10.10": {
+      "loadRightBefore": [
+        "5.71",
+        "6.92",
+        "8.71"
+      ],
+      "relay": "200",
+      "exit": 0,
+      "pinBefore": "-rwxr-xr-x@ 1 new  staff  225036032  9월 25 15:10 ~/.local/share/claude/versions/2.1.283",
+      "pinAfter": "-rwxr-xr-x@ 1 new  staff  225036032  9월 25 15:10 ~/.local/share/claude/versions/2.1.283",
+      "ownerCheckBefore": {
+        "claudeJsonScratchKeys": []
+      },
+      "ownerCheckAfter": {
+        "claudeJsonScratchKeys": [],
+        "underDotClaude": {
+          "filesModifiedDuringPiece": 0,
+          "ofThemThisAgentsOwnSession": 0,
+          "scratchNamedPaths": [],
+          "nonTranscriptFilesMentioningScratch": [],
+          "transcriptsWithScratchCwd": [],
+          "newTranscripts": []
+        },
+        "pass": true
+      }
+    },
+    "10.2": {
+      "loadRightBefore": [
+        "7.05",
+        "8.94",
+        "10.49"
+      ],
+      "relay": "200",
+      "exit": 0,
+      "pinBefore": "-rwxr-xr-x@ 1 new  staff  225036032  9월 25 15:10 ~/.local/share/claude/versions/2.1.283",
+      "pinAfter": "-rwxr-xr-x@ 1 new  staff  225036032  9월 25 15:10 ~/.local/share/claude/versions/2.1.283",
+      "ownerCheckBefore": {
+        "claudeJsonScratchKeys": []
+      },
+      "ownerCheckAfter": {
+        "claudeJsonScratchKeys": [],
+        "underDotClaude": {
+          "filesModifiedDuringPiece": 0,
+          "ofThemThisAgentsOwnSession": 0,
+          "scratchNamedPaths": [],
+          "nonTranscriptFilesMentioningScratch": [],
+          "transcriptsWithScratchCwd": [],
+          "newTranscripts": []
+        },
+        "pass": true
+      }
+    },
+    "10.3": {
+      "loadRightBefore": [
+        "6.51",
+        "8.64",
+        "10.33"
+      ],
+      "relay": "200",
+      "exit": 0,
+      "pinBefore": "-rwxr-xr-x@ 1 new  staff  225036032  9월 25 15:10 ~/.local/share/claude/versions/2.1.283",
+      "pinAfter": "-rwxr-xr-x@ 1 new  staff  225036032  9월 25 15:10 ~/.local/share/claude/versions/2.1.283",
+      "ownerCheckBefore": {
+        "claudeJsonScratchKeys": []
+      },
+      "ownerCheckAfter": {
+        "claudeJsonScratchKeys": [],
+        "underDotClaude": {
+          "filesModifiedDuringPiece": 1,
+          "ofThemThisAgentsOwnSession": 0,
+          "scratchNamedPaths": [],
+          "nonTranscriptFilesMentioningScratch": [],
+          "transcriptsWithScratchCwd": [],
+          "newTranscripts": []
+        },
+        "pass": true
+      }
+    },
+    "10.4-monitor": {
+      "loadRightBefore": [
+        "6.33",
+        "6.86",
+        "8.51"
+      ],
+      "relay": "200",
+      "exit": 1,
+      "pinBefore": "-rwxr-xr-x@ 1 new  staff  225036032  9월 25 15:10 ~/.local/share/claude/versions/2.1.283",
+      "pinAfter": "-rwxr-xr-x@ 1 new  staff  225036032  9월 25 15:10 ~/.local/share/claude/versions/2.1.283",
+      "ownerCheckBefore": {
+        "claudeJsonScratchKeys": []
+      },
+      "ownerCheckAfter": {
+        "claudeJsonScratchKeys": [],
+        "underDotClaude": {
+          "filesModifiedDuringPiece": 1,
+          "ofThemThisAgentsOwnSession": 0,
+          "scratchNamedPaths": [],
+          "nonTranscriptFilesMentioningScratch": [],
+          "transcriptsWithScratchCwd": [],
+          "newTranscripts": []
+        },
+        "pass": true
+      }
+    },
+    "10.4": {
+      "loadRightBefore": [
+        "6.10",
+        "8.27",
+        "10.11"
+      ],
+      "relay": "200",
+      "exit": 1,
+      "pinBefore": "-rwxr-xr-x@ 1 new  staff  225036032  9월 25 15:10 ~/.local/share/claude/versions/2.1.283",
+      "pinAfter": "-rwxr-xr-x@ 1 new  staff  225036032  9월 25 15:10 ~/.local/share/claude/versions/2.1.283",
+      "ownerCheckBefore": {
+        "claudeJsonScratchKeys": []
+      },
+      "ownerCheckAfter": {
+        "claudeJsonScratchKeys": [],
+        "underDotClaude": {
+          "filesModifiedDuringPiece": 1,
+          "ofThemThisAgentsOwnSession": 0,
+          "scratchNamedPaths": [],
+          "nonTranscriptFilesMentioningScratch": [],
+          "transcriptsWithScratchCwd": [],
+          "newTranscripts": []
+        },
+        "pass": true
+      }
+    },
+    "10.5": {
+      "loadRightBefore": [
+        "6.48",
+        "7.78",
+        "9.67"
+      ],
+      "relay": "200",
+      "exit": 0,
+      "pinBefore": "-rwxr-xr-x@ 1 new  staff  225036032  9월 25 15:10 ~/.local/share/claude/versions/2.1.283",
+      "pinAfter": "-rwxr-xr-x@ 1 new  staff  225036032  9월 25 15:10 ~/.local/share/claude/versions/2.1.283",
+      "ownerCheckBefore": {
+        "claudeJsonScratchKeys": []
+      },
+      "ownerCheckAfter": {
+        "claudeJsonScratchKeys": [],
+        "underDotClaude": {
+          "filesModifiedDuringPiece": 0,
+          "ofThemThisAgentsOwnSession": 0,
+          "scratchNamedPaths": [],
+          "nonTranscriptFilesMentioningScratch": [],
+          "transcriptsWithScratchCwd": [],
+          "newTranscripts": []
+        },
+        "pass": true
+      }
+    },
+    "10.6": {
+      "loadRightBefore": [
+        "5.96",
+        "7.54",
+        "9.52"
+      ],
+      "relay": "200",
+      "exit": 0,
+      "pinBefore": "-rwxr-xr-x@ 1 new  staff  225036032  9월 25 15:10 ~/.local/share/claude/versions/2.1.283",
+      "pinAfter": "-rwxr-xr-x@ 1 new  staff  225036032  9월 25 15:10 ~/.local/share/claude/versions/2.1.283",
+      "ownerCheckBefore": {
+        "claudeJsonScratchKeys": []
+      },
+      "ownerCheckAfter": {
+        "claudeJsonScratchKeys": [],
+        "underDotClaude": {
+          "filesModifiedDuringPiece": 0,
+          "ofThemThisAgentsOwnSession": 0,
+          "scratchNamedPaths": [],
+          "nonTranscriptFilesMentioningScratch": [],
+          "transcriptsWithScratchCwd": [],
+          "newTranscripts": []
+        },
+        "pass": true
+      }
+    },
+    "10.7": {
+      "loadRightBefore": [
+        "7.69",
+        "7.76",
+        "9.37"
+      ],
+      "relay": "200",
+      "exit": 0,
+      "pinBefore": "-rwxr-xr-x@ 1 new  staff  225036032  9월 25 15:10 ~/.local/share/claude/versions/2.1.283",
+      "pinAfter": "-rwxr-xr-x@ 1 new  staff  225036032  9월 25 15:10 ~/.local/share/claude/versions/2.1.283",
+      "ownerCheckBefore": {
+        "claudeJsonScratchKeys": []
+      },
+      "ownerCheckAfter": {
+        "claudeJsonScratchKeys": [],
+        "underDotClaude": {
+          "filesModifiedDuringPiece": 0,
+          "ofThemThisAgentsOwnSession": 0,
+          "scratchNamedPaths": [],
+          "nonTranscriptFilesMentioningScratch": [],
+          "transcriptsWithScratchCwd": [],
+          "newTranscripts": []
+        },
+        "pass": true
+      }
+    },
+    "10.8": {
+      "loadRightBefore": [
+        "6.83",
+        "7.55",
+        "9.18"
+      ],
+      "relay": "200",
+      "exit": 0,
+      "pinBefore": "-rwxr-xr-x@ 1 new  staff  225036032  9월 25 15:10 ~/.local/share/claude/versions/2.1.283",
+      "pinAfter": "-rwxr-xr-x@ 1 new  staff  225036032  9월 25 15:10 ~/.local/share/claude/versions/2.1.283",
+      "ownerCheckBefore": {
+        "claudeJsonScratchKeys": []
+      },
+      "ownerCheckAfter": {
+        "claudeJsonScratchKeys": [],
+        "underDotClaude": {
+          "filesModifiedDuringPiece": 0,
+          "ofThemThisAgentsOwnSession": 0,
+          "scratchNamedPaths": [],
+          "nonTranscriptFilesMentioningScratch": [],
+          "transcriptsWithScratchCwd": [],
+          "newTranscripts": []
+        },
+        "pass": true
+      }
+    },
+    "10.9": {
+      "loadRightBefore": [
+        "6.35",
+        "7.33",
+        "9.03"
+      ],
+      "relay": "200",
+      "exit": 0,
+      "pinBefore": "-rwxr-xr-x@ 1 new  staff  225036032  9월 25 15:10 ~/.local/share/claude/versions/2.1.283",
+      "pinAfter": "-rwxr-xr-x@ 1 new  staff  225036032  9월 25 15:10 ~/.local/share/claude/versions/2.1.283",
+      "ownerCheckBefore": {
+        "claudeJsonScratchKeys": []
+      },
+      "ownerCheckAfter": {
+        "claudeJsonScratchKeys": [],
+        "underDotClaude": {
+          "filesModifiedDuringPiece": 0,
+          "ofThemThisAgentsOwnSession": 0,
+          "scratchNamedPaths": [],
+          "nonTranscriptFilesMentioningScratch": [],
+          "transcriptsWithScratchCwd": [],
+          "newTranscripts": []
+        },
+        "pass": true
+      }
+    },
+    "c8-attach": {
+      "loadRightBefore": [
+        "5.85",
+        "6.87",
+        "8.65"
+      ],
+      "relay": "200",
+      "exit": 0,
+      "pinBefore": "-rwxr-xr-x@ 1 new  staff  225036032  9월 25 15:10 ~/.local/share/claude/versions/2.1.283",
+      "pinAfter": "-rwxr-xr-x@ 1 new  staff  225036032  9월 25 15:10 ~/.local/share/claude/versions/2.1.283",
+      "ownerCheckBefore": {
+        "claudeJsonScratchKeys": []
+      },
+      "ownerCheckAfter": {
+        "claudeJsonScratchKeys": [],
+        "underDotClaude": {
+          "filesModifiedDuringPiece": 0,
+          "ofThemThisAgentsOwnSession": 0,
+          "scratchNamedPaths": [],
+          "nonTranscriptFilesMentioningScratch": [],
+          "transcriptsWithScratchCwd": [],
+          "newTranscripts": []
+        },
+        "pass": true
+      }
+    },
+    "r2-10.2": {
+      "loadRightBefore": [
+        "8.42",
+        "7.43",
+        "8.56"
+      ],
+      "relay": "200",
+      "exit": 0,
+      "pinBefore": "-rwxr-xr-x@ 1 new  staff  225036032  9월 25 15:10 ~/.local/share/claude/versions/2.1.283",
+      "pinAfter": "-rwxr-xr-x@ 1 new  staff  225036032  9월 25 15:10 ~/.local/share/claude/versions/2.1.283",
+      "ownerCheckBefore": {
+        "claudeJsonScratchKeys": []
+      },
+      "ownerCheckAfter": {
+        "claudeJsonScratchKeys": [],
+        "underDotClaude": {
+          "filesModifiedDuringPiece": 0,
+          "ofThemThisAgentsOwnSession": 0,
+          "scratchNamedPaths": [],
+          "nonTranscriptFilesMentioningScratch": [],
+          "transcriptsWithScratchCwd": [],
+          "newTranscripts": []
+        },
+        "pass": true
+      }
+    },
+    "r2-10.4-monitor": {
+      "loadRightBefore": [
+        "8.13",
+        "7.43",
+        "8.53"
+      ],
+      "relay": "200",
+      "exit": 0,
+      "pinBefore": "-rwxr-xr-x@ 1 new  staff  225036032  9월 25 15:10 ~/.local/share/claude/versions/2.1.283",
+      "pinAfter": "-rwxr-xr-x@ 1 new  staff  225036032  9월 25 15:10 ~/.local/share/claude/versions/2.1.283",
+      "ownerCheckBefore": {
+        "claudeJsonScratchKeys": []
+      },
+      "ownerCheckAfter": {
+        "claudeJsonScratchKeys": [],
+        "underDotClaude": {
+          "filesModifiedDuringPiece": 0,
+          "ofThemThisAgentsOwnSession": 0,
+          "scratchNamedPaths": [],
+          "nonTranscriptFilesMentioningScratch": [],
+          "transcriptsWithScratchCwd": [],
+          "newTranscripts": []
+        },
+        "pass": true
+      }
+    },
+    "realstore-cold": {
+      "loadRightBefore": [
+        "7.99",
+        "9.98",
+        "11.05"
+      ],
+      "relay": "200",
+      "exit": 0,
+      "pinBefore": "-rwxr-xr-x@ 1 new  staff  225036032  9월 25 15:10 ~/.local/share/claude/versions/2.1.283",
+      "pinAfter": "-rwxr-xr-x@ 1 new  staff  225036032  9월 25 15:10 ~/.local/share/claude/versions/2.1.283",
+      "ownerCheckBefore": {
+        "claudeJsonScratchKeys": []
+      },
+      "ownerCheckAfter": {
+        "claudeJsonScratchKeys": [],
+        "underDotClaude": {
+          "filesModifiedDuringPiece": 2,
+          "ofThemThisAgentsOwnSession": 1,
+          "scratchNamedPaths": [],
+          "nonTranscriptFilesMentioningScratch": [],
+          "transcriptsWithScratchCwd": [],
+          "newTranscripts": []
+        },
+        "pass": true
+      }
+    },
+    "realstore-warm": {
+      "loadRightBefore": [
+        "6.29",
+        "9.23",
+        "10.71"
+      ],
+      "relay": "200",
+      "exit": 0,
+      "pinBefore": "-rwxr-xr-x@ 1 new  staff  225036032  9월 25 15:10 ~/.local/share/claude/versions/2.1.283",
+      "pinAfter": "-rwxr-xr-x@ 1 new  staff  225036032  9월 25 15:10 ~/.local/share/claude/versions/2.1.283",
+      "ownerCheckBefore": {
+        "claudeJsonScratchKeys": []
+      },
+      "ownerCheckAfter": {
+        "claudeJsonScratchKeys": [],
+        "underDotClaude": {
+          "filesModifiedDuringPiece": 0,
+          "ofThemThisAgentsOwnSession": 0,
+          "scratchNamedPaths": [],
+          "nonTranscriptFilesMentioningScratch": [],
+          "transcriptsWithScratchCwd": [],
+          "newTranscripts": []
+        },
+        "pass": true
+      }
+    }
+  },
+  "run": {
+    "terminalLoginShellClaudeKeys": [
+      "CLAUDE_CODE_CHILD_SESSION",
+      "CLAUDE_CODE_DISABLE_1M_CONTEXT",
+      "CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING",
+      "CLAUDE_CODE_ENABLE_FUNCTION_HOOKS",
+      "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY",
+      "CLAUDE_CODE_ENTRYPOINT",
+      "CLAUDE_CODE_EXECPATH",
+      "CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS",
+      "CLAUDE_CODE_MAX_CONTEXT_TOKENS",
+      "CLAUDE_CODE_MAX_SUBAGENTS_PER_SESSION",
+      "CLAUDE_CODE_MESSAGING_SOCKET",
+      "CLAUDE_CODE_MESSAGING_TOKEN",
+      "CLAUDE_CODE_SESSION_ATTENDED",
+      "CLAUDE_CODE_SESSION_ID",
+      "CLAUDE_CODE_SUBAGENT_MODEL",
+      "CLAUDE_CONFIG_DIR",
+      "CLAUDE_EFFORT",
+      "CLAUDE_MODEL",
+      "CLAUDE_PID"
+    ],
+    "ownerFileCheck": {
+      "§10.1 terminal-started sessions show under their projects, the live one foreign-live": {
+        "before": [],
+        "after": [],
+        "pinBefore": "-rwxr-xr-x@ 1 new  staff  225036032  9월 25 15:10 ~/.local/share/claude/versions/2.1.283",
+        "pinAfter": "-rwxr-xr-x@ 1 new  staff  225036032  9월 25 15:10 ~/.local/share/claude/versions/2.1.283"
+      },
+      "§10.2 a new worktree from \"+\", trust attested, project settings load as in the terminal": {
+        "before": [],
+        "after": [],
+        "pinBefore": "-rwxr-xr-x@ 1 new  staff  225036032  9월 25 15:10 ~/.local/share/claude/versions/2.1.283",
+        "pinAfter": "-rwxr-xr-x@ 1 new  staff  225036032  9월 25 15:10 ~/.local/share/claude/versions/2.1.283"
+      },
+      "§10.3 from Overview cards: approve P, answer Q; R asks while the window is blurred (fallback notification); attention.next lands on R": {
+        "before": [],
+        "after": [],
+        "pinBefore": "-rwxr-xr-x@ 1 new  staff  225036032  9월 25 15:10 ~/.local/share/claude/versions/2.1.283",
+        "pinAfter": "-rwxr-xr-x@ 1 new  staff  225036032  9월 25 15:10 ~/.local/share/claude/versions/2.1.283"
+      },
+      "§10.4 one deep session: a relay to a running background child, Review with This branch (G3), a Terminal in the worktree, a viewer tab, a workflow; Session info in the panel": {
+        "before": [],
+        "after": [],
+        "pinBefore": "-rwxr-xr-x@ 1 new  staff  225036032  9월 25 15:10 ~/.local/share/claude/versions/2.1.283",
+        "pinAfter": "-rwxr-xr-x@ 1 new  staff  225036032  9월 25 15:10 ~/.local/share/claude/versions/2.1.283"
+      },
+      "§10.5 the archived deep session resumes from a terminal with claude --resume; a terminal-started session resumes in MAWS": {
+        "before": [],
+        "after": [],
+        "pinBefore": "-rwxr-xr-x@ 1 new  staff  225036032  9월 25 15:10 ~/.local/share/claude/versions/2.1.283",
+        "pinAfter": "-rwxr-xr-x@ 1 new  staff  225036032  9월 25 15:10 ~/.local/share/claude/versions/2.1.283"
+      },
+      "§10.6 in brief on the owner build: one release and its Send-to-resume; the quit question with a turn in flight, background work and a busy terminal": {
+        "before": [],
+        "after": [],
+        "pinBefore": "-rwxr-xr-x@ 1 new  staff  225036032  9월 25 15:10 ~/.local/share/claude/versions/2.1.283",
+        "pinAfter": "-rwxr-xr-x@ 1 new  staff  225036032  9월 25 15:10 ~/.local/share/claude/versions/2.1.283"
+      },
+      "§10.7 a 500-turn transcript stays anchored while old work expands; streaming never drags a reader; the owner’s three longest transcripts listed": {
+        "before": [],
+        "after": [],
+        "pinBefore": "-rwxr-xr-x@ 1 new  staff  225036032  9월 25 15:10 ~/.local/share/claude/versions/2.1.283",
+        "pinAfter": "-rwxr-xr-x@ 1 new  staff  225036032  9월 25 15:10 ~/.local/share/claude/versions/2.1.283"
+      },
+      "§10.8 every palette widget opens backed by its read; ! and # work; a live session’s phase moves running → idle": {
+        "before": [],
+        "after": [],
+        "pinBefore": "-rwxr-xr-x@ 1 new  staff  225036032  9월 25 15:10 ~/.local/share/claude/versions/2.1.283",
+        "pinAfter": "-rwxr-xr-x@ 1 new  staff  225036032  9월 25 15:10 ~/.local/share/claude/versions/2.1.283"
+      },
+      "§10.9 queue, steer, stop and resume as labelled; a paused queue survives a quit; a denial shows in a collapsed turn; an interrupt with a pending approval": {
+        "before": [],
+        "after": [],
+        "pinBefore": "-rwxr-xr-x@ 1 new  staff  225036032  9월 25 15:10 ~/.local/share/claude/versions/2.1.283",
+        "pinAfter": "-rwxr-xr-x@ 1 new  staff  225036032  9월 25 15:10 ~/.local/share/claude/versions/2.1.283"
+      },
+      "§10.10 light is the default on a fresh profile; dark switches cleanly and back": {
+        "before": [],
+        "after": [],
+        "pinBefore": "-rwxr-xr-x@ 1 new  staff  225036032  9월 25 15:10 ~/.local/share/claude/versions/2.1.283",
+        "pinAfter": "-rwxr-xr-x@ 1 new  staff  225036032  9월 25 15:10 ~/.local/share/claude/versions/2.1.283"
+      },
+      "C8 item 9: Attach adds the Terminal tab and activates its session (a claude --bg job under the scratch home)": {
+        "before": [],
+        "after": [],
+        "pinBefore": "-rwxr-xr-x@ 1 new  staff  225036032  9월 25 15:10 ~/.local/share/claude/versions/2.1.283",
+        "pinAfter": "-rwxr-xr-x@ 1 new  staff  225036032  9월 25 15:10 ~/.local/share/claude/versions/2.1.283"
+      }
+    },
+    "terminalUsd": {
+      "10.1 north-one (-p)": 0.21698,
+      "10.1 south-one (-p)": 0.0990018,
+      "10.2 terminal compare (-p)": 0.1015218,
+      "10.5 terminal --resume (PTY, estimate)": 0.1391,
+      "c8 attach --bg job (estimate)": 0.0729
+    },
+    "10.1.sessions": {
+      "northOne": {
+        "sessionId": "65bffb06-2341-4974-b014-bb55ee30d1b3",
+        "how": "claude -p",
+        "cwd": "/private/tmp/maws-c12-prerun-1790785989/repos/north"
+      },
+      "southOne": {
+        "sessionId": "44848332-2f7e-4eea-93a0-a488a224d3b0",
+        "how": "claude -p",
+        "cwd": "/private/tmp/maws-c12-prerun-1790785989/repos/south"
+      },
+      "northLive": {
+        "sessionId": "316790ca-466a-43dc-bd3b-844dc8c9866a",
+        "how": "claude (interactive, in a PTY, kept live)",
+        "cwd": "/private/tmp/maws-c12-prerun-1790785989/repos/north"
+      }
+    },
+    "build": {
+      "packaged": true,
+      "executable": "dist/mac-arm64/MAWS.app/Contents/MacOS/MAWS"
+    },
+    "10.1": {
+      "projects": {
+        "north": 2,
+        "south": 1
+      },
+      "phases": {
+        "northOne": "exited",
+        "southOne": "exited",
+        "northLive": "foreign"
+      },
+      "liveRowLine": "Terminal · pid 60899",
+      "overviewCard": "foreign card with the holder line",
+      "screenshots": [
+        "docs/doperpowers/evidence/c12/prerun-10.1-overview-light.png",
+        "docs/doperpowers/evidence/c12/prerun-10.1-overview-dark.png"
+      ],
+      "consoleErrors": []
+    },
+    "spend": {
+      "usd": 2.4379,
+      "journalsUsd": 1.8084,
+      "terminalUsd": 0.6295
+    },
+    "result:§10.1 terminal-started sessions show under their projects, the live one foreign-live": {
+      "status": "passed",
+      "durationMs": 12257,
+      "consoleErrors": [],
+      "error": null
+    },
+    "10.2-trust-card.screenshots": [
+      "docs/doperpowers/evidence/c12/prerun-10.2-trust-card-light.png",
+      "docs/doperpowers/evidence/c12/prerun-10.2-trust-card-dark.png"
+    ],
+    "10.2": {
+      "appSessionId": "32a3a9c3-326b-4d0f-831e-b148bcd727f4",
+      "cwd": "/private/tmp/maws-c12-prerun-1790785989/repos/deep/.claude/worktrees/deep-v1ms",
+      "worktreeListed": true,
+      "branch": "worktree-deep-v1ms",
+      "setupPhases": [
+        "worktree",
+        "trusting",
+        "trusting",
+        "launching",
+        "ready"
+      ],
+      "maws": {
+        "mcp": [
+          "c12-sentinel:connected"
+        ],
+        "commands": [
+          "__remote-workflow",
+          "agents",
+          "auto-mode-setup",
+          "autocompact",
+          "batch",
+          "c12-plugin:c12-plugin-ping",
+          "claude-api",
+          "clear",
+          "code-review",
+          "color",
+          "compact",
+          "config",
+          "context",
+          "dataviz",
+          "debug",
+          "deep-research",
+          "design",
+          "design-consent",
+          "design-revoke",
+          "design-sync",
+          "doctor",
+          "effort",
+          "fast",
+          "fewer-permission-prompts",
+          "focus",
+          "goal",
+          "heapdump",
+          "init",
+          "insights",
+          "list-agents",
+          "loop",
+          "mcp",
+          "model",
+          "output-style",
+          "plugin-authoring",
+          "plugin-types",
+          "recap",
+          "reload-plugins",
+          "reload-skills",
+          "rename",
+          "run",
+          "run-skill-generator",
+          "security-review",
+          "simplify",
+          "team-onboarding",
+          "update-config",
+          "usage",
+          "verify",
+          "workflow-authoring",
+          "workflow-launch-exec"
+        ],
+        "agents": [
+          "Explore",
+          "Plan",
+          "claude",
+          "general-purpose",
+          "statusline-setup"
+        ],
+        "plugins": [
+          "agents-md",
+          "c12-plugin",
+          "plugin-authoring",
+          "telemetry"
+        ],
+        "mcpTools": [
+          "mcp__c12-sentinel__ask_color"
+        ],
+        "workflowTool": true
+      },
+      "terminal": {
+        "mcp": [
+          "c12-sentinel:connected"
+        ],
+        "commands": [
+          "__remote-workflow",
+          "agents",
+          "auto-mode-setup",
+          "autocompact",
+          "batch",
+          "c12-plugin:c12-plugin-ping",
+          "claude-api",
+          "clear",
+          "code-review",
+          "color",
+          "compact",
+          "config",
+          "context",
+          "dataviz",
+          "debug",
+          "deep-research",
+          "design",
+          "design-consent",
+          "design-revoke",
+          "design-sync",
+          "doctor",
+          "effort",
+          "fast",
+          "fewer-permission-prompts",
+          "focus",
+          "goal",
+          "heapdump",
+          "init",
+          "insights",
+          "list-agents",
+          "loop",
+          "mcp",
+          "model",
+          "output-style",
+          "plugin-authoring",
+          "plugin-types",
+          "recap",
+          "reload-plugins",
+          "reload-skills",
+          "rename",
+          "run",
+          "run-skill-generator",
+          "security-review",
+          "simplify",
+          "team-onboarding",
+          "update-config",
+          "usage",
+          "verify",
+          "workflow-authoring",
+          "workflow-launch-exec"
+        ],
+        "agents": [
+          "Explore",
+          "Plan",
+          "claude",
+          "general-purpose",
+          "statusline-setup"
+        ],
+        "plugins": [
+          "agents-md",
+          "c12-plugin",
+          "plugin-authoring",
+          "telemetry"
+        ],
+        "mcpTools": [
+          "mcp__c12-sentinel__ask_color"
+        ],
+        "workflowTool": true
+      },
+      "same": {
+        "mcp": true,
+        "commands": true,
+        "agents": true,
+        "plugins": true
+      },
+      "commandsOnlyInMaws": [],
+      "commandsOnlyInTerminal": [],
+      "hookMarkers": {
+        "afterMaws": 2,
+        "afterTerminal": 3
+      },
+      "allowRuleListed": true,
+      "trust": {
+        "before": {
+          "trusted": false
+        },
+        "after": {
+          "trusted": true,
+          "keyKind": "repo",
+          "configInScratch": true
+        },
+        "workspaceTrustSent": [
+          {
+            "accepted": true,
+            "directory": "/private/tmp/maws-c12-prerun-1790785989/repos/deep"
+          }
+        ]
+      },
+      "screenshots": [
+        "docs/doperpowers/evidence/c12/prerun-10.2-session-light.png",
+        "docs/doperpowers/evidence/c12/prerun-10.2-session-dark.png"
+      ],
+      "consoleErrors": []
+    },
+    "result:§10.2 a new worktree from \"+\", trust attested, project settings load as in the terminal": {
+      "status": "passed",
+      "durationMs": 10496,
+      "consoleErrors": [],
+      "error": null
+    },
+    "10.3": {
+      "sessions": {
+        "P": "b5928e46-7604-4ffa-b0ea-bf70669617b1",
+        "Q": "5854d7d4-d3a3-44ac-b636-4e3520a90500",
+        "R": "072a63bc-0418-49e7-9697-3eebf4d109c6"
+      },
+      "blurredBeforeR": true,
+      "notified": [
+        {
+          "session": "P",
+          "delivery": "fallback"
+        },
+        {
+          "session": "Q",
+          "delivery": "fallback"
+        },
+        {
+          "session": "R",
+          "delivery": "fallback"
+        }
+      ],
+      "pTouched": true,
+      "qReply": "Red",
+      "landedOn": "R (its composer and approval card shown after the attention.next menu item)",
+      "attention": [
+        {
+          "session": "R",
+          "kind": "permission",
+          "state": "pending"
+        }
+      ],
+      "screenshots": [
+        "docs/doperpowers/evidence/c12/prerun-10.3-overview-cards-light.png",
+        "docs/doperpowers/evidence/c12/prerun-10.3-overview-cards-dark.png",
+        "docs/doperpowers/evidence/c12/prerun-10.3-attention-next-r-light.png",
+        "docs/doperpowers/evidence/c12/prerun-10.3-attention-next-r-dark.png"
+      ],
+      "consoleErrors": []
+    },
+    "result:§10.3 from Overview cards: approve P, answer Q; R asks while the window is blurred (fallback notification); attention.next lands on R": {
+      "status": "passed",
+      "durationMs": 21774,
+      "consoleErrors": [],
+      "error": null
+    },
+    "10.4.failed:a monitor started from the live session shows in Background work and stops": "locator.click: Timeout 30000ms exceeded. / Call log: / \u001b[2m  - waiting for locator('[data-region=\"main\"]').getByRole('textbox', { name: 'Message' })\u001b[22m / ",
+    "10.4": {
+      "sessionInfo": {
+        "plusMenu": [
+          "Subagents",
+          "Review",
+          "Terminal",
+          "Files",
+          "Background work",
+          "Session info"
+        ],
+        "opensFromModelRow": true,
+        "screenshots": [
+          "docs/doperpowers/evidence/c12/prerun-10.4-session-info-light.png",
+          "docs/doperpowers/evidence/c12/prerun-10.4-session-info-dark.png"
+        ]
+      },
+      "relay": {
+        "agentId": "a9c3a1ce95cf6f058",
+        "text": "RELAY-C12-muobwr0f",
+        "sendMessageAfterMs": 2746,
+        "lineHistory": [
+          {
+            "ms": 23,
+            "v": "Asked Deep ready reply to relay · <elapsed>"
+          },
+          {
+            "ms": 1025,
+            "v": "Asked Deep ready reply to relay · <elapsed>"
+          },
+          {
+            "ms": 2026,
+            "v": "Asked Deep ready reply to relay · <elapsed>"
+          },
+          {
+            "ms": 2766,
+            "v": "Deep ready reply sent it with SendMessage after 2 parent rounds · Background relay polling agent gets it at its next tool round"
+          },
+          {
+            "ms": 6746,
+            "v": ""
+          }
+        ],
+        "reached": "delivered",
+        "deliveredAfterMs": 6746,
+        "inboxAfterMs": 10973,
+        "childTranscriptAttachment": [
+          {
+            "type": "attachment",
+            "attachment": "queued_command",
+            "origin": {
+              "kind": "coordinator"
+            }
+          },
+          {
+            "type": "assistant",
+            "attachment": null,
+            "origin": null
+          },
+          {
+            "type": "assistant",
+            "attachment": null,
+            "origin": null
+          }
+        ],
+        "followStates": [
+          {
+            "state": "backfilling",
+            "afterSendMs": 2766
+          },
+          {
+            "state": "following",
+            "afterSendMs": 2767
+          },
+          {
+            "state": "following",
+            "afterSendMs": 6746
+          },
+          {
+            "state": "following",
+            "afterSendMs": 8266
+          },
+          {
+            "state": "following",
+            "afterSendMs": 8995
+          },
+          {
+            "state": "following",
+            "afterSendMs": 10397
+          }
+        ],
+        "childEndedAt": null,
+        "screenshots": [
+          "docs/doperpowers/evidence/c12/prerun-10.4-relay-light.png",
+          "docs/doperpowers/evidence/c12/prerun-10.4-relay-dark.png"
+        ]
+      },
+      "review": {
+        "uncommitted": {
+          "header": "1 file changed · +0 −0 · Uncommitted",
+          "footer": "worktree-deep-v1ms · Working tree against HEAD"
+        },
+        "thisBranch": {
+          "header": "1 file changed · +1 −0 · This branch",
+          "footer": "worktree-deep-v1ms · Since main"
+        },
+        "screenshots": [
+          "docs/doperpowers/evidence/c12/prerun-10.4-review-light.png",
+          "docs/doperpowers/evidence/c12/prerun-10.4-review-dark.png",
+          "docs/doperpowers/evidence/c12/prerun-10.4-review-this-branch-light.png",
+          "docs/doperpowers/evidence/c12/prerun-10.4-review-this-branch-dark.png"
+        ]
+      },
+      "terminal": {
+        "ptyCwd": "/private/tmp/maws-c12-prerun-1790785989/repos/deep/.claude/worktrees/deep-v1ms",
+        "pwdTypedInTheTab": "/private/tmp/maws-c12-prerun-1790785989/repos/deep/.claude/worktrees/deep-v1ms",
+        "screenshots": [
+          "docs/doperpowers/evidence/c12/prerun-10.4-terminal-light.png",
+          "docs/doperpowers/evidence/c12/prerun-10.4-terminal-dark.png"
+        ]
+      },
+      "viewer": {
+        "path": "one.txt in the worktree",
+        "screenshots": [
+          "docs/doperpowers/evidence/c12/prerun-10.4-viewer-light.png",
+          "docs/doperpowers/evidence/c12/prerun-10.4-viewer-dark.png"
+        ]
+      },
+      "workflow": {
+        "taskId": "wk46xb9lh",
+        "title": "Two echo agents in one phase",
+        "phases": [
+          "Echo 2/2"
+        ],
+        "agents": [
+          "alpha\n\tclaude-haiku-4-5-20251001\t10.0k\t19s",
+          "beta\n\tclaude-haiku-4-5-20251001\t10.0k\t1s"
+        ],
+        "screenshots": [
+          "docs/doperpowers/evidence/c12/prerun-10.4-workflow-light.png",
+          "docs/doperpowers/evidence/c12/prerun-10.4-workflow-dark.png"
+        ]
+      },
+      "strayPermissionsAllowed": [],
+      "consoleErrors": [],
+      "failures": [],
+      "rerunPieces": "monitor"
+    },
+    "result:§10.4 one deep session: a relay to a running background child, Review with This branch (G3), a Terminal in the worktree, a viewer tab, a workflow; Session info in the panel": {
+      "status": "failed",
+      "durationMs": 31296,
+      "consoleErrors": [],
+      "error": "TimeoutError: locator.click: Timeout 30000ms exceeded. / Call log: / \u001b[2m  - waiting for locator('[role=\"treeitem\"][data-menu=\"session:32a3a9c3-326b-4d0f-831e-b148bcd727f4\"]')\u001b[22m / "
+    },
+    "10.5": {
+      "archive": {
+        "archived": true,
+        "cleanupDialogOffered": false,
+        "cleanupTitle": null
+      },
+      "terminalResume": {
+        "engineSessionId": "906c18cf-0a0b-4a02-8e06-6549a979ff66",
+        "reply": "I created `c12-deep.txt` in the worktree root, and it holds the single line `DEEP`.",
+        "version": "2.1.283 (the pin, by absolute path); the owner’s `claude` on PATH is 2.1.285, so the owner’s step 5 resumes with a newer engine than MAWS’s"
+      },
+      "mawsResume": {
+        "appSessionId": "410e83b2-bb9c-400a-96cd-9d2bcfe8068f",
+        "readyMs": 1995,
+        "spawnHasResume": true,
+        "reply": "RESUMED IN MAWS",
+        "screenshots": [
+          "docs/doperpowers/evidence/c12/prerun-10.5-resumed-in-maws-light.png",
+          "docs/doperpowers/evidence/c12/prerun-10.5-resumed-in-maws-dark.png"
+        ]
+      },
+      "consoleErrors": [],
+      "failures": []
+    },
+    "result:§10.5 the archived deep session resumes from a terminal with claude --resume; a terminal-started session resumes in MAWS": {
+      "status": "passed",
+      "durationMs": 12249,
+      "consoleErrors": [],
+      "error": null
+    },
+    "10.6": {
+      "release": {
+        "treesMiB": [
+          257.7,
+          261,
+          263.8
+        ],
+        "sumMiB": 782,
+        "budgetMiB": 653,
+        "releasedAfterSetMs": 382,
+        "released": "X1 (least recently used)",
+        "othersProcess": [
+          "ready",
+          "ready"
+        ],
+        "attentionItemsForX1": 0,
+        "sendToReadyMs": 901,
+        "reconnectProcessExit": true,
+        "userFrames": 1,
+        "reply": "X1 BACK",
+        "screenshots": [
+          "docs/doperpowers/evidence/c12/prerun-10.6-released-light.png",
+          "docs/doperpowers/evidence/c12/prerun-10.6-released-dark.png",
+          "docs/doperpowers/evidence/c12/prerun-10.6-resumed-light.png",
+          "docs/doperpowers/evidence/c12/prerun-10.6-resumed-dark.png"
+        ]
+      },
+      "quit": {
+        "cancel": [
+          "quit-report: 5 ms · 1 mid-turn, 1 background work, 1 busy terminal",
+          "quit-guard: 1 mid-turn, 1 background work, 1 busy terminal, auto-answered cancel"
+        ],
+        "whenIdle": [
+          "quit-guard: 1 mid-turn, 1 background work, 1 busy terminal, auto-answered when_idle"
+        ],
+        "banner": "MAWS will quit when 3 things finish\nQuit now\nCancel",
+        "quitAfterWaitMs": 42730,
+        "screenshots": [
+          "docs/doperpowers/evidence/c12/prerun-10.6-quit-when-idle-light.png",
+          "docs/doperpowers/evidence/c12/prerun-10.6-quit-when-idle-dark.png"
+        ]
+      },
+      "sessions": [
+        "94019f1b-c4ea-49ce-accd-be20282586f3",
+        "cbc5d699-ab9c-4ffd-a91c-09b95e743012",
+        "bccb1cff-c068-4f58-a522-c7803aca730f"
+      ],
+      "failures": []
+    },
+    "result:§10.6 in brief on the owner build: one release and its Send-to-resume; the quit question with a turn in flight, background work and a busy terminal": {
+      "status": "passed",
+      "durationMs": 85884,
+      "consoleErrors": [],
+      "error": null
+    },
+    "10.7": {
+      "transcript": {
+        "records": 10044,
+        "turns": 500,
+        "generator": "test/support/synth-transcript.ts synthesise({ turns: 500, seed: 7 }), written as disk records"
+      },
+      "ownerLongest": {
+        "listedAt": "2026-09-30T16:42:06.609Z",
+        "transcripts": 3823,
+        "top": [
+          {
+            "path": "~/.claude/projects/-Users-new-claude-code-bundle-2-1-257/809406bb-43f0-4d12-a0eb-4f20d6cc4941.jsonl",
+            "records": 28317
+          },
+          {
+            "path": "~/.claude/projects/-Users-new-Developer-GitHub-AutoPM/d7e8a60d-4568-4492-b6c2-61ed8346b7c8.jsonl",
+            "records": 24364
+          },
+          {
+            "path": "~/.claude/projects/-Users-new-Developer-GitHub-doperpowers--claude-worktrees-fold-plans/30e0568a-f1ee-4dce-8db9-b9799fb23107.jsonl",
+            "records": 16975
+          },
+          {
+            "path": "~/.claude/projects/-Users-new-Developer-GitHub-MAWS/e3ce7feb-2e31-42ee-b836-829ecb01458b.jsonl",
+            "records": 15896
+          },
+          {
+            "path": "~/.claude/projects/-Users-new-Developer-GitHub-manim-master-c34/f795f5be-7527-4065-bd90-55b1a7a292f6.jsonl",
+            "records": 12556
+          }
+        ]
+      },
+      "anchoring": {
+        "trials": [
+          {
+            "at": "50%",
+            "expanded": "divider:turn:00000000-0000-4000-8000-000000010020",
+            "rowAbove": "user:00000000-0000-4000-8000-000000010020",
+            "before": {
+              "divider": 253,
+              "aboveId": "user:00000000-0000-4000-8000-000000010020",
+              "above": -408,
+              "scrollTop": 197343
+            },
+            "after": {
+              "divider": 253,
+              "aboveId": "user:00000000-0000-4000-8000-000000010020",
+              "above": -408,
+              "scrollTop": 197343
+            },
+            "baselineDriftPx": {
+              "divider": 0,
+              "rowAbove": 0
+            },
+            "driftPx": 0,
+            "dividerDriftPx": 0,
+            "rowAboveDriftPx": 0
+          },
+          {
+            "at": "40%",
+            "expanded": "divider:turn:00000000-0000-4000-8000-000000004086",
+            "rowAbove": "user:00000000-0000-4000-8000-000000004086",
+            "before": {
+              "divider": 351,
+              "aboveId": "user:00000000-0000-4000-8000-000000004086",
+              "above": -285,
+              "scrollTop": 81766
+            },
+            "after": {
+              "divider": 351,
+              "aboveId": "user:00000000-0000-4000-8000-000000004086",
+              "above": -285,
+              "scrollTop": 81766
+            },
+            "baselineDriftPx": {
+              "divider": 0,
+              "rowAbove": 0
+            },
+            "driftPx": 0,
+            "dividerDriftPx": 0,
+            "rowAboveDriftPx": 0
+          }
+        ],
+        "screenshots": [
+          "docs/doperpowers/evidence/c12/prerun-10.7-long-transcript-light.png",
+          "docs/doperpowers/evidence/c12/prerun-10.7-long-transcript-dark.png"
+        ]
+      },
+      "streaming": {
+        "scrolledUpPx": 500,
+        "samples": 118,
+        "maxScrollDeltaPx": 0,
+        "contentGrewPx": 1643,
+        "screenshots": [
+          "docs/doperpowers/evidence/c12/prerun-10.7-streaming-scrolled-up-light.png",
+          "docs/doperpowers/evidence/c12/prerun-10.7-streaming-scrolled-up-dark.png"
+        ]
+      },
+      "consoleErrors": [],
+      "failures": []
+    },
+    "result:§10.7 a 500-turn transcript stays anchored while old work expands; streaming never drags a reader; the owner’s three longest transcripts listed": {
+      "status": "passed",
+      "durationMs": 45638,
+      "consoleErrors": [],
+      "error": null
+    },
+    "10.8": {
+      "phase": {
+        "engineStates": [
+          "running",
+          "idle"
+        ],
+        "digestPhases": [
+          "working",
+          "idle"
+        ],
+        "sessionStateFrames": [
+          "running",
+          "idle",
+          "running",
+          "idle"
+        ]
+      },
+      "widgets": {
+        "opened": {
+          "model": {
+            "footer": "Read with list_models · Sets with set_model and apply_flag_settings for this session only · your default model and effort are set in settings or the terminal's /model",
+            "error": 0
+          },
+          "effort": {
+            "footer": "Read with list_models · Sets with set_model and apply_flag_settings for this session only · your default model and effort are set in settings or the terminal's /model",
+            "error": 0
+          },
+          "permissions": {
+            "footer": "Read with list_permission_rules · Sets the mode with set_permission_mode for this session only · rules are edited in their settings files; session grants come from approval cards",
+            "error": 0
+          },
+          "usage": {
+            "footer": "Read with get_usage · Windows come from ClaudeUsage; the engine reports none through the relay",
+            "error": 0
+          },
+          "context.screenshots": [
+            "docs/doperpowers/evidence/c12/prerun-10.8-widget-context-light.png",
+            "docs/doperpowers/evidence/c12/prerun-10.8-widget-context-dark.png"
+          ],
+          "context": {
+            "footer": "Read with get_context_usage · Context is the engine's own accounting",
+            "error": 0
+          },
+          "config": {
+            "footer": "Read with get_settings and get_memory_dialog · Settings are edited in their files or the terminal's /config; MAWS's own settings are in the Settings tab",
+            "error": 0
+          },
+          "plugins": {
+            "footer": "Read with system/init · Reload with reload_plugins is for this session · enable and disable in settings (enabledPlugins) or the terminal's /plugins; the engine lists what it loaded",
+            "error": 0
+          },
+          "mcp.screenshots": [
+            "docs/doperpowers/evidence/c12/prerun-10.8-widget-mcp-light.png",
+            "docs/doperpowers/evidence/c12/prerun-10.8-widget-mcp-dark.png"
+          ],
+          "mcp": {
+            "footer": "Read with mcp_status · Servers are configured in .mcp.json and settings · Reconnect is for this session · Enable and disable: recorded by the engine for this project in ~/.claude.json",
+            "error": 0
+          },
+          "sandbox": {
+            "footer": "Read with get_sandbox_dialog · Sandbox is enabled in settings (sandbox); the terminal's toggle writes there",
+            "error": 0
+          },
+          "hooks": {
+            "footer": "Read with get_hooks_listing · Hooks are edited in settings and plugins; MAWS's own callback hooks are not listed by the engine (none in P0)",
+            "error": 0
+          },
+          "memory": {
+            "footer": "Read with get_memory_dialog · Memory files are edited in your editor; Reveal opens their folder",
+            "error": 0
+          },
+          "skills": {
+            "footer": "Read with get_skills_dialog and system/init · Skills are files under .claude/skills and plugins; the palette runs them",
+            "error": 0
+          }
+        },
+        "readsOnTheWire": {
+          "model": "list_models",
+          "effort": "list_models",
+          "permissions": "list_permission_rules",
+          "usage": "get_usage",
+          "context": "get_context_usage",
+          "config": "get_settings",
+          "plugins": "system/init (no read of its own)",
+          "mcp": "mcp_status",
+          "sandbox": "get_sandbox_dialog",
+          "hooks": "get_hooks_listing",
+          "memory": "get_memory_dialog",
+          "skills": "get_skills_dialog"
+        }
+      },
+      "bang": {
+        "command": "!ls",
+        "shows": "one.txt"
+      },
+      "memory": {
+        "file": "CLAUDE.md in the scratch project",
+        "line": "- C12 pre-run memory note",
+        "screenshots": [
+          "docs/doperpowers/evidence/c12/prerun-10.8-bang-and-memory-light.png",
+          "docs/doperpowers/evidence/c12/prerun-10.8-bang-and-memory-dark.png"
+        ]
+      },
+      "consoleErrors": [],
+      "failures": []
+    },
+    "result:§10.8 every palette widget opens backed by its read; ! and # work; a live session’s phase moves running → idle": {
+      "status": "passed",
+      "durationMs": 16729,
+      "consoleErrors": [],
+      "error": null
+    },
+    "10.9.lost.interruptSentAt": "2026-09-30T16:44:40.724Z",
+    "10.9": {
+      "queue": {
+        "label": "Queue",
+        "queuedShown": "1 queued",
+        "writtenToTheWire": 1
+      },
+      "steer": {
+        "label": "Steer",
+        "priority": "next"
+      },
+      "stopResume": {
+        "stopLabel": "Stop",
+        "resumeLabel": "Resume",
+        "writtenToTheWireAfterResume": 1,
+        "screenshots": [
+          "docs/doperpowers/evidence/c12/prerun-10.9-queue-paused-light.png",
+          "docs/doperpowers/evidence/c12/prerun-10.9-queue-paused-dark.png"
+        ]
+      },
+      "survives": {
+        "beforeQuit": {
+          "length": 1,
+          "paused": true
+        },
+        "afterRelaunch": {
+          "entries": [
+            "queued"
+          ],
+          "paused": true,
+          "pauseReason": "interrupt"
+        },
+        "shown": "1 queued · Queue paused because you interrupted\nResume\nReply with exactly the word SURVIVOR and nothing else.\nSteer\n⌄\nEdit\nDelete",
+        "screenshots": [
+          "docs/doperpowers/evidence/c12/prerun-10.9-queue-survived-light.png",
+          "docs/doperpowers/evidence/c12/prerun-10.9-queue-survived-dark.png"
+        ]
+      },
+      "denial": {
+        "dividerCollapsed": true,
+        "mark": "1 denied",
+        "screenshots": [
+          "docs/doperpowers/evidence/c12/prerun-10.9-denied-collapsed-light.png",
+          "docs/doperpowers/evidence/c12/prerun-10.9-denied-collapsed-dark.png"
+        ]
+      },
+      "lost": {
+        "afterInterrupt": {
+          "process": "ready",
+          "pendingRequests": 0,
+          "turn": false,
+          "interruptedItems": [],
+          "cardShown": false
+        },
+        "afterExit": {
+          "how": "SIGKILL of the engine with the approval pending (a crash)",
+          "exit": {
+            "code": null,
+            "signal": "SIGKILL",
+            "reason": "crash",
+            "at": "2026-09-30T16:44:47.159Z",
+            "release": null
+          },
+          "interruptedItems": [
+            "Session interrupted, 1 approval lost"
+          ],
+          "transcriptExitRow": "Session process exited (crash) · 1 approval lost",
+          "screenshots": [
+            "docs/doperpowers/evidence/c12/prerun-10.9-approval-lost-light.png",
+            "docs/doperpowers/evidence/c12/prerun-10.9-approval-lost-dark.png"
+          ]
+        }
+      },
+      "consoleErrors": [],
+      "failures": []
+    },
+    "result:§10.9 queue, steer, stop and resume as labelled; a paused queue survives a quit; a denial shows in a collapsed turn; an interrupt with a pending approval": {
+      "status": "passed",
+      "durationMs": 68474,
+      "consoleErrors": [],
+      "error": null
+    },
+    "10.10": {
+      "firstPaintTheme": "light",
+      "settingOnFreshProfile": "light",
+      "background": {
+        "light": "rgb(250, 249, 246) / rgb(255, 255, 255)",
+        "dark": "rgb(19, 19, 19) / rgb(26, 26, 26)",
+        "read": "body / sidebar"
+      },
+      "switchedBack": true,
+      "consoleErrors": [],
+      "screenshots": [
+        "docs/doperpowers/evidence/c12/prerun-10.10-fresh-light.png",
+        "docs/doperpowers/evidence/c12/prerun-10.10-fresh-dark.png"
+      ]
+    },
+    "result:§10.10 light is the default on a fresh profile; dark switches cleanly and back": {
+      "status": "passed",
+      "durationMs": 1437,
+      "consoleErrors": [],
+      "error": null
+    },
+    "c8.attach": {
+      "bgStarted": [
+        "backgrounded · c40b2eee",
+        "  claude agents             list sessions",
+        "  claude attach c40b2eee    open in this terminal",
+        "  claude logs c40b2eee      show recent output"
+      ],
+      "jobId": "c40b2eee",
+      "attach": {
+        "rowMenu": [
+          "Open",
+          "Attach in a terminal tab"
+        ],
+        "sessionTabActivated": true,
+        "terminalTabActive": true,
+        "screenshots": [
+          "docs/doperpowers/evidence/c12/prerun-c8-attach-light.png",
+          "docs/doperpowers/evidence/c12/prerun-c8-attach-dark.png"
+        ]
+      },
+      "consoleErrors": [],
+      "stopped": "stopped c40b2eee"
+    },
+    "result:C8 item 9: Attach adds the Terminal tab and activates its session (a claude --bg job under the scratch home)": {
+      "status": "passed",
+      "durationMs": 4791,
+      "consoleErrors": [],
+      "error": null
+    }
+  },
+  "monitorRerun": {
+    "terminalLoginShellClaudeKeys": [
+      "CLAUDE_CODE_CHILD_SESSION",
+      "CLAUDE_CODE_DISABLE_1M_CONTEXT",
+      "CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING",
+      "CLAUDE_CODE_ENABLE_FUNCTION_HOOKS",
+      "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY",
+      "CLAUDE_CODE_ENTRYPOINT",
+      "CLAUDE_CODE_EXECPATH",
+      "CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS",
+      "CLAUDE_CODE_MAX_CONTEXT_TOKENS",
+      "CLAUDE_CODE_MAX_SUBAGENTS_PER_SESSION",
+      "CLAUDE_CODE_MESSAGING_SOCKET",
+      "CLAUDE_CODE_MESSAGING_TOKEN",
+      "CLAUDE_CODE_SESSION_ATTENDED",
+      "CLAUDE_CODE_SESSION_ID",
+      "CLAUDE_CODE_SUBAGENT_MODEL",
+      "CLAUDE_CONFIG_DIR",
+      "CLAUDE_EFFORT",
+      "CLAUDE_MODEL",
+      "CLAUDE_PID"
+    ],
+    "ownerFileCheck": {
+      "§10.2 a new worktree from \"+\", trust attested, project settings load as in the terminal": {
+        "before": [],
+        "after": [],
+        "pinBefore": "-rwxr-xr-x@ 1 new  staff  225036032  9월 25 15:10 ~/.local/share/claude/versions/2.1.283",
+        "pinAfter": "-rwxr-xr-x@ 1 new  staff  225036032  9월 25 15:10 ~/.local/share/claude/versions/2.1.283"
+      },
+      "§10.4 one deep session: a relay to a running background child, Review with This branch (G3), a Terminal in the worktree, a viewer tab, a workflow; Session info in the panel": {
+        "before": [],
+        "after": [],
+        "pinBefore": "-rwxr-xr-x@ 1 new  staff  225036032  9월 25 15:10 ~/.local/share/claude/versions/2.1.283",
+        "pinAfter": "-rwxr-xr-x@ 1 new  staff  225036032  9월 25 15:10 ~/.local/share/claude/versions/2.1.283"
+      }
+    },
+    "build": {
+      "packaged": true,
+      "executable": "dist/mac-arm64/MAWS.app/Contents/MacOS/MAWS"
+    },
+    "10.2-trust-card.screenshots": [
+      "docs/doperpowers/evidence/c12/prerun-10.2-trust-card-light.png",
+      "docs/doperpowers/evidence/c12/prerun-10.2-trust-card-dark.png"
+    ],
+    "terminalUsd": {
+      "10.2 terminal compare (-p)": 0.1015058
+    },
+    "10.2": {
+      "appSessionId": "08d89d5c-4de0-46b6-9d48-9ed84110c4c7",
+      "cwd": "/private/tmp/maws-c12-prerun-1790786875/repos/deep/.claude/worktrees/deep-9w3q",
+      "worktreeListed": true,
+      "branch": "worktree-deep-9w3q",
+      "setupPhases": [
+        "worktree",
+        "trusting",
+        "trusting",
+        "launching",
+        "ready"
+      ],
+      "maws": {
+        "mcp": [
+          "c12-sentinel:connected"
+        ],
+        "commands": [
+          "__remote-workflow",
+          "agents",
+          "auto-mode-setup",
+          "autocompact",
+          "batch",
+          "c12-plugin:c12-plugin-ping",
+          "claude-api",
+          "clear",
+          "code-review",
+          "color",
+          "compact",
+          "config",
+          "context",
+          "dataviz",
+          "debug",
+          "deep-research",
+          "design",
+          "design-consent",
+          "design-revoke",
+          "design-sync",
+          "doctor",
+          "effort",
+          "fast",
+          "fewer-permission-prompts",
+          "focus",
+          "goal",
+          "heapdump",
+          "init",
+          "insights",
+          "list-agents",
+          "loop",
+          "mcp",
+          "model",
+          "output-style",
+          "plugin-authoring",
+          "plugin-types",
+          "recap",
+          "reload-plugins",
+          "reload-skills",
+          "rename",
+          "run",
+          "run-skill-generator",
+          "security-review",
+          "simplify",
+          "team-onboarding",
+          "update-config",
+          "usage",
+          "verify",
+          "workflow-authoring",
+          "workflow-launch-exec"
+        ],
+        "agents": [
+          "Explore",
+          "Plan",
+          "claude",
+          "general-purpose",
+          "statusline-setup"
+        ],
+        "plugins": [
+          "agents-md",
+          "c12-plugin",
+          "plugin-authoring",
+          "telemetry"
+        ],
+        "mcpTools": [
+          "mcp__c12-sentinel__ask_color"
+        ],
+        "workflowTool": true
+      },
+      "terminal": {
+        "mcp": [
+          "c12-sentinel:connected"
+        ],
+        "commands": [
+          "__remote-workflow",
+          "agents",
+          "auto-mode-setup",
+          "autocompact",
+          "batch",
+          "c12-plugin:c12-plugin-ping",
+          "claude-api",
+          "clear",
+          "code-review",
+          "color",
+          "compact",
+          "config",
+          "context",
+          "dataviz",
+          "debug",
+          "deep-research",
+          "design",
+          "design-consent",
+          "design-revoke",
+          "design-sync",
+          "doctor",
+          "effort",
+          "fast",
+          "fewer-permission-prompts",
+          "focus",
+          "goal",
+          "heapdump",
+          "init",
+          "insights",
+          "list-agents",
+          "loop",
+          "mcp",
+          "model",
+          "output-style",
+          "plugin-authoring",
+          "plugin-types",
+          "recap",
+          "reload-plugins",
+          "reload-skills",
+          "rename",
+          "run",
+          "run-skill-generator",
+          "security-review",
+          "simplify",
+          "team-onboarding",
+          "update-config",
+          "usage",
+          "verify",
+          "workflow-authoring",
+          "workflow-launch-exec"
+        ],
+        "agents": [
+          "Explore",
+          "Plan",
+          "claude",
+          "general-purpose",
+          "statusline-setup"
+        ],
+        "plugins": [
+          "agents-md",
+          "c12-plugin",
+          "plugin-authoring",
+          "telemetry"
+        ],
+        "mcpTools": [
+          "mcp__c12-sentinel__ask_color"
+        ],
+        "workflowTool": true
+      },
+      "same": {
+        "mcp": true,
+        "commands": true,
+        "agents": true,
+        "plugins": true
+      },
+      "commandsOnlyInMaws": [],
+      "commandsOnlyInTerminal": [],
+      "hookMarkers": {
+        "afterMaws": 2,
+        "afterTerminal": 3
+      },
+      "allowRuleListed": true,
+      "trust": {
+        "before": {
+          "trusted": false
+        },
+        "after": {
+          "trusted": true,
+          "keyKind": "repo",
+          "configInScratch": true
+        },
+        "workspaceTrustSent": [
+          {
+            "accepted": true,
+            "directory": "/private/tmp/maws-c12-prerun-1790786875/repos/deep"
+          }
+        ]
+      },
+      "screenshots": [
+        "docs/doperpowers/evidence/c12/prerun-10.2-session-light.png",
+        "docs/doperpowers/evidence/c12/prerun-10.2-session-dark.png"
+      ],
+      "consoleErrors": []
+    },
+    "spend": {
+      "usd": 0.2739,
+      "journalsUsd": 0.1724,
+      "terminalUsd": 0.1015
+    },
+    "result:§10.2 a new worktree from \"+\", trust attested, project settings load as in the terminal": {
+      "status": "passed",
+      "durationMs": 10016,
+      "consoleErrors": [],
+      "error": null
+    },
+    "10.4": {
+      "monitor": {
+        "prompt": "Use the Monitor tool (load it with ToolSearch if it is not listed) to watch the output of this command: for i in $(seq 1 60); do echo tick $i; sleep 5; done. Start it and reply with exactly the word WATCHING; do not wait for it. If the Monitor tool is not available, do nothing else and reply with exactly the words MONITOR UNAVAILABLE.",
+        "available": false,
+        "toolSearches": [
+          {
+            "query": "Monitor",
+            "max_results": 5
+          }
+        ],
+        "note": "the engine offers no Monitor tool in this session (ToolSearch finds none); a feature gate of the engine, not MAWS"
+      },
+      "strayPermissionsAllowed": [],
+      "consoleErrors": [],
+      "failures": [],
+      "rerunPieces": "monitor"
+    },
+    "result:§10.4 one deep session: a relay to a running background child, Review with This branch (G3), a Terminal in the worktree, a viewer tab, a workflow; Session info in the panel": {
+      "status": "passed",
+      "durationMs": 9414,
+      "consoleErrors": [],
+      "error": null
+    }
+  },
+  "realstore": {
+    "coldStart": {
+      "ownerFileCheck": {
+        "§10.1 real store, read only": {
+          "before": [],
+          "after": [],
+          "pinBefore": "-rwxr-xr-x@ 1 new  staff  225036032  9월 25 15:10 ~/.local/share/claude/versions/2.1.283",
+          "pinAfter": "-rwxr-xr-x@ 1 new  staff  225036032  9월 25 15:10 ~/.local/share/claude/versions/2.1.283"
+        }
+      },
+      "10.1.realstore": {
+        "counts": {
+          "projects": 276,
+          "projectsVisible": 276,
+          "projectRowsShown": 276,
+          "sessions": 3279,
+          "foreignLive": 14,
+          "foreignGlyphsInSidebar": 13,
+          "overviewCards": 14
+        },
+        "timingMs": {
+          "firstWindow": 2402,
+          "shellVisible": 2567,
+          "firstOverviewCard": 3466,
+          "firstProjectRow": 3489,
+          "indexSettled": 6145
+        },
+        "engineSessionsAtEnd": 0,
+        "screenshotOutsideRepo": "realstore/prerun-10.1-realstore-light.png under the scratch root (shows the owner’s titles; not committed)",
+        "consoleErrors": 0
+      },
+      "result:§10.1 real store, read only": {
+        "status": "passed",
+        "durationMs": 13978,
+        "consoleErrors": [],
+        "error": null
+      }
+    },
+    "warm": {
+      "ownerFileCheck": {
+        "§10.1 real store, read only": {
+          "before": [],
+          "after": [],
+          "pinBefore": "-rwxr-xr-x@ 1 new  staff  225036032  9월 25 15:10 ~/.local/share/claude/versions/2.1.283",
+          "pinAfter": "-rwxr-xr-x@ 1 new  staff  225036032  9월 25 15:10 ~/.local/share/claude/versions/2.1.283"
+        }
+      },
+      "10.1.realstore": {
+        "counts": {
+          "projects": 276,
+          "projectsVisible": 276,
+          "projectRowsShown": 276,
+          "sessions": 3279,
+          "foreignLive": 14,
+          "foreignGlyphsInSidebar": 13,
+          "overviewCards": 14
+        },
+        "timingMs": {
+          "firstWindow": 863,
+          "shellVisible": 1415,
+          "firstOverviewCard": 1426,
+          "firstProjectRow": 1454,
+          "indexSettled": 2196
+        },
+        "engineSessionsAtEnd": 0,
+        "screenshotOutsideRepo": "realstore/prerun-10.1-realstore-light.png under the scratch root (shows the owner’s titles; not committed)",
+        "consoleErrors": 0
+      },
+      "result:§10.1 real store, read only": {
+        "status": "passed",
+        "durationMs": 9303,
+        "consoleErrors": [],
+        "error": null
+      }
+    }
+  }
+}
