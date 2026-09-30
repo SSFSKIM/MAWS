@@ -80,6 +80,7 @@ export class ProcessTable {
   private readonly budgetListeners = new Set<(state: BudgetState) => void>();
   private readonly exitedRowsMax: number;
   private readonly dropListeners = new Set<(appSessionId: AppSessionId) => void>();
+  private readonly exitsSeen = new WeakSet<EngineSession>();
   // C12 end
 
   constructor(opts: { ps?: () => Promise<string>; sampleMs?: number; log?: (message: string) => void; totalMemBytes?: number; exitedRowsMax?: number /* C12 */ } = {}) {
@@ -252,6 +253,10 @@ export class ProcessTable {
   // exited rows beyond the cap go, the oldest exit first (ties in the table's order), each with no word to main: its
   // state file stays, and a later read of it answers from disk.
   private exitedRow(session: EngineSession, status: EngineSessionStatus): void {
+    // once per process, and only while it is the id's row (a status an exited process emits later, or after a
+    // relaunch replaced it, must not mark the new launch released)
+    if (this.exitsSeen.has(session) || this.rows.get(status.appSessionId) !== session) return;
+    this.exitsSeen.add(session);
     if (status.exit?.reason === 'budget') this.released.add(status.appSessionId);
     if (this.releasing === session) {
       this.releasing = null;

@@ -352,6 +352,19 @@ describe('process table (C12): the memory budget', () => {
     expect(table.takeReleased('b' as AppSessionId)).toBe(false);
   });
 
+  it('a released process that speaks again after its id relaunched does not mark the new launch released', async () => {
+    const { table, s } = await budgetTable({ a: 400 }, { limitKiB: 100 });
+    await table.sampleMemory();
+    await table.sampleMemory();
+    await exitOf(s.a!);
+    expect(table.takeReleased('a' as AppSessionId)).toBe(true); // the launcher takes it as it creates the next launch
+    const next = scriptedSession({ spec: { appSessionId: 'a' as AppSessionId } });
+    table.reserve('a' as AppSessionId, () => next.session);
+    await next.session.start();
+    s.a!.session.markUsed(); // the old process emits another exited status
+    expect(table.takeReleased('a' as AppSessionId)).toBe(false);
+  });
+
   it('a policy change re-reads every live status, so keepAlive follows the stateful list', async () => {
     const { table, s } = await budgetTable({ a: 400 });
     s.a!.transport.push({ type: 'system', subtype: 'init', cwd: '/w', session_id: 's', tools: [], mcp_servers: [{ name: 'c12-kernel', status: 'pending', source: 'project' }], model: 'm', permissionMode: 'auto', slash_commands: [], claude_code_version: '2.1.283', output_style: 'default', uuid: 'i-a' });
