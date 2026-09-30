@@ -136,11 +136,11 @@ describe('evaluate', () => {
     expect(evaluate(input([row('x')], { quiet: new Set() }))).toMatchObject({ candidates: 0, settling: 1, release: null });
   });
 
-  // The pinned engine emits `session_state_changed` only under CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS, which the
-  // product's launch does not set: no fixture carries the frame, and M3's live run saw none, so a live row's engine
-  // state stays `unknown` for its whole life. Such a row is a candidate once ready, measured, quiet and holding nothing;
-  // an engine's own follow-up turn after its background tasks end moves `lastEventSeq` (so the row is not quiet) and
-  // then opens a turn (a hard reason).
+  // The pinned engine emits `session_state_changed` only under CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS, which X6 sets
+  // from C12 M5 on; before its first frame (and on any launch without the variable, as M3's live run was) a row's engine
+  // state is `unknown`. Such a row is a candidate once ready, measured, quiet and holding nothing; an engine's own
+  // follow-up turn after its background tasks end moves `lastEventSeq` (so the row is not quiet) and then opens a turn
+  // (a hard reason).
   it('a ready row whose engine never reported its state (unknown) is a candidate once quiet; the follow-up window is not quiet', () => {
     const silent = row('x', { engineState: 'unknown' });
     expect(evaluate(input([silent]))).toMatchObject({ candidates: 1, settling: 0, release: id('x') });

@@ -56,11 +56,11 @@ export function hardReasons(s: EngineSessionStatus, stateful: ReadonlySet<string
 // to 7 s, is never counted twice).
 const LIVE: ReadonlySet<EngineSessionStatus['process']> = new Set(['starting', 'initializing', 'ready']);
 
-// An engine state that rules a row out: the engine said it is working or waiting. `unknown` does not, since the pinned
-// engine reports its state (`session_state_changed`) only under CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS, which the
-// product's launch does not set (no fixture carries the frame; M3's live run saw none): a live row reads `unknown` for
-// its whole life. Its turn, work in flight and quiet stand in for the state: an engine's own follow-up turn after its
-// background tasks end moves `lastEventSeq` first and then opens a turn.
+// An engine state that rules a row out: the engine said it is working or waiting. `unknown` does not: the pinned engine
+// reports its state (`session_state_changed`) only under CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS, which X6 sets from
+// C12 M5 on (pass3/launch-env-state-events.jsonl); before the first frame, or on a launch without it (M3's live run), a
+// row reads `unknown`, and its turn, work in flight and quiet stand in for the state: an engine's own follow-up turn
+// after its background tasks end moves `lastEventSeq` first and then opens a turn.
 const ENGINE_ACTIVE: ReadonlySet<EngineSessionStatus['engineState']> = new Set(['running', 'requires_action']);
 
 export function evaluate(input: BudgetInput): BudgetVerdict {
