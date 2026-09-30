@@ -63,11 +63,10 @@ describe('near-limit banner posts once per window', () => {
     expect(bannerKey('aa9db20d', 'session', '2026-09-29T07:49:59.000Z')).toBe('usage:aa9db20d:session:2026-09-29T07:49:59Z');
   });
 
-  it('reads the threshold from settings.usage.nearLimitPercent within 50 to 100, else 90', () => {
+  it('reads the threshold from settings v3’s usage.nearLimitPercent, 90 before the settings are read', () => {
     expect(thresholdFrom(null)).toBe(90);
-    expect(thresholdFrom({ theme: 'system' })).toBe(90);
-    expect(thresholdFrom({ usage: { nearLimitPercent: 75 } })).toBe(75);
-    expect(thresholdFrom({ usage: { nearLimitPercent: 20 } })).toBe(90);
+    expect(thresholdFrom(SETTINGS_DEFAULTS_V3)).toBe(90);
+    expect(thresholdFrom({ ...SETTINGS_DEFAULTS_V3, usage: { nearLimitPercent: 75 } })).toBe(75);
   });
 });
 

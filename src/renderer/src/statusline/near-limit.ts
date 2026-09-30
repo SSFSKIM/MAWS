@@ -4,6 +4,7 @@
 // `usage.banners` and never posted again, across every composer and across reloads.
 import type { MawsBridge } from '@shared/ipc/schema';
 import { UsageBannersSchema } from '@shared/ipc/schema/layout';
+import type { Settings } from '@shared/ipc/schema/settings';
 import type { UsageSnapshot, UsageWindow } from '@shared/usage/types';
 import { ipc } from '../ipc/client';
 import { useNotices } from '../stores/notices';
@@ -41,11 +42,9 @@ function knownKey(known: readonly string[], accountUuid: string, limitKey: strin
   });
 }
 
-// C11's `settings.usage.nearLimitPercent` (50–100) once C11 lands it; 90 until then. `settings` is SettingsState's
-// `settings` member (the persisted settings), not the state around it.
-export function thresholdFrom(settings: unknown): number {
-  const percent = (settings as { usage?: { nearLimitPercent?: unknown } } | null)?.usage?.nearLimitPercent;
-  return typeof percent === 'number' && percent >= 50 && percent <= 100 ? percent : DEFAULT_NEAR_LIMIT_PERCENT;
+// C11's `settings.usage.nearLimitPercent` (50–100, settings v3 validates it); 90 before the settings are read.
+export function thresholdFrom(settings: Settings | null): number {
+  return settings?.usage.nearLimitPercent ?? DEFAULT_NEAR_LIMIT_PERCENT;
 }
 
 // Every banner the snapshot warrants at `now`, each keyed by the `known` key that already names its window, else by
