@@ -95,6 +95,7 @@ export class FsService {
   private lastScan: FsScanResult | null = null;
   // Until main's first fs.scan (or the fallback), passes list and nothing is summarised.
   private summarising = false;
+  private commandsQueued = 0; // main's fs.scan passes enqueued and not yet begun
   private fallback: ReturnType<typeof setTimeout> | null = null;
   private readonly startScanFallbackMs: number;
   // The (size, mtime) main holds each transcript's summary for, from its fs.scan `known`: a refresh reads none of those
@@ -185,6 +186,7 @@ export class FsService {
       this.bindings.bind(sessionId, appSessionId);
       this.known.set(sessionId, { size, mtimeMs });
     }
+    this.commandsQueued += 1;
     return this.enqueueScan(new Map(known.map((entry) => [entry.sessionId, entry])), 'command');
   }
 
@@ -525,6 +527,7 @@ export class FsService {
   }
 
   private async pass(known: Map<SessionId, FsScanKnown> | null, mode: ScanMode, started: number): Promise<FsScanResult> {
+    if (mode === 'command') this.commandsQueued -= 1;
     this.observedSinceListing.clear();
     const files = await this.discovery.list();
     // Reconcile the snapshot against the live table as it is now: the watcher may have found a transcript the listing
@@ -537,8 +540,10 @@ export class FsService {
     for (const sessionId of gone) if (!stale(sessionId)) this.forget(sessionId);
     for (const file of files) if (!stale(file.sessionId)) this.listed.set(file.sessionId, file);
 
-    // Only list until main has spoken (or the fallback fired). A refresh skips what main holds unchanged.
-    const summarising = mode === 'command' || this.summarising;
+    // Only list until main has spoken (or the fallback fired), and while main's fs.scan waits behind this pass: that
+    // scan reads everything main does not hold itself, so a refresh ahead of it (at a cold start, the start-up pass)
+    // that read too would emit each transcript twice (debt wave 6). A refresh skips what main holds unchanged.
+    const summarising = mode === 'command' || (this.summarising && this.commandsQueued === 0);
     const baseline = mode === 'command' ? known : this.known;
     const todo = summarising ? files.filter((file) => !matchesKnown(file, baseline?.get(file.sessionId))).sort((a, b) => b.mtimeMs - a.mtimeMs) : [];
     // Debt wave 5 (the cold first paint): the pass says how much it has to read before its first read, and reads the

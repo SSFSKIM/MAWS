@@ -23,7 +23,7 @@ import { GitService } from './git/service';
 // C5 start (emit comes with C3's imports)
 import { startAttention } from './attention';
 import { dropPanelKeysOfRemovedSessions, LayoutFileStore, registerLayoutHandlers } from './layout/store';
-import { askToQuit, installQuitGuard } from './lifecycle/quit-guard';
+import { askToQuit, installQuitGuard, listProcesses } from './lifecycle/quit-guard';
 import { registerMenuHandlers, startMenu } from './menu';
 import { registerOpenExternal } from './open-external';
 import { startSessions } from './sessions';
@@ -337,6 +337,8 @@ app.whenReady().then(() => {
         console.warn('[quit-guard] engine.shutdown failed', result.error);
       }
     },
+    // debt wave 6: past the bound, the ladder's SIGKILL rung for the engines still the engine host's children
+    engines: { hostPid: () => hosts.snapshot('engine-host').pid, ps: listProcesses, kill: (pid) => process.kill(pid, 'SIGKILL') },
   });
   // C12 start: the banner's reads and answers
   registerMainHandler('layout.quitWait', () => ({ waiting: quitGuard.waiting() }));

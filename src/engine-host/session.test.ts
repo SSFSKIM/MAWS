@@ -789,6 +789,36 @@ describe('failed initialize terminates the process', () => {
       expect(session.status().process).toBe('exiting');
     });
 
+    // Debt wave 6: a SessionStart hook configured with a timeout above 600 s runs that long before the engine gives up
+    it('a hook configured past 600 s holds the answer for its own timeout plus the class, read from the launch\'s settings', async () => {
+      vi.useFakeTimers();
+      const read = vi.fn(async () => 900_000);
+      const { session, transport, plan } = setup({ responder: defaultResponder({ initialize: () => null }), session: { sessionStartHookMs: read } });
+      void session.start();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(read).toHaveBeenCalledWith(plan);
+      transport.push(hookFrame('hook_started', 'long'));
+      await vi.advanceTimersByTimeAsync(900_000 + REQUEST_TIMEOUT_MS.long - 1);
+      expect(session.status().process).toBe('initializing');
+      await vi.advanceTimersByTimeAsync(1);
+      expect(session.status().process).toBe('exiting');
+    });
+
+    it('a bound read after a hook started still holds that hook, from the read', async () => {
+      vi.useFakeTimers();
+      let resolve!: (ms: number) => void;
+      const { session, transport } = setup({ responder: defaultResponder({ initialize: () => null }), session: { sessionStartHookMs: () => new Promise((r) => (resolve = r)) } });
+      void session.start();
+      await vi.advanceTimersByTimeAsync(0);
+      transport.push(hookFrame('hook_started', 'long'));
+      await vi.advanceTimersByTimeAsync(1000);
+      resolve(900_000);
+      await vi.advanceTimersByTimeAsync(900_000 + REQUEST_TIMEOUT_MS.long - 1);
+      expect(session.status().process).toBe('initializing');
+      await vi.advanceTimersByTimeAsync(1);
+      expect(session.status().process).toBe('exiting');
+    });
+
     it('hook frames never stretch the first-output bound: the bound is on silence, and they end it', async () => {
       vi.useFakeTimers();
       const { session, transport } = setup({ responder: defaultResponder({ initialize: () => null }) });

@@ -15,6 +15,7 @@
 // out is inert until the one final app.quit() (review fix). The end-to-end smoke answers without a dialog. The
 // `Restart` wording waits for P1's updater.
 // C12 end
+import { execFile } from 'node:child_process';
 import { app, type MessageBoxOptions } from 'electron';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { SessionReadModel } from '../sessions/read-model';
@@ -29,9 +30,23 @@ export const WAIT_POLL_MS = 2_000;
 // How long a quit waits for engine.shutdown. The host's ladder (session-ladder.ts) writes end_session and waits 3 s for
 // the exit, then closes stdin and sends SIGTERM (2.1.283's own handler exits 143: pass3/sigterm-disposition.mjs), then
 // SIGKILL at 6 s. 5 s covers the end_session rung and 2 s of the SIGTERM rung, so only an engine that ignores both
-// loses its SIGKILL rung; past the bound will-quit kills the engine host, the engines are orphaned with their stdin
-// closed, and they end on its end of input, as every quit with nothing busy ended them before (1 to 3 s after the app).
+// would lose its SIGKILL rung, since will-quit kills the engine host (debt wave 6): past the bound main sends that rung
+// itself (`killEngines`) before the final app.quit().
 export const SHUTDOWN_BOUND_MS = 5_000;
+export const KILL_PS_TIMEOUT_MS = 1_000; // the process listing that confirms each pid before its SIGKILL
+
+// The engine host's processes as main reaches them at the bound: its pid (the supervisor's), the process listing
+// (`ps -axo pid=,ppid=`) and the signal.
+export interface EngineKill {
+  hostPid(): number | null;
+  ps(): Promise<string>;
+  kill(pid: number): void; // SIGKILL
+}
+
+export const listProcesses = (): Promise<string> =>
+  new Promise((resolve, reject) => execFile('/bin/ps', ['-axo', 'pid=,ppid='], { maxBuffer: 16 * 1024 * 1024 }, (error, stdout) => (error ? reject(error) : resolve(stdout))));
+
+class BoundExpired extends Error {}
 
 export interface QuitPty {
   list(): Promise<readonly { ptyId: string; alive: boolean }[]>;
@@ -45,7 +60,7 @@ const total = (r: BusyReport) => r.midTurn + r.backgroundWork + r.busyTerminals;
 
 function within<T>(promise: Promise<T>, ms: number): Promise<T> {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`no answer within ${ms} ms`)), ms);
+    const timer = setTimeout(() => reject(new BoundExpired(`no answer within ${ms} ms`)), ms);
     promise.then(
       (value) => (clearTimeout(timer), resolve(value)),
       (error: unknown) => (clearTimeout(timer), reject(error)),
@@ -81,6 +96,31 @@ export async function busyReport(model: Pick<SessionReadModel, 'midTurnCount' | 
   const probes = ptys.filter((p) => p.alive).map((p) => within(pty.foreground(p.ptyId), PROBE_TIMEOUT_MS).then((f) => f.busy, () => true));
   const busyTerminals = (await Promise.all(probes)).filter(Boolean).length;
   return { ...sessions(), busyTerminals, terminalsUnknown: false };
+}
+
+// Debt wave 6: the ladder's SIGKILL rung for every engine the statuses name as not yet exited, sent only to a pid the
+// listing still shows as the engine host's child, so a pid the OS reused after an exit main has not heard of yet is
+// never signalled. A listing that fails or is late kills nothing; the quit goes on either way.
+export async function killEngines(statuses: readonly EngineSessionStatus[], deps: EngineKill): Promise<number[]> {
+  const host = deps.hostPid();
+  const known = statuses.flatMap((s) => (s.process !== 'exited' && s.pid !== null ? [s.pid] : []));
+  if (host === null || known.length === 0) return [];
+  const parents = new Map<number, number>();
+  for (const line of (await within(deps.ps(), KILL_PS_TIMEOUT_MS)).split('\n')) {
+    const [pid, ppid] = line.trim().split(/\s+/).map(Number);
+    if (Number.isInteger(pid) && Number.isInteger(ppid)) parents.set(pid!, ppid!);
+  }
+  const killed: number[] = [];
+  for (const pid of known) {
+    if (parents.get(pid) !== host) continue;
+    try {
+      deps.kill(pid);
+      killed.push(pid);
+    } catch {
+      // exited between the listing and the signal
+    }
+  }
+  return killed;
 }
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
@@ -133,6 +173,7 @@ export interface QuitGuardDeps {
   pty: QuitPty;
   ask(report: BusyReport): Promise<QuitAnswer>;
   shutdownEngine(): Promise<void>;
+  engines: EngineKill; // debt wave 6: the SIGKILL rung past the bound
   publish(waiting: BusyReport | null): void; // the page's "MAWS will quit when … finish" banner
   log?(line: string): void; // the report's latency, for the e2e
   pollMs?: number;
@@ -170,6 +211,12 @@ export function installQuitGuard(model: Pick<SessionReadModel, 'midTurnCount' | 
         await within(deps.shutdownEngine(), SHUTDOWN_BOUND_MS);
       } catch (error) {
         console.error('[quit-guard] stopping the engine failed or ran past its bound; quitting anyway', error);
+        if (error instanceof BoundExpired) {
+          await killEngines(model.engineStatuses(), deps.engines).then(
+            (killed) => killed.length > 0 && console.error(`[quit-guard] sent SIGKILL to engines still running at the bound: ${killed.join(', ')}`),
+            (failure: unknown) => console.error('[quit-guard] could not list the engines at the bound; quitting without SIGKILL', failure),
+          );
+        }
       }
       finalQuit();
     })();

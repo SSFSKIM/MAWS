@@ -141,6 +141,7 @@ interface Root {
   last: { status: GitStatus; projection: string };
   backoff: boolean;
   failing: boolean;
+  retry: boolean; // the pending pass is the one automatic retry after a timeout; a new event clears it
   nested: string[]; // the linked worktrees under the root, root-relative
   nestedRead: 'idle' | 'reading' | 'again';
 }
@@ -225,6 +226,7 @@ export class GitWatcher {
       last: { status, projection },
       backoff: false,
       failing: false,
+      retry: false,
       nested,
       nestedRead: 'idle',
     };
@@ -299,6 +301,10 @@ export class GitWatcher {
     if (reason === 'refs' && sub !== null && !root.inFlight && !refMatters(sub, root.last.status)) return;
     root.pending.add(reason);
     if (reason === 'worktree' && rel !== null) root.touched.add(rel);
+    if (root.retry) {
+      root.retry = false; // the event's own window replaces the pending retry
+      root.windowStart = null;
+    }
     this.schedule(root);
   }
 
@@ -348,6 +354,8 @@ export class GitWatcher {
 
   private async refresh(root: Root): Promise<void> {
     root.inFlight = true;
+    const retrying = root.retry;
+    root.retry = false;
     const reasons = root.pending;
     const touched = root.touched;
     root.pending = new Set();
@@ -369,6 +377,12 @@ export class GitWatcher {
       for (const rel of touched) root.touched.add(rel);
       const timedOut = error instanceof GitTimeoutError;
       if (timedOut) root.backoff = true;
+      // The failed change may be the last one: retry once after the back-off rather than wait for the next event,
+      // unless this pass was that retry, so a repository whose status always times out is not polled.
+      if (timedOut && !retrying && !root.again && !root.timer && !root.closed) {
+        root.retry = true;
+        this.schedule(root);
+      }
       if (!root.failing) console.warn(`[git] status failed under ${root.root}${timedOut ? '; debouncing at 5 s until it succeeds' : ''}: ${error instanceof Error ? error.message : String(error)}`);
       root.failing = true;
     } finally {

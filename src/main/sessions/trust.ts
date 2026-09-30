@@ -49,15 +49,22 @@ export async function trustKeyOf(directory: string, git: GitRun): Promise<{ trus
   if (!resolved.exists) return { trustKey: resolved.path, keyKind: 'directory', directory: resolved.path };
   let out: string;
   try {
-    out = await git(resolved.path, ['rev-parse', '--path-format=absolute', '--show-toplevel', '--git-common-dir']);
+    out = await git(resolved.path, ['rev-parse', '--path-format=absolute', '--show-toplevel', '--git-common-dir', '--git-dir']);
   } catch (error) {
     if (error instanceof NotARepositoryError) return { trustKey: resolved.path, keyKind: 'directory', directory: resolved.path };
     throw error;
   }
-  const [toplevel, commonDir] = out.split('\n').map((line) => line.trim());
-  if (!toplevel || !commonDir) throw new Error(`git rev-parse answered no toplevel and common dir for ${resolved.path}`);
-  // a submodule's `.git/modules/<name>` or another layout: the toplevel is the key (the acceptance records which)
-  const root = basename(commonDir) === '.git' ? dirname(commonDir) : toplevel;
+  const [toplevel, commonDir, gitDir] = out.split('\n').map((line) => line.trim());
+  if (!toplevel || !commonDir || !gitDir) throw new Error(`git rev-parse answered no toplevel, common dir and git dir for ${resolved.path}`);
+  let root: string;
+  if (basename(commonDir) === '.git') root = dirname(commonDir);
+  else {
+    // A common dir of another name (a separate git dir, a submodule's `.git/modules/<name>`): the checkout that owns it
+    // keys itself; a linked worktree of it keys the common dir, unless that holds a `.git` of its own (debt wave 6: the
+    // engine's canonical root, 2.1.283 `Qt`, cli.pretty.js 23840-23884).
+    const [common, own] = await Promise.all([realOrSelf(commonDir), realOrSelf(gitDir)]);
+    root = common.path === own.path || existsSync(join(commonDir, '.git')) ? toplevel : commonDir;
+  }
   return { trustKey: (await realOrSelf(root)).path, keyKind: 'repo', directory: resolved.path };
 }
 

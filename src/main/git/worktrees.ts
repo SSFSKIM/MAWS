@@ -12,7 +12,7 @@ import { lstat } from 'node:fs/promises';
 // C12 start
 import { appendFile, mkdir, readFile } from 'node:fs/promises';
 // C12 end
-import { basename, dirname, isAbsolute, join } from 'node:path';
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import type {
   GitBranchDeleted,
   GitWorktreeAddInput,
@@ -63,6 +63,16 @@ const NODE_FS: ExcludeFs = { readFile, appendFile, mkdir };
 // never both find no marker and append two blocks (re-review of f0ea3676): each read, check and append runs after the
 // previous one for that directory settled. The chain entry is dropped once it is the last.
 const excludeChains = new Map<string, Promise<void>>();
+// Debt wave 6: the nearest ancestor of `path` whose `.git` is a pointer file to `commonDir` (canonical), else null.
+async function checkoutAbove(path: string, commonDir: string): Promise<string | null> {
+  for (let dir = dirname(path); ; dir = dirname(dir)) {
+    const pointer = await readFile(join(dir, '.git'), 'utf8').catch(() => null); // absent, or a `.git` directory
+    const target = pointer?.match(/^gitdir:\s*(.+?)\s*$/m)?.[1];
+    if (target !== undefined && (await canonicalPath(resolve(dir, target))) === commonDir) return dir;
+    if (dirname(dir) === dir) return null;
+  }
+}
+
 export function ensureRuntimeExclude(commonDir: string, fs: ExcludeFs = NODE_FS): Promise<void> {
   const next = (excludeChains.get(commonDir) ?? Promise.resolve()).then(() => writeRuntimeExclude(commonDir, fs));
   excludeChains.set(commonDir, next);
@@ -213,17 +223,23 @@ export class WorktreeService {
   }
 
   // The main worktree's root: the parent of the common dir when that is a `.git` directory (linked worktrees share
-  // it), else the toplevel (a submodule's `.git/modules/<name>`, a separate git dir), as the trust key is derived
-  // (src/main/sessions/trust.ts). `isMain`: the root is the main checkout, known because the common dir is its `.git`
-  // or because the git dir asked from it is the common dir itself (not a linked worktree's `worktrees/<name>`).
+  // it), else the toplevel (a submodule's `.git/modules/<name>`, a separate git dir). `isMain`: the root is the main
+  // checkout, known because the common dir is its `.git` or because the git dir asked from it is the common dir itself
+  // (not a linked worktree's `worktrees/<name>`). Asked from a linked worktree of a separate-git-dir repository, where
+  // git records no path from the common dir to the main checkout, the root is the nearest ancestor whose own `.git`
+  // pointer names the common dir (the engine's layout and MAWS's put worktrees under the checkout's
+  // `.claude/worktrees/`); a linked worktree outside its main checkout leaves no trace of it and is its own root (git's
+  // limit). The trust key follows the engine's rule instead (src/main/sessions/trust.ts).
   private async mainRoot(repoRoot: string): Promise<Repo> {
     requireAbsolute(repoRoot);
     const out = await this.git(repoRoot, ['rev-parse', '--path-format=absolute', '--show-toplevel', '--git-common-dir', '--git-dir']);
     const [toplevel, commonDir, gitDir] = out.split('\n').map((line) => line.trim());
     if (!toplevel || !commonDir || !gitDir) throw new Error(`git rev-parse answered no toplevel, common dir and git dir for ${repoRoot}`);
-    const dotGit = basename(commonDir) === '.git';
-    const [common, git] = await Promise.all([canonicalPath(commonDir), canonicalPath(gitDir)]);
-    return { root: await canonicalPath(dotGit ? dirname(commonDir) : toplevel), commonDir: common, isMain: dotGit || git === common };
+    const [common, git, top] = await Promise.all([canonicalPath(commonDir), canonicalPath(gitDir), canonicalPath(toplevel)]);
+    if (basename(commonDir) === '.git') return { root: await canonicalPath(dirname(commonDir)), commonDir: common, isMain: true };
+    if (git === common) return { root: top, commonDir: common, isMain: true };
+    const checkout = await checkoutAbove(top, common);
+    return { root: checkout ?? top, commonDir: common, isMain: checkout !== null };
   }
 
   // `worktree list --porcelain -z`: NUL-terminated attribute lines, an empty one between stanzas; the first is the main
