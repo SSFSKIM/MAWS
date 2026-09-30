@@ -33,7 +33,7 @@ import {
   type UserInputFrame,
 } from '@shared/wire/frames';
 import type { JournalRow } from '@shared/wire/journal';
-import { bashPartOf, denialKindOf, engineUserMarkerOf, spillPathOf, stringOrNull, tokenUsageOf, type Attribution, type EventSink } from './normalizer-support';
+import { bashPartOf, contextTotal, denialKindOf, engineUserMarkerOf, spillPathOf, stringOrNull, tokenUsageOf, type Attribution, type EventSink } from './normalizer-support';
 import { mapInboundCancel, mapInboundRequest, mapOutboundResponse, type InboundEntry } from './normalizer-controls';
 import { mapSystemFrame, type TaskRegistry } from './normalizer-system';
 import type { SafeguardVerdict } from '@shared/graph/enums';
@@ -443,7 +443,8 @@ export class Normalizer {
     if (frame.response.subtype !== 'success') return;
     const parsed = GetContextUsageResponseSchema.safeParse(frame.response.response);
     if (!parsed.success) return;
-    const { totalTokens, maxTokens, percentage, autoCompactThreshold, isAutoCompactEnabled, model } = parsed.data;
+    const { maxTokens, autoCompactThreshold, isAutoCompactEnabled, model } = parsed.data;
+    const { totalTokens, percentage } = contextTotal(parsed.data);
     out.emit({ kind: 'context.sample', totalTokens, maxTokens, percentage, autoCompactThreshold: autoCompactThreshold ?? null, isAutoCompactEnabled, model }, attribution);
   }
 

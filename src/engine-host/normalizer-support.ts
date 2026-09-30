@@ -89,3 +89,23 @@ export interface Attribution {
 export interface EventSink {
   emit(payload: EventPayload, attribution: Attribution | null): void;
 }
+
+// Debt wave 4: `context.sample`'s total. The engine's total is its non-message categories plus the messages it
+// measures as the last response's input side (input + cache creation + cache read, `apiUsage`) minus those categories,
+// floored at zero, plus a local estimate of what was appended since that response (SPEC 13.18.2, "The total"). The
+// `summary` detail C3 reads at each turn's end estimates the non-message categories locally and high (pass3/context-full
+// seq 77: 30,304 tokens, where `detail: 'full'` counts 18,817 at seq 79), so while the measured input is below that
+// estimate the floor swallows the messages and the total stands still (15 % of a 200k window in pass3/context-sample).
+// Then the measured input plus the `Messages` category (at the floor, only the post-response estimate) is the context
+// the model reads, and what `detail: 'full'` answers (21,520 + 1 at seq 77 against 21,521 at seq 79); once the measured
+// input passes the estimate the engine's total already is that sum (seq 311 onwards, both details agree).
+type ContextFigures = { totalTokens: number; maxTokens: number; percentage: number; categories: { name: string; tokens: number }[]; apiUsage?: { input_tokens: number; cache_creation_input_tokens: number; cache_read_input_tokens: number } | null };
+export function contextTotal(usage: ContextFigures): { totalTokens: number; percentage: number } {
+  const { totalTokens, maxTokens, percentage, categories, apiUsage } = usage;
+  if (!apiUsage) return { totalTokens, percentage }; // no response yet: the estimate is all there is
+  const measured = apiUsage.input_tokens + apiUsage.cache_creation_input_tokens + apiUsage.cache_read_input_tokens;
+  const messages = categories.find((c) => c.name === 'Messages')?.tokens ?? 0;
+  if (measured >= totalTokens - messages) return { totalTokens, percentage };
+  const derived = measured + messages;
+  return { totalTokens: derived, percentage: maxTokens > 0 ? Math.round((derived / maxTokens) * 100) : percentage };
+}

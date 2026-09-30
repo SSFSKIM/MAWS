@@ -521,14 +521,24 @@ describe('normaliser: context.sample (debt wave 3)', () => {
   const recorded = (journal.find((r) => r.seq === 53)!.frame as { response: { response: Record<string, unknown> } }).response.response;
   const answer = (payload: unknown, requestId = request.request_id) => inRow({ type: 'control_response', response: { subtype: 'success', request_id: requestId, response: payload } });
 
-  it("turns a get_context_usage answer into context.sample with the engine's figures", () => {
+  it("turns a get_context_usage answer into context.sample with the engine's figures, the total from the measured input when the estimate swallows the messages", () => {
     expect(request.request.subtype).toBe('get_context_usage');
     const events = feed(make(), [outRow(request), answer(recorded)]);
     expect(events).toHaveLength(1);
+    // the engine answered 30,304 (15 %) with `Messages` at 1; the last response read 10 + 9,232 + 12,252 input-side tokens
+    expect(recorded).toMatchObject({ totalTokens: 30304, percentage: 15, apiUsage: { input_tokens: 10, cache_creation_input_tokens: 9232, cache_read_input_tokens: 12252 } });
     expect(events[0]).toMatchObject({
       kind: 'context.sample', seq: 2, parentToolUseId: null, agentId: null,
-      totalTokens: 30304, maxTokens: 200000, percentage: 15, autoCompactThreshold: 167000, isAutoCompactEnabled: true, model: 'claude-haiku-4-5-20251001',
+      totalTokens: 21495, maxTokens: 200000, percentage: 11, autoCompactThreshold: 167000, isAutoCompactEnabled: true, model: 'claude-haiku-4-5-20251001',
     });
+  });
+
+  it("keeps the engine's total before any response (no apiUsage) and once the measured input passes its estimate", () => {
+    const noResponse = { ...recorded, apiUsage: null };
+    expect(feed(make(), [outRow(request), answer(noResponse)])[0]).toMatchObject({ totalTokens: 30304, percentage: 15 });
+    // pass3/context-full seq 311: 41,880 with `Messages` at 11,576 over a measured 41,878, so the engine's total stands
+    const later = loadJournal('pass3', 'context-full').find((r) => r.seq === 311)!.frame as { response: { response: Record<string, unknown> } };
+    expect(feed(make(), [outRow(request), answer(later.response.response)])[0]).toMatchObject({ totalTokens: 41880, percentage: 21 });
   });
 
   it('samples nothing from an error, an answer without the figures, or an answer to another read', () => {

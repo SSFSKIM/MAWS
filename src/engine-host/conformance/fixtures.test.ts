@@ -47,7 +47,7 @@ describe('normaliser replays every probe fixture into the X1 graph', () => {
     const c10 = ['fork-pinned-id-fork', 'fork-pinned-id-start', 'home-trust-session-only', 'home-trust-unattested', 'read-only-permission', 'trust-bootstrap-recorded', 'trust-exact-key'];
     // C10 end
     const wave3 = ['context-sample', 'interrupt-text', 'question-deny']; // debt wave 3: the turn-end context read, a text block cut by an interrupt, a question skipped by a deny
-    const wave4 = ['end-session-archive']; // debt wave 4: an archive's end_session
+    const wave4 = ['context-full', 'end-session-archive']; // debt wave 4: both context details over a growing conversation, an archive's end_session
     expect(listJournals('pass3')).toEqual(['engine-turn-release', 'fork-worktree-fork', 'fork-worktree-resume-in-b', 'fork-worktree-start', 'nested-agents', 'plan-outcomes', 'relay-to-child', 'rewind-files', 'steer-next', 'steer-now', 'steer-now-unheld', 'stop-task', 'workspace-diff-branch', 'workspace-diff-dirty', ...c10, ...wave3, ...wave4].sort());
   });
 
@@ -360,7 +360,21 @@ describe('normaliser: per-fixture graph facts (C2 findings restated)', () => {
     const { events } = await run('pass3', 'context-sample');
     const samples = events.filter((e) => e.kind === 'context.sample');
     expect(samples.map((e) => e.seq)).toEqual([53, 148]); // the answers to the reads at seq 51 and 146, each after its turn's result (seq 50, 145)
-    for (const sample of samples) expect(sample).toMatchObject({ totalTokens: 30304, maxTokens: 200000, percentage: 15, autoCompactThreshold: 167000, isAutoCompactEnabled: true, model: 'claude-haiku-4-5-20251001' });
+    for (const sample of samples) expect(sample).toMatchObject({ maxTokens: 200000, autoCompactThreshold: 167000, isAutoCompactEnabled: true, model: 'claude-haiku-4-5-20251001' });
+    // debt wave 4: the engine answered 30,304 (15 %) both times; the samples carry the measured input plus the Messages estimate
+    expect(samples.map((e) => [e.totalTokens, e.percentage])).toEqual([[21495, 11], [21841, 11]]);
+  });
+
+  it("pass3/context-full (debt wave 4): the sample follows the conversation from the first turn, and matches detail: 'full'", async () => {
+    const { events } = await run('pass3', 'context-full');
+    const samples = ofKind(events, 'context.sample');
+    // a summary and a full read after each of five turns (answers at 77/79, 311/313, 451/453, 527/529, 650/652)
+    expect(samples.map((e) => e.seq)).toEqual([77, 79, 311, 313, 451, 453, 527, 529, 650, 652]);
+    const summary = samples.filter((_, i) => i % 2 === 0);
+    const full = samples.filter((_, i) => i % 2 === 1);
+    // the engine's summary answered 30,305 (15 %) on the first; the rest as answered
+    expect(summary.map((e) => [e.totalTokens, e.percentage])).toEqual([[21521, 11], [41880, 21], [62407, 31], [82798, 41], [103190, 52]]);
+    expect(full.map((e) => e.totalTokens)).toEqual(summary.map((e) => e.totalTokens));
   });
 
   it("pass3/end-session-archive (debt wave 4): the engine acknowledges end_session { reason: 'archive' } and exits 0", async () => {

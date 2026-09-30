@@ -221,6 +221,8 @@ export const GetContextUsageResponseSchema = z.looseObject({
   autoCompactThreshold: z.number().nullable().optional(),
   isAutoCompactEnabled: z.boolean(),
   model: z.string(),
+  // the last response's usage (pass3/context-full): its input side is the context the model last read
+  apiUsage: z.looseObject({ input_tokens: z.number(), cache_creation_input_tokens: z.number(), cache_read_input_tokens: z.number() }).nullable().optional(),
 });
 export type GetContextUsageResponse = z.infer<typeof GetContextUsageResponseSchema>;
 

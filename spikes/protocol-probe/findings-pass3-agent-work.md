@@ -57,3 +57,19 @@ Engine 2.1.283 through the relay under a scratch config home. Scenarios `scenari
 Engine 2.1.283 through the relay under a fresh scratch `CLAUDE_CONFIG_DIR` (`/private/tmp/maws-w4a-<epoch>/config`, `settings.json` `{}`) and a scratch repository, haiku, default mode, US$0.04. No scratch path appeared in the owner's `~/.claude.json`.
 
 `scenarios/pass3/end-session-archive.mjs`, `fixtures/pass3/end-session-archive.jsonl`: one turn, then the frame C3's session writes when an archive stops it (`end_session { reason: 'archive' }`, seq 49). The engine answered `success` with no payload (seq 51, 1 ms later), after the turn's `command_lifecycle completed` (seq 50), and exited 0 about 200 ms after the request (seq 52): the same answer and exit as `stop` and `quit`. Its debug log reads `[print.ts] end_session received, reason=archive`; the engine's only reason-specific branch ignores a stale `archived` (with a d) under a worker epoch above 1 (SPEC 45.22.2), which MAWS never sets. The session's transcript ends with the engine's own `last-prompt`, `ai-title`, `atis-latch` and `cost-state` records, nothing naming the archive.
+
+## 2026-09-29, debt wave 4 (engine host): `get_context_usage` at both details over a longer conversation
+
+Same conditions (scratch config home, scratch repository, haiku, default mode, `Read` allowed), US$0.23. `scenarios/pass3/context-full.mjs`, `fixtures/pass3/context-full.jsonl`: five turns (`Reply with exactly OK`, then four full `Read`s of distinct ~10k-token files), each followed by a `summary` read (the one C3's session issues at every turn's end) and a `full` read. Per turn: the two totals, the answer's `apiUsage` input side (input + cache creation + cache read of the last response), and the `Messages` category at each detail.
+
+| Turn (answers) | summary | full | apiUsage | Messages, summary | Messages, full |
+|---|---|---|---|---|---|
+| 0 (seq 77, 79) | 30,305 (15 %) | 21,521 (11 %) | 21,520 | 1 | 2,704 |
+| 1 (311, 313) | 41,880 | 41,880 | 41,878 | 11,576 | 23,063 |
+| 2 (451, 453) | 62,407 | 62,407 | 62,405 | 32,103 | 43,590 |
+| 3 (527, 529) | 82,798 | 82,798 | 82,796 | 52,494 | 63,981 |
+| 4 (650, 652) | 103,190 (52 %) | 103,190 | 103,188 | 72,886 | 84,373 |
+
+- The engine's total is its non-message categories plus `max(0, apiUsage − those categories)` plus a local estimate of what came after the last response (SPEC 13.18.2, "The total"). `summary` estimates the non-message categories locally at 30,304 (system prompt 6,806, system tools 22,063, skills 1,435); `full` counts them through the API at 18,817 (6,258, 11,124, 1,435). While the measured input is below 30,304 the `summary` total is floored there and `Messages` holds only the post-response estimate (1): the "about 15 % all session" of pass3/context-sample, whose two short turns never passed the floor. Past it, both details answer the same figure, `apiUsage` plus a token or two, and follow the conversation. So the total did not ignore the conversation for good; it ignored it below an overestimated fixed floor, which a short or freshly compacted session sits under.
+- `full` issues `count_tokens` requests (here through the relay) and answers more slowly; every `summary` answer already carries the measured input, so the host needs no `full` read.
+- Consequence (C3, `contextTotal` in `src/engine-host/normalizer-support.ts`): `context.sample`'s total is the measured input plus the `Messages` category while the measured input is below the engine's non-message sum, and the engine's total otherwise; before any response (`apiUsage` null) the engine's estimate stands. Over this fixture the samples read 21,521 / 41,880 / 62,407 / 82,798 / 103,190, equal to `full` at every turn.
