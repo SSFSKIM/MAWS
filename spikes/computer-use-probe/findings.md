@@ -290,3 +290,24 @@ Result [V]: `success` in 13 turns, 12 `js` calls, 66 s, $0.43.
 - A window large enough for its screenshot to be downscaled, and the coordinate space then.
 - Whether the service refuses an app operation from a direct socket client that skipped the policy step (report 03,
   E4).
+
+## 2026-09-30 addendum: silencing the app-approval dialog
+
+Three of the open questions above are now settled, all from this Claude Code session (host 2.1.285, ChatGPT.app
+26.924.22138), against the plugin's shim with the owner's scratch `CODEX_HOME` (`~/.maws/cua-home`).
+
+- **`node_repl` reads the machine-wide always-allow list even under a scratch `CODEX_HOME`.** Finder, which is on the
+  owner's `~/Library/Group Containers/2DC432GLL2.com.openai.sky.CUAService/Library/Application Support/Software/ComputerUseAppApprovals.json`,
+  bound with no `elicitation/create`; TextEdit, which is not, drew the request (`persist:["session","always"]`,
+  `riskLevel:"low"`) and was declined. Nothing was written (`w4-always-allow-read.shim.jsonl`, seq 4 to 11).
+- **A reply carrying `_meta:{persist:"always"}` (`CUA_SHIM_PERSIST=always`) is written to that same list**, not to a
+  session file: `com.apple.TextEdit` was appended to `approvedBundleIdentifiers` and no `sessions/*.toml` appeared
+  (`w4-persist-always.shim.jsonl`, seq 7). The list was restored to its four original entries afterwards.
+- **A Claude Code `Elicitation` hook answers the request before any dialog.** With
+  `hooks.Elicitation[matcher "cua_repl|plugin:cua:cua_repl"]` returning
+  `{"hookSpecificOutput":{"hookEventName":"Elicitation","action":"accept","content":{}}}`, a `claude -p` run bound
+  TextEdit on its first call: request at seq 8, accept from the host 43 ms later at seq 9, `_meta.persist:"session"`
+  stamped by the shim, `sessions/<session id>.toml` written (`w4-elicitation-hook.shim.jsonl`). In the 2.1.283 source
+  the handler returns the hook's response and skips `ask()` (`handle` in the elicitation class: "Elicitation resolved
+  by hook"); the same order holds on the print-mode path. The hook input carries `mcp_server_name`, `message`, `mode`,
+  `url`, `elicitation_id` and `requested_schema`, not the server's `_meta`, so an app filter has to go by `message`.
