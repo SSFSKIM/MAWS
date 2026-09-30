@@ -47,7 +47,8 @@ describe('normaliser replays every probe fixture into the X1 graph', () => {
     const c10 = ['fork-pinned-id-fork', 'fork-pinned-id-start', 'home-trust-session-only', 'home-trust-unattested', 'read-only-permission', 'trust-bootstrap-recorded', 'trust-exact-key'];
     // C10 end
     const wave3 = ['context-sample', 'interrupt-text', 'question-deny']; // debt wave 3: the turn-end context read, a text block cut by an interrupt, a question skipped by a deny
-    expect(listJournals('pass3')).toEqual(['engine-turn-release', 'fork-worktree-fork', 'fork-worktree-resume-in-b', 'fork-worktree-start', 'nested-agents', 'plan-outcomes', 'relay-to-child', 'rewind-files', 'steer-next', 'steer-now', 'steer-now-unheld', 'stop-task', 'workspace-diff-branch', 'workspace-diff-dirty', ...c10, ...wave3].sort());
+    const wave4 = ['end-session-archive']; // debt wave 4: an archive's end_session
+    expect(listJournals('pass3')).toEqual(['engine-turn-release', 'fork-worktree-fork', 'fork-worktree-resume-in-b', 'fork-worktree-start', 'nested-agents', 'plan-outcomes', 'relay-to-child', 'rewind-files', 'steer-next', 'steer-now', 'steer-now-unheld', 'stop-task', 'workspace-diff-branch', 'workspace-diff-dirty', ...c10, ...wave3, ...wave4].sort());
   });
 
   for (const pass of FIXTURE_PASSES) {
@@ -360,6 +361,23 @@ describe('normaliser: per-fixture graph facts (C2 findings restated)', () => {
     const samples = events.filter((e) => e.kind === 'context.sample');
     expect(samples.map((e) => e.seq)).toEqual([53, 148]); // the answers to the reads at seq 51 and 146, each after its turn's result (seq 50, 145)
     for (const sample of samples) expect(sample).toMatchObject({ totalTokens: 30304, maxTokens: 200000, percentage: 15, autoCompactThreshold: 167000, isAutoCompactEnabled: true, model: 'claude-haiku-4-5-20251001' });
+  });
+
+  it("pass3/end-session-archive (debt wave 4): the engine acknowledges end_session { reason: 'archive' } and exits 0", async () => {
+    type Row = { request_id?: string; request?: { subtype?: string }; response?: { request_id?: string }; event?: string };
+    const journal = loadJournal('pass3', 'end-session-archive');
+    const frame = (r: { frame: unknown }) => r.frame as Row;
+    const request = journal.find((r) => r.direction === 'out' && frame(r).request?.subtype === 'end_session')!;
+    expect(frame(request).request).toEqual({ subtype: 'end_session', reason: 'archive' });
+    const answered = journal.find((r) => r.direction === 'in' && frame(r).response?.request_id === frame(request).request_id)!;
+    expect(frame(answered).response).toEqual({ subtype: 'success', request_id: frame(request).request_id });
+    const exit = journal.find((r) => frame(r).event === 'exit')!;
+    expect(answered.seq).toBeLessThan(exit.seq);
+    expect(exit.frame).toMatchObject({ code: 0, signal: null });
+    // the engine logged the reason it received (its debug log, copied after the exit)
+    expect(journal.find((r) => frame(r).event === 'archive_after_exit')!.frame).toMatchObject({ debugLines: ['[DEBUG] [print.ts] end_session received, reason=archive'] });
+    const { events } = await run('pass3', 'end-session-archive');
+    expect(ofKind(events, 'process.exited')).toMatchObject([{ code: 0 }]);
   });
 
   it("pass3/workspace-diff-*: every get_workspace_diff response parses with the typed schema (C8c's ask)", async () => {

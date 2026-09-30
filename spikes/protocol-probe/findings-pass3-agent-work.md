@@ -51,3 +51,9 @@ Engine 2.1.283 through the relay under a scratch config home. Scenarios `scenari
 > - Cascade: moot on this build. The stop went out 10 ms after its agent's `startedAt` and 27 ms after the workflow's `task_started` (seq 223 at 13.406, the first `task_progress` with the agent in state `start` at 229, the `stop_task` at 230, both at 13.433), and a workflow's agents have no task of their own on the wire (pass 2's finding), so no agent-level `task_updated` or `task_notification` could follow; none did.
 >
 > Verdict: `stop_task` gives the interrupt path's order (snapshot without the task, `killed`, `stopped`) and answers after all three frames, within 10 ms; a missing or already-stopped id is an idempotent success with no frame, so a 2,000 ms settle window before removing such a node holds with a wide margin.
+
+## 2026-09-29, debt wave 4 (engine host): an archive's `end_session`
+
+Engine 2.1.283 through the relay under a fresh scratch `CLAUDE_CONFIG_DIR` (`/private/tmp/maws-w4a-<epoch>/config`, `settings.json` `{}`) and a scratch repository, haiku, default mode, US$0.04. No scratch path appeared in the owner's `~/.claude.json`.
+
+`scenarios/pass3/end-session-archive.mjs`, `fixtures/pass3/end-session-archive.jsonl`: one turn, then the frame C3's session writes when an archive stops it (`end_session { reason: 'archive' }`, seq 49). The engine answered `success` with no payload (seq 51, 1 ms later), after the turn's `command_lifecycle completed` (seq 50), and exited 0 about 200 ms after the request (seq 52): the same answer and exit as `stop` and `quit`. Its debug log reads `[print.ts] end_session received, reason=archive`; the engine's only reason-specific branch ignores a stale `archived` (with a d) under a worker epoch above 1 (SPEC 45.22.2), which MAWS never sets. The session's transcript ends with the engine's own `last-prompt`, `ai-title`, `atis-latch` and `cost-state` records, nothing naming the archive.
