@@ -617,6 +617,19 @@ describe('IndexSessionSource against the real filesystem state service', () => {
     expect(index.sessions.get(allocated[1])?.title).toEqual({ text: 'Named later', source: 'user' });
   });
 
+  it('a cold start scans once: one fs.scan, and each transcript reaches main in one fs.sessionChanged (debt wave 6)', async () => {
+    for (const [i, sessionId] of S.entries()) await fixture.addTranscript(`/work/p${i}`, sessionId, [user('u1', null, `/work/p${i}`, `hello ${i}`)]);
+    const changed: SessionId[] = [];
+    wired.listen('fs.sessionChanged', (payload) => changed.push((payload as EventPayload<'fs.sessionChanged'>).summary.sessionId));
+    wired.start(); // the host's start-up pass is listing when main's scan arrives, as at an app start
+    begin();
+
+    await expect.poll(() => index.sessions.list().length, { timeout: 3_000 }).toBe(3);
+    await expect.poll(() => wired.calls.some((c) => c.name === 'fs.state'), { timeout: 3_000 }).toBe(true); // the sync ended
+    expect(wired.calls.filter((c) => c.name === 'fs.scan')).toHaveLength(1);
+    expect(changed.sort()).toEqual([...S].sort());
+  });
+
   it('a second engine id in session.status (the engine\'s /clear) rebinds the app session in the index and the host; the old transcript becomes its own record', async () => {
     const [A, B] = S;
     const line = (uuid: string, content: string) => JSON.stringify(user(uuid, null, '/work/c', content));

@@ -159,6 +159,25 @@ describe('filesystem state service: discovery, sidecars and holders', () => {
       expect(events('fs.sessionChanged')).toEqual([]);
     });
 
+    // Debt wave 6: at a cold start the host emitted every fs.sessionChanged twice, once from this pass and once from
+    // main's scan queued behind it.
+    it.each(['before the start-up listing begins', 'while the start-up listing is in flight'])('main\'s fs.scan arriving %s summarises and emits each transcript once', async (when) => {
+      await threeSessions();
+      const listing = await new Discovery(fixture.paths).list();
+      let release!: (files: ListedTranscript[]) => void;
+      const list = vi.spyOn(Discovery.prototype, 'list').mockReturnValueOnce(new Promise((resolve) => (release = resolve)));
+      const reads = vi.spyOn(Discovery.prototype, 'summarizeOne');
+      service = new FsService({ paths: fixture.paths, emit: (name, payload) => void emitted.push({ name, payload } as Emitted), watch: deafWatch });
+      const starting = service.start();
+      if (when.startsWith('while')) await expect.poll(() => list.mock.calls.length).toBe(1);
+      const scanning = service.scan([]); // a cold index: main knows nothing
+      release(listing);
+      await starting;
+      expect(await scanning).toMatchObject({ sessions: 3, changed: 3 });
+      expect(events('fs.sessionChanged').map((e) => e.summary.sessionId).sort()).toEqual([S1, S2, S3].sort());
+      expect(reads).toHaveBeenCalledTimes(3);
+    });
+
     it('without any fs.scan from main, the fallback pass summarises and emits everything once the fallback delay has passed', async () => {
       expect(START_SCAN_FALLBACK_MS).toBe(3_000);
       await threeSessions();
