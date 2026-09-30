@@ -274,9 +274,51 @@ describe('custody: main configures the host with the copy MAWS keeps', () => {
     await expect(h.configure.launchGate()).resolves.toBeNull();
   });
 
-  it('a crashed host does not hold the gate: it answers custody’s verdict', async () => {
-    const h = harness('crashed', undefined, async (version) => missing(version));
-    await expect(h.configure.launchGate()).resolves.toMatchObject({ reason: 'binary_missing' });
+  // review fix: the gate fails closed; a crashed host holds no configuration, so nothing launches, at once and in words
+  it('a crashed host refuses at once, naming its state; applied rejects the same way, even for a change made while it is down', async () => {
+    const h = harness('crashed', undefined, async (version) => ok(version));
+    await expect(h.configure.launchGate()).resolves.toEqual({ status: 'refused', reason: 'host_unavailable', message: 'The engine host is crashed and holds no engine configuration. Restart MAWS.' });
+    h.change(engine({ binaryPath: '/opt/claude' }));
+    await expect(h.configure.applied()).rejects.toThrow('The engine host is crashed and holds no engine configuration. Restart MAWS.');
+    expect(h.dispatch).not.toHaveBeenCalled();
+  });
+
+  // review fix: answered is not applied; a host whose configure push failed still holds its installer default
+  it('a failed push refuses the gate with the push’s words, though custody is ok; a later push that lands lets it pass', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const dispatch = vi.fn(async (): Promise<CommandResult<'engine.configure'>> => ({ ok: false, error: { code: 'timeout', message: 'engine-host did not answer engine.configure within 10 s' } }));
+    const h = harness('ready', dispatch, async (version) => ok(version));
+    await expect(h.configure.launchGate()).resolves.toEqual({ status: 'refused', reason: 'host_unavailable', message: 'The engine host did not take the engine configuration: engine-host did not answer engine.configure within 10 s' });
+    await expect(h.configure.applied()).rejects.toThrow('engine-host did not answer engine.configure within 10 s');
+    dispatch.mockResolvedValue({ ok: true, value: INFO });
+    h.moveHost('restarting');
+    h.moveHost('ready');
+    await expect(h.configure.launchGate()).resolves.toBeNull();
+    warn.mockRestore();
+  });
+
+  // review fix: an unexpected custody failure is the coordinator's bounded error, never an unhandled rejection
+  it('a custody that rejects pushes nothing without a chosen path, refuses the gate with its words, and rejects applied and custody', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const unhandled = vi.fn();
+    process.on('unhandledRejection', unhandled);
+    try {
+      const h = harness('ready', undefined, () => Promise.reject(new Error('EIO: i/o error')));
+      const refusal = { status: 'refused', reason: 'binary_missing', message: "MAWS could not check its copy of Claude Code 2.1.283 (EIO: i/o error). Restart MAWS, or choose a binary path in Settings › Engine." };
+      await expect(h.configure.launchGate()).resolves.toEqual(refusal);
+      await expect(h.configure.applied()).rejects.toThrow(refusal.message);
+      await expect(h.configure.custody()).rejects.toThrow(refusal.message);
+      expect(h.dispatch).not.toHaveBeenCalled(); // never binaryPath null: the host would fall back to the installer's file
+      h.change(engine({ binaryPath: '/opt/claude' }));
+      await h.configure.applied(); // a chosen path goes as chosen
+      expect(h.dispatch).toHaveBeenCalledExactlyOnceWith({ binaryPath: '/opt/claude', expectedVersion: '2.1.283' });
+      await expect(h.configure.launchGate()).resolves.toBeNull();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(unhandled).not.toHaveBeenCalled();
+    } finally {
+      process.off('unhandledRejection', unhandled);
+      warn.mockRestore();
+    }
   });
 
   it('without custody (MAWS_E2E, replay) the gate passes at once, custody answers null and the host keeps ENGINE_BIN (binaryPath null)', async () => {

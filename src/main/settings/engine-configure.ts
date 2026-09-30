@@ -61,39 +61,72 @@ const settingsKey = ({ engine }: Settings) => `${engine.binaryPath ?? ''}\0${eng
 // C12 end
 
 export function startEngineConfigure(deps: EngineConfigureDeps): EngineConfigure {
-  // C12 start: the configure push, serialized behind custody
-  const custodies = new Map<string, Promise<Custody>>(); // one custody per version per app run
-  const custodyOf = (version: string) => {
+  // C12 start: the configure push, serialized behind custody. Each push's result is recorded for the settings and the
+  // host generation it stood for; `applied`, the launch gate and the Settings row read one verdict from it (review fix:
+  // answered is not applied, and a crashed host or a custody that failed is a verdict, not a wait).
+  type CustodyAnswer = Custody | { state: 'failed'; message: string };
+  const custodies = new Map<string, Promise<CustodyAnswer>>(); // one custody per version per app run, never rejecting
+  const custodyDone = new Set<string>(); // versions whose custody has answered
+  const custodyOf = (version: string): Promise<CustodyAnswer> => {
     let pending = custodies.get(version);
     if (!pending) {
-      custodies.set(version, (pending = deps.custody!(version)));
-      void pending.then(() => custodyDone.add(version));
+      pending = deps.custody!(version).then(
+        (c): CustodyAnswer => c,
+        (error: unknown): CustodyAnswer => {
+          console.warn('[custody] the check failed', error);
+          const why = error instanceof Error ? error.message : String(error);
+          return { state: 'failed', message: `MAWS could not check its copy of Claude Code ${version} (${why}). Restart MAWS, or choose a binary path in Settings › Engine.` };
+        },
+      );
+      custodies.set(version, pending);
+      void pending.then(() => {
+        custodyDone.add(version);
+        notify();
+      });
     }
     return pending;
   };
-  const custodyDone = new Set<string>(); // versions whose custody has answered
+  // What the last push (or the push custody's failure withheld) stood for and came to.
+  interface Pushed { key: string; generation: number; custody: CustodyAnswer | null; applied: boolean; pushError: string | null }
   let generation = 0; // host generations seen ready; each starts unconfigured
-  let pushedFor: { key: string; generation: number } | null = null; // the settings the last answered push stood for
-  let outcome: { key: string; error: string | null } | null = null; // what that answer means for `applied`
-  let firstAnswered = false;
+  let last: Pushed | null = null;
   let pumping = false;
   const waiters = new Set<() => void>();
   const notify = () => [...waiters].forEach((check) => check());
-  const hostReady = () => deps.hostState().state === 'ready';
-  // Nothing is left to push for the settings as they stand: the host holds them, or cannot take a push right now.
-  const settled = () => !pumping && (!hostReady() || (pushedFor?.key === settingsKey(deps.settings()) && pushedFor.generation === generation));
-  // true once `done` holds, false when CONFIGURE_WAIT_MS passes first
-  const until = (done: () => boolean): Promise<boolean> =>
+  const hostState = () => deps.hostState().state;
+  const seconds = CONFIGURE_WAIT_MS / 1000;
+
+  // The verdict for settings.engine as it stands: still to come, or what the gate and `applied` answer.
+  type Verdict = { kind: 'pending' } | { kind: 'done'; refusal: Omit<GateRefusal, 'status'> | null; appliedError: string | null };
+  const verdict = (): Verdict => {
+    if (hostState() === 'crashed') {
+      const message = 'The engine host is crashed and holds no engine configuration. Restart MAWS.';
+      return { kind: 'done', refusal: { reason: 'host_unavailable', message }, appliedError: message };
+    }
+    if (hostState() !== 'ready' || pumping || last === null || last.key !== settingsKey(deps.settings()) || last.generation !== generation) return { kind: 'pending' };
+    const chosen = deps.settings().engine.binaryPath !== null;
+    const c = last.custody;
+    if (!chosen && c !== null && c.state === 'failed') return { kind: 'done', refusal: { reason: 'binary_missing', message: c.message }, appliedError: c.message };
+    const custodyRefused = !chosen && c !== null && c.state !== 'ok' && c.state !== 'failed' ? custodyRefusal(c) : null;
+    if (!last.applied) {
+      const message = `The engine host did not take the engine configuration: ${last.pushError}`;
+      return { kind: 'done', refusal: custodyRefused ?? { reason: 'host_unavailable', message }, appliedError: custodyRefused?.message ?? last.pushError };
+    }
+    return { kind: 'done', refusal: custodyRefused, appliedError: custodyRefused?.message ?? null };
+  };
+  // The verdict once it is in, or null when CONFIGURE_WAIT_MS passes first; a waiter that times out is removed.
+  const settle = (): Promise<Extract<Verdict, { kind: 'done' }> | null> =>
     new Promise((resolve) => {
       const timer = setTimeout(() => {
         waiters.delete(check);
-        resolve(false);
+        resolve(null);
       }, CONFIGURE_WAIT_MS);
       const check = () => {
-        if (!done()) return;
+        const v = verdict();
+        if (v.kind === 'pending') return;
         clearTimeout(timer);
         waiters.delete(check);
-        resolve(true);
+        resolve(v);
       };
       waiters.add(check);
       check();
@@ -101,38 +134,42 @@ export function startEngineConfigure(deps: EngineConfigureDeps): EngineConfigure
   // What a wait that ran out was waiting on: the copy for the pin, else the host in the state it is in.
   const stalled = (): Omit<GateRefusal, 'status'> => {
     const version = deps.settings().engine.pinnedVersion;
-    const seconds = CONFIGURE_WAIT_MS / 1000;
-    if (deps.custody && !custodyDone.has(version)) return { reason: 'binary_missing', message: `MAWS's copy of Claude Code ${version} was not ready within ${seconds} s. Try again in a moment, or restart MAWS.` };
-    return { reason: 'host_unavailable', message: `The engine host is ${deps.hostState().state} and did not take the engine configuration within ${seconds} s. Try again once it is ready, or restart MAWS.` };
+    if (deps.custody && deps.settings().engine.binaryPath === null && !custodyDone.has(version)) return { reason: 'binary_missing', message: `MAWS's copy of Claude Code ${version} was not ready within ${seconds} s. Try again in a moment, or restart MAWS.` };
+    return { reason: 'host_unavailable', message: `The engine host is ${hostState()} and did not take the engine configuration within ${seconds} s. Try again once it is ready, or restart MAWS.` };
   };
 
   const pump = async () => {
     if (pumping) return;
     pumping = true;
     try {
-      while (hostReady()) {
+      while (hostState() === 'ready') {
         const settings = deps.settings();
         const key = settingsKey(settings);
-        if (pushedFor?.key === key && pushedFor.generation === generation) break;
+        if (last?.key === key && last.generation === generation) break;
         const { binaryPath, pinnedVersion } = settings.engine;
-        const custody = deps.custody ? await custodyOf(pinnedVersion) : null; // without custody nothing is awaited: the push goes at once
+        // custody for the pin, unless the owner chose a path (used as chosen) or custody does not run; without an await
+        // the push goes at once
+        const custody = deps.custody && binaryPath === null ? await custodyOf(pinnedVersion) : null;
         if (settingsKey(deps.settings()) !== key) continue; // the latest settings win
-        if (!hostReady()) break;
+        if (hostState() !== 'ready') break;
         const pushGeneration = generation;
-        let error = binaryPath === null && custody !== null && custody.state !== 'ok' ? custody.message : null;
+        if (custody !== null && custody.state === 'failed') {
+          // nothing to push: binaryPath null would put the host on the installer's file
+          last = { key, generation: pushGeneration, custody, applied: false, pushError: custody.message };
+          continue;
+        }
+        let pushError: string | null = null;
         try {
           const result = await deps.dispatch({ binaryPath: binaryPath ?? custody?.path ?? null, expectedVersion: pinnedVersion });
           if (!result.ok) {
             console.warn('[settings] engine.configure failed', result.error);
-            error ??= result.error.message;
+            pushError = result.error.message;
           }
         } catch (failure) {
           console.warn('[settings] engine.configure failed', failure);
-          error ??= failure instanceof Error ? failure.message : String(failure);
+          pushError = failure instanceof Error ? failure.message : String(failure);
         }
-        pushedFor = { key, generation: pushGeneration };
-        outcome = { key, error };
-        firstAnswered = true;
+        last = { key, generation: pushGeneration, custody, applied: pushError === null, pushError };
       }
     } finally {
       pumping = false;
@@ -158,7 +195,7 @@ export function startEngineConfigure(deps: EngineConfigureDeps): EngineConfigure
       // C12 start: each generation is configured again, through the serialized push
       if (state.state === 'ready') generation += 1;
       if (state.state === 'ready') void pump();
-      notify(); // a host that went away holds no gate
+      notify(); // a crashed host is a verdict
       // C12 end
       if (state.state === 'ready') sendPolicy(budgetPolicyOf(deps.settings(), deps.totalMemBytes)); // C12
     }),
@@ -166,30 +203,36 @@ export function startEngineConfigure(deps: EngineConfigureDeps): EngineConfigure
       // C12 start
       if (deps.custody) void custodyOf(settings.engine.pinnedVersion); // a pin change runs custody before its push
       void pump();
+      notify(); // a change made while the host is down is answered from its state
       const next = budgetPolicyOf(settings, deps.totalMemBytes);
       if (!samePolicy(next, policy)) sendPolicy(next);
       // C12 end
     }),
   ];
   // C12 start
-  if (hostReady()) generation += 1;
+  if (hostState() === 'ready') generation += 1;
   void pump();
-  if (hostReady()) sendPolicy(policy);
+  if (hostState() === 'ready') sendPolicy(policy);
   return {
     stop: () => offs.forEach((off) => off()),
     applied: async () => {
-      if (!(await until(() => settled() && outcome?.key === settingsKey(deps.settings())))) throw new Error(stalled().message);
-      if (outcome!.error !== null) throw new Error(outcome!.error);
+      const v = await settle();
+      if (v === null) throw new Error(stalled().message);
+      if (v.appliedError !== null) throw new Error(v.appliedError);
     },
-    custody: async () => (deps.custody ? custodyOf(deps.settings().engine.pinnedVersion) : null),
+    custody: async () => {
+      if (!deps.custody) return null;
+      const c = await custodyOf(deps.settings().engine.pinnedVersion);
+      if (c.state === 'failed') throw new Error(c.message);
+      return c;
+    },
     launchGate: async () => {
       if (!deps.custody) return null;
-      // custody's answer and the first push's (a launch in the first seconds after a first start waits for the copy and
-      // for the host to hold its path); a crashed host holds nothing up, and nothing waits past CONFIGURE_WAIT_MS
-      if (!(await until(() => deps.hostState().state === 'crashed' || (firstAnswered && settled())))) return { status: 'refused', ...stalled() };
-      const { binaryPath, pinnedVersion } = deps.settings().engine;
-      if (binaryPath !== null) return null; // a path the owner chose is used as chosen
-      return custodyRefusal(await custodyOf(pinnedVersion));
+      // custody's answer and the push for the settings as they stand (a launch in the first seconds after a first start
+      // waits for the copy and for the host to hold its path); it fails closed, and never waits past CONFIGURE_WAIT_MS
+      const v = await settle();
+      if (v === null) return { status: 'refused', ...stalled() };
+      return v.refusal === null ? null : { status: 'refused', ...v.refusal };
     },
   };
   // C12 end
