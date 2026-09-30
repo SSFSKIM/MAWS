@@ -461,7 +461,9 @@ test('nine sessions under a memory budget: releases, the released surfaces, Send
     await test.step('the budget below the protected sessions’ sum: every other session released, then one banner', async () => {
       const rows = await sessions(page);
       const protectedKiB = rows.filter((s) => protectedLabels.includes(labels.get(s.appSessionId) ?? '') && live(s)).reduce((sum, s) => sum + (s.memory.treeRssKiB ?? 0), 0);
-      const lowMiB = Math.max(512, Math.floor(protectedKiB / 1024) - 100);
+      // Half the protected sum: idle trees shrink as macOS compresses their pages (a run saw the five fall 170 MiB in a
+      // minute), so a margin of a few percent can leave the sum under the budget before the banner's second sample.
+      const lowMiB = Math.max(512, Math.floor(protectedKiB / 1024 / 2));
       const baseline = await identity();
       const at = Date.now();
       value(await invoke(page, 'settings.set', { engine: { memoryBudgetMiB: lowMiB } }));
@@ -552,6 +554,11 @@ test('nine sessions under a memory budget: releases, the released surfaces, Send
       record('settingsField', { typed: '12.5', memoryBudgetMiB: 12_800 });
     });
   } finally {
+    // What the host and the page showed last, for a run that stopped early: the budget events and the banner host.
+    const events = await budgetEvents(page).catch(() => []);
+    record('budgetEvents', events.map((e) => ({ at: e.receivedAt, limitKiB: e.limitKiB, totalKiB: e.totalKiB, over: e.over, overWithoutCandidate: e.overWithoutCandidate, candidates: e.candidates, settling: e.settling, releasing: e.releasing, blocked: e.blocked.length })));
+    record('bannerHost', await page.locator('[data-banner-host]').innerText().catch(() => null));
+    await page.screenshot({ path: join(scratch.root, 'last.png') }).catch(() => undefined);
     // The budget back to its default and every session stopped, whatever happened above.
     await invoke(page, 'settings.set', { engine: { memoryBudgetMiB: null } }).catch(() => undefined);
     for (const id of Object.values(ids)) {
