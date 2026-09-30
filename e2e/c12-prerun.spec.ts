@@ -83,10 +83,16 @@ test.afterEach(async ({}, testInfo) => {
   const checks = (rec.read().ownerFileCheck ?? {}) as Record<string, { before: string[] }>;
   rec.note('ownerFileCheck', { ...checks, [testInfo.title]: { ...checks[testInfo.title], after, pinAfter: lsPin() } });
   if (!REALSTORE) rec.note('spend', spent());
-  rec.note(`result:${testInfo.title}`, { status: testInfo.status, durationMs: testInfo.duration, error: testInfo.error?.message?.split('\n').slice(0, 4).join(' / ') ?? null });
+  // every window this test opened, closed or not: its console errors and uncaught errors from its first load on
+  const errors = launches.splice(0).flatMap((read) => read());
+  rec.note(`result:${testInfo.title}`, { status: testInfo.status, durationMs: testInfo.duration, consoleErrors: errors, error: testInfo.error?.message?.split('\n').slice(0, 4).join(' / ') ?? null });
   rec.publish();
   expect(after, 'no scratch path in the owner’s ~/.claude.json after the test').toEqual([]);
+  expect(errors, 'no console error in any window the test opened').toEqual([]);
 });
+
+// The console-error readers of every launch in the current test, checked in afterEach.
+const launches: (() => string[])[] = [];
 
 // ---- the app -------------------------------------------------------------------------------------------------------
 
@@ -108,6 +114,7 @@ const records = async (page: Page, includeArchived = false) => value(await invok
 // for its children.
 async function open(extraEnv: Record<string, string> = {}): Promise<MawsLaunch> {
   const maws = await launchMaws({ userData: scratch.userData, env: { MAWS_HARNESS: '0', CLAUDE_CONFIG_DIR: scratch.config, ...extraEnv } });
+  launches.push(maws.consoleErrors);
   await expect(main(maws.page)).toBeVisible({ timeout: 60_000 });
   value(await invoke(maws.page, 'settings.set', { engine: { subagentModel: 'haiku' } }));
   rec.note('build', { packaged: maws.packaged, executable: process.env.MAWS_E2E_EXECUTABLE ?? 'out/main/index.js' });
@@ -203,6 +210,7 @@ test('§10.1 real store, read only', async () => {
     const page = await app.firstWindow();
     const firstWindowMs = Date.now() - launchedAt;
     const errors = await collectConsoleErrors(page);
+    launches.push(errors);
     await expect(main(page)).toBeVisible({ timeout: 60_000 });
     const shellMs = Date.now() - launchedAt;
     const board = main(page).getByRole('list', { name: 'Overview' });
@@ -274,7 +282,7 @@ async function addProject(page: Page, repo: string): Promise<void> {
 // "+" on the project, the unstarted tab's intent (Sonnet in the given mode, as the widgets write it), optionally a new
 // worktree from the Location chip, the first message sent from the composer, the trust card answered when the folder is
 // not yet trusted (a screenshot of it first when asked), and the session waited to `ready`.
-async function plus(page: Page, repo: string, first: string, o: { mode?: string; worktree?: string; shootTrust?: string; wait?: boolean } = {}): Promise<string> {
+async function plus(page: Page, repo: string, first: string, o: { mode?: string; worktree?: string; shootTrust?: string; requireTrust?: boolean; wait?: boolean } = {}): Promise<string> {
   const s = spent();
   if (s.usd >= MAX_USD) throw new Error(`spend limit: US$${s.usd} of US$${MAX_USD}`);
   await addProject(page, repo);
@@ -295,6 +303,11 @@ async function plus(page: Page, repo: string, first: string, o: { mode?: string;
   await send(page, first);
   const card = page.getByRole('group', { name: 'Trust this folder?' });
   await expect.poll(async () => (await card.isVisible()) || (await statusOrNull(page, id!)) !== null, { timeout: 60_000 }).toBe(true);
+  if (o.requireTrust) {
+    // a fresh launch that passes through the card: no engine process for this session before Trust and start
+    await expect(card, 'the trust card for an untrusted folder').toBeVisible();
+    expect(await statusOrNull(page, id!), 'no launch before the trust card is answered').toBeNull();
+  }
   if (await card.isVisible()) {
     if (o.shootTrust) rec.note(`${o.shootTrust}.screenshots`, await shoot(page, o.shootTrust));
     await card.getByRole('button', { name: 'Trust and start' }).click();
@@ -447,7 +460,11 @@ test('§10.2 a new worktree from "+", trust attested, project settings load as i
       window.maws.on('session.setup', (e) => log.push(e));
     });
     const name = `deep-${Date.now().toString(36).slice(-4)}`; // a fresh worktree per run
-    const id = await plus(page, repo, 'Reply with exactly: DEEP READY', { mode: 'auto', worktree: name, shootTrust: '10.2-trust-card' });
+    const markers = () => (existsSync(join(scratch.root, 'hooks')) ? readdirSync(join(scratch.root, 'hooks')) : []);
+    const markersBefore = new Set(markers());
+    const trustBefore = value(await invoke(page, 'session.trust.check', { directory: repo }));
+    expect(trustBefore.trusted, 'the sentinel repository starts untrusted (a fresh scratch root)').toBe(false);
+    const id = await plus(page, repo, 'Reply with exactly: DEEP READY', { mode: 'auto', worktree: name, shootTrust: '10.2-trust-card', requireTrust: true });
     await idle(page, id);
     const status = await statusOf(page, id);
     const worktree = join(repo, '.claude/worktrees', name);
@@ -458,24 +475,42 @@ test('§10.2 a new worktree from "+", trust attested, project settings load as i
     const record = value(await invoke(page, 'session.get', { appSessionId: id as AppSessionId }))!;
     state.set('deep.engineSessionId', record.engineSessionId ?? '');
     const mawsInit = loaded(initOf(status.journalPath));
+    const mawsHooks = markers().filter((m) => !markersBefore.has(m)); // before the terminal runs
     // the terminal in the same worktree under the same home, after MAWS's trust step
     const terminal = printRun(scratch.config, worktree, 'Reply with exactly: TERMINAL OK', ['--setting-sources', 'user,project,local']);
     terminalCost('10.2 terminal compare (-p)', terminal.costUsd);
     const termInit = loaded(terminal.init);
     const setup = await page.evaluate(() => (window as unknown as { __setup: { appSessionId: string; phase: string }[] }).__setup);
     const worktrees = git(repo, 'worktree', 'list', '--porcelain');
-    const hooks = readdirSync(join(scratch.root, 'hooks'));
-    const rules = await invoke(page, 'session.listPermissionRules', { appSessionId: id as AppSessionId });
+    const hooks = markers().filter((m) => !markersBefore.has(m));
+    const rules = value(await invoke(page, 'session.listPermissionRules', { appSessionId: id as AppSessionId }));
+    // the attestation: main's trust read now finds the repository trusted in the scratch home's global config, and a
+    // launch of this session carried `initialize.workspaceTrust` (C10's bootstrap carries it; the engine persists it)
+    const trustAfter = value(await invoke(page, 'session.trust.check', { directory: worktree }));
+    const journalDir = join(status.journalPath, '..');
+    const attested = readdirSync(journalDir)
+      .filter((f) => f.endsWith('.jsonl'))
+      .flatMap((f) => readJournal(join(journalDir, f)))
+      .filter((r) => r.direction === 'out' && r.frame.type === 'control_request' && (r.frame.request as { subtype?: string } | undefined)?.subtype === 'initialize')
+      .map((r) => (r.frame.request as { workspaceTrust?: { accepted: boolean; directory: string } }).workspaceTrust ?? null)
+      .filter((t) => t !== null);
     rec.note('10.2', {
       appSessionId: id, cwd: status.cwd, worktreeListed: worktrees.includes(worktree), branch: /branch refs\/heads\/(\S+)/.exec(worktrees.split('\n\n').find((b) => b.includes(worktree)) ?? '')?.[1] ?? null,
       setupPhases: setup.filter((e) => e.appSessionId === id).map((e) => e.phase), maws: mawsInit, terminal: termInit,
       same: { mcp: JSON.stringify(mawsInit?.mcp) === JSON.stringify(termInit?.mcp), commands: JSON.stringify(mawsInit?.commands) === JSON.stringify(termInit?.commands), agents: JSON.stringify(mawsInit?.agents) === JSON.stringify(termInit?.agents), plugins: JSON.stringify(mawsInit?.plugins) === JSON.stringify(termInit?.plugins) },
       commandsOnlyInMaws: mawsInit?.commands.filter((c) => !termInit?.commands.includes(c)) ?? [], commandsOnlyInTerminal: termInit?.commands.filter((c) => !mawsInit?.commands.includes(c)) ?? [],
-      hookFiles: hooks.length, allowRuleListed: JSON.stringify(rules).includes('C12_SENTINEL'),
+      hookMarkers: { afterMaws: mawsHooks.length, afterTerminal: hooks.length }, allowRuleListed: JSON.stringify(rules).includes('Bash(echo C12_SENTINEL:*)'),
+      trust: { before: { trusted: trustBefore.trusted }, after: { trusted: trustAfter.trusted, keyKind: trustAfter.keyKind, configInScratch: trustAfter.configPath.startsWith(scratch.config) }, workspaceTrustSent: attested },
       screenshots: await shoot(page, '10.2-session'),
       consoleErrors: maws.consoleErrors(),
     });
     expect(status.cwd).toBe(worktree);
+    expect.soft(trustAfter.trusted, 'the repository reads trusted after Trust and start').toBe(true);
+    expect.soft(trustAfter.configPath.startsWith(scratch.config), 'the trust was written to the scratch home').toBe(true);
+    expect.soft(attested.some((t) => t.accepted === true), 'a launch carried initialize.workspaceTrust accepted').toBe(true);
+    expect.soft(mawsHooks.length, 'the project SessionStart hook ran for MAWS’s launch').toBeGreaterThanOrEqual(1);
+    expect.soft(hooks.length, 'and once more for the terminal run').toBeGreaterThan(mawsHooks.length);
+    expect.soft(JSON.stringify(rules), 'the project allow rule is listed').toContain('Bash(echo C12_SENTINEL:*)');
     expect.soft(mawsInit?.mcp, 'MCP servers as the terminal loads them').toEqual(termInit?.mcp);
     expect.soft(mawsInit?.mcp).toContain('c12-sentinel:connected');
     expect.soft(mawsInit?.plugins, 'plugins as the terminal loads them').toEqual(termInit?.plugins);
@@ -690,6 +725,11 @@ test('§10.4 one deep session: a relay to a running background child, Review wit
       await log.until('the child finished', () => childEndedAt(), 240_000);
       await log.idle(240_000);
       expect(inboxAt, 'the child received the relayed message (its inbox)').not.toBeNull();
+      // C8-R: delivered live, or the permitted fallback: forwarded, with the child's disk attachment and the follow's state
+      const forwardedLine = history.some((l) => /sent it with SendMessage/.test(l.v));
+      const diskAttachment = (attachment ?? []).some((a) => a.attachment === 'queued_command');
+      const following = follow.some((f) => f.state === 'following');
+      expect(deliveredAt !== null || (forwardedLine && diskAttachment && following), `the relay reached delivered, or forwarded with the disk attachment and the follow (${JSON.stringify({ deliveredAt, forwardedLine, diskAttachment, following })})`).toBe(true);
     });
     writeFileSync(stop, '');
 
@@ -876,6 +916,9 @@ test('§10.6 in brief on the owner build: one release and its Send-to-resume; th
       expect(others).toEqual(['ready', 'ready']);
       expect(attention).toBe(0);
       expect(reconnect).toBe(true);
+      const release = out.release as { userFrames: number; reply: string | null };
+      expect(release.userFrames, 'the message was delivered once (one user frame in the resumed launch)').toBe(1);
+      expect(release.reply ?? '', 'the resumed session answered the message').toContain('X1 BACK');
     });
 
     await step('the quit question names a turn in flight, background work and a busy terminal; cancel, then quit when idle', async () => {
@@ -1208,6 +1251,8 @@ test('§10.9 queue, steer, stop and resume as labelled; a paused queue survives 
       await page.keyboard.insertText(text);
     };
     const userWrites = async () => readJournal((await statusOf(page, id)).journalPath).filter((r) => r.direction === 'out' && r.frame.type === 'user').map((r) => r.frame as { priority?: string; message?: { content?: unknown } });
+    // how many times a message's text went out on the wire as a user frame
+    const writesOf = async (text: string) => (await userWrites()).filter((u) => JSON.stringify(u.message?.content ?? '').includes(text)).length;
 
     await step('Queue while a turn runs, sent when it ends', async () => {
       await log.pull();
@@ -1221,7 +1266,9 @@ test('§10.9 queue, steer, stop and resume as labelled; a paused queue survives 
       await idle(page, id, 180_000);
       await expect(list()).toHaveCount(0, { timeout: 60_000 });
       await idle(page, id, 180_000);
-      out.queue = { label: 'Queue', queuedShown: '1 queued', sentAfterTurn: JSON.stringify(await userWrites()).includes('QUEUED ONE') };
+      const written = await writesOf('QUEUED ONE');
+      out.queue = { label: 'Queue', queuedShown: '1 queued', writtenToTheWire: written };
+      expect(written, 'the queued message reached the wire exactly once').toBe(1);
     });
 
     await step('Steer (⌥Enter) folds into the running turn', async () => {
@@ -1254,11 +1301,14 @@ test('§10.9 queue, steer, stop and resume as labelled; a paused queue survives 
       await idle(page, id);
       const resumeLabel = await control().innerText();
       const shots = await shoot(page, '10.9-queue-paused');
+      expect(await writesOf('AFTER STOP'), 'nothing of the paused message went out before Resume').toBe(0);
       if (resumeLabel.trim() === 'Resume') await control().click();
       else await list().getByRole('button', { name: 'Resume' }).click();
       await expect(list()).toHaveCount(0, { timeout: 60_000 });
       await idle(page, id, 180_000);
-      out.stopResume = { stopLabel, resumeLabel, releasedAfterResume: JSON.stringify(await userWrites()).includes('AFTER STOP'), screenshots: shots };
+      const released = await writesOf('AFTER STOP');
+      out.stopResume = { stopLabel, resumeLabel, writtenToTheWireAfterResume: released, screenshots: shots };
+      expect(released, 'the paused message reached the wire exactly once, after Resume').toBe(1);
       expect(stopLabel.trim()).toBe('Stop');
       expect(resumeLabel.trim()).toBe('Resume');
     });
@@ -1349,6 +1399,7 @@ test('§10.9 queue, steer, stop and resume as labelled; a paused queue survives 
 test('§10.10 light is the default on a fresh profile; dark switches cleanly and back', async () => {
   test.skip(REALSTORE, 'the real-store run takes only its own case');
   const maws = await launchMaws({ env: { MAWS_HARNESS: '0' } }); // a fresh profile of its own, no engine launched
+  launches.push(maws.consoleErrors);
   const { page, app } = maws;
   try {
     await expect(main(page)).toBeVisible({ timeout: 60_000 });
