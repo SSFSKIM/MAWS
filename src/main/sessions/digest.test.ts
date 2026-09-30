@@ -57,6 +57,17 @@ describe('digest fold', () => {
     expect(run([ev('turn.started', {}), ev('turn.ended', { isError: true, terminalReason: 'aborted_streaming' })]).phase).toBe('idle');
   });
 
+  // Debt wave 5 (C5 · C6): an interrupt while a tool runs ends the turn `error_during_execution` with `aborted_tools`
+  // (pass2/per-task-stop-off.jsonl: the foreground `sleep 20` interrupted at seq 67, its result at seq 72), which is the
+  // human's stop, not a failure: the row and tab read idle, as the transcript's divider reads Stopped.
+  it('an interrupt during a tool (the recorded aborted_tools result) reads idle, not failed', () => {
+    const normalizer = new Normalizer({ appSessionId: APP, launchId: 'LAUNCH01', sessionId: null });
+    const events = loadJournal('pass2', 'per-task-stop-off').filter((row) => row.seq <= 72).flatMap((row) => normalizer.push(row));
+    const ended = events.findLast((e) => e.kind === 'turn.ended');
+    expect(ended).toMatchObject({ isError: true, terminalReason: 'aborted_tools' });
+    expect(run(events).phase).toBe('idle');
+  });
+
   // C12 start: the engine's state frames, which X6 turns on from C12 M5 (CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS), read
   // honestly beside the turn's own events (pass3/launch-env-state-events.jsonl: running, requires_action with its
   // can_use_tool, running, the result, then idle).
