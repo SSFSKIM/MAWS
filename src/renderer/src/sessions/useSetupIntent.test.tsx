@@ -15,7 +15,7 @@ import { beforeCloseUnstarted } from './setup-actions';
 import { closeDialog, useDialogs } from './dialogs';
 import { createUnstartedSession, retainsTab, unstartedTitle } from './connect';
 import { connectSetup, useSetup } from './store';
-import { useSetupIntent } from './useSetupIntent';
+import { modelsOf, useSetupIntent } from './useSetupIntent';
 import type { UseSetupIntent } from '../composer/setup-intent';
 
 const CATALOGUE: ModelCatalogue = {
@@ -153,6 +153,24 @@ describe('setup intent hook', () => {
     expect(fake.invoked('engine.models'), 'a patch that keeps the route reads nothing').toEqual([
       { refresh: false, gateway: 'direct' },
       { refresh: false, gateway: 'gateway' },
+    ]);
+  });
+
+  // Debt wave 4: the catalogue's effort levels reach C7's ModelInfo, so the model widget can lower an effort
+  it('keeps a catalogue entry’s effort levels, and drops a malformed list', () => {
+    const catalogue: ModelCatalogue = {
+      source: 'cached',
+      at: null,
+      models: [
+        { value: 'sonnet', displayName: 'Sonnet 5', supportedEffortLevels: ['low', 'medium', 'high'] },
+        { value: 'odd', displayName: 'Odd', supportedEffortLevels: [1, 'high'] },
+        { value: 'opus', displayName: 'Opus' },
+      ],
+    };
+    expect(modelsOf(catalogue)).toEqual([
+      { value: 'sonnet', displayName: 'Sonnet 5', supportedEffortLevels: ['low', 'medium', 'high'] },
+      { value: 'odd', displayName: 'Odd' },
+      { value: 'opus', displayName: 'Opus' },
     ]);
   });
 

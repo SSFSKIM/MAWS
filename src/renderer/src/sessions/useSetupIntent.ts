@@ -15,8 +15,8 @@ import { useSessions } from '../stores/sessions';
 import { patchIntent, startIntent, type HookResult } from './setup-actions';
 import { useSetup } from './store';
 
-// C7's `ModelInfo`: the catalogue fills `value`, `displayName` and the two capability flags and leaves `description`
-// and `supportedEffortLevels` absent (C7 then offers every effort level).
+// C7's `ModelInfo`: the catalogue fills `value`, `displayName`, the two capability flags and `supportedEffortLevels`
+// when the entry lists them, and leaves `description` absent (an entry without levels offers every effort level).
 export type { ModelInfo };
 
 export interface SetupIntentOptions {
@@ -62,11 +62,16 @@ export function locationsOf(input: { projectDirectory: string; intent: SetupInte
   return [directory, ...existing, template];
 }
 
+// The catalogue's entries as C7's `ModelInfo`. The entry schema is loose, so the engine's other `list_models` fields
+// ride along unchecked: `supportedEffortLevels` is kept when it is a list of strings, so the model widget lowers an
+// effort the chosen model does not list, as it does for a live session.
 export function modelsOf(catalogue: ModelCatalogue): ModelInfo[] {
   return catalogue.models.map((entry) => {
     const info: ModelInfo = { value: entry.value, displayName: entry.displayName };
     if (entry.supportsAutoMode !== undefined) info.supportsAutoMode = entry.supportsAutoMode;
     if (entry.supportsFastMode !== undefined) info.supportsFastMode = entry.supportsFastMode;
+    const levels: unknown = entry.supportedEffortLevels;
+    if (Array.isArray(levels) && levels.every((level) => typeof level === 'string')) info.supportedEffortLevels = levels;
     return info;
   });
 }
