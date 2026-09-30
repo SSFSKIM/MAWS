@@ -164,7 +164,7 @@ describe('EngineSession: the handshake, journal-before-normalise and the gateway
     expect(shape(journal)).toEqual(['meta:reconnect', 'meta:spawn', 'out:control_request/initialize', 'in:control_response', 'meta:initialize', 'meta:reconnect', 'out:control_request/get_status', 'in:control_response', 'meta:status_check', 'out:control_request/apply_flag_settings', 'in:control_response', 'out:control_request/get_context_usage']); // then the ready read
     expect(transport.requestsOf('apply_flag_settings')[0]!.request).toEqual({ subtype: 'apply_flag_settings', settings: { permissions: { allow: ['Bash(touch granted.txt)'] } } });
     expect(events.map((e) => e.kind === 'session.reconnect' && e.phase)).toEqual(['attempting', 'reconnected']);
-    expect(session.status()).toMatchObject({ process: 'ready', grants: ['Bash(touch granted.txt)'], keepAlive: ['grants'] });
+    expect(session.status()).toMatchObject({ process: 'ready', grants: ['Bash(touch granted.txt)'], keepAlive: [] });
   });
 
   it('retains the command catalogue: initialize commands and agents, system/init skills and terminal commands, commands_changed', async () => {
@@ -180,7 +180,7 @@ describe('EngineSession: the handshake, journal-before-normalise and the gateway
     await flush();
     expect(session.catalog()).toEqual({ commands: [{ name: 'x', description: 'X' }], agents: INIT_RESPONSE.agents, skills: ['dataviz'], terminalSlashCommands: ['doctor'], revision: 3 });
     // a system/init with no turn open is an engine-initiated turn: the turn keeps the process alive too
-    expect(session.status()).toMatchObject({ model: { resolved: 'claude-sonnet-5' }, mcpServers: [{ name: 'gh', status: 'connected', source: null }], keepAlive: ['turn', 'mcp_connected'] });
+    expect(session.status()).toMatchObject({ model: { resolved: 'claude-sonnet-5' }, mcpServers: [{ name: 'gh', status: 'connected', source: null }], keepAlive: ['turn'] });
   });
 });
 

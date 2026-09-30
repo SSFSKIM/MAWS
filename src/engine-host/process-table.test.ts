@@ -12,10 +12,9 @@ afterEach(() => {
 });
 
 describe('keep-alive reasons', () => {
-  it('names every reason §4.4 lists, in a fixed order, and none for an idle process', () => {
-    expect(keepAliveReasons({ turnOpen: false, backgroundTasks: 0, grants: 0, mcpServers: [], heldPeerMessages: 0 })).toEqual([]);
-    expect(keepAliveReasons({ turnOpen: true, backgroundTasks: 1, grants: 2, mcpServers: [{ status: 'connected' }], heldPeerMessages: 1 })).toEqual(['turn', 'background_tasks', 'grants', 'mcp_connected', 'held_peer_message']);
-    expect(keepAliveReasons({ turnOpen: false, backgroundTasks: 0, grants: 0, mcpServers: [{ status: 'pending' }, { status: 'failed' }], heldPeerMessages: 0 })).toEqual([]);
+  it('names every reason §4.4 lists as amended, in a fixed order, and none for an idle process', () => {
+    expect(keepAliveReasons({ turnOpen: false, backgroundTasks: 0, heldPeerMessages: 0 })).toEqual([]);
+    expect(keepAliveReasons({ turnOpen: true, backgroundTasks: 1, heldPeerMessages: 1 })).toEqual(['turn', 'background_tasks', 'held_peer_message']);
   });
 
   it('a session reports background_tasks after background_tasks_changed with one task and drops it when the list empties (pass1/subagent seq 171, 363)', async () => {
@@ -62,12 +61,12 @@ describe('keep-alive reasons', () => {
     expect(statuses.filter((st) => st.process === 'exited').every((st) => st.heldPeerMessages.length === 0)).toBe(true);
   });
 
-  it('grants and connected MCP servers keep a process', async () => {
+  it('grants and connected MCP servers no longer keep a process (§4.4 as amended, C12)', async () => {
     const s = scriptedSession({ session: { grants: { allow: ['Bash(ls)'] } } });
     await s.session.start();
     s.transport.push({ type: 'system', subtype: 'init', cwd: '/w', session_id: 's', tools: [], mcp_servers: [{ name: 'gh', status: 'connected', source: 'user' }], model: 'm', permissionMode: 'auto', slash_commands: [], claude_code_version: '2.1.283', output_style: 'default', uuid: 'i-1' });
     await flush();
-    expect(s.session.status().keepAlive).toEqual(['turn', 'grants', 'mcp_connected']); // the init opened an engine-initiated turn
+    expect(s.session.status().keepAlive).toEqual(['turn']); // the init opened an engine-initiated turn
   });
 });
 

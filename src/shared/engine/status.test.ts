@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { SessionRecordSchema, type SessionRecord } from '../graph/session';
-import { EngineSessionStatusSchema, toSessionRecordPatch, type EngineSessionStatus } from './status';
+import { EngineSessionStatusSchema, HardReasonSchema /* C12 */, toSessionRecordPatch, type EngineSessionStatus } from './status';
 
 const status = (over: Partial<EngineSessionStatus> = {}): EngineSessionStatus =>
   EngineSessionStatusSchema.parse({
@@ -10,7 +10,7 @@ const status = (over: Partial<EngineSessionStatus> = {}): EngineSessionStatus =>
     gateway: { mode: 'gateway', baseUrl: 'http://127.0.0.1:8641', verified: 'routed', autoModeServer: 'enabled', localLane: null },
     subagentModel: null, modelOverrides: {}, engineVersion: '2.1.283', fileCheckpointing: true,
     fastMode: { state: null, disabledReason: null }, plugins: [], pluginErrors: [], pluginWarnings: [],
-    backgroundTasks: [], grants: [], mcpServers: [], heldPeerMessages: [], pendingRequests: 0, queue: { length: 0, paused: false }, keepAlive: [],
+    backgroundTasks: [], grants: [], mcpServers: [], heldPeerMessages: [], pendingRequests: 0, queue: { length: 0, paused: false }, keepAlive: [], busy: false, lastUsedAt: '2026-09-28T10:00:00.000Z', /* C12 */
     memory: { rssKiB: null, treeRssKiB: null, sampledAt: null }, journalPath: '/j', hostHooks: [], lastEventSeq: 0, trust: { attested: false, recorded: null } /* C10 */, ...over,
   });
 
@@ -56,4 +56,18 @@ describe('toSessionRecordPatch', () => {
     expect(EngineSessionStatusSchema.parse(s)).toEqual(s);
     expect(() => EngineSessionStatusSchema.parse({ ...s, gateway: { ...s.gateway, localLaneObserved: true } })).toThrow();
   });
+
+  // C12 start
+  it("keepAlive names the amended hard reasons only; busy and lastUsedAt are required; a budget exit carries its release (C12)", () => {
+    expect(HardReasonSchema.options).toEqual(['turn', 'busy', 'background_tasks', 'pending_request', 'queued_messages', 'held_peer_message', 'stateful_mcp']);
+    const s = status({ keepAlive: ['busy', 'stateful_mcp'], busy: true, process: 'exited', exit: { code: 0, signal: null, reason: 'budget', at: '2026-09-29T10:00:00.000Z', release: { limitKiB: 8_388_608, totalKiB: 9_000_000 } } });
+    expect(EngineSessionStatusSchema.parse(s)).toEqual(s);
+    expect(() => EngineSessionStatusSchema.parse({ ...s, keepAlive: ['grants'] })).toThrow();
+    expect(() => EngineSessionStatusSchema.parse({ ...s, keepAlive: ['mcp_connected'] })).toThrow();
+    const without = (key: string) => Object.fromEntries(Object.entries(s).filter(([k]) => k !== key));
+    expect(() => EngineSessionStatusSchema.parse(without('busy'))).toThrow();
+    expect(() => EngineSessionStatusSchema.parse(without('lastUsedAt'))).toThrow();
+    expect(() => EngineSessionStatusSchema.parse({ ...s, exit: { code: 0, signal: null, reason: 'stop', at: '2026-09-29T10:00:00.000Z' } })).toThrow(); // release is required (null when not a release)
+  });
+  // C12 end
 });

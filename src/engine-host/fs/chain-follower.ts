@@ -385,6 +385,7 @@ class FollowerCore {
         signal: null,
         reason: 'unknown',
         lostAttentionCount: 0,
+        budget: null, // C12
       };
     }
     return null;

@@ -161,7 +161,7 @@ describe('graph schemas accept and reject', () => {
         'api.retry': { attempt: 1, maxRetries: 3, retryDelayMs: 500, errorStatus: 529, error: 'overloaded' },
         'session.reconnect': { phase: 'reconnected', attempt: 2, maxAttempts: null, trigger: 'host_restart', reason: null },
         'notice.posted': { level: 'info', text: 'hi', key: null },
-        'process.exited': { code: 0, signal: null, reason: 'quit', lostAttentionCount: 0 },
+        'process.exited': { code: 0, signal: null, reason: 'quit', lostAttentionCount: 0, budget: null /* C12 */ },
         'frame.unknown': { frameType: 'wibble', subtype: null },
       };
       expect(Object.keys(samples).sort()).toEqual([...EVENT_KINDS].sort());

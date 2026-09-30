@@ -252,7 +252,7 @@ describe('turn boundaries', () => {
     b.turn('u1');
     b.toolUse('t1', 'Bash', { command: 'sleep 60' });
     prompt(b, 'u2', 'waiting'); // pending when the process dies: it stays pending
-    b.emit('process.exited', { code: null, signal: 'SIGKILL', reason: 'crash', lostAttentionCount: 0 });
+    b.emit('process.exited', { code: null, signal: 'SIGKILL', reason: 'crash', lostAttentionCount: 0, budget: null /* C12 */ });
     let state = reduce(b.events);
     const [one, two] = [turnId.ofMessage(uuid('u1')), turnId.ofMessage(uuid('u2'))];
     expect(state.turns.get(one)).toMatchObject({ state: 'closed', closedBy: 'stopped' });
@@ -279,7 +279,7 @@ describe('turn boundaries', () => {
     quiet.toolUse('t1', 'Bash', { command: 'ls' });
     quiet.result('t1', 'a.ts');
     quiet.text('m1', 0, 'Done.');
-    quiet.emit('process.exited', { code: null, signal: null, reason: 'unknown', lostAttentionCount: 0 });
+    quiet.emit('process.exited', { code: null, signal: null, reason: 'unknown', lostAttentionCount: 0, budget: null /* C12 */ });
     let state = reduce(quiet.events);
     expect(state.turns.get(turnId.ofMessage(uuid('u1')))).toMatchObject({ state: 'closed', closedBy: 'completed' });
     expect(find(rowsOf(state), 'divider')).toMatchObject({ state: 'completed' });
@@ -287,7 +287,7 @@ describe('turn boundaries', () => {
     denied.turn('u1');
     denied.toolUse('t1', 'Bash', { command: 'rm -rf x' });
     denied.result('t1', 'User rejected tool use', { isError: true, denial: 'user-rejected' });
-    denied.emit('process.exited', { code: null, signal: null, reason: 'unknown', lostAttentionCount: 0 });
+    denied.emit('process.exited', { code: null, signal: null, reason: 'unknown', lostAttentionCount: 0, budget: null /* C12 */ });
     state = reduce(denied.events);
     expect(state.turns.get(turnId.ofMessage(uuid('u1')))).toMatchObject({ state: 'closed', closedBy: 'stopped' });
   });
@@ -299,7 +299,7 @@ describe('turn boundaries', () => {
     const b = builder();
     b.turn('u1');
     b.text('m1', 0, 'Done.');
-    b.emit('process.exited', { code: null, signal: null, reason: 'unknown', lostAttentionCount: 0 });
+    b.emit('process.exited', { code: null, signal: null, reason: 'unknown', lostAttentionCount: 0, budget: null /* C12 */ });
     const live = rowsOf(reduce(b.events)).filter((row) => row.kind === 'error');
     expect(live.map((row) => (row as Extract<Row, { kind: 'error' }>).text)).toEqual(['Session process exited (unknown)']);
     const disk = rowsOf(reduce(b.events.map((event) => (event.kind === 'process.exited' ? { ...event, seq: null } : event))));

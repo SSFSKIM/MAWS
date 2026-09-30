@@ -395,7 +395,7 @@ describe('child turn closure', () => {
 
   it('the parent’s process.exited closes the child’s open turn as stopped, and is no row of the child’s', () => {
     const events = child('completed', 'subagent.finished').slice(0, -1);
-    const exit = builder('2026-09-28T10:00:09.000Z').emit('process.exited', { code: null, signal: 'SIGKILL', reason: 'crash', lostAttentionCount: 0 }, { id: 'exit' });
+    const exit = builder('2026-09-28T10:00:09.000Z').emit('process.exited', { code: null, signal: 'SIGKILL', reason: 'crash', lostAttentionCount: 0, budget: null /* C12 */ }, { id: 'exit' });
     const list = childRows([...events, exit]);
     expect(find(list, 'divider')).toMatchObject({ state: 'stopped', endedAt: exit.at });
     expect(kinds(list)).not.toContain('error');

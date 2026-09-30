@@ -35,7 +35,7 @@ const DEFAULTS: Partial<Record<EventKind, Record<string, unknown>>> = {
     usage: { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, thinkingTokens: null },
     permissionDenials: [], errors: [], userMessageUuids: [], origin: 'human', resultIndex: null, isEchoReceipt: false,
   },
-  'process.exited': { code: 0, signal: null, reason: 'quit', lostAttentionCount: 0 },
+  'process.exited': { code: 0, signal: null, reason: 'quit', lostAttentionCount: 0, budget: null /* C12 */ },
   'session.state': { state: 'idle' },
 };
 

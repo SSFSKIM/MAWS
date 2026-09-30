@@ -512,14 +512,16 @@ export class Normalizer {
         this.postTrustNotice(out, main); // C10: exited before answering initialize: nothing recorded
         const code = typeof meta.code === 'number' ? meta.code : null;
         const signal = stringOrNull(meta.signal);
-        const reason = typeof meta.reason === 'string' ? (meta.reason as 'quit' | 'stop' | 'archive' | 'crash' | 'unknown') : code === 0 && signal === null ? 'unknown' : 'crash';
-        out.emit({ kind: 'process.exited', code, signal, reason, lostAttentionCount: typeof meta.lostAttentionCount === 'number' ? meta.lostAttentionCount : 0 }, main);
+        const reason = typeof meta.reason === 'string' ? (meta.reason as 'quit' | 'stop' | 'archive' | 'crash' | 'unknown' | 'budget' /* C12 */) : code === 0 && signal === null ? 'unknown' : 'crash';
+        // C12: a release carries the budget and the sum it was made at (the exit row's `budget`)
+        const budget = reason === 'budget' ? budgetOf(meta.budget) : null;
+        out.emit({ kind: 'process.exited', code, signal, reason, lostAttentionCount: typeof meta.lostAttentionCount === 'number' ? meta.lostAttentionCount : 0, budget }, main);
         return;
       }
       case 'reconnect':
         out.emit({
           kind: 'session.reconnect', phase: meta.phase as 'attempting' | 'reconnected' | 'failed', attempt: typeof meta.attempt === 'number' ? meta.attempt : 1,
-          maxAttempts: typeof meta.maxAttempts === 'number' ? meta.maxAttempts : null, trigger: (meta.trigger ?? 'user') as 'user', reason: stringOrNull(meta.reason),
+          maxAttempts: typeof meta.maxAttempts === 'number' ? meta.maxAttempts : null, trigger: RECONNECT_TRIGGERS.has(meta.trigger as string) ? (meta.trigger as ReconnectTrigger) : 'user' /* C12: as recorded */, reason: stringOrNull(meta.reason),
         }, main);
         return;
       case 'notice': {
@@ -585,3 +587,14 @@ function laneOf(frame: StdoutFrame): ParentToolUseId | null {
   const parent = (frame as { parent_tool_use_id?: unknown }).parent_tool_use_id;
   return typeof parent === 'string' && parent.length > 0 ? (parent as ParentToolUseId) : null;
 }
+
+// C12 start: the exit row's `budget` (a release's budget and sum) and the reconnect row's trigger, as the host recorded
+// them; a trigger outside X1's set reads `user`, as every row did before C12 produced `process_exit`.
+type ReconnectTrigger = Extract<SessionEvent, { kind: 'session.reconnect' }>['trigger'];
+const RECONNECT_TRIGGERS: ReadonlySet<string> = new Set<ReconnectTrigger>(['process_exit', 'host_restart', 'transport_error', 'user']);
+
+function budgetOf(value: unknown): { limitKiB: number; totalKiB: number } | null {
+  const b = value as { limitKiB?: unknown; totalKiB?: unknown } | null | undefined;
+  return b && typeof b.limitKiB === 'number' && typeof b.totalKiB === 'number' ? { limitKiB: b.limitKiB, totalKiB: b.totalKiB } : null;
+}
+// C12 end

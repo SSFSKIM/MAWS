@@ -424,6 +424,31 @@ describe('normaliser: meta rows, system subtypes and the unknown', () => {
     expect(events[8]).toMatchObject({ reason: 'crash', signal: 'SIGKILL' });
   });
 
+  // C12 start
+  it("a release's exit row yields process.exited { reason: budget } with its budget and sum; every other exit carries budget null (C12)", () => {
+    const events = feed(make(), [
+      metaRow({ event: 'exit', code: 0, signal: null, reason: 'budget', lostAttentionCount: 0, budget: { limitKiB: 8_388_608, totalKiB: 9_000_000 } }),
+      metaRow({ event: 'exit', code: 0, signal: null, reason: 'stop', lostAttentionCount: 0, budget: null }),
+      metaRow({ event: 'exit', code: 0, signal: null, reason: 'stop', lostAttentionCount: 0 }),
+    ]);
+    expect(only(events, 'process.exited').map((e) => [e.reason, e.budget])).toEqual([
+      ['budget', { limitKiB: 8_388_608, totalKiB: 9_000_000 }],
+      ['stop', null],
+      ['stop', null],
+    ]);
+  });
+
+  it('the reconnect trigger is the one the host recorded (process_exit after a release); a row without one, or with a trigger X1 does not name, reads user (C12)', () => {
+    const events = feed(make(), [
+      metaRow({ event: 'reconnect', phase: 'attempting', attempt: 1, maxAttempts: 1, trigger: 'process_exit', reason: null }),
+      metaRow({ event: 'reconnect', phase: 'reconnected', attempt: 1, maxAttempts: 1, trigger: 'process_exit', reason: null }),
+      metaRow({ event: 'reconnect', phase: 'attempting', attempt: 1, maxAttempts: 1, reason: null }),
+      metaRow({ event: 'reconnect', phase: 'attempting', attempt: 1, maxAttempts: 1, trigger: 'meteor', reason: null }),
+    ]);
+    expect(only(events, 'session.reconnect').map((e) => e.trigger)).toEqual(['process_exit', 'process_exit', 'user', 'user']);
+  });
+  // C12 end
+
   it('maps every named system subtype and the other top-level frames', () => {
     const sys = (subtype: string, extra: Record<string, unknown>) => inRow({ type: 'system', subtype, session_id: 'sess-1', uuid: `s-${subtype}`, ...extra });
     const events = feed(make(), [

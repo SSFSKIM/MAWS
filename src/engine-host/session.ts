@@ -111,7 +111,7 @@ export class EngineSession {
   private starting: Promise<void> | null = null;
   private processState: ProcessState = 'starting';
   private exitInfo: EngineSessionStatus['exit'] = null;
-  private stopReason: 'stop' | 'archive' | 'quit' | null = null;
+  private stopReason: 'stop' | 'archive' | 'quit' | 'budget' | null = null; // C12: 'budget'
   private handshakeDone = false;
   private initFailed = false;
   private journalClosed = false;
@@ -166,7 +166,8 @@ export class EngineSession {
       markExiting: () => this.setProcess('exiting'),
       endSession: () => {
         if (!this.handshakeDone || !this.client) return false;
-        endSession(this.client, { reason: this.stopReason ?? 'stop' }).catch(() => {}); // the exit is the answer that matters
+        // C12: `budget` is MAWS's own reason and never goes to the engine; a release ends the process as a stop does
+        endSession(this.client, { reason: this.stopReason === 'budget' || this.stopReason === null ? 'stop' : this.stopReason }).catch(() => {}); // the exit is the answer that matters
         return true;
       },
       stopResult: () => this.stopResult(),
@@ -258,7 +259,7 @@ export class EngineSession {
   // Ends the process through the termination ladder; `graceMs` (the end_session wait) is capped at 3 s. Before the
   // process is spawned there is nothing to ladder: the reason is recorded, `run()` sees it and ends the session with no
   // process (a stop before `start()` ends it at once), and the answer is that exit (whole-branch review).
-  stop(reason: 'stop' | 'archive' | 'quit' = 'stop', opts: { graceMs?: number } = {}): Promise<StopResult> {
+  stop(reason: 'stop' | 'archive' | 'quit' | 'budget' = 'stop', opts: { graceMs?: number } = {}): Promise<StopResult> {
     if (this.processState === 'exited') return this.exited.then(() => this.stopResult()); // its store writes settled too
     this.stopReason ??= reason;
     if (!this.transport) {
@@ -276,6 +277,12 @@ export class EngineSession {
   // The process's state alone (`status().process`, without building the whole status).
   get lifecycle(): ProcessState {
     return this.processState;
+  }
+
+  // C12: the host has work in flight (the status's `busy`): the queue's own predicate, a `!` command not yet answered,
+  // or a held clear-and-implement. An exited process holds nothing.
+  get busy(): boolean {
+    return this.processState !== 'exited' && (this.queue.busy || this.bashMode.hasPending || this.clearAndImplement.holding);
   }
 
   // What the human asked for through X2 once the engine accepted (or, for a mode, refused) it (M5): the status reports
@@ -335,7 +342,8 @@ export class EngineSession {
       fastMode: tracked.fastMode, plugins: tracked.plugins, pluginErrors: tracked.pluginErrors, pluginWarnings: tracked.pluginWarnings,
       backgroundTasks: tracked.backgroundTasks, grants: [...this.grants.allow], mcpServers: tracked.mcpServers, heldPeerMessages: tracked.heldPeerMessages,
       pendingRequests: this.broker.live, queue: { length: this.queue.queuedCount, paused: this.queue.isPaused },
-      keepAlive: keepAliveReasons({ turnOpen: turn !== null, backgroundTasks: tracked.backgroundTasks.length, grants: this.grants.allow.length, mcpServers: tracked.mcpServers, heldPeerMessages: tracked.heldPeerMessages.length }),
+      keepAlive: keepAliveReasons({ turnOpen: turn !== null, backgroundTasks: tracked.backgroundTasks.length, heldPeerMessages: tracked.heldPeerMessages.length }),
+      busy: this.busy, lastUsedAt: this.launchedAt, // C12
       memory: tracked.memory,
       journalPath: this.journal.path, hostHooks: this.hooks.ids(), lastEventSeq: this.lastEventSeq,
       trust: { attested: this.spec.trust !== null, recorded: this.trustRecorded }, // C10
@@ -742,7 +750,7 @@ export class EngineSession {
     const queueSettled = this.handshakeDone ? this.queue.onProcessExited(reason) : Promise.resolve();
     queueSettled.catch((error: unknown) => this.log(`queue not settled at exit: ${messageOf(error)}`));
     this.record('meta', { event: 'exit', code: exit.code, signal: exit.signal, reason, lostAttentionCount: lost, peakTreeRssKiB: this.tracker.peakTreeRssKiB });
-    this.exitInfo = { code: exit.code, signal: exit.signal, reason, at: new Date().toISOString() };
+    this.exitInfo = { code: exit.code, signal: exit.signal, reason, at: new Date().toISOString(), release: null };
     this.setProcess('exited');
     this.journalClosed = true;
     void this.journal.close();

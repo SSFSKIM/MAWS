@@ -35,6 +35,11 @@ export class BashMode {
 
   constructor(private readonly deps: BashModeDeps) {}
 
+  // C12: a `!` command written and not yet answered by its output (the status's `busy`)
+  get hasPending(): boolean {
+    return this.pending.length > 0;
+  }
+
   // Writes `bash_command` and answers at the flush; the echo follows from `observe`.
   async run(command: string): Promise<{ commandUuid: MessageUuid }> {
     if (!this.deps.canWrite()) throw new Error('the session is not ready');

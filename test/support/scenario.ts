@@ -115,7 +115,7 @@ export function expandEngine(compact: CompactEngine, record: SessionRecord, time
     cwd: record.directory,
     pendingPlan: null,
     process: compact.process,
-    exit: compact.exit ? { code: null, signal: null, reason: compact.exit.reason, at: times.playedAt } : null,
+    exit: compact.exit ? { code: null, signal: null, reason: compact.exit.reason, at: times.playedAt, release: null /* C12 */ } : null,
     engineState: compact.engineState,
     activity: null,
     turn:
@@ -147,6 +147,10 @@ export function expandEngine(compact: CompactEngine, record: SessionRecord, time
     pendingRequests: compact.pendingRequests,
     queue: { length: 0, paused: false },
     keepAlive: compact.turn === null ? [] : ['turn'],
+    // C12 start: an open turn is the queue's busy; the launch is the last use
+    busy: compact.turn !== null,
+    lastUsedAt: times.launchedAt,
+    // C12 end
     memory: { rssKiB: null, treeRssKiB: null, sampledAt: null },
     journalPath: '',
     hostHooks: [],

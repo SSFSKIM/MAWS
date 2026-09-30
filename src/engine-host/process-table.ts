@@ -16,14 +16,12 @@ export const MEMORY_SAMPLE_MS = 10_000;
 export type ReserveOutcome = { status: 'launching'; session: EngineSession } | { status: 'refused'; reason: 'already_live'; message: string };
 type KeepAlive = EngineSessionStatus['keepAlive'][number];
 
-// §4.4's list, in a fixed order: a running turn, background tasks or workflows, session grants (lost on exit, restored
-// on resume), a connected MCP server, a held peer message.
-export function keepAliveReasons(s: { turnOpen: boolean; backgroundTasks: number; grants: number; mcpServers: { status: string }[]; heldPeerMessages: number }): KeepAlive[] {
+// §4.4's list as amended (2026-09-29), in a fixed order: a running turn, background tasks or workflows, a held peer
+// message. Session grants and connected MCP servers no longer keep a process (C12).
+export function keepAliveReasons(s: { turnOpen: boolean; backgroundTasks: number; heldPeerMessages: number }): KeepAlive[] {
   const reasons: KeepAlive[] = [];
   if (s.turnOpen) reasons.push('turn');
   if (s.backgroundTasks > 0) reasons.push('background_tasks');
-  if (s.grants > 0) reasons.push('grants');
-  if (s.mcpServers.some((m) => m.status === 'connected')) reasons.push('mcp_connected');
   if (s.heldPeerMessages > 0) reasons.push('held_peer_message');
   return reasons;
 }
