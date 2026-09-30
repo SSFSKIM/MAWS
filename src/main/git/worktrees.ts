@@ -4,11 +4,14 @@
 // <name>`, SPEC §47 11.1), and the cleanup ladder's destructive steps (`remove`, `deleteBranch`) re-read git before
 // acting and answer a refusal when what the caller saw is no longer true. Which process is in a worktree comes from
 // holder authority (a fresh registry read and C3's process table), never the index's projection. No network, no `gc`,
-// no write to `info/exclude` (the engine appends its own block there).
+// no write to `info/exclude` but the engine's own runtime block, once (C12).
 //
 // Every command takes a repository root and normalises it to the main worktree's root (a linked worktree's path works
 // too); every path is matched against `git worktree list` as an NFC realpath on both sides.
 import { lstat } from 'node:fs/promises';
+// C12 start
+import { appendFile, mkdir, readFile } from 'node:fs/promises';
+// C12 end
 import { basename, dirname, isAbsolute, join } from 'node:path';
 import type {
   GitBranchDeleted,
@@ -36,6 +39,36 @@ export class WorktreeAddFailed extends Error {
     this.name = 'WorktreeAddFailed';
   }
 }
+
+// C12 start: the engine's runtime-exclude block (2.1.283, `ensureClaudeRuntimeFilesExcluded`, cli.pretty.js 337187-337211),
+// written the way the engine writes it: appended once to the common dir's `info/exclude` unless the file already holds
+// the marker, after a newline when the file does not end in one. `**/.claude/worktrees/` is in it, so a worktree MAWS
+// makes leaves the main checkout clean as one the engine makes does (the architect's ruling at C12 M5). MAWS never
+// removes it, and a write that fails leaves the created worktree alone: it only costs the main checkout its clean read.
+export const RUNTIME_EXCLUDE_MARKER = '# claude-code-runtime';
+const RUNTIME_EXCLUDE_PATTERNS = [
+  '**/.claude/scheduled_tasks.lock', '**/.claude/scheduled_tasks.json', '**/.claude/routines/.state/', '**/.claude/worktrees/', '**/.claude/checkpoints/',
+  '**/.claude/mailbox/', '**/.claude/agent-registry.json', '**/.claude/agent-memory-local', '**/.claude/first-run', '**/.claude/assistant-daemon-state.json',
+];
+export const RUNTIME_EXCLUDE_BLOCK = [RUNTIME_EXCLUDE_MARKER, ...RUNTIME_EXCLUDE_PATTERNS, ''].join('\n');
+
+async function ensureRuntimeExclude(commonDir: string): Promise<void> {
+  const file = join(commonDir, 'info', 'exclude');
+  try {
+    let text = '';
+    try {
+      text = await readFile(file, 'utf8');
+      if (text.includes(RUNTIME_EXCLUDE_MARKER)) return;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      await mkdir(join(commonDir, 'info'), { recursive: true });
+    }
+    await appendFile(file, (text !== '' && !text.endsWith('\n') ? '\n' : '') + RUNTIME_EXCLUDE_BLOCK);
+  } catch (error) {
+    console.warn(`[worktrees] the runtime exclude block was not written to ${file}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+// C12 end
 
 export class WorktreeService {
   constructor(private readonly deps: WorktreeServiceDeps) {}
@@ -82,7 +115,7 @@ export class WorktreeService {
   async add({ repoRoot, name, branch }: GitWorktreeAddInput): Promise<WorktreeInfo> {
     const invalid = validateWorktreeName(name);
     if (invalid !== null) throw new Error(invalid);
-    const { root } = await this.mainRoot(repoRoot);
+    const { root, commonDir } = await this.mainRoot(repoRoot); // C12: commonDir, for the runtime exclude block
     if ((await this.resolve(root, 'HEAD')) === null) throw new Error('repository has no commits');
     const path = join(root, '.claude', 'worktrees', worktreeDirName(name));
     const entries = await this.entries(root);
@@ -102,6 +135,7 @@ export class WorktreeService {
     }
     const created = await this.find(root, path);
     if (created === null) throw new WorktreeAddFailed(`git worktree add did not list ${path}`);
+    await ensureRuntimeExclude(commonDir); // C12
     return created;
   }
 
