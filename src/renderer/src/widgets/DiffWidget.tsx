@@ -4,7 +4,6 @@
 // that file; until then the per-file rows are the whole view.
 import type { AppSessionId } from '@shared/graph/ids';
 import type { GetWorkspaceDiffResponse } from '@shared/wire/control';
-import { ARRIVES_WITH } from '../panel/arrives-with';
 import { panelHost, usePanelHost } from '../panel/host';
 import { DIFF, WIDGET_FOOT, WIDGET_TITLE } from './copy';
 import { Mono, num, Row, Rows, TextButton } from './parts';
@@ -45,7 +44,7 @@ export function DiffBody({ view, appSessionId, close }: { view: DiffView; appSes
     <div className="flex flex-col gap-2">
       <div className="flex items-baseline gap-2">
         <p className="m-0 flex-1">{view.line}</p>
-        <TextButton onClick={() => open()} disabled={!review} title={review ? undefined : DIFF.arrivesWith(ARRIVES_WITH.review)}>
+        <TextButton onClick={() => open()} disabled={!review} title={review ? undefined : DIFF.reviewUnavailable}>
           {DIFF.openInReview}
         </TextButton>
       </div>

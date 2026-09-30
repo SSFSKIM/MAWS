@@ -105,10 +105,10 @@ describe('panel host registry and instances', () => {
     expect(screen.getByTestId(`body:${second}`)).toBeTruthy();
   });
 
-  it('renders a tab whose tool is not registered as a placeholder naming its child, and closes it', async () => {
+  it('renders a tab whose tool is not registered as a placeholder naming it, and closes it', async () => {
     useLayout.setState({ panelBySession: new Map([[A, { tabs: [ref('terminal:aaaaaaaa')], activeTabId: 'terminal:aaaaaaaa' }]]) });
     render(<TestHost />);
-    expect(screen.getByRole('tabpanel').textContent).toBe('Arrives with C9');
+    expect(screen.getByRole('tabpanel').textContent).toBe('terminal is not available');
     expect(screen.getByRole('tab', { selected: true }).textContent).toContain('terminal');
     await act(async () => void expect(await panelHost.closeTab('terminal:aaaaaaaa')).toBe(true));
     expect(panelOf(A)).toEqual({ tabs: [], activeTabId: null });

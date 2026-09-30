@@ -5,7 +5,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { PanelTabRef } from '@shared/ipc/schema/layout';
 import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
-import { arrivesWith } from './copy';
+import { unavailable } from './copy';
 import { instanceOf, panelHost, setTitle, usePanelHost } from './host';
 import type { PanelToolContext } from './tool';
 
@@ -23,7 +23,7 @@ export function ToolBody({ tab, appSessionId }: { tab: PanelTabRef; appSessionId
 
   if (!tool) {
     // A registered tool's instance is created before paint (PanelHost's layout effect); a placeholder has none.
-    return registered ? null : <p className="flex h-full items-center justify-center p-4 text-center text-ui text-fg-muted">{arrivesWith(tab.toolId)}</p>;
+    return registered ? null : <p className="flex h-full items-center justify-center p-4 text-center text-ui text-fg-muted">{unavailable(tab.toolId)}</p>;
   }
   const ctx: PanelToolContext = {
     appSessionId,

@@ -223,7 +223,7 @@ export const DIFF = {
   restricted: (n: string, one: boolean) => `${n} restricted file${one ? '' : 's'} not shown`,
   list: 'Changed files',
   openInReview: 'Open in Review',
-  arrivesWith: (child: string) => `arrives with ${child}`,
+  reviewUnavailable: 'Review is not available',
 };
 
 // Export.

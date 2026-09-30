@@ -137,7 +137,7 @@ describe('panel tab strip and plus menu', () => {
     expect(panelOf(B)!.tabs.map((r) => r.id)).toEqual([id]);
   });
 
-  it('a placeholder tab reads "Arrives with <child>" and a tool’s title suffix follows its tab', () => {
+  it('a placeholder tab reads "<tool> is not available" and a tool’s title suffix follows its tab', () => {
     const { tool } = probeTool('t', {
       title: 'Tee',
       render: function Suffixed({ ctx }) {
@@ -147,9 +147,9 @@ describe('panel tab strip and plus menu', () => {
     register(tool);
     useLayout.setState({ panelBySession: new Map([[A, { tabs: [ref('review:aaaaaaaa'), ref('subagents:aaaaaaaa')], activeTabId: 'review:aaaaaaaa' }]]) });
     render(<TestHost />);
-    expect(screen.getByRole('tabpanel').textContent).toBe('Arrives with C8c');
+    expect(screen.getByRole('tabpanel').textContent).toBe('review is not available');
     act(() => panelHost.selectTab('subagents:aaaaaaaa'));
-    expect(screen.getByRole('tabpanel').textContent).toBe('Arrives with C8b');
+    expect(screen.getByRole('tabpanel').textContent).toBe('subagents is not available');
     act(() => void panelHost.addTool('t', { appSessionId: A }));
     act(() => screen.getByRole('button', { name: 'suffix' }).click());
     expect(screen.getByRole('tab', { selected: true }).textContent).toBe('Tee · zsh');

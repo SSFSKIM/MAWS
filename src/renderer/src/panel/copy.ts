@@ -1,7 +1,5 @@
 // Every sentence the panel host shows (C8a execution document, Interfaces *Copy*; the exact strings are decisions).
 // M2 adds the summary's section copy here.
-import { ARRIVES_WITH } from './arrives-with';
-
 export const COPY = {
   home: 'Session overview',
   add: 'Add a tool',
@@ -63,8 +61,6 @@ export const SUMMARY_COPY = {
   sourceOnly: 'Source only',
 } as const;
 
-// "Arrives with <child>" for a tool id the host has no registration for; an id outside the P0 table names no child.
-export function arrivesWith(toolId: string): string {
-  const child = ARRIVES_WITH[toolId];
-  return child ? `Arrives with ${child}` : `${toolId} is not available`;
-}
+// A tab or a summary button whose tool the host has no registration for: a restored tab before its tool registers, or a
+// tool id no build registers any more.
+export const unavailable = (toolId: string): string => `${toolId} is not available`;
