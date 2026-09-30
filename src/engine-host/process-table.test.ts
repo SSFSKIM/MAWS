@@ -441,4 +441,40 @@ describe('process table (C12): exited rows beyond the cap', () => {
     expect(table.list().map((x) => x.status().appSessionId)).toEqual(['c', 'd']);
   });
 });
+
+describe('process table (C12): the cap never exceeds itself when exit times tie or go backward', () => {
+  async function twoRows(max: number) {
+    const table = new ProcessTable({ ps: async () => '', exitedRowsMax: max });
+    const dropped: string[] = [];
+    table.onDropped((id) => dropped.push(id));
+    const rows = ['a', 'b'].map((name) => scriptedSession({ spec: { appSessionId: name as AppSessionId }, responder: handshakeResponder({ end_session: () => null }) }));
+    rows.forEach((x, i) => table.reserve(['a', 'b'][i] as AppSessionId, () => x.session));
+    await Promise.all(rows.map((x) => x.session.start()));
+    const exit = async (x: (typeof rows)[number], at: string) => {
+      vi.setSystemTime(new Date(at));
+      const stopping = x.session.stop('stop');
+      x.transport.exit(0);
+      await stopping;
+    };
+    return { table, dropped, a: rows[0]!, b: rows[1]!, exit };
+  }
+
+  it('a tie with the row whose exit is being delivered drops the other row', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const { table, dropped, a, b, exit } = await twoRows(1);
+    await exit(b, '2026-09-29T10:00:00.000Z');
+    await exit(a, '2026-09-29T10:00:00.000Z'); // a is first in the table's order and ties with b
+    expect(dropped).toEqual(['b']);
+    expect(table.list().map((x) => x.status().appSessionId)).toEqual(['a']);
+  });
+
+  it('an exit stamped before an earlier one (the clock went back) still keeps the table at the cap', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const { table, dropped, a, b, exit } = await twoRows(1);
+    await exit(a, '2026-09-29T10:05:00.000Z');
+    await exit(b, '2026-09-29T10:00:00.000Z');
+    expect(dropped).toEqual(['a']);
+    expect(table.list().map((x) => x.status().appSessionId)).toEqual(['b']);
+  });
+});
 // C12 end

@@ -263,13 +263,13 @@ export class ProcessTable {
       this.budget = { ...this.budget, releasing: null };
       this.emitBudget(false);
     }
-    const exited = [...this.rows]
-      .map(([id, row]) => ({ id, row, at: row.status().exit?.at ?? '' }))
-      .filter(({ row }) => row.lifecycle === 'exited');
+    const exited = [...this.rows].filter(([, row]) => row.lifecycle === 'exited');
     if (exited.length <= this.exitedRowsMax) return;
-    const oldest = exited.map((e, order) => ({ ...e, order })).sort((x, y) => x.at.localeCompare(y.at) || x.order - y.order).slice(0, exited.length - this.exitedRowsMax);
-    for (const { id, row } of oldest) {
-      if (row === session) continue; // never the row whose exit is being delivered right now
+    // the row whose exit is being delivered is never dropped, so the excess comes from the others (a tied or earlier
+    // exit time for it, a clock gone back, still leaves the table at the cap)
+    const others = exited.filter(([, row]) => row !== session).map(([id, row], order) => ({ id, at: row.status().exit?.at ?? '', order }));
+    const oldest = others.sort((x, y) => x.at.localeCompare(y.at) || x.order - y.order).slice(0, exited.length - this.exitedRowsMax);
+    for (const { id } of oldest) {
       this.rows.delete(id);
       for (const listener of this.dropListeners) {
         try {
