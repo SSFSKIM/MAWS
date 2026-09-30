@@ -61,7 +61,9 @@ export function sidebarModel({ records, digests, projects, rows, sort, query }: 
   const grouped = new Map<ProjectId | null, SessionRecord[]>();
   for (const r of live) {
     const key = r.projectId !== null && byId.has(r.projectId) ? r.projectId : null;
-    grouped.set(key, [...(grouped.get(key) ?? []), r]);
+    const list = grouped.get(key);
+    if (list) list.push(r);
+    else grouped.set(key, [r]);
   }
 
   const sections = projects.map((project) => {

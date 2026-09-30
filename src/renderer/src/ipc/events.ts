@@ -3,7 +3,7 @@
 // the events that raced it inside its store (by revision for sessions, projects and digests; by buffer and replay for
 // attention). The layout hydrates once the sessions are known, so a persisted tab of a vanished session is dropped,
 // unless a registered tab retention (C10's) keeps it.
-import type { MawsBridge } from '@shared/ipc/schema';
+import type { EventPayload, MawsBridge, SessionDigest } from '@shared/ipc/schema';
 import { currentTabRetention } from '../keymap/actions-runtime';
 import { useAttention } from '../stores/attention';
 import { createFreshness } from '../stores/freshness';
@@ -28,22 +28,79 @@ export interface ShellStores {
   layout: typeof useLayout;
 }
 
-export function connectShell(client: MawsBridge = ipc, stores: ShellStores = { sessions: useSessions, attention: useAttention, layout: useLayout }): () => void {
+// Debt wave 5 (the cold first paint): the record side's events (records, removals, projects, digests, the discovery
+// pass's progress) are applied together once per window rather than one by one, so a flood of them (a cold index
+// announces every session in the store, twice over with its seed digests) costs the page one store write per kind and
+// one render per window instead of one render per event. 0 applies each event as it arrives. A snapshot reply applies
+// after the window's events that preceded it, and the layout's hydration drains the window once its reads are in and
+// before it captures the early changes it replays, so its tab check sees every event received and the removals the
+// drain makes are replayed with the rest.
+export const SHELL_BATCH_MS = 16;
+
+type Queued =
+  | { t: 'changed'; e: EventPayload<'session.changed'> }
+  | { t: 'removed'; e: EventPayload<'session.removed'> }
+  | { t: 'projects'; e: EventPayload<'session.projects.changed'> }
+  | { t: 'digest'; d: SessionDigest }
+  | { t: 'progress'; e: EventPayload<'fs.scanProgress'> };
+
+export function connectShell(
+  client: MawsBridge = ipc,
+  stores: ShellStores = { sessions: useSessions, attention: useAttention, layout: useLayout },
+  { batchMs = SHELL_BATCH_MS }: { batchMs?: number } = {},
+): () => void {
   const sessions = () => stores.sessions.getState();
   const attention = () => stores.attention.getState();
   const freshness = createFreshness();
   let connected = true;
   const on: MawsBridge['on'] = (name, listener) => client.on(name, (payload) => connected && listener(payload));
 
+  // In arrival order; consecutive changes and consecutive digests go to the store as one call each.
+  const apply = (queue: Queued[]) => {
+    for (let i = 0; i < queue.length; ) {
+      const item = queue[i];
+      if (item.t === 'changed' || item.t === 'digest') {
+        let j = i;
+        while (j < queue.length && queue[j].t === item.t) j++;
+        const run = queue.slice(i, j);
+        if (item.t === 'changed') sessions().applyChangedMany(run.map((q) => (q as Extract<Queued, { t: 'changed' }>).e));
+        else sessions().applyDigests(run.map((q) => (q as Extract<Queued, { t: 'digest' }>).d));
+        i = j;
+        continue;
+      }
+      if (item.t === 'removed') {
+        // A stale removal (older than what the store knows) leaves the session, so its tabs stay too; so does a tab the
+        // registered retention keeps (a rolled-back provisional record, whose tab shows the failure).
+        if (sessions().applyRemoved(item.e) && !currentTabRetention()?.retains(item.e.appSessionId)) stores.layout.getState().dropSession(item.e.appSessionId);
+      } else if (item.t === 'projects') sessions().applyProjects(item.e);
+      else sessions().applyScanProgress(item.e);
+      i++;
+    }
+  };
+  let queued: Queued[] = [];
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const flush = () => {
+    timer = null;
+    const queue = queued;
+    queued = [];
+    if (connected) apply(queue);
+  };
+  const flushNow = () => {
+    if (timer) clearTimeout(timer);
+    if (timer || queued.length > 0) flush();
+  };
+  const enqueue = (item: Queued) => {
+    if (batchMs <= 0) return apply([item]);
+    queued.push(item);
+    timer ??= setTimeout(flush, batchMs);
+  };
+
   const offs = [
-    on('session.changed', (e) => sessions().applyChanged(e)),
-    on('session.removed', (e) => {
-      // A stale removal (older than what the store knows) leaves the session, so its tabs stay too; so does a tab the
-      // registered retention keeps (a rolled-back provisional record, whose tab shows the failure).
-      if (sessions().applyRemoved(e) && !currentTabRetention()?.retains(e.appSessionId)) stores.layout.getState().dropSession(e.appSessionId);
-    }),
-    on('session.projects.changed', (e) => sessions().applyProjects(e)),
-    on('session.digest', (d) => sessions().applyDigest(d)),
+    on('session.changed', (e) => enqueue({ t: 'changed', e })),
+    on('session.removed', (e) => enqueue({ t: 'removed', e })),
+    on('session.projects.changed', (e) => enqueue({ t: 'projects', e })),
+    on('session.digest', (d) => enqueue({ t: 'digest', d })),
+    on('fs.scanProgress', (e) => enqueue({ t: 'progress', e })),
     on('session.status', (e) => sessions().applyStatus(e)),
     on('attention.changed', (e) => attention().applyChanged(e)),
     on('attention.notified', (e) => attention().applyNotified(e)),
@@ -57,7 +114,10 @@ export function connectShell(client: MawsBridge = ipc, stores: ShellStores = { s
     // A snapshot nobody answers leaves its store empty and live on events: a degraded start, not a fault in the page.
     // (In launch mode `index` before C3 and C4 land, the record side and attention have no answerer at all.)
     if (!result.ok) console.warn(`[shell] ${label} unavailable; starting empty`, result.error);
-    else apply(result.value);
+    else {
+      flushNow();
+      apply(result.value);
+    }
   };
 
   // C3's process table, so a live session reads live after a reload before its next status (debt wave 3).
@@ -78,11 +138,14 @@ export function connectShell(client: MawsBridge = ipc, stores: ShellStores = { s
     const retention = currentTabRetention();
     if (retention) await retention.ready;
     if (!live()) return;
-    await stores.layout.getState().hydrate(client, (id) => sessions().records.has(id) || (retention?.retains(id) ?? false));
+    await stores.layout.getState().hydrate(client, (id) => sessions().records.has(id) || (retention?.retains(id) ?? false), flushNow);
   });
 
   return () => {
     connected = false;
+    if (timer) clearTimeout(timer);
+    timer = null;
+    queued = [];
     freshness.advance();
     offs.forEach((off) => off());
   };

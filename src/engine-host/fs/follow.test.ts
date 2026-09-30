@@ -393,6 +393,31 @@ describe('a followed session backfills, then tails its transcript', () => {
     expect(emitted.slice(count).filter((e) => e.name === 'session.eventBatch' || e.name === 'fs.followState')).toEqual([]);
   });
 
+  // The disk half of the disk-to-live handoff (main's fs.unfollow when C3 reports the app id live, source.ts
+  // liveStatus): only a read (eventsSnapshot, agentEvents) starts a session's follow, so nothing a live MAWS process
+  // does to the store afterwards starts it again and puts disk-form copies of its live events on session.eventBatch:
+  // its own registry record (every `-p` launch writes one), its appends, main's re-sent binding and scan (sync).
+  it('after fs.unfollow, a live process on the session (its registry record, its appends, main\'s re-sent binding and scan) starts no follow', async () => {
+    const path = await fixture.addTranscript(REWIND_DIR, REWIND, rewindLines.slice(0, 26));
+    const fs = await start();
+    fs.bind([{ sessionId: REWIND, appSessionId: APP }]);
+    await fs.eventsSnapshot(APP, null); // the pane read before the launch
+    await fs.unfollow(APP, null); // the handoff at the launch's first status
+    const count = emitted.length;
+
+    await fixture.addRegistryRecord(process.pid, { sessionId: REWIND, cwd: REWIND_DIR, startedAt: Date.now() });
+    await expect.poll(() => events('fs.holderChanged').some((e) => e.sessionId === REWIND && e.holder.kind !== 'none')).toBe(true);
+    await fixture.appendLines(path, rewindLines.slice(26));
+    await expect.poll(() => events('fs.sessionChanged').filter((e) => e.summary.sessionId === REWIND && e.appSessionId === APP).length).toBeGreaterThan(0);
+    await fs.bind([{ sessionId: REWIND, appSessionId: APP }]);
+    const { size, mtimeMs } = statSync(path);
+    await fs.scan([{ sessionId: REWIND, appSessionId: APP, size, mtimeMs }]);
+    await settled();
+
+    expect(fs.state().followed).toEqual([]);
+    expect(emitted.slice(count).filter((e) => e.name === 'session.eventBatch' || e.name === 'fs.followState')).toEqual([]);
+  });
+
   it.each(['new path first, then the old one deleted', 'old path deleted first, then the new one written'])(
     'follows a relocated transcript to the surviving file whatever order the notifications arrive in (%s)',
     async (order) => {

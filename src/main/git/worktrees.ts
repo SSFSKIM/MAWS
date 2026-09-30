@@ -91,21 +91,29 @@ async function writeRuntimeExclude(commonDir: string, fs: ExcludeFs): Promise<vo
 }
 // C12 end
 
+// A repository as the service resolves it: the main worktree's root, the common dir, and whether the root is known to
+// be the main checkout (see `mainRoot`).
+interface Repo {
+  root: string;
+  commonDir: string;
+  isMain: boolean;
+}
+
 export class WorktreeService {
   constructor(private readonly deps: WorktreeServiceDeps) {}
 
   async list(repoRoot: string): Promise<GitWorktreeList> {
-    const { root, commonDir } = await this.mainRoot(repoRoot);
-    return { repoRoot: root, commonDir, worktrees: await this.entries(root) };
+    const repo = await this.mainRoot(repoRoot);
+    return { repoRoot: repo.root, commonDir: repo.commonDir, worktrees: await this.entries(repo) };
   }
 
   // null when git does not list the path (removed, or never a worktree). A listed entry whose directory is gone
   // (`prunable`) has nothing to inspect: no changes, and its occupancy is still asked, since a process can outlive it.
   async status(repoRoot: string, path: string): Promise<WorktreeStatus | null> {
-    const { root } = await this.mainRoot(repoRoot);
+    const repo = await this.mainRoot(repoRoot);
     requireAbsolute(path);
     const target = await canonicalPath(path);
-    const entries = await this.entries(root);
+    const entries = await this.entries(repo);
     const entry = entries.find((e) => e.path === target);
     if (entry === undefined) return null;
     // a worktree inside this one (the main checkout holds `.claude/worktrees/*`) answers for its own processes
@@ -121,10 +129,11 @@ export class WorktreeService {
   // null when there is no such local branch. base: the main worktree's branch, else 'HEAD'; ahead: commits on the
   // branch that base does not have.
   async branch(repoRoot: string, branch: string): Promise<BranchStatus | null> {
-    const { root } = await this.mainRoot(repoRoot);
+    const repo = await this.mainRoot(repoRoot);
+    const { root } = repo;
     const head = await this.branchHead(root, branch);
     if (head === null) return null;
-    const [entries, base] = await Promise.all([this.entries(root), this.baseOf(root)]);
+    const [entries, base] = await Promise.all([this.entries(repo), this.baseOf(root)]);
     const baseRev = base === 'HEAD' ? 'HEAD' : `refs/heads/${base}`;
     const ahead = Number((await this.git(root, ['rev-list', '--count', `${baseRev}..refs/heads/${branch}`, '--'])).trim());
     const checkedOutAt = entries.find((e) => e.branch === branch)?.path ?? null;
@@ -136,10 +145,11 @@ export class WorktreeService {
   async add({ repoRoot, name, branch }: GitWorktreeAddInput): Promise<WorktreeInfo> {
     const invalid = validateWorktreeName(name);
     if (invalid !== null) throw new Error(invalid);
-    const { root, commonDir } = await this.mainRoot(repoRoot); // C12: commonDir, for the runtime exclude block
+    const repo = await this.mainRoot(repoRoot);
+    const { root, commonDir } = repo; // C12: commonDir, for the runtime exclude block
     if ((await this.resolve(root, 'HEAD')) === null) throw new Error('repository has no commits');
     const path = join(root, '.claude', 'worktrees', worktreeDirName(name));
-    const entries = await this.entries(root);
+    const entries = await this.entries(repo);
     if ((await exists(path)) || entries.some((e) => e.path === path)) throw new Error('worktree path exists');
     await this.requireBranchName(root, branch.name);
     const existing = await this.branchHead(root, branch.name);
@@ -154,7 +164,7 @@ export class WorktreeService {
       if (holder) throw new Error(`branch checked out at ${holder.path}`);
       await this.invokeAdd(root, ['worktree', 'add', path, branch.name]);
     }
-    const created = await this.find(root, path);
+    const created = await this.find(repo, path);
     if (created === null) throw new WorktreeAddFailed(`git worktree add did not list ${path}`);
     await ensureRuntimeExclude(commonDir); // C12
     return created;
@@ -203,19 +213,25 @@ export class WorktreeService {
   }
 
   // The main worktree's root: the parent of the common dir when that is a `.git` directory (linked worktrees share
-  // it), else the toplevel (a submodule's `.git/modules/<name>`), as the trust key is derived (src/main/sessions/trust.ts).
-  private async mainRoot(repoRoot: string): Promise<{ root: string; commonDir: string }> {
+  // it), else the toplevel (a submodule's `.git/modules/<name>`, a separate git dir), as the trust key is derived
+  // (src/main/sessions/trust.ts). `isMain`: the root is the main checkout, known because the common dir is its `.git`
+  // or because the git dir asked from it is the common dir itself (not a linked worktree's `worktrees/<name>`).
+  private async mainRoot(repoRoot: string): Promise<Repo> {
     requireAbsolute(repoRoot);
-    const out = await this.git(repoRoot, ['rev-parse', '--path-format=absolute', '--show-toplevel', '--git-common-dir']);
-    const [toplevel, commonDir] = out.split('\n').map((line) => line.trim());
-    if (!toplevel || !commonDir) throw new Error(`git rev-parse answered no toplevel and common dir for ${repoRoot}`);
-    const root = basename(commonDir) === '.git' ? dirname(commonDir) : toplevel;
-    return { root: await canonicalPath(root), commonDir: await canonicalPath(commonDir) };
+    const out = await this.git(repoRoot, ['rev-parse', '--path-format=absolute', '--show-toplevel', '--git-common-dir', '--git-dir']);
+    const [toplevel, commonDir, gitDir] = out.split('\n').map((line) => line.trim());
+    if (!toplevel || !commonDir || !gitDir) throw new Error(`git rev-parse answered no toplevel, common dir and git dir for ${repoRoot}`);
+    const dotGit = basename(commonDir) === '.git';
+    const [common, git] = await Promise.all([canonicalPath(commonDir), canonicalPath(gitDir)]);
+    return { root: await canonicalPath(dotGit ? dirname(commonDir) : toplevel), commonDir: common, isMain: dotGit || git === common };
   }
 
   // `worktree list --porcelain -z`: NUL-terminated attribute lines, an empty one between stanzas; the first is the main
-  // worktree. The branch is what git says, never derived from the directory's name.
-  private async entries(root: string): Promise<WorktreeInfo[]> {
+  // worktree. The branch is what git says, never derived from the directory's name. When the git dir is separate from
+  // the checkout (`git init --separate-git-dir`), git lists the main worktree at the git dir itself, having no pointer
+  // back to the checkout; that entry is the root when the root is known to be the main checkout.
+  private async entries(repo: Repo): Promise<WorktreeInfo[]> {
+    const { root } = repo;
     const out = await this.git(root, ['worktree', 'list', '--porcelain', '-z']);
     const stanzas: Map<string, string>[] = [];
     let current: Map<string, string> | null = null;
@@ -231,7 +247,8 @@ export class WorktreeService {
     const managedPrefix = join(root, '.claude', 'worktrees') + '/';
     return Promise.all(
       stanzas.map(async (stanza, i) => {
-        const path = await canonicalPath(stanza.get('worktree') ?? '');
+        const listed = await canonicalPath(stanza.get('worktree') ?? '');
+        const path = i === 0 && repo.isMain && !stanza.has('bare') && listed === repo.commonDir ? root : listed;
         const ref = stanza.get('branch');
         return {
           repoRoot: root,
@@ -247,10 +264,10 @@ export class WorktreeService {
     );
   }
 
-  private async find(root: string, path: string): Promise<WorktreeInfo | null> {
+  private async find(repo: Repo, path: string): Promise<WorktreeInfo | null> {
     requireAbsolute(path);
     const target = await canonicalPath(path);
-    return (await this.entries(root)).find((e) => e.path === target) ?? null;
+    return (await this.entries(repo)).find((e) => e.path === target) ?? null;
   }
 
   // The engine's own cleanliness probe (SPEC §23 3.2): tracked changes and untracked files, ignored files excluded,

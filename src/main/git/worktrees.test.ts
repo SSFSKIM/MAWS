@@ -280,6 +280,32 @@ describe('worktree service over scratch repositories', () => {
       await expect(service.add({ repoRoot: repo.root, name: 'rev', branch: { kind: 'existing', name: 'main~1' } })).rejects.toThrow('invalid branch name: main~1');
     });
 
+    // git lists the main worktree of a separate-git-dir repository at the git dir itself (the checkout's `.git` is a
+    // pointer file and nothing points back), so the main checkout is matched through the root git resolves from it
+    it('reads the main checkout of a separate-git-dir repository, lists it at the checkout, and keeps a created worktree off it', async () => {
+      const base = realpathSync(mkdtempSync(join(tmpdir(), 'maws-sep-')));
+      try {
+        const work = join(base, 'work');
+        const gitDir = join(base, 'gitdir');
+        await runGit(base, ['init', '-q', '-b', 'main', `--separate-git-dir=${gitDir}`, work]);
+        writeFileSync(join(work, 'a.txt'), 'a\n');
+        await runGit(work, ['add', 'a.txt']);
+        await runGit(work, ['commit', '-q', '-m', 'a']);
+        const head = (await runGit(work, ['rev-parse', 'HEAD'])).trim();
+        await expect(service.status(work, work)).resolves.toMatchObject({ repoRoot: work, path: work, isMain: true, branch: 'main', head, state: 'clean' });
+        const w = await service.add({ repoRoot: work, name: 'sep', branch: newBranch('worktree-sep') });
+        expect(w.path).toBe(join(work, '.claude', 'worktrees', 'sep'));
+        const list = await service.list(work);
+        expect(list).toMatchObject({ repoRoot: work, commonDir: gitDir });
+        expect(list.worktrees.map((e) => [e.path, e.isMain])).toEqual([[work, true], [w.path, false]]);
+        writeFileSync(join(work, 'b.txt'), 'b\n');
+        await expect(service.status(join(work, '.claude'), work)).resolves.toMatchObject({ state: 'dirty', dirty: { tracked: 0, untracked: 1 } });
+        await expect(service.status(work, gitDir)).resolves.toBeNull();
+      } finally {
+        rmSync(base, { recursive: true, force: true });
+      }
+    });
+
     it('matches a worktree reached through a symlink by its realpath', async () => {
       const outside = repo.scratchDir();
       mkdirSync(join(outside, 'real'));

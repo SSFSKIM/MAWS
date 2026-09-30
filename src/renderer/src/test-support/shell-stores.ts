@@ -40,6 +40,7 @@ export function fillStores(scenario: Scenario, opts: { loaded?: boolean } = {}):
 
 export function resetShellStores(): void {
   fillStores({ projects: [], sessions: [], digests: [], engine: [], attention: [], timeline: [] }, { loaded: false });
+  useSessions.setState({ indexing: null });
   useLayout.setState({
     regions: LAYOUT_DEFAULTS.regions,
     main: LAYOUT_DEFAULTS.main,

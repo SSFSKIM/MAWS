@@ -486,41 +486,71 @@ describe('process table (C12): the memory budget', () => {
 
 // C12 start: the exited-row cap (C12 execution document, M1 task 5)
 describe('process table (C12): exited rows beyond the cap', () => {
-  it('drops the oldest exit first once more rows have exited than the cap, telling its listeners; live rows are never dropped; a released id outlives its row', async () => {
+  it('drops the oldest exit first once more rows have exited than the cap, telling its listeners; live rows are never dropped', async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
-    vi.setSystemTime(new Date('2026-09-29T10:00:00.000Z'));
-    const table = new ProcessTable({ ps: async () => '  601     1   400\n', exitedRowsMax: 2 });
+    const table = new ProcessTable({ ps: async () => '', exitedRowsMax: 2 });
     const dropped: string[] = [];
     table.onDropped((id) => dropped.push(id));
-    const sessions = ['a', 'b', 'c', 'd'].map((name, i) => scriptedSession({ spec: { appSessionId: name as AppSessionId }, transport: { pid: 601 + i }, responder: handshakeResponder({ end_session: () => null }) }));
-    sessions.forEach((x, i) => table.reserve(['a', 'b', 'c', 'd'][i] as AppSessionId, () => x.session));
+    const names = ['a', 'b', 'c', 'd'];
+    const sessions = names.map((name) => scriptedSession({ spec: { appSessionId: name as AppSessionId }, responder: handshakeResponder({ end_session: () => null }) }));
+    sessions.forEach((x, i) => table.reserve(names[i] as AppSessionId, () => x.session));
     await Promise.all(sessions.map((x) => x.session.start()));
-    const [a, b, c, d] = sessions as [ReturnType<typeof scriptedSession>, ReturnType<typeof scriptedSession>, ReturnType<typeof scriptedSession>, ReturnType<typeof scriptedSession>];
-    // a is released by the budget; b and c are stopped later; d stays live
+    const exit = async (i: number, at: string) => {
+      vi.setSystemTime(new Date(at));
+      const stopping = sessions[i]!.session.stop('stop');
+      sessions[i]!.transport.exit(0);
+      await stopping;
+    };
+    await exit(0, '2026-09-29T10:00:00.000Z');
+    await exit(1, '2026-09-29T10:01:00.000Z');
+    await exit(2, '2026-09-29T10:02:00.000Z');
+    expect(dropped).toEqual(['a']);
+    expect(table.list().map((x) => x.status().appSessionId)).toEqual(['b', 'c', 'd']); // d is live
+    await exit(3, '2026-09-29T10:03:00.000Z');
+    expect(dropped).toEqual(['a', 'b']);
+    expect(table.list().map((x) => x.status().appSessionId)).toEqual(['c', 'd']);
+  });
+
+  // A row the budget released neither counts nor goes (tracker row: a capped row's released id survived archive, since
+  // main archives through the host's row and the host's released id outlived it). The released ids and their rows now
+  // leave together: at the id's next launch, which replaces the row, or at an archive or forget, which drops both.
+  it('keeps a released row past the cap, so an archive reaches it and takes its released id; other exits stay capped', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-09-29T10:00:00.000Z'));
+    const table = new ProcessTable({ ps: async () => '  601     1   400\n  602     1   400\n', exitedRowsMax: 1 });
+    const dropped: string[] = [];
+    table.onDropped((id) => dropped.push(id));
+    const names = ['a', 'b', 'c', 'd', 'e'];
+    const sessions = names.map((name, i) => scriptedSession({ spec: { appSessionId: name as AppSessionId }, transport: { pid: 601 + i }, responder: handshakeResponder({ end_session: () => null }) }));
+    sessions.forEach((x, i) => table.reserve(names[i] as AppSessionId, () => x.session));
+    await Promise.all(sessions.map((x) => x.session.start()));
+    const [a, b] = sessions as [ReturnType<typeof scriptedSession>, ReturnType<typeof scriptedSession>];
+    // a, then b, released by the budget (c, d and e are engine-unknown, never candidates)
     a.transport.push({ type: 'system', subtype: 'session_state_changed', state: 'idle', uuid: 'idle-a', session_id: 's' });
+    b.transport.push({ type: 'system', subtype: 'session_state_changed', state: 'idle', uuid: 'idle-b', session_id: 's' });
     await flush();
-    await table.sampleMemory();
-    await table.sampleMemory(); // a is quiet at this sample
     table.configure({ limitKiB: 100, statefulMcpServers: [] });
+    await table.sampleMemory();
+    await table.sampleMemory();
     expect(table.budgetState().releasing).toBe('a');
     a.transport.exit(0);
     await a.session.exited;
-    for (const [x, at] of [[b, '2026-09-29T10:01:00.000Z'], [c, '2026-09-29T10:02:00.000Z']] as const) {
+    await table.sampleMemory();
+    expect(table.budgetState().releasing).toBe('b');
+    b.transport.exit(0);
+    await b.session.exited;
+    expect([a, b].map((x) => x.session.status().exit?.reason)).toEqual(['budget', 'budget']);
+    for (const [i, at] of [[2, '2026-09-29T10:01:00.000Z'], [3, '2026-09-29T10:02:00.000Z'], [4, '2026-09-29T10:03:00.000Z']] as const) {
       vi.setSystemTime(new Date(at));
-      const stopping = x.session.stop('stop');
-      x.transport.exit(0);
+      const stopping = sessions[i]!.session.stop('stop');
+      sessions[i]!.transport.exit(0);
       await stopping;
     }
-    expect(dropped).toEqual(['a']);
-    expect(table.get('a' as AppSessionId)).toBeUndefined();
-    expect(table.list().map((x) => x.status().appSessionId)).toEqual(['b', 'c', 'd']);
-    expect(table.takeReleased('a' as AppSessionId)).toBe(true); // the next launch of a still reconnects as process_exit
-    vi.setSystemTime(new Date('2026-09-29T10:03:00.000Z'));
-    const stopping = d.session.stop('stop');
-    d.transport.exit(0);
-    await stopping;
-    expect(dropped).toEqual(['a', 'b']);
-    expect(table.list().map((x) => x.status().appSessionId)).toEqual(['c', 'd']);
+    expect(dropped).toEqual(['c', 'd']); // the cap still bounds the exits that were not releases
+    expect(table.list().map((x) => x.status().appSessionId)).toEqual(['a', 'b', 'e']);
+    expect(table.release('a' as AppSessionId)).toBe(true); // the archive's release
+    expect(table.takeReleased('a' as AppSessionId)).toBe(false); // an unarchived a launches fresh, with no Resumed row
+    expect(table.takeReleased('b' as AppSessionId)).toBe(true); // b's next launch still reconnects as process_exit
   });
 });
 
