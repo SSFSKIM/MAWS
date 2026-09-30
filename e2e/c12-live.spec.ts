@@ -355,11 +355,20 @@ test('nine sessions under a memory budget: releases, the released surfaces, Send
           return b.releasing === null && b.sampledAt !== null && Date.parse(b.sampledAt) > setAt + SAMPLE_MS && (!b.over || b.candidates === 0);
         }, { timeout: 150_000, intervals: [1_000] })
         .toBe(true);
+      const releasesNow = async () =>
+        [...new Map((await budgetEvents(page)).filter((e) => e.lastRelease !== null).map((e) => [`${e.lastRelease!.appSessionId}@${e.lastRelease!.at}`, e.lastRelease!])).values()].map((r) => ({ label: labels.get(r.appSessionId), ...r, totalMiB: mib(r.totalKiB) }));
+      const settled = await releasesNow();
+      const sampledBefore = (await budget(page)).sampledAt;
       await page.waitForTimeout(SAMPLE_MS + 1_000); // one more sample: nothing else goes
       const after = await trees(page, labels);
-      const events = await budgetEvents(page);
-      const releases = [...new Map(events.filter((e) => e.lastRelease !== null).map((e) => [`${e.lastRelease!.appSessionId}@${e.lastRelease!.at}`, e.lastRelease!])).values()].map((r) => ({ label: labels.get(r.appSessionId), ...r, totalMiB: mib(r.totalKiB) }));
-      record('budgetAfter', await budget(page));
+      const releases = await releasesNow();
+      const final = await budget(page);
+      record('budgetAfter', final);
+      expect(final.sampledAt, 'a sample came and went').not.toBe(sampledBefore);
+      expect(releases, 'no release at the extra sample').toEqual(settled);
+      expect(final.releasing).toBeNull();
+      expect(!final.over || final.candidates === 0, 'under the budget, or no candidate left').toBe(true);
+      for (const r of releases) expect(r.totalKiB, `${r.label} released while over the budget`).toBeGreaterThan(limitMiB * 1024);
       record('treesAfter', after);
       checkTrees(after);
       record('releases', releases);
@@ -462,6 +471,9 @@ test('nine sessions under a memory budget: releases, the released surfaces, Send
       for (const l of protectedLabels) titles[l] = await titleOf(page, ids[l]!);
       const events = await budgetEvents(page);
       await oneAtATime(page, events.filter((e) => e.lastRelease !== null && Date.parse(e.lastRelease.at) >= at).map((e) => e.lastRelease!));
+      for (const e of events.filter((e) => e.lastRelease !== null && Date.parse(e.lastRelease.at) >= at)) {
+        expect(e.lastRelease!.totalKiB, `${labels.get(e.lastRelease!.appSessionId)} released while over the budget`).toBeGreaterThan(lowMiB * 1024);
+      }
       const lowTrees = await trees(page, labels);
       record('noCandidate', {
         limitMiB: lowMiB, protectedMiB: mib(protectedKiB), setAt: new Date(at).toISOString(), bannerSeconds: (bannerAt - at) / 1000,
