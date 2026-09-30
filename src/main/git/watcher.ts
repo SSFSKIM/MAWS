@@ -1,7 +1,8 @@
 // The repository watcher (C4 execution document, Interfaces "Git service" and M6): per repository root, one recursive
 // `fs.watch` on the root and one on the git dir when it lies outside the root (a linked worktree's lives under the
 // common dir's `worktrees/<name>/`), and for a linked worktree one on the common dir for the refs, packed-refs and
-// config it shares. Paths are classified, a 250 ms trailing debounce capped at 1 s gathers them, at most one
+// config it shares. Paths are classified (writes inside a linked worktree nested under the root are that worktree's, and
+// a ref counts only when it can move this root's status), a 250 ms trailing debounce capped at 1 s gathers them, at most one
 // `git status` runs per root with one re-run for whatever arrived meanwhile, and `git.changed` carries the fresh status
 // only when the compared projection moved. The projection is the status's own facts plus the size and mtime of every
 // listed file, so a second content write to an already-dirty file emits although its porcelain line is unchanged (C8a's
@@ -12,8 +13,8 @@
 // directories each owner (the requesting window) passed, and an owner's are released together when it goes; the first
 // watch of a root emits its status as `initial`.
 import { watch as fsWatch } from 'node:fs';
-import { stat } from 'node:fs/promises';
-import { isAbsolute, join, relative, sep } from 'node:path';
+import { readdir, readFile, realpath, stat } from 'node:fs/promises';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { GitChangeReason, GitChanged, GitStatus } from '@shared/ipc/schema/git';
 import { GitTimeoutError } from './runner';
 
@@ -33,6 +34,7 @@ export interface GitWatcherDeps {
   emit(change: GitChanged): void;
   watch?: WatchFn;
   statFile?(path: string): Promise<FileFacts | null>;
+  linkedWorktrees?(commonDir: string): Promise<string[]>; // absolute paths; the common dir's `worktrees/*/gitdir` by default
 }
 
 const DEBOUNCE_MS = 250;
@@ -43,9 +45,10 @@ const BACKOFF_MS = 5000; // after a status timeout, until a status succeeds
 const WEIGHT: Record<Exclude<GitChangeReason, 'initial'>, number> = { worktree: 0, index: 1, refs: 2, head: 3 };
 
 // A path inside the git dir, relative to it. `config` holds the upstream and the remote URL (`branch -u`,
-// `remote set-url`), so it counts as `refs`. Git's own `*.lock` files are ignored here, and only here.
+// `remote set-url`), so it counts as `refs`. Git's own `*.lock` files are ignored here, and only here; so are the object
+// stores, git's and git-lfs's (whose clean filter runs under `git status` and writes under `lfs/`).
 export function classifyGitPath(sub: string): Exclude<GitChangeReason, 'initial' | 'worktree'> | null {
-  if (sub.endsWith('.lock') || sub === 'objects' || sub.startsWith('objects/')) return null;
+  if (sub.endsWith('.lock') || under(sub, 'objects') || under(sub, 'lfs')) return null;
   if (sub === 'HEAD' || sub === 'ORIG_HEAD' || sub === 'MERGE_HEAD') return 'head';
   if (sub === 'index') return 'index';
   if (sub === 'packed-refs' || sub.startsWith('refs/') || sub === 'config') return 'refs';
@@ -66,6 +69,55 @@ export function classifyRootPath(rel: string, gitDirRel: string | null): Exclude
   return 'worktree';
 }
 
+// Whether a ref event (a path in the common dir, relative to it) can move this status: the branch's own ref, the
+// upstream's (a remote-tracking ref, or a local branch's), the stash; `packed-refs` and `config` may hold any of them.
+// A directory above one of them (an event naming `refs/heads`) counts. The per-worktree HEAD and index are not refs.
+export function refMatters(sub: string, status: Pick<GitStatus, 'branch' | 'upstream'>): boolean {
+  if (sub === 'packed-refs' || sub === 'config') return true;
+  const refs = ['refs/stash'];
+  if (status.branch !== null) refs.push(`refs/heads/${status.branch}`);
+  if (status.upstream !== null) refs.push(`refs/remotes/${status.upstream}`, `refs/heads/${status.upstream}`);
+  return refs.some((ref) => under(ref, sub));
+}
+
+// The engine's linked worktrees, and MAWS's, live at `<root>/.claude/worktrees/<name>` (its runtime exclude reads
+// `**/.claude/worktrees/`, at any depth).
+const ENGINE_WORKTREE = /(^|\/)\.claude\/worktrees\/[^/]+\//;
+
+// Whether a root-relative path lies inside another checkout nested under the root, whose files git never reads as the
+// root's: a linked worktree of the engine's layout (known before git has registered it), one the common dir lists
+// (`nested`, root-relative), or a nested checkout's own `.git`. The nested checkout's directory itself appearing or
+// going stays the root's.
+export function insideNestedCheckout(rel: string, nested: readonly string[]): boolean {
+  return ENGINE_WORKTREE.test(rel) || rel.endsWith('/.git') || nested.some((dir) => rel.startsWith(`${dir}/`));
+}
+
+// The common dir's `worktrees/<name>/gitdir` names each linked worktree's `.git`: its registration, which `worktree
+// add` writes and `remove` and `prune` delete, and what an event re-reads the list on.
+function registration(sub: string): boolean {
+  return /^worktrees(\/[^/]+(\/gitdir)?)?$/.test(sub);
+}
+
+// Every linked worktree the common dir registers, by absolute path (a relative `gitdir`, `worktree.useRelativePaths`,
+// resolved against its own directory); none when the common dir has no `worktrees/`.
+async function readLinkedWorktrees(commonDir: string): Promise<string[]> {
+  const dir = join(commonDir, 'worktrees');
+  const names = await readdir(dir).catch(() => [] as string[]);
+  const paths = await Promise.all(
+    names.map(async (name) => {
+      const pointer = await readFile(join(dir, name, 'gitdir'), 'utf8').catch(() => null);
+      if (pointer === null || pointer.trim() === '') return null;
+      const path = dirname(resolve(dir, name, pointer.trim()));
+      return realpath(path).catch(() => path);
+    }),
+  );
+  return paths.filter((path): path is string => path !== null);
+}
+
+function under(path: string, dir: string): boolean {
+  return path === dir || path.startsWith(`${dir}/`);
+}
+
 // Who holds a watch: main passes the requesting window's `webContents.id`; 0 is a caller without a window.
 export type WatchOwner = number;
 
@@ -84,6 +136,8 @@ interface Root {
   last: { status: GitStatus; projection: string };
   backoff: boolean;
   failing: boolean;
+  nested: string[]; // the linked worktrees under the root, root-relative
+  nestedRead: 'idle' | 'reading' | 'again';
 }
 
 export class GitWatcher {
@@ -92,10 +146,12 @@ export class GitWatcher {
   private readonly generations = new Map<WatchOwner, number>(); // bumped by each release of the owner
   private readonly watchFn: WatchFn;
   private readonly statFile: (path: string) => Promise<FileFacts | null>;
+  private readonly linkedWorktrees: (commonDir: string) => Promise<string[]>;
 
   constructor(private readonly deps: GitWatcherDeps) {
     this.watchFn = deps.watch ?? (fsWatch as unknown as WatchFn);
     this.statFile = deps.statFile ?? ((path) => stat(path).then((s) => ({ size: s.size, mtimeMs: s.mtimeMs }), () => null));
+    this.linkedWorktrees = deps.linkedWorktrees ?? readLinkedWorktrees;
   }
 
   // Resolves the directory's status (failing as `status` fails, with nothing registered), then counts one more watcher
@@ -105,11 +161,11 @@ export class GitWatcher {
   async watch(directory: string, owner: WatchOwner = 0): Promise<GitStatus> {
     const generation = this.generations.get(owner) ?? 0;
     const status = await this.deps.status(directory);
-    const projection = await this.project(status, new Map());
+    const [projection, nested] = await Promise.all([this.project(status, new Map()), this.nestedUnder(status)]);
     if ((this.generations.get(owner) ?? 0) !== generation) return status;
     let root = this.roots.get(status.repoRoot);
     if (!root) {
-      root = this.open(status, projection);
+      root = this.open(status, projection, nested);
       this.deps.emit({ repoRoot: root.root, status, reason: 'initial' });
     }
     root.count++;
@@ -148,7 +204,7 @@ export class GitWatcher {
     if (root && (root.count -= count) <= 0) this.close(root);
   }
 
-  private open(status: GitStatus, projection: string): Root {
+  private open(status: GitStatus, projection: string, nested: string[]): Root {
     const root: Root = {
       root: status.repoRoot,
       count: 0,
@@ -164,22 +220,36 @@ export class GitWatcher {
       last: { status, projection },
       backoff: false,
       failing: false,
+      nested,
+      nestedRead: 'idle',
     };
     const inside = relative(root.root, status.gitDir);
     const gitDirRel = inside !== '' && !inside.startsWith('..') && !isAbsolute(inside) ? inside.split(sep).join('/') : null;
     const onError = (error: Error) => console.warn(`[git] watch failed under ${root.root}: ${error.message}`);
+    // A path in the git dir or the common dir, relative to it; `common`: the directory is the common dir, where the
+    // linked worktrees are registered.
+    const onGitPath = (sub: string, reason: Exclude<GitChangeReason, 'initial'> | null, common: boolean) => {
+      if (common && registration(sub)) this.readNested(root, status);
+      this.changed(root, reason, null, sub);
+    };
+    const gitDirIsCommon = status.gitDir === status.commonDir;
     // A watch that cannot open (the directory vanished since its status was read) fails this call and leaves no root.
     try {
       const rootWatch = this.watchFn(root.root, { recursive: true }, (_event, filename) => {
-        const rel = filename === null ? null : filename.split(sep).join('/');
-        this.changed(root, rel === null ? 'worktree' : classifyRootPath(rel, gitDirRel), rel);
+        if (filename === null) return this.changed(root, 'worktree');
+        const rel = filename.split(sep).join('/');
+        if (gitDirRel !== null && rel.startsWith(`${gitDirRel}/`)) return onGitPath(rel.slice(gitDirRel.length + 1), classifyRootPath(rel, gitDirRel), gitDirIsCommon);
+        if (insideNestedCheckout(rel, root.nested)) return;
+        this.changed(root, classifyRootPath(rel, gitDirRel), rel);
       });
       root.handles.push(rootWatch);
       rootWatch.on('error', onError);
       if (gitDirRel === null) {
-        const gitDirWatch = this.watchFn(status.gitDir, { recursive: true }, (_event, filename) =>
-          this.changed(root, filename === null ? 'index' : classifyGitPath(filename.split(sep).join('/'))),
-        );
+        const gitDirWatch = this.watchFn(status.gitDir, { recursive: true }, (_event, filename) => {
+          if (filename === null) return this.changed(root, 'index');
+          const sub = filename.split(sep).join('/');
+          onGitPath(sub, classifyGitPath(sub), gitDirIsCommon);
+        });
         root.handles.push(gitDirWatch);
         gitDirWatch.on('error', onError);
       }
@@ -188,9 +258,11 @@ export class GitWatcher {
       // those paths, rather than separate watches on `refs/` and `packed-refs`, since `packed-refs` may not exist yet
       // (a watch on a missing file cannot open) and `config` sits beside them.
       if (status.isWorktree) {
-        const commonWatch = this.watchFn(status.commonDir, { recursive: true }, (_event, filename) =>
-          this.changed(root, filename === null ? 'refs' : classifyCommonPath(filename.split(sep).join('/'))),
-        );
+        const commonWatch = this.watchFn(status.commonDir, { recursive: true }, (_event, filename) => {
+          if (filename === null) return this.changed(root, 'refs');
+          const sub = filename.split(sep).join('/');
+          onGitPath(sub, classifyCommonPath(sub), true);
+        });
         root.handles.push(commonWatch);
         commonWatch.on('error', onError);
       }
@@ -215,11 +287,39 @@ export class GitWatcher {
     }
   }
 
-  private changed(root: Root, reason: Exclude<GitChangeReason, 'initial'> | null, rel: string | null = null): void {
+  // `sub`: the path of a git dir event, relative to that dir. A ref is judged by the last status's branch and upstream,
+  // unless a status is in flight, which may be about to move them.
+  private changed(root: Root, reason: Exclude<GitChangeReason, 'initial'> | null, rel: string | null = null, sub: string | null = null): void {
     if (reason === null || root.closed) return;
+    if (reason === 'refs' && sub !== null && !root.inFlight && !refMatters(sub, root.last.status)) return;
     root.pending.add(reason);
     if (reason === 'worktree' && rel !== null) root.touched.add(rel);
     this.schedule(root);
+  }
+
+  // The linked worktrees under the status's root, root-relative (the root itself, and those outside it, are not).
+  private async nestedUnder(status: GitStatus): Promise<string[]> {
+    const paths = await this.linkedWorktrees(status.commonDir).catch(() => []);
+    return paths
+      .map((path) => relative(status.repoRoot, path))
+      .filter((rel) => rel !== '' && !rel.startsWith('..') && !isAbsolute(rel))
+      .map((rel) => rel.split(sep).join('/'));
+  }
+
+  // Re-reads them after a registration moved: one read at a time, and one more for whatever moved meanwhile. Until it
+  // lands, a write in a worktree being added still counts, costing one status that finds nothing new.
+  private readNested(root: Root, status: GitStatus): void {
+    if (root.nestedRead !== 'idle') {
+      root.nestedRead = 'again';
+      return;
+    }
+    root.nestedRead = 'reading';
+    void this.nestedUnder(status).then((nested) => {
+      root.nested = nested;
+      const again = root.nestedRead === 'again';
+      root.nestedRead = 'idle';
+      if (again && !root.closed) this.readNested(root, status);
+    });
   }
 
   // Trailing debounce, capped from the window's first event so a writer that never pauses cannot hold the status off
