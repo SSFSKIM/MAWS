@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { IpcErrorSchema } from './errors';
+import { NAMES } from './names';
 import { commandChannel, commands, eventChannel, events, NAMESPACES, type Namespace } from './schema';
 import * as attention from './schema/attention';
 import * as engine from './schema/engine';
@@ -39,6 +40,12 @@ describe('ipc schema validates both directions', () => {
       for (const key of [...Object.keys(modules[ns].commands), ...Object.keys(modules[ns].events)]) {
         expect(key.startsWith(`${ns}.`), key).toBe(true);
       }
+    });
+
+    // Debt wave 4: the preload bridges these zod-free lists, not the registries.
+    it.each(NAMESPACES)('names/%s.ts lists exactly schema/%s.ts’s keys, once each', (ns) => {
+      expect([...NAMES[ns].commands]).toEqual(Object.keys(modules[ns].commands));
+      expect([...NAMES[ns].events]).toEqual(Object.keys(modules[ns].events));
     });
 
     it('merges without losing a key to a duplicate', () => {

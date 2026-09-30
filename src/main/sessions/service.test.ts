@@ -9,6 +9,7 @@ import { validateEventPayload } from '@shared/ipc/validate';
 import { SessionHarness } from '../../../test/support/session-harness';
 import { DOWN_RELAY } from '../../../test/support/session-host';
 import { storeLabel } from './record-actions';
+import { directRouteRefusal } from './start-guards';
 
 // The service is Electron-free (its handlers are service-register.ts's).
 vi.mock('electron', () => {
@@ -209,6 +210,27 @@ describe('session service', () => {
       const gatewayModel = await create();
       await h.service.patch(gatewayModel, { model: 'claude/astra' });
       expect(await h.service.startSession(gatewayModel, { message: null, options: {} })).toMatchObject({ status: 'relay_unreachable' });
+    });
+
+    // Debt wave 4: a relay alias on the direct route is refused before any card or launch, naming the model and route
+    it('refuses a gateway model on the direct route before any card or launch, and hands the message back', async () => {
+      const id = await create(h.dir('untrusted-direct')); // an untrusted folder: the refusal comes before the trust card
+      await h.service.patch(id, { gateway: 'direct', model: 'claude/astra', draft: DRAFT });
+      const refused = await h.service.startSession(id, { message: OK_MESSAGE, options: {} });
+      expect(refused).toEqual({ status: 'invalid', appSessionId: id, field: 'model', message: directRouteRefusal('claude/astra') });
+      expect(directRouteRefusal('claude/astra')).toMatch(/^claude\/astra is a gateway model, which the Direct route cannot serve/);
+      expect(intentFile(h, id)).toMatchObject({ message: null, draft: DRAFT });
+      // the route given as the start's option counts as the intent's: the relay card's Run direct on an alias
+      const viaOption = await create();
+      await h.service.patch(viaOption, { model: 'claude/astra' });
+      expect(await h.service.startSession(viaOption, { message: OK_MESSAGE, options: { gateway: 'direct' } })).toMatchObject({ status: 'invalid', field: 'model' });
+      // a Claude model on the direct route, and the alias on the gateway, pass
+      h.trustDirectory(h.work);
+      await h.service.patch(viaOption, { model: 'sonnet' });
+      expect(await h.service.startSession(viaOption, { message: null, options: { gateway: 'direct' } })).toMatchObject({ status: 'starting' });
+      await h.settled(viaOption);
+      expect(h.host.launches).toHaveLength(1);
+      expect(h.host.launches[0]).toMatchObject({ gateway: 'direct', model: 'sonnet' });
     });
 
     it('a launch with no status for the watchdog’s span is stopped and rolled back', async () => {

@@ -52,6 +52,11 @@ export async function guardIntentStart(s: Setup, ctx: GuardContext, intentIn: Se
     const refusal = await forkRefusal(s, intent.source!.appSessionId);
     if (refusal !== null) return reject({ status: 'refused', appSessionId, ...refusal });
   }
+  // a relay alias on the direct route (C7's model chip, or a Direct default route, can leave one): refused before any
+  // card, since the launch would fail on the failure card; the page answers `field: 'model'` with pickDirectModel
+  if (intent.gateway === 'direct' && intent.model !== null && isGatewayModel(intent.model)) {
+    return reject({ status: 'invalid', appSessionId, field: 'model', message: directRouteRefusal(intent.model) });
+  }
 
   // the card outcomes: the message stays with the intent until the card's continuation, a release or the handoff
   const trust = await trustStateOf(trustDirectoryOf(intent.location), { git: s.git, env: s.env });
@@ -77,6 +82,9 @@ export async function guardIntentStart(s: Setup, ctx: GuardContext, intentIn: Se
   if (progress !== intent.progress) await ctx.putIntent({ ...intent, progress, updatedAt: s.now() });
   return [{ status: 'starting', appSessionId }, () => runIntentSetup(s, appSessionId, { gateway, directFallback })];
 }
+
+export const directRouteRefusal = (model: string) =>
+  `${model} is a gateway model, which the Direct route cannot serve · choose a Claude model, or start on the gateway`;
 
 // A fork is refused for a source that is gone, has no engine id, or has a turn open in MAWS (a copy taken mid-turn
 // would hold a half-written turn).
