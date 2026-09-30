@@ -264,14 +264,15 @@ test.describe('interactive', () => {
     await expect(page.getByRole('textbox', { name: 'Message' })).toBeVisible();
     const inputsOf = async (command: string) => (await commandsOf(backend)).filter((c) => c.command === command).map((c) => c.input);
     const noWidget = () => expect(page.locator('[data-widget]')).toHaveCount(0);
+    // Toasts by exact text: Radix's transient live-region announcement reads `Notification <text>` and would match too.
 
     await typeCommand(page, '/model opus');
-    await expect(page.getByText('Model · Opus 5.5 (1M context) · set · the next init frame confirms it')).toBeVisible();
+    await expect(page.getByText('Model · Opus 5.5 (1M context) · set · the next init frame confirms it', { exact: true })).toBeVisible();
     await noWidget();
     expect(await inputsOf('session.setModel')).toEqual([{ appSessionId: READY, model: 'opus' }]);
 
     await typeCommand(page, '/fast off');
-    await expect(page.getByText('Fast mode · off · set · the next init frame confirms it')).toBeVisible();
+    await expect(page.getByText('Fast mode · off · set · the next init frame confirms it', { exact: true })).toBeVisible();
     await noWidget();
     expect(await inputsOf('session.applyFlagSettings')).toEqual([{ appSessionId: READY, settings: { fastMode: false } }]);
 
@@ -280,7 +281,7 @@ test.describe('interactive', () => {
     await page.keyboard.press('Escape');
 
     await typeCommand(page, '/effort high');
-    await expect(page.getByText('Effort · high · set · the next init frame confirms it')).toBeVisible();
+    await expect(page.getByText('Effort · high · set · the next init frame confirms it', { exact: true })).toBeVisible();
     await noWidget();
     expect(await inputsOf('session.setEffort')).toEqual([{ appSessionId: READY, effort: 'high' }]);
 
@@ -296,7 +297,7 @@ test.describe('interactive', () => {
     expect(await inputsOf('session.setModel')).toHaveLength(1);
 
     await typeCommand(page, '/permissions acceptEdits');
-    await expect(page.getByText('Permission mode · acceptEdits')).toBeVisible();
+    await expect(page.getByText('Permission mode · acceptEdits', { exact: true })).toBeVisible();
     await noWidget();
     expect(await inputsOf('session.setPermissionMode')).toEqual([{ appSessionId: READY, mode: 'acceptEdits' }]);
 
