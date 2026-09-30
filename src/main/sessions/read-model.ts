@@ -61,6 +61,9 @@ export class SessionReadModel {
   private readonly attentionById = new Map<AppSessionId, AttentionItem[]>();
   private readonly visible = new Set<AppSessionId>();
   private readonly sources = new Set<SessionSource>();
+  // C12: the launch whose released mark a terminal or background job holder, or an archive, cleared (null when no status
+  // named one); the mark applies once per release, so nothing of that launch restores it, and the next launch forgets it
+  private readonly clearedRelease = new Map<AppSessionId, string | null>();
   private readonly listeners: { [K in keyof ReadModelEvents]: Set<ReadModelEvents[K]> } = {
     record: new Set(), digest: new Set(), engine: new Set(), attention: new Set(),
   };
@@ -174,6 +177,23 @@ export class SessionReadModel {
     return this.digestsById.get(appSessionId) ?? emptyDigest(appSessionId);
   }
 
+  // C12 start: the released mark once per release. `clearRelease` remembers the launch whose mark goes; `onceReleased`
+  // leaves the digest as it was (its phase, no mark) when a status or event of that launch would mark it again.
+  private launchOf(appSessionId: AppSessionId): string | null {
+    return this.statuses.get(appSessionId)?.launchId ?? null;
+  }
+
+  private clearRelease(appSessionId: AppSessionId): void {
+    this.clearedRelease.set(appSessionId, this.launchOf(appSessionId));
+  }
+
+  private onceReleased(prev: SessionDigest, next: SessionDigest): SessionDigest {
+    const cleared = this.clearedRelease.get(next.appSessionId);
+    if (next.released === undefined || prev.released !== undefined || cleared === undefined || cleared !== this.launchOf(next.appSessionId)) return next;
+    return { ...withoutReleased(next), phase: prev.phase, activity: prev.activity };
+  }
+  // C12 end
+
   private readonly writer: ReadModelWriter = {
     observeRecord: (r) => {
       this.records.set(r.appId, r);
@@ -181,7 +201,10 @@ export class SessionReadModel {
       // C12 start: an archive is not a cause C4 re-seeds the digest on, so an archived released session reads exited here
       // (an unarchived one then starts fresh)
       const digest = this.digestsById.get(r.appId);
-      if (r.archived && digest?.released !== undefined) this.commit({ ...withoutReleased(digest), phase: 'exited', activity: null });
+      if (r.archived && digest?.released !== undefined) {
+        this.clearRelease(r.appId);
+        this.commit({ ...withoutReleased(digest), phase: 'exited', activity: null });
+      }
       // C12 end
     },
     observeRemoved: (appSessionId) => {
@@ -194,6 +217,7 @@ export class SessionReadModel {
       this.statuses.delete(appSessionId);
       this.attentionById.delete(appSessionId);
       this.visible.delete(appSessionId);
+      this.clearedRelease.delete(appSessionId); // C12
       this.fire('record', appSessionId, null);
     },
     observeProject: (p) => {
@@ -217,6 +241,7 @@ export class SessionReadModel {
       // C12: C4's holder-change seed after a release (phase `exited`) keeps the released mark and its idle phase; any
       // other phase (a terminal or background job holding it: `foreign`) drops the mark and takes the incoming phase.
       const keepReleased = prev?.released !== undefined && d.released === undefined && d.phase === 'exited';
+      if (prev?.released !== undefined && d.released === undefined && !keepReleased) this.clearRelease(d.appSessionId); // C12
       this.commit({
         ...d,
         cost: keepCost ? (prev?.cost ?? null) : d.cost,
@@ -234,13 +259,15 @@ export class SessionReadModel {
       if (!seen) this.seen.set(appSessionId, (seen = new Set()));
       let ledger = this.ledgers.get(appSessionId);
       if (!ledger) this.ledgers.set(appSessionId, (ledger = costLedger(this.current(appSessionId))));
-      this.commit(foldEvents(this.current(appSessionId), seen, events, ledger, this.live(appSessionId)));
+      const current = this.current(appSessionId);
+      this.commit(this.onceReleased(current, foldEvents(current, seen, events, ledger, this.live(appSessionId)))); // C12: onceReleased
     },
     applyEngineStatus: (s) => {
       if (!this.records.has(s.appSessionId)) return;
       this.statuses.set(s.appSessionId, s);
       this.fire('engine', s.appSessionId, s);
-      this.commit(applyStatusToDigest(this.current(s.appSessionId), s));
+      const current = this.current(s.appSessionId);
+      this.commit(this.onceReleased(current, applyStatusToDigest(current, s))); // C12: onceReleased
     },
     observeReplay: (appSessionId) => {
       if (this.records.has(appSessionId)) this.replays.add(appSessionId);

@@ -443,6 +443,43 @@ describe('the released mark against seeds, launches and archive', () => {
     expect(current().released).toBeUndefined();
   });
 
+  // M2 review: the mark applies once per release. A repeated status (or a late event) of the release whose mark a
+  // terminal or an archive cleared never restores it; the next launch's own release marks again.
+  it('a repeated exited status of a release whose mark a terminal cleared restores nothing, before or after the terminal lets go', () => {
+    release();
+    seed('foreign');
+    const exited = status(A, { process: 'exited', exit: { reason: 'budget', release: RELEASE } });
+    src.writer.applyEngineStatus(exited);
+    expect(current().phase).toBe('foreign');
+    expect(current().released).toBeUndefined();
+    src.writer.fold(A, [ev('process.exited', { reason: 'budget', budget: RELEASE })]); // a late event of the same exit
+    expect(current().released).toBeUndefined();
+    seed('exited'); // the terminal let go
+    src.writer.applyEngineStatus(exited);
+    expect(current().phase).toBe('exited');
+    expect(current().released).toBeUndefined();
+  });
+
+  it('a repeated exited status of a release whose mark an archive cleared restores nothing', () => {
+    release();
+    src.writer.observeRecord(record(A, { archived: true }));
+    src.writer.observeRecord(record(A, { archived: false }));
+    src.writer.applyEngineStatus(status(A, { process: 'exited', exit: { reason: 'budget', release: RELEASE } }));
+    expect(current().phase).toBe('exited');
+    expect(current().released).toBeUndefined();
+  });
+
+  it('repeated statuses of a still-released session keep the mark; the next launch’s release marks again', () => {
+    release();
+    const mark = current().released;
+    src.writer.applyEngineStatus(status(A, { process: 'exited', exit: { reason: 'budget', release: RELEASE } }));
+    expect(current()).toMatchObject({ phase: 'idle', released: mark });
+    seed('foreign');
+    src.writer.applyEngineStatus({ ...status(A, { process: 'starting' }), launchId: 'L2' });
+    src.writer.applyEngineStatus({ ...status(A, { process: 'exited', exit: { reason: 'budget', release: RELEASE } }), launchId: 'L2' });
+    expect(current()).toMatchObject({ phase: 'idle', released: { limitKiB: 8_388_608 } });
+  });
+
   it('the next launch clears the mark', () => {
     release();
     src.writer.applyEngineStatus(status(A, { process: 'starting' }));
