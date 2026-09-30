@@ -122,7 +122,7 @@ describe('graph schemas accept and reject', () => {
         'turn.ended': { result: 'success', isError: false, terminalReason: 'completed', resultText: 'OK', durationMs: 10, numTurns: 1, costUsd: 0.01, usage: { inputTokens: 1, outputTokens: 2, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, thinkingTokens: null }, permissionDenials: [{ toolName: 'Bash', toolUseId: 't', toolInput: {} }], errors: [], userMessageUuids: ['u'], origin: 'human', resultIndex: 0, isEchoReceipt: false },
         'command.lifecycle': { commandUuid: 'c', state: 'queued' },
         'assistant.block.delta': { apiMessageId: 'msg_1', blockIndex: 0, blockType: 'text', textDelta: 'hi', thinkingDelta: null, inputJsonDelta: null, userMessageUuid: null },
-        'assistant.block.complete': { messageUuid: 'm', apiMessageId: 'msg_1', blockIndex: 0, block: { type: 'text', text: 'hi' }, model: 'm', supersedes: null, aborted: false, userMessageUuids: [] },
+        'assistant.block.complete': { messageUuid: 'm', apiMessageId: 'msg_1', blockIndex: 0, block: { type: 'text', text: 'hi' }, model: 'm', supersedes: [], aborted: false, userMessageUuids: [] },
         'user.message': { messageUuid: 'u', content: 'hi', isReplay: true, isSynthetic: false, origin: 'human', bash: { part: 'output', stdout: 'x', stderr: '', exitCode: 0 } },
         'tool.use': { toolUseId: 't', toolName: 'Bash', input: { command: 'ls' }, apiMessageId: null, messageUuid: null },
         'tool.safeguard': { toolUseId: 't', verdict: 'not_flagged', lane: 'server' },

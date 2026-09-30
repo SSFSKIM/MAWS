@@ -42,12 +42,14 @@ describe('context.sample once ready and at each turn end', () => {
     expect(samples[0]!.seq!).toBeLessThan(firstTurn.seq!); // `ctx` before the first turn has run
     const turnEnds = run.events.filter((e) => e.kind === 'turn.ended').map((e) => e.seq!);
     expect(samples.slice(1).every((s, i) => s.seq! > turnEnds[i]!)).toBe(true);
-    expect(samples[2]).toMatchObject({ totalTokens: 30304, maxTokens: 200000, percentage: 15, autoCompactThreshold: 167000, isAutoCompactEnabled: true });
+    // the ready read is the engine's estimate (its recorded answer, replayed before any turn, still names the first
+    // turn's apiUsage, so it too derives); each turn-end read's total is the measured input plus the Messages estimate
+    expect(samples[2]).toMatchObject({ totalTokens: 21841, maxTokens: 200000, percentage: 11, autoCompactThreshold: 167000, isAutoCompactEnabled: true });
     expect(run.rebuilt()).toEqual(run.events);
 
     const before = run.events.slice(0, run.events.indexOf(firstTurn)).reduce(foldDigest, emptyDigest(run.session.status().appSessionId as AppSessionId));
-    expect(before.context).toEqual({ percent: 15, totalTokens: 30304, maxTokens: 200000, autoCompactThreshold: 167000 });
+    expect(before.context).toEqual({ percent: 11, totalTokens: 21495, maxTokens: 200000, autoCompactThreshold: 167000 });
     const digest = run.events.reduce(foldDigest, emptyDigest(run.session.status().appSessionId as AppSessionId));
-    expect(digest.context).toEqual({ percent: 15, totalTokens: 30304, maxTokens: 200000, autoCompactThreshold: 167000 });
+    expect(digest.context).toEqual({ percent: 11, totalTokens: 21841, maxTokens: 200000, autoCompactThreshold: 167000 });
   });
 });

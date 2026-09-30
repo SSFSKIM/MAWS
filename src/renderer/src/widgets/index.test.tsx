@@ -64,7 +64,7 @@ describe('every widget renders its fixture response', () => {
     model: 'From gateway',
     effort: 'Engine default',
     fast: 'Fast mode is for Opus', // the scenario session is on Sonnet
-    compact: '30,433 of 200,000 · 15% · autocompact at 167,000',
+    compact: '21,508 of 200,000 · 11% · autocompact at 167,000', // the summary corrected as C3 corrects its sample (debt wave 4)
     resume: 'Usage reset countdown',
     rename: 'New title',
   };

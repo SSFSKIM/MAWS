@@ -8,6 +8,7 @@ import { create } from 'zustand';
 import { sendContentRefusal } from '@shared/engine/session-state-store';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, AppSessionId } from '@shared/graph/ids';
+import { useTranscriptStore } from '../../stores/transcript';
 import { agentWorkClient } from './client';
 import { RELAY_COPY } from './copy';
 import { isPending, matchesReceipt, matchesSendMessage, parentRoundsBetween, relayText, type Relay } from './model/relay';
@@ -45,6 +46,7 @@ export function createRelayStore() {
   const watches = new Map<AppSessionId, SessionWatch>();
   const started = new Set<string>(); // steer uuids the engine reported started: a later cancellation is not a drop
   const inFlight = new Set<string>(); // relay keys whose steer is unanswered
+  const followed = new Set<string>(); // relay keys whose child this store asked the host to follow (debt wave 4)
 
   return create<RelayStore>()((set, get) => {
     const put = (key: string, relay: Relay | null) => {
@@ -54,6 +56,15 @@ export function createRelayStore() {
       set({ relays });
     };
     const ofSession = (id: AppSessionId) => [...get().relays].filter(([, r]) => r.appSessionId === id);
+
+    // Releases the child follow this store started, once its relay is delivered or ended. Not while the child's drill-in
+    // holds a transcript entry under the same key: the host keeps one follower per child, and a drill-in over an ended
+    // child reads that same follower (the entry outlives a detach, so this errs towards keeping the follower).
+    const release = (key: string, relay: Relay) => {
+      if (!followed.delete(key)) return;
+      if (useTranscriptStore.getState().entries[key] !== undefined) return;
+      agentWorkClient().unfollowAgent(relay.appSessionId, relay.agentId).catch(() => {});
+    };
 
     // Drops what no relay of the session needs any more, and the subscription once none is in flight or pending.
     const tidy = (id: AppSessionId) => {
@@ -74,7 +85,10 @@ export function createRelayStore() {
       const w = watches.get(relay.appSessionId);
       const { state } = relay;
       if (!isPending(state)) return;
-      if (e.kind === 'process.exited' && e.agentId === null && e.seq !== null) return put(key, null); // the steer went with the process
+      if (e.kind === 'process.exited' && e.agentId === null && e.seq !== null) {
+        release(key, relay);
+        return put(key, null); // the steer went with the process
+      }
       const ended = endedAt(e, relay.agentId);
       if (state.kind === 'asked') {
         if (e.kind === 'command.lifecycle' && e.commandUuid === state.messageUuid) {
@@ -86,13 +100,45 @@ export function createRelayStore() {
         if (e.kind === 'tool.use' && e.seq !== null && matchesSendMessage(e, relay)) { // (b) is the live parent's row; the receipt below takes either form (O3)
           const parentRounds = parentRoundsBetween(w?.rounds ?? [], state.sentSeq ?? -Infinity, e.seq + 1);
           put(key, { ...relay, state: { kind: 'forwarded', messageUuid: state.messageUuid, sentAt: state.sentAt, toolUseId: e.toolUseId, forwardedAt: e.at, parentRounds, childEndedAt: state.childEndedAt } });
+          if (state.childEndedAt === null) followChild(key, relay);
         }
         return;
       }
-      if (matchesReceipt(e, relay)) return put(key, { ...relay, state: { kind: 'delivered', deliveredAt: e.at } });
+      // A disk-form receipt counts only if written at or after this forward: the child's transcript may already hold the
+      // same text from an earlier relay or its own prompt (both clocks are this machine's, ISO strings in UTC).
+      if (matchesReceipt(e, relay) && !(e.seq === null && e.at < state.forwardedAt)) {
+        release(key, relay);
+        return put(key, { ...relay, state: { kind: 'delivered', deliveredAt: e.at } });
+      }
       // A forwarded relay's agent ended: the rows in both transcripts are the record. Not for one forwarded to an agent
       // that had already ended, which the forward resumes and whose resume start is the receipt.
-      if (ended !== null && state.childEndedAt === null) put(key, null);
+      if (ended !== null && state.childEndedAt === null) {
+        release(key, relay);
+        put(key, null);
+      }
+    };
+
+    // Debt wave 4: a live child's receipt reaches no wire on 2.1.283 (O3); it is the `queued_command` attachment its
+    // transcript gains at its next tool round, which C4 surfaces as the child's disk-form `user.message`. Nothing follows
+    // a live child's transcript otherwise (its drill-in reads the parent's stream), so a relay forwarded to a running
+    // child follows it: the answer carries what was written already, and the follower's later events arrive on the
+    // session's batches this store watches. The follow is released when the relay is delivered or its child ends.
+    // The answer applies only to the forward that asked for it (a later send replaces the relay under the same key), and
+    // only its receipts: the rest of the child's history is not news to the relay.
+    const followChild = (key: string, relay: Relay) => {
+      const forward = (r: Relay | undefined) => (r?.state.kind === 'forwarded' ? r.state.toolUseId : null);
+      const asked = forward(get().relays.get(key));
+      followed.add(key);
+      agentWorkClient()
+        .agentEvents(relay.appSessionId, relay.agentId)
+        .then((events) => {
+          if (asked === null || forward(get().relays.get(key)) !== asked) return;
+          for (const e of events) if (e.kind === 'user.message') step(key, e);
+          tidy(relay.appSessionId);
+        })
+        .catch(() => {
+          followed.delete(key); // not yet listed, or no meta: nothing follows it, and the relay rests at forwarded
+        });
     };
 
     const onBatch = (id: AppSessionId, events: SessionEvent[]) => {
@@ -150,6 +196,7 @@ export function createRelayStore() {
       dismiss(key) {
         const relay = get().relays.get(key);
         if (!relay) return;
+        release(key, relay);
         put(key, null);
         tidy(relay.appSessionId);
       },

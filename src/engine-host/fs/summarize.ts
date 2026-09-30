@@ -49,7 +49,10 @@ export function summarize(
     lastRecordAt: stringField(lastUuid, 'timestamp'),
     customTitle: customTitle === '' ? null : customTitle, // an empty custom title is the engine's "clear" (SPEC 35.5.1)
     aiTitle: lastString(tailReversed, 'ai-title', 'aiTitle') ?? lastString(headReversed, 'ai-title', 'aiTitle'),
-    firstPrompt: lastString(tailReversed, 'last-prompt', 'lastPrompt') ?? firstUserText(headRecords),
+    // The conversation's first prompt (charter §19, the title rule): the engine's `last-prompt` follows the latest one,
+    // a relay's steer included, so it stands in only when the first prompt's record is cut by the head window, and
+    // then its earliest copy the windows hold (debt wave 4).
+    firstPrompt: firstUserText(headRecords) ?? firstOfType([...headRecords, ...tailRecords], 'last-prompt', 'lastPrompt'),
     lastAssistantText: lastAssistant,
     gitBranch: firstString(tailReversed, 'gitBranch') ?? firstString(headReversed, 'gitBranch'),
     engineVersion: firstString(headRecords, 'version') ?? firstString(tailReversed, 'version'),
@@ -174,9 +177,11 @@ function firstString(records: TranscriptRecord[], field: string): string | null 
   return null;
 }
 
-// `records` is given newest first; the first match is the last record of that type in the window.
-function lastString(reversed: TranscriptRecord[], type: string, field: string): string | null {
-  for (const record of reversed) {
+// The field of the first record of that type in `records`' order: given newest first, the last such record in the
+// window (`lastString`); given in file order, the earliest (`firstOfType`).
+const firstOfType = (records: TranscriptRecord[], type: string, field: string): string | null => lastString(records, type, field);
+function lastString(records: TranscriptRecord[], type: string, field: string): string | null {
+  for (const record of records) {
     if (record.type !== type) continue;
     const value = record[field];
     if (typeof value === 'string') return value;
@@ -190,6 +195,9 @@ function firstUserText(records: TranscriptRecord[]): string | null {
     if (record.type !== 'user' || record.isMeta === true) continue;
     const content = (record.message as { content?: unknown } | undefined)?.content;
     if (typeof content === 'string') {
+      // A bash-mode prompt stores its command in tags; it titles as the terminal shows it, `! <command>` (debt wave 4)
+      const bash = /^<bash-input>([\s\S]*?)<\/bash-input>/.exec(content);
+      if (bash) return `! ${bash[1]}`.slice(0, TEXT_CAP);
       if (content.length > 0) return content.slice(0, TEXT_CAP);
       continue;
     }

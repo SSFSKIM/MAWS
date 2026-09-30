@@ -81,6 +81,45 @@ describe('head and tail summary', () => {
     expect(summary.lastAssistantText).toBe('Reply one');
   });
 
+  // Debt wave 4, the title rule (charter §19, the C12 review rulings, item (1)): a `none`-source title is the
+  // conversation's first human prompt; the engine's `last-prompt` follows the latest prompt, a relay's steer included.
+  it("the prompt is the conversation's first, never a later prompt or a relay's steer that the engine's last-prompt names", () => {
+    const steer = 'Relay to agent a7aea42f9bed9b3ea with SendMessage, verbatim, then continue what you were doing: Say PING in your next inbox line';
+    const text =
+      line({ type: 'user', uuid: 'u1', parentUuid: null, cwd: '/d', timestamp: '2026-09-29T10:00:00.000Z', message: { role: 'user', content: 'Fix the drag handle' } }) +
+      line({ type: 'assistant', uuid: 'a1', parentUuid: 'u1', timestamp: '2026-09-29T10:00:01.000Z', message: { role: 'assistant', content: [{ type: 'text', text: 'On it.' }] } }) +
+      line({ type: 'last-prompt', lastPrompt: 'Fix the drag handle', leafUuid: 'a1', sessionId: 'S' }) +
+      line({ type: 'user', uuid: 'u2', parentUuid: 'a1', timestamp: '2026-09-29T10:00:02.000Z', message: { role: 'user', content: steer } }) +
+      line({ type: 'last-prompt', lastPrompt: steer, leafUuid: 'u2', sessionId: 'S' });
+    const bytes = Buffer.from(text, 'utf8');
+    expect(summarize(bytes, bytes, { size: bytes.length, mtimeMs: 1 }, '/p/S.jsonl', '-p').firstPrompt).toBe('Fix the drag handle');
+
+    // a real terminal transcript with three prompts: last-prompt ends on the third
+    const real = readFileSync(join(TEST_FIXTURE_DIR, 'transcripts/rewind-terminal.jsonl'));
+    const windows = headAndTail(real);
+    expect(summarize(windows.head, windows.tail, { size: real.length, mtimeMs: 1 }, '/p/a76ad588-e4b4-4a99-bf4e-69287514916f.jsonl', '-p').firstPrompt).toBe('Remember APPLE.');
+  });
+
+  it('a bash-mode first prompt is the command as the terminal shows it, `! <command>`, never its tags', () => {
+    const text =
+      line({ type: 'user', uuid: 'u1', parentUuid: null, cwd: '/d', message: { role: 'user', content: '<bash-input>git status</bash-input>' } }) +
+      line({ type: 'user', uuid: 'u2', parentUuid: 'u1', message: { role: 'user', content: '<bash-stdout>clean</bash-stdout><bash-stderr></bash-stderr>' } }) +
+      line({ type: 'user', uuid: 'u3', parentUuid: 'u2', message: { role: 'user', content: 'Now fix the drag handle' } });
+    const bytes = Buffer.from(text, 'utf8');
+    expect(summarize(bytes, bytes, { size: bytes.length, mtimeMs: 1 }, '/p/S.jsonl', '-p').firstPrompt).toBe('! git status');
+  });
+
+  it('a first prompt longer than the head window falls back to the earliest last-prompt the windows hold', () => {
+    const big = line({ parentUuid: null, type: 'user', uuid: 'u1', timestamp: '2026-09-29T10:00:00.000Z', cwd: '/d', message: { role: 'user', content: 'y'.repeat(150 * 1024) } });
+    const rest =
+      line({ type: 'last-prompt', lastPrompt: 'yyyy…', leafUuid: 'u1', sessionId: 'S' }) +
+      line({ type: 'user', uuid: 'u2', parentUuid: 'u1', timestamp: '2026-09-29T10:00:02.000Z', message: { role: 'user', content: 'a steer' } }) +
+      line({ type: 'last-prompt', lastPrompt: 'a steer', leafUuid: 'u2', sessionId: 'S' });
+    const whole = Buffer.from(big + rest, 'utf8');
+    const windows = headAndTail(whole);
+    expect(summarize(windows.head, windows.tail, { size: whole.length, mtimeMs: 1 }, '/p/S.jsonl', '-p').firstPrompt).toBe('yyyy…');
+  });
+
   it('takes the custom title from the tail record, else the custom-title.json sidecar, else the head record (SPEC 35.14.3)', () => {
     const filler = line({ type: 'attachment', uuid: 'f1', parentUuid: 'u1', attachment: { type: 'x', text: 'y'.repeat(HEAD_TAIL_BYTES) } });
     const headOnly = Buffer.from(

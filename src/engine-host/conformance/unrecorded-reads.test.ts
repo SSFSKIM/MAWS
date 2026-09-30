@@ -62,7 +62,8 @@ describe('replay: a read the fixture never recorded', () => {
     expect(outcomes).toHaveLength(2);
     expect(outcomes.filter((o) => o instanceof ControlError)).toHaveLength(1); // the second: an empty answer that fails its schema
     expect(outcomes.find((o) => !(o instanceof ControlError))).toMatchObject({ totalTokens: 30433, maxTokens: 200000 }); // the first: reads.jsonl seq 57
-    const recordedAnswer = run.events.filter((e) => e.kind === 'context.sample' && e.totalTokens === 30433);
+    // its sample carries the measured input (10 + 9,179 + 12,318) plus the Messages estimate (1), debt wave 4
+    const recordedAnswer = run.events.filter((e) => e.kind === 'context.sample' && e.totalTokens === 21508);
     expect(recordedAnswer).toHaveLength(1);
   });
 });

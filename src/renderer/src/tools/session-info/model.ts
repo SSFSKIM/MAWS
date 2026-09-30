@@ -6,7 +6,7 @@ import type { BinaryInfo } from '@shared/ipc/schema/engine';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { SessionRecord } from '@shared/graph/session';
 import type { SessionDigest } from '@shared/ipc/schema';
-import type { GetContextUsageResponse, GetHooksListingResponse, GetStatusResponse, ListPermissionRulesResponse, McpStatusResponse } from '@shared/wire/control';
+import { contextTotal, type GetContextUsageResponse, type GetHooksListingResponse, type GetStatusResponse, type ListPermissionRulesResponse, type McpStatusResponse } from '@shared/wire/control';
 import type { SessionWindows } from '../../stores/usage';
 import { MODE_REFUSAL_WORDS } from '../../statusline/mode-menu';
 import { resetsIn, windowShown } from '../../statusline/format';
@@ -121,7 +121,7 @@ function usageSection({ digest, windows, now, reads }: SessionInfoInput): InfoSe
   const context = sampled
     ? CONTEXT.line(num(sampled.totalTokens), num(sampled.maxTokens), Math.round(sampled.percent), sampled.autoCompactThreshold === null ? null : num(sampled.autoCompactThreshold))
     : reads.context
-      ? presentContext(reads.context).line
+      ? presentContext({ ...reads.context, ...contextTotal(reads.context) }).line // corrected as C3 corrects its sample (debt wave 4)
       : NONE;
   const meter = (label: string, w: NonNullable<SessionWindows['windows']>['fiveHour']) => {
     if (!w) return null;

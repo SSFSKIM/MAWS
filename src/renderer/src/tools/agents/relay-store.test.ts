@@ -1,10 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { AgentId, AppSessionId } from '@shared/graph/ids';
+import type { AgentId, AppSessionId, ParentToolUseId, SessionId } from '@shared/graph/ids';
 import type { SessionEvent } from '@shared/graph/events';
+import { parseTranscriptRecord } from '@shared/wire/transcript';
+import { createBackfillContext, recordToEvents } from '../../../../engine-host/fs/backfill';
 import { setAgentWorkClient } from './client';
 import { relayText, restoreDraft } from './model/relay';
 import { createRelayStore, relayKey } from './relay-store';
-import { event, replayed } from '../../../../../test/support/agents-events';
+import { useTranscriptStore } from '../../stores/transcript';
+import { event, recordedReceiptRecord, replayed } from '../../../../../test/support/agents-events';
 import { fakeAgentWorkClient, type FakeAgentWorkClient } from './fake-work-client';
 
 const A = 'A' as AppSessionId;
@@ -81,6 +84,98 @@ describe('relay store', () => {
     batch([event('user.message', { agentId: LOOPER.agentId, content: 'The coordinator sent a message while you were working:\nSay PING' }, { seq: null, at: '2026-09-29T15:47:33.000Z' })]);
     expect(stateOf(LOOPER)).toEqual({ kind: 'delivered', deliveredAt: '2026-09-29T15:47:33.000Z' });
     expect(fake.listeners()).toBe(0);
+  });
+
+  // Debt wave 4: the recorded receipt (R1's queued_command attachment in the looping child's transcript, seq 232 and
+  // 351) through C4's backfill, as the child's follower delivers it.
+  describe('a live child’s receipt from its transcript', () => {
+    const receipt = (kase: 'idle' | 'busy') => {
+      const record = recordedReceiptRecord(kase);
+      const ctx = createBackfillContext({ sessionId: 'sess-1' as SessionId, agent: { agentId: LOOPER.agentId, parentToolUseId: 'toolu_019WWfE6Ry9diHmJymKAtX7Q' as ParentToolUseId } });
+      return recordToEvents(parseTranscriptRecord(record), ctx);
+    };
+
+    it('follows the child once forwarded, and delivers on the attachment arriving on the batches', async () => {
+      await send(LOOPER, 'Say PING in your next inbox line', IDLE_UUID);
+      expect(fake.inputs.agentEvents).toEqual([]);
+      batch(between(150, 200));
+      expect(stateOf(LOOPER)?.kind).toBe('forwarded');
+      expect(fake.inputs.agentEvents).toEqual([['A', LOOPER.agentId]]);
+      await fake.answer('agentEvents', []); // nothing written yet: the child's next tool round writes it
+      expect(stateOf(LOOPER)?.kind).toBe('forwarded');
+      batch(receipt('idle'));
+      expect(stateOf(LOOPER)).toEqual({ kind: 'delivered', deliveredAt: '2026-09-29T15:47:33.186Z' });
+      expect(fake.listeners()).toBe(0);
+    });
+
+    it('delivers from the follow’s answer when the attachment was written before it', async () => {
+      await send(LOOPER, 'Say PONG in your next inbox line', 'be019ba5-e49d-4ce6-8116-9a893ac8520f', true);
+      batch(between(285, 320));
+      expect(stateOf(LOOPER)?.kind).toBe('forwarded');
+      await fake.answer('agentEvents', [...receipt('idle'), ...receipt('busy')]); // the earlier PING receipt does not match
+      expect(stateOf(LOOPER)).toEqual({ kind: 'delivered', deliveredAt: '2026-09-29T15:48:46.208Z' });
+      expect(fake.listeners()).toBe(0);
+    });
+
+    it('the same text relayed again is not delivered by the earlier relay’s receipt already in the transcript', async () => {
+      await send(LOOPER, 'Say PING in your next inbox line', IDLE_UUID);
+      batch(between(150, 200));
+      await fake.answer('agentEvents', []);
+      batch(receipt('idle'));
+      expect(stateOf(LOOPER)?.kind).toBe('delivered');
+      // the same words again, forwarded by the busy case's SendMessage (15:48:4x): the follow answers the whole transcript
+      await send(LOOPER, 'Say PING in your next inbox line', 'be019ba5-e49d-4ce6-8116-9a893ac8520f', true);
+      batch(between(285, 320));
+      expect(stateOf(LOOPER)?.kind).toBe('forwarded');
+      await fake.answer('agentEvents', receipt('idle')); // written 15:47:33, before this forward
+      expect(stateOf(LOOPER)?.kind).toBe('forwarded');
+      batch(receipt('idle')); // a follower's re-delivery of the old record changes nothing either
+      expect(stateOf(LOOPER)?.kind).toBe('forwarded');
+    });
+
+    const unfollows = () => fake.calls.filter((c) => c.startsWith('unfollow '));
+
+    it('releases the follow once delivered, or once the child ends, and not while its drill-in holds the transcript', async () => {
+      await send(LOOPER, 'Say PING in your next inbox line', IDLE_UUID);
+      batch(between(150, 200));
+      await fake.answer('agentEvents', []);
+      expect(unfollows()).toEqual([]);
+      batch(receipt('idle'));
+      expect(unfollows()).toEqual([`unfollow A ${LOOPER.agentId}`]);
+
+      await send(LOOPER, 'Say PONG in your next inbox line', 'be019ba5-e49d-4ce6-8116-9a893ac8520f', true);
+      batch(between(285, 320));
+      await fake.answer('agentEvents', []);
+      batch([event('subagent.finished', { taskId: LOOPER.agentId, agentId: LOOPER.agentId }, { seq: 321 })]);
+      expect(relayOf(LOOPER)).toBeUndefined();
+      expect(unfollows()).toHaveLength(2);
+
+      useTranscriptStore.setState((s) => ({ entries: { ...s.entries, [relayKey(A, LOOPER.agentId)]: {} as never } }));
+      try {
+        await send(LOOPER, 'Say PING in your next inbox line', 'third', true);
+        batch(between(150, 200).map((e) => ({ ...e, seq: e.seq! + 1000 })));
+        await fake.answer('agentEvents', []);
+        batch([event('subagent.finished', { taskId: LOOPER.agentId, agentId: LOOPER.agentId }, { seq: 1300 })]);
+        expect(relayOf(LOOPER)).toBeUndefined();
+        expect(unfollows()).toHaveLength(2); // the drill-in's entry keeps the shared follower
+      } finally {
+        useTranscriptStore.getState().drop(relayKey(A, LOOPER.agentId));
+      }
+    });
+
+    it('a follow the host refuses leaves the relay forwarded; a relay forwarded to an ended child follows nothing', async () => {
+      await send(LOOPER, 'Say PING in your next inbox line', IDLE_UUID);
+      batch(between(150, 200));
+      await fake.fail('agentEvents', 'agent meta not yet available');
+      expect(stateOf(LOOPER)?.kind).toBe('forwarded');
+      await send(WALKER, 'Say PANG in your next inbox line', FOREGROUND_UUID, true);
+      batch(between(454, 547));
+      expect(stateOf(WALKER)).toMatchObject({ kind: 'forwarded', childEndedAt: '2026-09-29T15:49:19.672Z' });
+      expect(fake.inputs.agentEvents).toEqual([['A', LOOPER.agentId]]);
+      batch([event('subagent.finished', { taskId: LOOPER.agentId, agentId: LOOPER.agentId }, { seq: 548 })]);
+      expect(relayOf(LOOPER)).toBeUndefined();
+      expect(unfollows()).toEqual([]); // the refused follow has nothing to release
+    });
   });
 
   it('dismisses a forwarded relay when its agent ends', async () => {

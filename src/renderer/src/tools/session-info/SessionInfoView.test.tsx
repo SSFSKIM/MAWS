@@ -77,7 +77,8 @@ describe('session info renders the six sections', () => {
     expect(valueOf('Tool search')).toBe('on · ENABLE_TOOL_SEARCH, needed behind a base URL');
     expect(valueOf('Mode')).toBe('auto · effective, from the init frame');
     // the stores first, the reads as they answer
-    await waitFor(() => expect(valueOf('Context')).toBe('30,433 of 200,000 · 15% · autocompact at 167,000'));
+    // the engine's summary (pass1/reads seq 57: 30,433, 15 %) corrected as C3 corrects its sample: 21,507 measured + 1
+    await waitFor(() => expect(valueOf('Context')).toBe('21,508 of 200,000 · 11% · autocompact at 167,000'));
     // C3 has not read the row for this scenario status; Session info's own get_status answer (auto-routed seq 145) has
     await waitFor(() => expect(valueOf('Auto-mode lane')).toBe('Server · reviews ride on the main request · no charge · model chosen server-side'));
     await waitFor(() => expect(valueOf('Rules')).toMatch(/^1 allow · 1 ask · 0 deny · 0 session grants/));

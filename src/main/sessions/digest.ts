@@ -149,7 +149,8 @@ function foldWithLedger(prev: SessionDigest, event: SessionEvent, ledger: CostLe
           percent: event.percentage,
           totalTokens: Math.round(event.totalTokens),
           maxTokens: Math.round(event.maxTokens),
-          autoCompactThreshold: event.autoCompactThreshold === null ? null : Math.round(event.autoCompactThreshold),
+          // no threshold applies when the engine reports autocompact off (debt wave 4), whatever figure it still sends
+          autoCompactThreshold: !event.isAutoCompactEnabled || event.autoCompactThreshold === null ? null : Math.round(event.autoCompactThreshold),
         },
       };
     case 'usage.sample':

@@ -25,6 +25,7 @@ const RENDERER_NODE_TESTS = 'src/renderer/src/terminal/**/*.node.test.ts';
 const TIMING_TIMEOUTS = { testTimeout: 30_000, hookTimeout: 30_000 };
 const TIMING_NODE_TESTS = [
   'src/engine-host/fs/follow.test.ts',
+  'src/engine-host/fs/sidecars.test.ts', // its retry cases wait out the retry schedule against a real writer
   'src/engine-host/fs/watcher.test.ts',
   'src/main/git/watcher.test.ts',
   'src/main/index/source.test.ts', // its wired cases follow real transcripts through the fs service

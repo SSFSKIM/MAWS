@@ -88,7 +88,7 @@ export function derivePanelChildFixture(): SessionEvent[] {
     const apiMessageId = `msg_panel_child_${unit}_call` as ApiMessageId;
     const messageUuid = `panel-child-${unit}-call` as MessageUuid;
     return [
-      { ...base(), kind: 'assistant.block.complete', messageUuid, apiMessageId, blockIndex: 0, block: { type: 'tool_use', id: toolUseId, name, input, caller: { type: 'direct' } }, model, supersedes: null, aborted: false, userMessageUuids: [] },
+      { ...base(), kind: 'assistant.block.complete', messageUuid, apiMessageId, blockIndex: 0, block: { type: 'tool_use', id: toolUseId, name, input, caller: { type: 'direct' } }, model, supersedes: [], aborted: false, userMessageUuids: [] },
       { ...base(), kind: 'tool.use', toolUseId, toolName: name, input, apiMessageId, messageUuid },
     ];
   };
@@ -104,7 +104,7 @@ export function derivePanelChildFixture(): SessionEvent[] {
     });
     tail.push({
       ...base(), kind: 'assistant.block.complete', messageUuid: `panel-child-${unit}-text` as MessageUuid, apiMessageId: `msg_panel_child_${unit}_text` as ApiMessageId,
-      blockIndex: 0, block: { type: 'text', text: `Read ${path}; its first line names the file.` }, model, supersedes: null, aborted: false, userMessageUuids: [],
+      blockIndex: 0, block: { type: 'text', text: `Read ${path}; its first line names the file.` }, model, supersedes: [], aborted: false, userMessageUuids: [],
     });
   }
   const bash = toolCall('bash', 'Bash', { command: 'pnpm test', description: 'Run the unit tests' });

@@ -69,6 +69,13 @@ describe('digest fold', () => {
     expect(digest.cost?.totalUsd).toBe(0.5);
   });
 
+  it('names no auto-compact threshold when the engine reports autocompact off', () => {
+    const off = run([ev('context.sample', { totalTokens: 180000, maxTokens: 200000, percentage: 90, autoCompactThreshold: 167000, isAutoCompactEnabled: false })]);
+    expect(off.context).toEqual({ percent: 90, totalTokens: 180000, maxTokens: 200000, autoCompactThreshold: null });
+    // and a later sample with it back on names it again
+    expect(run([ev('context.sample', { totalTokens: 1, maxTokens: 200000, percentage: 0, autoCompactThreshold: 167000, isAutoCompactEnabled: true })], off).context?.autoCompactThreshold).toBe(167000);
+  });
+
   it('treats the engine’s cost as the process’s running total, not an increment', () => {
     // The probe's results report a cumulative total_cost_usd (pass2/rewind: 0.0555, 0.0614, 0.0674).
     const digest = run([ev('turn.ended', { costUsd: 0.0555 }), ev('turn.ended', { costUsd: 0.0614 }), ev('turn.ended', { costUsd: 0.0674 })]);
