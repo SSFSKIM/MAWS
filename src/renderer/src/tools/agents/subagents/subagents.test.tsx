@@ -277,6 +277,21 @@ describe('subagents lists', () => {
     expect(lines).toEqual({ ok: 'finished · 3m ago · Read both files', bad: 'finished with errors · 3m ago', halt: 'stopped · 3m ago', gone: 'ended with the session' });
   });
 
+  it('a handed-back agent’s Done row shows its report’s first line, never the engine’s pointer (2.1.283 wording)', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(Date.parse(at(10 + 180)));
+    const pointer = 'This agent\'s report was delivered to you as a message from "hb" (its SubagentHandback call). Read it there; it is not repeated here.\n';
+    const report = 'Another Claude session sent a message:\n<agent-message from="hb">\n[Subagent hand-back] The text below is the final report. The report follows:\n  Found 3 files.\n  - a.ts\n</agent-message>\n\nTrailer.';
+    await mount({
+      events: [
+        started('hb', 1), event('user.message', { content: report, origin: 'peer', isReplay: true, isSynthetic: true }, { seq: 2, at: at(9) }), finished('hb', 3, { summary: pointer }),
+        started('wait', 4), finished('wait', 5, { summary: pointer.replace('"hb"', '"wait"') }),
+      ],
+    });
+    const lines = Object.fromEntries(rowsOf('done').map((r) => [r.id, r.line]));
+    expect(lines).toEqual({ hb: 'finished · 3m ago · Found 3 files.', wait: 'finished · 3m ago' });
+  });
+
   it('clicking a row opens its drill-in', async () => {
     const { handle } = await mount({ events: [started('a1', 1)] });
     fireEvent.click(row('a1'));

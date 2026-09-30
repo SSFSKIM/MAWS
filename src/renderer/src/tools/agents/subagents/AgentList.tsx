@@ -9,7 +9,7 @@ import { selectPendingOf, useAttention } from '../../../stores/attention';
 import { SubagentGlyph } from '../../../transcript';
 import { SUBAGENTS_COPY } from '../copy';
 import { elapsedOf, formatElapsed } from '../model/elapsed';
-import { agentRows, emptyGraph, rowSecondLine, rowTitle, type AgentRow, type TaskGraph } from '../model/task-graph';
+import { agentRows, emptyGraph, outcomeSummary, rowSecondLine, rowTitle, type AgentRow, type TaskGraph } from '../model/task-graph';
 import { useTaskGraph } from '../store';
 import { outcomeOf, refOf, SLOW_TICK_MS, useTicker } from './shared';
 import type { ListSection, SubagentsHandle, SubagentsState } from './SubagentsTool';
@@ -98,7 +98,8 @@ function AgentRowButton({ row, graph, section, waiting, now, onOpen }: { row: Ag
     elapsed = e ? formatElapsed(e.ms) : SUBAGENTS_COPY.elapsedUnavailable;
     line = rowSecondLine(node);
   } else if (section === 'done') {
-    line = node.summary ? `${outcomeOf(node, now)} · ${node.summary}` : outcomeOf(node, now);
+    const summary = outcomeSummary(node);
+    line = summary ? `${outcomeOf(node, now)} · ${summary}` : outcomeOf(node, now);
   } else {
     line = SUBAGENTS_COPY.statusUnavailable;
   }
