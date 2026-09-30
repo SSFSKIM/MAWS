@@ -90,8 +90,27 @@ The sitting
      ~/.claude/projects/-Users-new-claude-code-bundle-2-1-257/809406bb-43f0-4d12-a0eb-4f20d6cc4941.jsonl  (28,317 records)
      ~/.claude/projects/-Users-new-Developer-GitHub-AutoPM/d7e8a60d-4568-4492-b6c2-61ed8346b7c8.jsonl  (24,079)
      ~/.claude/projects/-Users-new-Developer-GitHub-doperpowers--claude-worktrees-fold-plans/30e0568a-f1ee-4dce-8db9-b9799fb23107.jsonl  (16,975)
-   (Its row is under the ~/claude-code-bundle/2.1.257 project, or Other sessions if that folder is gone; the sidebar's
-   search finds it by title.) Scroll
+   The sidebar's search matches a session's title, directory and project name, not its id or file, so first print each
+   candidate's title in a terminal (read only; it prints the custom title, else the AI title, else the first prompt,
+   which is the order MAWS titles by):
+     python3 -c 'import json,sys,os
+     for p in sys.argv[1:]:
+         t={}
+         for l in open(os.path.expanduser(p)):
+             try: r=json.loads(l)
+             except ValueError: continue
+             k=r.get("type"); c=r.get("message",{}).get("content") if isinstance(r.get("message"),dict) else None
+             if k=="custom-title": t["c"]=r.get("customTitle")
+             elif k=="ai-title": t["a"]=r.get("aiTitle")
+             elif k=="user" and "f" not in t and isinstance(c,str): t["f"]=c[:80]
+         print(os.path.basename(p)[:8], "·", t.get("c") or t.get("a") or t.get("f") or "(no title)")' \
+       ~/.claude/projects/-Users-new-claude-code-bundle-2-1-257/809406bb-43f0-4d12-a0eb-4f20d6cc4941.jsonl \
+       ~/.claude/projects/-Users-new-Developer-GitHub-AutoPM/d7e8a60d-4568-4492-b6c2-61ed8346b7c8.jsonl \
+       ~/.claude/projects/-Users-new-Developer-GitHub-doperpowers--claude-worktrees-fold-plans/30e0568a-f1ee-4dce-8db9-b9799fb23107.jsonl
+   (The pre-run checked that it finds a title in each of the three; the titles themselves are not in this pack.) Type a
+   few words of the first title into Search sessions, or open its project (claude-code-bundle's 2.1.257 folder, or Other
+   sessions if that folder is gone), and open the row. Confirm it is the right one: Session info (the panel's "+", or
+   the summary's Session info button) shows "Session id", which must read 809406bb-43f0-4d12-a0eb-4f20d6cc4941. Scroll
    halfway and expand old work: the view stays put. In another session, ask for a long answer and scroll up while it
    streams: you are not dragged down. Record.
 
