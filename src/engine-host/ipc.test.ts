@@ -586,7 +586,8 @@ describe('engine.policy.set and engine.budget (C12)', () => {
     await until(() => host.statuses(id).some((s) => s.process === 'ready'), 'ready');
     transports[0]!.push(idle);
     await until(() => table.get(id)!.status().engineState === 'idle', 'idle');
-    await table.sampleMemory(); // records the row's lastEventSeq: it is quiet from here
+    await table.sampleMemory(); // records the row's lastEventSeq
+    await table.sampleMemory(); // finds it unmoved: quiet from here
     expect(await host.call('engine.budget', undefined)).toMatchObject({ totalKiB: 400, over: false, releasing: null });
 
     const state = await host.call('engine.policy.set', { limitKiB: 100, statefulMcpServers: ['c12-kernel'] });

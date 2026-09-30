@@ -70,6 +70,7 @@ export class ProcessTable {
   private policy: BudgetPolicy;
   private stateful: ReadonlySet<string> = new Set();
   private readonly sampledSeqs = new WeakMap<EngineSession, number>(); // each process's lastEventSeq at the previous sample
+  private readonly sampledQuiet = new WeakSet<EngineSession>(); // the processes the latest sample found quiet
   private previousOverWithoutCandidate = false; // the previous sample's `over && candidates === 0`
   private releasing: EngineSession | null = null; // a release whose ladder has not ended
   private readonly released = new Set<AppSessionId>(); // ids whose last exit was a release, until their next launch
@@ -203,15 +204,23 @@ export class ProcessTable {
 
   // Reads every status, asks the policy, and releases in the same synchronous step: nothing here awaits, so no frame is
   // processed between the verdict and the stop. `sample` is true after a memory sample, whose lastEventSeq per process
-  // is what the next evaluation's `quiet` compares against, and whose flag the next sample's debounce reads.
+  // is what the next sample's `quiet` compares against, and whose flag the next sample's debounce reads. A policy
+  // change between samples takes a row as quiet only when the latest sample found it quiet and its lastEventSeq has not
+  // moved since: the sample's baseline alone would call quiet a row that spoke just before that sample (a turn's
+  // `result`, say, with the engine's own follow-up `init` still to come), which has not been quiet for a period.
   private evaluateBudget(sample: boolean): void {
     const sessions = this.list();
     const statuses = sessions.map((session) => session.status());
     const quiet = new Set<AppSessionId>();
     sessions.forEach((session, i) => {
       const status = statuses[i]!;
-      if (this.sampledSeqs.get(session) === status.lastEventSeq) quiet.add(status.appSessionId);
-      if (sample) this.sampledSeqs.set(session, status.lastEventSeq);
+      const unmoved = this.sampledSeqs.get(session) === status.lastEventSeq;
+      if (sample ? unmoved : unmoved && this.sampledQuiet.has(session)) quiet.add(status.appSessionId);
+      if (sample) {
+        this.sampledSeqs.set(session, status.lastEventSeq);
+        if (unmoved) this.sampledQuiet.add(session);
+        else this.sampledQuiet.delete(session);
+      }
     });
     const verdict = evaluate({ rows: statuses, policy: this.policy, quiet, releasing: this.releasing?.status().appSessionId ?? null, previousOverWithoutCandidate: this.previousOverWithoutCandidate });
     if (sample) this.previousOverWithoutCandidate = verdict.over && verdict.candidates === 0;

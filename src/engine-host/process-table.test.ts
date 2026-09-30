@@ -5,6 +5,8 @@ import { handshakeResponder, scriptedSession } from './conformance/session-harne
 import { parsePsTree, ProcessTable } from './process-table';
 import { EngineSession } from './session';
 // C12 start
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { BudgetState } from '@shared/ipc/schema/engine';
 // C12 end
 
@@ -208,6 +210,9 @@ describe('process table (C12): the memory budget', () => {
     return { table, s, states, rss };
   }
   const reasons = (x: Scripted) => x.session.status().exit?.reason ?? null;
+  const fixture = readFileSync(join(__dirname, '../../spikes/protocol-probe/fixtures/subagent.jsonl'), 'utf8').split('\n');
+  const TASK_RESULT = (JSON.parse(fixture[423]!) as { frame: Record<string, unknown> }).frame; // seq 424
+  const FOLLOW_UP_INIT = (JSON.parse(fixture[424]!) as { frame: Record<string, unknown> }).frame; // seq 425
   const exitOf = async (x: Scripted) => {
     x.transport.exit(0);
     await x.session.exited;
@@ -241,10 +246,35 @@ describe('process table (C12): the memory budget', () => {
   it('evaluates at a policy change against the previous sample, without waiting for the next', async () => {
     const { table, s } = await budgetTable({ a: 400, b: 300 });
     await table.sampleMemory(); // records each row's lastEventSeq; the default budget is far above 700 KiB
+    await table.sampleMemory(); // classifies each row quiet
     expect(table.budgetState()).toMatchObject({ over: false, releasing: null });
     const state = table.configure({ limitKiB: 500, statefulMcpServers: [] });
     expect(state).toMatchObject({ limitKiB: 500, over: true, releasing: 'a' }); // a launched first, so it is the least recently used
     expect(s.a!.session.lifecycle).toBe('exiting');
+  });
+
+  // pass1/subagent.jsonl seq 424-425: a task-notification turn's `result`, then the engine's own follow-up `system/init`
+  // 3 ms later. Between the two the row has no turn, so only quiet protects it; a sample that saw the result must not
+  // hand a policy change a fresh baseline to call quiet (M1 re-review of the unknown engine state).
+  it('a policy change calls a row quiet only if the latest sample did and nothing moved since: result, sample, configure before the follow-up init releases nothing; the init then protects by its turn', async () => {
+    const { table, s } = await budgetTable({ a: 400 });
+    await table.sampleMemory();
+    await table.sampleMemory(); // a is quiet at this sample
+    const seq = s.a!.session.status().lastEventSeq;
+    s.a!.transport.push({ ...TASK_RESULT, session_id: 's' });
+    await flush();
+    expect(s.a!.session.status().lastEventSeq).toBeGreaterThan(seq);
+    expect(s.a!.session.status().turn).toBeNull();
+    await table.sampleMemory(); // sees the result: not quiet, and records the new lastEventSeq
+    expect(table.configure({ limitKiB: 100, statefulMcpServers: [] })).toMatchObject({ over: true, candidates: 0, releasing: null });
+    expect(s.a!.session.lifecycle).toBe('ready');
+    s.a!.transport.push({ ...FOLLOW_UP_INIT, session_id: 's' });
+    await flush();
+    expect(s.a!.session.status().turn).toMatchObject({ origin: 'engine' });
+    expect(table.configure({ limitKiB: 100, statefulMcpServers: [] })).toMatchObject({ candidates: 0, releasing: null, blocked: [{ appSessionId: 'a', reasons: ['turn'] }] });
+    await table.sampleMemory();
+    await table.sampleMemory();
+    expect(s.a!.session.lifecycle).toBe('ready');
   });
 
   it('a row whose lastEventSeq moved since the previous sample is not quiet, so it is not released', async () => {
@@ -419,6 +449,7 @@ describe('process table (C12): exited rows beyond the cap', () => {
     a.transport.push({ type: 'system', subtype: 'session_state_changed', state: 'idle', uuid: 'idle-a', session_id: 's' });
     await flush();
     await table.sampleMemory();
+    await table.sampleMemory(); // a is quiet at this sample
     table.configure({ limitKiB: 100, statefulMcpServers: [] });
     expect(table.budgetState().releasing).toBe('a');
     a.transport.exit(0);
