@@ -11,6 +11,12 @@ import { useNotices } from '../stores/notices';
 import { useSettings } from '../stores/settings';
 import { BINARY, settingsBridge, type SettingsBridge } from '../test-support/settings-bridge';
 import { SettingsView } from './SettingsView';
+// C12 start
+import type { AppSessionId } from '@shared/graph/ids';
+import { status } from '../../../../test/support/builders';
+import { resetBudgetStore, useBudget } from '../budget/store';
+import { useSessions } from '../stores/sessions';
+// C12 end
 
 let b: SettingsBridge;
 
@@ -212,3 +218,64 @@ describe('settings tab writes one field per row', () => {
     expect(within(screen.getByRole('navigation', { name: 'Settings sections' })).getByRole('button', { name: 'Keyboard' }).getAttribute('aria-current')).toBe('true');
   });
 });
+
+// C12 start: Settings › Engine's memory budget rows (C12 execution document, Interfaces "Settings, version 4"): the
+// budget in GB with one decimal stored in MiB, its default named from the host's limit, and the stateful servers.
+describe('settings tab: the memory budget rows', () => {
+  const GiB = 1024 * 1024;
+  beforeEach(() => {
+    resetBudgetStore();
+    useBudget.getState().apply({ limitKiB: 8 * GiB, totalKiB: 3 * GiB, sampledAt: null, over: false, overWithoutCandidate: false, candidates: 0, settling: 0, releasing: null, blocked: [], lastRelease: null });
+  });
+  afterEach(() => {
+    resetBudgetStore();
+    useSessions.setState({ engine: new Map() });
+  });
+
+  it('Memory budget: the default named from the host’s limit; a GB value with one decimal is stored in MiB; Use default writes null', async () => {
+    renderView();
+    const field = within(row('Memory budget')).getByRole('textbox', { name: 'Memory budget' }) as HTMLInputElement;
+    expect(field.value).toBe('');
+    expect(field.placeholder).toBe('8');
+    expect(row('Memory budget').textContent).toContain('Default · 25% of physical memory (8 GB)');
+    fireEvent.change(field, { target: { value: '6.5' } });
+    fireEvent.keyDown(field, { key: 'Enter' });
+    await vi.waitFor(() => expect(b.sets).toEqual([{ engine: { memoryBudgetMiB: 6656 } }]));
+    await vi.waitFor(() => expect(field.value).toBe('6.5'));
+    fireEvent.click(within(row('Memory budget')).getByRole('button', { name: 'Use default' }));
+    await vi.waitFor(() => expect(b.sets.at(-1)).toEqual({ engine: { memoryBudgetMiB: null } }));
+    expect(settings().engine.memoryBudgetMiB).toBeNull();
+  });
+
+  it('Memory budget: a value below 0.5 GB or not a number is refused in words and the field goes back', async () => {
+    renderView({ ...SETTINGS_DEFAULTS_V4, engine: { ...SETTINGS_DEFAULTS_V4.engine, memoryBudgetMiB: 6144 } });
+    const field = within(row('Memory budget')).getByRole('textbox', { name: 'Memory budget' }) as HTMLInputElement;
+    expect(field.value).toBe('6.0');
+    for (const typed of ['0.4', 'lots']) {
+      fireEvent.change(field, { target: { value: typed } });
+      fireEvent.blur(field);
+      await vi.waitFor(() => expect(field.value).toBe('6.0'));
+    }
+    expect(b.sets).toEqual([]);
+    expect(useNotices.getState().notices.map((n) => n.text)).toContain('Enter the memory budget in GB, at least 0.5');
+  });
+
+  it('Stateful MCP servers: adds a typed name, suggests the names live sessions report, and removes a chip', async () => {
+    useSessions.setState({ engine: new Map([['app-a' as AppSessionId, status('app-a', { mcpServers: [{ name: 'plugin:ptc:ptc', status: 'connected', source: 'plugin' }, { name: 'c12-kernel', status: 'pending', source: 'project' }] })]]) });
+    renderView();
+    const add = within(row('Stateful MCP servers')).getByRole('combobox', { name: 'Add a stateful MCP server' }) as HTMLInputElement;
+    const suggestions = () => [...document.getElementById(add.getAttribute('list')!)!.querySelectorAll('option')].map((o) => o.value);
+    expect(suggestions()).toEqual(['c12-kernel', 'plugin:ptc:ptc']);
+    fireEvent.change(add, { target: { value: ' c12-kernel ' } });
+    fireEvent.keyDown(add, { key: 'Enter' });
+    await vi.waitFor(() => expect(b.sets).toEqual([{ engine: { statefulMcpServers: ['c12-kernel'] } }]));
+    await vi.waitFor(() => expect(add.value).toBe(''));
+    expect(suggestions()).toEqual(['plugin:ptc:ptc']);
+    fireEvent.change(add, { target: { value: 'my-kernel' } });
+    fireEvent.keyDown(add, { key: 'Enter' });
+    await vi.waitFor(() => expect(settings().engine.statefulMcpServers).toEqual(['c12-kernel', 'my-kernel']));
+    fireEvent.click(within(row('Stateful MCP servers')).getByRole('button', { name: 'Remove c12-kernel' }));
+    await vi.waitFor(() => expect(b.sets.at(-1)).toEqual({ engine: { statefulMcpServers: ['my-kernel'] } }));
+  });
+});
+// C12 end

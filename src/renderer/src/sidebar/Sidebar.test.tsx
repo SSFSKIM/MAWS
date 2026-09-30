@@ -353,3 +353,27 @@ describe('the footer gear', () => {
   });
 });
 // C11 end
+
+// C12 start: the memory budget's released mark (C12 execution document, Interfaces "Surfaces of the budget"): one muted
+// word on an idle row, with the release's time and budget in its title; no glyph, unread or Needs-you change.
+describe('a released session’s row', () => {
+  beforeEach(() => {
+    fillStores(nine);
+    window.maws = fakeClient().client;
+  });
+
+  it('reads idle with the muted word released, and says when and why in its title', () => {
+    const id = idOf('Settings idle probe');
+    const at = new Date(2026, 8, 29, 14, 2).toISOString();
+    const digest = useSessions.getState().digests.get(id)!;
+    act(() => useSessions.getState().applyDigest({ ...digest, released: { at, limitKiB: 8 * 1024 * 1024 }, revision: digest.revision + 1 }));
+    render(<Sidebar />);
+    const mark = within(row('Settings idle probe')).getByText('released');
+    expect(mark.getAttribute('title')).toBe('Released at 14:02 to stay under the 8 GB memory budget · Send resumes it');
+    expect(within(row('Settings idle probe')).getByRole('img', { name: 'Idle' }).textContent).toBe('○'); // the idle glyph, unchanged
+    expect(within(row('Settings idle probe')).queryByLabelText('Unread')).toBeNull();
+    expect(needsYouTitles()).not.toContain('Settings idle probe');
+    expect(screen.getAllByText('released')).toHaveLength(1);
+  });
+});
+// C12 end

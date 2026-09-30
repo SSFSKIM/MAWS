@@ -52,6 +52,10 @@ import { registerAllWidgets } from './widgets';
 import { registerAccountsTab } from './accounts';
 import { connectMonoFont, registerSettingsTab } from './settings-tab';
 // C11 end
+// C12 start
+import { BudgetSheets } from './budget/BudgetSheets';
+import { connectBudget } from './budget/store';
+// C12 end
 
 // C10 start: C7's composer binds an unstarted session's chips and Send through C10's hook; registered at module load,
 // before any composer renders, so the function the composer calls as a hook is fixed for the page's life (C7's rule)
@@ -137,6 +141,9 @@ export function App() {
   }, []);
   useEffect(() => connectMonoFont(), []);
   // C11 end
+  // C12 start: the engine host's memory budget (Session info's line, Settings' default) and its app-wide banner
+  useEffect(() => connectBudget(), []);
+  // C12 end
 
   // index.html ships data-theme="light" for the first paint; from then on main's resolved theme decides.
   useEffect(() => {
@@ -155,6 +162,9 @@ export function App() {
       {/* C11 start: the route switch's confirm and pickDirectModel's dialog */}
       <GatewayDialogs />
       {/* C11 end */}
+      {/* C12 start: the memory budget's blocked sessions and stop sheets */}
+      <BudgetSheets />
+      {/* C12 end */}
     </QueryClientProvider>
   );
 }

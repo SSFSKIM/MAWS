@@ -8,6 +8,7 @@ import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { EngineSessionStatus } from '@shared/engine/status';
+import type { BudgetState } from '@shared/ipc/schema/engine'; // C12
 import type { EventName, EventPayload } from '@shared/ipc/schema';
 import { loadScenario, type Scenario, type ScenarioDigest, type ScenarioOp } from '../../../test/support/scenario';
 import type { interceptCommand } from '../ipc/router';
@@ -50,6 +51,7 @@ export function stubSource(scenario: string | Scenario, clock: ScenarioClock, de
   const digests = new Map<AppSessionId, ScenarioDigest>();
   const statuses = new Map<AppSessionId, EngineSessionStatus>();
   const costAtSeen = new Map<AppSessionId, number>();
+  let budget: BudgetState | null = null; // C12: the last budget the timeline played
 
   // While the scenario loads nothing is emitted but attention: the renderer reads the snapshots, as it would from C3 and
   // C4, and the read model learns attention only from `attention.changed` as emitted (the tap in sessions/index.ts),
@@ -100,6 +102,12 @@ export function stubSource(scenario: string | Scenario, clock: ScenarioClock, de
         store?.put(op.record, 'discovered');
         writer?.observeRecord(op.record);
         return;
+      // C12 start: the engine host's memory budget, as its engine.budget event would carry it
+      case 'budget':
+        budget = op.state;
+        emit('engine.budget', op.state);
+        return;
+      // C12 end
       case 'removeSession':
         store?.remove(op.appSessionId);
         attention.delete(op.appSessionId);
@@ -173,6 +181,10 @@ export function stubSource(scenario: string | Scenario, clock: ScenarioClock, de
         }),
         // end C6
       ];
+      // C12: a scenario that scripts the memory budget answers engine.budget itself (the last state played, or its first
+      // state before any has played); one that does not leaves the command to the engine host
+      const firstBudget = timeline.find((op) => op.op === 'budget');
+      if (firstBudget) disposers.push(deps.intercept('engine.budget', () => budget ?? firstBudget.state));
 
       const timers: ReturnType<typeof setTimeout>[] = [];
       if (clock.kind === 'manual') {

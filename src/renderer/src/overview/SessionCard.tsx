@@ -15,6 +15,7 @@ import { selectPendingOf, useAttention } from '../stores/attention';
 import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
 import { cardActivity, cardFooter } from './derive';
+import { ReleasedMark } from '../budget/ReleasedMark'; // C12
 
 type PaneIndex = 0 | 1;
 
@@ -63,6 +64,7 @@ export function SessionCard({ appSessionId, paneIndex, showProject, stop, onFocu
         <span className="truncate font-medium text-fg">{title}</span>
         {showProject && project && <span className="shrink-0 text-ui-sm text-fg-muted">{project}</span>}
         {branch && <span className="shrink-0 rounded-sm border border-border px-1.5 text-ui-sm text-fg-muted">⎇ {branch}</span>}
+        <ReleasedMark released={digest?.released} /> {/* C12: the memory budget's released mark */}
         {record.unread && <span role="img" aria-label="Unread" className="ml-auto block size-[5px] shrink-0 rounded-full bg-info" />}
       </div>
       <p data-testid="card-activity" className="m-0 truncate text-ui-sm text-fg">

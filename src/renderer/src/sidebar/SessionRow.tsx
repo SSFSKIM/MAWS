@@ -12,6 +12,7 @@ import { selectPendingOf, useAttention } from '../stores/attention';
 import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
 import { rowBranch, secondaryLine, sessionAge } from './derive';
+import { ReleasedMark } from '../budget/ReleasedMark'; // C12
 import { sessionNodeId, useTree } from './tree';
 
 export const SESSION_DRAG_TYPE = 'application/x-maws-session';
@@ -63,6 +64,7 @@ export function SessionRow({ record, level }: { record: SessionRecord; level: 1 
               ⎇ {branch}
             </span>
           )}
+          <ReleasedMark released={digest?.released} /> {/* C12: the memory budget's released mark */}
         </span>
         {secondary && (
           <span className="mt-[3px] truncate text-ui-sm leading-[15px] text-fg-muted group-hover/session:text-fg">{secondary}</span>

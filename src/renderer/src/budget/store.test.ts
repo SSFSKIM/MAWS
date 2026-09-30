@@ -1,0 +1,102 @@
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { AppSessionId, TaskId } from '@shared/graph/ids';
+import type { BudgetState } from '@shared/ipc/schema/engine';
+import { status } from '../../../../test/support/builders';
+import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
+import { useNotices } from '../stores/notices';
+import { BUDGET, clockTime, gb, reasonWords } from './copy';
+import { BUDGET_BANNER_ID, connectBudget, resetBudgetStore, useBudget } from './store';
+
+const A = 'app-a' as AppSessionId;
+const B = 'app-b' as AppSessionId;
+const GiB = 1024 * 1024;
+const state = (over: Partial<BudgetState> = {}): BudgetState => ({
+  limitKiB: 8 * GiB, totalKiB: 3.1 * GiB, sampledAt: '2026-09-29T14:02:00.000Z', over: false, overWithoutCandidate: false, candidates: 0, settling: 0,
+  releasing: null, blocked: [], lastRelease: null, ...over,
+});
+const over = (blocked: AppSessionId[]) => state({ totalKiB: 9 * GiB, over: true, overWithoutCandidate: true, blocked: blocked.map((appSessionId) => ({ appSessionId, reasons: ['turn' as const] })) });
+const banners = () => useNotices.getState().notices.filter((n) => n.id === BUDGET_BANNER_ID);
+
+describe('the budget’s words', () => {
+  it('writes sizes in GB with one decimal, dropping a zero decimal', () => {
+    expect(gb(8 * GiB)).toBe('8 GB');
+    expect(gb(3.14 * GiB)).toBe('3.1 GB');
+    expect(gb(0.5 * GiB)).toBe('0.5 GB');
+    expect(BUDGET.budgetLine(3.1 * GiB, 8 * GiB, 9)).toBe('3.1 GB of 8 GB · 9 sessions');
+    expect(BUDGET.budgetLine(0.4 * GiB, 8 * GiB, 1)).toBe('0.4 GB of 8 GB · 1 session');
+  });
+
+  it('names the release’s time and budget on the mark and in Session info', () => {
+    const at = new Date(2026, 8, 29, 14, 2).toISOString(); // 14:02 on the host's clock
+    expect(clockTime(at)).toBe('14:02');
+    expect(BUDGET.markTitle({ at, limitKiB: 8 * GiB })).toBe('Released at 14:02 to stay under the 8 GB memory budget · Send resumes it');
+    expect(BUDGET.releasedLine({ at, limitKiB: 8 * GiB })).toBe('Released at 14:02 to stay under 8 GB');
+  });
+
+  it('says why each session holds work, counting where a count helps', () => {
+    const s = status(A, {
+      backgroundTasks: [{ taskId: 't1' as TaskId, taskType: 'local_bash', description: 'sleep', ambient: false }, { taskId: 't2' as TaskId, taskType: 'local_bash', description: 'b', ambient: false }, { taskId: 't3' as TaskId, taskType: 'dream', description: 'x', ambient: true }],
+      queue: { length: 1, paused: true },
+      mcpServers: [{ name: 'c12-kernel', status: 'connected', source: 'project' }, { name: 'plain', status: 'connected', source: 'user' }],
+    });
+    const stateful = new Set(['c12-kernel']);
+    expect(['turn', 'busy', 'background_tasks', 'pending_request', 'queued_messages', 'held_peer_message', 'stateful_mcp'].map((r) => reasonWords(r as never, s, stateful))).toEqual([
+      'mid-turn', 'working', '2 background tasks', 'waiting for you', '1 queued message', 'held message', 'stateful server c12-kernel',
+    ]);
+    expect(reasonWords('background_tasks', null, stateful)).toBe('background tasks');
+  });
+
+  it('counts the held sessions in the banner', () => {
+    expect(BUDGET.banner(3)).toBe('Memory budget exceeded · 3 sessions hold work MAWS will not stop');
+    expect(BUDGET.banner(1)).toBe('Memory budget exceeded · 1 session holds work MAWS will not stop');
+  });
+});
+
+describe('the budget store and its banner', () => {
+  let fake: FakeClient;
+  let off: () => void;
+  beforeEach(() => {
+    resetBudgetStore();
+    useNotices.setState({ notices: [] });
+    fake = fakeClient();
+    off = connectBudget(fake.client);
+  });
+  afterEach(() => off());
+
+  it('subscribes before it reads the snapshot, and an event wins over a snapshot still on its way', async () => {
+    expect(fake.calls).toEqual(['on engine.budget', 'invoke engine.budget']);
+    fake.event('engine.budget', state({ totalKiB: 5 * GiB }));
+    await fake.reply('engine.budget', state({ totalKiB: 1 * GiB }));
+    expect(useBudget.getState().state?.totalKiB).toBe(5 * GiB);
+  });
+
+  it('takes the snapshot when no event came first', async () => {
+    await fake.reply('engine.budget', state());
+    expect(useBudget.getState().state).toEqual(state());
+  });
+
+  it('shows the banner once per crossing of the host’s flag; a dismissal holds until the next crossing; it goes when the flag clears', async () => {
+    await fake.reply('engine.budget', state());
+    expect(banners()).toEqual([]);
+    fake.event('engine.budget', state({ over: true })); // over, not yet debounced by the host: no banner
+    expect(banners()).toEqual([]);
+    fake.event('engine.budget', over([A, B]));
+    expect(banners()).toMatchObject([{ level: 'warning', text: 'Memory budget exceeded · 2 sessions hold work MAWS will not stop', dismissible: true, actions: [{ label: 'Review…' }] }]);
+    fake.event('engine.budget', over([A, B, A]));
+    expect(banners()).toHaveLength(1); // kept current in place
+    useNotices.getState().dismiss(BUDGET_BANNER_ID);
+    fake.event('engine.budget', over([A]));
+    expect(banners()).toEqual([]); // dismissed for this crossing
+    fake.event('engine.budget', state());
+    fake.event('engine.budget', over([A]));
+    expect(banners()).toHaveLength(1); // the next crossing
+    fake.event('engine.budget', state());
+    expect(banners()).toEqual([]);
+  });
+
+  it('Review… opens the blocked sessions sheet', async () => {
+    await fake.reply('engine.budget', over([A]));
+    banners()[0]!.actions[0]!.run();
+    expect(useBudget.getState().sheet).toEqual({ kind: 'blocked' });
+  });
+});

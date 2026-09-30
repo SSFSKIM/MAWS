@@ -157,3 +157,19 @@ describe('overview board', () => {
     expect(asked).toBe(1);
   });
 });
+
+// C12 start: the released mark on a card (C12 execution document, Interfaces "Surfaces of the budget"): the card stays on
+// the board in its idle presentation with one muted word.
+describe('a released session’s card', () => {
+  it('stays on the board, idle, with the muted word released', () => {
+    const id = idOf('Settings idle probe');
+    const digest = useSessions.getState().digests.get(id)!;
+    act(() => useSessions.getState().applyDigest({ ...digest, released: { at: new Date(2026, 8, 29, 14, 2).toISOString(), limitKiB: 8 * 1024 * 1024 }, revision: digest.revision + 1 }));
+    render(<Overview paneIndex={0} />);
+    const released = card('Settings idle probe');
+    expect(within(released).getByTestId('card-activity').textContent).toBe('Idle');
+    expect(within(released).getByText('released').getAttribute('title')).toBe('Released at 14:02 to stay under the 8 GB memory budget · Send resumes it');
+    expect(cardTitles(group('Needs you'))).not.toContain('Settings idle probe');
+  });
+});
+// C12 end

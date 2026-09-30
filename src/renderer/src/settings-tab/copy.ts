@@ -42,6 +42,22 @@ export const ENGINE = {
   subagentNote: 'Sets CLAUDE_CODE_SUBAGENT_MODEL per launch for new sessions; Session info shows what a session actually got.',
 };
 
+// C12 start: the memory budget's rows in Settings › Engine (C12 execution document, "Surfaces of the budget")
+export const BUDGET_SETTINGS = {
+  budget: 'Memory budget',
+  placeholder: 'default',
+  defaultNote: (limit: string | null) => `Default · 25% of physical memory${limit === null ? '' : ` (${limit})`}. Past it, MAWS releases the least recently used idle session; Send resumes it.`,
+  setNote: 'Default · 25% of physical memory. Past it, MAWS releases the least recently used idle session; Send resumes it.',
+  useDefault: 'Use default',
+  invalid: 'Enter the memory budget in GB, at least 0.5',
+  stateful: 'Stateful MCP servers',
+  statefulNote: 'Servers whose state is lost when their process ends: a session connected to one is never released. Names match exactly; the field suggests those live sessions report.',
+  addServer: 'Add a stateful MCP server',
+  addPlaceholder: 'server name',
+  remove: (name: string) => `Remove ${name}`,
+};
+// C12 end
+
 export const GATEWAY = {
   hint: 'D-19',
   defaultRoute: 'Default route',

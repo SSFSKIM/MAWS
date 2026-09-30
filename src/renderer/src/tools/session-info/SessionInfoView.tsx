@@ -21,6 +21,7 @@ import { useEngineRead } from '../../widgets/read';
 import { INFO } from './copy';
 import { autoModeLane, reviewsOf } from './lane';
 import { sessionInfoSections, type InfoRow } from './model';
+import { useBudget } from '../../budget/store'; // C12
 
 export type SessionInfoState = { openedAt: string }; // no per-tab state beyond bookkeeping; every value is read live
 
@@ -65,6 +66,7 @@ function SessionInfoBody({ appSessionId, visible, record }: { appSessionId: AppS
   const transcript = useTranscriptStore((s) => (s.entries[appSessionId]?.rows.length ? s.entries[appSessionId].state : undefined));
   const now = useNow(POPOVER_TICK_MS);
   const windows = useSessionWindows(record, status);
+  const budget = useBudget((s) => s.state); // C12
 
   const facts = routingFacts(record, status, snapshot, settings, directLogin);
   let lane = null;
@@ -86,6 +88,7 @@ function SessionInfoBody({ appSessionId, visible, record }: { appSessionId: AppS
     lane,
     models: models ?? null,
     windows,
+    budget, // C12
     now,
     reads: { status: statusRead.data ?? null, rules: rules.data ?? null, hooks: hooks.data ?? null, mcp: mcp.data ?? null, context: context.data ?? null },
   });

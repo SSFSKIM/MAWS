@@ -14,6 +14,7 @@ import { EffortSchema } from '../../src/shared/engine/launch-spec';
 import { EngineSessionStatusSchema, type EngineSessionStatus } from '../../src/shared/engine/status';
 import { ProjectRecordSchema, SessionDigestSchema, type ProjectRecord } from '../../src/shared/ipc/schema/session';
 import type { AttentionItem } from '../../src/shared/graph/attention';
+import { BudgetStateSchema, type BudgetState } from '../../src/shared/ipc/schema/engine'; // C12
 
 // The gateway relay's URL, the value of C3's `RELAY_URL` in `src/engine-host/launch.ts`. Held here rather than imported:
 // this loader ships in the main bundle through the stub source, and C3's launch module is engine-host code.
@@ -55,6 +56,7 @@ const TimelineEntrySchema = z.discriminatedUnion('op', [
   z.strictObject({ at, op: z.literal('engine'), appSessionId: AppSessionIdSchema, engine: CompactEngineSchema.nullable() }), // null removes the status
   z.strictObject({ at, op: z.literal('session'), record: SessionRecordSchema }),
   z.strictObject({ at, op: z.literal('removeSession'), appSessionId: AppSessionIdSchema }),
+  z.strictObject({ at, op: z.literal('budget'), state: BudgetStateSchema }), // C12: the engine host's memory budget (engine.budget)
 ]);
 
 export const ScenarioFileSchema = z.strictObject({
@@ -74,7 +76,8 @@ export type ScenarioOp =
   | { at: number; op: 'digest'; digest: ScenarioDigest }
   | { at: number; op: 'engine'; appSessionId: AppSessionId; engine: EngineSessionStatus | null }
   | { at: number; op: 'session'; record: SessionRecord }
-  | { at: number; op: 'removeSession'; appSessionId: AppSessionId };
+  | { at: number; op: 'removeSession'; appSessionId: AppSessionId }
+  | { at: number; op: 'budget'; state: BudgetState }; // C12
 
 export interface Scenario {
   projects: ProjectRecord[];
@@ -219,6 +222,11 @@ export function parseScenario(raw: unknown, now: number = Date.now()): Scenario 
         case 'digest':
           known(entry.digest.appSessionId, `${where}.digest.appSessionId`);
           return entry;
+        // C12 start: every session a budget names is known
+        case 'budget':
+          for (const id of [...entry.state.blocked.map((b) => b.appSessionId), entry.state.releasing, entry.state.lastRelease?.appSessionId ?? null]) if (id !== null) known(id, `${where}.state`);
+          return entry;
+        // C12 end
         default:
           known(entry.appSessionId, `${where}.appSessionId`);
           return entry;

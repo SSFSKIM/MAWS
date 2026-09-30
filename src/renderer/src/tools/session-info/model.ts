@@ -19,6 +19,10 @@ import { liveModel, type ModelRow } from '../../widgets/model';
 import { num } from '../../widgets/parts';
 import { INFO, LANE } from './copy';
 import type { Lane } from './lane';
+// C12 start
+import type { BudgetState } from '@shared/ipc/schema/engine';
+import { BUDGET } from '../../budget/copy';
+// C12 end
 
 export type InfoRow = { label: string; value: string; note?: string; action?: 'permissions' };
 export type InfoSection = { title: string; rows: InfoRow[] };
@@ -34,6 +38,7 @@ export interface SessionInfoInput {
   lane: Lane | null; // null without a status
   models: readonly ModelRow[] | null; // the session's listed catalogue, when C7 read one (an alias matched to its resolved id)
   windows: SessionWindows;
+  budget: BudgetState | null; // C12: the engine host's memory budget, null before it answered
   now: number;
   reads: {
     status: GetStatusResponse | null;
@@ -50,7 +55,17 @@ export const homeAbbreviated = (path: string): string => path.replace(/^\/Users\
 const mb = (kib: number) => `${Math.round(kib / 1024)} MB`;
 const usd = (n: number) => `$${n.toFixed(2)}`;
 
-function engineSection({ record, status, binary, pinnedVersion }: SessionInfoInput): InfoSection {
+// C12 start: the memory budget beside the process tree (§4.4: "visible in Session info"): the sum of the live trees
+// against the limit with the live sessions counted, and for a released session when and why.
+export function budgetRows(budget: BudgetState | null, digest: SessionDigest | null): InfoRow[] {
+  const sessions = budget === null ? 0 : budget.blocked.length + budget.settling + budget.candidates;
+  const rows: InfoRow[] = [{ label: BUDGET.budgetLabel, value: budget === null ? NONE : BUDGET.budgetLine(budget.totalKiB, budget.limitKiB, sessions) }];
+  if (digest?.released) rows.push({ label: BUDGET.releasedLabel, value: BUDGET.releasedLine(digest.released) });
+  return rows;
+}
+// C12 end
+
+function engineSection({ record, status, digest, binary, pinnedVersion, budget }: SessionInfoInput): InfoSection { // C12: digest, budget
   const version = status?.engineVersion ?? record.engineVersion;
   const tree = status?.memory.treeRssKiB ?? null;
   return {
@@ -60,6 +75,7 @@ function engineSection({ record, status, binary, pinnedVersion }: SessionInfoInp
       { label: INFO.binary, value: binary ? homeAbbreviated(binary.path) : NONE },
       { label: INFO.sessionId, value: record.engineSessionId ?? NONE },
       { label: INFO.processTree, value: tree === null ? NONE : INFO.tree(mb(tree), status?.memory.rssKiB == null ? null : mb(status.memory.rssKiB)) },
+      ...budgetRows(budget, digest), // C12
     ],
   };
 }

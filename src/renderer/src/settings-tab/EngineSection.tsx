@@ -14,6 +14,7 @@ import { toast } from '../stores/notices';
 import { homeAbbreviated } from '../tools/session-info/model';
 import { ENGINE } from './copy';
 import { Chip, INPUT, Setting, TEXT_ACTION, useCommittedDraft, writeSettings } from './parts';
+import { MemoryBudget, StatefulServers } from './BudgetSettings'; // C12
 
 const BINARY_INFO_KEY = ['maws', 'engine.binaryInfo', undefined];
 
@@ -70,6 +71,10 @@ export function EngineSection({ settings }: { settings: Settings }) {
       </Setting>
       <ConfigHome />
       <SubagentModel settings={settings} />
+      {/* C12 start: the memory budget and the stateful MCP servers (settings v4) */}
+      <MemoryBudget settings={settings} />
+      <StatefulServers settings={settings} />
+      {/* C12 end */}
       {repinning !== null && (
         <GatewaySheet
           title={ENGINE.repinTitle(repinning)}

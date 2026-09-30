@@ -15,7 +15,7 @@ const CHARTER = 'app-9a1d4262' as AppSessionId;
 const FIX = 'app-3eb04b84' as AppSessionId;
 const USAGE = 'app-59505fdc' as AppSessionId;
 
-function harness() {
+function harness(scenario = NINE /* C12 */) {
   const handlers = new Map<CommandName, (input: unknown) => unknown>();
   const emitted: { name: EventName; payload: unknown }[] = [];
   // main's emit and its taps, as sessions/index.ts wires them: the read model hears attention only as emitted.
@@ -38,7 +38,7 @@ function harness() {
   };
   const model = new SessionReadModel('scenario');
   const stopTap = model.registerScenario(emittedAttentionSource(tap));
-  const source = stubSource(NINE, { kind: 'manual' }, deps);
+  const source = stubSource(scenario, { kind: 'manual' }, deps); // C12: the scenario given
   const stopSource = model.registerScenario(source);
   const stop = () => {
     stopSource();
@@ -166,6 +166,37 @@ describe('stub source plays a timeline', () => {
     expect(scenarioGlobal()).toBeUndefined();
   });
 });
+
+// C12 start: a scenario that scripts the memory budget (C12 execution document, Acceptance item 2's replay): the
+// budget's states go out as the engine host's engine.budget would, the command answers the last one, and a release's
+// exited status reaches the read model, which marks the session released
+describe('stub source plays the memory budget', () => {
+  const BUDGET = join(TEST_FIXTURE_DIR, 'shell/c12-budget.json');
+  const RELEASED = 'app-c12a0001' as AppSessionId;
+  let h: ReturnType<typeof harness>;
+  beforeEach(() => {
+    h = harness(BUDGET);
+  });
+  afterEach(() => h.stop());
+
+  it('emits each budget state, answers engine.budget with the last one played, and marks the release on the digest', () => {
+    expect(h.call<{ limitKiB: number }>('engine.budget').limitKiB).toBe(8 * 1024 * 1024); // the first state, before any has played
+    scenarioGlobal()!.advanceTo(2000);
+    expect(h.events('engine.budget').map((b) => (b as { releasing: string | null }).releasing)).toEqual([null, RELEASED, null]);
+    expect(h.call<{ limitKiB: number; candidates: number }>('engine.budget')).toMatchObject({ limitKiB: 2 * 1024 * 1024, candidates: 0 });
+    expect(h.model.digests().find((d) => d.appSessionId === RELEASED)).toMatchObject({ phase: 'idle', released: { limitKiB: 2 * 1024 * 1024 } });
+    expect(h.model.attention(RELEASED)).toEqual([]);
+    scenarioGlobal()!.advanceTo(3000);
+    expect(h.call<{ overWithoutCandidate: boolean }>('engine.budget').overWithoutCandidate).toBe(true);
+  });
+
+  it('a scenario with no budget leaves engine.budget to the engine host', () => {
+    h.stop();
+    h = harness();
+    expect(h.handlers.has('engine.budget')).toBe(false);
+  });
+});
+// C12 end
 
 describe('stub source on the wall clock', () => {
   it('plays entries at their offsets', () => {

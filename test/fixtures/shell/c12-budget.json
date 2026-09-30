@@ -1,0 +1,608 @@
+{
+  "_note": "C12 M2: the memory budget replayed through the stub source (C12 execution document, Acceptance item 2): a release of the least recently used idle session, then over budget with every live session holding work. Every value is synthetic; the shapes are X1, X2 and the C3 status.",
+  "version": 1,
+  "projects": [
+    {
+      "id": "proj-maws",
+      "name": "MAWS",
+      "directory": "/Users/new/Developer/GitHub/MAWS",
+      "order": 0,
+      "createdAt": "2026-09-01T09:00:00.000Z"
+    }
+  ],
+  "sessions": [
+    {
+      "appId": "app-c12a0001",
+      "engineSessionId": "c12a0001-0000-4000-8000-000000000001",
+      "projectId": "proj-maws",
+      "directory": "/private/tmp/maws-c12-b/B1",
+      "additionalDirectories": [],
+      "worktree": null,
+      "branch": null,
+      "title": {
+        "text": "Release candidate",
+        "source": "user"
+      },
+      "pinned": false,
+      "archived": false,
+      "holder": {
+        "kind": "self"
+      },
+      "lastSeen": {
+        "messageUuid": null,
+        "at": "2026-09-29T13:50:00.000Z"
+      },
+      "unread": false,
+      "engineVersion": "2.1.283",
+      "gateway": {
+        "routed": false,
+        "baseUrl": null,
+        "autoModeServer": "unknown",
+        "_note": "pass-1 spawn row carries no routed flag: the pass-1 probe launched direct"
+      },
+      "model": {
+        "requested": "haiku",
+        "resolved": "claude-haiku-4-5-20251001"
+      },
+      "effort": null,
+      "permissionMode": {
+        "requested": "default",
+        "effective": "default",
+        "refusal": null
+      },
+      "createdAt": "2026-09-29T13:00:00.000Z",
+      "updatedAt": "2026-09-29T13:50:00.000Z"
+    },
+    {
+      "appId": "app-c12a0002",
+      "engineSessionId": "c12a0002-0000-4000-8000-000000000002",
+      "projectId": "proj-maws",
+      "directory": "/private/tmp/maws-c12-b/B2",
+      "additionalDirectories": [],
+      "worktree": null,
+      "branch": null,
+      "title": {
+        "text": "Refactor mid-turn",
+        "source": "user"
+      },
+      "pinned": false,
+      "archived": false,
+      "holder": {
+        "kind": "self"
+      },
+      "lastSeen": {
+        "messageUuid": null,
+        "at": "2026-09-29T13:50:00.000Z"
+      },
+      "unread": false,
+      "engineVersion": "2.1.283",
+      "gateway": {
+        "routed": false,
+        "baseUrl": null,
+        "autoModeServer": "unknown",
+        "_note": "pass-1 spawn row carries no routed flag: the pass-1 probe launched direct"
+      },
+      "model": {
+        "requested": "haiku",
+        "resolved": "claude-haiku-4-5-20251001"
+      },
+      "effort": null,
+      "permissionMode": {
+        "requested": "default",
+        "effective": "default",
+        "refusal": null
+      },
+      "createdAt": "2026-09-29T13:00:00.000Z",
+      "updatedAt": "2026-09-29T13:50:00.000Z"
+    },
+    {
+      "appId": "app-c12a0003",
+      "engineSessionId": "c12a0003-0000-4000-8000-000000000003",
+      "projectId": "proj-maws",
+      "directory": "/private/tmp/maws-c12-b/B3",
+      "additionalDirectories": [],
+      "worktree": null,
+      "branch": null,
+      "title": {
+        "text": "Background sleeper",
+        "source": "user"
+      },
+      "pinned": false,
+      "archived": false,
+      "holder": {
+        "kind": "self"
+      },
+      "lastSeen": {
+        "messageUuid": null,
+        "at": "2026-09-29T13:50:00.000Z"
+      },
+      "unread": false,
+      "engineVersion": "2.1.283",
+      "gateway": {
+        "routed": false,
+        "baseUrl": null,
+        "autoModeServer": "unknown",
+        "_note": "pass-1 spawn row carries no routed flag: the pass-1 probe launched direct"
+      },
+      "model": {
+        "requested": "haiku",
+        "resolved": "claude-haiku-4-5-20251001"
+      },
+      "effort": null,
+      "permissionMode": {
+        "requested": "default",
+        "effective": "default",
+        "refusal": null
+      },
+      "createdAt": "2026-09-29T13:00:00.000Z",
+      "updatedAt": "2026-09-29T13:50:00.000Z"
+    },
+    {
+      "appId": "app-c12a0004",
+      "engineSessionId": "c12a0004-0000-4000-8000-000000000004",
+      "projectId": "proj-maws",
+      "directory": "/private/tmp/maws-c12-a/A1",
+      "additionalDirectories": [],
+      "worktree": null,
+      "branch": null,
+      "title": {
+        "text": "Kernel notebook",
+        "source": "user"
+      },
+      "pinned": false,
+      "archived": false,
+      "holder": {
+        "kind": "self"
+      },
+      "lastSeen": {
+        "messageUuid": null,
+        "at": "2026-09-29T13:50:00.000Z"
+      },
+      "unread": false,
+      "engineVersion": "2.1.283",
+      "gateway": {
+        "routed": false,
+        "baseUrl": null,
+        "autoModeServer": "unknown",
+        "_note": "pass-1 spawn row carries no routed flag: the pass-1 probe launched direct"
+      },
+      "model": {
+        "requested": "haiku",
+        "resolved": "claude-haiku-4-5-20251001"
+      },
+      "effort": null,
+      "permissionMode": {
+        "requested": "default",
+        "effective": "default",
+        "refusal": null
+      },
+      "createdAt": "2026-09-29T13:00:00.000Z",
+      "updatedAt": "2026-09-29T13:50:00.000Z"
+    }
+  ],
+  "digests": [
+    {
+      "appSessionId": "app-c12a0001",
+      "phase": "idle",
+      "activity": null,
+      "lastAssistantLine": "The release candidate notes are written.",
+      "turnStartedAt": null,
+      "lastTurnEndedAt": "2026-09-29T13:50:00.000Z",
+      "context": null,
+      "cost": {
+        "totalUsd": 0.04,
+        "sinceSeenUsd": 0
+      },
+      "childAgents": {
+        "active": 0,
+        "done": 0
+      },
+      "pendingRequests": 0
+    },
+    {
+      "appSessionId": "app-c12a0002",
+      "phase": "working",
+      "activity": "Editing src/router.ts",
+      "lastAssistantLine": "Reading the router.",
+      "turnStartedAt": "2026-09-29T13:58:00.000Z",
+      "lastTurnEndedAt": "2026-09-29T13:50:00.000Z",
+      "context": null,
+      "cost": {
+        "totalUsd": 0.04,
+        "sinceSeenUsd": 0
+      },
+      "childAgents": {
+        "active": 0,
+        "done": 0
+      },
+      "pendingRequests": 0
+    },
+    {
+      "appSessionId": "app-c12a0003",
+      "phase": "idle",
+      "activity": null,
+      "lastAssistantLine": "The sleep runs in the background.",
+      "turnStartedAt": null,
+      "lastTurnEndedAt": "2026-09-29T13:50:00.000Z",
+      "context": null,
+      "cost": {
+        "totalUsd": 0.04,
+        "sinceSeenUsd": 0
+      },
+      "childAgents": {
+        "active": 0,
+        "done": 0
+      },
+      "pendingRequests": 0
+    },
+    {
+      "appSessionId": "app-c12a0004",
+      "phase": "idle",
+      "activity": null,
+      "lastAssistantLine": "The kernel holds the notebook state.",
+      "turnStartedAt": null,
+      "lastTurnEndedAt": "2026-09-29T13:50:00.000Z",
+      "context": null,
+      "cost": {
+        "totalUsd": 0.04,
+        "sinceSeenUsd": 0
+      },
+      "childAgents": {
+        "active": 0,
+        "done": 0
+      },
+      "pendingRequests": 0
+    }
+  ],
+  "engine": [
+    {
+      "appSessionId": "app-c12a0001",
+      "process": "ready",
+      "engineState": "idle",
+      "turn": null,
+      "pendingRequests": 0
+    },
+    {
+      "appSessionId": "app-c12a0002",
+      "process": "ready",
+      "engineState": "running",
+      "turn": {
+        "origin": "human",
+        "startedAt": "2026-09-29T13:58:00.000Z",
+        "userMessageUuids": []
+      },
+      "pendingRequests": 0
+    },
+    {
+      "appSessionId": "app-c12a0003",
+      "process": "ready",
+      "engineState": "idle",
+      "turn": null,
+      "pendingRequests": 0,
+      "backgroundTasks": [
+        {
+          "taskId": "b3sleep1",
+          "taskType": "local_bash",
+          "description": "sleep 900",
+          "ambient": false
+        }
+      ]
+    },
+    {
+      "appSessionId": "app-c12a0004",
+      "process": "ready",
+      "engineState": "idle",
+      "turn": null,
+      "pendingRequests": 0,
+      "queue": {
+        "length": 1,
+        "paused": true
+      },
+      "mcpServers": [
+        {
+          "name": "c12-kernel",
+          "status": "connected",
+          "source": "project"
+        }
+      ]
+    }
+  ],
+  "attention": [],
+  "timeline": [
+    {
+      "_note": "the budget at the default, under it",
+      "at": 0,
+      "op": "budget",
+      "state": {
+        "limitKiB": 8388608,
+        "totalKiB": 3040870,
+        "sampledAt": "2026-09-29T14:00:00.000Z",
+        "over": false,
+        "overWithoutCandidate": false,
+        "candidates": 1,
+        "settling": 0,
+        "releasing": null,
+        "blocked": [
+          {
+            "appSessionId": "app-c12a0002",
+            "reasons": [
+              "turn"
+            ]
+          },
+          {
+            "appSessionId": "app-c12a0003",
+            "reasons": [
+              "background_tasks"
+            ]
+          },
+          {
+            "appSessionId": "app-c12a0004",
+            "reasons": [
+              "queued_messages",
+              "stateful_mcp"
+            ]
+          }
+        ],
+        "lastRelease": null
+      }
+    },
+    {
+      "_note": "each status again as C3 emits it: the stub emits nothing at load, and the page takes statuses from events",
+      "at": 500,
+      "op": "engine",
+      "appSessionId": "app-c12a0001",
+      "engine": {
+        "appSessionId": "app-c12a0001",
+        "process": "ready",
+        "engineState": "idle",
+        "turn": null,
+        "pendingRequests": 0
+      }
+    },
+    {
+      "_note": "each status again as C3 emits it: the stub emits nothing at load, and the page takes statuses from events",
+      "at": 500,
+      "op": "engine",
+      "appSessionId": "app-c12a0002",
+      "engine": {
+        "appSessionId": "app-c12a0002",
+        "process": "ready",
+        "engineState": "running",
+        "turn": {
+          "origin": "human",
+          "startedAt": "2026-09-29T13:58:00.000Z",
+          "userMessageUuids": []
+        },
+        "pendingRequests": 0
+      }
+    },
+    {
+      "_note": "each status again as C3 emits it: the stub emits nothing at load, and the page takes statuses from events",
+      "at": 500,
+      "op": "engine",
+      "appSessionId": "app-c12a0003",
+      "engine": {
+        "appSessionId": "app-c12a0003",
+        "process": "ready",
+        "engineState": "idle",
+        "turn": null,
+        "pendingRequests": 0,
+        "backgroundTasks": [
+          {
+            "taskId": "b3sleep1",
+            "taskType": "local_bash",
+            "description": "sleep 900",
+            "ambient": false
+          }
+        ]
+      }
+    },
+    {
+      "_note": "each status again as C3 emits it: the stub emits nothing at load, and the page takes statuses from events",
+      "at": 500,
+      "op": "engine",
+      "appSessionId": "app-c12a0004",
+      "engine": {
+        "appSessionId": "app-c12a0004",
+        "process": "ready",
+        "engineState": "idle",
+        "turn": null,
+        "pendingRequests": 0,
+        "queue": {
+          "length": 1,
+          "paused": true
+        },
+        "mcpServers": [
+          {
+            "name": "c12-kernel",
+            "status": "connected",
+            "source": "project"
+          }
+        ]
+      }
+    },
+    {
+      "_note": "the owner set 2 GB: over, and the least recently used idle session is released at once",
+      "at": 1000,
+      "op": "budget",
+      "state": {
+        "limitKiB": 2097152,
+        "totalKiB": 3040870,
+        "sampledAt": "2026-09-29T14:00:00.000Z",
+        "over": true,
+        "overWithoutCandidate": false,
+        "candidates": 1,
+        "settling": 0,
+        "releasing": "app-c12a0001",
+        "blocked": [
+          {
+            "appSessionId": "app-c12a0002",
+            "reasons": [
+              "turn"
+            ]
+          },
+          {
+            "appSessionId": "app-c12a0003",
+            "reasons": [
+              "background_tasks"
+            ]
+          },
+          {
+            "appSessionId": "app-c12a0004",
+            "reasons": [
+              "queued_messages",
+              "stateful_mcp"
+            ]
+          }
+        ],
+        "lastRelease": {
+          "appSessionId": "app-c12a0001",
+          "at": "2026-09-29T14:02:00.000Z",
+          "totalKiB": 3040870
+        }
+      }
+    },
+    {
+      "_note": "the release exits (reason budget); the sum is still over and no candidate is left",
+      "at": 2000,
+      "op": "engine",
+      "appSessionId": "app-c12a0001",
+      "engine": {
+        "appSessionId": "app-c12a0001",
+        "process": "exited",
+        "engineState": "idle",
+        "turn": null,
+        "pendingRequests": 0,
+        "exit": {
+          "reason": "budget",
+          "release": {
+            "limitKiB": 2097152,
+            "totalKiB": 3040870
+          }
+        }
+      }
+    },
+    {
+      "at": 2000,
+      "op": "budget",
+      "state": {
+        "limitKiB": 2097152,
+        "totalKiB": 2726297,
+        "sampledAt": "2026-09-29T14:00:00.000Z",
+        "over": true,
+        "overWithoutCandidate": false,
+        "candidates": 0,
+        "settling": 0,
+        "releasing": null,
+        "blocked": [
+          {
+            "appSessionId": "app-c12a0002",
+            "reasons": [
+              "turn"
+            ]
+          },
+          {
+            "appSessionId": "app-c12a0003",
+            "reasons": [
+              "background_tasks"
+            ]
+          },
+          {
+            "appSessionId": "app-c12a0004",
+            "reasons": [
+              "queued_messages",
+              "stateful_mcp"
+            ]
+          }
+        ],
+        "lastRelease": {
+          "appSessionId": "app-c12a0001",
+          "at": "2026-09-29T14:02:00.000Z",
+          "totalKiB": 3040870
+        }
+      }
+    },
+    {
+      "_note": "the second sample over budget with no candidate: the host raises overWithoutCandidate",
+      "at": 3000,
+      "op": "budget",
+      "state": {
+        "limitKiB": 2097152,
+        "totalKiB": 2726297,
+        "sampledAt": "2026-09-29T14:00:00.000Z",
+        "over": true,
+        "overWithoutCandidate": true,
+        "candidates": 0,
+        "settling": 0,
+        "releasing": null,
+        "blocked": [
+          {
+            "appSessionId": "app-c12a0002",
+            "reasons": [
+              "turn"
+            ]
+          },
+          {
+            "appSessionId": "app-c12a0003",
+            "reasons": [
+              "background_tasks"
+            ]
+          },
+          {
+            "appSessionId": "app-c12a0004",
+            "reasons": [
+              "queued_messages",
+              "stateful_mcp"
+            ]
+          }
+        ],
+        "lastRelease": {
+          "appSessionId": "app-c12a0001",
+          "at": "2026-09-29T14:02:00.000Z",
+          "totalKiB": 3040870
+        }
+      }
+    },
+    {
+      "_note": "the budget back at the default: the flag clears",
+      "at": 4000,
+      "op": "budget",
+      "state": {
+        "limitKiB": 8388608,
+        "totalKiB": 2726297,
+        "sampledAt": "2026-09-29T14:00:00.000Z",
+        "over": false,
+        "overWithoutCandidate": false,
+        "candidates": 0,
+        "settling": 0,
+        "releasing": null,
+        "blocked": [
+          {
+            "appSessionId": "app-c12a0002",
+            "reasons": [
+              "turn"
+            ]
+          },
+          {
+            "appSessionId": "app-c12a0003",
+            "reasons": [
+              "background_tasks"
+            ]
+          },
+          {
+            "appSessionId": "app-c12a0004",
+            "reasons": [
+              "queued_messages",
+              "stateful_mcp"
+            ]
+          }
+        ],
+        "lastRelease": {
+          "appSessionId": "app-c12a0001",
+          "at": "2026-09-29T14:02:00.000Z",
+          "totalKiB": 3040870
+        }
+      }
+    }
+  ]
+}

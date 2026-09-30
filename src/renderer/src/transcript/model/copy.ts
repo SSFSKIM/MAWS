@@ -276,8 +276,13 @@ export const retryCopy = (attempt: number, max: number | null, status: number | 
   `Retrying (${attempt}/${max ?? '?'}) · ${status === null ? '' : `${status} `}${error}`;
 export const reconnectCopy = (phase: 'attempting' | 'reconnected' | 'failed', attempt: number, max: number | null, reason: string | null) =>
   phase === 'attempting' ? `Reconnecting (${attempt}/${max ?? '?'})…` : phase === 'reconnected' ? 'Reconnected' : `Could not reconnect${reason ? ` · ${reason}` : ''}`;
+// C12 start: the memory budget's release and the resume after it (C12 execution document, "Surfaces of the budget")
+export const RELEASED_COPY = 'Released to stay under the memory budget · sending resumes it';
+export const RESUMING_COPY = 'Resuming…';
+export const RESUMED_COPY = 'Resumed';
+// C12 end
 export const processExitCopy = (reason: string, lostAttentionCount: number) =>
-  `Session process exited (${reason})${lostAttentionCount > 0 ? ` · ${plural(lostAttentionCount, 'approval')} lost` : ''}`;
+  reason === 'budget' ? RELEASED_COPY /* C12 */ : `Session process exited (${reason})${lostAttentionCount > 0 ? ` · ${plural(lostAttentionCount, 'approval')} lost` : ''}`;
 export const bashHeader = (command: string) => `! ${command}`;
 export const LOCAL_COMMAND_HEADER = 'Command output';
 export const NOT_SENT = 'Not sent'; // a dropped user row: a steer the engine cancelled, or an idle prompt dropped before its init

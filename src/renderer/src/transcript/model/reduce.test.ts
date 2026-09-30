@@ -934,3 +934,41 @@ describe('determinism and sharing', () => {
     expect(turn.ended?.costUsd).toBe(0.5);
   });
 });
+
+// C12 start: the memory budget's release and its resume in quiet words (C12 execution document, Interfaces "Surfaces of
+// the budget", Transcript): a release is a notice, not an error, and the resume after it stays as one line.
+describe('a release and the resume after it', () => {
+  const texts = (rows: Row[]) => rows.filter((row) => row.kind === 'error').map((row) => [(row as Extract<Row, { kind: 'error' }>).severity, (row as Extract<Row, { kind: 'error' }>).text]);
+
+  it('a budget exit reads as a release, quietly', () => {
+    const b = builder();
+    b.turn('u1');
+    b.text('m1', 0, 'Done.');
+    b.emit('process.exited', { code: 0, signal: null, reason: 'budget', lostAttentionCount: 0, budget: { limitKiB: 8_388_608, totalKiB: 9_100_000 } });
+    expect(texts(rowsOf(reduce(b.events)))).toEqual([['notice', 'Released to stay under the memory budget · sending resumes it']]);
+  });
+
+  it('a process_exit reconnect reads Resuming… and then stays as Resumed; a user reconnect still leaves no row', () => {
+    const b = builder();
+    b.emit('process.exited', { code: 0, signal: null, reason: 'budget', lostAttentionCount: 0, budget: { limitKiB: 8_388_608, totalKiB: 9_100_000 } });
+    b.emit('session.reconnect', { phase: 'attempting', attempt: 1, maxAttempts: 1, trigger: 'process_exit', reason: null });
+    expect(texts(rowsOf(reduce(b.events))).at(-1)).toEqual(['transient', 'Resuming…']);
+    b.emit('session.reconnect', { phase: 'reconnected', attempt: 1, maxAttempts: 1, trigger: 'process_exit', reason: null });
+    expect(texts(rowsOf(reduce(b.events)))).toEqual([
+      ['notice', 'Released to stay under the memory budget · sending resumes it'],
+      ['notice', 'Resumed'],
+    ]);
+    const user = builder();
+    user.emit('session.reconnect', { phase: 'attempting', attempt: 1, maxAttempts: 1, trigger: 'user', reason: null });
+    user.emit('session.reconnect', { phase: 'reconnected', attempt: 1, maxAttempts: 1, trigger: 'user', reason: null });
+    expect(texts(rowsOf(reduce(user.events)))).toEqual([]);
+  });
+
+  it('a failed resume after a release says why, as any failed reconnect does', () => {
+    const b = builder();
+    b.emit('session.reconnect', { phase: 'attempting', attempt: 1, maxAttempts: 1, trigger: 'process_exit', reason: null });
+    b.emit('session.reconnect', { phase: 'failed', attempt: 1, maxAttempts: 1, trigger: 'process_exit', reason: 'engine binary missing' });
+    expect(texts(rowsOf(reduce(b.events)))).toEqual([['error', 'Could not reconnect · engine binary missing']]);
+  });
+});
+// C12 end
