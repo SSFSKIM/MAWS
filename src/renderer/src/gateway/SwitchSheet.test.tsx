@@ -74,7 +74,7 @@ describe('the switch sheet', () => {
     // Sonnet admits every level on 2.1.283, so the current `max` needs no effort override; the answer carries the work
     // the disclosure showed, which the recheck compares against
     expect(answer).toHaveBeenCalledWith(READY, { model: 'sonnet', displayName: 'Sonnet 5', effort: null, backgroundTasks: tasks });
-    expect(backend.calls.filter((c) => c.command === 'engine.models').map((c) => c.input), "the direct route's catalogue").toEqual([{ refresh: false, gateway: 'direct' }]);
+    expect(backend.calls.filter((c) => c.command === 'engine.models').map((c) => c.input), "the direct route's catalogue for the session's directory").toEqual([{ refresh: false, gateway: 'direct', cwd: useSessions.getState().engine.get(READY)!.cwd }]);
   });
 
   it('opens on Cancel (a switch stops a process), answers the reply when its form is submitted, and null on Escape', async () => {

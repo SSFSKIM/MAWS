@@ -133,7 +133,7 @@ describe('setup intent hook', () => {
     catalogue = CATALOGUE; // a launch filled the host's cache, the relay's aliases included
     const second = renderHook(() => useSetupIntent(ID));
     await waitFor(() => expect(second.result.current!.options.models.map((m) => m.value)).toEqual(['default', 'haiku', 'claude/astra']));
-    expect(fake.invoked('engine.models')).toEqual([{ refresh: false, gateway: 'gateway' }, { refresh: false, gateway: 'gateway' }]);
+    expect(fake.invoked('engine.models')).toEqual([{ refresh: false, gateway: 'gateway', cwd: REPO }, { refresh: false, gateway: 'gateway', cwd: REPO }]);
   });
 
   // Debt wave 4: the host keeps one catalogue per route; the tab asks for its own route's, and again when it switches
@@ -151,9 +151,20 @@ describe('setup intent hook', () => {
     act(() => putIntent(intent({ gateway: 'gateway', model: 'claude/astra' })));
     await act(async () => {});
     expect(fake.invoked('engine.models'), 'a patch that keeps the route reads nothing').toEqual([
-      { refresh: false, gateway: 'direct' },
-      { refresh: false, gateway: 'gateway' },
+      { refresh: false, gateway: 'direct', cwd: REPO },
+      { refresh: false, gateway: 'gateway', cwd: REPO },
     ]);
+  });
+
+  // Debt wave 5: the host keys a launch whose settings set model env apart, so the tab names the directory it would
+  // launch in: an existing worktree itself, a worktree not yet made by its repository
+  it('names the directory whose settings the launch would read: an existing worktree’s own path, a new worktree’s repository', async () => {
+    withMain();
+    putIntent(intent({ location: { kind: 'existingWorktree', repoRoot: REPO, path: WORKTREE } }));
+    renderHook(() => useSetupIntent(ID));
+    await waitFor(() => expect(fake.invoked('engine.models')).toEqual([{ refresh: false, gateway: 'gateway', cwd: WORKTREE }]));
+    act(() => putIntent(intent({ location: { kind: 'newWorktree', repoRoot: REPO, name: 'two', branch: { kind: 'new', name: 'worktree-two', base: 'HEAD' } } })));
+    await waitFor(() => expect(fake.invoked('engine.models').at(-1)).toEqual({ refresh: false, gateway: 'gateway', cwd: REPO }));
   });
 
   // Debt wave 4: the catalogue's effort levels reach C7's ModelInfo, so the model widget can lower an effort
@@ -183,7 +194,7 @@ describe('setup intent hook', () => {
     expect(fake.invoked('engine.models'), 'a started session’s composer asks nothing').toEqual([]);
     act(() => putIntent(intent()));
     await waitFor(() => expect(result.current!.options.models.map((m) => m.value)).toEqual(['default', 'haiku', 'claude/astra']));
-    expect(fake.invoked('engine.models')).toEqual([{ refresh: false, gateway: 'gateway' }]);
+    expect(fake.invoked('engine.models')).toEqual([{ refresh: false, gateway: 'gateway', cwd: REPO }]);
   });
 
   it('notes a model that cannot hold auto mode, and a gateway model’s local auto lane', async () => {

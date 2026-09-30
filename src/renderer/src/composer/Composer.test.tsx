@@ -317,14 +317,14 @@ describe("composer DOM under C5's dispatcher", () => {
     const view = mount([{ index: 0, id: A }]);
     const chip = () => within(composerOf(0)).getByRole('button', { name: /^Model / });
     await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model Sonnet (Direct)'));
-    expect(invoked('engine.models')).toContainEqual({ refresh: false, gateway: 'direct' }); // the session's own route
+    expect(invoked('engine.models')).toContainEqual({ refresh: false, gateway: 'direct', cwd: '/work/app-a' }); // the session's own route and directory
     expect(invoked('session.listModels')).toEqual([]); // the engine is not asked on mount
     view.unmount();
     // an exited session names it from the route its record kept
     useSessions.setState({ engine: new Map(), records: new Map([[A, record(A, { model: { requested: null, resolved: 'claude-sonnet' } })]]) });
     mount([{ index: 0, id: A }]);
     await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model Sonnet (relay)'));
-    expect(invoked('engine.models')).toContainEqual({ refresh: false, gateway: 'gateway' });
+    expect(invoked('engine.models')).toContainEqual({ refresh: false, gateway: 'gateway', cwd: '/work/app-a' });
   });
 
   it('renews the route’s catalogue when the process becomes ready, not at each mount of a ready session', async () => {

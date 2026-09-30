@@ -35,9 +35,10 @@ export function routeOf(status: EngineSessionStatus | null, record: SessionRecor
 
 // The route's catalogue. A launch updates its route's catalogue at `initialize`, so the read is renewed when the
 // session's process becomes ready (a relay's `claude/*` aliases arrive with the first routed launch): on the change to
-// ready only, not at every mount of an already-ready session's composer.
-export function useModelCatalogue(route: Route | null, ready: boolean): readonly ModelCatalogueEntry[] | null {
-  const read = useCommand('engine.models', route === null ? { refresh: false } : { refresh: false, gateway: route }, { staleTime: 60_000 });
+// ready only, not at every mount of an already-ready session's composer. With the route, the session's directory: a
+// launch whose settings there set a model environment of its own has its own catalogue (debt wave 5).
+export function useModelCatalogue(route: Route | null, ready: boolean, cwd: string | null = null): readonly ModelCatalogueEntry[] | null {
+  const read = useCommand('engine.models', route === null ? { refresh: false } : cwd === null ? { refresh: false, gateway: route } : { refresh: false, gateway: route, cwd }, { staleTime: 60_000 });
   const client = useQueryClient();
   const wasReady = useRef(ready);
   useEffect(() => {

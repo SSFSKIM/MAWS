@@ -40,6 +40,12 @@ export function baseDirectoryOf(location: Location): string {
   return location.kind === 'directory' ? location.path : location.kind === 'newWorktree' ? location.repoRoot : location.repoRoot;
 }
 
+// The directory whose settings a launch at `location` reads (debt wave 5): the directory or the existing worktree itself;
+// a worktree not yet made will be a checkout of its repository, whose root stands in for it.
+export function settingsDirectoryOf(location: Location): string {
+  return location.kind === 'newWorktree' ? location.repoRoot : location.path;
+}
+
 // `<yyyy-mm-dd>-<4 base32>`, prefilled and not selected (the fork sheet's rule, reused by the location chip).
 const BASE32 = 'abcdefghijklmnopqrstuvwxyz234567';
 export function defaultWorktreeName(now: Date = new Date(), random: () => number = Math.random): string {
@@ -125,9 +131,10 @@ async function readRepository(directory: string): Promise<RepositoryFacts> {
 // The catalogue at every mount and on every route change: the host answers the tab's route's catalogue from its cache
 // in memory, which a launch or a refresh updates (the relay's `claude/*` aliases arrive with the first routed launch),
 // so each new tab sees what the host knows now for the route it would launch on, not the most recently updated route's.
-// A failed read shows the built-in list the host itself answers before any launch.
-async function readCatalogue(gateway: SetupIntent['gateway']): Promise<ModelCatalogue> {
-  const result = await ipc.invoke('engine.models', { refresh: false, gateway });
+// A failed read shows the built-in list the host itself answers before any launch. The directory it names is the one
+// the launch would read settings from, which may set a model environment of its own (debt wave 5).
+async function readCatalogue(gateway: SetupIntent['gateway'], cwd: string | null): Promise<ModelCatalogue> {
+  const result = await ipc.invoke('engine.models', cwd === null ? { refresh: false, gateway } : { refresh: false, gateway, cwd });
   if (result.ok) return result.value;
   console.warn('[sessions] engine.models unavailable', result.error);
   return BUILTIN_FALLBACK;
@@ -145,14 +152,15 @@ function useSetupOptions(
 
   // Only an unstarted session reads it: C7 calls this hook from every composer, and a started session's has no intent.
   const route = intent?.gateway ?? null;
+  const settingsDirectory = intent ? settingsDirectoryOf(intent.location) : null;
   useEffect(() => {
     if (route === null) return;
     let live = true;
-    void readCatalogue(route).then((c) => live && setCatalogue(c));
+    void readCatalogue(route, settingsDirectory).then((c) => live && setCatalogue(c));
     return () => {
       live = false;
     };
-  }, [route]);
+  }, [route, settingsDirectory]);
 
   // The repository is read again only when the base directory moves to another repository or out of one; a move
   // between two locations of one repository keeps what was read.

@@ -132,3 +132,11 @@ test('pass3 stop-task: each stop emits the snapshot without the task, killed, th
 test('pass3 nested-agents-sidecars carry no secrets',()=>{const side=new URL('nested-agents-sidecars/',dir3);const files=readdirSync(side);assert.equal(files.length,4);
  for(const file of files){const text=readFileSync(new URL(file,side),'utf8');assert.ok(!text.includes('sk-ant-'),file);if(secret&&secret.length>=8)assert.ok(!text.includes(secret),file);}});
 // C8b end
+// Debt wave 5 (C3): the transient daemon a `--bg` job starts runs the installer's launcher while the pin runs from the
+// installer's versions directory, whatever PATH says or however the pin is linked; it runs the pin when the pin's real
+// path is outside that directory (engine custody's copy) or XDG_DATA_HOME moves the directory.
+test('pass3 bg-daemon-binary: the daemon runs the pin only when the pin is not under the versions directory',()=>{const r=load3('bg-daemon-binary');
+ const version=Object.fromEntries(notes(r,'daemon_start').map(n=>[n.arm,n.version]));
+ assert.deepEqual(version,{'installed-path':'2.1.285','path-shim':'2.1.285','xdg-data-home':'2.1.283','symlink-outside':'2.1.285','custody-copy':'2.1.283'});
+ const exe=Object.fromEntries(notes(r,'daemon_process').map(n=>[n.arm,n.exe]));assert.equal(exe['custody-copy'],notes(r,'arm').find(n=>n.arm==='custody-copy').bin);
+ assert.ok(notes(r,'daemon_exit').every(n=>n.alive===false));assert.ok(notes(r,'owner_file_check').every(n=>n.scratchProjects.length===0));});

@@ -22,7 +22,7 @@ import type { ControlRequestFrame } from '@shared/wire/frames';
 import type { JournalDirection, JournalRow } from '@shared/wire/journal';
 import { BashMode } from './bash-mode';
 import { DECLARED_DIALOG_KINDS, PermissionBroker } from './broker';
-import { endSession, getContextUsage, getStatus, initialize, interrupt, requestClassOf } from './controls';
+import { endSession, getContextUsage, getStatus, initialize, interrupt, REQUEST_TIMEOUT_MS, requestClassOf } from './controls';
 import { EMPTY_GRANTS, reapply, recordFromResponse, type GrantSnapshot } from './grants';
 import { HostHookRegistry } from './host-hooks';
 import { RELAY_URL, spawnMeta, type LaunchPlan } from './launch';
@@ -50,6 +50,10 @@ export const EOF_WRITE_WAIT_MS = 3_000;
 // An engine that has written anything keeps the long class's initialize deadline, since SessionStart hooks, which the
 // engine runs before it reads `initialize`, may legitimately take minutes and announce themselves with `hook_started`.
 export const FIRST_OUTPUT_MS = 30_000;
+// Debt wave 5: 2.1.283 runs SessionStart hooks before it reads `initialize` and bounds each by 600 s unless the hook
+// says otherwise (`La`), so each hook frame it streams first restarts `initialize`'s deadline: the long class from the
+// frame, plus this bound while a hook it reported started has not reported back.
+export const SESSION_START_HOOK_MS = 600_000;
 const STDERR_TAIL_LINES = 20;
 
 // What the session journals through: JournalWriter satisfies it; tests use an in-memory journal.
@@ -134,6 +138,9 @@ export class EngineSession {
   // C12 end
   private handshakeDone = false;
   private silence: ReturnType<typeof setTimeout> | null = null; // C3 corrective: the first-output bound, until anything is read
+  // debt wave 5: the initialize request once written, and the SessionStart hooks reported started and not yet back
+  private initializeId: RequestId | null = null;
+  private hooksBeforeAnswer: Set<string> | null = null; // null until the first hook frame
   private initFailed = false;
   private journalClosed = false;
   private lastEventSeq = 0;
@@ -505,7 +512,12 @@ export class EngineSession {
     if (this.spec.trust) request.workspaceTrust = this.spec.trust;
     let init;
     try {
-      init = await initialize(client, request);
+      init = await initialize(client, request, {
+        onWritten: (requestId) => {
+          this.initializeId = requestId;
+          this.extendInitialize(); // hook frames read while the write was in flight
+        },
+      });
     } catch (error) {
       this.initializeFailed(error);
       return;
@@ -614,6 +626,7 @@ export class EngineSession {
       }
       const row = this.record('in', item.frame);
       const frame = item.frame as Frame;
+      if (!this.handshakeDone) this.hookBeforeAnswer(frame);
       this.tracker.observe(frame, typeof frame.timestamp === 'string' ? frame.timestamp : row.at);
       if (frame.type === 'system') this.publishCatalog(); // C7: only system/init and system/commands_changed move the catalogue
       this.broker.observe(item.frame);
@@ -799,6 +812,25 @@ export class EngineSession {
 
   // ---------------------------------------------------------------------------------------------------------------------
   // Failure, the ladder and exit
+
+  // Debt wave 5: a hook frame before the initialize answer (SessionStart hooks, which 2.1.283 runs before it reads
+  // initialize) restarts the answer's deadline, so the hooks' own time never counts against the long class.
+  private hookBeforeAnswer(frame: Frame): void {
+    if (this.processState !== 'initializing' || frame.type !== 'system') return;
+    if (frame.subtype !== 'hook_started' && frame.subtype !== 'hook_progress' && frame.subtype !== 'hook_response') return;
+    this.hooksBeforeAnswer ??= new Set();
+    if (typeof frame.hook_id === 'string') {
+      if (frame.subtype === 'hook_response') this.hooksBeforeAnswer.delete(frame.hook_id);
+      else this.hooksBeforeAnswer.add(frame.hook_id);
+    }
+    this.extendInitialize();
+  }
+
+  private extendInitialize(): void {
+    if (this.hooksBeforeAnswer === null || this.initializeId === null) return;
+    const running = this.hooksBeforeAnswer.size > 0 ? SESSION_START_HOOK_MS : 0;
+    this.client?.extendDeadline(this.initializeId, running + REQUEST_TIMEOUT_MS.long, 'the last SessionStart hook frame');
+  }
 
   // The engine wrote something: the first-output bound is met (C3 corrective).
   private heard(): void {
