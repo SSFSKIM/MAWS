@@ -419,7 +419,7 @@ describe('one Stop handler for every pane', () => {
 });
 
 // A stub of C10's hook over a small mutable intent: `start` answers when the test says.
-function stubIntent(over: Partial<SetupIntentHook['intent']> = {}) {
+function stubIntent(over: Partial<SetupIntentHook['intent']> = {}, options: Partial<SetupIntentHook['options']> = {}) {
   let resolveStart: ((r: HookResult) => void) | null = null;
   const state = {
     intent: { location: { kind: 'directory' as const, path: '/repo' }, additionalDirectories: [], model: null, effort: null, permissionMode: null, message: null, draft: null, ...over } as SetupIntentHook['intent'],
@@ -434,7 +434,7 @@ function stubIntent(over: Partial<SetupIntentHook['intent']> = {}) {
   };
   function useStub(): SetupIntentHook {
     useStubTick(state.listeners);
-    return { intent: state.intent, options: { locations: [state.intent.location], branches: [], models: [], autoModeNote: null }, phase: state.phase, patch, start };
+    return { intent: state.intent, options: { locations: [state.intent.location], branches: [], models: [], autoModeNote: null, ...options }, phase: state.phase, patch, start };
   }
   registerSetupIntentHook((id) => (id === A ? useStub() : null)); // a hook, registered as C10's is
   const setPhase = (phase: string | null) => {
@@ -655,6 +655,33 @@ describe('unstarted send holds a starting state', () => {
     expect(invoked('session.listModels')).toEqual([]);
     await user.click(within(composerOf(0)).getByRole('button', { name: /^Location/ }));
     await waitFor(() => expect(invoked('session.listPermissionRules')).toHaveLength(1));
+  });
+
+  it('the location chip names the directory (the path in the popover); a new worktree starts from a chosen branch; an existing worktree shows its branch and sessions', async () => {
+    const repo = '/Users/owner/code/repo';
+    const existing = `${repo}/.claude/worktrees/older`;
+    const template = { kind: 'newWorktree' as const, repoRoot: repo, name: 'next', branch: { kind: 'new' as const, name: 'worktree-next', base: 'HEAD' } };
+    const stub = stubIntent({ location: { kind: 'directory', path: repo } }, { locations: [{ kind: 'directory', path: repo }, { kind: 'existingWorktree', repoRoot: repo, path: existing }, template], branches: ['main', 'feature'] });
+    const invoke = fake.client.invoke.bind(fake.client);
+    const worktrees = { repoRoot: repo, commonDir: `${repo}/.git`, worktrees: [{ repoRoot: repo, path: existing, branch: 'worktree-older', head: 'abc', isMain: false, locked: false, prunable: false, managed: true }] };
+    fake.client.invoke = ((name, input) => (name === 'git.worktree.list' ? Promise.resolve({ ok: true, value: worktrees }) : invoke(name, input))) as MawsBridge['invoke'];
+    useSessions.setState({ records: new Map([['s-1' as AppSessionId, record('s-1', { directory: existing, worktree: { path: existing, branch: 'worktree-older' } })], ['s-2' as AppSessionId, record('s-2', { directory: existing, worktree: { path: existing, branch: 'worktree-older' }, archived: true })]]) });
+    mount([{ index: 0, id: A }]);
+    const chip = within(composerOf(0)).getByRole('button', { name: `Location ${repo}` });
+    expect(chip.textContent).toMatch(/^repo·/); // the name; the path is the tooltip and the popover's first line
+    expect(chip.title).toBe(repo);
+    const user = userEvent.setup();
+    await user.click(chip);
+    const popover = screen.getByRole('dialog', { name: 'Location' });
+    expect(within(popover).getByText('/Users/owner/code/repo')).toBeTruthy();
+    const older = within(popover).getByRole('menuitemradio', { name: /Existing worktree/ });
+    await waitFor(() => expect(older.textContent).toBe('Existing worktreeolder · ⎇ worktree-older · 1 session'));
+    expect(older.title).toBe(existing);
+    const from = within(popover).getByRole('combobox', { name: 'Start from' }) as HTMLSelectElement;
+    expect([...from.options].map((o) => o.value)).toEqual(['HEAD', 'main', 'feature']);
+    await user.selectOptions(from, 'feature');
+    await user.click(within(popover).getByRole('button', { name: 'Use' }));
+    expect(stub.patch).toHaveBeenCalledWith({ location: { ...template, branch: { kind: 'new', name: 'worktree-next', base: 'feature' } } });
   });
 
   it('holds `!` and `#` until the session starts, and hides the queue', async () => {

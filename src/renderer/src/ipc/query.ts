@@ -32,6 +32,7 @@ export const QUERY_COMMANDS = [
   'session.history.list',
   'session.listPermissionRules', // M4: the + dir chip's workspace directories
   'git.branches', // M4: the location chip's branch picker
+  'git.worktree.list', // debt wave 4: the location popover's existing worktrees and their branches
   // C7 end
   // C11 start: the widgets' engine reads, Session info's and the Settings tab's (C11 execution document, Repository map),
   // and C10's model catalogue, which the Direct model choice and Session info's lane read before any process
