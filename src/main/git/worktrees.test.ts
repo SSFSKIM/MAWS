@@ -306,6 +306,32 @@ describe('worktree service over scratch repositories', () => {
       }
     });
 
+    // Debt wave 6: asked from a linked worktree of such a repository, the root is the checkout whose own `.git` points
+    // at the common dir, found among the worktree's ancestors (where the engine's layout puts managed worktrees).
+    it('asked from a linked worktree of a separate-git-dir repository, finds the main checkout through the common dir', async () => {
+      const base = realpathSync(mkdtempSync(join(tmpdir(), 'maws-sep-linked-')));
+      try {
+        const work = join(base, 'work');
+        const gitDir = join(base, 'gitdir');
+        await runGit(base, ['init', '-q', '-b', 'main', `--separate-git-dir=${gitDir}`, work]);
+        await runGit(work, ['commit', '-q', '--allow-empty', '-m', 'a']);
+        const w = await service.add({ repoRoot: work, name: 'sep', branch: newBranch('worktree-sep') });
+        const deep = join(w.path, 'src');
+        mkdirSync(deep);
+        for (const asked of [w.path, deep]) {
+          const list = await service.list(asked);
+          expect(list, asked).toMatchObject({ repoRoot: work, commonDir: gitDir });
+          expect(list.worktrees.map((e) => [e.path, e.isMain])).toEqual([[work, true], [w.path, false]]);
+        }
+        await expect(service.status(w.path, w.path)).resolves.toMatchObject({ repoRoot: work, path: w.path, isMain: false, branch: 'worktree-sep' });
+        await expect(service.status(w.path, work)).resolves.toMatchObject({ repoRoot: work, isMain: true, branch: 'main' });
+        const again = await service.add({ repoRoot: w.path, name: 'from-linked', branch: newBranch('worktree-from-linked') });
+        expect(again.path).toBe(join(work, '.claude', 'worktrees', 'from-linked')); // beside the first, not inside it
+      } finally {
+        rmSync(base, { recursive: true, force: true });
+      }
+    });
+
     it('matches a worktree reached through a symlink by its realpath', async () => {
       const outside = repo.scratchDir();
       mkdirSync(join(outside, 'real'));

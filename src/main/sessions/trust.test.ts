@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createGitRunner } from '../git/runner';
+import { runGit } from '../../../test/support/git-fixture';
 import { ScratchRepo } from '../../../test/support/scratch-repo';
 import { TrustStoreFixture } from '../../../test/support/trust-store';
 import { configFilePath, readTrustStore, trustKeyOf, trustStateOf } from './trust';
@@ -47,6 +48,36 @@ describe('config path and trust key', () => {
       expect(await trustKeyOf(repo.root, git)).toEqual({ trustKey: repo.root, keyKind: 'repo', directory: repo.root });
       expect(await trustKeyOf(repo.path('src/deep'), git)).toEqual({ trustKey: repo.root, keyKind: 'repo', directory: repo.path('src/deep') });
       expect(await trustKeyOf(worktree, git)).toEqual({ trustKey: repo.root, keyKind: 'repo', directory: worktree });
+    });
+
+    // Debt wave 6: the keys of ordinary repositories stay as they were (a changed key would ask again for trust the owner
+    // gave); a worktree outside the root shares the root's key too.
+    it('answers the main worktree root for a linked worktree outside the repository', async () => {
+      const outside = join(repo.scratchDir(), 'side');
+      await repo.addWorktreeAt(outside, 'trust-side');
+      expect(await trustKeyOf(outside, git)).toEqual({ trustKey: repo.root, keyKind: 'repo', directory: realpathSync(outside) });
+    });
+
+    // Debt wave 6: 2.1.283's canonical root (`Qt`, cli.pretty.js 23840-23884) for a linked worktree whose common dir is
+    // not named `.git` is the common dir itself, unless that holds a `.git` of its own; the main checkout keys itself.
+    it('keys a separate-git-dir repository as the engine does: the checkout for itself, the common dir for its linked worktrees', async () => {
+      const base = realpathSync(mkdtempSync(join(tmpdir(), 'maws-trust-sep-')));
+      try {
+        const work = join(base, 'work');
+        const gitDir = join(base, 'gitdir');
+        await runGit(base, ['init', '-q', '-b', 'main', `--separate-git-dir=${gitDir}`, work]);
+        await runGit(work, ['commit', '-q', '--allow-empty', '-m', 'a']);
+        const linked = join(work, '.claude', 'worktrees', 'sep');
+        await runGit(work, ['worktree', 'add', '-q', '-b', 'sep', linked]);
+        mkdirSync(join(linked, 'src'));
+        expect(await trustKeyOf(work, git)).toEqual({ trustKey: work, keyKind: 'repo', directory: work });
+        expect(await trustKeyOf(linked, git)).toEqual({ trustKey: gitDir, keyKind: 'repo', directory: linked });
+        expect((await trustKeyOf(join(linked, 'src'), git)).trustKey).toBe(gitDir);
+        mkdirSync(join(gitDir, '.git')); // a common dir with a .git of its own: the engine keys the checkout
+        expect((await trustKeyOf(linked, git)).trustKey).toBe(linked);
+      } finally {
+        rmSync(base, { recursive: true, force: true });
+      }
     });
 
     it('answers the directory itself outside a repository, and the realpath through a symlink', async () => {
