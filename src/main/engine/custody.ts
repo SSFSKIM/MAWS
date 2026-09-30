@@ -24,6 +24,7 @@ export const VERSION_TIMEOUT_MS = 5_000; // C3's binary probe's
 export interface CustodyDeps {
   copyFile?: (from: string, to: string, mode: number) => Promise<void>;
   runVersion?: (path: string) => Promise<string>; // the stdout of `<path> --version`, run by absolute path
+  sha256Of?: (path: string) => Promise<string>; // the hash of a file (tests inject a read failure)
   now?: () => string;
   log?: (message: string) => void;
 }
@@ -46,12 +47,14 @@ export async function ensureCustody(o: { userData: string; version: string; sour
   const path = custodyPath(o.userData, o.version);
   const source = join(o.sourceDir, o.version);
   const log = deps.log ?? ((message: string) => console.warn(`[custody] ${message}`));
-  const problem = await verify(path, o.version);
-  if (problem === null) return { state: 'ok', path, manifest: (await readManifest(path))! };
-  if (!(await exists(source))) return refused(problem, o, path);
+  const problem = await verify(path, o.version, deps.sha256Of ?? sha256Of);
+  const manifest = problem === null ? await readManifest(path) : null;
+  if (manifest !== null) return { state: 'ok', path, manifest };
+  const found = problem ?? 'mismatch'; // a manifest that went away after the check cannot vouch for the copy
+  if (!(await exists(source))) return refused(found, o, path);
   const made = await makeCopy(source, path, o.version, deps);
-  if (made.state !== 'ok') return made.state === 'version' ? refused('version', o, path, made.answered) : refused(problem, o, path);
-  log(problem === 'missing' ? `copied ${source} to ${path}` : `the copy at ${path} did not match its manifest; made again from ${source}`);
+  if (made.state !== 'ok') return made.state === 'version' ? refused('version', o, path, made.answered) : refused(found, o, path);
+  log(found === 'missing' ? `copied ${source} to ${path}` : `the copy at ${path} did not match its manifest; made again from ${source}`);
   return { state: 'ok', path, manifest: made.manifest };
 }
 
@@ -77,7 +80,9 @@ async function readManifest(path: string): Promise<CustodyManifest | null> {
 // altered one. The full hash runs at every start: measured 2026-09-29 (C12 M4 task 3) on the owner's Mac, 2.1.283's
 // 225,036,032 bytes hash in 207 to 259 ms, well under the one second past which the document would compare size and
 // mtime at start and hash in the background instead.
-async function verify(path: string, version: string): Promise<'missing' | 'mismatch' | null> {
+// A copy that cannot be read is a verdict too (review fix): gone by the time it is hashed, `missing`; still there but
+// unreadable, `mismatch`; either is made again from a source that verifies, else refused.
+async function verify(path: string, version: string, hash: (path: string) => Promise<string>): Promise<'missing' | 'mismatch' | null> {
   let size: number;
   try {
     size = (await stat(path)).size;
@@ -86,7 +91,11 @@ async function verify(path: string, version: string): Promise<'missing' | 'misma
   }
   const manifest = await readManifest(path);
   if (manifest === null || manifest.version !== version || manifest.size !== size) return 'mismatch';
-  return (await sha256Of(path)) === manifest.sha256 ? null : 'mismatch';
+  try {
+    return (await hash(path)) === manifest.sha256 ? null : 'mismatch';
+  } catch {
+    return (await exists(path)) ? 'mismatch' : 'missing';
+  }
 }
 
 export function sha256Of(path: string): Promise<string> {

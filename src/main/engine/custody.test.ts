@@ -94,6 +94,42 @@ describe('the custody copy', () => {
     expect(existsSync(join(userData, 'engine', VERSION, 'manifest.json'))).toBe(true);
   });
 
+  // review fix: a read failure while verifying is a verdict, never a rejection out of ensureCustody
+  it('a copy that cannot be read is treated as altered: made again from the source, else refused as mismatch', async () => {
+    install();
+    await ensure();
+    const path = custodyPath(userData, VERSION);
+    chmodSync(path, 0o000);
+    expect(await ensure()).toMatchObject({ state: 'ok' });
+    expect(sha256(path)).toBe(sha256(join(sourceDir, VERSION)));
+    chmodSync(path, 0o000);
+    rmSync(sourceDir, { recursive: true });
+    expect(await ensure()).toMatchObject({ state: 'mismatch', path });
+    chmodSync(path, 0o755);
+  });
+
+  it('a copy that vanishes between its stat and its hash reads as missing', async () => {
+    install();
+    await ensure();
+    rmSync(sourceDir, { recursive: true });
+    const path = custodyPath(userData, VERSION);
+    const sha256Of = vi.fn(async (p: string) => {
+      rmSync(p);
+      throw Object.assign(new Error(`ENOENT: no such file, open '${p}'`), { code: 'ENOENT' });
+    });
+    expect(await ensure(VERSION, { sha256Of })).toMatchObject({ state: 'missing', path });
+  });
+
+  it('a read-stream error with the copy still there reads as altered', async () => {
+    install();
+    await ensure();
+    rmSync(sourceDir, { recursive: true });
+    const sha256Of = vi.fn(async () => {
+      throw new Error('EIO: i/o error, read');
+    });
+    expect(await ensure(VERSION, { sha256Of })).toMatchObject({ state: 'mismatch' });
+  });
+
   it('leaves no temporary file behind', async () => {
     install();
     await ensure();
