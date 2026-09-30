@@ -21,12 +21,17 @@ import type { TranscriptSource } from './types';
 const APP = 'app-1' as AppSessionId;
 const AGENT = 'agent-7' as AgentId;
 
-// A fake X2 client: every invoke waits for the test to answer it; events are pushed by name.
+// A fake X2 client: every invoke waits for the test to answer it, but for main's `session.appEvents`, answered at once
+// from `appEvents` (what main's read model keeps); events are pushed by name.
 function fakeClient() {
   const listeners = new Map<string, Set<(payload: unknown) => void>>();
   const calls: { name: string; input: unknown; answer: (result: CommandResult<CommandName>) => void; answered?: boolean }[] = [];
+  const appEvents = new Map<AppSessionId, SessionEvent[]>();
   const client: MawsBridge = {
-    invoke: ((name: CommandName, input: unknown) => new Promise((resolve) => calls.push({ name, input, answer: resolve as never }))) as MawsBridge['invoke'],
+    invoke: ((name: CommandName, input: unknown) =>
+      name === 'session.appEvents'
+        ? Promise.resolve({ ok: true, value: { events: appEvents.get((input as { appSessionId: AppSessionId }).appSessionId) ?? [] } })
+        : new Promise((resolve) => calls.push({ name, input, answer: resolve as never }))) as MawsBridge['invoke'],
     on: ((name: EventName, listener: (payload: unknown) => void) => {
       const set = listeners.get(name) ?? new Set();
       set.add(listener);
@@ -38,12 +43,12 @@ function fakeClient() {
   const emit = <N extends EventName>(name: N, payload: EventPayload<N>) => {
     for (const listener of listeners.get(name) ?? []) listener(payload);
   };
-  return { client, calls, emit, listeners };
+  return { client, calls, emit, listeners, appEvents };
 }
 
 const batch = (events: SessionEvent[], appSessionId = APP) => ({ appSessionId, events });
-// The sources' own `session.eventBatch` listeners: less the one the page keeps per client for app-synthesised events.
-const subscriptions = (fake: ReturnType<typeof fakeClient>) => (fake.listeners.get('session.eventBatch')?.size ?? 0) - 1;
+// The sources' own `session.eventBatch` listeners.
+const subscriptions = (fake: ReturnType<typeof fakeClient>) => fake.listeners.get('session.eventBatch')?.size ?? 0;
 
 // A session source subscribed and past an empty snapshot, as the store drives it (batches before the snapshot are held).
 async function subscribed(fake: ReturnType<typeof fakeClient>, source: TranscriptSource, listener: (events: SessionEvent[]) => void) {
@@ -153,6 +158,7 @@ describe('ipcSource', () => {
     await hydrated;
     fake.emit('session.eventBatch', batch(liveForm.slice(0, 2)));
     fake.emit('session.eventBatch', batch([...diskForm.slice(0, 2), notice])); // the follower's copy, and the app's notice
+    fake.appEvents.set(APP, [notice]); // main's read model keeps the notice as it emits it
     fake.emit('session.eventBatch', batch([...diskForm.slice(2), ...liveForm.slice(2)])); // the copy first within a batch
     const entry = useTranscriptStore.getState().entries[APP];
     expect([...entry.state.seen]).toEqual([...history, ...liveForm.slice(0, 2), notice, ...liveForm.slice(2)].map((event) => event.id));
@@ -168,7 +174,7 @@ describe('ipcSource', () => {
     fake.calls[1].answer({ ok: true, value: { events: liveForm, lastSeq: liveForm.length, complete: true } } as never);
     await again;
     fake.emit('session.eventBatch', batch(diskForm.slice(1)));
-    // the app's notice, which no snapshot carries, comes back from the page's copy at its place in time (the last)
+    // the app's notice, which no journal snapshot carries, comes back from main's copy at its place in time (the last)
     expect([...useTranscriptStore.getState().entries[APP].state.seen]).toEqual([...liveForm, notice].map((event) => event.id));
     store.detach(source.key!);
   });
@@ -238,10 +244,11 @@ describe('ipcSource', () => {
     expect(subscriptions(fake)).toBe(0);
   });
 
-  // C10 · C6 (debt wave 4): C10's `relay:direct_fallback` notice is posted once as a batch (main's `directFallbackNotice`
-  // frame) and stored nowhere, so a snapshot never carries it. The page keeps it, and a hydration after it (a first
-  // attach, a Retry) shows it as a notice row at its place in time, once.
-  it('shows a route notice main posted before the transcript hydrated, before the turn it preceded, again after a Retry', async () => {
+  // C10 · C6 (debt wave 5): C10's `relay:direct_fallback` notice is posted once as a batch (main's `directFallbackNotice`)
+  // and journalled nowhere, so no `session.events` snapshot carries it; main's read model keeps it. A page that loads
+  // after it (a reload: a new client that heard no batch) shows it as a notice row at its place in time, and so does
+  // a later hydration (a Retry), once.
+  it('shows a route notice main kept from before the page loaded, before the turn it preceded, again after a Retry', async () => {
     const fake = fakeClient();
     const source = ipcSourceOver(fake.client, APP);
     const b = builder();
@@ -253,8 +260,7 @@ describe('ipcSource', () => {
       id: `${APP}:c10:relay-fallback:1` as EventId, sessionId: 'unknown', at: noticeAt, seq: null, agentId: null, parentToolUseId: null,
       kind: 'notice.posted', level: 'warning', key: 'relay:direct_fallback', text: 'The relay was unreachable, so this session started on the direct route.',
     } as unknown as SessionEvent;
-    fake.emit('session.eventBatch', batch([notice]));
-    fake.emit('session.eventBatch', batch(b.events.slice(0, 2), 'app-other' as AppSessionId)); // not synthesised for APP: never kept
+    fake.appEvents.set(APP, [notice]); // posted before this page loaded: main has it, the page never heard it
     const store = useTranscriptStore.getState();
     const answer = { ok: true, value: { events: b.events, lastSeq: b.events.length - 1, complete: true } } as never;
     const hydrated = store.attach(APP, source);
@@ -264,6 +270,7 @@ describe('ipcSource', () => {
     expect(noticeRows().map((row) => row.kind === 'error' && row.text)).toEqual(['The relay was unreachable, so this session started on the direct route.']);
     const kinds = useTranscriptStore.getState().entries[APP].rows.map((row) => row.kind);
     expect(kinds.indexOf('error'), 'before the turn it preceded').toBeLessThan(kinds.indexOf('user'));
+    expect(fake.calls.map((call) => call.name), 'main is read after the journal, with no call of its own to answer').toEqual(['session.events']);
 
     // A later hydration of the key (a reset, as a Retry or a reopened tab) still carries it, once.
     store.detach(APP);

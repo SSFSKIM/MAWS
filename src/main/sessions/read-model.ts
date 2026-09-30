@@ -31,6 +31,7 @@ export interface ReadModelWriter {
   forgetEngineStatus(appSessionId: AppSessionId): void; // no process is owned any more (the scenario's `engine: null`)
   observeReplay(appSessionId: AppSessionId): void; // C4's `session.replay.progress`: the host plays this session's events live
   observeAttention(appSessionId: AppSessionId, items: AttentionItem[]): void; // attention.changed
+  observeAppEvents(appSessionId: AppSessionId, events: SessionEvent[]): void; // debt wave 5: events main synthesised for the session
 }
 
 interface ReadModelEvents {
@@ -40,6 +41,7 @@ interface ReadModelEvents {
   attention: (appSessionId: AppSessionId, items: AttentionItem[]) => void;
 }
 
+const APP_EVENTS_KEPT = 20; // debt wave 5: per session
 const LIVE = new Set<EngineSessionStatus['process']>(['starting', 'initializing', 'ready']);
 const FOLD_LIVE = new Set<EngineSessionStatus['process']>([...LIVE, 'exiting']);
 const LAUNCHING = new Set<EngineSessionStatus['process']>(['starting', 'initializing']);
@@ -59,6 +61,9 @@ export class SessionReadModel {
   private readonly costAtSeen = new Map<AppSessionId, number>();
   private readonly statuses = new Map<AppSessionId, EngineSessionStatus>();
   private readonly attentionById = new Map<AppSessionId, AttentionItem[]>();
+  // Debt wave 5: the events main synthesised for each session (`isAppSynthesised`), which nothing journals, kept for a
+  // transcript snapshot taken after they were emitted (a page reload); a few per launch at most, the newest kept.
+  private readonly appEventsById = new Map<AppSessionId, SessionEvent[]>();
   private readonly visible = new Set<AppSessionId>();
   private readonly sources = new Set<SessionSource>();
   // C12: the launch whose released mark a terminal or background job holder, or an archive, cleared (null when no status
@@ -127,6 +132,10 @@ export class SessionReadModel {
     return [...this.records.values()];
   }
   // C7 end
+
+  appEvents(appSessionId: AppSessionId): SessionEvent[] {
+    return this.appEventsById.get(appSessionId) ?? [];
+  }
 
   attention(appSessionId: AppSessionId): AttentionItem[] {
     return this.attentionById.get(appSessionId) ?? [];
@@ -222,6 +231,7 @@ export class SessionReadModel {
       this.costAtSeen.delete(appSessionId);
       this.statuses.delete(appSessionId);
       this.attentionById.delete(appSessionId);
+      this.appEventsById.delete(appSessionId); // debt wave 5
       this.visible.delete(appSessionId);
       this.clearedRelease.delete(appSessionId); // C12
       this.fire('record', appSessionId, null);
@@ -285,6 +295,13 @@ export class SessionReadModel {
     observeAttention: (appSessionId, items) => {
       this.attentionById.set(appSessionId, items);
       this.fire('attention', appSessionId, items);
+    },
+    // Debt wave 5. A session with no observed record is dropped, as `fold` drops its batches.
+    observeAppEvents: (appSessionId, events) => {
+      if (!this.records.has(appSessionId)) return;
+      const kept = this.appEventsById.get(appSessionId) ?? [];
+      const added = events.filter((event) => !kept.some((k) => k.id === event.id));
+      if (added.length > 0) this.appEventsById.set(appSessionId, [...kept, ...added].slice(-APP_EVENTS_KEPT));
     },
   };
 }
