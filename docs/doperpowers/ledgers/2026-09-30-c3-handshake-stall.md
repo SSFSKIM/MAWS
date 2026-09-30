@@ -51,3 +51,23 @@ All live work ran under the scratch root `/private/tmp/maws-c3-stall` (config ho
 4. **The engine awaits SessionStart:resume hooks before it reads `initialize`**, 600 s per hook by default (research, above): the `long` class's 120 s can already fail a legitimate resume with a slow hook. Not changed here; for C3's owner.
 
 ## Outcome
+
+Handed back 2026-09-30 07:00 (local) on branch head after be98cdaf plus this ledger commit; not merged.
+
+- **Cause: bounded, not found.** The pre-run's stalls ended by SIGTERM's default action (`code: null, signal: SIGTERM`) after about 120 s, and 2.1.283 installs its own SIGTERM handler 75 to 100 ms into its start (measured, `pass3/sigterm-disposition.mjs`; located in source at `Cwr` inside init). So each stalled process was still in early boot two minutes in: entry-module evaluation, the MDM or Keychain prefetch (`security find-generic-password` children, joined before init), or the first part of init (config, certificates, credential reads). Nothing session-specific had started, which rules out hypothesis 1 (the host reader and writer, also negative by reading) and hypothesis 3 (session state after SIGTERM, also negative in 21 probe resumes). Hypothesis 2 (the environment): the product's engine environment equals the probe's but for two `node_modules/.bin` entries on PATH; negative. Hypothesis 4 (the product): 0 silent stalls in 74 row Resumes over the dev and the packaged unsigned builds. The likeliest remaining difference is the parent's security context for the Keychain read; it did not reproduce, and a live capture of a stall (ps tree for a `security` child, `sample`) is what would settle it. `e2e/c3-stall.spec.ts` captures exactly that if it recurs.
+- **Fix commits.** 80e27493 (main's `LaunchWatch` counts only live events, seq set; and a first 30 s `initialize` class, superseded), ebd82749 (the first-output bound: no stdout frame and no stderr line within 30 s of the spawn is `init_failed { no_output }`, the ladder without `end_session`, a resumable row; `initialize` keeps 120 s once the engine has written anything; the SIGTERM probe), be98cdaf (review fixes), 56c93cfd and this commit (ledger).
+- **Hit rate.** The silent stall: pre-run 2 of 4; here 0 of 74 product resumes and 0 of 22 probe launches, before and after, so the bound is verified against a stub engine (`e2e/sessions.spec.ts`: failed at 32 s with the reason shown in the toast, Resume offered again) and in fake-timer session tests, not against a live stall. The launch-watch race (Surprise 1): 15 of 29 row Resumes failed before 80e27493, 0 of 45 after (25 dev, 20 packaged).
+- **Gates** (HEAD be98cdaf, out/ rebuilt at HEAD; 1-minute load read right before each):
+
+  | Gate | Load before | Result |
+  |---|---|---|
+  | `pnpm typecheck` | about 11 | 0 errors |
+  | `pnpm lint` | about 11 | clean |
+  | `pnpm test` | about 11 | 373 files, 4,582 passed, 1 skipped |
+  | `pnpm e2e` | 18.83 (waited 5 min for under 20) | 27 passed, 79 skipped (gated live specs), the new stub case among the passes |
+  | `pnpm e2e:c12` | 17.21 | 4 passed |
+
+- **Review.** `doperpowers:reviewer-high` on b25a41f2..56c93cfd: incorrect, three P2s (a journal failure in the silence timer escaping it; the stall harness opening the owner's MAWS profile when `MAWS_USER_DATA` is empty; an unquoted scratch path in the harness's hook command), all real, fixed in be98cdaf by a fix-wave worker. Round 2 on be98cdaf: correct, no findings.
+- **Spend.** About US$2.87 of the US$5 cap: US$2.836 from the H4 profile's journals (every product resume's Haiku turn and the deep session's making), US$0.028 for the probe session's making, and one Haiku turn in the concurrency probe whose cost was not captured (a one-line reply, a few cents at most). No Sonnet or Opus turn.
+- **`~/.claude.json`.** No scratch path in its `projects` before or after any live block (every check `[]`, last at 06:52); its mtime and size moved only with the owner's concurrent sessions. Nothing written under `~/.claude`; the relay was never stopped or restarted; no desktop input was sent.
+- **For the architect.** The single automatic retry on `init_failed { no_output }` (recommended, Decisions); §12 C3's timeout-class paragraph to amend for the first-output bound; Surprise 2 (engines outliving a closed app for a few seconds) for C12's quit path; Surprise 4 (SessionStart hooks count against `initialize`'s 120 s) for C3.
