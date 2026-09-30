@@ -90,6 +90,7 @@ export class FsService {
   // newer than the listing, so the scan neither forgets nor re-lists them from its snapshot.
   private readonly observedSinceListing = new Set<SessionId>();
   private scans: Promise<unknown> = Promise.resolve();
+  private registryRead: Promise<unknown> = Promise.resolve(); // the holder registry's first read, which a scan orders by
   private lastScanAt: string | null = null;
   private lastScan: FsScanResult | null = null;
   // Until main's first fs.scan (or the fallback), passes list and nothing is summarised.
@@ -143,7 +144,8 @@ export class FsService {
       this.summarising = true;
       void this.enqueueScan(null, 'refresh').catch(logScanFailure);
     }, this.startScanFallbackMs);
-    await Promise.all([this.holders.start(), this.enqueueScan(null, 'refresh')]);
+    this.registryRead = this.holders.start();
+    await Promise.all([this.registryRead, this.enqueueScan(null, 'refresh')]);
   }
 
   stop(): void {
@@ -539,6 +541,16 @@ export class FsService {
     const summarising = mode === 'command' || this.summarising;
     const baseline = mode === 'command' ? known : this.known;
     const todo = summarising ? files.filter((file) => !matchesKnown(file, baseline?.get(file.sessionId))).sort((a, b) => b.mtimeMs - a.mtimeMs) : [];
+    // Debt wave 5 (the cold first paint): the pass says how much it has to read before its first read, and reads the
+    // transcripts a live process holds (the registry's, read at start) before the rest, so a cold index shows the
+    // sessions running now within the first reads rather than after the store's history.
+    if (todo.length > 0) {
+      await this.registryRead.catch(() => undefined); // a registry that failed to read orders nothing first
+      this.send('fs.scanProgress', { scanned: 0, total: todo.length });
+    }
+    const held = new Set(this.holders.holders().map(({ sessionId }) => sessionId));
+    const first = todo.filter((file) => held.has(file.sessionId));
+    const rest = todo.filter((file) => !held.has(file.sessionId));
     let scanned = 0;
     const visit = async (file: ListedTranscript) => {
       const cached = this.summaries.get(file.sessionId);
@@ -550,8 +562,10 @@ export class FsService {
       scanned += 1;
       if (scanned % PROGRESS_EVERY === 0 && scanned < todo.length) this.send('fs.scanProgress', { scanned, total: todo.length });
     };
-    const visits = mapConcurrent(todo, SUMMARY_CONCURRENCY, visit)[Symbol.asyncIterator]();
-    while (!(await visits.next()).done); // drain: every visit has run
+    for (const batch of [first, rest]) {
+      const visits = mapConcurrent(batch, SUMMARY_CONCURRENCY, visit)[Symbol.asyncIterator]();
+      while (!(await visits.next()).done); // drain: every visit has run
+    }
     const result = { projects: countSlugs(this.listed.values()), sessions: this.listed.size, changed: todo.length, durationMs: Math.round(performance.now() - started) };
     if (!summarising) return result;
     this.send('fs.scanProgress', { scanned, total: todo.length });

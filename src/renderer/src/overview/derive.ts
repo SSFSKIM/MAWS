@@ -119,22 +119,23 @@ export function sortSessions(
   { digests, rows }: { digests: Map<AppSessionId, SessionDigest>; rows: NeedsYouRow[] },
 ): SessionRecord[] {
   const rowIndex = new Map(rows.map((row, i) => [row.appSessionId, i]));
-  const byRecency = (a: SessionRecord, b: SessionRecord) => recency(b, digests.get(b.appId)) - recency(a, digests.get(a.appId)) || byTitle(a, b);
-  if (sort === 'recency') return [...sessions].sort(byRecency);
-
-  const rank = (r: SessionRecord): [number, number] => {
+  // Each session's keys are computed once, not per comparison (debt wave 5: a cold index sorts thousands per render).
+  const keyed = sessions.map((r) => {
     const d = digests.get(r.appId);
     const row = rowIndex.get(r.appId);
-    if (row !== undefined) return [0, row];
-    if (r.unread) return [1, -time(d?.lastTurnEndedAt)];
-    if (d?.phase === 'working' || d?.phase === 'starting') return [2, -time(d.turnStartedAt)];
-    return [3, 0];
-  };
-  return [...sessions].sort((a, b) => {
-    const [ga, ka] = rank(a);
-    const [gb, kb] = rank(b);
-    if (ga !== gb) return ga - gb;
-    if (ga === 3) return byRecency(a, b);
-    return ka - kb || byTitle(a, b);
+    const [group, key]: [number, number] =
+      sort === 'recency' ? [3, 0]
+      : row !== undefined ? [0, row]
+      : r.unread ? [1, -time(d?.lastTurnEndedAt)]
+      : d?.phase === 'working' || d?.phase === 'starting' ? [2, -time(d.turnStartedAt)]
+      : [3, 0];
+    return { r, group, key, recency: recency(r, d) };
   });
+  return keyed
+    .sort((a, b) => {
+      if (a.group !== b.group) return a.group - b.group;
+      if (a.group === 3) return b.recency - a.recency || byTitle(a.r, b.r);
+      return a.key - b.key || byTitle(a.r, b.r);
+    })
+    .map(({ r }) => r);
 }

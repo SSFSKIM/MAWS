@@ -11,14 +11,14 @@ import { connectShell } from './events';
 
 const A = 'a' as AppSessionId;
 
-function setup() {
+function setup(batchMs = 0) {
   const fake = fakeClient({ 'layout.list': { keys: ['main.tabs'] } , 'layout.get': ({ key }: { key: string }) => ({
     value: key === 'main.tabs'
       ? { ...LAYOUT_DEFAULTS.main, panes: [{ tabs: [...LAYOUT_DEFAULTS.main.panes[0].tabs, { id: 'session:a', kind: 'session', appSessionId: 'a', pinned: false }, { id: 'session:gone', kind: 'session', appSessionId: 'gone', pinned: false }], activeTabId: 'overview' }] }
       : null,
   }) });
   const stores = { sessions: createSessionsStore(), attention: createAttentionStore(), layout: createLayoutStore() };
-  const disconnect = connectShell(fake.client, stores);
+  const disconnect = connectShell(fake.client, stores, { batchMs });
   return { fake, stores, disconnect };
 }
 
@@ -36,7 +36,7 @@ describe('shell event subscription', () => {
     const subscriptions = fake.calls.slice(0, firstInvoke);
     expect(subscriptions.sort()).toEqual(
       [
-        'attention.changed', 'attention.notified', 'session.changed', 'session.digest', 'session.projects.changed', 'session.removed', 'session.status',
+        'attention.changed', 'attention.notified', 'fs.scanProgress', 'session.changed', 'session.digest', 'session.projects.changed', 'session.removed', 'session.status',
       ].map((n) => `on ${n}`),
     );
     expect(fake.calls.slice(firstInvoke).filter((c) => c.startsWith('on'))).toEqual([]);
@@ -158,6 +158,50 @@ describe('shell event subscription', () => {
     expect(stores.sessions.getState().records.size).toBe(0);
     expect(stores.sessions.getState().digests.size).toBe(0);
     expect(stores.attention.getState().loaded).toBe(false);
+  });
+
+  // Debt wave 5 (the cold first paint): a cold index announces thousands of records and seed digests within a second;
+  // the page takes them a window at a time, so it renders once per window, not once per event.
+  describe('the record side, batched per window', () => {
+    afterEach(() => vi.useRealTimers());
+
+    it('applies a window’s events together, in arrival order, with one store write per kind; a removal in between still wins over the change before it', async () => {
+      const { fake, stores } = setup(16);
+      await answerSnapshots(fake);
+      await vi.waitFor(() => expect(stores.layout.getState().hydrated).toBe(true));
+      vi.useFakeTimers();
+      const writes = vi.fn();
+      stores.sessions.subscribe(writes);
+
+      fake.event('fs.scanProgress', { scanned: 0, total: 300 });
+      for (let i = 0; i < 200; i++) fake.event('session.changed', { record: record(`s${i}`), cause: 'discovered', revision: 10 + i });
+      for (let i = 0; i < 200; i++) fake.event('session.digest', digest(`s${i}`, { phase: 'exited', revision: 1 }));
+      fake.event('session.removed', { appSessionId: 's7', revision: 500 });
+      fake.event('session.changed', { record: record('s7'), cause: 'facts', revision: 499 }); // older than the removal
+      expect(writes).not.toHaveBeenCalled();
+      expect(stores.sessions.getState().records.has('s0' as AppSessionId)).toBe(false);
+
+      vi.advanceTimersByTime(16);
+      const state = stores.sessions.getState();
+      expect(state.records.size).toBe(1 + 200 - 1); // `a`, the 200, less the removed s7
+      expect(state.records.has('s7' as AppSessionId)).toBe(false);
+      expect(state.digests.get('s199' as AppSessionId)?.phase).toBe('exited');
+      expect(state.indexing).toEqual({ scanned: 0, total: 300 });
+      expect(writes.mock.calls.length).toBeLessThanOrEqual(5); // progress, changes, digests, the removal (the stale change writes nothing)
+
+      fake.event('fs.scanProgress', { scanned: 300, total: 300 });
+      vi.advanceTimersByTime(16);
+      expect(stores.sessions.getState().indexing).toBeNull();
+    });
+
+    it('drops a pending window at disconnect', () => {
+      vi.useFakeTimers();
+      const { fake, stores, disconnect } = setup(16);
+      fake.event('session.changed', { record: record('late'), cause: 'discovered', revision: 5 });
+      disconnect();
+      vi.advanceTimersByTime(50);
+      expect(stores.sessions.getState().records.size).toBe(0);
+    });
   });
 
   it('still loads when a snapshot command has no answerer, warning about it', async () => {

@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
-import { chmod, mkdir, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, realpath, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, SessionId } from '@shared/graph/ids';
@@ -94,6 +94,30 @@ describe('filesystem state service: discovery, sidecars and holders', () => {
     await expect.poll(() => events('fs.sessionChanged').map((e) => [e.summary.sessionId, e.appSessionId]), { timeout: 1_000 }).toContainEqual([S1, 'app-1']);
     expect(fs.state()).toMatchObject({ configHome: fixture.configHome, watching: true, projects: 2, sessions: 3, bound: 3, followed: [], holders: [] });
     expect(fs.state().lastScanAt).not.toBeNull();
+  });
+
+  // Debt wave 5 (the cold first paint): a scan announces its size before its first read, then reads the transcripts a
+  // live process holds before any other, so their cards need no wait for the store's history (the rest follow most
+  // recent first, up to the reads in flight completing out of order).
+  it('a scan announces its total first, then summarises the live-held transcripts before any other', async () => {
+    const S4 = '44444444-4444-4444-8444-444444444444' as SessionId;
+    const ids = [S1, S2, S3, S4];
+    for (const [i, sessionId] of ids.entries()) {
+      const path = await fixture.addTranscript('/work/a', sessionId, [user(`u${i}`, null, '/work/a', `prompt ${i}`)]);
+      const at = new Date(Date.parse('2026-09-01T00:00:00Z') + i * 60_000); // S4 newest, S1 oldest
+      await utimes(path, at, at);
+    }
+    await fixture.addRegistryRecord(process.pid, { sessionId: S1, kind: 'interactive', cwd: '/work/a' });
+    const fs = await start();
+    clear();
+
+    await fs.scan([]);
+    const order = emitted.filter((e) => e.name === 'fs.sessionChanged' || e.name === 'fs.scanProgress');
+    expect(order[0]).toEqual({ name: 'fs.scanProgress', payload: { scanned: 0, total: 4 } });
+    const changed = events('fs.sessionChanged').map((e) => e.summary.sessionId);
+    expect(changed[0]).toBe(S1); // the oldest, but live in a terminal
+    expect(changed.slice(1).sort()).toEqual([S2, S3, S4]);
+    expect(events('fs.scanProgress').at(-1)).toEqual({ scanned: 4, total: 4 });
   });
 
   describe('the start-up pass waits for main\'s known map (M4 fix wave)', () => {

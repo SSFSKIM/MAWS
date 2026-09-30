@@ -3,6 +3,9 @@
 // cards share one tab stop and the arrow keys move focus across them in reading order (Home and End to the ends),
 // Enter opens the focused card's session and ⌘Enter opens it in the split. A sidebar Needs-you row deep-links here
 // through `focusCard`, which reveals and focuses that card once.
+// Debt wave 5 (the cold first paint): while the engine host's discovery pass reads the store (a cold index, the owner's
+// first open), the board renders the cards it has and says above them, or in place of the empty board, that indexing
+// continues and how far it has come.
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -20,7 +23,7 @@ const PREVIOUS = new Set(['ArrowUp', 'ArrowLeft']);
 
 export function Overview({ paneIndex }: { paneIndex: PaneIndex }) {
   const sessions = useSessions(
-    useShallow((s) => ({ loaded: s.loaded, records: s.records, recordsVersion: s.recordsVersion, digests: s.digests, projects: selectProjectOrder(s) })),
+    useShallow((s) => ({ loaded: s.loaded, records: s.records, recordsVersion: s.recordsVersion, digests: s.digests, projects: selectProjectOrder(s), indexing: s.indexing })),
   );
   const attention = useAttention(useShallow((a) => ({ loaded: a.loaded, bySession: a.bySession, version: a.version })));
   const rows = selectNeedsYou(attention, sessions);
@@ -57,10 +60,10 @@ export function Overview({ paneIndex }: { paneIndex: PaneIndex }) {
   };
 
   if (!sessions.loaded || !attention.loaded) return null;
-  if (groups.length === 0) return <EmptyBoard />;
+  if (groups.length === 0) return <EmptyBoard indexing={sessions.indexing} />;
 
-  return (
-    <div ref={board} role="list" aria-label="Overview" className="flex h-full flex-col gap-6 overflow-auto px-6 py-5">
+  const list = (
+    <div ref={board} role="list" aria-label="Overview" className="flex min-h-0 flex-1 flex-col gap-6 overflow-auto px-6 py-5">
       {groups.map((group) => (
         <CardGroup
           key={group.id}
@@ -74,13 +77,29 @@ export function Overview({ paneIndex }: { paneIndex: PaneIndex }) {
       ))}
     </div>
   );
+  return (
+    <div className="flex h-full flex-col">
+      {sessions.indexing && <IndexingNote indexing={sessions.indexing} className="px-6 pt-4" />}
+      {list}
+    </div>
+  );
 }
 
-function EmptyBoard() {
+const count = new Intl.NumberFormat('en-US');
+
+function IndexingNote({ indexing, className = '' }: { indexing: { scanned: number; total: number }; className?: string }) {
+  return (
+    <p role="status" className={`m-0 text-ui-sm text-fg-muted ${className}`}>
+      Indexing sessions · {count.format(indexing.scanned)} of {count.format(indexing.total)}
+    </p>
+  );
+}
+
+function EmptyBoard({ indexing }: { indexing: { scanned: number; total: number } | null }) {
   const canCreate = useSessionCreatorRegistered();
   return (
     <div className="flex h-full flex-col items-center justify-center gap-3 text-ui text-fg-muted">
-      <p className="m-0">Nothing live or unread</p>
+      {indexing ? <IndexingNote indexing={indexing} /> : <p className="m-0">Nothing live or unread</p>}
       <button
         type="button"
         disabled={!canCreate}

@@ -156,6 +156,25 @@ describe('overview board', () => {
     await user.click(button);
     expect(asked).toBe(1);
   });
+
+  // Debt wave 5 (the cold first paint): the board shows what it has while the discovery pass reads, and says so.
+  it('while the store is being indexed, says how far it has come above the cards it has, or in place of the empty board', () => {
+    act(() => useSessions.getState().applyScanProgress({ scanned: 1200, total: 3274 }));
+    const { unmount } = render(<Overview paneIndex={0} />);
+    expect(screen.getByRole('status').textContent).toBe('Indexing sessions · 1,200 of 3,274');
+    expect(cardTitles(group('Needs you'))).toEqual(['Fix sidebar drag', 'Sidebar interaction pass', 'Quota reset recovery']);
+    act(() => useSessions.getState().applyScanProgress({ scanned: 3274, total: 3274 }));
+    expect(screen.queryByRole('status')).toBeNull();
+    unmount();
+
+    resetShellStores();
+    fillStores(scenarioFile('empty'));
+    act(() => useSessions.getState().applyScanProgress({ scanned: 0, total: 3274 }));
+    render(<Overview paneIndex={0} />);
+    expect(screen.getByRole('status').textContent).toBe('Indexing sessions · 0 of 3,274');
+    expect(screen.queryByText('Nothing live or unread')).toBeNull();
+    expect(screen.getByRole('button', { name: 'New session' })).toBeTruthy();
+  });
 });
 
 // C12 start: the released mark on a card (C12 execution document, Interfaces "Surfaces of the budget"): the card stays on

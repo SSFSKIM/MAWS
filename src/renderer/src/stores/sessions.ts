@@ -31,8 +31,13 @@ export interface SessionsState {
   recordsVersion: number; // bumped on every write to `records`; selectors memoise on the versions
   projectsVersion: number;
   digestsVersion: number;
+  // Debt wave 5: the engine host's discovery pass while it reads (`fs.scanProgress` below its total), else null; the
+  // Overview says that indexing continues while it is set.
+  indexing: { scanned: number; total: number } | null;
+  applyScanProgress(progress: EventPayload<'fs.scanProgress'>): void;
   applyList(snapshot: { sessions: SessionRecord[]; revision: number }): void;
   applyChanged(event: EventPayload<'session.changed'>): boolean; // whether it was newer than what the store knew
+  applyChangedMany(events: EventPayload<'session.changed'>[]): void; // the same rule per event, in order, in one write
   applyRemoved(event: EventPayload<'session.removed'>): boolean;
   applyProjects(list: { projects: ProjectRecord[]; revision: number }): void;
   applyDigests(digests: SessionDigest[]): void;
@@ -91,6 +96,20 @@ export function createSessionsStore() {
         ...forget(removed),
       });
     };
+    // Changes applied in order, each against what the store knew before it; one write for all that were news. Whether any was.
+    const changeMany = (events: EventPayload<'session.changed'>[]): boolean => {
+      let records: Map<AppSessionId, SessionRecord> | null = null;
+      let latest = -1;
+      for (const { record, revision } of events) {
+        if (revision <= known(record.appId, (records ?? get().records).has(record.appId))) continue;
+        recordRevs.set(record.appId, revision);
+        (records ??= new Map(get().records)).set(record.appId, record);
+        latest = Math.max(latest, revision);
+      }
+      if (records === null) return false;
+      writeRecords(records, latest);
+      return true;
+    };
     const keepDigests = (incoming: SessionDigest[]) => {
       const digests = new Map(get().digests);
       let changed = false;
@@ -115,6 +134,7 @@ export function createSessionsStore() {
       recordsVersion: 0,
       projectsVersion: 0,
       digestsVersion: 0,
+      indexing: null,
       applyList({ sessions, revision }) {
         const records = new Map(get().records);
         const listed = new Set<AppSessionId>();
@@ -128,11 +148,17 @@ export function createSessionsStore() {
         listRevision = Math.max(listRevision, revision);
         writeRecords(records, revision);
       },
-      applyChanged({ record, revision }) {
-        if (revision <= known(record.appId, get().records.has(record.appId))) return false;
-        recordRevs.set(record.appId, revision);
-        writeRecords(new Map(get().records).set(record.appId, record), revision);
-        return true;
+      applyChanged(event) {
+        return changeMany([event]);
+      },
+      applyChangedMany(events) {
+        changeMany(events);
+      },
+      applyScanProgress({ scanned, total }) {
+        const indexing = scanned < total ? { scanned, total } : null;
+        const current = get().indexing;
+        if (current?.scanned === indexing?.scanned && current?.total === indexing?.total) return;
+        set({ indexing });
       },
       applyRemoved({ appSessionId, revision }) {
         const held = get().records.has(appSessionId);
