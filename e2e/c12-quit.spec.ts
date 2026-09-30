@@ -38,6 +38,16 @@ function stderrOf(app: ElectronApplication): () => string[] {
 }
 
 const exited = (app: ElectronApplication) => new Promise<number>((resolve) => app.process().once('exit', () => resolve(Date.now())));
+// The app's exit, bounded so a quit that never comes fails here with the guard's own lines instead of the test timeout.
+async function exitWithin(gone: Promise<number>, ms: number, lines: () => string[]): Promise<number> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<never>((_, reject) => (timer = setTimeout(() => reject(new Error(`MAWS did not quit within ${ms} ms; the guard said: ${JSON.stringify(lines())}`)), ms)));
+  try {
+    return await Promise.race([gone, late]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 const quit = (app: ElectronApplication) => app.evaluate(({ app: electronApp }) => electronApp.quit());
 const answerWith = (app: ElectronApplication, answer: 'cancel' | 'when_idle' | 'quit') =>
   app.evaluate((_electron, a) => {
@@ -116,7 +126,7 @@ test('quit names a replayed session’s background work and a busy terminal; can
     // the terminal's command ends; within the 2 s re-read the app quits
     const ended = Date.now();
     value(await invoke(page, 'pty.write', { ptyId, data: '\x03' }));
-    const exitAt = await gone;
+    const exitAt = await exitWithin(gone, 20_000, lines);
     testInfo.annotations.push({ type: 'quit after the last busy thing ended', description: `${exitAt - ended} ms` });
     expect(exitAt - ended).toBeLessThan(10_000);
   } finally {
@@ -135,7 +145,7 @@ test('a quit with nothing busy asks nothing and exits within the probe bound', a
     const started = Date.now();
     const gone = exited(app);
     await quit(app);
-    const exitAt = await gone;
+    const exitAt = await exitWithin(gone, 20_000, lines);
     const report = lines().find((l) => l.startsWith('quit-report:'));
     expect(report).toMatch(/^quit-report: \d+ ms · nothing busy$/);
     const reportMs = Number(/(\d+) ms/.exec(report!)![1]);
