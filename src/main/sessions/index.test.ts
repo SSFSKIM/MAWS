@@ -9,7 +9,7 @@ vi.mock('../ipc/router', () => ({
 
 import { startSessions } from '.';
 
-const hosts = { onEvent: () => () => {} };
+const hosts = { onEvent: () => () => {}, onState: () => () => {} }; // C12: onState
 
 describe('launch mode reaches the page', () => {
   afterEach(() => handlers.clear());

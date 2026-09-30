@@ -18,6 +18,7 @@ describe('read model snapshot matches events', () => {
         listeners.set(name, listener);
         return () => listeners.delete(name);
       },
+      onState: () => () => {}, // C12
     };
     const model = new SessionReadModel('index');
     model.register({ start: (writer) => (writer.observeRecord(record('a1')), () => {}) });
@@ -32,7 +33,7 @@ describe('read model snapshot matches events', () => {
 
   it('folds a C4 replay run in full once the host reports its progress, with no engine status', () => {
     const listeners = new Map<string, (payload: unknown) => void>();
-    const hosts = { onEvent: (name: string, listener: (payload: unknown) => void) => (listeners.set(name, listener), () => listeners.delete(name)) };
+    const hosts = { onEvent: (name: string, listener: (payload: unknown) => void) => (listeners.set(name, listener), () => listeners.delete(name)), onState: () => () => {} /* C12 */ };
     const model = new SessionReadModel('index');
     model.register({ start: (writer) => (writer.observeRecord(record('r1')), () => {}) });
     model.register(hostEventSource(hosts as never));

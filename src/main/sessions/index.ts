@@ -16,7 +16,7 @@ export interface SessionsOptions {
   env: Record<string, string | undefined>;
   packaged: boolean;
   appRoot: string;
-  hosts: Pick<HostSupervisor, 'onEvent'>;
+  hosts: Pick<HostSupervisor, 'onEvent' | 'onState'>; // C12: onState
   indexSource?: SessionSource; // C4's IndexSessionSource: the records, projects and seed digests, and the unread rule
 }
 
@@ -27,12 +27,23 @@ export interface Sessions {
 
 // C3's event batches and statuses on the re-emit path: the digest fold and the process table the quit guard reads;
 // C4's replay progress marks a replay run live for the fold.
-export function hostEventSource(hosts: Pick<HostSupervisor, 'onEvent'>): SessionSource {
+// C12: at each engine-host generation change (the host leaving `ready`) the statuses it sent are forgotten, since a
+// replacement host starts with none of their processes, as the budget store re-reads per generation (whole-branch
+// review); the read model's `engine` event lets a quit wait re-read.
+export function hostEventSource(hosts: Pick<HostSupervisor, 'onEvent' | 'onState'>): SessionSource { // C12: onState
   return {
     start(writer) {
+      const held = new Set<AppSessionId>(); // C12: ids this host generation sent a status for
       const offs = [
         hosts.onEvent('session.eventBatch', ({ appSessionId, events }) => writer.fold(appSessionId, events)),
-        hosts.onEvent('session.status', ({ status }) => writer.applyEngineStatus(status)),
+        hosts.onEvent('session.status', ({ status }) => (held.add(status.appSessionId), writer.applyEngineStatus(status))), // C12: held
+        // C12 start
+        hosts.onState('engine-host', (state) => {
+          if (state.state === 'ready') return;
+          for (const appSessionId of held) writer.forgetEngineStatus(appSessionId);
+          held.clear();
+        }),
+        // C12 end
         // C4's replay runs have no engine status; their progress says the host is playing the session's events live.
         hosts.onEvent('session.replay.progress', ({ appSessionId }) => writer.observeReplay(appSessionId as AppSessionId)),
       ];

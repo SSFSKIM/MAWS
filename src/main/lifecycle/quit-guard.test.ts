@@ -28,10 +28,11 @@ const electron = vi.hoisted(() => {
   };
   return { app };
 });
-vi.mock('electron', () => ({ app: electron.app }));
+vi.mock('electron', () => ({ app: electron.app, BrowserWindow: { getAllWindows: () => [] }, ipcMain: { handle: vi.fn() } })); // C12: the sessions feed's imports
 
 const { SessionReadModel } = await import('../sessions/read-model');
 const { askToQuit, busyReport, installQuitGuard, quitQuestion } = await import('./quit-guard');
+const { hostEventSource } = await import('../sessions'); // C12
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 const NONE = { midTurn: 0, backgroundWork: 0, busyTerminals: 0, terminalsUnknown: false };
@@ -460,6 +461,34 @@ describe('quitting happens once', () => {
     expect(publish).not.toHaveBeenCalledWith(expect.objectContaining({ backgroundWork: 1 })); // no wait begins
     await s.finish();
     expect(electron.app.quits).toBe(1);
+  });
+});
+
+// whole-branch review (P2): a crashed engine host takes its sessions with it; main forgets their statuses at the
+// generation change, so a wait holding on them re-reads and completes
+describe('an engine-host crash during a wait', () => {
+  it('forgets the crashed host’s statuses, and the wait completes once nothing else is busy', async () => {
+    const events = new Map<string, (payload: unknown) => void>();
+    const states = new Set<(state: { state: string }) => void>();
+    const hosts = {
+      onEvent: (name: string, listener: (payload: unknown) => void) => (events.set(name, listener), () => void events.delete(name)),
+      onState: (_owner: string, listener: (state: { state: string }) => void) => (states.add(listener), () => void states.delete(listener)),
+    };
+    const model = new SessionReadModel('index');
+    model.register({ start: (writer) => (writer.observeRecord(record('bg')), () => {}) });
+    model.register(hostEventSource(hosts as never));
+    events.get('session.status')!({ appSessionId: 'bg', status: status('bg', { backgroundTasks: [TASK] }) });
+    const publish = vi.fn();
+    guardDeps(model as never, { publish, ask: async () => 'when_idle' });
+    electron.app.attempt();
+    await settle();
+    expect(publish).toHaveBeenLastCalledWith({ midTurn: 0, backgroundWork: 1, busyTerminals: 0, terminalsUnknown: false });
+    states.forEach((listener) => listener({ state: 'crashed' })); // the host and its processes are gone
+    await settle();
+    await settle();
+    expect(model.engineStatuses()).toEqual([]);
+    expect(electron.app.quits).toBe(1);
+    expect(publish).toHaveBeenLastCalledWith(null);
   });
 });
 
