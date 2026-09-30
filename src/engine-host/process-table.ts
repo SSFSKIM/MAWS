@@ -274,7 +274,9 @@ export class ProcessTable {
       this.budget = { ...this.budget, releasing: null };
       this.emitBudget(false);
     }
-    const exited = [...this.rows].filter(([, row]) => row.lifecycle === 'exited');
+    // an exited row that still holds a queue neither counts nor goes (whole-branch review): session.queue.edit and remove
+    // need it for what the list shows from disk; once its queue is empty the next exit's cap picks it up
+    const exited = [...this.rows].filter(([, row]) => row.lifecycle === 'exited' && row.status().queue.length === 0);
     if (exited.length <= this.exitedRowsMax) return;
     // the row whose exit is being delivered is never dropped, so the excess comes from the others (a tied or earlier
     // exit time for it, a clock gone back, still leaves the table at the cap)

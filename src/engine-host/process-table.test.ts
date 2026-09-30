@@ -524,6 +524,44 @@ describe('process table (C12): exited rows beyond the cap', () => {
   });
 });
 
+// whole-branch review (P2): an exited row that still holds a queue is exempt from the cap's count and from eviction, so
+// session.queue.edit and remove keep answering for what the list shows; once its queue is empty the next exit's cap
+// picks it up
+describe('process table (C12): exited rows holding a queue', () => {
+  it('stay past the cap while their queue holds entries, and go at the next exit once it is empty', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const table = new ProcessTable({ ps: async () => '', exitedRowsMax: 1 });
+    const dropped: string[] = [];
+    table.onDropped((id) => dropped.push(id));
+    const names = ['q1', 'q2', 'p1', 'p2', 'p3'];
+    // q1 and q2's first message fails its write and waits in their paused queue (session.test: write_failed)
+    const rows = names.map((name) => scriptedSession({ spec: { appSessionId: name as AppSessionId }, responder: handshakeResponder({ end_session: () => null }), transport: name.startsWith('q') ? { failWrite: (f) => f.type === 'user' } : {} }));
+    rows.forEach((x, i) => table.reserve(names[i] as AppSessionId, () => x.session));
+    await Promise.all(rows.map((x) => x.session.start()));
+    const [q1, q2, p1, p2, p3] = rows as [(typeof rows)[number], (typeof rows)[number], (typeof rows)[number], (typeof rows)[number], (typeof rows)[number]];
+    const entry1 = (await q1.session.send('draft one')).entry!;
+    const entry2 = (await q2.session.send('draft two')).entry!;
+    const exit = async (x: (typeof rows)[number], at: string) => {
+      vi.setSystemTime(new Date(at));
+      const stopping = x.session.stop('stop');
+      x.transport.exit(0);
+      await stopping;
+    };
+    await exit(q1, '2026-09-30T10:00:00.000Z');
+    await exit(q2, '2026-09-30T10:01:00.000Z');
+    await exit(p1, '2026-09-30T10:02:00.000Z');
+    await exit(p2, '2026-09-30T10:03:00.000Z');
+    expect(dropped).toEqual(['p1']); // the queue-holders neither count nor go
+    const id = (x: string) => x as AppSessionId;
+    await expect(table.get(id('q1'))!.queue.edit(entry1.queueId, 'draft one, edited')).resolves.toMatchObject({ content: 'draft one, edited' });
+    await table.get(id('q2'))!.queue.remove(entry2.queueId); // q2's queue is now empty
+    expect(dropped).toEqual(['p1']); // eligible again, picked up at the cap's next application
+    await exit(p3, '2026-09-30T10:04:00.000Z');
+    expect(dropped).toEqual(['p1', 'q2', 'p2']);
+    expect(table.list().map((x) => x.status().appSessionId)).toEqual(['q1', 'p3']);
+  });
+});
+
 describe('process table (C12): the cap never exceeds itself when exit times tie or go backward', () => {
   async function twoRows(max: number) {
     const table = new ProcessTable({ ps: async () => '', exitedRowsMax: max });
