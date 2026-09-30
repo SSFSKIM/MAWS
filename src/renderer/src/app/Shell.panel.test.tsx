@@ -83,7 +83,7 @@ describe('shell renders the panel host in the region', () => {
     renderShell();
     expect(stripIds()).toEqual(['terminal:pin00000', 'files:aaaaaaaa']);
     expect(selectedId()).toBe('files:aaaaaaaa');
-    expect(within(panel()).getByText('Arrives with C8c')).toBeTruthy();
+    expect(within(panel()).getByText('files is not available')).toBeTruthy();
     expect(within(panel()).queryByText(/^Tools stay with this session/)).toBeNull(); // the summary is behind the tab
 
     await user.click(within(panel()).getByRole('button', { name: 'Pin files' }));
@@ -95,7 +95,7 @@ describe('shell renders the panel host in the region', () => {
   it('a restored tab whose tool registers after hydration gets its instance at the registration', () => {
     useLayout.setState({ panelBySession: new Map([[A, { tabs: [ref('files:aaaaaaaa')], activeTabId: 'files:aaaaaaaa' }]]) });
     renderShell();
-    expect(within(panel()).getByText('Arrives with C8c')).toBeTruthy();
+    expect(within(panel()).getByText('files is not available')).toBeTruthy();
     const files = probeTool('files');
     act(() => void register(files.tool));
     expect(files.probe.created).toEqual([{ appSessionId: A, session: expect.objectContaining({ appId: A }), instanceId: 'files:aaaaaaaa', params: undefined }]);

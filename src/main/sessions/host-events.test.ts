@@ -7,7 +7,7 @@ import { humanTurn, record, status } from '../../../test/support/builders';
 import { ev } from '../../../test/support/events';
 import { item } from '../../../test/support/builders';
 import { emit } from '../ipc/events';
-import { emittedAttentionSource, hostEventSource } from '.';
+import { emittedAppEventsSource, emittedAttentionSource, hostEventSource } from '.';
 import { SessionReadModel } from './read-model';
 
 describe('read model snapshot matches events', () => {
@@ -55,5 +55,26 @@ describe('read model snapshot matches events', () => {
       emit('attention.changed', { appSessionId: 'a1' as AppSessionId, items: [] });
       expect(model.attention('a1' as AppSessionId)).toEqual(items);
     }
+  });
+
+  // Debt wave 5 (C10 · C6): an event main synthesises for a session (`seq: null`, its id under the app session id, as
+  // C10's route notice) is emitted once and nowhere journalled, so main keeps it for a page that loads after it.
+  it('keeps the events main synthesises for a session, as emitted, until the session is removed', () => {
+    const A = 'a1' as AppSessionId;
+    const model = new SessionReadModel('index');
+    let remove = () => {};
+    model.register({ start: (writer) => (writer.observeRecord(record('a1')), (remove = () => writer.observeRemoved(A)), () => {}) });
+    const stop = model.register(emittedAppEventsSource());
+    const notice = ev('notice.posted', { id: 'a1:c10:relay-fallback:1', seq: null, level: 'warning', key: 'relay:direct_fallback', text: 'Direct.' });
+    const live = ev('turn.started', { id: 'a1:7', seq: 7 }); // C3's live row: journalled by the host
+    const disk = ev('turn.started', { id: 'uuid-1', seq: null }); // C4's disk form: read from the transcript
+    expect(emit('session.eventBatch', { appSessionId: A, events: [live, disk, notice] })).toBe(true);
+    emit('session.eventBatch', { appSessionId: A, events: [notice] }); // a repeat keeps one
+    emit('session.eventBatch', { appSessionId: 'b2' as AppSessionId, events: [{ ...notice, id: 'b2:x' as never }] }); // no record: dropped
+    expect(model.appEvents(A)).toEqual([notice]);
+    expect(model.appEvents('b2' as AppSessionId)).toEqual([]);
+    remove();
+    expect(model.appEvents(A)).toEqual([]);
+    stop();
   });
 });

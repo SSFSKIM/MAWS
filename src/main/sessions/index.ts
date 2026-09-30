@@ -5,6 +5,7 @@
 // so the index never scans.
 import type { AppSessionId } from '@shared/graph/ids';
 import type { EventName, EventPayload } from '@shared/ipc/schema';
+import { isAppSynthesised } from '@shared/sessions/app-events';
 import type { HostSupervisor } from '../hosts/supervisor';
 import { emit, onEmitted } from '../ipc/events';
 import { interceptCommand, registerMainHandler } from '../ipc/router';
@@ -60,11 +61,25 @@ export function emittedAttentionSource(tap: typeof onEmitted = onEmitted): Sessi
   };
 }
 
+// Debt wave 5 (C10 · C6): the events main itself synthesises for a session (C10's route notice), tapped from main's
+// `session.eventBatch` as the renderer receives them, so the read model keeps what nothing else stores.
+export function emittedAppEventsSource(tap: typeof onEmitted = onEmitted): SessionSource {
+  return {
+    start: (writer) =>
+      tap('session.eventBatch', ({ appSessionId, events }) => {
+        const id = appSessionId as AppSessionId;
+        const ours = events.filter((event) => isAppSynthesised(id, event));
+        if (ours.length > 0) writer.observeAppEvents(id, ours);
+      }),
+  };
+}
+
 export function startSessions({ env, packaged, appRoot, hosts, indexSource }: SessionsOptions): Sessions {
   const mode = launchMode(env, packaged);
   const model = new SessionReadModel(mode);
   registerMainHandler('session.digests', () => ({ digests: model.digests() }));
   registerMainHandler('session.launchMode', () => ({ mode }));
+  registerMainHandler('session.appEvents', ({ appSessionId }) => ({ events: model.appEvents(appSessionId as AppSessionId) })); // debt wave 5
   registerMainHandler('session.setVisible', ({ appSessionId, visible }) => model.setVisible(appSessionId as AppSessionId, visible));
   model.on('digest', (digest) => emit('session.digest', digest));
 
@@ -73,11 +88,13 @@ export function startSessions({ env, packaged, appRoot, hosts, indexSource }: Se
     // The index first: its records are observed before any batch or status for them is folded.
     if (indexSource) stops.push(model.register(indexSource));
     stops.push(model.register(emittedAttentionSource()));
+    stops.push(model.register(emittedAppEventsSource())); // debt wave 5
     stops.push(model.register(hostEventSource(hosts)));
   } else {
     if (indexSource) model.register(indexSource); // refused unstarted (logged): the scenario is the only source
     // Attached before the stub, whose load emits the scenario's attention through the same tap.
     stops.push(model.registerScenario(emittedAttentionSource()));
+    stops.push(model.registerScenario(emittedAppEventsSource())); // debt wave 5
     try {
       const path = scenarioPath(env, { packaged, appRoot });
       const clock = scenarioClock(env);

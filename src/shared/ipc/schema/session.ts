@@ -306,6 +306,9 @@ const c5Commands = {
   // The launch mode main decided at app ready (select-source.ts), so the page can register the scenario's session
   // creator in mode `scenario` (the owner's design 2026-09-28: the stub stands in for C10's `session.create`).
   'session.launchMode': { input: z.void(), output: z.strictObject({ mode: z.enum(['index', 'scenario']) }), owner: 'main' },
+  // Debt wave 5 (additive X2, flagged to the architect): the events main synthesised for the session and keeps in its
+  // read model (`isAppSynthesised`, as C10's route notice), oldest first, which no `session.events` snapshot carries.
+  'session.appEvents': { input: z.strictObject({ appSessionId: AppSessionIdSchema }), output: z.strictObject({ events: z.array(SessionEventSchema) }), owner: 'main' },
 } as const satisfies Record<`session.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 const c5Events = {
   'session.digest': SessionDigestSchema,

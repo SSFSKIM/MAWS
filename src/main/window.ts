@@ -77,7 +77,12 @@ export function createWindow(theme: ResolvedTheme, placement: WindowState | null
   win.webContents.on('will-navigate', (event) => event.preventDefault());
   win.once('ready-to-show', () => {
     if (placement?.maximized) win.maximize(); // C5
-    win.show();
+    // Debt wave 5: an end-to-end launch shows its window without making it key. A run opens one window per test, and
+    // a window that activated took the keystrokes and clicks of whoever was using the desktop meanwhile, which landed in
+    // the c7 group's editors as characters no test typed. Playwright drives the page over CDP with its focus emulated,
+    // so no test needs the window key; one that needs native focus asks for it (`win.focus()`).
+    if (process.env.MAWS_E2E === '1') win.showInactive();
+    else win.show();
   });
 
   if (pageUrl) void win.loadURL(pageUrl);

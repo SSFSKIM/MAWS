@@ -6,7 +6,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { SummarySection } from '@shared/ipc/schema/layout';
 import { ChevronDownIcon } from '../../app/IconButton';
 import { useSummary } from '../../stores/summary';
-import { arrivesWith, SUMMARY_COPY } from '../copy';
+import { unavailable, SUMMARY_COPY } from '../copy';
 import { panelHost, usePanelHost } from '../host';
 
 export function Section({ id, children }: { id: SummarySection; children: ReactNode }) {
@@ -54,7 +54,7 @@ export function ToolButton({ toolId, label, appSessionId }: { toolId: string; la
   if (!registered) {
     return (
       <button type="button" disabled className={actionClass}>
-        {arrivesWith(toolId)}
+        {unavailable(toolId)}
       </button>
     );
   }

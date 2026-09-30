@@ -15,8 +15,11 @@ export interface FakeClient {
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
-// `auto` answers a command at once: with the value, or with the value a function computes from the input.
-export function fakeClient(auto: Partial<Record<CommandName, unknown>> = {}): FakeClient {
+// `auto` answers a command at once: with the value, or with the value a function computes from the input. Main's
+// `session.appEvents` answers at once with nothing kept unless `auto` says otherwise (debt wave 5: every transcript
+// snapshot reads it after the journal's, and a test staging the journal read has no reason to stage this one too).
+export function fakeClient(given: Partial<Record<CommandName, unknown>> = {}): FakeClient {
+  const auto: Partial<Record<CommandName, unknown>> = { 'session.appEvents': { events: [] }, ...given };
   const listeners = new Map<string, Set<(payload: unknown) => void>>();
   const waiting = new Map<string, ((result: CommandResult<CommandName>) => void)[]>();
   const inputs = new Map<string, unknown[]>();

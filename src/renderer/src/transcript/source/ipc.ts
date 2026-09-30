@@ -5,6 +5,7 @@
 import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, AppSessionId, EventId, MessageUuid } from '@shared/graph/ids';
 import type { CommandName, CommandOutput, CommandResult, MawsBridge } from '@shared/ipc/schema';
+import { isAppSynthesised } from '@shared/sessions/app-events';
 import { ipc } from '../../ipc/client';
 import { useTranscriptStore } from '../../stores/transcript';
 import { turnId as turnIdOf } from '../model/keys';
@@ -87,30 +88,13 @@ async function eventsOnceKnown(client: MawsBridge, appSessionId: AppSessionId, w
   }
 }
 
-// The events main synthesises for a session (`seq: null`, ids under `<appSessionId>:`, as C10's
-// `relay:direct_fallback` notice) are emitted once as a `session.eventBatch` and stored nowhere, so a snapshot never
-// carries them: a transcript hydrated again (Retry, a reset, a tab closed and opened), or attached after one was posted,
-// would never show it. From the client's first transcript source on (a "+" session's pane swaps to its transcript when
-// main records it, before the launch that posts the route notice), the page keeps each one per session, and a session's
-// snapshot carries them back at their place in time. A page reload still loses them: main does not store them.
-const retained = new WeakMap<MawsBridge, Map<AppSessionId, SessionEvent[]>>();
-const synthesised = (appSessionId: AppSessionId, event: SessionEvent) => event.seq === null && event.id.startsWith(`${appSessionId}:`);
-
-function retainAppEvents(client: MawsBridge): void {
-  if (retained.has(client)) return;
-  const kept = new Map<AppSessionId, SessionEvent[]>();
-  retained.set(client, kept);
-  client.on('session.eventBatch', ({ appSessionId, events }) => {
-    const id = appSessionId as AppSessionId;
-    const ours = events.filter((event) => synthesised(id, event));
-    if (ours.length > 0) kept.set(id, [...(kept.get(id) ?? []), ...ours.filter((event) => !kept.get(id)?.some((k) => k.id === event.id))]);
-  });
-  client.on('session.removed', ({ appSessionId }) => kept.delete(appSessionId as AppSessionId));
-}
-
-// A snapshot with the session's retained events it lacks, each before the first event later than it.
-function withRetained(client: MawsBridge, appSessionId: AppSessionId, events: SessionEvent[]): SessionEvent[] {
-  const missing = (retained.get(client)?.get(appSessionId) ?? []).filter((event) => !events.some((e) => e.id === event.id));
+// The events main synthesises for a session (`isAppSynthesised`, as C10's `relay:direct_fallback` notice) are emitted
+// once as a `session.eventBatch` and journalled nowhere, so no `session.events` snapshot carries them; main's read model
+// keeps them (debt wave 5), and a session's snapshot reads them from there (`session.appEvents`, after the journal's, so
+// one posted in between is in the held batches or in main's answer, and the store deduplicates by id) and places each
+// at its time. So a transcript hydrated again (Retry, a reset, a tab closed and opened, a page reload) shows them.
+function withAppEvents(app: SessionEvent[], events: SessionEvent[]): SessionEvent[] {
+  const missing = app.filter((event) => !events.some((e) => e.id === event.id));
   if (missing.length === 0) return events;
   const out = [...events];
   for (const event of missing) {
@@ -130,8 +114,7 @@ function withRetained(client: MawsBridge, appSessionId: AppSessionId, events: Se
 // is neither form's copy of the other and always passes.
 function sessionSource(client: MawsBridge, appSessionId: AppSessionId): TranscriptSource {
   const liveForm = (event: SessionEvent) => event.seq !== null;
-  // Relies on a convention: main's synthesised events use ids under `<appSessionId>:` (C10's route notice), as C3's live ids do.
-  const diskForm = (event: SessionEvent) => event.seq === null && !event.id.startsWith(`${appSessionId}:`);
+  const diskForm = (event: SessionEvent) => event.seq === null && !isAppSynthesised(appSessionId, event);
   // Per subscription (the store subscribes once per attachment, then snapshots): whether it has seen the live form, the
   // batches that arrived before its snapshot answered, and its filter. A snapshot serves the subscription made just
   // before it, so a second subscription or a stale snapshot never delivers into another's listener.
@@ -176,7 +159,8 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
     // held batches are passed before the snapshot returns, while the store still buffers.
     async snapshot() {
       const subscription = latest;
-      const events = withRetained(client, appSessionId, valueOf(await eventsOnceKnown(client, appSessionId, subscription)).events);
+      const journal = valueOf(await eventsOnceKnown(client, appSessionId, subscription)).events;
+      const events = withAppEvents(valueOf(await client.invoke('session.appEvents', { appSessionId })).events, journal);
       if (subscription) {
         if (events.some(liveForm)) subscription.live = true;
         const waiting = subscription.held ?? [];
@@ -314,10 +298,7 @@ const sources = new WeakMap<MawsBridge, Map<string, TranscriptSource>>();
 export function ipcSourceOver(client: MawsBridge, appSessionId: AppSessionId, agentId?: AgentId): TranscriptSource {
   const key = agentId === undefined ? appSessionId : `${appSessionId}:${agentId}`;
   let known = sources.get(client);
-  if (!known) {
-    sources.set(client, (known = new Map()));
-    retainAppEvents(client);
-  }
+  if (!known) sources.set(client, (known = new Map()));
   let source = known.get(key);
   if (!source) known.set(key, (source = agentId === undefined ? sessionSource(client, appSessionId) : childSource(client, appSessionId, agentId)));
   return source;

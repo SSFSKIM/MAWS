@@ -14,7 +14,10 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSyn
 import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { expect, type Page } from '@playwright/test';
+import type { LaunchSpec } from '@shared/engine/launch-spec';
+import type { AppSessionId, SessionId } from '@shared/graph/ids';
 import { ENGINE_BIN, ENGINE_VERSION, GATEWAY_AUTH_TOKEN, RELAY_URL } from '../src/engine-host/launch';
+import { launchDefaults } from '../src/shared/composer/launch-defaults';
 import { scratchConfigHome } from '../test/live/support/live';
 import { launchMaws, REPO_ROOT, test, type MawsLaunch } from './support/launch';
 import { CHARTER } from './support/panel-support';
@@ -254,10 +257,10 @@ test('live: a turn that edits a file opens Review on Last turn and the viewer at
       .toBe(true);
     observed.record = { appId: record!.appId, directory: record!.directory };
 
-    const spec = {
-      appSessionId: record!.appId, cwd: record!.directory, additionalDirectories: [], model: 'sonnet', effort: null, permissionMode: 'acceptEdits',
-      gateway: 'gateway', subagentModel: 'sonnet', resume: { sessionId: created.session_id, fork: false }, sessionId: null, trust: null, mcpConfig: null,
-      extraSettings: null, maxBudgetUsd: 0.5, replay: null,
+    // Spread from C7's one list of X6 fields, so a field the contract makes mandatory fails typecheck here, not at launch.
+    const spec: LaunchSpec = {
+      ...launchDefaults(record!.appId as AppSessionId, record!.directory),
+      model: 'sonnet', permissionMode: 'acceptEdits', subagentModel: 'sonnet', resume: { sessionId: created.session_id as SessionId, fork: false }, maxBudgetUsd: 0.5,
     };
     const launched = (await invoke('session.launch', { spec })) as { ok: boolean };
     expect(launched, JSON.stringify(launched)).toMatchObject({ ok: true });

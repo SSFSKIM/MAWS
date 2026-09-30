@@ -3,7 +3,7 @@
 // dispatcher (`dispatcher.ts`) runs it only when that element contains both the key's target and the element that
 // holds focus, the innermost such binding winning. So a docked card answers only from its own pane, and of two
 // Overview cards only the focused one can answer; a remembered pane index plays no part.
-import { useEffect, useEffectEvent, type RefObject } from 'react';
+import { useEffectEvent, useLayoutEffect, type RefObject } from 'react';
 import type { ActionId } from '@shared/keymap/actions';
 
 export interface ChordBinding {
@@ -31,7 +31,9 @@ export function useKeyChord(
 ): void {
   const { within = null, enabled = true } = opts;
   const onKey = useEffectEvent(handler);
-  useEffect(() => {
+  // Bound in the commit that mounts the element (debt wave 5): a passive effect runs after paint, and under load late
+  // enough that a key pressed at a card that is already on screen found no binding.
+  useLayoutEffect(() => {
     if (!enabled) return;
     return bindChord({ id, within, run: (arg) => onKey(arg) });
   }, [id, within, enabled]);

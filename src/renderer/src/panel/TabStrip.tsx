@@ -7,7 +7,6 @@ import type { KeyboardEvent, ReactNode } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { PanelTabRef } from '@shared/ipc/schema/layout';
 import { Icon, IconButton } from '../app/IconButton';
-import { MENU_ORDER } from './arrives-with';
 import { COPY } from './copy';
 import { instanceOf, panelHost, requestFocus, togglePinned, usePanelHost, type PanelHostState } from './host';
 import type { PanelHostProps } from './host-slot';
@@ -112,6 +111,9 @@ function GlyphButton(props: { label: string; pressed?: boolean; disabled?: boole
     </button>
   );
 }
+
+// The §5.6 order "+" lists tools in; any other registered tool follows in registration order.
+const MENU_ORDER: readonly string[] = ['subagents', 'review', 'terminal', 'files', 'background', 'session-info'];
 
 // "+": every registered tool offered from the menu, in the §5.6 order then registration order, less a single-instance
 // tool that already has a tab here. With no session shown there is nothing for a tool to read, so it is disabled.

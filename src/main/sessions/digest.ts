@@ -140,7 +140,9 @@ function foldWithLedger(prev: SessionDigest, event: SessionEvent, ledger: CostLe
       return { ...d, phase: event.state === 'requires_action' ? 'waiting' : event.state === 'running' ? 'working' : 'idle' };
     case 'turn.ended': {
       if (event.isEchoReceipt) return d;
-      const failed = event.isError && event.terminalReason !== 'aborted_streaming';
+      // An interrupt is the human's stop, not a failure: `aborted_streaming` mid-reply, `aborted_tools` mid-tool (debt
+      // wave 5), as C3's attention service and C6's divider (`isAbortedReason`) read every `aborted_*` reason.
+      const failed = event.isError && !event.terminalReason?.startsWith('aborted_');
       const ended: SessionDigest = { ...d, phase: failed ? 'failed' : 'idle', lastTurnEndedAt: event.at, activity: null };
       return event.seq === null ? ended : withCost(ended, costOf(ledger));
     }

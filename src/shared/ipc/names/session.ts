@@ -15,7 +15,7 @@ export const commands = [
   'session.get', 'session.update', 'session.projects.list', 'session.projects.add', 'session.projects.update',
   'session.projects.remove', 'session.drafts.get', 'session.drafts.set', 'session.replay.start',
   'session.replay.launch', 'session.replay.control', 'session.replay.fixtures', 'session.digests',
-  'session.setVisible', 'session.launchMode', 'session.history.list', 'session.history.append', 'session.trust.check',
+  'session.setVisible', 'session.launchMode', 'session.appEvents', 'session.history.list', 'session.history.append', 'session.trust.check',
   'session.forget', 'session.create', 'session.intent.get', 'session.intent.list', 'session.intent.patch',
   'session.intent.release', 'session.intent.discard', 'session.intent.resolveWorktree', 'session.start',
   'session.fork', 'session.archive', 'session.delete', 'session.rename', 'session.revealPath',

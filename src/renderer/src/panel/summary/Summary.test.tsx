@@ -149,7 +149,7 @@ describe('summary card', () => {
   it('Review opens the review tool when one is registered and names C8c when not', async () => {
     const user = userEvent.setup();
     await mount();
-    const disabled = within(section('Environment')).getByRole('button', { name: 'Arrives with C8c' });
+    const disabled = within(section('Environment')).getByRole('button', { name: 'review is not available' });
     expect(disabled.hasAttribute('disabled')).toBe(true);
     offs.push(registerPanelTool(probeTool('review', { title: 'Review', multiInstance: false }).tool));
     await settle();
@@ -164,21 +164,21 @@ describe('summary card', () => {
     await mount();
     const env = section('Environment');
     expect(within(env).getByText('claude-opus-4-1 · high')).toBeTruthy();
-    expect(within(env).getByRole('button', { name: 'Arrives with C11' }).hasAttribute('disabled')).toBe(true);
+    expect(within(env).getByRole('button', { name: 'session-info is not available' }).hasAttribute('disabled')).toBe(true);
     offs.push(registerPanelTool(probeTool('session-info', { title: 'Session info', multiInstance: false }).tool));
     await settle();
     await user.click(within(section('Environment')).getByRole('button', { name: 'Session info' }));
     expect(panelOf(A)!.tabs.map((t) => t.toolId)).toEqual(['session-info']);
   });
 
-  it('counts subagents from the digest and draws the transcript’s glyphs; Open names C8b', async () => {
+  it('counts subagents from the digest and draws the transcript’s glyphs; Open says it is not available', async () => {
     await live();
     await attachTranscript('agents-and-messages');
     await mount();
     const agents = section('Subagents');
     expect(within(agents).getByText('2 working · 1 done')).toBeTruthy();
     expect(within(agents).getByTestId('agent-glyphs').textContent).toBe('✻✿'); // C6's marks 0 and 2 (glyphFor of the two task ids)
-    expect(within(agents).getByRole('button', { name: 'Arrives with C8b' }).hasAttribute('disabled')).toBe(true);
+    expect(within(agents).getByRole('button', { name: 'subagents is not available' }).hasAttribute('disabled')).toBe(true);
   });
 
   it('reads No subagents yet with no children, and counts alone with no transcript', async () => {
@@ -207,7 +207,7 @@ describe('summary card', () => {
     failing('fs.workflows', 'no host', 'host_unavailable');
     await mount();
     const background = section('Background work');
-    expect(background.textContent).toBe('Background workShells and monitors are known only while the session runs hereArrives with C8b');
+    expect(background.textContent).toBe('Background workShells and monitors are known only while the session runs herebackground is not available');
   });
 
   it('lists Sources from the transcript projection: files open a file tab, web rows open externally, MCP rows are source only', async () => {
