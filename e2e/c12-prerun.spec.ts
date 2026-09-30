@@ -628,6 +628,8 @@ async function ensureLive(page: Page, id: string): Promise<void> {
   await expect.poll(async () => (await statusOrNull(page, id))?.process ?? null, { timeout: 180_000 }).toBe('ready');
 }
 
+const MONITOR_PROMPT = 'Use the Monitor tool (load it with ToolSearch if it is not listed) to watch the output of this command: for i in $(seq 1 60); do echo tick $i; sleep 5; done. Start it and reply with exactly the word WATCHING; do not wait for it. If the Monitor tool is not available, do nothing else and reply with exactly the words MONITOR UNAVAILABLE.';
+
 const WORKFLOW_SCRIPT = `export const meta = { name: 'c12-prerun', description: 'Two echo agents in one phase', phases: [{ title: 'Echo' }] }
 phase('Echo')
 const out = await parallel([() => agent('Reply with exactly ALPHA and nothing else.', {label: 'alpha', effort: 'low'}), () => agent('Reply with exactly BETA and nothing else.', {label: 'beta', effort: 'low'})])
@@ -788,6 +790,35 @@ test('§10.4 one deep session: a relay to a running background child, Review wit
       };
       expect((out.workflow as { phases: string[] }).phases.join(' ')).toContain('Echo');
       expect((out.workflow as { agents: string[] }).agents.length).toBeGreaterThanOrEqual(2);
+    });
+    // C8's sitting item "a monitor started from a live session", run here so the owner's script carries a tested prompt
+    await step('a monitor started from the live session shows in Background work and stops', async () => {
+      const from = log.seq;
+      await send(page, MONITOR_PROMPT);
+      // the Monitor tool sits behind an engine feature gate (tengu_amber_sentinel, default off on 2.1.283), so the answer is
+      // either a monitor task or the session saying the tool is not there; both are recorded, the second as unavailable
+      const outcome = await log.until('the monitor’s start or the tool’s absence', (ev) => {
+        const monitor = ev.find((e) => e.seq !== null && e.seq > from && e.kind === 'task.started' && String(e.taskType ?? '').startsWith('monitor'));
+        if (monitor) return { monitor };
+        const unavailable = ev.some((e) => e.seq !== null && e.seq > from && e.kind === 'assistant.block.complete' && e.agentId === null && JSON.stringify(e.block ?? '').includes('MONITOR UNAVAILABLE'));
+        return unavailable ? { monitor: null } : null;
+      }, 180_000);
+      await log.idle(180_000);
+      const searches = log.events.filter((e) => e.seq !== null && e.seq > from && e.kind === 'tool.use' && e.toolName === 'ToolSearch').map((e) => e.input);
+      if (!outcome.monitor) {
+        out.monitor = { prompt: MONITOR_PROMPT, available: false, toolSearches: searches, note: 'the engine offers no Monitor tool in this session (ToolSearch finds none); a feature gate of the engine, not MAWS' };
+        return;
+      }
+      const taskId = outcome.monitor.taskId as string;
+      await showTool(page, 'Background work');
+      const row = panel(page).locator(`[data-monitor="${taskId}"]`);
+      await expect(row).toBeVisible({ timeout: 20_000 });
+      const line = await row.locator('[data-part="line"]').innerText();
+      const shots = await shoot(page, '10.4-monitor');
+      await row.getByRole('button', { name: 'Stop' }).click();
+      await log.until('the monitor’s end', (ev) => ev.find((e) => (e.kind === 'task.notification' || e.kind === 'task.updated') && e.taskId === taskId && e.seq !== null && e.seq > outcome.monitor!.seq!), 60_000);
+      await log.idle(180_000);
+      out.monitor = { prompt: MONITOR_PROMPT, available: true, taskId, taskType: outcome.monitor.taskType, line, stopped: true, screenshots: shots };
     });
     out.strayPermissionsAllowed = log.stray;
     out.consoleErrors = maws.consoleErrors();

@@ -163,10 +163,25 @@ The sitting
 14. C8's sitting items (the C8 recomposition; 5 min, beside steps 4, 10 and 11).
     - Both themes by eye over the right panel's tools.
     - "Open on GitHub" and the push state against a real upstream.
-    - A monitor started from a live session (Background work lists it).
-    - Attach by hand: a session held by `claude --bg` offers "Attach in a terminal tab" on its row; it opens the Terminal
-      tab and switches to that session. (The pre-run did this by clicking; note that `claude --bg` runs through
-      ~/.local/bin/claude's daemon, so the job is 2.1.285, not the pin.)
+    - A monitor started from a live session. In any live session send this prompt (the pre-run's, tested):
+        Use the Monitor tool (load it with ToolSearch if it is not listed) to watch the output of this command: for i in
+        $(seq 1 60); do echo tick $i; sleep 5; done. Start it and reply with exactly the word WATCHING; do not wait for
+        it. If the Monitor tool is not available, do nothing else and reply with exactly the words MONITOR UNAVAILABLE.
+      If it replies WATCHING, open Background work: the monitor is listed under its own row with a running line and a
+      Stop button; press Stop, and the row stops (that is the cleanup). If it replies MONITOR UNAVAILABLE, record that:
+      the Monitor tool sits behind an engine feature gate (off by default on 2.1.283), and the pre-run's scratch session
+      had none (ToolSearch found no Monitor); your account's gates may differ.
+    - Attach by hand, with a background job made for the purpose (the pre-run's recipe, tested twice):
+      1. In a terminal, in a project MAWS already lists (a scratch one is best), run
+           claude --bg --model sonnet 'Reply with exactly the words BG READY, then stop.'
+         It prints `backgrounded · <id>` (an eight-character id) and the attach, logs and agents commands; `claude agents`
+         lists it too. Note that `claude --bg` hands the job to the installed daemon (~/.local/bin/claude), so the job
+         runs on your installed 2.1.285, not MAWS's pinned 2.1.283.
+      2. In MAWS, the session appears in that project with the "Live as background job" glyph. Open some other session
+         first, then right-click the job's row: the menu is exactly Open and "Attach in a terminal tab". Choose Attach:
+         MAWS switches to the job's session and opens a Terminal tab in the right panel attached to it.
+      3. Clean up: close the Terminal tab, then in a terminal run `claude stop <id>` (it prints `stopped <id>`); the
+         daemon exits by itself a few seconds later. `claude rm <id>` also deletes the job (it removes a worktree only if the job made one; the pre-run's did not).
     - The disabled half of This branch on a session on master (Review › This branch reads "Session runs on <branch>, the
       main worktree's branch").
     Record each.
