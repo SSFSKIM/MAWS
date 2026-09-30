@@ -1,0 +1,153 @@
+C12 §10 pre-run, re-run on master
+=================================
+
+Child C12 of docs/charter.md. This is the agents' §10 pre-run (prerun.txt beside this file) run again on the final tree:
+master at ea42f326, after the C3 handshake corrective (a2b88bde) and debt waves 5 (2b12f5f5 → e6814b0a) and 6
+(abaca99f). The purpose is to confirm, before the owner's sitting, that every §10 item the agents can run still passes,
+and to name every difference from the recorded pre-run. It is a report only: nothing in the product or in the spec was
+changed. Run on 2026-09-30 between 09:34 and 09:49 local time, in an isolated worktree off ea42f326. Plain text, like
+prerun.txt.
+
+What ran, and how
+-----------------
+- Target: the owner build, dist/mac-arm64/MAWS.app, from `pnpm build:app` with MAWS_SIGN_IDENTITY unset. `codesign -dv`
+  reports Identifier=Electron, Signature=adhoc, flags=0x20002(adhoc,linker-signed), Info.plist=not bound. Every test ran
+  through `pnpm e2e:packaged e2e/c12-prerun.spec.ts -g <test>`, and the record says "packaged": true.
+- Spec: e2e/c12-prerun.spec.ts and e2e/support/c12-prerun.ts as on master. Neither has changed since the C12 landing.
+  Each test ran as its own piece, in the spec's order: §10.1 real store (cold, then warm), then §10.1 to §10.10, then C8
+  item 9. MAWS_C12_PRERUN_MAX_USD was set to 7, below the US$8 cap.
+- Engine: the pinned 2.1.283, called by its absolute path, through ClaudeUsage's relay. http://127.0.0.1:8641/api/hello
+  answered 200 before every piece. The relay was never stopped or restarted.
+- Scratch root: /private/tmp/maws-c12-prerun-1790785989, holding config/ (CLAUDE_CONFIG_DIR, settings.json `{}`),
+  userData/, userData-real/ (the real-store case only), repos/ and logs/. The monitor re-run used a second fresh root,
+  /private/tmp/maws-c12-prerun-1790786875 (see §10.4). Both roots are kept until this commit, then removed.
+- Load rule: before each piece a gate waited for a one-minute load under 20, for up to 20 minutes, and would then have
+  accepted a load under 40. No piece had to wait: every piece started at a one-minute load between 5.71 and 8.42. The
+  load read right before each piece is recorded in prerun-master-run.json "pieces".
+- Owner-file check, before and after each of the 16 pieces, both recorded:
+  (a) The spec's own check. The standing rules' python one-liner looks for scratch keys in ~/.claude.json `projects`,
+      under the root as /private/tmp/... and as /tmp/.... It read `[]` before and after every piece, in both roots.
+  (b) An added check over ~/.claude, read only, run outside the repository. It lists every file modified during the
+      piece and flags three things: a path named for the scratch root, a non-transcript file that mentions the scratch
+      stamp, or a transcript whose `cwd` is under the scratch root. It flagged nothing in any piece. The only files
+      modified were at most 4 per piece. Each was the running agent's own session record or the owner's other
+      sessions, and no new transcript appeared. The session driving this run is excluded by path, because its own
+      tool calls name the scratch. The C8 case's `claude --bg` daemon logged to the scratch config
+      (config/daemon.log, "daemon start version=2.1.285 ... origin=transient"), not to ~/.claude.
+  (c) The pin. `ls -l ~/.local/share/claude/versions/2.1.283` read `-rwxr-xr-x@ 1 new staff 225036032 9월 25 15:10`
+      before and after every piece.
+- Models: as in the C12 pre-run (Sonnet sessions, Haiku subagents).
+- Evidence: prerun-master-run.json holds the spec's records ("run", "monitorRerun", "realstore.coldStart",
+  "realstore.warm") and the per-piece gate log ("pieces": loads, relay, pin, both owner-file checks). This run's
+  screenshots were not committed. The spec writes them over the C12 pre-run's files of the same names, so those
+  committed files were restored, and this run's 54 screenshots are kept outside the repository at
+  /tmp/maws-prerun-master-artifacts/screenshots-master/. The real-store screenshots, which show the owner's titles,
+  are under the scratch root's realstore/ only.
+
+Per-item results
+----------------
+| Item | Result | Key observations and timings |
+| §10.1 scratch | pass | north 2 and south 1 rows. The live PTY session is foreign: glyph "Live in terminal", line "Terminal · pid 60899", digest `foreign`, and an Overview card with the holder line. Both `-p` sessions read exited. |
+| §10.1 real store, cold | pass | 276 projects (276 rows), 3,279 sessions, 14 foreign-live digests (13 glyphs in the sidebar), 14 Overview cards, `engine.sessions` [] at the end, 0 console errors. Window 2.4 s, shell 2.6 s, first Overview card 3.5 s, first project row 3.5 s, index settled 6.1 s. |
+| §10.1 real store, warm | pass | The same counts. Window 0.9 s, shell 1.4 s, first card 1.4 s, first project row 1.5 s, settled 2.2 s. |
+| §10.2 | pass | The repository read untrusted, and the trust card showed with no engine running. Setup went worktree, trusting, trusting, launching, ready. Trust then read true (key kind repo), written to the scratch home. initialize.workspaceTrust {accepted: true, directory: repos/deep} was sent. The hook ran 2 times for MAWS's launches and 3 in all with the terminal. The allow rule was listed. MCP (c12-sentinel:connected), the 50 commands, the agents and the plugins were identical to the terminal's `claude -p --setting-sources user,project,local`, on the first pass. |
+| §10.3 | pass | P approved and Q answered ("Red") from their Overview cards. The blur took before R asked. R's notification was `fallback`, as were P's and Q's. `attention.next` opened R with its approval card. |
+| §10.4 | pass, with one piece passing only when re-run alone (see Differences) | Session info: "+" lists it, and the model row opens it. Relay: SendMessage at 2.7 s after Send, `delivered` at 6.7 s (the line cleared while the child still ran), the child's inbox at 11.0 s, a queued_command attachment (origin coordinator), and the follow went backfilling → following. Review: Uncommitted "1 file changed · +0 −0"; This branch "1 file changed · +1 −0", footer "worktree-deep-v1ms · Since main". The Terminal pty and `pwd` both read the worktree. The viewer tab opened one.txt. The workflow showed "Two echo agents in one phase", phase "Echo 2/2", alpha and beta on Haiku. Monitor: unavailable (ToolSearch "Monitor" found none; the session replied MONITOR UNAVAILABLE), the same as the C12 review re-run. |
+| §10.5 | pass | Archived from the row, with no cleanup dialog. `claude --resume` (the pin, in a PTY) answered "I created `c12-deep.txt` in the worktree root, and it holds the single line `DEEP`." The north `-p` session's Resume in MAWS was ready in 2.0 s, its spawn carries --resume, and it replied "RESUMED IN MAWS". |
+| §10.6 | pass | Trees 257.7, 261.0 and 263.8 MiB (sum 782) against a budget of 653 MiB. X1 was released 0.38 s after the budget was set. The other two stayed ready, with no attention item. Send-to-ready 0.90 s, 1 user frame, reconnect process_exit, reply "X1 BACK". The quit report read "5 ms · 1 mid-turn, 1 background work, 1 busy terminal". On cancel the app stayed. On when_idle the banner read "MAWS will quit when 3 things finish" (Quit now, Cancel), and the app quit by itself 42.7 s later. |
+| §10.7 | pass | 10,044 disk records (500 turns, seed 7). The expansions at 50% and 40% drifted 0 px, the baseline 0 px. Streaming: 118 samples, a 0 px offset change while the content grew 1,643 px below. The owner's longest three transcripts are the same three paths as before, out of 3,823 counted. |
+| §10.8 | pass | All twelve widgets opened with a "Read with …" footer and no error. Every read was on the wire (list_models, list_permission_rules, get_usage, get_context_usage, get_settings, mcp_status, get_sandbox_dialog, get_hooks_listing, get_memory_dialog, get_skills_dialog; plugins from system/init). `!ls` listed one.txt. `#` wrote "- C12 pre-run memory note" to CLAUDE.md. Phase: engine running → idle, digest working → idle, frames running, idle, running, idle. |
+| §10.9 | pass | Queue: sent once. Steer: priority next. Stop and Resume: the label read Stop, then Resume; the message went out 0 times before Resume and once after. The queue survived a quit: 1 queued, paused, reason interrupt. The collapsed divider read "1 denied". The ⌘. interrupt retired the pending approval with nothing lost. A SIGKILL crash with an approval pending raised "Session interrupted, 1 approval lost" and "Session process exited (crash) · 1 approval lost". |
+| §10.10 | pass | The first paint was light, with the light setting on a fresh profile. theme.dark switched the page (body / sidebar rgb(19,19,19) / rgb(26,26,26)), and theme.light switched back to rgb(250,249,246) / rgb(255,255,255). |
+| C8 item 9 | pass | `claude --bg` job c40b2eee. Its row offered Open and "Attach in a terminal tab". Attach selected the job's session tab and the Terminal tab, and its pty was alive. The test's finally ran "stopped c40b2eee". |
+| Console errors | none | [] for every window of every test. |
+
+Engine launches: 16 in all, 14 in the main root and 2 in the monitor root. Each gave its first engine output 0.29 to
+0.42 s after spawn. No journal holds a `no_output` or a retry.
+
+Differences from the C12 pre-run
+--------------------------------
+1. §10.1 real store, cold start. Improvement, from waves 5 and 6.
+   - Before: shell 16.3 s, first Overview card 57.9 s, first project row 58.4 s, settled 59.2 s.
+   - Now: shell 2.6 s, first card 3.5 s, first project row 3.5 s, settled 6.1 s, over a slightly larger store.
+   - Cause: this is wave 5B's progressive paint (record events batched per 16 ms) together with wave 6's single cold
+     scan.
+   - Consequence: the owner's first open at the sitting should now take seconds, not about a minute. prerun.txt's note
+     at §10.1 and the owner's script step 1 still describe the minute.
+2. §10.1 real store, warm start. Small improvement, partly noise.
+   - Before: shell 2.1 s, first card 2.4 s, settled 3.8 s.
+   - Now: shell 1.4 s, first card 1.4 s, settled 2.2 s.
+   - Direction is consistent with the batching; the size is within what the load (about 6 now, about 9 to 17 before)
+     can explain.
+3. Real-store counts. Noise.
+   - Before: 275 projects, 3,274 sessions, 13 foreign-live.
+   - Now: 276 projects, 3,279 sessions, 14 foreign-live.
+   - The owner's store kept growing, and live terminals come and go.
+4. §10.4 monitor piece: failed in the full pass, passed alone. Not a product regression; a defect in the spec.
+   - What failed: in the full §10.4 pass the monitor piece timed out, because the Message textbox was not in the main
+     region.
+   - Why: the viewer piece just before it leaves the one.txt viewer tab active in the main strip. The workflow piece
+     sends through `session.send`, so it does not need the composer. The monitor piece types into the composer, so it
+     does.
+   - The product has not changed here: the C12 pre-run's own viewer screenshot also shows one.txt as the active main
+     tab.
+   - Why it never failed before: the monitor piece was added at the M6 review, and until now it had only run alone
+     (MAWS_C12_PRERUN_PIECES). This is the first time the monitor piece ran after the viewer piece in one pass.
+   - Re-runs:
+     - Alone in the main root, it failed at the row's Resume. §10.5 had already archived the deep session, so it had
+       no row, which is a precondition of the spec.
+     - In a fresh root, §10.2 and then §10.4 with MAWS_C12_PRERUN_PIECES=monitor passed. The result was the same as
+       the C12 review re-run: Monitor unavailable.
+   - Captures: /tmp/maws-prerun-master-artifacts/pw-10.4/ (full pass) and pw-10.4-monitor/ (the failed solo re-run),
+     each with Playwright's error-context.md. The screenshot of the state is
+     /tmp/maws-prerun-master-artifacts/screenshots-master/prerun-10.4-viewer-light.png.
+   - Fix for the spec (not applied): the monitor piece should reopen the deep session's tab first, or send through
+     `session.send` as the workflow piece does.
+5. The resume stall is not reproduced. Not evidence of a fix.
+   - Before: the C12 pre-run saw the deep session's resume sit at `initialize` for 120 s twice in five launches.
+   - Now: none of the 16 launches stalled; the first output always came within 0.42 s. The C3 corrective's 30 s bound
+     and its relaunch never fired.
+   - The cause is still unexplained (the §19 entry). This run's load was 6 to 8, far from the load above 60 at which
+     the stalls happened, so the stall's absence says nothing either way.
+6. Relay timings in §10.4. Noise.
+   - Before: SendMessage at 4.2 s, delivered at 6.1 s, inbox at 10.5 s. The review re-run had delivered at 4.7 s and
+     the inbox at 8.9 s.
+   - Now: SendMessage at 2.7 s, delivered at 6.7 s, inbox at 11.0 s.
+   - These follow the child's 3 s sleep rounds. The child's title also differs ("Deep ready reply" against "DEEP READY
+     reply"), because the model wrote it.
+7. §10.6 timings. Noise. Now, then before (before first, the review re-run second):
+   - Release after the setting: 0.38 s now, 0.39 s and 0.37 s before.
+   - Send-to-ready: 0.90 s now, 0.92 s and 0.91 s before.
+   - Quit when idle: 42.7 s now, 41.9 s before. This time is set by the 45 s background sleep. Wave 5's bounded
+     wait for the host's shutdown (5 s, then SIGKILL) did not visibly lengthen it.
+   - Trees: 258 to 264 MiB now, 259 to 261 MiB before.
+8. §10.5, MAWS resume. Noise: ready in 2.0 s now, 1.96 s before.
+9. §10.7 streaming. Noise: the answer's length differs.
+   - Before: 95 samples, the content grew 1,346 px.
+   - Now: 118 samples, the content grew 1,643 px.
+   - The offset moved 0 px both times.
+   - The owner's transcript count is 3,823 now, 3,817 before. The same top three; the second grew from 24,079 to
+     24,364 records.
+10. §10.2 passed on its first pass. Same as the review re-run, which already had the fix.
+    - Before: the C12 pre-run's first comparison differed, because of its terminal environment.
+    - The terminal's login-shell capture now also names CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING, which the
+      owner's shell exports and the earlier capture did not list. It changed nothing that §10.2 compares.
+11. Test durations cannot be compared. The C12 record's durations are partly those of piece re-runs; for example,
+    §10.4's 7.5 s there was a re-run of some pieces.
+Every other observation matches the C12 pre-run and its review re-run exactly: the sets, labels, counts, texts, colours
+and verdicts.
+
+Observation for the sitting (no earlier record to compare)
+----------------------------------------------------------
+On the real store, many session rows and Overview cards show `<to-human>` as their last-assistant line. The owner's
+own assistant messages open with that tag, and the digest line shows it raw. It may have looked the same at the C12
+pre-run, whose real-store screenshot was not kept, so this is not listed as a difference.
+
+Spend
+-----
+US$2.71 of the US$8 cap:
+- Main root: US$2.44. That is US$1.81 from the journals' result.total_cost_usd and US$0.63 from terminal runs (the
+  `-p` runs' reported cost, US$0.42, and estimates from transcript token usage for the PTY resume, US$0.14, and the
+  `--bg` job, US$0.07).
+- Monitor root: US$0.27 (journals US$0.17, terminal `-p` US$0.10).
+Per-run figures are in prerun-master-run.json "run.spend", "run.terminalUsd" and "monitorRerun.spend".
