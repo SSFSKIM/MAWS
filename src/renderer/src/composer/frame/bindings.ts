@@ -5,7 +5,8 @@
 // reason while the first send is starting or C10 holds the message. A live session binds to C3: model and effort
 // through `session.setModel` and `session.setEffort`, the mode through the shared mode menu's binding (M5), additional
 // directories through `session.applyFlagSettings` (`/add-dir` is gated to remote entrypoints headless, SPEC 28 §22);
-// location and branch are read-only under a live engine in P0 (switching is C10's worktree concern).
+// location and branch are read-only under a live engine: where a session runs is fixed once it starts (§19, the C8
+// recomposition entry).
 import type { Effort } from '@shared/engine/launch-spec';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { SessionRecord } from '@shared/graph/session';
@@ -36,7 +37,8 @@ export interface FrameBindings {
   directories: ChipBinding<string[]>; // AddDirChip
 }
 
-export const ARRIVES_WITH_C10 = 'Arrives with C10';
+export const LOCATION_FIXED = 'The location is fixed once the session starts';
+export const BRANCH_FIXED = 'The branch is fixed once the session starts';
 export const NEW_WORKTREE_BRANCH = 'Choose New worktree to pick a branch';
 
 const refused = (error: string) => async (): Promise<HookResult> => ({ ok: false, error });
@@ -111,8 +113,8 @@ export function liveBindings(status: EngineSessionStatus | null, record: Session
   const directories = [...(reads.directories ?? record?.additionalDirectories ?? [])];
   const location: Location = { kind: 'directory', path: status?.cwd ?? record?.directory ?? '' };
   return {
-    location: { value: location, options: [location], disabled: ARRIVES_WITH_C10, set: refused(ARRIVES_WITH_C10) },
-    branch: { value: reads.branch ?? record?.worktree?.branch ?? record?.branch ?? null, options: [...(reads.branches ?? [])], disabled: ARRIVES_WITH_C10, set: refused(ARRIVES_WITH_C10) },
+    location: { value: location, options: [location], disabled: LOCATION_FIXED, set: refused(LOCATION_FIXED) },
+    branch: { value: reads.branch ?? record?.worktree?.branch ?? record?.branch ?? null, options: [...(reads.branches ?? [])], disabled: BRANCH_FIXED, set: refused(BRANCH_FIXED) },
     model: {
       value: current,
       options: [...(reads.models ?? [])],

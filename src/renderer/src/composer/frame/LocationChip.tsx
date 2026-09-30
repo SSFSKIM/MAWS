@@ -1,8 +1,8 @@
 // The chip row's location (C7 execution document, "Composer frame" Location): the directory or worktree, home-
 // abbreviated, with its branch and a dirty marker. Its popover offers the project directory, a new worktree with a
 // name, an existing worktree, and the branch picker (a search over the branches with a create action), and lists the
-// additional directories with copy. Under a live engine every choice is read-only ("Arrives with C10"); under an
-// unstarted session's intent every choice writes through the binding.
+// additional directories with copy. Under a live engine every choice is read-only (the location is fixed once the
+// session starts); under an unstarted session's intent every choice writes through the binding.
 import { Popover } from 'radix-ui';
 import { useState } from 'react';
 import { formatCwd } from '../../session/StatusLine';

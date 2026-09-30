@@ -3,7 +3,7 @@ import type { MawsBridge } from '@shared/ipc/schema';
 import { record, status } from '../../../../../test/support/builders';
 import type { SetupIntentHook } from '../setup-intent';
 import { MESSAGE_HELD, STARTING } from '../submit/submit-state';
-import { ARRIVES_WITH_C10, intentBindings, liveBindings, workspaceDirectoriesOf } from './bindings';
+import { BRANCH_FIXED, intentBindings, liveBindings, LOCATION_FIXED, workspaceDirectoriesOf } from './bindings';
 
 const APP = 'app-1';
 
@@ -66,9 +66,10 @@ describe('the frame binds its chips to the setup intent or to the live session',
     const s = { ...status(APP), cwd: '/work/app-1', model: { requested: 'sonnet', resolved: 'claude-sonnet' }, effort: 'medium' as const };
     const refresh = vi.fn();
     const b = liveBindings(s, record(APP), { models: null, directories: ['/a'], branch: 'main', branches: ['main'], refresh }, client);
-    expect(b.location).toMatchObject({ value: { kind: 'directory', path: '/work/app-1' }, disabled: ARRIVES_WITH_C10 });
-    expect(b.branch).toMatchObject({ value: 'main', disabled: ARRIVES_WITH_C10 });
-    expect(await b.location.set({ kind: 'directory', path: '/x' })).toEqual({ ok: false, error: ARRIVES_WITH_C10 });
+    expect(b.location).toMatchObject({ value: { kind: 'directory', path: '/work/app-1' }, disabled: 'The location is fixed once the session starts' });
+    expect(b.branch).toMatchObject({ value: 'main', disabled: BRANCH_FIXED });
+    expect(await b.location.set({ kind: 'directory', path: '/x' })).toEqual({ ok: false, error: LOCATION_FIXED });
+    expect(await b.branch.set('feature')).toEqual({ ok: false, error: BRANCH_FIXED });
     expect(b.model.value).toEqual({ model: 'claude-sonnet', effort: 'medium' });
     await b.model.set({ model: 'haiku', effort: 'medium' });
     await b.model.set({ model: 'claude-sonnet', effort: 'high' });
