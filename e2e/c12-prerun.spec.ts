@@ -27,6 +27,7 @@ import { ENGINE_BIN as ENGINE_BIN_PATH } from '../src/engine-host/launch';
 import { synthesise } from '../test/support/synth-transcript';
 import { invoke, value } from './support/c7-replay';
 import { collectConsoleErrors, launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
+import { taskEnded, type TaskEventLike } from './support/c12-task-end';
 import {
   captureLoginShell, EVIDENCE, journalSpend, lsPin, ownerFileCheck, prerunScratch, prerunSkipReason, printRun, ptyEngine, recorder, scratchRepo, shoot, stateOf,
   terminalEnv, transcriptFile, transcriptUsdEstimate, trustInScratch, git,
@@ -816,9 +817,11 @@ test('§10.4 one deep session: a relay to a running background child, Review wit
       const line = await row.locator('[data-part="line"]').innerText();
       const shots = await shoot(page, '10.4-monitor');
       await row.getByRole('button', { name: 'Stop' }).click();
-      await log.until('the monitor’s end', (ev) => ev.find((e) => (e.kind === 'task.notification' || e.kind === 'task.updated') && e.taskId === taskId && e.seq !== null && e.seq > outcome.monitor!.seq!), 60_000);
+      // the end is a notification or a terminal status, never any other update (support/c12-task-end.ts)
+      const ended = await log.until('the monitor’s end', (ev) => ev.find((e) => taskEnded(e as TaskEventLike, taskId, outcome.monitor!.seq!)), 60_000);
       await log.idle(180_000);
-      out.monitor = { prompt: MONITOR_PROMPT, available: true, taskId, taskType: outcome.monitor.taskType, line, stopped: true, screenshots: shots };
+      await expect(row.getByRole('button'), 'the stopped row: no Stop (or stopping…) button, which shows only while it runs').toHaveCount(0, { timeout: 15_000 });
+      out.monitor = { prompt: MONITOR_PROMPT, available: true, taskId, taskType: outcome.monitor.taskType, line, endedBy: ended.kind, lineAfterStop: await row.locator('[data-part="line"]').innerText(), screenshots: shots };
     });
     out.strayPermissionsAllowed = log.stray;
     out.consoleErrors = maws.consoleErrors();
