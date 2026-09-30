@@ -36,6 +36,7 @@ import { ControlClient, ControlError } from './rpc';
 import { ClearAndImplementSequence } from './session-clear';
 import { LADDER_MS, TerminationLadder, type ExitReason, type ExitSummary, type StopResult } from './session-ladder';
 import { SessionStatusTracker, type Catalog } from './session-status';
+import { SESSION_START_HOOK_MS, sessionStartHookMs } from './session-start-hooks';
 import { MemorySessionStateStore } from './store/memory-session-state-store';
 import type { EngineTransport, TransportItem, TransportProblem } from './transport';
 
@@ -50,10 +51,10 @@ export const EOF_WRITE_WAIT_MS = 3_000;
 // An engine that has written anything keeps the long class's initialize deadline, since SessionStart hooks, which the
 // engine runs before it reads `initialize`, may legitimately take minutes and announce themselves with `hook_started`.
 export const FIRST_OUTPUT_MS = 30_000;
-// Debt wave 5: 2.1.283 runs SessionStart hooks before it reads `initialize` and bounds each by 600 s unless the hook
-// says otherwise (`La`), so each hook frame it streams first restarts `initialize`'s deadline: the long class from the
-// frame, plus this bound while a hook it reported started has not reported back.
-export const SESSION_START_HOOK_MS = 600_000;
+// Debt wave 5: 2.1.283 runs SessionStart hooks before it reads `initialize`, so each hook frame it streams first restarts
+// `initialize`'s deadline: the long class from the frame, plus the hooks' bound while a hook it reported started has not
+// reported back (debt wave 6: the largest SessionStart `timeout` the launch's settings configure, at least 600 s).
+export { SESSION_START_HOOK_MS } from './session-start-hooks';
 const STDERR_TAIL_LINES = 20;
 
 // What the session journals through: JournalWriter satisfies it; tests use an in-memory journal.
@@ -81,6 +82,7 @@ export interface EngineSessionOptions {
   statefulMcpServers?: () => ReadonlySet<string>;
   reconnectTrigger?: 'user' | 'process_exit';
   // C12 end
+  sessionStartHookMs?: (plan: LaunchPlan) => Promise<number>; // debt wave 6: the hooks' bound; read from the settings by default
 }
 
 // C12: the budget and the sum a release was made at (X6 `exit.release`, X1 `process.exited.budget`)
@@ -141,6 +143,7 @@ export class EngineSession {
   // debt wave 5: the initialize request once written, and the SessionStart hooks reported started and not yet back
   private initializeId: RequestId | null = null;
   private hooksBeforeAnswer: Set<string> | null = null; // null until the first hook frame
+  private hookBoundMs = SESSION_START_HOOK_MS; // debt wave 6: the launch's configured bound once read
   private initFailed = false;
   private journalClosed = false;
   private lastEventSeq = 0;
@@ -458,6 +461,13 @@ export class EngineSession {
     if (this.reconnect) this.record('meta', { event: 'reconnect', phase: 'attempting', ...this.attempt, trigger: this.reconnectTrigger, reason: this.spec.retry?.reason ?? null });
     if (this.spec.retry) this.notice('launch:retry', `${this.spec.retry.reason} Trying once more (attempt ${this.spec.retry.attempt} of ${this.spec.retry.maxAttempts}).`); // C3 corrective
     this.record('meta', spawnMeta(this.plan, { appVersion: this.opts.appVersion ?? 'unknown' }));
+    void (this.opts.sessionStartHookMs ?? sessionStartHookMs)(this.plan).then(
+      (ms) => {
+        this.hookBoundMs = ms;
+        if (this.hooksBeforeAnswer !== null && this.hooksBeforeAnswer.size > 0) this.extendInitialize(); // read after a hook started
+      },
+      (error: unknown) => this.log(`could not read the SessionStart hooks' timeouts: ${messageOf(error)}`),
+    );
     if (this.opts.relayHealth) this.record('meta', { event: 'relay_health', ...this.opts.relayHealth });
     let transport: EngineTransport;
     try {
@@ -828,7 +838,7 @@ export class EngineSession {
 
   private extendInitialize(): void {
     if (this.hooksBeforeAnswer === null || this.initializeId === null) return;
-    const running = this.hooksBeforeAnswer.size > 0 ? SESSION_START_HOOK_MS : 0;
+    const running = this.hooksBeforeAnswer.size > 0 ? this.hookBoundMs : 0;
     this.client?.extendDeadline(this.initializeId, running + REQUEST_TIMEOUT_MS.long, 'the last SessionStart hook frame');
   }
 
