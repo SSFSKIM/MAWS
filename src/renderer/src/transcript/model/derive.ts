@@ -51,7 +51,15 @@ function flatten(state: TranscriptState, before: Map<RowId, Row>, times: Map<Row
     if (placement === undefined) continue; // unplaced: nothing to render
     looseAfter.set(placement, [...(looseAfter.get(placement) ?? []), event]);
   }
-  const emit = (rows: Row[], subject: 'human' | 'engine' | 'peer' | 'loose', separator: RowId) => {
+  // Row ids are unique in the flat list (the virtualiser keys by them). One session's history can reach the model in
+  // both event forms (C4's disk follower and C3's live stream carry the same blocks under different event ids), and then
+  // a block derives its row, with one id, under both copies of its turn: the first shown wins, and a turn whose rows
+  // were all copies shows nothing, not even its divider (debt wave 4, the C8b live run's repeated rows).
+  const shown = new Set<RowId>();
+  const emit = (all: Row[], subject: 'human' | 'engine' | 'peer' | 'loose', separator: RowId) => {
+    const rows = all.some((row) => shown.has(row.id)) ? all.filter((row) => !shown.has(row.id)) : all;
+    if (rows !== all && rows.every((row) => row.kind === 'divider')) return;
+    for (const row of rows) shown.add(row.id);
     if (rows.length === 0) return;
     if (needsSeparator(previousAt, rows[0].at, subject)) {
       const label = separatorLabel(rows[0].at);
