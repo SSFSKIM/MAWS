@@ -117,11 +117,12 @@ async function readRepository(directory: string): Promise<RepositoryFacts> {
   return { directory, repoRoot, worktrees: listed.ok ? listed.value.worktrees : [], branches: names, trustError: null };
 }
 
-// The catalogue at every mount: the host answers from its cache in memory, which a launch or a refresh updates (the
-// relay's `claude/*` aliases arrive with the first routed launch), so each new tab sees what the host knows now. A
-// failed read shows the built-in list the host itself answers before any launch.
-async function readCatalogue(): Promise<ModelCatalogue> {
-  const result = await ipc.invoke('engine.models', { refresh: false });
+// The catalogue at every mount and on every route change: the host answers the tab's route's catalogue from its cache
+// in memory, which a launch or a refresh updates (the relay's `claude/*` aliases arrive with the first routed launch),
+// so each new tab sees what the host knows now for the route it would launch on, not the most recently updated route's.
+// A failed read shows the built-in list the host itself answers before any launch.
+async function readCatalogue(gateway: SetupIntent['gateway']): Promise<ModelCatalogue> {
+  const result = await ipc.invoke('engine.models', { refresh: false, gateway });
   if (result.ok) return result.value;
   console.warn('[sessions] engine.models unavailable', result.error);
   return BUILTIN_FALLBACK;
@@ -138,15 +139,15 @@ function useSetupOptions(
   const [worktreeName] = useState(() => defaultWorktreeName());
 
   // Only an unstarted session reads it: C7 calls this hook from every composer, and a started session's has no intent.
-  const unstarted = intent !== null;
+  const route = intent?.gateway ?? null;
   useEffect(() => {
-    if (!unstarted) return;
+    if (route === null) return;
     let live = true;
-    void readCatalogue().then((c) => live && setCatalogue(c));
+    void readCatalogue(route).then((c) => live && setCatalogue(c));
     return () => {
       live = false;
     };
-  }, [unstarted]);
+  }, [route]);
 
   // The repository is read again only when the base directory moves to another repository or out of one; a move
   // between two locations of one repository keeps what was read.
