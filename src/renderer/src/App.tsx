@@ -55,6 +55,7 @@ import { connectMonoFont, registerSettingsTab } from './settings-tab';
 // C12 start
 import { BudgetSheets } from './budget/BudgetSheets';
 import { connectBudget } from './budget/store';
+import { connectQuitWait } from './lifecycle/quit-wait';
 // C12 end
 
 // C10 start: C7's composer binds an unstarted session's chips and Send through C10's hook; registered at module load,
@@ -143,6 +144,7 @@ export function App() {
   // C11 end
   // C12 start: the engine host's memory budget (Session info's line, Settings' default) and its app-wide banner
   useEffect(() => connectBudget(), []);
+  useEffect(() => connectQuitWait(), []); // M4: Quit when idle's banner while main holds the quit
   // C12 end
 
   // index.html ships data-theme="light" for the first paint; from then on main's resolved theme decides.

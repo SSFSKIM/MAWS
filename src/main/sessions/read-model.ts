@@ -100,6 +100,12 @@ export class SessionReadModel {
     return this.statuses.get(appSessionId) ?? null;
   }
 
+  // C12 start: every engine status held (the quit question's background work reads them)
+  engineStatuses(): EngineSessionStatus[] {
+    return [...this.statuses.values()];
+  }
+  // C12 end
+
   // Sessions whose process C3's host owns and that hold a turn, or are still launching (a first message on its way).
   // The engine status is the process table's truth; the digest is folded from events a stale batch can skew.
   midTurnCount(): number {

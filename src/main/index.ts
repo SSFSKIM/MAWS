@@ -302,9 +302,26 @@ app.whenReady().then(() => {
 
   // ---- C5: notifications, dock badge and the quit guard ----
   startAttention(sessions.model, { settings: () => settings.state().settings, openWindow });
-  installQuitGuard(sessions.model, {
-    ask: (count) =>
-      askToQuit(count, {
+  // C12: the busy report asks C9's pty host (read only: pty.list and pty.foreground) and publishes Quit when idle's wait
+  const quitGuard = installQuitGuard(sessions.model, {
+    // C12 start
+    pty: {
+      list: async () => {
+        const result = await hosts.dispatch('pty-host', 'pty.list', undefined);
+        if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`);
+        return (result.value as { ptys: { ptyId: string; alive: boolean }[] }).ptys;
+      },
+      foreground: async (ptyId) => {
+        const result = await hosts.dispatch('pty-host', 'pty.foreground', { ptyId });
+        if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`);
+        return result.value as { busy: boolean };
+      },
+    },
+    publish: (waiting) => void emit('layout.quitWait', { waiting }),
+    log: process.env.MAWS_E2E === '1' ? (line) => console.error(line) : undefined,
+    // C12 end
+    ask: (report) =>
+      askToQuit(report, {
         env: process.env,
         show: (options) => {
           const win = BrowserWindow.getFocusedWindow();
@@ -320,6 +337,10 @@ app.whenReady().then(() => {
       }
     },
   });
+  // C12 start: the banner's reads and answers
+  registerMainHandler('layout.quitWait', () => ({ waiting: quitGuard.waiting() }));
+  registerMainHandler('layout.quitWaitAnswer', ({ action }) => (action === 'quitNow' ? quitGuard.quitNow() : quitGuard.cancelWait()));
+  // C12 end
   // ---- end C5 ----
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) openWindow();

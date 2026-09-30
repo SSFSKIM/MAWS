@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { commands, LAYOUT_DEFAULTS, LayoutKeySchema, LayoutMainSchema, LayoutRegionsSchema, PanelPinnedSchema, TabRefSchema, tabId, UsageBannersSchema } from './layout'; // C7: UsageBannersSchema
+import { commands, LAYOUT_DEFAULTS, LayoutKeySchema, LayoutMainSchema, LayoutRegionsSchema, PanelPinnedSchema, TabRefSchema, tabId, UsageBannersSchema, QuitWaitSchema } from './layout'; // C7: UsageBannersSchema; C12: QuitWaitSchema
 
 describe('layout value shapes', () => {
   it('validates its own defaults', () => {
@@ -49,8 +49,21 @@ describe('layout value shapes', () => {
       'layout.pickFiles': 'main', // C7
       'layout.saveTextFile': 'main', // C11
       'layout.captureChords': 'main', // C11 (M5 fix wave: the chord capture sets the menu aside)
+      'layout.quitWait': 'main', // C12: Quit when idle's wait
+      'layout.quitWaitAnswer': 'main', // C12: its banner's Quit now and Cancel
     });
   });
+
+  // C12 start: Quit when idle (C12 execution document, Interfaces "The quit question")
+  it('carries the busy report main waits on, or null, and the banner’s two answers', () => {
+    const report = { midTurn: 1, backgroundWork: 0, busyTerminals: 2 };
+    expect(QuitWaitSchema.safeParse({ waiting: report }).success).toBe(true);
+    expect(QuitWaitSchema.safeParse({ waiting: null }).success).toBe(true);
+    expect(QuitWaitSchema.safeParse({ waiting: { ...report, busyTerminals: -1 } }).success).toBe(false);
+    expect(commands['layout.quitWaitAnswer'].input.safeParse({ action: 'quitNow' }).success).toBe(true);
+    expect(commands['layout.quitWaitAnswer'].input.safeParse({ action: 'restart' }).success).toBe(false);
+  });
+  // C12 end
 
   // C7 start: the dismissed near-limit banner keys (C7 execution document, Status line popovers and usage)
   it('holds usage.banners to fifty string keys', () => {

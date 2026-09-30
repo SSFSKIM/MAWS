@@ -4,8 +4,10 @@
 export const commands = [
   'layout.get', 'layout.set', 'layout.list', 'layout.openExternal', 'layout.setEnabledActions', 'layout.pickFiles',
   'layout.saveTextFile', 'layout.captureChords',
+  'layout.quitWait', 'layout.quitWaitAnswer', // C12
 ] as const;
 
 export const events = [
   'layout.action',
+  'layout.quitWait', // C12
 ] as const;

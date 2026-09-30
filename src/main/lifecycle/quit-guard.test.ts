@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
+import type { EngineSessionStatus } from '@shared/engine/status';
 import { humanTurn, record, status } from '../../../test/support/builders';
 
 // Electron's `app` as the guard sees it: `before-quit` listeners, and `quit()` firing `before-quit` again, as it does.
@@ -30,84 +31,194 @@ const electron = vi.hoisted(() => {
 vi.mock('electron', () => ({ app: electron.app }));
 
 const { SessionReadModel } = await import('../sessions/read-model');
-const { askToQuit, installQuitGuard, quitDecision, quitQuestion } = await import('./quit-guard');
+const { askToQuit, busyReport, installQuitGuard, quitQuestion } = await import('./quit-guard');
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+const NONE = { midTurn: 0, backgroundWork: 0, busyTerminals: 0 };
+const TASK = { taskId: 'b1' as never, taskType: 'local_bash', description: 'sleep 900', ambient: false };
 
-function modelWithMidTurn(count: number) {
+// A read model holding the given engine statuses (C4's index source in the product; `apply` changes one later).
+function modelWith(statuses: EngineSessionStatus[]) {
   const model = new SessionReadModel('index');
+  let writer!: Parameters<Parameters<typeof model.register>[0]['start']>[0];
   model.register({
     start(w) {
-      for (let i = 0; i < count; i += 1) {
-        const id = `s${i}` as AppSessionId;
-        w.observeRecord(record(id));
-        w.applyEngineStatus(status(id, { process: 'ready', engineState: 'running', turn: humanTurn }));
+      writer = w;
+      for (const s of statuses) {
+        w.observeRecord(record(s.appSessionId));
+        w.applyEngineStatus(s);
       }
       return () => {};
     },
   });
-  return model;
+  return Object.assign(model, { apply: (s: EngineSessionStatus) => writer.applyEngineStatus(s) });
 }
+const midTurn = (n: number) => Array.from({ length: n }, (_, i) => status(`s${i}` as AppSessionId, { process: 'ready', engineState: 'running', turn: humanTurn }));
+const noTerminals = { list: async () => [], foreground: async () => ({ busy: false }) };
 
 beforeEach(() => electron.app.reset());
 
-describe('quit decision', () => {
-  it('quits at once when nothing is mid-turn, and otherwise follows the answer', () => {
-    expect(quitDecision(0, 'cancel')).toBe('quit');
-    expect(quitDecision(2, 'cancel')).toBe('cancel');
-    expect(quitDecision(2, 'quit')).toBe('quit');
+// C12 start: the busy report (C12 execution document, Interfaces "The quit question"; charter §3 P0 quit line, D8)
+describe('the busy report', () => {
+  it('counts sessions mid-turn or launching, sessions with background work that are not mid-turn, once each, and never ambient tasks', async () => {
+    const model = modelWith([
+      status('turn', { turn: humanTurn, backgroundTasks: [TASK] }), // mid-turn, counted there only
+      status('launching', { process: 'initializing' }),
+      status('bg', { backgroundTasks: [TASK] }),
+      status('workflow', { backgroundTasks: [{ ...TASK, taskType: 'local_workflow' }] }),
+      status('ambient', { backgroundTasks: [{ ...TASK, ambient: true }] }), // engine housekeeping (M1's rule)
+      status('exited', { process: 'exited', backgroundTasks: [TASK] }),
+      status('idle'),
+    ]);
+    expect(await busyReport(model, noTerminals)).toEqual({ midTurn: 2, backgroundWork: 2, busyTerminals: 0 });
   });
 
-  it('asks nothing when no session is mid-turn', () => {
-    const ask = vi.fn();
-    installQuitGuard(modelWithMidTurn(0), { ask, shutdownEngine: vi.fn() });
-    expect(electron.app.attempt()).toBe(true);
-    expect(ask).not.toHaveBeenCalled();
+  it('asks every live terminal in parallel, and counts one that does not answer as busy', async () => {
+    vi.useFakeTimers();
+    try {
+      const asked: string[] = [];
+      const pty = {
+        list: async () => [{ ptyId: 'a', alive: true }, { ptyId: 'b', alive: true }, { ptyId: 'c', alive: true }, { ptyId: 'dead', alive: false }],
+        foreground: (id: string) => {
+          asked.push(id);
+          if (id === 'a') return Promise.resolve({ busy: true });
+          if (id === 'b') return Promise.resolve({ busy: false });
+          return new Promise<{ busy: boolean }>(() => {}); // c never answers
+        },
+      };
+      const report = busyReport(modelWith([]), pty);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(asked).toEqual(['a', 'b', 'c']); // all at once, the exited one never
+      await vi.advanceTimersByTimeAsync(2_000); // the probe bound
+      expect(await report).toEqual({ midTurn: 0, backgroundWork: 0, busyTerminals: 2 });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
-  it('holds the quit and asks with the mid-turn count; Cancel keeps the app, and the next quit asks again', async () => {
-    const ask = vi.fn(() => Promise.resolve('cancel' as const));
-    const shutdownEngine = vi.fn(() => Promise.resolve());
-    installQuitGuard(modelWithMidTurn(2), { ask, shutdownEngine });
+  it('counts a failed probe busy, and no terminal when the pty host cannot list them', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const failing = { list: async () => [{ ptyId: 'a', alive: true }], foreground: () => Promise.reject(new Error('pty-host is crashed')) };
+    expect(await busyReport(modelWith([]), failing)).toMatchObject({ busyTerminals: 1 });
+    const unlisted = { list: () => Promise.reject(new Error('host_unavailable')), foreground: async () => ({ busy: true }) };
+    expect(await busyReport(modelWith([]), unlisted)).toMatchObject({ busyTerminals: 0 });
+    expect(warn).toHaveBeenCalledWith('[quit-guard] the terminals could not be listed; counting none', expect.any(Error));
+    warn.mockRestore();
+  });
+});
+
+describe('the question', () => {
+  it('names only the non-zero parts, for one and for many', () => {
+    expect(quitQuestion({ midTurn: 2, backgroundWork: 1, busyTerminals: 1 }, 'Quit')).toMatchObject({
+      type: 'warning',
+      message: '2 sessions mid-turn · 1 session running background work · 1 terminal running a command',
+      detail: 'Quitting stops them. Transcripts stay on disk and can be resumed.',
+      buttons: ['Quit', 'Quit when idle', 'Cancel'],
+      defaultId: 2,
+      cancelId: 2,
+    });
+    expect(quitQuestion({ midTurn: 1, backgroundWork: 0, busyTerminals: 3 }, 'Quit').message).toBe('1 session mid-turn · 3 terminals running a command');
+    expect(quitQuestion({ midTurn: 0, backgroundWork: 2, busyTerminals: 0 }, 'Quit').message).toBe('2 sessions running background work');
+  });
+
+  it('is worded for the updater’s restart too (P1; not wired in P0)', () => {
+    expect(quitQuestion({ midTurn: 1, backgroundWork: 0, busyTerminals: 0 }, 'Restart')).toMatchObject({
+      buttons: ['Restart', 'Restart when idle', 'Cancel'],
+      detail: 'Restarting stops them. Transcripts stay on disk and can be resumed.',
+    });
+  });
+
+  it('under MAWS_E2E answers from MAWS_E2E_QUIT_ANSWER (quit by default) and logs the parts instead of showing the dialog', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const show = vi.fn();
+    expect(await askToQuit({ ...NONE, midTurn: 4 }, { env: { MAWS_E2E: '1' }, show })).toBe('quit');
+    expect(await askToQuit({ ...NONE, midTurn: 5 }, { env: { MAWS_E2E: '1', MAWS_E2E_QUIT_ANSWER: 'cancel' }, show })).toBe('cancel');
+    expect(await askToQuit({ midTurn: 0, backgroundWork: 1, busyTerminals: 1 }, { env: { MAWS_E2E: '1', MAWS_E2E_QUIT_ANSWER: 'when_idle' }, show })).toBe('when_idle');
+    expect(show).not.toHaveBeenCalled();
+    expect(log.mock.calls.map(([line]) => line)).toEqual([
+      'quit-guard: 4 mid-turn, auto-answered quit', // C5's line, unchanged when only turns are busy
+      'quit-guard: 5 mid-turn, auto-answered cancel',
+      'quit-guard: 1 background work, 1 busy terminal, auto-answered when_idle',
+    ]);
+    log.mockRestore();
+  });
+
+  it('otherwise shows the question and maps its three buttons', async () => {
+    const show = vi.fn().mockResolvedValueOnce({ response: 0 }).mockResolvedValueOnce({ response: 1 }).mockResolvedValueOnce({ response: 2 });
+    const report = { ...NONE, midTurn: 2 };
+    expect(await askToQuit(report, { env: {}, show })).toBe('quit');
+    expect(await askToQuit(report, { env: {}, show })).toBe('when_idle');
+    expect(await askToQuit(report, { env: {}, show })).toBe('cancel');
+    expect(show).toHaveBeenCalledWith(quitQuestion(report, 'Quit'));
+  });
+});
+// C12 end
+
+// C12 start: the guard always holds the quit while the report is computed (the review rulings (7)), then quits at once
+// when nothing is busy and otherwise asks; C5's pins, restated over the report.
+describe('the quit guard', () => {
+  function guard(model: ReturnType<typeof modelWith>, over: Partial<Parameters<typeof installQuitGuard>[1]> = {}) {
+    const deps = {
+      pty: noTerminals,
+      ask: vi.fn(async (): Promise<'quit' | 'cancel' | 'when_idle'> => 'cancel'),
+      shutdownEngine: vi.fn(async () => {}),
+      publish: vi.fn(),
+      ...over,
+    };
+    return { deps, control: installQuitGuard(model, deps) };
+  }
+
+  it('holds even with nothing busy, then quits without asking once the report is all zero', async () => {
+    const { deps } = guard(modelWith([status('idle')]));
+    expect(electron.app.attempt()).toBe(false); // before-quit must prevent synchronously
+    await settle();
+    expect(deps.ask).not.toHaveBeenCalled();
+    expect(deps.shutdownEngine).not.toHaveBeenCalled(); // the existing quit path stops the hosts
+    expect(electron.app.quits).toBe(1);
+  });
+
+  it('asks with the report; Cancel keeps the app, and the next quit asks again', async () => {
+    const { deps } = guard(modelWith(midTurn(2)));
     expect(electron.app.attempt()).toBe(false);
     await settle();
-    expect(ask).toHaveBeenCalledExactlyOnceWith(2);
-    expect(shutdownEngine).not.toHaveBeenCalled();
+    expect(deps.ask).toHaveBeenCalledExactlyOnceWith({ midTurn: 2, backgroundWork: 0, busyTerminals: 0 });
+    expect(deps.shutdownEngine).not.toHaveBeenCalled();
     expect(electron.app.quits).toBe(0);
     expect(electron.app.attempt()).toBe(false);
-    expect(ask).toHaveBeenCalledTimes(2);
+    await settle();
+    expect(deps.ask).toHaveBeenCalledTimes(2);
   });
 
   it('Quit stops the engine, then quits without asking again', async () => {
-    const order: string[] = [];
-    const ask = vi.fn(() => Promise.resolve('quit' as const));
-    const shutdownEngine = vi.fn(async () => void order.push('shutdown'));
-    installQuitGuard(modelWithMidTurn(3), { ask, shutdownEngine });
+    const { deps } = guard(modelWith(midTurn(3)), { ask: vi.fn(async () => 'quit' as const) });
     electron.app.attempt();
     await settle();
-    expect(shutdownEngine).toHaveBeenCalledOnce();
+    expect(deps.shutdownEngine).toHaveBeenCalledOnce();
     expect(electron.app.quits).toBe(1);
-    expect(ask).toHaveBeenCalledOnce();
+    expect(deps.ask).toHaveBeenCalledOnce();
   });
 
   it('quits even when stopping the engine fails', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
-    installQuitGuard(modelWithMidTurn(1), { ask: () => Promise.resolve('quit'), shutdownEngine: () => Promise.reject(new Error('host gone')) });
+    guard(modelWith(midTurn(1)), { ask: async () => 'quit', shutdownEngine: () => Promise.reject(new Error('host gone')) });
     electron.app.attempt();
     await settle();
     expect(electron.app.quits).toBe(1);
   });
 
-  it('a second quit while the question is open is held without a second question', async () => {
+  it('a second quit while the report or the question is under way is held without a second question', async () => {
     let answer!: (a: 'quit' | 'cancel') => void;
     const ask = vi.fn(() => new Promise<'quit' | 'cancel'>((resolve) => (answer = resolve)));
-    installQuitGuard(modelWithMidTurn(1), { ask, shutdownEngine: () => Promise.resolve() });
+    guard(modelWith(midTurn(1)), { ask });
     expect(electron.app.attempt()).toBe(false);
-    expect(electron.app.attempt()).toBe(false);
+    expect(electron.app.attempt()).toBe(false); // the report is still being computed
+    await settle();
+    expect(electron.app.attempt()).toBe(false); // the question is open
     expect(ask).toHaveBeenCalledOnce();
     answer('cancel');
     await settle();
     expect(electron.app.attempt()).toBe(false);
+    await settle();
     expect(ask).toHaveBeenCalledTimes(2);
   });
 
@@ -117,17 +228,17 @@ describe('quit decision', () => {
     process.on('unhandledRejection', unhandled);
     try {
       const ask = vi.fn().mockRejectedValueOnce(new Error('no dialog')).mockResolvedValueOnce('cancel');
-      const shutdownEngine = vi.fn();
-      installQuitGuard(modelWithMidTurn(2), { ask, shutdownEngine });
+      const { deps } = guard(modelWith(midTurn(2)), { ask });
       expect(electron.app.attempt()).toBe(false);
       await settle();
       await settle();
       expect(unhandled).not.toHaveBeenCalled();
       expect(log).toHaveBeenCalledOnce();
-      expect(String(log.mock.calls[0][0])).toContain('[quit-guard]');
-      expect(shutdownEngine).not.toHaveBeenCalled();
+      expect(String(log.mock.calls[0]![0])).toContain('[quit-guard]');
+      expect(deps.shutdownEngine).not.toHaveBeenCalled();
       expect(electron.app.quits).toBe(0);
       expect(electron.app.attempt()).toBe(false); // not stuck asking: the next quit asks again
+      await settle();
       expect(ask).toHaveBeenCalledTimes(2);
     } finally {
       process.off('unhandledRejection', unhandled);
@@ -135,24 +246,102 @@ describe('quit decision', () => {
     }
   });
 
-  it('words the question for one and for many', () => {
-    expect(quitQuestion(1)).toMatchObject({ type: 'warning', message: '1 session mid-turn', buttons: ['Quit', 'Cancel'], defaultId: 1, cancelId: 1 });
-    expect(quitQuestion(4)).toMatchObject({ message: '4 sessions mid-turn', detail: 'Quitting stops them. Transcripts stay on disk and can be resumed.' });
-  });
-
-  it('under MAWS_E2E answers from MAWS_E2E_QUIT_ANSWER (quit by default) and logs instead of showing the dialog', async () => {
-    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const show = vi.fn();
-    expect(await askToQuit(4, { env: { MAWS_E2E: '1' }, show })).toBe('quit');
-    expect(await askToQuit(5, { env: { MAWS_E2E: '1', MAWS_E2E_QUIT_ANSWER: 'cancel' }, show })).toBe('cancel');
-    expect(show).not.toHaveBeenCalled();
-    expect(log.mock.calls.map(([line]) => line)).toEqual(['quit-guard: 4 mid-turn, auto-answered quit', 'quit-guard: 5 mid-turn, auto-answered cancel']);
-  });
-
-  it('otherwise shows the question and maps its buttons', async () => {
-    const show = vi.fn().mockResolvedValueOnce({ response: 0 }).mockResolvedValueOnce({ response: 1 });
-    expect(await askToQuit(2, { env: {}, show })).toBe('quit');
-    expect(await askToQuit(2, { env: {}, show })).toBe('cancel');
-    expect(show).toHaveBeenCalledWith(quitQuestion(2));
+  it('logs the report’s latency where the app wants it (the e2e reads it)', async () => {
+    const log = vi.fn();
+    guard(modelWith([]), { log });
+    electron.app.attempt();
+    await settle();
+    expect(log).toHaveBeenCalledWith(expect.stringMatching(/^quit-report: \d+ ms · nothing busy$/));
   });
 });
+
+describe('quit when idle', () => {
+  const bg = (id: string, tasks = [TASK]) => status(id, { backgroundTasks: tasks });
+
+  it('holds the quit, publishes the waiting report, re-reads it on every status change, and quits at zero', async () => {
+    const model = modelWith([bg('a'), status('b', { turn: humanTurn })]);
+    const publish = vi.fn();
+    const shutdownEngine = vi.fn(async () => {});
+    guardDeps(model, { publish, shutdownEngine, ask: async () => 'when_idle' });
+    electron.app.attempt();
+    await settle();
+    expect(publish).toHaveBeenLastCalledWith({ midTurn: 1, backgroundWork: 1, busyTerminals: 0 });
+    expect(electron.app.quits).toBe(0);
+    model.apply(status('b')); // the turn ended
+    await settle();
+    expect(publish).toHaveBeenLastCalledWith({ midTurn: 0, backgroundWork: 1, busyTerminals: 0 });
+    expect(electron.app.quits).toBe(0);
+    model.apply(bg('a', [])); // the task settled
+    await settle();
+    expect(publish).toHaveBeenLastCalledWith(null);
+    expect(electron.app.quits).toBe(1);
+    expect(shutdownEngine).not.toHaveBeenCalled(); // nothing was busy any more
+  });
+
+  it('re-reads every 2 s, since a terminal’s command ending is no status change', async () => {
+    vi.useFakeTimers();
+    try {
+      let busy = true;
+      const pty = { list: async () => [{ ptyId: 't', alive: true }], foreground: async () => ({ busy }) };
+      const publish = vi.fn();
+      guardDeps(modelWith([]), { pty, publish, ask: async () => 'when_idle' });
+      electron.app.attempt();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(publish).toHaveBeenLastCalledWith({ midTurn: 0, backgroundWork: 0, busyTerminals: 1 });
+      busy = false;
+      await vi.advanceTimersByTimeAsync(1_999);
+      expect(electron.app.quits).toBe(0);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(electron.app.quits).toBe(1);
+      expect(publish).toHaveBeenLastCalledWith(null);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('Quit now stops the engine and quits; Cancel stops waiting and keeps the app', async () => {
+    const model = modelWith([bg('a')]);
+    const publish = vi.fn();
+    const shutdownEngine = vi.fn(async () => {});
+    const control = guardDeps(model, { publish, shutdownEngine, ask: async () => 'when_idle' });
+    electron.app.attempt();
+    await settle();
+    control.cancelWait();
+    expect(publish).toHaveBeenLastCalledWith(null);
+    model.apply(bg('a', []));
+    await settle();
+    expect(electron.app.quits).toBe(0); // no longer waiting
+    model.apply(bg('a'));
+    electron.app.attempt();
+    await settle();
+    expect(control.waiting()).toEqual({ midTurn: 0, backgroundWork: 1, busyTerminals: 0 });
+    control.quitNow();
+    await settle();
+    expect(shutdownEngine).toHaveBeenCalledOnce();
+    expect(electron.app.quits).toBe(1);
+  });
+
+  it('a second ⌘Q while waiting asks again; its Cancel leaves the wait as it was, its Quit quits', async () => {
+    const model = modelWith([bg('a')]);
+    const answers: ('when_idle' | 'cancel' | 'quit')[] = ['when_idle', 'cancel', 'quit'];
+    const ask = vi.fn(async () => answers.shift()!);
+    const publish = vi.fn();
+    const control = guardDeps(model, { ask, publish });
+    electron.app.attempt();
+    await settle();
+    expect(control.waiting()).not.toBeNull();
+    electron.app.attempt();
+    await settle();
+    expect(ask).toHaveBeenCalledTimes(2);
+    expect(control.waiting()).not.toBeNull(); // Cancel on the second question is not Cancel on the banner
+    electron.app.attempt();
+    await settle();
+    expect(electron.app.quits).toBe(1);
+    expect(publish).toHaveBeenLastCalledWith(null);
+  });
+});
+
+function guardDeps(model: ReturnType<typeof modelWith>, over: Partial<Parameters<typeof installQuitGuard>[1]>) {
+  return installQuitGuard(model, { pty: noTerminals, ask: async () => 'cancel', shutdownEngine: vi.fn(async () => {}), publish: () => {}, ...over });
+}
+// C12 end
