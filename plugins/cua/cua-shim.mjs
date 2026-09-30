@@ -10,7 +10,8 @@
 //   1. tools/call gets `_meta["x-codex-turn-metadata"]` and friends, which node_repl uses to key session approvals;
 //   2. an accepted app-approval elicitation gets `_meta.persist` so the approval sticks for the session;
 //   3. image results get their real MIME type (node_repl labels JPEG screenshots `image/png`);
-//   4. tools/list is trimmed to js and js_reset (plus the host-only turn_ended), marked `anthropic/alwaysLoad`;
+//   4. tools/list is trimmed to js and js_reset (plus the host-only turn_ended); both stay deferred behind ToolSearch,
+//      with an `anthropic/searchHint` so a keyword search for GUI control finds them despite the bare name `js`;
 //   5. the initialize result's `instructions` gain host notes: what OpenAI's returned API document does not say about
 //      operating under this host (Claude Code shows server instructions to the model, capped at 2,048 characters);
 //   6. `notifications/cancelled` and everything else pass through untouched.
@@ -44,8 +45,8 @@ const MODEL=env.CUA_SHIM_MODEL||'claude';
 const PERSIST=env.CUA_SHIM_PERSIST||'session';
 const SURFACES=env.CUA_SHIM_SURFACES||'computer';
 const LOG=env.CUA_SHIM_LOG;
-const MODEL_TOOLS=new Set(['js','js_reset']);
-const KEEP_TOOLS=new Set([...MODEL_TOOLS,'turn_ended']);
+const MODEL_TOOLS=new Map([['js','control macos apps through their gui (computer use): click, type, read the screen, screenshot'],['js_reset','reset the computer-use session for macos gui control']]);
+const KEEP_TOOLS=new Set([...MODEL_TOOLS.keys(),'turn_ended']);
 const HOST_NOTES=env.CUA_SHIM_HOST_NOTES==='none'?'':(env.CUA_SHIM_HOST_NOTES??`Host notes (Claude Code through cua-shim):
 - Use this when a task needs a macOS app's GUI and no CLI, API or skill covers it. The first js call returns the API document; read it before writing more code.
 - Each app asks the user for approval once per session, in a dialog. Do not retry an app the user declined; report it instead.
@@ -98,7 +99,7 @@ function toHost(msg){
  if(msg.method==='elicitation/create'&&msg.id!==undefined)pendingElicitations.add(msg.id);
  if(msg.id!==undefined&&msg.result){
   if(HOST_NOTES&&typeof msg.result.protocolVersion==='string'&&msg.result.capabilities)msg.result.instructions=[msg.result.instructions,HOST_NOTES].filter(Boolean).join('\n\n');
-  if(listRequests.has(msg.id)){listRequests.delete(msg.id);if(Array.isArray(msg.result.tools))msg.result.tools=msg.result.tools.filter(t=>KEEP_TOOLS.has(t.name)).map(t=>MODEL_TOOLS.has(t.name)?{...t,_meta:{...(t._meta??{}),'anthropic/alwaysLoad':true}}:t);}
+  if(listRequests.has(msg.id)){listRequests.delete(msg.id);if(Array.isArray(msg.result.tools))msg.result.tools=msg.result.tools.filter(t=>KEEP_TOOLS.has(t.name)).map(t=>MODEL_TOOLS.has(t.name)?{...t,_meta:{...(t._meta??{}),'anthropic/searchHint':MODEL_TOOLS.get(t.name)}}:t);}
   if(Array.isArray(msg.result.content))msg.result.content=msg.result.content.map(sniff);
  }
  return msg;
