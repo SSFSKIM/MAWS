@@ -114,11 +114,30 @@ const c11Commands = {
 } as const satisfies Record<`settings.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 // C11 end
 
+// C12 start: MAWS's custody of the pinned engine (C12 execution document, Interfaces "Engine custody" and "X2
+// additions"). `settings.engineCustody` answers the copy the next launch uses, null when custody does not run (MAWS_E2E
+// and replay, where the host keeps C3's ENGINE_BIN). `settings.engineApplied` answers once main's `engine.configure` push
+// for `settings.engine` as it now stands has been answered by the host, custody for a changed pin included; its error
+// carries custody's or the push's message. Main is the only sender of `engine.configure`.
+export const CustodyManifestSchema = z.strictObject({ version: z.string(), sha256: z.string(), size: z.number().int(), source: z.string(), copiedAt: z.string() });
+export type CustodyManifest = z.infer<typeof CustodyManifestSchema>;
+export const CustodySchema = z.discriminatedUnion('state', [
+  z.strictObject({ state: z.literal('ok'), path: z.string(), manifest: CustodyManifestSchema }),
+  z.strictObject({ state: z.enum(['missing', 'mismatch', 'version']), path: z.string(), message: z.string() }),
+]);
+export type Custody = z.infer<typeof CustodySchema>;
+const c12Commands = {
+  'settings.engineCustody': { input: z.void(), output: CustodySchema.nullable(), owner: 'main' },
+  'settings.engineApplied': { input: z.void(), output: z.void(), owner: 'main' },
+} as const satisfies Record<`settings.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
+// C12 end
+
 export const commands = {
   'settings.get': { input: z.void(), output: SettingsStateSchema, owner: 'main' },
   'settings.set': { input: SettingsPatchSchema, output: SettingsStateSchema, owner: 'main' },
   ...c7Commands, // C7
   ...c11Commands, // C11
+  ...c12Commands, // C12
 } as const satisfies Record<`settings.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {
