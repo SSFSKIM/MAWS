@@ -707,7 +707,7 @@ export class EngineSession {
       if (event.kind === 'turn.started') {
         this.tracker.turnStarted(event.id);
       } else if (event.kind === 'turn.ended' && !event.isEchoReceipt) {
-        this.lastUsedAt = event.at; // C12: a turn's end is use (the status goes out with the frame's touch)
+        this.lastUsedAt = new Date().toISOString(); // C12: a turn's end is use, on the host's clock like every other (the status goes out with the frame's touch)
         // the queue first: while a host sequence (clear and implement) still holds the session, it releases nothing
         this.queue.onTurnEnded(event).catch((error: unknown) => this.log(`queue release failed: ${messageOf(error)}`));
         if ((event.origin === 'human' || event.origin === null) && this.processState === 'ready') void this.verifyGateway();
