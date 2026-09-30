@@ -66,6 +66,7 @@ export interface ComposerState {
   resubmit: ReadonlyMap<AppSessionId, Resubmit>; // M4b: absent is IDLE_RESUBMIT
   restoredEdits: ReadonlySet<AppSessionId>; // M4b: edit modes restored from a draft (a reload), until the edit ends
   models: ReadonlyMap<AppSessionId, readonly ListedModel[]>; // the engine's latest `session.listModels` answer per session
+  setupPhases: ReadonlyMap<AppSessionId, string>; // an unstarted session's running setup phase in words (C10's hook), for the status line
 }
 
 export type ListedModel = ListModelsResponse['models'][number];
@@ -80,6 +81,7 @@ const initial = (): ComposerState => ({
   resubmit: new Map(),
   restoredEdits: new Set(),
   models: new Map(),
+  setupPhases: new Map(),
 });
 
 export const useComposerStore = create<ComposerState>()(initial);
@@ -219,4 +221,18 @@ export const listedModelsOf = (state: ComposerState, appSessionId: AppSessionId)
 
 export function rememberListedModels(appSessionId: AppSessionId, models: readonly ListedModel[]): void {
   useComposerStore.setState((s) => (s.models.get(appSessionId) === models ? s : { models: new Map(s.models).set(appSessionId, models) }));
+}
+
+// An unstarted session's running setup phase (C10's `phase`, "Creating worktree <name>…", "Trusting <key>…",
+// "Starting…"), published by its mounted composer, which holds the setup hook, for the status line's activity.
+export const setupPhaseOf = (state: ComposerState, appSessionId: AppSessionId): string | null => state.setupPhases.get(appSessionId) ?? null;
+
+export function setSetupPhase(appSessionId: AppSessionId, phase: string | null): void {
+  if (setupPhaseOf(useComposerStore.getState(), appSessionId) === phase) return;
+  useComposerStore.setState((s) => {
+    const setupPhases = new Map(s.setupPhases);
+    if (phase === null) setupPhases.delete(appSessionId);
+    else setupPhases.set(appSessionId, phase);
+    return { setupPhases };
+  });
 }
