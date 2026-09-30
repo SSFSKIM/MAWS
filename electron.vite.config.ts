@@ -54,8 +54,9 @@ export default defineConfig(({ command }) => {
     },
     preload: {
       resolve: { alias },
-      // A sandboxed preload's `require` loads only `electron`, `events`, `timers` and `url`, so zod and the registries
-      // the allowlist imports must be bundled into out/preload/index.js; only `electron` stays external.
+      // A sandboxed preload's `require` loads only `electron`, `events`, `timers` and `url`, so whatever it imports
+      // (X2's zod-free name lists, `@shared/ipc/names`) is bundled into out/preload/index.js; only `electron` stays
+      // external.
       build: { externalizeDeps: false, rollupOptions },
     },
     renderer: {

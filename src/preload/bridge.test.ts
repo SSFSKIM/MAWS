@@ -1,3 +1,5 @@
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import type { CommandName, EventName, MawsBridge } from '@shared/ipc/schema';
 import { createBridge, type BridgeTransport } from './bridge';
@@ -85,6 +87,32 @@ void ((bridge: MawsBridge) => {
   const event: EventName = 'settings.changed';
   void bridge.invoke(name, undefined);
   bridge.on(event, (state) => void state.resolvedTheme);
+});
+
+// Debt wave 4: the sandboxed preload bundles its whole import graph, so the allowlist is X2's zod-free name lists and
+// nothing it imports reaches a registry module or zod (235 kB, then 313 kB, when it imported the registries).
+describe('preload bundle', () => {
+  it('imports no schema: its module graph reaches neither `@shared/ipc/schema` nor zod', () => {
+    const src = resolve(__dirname, '..');
+    const seen = new Set<string>();
+    const bare = new Set<string>();
+    const walk = (file: string) => {
+      if (seen.has(file)) return;
+      seen.add(file);
+      const text = readFileSync(file, 'utf8');
+      // value imports and re-exports only: `import type` and `export type` are erased from the bundle
+      for (const [, spec] of text.matchAll(/^(?:import|export)\s+(?!type\b)[^;]*?from\s+'([^']+)'/gms)) {
+        if (spec.startsWith('.') || spec.startsWith('@shared/')) {
+          const base = spec.startsWith('.') ? resolve(dirname(file), spec) : resolve(src, 'shared', spec.slice(8));
+          walk(existsSync(`${base}.ts`) ? `${base}.ts` : resolve(base, 'index.ts'));
+        } else bare.add(spec);
+      }
+    };
+    walk(resolve(__dirname, 'index.ts'));
+    expect([...bare]).toEqual(['electron']);
+    expect([...seen].filter((f) => f.includes('/shared/ipc/schema'))).toEqual([]);
+    expect(seen).toContain(resolve(src, 'shared/ipc/names.ts'));
+  });
 });
 
 // C7 start: a dropped file's path comes only from Electron's webUtils in the preload (C7 execution document, §4.1 rule)
