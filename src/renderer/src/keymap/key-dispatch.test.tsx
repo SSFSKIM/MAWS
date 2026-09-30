@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { useRef, type ReactNode } from 'react';
+import { useLayoutEffect, useRef, type ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ActionId } from '@shared/keymap/actions';
 import { useLayout } from '../stores/layout';
@@ -158,6 +158,28 @@ describe('key dispatch follows DOM focus', () => {
     const enter = new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true, cancelable: true });
     search.dispatchEvent(enter);
     expect(enter.defaultPrevented).toBe(false);
+  });
+
+  // Debt wave 5 (C7's keyboard e2e cases): a chord is bound in the commit that mounts its element, so a key pressed as
+  // soon as the element can be seen (here, from a later sibling's layout effect, before any passive effect of that
+  // commit has run) reaches it; under load the page can paint well before its passive effects run.
+  it('a key pressed in the commit that mounts the bound element reaches it', () => {
+    const late = vi.fn();
+    function PressAtMount() {
+      useLayoutEffect(() => {
+        const card = screen.getByLabelText('late card');
+        card.focus();
+        card.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true, cancelable: true }));
+      }, []);
+      return null;
+    }
+    render(
+      <>
+        <Bound id="request.accept" label="late card" spy={late} />
+        <PressAtMount />
+      </>,
+    );
+    expect(late).toHaveBeenCalledTimes(1);
   });
 
   it('a binding whose element does not hold focus is no candidate, though the key’s target is inside it', () => {
