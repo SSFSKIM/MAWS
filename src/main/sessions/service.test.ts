@@ -10,6 +10,7 @@ import { SessionHarness } from '../../../test/support/session-harness';
 import { DOWN_RELAY } from '../../../test/support/session-host';
 import { storeLabel } from './record-actions';
 import { directRouteRefusal } from './start-guards';
+import { RETRY_DETAIL, RETRY_REASON } from './resume'; // C3 corrective
 import { ScratchRepo } from '../../../test/support/scratch-repo'; // C12
 
 // The service is Electron-free (its handlers are service-register.ts's).
@@ -18,6 +19,7 @@ vi.mock('electron', () => {
 });
 
 const OK_MESSAGE = { content: 'Reply OK', display: 'Reply OK' };
+const NO_OUTPUT_TEXT = 'the engine wrote nothing in the 30 s after it started; initialize was not answered'; // C3 corrective
 const DRAFT = { doc: { type: 'doc' }, attachments: [], updatedAt: '2026-09-29T00:00:00.000Z' };
 
 function intentFile(h: SessionHarness, id: string): SetupIntent | null {
@@ -411,6 +413,57 @@ describe('session service', () => {
       await h.service.startSession(record.appId, { message: null, options: { gateway: 'direct' } });
       expect(await h.settled(record.appId, 4)).toMatchObject({ phase: 'ready', outcome: { firstTurn: 'sent' } });
       expect(h.host.calledWith('session.send')).toEqual([{ appSessionId: record.appId, content: 'Reply OK' }]);
+    });
+
+    // C3 corrective (2026-09-30 ledger): C4's follower, restarted by a read between the handover and the launch, replays
+    // the exited transcript and synthesises `process.exited` (seq null) when its last turn never ended
+    it('a transcript-synthesised exit arriving during the launch is not the launch’s exit: the resume reaches ready and nothing is stopped', async () => {
+      h.trustDirectory(h.work);
+      const record = recordAt(h.work);
+      h.host.script = (spec) => {
+        const synthetic = { id: `session:${SID}:exited`, sessionId: SID, at: '2026-09-30T00:00:00.000Z', seq: null, agentId: null, parentToolUseId: null, kind: 'process.exited', code: null, signal: null, reason: 'unknown', lostAttentionCount: 0, budget: null };
+        h.host.emitEvent('session.eventBatch', { appSessionId: spec.appSessionId, events: [synthetic as never] });
+        return {};
+      };
+      await h.service.startSession(record.appId, { message: null, options: {} });
+      expect(await h.settled(record.appId)).toMatchObject({ phase: 'ready' });
+      expect(h.host.calledWith('session.stop')).toEqual([]);
+    });
+
+    // C3 corrective: one visible retry for an engine that wrote nothing (`no_output`), never chained, and for nothing else
+    it('a resume whose engine wrote nothing launches once more, with the retry marked on the spec, and reaches ready without a failure', async () => {
+      h.trustDirectory(h.work);
+      const record = recordAt(h.work);
+      let n = 0;
+      h.host.script = (spec) => {
+        n += 1;
+        if (n === 1) return { exit: { error: NO_OUTPUT_TEXT, code: 'no_output' } };
+        // the replaced launch's last status arriving after the retry began (seen live): not the retry's exit
+        const replaced = h.host.table.get(spec.appSessionId)!;
+        setTimeout(() => h.host.emitEvent('session.status', { appSessionId: spec.appSessionId, status: replaced }), 0);
+        return {};
+      };
+      await h.service.startSession(record.appId, { message: OK_MESSAGE, options: {} });
+      expect(await h.settled(record.appId)).toMatchObject({ phase: 'ready', outcome: { firstTurn: 'sent' } });
+      expect(h.host.launches.map((l) => l.retry)).toEqual([undefined, { attempt: 2, maxAttempts: 2, reason: RETRY_REASON }]);
+      expect(h.host.launches[1]).toMatchObject({ ...h.host.launches[0], retry: { attempt: 2 } });
+      expect(h.host.calledWith('session.stop'), 'the silent process exited on its own; nothing to stop').toEqual([]);
+      expect(h.host.calledWith('session.send')).toEqual([{ appSessionId: record.appId, content: 'Reply OK' }]);
+      expect(h.setupEvents(record.appId).map((e) => [e.phase, e.detail])).toEqual([['launching', 'Starting'], ['launching', RETRY_DETAIL], ['ready', null]]);
+    });
+
+    it('a retry that also writes nothing fails for good with its reason and the message handed back; any other exit is not retried', async () => {
+      h.trustDirectory(h.work);
+      const record = recordAt(h.work);
+      h.host.script = () => ({ exit: { error: NO_OUTPUT_TEXT, code: 'no_output' } });
+      await h.service.startSession(record.appId, { message: OK_MESSAGE, options: {} });
+      expect(await h.settled(record.appId)).toMatchObject({ phase: 'failed', outcome: { kind: 'error', message: `the engine exited before it was ready: ${NO_OUTPUT_TEXT}` } });
+      expect(h.host.launches).toHaveLength(2);
+      expect(h.host.calledWith('session.send')).toEqual([]);
+      h.host.script = () => ({ exit: { error: 'initialize unanswered after 120 s', code: 'timeout' } });
+      await h.service.startSession(record.appId, { message: null, options: {} });
+      expect(await h.settled(record.appId, 2)).toMatchObject({ phase: 'failed' });
+      expect(h.host.launches).toHaveLength(3);
     });
 
     it('a resume that fails after ready stops its process before telling the failure', async () => {
