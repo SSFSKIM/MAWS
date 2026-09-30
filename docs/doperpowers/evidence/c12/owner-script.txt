@@ -92,18 +92,20 @@ The sitting
      ~/.claude/projects/-Users-new-Developer-GitHub-doperpowers--claude-worktrees-fold-plans/30e0568a-f1ee-4dce-8db9-b9799fb23107.jsonl  (16,975)
    The sidebar's search matches a session's title, directory and project name, not its id or file, so first print each
    candidate's title in a terminal (read only; it prints the custom title, else the AI title, else the first prompt,
-   which is the order MAWS titles by):
-     python3 -c 'import json,sys,os
-     for p in sys.argv[1:]:
-         t={}
-         for l in open(os.path.expanduser(p)):
-             try: r=json.loads(l)
-             except ValueError: continue
-             k=r.get("type"); c=r.get("message",{}).get("content") if isinstance(r.get("message"),dict) else None
-             if k=="custom-title": t["c"]=r.get("customTitle")
-             elif k=="ai-title": t["a"]=r.get("aiTitle")
-             elif k=="user" and "f" not in t and isinstance(c,str): t["f"]=c[:80]
-         print(os.path.basename(p)[:8], "·", t.get("c") or t.get("a") or t.get("f") or "(no title)")' \
+   which is the order MAWS titles by). Paste the whole command as shown, margin included: the `if True:` line lets the
+   indented code run as it is.
+     python3 -c 'if True:
+         import json, sys, os
+         for p in sys.argv[1:]:
+             t = {}
+             for l in open(os.path.expanduser(p)):
+                 try: r = json.loads(l)
+                 except ValueError: continue
+                 k = r.get("type"); m = r.get("message"); c = m.get("content") if isinstance(m, dict) else None
+                 if k == "custom-title": t["c"] = r.get("customTitle")
+                 elif k == "ai-title": t["a"] = r.get("aiTitle")
+                 elif k == "user" and "f" not in t and isinstance(c, str): t["f"] = c[:80]
+             print(os.path.basename(p)[:8], "·", t.get("c") or t.get("a") or t.get("f") or "(no title)")' \
        ~/.claude/projects/-Users-new-claude-code-bundle-2-1-257/809406bb-43f0-4d12-a0eb-4f20d6cc4941.jsonl \
        ~/.claude/projects/-Users-new-Developer-GitHub-AutoPM/d7e8a60d-4568-4492-b6c2-61ed8346b7c8.jsonl \
        ~/.claude/projects/-Users-new-Developer-GitHub-doperpowers--claude-worktrees-fold-plans/30e0568a-f1ee-4dce-8db9-b9799fb23107.jsonl
