@@ -38,7 +38,7 @@ import { attachmentsOf, editingOfDoc, emptyDoc, isMultiline, type ComposerDoc } 
 import { ipcDrafts, type DraftPort, type EditorHandle, type SubmitHow } from './editor/controller';
 import { Editor } from './editor/Editor';
 import { serializeDraft, type Serialized } from './editor/serialize';
-import { dispatchByMode, submitSerialized, type Dispatch } from './editor/submit';
+import { afterAccepted, dispatchByMode, precheck, submitSerialized, type Dispatch } from './editor/submit'; // C12: afterAccepted, precheck
 import { newestUserUuid } from './edit-prefill';
 import { EditModeLine, RewindConfirm } from './EditMode';
 import { endedBindings, intentBindings, liveBindings, workspaceDirectoriesOf, type FrameBindings } from './frame/bindings';
@@ -62,6 +62,7 @@ import {
   takeAutoSend,
 } from './resubmit-seam';
 import { routeOf, useListModels, useModelCatalogue, type Route } from './list-models';
+import { releasedResume } from './resume-seam'; // C12
 import { locationPath, useSetupIntent, type SetupIntentHook } from './setup-intent';
 import { steerPriority, submitState, type SubmitDecision } from './submit/submit-state';
 import { SubmitControl } from './submit/SubmitControl';
@@ -202,6 +203,8 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
   // ---- the submit control's state ------------------------------------------------------------------------------
   const draft = useMemo(() => serializeDraft(doc, { sessionId: null, cwd: '' }), [doc]);
   const messageHeld = setup !== null && setup.intent.message !== null;
+  // C12: released under the memory budget (until the digest carries the mark, the exit's reason says so)
+  const released = status?.exit?.reason === 'budget' && status.process === 'exited';
   const decision = submitState({
     status,
     intent: unstarted ? { starting, messageHeld, phase: setup.phase ?? null } : null, // C10: the setup phase
@@ -209,6 +212,7 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
     empty: draft.empty,
     mode: draft.mode,
     steerHeld: alt && (hover || boxFocused),
+    released, // C12
   });
   // In edit mode a non-empty prompt resubmits (a fork, or the explicit rewind): the control reads Send, and waits while
   // the resubmit is under way.
@@ -314,8 +318,9 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
     }
     const edit = editingOf(useComposerStore.getState(), appSessionId);
     if (edit && s.mode === 'send') return resubmitSubmission(s, edit, how);
-    const decided = submitState({ status, intent: null, queue, empty: s.empty, mode: s.mode, steerHeld: how === 'steer' });
+    const decided = submitState({ status, intent: null, queue, empty: s.empty, mode: s.mode, steerHeld: how === 'steer', released /* C12 */ });
     if (!decided.enabled) return false;
+    if (released && (status === null || status.process === 'exited')) return resumeReleased(s); // C12
     const target = memoryTargetOf(useComposerStore.getState(), appSessionId);
     let dispatch: Dispatch;
     if (s.mode !== 'send') dispatch = () => dispatchByMode(client, appSessionId, s, 'send', target);
@@ -332,6 +337,17 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
       };
     return submitSerialized(client, appSessionId, s, 'send', target, { dispatch, retry });
   };
+
+  // C12 start: Send on a released session resumes it through C10's resume (registered in `resume-seam.ts`), the message
+  // going with it; a refused resume says why itself and the editor keeps the text.
+  const resumeReleased = async (s: Serialized): Promise<boolean> => {
+    const resume = releasedResume();
+    if (resume === null || !precheck(s)) return false;
+    const accepted = await resume(appSessionId, { content: s.content, display: s.display });
+    if (accepted) afterAccepted(client, appSessionId, s);
+    return accepted;
+  };
+  // C12 end
 
   const interrupt = () =>
     void client.invoke('session.interrupt', { appSessionId, cancelEngineQueued: false }).then((result) => {

@@ -10,7 +10,7 @@ const entry = (state: QueueEntry['state'], over: Partial<QueueEntry> = {}): Queu
 });
 const idle = status(APP);
 const turning = { ...status(APP, { engineState: 'running', turn: humanTurn }) };
-const input = (over: Partial<SubmitInput>): SubmitInput => ({ status: idle, intent: null, queue: { entries: [], paused: false }, empty: false, mode: 'send', steerHeld: false, ...over });
+const input = (over: Partial<SubmitInput>): SubmitInput => ({ status: idle, intent: null, queue: { entries: [], paused: false }, empty: false, mode: 'send', steerHeld: false, released: false /* C12 */, ...over });
 const row = (over: Partial<SubmitInput>) => {
   const d = submitState(input(over));
   return [d.primary, d.label, d.enabled, d.reason, d.secondaryStop];
@@ -110,3 +110,46 @@ describe('submitState covers the five states, the caret menu and the unstarted r
     expect(steerPriority('interrupt_and_send')).toBe('now');
   });
 });
+
+// C12 start: Send-to-resume (C12 execution document, Interfaces "Send-to-resume"). A session released under the memory
+// budget sends to resume; every other ended session stays ended, as the brief rules.
+describe('a released session resumes on Send; stopped, crashed, archived and exiting sessions do not', () => {
+  const exited = (reason: 'budget' | 'stop' | 'crash' | 'archive') => ({ ...idle, process: 'exited' as const, engineState: 'idle' as const, exit: { code: 0, signal: null, reason, at: '2026-09-29T12:00:00.000Z', release: reason === 'budget' ? { limitKiB: 8_388_608, totalKiB: 9_000_000 } : null } });
+
+  it('released + send: Send is enabled, says it resumes the session, and waits for text', () => {
+    const d = submitState(input({ released: true, status: exited('budget') }));
+    expect([d.primary, d.label, d.enabled, d.reason, d.secondaryStop, d.menu]).toEqual(['send', 'Send', true, null, false, []]);
+    expect(d.detail).toBe('Resumes this session');
+    expect(row({ released: true, status: exited('budget'), empty: true })).toEqual(['send', 'Send', false, null, false]);
+    // no status at all (the host forgot the row after the exited-row cap): the digest's mark still decides
+    expect(row({ released: true, status: null })).toEqual(['send', 'Send', true, null, false]);
+  });
+
+  it('released + ! or #: disabled, asking for a message first', () => {
+    expect(row({ released: true, status: exited('budget'), mode: 'bash' })).toEqual(['send', 'Send', false, 'Send a message to resume this session first', false]);
+    expect(row({ released: true, status: exited('budget'), mode: 'memory' })[3]).toBe('Send a message to resume this session first');
+  });
+
+  it('stopped and crashed sessions stay ended', () => {
+    expect(row({ status: exited('stop') })).toEqual(['send', 'Send', false, 'Session ended', false]);
+    expect(row({ status: exited('crash') })).toEqual(['send', 'Send', false, 'Session ended', false]);
+  });
+
+  it('an archived-and-unarchived session (its mark dropped with the archive) stays ended, whatever its last exit was', () => {
+    expect(row({ released: false, status: exited('budget') })).toEqual(['send', 'Send', false, 'Session ended', false]);
+    expect(row({ released: false, status: exited('archive') })[3]).toBe('Session ended');
+  });
+
+  it('a release still exiting refuses (the draft stays) until the status reads exited', () => {
+    const exiting = { ...idle, process: 'exiting' as const };
+    expect(row({ released: true, status: exiting })).toEqual(['send', 'Send', false, 'Session ended', false]);
+    expect(row({ released: false, status: exiting })[2]).toBe(false);
+  });
+
+  it('a released mark beside a live process (a resume under way) decides as that process', () => {
+    expect(row({ released: true, status: { ...idle, process: 'starting' } })[3]).toBe('Session is starting…');
+    expect(row({ released: true })).toEqual(['send', 'Send', true, null, false]);
+    expect(submitState(input({ released: true })).detail).toBeNull();
+  });
+});
+// C12 end

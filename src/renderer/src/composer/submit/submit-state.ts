@@ -15,6 +15,7 @@ export interface SubmitInput {
   empty: boolean;
   mode: 'send' | 'bash' | 'memory';
   steerHeld: boolean; // ⌥ held over the control, or ⌥Enter
+  released: boolean; // C12: the session's digest carries the memory budget's released mark (Send resumes it)
 }
 
 export interface SubmitMenuItem {
@@ -41,6 +42,10 @@ export const ENDED = 'Session ended';
 export const NOT_YET = 'Available once the session starts';
 // `!` while busy (architect's ruling on M6): the engine runs it inside the turn and folds its output in.
 export const RUNS_NOW = 'Runs now; the model sees the output in this turn';
+// C12 start: a session released under the memory budget (C12 execution document, "Send-to-resume")
+export const RESUMES = 'Resumes this session';
+export const RESUME_FIRST = 'Send a message to resume this session first';
+// C12 end
 
 export const isBusy = (status: EngineSessionStatus | null, entries: readonly QueueEntry[]): boolean =>
   (status?.turn ?? null) !== null || entries.some((e) => e.state === 'submitting' || e.state === 'released');
@@ -70,6 +75,13 @@ export function submitState(i: SubmitInput): SubmitDecision {
     if (mode !== 'send') return decide('send', 'Send', false, NOT_YET);
     return decide('send', 'Send', !empty);
   }
+  // C12 start: a released session with no live process sends to resume it through C10's resume; `!` and `#` wait for the
+  // process. A release still exiting falls to the rule below (refused, the draft kept) until its status reads exited.
+  if (i.released && (status === null || status.process === 'exited')) {
+    if (mode !== 'send') return decide('send', 'Send', false, RESUME_FIRST);
+    return { ...decide('send', 'Send', !empty), detail: RESUMES };
+  }
+  // C12 end
   if (status === null || status.process !== 'ready') {
     const starting = status !== null && (status.process === 'starting' || status.process === 'initializing');
     return decide('send', 'Send', false, starting ? STARTING : ENDED);

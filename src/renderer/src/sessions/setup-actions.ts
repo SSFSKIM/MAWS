@@ -170,18 +170,20 @@ export async function resolveWorktree(appSessionId: AppSessionId, resolution: 'd
 // ---- a record's resume -------------------------------------------------------------------------------------------
 
 // `session.resume` (and a continuation's first step for a record): a trust or relay card docks in the session's tab,
-// every refusal is a toast naming it.
-export async function resumeSession(appSessionId: AppSessionId, message: FirstMessage | null = null): Promise<void> {
+// every refusal is a toast naming it. C12: answers whether the resume took the message (it started, or a card holds
+// it), so C7's Send-to-resume keeps the editor's text on a refusal.
+export async function resumeSession(appSessionId: AppSessionId, message: FirstMessage | null = null): Promise<boolean> {
   const outcome = await start(appSessionId, message, {});
   if ('error' in outcome) {
     toast({ level: 'danger', text: outcome.error, actions: [], dismissible: true });
-    return;
+    return false; // C12
   }
   dockFor(appSessionId, outcome, message);
   const refusal = refusalOf(outcome);
-  if (refusal === null) return;
+  if (refusal === null) return true; // C12
   if (outcome.status === 'held') heldToast(appSessionId, outcome.holder, outcome.attach);
   else toast({ level: 'danger', text: refusal, actions: [], dismissible: true });
+  return false; // C12
 }
 
 // ---- closing an unstarted tab ------------------------------------------------------------------------------------

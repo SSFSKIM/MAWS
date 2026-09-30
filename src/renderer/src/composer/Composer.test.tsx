@@ -28,6 +28,7 @@ import { DockedCardFrame } from './docked/DockedCardFrame';
 import { dockCard, resetDockedCards } from './docked/registry';
 import { docOf, paragraph, textNode } from './editor/doc';
 import { registerSetupIntentHook, type HookResult, type SetupIntentHook, type SetupIntentPatch } from './setup-intent';
+import { registerReleasedResume } from './resume-seam'; // C12
 
 const A = 'app-a' as AppSessionId;
 const B = 'app-b' as AppSessionId;
@@ -706,3 +707,52 @@ describe('unstarted send holds a starting state', () => {
     expect(invoked('session.queue.list')).toEqual([{ appSessionId: A }]); // read, but an unstarted session lists nothing
   });
 });
+
+// C12 start: Send-to-resume (C12 execution document, Interfaces "Send-to-resume"): a session released under the memory
+// budget sends through the resume C10 registers, with the message; its `!` waits for a message first.
+describe('a released session resumes on Send', () => {
+  const released = (appSessionId: AppSessionId) =>
+    live(appSessionId, { status: { process: 'exited', exit: { code: 0, signal: null, reason: 'budget', at: '2026-09-29T14:02:00.000Z', release: { limitKiB: 8_388_608, totalKiB: 9_000_000 } } } });
+  let off: () => void = () => {};
+  afterEach(() => off());
+
+  it('sends the typed message to the registered resume, clears the editor once it is taken, and records the prompt', async () => {
+    const resume = vi.fn(async () => true);
+    off = registerReleasedResume(resume);
+    released(A);
+    mount([{ index: 0, id: A }]);
+    await type('carry on');
+    await waitFor(() => expect(primary().disabled).toBe(false));
+    expect(primary().getAttribute('aria-description')).toBe('Resumes this session');
+    await key(editorOf(), { key: 'Enter' });
+    await waitFor(() => expect(resume).toHaveBeenCalledExactlyOnceWith(A, { content: 'carry on', display: 'carry on' }));
+    await waitFor(() => expect(editorOf().editor.getText()).toBe(''));
+    expect(invoked('session.send')).toEqual([]);
+    expect(invoked('session.history.append')).toEqual([{ appSessionId: A, display: 'carry on', pastedContents: {} }]);
+  });
+
+  it('keeps the text when the resume is refused', async () => {
+    const resume = vi.fn(async () => false);
+    off = registerReleasedResume(resume);
+    released(A);
+    mount([{ index: 0, id: A }]);
+    await type('carry on');
+    await key(editorOf(), { key: 'Enter' });
+    await waitFor(() => expect(resume).toHaveBeenCalledOnce());
+    expect(editorOf().editor.getText()).toBe('carry on');
+    expect(invoked('session.history.append')).toEqual([]);
+  });
+
+  it('a stopped session still reads Session ended and resumes nothing', async () => {
+    const resume = vi.fn(async () => true);
+    off = registerReleasedResume(resume);
+    live(A, { status: { process: 'exited', exit: { code: 0, signal: null, reason: 'stop', at: '2026-09-29T14:02:00.000Z', release: null } } });
+    mount([{ index: 0, id: A }]);
+    await type('carry on');
+    await waitFor(() => expect(primary().title).toBe('Session ended'));
+    expect(primary().disabled).toBe(true);
+    await key(editorOf(), { key: 'Enter' });
+    expect(resume).not.toHaveBeenCalled();
+  });
+});
+// C12 end
