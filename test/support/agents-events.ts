@@ -26,7 +26,7 @@ const DEFAULTS: Partial<Record<EventKind, Record<string, unknown>>> = {
   'tool.result': { toolUseId: 'toolu_1', content: '', isError: false, structured: null, spillPath: null, denial: null, safeguard: 'not_evaluated', messageUuid: null },
   'user.message': { messageUuid: null, content: '', isReplay: false, isSynthetic: false, origin: null, bash: null },
   'assistant.block.complete': {
-    messageUuid: 'm1', apiMessageId: 'msg_1', blockIndex: 0, block: { type: 'text', text: '' }, model: 'claude', supersedes: null, aborted: false, userMessageUuids: [],
+    messageUuid: 'm1', apiMessageId: 'msg_1', blockIndex: 0, block: { type: 'text', text: '' }, model: 'claude', supersedes: [], aborted: false, userMessageUuids: [],
   },
   'command.lifecycle': { commandUuid: 'cmd-1', state: 'queued' },
   'turn.started': { userMessageUuid: null, origin: 'human' },

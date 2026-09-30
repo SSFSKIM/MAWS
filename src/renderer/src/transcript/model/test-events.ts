@@ -61,19 +61,19 @@ export function builder(start = '2026-09-28T10:00:00.000Z'): Builder {
     text(apiId, index, text, options = {}) {
       b.emit('assistant.block.complete', {
         messageUuid: uuid(`${apiId}-u${index}`), apiMessageId: api(apiId), blockIndex: index, block: { type: 'text', text }, model: MODEL,
-        supersedes: null, aborted: false, userMessageUuids: [], ...options,
+        supersedes: [], aborted: false, userMessageUuids: [], ...options,
       });
     },
     thinking(apiId, index, text) {
       b.emit('assistant.block.complete', {
         messageUuid: uuid(`${apiId}-u${index}`), apiMessageId: api(apiId), blockIndex: index, block: { type: 'thinking', thinking: text, signature: '' }, model: MODEL,
-        supersedes: null, aborted: false, userMessageUuids: [],
+        supersedes: [], aborted: false, userMessageUuids: [],
       });
     },
     toolUse(id, name, input, apiId = `msg-${id}`, index = 0) {
       b.emit('assistant.block.complete', {
         messageUuid: uuid(`${apiId}-u${index}`), apiMessageId: api(apiId), blockIndex: index, block: { type: 'tool_use', id, name, input }, model: MODEL,
-        supersedes: null, aborted: false, userMessageUuids: [],
+        supersedes: [], aborted: false, userMessageUuids: [],
       });
       b.emit('tool.use', { toolUseId: tool(id), toolName: name, input, apiMessageId: api(apiId), messageUuid: uuid(`${apiId}-u${index}`) });
     },

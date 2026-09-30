@@ -709,7 +709,7 @@ describe('child traffic', () => {
     const b = builder();
     b.emit('tool.use', { toolUseId: tool('c1'), toolName: 'Read', input: { file_path: '/a' }, apiMessageId: api('cm'), messageUuid: null }, { parentToolUseId: 'agent1' as never });
     b.emit('tool.result', { toolUseId: tool('c1'), content: 'x', isError: false, structured: null, spillPath: null, denial: null, safeguard: 'not_evaluated', messageUuid: null }, { parentToolUseId: 'agent1' as never });
-    b.emit('assistant.block.complete', { messageUuid: uuid('cu'), apiMessageId: api('cm2'), blockIndex: 0, block: { type: 'text', text: 'Child answer' }, model: 'm', supersedes: null, aborted: false, userMessageUuids: [] }, { parentToolUseId: 'agent1' as never });
+    b.emit('assistant.block.complete', { messageUuid: uuid('cu'), apiMessageId: api('cm2'), blockIndex: 0, block: { type: 'text', text: 'Child answer' }, model: 'm', supersedes: [], aborted: false, userMessageUuids: [] }, { parentToolUseId: 'agent1' as never });
     const state = applyEvents(createState(null, 'agent-1' as never), b.events);
     expect(state.order).toHaveLength(1);
     const list = rowsOf(withAllExpanded(state));
@@ -736,10 +736,28 @@ describe('revisable log', () => {
     const b = builder();
     b.turn('u1');
     b.text('m1', 0, 'First try');
-    b.text('m2', 0, 'Second try', { supersedes: uuid('m1-u0') });
+    b.text('m2', 0, 'Second try', { supersedes: [uuid('m1-u0')] });
     b.end(['u1']);
     const list = rows(b.events);
     expect(list.filter((row) => row.kind === 'assistant_text').map((row) => (row as Extract<Row, { kind: 'assistant_text' }>).markdown)).toEqual(['Second try']);
+  });
+
+  // Synthetic until a live refusal fallback is recorded (debt wave 4): the wire names every block frame of the refused
+  // attempt, on the replacement's first frame only (SPEC 45), so the list drops all of them and the later frames of the
+  // replacement, which name none, stay.
+  it('a supersedes list drops every block of the refused attempt, named on the replacement’s first block only', () => {
+    const b = builder();
+    b.turn('u1');
+    b.thinking('m1', 0, 'Refused reasoning');
+    b.text('m1', 1, 'Refused answer');
+    b.text('m0', 0, 'Unrelated earlier answer');
+    b.text('m2', 0, 'Fallback part one', { supersedes: [uuid('m1-u0'), uuid('m1-u1')] });
+    b.text('m2', 1, 'Fallback part two');
+    b.end(['u1']);
+    const list = rows(b.events);
+    const texts = list.filter((row) => row.kind === 'assistant_text').map((row) => (row as Extract<Row, { kind: 'assistant_text' }>).markdown);
+    expect(texts).toEqual(['Unrelated earlier answer', 'Fallback part one', 'Fallback part two']);
+    expect(JSON.stringify(list)).not.toContain('Refused');
   });
 
   it('compaction and reset are rows between turns, or inside the turn when they arrive mid-turn', () => {

@@ -118,7 +118,7 @@ describe('transcript records map to X1 events', () => {
     expect(blocks.map((b) => [b.messageUuid, b.blockIndex, b.block.type])).toEqual([
       ['a1', 0, 'thinking'], ['a2', 1, 'tool_use'], ['a3', 0, 'text'], ['a3', 1, 'text'], ['a4', 5, 'text'], ['a4', 6, 'text'],
     ]);
-    expect(blocks[0]).toMatchObject({ apiMessageId: 'msg_1', model: 'claude-sonnet-5', supersedes: null, aborted: false, userMessageUuids: [] });
+    expect(blocks[0]).toMatchObject({ apiMessageId: 'msg_1', model: 'claude-sonnet-5', supersedes: [], aborted: false, userMessageUuids: [] });
     expect(blocks.map((b) => b.id)).toEqual(['a1', 'a2', 'a3', 'a3#1', 'a4', 'a4#1']);
     const uses = only(events, 'tool.use');
     expect(uses).toHaveLength(1);

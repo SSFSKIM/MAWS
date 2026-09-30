@@ -205,7 +205,7 @@ function assistantEvents(record: TranscriptRecord, uuid: MessageUuid, ctx: Backf
       blockIndex: apiBlockIndex === null ? i : apiBlockIndex + i,
       block,
       model,
-      supersedes: null,
+      supersedes: [],
       aborted: false,
       userMessageUuids: [],
     });

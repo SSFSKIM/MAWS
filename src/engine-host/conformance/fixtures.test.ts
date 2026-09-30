@@ -232,7 +232,7 @@ describe('normaliser: per-fixture graph facts (C2 findings restated)', () => {
     const blocks = ofKind(events, 'assistant.block.complete');
     expect(blocks.filter((e) => e.aborted).map((e) => [e.seq, e.blockIndex, e.block.type])).toEqual([[96, 1, 'text']]);
     expect(blocks.find((e) => e.aborted)!.block).toMatchObject({ text: expect.stringContaining('History of Tea') as unknown });
-    expect(blocks.every((e) => e.supersedes === null)).toBe(true);
+    expect(blocks.every((e) => e.supersedes.length === 0)).toBe(true);
     expect(ofKind(events, 'turn.ended').map((e) => e.terminalReason)).toEqual(['aborted_streaming', 'completed']);
   });
 

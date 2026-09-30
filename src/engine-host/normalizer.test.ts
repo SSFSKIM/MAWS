@@ -215,7 +215,7 @@ describe('normaliser: tools, blocks and safeguards', () => {
     expect(deltas[1]).toMatchObject({ apiMessageId: 'msg_1', blockIndex: 1, blockType: 'tool_use', inputJsonDelta: '{"c":1}' });
     const completes = only(events, 'assistant.block.complete');
     expect(completes.map((c) => [c.apiMessageId, c.blockIndex, c.block.type])).toEqual([['msg_1', 0, 'thinking'], ['msg_1', 1, 'tool_use']]);
-    expect(completes[0]).toMatchObject({ messageUuid: 'a-1', model: 'm', supersedes: null, aborted: false, userMessageUuids: ['u-1'] });
+    expect(completes[0]).toMatchObject({ messageUuid: 'a-1', model: 'm', supersedes: [], aborted: false, userMessageUuids: ['u-1'] });
     expect(only(events, 'tool.use')[0]).toMatchObject({ toolUseId: 'toolu_1', toolName: 'Bash', input: { c: 1 }, apiMessageId: 'msg_1', messageUuid: 'a-1' });
   });
 
@@ -508,9 +508,12 @@ describe('normaliser: aborted and supersedes on assistant.block.complete (debt w
     expect(feed(make(), [inRow(assistantFrame({}))])[0]).toMatchObject({ kind: 'assistant.block.complete', aborted: false });
   });
 
-  it("keeps supersedes null even when the wire names the replaced frames: X1's single uuid cannot hold the wire's list", () => {
-    const events = feed(make(), [inRow(assistantFrame({ supersedes: ['old-1', 'old-2'] }))]);
-    expect(events[0]).toMatchObject({ kind: 'assistant.block.complete', supersedes: null });
+  // synthetic until a live refusal fallback is recorded (debt wave 4): the wire names every block frame of the refused
+  // attempt on the replacement's first frame only (SPEC 45)
+  it("carries the wire's supersedes list as sent, and an empty list when the frame has none", () => {
+    const events = feed(make(), [inRow(assistantFrame({ supersedes: ['old-1', 'old-2'] })), inRow(assistantFrame({ uuid: 'a-2' }))]);
+    expect(events[0]).toMatchObject({ kind: 'assistant.block.complete', messageUuid: 'a-1', supersedes: ['old-1', 'old-2'] });
+    expect(events[1]).toMatchObject({ kind: 'assistant.block.complete', messageUuid: 'a-2', supersedes: [] });
   });
 });
 
