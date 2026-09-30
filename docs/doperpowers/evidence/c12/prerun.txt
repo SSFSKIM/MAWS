@@ -1,0 +1,181 @@
+C12 M6: the §10 pre-run
+=======================
+
+Child C12 of docs/charter.md (execution document docs/doperpowers/plans/2026-09-29-c12-finish.md, M6, Acceptance item
+12). Plain text because this branch may not create .md files (the document's own fallback; Decision Log, executor
+pre-flight). Run 2026-09-30 by the M6 executor on branch worktree-agent-af283ff23966ccd8d at 50cf19e7 plus the pre-run
+spec (e2e/c12-prerun.spec.ts, e2e/support/c12-prerun.ts).
+
+What ran, and how
+-----------------
+- Target: the owner build, dist/mac-arm64/MAWS.app from `pnpm build:app` with MAWS_SIGN_IDENTITY unset.
+  `codesign -dv`: Identifier=Electron, Signature=adhoc, flags=0x20002(adhoc,linker-signed), Info.plist=not bound.
+  Every test ran through `pnpm e2e:packaged e2e/c12-prerun.spec.ts` (MAWS_E2E_EXECUTABLE = the app's
+  Contents/MacOS/MAWS; the run record says "packaged": true for every launch).
+- Engine: the pinned 2.1.283 by absolute path, through ClaudeUsage's relay (http://127.0.0.1:8641/api/hello answered 200
+  before the run and at each test's gate).
+- Scratch root: /private/tmp/maws-c12-prerun-1790765266 holding config/ (CLAUDE_CONFIG_DIR, settings.json `{}`), userData/,
+  userData-real/ (the real-store case only) and repos/ (every scratch repository). Removed after the run.
+- Owner-file check (the standing rules' python one-liner over ~/.claude.json `projects`, for the root as
+  /private/tmp/... and as /tmp/...): `[]` before and after every test, eleven tests and the real-store case, every rerun
+  included. Recorded per test under "ownerFileCheck" in prerun-run.json and prerun-realstore.json.
+- Pin: `ls -l ~/.local/share/claude/versions/2.1.283` read `-rwxr-xr-x@ 1 new staff 225036032 9월 25 15:10` before and
+  after every test (same records).
+- Models: sessions on Sonnet (the intent's model, as the model widget writes it); subagents on Haiku (Settings › Engine
+  subagent model set to haiku in the scratch profile). No item needed the owner's model.
+- Loads: every live block started with a 1-minute load average between 9.3 and 17.5 (under the 20 threshold); the
+  readings are the first lines of each run log.
+- Evidence: prerun-run.json (every number, per item; items rerun in part carry "rerunPieces"), prerun-realstore.json
+  (counts and timing only), and the screenshots prerun-<item>-<surface>-<theme>.png listed per item below (downscaled to
+  1600 px wide). No journal needed redaction for a finding, so none is committed.
+
+Verdicts: pass = observed by the pre-run as §10 words it; owner = only the real home or human hands can observe it (the
+owner's script step named); both = the pre-run observed what an agent may, and a step remains for the owner.
+
+§10.1 Overview with the owner's terminal sessions, foreign-live
+---------------------------------------------------------------
+Verdict: both (scratch observed; the owner's own sessions are owner's script step 1).
+| Observed | Evidence |
+| Three terminal-started sessions in two scratch projects (north: one `claude -p` and one interactive `claude` kept live in a PTY; south: one `claude -p`) list under their projects (north 2, south 1). | prerun-run.json "10.1"; prerun-10.1-overview-{light,dark}.png |
+| The live one is foreign-live: row glyph "Live in terminal", line "Terminal · pid 78758", digest phase `foreign`, and its Overview card shows the holder line with no controls; the two `-p` sessions read exited. | same |
+| Real store, read only (MAWS_E2E=1 kept, only CLAUDE_CONFIG_DIR deleted, scratch MAWS_USER_DATA, no engine launched, no session.* call but reads): 275 projects (275 rows shown), 3,274 sessions, 13 foreign-live digests (12 foreign glyphs in the sidebar's visible rows), 14 Overview cards. `engine.sessions` answered `[]` at the end. | prerun-realstore.json "10.1.realstore.coldStart"; the screenshot is under the scratch root only (it shows the owner's titles), not committed |
+| Time to first paint, cold (empty index): window 3.0 s, shell 16.3 s, first Overview card 57.9 s, first project row 58.4 s, index settled 59.2 s. Warm (the same profile, index built): window 1.4 s, shell 2.1 s, first card 2.4 s, first project row 3.0 s, settled 3.8 s (3,273 sessions, 11 foreign-live). | prerun-realstore.json "10.1.realstore.coldStart" and "10.1.realstore" |
+Notes: the cold figure is the first start over an owner store of 3,272 transcripts and is the owner's first-open
+experience of the sitting (step 1): about a minute before the first card. The owner's first open will be cold unless
+MAWS has run over the real store before.
+
+§10.2 A new worktree from "+", trust attested, settings load as in the terminal
+--------------------------------------------------------------------------------
+Verdict: both (scratch observed; a real project with its own settings is owner's script step 2).
+| Observed | Evidence |
+| C10's sentinel recipe in repos/deep: project .mcp.json server c12-sentinel, a SessionStart hook, an allow rule `Bash(echo C12_SENTINEL:*)`, plugin c12-plugin from a directory marketplace, enableWorkflows; all committed. "+" → Location › New worktree → Send → the trust card ("Trust this folder?") → Trust and start. Setup phases worktree, trusting, trusting, launching, ready (first pass). | prerun-run.json "10.2.run1" and "10.2"; prerun-10.2-trust-card-{light,dark}.png, prerun-10.2-session-{light,dark}.png |
+| The session runs in <repo>/.claude/worktrees/deep-q8jv on branch worktree-deep-q8jv. | "10.2" cwd, branch |
+| The init frame against a terminal `claude -p --setting-sources user,project,local` in the same worktree under the same home: MCP servers (c12-sentinel:connected), the 50 slash commands (c12-plugin:c12-plugin-ping among them), the agents (Explore, Plan, claude, general-purpose, statusline-setup) and the plugins (agents-md, c12-plugin, plugin-authoring, telemetry) are identical. The hook ran for each launch (5 marker files), and the allow rule is listed by session.listPermissionRules. | "10.2" maws, terminal, same |
+Notes: the first comparison differed in one plugin (plugin-authoring) and two commands, and the cause was the test's
+terminal, not MAWS: the terminal half then ran without the owner's login-shell CLAUDE_* switches (the owner's shell
+exports CLAUDE_CODE_ENABLE_FUNCTION_HOOKS, which brings plugin-authoring, and others), while MAWS's launch carries them
+from its captured login shell. The spec now builds the terminal's environment from the same login-shell capture; with it
+every set matches. The second pass reused the trusted repository, so its phases show no trusting step; the first pass
+recorded the card.
+
+§10.3 Overview approvals, notification, ⌘⇧J
+------------------------------------------
+Verdict: both (native delivery and the key itself are owner's script step 3).
+| Observed | Evidence |
+| P (proj-p, default mode) asked to `touch c12-p.txt`; Q (proj-q) asked with AskUserQuestion; both approved/answered on their Overview cards (Allow once; Red, Submit). P's file exists; Q replied "Red". | prerun-run.json "10.3"; prerun-10.3-overview-cards-{light,dark}.png |
+| R (proj-r, default mode, `mkdir c12-r`) raised its request after BrowserWindow.blur() (the blur took: no MAWS window focused); C5's notifier logged R's notification with delivery `fallback` (the unsigned build cannot post natively). | "10.3" blurredBeforeR, notified |
+| The `attention.next` menu item (⌘⇧J's item), clicked through Electron's Menu API, opened R with its approval card. | prerun-10.3-attention-next-r-{light,dark}.png |
+Notes: P and Q were also notified (fallback): the Playwright-launched window was not focused when their requests came,
+so the notifier treated MAWS as in the background, as it should.
+
+§10.4 One deep session
+----------------------
+Verdict: both (the pre-run observed every piece; owner's script step 4 repeats it on a real project, and step 14 adds
+C8's by-hand items).
+| Observed | Evidence |
+| Relay to a running background child: the deep session dispatched a background Haiku agent (a Read/sleep loop that appends messages to an inbox file); Subagents › the agent › a relay typed and sent. Line history: "Asked DEEP READY reply to relay" (4 s), then "DEEP READY reply sent it with SendMessage after 2 parent rounds · Background relay loop agent gets it at its next tool round" (4.3 s), then cleared at 6.1 s while the child still ran: the relay reached `delivered` (a delivered relay is dismissed at once; the child ended only after the stop file). The child's inbox got the text at 10.5 s; its disk transcript holds the `queued_command` attachment (origin coordinator); fs.followState for the child went backfilling → following at the forward (wave 4A's follow). | prerun-run.json "10.4".relay; prerun-10.4-relay-{light,dark}.png |
+| Review shows the session's diff (Uncommitted: "1 file changed · +0 −0", the untracked c12-deep.txt the session wrote). | "10.4".review; prerun-10.4-review-{light,dark}.png |
+| C8c G3: after a commit on the worktree branch, This branch reads "1 file changed · +1 −0 · This branch", footer "worktree-deep-q8jv · Since main". | "10.4".review.thisBranch; prerun-10.4-review-this-branch-{light,dark}.png |
+| A Terminal opened from "+" starts in the worktree (pty.list cwd, and `pwd` typed in the tab wrote the worktree path). | "10.4".terminal; prerun-10.4-terminal-{light,dark}.png |
+| Files › the worktree root › one.txt opens a viewer tab. | "10.4".viewer; prerun-10.4-viewer-{light,dark}.png |
+| A workflow (two Haiku agents in one phase) shows in Background work: "Two echo agents in one phase", phase "Echo 2/2", agents alpha and beta with model, tokens and time. | "10.4".workflow; prerun-10.4-workflow-{light,dark}.png |
+| C8 gap 1: "+" lists Session info (Subagents, Review, Terminal, Files, Background work, Session info), and the resting summary's model row opens it. | "10.4".sessionInfo; prerun-10.4-session-info-{light,dark}.png |
+Notes: the foreground-relay observation is dropped (the fork gate stays, ruled at M5). Twice in five launches, MAWS's
+resume of the deep session (row › Resume) sat at `initialize` with no frame at all from the engine for 120 s (journal:
+one `out` initialize, nothing `in`), then passed on the next attempt; a standalone reproduction of the same launch
+answered in under 0.6 s on each of five tries. See the executor report (Discoveries); the owner may meet it as a
+resume that never becomes ready.
+
+§10.5 Resume both ways
+----------------------
+Verdict: both (owner's script step 5, with the owner's 2.1.285 terminal).
+| Observed | Evidence |
+| The deep session archived from its row (Archive…, the sheet's Archive); no cleanup dialog was offered. | prerun-run.json "10.5".archive |
+| `claude --resume d13ad955-…` in its worktree, the pinned 2.1.283 interactively in a PTY under the scratch home, answered "I created `c12-deep.txt` in the worktree root, and it holds the single line `DEEP`." | "10.5".terminalResume |
+| The `claude -p` session from §10.1 (north) resumed in MAWS from its row's Resume: ready in 1.96 s, spawn carries --resume, and "Reply with exactly: RESUMED IN MAWS" was answered. | "10.5".mawsResume; prerun-10.5-resumed-in-maws-{light,dark}.png |
+Notes: version skew: the pre-run's terminal is the pin; the owner's `claude` on PATH is 2.1.285, so the owner's step 5
+resumes MAWS's 2.1.283 transcript with a newer engine.
+
+§10.6 Nine sessions under the budget; quit asks first
+-----------------------------------------------------
+Verdict: both (the nine-session run is M3's, budget-run.json; the owner's numbers are step 6; the quit is step 12).
+| Observed | Evidence |
+| M3's measured run (nine trees, sum 2,854 MiB, budget 2,553 MiB, one release 0.19 s after the setting, Send-to-ready 0.63 s with the grant re-applied, the no-candidate banner). | budget-run.json |
+| In brief on the owner build: three trees 261.1, 259.1, 259.1 MiB (sum 779), budget 649 MiB: X1, the least recently used, released 0.39 s after the setting, the other two untouched, no attention item; X1's row read `released`. Send in X1 resumed it: ready 0.92 s after Enter, one user frame, `reconnect` trigger process_exit, reply "X1 BACK". | prerun-run.json "10.6".release; prerun-10.6-released-*.png, prerun-10.6-resumed-*.png |
+| Quit with a turn in flight (X1, a foreground sleep 30), background work (X2, a background sleep 45) and a busy terminal (sleep 40 in a PTY): "quit-report: 5 ms · 1 mid-turn, 1 background work, 1 busy terminal"; answered cancel: the app and its sessions stayed. Answered when_idle: the banner "MAWS will quit when 3 things finish" with Quit now and Cancel; the app quit by itself 41.9 s later, when all three had finished. | "10.6".quit; prerun-10.6-quit-when-idle-{light,dark}.png |
+
+§10.7 500 turns anchored; streaming never drags the reader
+----------------------------------------------------------
+Verdict: both (the owner's longest real transcript is step 7).
+| Observed | Evidence |
+| C6's seeded 500-turn session (test/support/synth-transcript.ts, seed 7) written as 10,044 disk records under the scratch home and opened in MAWS from disk. At 50% and 40% of its height, a collapsed turn was expanded: the clicked divider and the row above it moved 0 px (baseline without a click: 0 px). | prerun-run.json "10.7".anchoring; prerun-10.7-long-transcript-{light,dark}.png |
+| A live Sonnet answer (about 900 words) streamed while the reader was scrolled up 500 px ("Jump to latest" shown): 95 samples, the scroll offset moved 0 px while the content grew 1,346 px below. | "10.7".streaming; prerun-10.7-streaming-scrolled-up-{light,dark}.png |
+| The owner's three longest transcripts, by record count (read only, paths only): ~/.claude/projects/-Users-new-claude-code-bundle-2-1-257/809406bb-43f0-4d12-a0eb-4f20d6cc4941.jsonl (28,317), ~/.claude/projects/-Users-new-Developer-GitHub-AutoPM/d7e8a60d-4568-4492-b6c2-61ed8346b7c8.jsonl (24,079), ~/.claude/projects/-Users-new-Developer-GitHub-doperpowers--claude-worktrees-fold-plans/30e0568a-f1ee-4dce-8db9-b9799fb23107.jsonl (16,975); 3,817 transcripts counted at 2026-09-30 11:17 UTC. | "10.7".ownerLongest; owner-script.txt step 7 |
+Notes: rows below an expanded turn move down by the expansion's height, as in any document; the anchor is the turn the
+reader opened and what sits above it (C6's own criterion for this case). The first attempt measured a row below the
+expansion and is superseded.
+
+§10.8 Palette widgets, `!`, `#`; the live phase
+-----------------------------------------------
+Verdict: both (owner's script step 8 on the real home, with the keyboard rebinding).
+| Observed | Evidence |
+| /model, /effort, /permissions, /usage, /context, /config, /plugins, /mcp, /sandbox, /hooks, /memory, /skills each opened from the palette with a "Read with …" footer and no error; each read went out on the wire (list_models, list_permission_rules, get_usage, get_context_usage, get_settings, mcp_status, get_sandbox_dialog, get_hooks_listing, get_memory_dialog, get_skills_dialog; plugins reads system/init). | prerun-run.json "10.8".widgets; prerun-10.8-widget-{context,mcp}-{light,dark}.png |
+| `!ls` listed one.txt in the transcript's bash row; `#C12 pre-run memory note` wrote "- C12 pre-run memory note" to the scratch project's CLAUDE.md. | "10.8".bang, "10.8".memory; prerun-10.8-bang-and-memory-{light,dark}.png |
+| The live phase with session_state_changed on the wire (M5's third variable): engine states running → idle, digest phases working → idle, frames running, idle, running, idle. | "10.8".phase |
+
+§10.9 Queue, steer, stop, resume; survives exit; denial; approvals lost
+-----------------------------------------------------------------------
+Verdict: both (owner's script steps 9 and 12).
+| Observed | Evidence |
+| Queue: during a running turn the control read Queue; "1 queued"; the message went out when the turn ended. | prerun-run.json "10.9".queue |
+| Steer: with ⌥ held the control read Steer; the write carried priority next. | "10.9".steer |
+| Stop and Resume as labelled: with a message queued the control read Stop, and Stop paused the queue ("Queue paused because you interrupted"); idle, the control read Resume, and Resume released it. | "10.9".stopResume; prerun-10.9-queue-paused-{light,dark}.png |
+| A paused queue survives a quit: after quit and relaunch, session.queue.list answered one queued entry, paused, reason interrupt, and the list showed "1 queued · Queue paused because you interrupted". | "10.9".survives; prerun-10.9-queue-survived-{light,dark}.png |
+| A denied command stays visible while its turn is collapsed: the collapsed divider carries "1 denied". | "10.9".denial; prerun-10.9-denied-collapsed-{light,dark}.png |
+| "1 approval lost": an engine that ends with an approval pending (SIGKILL of the scratch session's engine, exit reason crash) raises "Session interrupted, 1 approval lost" in Needs you and "Session process exited (crash) · 1 approval lost" in the transcript. | "10.9".lost.afterExit; prerun-10.9-approval-lost-{light,dark}.png |
+Notes: on 2.1.283, ⌘. with an approval pending does not lose it: the engine answers the interrupt with a
+`control_cancel_request` for the pending `can_use_tool`, the card retires as aborted, and nothing is counted lost (the
+journal, seq 59 → 65). A quit does the same (seq 103 → 108, exit reason quit, lostAttentionCount 0). Only a process that
+ends without cancelling (a crash) loses an approval. §10.9's "an interrupted session raises N approvals lost" therefore
+holds for an interrupted process, not for the ⌘. interrupt; the architect may restate it.
+
+§10.10 Themes
+-------------
+Verdict: both (by-eye comparison beside Claude Desktop and Codex is step 10).
+| Observed | Evidence |
+| A fresh profile paints light first (html data-theme light, settings.theme light); the application menu's theme.dark item (clicked through Electron's Menu API) switches the page (body and sidebar backgrounds change) and its theme.light item switches back to the same colours. | prerun-run.json "10.10"; prerun-10.10-fresh-{light,dark}.png |
+| Every surface above is screenshotted in both themes (the files named per item). | the pack |
+| Token scan: `pnpm exec vitest run test/support/tokens-guard.test.ts` 4/4 (its scan over the renderer sources finds no colour literal or palette class). | this file |
+
+C8's four gaps
+--------------
+1. C11's Session info in the panel: pass ("+" lists it; the summary's model row opens it). §10.4 above.
+2. Item 9 as restated (Attach adds the Terminal tab and activates its session): pass. A `claude --bg` job under the
+   scratch home held a session in repos/bgjob; its row offered exactly Open and "Attach in a terminal tab"; with another
+   session focused, Attach selected the job's session tab and the panel's Terminal tab, and pty.list held its live pty.
+   prerun-run.json "c8.attach"; prerun-c8-attach-{light,dark}.png. Note: `claude --bg` from the pin starts a transient
+   daemon through `~/.local/bin/claude`, so the job ran on 2.1.285, not the pin (config/daemon.log "daemon start
+   version=2.1.285"); the daemon exited by itself 5 s after the job was stopped (`claude stop e970252d`).
+3. C8c's G3: pass (§10.4, This branch in a .claude/worktrees/ worktree).
+4. The owner's sitting: owner (owner's script steps 4, 10, 11 and 14).
+
+Differences from the owner build as the owner runs it
+-----------------------------------------------------
+- MAWS_E2E=1 on every launch (launchMaws sets it, the real-store case keeps it): custody is bypassed (configure sends
+  binaryPath null and the host runs the installer's pin), Chromium uses a mock keychain, and the quit question is
+  answered from MAWS_E2E_QUIT_ANSWER instead of the native dialog.
+- No harness routes (MAWS_HARNESS=0; the packaged build has none); every observation went through the product's own UI
+  and its X2 bridge.
+- Unsigned, ad-hoc build: notifications fall back (dock bounce and toast) instead of native delivery.
+- A scratch config home with `{}` user settings, the owner's login-shell environment otherwise (MAWS captures it), Sonnet
+  sessions and Haiku subagents instead of the owner's default model, scratch repositories.
+- The window is driven through Playwright: blur, focus and native menu items through Electron's API on MAWS's own window;
+  the ⌘⇧J key, the Korean IME, ⌘-click, the Open panel and by-eye taste are the owner's.
+- Approvals are answered by clicks on MAWS's cards; the §10.4 child's own tool calls needed none (auto mode).
+
+Spend
+-----
+US$3.89 of the US$15 limit: US$2.57 from the journals' result.total_cost_usd (an upper bound: a resumed process's figure
+may include the cost it restored), US$1.32 from terminal runs (the `-p` runs' reported cost, US$0.90, and three
+interactive or background runs estimated from their transcripts' token usage at Sonnet prices, US$0.42; one of the
+`-p` runs, US$0.23, was the diagnosis of the resume stall). Per-run figures: prerun-run.json "spend" and "terminalUsd".

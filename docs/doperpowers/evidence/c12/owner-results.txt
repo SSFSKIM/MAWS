@@ -1,0 +1,32 @@
+MAWS P0 sitting: the owner's results
+=====================================
+
+Fill one row per step of owner-script.txt: the result (pass, fail or note), what you saw, and a screenshot path if
+useful. The architect completes recomposition.txt from this file and prerun.txt.
+
+Date:
+MAWS commit (git rev-parse --short HEAD):
+Engine: 2.1.283 (pinned); terminal `claude --version`:
+
+| Step | Result | Notes | Screenshot |
+|---|---|---|---|
+| B1 build (codesign -dv, first five lines) | | | |
+| B2 ~/.claude.json scratch entries and ~/.Trash emptied | | | |
+| B3 ClaudeUsage running; a terminal claude kept live | | | |
+| B4 opened; notifications allowed; first-open time to a full Overview | | | |
+| B5 stateful MCP servers (the list) | | | |
+| 1 Overview, foreign-live (§10.1) | | | |
+| 2 new worktree, trust card, settings as in the terminal (§10.2) | | | |
+| 3 Overview approve and answer; native notification for R; ⌘⇧J lands on R (§10.3) | | | |
+| 4 relay (line cleared = delivered), SendMessage row, Review, Terminal, viewer tab, workflow (§10.4) | | | |
+| 5 resume from the terminal (2.1.285) and in MAWS (§10.5) | | | |
+| 6 budget: X of 8 GB, three per-tree figures, the release, the resume (§10.6) | | | |
+| 7 longest transcript anchored; streaming holds the reader (§10.7) | | | |
+| 8 twelve widgets, `!git status`, `#` note, a rebinding (§10.8) | | | |
+| 9 queue, steer, stop, resume; denial when collapsed; ⌘. with an approval pending (§10.9) | | | |
+| 10 themes and taste beside Claude Desktop, Codex and ClaudeUsage (§10.10) | | | |
+| 11 IME, ⌘-click, ⌘A and Select All, Open on GitHub and push state, Open panel, ⌘R | | | |
+| 12 quit question (three parts), Quit when idle banner, Cancel, Quit; the queued message after reopening | | | |
+| 13 terminal launch environment: foreground or background subagent; TaskCreate or TodoWrite or none | | | |
+| 14 C8: both themes over the panel, Open on GitHub against an upstream, a monitor, Attach by hand, This branch disabled on master | | | |
+| 15 split-pane irritations (M5.3); ExitPlanMode and EnterPlanMode denies; sleep and wake (optional) | | | |

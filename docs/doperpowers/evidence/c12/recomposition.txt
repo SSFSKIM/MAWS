@@ -1,0 +1,39 @@
+P0 recomposition checklist against charter §10
+===============================================
+
+C12 of docs/charter.md (docs/doperpowers/plans/2026-09-29-c12-finish.md, M6). The architect completes the Verdict column
+from the evidence pack (prerun.txt, prerun-run.json, prerun-realstore.json, budget-run.json, custody-run.json, the
+screenshots) and owner-results.txt. Verdicts: met, met as restated, gap, waived by the owner. "Pre-run" gives the
+pre-run's own verdict (pass, owner, both) and where its evidence is; paths are under docs/doperpowers/evidence/c12/.
+
+| # | Item | Pre-run evidence | Owner step | Verdict | Notes |
+|---|---|---|---|---|---|
+| 1 | §10.1 Overview, foreign-live | both: prerun.txt §10.1; prerun-run.json "10.1"; prerun-10.1-overview-*.png; real store read only: prerun-realstore.json (275 projects, 3,274 sessions, 13 foreign-live; first card 57.9 s cold, 2.4 s warm; engine.sessions [] at the end) | 1 | | cold first open about a minute on the owner's store |
+| 2 | §10.2 new worktree, trust, settings load | both: prerun.txt §10.2; "10.2" and "10.2.run1"; prerun-10.2-trust-card-*.png, prerun-10.2-session-*.png (MCP, 50 commands, agents, plugins identical to a terminal run in the worktree) | 2 | | the terminal half needs the owner's login-shell CLAUDE_* switches to compare |
+| 3 | §10.3 Overview approvals, notification, ⌘⇧J | both: prerun.txt §10.3; "10.3"; prerun-10.3-*.png (fallback notification; the attention.next menu item clicked through Electron's API) | 3 | | native delivery and the key are the owner's |
+| 4 | §10.4 deep session | both: prerun.txt §10.4; "10.4"; prerun-10.4-*.png (relay, Review, Terminal in the worktree, viewer, workflow, G3, Session info) | 4 | | relay reached delivered live (see C8-R) |
+| 5 | §10.5 resume both ways | both: prerun.txt §10.5; "10.5"; prerun-10.5-resumed-in-maws-*.png | 5 | | version skew: the owner's terminal is 2.1.285, the pin 2.1.283 |
+| 6 | §10.6 as restated (budget, release, resume, quit) | both: budget-run.json (M3, nine trees); prerun.txt §10.6; "10.6"; prerun-10.6-*.png (release 0.39 s, Send-to-ready 0.92 s, the three-part quit question, cancel, quit when idle quitting 41.9 s later) | B5, 6, 12 | | the measured figures for §10 item 6 are M3's (Proposed charter lines) |
+| 7 | §10.7 500 turns anchored, streaming | both: prerun.txt §10.7; "10.7" (0 px drift at the expanded turn and above; 0 px while 1,346 px streamed below); prerun-10.7-*.png; the owner's three longest transcripts listed in owner-script.txt step 7 | 7 | | |
+| 8 | §10.8 widgets, `!`, `#` | both: prerun.txt §10.8; "10.8" (twelve widgets, each read on the wire); prerun-10.8-*.png | 8 | | |
+| 9 | §10.9 queue, steer, stop, resume, survives exit, denial, lost | both: prerun.txt §10.9; "10.9"; prerun-10.9-*.png | 9, 12 | | on 2.1.283 ⌘. cancels a pending approval (nothing lost); "1 approval lost" shows for a process that dies with it pending: a restatement candidate |
+| 10 | §10.10 themes | both: prerun.txt §10.10; "10.10"; every prerun-*-{light,dark}.png; tokens-guard 4/4 | 10 | | |
+| D9 | Launch environment mirrors the terminal | M5 probe: spikes/protocol-probe/fixtures/pass3/launch-env-{terminal,fork,unset,todo,state-events,state-events-unset}.jsonl; the X6 lines under the document's Proposed charter lines | 13 | | scratch-home gates against the owner's account |
+| C8-1 | C11's Session info in the panel | pass: prerun.txt "C8's four gaps" 1; "10.4".sessionInfo; prerun-10.4-session-info-*.png | 4 | | |
+| C8-9 | Attach activates its session (restated) | pass: prerun.txt "C8's four gaps" 2; "c8.attach"; prerun-c8-attach-*.png | 14 | | a `claude --bg` job runs on the installed 2.1.285 daemon, not the pin |
+| C8-G3 | This branch in a worktree | pass: "10.4".review.thisBranch; prerun-10.4-review-this-branch-*.png | 14 (the disabled half on master) | | |
+| C8-S | C8's one sitting | owner | 4, 10, 14 | | |
+| C8-R | Relay reaching `delivered` for a live child | pass: "10.4".relay: forwarded at 4.3 s, cleared (delivered) at 6.1 s with the child still running; the child's disk transcript holds the queued_command attachment (origin coordinator); fs.followState backfilling → following at the forward; the child's inbox had the text at 10.5 s | 4 | | first live observation of wave 4A's follow; unit-pinned only until now |
+| W4 | Debt wave 4 on master (honest ctx, the title rule, the reasons) | merge commits 2cf00f58, 2b306e66, a5ae05c2, a37d35f1 (the C12 pre-flight) | — | | |
+| S | Scale review of the integrated app (§19 2026-09-28) | — | — | | the architect's |
+| T | Tracker rows closed or narrowed | the document's Tracker rows, with their commits | — | | |
+| §17/§20 | Tracking row closed, retrospective written | — | — | | the architect's |
+
+Open observations from the pre-run for the architect (details in prerun.txt and the M6 executor report):
+- A MAWS resume sat at the engine's `initialize` with no answer for 120 s in two of five launches (no frame in; a
+  standalone reproduction answered in under 0.6 s every time). The host has no initialize timeout, so the owner would see
+  a resume that never becomes ready.
+- §10.9's "interrupted session raises N approvals lost": on 2.1.283 an interrupt and a quit both cancel the pending
+  approval; only a crash loses one.
+- `claude --bg` from the pinned binary runs its job on the installed 2.1.285 daemon.
+- The owner's first open over the real store takes about a minute to the first Overview card (cold index).
