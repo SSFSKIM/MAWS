@@ -71,6 +71,11 @@ describe('the repository watcher classifies paths', () => {
     for (const sub of ['refs/heads/main', 'refs/heads/feat/xy', 'refs/remotes/origin/main', 'refs/remotes/upstream', 'refs/tags/v1', 'refs/notes/commits']) {
       expect(refMatters(sub, on), sub).toBe(false);
     }
+    // A remote fetched into a namespace of its own (`remote.review.fetch=+refs/heads/*:refs/custom/review/*`) tracks as
+    // `custom/review/main`; its ref counts, and so does any ref outside the namespaces known not to be it.
+    const custom = status({ branch: 'main', upstream: 'custom/review/main' });
+    for (const sub of ['refs/custom/review/main', 'refs/custom', 'refs/other/thing']) expect(refMatters(sub, custom), sub).toBe(true);
+    for (const sub of ['refs/remotes/origin/main', 'refs/tags/v1']) expect(refMatters(sub, custom), sub).toBe(false);
     const detached = status({ branch: null, upstream: null });
     expect(refMatters('refs/heads/main', detached)).toBe(false);
     expect(refMatters('refs/stash', detached)).toBe(true);

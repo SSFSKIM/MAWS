@@ -82,6 +82,11 @@ export function connectShell(
     queued = [];
     if (connected) apply(queue);
   };
+  // What a snapshot reply or the layout's tab check must see first: the window's events, applied at once.
+  const flushNow = () => {
+    if (timer) clearTimeout(timer);
+    if (queued.length > 0 || timer) flush();
+  };
   const enqueue = (item: Queued) => {
     if (batchMs <= 0) return apply([item]);
     queued.push(item);
@@ -107,7 +112,10 @@ export function connectShell(
     // A snapshot nobody answers leaves its store empty and live on events: a degraded start, not a fault in the page.
     // (In launch mode `index` before C3 and C4 land, the record side and attention have no answerer at all.)
     if (!result.ok) console.warn(`[shell] ${label} unavailable; starting empty`, result.error);
-    else apply(result.value);
+    else {
+      flushNow(); // the events that arrived before the reply apply before it, in arrival order
+      apply(result.value);
+    }
   };
 
   // C3's process table, so a live session reads live after a reload before its next status (debt wave 3).
@@ -128,7 +136,12 @@ export function connectShell(
     const retention = currentTabRetention();
     if (retention) await retention.ready;
     if (!live()) return;
-    await stores.layout.getState().hydrate(client, (id) => sessions().records.has(id) || (retention?.retains(id) ?? false));
+    // A tab is judged against every record event already received, those still waiting for their window included (a
+    // session the snapshot missed and a later change restored keeps its tab).
+    await stores.layout.getState().hydrate(client, (id) => {
+      flushNow();
+      return sessions().records.has(id) || (retention?.retains(id) ?? false);
+    });
   });
 
   return () => {

@@ -194,6 +194,18 @@ describe('shell event subscription', () => {
       expect(stores.sessions.getState().indexing).toBeNull();
     });
 
+    it('a saved tab is judged against the events still in their window: a session the snapshot missed and a newer change restored keeps its tab', async () => {
+      const { fake, stores } = setup(60_000); // a window that never closes on its own during the test
+      fake.event('session.changed', { record: record('a'), cause: 'discovered', revision: 2 });
+      await fake.reply('session.list', { sessions: [], revision: 1 });
+      await fake.reply('session.projects.list', { projects: [project('p1', 0)], revision: 1 });
+      await fake.reply('session.digests', { digests: [] });
+      await fake.reply('attention.list', []);
+      await vi.waitFor(() => expect(stores.layout.getState().hydrated).toBe(true));
+      expect(stores.layout.getState().main.panes[0].tabs.map((t) => t.id)).toEqual(['overview', 'session:a']);
+      expect(stores.sessions.getState().records.has(A)).toBe(true);
+    });
+
     it('drops a pending window at disconnect', () => {
       vi.useFakeTimers();
       const { fake, stores, disconnect } = setup(16);

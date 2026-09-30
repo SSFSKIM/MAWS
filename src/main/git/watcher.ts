@@ -70,14 +70,19 @@ export function classifyRootPath(rel: string, gitDirRel: string | null): Exclude
 }
 
 // Whether a ref event (a path in the common dir, relative to it) can move this status: the branch's own ref, the
-// upstream's (a remote-tracking ref, or a local branch's), the stash; `packed-refs` and `config` may hold any of them.
-// A directory above one of them (an event naming `refs/heads`) counts. The per-worktree HEAD and index are not refs.
+// upstream's, the stash; `packed-refs` and `config` may hold any of them. A directory above one of them (an event
+// naming `refs/heads`) counts. The upstream is git's short name, which drops `refs/remotes/` or `refs/heads/`, or only
+// `refs/` for a ref elsewhere (a remote fetched into `refs/custom/<remote>/*` tracks as `custom/<remote>/main`), so all
+// three readings count. Only the namespaces that cannot hold a status's ref under another name (other branches, other
+// remote-tracking refs, tags, notes) are ruled out; a ref anywhere else counts. The per-worktree HEAD and index are not refs.
+const RULED_OUT = ['refs/heads', 'refs/remotes', 'refs/tags', 'refs/notes'];
 export function refMatters(sub: string, status: Pick<GitStatus, 'branch' | 'upstream'>): boolean {
   if (sub === 'packed-refs' || sub === 'config') return true;
   const refs = ['refs/stash'];
   if (status.branch !== null) refs.push(`refs/heads/${status.branch}`);
-  if (status.upstream !== null) refs.push(`refs/remotes/${status.upstream}`, `refs/heads/${status.upstream}`);
-  return refs.some((ref) => under(ref, sub));
+  if (status.upstream !== null) refs.push(`refs/remotes/${status.upstream}`, `refs/heads/${status.upstream}`, `refs/${status.upstream}`);
+  if (refs.some((ref) => under(ref, sub))) return true;
+  return sub.startsWith('refs/') && !RULED_OUT.some((ns) => under(sub, ns));
 }
 
 // The engine's linked worktrees, and MAWS's, live at `<root>/.claude/worktrees/<name>` (its runtime exclude reads
