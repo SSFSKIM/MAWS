@@ -31,7 +31,9 @@ export interface ShellStores {
 // Debt wave 5 (the cold first paint): the record side's events (records, removals, projects, digests, the discovery
 // pass's progress) are applied together once per window rather than one by one, so a flood of them (a cold index
 // announces every session in the store, twice over with its seed digests) costs the page one store write per kind and
-// one render per window instead of one render per event. 0 applies each event as it arrives.
+// one render per window instead of one render per event. 0 applies each event as it arrives. Batching starts once the
+// layout has hydrated: until then every event applies as it arrives, so the snapshots and the layout's tab check (and
+// the removals it replays) see them exactly as before, and a window never has to be drained from inside them.
 export const SHELL_BATCH_MS = 16;
 
 type Queued =
@@ -74,6 +76,7 @@ export function connectShell(
       i++;
     }
   };
+  let batching = false; // from the layout's hydration on
   let queued: Queued[] = [];
   let timer: ReturnType<typeof setTimeout> | null = null;
   const flush = () => {
@@ -82,13 +85,8 @@ export function connectShell(
     queued = [];
     if (connected) apply(queue);
   };
-  // What a snapshot reply or the layout's tab check must see first: the window's events, applied at once.
-  const flushNow = () => {
-    if (timer) clearTimeout(timer);
-    if (queued.length > 0 || timer) flush();
-  };
   const enqueue = (item: Queued) => {
-    if (batchMs <= 0) return apply([item]);
+    if (batchMs <= 0 || !batching) return apply([item]);
     queued.push(item);
     timer ??= setTimeout(flush, batchMs);
   };
@@ -112,10 +110,7 @@ export function connectShell(
     // A snapshot nobody answers leaves its store empty and live on events: a degraded start, not a fault in the page.
     // (In launch mode `index` before C3 and C4 land, the record side and attention have no answerer at all.)
     if (!result.ok) console.warn(`[shell] ${label} unavailable; starting empty`, result.error);
-    else {
-      flushNow(); // the events that arrived before the reply apply before it, in arrival order
-      apply(result.value);
-    }
+    else apply(result.value);
   };
 
   // C3's process table, so a live session reads live after a reload before its next status (debt wave 3).
@@ -136,12 +131,8 @@ export function connectShell(
     const retention = currentTabRetention();
     if (retention) await retention.ready;
     if (!live()) return;
-    // A tab is judged against every record event already received, those still waiting for their window included (a
-    // session the snapshot missed and a later change restored keeps its tab).
-    await stores.layout.getState().hydrate(client, (id) => {
-      flushNow();
-      return sessions().records.has(id) || (retention?.retains(id) ?? false);
-    });
+    await stores.layout.getState().hydrate(client, (id) => sessions().records.has(id) || (retention?.retains(id) ?? false));
+    batching = true;
   });
 
   return () => {

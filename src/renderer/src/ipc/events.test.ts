@@ -194,7 +194,7 @@ describe('shell event subscription', () => {
       expect(stores.sessions.getState().indexing).toBeNull();
     });
 
-    it('a saved tab is judged against the events still in their window: a session the snapshot missed and a newer change restored keeps its tab', async () => {
+    it('until the layout has hydrated, events apply as they arrive: a session the snapshot missed and a newer change restored keeps its saved tab', async () => {
       const { fake, stores } = setup(60_000); // a window that never closes on its own during the test
       fake.event('session.changed', { record: record('a'), cause: 'discovered', revision: 2 });
       await fake.reply('session.list', { sessions: [], revision: 1 });
@@ -206,13 +206,15 @@ describe('shell event subscription', () => {
       expect(stores.sessions.getState().records.has(A)).toBe(true);
     });
 
-    it('drops a pending window at disconnect', () => {
-      vi.useFakeTimers();
+    it('drops a pending window at disconnect', async () => {
       const { fake, stores, disconnect } = setup(16);
+      await answerSnapshots(fake);
+      await vi.waitFor(() => expect(stores.layout.getState().hydrated).toBe(true));
+      vi.useFakeTimers();
       fake.event('session.changed', { record: record('late'), cause: 'discovered', revision: 5 });
       disconnect();
       vi.advanceTimersByTime(50);
-      expect(stores.sessions.getState().records.size).toBe(0);
+      expect(stores.sessions.getState().records.has('late' as AppSessionId)).toBe(false);
     });
   });
 
