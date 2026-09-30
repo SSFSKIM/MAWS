@@ -1,6 +1,6 @@
-// The gateway's small confirmation sheets (the route switch's confirm and `pickDirectModel`'s choice; the Settings tab's
-// Re-pin and Reset confirms): C10's `Sheet` and `SheetForm` (D-20) with the close callback their answer is owed to (the
-// switch's machine, `pickDirectModel`'s promise), so Escape, the overlay and Cancel all reach `onClose`. It opens with
+// The small confirmation sheets whose answer is owed to a caller (the route switch's machine, `pickDirectModel`'s
+// promise, the Settings tab's confirms): C10's `Sheet` and `SheetForm` (D-20) with that caller's close callback, so
+// Escape, the overlay and Cancel all reach `onClose`. It opens with
 // focus on its first control, which is Cancel when the sheet holds no list: the sheets hold no text field, so Enter
 // never confirms on its own, and stopping a session's process takes a deliberate press of the confirm button.
 import type { ReactNode } from 'react';

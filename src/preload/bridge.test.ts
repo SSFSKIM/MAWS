@@ -100,8 +100,13 @@ describe('preload bundle', () => {
       if (seen.has(file)) return;
       seen.add(file);
       const text = readFileSync(file, 'utf8');
-      // value imports and re-exports only: `import type` and `export type` are erased from the bundle
-      for (const [, spec] of text.matchAll(/^(?:import|export)\s+(?!type\b)[^;]*?from\s+'([^']+)'/gms)) {
+      // value imports, re-exports, side-effect imports and dynamic imports: `import type` and `export type` are erased
+      const specs = [
+        ...text.matchAll(/^(?:import|export)\s+(?!type\b)[^;]*?from\s+'([^']+)'/gms),
+        ...text.matchAll(/^import\s+'([^']+)'/gm),
+        ...text.matchAll(/\b(?:import|require)\(\s*'([^']+)'\s*\)/g),
+      ];
+      for (const [, spec] of specs) {
         if (spec.startsWith('.') || spec.startsWith('@shared/')) {
           const base = spec.startsWith('.') ? resolve(dirname(file), spec) : resolve(src, 'shared', spec.slice(8));
           walk(existsSync(`${base}.ts`) ? `${base}.ts` : resolve(base, 'index.ts'));

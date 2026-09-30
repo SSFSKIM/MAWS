@@ -178,7 +178,7 @@ app.whenReady().then(() => {
     try {
       projectDirectories = index.projects.list({ includeHidden: true }).map((p) => p.directory);
     } catch {
-      // the index is unavailable: the read model's sessions alone (knownSessionDirectories warns once per read)
+      // the projects are unavailable; the session walk falls back to the read model on its own (with a warning)
     }
     return listableRoots(knownSessionDirectories(sessions.model, index, { includeArchived: false }), projectDirectories); // debt wave 4: C11's walk
   };
