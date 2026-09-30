@@ -72,8 +72,11 @@ The sitting
        phase('Echo')
        const out = await parallel([() => agent('Reply with exactly ALPHA and nothing else.', {label: 'alpha', effort: 'low'}), () => agent('Reply with exactly BETA and nothing else.', {label: 'beta', effort: 'low'})])
        return out
-   Record each piece. If Resume on a session ever stays at "Resuming…" for more than half a minute, note it (the
-   pre-run saw a resume sit at the engine's initialize twice in five tries).
+   Record each piece. If Resume on a session ever stays at "Resuming…": after 30 s of engine silence MAWS now relaunches
+   once and says so in the setup detail ("No output from the engine for 30 s · trying once more"); a second silence fails
+   the launch with "no output" and offers Resume. Note any occurrence with the time and the machine's load (`uptime`):
+   the pre-run saw the stall twice in four resumes at a load above 60, and the C3 corrective (2026-09-30) could not
+   reproduce it in 74 resumes at normal load.
 
 5. Resume both ways (§10.5; 4 min). Archive the deep session. In a terminal run `cd <worktree> && claude --resume <id>`
    (the id is in Session info) and ask what it just did; it answers; `/exit`. Then quit the terminal `claude` from B3,
@@ -128,7 +131,7 @@ The sitting
    Then in `default` mode deny a command; collapse its turn and "1 denied" still shows on the divider. Interrupt (⌘.)
    while an approval is pending: note what you see. (On 2.1.283 the engine cancels the pending request on an interrupt,
    so the pre-run saw the card retire and no "approval lost"; "1 approval lost" appeared only when the engine process
-   died with the approval pending. The architect may restate this clause.) Last, start a turn, Queue one message while
+   died with the approval pending. The charter's §10 item 9 was restated to that at C12's landing.) Last, start a turn, Queue one message while
    it runs, and press Stop: the queue pauses with the message still listed (a message queued with nothing running is
    sent at once). Leave it for step 12. Record.
 
