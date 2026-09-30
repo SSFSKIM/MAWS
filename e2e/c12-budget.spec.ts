@@ -2,7 +2,8 @@
 // built app on C5's stub source with `test/fixtures/shell/c12-budget.json` and a manual clock, which scripts the engine
 // host's side exactly as it would reach main: the `engine.budget` states and the released session's exited status
 // (reason `budget`). Main's read model folds the release onto the digest, so what the test observes is the product's
-// own path from there: the released mark on the row and the card with no Needs-you item, Send offering to resume,
+// own path from there: the released mark on the row and the card with no Needs-you item, Send offering to resume (the
+// resume itself is C10's and needs launch mode index, so M3's live spec proves it),
 // Session info's two lines, the banner once the host's flag is up, the blocked sessions sheet and the stop sheet with
 // C10's disclosure; and the banner going when the flag clears. Each state is photographed in both themes, into the
 // evidence pack under MAWS_C12_SHOTS=1 and into the test's output otherwise. Run by `pnpm e2e:c12`
@@ -49,7 +50,7 @@ async function shoot(page: Page, testInfo: TestInfo, name: string): Promise<void
 const dd = (scope: Locator, term: string) => scope.getByRole('term').filter({ hasText: new RegExp(`^${term}$`) }).locator('xpath=following-sibling::dd[1]');
 
 // eslint-disable-next-line no-empty-pattern -- Playwright requires the fixtures argument to be destructured
-test('a release reads idle and marked, resumes on Send; over budget with no candidate raises one banner, the sheets and the disclosure', async ({}, testInfo) => {
+test('a release reads idle and marked, offers resume on Send; over budget with no candidate raises one banner, the sheets and the disclosure', async ({}, testInfo) => {
   test.setTimeout(120_000);
   const maws = await launchMaws({ env: { MAWS_SESSION_SOURCE: 'stub:test/fixtures/shell/c12-budget.json', MAWS_SCENARIO_CLOCK: 'manual' } });
   try {
