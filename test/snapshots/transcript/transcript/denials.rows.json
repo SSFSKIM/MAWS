@@ -15,6 +15,7 @@
     "kind": "user",
     "lines": 1,
     "messageUuid": "u-denials-002",
+    "placeholders": [],
     "steer": false,
     "text": "Run git push --force, then rm -rf build, then curl the deploy hook. Report what happened.",
     "turnId": "turn:u-denials-002"
@@ -247,6 +248,7 @@
     "kind": "user",
     "lines": 1,
     "messageUuid": "u-denials-059",
+    "placeholders": [],
     "steer": false,
     "text": "Count to 100 slowly with one Bash call per number.",
     "turnId": "turn:u-denials-059"
@@ -357,6 +359,7 @@
     "kind": "user",
     "lines": 1,
     "messageUuid": "u-denials-077",
+    "placeholders": [],
     "steer": false,
     "text": "Try the three deploy steps again.",
     "turnId": "turn:u-denials-077"

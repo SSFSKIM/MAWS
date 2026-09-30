@@ -15,6 +15,7 @@
     "kind": "user",
     "lines": 1,
     "messageUuid": "7c16db57-3810-4c67-84e8-ac43853377ca",
+    "placeholders": [],
     "steer": false,
     "text": "Plan how to create a file named plan.txt containing the single word PLANNED. The repository is tiny: do not explore it and do not launch agents. Present the plan with ExitPlanMode right away.",
     "turnId": "turn:7c16db57-3810-4c67-84e8-ac43853377ca"
@@ -314,6 +315,7 @@
     "kind": "user",
     "lines": 1,
     "messageUuid": "669cdcf4-dd9a-46a9-95eb-e26deac85925",
+    "placeholders": [],
     "steer": false,
     "text": "Reply with exactly MODE_OK",
     "turnId": "turn:669cdcf4-dd9a-46a9-95eb-e26deac85925"
@@ -339,6 +341,7 @@
     "kind": "user",
     "lines": 1,
     "messageUuid": "1b740363-a57a-473a-97a1-72a75a272cc8",
+    "placeholders": [],
     "steer": false,
     "text": "Plan how to create a file named second.txt containing the single word SECOND. The repository is tiny: do not explore it and do not launch agents. Present the plan with ExitPlanMode right away.",
     "turnId": "turn:1b740363-a57a-473a-97a1-72a75a272cc8"
@@ -557,6 +560,7 @@
     "kind": "user",
     "lines": 1,
     "messageUuid": "4c6e1bdb-4af7-467d-a602-4775821aaeff",
+    "placeholders": [],
     "steer": false,
     "text": "/clear",
     "turnId": "turn:4c6e1bdb-4af7-467d-a602-4775821aaeff"
@@ -627,6 +631,7 @@
     "kind": "user",
     "lines": 14,
     "messageUuid": "8e7fbc83-df00-48bf-a05a-6b1592924ec4",
+    "placeholders": [],
     "steer": false,
     "text": "Implement this plan:\n\n# Plan: create second.txt\n\n## Context\nThe user wants a file named `second.txt` in the repo root containing the single word `SECOND`. This is a new task, separate from the earlier `plan.txt` one. The repo is tiny, so no exploration is needed.\n\n## Steps\n1. Use the Write tool to create `/private/var/folders/c1/l4z5k02n2779byvnymzxsvth0000gn/T/maws-live-scratch-1iNOpI/second.txt` with the content `SECOND`.\n2. End the file with a trailing newline, as with `plan.txt`, so the content is `SECOND\\n`.\n\n## Verification\n- Read `second.txt` and confirm it contains only `SECOND`, followed by a trailing newline.\n",
     "turnId": "turn:8e7fbc83-df00-48bf-a05a-6b1592924ec4"

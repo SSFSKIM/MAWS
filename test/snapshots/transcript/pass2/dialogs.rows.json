@@ -15,6 +15,7 @@
     "kind": "user",
     "lines": 1,
     "messageUuid": "515ffadf-0558-4de5-81bf-e2cba9fe5605",
+    "placeholders": [],
     "steer": false,
     "text": "Call the mcp__maws-elicit__ask_color tool once, then reply with the color it returned.",
     "turnId": "turn:515ffadf-0558-4de5-81bf-e2cba9fe5605"

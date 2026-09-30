@@ -26,6 +26,7 @@
     "kind": "user",
     "lines": 1,
     "messageUuid": "c4fca6b8-ee2d-4aec-a12d-8832103e503c",
+    "placeholders": [],
     "steer": false,
     "text": "I just ran a shell command with the ! prefix. What exactly did it print? Reply with only the printed text, or NONE if you cannot see it.",
     "turnId": "turn:c4fca6b8-ee2d-4aec-a12d-8832103e503c"

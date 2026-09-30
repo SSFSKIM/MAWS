@@ -15,6 +15,7 @@
     "kind": "user",
     "lines": 1,
     "messageUuid": "2278b624-b86d-4b59-a93f-a2ce23eaee2a",
+    "placeholders": [],
     "steer": false,
     "text": "Use Bash to run exactly: git status --short. Then reply OK.",
     "turnId": "turn:2278b624-b86d-4b59-a93f-a2ce23eaee2a"
@@ -40,6 +41,7 @@
     "kind": "user",
     "lines": 1,
     "messageUuid": "dcfc8574-52fa-4d58-a448-43000c743eec",
+    "placeholders": [],
     "steer": false,
     "text": "Use Bash to run exactly: git log --oneline -1. Then reply OK.",
     "turnId": "turn:dcfc8574-52fa-4d58-a448-43000c743eec"
@@ -65,6 +67,7 @@
     "kind": "user",
     "lines": 1,
     "messageUuid": "7f94e6e0-bdb4-463d-9bba-1a070f8dc25e",
+    "placeholders": [],
     "steer": false,
     "text": "Use Bash to run exactly: git push --force origin main. Do not retry or run anything else. If it is blocked or fails, reply BLOCKED.",
     "turnId": "turn:7f94e6e0-bdb4-463d-9bba-1a070f8dc25e"

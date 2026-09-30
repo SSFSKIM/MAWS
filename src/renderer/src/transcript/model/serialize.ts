@@ -21,7 +21,7 @@ function cellLines(cell: Cell, by: string): string[] {
 function partOf(row: Row): string | null {
   switch (row.kind) {
     case 'time': return `### ${row.label}`;
-    case 'user': return `**You**\n\n${untaggedUserText(row.text, row.attachments)}${row.dropped ? `\n\n*${NOT_SENT}*` : ''}`;
+    case 'user': return `**You**\n\n${untaggedUserText(row.text, row.attachments, row.placeholders)}${row.dropped ? `\n\n*${NOT_SENT}*` : ''}`;
     case 'assistant_text': return row.markdown;
     case 'divider': return `*${dividerCopy({ ...row, durationMs: row.summary.durationMs ?? Date.parse(row.endedAt ?? row.startedAt) - Date.parse(row.startedAt) })}*`;
     case 'group': return [`- ${row.summary}`, ...row.cells.flatMap((cell) => cellLines(cell, '  '))].join('\n');

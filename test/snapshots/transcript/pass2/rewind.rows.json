@@ -15,6 +15,7 @@
     "kind": "user",
     "lines": 1,
     "messageUuid": "e3b48834-657d-49b3-8245-02a9a5912f9f",
+    "placeholders": [],
     "steer": false,
     "text": "Remember the word APPLE. Reply OK.",
     "turnId": "turn:e3b48834-657d-49b3-8245-02a9a5912f9f"
@@ -51,6 +52,7 @@
     "kind": "user",
     "lines": 1,
     "messageUuid": "36a2aa44-9ae9-455e-b52b-e70b27eecde5",
+    "placeholders": [],
     "steer": false,
     "text": "Also remember the word BANANA. Reply OK.",
     "turnId": "turn:36a2aa44-9ae9-455e-b52b-e70b27eecde5"
@@ -76,6 +78,7 @@
     "kind": "user",
     "lines": 1,
     "messageUuid": "a4d68c72-bdde-4afa-bc32-408c9dac42e6",
+    "placeholders": [],
     "steer": false,
     "text": "List every word I asked you to remember, comma separated, nothing else.",
     "turnId": "turn:a4d68c72-bdde-4afa-bc32-408c9dac42e6"

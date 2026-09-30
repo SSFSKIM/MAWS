@@ -15,6 +15,7 @@
     "kind": "user",
     "lines": 1,
     "messageUuid": "u-exploration-and-web-002",
+    "placeholders": [],
     "steer": false,
     "text": "Find where rows are derived, read the relevant files, check the TanStack docs for followOnAppend, and load the tdd skill.",
     "turnId": "turn:u-exploration-and-web-002"

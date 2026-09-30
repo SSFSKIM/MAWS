@@ -10,25 +10,53 @@ const utf8Length = (text: string) => new TextEncoder().encode(text).length;
 export interface UserText {
   text: string;
   attachments: Attachment[];
+  placeholders: number[]; // where each pasted block's placeholder was put in `text`, the n-th block's at [n - 1]
   lines: number;
 }
 
 // The n-th match becomes a `text` attachment; its place in the text is `[Pasted text #n +L lines]`, keeping one
-// newline on each side when the match consumed any.
-export function splitPastedSegments(text: string): { text: string; attachments: Attachment[] } {
+// newline on each side when the match consumed any. Where each placeholder went is recorded, so text the human typed
+// in the same shape is never taken for one (copy, export and the bubble split only at the recorded places).
+export function splitPastedSegments(text: string): { text: string; attachments: Attachment[]; placeholders: number[] } {
   const attachments: Attachment[] = [];
-  const replaced = text.replace(PASTED_BLOCK, (match, _id: string, body: string) => {
+  const placeholders: number[] = [];
+  let out = '';
+  let from = 0;
+  for (const match of text.matchAll(PASTED_BLOCK)) {
+    const [whole, , body] = match;
+    out += text.slice(from, match.index);
+    if (whole.startsWith('\n')) out += '\n';
     attachments.push({ kind: 'text', name: `Pasted text #${attachments.length + 1}`, bytes: utf8Length(body), dataUrl: null, mediaType: 'text/plain', text: body });
-    const placeholder = pastedPlaceholder(attachments.length, body.split('\n').length);
-    return `${match.startsWith('\n') ? '\n' : ''}${placeholder}${match.endsWith('\n') ? '\n' : ''}`;
-  });
-  return { text: replaced, attachments };
+    placeholders.push(out.length);
+    out += pastedPlaceholder(attachments.length, body.split('\n').length);
+    if (whole.endsWith('\n')) out += '\n';
+    from = match.index + whole.length;
+  }
+  return { text: out + text.slice(from), attachments, placeholders };
 }
 
-// Copy and export: each placeholder replaced by its body, untagged (the engine's own behaviour).
-export function untaggedUserText(text: string, attachments: Attachment[]): string {
-  const bodies = attachments.filter((attachment) => attachment.kind === 'text');
-  return text.replace(PASTED_PLACEHOLDER, (placeholder, n: string) => bodies[Number(n) - 1]?.text ?? placeholder);
+// The recorded placeholders of a user row, in text order: each one's range and its pasted attachment.
+export function placeholdersOf(text: string, attachments: Attachment[], placeholders: number[]): { from: number; to: number; n: number; lines: number; attachment: Attachment }[] {
+  const pasted = attachments.filter((attachment) => attachment.kind === 'text');
+  return placeholders.flatMap((at, i) => {
+    const match = new RegExp(PASTED_PLACEHOLDER.source, 'y');
+    match.lastIndex = at;
+    const found = match.exec(text);
+    const attachment = pasted[i];
+    return found && attachment && Number(found[1]) === i + 1 ? [{ from: at, to: at + found[0].length, n: i + 1, lines: Number(/\+(\d+) lines/.exec(found[0])![1]), attachment }] : [];
+  });
+}
+
+// Copy and export: each recorded placeholder replaced by its body, untagged (the engine's own behaviour); text typed
+// in the placeholder's shape stays as typed.
+export function untaggedUserText(text: string, attachments: Attachment[], placeholders: number[]): string {
+  let out = '';
+  let from = 0;
+  for (const placeholder of placeholdersOf(text, attachments, placeholders)) {
+    out += text.slice(from, placeholder.from) + (placeholder.attachment.text ?? '');
+    from = placeholder.to;
+  }
+  return out + text.slice(from);
 }
 
 const base64Bytes = (data: string) => Math.floor((data.length * 3) / 4) - (data.endsWith('==') ? 2 : data.endsWith('=') ? 1 : 0);
@@ -64,7 +92,7 @@ export function userTextOf(content: string | ContentBlock[]): UserText {
   }
   const split = splitPastedSegments(texts.join('\n\n'));
   const text = split.text;
-  return { text, attachments: [...split.attachments, ...attachments], lines: text.length === 0 ? 0 : text.split('\n').length };
+  return { text, attachments: [...split.attachments, ...attachments], placeholders: split.placeholders, lines: text.length === 0 ? 0 : text.split('\n').length };
 }
 
 // The engine's local-command echo (`/model`, `/status` and the like arrive as replayed user frames wrapped in these

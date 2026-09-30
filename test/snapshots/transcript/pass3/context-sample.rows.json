@@ -15,6 +15,7 @@
     "kind": "user",
     "lines": 1,
     "messageUuid": "fa4d0234-8ffe-440f-b32b-3ec27cea7416",
+    "placeholders": [],
     "steer": false,
     "text": "Reply with exactly OK",
     "turnId": "turn:fa4d0234-8ffe-440f-b32b-3ec27cea7416"
@@ -96,6 +97,7 @@
     "kind": "user",
     "lines": 1,
     "messageUuid": "66cfb780-b906-4f92-af32-02b7c17fec7b",
+    "placeholders": [],
     "steer": false,
     "text": "Use the Read tool to read one.txt and reply with only the single word it contains.",
     "turnId": "turn:66cfb780-b906-4f92-af32-02b7c17fec7b"

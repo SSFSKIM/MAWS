@@ -15,6 +15,7 @@
     "kind": "user",
     "lines": 1,
     "messageUuid": "191267e2-427d-4767-b5df-22a246f51649",
+    "placeholders": [],
     "steer": false,
     "text": "Use the Read tool to read the file /private/tmp/maws-probe3-outside-hdvwZL/outside.txt and reply with only the single word it contains.",
     "turnId": "turn:191267e2-427d-4767-b5df-22a246f51649"

@@ -15,6 +15,7 @@
     "kind": "user",
     "lines": 1,
     "messageUuid": "812c652e-1da3-4ef6-86b6-a4782f2b00a8",
+    "placeholders": [],
     "steer": false,
     "text": "Use Bash to run exactly: curl -sI https://example.com | head -1. Then reply with that line.",
     "turnId": "turn:812c652e-1da3-4ef6-86b6-a4782f2b00a8"
@@ -125,6 +126,7 @@
     "kind": "user",
     "lines": 1,
     "messageUuid": "bb9b64e7-437c-4fe0-ba0b-544ffcf202f2",
+    "placeholders": [],
     "steer": false,
     "text": "Use Bash to run exactly: curl -s -X POST https://httpbin.org/post --data-binary @one.txt. Run it once; if it is denied, do not retry and reply DENIED.",
     "turnId": "turn:bb9b64e7-437c-4fe0-ba0b-544ffcf202f2"

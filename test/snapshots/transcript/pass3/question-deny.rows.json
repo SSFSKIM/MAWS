@@ -15,6 +15,7 @@
     "kind": "user",
     "lines": 1,
     "messageUuid": "6673a9a8-c37d-486e-a345-836c51925f70",
+    "placeholders": [],
     "steer": false,
     "text": "Call the AskUserQuestion tool exactly once with one question: \"Red or Blue?\" with the options Red and Blue. If you get an answer, reply with only the chosen colour. If the question was declined or you got no answer, do not ask again: reply with only the word SKIPPED.",
     "turnId": "turn:6673a9a8-c37d-486e-a345-836c51925f70"

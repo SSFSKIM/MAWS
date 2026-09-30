@@ -9,7 +9,7 @@ import { applyEvents, createState } from './reduce';
 import type { Row } from './rows';
 import { serializeRows } from './serialize';
 import { builder, uuid } from './test-events';
-import { splitPastedSegments, userTextOf } from './user-text';
+import { splitPastedSegments, untaggedUserText, userTextOf } from './user-text';
 
 // The golden fixture: one 40-line block wrapped exactly as the grammar frames it, typed text before and after.
 const fixture = JSON.parse(readFileSync(join(__dirname, '../../../../../test/fixtures/composer/pasted-40-lines.json'), 'utf8')) as { typed: string; pasted: { id: string; body: string }[]; sent: string };
@@ -26,11 +26,12 @@ describe('pasted content', () => {
     expect(BODY.split('\n')).toHaveLength(40);
     expect(splitPastedSegments('a\n<pasted_content id="abcd">\nx\n</pasted_content id="abcd">\nb')).toEqual({
       text: 'a\n[Pasted text #1 +1 lines]\nb',
+      placeholders: [2],
       attachments: [{ kind: 'text', name: 'Pasted text #1', bytes: 1, dataUrl: null, mediaType: 'text/plain', text: 'x' }],
     });
-    expect(splitPastedSegments('<pasted_content id="abcd">\nx\n</pasted_content id="beef">')).toEqual({ text: '<pasted_content id="abcd">\nx\n</pasted_content id="beef">', attachments: [] }); // ids differ: plain text
-    expect(splitPastedSegments('<pasted_content id="abcd">\nx')).toEqual({ text: '<pasted_content id="abcd">\nx', attachments: [] }); // no close
-    expect(splitPastedSegments('see <\\pasted_content> here')).toEqual({ text: 'see <\\pasted_content> here', attachments: [] }); // neutralised
+    expect(splitPastedSegments('<pasted_content id="abcd">\nx\n</pasted_content id="beef">')).toEqual({ text: '<pasted_content id="abcd">\nx\n</pasted_content id="beef">', attachments: [], placeholders: [] }); // ids differ: plain text
+    expect(splitPastedSegments('<pasted_content id="abcd">\nx')).toEqual({ text: '<pasted_content id="abcd">\nx', attachments: [], placeholders: [] }); // no close
+    expect(splitPastedSegments('see <\\pasted_content> here')).toEqual({ text: 'see <\\pasted_content> here', attachments: [], placeholders: [] }); // neutralised
   });
 
   it('numbers matches in order and counts bytes in UTF-8', () => {
@@ -66,5 +67,27 @@ describe('pasted content', () => {
     expect(out.attachments.map((a) => a.kind)).toEqual(['text', 'image']);
     expect(out.text).toBe('[Pasted text #1 +1 lines]');
     expect(out.lines).toBe(1);
+  });
+
+  // Debt wave 4: only the places extraction put a placeholder are pasted blocks; the same shape typed by the human stays
+  // as typed in copy, export and the bubble, before or after the real one, and with or without a pasted block at all.
+  it('leaves placeholder-shaped text the human typed alone, and replaces only the recorded placeholders', () => {
+    const typed = '[Pasted text #1 +3 lines]';
+    const b = builder();
+    for (const [u, content] of [['u1', `I typed ${typed} before\n${framePasted('00aa', 'real\nbody')}\nand ${typed} after`], ['u2', `only ${typed}`]] as const) {
+      b.emit('turn.started', { userMessageUuid: uuid(u), origin: 'human' });
+      b.emit('user.message', { messageUuid: uuid(u), content, isReplay: false, isSynthetic: false, origin: 'human', bash: null });
+      b.text(`m${u}`, 0, 'Ok.');
+      b.end([u]);
+    }
+    const rows = rowsOf(applyEvents(createState(null, null), b.events));
+    const [first, second] = rows.filter((row): row is Extract<Row, { kind: 'user' }> => row.kind === 'user');
+    expect(first.text).toBe(`I typed ${typed} before\n[Pasted text #1 +2 lines]\nand ${typed} after`);
+    expect(first.placeholders).toEqual([first.text.indexOf('[Pasted text #1 +2 lines]')]);
+    expect(untaggedUserText(first.text, first.attachments, first.placeholders)).toBe(`I typed ${typed} before\nreal\nbody\nand ${typed} after`);
+    expect(untaggedUserText(second.text, second.attachments, second.placeholders)).toBe(`only ${typed}`);
+    const markdown = serializeRows(rows);
+    expect(markdown).toContain(`I typed ${typed} before\nreal\nbody\nand ${typed} after`);
+    expect(markdown).toContain(`only ${typed}`);
   });
 });

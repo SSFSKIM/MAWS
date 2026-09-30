@@ -15,6 +15,7 @@
     "kind": "user",
     "lines": 1,
     "messageUuid": "78bf314c-d854-4662-b810-fede10ae5be3",
+    "placeholders": [],
     "steer": false,
     "text": "Dispatch two general-purpose Agent subagents in parallel, model haiku. One reads one.txt, the other two.txt; each reports only its file line. Set run_in_background true for the second if supported. Summarize in one line after both finish.",
     "turnId": "turn:78bf314c-d854-4662-b810-fede10ae5be3"

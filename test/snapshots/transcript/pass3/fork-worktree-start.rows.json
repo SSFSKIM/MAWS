@@ -26,6 +26,7 @@
     "kind": "user",
     "lines": 1,
     "messageUuid": "e9320a4e-25c8-41f4-98e4-97a4b773ff98",
+    "placeholders": [],
     "steer": false,
     "text": "Remember the word MANGO. Reply OK.",
     "turnId": "turn:e9320a4e-25c8-41f4-98e4-97a4b773ff98"

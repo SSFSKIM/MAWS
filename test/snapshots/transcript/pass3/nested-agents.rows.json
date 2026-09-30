@@ -15,6 +15,7 @@
     "kind": "user",
     "lines": 1,
     "messageUuid": "d157117c-0a34-49ab-bbf5-24815f33a51d",
+    "placeholders": [],
     "steer": false,
     "text": "Dispatch one general-purpose Agent, model sonnet, named \"outer\". Its task: dispatch a general-purpose Agent, model haiku, named \"inner\", to read one.txt and report its line, wait for it, then report inner's answer. Reply DONE with both answers.",
     "turnId": "turn:d157117c-0a34-49ab-bbf5-24815f33a51d"

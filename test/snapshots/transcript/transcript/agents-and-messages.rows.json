@@ -15,6 +15,7 @@
     "kind": "user",
     "lines": 1,
     "messageUuid": "u-agents-and-messages-002",
+    "placeholders": [],
     "steer": false,
     "text": "Dispatch two agents: one to survey src/ for TODOs, one to list the tests. Tell the first to skip node_modules. Then summarise.",
     "turnId": "turn:u-agents-and-messages-002"

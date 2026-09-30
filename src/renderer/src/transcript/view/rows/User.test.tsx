@@ -67,6 +67,13 @@ describe('user row', () => {
     expect(bubble.textContent).toContain('thanks');
   });
 
+  it('splits the bubble only where a pasted block was: the same placeholder shape typed by the human stays text', () => {
+    const typed = '[Pasted text #1 +40 lines]';
+    const { container } = renderRow(userRow(`${typed} is what I typed\n${fixture.sent}`));
+    expect(screen.getAllByRole('button', { name: /Pasted text #1 · 40 lines/ })).toHaveLength(1);
+    expect(container.querySelector('[data-bubble]')!.textContent).toContain(`${typed} is what I typed`);
+  });
+
   it('shows an image attachment inline from its data URL', () => {
     const { container } = renderRow(userRow([{ type: 'text', text: 'look' }, { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'iVBORw0KGgo=' } }]));
     expect(container.querySelector('img')?.getAttribute('src')).toBe('data:image/png;base64,iVBORw0KGgo=');

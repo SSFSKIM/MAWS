@@ -15,6 +15,7 @@
     "kind": "user",
     "lines": 1,
     "messageUuid": "u-ansi-1",
+    "placeholders": [],
     "steer": false,
     "text": "Show the build status in colour.",
     "turnId": "turn:u-ansi-1"

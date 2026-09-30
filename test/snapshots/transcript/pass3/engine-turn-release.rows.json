@@ -15,6 +15,7 @@
     "kind": "user",
     "lines": 1,
     "messageUuid": "458685fe-08d6-4f66-82c0-0ad0a63245ae",
+    "placeholders": [],
     "steer": false,
     "text": "Run in the background: start two background Bash commands with run_in_background, `sleep 15 && echo BG_ONE` and `sleep 16 && echo BG_TWO`. Do not wait for them and do not check on them; reply STARTED right away.",
     "turnId": "turn:458685fe-08d6-4f66-82c0-0ad0a63245ae"
@@ -312,6 +313,7 @@
     "kind": "user",
     "lines": 1,
     "messageUuid": "562abf01-f74a-4656-b617-4166196def6e",
+    "placeholders": [],
     "steer": false,
     "text": "Reply with exactly QUEUED_A",
     "turnId": "turn:562abf01-f74a-4656-b617-4166196def6e"
@@ -730,6 +732,7 @@
     "kind": "user",
     "lines": 1,
     "messageUuid": "1a5ce608-758a-47bf-95c1-d259be2ca524",
+    "placeholders": [],
     "steer": false,
     "text": "Reply with exactly QUEUED_B",
     "turnId": "turn:1a5ce608-758a-47bf-95c1-d259be2ca524"

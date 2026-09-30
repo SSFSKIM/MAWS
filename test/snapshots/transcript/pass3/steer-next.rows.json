@@ -15,6 +15,7 @@
     "kind": "user",
     "lines": 1,
     "messageUuid": "fe091b0d-b28b-41a8-aed3-39585769623d",
+    "placeholders": [],
     "steer": false,
     "text": "Count to 8 with separate Bash sleep 1 calls: for each number n from 1 to 8, make exactly one Bash call `sleep 1 && echo n`, one call at a time, never in parallel. Then reply COUNTED.",
     "turnId": "turn:fe091b0d-b28b-41a8-aed3-39585769623d"
@@ -805,6 +806,7 @@
     "kind": "user",
     "lines": 1,
     "messageUuid": "42a15931-3c9a-4267-a6b2-09fa5697735d",
+    "placeholders": [],
     "steer": true,
     "text": "Reply NEXT_OK",
     "turnId": "turn:fe091b0d-b28b-41a8-aed3-39585769623d"
