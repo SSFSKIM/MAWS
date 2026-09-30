@@ -366,4 +366,74 @@ describe('quit when idle', () => {
 function guardDeps(model: ReturnType<typeof modelWith>, over: Partial<Parameters<typeof installQuitGuard>[1]>) {
   return installQuitGuard(model, { pty: noTerminals, ask: async () => 'cancel', shutdownEngine: vi.fn(async () => {}), publish: () => {}, ...over });
 }
+
+// A pty host whose every `pty.list` answers when the test says; one terminal, busy while `busy` is true.
+function deferredPty() {
+  const lists: ((ptys: { ptyId: string; alive: boolean }[]) => void)[] = [];
+  const state = { busy: false };
+  const pty = {
+    list: () => new Promise<{ ptyId: string; alive: boolean }[]>((resolve) => lists.push(resolve)),
+    foreground: async () => ({ busy: state.busy }),
+    hostGone: () => false,
+  };
+  return { pty, state, lists, answer: async (index: number, ptys = [{ ptyId: 't', alive: true }]) => (lists[index]!(ptys), await settle(), await settle()) };
+}
+
+// review fix: nothing is decided on session counts older than the terminal read
+describe('the report is fresh when it decides', () => {
+  it('a session that turns busy while the terminals are read is asked about, not quit over', async () => {
+    const model = modelWith([status('a')]);
+    const d = deferredPty();
+    const ask = vi.fn(async () => 'cancel' as const);
+    guardDeps(model, { pty: d.pty, ask });
+    electron.app.attempt();
+    await settle();
+    model.apply(status('a', { turn: humanTurn })); // a turn starts during the read
+    await d.answer(0);
+    expect(electron.app.quits).toBe(0);
+    expect(ask).toHaveBeenCalledExactlyOnceWith({ midTurn: 1, backgroundWork: 0, busyTerminals: 0, terminalsUnknown: false });
+  });
+
+  it('while waiting, a read that a status change overtook does not quit on its zero', async () => {
+    const model = modelWith([status('a', { turn: humanTurn })]);
+    const d = deferredPty();
+    const publish = vi.fn();
+    guardDeps(model, { pty: d.pty, ask: async () => 'when_idle', publish });
+    electron.app.attempt();
+    await settle();
+    await d.answer(0); // the question's read: one mid-turn, so it waits
+    expect(publish).toHaveBeenLastCalledWith({ midTurn: 1, backgroundWork: 0, busyTerminals: 0, terminalsUnknown: false });
+    model.apply(status('a')); // the turn ends: a re-read starts
+    await settle();
+    model.apply(status('a', { turn: humanTurn })); // and another begins while it reads
+    await d.answer(1);
+    expect(electron.app.quits).toBe(0);
+    await d.answer(2); // the re-read the change asked for
+    expect(electron.app.quits).toBe(0);
+    expect(publish).toHaveBeenLastCalledWith({ midTurn: 1, backgroundWork: 0, busyTerminals: 0, terminalsUnknown: false });
+  });
+
+  it('a read still out when its wait was cancelled is inert under the next wait', async () => {
+    const model = modelWith([status('a')]);
+    const d = deferredPty();
+    d.state.busy = true;
+    const publish = vi.fn();
+    const control = guardDeps(model, { pty: d.pty, ask: async () => 'when_idle', publish });
+    electron.app.attempt();
+    await settle();
+    await d.answer(0); // wait 1: the terminal is busy
+    model.apply(status('a')); // a status change: wait 1 starts a re-read (list 1), left outstanding
+    await settle();
+    control.cancelWait();
+    electron.app.attempt(); // the next quit: its question's read is list 2
+    await settle();
+    await d.answer(2); // still busy: wait 2
+    const wait2 = { midTurn: 0, backgroundWork: 0, busyTerminals: 1, terminalsUnknown: false };
+    expect(control.waiting()).toEqual(wait2);
+    await d.answer(1, []); // wait 1's old re-read answers zero
+    expect(electron.app.quits).toBe(0); // inert: wait 2 is still waiting
+    expect(control.waiting()).toEqual(wait2);
+    expect(publish).toHaveBeenLastCalledWith(wait2);
+  });
+});
 // C12 end

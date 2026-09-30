@@ -44,12 +44,14 @@ function within<T>(promise: Promise<T>, ms: number): Promise<T> {
 }
 
 export async function busyReport(model: Pick<SessionReadModel, 'midTurnCount' | 'engineStatuses'>, pty: QuitPty): Promise<BusyReport> {
-  const midTurn = model.midTurnCount();
-  // a session is counted once: background work only when it is not already counted mid-turn; ambient tasks are the
-  // engine's housekeeping, as the budget's hard reasons read them
-  const backgroundWork = model
-    .engineStatuses()
-    .filter((s) => LIVE.has(s.process) && s.turn === null && !LAUNCHING.has(s.process) && s.backgroundTasks.some((t) => !t.ambient)).length;
+  // The sessions are read after the terminals (review fix): a status can only arrive between awaits, so the counts a
+  // zero decision rests on are never older than the terminal read.
+  const sessions = () => ({
+    midTurn: model.midTurnCount(),
+    // a session is counted once: background work only when it is not already counted mid-turn; ambient tasks are the
+    // engine's housekeeping, as the budget's hard reasons read them
+    backgroundWork: model.engineStatuses().filter((s) => LIVE.has(s.process) && s.turn === null && !LAUNCHING.has(s.process) && s.backgroundTasks.some((t) => !t.ambient)).length,
+  });
   let ptys: readonly { ptyId: string; alive: boolean }[] = [];
   try {
     ptys = await within(pty.list(), PROBE_TIMEOUT_MS);
@@ -57,12 +59,12 @@ export async function busyReport(model: Pick<SessionReadModel, 'midTurnCount' | 
     // review fix: only a pty host that is gone holds no terminal; a slow live one may hold busy ones
     if (!pty.hostGone()) {
       console.warn('[quit-guard] the pty host did not list its terminals; counting them busy', error);
-      return { midTurn, backgroundWork, busyTerminals: 1, terminalsUnknown: true };
+      return { ...sessions(), busyTerminals: 1, terminalsUnknown: true };
     }
   }
   const probes = ptys.filter((p) => p.alive).map((p) => within(pty.foreground(p.ptyId), PROBE_TIMEOUT_MS).then((f) => f.busy, () => true));
   const busyTerminals = (await Promise.all(probes)).filter(Boolean).length;
-  return { midTurn, backgroundWork, busyTerminals, terminalsUnknown: false };
+  return { ...sessions(), busyTerminals, terminalsUnknown: false };
 }
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
@@ -129,7 +131,7 @@ export interface QuitGuard {
 export function installQuitGuard(model: Pick<SessionReadModel, 'midTurnCount' | 'engineStatuses' | 'on'>, deps: QuitGuardDeps): QuitGuard {
   let disarmed = false;
   let asking = false; // a report or a question is under way
-  let wait: { report: BusyReport; stop: () => void } | null = null;
+  let wait: { report: BusyReport; stop: () => void } | null = null; // each wait is its own object: a cancelled one's reads are inert
   const report = () => busyReport(model, deps.pty);
 
   const quit = () => {
@@ -159,24 +161,25 @@ export function installQuitGuard(model: Pick<SessionReadModel, 'midTurnCount' | 
       return;
     }
     let reading = false;
-    let again = false;
+    let again = false; // something changed while a read was out: that read decides nothing, the next one does
     const recheck = () => {
+      if (wait !== mine) return;
       if (reading) return void (again = true);
       reading = true;
       void report()
         .then((next) => {
-          if (!wait) return;
+          if (wait !== mine || again) return;
           if (total(next) === 0) {
             stopWaiting();
             quit();
           } else {
-            wait.report = next;
+            mine.report = next;
             deps.publish(next);
           }
         })
         .finally(() => {
           reading = false;
-          if (again && wait) {
+          if (again && wait === mine) {
             again = false;
             recheck();
           }
@@ -184,7 +187,8 @@ export function installQuitGuard(model: Pick<SessionReadModel, 'midTurnCount' | 
     };
     const off = model.on('engine', recheck);
     const timer = setInterval(recheck, deps.pollMs ?? WAIT_POLL_MS);
-    wait = { report: first, stop: () => (off(), clearInterval(timer)) };
+    const mine = { report: first, stop: () => (off(), clearInterval(timer)) };
+    wait = mine;
     deps.publish(first);
   };
 
