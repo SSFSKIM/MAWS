@@ -24,8 +24,9 @@ import { useCommand } from '../ipc/query';
 import { useKeyChord } from '../keymap/useKeyChord';
 import { RequestCard } from '../request-card/RequestCard';
 import { nextMode } from '../statusline';
+import { SetupStatusLine } from '../statusline/SetupActivity';
 import { useAttention, selectPendingOf } from '../stores/attention';
-import { editingOf, isStarting, listedModelsOf, memoryTargetOf, registerFocusTarget, resubmitRecordOf, setStarting, useComposerStore, type Editing, type ResubmitState } from '../stores/composer';
+import { editingOf, isStarting, memoryTargetOf, registerFocusTarget, resubmitRecordOf, setSetupPhase, setStarting, useComposerStore, type Editing, type ResubmitState } from '../stores/composer';
 import { useLayout } from '../stores/layout';
 import { toast } from '../stores/notices';
 import { useSessionQueue } from '../stores/queue';
@@ -60,7 +61,7 @@ import {
   settleRestoredEdit,
   takeAutoSend,
 } from './resubmit-seam';
-import { useListModels } from './list-models';
+import { routeOf, useListModels, useModelCatalogue, type Route } from './list-models';
 import { locationPath, useSetupIntent, type SetupIntentHook } from './setup-intent';
 import { steerPriority, submitState, type SubmitDecision } from './submit/submit-state';
 import { SubmitControl } from './submit/SubmitControl';
@@ -139,11 +140,11 @@ function useDraftPort(appSessionId: AppSessionId, hook: SetupIntentHook | null, 
 }
 
 // The live chips' reads: C3's models and permission rules, each a control request to the engine, read once a chip that
-// shows it has opened (never per mount), the session's last listed models for the model chip's name, and the branch
-// list for the location popover.
-function useLiveReads(appSessionId: AppSessionId, want: { models: boolean; rules: boolean }, directory: string | null, git: { branch: string | null } | null) {
+// shows it has opened (never per mount), the route's model catalogue for the model chip's name (a host read, from the
+// first render), and the branch list for the location popover.
+function useLiveReads(appSessionId: AppSessionId, want: { models: boolean; rules: boolean }, directory: string | null, git: { branch: string | null } | null, route: Route | null, ready: boolean) {
   const models = useListModels(appSessionId, want.models);
-  const modelNames = useComposerStore((s) => listedModelsOf(s, appSessionId));
+  const modelNames = useModelCatalogue(route, ready);
   const rules = useCommand('session.listPermissionRules', { appSessionId }, { enabled: want.rules, staleTime: 10_000 });
   const branches = useCommand('git.branches', { directory: directory ?? '' }, { enabled: want.rules && directory !== null && git !== null, staleTime: 30_000 });
   return {
@@ -165,6 +166,12 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
   // exited status for the id.
   const setup = status === null || record === null ? hook : null;
   const unstarted = setup !== null;
+  // The running setup's phase is also the status line's activity: published for it while this composer holds the hook.
+  const phase = setup?.phase ?? null;
+  useEffect(() => {
+    setSetupPhase(appSessionId, phase);
+    return () => setSetupPhase(appSessionId, null);
+  }, [appSessionId, phase]);
   const queue = useSessionQueue(appSessionId, client);
   const starting = useComposerStore((s) => isStarting(s, appSessionId));
   const handle = useRef<EditorHandle>(null);
@@ -189,7 +196,7 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
   const repo = useGitWatch(setup ? null : cwd || null, client);
   const [opened, setOpened] = useState({ models: false, rules: false });
   const ready = status?.process === 'ready';
-  const reads = useLiveReads(appSessionId, { models: ready && opened.models, rules: ready && opened.rules }, setup ? null : cwd || null, repo);
+  const reads = useLiveReads(appSessionId, { models: ready && opened.models, rules: ready && opened.rules }, setup ? null : cwd || null, repo, routeOf(status, record), ready);
   const bindings: FrameBindings = setup ? intentBindings(setup, { starting }) : status || record ? liveBindings(status, record, reads, client) : endedBindings();
 
   // ---- the submit control's state ------------------------------------------------------------------------------
@@ -422,6 +429,8 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
         }
         submit={<SubmitControl decision={shown} multiline={isMultiline(doc)} onPrimary={onPrimary} onStop={interrupt} onMenu={(id) => handle.current?.submit(id === 'steer' ? 'steer' : id)} onHover={setHover} />}
       />
+      {/* a tab with no record has no status line yet: the setup's phase shows here, and only while it runs */}
+      {record === null && phase !== null && <SetupStatusLine phase={phase} />}
     </section>
   );
 }

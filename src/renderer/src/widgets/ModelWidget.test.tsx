@@ -314,7 +314,7 @@ describe("the model widget on an unstarted session, with C10's registered hook",
 describe('the model widget on an unstarted session carries its route', () => {
   // every state the intent passed through, so a case can assert it never held Direct with a relay alias
   let history: { gateway: string; model: string | null }[] = [];
-  const mountUnstarted = (over: Parameters<typeof intent>[0] = {}, hook: typeof useC10SetupIntent = useC10SetupIntent) => {
+  const mountUnstarted = (over: Parameters<typeof intent>[0] = {}) => {
     let held = intent({ appSessionId: INTENT_ID, model: 'sonnet', permissionMode: 'default', ...over });
     history = [];
     useSetup.setState({ intents: new Map([[INTENT_ID, held]]) });
@@ -323,7 +323,7 @@ describe('the model widget on an unstarted session carries its route', () => {
       history.push({ gateway: held.gateway, model: held.model });
       return held;
     });
-    offs.push(registerSetupIntentHook(hook));
+    offs.push(registerSetupIntentHook(useC10SetupIntent));
     const Widget = modelWidget('model');
     render(
       <QueryClientProvider client={new QueryClient()}>
@@ -384,15 +384,11 @@ describe('the model widget on an unstarted session carries its route', () => {
   });
 
   it('the pending Claude choice lowers an intent effort the chosen model does not admit, in the same patch', async () => {
-    // C10's catalogue rows carry no effort levels (every listing entry on 2.1.283 lists all five); this hook narrows
-    // Sonnet's so the lowering has something to lower
-    const useNarrowedIntent: typeof useC10SetupIntent = (id) => {
-      const hook = useC10SetupIntent(id);
-      if (hook === null) return null;
-      const models = hook.options.models.map((m) => (m.value === 'sonnet' ? { ...m, supportedEffortLevels: ['low', 'medium', 'high'] } : m));
-      return { ...hook, options: { ...hook.options, models } };
-    };
-    mountUnstarted({ model: 'claude/astra', effort: 'max' }, useNarrowedIntent);
+    // C10's catalogue now carries each entry's effort levels (every listing entry on 2.1.283 lists all five): the host's
+    // catalogue narrows Sonnet's so the lowering has something to lower, through C10's own hook
+    const narrowed = CATALOGUE.map((m) => (m.value === 'sonnet' ? { ...m, supportedEffortLevels: ['low', 'medium', 'high'] } : m));
+    offs.push(backend.script('engine.models', () => ({ models: narrowed, source: 'cached', at: null })));
+    mountUnstarted({ model: 'claude/astra', effort: 'max' });
     await waitFor(() => expect(within(screen.getByRole('radiogroup', { name: 'Claude models' })).getAllByRole('radio').length).toBeGreaterThan(0));
     fireEvent.click(radio('Claude models', 'Sonnet 5')); // chosen, not applied
     fireEvent.click(route().getByRole('radio', { name: 'Direct' }));

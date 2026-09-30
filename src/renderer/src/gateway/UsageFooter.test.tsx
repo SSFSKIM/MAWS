@@ -49,8 +49,8 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-const popover = (status: EngineSessionStatus | null = useSessions.getState().engine.get(READY) ?? null) => {
-  render(<UsagePopoverBody record={useSessions.getState().records.get(READY)!} status={status} />);
+const popover = (status: EngineSessionStatus | null = useSessions.getState().engine.get(READY) ?? null, close?: () => void) => {
+  render(<UsagePopoverBody record={useSessions.getState().records.get(READY)!} status={status} close={close} />);
   return screen.getByText((_, el) => el?.hasAttribute('data-routing-footer') ?? false);
 };
 
@@ -74,6 +74,19 @@ describe('routingFacts names the account and the switch — the footer', () => {
     expect(addTool).toHaveBeenCalledWith('session-info', { appSessionId: READY });
     fireEvent.click(within(footer).getByRole('button', { name: 'Switch to Direct…' }));
     await vi.waitFor(() => expect(useGateway.getState().switching.get(READY)).toMatchObject({ phase: 'confirming', confirm: expect.anything() }));
+    expect(answerSwitch(READY, null)).toBe(true);
+  });
+
+  it('the actions that open another surface close the popover first; the switch keeps it open for its progress', async () => {
+    offs.push(registerAction('accounts.open', vi.fn()), registerAction('gateway.openClaudeUsage', vi.fn()));
+    vi.spyOn(panelHost, 'addTool').mockReturnValue('session-info:x');
+    const close = vi.fn();
+    const footer = popover(undefined, close);
+    for (const name of ['Open ClaudeUsage ↗', 'Accounts', 'Session info']) fireEvent.click(within(footer).getByRole('button', { name }));
+    expect(close).toHaveBeenCalledTimes(3);
+    fireEvent.click(within(footer).getByRole('button', { name: 'Switch to Direct…' }));
+    await vi.waitFor(() => expect(useGateway.getState().switching.get(READY)).toMatchObject({ phase: 'confirming', confirm: expect.anything() }));
+    expect(close).toHaveBeenCalledTimes(3);
     expect(answerSwitch(READY, null)).toBe(true);
   });
 
@@ -114,12 +127,12 @@ describe('routingFacts names the account and the switch — the footer', () => {
 // architect's ruling of 2026-09-29; D-19's per-session Direct). Branching before routingFacts is what keeps its
 // unrecorded route from reading "Route not recorded" with a restart offered.
 describe('an unstarted session chooses its route and restarts nothing — the footer', () => {
-  const unstarted = (over: Parameters<typeof intentOf>[0] = {}) => {
+  const unstarted = (over: Parameters<typeof intentOf>[0] = {}, close?: () => void) => {
     const held = intentOf({ appSessionId: READY, ...over });
     useSetup.setState({ intents: new Map([[READY, held]]) });
     useSessions.setState({ engine: new Map(), records: new Map([[READY, { ...record, gateway: { ...record.gateway, routed: null } }]]) });
     backend.script('session.intent.patch', (input) => ({ ...held, ...(input as { patch: object }).patch }));
-    return popover(null);
+    return popover(null, close);
   };
 
   it('names the intent’s route and offers the relay and Direct, with no switch', () => {
@@ -140,6 +153,17 @@ describe('an unstarted session chooses its route and restarts nothing — the fo
     fireEvent.click(within(footer).getByRole('button', { name: 'Direct' }));
     await vi.waitFor(() => expect(useSetup.getState().intents.get(READY)?.gateway).toBe('direct'));
     expect(backend.calls.map((c) => [c.command, c.input])).toEqual([['session.intent.patch', { appSessionId: READY, patch: { gateway: 'direct' } }]]);
+  });
+
+  it('the hand-off and Accounts close the popover; the route choice keeps it open', async () => {
+    offs.push(registerAction('accounts.open', vi.fn()), registerAction('gateway.openClaudeUsage', vi.fn()));
+    const close = vi.fn();
+    const footer = unstarted({}, close);
+    fireEvent.click(within(footer).getByRole('button', { name: 'Direct' }));
+    await vi.waitFor(() => expect(useSetup.getState().intents.get(READY)?.gateway).toBe('direct'));
+    expect(close).not.toHaveBeenCalled();
+    for (const name of ['Open ClaudeUsage ↗', 'Accounts']) fireEvent.click(within(footer).getByRole('button', { name }));
+    expect(close).toHaveBeenCalledTimes(2);
   });
 
   it('while its start runs, or its first message waits behind a card, the choice is disabled', () => {

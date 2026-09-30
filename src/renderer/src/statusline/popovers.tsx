@@ -114,7 +114,7 @@ export const ContextPopover = ({ record, children }: FieldProps) => (
 // The 5h and the 7d fields open the same popover.
 export const UsagePopover = ({ record, status, children }: FieldProps & { status: EngineSessionStatus | null }) => (
   <StatusPopover label="Account usage" width="w-80" trigger={children}>
-    {() => <UsagePopoverBody record={record} status={status} />}
+    {(close) => <UsagePopoverBody record={record} status={status} close={close} />}
   </StatusPopover>
 );
 

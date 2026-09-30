@@ -123,6 +123,28 @@ describe('status line popovers', () => {
     expect(within(popover).getByText('Updated 2m ago')).toBeTruthy();
   });
 
+  it('the footer seam carries the popover’s close: a footer action that opens another surface closes the popover', () => {
+    useUsage.getState().applySnapshot(SNAP);
+    const opened = vi.fn();
+    const dispose = registerUsagePopoverFooter(({ close }) => (
+      <button
+        type="button"
+        onClick={() => {
+          close();
+          opened();
+        }}
+      >
+        Accounts
+      </button>
+    ));
+    mount();
+    fireEvent.click(field(/^5h/));
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'Account usage' })).getByRole('button', { name: 'Accounts' }));
+    expect(opened).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('dialog', { name: 'Account usage' })).toBeNull();
+    act(() => dispose());
+  });
+
   it('reads — for both windows when ClaudeUsage is unavailable, with the tooltip, and says so in the popover', () => {
     useUsage.getState().applySnapshot({ ...SNAP, available: false, accounts: [], drainTarget: null, pinsFor: {}, error: 'ClaudeUsage is not installed or has no data at /cu' });
     mount();

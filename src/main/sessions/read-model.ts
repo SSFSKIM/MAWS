@@ -12,7 +12,7 @@ import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { ProjectRecord, SessionDigest } from '@shared/ipc/schema';
-import { applyStatusToDigest, costLedger, emptyDigest, foldEvents, type CostLedger } from './digest';
+import { applyStatusToDigest, costLedger, costOf, emptyDigest, foldEvents, type CostLedger } from './digest';
 import type { LaunchMode } from './select-source';
 
 export interface SessionSource {
@@ -203,7 +203,7 @@ export class SessionReadModel {
       // running total, unless it is below what the session's processes already cost (a seed after an exit).
       const prev = this.digestsById.get(d.appSessionId);
       const ledger = this.ledgers.get(d.appSessionId);
-      const keepCost = d.cost === null || (ledger !== undefined && d.cost.totalUsd < ledger.finishedUsd + ledger.runningUsd);
+      const keepCost = d.cost === null || (ledger !== undefined && d.cost.totalUsd < costOf(ledger));
       if (!keepCost && d.cost) {
         // A given `sinceSeenUsd` fixes the cost at which the session was last seen, so later samples stay consistent.
         this.costAtSeen.set(d.appSessionId, d.cost.totalUsd - d.cost.sinceSeenUsd);

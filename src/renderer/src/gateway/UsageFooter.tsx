@@ -26,17 +26,25 @@ import { switchRoute } from './switch-route';
 
 const LINK = 'rounded-sm px-1 py-0.5 text-ui-sm text-accent outline-accent hover:bg-bg-hover focus-visible:outline-2 disabled:text-fg-faint';
 
-export function UsageFooter({ appSessionId }: { appSessionId: AppSessionId }) {
+// `close` is C7's popover close: the actions that open another surface (the hand-off, Accounts, Session info) close the
+// popover first; the route choices and the switch keep it open, since their progress and errors show here.
+export function UsageFooter({ appSessionId, close }: { appSessionId: AppSessionId; close: () => void }) {
   const { record, status } = useSessions(useShallow((s) => ({ record: s.records.get(appSessionId) ?? null, status: s.engine.get(appSessionId) ?? null })));
   const intent = useSetup((s) => s.intents.get(appSessionId) ?? null);
   // C10's definition of unstarted (its setup hook's): an intent, and no record with a status. First, so a provisional
   // record without a route is never offered a restart.
-  if (intent !== null && !(record !== null && status !== null)) return <UnstartedFooter appSessionId={appSessionId} intent={intent} />;
+  if (intent !== null && !(record !== null && status !== null)) return <UnstartedFooter appSessionId={appSessionId} intent={intent} close={close} />;
   if (!record) return <span />;
-  return <Footer appSessionId={appSessionId} record={record} status={status} />;
+  return <Footer appSessionId={appSessionId} record={record} status={status} close={close} />;
 }
 
-function Footer({ appSessionId, record, status }: { appSessionId: AppSessionId; record: SessionRecord; status: EngineSessionStatus | null }) {
+// Closes the popover, then opens the surface.
+const leaving = (close: () => void, open: () => unknown) => () => {
+  close();
+  open();
+};
+
+function Footer({ appSessionId, record, status, close }: { appSessionId: AppSessionId; record: SessionRecord; status: EngineSessionStatus | null; close: () => void }) {
   const now = useNow(POPOVER_TICK_MS);
   const snapshot = useUsage((s) => s.snapshot);
   const settings = useSettings((s) => s.state?.settings) ?? SETTINGS_DEFAULTS_V3;
@@ -71,14 +79,14 @@ function Footer({ appSessionId, record, status }: { appSessionId: AppSessionId; 
       {facts.refusal && <p className="m-0 text-ui-sm text-fg-muted">{facts.refusal}</p>}
       <div className="-ml-1 flex flex-wrap items-center gap-x-1">
         {facts.route !== 'direct' && (
-          <button type="button" className={LINK} onClick={() => runAction('gateway.openClaudeUsage')}>
+          <button type="button" className={LINK} onClick={leaving(close, () => runAction('gateway.openClaudeUsage'))}>
             {FOOTER.openClaudeUsage}
           </button>
         )}
-        <button type="button" className={LINK} onClick={() => runAction('accounts.open')}>
+        <button type="button" className={LINK} onClick={leaving(close, () => runAction('accounts.open'))}>
           {FOOTER.accounts}
         </button>
-        <button type="button" className={LINK} onClick={() => panelHost.addTool('session-info', { appSessionId })}>
+        <button type="button" className={LINK} onClick={leaving(close, () => panelHost.addTool('session-info', { appSessionId }))}>
           {FOOTER.sessionInfo}
         </button>
         {facts.targets.map((target) => (
@@ -100,7 +108,7 @@ function Footer({ appSessionId, record, status }: { appSessionId: AppSessionId; 
 // The route an unstarted session will start on, chosen on its intent (`session.intent.patch { gateway }`, C10's hook's
 // patch). Disabled while its start runs or its first message waits behind a card: the launch already read the route,
 // and the relay card's `Run direct` is the way there.
-function UnstartedFooter({ appSessionId, intent }: { appSessionId: AppSessionId; intent: SetupIntent }) {
+function UnstartedFooter({ appSessionId, intent, close }: { appSessionId: AppSessionId; intent: SetupIntent; close: () => void }) {
   const settings = useSettings((s) => s.state?.settings) ?? SETTINGS_DEFAULTS_V3;
   const starting = useSetup((s) => isStarting(s, appSessionId)) || intent.message !== null;
   const [error, setError] = useState<string | null>(null);
@@ -131,10 +139,10 @@ function UnstartedFooter({ appSessionId, intent }: { appSessionId: AppSessionId;
         </p>
       )}
       <div className="-ml-1 flex flex-wrap items-center gap-x-1">
-        <button type="button" className={LINK} onClick={() => runAction('gateway.openClaudeUsage')}>
+        <button type="button" className={LINK} onClick={leaving(close, () => runAction('gateway.openClaudeUsage'))}>
           {FOOTER.openClaudeUsage}
         </button>
-        <button type="button" className={LINK} onClick={() => runAction('accounts.open')}>
+        <button type="button" className={LINK} onClick={leaving(close, () => runAction('accounts.open'))}>
           {FOOTER.accounts}
         </button>
       </div>

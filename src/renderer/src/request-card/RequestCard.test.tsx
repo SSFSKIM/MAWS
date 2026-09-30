@@ -89,6 +89,7 @@ const flaggedRead = syntheticRequest('flagged-read');
 const unflaggedRead = syntheticRequest('flagged-read', (r) => delete r.requires_user_interaction);
 const reapply = fixtureRequest('pass2', 'grant-reapply-start', 30);
 const question = fixtureRequest('pass1', 'question-roundtrip', 137);
+const skippedQuestion = fixtureRequest('pass3', 'question-deny', 108); // the probe's question skipped by a plain deny
 const elicitation = fixtureRequest('pass2', 'dialogs', 41);
 const plan: RequestEvent = { ...permission(), kind: 'plan.requested', plan: '# Plan\n\n1. Split the parser\n2. Test it', input: {} } as never;
 
@@ -246,6 +247,19 @@ describe('request card placements and delivery states', () => {
     await user.click(screen.getByRole('checkbox', { name: 'Pear' }));
     await user.click(submit);
     await waitFor(() => expect(answers()).toEqual([{ kind: 'question', answers: { 'Which color do you prefer?': 'Red', 'Which fruits do you like?': 'Apple, Pear' } }]));
+  });
+
+  it('Skip declines a question with the plain permission deny pass3/question-deny seq 110 recorded, and Esc on the docked frame skips too', async () => {
+    const first = mount(skippedQuestion, 'inline');
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Skip' }));
+    // the answer C3's broker writes as the recorded deny (broker.test.ts pins the wire over the same fixture)
+    await waitFor(() => expect(answers()).toEqual([{ kind: 'permission', decision: 'deny' }]));
+    await waitFor(() => expect(screen.getByText('Answered · Skipped')).toBeTruthy());
+    first.view.unmount();
+    mount(skippedQuestion, 'docked');
+    focusOn(frame());
+    await press('{Escape}');
+    await waitFor(() => expect(answers()).toEqual([{ kind: 'permission', decision: 'deny' }, { kind: 'permission', decision: 'deny' }]));
   });
 
   it('the elicitation form for pass2/dialogs seq 41 has one required text input and accepts { color: teal }', async () => {

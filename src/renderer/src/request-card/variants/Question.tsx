@@ -2,8 +2,9 @@
 // checkboxes when `multiSelect`) with their descriptions, the `Other…` free-text row the engine always accepts, and a
 // single-select question's option previews beside the list in a sandboxed frame (only the selected option's, so a
 // preview frame exists only while it is shown). Submit is enabled once every question has an answer; Enter submits a
-// complete form; Esc leaves the card without answering. C3's broker resolves a question request only with a question
-// answer, so there is no Skip: a question is answered here or in the terminal.
+// complete form. Skip (and Esc) declines the question with a plain permission deny, the answer the terminal's Escape
+// writes: C3's broker admits it for a question, the engine hands the model `Denied by the user in MAWS.` and the turn
+// goes on (pass3/question-deny seq 108 to 154), and the transcript records the question with no answers.
 import { Checkbox, RadioGroup } from 'radix-ui';
 import { useEffect, useState } from 'react';
 import type { Question } from '@shared/graph/events';
@@ -126,12 +127,10 @@ export function QuestionBody({ request, busy, submit, bindKeys }: VariantProps<'
   };
   const complete = questionAnswers(state) !== null;
   const send = () => complete && submit(toAnswer(state), 'Submitted');
+  const skip = () => submit(toAnswer({ kind: 'permission', decision: 'deny', message: '' }), 'Skipped');
 
   useEffect(() => {
-    bindKeys({
-      accept: send,
-      decline: () => (document.activeElement instanceof HTMLElement ? document.activeElement.blur() : undefined),
-    });
+    bindKeys({ accept: send, decline: skip });
   });
 
   return (
@@ -155,6 +154,9 @@ export function QuestionBody({ request, busy, submit, bindKeys }: VariantProps<'
       })}
       <Controls>
         {!complete && <span className="mr-auto text-ui-sm text-fg-faint">Answer every question to submit</span>}
+        <CardButton disabled={busy} onClick={skip}>
+          Skip
+        </CardButton>
         <CardButton tone="primary" disabled={busy || !complete} onClick={send}>
           Submit
         </CardButton>

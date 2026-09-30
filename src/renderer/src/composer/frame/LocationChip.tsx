@@ -1,11 +1,14 @@
-// The chip row's location (C7 execution document, "Composer frame" Location): the directory or worktree, home-
-// abbreviated, with its branch and a dirty marker. Its popover offers the project directory, a new worktree with a
-// name, an existing worktree, and the branch picker (a search over the branches with a create action), and lists the
-// additional directories with copy. Under a live engine every choice is read-only ("Arrives with C10"); under an
-// unstarted session's intent every choice writes through the binding.
+// The chip row's location (C7 execution document, "Composer frame" Location): the directory's or worktree's name (the
+// path in the popover and the tooltip), with its branch and a dirty marker. Its popover offers the project directory,
+// a new worktree with a name and the branch it starts from, each existing worktree with its branch and how many
+// sessions run there, and the branch picker (a search over the branches with a create action), and lists the
+// additional directories with copy. Under a live engine every choice is read-only (the location is fixed once the
+// session starts); under an unstarted session's intent every choice writes through the binding.
 import { Popover } from 'radix-ui';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
+import { useCommand } from '../../ipc/query';
 import { formatCwd } from '../../session/StatusLine';
+import { useSessions } from '../../stores/sessions';
 import { locationPath, type Location } from '../setup-intent';
 import type { ChipBinding } from './bindings';
 import { CHIP, ITEM, NOTE, POPOVER } from './chip-style';
@@ -20,33 +23,82 @@ export interface LocationChipProps {
 
 const sameLocation = (a: Location, b: Location) => a.kind === b.kind && locationPath(a) === locationPath(b);
 
-function optionLabel(location: Location): { title: string; detail: string } {
+// The last segment of the home-abbreviated path: `~` for the home directory itself.
+export const directoryName = (path: string): string => formatCwd(path).split('/').filter(Boolean).at(-1) ?? path;
+
+const sessionCount = (n: number) => (n === 0 ? 'no sessions' : n === 1 ? '1 session' : `${n} sessions`);
+
+// What the popover says of an existing worktree: its branch (from `git.worktree.list`, read while the popover is open)
+// and the sessions MAWS knows there, archived ones aside.
+interface WorktreeFacts {
+  branch: string | null | undefined; // undefined: not read yet; null: a detached checkout
+  sessions: number;
+}
+
+function useWorktreeFacts(options: readonly Location[], open: boolean): (path: string) => WorktreeFacts {
+  const repoRoot = options.find((o): o is Extract<Location, { kind: 'existingWorktree' }> => o.kind === 'existingWorktree')?.repoRoot ?? null;
+  const listed = useCommand('git.worktree.list', { repoRoot: repoRoot ?? '' }, { enabled: open && repoRoot !== null, staleTime: 30_000 });
+  const records = useSessions((s) => s.records);
+  const counts = useMemo(() => {
+    const byPath = new Map<string, number>();
+    for (const r of records.values()) {
+      if (r.archived) continue;
+      const path = r.worktree?.path ?? r.directory;
+      byPath.set(path, (byPath.get(path) ?? 0) + 1);
+    }
+    return byPath;
+  }, [records]);
+  return (path) => ({ branch: listed.data?.worktrees.find((w) => w.path === path)?.branch, sessions: counts.get(path) ?? 0 });
+}
+
+function optionLabel(location: Location, facts: (path: string) => WorktreeFacts): { title: string; detail: string } {
   switch (location.kind) {
     case 'directory':
       return { title: 'Project directory', detail: formatCwd(location.path) };
-    case 'existingWorktree':
-      return { title: 'Existing worktree', detail: formatCwd(location.path) };
+    case 'existingWorktree': {
+      const { branch, sessions } = facts(location.path);
+      const on = branch === undefined ? [] : [branch === null ? 'detached' : `⎇ ${branch}`];
+      return { title: 'Existing worktree', detail: [directoryName(location.path), ...on, sessionCount(sessions)].join(' · ') };
+    }
     case 'newWorktree':
       return { title: 'New worktree', detail: `${location.name} · ${location.branch.name}` };
   }
 }
 
-function NewWorktree({ template, disabled, choose }: { template: Extract<Location, { kind: 'newWorktree' }>; disabled: boolean; choose(l: Location): void }) {
+const FIELD = 'rounded-sm border border-border-strong bg-bg px-1.5 py-0.5 text-ui text-fg';
+
+// A new worktree's name and, for a new branch, where it starts from (HEAD or a local branch).
+function NewWorktree({ template, bases, disabled, choose }: { template: Extract<Location, { kind: 'newWorktree' }>; bases: readonly string[]; disabled: boolean; choose(l: Location): void }) {
   const [name, setName] = useState(template.name);
+  const [base, setBase] = useState(template.branch.kind === 'new' ? template.branch.base : 'HEAD');
   const valid = /^[A-Za-z0-9._-]+$/.test(name);
+  const starts = ['HEAD', ...bases.filter((b) => b !== 'HEAD')];
+  if (!starts.includes(base)) starts.push(base); // a base the intent holds that is no local branch now
   return (
     <form
-      className="flex items-center gap-1 px-2 py-1"
+      className="flex items-end gap-1 px-2 py-1"
       onSubmit={(event) => {
         event.preventDefault();
-        if (valid) choose({ ...template, name, branch: template.branch.kind === 'new' ? { ...template.branch, name: `worktree-${name}` } : template.branch });
+        if (valid) choose({ ...template, name, branch: template.branch.kind === 'new' ? { kind: 'new', name: `worktree-${name}`, base } : template.branch });
       }}
     >
       <label className="flex min-w-0 flex-1 flex-col text-ui-sm text-fg-muted">
         New worktree
-        <input aria-label="New worktree name" value={name} disabled={disabled} onChange={(e) => setName(e.target.value)} className="rounded-sm border border-border-strong bg-bg px-1.5 py-0.5 font-mono text-ui text-fg" />
+        <input aria-label="New worktree name" value={name} disabled={disabled} onChange={(e) => setName(e.target.value)} className={`${FIELD} font-mono`} />
       </label>
-      <button type="submit" disabled={disabled || !valid} className={`${CHIP} self-end`}>
+      {template.branch.kind === 'new' && (
+        <label className="flex min-w-0 flex-1 flex-col text-ui-sm text-fg-muted">
+          Start from
+          <select aria-label="Start from" value={base} disabled={disabled} onChange={(e) => setBase(e.target.value)} className={`${FIELD} font-mono`}>
+            {starts.map((b) => (
+              <option key={b} value={b}>
+                {b}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+      <button type="submit" disabled={disabled || !valid} className={CHIP}>
         Use
       </button>
     </form>
@@ -99,6 +151,7 @@ export function LocationChip({ location, branch, directories, dirty, onOpen }: L
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
   const path = locationPath(location.value);
+  const facts = useWorktreeFacts(location.options, open);
   const choose = async (next: Location) => {
     const result = await location.set(next);
     setError(result.ok ? null : result.error);
@@ -117,7 +170,7 @@ export function LocationChip({ location, branch, directories, dirty, onOpen }: L
       }}
     >
       <Popover.Trigger aria-label={`Location ${path}`} title={location.disabled ? `${path} · ${location.disabled}` : path} className={`${CHIP} font-mono`}>
-        <span className="truncate">{formatCwd(path)}</span>
+        <span className="truncate">{directoryName(path)}</span>
         <span className="shrink-0 text-fg-faint">·</span>
         <span className="shrink-0 truncate">{branch.value === null ? '—' : `⎇ ${branch.value}`}</span>
         {dirty && (
@@ -134,9 +187,19 @@ export function LocationChip({ location, branch, directories, dirty, onOpen }: L
             {location.options
               .filter((o) => o.kind !== 'newWorktree')
               .map((option) => {
-                const { title, detail } = optionLabel(option);
+                const { title, detail } = optionLabel(option, facts);
                 return (
-                  <button key={`${option.kind}:${locationPath(option)}`} type="button" role="menuitemradio" aria-checked={sameLocation(option, location.value)} disabled={location.disabled !== null} onClick={() => void choose(option)} className={ITEM}>
+                  <button
+                    key={`${option.kind}:${locationPath(option)}`}
+                    type="button"
+                    role="menuitemradio"
+                    aria-checked={sameLocation(option, location.value)}
+                    title={locationPath(option)}
+                    aria-description={locationPath(option)}
+                    disabled={location.disabled !== null}
+                    onClick={() => void choose(option)}
+                    className={ITEM}
+                  >
                     <span>{title}</span>
                     <span className="font-mono text-ui-sm text-fg-muted">{detail}</span>
                   </button>
@@ -147,7 +210,7 @@ export function LocationChip({ location, branch, directories, dirty, onOpen }: L
             .filter((o): o is Extract<Location, { kind: 'newWorktree' }> => o.kind === 'newWorktree')
             .slice(0, 1)
             .map((template) => (
-              <NewWorktree key="new" template={template} disabled={location.disabled !== null} choose={(l) => void choose(l)} />
+              <NewWorktree key="new" template={template} bases={branch.options} disabled={location.disabled !== null} choose={(l) => void choose(l)} />
             ))}
           {location.disabled && <p className={NOTE}>{location.disabled}</p>}
           {error && (

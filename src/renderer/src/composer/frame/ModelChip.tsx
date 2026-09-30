@@ -1,5 +1,6 @@
 // The toolbar's model with effort (C7 execution document, "Composer frame" Model · effort): the resolved model and the
-// effort, named by the model's display name once the session's models have been listed (the resolved id before);
+// effort, named by the model's display name from the route's catalogue (C10's `engine.models`; the resolved id when
+// no entry names it);
 // the menu lists the models the binding offers (C3's `listModels`, or C10's catalogue for an unstarted
 // session) with their descriptions, and the chosen model's effort levels (every level when it names none). When C11
 // registered the `/model` widget the chip opens it instead.
@@ -31,7 +32,7 @@ export function ModelChip({ binding, openWidget, onOpen }: { binding: ChipBindin
       setPending(false);
     }
   };
-  // named from the options this mount read, else the session's last listed models, else the resolved id itself
+  // named from the options this mount listed, else the route's catalogue, else the resolved id itself
   const label = `${displayOf(binding.options.length > 0 ? binding.options : (binding.names ?? []), model)}${effort ? ` · ${effort}` : ''}`;
   return (
     <Popover.Root

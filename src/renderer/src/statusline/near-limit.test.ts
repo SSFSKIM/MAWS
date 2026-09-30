@@ -63,11 +63,10 @@ describe('near-limit banner posts once per window', () => {
     expect(bannerKey('aa9db20d', 'session', '2026-09-29T07:49:59.000Z')).toBe('usage:aa9db20d:session:2026-09-29T07:49:59Z');
   });
 
-  it('reads the threshold from settings.usage.nearLimitPercent within 50 to 100, else 90', () => {
+  it('reads the threshold from settings v3’s usage.nearLimitPercent, 90 before the settings are read', () => {
     expect(thresholdFrom(null)).toBe(90);
-    expect(thresholdFrom({ theme: 'system' })).toBe(90);
-    expect(thresholdFrom({ usage: { nearLimitPercent: 75 } })).toBe(75);
-    expect(thresholdFrom({ usage: { nearLimitPercent: 20 } })).toBe(90);
+    expect(thresholdFrom(SETTINGS_DEFAULTS_V3)).toBe(90);
+    expect(thresholdFrom({ ...SETTINGS_DEFAULTS_V3, usage: { nearLimitPercent: 75 } })).toBe(75);
   });
 });
 
@@ -131,6 +130,49 @@ describe('near-limit banner posts once per window: the notices adapter', () => {
 
     const reloaded = setup(['usage:a4:session:2026-09-29T09:49:59Z']);
     reloaded.usage.getState().applySnapshot(reading('2026-09-29T09:50:00Z'));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(reloaded.banners()).toEqual([]);
+    reloaded.off();
+  });
+
+  it('measures the 90 s tolerance reading to reading: a reset time drifting a minute per reading stays one banner, and a drifted dismissal is recorded again so a reload still finds it', async () => {
+    const reading = (resetsAt: string) => snapshot([account('a5', 'five@example.test', { fiveHour: { percent: 99, resetsAt, recordedAt: at(0) } })]);
+    const first = setup();
+    for (const resetsAt of ['2026-09-29T09:50:00Z', '2026-09-29T09:51:00Z', '2026-09-29T09:52:00Z', '2026-09-29T09:53:00Z']) {
+      first.usage.getState().applySnapshot(reading(resetsAt));
+      await vi.advanceTimersByTimeAsync(0);
+    }
+    expect(first.banners().map((b) => b.id)).toEqual(['usage:a5:session:2026-09-29T09:50:00Z']); // three minutes from its first key, one window
+    first.notices.getState().dismiss('usage:a5:session:2026-09-29T09:50:00Z');
+    await vi.advanceTimersByTimeAsync(0);
+    first.usage.getState().applySnapshot(reading('2026-09-29T09:54:00Z'));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(first.banners()).toEqual([]);
+    // the dismissal is written, then written again at the drifted reading, so the next run measures from there
+    expect(first.fake.invoked('layout.set').at(-1)).toEqual({ key: 'usage.banners', value: ['usage:a5:session:2026-09-29T09:54:00Z'] });
+    first.off();
+
+    const reloaded = setup(['usage:a5:session:2026-09-29T09:54:00Z']);
+    reloaded.usage.getState().applySnapshot(reading('2026-09-29T09:55:00Z'));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(reloaded.banners()).toEqual([]);
+    reloaded.off();
+  });
+
+  it('a banner dismissed after its window drifted is recorded at its latest reading, so a reload at once still finds it', async () => {
+    const reading = (resetsAt: string) => snapshot([account('a6', 'six@example.test', { fiveHour: { percent: 99, resetsAt, recordedAt: at(0) } })]);
+    const first = setup();
+    for (const resetsAt of ['2026-09-29T09:50:00Z', '2026-09-29T09:51:00Z', '2026-09-29T09:52:00Z']) {
+      first.usage.getState().applySnapshot(reading(resetsAt));
+      await vi.advanceTimersByTimeAsync(0);
+    }
+    first.notices.getState().dismiss('usage:a6:session:2026-09-29T09:50:00Z');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(first.fake.invoked('layout.set')).toEqual([{ key: 'usage.banners', value: ['usage:a6:session:2026-09-29T09:52:00Z'] }]);
+    first.off();
+
+    const reloaded = setup(['usage:a6:session:2026-09-29T09:52:00Z']);
+    reloaded.usage.getState().applySnapshot(reading('2026-09-29T09:52:00Z'));
     await vi.advanceTimersByTimeAsync(0);
     expect(reloaded.banners()).toEqual([]);
     reloaded.off();
