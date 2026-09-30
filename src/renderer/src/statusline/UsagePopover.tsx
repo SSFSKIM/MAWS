@@ -38,7 +38,11 @@ function WindowMeter({ label, name, window, now }: { label: string; name: string
   );
 }
 
-export function UsagePopoverBody({ record, status }: { record: SessionRecord; status: EngineSessionStatus | null }) {
+const NO_CLOSE = () => {};
+
+// `close` closes the popover around the body (C11's footer calls it before opening another surface); a host that
+// renders the body outside a popover passes none.
+export function UsagePopoverBody({ record, status, close = NO_CLOSE }: { record: SessionRecord; status: EngineSessionStatus | null; close?: () => void }) {
   const now = useNow(POPOVER_TICK_MS);
   const snapshot = useUsage((s) => s.snapshot);
   const shown = useSessionWindows(record, status);
@@ -95,7 +99,7 @@ export function UsagePopoverBody({ record, status }: { record: SessionRecord; st
       </div>
       <div className="flex items-center justify-between gap-3 border-t border-border px-3.5 py-2.5 text-ui-sm">
         {/* eslint-disable-next-line react-hooks/static-components -- registered once by C11, not created in render */}
-        {Footer ? <Footer appSessionId={record.appId} /> : <span />}
+        {Footer ? <Footer appSessionId={record.appId} close={close} /> : <span />}
         {shown.readAt !== null && <span className="text-fg-muted">Updated {ago(Math.max(0, now - Date.parse(shown.readAt)))}</span>}
       </div>
     </>
