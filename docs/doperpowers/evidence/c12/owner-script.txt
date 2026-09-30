@@ -27,8 +27,9 @@ B2. Remove from ~/.claude.json the scratch entries earlier agent runs left under
 B3. Make sure ClaudeUsage is running (Settings › Accounts in MAWS shows it). In one terminal, keep a `claude` running in a
     project of your choice; step 1 looks for it.
 B4. Open dist/mac-arm64/MAWS.app. At its first notification request, allow MAWS in System Settings › Notifications.
-    Expect the first open over your store to take about a minute before the Overview fills: the pre-run's cold start
-    over your 3,272 transcripts showed the first card at 58 s; the second start at 2.4 s.
+    Expect the Overview to fill within a few seconds, with "Indexing sessions · N of M" above the cards until the index
+    settles: the pre-run re-run on master (2026-09-30, prerun-master.txt) showed the first card at 3.5 s cold and 1.4 s
+    warm over your 3,279 transcripts (C12's pre-run had seen 58 s before debt wave 5). Record the two figures you see.
 B5. Decide the stateful MCP servers. In Settings › Engine › Stateful MCP servers, add each server whose state would be
     lost if its process ended and MAWS resumed the session later. ptc's documentation says its namespace persists
     across --resume until its idle TTL, so it is probably not stateful; leave it out unless you have seen otherwise.
