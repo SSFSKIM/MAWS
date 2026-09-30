@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, TaskId } from '@shared/graph/ids';
 import type { BudgetState } from '@shared/ipc/schema/engine';
 import { status } from '../../../../test/support/builders';
@@ -116,7 +116,10 @@ describe('the budget store across engine host generations', () => {
   afterEach(() => off());
 
   it('a startup read the host refused is made again once the host is ready', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     await fake.fail('engine.budget', 'engine-host is starting');
+    expect(warn).toHaveBeenCalledExactlyOnceWith('[budget] engine.budget unavailable', { code: 'internal', message: 'engine-host is starting' });
+    warn.mockRestore();
     expect(useBudget.getState().state).toBeNull();
     host('ready', 2);
     expect(fake.pending('engine.budget')).toBe(1);
