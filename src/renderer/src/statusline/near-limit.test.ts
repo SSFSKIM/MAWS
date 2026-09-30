@@ -135,6 +135,30 @@ describe('near-limit banner posts once per window: the notices adapter', () => {
     reloaded.off();
   });
 
+  it('measures the 90 s tolerance reading to reading: a reset time drifting a minute per reading stays one banner, and a drifted dismissal is recorded again so a reload still finds it', async () => {
+    const reading = (resetsAt: string) => snapshot([account('a5', 'five@example.test', { fiveHour: { percent: 99, resetsAt, recordedAt: at(0) } })]);
+    const first = setup();
+    for (const resetsAt of ['2026-09-29T09:50:00Z', '2026-09-29T09:51:00Z', '2026-09-29T09:52:00Z', '2026-09-29T09:53:00Z']) {
+      first.usage.getState().applySnapshot(reading(resetsAt));
+      await vi.advanceTimersByTimeAsync(0);
+    }
+    expect(first.banners().map((b) => b.id)).toEqual(['usage:a5:session:2026-09-29T09:50:00Z']); // three minutes from its first key, one window
+    first.notices.getState().dismiss('usage:a5:session:2026-09-29T09:50:00Z');
+    await vi.advanceTimersByTimeAsync(0);
+    first.usage.getState().applySnapshot(reading('2026-09-29T09:54:00Z'));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(first.banners()).toEqual([]);
+    // the dismissal is written, then written again at the drifted reading, so the next run measures from there
+    expect(first.fake.invoked('layout.set').at(-1)).toEqual({ key: 'usage.banners', value: ['usage:a5:session:2026-09-29T09:54:00Z'] });
+    first.off();
+
+    const reloaded = setup(['usage:a5:session:2026-09-29T09:54:00Z']);
+    reloaded.usage.getState().applySnapshot(reading('2026-09-29T09:55:00Z'));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(reloaded.banners()).toEqual([]);
+    reloaded.off();
+  });
+
   it('keeps usage.banners to the newest fifty keys', async () => {
     const old = Array.from({ length: 50 }, (_, i) => `usage:old:${i}`);
     const { usage, notices, fake, off } = setup(old);

@@ -19,12 +19,15 @@ const REFRESH_MS = 60_000; // a shown banner's countdown, and its withdrawal onc
 export interface NearLimitBanner {
   key: string;
   text: string;
+  resetsAtMs: number; // this reading's reset time, which the adapter remembers for the key
 }
 
 // ClaudeUsage records a window's `resetsAt` from the rate-limit headers, which move by a second between readings
-// (`07:49:59Z`, then `07:50:00Z`). One window is an account, a limit key and reset times within 90 s of each other;
-// its key carries the first reset time seen for it, and a later reading finds that key again by the same tolerance,
-// in this run (the posted keys) and after a reload (the dismissed keys in `usage.banners`).
+// (`07:49:59Z`, then `07:50:00Z`). One window is an account, a limit key and reset times within 90 s of each other,
+// measured reading to reading: its key carries the first reset time seen for it, and a later reading finds that key
+// again within 90 s of the key's latest reading (the adapter's `lastSeen`; the key's own time before any), so a reset
+// time that drifts a little at every reading stays one window. After a reload the dismissed keys in `usage.banners`
+// are the anchors; a dismissal whose window has drifted past half the tolerance is re-recorded at the current reading.
 export const SAME_WINDOW_MS = 90_000;
 
 export function bannerKey(accountUuid: string, limitKey: string, resetsAt: string): string {
@@ -33,12 +36,21 @@ export function bannerKey(accountUuid: string, limitKey: string, resetsAt: strin
 
 const KEY = /^usage:([^:]+):([^:]+):(.+)$/;
 
-// The key among `known` that names this window, if any.
-function knownKey(known: readonly string[], accountUuid: string, limitKey: string, resetsAt: string): string | undefined {
+const keyTime = (key: string): number => Date.parse(KEY.exec(key)?.[3] ?? '');
+
+// The same window's key at another reset time.
+const reanchored = (key: string, resetsAtMs: number): string => {
+  const [, account, limit] = KEY.exec(key)!;
+  return bannerKey(account, limit, new Date(resetsAtMs).toISOString());
+};
+
+// The key among `known` that names this window, if any: its latest reading (`lastSeen`), else its own reset time, within
+// the tolerance of this one.
+function knownKey(known: readonly string[], accountUuid: string, limitKey: string, resetsAt: string, lastSeen: ReadonlyMap<string, number>): string | undefined {
   const at = Date.parse(resetsAt);
   return known.find((key) => {
     const m = KEY.exec(key);
-    return m !== null && m[1] === accountUuid && m[2] === limitKey && Math.abs(Date.parse(m[3]) - at) <= SAME_WINDOW_MS;
+    return m !== null && m[1] === accountUuid && m[2] === limitKey && Math.abs((lastSeen.get(key) ?? Date.parse(m[3])) - at) <= SAME_WINDOW_MS;
   });
 }
 
@@ -47,12 +59,19 @@ export function thresholdFrom(settings: Settings | null): number {
   return settings?.usage.nearLimitPercent ?? DEFAULT_NEAR_LIMIT_PERCENT;
 }
 
+interface WindowOptions {
+  thresholdPercent?: number;
+  now?: number;
+  lastSeen?: ReadonlyMap<string, number>; // each known key's latest reset time read
+}
+
 // Every banner the snapshot warrants at `now`, each keyed by the `known` key that already names its window, else by
 // its own reset time. Pure.
-export function nearLimitWindows(snapshot: UsageSnapshot, known: readonly string[], opts: { thresholdPercent?: number; now?: number } = {}): NearLimitBanner[] {
+export function nearLimitWindows(snapshot: UsageSnapshot, known: readonly string[], opts: WindowOptions = {}): NearLimitBanner[] {
   if (!snapshot.available) return [];
   const threshold = opts.thresholdPercent ?? DEFAULT_NEAR_LIMIT_PERCENT;
   const now = opts.now ?? Date.now();
+  const lastSeen = opts.lastSeen ?? new Map<string, number>();
   const banners: NearLimitBanner[] = [];
   for (const account of snapshot.accounts) {
     const windows: [string, string, UsageWindow | null][] = [
@@ -64,15 +83,15 @@ export function nearLimitWindows(snapshot: UsageSnapshot, known: readonly string
       if (!window || window.percent < threshold) continue;
       const left = Date.parse(window.resetsAt) - now;
       if (!(left > 0)) continue;
-      const key = knownKey(known, account.uuid, limitKey, window.resetsAt) ?? bannerKey(account.uuid, limitKey, window.resetsAt);
-      banners.push({ key, text: `${label} window at ${Math.round(window.percent)}% for ${account.email} · resets in ${resetsIn(left)}` });
+      const key = knownKey(known, account.uuid, limitKey, window.resetsAt, lastSeen) ?? bannerKey(account.uuid, limitKey, window.resetsAt);
+      banners.push({ key, text: `${label} window at ${Math.round(window.percent)}% for ${account.email} · resets in ${resetsIn(left)}`, resetsAtMs: Date.parse(window.resetsAt) });
     }
   }
   return banners;
 }
 
 // Every banner the snapshot warrants at `now`, less the windows `dismissed` names. Pure.
-export function nearLimitBanners(snapshot: UsageSnapshot, dismissed: Iterable<string>, opts: { thresholdPercent?: number; now?: number } = {}): NearLimitBanner[] {
+export function nearLimitBanners(snapshot: UsageSnapshot, dismissed: Iterable<string>, opts: WindowOptions = {}): NearLimitBanner[] {
   const skip = [...dismissed];
   return nearLimitWindows(snapshot, skip, opts).filter((b) => !skip.includes(b.key));
 }
@@ -93,6 +112,7 @@ export function connectNearLimitBanners(deps: NearLimitDeps = { client: ipc, usa
   let dismissed: string[] | null = null; // newest last, as layout.json keeps them
   const posted = new Set<string>(); // every key posted in this run: never posted again
   const withdrawing = new Set<string>(); // keys this adapter removes itself, which are not dismissals
+  const lastSeen = new Map<string, number>(); // each key's latest reset time read in this run
   let live = true;
 
   const shown = () => new Set(notices.getState().notices.map((n) => n.id));
@@ -100,10 +120,19 @@ export function connectNearLimitBanners(deps: NearLimitDeps = { client: ipc, usa
   const evaluate = () => {
     const snapshot = usage.getState().snapshot;
     if (!live || dismissed === null || !snapshot) return;
-    // keyed by what this run posted and what was dismissed, so a jittered reset time finds its window's key again
+    // keyed by what was dismissed and what this run posted, so a jittered reset time finds its window's key again
+    const opts = { thresholdPercent: thresholdFrom(settings.getState().state?.settings ?? null), now: Date.now(), lastSeen };
+    const windows = nearLimitWindows(snapshot, [...dismissed, ...posted], opts);
+    for (const { key, resetsAtMs } of windows) lastSeen.set(key, resetsAtMs);
+    // a dismissal whose window has drifted past half the tolerance is recorded again at this reading, so a reload
+    // (which has only the keys' own times) still finds it
+    const moved = new Map(windows.filter((b) => dismissed!.includes(b.key) && Math.abs(b.resetsAtMs - keyTime(b.key)) > SAME_WINDOW_MS / 2).map((b) => [b.key, reanchored(b.key, b.resetsAtMs)]));
+    if (moved.size > 0) {
+      for (const [, key] of moved) lastSeen.set(key, keyTime(key));
+      writeDismissed(dismissed.map((key) => moved.get(key) ?? key));
+    }
     const skip = dismissed;
-    const opts = { thresholdPercent: thresholdFrom(settings.getState().state?.settings ?? null), now: Date.now() };
-    const current = nearLimitWindows(snapshot, [...posted, ...skip], opts).filter((b) => !skip.includes(b.key));
+    const current = windows.filter((b) => !moved.has(b.key) && !skip.includes(b.key));
     const onScreen = shown();
     for (const { key, text } of current) {
       const held = notices.getState().notices.find((n) => n.id === key);
@@ -120,12 +149,16 @@ export function connectNearLimitBanners(deps: NearLimitDeps = { client: ipc, usa
     }
   };
 
-  const recordDismissal = (key: string) => {
-    if (dismissed === null || dismissed.includes(key)) return;
-    dismissed = [...dismissed, key].slice(-MAX_DISMISSED);
+  const writeDismissed = (next: string[]) => {
+    dismissed = next.slice(-MAX_DISMISSED);
     void client.invoke('layout.set', { key: 'usage.banners', value: dismissed }).then((result) => {
       if (!result.ok) console.error('[usage] layout.set usage.banners failed', result.error);
     });
+  };
+
+  const recordDismissal = (key: string) => {
+    if (dismissed === null || dismissed.includes(key)) return;
+    writeDismissed([...dismissed, key]);
   };
 
   const offNotices = notices.subscribe((state, before) => {
