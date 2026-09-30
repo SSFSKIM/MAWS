@@ -519,7 +519,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
       ...receiptFields(RECEIPT_APPLIED), // the reader's undo state is laid over in rowsOfTurn
     });
   }
-  return { rows, summary, cells, work: workOf(turn, tools, cells, subagents) };
+  return { rows, summary, cells, work: workOf(turn, tools, cells, subagents, state?.cwd ?? null) };
 }
 
 // What the turn did whatever was disclosed, one entry per tool use from the turn's tool records (so the calls a merged
@@ -534,32 +534,43 @@ const EDITS = new Set(['Edit', 'MultiEdit', 'Write', 'NotebookEdit']);
 
 // Whether a Grep's `path` was a file, read from the engine's structured result (2.1.283's Grep: `{ mode, filenames,
 // content, … }`): in `files_with_matches` mode the one filename is the scope itself; in `count` mode the one `path:N`
-// line names the scope; in `content` mode a file target's lines carry no path prefix (`12:text`, `12-context`, `--`)
-// where a directory's read `src/a.ts:12:text`. A search with no match, or `-n: false` content, proves nothing, so the
-// scope stays out (a directory must never count as a file read).
-function grepFileScope(input: Record<string, unknown>, structured: unknown): string | null {
+// line names it. Only a path the result names proves anything: `content` mode's lines (`12:text` for a file,
+// `dir/a.ts:12:text` for a directory, and a directory's own path may start with digits) and a search with no match
+// prove nothing, so the scope stays out (a directory must never count as a file read).
+function grepFileScope(input: Record<string, unknown>, structured: unknown, cwd: string | null): string | null {
   const scope = str(input.path).replace(/\/+$/, '');
   if (!scope) return null;
   const s = record(structured);
-  const names = (filename: string) => sameFile(scope, filename);
+  const names = (filename: string) => samePath(scope, filename, cwd);
   const filenames = Array.isArray(s.filenames) ? s.filenames.filter((name): name is string => typeof name === 'string') : [];
   const lines = str(s.content).split('\n').filter((line) => line !== '');
   const mode = str(s.mode, 'files_with_matches');
   if (mode === 'files_with_matches') return filenames.length === 1 && names(filenames[0]) ? scope : null;
   if (mode === 'count') return lines.length === 1 && /:\d+$/.test(lines[0]) && names(lines[0].slice(0, lines[0].lastIndexOf(':'))) ? scope : null;
-  if (mode === 'content' && input['-n'] !== false) return lines.length > 0 && lines.every((line) => line === '--' || /^\d+[:-]/.test(line)) ? scope : null;
   return null;
 }
 
-// Whether the engine's filename spells the scope: Grep prints a path relative to the cwd (absolute outside it), so the
-// filename equals the scope or ends an absolute scope at a separator. Never the other way round: a directory `lib`
-// whose one match is `lib/x/lib` is no file scope.
-function sameFile(scope: string, filename: string): boolean {
-  const [x, y] = [scope.replace(/^\.\//, ''), filename.replace(/^\.\//, '')];
-  return x === y || (x.startsWith('/') && x.endsWith(`/${y}`));
+// Whether the engine's filename is the scope itself. Grep prints a path relative to the session's cwd (absolute outside
+// it), so both are resolved against the cwd (the session's latest `session.started`/`session.init`); without one, only
+// two spellings of the same form compare, and an absolute and a relative path prove nothing.
+function samePath(scope: string, filename: string, cwd: string | null): boolean {
+  const absolute = (path: string) => path.startsWith('/');
+  if (absolute(scope) !== absolute(filename) && cwd === null) return false;
+  const resolve = (path: string) => normalise(absolute(path) || cwd === null ? path : `${cwd}/${path}`);
+  return resolve(scope) === resolve(filename);
 }
 
-function workOf(turn: TurnState, tools: Map<ToolUseId, ToolRecord>, cells: Cell[], subagents: SubagentGroup[]): TurnWork {
+function normalise(path: string): string {
+  const parts: string[] = [];
+  for (const part of path.split('/')) {
+    if (part === '' || part === '.') continue;
+    if (part === '..') parts.pop();
+    else parts.push(part);
+  }
+  return `${path.startsWith('/') ? '/' : ''}${parts.join('/')}`;
+}
+
+function workOf(turn: TurnState, tools: Map<ToolUseId, ToolRecord>, cells: Cell[], subagents: SubagentGroup[], cwd: string | null): TurnWork {
   const edits = new Map(cells.flatMap((cell) => (cell.detail.kind === 'edit' && cell.toolUseId !== null ? [[cell.toolUseId, cell.detail] as const] : [])));
   const files: TurnWork['files'] = [];
   const used: TurnWork['tools'] = [];
@@ -569,7 +580,7 @@ function workOf(turn: TurnState, tools: Map<ToolUseId, ToolRecord>, cells: Cell[
     const mcp = MCP_TOOL.exec(use.toolName);
     used.push({ name: use.toolName, category, at: use.at, url: use.toolName === 'WebFetch' && typeof input.url === 'string' ? input.url : null, mcp: mcp ? { server: mcp[1], tool: mcp[2] } : null });
     const completed = result !== null && !result.isError && result.denial === null;
-    const grepFile = use.toolName === 'Grep' && completed ? grepFileScope(input, result.structured) : null;
+    const grepFile = use.toolName === 'Grep' && completed ? grepFileScope(input, result.structured, cwd) : null;
     const path = grepFile ?? filePathOf(input);
     const kind = READS.has(use.toolName) || grepFile !== null ? 'read' : EDITS.has(use.toolName) ? 'edited' : null;
     if (path && completed && kind) files.push({ path, use: kind, at: use.at, edit: kind === 'edited' ? (edits.get(use.toolUseId) ?? null) : null });

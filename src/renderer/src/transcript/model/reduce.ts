@@ -122,6 +122,7 @@ export interface TranscriptState {
   // (every returned state stays a valid, readable snapshot; applying events to a state that is not the lineage's
   // latest throws, since a fork would read registries its predecessor never filled; M2 review ruling).
   current: TurnId | null;
+  cwd: string | null; // additive (debt wave 4): the session's working directory, from its latest session.started or session.init
   placement: Map<EventId, TurnId | null>;
   index: { toolUses: Map<ToolUseId, TurnId>; tasks: Map<TaskId, TurnId>; requests: Map<RequestId, TurnId>; hooks: Map<string, TurnId>; messages: Map<MessageUuid, TurnId> };
   memo: Map<TurnId, MemoEntry>;
@@ -132,7 +133,7 @@ export function createState(sessionId: SessionId | null, agentId: AgentId | null
   return {
     sessionId, agentId, turns: new Map(), order: [], loose: [], hidden: null, pending: new Map(), seen: new Set(), echoUuids: new Set(),
     ui: { expandedTurns: new Set(), collapsedTurns: new Set(), expandedGroups: new Set(), expandedCells: new Set(), revealedBoundaries: new Set(), receipts: new Map(), spills: new Map(), global: 0, stamps: new Map(), version: 0 },
-    current: null, placement: new Map(),
+    current: null, cwd: null, placement: new Map(),
     index: { toolUses: new Map(), tasks: new Map(), requests: new Map(), hooks: new Map(), messages: new Map() },
     memo: new Map(),
     lineage: { latest: null },
@@ -608,6 +609,10 @@ function apply(batch: Batch, event: SessionEvent): void {
       }
       return batch.loose(event);
     }
+    case 'session.started':
+    case 'session.init':
+      state.cwd = event.cwd; // what the engine's cwd-relative tool output is relative to (derive.ts, grepFileScope)
+      return;
     default:
       return; // session lifecycle, accounting, snapshots and unknown frames: nothing the transcript shows
   }

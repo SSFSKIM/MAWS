@@ -340,6 +340,9 @@ describe('task graph', () => {
       const unreported = node(graphOf(recorded.filter((e) => e.kind !== 'user.message')), AGENT);
       expect(outcomeSummary(unreported)).toBeNull();
       expect(rowSecondLine(unreported)).not.toMatch(/report was delivered/);
+      // The same markup in a human's message (a pasted or quoted hand-back) is no report.
+      const quoted = recorded.map((e) => (e.kind === 'user.message' ? { ...e, origin: 'human' } : e));
+      expect(node(graphOf(quoted), AGENT).report).toBeNull();
       // An ordinary summary is the outcome as sent.
       expect(outcomeSummary(node(graphOf(events), 'ad286defbc77bc090'))).toBe('ONE');
     });

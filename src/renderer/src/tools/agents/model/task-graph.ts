@@ -322,7 +322,7 @@ function applyEvent(draft: Draft, e: SessionEvent): void {
       if (e.agentId === null) exitInto(draft, e.at);
       return;
     case 'user.message': {
-      const handback = e.agentId === null ? handbackOf(e.content) : null;
+      const handback = e.agentId === null && e.origin === 'peer' ? handbackOf(e.content) : null; // a peer message only: the same markup typed or quoted by the human is no report
       if (handback && draft.get(handback.taskId)) draft.patch(handback.taskId, { report: handback.report });
       return;
     }
