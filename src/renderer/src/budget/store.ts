@@ -1,6 +1,7 @@
 // The memory budget as the page sees it (C12 execution document, Interfaces "X2 additions" and "Surfaces of the
 // budget"): the engine host's `BudgetState` from the `engine.budget` event (subscribed first, then the command's
-// snapshot, C1's ordering rule), the app-wide banner, and which of the budget's two sheets is open.
+// snapshot, C1's ordering rule, read again at every host generation), the app-wide banner, and which of the budget's
+// two sheets is open.
 //
 // The banner follows the host's own debounced flag (`overWithoutCandidate`, two consecutive samples over budget with no
 // candidate); the page never counts samples. It is posted once per crossing (the flag turning true), through C5's
@@ -56,26 +57,45 @@ function syncBanner(previous: BudgetState | null, next: BudgetState): void {
   });
 }
 
+// Follows the engine host's generations (its `engine.hostState` transitions): each time the host is ready its snapshot
+// is read again (a startup read the host refused, or a restarted host, which starts with no sessions and may never emit
+// an event), an event of that generation winning over its snapshot; when the host goes away, its state and banner go
+// with it.
 export function connectBudget(client: MawsBridge = ipc): () => void {
   let live = true;
-  let snapshotPending = true;
+  let generation = 0;
+  let snapshotPending = true; // the current generation has heard no event yet
   const apply = (next: BudgetState) => {
     const previous = useBudget.getState().state;
     useBudget.getState().apply(next);
     syncBanner(previous, next);
   };
-  const off = client.on('engine.budget', (state) => {
-    if (!live) return;
-    snapshotPending = false; // an event is newer than any snapshot still on its way
-    apply(state);
-  });
-  void client.invoke('engine.budget', undefined).then((result) => {
-    if (!live || !snapshotPending) return;
-    if (result.ok) apply(result.value);
-    else console.warn('[budget] engine.budget unavailable', result.error);
-  });
+  const read = () => {
+    const asked = generation;
+    void client.invoke('engine.budget', undefined).then((result) => {
+      if (!live || asked !== generation || !snapshotPending) return;
+      if (result.ok) apply(result.value);
+      else console.warn('[budget] engine.budget unavailable', result.error);
+    });
+  };
+  const offs = [
+    client.on('engine.budget', (state) => {
+      if (!live) return;
+      snapshotPending = false; // an event is newer than any snapshot still on its way
+      apply(state);
+    }),
+    client.on('engine.hostState', (host) => {
+      if (!live) return;
+      generation += 1;
+      snapshotPending = true;
+      if (host.state === 'ready') return read();
+      useBudget.setState({ state: null }); // the host took its sessions and their budget with it
+      useNotices.getState().dismiss(BUDGET_BANNER_ID);
+    }),
+  ];
+  read();
   return () => {
     live = false;
-    off();
+    offs.forEach((off) => off());
   };
 }

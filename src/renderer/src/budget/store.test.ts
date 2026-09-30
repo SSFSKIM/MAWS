@@ -64,7 +64,7 @@ describe('the budget store and its banner', () => {
   afterEach(() => off());
 
   it('subscribes before it reads the snapshot, and an event wins over a snapshot still on its way', async () => {
-    expect(fake.calls).toEqual(['on engine.budget', 'invoke engine.budget']);
+    expect(fake.calls).toEqual(['on engine.budget', 'on engine.hostState', 'invoke engine.budget']);
     fake.event('engine.budget', state({ totalKiB: 5 * GiB }));
     await fake.reply('engine.budget', state({ totalKiB: 1 * GiB }));
     expect(useBudget.getState().state?.totalKiB).toBe(5 * GiB);
@@ -98,5 +98,53 @@ describe('the budget store and its banner', () => {
     await fake.reply('engine.budget', over([A]));
     banners()[0]!.actions[0]!.run();
     expect(useBudget.getState().sheet).toEqual({ kind: 'blocked' });
+  });
+});
+
+// M2 review: the store follows the engine host's generations. A snapshot the host could not answer is read again when it
+// is ready; a host that goes away takes its state and banner with it, and its restart is read afresh.
+describe('the budget store across engine host generations', () => {
+  let fake: FakeClient;
+  let off: () => void;
+  const host = (state: 'starting' | 'ready' | 'crashed' | 'restarting', revision: number) => fake.event('engine.hostState', { state, pid: state === 'ready' ? 7 : null, restarts: 0, revision });
+  beforeEach(() => {
+    resetBudgetStore();
+    useNotices.setState({ notices: [] });
+    fake = fakeClient();
+    off = connectBudget(fake.client);
+  });
+  afterEach(() => off());
+
+  it('a startup read the host refused is made again once the host is ready', async () => {
+    await fake.fail('engine.budget', 'engine-host is starting');
+    expect(useBudget.getState().state).toBeNull();
+    host('ready', 2);
+    expect(fake.pending('engine.budget')).toBe(1);
+    await fake.reply('engine.budget', state());
+    expect(useBudget.getState().state).toEqual(state());
+  });
+
+  it('a host that goes away clears its over-budget state and banner; the restarted host is read afresh', async () => {
+    await fake.reply('engine.budget', over([A, B]));
+    expect(banners()).toHaveLength(1);
+    host('crashed', 3);
+    expect(useBudget.getState().state).toBeNull();
+    expect(banners()).toEqual([]);
+    host('restarting', 4);
+    host('ready', 5);
+    await fake.reply('engine.budget', state());
+    expect(useBudget.getState().state).toEqual(state());
+    expect(banners()).toEqual([]);
+  });
+
+  it('an event of the new generation wins over its snapshot, and a late answer of an old generation is dropped', async () => {
+    await fake.reply('engine.budget', state());
+    host('ready', 2); // a restart the page saw only as ready: read again
+    host('crashed', 3);
+    host('ready', 4);
+    fake.event('engine.budget', state({ totalKiB: 5 * GiB }));
+    await fake.reply('engine.budget', state({ totalKiB: 1 * GiB })); // generation 2's answer
+    await fake.reply('engine.budget', state({ totalKiB: 2 * GiB })); // generation 4's, overtaken by its event
+    expect(useBudget.getState().state?.totalKiB).toBe(5 * GiB);
   });
 });
