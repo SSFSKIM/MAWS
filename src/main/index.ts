@@ -316,6 +316,7 @@ app.whenReady().then(() => {
         if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`);
         return result.value as { busy: boolean };
       },
+      hostGone: () => hosts.snapshot('pty-host').state !== 'ready',
     },
     publish: (waiting) => void emit('layout.quitWait', { waiting }),
     log: process.env.MAWS_E2E === '1' ? (line) => console.error(line) : undefined,

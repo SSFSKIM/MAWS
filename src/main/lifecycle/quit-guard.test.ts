@@ -34,7 +34,7 @@ const { SessionReadModel } = await import('../sessions/read-model');
 const { askToQuit, busyReport, installQuitGuard, quitQuestion } = await import('./quit-guard');
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
-const NONE = { midTurn: 0, backgroundWork: 0, busyTerminals: 0 };
+const NONE = { midTurn: 0, backgroundWork: 0, busyTerminals: 0, terminalsUnknown: false };
 const TASK = { taskId: 'b1' as never, taskType: 'local_bash', description: 'sleep 900', ambient: false };
 
 // A read model holding the given engine statuses (C4's index source in the product; `apply` changes one later).
@@ -54,7 +54,7 @@ function modelWith(statuses: EngineSessionStatus[]) {
   return Object.assign(model, { apply: (s: EngineSessionStatus) => writer.applyEngineStatus(s) });
 }
 const midTurn = (n: number) => Array.from({ length: n }, (_, i) => status(`s${i}` as AppSessionId, { process: 'ready', engineState: 'running', turn: humanTurn }));
-const noTerminals = { list: async () => [], foreground: async () => ({ busy: false }) };
+const noTerminals = { list: async () => [], foreground: async () => ({ busy: false }), hostGone: () => false };
 
 beforeEach(() => electron.app.reset());
 
@@ -70,7 +70,7 @@ describe('the busy report', () => {
       status('exited', { process: 'exited', backgroundTasks: [TASK] }),
       status('idle'),
     ]);
-    expect(await busyReport(model, noTerminals)).toEqual({ midTurn: 2, backgroundWork: 2, busyTerminals: 0 });
+    expect(await busyReport(model, noTerminals)).toEqual({ midTurn: 2, backgroundWork: 2, busyTerminals: 0, terminalsUnknown: false });
   });
 
   it('asks every live terminal in parallel, and counts one that does not answer as busy', async () => {
@@ -85,31 +85,53 @@ describe('the busy report', () => {
           if (id === 'b') return Promise.resolve({ busy: false });
           return new Promise<{ busy: boolean }>(() => {}); // c never answers
         },
+        hostGone: () => false,
       };
       const report = busyReport(modelWith([]), pty);
       await vi.advanceTimersByTimeAsync(0);
       expect(asked).toEqual(['a', 'b', 'c']); // all at once, the exited one never
       await vi.advanceTimersByTimeAsync(2_000); // the probe bound
-      expect(await report).toEqual({ midTurn: 0, backgroundWork: 0, busyTerminals: 2 });
+      expect(await report).toEqual({ midTurn: 0, backgroundWork: 0, busyTerminals: 2, terminalsUnknown: false });
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it('counts a failed probe busy, and no terminal when the pty host cannot list them', async () => {
+  it('counts a failed probe busy', async () => {
+    const failing = { list: async () => [{ ptyId: 'a', alive: true }], foreground: () => Promise.reject(new Error('pty-host is crashed')), hostGone: () => false };
+    expect(await busyReport(modelWith([]), failing)).toMatchObject({ busyTerminals: 1, terminalsUnknown: false });
+  });
+
+  // review fix: a slow live pty host is not a gone one
+  it('a list that does not answer from a live pty host is terminals of unknown state, asked about in those words', async () => {
+    vi.useFakeTimers();
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const failing = { list: async () => [{ ptyId: 'a', alive: true }], foreground: () => Promise.reject(new Error('pty-host is crashed')) };
-    expect(await busyReport(modelWith([]), failing)).toMatchObject({ busyTerminals: 1 });
-    const unlisted = { list: () => Promise.reject(new Error('host_unavailable')), foreground: async () => ({ busy: true }) };
-    expect(await busyReport(modelWith([]), unlisted)).toMatchObject({ busyTerminals: 0 });
-    expect(warn).toHaveBeenCalledWith('[quit-guard] the terminals could not be listed; counting none', expect.any(Error));
+    try {
+      const silent = { list: () => new Promise<never>(() => {}), foreground: async () => ({ busy: false }), hostGone: () => false };
+      const report = busyReport(modelWith([]), silent);
+      await vi.advanceTimersByTimeAsync(2_000);
+      const r = await report;
+      expect(r).toEqual({ midTurn: 0, backgroundWork: 0, busyTerminals: 1, terminalsUnknown: true });
+      expect(quitQuestion(r, 'Quit').message).toBe('the terminals did not answer');
+      const failed = { list: () => Promise.reject(new Error('timeout')), foreground: async () => ({ busy: false }), hostGone: () => false };
+      expect(await busyReport(modelWith([]), failed)).toMatchObject({ busyTerminals: 1, terminalsUnknown: true });
+    } finally {
+      warn.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it('counts no terminal only when the pty host is gone (its supervisor state), where its terminals went with it', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const gone = { list: () => Promise.reject(new Error('host_unavailable')), foreground: async () => ({ busy: true }), hostGone: () => true };
+    expect(await busyReport(modelWith([]), gone)).toEqual({ midTurn: 0, backgroundWork: 0, busyTerminals: 0, terminalsUnknown: false });
     warn.mockRestore();
   });
 });
 
 describe('the question', () => {
   it('names only the non-zero parts, for one and for many', () => {
-    expect(quitQuestion({ midTurn: 2, backgroundWork: 1, busyTerminals: 1 }, 'Quit')).toMatchObject({
+    expect(quitQuestion({ midTurn: 2, backgroundWork: 1, busyTerminals: 1, terminalsUnknown: false }, 'Quit')).toMatchObject({
       type: 'warning',
       message: '2 sessions mid-turn · 1 session running background work · 1 terminal running a command',
       detail: 'Quitting stops them. Transcripts stay on disk and can be resumed.',
@@ -117,12 +139,12 @@ describe('the question', () => {
       defaultId: 2,
       cancelId: 2,
     });
-    expect(quitQuestion({ midTurn: 1, backgroundWork: 0, busyTerminals: 3 }, 'Quit').message).toBe('1 session mid-turn · 3 terminals running a command');
-    expect(quitQuestion({ midTurn: 0, backgroundWork: 2, busyTerminals: 0 }, 'Quit').message).toBe('2 sessions running background work');
+    expect(quitQuestion({ midTurn: 1, backgroundWork: 0, busyTerminals: 3, terminalsUnknown: false }, 'Quit').message).toBe('1 session mid-turn · 3 terminals running a command');
+    expect(quitQuestion({ midTurn: 0, backgroundWork: 2, busyTerminals: 0, terminalsUnknown: false }, 'Quit').message).toBe('2 sessions running background work');
   });
 
   it('is worded for the updater’s restart too (P1; not wired in P0)', () => {
-    expect(quitQuestion({ midTurn: 1, backgroundWork: 0, busyTerminals: 0 }, 'Restart')).toMatchObject({
+    expect(quitQuestion({ midTurn: 1, backgroundWork: 0, busyTerminals: 0, terminalsUnknown: false }, 'Restart')).toMatchObject({
       buttons: ['Restart', 'Restart when idle', 'Cancel'],
       detail: 'Restarting stops them. Transcripts stay on disk and can be resumed.',
     });
@@ -133,7 +155,7 @@ describe('the question', () => {
     const show = vi.fn();
     expect(await askToQuit({ ...NONE, midTurn: 4 }, { env: { MAWS_E2E: '1' }, show })).toBe('quit');
     expect(await askToQuit({ ...NONE, midTurn: 5 }, { env: { MAWS_E2E: '1', MAWS_E2E_QUIT_ANSWER: 'cancel' }, show })).toBe('cancel');
-    expect(await askToQuit({ midTurn: 0, backgroundWork: 1, busyTerminals: 1 }, { env: { MAWS_E2E: '1', MAWS_E2E_QUIT_ANSWER: 'when_idle' }, show })).toBe('when_idle');
+    expect(await askToQuit({ midTurn: 0, backgroundWork: 1, busyTerminals: 1, terminalsUnknown: false }, { env: { MAWS_E2E: '1', MAWS_E2E_QUIT_ANSWER: 'when_idle' }, show })).toBe('when_idle');
     expect(show).not.toHaveBeenCalled();
     expect(log.mock.calls.map(([line]) => line)).toEqual([
       'quit-guard: 4 mid-turn, auto-answered quit', // C5's line, unchanged when only turns are busy
@@ -181,7 +203,7 @@ describe('the quit guard', () => {
     const { deps } = guard(modelWith(midTurn(2)));
     expect(electron.app.attempt()).toBe(false);
     await settle();
-    expect(deps.ask).toHaveBeenCalledExactlyOnceWith({ midTurn: 2, backgroundWork: 0, busyTerminals: 0 });
+    expect(deps.ask).toHaveBeenCalledExactlyOnceWith({ midTurn: 2, backgroundWork: 0, busyTerminals: 0, terminalsUnknown: false });
     expect(deps.shutdownEngine).not.toHaveBeenCalled();
     expect(electron.app.quits).toBe(0);
     expect(electron.app.attempt()).toBe(false);
@@ -265,11 +287,11 @@ describe('quit when idle', () => {
     guardDeps(model, { publish, shutdownEngine, ask: async () => 'when_idle' });
     electron.app.attempt();
     await settle();
-    expect(publish).toHaveBeenLastCalledWith({ midTurn: 1, backgroundWork: 1, busyTerminals: 0 });
+    expect(publish).toHaveBeenLastCalledWith({ midTurn: 1, backgroundWork: 1, busyTerminals: 0, terminalsUnknown: false });
     expect(electron.app.quits).toBe(0);
     model.apply(status('b')); // the turn ended
     await settle();
-    expect(publish).toHaveBeenLastCalledWith({ midTurn: 0, backgroundWork: 1, busyTerminals: 0 });
+    expect(publish).toHaveBeenLastCalledWith({ midTurn: 0, backgroundWork: 1, busyTerminals: 0, terminalsUnknown: false });
     expect(electron.app.quits).toBe(0);
     model.apply(bg('a', [])); // the task settled
     await settle();
@@ -282,12 +304,12 @@ describe('quit when idle', () => {
     vi.useFakeTimers();
     try {
       let busy = true;
-      const pty = { list: async () => [{ ptyId: 't', alive: true }], foreground: async () => ({ busy }) };
+      const pty = { list: async () => [{ ptyId: 't', alive: true }], foreground: async () => ({ busy }), hostGone: () => false };
       const publish = vi.fn();
       guardDeps(modelWith([]), { pty, publish, ask: async () => 'when_idle' });
       electron.app.attempt();
       await vi.advanceTimersByTimeAsync(0);
-      expect(publish).toHaveBeenLastCalledWith({ midTurn: 0, backgroundWork: 0, busyTerminals: 1 });
+      expect(publish).toHaveBeenLastCalledWith({ midTurn: 0, backgroundWork: 0, busyTerminals: 1, terminalsUnknown: false });
       busy = false;
       await vi.advanceTimersByTimeAsync(1_999);
       expect(electron.app.quits).toBe(0);
@@ -314,7 +336,7 @@ describe('quit when idle', () => {
     model.apply(bg('a'));
     electron.app.attempt();
     await settle();
-    expect(control.waiting()).toEqual({ midTurn: 0, backgroundWork: 1, busyTerminals: 0 });
+    expect(control.waiting()).toEqual({ midTurn: 0, backgroundWork: 1, busyTerminals: 0, terminalsUnknown: false });
     control.quitNow();
     await settle();
     expect(shutdownEngine).toHaveBeenCalledOnce();

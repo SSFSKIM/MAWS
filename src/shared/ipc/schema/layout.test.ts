@@ -56,7 +56,7 @@ describe('layout value shapes', () => {
 
   // C12 start: Quit when idle (C12 execution document, Interfaces "The quit question")
   it('carries the busy report main waits on, or null, and the banner’s two answers', () => {
-    const report = { midTurn: 1, backgroundWork: 0, busyTerminals: 2 };
+    const report = { midTurn: 1, backgroundWork: 0, busyTerminals: 2, terminalsUnknown: false };
     expect(QuitWaitSchema.safeParse({ waiting: report }).success).toBe(true);
     expect(QuitWaitSchema.safeParse({ waiting: null }).success).toBe(true);
     expect(QuitWaitSchema.safeParse({ waiting: { ...report, busyTerminals: -1 } }).success).toBe(false);

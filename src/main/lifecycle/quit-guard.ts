@@ -17,7 +17,8 @@ import type { SessionReadModel } from '../sessions/read-model';
 
 // C12 start
 export type QuitAnswer = 'quit' | 'when_idle' | 'cancel';
-export interface BusyReport { midTurn: number; backgroundWork: number; busyTerminals: number }
+// terminalsUnknown: a live pty host did not list its terminals in time, so they count as one busy terminal, said so
+export interface BusyReport { midTurn: number; backgroundWork: number; busyTerminals: number; terminalsUnknown: boolean }
 
 export const PROBE_TIMEOUT_MS = 2_000; // per terminal, and for the list
 export const WAIT_POLL_MS = 2_000;
@@ -25,6 +26,7 @@ export const WAIT_POLL_MS = 2_000;
 export interface QuitPty {
   list(): Promise<readonly { ptyId: string; alive: boolean }[]>;
   foreground(ptyId: string): Promise<{ busy: boolean }>;
+  hostGone(): boolean; // the supervisor's state: a pty host that is not running holds no terminal
 }
 
 const LIVE = new Set<EngineSessionStatus['process']>(['starting', 'initializing', 'ready']);
@@ -52,11 +54,15 @@ export async function busyReport(model: Pick<SessionReadModel, 'midTurnCount' | 
   try {
     ptys = await within(pty.list(), PROBE_TIMEOUT_MS);
   } catch (error) {
-    console.warn('[quit-guard] the terminals could not be listed; counting none', error); // a pty host that is gone holds no terminal
+    // review fix: only a pty host that is gone holds no terminal; a slow live one may hold busy ones
+    if (!pty.hostGone()) {
+      console.warn('[quit-guard] the pty host did not list its terminals; counting them busy', error);
+      return { midTurn, backgroundWork, busyTerminals: 1, terminalsUnknown: true };
+    }
   }
   const probes = ptys.filter((p) => p.alive).map((p) => within(pty.foreground(p.ptyId), PROBE_TIMEOUT_MS).then((f) => f.busy, () => true));
   const busyTerminals = (await Promise.all(probes)).filter(Boolean).length;
-  return { midTurn, backgroundWork, busyTerminals };
+  return { midTurn, backgroundWork, busyTerminals, terminalsUnknown: false };
 }
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
@@ -65,7 +71,7 @@ export function quitQuestion(report: BusyReport, verb: 'Quit' | 'Restart'): Mess
   const parts = [
     report.midTurn > 0 ? `${plural(report.midTurn, 'session', 'sessions')} mid-turn` : null,
     report.backgroundWork > 0 ? `${plural(report.backgroundWork, 'session', 'sessions')} running background work` : null,
-    report.busyTerminals > 0 ? `${plural(report.busyTerminals, 'terminal', 'terminals')} running a command` : null,
+    report.terminalsUnknown ? 'the terminals did not answer' : report.busyTerminals > 0 ? `${plural(report.busyTerminals, 'terminal', 'terminals')} running a command` : null,
   ].filter((p): p is string => p !== null);
   return {
     type: 'warning',
@@ -82,7 +88,7 @@ function logParts(r: BusyReport): string {
   const parts = [
     r.midTurn > 0 ? `${r.midTurn} mid-turn` : null,
     r.backgroundWork > 0 ? `${r.backgroundWork} background work` : null,
-    r.busyTerminals > 0 ? plural(r.busyTerminals, 'busy terminal', 'busy terminals') : null,
+    r.terminalsUnknown ? 'terminals unknown' : r.busyTerminals > 0 ? plural(r.busyTerminals, 'busy terminal', 'busy terminals') : null,
   ].filter((p): p is string => p !== null);
   return parts.length > 0 ? parts.join(', ') : 'nothing busy';
 }

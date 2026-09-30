@@ -6,7 +6,7 @@ import { useNotices } from '../stores/notices';
 import { connectQuitWait, QUIT_WAIT_BANNER_ID, quitWaitText } from './quit-wait';
 
 const banners = () => useNotices.getState().notices.filter((n) => n.id === QUIT_WAIT_BANNER_ID);
-const report = (midTurn: number, backgroundWork: number, busyTerminals: number) => ({ waiting: { midTurn, backgroundWork, busyTerminals } });
+const report = (midTurn: number, backgroundWork: number, busyTerminals: number) => ({ waiting: { midTurn, backgroundWork, busyTerminals, terminalsUnknown: false } });
 
 describe('the quit-when-idle banner', () => {
   let fake: FakeClient;
@@ -19,8 +19,8 @@ describe('the quit-when-idle banner', () => {
   afterEach(() => off());
 
   it('counts the things main waits on', () => {
-    expect(quitWaitText({ midTurn: 1, backgroundWork: 1, busyTerminals: 1 })).toBe('MAWS will quit when 3 things finish');
-    expect(quitWaitText({ midTurn: 0, backgroundWork: 0, busyTerminals: 1 })).toBe('MAWS will quit when 1 thing finishes');
+    expect(quitWaitText({ midTurn: 1, backgroundWork: 1, busyTerminals: 1, terminalsUnknown: false })).toBe('MAWS will quit when 3 things finish');
+    expect(quitWaitText({ midTurn: 0, backgroundWork: 0, busyTerminals: 1, terminalsUnknown: false })).toBe('MAWS will quit when 1 thing finishes');
   });
 
   it('subscribes before it reads the snapshot, shows the wait, follows it, and goes when main stops waiting', async () => {

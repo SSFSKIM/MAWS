@@ -142,7 +142,7 @@ const c11Commands = {
 // C12 start: "Quit when idle" (C12 execution document, Interfaces "The quit question"): main holds the quit and the
 // page shows the banner. `layout.quitWait` answers, and emits on every change, the busy report main is waiting on (null
 // when it is not waiting); `layout.quitWaitAnswer` is the banner's Quit now or Cancel.
-export const BusyReportSchema = z.strictObject({ midTurn: z.number().int().nonnegative(), backgroundWork: z.number().int().nonnegative(), busyTerminals: z.number().int().nonnegative() });
+export const BusyReportSchema = z.strictObject({ midTurn: z.number().int().nonnegative(), backgroundWork: z.number().int().nonnegative(), busyTerminals: z.number().int().nonnegative(), terminalsUnknown: z.boolean() });
 export const QuitWaitSchema = z.strictObject({ waiting: BusyReportSchema.nullable() });
 export type QuitWait = z.infer<typeof QuitWaitSchema>;
 const c12Commands = {
