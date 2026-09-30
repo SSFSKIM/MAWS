@@ -12,7 +12,7 @@ import * as z from 'zod';
 import { PERMISSION_MODES, type PermissionMode } from '@shared/graph/enums';
 import type { EventPayload, SessionEvent } from '@shared/graph/events';
 import type { AgentId, ApiMessageId, AppSessionId, EventId, MessageUuid, ParentToolUseId, RequestId, SessionId, TaskId, ToolUseId } from '@shared/graph/ids';
-import { GetContextUsageResponseSchema, RewindConversationResponseSchema } from '@shared/wire/control';
+import { contextTotal, GetContextUsageResponseSchema, RewindConversationResponseSchema } from '@shared/wire/control';
 import {
   ControlRequestFrameSchema,
   parseStdinFrame,
@@ -33,7 +33,7 @@ import {
   type UserInputFrame,
 } from '@shared/wire/frames';
 import type { JournalRow } from '@shared/wire/journal';
-import { bashPartOf, contextTotal, denialKindOf, engineUserMarkerOf, spillPathOf, stringOrNull, tokenUsageOf, type Attribution, type EventSink } from './normalizer-support';
+import { bashPartOf, denialKindOf, engineUserMarkerOf, spillPathOf, stringOrNull, tokenUsageOf, type Attribution, type EventSink } from './normalizer-support';
 import { mapInboundCancel, mapInboundRequest, mapOutboundResponse, type InboundEntry } from './normalizer-controls';
 import { mapSystemFrame, type TaskRegistry } from './normalizer-system';
 import type { SafeguardVerdict } from '@shared/graph/enums';
