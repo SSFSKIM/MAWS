@@ -100,6 +100,15 @@ describe('head and tail summary', () => {
     expect(summarize(windows.head, windows.tail, { size: real.length, mtimeMs: 1 }, '/p/a76ad588-e4b4-4a99-bf4e-69287514916f.jsonl', '-p').firstPrompt).toBe('Remember APPLE.');
   });
 
+  it('a bash-mode first prompt is the command as the terminal shows it, `! <command>`, never its tags', () => {
+    const text =
+      line({ type: 'user', uuid: 'u1', parentUuid: null, cwd: '/d', message: { role: 'user', content: '<bash-input>git status</bash-input>' } }) +
+      line({ type: 'user', uuid: 'u2', parentUuid: 'u1', message: { role: 'user', content: '<bash-stdout>clean</bash-stdout><bash-stderr></bash-stderr>' } }) +
+      line({ type: 'user', uuid: 'u3', parentUuid: 'u2', message: { role: 'user', content: 'Now fix the drag handle' } });
+    const bytes = Buffer.from(text, 'utf8');
+    expect(summarize(bytes, bytes, { size: bytes.length, mtimeMs: 1 }, '/p/S.jsonl', '-p').firstPrompt).toBe('! git status');
+  });
+
   it('a first prompt longer than the head window falls back to the earliest last-prompt the windows hold', () => {
     const big = line({ parentUuid: null, type: 'user', uuid: 'u1', timestamp: '2026-09-29T10:00:00.000Z', cwd: '/d', message: { role: 'user', content: 'y'.repeat(150 * 1024) } });
     const rest =

@@ -195,6 +195,9 @@ function firstUserText(records: TranscriptRecord[]): string | null {
     if (record.type !== 'user' || record.isMeta === true) continue;
     const content = (record.message as { content?: unknown } | undefined)?.content;
     if (typeof content === 'string') {
+      // A bash-mode prompt stores its command in tags; it titles as the terminal shows it, `! <command>` (debt wave 4)
+      const bash = /^<bash-input>([\s\S]*?)<\/bash-input>/.exec(content);
+      if (bash) return `! ${bash[1]}`.slice(0, TEXT_CAP);
       if (content.length > 0) return content.slice(0, TEXT_CAP);
       continue;
     }
