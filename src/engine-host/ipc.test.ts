@@ -618,6 +618,39 @@ describe('engine.policy.set and engine.budget (C12)', () => {
     await last;
   });
 
+  // M2: an archive of a released session drops its released id with the row, so the unarchived session's next launch
+  // is a fresh one (trigger user), not a resume after a release
+  it('an archive of a released session drops the released id: the next launch reconnects as the owner’s', async () => {
+    const transports: ScriptedTransport[] = [];
+    const nextTransport = () => {
+      const t = scriptedTransport({ pid: 4242, onWrite: autoResponder(handshakeResponder({ end_session: () => null })) });
+      transports.push(t);
+      return t;
+    };
+    const table = new ProcessTable({ ps: async () => '  4242     1   400\n' });
+    const host = engineHost({ table, spawn: () => nextTransport(), binaryProbe: async () => OK_BINARY, checkRelay: async () => OK_RELAY, captureEnv: async () => ({ PATH: '/usr/bin' }) });
+    const id = 'app-ipc' as AppSessionId;
+    await host.call('session.launch', { spec: spec() });
+    await until(() => host.statuses(id).some((s) => s.process === 'ready'), 'ready');
+    transports[0]!.push(idle);
+    await until(() => table.get(id)!.status().engineState === 'idle', 'idle');
+    await table.sampleMemory();
+    await host.call('engine.policy.set', { limitKiB: 100, statefulMcpServers: [] });
+    transports[0]!.exit(0);
+    await until(() => host.statuses(id).some((s) => s.process === 'exited'), 'released');
+    expect(await host.call('session.stop', { appSessionId: id, reason: 'archive' })).toMatchObject({ exited: true });
+    expect(table.get(id)).toBeUndefined(); // the archive released the row
+    expect(table.takeReleased(id)).toBe(false);
+    await host.call('engine.policy.set', { limitKiB: 1_000_000, statefulMcpServers: [] });
+    await host.call('session.launch', { spec: spec({ resume: { sessionId: '33333333-3333-4333-8333-333333333333' as never, fork: false } }) });
+    await until(() => host.statuses(id).at(-1)?.process === 'ready', 'resumed');
+    expect(reconnectTriggers(table.get(id)!.status().journalPath)).toEqual(['user', 'user']);
+    const last = host.call('session.stop', { appSessionId: id, reason: 'stop' });
+    await until(() => transports[1]!.requestsOf('end_session').length === 1, 'end_session');
+    transports[1]!.exit(0);
+    await last;
+  });
+
   it('the launched session reads the stateful servers of the policy in force', async () => {
     const table = new ProcessTable({ ps: async () => '' });
     const transport = scriptedTransport({ onWrite: autoResponder(handshakeResponder({ end_session: () => null })) });

@@ -160,6 +160,8 @@ function foldWithLedger(prev: SessionDigest, event: SessionEvent, ledger: CostLe
     case 'subagent.finished':
       return { ...d, childAgents: { active: Math.max(0, d.childAgents.active - 1), done: d.childAgents.done + 1 } };
     case 'process.exited':
+      // C12: a release under the memory budget reads idle with the released mark (an existing mark kept)
+      if (event.reason === 'budget' && event.budget !== null) return { ...d, phase: 'idle', activity: null, pendingRequests: 0, released: d.released ?? { at: event.at, limitKiB: event.budget.limitKiB } };
       // The broker retires every pending item on exit (they become one `interrupted` attention item).
       return { ...d, phase: event.reason === 'crash' ? 'failed' : 'exited', activity: null, pendingRequests: 0 };
     case 'session.reconnect':
@@ -204,12 +206,16 @@ export function foldEvents(
 // C3's process table onto the digest's phase: a launching process is `starting`, an exited one `exited` unless the
 // digest already says `failed`; a process that became ready while the digest still says `starting` takes the engine
 // state's phase (the events that would otherwise say so may have preceded the fold).
+// C12: a release (exit reason `budget`) reads idle with the released mark, an existing mark kept; a launch drops it.
 export function applyStatusToDigest(d: SessionDigest, status: EngineSessionStatus): SessionDigest {
   switch (status.process) {
     case 'starting':
     case 'initializing':
-      return { ...d, phase: 'starting' };
+      return withoutReleased({ ...d, phase: 'starting' }); // C12
     case 'exited':
+      // C12 start
+      if (status.exit?.reason === 'budget' && status.exit.release !== null) return { ...d, phase: 'idle', activity: null, released: d.released ?? { at: status.exit.at, limitKiB: status.exit.release.limitKiB } };
+      // C12 end
       return d.phase === 'failed' ? d : { ...d, phase: 'exited', activity: null };
     case 'ready':
       if (d.phase !== 'starting') return d;
@@ -218,3 +224,12 @@ export function applyStatusToDigest(d: SessionDigest, status: EngineSessionStatu
       return d;
   }
 }
+
+// C12 start: the digest without the released mark (the field is optional, so it is left out rather than set undefined)
+export function withoutReleased(d: SessionDigest): SessionDigest {
+  if (d.released === undefined) return d;
+  const { released: _released, ...rest } = d;
+  void _released;
+  return rest;
+}
+// C12 end

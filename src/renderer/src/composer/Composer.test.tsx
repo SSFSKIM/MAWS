@@ -8,7 +8,7 @@ import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { MawsBridge } from '@shared/ipc/schema';
-import { humanTurn, record, status } from '../../../../test/support/builders';
+import { digest, humanTurn, record, status } from '../../../../test/support/builders'; // C12: digest
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
 import { connectKeys } from '../keymap/dispatcher';
 import { bindingsOf, useKeyChord } from '../keymap/useKeyChord';
@@ -711,8 +711,12 @@ describe('unstarted send holds a starting state', () => {
 // C12 start: Send-to-resume (C12 execution document, Interfaces "Send-to-resume"): a session released under the memory
 // budget sends through the resume C10 registers, with the message; its `!` waits for a message first.
 describe('a released session resumes on Send', () => {
-  const released = (appSessionId: AppSessionId) =>
-    live(appSessionId, { status: { process: 'exited', exit: { code: 0, signal: null, reason: 'budget', at: '2026-09-29T14:02:00.000Z', release: { limitKiB: 8_388_608, totalKiB: 9_000_000 } } } });
+  const exitedBy = (appSessionId: AppSessionId, reason: 'budget' | 'stop') =>
+    live(appSessionId, { status: { process: 'exited', exit: { code: 0, signal: null, reason, at: '2026-09-29T14:02:00.000Z', release: reason === 'budget' ? { limitKiB: 8_388_608, totalKiB: 9_000_000 } : null } } });
+  const released = (appSessionId: AppSessionId) => {
+    exitedBy(appSessionId, 'budget');
+    useSessions.getState().applyDigest(digest(appSessionId, { phase: 'idle', released: { at: '2026-09-29T14:02:00.000Z', limitKiB: 8_388_608 } }));
+  };
   let off: () => void = () => {};
   afterEach(() => off());
 
@@ -743,15 +747,18 @@ describe('a released session resumes on Send', () => {
     expect(invoked('session.history.append')).toEqual([]);
   });
 
-  it('a stopped session still reads Session ended and resumes nothing', async () => {
+  it('a stopped session, and a released one whose mark an archive dropped, still read Session ended and resume nothing', async () => {
     const resume = vi.fn(async () => true);
     off = registerReleasedResume(resume);
-    live(A, { status: { process: 'exited', exit: { code: 0, signal: null, reason: 'stop', at: '2026-09-29T14:02:00.000Z', release: null } } });
-    mount([{ index: 0, id: A }]);
-    await type('carry on');
-    await waitFor(() => expect(primary().title).toBe('Session ended'));
-    expect(primary().disabled).toBe(true);
-    await key(editorOf(), { key: 'Enter' });
+    exitedBy(A, 'stop');
+    exitedBy(B, 'budget'); // the host's row still says budget; main's digest has no mark (archived and unarchived)
+    mount([{ index: 0, id: A }, { index: 1, id: B }]);
+    for (const pane of [0, 1] as const) {
+      await type('carry on', pane);
+      await waitFor(() => expect(primary(pane).title).toBe('Session ended'));
+      expect(primary(pane).disabled).toBe(true);
+      await key(editorOf(pane), { key: 'Enter' });
+    }
     expect(resume).not.toHaveBeenCalled();
   });
 });

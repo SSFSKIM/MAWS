@@ -203,8 +203,9 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
   // ---- the submit control's state ------------------------------------------------------------------------------
   const draft = useMemo(() => serializeDraft(doc, { sessionId: null, cwd: '' }), [doc]);
   const messageHeld = setup !== null && setup.intent.message !== null;
-  // C12: released under the memory budget (until the digest carries the mark, the exit's reason says so)
-  const released = status?.exit?.reason === 'budget' && status.process === 'exited';
+  // C12: released under the memory budget: main's digest carries the mark (cleared by a launch, an archive, or a terminal
+  // taking the session)
+  const released = useSessions((s) => s.digests.get(appSessionId)?.released !== undefined);
   const decision = submitState({
     status,
     intent: unstarted ? { starting, messageHeld, phase: setup.phase ?? null } : null, // C10: the setup phase

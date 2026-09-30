@@ -12,7 +12,7 @@ import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { ProjectRecord, SessionDigest } from '@shared/ipc/schema';
-import { applyStatusToDigest, costLedger, costOf, emptyDigest, foldEvents, type CostLedger } from './digest';
+import { applyStatusToDigest, costLedger, costOf, emptyDigest, foldEvents, withoutReleased, type CostLedger } from './digest'; // C12: withoutReleased
 import type { LaunchMode } from './select-source';
 
 export interface SessionSource {
@@ -178,6 +178,11 @@ export class SessionReadModel {
     observeRecord: (r) => {
       this.records.set(r.appId, r);
       this.fire('record', r.appId, r);
+      // C12 start: an archive is not a cause C4 re-seeds the digest on, so an archived released session reads exited here
+      // (an unarchived one then starts fresh)
+      const digest = this.digestsById.get(r.appId);
+      if (r.archived && digest?.released !== undefined) this.commit({ ...withoutReleased(digest), phase: 'exited', activity: null });
+      // C12 end
     },
     observeRemoved: (appSessionId) => {
       this.records.delete(appSessionId);
@@ -209,11 +214,15 @@ export class SessionReadModel {
         this.costAtSeen.set(d.appSessionId, d.cost.totalUsd - d.cost.sinceSeenUsd);
         this.ledgers.delete(d.appSessionId);
       }
+      // C12: C4's holder-change seed after a release (phase `exited`) keeps the released mark and its idle phase; any
+      // other phase (a terminal or background job holding it: `foreign`) drops the mark and takes the incoming phase.
+      const keepReleased = prev?.released !== undefined && d.released === undefined && d.phase === 'exited';
       this.commit({
         ...d,
         cost: keepCost ? (prev?.cost ?? null) : d.cost,
         context: d.context ?? prev?.context ?? null,
         lastAssistantLine: d.lastAssistantLine ?? prev?.lastAssistantLine ?? null,
+        ...(keepReleased && { phase: prev.phase, released: prev.released }), // C12
         revision: 0,
       });
     },

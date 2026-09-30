@@ -116,9 +116,11 @@ export class ProcessTable {
 
   // Drops an exited row (an archive: whole-branch review), so the host keeps nothing of a session no one will relaunch;
   // a row whose process has not exited stays, since it is still the reservation. True when a row was dropped.
+  // C12: a dropped row takes its released id with it (an archived or forgotten session's next launch is a fresh one).
   release(appSessionId: AppSessionId): boolean {
     const row = this.rows.get(appSessionId);
     if (!row || row.status().process !== 'exited') return false;
+    this.released.delete(appSessionId); // C12
     return this.rows.delete(appSessionId);
   }
 

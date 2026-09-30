@@ -168,6 +168,17 @@ describe('attention service merges broker items with the derived kinds', () => {
     expect(await service.list()).toEqual([]);
   });
 
+  // C12: a release under the memory budget is not an attention event (D-18, §5.7): nothing is raised, whatever the
+  // session held before (a released session held no request, so it lost none)
+  it('a budget exit raises nothing and keeps what the session already had', () => {
+    const { batch, last, changed } = setup();
+    batch(event('turn.ended', { isError: true, terminalReason: 'model_error', result: 'x', resultText: null, isEchoReceipt: false, origin: 'human', errors: [] }));
+    const before = last();
+    batch(event('process.exited', { code: 0, signal: null, reason: 'budget', lostAttentionCount: 0, budget: { limitKiB: 8_388_608, totalKiB: 9_100_000 } }));
+    expect(last()).toEqual(before);
+    expect(changed.at(-1)?.items.some((i) => i.kind === 'interrupted')).toBe(false);
+  });
+
   it('on start, keeps the persisted derived items and drops broker items whose processes died with the previous run', async () => {
     const interrupted = item({ kind: 'interrupted', state: 'pending', id: `${APP}:interrupted:e1` as never, summary: 'Session interrupted, 1 approval lost', request: { requestId: null, toolUseId: null, taskId: null, agentId: null } });
     const stale = item({ kind: 'permission', state: 'pending' });
