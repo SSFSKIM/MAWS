@@ -156,6 +156,17 @@ describe('setup intent hook', () => {
     ]);
   });
 
+  // Debt wave 5: the host keys a launch whose settings set model env apart, so the tab names the directory it would
+  // launch in: an existing worktree itself, a worktree not yet made by its repository
+  it('names the directory whose settings the launch would read: an existing worktree’s own path, a new worktree’s repository', async () => {
+    withMain();
+    putIntent(intent({ location: { kind: 'existingWorktree', repoRoot: REPO, path: WORKTREE } }));
+    renderHook(() => useSetupIntent(ID));
+    await waitFor(() => expect(fake.invoked('engine.models')).toEqual([{ refresh: false, gateway: 'gateway', cwd: WORKTREE }]));
+    act(() => putIntent(intent({ location: { kind: 'newWorktree', repoRoot: REPO, name: 'two', branch: { kind: 'new', name: 'worktree-two', base: 'HEAD' } } })));
+    await waitFor(() => expect(fake.invoked('engine.models').at(-1)).toEqual({ refresh: false, gateway: 'gateway', cwd: REPO }));
+  });
+
   // Debt wave 4: the catalogue's effort levels reach C7's ModelInfo, so the model widget can lower an effort
   it('keeps a catalogue entry’s effort levels, and drops a malformed list', () => {
     const catalogue: ModelCatalogue = {

@@ -8,7 +8,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { ModelCatalogueEntry } from '@shared/sessions/models';
 import { useCommand } from '../ipc/query';
 import { useSetup } from '../sessions/store';
-import { baseDirectoryOf } from '../sessions/useSetupIntent';
+import { settingsDirectoryOf } from '../sessions/useSetupIntent';
 import { useSessions } from '../stores/sessions';
 import { effortsOf, presentModels, type ModelRow } from '../widgets/model';
 import { DIRECT_MODEL } from './copy';
@@ -51,7 +51,7 @@ export function useSessionDirectory(appSessionId: AppSessionId): string | null {
   const known = useSessions((s) => s.engine.get(appSessionId)?.cwd || s.records.get(appSessionId)?.directory || null);
   const intended = useSetup((s) => {
     const intent = s.intents.get(appSessionId);
-    return intent ? baseDirectoryOf(intent.location) : null;
+    return intent ? settingsDirectoryOf(intent.location) : null;
   });
   return known ?? intended;
 }
