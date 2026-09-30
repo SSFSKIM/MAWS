@@ -15,7 +15,7 @@ import { beforeCloseUnstarted } from './setup-actions';
 import { closeDialog, useDialogs } from './dialogs';
 import { createUnstartedSession, retainsTab, unstartedTitle } from './connect';
 import { connectSetup, useSetup } from './store';
-import { useSetupIntent } from './useSetupIntent';
+import { modelsOf, useSetupIntent } from './useSetupIntent';
 import type { UseSetupIntent } from '../composer/setup-intent';
 
 const CATALOGUE: ModelCatalogue = {
@@ -133,7 +133,45 @@ describe('setup intent hook', () => {
     catalogue = CATALOGUE; // a launch filled the host's cache, the relay's aliases included
     const second = renderHook(() => useSetupIntent(ID));
     await waitFor(() => expect(second.result.current!.options.models.map((m) => m.value)).toEqual(['default', 'haiku', 'claude/astra']));
-    expect(fake.invoked('engine.models')).toEqual([{ refresh: false }, { refresh: false }]);
+    expect(fake.invoked('engine.models')).toEqual([{ refresh: false, gateway: 'gateway' }, { refresh: false, gateway: 'gateway' }]);
+  });
+
+  // Debt wave 4: the host keeps one catalogue per route; the tab asks for its own route's, and again when it switches
+  it('asks for the catalogue of the tab’s route, and again when the route changes', async () => {
+    const byRoute = {
+      gateway: CATALOGUE,
+      direct: { models: [{ value: 'sonnet', displayName: 'Sonnet 5' }], source: 'cached', at: null } satisfies ModelCatalogue,
+    };
+    withMain({ 'engine.models': (input: { gateway: 'gateway' | 'direct' }) => byRoute[input.gateway] });
+    putIntent(intent({ gateway: 'direct' }));
+    const { result } = renderHook(() => useSetupIntent(ID));
+    await waitFor(() => expect(result.current!.options.models.map((m) => m.value)).toEqual(['sonnet']));
+    act(() => putIntent(intent({ gateway: 'gateway' })));
+    await waitFor(() => expect(result.current!.options.models.map((m) => m.value)).toEqual(['default', 'haiku', 'claude/astra']));
+    act(() => putIntent(intent({ gateway: 'gateway', model: 'claude/astra' })));
+    await act(async () => {});
+    expect(fake.invoked('engine.models'), 'a patch that keeps the route reads nothing').toEqual([
+      { refresh: false, gateway: 'direct' },
+      { refresh: false, gateway: 'gateway' },
+    ]);
+  });
+
+  // Debt wave 4: the catalogue's effort levels reach C7's ModelInfo, so the model widget can lower an effort
+  it('keeps a catalogue entry’s effort levels, and drops a malformed list', () => {
+    const catalogue: ModelCatalogue = {
+      source: 'cached',
+      at: null,
+      models: [
+        { value: 'sonnet', displayName: 'Sonnet 5', supportedEffortLevels: ['low', 'medium', 'high'] },
+        { value: 'odd', displayName: 'Odd', supportedEffortLevels: [1, 'high'] },
+        { value: 'opus', displayName: 'Opus' },
+      ],
+    };
+    expect(modelsOf(catalogue)).toEqual([
+      { value: 'sonnet', displayName: 'Sonnet 5', supportedEffortLevels: ['low', 'medium', 'high'] },
+      { value: 'odd', displayName: 'Odd' },
+      { value: 'opus', displayName: 'Opus' },
+    ]);
   });
 
   // C7 calls the hook from every composer: a started session's has no intent and reads nothing
@@ -145,7 +183,7 @@ describe('setup intent hook', () => {
     expect(fake.invoked('engine.models'), 'a started session’s composer asks nothing').toEqual([]);
     act(() => putIntent(intent()));
     await waitFor(() => expect(result.current!.options.models.map((m) => m.value)).toEqual(['default', 'haiku', 'claude/astra']));
-    expect(fake.invoked('engine.models')).toEqual([{ refresh: false }]);
+    expect(fake.invoked('engine.models')).toEqual([{ refresh: false, gateway: 'gateway' }]);
   });
 
   it('notes a model that cannot hold auto mode, and a gateway model’s local auto lane', async () => {

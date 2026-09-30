@@ -7,7 +7,7 @@ import { TEST_FIXTURE_DIR } from '../../../../test/support/fixtures';
 import { loadScenario } from '../../../../test/support/scenario';
 import { needsYou } from '../attention/derive';
 import { orderProjects } from '../overview/derive';
-import { formatAge, needsYouAge, PROJECT_PAGE, secondaryLine, sessionAge, sidebarModel, type SidebarInput } from './derive';
+import { formatAge, needsYouAge, PROJECT_PAGE, rowBranch, secondaryLine, sessionAge, sidebarModel, type SidebarInput } from './derive';
 
 const scenario = loadScenario(join(TEST_FIXTURE_DIR, 'shell/nine-sessions.json'));
 const records = new Map(scenario.sessions.map((r) => [r.appId, r]));
@@ -80,11 +80,21 @@ describe('sidebar row text', () => {
   it('the secondary line: holder for foreign-live, the waiting item, the activity while working, else the last answer', () => {
     const r = record('r');
     expect(secondaryLine(record('t', { holder: { kind: 'terminal', pid: 7135 } }), digest('t', { phase: 'foreign', lastAssistantLine: 'x' }), [])).toBe('Terminal · pid 7135');
-    expect(secondaryLine(record('b', { holder: { kind: 'background_job', pid: null, jobId: 'j1' } }), null, [])).toBe('Background job');
+    // debt wave 4: a background job reads by the short id `claude --bg` printed, its pid only without one
+    expect(secondaryLine(record('b', { holder: { kind: 'background_job', pid: 4242, jobId: 'e6dcd828' } }), null, [])).toBe('bg · e6dcd828');
+    expect(secondaryLine(record('b', { holder: { kind: 'background_job', pid: 4242, jobId: null } }), null, [])).toBe('bg · pid 4242');
+    expect(secondaryLine(record('b', { holder: { kind: 'background_job', pid: null, jobId: null } }), null, [])).toBe('Background job');
     expect(secondaryLine(r, digest('r', { phase: 'waiting', lastAssistantLine: 'old' }), [item('r', 'question', '2026-09-28T10:00:00Z', { summary: 'Which color?' })])).toBe('Which color?');
     expect(secondaryLine(r, digest('r', { phase: 'working', activity: 'Running bun test', lastAssistantLine: 'old' }), [])).toBe('Running bun test');
     expect(secondaryLine(r, digest('r', { phase: 'idle', lastAssistantLine: 'Done.' }), [])).toBe('Done.');
     expect(secondaryLine(r, null, [])).toBeNull();
+  });
+
+  it('the branch chip: a worktree session’s branch, none for a session in the project directory', () => {
+    expect(rowBranch(record('w', { worktree: { path: '/w/.claude/worktrees/a', branch: 'worktree-a' }, branch: 'stale' }))).toBe('worktree-a');
+    expect(rowBranch(record('w', { worktree: { path: '/w/.claude/worktrees/a', branch: null }, branch: 'from-index' }))).toBe('from-index');
+    expect(rowBranch(record('w', { worktree: { path: '/w/.claude/worktrees/a', branch: null } }))).toBeNull();
+    expect(rowBranch(record('p', { branch: 'main' }))).toBeNull();
   });
 
   it('the waiting item is the one its Needs-you row shows: an actionable item outranks an older held message', () => {

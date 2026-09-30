@@ -5,6 +5,7 @@
 // registries lose no key to a duplicate, which the spread below would otherwise overwrite without a word.
 import type * as z from 'zod';
 import type { IpcError } from './errors';
+import type { BridgedCommandName, BridgedEventName } from './names';
 import * as attention from './schema/attention';
 import type { CommandSpec, Namespace } from './schema/common';
 import * as engine from './schema/engine';
@@ -109,5 +110,11 @@ export interface MawsBridge {
   pathForFile(file: File): string; // C7: a dropped file's path through Electron's webUtils.getPathForFile; '' when Electron has none (a file dragged from a browser)
 }
 
-export const commandChannel = (name: CommandName) => `maws:cmd:${name}`;
-export const eventChannel = (name: EventName) => `maws:evt:${name}`;
+// The preload bridges `./names.ts`'s zod-free lists (so its bundle carries no schema); they must name exactly the
+// registries' keys, which this alias refuses to compile otherwise. `schema.test.ts` pins the same per namespace.
+type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
+type Assert<T extends true> = T;
+export type BridgedNamesAreRegistered = Assert<Same<BridgedCommandName, CommandName>> &
+  Assert<Same<BridgedEventName, EventName>>;
+
+export { commandChannel, eventChannel } from './names';
