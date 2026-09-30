@@ -209,6 +209,49 @@ describe('the repository watcher debounces, coalesces and backs off', () => {
     watcher.dispose();
   });
 
+  it('retries a timed-out status once, 5 s later, when no further event comes; a timed-out retry waits for the next event', async () => {
+    const fake = fakeWatch();
+    let failing = false;
+    let current = status();
+    const read = vi.fn(async () => {
+      if (failing) throw new GitTimeoutError('git status timed out after 10 s in /repo');
+      return current;
+    });
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const emitted: GitChanged[] = [];
+    const watcher = new GitWatcher({ status: read, emit: (e) => emitted.push(e), watch: fake.watch, statFile: async () => null });
+    await watcher.watch(ROOT);
+    await vi.advanceTimersByTimeAsync(300);
+    const settled = read.mock.calls.length;
+
+    failing = true;
+    current = status({ dirty: true, files: [{ path: 'a.ts', oldPath: null, index: '.', worktree: 'M', untracked: false }] });
+    fake.fire(ROOT, 'a.ts'); // the last change, and its status times out
+    await vi.advanceTimersByTimeAsync(300);
+    expect(read.mock.calls.length).toBe(settled + 1);
+    failing = false;
+    await vi.advanceTimersByTimeAsync(4900);
+    expect(read.mock.calls.length).toBe(settled + 1);
+    await vi.advanceTimersByTimeAsync(200); // the retry
+    expect(read.mock.calls.length).toBe(settled + 2);
+    expect(emitted.at(-1)).toEqual({ repoRoot: ROOT, status: current, reason: 'worktree' });
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(read.mock.calls.length).toBe(settled + 2); // a success schedules nothing
+
+    failing = true;
+    fake.fire(ROOT, 'b.ts');
+    await vi.advanceTimersByTimeAsync(300); // times out
+    await vi.advanceTimersByTimeAsync(5000); // the retry times out too
+    expect(read.mock.calls.length).toBe(settled + 4);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(read.mock.calls.length).toBe(settled + 4); // bounded: one retry per change
+    failing = false;
+    fake.fire(ROOT, 'c.ts'); // a new event still reads, under the back-off
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(read.mock.calls.length).toBe(settled + 5);
+    watcher.dispose();
+  });
+
   it('ref-counts per repository root and watches a linked worktree git dir that lies outside its root', async () => {
     const fake = fakeWatch();
     const wt = status({ repoRoot: '/repo/.claude/worktrees/wt', gitDir: '/repo/.git/worktrees/wt', isWorktree: true, branch: 'wt' });
