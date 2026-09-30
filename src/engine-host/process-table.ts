@@ -11,13 +11,14 @@
 // used idle, quiet session with nothing to lose: `stop('budget')` in the same synchronous step as the read of the
 // statuses, so no event can land between the verdict and the stop; one at a time, the next only after that exit.
 // Evaluation has no timer of its own (§4.4: never a fixed timer). The ids it released are kept until each id's next
-// launch, whose reconnect rows then read `process_exit`.
+// launch, whose reconnect rows then read `process_exit`. Exited rows beyond EXITED_ROWS_MAX leave the table, the oldest
+// exit first, at each exit; the host then answers such a session from disk, as it does for any it never launched.
 import { execFile } from 'node:child_process';
 import { totalmem } from 'node:os';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { BudgetState } from '@shared/ipc/schema/engine';
-import { defaultBudgetKiB, evaluate, type BudgetPolicy, type BudgetVerdict } from './budget';
+import { defaultBudgetKiB, evaluate, EXITED_ROWS_MAX, type BudgetPolicy, type BudgetVerdict } from './budget';
 import type { EngineSession } from './session';
 
 export const MEMORY_SAMPLE_MS = 10_000;
@@ -77,9 +78,11 @@ export class ProcessTable {
   private budget: BudgetState;
   private budgetSignature = '';
   private readonly budgetListeners = new Set<(state: BudgetState) => void>();
+  private readonly exitedRowsMax: number;
+  private readonly dropListeners = new Set<(appSessionId: AppSessionId) => void>();
   // C12 end
 
-  constructor(opts: { ps?: () => Promise<string>; sampleMs?: number; log?: (message: string) => void; totalMemBytes?: number /* C12 */ } = {}) {
+  constructor(opts: { ps?: () => Promise<string>; sampleMs?: number; log?: (message: string) => void; totalMemBytes?: number; exitedRowsMax?: number /* C12 */ } = {}) {
     this.ps = opts.ps ?? runPs;
     this.sampleMs = opts.sampleMs ?? MEMORY_SAMPLE_MS;
     this.log = opts.log ?? ((message) => console.warn(`[engine-host process table] ${message}`));
@@ -87,6 +90,7 @@ export class ProcessTable {
     this.policy = { limitKiB: defaultBudgetKiB(opts.totalMemBytes ?? totalmem()), statefulMcpServers: [] };
     this.budget = { limitKiB: this.policy.limitKiB, totalKiB: 0, sampledAt: null, over: false, overWithoutCandidate: false, candidates: 0, settling: 0, releasing: null, blocked: [], lastRelease: null };
     this.budgetSignature = signatureOf(this.budget);
+    this.exitedRowsMax = opts.exitedRowsMax ?? EXITED_ROWS_MAX;
     // C12 end
   }
 
@@ -238,13 +242,37 @@ export class ProcessTable {
     }
   }
 
-  // A row's process exited: a release's ends the one in flight, and its id is kept for its next launch.
+  // Told of each exited row the table drops beyond the cap (the host drops its stream and spec with it).
+  onDropped(listener: (appSessionId: AppSessionId) => void): () => void {
+    this.dropListeners.add(listener);
+    return () => this.dropListeners.delete(listener);
+  }
+
+  // A row's process exited: a release's ends the one in flight, and its id is kept for its next launch; then the
+  // exited rows beyond the cap go, the oldest exit first (ties in the table's order), each with no word to main: its
+  // state file stays, and a later read of it answers from disk.
   private exitedRow(session: EngineSession, status: EngineSessionStatus): void {
     if (status.exit?.reason === 'budget') this.released.add(status.appSessionId);
     if (this.releasing === session) {
       this.releasing = null;
       this.budget = { ...this.budget, releasing: null };
       this.emitBudget(false);
+    }
+    const exited = [...this.rows]
+      .map(([id, row]) => ({ id, row, at: row.status().exit?.at ?? '' }))
+      .filter(({ row }) => row.lifecycle === 'exited');
+    if (exited.length <= this.exitedRowsMax) return;
+    const oldest = exited.map((e, order) => ({ ...e, order })).sort((x, y) => x.at.localeCompare(y.at) || x.order - y.order).slice(0, exited.length - this.exitedRowsMax);
+    for (const { id, row } of oldest) {
+      if (row === session) continue; // never the row whose exit is being delivered right now
+      this.rows.delete(id);
+      for (const listener of this.dropListeners) {
+        try {
+          listener(id);
+        } catch (error) {
+          this.log(`drop listener failed: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
     }
   }
   // C12 end -----------------------------------------------------------------------------------------------------------

@@ -638,3 +638,37 @@ describe('engine.policy.set and engine.budget (C12)', () => {
   });
 });
 // C12 end
+
+// C12 start: a dropped exited row (C12 execution document, M1 task 5)
+describe('exited rows beyond the cap leave the host (C12)', () => {
+  it('drops the oldest exited row, its stream and its spec without session.forgotten, keeps its state file, and session.events answers it from disk', async () => {
+    const transports: ScriptedTransport[] = [];
+    const table = new ProcessTable({ ps: async () => '', exitedRowsMax: 1 });
+    const disk = vi.fn(async () => ({ events: [] as SessionEvent[], complete: true }));
+    const host = engineHost({
+      table, diskEvents: disk, binaryProbe: async () => OK_BINARY, checkRelay: async () => OK_RELAY, captureEnv: async () => ({ PATH: '/usr/bin' }),
+      spawn: () => {
+        const t = scriptedTransport({ onWrite: autoResponder(handshakeResponder({ end_session: () => null })) });
+        transports.push(t);
+        return t;
+      },
+    });
+    for (const [i, id] of (['app-one', 'app-two'] as AppSessionId[]).entries()) {
+      await host.call('session.launch', { spec: spec({ appSessionId: id }) });
+      await until(() => host.statuses(id).some((s) => s.process === 'ready'), `${id} ready`);
+      const stopping = host.call('session.stop', { appSessionId: id, reason: 'stop' });
+      await until(() => transports[i]!.requestsOf('end_session').length === 1, 'end_session');
+      transports[i]!.exit(0);
+      await stopping;
+    }
+    expect(table.get('app-one' as AppSessionId)).toBeUndefined();
+    expect(host.emitted.some((e) => e.name === 'session.forgotten')).toBe(false);
+    expect(existsSync(join(userData, 'engine-host', 'state', 'app-one.json'))).toBe(true);
+    expect(await host.call('session.events', { appSessionId: 'app-one', afterSeq: null, limit: null })).toEqual({ events: [], complete: true, lastSeq: 0 });
+    expect(disk).toHaveBeenCalledWith('app-one');
+    const two = await host.call('session.events', { appSessionId: 'app-two', afterSeq: null, limit: null });
+    expect(two.events.length).toBeGreaterThan(0); // still this host's stream
+    expect(disk).toHaveBeenCalledTimes(1);
+  });
+});
+// C12 end

@@ -184,6 +184,14 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
   on('engine.policy.set', async (policy) => table.configure(policy));
   on('engine.budget', async () => table.budgetState());
   table.onBudget((state) => emit('engine.budget', state));
+  // An exited row dropped beyond the cap takes its stream and spec with it, as an archive's release does, but nothing
+  // is forgotten: no session.forgotten, the state file and the journal stay, and session.events answers from disk.
+  table.onDropped((id) => {
+    streams.get(id)?.dispose();
+    streams.delete(id);
+    specs.delete(id);
+    modelKeys.delete(id); // C10
+  });
   // C12 end
   // C11 start: the binary configuration main sends from settings.engine (C11 execution document, M1). The next launch
   // and engine.binaryInfo read it; a process already spawned keeps the path its plan carries. C3's setter refuses a

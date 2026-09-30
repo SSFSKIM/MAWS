@@ -371,3 +371,43 @@ describe('process table (C12): the memory budget', () => {
   });
 });
 // C12 end
+
+// C12 start: the exited-row cap (C12 execution document, M1 task 5)
+describe('process table (C12): exited rows beyond the cap', () => {
+  it('drops the oldest exit first once more rows have exited than the cap, telling its listeners; live rows are never dropped; a released id outlives its row', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-09-29T10:00:00.000Z'));
+    const table = new ProcessTable({ ps: async () => '  601     1   400\n', exitedRowsMax: 2 });
+    const dropped: string[] = [];
+    table.onDropped((id) => dropped.push(id));
+    const sessions = ['a', 'b', 'c', 'd'].map((name, i) => scriptedSession({ spec: { appSessionId: name as AppSessionId }, transport: { pid: 601 + i }, responder: handshakeResponder({ end_session: () => null }) }));
+    sessions.forEach((x, i) => table.reserve(['a', 'b', 'c', 'd'][i] as AppSessionId, () => x.session));
+    await Promise.all(sessions.map((x) => x.session.start()));
+    const [a, b, c, d] = sessions as [ReturnType<typeof scriptedSession>, ReturnType<typeof scriptedSession>, ReturnType<typeof scriptedSession>, ReturnType<typeof scriptedSession>];
+    // a is released by the budget; b and c are stopped later; d stays live
+    a.transport.push({ type: 'system', subtype: 'session_state_changed', state: 'idle', uuid: 'idle-a', session_id: 's' });
+    await flush();
+    await table.sampleMemory();
+    table.configure({ limitKiB: 100, statefulMcpServers: [] });
+    expect(table.budgetState().releasing).toBe('a');
+    a.transport.exit(0);
+    await a.session.exited;
+    for (const [x, at] of [[b, '2026-09-29T10:01:00.000Z'], [c, '2026-09-29T10:02:00.000Z']] as const) {
+      vi.setSystemTime(new Date(at));
+      const stopping = x.session.stop('stop');
+      x.transport.exit(0);
+      await stopping;
+    }
+    expect(dropped).toEqual(['a']);
+    expect(table.get('a' as AppSessionId)).toBeUndefined();
+    expect(table.list().map((x) => x.status().appSessionId)).toEqual(['b', 'c', 'd']);
+    expect(table.takeReleased('a' as AppSessionId)).toBe(true); // the next launch of a still reconnects as process_exit
+    vi.setSystemTime(new Date('2026-09-29T10:03:00.000Z'));
+    const stopping = d.session.stop('stop');
+    d.transport.exit(0);
+    await stopping;
+    expect(dropped).toEqual(['a', 'b']);
+    expect(table.list().map((x) => x.status().appSessionId)).toEqual(['c', 'd']);
+  });
+});
+// C12 end
