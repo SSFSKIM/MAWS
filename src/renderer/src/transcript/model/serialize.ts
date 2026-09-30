@@ -1,7 +1,7 @@
 // rows → markdown, for "Copy turn as markdown" and the copy actions (C6 execution document, residue *Copy and export*).
 // One part per row (a group is one part with its cells as a nested list), joined by blank lines; user text is emitted
 // untagged (pasted bodies in place of their placeholders); answer markdown is emitted verbatim.
-import { bashFooter, bashHeader, dividerCopy, LOCAL_COMMAND_HEADER, NOT_SENT, planBadge, plural, requestSlotPlaceholder } from './copy';
+import { bashFooter, bashHeader, dividerCopy, LOCAL_COMMAND_HEADER, NOT_SENT, planBadge, plural, QUESTION, requestSlotPlaceholder } from './copy';
 import type { Cell, Row } from './rows';
 import { untaggedUserText } from './user-text';
 
@@ -31,7 +31,7 @@ function partOf(row: Row): string | null {
     case 'agent_message': return `- ${row.text}`;
     case 'thinking': return row.text.length > 0 ? `*${row.live ? 'Thinking' : 'Thought'}*\n${indent(row.text, '> ')}` : null;
     case 'plan': return `**Plan · ${planBadge(row.outcome, row.feedback)}**\n\n${row.plan}`;
-    case 'question': return row.questions.map((q) => `**${q.header}** ${q.question}: ${row.answers?.[q.question] ?? '—'}`).join('\n');
+    case 'question': return row.questions.map((q) => `**${q.header}** ${q.question}: ${row.answers?.[q.question] ?? (row.answers !== null && Object.keys(row.answers).length === 0 ? QUESTION.skipped : '—')}`).join('\n'); // an empty answer map: skipped (a plain deny)
     case 'request_slot': return `*${requestSlotPlaceholder(row.toolName ?? row.requestKind)}*`;
     case 'error': return `*${row.text}*`;
     case 'boundary': return `---\n*${row.text}*`;

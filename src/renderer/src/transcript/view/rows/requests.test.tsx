@@ -8,6 +8,7 @@ import { loadEventFixture, loadJournal, loadSyntheticJournal } from '../../../..
 import { useTranscriptStore } from '../../../stores/transcript';
 import { journalToEvents } from '../../dev/journal';
 import { rowId } from '../../model/keys';
+import { serializeRows } from '../../model/serialize';
 import type { Row } from '../../model/rows';
 import { api, builder, request, tool, uuid } from '../../model/test-events';
 import { DEFAULT_ACTIONS } from '../context';
@@ -130,6 +131,19 @@ describe('question row', () => {
     const unanswered = await expanded(questions(false));
     view = renderRow(rowOf(unanswered.rows(), 'question'), { storeKey: unanswered.key });
     expect(view.container.textContent).toContain('Not answered');
+  });
+
+  // Debt wave 4: the card's Skip answers a question with a plain permission deny, which C3 reports as `question.answered`
+  // with no answers (recorded: pass3/question-deny). The row reads the question as skipped, not unanswered.
+  it('a question skipped through a plain deny reads Skipped, in the row and its export (pass3/question-deny)', async () => {
+    const store = await expanded(journalToEvents(loadJournal('pass3', 'question-deny')));
+    const row = rowOf(store.rows(), 'question');
+    expect(row.answers).toEqual({});
+    const view = renderRow(row, { storeKey: store.key });
+    expect(view.container.querySelector('[data-question]')!.textContent).toContain('Skipped');
+    expect(view.container.textContent).not.toContain('Not answered');
+    expect(view.container.querySelectorAll('[data-chosen]')).toHaveLength(0);
+    expect(serializeRows([row])).toBe('**Color** Red or Blue?: Skipped');
   });
 
   it('a partially answered row says Not answered for each question without an answer, and only for those', async () => {

@@ -13,6 +13,10 @@ function picked(question: Question, answers: Record<string, string> | null): str
   return question.multiSelect ? answer.split(', ') : [answer];
 }
 
+// A question the human skipped: the card's Skip answers the request with a plain permission deny, which C3 reports as
+// `question.answered` with no answers (C3's broker, `pass3/question-deny`), so an answer map that is present and empty.
+const wasSkipped = (answers: Record<string, string> | null) => answers !== null && Object.keys(answers).length === 0;
+
 function QuestionItem({ question, answers }: { question: Question; answers: Record<string, string> | null }) {
   const chosen = picked(question, answers);
   const labels = new Set(question.options.map((option) => option.label));
@@ -42,7 +46,7 @@ function QuestionItem({ question, answers }: { question: Question; answers: Reco
         })}
       </ul>
       {other.length > 0 && <div className="transcript-question-answer">{QUESTION.answer(other.join(', '))}</div>}
-      {answers?.[question.question] === undefined && <div className="transcript-question-answer">{QUESTION.notAnswered}</div>}
+      {answers?.[question.question] === undefined && <div className="transcript-question-answer">{wasSkipped(answers) ? QUESTION.skipped : QUESTION.notAnswered}</div>}
     </div>
   );
 }
