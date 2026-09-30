@@ -5,9 +5,19 @@
 // listeners, samples memory for all live processes with one `ps` every 10 s, and ends them all on shutdown. What would
 // keep a process alive is each status's `keepAlive` (C12: the budget's hard reasons, budget.ts). An exited row stays
 // (its status and events still answer) until the id is relaunched, which replaces it, or archived, which releases it.
+//
+// C12: the table holds the memory budget (charter §4.4 as amended). After each sample and at a policy change it asks
+// the policy (budget.ts `evaluate`) and, when the sum of the live trees is over the budget, releases the least recently
+// used idle, quiet session with nothing to lose: `stop('budget')` in the same synchronous step as the read of the
+// statuses, so no event can land between the verdict and the stop; one at a time, the next only after that exit.
+// Evaluation has no timer of its own (§4.4: never a fixed timer). The ids it released are kept until each id's next
+// launch, whose reconnect rows then read `process_exit`.
 import { execFile } from 'node:child_process';
+import { totalmem } from 'node:os';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { EngineSessionStatus } from '@shared/engine/status';
+import type { BudgetState } from '@shared/ipc/schema/engine';
+import { defaultBudgetKiB, evaluate, type BudgetPolicy, type BudgetVerdict } from './budget';
 import type { EngineSession } from './session';
 
 export const MEMORY_SAMPLE_MS = 10_000;
@@ -42,6 +52,9 @@ export function parsePsTree(output: string): { sample(pid: number): { rssKiB: nu
   };
 }
 
+// C12: the budget state's identity for its event, without `sampledAt` (a sample that moved nothing else is not news)
+const signatureOf = (state: BudgetState): string => JSON.stringify({ ...state, sampledAt: null });
+
 const runPs = (): Promise<string> =>
   new Promise((resolve, reject) => execFile('/bin/ps', ['-axo', 'pid=,ppid=,rss='], { timeout: 5_000 }, (error, stdout) => (error ? reject(error) : resolve(stdout))));
 
@@ -52,11 +65,29 @@ export class ProcessTable {
   private readonly sampleMs: number;
   private sampler: ReturnType<typeof setInterval> | null = null;
   private sampling = false;
+  // C12 start: the budget's policy (25% of physical memory until main's first engine.policy.set) and its state
+  private policy: BudgetPolicy;
+  private stateful: ReadonlySet<string> = new Set();
+  private readonly sampledSeqs = new WeakMap<EngineSession, number>(); // each process's lastEventSeq at the previous sample
+  private previousOverWithoutCandidate = false; // the previous sample's `over && candidates === 0`
+  private releasing: EngineSession | null = null; // a release whose ladder has not ended
+  private readonly released = new Set<AppSessionId>(); // ids whose last exit was a release, until their next launch
+  private lastRelease: BudgetState['lastRelease'] = null;
+  private sampledAt: string | null = null;
+  private budget: BudgetState;
+  private budgetSignature = '';
+  private readonly budgetListeners = new Set<(state: BudgetState) => void>();
+  // C12 end
 
-  constructor(opts: { ps?: () => Promise<string>; sampleMs?: number; log?: (message: string) => void } = {}) {
+  constructor(opts: { ps?: () => Promise<string>; sampleMs?: number; log?: (message: string) => void; totalMemBytes?: number /* C12 */ } = {}) {
     this.ps = opts.ps ?? runPs;
     this.sampleMs = opts.sampleMs ?? MEMORY_SAMPLE_MS;
     this.log = opts.log ?? ((message) => console.warn(`[engine-host process table] ${message}`));
+    // C12 start
+    this.policy = { limitKiB: defaultBudgetKiB(opts.totalMemBytes ?? totalmem()), statefulMcpServers: [] };
+    this.budget = { limitKiB: this.policy.limitKiB, totalKiB: 0, sampledAt: null, over: false, overWithoutCandidate: false, candidates: 0, settling: 0, releasing: null, blocked: [], lastRelease: null };
+    this.budgetSignature = signatureOf(this.budget);
+    // C12 end
   }
 
   private readonly log: (message: string) => void;
@@ -71,6 +102,7 @@ export class ProcessTable {
     const session = create();
     this.rows.set(appSessionId, session);
     session.on('status', (status) => {
+      if (status.process === 'exited') this.exitedRow(session, status); // C12
       for (const listener of this.listeners) listener(status);
     });
     void session.start();
@@ -109,24 +141,113 @@ export class ProcessTable {
     this.sampler = null;
   }
 
-  // One `ps` for every live process (never one per process); a sample never overlaps the previous one.
+  // One `ps` for every live process (never one per process); a sample never overlaps the previous one. C12: the budget
+  // is evaluated right after the sample is recorded, in the same synchronous step (a sample with no process to measure
+  // still evaluates, so the state follows the last exit); a failed `ps` evaluates nothing.
   async sampleMemory(): Promise<void> {
+    if (this.sampling) return;
     const live = this.list().filter((s) => s.pid !== null && s.status().process !== 'exited');
-    if (live.length === 0 || this.sampling) return;
     this.sampling = true;
     try {
-      const tree = parsePsTree(await this.ps());
+      const tree = live.length > 0 ? parsePsTree(await this.ps()) : null;
       const sampledAt = new Date().toISOString();
       for (const session of live) {
-        const sample = tree.sample(session.pid!);
+        const sample = tree!.sample(session.pid!);
         session.recordMemory({ rssKiB: sample?.rssKiB ?? null, treeRssKiB: sample?.treeRssKiB ?? null, sampledAt });
       }
+      this.sampledAt = sampledAt; // C12
+      this.evaluateBudget(true); // C12
     } catch (error) {
       this.log(`memory sample failed: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       this.sampling = false;
     }
   }
+
+  // C12 start ---------------------------------------------------------------------------------------------------------
+  // The budget's policy (engine.policy.set): every live status is re-read (keepAlive names the stateful servers), and
+  // the policy is evaluated at once against the previous sample.
+  configure(policy: BudgetPolicy): BudgetState {
+    this.policy = { limitKiB: policy.limitKiB, statefulMcpServers: [...policy.statefulMcpServers] };
+    this.stateful = new Set(policy.statefulMcpServers);
+    for (const session of this.list()) session.policyChanged();
+    this.evaluateBudget(false);
+    return this.budgetState();
+  }
+
+  get statefulMcpServers(): ReadonlySet<string> {
+    return this.stateful;
+  }
+
+  budgetState(): BudgetState {
+    return structuredClone(this.budget);
+  }
+
+  onBudget(listener: (state: BudgetState) => void): () => void {
+    this.budgetListeners.add(listener);
+    return () => this.budgetListeners.delete(listener);
+  }
+
+  // True once for an id whose last exit was a release: its next launch (the launcher asks as it creates the session)
+  // reconnects with trigger `process_exit`.
+  takeReleased(appSessionId: AppSessionId): boolean {
+    return this.released.delete(appSessionId);
+  }
+
+  // Reads every status, asks the policy, and releases in the same synchronous step: nothing here awaits, so no frame is
+  // processed between the verdict and the stop. `sample` is true after a memory sample, whose lastEventSeq per process
+  // is what the next evaluation's `quiet` compares against, and whose flag the next sample's debounce reads.
+  private evaluateBudget(sample: boolean): void {
+    const sessions = this.list();
+    const statuses = sessions.map((session) => session.status());
+    const quiet = new Set<AppSessionId>();
+    sessions.forEach((session, i) => {
+      const status = statuses[i]!;
+      if (this.sampledSeqs.get(session) === status.lastEventSeq) quiet.add(status.appSessionId);
+      if (sample) this.sampledSeqs.set(session, status.lastEventSeq);
+    });
+    const verdict = evaluate({ rows: statuses, policy: this.policy, quiet, releasing: this.releasing?.status().appSessionId ?? null, previousOverWithoutCandidate: this.previousOverWithoutCandidate });
+    if (sample) this.previousOverWithoutCandidate = verdict.over && verdict.candidates === 0;
+    if (verdict.release !== null) {
+      const session = sessions[statuses.findIndex((s) => s.appSessionId === verdict.release)]!;
+      this.releasing = session;
+      this.lastRelease = { appSessionId: verdict.release, at: new Date().toISOString(), totalKiB: verdict.totalKiB };
+      session.stop('budget', { release: { limitKiB: verdict.limitKiB, totalKiB: verdict.totalKiB } }).catch((error: unknown) => this.log(`release of ${verdict.release} failed: ${error instanceof Error ? error.message : String(error)}`));
+    }
+    this.publishBudget(verdict, verdict.release !== null);
+  }
+
+  private publishBudget(verdict: BudgetVerdict, force: boolean): void {
+    this.budget = {
+      limitKiB: verdict.limitKiB, totalKiB: verdict.totalKiB, sampledAt: this.sampledAt, over: verdict.over, overWithoutCandidate: verdict.overWithoutCandidate,
+      candidates: verdict.candidates, settling: verdict.settling, releasing: this.releasing?.status().appSessionId ?? null, blocked: verdict.blocked, lastRelease: this.lastRelease,
+    };
+    this.emitBudget(force);
+  }
+
+  private emitBudget(force: boolean): void {
+    const signature = signatureOf(this.budget);
+    if (!force && signature === this.budgetSignature) return;
+    this.budgetSignature = signature;
+    for (const listener of this.budgetListeners) {
+      try {
+        listener(this.budgetState());
+      } catch (error) {
+        this.log(`budget listener failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+  }
+
+  // A row's process exited: a release's ends the one in flight, and its id is kept for its next launch.
+  private exitedRow(session: EngineSession, status: EngineSessionStatus): void {
+    if (status.exit?.reason === 'budget') this.released.add(status.appSessionId);
+    if (this.releasing === session) {
+      this.releasing = null;
+      this.budget = { ...this.budget, releasing: null };
+      this.emitBudget(false);
+    }
+  }
+  // C12 end -----------------------------------------------------------------------------------------------------------
 
   // engine.shutdown: every live process through the ladder in parallel with reason `quit` (the end_session wait capped
   // at 3 s); `stopped` counts the exits before SIGKILL, `forced` the SIGKILLs. Idempotent: a process already exited

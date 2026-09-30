@@ -178,6 +178,13 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
   handle('engine.relayHealth', async ({ force }) => relayCheck(force));
   handle('engine.sessions', async () => table.list().map((session) => session.status()));
   handle('engine.shutdown', async ({ graceMs }) => table.shutdown({ graceMs }));
+  // C12 start: the memory budget (C12 execution document, Interfaces "X2 additions"). Both immediate: the policy is
+  // evaluated at once against the previous sample (a release it makes is a stop the table starts, not awaited here),
+  // and the state is the table's own; the event goes out whenever the state changes and at every release.
+  on('engine.policy.set', async (policy) => table.configure(policy));
+  on('engine.budget', async () => table.budgetState());
+  table.onBudget((state) => emit('engine.budget', state));
+  // C12 end
   // C11 start: the binary configuration main sends from settings.engine (C11 execution document, M1). The next launch
   // and engine.binaryInfo read it; a process already spawned keeps the path its plan carries. C3's setter refuses a
   // relative path (the validator already has), which reaches the renderer as invalid_input.

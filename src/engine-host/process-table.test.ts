@@ -4,6 +4,9 @@ import type { EngineSessionStatus } from '@shared/engine/status';
 import { handshakeResponder, scriptedSession } from './conformance/session-harness';
 import { parsePsTree, ProcessTable } from './process-table';
 import { EngineSession } from './session';
+// C12 start
+import type { BudgetState } from '@shared/ipc/schema/engine';
+// C12 end
 
 const flush = () => new Promise((r) => setImmediate(r));
 
@@ -176,3 +179,195 @@ describe('process table: change notification, shutdown and reservations', () => 
     expect(resumed.session.status().process).toBe('ready');
   });
 });
+
+// C12 start: the budget's table side (C12 execution document, Interfaces "The table's side"; M1 task 4)
+describe('process table (C12): the memory budget', () => {
+  type Scripted = ReturnType<typeof scriptedSession>;
+  const RSS = (rows: [number, number][]) => rows.map(([pid, kib]) => `  ${pid}     1   ${kib}`).join('\n') + '\n';
+  const idleFrame = (uuid: string) => ({ type: 'system', subtype: 'session_state_changed', state: 'idle', uuid, session_id: 's' });
+
+  // Ready, engine-idle sessions under one table whose `ps` answers the given trees (KiB by pid). end_session is never
+  // answered, so a released process stays `exiting` until the test pushes its exit.
+  async function budgetTable(trees: Record<string, number>, opts: { limitKiB?: number; stateful?: string[] } = {}) {
+    const rss = new Map<number, number>();
+    const table = new ProcessTable({ ps: async () => RSS([...rss]) });
+    const s: Record<string, Scripted> = {};
+    let pid = 500;
+    for (const [name, kib] of Object.entries(trees)) {
+      pid += 1;
+      rss.set(pid, kib);
+      s[name] = scriptedSession({ spec: { appSessionId: name as AppSessionId }, transport: { pid }, responder: handshakeResponder({ end_session: () => null }), session: { statefulMcpServers: () => table.statefulMcpServers } });
+      table.reserve(name as AppSessionId, () => s[name]!.session);
+    }
+    await Promise.all(Object.values(s).map((x) => x.session.start()));
+    for (const [name, x] of Object.entries(s)) x.transport.push(idleFrame(`idle-${name}`));
+    await flush();
+    const states: BudgetState[] = [];
+    table.onBudget((state) => states.push(state));
+    if (opts.limitKiB !== undefined) table.configure({ limitKiB: opts.limitKiB, statefulMcpServers: opts.stateful ?? [] });
+    return { table, s, states, rss };
+  }
+  const reasons = (x: Scripted) => x.session.status().exit?.reason ?? null;
+  const exitOf = async (x: Scripted) => {
+    x.transport.exit(0);
+    await x.session.exited;
+  };
+
+  it('evaluates after each sample: nothing is quiet at the first, and the second releases the least recently used idle session through the ladder with reason budget', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-09-29T10:00:00.000Z'));
+    const { table, s, states } = await budgetTable({ a: 400, b: 300, c: 200 }, { limitKiB: 800 });
+    s.b!.session.markUsed(); // a is now the least recently used, then c
+    vi.setSystemTime(new Date('2026-09-29T10:00:01.000Z'));
+    s.c!.session.markUsed();
+    vi.setSystemTime(new Date('2026-09-29T10:00:02.000Z'));
+    s.b!.session.markUsed();
+    await table.sampleMemory();
+    expect(table.budgetState()).toMatchObject({ totalKiB: 900, limitKiB: 800, over: true, candidates: 0, settling: 3, releasing: null, sampledAt: '2026-09-29T10:00:02.000Z' });
+    expect(Object.values(s).map((x) => x.session.lifecycle)).toEqual(['ready', 'ready', 'ready']);
+    await table.sampleMemory();
+    expect(s.a!.session.lifecycle).toBe('exiting');
+    expect(s.a!.transport.requestsOf('end_session').map((r) => r.request.reason)).toEqual(['stop']); // `budget` never goes on the wire
+    expect(table.budgetState()).toMatchObject({ over: true, candidates: 3, releasing: 'a', lastRelease: { appSessionId: 'a', at: '2026-09-29T10:00:02.000Z', totalKiB: 900 } });
+    expect(states.at(-1)).toMatchObject({ releasing: 'a' });
+    await exitOf(s.a!);
+    expect(s.a!.session.status().exit).toMatchObject({ reason: 'budget', release: { limitKiB: 800, totalKiB: 900 } });
+    expect(table.budgetState().releasing).toBeNull();
+    await table.sampleMemory();
+    expect(table.budgetState()).toMatchObject({ totalKiB: 500, over: false });
+    expect([s.b, s.c].map((x) => x!.session.lifecycle)).toEqual(['ready', 'ready']);
+  });
+
+  it('evaluates at a policy change against the previous sample, without waiting for the next', async () => {
+    const { table, s } = await budgetTable({ a: 400, b: 300 });
+    await table.sampleMemory(); // records each row's lastEventSeq; the default budget is far above 700 KiB
+    expect(table.budgetState()).toMatchObject({ over: false, releasing: null });
+    const state = table.configure({ limitKiB: 500, statefulMcpServers: [] });
+    expect(state).toMatchObject({ limitKiB: 500, over: true, releasing: 'a' }); // a launched first, so it is the least recently used
+    expect(s.a!.session.lifecycle).toBe('exiting');
+  });
+
+  it('a row whose lastEventSeq moved since the previous sample is not quiet, so it is not released', async () => {
+    const { table, s } = await budgetTable({ a: 400 }, { limitKiB: 100 });
+    await table.sampleMemory();
+    s.a!.transport.push(idleFrame('idle-again'));
+    await flush();
+    await table.sampleMemory();
+    expect(s.a!.session.lifecycle).toBe('ready');
+    expect(table.budgetState()).toMatchObject({ candidates: 0, settling: 1 });
+    await table.sampleMemory();
+    expect(s.a!.session.lifecycle).toBe('exiting');
+  });
+
+  it('evaluates and stops in one synchronous step: a frame queued while the sample lands reaches the session only after the end_session', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-09-29T10:00:00.000Z'));
+    const { table, s } = await budgetTable({ a: 400 }, { limitKiB: 100 });
+    await table.sampleMemory();
+    vi.setSystemTime(new Date('2026-09-29T10:00:10.000Z')); // the next sample's time, so its status goes out
+    const turn = { type: 'system', subtype: 'init', cwd: '/w', session_id: 's', tools: [], mcp_servers: [], model: 'm', permissionMode: 'auto', slash_commands: [], claude_code_version: '2.1.283', output_style: 'default', uuid: 'late-init' };
+    let pushed = false;
+    s.a!.session.on('status', (st) => {
+      if (!pushed && st.memory.sampledAt !== null && st.process === 'ready') {
+        pushed = true;
+        s.a!.transport.push(turn); // arrives while the table is between the sample and its verdict
+      }
+    });
+    await table.sampleMemory();
+    expect(pushed).toBe(true);
+    await flush();
+    const rows = s.a!.journal.rows.map((r) => r.frame as { type?: string; uuid?: string; request?: { subtype?: string } });
+    const endSession = rows.findIndex((f) => f.type === 'control_request' && f.request?.subtype === 'end_session');
+    const late = rows.findIndex((f) => f.uuid === 'late-init');
+    expect(endSession).toBeGreaterThanOrEqual(0);
+    expect(late).toBeGreaterThan(endSession);
+    expect(s.a!.session.lifecycle).toBe('exiting');
+  });
+
+  it('releases no second session while one is exiting, then one per sample', async () => {
+    const { table, s } = await budgetTable({ a: 400, b: 300, c: 200 }, { limitKiB: 100 });
+    await table.sampleMemory();
+    await table.sampleMemory();
+    expect(Object.values(s).map((x) => x.session.lifecycle)).toEqual(['exiting', 'ready', 'ready']);
+    await table.sampleMemory();
+    expect(Object.values(s).map((x) => x.session.lifecycle)).toEqual(['exiting', 'ready', 'ready']);
+    expect(table.budgetState()).toMatchObject({ totalKiB: 500, releasing: 'a' }); // the exiting tree is not in the sum
+    await exitOf(s.a!);
+    await table.sampleMemory();
+    expect(Object.values(s).map((x) => x.session.lifecycle)).toEqual(['exited', 'exiting', 'ready']);
+  });
+
+  it('never touches a session with a hard reason, and names why in the state', async () => {
+    const { table, s } = await budgetTable({ a: 400, b: 300 }, { limitKiB: 100, stateful: ['c12-kernel'] });
+    s.a!.transport.push({ type: 'system', subtype: 'background_tasks_changed', tasks: [{ task_id: 't1', task_type: 'local_bash', description: 'sleep 900' }], uuid: 'bg', session_id: 's' });
+    s.b!.transport.push({ type: 'system', subtype: 'init', cwd: '/w', session_id: 's', tools: [], mcp_servers: [{ name: 'c12-kernel', status: 'connected', source: 'project' }], model: 'm', permissionMode: 'auto', slash_commands: [], claude_code_version: '2.1.283', output_style: 'default', uuid: 'i-b' });
+    s.b!.transport.push({ type: 'result', subtype: 'success', session_id: 's', is_error: false, duration_ms: 1, num_turns: 0, total_cost_usd: 0, usage: {}, permission_denials: [], terminal_reason: 'completed' });
+    s.b!.transport.push(idleFrame('idle-b2'));
+    await flush();
+    await table.sampleMemory();
+    await table.sampleMemory();
+    expect([s.a, s.b].map((x) => x!.session.lifecycle)).toEqual(['ready', 'ready']);
+    expect(table.budgetState()).toMatchObject({ over: true, candidates: 0, blocked: [{ appSessionId: 'a', reasons: ['background_tasks'] }, { appSessionId: 'b', reasons: ['stateful_mcp'] }] });
+    expect(s.b!.session.status().keepAlive).toEqual(['stateful_mcp']);
+  });
+
+  it('raises overWithoutCandidate only on the second consecutive sample over budget with no candidate, and emits it', async () => {
+    const { table, s, states } = await budgetTable({ a: 400 }, { limitKiB: 100 });
+    s.a!.transport.push({ type: 'system', subtype: 'background_tasks_changed', tasks: [{ task_id: 't1', task_type: 'local_bash', description: 'sleep 900' }], uuid: 'bg', session_id: 's' });
+    await flush();
+    await table.sampleMemory();
+    expect(table.budgetState()).toMatchObject({ over: true, candidates: 0, overWithoutCandidate: false });
+    await table.sampleMemory();
+    expect(table.budgetState().overWithoutCandidate).toBe(true);
+    expect(states.at(-1)!.overWithoutCandidate).toBe(true);
+    table.configure({ limitKiB: 1_000, statefulMcpServers: [] }); // under budget again: cleared at once
+    expect(table.budgetState()).toMatchObject({ over: false, overWithoutCandidate: false });
+  });
+
+  it('emits the budget state when a field other than sampledAt changes, and at every release', async () => {
+    const { table, states } = await budgetTable({ a: 400 }, { limitKiB: 10_000 });
+    const before = states.length;
+    await table.sampleMemory();
+    const afterFirst = states.length;
+    expect(afterFirst).toBeGreaterThan(before); // the total moved from nothing to 400
+    await table.sampleMemory(); // a turns quiet: candidates 0 → 1
+    await table.sampleMemory(); // nothing but sampledAt moved
+    expect(states.length).toBe(afterFirst + 1);
+    table.configure({ limitKiB: 100, statefulMcpServers: [] });
+    expect(states.at(-1)).toMatchObject({ releasing: 'a', lastRelease: { appSessionId: 'a' } });
+  });
+
+  it("keeps the ids it released, each taken once by the id's next launch, and never an id whose release an explicit stop overrode", async () => {
+    const { table, s } = await budgetTable({ a: 400, b: 300 }, { limitKiB: 100 });
+    await table.sampleMemory();
+    await table.sampleMemory();
+    await exitOf(s.a!);
+    await table.sampleMemory();
+    expect(s.b!.session.lifecycle).toBe('exiting');
+    void s.b!.session.stop('stop'); // the owner's stop during the release's ladder wins
+    await exitOf(s.b!);
+    expect(reasons(s.b!)).toBe('stop');
+    expect(table.takeReleased('a' as AppSessionId)).toBe(true);
+    expect(table.takeReleased('a' as AppSessionId)).toBe(false);
+    expect(table.takeReleased('b' as AppSessionId)).toBe(false);
+  });
+
+  it('a policy change re-reads every live status, so keepAlive follows the stateful list', async () => {
+    const { table, s } = await budgetTable({ a: 400 });
+    s.a!.transport.push({ type: 'system', subtype: 'init', cwd: '/w', session_id: 's', tools: [], mcp_servers: [{ name: 'c12-kernel', status: 'pending', source: 'project' }], model: 'm', permissionMode: 'auto', slash_commands: [], claude_code_version: '2.1.283', output_style: 'default', uuid: 'i-a' });
+    s.a!.transport.push({ type: 'result', subtype: 'success', session_id: 's', is_error: false, duration_ms: 1, num_turns: 0, total_cost_usd: 0, usage: {}, permission_denials: [], terminal_reason: 'completed' });
+    await flush();
+    const seen: EngineSessionStatus[] = [];
+    table.onChange((st) => seen.push(st));
+    table.configure({ limitKiB: 10_000, statefulMcpServers: ['c12-kernel'] });
+    expect(seen.at(-1)!.keepAlive).toEqual(['stateful_mcp']);
+  });
+
+  it('defaults the budget to a quarter of physical memory until a policy arrives', () => {
+    const table = new ProcessTable({ ps: async () => '', totalMemBytes: 32 * 1024 ** 3 });
+    expect(table.budgetState()).toEqual({
+      limitKiB: 8 * 1024 ** 2, totalKiB: 0, sampledAt: null, over: false, overWithoutCandidate: false, candidates: 0, settling: 0, releasing: null, blocked: [], lastRelease: null,
+    });
+  });
+});
+// C12 end

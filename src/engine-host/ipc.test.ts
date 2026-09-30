@@ -25,6 +25,10 @@ import { createBinaryProbe } from './binary-info';
 import { getBinaryConfig, setBinaryConfig, type LaunchPlan } from './launch';
 // C11 end
 import { LADDER_MS } from './session';
+// C12 start
+import { readFileSync } from 'node:fs';
+import { ProcessTable } from './process-table';
+// C12 end
 import { FileSessionStateStore } from './store/file-session-state-store';
 import { MemorySessionStateStore } from './store/memory-session-state-store';
 
@@ -559,3 +563,78 @@ describe('engine.configure answers binaryInfo and buildLaunch uses the configure
   });
 });
 // C11 end
+
+// C12 start: the memory budget's host commands (C12 execution document, Interfaces "X2 additions"; M1 task 4)
+describe('engine.policy.set and engine.budget (C12)', () => {
+  const idle = { type: 'system', subtype: 'session_state_changed', state: 'idle', uuid: 'idle-1', session_id: 's' };
+  const reconnectTriggers = (journalPath: string) =>
+    readFileSync(journalPath, 'utf8').trim().split('\n').map((line) => JSON.parse(line) as { frame: { event?: string; trigger?: string } }).filter((r) => r.frame.event === 'reconnect').map((r) => r.frame.trigger);
+
+  it('engine.policy.set evaluates at once and answers the budget state; engine.budget answers it; the event carries each change and each release; the next launch after a release reconnects with process_exit', async () => {
+    const transports: ScriptedTransport[] = [];
+    const nextTransport = () => {
+      const t = scriptedTransport({ pid: 4242, onWrite: autoResponder(handshakeResponder({ end_session: () => null })) });
+      transports.push(t);
+      return t;
+    };
+    const table = new ProcessTable({ ps: async () => '  4242     1   400\n' });
+    const host = engineHost({ table, spawn: () => nextTransport(), binaryProbe: async () => OK_BINARY, checkRelay: async () => OK_RELAY, captureEnv: async () => ({ PATH: '/usr/bin' }) });
+    const id = 'app-ipc' as AppSessionId;
+    const budgetEvents = () => host.emitted.filter((e) => e.name === 'engine.budget').map((e) => e.payload as { releasing: string | null; limitKiB: number });
+
+    await host.call('session.launch', { spec: spec() });
+    await until(() => host.statuses(id).some((s) => s.process === 'ready'), 'ready');
+    transports[0]!.push(idle);
+    await until(() => table.get(id)!.status().engineState === 'idle', 'idle');
+    await table.sampleMemory(); // records the row's lastEventSeq: it is quiet from here
+    expect(await host.call('engine.budget', undefined)).toMatchObject({ totalKiB: 400, over: false, releasing: null });
+
+    const state = await host.call('engine.policy.set', { limitKiB: 100, statefulMcpServers: ['c12-kernel'] });
+    expect(state).toMatchObject({ limitKiB: 100, totalKiB: 400, over: true, candidates: 1, releasing: id, lastRelease: { appSessionId: id, totalKiB: 400 } });
+    expect(budgetEvents().at(-1)).toMatchObject({ limitKiB: 100, releasing: id });
+    expect(transports[0]!.requestsOf('end_session').map((r) => r.request.reason)).toEqual(['stop']);
+    transports[0]!.exit(0);
+    await until(() => host.statuses(id).some((s) => s.process === 'exited'), 'exited');
+    expect(host.statuses(id).at(-1)!.exit).toMatchObject({ reason: 'budget', release: { limitKiB: 100, totalKiB: 400 } });
+    expect(await host.call('engine.budget', undefined)).toMatchObject({ releasing: null });
+    expect(budgetEvents().at(-1)).toMatchObject({ releasing: null });
+
+    // the resume after the release: its reconnect rows name process_exit; the launch after that one is the owner's again
+    const resume = spec({ resume: { sessionId: '33333333-3333-4333-8333-333333333333' as never, fork: false } });
+    await host.call('engine.policy.set', { limitKiB: 1_000_000, statefulMcpServers: [] }); // no further release
+    await host.call('session.launch', { spec: resume });
+    await until(() => host.statuses(id).at(-1)?.process === 'ready', 'resumed');
+    expect(reconnectTriggers(table.get(id)!.status().journalPath)).toEqual(['process_exit', 'process_exit']);
+    const stopping = host.call('session.stop', { appSessionId: id, reason: 'stop' });
+    await until(() => transports[1]!.requestsOf('end_session').length === 1, 'end_session');
+    transports[1]!.exit(0);
+    await stopping;
+    await host.call('session.launch', { spec: resume });
+    await until(() => host.statuses(id).at(-1)?.process === 'ready', 'resumed again');
+    expect(reconnectTriggers(table.get(id)!.status().journalPath)).toEqual(['user', 'user']);
+    const last = host.call('session.stop', { appSessionId: id, reason: 'stop' });
+    await until(() => transports[2]!.requestsOf('end_session').length === 1, 'end_session');
+    transports[2]!.exit(0);
+    await last;
+  });
+
+  it('the launched session reads the stateful servers of the policy in force', async () => {
+    const table = new ProcessTable({ ps: async () => '' });
+    const transport = scriptedTransport({ onWrite: autoResponder(handshakeResponder({ end_session: () => null })) });
+    const host = engineHost({ table, spawn: () => transport, binaryProbe: async () => OK_BINARY, checkRelay: async () => OK_RELAY, captureEnv: async () => ({ PATH: '/usr/bin' }) });
+    const id = 'app-ipc' as AppSessionId;
+    await host.call('session.launch', { spec: spec() });
+    await until(() => host.statuses(id).some((s) => s.process === 'ready'), 'ready');
+    transport.push({ type: 'system', subtype: 'init', cwd: '/w', session_id: 's', tools: [], mcp_servers: [{ name: 'c12-kernel', status: 'connected', source: 'project' }], model: 'm', permissionMode: 'auto', slash_commands: [], claude_code_version: '2.1.283', output_style: 'default', uuid: 'i-1' });
+    transport.push({ type: 'result', subtype: 'success', session_id: 's', is_error: false, duration_ms: 1, num_turns: 0, total_cost_usd: 0, usage: {}, permission_denials: [], terminal_reason: 'completed' });
+    await until(() => table.get(id)!.status().mcpServers.length === 1 && table.get(id)!.status().turn === null, 'init');
+    expect(table.get(id)!.status().keepAlive).toEqual([]);
+    await host.call('engine.policy.set', { limitKiB: 1_000_000, statefulMcpServers: ['c12-kernel'] });
+    expect(host.statuses(id).at(-1)!.keepAlive).toEqual(['stateful_mcp']);
+    const stopping = host.call('session.stop', { appSessionId: id, reason: 'stop' });
+    await until(() => transport.requestsOf('end_session').length === 1, 'end_session');
+    transport.exit(0);
+    await stopping;
+  });
+});
+// C12 end
