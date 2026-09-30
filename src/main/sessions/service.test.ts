@@ -413,6 +413,21 @@ describe('session service', () => {
       expect(h.host.calledWith('session.send')).toEqual([{ appSessionId: record.appId, content: 'Reply OK' }]);
     });
 
+    // C3 corrective (2026-09-30 ledger): C4's follower, restarted by a read between the handover and the launch, replays
+    // the exited transcript and synthesises `process.exited` (seq null) when its last turn never ended
+    it('a transcript-synthesised exit arriving during the launch is not the launch’s exit: the resume reaches ready and nothing is stopped', async () => {
+      h.trustDirectory(h.work);
+      const record = recordAt(h.work);
+      h.host.script = (spec) => {
+        const synthetic = { id: `session:${SID}:exited`, sessionId: SID, at: '2026-09-30T00:00:00.000Z', seq: null, agentId: null, parentToolUseId: null, kind: 'process.exited', code: null, signal: null, reason: 'unknown', lostAttentionCount: 0, budget: null };
+        h.host.emitEvent('session.eventBatch', { appSessionId: spec.appSessionId, events: [synthetic as never] });
+        return {};
+      };
+      await h.service.startSession(record.appId, { message: null, options: {} });
+      expect(await h.settled(record.appId)).toMatchObject({ phase: 'ready' });
+      expect(h.host.calledWith('session.stop')).toEqual([]);
+    });
+
     it('a resume that fails after ready stops its process before telling the failure', async () => {
       h.trustDirectory(h.work);
       const record = recordAt(h.work);

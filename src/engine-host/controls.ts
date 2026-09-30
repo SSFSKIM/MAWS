@@ -37,11 +37,14 @@ import {
 } from '@shared/wire/control';
 import type { ControlClient } from './rpc';
 
-export type RequestClass = 'read' | 'mutate' | 'interrupt' | 'long' | 'human';
+export type RequestClass = 'read' | 'mutate' | 'interrupt' | 'handshake' | 'long' | 'human';
 
 // The three bounded classes fit under X2's 10 s router timeout with the two IPC hops to spare; `long` is never
 // awaited by a synchronous X2 command (operations answer a receipt and complete through `session.operation`).
-export const REQUEST_TIMEOUT_MS: Record<Exclude<RequestClass, 'human'>, number> = { read: 8_000, mutate: 8_000, interrupt: 8_000, long: 120_000 };
+// `handshake` is `initialize` alone (C3 corrective, 2026-09-30 ledger): it answers in about half a second, and one that
+// never answers must reach `init_failed`, and a resumable row, in a time the owner can wait; 30 s is the bound the
+// launch gate already uses (main's CONFIGURE_WAIT_MS).
+export const REQUEST_TIMEOUT_MS: Record<Exclude<RequestClass, 'human'>, number> = { read: 8_000, mutate: 8_000, interrupt: 8_000, handshake: 30_000, long: 120_000 };
 
 // One row per subtype: request payload type, response schema, timeout class.
 interface Control<Req, Res extends z.ZodType> { request: Req; response: Res; klass: Exclude<RequestClass, 'human'> }
@@ -80,8 +83,9 @@ export const CONTROLS = {
   end_session: control<C.EndSessionRequest, typeof VoidResponseSchema>(VoidResponseSchema, 'mutate'),
   // interrupt
   interrupt: control<C.InterruptRequest, typeof InterruptResponseSchema>(InterruptResponseSchema, 'interrupt'),
-  // long: the launch path, title generation, side questions, plugin reloads and MCP server lifecycle
-  initialize: control<C.InitializeRequest, typeof InitializeResponseSchema>(InitializeResponseSchema, 'long'),
+  // handshake: the launch's initialize (C3 corrective)
+  initialize: control<C.InitializeRequest, typeof InitializeResponseSchema>(InitializeResponseSchema, 'handshake'),
+  // long: a prewarmed spare's claim, title generation, side questions, plugin reloads and MCP server lifecycle
   claim_session: control<C.ClaimSessionRequest, typeof ClaimSessionResponseSchema>(ClaimSessionResponseSchema, 'long'),
   generate_session_title: control<C.GenerateSessionTitleRequest, typeof GenerateSessionTitleResponseSchema>(GenerateSessionTitleResponseSchema, 'long'),
   side_question: control<C.SideQuestionRequest, typeof SideQuestionResponseSchema>(SideQuestionResponseSchema, 'long'),

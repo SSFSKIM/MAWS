@@ -404,6 +404,44 @@ test.describe('sessions', () => {
     expect(value(await invoke(page, 'session.get', { appSessionId: gone.appId }))).toBeNull();
   });
 
+  // C3 corrective (2026-09-30 ledger): a resume whose engine never answers `initialize` fails at the handshake's 30 s
+  // bound, not at the long class's 120 s; the reason (the timeout and the engine's stderr tail) reaches the owner, and
+  // the row offers Resume again. The engine is a stub under the Engine setting's binary path: it answers `--version` as
+  // the pin and otherwise writes one stderr line and never reads its stdin.
+  test('a resume whose engine never answers initialize fails at 30 s with its stderr in the reason, and the row can be resumed again', async () => {
+    test.setTimeout(150_000);
+    const repo = await ScratchRepo.create();
+    const store = await StoreFixture.create();
+    const sid = '5e551011-0000-4000-8000-0000000000c3';
+    await store.addTranscript(repo.root, sid, [{ type: 'user', uuid: `u-${sid}`, parentUuid: null, cwd: repo.root, sessionId: sid, timestamp: '2026-09-30T10:00:00.000Z', message: { role: 'user', content: 'resume me' } }]);
+    const stub = join(store.configHome, 'stub-engine.sh');
+    writeFileSync(stub, '#!/bin/sh\nif [ "$1" = "--version" ]; then echo "2.1.283 (Claude Code)"; exit 0; fi\necho "stub engine: holding initialize" >&2\nexec sleep 300\n');
+    chmodSync(stub, 0o755);
+    const launched = await launchCase({ fixtures: [], trusted: [repo.root], store });
+    current = { ...launched, repos: [repo] };
+    const { page, maws } = launched;
+    value(await invoke(page, 'settings.set', { engine: { binaryPath: stub } }));
+    await expect.poll(async () => value(await invoke(page, 'session.list', {})).sessions.some((r) => r.engineSessionId === sid), { timeout: 20_000 }).toBe(true);
+    const record = value(await invoke(page, 'session.list', {})).sessions.find((r) => r.engineSessionId === sid)!;
+    const startedAt = Date.now();
+    expect(value(await invoke(page, 'session.start', { appSessionId: record.appId, message: null, options: { gateway: 'direct' } }))).toMatchObject({ status: 'starting' });
+    await expect.poll(async () => (await setupOf(page, record.appId)).map((e) => e.phase), { timeout: 60_000 }).toContain('failed');
+    const failedAfterMs = Date.now() - startedAt;
+    expect(failedAfterMs, 'the handshake bound, well before the long class’s 120 s').toBeGreaterThanOrEqual(29_000);
+    expect(failedAfterMs).toBeLessThan(60_000);
+    const failure = (await setupOf(page, record.appId)).find((e) => e.phase === 'failed')!;
+    expect(failure.outcome).toMatchObject({ kind: 'error' });
+    expect(failure.outcome!.message).toContain('initialize unanswered after 30 s');
+    expect(failure.outcome!.message, 'the engine’s stderr tail rides in the reason').toContain('stub engine: holding initialize');
+    await expect(page.getByText('initialize unanswered after 30 s', { exact: false }).first(), 'the owner sees the reason').toBeVisible();
+    const rows = journal(maws, record.appId).filter((r) => r.direction === 'meta').map((r) => r.frame.event);
+    expect(rows).toEqual(['reconnect', 'spawn', 'init_failed', 'reconnect', 'exit']);
+    expect(value(await invoke(page, 'session.status', { appSessionId: record.appId }))).toMatchObject({ process: 'exited', exit: { reason: 'crash' } });
+    await row(page, record.appId).click({ button: 'right' });
+    await expect(page.getByRole('menuitem', { name: 'Resume', exact: true }), 'the row can be resumed again').toBeEnabled();
+    await page.keyboard.press('Escape');
+  });
+
   // M5, acceptance items 12 and 13's renderer half, with no engine and no real job: a synthetic registry record under
   // the temp config home (C4's recipe: the pid of this test runner, its `procStart` as the engine renders it), and a
   // login shell that is not a shell. The PTY host runs `$SHELL -l`; the case's `$SHELL` records the directory it

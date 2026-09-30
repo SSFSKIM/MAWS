@@ -33,6 +33,11 @@ export class LaunchWatch {
       s.onEvent('session.eventBatch', ({ appSessionId: id, events }) => {
         if (id !== appSessionId) return;
         for (const event of events) {
+          // C3 corrective: only a live launch's events (each derives from a journal row, so `seq` is set). C4's follower
+          // of the exited transcript, restarted by a read between the handover and the launch, synthesises
+          // `process.exited` (seq null) for a last turn that never ended; counted, it failed the resume and stopped the
+          // process it had just launched.
+          if (event.seq === null) continue;
           if (event.kind === 'error.raised' && event.scope === 'process') this.errors.push(event.message);
           if (event.kind === 'process.exited') this.exited = true;
         }

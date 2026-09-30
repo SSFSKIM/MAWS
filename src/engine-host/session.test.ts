@@ -614,22 +614,29 @@ describe('failed initialize terminates the process', () => {
     expect(table.reserve('app-s' as AppSessionId, () => setup().session)).toMatchObject({ status: 'launching' });
   });
 
-  it('an initialize that never answers: exiting at the long deadline, SIGTERM with stdin closed, SIGKILL 3 s later, exited only at the real exit; the reservation holds until then', async () => {
+  // C3 corrective (2026-09-30 ledger): the handshake's own 30 s bound, where the long class's 120 s let a silent resume sit
+  it('a resume whose initialize never answers: exiting at the 30 s handshake bound with the stderr tail in the reason, SIGTERM with stdin closed and no end_session, SIGKILL 3 s later, exited crash only at the real exit; the reservation holds until then and a new launch takes it after', async () => {
     vi.useFakeTimers();
     const table = new ProcessTable();
+    const resume = { resume: { sessionId: '44444444-4444-4444-8444-444444444444' as LaunchSpec['sessionId'] & string, fork: false }, sessionId: null };
     let first!: ReturnType<typeof setup>;
     const reserved = table.reserve(spec().appSessionId, () => {
-      first = setup({ responder: defaultResponder({ initialize: () => null }) });
+      first = setup({ spec: resume, responder: defaultResponder({ initialize: () => null }) });
       first.transport.pushStderr('warming up');
       return first.session;
     });
     expect(reserved.status).toBe('launching');
-    await vi.advanceTimersByTimeAsync(119_999);
+    await vi.advanceTimersByTimeAsync(29_999);
     expect(first.session.status().process).toBe('initializing');
+    expect(first.transport.calls).toEqual([]);
     await vi.advanceTimersByTimeAsync(1);
     expect(first.session.status().process).toBe('exiting');
-    expect(first.events.filter((e) => e.kind === 'error.raised')).toMatchObject([{ scope: 'process', code: 'timeout' }]);
-    expect((first.events.find((e) => e.kind === 'error.raised') as { message: string }).message).toContain('warming up');
+    const raised = first.events.filter((e) => e.kind === 'error.raised') as { scope: string; code: string | null; message: string }[];
+    expect(raised).toMatchObject([{ scope: 'process', code: 'timeout' }]);
+    expect(raised[0]!.message).toBe('initialize unanswered after 30 s\nwarming up');
+    const reconnects = first.events.filter((e) => e.kind === 'session.reconnect') as { phase: string; reason: string | null }[];
+    expect(reconnects.map((e) => e.phase)).toEqual(['attempting', 'failed']);
+    expect(reconnects[1]!.reason).toBe('initialize unanswered after 30 s\nwarming up');
     expect(first.transport.calls).toEqual(['endInput', 'kill:SIGTERM']);
     expect(first.transport.requestsOf('end_session')).toHaveLength(0); // the handshake never completed: no end_session rung
     await vi.advanceTimersByTimeAsync(2_999);
@@ -643,8 +650,9 @@ describe('failed initialize terminates the process', () => {
     first.transport.exit(null, 'SIGKILL');
     await vi.advanceTimersByTimeAsync(0);
     expect(first.session.status()).toMatchObject({ process: 'exited', exit: { reason: 'crash', signal: 'SIGKILL' } });
-    expect(metaEvents(first.journal)).toEqual(['spawn', 'init_failed', 'exit']);
-    const again = table.reserve(spec().appSessionId, () => setup().session);
+    expect(metaEvents(first.journal)).toEqual(['reconnect', 'spawn', 'init_failed', 'reconnect', 'exit']);
+    expect(first.events.at(-1)).toMatchObject({ kind: 'process.exited', reason: 'crash' });
+    const again = table.reserve(spec().appSessionId, () => setup({ spec: resume }).session);
     expect(again.status).toBe('launching');
   });
 
