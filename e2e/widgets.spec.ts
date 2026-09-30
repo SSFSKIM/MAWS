@@ -451,7 +451,7 @@ test.describe('interactive', () => {
     const info = page.locator(`[data-session-info="${READY}"]`);
     for (const title of ['Engine', 'Model', 'Gateway', 'Permissions', 'Context, usage, cost', 'Hooks and MCP']) await expect(info.getByRole('region', { name: title })).toBeVisible();
     await expect(valueOf(info, 'Route')).toHaveText('Gateway · ClaudeUsage relay · http://127.0.0.1:8641');
-    await expect(valueOf(info, 'Context')).toHaveText('30,433 of 200,000 · 15% · autocompact at 167,000');
+    await expect(valueOf(info, 'Context')).toHaveText('21,508 of 200,000 · 11% · autocompact at 167,000');
     const lane = valueOf(info, 'Auto-mode lane');
     const SERVER = 'Server · reviews ride on the main request · no charge · model chosen server-side';
     await expect(lane, 'the scenario status on Sonnet, get_status reading Enabled (auto-routed seq 145)').toHaveText(SERVER);
@@ -628,7 +628,7 @@ test.describe('replay conformance', () => {
     await read('session.getUsage', {}); // seq 52
     await expect(widget(page, 'usage')).toContainText('rate_limits_available: false');
     await read('session.getContextUsage', { detail: 'summary' }); // seq 56: the compact widget's read
-    await expect(widget(page, 'compact')).toContainText('30,433 of 200,000 · 15% · autocompact at 167,000');
+    await expect(widget(page, 'compact')).toContainText('21,508 of 200,000 · 11% · autocompact at 167,000');
     await read('session.getSettings', {}); // seq 59
     await expect(widget(page, 'config')).toContainText('No settings in effect beyond the defaults');
     await expect(widget(page, 'config')).toContainText('claude-haiku-4-5-20251001');
