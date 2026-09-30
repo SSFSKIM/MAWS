@@ -103,6 +103,13 @@ export function secondaryLine(record: SessionRecord, digest: SessionDigest | nul
   return digest?.lastAssistantLine ?? null;
 }
 
+// The row's branch chip: a worktree session's branch (C10's record, else the index's), since a session in the project
+// directory is on the project's own branch and a chip on every row would say nothing. Null for a detached worktree.
+export function rowBranch(record: SessionRecord): string | null {
+  if (record.worktree === null) return null;
+  return record.worktree.branch ?? record.branch ?? null;
+}
+
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;

@@ -15,8 +15,8 @@ import { useSessions } from '../stores/sessions';
 import { patchIntent, startIntent, type HookResult } from './setup-actions';
 import { useSetup } from './store';
 
-// C7's `ModelInfo`: the catalogue fills `value`, `displayName` and the two capability flags and leaves `description`
-// and `supportedEffortLevels` absent (C7 then offers every effort level).
+// C7's `ModelInfo`: the catalogue fills `value`, `displayName`, the two capability flags and `supportedEffortLevels`
+// when the entry lists them, and leaves `description` absent (an entry without levels offers every effort level).
 export type { ModelInfo };
 
 export interface SetupIntentOptions {
@@ -62,11 +62,16 @@ export function locationsOf(input: { projectDirectory: string; intent: SetupInte
   return [directory, ...existing, template];
 }
 
+// The catalogue's entries as C7's `ModelInfo`. The entry schema is loose, so the engine's other `list_models` fields
+// ride along unchecked: `supportedEffortLevels` is kept when it is a list of strings, so the model widget lowers an
+// effort the chosen model does not list, as it does for a live session.
 export function modelsOf(catalogue: ModelCatalogue): ModelInfo[] {
   return catalogue.models.map((entry) => {
     const info: ModelInfo = { value: entry.value, displayName: entry.displayName };
     if (entry.supportsAutoMode !== undefined) info.supportsAutoMode = entry.supportsAutoMode;
     if (entry.supportsFastMode !== undefined) info.supportsFastMode = entry.supportsFastMode;
+    const levels: unknown = entry.supportedEffortLevels;
+    if (Array.isArray(levels) && levels.every((level) => typeof level === 'string')) info.supportedEffortLevels = levels;
     return info;
   });
 }
@@ -117,11 +122,12 @@ async function readRepository(directory: string): Promise<RepositoryFacts> {
   return { directory, repoRoot, worktrees: listed.ok ? listed.value.worktrees : [], branches: names, trustError: null };
 }
 
-// The catalogue at every mount: the host answers from its cache in memory, which a launch or a refresh updates (the
-// relay's `claude/*` aliases arrive with the first routed launch), so each new tab sees what the host knows now. A
-// failed read shows the built-in list the host itself answers before any launch.
-async function readCatalogue(): Promise<ModelCatalogue> {
-  const result = await ipc.invoke('engine.models', { refresh: false });
+// The catalogue at every mount and on every route change: the host answers the tab's route's catalogue from its cache
+// in memory, which a launch or a refresh updates (the relay's `claude/*` aliases arrive with the first routed launch),
+// so each new tab sees what the host knows now for the route it would launch on, not the most recently updated route's.
+// A failed read shows the built-in list the host itself answers before any launch.
+async function readCatalogue(gateway: SetupIntent['gateway']): Promise<ModelCatalogue> {
+  const result = await ipc.invoke('engine.models', { refresh: false, gateway });
   if (result.ok) return result.value;
   console.warn('[sessions] engine.models unavailable', result.error);
   return BUILTIN_FALLBACK;
@@ -138,15 +144,15 @@ function useSetupOptions(
   const [worktreeName] = useState(() => defaultWorktreeName());
 
   // Only an unstarted session reads it: C7 calls this hook from every composer, and a started session's has no intent.
-  const unstarted = intent !== null;
+  const route = intent?.gateway ?? null;
   useEffect(() => {
-    if (!unstarted) return;
+    if (route === null) return;
     let live = true;
-    void readCatalogue().then((c) => live && setCatalogue(c));
+    void readCatalogue(route).then((c) => live && setCatalogue(c));
     return () => {
       live = false;
     };
-  }, [unstarted]);
+  }, [route]);
 
   // The repository is read again only when the base directory moves to another repository or out of one; a move
   // between two locations of one repository keeps what was read.
