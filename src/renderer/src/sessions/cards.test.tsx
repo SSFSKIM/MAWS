@@ -289,6 +289,44 @@ describe('relay card, with C11', () => {
 });
 // C11 end
 
+// Debt wave 4: main refuses a relay alias on the direct route; Send offers the Direct-compatible choice first
+describe('a gateway model on the direct route', () => {
+  const words = 'claude/astra is a gateway model, which the Direct route cannot serve · choose a Claude model, or start on the gateway';
+  const refusal: StartOutcome = { status: 'invalid', appSessionId: ID, field: 'model', message: words };
+
+  it('a pick is written with its effort and the message sent once more; the resend asks no second time', async () => {
+    const outcomes = [refusal, starting];
+    withMain({ 'session.start': () => outcomes.shift(), 'session.intent.patch': ({ patch }: { patch: object }) => intent({ gateway: 'direct', ...patch }) });
+    putIntent(intent({ gateway: 'direct', model: 'claude/astra', effort: 'max' }));
+    const pick = vi.fn(async () => ({ model: 'sonnet', effort: 'high' as const }));
+    expect(await act(() => startIntent(ID, MESSAGE, pick))).toEqual({ ok: true });
+    expect(pick).toHaveBeenCalledExactlyOnceWith(ID);
+    expect(fake.invoked('session.intent.patch')).toEqual([{ appSessionId: ID, patch: { model: 'sonnet', effort: 'high' } }]);
+    expect(fake.invoked('session.start')).toEqual([
+      { appSessionId: ID, message: MESSAGE, options: {} },
+      { appSessionId: ID, message: MESSAGE, options: {} },
+    ]);
+    expect(useSetup.getState().intents.get(ID)).toMatchObject({ model: 'sonnet', effort: 'high' });
+  });
+
+  it('a cancelled pick leaves the refusal, naming the model and the route, as the editor’s error and the intent as it was', async () => {
+    withMain({ 'session.start': answer(refusal) });
+    putIntent(intent({ gateway: 'direct', model: 'claude/astra' }));
+    expect(await act(() => startIntent(ID, MESSAGE, async () => null))).toEqual({ ok: false, error: words });
+    expect(fake.invoked('session.intent.patch')).toEqual([]);
+    expect(fake.invoked('session.start')).toHaveLength(1);
+  });
+
+  it('a refusal after the pick is the editor’s error, with no second pick', async () => {
+    withMain({ 'session.start': answer(refusal), 'session.intent.patch': () => intent({ gateway: 'direct', model: 'sonnet' }) });
+    putIntent(intent({ gateway: 'direct', model: 'claude/astra' }));
+    const pick = vi.fn(async () => ({ model: 'sonnet', effort: null }));
+    expect(await act(() => startIntent(ID, MESSAGE, pick))).toEqual({ ok: false, error: words });
+    expect(pick).toHaveBeenCalledTimes(1);
+    expect(fake.invoked('session.intent.patch')).toEqual([{ appSessionId: ID, patch: { model: 'sonnet' } }]);
+  });
+});
+
 describe('failure card', () => {
   const failed = (over: Parameters<typeof resources>[0] = {}) => ({ message: 'launch refused: replay_disabled', resources: resources(over) });
 

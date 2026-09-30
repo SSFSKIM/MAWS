@@ -6,6 +6,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { StartOptions } from '@shared/ipc/schema/session';
 import type { FirstMessage, SetupIntent, SetupIntentPatch } from '@shared/sessions/intent';
 import type { SetupResources, StartOutcome } from '@shared/sessions/setup';
+import { pickDirectModel } from '../gateway/direct-model'; // debt wave 4: the direct route's model refusal
 import { ipc } from '../ipc/client';
 import { toast } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
@@ -78,9 +79,18 @@ export async function patchIntent(appSessionId: AppSessionId, patch: SetupIntent
 
 // Send on an unstarted session: `starting`, `needs_trust` and `relay_unreachable` are `{ ok: true }` (the message is
 // retained; a card takes over), every refusal `{ ok: false }` with the editor keeping its text.
-export async function startIntent(appSessionId: AppSessionId, first: FirstMessage): Promise<HookResult> {
+// Main refuses a relay alias on the direct route (`invalid`, field `model`); Send then offers C11's Direct-compatible
+// choice, and a pick is written to the intent (with the effort it admits) and sent once more. Cancelling leaves the
+// refusal as the editor's error, the intent unchanged; the resend after a pick asks no second time (`pick` null).
+export async function startIntent(appSessionId: AppSessionId, first: FirstMessage, pick: typeof pickDirectModel | null = pickDirectModel): Promise<HookResult> {
   const outcome = await start(appSessionId, first, {});
   if ('error' in outcome) return { ok: false, error: outcome.error };
+  if (outcome.status === 'invalid' && outcome.field === 'model' && pick !== null) {
+    const choice = await pick(appSessionId);
+    if (choice === null) return { ok: false, error: outcome.message };
+    const patched = await patchIntent(appSessionId, { model: choice.model, ...(choice.effort !== null && { effort: choice.effort }) });
+    return patched.ok ? startIntent(appSessionId, first, null) : patched;
+  }
   dockFor(appSessionId, outcome, first);
   const refusal = refusalOf(outcome);
   return refusal === null ? { ok: true } : { ok: false, error: refusal };
