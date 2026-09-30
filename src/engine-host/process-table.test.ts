@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { AppSessionId } from '@shared/graph/ids';
+import type { AppSessionId, RequestId } from '@shared/graph/ids'; // C12: RequestId
 import type { EngineSessionStatus } from '@shared/engine/status';
 import { handshakeResponder, scriptedSession } from './conformance/session-harness';
 import { parsePsTree, ProcessTable } from './process-table';
@@ -275,6 +275,57 @@ describe('process table (C12): the memory budget', () => {
     await table.sampleMemory();
     await table.sampleMemory();
     expect(s.a!.session.lifecycle).toBe('ready');
+  });
+
+  // C12 M5: the real states, from the probe's recording under CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS=1 (pass3/
+  // launch-env-state-events.jsonl: running at seq 6, requires_action at 29 with the can_use_tool at 30, running at 36,
+  // the result at 53, idle at 55). The engine's frames are replayed in order (its echo of the host's answer, an `in`
+  // control_response, is the host's own and is skipped; the host answers the request itself). Between the result and
+  // `idle` the row holds no hard reason, so only its engine state keeps it: `running` blocks a release there, and the
+  // release follows `idle` once the row is quiet.
+  it('real engine states: running and requires_action block a release, idle allows it (pass3/launch-env-state-events)', async () => {
+    const rows = readFileSync(join(__dirname, '../../spikes/protocol-probe/fixtures/pass3/launch-env-state-events.jsonl'), 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as { seq: number; direction: string; frame: Record<string, unknown> });
+    const engine = rows.filter((r) => r.direction === 'in' && r.frame.type !== 'control_response');
+    const { table, s } = await budgetTable({ a: 400 }, { limitKiB: 100 });
+    const a = s.a!;
+    let next = 0;
+    const replayThrough = async (seq: number) => {
+      while (next < engine.length && engine[next]!.seq <= seq) a.transport.push({ ...engine[next++]!.frame, session_id: 's' });
+      await flush();
+    };
+    const twoSamples = async () => {
+      await table.sampleMemory();
+      await table.sampleMemory();
+    };
+
+    await replayThrough(6);
+    expect(a.session.status().engineState).toBe('running');
+    await twoSamples();
+    expect(a.session.lifecycle).toBe('ready');
+
+    await replayThrough(30);
+    expect(a.session.status()).toMatchObject({ engineState: 'requires_action', pendingRequests: 1 });
+    await twoSamples();
+    expect(a.session.lifecycle).toBe('ready');
+    expect(await a.session.answer('babe54eb-6089-4878-a021-386ba22f4141' as RequestId, { kind: 'permission', decision: 'allow', scope: 'once' })).toBe('delivered');
+
+    await replayThrough(53); // the result: the turn is over, the engine has not said idle yet
+    expect(a.session.status()).toMatchObject({ engineState: 'running', turn: null, busy: false, pendingRequests: 0, keepAlive: [] });
+    await twoSamples();
+    expect(a.session.lifecycle).toBe('ready');
+    expect(table.budgetState()).toMatchObject({ over: true, candidates: 0, settling: 1, blocked: [], releasing: null });
+
+    await replayThrough(55);
+    expect(a.session.status().engineState).toBe('idle');
+    await table.sampleMemory(); // idle moved lastEventSeq: not quiet yet
+    expect(a.session.lifecycle).toBe('ready');
+    await table.sampleMemory();
+    expect(a.session.lifecycle).toBe('exiting');
+    await exitOf(a);
+    expect(a.session.status().exit).toMatchObject({ reason: 'budget' });
   });
 
   it('a row whose lastEventSeq moved since the previous sample is not quiet, so it is not released', async () => {

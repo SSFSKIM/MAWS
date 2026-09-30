@@ -135,6 +135,8 @@ function foldWithLedger(prev: SessionDigest, event: SessionEvent, ledger: CostLe
       return line === null ? d : { ...d, lastAssistantLine: line };
     }
     case 'session.state':
+      // C12: the engine's `idle` follows every result (X6 emits the frames from C12 M5 on), so it keeps a failed turn failed
+      if (event.state === 'idle' && d.phase === 'failed') return d;
       return { ...d, phase: event.state === 'requires_action' ? 'waiting' : event.state === 'running' ? 'working' : 'idle' };
     case 'turn.ended': {
       if (event.isEchoReceipt) return d;

@@ -5,6 +5,7 @@ import { applyStatusToDigest, costLedger, emptyDigest, foldDigest, foldEvents } 
 import { status } from '../../../test/support/builders'; // C12
 import { ev } from '../../../test/support/events';
 import { framesOf, loadJournal } from '../../../test/support/fixtures';
+import { Normalizer } from '../../engine-host/normalizer'; // C12
 
 const APP = 'app-1' as AppSessionId;
 const CHILD = { agentId: 'agent-a', parentToolUseId: 'toolu_parent' };
@@ -55,6 +56,29 @@ describe('digest fold', () => {
     expect(run([ev('turn.started', {}), ev('turn.ended', { isError: true, terminalReason: 'max_turns' })]).phase).toBe('failed');
     expect(run([ev('turn.started', {}), ev('turn.ended', { isError: true, terminalReason: 'aborted_streaming' })]).phase).toBe('idle');
   });
+
+  // C12 start: the engine's state frames, which X6 turns on from C12 M5 (CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS), read
+  // honestly beside the turn's own events (pass3/launch-env-state-events.jsonl: running, requires_action with its
+  // can_use_tool, running, the result, then idle).
+  it('with the recorded state frames, a turn with a permission reads working, waiting, working, then idle, then exited at the end_session', () => {
+    const normalizer = new Normalizer({ appSessionId: APP, launchId: 'LAUNCH01', sessionId: null });
+    const events = loadJournal('pass3', 'launch-env-state-events').flatMap((row) => normalizer.push(row));
+    expect(events.filter((e) => e.kind === 'session.state').map((e) => (e as Extract<SessionEvent, { kind: 'session.state' }>).state)).toEqual(['running', 'requires_action', 'running', 'idle']);
+    const phases: string[] = [];
+    events.reduce((d, e) => {
+      const next = foldDigest(d, e);
+      if (phases.at(-1) !== next.phase) phases.push(next.phase);
+      return next;
+    }, emptyDigest(APP));
+    expect(phases).toEqual(['idle', 'working', 'waiting', 'working', 'idle', 'exited']); // the probe ended the process
+  });
+
+  it("the engine's idle after a failed turn keeps the failure; its running for the next turn clears it", () => {
+    const failed = run([ev('session.state', { state: 'running' }), ev('turn.started', {}), ev('turn.ended', { isError: true, terminalReason: 'max_turns' }), ev('session.state', { state: 'idle' })]);
+    expect(failed.phase).toBe('failed');
+    expect(run([ev('session.state', { state: 'running' })], failed).phase).toBe('working');
+  });
+  // C12 end
 
   it('ends on process exit, failed on a crash', () => {
     expect(run([ev('turn.started', {}), ev('process.exited', { reason: 'quit' })])).toMatchObject({ phase: 'exited', activity: null });
