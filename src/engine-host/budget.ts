@@ -25,7 +25,7 @@ export interface BudgetVerdict {
   totalKiB: number; limitKiB: number; over: boolean; unmeasured: number; // live rows with no sample yet (counted as 0)
   release: AppSessionId | null; // at most one per evaluation; null while `releasing`
   blocked: { appSessionId: AppSessionId; reasons: HardReason[] }[]; // live rows with a hard reason, with why
-  settling: number; // rows with no hard reason that are not yet candidates (engine not idle, not quiet, unmeasured, launching)
+  settling: number; // rows with no hard reason that are not yet candidates (engine running or waiting, not quiet, unmeasured, launching)
   candidates: number;
   overWithoutCandidate: boolean; // over with no candidate now and at the previous sample
 }
@@ -56,6 +56,13 @@ export function hardReasons(s: EngineSessionStatus, stateful: ReadonlySet<string
 // to 7 s, is never counted twice).
 const LIVE: ReadonlySet<EngineSessionStatus['process']> = new Set(['starting', 'initializing', 'ready']);
 
+// An engine state that rules a row out: the engine said it is working or waiting. `unknown` does not, since the pinned
+// engine reports its state (`session_state_changed`) only under CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS, which the
+// product's launch does not set (no fixture carries the frame; M3's live run saw none): a live row reads `unknown` for
+// its whole life. Its turn, work in flight and quiet stand in for the state: an engine's own follow-up turn after its
+// background tasks end moves `lastEventSeq` first and then opens a turn.
+const ENGINE_ACTIVE: ReadonlySet<EngineSessionStatus['engineState']> = new Set(['running', 'requires_action']);
+
 export function evaluate(input: BudgetInput): BudgetVerdict {
   const stateful = new Set(input.policy.statefulMcpServers);
   const live = input.rows.filter((s) => LIVE.has(s.process));
@@ -70,7 +77,7 @@ export function evaluate(input: BudgetInput): BudgetVerdict {
     else totalKiB += tree;
     const reasons = hardReasons(s, stateful);
     if (reasons.length > 0) blocked.push({ appSessionId: s.appSessionId, reasons });
-    else if (s.process === 'ready' && s.engineState === 'idle' && tree !== null && input.quiet.has(s.appSessionId)) candidates.push(s);
+    else if (s.process === 'ready' && !ENGINE_ACTIVE.has(s.engineState) && tree !== null && input.quiet.has(s.appSessionId)) candidates.push(s);
     else settling += 1;
   }
   const over = totalKiB > input.policy.limitKiB;

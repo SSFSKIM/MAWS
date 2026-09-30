@@ -127,7 +127,6 @@ describe('evaluate', () => {
       ['initializing', row('x', { process: 'initializing' })],
       ['engine running', row('x', { engineState: 'running' })],
       ['engine requires_action', row('x', { engineState: 'requires_action' })],
-      ['engine unknown (the window after background_tasks_changed [] before its own follow-up turn)', row('x', { engineState: 'unknown' })],
       ['unmeasured', row('x', { memory: { rssKiB: null, treeRssKiB: null, sampledAt: null } })],
     ];
     for (const [why, s] of notCandidates) {
@@ -135,6 +134,18 @@ describe('evaluate', () => {
     }
     // a row whose lastEventSeq moved since the previous sample is not in `quiet`
     expect(evaluate(input([row('x')], { quiet: new Set() }))).toMatchObject({ candidates: 0, settling: 1, release: null });
+  });
+
+  // The pinned engine emits `session_state_changed` only under CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS, which the
+  // product's launch does not set: no fixture carries the frame, and M3's live run saw none, so a live row's engine
+  // state stays `unknown` for its whole life. Such a row is a candidate once ready, measured, quiet and holding nothing;
+  // an engine's own follow-up turn after its background tasks end moves `lastEventSeq` (so the row is not quiet) and
+  // then opens a turn (a hard reason).
+  it('a ready row whose engine never reported its state (unknown) is a candidate once quiet; the follow-up window is not quiet', () => {
+    const silent = row('x', { engineState: 'unknown' });
+    expect(evaluate(input([silent]))).toMatchObject({ candidates: 1, settling: 0, release: id('x') });
+    expect(evaluate(input([silent], { quiet: new Set() }))).toMatchObject({ candidates: 0, settling: 1, release: null });
+    expect(evaluate(input([row('x', { engineState: 'unknown', turn: { ...TURN, origin: 'engine' } })]))).toMatchObject({ candidates: 0, release: null, blocked: [{ appSessionId: id('x'), reasons: ['turn'] }] });
   });
 
   it('a busy process (a written message not yet started, a ! command pending, a held clear-and-implement) is blocked, never a candidate', () => {
