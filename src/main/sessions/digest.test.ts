@@ -3,6 +3,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionEvent } from '@shared/graph/events';
 import { costLedger, emptyDigest, foldDigest, foldEvents } from './digest';
 import { ev } from '../../../test/support/events';
+import { framesOf, loadJournal } from '../../../test/support/fixtures';
 
 const APP = 'app-1' as AppSessionId;
 const CHILD = { agentId: 'agent-a', parentToolUseId: 'toolu_parent' };
@@ -89,7 +90,33 @@ describe('digest fold', () => {
       totals.push(digest.cost?.totalUsd ?? 0);
     }
     expect(totals).toEqual([0.3, 0.3, 0.35, 0.37]);
-    expect(ledger).toEqual({ finishedUsd: 0.3, runningUsd: 0.07 });
+    expect(ledger).toEqual({ finishedUsd: 0.3, restoredUsd: 0, runningUsd: 0.07, awaitingFirst: false });
+  });
+
+  // Each journal's result totals as the engine reported them, one process per journal, an exit between processes.
+  const processes = (...names: string[]) =>
+    names.map((name) => [
+      ...framesOf(loadJournal(name.includes('/') ? 'pass2' : 'pass1', name.replace(/^pass2\//, '')), 'in')
+        .filter(({ frame }) => (frame as { type?: string }).type === 'result')
+        .flatMap(({ seq, frame }) => [ev('turn.started', {}), ev('turn.ended', { seq, costUsd: (frame as { total_cost_usd: number }).total_cost_usd })]),
+      ev('process.exited', { reason: 'quit' }),
+    ]);
+  const costAfterEach = (batches: SessionEvent[][]) => {
+    const ledger = costLedger(emptyDigest(APP));
+    const seen = new Set<string>();
+    let digest = emptyDigest(APP);
+    return batches.map((batch) => (digest = foldEvents(digest, seen, batch, ledger)).cost?.totalUsd);
+  };
+
+  it('a resumed process’s total continues the restored one, so it replaces the restored part rather than adding to it (resume-fork-*)', () => {
+    // resume-fork-start ends at 0.0266824; its two resumes of the same id report 0.0295122 and 0.0322007, each total
+    // carrying what the processes before it spent (the engine's modelUsage grows 920 → 930 → 940 input tokens)
+    expect(costAfterEach(processes('resume-fork-start', 'resume-fork-no-replay', 'resume-fork-replay'))).toEqual([0.0266824, 0.0295122, 0.0322007].map((usd) => expect.closeTo(usd, 9)));
+  });
+
+  it('a resumed process that restored nothing (pass2/resume-live-second, resumed while its holder still ran) counts from zero', () => {
+    // the holder ends at 0.061483; the resume's first total, 0.0060484, is its own turn alone (modelUsage 2 input tokens)
+    expect(costAfterEach(processes('pass2/resume-live-holder', 'pass2/resume-live-second'))).toEqual([0.061483, 0.061483 + 0.0060484].map((usd) => expect.closeTo(usd, 9)));
   });
 
   it('a synthesised turn end (C4’s backfill, no accounting on disk) leaves the cost alone', () => {
