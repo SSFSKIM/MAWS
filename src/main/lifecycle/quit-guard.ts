@@ -174,10 +174,18 @@ export function installQuitGuard(model: Pick<SessionReadModel, 'midTurnCount' | 
       return;
     }
     let reading = false;
-    let again = false; // something changed while a read was out: that read decides nothing, the next one does
-    const recheck = () => {
+    let again = false; // a status changed while a read was out: that read decides nothing, the next one does
+    // A status change invalidates a read already out; the 2 s poll only starts one when none is (re-review fix: a tick
+    // that invalidated would discard every read slower than the poll, and a wait would never end).
+    const changed = () => {
       if (wait !== mine) return;
       if (reading) return void (again = true);
+      recheck();
+    };
+    const tick = () => {
+      if (wait === mine && !reading) recheck();
+    };
+    const recheck = () => {
       reading = true;
       void report()
         .then((next) => {
@@ -197,8 +205,8 @@ export function installQuitGuard(model: Pick<SessionReadModel, 'midTurnCount' | 
           }
         });
     };
-    const off = model.on('engine', recheck);
-    const timer = setInterval(recheck, deps.pollMs ?? WAIT_POLL_MS);
+    const off = model.on('engine', changed);
+    const timer = setInterval(tick, deps.pollMs ?? WAIT_POLL_MS);
     const mine = { report: first, stop: () => (off(), clearInterval(timer)) };
     wait = mine;
     deps.publish(first);

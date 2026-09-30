@@ -466,6 +466,27 @@ describe('the report is fresh when it decides', () => {
     expect(publish).toHaveBeenLastCalledWith({ midTurn: 1, backgroundWork: 0, busyTerminals: 0, terminalsUnknown: false });
   });
 
+  // re-review fix: the 2 s poll only starts a read when none is out; it never discards one
+  it('slow but successful terminal reads (1.5 s list, 1 s probe) with no status change: the first zero report quits', async () => {
+    vi.useFakeTimers();
+    try {
+      let busy = true;
+      const later = <T>(ms: number, value: () => T) => new Promise<T>((resolve) => setTimeout(() => resolve(value()), ms));
+      const pty = { list: () => later(1_500, () => [{ ptyId: 't', alive: true }]), foreground: () => later(1_000, () => ({ busy })), hostGone: () => false };
+      const publish = vi.fn();
+      guardDeps(modelWith([]), { pty, publish, ask: async () => 'when_idle' });
+      electron.app.attempt();
+      await vi.advanceTimersByTimeAsync(2_500); // the question's read: the terminal is busy
+      expect(publish).toHaveBeenLastCalledWith({ midTurn: 0, backgroundWork: 0, busyTerminals: 1, terminalsUnknown: false });
+      busy = false; // the command ends; nothing else changes
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(electron.app.quits).toBe(1);
+      expect(publish).toHaveBeenLastCalledWith(null);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('a read still out when its wait was cancelled is inert under the next wait', async () => {
     const model = modelWith([status('a')]);
     const d = deferredPty();
