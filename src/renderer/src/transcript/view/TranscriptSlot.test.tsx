@@ -70,7 +70,13 @@ describe('TranscriptSlot', () => {
 
   it('renders the session’s rows from its IPC source, with every registered action reaching the rendered Transcript', async () => {
     const invoke = vi.fn((name: string) =>
-      Promise.resolve(name === 'session.events' ? { ok: true, value: { events: history(), lastSeq: 3, complete: true } } : { ok: false, error: { code: 'internal', message: 'unexpected' } }),
+      Promise.resolve(
+        name === 'session.events'
+          ? { ok: true, value: { events: history(), lastSeq: 3, complete: true } }
+          : name === 'session.appEvents'
+            ? { ok: true, value: { events: [] } }
+            : { ok: false, error: { code: 'internal', message: 'unexpected' } },
+      ),
     );
     (window as { maws?: MawsBridge }).maws = { invoke, on: vi.fn(() => () => {}) } as unknown as MawsBridge;
     render(<TranscriptSlot appSessionId={APP} className="slot" />);
@@ -111,7 +117,7 @@ describe('TranscriptSlot', () => {
     const records = useSessions.getState().records;
     act(() => useSessions.setState({ records: new Map([[id, { directory: '/w/project', worktree: { path: '/w/project-wt', branch: 'wt' } } as unknown as SessionRecord]]) }));
     onTestFinished(() => useSessions.setState({ records }));
-    const invoke = vi.fn(() => Promise.resolve({ ok: true, value: { events: b.events, lastSeq: 3, complete: true } }));
+    const invoke = vi.fn((name: string) => Promise.resolve({ ok: true, value: name === 'session.appEvents' ? { events: [] } : { events: b.events, lastSeq: 3, complete: true } }));
     (window as { maws?: MawsBridge }).maws = { invoke, on: vi.fn(() => () => {}) } as unknown as MawsBridge;
     render(<TranscriptSlot appSessionId={id} />);
     await waitFor(() => expect(useTranscriptStore.getState().entries[id]?.phase).toBe('live'));
@@ -134,7 +140,7 @@ describe('TranscriptSlot', () => {
     onTestFinished(() => useSessions.setState({ records }));
     const invoke = vi.fn((name: string) =>
       Promise.resolve(
-        name === 'session.events' ? { ok: true, value: { events: [], lastSeq: 0, complete: true } } : { ok: true, value: { events, complete: true } },
+        name === 'session.events' || name === 'session.appEvents' ? { ok: true, value: { events: [], lastSeq: 0, complete: true } } : { ok: true, value: { events, complete: true } },
       ),
     );
     (window as { maws?: MawsBridge }).maws = { invoke, on: vi.fn(() => () => {}) } as unknown as MawsBridge;
@@ -151,7 +157,7 @@ describe('TranscriptSlot', () => {
     b.turn('u1', 'Ask me');
     b.toolUse('q1', 'AskUserQuestion', { questions: [] });
     b.emit('question.requested', { requestId: request('r1'), toolUseId: tool('q1'), questions: [] });
-    const invoke = vi.fn(() => Promise.resolve({ ok: true, value: { events: b.events, lastSeq: 3, complete: true } }));
+    const invoke = vi.fn((name: string) => Promise.resolve({ ok: true, value: name === 'session.appEvents' ? { events: [] } : { events: b.events, lastSeq: 3, complete: true } }));
     (window as { maws?: MawsBridge }).maws = { invoke, on: vi.fn(() => () => {}) } as unknown as MawsBridge;
     render(<TranscriptSlot appSessionId={'app-slot-request' as AppSessionId} />);
     const slot = () => document.querySelector<HTMLElement>('[data-kind="request_slot"]');

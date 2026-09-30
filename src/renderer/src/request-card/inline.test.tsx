@@ -56,7 +56,9 @@ beforeEach(() => {
     Promise.resolve(
       name === 'session.events'
         ? { ok: true, value: { events, lastSeq: events.length, complete: true } }
-        : name === 'attention.request'
+        : name === 'session.appEvents'
+          ? { ok: true, value: { events: [] } }
+          : name === 'attention.request'
           ? { ok: true, value: { event: { ...(input.appSessionId === TWIN ? twin : input.requestId === 'r1' ? bash : read), sessionId: events[0].sessionId } } }
           : { ok: false, error: { code: 'internal', message: `unexpected ${name}` } },
     );
