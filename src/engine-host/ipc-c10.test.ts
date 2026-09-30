@@ -1,7 +1,7 @@
 // C10's engine-host commands (C10 execution document, X2 additions): `engine.models` over the catalogue cache and
 // `session.forget`, the whole erase behind delete conversation.
 import { existsSync } from 'node:fs';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -98,6 +98,30 @@ describe('engine.models', () => {
 
     const restarted = engineHost();
     expect(await restarted.call('engine.models', { refresh: false, gateway: 'direct' })).toMatchObject({ source: 'cached', models: expect.arrayContaining([expect.objectContaining({ value: 'claude-fable-5-1[1m]' })]) as unknown });
+  });
+
+  it("keys a launch whose project settings set model env apart from its route, and answers it to a reader naming that directory (debt wave 5)", async () => {
+    const host = engineHost({ captureEnv: () => Promise.resolve({}) });
+    const plain = join(userData, 'plain');
+    const home = join(userData, 'home');
+    await mkdir(join(home, '.claude'), { recursive: true });
+    await writeFile(join(home, '.claude', 'settings.json'), JSON.stringify({ env: { ANTHROPIC_DEFAULT_OPUS_MODEL: 'claude-opus-5-5[1m]' } }));
+    const values = async (input: { refresh: boolean; gateway?: 'gateway' | 'direct'; cwd?: string }) => (await host.call('engine.models', input)).models.map((m) => m.value);
+
+    const routed = 'app-models-routed' as AppSessionId;
+    await host.call('session.launch', { spec: { ...spec(routed, 'spikes/protocol-probe/fixtures/reads.jsonl'), cwd: plain } });
+    await until(() => host.ipc.table.get(routed)?.lifecycle === 'ready', 'ready');
+    for (let i = 0; i < 100 && !(await values({ refresh: false, gateway: 'gateway' })).includes('claude/astra'); i++) await new Promise((r) => setTimeout(r, 5));
+    expect(await values({ refresh: false, gateway: 'gateway', cwd: home })).toContain('claude/astra'); // before the home's own list: its route's
+
+    const atHome = 'app-models-home' as AppSessionId;
+    await host.call('session.launch', { spec: { ...spec(atHome, 'spikes/protocol-probe/fixtures/pass2/auto-unrouted.jsonl'), cwd: home } });
+    await until(() => host.ipc.table.get(atHome)?.lifecycle === 'ready', 'ready');
+    for (let i = 0; i < 100 && (await values({ refresh: false, gateway: 'gateway', cwd: home })).includes('claude/astra'); i++) await new Promise((r) => setTimeout(r, 5));
+    expect(await values({ refresh: false, gateway: 'gateway', cwd: home })).toEqual(['default', 'opus', 'claude-fable-5-1[1m]', 'sonnet', 'haiku']);
+    expect(await values({ refresh: false, gateway: 'gateway' })).toContain('claude/astra'); // the route's list was not overwritten
+    expect(await values({ refresh: false, gateway: 'gateway', cwd: plain })).toContain('claude/astra');
+    await host.ipc.table.shutdown({ graceMs: 0 });
   });
 });
 

@@ -133,7 +133,7 @@ describe('setup intent hook', () => {
     catalogue = CATALOGUE; // a launch filled the host's cache, the relay's aliases included
     const second = renderHook(() => useSetupIntent(ID));
     await waitFor(() => expect(second.result.current!.options.models.map((m) => m.value)).toEqual(['default', 'haiku', 'claude/astra']));
-    expect(fake.invoked('engine.models')).toEqual([{ refresh: false, gateway: 'gateway' }, { refresh: false, gateway: 'gateway' }]);
+    expect(fake.invoked('engine.models')).toEqual([{ refresh: false, gateway: 'gateway', cwd: REPO }, { refresh: false, gateway: 'gateway', cwd: REPO }]);
   });
 
   // Debt wave 4: the host keeps one catalogue per route; the tab asks for its own route's, and again when it switches
@@ -151,8 +151,8 @@ describe('setup intent hook', () => {
     act(() => putIntent(intent({ gateway: 'gateway', model: 'claude/astra' })));
     await act(async () => {});
     expect(fake.invoked('engine.models'), 'a patch that keeps the route reads nothing').toEqual([
-      { refresh: false, gateway: 'direct' },
-      { refresh: false, gateway: 'gateway' },
+      { refresh: false, gateway: 'direct', cwd: REPO },
+      { refresh: false, gateway: 'gateway', cwd: REPO },
     ]);
   });
 
@@ -183,7 +183,7 @@ describe('setup intent hook', () => {
     expect(fake.invoked('engine.models'), 'a started session’s composer asks nothing').toEqual([]);
     act(() => putIntent(intent()));
     await waitFor(() => expect(result.current!.options.models.map((m) => m.value)).toEqual(['default', 'haiku', 'claude/astra']));
-    expect(fake.invoked('engine.models')).toEqual([{ refresh: false, gateway: 'gateway' }]);
+    expect(fake.invoked('engine.models')).toEqual([{ refresh: false, gateway: 'gateway', cwd: REPO }]);
   });
 
   it('notes a model that cannot hold auto mode, and a gateway model’s local auto lane', async () => {

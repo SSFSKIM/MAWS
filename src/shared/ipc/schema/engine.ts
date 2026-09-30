@@ -34,9 +34,10 @@ export const C3_ENGINE_EVENTS: string[] = []; // the engine host's events are pe
 
 // C10 start: the model catalogue before any session exists (C10 execution document, X2 additions; Interfaces
 // "Catalogue cache"). Owner engine-host: `refresh` asks the most recently launched ready session's `list_models`;
-// `gateway` (debt wave 3, optional) names the route the caller will launch under, whose catalogue is answered.
+// `gateway` (debt wave 3, optional) names the route the caller will launch under, whose catalogue is answered; `cwd`
+// (debt wave 5, optional, read only with `gateway`) the directory, whose settings may set a model environment of its own.
 const c10Commands = {
-  'engine.models': { input: z.strictObject({ refresh: z.boolean(), gateway: z.enum(['gateway', 'direct']).optional() }), output: ModelCatalogueSchema, owner: 'engine-host' },
+  'engine.models': { input: z.strictObject({ refresh: z.boolean(), gateway: z.enum(['gateway', 'direct']).optional(), cwd: AbsolutePathSchema.optional() }), output: ModelCatalogueSchema, owner: 'engine-host' },
 } as const;
 // C10 end
 // C11 start: the host's binary configuration (C11 execution document, Interfaces "X2 additions"; C3's BinaryConfig in

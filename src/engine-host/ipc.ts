@@ -38,7 +38,7 @@ import type { SessionEvent } from '@shared/graph/events';
 // C4 end
 // C10 start
 import type { ModelCatalogue } from '@shared/sessions/models';
-import { ModelsCache, modelsKey } from './models-cache';
+import { catalogueKey, ModelsCache, modelsKey } from './models-cache';
 // C10 end
 
 export type DeadlineShape = 'immediate' | 'bounded' | 'operation';
@@ -117,14 +117,15 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
   const operations = new OperationTable((event) => emit('session.operation', event));
   const binaryProbe = deps.binaryProbe ?? createBinaryProbe();
   const relayCheck = deps.checkRelay ?? ((force: boolean) => checkRelayHealth(RELAY_URL, undefined, { force }));
+  const captureEnv = deps.captureEnv ?? (() => captureShellEnvironment());
   // C10 start: the model catalogue, updated from every initialize response and every list_models answer, each under
-  // its launch's key (binary version and route: debt wave 3)
+  // its launch's key (binary version and route: debt wave 3; and the model environment its settings set: debt wave 5)
   const models = new ModelsCache(deps.userData, { warn: log });
   const modelsLoaded = models.load();
-  const modelKeys = new Map<AppSessionId, string>();
+  const modelKeys = new Map<AppSessionId, Promise<string>>();
   const updateModels = (id: AppSessionId, list: readonly unknown[]) => {
     const key = modelKeys.get(id);
-    if (key !== undefined) void modelsLoaded.then(() => models.update(key, list));
+    if (key !== undefined) void Promise.all([key, modelsLoaded]).then(([resolved]) => models.update(resolved, list));
   };
   // C10 end
 
@@ -136,7 +137,7 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
     store,
     binaryProbe,
     checkRelay: relayCheck,
-    captureEnv: deps.captureEnv ?? (() => captureShellEnvironment()),
+    captureEnv,
     spawn: deps.spawn ?? ((plan) => spawnEngine(plan, { maxLineChars: MAX_LINE_CHARS })),
     appVersion: deps.appVersion ?? 'unknown',
     log,
@@ -153,7 +154,7 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
       session.on('queue', (queue) => stream.queue(queue));
       session.on('brokerItems', (items) => stream.brokerItems(items));
       session.on('catalog', (catalog) => stream.catalog(catalog)); // C7: session.catalogChanged
-      modelKeys.set(spec.appSessionId, modelsKey(plan.engineVersion, plan.gateway)); // C10
+      modelKeys.set(spec.appSessionId, catalogueKey(plan.engineVersion, plan.gateway, { env: plan.env, cwd: plan.cwd, flagEnv: plan.flagSettings.env })); // C10; never rejects
       session.on('models', (list) => updateModels(spec.appSessionId, list)); // C10
     },
   });
@@ -396,29 +397,33 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
   const handleC10 = <N extends C10Command>(name: N, handler: (input: CommandInput<N>) => Promise<CommandOutput<N>>) => on(name, handler);
 
   // The catalogue before any session exists, for the route the caller names (the launch's binary version and that
-  // route key the cache; with no route, the most recent catalogue of any): with `refresh`, the most recently launched
-  // ready session's list_models among that route's (a failure falls back to what is cached, logged); otherwise the
-  // cache, else the built-in list. Bounded: its one control round trip runs under `bounded`.
-  handleC10('engine.models', async ({ refresh, gateway }): Promise<ModelCatalogue> => {
+  // route key the cache; with no route, the most recent catalogue of any) and, when it names one, the directory it
+  // would launch in (whose settings may key it apart, debt wave 5; before that key's first list, the route's): with
+  // `refresh`, the most recently launched ready session's list_models among that key's (a failure falls back to what
+  // is cached, logged); otherwise the cache, else the built-in list. Bounded: its one control round trip runs under
+  // `bounded`.
+  handleC10('engine.models', async ({ refresh, gateway, cwd }): Promise<ModelCatalogue> => {
     await modelsLoaded;
-    const key = gateway === undefined ? undefined : modelsKey(getBinaryConfig().expectedVersion, gateway);
-    const asked = refresh
-      ? table
-          .list()
-          .filter((session) => session.lifecycle === 'ready' && session.control && (key === undefined || modelKeys.get(session.status().appSessionId) === key))
-          .sort((a, b) => b.status().launchedAt.localeCompare(a.status().launchedAt))[0]
-      : undefined;
-    if (asked?.control) {
-      const askedKey = modelKeys.get(asked.status().appSessionId)!;
+    const route = gateway === undefined ? undefined : modelsKey(getBinaryConfig().expectedVersion, gateway);
+    const key = gateway === undefined || cwd === undefined ? route : await catalogueKey(getBinaryConfig().expectedVersion, gateway, { env: await captureEnv(), cwd });
+    const ready = await Promise.all(
+      table
+        .list()
+        .filter((session) => refresh && session.lifecycle === 'ready' && session.control)
+        .map(async (session) => ({ session, key: await modelKeys.get(session.status().appSessionId) })),
+    );
+    const asked = ready.filter((candidate) => candidate.key !== undefined && (key === undefined || candidate.key === key)).sort((a, b) => b.session.status().launchedAt.localeCompare(a.session.status().launchedAt))[0];
+    if (asked?.session.control) {
+      const askedKey = asked.key!;
       try {
-        const answer = await bounded(() => controls.listModels(asked.control!, {}));
+        const answer = await bounded(() => controls.listModels(asked.session.control!, {}));
         await models.update(askedKey, answer.models);
         return { ...models.answer(askedKey), source: 'live' };
       } catch (error) {
         log(`engine.models: list_models failed (${error instanceof Error ? error.message : String(error)}); answering the cache`);
       }
     }
-    return models.answer(key);
+    return models.answer(key, route);
   });
 
   // The whole erase behind delete conversation: the state file and the journal directory, then `session.forgotten` so

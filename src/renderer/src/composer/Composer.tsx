@@ -145,7 +145,7 @@ function useDraftPort(appSessionId: AppSessionId, hook: SetupIntentHook | null, 
 // first render), and the branch list for the location popover.
 function useLiveReads(appSessionId: AppSessionId, want: { models: boolean; rules: boolean }, directory: string | null, git: { branch: string | null } | null, route: Route | null, ready: boolean) {
   const models = useListModels(appSessionId, want.models);
-  const modelNames = useModelCatalogue(route, ready);
+  const modelNames = useModelCatalogue(route, ready, directory);
   const rules = useCommand('session.listPermissionRules', { appSessionId }, { enabled: want.rules, staleTime: 10_000 });
   const branches = useCommand('git.branches', { directory: directory ?? '' }, { enabled: want.rules && directory !== null && git !== null, staleTime: 30_000 });
   return {
