@@ -40,6 +40,18 @@ import { useSetupIntent } from './sessions/useSetupIntent';
 import { connectAgentWorkEvents } from './ipc/events';
 import { agentsDevSurface, agentTranscriptActions, registerAgentTools } from './tools/agents';
 // C8b end
+// C11 start
+import { registerGatewayActions } from './gateway/actions';
+import { connectDirectLogin } from './gateway/direct-login';
+import { startRelayMonitor } from './gateway/relay-monitor';
+import { GatewayDialogs } from './gateway/SwitchSheet';
+import { UsageFooter } from './gateway/UsageFooter';
+import { registerUsagePopoverFooter } from './statusline';
+import { sessionInfoTool } from './tools/session-info';
+import { registerAllWidgets } from './widgets';
+import { registerAccountsTab } from './accounts';
+import { connectMonoFont, registerSettingsTab } from './settings-tab';
+// C11 end
 
 // C10 start: C7's composer binds an unstarted session's chips and Send through C10's hook; registered at module load,
 // before any composer renders, so the function the composer calls as a hook is fixed for the page's life (C7's rule)
@@ -106,6 +118,25 @@ export function App() {
     if (import.meta.env.DEV) window.__maws_agents = agentsDevSurface();
   }, []);
   // C8b end
+  // C11 start: Settings…, Accounts and Open ClaudeUsage in the action table; the relay monitor's app-wide banner while a
+  // routed session is live; a widget for every name of the slash palette
+  useEffect(() => registerGatewayActions(), []);
+  useEffect(() => startRelayMonitor(), []);
+  useEffect(() => registerAllWidgets(), []);
+  // M4: the routing footer in C7's usage popover, and a Direct session's login from every get_status answer
+  useEffect(() => registerUsagePopoverFooter(UsageFooter), []);
+  useEffect(() => connectDirectLogin(queryClient), []);
+  // Session info in the panel's "+" menu, registered once and never unregistered, as C8a's block does
+  useEffect(() => {
+    registerPanelTool(sessionInfoTool);
+  }, []);
+  // M5: the Accounts and Settings tabs in C5's slots, and appearance.monoFont as the root --font-mono override
+  useEffect(() => {
+    registerAccountsTab();
+    registerSettingsTab();
+  }, []);
+  useEffect(() => connectMonoFont(), []);
+  // C11 end
 
   // index.html ships data-theme="light" for the first paint; from then on main's resolved theme decides.
   useEffect(() => {
@@ -121,6 +152,9 @@ export function App() {
       {/* C10 start: the small sheets (rename, fork, archive, delete, cleanup, archived sessions) */}
       <SessionDialogs />
       {/* C10 end */}
+      {/* C11 start: the route switch's confirm and pickDirectModel's dialog */}
+      <GatewayDialogs />
+      {/* C11 end */}
     </QueryClientProvider>
   );
 }

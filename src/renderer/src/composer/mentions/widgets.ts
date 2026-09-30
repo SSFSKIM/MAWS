@@ -33,6 +33,11 @@ export type WidgetCommandName = (typeof WIDGET_COMMANDS)[number]['name'];
 export interface SlashWidget {
   title: string;
   component: ComponentType<{ appSessionId: AppSessionId; args: string; close(): void }>;
+  // C11 start: a typed `/<name> <args>` whose argument the widget resolves fully is applied through the widget's own
+  // control path with no widget shown (the architect's correction of 2026-09-29); resolves false to open it instead.
+  // `tooLate` aborts once the editor stopped waiting and opened the widget: nothing may be applied after it.
+  apply?: (appSessionId: AppSessionId, args: string, tooLate: AbortSignal) => Promise<boolean>;
+  // C11 end
 }
 
 const widgets = new Map<string, SlashWidget>();

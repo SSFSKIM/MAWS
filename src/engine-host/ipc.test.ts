@@ -20,6 +20,10 @@ import { REQUEST_TIMEOUT_MS } from './controls';
 import { bounded, DEADLINE_SHAPES, PRE_SPAWN_BOUND_MS, registerEngineIpc, type EngineIpcDeps } from './ipc';
 import { MemoryAppendBudgetSpent } from './memory-append';
 import { ENGINE_BIN, ENGINE_VERSION, RELAY_URL } from './launch';
+// C11 start
+import { createBinaryProbe } from './binary-info';
+import { getBinaryConfig, setBinaryConfig, type LaunchPlan } from './launch';
+// C11 end
 import { LADDER_MS } from './session';
 import { FileSessionStateStore } from './store/file-session-state-store';
 import { MemorySessionStateStore } from './store/memory-session-state-store';
@@ -466,3 +470,62 @@ describe('catalog answers and publishes from handshake state through the host (C
   });
 });
 // C7 end
+
+// C11 start: the host's binary configuration through `engine.configure` (C11 execution document, M1; C3's BinaryConfig)
+describe('engine.configure answers binaryInfo and buildLaunch uses the configured path', () => {
+  const CONFIGURED = '/opt/maws-test/claude-2.1.283';
+  // The real probe over a fake file system: only ENGINE_BIN and CONFIGURED exist, and both print the pinned version.
+  const probe = () =>
+    createBinaryProbe({
+      access: async (path) => {
+        if (path !== ENGINE_BIN && path !== CONFIGURED) throw new Error('ENOENT');
+      },
+      run: async () => `${ENGINE_VERSION} (Claude Code)\n`,
+    });
+  afterEach(() => setBinaryConfig({ binaryPath: null, expectedVersion: ENGINE_VERSION })); // the host's configuration is module state
+
+  it('a missing path answers ok: false with the missing-binary error, and the next launch is refused binary_missing', async () => {
+    const spawn = vi.fn();
+    const host = engineHost({ spawn, binaryProbe: probe(), checkRelay: async () => OK_RELAY, captureEnv: async () => ({ PATH: '/usr/bin' }) });
+    const info = await host.call('engine.configure', { binaryPath: '/nonexistent', expectedVersion: ENGINE_VERSION });
+    expect(info).toEqual({ path: '/nonexistent', expectedVersion: ENGINE_VERSION, version: null, ok: false, error: expect.stringContaining('no executable engine binary at /nonexistent') });
+    expect(await host.call('engine.binaryInfo', undefined)).toEqual(info);
+    expect(await host.call('session.launch', { spec: spec() })).toEqual({ status: 'refused', reason: 'binary_missing', message: expect.stringContaining('/nonexistent') });
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it('null restores the default binary and answers its version; a version other than the pin is binary_version', async () => {
+    const host = engineHost({ binaryProbe: probe() });
+    await host.call('engine.configure', { binaryPath: '/nonexistent', expectedVersion: ENGINE_VERSION });
+    expect(await host.call('engine.configure', { binaryPath: null, expectedVersion: ENGINE_VERSION })).toEqual({ path: ENGINE_BIN, expectedVersion: ENGINE_VERSION, version: ENGINE_VERSION, ok: true, error: null });
+    expect(await host.call('engine.configure', { binaryPath: null, expectedVersion: '2.1.300' })).toMatchObject({ path: ENGINE_BIN, version: ENGINE_VERSION, ok: false, error: expect.stringContaining('MAWS expects 2.1.300') });
+    expect(getBinaryConfig()).toEqual({ binaryPath: null, expectedVersion: '2.1.300' });
+  });
+
+  it('a configured path is the bin of the next launch plan; an unconfigured host launches ENGINE_BIN as before', async () => {
+    const plans: LaunchPlan[] = [];
+    let transport: ScriptedTransport;
+    const spawn = (plan: LaunchPlan) => {
+      plans.push(plan);
+      return transport;
+    };
+    const host = engineHost({ spawn, binaryProbe: probe(), checkRelay: async () => OK_RELAY, captureEnv: async () => ({ PATH: '/usr/bin' }) });
+    const run = async (appSessionId: string) => {
+      transport = scriptedTransport({ onWrite: autoResponder(handshakeResponder()) });
+      expect(await host.call('session.launch', { spec: spec({ appSessionId: appSessionId as AppSessionId, gateway: 'direct' }) })).toMatchObject({ status: 'launching' });
+      transport.exit(0);
+      await host.ipc.table.get(appSessionId as AppSessionId)!.exited;
+    };
+    await run('app-default');
+    expect(await host.call('engine.configure', { binaryPath: CONFIGURED, expectedVersion: ENGINE_VERSION })).toMatchObject({ path: CONFIGURED, ok: true });
+    await run('app-configured');
+    expect(plans.map((p) => [p.bin, p.engineVersion])).toEqual([[ENGINE_BIN, ENGINE_VERSION], [CONFIGURED, ENGINE_VERSION]]);
+  });
+
+  it('refuses a relative path as invalid_input (the validator refuses it first) before touching the configuration', async () => {
+    const host = engineHost({ binaryProbe: probe() });
+    await expect(host.handlers.get('engine.configure')!({ binaryPath: 'claude', expectedVersion: ENGINE_VERSION })).rejects.toMatchObject({ ipcError: { code: 'invalid_input' } });
+    expect(getBinaryConfig()).toEqual({ binaryPath: null, expectedVersion: ENGINE_VERSION });
+  });
+});
+// C11 end

@@ -85,6 +85,13 @@ export class ClaudeUsageReader {
     return snapshot;
   }
 
+  // C11 start: whether ClaudeUsage's files are there (settings.claudeUsage.status's dataDirPresent): the last read, or one
+  // read if none has run; never a caller of settings.usage, so the ids it named and what it was last sent stay as they are
+  async available(): Promise<boolean> {
+    return (this.last ?? (await this.read())).available;
+  }
+  // C11 end
+
   // Re-reads the files and emits when the snapshot differs from the last one published (the read time aside).
   async refresh(): Promise<void> {
     const snapshot = this.compose(await this.read());

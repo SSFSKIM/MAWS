@@ -18,6 +18,14 @@ import { registerMessageReturn } from './message-return';
 import { resumeSession, startIntent } from './setup-actions';
 import { connectSetup, useSetup } from './store';
 import { TrustCard } from './TrustCard';
+// C11 start
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { BUILTIN_MODELS } from '@shared/sessions/models';
+import { SETTINGS_DEFAULTS_V3 } from '@shared/settings/defaults';
+import { GatewayDialogs } from '../gateway/SwitchSheet';
+import { registerAction } from '../keymap/actions-runtime';
+import { useSettings } from '../stores/settings';
+// C11 end
 
 let fake: FakeClient;
 let returned: unknown[];
@@ -210,6 +218,76 @@ describe('relay card', () => {
     expect(direct.getAttribute('title')).toBe('Pick a Claude model first');
   });
 });
+
+// C11 start: the docked card as C11 feeds it (C11's Asks of C10 (2) and (7)): the policy from settings v3, the hand-off
+// action once registered, and Run direct on a gateway model asking for a Claude model first.
+describe('relay card, with C11', () => {
+  let relayUp = false;
+  const docked = async (over: Parameters<typeof intent>[0] = {}) => {
+    relayUp = false;
+    withMain({
+      'session.start': answer({ status: 'relay_unreachable', appSessionId: ID, health: health() }),
+      'engine.relayHealth': () => health({ ok: relayUp, status: relayUp ? 200 : null, error: relayUp ? null : 'timed out' }),
+      'session.intent.patch': (input: unknown) => ({ ...intent(over), ...(input as { patch: object }).patch }),
+      'engine.models': { models: [...BUILTIN_MODELS], source: 'builtin', at: null },
+    });
+    putIntent(intent({ message: MESSAGE, ...over }));
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <Docked />
+        <GatewayDialogs />
+      </QueryClientProvider>,
+    );
+    await act(() => startIntent(ID, MESSAGE));
+    return within(await screen.findByTestId('docked'));
+  };
+  afterEach(() => useSettings.setState({ state: null }));
+
+  it("settings' relayUnreachable 'wait' makes Open ClaudeUsage, then start the primary, and it runs C11's hand-off", async () => {
+    useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V3, gateway: { ...SETTINGS_DEFAULTS_V3.gateway, relayUnreachable: 'wait' } }, resolvedTheme: 'light' } as never });
+    const handOff = vi.fn();
+    const off = registerAction('gateway.openClaudeUsage', handOff);
+    const card = await docked();
+    const [primary] = card.getAllByRole('button');
+    expect(primary!.textContent).toBe('Open ClaudeUsage, then start');
+    expect(card.getByText(/Waiting for the relay/)).toBeTruthy();
+    await userEvent.click(primary!);
+    expect(handOff).toHaveBeenCalledTimes(1);
+    off();
+  });
+
+  it('on a gateway model Run direct asks for a Claude model, patches the intent with it, then starts direct', async () => {
+    const card = await docked({ model: 'claude/astra' });
+    const direct = card.getByRole('button', { name: 'Run direct' });
+    expect(direct.hasAttribute('disabled')).toBe(false);
+    await userEvent.click(direct);
+    const pick = await screen.findByRole('dialog', { name: 'Choose a Claude model' });
+    await userEvent.click(await within(pick).findByRole('radio', { name: /^Sonnet/ }));
+    await userEvent.click(within(pick).getByRole('button', { name: 'Use this model' }));
+    await waitFor(() => expect(fake.invoked('session.start').at(-1)).toEqual({ appSessionId: ID, message: null, options: { gateway: 'direct' } }));
+    expect(fake.invoked('session.intent.patch').at(-1)).toEqual({ appSessionId: ID, patch: { model: 'sonnet' } });
+  });
+
+  it('while the Claude-model pick is open the card stops polling, so a recovering relay starts nothing under it', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const card = await docked({ model: 'claude/astra' });
+      await userEvent.click(card.getByRole('button', { name: 'Run direct' }));
+      const pick = await screen.findByRole('dialog', { name: 'Choose a Claude model' });
+      relayUp = true;
+      const polls = fake.invoked('engine.relayHealth').length;
+      await act(() => vi.advanceTimersByTimeAsync(12_000));
+      expect(fake.invoked('engine.relayHealth').length, 'no poll while the pick is open').toBe(polls);
+      expect(fake.invoked('session.start').map((i) => (i as { options: unknown }).options)).toEqual([{}]); // only the first send's
+      await userEvent.click(within(pick).getByRole('button', { name: 'Cancel' }));
+      await act(() => vi.advanceTimersByTimeAsync(5_000));
+      await waitFor(() => expect(fake.invoked('session.start').at(-1)).toEqual({ appSessionId: ID, message: null, options: { gateway: 'gateway' } })); // the poll is back
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+// C11 end
 
 describe('failure card', () => {
   const failed = (over: Parameters<typeof resources>[0] = {}) => ({ message: 'launch refused: replay_disabled', resources: resources(over) });

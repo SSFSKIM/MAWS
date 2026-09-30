@@ -32,7 +32,7 @@ vi.mock('electron', () => {
   };
 });
 vi.mock('./hosts', () => ({ createHosts: () => fake.hosts }));
-vi.mock('./ipc/router', () => ({ installRouter: vi.fn(), registerMainHandler: vi.fn() /* C3 */ }));
+vi.mock('./ipc/router', () => ({ installRouter: vi.fn(), registerMainHandler: vi.fn() /* C3 */, interceptCommand: vi.fn(), CommandFailure: Error /* C11 */ }));
 // C3 start: main's attention service and its store, started from index.ts, are replaced like the other wired modules
 vi.mock('./attention/service', () => ({ startAttentionService: vi.fn() }));
 vi.mock('./attention/file-attention-store', () => ({ FileAttentionStore: vi.fn() }));
@@ -71,6 +71,10 @@ vi.mock('@shared/host/shell-env', () => ({ captureShellEnvironment: () => Promis
 vi.mock('./sessions/service', () => ({ SessionService: class { start = async () => void (c10.started += 1); } }));
 vi.mock('./sessions/service-register', () => ({ registerSessionServiceHandlers: vi.fn(), engineHostSettled: vi.fn() }));
 // C10 end
+// C11 start: the engine host's binary configuration follows the settings, which this test replaces
+vi.mock('./settings/engine-configure', () => ({ startEngineConfigure: () => () => {} }));
+vi.mock('./widgets/fixture-backend', () => ({ installWidgetBackend: () => null })); // the widget e2e's stand-in, off here
+// C11 end
 
 beforeAll(async () => {
   await import('./index');

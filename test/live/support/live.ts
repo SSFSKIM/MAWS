@@ -19,6 +19,7 @@ import { buildLaunch, ENGINE_BIN, ENGINE_VERSION, RELAY_URL, spawnMeta, type Lau
 import { checkRelay } from '../../../src/engine-host/relay-health';
 import { MAX_LINE_CHARS, spawnEngine, type EngineTransport } from '../../../src/engine-host/transport';
 
+// The engine's cap is cumulative for the conversation (a resumed session's restored cost counts toward it; C11 M6).
 export const LIVE_MAX_BUDGET_USD = 0.5;
 export const LIVE_APP_VERSION = '0.0.0-live';
 

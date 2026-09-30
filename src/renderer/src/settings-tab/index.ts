@@ -1,0 +1,11 @@
+// The Settings tab's registration into C5's slot (C11 execution document, Repository map; Ask of C5 (1)), and the root
+// `--font-mono` override that follows `appearance.monoFont` app-wide.
+import { registerSlot } from '../app/slots';
+import { SettingsView } from './SettingsView';
+
+export { SettingsView } from './SettingsView';
+export { connectMonoFont } from './mono-font';
+
+export function registerSettingsTab(): void {
+  registerSlot('settingsTab', SettingsView);
+}

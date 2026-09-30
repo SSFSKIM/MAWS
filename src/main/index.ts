@@ -52,6 +52,19 @@ import { openDialogFor } from './files/e2e-pick';
 import { SessionService } from './sessions/service';
 import { engineHostSettled, registerSessionServiceHandlers } from './sessions/service-register';
 // C10 end
+// C11 start
+// (electron's `shell` comes with C8c's imports above, `onEmitted` with C7's)
+import type { CommandResult } from '@shared/ipc/schema';
+import { saveTextFile } from './files/save-text';
+import { captureChords } from './settings/capture-chords';
+import { createClaudeUsageApp, execRunner } from './gateway/claude-usage-app';
+import { startEngineConfigure } from './settings/engine-configure';
+import { revealPath } from './settings/reveal';
+import { sessionSettingsOf } from './settings/session-settings';
+import { knownSessionDirectories } from './settings/session-directories';
+import { CommandFailure, interceptCommand } from './ipc/router';
+import { installWidgetBackend } from './widgets/fixture-backend';
+// C11 end
 
 // A fresh profile for the end-to-end smoke (and anyone else who wants one); must be set before the app is ready.
 if (process.env.MAWS_USER_DATA) app.setPath('userData', process.env.MAWS_USER_DATA);
@@ -212,10 +225,52 @@ app.whenReady().then(() => {
     trash: trashFor(process.env, (path) => shell.trashItem(path)), // the e2e seam (MAWS_E2E_TRASH_DIR) or the Trash
     reveal: (path) => shell.showItemInFolder(path),
     replay: ReplaySeam.fromEnv(process.env, process.cwd()), // the e2e seam (MAWS_E2E_REPLAY_FIXTURES)
+    settings: () => sessionSettingsOf(settings.state().settings), // C11: the route, the relay policy and the subagent model from settings v3
   });
   registerSessionServiceHandlers(sessionService);
   sessionService.start().catch((error: unknown) => console.error('[sessions] the session service failed to start:', error));
   // C10 end
+
+  // C11 start: the plumbing of settings v3 (C11 execution document, M1). The engine host's binary configuration follows
+  // settings.engine; ClaudeUsage's hand-off and status; the reveal guard; the export's Save as….
+  const stopEngineConfigure = startEngineConfigure({
+    settings: () => settings.state().settings,
+    onSettingsChanged: (listener) => onEmitted('settings.changed', (state) => listener(state.settings)),
+    hostState: () => hosts.snapshot('engine-host'),
+    onHostState: (listener) => hosts.onState('engine-host', listener),
+    dispatch: (config) => hosts.dispatch('engine-host', 'engine.configure', config) as Promise<CommandResult<'engine.configure'>>,
+  });
+  app.on('will-quit', stopEngineConfigure);
+  // Under the end-to-end harness nothing may activate the owner's ClaudeUsage: `open` answers as if it had.
+  const e2e = process.env.MAWS_E2E === '1';
+  const claudeUsage = createClaudeUsageApp({
+    run: (file, args, timeoutMs) => (e2e && file === '/usr/bin/open' ? Promise.resolve({ stdout: '' }) : execRunner(file, args, timeoutMs)),
+    relayRunning: async () => {
+      const health = await hosts.dispatch('engine-host', 'engine.relayHealth', { force: true });
+      return health.ok && (health.value as { ok: boolean }).ok;
+    },
+    dataDirPresent: () => usage.available(), // not usage.snapshot, which would replace the ids settings.usage last named
+  });
+  registerMainHandler('settings.claudeUsage.status', () => claudeUsage.status());
+  registerMainHandler('settings.claudeUsage.open', (intent) => claudeUsage.open(intent));
+  const sessionDirectories = () => knownSessionDirectories(sessions.model, index);
+  registerMainHandler('settings.reveal', ({ path }) =>
+    revealPath(path, { configHome: () => claudeConfigDir(process.env, home), sessionDirectories, showItemInFolder: (p) => shell.showItemInFolder(p) }),
+  );
+  registerMainHandler('layout.captureChords', captureChords); // the Settings tab's chord capture sets the menu aside (M5 fix wave)
+  registerMainHandler('layout.saveTextFile', (input, { sender }) =>
+    saveTextFile(input, {
+      downloads: app.getPath('downloads'),
+      showSaveDialog: (options) => {
+        const win = BrowserWindow.fromWebContents(sender);
+        return win ? dialog.showSaveDialog(win, options) : dialog.showSaveDialog(options);
+      },
+    }),
+  );
+  // The widget e2e's engine stand-in: under MAWS_WIDGET_BACKEND=fixtures in launch mode scenario only (M2).
+  const stopWidgetBackend = installWidgetBackend({ env: process.env, packaged: app.isPackaged, appRoot: process.cwd(), intercept: interceptCommand, emit, fail: (error) => new CommandFailure(error) });
+  if (stopWidgetBackend) app.on('will-quit', stopWidgetBackend);
+  // C11 end
 
   // The hosts belong to the app, not to a window or a page (§4.1): they start here, before any window exists, and
   // `start()` is idempotent, so opening a window again forks nothing and a reload never reaches them.

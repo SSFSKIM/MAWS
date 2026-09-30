@@ -30,6 +30,7 @@ const electron = vi.hoisted(() => {
     pid: number | undefined = undefined;
     hello: { message: unknown; port: FakePort } | null = null;
     killed = false;
+    relayOverride: string | undefined = undefined; // C11
     private handlers = new Map<string, ((...args: unknown[]) => void)[]>();
     stdout = null;
     stderr = null;
@@ -63,13 +64,16 @@ const electron = vi.hoisted(() => {
     }
   }
   const forks: FakeChild[] = [];
-  return { FakePort, FakeChild, forks };
+  const app = { isPackaged: false }; // C11: the relay override's packaged-mode pin
+  return { FakePort, FakeChild, forks, app };
 });
 
 vi.mock('electron', () => ({
+  app: electron.app, // C11
   utilityProcess: {
     fork: (modulePath: string, args: string[], options: Record<string, unknown>) => {
       const child = new electron.FakeChild(modulePath, args, options);
+      child.relayOverride = process.env.MAWS_RELAY_URL; // C11: what the forked host inherits
       electron.forks.push(child);
       return child;
     },
@@ -391,4 +395,27 @@ describe('host supervisor', () => {
       error: { code: 'host_unavailable' },
     });
   });
+
+  // C11 start: the dev-only MAWS_RELAY_URL (C11 M6, ruled 2026-09-29) never reaches a packaged app's engine host.
+  describe('the dev-only relay override', () => {
+    afterEach(() => {
+      delete process.env.MAWS_RELAY_URL;
+      electron.app.isPackaged = false;
+    });
+
+    it('a packaged app drops MAWS_RELAY_URL from the environment its hosts inherit', async () => {
+      process.env.MAWS_RELAY_URL = 'http://127.0.0.1:18641';
+      electron.app.isPackaged = true;
+      void supervisor.start();
+      expect(latest('maws-engine-host').relayOverride).toBeUndefined();
+      expect(process.env.MAWS_RELAY_URL).toBeUndefined();
+    });
+
+    it('a dev build passes it through', async () => {
+      process.env.MAWS_RELAY_URL = 'http://127.0.0.1:18641';
+      void supervisor.start();
+      expect(latest('maws-engine-host').relayOverride).toBe('http://127.0.0.1:18641');
+    });
+  });
+  // C11 end
 });

@@ -3,7 +3,7 @@
 // restarts a host that dies unexpectedly, and answers for a host's state itself, so a crashed host still reports.
 // Hosts are app-scoped: nothing here knows about windows or pages, so a renderer reload never touches them.
 import { createInterface } from 'node:readline';
-import { MessageChannelMain, utilityProcess, type MessagePortMain, type UtilityProcess } from 'electron';
+import { app, MessageChannelMain, utilityProcess, type MessagePortMain, type UtilityProcess } from 'electron';
 import { ipcError } from '@shared/ipc/errors';
 import { HostToMainSchema, type HostMessage, type HostResponse } from '@shared/ipc/host-protocol';
 import type { CommandName, CommandResult, EventName, EventPayload, HostState, PtyId } from '@shared/ipc/schema';
@@ -102,6 +102,7 @@ export function createHostSupervisor({ hosts: specs, emit }: HostSupervisorOptio
   function launch(host: Host): void {
     const { port1, port2 } = new MessageChannelMain();
     let child: UtilityProcess;
+    if (app.isPackaged) delete process.env.MAWS_RELAY_URL; // C11: the dev-only relay override (M6) never reaches a packaged host
     try {
       child = utilityProcess.fork(host.spec.modulePath, [], { serviceName: host.spec.serviceName, stdio: 'pipe' });
     } catch (error) {

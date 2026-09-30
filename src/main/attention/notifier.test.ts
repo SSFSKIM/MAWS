@@ -3,6 +3,7 @@ import type { AttentionItem } from '@shared/graph/attention';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { Settings } from '@shared/ipc/schema';
 import { item, project, record } from '../../../test/support/builders';
+import { SETTINGS_DEFAULTS_V3 } from '@shared/settings/defaults';
 
 // A stand-in for Electron's Notification: records every instance, and lets a test fire its events.
 const electron = vi.hoisted(() => {
@@ -41,7 +42,7 @@ type Writer = import('../sessions/read-model').ReadModelWriter;
 const CHARTER = 'app-charter' as AppSessionId;
 const LOOSE = 'app-loose' as AppSessionId;
 const T = '2026-09-28T10:00:00Z';
-const SETTINGS: Settings = { version: 2, theme: 'light', keymap: {}, notifications: { enabled: true, sound: false } };
+const SETTINGS: Settings = SETTINGS_DEFAULTS_V3;
 
 function harness(opts: { focused?: boolean; settings?: Settings; before?: (w: Writer) => void } = {}) {
   const model = new SessionReadModel('index');
@@ -82,7 +83,7 @@ describe('notifier fires once per item when unfocused', () => {
   });
 
   it('titles a session with no project by its title alone, and plays the sound when asked', () => {
-    const h = harness({ settings: { ...SETTINGS, notifications: { enabled: true, sound: true } } });
+    const h = harness({ settings: { ...SETTINGS, notifications: { ...SETTINGS.notifications, sound: true } } });
     h.set(LOOSE, [item(LOOSE, 'question', T)]);
     expect(posted()[0].options).toMatchObject({ title: 'Terminal workflow notes', silent: false });
   });
@@ -110,15 +111,14 @@ describe('notifier fires once per item when unfocused', () => {
     h.set(CHARTER, [item(CHARTER, 'held_peer_message', T)]);
     h.set(LOOSE, [item(LOOSE, 'permission', T, { state: 'delivered' })]);
     expect(posted()).toHaveLength(0);
-    const off = harness({ settings: { ...SETTINGS, notifications: { enabled: false, sound: false } } });
+    const off = harness({ settings: { ...SETTINGS, notifications: { ...SETTINGS.notifications, enabled: false } } });
     off.set(CHARTER, [item(CHARTER, 'plan', T)]);
     expect(posted()).toHaveLength(0);
   });
 
-  it('with C11’s notifications.kinds present, posts only for a group that is on (approvals, questions, plan reviews, errors)', () => {
+  it('with C11’s notifications.kinds, posts only for a group that is on (approvals, questions, plan reviews, errors)', () => {
     const kinds = { approvals: false, questions: true, planReviews: false, errors: true, heldPeerMessages: true };
-    // C11's settings v3 carries `kinds`; C5's v2 type does not, so the test widens it the way the notifier reads it.
-    const settings = { ...SETTINGS, notifications: { ...SETTINGS.notifications, kinds } } as Settings;
+    const settings: Settings = { ...SETTINGS, notifications: { ...SETTINGS.notifications, kinds } };
     const h = harness({ settings });
     const at = (n: number) => `2026-09-28T10:0${n}:00Z`;
     h.set(CHARTER, [

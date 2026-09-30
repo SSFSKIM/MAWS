@@ -53,6 +53,18 @@ export {
 } from './schema/session';
 export { ChordSchema } from './schema/settings';
 // C5 end
+// C11 start: settings v3 and the ClaudeUsage hand-off shapes
+export {
+  CLAUDE_USAGE_BUNDLE_ID,
+  ClaudeUsageOpenIntentSchema,
+  NotificationKindsSchema,
+  type ClaudeUsageOpenIntent,
+  type ClaudeUsageOpenResult,
+  type ClaudeUsageStatus,
+  type NotificationKinds,
+} from './schema/settings';
+export { EngineBinaryConfigSchema, type EngineBinaryConfig } from './schema/engine';
+// C11 end
 
 export const commands = {
   ...session.commands,

@@ -233,6 +233,7 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
           else handle.current?.focus();
         },
         insertText: (text) => handle.current?.insertText(text),
+        openWidget: (name, args) => handle.current?.openWidget(name, args) ?? false, // C11: openComposerWidget
       }),
     [appSessionId],
   );

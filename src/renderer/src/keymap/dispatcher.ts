@@ -84,6 +84,9 @@ function owner(id: ActionId, target: Element): ChordBinding | null {
 export function dispatchKey(event: KeyboardEvent, keymap: KeymapOverrides): boolean {
   if (!(event.target instanceof Element)) return false;
   const target = event.target;
+  // C11 start: the Settings tab's chord capture is recording this key (settings-tab/KeymapSection.tsx): it runs nothing
+  if (target.closest('[data-chord-capture]') !== null) return false;
+  // C11 end
   for (const id of RENDERER_ACTIONS) {
     const chord = effectiveChord(id, keymap);
     if (chord === null || !matchesChord(event, parseChord(chord))) continue;

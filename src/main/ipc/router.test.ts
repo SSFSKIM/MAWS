@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { SETTINGS_DEFAULTS_V3 } from '@shared/settings/defaults';
 
 // Electron is faked: `ipcMain.handle` records one handler per channel, and each fake window is the one whose
 // webContents the fake event names as its sender.
@@ -45,7 +46,7 @@ const invoke = (event: unknown, name: string, input?: unknown) => {
   return handler(event, input);
 };
 
-const LIGHT = { settings: { version: 2, keymap: {}, notifications: { enabled: true, sound: false }, theme: 'light' }, resolvedTheme: 'light' } as const;
+const LIGHT = { settings: { ...SETTINGS_DEFAULTS_V3, theme: 'light' }, resolvedTheme: 'light' } as const;
 
 describe('main ipc router', () => {
   beforeEach(async () => {

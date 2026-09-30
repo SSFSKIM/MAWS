@@ -8,6 +8,7 @@ import { fakeClient } from '../../../../../test/support/fake-client';
 import { connectKeys } from '../../keymap/dispatcher';
 import { resetCatalogStore } from '../../stores/catalog';
 import { prefillComposer, resetComposerStore } from '../../stores/composer';
+import { registerSlashWidget } from '../mentions/widgets'; // C11
 import { docOf, hardBreak, paragraph, pastedNode, textNode } from './doc';
 import { Editor, type DraftPort, type EditorHandle } from './Editor';
 import type { Serialized } from './serialize';
@@ -221,3 +222,136 @@ describe('the editor mounts over its draft, takes prefills and submits through t
     expect(handle.current?.serialize()).toMatchObject({ display: '', empty: true });
   });
 });
+
+// C11 start: the widget seam C11 added to the editor (C11 execution document, the Arguments rule; Decision (M2) item 11):
+// a typed `/<name> <args>` for a registered widget opens it with its argument, and the handle opens one with an argument.
+describe('a registered widget named at Enter opens with its argument', () => {
+  const opened = (container: HTMLElement) => container.querySelector('[data-test-widget]')?.textContent ?? null;
+  let off: () => void;
+  beforeEach(() => {
+    const offs = (['model', 'compact'] as const).map((name) =>
+      registerSlashWidget(name, { title: name, component: ({ args }: { args: string }) => <p data-test-widget>{`${name}:${args}`}</p> }),
+    );
+    off = () => offs.forEach((o) => o());
+  });
+  afterEach(() => off());
+
+  const enter = (content: HTMLElement) => act(async () => void content.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })));
+
+  it('opens the widget with the typed argument in place of sending, and clears the document and its draft', async () => {
+    const onSubmit = vi.fn(async () => true);
+    const { port, saved } = drafts({ doc: docOf([paragraph(textNode('/model haiku'))]), attachments: [], updatedAt: '2026-09-29T00:00:00.000Z' });
+    const handle = createRef<EditorHandle>();
+    const { container } = render(<Editor appSessionId={APP} cwd="/repo" sessionId={null} drafts={port} client={client} onSubmit={onSubmit} handle={handle} />);
+    const content = contentOf(container);
+    await waitFor(() => expect(content.textContent).toBe('/model haiku'));
+    content.focus();
+    await enter(content);
+    await waitFor(() => expect(opened(container)).toBe('model:haiku'));
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(handle.current?.serialize().empty).toBe(true);
+    expect(saved).toEqual([null]);
+  });
+
+  it('keeps the whole rest of the line as the argument, and none when only the name is typed', async () => {
+    const { port } = drafts({ doc: docOf([paragraph(textNode('/compact focus on tests'))]), attachments: [], updatedAt: '2026-09-29T00:00:00.000Z' });
+    const handle = createRef<EditorHandle>();
+    const { container } = render(<Editor appSessionId={APP} cwd="/repo" sessionId={null} drafts={port} client={client} onSubmit={vi.fn(async () => true)} handle={handle} />);
+    const content = contentOf(container);
+    await waitFor(() => expect(content.textContent).toBe('/compact focus on tests'));
+    content.focus();
+    await enter(content);
+    await waitFor(() => expect(opened(container)).toBe('compact:focus on tests'));
+    act(() => handle.current?.insertText('/model'));
+    await enter(content);
+    await waitFor(() => expect(opened(container)).toBe('model:'));
+  });
+
+  it('sends a command no widget is registered for, as before', async () => {
+    const onSubmit = vi.fn(async () => true);
+    const { port } = drafts({ doc: docOf([paragraph(textNode('/review the diff'))]), attachments: [], updatedAt: '2026-09-29T00:00:00.000Z' });
+    const { container } = render(<Editor appSessionId={APP} cwd="/repo" sessionId={null} drafts={port} client={client} onSubmit={onSubmit} />);
+    const content = contentOf(container);
+    await waitFor(() => expect(content.textContent).toBe('/review the diff'));
+    content.focus();
+    await enter(content);
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ display: '/review the diff' }), 'send'));
+    expect(opened(container)).toBeNull();
+  });
+
+  it('sends a multi-line draft that starts with a widget name as text: nothing after the first line is lost', async () => {
+    const onSubmit = vi.fn(async () => true);
+    const { port } = drafts({ doc: docOf([paragraph(textNode('/model haiku'), hardBreak(), textNode('and the rest of the note'))]), attachments: [], updatedAt: '2026-09-29T00:00:00.000Z' });
+    const handle = createRef<EditorHandle>();
+    const { container } = render(<Editor appSessionId={APP} cwd="/repo" sessionId={null} drafts={port} client={client} onSubmit={onSubmit} handle={handle} />);
+    await waitFor(() => expect(handle.current?.serialize().display).toBe('/model haiku\nand the rest of the note'));
+    act(() => handle.current?.submit('send')); // ⌘Enter's path: a multi-line document never sends on a plain Enter
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ display: '/model haiku\nand the rest of the note' }), 'send'));
+    expect(opened(container)).toBeNull();
+  });
+
+  // The architect's correction (2026-09-29): an argument the widget resolves applies with no widget shown.
+  it('hands a typed argument to the widget’s apply first: applied, nothing opens; not applied, the widget opens with it', async () => {
+    const apply = vi.fn(async (_id: string, args: string) => args === 'opus');
+    const offApply = registerSlashWidget('effort', { title: 'effort', component: ({ args }: { args: string }) => <p data-test-widget>{`effort:${args}`}</p>, apply });
+    const onSubmit = vi.fn(async () => true);
+    const { port } = drafts({ doc: docOf([paragraph(textNode('/effort opus'))]), attachments: [], updatedAt: '2026-09-29T00:00:00.000Z' });
+    const handle = createRef<EditorHandle>();
+    const { container } = render(<Editor appSessionId={APP} cwd="/repo" sessionId={null} drafts={port} client={client} onSubmit={onSubmit} handle={handle} />);
+    const content = contentOf(container);
+    await waitFor(() => expect(content.textContent).toBe('/effort opus'));
+    content.focus();
+    await enter(content);
+    await waitFor(() => expect(apply).toHaveBeenCalledWith(APP, 'opus', expect.any(AbortSignal)));
+    expect(opened(container), 'applied: no widget').toBeNull();
+    expect(handle.current?.serialize().empty).toBe(true);
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    act(() => handle.current?.insertText('/effort extreme'));
+    await enter(content);
+    await waitFor(() => expect(opened(container)).toBe('effort:extreme'));
+    expect(apply).toHaveBeenLastCalledWith(APP, 'extreme', expect.any(AbortSignal));
+
+    act(() => handle.current?.insertText('/effort'));
+    apply.mockClear();
+    await enter(content);
+    await waitFor(() => expect(opened(container)).toBe('effort:'));
+    expect(apply, 'no argument: the widget opens as built').not.toHaveBeenCalled();
+    offApply();
+  });
+
+  // C11 start (M4 fix wave re-review, carried Minor): the draft is gone at Enter, so a decision that takes long (a catalogue
+  // read, up to its 8 s bound) must not leave nothing on screen and then open the widget late over new typing: the editor
+  // opens it after a short bound and tells `apply` it is too late to apply.
+  it("opens the widget when apply has not decided within the bound, and signals apply that it is too late", async () => {
+    let signal: AbortSignal | null = null;
+    let decide: (applied: boolean) => void = () => {};
+    const apply = vi.fn((_id: string, _args: string, given?: AbortSignal) => {
+      signal = given ?? null;
+      return new Promise<boolean>((resolve) => (decide = resolve));
+    });
+    const offApply = registerSlashWidget('effort', { title: 'effort', component: ({ args }: { args: string }) => <p data-test-widget>{`effort:${args}`}</p>, apply });
+    const { port } = drafts({ doc: docOf([paragraph(textNode('/effort high'))]), attachments: [], updatedAt: '2026-09-29T00:00:00.000Z' });
+    const { container } = render(<Editor appSessionId={APP} cwd="/repo" sessionId={null} drafts={port} client={client} onSubmit={vi.fn(async () => true)} />);
+    const content = contentOf(container);
+    await waitFor(() => expect(content.textContent).toBe('/effort high'));
+    content.focus();
+    await enter(content);
+    expect(opened(container), 'undecided: nothing yet').toBeNull();
+    await waitFor(() => expect(opened(container)).toBe('effort:high'), { timeout: 1_000 });
+    expect(signal!.aborted, 'apply is told the editor stopped waiting').toBe(true);
+    await act(async () => decide(false)); // a late answer opens nothing a second time
+    expect(opened(container)).toBe('effort:high');
+    offApply();
+  });
+  // C11 end
+
+  it('opens a widget through the handle with an argument', async () => {
+    const handle = createRef<EditorHandle>();
+    const { container } = render(<Editor appSessionId={APP} cwd="/repo" sessionId={null} drafts={drafts(null).port} client={client} handle={handle} />);
+    act(() => void handle.current?.openWidget('compact', 'keep the plan'));
+    await waitFor(() => expect(opened(container)).toBe('compact:keep the plan'));
+    expect(handle.current?.openWidget('status', '')).toBe(false); // none registered for it
+  });
+});
+// C11 end

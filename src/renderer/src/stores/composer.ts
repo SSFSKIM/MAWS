@@ -24,6 +24,7 @@ export interface FocusTarget {
   focusEditor(): void;
   focusFrame(): void;
   insertText(text: string): void; // at the editor's caret, at the end when it is not focused (C11's insertComposerText)
+  openWidget?(name: string, args: string): boolean; // C11: a registered widget over the composer, with its argument (openComposerWidget)
 }
 
 // Edit mode: the message an edited prefill resubmits against, and the transcript's newest user uuid when the edit began.
@@ -202,6 +203,16 @@ export function insertComposerText(appSessionId: AppSessionId, text: string): vo
   if (target) target.insertText(text);
   else console.warn(`[composer] insertComposerText: no composer is mounted for ${appSessionId}`);
 }
+
+// C11 start: a registered slash widget opened over the session's mounted composer with an argument, from anywhere (the
+// context widget's Compact…, Session info's actions); whether one opened.
+export function openComposerWidget(appSessionId: AppSessionId, name: string, args: string): boolean {
+  const target = useComposerStore.getState().focusTargets.get(appSessionId);
+  if (target?.openWidget) return target.openWidget(name, args);
+  console.warn(`[composer] openComposerWidget: no composer is mounted for ${appSessionId}`);
+  return false;
+}
+// C11 end
 
 // The session's listed models, kept past any one read (a C10 `engine.models` source replaces this once it lands).
 export const listedModelsOf = (state: ComposerState, appSessionId: AppSessionId): readonly ListedModel[] | null => state.models.get(appSessionId) ?? null;

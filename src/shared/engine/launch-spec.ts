@@ -22,7 +22,7 @@ export const LaunchSpecSchema = z.strictObject({
   trust: z.strictObject({ accepted: z.literal(true), directory: z.string() }).nullable(), // initialize.workspaceTrust (C10 fills)
   mcpConfig: z.record(z.string(), z.unknown()).nullable(), // --mcp-config JSON (C10/C11 extension; the live tests' elicitation server)
   extraSettings: z.record(z.string(), z.unknown()).nullable(), // merged into --settings after the host's own keys (tests: ask rules, enableWorkflows)
-  maxBudgetUsd: z.number().positive().nullable(), // --max-budget-usd (live tests; C11 may expose)
+  maxBudgetUsd: z.number().positive().nullable(), // --max-budget-usd (live tests only; cumulative for the conversation, a resume's restored cost included; C11 M6)
   replay: z.string().nullable(), // fixture path for ReplayTransport; refused unless MAWS_ENGINE_REPLAY=1
   // C10 start (additive X6, flagged to the coordinator): a fork carries the grants the human issued for the conversation
   // it copies. When set and the session's own snapshot is empty, start() loads the named session's snapshot, saves it

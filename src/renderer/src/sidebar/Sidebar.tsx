@@ -6,7 +6,9 @@ import { ContextMenu, DropdownMenu } from 'radix-ui';
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import { FolderIcon, GearIcon, IconButton, PlusIcon, SortIcon } from '../app/IconButton';
+import { useChordHint } from '../app/IconButton'; // C11
 import { createSession, useSessionCreatorRegistered } from '../keymap/actions-runtime';
+import { runAction, useActionEnabled } from '../keymap/actions-runtime'; // C11: the footer's gear opens Settings
 import { selectNeedsYou, useAttention } from '../stores/attention';
 import { useLayout } from '../stores/layout';
 import { activeTab } from '../stores/layout-model';
@@ -310,19 +312,24 @@ function SidebarSkeleton() {
 }
 
 function Footer() {
+  const settings = useActionEnabled('settings.open'); // C11
+  const chord = useChordHint('settings.open'); // C11
   return (
     <footer className="flex min-h-[43px] items-center gap-2 border-t border-border px-4 py-[7px] text-ui-sm text-fg-muted">
       <FolderIcon />
       <span>Local workspace</span>
+      {/* C11 start: the gear opens the Settings tab (settings.open) once C11's handler is registered */}
       <button
         type="button"
-        disabled
+        disabled={!settings}
         aria-label="Workspace settings"
-        title="Arrives with C11"
-        className="ml-auto inline-flex size-7 items-center justify-center rounded-sm text-fg-faint"
+        title={settings ? `Settings${chord ? ` · ${chord}` : ''}` : 'Arrives with C11'}
+        onClick={() => runAction('settings.open')}
+        className="ml-auto inline-flex size-7 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2 disabled:text-fg-faint disabled:hover:bg-transparent"
       >
         <GearIcon />
       </button>
+      {/* C11 end */}
     </footer>
   );
 }

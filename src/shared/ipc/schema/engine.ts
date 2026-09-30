@@ -8,6 +8,9 @@ import { EngineSessionStatusSchema } from '../../engine/status';
 import { ModelCatalogueSchema } from '../../sessions/models';
 // C10 end
 import { HostPingSchema, HostStateSchema, type CommandSpec } from './common';
+// C11 start
+import { AbsolutePathSchema } from './settings';
+// C11 end
 
 // C3 start: the engine host level (C3 execution document, Interfaces "X2 — commands and events"): the binary, the
 // relay, the process table and shutdown. Owner engine-host.
@@ -32,6 +35,15 @@ const c10Commands = {
   'engine.models': { input: z.strictObject({ refresh: z.boolean(), gateway: z.enum(['gateway', 'direct']).optional() }), output: ModelCatalogueSchema, owner: 'engine-host' },
 } as const;
 // C10 end
+// C11 start: the host's binary configuration (C11 execution document, Interfaces "X2 additions"; C3's BinaryConfig in
+// src/engine-host/launch.ts). Sent by main after the settings load, on every change of settings.engine and whenever the
+// engine host is ready again; answers engine.binaryInfo's shape for the configured path. A live process keeps its binary.
+export const EngineBinaryConfigSchema = z.strictObject({ binaryPath: AbsolutePathSchema.nullable(), expectedVersion: z.string() });
+export type EngineBinaryConfig = z.infer<typeof EngineBinaryConfigSchema>;
+const c11Commands = {
+  'engine.configure': { input: EngineBinaryConfigSchema, output: BinaryInfoSchema, owner: 'engine-host' },
+} as const;
+// C11 end
 
 export const commands = {
   'engine.ping': { input: z.void(), output: HostPingSchema, owner: 'engine-host' },
@@ -39,6 +51,7 @@ export const commands = {
   'engine.hostState': { input: z.void(), output: HostStateSchema, owner: 'main' },
   ...c3Commands, // C3
   ...c10Commands, // C10
+  ...c11Commands, // C11
 } as const satisfies Record<`engine.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {

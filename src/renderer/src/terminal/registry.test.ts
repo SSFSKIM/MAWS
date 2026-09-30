@@ -10,6 +10,7 @@ import { FakeRenderer } from './renderer.fake';
 import type { TerminalTheme } from './renderer';
 import { TerminalRegistry, type Adopting } from './registry';
 import { alignReplay, explicitModes, INITIAL_STREAM } from './replay';
+import { SETTINGS_DEFAULTS_V3 } from '@shared/settings/defaults';
 
 const A = 'session-a' as AppSessionId;
 const KiB = 1024;
@@ -102,6 +103,10 @@ let ipc: ReturnType<typeof fakeBridge>;
 let renderers: FakeRenderer[];
 let runAction: ReturnType<typeof vi.fn<(id: 'tab.next' | 'tab.previous') => void>>;
 let currentTheme: TerminalTheme;
+// C11 start: the font the registry reads from the document (C11's monoFont override moves it)
+const MONO = { family: 'mono', size: 13, lineHeight: 1.2 };
+let currentFont = MONO;
+// C11 end
 
 // `rendererFails`: every renderer creation rejects; `rendererFailures`: only the first that many do.
 function makeRegistry(options: { webglBudget?: number; rendererFails?: boolean; rendererFailures?: number } = {}) {
@@ -115,7 +120,7 @@ function makeRegistry(options: { webglBudget?: number; rendererFails?: boolean; 
       return r;
     },
     readTheme: () => currentTheme,
-    readFont: () => ({ family: 'mono', size: 13, lineHeight: 1.2 }),
+    readFont: () => currentFont, // C11: a variable, so the monoFont cases can move it
     runAction,
     ...(options.webglBudget ? { webglBudget: options.webglBudget } : {}),
   });
@@ -803,7 +808,7 @@ describe('terminal theme from tokens', () => {
     registry.unmount(hidden.id);
     expect(shown.renderer.options.theme.background).toBe('light-bg');
     currentTheme = theme('dark-bg');
-    ipc.emit('settings.changed', { settings: { version: 2, keymap: {}, notifications: { enabled: true, sound: false }, theme: 'dark' }, resolvedTheme: 'dark' });
+    ipc.emit('settings.changed', { settings: { ...SETTINGS_DEFAULTS_V3, theme: 'dark' }, resolvedTheme: 'dark' });
     expect(shown.renderer.theme.background).toBe('dark-bg');
     expect(hidden.renderer.theme.background).toBe('dark-bg');
   });
@@ -825,3 +830,60 @@ describe('terminal theme from tokens', () => {
     expect(renderer.options.webgl).toBe(true);
   });
 });
+// C11 start: C11's appearance.monoFont is a root `--font-mono` override, which open terminals follow as they follow the
+// theme (the ruling of 2026-09-29: the terminal reads the token at start and on change)
+describe('terminal font from the root --font-mono', () => {
+  afterEach(() => {
+    currentFont = MONO;
+  });
+
+  it('pushes a changed font to every handle, hidden ones included, on settings.changed, and refits', async () => {
+    const registry = makeRegistry();
+    const shown = await openRunning(registry, 'shown');
+    const hidden = await openRunning(registry, 'hidden');
+    registry.unmount(hidden.id);
+    const fit = vi.spyOn(shown.renderer, 'fit');
+    currentFont = { ...MONO, family: '"MesloLGM Nerd Font Mono", "SF Mono", monospace' };
+    ipc.emit('settings.changed', { settings: { ...SETTINGS_DEFAULTS_V3, appearance: { monoFont: 'MesloLGM Nerd Font Mono' } }, resolvedTheme: 'light' });
+    expect(shown.renderer.font.family).toBe(currentFont.family);
+    expect(hidden.renderer.font.family).toBe(currentFont.family);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(fit).toHaveBeenCalled();
+  });
+
+  it("follows the root element's style, which the page sets after settings.changed; an unchanged font is not pushed", async () => {
+    const registry = makeRegistry();
+    const { renderer } = await openRunning(registry);
+    const setFont = vi.spyOn(renderer, 'setFont');
+    document.documentElement.style.setProperty('--unrelated', '1');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(setFont).not.toHaveBeenCalled();
+    currentFont = { ...MONO, family: '"Symbols Nerd Font Mono", monospace' };
+    document.documentElement.style.setProperty('--font-mono', currentFont.family);
+    await vi.waitFor(() => expect(renderer.font.family).toBe('"Symbols Nerd Font Mono", monospace'));
+    expect(setFont).toHaveBeenCalledOnce();
+    document.documentElement.style.removeProperty('--font-mono');
+    document.documentElement.style.removeProperty('--unrelated');
+  });
+
+  it('creates new terminals with the current font', async () => {
+    currentFont = { ...MONO, family: '"Other", monospace' };
+    const { renderer } = await openRunning(makeRegistry());
+    expect(renderer.options.font.family).toBe('"Other", monospace');
+  });
+
+  it('a renderer still being created when the font changes gets the new font once it attaches (M5 fix wave)', async () => {
+    const registry = makeRegistry();
+    await openRunning(registry, 'first'); // the registry has handed a font out
+    const id = registry.open({ appSessionId: A, label: 'second', cwd: '/tmp/a' });
+    registry.mount(id, parent()); // its renderer is being created with the font of this moment
+    currentFont = { ...MONO, family: '"Changed", monospace' };
+    ipc.emit('settings.changed', { settings: { ...SETTINGS_DEFAULTS_V3, appearance: { monoFont: 'Changed' } }, resolvedTheme: 'light' });
+    await settle();
+    const renderer = registry.get(id)!.renderer as FakeRenderer;
+    expect(renderer.options.font.family).toBe('mono');
+    expect(renderer.font.family).toBe('"Changed", monospace');
+  });
+});
+// C11 end
+

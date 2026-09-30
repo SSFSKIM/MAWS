@@ -45,6 +45,12 @@ export const ACTIONS = {
   'composer.stop':        { title: 'Stop the running turn',       chord: 'Cmd+.',        sink: 'renderer', menu: null, scope: 'app' },
   'composer.focus':       { title: 'Focus the composer',          chord: 'Cmd+L',        sink: 'renderer', menu: null, scope: 'app' },
   // C7 end
+  // C11 start: the Settings and Accounts tabs and the ClaudeUsage hand-off (C11 execution document, Keymap and action
+  // entries). settings.open's arg, when given, is the index of a Settings section; the relay card runs the hand-off.
+  'settings.open':           { title: 'Settings…',                chord: 'Cmd+,',        sink: 'menu', menu: 'app',  scope: 'app' },
+  'accounts.open':           { title: 'Accounts',                 chord: null,           sink: 'menu', menu: 'view', scope: 'app' },
+  'gateway.openClaudeUsage': { title: 'Open ClaudeUsage',         chord: null,           sink: 'renderer', menu: null, scope: 'app' },
+  // C11 end
 } as const satisfies Record<string, ActionSpec>;
 
 export type ActionId = keyof typeof ACTIONS;

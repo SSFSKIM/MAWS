@@ -184,6 +184,7 @@ export class TerminalRegistry {
   private metaHeld = false; // a ⌘ keydown seen and not yet released (link activation events may not carry metaKey)
   private theme: TerminalTheme | null = null;
   private themeKey = '';
+  private fontKey: string | null = null; // C11: the font the renderers were last given, so a root `--font-mono` change reaches them
   private hostState: HostState | null = null;
   private readonly webglBudget: number;
 
@@ -200,6 +201,10 @@ export class TerminalRegistry {
     bridge.on('pty.exit', (event) => this.receiveExit(event));
     bridge.on('pty.hostState', (state) => this.applyHost(state));
     bridge.on('settings.changed', () => this.refreshTheme());
+    // C11 start: C11's appearance.monoFont is a `style` override of `--font-mono` on the root, set after settings.changed
+    bridge.on('settings.changed', () => this.refreshFont());
+    new MutationObserver(() => this.refreshFont()).observe(document.documentElement, { attributes: true, attributeFilter: ['style'] });
+    // C11 end
     void bridge.invoke('pty.hostState', undefined).then((result) => {
       if (result.ok) this.applyHost(result.value);
     });
@@ -361,10 +366,11 @@ export class TerminalRegistry {
   }
 
   private startRenderer(entry: Entry): Promise<TerminalRenderer | null> {
-    const options: RendererOptions = { scrollback: SCROLLBACK_LINES, theme: this.currentTheme(), font: this.deps.readFont(), webgl: true };
+    const options: RendererOptions = { scrollback: SCROLLBACK_LINES, theme: this.currentTheme(), font: this.currentFont(), webgl: true }; // C11: currentFont
     entry.ready = this.deps.createRenderer(options).then(
       (renderer) => {
         this.attachRenderer(entry, renderer);
+        if (entry.renderer) this.catchUpFont(entry, options.font); // C11
         return entry.renderer;
       },
       (error: unknown) => {
@@ -722,6 +728,35 @@ export class TerminalRegistry {
     this.themeKey = key;
     for (const entry of this.entries.values()) entry.renderer?.setTheme(next);
   }
+
+  // C11 start: the font follows `--font-mono` at the document root (C11's monoFont override), as the theme follows
+  // `data-theme`: read for each new renderer, and pushed to every handle, hidden ones included, when it changes.
+  private currentFont(): TerminalFont {
+    const font = this.deps.readFont();
+    this.fontKey ??= JSON.stringify(font); // what every renderer holds; only refreshFont moves it, so none is skipped
+    return font;
+  }
+
+  private refreshFont(): void {
+    if (this.fontKey === null) return; // no renderer has been created: the next one reads the font itself
+    const next = this.deps.readFont();
+    const key = JSON.stringify(next);
+    if (key === this.fontKey) return;
+    this.fontKey = key;
+    for (const entry of this.entries.values()) {
+      if (!entry.renderer) continue; // still being created: catchUpFont gives it the font once it attaches
+      entry.renderer.setFont(next);
+      this.scheduleFit(entry); // another family measures another cell: the grid and the pty follow
+    }
+  }
+
+  // A renderer created with a font that has moved on while it was being created.
+  private catchUpFont(entry: Entry, created: TerminalFont): void {
+    if (this.fontKey === null || this.fontKey === JSON.stringify(created)) return;
+    entry.renderer!.setFont(JSON.parse(this.fontKey) as TerminalFont);
+    this.scheduleFit(entry);
+  }
+  // C11 end
 
   private update(entry: Entry, patch: Partial<TerminalInfo>): void {
     entry.info = { ...entry.info, ...patch };

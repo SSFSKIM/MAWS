@@ -19,6 +19,9 @@ import { OPERATION_COMMANDS } from '../engine/operations';
 // C8c start
 import * as files from './schema/files';
 // C8c end
+// C11 start
+import { SETTINGS_DEFAULTS_V3 } from '../settings/defaults';
+// C11 end
 
 // One entry per namespace, checked against NAMESPACES at compile time and at run time.
 const modules = { session, engine, fs, git, pty, layout, attention, settings, files /* C8c */ } satisfies Record<
@@ -240,7 +243,7 @@ describe('ipc schema validates both directions', () => {
   });
 
   describe('command output (renderer, on receipt)', () => {
-    const state = { settings: { version: 2, keymap: {}, notifications: { enabled: true, sound: false }, theme: 'system' }, resolvedTheme: 'dark' };
+    const state = { settings: { ...SETTINGS_DEFAULTS_V3, theme: 'system' }, resolvedTheme: 'dark' };
 
     it('accepts a settings state and returns it unchanged', () => {
       expect(validateCommandOutput('settings.get', state)).toEqual({ ok: true, value: state });
@@ -275,7 +278,7 @@ describe('ipc schema validates both directions', () => {
     it('accepts well-formed events unchanged', () => {
       const exit = { ptyId: 'p1', exitCode: null, signal: null };
       expect(validateEventPayload('pty.exit', exit)).toEqual({ ok: true, value: exit });
-      const changed = { settings: { version: 2, keymap: {}, notifications: { enabled: true, sound: false }, theme: 'light' }, resolvedTheme: 'light' };
+      const changed = { settings: { ...SETTINGS_DEFAULTS_V3, theme: 'light' }, resolvedTheme: 'light' };
       expect(validateEventPayload('settings.changed', changed)).toEqual({ ok: true, value: changed });
     });
 
@@ -490,4 +493,92 @@ describe('ipc schema validates both directions', () => {
     });
   });
   // C10 end
+  // C11 start
+  describe('C11 entries', () => {
+    it('adds its six commands under existing namespaces with their owners, and no namespace or event', () => {
+      const owners = { 'settings.claudeUsage.status': 'main', 'settings.claudeUsage.open': 'main', 'settings.reveal': 'main', 'layout.saveTextFile': 'main', 'layout.captureChords': 'main', 'engine.configure': 'engine-host' } as const;
+      // Every C11 command sits under a namespace that existed before C11 (C8c's `files` is the one added since).
+      const before = ['session', 'engine', 'fs', 'git', 'pty', 'layout', 'attention', 'settings'];
+      for (const name of Object.keys(owners)) expect(before, name).toContain(name.split('.')[0]);
+      expect(NAMESPACES.filter((ns) => !before.includes(ns))).toEqual(['files']);
+      for (const [name, owner] of Object.entries(owners)) expect(commands[name as keyof typeof owners].owner, name).toBe(owner);
+      for (const name of Object.keys(owners)) expect(Object.hasOwn(events, name), name).toBe(false);
+    });
+
+    it('settings.get and settings.changed carry the whole version 3 state', () => {
+      const state = { settings: { ...SETTINGS_DEFAULTS_V3, gateway: { defaultRoute: 'direct', relayUnreachable: 'wait', offerDirect: false } }, resolvedTheme: 'light' };
+      expect(validateCommandOutput('settings.get', state)).toEqual({ ok: true, value: state });
+      expect(validateEventPayload('settings.changed', state).ok).toBe(true);
+      expect(validateEventPayload('settings.changed', { ...state, settings: { ...state.settings, version: 2 } }).ok).toBe(false);
+    });
+
+    it('settings.set takes a section by field and one notification kind alone', () => {
+      expect(validateCommandInput('settings.set', { notifications: { kinds: { errors: false } } }).ok).toBe(true);
+      expect(validateCommandInput('settings.set', { gateway: { relayUnreachable: 'wait' } }).ok).toBe(true);
+      expect(validateCommandInput('settings.set', { engine: { binaryPath: null } }).ok).toBe(true);
+      expect(validateCommandInput('settings.set', { engine: { binaryPath: 'bin/claude' } }).ok).toBe(false);
+      expect(validateCommandInput('settings.set', { usage: { nearLimitPercent: 95 } }).ok).toBe(true);
+      expect(validateCommandInput('settings.set', { usage: { nearLimitPercent: 40 } }).ok).toBe(false);
+      expect(validateCommandInput('settings.set', { appearance: { monoFont: 'Hack Nerd Font' } }).ok).toBe(true);
+      expect(validateCommandInput('settings.set', { gateway: { relay: 'x' } }).ok).toBe(false);
+    });
+
+    it('settings.claudeUsage.open takes the four intents, an email only in the two that name an account', () => {
+      const ok = (input: unknown) => validateCommandInput('settings.claudeUsage.open', input).ok;
+      expect(ok({ intent: 'panel' })).toBe(true);
+      expect(ok({ intent: 'addAccount' })).toBe(true);
+      expect(ok({ intent: 'reconnect', accountEmail: '1@example.test' })).toBe(true);
+      expect(ok({ intent: 'remove', accountEmail: '1@example.test' })).toBe(true);
+      expect(ok({ intent: 'panel', accountEmail: null })).toBe(false);
+      expect(ok({ intent: 'reconnect' })).toBe(false);
+      expect(ok({ intent: 'remove', accountEmail: '' })).toBe(false);
+      expect(ok({ intent: 'login' })).toBe(false);
+      const out = (value: unknown) => validateCommandOutput('settings.claudeUsage.open', value).ok;
+      expect(out({ opened: true, reason: null, instruction: 'ClaudeUsage is in the menu bar · click its icon' })).toBe(true);
+      expect(out({ opened: false, reason: 'not_installed', instruction: 'x' })).toBe(true);
+      expect(out({ opened: false, reason: 'crashed', instruction: 'x' })).toBe(false);
+    });
+
+    it('settings.claudeUsage.status answers the bundle id it checked', () => {
+      const status = { installed: true, running: false, bundleId: 'com.haegi.ClaudeUsage', dataDirPresent: true, checkedAt: '2026-09-29T08:00:00.000Z' };
+      expect(validateCommandInput('settings.claudeUsage.status', undefined).ok).toBe(true);
+      expect(validateCommandOutput('settings.claudeUsage.status', status)).toEqual({ ok: true, value: status });
+      expect(validateCommandOutput('settings.claudeUsage.status', { ...status, bundleId: 'com.example.Other' }).ok).toBe(false);
+    });
+
+    it('settings.reveal takes a path and answers whether it revealed', () => {
+      expect(validateCommandInput('settings.reveal', { path: '/Users/new/.claude/settings.json' }).ok).toBe(true);
+      expect(validateCommandInput('settings.reveal', { path: 1 }).ok).toBe(false);
+      expect(validateCommandOutput('settings.reveal', { revealed: false }).ok).toBe(true);
+    });
+
+    it('engine.configure takes an absolute path or null and answers binaryInfo', () => {
+      expect(validateCommandInput('engine.configure', { binaryPath: null, expectedVersion: '2.1.283' }).ok).toBe(true);
+      expect(validateCommandInput('engine.configure', { binaryPath: '/opt/claude', expectedVersion: '2.1.283' }).ok).toBe(true);
+      expect(validateCommandInput('engine.configure', { binaryPath: 'claude', expectedVersion: '2.1.283' }).ok).toBe(false);
+      expect(validateCommandInput('engine.configure', { binaryPath: '/opt/claude' }).ok).toBe(false);
+      const info = { path: '/opt/claude', expectedVersion: '2.1.283', version: null, ok: false, error: 'no executable engine binary at /opt/claude' };
+      expect(validateCommandOutput('engine.configure', info)).toEqual({ ok: true, value: info });
+    });
+
+    it('layout.saveTextFile takes a bounded name and text and answers saved with a path, or not saved', () => {
+      expect(validateCommandInput('layout.saveTextFile', { defaultName: 'a.txt', text: '' }).ok).toBe(true);
+      expect(validateCommandInput('layout.saveTextFile', { defaultName: '', text: 'x' }).ok).toBe(false);
+      expect(validateCommandInput('layout.saveTextFile', { defaultName: 'x'.repeat(256), text: 'x' }).ok).toBe(false);
+      expect(validateCommandOutput('layout.saveTextFile', { saved: true, path: '/Users/new/Downloads/a.txt' }).ok).toBe(true);
+      expect(validateCommandOutput('layout.saveTextFile', { saved: false }).ok).toBe(true);
+      expect(validateCommandOutput('layout.saveTextFile', { saved: true }).ok).toBe(false);
+      expect(validateCommandOutput('layout.saveTextFile', { saved: false, path: '/x' }).ok).toBe(false);
+    });
+
+    it('layout.captureChords takes exactly { active } and answers nothing (M5 fix wave)', () => {
+      expect(validateCommandInput('layout.captureChords', { active: true }).ok).toBe(true);
+      expect(validateCommandInput('layout.captureChords', { active: false }).ok).toBe(true);
+      expect(validateCommandInput('layout.captureChords', {}).ok).toBe(false);
+      expect(validateCommandInput('layout.captureChords', { active: 'yes' }).ok).toBe(false);
+      expect(validateCommandInput('layout.captureChords', { active: true, extra: 1 }).ok).toBe(false);
+      expect(validateCommandOutput('layout.captureChords', undefined).ok).toBe(true);
+    });
+  });
+  // C11 end
 });

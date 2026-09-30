@@ -6,6 +6,7 @@ import type { MawsBridge } from '@shared/ipc/schema';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { registerSessionAction } from '../app/session-actions';
 import { registerSessionCreator } from '../keymap/actions-runtime';
+import { registerAction } from '../keymap/actions-runtime'; // C11
 import { useAttention } from '../stores/attention';
 import { useLayout } from '../stores/layout';
 import { activeTab } from '../stores/layout-model';
@@ -312,3 +313,21 @@ describe('sidebar at scale', () => {
     expect(within(groups[0]).getAllByRole('treeitem').filter((t) => t.dataset.kind === 'session')).toHaveLength(120);
   });
 });
+
+// C11 start: the footer's gear opens the Settings tab once C11 registers settings.open (C11 execution document, M5)
+describe('the footer gear', () => {
+  beforeEach(() => fillStores(nine));
+
+  it('is disabled until settings.open has a handler, then runs it', () => {
+    render(<Sidebar />);
+    const gear = screen.getByRole('button', { name: 'Workspace settings' }) as HTMLButtonElement;
+    expect(gear.disabled).toBe(true);
+    const open = vi.fn();
+    act(() => void offs.push(registerAction('settings.open', open)));
+    expect(gear.disabled).toBe(false);
+    expect(gear.title).toBe('Settings · ⌘,');
+    fireEvent.click(gear);
+    expect(open).toHaveBeenCalledOnce();
+  });
+});
+// C11 end

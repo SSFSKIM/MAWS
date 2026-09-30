@@ -9,18 +9,18 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { isGatewayModel } from '@shared/sessions/models';
 import { DockedCardFrame } from '../composer/docked/DockedCardFrame';
 import { dockCard } from '../composer/docked/registry';
+// C11 start: the card's policy, its hand-off and Run direct on a gateway model (C11's Asks of C10 (2) and (7))
+import { runDirect, useOpenClaudeUsage, usePickingDirectModel, useRelayPolicy } from '../gateway/relay-card';
+// C11 end
 import { ipc } from '../ipc/client';
 import { useSessions } from '../stores/sessions';
 import { FAILURE_CARD_TITLE, FailureCard } from './FailureCard';
-import { RELAY_CARD_TITLE, RelayCard, type RelayPolicy } from './RelayCard';
+import { RELAY_CARD_TITLE, RelayCard } from './RelayCard';
 import { continueSetup, reclaimMessage, releaseMessage, resolveWorktree, type WorktreeResource } from './setup-actions';
 import { failureOf, isStarting, UNSENT, useSetup, type SetupFailure, type SetupState, type WaitingCard } from './store';
 import { TRUST_CARD_TITLE, TrustCard } from './TrustCard';
 
 export const RELAY_POLL_MS = 5_000;
-
-// C11's settings v3 owns `relayUnreachable`; until it lands the default applies (C10's readSettings seam).
-const RELAY_POLICY: RelayPolicy = 'ask';
 
 export type SetupCardKind = WaitingCard['kind'] | 'failure';
 
@@ -104,8 +104,14 @@ function RelayHost({ appSessionId, card, busy }: { appSessionId: AppSessionId; c
   const model = useSetup((s) => s.intents.get(appSessionId)?.model ?? null);
   const recordModel = useSessions((s) => s.records.get(appSessionId)?.model.requested ?? null);
   const gatewayModel = isGatewayModel(model ?? recordModel ?? '');
+  // C11 start: settings v3's relayUnreachable (wait → 'wait'; ask and direct → 'ask'), and C11's hand-off action
+  const policy = useRelayPolicy();
+  const openClaudeUsage = useOpenClaudeUsage();
+  const picking = usePickingDirectModel(appSessionId); // Run direct's Claude-model pick is open: the poll pauses
+  // C11 end
 
   useEffect(() => {
+    if (picking) return; // C11: no routed start under an open Claude-model pick
     let live = true;
     const check = async () => {
       const result = await ipc.invoke('engine.relayHealth', { force: true });
@@ -123,7 +129,7 @@ function RelayHost({ appSessionId, card, busy }: { appSessionId: AppSessionId; c
       live = false;
       clearInterval(timer);
     };
-  }, [appSessionId, card]);
+  }, [appSessionId, card, picking /* C11 */]);
 
   const recheck = async () => {
     const result = await ipc.invoke('engine.relayHealth', { force: true });
@@ -132,12 +138,17 @@ function RelayHost({ appSessionId, card, busy }: { appSessionId: AppSessionId; c
     setHealth(result.value);
     if (result.value.ok) void continueSetup(appSessionId, { gateway: 'gateway' }, card.message);
   };
-  const direct = () => void continueSetup(appSessionId, { gateway: 'direct' }, card.message);
+  const direct = () => void runDirect(appSessionId, card.message, gatewayModel); // C11: a gateway model takes a Claude model first (pickDirectModel)
   const decline = () => void releaseMessage(appSessionId, card.message);
+  // C11 start: Enter runs Run direct on a gateway model too (C10 refused it there, `busy || gatewayModel`): it asks for a
+  // Claude model first
+  const accept = busy ? null : direct;
+  // C11 end
 
   return (
-    <DockedCardFrame appSessionId={appSessionId} title={RELAY_CARD_TITLE} onAccept={busy || gatewayModel ? null : direct} onDecline={busy ? null : decline}>
-      <RelayCard health={health} policy={RELAY_POLICY} now={now} gatewayModel={gatewayModel} openClaudeUsage={null} onAccept={direct} onDecline={decline} onRecheck={() => void recheck()} />
+    <DockedCardFrame appSessionId={appSessionId} title={RELAY_CARD_TITLE} onAccept={accept} onDecline={busy ? null : decline}>
+      {/* C11: gatewayModel={false}: with pickDirectModel in place a gateway model no longer blocks Run direct, it asks for a Claude model first */}
+      <RelayCard health={health} policy={policy} now={now} gatewayModel={false} openClaudeUsage={openClaudeUsage} onAccept={direct} onDecline={decline} onRecheck={() => void recheck()} />
     </DockedCardFrame>
   );
 }

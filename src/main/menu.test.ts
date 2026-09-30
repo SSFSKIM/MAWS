@@ -2,6 +2,7 @@ import type { MenuItemConstructorOptions } from 'electron';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Settings } from '@shared/ipc/schema';
 import { ACTIONS, ACTION_IDS, type ActionId } from '@shared/keymap/actions';
+import { SETTINGS_DEFAULTS_V3 } from '@shared/settings/defaults';
 
 const electron = vi.hoisted(() => ({
   setApplicationMenu: vi.fn(),
@@ -15,7 +16,7 @@ const { emit } = await import('./ipc/events');
 const { menuTemplate, startMenu } = await import('./menu');
 
 type Item = MenuItemConstructorOptions;
-const SETTINGS: Settings = { version: 2, theme: 'light', keymap: {}, notifications: { enabled: true, sound: false } };
+const SETTINGS: Settings = SETTINGS_DEFAULTS_V3;
 const ALL = new Set<ActionId>(ACTION_IDS);
 const MENU_SINK = ACTION_IDS.filter((id) => ACTIONS[id].sink === 'menu');
 
@@ -78,17 +79,16 @@ describe('application menu', () => {
   });
 
   it('places an action whose menu is app in the application menu, after About (C11’s Settings… ⌘,)', () => {
-    // No C5 action uses 'app' yet; C11's settings.open will. A table with one action moved there stands in for it.
-    const table = { ...ACTIONS, 'diagnostics.open': { ...ACTIONS['diagnostics.open'], title: 'Settings…', chord: 'Cmd+,', menu: 'app' as const } };
-    const template = menuTemplate(table, {}, ALL, vi.fn());
+    // C11: settings.open is the one action placed there (it replaced the stand-in this test used before it landed).
+    const template = menuTemplate(ACTIONS, {}, ALL, vi.fn());
     const appMenu = template[0].submenu as Item[];
     expect(appMenu.map((item) => item.role ?? item.id ?? item.type)).toEqual([
-      'about', 'separator', 'diagnostics.open', 'separator', 'services', 'separator', 'hide', 'hideOthers', 'unhide', 'separator', 'quit',
+      'about', 'separator', 'settings.open', 'separator', 'services', 'separator', 'hide', 'hideOthers', 'unhide', 'separator', 'quit',
     ]);
-    expect(byId(template, 'diagnostics.open')).toMatchObject({ label: 'Settings…', accelerator: 'Cmd+,' });
-    expect((top(template, 'Help')!.submenu as Item[]).some((item) => item.id === 'diagnostics.open')).toBe(false);
+    expect(byId(template, 'settings.open')).toMatchObject({ label: 'Settings…', accelerator: 'Cmd+,' });
     // With no app-menu action the application menu is the standard one, with no empty group.
-    const standard = menuTemplate(ACTIONS, {}, ALL, vi.fn())[0].submenu as Item[];
+    const table = { ...ACTIONS, 'settings.open': { ...ACTIONS['settings.open'], menu: 'help' as const } };
+    const standard = menuTemplate(table, {}, ALL, vi.fn())[0].submenu as Item[];
     expect(standard.map((item) => item.role ?? item.type)).toEqual(['about', 'separator', 'services', 'separator', 'hide', 'hideOthers', 'unhide', 'separator', 'quit']);
   });
 

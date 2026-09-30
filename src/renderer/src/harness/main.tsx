@@ -12,6 +12,9 @@ import { PanelHarness } from './panel/PanelHarness';
 import { ComposerHarness } from './composer/ComposerHarness';
 import { EditorHarness } from './composer/EditorHarness';
 // C7 end
+// C11 start
+import { WidgetsHarness } from './widgets/WidgetsHarness';
+// C11 end
 
 const ROUTES: Record<string, () => ReactNode> = {
   transcript: () => <Harness />,
@@ -22,6 +25,9 @@ const ROUTES: Record<string, () => ReactNode> = {
   composer: () => <ComposerHarness />,
   editor: () => <EditorHarness />,
   // C7 end
+  // C11 start: the widgets over the composer, on the fixture-backed backend or passively over C3's strict replay
+  widgets: () => <WidgetsHarness />,
+  // C11 end
 };
 
 // C9 block begin: the terminal probe page (harness/terminal/), routed as `#probe`; its `#panel` stand-in was folded
