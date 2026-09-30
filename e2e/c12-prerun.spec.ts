@@ -1470,8 +1470,10 @@ test('C8 item 9: Attach adds the Terminal tab and activates its session (a claud
   const out: Record<string, unknown> = {};
   let jobId: string | null = null;
   let bg: SessionRecord | undefined;
-  // The job is started inside the outer try, and its stop sits in the outer finally, so it is stopped whether or not
-  // the app launched, the attach passed or the app's cleanup succeeded.
+  // The job is started inside the outer try, and its stop runs after it whatever happened there, so it is stopped
+  // whether or not the app launched, the attach passed or the app's cleanup succeeded. A stop that fails fails the
+  // test (with the body's own failure, when there was one, in one AggregateError).
+  let bodyError: unknown = null;
   try {
     let started = '';
     try {
@@ -1507,15 +1509,21 @@ test('C8 item 9: Attach adds the Terminal tab and activates its session (a claud
       rec.note('c8.attach', out);
       await maws.cleanup();
     }
-  } finally {
-    if (jobId) {
-      try {
-        out.stopped = plain(execFileSync(ENGINE_BIN_PATH, ['stop', jobId], { cwd: repo, env, encoding: 'utf8', timeout: 60_000 }));
-      } catch (error) {
-        out.stopFailed = error instanceof Error ? error.message.split('\n')[0] : String(error);
-      }
-    }
-    rec.note('c8.attach', out);
-    if (bg?.engineSessionId) terminalCost('c8 attach --bg job (estimate)', transcriptUsdEstimate(transcriptFile(scratch.config, repo, bg.engineSessionId), since));
+  } catch (error) {
+    bodyError = error;
   }
+  let stopError: unknown = null;
+  if (jobId) {
+    try {
+      out.stopped = plain(execFileSync(ENGINE_BIN_PATH, ['stop', jobId], { cwd: repo, env, encoding: 'utf8', timeout: 60_000 }));
+    } catch (error) {
+      stopError = error;
+      out.stopFailed = error instanceof Error ? error.message.split('\n')[0] : String(error); // the diagnostic record
+    }
+  }
+  rec.note('c8.attach', out);
+  if (bg?.engineSessionId) terminalCost('c8 attach --bg job (estimate)', transcriptUsdEstimate(transcriptFile(scratch.config, repo, bg.engineSessionId), since));
+  if (bodyError !== null && stopError !== null) throw new AggregateError([bodyError, stopError], `the attach case failed, and stopping the background job ${jobId} failed too`);
+  if (stopError !== null) throw stopError;
+  if (bodyError !== null) throw bodyError;
 });
