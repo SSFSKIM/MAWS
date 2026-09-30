@@ -320,7 +320,12 @@ test('nine sessions under a memory budget: releases, the released surfaces, Send
     const identity = async () =>
       Object.fromEntries(await Promise.all(Object.entries(ids).map(async ([l, id]) => {
         const s = await statusOf(page, id);
-        return [l, { process: s.process, pid: s.pid, launchId: s.launchId, exitReason: s.exit?.reason ?? null }] as const;
+        // what the process is and what work it holds; memory, sample times and event counters move on their own
+        return [l, {
+          process: s.process, pid: s.pid, launchId: s.launchId, exitReason: s.exit?.reason ?? null,
+          turn: s.turn?.id ?? null, busy: s.busy, pendingRequests: s.pendingRequests, pendingPlan: s.pendingPlan, queue: s.queue,
+          backgroundTasks: s.backgroundTasks.map((t) => t.taskId), heldPeerMessages: s.heldPeerMessages.length, keepAlive: s.keepAlive,
+        }] as const;
       })));
 
     await test.step('quiet for a sample period, then the trees, the sum and the independent ps read', async () => {
@@ -457,12 +462,14 @@ test('nine sessions under a memory budget: releases, the released surfaces, Send
       const rows = await sessions(page);
       const protectedKiB = rows.filter((s) => protectedLabels.includes(labels.get(s.appSessionId) ?? '') && live(s)).reduce((sum, s) => sum + (s.memory.treeRssKiB ?? 0), 0);
       const lowMiB = Math.max(512, Math.floor(protectedKiB / 1024) - 100);
+      const baseline = await identity();
       const at = Date.now();
       value(await invoke(page, 'settings.set', { engine: { memoryBudgetMiB: lowMiB } }));
       const others = ['B1', 'B5', 'B6', 'B7'];
       await expect
         .poll(async () => (await Promise.all(others.map(async (l) => (await statusOf(page, ids[l]!)).process))).every((p) => p === 'exited'), { timeout: 240_000, intervals: [1_000] })
         .toBe(true);
+      for (const l of others) expect((await statusOf(page, ids[l]!)).exit?.reason, `${l} exited as a release`).toBe('budget');
       const banner = page.locator('[data-banner-host]').getByRole('status').filter({ hasText: 'Memory budget exceeded' });
       await expect(banner).toHaveCount(1, { timeout: 60_000 });
       const bannerAt = Date.now();
@@ -474,6 +481,8 @@ test('nine sessions under a memory budget: releases, the released surfaces, Send
       for (const e of events.filter((e) => e.lastRelease !== null && Date.parse(e.lastRelease.at) >= at)) {
         expect(e.lastRelease!.totalKiB, `${labels.get(e.lastRelease!.appSessionId)} released while over the budget`).toBeGreaterThan(lowMiB * 1024);
       }
+      const wave = await identity();
+      for (const l of protectedLabels) expect(wave[l], `${l} untouched by the second wave`).toEqual(baseline[l]);
       const lowTrees = await trees(page, labels);
       record('noCandidate', {
         limitMiB: lowMiB, protectedMiB: mib(protectedKiB), setAt: new Date(at).toISOString(), bannerSeconds: (bannerAt - at) / 1000,
@@ -493,6 +502,8 @@ test('nine sessions under a memory budget: releases, the released surfaces, Send
       const listed = await blocked.getByRole('listitem').allInnerTexts();
       const sheetShots = await shoot(page, 'blocked-sheet');
       const item = (l: string) => blocked.getByRole('listitem', { name: titles[l], exact: true });
+      const reasons: Record<string, RegExp> = { A1: /stateful server c12-kernel/, A2: /stateful server c12-kernel/, B2: /1 background task/, B3: /1 queued message/, B4: /waiting for you/ };
+      for (const l of protectedLabels) await expect(item(l), `${l} listed with its reason`).toContainText(reasons[l]!);
       await item('B2').getByRole('button', { name: 'Stop…' }).click();
       const stop = page.getByRole('dialog', { name: `Stop “${titles.B2}”?` });
       const disclosure = await stop.getByRole('note').innerText();
@@ -503,7 +514,6 @@ test('nine sessions under a memory budget: releases, the released surfaces, Send
       await page.waitForTimeout(2_000);
       const afterCancel = await identity();
       record('blockedSheet', { listed, disclosure, unchangedAfterCancel: JSON.stringify(afterCancel) === JSON.stringify(before), screenshots: [...sheetShots, ...stopShots] });
-      for (const l of protectedLabels) expect(listed.some((t) => t.startsWith(titles[l]!)), `${l} listed`).toBe(true);
       expect(disclosure).toContain('1 background task is still running and will be stopped');
       expect(afterCancel).toEqual(before);
     });
