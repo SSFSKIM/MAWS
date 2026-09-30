@@ -179,3 +179,25 @@ US$3.89 of the US$15 limit: US$2.57 from the journals' result.total_cost_usd (an
 may include the cost it restored), US$1.32 from terminal runs (the `-p` runs' reported cost, US$0.90, and three
 interactive or background runs estimated from their transcripts' token usage at Sonnet prices, US$0.42; one of the
 `-p` runs, US$0.23, was the diagnosis of the resume stall). Per-run figures: prerun-run.json "spend" and "terminalUsd".
+
+Review re-run (2026-09-30, after the M6 task review)
+----------------------------------------------------
+The review found observations that were recorded but not asserted. The spec now asserts each one (82b0c2c1), ends a
+terminal engine whose prompt never shows and stops a background job whatever the app's cleanup does (2641b237), and
+records the monitor recipe (f498dba9). Only the affected pieces were re-run, under a fresh scratch root
+/private/tmp/maws-c12-prerun-1790768985 (removed afterwards). The same rules applied: the relay answered 200, the
+owner-file check read `[]` before and after each of the six tests, the pin's `ls -l` did not change, and every block
+started at a load between 16.8 and 19.9 (under 20). The build was the same owner build: the master merge that landed
+since changed no product source. The record is prerun-review-run.json. The screenshots of the re-run pieces replace
+the earlier ones under the same names.
+| Piece | Now asserted, and what the re-run observed |
+| §10.1 (the PTY helper's change) | passed as before. |
+| §10.2 | A fresh launch through the card: the repository read untrusted before, the trust card showed with no engine running, and the setup went worktree, trusting, trusting, launching, ready. Afterwards main's trust read gives trusted (key kind repo), written to the scratch home's config. A launch sent initialize.workspaceTrust {accepted: true, directory: repos/deep}. The SessionStart hook ran 2 times for MAWS's launches and once more for the terminal run. The allow rule Bash(echo C12_SENTINEL:*) is listed. MCP servers, commands, agents and plugins are identical to the terminal. |
+| §10.4 relay (C8-R) | delivered 4.7 s after Send (the line cleared with the child still running). The inbox had the text at 8.9 s. The child's disk transcript holds the queued_command attachment (origin coordinator). The follow went backfilling → following. The assertion accepts delivered, or forwarded together with the attachment and the follow. |
+| §10.4 monitor (C8's sitting item) | The prompt in owner-script.txt step 14 ran in the deep session. The engine offered no Monitor tool: `ToolSearch select:Monitor` found none, because the tool sits behind the gate tengu_amber_sentinel, default off on 2.1.283. The session replied MONITOR UNAVAILABLE. Recorded as unavailable. An earlier wording of the prompt made the model fall back to a background Bash task instead; that first attempt is under "supersededFailures". |
+| §10.6 Send-to-resume | Trees 210, 209.3 and 212.7 MiB against a budget of 527 MiB. X1 was released 0.37 s after the budget was set. Send took 0.91 s to ready. Exactly one user frame, the reply "X1 BACK", reconnect process_exit. |
+| §10.9 Queue, Stop and Resume | The queued message reached the wire exactly once. The paused message reached it 0 times before Resume and exactly once after. |
+| C8 item 9 (the job's cleanup) | Attach as before. The job 04f02bdc was stopped ("stopped 04f02bdc") in the test's outer finally, and its daemon exited 5 s later. |
+| Console errors | Asserted empty for every window a test opens. The re-run's six tests read [] throughout, and every earlier test recorded []. |
+Re-run spend: US$1.74. That is US$1.18 from the journals and US$0.56 from terminal runs (the -p runs, plus the PTY and --bg runs estimated as before).
+Pre-run total: US$5.63 of the US$15 limit.
