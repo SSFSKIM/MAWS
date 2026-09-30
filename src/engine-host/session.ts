@@ -448,7 +448,8 @@ export class EngineSession {
       this.handleExit({ code: null, signal: null }); // stopped while the state loaded: never spawn (idempotent)
       return;
     }
-    if (this.reconnect) this.record('meta', { event: 'reconnect', phase: 'attempting', attempt: 1, maxAttempts: 1, trigger: this.reconnectTrigger, reason: null });
+    if (this.reconnect) this.record('meta', { event: 'reconnect', phase: 'attempting', ...this.attempt, trigger: this.reconnectTrigger, reason: this.spec.retry?.reason ?? null });
+    if (this.spec.retry) this.notice('launch:retry', `${this.spec.retry.reason} Trying once more (attempt ${this.spec.retry.attempt} of ${this.spec.retry.maxAttempts}).`); // C3 corrective
     this.record('meta', spawnMeta(this.plan, { appVersion: this.opts.appVersion ?? 'unknown' }));
     if (this.opts.relayHealth) this.record('meta', { event: 'relay_health', ...this.opts.relayHealth });
     let transport: EngineTransport;
@@ -512,7 +513,7 @@ export class EngineSession {
     if (this.processState !== 'initializing') return;
     this.handshakeDone = true;
     this.record('meta', { event: 'initialize', current_permission_mode: init.current_permission_mode, session_state: init.session_state ?? null, hooks_applied: init.hooks_applied ?? null, workspace_trust_recorded: init.workspace_trust_recorded ?? null });
-    if (this.reconnect) this.record('meta', { event: 'reconnect', phase: 'reconnected', attempt: 1, maxAttempts: 1, trigger: this.reconnectTrigger, reason: null });
+    if (this.reconnect) this.record('meta', { event: 'reconnect', phase: 'reconnected', ...this.attempt, trigger: this.reconnectTrigger, reason: null });
     this.tracker.initialize(init);
     this.publishCatalog(); // C7
     // C10 start: trust into the status; the model list to the catalogue cache
@@ -777,6 +778,11 @@ export class EngineSession {
     }
   }
 
+  // C3 corrective: the reconnect rows' attempt, main's retry of a silent resume (`spec.retry`) or the one attempt
+  private get attempt(): { attempt: number; maxAttempts: number } {
+    return { attempt: this.spec.retry?.attempt ?? 1, maxAttempts: this.spec.retry?.maxAttempts ?? 1 };
+  }
+
   // C12: `process_exit` for the first launch of an id after its release (the process table's released ids), else `user`
   private get reconnectTrigger(): 'user' | 'process_exit' {
     return this.opts.reconnectTrigger ?? 'user';
@@ -813,7 +819,7 @@ export class EngineSession {
     this.initFailed = true;
     const detail = this.stderrTail.length > 0 ? `${message}\n${this.stderrTail.join('\n')}` : message;
     this.record('meta', { event: 'init_failed', message: detail, code });
-    if (this.reconnect) this.record('meta', { event: 'reconnect', phase: 'failed', attempt: 1, maxAttempts: 1, trigger: this.reconnectTrigger, reason: detail });
+    if (this.reconnect) this.record('meta', { event: 'reconnect', phase: 'failed', ...this.attempt, trigger: this.reconnectTrigger, reason: detail });
   }
 
   // The process's one ladder (session-ladder.ts); with no process yet it answers the stop result at once.

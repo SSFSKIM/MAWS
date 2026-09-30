@@ -10,11 +10,16 @@ import type { SetupEvent, SetupResources } from '@shared/sessions/setup';
 import type { StartOptions } from '@shared/ipc/schema/session';
 import { hostCall, pathExists, transcriptPathOf } from './context';
 import { holderAuthority } from './holders';
-import { LaunchWatch } from './launch-watch';
+import { LaunchWatch, type LaunchEnd } from './launch-watch';
 import { resumeLaunchSpec } from './launch-mapping';
 import { passLaunchGate, runBootstrap } from './setup'; // C12: passLaunchGate
 import { exitFailure, heldOutcome, HeldFailure, messageOf, RelayFailure, SetupFailure, setupEvent, stopQuietly, takeReplay, WatchdogFailure, type Setup } from './setup-steps';
 import { trustStateOf } from './trust';
+
+// C3 corrective: the host's code for an engine that wrote nothing before its first-output bound, and what the retry says
+const NO_OUTPUT = 'no_output';
+export const RETRY_REASON = 'The engine gave no output for 30 s.';
+export const RETRY_DETAIL = 'No output from the engine for 30 s · trying once more';
 
 export async function runResume(
   s: Setup,
@@ -52,13 +57,26 @@ export async function runResume(
       });
     }
     const fixture = takeReplay(s, 'launching');
-    const spec = resumeLaunchSpec(record, input.options, { trust: attestation, replay: fixture?.path ?? null }, s.settings());
-    watch = new LaunchWatch(s, appSessionId);
-    const answer = await hostCall(s.dispatch, 'session.launch', { spec });
-    if (answer.status === 'relay_unreachable') throw new RelayFailure(answer.health);
-    if (answer.status === 'refused') throw new SetupFailure('launching', `${answer.reason}: ${answer.message}`);
-    launched = true;
-    const end = await watch.untilReady();
+    let spec = resumeLaunchSpec(record, input.options, { trust: attestation, replay: fixture?.path ?? null }, s.settings());
+    let end: LaunchEnd;
+    let previousLaunchId: string | null = null;
+    for (;;) {
+      watch = new LaunchWatch(s, appSessionId, previousLaunchId);
+      const answer = await hostCall(s.dispatch, 'session.launch', { spec });
+      if (answer.status === 'relay_unreachable') throw new RelayFailure(answer.health);
+      if (answer.status === 'refused') throw new SetupFailure('launching', `${answer.reason}: ${answer.message}`);
+      launched = true;
+      previousLaunchId = answer.session.launchId;
+      end = await watch.untilReady();
+      // C3 corrective: an engine that wrote nothing at all (`init_failed { no_output }`) touched nothing of the session,
+      // so the resume launches once more, visibly (the host journals the retry's reconnect rows and a notice); never
+      // chained, and the retry's own failure is told as any other
+      if (end.kind !== 'exited' || spec.retry !== undefined || !end.codes.includes(NO_OUTPUT)) break;
+      watch.dispose();
+      watch = null;
+      setupEvent(s, appSessionId, 'launching', RETRY_DETAIL);
+      spec = { ...spec, retry: { attempt: 2, maxAttempts: 2, reason: RETRY_REASON } };
+    }
     if (end.kind === 'timeout') throw new WatchdogFailure();
     if (end.kind === 'exited') throw exitFailure(end.errors);
     let firstTurn: 'sent' | 'queued' | 'none' = 'none';

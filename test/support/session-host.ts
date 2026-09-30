@@ -25,7 +25,7 @@ export interface LaunchScript {
   answer?: 'launching' | { relay: RelayHealth } | { refused: Extract<LaunchResult, { status: 'refused' }>['reason']; message: string };
   ready?: boolean; // false: the launch hangs in `initializing` (no ready, no exit)
   recorded?: boolean | null; // the initialize response's workspace_trust_recorded
-  exit?: { error: string }; // the process exits before ready, having raised `error.raised { scope: 'process' }` with this text
+  exit?: { error: string; code?: string }; // the process exits before ready, having raised `error.raised { scope: 'process' }` with this text (and code, default `exited`)
   onReady?: (spec: LaunchSpec, engineSessionId: SessionId) => void | Promise<void>; // e.g. write the transcript a launch would
 }
 
@@ -257,7 +257,7 @@ export class FakeEngineHost {
     if (this.table.get(spec.appSessionId) !== base) return;
     this.setStatus({ ...base, process: 'initializing' });
     if (script.exit) {
-      this.batch(spec.appSessionId, [{ kind: 'error.raised', scope: 'process', message: script.exit.error, code: 'exited', toolUseId: null, taskId: null, requestId: null }]);
+      this.batch(spec.appSessionId, [{ kind: 'error.raised', scope: 'process', message: script.exit.error, code: script.exit.code ?? 'exited', toolUseId: null, taskId: null, requestId: null }]);
       this.setStatus({ ...base, process: 'exited', exit: { code: 1, signal: null, reason: 'crash', at: T0, release: null /* C12 */ } });
       this.batch(spec.appSessionId, [{ kind: 'process.exited', code: 1, signal: null, reason: 'crash', lostAttentionCount: 0, budget: null /* C12 */ }]);
       return;

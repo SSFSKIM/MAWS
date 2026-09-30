@@ -404,37 +404,74 @@ test.describe('sessions', () => {
     expect(value(await invoke(page, 'session.get', { appSessionId: gone.appId }))).toBeNull();
   });
 
-  // C3 corrective (2026-09-30 ledger): a resume whose engine writes nothing at all (the C12 pre-run's stall) fails at the
-  // 30 s first-output bound, not at the long class's 120 s; the reason reaches the owner, and the row offers Resume
-  // again. The engine is a stub under the Engine setting's binary path: it answers `--version` as the pin and otherwise
-  // writes nothing and never reads its stdin.
-  test('a resume whose engine writes nothing fails at 30 s with the reason shown, and the row can be resumed again', async () => {
-    test.setTimeout(150_000);
+  // C3 corrective (2026-09-30 ledger): a resume whose engine writes nothing at all (the C12 pre-run's stall) fails its
+  // launch at the 30 s first-output bound, not at the long class's 120 s, and main launches it once more, visibly (the
+  // retry's reconnect rows read attempt 2 of 2, and a notice). The engine is a stub under the Engine setting's binary
+  // path: it answers `--version` as the pin; a silent spawn writes nothing and never reads its stdin; an answering one
+  // (a node script) answers `initialize` with the fields the host requires and every other request with an error.
+  async function silentResume(answerSecond: boolean) {
     const repo = await ScratchRepo.create();
     const store = await StoreFixture.create();
     const sid = '5e551011-0000-4000-8000-0000000000c3';
     await store.addTranscript(repo.root, sid, [{ type: 'user', uuid: `u-${sid}`, parentUuid: null, cwd: repo.root, sessionId: sid, timestamp: '2026-09-30T10:00:00.000Z', message: { role: 'user', content: 'resume me' } }]);
+    const answering = join(store.configHome, 'stub-engine.mjs');
+    writeFileSync(answering, [
+      "import { createInterface } from 'node:readline';",
+      "const out = (f) => process.stdout.write(JSON.stringify(f) + '\\n');",
+      "createInterface({ input: process.stdin }).on('line', (line) => {",
+      '  const f = JSON.parse(line);',
+      "  if (f.type !== 'control_request') return;",
+      "  if (f.request.subtype === 'initialize') out({ type: 'control_response', response: { subtype: 'success', request_id: f.request_id, response: { commands: [], current_permission_mode: 'default' } } });",
+      "  else out({ type: 'control_response', response: { subtype: 'error', request_id: f.request_id, error: 'stub' } });",
+      "}).on('close', () => process.exit(0));",
+    ].join('\n'));
+    const mark = join(store.configHome, 'stub-spawned-once');
     const stub = join(store.configHome, 'stub-engine.sh');
-    writeFileSync(stub, '#!/bin/sh\nif [ "$1" = "--version" ]; then echo "2.1.283 (Claude Code)"; exit 0; fi\nexec sleep 300\n');
+    const second = answerSecond ? `exec "${process.execPath}" "${answering}"` : 'exec sleep 300';
+    writeFileSync(stub, `#!/bin/sh\nif [ "$1" = "--version" ]; then echo "2.1.283 (Claude Code)"; exit 0; fi\nif [ ! -e "${mark}" ]; then touch "${mark}"; exec sleep 300; fi\n${second}\n`);
     chmodSync(stub, 0o755);
     const launched = await launchCase({ fixtures: [], trusted: [repo.root], store });
     current = { ...launched, repos: [repo] };
-    const { page, maws } = launched;
+    const { page } = launched;
     value(await invoke(page, 'settings.set', { engine: { binaryPath: stub } }));
     await expect.poll(async () => value(await invoke(page, 'session.list', {})).sessions.some((r) => r.engineSessionId === sid), { timeout: 20_000 }).toBe(true);
     const record = value(await invoke(page, 'session.list', {})).sessions.find((r) => r.engineSessionId === sid)!;
     const startedAt = Date.now();
     expect(value(await invoke(page, 'session.start', { appSessionId: record.appId, message: null, options: { gateway: 'direct' } }))).toMatchObject({ status: 'starting' });
-    await expect.poll(async () => (await setupOf(page, record.appId)).map((e) => e.phase), { timeout: 60_000 }).toContain('failed');
+    return { ...launched, record, startedAt };
+  }
+  const metaRows = (maws: MawsLaunch, id: string) => journal(maws, id).filter((r) => r.direction === 'meta').map((r) => r.frame as Record<string, unknown>);
+
+  test('a resume whose engine writes nothing on its first spawn is launched once more and reaches ready, the retry visible in its rows and notice', async () => {
+    test.setTimeout(150_000);
+    const { page, maws, record, startedAt } = await silentResume(true);
+    await expect.poll(async () => (await setupOf(page, record.appId)).map((e) => e.phase), { timeout: 90_000 }).toContain('ready');
+    expect(Date.now() - startedAt, 'one first-output bound, then the retry').toBeGreaterThanOrEqual(29_000);
+    expect((await setupOf(page, record.appId)).map((e) => [e.phase, e.detail])).toEqual([['launching', 'Starting'], ['launching', 'No output from the engine for 30 s · trying once more'], ['ready', null]]);
+    const metas = metaRows(maws, record.appId);
+    expect(metas.filter((m) => m.event === 'spawn'), 'two spawn rows').toHaveLength(2);
+    expect(metas.filter((m) => m.event === 'init_failed').map((m) => m.code)).toEqual(['no_output']);
+    expect(metas.find((m) => m.event === 'notice')).toMatchObject({ key: 'launch:retry', text: 'The engine gave no output for 30 s. Trying once more (attempt 2 of 2).' });
+    expect(metas.find((m) => m.event === 'reconnect' && m.phase === 'reconnected')).toMatchObject({ attempt: 2, maxAttempts: 2 });
+    expect(value(await invoke(page, 'session.status', { appSessionId: record.appId }))).toMatchObject({ process: 'ready' });
+    const events = value(await invoke(page, 'session.events', { appSessionId: record.appId, afterSeq: null, limit: null })).events;
+    expect(events.filter((e) => e.kind === 'notice.posted').map((e) => (e as { key: string }).key), 'the notice reaches the session’s events').toContain('launch:retry');
+  });
+
+  test('a resume whose engine writes nothing twice fails for good with the reason shown, and the row can be resumed again', async () => {
+    test.setTimeout(180_000);
+    const { page, maws, record, startedAt } = await silentResume(false);
+    await expect.poll(async () => (await setupOf(page, record.appId)).map((e) => e.phase), { timeout: 120_000 }).toContain('failed');
     const failedAfterMs = Date.now() - startedAt;
-    expect(failedAfterMs, 'the handshake bound, well before the long class’s 120 s').toBeGreaterThanOrEqual(29_000);
-    expect(failedAfterMs).toBeLessThan(60_000);
+    expect(failedAfterMs, 'two first-output bounds, each well before the long class’s 120 s').toBeGreaterThanOrEqual(58_000);
+    expect(failedAfterMs).toBeLessThan(110_000);
     const failure = (await setupOf(page, record.appId)).find((e) => e.phase === 'failed')!;
     expect(failure.outcome).toMatchObject({ kind: 'error' });
     expect(failure.outcome!.message).toContain('the engine wrote nothing in the 30 s after it started');
     await expect(page.getByText('the engine wrote nothing in the 30 s after it started', { exact: false }).first(), 'the owner sees the reason').toBeVisible();
-    const rows = journal(maws, record.appId).filter((r) => r.direction === 'meta').map((r) => r.frame.event);
-    expect(rows).toEqual(['reconnect', 'spawn', 'init_failed', 'reconnect', 'exit']);
+    const metas = metaRows(maws, record.appId);
+    expect(metas.filter((m) => m.event === 'spawn'), 'one retry, never chained').toHaveLength(2);
+    expect(metas.filter((m) => m.event === 'init_failed').map((m) => m.code)).toEqual(['no_output', 'no_output']);
     expect(value(await invoke(page, 'session.status', { appSessionId: record.appId }))).toMatchObject({ process: 'exited', exit: { reason: 'crash' } });
     await row(page, record.appId).click({ button: 'right' });
     await expect(page.getByRole('menuitem', { name: 'Resume', exact: true }), 'the row can be resumed again').toBeEnabled();

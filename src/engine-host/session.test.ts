@@ -693,6 +693,20 @@ describe('failed initialize terminates the process', () => {
     expect(journal.rows.some((r) => (r.frame as { event?: string }).event === 'init_failed')).toBe(false);
   });
 
+  it('main’s retry of a silent resume (spec.retry) journals its reconnect rows as attempt 2 of 2 with the reason and a notice before the spawn', async () => {
+    const { session, journal, events } = setup({
+      spec: { resume: { sessionId: '44444444-4444-4444-8444-444444444444' as LaunchSpec['sessionId'] & string, fork: false }, sessionId: null, retry: { attempt: 2, maxAttempts: 2, reason: 'The engine gave no output for 30 s.' } },
+    });
+    await session.start();
+    expect(session.status().process).toBe('ready');
+    expect(metaEvents(journal).slice(0, 4)).toEqual(['reconnect', 'notice', 'spawn', 'initialize']);
+    const metas = journal.rows.filter((r) => r.direction === 'meta').map((r) => r.frame as Record<string, unknown>);
+    expect(metas[0]).toMatchObject({ event: 'reconnect', phase: 'attempting', attempt: 2, maxAttempts: 2, reason: 'The engine gave no output for 30 s.' });
+    expect(metas[1]).toMatchObject({ event: 'notice', key: 'launch:retry', text: 'The engine gave no output for 30 s. Trying once more (attempt 2 of 2).' });
+    expect(metas.find((m) => m.event === 'reconnect' && m.phase === 'reconnected')).toMatchObject({ attempt: 2, maxAttempts: 2 });
+    expect(events.filter((e) => e.kind === 'notice.posted')).toMatchObject([{ key: 'launch:retry' }]);
+  });
+
   it('an engine that has written anything (a hook frame, a stderr line) is past the silence bound: its initialize keeps the long deadline', async () => {
     vi.useFakeTimers();
     for (const speak of ['frame', 'stderr'] as const) {

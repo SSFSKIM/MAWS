@@ -5,7 +5,8 @@ import type { EngineSessionStatus } from '@shared/engine/status';
 import { hostCall } from './context';
 import type { Setup } from './setup-steps';
 
-export type LaunchEnd = { kind: 'ready'; status: EngineSessionStatus } | { kind: 'exited'; errors: string[] } | { kind: 'timeout' };
+// `codes`: the process errors' codes, beside their messages (C3 corrective: `no_output` earns a resume one retry)
+export type LaunchEnd = { kind: 'ready'; status: EngineSessionStatus } | { kind: 'exited'; errors: string[]; codes: (string | null)[] } | { kind: 'timeout' };
 
 // One launch's statuses and exit, from the moment before `session.launch` (so nothing it reports is missed). The
 // watchdog restarts at every status: a launch that reports nothing for `watchdogMs` has timed out.
@@ -14,6 +15,7 @@ export class LaunchWatch {
   private exited = false;
   private halted = false;
   private readonly errors: string[] = [];
+  private readonly codes: (string | null)[] = [];
   private readonly offs: (() => void)[];
   private wake: (() => void) | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
@@ -21,11 +23,13 @@ export class LaunchWatch {
   constructor(
     private readonly s: Setup,
     readonly appSessionId: AppSessionId,
+    // C3 corrective: a retry's watch ignores the launch it replaces, whose last statuses may still arrive after its exit
+    private readonly previousLaunchId: string | null = null,
   ) {
     s.watches.add(this);
     this.offs = [
       s.onEvent('session.status', ({ appSessionId: id, status }) => {
-        if (id !== appSessionId) return;
+        if (id !== appSessionId || (previousLaunchId !== null && status.launchId === previousLaunchId)) return;
         this.last = status;
         if (status.process === 'exited' || status.exit !== null) this.exited = true;
         this.poke();
@@ -38,7 +42,9 @@ export class LaunchWatch {
           // `process.exited` (seq null) for a last turn that never ended; counted, it failed the resume and stopped the
           // process it had just launched.
           if (event.seq === null) continue;
-          if (event.kind === 'error.raised' && event.scope === 'process') this.errors.push(event.message);
+          if (previousLaunchId !== null && event.id.startsWith(`${appSessionId}:${previousLaunchId}:`)) continue; // live ids name their launch
+
+          if (event.kind === 'error.raised' && event.scope === 'process') this.noteError(event.message, event.code);
           if (event.kind === 'process.exited') this.exited = true;
         }
         this.poke();
@@ -48,7 +54,7 @@ export class LaunchWatch {
 
   async untilReady(): Promise<LaunchEnd> {
     for (;;) {
-      if (this.exited) return { kind: 'exited', errors: await this.exitErrors() };
+      if (this.exited) return { kind: 'exited', errors: await this.exitErrors(), codes: this.codes };
       if (this.last?.process === 'ready') return { kind: 'ready', status: this.last };
       if (await this.nextChange(this.s.watchdogMs)) return { kind: 'timeout' };
     }
@@ -97,13 +103,18 @@ export class LaunchWatch {
     });
   }
 
+  private noteError(message: string, code: string | null): void {
+    this.errors.push(message);
+    this.codes.push(code);
+  }
+
   // The process-scope errors the exit came with: C3 batches events, so a snapshot of the session's ring fills in what
   // the batch has not delivered yet.
   private async exitErrors(): Promise<string[]> {
     if (this.errors.length > 0) return this.errors;
     try {
       const snapshot = await hostCall(this.s.dispatch, 'session.events', { appSessionId: this.appSessionId, afterSeq: null, limit: null });
-      for (const event of snapshot.events) if (event.kind === 'error.raised' && event.scope === 'process') this.errors.push(event.message);
+      for (const event of snapshot.events) if (event.kind === 'error.raised' && event.scope === 'process' && event.seq !== null) this.noteError(event.message, event.code);
     } catch {
       // nothing more to learn
     }

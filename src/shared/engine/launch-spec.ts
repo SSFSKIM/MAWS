@@ -29,5 +29,10 @@ export const LaunchSpecSchema = z.strictObject({
   // as this session's, and re-applies it in the resume rung (C10 execution document, Interfaces "X6 extensions").
   inheritGrantsFrom: AppSessionIdSchema.nullable(),
   // C10 end
+  // C3 corrective start (additive X6, flagged to the architect; 2026-09-30 ledger): the one automatic retry of a resume
+  // whose engine wrote nothing (`init_failed { no_output }`). The host journals the launch's reconnect rows as this
+  // attempt of `maxAttempts` with the reason, and a notice saying MAWS is trying once more. Absent on every other launch.
+  retry: z.strictObject({ attempt: z.number().int().positive(), maxAttempts: z.number().int().positive(), reason: z.string() }).optional(),
+  // C3 corrective end
 });
 export type LaunchSpec = z.infer<typeof LaunchSpecSchema>;
