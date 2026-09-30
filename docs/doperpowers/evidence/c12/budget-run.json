@@ -1,11 +1,11 @@
 {
   "scratch": {
-    "root": "/private/tmp/maws-c12-m3-1790743220",
-    "config": "/private/tmp/maws-c12-m3-1790743220/config",
-    "userData": "/private/tmp/maws-c12-m3-1790743220/userData",
+    "root": "/private/tmp/maws-c12-m3-1790746419",
+    "config": "/private/tmp/maws-c12-m3-1790746419/config",
+    "userData": "/private/tmp/maws-c12-m3-1790746419/userData",
     "repositories": {
-      "A": "/private/tmp/maws-c12-m3-1790743220/A",
-      "B": "/private/tmp/maws-c12-m3-1790743220/B"
+      "A": "/private/tmp/maws-c12-m3-1790746419/A",
+      "B": "/private/tmp/maws-c12-m3-1790746419/B"
     }
   },
   "ownerFileCheck": {
@@ -17,15 +17,15 @@
     "after": "-rwxr-xr-x@ 1 new  staff  225036032  9월 25 15:10 ~/.local/share/claude/versions/2.1.283"
   },
   "sessions": {
-    "A1": "b2ae60ba-92a4-4fb7-9504-955b28a5f9d8",
-    "A2": "423888be-f63c-4002-8064-b1035b8e66c2",
-    "B1": "76259f8e-69bf-4487-baa4-f9f27bb9c80f",
-    "B3": "f4b8b22c-6bb9-4363-8416-1f38bd6a6e7a",
-    "B4": "d942bc97-14c5-42c6-bcda-f8e9ff998535",
-    "B5": "7621beb2-e969-492f-a13f-e1c363ea2d2f",
-    "B6": "961f6453-be50-4b12-a47a-6e46bdc5bd41",
-    "B7": "59471f2d-2785-42c8-8dac-b4f317b1d8c0",
-    "B2": "eee4b592-c92b-49df-b8aa-69e47c569842"
+    "A1": "61ffa2ca-fe61-4c16-9a08-119b48b771fe",
+    "A2": "e69331b1-f9a0-4a40-bd9d-8bd23ddacc93",
+    "B1": "21bcffd4-33c5-48ae-a9a4-47c8fd0c852d",
+    "B3": "906fca3e-96ba-438e-9b53-79b4af8a618c",
+    "B4": "b76109da-dd3e-4657-ae0c-cab7b656b6eb",
+    "B5": "1f44cd70-e303-4db0-b774-d599877e6928",
+    "B6": "3e94f52f-e274-4482-b586-1b6c3ed1a65a",
+    "B7": "dc91313d-2e4f-4a12-aa6a-19b892a7a8bd",
+    "B2": "b863a2b6-89a1-4c1d-859c-109dc079203f"
   },
   "mcpServersA": {
     "A1": [
@@ -72,27 +72,27 @@
   "backgroundB2": {
     "tasks": [
       {
-        "taskId": "bscw66u7i",
+        "taskId": "bbtvcxjs5",
         "taskType": "local_bash",
         "description": "Sleep for 900 seconds in background",
         "ambient": false
       }
     ],
     "sleepPids": [
-      16055
+      69174
     ],
     "inTree": true,
     "anywhere": [
       {
-        "pid": 16055,
-        "ppid": 16053
+        "pid": 69174,
+        "ppid": 69172
       }
     ]
   },
   "budgetBefore": {
     "limitKiB": 8388608,
-    "totalKiB": 2915712,
-    "sampledAt": "2026-09-30T04:41:20.187Z",
+    "totalKiB": 2922448,
+    "sampledAt": "2026-09-30T05:34:49.163Z",
     "over": false,
     "overWithoutCandidate": false,
     "candidates": 4,
@@ -100,32 +100,32 @@
     "releasing": null,
     "blocked": [
       {
-        "appSessionId": "b2ae60ba-92a4-4fb7-9504-955b28a5f9d8",
+        "appSessionId": "61ffa2ca-fe61-4c16-9a08-119b48b771fe",
         "reasons": [
           "stateful_mcp"
         ]
       },
       {
-        "appSessionId": "423888be-f63c-4002-8064-b1035b8e66c2",
+        "appSessionId": "e69331b1-f9a0-4a40-bd9d-8bd23ddacc93",
         "reasons": [
           "stateful_mcp"
         ]
       },
       {
-        "appSessionId": "f4b8b22c-6bb9-4363-8416-1f38bd6a6e7a",
+        "appSessionId": "906fca3e-96ba-438e-9b53-79b4af8a618c",
         "reasons": [
           "queued_messages"
         ]
       },
       {
-        "appSessionId": "d942bc97-14c5-42c6-bcda-f8e9ff998535",
+        "appSessionId": "b76109da-dd3e-4657-ae0c-cab7b656b6eb",
         "reasons": [
           "turn",
           "pending_request"
         ]
       },
       {
-        "appSessionId": "eee4b592-c92b-49df-b8aa-69e47c569842",
+        "appSessionId": "b863a2b6-89a1-4c1d-859c-109dc079203f",
         "reasons": [
           "background_tasks"
         ]
@@ -134,207 +134,216 @@
     "lastRelease": null
   },
   "treesBefore": {
-    "at": "2026-09-30T04:41:23.755Z",
+    "at": "2026-09-30T05:34:51.341Z",
     "liveTrees": 9,
-    "sumKiB": 2915712,
-    "sumMiB": 2847.4,
-    "psSumKiB": 2915568,
-    "psSumMiB": 2847.2,
+    "sumKiB": 2922448,
+    "sumMiB": 2854,
+    "psSumKiB": 2922464,
+    "psSumMiB": 2854,
     "perTree": [
       {
         "label": "A1",
-        "appSessionId": "b2ae60ba-92a4-4fb7-9504-955b28a5f9d8",
+        "appSessionId": "61ffa2ca-fe61-4c16-9a08-119b48b771fe",
         "process": "ready",
         "exitReason": null,
-        "pid": 13504,
-        "treeRssKiB": 357216,
-        "sampledAt": "2026-09-30T04:41:20.187Z",
+        "pid": 63708,
+        "treeRssKiB": 352624,
+        "sampledAt": "2026-09-30T05:34:49.163Z",
         "keepAlive": [
           "stateful_mcp"
         ],
         "ps": {
-          "treeRssKiB": 357216,
+          "treeRssKiB": 352624,
           "processes": 3,
           "commands": [
             "2.1.283",
             "node",
             "node"
-          ]
+          ],
+          "mcpServers": 2
         }
       },
       {
         "label": "A2",
-        "appSessionId": "423888be-f63c-4002-8064-b1035b8e66c2",
+        "appSessionId": "e69331b1-f9a0-4a40-bd9d-8bd23ddacc93",
         "process": "ready",
         "exitReason": null,
-        "pid": 13656,
-        "treeRssKiB": 355104,
-        "sampledAt": "2026-09-30T04:41:20.187Z",
+        "pid": 63984,
+        "treeRssKiB": 354528,
+        "sampledAt": "2026-09-30T05:34:49.163Z",
         "keepAlive": [
           "stateful_mcp"
         ],
         "ps": {
-          "treeRssKiB": 355104,
+          "treeRssKiB": 354528,
           "processes": 3,
           "commands": [
             "2.1.283",
             "node",
             "node"
-          ]
+          ],
+          "mcpServers": 2
         }
       },
       {
         "label": "B1",
-        "appSessionId": "76259f8e-69bf-4487-baa4-f9f27bb9c80f",
+        "appSessionId": "21bcffd4-33c5-48ae-a9a4-47c8fd0c852d",
         "process": "ready",
         "exitReason": null,
-        "pid": 13891,
-        "treeRssKiB": 316640,
-        "sampledAt": "2026-09-30T04:41:20.187Z",
+        "pid": 64486,
+        "treeRssKiB": 316928,
+        "sampledAt": "2026-09-30T05:34:49.163Z",
         "keepAlive": [],
         "ps": {
-          "treeRssKiB": 316496,
+          "treeRssKiB": 316928,
           "processes": 2,
           "commands": [
             "2.1.283",
             "node"
-          ]
+          ],
+          "mcpServers": 1
         }
       },
       {
         "label": "B2",
-        "appSessionId": "eee4b592-c92b-49df-b8aa-69e47c569842",
+        "appSessionId": "b863a2b6-89a1-4c1d-859c-109dc079203f",
         "process": "ready",
         "exitReason": null,
-        "pid": 15591,
-        "treeRssKiB": 324624,
-        "sampledAt": "2026-09-30T04:41:20.187Z",
+        "pid": 68362,
+        "treeRssKiB": 321328,
+        "sampledAt": "2026-09-30T05:34:49.163Z",
         "keepAlive": [
           "background_tasks"
         ],
         "ps": {
-          "treeRssKiB": 324624,
+          "treeRssKiB": 321344,
           "processes": 4,
           "commands": [
             "2.1.283",
             "node",
             "zsh",
             "sleep"
-          ]
+          ],
+          "mcpServers": 1
         }
       },
       {
         "label": "B3",
-        "appSessionId": "f4b8b22c-6bb9-4363-8416-1f38bd6a6e7a",
+        "appSessionId": "906fca3e-96ba-438e-9b53-79b4af8a618c",
         "process": "ready",
         "exitReason": null,
-        "pid": 14461,
-        "treeRssKiB": 309664,
-        "sampledAt": "2026-09-30T04:41:20.187Z",
+        "pid": 66239,
+        "treeRssKiB": 309424,
+        "sampledAt": "2026-09-30T05:34:49.163Z",
         "keepAlive": [
           "queued_messages"
         ],
         "ps": {
-          "treeRssKiB": 309664,
+          "treeRssKiB": 309424,
           "processes": 2,
           "commands": [
             "2.1.283",
             "node"
-          ]
+          ],
+          "mcpServers": 1
         }
       },
       {
         "label": "B4",
-        "appSessionId": "d942bc97-14c5-42c6-bcda-f8e9ff998535",
+        "appSessionId": "b76109da-dd3e-4657-ae0c-cab7b656b6eb",
         "process": "ready",
         "exitReason": null,
-        "pid": 14921,
-        "treeRssKiB": 310496,
-        "sampledAt": "2026-09-30T04:41:20.187Z",
+        "pid": 67064,
+        "treeRssKiB": 309008,
+        "sampledAt": "2026-09-30T05:34:49.163Z",
         "keepAlive": [
           "turn",
           "pending_request"
         ],
         "ps": {
-          "treeRssKiB": 310496,
+          "treeRssKiB": 309008,
           "processes": 2,
           "commands": [
             "2.1.283",
             "node"
-          ]
+          ],
+          "mcpServers": 1
         }
       },
       {
         "label": "B5",
-        "appSessionId": "7621beb2-e969-492f-a13f-e1c363ea2d2f",
+        "appSessionId": "1f44cd70-e303-4db0-b774-d599877e6928",
         "process": "ready",
         "exitReason": null,
-        "pid": 15043,
-        "treeRssKiB": 312768,
-        "sampledAt": "2026-09-30T04:41:20.187Z",
+        "pid": 67418,
+        "treeRssKiB": 318256,
+        "sampledAt": "2026-09-30T05:34:49.163Z",
         "keepAlive": [],
         "ps": {
-          "treeRssKiB": 312768,
+          "treeRssKiB": 318256,
           "processes": 2,
           "commands": [
             "2.1.283",
             "node"
-          ]
+          ],
+          "mcpServers": 1
         }
       },
       {
         "label": "B6",
-        "appSessionId": "961f6453-be50-4b12-a47a-6e46bdc5bd41",
+        "appSessionId": "3e94f52f-e274-4482-b586-1b6c3ed1a65a",
         "process": "ready",
         "exitReason": null,
-        "pid": 15203,
-        "treeRssKiB": 314256,
-        "sampledAt": "2026-09-30T04:41:20.187Z",
+        "pid": 67773,
+        "treeRssKiB": 322832,
+        "sampledAt": "2026-09-30T05:34:49.163Z",
         "keepAlive": [],
         "ps": {
-          "treeRssKiB": 314256,
+          "treeRssKiB": 322832,
           "processes": 2,
           "commands": [
             "2.1.283",
             "node"
-          ]
+          ],
+          "mcpServers": 1
         }
       },
       {
         "label": "B7",
-        "appSessionId": "59471f2d-2785-42c8-8dac-b4f317b1d8c0",
+        "appSessionId": "dc91313d-2e4f-4a12-aa6a-19b892a7a8bd",
         "process": "ready",
         "exitReason": null,
-        "pid": 15474,
-        "treeRssKiB": 314944,
-        "sampledAt": "2026-09-30T04:41:20.187Z",
+        "pid": 68073,
+        "treeRssKiB": 317520,
+        "sampledAt": "2026-09-30T05:34:49.163Z",
         "keepAlive": [],
         "ps": {
-          "treeRssKiB": 314944,
+          "treeRssKiB": 317520,
           "processes": 2,
           "commands": [
             "2.1.283",
             "node"
-          ]
+          ],
+          "mcpServers": 1
         }
       }
     ]
   },
   "firstRelease": {
-    "limitMiB": 2547,
-    "sumMiB": 2847,
-    "setAt": "2026-09-30T04:41:23.768Z",
-    "exitAt": "2026-09-30T04:41:23.960Z",
-    "secondsAfterSet": 0.192,
+    "limitMiB": 2553,
+    "sumMiB": 2853,
+    "setAt": "2026-09-30T05:34:51.361Z",
+    "exitAt": "2026-09-30T05:34:51.542Z",
+    "secondsAfterSet": 0.181,
     "release": {
-      "limitKiB": 2608128,
-      "totalKiB": 2915712
+      "limitKiB": 2614272,
+      "totalKiB": 2922448
     }
   },
   "budgetAfter": {
-    "limitKiB": 2608128,
-    "totalKiB": 2598992,
-    "sampledAt": "2026-09-30T04:41:50.190Z",
+    "limitKiB": 2614272,
+    "totalKiB": 2605616,
+    "sampledAt": "2026-09-30T05:35:19.158Z",
     "over": false,
     "overWithoutCandidate": false,
     "candidates": 3,
@@ -342,219 +351,227 @@
     "releasing": null,
     "blocked": [
       {
-        "appSessionId": "b2ae60ba-92a4-4fb7-9504-955b28a5f9d8",
+        "appSessionId": "61ffa2ca-fe61-4c16-9a08-119b48b771fe",
         "reasons": [
           "stateful_mcp"
         ]
       },
       {
-        "appSessionId": "423888be-f63c-4002-8064-b1035b8e66c2",
+        "appSessionId": "e69331b1-f9a0-4a40-bd9d-8bd23ddacc93",
         "reasons": [
           "stateful_mcp"
         ]
       },
       {
-        "appSessionId": "f4b8b22c-6bb9-4363-8416-1f38bd6a6e7a",
+        "appSessionId": "906fca3e-96ba-438e-9b53-79b4af8a618c",
         "reasons": [
           "queued_messages"
         ]
       },
       {
-        "appSessionId": "d942bc97-14c5-42c6-bcda-f8e9ff998535",
+        "appSessionId": "b76109da-dd3e-4657-ae0c-cab7b656b6eb",
         "reasons": [
           "turn",
           "pending_request"
         ]
       },
       {
-        "appSessionId": "eee4b592-c92b-49df-b8aa-69e47c569842",
+        "appSessionId": "b863a2b6-89a1-4c1d-859c-109dc079203f",
         "reasons": [
           "background_tasks"
         ]
       }
     ],
     "lastRelease": {
-      "appSessionId": "76259f8e-69bf-4487-baa4-f9f27bb9c80f",
-      "at": "2026-09-30T04:41:23.774Z",
-      "totalKiB": 2915712
+      "appSessionId": "21bcffd4-33c5-48ae-a9a4-47c8fd0c852d",
+      "at": "2026-09-30T05:34:51.368Z",
+      "totalKiB": 2922448
     }
   },
   "treesAfter": {
-    "at": "2026-09-30T04:41:52.171Z",
+    "at": "2026-09-30T05:35:20.778Z",
     "liveTrees": 8,
-    "sumKiB": 2598992,
-    "sumMiB": 2538.1,
-    "psSumKiB": 2599168,
-    "psSumMiB": 2538.3,
+    "sumKiB": 2605616,
+    "sumMiB": 2544.5,
+    "psSumKiB": 2606384,
+    "psSumMiB": 2545.3,
     "perTree": [
       {
         "label": "A1",
-        "appSessionId": "b2ae60ba-92a4-4fb7-9504-955b28a5f9d8",
+        "appSessionId": "61ffa2ca-fe61-4c16-9a08-119b48b771fe",
         "process": "ready",
         "exitReason": null,
-        "pid": 13504,
-        "treeRssKiB": 357248,
-        "sampledAt": "2026-09-30T04:41:50.190Z",
+        "pid": 63708,
+        "treeRssKiB": 352624,
+        "sampledAt": "2026-09-30T05:35:19.158Z",
         "keepAlive": [
           "stateful_mcp"
         ],
         "ps": {
-          "treeRssKiB": 357248,
+          "treeRssKiB": 352624,
           "processes": 3,
           "commands": [
             "2.1.283",
             "node",
             "node"
-          ]
+          ],
+          "mcpServers": 2
         }
       },
       {
         "label": "A2",
-        "appSessionId": "423888be-f63c-4002-8064-b1035b8e66c2",
+        "appSessionId": "e69331b1-f9a0-4a40-bd9d-8bd23ddacc93",
         "process": "ready",
         "exitReason": null,
-        "pid": 13656,
-        "treeRssKiB": 355104,
-        "sampledAt": "2026-09-30T04:41:50.190Z",
+        "pid": 63984,
+        "treeRssKiB": 354528,
+        "sampledAt": "2026-09-30T05:35:19.158Z",
         "keepAlive": [
           "stateful_mcp"
         ],
         "ps": {
-          "treeRssKiB": 355104,
+          "treeRssKiB": 354528,
           "processes": 3,
           "commands": [
             "2.1.283",
             "node",
             "node"
-          ]
+          ],
+          "mcpServers": 2
         }
       },
       {
         "label": "B1",
-        "appSessionId": "76259f8e-69bf-4487-baa4-f9f27bb9c80f",
+        "appSessionId": "21bcffd4-33c5-48ae-a9a4-47c8fd0c852d",
         "process": "exited",
         "exitReason": "budget",
-        "pid": 13891,
+        "pid": 64486,
         "treeRssKiB": null,
-        "sampledAt": "2026-09-30T04:41:20.187Z",
+        "sampledAt": "2026-09-30T05:34:49.163Z",
         "keepAlive": [],
         "ps": null
       },
       {
         "label": "B2",
-        "appSessionId": "eee4b592-c92b-49df-b8aa-69e47c569842",
+        "appSessionId": "b863a2b6-89a1-4c1d-859c-109dc079203f",
         "process": "ready",
         "exitReason": null,
-        "pid": 15591,
-        "treeRssKiB": 325024,
-        "sampledAt": "2026-09-30T04:41:50.190Z",
+        "pid": 68362,
+        "treeRssKiB": 321888,
+        "sampledAt": "2026-09-30T05:35:19.158Z",
         "keepAlive": [
           "background_tasks"
         ],
         "ps": {
-          "treeRssKiB": 325104,
+          "treeRssKiB": 322448,
           "processes": 4,
           "commands": [
             "2.1.283",
             "node",
             "zsh",
             "sleep"
-          ]
+          ],
+          "mcpServers": 1
         }
       },
       {
         "label": "B3",
-        "appSessionId": "f4b8b22c-6bb9-4363-8416-1f38bd6a6e7a",
+        "appSessionId": "906fca3e-96ba-438e-9b53-79b4af8a618c",
         "process": "ready",
         "exitReason": null,
-        "pid": 14461,
-        "treeRssKiB": 309648,
-        "sampledAt": "2026-09-30T04:41:50.190Z",
+        "pid": 66239,
+        "treeRssKiB": 309376,
+        "sampledAt": "2026-09-30T05:35:19.158Z",
         "keepAlive": [
           "queued_messages"
         ],
         "ps": {
-          "treeRssKiB": 309648,
+          "treeRssKiB": 309376,
           "processes": 2,
           "commands": [
             "2.1.283",
             "node"
-          ]
+          ],
+          "mcpServers": 1
         }
       },
       {
         "label": "B4",
-        "appSessionId": "d942bc97-14c5-42c6-bcda-f8e9ff998535",
+        "appSessionId": "b76109da-dd3e-4657-ae0c-cab7b656b6eb",
         "process": "ready",
         "exitReason": null,
-        "pid": 14921,
-        "treeRssKiB": 310448,
-        "sampledAt": "2026-09-30T04:41:50.190Z",
+        "pid": 67064,
+        "treeRssKiB": 308976,
+        "sampledAt": "2026-09-30T05:35:19.158Z",
         "keepAlive": [
           "turn",
           "pending_request"
         ],
         "ps": {
-          "treeRssKiB": 310448,
+          "treeRssKiB": 308976,
           "processes": 2,
           "commands": [
             "2.1.283",
             "node"
-          ]
+          ],
+          "mcpServers": 1
         }
       },
       {
         "label": "B5",
-        "appSessionId": "7621beb2-e969-492f-a13f-e1c363ea2d2f",
+        "appSessionId": "1f44cd70-e303-4db0-b774-d599877e6928",
         "process": "ready",
         "exitReason": null,
-        "pid": 15043,
-        "treeRssKiB": 312624,
-        "sampledAt": "2026-09-30T04:41:50.190Z",
+        "pid": 67418,
+        "treeRssKiB": 318128,
+        "sampledAt": "2026-09-30T05:35:19.158Z",
         "keepAlive": [],
         "ps": {
-          "treeRssKiB": 312720,
+          "treeRssKiB": 318240,
           "processes": 2,
           "commands": [
             "2.1.283",
             "node"
-          ]
+          ],
+          "mcpServers": 1
         }
       },
       {
         "label": "B6",
-        "appSessionId": "961f6453-be50-4b12-a47a-6e46bdc5bd41",
+        "appSessionId": "3e94f52f-e274-4482-b586-1b6c3ed1a65a",
         "process": "ready",
         "exitReason": null,
-        "pid": 15203,
-        "treeRssKiB": 314096,
-        "sampledAt": "2026-09-30T04:41:50.190Z",
+        "pid": 67773,
+        "treeRssKiB": 322704,
+        "sampledAt": "2026-09-30T05:35:19.158Z",
         "keepAlive": [],
         "ps": {
-          "treeRssKiB": 314096,
+          "treeRssKiB": 322800,
           "processes": 2,
           "commands": [
             "2.1.283",
             "node"
-          ]
+          ],
+          "mcpServers": 1
         }
       },
       {
         "label": "B7",
-        "appSessionId": "59471f2d-2785-42c8-8dac-b4f317b1d8c0",
+        "appSessionId": "dc91313d-2e4f-4a12-aa6a-19b892a7a8bd",
         "process": "ready",
         "exitReason": null,
-        "pid": 15474,
-        "treeRssKiB": 314800,
-        "sampledAt": "2026-09-30T04:41:50.190Z",
+        "pid": 68073,
+        "treeRssKiB": 317392,
+        "sampledAt": "2026-09-30T05:35:19.158Z",
         "keepAlive": [],
         "ps": {
-          "treeRssKiB": 314800,
+          "treeRssKiB": 317392,
           "processes": 2,
           "commands": [
             "2.1.283",
             "node"
-          ]
+          ],
+          "mcpServers": 1
         }
       }
     ]
@@ -562,27 +579,27 @@
   "releases": [
     {
       "label": "B1",
-      "appSessionId": "76259f8e-69bf-4487-baa4-f9f27bb9c80f",
-      "at": "2026-09-30T04:41:23.774Z",
-      "totalKiB": 2915712,
-      "totalMiB": 2847.4
+      "appSessionId": "21bcffd4-33c5-48ae-a9a4-47c8fd0c852d",
+      "at": "2026-09-30T05:34:51.368Z",
+      "totalKiB": 2922448,
+      "totalMiB": 2854
     }
   ],
   "releasedSurfaces": {
     "released": [
       "B1"
     ],
-    "markTitle": "Released at 21:41 to stay under the 2.5 GB memory budget · Send resumes it",
+    "markTitle": "Released at 22:34 to stay under the 2.5 GB memory budget · Send resumes it",
     "sessionInfo": {
-      "process": "Released at 21:41 to stay under 2.5 GB",
+      "process": "Released at 22:34 to stay under 2.5 GB",
       "memoryBudget": "2.5 GB of 2.5 GB · 8 sessions"
     },
     "attention": {
       "before": [
-        "d942bc97-14c5-42c6-bcda-f8e9ff998535:aaeaa201-6fdf-47d9-ae60-397eb7ab1b14"
+        "b76109da-dd3e-4657-ae0c-cab7b656b6eb:c8d0242c-fbfe-4ba7-938a-240d0535211d"
       ],
       "after": [
-        "d942bc97-14c5-42c6-bcda-f8e9ff998535:aaeaa201-6fdf-47d9-ae60-397eb7ab1b14"
+        "b76109da-dd3e-4657-ae0c-cab7b656b6eb:c8d0242c-fbfe-4ba7-938a-240d0535211d"
       ]
     },
     "notified": {
@@ -595,10 +612,10 @@
     ]
   },
   "resume": {
-    "sendAt": "2026-09-30T04:41:52.615Z",
+    "sendAt": "2026-09-30T05:35:21.225Z",
     "readySeconds": 0.634,
-    "userFrameSeconds": 0.535,
-    "journalPath": "$C12/userData/engine-host/journal/76259f8e-69bf-4487-baa4-f9f27bb9c80f/4c5ug7wm.jsonl",
+    "userFrameSeconds": 0.549,
+    "journalPath": "$C12/userData/engine-host/journal/21bcffd4-33c5-48ae-a9a4-47c8fd0c852d/vamkdt5o.jsonl",
     "reconnect": [
       {
         "event": "reconnect",
@@ -632,15 +649,15 @@
     ]
   },
   "noCandidate": {
-    "limitMiB": 1518,
-    "protectedMiB": 1618.6,
-    "setAt": "2026-09-30T04:41:57.591Z",
-    "bannerSeconds": 43.031,
+    "limitMiB": 804,
+    "protectedMiB": 1608.8,
+    "setAt": "2026-09-30T05:35:25.699Z",
+    "bannerSeconds": 43.549,
     "banner": "Memory budget exceeded · 5 sessions hold work MAWS will not stop",
     "budget": {
-      "limitKiB": 1554432,
-      "totalKiB": 1661040,
-      "sampledAt": "2026-09-30T04:42:50.196Z",
+      "limitKiB": 823296,
+      "totalKiB": 1651152,
+      "sampledAt": "2026-09-30T05:36:19.163Z",
       "over": true,
       "overWithoutCandidate": true,
       "candidates": 0,
@@ -648,223 +665,228 @@
       "releasing": null,
       "blocked": [
         {
-          "appSessionId": "b2ae60ba-92a4-4fb7-9504-955b28a5f9d8",
+          "appSessionId": "61ffa2ca-fe61-4c16-9a08-119b48b771fe",
           "reasons": [
             "stateful_mcp"
           ]
         },
         {
-          "appSessionId": "423888be-f63c-4002-8064-b1035b8e66c2",
+          "appSessionId": "e69331b1-f9a0-4a40-bd9d-8bd23ddacc93",
           "reasons": [
             "stateful_mcp"
           ]
         },
         {
-          "appSessionId": "f4b8b22c-6bb9-4363-8416-1f38bd6a6e7a",
+          "appSessionId": "906fca3e-96ba-438e-9b53-79b4af8a618c",
           "reasons": [
             "queued_messages"
           ]
         },
         {
-          "appSessionId": "d942bc97-14c5-42c6-bcda-f8e9ff998535",
+          "appSessionId": "b76109da-dd3e-4657-ae0c-cab7b656b6eb",
           "reasons": [
             "turn",
             "pending_request"
           ]
         },
         {
-          "appSessionId": "eee4b592-c92b-49df-b8aa-69e47c569842",
+          "appSessionId": "b863a2b6-89a1-4c1d-859c-109dc079203f",
           "reasons": [
             "background_tasks"
           ]
         }
       ],
       "lastRelease": {
-        "appSessionId": "76259f8e-69bf-4487-baa4-f9f27bb9c80f",
-        "at": "2026-09-30T04:42:20.193Z",
-        "totalKiB": 1978768
+        "appSessionId": "21bcffd4-33c5-48ae-a9a4-47c8fd0c852d",
+        "at": "2026-09-30T05:35:49.161Z",
+        "totalKiB": 1967664
       }
     },
     "releases": [
       {
         "label": "B5",
-        "appSessionId": "7621beb2-e969-492f-a13f-e1c363ea2d2f",
-        "at": "2026-09-30T04:41:57.595Z",
-        "totalKiB": 2598992
+        "appSessionId": "1f44cd70-e303-4db0-b774-d599877e6928",
+        "at": "2026-09-30T05:35:25.702Z",
+        "totalKiB": 2605616
       },
       {
         "label": "B6",
-        "appSessionId": "961f6453-be50-4b12-a47a-6e46bdc5bd41",
-        "at": "2026-09-30T04:42:00.192Z",
-        "totalKiB": 2605376
+        "appSessionId": "3e94f52f-e274-4482-b586-1b6c3ed1a65a",
+        "at": "2026-09-30T05:35:29.160Z",
+        "totalKiB": 2605568
       },
       {
         "label": "B7",
-        "appSessionId": "59471f2d-2785-42c8-8dac-b4f317b1d8c0",
-        "at": "2026-09-30T04:42:10.192Z",
-        "totalKiB": 2293552
+        "appSessionId": "dc91313d-2e4f-4a12-aa6a-19b892a7a8bd",
+        "at": "2026-09-30T05:35:39.162Z",
+        "totalKiB": 2284848
       },
       {
         "label": "B1",
-        "appSessionId": "76259f8e-69bf-4487-baa4-f9f27bb9c80f",
-        "at": "2026-09-30T04:42:20.193Z",
-        "totalKiB": 1978768
+        "appSessionId": "21bcffd4-33c5-48ae-a9a4-47c8fd0c852d",
+        "at": "2026-09-30T05:35:49.161Z",
+        "totalKiB": 1967664
       }
     ],
     "trees": {
-      "at": "2026-09-30T04:42:51.711Z",
+      "at": "2026-09-30T05:36:20.341Z",
       "liveTrees": 5,
-      "sumKiB": 1661040,
-      "sumMiB": 1622.1,
-      "psSumKiB": 1661056,
-      "psSumMiB": 1622.1,
+      "sumKiB": 1651152,
+      "sumMiB": 1612.5,
+      "psSumKiB": 1651152,
+      "psSumMiB": 1612.5,
       "perTree": [
         {
           "label": "A1",
-          "appSessionId": "b2ae60ba-92a4-4fb7-9504-955b28a5f9d8",
+          "appSessionId": "61ffa2ca-fe61-4c16-9a08-119b48b771fe",
           "process": "ready",
           "exitReason": null,
-          "pid": 13504,
-          "treeRssKiB": 357632,
-          "sampledAt": "2026-09-30T04:42:50.196Z",
+          "pid": 63708,
+          "treeRssKiB": 353168,
+          "sampledAt": "2026-09-30T05:36:19.163Z",
           "keepAlive": [
             "stateful_mcp"
           ],
           "ps": {
-            "treeRssKiB": 357584,
+            "treeRssKiB": 353168,
             "processes": 3,
             "commands": [
               "2.1.283",
               "node",
               "node"
-            ]
+            ],
+            "mcpServers": 2
           }
         },
         {
           "label": "A2",
-          "appSessionId": "423888be-f63c-4002-8064-b1035b8e66c2",
+          "appSessionId": "e69331b1-f9a0-4a40-bd9d-8bd23ddacc93",
           "process": "ready",
           "exitReason": null,
-          "pid": 13656,
-          "treeRssKiB": 355568,
-          "sampledAt": "2026-09-30T04:42:50.196Z",
+          "pid": 63984,
+          "treeRssKiB": 355136,
+          "sampledAt": "2026-09-30T05:36:19.163Z",
           "keepAlive": [
             "stateful_mcp"
           ],
           "ps": {
-            "treeRssKiB": 355568,
+            "treeRssKiB": 355136,
             "processes": 3,
             "commands": [
               "2.1.283",
               "node",
               "node"
-            ]
+            ],
+            "mcpServers": 2
           }
         },
         {
           "label": "B1",
-          "appSessionId": "76259f8e-69bf-4487-baa4-f9f27bb9c80f",
+          "appSessionId": "21bcffd4-33c5-48ae-a9a4-47c8fd0c852d",
           "process": "exited",
           "exitReason": "budget",
-          "pid": 18029,
+          "pid": 74079,
           "treeRssKiB": null,
-          "sampledAt": "2026-09-30T04:42:20.192Z",
+          "sampledAt": "2026-09-30T05:35:49.160Z",
           "keepAlive": [],
           "ps": null
         },
         {
           "label": "B2",
-          "appSessionId": "eee4b592-c92b-49df-b8aa-69e47c569842",
+          "appSessionId": "b863a2b6-89a1-4c1d-859c-109dc079203f",
           "process": "ready",
           "exitReason": null,
-          "pid": 15591,
-          "treeRssKiB": 326784,
-          "sampledAt": "2026-09-30T04:42:50.196Z",
+          "pid": 68362,
+          "treeRssKiB": 323600,
+          "sampledAt": "2026-09-30T05:36:19.163Z",
           "keepAlive": [
             "background_tasks"
           ],
           "ps": {
-            "treeRssKiB": 326784,
+            "treeRssKiB": 323600,
             "processes": 4,
             "commands": [
               "2.1.283",
               "node",
               "zsh",
               "sleep"
-            ]
+            ],
+            "mcpServers": 1
           }
         },
         {
           "label": "B3",
-          "appSessionId": "f4b8b22c-6bb9-4363-8416-1f38bd6a6e7a",
+          "appSessionId": "906fca3e-96ba-438e-9b53-79b4af8a618c",
           "process": "ready",
           "exitReason": null,
-          "pid": 14461,
-          "treeRssKiB": 310112,
-          "sampledAt": "2026-09-30T04:42:50.196Z",
+          "pid": 66239,
+          "treeRssKiB": 309840,
+          "sampledAt": "2026-09-30T05:36:19.163Z",
           "keepAlive": [
             "queued_messages"
           ],
           "ps": {
-            "treeRssKiB": 310144,
+            "treeRssKiB": 309840,
             "processes": 2,
             "commands": [
               "2.1.283",
               "node"
-            ]
+            ],
+            "mcpServers": 1
           }
         },
         {
           "label": "B4",
-          "appSessionId": "d942bc97-14c5-42c6-bcda-f8e9ff998535",
+          "appSessionId": "b76109da-dd3e-4657-ae0c-cab7b656b6eb",
           "process": "ready",
           "exitReason": null,
-          "pid": 14921,
-          "treeRssKiB": 310944,
-          "sampledAt": "2026-09-30T04:42:50.196Z",
+          "pid": 67064,
+          "treeRssKiB": 309408,
+          "sampledAt": "2026-09-30T05:36:19.163Z",
           "keepAlive": [
             "turn",
             "pending_request"
           ],
           "ps": {
-            "treeRssKiB": 310976,
+            "treeRssKiB": 309408,
             "processes": 2,
             "commands": [
               "2.1.283",
               "node"
-            ]
+            ],
+            "mcpServers": 1
           }
         },
         {
           "label": "B5",
-          "appSessionId": "7621beb2-e969-492f-a13f-e1c363ea2d2f",
+          "appSessionId": "1f44cd70-e303-4db0-b774-d599877e6928",
           "process": "exited",
           "exitReason": "budget",
-          "pid": 15043,
+          "pid": 67418,
           "treeRssKiB": null,
-          "sampledAt": "2026-09-30T04:41:50.190Z",
+          "sampledAt": "2026-09-30T05:35:19.158Z",
           "keepAlive": [],
           "ps": null
         },
         {
           "label": "B6",
-          "appSessionId": "961f6453-be50-4b12-a47a-6e46bdc5bd41",
+          "appSessionId": "3e94f52f-e274-4482-b586-1b6c3ed1a65a",
           "process": "exited",
           "exitReason": "budget",
-          "pid": 15203,
+          "pid": 67773,
           "treeRssKiB": null,
-          "sampledAt": "2026-09-30T04:42:00.191Z",
+          "sampledAt": "2026-09-30T05:35:29.159Z",
           "keepAlive": [],
           "ps": null
         },
         {
           "label": "B7",
-          "appSessionId": "59471f2d-2785-42c8-8dac-b4f317b1d8c0",
+          "appSessionId": "dc91313d-2e4f-4a12-aa6a-19b892a7a8bd",
           "process": "exited",
           "exitReason": "budget",
-          "pid": 15474,
+          "pid": 68073,
           "treeRssKiB": null,
-          "sampledAt": "2026-09-30T04:42:10.192Z",
+          "sampledAt": "2026-09-30T05:35:39.162Z",
           "keepAlive": [],
           "ps": null
         }
@@ -897,11 +919,11 @@
       "code": 0,
       "signal": null,
       "reason": "stop",
-      "at": "2026-09-30T04:42:55.026Z",
+      "at": "2026-09-30T05:36:23.635Z",
       "release": null
     },
     "sleepPidsGone": [
-      16055
+      69174
     ],
     "othersUnchanged": true
   },
@@ -913,80 +935,339 @@
     "typed": "12.5",
     "memoryBudgetMiB": 12800
   },
+  "budgetEvents": [
+    {
+      "at": "2026-09-30T05:33:59.151Z",
+      "limitKiB": 8388608,
+      "totalKiB": 705664,
+      "over": false,
+      "overWithoutCandidate": false,
+      "candidates": 0,
+      "settling": 0,
+      "releasing": null,
+      "blocked": 2
+    },
+    {
+      "at": "2026-09-30T05:34:09.154Z",
+      "limitKiB": 8388608,
+      "totalKiB": 1017264,
+      "over": false,
+      "overWithoutCandidate": false,
+      "candidates": 0,
+      "settling": 0,
+      "releasing": null,
+      "blocked": 3
+    },
+    {
+      "at": "2026-09-30T05:34:19.155Z",
+      "limitKiB": 8388608,
+      "totalKiB": 1949728,
+      "over": false,
+      "overWithoutCandidate": false,
+      "candidates": 0,
+      "settling": 1,
+      "releasing": null,
+      "blocked": 5
+    },
+    {
+      "at": "2026-09-30T05:34:29.155Z",
+      "limitKiB": 8388608,
+      "totalKiB": 2918512,
+      "over": false,
+      "overWithoutCandidate": false,
+      "candidates": 1,
+      "settling": 3,
+      "releasing": null,
+      "blocked": 5
+    },
+    {
+      "at": "2026-09-30T05:34:39.158Z",
+      "limitKiB": 8388608,
+      "totalKiB": 2922496,
+      "over": false,
+      "overWithoutCandidate": false,
+      "candidates": 4,
+      "settling": 0,
+      "releasing": null,
+      "blocked": 5
+    },
+    {
+      "at": "2026-09-30T05:34:49.165Z",
+      "limitKiB": 8388608,
+      "totalKiB": 2922448,
+      "over": false,
+      "overWithoutCandidate": false,
+      "candidates": 4,
+      "settling": 0,
+      "releasing": null,
+      "blocked": 5
+    },
+    {
+      "at": "2026-09-30T05:34:51.371Z",
+      "limitKiB": 2614272,
+      "totalKiB": 2922448,
+      "over": true,
+      "overWithoutCandidate": false,
+      "candidates": 4,
+      "settling": 0,
+      "releasing": "21bcffd4-33c5-48ae-a9a4-47c8fd0c852d",
+      "blocked": 5
+    },
+    {
+      "at": "2026-09-30T05:34:51.544Z",
+      "limitKiB": 2614272,
+      "totalKiB": 2922448,
+      "over": true,
+      "overWithoutCandidate": false,
+      "candidates": 4,
+      "settling": 0,
+      "releasing": null,
+      "blocked": 5
+    },
+    {
+      "at": "2026-09-30T05:34:59.159Z",
+      "limitKiB": 2614272,
+      "totalKiB": 2605456,
+      "over": false,
+      "overWithoutCandidate": false,
+      "candidates": 3,
+      "settling": 0,
+      "releasing": null,
+      "blocked": 5
+    },
+    {
+      "at": "2026-09-30T05:35:09.161Z",
+      "limitKiB": 2614272,
+      "totalKiB": 2605264,
+      "over": false,
+      "overWithoutCandidate": false,
+      "candidates": 3,
+      "settling": 0,
+      "releasing": null,
+      "blocked": 5
+    },
+    {
+      "at": "2026-09-30T05:35:19.161Z",
+      "limitKiB": 2614272,
+      "totalKiB": 2605616,
+      "over": false,
+      "overWithoutCandidate": false,
+      "candidates": 3,
+      "settling": 0,
+      "releasing": null,
+      "blocked": 5
+    },
+    {
+      "at": "2026-09-30T05:35:25.705Z",
+      "limitKiB": 823296,
+      "totalKiB": 2605616,
+      "over": true,
+      "overWithoutCandidate": false,
+      "candidates": 3,
+      "settling": 1,
+      "releasing": "1f44cd70-e303-4db0-b774-d599877e6928",
+      "blocked": 5
+    },
+    {
+      "at": "2026-09-30T05:35:25.859Z",
+      "limitKiB": 823296,
+      "totalKiB": 2605616,
+      "over": true,
+      "overWithoutCandidate": false,
+      "candidates": 3,
+      "settling": 1,
+      "releasing": null,
+      "blocked": 5
+    },
+    {
+      "at": "2026-09-30T05:35:29.162Z",
+      "limitKiB": 823296,
+      "totalKiB": 2605568,
+      "over": true,
+      "overWithoutCandidate": false,
+      "candidates": 2,
+      "settling": 1,
+      "releasing": "3e94f52f-e274-4482-b586-1b6c3ed1a65a",
+      "blocked": 5
+    },
+    {
+      "at": "2026-09-30T05:35:29.328Z",
+      "limitKiB": 823296,
+      "totalKiB": 2605568,
+      "over": true,
+      "overWithoutCandidate": false,
+      "candidates": 2,
+      "settling": 1,
+      "releasing": null,
+      "blocked": 5
+    },
+    {
+      "at": "2026-09-30T05:35:39.165Z",
+      "limitKiB": 823296,
+      "totalKiB": 2284848,
+      "over": true,
+      "overWithoutCandidate": false,
+      "candidates": 2,
+      "settling": 0,
+      "releasing": "dc91313d-2e4f-4a12-aa6a-19b892a7a8bd",
+      "blocked": 5
+    },
+    {
+      "at": "2026-09-30T05:35:39.387Z",
+      "limitKiB": 823296,
+      "totalKiB": 2284848,
+      "over": true,
+      "overWithoutCandidate": false,
+      "candidates": 2,
+      "settling": 0,
+      "releasing": null,
+      "blocked": 5
+    },
+    {
+      "at": "2026-09-30T05:35:49.163Z",
+      "limitKiB": 823296,
+      "totalKiB": 1967664,
+      "over": true,
+      "overWithoutCandidate": false,
+      "candidates": 1,
+      "settling": 0,
+      "releasing": "21bcffd4-33c5-48ae-a9a4-47c8fd0c852d",
+      "blocked": 5
+    },
+    {
+      "at": "2026-09-30T05:35:49.407Z",
+      "limitKiB": 823296,
+      "totalKiB": 1967664,
+      "over": true,
+      "overWithoutCandidate": false,
+      "candidates": 1,
+      "settling": 0,
+      "releasing": null,
+      "blocked": 5
+    },
+    {
+      "at": "2026-09-30T05:35:59.164Z",
+      "limitKiB": 823296,
+      "totalKiB": 1649952,
+      "over": true,
+      "overWithoutCandidate": false,
+      "candidates": 0,
+      "settling": 0,
+      "releasing": null,
+      "blocked": 5
+    },
+    {
+      "at": "2026-09-30T05:36:09.165Z",
+      "limitKiB": 823296,
+      "totalKiB": 1649984,
+      "over": true,
+      "overWithoutCandidate": true,
+      "candidates": 0,
+      "settling": 0,
+      "releasing": null,
+      "blocked": 5
+    },
+    {
+      "at": "2026-09-30T05:36:19.165Z",
+      "limitKiB": 823296,
+      "totalKiB": 1651152,
+      "over": true,
+      "overWithoutCandidate": true,
+      "candidates": 0,
+      "settling": 0,
+      "releasing": null,
+      "blocked": 5
+    },
+    {
+      "at": "2026-09-30T05:36:23.974Z",
+      "limitKiB": 13107200,
+      "totalKiB": 1327552,
+      "over": false,
+      "overWithoutCandidate": false,
+      "candidates": 0,
+      "settling": 0,
+      "releasing": null,
+      "blocked": 4
+    }
+  ],
+  "bannerHost": "",
   "consoleErrors": [],
   "journalsDir": "$C12/userData/engine-host/journal",
   "spend": {
-    "upperBoundUsd": 0.4315,
-    "perSessionUsd": 0.3545,
+    "upperBoundUsd": 0.4372,
+    "perSessionUsd": 0.3601,
     "journals": [
       {
-        "appSessionId": "423888be-f63c-4002-8064-b1035b8e66c2",
-        "file": "5mxrukbv.jsonl",
-        "costUsd": 0.022945
+        "appSessionId": "1f44cd70-e303-4db0-b774-d599877e6928",
+        "file": "ru44qrnb.jsonl",
+        "costUsd": 0.027958999999999998
       },
       {
-        "appSessionId": "59471f2d-2785-42c8-8dac-b4f317b1d8c0",
-        "file": "2fd5sbqr.jsonl",
-        "costUsd": 0.022905000000000002
+        "appSessionId": "21bcffd4-33c5-48ae-a9a4-47c8fd0c852d",
+        "file": "mbcqk3dd.jsonl",
+        "costUsd": 0.0770996
       },
       {
-        "appSessionId": "7621beb2-e969-492f-a13f-e1c363ea2d2f",
-        "file": "zb5chtvc.jsonl",
-        "costUsd": 0.022905000000000002
+        "appSessionId": "21bcffd4-33c5-48ae-a9a4-47c8fd0c852d",
+        "file": "vamkdt5o.jsonl",
+        "costUsd": 0.0923896
       },
       {
-        "appSessionId": "76259f8e-69bf-4487-baa4-f9f27bb9c80f",
-        "file": "4c5ug7wm.jsonl",
-        "costUsd": 0.09231999999999999
+        "appSessionId": "3e94f52f-e274-4482-b586-1b6c3ed1a65a",
+        "file": "akqrogkn.jsonl",
+        "costUsd": 0.022895
       },
       {
-        "appSessionId": "76259f8e-69bf-4487-baa4-f9f27bb9c80f",
-        "file": "w3vfciac.jsonl",
-        "costUsd": 0.07702999999999999
+        "appSessionId": "61ffa2ca-fe61-4c16-9a08-119b48b771fe",
+        "file": "qelvrelr.jsonl",
+        "costUsd": 0.0631886
       },
       {
-        "appSessionId": "961f6453-be50-4b12-a47a-6e46bdc5bd41",
-        "file": "tg4an6vs.jsonl",
-        "costUsd": 0.027969
+        "appSessionId": "906fca3e-96ba-438e-9b53-79b4af8a618c",
+        "file": "efyyfwfv.jsonl",
+        "costUsd": 0.030271000000000003
       },
       {
-        "appSessionId": "b2ae60ba-92a4-4fb7-9504-955b28a5f9d8",
-        "file": "c7jlew6l.jsonl",
-        "costUsd": 0.0682426
+        "appSessionId": "b76109da-dd3e-4657-ae0c-cab7b656b6eb",
+        "file": "7xtrt5ft.jsonl",
+        "costUsd": 0.029838
       },
       {
-        "appSessionId": "d942bc97-14c5-42c6-bcda-f8e9ff998535",
-        "file": "4rn6l7ut.jsonl",
-        "costUsd": 0.029848
+        "appSessionId": "b863a2b6-89a1-4c1d-859c-109dc079203f",
+        "file": "z4qwvce2.jsonl",
+        "costUsd": 0.0375738
       },
       {
-        "appSessionId": "eee4b592-c92b-49df-b8aa-69e47c569842",
-        "file": "3yf2jsb7.jsonl",
-        "costUsd": 0.0375392
+        "appSessionId": "dc91313d-2e4f-4a12-aa6a-19b892a7a8bd",
+        "file": "clvlenau.jsonl",
+        "costUsd": 0.027958999999999998
       },
       {
-        "appSessionId": "f4b8b22c-6bb9-4363-8416-1f38bd6a6e7a",
-        "file": "gsm4ovyx.jsonl",
-        "costUsd": 0.029800999999999998
+        "appSessionId": "e69331b1-f9a0-4a40-bd9d-8bd23ddacc93",
+        "file": "crno672q.jsonl",
+        "costUsd": 0.028019000000000002
       }
     ]
   },
   "m3SpendAcrossRuns": {
-    "note": "M3 took four live runs, each under a fresh scratch root; each figure is that run's journal upper bound (the sum of every process's largest result.total_cost_usd). Runs 1 to 3 stopped at spec or product defects fixed before run 4, which wrote this file.",
+    "note": "M3 took seven live runs, each under a fresh scratch root; each figure is that run's journal upper bound (the sum of every process's largest result.total_cost_usd). Runs 1 to 3 stopped at spec or product defects fixed before run 4 (the first green run); runs 5 and 6 followed the review's fixes and stopped where the no-candidate budget sat too close to the protected sum; run 7 wrote this file.",
     "runsUsd": [
       0.2898,
       0.329,
       0.4375,
-      0.4315
+      0.4315,
+      0.5107,
+      0.4369,
+      0.4372
     ],
-    "totalUsd": 1.4878,
+    "totalUsd": 2.8726,
     "limitUsd": 5
   },
   "figures": {
     "trees": 9,
-    "sumMiB": 2847.4,
-    "psSumMiB": 2847.2,
-    "budgetMiB": 2547,
+    "sumMiB": 2854,
+    "psSumMiB": 2854,
+    "budgetMiB": 2553,
     "releases": 1,
     "resumeSeconds": 0.634
   }
