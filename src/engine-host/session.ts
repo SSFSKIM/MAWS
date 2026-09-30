@@ -219,10 +219,7 @@ export class EngineSession {
     this.bashMode = new BashMode({
       cwd: () => this.tracker.engineCwd ?? this.spec.cwd,
       write: writeFrame,
-      notice: (key, text) => {
-        this.notice(key, text);
-        this.touch(); // C12: the command it names is no longer pending (busy)
-      },
+      notice: (key, text) => this.notice(key, text),
       canWrite: () => this.processState === 'ready',
       log: this.log,
     });
@@ -272,7 +269,7 @@ export class EngineSession {
   }
 
   // `!`: answered at the `bash_command` write; the echo and its receipt follow as events.
-  // C12: a `!` command is use, and busy until its output is replayed (or its timeout)
+  // C12: a `!` command is use, and busy until its output is replayed or the process exits
   async bash(command: string): Promise<{ commandUuid: MessageUuid }> {
     this.markUsed();
     try {

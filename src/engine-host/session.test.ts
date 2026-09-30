@@ -1163,17 +1163,38 @@ describe('EngineSession (C12): the stop precedence, busy, lastUsedAt, keepAlive 
     expect(statuses.at(-1)).toMatchObject({ busy: false });
   });
 
-  it('busy: a ! command that produced no output stops being busy at its timeout, and the status says so', async () => {
+  it('busy: a ! command still running past the no-output warning stays busy until its output arrives (the warning is not completion)', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
-    const { session } = setup();
+    const { session, transport, journal } = setup();
     await session.start();
     const statuses: EngineSessionStatus[] = [];
     session.on('status', (s) => statuses.push(s));
     await session.bash('sleep 100');
     expect(session.status().busy).toBe(true);
     await vi.advanceTimersByTimeAsync(30_000);
+    expect(journal.rows.some((r) => (r.frame as { key?: string }).key?.startsWith('bash:no_output:'))).toBe(true); // the warning went out
+    expect(session.status()).toMatchObject({ busy: true, keepAlive: ['busy'] });
+    await vi.advanceTimersByTimeAsync(70_000);
+    expect(session.status().busy).toBe(true);
+    transport.push({ type: 'user', message: { role: 'user', content: '<bash-input>sleep 100</bash-input>' }, parent_tool_use_id: null, session_id: 's' });
+    transport.push({ type: 'user', message: { role: 'user', content: '<bash-stdout></bash-stdout><bash-stderr></bash-stderr><bash-exit-code>0</bash-exit-code>' }, parent_tool_use_id: null, session_id: 's' });
+    await vi.advanceTimersByTimeAsync(0);
     expect(session.status().busy).toBe(false);
     expect(statuses.at(-1)).toMatchObject({ busy: false });
+    expect(transport.writes.filter((w) => w.type === 'user' && (w as { shouldQuery?: boolean }).shouldQuery === false)).toEqual([]); // still no echo after the warning
+  });
+
+  it('busy: a ! command that never answers holds until the process exits', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const { session, transport } = parked();
+    await session.start();
+    await session.bash('sleep 900');
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(session.status().busy).toBe(true);
+    const stopping = session.stop('stop');
+    transport.exit(0);
+    await stopping;
+    expect(session.status().busy).toBe(false);
   });
 
   it('busy: a held clear-and-implement between its turns, with no turn open', async () => {

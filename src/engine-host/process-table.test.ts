@@ -297,6 +297,24 @@ describe('process table (C12): the memory budget', () => {
     expect(Object.values(s).map((x) => x.session.lifecycle)).toEqual(['exited', 'exiting', 'ready']);
   });
 
+  it('never releases a session whose ! command is still running past its no-output warning; it becomes a candidate once the output arrives', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const { table, s } = await budgetTable({ a: 400 }, { limitKiB: 100 });
+    await s.a!.session.bash('sleep 100');
+    await vi.advanceTimersByTimeAsync(30_000); // the warning: no output yet
+    await table.sampleMemory();
+    await table.sampleMemory();
+    expect(s.a!.session.lifecycle).toBe('ready');
+    expect(table.budgetState()).toMatchObject({ candidates: 0, blocked: [{ appSessionId: 'a', reasons: ['busy'] }] });
+    s.a!.transport.push({ type: 'user', message: { role: 'user', content: '<bash-input>sleep 100</bash-input>' }, parent_tool_use_id: null, session_id: 's' });
+    s.a!.transport.push({ type: 'user', message: { role: 'user', content: '<bash-stdout></bash-stdout><bash-stderr></bash-stderr><bash-exit-code>0</bash-exit-code>' }, parent_tool_use_id: null, session_id: 's' });
+    await vi.advanceTimersByTimeAsync(0);
+    await table.sampleMemory(); // not quiet yet: the output moved lastEventSeq
+    expect(s.a!.session.lifecycle).toBe('ready');
+    await table.sampleMemory();
+    expect(s.a!.session.lifecycle).toBe('exiting');
+  });
+
   it('never touches a session with a hard reason, and names why in the state', async () => {
     const { table, s } = await budgetTable({ a: 400, b: 300 }, { limitKiB: 100, stateful: ['c12-kernel'] });
     s.a!.transport.push({ type: 'system', subtype: 'background_tasks_changed', tasks: [{ task_id: 't1', task_type: 'local_bash', description: 'sleep 900' }], uuid: 'bg', session_id: 's' });
