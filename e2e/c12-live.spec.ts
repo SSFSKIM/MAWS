@@ -562,4 +562,6 @@ test('nine sessions under a memory budget: releases, the released surfaces, Send
     await maws.cleanup();
     record('journalsDir', join(scratch.userData, 'engine-host', 'journal').replace(scratch.root, '$C12'));
   }
+  // after the cleanup, which runs whatever happened
+  expect(run.consoleErrors, 'no console error in the page').toEqual([]);
 });
