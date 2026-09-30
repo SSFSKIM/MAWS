@@ -90,7 +90,9 @@ export function createRelayStore() {
         }
         return;
       }
-      if (matchesReceipt(e, relay)) return put(key, { ...relay, state: { kind: 'delivered', deliveredAt: e.at } });
+      // A disk-form receipt counts only if written at or after this forward: the child's transcript may already hold the
+      // same text from an earlier relay or its own prompt (both clocks are this machine's, ISO strings in UTC).
+      if (matchesReceipt(e, relay) && !(e.seq === null && e.at < state.forwardedAt)) return put(key, { ...relay, state: { kind: 'delivered', deliveredAt: e.at } });
       // A forwarded relay's agent ended: the rows in both transcripts are the record. Not for one forwarded to an agent
       // that had already ended, which the forward resumes and whose resume start is the receipt.
       if (ended !== null && state.childEndedAt === null) put(key, null);
@@ -101,11 +103,16 @@ export function createRelayStore() {
     // a live child's transcript otherwise (its drill-in reads the parent's stream), so a relay forwarded to a running
     // child follows it: the answer carries what was written already, and the follower's later events arrive on the
     // session's batches this store watches. The follower stays with the session's others (a drill-in may share it).
+    // The answer applies only to the forward that asked for it (a later send replaces the relay under the same key), and
+    // only its receipts: the rest of the child's history is not news to the relay.
     const followChild = (key: string, relay: Relay) => {
+      const forward = (r: Relay | undefined) => (r?.state.kind === 'forwarded' ? r.state.toolUseId : null);
+      const asked = forward(get().relays.get(key));
       agentWorkClient()
         .agentEvents(relay.appSessionId, relay.agentId)
         .then((events) => {
-          for (const e of events) step(key, e);
+          if (asked === null || forward(get().relays.get(key)) !== asked) return;
+          for (const e of events) if (e.kind === 'user.message') step(key, e);
           tidy(relay.appSessionId);
         })
         .catch(() => {}); // not yet listed, or no meta: the relay rests at forwarded, as before

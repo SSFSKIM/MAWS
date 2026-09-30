@@ -544,6 +544,18 @@ describe('normaliser: context.sample (debt wave 3)', () => {
     expect(feed(make(), [outRow(request), answer(later.response.response)])[0]).toMatchObject({ totalTokens: 41880, percentage: 21 });
   });
 
+  // Synthetic (no fixture reaches the window): the engine clamps the Messages row to the window, never its total
+  // (SPEC 13.18.2), so the floor's excess comes from the non-message categories, not from total less Messages.
+  it('a clamped Messages row keeps the appended estimate: the total less the floor excess, past 100 %', () => {
+    const categories = [
+      { name: 'System prompt', tokens: 8000, kind: 'used' }, { name: 'System tools', tokens: 22000, kind: 'used' },
+      { name: 'System tools (deferred)', tokens: 23000, kind: 'deferred' }, { name: 'Messages', tokens: 170000, kind: 'used' }, { name: 'Free space', tokens: 0, kind: 'free' },
+    ];
+    // non-message 30,000, measured 21,000, 185,000 appended since: the engine reports 215,000 with Messages at 170,000
+    const clamped = { ...recorded, categories, totalTokens: 215000, percentage: 108, apiUsage: { input_tokens: 0, cache_creation_input_tokens: 1000, cache_read_input_tokens: 20000, output_tokens: 10 } };
+    expect(feed(make(), [outRow(request), answer(clamped)])[0]).toMatchObject({ totalTokens: 206000, percentage: 103 });
+  });
+
   it('samples nothing from an error, an answer without the figures, or an answer to another read', () => {
     expect(feed(make(), [outRow(request), inRow({ type: 'control_response', response: { subtype: 'error', request_id: request.request_id, error: 'boom' } })])).toEqual([]);
     expect(feed(make(), [outRow(request), answer({})])).toEqual([]); // a replay's empty answer to a read it never recorded

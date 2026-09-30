@@ -116,6 +116,22 @@ describe('relay store', () => {
       expect(fake.listeners()).toBe(0);
     });
 
+    it('the same text relayed again is not delivered by the earlier relay’s receipt already in the transcript', async () => {
+      await send(LOOPER, 'Say PING in your next inbox line', IDLE_UUID);
+      batch(between(150, 200));
+      await fake.answer('agentEvents', []);
+      batch(receipt('idle'));
+      expect(stateOf(LOOPER)?.kind).toBe('delivered');
+      // the same words again, forwarded by the busy case's SendMessage (15:48:4x): the follow answers the whole transcript
+      await send(LOOPER, 'Say PING in your next inbox line', 'be019ba5-e49d-4ce6-8116-9a893ac8520f', true);
+      batch(between(285, 320));
+      expect(stateOf(LOOPER)?.kind).toBe('forwarded');
+      await fake.answer('agentEvents', receipt('idle')); // written 15:47:33, before this forward
+      expect(stateOf(LOOPER)?.kind).toBe('forwarded');
+      batch(receipt('idle')); // a follower's re-delivery of the old record changes nothing either
+      expect(stateOf(LOOPER)?.kind).toBe('forwarded');
+    });
+
     it('a follow the host refuses leaves the relay forwarded; a relay forwarded to an ended child follows nothing', async () => {
       await send(LOOPER, 'Say PING in your next inbox line', IDLE_UUID);
       batch(between(150, 200));
