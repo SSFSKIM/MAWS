@@ -1,8 +1,8 @@
 // Quitting with turns in flight asks first (D-16; C5 execution document, "Quit guard"; residue *Quit coordination*).
 // Mid-turn is counted from C3's engine statuses in the read model (`midTurnCount`), never from the folded digest.
 // C12 start: the widened question (C12 execution document, Interfaces "The quit question"; charter §3 P0 quit line as
-// aligned by D8). The report counts sessions mid-turn or launching, sessions running background tasks or workflows that
-// are not mid-turn, and terminals whose shell has a foreground command (C9's `pty.foreground`, asked in parallel, an
+// aligned by D8). The report counts sessions mid-turn, launching or otherwise working (host work in flight, or the engine running or waiting,
+// with no turn), sessions running background tasks or workflows that are not counted so, and terminals whose shell has a foreground command (C9's `pty.foreground`, asked in parallel, an
 // unanswered probe counted busy as C9's close check does). `before-quit` must prevent synchronously and the report is
 // asynchronous, so the guard always holds the quit while it computes the report: all zero, it disarms and quits through
 // the existing path; otherwise it asks Quit, Quit when idle or Cancel. Quit stops the engine host's sessions
@@ -48,12 +48,18 @@ function within<T>(promise: Promise<T>, ms: number): Promise<T> {
 export async function busyReport(model: Pick<SessionReadModel, 'midTurnCount' | 'engineStatuses'>, pty: QuitPty): Promise<BusyReport> {
   // The sessions are read after the terminals (review fix): a status can only arrive between awaits, so the counts a
   // zero decision rests on are never older than the terminal read.
-  const sessions = () => ({
-    midTurn: model.midTurnCount(),
-    // a session is counted once: background work only when it is not already counted mid-turn; ambient tasks are the
-    // engine's housekeeping, as the budget's hard reasons read them
-    backgroundWork: model.engineStatuses().filter((s) => LIVE.has(s.process) && s.turn === null && !LAUNCHING.has(s.process) && s.backgroundTasks.some((t) => !t.ambient)).length,
-  });
+  const sessions = () => {
+    // with no open turn, a live session still works when the host has work in flight (`busy`: a `!` command, a message
+    // not yet started) or the engine reports itself running or waiting (whole-branch review); it counts with the turns
+    const idleTurn = model.engineStatuses().filter((s) => LIVE.has(s.process) && s.turn === null && !LAUNCHING.has(s.process));
+    const working = idleTurn.filter((s) => s.busy || s.engineState === 'running' || s.engineState === 'requires_action');
+    return {
+      midTurn: model.midTurnCount() + working.length,
+      // a session is counted once: background work only when it is not already counted working or mid-turn; ambient tasks
+      // are the engine's housekeeping, as the budget's hard reasons read them
+      backgroundWork: idleTurn.filter((s) => !working.includes(s) && s.backgroundTasks.some((t) => !t.ambient)).length,
+    };
+  };
   let ptys: readonly { ptyId: string; alive: boolean }[] = [];
   try {
     ptys = await within(pty.list(), PROBE_TIMEOUT_MS);

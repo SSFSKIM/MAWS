@@ -73,6 +73,19 @@ describe('the busy report', () => {
     expect(await busyReport(model, noTerminals)).toEqual({ midTurn: 2, backgroundWork: 2, busyTerminals: 0, terminalsUnknown: false });
   });
 
+  // whole-branch review (P1): host work in flight with no turn, and an engine already running, are busy work
+  it('counts a session with host work in flight or a running engine and no turn, once each, with its background work not twice', async () => {
+    const model = modelWith([
+      { ...status('bang'), busy: true }, // a `!` command still running after its turn closed
+      status('engine', { engineState: 'running' }), // the engine began its own turn before `turn` opens
+      status('asking', { engineState: 'requires_action' }),
+      { ...status('both'), busy: true, backgroundTasks: [TASK] }, // counted once, as working
+      status('bg', { backgroundTasks: [TASK] }),
+      status('idle'),
+    ]);
+    expect(await busyReport(model, noTerminals)).toEqual({ midTurn: 4, backgroundWork: 1, busyTerminals: 0, terminalsUnknown: false });
+  });
+
   it('asks every live terminal in parallel, and counts one that does not answer as busy', async () => {
     vi.useFakeTimers();
     try {
@@ -298,6 +311,24 @@ describe('quit when idle', () => {
     expect(publish).toHaveBeenLastCalledWith(null);
     expect(electron.app.quits).toBe(1);
     expect(shutdownEngine).not.toHaveBeenCalled(); // nothing was busy any more
+  });
+
+  // whole-branch review (P1): the turn that ran a long `!` command ends, the command does not; the wait holds for it
+  it('waits for a `!` command that outlives its turn, and quits once it ends', async () => {
+    const model = modelWith([{ ...status('a', { turn: humanTurn }), busy: true }]);
+    const publish = vi.fn();
+    guardDeps(model, { publish, ask: async () => 'when_idle' });
+    electron.app.attempt();
+    await settle();
+    model.apply({ ...status('a'), busy: true }); // the turn ended; the command still runs
+    await settle();
+    await settle();
+    expect(electron.app.quits).toBe(0);
+    expect(publish).toHaveBeenLastCalledWith({ midTurn: 1, backgroundWork: 0, busyTerminals: 0, terminalsUnknown: false });
+    model.apply(status('a')); // the command ended
+    await settle();
+    await settle();
+    expect(electron.app.quits).toBe(1);
   });
 
   it('re-reads every 2 s, since a terminal’s command ending is no status change', async () => {
