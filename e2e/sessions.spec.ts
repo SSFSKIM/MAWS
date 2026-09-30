@@ -142,6 +142,22 @@ async function startDirect(page: Page, id: string, patch: CommandInput<'session.
 
 const row = (page: Page, id: string) => page.locator(`[data-menu="session:${id}"]`);
 
+// Every text a transcript's load-failure alert showed (the alert stays until Retry), from before the first start: a
+// session started through "+" hydrates once the engine host knows it, never failing on an id not yet launched or bound.
+async function watchTranscriptFailures(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const seen: string[] = [];
+    (window as unknown as { __loadFailures: string[] }).__loadFailures = seen;
+    const note = () =>
+      document.querySelectorAll('[role="alert"]').forEach((node) => {
+        const text = (node.textContent ?? '').trim();
+        if (text.startsWith('Could not load this transcript') && !seen.includes(text)) seen.push(text);
+      });
+    new MutationObserver(note).observe(document.body, { subtree: true, childList: true, characterData: true });
+  });
+}
+const transcriptFailures = (page: Page) => page.evaluate(() => (window as unknown as { __loadFailures: string[] }).__loadFailures);
+
 // A main process built without the pick seam would put the native Open panel on this desktop at the first pick, so a
 // case that picks first checks that the build it launched carries the seam.
 function assertPickSeamBuilt(maws: MawsLaunch): void {
@@ -213,6 +229,9 @@ test.describe('sessions', () => {
     await chooseNewWorktree(page, repo.root, 'e2e-one');
     expect(value(await invoke(page, 'session.intent.get', { appSessionId: id }))!.location).toEqual({ kind: 'newWorktree', repoRoot: repo.root, name: 'e2e-one', branch: { kind: 'new', name: 'worktree-e2e-one', base: 'HEAD' } });
     await collectTurns(page);
+    await watchTranscriptFailures(page);
+    const early = await invoke(page, 'session.events', { appSessionId: id, afterSeq: null, limit: null });
+    expect(!early.ok && early.error.message, 'the host refuses a read before the launch: what the transcript waits out').toBe(`unknown app session: ${id}`);
     const prompt = fixtureIdentity(AUTO_ROUTED).firstPrompt!;
     await send(page, prompt.display);
     await untilPhase(page, id, 'ready');
@@ -230,6 +249,9 @@ test.describe('sessions', () => {
     await expect(row(page, id)).toBeVisible();
     await turnEnded(page, id);
     expect(value(await invoke(page, 'session.intent.get', { appSessionId: id })), 'bound: the intent is gone').toBeNull();
+    const main = page.locator('[data-region="main"]');
+    await expect(main.getByText(prompt.display, { exact: true }).first(), 'the transcript hydrated: the prompt shows as its bubble').toBeVisible();
+    expect(await transcriptFailures(page), 'the transcript never failed to load').toEqual([]);
     expect(maws.consoleErrors()).toEqual([]);
   });
 

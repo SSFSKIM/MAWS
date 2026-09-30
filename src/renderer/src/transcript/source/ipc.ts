@@ -31,6 +31,62 @@ const reportsOnOwnAgent = (event: SessionEvent) => event.agentId !== null && 'ta
 const ofParent = (event: SessionEvent) => event.agentId === null || event.parentToolUseId !== null || reportsOnOwnAgent(event);
 const ownOf = (agentId: AgentId) => (event: SessionEvent) => event.agentId === agentId && !reportsOnOwnAgent(event);
 
+// A session's snapshot, waiting out a session the engine host does not know yet. A session started through "+" gets its
+// record (and so its transcript pane) before C3's launch has wired its stream, and its engine id is bound only once the
+// engine reports it (C10's setup order), so a read in between is refused with `unknown app session` (X2, fs.ts). The
+// read is asked again at each sign the host may now answer, the session's status, a batch of its events or a change
+// to its record, and the refusal stands once KNOWN_WAIT_MS pass with none that helps, or the subscription ends. The
+// signs are listened for before the first read, so one that arrives while the refusal is on its way is not missed.
+export const KNOWN_WAIT_MS = 150_000; // C10's launch watchdog: a launch that reports nothing for this long has failed
+const UNKNOWN_SESSION = 'unknown app session';
+
+// What a snapshot's wait hears from its subscription: the batches it receives for the session (a sign, without a second
+// `session.eventBatch` listener) and its end (the key detached: the wait gives up at once).
+interface KnownWatch {
+  batch: (() => void) | null;
+  ended: AbortController;
+}
+
+async function eventsOnceKnown(client: MawsBridge, appSessionId: AppSessionId, watch: KnownWatch | null): Promise<CommandResult<'session.events'>> {
+  let signalled = false;
+  let wake: (() => void) | null = null;
+  const signal = () => {
+    signalled = true;
+    wake?.();
+  };
+  const offs = [
+    client.on('session.status', (payload) => payload.appSessionId === appSessionId && signal()),
+    client.on('session.changed', (payload) => payload.record.appId === appSessionId && signal()),
+  ];
+  if (watch) watch.batch = signal;
+  const ended = watch?.ended.signal ?? null;
+  const deadline = Date.now() + KNOWN_WAIT_MS;
+  try {
+    for (;;) {
+      signalled = false;
+      const result = await client.invoke('session.events', { appSessionId, afterSeq: null, limit: null });
+      if (result.ok || !result.error.message.startsWith(UNKNOWN_SESSION) || ended?.aborted) return result;
+      if (signalled) continue;
+      // true at a sign; false when the time is up or the subscription ended
+      const woke = await new Promise<boolean>((resolve) => {
+        const stop = () => {
+          clearTimeout(timer);
+          ended?.removeEventListener('abort', stop);
+          resolve(signalled);
+        };
+        const timer = setTimeout(stop, deadline - Date.now());
+        wake = stop;
+        ended?.addEventListener('abort', stop);
+      });
+      wake = null;
+      if (!woke) return result;
+    }
+  } finally {
+    for (const off of offs) off();
+    if (watch) watch.batch = null;
+  }
+}
+
 // A session's events can reach `session.eventBatch` in both forms at once: a disk follower started by an earlier read
 // (C4's backfill: `seq: null`, ids from the transcript's uuids) keeps delivering what a resumed launch's live journal
 // also delivers (its row's `seq`, ids under the app session id), under different ids, so id deduplication cannot merge
@@ -46,7 +102,7 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
   // Per subscription (the store subscribes once per attachment, then snapshots): whether it has seen the live form, the
   // batches that arrived before its snapshot answered, and its filter. A snapshot serves the subscription made just
   // before it, so a second subscription or a stale snapshot never delivers into another's listener.
-  interface Subscription {
+  interface Subscription extends KnownWatch {
     live: boolean;
     held: SessionEvent[][] | null;
     pass(batch: SessionEvent[]): void;
@@ -58,6 +114,8 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
       const subscription: Subscription = {
         live: false,
         held: [],
+        batch: null,
+        ended: new AbortController(),
         pass(batch) {
           const events = batch.filter((event) => {
             if (liveForm(event)) subscription.live = true;
@@ -69,6 +127,7 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
       latest = subscription;
       const off = client.on('session.eventBatch', (batch) => {
         if (batch.appSessionId !== appSessionId) return;
+        subscription.batch?.();
         if (subscription.held) subscription.held.push(batch.events);
         else subscription.pass(batch.events);
       });
@@ -76,6 +135,7 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
         off();
         subscription.held = null;
         subscription.pass = () => {};
+        subscription.ended.abort();
         if (latest === subscription) latest = null;
       };
     },
@@ -83,7 +143,7 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
     // held batches are passed before the snapshot returns, while the store still buffers.
     async snapshot() {
       const subscription = latest;
-      const { events } = valueOf(await client.invoke('session.events', { appSessionId, afterSeq: null, limit: null }));
+      const { events } = valueOf(await eventsOnceKnown(client, appSessionId, subscription));
       if (subscription) {
         if (events.some(liveForm)) subscription.live = true;
         const waiting = subscription.held ?? [];

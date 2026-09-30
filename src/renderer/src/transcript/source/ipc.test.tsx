@@ -15,7 +15,7 @@ import { builder, tool, uuid } from '../model/test-events';
 import { Disclosures, NO_ACTIONS, TranscriptProvider } from '../view/context';
 import { RowView } from '../view/rows/Row';
 import { Transcript } from '../view/Transcript';
-import { ipcLoadSpillOver, ipcRewindOver, ipcSourceOver } from './ipc';
+import { ipcLoadSpillOver, ipcRewindOver, ipcSourceOver, KNOWN_WAIT_MS } from './ipc';
 import type { TranscriptSource } from './types';
 
 const APP = 'app-1' as AppSessionId;
@@ -233,6 +233,76 @@ describe('ipcSource', () => {
     await hydrated;
     expect(useTranscriptStore.getState().entries[APP]).toMatchObject({ phase: 'failed', error: 'engine-host is not running' });
     expect(fake.listeners.get('session.eventBatch')?.size).toBe(0);
+  });
+
+  // C6 · C10 (debt wave 4): a session started through "+" shows its pane when main records it, before C3's launch has
+  // wired its stream and before its engine id is bound, so the first read is refused. The source asks again at the
+  // session's first sign of life instead of failing the key.
+  describe('a session the engine host does not know yet', () => {
+    const UNKNOWN = { ok: false, error: { code: 'internal', message: `unknown app session: ${APP}` } } as const;
+    const EMPTY = { ok: true, value: { events: [], lastSeq: 0, complete: true } } as never;
+    const settle = () => act(async () => {});
+
+    it('stays hydrating through the refusal and reads again at the session’s status, then goes live', async () => {
+      const fake = fakeClient();
+      const source = ipcSourceOver(fake.client, APP);
+      const hydrated = useTranscriptStore.getState().attach(APP, source);
+      fake.calls[0].answer(UNKNOWN);
+      await settle();
+      expect(fake.calls).toHaveLength(1);
+      expect(useTranscriptStore.getState().entries[APP]).toMatchObject({ phase: 'hydrating', error: null });
+      fake.emit('session.status', { appSessionId: 'another' as AppSessionId, status: {} as never });
+      await settle();
+      expect(fake.calls, 'another session’s sign wakes nothing').toHaveLength(1);
+      fake.emit('session.status', { appSessionId: APP, status: {} as never });
+      await settle();
+      expect(fake.calls.map((call) => call.name)).toEqual(['session.events', 'session.events']);
+      const events = builder();
+      events.turn('u1');
+      fake.calls[1].answer({ ok: true, value: { events: events.events, lastSeq: events.events.length - 1, complete: true } } as never);
+      await hydrated;
+      expect(useTranscriptStore.getState().entries[APP].phase).toBe('live');
+      expect(useTranscriptStore.getState().entries[APP].rows.some((row) => row.kind === 'user')).toBe(true);
+      expect(fake.listeners.get('session.status')?.size, 'the wait stopped listening').toBe(0);
+    });
+
+    it('reads again at once when the sign arrived while the refusal was on its way (a batch, or the record bound)', async () => {
+      for (const sign of ['batch', 'record'] as const) {
+        const fake = fakeClient();
+        const hydrated = useTranscriptStore.getState().attach(APP, ipcSourceOver(fake.client, APP));
+        if (sign === 'batch') fake.emit('session.eventBatch', batch([]));
+        else fake.emit('session.changed', { record: { appId: APP } as never, cause: 'live' as never, revision: 1 });
+        fake.calls[0].answer(UNKNOWN);
+        await settle();
+        expect(fake.calls, sign).toHaveLength(2);
+        fake.calls[1].answer(EMPTY);
+        await hydrated;
+        expect(useTranscriptStore.getState().entries[APP].phase).toBe('live');
+        useTranscriptStore.getState().drop(APP);
+      }
+    });
+
+    it('gives up at once when the key detaches while it waits, and fails the key when no sign comes in time', async () => {
+      const fake = fakeClient();
+      const store = useTranscriptStore.getState();
+      const source = ipcSourceOver(fake.client, APP);
+      const first = store.attach(APP, source);
+      fake.calls[0].answer(UNKNOWN);
+      await settle();
+      store.detach(APP);
+      await first;
+      expect(fake.calls).toHaveLength(1);
+      expect(fake.listeners.get('session.status')?.size, 'nothing left listening').toBe(0);
+
+      vi.useFakeTimers();
+      onTestFinished(() => void vi.useRealTimers());
+      const second = store.attach(APP, source);
+      fake.calls[1].answer(UNKNOWN);
+      await vi.advanceTimersByTimeAsync(KNOWN_WAIT_MS);
+      await second;
+      expect(fake.calls).toHaveLength(2);
+      expect(useTranscriptStore.getState().entries[APP]).toMatchObject({ phase: 'failed', error: `unknown app session: ${APP}` });
+    });
   });
 });
 
