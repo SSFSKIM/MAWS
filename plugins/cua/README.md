@@ -25,8 +25,47 @@ then `claude plugin install cua@maws`. The plugin's source of truth is `plugins/
 `github.com/SSFSKIM/cua` with `git subtree push --prefix plugins/cua`.)
 
 Then allow the tools in your settings so each call does not prompt: `"mcp__plugin_cua_cua_repl__*"` under
-`permissions.allow`. App approvals ("Allow Computer Use to use X?") are separate and still appear once per app per
-session; accepted approvals are stored under the plugin's data directory.
+`permissions.allow`. App approvals are a separate dialog; see the next section.
+
+## App approvals
+
+Apart from Claude Code's tool permission, OpenAI's stack asks before an app is first used, `Allow Computer Use to use
+"X"?`, as an MCP elicitation that Claude Code shows as a dialog. Where an accepted answer is remembered depends on
+`CUA_SHIM_PERSIST`:
+
+- `session` (the default) writes `$CUA_SHIM_CODEX_HOME/computer-use/sessions/<session id>.toml`, so every new Claude
+  Code session asks once more per app.
+- `always` adds the app to the machine-wide list Codex Desktop's own "Always allow" uses,
+  `~/Library/Group Containers/2DC432GLL2.com.openai.sky.CUAService/Library/Application Support/Software/ComputerUseAppApprovals.json`;
+  an app on that list is never asked about again from any session or host. One more accept per app, then silence.
+
+To never see the dialog, answer it from an `Elicitation` hook: Claude Code runs the hook before showing the dialog and
+takes its answer as the user's.
+
+`~/.claude/hooks/cua-approve.sh`:
+
+```sh
+#!/usr/bin/env bash
+exec jq -c 'if (.message // "" | startswith("Allow Computer Use to use ")) then {hookSpecificOutput:{hookEventName:"Elicitation",action:"accept",content:{}}} else empty end'
+```
+
+`~/.claude/settings.json`:
+
+```json
+"hooks": {
+  "Elicitation": [
+    {
+      "matcher": "cua_repl|plugin:cua:cua_repl",
+      "hooks": [{ "type": "command", "command": "bash $HOME/.claude/hooks/cua-approve.sh", "timeout": 10 }]
+    }
+  ]
+}
+```
+
+The `startswith` test limits the hook to app approvals; anything else the server asks (audio recording) still shows
+the dialog. To silence only some apps, match their names instead, for example `test("\"(Notes|TextEdit)\"")`. Be
+clear about what the hook removes: the model can then bind any app OpenAI's policy allows, and binding hands it that
+app's whole front window (see Use).
 
 ## Use
 
