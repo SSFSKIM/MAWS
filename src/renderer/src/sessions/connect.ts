@@ -10,6 +10,7 @@ import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { registerSlot } from '../app/slots';
 import { registerResubmitProvider } from '../composer/resubmit-seam';
+import { registerReleasedResume } from '../composer/resume-seam'; // C12
 import { ipc } from '../ipc/client';
 import { registerCloseGuard, registerSessionCreator, registerTabRetention, registerUnstartedTitle } from '../keymap/actions-runtime';
 import { prefillComposer } from '../stores/composer';
@@ -21,7 +22,7 @@ import { registerMessageReturn } from './message-return';
 import { NewSessionEmptyState } from './NewSessionEmptyState';
 import { resubmitProvider } from './record-ops';
 import { connectSetupDock } from './SetupCard';
-import { beforeCloseUnstarted } from './setup-actions';
+import { beforeCloseUnstarted, resumeSession } from './setup-actions'; // C12: resumeSession
 import { connectSetup, useSetup } from './store';
 import { baseDirectoryOf } from './useSetupIntent';
 
@@ -70,6 +71,7 @@ export function connectSessions(client: MawsBridge = ipc): () => void {
       connectSetupDock(),
       registerMessageReturn((appSessionId, message) => prefillComposer(appSessionId, messagePrefill(message))),
       registerResubmitProvider(resubmitProvider),
+      registerReleasedResume(resumeSession), // C12: Send on a session released under the memory budget resumes it
     );
   });
   return () => {

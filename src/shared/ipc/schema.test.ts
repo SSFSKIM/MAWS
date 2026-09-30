@@ -21,7 +21,7 @@ import { OPERATION_COMMANDS } from '../engine/operations';
 import * as files from './schema/files';
 // C8c end
 // C11 start
-import { SETTINGS_DEFAULTS_V3 } from '../settings/defaults';
+import { SETTINGS_DEFAULTS_V4 } from '../settings/defaults';
 // C11 end
 
 // One entry per namespace, checked against NAMESPACES at compile time and at run time.
@@ -250,7 +250,7 @@ describe('ipc schema validates both directions', () => {
   });
 
   describe('command output (renderer, on receipt)', () => {
-    const state = { settings: { ...SETTINGS_DEFAULTS_V3, theme: 'system' }, resolvedTheme: 'dark' };
+    const state = { settings: { ...SETTINGS_DEFAULTS_V4, theme: 'system' }, resolvedTheme: 'dark' };
 
     it('accepts a settings state and returns it unchanged', () => {
       expect(validateCommandOutput('settings.get', state)).toEqual({ ok: true, value: state });
@@ -285,7 +285,7 @@ describe('ipc schema validates both directions', () => {
     it('accepts well-formed events unchanged', () => {
       const exit = { ptyId: 'p1', exitCode: null, signal: null };
       expect(validateEventPayload('pty.exit', exit)).toEqual({ ok: true, value: exit });
-      const changed = { settings: { ...SETTINGS_DEFAULTS_V3, theme: 'light' }, resolvedTheme: 'light' };
+      const changed = { settings: { ...SETTINGS_DEFAULTS_V4, theme: 'light' }, resolvedTheme: 'light' };
       expect(validateEventPayload('settings.changed', changed)).toEqual({ ok: true, value: changed });
     });
 
@@ -304,7 +304,7 @@ describe('ipc schema validates both directions', () => {
       gateway: { mode: 'gateway', baseUrl: null, verified: 'pending', autoModeServer: 'unknown', localLane: null },
       subagentModel: null, modelOverrides: {}, engineVersion: null, fileCheckpointing: true, fastMode: { state: null, disabledReason: null },
       plugins: [], pluginErrors: [], pluginWarnings: [], backgroundTasks: [], grants: [], mcpServers: [], heldPeerMessages: [], pendingRequests: 0,
-      queue: { length: 0, paused: false }, keepAlive: [], memory: { rssKiB: null, treeRssKiB: null, sampledAt: null }, journalPath: '/j', hostHooks: [], lastEventSeq: 0, trust: { attested: false, recorded: null } /* C10 */,
+      queue: { length: 0, paused: false }, keepAlive: [], busy: false, lastUsedAt: '2026-09-28T10:00:00.000Z' /* C12 */, memory: { rssKiB: null, treeRssKiB: null, sampledAt: null }, journalPath: '/j', hostHooks: [], lastEventSeq: 0, trust: { attested: false, recorded: null } /* C10 */,
     };
 
     it('registers every command and event of the X2 tables, owner engine-host but attention.* (owner main, ruling 1)', () => {
@@ -513,7 +513,7 @@ describe('ipc schema validates both directions', () => {
     });
 
     it('settings.get and settings.changed carry the whole version 3 state', () => {
-      const state = { settings: { ...SETTINGS_DEFAULTS_V3, gateway: { defaultRoute: 'direct', relayUnreachable: 'wait', offerDirect: false } }, resolvedTheme: 'light' };
+      const state = { settings: { ...SETTINGS_DEFAULTS_V4, gateway: { defaultRoute: 'direct', relayUnreachable: 'wait', offerDirect: false } }, resolvedTheme: 'light' };
       expect(validateCommandOutput('settings.get', state)).toEqual({ ok: true, value: state });
       expect(validateEventPayload('settings.changed', state).ok).toBe(true);
       expect(validateEventPayload('settings.changed', { ...state, settings: { ...state.settings, version: 2 } }).ok).toBe(false);
@@ -588,4 +588,36 @@ describe('ipc schema validates both directions', () => {
     });
   });
   // C11 end
+  // C12 start: the memory budget (C12 execution document, Interfaces "X2 additions")
+  describe('C12 entries', () => {
+    const state = {
+      limitKiB: 8_388_608, totalKiB: 9_000_000, sampledAt: '2026-09-29T10:00:00.000Z', over: true, overWithoutCandidate: false, candidates: 1, settling: 0,
+      releasing: 'app-1', blocked: [{ appSessionId: 'app-2', reasons: ['turn', 'stateful_mcp'] }], lastRelease: { appSessionId: 'app-3', at: '2026-09-29T09:59:50.000Z', totalKiB: 9_100_000 },
+    };
+
+    it('engine.policy.set and engine.budget are engine-host commands; engine.budget is also an event, and both names are bridged', () => {
+      for (const name of ['engine.policy.set', 'engine.budget'] as const) expect(commands[name].owner, name).toBe('engine-host');
+      expect(Object.hasOwn(events, 'engine.budget')).toBe(true);
+      expect(NAMES.engine.commands).toEqual(expect.arrayContaining(['engine.policy.set', 'engine.budget']));
+      expect(NAMES.engine.events).toContain('engine.budget');
+    });
+
+    it('engine.policy.set takes a positive whole budget in KiB and at most 64 stateful server names, and answers the budget state', () => {
+      expect(validateCommandInput('engine.policy.set', { limitKiB: 8_388_608, statefulMcpServers: ['plugin:ptc:ptc'] }).ok).toBe(true);
+      expect(validateCommandInput('engine.policy.set', { limitKiB: 0, statefulMcpServers: [] }).ok).toBe(false);
+      expect(validateCommandInput('engine.policy.set', { limitKiB: 1.5, statefulMcpServers: [] }).ok).toBe(false);
+      expect(validateCommandInput('engine.policy.set', { limitKiB: 1, statefulMcpServers: Array.from({ length: 65 }, (_, i) => `s${i}`) }).ok).toBe(false);
+      expect(validateCommandInput('engine.policy.set', { limitKiB: 1, statefulMcpServers: [], extra: 1 }).ok).toBe(false);
+      expect(validateCommandOutput('engine.policy.set', state)).toEqual({ ok: true, value: state });
+    });
+
+    it('the budget state names hard reasons from the closed set and nothing else', () => {
+      expect(validateCommandInput('engine.budget', undefined).ok).toBe(true);
+      expect(validateEventPayload('engine.budget', state).ok).toBe(true);
+      expect(validateEventPayload('engine.budget', { ...state, releasing: null, lastRelease: null, sampledAt: null }).ok).toBe(true);
+      expect(validateEventPayload('engine.budget', { ...state, blocked: [{ appSessionId: 'app-2', reasons: ['grants'] }] }).ok).toBe(false);
+      expect(validateEventPayload('engine.budget', { ...state, unmeasured: 0 }).ok).toBe(false);
+    });
+  });
+  // C12 end
 });

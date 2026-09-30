@@ -17,6 +17,7 @@ import { registerEngineIpc } from '../../engine-host/ipc';
 import type { FsService } from '../../engine-host/fs/service';
 import { Index } from './index';
 import { IndexSessionSource, type ReadModelWriter, type SourceHost } from './source';
+import { SessionReadModel, type ReadModelWriter as ModelWriter } from '../sessions/read-model'; // C12
 
 type Listener = (payload: unknown) => void;
 
@@ -94,7 +95,7 @@ const status = (appSessionId: AppSessionId, over: Partial<EngineSessionStatus> =
     gateway: { mode: 'gateway', baseUrl: 'http://127.0.0.1:8641', verified: 'routed', autoModeServer: 'enabled', localLane: null },
     subagentModel: null, modelOverrides: {}, engineVersion: '2.1.283', fileCheckpointing: true,
     fastMode: { state: null, disabledReason: null }, plugins: [], pluginErrors: [], pluginWarnings: [],
-    backgroundTasks: [], grants: [], mcpServers: [], heldPeerMessages: [], pendingRequests: 0, queue: { length: 0, paused: false }, keepAlive: [],
+    backgroundTasks: [], grants: [], mcpServers: [], heldPeerMessages: [], pendingRequests: 0, queue: { length: 0, paused: false }, keepAlive: [], busy: false, lastUsedAt: '2026-09-28T10:00:00.000Z', /* C12 */
     memory: { rssKiB: null, treeRssKiB: null, sampledAt: null }, journalPath: '/j', hostHooks: [], lastEventSeq: 0, trust: { attested: false, recorded: null } /* C10 */, ...over,
   });
 
@@ -455,6 +456,64 @@ describe('IndexSessionSource folds the host\'s events into the index and feeds t
     await settle();
     expect(error).toHaveBeenCalledWith(expect.stringContaining('fs.scan'), expect.stringContaining('engine-host is crashed'));
   });
+
+  // C12 start: the memory budget's released mark against C4's seeds (C12 execution document, Edits to landed children,
+  // C4 row): the seed leaves `released` out, and main's read model keeps the mark against a seed with phase `exited` and
+  // drops it against one with phase `foreign`. The release's own exited status reaches the index as cause `live`, which
+  // seeds nothing; the seeds after it come from the transcript the exit writes (`facts`) and from holder changes.
+  describe('the released mark against the index seeds', () => {
+    const RELEASE = { limitKiB: 8_388_608, totalKiB: 9_100_000 };
+    const ENGINE_ID = sessionIdFor(41);
+    const released = (appSessionId: AppSessionId) =>
+      status(appSessionId, { engineSessionId: ENGINE_ID, process: 'exited', exit: { code: 0, signal: null, reason: 'budget', at: '2026-09-29T14:02:00.000Z', release: RELEASE } });
+    // C4's source writing into a real read model, and C3's statuses reaching both, as main wires them
+    const wired = async () => {
+      const fake = scriptedHost();
+      const model = new SessionReadModel('index');
+      let writer: ModelWriter | null = null;
+      model.register({
+        start: (w) => {
+          writer = w;
+          begin(fake.host, w);
+          return () => {};
+        },
+      });
+      const { record } = index.sessions.createForLaunch({ directory: '/x', additionalDirectories: [], worktree: null, model: { requested: 'opus', resolved: null }, effort: null, permissionMode: { requested: 'default', effective: 'default', refusal: null } });
+      await settle();
+      const apply = (s: EngineSessionStatus) => {
+        writer!.applyEngineStatus(s);
+        fake.fire('session.status', { appSessionId: record.appId, status: s });
+      };
+      apply(status(record.appId, { engineSessionId: ENGINE_ID }));
+      apply(released(record.appId));
+      await settle();
+      const digest = () => model.digests().find((d) => d.appSessionId === record.appId)!;
+      const holder = (h: Holder) => fake.fire('fs.holderChanged', { sessionId: ENGINE_ID, appSessionId: record.appId, holder: h, registry: null, job: null });
+      const transcriptWritten = () => fake.fire('fs.sessionChanged', { summary: summary({ sessionId: ENGINE_ID, lastRecordAt: '2026-09-29T14:02:01.000Z' }), appSessionId: record.appId });
+      return { digest, holder, transcriptWritten };
+    };
+    const MARK = { at: '2026-09-29T14:02:00.000Z', limitKiB: 8_388_608 };
+
+    it('after a release the seeds with phase exited (the exit’s transcript write, a holder reported none) leave the row idle and marked', async () => {
+      const { digest, holder, transcriptWritten } = await wired();
+      expect(digest()).toMatchObject({ phase: 'idle', released: MARK });
+      transcriptWritten();
+      holder({ kind: 'none' });
+      await settle();
+      expect(digest()).toMatchObject({ phase: 'idle', released: MARK, lastTurnEndedAt: '2026-09-29T14:02:01.000Z' });
+    });
+
+    it('a terminal holder after a release reads foreign with no mark, and stays unmarked once it lets go', async () => {
+      const { digest, holder } = await wired();
+      holder({ kind: 'terminal', pid: 7 });
+      expect(digest().phase).toBe('foreign');
+      expect(digest().released).toBeUndefined();
+      holder({ kind: 'none' });
+      expect(digest().phase).toBe('exited');
+      expect(digest().released).toBeUndefined();
+    });
+  });
+  // C12 end
 
   it('stop unsubscribes from the host and the index', async () => {
     const fake = scriptedHost();

@@ -1,7 +1,15 @@
 # Unsigned local build (charter §12 C1 *Packaging skeleton*): `pnpm build:app` → dist/mac-arm64/MAWS.app.
 # Signing, notarization, DMG and updates arrive with the child that ships a release.
+# C12 start (C12 execution document, M4 task 6; charter D7): C12 is that child, and for P0 ships this much.
+# The build is owner-only for P0: rebuilt from source on the owner's Mac, development-signed when MAWS_SIGN_IDENTITY
+# names a keychain identity (`MAWS_SIGN_IDENTITY="Apple Development: …" pnpm build:app`, which sets mac.identity below
+# from the command line), unsigned otherwise (`identity: null`, the default `pnpm verify` builds).
+# `appId` and `productName` are placeholders the owner names.
+# Signing with a Developer ID and the hardened runtime, notarization, DMG and ZIP targets, and the updater are the
+# deferred P1 milestones of the C12 document (P1-R1 to P1-R4), each started only when its preconditions exist.
+# C12 end
 appId: dev.maws.app # placeholder; the owner renames it
-productName: MAWS
+productName: MAWS # placeholder; the owner names it (C12)
 directories:
   output: dist
 files:

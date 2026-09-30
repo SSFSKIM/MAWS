@@ -88,8 +88,8 @@ export class FakeEngineHost {
   exitNow(appSessionId: string): void {
     const s = this.table.get(appSessionId);
     if (!s) return;
-    this.setStatus({ ...s, process: 'exited', exit: { code: null, signal: 'SIGKILL', reason: 'stop', at: T0 } });
-    this.batch(appSessionId, [{ kind: 'process.exited', code: null, signal: 'SIGKILL', reason: 'stop', lostAttentionCount: 0 }]);
+    this.setStatus({ ...s, process: 'exited', exit: { code: null, signal: 'SIGKILL', reason: 'stop', at: T0, release: null /* C12 */ } });
+    this.batch(appSessionId, [{ kind: 'process.exited', code: null, signal: 'SIGKILL', reason: 'stop', lostAttentionCount: 0, budget: null /* C12 */ }]);
   }
 
   readonly dispatch: HostDispatch = async (owner, name, input) => {
@@ -179,8 +179,8 @@ export class FakeEngineHost {
           this.setStatus({ ...s, process: 'exiting' });
           return { exited: false, code: null, signal: null };
         }
-        this.setStatus({ ...s, process: 'exited', exit: { code: 0, signal: null, reason, at: T0 } });
-        this.batch(id, [{ kind: 'process.exited', code: 0, signal: null, reason, lostAttentionCount: 0 }]);
+        this.setStatus({ ...s, process: 'exited', exit: { code: 0, signal: null, reason, at: T0, release: null /* C12 */ } });
+        this.batch(id, [{ kind: 'process.exited', code: 0, signal: null, reason, lostAttentionCount: 0, budget: null /* C12 */ }]);
         if (reason === 'archive') this.table.delete(id); // C3 releases an archived session's row at its exit
         return { exited: true, code: 0, signal: null };
       }
@@ -258,8 +258,8 @@ export class FakeEngineHost {
     this.setStatus({ ...base, process: 'initializing' });
     if (script.exit) {
       this.batch(spec.appSessionId, [{ kind: 'error.raised', scope: 'process', message: script.exit.error, code: 'exited', toolUseId: null, taskId: null, requestId: null }]);
-      this.setStatus({ ...base, process: 'exited', exit: { code: 1, signal: null, reason: 'crash', at: T0 } });
-      this.batch(spec.appSessionId, [{ kind: 'process.exited', code: 1, signal: null, reason: 'crash', lostAttentionCount: 0 }]);
+      this.setStatus({ ...base, process: 'exited', exit: { code: 1, signal: null, reason: 'crash', at: T0, release: null /* C12 */ } });
+      this.batch(spec.appSessionId, [{ kind: 'process.exited', code: 1, signal: null, reason: 'crash', lostAttentionCount: 0, budget: null /* C12 */ }]);
       return;
     }
     if (script.ready === false) return;

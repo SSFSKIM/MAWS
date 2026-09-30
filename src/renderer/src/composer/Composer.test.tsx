@@ -8,7 +8,7 @@ import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { MawsBridge } from '@shared/ipc/schema';
-import { humanTurn, record, status } from '../../../../test/support/builders';
+import { digest, humanTurn, record, status } from '../../../../test/support/builders'; // C12: digest
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
 import { connectKeys } from '../keymap/dispatcher';
 import { bindingsOf, useKeyChord } from '../keymap/useKeyChord';
@@ -28,6 +28,7 @@ import { DockedCardFrame } from './docked/DockedCardFrame';
 import { dockCard, resetDockedCards } from './docked/registry';
 import { docOf, paragraph, textNode } from './editor/doc';
 import { registerSetupIntentHook, type HookResult, type SetupIntentHook, type SetupIntentPatch } from './setup-intent';
+import { registerReleasedResume } from './resume-seam'; // C12
 
 const A = 'app-a' as AppSessionId;
 const B = 'app-b' as AppSessionId;
@@ -706,3 +707,59 @@ describe('unstarted send holds a starting state', () => {
     expect(invoked('session.queue.list')).toEqual([{ appSessionId: A }]); // read, but an unstarted session lists nothing
   });
 });
+
+// C12 start: Send-to-resume (C12 execution document, Interfaces "Send-to-resume"): a session released under the memory
+// budget sends through the resume C10 registers, with the message; its `!` waits for a message first.
+describe('a released session resumes on Send', () => {
+  const exitedBy = (appSessionId: AppSessionId, reason: 'budget' | 'stop') =>
+    live(appSessionId, { status: { process: 'exited', exit: { code: 0, signal: null, reason, at: '2026-09-29T14:02:00.000Z', release: reason === 'budget' ? { limitKiB: 8_388_608, totalKiB: 9_000_000 } : null } } });
+  const released = (appSessionId: AppSessionId) => {
+    exitedBy(appSessionId, 'budget');
+    useSessions.getState().applyDigest(digest(appSessionId, { phase: 'idle', released: { at: '2026-09-29T14:02:00.000Z', limitKiB: 8_388_608 } }));
+  };
+  let off: () => void = () => {};
+  afterEach(() => off());
+
+  it('sends the typed message to the registered resume, clears the editor once it is taken, and records the prompt', async () => {
+    const resume = vi.fn(async () => true);
+    off = registerReleasedResume(resume);
+    released(A);
+    mount([{ index: 0, id: A }]);
+    await type('carry on');
+    await waitFor(() => expect(primary().disabled).toBe(false));
+    expect(primary().getAttribute('aria-description')).toBe('Resumes this session');
+    await key(editorOf(), { key: 'Enter' });
+    await waitFor(() => expect(resume).toHaveBeenCalledExactlyOnceWith(A, { content: 'carry on', display: 'carry on' }));
+    await waitFor(() => expect(editorOf().editor.getText()).toBe(''));
+    expect(invoked('session.send')).toEqual([]);
+    expect(invoked('session.history.append')).toEqual([{ appSessionId: A, display: 'carry on', pastedContents: {} }]);
+  });
+
+  it('keeps the text when the resume is refused', async () => {
+    const resume = vi.fn(async () => false);
+    off = registerReleasedResume(resume);
+    released(A);
+    mount([{ index: 0, id: A }]);
+    await type('carry on');
+    await key(editorOf(), { key: 'Enter' });
+    await waitFor(() => expect(resume).toHaveBeenCalledOnce());
+    expect(editorOf().editor.getText()).toBe('carry on');
+    expect(invoked('session.history.append')).toEqual([]);
+  });
+
+  it('a stopped session, and a released one whose mark an archive dropped, still read Session ended and resume nothing', async () => {
+    const resume = vi.fn(async () => true);
+    off = registerReleasedResume(resume);
+    exitedBy(A, 'stop');
+    exitedBy(B, 'budget'); // the host's row still says budget; main's digest has no mark (archived and unarchived)
+    mount([{ index: 0, id: A }, { index: 1, id: B }]);
+    for (const pane of [0, 1] as const) {
+      await type('carry on', pane);
+      await waitFor(() => expect(primary(pane).title).toBe('Session ended'));
+      expect(primary(pane).disabled).toBe(true);
+      await key(editorOf(pane), { key: 'Enter' });
+    }
+    expect(resume).not.toHaveBeenCalled();
+  });
+});
+// C12 end

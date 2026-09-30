@@ -5,7 +5,8 @@
 // the ring has evicted is rebuilt from the launch's journal through a fresh Normalizer, which reproduces the live
 // events exactly (ids and seq included) because every event derives from a journal row; a rebuilt page stops at its
 // limit and the next page resumes where it stopped. The originating `*.requested` event of each live broker item is
-// kept aside for `session.pendingRequest`, whatever the ring has evicted since.
+// kept aside for `session.pendingRequest`, whatever the ring has evicted since. C12: once the launch has exited, its
+// ring keeps only the last EXITED_RING events (the budget's exited-history cap); older ranges rebuild from the journal.
 import { createReadStream } from 'node:fs';
 import { basename, dirname } from 'node:path';
 import { createInterface } from 'node:readline';
@@ -18,6 +19,7 @@ import type { EngineSessionStatus } from '@shared/engine/status';
 import type { EventsSnapshot } from '@shared/ipc/schema/session';
 import type { HostEmit } from '@shared/host/runtime';
 import { parseJournalRow } from '@shared/wire/journal';
+import { EXITED_RING } from './budget'; // C12
 import { JournalReader } from './journal';
 import { Normalizer } from './normalizer';
 
@@ -35,6 +37,7 @@ export interface SessionStreamOptions {
   emit: HostEmit;
   ringSize?: number;
   batchMs?: number;
+  exitedRingSize?: number; // C12: the ring once the launch has exited (EXITED_RING)
 }
 
 // Where the last rebuilt page stopped: the next page (afterSeq = `through`) goes on from here.
@@ -57,19 +60,18 @@ export class SessionStream {
   private liveItems = new Set<string>(); // request ids of pending or delivered broker items
   private readonly ringSize: number;
   private readonly batchMs: number;
+  private readonly exitedRingSize: number; // C12
 
   constructor(private readonly opts: SessionStreamOptions) {
     this.ringSize = opts.ringSize ?? RING_SIZE;
     this.batchMs = opts.batchMs ?? BATCH_MS;
+    this.exitedRingSize = opts.exitedRingSize ?? EXITED_RING; // C12
   }
 
   events(batch: SessionEvent[]): void {
     for (const event of batch) if (REQUESTED_KINDS.has(event.kind)) this.requests.set((event as { requestId: string }).requestId, event);
     this.ring.push(...batch);
-    if (this.ring.length > this.ringSize + Math.floor(this.ringSize / 5)) { // trims in chunks, never one shift per event
-      const dropped = this.ring.splice(0, this.ring.length - this.ringSize);
-      this.evictedThrough = dropped.at(-1)!.seq;
-    }
+    if (this.ring.length > this.ringSize + Math.floor(this.ringSize / 5)) this.trim(this.ringSize); // trims in chunks, never one shift per event
     this.pending.push(...batch);
     while (this.pending.length >= BATCH_MAX) this.emitBatch(this.pending.splice(0, BATCH_MAX));
     if (this.pending.length > 0 && this.timer === null) {
@@ -86,7 +88,14 @@ export class SessionStream {
 
   status(status: EngineSessionStatus): void {
     this.flush();
+    if (status.process === 'exited' && this.ring.length > this.exitedRingSize) this.trim(this.exitedRingSize); // C12: an exited launch's events are all in
     this.opts.emit('session.status', { appSessionId: this.opts.appSessionId, status });
+  }
+
+  // Keeps the last `size` events; the ones dropped are the journal's to rebuild.
+  private trim(size: number): void {
+    const dropped = this.ring.splice(0, this.ring.length - size);
+    if (dropped.length > 0) this.evictedThrough = dropped.at(-1)!.seq;
   }
 
   queue(queue: QueueState): void {

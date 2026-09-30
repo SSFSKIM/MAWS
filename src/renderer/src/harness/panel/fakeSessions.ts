@@ -33,7 +33,7 @@ export function liveStatus(record: SessionRecord): EngineSessionStatus {
       { taskId: 'harness-shell', taskType: 'local_bash', description: 'pnpm dev', ambient: false },
       { taskId: 'harness-workflow', taskType: 'local_workflow', description: 'review pass', ambient: false },
     ],
-    grants: [], mcpServers: [], heldPeerMessages: [], pendingRequests: 0, queue: { length: 0, paused: false }, keepAlive: ['background_tasks'],
+    grants: [], mcpServers: [], heldPeerMessages: [], pendingRequests: 0, queue: { length: 0, paused: false }, keepAlive: ['background_tasks'], busy: false, lastUsedAt: record.createdAt, // C12: busy and lastUsedAt
     memory: { rssKiB: null, treeRssKiB: null, sampledAt: null }, journalPath: '', hostHooks: [], lastEventSeq: 0,
     trust: { attested: false, recorded: null }, // C10's X6 field
   });

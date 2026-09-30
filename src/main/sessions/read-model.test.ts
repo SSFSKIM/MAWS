@@ -391,3 +391,117 @@ describe('the read model lists its records (C7)', () => {
   });
 });
 // C7 end
+
+// C12 start: the released mark lives on main's digest (C12 execution document, Interfaces "X2 additions"). C4's
+// holder-change seed after a release (phase `exited`) keeps it; a seed with phase `foreign` (a terminal or background
+// job took the session) drops it; a launch clears it; an archive clears it and reads `exited`.
+describe('the released mark against seeds, launches and archive', () => {
+  const RELEASE = { limitKiB: 8_388_608, totalKiB: 9_100_000 };
+  let model: SessionReadModel;
+  let src: ReturnType<typeof source>;
+  const current = () => model.digests().find((d) => d.appSessionId === A)!;
+  const seed = (phase: 'exited' | 'foreign') => {
+    const { revision: _r, ...d } = digest(A, { phase });
+    void _r;
+    src.writer.setDigest(d);
+  };
+  const release = () => {
+    src.writer.applyEngineStatus(status(A, { process: 'exited', exit: { reason: 'budget', release: RELEASE } }));
+    src.writer.fold(A, [ev('process.exited', { reason: 'budget', budget: RELEASE })]);
+  };
+
+  beforeEach(() => {
+    model = new SessionReadModel('index');
+    src = source();
+    model.register(src);
+    src.writer.observeRecord(record(A));
+    src.writer.applyEngineStatus(status(A, { process: 'ready' }));
+  });
+
+  it('a release reads idle with the mark', () => {
+    release();
+    expect(current()).toMatchObject({ phase: 'idle', released: { limitKiB: 8_388_608 } });
+  });
+
+  it('a holder-change seed with phase exited and further exited statuses keep the row idle and marked', () => {
+    release();
+    const mark = current().released;
+    seed('exited');
+    expect(current()).toMatchObject({ phase: 'idle', released: mark });
+    src.writer.applyEngineStatus(status(A, { process: 'exited', exit: { reason: 'budget', release: RELEASE } }));
+    seed('exited');
+    expect(current()).toMatchObject({ phase: 'idle', released: mark });
+  });
+
+  it('a seed with phase foreign (a terminal took it after the release) reads foreign with no mark', () => {
+    release();
+    seed('foreign');
+    expect(current().phase).toBe('foreign');
+    expect(current().released).toBeUndefined();
+    seed('exited'); // the terminal let go: an ordinary exited session, never released again
+    expect(current().phase).toBe('exited');
+    expect(current().released).toBeUndefined();
+  });
+
+  // M2 review: the mark applies once per release. A repeated status (or a late event) of the release whose mark a
+  // terminal or an archive cleared never restores it; the next launch's own release marks again.
+  it('a repeated exited status of a release whose mark a terminal cleared restores nothing, before or after the terminal lets go', () => {
+    release();
+    seed('foreign');
+    const exited = status(A, { process: 'exited', exit: { reason: 'budget', release: RELEASE } });
+    src.writer.applyEngineStatus(exited);
+    expect(current().phase).toBe('foreign');
+    expect(current().released).toBeUndefined();
+    src.writer.fold(A, [ev('process.exited', { reason: 'budget', budget: RELEASE })]); // a late event of the same exit
+    expect(current().released).toBeUndefined();
+    seed('exited'); // the terminal let go
+    src.writer.applyEngineStatus(exited);
+    expect(current().phase).toBe('exited');
+    expect(current().released).toBeUndefined();
+  });
+
+  it('a repeated exited status of a release whose mark an archive cleared restores nothing', () => {
+    release();
+    src.writer.observeRecord(record(A, { archived: true }));
+    src.writer.observeRecord(record(A, { archived: false }));
+    src.writer.applyEngineStatus(status(A, { process: 'exited', exit: { reason: 'budget', release: RELEASE } }));
+    expect(current().phase).toBe('exited');
+    expect(current().released).toBeUndefined();
+  });
+
+  it('repeated statuses of a still-released session keep the mark; the next launch’s release marks again', () => {
+    release();
+    const mark = current().released;
+    src.writer.applyEngineStatus(status(A, { process: 'exited', exit: { reason: 'budget', release: RELEASE } }));
+    expect(current()).toMatchObject({ phase: 'idle', released: mark });
+    seed('foreign');
+    src.writer.applyEngineStatus({ ...status(A, { process: 'starting' }), launchId: 'L2' });
+    src.writer.applyEngineStatus({ ...status(A, { process: 'exited', exit: { reason: 'budget', release: RELEASE } }), launchId: 'L2' });
+    expect(current()).toMatchObject({ phase: 'idle', released: { limitKiB: 8_388_608 } });
+  });
+
+  it('the next launch clears the mark', () => {
+    release();
+    src.writer.applyEngineStatus(status(A, { process: 'starting' }));
+    expect(current().phase).toBe('starting');
+    expect(current().released).toBeUndefined();
+  });
+
+  it('an archive clears the mark and reads exited; an unarchive leaves it exited', () => {
+    release();
+    src.writer.observeRecord(record(A, { archived: true }));
+    expect(current().phase).toBe('exited');
+    expect(current().released).toBeUndefined();
+    src.writer.observeRecord(record(A, { archived: false }));
+    expect(current().phase).toBe('exited');
+    expect(current().released).toBeUndefined();
+  });
+
+  it('an archive of a session that was not released leaves its digest alone', () => {
+    src.writer.applyEngineStatus(status(A, { process: 'exited', exit: { reason: 'stop' } }));
+    const before = current();
+    src.writer.observeRecord(record(A, { archived: true }));
+    expect(current()).toEqual(before);
+  });
+});
+// C12 end

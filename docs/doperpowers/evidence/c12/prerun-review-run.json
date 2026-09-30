@@ -1,0 +1,551 @@
+{
+  "terminalLoginShellClaudeKeys": [
+    "CLAUDE_CODE_CHILD_SESSION",
+    "CLAUDE_CODE_DISABLE_1M_CONTEXT",
+    "CLAUDE_CODE_ENABLE_FUNCTION_HOOKS",
+    "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY",
+    "CLAUDE_CODE_ENTRYPOINT",
+    "CLAUDE_CODE_EXECPATH",
+    "CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS",
+    "CLAUDE_CODE_MAX_CONTEXT_TOKENS",
+    "CLAUDE_CODE_MAX_SUBAGENTS_PER_SESSION",
+    "CLAUDE_CODE_MESSAGING_SOCKET",
+    "CLAUDE_CODE_MESSAGING_TOKEN",
+    "CLAUDE_CODE_SESSION_ATTENDED",
+    "CLAUDE_CODE_SESSION_ID",
+    "CLAUDE_CODE_SUBAGENT_MODEL",
+    "CLAUDE_CONFIG_DIR",
+    "CLAUDE_EFFORT",
+    "CLAUDE_MODEL",
+    "CLAUDE_PID"
+  ],
+  "ownerFileCheck": {
+    "\u00a710.1 terminal-started sessions show under their projects, the live one foreign-live": {
+      "before": [],
+      "after": [],
+      "pinBefore": "-rwxr-xr-x@ 1 new  staff  225036032  9\uc6d4 25 15:10 ~/.local/share/claude/versions/2.1.283",
+      "pinAfter": "-rwxr-xr-x@ 1 new  staff  225036032  9\uc6d4 25 15:10 ~/.local/share/claude/versions/2.1.283"
+    },
+    "\u00a710.2 a new worktree from \"+\", trust attested, project settings load as in the terminal": {
+      "before": [],
+      "after": [],
+      "pinBefore": "-rwxr-xr-x@ 1 new  staff  225036032  9\uc6d4 25 15:10 ~/.local/share/claude/versions/2.1.283",
+      "pinAfter": "-rwxr-xr-x@ 1 new  staff  225036032  9\uc6d4 25 15:10 ~/.local/share/claude/versions/2.1.283"
+    },
+    "\u00a710.4 one deep session: a relay to a running background child, Review with This branch (G3), a Terminal in the worktree, a viewer tab, a workflow; Session info in the panel": {
+      "before": [],
+      "after": [],
+      "pinBefore": "-rwxr-xr-x@ 1 new  staff  225036032  9\uc6d4 25 15:10 ~/.local/share/claude/versions/2.1.283",
+      "pinAfter": "-rwxr-xr-x@ 1 new  staff  225036032  9\uc6d4 25 15:10 ~/.local/share/claude/versions/2.1.283"
+    },
+    "\u00a710.6 in brief on the owner build: one release and its Send-to-resume; the quit question with a turn in flight, background work and a busy terminal": {
+      "before": [],
+      "after": [],
+      "pinBefore": "-rwxr-xr-x@ 1 new  staff  225036032  9\uc6d4 25 15:10 ~/.local/share/claude/versions/2.1.283",
+      "pinAfter": "-rwxr-xr-x@ 1 new  staff  225036032  9\uc6d4 25 15:10 ~/.local/share/claude/versions/2.1.283"
+    },
+    "\u00a710.9 queue, steer, stop and resume as labelled; a paused queue survives a quit; a denial shows in a collapsed turn; an interrupt with a pending approval": {
+      "before": [],
+      "after": [],
+      "pinBefore": "-rwxr-xr-x@ 1 new  staff  225036032  9\uc6d4 25 15:10 ~/.local/share/claude/versions/2.1.283",
+      "pinAfter": "-rwxr-xr-x@ 1 new  staff  225036032  9\uc6d4 25 15:10 ~/.local/share/claude/versions/2.1.283"
+    },
+    "C8 item 9: Attach adds the Terminal tab and activates its session (a claude --bg job under the scratch home)": {
+      "before": [],
+      "after": [],
+      "pinBefore": "-rwxr-xr-x@ 1 new  staff  225036032  9\uc6d4 25 15:10 ~/.local/share/claude/versions/2.1.283",
+      "pinAfter": "-rwxr-xr-x@ 1 new  staff  225036032  9\uc6d4 25 15:10 ~/.local/share/claude/versions/2.1.283"
+    }
+  },
+  "terminalUsd": {
+    "10.1 north-one (-p)": 0.21698,
+    "10.1 south-one (-p)": 0.0990018,
+    "10.2 terminal compare (-p)": 0.1015138,
+    "c8 attach --bg job (estimate)": 0.0286,
+    "10.1 north-live (PTY, estimate)": 0.1108
+  },
+  "10.1.sessions": {
+    "northOne": {
+      "sessionId": "e80d7e0c-94a2-4e60-afb8-d1fe7a7a222c",
+      "how": "claude -p",
+      "cwd": "/private/tmp/maws-c12-prerun-1790768985/repos/north"
+    },
+    "southOne": {
+      "sessionId": "2df6e50f-a5af-41c8-9fa2-ef18a892abef",
+      "how": "claude -p",
+      "cwd": "/private/tmp/maws-c12-prerun-1790768985/repos/south"
+    },
+    "northLive": {
+      "sessionId": "6c39e506-c978-420e-bda4-af3fbf2e5111",
+      "how": "claude (interactive, in a PTY, kept live)",
+      "cwd": "/private/tmp/maws-c12-prerun-1790768985/repos/north"
+    }
+  },
+  "build": {
+    "packaged": true,
+    "executable": "dist/mac-arm64/MAWS.app/Contents/MacOS/MAWS"
+  },
+  "10.1": {
+    "projects": {
+      "north": 2,
+      "south": 1
+    },
+    "phases": {
+      "northOne": "exited",
+      "southOne": "exited",
+      "northLive": "foreign"
+    },
+    "liveRowLine": "Terminal \u00b7 pid 59413",
+    "overviewCard": "foreign card with the holder line",
+    "screenshots": [
+      "docs/doperpowers/evidence/c12/prerun-10.1-overview-light.png",
+      "docs/doperpowers/evidence/c12/prerun-10.1-overview-dark.png"
+    ],
+    "consoleErrors": []
+  },
+  "spend": {
+    "usd": 1.7384,
+    "journalsUsd": 1.1815,
+    "terminalUsd": 0.5569
+  },
+  "result:\u00a710.1 terminal-started sessions show under their projects, the live one foreign-live": {
+    "status": "passed",
+    "durationMs": 12576,
+    "consoleErrors": [],
+    "error": null
+  },
+  "10.2-trust-card.screenshots": [
+    "docs/doperpowers/evidence/c12/prerun-10.2-trust-card-light.png",
+    "docs/doperpowers/evidence/c12/prerun-10.2-trust-card-dark.png"
+  ],
+  "10.2": {
+    "appSessionId": "156e3197-6126-4f25-af2e-49f39e07749a",
+    "cwd": "/private/tmp/maws-c12-prerun-1790768985/repos/deep/.claude/worktrees/deep-mwk8",
+    "worktreeListed": true,
+    "branch": "worktree-deep-mwk8",
+    "setupPhases": [
+      "worktree",
+      "trusting",
+      "trusting",
+      "launching",
+      "ready"
+    ],
+    "maws": {
+      "mcp": [
+        "c12-sentinel:connected"
+      ],
+      "commands": [
+        "__remote-workflow",
+        "agents",
+        "auto-mode-setup",
+        "autocompact",
+        "batch",
+        "c12-plugin:c12-plugin-ping",
+        "claude-api",
+        "clear",
+        "code-review",
+        "color",
+        "compact",
+        "config",
+        "context",
+        "dataviz",
+        "debug",
+        "deep-research",
+        "design",
+        "design-consent",
+        "design-revoke",
+        "design-sync",
+        "doctor",
+        "effort",
+        "fast",
+        "fewer-permission-prompts",
+        "focus",
+        "goal",
+        "heapdump",
+        "init",
+        "insights",
+        "list-agents",
+        "loop",
+        "mcp",
+        "model",
+        "output-style",
+        "plugin-authoring",
+        "plugin-types",
+        "recap",
+        "reload-plugins",
+        "reload-skills",
+        "rename",
+        "run",
+        "run-skill-generator",
+        "security-review",
+        "simplify",
+        "team-onboarding",
+        "update-config",
+        "usage",
+        "verify",
+        "workflow-authoring",
+        "workflow-launch-exec"
+      ],
+      "agents": [
+        "Explore",
+        "Plan",
+        "claude",
+        "general-purpose",
+        "statusline-setup"
+      ],
+      "plugins": [
+        "agents-md",
+        "c12-plugin",
+        "plugin-authoring",
+        "telemetry"
+      ],
+      "mcpTools": [
+        "mcp__c12-sentinel__ask_color"
+      ],
+      "workflowTool": true
+    },
+    "terminal": {
+      "mcp": [
+        "c12-sentinel:connected"
+      ],
+      "commands": [
+        "__remote-workflow",
+        "agents",
+        "auto-mode-setup",
+        "autocompact",
+        "batch",
+        "c12-plugin:c12-plugin-ping",
+        "claude-api",
+        "clear",
+        "code-review",
+        "color",
+        "compact",
+        "config",
+        "context",
+        "dataviz",
+        "debug",
+        "deep-research",
+        "design",
+        "design-consent",
+        "design-revoke",
+        "design-sync",
+        "doctor",
+        "effort",
+        "fast",
+        "fewer-permission-prompts",
+        "focus",
+        "goal",
+        "heapdump",
+        "init",
+        "insights",
+        "list-agents",
+        "loop",
+        "mcp",
+        "model",
+        "output-style",
+        "plugin-authoring",
+        "plugin-types",
+        "recap",
+        "reload-plugins",
+        "reload-skills",
+        "rename",
+        "run",
+        "run-skill-generator",
+        "security-review",
+        "simplify",
+        "team-onboarding",
+        "update-config",
+        "usage",
+        "verify",
+        "workflow-authoring",
+        "workflow-launch-exec"
+      ],
+      "agents": [
+        "Explore",
+        "Plan",
+        "claude",
+        "general-purpose",
+        "statusline-setup"
+      ],
+      "plugins": [
+        "agents-md",
+        "c12-plugin",
+        "plugin-authoring",
+        "telemetry"
+      ],
+      "mcpTools": [
+        "mcp__c12-sentinel__ask_color"
+      ],
+      "workflowTool": true
+    },
+    "same": {
+      "mcp": true,
+      "commands": true,
+      "agents": true,
+      "plugins": true
+    },
+    "commandsOnlyInMaws": [],
+    "commandsOnlyInTerminal": [],
+    "hookMarkers": {
+      "afterMaws": 2,
+      "afterTerminal": 3
+    },
+    "allowRuleListed": true,
+    "trust": {
+      "before": {
+        "trusted": false
+      },
+      "after": {
+        "trusted": true,
+        "keyKind": "repo",
+        "configInScratch": true
+      },
+      "workspaceTrustSent": [
+        {
+          "accepted": true,
+          "directory": "/private/tmp/maws-c12-prerun-1790768985/repos/deep"
+        }
+      ]
+    },
+    "screenshots": [
+      "docs/doperpowers/evidence/c12/prerun-10.2-session-light.png",
+      "docs/doperpowers/evidence/c12/prerun-10.2-session-dark.png"
+    ],
+    "consoleErrors": []
+  },
+  "result:\u00a710.2 a new worktree from \"+\", trust attested, project settings load as in the terminal": {
+    "status": "passed",
+    "durationMs": 11282,
+    "consoleErrors": [],
+    "error": null
+  },
+  "10.4": {
+    "sessionInfo": {
+      "plusMenu": [
+        "Subagents",
+        "Review",
+        "Terminal",
+        "Files",
+        "Background work",
+        "Session info"
+      ],
+      "opensFromModelRow": true,
+      "screenshots": [
+        "docs/doperpowers/evidence/c12/prerun-10.4-session-info-light.png",
+        "docs/doperpowers/evidence/c12/prerun-10.4-session-info-dark.png"
+      ]
+    },
+    "relay": {
+      "agentId": "a49fb60fc990dac54",
+      "text": "RELAY-C12-muo1oajm",
+      "sendMessageAfterMs": 2819,
+      "lineHistory": [
+        {
+          "ms": 23,
+          "v": "Asked DEEP READY reply to relay \u00b7 <elapsed>"
+        },
+        {
+          "ms": 1024,
+          "v": "Asked DEEP READY reply to relay \u00b7 <elapsed>"
+        },
+        {
+          "ms": 2024,
+          "v": "Asked DEEP READY reply to relay \u00b7 <elapsed>"
+        },
+        {
+          "ms": 2838,
+          "v": "DEEP READY reply sent it with SendMessage after 2 parent rounds \u00b7 Background relay loop agent gets it at its next tool round"
+        },
+        {
+          "ms": 4654,
+          "v": ""
+        }
+      ],
+      "reached": "delivered",
+      "deliveredAfterMs": 4654,
+      "inboxAfterMs": 8903,
+      "childTranscriptAttachment": [
+        {
+          "type": "attachment",
+          "attachment": "queued_command",
+          "origin": {
+            "kind": "coordinator"
+          }
+        },
+        {
+          "type": "assistant",
+          "attachment": null,
+          "origin": null
+        },
+        {
+          "type": "assistant",
+          "attachment": null,
+          "origin": null
+        }
+      ],
+      "followStates": [
+        {
+          "state": "backfilling",
+          "afterSendMs": 2839
+        },
+        {
+          "state": "following",
+          "afterSendMs": 2839
+        },
+        {
+          "state": "following",
+          "afterSendMs": 4654
+        },
+        {
+          "state": "following",
+          "afterSendMs": 5634
+        },
+        {
+          "state": "following",
+          "afterSendMs": 6090
+        },
+        {
+          "state": "following",
+          "afterSendMs": 7079
+        },
+        {
+          "state": "following",
+          "afterSendMs": 7313
+        },
+        {
+          "state": "following",
+          "afterSendMs": 8766
+        }
+      ],
+      "childEndedAt": null,
+      "screenshots": [
+        "docs/doperpowers/evidence/c12/prerun-10.4-relay-light.png",
+        "docs/doperpowers/evidence/c12/prerun-10.4-relay-dark.png"
+      ]
+    },
+    "strayPermissionsAllowed": [],
+    "consoleErrors": [],
+    "failures": [],
+    "rerunPieces": "monitor",
+    "monitor": {
+      "prompt": "Use the Monitor tool (load it with ToolSearch if it is not listed) to watch the output of this command: for i in $(seq 1 60); do echo tick $i; sleep 5; done. Start it and reply with exactly the word WATCHING; do not wait for it. If the Monitor tool is not available, do nothing else and reply with exactly the words MONITOR UNAVAILABLE.",
+      "available": false,
+      "toolSearches": [
+        {
+          "query": "select:Monitor",
+          "max_results": 1
+        }
+      ],
+      "note": "the engine offers no Monitor tool in this session (ToolSearch finds none); a feature gate of the engine, not MAWS"
+    }
+  },
+  "result:\u00a710.4 one deep session: a relay to a running background child, Review with This branch (G3), a Terminal in the worktree, a viewer tab, a workflow; Session info in the panel": {
+    "status": "passed",
+    "durationMs": 9240,
+    "consoleErrors": [],
+    "error": null
+  },
+  "10.6": {
+    "release": {
+      "treesMiB": [
+        210,
+        209.3,
+        212.7
+      ],
+      "sumMiB": 632,
+      "budgetMiB": 527,
+      "releasedAfterSetMs": 374,
+      "released": "X1 (least recently used)",
+      "othersProcess": [
+        "ready",
+        "ready"
+      ],
+      "attentionItemsForX1": 0,
+      "sendToReadyMs": 906,
+      "reconnectProcessExit": true,
+      "userFrames": 1,
+      "reply": "X1 BACK",
+      "screenshots": [
+        "docs/doperpowers/evidence/c12/prerun-10.6-released-light.png",
+        "docs/doperpowers/evidence/c12/prerun-10.6-released-dark.png",
+        "docs/doperpowers/evidence/c12/prerun-10.6-resumed-light.png",
+        "docs/doperpowers/evidence/c12/prerun-10.6-resumed-dark.png"
+      ]
+    },
+    "sessions": [
+      "cc0fb7ad-4ddb-4c04-ac7b-76f906350880",
+      "9c9bcabf-f116-43a6-a93a-47167355398e",
+      "dee44a57-e278-4be9-a65d-20fdc03a162c"
+    ],
+    "failures": [],
+    "rerunPieces": "release"
+  },
+  "result:\u00a710.6 in brief on the owner build: one release and its Send-to-resume; the quit question with a turn in flight, background work and a busy terminal": {
+    "status": "passed",
+    "durationMs": 41174,
+    "consoleErrors": [],
+    "error": null
+  },
+  "10.9": {
+    "queue": {
+      "label": "Queue",
+      "queuedShown": "1 queued",
+      "writtenToTheWire": 1
+    },
+    "stopResume": {
+      "stopLabel": "Stop",
+      "resumeLabel": "Resume",
+      "writtenToTheWireAfterResume": 1,
+      "screenshots": [
+        "docs/doperpowers/evidence/c12/prerun-10.9-queue-paused-light.png",
+        "docs/doperpowers/evidence/c12/prerun-10.9-queue-paused-dark.png"
+      ]
+    },
+    "consoleErrors": [],
+    "failures": [],
+    "rerunPieces": "Queue while|Stop pauses"
+  },
+  "result:\u00a710.9 queue, steer, stop and resume as labelled; a paused queue survives a quit; a denial shows in a collapsed turn; an interrupt with a pending approval": {
+    "status": "passed",
+    "durationMs": 29625,
+    "consoleErrors": [],
+    "error": null
+  },
+  "c8.attach": {
+    "bgStarted": [
+      "backgrounded \u00b7 04f02bdc",
+      "  claude agents             list sessions",
+      "  claude attach 04f02bdc    open in this terminal",
+      "  claude logs 04f02bdc      show recent output"
+    ],
+    "jobId": "04f02bdc",
+    "attach": {
+      "rowMenu": [
+        "Open",
+        "Attach in a terminal tab"
+      ],
+      "sessionTabActivated": true,
+      "terminalTabActive": true,
+      "screenshots": [
+        "docs/doperpowers/evidence/c12/prerun-c8-attach-light.png",
+        "docs/doperpowers/evidence/c12/prerun-c8-attach-dark.png"
+      ]
+    },
+    "consoleErrors": [],
+    "stopped": "stopped 04f02bdc"
+  },
+  "result:C8 item 9: Attach adds the Terminal tab and activates its session (a claude --bg job under the scratch home)": {
+    "status": "passed",
+    "durationMs": 4684,
+    "consoleErrors": [],
+    "error": null
+  },
+  "supersededFailures": {
+    "note": "failures of an earlier pass in this re-run, fixed in the spec and the piece rerun green",
+    "10.4.failed:a monitor started from the live session shows in Background work and stops": "timed out after 180 s waiting for the monitor\u2019s start"
+  },
+  "reviewRerun": {
+    "note": "M6 review fixes re-run: only the affected pieces, fresh scratch root",
+    "root": "/private/tmp/maws-c12-prerun-1790768985"
+  }
+}

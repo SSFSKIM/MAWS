@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { SETTINGS_DEFAULTS_V3 } from '../../settings/defaults';
-import { SettingsPatchSchema, SettingsSchema } from './settings';
+import { SETTINGS_DEFAULTS_V4 } from '../../settings/defaults';
+import { commands, SettingsPatchSchema, SettingsSchema } from './settings'; // C12: commands
 
-const base = SETTINGS_DEFAULTS_V3;
+const base = SETTINGS_DEFAULTS_V4;
 const issueCodes = (value: unknown) => {
   const parsed = SettingsSchema.safeParse(value);
   return parsed.success ? [] : parsed.error.issues.map((issue) => issue.code);
@@ -35,3 +35,21 @@ describe('settings keymap is a partial record', () => {
     expect(SettingsPatchSchema.safeParse({ version: 3 }).success).toBe(false);
   });
 });
+
+// C12 start: MAWS's custody of the pinned engine (C12 execution document, Interfaces "X2 additions")
+describe('settings.engineCustody and settings.engineApplied', () => {
+  const manifest = { version: '2.1.283', sha256: 'd8cb1e5c', size: 225036032, source: '/s/2.1.283', copiedAt: '2026-09-29T12:00:00.000Z' };
+  it('custody is the copy with its manifest, a refusal with its message, or null when custody does not run', () => {
+    expect(commands['settings.engineCustody'].output.safeParse({ state: 'ok', path: '/u/engine/2.1.283/claude', manifest }).success).toBe(true);
+    for (const state of ['missing', 'mismatch', 'version']) expect(commands['settings.engineCustody'].output.safeParse({ state, path: '/p', message: 'm' }).success).toBe(true);
+    expect(commands['settings.engineCustody'].output.safeParse(null).success).toBe(true);
+    expect(commands['settings.engineCustody'].output.safeParse({ state: 'ok', path: '/p', message: 'm' }).success).toBe(false);
+    expect(commands['settings.engineCustody'].output.safeParse({ state: 'gone', path: '/p', message: 'm' }).success).toBe(false);
+  });
+  it('both are main’s, and engineApplied answers nothing but its completion', () => {
+    expect(commands['settings.engineCustody'].owner).toBe('main');
+    expect(commands['settings.engineApplied'].owner).toBe('main');
+    expect(commands['settings.engineApplied'].output.safeParse(undefined).success).toBe(true);
+  });
+});
+// C12 end

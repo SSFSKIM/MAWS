@@ -124,7 +124,7 @@ describe('session creator', () => {
     const creator = vi.fn(async () => NEW);
     disposers.push(registerSessionCreator(creator));
     expect(isSessionCreatorRegistered()).toBe(true);
-    await createSession(P);
+    await expect(createSession(P)).resolves.toBe(NEW); // C12: the id, for the Worktrees… dialog's location
     expect(creator).toHaveBeenCalledWith(P);
     expect(useSessions.getState().unstarted.get(NEW)).toEqual({ projectId: P, createdAt: expect.any(String) });
     const pane = useLayout.getState().main.panes[0];
@@ -135,10 +135,10 @@ describe('session creator', () => {
   it('opens nothing when the creator declines, and logs a creator that fails', async () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     disposers.push(registerSessionCreator(async () => null));
-    await createSession(null);
+    await expect(createSession(null)).resolves.toBeNull(); // C12: createSession answers the id, null when none was made
     expect(useSessions.getState().unstarted.size).toBe(0);
     disposers.push(registerSessionCreator(() => Promise.reject(new Error('boom'))));
-    await expect(createSession(null)).resolves.toBeUndefined();
+    await expect(createSession(null)).resolves.toBeNull(); // C12
     expect(error).toHaveBeenCalledWith('[actions] session creator failed', expect.any(Error));
     expect(useLayout.getState().main).toBe(LAYOUT_DEFAULTS.main);
     error.mockRestore();

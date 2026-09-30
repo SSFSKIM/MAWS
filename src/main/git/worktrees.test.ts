@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'; // C12: mkdtempSync, realpathSync, statSync
+import { tmpdir } from 'node:os'; // C12
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SessionId } from '@shared/graph/ids';
@@ -10,7 +11,7 @@ import { runGit } from '../../../test/support/git-fixture';
 import { FakeHolderHost } from '../../../test/support/holder-host';
 import { emptyRepository, ScratchRepo } from '../../../test/support/scratch-repo';
 import { createGitRunner, type ExecFileFn } from './runner';
-import { WorktreeService } from './worktrees';
+import { ensureRuntimeExclude, RUNTIME_EXCLUDE_BLOCK, RUNTIME_EXCLUDE_MARKER, WorktreeService, type ExcludeFs } from './worktrees'; // C12: the exclude block
 
 // The service is Electron-free (its handlers are worktrees-register.ts's): any import of Electron from here fails.
 vi.mock('electron', () => {
@@ -90,6 +91,102 @@ describe('worktree service over scratch repositories', () => {
       await expect(service.add({ repoRoot: repo.root, name: 'again', branch: { kind: 'existing', name: 'nope' } })).rejects.toThrow('branch missing');
     });
 
+    // C12 start: the engine's runtime-exclude block (2.1.283, `ensureClaudeRuntimeFilesExcluded`: `# claude-code-runtime`
+    // then its ten patterns, `**/.claude/worktrees/` among them, appended once to the common dir's info/exclude), so a
+    // worktree MAWS makes leaves the main checkout clean as one the engine makes does (the architect's ruling at C12 M5)
+    describe('the runtime exclude block', () => {
+      const exclude = () => join(repo.root, '.git', 'info', 'exclude');
+      const read = () => readFileSync(exclude(), 'utf8');
+      const count = (text: string, line: string) => text.split('\n').filter((l) => l === line).length;
+
+      it('absent: add writes the engine’s block, and the main checkout stays clean', async () => {
+        const before = read();
+        expect(before).not.toContain(RUNTIME_EXCLUDE_MARKER);
+        const info = await service.add({ repoRoot: repo.root, name: 'one', branch: newBranch('worktree-one') });
+        expect(read()).toBe(`${before}${before.endsWith('\n') || before === '' ? '' : '\n'}${RUNTIME_EXCLUDE_BLOCK}`);
+        expect(RUNTIME_EXCLUDE_BLOCK.split('\n')).toEqual(expect.arrayContaining([RUNTIME_EXCLUDE_MARKER, '**/.claude/worktrees/']));
+        expect(await service.status(repo.root, repo.root)).toMatchObject({ state: 'clean', dirty: { tracked: 0, untracked: 0 } });
+        expect(info.path).toBe(managed('one'));
+      });
+
+      it('present (the engine’s own block, written before): untouched, byte for byte', async () => {
+        const engines = `# git ls-files --others --exclude-from=.git/info/exclude\n*.log\n${RUNTIME_EXCLUDE_MARKER}\n**/.claude/worktrees/\n`;
+        writeFileSync(exclude(), engines);
+        await service.add({ repoRoot: repo.root, name: 'two', branch: newBranch('worktree-two') });
+        expect(read()).toBe(engines);
+      });
+
+      it('repeated creation writes one block, from a linked worktree too; a missing info directory is made', async () => {
+        rmSync(join(repo.root, '.git', 'info'), { recursive: true, force: true });
+        const first = await service.add({ repoRoot: repo.root, name: 'a', branch: newBranch('worktree-a') });
+        await service.add({ repoRoot: repo.root, name: 'b', branch: newBranch('worktree-b') });
+        await service.add({ repoRoot: first.path, name: 'c', branch: newBranch('worktree-c') });
+        expect(count(read(), RUNTIME_EXCLUDE_MARKER)).toBe(1);
+        expect(count(read(), '**/.claude/worktrees/')).toBe(1);
+      });
+
+      // re-review of f0ea3676: the read, the marker check and the append are one step per common dir
+      it('two writes started before either appends end with one block: the second reads only after the first appended', async () => {
+        const dir = join(repo.root, 'fake-common');
+        let text = '';
+        const calls: string[] = [];
+        let release!: () => void;
+        const firstRead = new Promise<void>((r) => (release = r));
+        const fs: ExcludeFs = {
+          readFile: async () => {
+            calls.push('read');
+            if (calls.filter((c) => c === 'read').length === 1) await firstRead;
+            return text;
+          },
+          appendFile: async (_file, data) => {
+            calls.push('append');
+            text += data;
+          },
+          mkdir: async () => undefined,
+        };
+        const both = Promise.all([ensureRuntimeExclude(dir, fs), ensureRuntimeExclude(dir, fs)]);
+        await new Promise((r) => setTimeout(r, 10));
+        expect(calls).toEqual(['read']); // the second is queued behind the first, not reading
+        release();
+        await both;
+        expect(calls).toEqual(['read', 'append', 'read']);
+        expect(text).toBe(RUNTIME_EXCLUDE_BLOCK);
+      });
+
+      it('two concurrent creations in one repository leave one block', async () => {
+        await Promise.all([
+          service.add({ repoRoot: repo.root, name: 'x', branch: newBranch('worktree-x') }),
+          service.add({ repoRoot: repo.root, name: 'y', branch: newBranch('worktree-y') }),
+        ]);
+        expect(count(read(), RUNTIME_EXCLUDE_MARKER)).toBe(1);
+      });
+
+      it('writes to the common dir’s info/exclude when the git dir is separate from the checkout', async () => {
+        const base = realpathSync(mkdtempSync(join(tmpdir(), 'maws-sep-')));
+        try {
+          const work = join(base, 'work');
+          const gitDir = join(base, 'gitdir');
+          await runGit(base, ['init', '-q', '-b', 'main', `--separate-git-dir=${gitDir}`, work]);
+          writeFileSync(join(work, 'a.txt'), 'a\n');
+          await runGit(work, ['add', 'a.txt']);
+          await runGit(work, ['commit', '-q', '-m', 'a']);
+          await service.add({ repoRoot: work, name: 'sep', branch: newBranch('worktree-sep') });
+          expect(readFileSync(join(gitDir, 'info', 'exclude'), 'utf8')).toContain(RUNTIME_EXCLUDE_BLOCK);
+          expect(statSync(join(work, '.git')).isFile()).toBe(true); // the checkout's .git is still git's pointer file
+          expect(existsSync(join(work, '.git', 'info'))).toBe(false);
+        } finally {
+          rmSync(base, { recursive: true, force: true });
+        }
+      });
+
+      it('a refused add writes nothing', async () => {
+        const before = read();
+        await expect(service.add({ repoRoot: repo.root, name: '-bad', branch: newBranch('worktree-bad') })).rejects.toThrow();
+        expect(read()).toBe(before);
+      });
+    });
+    // C12 end
+
     it('creates the sibling under the main root when asked from a linked worktree', async () => {
       const first = await service.add({ repoRoot: repo.root, name: 'first', branch: newBranch('worktree-first') });
       const second = await service.add({ repoRoot: first.path, name: 'second', branch: newBranch('worktree-second') });
@@ -138,8 +235,8 @@ describe('worktree service over scratch repositories', () => {
       mkdirSync(join(w.path, 'src'));
       host.hold('eng-sub', { kind: 'terminal', pid: 78 }, join(w.path, 'src'));
       await expect(service.status(repo.root, w.path)).resolves.toMatchObject({ state: 'busy', occupancy: { unbound: 1 } });
-      // (the main checkout is dirty here, not busy: `.claude/` is untracked until the engine writes its info/exclude block)
-      await expect(service.status(repo.root, repo.root)).resolves.toMatchObject({ state: 'dirty', occupancy: { unbound: 0 } });
+      // C12: the main checkout is clean, not busy (add wrote the engine's runtime exclude block, `.claude/worktrees/` in it)
+      await expect(service.status(repo.root, repo.root)).resolves.toMatchObject({ state: 'clean', occupancy: { unbound: 0 } });
     });
 
     it('names idle and live sessions here: three records, one of them reserved', async () => {
@@ -272,7 +369,7 @@ describe('worktree service over scratch repositories', () => {
       expect(await read()).toBe('gone');
     });
 
-    it('never runs gc, fetch or anything outside the worktree commands, and leaves info/exclude alone', async () => {
+    it('never runs gc, fetch or anything outside the worktree commands; info/exclude gains the runtime block only (C12), which removal leaves', async () => {
       const exclude = join(repo.root, '.git', 'info', 'exclude');
       const before = existsSync(exclude) ? readFileSync(exclude, 'utf8') : null;
       const w = await service.add({ repoRoot: repo.root, name: 'all', branch: newBranch('worktree-all') });
@@ -284,7 +381,8 @@ describe('worktree service over scratch repositories', () => {
       expect([...subcommands].sort()).toEqual(['branch', 'check-ref-format', 'rev-list', 'rev-parse', 'show-ref', 'status', 'symbolic-ref', 'worktree']);
       const mutations = spawn.mock.calls.map(([, args]) => (args as string[]).slice(2)).filter((a) => a[0] === 'branch' || (a[0] === 'worktree' && a[1] !== 'list'));
       expect(mutations.map((a) => a.slice(0, 2).join(' '))).toEqual(['worktree add', 'worktree remove', 'worktree prune', 'branch -D']);
-      expect(existsSync(exclude) ? readFileSync(exclude, 'utf8') : null).toBe(before);
+      // C12: add appended the engine's runtime block (never removed by MAWS); the ladder wrote nothing else there
+      expect(readFileSync(exclude, 'utf8')).toBe(`${before ?? ''}${before && !before.endsWith('\n') ? '\n' : ''}${RUNTIME_EXCLUDE_BLOCK}`);
     });
   });
 });

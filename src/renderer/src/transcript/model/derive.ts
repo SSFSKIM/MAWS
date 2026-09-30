@@ -7,6 +7,7 @@ import type { AgentId, RequestId, TaskId, ToolUseId } from '@shared/graph/ids';
 import { MCP_TOOL, presentationOf, tableRowOf } from './classify';
 import { cellOf, editCounts, filePathOf, hookCell, type HookRecord, type ToolRecord, type TurnContext } from './cells';
 import { agentMessageCopy, boundaryCopy, groupSummary, processExitCopy, reconnectCopy, retryCopy, subagentSentence } from './copy';
+import { RESUMED_COPY, RESUMING_COPY } from './copy'; // C12
 import { glyphFor } from './glyphs';
 import { collectCells, groupItems, phrasesOf, type WorkItem } from './groups';
 import { cellId, rowId, turnId as turnIdOf } from './keys';
@@ -813,7 +814,13 @@ function looseRows(state: TranscriptState, events: SessionEvent[]): Row[] {
       case 'session.reconnect': {
         const id: RowId = episode?.id ?? rowId.reconnect(event.id);
         const row: RowOf<'error'> = { id, turnId: null, at: event.at, kind: 'error', severity: event.phase === 'failed' ? 'error' : 'transient', text: reconnectCopy(event.phase, event.attempt, event.maxAttempts, event.reason), attempt: { n: event.attempt, max: event.maxAttempts }, scope: 'reconnect', lostAttentionCount: null };
-        if (event.phase === 'reconnected') {
+        // C12 start: the resume of a session released under the memory budget reads Resuming… and stays as Resumed, the
+        // line that closes the release's own
+        const resumed = event.trigger === 'process_exit' && event.phase === 'reconnected';
+        if (event.trigger === 'process_exit' && event.phase === 'attempting') row.text = RESUMING_COPY;
+        if (resumed) Object.assign(row, { severity: 'notice', text: RESUMED_COPY, attempt: null });
+        // C12 end
+        if (event.phase === 'reconnected' && !resumed /* C12 */) {
           if (episode) rows.splice(episode.index, 1); // a reconnect that succeeded leaves no row
         } else if (episode) rows[episode.index] = row;
         else {

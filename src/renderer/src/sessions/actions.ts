@@ -98,7 +98,7 @@ async function addProject(): Promise<void> {
 
 export function registerSessionActions(): () => void {
   const offs = [
-    registerAction('session.new', () => createSession(focusedProject())),
+    registerAction('session.new', async () => void (await createSession(focusedProject()))), // C12: createSession answers the id
     // the session's tab first, so a trust or relay card its start docks is on screen
     registerSessionAction('resume', (id) => {
       useLayout.getState().openSession(id);
@@ -115,6 +115,7 @@ export function registerSessionActions(): () => void {
     registerProjectAction('archiveSessions', archiveProjectSessions),
     registerProjectAction('revealInFinder', revealProject),
     registerProjectAction('archivedSessions', (projectId) => openDialog({ kind: 'archived', projectId })),
+    registerProjectAction('worktrees', (projectId) => openDialog({ kind: 'worktrees', projectId })), // C12
     registerAddProject(addProject),
   ];
   return () => offs.forEach((off) => off());

@@ -1,0 +1,57 @@
+{
+  "ownerFileCheck": {
+    "§10.1 real store, read only": {
+      "before": [],
+      "after": [],
+      "pinBefore": "-rwxr-xr-x@ 1 new  staff  225036032  9월 25 15:10 ~/.local/share/claude/versions/2.1.283",
+      "pinAfter": "-rwxr-xr-x@ 1 new  staff  225036032  9월 25 15:10 ~/.local/share/claude/versions/2.1.283"
+    }
+  },
+  "10.1.realstore": {
+    "counts": {
+      "projects": 275,
+      "projectsVisible": 275,
+      "projectRowsShown": 275,
+      "sessions": 3273,
+      "foreignLive": 11,
+      "foreignGlyphsInSidebar": 10,
+      "overviewCards": 14
+    },
+    "timingMs": {
+      "firstWindow": 1372,
+      "shellVisible": 2051,
+      "firstOverviewCard": 2422,
+      "firstProjectRow": 2960,
+      "indexSettled": 3793
+    },
+    "engineSessionsAtEnd": 0,
+    "screenshotOutsideRepo": "realstore/prerun-10.1-realstore-light.png under the scratch root (shows the owner’s titles; not committed)",
+    "consoleErrors": 0
+  },
+  "result:§10.1 real store, read only": {
+    "status": "passed",
+    "durationMs": 11546,
+    "error": null
+  },
+  "10.1.realstore.coldStart": {
+    "counts": {
+      "projects": 275,
+      "projectsVisible": 275,
+      "projectRowsShown": 275,
+      "sessions": 3274,
+      "foreignLive": 13,
+      "foreignGlyphsInSidebar": 12,
+      "overviewCards": 14
+    },
+    "timingMs": {
+      "firstWindow": 2952,
+      "shellVisible": 16308,
+      "firstOverviewCard": 57863,
+      "firstProjectRow": 58369,
+      "indexSettled": 59226
+    },
+    "engineSessionsAtEnd": 0,
+    "screenshotOutsideRepo": "realstore/prerun-10.1-realstore-light.png under the scratch root (shows the owner’s titles; not committed)",
+    "consoleErrors": 0
+  }
+}

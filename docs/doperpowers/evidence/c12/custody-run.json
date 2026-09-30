@@ -1,0 +1,95 @@
+{
+  "scratch": {
+    "root": "/private/tmp/maws-c12-custody-1790749764",
+    "source": "/private/tmp/maws-c12-custody-1790749764/source",
+    "copy": "/private/tmp/maws-c12-custody-1790749764/userData/engine/2.1.283/claude"
+  },
+  "ownerFileCheck": {
+    "before": [],
+    "after": []
+  },
+  "pinLs": {
+    "before": "-rwxr-xr-x@ 1 new  staff  225036032  9월 25 15:10 ~/.local/share/claude/versions/2.1.283",
+    "after": "-rwxr-xr-x@ 1 new  staff  225036032  9월 25 15:10 ~/.local/share/claude/versions/2.1.283"
+  },
+  "step1": {
+    "custody": {
+      "state": "ok",
+      "path": "/private/tmp/maws-c12-custody-1790749764/userData/engine/2.1.283/claude",
+      "manifest": {
+        "version": "2.1.283",
+        "sha256": "d8cb1e5c79684cc12a8bfc813e3a2073406921b6245744b3009be3ab5651d21e",
+        "size": 225036032,
+        "source": "/private/tmp/maws-c12-custody-1790749764/source/2.1.283",
+        "copiedAt": "2026-09-30T06:29:36.359Z"
+      }
+    },
+    "answeredMsFromLaunch": 3103,
+    "sha256": "d8cb1e5c79684cc12a8bfc813e3a2073406921b6245744b3009be3ab5651d21e",
+    "codesignV": {
+      "status": 0,
+      "output": ""
+    },
+    "codesignDv": [
+      "Executable=/private/tmp/maws-c12-custody-1790749764/userData/engine/2.1.283/claude",
+      "Identifier=com.anthropic.claude-code",
+      "Format=Mach-O thin (arm64)",
+      "CodeDirectory v=20500 size=439013 flags=0x10000(runtime) hashes=13708+7 location=embedded",
+      "Signature size=9047",
+      "Timestamp=Sep 24, 2026 at 6:31:20 PM",
+      "Info.plist=not bound",
+      "TeamIdentifier=Q6L2SF6YDW",
+      "Runtime Version=26.5.0",
+      "Sealed Resources=none",
+      "Internal requirements count=1 size=188"
+    ],
+    "df": [
+      "Filesystem   512-blocks       Used Available Capacity  iused      ifree %iused  Mounted on",
+      "/dev/disk3s5 1942700360 1505889376 372615976    81% 10976812 1863079880    1%   /System/Volumes/Data",
+      "/dev/disk3s5 1942700360 1505889376 372615976    81% 10976812 1863079880    1%   /System/Volumes/Data"
+    ],
+    "spawnBins": [
+      "/private/tmp/maws-c12-custody-1790749764/userData/engine/2.1.283/claude"
+    ],
+    "appSessionId": "8a9931d4-ff4a-45dc-8a11-0b1756fe0811"
+  },
+  "step2": {
+    "sourceDeleted": true,
+    "appSessionId": "5cf46b28-b775-47ec-a3fc-822621d113ba",
+    "spawnBins": [
+      "/private/tmp/maws-c12-custody-1790749764/userData/engine/2.1.283/claude"
+    ]
+  },
+  "step3": {
+    "custody": {
+      "state": "mismatch",
+      "path": "/private/tmp/maws-c12-custody-1790749764/userData/engine/2.1.283/claude",
+      "message": "Claude Code 2.1.283 has been altered in MAWS's copy at /private/tmp/maws-c12-custody-1790749764/userData/engine/2.1.283/claude. Reinstall Claude Code 2.1.283 (it belongs at /private/tmp/maws-c12-custody-1790749764/source/2.1.283) and restart MAWS, or choose a binary path in Settings › Engine."
+    },
+    "failure": "binary_version: Claude Code 2.1.283 has been altered in MAWS's copy at /private/tmp/maws-c12-custody-1790749764/userData/engine/2.1.283/claude. Reinstall Claude Code 2.1.283 (it belongs at /private/tmp/maws-c12-custody-1790749764/source/2.1.283) and restart MAWS, or choose a binary path in Settings › Engine."
+  },
+  "step4": {
+    "custody": {
+      "state": "missing",
+      "path": "/private/tmp/maws-c12-custody-1790749764/userData/engine/2.1.283/claude",
+      "message": "Claude Code 2.1.283 is missing from MAWS's copy at /private/tmp/maws-c12-custody-1790749764/userData/engine/2.1.283/claude. Reinstall Claude Code 2.1.283 (it belongs at /private/tmp/maws-c12-custody-1790749764/source/2.1.283) and restart MAWS, or choose a binary path in Settings › Engine."
+    },
+    "failure": "binary_missing: Claude Code 2.1.283 is missing from MAWS's copy at /private/tmp/maws-c12-custody-1790749764/userData/engine/2.1.283/claude. Reinstall Claude Code 2.1.283 (it belongs at /private/tmp/maws-c12-custody-1790749764/source/2.1.283) and restart MAWS, or choose a binary path in Settings › Engine."
+  },
+  "spend": {
+    "upperBoundUsd": 0.0172,
+    "perSessionUsd": 0.0172,
+    "journals": [
+      {
+        "appSessionId": "5cf46b28-b775-47ec-a3fc-822621d113ba",
+        "file": "o7bmt454.jsonl",
+        "costUsd": 0.003304
+      },
+      {
+        "appSessionId": "8a9931d4-ff4a-45dc-8a11-0b1756fe0811",
+        "file": "4biirrzs.jsonl",
+        "costUsd": 0.0138825
+      }
+    ]
+  }
+}

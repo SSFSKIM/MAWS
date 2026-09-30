@@ -10,6 +10,7 @@ import { SessionHarness } from '../../../test/support/session-harness';
 import { DOWN_RELAY } from '../../../test/support/session-host';
 import { storeLabel } from './record-actions';
 import { directRouteRefusal } from './start-guards';
+import { ScratchRepo } from '../../../test/support/scratch-repo'; // C12
 
 // The service is Electron-free (its handlers are service-register.ts's).
 vi.mock('electron', () => {
@@ -614,6 +615,23 @@ describe('session service', () => {
       expect(h.host.disk.stores.has(record.appId)).toBe(true);
     });
 
+    // C12 start: a released session's exited row is archived through the host as a live one is, so the host drops the
+    // released id with the row; any other exited row is left alone (the store file is kept either way)
+    it('archives a session released under the memory budget through the host, and no other exited session', async () => {
+      const released = h.index.sessions.upsertFromSummary(summary({ sessionId: sessionIdFor(0xa4), directory: h.work })).record;
+      const stopped = h.index.sessions.upsertFromSummary(summary({ sessionId: sessionIdFor(0xa5), directory: h.work })).record;
+      const exit = (reason: 'budget' | 'stop') => ({ code: 0, signal: null, reason, at: '2026-09-29T14:02:00.000Z', release: reason === 'budget' ? { limitKiB: 8_388_608, totalKiB: 9_100_000 } : null });
+      h.host.reserve(released.appId, { cwd: h.work, process: 'exited', exit: exit('budget') });
+      h.host.reserve(stopped.appId, { cwd: h.work, process: 'exited', exit: exit('stop') });
+      h.host.disk.stores.add(released.appId);
+      expect(await h.service.archive(stopped.appId)).toEqual({ archived: true });
+      expect(h.host.calledWith('session.stop')).toEqual([]);
+      expect(await h.service.archive(released.appId)).toEqual({ archived: true });
+      expect(h.host.calledWith('session.stop')).toEqual([{ appSessionId: released.appId, reason: 'archive' }]);
+      expect(h.host.disk.stores.has(released.appId)).toBe(true);
+    });
+    // C12 end
+
     it('onlyIfIdle archives an idle session and skips, never stops, one that resumed after the snapshot', async () => {
       h.trustDirectory(h.work);
       const idle = h.index.sessions.upsertFromSummary(summary({ sessionId: sessionIdFor(0xa2), directory: h.work })).record;
@@ -770,3 +788,67 @@ describe('session service', () => {
     });
   });
 });
+
+// C12 start: the custody gate (C12 execution document, Interfaces "Engine custody", the launch gate; Acceptance item 7):
+// main refuses a launch itself when MAWS's copy of the engine is gone or altered, when a setup or a resume begins and
+// before anything it would have to undo: no worktree, no record, no unfollow, no trust bootstrap, nothing spawned.
+describe('the custody gate', () => {
+  const REFUSAL = { status: 'refused' as const, reason: 'binary_version' as const, message: "Claude Code 2.1.283 has been altered in MAWS's copy at /u/engine/2.1.283/claude." };
+  const SID = sessionIdFor(0xc12);
+  let h: SessionHarness;
+  let repo: ScratchRepo;
+  let verdict: () => Promise<{ reason: string; message: string } | null>;
+  beforeEach(async () => {
+    verdict = async () => REFUSAL;
+    h = await new SessionHarness({ launchGate: () => verdict() }).start();
+    repo = await ScratchRepo.create({ sentinels: false });
+    h.trustDirectory(repo.root, h.work);
+  });
+  afterEach(() => {
+    repo.dispose();
+    h.dispose();
+  });
+
+  it('fails a setup before its worktree step and its record, with the refusal a launch answers', async () => {
+    const location = { kind: 'newWorktree' as const, repoRoot: repo.root, name: 'gated', branch: { kind: 'new' as const, name: 'worktree-gated', base: 'HEAD' } };
+    const { appSessionId: id } = await h.service.create({ projectId: null, location });
+    expect(await h.service.startSession(id, { message: OK_MESSAGE, options: { trust: 'accepted' } })).toEqual({ status: 'starting', appSessionId: id });
+    expect(await h.settled(id)).toMatchObject({ phase: 'failed', outcome: { kind: 'error', message: `binary_version: ${REFUSAL.message}`, resources: { worktree: null, record: 'none', transcript: 'none' } } });
+    expect(h.setupEvents(id).map((e) => e.phase)).toEqual(['failed']); // not even `worktree`
+    expect(h.host.launches).toEqual([]); // no bootstrap, no launch
+    expect(h.index.sessions.get(id)).toBeNull();
+    expect(existsSync(join(repo.root, '.claude', 'worktrees', 'gated'))).toBe(false);
+    expect(intentFile(h, id)).toMatchObject({ progress: { worktree: null, lastFailure: { phase: 'launching' } } });
+  });
+
+  it('fails a resume before the trust bootstrap and fs.unfollow; the record stays', async () => {
+    const record = h.index.sessions.upsertFromSummary(summary({ sessionId: SID, directory: h.work })).record;
+    await h.service.startSession(record.appId, { message: OK_MESSAGE, options: { trust: 'accepted' } });
+    expect(await h.settled(record.appId)).toMatchObject({ phase: 'failed', outcome: { kind: 'error', message: `binary_version: ${REFUSAL.message}`, resources: { record: 'kept' } } });
+    expect(h.host.launches).toEqual([]);
+    expect(h.host.calledWith('fs.unfollow')).toEqual([]);
+    expect(h.index.sessions.get(record.appId)).toMatchObject({ engineSessionId: SID });
+  });
+
+  it('a gate that ran out of time fails the setup with the host’s state named, launching nothing', async () => {
+    const message = 'The engine host is starting and did not take the engine configuration within 30 s. Try again once it is ready, or restart MAWS.';
+    verdict = async () => ({ reason: 'host_unavailable', message });
+    const { appSessionId: id } = await h.service.create({ projectId: null, location: { kind: 'directory', path: h.work } });
+    await h.service.startSession(id, { message: OK_MESSAGE, options: {} });
+    expect(await h.settled(id)).toMatchObject({ phase: 'failed', outcome: { kind: 'error', message: `host_unavailable: ${message}`, resources: { record: 'none' } } });
+    expect(h.host.launches).toEqual([]);
+  });
+
+  it('holds a setup until the gate answers, and a passing gate lets the launch go', async () => {
+    let pass!: () => void;
+    verdict = () => new Promise((resolve) => (pass = () => resolve(null)));
+    const { appSessionId: id } = await h.service.create({ projectId: null, location: { kind: 'directory', path: h.work } });
+    await h.service.startSession(id, { message: OK_MESSAGE, options: {} });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(h.host.launches).toEqual([]);
+    pass();
+    expect(await h.settled(id)).toMatchObject({ phase: 'ready' });
+    expect(h.host.launches).toHaveLength(1);
+  });
+});
+// C12 end

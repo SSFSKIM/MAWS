@@ -333,7 +333,7 @@ export function createWidgetBackend(options: WidgetBackendOptions): WidgetBacken
 
   // C3's stop ladder, answered as a clean exit; the queue and its pause stay in the state file (a `stop` keeps it).
   function stop(status: EngineSessionStatus, reason: 'stop' | 'archive'): { exited: boolean; code: number | null; signal: string | null } {
-    emitStatus(status.appSessionId, { process: 'exited', exit: { code: 0, signal: null, reason, at: now() }, turn: null, engineState: 'idle', activity: null, pid: null });
+    emitStatus(status.appSessionId, { process: 'exited', exit: { code: 0, signal: null, reason, at: now(), release: null /* C12 */ }, turn: null, engineState: 'idle', activity: null, pid: null });
     return { exited: true, code: 0, signal: null };
   }
 
@@ -346,7 +346,7 @@ export function createWidgetBackend(options: WidgetBackendOptions): WidgetBacken
     return shaped({
       ...template,
       appSessionId: record.appId, engineSessionId: record.engineSessionId, taskListId: record.engineSessionId, cwd: record.directory, pid: null,
-      process: 'exited', exit: { code: 0, signal: null, reason: 'quit', at: now() }, engineState: 'idle', activity: null, turn: null, pendingPlan: null,
+      process: 'exited', exit: { code: 0, signal: null, reason: 'quit', at: now(), release: null /* C12 */ }, engineState: 'idle', activity: null, turn: null, pendingPlan: null,
       model: record.model, effort: effort.success ? effort.data : null, permissionMode: { ...record.permissionMode, refusal: null }, prePlanMode: null,
       backgroundTasks: [], grants: [], heldPeerMessages: [], pendingRequests: 0, queue: { length: 0, paused: false }, keepAlive: [], lastEventSeq: 0,
       trust: { attested: false, recorded: null },

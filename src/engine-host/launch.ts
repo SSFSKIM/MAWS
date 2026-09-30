@@ -110,8 +110,9 @@ export function buildEnvironment(spec: LaunchSpec, captured: Record<string, stri
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(captured)) if (isAllowed(key)) env[key] = value;
   env.CLAUDE_CODE_ENTRYPOINT = 'sdk-ts'; // the probe's identity; every fixture was recorded under it
-  env.CLAUDE_CODE_FORK_SUBAGENT = 'true';
+  env.CLAUDE_CODE_FORK_SUBAGENT = 'true'; // C12: kept (D9, ruled at M5): the terminal's interactive default; probe fixtures pass3/launch-env-{terminal,fork,unset}
   env.CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING = '1';
+  env.CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS = '1'; // C12: session_state_changed on the wire (a host-facing option, C12 M5 probe)
   env.TERM = 'dumb';
   if (spec.subagentModel !== null) env.CLAUDE_CODE_SUBAGENT_MODEL = spec.subagentModel;
   if (spec.gateway === 'gateway') {

@@ -1,4 +1,4 @@
-import { appendFileSync, readFileSync } from 'node:fs';
+import { appendFileSync, readFileSync, rmSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -186,3 +186,34 @@ describe('session event stream: batches, the ring and the reload snapshot', () =
     expect(stream.pendingRequest('nope' as never)).toBeNull();
   });
 });
+
+// C12 start: the exited-history cap (C12 execution document, M1 task 5)
+describe('an exited stream keeps a bounded ring (C12)', () => {
+  it('trims its ring to the exited size at the exit; a late read over the trimmed range answers from the journal, whole', async () => {
+    const { events, launchId, sessionId, appSessionId, status, journalPath } = await recordedInit();
+    const { emit } = recorder();
+    const stream = new SessionStream({ appSessionId, launchId, sessionId: sessionId as never, journalPath, emit, exitedRingSize: 5 });
+    stream.events(events);
+    stream.status({ ...status, process: 'ready' });
+    expect(events.length).toBeGreaterThan(20);
+    stream.status({ ...status, process: 'exited' });
+    expect(await stream.snapshot(null, null)).toEqual({ events, lastSeq: events.at(-1)!.seq, complete: true }); // rebuilt from the journal
+    const inRing = events.at(-3)!.seq!;
+    expect((await stream.snapshot(inRing, null)).events).toEqual(events.filter((e) => e.seq! > inRing));
+    rmSync(journalPath); // what the ring alone still holds: the last five events, marked incomplete
+    const kept = await stream.snapshot(null, null);
+    expect(kept.complete).toBe(false);
+    expect(kept.events).toEqual(events.slice(-5));
+  });
+
+  it('a live stream keeps its full ring', async () => {
+    const { events, launchId, sessionId, appSessionId, status, journalPath } = await recordedInit();
+    const { emit } = recorder();
+    const stream = new SessionStream({ appSessionId, launchId, sessionId: sessionId as never, journalPath, emit, exitedRingSize: 5 });
+    stream.events(events);
+    stream.status({ ...status, process: 'ready' });
+    rmSync(journalPath);
+    expect(await stream.snapshot(null, null)).toEqual({ events, lastSeq: events.at(-1)!.seq, complete: true });
+  });
+});
+// C12 end

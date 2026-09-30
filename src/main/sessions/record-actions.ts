@@ -34,8 +34,19 @@ export async function archiveRecord(s: Setup, appSessionId: AppSessionId, opts: 
   if (verdict.live === 'foreign') return { status: 'held', holder: verdict.holder };
   if (opts.onlyIfIdle && verdict.live !== 'none') return { status: 'skipped_live', holder: verdict.holder };
   if ((await reservationOf(s.dispatch, appSessionId)) !== null) await hostCall(s.dispatch, 'session.stop', { appSessionId, reason: 'archive' });
+  // C12 start: a session released under the memory budget is archived as the live session it reads as: the host drops
+  // its journal and its row as for a live archive, and with the row the released id, so the unarchived session's next
+  // launch is a fresh one, not a resume after a release (C12 execution document, Decision Log: the released id on archive)
+  else if (await releasedByHost(s, appSessionId)) await hostCall(s.dispatch, 'session.stop', { appSessionId, reason: 'archive' });
+  // C12 end
   s.sessions.update(appSessionId, { archived: true });
   return { archived: true };
+}
+
+// C12: whether the host's row for the session is the exit of a release (its last exit, since a launch replaces the row)
+async function releasedByHost(s: Setup, appSessionId: AppSessionId): Promise<boolean> {
+  const table = await hostCall(s.dispatch, 'engine.sessions', undefined);
+  return table.some((row) => row.appSessionId === appSessionId && row.process === 'exited' && row.exit?.reason === 'budget');
 }
 
 // `session.delete`: whole or not at all. Refused for a foreign holder, and for a MAWS-live session unless the caller

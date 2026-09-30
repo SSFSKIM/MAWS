@@ -594,7 +594,7 @@ describe('child source provenance', () => {
 
     // The parent's process exits: no finish will come for the live child. The exit joins its slice and closes its turn
     // as stopped; the same source switches to disk and signals a reset.
-    const exit = builder('2026-09-28T10:00:09.000Z').emit('process.exited', { code: 0, signal: null, reason: 'quit', lostAttentionCount: 0 }, { id: 'exit' });
+    const exit = builder('2026-09-28T10:00:09.000Z').emit('process.exited', { code: 0, signal: null, reason: 'quit', lostAttentionCount: 0, budget: null /* C12 */ }, { id: 'exit' });
     fake.emit('session.eventBatch', batch([child[3], exit]));
     expect(dividerOf(CHILD_KEY).state).toBe('stopped'); // in the live state, before the reset
     await Promise.resolve(); // the reset follows the batch that carried the end
@@ -622,7 +622,7 @@ describe('child source provenance', () => {
     const hydrated = store.attach(CHILD_KEY, childSource(fake), { agentId: AGENT });
     answer(fake, 'session.events', { events: [...parent, ...child.slice(0, 2)], lastSeq: 9, complete: true });
     await hydrated;
-    const exit = builder('2026-09-28T10:00:09.000Z').emit('process.exited', { code: 0, signal: null, reason: 'quit', lostAttentionCount: 0 }, { id: 'exit' });
+    const exit = builder('2026-09-28T10:00:09.000Z').emit('process.exited', { code: 0, signal: null, reason: 'quit', lostAttentionCount: 0, budget: null /* C12 */ }, { id: 'exit' });
     fake.emit('session.eventBatch', batch([exit]));
     await Promise.resolve(); // reset: now hydrating from disk
     // Pending live-form batches still in flight, interleaved with the disk follower's, while the backfill is pending.
@@ -658,7 +658,7 @@ describe('child source provenance', () => {
   it('mounting after a crash: an exit after the start in the parent’s snapshot is terminal, so the child is read from disk and reads stopped', async () => {
     const { parent, child } = live();
     const disk = onDisk(child);
-    const exit = builder('2026-09-28T10:00:09.000Z').emit('process.exited', { code: null, signal: 'SIGKILL', reason: 'crash', lostAttentionCount: 0 }, { id: 'crash' });
+    const exit = builder('2026-09-28T10:00:09.000Z').emit('process.exited', { code: null, signal: 'SIGKILL', reason: 'crash', lostAttentionCount: 0, budget: null /* C12 */ }, { id: 'crash' });
     const fake = fakeClient();
     const store = useTranscriptStore.getState();
     const hydrated = store.attach(CHILD_KEY, childSource(fake), { agentId: AGENT });
@@ -685,7 +685,7 @@ describe('child source provenance', () => {
 
   it('a stream batch carrying an exit from before the child’s start (a replay or backfill of the earlier run) switches nothing', async () => {
     const { parent, child } = live();
-    const earlier = builder('2026-09-28T09:59:00.000Z').emit('process.exited', { code: 0, signal: null, reason: 'quit', lostAttentionCount: 0 }, { id: 'earlier' });
+    const earlier = builder('2026-09-28T09:59:00.000Z').emit('process.exited', { code: 0, signal: null, reason: 'quit', lostAttentionCount: 0, budget: null /* C12 */ }, { id: 'earlier' });
     const fake = fakeClient();
     const source = childSource(fake);
     const resets = vi.fn();
@@ -701,7 +701,7 @@ describe('child source provenance', () => {
     expect(fake.calls.map((call) => call.name)).toEqual(['session.events']);
     expect([...useTranscriptStore.getState().entries[CHILD_KEY].state.seen]).toEqual([child[0].id]);
     // A new exit, after the start, still ends the child.
-    fake.emit('session.eventBatch', batch([builder('2026-09-28T10:00:09.000Z').emit('process.exited', { code: 0, signal: null, reason: 'quit', lostAttentionCount: 0 }, { id: 'later' })]));
+    fake.emit('session.eventBatch', batch([builder('2026-09-28T10:00:09.000Z').emit('process.exited', { code: 0, signal: null, reason: 'quit', lostAttentionCount: 0, budget: null /* C12 */ }, { id: 'later' })]));
     await flush();
     expect(resets).toHaveBeenCalledTimes(1);
     store.detach(CHILD_KEY);
@@ -709,7 +709,7 @@ describe('child source provenance', () => {
 
   it('an exit before the child started is no end of it: a child started after a relaunch is live', async () => {
     const { parent, child } = live();
-    const exit = builder('2026-09-28T09:59:00.000Z').emit('process.exited', { code: 0, signal: null, reason: 'quit', lostAttentionCount: 0 }, { id: 'earlier' });
+    const exit = builder('2026-09-28T09:59:00.000Z').emit('process.exited', { code: 0, signal: null, reason: 'quit', lostAttentionCount: 0, budget: null /* C12 */ }, { id: 'earlier' });
     const fake = fakeClient();
     const snapshot = childSource(fake).snapshot();
     answer(fake, 'session.events', { events: [exit, ...parent, ...child.slice(0, 1)], lastSeq: 9, complete: true });

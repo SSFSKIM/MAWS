@@ -15,7 +15,7 @@ import { EffortSchema, type Effort } from '@shared/engine/launch-spec';
 import type { PermissionMode } from '@shared/graph/enums';
 import type { AppSessionId } from '@shared/graph/ids';
 import { isGatewayModel } from '@shared/sessions/models';
-import { SETTINGS_DEFAULTS_V3 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V4 } from '@shared/settings/defaults';
 import { intentBindings } from '../composer/frame/bindings';
 import { useSetupIntent } from '../composer/setup-intent';
 import { ROUTE, type Route } from '../gateway/copy';
@@ -112,7 +112,7 @@ function useIntentBinding(appSessionId: AppSessionId): Binding | null {
   const starting = useComposerStore((s) => isStarting(s, appSessionId));
   // C10's intent carries the route C7's hook type does not name; it is read from C10's store and written by its patch
   const gateway = useSetup((s) => s.intents.get(appSessionId)?.gateway ?? null);
-  const settings = useSettings((s) => s.state?.settings) ?? SETTINGS_DEFAULTS_V3;
+  const settings = useSettings((s) => s.state?.settings) ?? SETTINGS_DEFAULTS_V4;
   if (!setup) return null;
   const bound = intentBindings(setup, { starting }).model;
   const { model, effort } = bound.value;

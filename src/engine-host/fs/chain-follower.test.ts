@@ -448,7 +448,7 @@ describe('a holder-less transcript whose last turn never ended', () => {
     expect(leafAt).toBe('2026-09-27T07:00:30.639Z');
     expect(events.at(-1)).toEqual({
       id: `session:${SDK}:exited`, sessionId: SDK, at: leafAt, seq: null, agentId: null, parentToolUseId: null,
-      kind: 'process.exited', code: null, signal: null, reason: 'unknown', lostAttentionCount: 0,
+      kind: 'process.exited', code: null, signal: null, reason: 'unknown', lostAttentionCount: 0, budget: null, // C12
     });
     // Delivered after the backfill's records and before `following`.
     const order = out.received.flatMap((e) => (e.t === 'state' ? [e.state] : e.t === 'events' && e.events.some((x) => x.kind === 'process.exited') ? ['exited'] : []));

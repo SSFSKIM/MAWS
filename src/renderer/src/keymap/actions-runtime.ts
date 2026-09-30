@@ -34,19 +34,21 @@ export const registerSessionCreator = (fn: SessionCreator): (() => void) => crea
 export const isSessionCreatorRegistered = (): boolean => creators.has('create');
 export const useSessionCreatorRegistered = (): boolean => creators.useEnabled('create');
 
-export async function createSession(projectId: ProjectId | null, opts: { pane?: 0 | 1 | 'focused' } = {}): Promise<void> {
+// C12: answers the new session's id (null when none was made), so the Worktrees… dialog can set its location.
+export async function createSession(projectId: ProjectId | null, opts: { pane?: 0 | 1 | 'focused' } = {}): Promise<AppSessionId | null> {
   const creator = creators.get('create') as SessionCreator | undefined;
-  if (!creator) return;
+  if (!creator) return null; // C12
   let appSessionId: AppSessionId | null;
   try {
     appSessionId = await creator(projectId);
   } catch (error) {
     console.error('[actions] session creator failed', error);
-    return;
+    return null; // C12
   }
-  if (appSessionId === null) return;
+  if (appSessionId === null) return null; // C12
   useSessions.getState().addUnstarted(appSessionId, { projectId, createdAt: new Date().toISOString() });
   useLayout.getState().openTab({ kind: 'session', appSessionId }, { pane: opts.pane ?? 'focused' });
+  return appSessionId; // C12
 }
 
 // ---- closing tabs -------------------------------------------------------------------------------------------------------

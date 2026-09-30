@@ -31,7 +31,7 @@ const DEFAULTS: Partial<Record<EventKind, Record<string, unknown>>> = {
   'usage.sample': { costUsd: 0, usage, modelUsage: {}, source: 'result' },
   'context.sample': { totalTokens: 0, maxTokens: 1, percentage: 0, autoCompactThreshold: null, isAutoCompactEnabled: true, model: 'claude' },
   'session.reconnect': { phase: 'attempting', attempt: 1, maxAttempts: 1, trigger: 'user', reason: null },
-  'process.exited': { code: 0, signal: null, reason: 'quit', lostAttentionCount: 0 },
+  'process.exited': { code: 0, signal: null, reason: 'quit', lostAttentionCount: 0, budget: null /* C12 */ },
 };
 
 let counter = 0;

@@ -8,6 +8,10 @@ import { EngineSessionStatusSchema } from '../../engine/status';
 import { ModelCatalogueSchema } from '../../sessions/models';
 // C10 end
 import { HostPingSchema, HostStateSchema, type CommandSpec } from './common';
+// C12 start
+import { AppSessionIdSchema } from '../../graph/ids';
+import { HardReasonSchema } from '../../engine/status';
+// C12 end
 // C11 start
 import { AbsolutePathSchema } from './settings';
 // C11 end
@@ -45,6 +49,26 @@ const c11Commands = {
 } as const;
 // C11 end
 
+// C12 start: the memory budget (C12 execution document, Interfaces "X2 additions"; charter §4.4). Owner engine-host.
+// `engine.policy.set` is pushed by main from settings (the budget in KiB and the stateful MCP servers by exact name) and
+// evaluates at once; `engine.budget` answers the table's budget state, and the event of the same name carries it
+// whenever any field but `sampledAt` changes and at every release. `overWithoutCandidate` is the host's two-sample
+// flag (over budget with no candidate on two consecutive samples); the renderer never counts samples.
+export const BudgetPolicyInputSchema = z.strictObject({ limitKiB: z.number().int().positive(), statefulMcpServers: z.array(z.string()).max(64) });
+export const BudgetStateSchema = z.strictObject({
+  limitKiB: z.number().int(), totalKiB: z.number().int(), sampledAt: z.string().nullable(),
+  over: z.boolean(), overWithoutCandidate: z.boolean(), candidates: z.number().int(), settling: z.number().int(),
+  releasing: AppSessionIdSchema.nullable(),
+  blocked: z.array(z.strictObject({ appSessionId: AppSessionIdSchema, reasons: z.array(HardReasonSchema) })),
+  lastRelease: z.strictObject({ appSessionId: AppSessionIdSchema, at: z.string(), totalKiB: z.number().int() }).nullable(),
+});
+export type BudgetState = z.infer<typeof BudgetStateSchema>;
+const c12Commands = {
+  'engine.policy.set': { input: BudgetPolicyInputSchema, output: BudgetStateSchema, owner: 'engine-host' },
+  'engine.budget': { input: z.void(), output: BudgetStateSchema, owner: 'engine-host' },
+} as const;
+// C12 end
+
 export const commands = {
   'engine.ping': { input: z.void(), output: HostPingSchema, owner: 'engine-host' },
   // Snapshot command, answered by the supervisor in main so a crashed host still reports; same name as the event.
@@ -52,8 +76,10 @@ export const commands = {
   ...c3Commands, // C3
   ...c10Commands, // C10
   ...c11Commands, // C11
+  ...c12Commands, // C12
 } as const satisfies Record<`engine.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {
   'engine.hostState': HostStateSchema,
+  'engine.budget': BudgetStateSchema, // C12
 } as const satisfies Record<`engine.${string}`, z.ZodType>;

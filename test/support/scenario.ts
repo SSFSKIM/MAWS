@@ -14,6 +14,7 @@ import { EffortSchema } from '../../src/shared/engine/launch-spec';
 import { EngineSessionStatusSchema, type EngineSessionStatus } from '../../src/shared/engine/status';
 import { ProjectRecordSchema, SessionDigestSchema, type ProjectRecord } from '../../src/shared/ipc/schema/session';
 import type { AttentionItem } from '../../src/shared/graph/attention';
+import { BudgetStateSchema, type BudgetState } from '../../src/shared/ipc/schema/engine'; // C12
 
 // The gateway relay's URL, the value of C3's `RELAY_URL` in `src/engine-host/launch.ts`. Held here rather than imported:
 // this loader ships in the main bundle through the stub source, and C3's launch module is engine-host code.
@@ -29,7 +30,13 @@ export const CompactEngineSchema = z.strictObject({
   engineState: StatusShape.engineState,
   turn: CompactTurnSchema,
   pendingRequests: StatusShape.pendingRequests,
-  exit: z.strictObject({ reason: z.enum(['quit', 'stop', 'archive', 'crash', 'unknown']) }).optional(),
+  exit: z.strictObject({ reason: z.enum(['quit', 'stop', 'archive', 'crash', 'unknown', 'budget' /* C12 */]), release: StatusShape.exit.unwrap().shape.release.optional() /* C12 */ }).optional(),
+  // C12 start: what a budget scenario needs beyond C5's fields (the stop sheet's disclosure, the blocked reasons' counts,
+  // the stateful server's name); each absent means empty
+  backgroundTasks: StatusShape.backgroundTasks.optional(),
+  queue: StatusShape.queue.optional(),
+  mcpServers: StatusShape.mcpServers.optional(),
+  // C12 end
 });
 export type CompactEngine = z.infer<typeof CompactEngineSchema>;
 
@@ -49,6 +56,7 @@ const TimelineEntrySchema = z.discriminatedUnion('op', [
   z.strictObject({ at, op: z.literal('engine'), appSessionId: AppSessionIdSchema, engine: CompactEngineSchema.nullable() }), // null removes the status
   z.strictObject({ at, op: z.literal('session'), record: SessionRecordSchema }),
   z.strictObject({ at, op: z.literal('removeSession'), appSessionId: AppSessionIdSchema }),
+  z.strictObject({ at, op: z.literal('budget'), state: BudgetStateSchema }), // C12: the engine host's memory budget (engine.budget)
 ]);
 
 export const ScenarioFileSchema = z.strictObject({
@@ -68,7 +76,8 @@ export type ScenarioOp =
   | { at: number; op: 'digest'; digest: ScenarioDigest }
   | { at: number; op: 'engine'; appSessionId: AppSessionId; engine: EngineSessionStatus | null }
   | { at: number; op: 'session'; record: SessionRecord }
-  | { at: number; op: 'removeSession'; appSessionId: AppSessionId };
+  | { at: number; op: 'removeSession'; appSessionId: AppSessionId }
+  | { at: number; op: 'budget'; state: BudgetState }; // C12
 
 export interface Scenario {
   projects: ProjectRecord[];
@@ -103,6 +112,7 @@ function gatewayOf(record: SessionRecord): EngineSessionStatus['gateway'] {
 }
 
 export function expandEngine(compact: CompactEngine, record: SessionRecord, times: { launchedAt: string; playedAt: string }, where: string): EngineSessionStatus {
+  if (compact.exit?.reason === 'budget' && !compact.exit.release) throw new ScenarioError(`${where}: a budget exit needs its release (the budget and the sum)`); // C12
   const effort = EffortSchema.nullable().safeParse(record.effort);
   if (!effort.success) throw new ScenarioError(`${where}: the session's effort ${JSON.stringify(record.effort)} is not an effort level`);
   const status: EngineSessionStatus = {
@@ -115,7 +125,7 @@ export function expandEngine(compact: CompactEngine, record: SessionRecord, time
     cwd: record.directory,
     pendingPlan: null,
     process: compact.process,
-    exit: compact.exit ? { code: null, signal: null, reason: compact.exit.reason, at: times.playedAt } : null,
+    exit: compact.exit ? { code: null, signal: null, reason: compact.exit.reason, at: times.playedAt, release: compact.exit.release ?? null /* C12 */ } : null,
     engineState: compact.engineState,
     activity: null,
     turn:
@@ -140,13 +150,17 @@ export function expandEngine(compact: CompactEngine, record: SessionRecord, time
     plugins: [],
     pluginErrors: [],
     pluginWarnings: [],
-    backgroundTasks: [],
+    backgroundTasks: compact.backgroundTasks ?? [], // C12
     grants: [],
-    mcpServers: [],
+    mcpServers: compact.mcpServers ?? [], // C12
     heldPeerMessages: [],
     pendingRequests: compact.pendingRequests,
-    queue: { length: 0, paused: false },
+    queue: compact.queue ?? { length: 0, paused: false }, // C12
     keepAlive: compact.turn === null ? [] : ['turn'],
+    // C12 start: an open turn is the queue's busy; the launch is the last use
+    busy: compact.turn !== null,
+    lastUsedAt: times.launchedAt,
+    // C12 end
     memory: { rssKiB: null, treeRssKiB: null, sampledAt: null },
     journalPath: '',
     hostHooks: [],
@@ -208,6 +222,11 @@ export function parseScenario(raw: unknown, now: number = Date.now()): Scenario 
         case 'digest':
           known(entry.digest.appSessionId, `${where}.digest.appSessionId`);
           return entry;
+        // C12 start: every session a budget names is known
+        case 'budget':
+          for (const id of [...entry.state.blocked.map((b) => b.appSessionId), entry.state.releasing, entry.state.lastRelease?.appSessionId ?? null]) if (id !== null) known(id, `${where}.state`);
+          return entry;
+        // C12 end
         default:
           known(entry.appSessionId, `${where}.appSessionId`);
           return entry;

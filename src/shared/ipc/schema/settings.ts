@@ -27,6 +27,13 @@ const EngineSettingsSchema = z.strictObject({
   binaryPath: AbsolutePathSchema.nullable(), // null = C3's ENGINE_BIN
   pinnedVersion: z.string(), // what engine.binaryInfo must report; a mismatch refuses launches (binary_version) until re-pinned
   subagentModel: z.string().nullable(), // the default CLAUDE_CODE_SUBAGENT_MODEL for new sessions; null = the captured shell's value
+  // C12 start: version 4, the memory budget (C12 execution document, Interfaces "Settings, version 4"; charter §4.4).
+  // memoryBudgetMiB: the limit on the sum of the engine process trees; null = 25% of physical memory.
+  // statefulMcpServers: MCP server names, exactly as system/init reports them, whose state dies with their process; a
+  // connected or connecting one keeps its session live under the budget.
+  memoryBudgetMiB: z.number().int().min(512).nullable(),
+  statefulMcpServers: z.array(z.string().min(1).max(200)).max(64),
+  // C12 end
 });
 const GatewaySettingsSchema = z.strictObject({
   defaultRoute: z.enum(['gateway', 'direct']), // D-19: 'gateway'; seeds C10's intent.gateway
@@ -39,7 +46,7 @@ const NotificationSettingsSchema = z.strictObject({ enabled: z.boolean(), sound:
 // C11 end
 
 export const SettingsSchema = z.strictObject({
-  version: z.literal(3), // C11: version 3
+  version: z.literal(4), // C11: version 3; C12: version 4 (engine.memoryBudgetMiB, engine.statefulMcpServers)
   theme: ThemeSettingSchema,
   // Overrides only; null unbinds; absent means the default. `partialRecord`, because zod 4's enum-keyed `record` is
   // exhaustive and would reject `{}` and every single override; unknown keys are still rejected.
@@ -107,11 +114,30 @@ const c11Commands = {
 } as const satisfies Record<`settings.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 // C11 end
 
+// C12 start: MAWS's custody of the pinned engine (C12 execution document, Interfaces "Engine custody" and "X2
+// additions"). `settings.engineCustody` answers the copy the next launch uses, null when custody does not run (MAWS_E2E
+// and replay, where the host keeps C3's ENGINE_BIN). `settings.engineApplied` answers once main's `engine.configure` push
+// for `settings.engine` as it now stands has been answered by the host, custody for a changed pin included; its error
+// carries custody's or the push's message. Main is the only sender of `engine.configure`.
+export const CustodyManifestSchema = z.strictObject({ version: z.string(), sha256: z.string(), size: z.number().int(), source: z.string(), copiedAt: z.string() });
+export type CustodyManifest = z.infer<typeof CustodyManifestSchema>;
+export const CustodySchema = z.discriminatedUnion('state', [
+  z.strictObject({ state: z.literal('ok'), path: z.string(), manifest: CustodyManifestSchema }),
+  z.strictObject({ state: z.enum(['missing', 'mismatch', 'version']), path: z.string(), message: z.string() }),
+]);
+export type Custody = z.infer<typeof CustodySchema>;
+const c12Commands = {
+  'settings.engineCustody': { input: z.void(), output: CustodySchema.nullable(), owner: 'main' },
+  'settings.engineApplied': { input: z.void(), output: z.void(), owner: 'main' },
+} as const satisfies Record<`settings.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
+// C12 end
+
 export const commands = {
   'settings.get': { input: z.void(), output: SettingsStateSchema, owner: 'main' },
   'settings.set': { input: SettingsPatchSchema, output: SettingsStateSchema, owner: 'main' },
   ...c7Commands, // C7
   ...c11Commands, // C11
+  ...c12Commands, // C12
 } as const satisfies Record<`settings.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {

@@ -48,7 +48,10 @@ describe('normaliser replays every probe fixture into the X1 graph', () => {
     // C10 end
     const wave3 = ['context-sample', 'interrupt-text', 'question-deny']; // debt wave 3: the turn-end context read, a text block cut by an interrupt, a question skipped by a deny
     const wave4 = ['context-full', 'end-session-archive']; // debt wave 4: both context details over a growing conversation, an archive's end_session
-    expect(listJournals('pass3')).toEqual(['engine-turn-release', 'fork-worktree-fork', 'fork-worktree-resume-in-b', 'fork-worktree-start', 'nested-agents', 'plan-outcomes', 'relay-to-child', 'rewind-files', 'steer-next', 'steer-now', 'steer-now-unheld', 'stop-task', 'workspace-diff-branch', 'workspace-diff-dirty', ...c10, ...wave3, ...wave4].sort());
+    // C12 start: M5's launch-environment probe (the print arms, the terminal half's meta-only record, the state-event pair)
+    const c12 = ['launch-env-fork', 'launch-env-state-events', 'launch-env-state-events-unset', 'launch-env-terminal', 'launch-env-todo', 'launch-env-unset'];
+    // C12 end
+    expect(listJournals('pass3')).toEqual(['engine-turn-release', 'fork-worktree-fork', 'fork-worktree-resume-in-b', 'fork-worktree-start', 'nested-agents', 'plan-outcomes', 'relay-to-child', 'rewind-files', 'steer-next', 'steer-now', 'steer-now-unheld', 'stop-task', 'workspace-diff-branch', 'workspace-diff-dirty', ...c10, ...wave3, ...wave4, ...c12 /* C12 */].sort());
   });
 
   for (const pass of FIXTURE_PASSES) {
@@ -558,7 +561,8 @@ describe('normaliser: per-fixture graph facts (C2 findings restated)', () => {
     expect([...seen].sort()).toEqual([
       'background_tasks_changed', 'commands_changed', 'hook_response', 'hook_started', 'init', 'status',
       'task_notification', 'task_progress', 'task_started', 'task_updated', 'thinking_tokens',
-    ]);
+      'session_state_changed', // C12: pass3/launch-env-state-events, under CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS=1
+    ].sort());
   });
 
   it('every event kind the fixtures produce is a known kind, and the kinds never produced are the ones no fixture exercises', async () => {
@@ -574,6 +578,7 @@ describe('normaliser: per-fixture graph facts (C2 findings restated)', () => {
       'usage.sample', 'user.message', 'workflow.progress',
       'notice.posted', // C10: the trust notice (pass2/trust-no-attestation, pass3/trust-exact-key)
       'context.sample', // debt wave 3: a get_context_usage answer (pass1/reads seq 57, pass3/context-sample)
+      'session.state', // C12: pass3/launch-env-state-events (running, requires_action, running, idle)
     ].sort());
     void kinds;
   });

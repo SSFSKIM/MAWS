@@ -106,6 +106,6 @@ describe('scenario loader', () => {
     );
     expect(scenario.timeline.map((op) => [op.at, op.op])).toEqual([[3000, 'removeSession'], [3000, 'engine'], [12000, 'engine']]);
     const exit = scenario.timeline[2];
-    expect(exit.op === 'engine' && exit.engine?.exit).toEqual({ code: null, signal: null, reason: 'unknown', at: '2026-09-28T10:00:12.000Z' });
+    expect(exit.op === 'engine' && exit.engine?.exit).toEqual({ code: null, signal: null, reason: 'unknown', at: '2026-09-28T10:00:12.000Z', release: null /* C12 */ });
   });
 });

@@ -4,17 +4,23 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MawsBridge, Settings } from '@shared/ipc/schema';
-import { SETTINGS_DEFAULTS_V3 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V4 } from '@shared/settings/defaults';
 import { useGateway } from '../gateway/store';
 import { useAttention } from '../stores/attention';
 import { useNotices } from '../stores/notices';
 import { useSettings } from '../stores/settings';
 import { BINARY, settingsBridge, type SettingsBridge } from '../test-support/settings-bridge';
 import { SettingsView } from './SettingsView';
+// C12 start
+import type { AppSessionId } from '@shared/graph/ids';
+import { status } from '../../../../test/support/builders';
+import { resetBudgetStore, useBudget } from '../budget/store';
+import { useSessions } from '../stores/sessions';
+// C12 end
 
 let b: SettingsBridge;
 
-function renderView(initial: Settings = SETTINGS_DEFAULTS_V3, section: Parameters<typeof SettingsView>[0]['section'] = null) {
+function renderView(initial: Settings = SETTINGS_DEFAULTS_V4, section: Parameters<typeof SettingsView>[0]['section'] = null) {
   b = settingsBridge(initial);
   window.maws = b.bridge;
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -73,11 +79,15 @@ describe('settings tab writes one field per row', () => {
   it('Engine: Change… stores the picked absolute path and configures the host; a mismatch says sessions will refuse', async () => {
     renderView();
     b.answers['layout.pickFiles'] = () => ({ files: [{ path: '/opt/claude/2.1.290/claude', name: 'claude', bytes: 10, mediaType: null, data: null }] });
-    b.answers['engine.configure'] = (input) => ({ ...BINARY, path: (input as { binaryPath: string }).binaryPath, version: '2.1.290', ok: false, error: 'binary reports 2.1.290, expected 2.1.283' });
+    // C12: main configures the host; the tab awaits settings.engineApplied and re-reads the binary as the host now holds it
+    b.answers['engine.binaryInfo'] = () => {
+      const { binaryPath, pinnedVersion } = settings().engine;
+      return binaryPath === null ? BINARY : { ...BINARY, path: binaryPath, expectedVersion: pinnedVersion, version: '2.1.290', ok: pinnedVersion === '2.1.290', error: pinnedVersion === '2.1.290' ? null : 'binary reports 2.1.290, expected 2.1.283' };
+    };
     fireEvent.click(await within(row('Binary')).findByRole('button', { name: 'Change…' }));
     await vi.waitFor(() => expect(b.sets).toEqual([{ engine: { binaryPath: '/opt/claude/2.1.290/claude' } }]));
     expect(b.calls.find((c) => c.name === 'layout.pickFiles')!.input).toEqual({ kind: 'files', directory: null, multiple: false });
-    await vi.waitFor(() => expect(b.calls).toContainEqual({ name: 'engine.configure', input: { binaryPath: '/opt/claude/2.1.290/claude', expectedVersion: '2.1.283' } }));
+    await vi.waitFor(() => expect(b.calls).toContainEqual({ name: 'settings.engineApplied', input: undefined })); // C12
     expect(await within(row('Binary')).findByText('/opt/claude/2.1.290/claude')).toBeTruthy();
     expect(within(row('Binary')).getByText('does not match the pinned version · sessions will refuse to start until you re-pin')).toBeTruthy();
     expect(within(row('Pinned version')).getByText('binary reports 2.1.290')).toBeTruthy();
@@ -89,7 +99,9 @@ describe('settings tab writes one field per row', () => {
     expect(sheet.textContent).toContain('Upgrading the engine is a deliberate re-probe: the fixtures and conformance tests were recorded on 2.1.283.');
     fireEvent.click(within(sheet).getByRole('button', { name: 'Re-pin to 2.1.290' }));
     await vi.waitFor(() => expect(b.sets.at(-1)).toEqual({ engine: { pinnedVersion: '2.1.290' } }));
-    await vi.waitFor(() => expect(b.calls.at(-1)).toEqual({ name: 'engine.configure', input: { binaryPath: '/opt/claude/2.1.290/claude', expectedVersion: '2.1.290' } }));
+    const afterWrite = () => b.calls.slice(b.calls.findLastIndex((c) => c.name === 'settings.set') + 1).map((c) => c.name); // C12
+    await vi.waitFor(() => expect(afterWrite().slice(0, 2)).toEqual(['settings.engineApplied', 'engine.binaryInfo'])); // C12
+    expect(b.calls.map((c) => c.name)).not.toContain('engine.configure'); // C12: main is its only sender
 
     // Use default puts the binary path back to C3's default
     fireEvent.click(within(row('Binary')).getByRole('button', { name: 'Use default' }));
@@ -207,8 +219,69 @@ describe('settings tab writes one field per row', () => {
     vi.spyOn(HTMLElement.prototype, 'scrollIntoView').mockImplementation(function (this: HTMLElement) {
       scrolled.push(this.getAttribute('aria-labelledby') ?? '');
     });
-    renderView(SETTINGS_DEFAULTS_V3, 'keyboard');
+    renderView(SETTINGS_DEFAULTS_V4, 'keyboard');
     expect(scrolled.at(-1)).toMatch(/keyboard/);
     expect(within(screen.getByRole('navigation', { name: 'Settings sections' })).getByRole('button', { name: 'Keyboard' }).getAttribute('aria-current')).toBe('true');
   });
 });
+
+// C12 start: Settings › Engine's memory budget rows (C12 execution document, Interfaces "Settings, version 4"): the
+// budget in GB with one decimal stored in MiB, its default named from the host's limit, and the stateful servers.
+describe('settings tab: the memory budget rows', () => {
+  const GiB = 1024 * 1024;
+  beforeEach(() => {
+    resetBudgetStore();
+    useBudget.getState().apply({ limitKiB: 8 * GiB, totalKiB: 3 * GiB, sampledAt: null, over: false, overWithoutCandidate: false, candidates: 0, settling: 0, releasing: null, blocked: [], lastRelease: null });
+  });
+  afterEach(() => {
+    resetBudgetStore();
+    useSessions.setState({ engine: new Map() });
+  });
+
+  it('Memory budget: the default named from the host’s limit; a GB value with one decimal is stored in MiB; Use default writes null', async () => {
+    renderView();
+    const field = within(row('Memory budget')).getByRole('textbox', { name: 'Memory budget' }) as HTMLInputElement;
+    expect(field.value).toBe('');
+    expect(field.placeholder).toBe('8');
+    expect(row('Memory budget').textContent).toContain('Default · 25% of physical memory (8 GB)');
+    fireEvent.change(field, { target: { value: '6.5' } });
+    fireEvent.keyDown(field, { key: 'Enter' });
+    await vi.waitFor(() => expect(b.sets).toEqual([{ engine: { memoryBudgetMiB: 6656 } }]));
+    await vi.waitFor(() => expect(field.value).toBe('6.5'));
+    fireEvent.click(within(row('Memory budget')).getByRole('button', { name: 'Use default' }));
+    await vi.waitFor(() => expect(b.sets.at(-1)).toEqual({ engine: { memoryBudgetMiB: null } }));
+    expect(settings().engine.memoryBudgetMiB).toBeNull();
+  });
+
+  it('Memory budget: a value below 0.5 GB or not a number is refused in words and the field goes back', async () => {
+    renderView({ ...SETTINGS_DEFAULTS_V4, engine: { ...SETTINGS_DEFAULTS_V4.engine, memoryBudgetMiB: 6144 } });
+    const field = within(row('Memory budget')).getByRole('textbox', { name: 'Memory budget' }) as HTMLInputElement;
+    expect(field.value).toBe('6.0');
+    for (const typed of ['0.4', 'lots']) {
+      fireEvent.change(field, { target: { value: typed } });
+      fireEvent.blur(field);
+      await vi.waitFor(() => expect(field.value).toBe('6.0'));
+    }
+    expect(b.sets).toEqual([]);
+    expect(useNotices.getState().notices.map((n) => n.text)).toContain('Enter the memory budget in GB, at least 0.5');
+  });
+
+  it('Stateful MCP servers: adds a typed name, suggests the names live sessions report, and removes a chip', async () => {
+    useSessions.setState({ engine: new Map([['app-a' as AppSessionId, status('app-a', { mcpServers: [{ name: 'plugin:ptc:ptc', status: 'connected', source: 'plugin' }, { name: 'c12-kernel', status: 'pending', source: 'project' }] })]]) });
+    renderView();
+    const add = within(row('Stateful MCP servers')).getByRole('combobox', { name: 'Add a stateful MCP server' }) as HTMLInputElement;
+    const suggestions = () => [...document.getElementById(add.getAttribute('list')!)!.querySelectorAll('option')].map((o) => o.value);
+    expect(suggestions()).toEqual(['c12-kernel', 'plugin:ptc:ptc']);
+    fireEvent.change(add, { target: { value: ' c12-kernel ' } });
+    fireEvent.keyDown(add, { key: 'Enter' });
+    await vi.waitFor(() => expect(b.sets).toEqual([{ engine: { statefulMcpServers: ['c12-kernel'] } }]));
+    await vi.waitFor(() => expect(add.value).toBe(''));
+    expect(suggestions()).toEqual(['plugin:ptc:ptc']);
+    fireEvent.change(add, { target: { value: 'my-kernel' } });
+    fireEvent.keyDown(add, { key: 'Enter' });
+    await vi.waitFor(() => expect(settings().engine.statefulMcpServers).toEqual(['c12-kernel', 'my-kernel']));
+    fireEvent.click(within(row('Stateful MCP servers')).getByRole('button', { name: 'Remove c12-kernel' }));
+    await vi.waitFor(() => expect(b.sets.at(-1)).toEqual({ engine: { statefulMcpServers: ['my-kernel'] } }));
+  });
+});
+// C12 end

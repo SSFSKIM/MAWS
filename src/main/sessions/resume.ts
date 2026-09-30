@@ -12,7 +12,7 @@ import { hostCall, pathExists, transcriptPathOf } from './context';
 import { holderAuthority } from './holders';
 import { LaunchWatch } from './launch-watch';
 import { resumeLaunchSpec } from './launch-mapping';
-import { runBootstrap } from './setup';
+import { passLaunchGate, runBootstrap } from './setup'; // C12: passLaunchGate
 import { exitFailure, heldOutcome, HeldFailure, messageOf, RelayFailure, SetupFailure, setupEvent, stopQuietly, takeReplay, WatchdogFailure, type Setup } from './setup-steps';
 import { trustStateOf } from './trust';
 
@@ -25,6 +25,7 @@ export async function runResume(
   let watch: LaunchWatch | null = null;
   let launched = false;
   try {
+    await passLaunchGate(s); // C12: custody refuses before the trust bootstrap and the handover
     const trust = await trustStateOf(record.directory, { git: s.git, env: s.env });
     const attestation = input.decision === 'accepted' ? { accepted: true as const, directory: trust.trustKey } : null;
     const gateway = input.options.gateway ?? (record.gateway.routed === true ? 'gateway' : record.gateway.routed === false ? 'direct' : s.settings().gateway.defaultRoute);

@@ -86,6 +86,10 @@ export function createLauncher(deps: LauncherDeps): (spec: LaunchSpec) => Promis
       const session = new EngineSession({
         spec, plan, spawn, store: deps.store, appVersion: deps.appVersion, relayHealth, log: (message) => deps.log(`${spec.appSessionId}: ${message}`),
         journal: new JournalWriter(journalDir(deps.userData, spec.appSessionId), plan.launchId, { maxBytes: JOURNAL_MAX_BYTES }),
+        // C12 start: the budget policy's stateful servers (keepAlive), and `process_exit` for the first launch after a release
+        statefulMcpServers: () => deps.table.statefulMcpServers,
+        reconnectTrigger: deps.table.takeReleased(spec.appSessionId) ? 'process_exit' : 'user',
+        // C12 end
       });
       deps.wire(session, plan, spec);
       return session;

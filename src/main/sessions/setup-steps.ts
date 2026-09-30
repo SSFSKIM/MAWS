@@ -12,7 +12,7 @@ import type { SessionStore } from '../index/sessions';
 import type { HostDispatch } from '../ipc/router';
 import { attachCommand } from '@shared/sessions/attach';
 import { bgRefusalOf } from './attach';
-import { hostCall, reservationOf, type Emit, type HostEvents } from './context';
+import { hostCall, reservationOf, type Emit, type HostEvents, type LaunchGate } from './context'; // C12: LaunchGate
 import type { BootstrapNotes, IntentStore } from './intents';
 import type { C10Settings } from './launch-mapping';
 import type { LaunchWatch } from './launch-watch';
@@ -31,6 +31,7 @@ export interface Setup {
   env: NodeJS.ProcessEnv;
   replay: ReplaySeam | null;
   settings: () => C10Settings;
+  launchGate: LaunchGate; // C12
   now: () => string;
   log: (message: string) => void;
   watchdogMs: number;

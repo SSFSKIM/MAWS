@@ -164,7 +164,7 @@ describe('EngineSession: the handshake, journal-before-normalise and the gateway
     expect(shape(journal)).toEqual(['meta:reconnect', 'meta:spawn', 'out:control_request/initialize', 'in:control_response', 'meta:initialize', 'meta:reconnect', 'out:control_request/get_status', 'in:control_response', 'meta:status_check', 'out:control_request/apply_flag_settings', 'in:control_response', 'out:control_request/get_context_usage']); // then the ready read
     expect(transport.requestsOf('apply_flag_settings')[0]!.request).toEqual({ subtype: 'apply_flag_settings', settings: { permissions: { allow: ['Bash(touch granted.txt)'] } } });
     expect(events.map((e) => e.kind === 'session.reconnect' && e.phase)).toEqual(['attempting', 'reconnected']);
-    expect(session.status()).toMatchObject({ process: 'ready', grants: ['Bash(touch granted.txt)'], keepAlive: ['grants'] });
+    expect(session.status()).toMatchObject({ process: 'ready', grants: ['Bash(touch granted.txt)'], keepAlive: [] });
   });
 
   it('retains the command catalogue: initialize commands and agents, system/init skills and terminal commands, commands_changed', async () => {
@@ -180,7 +180,7 @@ describe('EngineSession: the handshake, journal-before-normalise and the gateway
     await flush();
     expect(session.catalog()).toEqual({ commands: [{ name: 'x', description: 'X' }], agents: INIT_RESPONSE.agents, skills: ['dataviz'], terminalSlashCommands: ['doctor'], revision: 3 });
     // a system/init with no turn open is an engine-initiated turn: the turn keeps the process alive too
-    expect(session.status()).toMatchObject({ model: { resolved: 'claude-sonnet-5' }, mcpServers: [{ name: 'gh', status: 'connected', source: null }], keepAlive: ['turn', 'mcp_connected'] });
+    expect(session.status()).toMatchObject({ model: { resolved: 'claude-sonnet-5' }, mcpServers: [{ name: 'gh', status: 'connected', source: null }], keepAlive: ['turn'] });
   });
 });
 
@@ -432,7 +432,7 @@ describe('EngineSession: inbound requests, host hooks and exit', () => {
     await flush();
     transport.exit(1);
     await session.exited;
-    expect(journal.rows.at(-1)!.frame).toEqual({ event: 'exit', code: 1, signal: null, reason: 'crash', lostAttentionCount: 2, peakTreeRssKiB: null });
+    expect(journal.rows.at(-1)!.frame).toEqual({ event: 'exit', code: 1, signal: null, reason: 'crash', lostAttentionCount: 2, peakTreeRssKiB: null, budget: null /* C12 */ });
     expect(events.at(-1)).toMatchObject({ kind: 'process.exited', code: 1, reason: 'crash', lostAttentionCount: 2, seq: journal.rows.at(-1)!.seq });
     expect(lists.at(-1)).toEqual([]);
     expect(session.status()).toMatchObject({ process: 'exited', exit: { code: 1, signal: null, reason: 'crash' }, pendingRequests: 0 });
@@ -1067,3 +1067,206 @@ describe("permission.requested carries C3's optional fields through a live sessi
   });
 });
 // C7 end
+
+// C12 start: the budget's session side (C12 execution document, Interfaces "X6 status and X1 events"; M1 task 3)
+describe('EngineSession (C12): the stop precedence, busy, lastUsedAt, keepAlive and the reconnect trigger', () => {
+  const RELEASE = { limitKiB: 8_388_608, totalKiB: 9_000_000 };
+  const exitRow = (journal: MemoryJournal) => journal.rows.find((r) => r.direction === 'meta' && (r.frame as { event: string }).event === 'exit')!.frame;
+  const parked = () => setup({ responder: defaultResponder({ end_session: () => null }) }); // end_session is never answered: the exit is ours to push
+  const RESULT = { type: 'result', subtype: 'success', session_id: 's', is_error: false, duration_ms: 1, num_turns: 1, total_cost_usd: 0, usage: {}, permission_denials: [], terminal_reason: 'completed' };
+
+  it("a release writes end_session { reason: 'stop' } and exits with reason budget, its budget and sum on the status, the exit row and process.exited", async () => {
+    const { session, transport, journal, events } = parked();
+    await session.start();
+    const stopping = session.stop('budget', { release: RELEASE });
+    await flush();
+    expect(transport.requestsOf('end_session').map((r) => r.request.reason)).toEqual(['stop']);
+    transport.exit(0);
+    await stopping;
+    expect(session.status().exit).toMatchObject({ reason: 'budget', release: RELEASE });
+    expect(exitRow(journal)).toMatchObject({ reason: 'budget', budget: RELEASE });
+    expect(events.filter((e) => e.kind === 'process.exited')).toMatchObject([{ reason: 'budget', budget: RELEASE }]);
+  });
+
+  it('an archive during a budget ladder exits archive, with no release', async () => {
+    const { session, transport, journal, events } = parked();
+    await session.start();
+    const releasing = session.stop('budget', { release: RELEASE });
+    await flush();
+    const archiving = session.stop('archive');
+    transport.exit(0);
+    await Promise.all([releasing, archiving]);
+    expect(transport.requestsOf('end_session')).toHaveLength(1); // one ladder per process
+    expect(session.status().exit).toMatchObject({ reason: 'archive', release: null });
+    expect(exitRow(journal)).toMatchObject({ reason: 'archive', budget: null });
+    expect(events.filter((e) => e.kind === 'process.exited')).toMatchObject([{ reason: 'archive', budget: null }]);
+  });
+
+  it('a quit during a budget ladder exits quit', async () => {
+    const { session, transport } = parked();
+    await session.start();
+    void session.stop('budget', { release: RELEASE });
+    await flush();
+    const quitting = session.stop('quit');
+    transport.exit(0);
+    await quitting;
+    expect(session.status().exit).toMatchObject({ reason: 'quit', release: null });
+  });
+
+  it('a release after an explicit stop leaves the explicit reason; explicit reasons keep the first among themselves', async () => {
+    const a = parked();
+    await a.session.start();
+    const stopping = a.session.stop('stop');
+    void a.session.stop('budget', { release: RELEASE });
+    a.transport.exit(0);
+    await stopping;
+    expect(a.session.status().exit).toMatchObject({ reason: 'stop', release: null });
+    const b = parked();
+    await b.session.start();
+    void b.session.stop('stop');
+    const archiving = b.session.stop('archive');
+    b.transport.exit(0);
+    await archiving;
+    expect(b.session.status().exit?.reason).toBe('stop');
+  });
+
+  it('busy: a message written but not yet started, emitted on the change, with no turn open yet', async () => {
+    const { session, transport } = setup();
+    await session.start();
+    const statuses: EngineSessionStatus[] = [];
+    session.on('status', (s) => statuses.push(s));
+    expect(session.status().busy).toBe(false);
+    const { messageUuid } = await session.send('hi');
+    expect(session.status()).toMatchObject({ busy: true, turn: null, keepAlive: ['busy'] });
+    expect(statuses.at(-1)).toMatchObject({ busy: true });
+    transport.push({ type: 'command_lifecycle', command_uuid: messageUuid, state: 'started', uuid: 'l-1', session_id: 's' });
+    await flush();
+    expect(session.status().turn).not.toBeNull();
+    transport.push({ ...RESULT, origin: { kind: 'human' }, user_message_uuids: [messageUuid] });
+    await flush();
+    expect(session.status()).toMatchObject({ busy: false, turn: null, keepAlive: [] });
+    expect(statuses.at(-1)).toMatchObject({ busy: false });
+  });
+
+  it('busy: a ! command until its output is replayed, emitted on both changes', async () => {
+    const { session, transport } = setup();
+    await session.start();
+    const statuses: EngineSessionStatus[] = [];
+    session.on('status', (s) => statuses.push(s));
+    await session.bash('ls');
+    expect(session.status()).toMatchObject({ busy: true, turn: null });
+    expect(statuses.at(-1)).toMatchObject({ busy: true });
+    transport.push({ type: 'user', message: { role: 'user', content: '<bash-input>ls</bash-input>' }, parent_tool_use_id: null, session_id: 's' });
+    transport.push({ type: 'user', message: { role: 'user', content: '<bash-stdout>a.txt</bash-stdout><bash-stderr></bash-stderr><bash-exit-code>0</bash-exit-code>' }, parent_tool_use_id: null, session_id: 's' });
+    await flush();
+    expect(session.status().busy).toBe(false);
+    expect(statuses.at(-1)).toMatchObject({ busy: false });
+  });
+
+  it('busy: a ! command still running past the no-output warning stays busy until its output arrives (the warning is not completion)', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const { session, transport, journal } = setup();
+    await session.start();
+    const statuses: EngineSessionStatus[] = [];
+    session.on('status', (s) => statuses.push(s));
+    await session.bash('sleep 100');
+    expect(session.status().busy).toBe(true);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(journal.rows.some((r) => (r.frame as { key?: string }).key?.startsWith('bash:no_output:'))).toBe(true); // the warning went out
+    expect(session.status()).toMatchObject({ busy: true, keepAlive: ['busy'] });
+    await vi.advanceTimersByTimeAsync(70_000);
+    expect(session.status().busy).toBe(true);
+    transport.push({ type: 'user', message: { role: 'user', content: '<bash-input>sleep 100</bash-input>' }, parent_tool_use_id: null, session_id: 's' });
+    transport.push({ type: 'user', message: { role: 'user', content: '<bash-stdout></bash-stdout><bash-stderr></bash-stderr><bash-exit-code>0</bash-exit-code>' }, parent_tool_use_id: null, session_id: 's' });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(session.status().busy).toBe(false);
+    expect(statuses.at(-1)).toMatchObject({ busy: false });
+    expect(transport.writes.filter((w) => w.type === 'user' && (w as { shouldQuery?: boolean }).shouldQuery === false)).toEqual([]); // still no echo after the warning
+  });
+
+  it('busy: a ! command that never answers holds until the process exits', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const { session, transport } = parked();
+    await session.start();
+    await session.bash('sleep 900');
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(session.status().busy).toBe(true);
+    const stopping = session.stop('stop');
+    transport.exit(0);
+    await stopping;
+    expect(session.status().busy).toBe(false);
+  });
+
+  it('busy: a held clear-and-implement between its turns, with no turn open', async () => {
+    const { session, transport } = setup();
+    await session.start();
+    transport.push({ type: 'system', subtype: 'status', status: null, permissionMode: 'plan', session_id: 's' });
+    await flush();
+    await session.send('plan it');
+    transport.push({ type: 'control_request', request_id: 'p1', request: { subtype: 'can_use_tool', tool_name: 'ExitPlanMode', input: { plan: '# Plan' }, tool_use_id: 'toolu_p' } });
+    await flush();
+    await session.answer('p1' as RequestId, { kind: 'plan', outcome: 'clear_and_implement', feedback: null });
+    transport.push({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_p', content: 'denied' }] }, parent_tool_use_id: null, session_id: 's' });
+    transport.push({ ...RESULT, origin: { kind: 'human' } });
+    await flush();
+    expect(session.status()).toMatchObject({ turn: null, busy: true, keepAlive: ['busy'] });
+  });
+
+  it('lastUsedAt: the launch, then every command the human sends and every turn end; reading the status is not use', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-09-29T10:00:00.000Z'));
+    const { session, transport } = setup();
+    await session.start();
+    expect(session.status().lastUsedAt).toBe(session.status().launchedAt);
+    const at = (iso: string) => vi.setSystemTime(new Date(iso));
+    at('2026-09-29T10:01:00.000Z');
+    expect(session.status().lastUsedAt).toBe('2026-09-29T10:00:00.000Z');
+    const { messageUuid } = await session.send('hi');
+    expect(session.status().lastUsedAt).toBe('2026-09-29T10:01:00.000Z');
+    at('2026-09-29T10:02:00.000Z');
+    transport.push({ type: 'command_lifecycle', command_uuid: messageUuid, state: 'started', uuid: 'l-1', session_id: 's' });
+    transport.push({ ...RESULT, origin: { kind: 'human' }, user_message_uuids: [messageUuid] });
+    await flush();
+    expect(session.status().lastUsedAt).toBe('2026-09-29T10:02:00.000Z');
+    at('2026-09-29T10:03:00.000Z');
+    await session.bash('ls');
+    expect(session.status().lastUsedAt).toBe('2026-09-29T10:03:00.000Z');
+    at('2026-09-29T10:04:00.000Z');
+    session.markUsed(); // a mode, model, effort or thinking change, or a `#` note, through the X2 handlers
+    expect(session.status().lastUsedAt).toBe('2026-09-29T10:04:00.000Z');
+    at('2026-09-29T10:05:00.000Z');
+    await session.steer('also this');
+    expect(session.status().lastUsedAt).toBe('2026-09-29T10:05:00.000Z');
+  });
+
+  it('keepAlive is the hard reasons, the stateful servers read from the policy the session was given', async () => {
+    let stateful: ReadonlySet<string> = new Set();
+    const { session, transport } = setup({ session: { statefulMcpServers: () => stateful } });
+    await session.start();
+    const statuses: EngineSessionStatus[] = [];
+    session.on('status', (s) => statuses.push(s));
+    transport.push({ type: 'system', subtype: 'init', cwd: '/w', session_id: 's', tools: [], mcp_servers: [{ name: 'c12-kernel', status: 'connected', source: 'project' }], model: 'm', permissionMode: 'auto', slash_commands: [], claude_code_version: '2.1.283', output_style: 'default', uuid: 'i-1' });
+    transport.push({ ...RESULT, num_turns: 0 });
+    await flush();
+    expect(session.status().keepAlive).toEqual([]);
+    stateful = new Set(['c12-kernel']);
+    session.policyChanged();
+    expect(session.status().keepAlive).toEqual(['stateful_mcp']);
+    expect(statuses.at(-1)!.keepAlive).toEqual(['stateful_mcp']);
+    transport.push({ type: 'control_request', request_id: 'r1', request: { subtype: 'can_use_tool', tool_name: 'Bash', input: { command: 'touch x' }, tool_use_id: 'toolu_1' } });
+    await flush();
+    expect(session.status().keepAlive).toEqual(['pending_request', 'stateful_mcp']);
+  });
+
+  it('the reconnect rows carry the trigger the launch was given: process_exit after a release, user otherwise', async () => {
+    const resume = { resume: { sessionId: '33333333-3333-4333-8333-333333333333' as never, fork: false }, sessionId: null };
+    const released = setup({ spec: resume, session: { reconnectTrigger: 'process_exit' } });
+    await released.session.start();
+    expect(released.journal.rows.filter((r) => (r.frame as { event?: string }).event === 'reconnect').map((r) => (r.frame as { trigger: string }).trigger)).toEqual(['process_exit', 'process_exit']);
+    expect(released.events.filter((e) => e.kind === 'session.reconnect').map((e) => (e as { trigger: string }).trigger)).toEqual(['process_exit', 'process_exit']);
+    const plain = setup({ spec: resume });
+    await plain.session.start();
+    expect(plain.events.filter((e) => e.kind === 'session.reconnect').map((e) => (e as { trigger: string }).trigger)).toEqual(['user', 'user']);
+  });
+});
+// C12 end

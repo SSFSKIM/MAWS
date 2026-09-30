@@ -1,0 +1,193 @@
+MAWS P0 sitting: the owner's script
+====================================
+
+C12 of docs/charter.md (docs/doperpowers/plans/2026-09-29-c12-finish.md, M6). These are the §10 steps only your real
+config home or your hands can observe; the agents' pre-run of everything else is in prerun.txt beside this file. Record
+each step in owner-results.txt (pass, fail or note; a screenshot path if useful). Timed part: about 45 minutes for steps
+1 to 9 and 11 to 14, plus 60 to 75 minutes for step 10's taste comparison, which can be a sitting of its own.
+
+Before the sitting (untimed, about 15 minutes)
+----------------------------------------------
+B1. In the MAWS checkout: `git pull`, then `pnpm install`, then
+    `MAWS_SIGN_IDENTITY="Apple Development: …" pnpm build:app` (your Apple Development identity; answer the keychain
+    prompt if one appears). Record `codesign -dv dist/mac-arm64/MAWS.app 2>&1 | head -5` in the results file. This is
+    D7's development-signed build. (The pre-run used the unsigned build: Signature=adhoc.)
+B2. Remove from ~/.claude.json the scratch entries earlier agent runs left under "projects" (read 2026-09-30):
+      /private/var/folders/c1/l4z5k02n2779byvnymzxsvth0000gn/T/maws-live-scratch-aabp3h
+      /private/var/folders/c1/l4z5k02n2779byvnymzxsvth0000gn/T/maws-live-scratch-UaBGkQ
+      /private/var/folders/c1/l4z5k02n2779byvnymzxsvth0000gn/T/maws-live-scratch-m5E2Ak
+      /private/tmp/maws-probe-7w5Mj0
+      /private/tmp/maws-probe2-n3YlQe
+      /private/tmp/maws-probe2-3KyJMC
+    Two more of the same kind are there and not in the grounding's list; remove them too if you do not know them:
+      /private/tmp/maws-harness/a
+      /private/tmp/maws-accept
+    Empty from ~/.Trash the files grounding §6 item 3 lists. (Grounding §6 items 2 and 3.) The C12 pre-run added no
+    entry (its check read `[]` before and after every test).
+B3. Make sure ClaudeUsage is running (Settings › Accounts in MAWS shows it). In one terminal, keep a `claude` running in a
+    project of your choice; step 1 looks for it.
+B4. Open dist/mac-arm64/MAWS.app. At its first notification request, allow MAWS in System Settings › Notifications.
+    Expect the first open over your store to take about a minute before the Overview fills: the pre-run's cold start
+    over your 3,272 transcripts showed the first card at 58 s; the second start at 2.4 s.
+B5. Decide the stateful MCP servers. In Settings › Engine › Stateful MCP servers, add each server whose state would be
+    lost if its process ended and MAWS resumed the session later. ptc's documentation says its namespace persists
+    across --resume until its idle TTL, so it is probably not stateful; leave it out unless you have seen otherwise.
+    Record the list.
+
+The sitting
+-----------
+1. Overview (§10.1; 2 min). MAWS opens to the Overview. Observe: your terminal-started sessions appear under their
+   projects, and the terminal session from B3 is foreign-live (the "Live in terminal" glyph, "Terminal · pid N" under the
+   title, a card with no controls). The pre-run counted 275 projects, 3,274 sessions and 13 foreign-live on your store.
+   Record: pass or fail, plus anything missing.
+
+2. Trust and settings (§10.2; 4 min). Pick a real project with its own .mcp.json, hooks or plugins that MAWS has never
+   started a session in. Use "+", then the Location chip › New worktree `sitting` › Use, type `Reply OK`, and Send. The
+   trust card names what will load; choose Trust and start. Observe: Session info's MCP servers, hooks and plugins match
+   `/mcp` and `/hooks` in a terminal `claude` in the same worktree (`<project>/.claude/worktrees/sitting`). Record the
+   comparison.
+
+3. Supervise from the Overview (§10.3; 4 min). Start P in project A with mode `default` and "run `touch maws-sitting.txt`".
+   Start Q in project B with "Ask me with AskUserQuestion which colour to use". Start R in project C with mode `default`
+   and "run `mkdir maws-sitting-r`", then switch to another app before R asks. Observe: a native notification for R
+   (the pre-run's unsigned build only reached the fallback). Back in MAWS on the Overview, approve P and answer Q on their
+   cards, then press ⌘⇧J, which lands on R. Record: whether the notification was native, and each observation.
+
+4. One deep session (§10.4; 6 min). In step 2's session (it runs in auto mode or whichever you chose), send the pre-run's
+   dispatch prompt, with a stop file and an inbox of your choice:
+     Dispatch one general-purpose agent in the background, model haiku, with this task: repeat rounds of Read README.md
+     then "sleep 3" with Bash until the file /tmp/maws-sitting-stop exists; whenever you receive a message from the user,
+     append it to the file /tmp/maws-sitting-inbox.txt with Bash. Then reply DISPATCHED.
+   Open Subagents › the agent › type a relay and Send. It reads "Asked … to relay", then "… sent it with SendMessage
+   after N parent rounds · … gets it at its next tool round", then the line clears when the child has it (delivered;
+   the pre-run saw it clear 6 s after Send). The parent's SendMessage row appears. Then `touch /tmp/maws-sitting-stop`.
+   Then:
+   - open Review (from "+" or the summary's Review button);
+   - open Terminal (it starts in the worktree);
+   - click a file in Files, which opens a viewer tab;
+   - send the pre-run's workflow prompt, and Background work shows its phase and two agents:
+       Call the Workflow tool once with this exact script as the script parameter, then reply STARTED:
+
+       export const meta = { name: 'sitting', description: 'Two echo agents in one phase', phases: [{ title: 'Echo' }] }
+       phase('Echo')
+       const out = await parallel([() => agent('Reply with exactly ALPHA and nothing else.', {label: 'alpha', effort: 'low'}), () => agent('Reply with exactly BETA and nothing else.', {label: 'beta', effort: 'low'})])
+       return out
+   Record each piece. If Resume on a session ever stays at "Resuming…" for more than half a minute, note it (the
+   pre-run saw a resume sit at the engine's initialize twice in five tries).
+
+5. Resume both ways (§10.5; 4 min). Archive the deep session. In a terminal run `cd <worktree> && claude --resume <id>`
+   (the id is in Session info) and ask what it just did; it answers; `/exit`. Then quit the terminal `claude` from B3,
+   and choose Resume on its row in MAWS. Record: both resumes, and any sign of your terminal's 2.1.285 against MAWS's
+   2.1.283 (the pre-run resumed with the pin itself).
+
+6. Nine sessions and the budget (§10.6; 5 min). Have nine live sessions (the ones above plus quick `Reply OK` sessions).
+   Session info reads `Memory budget: X of 8 GB`; record X and three per-tree figures (Session info's process tree row).
+   In Settings › Engine, set the budget (GB, one decimal) below X. Observe: within about ten seconds a session reads
+   `released`, with no notification and no Needs-you item. Type in it and Send; it resumes (the pre-run: 0.9 s to ready).
+   Reset the budget to Default. Record: the numbers, and how the resume felt.
+
+7. Long transcript (§10.7; 3 min). Open the first of your three longest transcripts (by record count, read 2026-09-30):
+     ~/.claude/projects/-Users-new-claude-code-bundle-2-1-257/809406bb-43f0-4d12-a0eb-4f20d6cc4941.jsonl  (28,317 records)
+     ~/.claude/projects/-Users-new-Developer-GitHub-AutoPM/d7e8a60d-4568-4492-b6c2-61ed8346b7c8.jsonl  (24,079)
+     ~/.claude/projects/-Users-new-Developer-GitHub-doperpowers--claude-worktrees-fold-plans/30e0568a-f1ee-4dce-8db9-b9799fb23107.jsonl  (16,975)
+   The sidebar's search matches a session's title, directory and project name, not its id or file, so first print each
+   candidate's title in a terminal (read only; it prints the custom title, else the AI title, else the first prompt,
+   which is the order MAWS titles by). Paste the whole command as shown, margin included: the `if True:` line lets the
+   indented code run as it is.
+     python3 -c 'if True:
+         import json, sys, os
+         for p in sys.argv[1:]:
+             t = {}
+             for l in open(os.path.expanduser(p)):
+                 try: r = json.loads(l)
+                 except ValueError: continue
+                 k = r.get("type"); m = r.get("message"); c = m.get("content") if isinstance(m, dict) else None
+                 if k == "custom-title": t["c"] = r.get("customTitle")
+                 elif k == "ai-title": t["a"] = r.get("aiTitle")
+                 elif k == "user" and "f" not in t and isinstance(c, str): t["f"] = c[:80]
+             print(os.path.basename(p)[:8], "·", t.get("c") or t.get("a") or t.get("f") or "(no title)")' \
+       ~/.claude/projects/-Users-new-claude-code-bundle-2-1-257/809406bb-43f0-4d12-a0eb-4f20d6cc4941.jsonl \
+       ~/.claude/projects/-Users-new-Developer-GitHub-AutoPM/d7e8a60d-4568-4492-b6c2-61ed8346b7c8.jsonl \
+       ~/.claude/projects/-Users-new-Developer-GitHub-doperpowers--claude-worktrees-fold-plans/30e0568a-f1ee-4dce-8db9-b9799fb23107.jsonl
+   (The pre-run checked that it finds a title in each of the three; the titles themselves are not in this pack.) Type a
+   few words of the first title into Search sessions, or open its project (claude-code-bundle's 2.1.257 folder, or Other
+   sessions if that folder is gone), and open the row. Confirm it is the right one: Session info (the panel's "+", or
+   the summary's Session info button) shows "Session id", which must read 809406bb-43f0-4d12-a0eb-4f20d6cc4941. Scroll
+   halfway and expand old work: the view stays put. In another session, ask for a long answer and scroll up while it
+   streams: you are not dragged down. Record.
+
+8. Palette and keyboard (§10.8; 3 min). Type `/` and open each of: model, effort, permissions, usage, context, config,
+   plugins, MCP, sandbox, hooks, memory and skills. Then run `!git status`, and `# <a note>` to a project memory of your
+   choice. In Settings › Keyboard, rebind one action and use it, then reset it. Record.
+
+9. Queue, steer, stop, denial (§10.9; 3 min). While a turn runs:
+   - type and Queue;
+   - type and ⌥Enter (Steer);
+   - Stop;
+   - Resume.
+   Then in `default` mode deny a command; collapse its turn and "1 denied" still shows on the divider. Interrupt (⌘.)
+   while an approval is pending: note what you see. (On 2.1.283 the engine cancels the pending request on an interrupt,
+   so the pre-run saw the card retire and no "approval lost"; "1 approval lost" appeared only when the engine process
+   died with the approval pending. The architect may restate this clause.) Last, start a turn, Queue one message while
+   it runs, and press Stop: the queue pauses with the message still listed (a message queued with nothing running is
+   sent at once). Leave it for step 12. Record.
+
+10. Themes and taste (§10.10, C10 item 15, C8, C11; 60 to 75 min, can be its own sitting).
+    - Switch to dark and back.
+    - Compare, beside Claude Desktop and Codex, light and dark: the unstarted tab, the trust and relay cards, the rename,
+      fork, archive, delete and cleanup sheets, the Worktrees… dialog (against Codex's Settings › Worktrees), and the
+      right panel.
+    - Compare Settings › Accounts beside ClaudeUsage's panel, and confirm ClaudeUsage comes forward on hand-off.
+    The pre-run's screenshots of each surface in both themes are the prerun-*-{light,dark}.png files beside this script.
+    Record anything invented or off.
+
+11. Hands (C9, C8a, C10, C1; 4 min).
+    - Korean IME composition in a Terminal tab.
+    - ⌘-click a link in the terminal, which opens the browser.
+    - Native ⌘A with the terminal focused, and Edit › Select All by mouse.
+    - In a session in a repository with a GitHub remote: "Open on GitHub" and the push-state row.
+    - The Open panel behind "Add project".
+    - ⌘R: the window reloads and sessions keep running.
+    Record each.
+
+12. Quit (§10.6's quit, D8; 2 min). With a turn in flight, a background task and a terminal running `sleep 60`, press ⌘Q.
+    The question names all three. Choose Quit when idle and the banner appears ("MAWS will quit when 3 things finish");
+    choose Cancel. Press ⌘Q again and choose Quit. Reopen MAWS: step 9's queued message is still listed, and every
+    session reads exited. Record.
+
+13. Terminal launch environment (D9; 3 min). In a terminal: `mkdir -p /tmp/maws-parity && cd /tmp/maws-parity && git init -q`,
+    then run the pinned engine by its path, `~/.local/share/claude/versions/2.1.283`, with your default model, accept the
+    folder trust, and send "Use a subagent to list the files here, then make a two-item task list". Observe: whether the
+    subagent runs in the foreground (the prompt waits for it), and whether the task list is made with TaskCreate (or
+    TodoWrite). `/exit`. Record both; M5's probe recorded the same under a scratch home (background dispatch; no task
+    tools on claude-opus-5-5).
+
+14. C8's sitting items (the C8 recomposition; 5 min, beside steps 4, 10 and 11).
+    - Both themes by eye over the right panel's tools.
+    - "Open on GitHub" and the push state against a real upstream.
+    - A monitor started from a live session. In any live session send this prompt (the pre-run's, tested):
+        Use the Monitor tool (load it with ToolSearch if it is not listed) to watch the output of this command: for i in
+        $(seq 1 60); do echo tick $i; sleep 5; done. Start it and reply with exactly the word WATCHING; do not wait for
+        it. If the Monitor tool is not available, do nothing else and reply with exactly the words MONITOR UNAVAILABLE.
+      If it replies WATCHING, open Background work: the monitor is listed under its own row with a running line and a
+      Stop button; press Stop, and the row stops (that is the cleanup). If it replies MONITOR UNAVAILABLE, record that:
+      the Monitor tool sits behind an engine feature gate (off by default on 2.1.283), and the pre-run's scratch session
+      had none (ToolSearch found no Monitor); your account's gates may differ.
+    - Attach by hand, with a background job made for the purpose (the pre-run's recipe, tested twice):
+      1. In a terminal, in a project MAWS already lists (a scratch one is best), run
+           claude --bg --model sonnet 'Reply with exactly the words BG READY, then stop.'
+         It prints `backgrounded · <id>` (an eight-character id) and the attach, logs and agents commands; `claude agents`
+         lists it too. Note that `claude --bg` hands the job to the installed daemon (~/.local/bin/claude), so the job
+         runs on your installed 2.1.285, not MAWS's pinned 2.1.283.
+      2. In MAWS, the session appears in that project with the "Live as background job" glyph. Open some other session
+         first, then right-click the job's row: the menu is exactly Open and "Attach in a terminal tab". Choose Attach:
+         MAWS switches to the job's session and opens a Terminal tab in the right panel attached to it.
+      3. Clean up: close the Terminal tab, then in a terminal run `claude stop <id>` (it prints `stopped <id>`); the
+         daemon exits by itself a few seconds later. `claude rm <id>` also deletes the job (it removes a worktree only if the job made one; the pre-run's did not).
+    - The disabled half of This branch on a session on master (Review › This branch reads "Session runs on <branch>, the
+      main worktree's branch").
+    Record each.
+
+15. After (untimed). Name any split-pane irritations; these become M5.3. Decide whether your settings' ExitPlanMode and
+    EnterPlanMode denies stay (grounding §6 item 10). Optionally, run `pmset sleepnow` with a terminal running and check
+    that it survives the wake (C9).

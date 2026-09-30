@@ -42,6 +42,32 @@ export const ENGINE = {
   subagentNote: 'Sets CLAUDE_CODE_SUBAGENT_MODEL per launch for new sessions; Session info shows what a session actually got.',
 };
 
+// C12 start: the memory budget's rows in Settings › Engine (C12 execution document, "Surfaces of the budget")
+export const BUDGET_SETTINGS = {
+  budget: 'Memory budget',
+  placeholder: 'default',
+  defaultNote: (limit: string | null) => `Default · 25% of physical memory${limit === null ? '' : ` (${limit})`}. Past it, MAWS releases the least recently used idle session; Send resumes it.`,
+  setNote: 'Default · 25% of physical memory. Past it, MAWS releases the least recently used idle session; Send resumes it.',
+  useDefault: 'Use default',
+  invalid: 'Enter the memory budget in GB, at least 0.5',
+  stateful: 'Stateful MCP servers',
+  statefulNote: 'Servers whose state is lost when their process ends: a session connected to one is never released. Names match exactly; the field suggests those live sessions report.',
+  addServer: 'Add a stateful MCP server',
+  addPlaceholder: 'server name',
+  remove: (name: string) => `Remove ${name}`,
+};
+
+// M4: MAWS's copy of the pinned engine (Interfaces "Engine custody")
+export const CUSTODY_SETTINGS = {
+  label: 'Engine copy',
+  ok: (version: string, sha256: string, copiedAt: string) => `MAWS copy · ${version} · sha256 ${sha256.slice(0, 8)}… · copied ${copiedAt.slice(0, 10)}`,
+  chosen: 'not used while a binary path is chosen',
+  off: 'not kept in this run · launches use the installed binary',
+  reading: 'Checking the copy…',
+  note: "Sessions launch from MAWS's own copy of the pinned version, verified at every start, so the installer's cleanup never removes it. A missing or altered copy refuses launches.",
+};
+// C12 end
+
 export const GATEWAY = {
   hint: 'D-19',
   defaultRoute: 'Default route',

@@ -25,6 +25,10 @@ import { createBinaryProbe } from './binary-info';
 import { getBinaryConfig, setBinaryConfig, type LaunchPlan } from './launch';
 // C11 end
 import { LADDER_MS } from './session';
+// C12 start
+import { readFileSync } from 'node:fs';
+import { ProcessTable } from './process-table';
+// C12 end
 import { FileSessionStateStore } from './store/file-session-state-store';
 import { MemorySessionStateStore } from './store/memory-session-state-store';
 
@@ -390,6 +394,36 @@ describe('engine host X2 surface', () => {
     transport.exit(0);
     expect(await stopping).toEqual({ stopped: 1, forced: 0 });
   });
+
+  // C12 start
+  it('a mode, model, effort or thinking change marks the session used, whatever the engine answers (the budget\'s least-recently-used order, C12)', async () => {
+    const transport: ScriptedTransport = scriptedTransport({
+      onWrite: (frame, t) => {
+        if (frame.type !== 'control_request') return;
+        const reply = (response: object) => queueMicrotask(() => t.push({ type: 'control_response', response: { request_id: frame.request_id, ...response } }));
+        const r = frame.request as { subtype: string; mode?: string };
+        if (r.subtype === 'set_permission_mode') reply({ subtype: 'success', response: { mode: r.mode } });
+        else if (r.subtype === 'set_model') reply({ subtype: 'error', error: 'unknown model', error_code: 'bad_model' });
+        else if (r.subtype === 'apply_flag_settings' || r.subtype === 'set_max_thinking_tokens') reply({ subtype: 'success' });
+        else autoResponder(handshakeResponder())(frame, t);
+      },
+    });
+    const host = engineHost({ spawn: () => transport, binaryProbe: async () => OK_BINARY, checkRelay: async () => OK_RELAY, captureEnv: async () => ({ PATH: '/usr/bin' }) });
+    const id = 'app-ipc' as AppSessionId;
+    await host.call('session.launch', { spec: spec() });
+    await until(() => host.statuses(id).some((s) => s.process === 'ready'), 'ready');
+    const used = vi.spyOn(host.ipc.table.get(id)!, 'markUsed');
+    await host.call('session.setPermissionMode', { appSessionId: id, mode: 'acceptEdits' });
+    await host.call('session.setModel', { appSessionId: id, model: 'nonesuch' });
+    await host.call('session.setEffort', { appSessionId: id, effort: 'low' });
+    await host.call('session.setThinking', { appSessionId: id, maxThinkingTokens: 4096, display: 'summarized' });
+    expect(used).toHaveBeenCalledTimes(4);
+    const stopping = host.call('session.stop', { appSessionId: id, reason: 'stop' });
+    await until(() => transport.requestsOf('end_session').length === 1, 'end_session');
+    transport.exit(0);
+    await stopping;
+  });
+  // C12 end
 });
 
 // C4 start: the one seam into C4's filesystem state service (C4 execution document, Architecture and Cross-child
@@ -529,3 +563,146 @@ describe('engine.configure answers binaryInfo and buildLaunch uses the configure
   });
 });
 // C11 end
+
+// C12 start: the memory budget's host commands (C12 execution document, Interfaces "X2 additions"; M1 task 4)
+describe('engine.policy.set and engine.budget (C12)', () => {
+  const idle = { type: 'system', subtype: 'session_state_changed', state: 'idle', uuid: 'idle-1', session_id: 's' };
+  const reconnectTriggers = (journalPath: string) =>
+    readFileSync(journalPath, 'utf8').trim().split('\n').map((line) => JSON.parse(line) as { frame: { event?: string; trigger?: string } }).filter((r) => r.frame.event === 'reconnect').map((r) => r.frame.trigger);
+
+  it('engine.policy.set evaluates at once and answers the budget state; engine.budget answers it; the event carries each change and each release; the next launch after a release reconnects with process_exit', async () => {
+    const transports: ScriptedTransport[] = [];
+    const nextTransport = () => {
+      const t = scriptedTransport({ pid: 4242, onWrite: autoResponder(handshakeResponder({ end_session: () => null })) });
+      transports.push(t);
+      return t;
+    };
+    const table = new ProcessTable({ ps: async () => '  4242     1   400\n' });
+    const host = engineHost({ table, spawn: () => nextTransport(), binaryProbe: async () => OK_BINARY, checkRelay: async () => OK_RELAY, captureEnv: async () => ({ PATH: '/usr/bin' }) });
+    const id = 'app-ipc' as AppSessionId;
+    const budgetEvents = () => host.emitted.filter((e) => e.name === 'engine.budget').map((e) => e.payload as { releasing: string | null; limitKiB: number });
+
+    await host.call('session.launch', { spec: spec() });
+    await until(() => host.statuses(id).some((s) => s.process === 'ready'), 'ready');
+    transports[0]!.push(idle);
+    await until(() => table.get(id)!.status().engineState === 'idle', 'idle');
+    await table.sampleMemory(); // records the row's lastEventSeq
+    await table.sampleMemory(); // finds it unmoved: quiet from here
+    expect(await host.call('engine.budget', undefined)).toMatchObject({ totalKiB: 400, over: false, releasing: null });
+
+    const state = await host.call('engine.policy.set', { limitKiB: 100, statefulMcpServers: ['c12-kernel'] });
+    expect(state).toMatchObject({ limitKiB: 100, totalKiB: 400, over: true, candidates: 1, releasing: id, lastRelease: { appSessionId: id, totalKiB: 400 } });
+    expect(budgetEvents().at(-1)).toMatchObject({ limitKiB: 100, releasing: id });
+    expect(transports[0]!.requestsOf('end_session').map((r) => r.request.reason)).toEqual(['stop']);
+    transports[0]!.exit(0);
+    await until(() => host.statuses(id).some((s) => s.process === 'exited'), 'exited');
+    expect(host.statuses(id).at(-1)!.exit).toMatchObject({ reason: 'budget', release: { limitKiB: 100, totalKiB: 400 } });
+    expect(await host.call('engine.budget', undefined)).toMatchObject({ releasing: null });
+    expect(budgetEvents().at(-1)).toMatchObject({ releasing: null });
+
+    // the resume after the release: its reconnect rows name process_exit; the launch after that one is the owner's again
+    const resume = spec({ resume: { sessionId: '33333333-3333-4333-8333-333333333333' as never, fork: false } });
+    await host.call('engine.policy.set', { limitKiB: 1_000_000, statefulMcpServers: [] }); // no further release
+    await host.call('session.launch', { spec: resume });
+    await until(() => host.statuses(id).at(-1)?.process === 'ready', 'resumed');
+    expect(reconnectTriggers(table.get(id)!.status().journalPath)).toEqual(['process_exit', 'process_exit']);
+    const stopping = host.call('session.stop', { appSessionId: id, reason: 'stop' });
+    await until(() => transports[1]!.requestsOf('end_session').length === 1, 'end_session');
+    transports[1]!.exit(0);
+    await stopping;
+    await host.call('session.launch', { spec: resume });
+    await until(() => host.statuses(id).at(-1)?.process === 'ready', 'resumed again');
+    expect(reconnectTriggers(table.get(id)!.status().journalPath)).toEqual(['user', 'user']);
+    const last = host.call('session.stop', { appSessionId: id, reason: 'stop' });
+    await until(() => transports[2]!.requestsOf('end_session').length === 1, 'end_session');
+    transports[2]!.exit(0);
+    await last;
+  });
+
+  // M2: an archive of a released session drops its released id with the row, so the unarchived session's next launch
+  // is a fresh one (trigger user), not a resume after a release
+  it('an archive of a released session drops the released id: the next launch reconnects as the owner’s', async () => {
+    const transports: ScriptedTransport[] = [];
+    const nextTransport = () => {
+      const t = scriptedTransport({ pid: 4242, onWrite: autoResponder(handshakeResponder({ end_session: () => null })) });
+      transports.push(t);
+      return t;
+    };
+    const table = new ProcessTable({ ps: async () => '  4242     1   400\n' });
+    const host = engineHost({ table, spawn: () => nextTransport(), binaryProbe: async () => OK_BINARY, checkRelay: async () => OK_RELAY, captureEnv: async () => ({ PATH: '/usr/bin' }) });
+    const id = 'app-ipc' as AppSessionId;
+    await host.call('session.launch', { spec: spec() });
+    await until(() => host.statuses(id).some((s) => s.process === 'ready'), 'ready');
+    transports[0]!.push(idle);
+    await until(() => table.get(id)!.status().engineState === 'idle', 'idle');
+    await table.sampleMemory();
+    await host.call('engine.policy.set', { limitKiB: 100, statefulMcpServers: [] });
+    transports[0]!.exit(0);
+    await until(() => host.statuses(id).some((s) => s.process === 'exited'), 'released');
+    expect(await host.call('session.stop', { appSessionId: id, reason: 'archive' })).toMatchObject({ exited: true });
+    expect(table.get(id)).toBeUndefined(); // the archive released the row
+    expect(table.takeReleased(id)).toBe(false);
+    await host.call('engine.policy.set', { limitKiB: 1_000_000, statefulMcpServers: [] });
+    await host.call('session.launch', { spec: spec({ resume: { sessionId: '33333333-3333-4333-8333-333333333333' as never, fork: false } }) });
+    await until(() => host.statuses(id).at(-1)?.process === 'ready', 'resumed');
+    expect(reconnectTriggers(table.get(id)!.status().journalPath)).toEqual(['user', 'user']);
+    const last = host.call('session.stop', { appSessionId: id, reason: 'stop' });
+    await until(() => transports[1]!.requestsOf('end_session').length === 1, 'end_session');
+    transports[1]!.exit(0);
+    await last;
+  });
+
+  it('the launched session reads the stateful servers of the policy in force', async () => {
+    const table = new ProcessTable({ ps: async () => '' });
+    const transport = scriptedTransport({ onWrite: autoResponder(handshakeResponder({ end_session: () => null })) });
+    const host = engineHost({ table, spawn: () => transport, binaryProbe: async () => OK_BINARY, checkRelay: async () => OK_RELAY, captureEnv: async () => ({ PATH: '/usr/bin' }) });
+    const id = 'app-ipc' as AppSessionId;
+    await host.call('session.launch', { spec: spec() });
+    await until(() => host.statuses(id).some((s) => s.process === 'ready'), 'ready');
+    transport.push({ type: 'system', subtype: 'init', cwd: '/w', session_id: 's', tools: [], mcp_servers: [{ name: 'c12-kernel', status: 'connected', source: 'project' }], model: 'm', permissionMode: 'auto', slash_commands: [], claude_code_version: '2.1.283', output_style: 'default', uuid: 'i-1' });
+    transport.push({ type: 'result', subtype: 'success', session_id: 's', is_error: false, duration_ms: 1, num_turns: 0, total_cost_usd: 0, usage: {}, permission_denials: [], terminal_reason: 'completed' });
+    await until(() => table.get(id)!.status().mcpServers.length === 1 && table.get(id)!.status().turn === null, 'init');
+    expect(table.get(id)!.status().keepAlive).toEqual([]);
+    await host.call('engine.policy.set', { limitKiB: 1_000_000, statefulMcpServers: ['c12-kernel'] });
+    expect(host.statuses(id).at(-1)!.keepAlive).toEqual(['stateful_mcp']);
+    const stopping = host.call('session.stop', { appSessionId: id, reason: 'stop' });
+    await until(() => transport.requestsOf('end_session').length === 1, 'end_session');
+    transport.exit(0);
+    await stopping;
+  });
+});
+// C12 end
+
+// C12 start: a dropped exited row (C12 execution document, M1 task 5)
+describe('exited rows beyond the cap leave the host (C12)', () => {
+  it('drops the oldest exited row, its stream and its spec without session.forgotten, keeps its state file, and session.events answers it from disk', async () => {
+    const transports: ScriptedTransport[] = [];
+    const table = new ProcessTable({ ps: async () => '', exitedRowsMax: 1 });
+    const disk = vi.fn(async () => ({ events: [] as SessionEvent[], complete: true }));
+    const host = engineHost({
+      table, diskEvents: disk, binaryProbe: async () => OK_BINARY, checkRelay: async () => OK_RELAY, captureEnv: async () => ({ PATH: '/usr/bin' }),
+      spawn: () => {
+        const t = scriptedTransport({ onWrite: autoResponder(handshakeResponder({ end_session: () => null })) });
+        transports.push(t);
+        return t;
+      },
+    });
+    for (const [i, id] of (['app-one', 'app-two'] as AppSessionId[]).entries()) {
+      await host.call('session.launch', { spec: spec({ appSessionId: id }) });
+      await until(() => host.statuses(id).some((s) => s.process === 'ready'), `${id} ready`);
+      const stopping = host.call('session.stop', { appSessionId: id, reason: 'stop' });
+      await until(() => transports[i]!.requestsOf('end_session').length === 1, 'end_session');
+      transports[i]!.exit(0);
+      await stopping;
+    }
+    expect(table.get('app-one' as AppSessionId)).toBeUndefined();
+    expect(host.emitted.some((e) => e.name === 'session.forgotten')).toBe(false);
+    expect(existsSync(join(userData, 'engine-host', 'state', 'app-one.json'))).toBe(true);
+    expect(await host.call('session.events', { appSessionId: 'app-one', afterSeq: null, limit: null })).toEqual({ events: [], complete: true, lastSeq: 0 });
+    expect(disk).toHaveBeenCalledWith('app-one');
+    const two = await host.call('session.events', { appSessionId: 'app-two', afterSeq: null, limit: null });
+    expect(two.events.length).toBeGreaterThan(0); // still this host's stream
+    expect(disk).toHaveBeenCalledTimes(1);
+  });
+});
+// C12 end

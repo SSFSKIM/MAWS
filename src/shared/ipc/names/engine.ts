@@ -4,8 +4,14 @@
 export const commands = [
   'engine.ping', 'engine.hostState', 'engine.binaryInfo', 'engine.relayHealth', 'engine.sessions', 'engine.shutdown',
   'engine.models', 'engine.configure',
+  // C12 start
+  'engine.policy.set', 'engine.budget',
+  // C12 end
 ] as const;
 
 export const events = [
   'engine.hostState',
+  // C12 start
+  'engine.budget',
+  // C12 end
 ] as const;

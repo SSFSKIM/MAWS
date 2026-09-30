@@ -178,6 +178,21 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
   handle('engine.relayHealth', async ({ force }) => relayCheck(force));
   handle('engine.sessions', async () => table.list().map((session) => session.status()));
   handle('engine.shutdown', async ({ graceMs }) => table.shutdown({ graceMs }));
+  // C12 start: the memory budget (C12 execution document, Interfaces "X2 additions"). Both immediate: the policy is
+  // evaluated at once against the previous sample (a release it makes is a stop the table starts, not awaited here),
+  // and the state is the table's own; the event goes out whenever the state changes and at every release.
+  on('engine.policy.set', async (policy) => table.configure(policy));
+  on('engine.budget', async () => table.budgetState());
+  table.onBudget((state) => emit('engine.budget', state));
+  // An exited row dropped beyond the cap takes its stream and spec with it, as an archive's release does, but nothing
+  // is forgotten: no session.forgotten, the state file and the journal stay, and session.events answers from disk.
+  table.onDropped((id) => {
+    streams.get(id)?.dispose();
+    streams.delete(id);
+    specs.delete(id);
+    modelKeys.delete(id); // C10
+  });
+  // C12 end
   // C11 start: the binary configuration main sends from settings.engine (C11 execution document, M1). The next launch
   // and engine.binaryInfo read it; a process already spawned keeps the path its plan carries. C3's setter refuses a
   // relative path (the validator already has), which reaches the renderer as invalid_input.
@@ -255,12 +270,17 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
   handle('session.interrupt', async ({ appSessionId, cancelEngineQueued }) => bounded(() => sessionOf(appSessionId).interrupt({ cancelEngineQueued })));
   handle('session.answer', async ({ appSessionId, requestId, answer }) => ({ outcome: await sessionOf(appSessionId).answer(requestId as RequestId, answer as Parameters<EngineSession['answer']>[1]) }));
   handle('session.bash', async ({ appSessionId, command }) => sessionOf(appSessionId).bash(command));
-  handle('session.memoryAppend', async ({ appSessionId, text, target }) => bounded(() => memoryAppend(sessionOf(appSessionId), { text, target }, { budgetMs: BOUNDED_BUDGET_S * 1000 })));
+  handle('session.memoryAppend', async ({ appSessionId, text, target }) => {
+    const session = sessionOf(appSessionId);
+    session.markUsed(); // C12: a `#` note is use
+    return bounded(() => memoryAppend(session, { text, target }, { budgetMs: BOUNDED_BUDGET_S * 1000 }));
+  });
 
   // -- mutations -------------------------------------------------------------------------------------------------------
   handle('session.setPermissionMode', async ({ appSessionId, mode }) =>
     bounded(async () => {
       const { session, client } = ready(appSessionId);
+      session.markUsed(); // C12: a mode change is use, whatever the engine answers
       try {
         const response = await controls.setPermissionMode(client, { mode });
         session.noteRequested({ permissionMode: { mode, refusal: null, effective: response.mode } });
@@ -277,6 +297,7 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
   handle('session.setModel', async ({ appSessionId, model }) =>
     bounded(async () => {
       const { session, client } = ready(appSessionId);
+      session.markUsed(); // C12
       try {
         await controls.setModel(client, { model });
       } catch (error) {
@@ -290,12 +311,17 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
   handle('session.setEffort', async ({ appSessionId, effort }) =>
     bounded(async () => {
       const { session, client } = ready(appSessionId);
+      session.markUsed(); // C12
       await controls.applyFlagSettings(client, { settings: { effortLevel: effort } }); // null clears (M6 observes the live answer)
       session.noteRequested({ effort });
     }),
   );
   handle('session.setThinking', async ({ appSessionId, maxThinkingTokens, display }) =>
-    bounded(async () => void (await controls.setMaxThinkingTokens(ready(appSessionId).client, { max_thinking_tokens: maxThinkingTokens, display }))),
+    bounded(async () => {
+      const { session, client } = ready(appSessionId);
+      session.markUsed(); // C12
+      await controls.setMaxThinkingTokens(client, { max_thinking_tokens: maxThinkingTokens, display });
+    }),
   );
   handle('session.applyFlagSettings', async ({ appSessionId, settings }) =>
     bounded(async () => {

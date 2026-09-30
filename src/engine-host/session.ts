@@ -28,8 +28,10 @@ import { HostHookRegistry } from './host-hooks';
 import { RELAY_URL, spawnMeta, type LaunchPlan } from './launch';
 import { Normalizer, type NormalizerWarning } from './normalizer';
 import { JournalClosed, OutboundWriter } from './outbound-writer';
-import { keepAliveReasons } from './process-table';
 import { MessageQueue, type SteerPriority } from './queue';
+// C12 start
+import { hardReasons } from './budget';
+// C12 end
 import { ControlClient, ControlError } from './rpc';
 import { ClearAndImplementSequence } from './session-clear';
 import { LADDER_MS, TerminationLadder, type ExitReason, type ExitSummary, type StopResult } from './session-ladder';
@@ -64,7 +66,15 @@ export interface EngineSessionOptions {
   relayHealth?: RelayHealth; // the check that let a gateway launch spawn (M5): journaled after the spawn row
   appVersion?: string;
   log?: (message: string) => void;
+  // C12 start: the stateful MCP servers of the budget policy, read at every status (the status's keepAlive); and the
+  // trigger this launch's reconnect rows carry, `process_exit` for the first launch after a release
+  statefulMcpServers?: () => ReadonlySet<string>;
+  reconnectTrigger?: 'user' | 'process_exit';
+  // C12 end
 }
+
+// C12: the budget and the sum a release was made at (X6 `exit.release`, X1 `process.exited.budget`)
+export interface BudgetRelease { limitKiB: number; totalKiB: number }
 
 export interface SendResult { messageUuid: MessageUuid | null; disposition: 'sent' | 'queued'; queueId: string; entry: QueueEntry }
 
@@ -111,7 +121,11 @@ export class EngineSession {
   private starting: Promise<void> | null = null;
   private processState: ProcessState = 'starting';
   private exitInfo: EngineSessionStatus['exit'] = null;
-  private stopReason: 'stop' | 'archive' | 'quit' | null = null;
+  private stopReason: 'stop' | 'archive' | 'quit' | 'budget' | null = null; // C12: 'budget'
+  // C12 start: the release a budget stop carries until the exit; the last use (the launch until the first command)
+  private release: BudgetRelease | null = null;
+  private lastUsedAt: string;
+  // C12 end
   private handshakeDone = false;
   private initFailed = false;
   private journalClosed = false;
@@ -139,6 +153,7 @@ export class EngineSession {
     this.reconnect = opts.reconnect ?? (opts.spec.resume !== null && !opts.spec.resume.fork);
     this.log = opts.log ?? ((message) => console.warn(`[engine-host ${opts.spec.appSessionId}] ${message}`));
     this.exited = new Promise((resolve) => (this.resolveExited = resolve));
+    this.lastUsedAt = this.launchedAt; // C12
     this.tracker = new SessionStatusTracker(opts.spec, () => this.touch());
     this.normalizer = new Normalizer({ appSessionId: opts.spec.appSessionId, launchId: opts.plan.launchId, sessionId: opts.plan.sessionId, warn: (w) => this.pendingWarnings.push(w) });
     this.broker = new PermissionBroker({
@@ -166,7 +181,8 @@ export class EngineSession {
       markExiting: () => this.setProcess('exiting'),
       endSession: () => {
         if (!this.handshakeDone || !this.client) return false;
-        endSession(this.client, { reason: this.stopReason ?? 'stop' }).catch(() => {}); // the exit is the answer that matters
+        // C12: `budget` is MAWS's own reason and never goes to the engine; a release ends the process as a stop does
+        endSession(this.client, { reason: this.stopReason === 'budget' || this.stopReason === null ? 'stop' : this.stopReason }).catch(() => {}); // the exit is the answer that matters
         return true;
       },
       stopResult: () => this.stopResult(),
@@ -227,29 +243,44 @@ export class EngineSession {
   // Every send is a queue entry: submitted now when the session is not busy, queued otherwise (M4).
   async send(content: SendContent): Promise<SendResult> {
     if (this.processState !== 'ready') throw new Error(`session ${this.spec.appSessionId} is not ready (${this.processState})`);
+    this.markUsed(); // C12
     const { entry, disposition } = await this.queue.send(content);
     return { messageUuid: entry.messageUuid, disposition, queueId: entry.queueId, entry };
   }
 
-  steer(content: SendContent, opts: { priority?: SteerPriority } = {}): Promise<{ messageUuid: MessageUuid }> {
-    return this.queue.steer(content, opts);
+  // C12: a steer is use, and the prompt it writes is busy until the engine starts it
+  async steer(content: SendContent, opts: { priority?: SteerPriority } = {}): Promise<{ messageUuid: MessageUuid }> {
+    this.markUsed();
+    try {
+      return await this.queue.steer(content, opts);
+    } finally {
+      this.touch();
+    }
   }
 
   // Pauses the app queue first ("queue paused because you interrupted"), so the turn.ended the interrupt causes
   // releases nothing, then interrupts the engine; `cancelEngineQueued` maps to the engine queue's `cancel_queued`.
   async interrupt(opts: { cancelEngineQueued: boolean }): Promise<{ stillQueued: string[]; cancelled: string[] }> {
     const client = this.readyClient();
+    this.markUsed(); // C12
     await this.queue.pause('interrupt');
     const response: InterruptResponse = await interrupt(client, { reason: 'user-cancel', cancel_queued: opts.cancelEngineQueued });
     return { stillQueued: [...response.still_queued], cancelled: [...(response.cancelled ?? [])] };
   }
 
   // `!`: answered at the `bash_command` write; the echo and its receipt follow as events.
-  bash(command: string): Promise<{ commandUuid: MessageUuid }> {
-    return this.bashMode.run(command);
+  // C12: a `!` command is use, and busy until its output is replayed or the process exits
+  async bash(command: string): Promise<{ commandUuid: MessageUuid }> {
+    this.markUsed();
+    try {
+      return await this.bashMode.run(command);
+    } finally {
+      this.touch();
+    }
   }
 
   async answer(requestId: RequestId, answer: RequestAnswer): Promise<'delivered' | 'not_pending' | 'write_failed'> {
+    this.markUsed(); // C12
     const item = this.broker.item(requestId);
     if (answer.kind !== 'plan' || answer.outcome !== 'clear_and_implement' || item?.kind !== 'plan' || item.attention.state !== 'pending') return this.broker.answer(requestId, answer);
     return this.clearAndImplement.stage((item.request.request.input as { plan?: unknown } | undefined)?.plan, () => this.broker.answer(requestId, answer));
@@ -258,9 +289,23 @@ export class EngineSession {
   // Ends the process through the termination ladder; `graceMs` (the end_session wait) is capped at 3 s. Before the
   // process is spawned there is nothing to ladder: the reason is recorded, `run()` sees it and ends the session with no
   // process (a stop before `start()` ends it at once), and the answer is that exit (whole-branch review).
-  stop(reason: 'stop' | 'archive' | 'quit' = 'stop', opts: { graceMs?: number } = {}): Promise<StopResult> {
+  // C12: the stop precedence. A release (`budget`, the process table's act, with the budget and sum it was made at)
+  // never replaces a recorded reason; an explicit stop, archive or quit replaces a recorded release, so an archive or
+  // quit during a release's ladder exits as itself; explicit reasons keep the first among themselves. The one ladder
+  // already running keeps its end_session.
+  stop(reason?: 'stop' | 'archive' | 'quit', opts?: { graceMs?: number }): Promise<StopResult>;
+  stop(reason: 'budget', opts: { graceMs?: number; release: BudgetRelease }): Promise<StopResult>;
+  stop(reason: 'stop' | 'archive' | 'quit' | 'budget' = 'stop', opts: { graceMs?: number; release?: BudgetRelease } = {}): Promise<StopResult> {
     if (this.processState === 'exited') return this.exited.then(() => this.stopResult()); // its store writes settled too
-    this.stopReason ??= reason;
+    if (reason === 'budget') {
+      if (this.stopReason === null) {
+        this.stopReason = 'budget';
+        this.release = opts.release ?? null;
+      }
+    } else if (this.stopReason === null || this.stopReason === 'budget') {
+      this.stopReason = reason;
+      this.release = null;
+    }
     if (!this.transport) {
       if (this.starting === null) this.handleExit({ code: null, signal: null });
       return this.exited.then(() => this.stopResult());
@@ -277,6 +322,25 @@ export class EngineSession {
   get lifecycle(): ProcessState {
     return this.processState;
   }
+
+  // C12: the host has work in flight (the status's `busy`): the queue's own predicate, a `!` command not yet answered,
+  // or a held clear-and-implement. An exited process holds nothing.
+  get busy(): boolean {
+    return this.processState !== 'exited' && (this.queue.busy || this.bashMode.hasPending || this.clearAndImplement.holding);
+  }
+
+  // C12 start: the human used the session (the X2 handlers call it for a mode, model, effort or thinking change and a
+  // `#` note; send, steer, interrupt, `!` and answers mark it here), which orders the budget's releases; and the budget
+  // policy's stateful servers changed, which may change keepAlive
+  markUsed(): void {
+    this.lastUsedAt = new Date().toISOString();
+    this.touch();
+  }
+
+  policyChanged(): void {
+    this.touch();
+  }
+  // C12 end
 
   // What the human asked for through X2 once the engine accepted (or, for a mode, refused) it (M5): the status reports
   // it as requested; the resolved model and the effective mode still come from the frames.
@@ -319,7 +383,7 @@ export class EngineSession {
     const turnId = this.tracker.turnEventId;
     const env = this.plan.env;
     const engineSessionId = this.normalizer.state.sessionId ?? this.plan.sessionId;
-    return {
+    const status: EngineSessionStatus = {
       appSessionId: this.spec.appSessionId, engineSessionId, pid: this.transport?.pid ?? null, launchId: this.plan.launchId, launchedAt: this.launchedAt,
       taskListId: env.CLAUDE_CODE_TASK_LIST_ID ?? engineSessionId ?? null, // C8's ask: the list the engine's task tools read (SPEC 20)
       cwd: this.spec.cwd, pendingPlan: this.clearAndImplement.pendingPlan,
@@ -335,11 +399,14 @@ export class EngineSession {
       fastMode: tracked.fastMode, plugins: tracked.plugins, pluginErrors: tracked.pluginErrors, pluginWarnings: tracked.pluginWarnings,
       backgroundTasks: tracked.backgroundTasks, grants: [...this.grants.allow], mcpServers: tracked.mcpServers, heldPeerMessages: tracked.heldPeerMessages,
       pendingRequests: this.broker.live, queue: { length: this.queue.queuedCount, paused: this.queue.isPaused },
-      keepAlive: keepAliveReasons({ turnOpen: turn !== null, backgroundTasks: tracked.backgroundTasks.length, grants: this.grants.allow.length, mcpServers: tracked.mcpServers, heldPeerMessages: tracked.heldPeerMessages.length }),
+      keepAlive: [], busy: this.busy, lastUsedAt: this.lastUsedAt, // C12: keepAlive from the hard reasons below
       memory: tracked.memory,
       journalPath: this.journal.path, hostHooks: this.hooks.ids(), lastEventSeq: this.lastEventSeq,
       trust: { attested: this.spec.trust !== null, recorded: this.trustRecorded }, // C10
     };
+    // C12: what an exit would lose, by the budget policy's rules (an exited process holds nothing)
+    if (status.process !== 'exited') status.keepAlive = hardReasons(status, this.opts.statefulMcpServers?.() ?? NO_SERVERS);
+    return status;
   }
 
   // ---------------------------------------------------------------------------------------------------------------------
@@ -374,7 +441,7 @@ export class EngineSession {
       this.handleExit({ code: null, signal: null }); // stopped while the state loaded: never spawn (idempotent)
       return;
     }
-    if (this.reconnect) this.record('meta', { event: 'reconnect', phase: 'attempting', attempt: 1, maxAttempts: 1, trigger: 'user', reason: null });
+    if (this.reconnect) this.record('meta', { event: 'reconnect', phase: 'attempting', attempt: 1, maxAttempts: 1, trigger: this.reconnectTrigger, reason: null });
     this.record('meta', spawnMeta(this.plan, { appVersion: this.opts.appVersion ?? 'unknown' }));
     if (this.opts.relayHealth) this.record('meta', { event: 'relay_health', ...this.opts.relayHealth });
     let transport: EngineTransport;
@@ -428,7 +495,7 @@ export class EngineSession {
     if (this.processState !== 'initializing') return;
     this.handshakeDone = true;
     this.record('meta', { event: 'initialize', current_permission_mode: init.current_permission_mode, session_state: init.session_state ?? null, hooks_applied: init.hooks_applied ?? null, workspace_trust_recorded: init.workspace_trust_recorded ?? null });
-    if (this.reconnect) this.record('meta', { event: 'reconnect', phase: 'reconnected', attempt: 1, maxAttempts: 1, trigger: 'user', reason: null });
+    if (this.reconnect) this.record('meta', { event: 'reconnect', phase: 'reconnected', attempt: 1, maxAttempts: 1, trigger: this.reconnectTrigger, reason: null });
     this.tracker.initialize(init);
     this.publishCatalog(); // C7
     // C10 start: trust into the status; the model list to the catalogue cache
@@ -637,6 +704,7 @@ export class EngineSession {
       if (event.kind === 'turn.started') {
         this.tracker.turnStarted(event.id);
       } else if (event.kind === 'turn.ended' && !event.isEchoReceipt) {
+        this.lastUsedAt = new Date().toISOString(); // C12: a turn's end is use, on the host's clock like every other (the status goes out with the frame's touch)
         // the queue first: while a host sequence (clear and implement) still holds the session, it releases nothing
         this.queue.onTurnEnded(event).catch((error: unknown) => this.log(`queue release failed: ${messageOf(error)}`));
         if ((event.origin === 'human' || event.origin === null) && this.processState === 'ready') void this.verifyGateway();
@@ -690,6 +758,11 @@ export class EngineSession {
     }
   }
 
+  // C12: `process_exit` for the first launch of an id after its release (the process table's released ids), else `user`
+  private get reconnectTrigger(): 'user' | 'process_exit' {
+    return this.opts.reconnectTrigger ?? 'user';
+  }
+
   private readyClient(): ControlClient {
     if (this.processState !== 'ready' || !this.client) throw new Error(`session ${this.spec.appSessionId} is not ready (${this.processState})`);
     return this.client;
@@ -714,7 +787,7 @@ export class EngineSession {
     this.initFailed = true;
     const detail = this.stderrTail.length > 0 ? `${message}\n${this.stderrTail.join('\n')}` : message;
     this.record('meta', { event: 'init_failed', message: detail, code });
-    if (this.reconnect) this.record('meta', { event: 'reconnect', phase: 'failed', attempt: 1, maxAttempts: 1, trigger: 'user', reason: detail });
+    if (this.reconnect) this.record('meta', { event: 'reconnect', phase: 'failed', attempt: 1, maxAttempts: 1, trigger: this.reconnectTrigger, reason: detail });
   }
 
   // The process's one ladder (session-ladder.ts); with no process yet it answers the stop result at once.
@@ -741,8 +814,9 @@ export class EngineSession {
     // A process that never became ready never loaded the queue: nothing of this launch is in it to retire.
     const queueSettled = this.handshakeDone ? this.queue.onProcessExited(reason) : Promise.resolve();
     queueSettled.catch((error: unknown) => this.log(`queue not settled at exit: ${messageOf(error)}`));
-    this.record('meta', { event: 'exit', code: exit.code, signal: exit.signal, reason, lostAttentionCount: lost, peakTreeRssKiB: this.tracker.peakTreeRssKiB });
-    this.exitInfo = { code: exit.code, signal: exit.signal, reason, at: new Date().toISOString() };
+    const release = reason === 'budget' ? this.release : null; // C12
+    this.record('meta', { event: 'exit', code: exit.code, signal: exit.signal, reason, lostAttentionCount: lost, peakTreeRssKiB: this.tracker.peakTreeRssKiB, budget: release /* C12 */ });
+    this.exitInfo = { code: exit.code, signal: exit.signal, reason, at: new Date().toISOString(), release };
     this.setProcess('exited');
     this.journalClosed = true;
     void this.journal.close();
@@ -811,6 +885,8 @@ class JournalWriteFailed extends Error {
     this.name = 'JournalWriteFailed';
   }
 }
+
+const NO_SERVERS: ReadonlySet<string> = new Set(); // C12
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);

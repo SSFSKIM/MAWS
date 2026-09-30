@@ -139,6 +139,18 @@ const c11Commands = {
 } as const satisfies Record<`layout.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 // C11 end
 
+// C12 start: "Quit when idle" (C12 execution document, Interfaces "The quit question"): main holds the quit and the
+// page shows the banner. `layout.quitWait` answers, and emits on every change, the busy report main is waiting on (null
+// when it is not waiting); `layout.quitWaitAnswer` is the banner's Quit now or Cancel.
+export const BusyReportSchema = z.strictObject({ midTurn: z.number().int().nonnegative(), backgroundWork: z.number().int().nonnegative(), busyTerminals: z.number().int().nonnegative(), terminalsUnknown: z.boolean() });
+export const QuitWaitSchema = z.strictObject({ waiting: BusyReportSchema.nullable() });
+export type QuitWait = z.infer<typeof QuitWaitSchema>;
+const c12Commands = {
+  'layout.quitWait': { input: z.void(), output: QuitWaitSchema, owner: 'main' },
+  'layout.quitWaitAnswer': { input: z.strictObject({ action: z.enum(['quitNow', 'cancel']) }), output: z.void(), owner: 'main' },
+} as const satisfies Record<`layout.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
+// C12 end
+
 export const commands = {
   'layout.get':          { input: z.strictObject({ key: LayoutKeySchema }), output: z.strictObject({ value: z.unknown().nullable() }), owner: 'main' },
   'layout.set':          { input: z.strictObject({ key: LayoutKeySchema, value: z.unknown() }), output: z.void(), owner: 'main' },
@@ -149,8 +161,10 @@ export const commands = {
   'layout.setEnabledActions': { input: z.strictObject({ actions: z.array(z.enum(ACTION_IDS)) }), output: z.void(), owner: 'main' },
   ...c7Commands, // C7
   ...c11Commands, // C11
+  ...c12Commands, // C12
 } as const satisfies Record<`layout.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {
   'layout.action': z.strictObject({ action: z.enum(ACTION_IDS), arg: z.number().int().nullable() }),   // an application-menu click or accelerator; the renderer runs the action
+  'layout.quitWait': QuitWaitSchema, // C12: the report main waits on to quit, or null
 } as const satisfies Record<`layout.${string}`, z.ZodType>;

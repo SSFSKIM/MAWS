@@ -237,6 +237,8 @@ export class IndexSessionSource implements SessionSource {
 
   // Sessions nobody runs in MAWS get a digest from what their transcript's tail says, so the sidebar can describe them;
   // a session MAWS runs (`self`) is C5's live fold.
+  // C12: the seed leaves the memory budget's released mark out; main's read model keeps it against a seed with phase
+  // `exited` and drops it against a `foreign` one (a terminal or background job took the session after its release).
   private digest(record: SessionRecord): void {
     if (!this.writer || record.holder.kind === 'self') return;
     const summary = this.index.sessions.summaryOf(record.appId);

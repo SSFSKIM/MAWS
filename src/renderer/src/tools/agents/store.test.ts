@@ -160,7 +160,7 @@ describe('task graph store', () => {
       await snapshot(upTo(pass1, 296));
       setStatus(live({ backgroundTasks: [bgTask('bgx')] }));
       expect(nodeOf('bgx')).toMatchObject({ status: 'running', startedAt: null });
-      setStatus(live({ process: 'exited', exit: { code: 0, signal: null, reason: 'quit', at: '2026-09-29T12:00:00.000Z' } }));
+      setStatus(live({ process: 'exited', exit: { code: 0, signal: null, reason: 'quit', at: '2026-09-29T12:00:00.000Z', release: null /* C12 */ } }));
       expect(nodeOf(ONE)?.status).toBe('exited');
       expect(nodeOf('bgx')).toMatchObject({ status: 'exited', endedAt: '2026-09-29T12:00:00.000Z' });
       expect(fake.listeners()).toBe(1); // the subscriptions stay until the last watcher leaves

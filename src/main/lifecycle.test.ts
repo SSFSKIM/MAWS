@@ -72,7 +72,7 @@ vi.mock('./sessions/service', () => ({ SessionService: class { start = async () 
 vi.mock('./sessions/service-register', () => ({ registerSessionServiceHandlers: vi.fn(), engineHostSettled: vi.fn() }));
 // C10 end
 // C11 start: the engine host's binary configuration follows the settings, which this test replaces
-vi.mock('./settings/engine-configure', () => ({ startEngineConfigure: () => () => {} }));
+vi.mock('./settings/engine-configure', () => ({ startEngineConfigure: () => ({ stop: () => {} }) })); // C12: the coordinator
 vi.mock('./widgets/fixture-backend', () => ({ installWidgetBackend: () => null })); // the widget e2e's stand-in, off here
 // C11 end
 

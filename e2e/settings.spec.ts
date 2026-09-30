@@ -39,13 +39,14 @@ test('settings: a v2 file migrates; ⌘, opens the tab; a chord is recorded, ref
     let maws = await launchMaws({ userData });
     try {
       const { app, page } = maws;
-      // Main migrated C5's file to version 3 on load, keeping its theme, override and notification choices.
+      // Main migrated C5's file to version 3 on load, keeping its theme, override and notification choices. C12: to
+      // version 4, with the memory budget's defaults.
       expect(readSettings(userData)).toMatchObject({
-        version: 3,
+        version: 4, // C12
         theme: 'system',
         keymap: { 'attention.next': 'Cmd+Alt+J' },
         notifications: { enabled: false, sound: true, kinds: { approvals: true, questions: true, planReviews: true, errors: true, heldPeerMessages: false } },
-        engine: { binaryPath: null, pinnedVersion: '2.1.283', subagentModel: null },
+        engine: { binaryPath: null, pinnedVersion: '2.1.283', subagentModel: null, memoryBudgetMiB: null, statefulMcpServers: [] /* C12 */ },
         gateway: { defaultRoute: 'gateway', relayUnreachable: 'ask', offerDirect: true },
         usage: { nearLimitPercent: 90 },
         appearance: { monoFont: null },

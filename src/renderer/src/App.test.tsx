@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { HostState, MawsBridge, SettingsState } from '@shared/ipc/schema';
-import { SETTINGS_DEFAULTS_V3 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V4 } from '@shared/settings/defaults';
 
 const HOSTS: Record<'engine.hostState' | 'pty.hostState', HostState> = {
   'engine.hostState': { state: 'ready', pid: 1111, restarts: 0, revision: 1 },
@@ -43,7 +43,7 @@ function fakeMain(initial: SettingsState['settings']['theme']) {
     send('pty.data', { ptyId: 'p1', offset: line.byteLength, data: new TextEncoder().encode('MAWS_ECHO_OK\r\n$ ') });
     markEchoed();
   };
-  const state = () => ({ settings: { ...SETTINGS_DEFAULTS_V3, theme }, resolvedTheme: theme === 'dark' ? 'dark' : 'light' });
+  const state = () => ({ settings: { ...SETTINGS_DEFAULTS_V4, theme }, resolvedTheme: theme === 'dark' ? 'dark' : 'light' });
   const answer = (name: string, input: { theme: typeof theme; data: string }) => {
     switch (name) {
       case 'settings.set':
@@ -113,6 +113,13 @@ function fakeMain(initial: SettingsState['settings']['theme']) {
       case 'session.deletions.list':
         return { manifests: [] };
       // C10 end
+      // C12 start: the memory budget's snapshot at connect (under budget, nothing held)
+      case 'engine.budget':
+        return { limitKiB: 8_388_608, totalKiB: 0, sampledAt: null, over: false, overWithoutCandidate: false, candidates: 0, settling: 0, releasing: null, blocked: [], lastRelease: null };
+      // M4: Quit when idle's snapshot at connect (main is not waiting)
+      case 'layout.quitWait':
+        return { waiting: null };
+      // C12 end
       case 'pty.spawn':
         return { ptyId: 'p1', pid: 3333 };
       case 'pty.write':

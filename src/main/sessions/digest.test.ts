@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionEvent } from '@shared/graph/events';
-import { costLedger, emptyDigest, foldDigest, foldEvents } from './digest';
+import { applyStatusToDigest, costLedger, emptyDigest, foldDigest, foldEvents } from './digest';
+import { status } from '../../../test/support/builders'; // C12
 import { ev } from '../../../test/support/events';
 import { framesOf, loadJournal } from '../../../test/support/fixtures';
+import { Normalizer } from '../../engine-host/normalizer'; // C12
 
 const APP = 'app-1' as AppSessionId;
 const CHILD = { agentId: 'agent-a', parentToolUseId: 'toolu_parent' };
@@ -54,6 +56,29 @@ describe('digest fold', () => {
     expect(run([ev('turn.started', {}), ev('turn.ended', { isError: true, terminalReason: 'max_turns' })]).phase).toBe('failed');
     expect(run([ev('turn.started', {}), ev('turn.ended', { isError: true, terminalReason: 'aborted_streaming' })]).phase).toBe('idle');
   });
+
+  // C12 start: the engine's state frames, which X6 turns on from C12 M5 (CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS), read
+  // honestly beside the turn's own events (pass3/launch-env-state-events.jsonl: running, requires_action with its
+  // can_use_tool, running, the result, then idle).
+  it('with the recorded state frames, a turn with a permission reads working, waiting, working, then idle, then exited at the end_session', () => {
+    const normalizer = new Normalizer({ appSessionId: APP, launchId: 'LAUNCH01', sessionId: null });
+    const events = loadJournal('pass3', 'launch-env-state-events').flatMap((row) => normalizer.push(row));
+    expect(events.filter((e) => e.kind === 'session.state').map((e) => (e as Extract<SessionEvent, { kind: 'session.state' }>).state)).toEqual(['running', 'requires_action', 'running', 'idle']);
+    const phases: string[] = [];
+    events.reduce((d, e) => {
+      const next = foldDigest(d, e);
+      if (phases.at(-1) !== next.phase) phases.push(next.phase);
+      return next;
+    }, emptyDigest(APP));
+    expect(phases).toEqual(['idle', 'working', 'waiting', 'working', 'idle', 'exited']); // the probe ended the process
+  });
+
+  it("the engine's idle after a failed turn keeps the failure; its running for the next turn clears it", () => {
+    const failed = run([ev('session.state', { state: 'running' }), ev('turn.started', {}), ev('turn.ended', { isError: true, terminalReason: 'max_turns' }), ev('session.state', { state: 'idle' })]);
+    expect(failed.phase).toBe('failed');
+    expect(run([ev('session.state', { state: 'running' })], failed).phase).toBe('working');
+  });
+  // C12 end
 
   it('ends on process exit, failed on a crash', () => {
     expect(run([ev('turn.started', {}), ev('process.exited', { reason: 'quit' })])).toMatchObject({ phase: 'exited', activity: null });
@@ -180,3 +205,42 @@ describe('digest fold', () => {
     expect(seen.has('e0')).toBe(false);
   });
 });
+
+// C12 start: the memory budget's released mark (C12 execution document, Interfaces "X2 additions", SessionDigest.released).
+// A release reads idle with the mark, not exited; the next launch clears it.
+describe('a budget exit reads idle with the released mark', () => {
+  const RELEASE = { limitKiB: 8_388_608, totalKiB: 9_100_000 };
+  const releasedStatus = () => ({ ...status(APP, { process: 'exited', exit: { reason: 'budget', release: RELEASE } }), exit: { code: 0, signal: null, reason: 'budget' as const, at: '2026-09-29T14:02:00.000Z', release: RELEASE } });
+
+  it('the exited status of a release maps to idle with the mark, keeping an existing mark', () => {
+    const working = { ...emptyDigest(APP), phase: 'working' as const, activity: 'Thinking' };
+    const released = applyStatusToDigest(working, releasedStatus());
+    expect(released).toMatchObject({ phase: 'idle', activity: null, released: { at: '2026-09-29T14:02:00.000Z', limitKiB: 8_388_608 } });
+    const earlier = { ...released, released: { at: '2026-09-29T13:00:00.000Z', limitKiB: 4_194_304 } };
+    expect(applyStatusToDigest(earlier, releasedStatus()).released).toEqual({ at: '2026-09-29T13:00:00.000Z', limitKiB: 4_194_304 });
+  });
+
+  it('every other exit keeps today’s mapping, with no mark', () => {
+    for (const reason of ['stop', 'quit', 'archive', 'unknown'] as const) {
+      const d = applyStatusToDigest(emptyDigest(APP), status(APP, { process: 'exited', exit: { reason } }));
+      expect(d.phase).toBe('exited');
+      expect(d.released).toBeUndefined();
+    }
+  });
+
+  it('the process.exited event of a release folds to idle with the mark and no pending requests', () => {
+    const exited = ev('process.exited', { reason: 'budget', budget: RELEASE, at: '2026-09-29T14:02:00.000Z' });
+    expect(run([ev('turn.started', {}), ev('turn.ended', {}), exited])).toMatchObject({ phase: 'idle', activity: null, pendingRequests: 0, released: { at: '2026-09-29T14:02:00.000Z', limitKiB: 8_388_608 } });
+    expect(run([ev('process.exited', { reason: 'stop' })]).released).toBeUndefined();
+  });
+
+  it('a launch clears the mark: starting and initializing drop it', () => {
+    const released = applyStatusToDigest(emptyDigest(APP), releasedStatus());
+    for (const process of ['starting', 'initializing'] as const) {
+      const d = applyStatusToDigest(released, status(APP, { process }));
+      expect(d.phase).toBe('starting');
+      expect(d.released).toBeUndefined();
+    }
+  });
+});
+// C12 end

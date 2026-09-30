@@ -208,6 +208,16 @@ describe('launch contract builds the X6 command line and environment', () => {
       for (const key of EXCLUDED_KEYS) expect(env, key).not.toHaveProperty(key);
     });
 
+    // C12 start: the host-facing wire option (C12 M5, the architect's ruling at M3): 2.1.283 sends
+    // `system/session_state_changed` only under it, and the probe found nothing else in the launch changing
+    // (spikes/protocol-probe/fixtures/pass3/launch-env-state-events.jsonl against launch-env-state-events-unset.jsonl).
+    it('sets CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS=1 under both gateway modes, over any value the capture holds', () => {
+      const captured = { ...CAPTURED, CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS: '0' };
+      expect(buildLaunch(spec(), captured, OPTS).env.CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS).toBe('1');
+      expect(buildLaunch(spec({ gateway: 'direct' }), captured, OPTS).env.CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS).toBe('1');
+    });
+    // C12 end
+
     it('passes the allowlisted shell keys through, by name and by prefix', () => {
       const { env } = buildLaunch(spec(), CAPTURED, OPTS);
       expect(env).toMatchObject({

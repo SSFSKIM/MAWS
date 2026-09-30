@@ -292,6 +292,11 @@ export const SessionDigestSchema = z.strictObject({
   childAgents: z.strictObject({ active: z.number().int(), done: z.number().int() }),
   pendingRequests: z.number().int(),
   revision: z.number().int(),                 // per session, monotonic; a consumer keeps the higher of snapshot and event
+  // C12 start: the memory budget's released mark (charter §4.4; D1): the session's last exit was a release, and it has
+  // not launched, been archived, or been taken by a terminal or background job since. Absent means not released. Main's
+  // in-memory state of this app run (D-16), never persisted; the phase reads `idle` while it is set.
+  released: z.strictObject({ at: z.string(), limitKiB: z.number().int() }).optional(),
+  // C12 end
 });
 export type SessionDigest = z.infer<typeof SessionDigestSchema>;
 
