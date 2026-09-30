@@ -10,7 +10,7 @@ import { buildLaunch, ENGINE_VERSION, RELAY_URL } from './launch';
 import { Normalizer } from './normalizer';
 import { getUsage, REQUEST_TIMEOUT_MS, rewindConversation } from './controls';
 import { ProcessTable } from './process-table';
-import { EngineSession, FIRST_OUTPUT_MS, HostHookRegistry, type EngineSessionOptions } from './session';
+import { EngineSession, FIRST_OUTPUT_MS, HostHookRegistry, SESSION_START_HOOK_MS, type EngineSessionOptions } from './session';
 import { MemoryJournal, scriptedTransport, type ScriptedTransport } from './conformance/scripted-transport';
 import { replayedSession } from './conformance/session-harness';
 import { MemorySessionStateStore } from './store/memory-session-state-store';
@@ -55,6 +55,12 @@ function autoResponder(responder: Responder) {
 }
 
 type TransportOpts = Omit<Parameters<typeof scriptedTransport>[0] & object, 'onWrite'>;
+
+// A SessionStart hook's frame as 2.1.283 streams it before it reads initialize (pass3/steer-now.jsonl seqs 4 to 8)
+const hookFrame = (subtype: 'hook_started' | 'hook_progress' | 'hook_response', hookId: string) => ({
+  type: 'system', subtype, hook_id: hookId, hook_name: 'SessionStart:resume', hook_event: 'SessionStart', uuid: `u-${subtype}-${hookId}`, session_id: '44444444-4444-4444-8444-444444444444',
+  ...(subtype === 'hook_response' ? { output: '', stdout: '', stderr: '', exit_code: 0, outcome: 'success' } : subtype === 'hook_progress' ? { stdout: '', stderr: '', output: '' } : {}),
+});
 function setup(opts: { spec?: Partial<LaunchSpec>; responder?: Responder; session?: Partial<EngineSessionOptions>; transport?: TransportOpts } = {}) {
   const launchSpec = spec(opts.spec);
   const plan = buildLaunch(launchSpec, { PATH: '/usr/bin', HOME: '/Users/x', ANTHROPIC_DEFAULT_SONNET_MODEL: 'claude-sonnet-5' }, { relayUrl: RELAY_URL, engineVersion: ENGINE_VERSION });
@@ -707,20 +713,92 @@ describe('failed initialize terminates the process', () => {
     expect(events.filter((e) => e.kind === 'notice.posted')).toMatchObject([{ key: 'launch:retry' }]);
   });
 
-  it('an engine that has written anything (a hook frame, a stderr line) is past the silence bound: its initialize keeps the long deadline', async () => {
+  it('an engine that has written anything (a finished hook, a stderr line) is past the silence bound: its initialize keeps the long deadline', async () => {
     vi.useFakeTimers();
     for (const speak of ['frame', 'stderr'] as const) {
       const { session, transport } = setup({ responder: defaultResponder({ initialize: () => null }) });
       if (speak === 'stderr') transport.pushStderr('loading plugins');
       void session.start();
       await vi.advanceTimersByTimeAsync(0);
-      if (speak === 'frame') transport.push({ type: 'system', subtype: 'hook_started', hook_id: 'h1', hook_name: 'SessionStart:resume', hook_event: 'SessionStart', uuid: 'u1', session_id: 's' });
+      if (speak === 'frame') {
+        transport.push(hookFrame('hook_started', 'h1'));
+        transport.push(hookFrame('hook_response', 'h1'));
+      }
       await vi.advanceTimersByTimeAsync(FIRST_OUTPUT_MS + 60_000);
       expect(session.status().process, speak).toBe('initializing');
       expect(transport.calls, speak).toEqual([]);
       await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS.long - FIRST_OUTPUT_MS - 60_000);
       expect(session.status().process, speak).toBe('exiting');
     }
+  });
+
+  // Debt wave 5: 2.1.283 runs SessionStart hooks (600 s each by default) before it reads initialize, streaming their
+  // frames; their time must not count against the long class's 120 s
+  describe('SessionStart hooks before the initialize answer', () => {
+    const answerInitialize = (transport: ScriptedTransport) =>
+      transport.push({ type: 'control_response', response: { subtype: 'success', request_id: transport.requestsOf('initialize')[0]!.request_id, response: INIT_RESPONSE } });
+
+    it('a stub engine that runs one hook past the class and then more in turn, 7 minutes in all, then answers: the session becomes ready', async () => {
+      vi.useFakeTimers();
+      const { session, transport, events } = setup({ spec: { resume: { sessionId: '44444444-4444-4444-8444-444444444444' as LaunchSpec['sessionId'] & string, fork: false }, sessionId: null }, responder: defaultResponder({ initialize: () => null }) });
+      void session.start();
+      await vi.advanceTimersByTimeAsync(1_000);
+      transport.push(hookFrame('hook_started', 'slow'));
+      transport.push(hookFrame('hook_progress', 'slow'));
+      await vi.advanceTimersByTimeAsync(300_000); // one hook, silent for 2.5 times the class
+      transport.push(hookFrame('hook_response', 'slow'));
+      for (const id of ['a', 'b', 'c']) {
+        await vi.advanceTimersByTimeAsync(20_000);
+        transport.push(hookFrame('hook_started', id));
+        await vi.advanceTimersByTimeAsync(20_000);
+        transport.push(hookFrame('hook_response', id));
+      }
+      await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS.long - 1); // the class again, from the last hook frame
+      expect(session.status().process).toBe('initializing');
+      expect(transport.calls).toEqual([]);
+      answerInitialize(transport);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(session.status().process).toBe('ready');
+      expect(events.filter((e) => e.kind === 'error.raised')).toEqual([]);
+    });
+
+    it('after the last hook the engine still owes the answer within the class: init_failed 120 s after the last hook frame, saying so', async () => {
+      vi.useFakeTimers();
+      const { session, transport, events } = setup({ responder: defaultResponder({ initialize: () => null }) });
+      void session.start();
+      await vi.advanceTimersByTimeAsync(0);
+      transport.push(hookFrame('hook_started', 'h'));
+      await vi.advanceTimersByTimeAsync(200_000);
+      transport.push(hookFrame('hook_response', 'h'));
+      await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS.long - 1);
+      expect(session.status().process).toBe('initializing');
+      await vi.advanceTimersByTimeAsync(1);
+      expect(session.status().process).toBe('exiting');
+      expect(events.filter((e) => e.kind === 'error.raised')).toMatchObject([{ scope: 'process', code: 'timeout', message: 'initialize unanswered 120 s after the last SessionStart hook frame' }]);
+    });
+
+    it('a hook that never reports back holds the answer for no longer than the engine’s own hook bound plus the class', async () => {
+      vi.useFakeTimers();
+      const { session, transport } = setup({ responder: defaultResponder({ initialize: () => null }) });
+      void session.start();
+      await vi.advanceTimersByTimeAsync(0);
+      transport.push(hookFrame('hook_started', 'stuck'));
+      await vi.advanceTimersByTimeAsync(SESSION_START_HOOK_MS + REQUEST_TIMEOUT_MS.long - 1);
+      expect(session.status().process).toBe('initializing');
+      await vi.advanceTimersByTimeAsync(1);
+      expect(session.status().process).toBe('exiting');
+    });
+
+    it('hook frames never stretch the first-output bound: the bound is on silence, and they end it', async () => {
+      vi.useFakeTimers();
+      const { session, transport } = setup({ responder: defaultResponder({ initialize: () => null }) });
+      void session.start();
+      await vi.advanceTimersByTimeAsync(FIRST_OUTPUT_MS);
+      expect(session.status().process).toBe('exiting'); // silent: failed at 30 s, as before
+      transport.push(hookFrame('hook_started', 'late'));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(session.status().process).toBe('exiting');
+    });
   });
 
   it('an initialize answered with an error takes the same ladder and ends crash even when the process exits 0 on stdin end', async () => {

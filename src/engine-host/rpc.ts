@@ -33,8 +33,9 @@ export class ControlError extends Error {
   }
 }
 export class ControlTimeout extends ControlError {
-  constructor(subtype: string, requestId: RequestId, timeoutMs: number) {
-    super(subtype, requestId, `${subtype} unanswered after ${Math.round(timeoutMs / 1000)} s`, 'timeout');
+  // `since`: what a deadline restarted by `extendDeadline` counts from
+  constructor(subtype: string, requestId: RequestId, timeoutMs: number, since?: string) {
+    super(subtype, requestId, since === undefined ? `${subtype} unanswered after ${Math.round(timeoutMs / 1000)} s` : `${subtype} unanswered ${Math.round(timeoutMs / 1000)} s after ${since}`, 'timeout');
     this.name = 'ControlTimeout';
   }
 }
@@ -52,6 +53,7 @@ interface Pending {
   resolve: (envelope: ResponseEnvelope) => void;
   reject: (error: ControlError) => void;
   timer: ReturnType<typeof setTimeout> | null;
+  arm: ((timeoutMs: number, since?: string) => void) | null; // (re)starts the deadline, once the request was written
   onAbort: (() => void) | null;
   signal: AbortSignal | undefined;
 }
@@ -120,7 +122,7 @@ export class ControlClient {
     const timeoutMs = opts.timeoutMs ?? REQUEST_TIMEOUT_MS[opts.klass ?? (isOutboundSubtype(subtype) ? requestClassOf(subtype) : 'mutate')];
 
     const settled = new Promise<ResponseEnvelope>((resolve, reject) => {
-      const entry: Pending = { subtype, resolve, reject, timer: null, onAbort: null, signal: opts.signal };
+      const entry: Pending = { subtype, resolve, reject, timer: null, arm: null, onAbort: null, signal: opts.signal };
       this.pendingTable.set(requestId, entry);
       if (opts.signal) {
         entry.onAbort = () => this.cancel(requestId);
@@ -138,23 +140,36 @@ export class ControlClient {
       entry?.reject(failure);
       throw failure;
     }
-    opts.onWritten?.(requestId);
     const entry = this.pendingTable.get(requestId);
     if (entry) {
-      entry.timer = unref(
-        setTimeout(() => {
-          const timedOut = this.take(requestId);
-          if (!timedOut) return;
-          this.park(requestId, subtype);
-          this.writeCancel(requestId);
-          timedOut.reject(new ControlTimeout(subtype, requestId, timeoutMs));
-        }, timeoutMs),
-      );
+      entry.arm = (ms, since) => {
+        if (entry.timer) clearTimeout(entry.timer);
+        entry.timer = unref(
+          setTimeout(() => {
+            const timedOut = this.take(requestId);
+            if (!timedOut) return;
+            this.park(requestId, subtype);
+            this.writeCancel(requestId);
+            timedOut.reject(new ControlTimeout(subtype, requestId, ms, since));
+          }, ms),
+        );
+      };
+      entry.arm(timeoutMs);
     }
+    opts.onWritten?.(requestId); // after the deadline is armed, so the callback may extend it
 
     const envelope = await settled;
     if (envelope.subtype === 'error') throw new ControlError(subtype, requestId, envelope.error, envelope.error_code ?? null);
     return { envelope, requestId };
+  }
+
+  // Restarts a written, still pending request's deadline: `timeoutMs` from now, its timeout saying what it counted from
+  // (the session's initialize while the engine streams SessionStart hook frames). False when there is none to restart.
+  extendDeadline(requestId: RequestId, timeoutMs: number, since: string): boolean {
+    const entry = this.pendingTable.get(requestId);
+    if (!entry?.arm) return false;
+    entry.arm(timeoutMs, since);
+    return true;
   }
 
   // Withdraws one of our requests: writes control_cancel_request and rejects the promise with ControlCancelled. The
