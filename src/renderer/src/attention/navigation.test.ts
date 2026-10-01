@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AttentionId } from '@shared/graph/ids';
+import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { runAction } from '../keymap/actions-runtime';
 import { useAttention } from '../stores/attention';
@@ -33,6 +34,7 @@ describe('⌘⇧J (attention.next)', () => {
   });
 
   it('opens into the focused pane of a split', () => {
+    useLayout.getState().openSession(idOf('Settings idle probe')); // the left pane's tab (an empty pane takes a split's tab itself)
     useLayout.getState().openSession(idOf('Charter + research'), { split: true });
     expect(useLayout.getState().main.focusedPane).toBe(1);
     runAction('attention.next');
@@ -42,7 +44,7 @@ describe('⌘⇧J (attention.next)', () => {
   it('does nothing when nothing needs you', () => {
     useAttention.setState({ bySession: new Map(), version: useAttention.getState().version + 1 });
     runAction('attention.next');
-    expect(active()).toBe('overview');
+    expect(useLayout.getState().main).toBe(LAYOUT_DEFAULTS.main); // still the empty pane: no tab opened
   });
 });
 
@@ -80,7 +82,7 @@ describe('a navigation queued while no page could hear it (attention.pendingNavi
     const late = fakeClient();
     disconnect = connectAttention(late.client);
     await late.reply('attention.pendingNavigate', { navigate: null });
-    expect(active()).toBe('overview');
+    expect(useLayout.getState().main).toBe(LAYOUT_DEFAULTS.main); // still the empty pane: no tab opened
   });
 });
 

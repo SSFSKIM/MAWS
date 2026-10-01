@@ -14,7 +14,7 @@ const A = 'a' as AppSessionId;
 function setup(batchMs = 0) {
   const fake = fakeClient({ 'layout.list': { keys: ['main.tabs'] } , 'layout.get': ({ key }: { key: string }) => ({
     value: key === 'main.tabs'
-      ? { ...LAYOUT_DEFAULTS.main, panes: [{ tabs: [...LAYOUT_DEFAULTS.main.panes[0].tabs, { id: 'session:a', kind: 'session', appSessionId: 'a', pinned: false }, { id: 'session:gone', kind: 'session', appSessionId: 'gone', pinned: false }], activeTabId: 'overview' }] }
+      ? { ...LAYOUT_DEFAULTS.main, panes: [{ tabs: [{ id: 'session:a', kind: 'session', appSessionId: 'a', pinned: false }, { id: 'session:gone', kind: 'session', appSessionId: 'gone', pinned: false }], activeTabId: 'session:a' }] }
       : null,
   }) });
   const stores = { sessions: createSessionsStore(), attention: createAttentionStore(), layout: createLayoutStore() };
@@ -50,7 +50,7 @@ describe('shell event subscription', () => {
     expect(stores.sessions.getState().records.has(A)).toBe(true);
     expect(stores.attention.getState().loaded).toBe(true);
     await vi.waitFor(() => expect(stores.layout.getState().hydrated).toBe(true));
-    expect(stores.layout.getState().main.panes[0].tabs.map((t) => t.id)).toEqual(['overview', 'session:a']);
+    expect(stores.layout.getState().main.panes[0].tabs.map((t) => t.id)).toEqual(['session:a']);
   });
 
   it('feeds events to the stores, buffering attention changes until its snapshot lands', async () => {
@@ -67,7 +67,7 @@ describe('shell event subscription', () => {
     await answerSnapshots(fake);
     await vi.waitFor(() => expect(stores.layout.getState().hydrated).toBe(true));
     fake.event('session.removed', { appSessionId: 'a', revision: 2 });
-    expect(stores.layout.getState().main.panes[0].tabs.map((t) => t.id)).toEqual(['overview']);
+    expect(stores.layout.getState().main.panes[0].tabs.map((t) => t.id)).toEqual([]);
     expect(stores.sessions.getState().records.has(A)).toBe(false);
   });
 
@@ -78,7 +78,7 @@ describe('shell event subscription', () => {
     fake.event('session.changed', { record: record('a'), cause: 'update', revision: 4 });
     fake.event('session.removed', { appSessionId: 'a', revision: 3 });
     expect(stores.sessions.getState().records.has(A)).toBe(true);
-    expect(stores.layout.getState().main.panes[0].tabs.map((t) => t.id)).toEqual(['overview', 'session:a']);
+    expect(stores.layout.getState().main.panes[0].tabs.map((t) => t.id)).toEqual(['session:a']);
   });
 
   describe('tab retention (C10’s seventh ask)', () => {
@@ -89,9 +89,9 @@ describe('shell event subscription', () => {
       const { fake, stores } = setup();
       await answerSnapshots(fake);
       await vi.waitFor(() => expect(stores.layout.getState().hydrated).toBe(true));
-      expect(stores.layout.getState().main.panes[0].tabs.map((t) => t.id)).toEqual(['overview', 'session:a']);
+      expect(stores.layout.getState().main.panes[0].tabs.map((t) => t.id)).toEqual(['session:a']);
       fake.event('session.removed', { appSessionId: 'a', revision: 2 });
-      expect(stores.layout.getState().main.panes[0].tabs.map((t) => t.id)).toEqual(['overview']);
+      expect(stores.layout.getState().main.panes[0].tabs.map((t) => t.id)).toEqual([]);
     });
 
     it('hydration waits for ready, then keeps a record-less tab the retention retains', async () => {
@@ -104,7 +104,7 @@ describe('shell event subscription', () => {
       expect(stores.layout.getState().hydrated).toBe(false); // still waiting on the intent snapshot
       ready();
       await vi.waitFor(() => expect(stores.layout.getState().hydrated).toBe(true));
-      expect(stores.layout.getState().main.panes[0].tabs.map((t) => t.id)).toEqual(['overview', 'session:a', 'session:gone']);
+      expect(stores.layout.getState().main.panes[0].tabs.map((t) => t.id)).toEqual(['session:a', 'session:gone']);
     });
 
     it('a removal leaves a retained session’s tab open, and closes one it does not retain', async () => {
@@ -114,12 +114,12 @@ describe('shell event subscription', () => {
       await vi.waitFor(() => expect(stores.layout.getState().hydrated).toBe(true));
       fake.event('session.removed', { appSessionId: 'a', revision: 2 });
       expect(stores.sessions.getState().records.has(A)).toBe(false);
-      expect(stores.layout.getState().main.panes[0].tabs.map((t) => t.id)).toEqual(['overview', 'session:a']);
+      expect(stores.layout.getState().main.panes[0].tabs.map((t) => t.id)).toEqual(['session:a']);
       retentions.splice(0).forEach((off) => off());
       retentions.push(registerTabRetention({ ready: Promise.resolve(), retains: () => false }));
       fake.event('session.changed', { record: record('a'), cause: 'update', revision: 3 });
       fake.event('session.removed', { appSessionId: 'a', revision: 4 });
-      expect(stores.layout.getState().main.panes[0].tabs.map((t) => t.id)).toEqual(['overview']);
+      expect(stores.layout.getState().main.panes[0].tabs.map((t) => t.id)).toEqual([]);
     });
   });
 
@@ -206,7 +206,7 @@ describe('shell event subscription', () => {
       await fake.reply('attention.list', []);
       const answerLayout = async (tabs: string[]) => {
         await fake.reply('layout.list', { keys: ['main.tabs'] });
-        const main = { ...LAYOUT_DEFAULTS.main, panes: [{ tabs: [...LAYOUT_DEFAULTS.main.panes[0].tabs, ...tabs.map((id) => ({ id: `session:${id}`, kind: 'session', appSessionId: id, pinned: false }))], activeTabId: 'overview' }] };
+        const main = { ...LAYOUT_DEFAULTS.main, panes: [{ tabs: tabs.map((id) => ({ id: `session:${id}`, kind: 'session', appSessionId: id, pinned: false })), activeTabId: tabs[0] ? `session:${tabs[0]}` : '' }] };
         for (const value of [null, main, null]) await fake.reply('layout.get', { value }); // regions, main.tabs, panel.pinned
       };
       return { fake, stores, answerLayout };
@@ -217,7 +217,7 @@ describe('shell event subscription', () => {
       fake.event('session.changed', { record: record('a'), cause: 'discovered', revision: 2 });
       await answerLayout(['a']);
       expect(stores.layout.getState().hydrated).toBe(true);
-      expect(stores.layout.getState().main.panes[0].tabs.map((t) => t.id)).toEqual(['overview', 'session:a']);
+      expect(stores.layout.getState().main.panes[0].tabs.map((t) => t.id)).toEqual(['session:a']);
     });
 
     it('a removal drained by hydration is replayed with the early changes: a session opened during hydration and then removed has no tab', async () => {
@@ -227,7 +227,7 @@ describe('shell event subscription', () => {
       await answerLayout([]);
       expect(stores.layout.getState().hydrated).toBe(true);
       expect(stores.sessions.getState().records.has(A)).toBe(false);
-      expect(stores.layout.getState().main.panes[0].tabs.map((t) => t.id)).toEqual(['overview']);
+      expect(stores.layout.getState().main.panes[0].tabs.map((t) => t.id)).toEqual([]);
     });
 
     it('a snapshot reply applies after the window’s events that preceded it', async () => {
@@ -238,7 +238,7 @@ describe('shell event subscription', () => {
       await fake.reply('session.digests', { digests: [] });
       await fake.reply('attention.list', []);
       await vi.waitFor(() => expect(stores.layout.getState().hydrated).toBe(true));
-      expect(stores.layout.getState().main.panes[0].tabs.map((t) => t.id)).toEqual(['overview', 'session:a']);
+      expect(stores.layout.getState().main.panes[0].tabs.map((t) => t.id)).toEqual(['session:a']);
       expect(stores.sessions.getState().records.has(A)).toBe(true);
     });
 

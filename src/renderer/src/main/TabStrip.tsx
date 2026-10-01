@@ -1,4 +1,4 @@
-// A pane's tab strip (§5.2, D-13; residue *Tab strip*): a custom `role="tablist"`, browser-like, the Overview first.
+// A pane's tab strip (§5.2, D-13; residue *Tab strip*): a custom `role="tablist"`, browser-like.
 // One tab stop (the active tab); ArrowLeft and ArrowRight move focus along the strip, wrapping, Enter activates the
 // focused tab and Delete closes it. Overflow scrolls horizontally with the active tab kept in view. Drops: a tab
 // (`application/x-maws-tab`) moves to the pointer's position, computed against the tabs' midpoints, and a sidebar row
@@ -82,7 +82,6 @@ export function TabStrip({ pane, split, idPrefix }: { pane: Pane; split: boolean
         break;
       case 'Delete':
       case 'Backspace':
-        if (tab.kind === 'overview') return;
         // Focus stays on the tab while its guard decides; only a close that happens hands it to the neighbour (the
         // effect below, once the tab has left the strip).
         refocus.current = { id: tab.id, index };

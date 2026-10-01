@@ -97,7 +97,6 @@ describe('overview board', () => {
     render(<Overview paneIndex={0} />);
     await user.click(within(card('Charter + research')).getByText('Charter + research'));
     expect(activeTab(useLayout.getState().main)).toMatchObject({ appSessionId: idOf('Charter + research') });
-    act(() => useLayout.getState().activateTab('overview'));
     fireEvent.click(within(card('Settings idle probe')).getByText('Settings idle probe'), { metaKey: true });
     expect(useLayout.getState().main.panes).toHaveLength(2);
     expect(useLayout.getState().main.panes[1]?.activeTabId).toBe(`session:${idOf('Settings idle probe')}`);
@@ -123,6 +122,7 @@ describe('overview board', () => {
 
   it('⌘Enter on a focused card opens it in the split', async () => {
     const user = userEvent.setup();
+    useLayout.getState().openSession(idOf('Settings idle probe')); // a tab beside which to split (an empty pane takes the session itself)
     render(<Overview paneIndex={0} />);
     card('Charter + research').focus();
     await user.keyboard('{Meta>}{Enter}{/Meta}');

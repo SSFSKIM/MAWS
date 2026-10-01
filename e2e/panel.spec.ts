@@ -408,7 +408,7 @@ test.describe('the #panel harness: persistence and pins', () => {
     });
   });
 
-  test('Overview keeps the pin selection', async ({ maws }) => {
+  test('with no session shown (W5: a tab of none, the Overview being no tab), the pins keep their selection', async ({ maws }) => {
     const panel = await PanelPage.open(maws);
     const first = await panel.call('addTool', 'harness-stub', { pin: true });
     const second = await panel.call('addTool', 'harness-single', { pin: true }); // C11: a stand-in, not Session info (C11's real tool)
@@ -470,7 +470,7 @@ test.describe('the #panel harness: strip, summary, R7 and themes', () => {
     expect(terminal).toMatchObject({ pinned: false, active: true });
     await expect.poll(() => panel.panelOf('A')).toEqual({ tabs: [{ id: terminal!.id, toolId: 'terminal', pinned: false }], activeTabId: terminal!.id });
 
-    // With the Overview focused, "+" is disabled and says why, and the pins stay selectable (ruling O3).
+    // With no session shown, "+" is disabled and says why, and the pins stay selectable (ruling O3).
     await panel.call('switchSession', null);
     await expect(panel.region.getByRole('button', { name: 'Open a session to add a tool' })).toBeDisabled();
     expect(await panel.ids()).toEqual([pin]);
@@ -482,7 +482,7 @@ test.describe('the #panel harness: strip, summary, R7 and themes', () => {
 
   // C11 start: Session info on the #panel page (C11 execution document, M4 refresh task "Session info on C8a's host").
   // Main holds no engine process for the harness's sessions, so its reads fail quietly and the stores' values show.
-  test('Session info renders its six sections for the shown session, and asks for a session on the Overview', async ({ maws }) => {
+  test('Session info renders its six sections for the shown session, and asks for a session when none is shown', async ({ maws }) => {
     const panel = await PanelPage.open(maws);
     const info = await panel.call('addTool', 'session-info', { pin: true });
     const body = panel.region.locator('[data-session-info="A"]');
@@ -970,11 +970,12 @@ test.describe('the product host over a scenario derived from C5’s records', ()
       await expect(environment).not.toContainText('⎇');
       await expect(summary.getByRole('region', { name: 'Push state' })).toHaveCount(0);
 
-      // Back to the left pane's Charter tab, then the Overview: the footer, no sections, no tabs, "+" disabled.
+      // Back to the left pane's Charter tab, then a tab of no session (W5: the Overview is no tab; Help › Diagnostics
+      // is one): the footer, no sections, no tabs, "+" disabled.
       const left = page.getByRole('tablist', { name: 'Left pane tabs' });
       await left.getByRole('tab', { name: tabNamed(CHARTER) }).click();
       await expect(title).toContainText(CHARTER);
-      await left.getByRole('tab', { name: 'Overview' }).click();
+      await menu(app, 'diagnostics.open');
       await expect(summary.getByText('Tools stay with this session. Pin a tab to keep it with you as you switch.')).toBeVisible();
       await expect(summary.getByRole('region')).toHaveCount(0);
       await expect(panel.getByRole('tablist', { name: 'Panel tools' }).getByRole('tab')).toHaveCount(0);

@@ -49,5 +49,6 @@ export function resetShellStores(): void {
     panelActiveNoSession: null,
     hydrated: true,
     focusRequest: null,
+    overviewOpen: false,
   });
 }

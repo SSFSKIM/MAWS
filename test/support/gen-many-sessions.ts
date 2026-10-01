@@ -1,6 +1,7 @@
-// Writes test/fixtures/shell/many-sessions.json: three projects with 120 sessions each, for the sidebar's show-more and
-// scale checks (C5 execution document, "Sidebar scale"). Deterministic: a seeded PRNG and a fixed clock, so the file is
-// committed and regenerating it yields the same bytes. Run: node test/support/gen-many-sessions.ts
+// Writes test/fixtures/shell/many-sessions.json: three projects with 120 sessions each, for the sidebar's scale checks
+// (C5 execution document, "Sidebar scale"; W5: a project's page renders all of them, grouped by worktree, so a sixth of
+// MAWS's sessions sit in a managed worktree and another sixth in a sibling one). Deterministic: a seeded PRNG and a
+// fixed clock, so the file is committed and regenerating it yields the same bytes. Run: node test/support/gen-many-sessions.ts
 // Everything here is synthetic; the shapes follow nine-sessions.json, which is fixture-derived.
 const fs = process.getBuiltinModule('node:fs');
 const path = process.getBuiltinModule('node:path');
@@ -57,8 +58,13 @@ projects.forEach((project, p) => {
     const mode = routed ? 'auto' : 'default';
     const totalUsd = Math.round(rand() * 400) / 100;
     const turnStartedMs = phase === 'working' ? LOAD_MS - Math.floor(rand() * 20 * 60_000) : endedMs - 30_000;
+    // W5: by index, not the PRNG, so every other field stays as it was generated before.
+    const worktree =
+      p !== 0 || i % 6 === 0 || i % 6 > 2 ? null
+      : i % 6 === 1 ? { path: `${project.directory}/.claude/worktrees/scale-alpha`, branch: 'worktree-scale-alpha' }
+      : { path: `${project.directory}-scale-beta`, branch: 'scale-beta' };
     sessions.push({
-      appId, engineSessionId, projectId: project.id, directory: project.directory, additionalDirectories: [], worktree: null, branch: null,
+      appId, engineSessionId, projectId: project.id, directory: worktree?.path ?? project.directory, additionalDirectories: [], worktree, branch: worktree?.branch ?? null,
       title: { text: `${pick(VERBS)} ${pick(NOUNS)} #${i + 1}`, source: 'user' },
       pinned: false, archived: false, holder: live ? { kind: 'self' } : { kind: 'none' },
       lastSeen: unread ? { messageUuid: null, at: null } : { messageUuid: null, at: iso(endedMs) },

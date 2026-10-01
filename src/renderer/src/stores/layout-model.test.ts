@@ -11,39 +11,40 @@ const ids = (main: LayoutMain) => main.panes.map((p) => p.tabs.map((t) => t.id))
 const active = (main: LayoutMain) => main.panes.map((p) => p.activeTabId);
 const base = LAYOUT_DEFAULTS.main;
 const A_ID = 'a' as AppSessionId;
-// Overview, a, b, c in pane 0 with c active.
+// a, b, c in pane 0 with c active (the default is one empty pane: W5's Overview is no tab).
 const abc = () => [S('a'), S('b'), S('c')].reduce((m, t) => openTab(m, t), base);
 const split = () => openSession(abc(), 'd' as AppSessionId, { split: true }); // pane 1: [d]
 
 describe('layout store transitions', () => {
   it('openTab, not open: inserts after the target pane’s active tab, activates it and focuses that pane', () => {
     const m = openTab(activateTab(abc(), 'session:a'), S('x'));
-    expect(ids(m)).toEqual([['overview', 'session:a', 'session:x', 'session:b', 'session:c']]);
+    expect(ids(m)).toEqual([['session:a', 'session:x', 'session:b', 'session:c']]);
     expect(active(m)).toEqual(['session:x']);
     expect(m.focusedPane).toBe(0);
-    const pinned = openTab(togglePinned(openTab(base, S('p')), 'session:p'), S('q'));
-    const afterOverview = openTab(activateTab(pinned, 'overview'), S('r'));
-    expect(ids(afterOverview)).toEqual([['overview', 'session:p', 'session:r', 'session:q']]); // pinned tabs stay ahead
+    const pinned = openTab(['session:p', 'session:o'].reduce(togglePinned, openTab(openTab(base, S('p')), S('o'))), S('q')); // [p, o] pinned, q
+    const afterPinned = openTab(activateTab(pinned, 'session:p'), S('r'));
+    expect(ids(afterPinned)).toEqual([['session:p', 'session:o', 'session:r', 'session:q']]); // pinned tabs stay ahead
+    expect(openTab(base, S('x')).panes).toEqual([{ tabs: [{ id: 'session:x', ...S('x'), pinned: false }], activeTabId: 'session:x' }]); // the empty pane takes it
   });
 
   it('openTab, open in pane P: activates it there and focuses P, never opening a second copy', () => {
     const m = openTab(focusPane(split(), 0), S('d'));
-    expect(ids(m)).toEqual([['overview', 'session:a', 'session:b', 'session:c'], ['session:d']]);
+    expect(ids(m)).toEqual([['session:a', 'session:b', 'session:c'], ['session:d']]);
     expect(m.focusedPane).toBe(1);
     expect(active(openTab(abc(), S('a')))).toEqual(['session:a']);
   });
 
   it('openSession with split and no split: opens it in a new pane 1 at ratio 0.5 and focuses it', () => {
     const m = split();
-    expect(ids(m)).toEqual([['overview', 'session:a', 'session:b', 'session:c'], ['session:d']]);
+    expect(ids(m)).toEqual([['session:a', 'session:b', 'session:c'], ['session:d']]);
     expect(m).toMatchObject({ focusedPane: 1, splitRatio: 0.5 });
     const moved = openSession(abc(), 'b' as AppSessionId, { split: true });
-    expect(ids(moved)).toEqual([['overview', 'session:a', 'session:c'], ['session:b']]); // an open session moves across
+    expect(ids(moved)).toEqual([['session:a', 'session:c'], ['session:b']]); // an open session moves across
   });
 
   it('closeTab: removes it, remembers it, and activates the right neighbour, else the left', () => {
     const m = closeTab(activateTab(abc(), 'session:b'), 'session:b');
-    expect(ids(m)).toEqual([['overview', 'session:a', 'session:c']]);
+    expect(ids(m)).toEqual([['session:a', 'session:c']]);
     expect(active(m)).toEqual(['session:c']);
     expect(m.closedTabs.map((t) => t.id)).toEqual(['session:b']);
     expect(active(closeTab(abc(), 'session:c'))).toEqual(['session:b']);
@@ -52,14 +53,13 @@ describe('layout store transitions', () => {
 
   it('closeTab: an emptied pane 1 collapses the split and focuses pane 0', () => {
     const m = closeTab(split(), 'session:d');
-    expect(ids(m)).toEqual([['overview', 'session:a', 'session:b', 'session:c']]);
+    expect(ids(m)).toEqual([['session:a', 'session:b', 'session:c']]);
     expect(m.focusedPane).toBe(0);
   });
 
   it('closeTab: an emptied pane 0 hands its place to pane 1', () => {
-    const m = moveTab(split(), 'overview', 1, 0);
-    const emptied = ['session:a', 'session:b', 'session:c'].reduce(closeTab, m);
-    expect(ids(emptied)).toEqual([['overview', 'session:d']]);
+    const emptied = ['session:a', 'session:b', 'session:c'].reduce(closeTab, focusPane(split(), 0));
+    expect(ids(emptied)).toEqual([['session:d']]);
     expect(emptied.focusedPane).toBe(0);
   });
 
@@ -69,96 +69,101 @@ describe('layout store transitions', () => {
     expect(m.closedTabs.map((t) => t.id)).toEqual(Array.from({ length: 10 }, (_, i) => `session:s${i + 2}`));
   });
 
-  it('closeTab(overview) is a no-op: the Overview tab is permanent', () => {
-    expect(closeTab(abc(), 'overview')).toEqual(abc());
+  // W5: with the Overview out of the strip nothing is permanent; the last tab closes to one empty pane, which ⌘⇧T refills.
+  it('closeTab: the last tab leaves the only pane empty, and reopenClosed brings it back there', () => {
+    const m = closeTab(openTab(base, S('a')), 'session:a');
+    expect(m).toEqual({ ...base, closedTabs: [{ id: 'session:a', ...S('a'), pinned: false }] });
+    expect(LayoutMainSchema.safeParse(m).success).toBe(true);
+    const all = ['session:d', 'session:a', 'session:b', 'session:c'].reduce(closeTab, split());
+    expect(all).toMatchObject({ panes: [{ tabs: [], activeTabId: '' }], focusedPane: 0 });
+    const back = reopenClosed(m, 0);
+    expect(ids(back)).toEqual([['session:a']]);
+    expect(active(back)).toEqual(['session:a']);
   });
 
   it('moveTab: moves it to the index in the other pane, activates and focuses there; an emptied source collapses without a closed-tab entry', () => {
     const m = moveTab(split(), 'session:a', 1, 0);
-    expect(ids(m)).toEqual([['overview', 'session:b', 'session:c'], ['session:a', 'session:d']]);
+    expect(ids(m)).toEqual([['session:b', 'session:c'], ['session:a', 'session:d']]);
     expect(active(m)).toEqual(['session:c', 'session:a']);
     expect(m.focusedPane).toBe(1);
     const collapsed = moveTab(split(), 'session:d', 0, 1);
-    expect(ids(collapsed)).toEqual([['overview', 'session:d', 'session:a', 'session:b', 'session:c']]);
+    expect(ids(collapsed)).toEqual([['session:a', 'session:d', 'session:b', 'session:c']]);
     expect(collapsed).toMatchObject({ focusedPane: 0, closedTabs: [] });
   });
 
   it('splitWithActive, no split: moves the active tab into a new pane 1, the source keeping its neighbour active', () => {
     const m = splitWithActive(activateTab(abc(), 'session:b'));
-    expect(ids(m)).toEqual([['overview', 'session:a', 'session:c'], ['session:b']]);
+    expect(ids(m)).toEqual([['session:a', 'session:c'], ['session:b']]);
     expect(active(m)).toEqual(['session:c', 'session:b']);
     expect(m.focusedPane).toBe(1);
-    expect(splitWithActive(base)).toEqual(base); // a pane's only tab has nowhere to split from
+    const one = openTab(base, S('a'));
+    expect(splitWithActive(one)).toEqual(one); // a pane's only tab has nowhere to split from
+    expect(splitWithActive(base)).toEqual(base); // nor has an empty pane anything to split
+    // "Open in split" (or ⌘Enter on a card) with nothing open fills the empty pane rather than opening a second one
+    expect(ids(openSession(base, 'x' as AppSessionId, { split: true }))).toEqual([['session:x']]);
+    expect(ids(openTab(base, { kind: 'diagnostics' }, { pane: 'other' }))).toEqual([['diagnostics']]);
   });
 
   it('splitWithActive, split: moves the focused pane’s active tab to the other pane', () => {
     const m = splitWithActive(focusPane(split(), 0));
-    expect(ids(m)).toEqual([['overview', 'session:a', 'session:b'], ['session:d', 'session:c']]);
+    expect(ids(m)).toEqual([['session:a', 'session:b'], ['session:d', 'session:c']]);
     expect(m.focusedPane).toBe(1);
   });
 
   it('selectTab: activates the n-th tab of the focused pane; out of range is a no-op', () => {
-    expect(active(selectTab(abc(), 2))).toEqual(['session:a']);
-    expect(active(selectTab(abc(), 1))).toEqual(['overview']);
+    expect(active(selectTab(abc(), 2))).toEqual(['session:b']);
+    expect(active(selectTab(abc(), 1))).toEqual(['session:a']);
     expect(selectTab(abc(), 9)).toEqual(abc());
+    expect(selectTab(base, 1)).toEqual(base);
     expect(active(selectTab(split(), 1))).toEqual(['session:c', 'session:d']);
   });
 
-  it('cycleTab: next or previous tab of the focused pane, wrapping', () => {
-    expect(active(cycleTab(abc(), 1))).toEqual(['overview']);
+  it('cycleTab: next or previous tab of the focused pane, wrapping; an empty pane has nothing to cycle', () => {
+    expect(active(cycleTab(abc(), 1))).toEqual(['session:a']);
     expect(active(cycleTab(abc(), -1))).toEqual(['session:b']);
+    expect(cycleTab(base, 1)).toBe(base);
   });
 
   it('reopenClosed: brings the last closed tab back where it was, in the focused pane', () => {
     const closed = closeTab(activateTab(abc(), 'session:b'), 'session:b');
-    const m = reopenClosed(closed, 2);
-    expect(ids(m)).toEqual([['overview', 'session:a', 'session:b', 'session:c']]);
+    const m = reopenClosed(closed, 1);
+    expect(ids(m)).toEqual([['session:a', 'session:b', 'session:c']]);
     expect(active(m)).toEqual(['session:b']);
     expect(m.closedTabs).toEqual([]);
-    expect(ids(reopenClosed(closed, null))).toEqual([['overview', 'session:a', 'session:c', 'session:b']]); // no memory: openTab
+    expect(ids(reopenClosed(closed, null))).toEqual([['session:a', 'session:c', 'session:b']]); // no memory: openTab
     expect(reopenClosed(base, null)).toEqual(base);
   });
 
-  it('togglePinned: flips pinned and keeps pinned tabs ahead; never unpins Overview', () => {
+  it('togglePinned: flips pinned and keeps pinned tabs ahead', () => {
     const m = togglePinned(abc(), 'session:c');
-    expect(ids(m)).toEqual([['overview', 'session:c', 'session:a', 'session:b']]);
-    expect(ids(togglePinned(m, 'session:c'))).toEqual([['overview', 'session:c', 'session:a', 'session:b']]);
-    expect((togglePinned(m, 'session:c').panes[0].tabs[1] as TabRef).pinned).toBe(false);
-    expect(togglePinned(abc(), 'overview')).toEqual(abc());
+    expect(ids(m)).toEqual([['session:c', 'session:a', 'session:b']]);
+    expect(ids(togglePinned(m, 'session:c'))).toEqual([['session:c', 'session:a', 'session:b']]);
+    expect((togglePinned(m, 'session:c').panes[0].tabs[0] as TabRef).pinned).toBe(false);
   });
 
   it('session.removed: closes the session’s session and agent tabs without a closed-tab entry', () => {
     const withAgent = openTab(split(), { kind: 'agent', appSessionId: 'd' as AppSessionId, agentId: 'g1' as never });
     const m = dropSession(closeTab(withAgent, 'session:a'), 'd' as AppSessionId);
-    expect(ids(m)).toEqual([['overview', 'session:b', 'session:c']]);
+    expect(ids(m)).toEqual([['session:b', 'session:c']]);
     expect(m.closedTabs.map((t) => t.id)).toEqual(['session:a']);
   });
 
   it('drag to the right edge, no split: moveTab(id, 1, 0) creates pane 1 like a split open', () => {
     const m = moveTab(abc(), 'session:b', 1, 0);
-    expect(ids(m)).toEqual([['overview', 'session:a', 'session:c'], ['session:b']]);
+    expect(ids(m)).toEqual([['session:a', 'session:c'], ['session:b']]);
     expect(m).toMatchObject({ focusedPane: 1, splitRatio: 0.5 });
   });
 
-  it('keeps Overview first: a pinned tab reordered to index 0 lands after it', () => {
-    const pinnedA = togglePinned(openTab(base, S('a')), 'session:a'); // [overview, pinned a]
-    expect(ids(moveTab(pinnedA, 'session:a', 0, 0))).toEqual([['overview', 'session:a']]);
-    const unpinned = moveTab(abc(), 'session:c', 0, 0);
-    expect(ids(unpinned)).toEqual([['overview', 'session:c', 'session:a', 'session:b']]);
+  it('keeps pinned tabs ahead when reordering: an unpinned tab moved before a pinned one lands after it, and back', () => {
+    const pinnedA = togglePinned(abc(), 'session:a'); // [pinned a, b, c]
+    expect(ids(moveTab(pinnedA, 'session:c', 0, 0))).toEqual([['session:a', 'session:c', 'session:b']]);
+    expect(ids(moveTab(pinnedA, 'session:a', 0, 3))).toEqual([['session:a', 'session:b', 'session:c']]);
   });
 
-  it('keeps Overview first when Overview itself is moved, into a pane with a pinned tab or within its own', () => {
-    const withPinned = togglePinned(split(), 'session:d'); // pane 1: [pinned d]
-    const moved = moveTab(withPinned, 'overview', 1, 1);
-    expect(ids(moved)).toEqual([['session:a', 'session:b', 'session:c'], ['overview', 'session:d']]);
-    expect(ids(moveTab(abc(), 'overview', 0, 3))).toEqual([['overview', 'session:a', 'session:b', 'session:c']]);
-  });
-
-  it('keeps Overview first when a pinned tab crosses into its pane', () => {
-    const overviewRight = moveTab(split(), 'overview', 1, 0); // pane 0: [a, b, c], pane 1: [overview, d]
-    const pinnedB = togglePinned(overviewRight, 'session:b');
-    const crossed = moveTab(pinnedB, 'session:b', 1, 0);
-    expect(ids(crossed)).toEqual([['session:a', 'session:c'], ['overview', 'session:b', 'session:d']]);
+  it('keeps pinned tabs ahead when a pinned tab crosses into the other pane', () => {
+    const pinnedB = togglePinned(split(), 'session:b'); // pane 0: [pinned b, a, c], pane 1: [d]
+    const crossed = moveTab(pinnedB, 'session:b', 1, 1);
+    expect(ids(crossed)).toEqual([['session:a', 'session:c'], ['session:b', 'session:d']]);
   });
 
   it('clamps the split ratio to 0.25–0.75', () => {
@@ -166,17 +171,17 @@ describe('layout store transitions', () => {
     expect(setSplitRatio(split(), 0.1).splitRatio).toBe(0.25);
   });
 
-  it('hydrating drops a tab whose session is unknown and falls back to Overview when nothing is left', () => {
+  // W5: hydration no longer re-inserts an Overview; a layout left with nothing falls back to the default's empty pane.
+  it('hydrating drops a tab whose session is unknown and falls back to one empty pane when nothing is left', () => {
     const known = (id: AppSessionId) => id === 'a';
-    expect(ids(repairMain(split(), known))).toEqual([['overview', 'session:a']]);
-    const onlyUnknown = openSession(base, 'zz' as AppSessionId, { split: true });
-    expect(repairMain(moveTab(onlyUnknown, 'overview', 1, 0), known)).toEqual(base);
-    const noOverview: LayoutMain = { ...base, panes: [{ tabs: [{ id: 'session:zz', kind: 'session', appSessionId: 'zz' as AppSessionId, pinned: false }], activeTabId: 'session:zz' }] };
-    expect(repairMain(noOverview, known)).toEqual(base);
-    const lostOverview: LayoutMain = { ...base, panes: [{ tabs: [{ id: 'session:a', kind: 'session', appSessionId: 'a' as AppSessionId, pinned: false }], activeTabId: 'session:a' }] };
-    expect(ids(repairMain(lostOverview, known))).toEqual([['overview', 'session:a']]);
-    const misplaced: LayoutMain = { ...base, panes: [{ tabs: [{ id: 'session:a', kind: 'session', appSessionId: A_ID, pinned: true }, base.panes[0].tabs[0]], activeTabId: 'session:a' }] };
-    expect(ids(repairMain(misplaced, known))).toEqual([['overview', 'session:a']]);
+    const session = (id: string, pinned = false): TabRef => ({ id: `session:${id}`, ...S(id), pinned });
+    expect(ids(repairMain(split(), known))).toEqual([['session:a']]);
+    const onlyUnknown: LayoutMain = { ...base, panes: [{ tabs: [session('zz')], activeTabId: 'session:zz' }, { tabs: [session('yy')], activeTabId: 'session:yy' }], focusedPane: 1 };
+    expect(repairMain(onlyUnknown, known)).toEqual(base);
+    const onlyA: LayoutMain = { ...base, panes: [{ tabs: [session('a')], activeTabId: 'session:a' }] };
+    expect(repairMain(onlyA, known)).toEqual(onlyA); // nothing is added
+    const unordered: LayoutMain = { ...base, panes: [{ tabs: [session('a'), { id: 'diagnostics', kind: 'diagnostics', pinned: true }], activeTabId: 'session:zz' }] };
+    expect(repairMain(unordered, known).panes).toEqual([{ tabs: [unordered.panes[0].tabs[1], session('a')], activeTabId: 'diagnostics' }]); // pinned first; a lost active tab is the first
   });
 });
 
@@ -187,9 +192,9 @@ describe('accounts and settings tabs', () => {
   it('open as singletons: a second open activates the existing tab, and for settings updates its section', () => {
     let m = openTab(abc(), settings('engine'));
     m = openTab(m, { kind: 'accounts' });
-    expect(ids(m)).toEqual([['overview', 'session:a', 'session:b', 'session:c', 'settings', 'accounts']]);
+    expect(ids(m)).toEqual([['session:a', 'session:b', 'session:c', 'settings', 'accounts']]);
     m = openTab(activateTab(m, 'session:a'), settings('keyboard'));
-    expect(ids(m)).toEqual([['overview', 'session:a', 'session:b', 'session:c', 'settings', 'accounts']]);
+    expect(ids(m)).toEqual([['session:a', 'session:b', 'session:c', 'settings', 'accounts']]);
     expect(active(m)).toEqual(['settings']);
     expect(m.panes[0].tabs.find((t) => t.id === 'settings')).toEqual({ id: 'settings', kind: 'settings', section: 'keyboard', pinned: false });
     m = openTab(activateTab(m, 'session:a'), { kind: 'accounts' });
@@ -199,7 +204,7 @@ describe('accounts and settings tabs', () => {
   it('are closable and never pinned', () => {
     const m = openTab(openTab(base, settings(null)), { kind: 'accounts' });
     expect(togglePinned(togglePinned(m, 'settings'), 'accounts')).toBe(m);
-    expect(ids(closeTab(closeTab(m, 'settings'), 'accounts'))).toEqual([['overview']]);
+    expect(ids(closeTab(closeTab(m, 'settings'), 'accounts'))).toEqual([[]]);
     expect(LayoutMainSchema.safeParse(m).success).toBe(true);
   });
 });
@@ -242,7 +247,7 @@ describe('file tabs and the panel’s session (C8’s tenth ask)', () => {
     expect(sessionOfTab(activeTab(openTab(abc(), { kind: 'diff', appSessionId: B, ref: 'HEAD' })))).toBe('b');
     expect(sessionOfTab(activeTab(openTab(abc(), file(1))))).toBe('a');
     expect(sessionOfTab(activeTab(openTab(abc(), file(1, null))))).toBeNull();
-    expect(sessionOfTab(activeTab(base))).toBeNull(); // the Overview
+    expect(sessionOfTab(activeTab(base))).toBeNull(); // an empty pane
     expect(sessionOfTab(activeTab(openTab(abc(), { kind: 'diagnostics' })))).toBeNull();
   });
 });

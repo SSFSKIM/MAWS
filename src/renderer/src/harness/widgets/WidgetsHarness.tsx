@@ -80,11 +80,11 @@ function initial(): { pane: WidgetsPane; widget: { name: string; args: string } 
 
 // The layout store's first pane shows the session's tab, so the app-level keys and the usage store find it.
 function mirrorLayout(pane: WidgetsPane) {
-  const overview = { tabs: [{ id: 'overview' as const, kind: 'overview' as const, pinned: true as const }], activeTabId: 'overview' };
+  const noSession = { tabs: [{ id: 'diagnostics' as const, kind: 'diagnostics' as const, pinned: false }], activeTabId: 'diagnostics' }; // W5: the Overview is no tab
   const tabs = pane
     ? { tabs: [{ id: `session:${pane.appSessionId}`, kind: 'session' as const, appSessionId: pane.appSessionId as AppSessionId, pinned: false }], activeTabId: `session:${pane.appSessionId}` }
-    : overview;
-  useLayout.setState((s) => ({ main: { ...s.main, panes: [tabs, overview], focusedPane: 0 } }));
+    : noSession;
+  useLayout.setState((s) => ({ main: { ...s.main, panes: [tabs, noSession], focusedPane: 0 } }));
 }
 
 // A widget opened from the picker, placed as C7's editor places one opened from the palette (W3: the model selector's

@@ -181,7 +181,7 @@ describe('a project’s page', () => {
     const charter = row('Charter + research');
     await user.click(within(charter).getByRole('button', { name: 'Pin Charter + research' }));
     expect(pin).toHaveBeenCalledWith(idOf('Charter + research'));
-    expect(activeTab(useLayout.getState().main)?.kind).toBe('overview'); // the action does not open the row
+    expect(activeTab(useLayout.getState().main)).toBeNull(); // the action does not open the row
     const archive = within(charter).getByRole('button', { name: 'Archive Charter + research' }) as HTMLButtonElement;
     expect(archive.disabled).toBe(true);
     expect(archive.title).toBe('Not available here');
@@ -399,6 +399,13 @@ describe('sidebar at scale', () => {
     if (elapsed > 300) console.info(`[sidebar] a 120-session page opened in ${Math.round(elapsed)} ms`);
     expect(elapsed).toBeLessThan(2000);
     expect(sessionRows(pageTree('MAWS'))).toHaveLength(many.sessions.filter((r) => r.projectId === 'proj-maws' && !r.archived).length);
+    // Main, then the two worktrees by folder name (no worktree list answers here), every session of each
+    const groups = within(pageTree('MAWS')).getAllByRole('group');
+    expect(groups.map((g) => [g.getAttribute('aria-label'), sessionRows(g).length])).toEqual([
+      ['Main', 80],
+      ['MAWS-scale-beta · scale-beta', 20],
+      ['scale-alpha · worktree-scale-alpha', 20],
+    ]);
   });
 });
 

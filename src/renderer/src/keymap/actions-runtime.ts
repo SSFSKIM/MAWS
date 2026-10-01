@@ -69,7 +69,7 @@ const findTab = (main: LayoutMain, id: string): TabRef | null => main.panes.flat
 
 export async function requestCloseTab(id: string): Promise<void> {
   const ref = findTab(useLayout.getState().main, id);
-  if (!ref || ref.kind === 'overview') return;
+  if (!ref) return;
   const guard = closeGuards.get(ref.kind) as CloseGuard | undefined;
   if (guard) {
     let close: boolean;

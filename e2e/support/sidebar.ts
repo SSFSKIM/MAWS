@@ -9,11 +9,17 @@ const levelsOf = (page: Page) => sidebarOf(page).getByTestId('sidebar-levels');
 // The project list's row of a project, by name ("Other sessions" included).
 export const projectRow = (page: Page, name: string) => sidebarOf(page).locator(`[data-level-pane="1"] [data-kind="project"][aria-label="${name}"]`);
 
+// The levels slide (a 200ms transform): a row's box is where it will stay only once the slide has ended.
+async function settled(page: Page): Promise<void> {
+  await expect.poll(() => levelsOf(page).evaluate((el) => el.getAnimations().length), { message: 'the sidebar levels stop sliding' }).toBe(0);
+}
+
 // Back to the project list, when a page is open.
 export async function showProjectList(page: Page): Promise<void> {
   if ((await levelsOf(page).getAttribute('data-level')) === '1') return;
   await sidebarOf(page).getByRole('button', { name: 'Back to projects' }).click();
   await expect(levelsOf(page)).toHaveAttribute('data-level', '1');
+  await settled(page);
 }
 
 // Opens a project's page by its name on the list.
@@ -21,6 +27,7 @@ export async function openProject(page: Page, name: string): Promise<void> {
   await showProjectList(page);
   await projectRow(page, name).click();
   await expect(levelsOf(page)).toHaveAttribute('data-level', '2');
+  await settled(page);
 }
 
 export type SessionMatch = string | { appSessionId: string };
@@ -39,6 +46,7 @@ export async function sidebarRow(page: Page, match: SessionMatch): Promise<Locat
     await showProjectList(page);
     await sidebarOf(page).locator(`[data-level-pane="1"] [data-tree-id="p:${key}"]`).click();
     await expect(levels).toHaveAttribute('data-open-project', key);
+    await settled(page);
   }
   const page2 = sidebarOf(page).locator('[data-level-pane="2"]');
   return typeof match === 'string'

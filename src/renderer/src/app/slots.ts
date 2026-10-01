@@ -20,6 +20,7 @@ export interface Slots {
   newSession: ComponentType<{ appSessionId: AppSessionId }>; // C10: an unstarted session's setup, in its pane above the composer (no modal sheet)
   accountsTab: ComponentType<Record<never, never>>; // C11 (eighth ask): the Accounts tab's content
   settingsTab: ComponentType<{ section: Extract<TabRef, { kind: 'settings' }>['section'] }>; // C11: the Settings tab's content, at a section
+  topBarEnd: ComponentType<Record<never, never>>; // W5's mount point at the top bar's right, for W6's usage pill
 }
 
 // A store rather than a plain map, so a registration after the first render still reaches the page.

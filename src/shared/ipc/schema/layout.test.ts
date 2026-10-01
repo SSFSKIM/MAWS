@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { commands, events, LAYOUT_DEFAULTS, LayoutKeySchema, LayoutMainSchema, LayoutRegionsSchema, PanelPinnedSchema, StoredRegionsSchema, TabRefSchema, tabId, UsageBannersSchema, QuitWaitSchema } from './layout'; // C7: UsageBannersSchema; C12: QuitWaitSchema
+import { commands, events, LAYOUT_DEFAULTS, LayoutKeySchema, LayoutMainSchema, LayoutRegionsSchema, PanelPinnedSchema, StoredMainSchema, StoredRegionsSchema, TabRefSchema, tabId, UsageBannersSchema, QuitWaitSchema } from './layout'; // C7: UsageBannersSchema; C12: QuitWaitSchema
 
 describe('layout value shapes', () => {
   it('validates its own defaults', () => {
@@ -8,7 +8,10 @@ describe('layout value shapes', () => {
     expect(PanelPinnedSchema.parse(LAYOUT_DEFAULTS.panelPinned)).toEqual([]);
     expect(LAYOUT_DEFAULTS.regions.sidebar.width).toBe(300);
     expect(LAYOUT_DEFAULTS.regions.panel.width).toBe(380);
-    expect(LAYOUT_DEFAULTS.main.panes).toEqual([{ tabs: [{ id: 'overview', kind: 'overview', pinned: true }], activeTabId: 'overview' }]);
+    // W5: the Overview floats over the main area rather than being a tab, so a fresh layout opens on one empty pane and
+    // the panel in its default place.
+    expect(LAYOUT_DEFAULTS.main.panes).toEqual([{ tabs: [], activeTabId: '' }]);
+    expect(LAYOUT_DEFAULTS.regions.overview).toBeNull();
   });
 
   // W5: version 2's open project replaces version 1's collapsed lists; a stored version 1 keeps its sizes and sort.
@@ -18,8 +21,8 @@ describe('layout value shapes', () => {
       sidebar: { width: 240, collapsed: true, sort: 'recency', collapsedProjects: ['proj-a'], collapsedSections: ['pinned'] },
       panel: { width: 320, collapsed: false, maximized: false },
     };
-    expect(StoredRegionsSchema.parse(v1)).toEqual({ version: 2, sidebar: { width: 240, collapsed: true, sort: 'recency', openProject: null }, panel: v1.panel });
-    const v2 = { ...LAYOUT_DEFAULTS.regions, sidebar: { ...LAYOUT_DEFAULTS.regions.sidebar, openProject: 'other' } };
+    expect(StoredRegionsSchema.parse(v1)).toEqual({ version: 2, sidebar: { width: 240, collapsed: true, sort: 'recency', openProject: null }, panel: v1.panel, overview: null });
+    const v2 = { ...LAYOUT_DEFAULTS.regions, sidebar: { ...LAYOUT_DEFAULTS.regions.sidebar, openProject: 'other' }, overview: { x: 40, y: 12, width: 880, height: 640 } };
     expect(StoredRegionsSchema.parse(v2)).toEqual(v2);
     expect(StoredRegionsSchema.safeParse({ ...v2, sidebar: { ...v2.sidebar, collapsedProjects: [] } }).success).toBe(false);
   });
@@ -32,7 +35,6 @@ describe('layout value shapes', () => {
   });
 
   it('derives deterministic tab ids', () => {
-    expect(tabId({ kind: 'overview' })).toBe('overview');
     expect(tabId({ kind: 'session', appSessionId: 'a1' as never })).toBe('session:a1');
     expect(tabId({ kind: 'agent', appSessionId: 'a1' as never, agentId: 'g1' as never })).toBe('agent:a1:g1');
     expect(tabId({ kind: 'file', path: '/x/y.ts', line: 3, appSessionId: null })).toBe('file:/x/y.ts');
@@ -40,16 +42,61 @@ describe('layout value shapes', () => {
     expect(tabId({ kind: 'diagnostics' })).toBe('diagnostics');
   });
 
-  it('rejects an overview tab that is not pinned', () => {
-    expect(TabRefSchema.safeParse({ id: 'overview', kind: 'overview', pinned: false }).success).toBe(false);
+  // W5: only `StoredMainSchema` still knows the Overview's tab, to drop it from a layout saved before the panel.
+  it('rejects an overview tab', () => {
+    expect(TabRefSchema.safeParse({ id: 'overview', kind: 'overview', pinned: true }).success).toBe(false);
   });
 
   it('limits closedTabs to ten and panes to two', () => {
-    const tab = { id: 'overview', kind: 'overview', pinned: true } as const;
-    const pane = { tabs: [tab], activeTabId: 'overview' };
+    const tab = { id: 'diagnostics', kind: 'diagnostics', pinned: false } as const;
+    const pane = { tabs: [tab], activeTabId: 'diagnostics' };
     expect(LayoutMainSchema.safeParse({ ...LAYOUT_DEFAULTS.main, closedTabs: Array(11).fill(tab) }).success).toBe(false);
     expect(LayoutMainSchema.safeParse({ ...LAYOUT_DEFAULTS.main, panes: [pane, pane, pane] }).success).toBe(false);
     expect(LayoutMainSchema.safeParse({ ...LAYOUT_DEFAULTS.main, panes: [pane, pane] }).success).toBe(true);
+  });
+
+  // W5: every layout saved before the floating Overview holds its tab, first and pinned, in one of its panes (and in the
+  // ⌘⇧T history if a hand-edit closed it). Hydration reads `main.tabs` through `StoredMainSchema`, which drops that tab
+  // rather than failing the whole value back to the default and losing the user's tabs.
+  describe('a stored main.tabs from before the floating Overview', () => {
+    const overview = { id: 'overview', kind: 'overview', pinned: true };
+    const session = (n: number) => ({ id: `session:a${n}`, kind: 'session', appSessionId: `a${n}`, pinned: false });
+    const stored = (over: object) => ({ version: 1, panes: [], focusedPane: 0, splitRatio: 0.4, closedTabs: [], ...over });
+
+    it('drops the Overview leading an active pane, activating the pane’s first remaining tab', () => {
+      const main = stored({ panes: [{ tabs: [overview, session(1), session(2)], activeTabId: 'overview' }] });
+      expect(LayoutMainSchema.safeParse(main).success).toBe(false);
+      expect(StoredMainSchema.parse(main)).toEqual(stored({ panes: [{ tabs: [session(1), session(2)], activeTabId: 'session:a1' }] }));
+      // a pane whose active tab was another keeps it
+      const other = stored({ panes: [{ tabs: [overview, session(1), session(2)], activeTabId: 'session:a2' }] });
+      expect(StoredMainSchema.parse(other).panes).toEqual([{ tabs: [session(1), session(2)], activeTabId: 'session:a2' }]);
+    });
+
+    it('drops a pane the Overview was the only tab of, focusing pane 0', () => {
+      const main = stored({ panes: [{ tabs: [session(1)], activeTabId: 'session:a1' }, { tabs: [overview], activeTabId: 'overview' }], focusedPane: 1 });
+      expect(StoredMainSchema.parse(main)).toEqual(stored({ panes: [{ tabs: [session(1)], activeTabId: 'session:a1' }], focusedPane: 0 }));
+      // the split's other pane takes the emptied pane 0's place
+      const first = stored({ panes: [{ tabs: [overview], activeTabId: 'overview' }, { tabs: [session(2)], activeTabId: 'session:a2' }], focusedPane: 1 });
+      expect(StoredMainSchema.parse(first)).toEqual(stored({ panes: [{ tabs: [session(2)], activeTabId: 'session:a2' }], focusedPane: 0 }));
+    });
+
+    it('leaves one empty pane when the Overview was all there was (the old default)', () => {
+      const main = stored({ panes: [{ tabs: [overview], activeTabId: 'overview' }] });
+      expect(StoredMainSchema.parse(main)).toEqual(stored({ panes: [{ tabs: [], activeTabId: '' }] }));
+    });
+
+    it('drops the Overview from the closed-tab history', () => {
+      const main = stored({ panes: [{ tabs: [session(1)], activeTabId: 'session:a1' }], closedTabs: [session(2), overview, session(3)] });
+      expect(StoredMainSchema.parse(main).closedTabs).toEqual([session(2), session(3)]);
+    });
+
+    it('reads a layout without the Overview unchanged, and still rejects what LayoutMainSchema rejects', () => {
+      const main = stored({ panes: [{ tabs: [session(1)], activeTabId: 'session:a1' }, { tabs: [session(2)], activeTabId: 'session:a2' }], focusedPane: 1 });
+      expect(StoredMainSchema.parse(main)).toEqual(main);
+      const pane = { tabs: [session(1)], activeTabId: 'session:a1' };
+      expect(StoredMainSchema.safeParse(stored({ panes: [pane, pane, pane] })).success).toBe(false);
+      expect(StoredMainSchema.safeParse(stored({ panes: [pane], closedTabs: [{ ...session(2), kind: 'nope' }] })).success).toBe(false);
+    });
   });
 
   it('owns get, set, list, openExternal and setEnabledActions in main', () => {

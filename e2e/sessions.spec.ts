@@ -314,7 +314,7 @@ test.describe('sessions', () => {
     expect(args[args.indexOf('--session-id') + 1]).toBe(forkId);
     const records = value(await invoke(page, 'session.list', {})).sessions;
     expect(records.map((r) => r.engineSessionId).sort()).toEqual([sourceId, forkId].sort());
-    await expect(page.getByRole('tab')).toHaveCount(3); // Overview, the source, the fork
+    await expect(page.getByRole('tab')).toHaveCount(2); // the source, the fork (W5: the Overview is no tab)
   });
 
   test('rollback keeps the tab: a launch past the fixture list is refused, the worktree and record go, the failure card stays, and Back to editing returns the message to the editor', async () => {

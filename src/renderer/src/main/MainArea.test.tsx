@@ -25,7 +25,7 @@ const offs: (() => void)[] = [];
 
 const main = () => document.querySelector<HTMLElement>('[data-region="main"]')!;
 const strips = () => within(main()).getAllByRole('tablist');
-const tabNames = (strip = strips()[0]) => within(strip).getAllByRole('tab').map((t) => t.getAttribute('aria-label'));
+const tabNames = (strip = strips()[0]) => within(strip).queryAllByRole('tab').map((t) => t.getAttribute('aria-label'));
 const tab = (name: string) => within(main()).getByRole('tab', { name });
 const selected = (strip = strips()[0]) => within(strip).getAllByRole('tab').find((t) => t.getAttribute('aria-selected') === 'true')?.getAttribute('aria-label');
 // A session's row, on its project's page (W5: the sidebar drills into one project at a time).
@@ -90,24 +90,30 @@ afterEach(() => {
 });
 
 describe('tab strip reorders, closes, reopens', () => {
-  it('opens on the Overview, first and without a close control', () => {
+  // W5: the Overview floats over the main area rather than leading the strip, so the app opens on one empty pane, which
+  // offers the two ways in: the Overview and a new session.
+  it('opens on an empty pane that says so and offers the Overview and a new session', async () => {
+    const user = userEvent.setup();
     render(<Shell />);
-    expect(tabNames()).toEqual(['Overview']);
-    expect(selected()).toBe('Overview');
-    expect(within(tab('Overview')).queryByRole('button')).toBeNull();
-    expect(within(main()).getByRole('tabpanel')).toBeTruthy();
+    expect(tabNames()).toEqual([]);
+    const panel = within(main()).getByRole('tabpanel');
+    expect(within(panel).getByText('No open tabs')).toBeTruthy();
+    expect((within(panel).getByRole('button', { name: 'New session' }) as HTMLButtonElement).disabled).toBe(true); // no creator registered
+    expect(within(main()).queryByRole('dialog', { name: 'Overview' })).toBeNull();
+    await user.click(within(panel).getByRole('button', { name: /^Overview/ }));
+    expect(within(main()).getByRole('dialog', { name: 'Overview' })).toBeTruthy();
   });
 
   it('opening a session from the sidebar activates its tab in the focused pane; a second open activates the existing tab', async () => {
     const user = userEvent.setup();
     render(<Shell />);
     await user.click(sidebarRow('Charter + research'));
-    expect(tabNames()).toEqual(['Overview', 'Charter + research · MAWS']);
+    expect(tabNames()).toEqual(['Charter + research · MAWS']);
     expect(selected()).toBe('Charter + research · MAWS');
-    await user.click(tab('Overview'));
-    expect(selected()).toBe('Overview');
+    await user.click(sidebarRow('Fix sidebar drag'));
+    expect(selected()).toBe('Fix sidebar drag · MAWS');
     await user.click(sidebarRow('Charter + research'));
-    expect(tabNames()).toEqual(['Overview', 'Charter + research · MAWS']);
+    expect(tabNames()).toEqual(['Charter + research · MAWS', 'Fix sidebar drag · MAWS']);
     expect(selected()).toBe('Charter + research · MAWS');
   });
 
@@ -119,12 +125,15 @@ describe('tab strip reorders, closes, reopens', () => {
     expect(within(fix).getByText('MAWS').tagName).toBe('SMALL');
   });
 
-  it('⌘W on the Overview does nothing', () => {
+  // W5: no tab is permanent any more; closing the last one leaves the empty pane, where ⌘W has nothing to close.
+  it('⌘W on the last tab leaves the pane empty, saying "No open tabs", and then does nothing', async () => {
     render(<Shell />);
-    openThree();
-    act(() => useLayout.getState().activateTab('overview'));
+    act(() => useLayout.getState().openSession(idOf('Charter + research')));
+    await act(async () => runAction('tab.close'));
+    expect(tabNames()).toEqual([]);
+    expect(within(within(main()).getByRole('tabpanel')).getByText('No open tabs')).toBeTruthy();
     const before = useLayout.getState().main;
-    act(() => runAction('tab.close'));
+    await act(async () => runAction('tab.close'));
     expect(useLayout.getState().main).toBe(before);
   });
 
@@ -133,9 +142,9 @@ describe('tab strip reorders, closes, reopens', () => {
     openThree();
     act(() => useLayout.getState().activateTab(`session:${idOf('Charter + research')}`));
     await act(async () => runAction('tab.close'));
-    expect(tabNames()).toEqual(['Overview', 'Fix sidebar drag · MAWS', 'Quota reset recovery · codex_somersault']);
+    expect(tabNames()).toEqual(['Fix sidebar drag · MAWS', 'Quota reset recovery · codex_somersault']);
     act(() => runAction('tab.reopen'));
-    expect(tabNames()).toEqual(['Overview', 'Charter + research · MAWS', 'Fix sidebar drag · MAWS', 'Quota reset recovery · codex_somersault']);
+    expect(tabNames()).toEqual(['Charter + research · MAWS', 'Fix sidebar drag · MAWS', 'Quota reset recovery · codex_somersault']);
     expect(selected()).toBe('Charter + research · MAWS');
   });
 
@@ -146,7 +155,7 @@ describe('tab strip reorders, closes, reopens', () => {
     await user.click(within(tab('Fix sidebar drag · MAWS')).getByRole('button', { name: 'Close Fix sidebar drag' }));
     expect(tabNames()).not.toContain('Fix sidebar drag · MAWS');
     await act(async () => void fireEvent(tab('Charter + research · MAWS'), new MouseEvent('auxclick', { bubbles: true, button: 1 })));
-    expect(tabNames()).toEqual(['Overview', 'Quota reset recovery · codex_somersault']);
+    expect(tabNames()).toEqual(['Quota reset recovery · codex_somersault']);
   });
 
   it('ArrowLeft and ArrowRight move focus along the strip, Enter activates, Delete closes', async () => {
@@ -160,9 +169,9 @@ describe('tab strip reorders, closes, reopens', () => {
     await user.keyboard('{Enter}');
     expect(selected()).toBe('Fix sidebar drag · MAWS');
     await user.keyboard('{ArrowRight}{ArrowRight}');
-    expect(document.activeElement).toBe(tab('Overview')); // wraps
+    expect(document.activeElement).toBe(tab('Charter + research · MAWS')); // wraps
     await user.keyboard('{ArrowLeft}{Delete}');
-    expect(tabNames()).toEqual(['Overview', 'Charter + research · MAWS', 'Fix sidebar drag · MAWS']);
+    expect(tabNames()).toEqual(['Charter + research · MAWS', 'Fix sidebar drag · MAWS']);
   });
 
   it('Delete keeps focus on a guarded tab until its close succeeds', async () => {
@@ -188,20 +197,38 @@ describe('tab strip reorders, closes, reopens', () => {
     expect(plus.title).toBe('Not available here');
   });
 
-  it('⌘1…9 select tabs of the focused pane, ⌘0 the Overview', () => {
+  it('⌘1…9 select tabs of the focused pane, ⌃Tab and ⌃⇧Tab cycle them', () => {
     render(<Shell />);
     openThree();
     act(() => runAction('tab.select', 2));
+    expect(selected()).toBe('Fix sidebar drag · MAWS');
+    act(() => runAction('tab.select', 1));
     expect(selected()).toBe('Charter + research · MAWS');
     act(() => runAction('tab.select', 9));
     expect(selected()).toBe('Charter + research · MAWS');
-    act(() => runAction('tab.overview'));
-    expect(selected()).toBe('Overview');
     act(() => runAction('tab.next'));
-    expect(selected()).toBe('Charter + research · MAWS');
+    expect(selected()).toBe('Fix sidebar drag · MAWS');
     act(() => runAction('tab.previous'));
     act(() => runAction('tab.previous'));
     expect(selected()).toBe('Quota reset recovery · codex_somersault');
+  });
+
+  // W5: ⌘0 (and the View menu and the palette, which run the same action) opens the board floating over the active tab,
+  // which stays selected and live beneath it; asked again while it is open, it brings focus back to the panel.
+  it('⌘0 opens the floating Overview over the active tab, the board inside it, and refocuses it when open', () => {
+    render(<Shell />);
+    openThree();
+    act(() => runAction('tab.overview'));
+    const dialog = within(main()).getByRole('dialog', { name: 'Overview' });
+    expect(within(dialog).getByRole('list', { name: 'Overview' })).toBeTruthy();
+    expect(within(dialog).getAllByRole('article').length).toBeGreaterThan(0);
+    expect(dialog.contains(document.activeElement)).toBe(true);
+    expect(tabNames()).toEqual(['Charter + research · MAWS', 'Fix sidebar drag · MAWS', 'Quota reset recovery · codex_somersault']);
+    expect(selected()).toBe('Quota reset recovery · codex_somersault');
+    act(() => tab('Fix sidebar drag · MAWS').focus());
+    act(() => runAction('tab.overview'));
+    expect(within(main()).getByRole('dialog', { name: 'Overview' })).toBe(dialog);
+    expect(dialog.contains(document.activeElement)).toBe(true);
   });
 
   it('dragging a tab onto another position reorders it', () => {
@@ -215,7 +242,7 @@ describe('tab strip reorders, closes, reopens', () => {
     dragAt('dragOver', strip, dt, 120);
     dragAt('drop', strip, dt, 120);
     fireEvent.dragEnd(tab('Quota reset recovery · codex_somersault'), { dataTransfer: dt });
-    expect(tabNames()).toEqual(['Overview', 'Quota reset recovery · codex_somersault', 'Charter + research · MAWS', 'Fix sidebar drag · MAWS']);
+    expect(tabNames()).toEqual(['Charter + research · MAWS', 'Quota reset recovery · codex_somersault', 'Fix sidebar drag · MAWS']);
     expect(useLayout.getState().dragging).toBeNull();
   });
 
@@ -239,7 +266,7 @@ describe('tab strip reorders, closes, reopens', () => {
     const menu = await screen.findByRole('menu');
     fireEvent.click(within(menu).getByRole('menuitem', { name: 'Pin tab' }));
     await waitFor(() => expect(screen.queryByRole('menu')).toBeNull()); // the menu closes and hands focus back
-    expect(tabNames()).toEqual(['Overview', 'Quota reset recovery · codex_somersault', 'Charter + research · MAWS', 'Fix sidebar drag · MAWS']);
+    expect(tabNames()).toEqual(['Quota reset recovery · codex_somersault', 'Charter + research · MAWS', 'Fix sidebar drag · MAWS']);
   });
 
   it('the Diagnostics tab opens from Help › Diagnostics and renders the strip', () => {
@@ -275,7 +302,7 @@ describe('split', () => {
     render(<Shell />);
     openThree();
     act(() => runAction('pane.split'));
-    fireEvent.dragStart(tab('Overview'), { dataTransfer: transfer() });
+    fireEvent.dragStart(tab('Charter + research · MAWS'), { dataTransfer: transfer() });
     expect(screen.queryByTestId('drop-edge')).toBeNull();
   });
 
@@ -368,7 +395,7 @@ describe('unstarted sessions', () => {
     const user = userEvent.setup();
     render(<Shell />);
     await user.click(within(strips()[0].parentElement!).getByRole('button', { name: 'New session' }));
-    expect(asked).toEqual([null]); // on the Overview there is no session to take a project from
+    expect(asked).toEqual([null]); // an empty pane has no session to take a project from
     expect(selected()).toBe('New session');
     await act(async () => runAction('tab.close'));
     act(() => useLayout.getState().openSession(idOf('Quota reset recovery')));
@@ -401,7 +428,7 @@ describe('unstarted sessions', () => {
     render(<Shell />);
     await act(() => createSession(MAWS));
     await act(async () => runAction('tab.close'));
-    expect(tabNames()).toEqual(['Overview']);
+    expect(tabNames()).toEqual([]);
     expect(useSessions.getState().unstarted.has(NEW)).toBe(false);
     expect(useLayout.getState().main.closedTabs).toEqual([]);
   });
@@ -414,11 +441,11 @@ describe('unstarted sessions', () => {
     await act(() => createSession(MAWS));
     await act(async () => runAction('tab.close'));
     expect(guard).toHaveBeenCalledWith(expect.objectContaining({ kind: 'session', appSessionId: NEW }));
-    expect(tabNames()).toEqual(['Overview', 'New session · MAWS']);
+    expect(tabNames()).toEqual(['New session · MAWS']);
     expect(screen.queryByRole('alertdialog')).toBeNull(); // the guard asks, not the shell
     answer = true;
     await act(async () => runAction('tab.close'));
-    expect(tabNames()).toEqual(['Overview']);
+    expect(tabNames()).toEqual([]);
     expect(useSessions.getState().unstarted.has(NEW)).toBe(false);
   });
 
@@ -434,6 +461,7 @@ describe('unstarted sessions', () => {
 describe('before the layout has hydrated', () => {
   it('a session opened from the sidebar while layout.get is outstanding survives hydration', async () => {
     const user = userEvent.setup();
+    // Saved before W5, so it still holds the Overview's tab, which hydration drops.
     const persisted = {
       ...useLayout.getState().main,
       panes: [{ tabs: [{ id: 'overview', kind: 'overview', pinned: true }, { id: 'diagnostics', kind: 'diagnostics', pinned: false }], activeTabId: 'diagnostics' }],
@@ -449,7 +477,7 @@ describe('before the layout has hydrated', () => {
       for (const key of ['regions', 'main.tabs', 'panel.pinned']) await layoutMain.reply('layout.get', { value: key === 'main.tabs' ? persisted : null });
       await hydrating;
     });
-    expect(tabNames()).toEqual(['Overview', 'Diagnostics', 'Charter + research · MAWS']);
+    expect(tabNames()).toEqual(['Diagnostics', 'Charter + research · MAWS']);
     expect(selected()).toBe('Charter + research · MAWS');
   });
 });
@@ -484,19 +512,6 @@ describe('⌃Tab follows DOM focus', () => {
     expect(activeOf(0)).toBe(before0);
     await user.keyboard('{Control>}{Shift>}{Tab}{/Shift}{/Control}');
     expect(activeOf(1)).toBe(`session:${idOf('Sidebar interaction pass')}`);
-  });
-
-  it('with focus on an Overview card cycles that card’s pane', async () => {
-    const user = userEvent.setup();
-    render(<Shell />);
-    act(() => {
-      useLayout.getState().openSession(idOf('Charter + research'));
-      useLayout.getState().activateTab('overview');
-    });
-    const card = within(main()).getAllByRole('article')[0];
-    act(() => card.focus());
-    await user.keyboard('{Control>}{Tab}{/Control}');
-    expect(activeOf(0)).toBe(`session:${idOf('Charter + research')}`);
   });
 
   it('cycles nothing from text entry in the pane, from a key sink, from a button, or under an open menu', async () => {
@@ -536,7 +551,7 @@ describe('⌃Tab follows DOM focus', () => {
     });
     act(() => screen.getByLabelText('terminal input').focus());
     act(() => runAction('tab.next'));
-    expect(activeOf(0)).toBe('overview');
+    expect(activeOf(0)).toBe(`session:${idOf('Charter + research')}`); // wraps from the last tab, once
   });
 });
 
@@ -545,12 +560,12 @@ describe('accounts and settings tabs (C11)', () => {
     const user = userEvent.setup();
     render(<Shell />);
     act(() => useLayout.getState().openTab({ kind: 'accounts' }));
-    expect(tabNames()).toEqual(['Overview', 'Accounts']);
+    expect(tabNames()).toEqual(['Accounts']);
     expect(within(main()).getByText('Accounts unavailable')).toBeTruthy();
     act(() => useLayout.getState().openTab({ kind: 'settings', section: null }));
     expect(within(main()).getByText('Settings unavailable')).toBeTruthy();
     await user.click(within(tab('Settings')).getByRole('button', { name: 'Close Settings', hidden: true }));
-    expect(tabNames()).toEqual(['Overview', 'Accounts']);
+    expect(tabNames()).toEqual(['Accounts']);
   });
 
   it('pass the settings section to the registered slot, following a second open', () => {
@@ -560,7 +575,7 @@ describe('accounts and settings tabs (C11)', () => {
     expect(within(main()).getByText('section keyboard')).toBeTruthy();
     act(() => useLayout.getState().openTab({ kind: 'settings', section: 'notifications' }));
     expect(within(main()).getByText('section notifications')).toBeTruthy();
-    expect(tabNames()).toEqual(['Overview', 'Settings']);
+    expect(tabNames()).toEqual(['Settings']);
   });
 });
 

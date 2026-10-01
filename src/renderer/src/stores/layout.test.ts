@@ -8,7 +8,7 @@ const A = 'app-a' as AppSessionId;
 const session = (id: string) => ({ id: `session:${id}`, kind: 'session', appSessionId: id, pinned: false });
 const persistedMain: LayoutMain = {
   ...LAYOUT_DEFAULTS.main,
-  panes: [{ tabs: [LAYOUT_DEFAULTS.main.panes[0].tabs[0], session('app-a') as never, session('gone') as never], activeTabId: 'session:gone' }],
+  panes: [{ tabs: [session('app-a') as never, session('gone') as never], activeTabId: 'session:gone' }],
 };
 
 async function hydrate(values: Record<string, unknown>, known = (id: AppSessionId) => id === A) {
@@ -25,8 +25,20 @@ describe('layout and settings migrate', () => {
   it('hydrating a persisted layout whose session tab names an unknown appSessionId drops the tab', async () => {
     const { store } = await hydrate({ 'main.tabs': persistedMain });
     expect(store.getState().hydrated).toBe(true);
-    expect(store.getState().main.panes[0].tabs.map((t) => t.id)).toEqual(['overview', 'session:app-a']);
-    expect(store.getState().main.panes[0].activeTabId).toBe('overview');
+    expect(store.getState().main.panes[0].tabs.map((t) => t.id)).toEqual(['session:app-a']);
+    expect(store.getState().main.panes[0].activeTabId).toBe('session:app-a');
+  });
+
+  // W5: every layout saved before the floating Overview holds the Overview's tab, usually first and active. Reading it must
+  // keep the user's tabs (not fail over to the default's empty pane) and show the first of them in the Overview's place.
+  it('hydrating a layout saved with the Overview tab drops that tab, its pane activating the first remaining tab', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const overview = { id: 'overview', kind: 'overview', pinned: true };
+    const saved = { ...LAYOUT_DEFAULTS.main, panes: [{ tabs: [overview, session('app-a'), session('b')], activeTabId: 'overview' }], closedTabs: [overview] };
+    const { store } = await hydrate({ 'main.tabs': saved }, () => true);
+    expect(store.getState().main).toEqual({ ...LAYOUT_DEFAULTS.main, panes: [{ tabs: [session('app-a'), session('b')], activeTabId: 'session:app-a' }] });
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
   });
 
   it('falls back to the default for an absent or invalid key and reads the per-session panel keys', async () => {
@@ -57,11 +69,11 @@ describe('layout store actions', () => {
     s().openSession('c' as AppSessionId);
     s().activateTab('session:b');
     s().closeTab('session:b');
-    expect(s().main.panes[0].tabs.map((t) => t.id)).toEqual(['overview', 'session:app-a', 'session:c']);
+    expect(s().main.panes[0].tabs.map((t) => t.id)).toEqual(['session:app-a', 'session:c']);
     s().reopenClosed();
-    expect(s().main.panes[0].tabs.map((t) => t.id)).toEqual(['overview', 'session:app-a', 'session:b', 'session:c']);
+    expect(s().main.panes[0].tabs.map((t) => t.id)).toEqual(['session:app-a', 'session:b', 'session:c']);
     s().dropSession(A);
-    expect(s().main.panes[0].tabs.map((t) => t.id)).toEqual(['overview', 'session:b', 'session:c']);
+    expect(s().main.panes[0].tabs.map((t) => t.id)).toEqual(['session:b', 'session:c']);
   });
 
   it('moves a panel tab between the global pins and the session’s own tabs (D-10)', () => {
@@ -76,7 +88,7 @@ describe('layout store actions', () => {
     expect(store.getState().panelBySession.get(A)?.tabs).toEqual([{ id: 't1', toolId: 'files', pinned: false }]);
   });
 
-  it('clears the no-session selection when setPanelTabs(null, …) asks for none (the panel home glyph on the Overview)', () => {
+  it('clears the no-session selection when setPanelTabs(null, …) asks for none (the panel home glyph with no session shown)', () => {
     const store = createLayoutStore();
     const pin = { id: 't1', toolId: 'files', pinned: true };
     store.getState().setPanelTabs(null, { tabs: [pin], activeTabId: 't1' });
@@ -92,6 +104,17 @@ describe('layout store actions', () => {
     expect(store.getState().regions.sidebar.width).toBe(240);
     expect(store.getState().regions.panel).toEqual({ ...LAYOUT_DEFAULTS.regions.panel, collapsed: true });
   });
+
+  // W5: the floating Overview's rect persists with the regions; whether it is open does not (the app opens on the tabs).
+  it('keeps the Overview’s rect in the regions and its open state outside them', () => {
+    const store = createLayoutStore();
+    const before = store.getState().regions;
+    store.getState().setOverviewOpen(true);
+    expect(store.getState().overviewOpen).toBe(true);
+    expect(store.getState().regions).toBe(before);
+    store.getState().setOverviewRect({ x: 20, y: 12, width: 640, height: 480 });
+    expect(store.getState().regions).toEqual({ ...before, overview: { x: 20, y: 12, width: 640, height: 480 } });
+  });
 });
 
 describe('tab changes before hydration', () => {
@@ -100,12 +123,12 @@ describe('tab changes before hydration', () => {
     const store = createLayoutStore();
     const hydrating = store.getState().hydrate(fake.client, (id) => id === A || id === ('b' as AppSessionId));
     store.getState().openSession('b' as AppSessionId); // a click before layout.get answers
-    expect(store.getState().main.panes[0].tabs.map((t) => t.id)).toEqual(['overview', 'session:b']); // shown at once
+    expect(store.getState().main.panes[0].tabs.map((t) => t.id)).toEqual(['session:b']); // shown at once
     await new Promise((resolve) => setTimeout(resolve, 0)); // layout.list answered; the three reads are outstanding
     expect(fake.pending('layout.get')).toBe(3);
     for (const key of ['regions', 'main.tabs', 'panel.pinned']) await fake.reply('layout.get', { value: key === 'main.tabs' ? persistedMain : null });
     await hydrating;
-    expect(store.getState().main.panes[0].tabs.map((t) => t.id)).toEqual(['overview', 'session:b', 'session:app-a']);
+    expect(store.getState().main.panes[0].tabs.map((t) => t.id)).toEqual(['session:app-a', 'session:b']); // after the hydrated active tab
     expect(store.getState().main.panes[0].activeTabId).toBe('session:b');
     store.getState().openSession(A); // after hydration a change applies once, as before
     expect(store.getState().main.panes[0].activeTabId).toBe('session:app-a');

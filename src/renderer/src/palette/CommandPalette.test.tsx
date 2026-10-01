@@ -93,6 +93,7 @@ describe('command palette', () => {
   });
 
   it('⌘⏎ on a session opens it in the split', async () => {
+    useLayout.getState().openSession(idOf('Charter + research')); // a tab beside which to split (an empty pane takes the session itself)
     const user = await openAndType('quota');
     await user.keyboard('{Meta>}{Enter}{/Meta}');
     expect(useLayout.getState().main.panes).toHaveLength(2);

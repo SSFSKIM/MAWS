@@ -4,7 +4,7 @@
 // fixture did not record, so a matching `*.resolved` event is the journal's own witness. Probe fixtures replay as
 // recorded; the SPEC-derived synthetic requests (test/fixtures/requests) replay behind the handshake prelude
 // (test/fixtures/engine/replay-handshake.jsonl), each followed by the response the card must write. One case runs the
-// real shell on C5's stub scenario: the Overview card reached from the Needs-you row answers with Enter on its article.
+// real shell on C5's stub scenario: a card on the floating Overview (⌘0) answers with Enter on its article.
 // The real composer's case (M4's gate) runs in the shell too. The card page needs a harness build: `pnpm e2e:requests`
 // builds one and runs this file; under a plain `pnpm build && pnpm e2e` the card-page cases skip and the two shell
 // cases run.
@@ -296,7 +296,16 @@ test('the Overview card answers with Enter on its article', async () => {
     const { app, page } = shell;
     const fix = 'Fix sidebar drag';
     await expect(page.locator('[data-region="sidebar"] [data-kind="project"]').first()).toBeVisible({ timeout: 10_000 });
-    await app.evaluate(({ Menu }) => Menu.getApplicationMenu()?.getMenuItemById('tab.overview')?.click());
+    // ⌘0 (View › Overview), once the page has registered it: the item is disabled until then
+    const openOverview = () =>
+      app.evaluate(({ Menu }) => {
+        const item = Menu.getApplicationMenu()?.getMenuItemById('tab.overview');
+        if (!item?.enabled) return false;
+        item.click();
+        return true;
+      });
+    await expect.poll(openOverview, { message: 'View › Overview is enabled' }).toBe(true);
+    await expect(page.locator('[data-region="main"]').getByRole('dialog', { name: 'Overview' })).toBeVisible();
     const card = page.locator('[data-region="main"]').getByRole('article', { name: fix });
     await expect(card.getByRole('radio', { name: 'Allow once' })).toBeVisible(); // C7's card, not C5's preview
     const badge = () => app.evaluate(({ app }) => app.dock?.getBadge());
