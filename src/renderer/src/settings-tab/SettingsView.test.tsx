@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MawsBridge, Settings } from '@shared/ipc/schema';
-import { SETTINGS_DEFAULTS_V6 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V7 } from '@shared/settings/defaults';
 import { useGateway } from '../gateway/store';
 import { useAttention } from '../stores/attention';
 import { useNotices } from '../stores/notices';
@@ -20,7 +20,7 @@ import { useSessions } from '../stores/sessions';
 
 let b: SettingsBridge;
 
-function renderView(initial: Settings = SETTINGS_DEFAULTS_V6, section: Parameters<typeof SettingsView>[0]['section'] = null) {
+function renderView(initial: Settings = SETTINGS_DEFAULTS_V7, section: Parameters<typeof SettingsView>[0]['section'] = null) {
   b = settingsBridge(initial);
   window.maws = b.bridge;
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -219,7 +219,7 @@ describe('settings tab writes one field per row', () => {
     vi.spyOn(HTMLElement.prototype, 'scrollIntoView').mockImplementation(function (this: HTMLElement) {
       scrolled.push(this.getAttribute('aria-labelledby') ?? '');
     });
-    renderView(SETTINGS_DEFAULTS_V6, 'keyboard');
+    renderView(SETTINGS_DEFAULTS_V7, 'keyboard');
     expect(scrolled.at(-1)).toMatch(/keyboard/);
     expect(within(screen.getByRole('navigation', { name: 'Settings sections' })).getByRole('button', { name: 'Keyboard' }).getAttribute('aria-current')).toBe('true');
   });
@@ -231,7 +231,7 @@ describe('settings tab: the memory budget rows', () => {
   const GiB = 1024 * 1024;
   beforeEach(() => {
     resetBudgetStore();
-    useBudget.getState().apply({ limitKiB: 8 * GiB, totalKiB: 3 * GiB, sampledAt: null, over: false, overWithoutCandidate: false, candidates: 0, settling: 0, releasing: null, blocked: [], lastRelease: null });
+    useBudget.getState().apply({ enabled: true, limitKiB: 8 * GiB, totalKiB: 3 * GiB, sampledAt: null, over: false, overWithoutCandidate: false, candidates: 0, settling: 0, releasing: null, blocked: [], lastRelease: null });
   });
   afterEach(() => {
     resetBudgetStore();
@@ -240,22 +240,22 @@ describe('settings tab: the memory budget rows', () => {
 
   it('Memory budget: the default named from the host’s limit; a GB value with one decimal is stored in MiB; Use default writes null', async () => {
     renderView();
-    const field = within(row('Memory budget')).getByRole('textbox', { name: 'Memory budget' }) as HTMLInputElement;
+    const field = within(row('Limit')).getByRole('textbox', { name: 'Memory budget' }) as HTMLInputElement; // W7: the row is the limit's
     expect(field.value).toBe('');
     expect(field.placeholder).toBe('8');
-    expect(row('Memory budget').textContent).toContain('Default · 25% of physical memory (8 GB)');
+    expect(row('Limit').textContent).toContain('Default · 25% of physical memory (8 GB)');
     fireEvent.change(field, { target: { value: '6.5' } });
     fireEvent.keyDown(field, { key: 'Enter' });
     await vi.waitFor(() => expect(b.sets).toEqual([{ engine: { memoryBudgetMiB: 6656 } }]));
     await vi.waitFor(() => expect(field.value).toBe('6.5'));
-    fireEvent.click(within(row('Memory budget')).getByRole('button', { name: 'Use default' }));
+    fireEvent.click(within(row('Limit')).getByRole('button', { name: 'Use default' }));
     await vi.waitFor(() => expect(b.sets.at(-1)).toEqual({ engine: { memoryBudgetMiB: null } }));
     expect(settings().engine.memoryBudgetMiB).toBeNull();
   });
 
   it('Memory budget: a value below 0.5 GB or not a number is refused in words and the field goes back', async () => {
-    renderView({ ...SETTINGS_DEFAULTS_V6, engine: { ...SETTINGS_DEFAULTS_V6.engine, memoryBudgetMiB: 6144 } });
-    const field = within(row('Memory budget')).getByRole('textbox', { name: 'Memory budget' }) as HTMLInputElement;
+    renderView({ ...SETTINGS_DEFAULTS_V7, engine: { ...SETTINGS_DEFAULTS_V7.engine, memoryBudgetMiB: 6144 } });
+    const field = within(row('Limit')).getByRole('textbox', { name: 'Memory budget' }) as HTMLInputElement;
     expect(field.value).toBe('6.0');
     for (const typed of ['0.4', 'lots']) {
       fireEvent.change(field, { target: { value: typed } });
@@ -264,6 +264,25 @@ describe('settings tab: the memory budget rows', () => {
     }
     expect(b.sets).toEqual([]);
     expect(useNotices.getState().notices.map((n) => n.text)).toContain('Enter the memory budget in GB, at least 0.5');
+  });
+
+  // W7: the switch (settings version 7), on by default; off hides the limit and the stateful servers
+  it('Memory budget: a switch, on by default, writes the switch whole; off hides the limit and the stateful servers and says what off means', async () => {
+    renderView({ ...SETTINGS_DEFAULTS_V7, engine: { ...SETTINGS_DEFAULTS_V7.engine, memoryBudgetMiB: 6144 } });
+    const toggle = within(row('Memory budget')).getByRole('switch', { name: 'Release idle sessions to stay under a memory limit' });
+    expect(toggle.getAttribute('aria-checked')).toBe('true');
+    expect(row('Limit')).toBeTruthy();
+    expect(row('Stateful MCP servers')).toBeTruthy();
+    fireEvent.click(toggle);
+    await vi.waitFor(() => expect(b.sets).toEqual([{ engine: { memoryBudget: { enabled: false } } }]));
+    await vi.waitFor(() => expect(toggle.getAttribute('aria-checked')).toBe('false'));
+    expect(screen.queryByRole('group', { name: 'Limit' })).toBeNull();
+    expect(screen.queryByRole('group', { name: 'Stateful MCP servers' })).toBeNull();
+    expect(row('Memory budget').textContent).toContain('Off · engine processes never exit on their own');
+    fireEvent.click(toggle);
+    await vi.waitFor(() => expect(settings().engine.memoryBudget).toEqual({ enabled: true }));
+    expect((within(row('Limit')).getByRole('textbox', { name: 'Memory budget' }) as HTMLInputElement).value).toBe('6.0'); // the limit was kept while off
+    expect(b.sets).toEqual([{ engine: { memoryBudget: { enabled: false } } }, { engine: { memoryBudget: { enabled: true } } }]);
   });
 
   it('Stateful MCP servers: adds a typed name, suggests the names live sessions report, and removes a chip', async () => {

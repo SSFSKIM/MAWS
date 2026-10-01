@@ -6,6 +6,9 @@
 // The banner follows the host's own debounced flag (`overWithoutCandidate`, two consecutive samples over budget with no
 // candidate); the page never counts samples. It is posted once per crossing (the flag turning true), through C5's
 // banner host; dismissed, it stays dismissed until the next crossing; it goes when the flag clears.
+//
+// W7: a state whose `enabled` is false is the budget switched off in settings: no banner, and an open sheet closes
+// (BudgetSheets renders nothing while it is off). Session info still reads the totals from the same state.
 import { create } from 'zustand';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
@@ -29,7 +32,7 @@ export interface BudgetStore {
 export const useBudget = create<BudgetStore>()((set) => ({
   state: null,
   sheet: null,
-  apply: (state) => set({ state }),
+  apply: (state) => set((s) => ({ state, sheet: state.enabled ? s.sheet : null })), // W7: off closes a sheet
   open: (sheet) => set({ sheet }),
   close: () => set({ sheet: null }),
 }));
@@ -42,7 +45,7 @@ export function resetBudgetStore(): void {
 function syncBanner(previous: BudgetState | null, next: BudgetState): void {
   const notices = useNotices.getState();
   const shown = notices.notices.some((n) => n.id === BUDGET_BANNER_ID);
-  if (!next.overWithoutCandidate) {
+  if (!next.enabled || !next.overWithoutCandidate) { // W7: never while the budget is off
     if (shown) notices.dismiss(BUDGET_BANNER_ID);
     return;
   }

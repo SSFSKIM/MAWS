@@ -55,8 +55,13 @@ const c11Commands = {
 // evaluates at once; `engine.budget` answers the table's budget state, and the event of the same name carries it
 // whenever any field but `sampledAt` changes and at every release. `overWithoutCandidate` is the host's two-sample
 // flag (over budget with no candidate on two consecutive samples); the renderer never counts samples.
-export const BudgetPolicyInputSchema = z.strictObject({ limitKiB: z.number().int().positive(), statefulMcpServers: z.array(z.string()).max(64) });
+// W7 start: `enabled` is settings' `engine.memoryBudget.enabled` (charter §4.4 as amended 2026-10-01). Off, the host
+// releases nothing and `over` and `overWithoutCandidate` read false, while it keeps sampling and the state keeps the
+// totals; the limit still travels, so turning it on again needs nothing else. The state echoes the policy's `enabled`.
+// W7 end
+export const BudgetPolicyInputSchema = z.strictObject({ enabled: z.boolean() /* W7 */, limitKiB: z.number().int().positive(), statefulMcpServers: z.array(z.string()).max(64) });
 export const BudgetStateSchema = z.strictObject({
+  enabled: z.boolean(), // W7
   limitKiB: z.number().int(), totalKiB: z.number().int(), sampledAt: z.string().nullable(),
   over: z.boolean(), overWithoutCandidate: z.boolean(), candidates: z.number().int(), settling: z.number().int(),
   releasing: AppSessionIdSchema.nullable(),

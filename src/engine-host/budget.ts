@@ -11,7 +11,8 @@ export const DEFAULT_BUDGET_FRACTION = 0.25;
 export const EXITED_RING = 500; // events an exited stream keeps in memory; older ranges rebuild from the journal
 export const EXITED_ROWS_MAX = 24; // exited rows the host keeps; the oldest exit goes first
 
-export interface BudgetPolicy { limitKiB: number; statefulMcpServers: readonly string[] }
+// W7: `enabled` false is the budget switched off in settings: nothing is over, so nothing is released and no flag rises.
+export interface BudgetPolicy { enabled: boolean; limitKiB: number; statefulMcpServers: readonly string[] }
 
 export interface BudgetInput {
   rows: readonly EngineSessionStatus[];
@@ -80,7 +81,7 @@ export function evaluate(input: BudgetInput): BudgetVerdict {
     else if (s.process === 'ready' && !ENGINE_ACTIVE.has(s.engineState) && tree !== null && input.quiet.has(s.appSessionId)) candidates.push(s);
     else settling += 1;
   }
-  const over = totalKiB > input.policy.limitKiB;
+  const over = input.policy.enabled && totalKiB > input.policy.limitKiB; // W7: off, never over
   const lru = candidates.reduce<EngineSessionStatus | null>((best, s) => (best === null || s.lastUsedAt < best.lastUsedAt || (s.lastUsedAt === best.lastUsedAt && s.appSessionId < best.appSessionId) ? s : best), null);
   return {
     totalKiB, limitKiB: input.policy.limitKiB, over, unmeasured,

@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, type ElectronApplication, type Page } from '@playwright/test';
 import { collectConsoleErrors, REPO_ROOT, test } from './support/launch';
-import { SETTINGS_DEFAULTS_V6 } from '../src/shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V7 } from '../src/shared/settings/defaults';
 
 const LIGHT_BG = 'rgb(250, 249, 246)'; // #faf9f6, light `--bg`
 const DARK_BG = 'rgb(19, 19, 19)'; // #131313, dark `--bg`
@@ -109,7 +109,7 @@ test('MAWS opens light, hosts answer, pty echoes, survives reload and window clo
   expect(dark).toMatchObject({ ok: true, value: { settings: { theme: 'dark' }, resolvedTheme: 'dark' } });
   await expect(reopened.locator('html')).toHaveAttribute('data-theme', 'dark');
   await expect.poll(() => reopened.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe(DARK_BG);
-  expect(JSON.parse(readFileSync(join(maws.userData, 'settings.json'), 'utf8'))).toEqual({ ...SETTINGS_DEFAULTS_V6, theme: 'dark' });
+  expect(JSON.parse(readFileSync(join(maws.userData, 'settings.json'), 'utf8'))).toEqual({ ...SETTINGS_DEFAULTS_V7, theme: 'dark' });
 
   expect(maws.consoleErrors(), 'the console stays free of errors, first load included').toEqual([]);
   expect(reopenedConsoleErrors(), 'the re-created window\'s console stays free of errors').toEqual([]);

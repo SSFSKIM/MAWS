@@ -2,7 +2,8 @@
 // Version 2 (C5): the keymap overrides and the notification policy. Version 3 (C11): the engine binary, the gateway
 // policy, the near-limit threshold, the monospace font and the per-kind notification switches. Version 4 (C12): the
 // memory budget. Version 5 (W2): the transcript's width. Version 6 (W3): the mode a session takes when the engine refuses
-// auto. Migrations live in `src/shared/settings/defaults.ts`, run by main's store; the schema never defaults.
+// auto. Version 7 (W7): the memory budget's switch. Migrations live in `src/shared/settings/defaults.ts`, run by main's
+// store; the schema never defaults.
 import * as z from 'zod';
 import { ACTION_IDS } from '../../keymap/actions';
 import { CHORD_PATTERN } from '../../keymap/chord';
@@ -39,6 +40,10 @@ const EngineSettingsSchema = z.strictObject({
   memoryBudgetMiB: z.number().int().min(512).nullable(),
   statefulMcpServers: z.array(z.string().min(1).max(200)).max(64),
   // C12 end
+  // W7: version 7, the budget's switch (charter §4.4 as amended 2026-10-01): off, no process is released for the budget
+  // and engine processes never exit on their own; the two fields above are kept for when it is on again. An object, so
+  // a patch replaces it whole.
+  memoryBudget: z.strictObject({ enabled: z.boolean() }),
 });
 const GatewaySettingsSchema = z.strictObject({
   defaultRoute: z.enum(['gateway', 'direct']), // D-19: 'gateway'; seeds C10's intent.gateway
@@ -64,7 +69,7 @@ export type AutoFallback = z.infer<typeof AutoFallbackSchema>;
 const PermissionsSettingsSchema = z.strictObject({ autoFallback: AutoFallbackSchema });
 
 export const SettingsSchema = z.strictObject({
-  version: z.literal(6), // C11: version 3; C12: version 4 (engine.memoryBudgetMiB, engine.statefulMcpServers); W2: version 5 (appearance.transcriptWidth); W3: version 6 (permissions.autoFallback)
+  version: z.literal(7), // C11: version 3; C12: version 4 (engine.memoryBudgetMiB, engine.statefulMcpServers); W2: version 5 (appearance.transcriptWidth); W3: version 6 (permissions.autoFallback); W7: version 7 (engine.memoryBudget)
   theme: ThemeSettingSchema,
   // Overrides only; null unbinds; absent means the default. `partialRecord`, because zod 4's enum-keyed `record` is
   // exhaustive and would reject `{}` and every single override; unknown keys are still rejected.

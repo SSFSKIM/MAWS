@@ -8,7 +8,7 @@ import { budgetRows } from './model';
 const GiB = 1024 * 1024;
 const A = 'app-a' as AppSessionId;
 const state = (over: Partial<BudgetState> = {}): BudgetState => ({
-  limitKiB: 8 * GiB, totalKiB: Math.round(3.1 * GiB), sampledAt: null, over: false, overWithoutCandidate: false, candidates: 5, settling: 1, releasing: null,
+  enabled: true, limitKiB: 8 * GiB, totalKiB: Math.round(3.1 * GiB), sampledAt: null, over: false, overWithoutCandidate: false, candidates: 5, settling: 1, releasing: null,
   blocked: [{ appSessionId: A, reasons: ['turn'] }, { appSessionId: 'app-b' as AppSessionId, reasons: ['busy'] }, { appSessionId: 'app-c' as AppSessionId, reasons: ['pending_request'] }],
   lastRelease: null, ...over,
 });
@@ -16,6 +16,10 @@ const state = (over: Partial<BudgetState> = {}): BudgetState => ({
 describe("Session info's memory budget lines", () => {
   it('reads the budget as the sum of the live trees against the limit, with the live sessions counted', () => {
     expect(budgetRows(state(), digest(A))).toEqual([{ label: 'Memory budget', value: '3.1 GB of 8 GB · 9 sessions' }]);
+  });
+
+  it('reads the sum and the live sessions without a limit while the budget is off (W7)', () => {
+    expect(budgetRows(state({ enabled: false }), digest(A))).toEqual([{ label: 'Memory budget', value: 'Off · 3.1 GB · 9 sessions' }]);
   });
 
   it('reads — before the host has answered', () => {

@@ -6,7 +6,7 @@ import { validateCommandInput } from '@shared/ipc/validate';
 import type { BinaryInfo } from '@shared/ipc/schema/engine';
 import type { Custody } from '@shared/ipc/schema/settings'; // C12
 import type { CommandName, MawsBridge, Settings, SettingsPatch } from '@shared/ipc/schema';
-import { applySettingsPatch, SETTINGS_DEFAULTS_V6 } from '@shared/settings/defaults';
+import { applySettingsPatch, SETTINGS_DEFAULTS_V7 } from '@shared/settings/defaults';
 import { useSettings } from '../stores/settings';
 
 export const BINARY: BinaryInfo = { path: '/Users/owner/.local/share/claude/versions/2.1.283', expectedVersion: '2.1.283', version: '2.1.283', ok: true, error: null };
@@ -25,7 +25,7 @@ export interface SettingsBridge {
   answers: Record<string, (input: unknown) => unknown>; // command → the value it answers (throw to answer an error)
 }
 
-export function settingsBridge(initial: Settings = SETTINGS_DEFAULTS_V6): SettingsBridge {
+export function settingsBridge(initial: Settings = SETTINGS_DEFAULTS_V7): SettingsBridge {
   let settings = structuredClone(initial);
   const publish = () => useSettings.setState({ state: { settings, resolvedTheme: settings.theme === 'dark' ? 'dark' : 'light' } });
   publish();
