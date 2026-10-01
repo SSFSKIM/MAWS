@@ -23,14 +23,14 @@ const flush = () => new Promise((r) => setImmediate(r));
 // `turn` stands in for the normaliser's open turn (a write opens one, as the out row does). `onWrite` runs when a frame
 // reached the pipe, before the write resolves (where the real writer's settle drains the inbound frames it held);
 // `cancelAnswer`, when set, is what the engine's answer to a cancel waits on.
-async function harness(opts: { store?: MemorySessionStateStore; failWrite?: (frame: UserInputFrame) => boolean; holdWrites?: boolean; recovered?: boolean } = {}) {
+async function harness(opts: { store?: MemorySessionStateStore; failWrite?: (frame: UserInputFrame) => boolean; holdWrites?: boolean; recovered?: boolean; holdAllDeadlineMs?: number } = {}) {
   const store = opts.store ?? new MemorySessionStateStore();
   const writes: UserInputFrame[] = [];
   const rows: Record<string, unknown>[] = [];
   const changes: QueueState[] = [];
   const held: (() => void)[] = [];
   const cancels: MessageUuid[] = [];
-  const h = { turn: false, ready: true, cancelled: true, store, writes, rows, changes, held, cancels, storeAtWrite: [] as QueueState[], onWrite: null as ((frame: UserInputFrame) => void) | null, cancelAnswer: null as Promise<void> | null, cancelFor: null as ((uuid: MessageUuid) => boolean) | null };
+  const h = { turn: false, ready: true, cancelled: true, store, writes, rows, changes, held, cancels, storeAtWrite: [] as QueueState[], onWrite: null as ((frame: UserInputFrame) => void) | null, cancelAnswer: null as Promise<void> | null, cancelFor: null as ((uuid: MessageUuid) => boolean | Promise<boolean>) | null };
   const queue = new MessageQueue({
     appSessionId: ID,
     store,
@@ -52,6 +52,7 @@ async function harness(opts: { store?: MemorySessionStateStore; failWrite?: (fra
     },
     onChange: (q) => changes.push(q),
     log: () => {},
+    holdAllDeadlineMs: opts.holdAllDeadlineMs,
   });
   if (opts.recovered !== false) await queue.recover(); // what the session does before `ready`
   return { ...h, h, queue };
@@ -906,5 +907,103 @@ describe('holdAll, the plain stop’s hold (W1)', () => {
     expect(await t.queue.holdAll()).toEqual([]);
     expect(t.cancels).toEqual([]);
     expect(t.changes).toHaveLength(saves);
+  });
+
+  it('the withdrawals share one deadline: an unanswered cancel lets the stop go on at it, no further cancel starts, and the late answer is still held and saved (W1 review)', async () => {
+    vi.useFakeTimers();
+    const t = await harness({ holdAllDeadlineMs: 2_000 });
+    t.h.turn = true;
+    const a = (await t.queue.steer('steer a', { priority: 'next' })).messageUuid;
+    const b = (await t.queue.steer('steer b', { priority: 'next' })).messageUuid;
+    let answer!: () => void;
+    t.h.cancelAnswer = new Promise<void>((resolve) => (answer = resolve));
+    await t.queue.pause('interrupt');
+    let held: QueueEntry[] | null = null;
+    const holding = t.queue.holdAll().then((entries) => (held = entries));
+    await vi.advanceTimersByTimeAsync(1_999);
+    expect(held).toBeNull();
+    await vi.advanceTimersByTimeAsync(1);
+    await holding;
+    expect(held).toEqual([]);
+    expect(t.cancels).toEqual([a]); // b's cancel never started: b stays the engine's
+    expect(t.queue.state.steers?.map((s) => s.messageUuid)).toEqual([a, b]);
+    expect(t.queue.state.withdrawn).toEqual([a]); // a's withdrawal is still in flight
+    expect((await t.store.loadQueue(ID)).withdrawn).toEqual([a]);
+    const written = t.writes.length;
+    t.queue.onLifecycle(lifecycle(a, 'cancelled')); // the engine withdraws it, then answers
+    answer();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(t.queue.state.entries.map((e) => [e.content, e.state])).toEqual([['steer a', 'queued']]);
+    expect(t.queue.state.steers?.map((s) => s.messageUuid)).toEqual([b]);
+    expect(t.queue.state.withdrawn).toEqual([a]);
+    expect((await t.store.loadQueue(ID)).entries.map((e) => e.content)).toEqual(['steer a']);
+    expect(queueRows(t.rows)).toContain('hold:undefined');
+    expect(t.writes).toHaveLength(written); // paused: nothing released
+  });
+
+  it('each withdrawn steer is saved as a held entry before the next cancel goes out (W1 review)', async () => {
+    const t = await harness();
+    t.h.turn = true;
+    await t.queue.steer('steer a', { priority: 'next' });
+    await t.queue.steer('steer b', { priority: 'next' });
+    const onDisk: unknown[][] = [];
+    t.h.cancelFor = async () => {
+      onDisk.push((await t.store.loadQueue(ID)).entries.map((e) => e.content)); // what a crash during this cancel would leave
+      return true;
+    };
+    await t.queue.pause('interrupt');
+    await t.queue.holdAll();
+    expect(onDisk).toEqual([[], ['steer a']]);
+  });
+
+  it('a second stop while the first withdraws a steer leaves it to the first: one cancel, one held entry, its marker kept (W1 review)', async () => {
+    const t = await harness();
+    t.h.turn = true;
+    const a = (await t.queue.steer('steer a', { priority: 'next' })).messageUuid;
+    let answer!: () => void;
+    t.h.cancelAnswer = new Promise<void>((resolve) => (answer = resolve));
+    let given = 0;
+    t.h.cancelFor = () => given++ === 0; // the engine gives a message back once
+    await t.queue.pause('interrupt');
+    const first = t.queue.holdAll();
+    await flush();
+    expect(await t.queue.holdAll()).toEqual([]);
+    answer();
+    expect((await first).map((e) => e.content)).toEqual(['steer a']);
+    expect(t.cancels).toEqual([a]);
+    expect(t.queue.state.entries.map((e) => e.content)).toEqual(['steer a']);
+    expect(t.queue.state.withdrawn).toEqual([a]);
+    expect((await t.store.loadQueue(ID)).withdrawn).toEqual([a]);
+  });
+
+  it('a hold and a stop on the same steer: the stop leaves a held one to the hold, and a hold is refused while the stop withdraws it (W1 review)', async () => {
+    for (const holdFirst of [true, false]) {
+      const t = await harness();
+      t.h.turn = true;
+      const a = (await t.queue.steer('steer a', { priority: 'next' })).messageUuid;
+      let answer!: () => void;
+      t.h.cancelAnswer = new Promise<void>((resolve) => (answer = resolve));
+      let given = 0;
+      t.h.cancelFor = () => given++ === 0;
+      if (holdFirst) {
+        const holding = t.queue.hold(a);
+        await flush();
+        await t.queue.pause('interrupt');
+        expect(await t.queue.holdAll()).toEqual([]);
+        answer();
+        expect((await holding).content).toBe('steer a');
+      } else {
+        await t.queue.pause('interrupt');
+        const stopping = t.queue.holdAll();
+        await flush();
+        await expect(t.queue.hold(a)).rejects.toThrow('already being held');
+        answer();
+        expect((await stopping).map((e) => e.content)).toEqual(['steer a']);
+      }
+      expect(t.cancels).toEqual([a]);
+      expect(t.queue.state.entries.map((e) => e.content)).toEqual(['steer a']);
+      expect(t.queue.state.withdrawn).toEqual([a]);
+      expect((await t.store.loadQueue(ID)).withdrawn).toEqual([a]);
+    }
   });
 });
