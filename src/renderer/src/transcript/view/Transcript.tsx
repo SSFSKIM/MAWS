@@ -255,14 +255,18 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
           </div>
         )}
         {!following && (
-          <button type="button" className="transcript-jump" onClick={() => listRef.current?.scrollToEnd()}>
-            Jump to latest
-            {working && (
+          // W2 (B3): Codex's round scroll-to-bottom button, right of the column; its dots while the turn works
+          <button type="button" className="transcript-jump" aria-label="Jump to latest" title="Jump to latest" onClick={() => listRef.current?.scrollToEnd()}>
+            {working ? (
               <span className="transcript-working-dots" aria-hidden="true">
                 <span />
                 <span />
                 <span />
               </span>
+            ) : (
+              <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M8 3v10M3.5 8.5 8 13l4.5-4.5" />
+              </svg>
             )}
           </button>
         )}

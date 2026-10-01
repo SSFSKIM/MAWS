@@ -207,6 +207,12 @@ test('follow mode breaks on scroll-up and Jump to latest restores it', async ({ 
   await page.evaluate(() => document.querySelector<HTMLElement>('[data-transcript-scroller]')!.scrollBy(0, -200));
   await expect.poll(async () => (await metrics(page)).following, { message: 'a scroll up leaves follow mode' }).toBe(false);
   await expect(jump).toBeVisible();
+  // W2 (B3): Codex's round 32px button, right of the column, never over the prose of a pane with room for it
+  const button = (await jump.boundingBox())!;
+  const column = (await page.locator('.transcript-row').first().boundingBox())!;
+  expect([button.width, button.height]).toEqual([32, 32]);
+  await expect(jump).toHaveCSS('border-radius', '50%');
+  expect(button.x, 'the button sits right of the column').toBeGreaterThanOrEqual(column.x + column.width);
   const readingAt = await scrollerTop(page);
   await page.waitForTimeout(500);
   expect(await scrollerTop(page), 'the stream does not move a reader').toBe(readingAt);

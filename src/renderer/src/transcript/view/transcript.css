@@ -395,23 +395,27 @@ button.transcript-glyph-overflow:hover { color: var(--fg); background: var(--bg-
   font-size: var(--text-ui);
 }
 
-/* Jump to latest: positioned by the transcript root, never a measured row */
+/* Jump to latest (W2, B3: Codex's scroll-to-bottom button): a 32px round button positioned by the transcript root, never a
+   measured row; right of the column with a 12px gap where the pane has room, else 12px in from the pane's edge, so it
+   never sits over the prose of a wide pane. While the turn works, its dots replace the arrow. */
 .transcript-jump {
   position: absolute;
   bottom: 16px;
-  left: 50%;
-  transform: translateX(-50%);
+  right: max(12px, calc((100% - var(--measure)) / 2 - 44px));
+  z-index: 1;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 5px 12px;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
   border: 1px solid var(--border-strong);
-  border-radius: 999px;
+  border-radius: 50%;
   background: var(--bg-overlay);
-  color: var(--fg);
-  font-size: var(--text-ui);
+  background-clip: padding-box;
+  color: var(--fg-muted);
 }
-.transcript-jump:hover { background: var(--bg-hover); }
+.transcript-jump:hover { background-color: var(--bg-hover); color: var(--fg); }
+.transcript-jump svg { width: 14px; height: 14px; }
 .transcript-working-dots { display: inline-flex; gap: 2px; }
 .transcript-working-dots span { width: 4px; height: 4px; border-radius: 50%; background: var(--accent); animation: transcript-dot 1.2s infinite ease-in-out; }
 .transcript-working-dots span:nth-child(2) { animation-delay: 0.15s; }
