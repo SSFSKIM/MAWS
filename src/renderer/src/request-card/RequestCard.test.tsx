@@ -571,6 +571,17 @@ describe('request card placements and delivery states', () => {
     expect(useAttention.getState().requests.get(item.id)).toEqual(reapply);
   });
 
+  it('the Manual mode remedy sends the raw default engine id for an auto-unavailable notice', async () => {
+    const item = itemFor(permission(), APP, {
+      kind: 'auto_mode_unavailable',
+      request: { requestId: null, toolUseId: null, taskId: null, agentId: null },
+      summary: 'Auto mode is unavailable for this session',
+    });
+    render(<RequestCard item={item} request={null} placement="inline" paneIndex={null} />);
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Switch to Manual mode' }));
+    expect(fake.invoked('session.setPermissionMode')).toEqual([{ appSessionId: APP, mode: 'default' }]);
+  });
+
   it('a request the store could not read shows its notice with the failure instead of loading', () => {
     const item = itemFor(reapply, APP);
     useAttention.setState({ requests: new Map([[item.id, null]]), unreadable: new Map([[item.id, 'no host']]) });

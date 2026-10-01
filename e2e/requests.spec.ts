@@ -11,7 +11,7 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { expect, test as base, type Page } from '@playwright/test';
 import type { SessionEvent } from '@shared/graph/events';
 import type { CardsHarnessApi, HarnessPane } from '../src/renderer/src/harness/composer/api';
@@ -62,7 +62,7 @@ const resolved = async <K extends SessionEvent['kind']>(page: Page, id: string, 
 
 // The fixture's first recorded human prompt, sent as recorded (the replay holds at it).
 function firstPrompt(fixture: string): string {
-  for (const line of readFileSync(join(REPO_ROOT, fixture), 'utf8').split('\n')) {
+  for (const line of readFileSync(resolve(REPO_ROOT, fixture), 'utf8').split('\n')) {
     if (!line) continue;
     const row = JSON.parse(line) as { direction: string; frame: { type: string; message?: { content: string } } };
     if (row.direction === 'out' && row.frame.type === 'user') return row.frame.message!.content;

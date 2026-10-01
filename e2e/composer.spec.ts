@@ -847,8 +847,11 @@ test('W2: the shared column, the 14px prose, Codex’s bubble and Codex’s comp
 // R5: the light composer elevation follows the window, not the pane; the dark edge stays inset.
 test('R5: composer shadow switches below 640px and keeps the dark edge', async ({ editor }) => {
   const { page, app } = editor;
+  const id = 'r5-shadow';
+  const intent: HarnessIntent = { location: { kind: 'directory', path: repo }, additionalDirectories: [], model: null, effort: null, permissionMode: null, message: null, draft: null };
   await openComposerPage(page);
-  await showPanes(page, [{ composer: { appSessionId: 'r5-shadow', location: { kind: 'directory', path: repo } } }, null]);
+  await cards(page, 'intent', id, intent);
+  await showPanes(page, [{ composer: id }, null]);
   const box = pane(page, 0).locator('[data-composer-box]');
   await expect(box).toBeVisible();
   const shadow = (blur: number) => `rgba(0, 0, 0, 0.04) 0px 0px 0px 1px, rgba(0, 0, 0, 0.04) 0px 2px 8px 0px, rgba(0, 0, 0, 0.024) 0px 4px ${blur}px 8px`;
