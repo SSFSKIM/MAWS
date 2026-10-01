@@ -24,6 +24,18 @@ rules copied at the start. Do not describe the entire user settings file as byte
 The shell-spawning tests wrote real shell history and touched the shared clipboard during the first native pass;
 the test-isolation corrective addresses that separately. No native test relies on the contaminated terminal command.
 
+Test-isolation follow-up: 01431460 integrated at 11d9e3a9. Reviewer-medium's scratch-path quoting finding was fixed
+in a separate commit. Worker reported 4,653 units passed, one skipped; terminal log confirms 13/13. Final-head
+panel 23/23 and c12 4/4 passed with no failures/skips; typecheck and lint passed. Panel opened at load 18.79,
+c12 at 15.32. Both history files kept their sizes and mtimes before, between and after those final two suites;
+earlier leaked history entries were not removed. No clipboard-restoration warnings or console errors appeared
+in those logs; the clipboard lock was released. Tests still require exclusive pasteboard use, not arbitrary
+concurrent owner copying. The gate wrapper's final exit 1 was its diagnostic ls of the already-released lock;
+both test commands exited 0. The full live pre-run was deliberately skipped; its monitor ordering fix was
+inspected, not certified by a new full live run. No owner bundle was rebuilt or replaced for this integration.
+Local logs: /tmp/maws-a576-gates.log, /tmp/maws-a576-e2e-panel.log, /tmp/maws-a576-e2e-c12.log,
+/tmp/maws-a576-final-tc-lint.log and /tmp/maws-a576-e2e-terminal.log.
+
 | Step | Result | Notes | Screenshot |
 |---|---|---|---|
 | B1 build (codesign -dv, first five lines) | observed, not development-signed | Root bundle: Identifier=Electron; Mach-O thin arm64; CodeDirectory flags=0x20002(adhoc,linker-signed); Signature=adhoc; TeamIdentifier=not set. Owner's build/signing actions not independently supplied. Fixed retest bundle separately packaged from ffdfcdb9. | |
