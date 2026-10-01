@@ -12,6 +12,7 @@
 // column, as a started session pane holds it, and `wide` spans the page so the column reaches its cap.
 import { QueryClientProvider } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
@@ -129,10 +130,13 @@ export function ComposerHarness() {
     // W3: C11's rewind picker, which `/rewind` and Esc Esc open as the app's floating dialog
     const offs = [connectShell(), connectKeys(), connectInlineEdit(composerClient), registerSlashWidget('rewind', { title: 'Rewind', component: RewindWidget })];
     window.__maws_cards = {
-      show: (next) => {
-        mirrorLayout(next);
-        setPanes(next);
-      },
+      // Committed before the call returns: rendered later, the previous placement's card would still be in the page for
+      // a test's next step to find (a docked card answering for the inline one it moved to).
+      show: (next) =>
+        flushSync(() => {
+          mirrorLayout(next);
+          setPanes(next);
+        }),
       counted: () => counted.current,
       intent: (appSessionId, intent) => setStubIntent(appSessionId, intent as Parameters<typeof setStubIntent>[1]),
       starts: () => [...stubLog.starts],
