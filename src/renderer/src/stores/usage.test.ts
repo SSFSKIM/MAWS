@@ -1,11 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { AccountUsage, UsageSnapshot, UsageWindow } from '@shared/usage/types';
 import { record, status } from '../../../../test/support/builders';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { createLayoutStore } from './layout';
 import { createSessionsStore } from './sessions';
-import { connectUsage, createUsageStore, windowsFor, type Windows } from './usage';
+import { connectUsage, createUsageStore, ROUTE_HOLD_MS, windowsFor, type Windows } from './usage';
 
 const w = (percent: number): UsageWindow => ({ percent, resetsAt: '2026-09-29T11:20:00Z', recordedAt: '2026-09-29T07:34:17Z' });
 const windows = (five: number, seven: number): Windows => ({ fiveHour: w(five), sevenDay: w(seven), scoped: [] });
@@ -51,6 +51,52 @@ describe('usage store: windowsFor', () => {
     usage.getState().applySnapshot({ ...SNAP, available: false, accounts: [], drainTarget: null, error: 'absent' });
     expect(windowsFor(usage.getState(), record('a'), null).windows).toBeNull();
     expect(usage.getState().windows).toBeNull();
+  });
+});
+
+// W6 route executor: a Route ClaudeUsage answered is laid over the snapshots until C7's reader names its drain target.
+describe('usage store: a Route ClaudeUsage answered', () => {
+  const THREE: UsageSnapshot = { ...SNAP, accounts: [...SNAP.accounts, account('third', windows(5, 6))] };
+  const naming = (drainTarget: string, drainTargetIsManual: boolean): UsageSnapshot => ({ ...THREE, drainTarget, drainTargetIsManual });
+  afterEach(() => vi.useRealTimers());
+
+  it('holds over every snapshot, an event’s or a reply’s, until one names its drain target, then follows them', () => {
+    const usage = createUsageStore();
+    usage.getState().applySnapshot(THREE);
+    usage.getState().applyRoute('other', true);
+    expect(usage.getState().snapshot).toMatchObject({ drainTarget: 'other', drainTargetIsManual: true });
+    expect(usage.getState().windows).toEqual(windows(77, 44));
+    usage.getState().applySnapshot({ ...THREE, readAt: '2026-09-29T07:35:05Z', pinsFor: {} }, 'merge'); // an unrelated file changed
+    expect(usage.getState().snapshot).toMatchObject({ drainTarget: 'other', drainTargetIsManual: true, readAt: '2026-09-29T07:35:05Z' });
+    expect(usage.getState().windows).toEqual(windows(77, 44));
+    expect(usage.getState().pinsFor).toEqual({ 'eng-pinned': 'other' });
+    usage.getState().applySnapshot(THREE); // settings.usage's reply
+    expect(usage.getState().snapshot!.drainTarget).toBe('other');
+    usage.getState().applySnapshot(naming('other', true)); // the reader caught up
+    expect(usage.getState().snapshot).toMatchObject({ drainTarget: 'other', drainTargetIsManual: true });
+    usage.getState().applySnapshot(naming('third', false)); // ClaudeUsage moved on by itself: the reader is the word again
+    expect(usage.getState().snapshot).toMatchObject({ drainTarget: 'third', drainTargetIsManual: false });
+    expect(usage.getState().windows).toEqual(windows(5, 6));
+  });
+
+  it('lets go after its bound, and another Route replaces it', () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(Date.parse('2026-09-29T07:35:00Z'));
+    const usage = createUsageStore();
+    usage.getState().applySnapshot(THREE);
+    usage.getState().applyRoute('other', true);
+    vi.advanceTimersByTime(ROUTE_HOLD_MS - 1);
+    usage.getState().applySnapshot(THREE);
+    expect(usage.getState().snapshot!.drainTarget).toBe('other');
+    vi.advanceTimersByTime(1);
+    usage.getState().applySnapshot(THREE);
+    expect(usage.getState().snapshot).toMatchObject({ drainTarget: 'drain', drainTargetIsManual: false });
+
+    usage.getState().applyRoute('other', true);
+    usage.getState().applyRoute('third', false);
+    usage.getState().applySnapshot(naming('other', true)); // the first Route's write, overtaken by the second
+    expect(usage.getState().snapshot).toMatchObject({ drainTarget: 'third', drainTargetIsManual: false });
+    expect(usage.getState().windows).toEqual(windows(5, 6));
   });
 });
 

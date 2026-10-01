@@ -6,7 +6,8 @@
 // is unavailable under one hint, as before the API existed. Route and Remove ask in MAWS first, on the confirm sheet,
 // which takes the focus and so closes the popover; it opens again on either answer. Add and Reconnect open ClaudeUsage's
 // sign-in sheet and say so. A refusal's message is the popover's notice, shown in the hint's place while it is open.
-// After a Route the popover shows the new routing account at once, from ClaudeUsage's answer, until the reader catches up.
+// After a Route the popover shows the new routing account at once, from ClaudeUsage's answer, until the reader catches up
+// (the usage store holds it over the snapshots until then, `applyRoute`).
 import { useEffect } from 'react';
 import { create } from 'zustand';
 import { useShallow } from 'zustand/react/shallow';
@@ -77,9 +78,7 @@ const emailOf = (uuid: string) => useUsage.getState().snapshot?.accounts.find((a
 async function route({ uuid }: { uuid: string }): Promise<void> {
   if (!(await ask({ title: USAGE.routeConfirm.title(emailOf(uuid)), body: USAGE.routeConfirm.body, confirmLabel: USAGE.route, destructive: false }))) return;
   const result = await perform({ action: 'route', uuid }, null);
-  if (!result.ok) return;
-  const { snapshot, applySnapshot } = useUsage.getState();
-  if (snapshot?.available) applySnapshot({ ...snapshot, drainTarget: result.drainTarget, drainTargetIsManual: result.drainTargetIsManual }, 'merge');
+  if (result.ok) useUsage.getState().applyRoute(result.drainTarget ?? uuid, result.drainTargetIsManual);
 }
 
 async function remove({ uuid, email }: { uuid: string; email: string }): Promise<void> {

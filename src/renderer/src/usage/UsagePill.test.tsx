@@ -69,7 +69,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
-  useUsage.setState({ snapshot: null });
+  useUsage.setState({ snapshot: null, routed: null });
   useGateway.setState({ relay: null, claudeUsage: null });
   useNotices.setState({ notices: [] });
   useUsagePopover.setState({ open: false });
@@ -339,6 +339,17 @@ describe('the usage popover’s actions through ClaudeUsage’s control route', 
     expect(card(again, '3@example.test').textContent).not.toContain('Routing here');
     expect(useUsage.getState().snapshot!.drainTarget).toBe(uuidOf('1@example.test'));
     expect(pill().getAttribute('aria-label')).toContain('1@example.test');
+
+    // Snapshots before ClaudeUsage's pins.json write reaches the reader (an event for another file, a reply) still name
+    // 3@: the answered routing account holds over them until the reader names it.
+    act(() => useUsage.getState().applySnapshot({ ...fixture, readAt: new Date(NOW + 1_000).toISOString() }, 'merge'));
+    act(() => useUsage.getState().applySnapshot(fixture));
+    expect(card(reopened(), '1@example.test').textContent).toContain('Routing here · chosen in ClaudeUsage');
+    expect(card(reopened(), '3@example.test').textContent).not.toContain('Routing here');
+    expect(pill().getAttribute('aria-label')).toContain('1@example.test');
+    act(() => useUsage.getState().applySnapshot({ ...fixture, drainTarget: uuidOf('1@example.test'), drainTargetIsManual: true }));
+    expect(useUsage.getState().routed).toBeNull();
+    expect(card(reopened(), '1@example.test').textContent).toContain('Routing here · chosen in ClaudeUsage');
   });
 
   it('a Route cancelled on the sheet posts nothing and reopens the popover', async () => {
