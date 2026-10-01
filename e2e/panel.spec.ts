@@ -487,7 +487,9 @@ test.describe('the #panel harness: strip, summary, R7 and themes', () => {
     const body = panel.region.locator('[data-session-info="A"]');
     for (const title of ['Engine', 'Model', 'Gateway', 'Permissions', 'Context, usage, cost', 'Hooks and MCP']) await expect(body.getByRole('region', { name: title })).toBeVisible();
     const route = body.getByRole('term').filter({ hasText: /^Route$/ }).locator('xpath=following-sibling::dd[1]');
-    await expect(route, 'A runs direct in the harness scenario').toHaveText("Direct · engine's own login");
+    // W2 (C3): the Direct⇄gateway switch is the Route row's action, its button text part of the row's.
+    await expect(route, 'A runs direct in the harness scenario').toHaveText("Direct · engine's own loginSwitch to gateway…");
+    await expect(route.getByRole('button', { name: 'Switch to gateway…' })).toBeVisible();
     await panel.call('switchSession', null);
     await panel.call('selectTab', info);
     await expect(panel.region.getByText('Open a session to see its details')).toBeVisible();
