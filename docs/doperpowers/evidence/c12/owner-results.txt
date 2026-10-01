@@ -4,9 +4,16 @@ MAWS P0 sitting: the owner's results
 Fill one row per step of owner-script.txt: the result (pass, fail or note), what you saw, and a screenshot path if
 useful. The architect completes recomposition.txt from this file and prerun.txt.
 
-Date:
-MAWS commit (git rev-parse --short HEAD):
-Engine: 2.1.283 (pinned); terminal `claude --version`:
+Date: 2026-09-30 (sitting in progress)
+MAWS source baseline: ad8bcab3; GUI uses the existing packaged build (build commit not embedded/independently verified).
+Engine: 2.1.283 (pinned); terminal version to be checked.
+
+Owner confirmed steps 1, 2, 3 and 6 in chat; no measurements or screenshots supplied with that confirmation.
+Architect delegated the remaining steps to native cua_repl observation. Active tests use a copied app bundle,
+fresh config and userData under /private/tmp/maws-owner-cua-npoh1_yc, and a scratch repository. The scratch
+Claude settings inherit the existing user/project tool-denial rules (10 distinct rules); original settings are
+not edited. Scratch equivalents do not establish parity with the owner's hooks/plugins or account feature gates.
+Existing real-profile MAWS remains running and is used only for read-only historical observations.
 
 | Step | Result | Notes | Screenshot |
 |---|---|---|---|
@@ -15,13 +22,13 @@ Engine: 2.1.283 (pinned); terminal `claude --version`:
 | B3 ClaudeUsage running; a terminal claude kept live | | | |
 | B4 opened; notifications allowed; first-open time to a full Overview | | | |
 | B5 stateful MCP servers (the list) | | | |
-| 1 Overview, foreign-live (§10.1) | | | |
-| 2 new worktree, trust card, settings as in the terminal (§10.2) | | | |
-| 3 Overview approve and answer; native notification for R; ⌘⇧J lands on R (§10.3) | | | |
-| 4 relay (line cleared = delivered), SendMessage row, Review, Terminal, viewer tab, workflow (§10.4) | | | |
-| 5 resume from the terminal (2.1.285) and in MAWS (§10.5) | | | |
-| 6 budget: X of 8 GB, three per-tree figures, the release, the resume (§10.6) | | | |
-| 7 longest transcript anchored; streaming holds the reader (§10.7) | | | |
+| 1 Overview, foreign-live (§10.1) | owner-confirmed | Confirmed in chat, 2026-09-30. | |
+| 2 new worktree, trust card, settings as in the terminal (§10.2) | owner-confirmed | Confirmed in chat, 2026-09-30. | |
+| 3 Overview approve and answer; native notification for R; ⌘⇧J lands on R (§10.3) | owner-confirmed | Confirmed in chat, 2026-09-30; no separate notification/signature detail supplied. | |
+| 4 relay (line cleared = delivered), SendMessage row, Review, Terminal, viewer tab, workflow (§10.4) | in progress | Scratch native GUI sitting. | |
+| 5 resume from the terminal (2.1.285) and in MAWS (§10.5) | pending | Scratch sessions only. | |
+| 6 budget: X of 8 GB, three per-tree figures, the release, the resume (§10.6) | owner-confirmed | Confirmed in chat, 2026-09-30; numerical measurements not supplied. | |
+| 7 longest transcript anchored; streaming holds the reader (§10.7) | partial | Native GUI opened the original 809406bb-43f0-4d12-a0eb-4f20d6cc4941; Session info verified id. Scrolled 25 pages into old work, expanded “Continued for 3h 35m · 10 tool calls”: heading stayed at the same screen position, no jump to latest. Streaming half pending. | CUA screenshots 1790827825455-74kyvk (before), 1790827869848-56r0jg (after), in this session's tool-results. |
 | 8 twelve widgets, `!git status`, `#` note, a rebinding (§10.8) | | | |
 | 9 queue, steer, stop, resume; denial when collapsed; ⌘. with an approval pending (§10.9) | | | |
 | 10 themes and taste beside Claude Desktop, Codex and ClaudeUsage (§10.10) | | | |
@@ -29,4 +36,4 @@ Engine: 2.1.283 (pinned); terminal `claude --version`:
 | 12 quit question (three parts), Quit when idle banner, Cancel, Quit; the queued message after reopening | | | |
 | 13 terminal launch environment: foreground or background subagent; TaskCreate or TodoWrite or none | | | |
 | 14 C8: both themes over the panel, Open on GitHub against an upstream, a monitor, Attach by hand, This branch disabled on master | | | |
-| 15 split-pane irritations (M5.3); ExitPlanMode and EnterPlanMode denies; sleep and wake (optional) | | | |
+| 15 split-pane irritations (M5.3); ExitPlanMode and EnterPlanMode denies; sleep and wake (optional) | decision closed; feedback pending | Owner explicitly keeps all settings and all denied tools denied, including EnterPlanMode. No settings change. Split-pane feedback being collected separately by owner. Optional sleep/wake not run because it would interrupt their concurrent work. | |
