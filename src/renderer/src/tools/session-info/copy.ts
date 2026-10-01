@@ -1,7 +1,10 @@
 // Every sentence of the Session info tool (C11 execution document, Interfaces "Session info tool"; mockup 06 vignette 03).
 
+import type { PermissionMode } from '@shared/graph/enums';
+import { PERMISSION_MODE_LABELS } from '@shared/sessions/permission-mode-labels';
+
 export const LANE = {
-  off: (mode: string) => `Auto mode is off · ${mode}`,
+  off: (mode: PermissionMode) => `Auto mode is off · ${PERMISSION_MODE_LABELS[mode]}`,
   observed: (account: string) => `Local · Sonnet 5 through ${account} · counted as usage · the engine's notice is in the transcript`,
   someAccount: 'the routing account',
   expectedGateway: 'Local (expected) · a GPT route carries no Anthropic verdict',

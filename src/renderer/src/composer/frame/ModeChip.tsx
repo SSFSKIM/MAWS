@@ -2,6 +2,7 @@
 // glyph with the refusal in words when one is set, and M5's `ModeMenu` in a popover (W2: at the toolbar's left, so it
 // opens from its start). W3: never a printed "default" for a mode nothing knows yet; MAWS's own default is auto.
 // ⇧Tab's cycle is the Composer's (`composer.cycleMode`, delivered inside the editor).
+import { PERMISSION_MODE_LABELS } from '@shared/sessions/permission-mode-labels';
 import { Popover } from 'radix-ui';
 import { useState } from 'react';
 import { ModeMenu, MODE_REFUSAL_WORDS, type ModeBinding } from '../../statusline';
@@ -18,13 +19,13 @@ export function ModeChip({ binding, onOpen }: { binding: ModeBinding; onOpen?():
         setOpen(next);
       }}
     >
-      <Popover.Trigger aria-label={`Permission mode ${binding.value ?? 'auto'}${refusal ? ` · ${refusal}` : ''}`} title={refusal ?? binding.disabled ?? 'Permission mode'} className={`${CHIP} font-mono`}>
+      <Popover.Trigger aria-label={`Permission mode ${PERMISSION_MODE_LABELS[binding.value ?? 'auto']}${refusal ? ` · ${refusal}` : ''}`} title={refusal ?? binding.disabled ?? 'Permission mode'} className={`${CHIP} font-mono`}>
         {refusal && (
           <span aria-hidden className="text-warning">
             ⚠
           </span>
         )}
-        {binding.value ?? 'auto'}
+        {PERMISSION_MODE_LABELS[binding.value ?? 'auto']}
         <span aria-hidden className="shrink-0 text-fg-faint">⌄</span>
       </Popover.Trigger>
       <Popover.Portal>

@@ -62,7 +62,7 @@ describe('autoModeLane derives the lane from status and model', () => {
 
   it('unavailable with the refusal in words, off for any other mode', () => {
     expect(autoModeLane(status({ effective: 'default', refusal: 'auto_mode_fast_mode' }), null, null)).toMatchObject({ kind: 'unavailable', sentence: 'Auto mode is unavailable with fast mode' });
-    expect(autoModeLane(status({ effective: 'default' }), null, null)).toMatchObject({ kind: 'off', sentence: 'Auto mode is off · default' });
+    expect(autoModeLane(status({ effective: 'default' }), null, null)).toMatchObject({ kind: 'off', sentence: 'Auto mode is off · Manual' });
   });
 
   it('GPT → Claude: the observation on astra reads local, and the next turn on Sonnet reads server', () => {

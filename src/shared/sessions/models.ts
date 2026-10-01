@@ -3,6 +3,7 @@
 // exists, and the two notes the model chip shows beside an auto-mode choice.
 import * as z from 'zod';
 import type { PermissionMode } from '../graph/enums';
+import { PERMISSION_MODE_LABELS } from './permission-mode-labels';
 
 export const ModelCatalogueEntrySchema = z.looseObject({
   value: z.string(),
@@ -38,8 +39,8 @@ export function isGatewayModel(value: string): boolean {
 }
 
 // W3 (charter D-18 as amended 2026-10-01): Claude Desktop's notice in MAWS's words, with the mode MAWS sets instead.
-export const autoFallbackNotice = (fallback: string): string => `Auto mode isn't available for this session. Using ${fallback} instead.`;
-export const cannotHoldAutoNote = (model: string, fallback: string): string => `Auto mode isn't available for ${model}. This session will use ${fallback} instead.`;
+export const autoFallbackNotice = (fallback: PermissionMode): string => `Auto mode isn't available for this session. Using ${PERMISSION_MODE_LABELS[fallback]} instead.`;
+export const cannotHoldAutoNote = (model: string, fallback: PermissionMode): string => `Auto mode isn't available for ${model}. This session will use ${PERMISSION_MODE_LABELS[fallback]} instead.`;
 export const GATEWAY_AUTO_NOTE = 'Auto-mode reviews for this model run locally on Sonnet 5 and count against your usage.';
 
 // A model that cannot hold auto mode, when auto is chosen (W3: with the fallback the launch will set); else a gateway

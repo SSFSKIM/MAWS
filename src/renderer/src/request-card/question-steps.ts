@@ -55,6 +55,3 @@ export function skip(draft: QuestionDraft, question: Question, count: number): Q
   return advance(cleared, count);
 }
 
-// A single-select pick moves on by itself, unless the question is the last (Submit is the act there) or shows option
-// previews (the preview of the pick is what the human looks at before going on).
-export const advancesOnPick = (question: Question, last: boolean): boolean => !question.multiSelect && !last && !question.options.some((o) => o.preview !== null);

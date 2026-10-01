@@ -85,7 +85,7 @@ describe('session info renders the six sections', () => {
     expect(valueOf('Route')).toBe('Gateway · ClaudeUsage relay · http://127.0.0.1:8641Switch to Direct…'); // W2: the switch
     expect(valueOf('Account')).toBe('1@example.test · pinned for this session');
     expect(valueOf('Tool search')).toBe('on · ENABLE_TOOL_SEARCH, needed behind a base URL');
-    expect(valueOf('Mode')).toBe('auto · effective, from the init frame');
+    expect(valueOf('Mode')).toBe('Auto · effective, from the init frame');
     // the stores first, the reads as they answer
     // the engine's summary (pass1/reads seq 57: 30,433, 15 %) corrected as C3 corrects its sample: 21,507 measured + 1
     await waitFor(() => expect(valueOf('Context')).toBe('21,508 of 200,000 · 11% · autocompact at 167,000'));

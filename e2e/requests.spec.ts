@@ -11,7 +11,7 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { expect, test as base, type Page } from '@playwright/test';
 import type { SessionEvent } from '@shared/graph/events';
 import type { CardsHarnessApi, HarnessPane } from '../src/renderer/src/harness/composer/api';
@@ -62,7 +62,7 @@ const resolved = async <K extends SessionEvent['kind']>(page: Page, id: string, 
 
 // The fixture's first recorded human prompt, sent as recorded (the replay holds at it).
 function firstPrompt(fixture: string): string {
-  for (const line of readFileSync(join(REPO_ROOT, fixture), 'utf8').split('\n')) {
+  for (const line of readFileSync(resolve(REPO_ROOT, fixture), 'utf8').split('\n')) {
     if (!line) continue;
     const row = JSON.parse(line) as { direction: string; frame: { type: string; message?: { content: string } } };
     if (row.direction === 'out' && row.frame.type === 'user') return row.frame.message!.content;
@@ -94,6 +94,12 @@ function syntheticJournal(name: string, requests: { patch?: (request: Record<str
 
 const PERMISSION = 'spikes/protocol-probe/fixtures/permission-roundtrip.jsonl';
 const QUESTION = 'spikes/protocol-probe/fixtures/question-roundtrip.jsonl';
+const questionWithoutPreviews = () => {
+  const path = join(scratch, 'question-without-previews.jsonl');
+  const rows = readFileSync(join(REPO_ROOT, QUESTION), 'utf8').trim().split('\n');
+  writeFileSync(path, rows.map((line) => JSON.stringify(JSON.parse(line, (key, value) => key === 'preview' ? undefined : value))).join('\n') + '\n');
+  return path;
+};
 const DIALOGS = 'spikes/protocol-probe/fixtures/pass2/dialogs.jsonl';
 const GRANT = 'spikes/protocol-probe/fixtures/pass2/grant-reapply-start.jsonl';
 const unflag = (request: Record<string, unknown>) => delete request.requires_user_interaction;
@@ -138,6 +144,10 @@ test('a question card steps one question at a time, keeps its picks across place
   await frame.getByRole('radio', { name: 'Red' }).click();
   // The option's preview renders inside the sandboxed srcdoc frame under the app's CSP (no `<pre>` fallback needed).
   await expect(page.frameLocator('iframe[title="Preview of Red"]').locator('body')).toContainText('This is a red preview');
+  await frame.getByRole('radio', { name: 'Blue' }).click();
+  await expect(frame.getByRole('radio', { name: 'Blue' })).toHaveAttribute('aria-checked', 'true');
+  await expect(frame).toContainText('1 of 2');
+  await frame.getByRole('radio', { name: 'Red' }).click();
   await frame.getByRole('button', { name: 'Next', exact: true }).click();
   await expect(frame).toContainText('2 of 2');
   await frame.getByRole('checkbox', { name: 'Apple' }).click();
@@ -162,14 +172,20 @@ test('a question card steps one question at a time, keeps its picks across place
 test('the Overview card steps a question with digits and Enter, and Skip leaves the last question out of the reply', async ({ cards }) => {
   const { page } = cards;
   await openCards(page);
-  await launchReady(page, 'c7-question-card', QUESTION);
+  const journal = questionWithoutPreviews();
+  await launchReady(page, 'c7-question-card', journal);
   await show(page, [{ appSessionId: 'c7-question-card', placement: 'card' }, null]);
-  await sendFirstPrompt(page, 'c7-question-card', QUESTION);
+  await sendFirstPrompt(page, 'c7-question-card', journal);
   const article = page.getByRole('article', { name: 'card c7-question-card' });
   await expect(article).toContainText('1 of 2');
   await article.focus();
   await page.keyboard.press('2');
   await expect(article.getByRole('radio', { name: 'Blue' })).toHaveAttribute('aria-checked', 'true');
+  await page.waitForTimeout(250); // beyond the removed auto-advance delay, even without previews
+  await expect(article).toContainText('1 of 2');
+  await page.keyboard.press('1');
+  await expect(article.getByRole('radio', { name: 'Red' })).toHaveAttribute('aria-checked', 'true');
+  await page.keyboard.press('2');
   await page.keyboard.press('Enter');
   await expect(article).toContainText('2 of 2');
   await expect(article).toBeFocused();

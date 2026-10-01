@@ -5,6 +5,7 @@
 // W7: the memory budget's switch, whose rows show only while it is on.
 import { useQueryClient } from '@tanstack/react-query';
 import { useId, useState } from 'react';
+import { PERMISSION_MODE_LABELS } from '@shared/sessions/permission-mode-labels';
 import { PERMISSION_MODES } from '@shared/graph/enums';
 import type { Settings } from '@shared/ipc/schema';
 import type { AutoFallback } from '@shared/ipc/schema/settings';
@@ -134,7 +135,7 @@ function AutoFallback({ settings }: { settings: Settings }) {
       >
         {FALLBACKS.map((mode) => (
           <option key={mode} value={mode}>
-            {mode}
+            {PERMISSION_MODE_LABELS[mode]}
           </option>
         ))}
       </select>

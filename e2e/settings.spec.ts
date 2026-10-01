@@ -29,7 +29,7 @@ async function menu(app: ElectronApplication, id: string): Promise<void> {
 const accelerator = (app: ElectronApplication, id: string) => app.evaluate(({ Menu }, id) => Menu.getApplicationMenu()?.getMenuItemById(id)?.accelerator ?? null, id);
 const panel = (page: Page) => page.locator('[data-region="main"]').getByRole('tabpanel');
 const keyRow = (page: Page, title: string) => panel(page).getByRole('table', { name: 'Key bindings' }).getByRole('row', { name: title, exact: true });
-const readSettings = (userData: string) => JSON.parse(readFileSync(join(userData, 'settings.json'), 'utf8')) as Record<string, unknown> & { version: number; keymap: object; gateway: object };
+const readSettings = (userData: string) => JSON.parse(readFileSync(join(userData, 'settings.json'), 'utf8')) as Record<string, unknown> & { version: number; keymap: object; gateway: object; permissions: object };
 
 test('settings: a v2 file migrates; ⌘, opens the tab; a chord is recorded, refused, unbound and reset; the route and policy persist', async () => {
   test.setTimeout(120_000);
@@ -60,6 +60,12 @@ test('settings: a v2 file migrates; ⌘, opens the tab; a chord is recorded, ref
       await expect(page.locator('[data-region="main"]').getByRole('tab', { name: /Settings/ })).toBeVisible();
       await expect(panel(page).getByRole('region', { name: 'Keyboard' })).toBeVisible();
 
+      const fallback = panel(page).getByRole('combobox', { name: 'When auto mode is unavailable' });
+      await expect(fallback.locator('option')).toHaveText(['Manual', 'Accept edits', 'Plan', 'Bypass permissions', "Don't ask"]);
+      await expect(fallback).toHaveValue('acceptEdits');
+      await fallback.selectOption({ label: 'Plan' });
+      await expect.poll(() => readSettings(userData).permissions).toEqual({ autoFallback: 'plan' });
+
       // Record ⌘⇧U for Next Needs-you: the row and the Go menu's item follow.
       const next = keyRow(page, 'Next Needs-you');
       await expect(next.locator('kbd')).toHaveText('⌘⌥J');
@@ -89,6 +95,7 @@ test('settings: a v2 file migrates; ⌘, opens the tab; a chord is recorded, ref
       await gateway.getByRole('radio', { name: 'Direct' }).check();
       await gateway.getByRole('combobox', { name: 'Relay unreachable at launch' }).selectOption('wait');
       await expect.poll(() => readSettings(userData).gateway).toEqual({ defaultRoute: 'direct', relayUnreachable: 'wait', offerDirect: true });
+      expect(readSettings(userData).permissions).toEqual({ autoFallback: 'plan' });
       expect(readSettings(userData).keymap).toEqual({});
       expect(maws.consoleErrors()).toEqual([]);
     } finally {

@@ -1,6 +1,8 @@
 // Every widget string and foot in one table (C11 execution document, Repository map and the widget table under
 // Interfaces "Widgets"). A foot reads `Read with <control> · <what is edited elsewhere>`; the sentences are the table's.
 // Backticks in a sentence mark code, which the frame renders in mono.
+import type { PermissionMode } from '@shared/graph/enums';
+import { PERMISSION_MODE_LABELS } from '@shared/sessions/permission-mode-labels';
 import type { WidgetCommandName } from '../composer';
 import { NOT_RUNNING } from '../statusline/mode-menu';
 import { LAST_VALUE, NO_ANSWER } from '../ipc/transport-words';
@@ -251,7 +253,7 @@ export const MODEL = {
   group: { claude: 'Claude', gateway: 'Gateway' } as const,
   list: (group: string) => `${group} models`,
   oneM: '1M',
-  cannotHoldAuto: 'Cannot hold auto mode · runs in default',
+  cannotHoldAuto: `Cannot hold auto mode · runs in ${PERMISSION_MODE_LABELS.default}`,
   current: 'current',
   pending: 'set · the next init frame confirms it',
   none: 'The engine listed no models',
@@ -339,9 +341,8 @@ export const SELECTOR = {
   openModels: (model: string) => `${model} · Select model`,
   back: 'Back to effort',
   reset: "Reset effort to the model's default",
-  defaultBadge: 'Default',
-  recommended: 'Recommended',
-  fromSettings: 'From your settings',
+  default: 'Default',
+  recommended: 'Recommended set of models',
   model: 'Model',
   setting: 'setting…',
   reading: 'Reading the models…',
@@ -355,9 +356,9 @@ export const TYPED = {
   model: (name: string, cannotHoldAuto = false) => `Model · ${name} · ${MODEL.pending}${cannotHoldAuto ? ` · ${MODEL.cannotHoldAuto}` : ''}`,
   effort: (level: string | null) => `Effort · ${level ?? "the model's default"} · ${MODEL.pending}`,
   fastOff: `Fast mode · off · ${MODEL.pending}`,
-  mode: (mode: string) => `Permission mode · ${mode}`,
+  mode: (mode: PermissionMode) => `Permission mode · ${PERMISSION_MODE_LABELS[mode]}`,
   // the permissions widget opened with an argument it did not apply
-  modeAsks: (mode: string) => `${mode} asks first · choose it below`,
+  modeAsks: (mode: PermissionMode) => `${PERMISSION_MODE_LABELS[mode]} asks first · choose it below`,
   modeUnknown: (arg: string) => `No permission mode named ${arg}`,
 };
 

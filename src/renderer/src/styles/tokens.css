@@ -28,7 +28,7 @@
   --radius-sm: 6px; --radius: 10px; --radius-lg: 14px; --space: 4px;
   /* W2 (B2, C1): Codex's 22px corner, shared by the user bubble and the composer box; the box's faint shadow */
   --radius-2xl: 22px;
-  --shadow-composer: 0 0 0 1px rgba(0,0,0,0.04), 0 2px 8px rgba(0,0,0,0.04), 0 4px 40px 8px rgba(0,0,0,0.024);
+  --shadow-composer: 0 0 0 1px #0000000a, 0 2px 8px 0 #0000000a, 0 4px 80px 8px #00000006;
   --row-h: 30px; --toolbar-h: 44px; --sidebar-w: 300px; --panel-w: 380px;
   /* W5: the top bar above the tab strip, and the floating Overview's lift off the main area */
   --topbar-h: 30px;
@@ -48,6 +48,14 @@
   --code-meta: #6e7781; --code-invalid: #82071e;
   --code-gutter-fg: rgba(31,30,27,0.36); --code-line-active-bg: rgba(20,18,14,0.035); --code-selection-bg: rgba(201,102,63,0.20);
   /* C8c end */
+}
+
+/* Codex narrows the light composer elevation only below a 640px window. */
+@media (width < 640px) {
+  :root,
+  [data-theme="light"] {
+    --shadow-composer: 0 0 0 1px #0000000a, 0 2px 8px 0 #0000000a, 0 4px 40px 8px #00000006;
+  }
 }
 
 [data-theme="dark"] {

@@ -4,6 +4,7 @@
 // inputs and renders what this answers. A value not known yet reads `—`, never a guess. W2 (§5.5 as amended
 // 2026-10-01): with the status line gone, the Route row carries the Direct⇄gateway switch as its action, with the reason
 // when none is offered, and the usage rows carry the pace line the usage popover's footer showed.
+import { PERMISSION_MODE_LABELS } from '@shared/sessions/permission-mode-labels';
 import type { BinaryInfo } from '@shared/ipc/schema/engine';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { SessionRecord } from '@shared/graph/session';
@@ -145,7 +146,7 @@ function permissionsSection({ record, status, lane, reads }: SessionInfoInput): 
   return {
     title: INFO.sections.permissions,
     rows: [
-      { label: INFO.mode, value: mode.effective, note: mode.refusal ? `${INFO.effectiveNote} · ${MODE_REFUSAL_WORDS[mode.refusal]}` : INFO.effectiveNote },
+      { label: INFO.mode, value: PERMISSION_MODE_LABELS[mode.effective], note: mode.refusal ? `${INFO.effectiveNote} · ${MODE_REFUSAL_WORDS[mode.refusal]}` : INFO.effectiveNote },
       { label: INFO.lane, value: laneValue, note: lane?.reviews ? LANE.reviews(lane.reviews.evaluated, lane.reviews.flagged) : undefined },
       { label: INFO.rules, value: rules ? INFO.ruleCounts(count('allow'), count('ask'), count('deny'), grants) : INFO.grantsOnly(grants), action: 'permissions' },
     ],

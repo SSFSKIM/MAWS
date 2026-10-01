@@ -37,11 +37,11 @@ describe('permissions widget shows effective mode and rules with sources', () =>
     const status = backend.status(ID);
     useSessions.setState({ engine: new Map([[ID, { ...status, permissionMode: { requested: 'auto', effective: 'default', refusal: 'auto_mode_model' }, grants: ['Bash(git log --oneline)'] }]]) });
     mount();
-    const mode = await screen.findByText('default', { selector: 'strong' });
-    expect(mode.closest('p')?.textContent).toBe('Effective default · from the init frame');
+    const mode = await screen.findByText('Manual', { selector: 'strong' });
+    expect(mode.closest('p')?.textContent).toBe('Effective Manual · from the init frame');
     expect(screen.getByText('This model does not support auto mode')).toBeTruthy();
     expect(screen.getByText('1 session grant · re-applied after a resume')).toBeTruthy();
-    expect(screen.getByRole('menuitemradio', { checked: true }).textContent).toMatch(/^default/); // the segment selects the effective mode
+    expect(screen.getByRole('menuitemradio', { checked: true }).textContent).toMatch(/^Manual/); // the segment selects the effective mode
   });
 
   // C11 M6, live: a rules read cached before an approval card's session grant (fresh, so a mount does not refetch it)
@@ -91,9 +91,9 @@ describe('permissions widget: the mode segment (C7’s mode menu) over session.s
     const off = follow();
     mount();
     await screen.findByRole('menu', { name: 'Permission mode' });
-    choose('auto');
+    choose('Auto');
     await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('This model does not support auto mode'));
-    expect(checked()).toMatch(/^default/);
+    expect(checked()).toMatch(/^Manual/);
     expect(backend.calls.find((c) => c.subtype === 'set_permission_mode')?.input).toEqual({ appSessionId: ID, mode: 'auto' });
     off();
   });
@@ -104,8 +104,8 @@ describe('permissions widget: the mode segment (C7’s mode menu) over session.s
     const off = follow();
     mount();
     await screen.findByRole('menu', { name: 'Permission mode' });
-    choose('auto');
-    await waitFor(() => expect(checked()).toMatch(/^auto/));
+    choose('Auto');
+    await waitFor(() => expect(checked()).toMatch(/^Auto/));
     expect(screen.queryByRole('alert')).toBeNull();
     off();
   });
@@ -117,10 +117,10 @@ describe('permissions widget: the mode segment (C7’s mode menu) over session.s
     });
     mount();
     await screen.findByRole('menu', { name: 'Permission mode' });
-    choose('plan');
+    choose('Plan');
     await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('The engine did not answer · showing the last value it reported'));
-    expect(checked()).toMatch(/^auto/);
-    expect(screen.getAllByRole('menuitemradio').every((item) => !(item as HTMLButtonElement).disabled || item.textContent?.startsWith('auto'))).toBe(true); // re-enabled
+    expect(checked()).toMatch(/^Auto/);
+    expect(screen.getAllByRole('menuitemradio').every((item) => !(item as HTMLButtonElement).disabled || item.textContent?.startsWith('Auto'))).toBe(true); // re-enabled
   });
 
   it('keeps the segment when the rules read fails: the mode is the status, not the read', async () => {
@@ -131,7 +131,7 @@ describe('permissions widget: the mode segment (C7’s mode menu) over session.s
     mount();
     await screen.findByText('list_permission_rules refused');
     expect(screen.getByRole('menu', { name: 'Permission mode' })).toBeTruthy();
-    expect(checked()).toMatch(/^auto/);
+    expect(checked()).toMatch(/^Auto/);
   });
 
   it('reads list_models for auto’s availability and list_permission_rules for the rules, each once', async () => {

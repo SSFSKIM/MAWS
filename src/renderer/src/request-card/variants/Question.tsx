@@ -2,8 +2,7 @@
 // at a time under a "{n} of {N}" pager, its options as numbered radios (or checkboxes when `multiSelect`) with their
 // descriptions, the `Other…` free-text row the engine always accepts last, and a single-select question's option
 // previews in a sandboxed frame (only the selected option's, so a preview frame exists only while it is shown). A
-// single-select pick moves on by itself after a beat (unless the question is the last or shows previews); a
-// multi-select question and Other move on with Next; Skip leaves the question unanswered and moves on; the last step's
+// pick always waits for Next, so it can be changed before moving on; Other does too; Skip leaves the question unanswered and moves on; the last step's
 // Submit (or Skip) sends every answer as the one reply the wire takes (`question-roundtrip` seq 138), a skipped question
 // left out of it. The picks live beside the request in the attention store, so a remount resumes them. Enter is Next or
 // Submit once the question is answered, digits pick its options, and Esc declines the whole request with the plain
@@ -17,11 +16,10 @@ import { useAttention } from '../../stores/attention';
 import { questionAnswers, toAnswer } from '../answers';
 import { CardButton, Controls } from '../controls';
 import { SandboxedPreview } from '../preview/SandboxedPreview';
-import { advance, advancesOnPick, answerOf, EMPTY_DRAFT, goTo, pick, setOther, skip, toggle, type QuestionDraft } from '../question-steps';
+import { advance, answerOf, EMPTY_DRAFT, goTo, pick, setOther, skip, toggle, type QuestionDraft } from '../question-steps';
 import type { VariantProps } from './types';
 
 const OTHER = '\u0000other'; // the Other row's radio value: no option label can be it
-const ADVANCE_MS = 200; // T3's beat between a single-select pick and the next question, so the pick is seen
 
 const ROW = 'flex w-full items-start gap-2 rounded-sm border border-border px-2.5 py-1.5 text-left outline-accent hover:bg-bg-hover focus-visible:outline-2 data-[state=checked]:border-border-strong data-[state=checked]:bg-bg-active';
 
@@ -173,32 +171,10 @@ export function QuestionBody({ item, request, placement, busy, submit, bindKeys 
   };
   const decline = () => submit(toAnswer({ kind: 'permission', decision: 'deny', message: '' }), 'Skipped');
 
-  // A single-select pick moves on after a beat, from the draft as it is then, and only if the step is still this one.
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const cancelAdvance = () => {
-    if (timer.current !== null) clearTimeout(timer.current);
-    timer.current = null;
-  };
-  useEffect(() => cancelAdvance, []);
-  const onPick = (label: string) => {
-    save(pick(draft, question, label));
-    if (!advancesOnPick(question, last)) return;
-    cancelAdvance();
-    timer.current = setTimeout(() => {
-      timer.current = null;
-      const now = useAttention.getState().drafts.get(item.id);
-      if (now && now.step === step) saveStep(advance(now, count));
-    }, ADVANCE_MS);
-  };
+  const onPick = (label: string) => save(pick(draft, question, label));
   const onToggle = (label: string, on: boolean) => save(toggle(draft, question, label, on));
-  const onOther = (text: string | null) => {
-    cancelAdvance();
-    save(setOther(draft, question, text));
-  };
-  const show = (to: number) => {
-    cancelAdvance();
-    saveStep(goTo(draft, to, count));
-  };
+  const onOther = (text: string | null) => save(setOther(draft, question, text));
+  const show = (to: number) => saveStep(goTo(draft, to, count));
 
   useEffect(() => {
     bindKeys({

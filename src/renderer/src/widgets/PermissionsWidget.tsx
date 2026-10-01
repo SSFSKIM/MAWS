@@ -3,6 +3,7 @@
 // `list_permission_rules` grouped allow, ask, deny, each with the engine's own phrasing, the rule in mono and its source
 // file, then the workspace directories. The mode segment is C7's mode menu over `session.setPermissionMode`: it selects
 // the effective mode the engine answered, whatever was asked, and a refusal never moves it.
+import { PERMISSION_MODE_LABELS } from '@shared/sessions/permission-mode-labels';
 import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, type ReactNode } from 'react';
 import * as z from 'zod';
@@ -32,7 +33,7 @@ export interface RuleView {
 }
 
 export interface PermissionsView {
-  mode: { effective: string; refusal: string | null } | null; // null before any status
+  mode: { effective: PermissionMode; refusal: string | null } | null; // null before any status
   groups: { behavior: (typeof BEHAVIORS)[number]; label: string; rules: RuleView[] }[];
   workspace: { path: string; note: string }[];
   managedOnly: boolean;
@@ -70,7 +71,7 @@ export function ModeHeader({ mode, grants, segment }: { mode: NonNullable<Permis
   return (
     <div className="mb-2">
       <p className="m-0">
-        {PERMISSIONS.effective} <strong className="font-semibold">{mode.effective}</strong> <span className="text-ui-sm text-fg-muted">· {PERMISSIONS.fromInit}</span>
+        {PERMISSIONS.effective} <strong className="font-semibold">{PERMISSION_MODE_LABELS[mode.effective]}</strong> <span className="text-ui-sm text-fg-muted">· {PERMISSIONS.fromInit}</span>
       </p>
       {!segment && mode.refusal && <p className="m-0 mt-1 border-l-2 border-warning pl-2 text-ui-sm">{mode.refusal}</p>}
       {grants > 0 && <p className="m-0 mt-1 text-ui-sm text-fg-muted">{PERMISSIONS.grants(grants)}</p>}
