@@ -1,0 +1,35 @@
+[
+  {
+    "at": "2026-09-28T12:00:00.010Z",
+    "id": "time:turn:u-wide-1",
+    "kind": "time",
+    "label": "Yesterday 12:00 PM",
+    "turnId": "turn:u-wide-1"
+  },
+  {
+    "at": "2026-09-28T12:00:00.010Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:u-wide-1",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "u-wide-1",
+    "placeholders": [],
+    "steer": false,
+    "text": "Tabulate the fixtures, and show the column list as code.",
+    "turnId": "turn:u-wide-1"
+  },
+  {
+    "at": "2026-09-28T12:00:02.000Z",
+    "blockIndex": 0,
+    "id": "text:msg_wide_1:0",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "The first table fits the text; the second, and the line of code under it, are wider than the text.\n\n| Token | Value |\n| --- | --- |\n| `--measure` | 768px |\n| `--measure-pad` | 16px |\n\n| Fixture | Turns | Rows | Cells | Groups | Dividers | Subagents | Requests | Plans | Questions | Boundaries | Errors | Notices |\n| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n| events/wide-blocks | 1 | 3 | 0 | 0 | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |\n\n```ts\nexport const COLUMNS = ['fixture', 'turns', 'rows', 'cells', 'groups', 'dividers', 'subagents', 'requests', 'plans', 'questions', 'boundaries', 'errors', 'notices'] as const;\n```",
+    "messageUuid": "a-wide-1",
+    "model": "claude-opus-5-5",
+    "phase": "answer",
+    "turnId": "turn:u-wide-1"
+  }
+]

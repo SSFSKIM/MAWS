@@ -131,7 +131,9 @@ button.transcript-chip:hover { background: var(--bg-hover); }
 .transcript-prose [data-streamdown="code-block-body"] { font-size: var(--text-code); }
 .transcript-prose pre code { font-size: inherit; }
 /* W2: an answer's wide table or code block may break out of the text to --measure-wide, centred on the column and never
-   past the pane; one no wider than the text keeps the text's width */
+   past the pane; one no wider than the text keeps the text's width. A completed answer (static mode) holds its blocks
+   directly; a streaming one wraps each in a `display: contents` [dir] div. */
+:is(.transcript-answer, .transcript-commentary) > .transcript-prose > :is([data-streamdown="table-wrapper"], [data-streamdown="code-block"]),
 :is(.transcript-answer, .transcript-commentary) > .transcript-prose > [dir] > :is([data-streamdown="table-wrapper"], [data-streamdown="code-block"]) {
   position: relative;
   left: 50%;
