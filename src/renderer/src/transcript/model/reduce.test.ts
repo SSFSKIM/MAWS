@@ -713,8 +713,10 @@ describe('child traffic', () => {
     const state = applyEvents(createState(null, 'agent-1' as never), b.events);
     expect(state.order).toHaveLength(1);
     const list = rowsOf(withAllExpanded(state));
-    expect(kinds(list)).toEqual(['time', 'divider', 'group', 'assistant_text']); // the slice never closes its turn, so its group stays active
-    expect(find(list, 'group').cells[0].id).toBe('cell:c1');
+    // the slice never closes its turn; the answer after the read completes the read's group, which unwraps (W1: the
+    // answer is in the turn's event order, after the work it follows)
+    expect(kinds(list)).toEqual(['time', 'divider', 'cell', 'assistant_text']);
+    expect(find(list, 'cell').id).toBe('cell:c1');
   });
 });
 
@@ -727,7 +729,7 @@ describe('revisable log', () => {
     b.text('m2', 0, 'Fallback answer');
     b.end(['u1']);
     const list = rows(b.events);
-    expect(kinds(list)).toEqual(['time', 'user', 'divider', 'boundary', 'assistant_text']);
+    expect(kinds(list)).toEqual(['time', 'user', 'boundary', 'assistant_text']); // W1: a boundary is no work, so this turn has no divider
     expect(list.some((row) => row.kind === 'assistant_text' && row.markdown === 'Refused answer')).toBe(false);
     expect(find(list, 'boundary')).toMatchObject({ boundaryKind: 'retraction', text: 'Response retracted · refusal · switched to fallback' });
   });

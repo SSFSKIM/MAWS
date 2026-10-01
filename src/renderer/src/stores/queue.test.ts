@@ -19,7 +19,7 @@ describe('the queue store holds each session’s app queue from its snapshot and
     const off = attachQueue(APP, f.client);
     expect(f.calls).toEqual(['on session.queue', 'invoke session.queue.list']);
     await f.reply('session.queue.list', { entries: [entry('q-1')], paused: true, pauseReason: 'interrupt' });
-    expect(held()).toEqual({ entries: [entry('q-1')], paused: true, pauseReason: 'interrupt', loaded: true });
+    expect(held()).toEqual({ entries: [entry('q-1')], paused: true, pauseReason: 'interrupt', steers: [], withdrawn: [], loaded: true });
     f.event('session.queue', { appSessionId: OTHER, entries: [entry('elsewhere')], paused: false, pauseReason: null });
     f.event('session.queue', { appSessionId: APP, entries: [], paused: false, pauseReason: null });
     expect(held()).toEqual({ ...EMPTY_QUEUE, loaded: true });
@@ -32,7 +32,15 @@ describe('the queue store holds each session’s app queue from its snapshot and
     attachQueue(APP, f.client);
     f.event('session.queue', { appSessionId: APP, entries: [entry('q-2', 'submitting')], paused: false });
     await f.reply('session.queue.list', { entries: [entry('q-1')], paused: false, pauseReason: null });
-    expect(held()).toEqual({ entries: [entry('q-2', 'submitting')], paused: false, pauseReason: null, loaded: true });
+    expect(held()).toEqual({ entries: [entry('q-2', 'submitting')], paused: false, pauseReason: null, steers: [], withdrawn: [], loaded: true });
+  });
+
+  it('carries the pending steers and the withdrawn uuids the host publishes (W1)', async () => {
+    const f = fakeClient();
+    attachQueue(APP, f.client);
+    const steer = { messageUuid: 'm-1' as never, content: 'look at b', createdAt: '2026-09-29T10:00:00.000Z' };
+    f.event('session.queue', { appSessionId: APP, entries: [], paused: false, pauseReason: null, steers: [steer], withdrawn: ['m-0' as never] });
+    expect(held()).toMatchObject({ steers: [steer], withdrawn: ['m-0'] });
   });
 
   it('reads an unanswered snapshot (no process, no state file) as the empty queue', async () => {

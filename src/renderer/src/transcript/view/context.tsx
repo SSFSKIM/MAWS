@@ -13,6 +13,7 @@ export interface TranscriptActions {
   openFile(path: string, line?: number): void; // C5: the layout store action openTab({ kind: 'file', path, line })
   openExternal(url: string): void; // C5: layout.openExternal
   editAndResubmit(row: Extract<Row, { kind: 'user' }>): void; // C7: prefill the composer; forks history (§4.2)
+  editPrompt(row: Extract<Row, { kind: 'user' }>): void; // C7 (W1): a prompt that never reached the model (a hook blocked it) back into the composer, as a new message
   loadSpill(spill: Spill): Promise<string>; // C4: fs.readSpill; default adapter provided (DEFAULT_ACTIONS)
 }
 
@@ -24,7 +25,7 @@ export interface RewindInterface {
 
 const noop = () => {};
 export const NO_ACTIONS: TranscriptActions = {
-  openSubagent: noop, openFullLog: noop, reviewChanges: noop, openFile: noop, openExternal: noop, editAndResubmit: noop,
+  openSubagent: noop, openFullLog: noop, reviewChanges: noop, openFile: noop, openExternal: noop, editAndResubmit: noop, editPrompt: noop,
   loadSpill: () => Promise.reject(new Error('loadSpill: no adapter supplied')),
 };
 // What a Transcript does for an action its caller did not supply: the two X2 commands C6 can call itself (a spilled

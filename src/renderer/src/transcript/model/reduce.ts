@@ -8,7 +8,7 @@ import type { AgentId, ApiMessageId, EventId, MessageUuid, RequestId, SessionId,
 import { toolUseOf } from '@shared/graph/ids';
 import { rowId, turnId as turnIdOf } from './keys';
 import type { CellDetail, Row, RowId, Spill, SubagentRef, SubagentStatus, ToolCategory, TurnId } from './rows';
-import { appendStripped, stripAnsi } from './ansi';
+import { appendStripped, stripAnsi } from '@shared/wire/ansi';
 import { isInterruptionMarker, isLocalCommand } from './user-text';
 
 type Event<K extends SessionEvent['kind']> = Extract<SessionEvent, { kind: K }>;
@@ -321,17 +321,32 @@ class Batch {
     const next = this.state.order.slice(from).find((id) => this.state.turns.get(id)!.state === 'open' && this.state.turns.get(id)!.accepted);
     this.state.current = next ?? null;
   }
+
+  // W1: every prompt waiting for its turn (open and not accepted, a hidden one too: rowsOf derives it) is derived again.
+  rederiveWaiting(): void {
+    for (const [id, turn] of [...this.state.turns]) if (turn.state === 'open' && !turn.accepted) this.touch(id).version += 1;
+  }
+}
+
+// W1: the turn the engine is running: the current turn while it is open and accepted. A prompt waiting for its turn
+// reads as waiting at the next step only while one runs (derive.ts), so a batch that changes it (a turn starting or
+// closing) re-derives every waiting turn.
+export function runningTurn(state: TranscriptState): TurnId | null {
+  const turn = state.current === null ? undefined : state.turns.get(state.current);
+  return turn !== undefined && turn.state === 'open' && turn.accepted ? turn.id : null;
 }
 
 export function applyEvents(previous: TranscriptState, events: SessionEvent[]): TranscriptState {
   const batch = new Batch(previous);
   const { state } = batch;
+  const running = runningTurn(state);
   for (const event of events) {
     if (state.seen.has(event.id)) continue;
     state.seen.add(event.id);
     if (event.parentToolUseId !== null && state.agentId === null) applyChild(batch, event);
     else apply(batch, event);
   }
+  if (runningTurn(state) !== running) batch.rederiveWaiting();
   return state;
 }
 
@@ -430,7 +445,9 @@ function apply(batch: Batch, event: SessionEvent): void {
         if (event.messageUuid !== null) state.echoUuids.add(event.messageUuid);
         return;
       }
-      if (event.bash !== null || isLocalCommand(event.origin, event.content)) {
+      // W1 (A5): a synthetic one is the engine's `<local-command-caveat>` for the model (a meta record on disk, never on
+      // the wire), which falls through to the synthetic rule below: retained, no row
+      if (event.bash !== null || (isLocalCommand(event.origin, event.content) && !event.isSynthetic)) {
         if (!pushRouted(null)) batch.loose(event); // a bash or local_command row; never a turn
         return;
       }

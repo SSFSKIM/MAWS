@@ -25,7 +25,20 @@ export const QueuePauseReasonSchema = z.enum(QUEUE_PAUSE_REASONS);
 export type QueuePauseReason = z.infer<typeof QueuePauseReasonSchema>;
 // C7 end
 
-export const QueueStateSchema = z.strictObject({ entries: z.array(QueueEntrySchema), paused: z.boolean(), pauseReason: QueuePauseReasonSchema.nullable().optional() }); // C7: pauseReason
+// W1 start: the Enter scheme (charter §4.2 "Queue ownership" as amended 2026-10-01). Enter while a turn runs writes a
+// `next` steer, which the engine holds and delivers at the running turn's next tool boundary; until its `started` it is
+// a pending steer here, which the human may still hold back into the app queue ("Hold until the turn ends", through the
+// engine's `cancel_async_message`). A held-back steer's uuid is remembered (the last WITHDRAWN_MAX), because the engine
+// reports it `cancelled` and the transcript must not show it as a message that was never sent.
+export const PendingSteerSchema = z.strictObject({ messageUuid: MessageUuidSchema, content: z.union([z.string(), z.array(ContentBlockSchema)]), createdAt: z.string() });
+export type PendingSteer = z.infer<typeof PendingSteerSchema>;
+export const WITHDRAWN_MAX = 50;
+// W1 end
+
+export const QueueStateSchema = z.strictObject({
+  entries: z.array(QueueEntrySchema), paused: z.boolean(), pauseReason: QueuePauseReasonSchema.nullable().optional(), // C7: pauseReason
+  steers: z.array(PendingSteerSchema).optional(), withdrawn: z.array(MessageUuidSchema).optional(), // W1: absent in a state file written before them
+});
 export type QueueState = z.infer<typeof QueueStateSchema>;
 // What a load answers: the queue, and the path an unreadable state file was moved to (kept, never deleted) when the
 // load found one, so the queue can say so instead of starting silently empty (M4 review).

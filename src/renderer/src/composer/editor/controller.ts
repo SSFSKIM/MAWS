@@ -36,10 +36,10 @@ export interface DraftPort {
   clearsOnSend?(): boolean;
 }
 
-// How a submission was asked for: Enter and ⌘Enter send, ⌥Enter steers; the Composer's control adds its caret menu's
-// Queue and Interrupt and send (M4), and edit mode its Send without rewinding (M4b), which reach the caller's
-// `onSubmit` through the same path as a key.
-export type SubmitHow = 'send' | 'steer' | 'queue' | 'interrupt_and_send' | 'send_without_rewinding';
+// How a submission was asked for: Enter and ⌘Enter send (W1: while a turn runs the Composer makes that a `next`
+// steer), ⌥Enter holds; the Composer's control adds its caret menu's Queue and Send now (M4), and edit mode its Send
+// without rewinding (M4b), which reach the caller's `onSubmit` through the same path as a key.
+export type SubmitHow = 'send' | 'hold' | 'queue' | 'interrupt_and_send' | 'send_without_rewinding';
 
 export interface EditorHandle {
   focus(): void;
@@ -271,7 +271,7 @@ export class EditorController {
     this.writer.cancel(); // no draft write runs while a submission is in flight (an unstarted session's start forbids one)
     let accepted: boolean;
     try {
-      accepted = await (this.inputs.onSubmit ? this.inputs.onSubmit(s, how) : submitSerialized(this.client, appSessionId, s, how === 'steer' ? 'steer' : 'send', target));
+      accepted = await (this.inputs.onSubmit ? this.inputs.onSubmit(s, how) : submitSerialized(this.client, appSessionId, s, how === 'queue' ? 'steer' : 'send', target));
     } finally {
       this.busy = false;
       this.view.setBusy(false);

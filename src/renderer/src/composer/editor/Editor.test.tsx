@@ -10,7 +10,7 @@ import { resetCatalogStore } from '../../stores/catalog';
 import { prefillComposer, resetComposerStore } from '../../stores/composer';
 import { registerSlashWidget } from '../mentions/widgets'; // C11
 import { docOf, hardBreak, paragraph, pastedNode, textNode } from './doc';
-import { Editor, type DraftPort, type EditorHandle } from './Editor';
+import { Editor, type DraftPort, type EditorHandle, type SubmitHow } from './Editor';
 import type { Serialized } from './serialize';
 
 const APP = 'app-1' as AppSessionId;
@@ -66,7 +66,7 @@ describe('the editor mounts over its draft, takes prefills and submits through t
   });
 
   it('sends on ⌘Enter from the editor through C5’s dispatcher, then clears and drops the draft', async () => {
-    const onSubmit = vi.fn<(s: Serialized, how: 'send' | 'steer') => Promise<boolean>>(async () => true);
+    const onSubmit = vi.fn<(s: Serialized, how: SubmitHow) => Promise<boolean>>(async () => true);
     const { port, saved } = drafts({ doc: docOf([paragraph(textNode('hello'))]), attachments: [], updatedAt: '2026-09-29T00:00:00.000Z' });
     const { container } = render(<Editor appSessionId={APP} cwd="/repo" sessionId={null} drafts={port} client={client} onSubmit={onSubmit} />);
     const content = contentOf(container);
@@ -92,13 +92,13 @@ describe('the editor mounts over its draft, takes prefills and submits through t
     await act(async () => {
       content.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', altKey: true, bubbles: true, cancelable: true }));
     });
-    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ content: 'keep me' }), 'steer'));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ content: 'keep me' }), 'hold')); // ⌥Enter holds (W1)
     expect(content.textContent).toBe('keep me');
     expect(saved).toEqual([]);
   });
 
   it('sends on a plain Enter in a one-line document, and breaks the line with it once the document has more lines', async () => {
-    const onSubmit = vi.fn<(s: Serialized, how: 'send' | 'steer') => Promise<boolean>>(async () => false);
+    const onSubmit = vi.fn<(s: Serialized, how: SubmitHow) => Promise<boolean>>(async () => false);
     const multiline = docOf([paragraph(textNode('one'), hardBreak(), textNode('two'))]);
     const { port } = drafts({ doc: multiline, attachments: [], updatedAt: '2026-09-29T00:00:00.000Z' });
     const handle = createRef<EditorHandle>();
@@ -117,7 +117,7 @@ describe('the editor mounts over its draft, takes prefills and submits through t
   });
 
   it('treats an open @ popup with no rows as no popup: Enter sends', async () => {
-    const onSubmit = vi.fn<(s: Serialized, how: 'send' | 'steer') => Promise<boolean>>(async () => false);
+    const onSubmit = vi.fn<(s: Serialized, how: SubmitHow) => Promise<boolean>>(async () => false);
     const { port } = drafts(null);
     const handle = createRef<EditorHandle>();
     const { container } = render(<Editor appSessionId={APP} cwd="" sessionId={null} drafts={port} client={client} onSubmit={onSubmit} handle={handle} />);
@@ -134,7 +134,7 @@ describe('the editor mounts over its draft, takes prefills and submits through t
     const fake = fakeClient();
     window.maws = fake.client;
     try {
-      const onSubmit = vi.fn<(s: Serialized, how: 'send' | 'steer') => Promise<boolean>>(async () => false);
+      const onSubmit = vi.fn<(s: Serialized, how: SubmitHow) => Promise<boolean>>(async () => false);
       const { port } = drafts(null);
       const handle = createRef<EditorHandle>();
       const { container } = render(<Editor appSessionId={APP} cwd="/repo" sessionId={null} drafts={port} client={client} onSubmit={onSubmit} handle={handle} />);
@@ -182,7 +182,7 @@ describe('the editor mounts over its draft, takes prefills and submits through t
       ...client,
       invoke: vi.fn(async (name: string) => (name === 'session.history.list' ? { ok: true, value: { entries: history } } : { ok: false, error: { code: 'internal', message: 'no session' } })),
     } as unknown as MawsBridge;
-    const onSubmit = vi.fn<(s: Serialized, how: 'send' | 'steer') => Promise<boolean>>(async () => false);
+    const onSubmit = vi.fn<(s: Serialized, how: SubmitHow) => Promise<boolean>>(async () => false);
     const { port } = drafts(null);
     const handle = createRef<EditorHandle>();
     const { container } = render(<Editor appSessionId={APP} cwd="/repo" sessionId="s" drafts={port} client={recalling} onSubmit={onSubmit} handle={handle} />);

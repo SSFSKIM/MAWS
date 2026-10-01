@@ -212,6 +212,48 @@ describe("a coordinator's queued_command attachment in a child's transcript", ()
   });
 });
 
+// W1: a prompt the engine took into the running turn is only a `queued_command` attachment in the main transcript
+// (w1-steer-next-disk line 32, a stream-json `next` steer; w1-terminal-queued line 26, a prompt the terminal queued).
+describe('a human queued_command attachment in the main transcript is a steer', () => {
+  const steerOf = (name: string) => loadTranscriptFixture(name).find((record) => record.type === 'attachment' && (record.attachment as { type?: string }).type === 'queued_command')!;
+
+  it.each([['w1-steer-next-disk', 'Reply NEXT_OK'], ['w1-terminal-queued', 'Reply TERMINAL_QUEUED']])('%s: the prompt under its own uuid, then the engine’s started for it, and no turn of its own', (name, text) => {
+    const record = steerOf(name);
+    const sourceUuid = (record.attachment as { source_uuid: string }).source_uuid;
+    const events = mapAll([record]);
+    expect(kinds(events)).toEqual(['session.started', 'user.message', 'command.lifecycle']);
+    expect(only(events, 'user.message')[0]).toMatchObject({ id: record.uuid, messageUuid: sourceUuid, content: text, isSynthetic: false, origin: null, bash: null, seq: null });
+    expect(only(events, 'command.lifecycle')[0]).toMatchObject({ id: `${record.uuid as string}#1`, commandUuid: sourceUuid, state: 'started' });
+    expect(only(events, 'turn.started')).toEqual([]);
+  });
+
+  it('a meta one, or one of another origin or mode, stays a context injection', () => {
+    const record = steerOf('w1-steer-next-disk');
+    const attachment = record.attachment as Record<string, unknown>;
+    for (const variant of [{ ...attachment, isMeta: true }, { ...attachment, origin: { kind: 'task-notification' } }, { ...attachment, commandMode: 'bash' }, { ...attachment, source_uuid: undefined }]) {
+      expect(only(mapAll([rec({ ...record, attachment: variant })]), 'user.message')).toEqual([]);
+    }
+  });
+});
+
+// W1 (A5): `/compact` on disk (w1-compact.jsonl lines 28-32): the boundary with both token counts, the summary as a
+// synthetic message opening no turn, the caveat as meta, the command's record opening its turn, and its output
+// joining that turn.
+describe('a /compact on disk', () => {
+  it('maps the five records the way the live stream shows them', () => {
+    const records = loadTranscriptFixture('w1-compact');
+    const at = records.findIndex((record) => record.type === 'system' && record.subtype === 'compact_boundary');
+    const events = mapAll(records.slice(at, at + 5));
+    expect(only(events, 'boundary.compaction')[0]).toMatchObject({ trigger: 'manual', preTokens: 28986, postTokens: 1237, historical: true });
+    const messages = only(events, 'user.message');
+    expect(messages.map((m) => [m.isSynthetic, String(typeof m.content === 'string' ? m.content : '').slice(0, 24)])).toEqual([
+      [true, 'This session is being co'], [true, '<local-command-caveat>Ca'], [false, '<command-name>/compact</'], [false, '<local-command-stdout>Co'],
+    ]);
+    expect(only(events, 'turn.started').map((e) => e.userMessageUuid)).toEqual([messages[2].messageUuid]); // the command's turn only
+    expect(records.slice(at, at + 5).map((record) => startsTurn(record))).toEqual([false, false, false, true, false]);
+  });
+});
+
 describe('subagent sidecars map to the X1 graph', () => {
   it('produces subagent.started and subagent.finished for both Agent tool uses of the parent transcript', () => {
     const records = loadTranscriptFixture('subagent-parent');

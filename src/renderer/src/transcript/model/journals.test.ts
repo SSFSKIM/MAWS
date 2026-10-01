@@ -134,13 +134,11 @@ describe('fixture gates through the model', () => {
     }
   });
 
-  it('pass2/hooks: a hook cell inside the turn’s group', () => {
+  it('pass2/hooks: the successful PostToolUse hook shows nothing; the lone Bash call stands alone (W1)', () => {
     const rows = rowsFor('pass2', 'hooks');
-    const groups = ofKind(rows, 'group');
-    expect(groups).toHaveLength(1);
-    expect(groups[0].cells.map((cell) => cell.id)).toEqual(['cell:toolu_01Pw5t8WFEWy8m7zrSCNnca1', 'cell:hook:2fb18f8d-6da2-4d27-b7c5-5e55be53e312']);
-    expect(groups[0].cells[1].detail).toMatchObject({ kind: 'hook', outcome: 'success', stdout: 'MAWS_POSTHOOK\n' });
-    expect(groups[0].summary).toBe('Ran `git status --short`, ran 1 hook');
+    expect(ofKind(rows, 'group')).toHaveLength(0);
+    expect(cellsOf(rows).map((cell) => cell.id)).toEqual(['cell:toolu_01Pw5t8WFEWy8m7zrSCNnca1']);
+    expect(rows.some((row) => row.kind === 'error' && row.scope === 'hook')).toBe(false);
   });
 
   it('pass2/auto-routed: four local_command rows and no user row for them; the interrupt markers yield no row', () => {
@@ -179,7 +177,7 @@ describe('fixture gates through the model', () => {
     const state = stateOf('pass3', 'steer-next');
     const RUNNING = 'turn:fe091b0d-b28b-41a8-aed3-39585769623d';
     expect(state.order).toEqual([RUNNING]);
-    const rows = rowsOf(state); // closed and collapsed: the steer stays outside the work area
+    const rows = rowsOf(state); // closed and collapsed: the steer stays in view
     expect(ofKind(rows, 'divider').map((row) => [row.turnId, row.state])).toEqual([[RUNNING, 'completed']]);
     expect(ofKind(rows, 'user').map((row) => [row.id, row.turnId, row.steer, row.dropped])).toEqual([
       ['user:fe091b0d-b28b-41a8-aed3-39585769623d', RUNNING, false, false],
@@ -187,11 +185,90 @@ describe('fixture gates through the model', () => {
     ]);
   });
 
+  // W1 (A2): the steer sits where the engine took it, between the 2nd and 3rd Bash calls (seq 69-70), as a persistent
+  // unit that splits the fold; collapsed, the turn reads prompt, divider, steer, answer.
+  it('pass3/steer-next: the steer bubble renders between the 2nd and 3rd Bash calls, and stays when the turn folds', () => {
+    const STEER = 'user:42a15931-3c9a-4267-a6b2-09fa5697735d';
+    const shape = (rows: Row[]) => rows.filter((row) => row.kind !== 'time' && row.kind !== 'error').map((row) =>
+      row.kind === 'group' ? `group:${row.cells.map((cell) => (cell.detail.kind === 'shell' ? cell.detail.command.replace('sleep 1 && echo ', '') : cell.toolName)).join(',')}` : row.kind === 'user' ? (row.id === STEER ? 'steer' : 'prompt') : row.kind === 'assistant_text' ? `${row.phase}:${row.markdown}` : row.kind);
+    expect(shape(rowsFor('pass3', 'steer-next'))).toEqual(['prompt', 'divider', 'group:1,2', 'steer', 'commentary:NEXT_OK', 'group:3,4,5,6,7,8', 'answer:COUNTED']);
+    expect(shape(rowsOf(stateOf('pass3', 'steer-next')))).toEqual(['prompt', 'divider', 'steer', 'answer:COUNTED']);
+  });
+
+  it('pass3/steer-next: written at seq 46 and not yet taken, the steer is a dimmed tail bubble reading Sends at the next step; taken at seq 71, it moves into the turn', () => {
+    const waiting = rowsOf(journalState('pass3', 'steer-next', 60));
+    const tail = waiting.at(-1);
+    expect(tail).toMatchObject({ kind: 'user', id: 'user:42a15931-3c9a-4267-a6b2-09fa5697735d', pending: 'next', steer: false, dropped: false });
+    const taken = ofKind(rowsOf(journalState('pass3', 'steer-next', 75)), 'user').find((row) => row.id === tail!.id);
+    expect(taken).toMatchObject({ steer: true });
+    expect(taken!.pending).toBeUndefined();
+  });
+
+  // W1 review: a waiting prompt's caption depends on the running turn, so one evolving state must re-derive it whenever
+  // the running turn changes (STEER_B's turn starting at seq 42 leaves STEER_A waiting behind it), not only when one closes.
+  it('pass3/steer-next-then-now: applied row by row, every user row’s pending mark is the one a fresh derivation gives', () => {
+    const all = events('pass3', 'steer-next-then-now');
+    const pendingOf = (state: ReturnType<typeof createState>) => ofKind(rowsOf(state), 'user').map((row) => [row.id, row.pending ?? null]);
+    let state = createState(null, null);
+    let waited = 0;
+    for (let i = 0; i < all.length; ) {
+      let end = i + 1;
+      while (end < all.length && all[end].seq === all[i].seq) end += 1; // one journal row's events are one batch
+      state = applyEvents(state, all.slice(i, end));
+      const fresh = pendingOf(applyEvents(createState(null, null), all.slice(0, end)));
+      expect([all[i].seq, pendingOf(state)]).toEqual([all[i].seq, fresh]);
+      if (fresh.some(([, pending]) => pending === 'next')) waited += 1;
+      i = end;
+    }
+    expect(waited).toBeGreaterThan(0); // the replay passed through a waiting prompt
+  });
+
+  it('pass3/steer-next: COUNTED, followed by a MessageDisplay and a Stop hook (seq 230-237), is the answer, visible when the turn collapses (W1)', () => {
+    const state = stateOf('pass3', 'steer-next');
+    const answer = ofKind(rowsOf(state), 'assistant_text');
+    expect(answer.map((row) => [row.markdown, row.phase])).toEqual([['COUNTED', 'answer']]);
+    const expanded = ofKind(rowsFor('pass3', 'steer-next'), 'assistant_text');
+    expect(expanded.find((row) => row.markdown === 'COUNTED')).toMatchObject({ phase: 'answer' });
+  });
+
   it('pass3/steer-now: the now prompt preempts the running turn (stopped) and runs as its own turn', () => {
     const state = stateOf('pass3', 'steer-now');
     expect(state.order).toHaveLength(3);
-    expect(ofKind(rowsFor('pass3', 'steer-now'), 'divider').map((row) => row.state)).toEqual(['stopped', 'completed', 'completed']);
+    expect(state.order.map((id) => state.turns.get(id)!.state)).toEqual(['closed', 'closed', 'closed']);
+    // The two answer-only turns did no work (their hook runs show nothing since W1), so only the stopped turn has a divider.
+    expect(ofKind(rowsFor('pass3', 'steer-now'), 'divider').map((row) => [row.turnId, row.state])).toEqual([[state.order[0], 'stopped']]);
+    expect(ofKind(rowsFor('pass3', 'steer-now'), 'assistant_text').filter((row) => row.turnId !== state.order[0]).map((row) => row.phase)).toEqual(['answer', 'answer']);
     expect(ofKind(rowsFor('pass3', 'steer-now'), 'user').every((row) => !row.steer)).toBe(true);
+  });
+
+  // W1 (A4): a Stop hook answering decision: block (seq 30) and a UserPromptSubmit hook exiting 2 (seq 57), recorded live
+  // under a scratch config home. The engine's terminal words for both (seq 32, 59) give way to the hook's notice row.
+  it('pass3/hooks-blocking: Hook re-prompted Claude between the two answers; A hook blocked your prompt with Edit prompt; no divider, no engine notice', () => {
+    const rows = rowsOf(stateOf('pass3', 'hooks-blocking'));
+    expect(rows.filter((row) => row.kind !== 'time').map((row) => (row.kind === 'error' ? `${row.scope}:${row.text}` : row.kind === 'assistant_text' ? `${row.phase}:${row.markdown}` : `${row.kind}:${row.kind === 'user' ? row.text : ''}`))).toEqual([
+      'user:Reply ONE',
+      'answer:ONE',
+      'hook:Hook re-prompted Claude · Say REPROMPTED and stop',
+      'answer:REPROMPTED',
+      'user:BLOCKME please reply TWO',
+      'hook:A hook blocked your prompt · BLOCKED_BY_TEST_HOOK',
+      'exit:Session process exited (quit)',
+    ]);
+    expect(ofKind(rows, 'error').find((row) => row.scope === 'hook' && row.text.startsWith('A hook blocked'))?.action).toBe('edit_prompt');
+  });
+
+  // W1 (A5): `/compact` opens a turn of its own (seq 39) holding the boundary (seq 43), the engine's synthetic summary
+  // (seq 44) and the command's output (seq 45). Neither the boundary nor the output is work, so the turn has no
+  // "Worked for 0s" divider and both stay in view; the summary is no bubble.
+  it('pass3/compact: the /compact turn reads its one-line prompt, the boundary and the output, with no divider and no summary bubble', () => {
+    const state = stateOf('pass3', 'compact');
+    const compact = state.order[1];
+    const rows = rowsOf(state).filter((row) => row.turnId === compact);
+    expect(rows.map((row) => row.kind)).toEqual(['user', 'boundary', 'local_command']);
+    expect(ofKind(rows, 'user')[0].text).toBe('/compact');
+    expect(ofKind(rows, 'boundary')[0]).toMatchObject({ boundaryKind: 'compaction', text: 'Context compacted · 29k → 1k tokens · manual' });
+    expect(ofKind(rowsFor('pass3', 'compact'), 'user').map((row) => row.text)).toEqual(['Reply ONE', '/compact', 'Reply TWO']);
+    expect(ofKind(rowsFor('pass3', 'compact'), 'divider')).toEqual([]); // nor any around it: two answers and a local command
   });
 
   it('pass3/plan-outcomes: MAWS’s clear-and-implement (a deny with its fixed message) reads as such, beside the other two outcomes', () => {

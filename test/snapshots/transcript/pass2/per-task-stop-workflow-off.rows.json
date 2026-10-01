@@ -74,16 +74,6 @@
     "turnId": "turn:504399e2-3e09-4d3f-b266-6e7d8bfddc35"
   },
   {
-    "at": "2026-09-28T10:03:23.634Z",
-    "durationMs": 0,
-    "id": "think:msg_011CfVeU3Dz4eBHmnND4u2Q5:0",
-    "kind": "thinking",
-    "live": false,
-    "messageUuid": "2fd38510-0a2a-46cc-ae33-8922501a149d",
-    "text": "",
-    "turnId": "turn:504399e2-3e09-4d3f-b266-6e7d8bfddc35"
-  },
-  {
     "agents": [
       {
         "agentId": null,

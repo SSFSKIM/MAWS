@@ -11,16 +11,22 @@
 // `uncertain` head of a paused queue for the human to re-send or remove. Steer bypasses the queue with `priority:
 // 'now'` (or `'next'` on request). Every change is saved through the store before `onChange` fires. Releases and pauses are journaled as
 // `meta queue` rows and the queue's warnings as `meta notice` rows (the normaliser maps those to `notice.posted`).
+// W1: a `next` steer (Enter while a turn runs) is a pending steer until the engine starts it or drops it, published
+// with the queue so the composer can offer "Hold until the turn ends": `hold` withdraws it from the engine
+// (`cancel_async_message`, pass3/steer-next-cancelled) and appends it to the app queue, remembering its uuid.
 import { randomUUID } from 'node:crypto';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
-import { SendContentSchema, type QueueEntry, type QueuePauseReason, type QueueState, type SendContent, type SessionStateStore } from '@shared/engine/session-state-store';
+import { SendContentSchema, WITHDRAWN_MAX, type PendingSteer, type QueueEntry, type QueuePauseReason, type QueueState, type SendContent, type SessionStateStore } from '@shared/engine/session-state-store';
 import type { UserInputFrame } from '@shared/wire/frames';
 
 export const ACK_TIMEOUT_MS = 5_000;
+// W1: the plain stop's whole withdrawal phase (holdAll), so its interrupt is written well inside the bounded IPC budget
+// (8 s, under main's 10 s deadline) however long the engine leaves a cancel unanswered (each has its own 8 s timeout).
+export const HOLD_ALL_DEADLINE_MS = 2_000;
 const DROPPED_BEFORE_START: ReadonlySet<string> = new Set(['cancelled', 'discarded', 'refused']);
 
-export type ReleaseTrigger = 'send' | 'turn_ended' | 'resume' | 'dropped';
+export type ReleaseTrigger = 'send' | 'turn_ended' | 'resume' | 'dropped' | 'hold'; // W1: `hold`, a held steer whose turn ended during the withdrawal
 export type SteerPriority = 'now' | 'next';
 export type PauseReason = QueuePauseReason; // C7: the whole closed set the queue journals (QUEUE_PAUSE_REASONS)
 export type ExitKind = 'quit' | 'stop' | 'archive' | 'crash' | 'unknown' | 'budget'; // C12: a release pauses nothing, like `stop`
@@ -32,9 +38,11 @@ export interface MessageQueueDeps {
   meta: (frame: Record<string, unknown>) => void; // journals a meta row (queue, notice) through the session's record path
   turnOpen: () => boolean; // the normaliser holds a main-lane turn open
   canWrite: () => boolean; // the process is ready
+  cancel: (messageUuid: MessageUuid) => Promise<boolean>; // W1: `cancel_async_message`; true when the engine withdrew the message from its queue
   onChange: (queue: QueueState) => void;
   log?: (message: string) => void;
   ackTimeoutMs?: number;
+  holdAllDeadlineMs?: number; // W1: HOLD_ALL_DEADLINE_MS by default
 }
 
 export class QueueEntryError extends Error {
@@ -52,6 +60,9 @@ export class MessageQueue {
   private readonly ackTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly started = new Set<string>(); // queue ids whose submission the engine started
   private readonly saving = new Set<Promise<void>>(); // store saves not yet settled
+  private steers: PendingSteer[] = []; // W1: `next` steers written and not yet started or dropped, in write order
+  private withdrawn: MessageUuid[] = []; // W1: the steers held back into the app queue, the last WITHDRAWN_MAX
+  private readonly withdrawing = new Set<MessageUuid>(); // W1: steers one hold or stop has claimed and not yet settled
   private readonly log: (message: string) => void;
 
   constructor(private readonly deps: MessageQueueDeps) {
@@ -59,7 +70,8 @@ export class MessageQueue {
   }
 
   get state(): QueueState {
-    return structuredClone({ entries: this.entries, paused: this.paused, pauseReason: this.pauseReason }); // C7: pauseReason
+    // C7: pauseReason; W1: steers and withdrawn, present only when there are any (absent reads as none)
+    return structuredClone({ entries: this.entries, paused: this.paused, pauseReason: this.pauseReason, ...(this.steers.length > 0 && { steers: this.steers }), ...(this.withdrawn.length > 0 && { withdrawn: this.withdrawn }) });
   }
 
   // A turn is open, or an entry is `submitting`, or a `released` entry's turn has not ended.
@@ -87,6 +99,8 @@ export class MessageQueue {
     this.entries = loaded.entries;
     this.paused = loaded.paused;
     this.pauseReason = loaded.paused ? (loaded.pauseReason ?? null) : null; // C7
+    this.steers = []; // W1: a pending steer lived in the engine process that is gone
+    this.withdrawn = loaded.withdrawn ?? [];
     this.loaded = true;
     if (loaded.corrupt !== null) {
       // the state file was unreadable and kept aside: never a silent empty queue (M4 review)
@@ -177,8 +191,150 @@ export class MessageQueue {
     this.checkContent(content);
     if (!this.deps.canWrite()) throw new QueueEntryError('the session is not ready');
     const uuid = randomUUID() as MessageUuid;
-    await this.deps.write({ type: 'user', uuid, message: { role: 'user', content }, parent_tool_use_id: null, origin: { kind: 'human' }, priority: opts.priority ?? 'now' });
+    const next = opts.priority === 'next';
+    if (next) this.registerSteer(uuid, content);
+    try {
+      await this.deps.write({ type: 'user', uuid, message: { role: 'user', content }, parent_tool_use_id: null, origin: { kind: 'human' }, priority: opts.priority ?? 'now' });
+    } catch (error) {
+      if (next) {
+        this.steers = this.steers.filter((s) => s.messageUuid !== uuid);
+        await this.announceSteers(); // a save during the write may have published it
+      }
+      throw error;
+    }
+    if (next) await this.announceSteers();
     return { messageUuid: uuid };
+  }
+
+  // W1: a `next` steer is pending until the engine starts or drops it (onLifecycle). It is registered before its write,
+  // since the writer's settle drains the inbound frames it held (the engine's lifecycle for this uuid among them) before
+  // the write's promise resolves; taken back if the write fails. Its saves are only announcements (a pending steer is
+  // the engine's, so a lost save loses nothing).
+  private registerSteer(messageUuid: MessageUuid, content: SendContent): void {
+    this.steers = [...this.steers, { messageUuid, content, createdAt: new Date().toISOString() }];
+  }
+
+  private async announceSteers(): Promise<void> {
+    await this.persist().catch((error: unknown) => this.log(`pending steers not saved: ${messageOf(error)}`));
+  }
+
+  // W1: "Hold until the turn ends": the pending steer is withdrawn from the engine's queue and appended to the app
+  // queue, which releases it when the turn ends like any held message (at once if the turn ended while it was being
+  // withdrawn). Refused when the engine has already taken it (it was folded into the turn, or started) or answers that
+  // it had nothing to withdraw, and while another hold or a stop is withdrawing it (that one settles it; a second
+  // cancel would only be answered `false` and take back the first one's marker).
+  async hold(messageUuid: MessageUuid): Promise<QueueEntry> {
+    if (this.withdrawing.has(messageUuid)) throw new QueueEntryError('This message is already being held');
+    const steer = this.steers.find((s) => s.messageUuid === messageUuid);
+    if (!steer) throw new QueueEntryError('This message has already reached the running turn');
+    if (!this.deps.canWrite()) throw new QueueEntryError('the session is not ready');
+    this.claim([messageUuid]);
+    await this.persist().catch((error: unknown) => this.log(`hold not announced: ${messageOf(error)}`));
+    const entry = await this.withdraw(steer); // a failed cancel rejects here
+    if (!entry) throw new QueueEntryError('This message has already reached the running turn');
+    // The turn may have ended during the cancel's round trip, finding nothing to release: the usual gates (not paused,
+    // idle, ready) decide whether the head goes now.
+    await this.releaseHead('hold');
+    return structuredClone(entry);
+  }
+
+  // W1: the plain stop (⌘., the Stop button, a route switch) holds every waiting `next` steer in the app queue before
+  // the session interrupts the engine, which would otherwise start a waiting steer as its own turn the moment the
+  // running one is interrupted (pass3/steer-next-interrupted): the human's text is kept, as held rows, and nothing runs
+  // until Resume or Send now. Each is withdrawn as `hold` withdraws one, in write order, appended and saved in that order
+  // before the next cancel. One the engine took meanwhile (folded into the turn, or started) answers `cancelled: false`
+  // and stays the engine's, never duplicated; a cancel that fails is logged and leaves it the engine's; one another hold
+  // or stop is already withdrawing is left to that one. The whole phase has one deadline (HOLD_ALL_DEADLINE_MS) so the
+  // interrupt is always written promptly: past it no further cancel starts (those steers stay the engine's), and the one
+  // in flight settles in the background, still appended and saved as a held entry if the engine withdraws it. It never
+  // throws: the stop goes on regardless. Resolves to the entries held before the deadline.
+  async holdAll(): Promise<QueueEntry[]> {
+    const waiting = this.steers.filter((s) => !this.withdrawing.has(s.messageUuid));
+    if (waiting.length === 0 || !this.deps.canWrite()) return [];
+    const phase = { expired: false };
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<'expired'>((resolve) => {
+      timer = setTimeout(() => {
+        phase.expired = true;
+        resolve('expired');
+      }, this.deps.holdAllDeadlineMs ?? HOLD_ALL_DEADLINE_MS);
+      (timer as { unref?: () => void }).unref?.();
+    });
+    this.claim(waiting.map((s) => s.messageUuid)); // named before the cancels, as in hold()
+    await this.persist().catch((error: unknown) => this.log(`hold not announced: ${messageOf(error)}`));
+    const held: QueueEntry[] = [];
+    let started = 0;
+    while (started < waiting.length && !phase.expired) {
+      const withdrawal = this.withdraw(waiting[started++]).catch((error: unknown) => {
+        this.log(`a waiting steer could not be held: ${messageOf(error)}`);
+        return null;
+      });
+      const outcome = await Promise.race([withdrawal, deadline]);
+      if (outcome === 'expired') {
+        // the queue is paused by now; the gates decide, as after a hold, should it have been resumed meanwhile
+        void withdrawal.then((entry) => (entry ? this.releaseHead('hold') : undefined)).catch((error: unknown) => this.log(`release after a late hold failed: ${messageOf(error)}`));
+        break;
+      }
+      if (outcome) held.push(outcome);
+    }
+    clearTimeout(timer);
+    const unstarted = waiting.slice(started).map((s) => s.messageUuid);
+    if (unstarted.length > 0) {
+      this.log(`the stop's hold ran out of time: ${unstarted.length} waiting steer(s) left with the engine`);
+      await this.giveBack(unstarted);
+    }
+    await this.releaseHead('hold'); // gated as ever: a stop has paused the queue first
+    return held.map((entry) => structuredClone(entry));
+  }
+
+  // Named withdrawn before the cancel, so the engine's `cancelled` for it (which arrives before the answer) never reads
+  // as a message that was not sent; and claimed, so no other hold or stop withdraws it meanwhile.
+  private claim(uuids: MessageUuid[]): void {
+    for (const uuid of uuids) this.withdrawing.add(uuid);
+    this.withdrawn = [...this.withdrawn, ...uuids].slice(-WITHDRAWN_MAX);
+  }
+
+  // A claim whose withdrawal did not happen, taken back by the one that made it (the steer stays the engine's).
+  private async giveBack(uuids: MessageUuid[]): Promise<void> {
+    const gone = new Set(uuids);
+    for (const uuid of uuids) this.withdrawing.delete(uuid);
+    this.withdrawn = this.withdrawn.filter((u) => !gone.has(u));
+    await this.persist().catch((error: unknown) => this.log(`withdrawal's end not saved: ${messageOf(error)}`));
+  }
+
+  // A claimed steer withdrawn from the engine (`cancel_async_message`): on `cancelled: true` a held entry, saved before
+  // this resolves (the engine's own `cancelled` already saved a snapshot without the steer, so the entry must not wait
+  // on anything else to reach the disk; a save that fails pauses the queue and keeps it in memory); on `false` (the
+  // engine had taken it) null, and a failed cancel rejects, both giving the claim back.
+  private async withdraw(steer: PendingSteer): Promise<QueueEntry | null> {
+    let cancelled: boolean;
+    try {
+      cancelled = await this.deps.cancel(steer.messageUuid);
+    } catch (error) {
+      await this.giveBack([steer.messageUuid]);
+      throw error;
+    }
+    if (!cancelled) {
+      await this.giveBack([steer.messageUuid]);
+      return null;
+    }
+    this.withdrawing.delete(steer.messageUuid);
+    const entry = this.appendHeld(steer);
+    try {
+      await this.persist();
+    } catch (error) {
+      await this.storeFailed(entry, error); // kept in memory, the queue paused: nothing is lost
+    }
+    return entry;
+  }
+
+  // A withdrawn steer as a held entry at the app queue's end (its uuid already named withdrawn), journaled.
+  private appendHeld(steer: PendingSteer): QueueEntry {
+    this.steers = this.steers.filter((s) => s.messageUuid !== steer.messageUuid); // the engine's `cancelled` may have removed it already
+    const entry: QueueEntry = { queueId: randomUUID(), appSessionId: this.deps.appSessionId, content: steer.content, createdAt: new Date().toISOString(), state: 'queued', messageUuid: null, submittedAt: null, uncertain: false, steer: false };
+    this.entries.push(entry);
+    this.journal({ event: 'queue', action: 'hold', queueId: entry.queueId, messageUuid: steer.messageUuid });
+    return entry;
   }
 
   // A queued entry steered out of the queue, durably (M4 review): persisted as a `submitting` steer before the write
@@ -197,9 +353,12 @@ export class MessageQueue {
       throw error;
     }
     if (!current()) throw new QueueEntryError('the session ended before the steer was written');
+    const next = opts.priority === 'next';
+    if (next) this.registerSteer(uuid, entry.content); // W1: a pending steer from before its write, as in steer()
     try {
       await this.deps.write({ type: 'user', uuid, message: { role: 'user', content: entry.content }, parent_tool_use_id: null, origin: { kind: 'human' }, priority: opts.priority ?? 'now' });
     } catch (error) {
+      if (next) this.steers = this.steers.filter((s) => s.messageUuid !== uuid); // taken back, published with the revert
       if (current()) {
         this.revert(entry);
         await this.persist().catch((e: unknown) => this.log(`promote revert not saved: ${messageOf(e)}`));
@@ -219,6 +378,12 @@ export class MessageQueue {
   // (not paused, idle, ready): no turn.ended will come to release it; a `refused` drop pauses the queue instead. An interrupt pauses the queue first, so the drops it causes release nothing. Once started,
   // its turn.ended retires it.
   onLifecycle(event: Extract<SessionEvent, { kind: 'command.lifecycle' }>): void {
+    // W1: a pending steer ends at any lifecycle past `queued`: started (folded into the turn, or a turn of its own), or
+    // dropped (cancelled, discarded, refused)
+    if (event.state !== 'queued' && this.steers.some((s) => s.messageUuid === event.commandUuid)) {
+      this.steers = this.steers.filter((s) => s.messageUuid !== event.commandUuid);
+      this.persist().catch((error: unknown) => this.log(`pending steer's end not saved: ${messageOf(error)}`));
+    }
     const entry = this.entries.find((e) => e.state !== 'queued' && e.messageUuid === event.commandUuid);
     if (!entry) return; // a steer, the plan sequence's frames, or an entry already retired (a late `cancelled`)
     if (event.state === 'started') this.started.add(entry.queueId);
@@ -315,6 +480,7 @@ export class MessageQueue {
 
   private settleAfterExit(): void {
     this.started.clear(); // whatever the process started went with it
+    this.steers = []; // W1: and so did the engine's queue, pending steers in it
     const uncertain: QueueEntry[] = [];
     const kept: QueueEntry[] = [];
     for (const entry of this.entries) {

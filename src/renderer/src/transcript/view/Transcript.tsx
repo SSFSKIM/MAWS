@@ -14,6 +14,7 @@ import 'streamdown/styles.css';
 import type { AgentId } from '@shared/graph/ids';
 import { useTranscriptStore } from '../../stores/transcript';
 import { HYDRATION } from '../model/copy';
+import { withQueueTail } from '../model/derive';
 import type { Row, RowKind } from '../model/rows';
 import type { TranscriptSource } from '../source/types';
 import { DEFAULT_ACTIONS, listElementId, rowElementId, TranscriptProvider, useDisclosures, type RewindInterface, type TranscriptActions, type TranscriptContextValue } from './context';
@@ -137,6 +138,10 @@ export interface TranscriptProps {
   className?: string;
   handle?: Ref<TranscriptListHandle>; // additive: the list's imperative handle (the harness and tests)
   sessionDirectory?: string | null; // additive: the session's directory, shown on a shell call whose input names no cwd
+  // W1, additive: rows after the derived ones (the messages held in MAWS's queue, as dimmed bubbles), and the uuids of
+  // prompts whose waiting or dropped bubble is not shown (held back into that queue)
+  tail?: readonly Row[];
+  withdrawn?: ReadonlySet<string>;
 }
 
 const NO_ROWS: Row[] = [];
@@ -163,9 +168,13 @@ const focusIsHereOrNowhere = (root: HTMLElement | null) => {
   return active === null || active === document.body || (root?.contains(active) ?? false);
 };
 
-export function Transcript({ source, variant, actions, rewind, renderRequest, onFollowChange, className, handle, sessionDirectory }: TranscriptProps) {
+const NO_TAIL: readonly Row[] = [];
+const NOTHING_WITHDRAWN: ReadonlySet<string> = new Set();
+
+export function Transcript({ source, variant, actions, rewind, renderRequest, onFollowChange, className, handle, sessionDirectory, tail = NO_TAIL, withdrawn = NOTHING_WITHDRAWN }: TranscriptProps) {
   const storeKey = storeKeyOf(source);
-  const rows = useTranscriptStore((state) => state.entries[storeKey]?.rows ?? NO_ROWS);
+  const derived = useTranscriptStore((state) => state.entries[storeKey]?.rows ?? NO_ROWS);
+  const rows = useMemo(() => withQueueTail(derived, withdrawn, tail), [derived, withdrawn, tail]);
   const working = useTranscriptStore((state) => state.entries[storeKey]?.working ?? false);
   const jump = useTranscriptStore((state) => state.entries[storeKey]?.jump ?? null);
   const failed = useTranscriptStore((state) => (state.entries[storeKey]?.phase === 'failed' ? (state.entries[storeKey].error ?? '') : null));

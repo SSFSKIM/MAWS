@@ -33,6 +33,8 @@ export const rowId = {
   slot: (request: RequestId) => row(`slot:${request}`),
   error: (id: EventId) => row(`error:${id}`),
   retry: (turn: TurnId) => row(`retry:${turn}`),
+  hook: (hookId: string) => row(`hook:${hookId}`), // a hook that got in the way (W1), keyed by the engine's hook id
+  held: (queueId: string) => row(`held:${queueId}`), // W1: a message held in MAWS's queue, a tail bubble until it is released
   reconnect: (firstAttempt: EventId) => row(`reconnect:${firstAttempt}`), // one row per episode, keyed by its first 'attempting' event, updated in place
   boundary: (id: EventId) => row(`boundary:${id}`),
   bash: (inputMessage: MessageUuid) => row(`bash:${inputMessage}`),
@@ -44,6 +46,5 @@ export const rowId = {
 export const cellId = {
   tool: (toolUse: ToolUseId) => cell(`cell:${toolUse}`),
   thinking: (apiMessageId: ApiMessageId, blockIndex: number) => cell(`cell:think:${blockIdentity(apiMessageId, blockIndex)}`),
-  hook: (hookId: string) => cell(`cell:hook:${hookId}`),
   reads: (firstToolUse: ToolUseId) => cell(`cell:reads:${firstToolUse}`),
 };

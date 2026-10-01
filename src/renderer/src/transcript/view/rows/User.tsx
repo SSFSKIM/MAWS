@@ -1,8 +1,10 @@
 // The user's message: a bubble with the text through the shared markdown pipeline, its attachments (images inline from
 // their data URLs, files as chips, pasted blocks as chips that expand to their text), a collapse past 20 lines, and
 // copy and edit affordances (residues *Images and attachments*, *Bounded surfaces and truncation*, *Copy and export*;
-// *Pasted content* under Derivation). A dropped prompt carries a quiet `Not sent`.
-import { NOT_SENT } from '../../model/copy';
+// *Pasted content* under Derivation). A dropped prompt carries a quiet `Not sent`. W1: a message waiting for the engine
+// (a `next` steer, or one held in MAWS's queue) is dimmed with what it waits for, and a steer the engine took says it
+// was sent during the turn it sits in.
+import { NOT_SENT, PENDING_CAPTION, STEERED_CAPTION } from '../../model/copy';
 import type { Attachment, Row } from '../../model/rows';
 import { placeholdersOf, untaggedUserText } from '../../model/user-text';
 import { useActions, useDisclosure } from '../context';
@@ -34,7 +36,7 @@ export function UserRow({ row }: { row: UserRowData }) {
   const long = row.lines > COLLAPSE_LINES;
   const files = row.attachments.filter((a) => a.kind !== 'text');
   return (
-    <section className="transcript-user" aria-label="Your message">
+    <section className="transcript-user" aria-label="Your message" data-pending={row.pending} data-steer={row.steer ? '' : undefined}>
       <div className="transcript-user-bubble" data-bubble="" data-collapsed={long && !open ? '' : undefined}>
         {segmentsOf(row).map((segment, i) =>
           segment.kind === 'text' ? (
@@ -64,11 +66,13 @@ export function UserRow({ row }: { row: UserRowData }) {
       )}
       <div className="transcript-user-actions">
         {row.dropped && <span className="transcript-not-sent">{NOT_SENT}</span>}
+        {row.pending && <span className="transcript-user-caption">{PENDING_CAPTION[row.pending]}</span>}
+        {row.steer && !row.pending && <span className="transcript-user-caption">{STEERED_CAPTION}</span>}
         <span>{clockTime(row.at)}</span>
         <button type="button" onClick={() => copyText(untaggedUserText(row.text, row.attachments, row.placeholders))}>
           Copy
         </button>
-        {row.editable && (
+        {row.editable && !row.pending && (
           <button type="button" title="Edit and resubmit forks history" onClick={() => actions.editAndResubmit(row)}>
             Edit
           </button>

@@ -1,6 +1,6 @@
 import type { SessionEvent } from '@shared/graph/events';
 import { afterEach, describe, expect, it } from 'vitest';
-import { rowsOf, turnSummary, withAllExpanded } from './derive';
+import { heldRow, rowsOf, turnSummary, withAllExpanded, withQueueTail } from './derive';
 import { cellId, rowId, turnId } from './keys';
 import { applyEvents, createState } from './reduce';
 import type { Row } from './rows';
@@ -404,5 +404,25 @@ describe('child turn closure', () => {
   it('another agent’s finish closes nothing', () => {
     const events = child('completed', 'subagent.finished').map((event) => (event.kind === 'subagent.finished' ? { ...event, taskId: task('another') } : event));
     expect(find(childRows(events), 'divider').state).toBe('working');
+  });
+});
+
+// W1 (A2): what the session view shows around the derived rows: the held messages at the tail, dimmed with their
+// caption, and no bubble for a steer held back into MAWS's queue (the engine reports it cancelled).
+describe('the queue tail', () => {
+  it('appends held messages as dimmed tail bubbles and hides a withdrawn steer’s dropped bubble, nothing else', () => {
+    const b = builder();
+    b.turn('u1', 'count slowly');
+    b.emit('user.message', { messageUuid: uuid('s1'), content: 'look at b too', isReplay: false, isSynthetic: false, origin: 'human', bash: null });
+    b.emit('command.lifecycle', { commandUuid: uuid('s1'), state: 'cancelled' });
+    const rows = rowsOf(applyEvents(createState(null, null), b.events));
+    const dropped = rows.find((row) => row.kind === 'user' && row.messageUuid === 's1');
+    expect(dropped).toMatchObject({ dropped: true });
+    const held = heldRow({ queueId: 'q-1', content: 'look at b too', createdAt: '2026-09-28T10:00:09.000Z' });
+    expect(held).toMatchObject({ id: 'held:q-1', kind: 'user', turnId: null, pending: 'held', editable: false, text: 'look at b too', messageUuid: null });
+    const shown = withQueueTail(rows, new Set(['s1']), [held]);
+    expect(shown.filter((row) => row.kind === 'user').map((row) => row.id)).toEqual(['user:u1', 'held:q-1']);
+    expect(withQueueTail(rows, new Set(['u1']), [])).toEqual(rows); // a prompt that ran is never hidden
+    expect(withQueueTail(rows, new Set(), [])).toBe(rows);
   });
 });

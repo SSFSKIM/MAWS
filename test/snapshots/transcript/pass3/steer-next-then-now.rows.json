@@ -1,0 +1,171 @@
+[
+  {
+    "at": "2026-10-01T09:21:28.568Z",
+    "id": "time:turn:0e8c4bbd-6918-48ae-920f-13160299782d",
+    "kind": "time",
+    "label": "Oct 1, 2026 9:21 AM",
+    "turnId": "turn:0e8c4bbd-6918-48ae-920f-13160299782d"
+  },
+  {
+    "at": "2026-10-01T09:21:28.568Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:0e8c4bbd-6918-48ae-920f-13160299782d",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "0e8c4bbd-6918-48ae-920f-13160299782d",
+    "placeholders": [],
+    "steer": false,
+    "text": "Count to 8 with separate Bash sleep 6 calls: for each number n from 1 to 8, make exactly one Bash call `sleep 6 && echo n`, one call at a time, never in parallel. Then reply COUNTED.",
+    "turnId": "turn:0e8c4bbd-6918-48ae-920f-13160299782d"
+  },
+  {
+    "at": "2026-10-01T09:21:28.568Z",
+    "autoDenied": 0,
+    "denied": 0,
+    "endedAt": "2026-10-01T09:21:32.069Z",
+    "expanded": true,
+    "firstDeniedCell": null,
+    "id": "divider:turn:0e8c4bbd-6918-48ae-920f-13160299782d",
+    "kind": "divider",
+    "origin": "human",
+    "startedAt": "2026-10-01T09:21:28.633Z",
+    "state": "stopped",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 1,
+        "exploration": 0,
+        "files": 0,
+        "mcp": 0,
+        "other": 0,
+        "skills": 0,
+        "web": 0
+      },
+      "childAgents": 0,
+      "costUsd": 0.0722926,
+      "denials": [],
+      "durationMs": 3429,
+      "model": "claude-sonnet-5-5",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 0,
+        "reviewed": 1
+      },
+      "terminalReason": "aborted_tools",
+      "toolCalls": 1,
+      "usage": {
+        "cacheCreationInputTokens": 12373,
+        "cacheReadInputTokens": 16678,
+        "inputTokens": 2,
+        "outputTokens": 85,
+        "thinkingTokens": 0
+      }
+    },
+    "toolCalls": 1,
+    "turnId": "turn:0e8c4bbd-6918-48ae-920f-13160299782d"
+  },
+  {
+    "agent": null,
+    "at": "2026-10-01T09:21:30.174Z",
+    "category": "commands",
+    "classification": {
+      "category": "commands",
+      "denial": null,
+      "groupable": true,
+      "hidden": false,
+      "humanDecision": false,
+      "safeguard": "not_flagged",
+      "startsGroup": false,
+      "subagentLifecycle": null
+    },
+    "detail": {
+      "backgroundTaskId": null,
+      "command": "sleep 6 && echo 1",
+      "cwd": null,
+      "description": "Sleep then print 1",
+      "exitCode": null,
+      "interrupted": true,
+      "kind": "shell",
+      "spill": null,
+      "stderr": "",
+      "stdout": "",
+      "truncated": null
+    },
+    "endedAt": "2026-10-01T09:21:32.064Z",
+    "expanded": true,
+    "id": "cell:toolu_019hqrGKb63xtMsjPwxFE7F6",
+    "kind": "cell",
+    "label": "Failed `sleep 6 && echo 1` in 1s",
+    "paths": [],
+    "startedAt": "2026-10-01T09:21:30.174Z",
+    "status": "error",
+    "toolName": "Bash",
+    "toolUseId": "toolu_019hqrGKb63xtMsjPwxFE7F6",
+    "turnId": "turn:0e8c4bbd-6918-48ae-920f-13160299782d"
+  },
+  {
+    "at": "2026-10-01T09:21:31.435Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:683d57a8-1ac3-452f-ae2c-85aa56721860",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "683d57a8-1ac3-452f-ae2c-85aa56721860",
+    "placeholders": [],
+    "steer": false,
+    "text": "Reply STEER_B",
+    "turnId": "turn:683d57a8-1ac3-452f-ae2c-85aa56721860"
+  },
+  {
+    "at": "2026-10-01T09:21:32.985Z",
+    "blockIndex": 0,
+    "id": "text:msg_011CfbGhjR2F3vHYSH6hYE4n:0",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "STEER_B",
+    "messageUuid": "c37d9c26-39b3-48e7-8972-dd9af9923b2c",
+    "model": "claude-sonnet-5-5",
+    "phase": "answer",
+    "turnId": "turn:683d57a8-1ac3-452f-ae2c-85aa56721860"
+  },
+  {
+    "at": "2026-10-01T09:21:31.432Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:fd0154f8-f780-4ef9-a73c-1c0ec8109ecb",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "fd0154f8-f780-4ef9-a73c-1c0ec8109ecb",
+    "placeholders": [],
+    "steer": false,
+    "text": "Reply STEER_A",
+    "turnId": "turn:fd0154f8-f780-4ef9-a73c-1c0ec8109ecb"
+  },
+  {
+    "at": "2026-10-01T09:21:34.209Z",
+    "blockIndex": 0,
+    "id": "text:msg_011CfbGhoZpEbiqxGvC6tTW7:0",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "STEER_A",
+    "messageUuid": "94252ba8-bdd5-4913-a6a9-4b69fcf03553",
+    "model": "claude-sonnet-5-5",
+    "phase": "answer",
+    "turnId": "turn:fd0154f8-f780-4ef9-a73c-1c0ec8109ecb"
+  },
+  {
+    "at": "2026-10-01T09:21:49.685Z",
+    "attempt": null,
+    "id": "error:replay:journal:84:0",
+    "kind": "error",
+    "lostAttentionCount": 0,
+    "scope": "exit",
+    "severity": "notice",
+    "text": "Session process exited (quit)",
+    "turnId": null
+  }
+]

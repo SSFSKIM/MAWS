@@ -68,36 +68,8 @@
   },
   {
     "activeLabel": null,
-    "at": "2026-09-28T10:01:19.647Z",
+    "at": "2026-09-28T10:01:20.060Z",
     "cells": [
-      {
-        "agent": null,
-        "category": "other",
-        "classification": {
-          "category": "other",
-          "denial": null,
-          "groupable": true,
-          "hidden": true,
-          "humanDecision": false,
-          "safeguard": "not_evaluated",
-          "startsGroup": false,
-          "subagentLifecycle": null
-        },
-        "detail": {
-          "durationMs": 0,
-          "kind": "thinking",
-          "text": ""
-        },
-        "endedAt": "2026-09-28T10:01:19.647Z",
-        "expanded": true,
-        "id": "cell:think:msg_011CfVeJoDd2KdQdTjTDeM4u:0",
-        "label": "Thought for 0s",
-        "paths": [],
-        "startedAt": "2026-09-28T10:01:19.647Z",
-        "status": "done",
-        "toolName": "thinking",
-        "toolUseId": null
-      },
       {
         "agent": null,
         "category": "skills",
@@ -189,7 +161,7 @@
     ],
     "expanded": true,
     "icon": "mcp",
-    "id": "group:cell:think:msg_011CfVeJoDd2KdQdTjTDeM4u:0",
+    "id": "group:cell:toolu_016h47VUh2tj8pGf7PQMovaM",
     "kind": "group",
     "state": "completed",
     "summary": "Used maws-elicit, loaded 1 tool",

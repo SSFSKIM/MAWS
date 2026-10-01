@@ -67,84 +67,42 @@
     "turnId": "turn:b39196e7-b323-49c9-9cab-5b313f49bc83"
   },
   {
-    "activeLabel": null,
+    "agent": null,
     "at": "2026-09-28T10:00:57.487Z",
-    "cells": [
-      {
-        "agent": null,
-        "category": "commands",
-        "classification": {
-          "category": "commands",
-          "denial": null,
-          "groupable": true,
-          "hidden": false,
-          "humanDecision": false,
-          "safeguard": "not_flagged",
-          "startsGroup": true,
-          "subagentLifecycle": null
-        },
-        "detail": {
-          "backgroundTaskId": null,
-          "command": "git status --short",
-          "cwd": null,
-          "description": "Show short git status",
-          "exitCode": 0,
-          "interrupted": false,
-          "kind": "shell",
-          "spill": null,
-          "stderr": "",
-          "stdout": "",
-          "truncated": null
-        },
-        "endedAt": "2026-09-28T10:01:00.894Z",
-        "expanded": true,
-        "id": "cell:toolu_01Pw5t8WFEWy8m7zrSCNnca1",
-        "label": "Ran `git status --short` in 3s",
-        "paths": [],
-        "startedAt": "2026-09-28T10:00:57.487Z",
-        "status": "done",
-        "toolName": "Bash",
-        "toolUseId": "toolu_01Pw5t8WFEWy8m7zrSCNnca1"
-      },
-      {
-        "agent": null,
-        "category": "commands",
-        "classification": {
-          "category": "commands",
-          "denial": null,
-          "groupable": true,
-          "hidden": false,
-          "humanDecision": false,
-          "safeguard": "not_evaluated",
-          "startsGroup": false,
-          "subagentLifecycle": null
-        },
-        "detail": {
-          "event": "PostToolUse",
-          "exitCode": 0,
-          "kind": "hook",
-          "name": "PostToolUse:Bash",
-          "outcome": "success",
-          "stderr": "",
-          "stdout": "MAWS_POSTHOOK\n"
-        },
-        "endedAt": "2026-09-28T10:01:00.893Z",
-        "expanded": true,
-        "id": "cell:hook:2fb18f8d-6da2-4d27-b7c5-5e55be53e312",
-        "label": "Hook PostToolUse · PostToolUse:Bash",
-        "paths": [],
-        "startedAt": "2026-09-28T10:01:00.888Z",
-        "status": "done",
-        "toolName": "hook",
-        "toolUseId": null
-      }
-    ],
+    "category": "commands",
+    "classification": {
+      "category": "commands",
+      "denial": null,
+      "groupable": true,
+      "hidden": false,
+      "humanDecision": false,
+      "safeguard": "not_flagged",
+      "startsGroup": false,
+      "subagentLifecycle": null
+    },
+    "detail": {
+      "backgroundTaskId": null,
+      "command": "git status --short",
+      "cwd": null,
+      "description": "Show short git status",
+      "exitCode": 0,
+      "interrupted": false,
+      "kind": "shell",
+      "spill": null,
+      "stderr": "",
+      "stdout": "",
+      "truncated": null
+    },
+    "endedAt": "2026-09-28T10:01:00.894Z",
     "expanded": true,
-    "icon": "commands",
-    "id": "group:cell:toolu_01Pw5t8WFEWy8m7zrSCNnca1",
-    "kind": "group",
-    "state": "completed",
-    "summary": "Ran `git status --short`, ran 1 hook",
+    "id": "cell:toolu_01Pw5t8WFEWy8m7zrSCNnca1",
+    "kind": "cell",
+    "label": "Ran `git status --short` in 3s",
+    "paths": [],
+    "startedAt": "2026-09-28T10:00:57.487Z",
+    "status": "done",
+    "toolName": "Bash",
+    "toolUseId": "toolu_01Pw5t8WFEWy8m7zrSCNnca1",
     "turnId": "turn:b39196e7-b323-49c9-9cab-5b313f49bc83"
   },
   {

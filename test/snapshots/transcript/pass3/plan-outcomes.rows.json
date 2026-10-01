@@ -393,16 +393,6 @@
     "turnId": "turn:1b740363-a57a-473a-97a1-72a75a272cc8"
   },
   {
-    "at": "2026-09-29T01:44:55.447Z",
-    "durationMs": 823,
-    "id": "think:msg_011CfWtGH5yLt6S5q2pRsfgW:0",
-    "kind": "thinking",
-    "live": false,
-    "messageUuid": "8f148b64-2a32-4f95-b0b2-8709bba784e0",
-    "text": "",
-    "turnId": "turn:1b740363-a57a-473a-97a1-72a75a272cc8"
-  },
-  {
     "at": "2026-09-29T01:44:56.271Z",
     "blockIndex": 1,
     "id": "text:msg_011CfWtGH5yLt6S5q2pRsfgW:1",
@@ -563,52 +553,6 @@
     "placeholders": [],
     "steer": false,
     "text": "/clear",
-    "turnId": "turn:4c6e1bdb-4af7-467d-a602-4775821aaeff"
-  },
-  {
-    "at": "2026-09-29T01:45:02.284Z",
-    "autoDenied": 0,
-    "denied": 0,
-    "endedAt": "2026-09-29T01:45:02.301Z",
-    "expanded": true,
-    "firstDeniedCell": null,
-    "id": "divider:turn:4c6e1bdb-4af7-467d-a602-4775821aaeff",
-    "kind": "divider",
-    "origin": "human",
-    "startedAt": "2026-09-29T01:45:02.286Z",
-    "state": "completed",
-    "summary": {
-      "autoDenied": 0,
-      "byCategory": {
-        "commands": 0,
-        "exploration": 0,
-        "files": 0,
-        "mcp": 0,
-        "other": 0,
-        "skills": 0,
-        "web": 0
-      },
-      "childAgents": 0,
-      "costUsd": 0,
-      "denials": [],
-      "durationMs": 13,
-      "model": null,
-      "safeguard": {
-        "flagged": 0,
-        "notEvaluated": 0,
-        "reviewed": 0
-      },
-      "terminalReason": null,
-      "toolCalls": 0,
-      "usage": {
-        "cacheCreationInputTokens": 0,
-        "cacheReadInputTokens": 0,
-        "inputTokens": 0,
-        "outputTokens": 0,
-        "thinkingTokens": 0
-      }
-    },
-    "toolCalls": 0,
     "turnId": "turn:4c6e1bdb-4af7-467d-a602-4775821aaeff"
   },
   {

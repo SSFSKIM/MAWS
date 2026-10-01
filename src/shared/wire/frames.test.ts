@@ -64,10 +64,10 @@ describe('wire frames round-trip every probe fixture', () => {
 // [C6] The synthetic journals under test/fixtures/transcript/ use the X8 row format and must pass the same validators
 // before the presentation-model snapshot suite takes a snapshot of them.
 describe('wire frames round-trip every synthetic transcript journal', () => {
-  it('finds the eleven synthetic journals', () => {
+  it('finds the twelve synthetic journals', () => {
     expect(listSyntheticJournals()).toEqual([
       'agents-and-messages', 'attachments-and-images', 'boundaries', 'denials', 'edit-and-receipt',
-      'exploration-and-web', 'idle-drop', 'long-output', 'math-and-diagrams', 'mockup-turn', 'plan-outcomes',
+      'exploration-and-web', 'hooks-after-answer', 'idle-drop', 'long-output', 'math-and-diagrams', 'mockup-turn', 'plan-outcomes',
     ]);
   });
 

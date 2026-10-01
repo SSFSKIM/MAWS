@@ -1,19 +1,22 @@
 // The queued list above the composer frame (C7 execution document, "Submit control and queue", as the Decision Log of
-// 2026-09-29 amends it): one row per entry in C3's states. A `queued` entry reads as one line with Steer (promote with
-// priority `next`: it joins the running turn at its next step), a caret with Interrupt and send (priority `now`), Edit
-// (inline, through `session.queue.edit`) and Delete. An `uncertain` entry is the paused queue's head and says it may not
-// have been delivered, with Resume, Edit and Delete. A `submitting` entry is in flight: after 300 ms it reads Sending…,
-// with nothing to act on. A `released` entry is the running turn and is not listed. While paused (and no uncertain
-// entry explains why) the header says why, from the host's pause reason, with Resume. Failures keep the row and toast.
+// 2026-09-29 amends it, and W1's Enter scheme, charter §4.2 as amended 2026-10-01). First the pending steers (Enter
+// while a turn runs: the engine delivers them at the next step), each with Send now (an interrupt: the engine then
+// starts what it holds, pass3/steer-next-interrupted) and Hold until the turn ends (`session.queue.hold`). Then one row
+// per app-queue entry in C3's states. A `queued` (held) entry reads as one line with Send now (promote with priority
+// `now`), a caret with Send at the next step (priority `next`), Edit (inline, through `session.queue.edit`) and Delete.
+// An `uncertain` entry is the paused queue's head and says it may not have been delivered, with Resume, Edit and
+// Delete. A `submitting` entry is in flight: after 300 ms it reads Sending…, with nothing to act on. A `released` entry
+// is the running turn and is not listed. While paused (and no uncertain entry explains why) the header says why, from
+// the host's pause reason, with Resume. Failures keep the row and toast.
 import { DropdownMenu } from 'radix-ui';
 import { useEffect, useState } from 'react';
 import type { QueueEntry, QueuePauseReason, SendContent } from '@shared/engine/session-state-store';
-import type { AppSessionId } from '@shared/graph/ids';
+import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { ipc } from '../../ipc/client';
 import { toast } from '../../stores/notices';
 import type { SessionQueue } from '../../stores/queue';
-import { steerPriority } from '../submit/submit-state';
+import { SENDS_AT_NEXT_STEP, SENDS_AT_TURN_END, SEND_NOW_DETAIL, steerPriority } from '../submit/submit-state';
 import { entryDisplay } from './entry-text';
 import { QueueEdit } from './QueueEdit';
 
@@ -59,7 +62,10 @@ function useQueueActions(appSessionId: AppSessionId, client: MawsBridge) {
   };
   return {
     busy,
-    promote: (queueId: string, action: 'steer' | 'interrupt_and_send') => run(queueId, () => client.invoke('session.queue.promote', { appSessionId, queueId, priority: steerPriority(action) })),
+    promote: (queueId: string, action: 'queue' | 'interrupt_and_send') => run(queueId, () => client.invoke('session.queue.promote', { appSessionId, queueId, priority: steerPriority(action) })),
+    // W1: a pending steer's two actions
+    sendNow: (messageUuid: string) => run(messageUuid, () => client.invoke('session.interrupt', { appSessionId, cancelEngineQueued: false })),
+    hold: (messageUuid: string) => run(messageUuid, () => client.invoke('session.queue.hold', { appSessionId, messageUuid: messageUuid as MessageUuid })),
     remove: (queueId: string) => run(queueId, () => client.invoke('session.queue.remove', { appSessionId, queueId })),
     edit: (queueId: string, content: SendContent) => run(queueId, () => client.invoke('session.queue.edit', { appSessionId, queueId, content })),
     resume: () => run(null, () => client.invoke('session.queue.setPaused', { appSessionId, paused: false })),
@@ -107,7 +113,8 @@ export function QueueList({ appSessionId, queue, sessionId, cwd, client = ipc }:
   const lasting = useLastingSubmissions(queue.entries);
   // what is shown decides whether the list is: queued entries (the uncertain head among them) and lasting submissions
   const listed = queue.entries.filter((e) => e.state === 'queued' || (e.state === 'submitting' && lasting.has(e.queueId)));
-  if (listed.length === 0) return null;
+  const steers = queue.steers;
+  if (listed.length === 0 && steers.length === 0) return null;
   const waiting = listed.filter((e) => e.state === 'queued').length;
   const uncertain = listed.some((e) => e.uncertain);
   const disabled = (e: QueueEntry) => actions.busy !== null && (actions.busy === '' || actions.busy === e.queueId);
@@ -130,16 +137,28 @@ export function QueueList({ appSessionId, queue, sessionId, cwd, client = ipc }:
     <section aria-label="Queued messages" className="flex flex-col overflow-hidden rounded-lg border border-border bg-bg-raised text-ui">
       <header className="flex items-center gap-2 border-b border-border px-2.5 py-1 text-ui-sm text-fg-muted">
         <span className="flex-1">
-          {waiting > 0 ? `${waiting} queued` : 'Sending'}
-          {queue.paused && !uncertain ? ` · ${PAUSED_COPY[queue.pauseReason ?? 'none']}` : ''}
+          {[steers.length > 0 ? `${steers.length} at the next step` : null, waiting > 0 ? `${waiting} held until the turn ends` : listed.length > 0 ? 'Sending' : null].filter(Boolean).join(' · ')}
+          {queue.paused && !uncertain && listed.length > 0 ? ` · ${PAUSED_COPY[queue.pauseReason ?? 'none']}` : ''}
         </span>
-        {queue.paused && !uncertain && (
+        {queue.paused && !uncertain && listed.length > 0 && (
           <button type="button" className={BUTTON} disabled={actions.busy !== null} onClick={() => void actions.resume()}>
             Resume
           </button>
         )}
       </header>
       <ul className="m-0 flex list-none flex-col p-0">
+        {steers.map((steer) => (
+          <li key={steer.messageUuid} data-queue-state="steer" className="flex min-w-0 items-center gap-1 px-2.5 py-1.5">
+            <span className="min-w-0 flex-1 truncate text-fg">{entryDisplay(steer.content)}</span>
+            <span className="shrink-0 text-ui-sm text-fg-muted">{SENDS_AT_NEXT_STEP}</span>
+            <button type="button" className={BUTTON} title={SEND_NOW_DETAIL} disabled={actions.busy !== null} onClick={() => void actions.sendNow(steer.messageUuid)}>
+              Send now
+            </button>
+            <button type="button" className={BUTTON} title={SENDS_AT_TURN_END} disabled={actions.busy !== null} onClick={() => void actions.hold(steer.messageUuid)}>
+              Hold until the turn ends
+            </button>
+          </li>
+        ))}
         {listed.map((entry) => {
           if (entry.state === 'submitting') return <SubmittingRow key={entry.queueId} entry={entry} />;
           if (entry.uncertain)
@@ -175,8 +194,8 @@ export function QueueList({ appSessionId, queue, sessionId, cwd, client = ipc }:
               ) : (
                 <>
                   <span className="min-w-0 flex-1 truncate text-fg">{entryDisplay(entry.content)}</span>
-                  <button type="button" className={BUTTON} title="Adds this to the running turn at its next step" disabled={disabled(entry)} onClick={() => void actions.promote(entry.queueId, 'steer')}>
-                    Steer
+                  <button type="button" className={BUTTON} title={SEND_NOW_DETAIL} disabled={disabled(entry)} onClick={() => void actions.promote(entry.queueId, 'interrupt_and_send')}>
+                    Send now
                   </button>
                   <DropdownMenu.Root modal={false}>
                     <DropdownMenu.Trigger aria-label="More ways to send" className={BUTTON} disabled={disabled(entry)}>
@@ -184,9 +203,9 @@ export function QueueList({ appSessionId, queue, sessionId, cwd, client = ipc }:
                     </DropdownMenu.Trigger>
                     <DropdownMenu.Portal>
                       <DropdownMenu.Content align="end" sideOffset={4} className="z-50 min-w-56 rounded-md border border-border-strong bg-bg-overlay p-1 text-ui text-fg">
-                        <DropdownMenu.Item className={ITEM} onSelect={() => void actions.promote(entry.queueId, 'interrupt_and_send')}>
-                          <span>Interrupt and send</span>
-                          <span className="text-ui-sm text-fg-muted">Stops the running turn, then sends this</span>
+                        <DropdownMenu.Item className={ITEM} onSelect={() => void actions.promote(entry.queueId, 'queue')}>
+                          <span>Send at the next step</span>
+                          <span className="text-ui-sm text-fg-muted">Adds this to the running turn at its next step</span>
                         </DropdownMenu.Item>
                       </DropdownMenu.Content>
                     </DropdownMenu.Portal>

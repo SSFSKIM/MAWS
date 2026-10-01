@@ -33,7 +33,6 @@ export const CellDetailSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('mcp'), server: z.string(), tool: z.string(), input: z.unknown(), result, structured: z.unknown(), spill: nullable(SpillSchema) }),
   z.strictObject({ kind: z.literal('image'), images: z.array(z.strictObject({ dataUrl: z.string(), mediaType: z.string(), alt: nullable(z.string()) })), caption: nullable(z.string()) }),
   z.strictObject({ kind: z.literal('thinking'), text: z.string(), durationMs: nullable(z.number()) }),
-  z.strictObject({ kind: z.literal('hook'), event: z.string(), name: z.string(), outcome: z.enum(['success', 'error', 'cancelled', 'running']), exitCode: nullable(z.number()), stdout: z.string(), stderr: z.string() }),
   z.strictObject({ kind: z.literal('generic'), input: z.unknown(), result, structured: z.unknown(), isError: z.boolean(), spill: nullable(SpillSchema), truncated: nullable(TruncationSchema) }),
 ]);
 
@@ -60,7 +59,7 @@ const AttachmentSchema = z.strictObject({ kind: z.enum(['image', 'file', 'text']
 
 export const RowSchema = z.discriminatedUnion('kind', [
   z.strictObject({ ...base, kind: z.literal('time'), label: z.string() }),
-  z.strictObject({ ...base, kind: z.literal('user'), messageUuid: nullable(z.string()), text: z.string(), attachments: z.array(AttachmentSchema), placeholders: z.array(z.number().int()), lines: z.number(), editable: z.boolean(), steer: z.boolean(), dropped: z.boolean() }),
+  z.strictObject({ ...base, kind: z.literal('user'), messageUuid: nullable(z.string()), text: z.string(), attachments: z.array(AttachmentSchema), placeholders: z.array(z.number().int()), lines: z.number(), editable: z.boolean(), steer: z.boolean(), dropped: z.boolean(), pending: z.enum(['next', 'held']).optional() }),
   z.strictObject({ ...base, kind: z.literal('assistant_text'), messageUuid: nullable(z.string()), blockIndex: z.number(), markdown: z.string(), live: z.boolean(), phase: z.enum(['answer', 'commentary']), model: nullable(z.string()) }),
   z.strictObject({
     ...base, kind: z.literal('divider'), state: z.enum(['working', 'completed', 'stopped', 'failed']), origin: z.enum(['human', 'engine', 'peer']), startedAt: z.string(), endedAt: nullable(z.string()),
@@ -82,7 +81,8 @@ export const RowSchema = z.discriminatedUnion('kind', [
   }),
   z.strictObject({
     ...base, kind: z.literal('error'), severity: z.enum(['transient', 'error', 'notice']), text: z.string(), attempt: nullable(z.strictObject({ n: z.number(), max: nullable(z.number()) })),
-    scope: z.enum(['turn', 'task', 'process', 'transport', 'request', 'api', 'reconnect', 'notice', 'exit']), lostAttentionCount: nullable(z.number()),
+    scope: z.enum(['turn', 'task', 'process', 'transport', 'request', 'api', 'reconnect', 'notice', 'exit', 'hook']), lostAttentionCount: nullable(z.number()),
+    action: z.literal('edit_prompt').optional(),
   }),
   z.strictObject({ ...base, kind: z.literal('boundary'), boundaryKind: z.enum(['compaction', 'reset', 'retraction', 'rewind']), text: z.string(), detail: nullable(z.string()), hiddenRows: z.number(), revealed: z.boolean() }),
   z.strictObject({ ...base, kind: z.literal('bash'), command: z.string(), stdout: z.string(), stderr: z.string(), exitCode: nullable(z.number()), cwd: nullable(z.string()) }),

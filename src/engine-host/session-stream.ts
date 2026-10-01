@@ -100,7 +100,7 @@ export class SessionStream {
 
   queue(queue: QueueState): void {
     this.flush();
-    this.opts.emit('session.queue', { appSessionId: this.opts.appSessionId, entries: queue.entries, paused: queue.paused, pauseReason: queue.pauseReason ?? null }); // C7: pauseReason
+    this.opts.emit('session.queue', { appSessionId: this.opts.appSessionId, entries: queue.entries, paused: queue.paused, pauseReason: queue.pauseReason ?? null, ...(queue.steers && { steers: queue.steers }), ...(queue.withdrawn && { withdrawn: queue.withdrawn }) }); // C7: pauseReason; W1: steers, withdrawn when there are any
   }
 
   // C7 start: the launch's catalogue, whole, as `session.catalogChanged` (after the events that caused it, like every other

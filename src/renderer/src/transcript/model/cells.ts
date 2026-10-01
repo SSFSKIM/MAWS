@@ -20,11 +20,6 @@ export interface ToolRecord {
   backgroundDone: boolean;
 }
 
-export interface HookRecord {
-  started: Event<'hook.started'> | null;
-  finished: Event<'hook.finished'> | null;
-}
-
 export interface TurnContext {
   closed: boolean;
   terminalReason: string | null;
@@ -248,21 +243,5 @@ export function thinkingCell(id: string, text: string, live: boolean, at: string
   return {
     id: id as Cell['id'], toolUseId: null, toolName: 'thinking', category: 'other', classification: { ...classification, hidden: true }, status: live ? 'running' : 'done',
     label: thinkingLabel(live, durationMs), paths: [], startedAt: at, endedAt: live ? null : at, detail: { kind: 'thinking', text, durationMs }, expanded, agent: null,
-  };
-}
-
-export function hookCell(rec: HookRecord, expanded: boolean): Cell {
-  const started = rec.started;
-  const finished = rec.finished;
-  const hookId = (started ?? finished)!.hookId;
-  const name = (started ?? finished)!.hookName;
-  const event = (started ?? finished)!.hookEvent;
-  const outcome = finished?.outcome ?? 'running';
-  const classification = classifyTool('hook', null, { denial: null, terminalReason: null, turnClosed: false, humanDecision: false, safeguard: 'not_evaluated', imageResult: false, isError: outcome === 'error' });
-  return {
-    id: cellId.hook(hookId), toolUseId: null, toolName: 'hook', category: 'commands', classification: { ...classification, category: 'commands', groupable: outcome === 'success' || outcome === 'running' },
-    status: outcome === 'running' ? 'running' : outcome === 'success' ? 'done' : outcome === 'cancelled' ? 'stopped' : 'error',
-    label: cellLabel({ kind: 'hook', event, name }), paths: [], startedAt: (started ?? finished)!.at, endedAt: finished?.at ?? null,
-    detail: { kind: 'hook', event, name, outcome, exitCode: finished?.exitCode ?? null, stdout: finished?.stdout ?? '', stderr: finished?.stderr ?? '' }, expanded, agent: null,
   };
 }

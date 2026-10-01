@@ -7,9 +7,15 @@
 // goes back to the editor.
 //
 // Every submission ends in the editor's `onSubmit`, decided here through `submitState`: an unstarted session's first
-// send goes to C10's `start` under the synchronous `starting` gate; a live one sends (C3 decides sent or queued),
-// steers with priority `next` (⌥Enter or the Steer label), or interrupts and sends with `now` (the caret menu); `!` and
-// `#` run through their modes. ⌘. and ⌘L are not registered here: `ComposerAppKeys` holds the one app-level handler.
+// send goes to C10's `start` under the synchronous `starting` gate; a live one sends (C3 decides sent or queued), and
+// while a turn runs (W1, charter §4.2 as amended 2026-10-01) Enter is Queue, a steer with priority `next` the engine
+// delivers at the turn's next tool boundary, ⌥Enter is Hold, MAWS's own queue released when the turn ends, and the
+// caret menu's Send now steers with `now`; `!` and `#` run through their modes. Esc in the editor interrupts and sends
+// now: the held head (a `now` promote), else whatever `next` steer waits (the engine starts it once the turn is
+// interrupted), else it just stops; it first leaves edit mode, and an open `@` or `/` list takes it before the
+// composer does. The Stop button and ⌘. are the plain stop: `session.interrupt` with `holdEngineQueued`, which first
+// holds every waiting `next` steer in MAWS's queue, so nothing runs until Resume or Send now and the queue reads
+// paused because you interrupted. ⌘. and ⌘L are not registered here: `ComposerAppKeys` holds the one app-level handler.
 //
 // Edit mode (M4b): a prefill with `editing` (a bubble's Edit, the refusal dialog's Edit prompt) shows the state line
 // above the frame; Send then forks through C10's provider, or asks to rewind this session and resend, and the state
@@ -64,7 +70,7 @@ import {
 import { routeOf, useListModels, useModelCatalogue, type Route } from './list-models';
 import { releasedResume } from './resume-seam'; // C12
 import { locationPath, useSetupIntent, type SetupIntentHook } from './setup-intent';
-import { steerPriority, submitState, type SubmitDecision } from './submit/submit-state';
+import { isBusy, steerPriority, submitState, type SubmitDecision } from './submit/submit-state';
 import { SubmitControl } from './submit/SubmitControl';
 
 // Why Send waits while the resubmit is under way (null: it may go).
@@ -99,7 +105,7 @@ function useSessionStatus(appSessionId: AppSessionId, client: MawsBridge) {
   return status;
 }
 
-// ⌥ held (the Steer label changes live while it is down over the control or with focus in the box).
+// ⌥ held (the Hold label replaces Queue live while it is down over the control or with focus in the box).
 function useAltHeld(): boolean {
   const [held, setHeld] = useState(false);
   useEffect(() => {
@@ -212,7 +218,7 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
     queue,
     empty: draft.empty,
     mode: draft.mode,
-    steerHeld: alt && (hover || boxFocused),
+    holdHeld: alt && (hover || boxFocused),
     released, // C12
   });
   // In edit mode a non-empty prompt resubmits (a fork, or the explicit rewind): the control reads Send, and waits while
@@ -319,14 +325,14 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
     }
     const edit = editingOf(useComposerStore.getState(), appSessionId);
     if (edit && s.mode === 'send') return resubmitSubmission(s, edit, how);
-    const decided = submitState({ status, intent: null, queue, empty: s.empty, mode: s.mode, steerHeld: how === 'steer', released /* C12 */ });
+    const decided = submitState({ status, intent: null, queue, empty: s.empty, mode: s.mode, holdHeld: how === 'hold', released /* C12 */ });
     if (!decided.enabled) return false;
     if (released && (status === null || status.process === 'exited')) return resumeReleased(s); // C12
     const target = memoryTargetOf(useComposerStore.getState(), appSessionId);
     let dispatch: Dispatch;
     if (s.mode !== 'send') dispatch = () => dispatchByMode(client, appSessionId, s, 'send', target);
-    else if (decided.primary === 'steer' || (how === 'interrupt_and_send' && decided.menu.length > 0)) {
-      const priority = steerPriority(decided.primary === 'steer' ? 'steer' : 'interrupt_and_send');
+    else if (decided.primary === 'queue' || (how === 'interrupt_and_send' && decided.menu.length > 0)) {
+      const priority = steerPriority(how === 'interrupt_and_send' ? 'interrupt_and_send' : 'queue');
       dispatch = async () => {
         const result = await client.invoke('session.steer', { appSessionId, content: s.content, priority });
         return result.ok ? null : result.error.message;
@@ -350,17 +356,42 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
   };
   // C12 end
 
+  // The plain stop (the Stop button, a primary Stop): nothing runs after it (W1)
+  const stop = () =>
+    void client.invoke('session.interrupt', { appSessionId, cancelEngineQueued: false, holdEngineQueued: true }).then((result) => {
+      if (!result.ok) console.warn('[composer] session.interrupt failed', result.error);
+    });
+  // Esc's interrupt: a waiting `next` steer runs right after it (W1)
   const interrupt = () =>
     void client.invoke('session.interrupt', { appSessionId, cancelEngineQueued: false }).then((result) => {
       if (!result.ok) console.warn('[composer] session.interrupt failed', result.error);
     });
   const onPrimary = () => {
-    if (shown.primary === 'stop') return interrupt();
+    if (shown.primary === 'stop') return stop();
     if (shown.primary === 'resume')
       return void client.invoke('session.queue.setPaused', { appSessionId, paused: false }).then((result) => {
         if (!result.ok) toast({ level: 'warning', text: result.error.message, actions: [], dismissible: true }); // as the queued list does
       });
-    handle.current?.submit(shown.primary === 'steer' ? 'steer' : 'send');
+    handle.current?.submit(shown.primary === 'hold' ? 'hold' : 'send');
+  };
+
+  // W1: Esc while a turn runs interrupts and sends now: the held head (a `now` promote, which preempts the turn), or,
+  // with nothing held, an interrupt after which a `next` steer still waiting runs, since the engine starts what it holds
+  // once the turn is interrupted (pass3/steer-next-interrupted, steer-next-then-now); with nothing waiting either, that
+  // is just a stop. Unlike ⌘. it holds nothing back. An uncertain head waits for the human's own decision. Not busy,
+  // Esc is not the composer's.
+  const escapeTurn = (): boolean => {
+    const current = useSessions.getState().engine.get(appSessionId) ?? null;
+    if (current?.process !== 'ready' || !isBusy(current, queue.entries)) return false;
+    const head = queue.entries.find((e) => e.state === 'queued' && !e.uncertain);
+    if (!head) {
+      interrupt();
+      return true;
+    }
+    void client.invoke('session.queue.promote', { appSessionId, queueId: head.queueId, priority: steerPriority('interrupt_and_send') }).then((result) => {
+      if (!result.ok) toast({ level: 'warning', text: result.error.message, actions: [], dismissible: true });
+    });
+    return true;
   };
 
   // The edit mode into the document, so the draft carries it across a reload. Every replacement of the document sets the
@@ -439,12 +470,12 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
                 const carried = editingOfDoc(restoredDoc);
                 if (carried && !unstarted && editingOf(useComposerStore.getState(), appSessionId) === null) restoreEditMode(appSessionId, carried);
               }}
-              onEscape={() => editingOf(useComposerStore.getState(), appSessionId) !== null && leaveEditMode(appSessionId)}
+              onEscape={() => (editingOf(useComposerStore.getState(), appSessionId) !== null ? leaveEditMode(appSessionId) : escapeTurn())}
               onSubmit={onSubmit}
             />
           </div>
         }
-        submit={<SubmitControl decision={shown} multiline={isMultiline(doc)} onPrimary={onPrimary} onStop={interrupt} onMenu={(id) => handle.current?.submit(id === 'steer' ? 'steer' : id)} onHover={setHover} />}
+        submit={<SubmitControl decision={shown} multiline={isMultiline(doc)} onPrimary={onPrimary} onStop={stop} onMenu={(id) => handle.current?.submit(id)} onHover={setHover} />}
       />
       {/* a tab with no record has no status line yet: the setup's phase shows here, and only while it runs */}
       {record === null && phase !== null && <SetupStatusLine phase={phase} />}

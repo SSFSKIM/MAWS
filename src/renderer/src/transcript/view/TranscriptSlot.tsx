@@ -3,9 +3,14 @@
 // latest registered request-card renderer (C7's), re-rendered when either changes. A session transcript gets the
 // receipt's rewind over `session.rewindFiles`; a child's does not (its turns are not the session's prompts, so there is
 // nothing to rewind to). C5's `transcript` slot renders it through `transcript/shell.tsx`, registered from `App.tsx`.
+// W1: a session's transcript also shows the messages held in MAWS's queue at its tail, dimmed with "Sends when this
+// turn ends", and hides the bubble of a steer held back into that queue (C7's queue store, live while the session's
+// composer is attached).
 import type { AgentId, AppSessionId } from '@shared/graph/ids';
 import { useMemo } from 'react';
+import { EMPTY_QUEUE, useQueueStore } from '../../stores/queue';
 import { useSessions } from '../../stores/sessions';
+import { heldRow } from '../model/derive';
 import { ipcRewind, ipcSource } from '../source/ipc';
 import { useRegisteredActions, useRegisteredRequestRenderer } from './registry';
 import { Transcript } from './Transcript';
@@ -28,6 +33,9 @@ export function TranscriptSlot({ appSessionId, agentId, className }: TranscriptS
     const record = agentId === undefined ? state.records.get(appSessionId) : undefined;
     return record ? (record.worktree?.path ?? record.directory) : null;
   });
+  const queue = useQueueStore((state) => (agentId === undefined ? (state.bySession.get(appSessionId) ?? EMPTY_QUEUE) : EMPTY_QUEUE));
+  const tail = useMemo(() => queue.entries.filter((entry) => entry.state === 'queued' && !entry.uncertain).map(heldRow), [queue.entries]);
+  const withdrawn = useMemo(() => new Set<string>(queue.withdrawn), [queue.withdrawn]);
   return (
     <Transcript
       source={source}
@@ -37,6 +45,8 @@ export function TranscriptSlot({ appSessionId, agentId, className }: TranscriptS
       renderRequest={renderRequest}
       className={className}
       sessionDirectory={sessionDirectory}
+      tail={tail}
+      withdrawn={withdrawn}
     />
   );
 }

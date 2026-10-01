@@ -182,7 +182,7 @@ describe('mcp detail', () => {
   });
 });
 
-describe('image, thinking, hook and generic detail', () => {
+describe('image, thinking and generic detail', () => {
   it('an image result renders inline from its data URL', async () => {
     const { cell } = await expandedCell((b) => {
       b.toolUse('t1', 'Read', { file_path: '/p/shot.png' });
@@ -191,16 +191,7 @@ describe('image, thinking, hook and generic detail', () => {
     expect(cell.querySelector('img')?.getAttribute('src')).toBe('data:image/png;base64,iVBORw0KGgo=');
   });
 
-  it('a hook shows its event, name, outcome and output; a generic tool its input and result', async () => {
-    const hook = await expandedCell((b) => {
-      b.toolUse('t1', 'Bash', { command: 'ls' });
-      b.result('t1', 'a', { structured: BASH_RESULT('a') });
-      b.emit('hook.started', { hookId: 'h1', hookName: 'PostToolUse:Bash', hookEvent: 'PostToolUse' });
-      b.emit('hook.finished', { hookId: 'h1', hookName: 'PostToolUse:Bash', hookEvent: 'PostToolUse', outcome: 'success', exitCode: 0, stdout: 'hook said hi', stderr: '' });
-    }, 'cell:hook:h1');
-    expect(hook.cell.textContent).toContain('hook said hi');
-    expect(hook.cell.textContent).toContain('exit 0');
-    cleanup();
+  it('a generic tool shows its input and result', async () => {
     const generic = await expandedCell((b) => {
       b.toolUse('t1', 'LSP', { operation: 'hover', file: '/p/a.ts' });
       b.result('t1', 'type A = string');
@@ -300,17 +291,6 @@ describe('the 64 KB DOM cap on every detail output branch', () => {
     }
   });
 
-  it('hook stdout and stderr', async () => {
-    for (const [stdout, stderr] of [[BIG, ''], ['', BIG]]) {
-      const { cell } = await expandedCell((b) => {
-        withLs(b);
-        b.emit('hook.started', { hookId: 'h1', hookName: 'PostToolUse:Bash', hookEvent: 'PostToolUse' });
-        b.emit('hook.finished', { hookId: 'h1', hookName: 'PostToolUse:Bash', hookEvent: 'PostToolUse', outcome: 'success', exitCode: 0, stdout, stderr });
-      }, 'cell:hook:h1');
-      capped(cell);
-      cleanup();
-    }
-  });
 });
 
 describe('safeguard verdict (§19)', () => {

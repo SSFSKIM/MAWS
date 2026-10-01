@@ -2,17 +2,19 @@
 // "Expansion state", "Revisable log", "Requests", "Receipts", "Bash rows", "Time separators"). Rows are derived per
 // turn from its retained events and memoised on (version, ui version); the flat list is the concatenation, with
 // loose rows placed after the turn they followed and time separators inserted by the thresholds in time.ts.
+import type { QueueEntry } from '@shared/engine/session-state-store';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, RequestId, TaskId, ToolUseId } from '@shared/graph/ids';
 import { MCP_TOOL, presentationOf, tableRowOf } from './classify';
-import { cellOf, editCounts, filePathOf, hookCell, type HookRecord, type ToolRecord, type TurnContext } from './cells';
+import { cellOf, editCounts, filePathOf, type ToolRecord, type TurnContext } from './cells';
+import { hookNotice, type HookRecord } from './hooks';
 import { agentMessageCopy, boundaryCopy, groupSummary, processExitCopy, reconnectCopy, retryCopy, subagentSentence } from './copy';
 import { RESUMED_COPY, RESUMING_COPY } from './copy'; // C12
 import { glyphFor } from './glyphs';
 import { collectCells, groupItems, phrasesOf, type WorkItem } from './groups';
 import { cellId, rowId, turnId as turnIdOf } from './keys';
 import type { LiveBlock, TranscriptState, TranscriptUi, TurnState, TurnWork } from './reduce';
-import { isEngineOrigin, originOf, RECEIPT_APPLIED, type ReceiptUndo } from './reduce';
+import { isEngineOrigin, originOf, RECEIPT_APPLIED, runningTurn, type ReceiptUndo } from './reduce';
 import { TOOL_CATEGORIES, type Cell, type ChangedFile, type Row, type RowId, type SubagentRef, type SubagentStatus, type ToolCategory, type TurnId, type TurnSummary } from './rows';
 import { needsSeparator, separatorLabel } from './time';
 import { isInterruptionMarker, isLocalCommand, localCommandOutput, userTextOf } from './user-text';
@@ -93,6 +95,29 @@ function flatten(state: TranscriptState, before: Map<RowId, Row>, times: Map<Row
   return out;
 }
 
+// The rows of a turn that stay in view when its work area folds, in event order among its work (W1): a prompt the
+// engine took into the turn at its next tool boundary (a steer, at its delivery position, so it splits the work around
+// it, Codex's persistent unit), a hook that got in the way, the answer, a boundary (compaction, reset, retraction:
+// charter §5.3, the visible transcript stays true to the model's context) and a slash command's output. The divider
+// folds everything else, so a turn of a local command alone (`/compact`: its boundary and its output) has no work and
+// no "Worked for 0s" divider.
+export const isPersistentRow = (row: Row): boolean =>
+  row.kind === 'user' || row.kind === 'boundary' || row.kind === 'local_command' || (row.kind === 'assistant_text' && row.phase === 'answer') || (row.kind === 'error' && row.scope === 'hook');
+
+// W1: a message held in MAWS's queue until the running turn ends, as the dimmed bubble the transcript's tail shows
+// for it (Claude Desktop's pattern); it becomes its own turn when the queue releases it.
+export function heldRow(entry: Pick<QueueEntry, 'queueId' | 'content' | 'createdAt'>): RowOf<'user'> {
+  const text = userTextOf(entry.content);
+  return { id: rowId.held(entry.queueId), turnId: null, at: entry.createdAt, kind: 'user', messageUuid: null, text: text.text, attachments: text.attachments, placeholders: text.placeholders, lines: text.lines, editable: false, steer: false, dropped: false, pending: 'held' };
+}
+
+// W1: what the session's transcript shows around its derived rows: no bubble for a prompt held back into MAWS's queue
+// (the engine reports it cancelled, and it is not lost: it waits in the queue), and the held messages at the tail.
+export function withQueueTail(rows: Row[], withdrawn: ReadonlySet<string>, tail: readonly Row[]): Row[] {
+  const kept = withdrawn.size === 0 ? rows : rows.filter((row) => !(row.kind === 'user' && row.messageUuid !== null && withdrawn.has(row.messageUuid) && (row.dropped || row.pending !== undefined)));
+  return tail.length === 0 ? kept : [...kept, ...tail];
+}
+
 export function turnSummary(turn: TurnState): TurnSummary {
   return deriveTurn(turn, null).summary;
 }
@@ -154,7 +179,7 @@ type Item =
   | { kind: 'hook'; hookId: string }
   | { kind: 'request'; toolUseId: ToolUseId }
   | { kind: 'subagents'; group: SubagentGroup }
-  | { kind: 'steer'; row: RowOf<'user'> }; // a prompt folded into this turn: outside the work area, in event order with the answer
+  | { kind: 'steer'; row: RowOf<'user'> }; // a prompt folded into this turn: a persistent row at its delivery position (W1)
 
 interface SubagentGroup { id: RowId; at: string; apiMessageId: string | null; refs: SubagentRef[]; statuses: Map<TaskId, SubagentStatus>; lastTool: Map<TaskId, string | null>; phase: string | null }
 interface Pending { kind: 'question' | 'plan'; use: Event<'tool.use'>; answers: Record<string, string> | null; outcome: RowOf<'plan'>['outcome']; feedback: string | null; requestId: RequestId | null }
@@ -207,9 +232,16 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
     if (event.kind === 'command.lifecycle') openerDropped = true;
   }
   const dropped = (messageUuid: string | null) => messageUuid !== null && (retracted.has(messageUuid) || superseded.has(messageUuid));
+  // W1: a prompt waiting for the engine while another turn runs is a `next` steer (Enter while a turn runs); a `now`
+  // one waits only until the engine has stopped that turn. Its bubble sits at the tail, dimmed, until the engine takes
+  // it (the reducer re-derives every waiting turn when the running turn changes).
+  const waiting = state !== null && turn.state === 'open' && !turn.accepted && runningTurn(state) !== null && !openerDropped;
   const userRow = (event: Event<'user.message'>, id: RowId, editable: boolean, steer = false): RowOf<'user'> => {
     const text = userTextOf(event.content);
-    return { id, turnId: turn.id, at: event.at, kind: 'user', messageUuid: event.messageUuid, text: text.text, attachments: text.attachments, placeholders: text.placeholders, lines: text.lines, editable, steer, dropped: !steer && openerDropped };
+    return {
+      id, turnId: turn.id, at: event.at, kind: 'user', messageUuid: event.messageUuid, text: text.text, attachments: text.attachments, placeholders: text.placeholders, lines: text.lines, editable, steer, dropped: !steer && openerDropped,
+      ...(waiting && !steer && { pending: 'next' as const }),
+    };
   };
 
   const blockRow = (block: LiveBlock, at: string): Item | null => {
@@ -217,6 +249,8 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
     if (dropped(block.messageUuid)) return null;
     if (block.blockType === 'text') return { kind: 'text', row: { id: block.rowId, turnId: turn.id, at, kind: 'assistant_text', messageUuid: block.messageUuid, blockIndex: block.blockIndex, markdown: block.buffer, live, phase: 'answer', model: block.model } };
     if (block.blockType === 'thinking') {
+      // A completed thinking block with no text (a signature-only block) has nothing to disclose: no row (W1).
+      if (!live && block.buffer.trim() === '') return null;
       const durationMs = block.completedAt !== null && block.markerEventId !== null ? Date.parse(block.completedAt) - Date.parse(at) : null;
       return { kind: 'thinking', row: { id: block.rowId, turnId: turn.id, at, kind: 'thinking', messageUuid: block.messageUuid, text: block.buffer, live, durationMs } };
     }
@@ -249,7 +283,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
         } else if (event.bash?.part === 'output') {
           const at = items.findIndex((item) => item.kind === 'row' && item.row.kind === 'bash' && item.row.exitCode === null);
           if (at >= 0) items[at] = { kind: 'row', row: withBashOutput((items[at] as { row: RowOf<'bash'> }).row, event) };
-        } else if (isLocalCommand(event.origin, event.content)) {
+        } else if (isLocalCommand(event.origin, event.content) && !event.isSynthetic) { // a synthetic one is the engine's caveat for the model (W1)
           items.push({ kind: 'row', row: localCommandRow(event, turn.id) });
         } else if (isInterruptionMarker(event.origin, event.content)) {
           // The engine's interrupt marker is never a bubble, whatever turn it landed in: the stopped divider says it.
@@ -441,7 +475,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
         items.push({ kind: 'row', row: { id: rowId.error(event.id), turnId: turn.id, at: event.at, kind: 'error', severity: 'error', text: event.message, attempt: null, scope: event.scope, lostAttentionCount: null } });
         break;
       case 'notice.posted':
-        items.push({ kind: 'row', row: noticeRow(event, event.text, turn.id) });
+        if (!supersededByHookRow(event)) items.push({ kind: 'row', row: noticeRow(event, event.text, turn.id) });
         break;
       default:
         break;
@@ -451,7 +485,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
   // Resolve the placeholders now that every event of the turn has been seen: tool and hook cells, question and plan
   // rows, subagent rows. The retry row updates in place: the last api.retry event's text at the first one's position.
   const retryRow = retry;
-  const resolved: (WorkItem | Extract<Item, { kind: 'steer' }>)[] = [];
+  const resolved: (WorkItem | Extract<Item, { kind: 'steer' }> | { kind: 'notice'; row: RowOf<'error'> })[] = [];
   for (const item of items) {
     switch (item.kind) {
       case 'tool': {
@@ -459,9 +493,15 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
         resolved.push({ kind: 'cell', cell: cellOf(rec, context, ui?.expandedCells.has(cellId.tool(rec.use.toolUseId)) ?? false) });
         break;
       }
-      case 'hook':
-        resolved.push({ kind: 'cell', cell: hookCell(hooks.get(item.hookId)!, ui?.expandedCells.has(cellId.hook(item.hookId)) ?? false) });
+      case 'hook': {
+        // A hook that ran and let things go on, or is still running, shows nothing; one that got in the way is a notice
+        // outside the work area, so it stays in view when the turn folds (model/hooks.ts; W1).
+        const rec = hooks.get(item.hookId)!;
+        const notice = hookNotice(rec);
+        const at = (rec.started ?? rec.finished)!;
+        if (notice) resolved.push({ kind: 'notice', row: { id: rowId.hook(item.hookId), turnId: turn.id, at: at.at, kind: 'error', attempt: null, scope: 'hook', lostAttentionCount: null, ...notice } });
         break;
+      }
       case 'request': {
         const row = requestOrHistoricalRow(pendingRows.get(item.toolUseId)!, turn.id, state);
         if (row) resolved.push({ kind: 'row', row });
@@ -480,20 +520,27 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
         resolved.push(item);
     }
   }
-  // Text blocks after the last piece of work are the answer, outside the work area; earlier ones are commentary.
+  // Text blocks after the last piece of work are the answer, outside the work area; earlier ones are commentary. A hook
+  // and a notice are not the model's work: under MessageDisplay and Stop hooks every final text is followed by hook
+  // events (pass3/steer-next seq 230-237), and counting them would class the answer as commentary (W1).
   const WORK_ROWS = new Set<Row['kind']>(['subagent', 'agent_message', 'question', 'plan', 'request_slot', 'error']);
-  const lastWork = resolved.map((item) => item.kind === 'cell' || (item.kind === 'row' && WORK_ROWS.has(item.row.kind))).lastIndexOf(true);
-  const answer: Row[] = [];
-  const workItems: WorkItem[] = [];
+  const isWork = (item: (typeof resolved)[number]) => item.kind === 'cell' || (item.kind === 'row' && WORK_ROWS.has(item.row.kind) && !(item.row.kind === 'error' && item.row.severity === 'notice'));
+  const lastWork = resolved.map(isWork).lastIndexOf(true);
+  // W1: one stream in event order. The rows that stay in view when the work area folds (isPersistentRow: a prompt the
+  // engine took into this turn, at its delivery position; a hook that got in the way; the answer; a boundary; a slash
+  // command's output) go through the group machine as rows, so a steer splits the work around it; everything else is
+  // the work area.
+  const ordered: WorkItem[] = [];
   resolved.forEach((item, i) => {
-    if (item.kind === 'steer') answer.push(item.row); // folded prompts and the answer in event order, outside the work area
-    else if (item.kind === 'text' && i > lastWork) answer.push({ ...item.row, phase: 'answer' });
-    else if (item.kind === 'text') workItems.push({ kind: 'text', row: { ...item.row, phase: 'commentary' } });
-    else if (item.kind === 'thinking' && i > lastWork) workItems.push({ kind: 'row', row: item.row }); // after the last tool use: a row, not a cell of the last group
-    else workItems.push(item);
+    if (item.kind === 'steer' || item.kind === 'notice') ordered.push({ kind: 'row', row: item.row });
+    else if (item.kind === 'text' && i > lastWork) ordered.push({ kind: 'row', row: { ...item.row, phase: 'answer' } });
+    else if (item.kind === 'text') ordered.push({ kind: 'text', row: { ...item.row, phase: 'commentary' } });
+    else if (item.kind === 'thinking' && i > lastWork) ordered.push({ kind: 'row', row: item.row }); // after the last tool use: a row, not a cell of the last group
+    else ordered.push(item);
   });
 
-  const workRows = groupItems(workItems, turn, ui, tools);
+  const allRows = groupItems(ordered, turn, ui, tools);
+  const workRows = allRows.filter((row) => !isPersistentRow(row));
   const cells = collectCells(workRows);
   const files = changedFiles(cells, turn);
   const summary = summaryOf(turn, cells, subagents, model);
@@ -511,9 +558,8 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
       id: rowId.divider(turn.id), turnId: turn.id, at: user?.at ?? turn.startedAt, kind: 'divider', state: dividerState, origin: turn.origin, startedAt: turn.startedAt, endedAt: turn.endedAt,
       toolCalls: summary.toolCalls, denied: denied.length, autoDenied: summary.autoDenied, firstDeniedCell: firstDenied, expanded, summary,
     });
-    if (expanded) rows.push(...workRows);
   }
-  rows.push(...answer);
+  rows.push(...(expanded ? allRows : allRows.filter(isPersistentRow))); // with no divider there is no work: every row is persistent
   if (files.length > 0) {
     rows.push({
       id: rowId.receipt(turn.id), turnId: turn.id, at: context.lastAt, kind: 'receipt', files, added: files.reduce((n, f) => n + f.added, 0), removed: files.reduce((n, f) => n + f.removed, 0),
@@ -691,7 +737,7 @@ function summaryOf(turn: TurnState, cells: Cell[], subagents: SubagentGroup[], m
   const safeguard = { reviewed: 0, flagged: 0, notEvaluated: 0 };
   let toolCalls = 0;
   for (const cell of cells) {
-    if (cell.toolName === 'thinking' || cell.toolName === 'hook') continue;
+    if (cell.toolName === 'thinking') continue;
     const count = cell.id.startsWith('cell:reads:') && cell.detail.kind === 'read' ? cell.detail.files.length : 1;
     toolCalls += count;
     byCategory[cell.category] += count;
@@ -760,6 +806,12 @@ function localCommandRow(event: Event<'user.message'>, turnId: TurnId | null): R
   return { id: event.messageUuid === null ? rowId.localOfEvent(event.id) : rowId.local(event.messageUuid), turnId, at: event.at, kind: 'local_command', messageUuid: event.messageUuid, text };
 }
 
+// The engine's own words for a hook that got in the way, written for the terminal, which the hook's notice row says
+// instead (model/hooks.ts; pass3/hooks-blocking seq 32 and 59): the `stop-hook-error` notification ("Stop hook error
+// occurred · ctrl+o to see", also sent when a Stop hook re-prompts) and the informational "UserPromptSubmit operation
+// blocked by hook: …" (2.1.283 cli.pretty.js 807758, 919121).
+const supersededByHookRow = (event: Event<'notice.posted'>) => event.key === 'stop-hook-error' || event.text.startsWith('UserPromptSubmit operation blocked by hook:');
+
 function noticeRow(event: SessionEvent, text: string, turnId: TurnId | null): RowOf<'error'> {
   return { id: rowId.error(event.id), turnId, at: event.at, kind: 'error', severity: 'notice', text, attempt: null, scope: 'notice', lostAttentionCount: null };
 }
@@ -787,7 +839,7 @@ function looseRows(state: TranscriptState, events: SessionEvent[]): Row[] {
         else if (event.bash?.part === 'output') {
           const at = rows.findIndex((row) => row.kind === 'bash' && row.exitCode === null);
           if (at >= 0) rows[at] = withBashOutput(rows[at] as RowOf<'bash'>, event);
-        } else if (isLocalCommand(event.origin, event.content)) rows.push(localCommandRow(event, null));
+        } else if (isLocalCommand(event.origin, event.content) && !event.isSynthetic) rows.push(localCommandRow(event, null));
         break;
       }
       case 'boundary.compaction':
@@ -809,7 +861,7 @@ function looseRows(state: TranscriptState, events: SessionEvent[]): Row[] {
         rows.push({ id: rowId.error(event.id), turnId: null, at: event.at, kind: 'error', severity: 'error', text: event.message, attempt: null, scope: event.scope, lostAttentionCount: null });
         break;
       case 'notice.posted':
-        rows.push(noticeRow(event, event.text, null));
+        if (!supersededByHookRow(event)) rows.push(noticeRow(event, event.text, null));
         break;
       case 'session.reconnect': {
         const id: RowId = episode?.id ?? rowId.reconnect(event.id);

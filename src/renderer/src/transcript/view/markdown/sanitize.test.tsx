@@ -20,12 +20,38 @@ const HOSTILE = [
 describe.each([false, true])('markdown sanitisation (live: %s)', (live) => {
   const view = () => render(<Markdown markdown={HOSTILE} live={live} />).container;
 
-  it('removes raw HTML before parsing: no script, no raw element, no event handler', () => {
+  it('never parses raw HTML: no script, no raw element, no event handler; the tags read as written (W1)', () => {
     const root = view();
     expect(root.querySelector('script')).toBeNull();
     expect(root.querySelector('b')).toBeNull();
-    expect(root.innerHTML).not.toMatch(/onerror|onclick/);
-    expect(root.textContent).not.toContain('raw block');
+    expect(root.querySelector('div[onclick], img[onerror], [onclick], [onerror]')).toBeNull();
+    expect(root.textContent).toContain('<b>bold</b>');
+    expect(root.textContent).toContain('<script>alert(1)</script>');
+    expect(root.textContent).toContain('<div onclick="alert(3)">raw block</div>');
+  });
+
+  // W1 (A3), the study's exact strings: a tag alone on a line used to open an HTML block that swallowed the next
+  // paragraph, and the block was deleted.
+  it('keeps every paragraph around a tag alone on a line, and the tag itself', () => {
+    const two = render(<Markdown markdown={'<to-human>\nPara1\n\nPara2\n</to-human>'} live={live} />).container;
+    expect(two.textContent).toContain('Para1');
+    expect(two.textContent).toContain('Para2');
+    expect(two.textContent).toContain('<to-human>');
+    expect(two.textContent).toContain('</to-human>');
+    cleanup();
+    const one = render(<Markdown markdown={'<to-human>\nOne paragraph with **bold**\n</to-human>'} live={live} />).container;
+    expect(one.textContent).toContain('One paragraph with bold');
+    expect(one.querySelector('[data-streamdown="strong"]')?.textContent).toBe('bold'); // what follows the tag is markdown again
+    cleanup();
+    const list = render(<Markdown markdown={'<to-human>\n- first\n- second\n</to-human>'} live={live} />).container;
+    expect([...list.querySelectorAll('li')].map((li) => li.textContent?.split('\n')[0])).toEqual(['first', 'second']); // the closing tag is the last item's lazy continuation line
+  });
+
+  it('leaves code untouched and autolinks working', () => {
+    const root = render(<Markdown markdown={'Use `<div>` here.\n\n```html\n<p>hi</p>\n```\n\nSee <https://example.com/x>.'} live={live} />).container;
+    expect(root.querySelector('code')?.textContent).toBe('<div>');
+    expect(root.textContent).toContain('<p>hi</p>');
+    expect([...root.querySelectorAll('a')].map((a) => a.getAttribute('href'))).toContain('https://example.com/x');
   });
 
   it('keeps no javascript:, file:, data: or vbscript: href, and reduces those links to their text', () => {

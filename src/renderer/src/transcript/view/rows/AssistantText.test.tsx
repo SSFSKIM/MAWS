@@ -55,8 +55,10 @@ describe('assistant text row', () => {
       const { container } = renderRow(row, { storeKey: store.key });
       expect(container.querySelector('script')).toBeNull();
       expect(container.querySelector('img')).toBeNull();
-      expect(container.innerHTML).not.toMatch(/onerror|javascript:/);
+      expect(container.querySelector('[onerror]')).toBeNull();
+      expect([...container.querySelectorAll('[href]')].some((a) => /^javascript:/i.test(a.getAttribute('href') ?? ''))).toBe(false);
       expect(container.textContent).toContain('go');
+      expect(container.textContent).toContain('<img src="x" onerror="alert(2)">'); // shown as written, never parsed (W1)
     });
   });
 });

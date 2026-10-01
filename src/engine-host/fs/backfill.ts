@@ -93,8 +93,9 @@ export function recordToEvents(record: TranscriptRecord, ctx: BackfillContext): 
     case 'system':
       systemEvents(record, ctx, base, events);
       break;
-    case 'attachment': // context injections: on the chain, nothing to show, except a relay's receipt in a child
-      coordinatorMessage(record, uuid, ctx, base, events);
+    case 'attachment': // context injections: on the chain, nothing to show, except a relay's receipt in a child and a prompt taken mid-turn (W1)
+      if (ctx.agentId === null) steeredPrompt(record, base, events);
+      else coordinatorMessage(record, uuid, ctx, base, events);
       break;
     case 'progress': // never on the chain; the follower keeps only its skeleton
       break;
@@ -111,21 +112,42 @@ type Base = () => EventBase;
 // reads as a system reminder (pass3/relay-to-child seq 232 and 351, the recorded line: `attachment { type, prompt,
 // source_uuid, origin: { kind: 'coordinator' }, isMeta: true }`). It becomes the child's synthetic `user.message` with
 // the prompt as its content, as the resumed child's own `isMeta` user record already does, so C8b's relay sees the
-// receipt; a synthetic message opens no turn and renders no row. Other attachments, and any attachment in the main
-// transcript (no probe records one there), stay unshown.
+// receipt; a synthetic message opens no turn and renders no row. Other attachments in a child's transcript stay unshown
+// (the main transcript's are steeredPrompt's, below).
 function coordinatorMessage(record: TranscriptRecord, uuid: MessageUuid, ctx: BackfillContext, base: Base, events: SessionEvent[]): void {
-  if (ctx.agentId === null) return;
   const attachment = record.attachment as { type?: unknown; prompt?: unknown; origin?: { kind?: unknown } } | undefined;
   if (attachment?.type !== 'queued_command' || attachment.origin?.kind !== 'coordinator' || typeof attachment.prompt !== 'string') return;
   events.push({ ...base(), kind: 'user.message', messageUuid: uuid, content: attachment.prompt, isReplay: false, isSynthetic: true, origin: 'coordinator', bash: null });
 }
 
+// W1: a prompt the engine took into the running turn at a tool boundary is written to the main transcript only as a
+// `queued_command` attachment after that tool's result, never as a user record: a stream-json `next` steer
+// (test/fixtures/transcripts/w1-steer-next-disk.jsonl line 32) and a prompt the interactive terminal queued mid-turn
+// (w1-terminal-queued.jsonl line 26) alike, `{ type, prompt, source_uuid, commandMode: 'prompt', origin: { kind:
+// 'human' }, humanTurn: true }`. It becomes what the live stream shows: the prompt's `user.message` under its own uuid
+// (`source_uuid`, the uuid it was written with), then the engine's `started` for it, which folds it into the open turn
+// at this point (the reducer's `next` path), so a reloaded session places the steer where the live one did. A queued
+// command of another origin (a task notification, a coordinator's) or a meta one is a context injection, as before.
+function steeredPrompt(record: TranscriptRecord, base: Base, events: SessionEvent[]): void {
+  const attachment = record.attachment as { type?: unknown; prompt?: unknown; source_uuid?: unknown; commandMode?: unknown; origin?: { kind?: unknown }; isMeta?: unknown } | undefined;
+  if (attachment?.type !== 'queued_command' || attachment.origin?.kind !== 'human' || attachment.commandMode !== 'prompt' || attachment.isMeta === true) return;
+  if (typeof attachment.source_uuid !== 'string' || attachment.source_uuid.length === 0) return;
+  const content = typeof attachment.prompt === 'string' ? attachment.prompt : Array.isArray(attachment.prompt) ? attachment.prompt.filter(isContentBlock) : null;
+  if (content === null) return;
+  const messageUuid = attachment.source_uuid as MessageUuid;
+  events.push({ ...base(), kind: 'user.message', messageUuid, content, isReplay: false, isSynthetic: false, origin: null, bash: null });
+  events.push({ ...base(), kind: 'command.lifecycle', commandUuid: messageUuid, state: 'started' });
+}
+
 function userEvents(record: TranscriptRecord, uuid: MessageUuid, ctx: BackfillContext, base: Base, events: SessionEvent[]): void {
   const content = messageContent(record);
-  const isMeta = record.isMeta === true;
+  // W1 (A5): the summary `/compact` writes after its boundary (`isCompactSummary`, w1-compact.jsonl line 29) is the
+  // engine's context for the model, which the live stream sends as a synthetic frame: no bubble and no turn, like meta.
+  const isMeta = record.isMeta === true || record.isCompactSummary === true;
   const marker = isInterruptMarker(record);
+  const local = isLocalCommandOutput(record);
   const turn = (origin: string | null): void => {
-    if (isMeta || marker) return; // the marker belongs to the turn it interrupted
+    if (isMeta || marker || local) return; // the marker belongs to the turn it interrupted, a command's output to the command's turn (W1)
     ctx.lastTurnUserUuid = uuid;
     events.push({ ...base(), kind: 'turn.started', userMessageUuid: uuid, origin });
   };
@@ -267,13 +289,13 @@ function systemEvents(record: TranscriptRecord, ctx: BackfillContext, base: Base
   const subtype = typeof record.subtype === 'string' ? record.subtype : null;
   switch (subtype) {
     case 'compact_boundary': {
-      const meta = record.compactMetadata as { trigger?: unknown; preTokens?: unknown } | undefined;
+      const meta = record.compactMetadata as { trigger?: unknown; preTokens?: unknown; postTokens?: unknown } | undefined;
       events.push({
         ...base(),
         kind: 'boundary.compaction',
         trigger: typeof meta?.trigger === 'string' ? meta.trigger : 'unknown',
         preTokens: typeof meta?.preTokens === 'number' ? meta.preTokens : 0,
-        postTokens: null,
+        postTokens: typeof meta?.postTokens === 'number' ? meta.postTokens : null, // W1: 2.1.283 writes it (w1-compact.jsonl line 28)
         logicalParentUuid: typeof record.logicalParentUuid === 'string' ? (record.logicalParentUuid as MessageUuid) : null,
         historical: true,
       });
@@ -311,7 +333,7 @@ function systemEvents(record: TranscriptRecord, ctx: BackfillContext, base: Base
 // A prompt that opens a turn: a `user` record, not `isMeta`, not an interrupt marker, whose content is text or blocks
 // with no tool result (a tool result continues the turn its tool use is in). The follower reads turn boundaries by it.
 export function startsTurn(record: TranscriptRecord): boolean {
-  if (record.type !== 'user' || record.isMeta === true || isInterruptMarker(record)) return false;
+  if (record.type !== 'user' || record.isMeta === true || record.isCompactSummary === true || isInterruptMarker(record) || isLocalCommandOutput(record)) return false; // W1: a compact summary and a command's output too
   const content = messageContent(record);
   if (typeof content === 'string') return true;
   if (!Array.isArray(content)) return false;
@@ -333,6 +355,17 @@ function isInterruptMarker(record: TranscriptRecord): boolean {
     if (others.length > 0 && others.every((block) => block.type === 'text' && typeof block.text === 'string')) text = others.map((block) => block.text as string).join('');
   }
   return text !== null && INTERRUPT_MARKER.test(text.trim());
+}
+
+// W1 (A5): a slash command's output, `<local-command-stdout>…` after the command's own record (w1-compact.jsonl line
+// 32, the terminal's `/exit` in w1-terminal-queued.jsonl), is the engine's echo, not a prompt: it belongs to the
+// command's turn, as the live stream's replay of it does (pass3/compact seq 45), so it opens none of its own (a turn of
+// its own read "Worked for 0s" under a bubble-less divider).
+function isLocalCommandOutput(record: TranscriptRecord): boolean {
+  if (record.type !== 'user') return false;
+  const content = messageContent(record);
+  const text = typeof content === 'string' ? content : Array.isArray(content) && content.length === 1 && isContentBlock(content[0]) && content[0].type === 'text' && typeof content[0].text === 'string' ? content[0].text : null;
+  return text !== null && /^\s*<local-command-(stdout|caveat)>/.test(text);
 }
 
 function messageContent(record: TranscriptRecord): unknown {

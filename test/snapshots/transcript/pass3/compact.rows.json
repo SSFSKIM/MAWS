@@ -1,0 +1,105 @@
+[
+  {
+    "at": "2026-10-01T09:24:02.667Z",
+    "id": "time:turn:74afc69a-478d-4004-9c82-bc41769e0217",
+    "kind": "time",
+    "label": "Oct 1, 2026 9:24 AM",
+    "turnId": "turn:74afc69a-478d-4004-9c82-bc41769e0217"
+  },
+  {
+    "at": "2026-10-01T09:24:02.667Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:74afc69a-478d-4004-9c82-bc41769e0217",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "74afc69a-478d-4004-9c82-bc41769e0217",
+    "placeholders": [],
+    "steer": false,
+    "text": "Reply ONE",
+    "turnId": "turn:74afc69a-478d-4004-9c82-bc41769e0217"
+  },
+  {
+    "at": "2026-10-01T09:24:04.100Z",
+    "blockIndex": 0,
+    "id": "text:msg_011CfbGtqfsFnPeKqvUYuFpC:0",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "ONE",
+    "messageUuid": "f8ab4bdc-44da-438c-b301-2fb4f1dea7a3",
+    "model": "claude-sonnet-5-5",
+    "phase": "answer",
+    "turnId": "turn:74afc69a-478d-4004-9c82-bc41769e0217"
+  },
+  {
+    "at": "2026-10-01T09:24:04.201Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:062ad4d0-6e0b-4398-8031-ed1fe2164099",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "062ad4d0-6e0b-4398-8031-ed1fe2164099",
+    "placeholders": [],
+    "steer": false,
+    "text": "/compact",
+    "turnId": "turn:062ad4d0-6e0b-4398-8031-ed1fe2164099"
+  },
+  {
+    "at": "2026-10-01T09:24:11.523Z",
+    "boundaryKind": "compaction",
+    "detail": "b179b09e-c2a7-4b61-b84f-d92ccbdbb327",
+    "hiddenRows": 0,
+    "id": "boundary:replay:journal:43:0",
+    "kind": "boundary",
+    "revealed": false,
+    "text": "Context compacted · 29k → 1k tokens · manual",
+    "turnId": "turn:062ad4d0-6e0b-4398-8031-ed1fe2164099"
+  },
+  {
+    "at": "2026-10-01T09:24:11.618Z",
+    "id": "local:7f84c993-b61d-4bb6-a46d-ae221df0af36",
+    "kind": "local_command",
+    "messageUuid": "7f84c993-b61d-4bb6-a46d-ae221df0af36",
+    "text": "Compacted Tip: You have access to Sonnet 1M with 5x more context",
+    "turnId": "turn:062ad4d0-6e0b-4398-8031-ed1fe2164099"
+  },
+  {
+    "at": "2026-10-01T09:24:16.815Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:27e338fc-e1de-4473-b8c3-7f25998b03c1",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "27e338fc-e1de-4473-b8c3-7f25998b03c1",
+    "placeholders": [],
+    "steer": false,
+    "text": "Reply TWO",
+    "turnId": "turn:27e338fc-e1de-4473-b8c3-7f25998b03c1"
+  },
+  {
+    "at": "2026-10-01T09:24:18.223Z",
+    "blockIndex": 0,
+    "id": "text:msg_011CfbGutMdSws2jKwcL8Sg6:0",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "TWO",
+    "messageUuid": "1059873d-e86f-4d74-8f3e-10bd8377b207",
+    "model": "claude-sonnet-5-5",
+    "phase": "answer",
+    "turnId": "turn:27e338fc-e1de-4473-b8c3-7f25998b03c1"
+  },
+  {
+    "at": "2026-10-01T09:24:23.665Z",
+    "attempt": null,
+    "id": "error:replay:journal:80:0",
+    "kind": "error",
+    "lostAttentionCount": 0,
+    "scope": "exit",
+    "severity": "notice",
+    "text": "Session process exited (quit)",
+    "turnId": null
+  }
+]

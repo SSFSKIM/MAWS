@@ -16,6 +16,31 @@ describe('time separator', () => {
   });
 });
 
+describe('hook notice row (W1)', () => {
+  it('a blocked prompt’s notice offers Edit prompt, which hands the turn’s own prompt to the composer', async () => {
+    const b = builder();
+    b.turn('u1', 'BLOCKME please');
+    b.emit('hook.started', { hookId: 'h1', hookName: 'UserPromptSubmit', hookEvent: 'UserPromptSubmit' });
+    b.emit('hook.finished', { hookId: 'h1', hookName: 'UserPromptSubmit', hookEvent: 'UserPromptSubmit', outcome: 'error', exitCode: 2, stdout: '', stderr: 'No.' });
+    const store = await storeWith(b.events);
+    const notice = store.rows().find((row): row is Extract<Row, { kind: 'error' }> => row.kind === 'error' && row.scope === 'hook')!;
+    const { actions, container } = renderRow(notice, { storeKey: store.key });
+    expect(container.textContent).toContain('A hook blocked your prompt · No.');
+    fireEvent.click(screen.getByRole('button', { name: 'Edit prompt' }));
+    expect(actions.editPrompt).toHaveBeenCalledWith(expect.objectContaining({ kind: 'user', messageUuid: uuid('u1'), text: 'BLOCKME please' }));
+  });
+
+  it('an empty thinking block still streaming is a plain label with nothing to open', async () => {
+    const b = builder();
+    b.turn('u1');
+    b.emit('assistant.block.delta', { apiMessageId: api('m1'), blockIndex: 0, blockType: 'thinking', textDelta: null, thinkingDelta: '', inputJsonDelta: null, userMessageUuid: null });
+    const store = await storeWith(b.events);
+    renderRow(rowOf(store.rows(), 'thinking'), { storeKey: store.key });
+    expect(screen.queryByRole('button')).toBeNull();
+    expect(screen.getByText('Thinking')).toBeTruthy();
+  });
+});
+
 describe('thinking row', () => {
   it('reads Thinking while live from its buffer, then Thought for {t}, and discloses its text', async () => {
     const b = builder();

@@ -81,7 +81,6 @@ export interface GroupPhraseInput {
   readFiles: string[];
   searches: string[];
   commands: string[];
-  hooks: number;
   webQueries: string[];
   fetchedHosts: string[];
   other: number;
@@ -105,7 +104,6 @@ export function groupSummary(input: GroupPhraseInput): string {
   for (const pattern of [...new Set(input.searches)]) byCategory.exploration.push(`searched for \`${pattern}\``);
   if (input.commands.length === 1) byCategory.commands.push(`ran \`${input.commands[0]}\``);
   else if (input.commands.length > 1) byCategory.commands.push(`ran ${plural(input.commands.length, 'command')}`);
-  if (input.hooks > 0) byCategory.commands.push(`ran ${plural(input.hooks, 'hook')}`);
   for (const query of input.webQueries) byCategory.web.push(`searched the web for ${query}`);
   const hosts = [...new Set(input.fetchedHosts)];
   if (hosts.length === 1) byCategory.web.push(`fetched ${hosts[0]}`);
@@ -148,8 +146,7 @@ export type CellLabelInput =
   | { kind: 'edit'; path: string; change: 'create' | 'update' | 'delete'; added: number; removed: number }
   | { kind: 'read'; paths: string[] }
   | { kind: 'denied'; subject: string; disposition: 'denied' | 'auto_denied' | 'stopped'; denialKind: DenialKind; reason: string | null }
-  | { kind: 'generic'; toolName: string; category: ToolCategory; detail?: string | null; scope?: string | null }
-  | { kind: 'hook'; event: string; name: string };
+  | { kind: 'generic'; toolName: string; category: ToolCategory; detail?: string | null; scope?: string | null };
 
 export function cellLabel(input: CellLabelInput): string {
   switch (input.kind) {
@@ -179,8 +176,6 @@ export function cellLabel(input: CellLabelInput): string {
       }
       break;
     }
-    case 'hook':
-      return `Hook ${input.event} · ${input.name}`;
     case 'generic': {
       const mcp = MCP_TOOL.exec(input.toolName);
       if (mcp) return `Used ${mcp[1]}`;
@@ -286,6 +281,10 @@ export const processExitCopy = (reason: string, lostAttentionCount: number) =>
 export const bashHeader = (command: string) => `! ${command}`;
 export const LOCAL_COMMAND_HEADER = 'Command output';
 export const NOT_SENT = 'Not sent'; // a dropped user row: a steer the engine cancelled, or an idle prompt dropped before its init
+// W1: a message sent while a turn runs, Claude Desktop's dimmed tail bubble with its caption until the engine takes it,
+// and a steer the engine took, inside the turn at the step where it arrived.
+export const PENDING_CAPTION = { next: 'Sends at the next step', held: 'Sends when this turn ends' } as const;
+export const STEERED_CAPTION = 'Sent during this turn';
 export const bashFooter = (exitCode: number | null) => (exitCode === null ? '' : `exit ${exitCode}`);
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -307,7 +306,18 @@ export const DETAIL = {
   noDiff: 'No diff recorded',
   omitted: (bytes: number) => `${Math.max(1, Math.round(bytes / 1024))} KB omitted`,
   linesOmitted: (lines: number) => `${plural(lines, 'line')} omitted`,
-  hookOutcome: (outcome: string, exitCode: number | null) => (exitCode === null ? outcome : `${outcome} · exit ${exitCode}`),
+} as const;
+
+// A hook that got in the way (model/hooks.ts; Claude Desktop's words for the blocked prompt and the re-prompt). A reason
+// is the hook's own first line, when it gave one.
+const because = (reason: string | null) => (reason ? ` · ${reason}` : '');
+export const HOOK = {
+  blockedPrompt: (reason: string | null) => `A hook blocked your prompt${because(reason)}`,
+  editPrompt: 'Edit prompt',
+  reprompted: (reason: string | null) => `Hook re-prompted Claude${because(reason)}`,
+  blocked: (name: string, reason: string | null) => `Hook ${name} blocked this step${because(reason)}`,
+  failed: (name: string, exitCode: number | null, reason: string | null) => `Hook ${name} failed${exitCode === null ? '' : ` · exit ${exitCode}`}${because(reason)}`,
+  cancelled: (name: string) => `Hook ${name} was cancelled`,
 } as const;
 
 // A spilled result's loader (residue *Spilled results*).

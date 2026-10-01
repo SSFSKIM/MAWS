@@ -52,7 +52,11 @@ describe('normaliser replays every probe fixture into the X1 graph', () => {
     const c12 = ['launch-env-fork', 'launch-env-state-events', 'launch-env-state-events-unset', 'launch-env-terminal', 'launch-env-todo', 'launch-env-unset'];
     // C12 end
     const wave5 = ['bg-daemon-binary']; // debt wave 5: which binary a `--bg` job's transient daemon runs (meta rows only)
-    expect(listJournals('pass3')).toEqual(['engine-turn-release', 'fork-worktree-fork', 'fork-worktree-resume-in-b', 'fork-worktree-start', 'nested-agents', 'plan-outcomes', 'relay-to-child', 'rewind-files', 'steer-next', 'steer-now', 'steer-now-unheld', 'stop-task', 'workspace-diff-branch', 'workspace-diff-dirty', ...c10, ...wave3, ...wave4, ...c12 /* C12 */, ...wave5].sort());
+    // W1: live records under a scratch config home (a blocking UserPromptSubmit and Stop hook; the Enter scheme's `next`
+    // steer at an interrupt, before a `now` one, delivered with its disk copy, and withdrawn by cancel_async_message;
+    // `/compact` between two turns)
+    const w1 = ['compact', 'hooks-blocking', 'steer-next-cancelled', 'steer-next-disk-live', 'steer-next-interrupted', 'steer-next-then-now'];
+    expect(listJournals('pass3')).toEqual(['engine-turn-release', 'fork-worktree-fork', 'fork-worktree-resume-in-b', 'fork-worktree-start', 'nested-agents', 'plan-outcomes', 'relay-to-child', 'rewind-files', 'steer-next', 'steer-now', 'steer-now-unheld', 'stop-task', 'workspace-diff-branch', 'workspace-diff-dirty', ...c10, ...wave3, ...wave4, ...c12 /* C12 */, ...wave5, ...w1].sort());
   });
 
   for (const pass of FIXTURE_PASSES) {
@@ -563,6 +567,8 @@ describe('normaliser: per-fixture graph facts (C2 findings restated)', () => {
       'background_tasks_changed', 'commands_changed', 'hook_response', 'hook_started', 'init', 'status',
       'task_notification', 'task_progress', 'task_started', 'task_updated', 'thinking_tokens',
       'session_state_changed', // C12: pass3/launch-env-state-events, under CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS=1
+      'informational', 'notification', // W1: pass3/hooks-blocking (a blocked prompt's informational, the stop-hook-error notification)
+      'compact_boundary', // W1: pass3/compact
     ].sort());
   });
 
@@ -580,6 +586,7 @@ describe('normaliser: per-fixture graph facts (C2 findings restated)', () => {
       'notice.posted', // C10: the trust notice (pass2/trust-no-attestation, pass3/trust-exact-key)
       'context.sample', // debt wave 3: a get_context_usage answer (pass1/reads seq 57, pass3/context-sample)
       'session.state', // C12: pass3/launch-env-state-events (running, requires_action, running, idle)
+      'boundary.compaction', // W1: pass3/compact seq 43
     ].sort());
     void kinds;
   });

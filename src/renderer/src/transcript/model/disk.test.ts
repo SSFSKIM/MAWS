@@ -14,7 +14,7 @@ import { journalToEvents } from '../dev/journal';
 
 const SNAPSHOT_DIR = join(__dirname, '../../../../../test/snapshots/transcript');
 import { MemoryFileReader } from '../../../../../test/support/memory-reader';
-import { rowsOf } from './derive';
+import { rowsOf, withAllExpanded } from './derive';
 import { applyEvents, createState, type TranscriptState } from './reduce';
 import type { Row } from './rows';
 import { builder, uuid } from './test-events';
@@ -139,5 +139,53 @@ describe('one session in both event forms', () => {
       expect(ofKind(rows, 'divider')).toHaveLength(ofKind(alone, 'divider').length); // no divider of a copied turn
     }
     await expect(`${JSON.stringify(rowsOf(stateOf([...disk, ...live])).map((row) => [row.kind, row.id]), null, 1)}\n`).toMatchFileSnapshot(join(SNAPSHOT_DIR, 'both-forms-subagent.rows.json'));
+  });
+});
+
+// W1 (A2): a steer is written to the main transcript only as a `queued_command` attachment after the tool result it
+// followed; reloaded from disk it sits where the live stream placed it (pass3/steer-next-disk-live is the same run's
+// journal), and a prompt the interactive terminal queued mid-turn reads the same way.
+describe('a steer reloaded from disk', () => {
+  const shape = (rows: Row[]) => rows.filter((row) => row.kind !== 'time' && row.kind !== 'error').map((row) =>
+    row.kind === 'group' ? `group:${row.cells.map((cell) => (cell.detail.kind === 'shell' ? /echo (\d+)/.exec(cell.detail.command)?.[1] ?? cell.detail.command : cell.toolName)).join(',')}` : row.kind === 'cell' ? `cell:${row.detail.kind === 'shell' ? /echo (\d+)/.exec(row.detail.command)?.[1] ?? row.detail.command : row.toolName}` : row.kind === 'user' ? `${row.steer ? 'steer' : 'prompt'}:${row.text}` : row.kind === 'assistant_text' ? `${row.phase}:${row.markdown.split('\n')[0]}` : row.kind);
+
+  it('w1-steer-next-disk: the steer between the 2nd and 3rd Bash calls, as live; collapsed, prompt, divider, steer, answer', async () => {
+    const disk = await backfillFixture('w1-steer-next-disk', '655f7a68-9781-4217-a02f-db29a972ac95');
+    const state = stateOf(disk);
+    expect(state.order).toHaveLength(1);
+    const rows = expanded(state);
+    const steerAt = rows.findIndex((row) => row.kind === 'user' && row.steer);
+    expect(rows[steerAt]).toMatchObject({ text: 'Reply NEXT_OK', steer: true, dropped: false });
+    expect(shape(rows.slice(0, steerAt)).at(-1)).toMatch(/^group:1,2$|^cell:2$/);
+    expect(shape(rows.slice(steerAt + 1)).find((s) => s.startsWith('group:') || s.startsWith('cell:'))).toMatch(/^(group|cell):3/);
+    const live = rowsOf(withAllExpanded(stateOf(journalToEvents(loadJournal('pass3', 'steer-next-disk-live')))));
+    const steerLive = live.find((row) => row.kind === 'user' && row.steer)!;
+    expect(steerLive.id).toBe(rows[steerAt].id); // the same row, under the uuid the steer was written with
+    expect(shape(rowsOf(state)).slice(0, 3)).toEqual(['prompt:' + (ofKind(rows, 'user')[0].text), 'divider', 'steer:Reply NEXT_OK']);
+  });
+
+  it('w1-terminal-queued: a prompt the terminal queued mid-turn is a steer at its delivery position', async () => {
+    const disk = await backfillFixture('w1-terminal-queued', '1b98bf57-b6f7-40b0-aae2-67bc18af862c');
+    const state = stateOf(disk);
+    const counting = state.order[0]; // then the session's `/exit`
+    const users = ofKind(expanded(state), 'user').filter((row) => row.turnId === counting);
+    expect(users.map((row) => [row.steer, row.text])).toEqual([[false, users[0].text], [true, 'Reply TERMINAL_QUEUED']]);
+    expect(ofKind(rowsOf(state), 'user').filter((row) => row.turnId === counting).map((row) => row.steer)).toEqual([false, true]); // in view when the turn folds
+    const rows = expanded(state).filter((row) => row.turnId === counting);
+    expect(rows.findIndex((row) => row.kind === 'user' && row.steer)).toBeGreaterThan(rows.findIndex((row) => row.kind === 'cell' || row.kind === 'group')); // after the first Bash call
+  });
+});
+
+// W1 (A5): `/compact` between two turns, recorded live (pass3/compact) and read back from disk (w1-compact.jsonl).
+describe('a /compact turn from disk', () => {
+  it('w1-compact: the summary is no bubble, the command one line, its output and the boundary in view, and no divider', async () => {
+    const disk = await backfillFixture('w1-compact', '48e08366-38c0-48db-add3-13d7c3d34df3');
+    const rows = rowsOf(stateOf(disk));
+    const shape = rows.filter((row) => row.kind !== 'time').map((row) => (row.kind === 'user' ? `user:${row.text}` : row.kind === 'assistant_text' ? `answer:${row.markdown}` : row.kind === 'boundary' ? `boundary:${row.boundaryKind}` : row.kind === 'local_command' ? `local:${row.text.split(' ')[0]}` : row.kind));
+    expect(shape).toEqual(['user:Reply ONE', 'answer:ONE', 'boundary:compaction', 'user:/compact', 'local:Compacted', 'user:Reply TWO', 'answer:TWO']);
+    expect(ofKind(rows, 'boundary')[0].text).toBe('Compacted earlier · 29k → 1k'); // the post-compaction size is on disk too
+    expect(ofKind(rows, 'user').some((row) => row.text.startsWith('This session is being continued'))).toBe(false);
+    expect(ofKind(rows, 'local_command').some((row) => row.text.startsWith('Caveat'))).toBe(false); // the engine's caveat for the model
+    expect(ofKind(rows, 'divider')).toEqual([]);
   });
 });

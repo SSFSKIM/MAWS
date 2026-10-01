@@ -85,3 +85,26 @@ describe('user row', () => {
     expect(screen.getByText('Not sent')).toBeDefined();
   });
 });
+
+// W1 (A2): a message waiting for the engine is a dimmed bubble saying what it waits for; a steer the engine took says
+// it was sent during the turn it sits in.
+describe('waiting and steered bubbles', () => {
+  it('a waiting next steer and a held message are dimmed with their captions, and offer no Edit', () => {
+    const next = { ...userRow('look at b too'), pending: 'next' as const };
+    const { container } = renderRow(next);
+    expect(container.querySelector('[data-pending="next"]')).not.toBeNull();
+    expect(container.textContent).toContain('Sends at the next step');
+    expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull();
+    cleanup();
+    const held = renderRow({ ...userRow('after the turn'), pending: 'held' as const });
+    expect(held.container.querySelector('[data-pending="held"]')).not.toBeNull();
+    expect(held.container.textContent).toContain('Sends when this turn ends');
+  });
+
+  it('a steer the engine took reads Sent during this turn, at full strength', () => {
+    const { container } = renderRow({ ...userRow('look at b too'), steer: true });
+    expect(container.querySelector('[data-pending]')).toBeNull();
+    expect(container.querySelector('[data-steer]')).not.toBeNull();
+    expect(container.textContent).toContain('Sent during this turn');
+  });
+});

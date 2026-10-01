@@ -74,16 +74,6 @@
     "turnId": "turn:77244027-54d4-46df-9794-2c1b36b8b601"
   },
   {
-    "at": "2026-09-28T10:02:23.123Z",
-    "durationMs": 0,
-    "id": "think:msg_011CfVePVKV4XyvvXPKuSCXi:0",
-    "kind": "thinking",
-    "live": false,
-    "messageUuid": "4a3accf6-eb3a-4d08-83a7-37fbdb19da09",
-    "text": "",
-    "turnId": "turn:77244027-54d4-46df-9794-2c1b36b8b601"
-  },
-  {
     "agent": null,
     "at": "2026-09-28T10:02:23.408Z",
     "category": "commands",

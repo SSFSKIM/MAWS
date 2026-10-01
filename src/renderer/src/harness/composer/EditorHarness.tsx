@@ -81,7 +81,7 @@ export function EditorHarness() {
             handle={handle}
             onDocChange={setDoc}
             onSubmit={async (s, chord) => {
-              const how = chord === 'steer' ? 'steer' : 'send'; // the page's keys give only these two
+              const how = chord === 'queue' ? 'steer' : 'send'; // the page's keys give Enter ('send') and ⌥Enter ('hold', W1), both a send here
               const accepted = await submitSerialized(ipc, appSessionId, s, how, memoryTargetOf(useComposerStore.getState(), appSessionId));
               submissions.current.push({ mode: s.mode, how, content: s.content, display: s.display, accepted });
               return accepted;

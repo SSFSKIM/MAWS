@@ -1,6 +1,7 @@
 // ANSI escape sequences in assistant text (C3's live acceptance, 2026-09-28: a MessageDisplay hook can put colour codes
-// into the model's text). They are stripped, never rendered: the reducer cleans a block's text as it streams and when
-// it completes, so every surface and every copy sees the same clean text.
+// into the model's text). They are stripped, never rendered: the transcript's reducer cleans a block's text as it
+// streams and when it completes, and main's digest cleans the summary line it takes from a block (W1), so every surface
+// and every copy sees the same clean text.
 
 // CSI (`ESC [` … final byte), OSC (`ESC ]` … BEL or `ESC \`, hyperlinks included), and the two-byte escapes: ESC
 // followed by a byte in 0x30–0x3F (`ESC 7`, `ESC 8`), 0x40–0x5F other than `[` and `]` (those open CSI and OSC, which

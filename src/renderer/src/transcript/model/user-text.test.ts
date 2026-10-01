@@ -9,7 +9,7 @@ import { applyEvents, createState } from './reduce';
 import type { Row } from './rows';
 import { serializeRows } from './serialize';
 import { builder, uuid } from './test-events';
-import { splitPastedSegments, untaggedUserText, userTextOf } from './user-text';
+import { slashCommandLine, splitPastedSegments, untaggedUserText, userTextOf } from './user-text';
 
 // The golden fixture: one 40-line block wrapped exactly as the grammar frames it, typed text before and after.
 const fixture = JSON.parse(readFileSync(join(__dirname, '../../../../../test/fixtures/composer/pasted-40-lines.json'), 'utf8')) as { typed: string; pasted: { id: string; body: string }[]; sent: string };
@@ -89,5 +89,22 @@ describe('pasted content', () => {
     const markdown = serializeRows(rows);
     expect(markdown).toContain(`I typed ${typed} before\nreal\nbody\nand ${typed} after`);
     expect(markdown).toContain(`only ${typed}`);
+  });
+});
+
+// W1 (A3): the engine's record of a slash command folds to the line the human typed (shot 03's two-line "/compact
+// compact" bubble). The exact record is pass3/compact's disk line 31.
+describe('slash-command records', () => {
+  const RECORD = '<command-name>/compact</command-name>\n            <command-message>compact</command-message>\n            <command-args></command-args>';
+  it('folds the record to the command, with its arguments when there are any', () => {
+    expect(slashCommandLine(RECORD)).toBe('/compact');
+    expect(userTextOf(RECORD)).toMatchObject({ text: '/compact', lines: 1 });
+    expect(slashCommandLine('<command-message>review is running…</command-message>\n<command-name>/review</command-name>\n<command-args>src/a.ts --fast</command-args>')).toBe('/review src/a.ts --fast');
+  });
+
+  it('leaves anything else as written: no name, or text outside the tags', () => {
+    expect(slashCommandLine('<command-message>x</command-message>')).toBeNull();
+    expect(slashCommandLine('please run <command-name>/compact</command-name> later')).toBeNull();
+    expect(userTextOf('please run <command-name>/compact</command-name> later').text).toBe('please run <command-name>/compact</command-name> later');
   });
 });

@@ -10,7 +10,7 @@ const entry = (state: QueueEntry['state'], over: Partial<QueueEntry> = {}): Queu
 });
 const idle = status(APP);
 const turning = { ...status(APP, { engineState: 'running', turn: humanTurn }) };
-const input = (over: Partial<SubmitInput>): SubmitInput => ({ status: idle, intent: null, queue: { entries: [], paused: false }, empty: false, mode: 'send', steerHeld: false, released: false /* C12 */, ...over });
+const input = (over: Partial<SubmitInput>): SubmitInput => ({ status: idle, intent: null, queue: { entries: [], paused: false }, empty: false, mode: 'send', holdHeld: false, released: false /* C12 */, ...over });
 const row = (over: Partial<SubmitInput>) => {
   const d = submitState(input(over));
   return [d.primary, d.label, d.enabled, d.reason, d.secondaryStop];
@@ -64,13 +64,15 @@ describe('submitState covers the five states, the caret menu and the unstarted r
     expect(submitState(input({ mode: 'bash', status: turning })).detail).toBe('Runs now; the model sees the output in this turn');
     expect(submitState(input({ mode: 'bash', queue: { entries: [entry('submitting')], paused: false } })).detail).toBe('Runs now; the model sees the output in this turn');
     expect(submitState(input({ mode: 'bash' })).detail).toBeNull(); // idle: Run is all there is to say
-    expect(submitState(input({ status: turning })).detail).toBeNull();
   });
 
   it('reads busy from the open turn, or an entry in flight before the engine’s started', () => {
     expect(row({ status: turning, empty: true })).toEqual(['stop', 'Stop', true, null, false]);
-    expect(row({ status: turning, steerHeld: true })).toEqual(['steer', 'Steer', true, null, true]);
+    // W1: Queue is the `next` steer (Enter), Hold the app queue (⌥ held), each saying when it sends
+    expect(row({ status: turning, holdHeld: true })).toEqual(['hold', 'Hold', true, null, true]);
     expect(row({ status: turning })).toEqual(['queue', 'Queue', true, null, true]);
+    expect(submitState(input({ status: turning })).detail).toBe('Sends at the next step');
+    expect(submitState(input({ status: turning, holdHeld: true })).detail).toBe('Sends when this turn ends');
     // a first entry `submitting` while status.turn is still null: busy
     const submitting = { entries: [entry('submitting')], paused: false };
     expect(row({ queue: submitting, empty: true })).toEqual(['stop', 'Stop', true, null, false]);
@@ -84,29 +86,30 @@ describe('submitState covers the five states, the caret menu and the unstarted r
     const paused = { entries: [entry('queued')], paused: true };
     expect(row({ queue: paused, empty: true })).toEqual(['resume', 'Resume', true, null, false]);
     expect(row({ queue: { entries: [], paused: true }, empty: true })).toEqual(['resume', 'Resume', false, null, false]);
-    expect(row({ queue: paused })).toEqual(['queue', 'Queue', true, null, false]);
-    expect(row({ queue: { entries: [entry('queued')], paused: false } })).toEqual(['queue', 'Queue', true, null, false]);
-    expect(row({ queue: { entries: [entry('queued')], paused: false }, empty: true })).toEqual(['queue', 'Queue', false, null, false]);
+    // idle with messages waiting in the app queue: a new one joins them there (the control still reads Queue)
+    expect(row({ queue: paused })).toEqual(['hold', 'Queue', true, null, false]);
+    expect(row({ queue: { entries: [entry('queued')], paused: false } })).toEqual(['hold', 'Queue', true, null, false]);
+    expect(row({ queue: { entries: [entry('queued')], paused: false }, empty: true })).toEqual(['hold', 'Queue', false, null, false]);
     expect(row({})).toEqual(['send', 'Send', true, null, false]);
     expect(row({ empty: true })).toEqual(['send', 'Send', false, null, false]);
-    // ⌥ held with no turn open decides as Send (next on an idle engine runs at once; the app queue keeps its order)
-    expect(row({ steerHeld: true })).toEqual(['send', 'Send', true, null, false]);
+    // ⌥ held with no turn open decides as Send (nothing to hold back from)
+    expect(row({ holdHeld: true })).toEqual(['send', 'Send', true, null, false]);
   });
 
-  it('offers Queue, Steer and Interrupt and send in the caret menu while busy, each labelled with what it does', () => {
+  it('offers Queue, Hold until the turn ends and Send now in the caret menu while busy, each labelled with what it does (W1)', () => {
     const menu = submitState(input({ status: turning })).menu;
     expect(menu).toEqual([
-      { id: 'queue', label: 'Queue', detail: 'Sends when this turn ends', chord: 'Enter', enabled: true },
-      { id: 'steer', label: 'Steer', detail: 'Adds this to the running turn at its next step', chord: '⌥Enter', enabled: true },
-      { id: 'interrupt_and_send', label: 'Interrupt and send', detail: 'Stops the running turn, then sends this', chord: null, enabled: true },
+      { id: 'queue', label: 'Queue', detail: 'Sends at the next step', chord: 'Enter', enabled: true },
+      { id: 'hold', label: 'Hold until the turn ends', detail: 'Sends when this turn ends', chord: '⌥Enter', enabled: true },
+      { id: 'interrupt_and_send', label: 'Send now', detail: 'Stops the running turn, then sends this', chord: null, enabled: true },
     ]);
     expect(submitState(input({ status: turning, empty: true })).menu.map((m) => m.enabled)).toEqual([false, false, false]);
     expect(submitState(input({})).menu).toEqual([]);
     expect(submitState(input({ queue: { entries: [entry('queued')], paused: true } })).menu).toEqual([]);
   });
 
-  it('maps Steer to next and Interrupt and send to now, in one place', () => {
-    expect(steerPriority('steer')).toBe('next');
+  it('maps Queue to next and Send now to now, in one place', () => {
+    expect(steerPriority('queue')).toBe('next');
     expect(steerPriority('interrupt_and_send')).toBe('now');
   });
 });

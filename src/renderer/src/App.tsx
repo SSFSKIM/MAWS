@@ -20,7 +20,7 @@ import { PanelHost } from './panel/PanelHost';
 import { adoptTerminals, terminalTool } from './tools/terminal';
 // C8a end
 // C7 start
-import { ComposerAppKeys, connectComposer, editAndResubmitRow } from './composer';
+import { ComposerAppKeys, connectComposer, editAndResubmitRow, editPromptRow } from './composer';
 import { connectRequestCard } from './request-card';
 import { connectStatusLine } from './statusline';
 import { registerTranscriptActions } from './transcript';
@@ -97,7 +97,7 @@ export function App() {
   useEffect(() => connectRequestCard(), []);
   useEffect(() => connectStatusLine(), []); // the shared ClaudeUsage read and the near-limit banner, app-wide
   useEffect(() => connectComposer(), []); // the composer in C5's composer slot
-  useEffect(() => registerTranscriptActions({ editAndResubmit: editAndResubmitRow }), []); // a bubble's Edit prefills the composer in edit mode
+  useEffect(() => registerTranscriptActions({ editAndResubmit: editAndResubmitRow, editPrompt: editPromptRow }), []); // a bubble's Edit prefills the composer in edit mode; a blocked prompt's Edit prompt as a new message (W1)
   // C7 end
   // C8c start: Review, Files, the file viewer and the diff tab, registered once and never unregistered, as C8a's block
   // does (a registration's disposer closes the tool's tabs); main's files.changed; and the transcript's two callbacks

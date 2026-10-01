@@ -329,16 +329,6 @@
     "turnId": "turn:973fefba-82be-4059-9266-a70593597680"
   },
   {
-    "at": "2026-09-29T15:48:27.124Z",
-    "direction": "to_child",
-    "from": null,
-    "id": "agentmsg:replay:journal:315:1",
-    "kind": "agent_message",
-    "text": "Sent message to a7aea42f9bed9b3ea: Say PONG in your next inbox line",
-    "to": null,
-    "turnId": "turn:973fefba-82be-4059-9266-a70593597680"
-  },
-  {
     "at": "2026-09-29T15:47:46.179Z",
     "attachments": [],
     "dropped": false,
@@ -350,6 +340,16 @@
     "placeholders": [],
     "steer": true,
     "text": "Relay to agent a7aea42f9bed9b3ea with SendMessage, verbatim, then continue what you were doing: Say PONG in your next inbox line",
+    "turnId": "turn:973fefba-82be-4059-9266-a70593597680"
+  },
+  {
+    "at": "2026-09-29T15:48:27.124Z",
+    "direction": "to_child",
+    "from": null,
+    "id": "agentmsg:replay:journal:315:1",
+    "kind": "agent_message",
+    "text": "Sent message to a7aea42f9bed9b3ea: Say PONG in your next inbox line",
+    "to": null,
     "turnId": "turn:973fefba-82be-4059-9266-a70593597680"
   },
   {
@@ -425,16 +425,6 @@
     "turnId": "turn:2bd7dd49-6474-4c08-9f1f-8659a3ed8fd8"
   },
   {
-    "at": "2026-09-29T15:48:53.539Z",
-    "durationMs": 214,
-    "id": "think:msg_011CfXzd1k2Fmp4ngdZLnwMh:0",
-    "kind": "thinking",
-    "live": false,
-    "messageUuid": "2bf20628-20dd-415d-84f8-44b73f187bdd",
-    "text": "",
-    "turnId": "turn:2bd7dd49-6474-4c08-9f1f-8659a3ed8fd8"
-  },
-  {
     "agents": [
       {
         "agentId": "accea5ba03e220b64",
@@ -452,6 +442,20 @@
     "overflow": 0,
     "sentence": "Read file after sleep finished",
     "status": "finished",
+    "turnId": "turn:2bd7dd49-6474-4c08-9f1f-8659a3ed8fd8"
+  },
+  {
+    "at": "2026-09-29T15:48:58.363Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:e58f0d75-f2f8-428b-b42d-c725406929a5",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "e58f0d75-f2f8-428b-b42d-c725406929a5",
+    "placeholders": [],
+    "steer": true,
+    "text": "Relay to agent accea5ba03e220b64 (named \"walker\") with SendMessage, verbatim, then continue what you were doing: Say PANG in your next inbox line",
     "turnId": "turn:2bd7dd49-6474-4c08-9f1f-8659a3ed8fd8"
   },
   {
@@ -482,20 +486,6 @@
     "overflow": 0,
     "sentence": "Read file after sleep finished",
     "status": "finished",
-    "turnId": "turn:2bd7dd49-6474-4c08-9f1f-8659a3ed8fd8"
-  },
-  {
-    "at": "2026-09-29T15:48:58.363Z",
-    "attachments": [],
-    "dropped": false,
-    "editable": true,
-    "id": "user:e58f0d75-f2f8-428b-b42d-c725406929a5",
-    "kind": "user",
-    "lines": 1,
-    "messageUuid": "e58f0d75-f2f8-428b-b42d-c725406929a5",
-    "placeholders": [],
-    "steer": true,
-    "text": "Relay to agent accea5ba03e220b64 (named \"walker\") with SendMessage, verbatim, then continue what you were doing: Say PANG in your next inbox line",
     "turnId": "turn:2bd7dd49-6474-4c08-9f1f-8659a3ed8fd8"
   },
   {

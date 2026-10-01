@@ -5,7 +5,7 @@
 // ControlTimeout answers the typed `timeout` HostCommandError), and operations (a receipt now, `session.operation`
 // later, through the OperationTable). Each live launch's events, statuses, queue and broker items leave through its
 // SessionStream. A command naming an `appSessionId` with no session answers the typed `internal` error.
-import type { AppSessionId, RequestId } from '@shared/graph/ids';
+import type { AppSessionId, MessageUuid, RequestId } from '@shared/graph/ids';
 import { AUTO_MODE_REFUSAL_CODES, type AutoModeRefusalCode } from '@shared/graph/enums';
 import { assertSafeAppSessionId } from '@shared/engine/app-session-id';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
@@ -49,7 +49,7 @@ export const DEADLINE_SHAPES: Record<C3Command, DeadlineShape> = {
   'engine.binaryInfo': 'immediate', 'engine.relayHealth': 'immediate', 'engine.sessions': 'immediate', 'engine.shutdown': 'bounded',
   'session.launch': 'immediate', 'session.status': 'immediate', 'session.events': 'immediate', 'session.stop': 'bounded', 'session.pendingRequest': 'immediate', 'session.catalog': 'immediate',
   'session.send': 'immediate', 'session.steer': 'immediate', 'session.queue.list': 'immediate', 'session.queue.edit': 'immediate', 'session.queue.remove': 'immediate',
-  'session.queue.promote': 'immediate', 'session.queue.setPaused': 'immediate', 'session.interrupt': 'bounded', 'session.answer': 'immediate', 'session.bash': 'immediate',
+  'session.queue.promote': 'immediate', 'session.queue.hold': 'bounded' /* W1 */, 'session.queue.setPaused': 'immediate', 'session.interrupt': 'bounded', 'session.answer': 'immediate', 'session.bash': 'immediate',
   'session.memoryAppend': 'bounded', 'session.setPermissionMode': 'bounded', 'session.setModel': 'bounded', 'session.setEffort': 'bounded', 'session.setThinking': 'bounded',
   'session.applyFlagSettings': 'bounded', 'session.stopTask': 'bounded', 'session.rewind': 'bounded', 'session.rewindFiles': 'bounded', 'session.setCwd': 'bounded',
   'session.renameSession': 'bounded',
@@ -267,8 +267,9 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
   handle('session.queue.edit', async ({ appSessionId, queueId, content }) => sessionOf(appSessionId).queue.edit(queueId, content));
   handle('session.queue.remove', async ({ appSessionId, queueId }) => sessionOf(appSessionId).queue.remove(queueId));
   handle('session.queue.promote', async ({ appSessionId, queueId, priority }) => sessionOf(appSessionId).queue.promote(queueId, { priority: priority ?? 'now' }));
+  handle('session.queue.hold', async ({ appSessionId, messageUuid }) => bounded(() => sessionOf(appSessionId).queue.hold(messageUuid as MessageUuid))); // W1
   handle('session.queue.setPaused', async ({ appSessionId, paused }) => sessionOf(appSessionId).queue.setPaused(paused));
-  handle('session.interrupt', async ({ appSessionId, cancelEngineQueued }) => bounded(() => sessionOf(appSessionId).interrupt({ cancelEngineQueued })));
+  handle('session.interrupt', async ({ appSessionId, cancelEngineQueued, holdEngineQueued }) => bounded(() => sessionOf(appSessionId).interrupt({ cancelEngineQueued, holdEngineQueued: holdEngineQueued ?? false })));
   handle('session.answer', async ({ appSessionId, requestId, answer }) => ({ outcome: await sessionOf(appSessionId).answer(requestId as RequestId, answer as Parameters<EngineSession['answer']>[1]) }));
   handle('session.bash', async ({ appSessionId, command }) => sessionOf(appSessionId).bash(command));
   handle('session.memoryAppend', async ({ appSessionId, text, target }) => {

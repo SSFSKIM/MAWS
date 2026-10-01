@@ -231,6 +231,7 @@ function toastCallbacks(say: (text: string) => void, open: (ref: SubagentRef) =>
       openFile: (path, line) => say(`openFile ${path}${line ? `:${line}` : ''}`),
       openExternal: (url) => say(`openExternal ${url}`),
       editAndResubmit: (row) => say(`editAndResubmit ${row.id}`),
+      editPrompt: (row) => say(`editPrompt ${row.id}`), // W1
       loadSpill: (spill) => {
         say(`loadSpill ${spill.path}`);
         return Promise.resolve(`(the harness has no spill content for ${spill.path})`);

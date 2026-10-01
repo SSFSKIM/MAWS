@@ -1,7 +1,7 @@
 // The composer's editor (C7 execution document, M3): the Tiptap instance with its keys, draft, history, paste and drop,
 // the `@` menu and `/` palette, the `!` and `#` decoration and the prefill intake (the behaviour is `controller.ts`'s).
 // The root is the one element that carries `data-key-sink="composer"` (with the popups it portals), so C5's dispatcher
-// delivers the composer's chords here (⌘Enter sends, ⌥Enter steers) and never a pane's Enter or Esc. Enter sends a
+// delivers the composer's chords here (⌘Enter sends, ⌥Enter holds: W1) and never a pane's Enter or Esc. Enter sends a
 // one-line document and breaks the line once there are more (§5.8), Shift+Enter breaks the line, a composing IME key
 // never sends; ArrowUp on an empty editor (or while recalling) walks
 // history. Mount one Editor per session (key it by the session): its draft and history are that session's. What a
@@ -34,9 +34,9 @@ export interface EditorProps {
   disabled?: string | null; // read-only, for this reason
   drafts?: DraftPort;
   // What a submission does, and whether it was accepted (the editor then clears and drops the draft). `how` is the
-  // chord: 'send' for Enter and ⌘Enter, 'steer' for ⌥Enter (the handle's `submit` adds the caret menu's). Given, the editor dispatches nothing itself, so the
-  // Composer maps the chord through its submit state (⌥Enter with no turn open is a Send); absent, the default
-  // (`submitSerialized`) sends, or steers with priority 'next'.
+  // chord: 'send' for Enter and ⌘Enter, 'hold' for ⌥Enter (the handle's `submit` adds the caret menu's). Given, the editor dispatches nothing itself, so the
+  // Composer maps the chord through its submit state (W1: Enter while a turn runs is a `next` steer, ⌥Enter with no
+  // turn open is a Send); absent, the default (`submitSerialized`) sends, or steers with priority 'next' for 'queue'.
   onSubmit?(s: Serialized, how: SubmitHow): Promise<boolean>;
   onPrefill?(prefill: Prefill): void; // a prefill the editor took (the Composer keeps its `editing`)
   onDocChange?(doc: ComposerDoc): void;
@@ -107,7 +107,7 @@ export function Editor(props: EditorProps) {
   }, [controller, editor, prefill]);
 
   useKeyChord('composer.send', () => void controller.submit('send'), { within: rootRef });
-  useKeyChord('composer.steer', () => void controller.submit('steer'), { within: rootRef });
+  useKeyChord('composer.steer', () => void controller.submit('hold'), { within: rootRef }); // W1: ⌥Enter holds until the turn ends (the action id predates W1; overrides are keyed by it)
   useImperativeHandle(props.handle, () => controller.handle(), [controller]);
 
   const open = widget ? slashWidget(widget.name) : null;
