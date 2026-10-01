@@ -384,7 +384,10 @@ const control = (page: Page, index: 0 | 1) => pane(page, index).locator('[data-s
 const statusOf = async (page: Page, id: string) => value(await invoke(page, 'session.status', { appSessionId: id }));
 const COUNT = 'Count to 30 slowly. For each number use a separate Bash call sleep 1; echo NUMBER. Start now.';
 
-test('the composer sends, queues, steers, stops and resumes as labelled', async ({ editor }) => {
+// W1 (charter §4.2 as amended 2026-10-01): while a turn runs the control reads Queue (Enter: a `next` steer) and Hold
+// while ⌥ is down (⌥Enter: MAWS's queue, released at the turn's end). The replay holds at the recorded writes, and this
+// journal recorded the held message as a plain write after the resume, so the case holds it with ⌥Enter.
+test('the composer sends, queues, holds, stops and resumes as labelled', async ({ editor }) => {
   const { page } = editor;
   const id = 'c7-surface-queue';
   await openComposerPage(page);
@@ -403,22 +406,22 @@ test('the composer sends, queues, steers, stops and resumes as labelled', async 
   await page.keyboard.type(queued);
   await expect(control(page, 0)).toHaveText('Queue');
   await page.keyboard.down('Alt');
-  await expect(control(page, 0)).toHaveText('Steer'); // live while ⌥ is down
+  await expect(control(page, 0)).toHaveText('Hold'); // live while ⌥ is down
   await page.keyboard.up('Alt');
   await expect(control(page, 0)).toHaveText('Queue');
   await pane(page, 0).getByRole('button', { name: 'More ways to send' }).click();
   const menu = page.getByRole('menu');
   expect(await menu.getByRole('menuitem').allTextContents()).toEqual([
-    'QueueEnterSends when this turn ends',
-    'Steer⌥EnterAdds this to the running turn at its next step',
-    'Interrupt and sendStops the running turn, then sends this',
+    'QueueEnterSends at the next step',
+    'Hold until the turn ends⌥EnterSends when this turn ends',
+    'Send nowStops the running turn, then sends this',
   ]);
   await page.keyboard.press('Escape');
   await expect(menu).toHaveCount(0);
   await messageIn(page, 0).click();
-  await page.keyboard.press('Enter'); // the app queue holds it: nothing is written while the turn runs
+  await page.keyboard.press('Alt+Enter'); // the app queue holds it: nothing is written while the turn runs
   const list = pane(page, 0).getByRole('region', { name: 'Queued messages' });
-  await expect(list).toContainText('1 queued');
+  await expect(list).toContainText('1 held until the turn ends');
   await expect(list).toContainText(queued);
   expect(await sent(page, id)).toEqual([COUNT]);
 

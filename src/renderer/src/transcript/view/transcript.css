@@ -82,10 +82,13 @@ button.transcript-chip:hover { background: var(--bg-hover); }
 .transcript-quiet-button { margin-top: 4px; color: var(--fg-muted); font-size: var(--text-ui-sm); }
 .transcript-quiet-button:hover { color: var(--fg); }
 .transcript-user-actions { display: flex; align-items: center; gap: 8px; min-height: 26px; color: var(--fg-muted); font-size: var(--text-ui-sm); }
-.transcript-user-actions > :not(.transcript-not-sent) { opacity: 0; transition: opacity 0.12s; }
+.transcript-user-actions > :not(.transcript-not-sent, .transcript-user-caption) { opacity: 0; transition: opacity 0.12s; }
 .transcript-user:hover .transcript-user-actions > *, .transcript-user:focus-within .transcript-user-actions > * { opacity: 1; }
 .transcript-user-actions button:hover { color: var(--fg); }
 .transcript-not-sent { color: var(--warning); }
+/* W1: a message waiting for the engine (Claude Desktop's dimmed tail bubble), and its caption, always shown */
+.transcript-user[data-pending] .transcript-user-bubble { opacity: 0.55; }
+.transcript-user-caption { color: var(--fg-muted); }
 
 /* Assistant text: a long path or URL wraps rather than scrolling a narrow transcript sideways (as the bubble does) */
 .transcript-answer { padding: 4px 0 12px; line-height: var(--lh-prose); overflow-wrap: anywhere; }

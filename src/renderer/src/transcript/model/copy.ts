@@ -281,6 +281,10 @@ export const processExitCopy = (reason: string, lostAttentionCount: number) =>
 export const bashHeader = (command: string) => `! ${command}`;
 export const LOCAL_COMMAND_HEADER = 'Command output';
 export const NOT_SENT = 'Not sent'; // a dropped user row: a steer the engine cancelled, or an idle prompt dropped before its init
+// W1: a message sent while a turn runs, Claude Desktop's dimmed tail bubble with its caption until the engine takes it,
+// and a steer the engine took, inside the turn at the step where it arrived.
+export const PENDING_CAPTION = { next: 'Sends at the next step', held: 'Sends when this turn ends' } as const;
+export const STEERED_CAPTION = 'Sent during this turn';
 export const bashFooter = (exitCode: number | null) => (exitCode === null ? '' : `exit ${exitCode}`);
 
 // ---------------------------------------------------------------------------------------------------------------------

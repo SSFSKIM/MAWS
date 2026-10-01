@@ -218,7 +218,7 @@ describe('boundary row', () => {
     expect(view.container.querySelector('button')).toBeNull();
   });
 
-  it('a retraction naming a message removes its text row and leaves the boundary at its index', async () => {
+  it('a retraction naming a message removes its text row and leaves the boundary in its place in event order', async () => {
     const b = builder();
     b.turn('u1');
     b.toolUse('t1', 'Bash', { command: 'ls' }, 'm1', 0);
@@ -234,7 +234,10 @@ describe('boundary row', () => {
     later.emit('boundary.retraction', { retractedMessageUuids: [uuid('m2-u0')], reason: 'refusal', fallbackModel: 'claude-sonnet-5' }, { id: 'retract' });
     act(() => store.push(later.events));
     const after = store.rows();
-    expect(after[at]).toMatchObject({ kind: 'boundary', boundaryKind: 'retraction', id: rowId.boundary('retract' as EventId) });
+    expect(after.slice(0, at)).toEqual(before.slice(0, at));
+    // W1: a turn's rows are in event order, and this retraction arrived after the fallback answer
+    expect(after.slice(at).map((row) => row.kind)).toEqual(['assistant_text', 'boundary']);
+    expect(after.at(-1)).toMatchObject({ kind: 'boundary', boundaryKind: 'retraction', id: rowId.boundary('retract' as EventId) });
     expect(after.some((row) => row.kind === 'assistant_text' && row.markdown === 'A refused answer')).toBe(false);
     expect(after).toHaveLength(before.length);
   });

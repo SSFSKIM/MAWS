@@ -4,18 +4,18 @@
 // registerEngineIpc; support/live-host.ts); 3.18 builds the EngineSession the launcher would, because host hooks have no
 // X2 path in P0. Skipped, never failed, when the gate says so. `MAWS_LIVE=1 pnpm test:live`.
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, type TestContext } from 'vitest';
 import type { SessionEvent } from '@shared/graph/events';
-import type { MessageUuid } from '@shared/graph/ids';
+import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
 import type { RequestAnswer } from '@shared/engine/answers';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
 import { parseJournalRow, type JournalRow } from '@shared/wire/journal';
 import { getHooksListing } from '../../src/engine-host/controls';
 import { HostHookRegistry } from '../../src/engine-host/host-hooks';
 import { ENGINE_VERSION, RELAY_URL } from '../../src/engine-host/launch';
-import { exportFixture, frameInventory, LiveLedger, liveGate, liveSpec, scratchConfigHome, turnAttribution, withRawProcess, type LiveContext } from './support/live';
+import { exportFixture, frameInventory, LiveLedger, liveGate, liveSpec, redactJournal, scratchConfigHome, turnAttribution, withRawProcess, type LiveContext } from './support/live';
 import { LiveHost, startDirectSession } from './support/live-host';
 
 const REPO_ROOT = resolve(__dirname, '../..');
@@ -912,6 +912,347 @@ describe('engine host live', () => {
       expect(listed.trim()).toBe('');
     });
   });
+
+  // W1 (UX fundamentals wave W1): what the engine does with a `next` steer around an interrupt and a `now` steer, what a
+  // delivered `next` writes to the main transcript, and /compact on the wire and on disk. Each case runs under a scratch
+  // config home and exports its journal and its main transcript (redacted) with the run's other exports; its
+  // assertions record what the live run showed (they document the engine, they do not gate the product).
+  // W1
+  it('W1 next steer at an interrupt', async (ctx) => {
+    const g = live(ctx);
+    const configHome = scratchConfigHome();
+    let journalPath = '';
+    let engineSessionId = '';
+    await withHost(g, 'W1 next at interrupt', async (host) => {
+      const spec = liveSpec(g.scratch());
+      const { status } = await host.launch(spec);
+      journalPath = status.journalPath;
+      engineSessionId = spec.sessionId!;
+      const s = sessionView(host, spec);
+      const first = await s.send(SLOW_COUNT(6));
+      const use = await s.wait('tool.use', 'the first Bash call', (e) => e.toolName === 'Bash');
+      const { messageUuid: steer } = await host.call('session.steer', { appSessionId: s.id, content: 'Reply STEER_A', priority: 'next' });
+      await delay(500);
+      const answer = await host.call('session.interrupt', { appSessionId: s.id, cancelEngineQueued: false });
+      const names: Record<string, string> = { [first.messageUuid!]: 'first', [steer]: 'steer' };
+      const ended = await s.waitTurns(1);
+      console.log(`   first Bash tool.use seq ${use.seq}; interrupt answer ${JSON.stringify(answer)}; turn 1 ended seq ${ended.seq} ${ended.terminalReason} [${ended.userMessageUuids.map((u) => names[u] ?? u).join(',')}]`);
+      await w1Quiet(host, s.id, 20_000, 120_000);
+      const namedBefore = mainTurnsEnded(s.events()).some((t) => t.userMessageUuids.includes(steer));
+      console.log(`   after 20 s quiet: steer lifecycle [${w1Lifecycle(s.events(), steer).join(',')}]; a result named the steer: ${namedBefore}; queue ${JSON.stringify(s.status().queue)}`);
+      await host.call('session.queue.setPaused', { appSessionId: s.id, paused: false });
+      const plain = await s.send('Reply PLAIN');
+      names[plain.messageUuid!] = 'plain';
+      await host.waitFor(() => mainTurnsEnded(s.events()).find((t) => t.userMessageUuids.includes(plain.messageUuid!)), 'a result naming the plain message', TURN_MS);
+      await w1Quiet(host, s.id, 10_000, 120_000);
+      console.log(`   steer lifecycle at the end [${w1Lifecycle(s.events(), steer).join(',')}]`);
+      const events = s.events();
+      for (const line of w1Timeline(events, names)) console.log(`   ${line}`);
+      const steerOut = outFrames(s.journal()).find((r) => r.frame.type === 'user' && r.frame.uuid === steer)!;
+      expect(steerOut.frame.priority).toBe('next');
+      // observed (first run, pass3/steer-next-interrupted): the interrupt leaves the undelivered `next` steer in the
+      // engine's queue (still_queued names it), the aborted turn's result names only the first prompt, whose lifecycle
+      // then turns `cancelled`, and the engine at once starts the steer as a turn of its own, with no further user frame
+      expect(answer).toEqual({ stillQueued: [steer], cancelled: [] });
+      expect(ended.terminalReason).toBe('aborted_tools');
+      expect(ended.userMessageUuids).toEqual([first.messageUuid]);
+      expect(ofKind(events, 'command.lifecycle').filter((e) => e.commandUuid === first.messageUuid).map((e) => e.state)).toEqual(['queued', 'started', 'cancelled']);
+      expect(ofKind(events, 'command.lifecycle').filter((e) => e.commandUuid === steer).map((e) => e.state)).toEqual(['queued', 'started', 'completed']);
+      const steerTurn = mainTurnsEnded(events).find((t) => t.userMessageUuids.includes(steer))!;
+      expect(namedBefore).toBe(true);
+      expect(steerTurn.userMessageUuids).toEqual([steer]);
+      expect(steerTurn.resultText).toContain('STEER_A');
+      expect(ofKind(events, 'turn.started').find((e) => e.userMessageUuid === steer)?.origin).toBe('human');
+    }, new LiveHost({ userData: g.userData, configHome }));
+    exportTo('steer-next-interrupted', journalPath, g);
+    const records = exportTranscript('w1-steer-next-interrupted', configHome, engineSessionId, g);
+    // on disk the steer is an ordinary user record after the interrupt marker, not a queued_command attachment
+    const steerRecord = records.find((r) => r.type === 'user' && r.message?.content === 'Reply STEER_A');
+    expect(records.find((r) => r.uuid === steerRecord?.parentUuid)?.message?.content).toEqual([{ type: 'text', text: '[Request interrupted by user for tool use]' }]);
+    expect(records.filter((r) => r.attachment?.type === 'queued_command')).toEqual([]);
+  }, LONG_CASE_MS);
+
+  // W1
+  it('W1 next steer then now steer', async (ctx) => {
+    const g = live(ctx);
+    const configHome = scratchConfigHome();
+    let journalPath = '';
+    let engineSessionId = '';
+    await withHost(g, 'W1 next then now', async (host) => {
+      const spec = liveSpec(g.scratch());
+      const { status } = await host.launch(spec);
+      journalPath = status.journalPath;
+      engineSessionId = spec.sessionId!;
+      const s = sessionView(host, spec);
+      const first = await s.send(SLOW_COUNT(6));
+      const use = await s.wait('tool.use', 'the first Bash call', (e) => e.toolName === 'Bash');
+      // the call is running: the message carrying it has stopped (a first run sent both steers before that, while the
+      // message still streamed, and `now` aborted the stream: terminal reason aborted_streaming, the call never ran)
+      await host.waitFor(() => s.journal().some((r) => r.seq > seqOf(use) && (r.frame as { event?: { type?: string } }).event?.type === 'message_stop'), 'the message carrying the call stopped', 10_000);
+      await delay(500);
+      const { messageUuid: a } = await host.call('session.steer', { appSessionId: s.id, content: 'Reply STEER_A', priority: 'next' });
+      const { messageUuid: b } = await host.call('session.steer', { appSessionId: s.id, content: 'Reply STEER_B', priority: 'now' });
+      const names: Record<string, string> = { [first.messageUuid!]: 'first', [a]: 'A(next)', [b]: 'B(now)' };
+      const settled = (u: string) => mainTurnsEnded(s.events()).some((t) => t.userMessageUuids.includes(u as MessageUuid)) || ofKind(s.events(), 'command.lifecycle').some((e) => e.commandUuid === u && e.state !== 'queued' && e.state !== 'started');
+      await host.waitFor(() => settled(a) && settled(b) && settled(first.messageUuid!), 'a fate for both steers and the first prompt', LONG_CASE_MS - 90_000);
+      await w1Quiet(host, s.id, 15_000, 120_000);
+      console.log(`   first Bash tool.use seq ${use.seq}; A lifecycle [${w1Lifecycle(s.events(), a).join(',')}]; B lifecycle [${w1Lifecycle(s.events(), b).join(',')}]`);
+      const events = s.events();
+      for (const line of w1Timeline(events, names)) console.log(`   ${line}`);
+      const out = outFrames(s.journal()).filter((r) => r.frame.type === 'user' && (r.frame.uuid === a || r.frame.uuid === b));
+      expect(out.map((r) => r.frame.priority)).toEqual(['next', 'now']);
+      // observed (pass3/steer-next-then-now): `now` aborts the running call and the turn (no interrupt marker on the
+      // wire); `now` then runs as its own turn first, and the earlier `next` as another turn after it, each result naming
+      // only its own prompt; neither folds into the other's turn
+      const turns = mainTurnsEnded(events);
+      const lifecycle = (u: string) => ofKind(events, 'command.lifecycle').filter((e) => e.commandUuid === u);
+      expect(turns.map((t) => t.userMessageUuids)).toEqual([[first.messageUuid], [b], [a]]);
+      expect(turns[0]!.terminalReason).toBe('aborted_tools');
+      expect(ofKind(events, 'tool.result').find((e) => e.toolUseId === use.toolUseId)).toMatchObject({ isError: true, content: '<error>Command was aborted before completion</error>' });
+      expect(lifecycle(first.messageUuid!).map((e) => e.state)).toEqual(['queued', 'started', 'cancelled']);
+      expect(lifecycle(a).map((e) => e.state)).toEqual(['queued', 'started', 'completed']);
+      expect(lifecycle(b).map((e) => e.state)).toEqual(['queued', 'started', 'completed']);
+      expect(seqOf(lifecycle(b)[1]!)).toBeLessThan(seqOf(lifecycle(a)[1]!));
+      expect([turns[1]!.resultText, turns[2]!.resultText]).toEqual(['STEER_B', 'STEER_A']);
+      expect(ofKind(events, 'user.message').filter((m) => m.origin === 'interrupt-marker')).toEqual([]);
+    }, new LiveHost({ userData: g.userData, configHome }));
+    exportTo('steer-next-then-now', journalPath, g);
+    const records = exportTranscript('w1-steer-next-then-now', configHome, engineSessionId, g);
+    expect(records.filter((r) => r.type === 'user' && typeof r.message?.content === 'string').map((r) => r.message!.content).slice(1)).toEqual(['Reply STEER_B', 'Reply STEER_A']);
+  }, LONG_CASE_MS);
+
+  // W1
+  it('W1 delivered next steer on disk', async (ctx) => {
+    const g = live(ctx);
+    const configHome = scratchConfigHome();
+    let journalPath = '';
+    let engineSessionId = '';
+    await withHost(g, 'W1 next on disk', async (host) => {
+      const spec = liveSpec(g.scratch());
+      const { status } = await host.launch(spec);
+      journalPath = status.journalPath;
+      engineSessionId = spec.sessionId!;
+      const s = sessionView(host, spec);
+      const first = await s.send(SLOW_COUNT(1));
+      await s.wait('tool.result', 'the first count');
+      const { messageUuid: next } = await host.call('session.steer', { appSessionId: s.id, content: 'Reply NEXT_OK', priority: 'next' });
+      const names: Record<string, string> = { [first.messageUuid!]: 'first', [next]: 'next' };
+      const answered = await host.waitFor(() => mainTurnsEnded(s.events()).find((t) => t.userMessageUuids.includes(next as MessageUuid)), 'a result naming the next steer', LONG_CASE_MS - 90_000);
+      await w1Quiet(host, s.id, 5_000, TURN_MS);
+      for (const line of w1Timeline(s.events(), names)) console.log(`   ${line}`);
+      expect(answered.userMessageUuids).toEqual([first.messageUuid, next]); // 3.7n's fold, again
+      expect(ofKind(s.events(), 'turn.started').filter((e) => e.parentToolUseId === null)).toHaveLength(1);
+    }, new LiveHost({ userData: g.userData, configHome }));
+    exportTo('steer-next-disk-live', journalPath, g);
+    const records = exportTranscript('w1-steer-next-disk', configHome, engineSessionId, g);
+    // observed (test/fixtures/transcripts/w1-steer-next-disk.jsonl): the folded steer is written only as a
+    // `queued_command` attachment chained under the tool result it rode in with (no user record carries its uuid), with
+    // a queue-operation enqueue and a `remove` for reason absorbed_mid_turn
+    const steerUuid = outFrames(readJournal(journalPath)).find((r) => r.frame.type === 'user' && r.frame.priority === 'next')!.frame.uuid;
+    const queued = records.filter((r) => r.attachment?.type === 'queued_command');
+    expect(queued.map((r) => r.attachment)).toEqual([{ type: 'queued_command', prompt: 'Reply NEXT_OK', source_uuid: steerUuid, commandMode: 'prompt', origin: { kind: 'human' }, timestamp: expect.any(String), humanTurn: true }]);
+    expect(records.filter((r) => r.uuid === steerUuid)).toEqual([]);
+    const parent = records.find((r) => r.uuid === queued[0]!.parentUuid);
+    expect(parent?.type).toBe('user');
+    expect((parent?.message?.content as { type?: string }[])[0]?.type).toBe('tool_result');
+    expect(records.filter((r) => r.type === 'queue-operation' && r.content === 'Reply NEXT_OK').map((r) => [r.operation, r.reason])).toEqual([['enqueue', undefined], ['remove', 'absorbed_mid_turn']]);
+  }, LONG_CASE_MS);
+
+  // Blocking hooks from the user settings layer MAWS launches with (the scratch home's settings.json, so no project
+  // trust is involved): a UserPromptSubmit hook that blocks a prompt naming BLOCKME (exit 2, its reason on stderr), and
+  // a Stop hook that blocks the first stop of each session with a reason on stdout and lets every later stop through.
+  // W1
+  it('W1 blocking hooks', async (ctx) => {
+    const g = live(ctx);
+    const configHome = scratchConfigHome();
+    const gate = join(configHome, 'prompt-gate.sh');
+    const stopOnce = join(configHome, 'stop-once.sh');
+    writeFileSync(gate, '#!/bin/sh\n# exit 2 with a reason on stderr when the prompt names BLOCKME\nif grep -q BLOCKME; then echo BLOCKED_BY_TEST_HOOK >&2; exit 2; fi\nexit 0\n', { mode: 0o755 });
+    writeFileSync(
+      stopOnce,
+      `#!/bin/sh\n# block the first stop of each session, let every later one through\ninput=$(cat)\nsid=$(printf '%s' "$input" | sed -n 's/.*"session_id" *: *"\\([^"]*\\)".*/\\1/p')\nmarker="$(dirname "$0")/stop-fired-$sid"\nif [ ! -e "$marker" ]; then : > "$marker"; echo '{"decision":"block","reason":"Say REPROMPTED and stop"}'; fi\nexit 0\n`,
+      { mode: 0o755 },
+    );
+    writeFileSync(join(configHome, 'settings.json'), `${JSON.stringify({ hooks: { UserPromptSubmit: [{ hooks: [{ type: 'command', command: gate }] }], Stop: [{ hooks: [{ type: 'command', command: stopOnce }] }] } }, null, 2)}\n`);
+    let journalPath = '';
+    let engineSessionId = '';
+    await withHost(g, 'W1 hooks', async (host) => {
+      const spec = liveSpec(g.scratch());
+      const { status } = await host.launch(spec);
+      journalPath = status.journalPath;
+      engineSessionId = spec.sessionId!;
+      const s = sessionView(host, spec);
+      const one = await s.send('Reply ONE');
+      const names: Record<string, string> = { [one.messageUuid!]: 'ONE' };
+      await host.waitFor(() => mainTurnsEnded(s.events()).find((t) => t.userMessageUuids.includes(one.messageUuid!)), 'a result naming ONE', TURN_MS);
+      await w1Quiet(host, s.id, 5_000, TURN_MS);
+      const blocked = await s.send('BLOCKME please reply TWO');
+      names[blocked.messageUuid!] = 'BLOCKME';
+      const fate = () =>
+        mainTurnsEnded(s.events()).some((t) => t.userMessageUuids.includes(blocked.messageUuid!)) ||
+        ofKind(s.events(), 'command.lifecycle').some((e) => e.commandUuid === blocked.messageUuid && e.state !== 'queued' && e.state !== 'started');
+      await host.waitFor(fate, 'a fate for the BLOCKME prompt', 60_000).catch((error: unknown) => console.log(`   ${String(error)}`));
+      await w1Quiet(host, s.id, 8_000, 60_000);
+      console.log(`   BLOCKME send ${JSON.stringify({ disposition: blocked.disposition })}; lifecycle [${w1Lifecycle(s.events(), blocked.messageUuid!).join(',')}]; status turn ${JSON.stringify(s.status().turn)} queue ${JSON.stringify(s.status().queue)}`);
+      const events = s.events();
+      for (const line of w1Timeline(events, names)) console.log(`   ${line}`);
+      const hookFrames = s.journal().filter((r) => r.direction === 'in' && /^hook_/.test(String((r.frame as { subtype?: unknown }).subtype)));
+      for (const r of hookFrames) console.log(`   ${r.seq} ${JSON.stringify(r.frame).slice(0, 500)}`);
+      expect(hookFrames.length).toBeGreaterThan(0); // the engine loaded the user-layer hooks
+      // observed (pass3/hooks-blocking): the Stop hook's block keeps the turn going inside the same result (a synthetic
+      // user frame carries "Stop hook feedback:" and the reason, a `notification` notice follows, the model answers, the
+      // Stop hook runs again); the blocked prompt starts a turn (started lifecycle, system/init) that ends in a
+      // zero-turn success result carrying the block message, with no replayed user frame and no assistant message
+      const finished = ofKind(events, 'hook.finished');
+      expect(finished.map((e) => [e.hookEvent, e.outcome, e.exitCode])).toEqual([['UserPromptSubmit', 'success', 0], ['Stop', 'success', 0], ['Stop', 'success', 0], ['UserPromptSubmit', 'error', 2]]);
+      expect(finished[1]!.stdout).toBe('{"decision":"block","reason":"Say REPROMPTED and stop"}\n');
+      expect(finished[3]!.stderr).toBe('BLOCKED_BY_TEST_HOOK\n');
+      const feedback = ofKind(events, 'user.message').find((m) => m.isSynthetic && text(m.content).includes('Stop hook feedback:'));
+      expect(text(feedback?.content)).toContain('Say REPROMPTED and stop');
+      const [oneTurn, blockedTurn] = mainTurnsEnded(events);
+      expect(oneTurn).toMatchObject({ userMessageUuids: [one.messageUuid], terminalReason: 'completed', numTurns: 2 });
+      expect(blockedTurn).toMatchObject({ userMessageUuids: [blocked.messageUuid], isError: false, numTurns: 0, terminalReason: null });
+      expect(blockedTurn!.resultText).toContain('UserPromptSubmit operation blocked by hook:');
+      expect(blockedTurn!.resultText).toContain('BLOCKED_BY_TEST_HOOK');
+      expect(ofKind(events, 'turn.started').find((e) => e.userMessageUuid === blocked.messageUuid)).toBeDefined();
+      expect(w1Lifecycle(events, blocked.messageUuid!).map((st) => st.split('@')[0])).toEqual(['queued', 'started', 'completed']);
+      expect(ofKind(events, 'assistant.block.complete').filter((e) => seqOf(e) > seqOf(ofKind(events, 'turn.started').at(-1)!))).toEqual([]);
+    }, new LiveHost({ userData: g.userData, configHome }));
+    exportTo('hooks-blocking', journalPath, g);
+    const records = exportTranscript('w1-hooks-blocking', configHome, engineSessionId, g);
+    // on disk: the Stop block is a meta user record, a hook_blocking_error attachment and a stop_hook_summary; the
+    // blocked prompt leaves no user record, only its queue operations and a system/informational record
+    expect(records.filter((r) => r.type === 'user' && r.isMeta === true).map((r) => r.message?.content)).toEqual(['Stop hook feedback:\nSay REPROMPTED and stop']);
+    expect(records.filter((r) => r.attachment?.type === 'hook_blocking_error')).toHaveLength(1);
+    expect(records.filter((r) => r.type === 'system' && r.subtype === 'stop_hook_summary')).toHaveLength(2);
+    expect(records.filter((r) => r.type === 'user' && JSON.stringify(r.message?.content).includes('BLOCKME'))).toEqual([]);
+    expect(records.filter((r) => r.type === 'system' && r.subtype === 'informational').map((r) => r.preventContinuation)).toEqual([true]);
+  }, LONG_CASE_MS);
+
+  // "Hold until the turn ends" on a pending `next` steer: cancel_async_message withdraws it from the engine's queue. No
+  // X2 command wraps the control, so the case drives the session's control client raw. The engine reads the steer's
+  // uuid from `message_uuid`; the first request is sent in the shape src/shared/wire/control.ts declares
+  // (CancelAsyncMessageRequest `{ uuid }`) to record what that shape does. After the turn, a delivered uuid is cancelled.
+  // W1
+  it('W1 next steer withdrawn by cancel_async_message', async (ctx) => {
+    const g = live(ctx);
+    const configHome = scratchConfigHome();
+    let journalPath = '';
+    let engineSessionId = '';
+    let steerUuid = '';
+    await withHost(g, 'W1 next cancelled', async (host) => {
+      const spec = liveSpec(g.scratch());
+      const { status } = await host.launch(spec);
+      journalPath = status.journalPath;
+      engineSessionId = spec.sessionId!;
+      const s = sessionView(host, spec);
+      const control = host.ipc.table.get(spec.appSessionId as AppSessionId)!.control!;
+      const cancel = (payload: Record<string, unknown>) => control.requestRaw('cancel_async_message', payload).catch((error: unknown) => ({ error: String(error) }));
+      const first = await s.send(SLOW_COUNT(6));
+      const use = await s.wait('tool.use', 'the first Bash call', (e) => e.toolName === 'Bash');
+      await host.waitFor(() => s.journal().some((r) => r.seq > seqOf(use) && (r.frame as { event?: { type?: string } }).event?.type === 'message_stop'), 'the message carrying the call stopped', 10_000);
+      await delay(500);
+      const { messageUuid: steer } = await host.call('session.steer', { appSessionId: s.id, content: 'Reply STEER_A', priority: 'next' });
+      steerUuid = steer;
+      await delay(1_000);
+      const declaredShape = await cancel({ uuid: steer });
+      const withdrawn = await cancel({ message_uuid: steer });
+      console.log(`   cancel_async_message { uuid } → ${JSON.stringify(declaredShape)}; { message_uuid } → ${JSON.stringify(withdrawn)}; steer lifecycle [${w1Lifecycle(s.events(), steer).join(',')}]`);
+      const ended = await s.waitTurns(1, LONG_CASE_MS - 90_000);
+      await w1Quiet(host, s.id, 10_000, TURN_MS);
+      const delivered = await cancel({ message_uuid: first.messageUuid });
+      await w1Quiet(host, s.id, 5_000, TURN_MS);
+      const names: Record<string, string> = { [first.messageUuid!]: 'first', [steer]: 'steer' };
+      const events = s.events();
+      console.log(`   delivered uuid { message_uuid } → ${JSON.stringify(delivered)}; first lifecycle [${w1Lifecycle(events, first.messageUuid!).join(',')}]; steer lifecycle [${w1Lifecycle(events, steer).join(',')}]`);
+      for (const line of w1Timeline(events, names)) console.log(`   ${line}`);
+      const rows = s.journal();
+      for (const r of rows.filter((row) => JSON.stringify(row.frame).includes(steer) || (row.frame as { request?: { subtype?: string } }).request?.subtype === 'cancel_async_message')) console.log(`   ${r.seq} ${r.direction} ${JSON.stringify(r.frame).slice(0, 400)}`);
+      // observed (pass3/steer-next-cancelled): the declared `{ uuid }` shape cancels nothing; `{ message_uuid }` withdraws
+      // the queued steer (a `cancelled` lifecycle, never started), and the running turn goes on to its end without it;
+      // a delivered uuid answers cancelled: false
+      expect(declaredShape).toEqual({ cancelled: false });
+      expect(withdrawn).toEqual({ cancelled: true });
+      expect(delivered).toEqual({ cancelled: false });
+      expect(ofKind(events, 'command.lifecycle').filter((e) => e.commandUuid === steer).map((e) => e.state)).toEqual(['queued', 'cancelled']);
+      expect(ended).toMatchObject({ userMessageUuids: [first.messageUuid], terminalReason: 'completed' });
+      expect(ended.resultText).toContain('COUNTED');
+      expect(rows.filter((r) => r.direction === 'in' && JSON.stringify(r.frame).includes('STEER_A'))).toEqual([]);
+      expect(mainTurnsEnded(events)).toHaveLength(1);
+    }, new LiveHost({ userData: g.userData, configHome }));
+    exportTo('steer-next-cancelled', journalPath, g);
+    const records = exportTranscript('w1-steer-next-cancelled', configHome, engineSessionId, g);
+    // on disk the withdrawn steer is its `enqueue` and then a bare `dequeue` (no content, no reason: the same record a
+    // delivered prompt's dequeue writes) and nothing else: no user record, no queued_command
+    const ops = records.filter((r) => r.type === 'queue-operation');
+    const at = ops.findIndex((r) => r.content === 'Reply STEER_A');
+    expect(ops.slice(at, at + 2).map((r) => [r.operation, r.content ?? null, r.reason ?? null])).toEqual([['enqueue', 'Reply STEER_A', null], ['dequeue', null, null]]);
+    expect(records.filter((r) => JSON.stringify(r).includes('STEER_A'))).toHaveLength(1);
+    expect(records.filter((r) => r.attachment?.type === 'queued_command')).toEqual([]);
+    expect(records.filter((r) => r.uuid === steerUuid)).toEqual([]);
+  }, LONG_CASE_MS);
+
+  // W1
+  it('W1 compact between two turns', async (ctx) => {
+    const g = live(ctx);
+    const configHome = scratchConfigHome();
+    let journalPath = '';
+    let engineSessionId = '';
+    let compactUuid = '';
+    await withHost(g, 'W1 compact', async (host) => {
+      const spec = liveSpec(g.scratch());
+      const { status } = await host.launch(spec);
+      journalPath = status.journalPath;
+      engineSessionId = spec.sessionId!;
+      const s = sessionView(host, spec);
+      const one = await s.send('Reply ONE');
+      await s.waitTurns(1);
+      const compact = await s.send('/compact');
+      compactUuid = compact.messageUuid!;
+      console.log(`   /compact send ${JSON.stringify({ disposition: compact.disposition, messageUuid: compact.messageUuid })}`);
+      const boundary = await s.wait('boundary.compaction', 'the compaction', () => true, LONG_CASE_MS - 120_000);
+      await w1Quiet(host, s.id, 5_000, TURN_MS);
+      const activities = [...new Set(host.statuses(s.id).map((st) => st.activity))];
+      console.log(`   boundary.compaction seq ${boundary.seq} ${boundary.trigger} pre ${boundary.preTokens} post ${boundary.postTokens}; status activities seen ${JSON.stringify(activities)}`);
+      const two = await s.send('Reply TWO');
+      const names: Record<string, string> = { [one.messageUuid!]: 'ONE', [compact.messageUuid!]: '/compact', [two.messageUuid!]: 'TWO' };
+      await host.waitFor(() => mainTurnsEnded(s.events()).find((t) => t.userMessageUuids.includes(two.messageUuid!)), 'a result naming TWO', TURN_MS);
+      await w1Quiet(host, s.id, 5_000, TURN_MS);
+      const events = s.events();
+      for (const line of w1Timeline(events, names)) console.log(`   ${line}`);
+      // observed (pass3/compact): /compact opens a turn of its own (started lifecycle, turn.started) that the zero-turn
+      // `local_command: compact` result closes; between them status `compacting`, then status null with
+      // compact_result success, system/init, compact_boundary, a synthetic user frame carrying the summary (no
+      // isCompactSummary on the wire), the replayed <local-command-stdout>, and the replayed <command-name> record
+      expect(compact.disposition).toBe('sent');
+      expect(boundary).toMatchObject({ trigger: 'manual', historical: false });
+      expect(boundary.logicalParentUuid).not.toBeNull();
+      expect(activities).toContain('compacting');
+      const compactTurn = mainTurnsEnded(events).find((t) => t.userMessageUuids.includes(compact.messageUuid!))!;
+      expect(compactTurn).toMatchObject({ userMessageUuids: [compact.messageUuid], numTurns: 0, terminalReason: null, isEchoReceipt: false });
+      expect(ofKind(events, 'turn.started').find((e) => e.userMessageUuid === compact.messageUuid)).toBeDefined();
+      const after = ofKind(events, 'user.message').filter((m) => seqOf(m) > seqOf(boundary) && seqOf(m) < seqOf(compactTurn));
+      expect(after.map((m) => [m.isSynthetic, m.isReplay, m.origin])).toEqual([[true, false, null], [false, true, 'local-command']]);
+      expect(text(after[0]!.content)).toMatch(/^This session is being continued from a previous conversation/);
+      expect(text(after[1]!.content)).toMatch(/^Compacted/); // the normaliser unwraps the wire's <local-command-stdout>
+      expect(mainTurnsEnded(events).at(-1)!.resultText).toContain('TWO');
+    }, new LiveHost({ userData: g.userData, configHome }));
+    exportTo('compact', journalPath, g);
+    const records = exportTranscript('w1-compact', configHome, engineSessionId, g);
+    // on disk: the boundary (parentUuid null, logicalParentUuid), the summary user record under it (isCompactSummary,
+    // isVisibleInTranscriptOnly), the local-command caveat (isMeta), the <command-name>/compact record (the send's uuid)
+    // and the <local-command-stdout> record, chained in that order; no system/local_command record
+    const at = records.findIndex((r) => r.type === 'system' && r.subtype === 'compact_boundary');
+    const chain = records.slice(at, at + 5);
+    expect(chain[0]).toMatchObject({ parentUuid: null, compactMetadata: { trigger: 'manual' } });
+    expect(chain[1]).toMatchObject({ type: 'user', isCompactSummary: true, isVisibleInTranscriptOnly: true, parentUuid: chain[0]!.uuid });
+    expect(chain[2]).toMatchObject({ type: 'user', isMeta: true, parentUuid: chain[1]!.uuid });
+    expect(chain[3]).toMatchObject({ type: 'user', uuid: compactUuid, parentUuid: chain[2]!.uuid });
+    expect(String(chain[3]!.message?.content)).toMatch(/^<command-name>\/compact<\/command-name>/);
+    expect(chain[4]).toMatchObject({ type: 'user', parentUuid: chain[3]!.uuid });
+    expect(String(chain[4]!.message?.content)).toMatch(/^<local-command-stdout>Compacted/);
+    expect(records.filter((r) => r.type === 'system' && r.subtype === 'local_command')).toEqual([]);
+  }, LONG_CASE_MS);
 });
 
 // A live journal as a pass-3 fixture candidate: redacted, provenance first, written under the run's userData for a
@@ -924,3 +1265,73 @@ function exportTo(name: string, journalPath: string, ctx: LiveContext): void {
   writeFileSync(dest, exportFixture(readFileSync(journalPath, 'utf8')));
   exports.push(`${name}: ${dest} (from ${journalPath}; ${readdirSync(dir).length} exported so far)`);
 }
+
+// W1: the main transcript the engine wrote for one session under a scratch config home, redacted, beside the journal
+// exports, for a look by eye before it is copied into test/fixtures/transcripts/; answers its records.
+interface TranscriptRecord {
+  type?: string;
+  subtype?: string;
+  uuid?: string;
+  parentUuid?: string | null;
+  isMeta?: boolean;
+  message?: { content?: unknown };
+  attachment?: { type?: string } & Record<string, unknown>;
+  [key: string]: unknown;
+}
+function exportTranscript(name: string, configHome: string, engineSessionId: string, ctx: LiveContext): TranscriptRecord[] {
+  const projects = join(configHome, 'projects');
+  const source = readdirSync(projects).map((dir) => join(projects, dir, `${engineSessionId}.jsonl`)).find((path) => existsSync(path));
+  if (!source) throw new Error(`no transcript for ${engineSessionId} under ${projects}`);
+  const dir = join(ctx.userData, 'exports');
+  mkdirSync(dir, { recursive: true });
+  const dest = join(dir, `${name}.jsonl`);
+  const redacted = redactJournal(readFileSync(source, 'utf8'));
+  writeFileSync(dest, redacted);
+  exports.push(`${name}: ${dest} (transcript ${source})`);
+  return redacted
+    .split('\n')
+    .filter((line) => line.length > 0)
+    .map((line) => JSON.parse(line) as TranscriptRecord);
+}
+
+// W1: waits until the session has no open turn and its events have been still for `quietMs` (progress heartbeats aside).
+async function w1Quiet(host: LiveHost, id: string, quietMs: number, timeoutMs: number): Promise<void> {
+  const count = () => host.events(id).filter((e) => e.kind !== 'tool.progress').length;
+  let seen = count();
+  let since = Date.now();
+  for (const deadline = Date.now() + timeoutMs; Date.now() < deadline; await delay(250)) {
+    const now = count();
+    if (now !== seen) [seen, since] = [now, Date.now()];
+    else if (Date.now() - since >= quietMs && host.status(id)?.turn === null) return;
+  }
+  console.log(`   (not quiet after ${timeoutMs} ms)`);
+}
+
+const w1Lifecycle = (events: SessionEvent[], uuid: string): string[] => ofKind(events, 'command.lifecycle').filter((e) => e.commandUuid === uuid).map((e) => `${e.state}@${e.seq}`);
+
+// W1: the main lane, one line per event that bears on a prompt's fate, the case's prompts named.
+function w1Timeline(events: SessionEvent[], names: Record<string, string>): string[] {
+  const name = (uuid: string | null) => (uuid !== null && names[uuid]) || String(uuid);
+  const short = (value: unknown, n = 80) => JSON.stringify(text(value).slice(0, n));
+  const out: string[] = [];
+  for (const e of events) {
+    if (e.parentToolUseId !== null) continue;
+    if (e.kind === 'turn.started') out.push(`${e.seq} turn.started ${name(e.userMessageUuid)} origin=${e.origin}`);
+    else if (e.kind === 'turn.ended') out.push(`${e.seq} turn.ended ${e.terminalReason} [${e.userMessageUuids.map(name).join(',')}] echo=${e.isEchoReceipt} numTurns=${e.numTurns} ${short(e.resultText ?? '', 60)}`);
+    else if (e.kind === 'command.lifecycle') out.push(`${e.seq} lifecycle ${e.state} ${name(e.commandUuid)}`);
+    else if (e.kind === 'user.message') out.push(`${e.seq} user.message ${name(e.messageUuid)} replay=${e.isReplay} synthetic=${e.isSynthetic} origin=${e.origin} ${short(e.content)}`);
+    else if (e.kind === 'tool.use') out.push(`${e.seq} tool.use ${e.toolName} ${short(e.input, 50)}`);
+    else if (e.kind === 'tool.result') out.push(`${e.seq} tool.result error=${e.isError} denial=${e.denial} ${short(e.content, 50)}`);
+    else if (e.kind === 'assistant.block.complete' && e.block.type === 'text') out.push(`${e.seq} assistant text ${short((e.block as { text?: string }).text ?? '', 60)}`);
+    else if (e.kind === 'boundary.compaction') out.push(`${e.seq} boundary.compaction ${e.trigger} pre=${e.preTokens} post=${e.postTokens} logicalParent=${e.logicalParentUuid}`);
+    else if (e.kind === 'hook.started') out.push(`${e.seq} hook.started ${e.hookEvent} ${e.hookName}`);
+    else if (e.kind === 'hook.finished') out.push(`${e.seq} hook.finished ${e.hookEvent} ${e.outcome} exit=${e.exitCode} stdout=${short(e.stdout)} stderr=${short(e.stderr)}`);
+    else if (e.kind === 'session.state') out.push(`${e.seq} session.state ${e.state}`);
+    else if (e.kind === 'session.init') out.push(`${e.seq} session.init ${e.model}`);
+    else if (e.kind === 'notice.posted') out.push(`${e.seq} notice ${short(e.text)}`);
+    else if (e.kind === 'error.raised') out.push(`${e.seq} error ${e.scope} ${short(e.message)}`);
+  }
+  return out;
+}
+
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));

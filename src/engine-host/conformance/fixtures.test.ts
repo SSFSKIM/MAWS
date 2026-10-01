@@ -52,7 +52,9 @@ describe('normaliser replays every probe fixture into the X1 graph', () => {
     const c12 = ['launch-env-fork', 'launch-env-state-events', 'launch-env-state-events-unset', 'launch-env-terminal', 'launch-env-todo', 'launch-env-unset'];
     // C12 end
     const wave5 = ['bg-daemon-binary']; // debt wave 5: which binary a `--bg` job's transient daemon runs (meta rows only)
-    const w1 = ['hooks-blocking']; // W1: live records under a scratch config home (a blocking UserPromptSubmit and Stop hook)
+    // W1: live records under a scratch config home (a blocking UserPromptSubmit and Stop hook; the Enter scheme's `next`
+    // steer at an interrupt, before a `now` one, delivered with its disk copy, and withdrawn by cancel_async_message)
+    const w1 = ['hooks-blocking', 'steer-next-cancelled', 'steer-next-disk-live', 'steer-next-interrupted', 'steer-next-then-now'];
     expect(listJournals('pass3')).toEqual(['engine-turn-release', 'fork-worktree-fork', 'fork-worktree-resume-in-b', 'fork-worktree-start', 'nested-agents', 'plan-outcomes', 'relay-to-child', 'rewind-files', 'steer-next', 'steer-now', 'steer-now-unheld', 'stop-task', 'workspace-diff-branch', 'workspace-diff-dirty', ...c10, ...wave3, ...wave4, ...c12 /* C12 */, ...wave5, ...w1].sort());
   });
 

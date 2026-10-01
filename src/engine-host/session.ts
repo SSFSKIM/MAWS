@@ -22,7 +22,7 @@ import type { ControlRequestFrame } from '@shared/wire/frames';
 import type { JournalDirection, JournalRow } from '@shared/wire/journal';
 import { BashMode } from './bash-mode';
 import { DECLARED_DIALOG_KINDS, PermissionBroker } from './broker';
-import { endSession, getContextUsage, getStatus, initialize, interrupt, REQUEST_TIMEOUT_MS, requestClassOf } from './controls';
+import { cancelAsyncMessage, endSession, getContextUsage, getStatus, initialize, interrupt, REQUEST_TIMEOUT_MS, requestClassOf } from './controls';
 import { EMPTY_GRANTS, reapply, recordFromResponse, type GrantSnapshot } from './grants';
 import { HostHookRegistry } from './host-hooks';
 import { RELAY_URL, spawnMeta, type LaunchPlan } from './launch';
@@ -227,6 +227,7 @@ export class EngineSession {
       // prompt written but not yet started (a `now` steer preempts the running turn and runs next: M6 live 3.7)
       turnOpen: () => this.processState !== 'exited' && (this.normalizer.state.currentTurn !== null || this.normalizer.state.unstartedPrompts.size > 0 || this.clearAndImplement.holding),
       canWrite: () => this.processState === 'ready',
+      cancel: async (messageUuid) => (await cancelAsyncMessage(this.readyClient(), { message_uuid: messageUuid })).cancelled === true, // W1
       onChange: (queue) => {
         this.emit('queue', queue);
         this.touch();

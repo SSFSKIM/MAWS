@@ -152,6 +152,20 @@
     "turnId": "turn:fe091b0d-b28b-41a8-aed3-39585769623d"
   },
   {
+    "at": "2026-09-29T02:24:29.263Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:42a15931-3c9a-4267-a6b2-09fa5697735d",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "42a15931-3c9a-4267-a6b2-09fa5697735d",
+    "placeholders": [],
+    "steer": true,
+    "text": "Reply NEXT_OK",
+    "turnId": "turn:fe091b0d-b28b-41a8-aed3-39585769623d"
+  },
+  {
     "at": "2026-09-29T02:24:33.390Z",
     "blockIndex": 1,
     "id": "text:msg_011CfWwHb5arQupcZMzccvQW:1",
@@ -390,20 +404,6 @@
     "kind": "group",
     "state": "completed",
     "summary": "Ran 6 commands",
-    "turnId": "turn:fe091b0d-b28b-41a8-aed3-39585769623d"
-  },
-  {
-    "at": "2026-09-29T02:24:29.263Z",
-    "attachments": [],
-    "dropped": false,
-    "editable": true,
-    "id": "user:42a15931-3c9a-4267-a6b2-09fa5697735d",
-    "kind": "user",
-    "lines": 1,
-    "messageUuid": "42a15931-3c9a-4267-a6b2-09fa5697735d",
-    "placeholders": [],
-    "steer": true,
-    "text": "Reply NEXT_OK",
     "turnId": "turn:fe091b0d-b28b-41a8-aed3-39585769623d"
   },
   {

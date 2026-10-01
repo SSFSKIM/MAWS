@@ -320,6 +320,12 @@ class Batch {
     const from = this.state.order.indexOf(closed) + 1;
     const next = this.state.order.slice(from).find((id) => this.state.turns.get(id)!.state === 'open' && this.state.turns.get(id)!.accepted);
     this.state.current = next ?? null;
+    // W1: a prompt waiting for its turn reads as waiting at the next step only while another turn runs (derive.ts), so
+    // each waiting turn is derived again now that the running one has closed.
+    for (const id of this.state.order.slice(from)) {
+      const turn = this.state.turns.get(id)!;
+      if (turn.state === 'open' && !turn.accepted) this.touch(id).version += 1;
+    }
   }
 }
 

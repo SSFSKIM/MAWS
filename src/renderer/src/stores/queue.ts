@@ -2,11 +2,12 @@
 // control and queue"): C3's `session.queue` events and a `session.queue.list` snapshot, per session, while a composer
 // is attached. The event carries the whole queue and no revision, so the rule is arrival: the subscription goes on
 // first, and a snapshot that answers after an event for its session is older than that event and is dropped. A session
-// whose queue the host cannot answer (no process and no state file yet) holds the empty queue.
+// whose queue the host cannot answer (no process and no state file yet) holds the empty queue. W1: the pending `next`
+// steers (Enter while a turn runs) and the uuids of those held back into the queue ride along.
 import { useEffect } from 'react';
 import { create } from 'zustand';
-import type { QueueEntry, QueuePauseReason } from '@shared/engine/session-state-store';
-import type { AppSessionId } from '@shared/graph/ids';
+import type { PendingSteer, QueueEntry, QueuePauseReason, QueueState as HostQueueState } from '@shared/engine/session-state-store';
+import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { ipc } from '../ipc/client';
 
@@ -14,10 +15,16 @@ export interface SessionQueue {
   entries: readonly QueueEntry[];
   paused: boolean;
   pauseReason: QueuePauseReason | null; // why it paused; null while running, and for a state file older than the reason
+  steers: readonly PendingSteer[]; // W1: `next` steers the engine has not started yet, in write order
+  withdrawn: readonly MessageUuid[]; // W1: steers held back into the queue (the engine reports them cancelled)
   loaded: boolean; // a snapshot or an event has arrived
 }
 
-export const EMPTY_QUEUE: SessionQueue = Object.freeze({ entries: Object.freeze([]) as readonly QueueEntry[], paused: false, pauseReason: null, loaded: false });
+export const EMPTY_QUEUE: SessionQueue = Object.freeze({ entries: Object.freeze([]) as readonly QueueEntry[], paused: false, pauseReason: null, steers: Object.freeze([]) as readonly PendingSteer[], withdrawn: Object.freeze([]) as readonly MessageUuid[], loaded: false });
+
+const sessionQueueOf = (q: Omit<HostQueueState, 'pauseReason'> & { pauseReason?: QueuePauseReason | null }): SessionQueue => ({
+  entries: q.entries, paused: q.paused, pauseReason: q.pauseReason ?? null, steers: q.steers ?? EMPTY_QUEUE.steers, withdrawn: q.withdrawn ?? EMPTY_QUEUE.withdrawn, loaded: true,
+});
 
 interface QueueState {
   bySession: ReadonlyMap<AppSessionId, SessionQueue>;
@@ -39,11 +46,11 @@ export function attachQueue(appSessionId: AppSessionId, client: MawsBridge = ipc
     const off = client.on('session.queue', (e) => {
       if (!live || e.appSessionId !== appSessionId) return;
       evented = true;
-      put(appSessionId, { entries: e.entries, paused: e.paused, pauseReason: e.pauseReason ?? null, loaded: true });
+      put(appSessionId, sessionQueueOf(e));
     });
     void client.invoke('session.queue.list', { appSessionId }).then((result) => {
       if (!live || evented) return;
-      put(appSessionId, result.ok ? { entries: result.value.entries, paused: result.value.paused, pauseReason: result.value.pauseReason ?? null, loaded: true } : { ...EMPTY_QUEUE, loaded: true });
+      put(appSessionId, result.ok ? sessionQueueOf(result.value) : { ...EMPTY_QUEUE, loaded: true });
     });
     attachments.set(appSessionId, {
       count: 1,

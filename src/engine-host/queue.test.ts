@@ -27,7 +27,8 @@ async function harness(opts: { store?: MemorySessionStateStore; failWrite?: (fra
   const rows: Record<string, unknown>[] = [];
   const changes: QueueState[] = [];
   const held: (() => void)[] = [];
-  const h = { turn: false, ready: true, store, writes, rows, changes, held, storeAtWrite: [] as QueueState[] };
+  const cancels: MessageUuid[] = [];
+  const h = { turn: false, ready: true, cancelled: true, store, writes, rows, changes, held, cancels, storeAtWrite: [] as QueueState[] };
   const queue = new MessageQueue({
     appSessionId: ID,
     store,
@@ -41,6 +42,7 @@ async function harness(opts: { store?: MemorySessionStateStore; failWrite?: (fra
     meta: (frame) => rows.push(frame),
     turnOpen: () => h.turn,
     canWrite: () => h.ready,
+    cancel: async (uuid) => (cancels.push(uuid), h.cancelled), // W1: `cancel_async_message`
     onChange: (q) => changes.push(q),
     log: () => {},
   });
@@ -720,3 +722,66 @@ describe('queue pause reasons (C7)', () => {
   });
 });
 // C7 end
+
+// W1: the Enter scheme. A `next` steer is a pending steer until the engine starts or drops it; "Hold until the turn
+// ends" withdraws it from the engine (`cancel_async_message`, pass3/steer-next-cancelled) into the app queue's end.
+describe('pending steers and hold (W1)', () => {
+  it('a next steer is published as pending, and leaves at its started (folded into the turn) or its drop', async () => {
+    const t = await harness();
+    t.h.turn = true;
+    const { messageUuid } = await t.queue.steer('look at b too', { priority: 'next' });
+    expect(t.writes.at(-1)).toMatchObject({ uuid: messageUuid, priority: 'next' });
+    expect(t.queue.state.steers).toEqual([{ messageUuid, content: 'look at b too', createdAt: expect.any(String) }]);
+    expect(t.changes.at(-1)?.steers?.map((s) => s.messageUuid)).toEqual([messageUuid]);
+    t.queue.onLifecycle(lifecycle(messageUuid, 'queued'));
+    expect(t.queue.state.steers).toHaveLength(1); // queued is still waiting
+    t.queue.onLifecycle(lifecycle(messageUuid, 'started'));
+    await flush();
+    expect(t.queue.state.steers).toBeUndefined();
+    const now = await t.queue.steer('stop', { priority: 'now' });
+    expect(t.queue.state.steers).toBeUndefined(); // a now steer preempts at once: nothing to hold
+    expect(now.messageUuid).toBeTruthy();
+  });
+
+  it('hold withdraws the pending steer and appends it to the app queue, remembering its uuid; the turn end releases it', async () => {
+    const t = await harness();
+    t.h.turn = true;
+    await t.queue.send('held first');
+    const { messageUuid } = await t.queue.steer('then this', { priority: 'next' });
+    const entry = await t.queue.hold(messageUuid);
+    expect(t.cancels).toEqual([messageUuid]);
+    expect(entry).toMatchObject({ state: 'queued', content: 'then this', messageUuid: null });
+    expect(t.queue.state.entries.map((e) => e.content)).toEqual(['held first', 'then this']);
+    expect(t.queue.state).toMatchObject({ withdrawn: [messageUuid] });
+    expect(t.queue.state.steers).toBeUndefined();
+    expect(queueRows(t.rows)).toContain('hold:undefined');
+    expect((await t.store.loadQueue(ID)).withdrawn).toEqual([messageUuid]); // a restart still knows it was held, not lost
+    t.queue.onLifecycle(lifecycle(messageUuid, 'cancelled')); // the engine's own report of the withdrawal changes nothing more
+    t.h.turn = false;
+    await t.queue.onTurnEnded(turnEnded({ origin: 'human' }));
+    expect(t.writes.at(-1)).toMatchObject({ message: { content: 'held first' } });
+  });
+
+  it('hold is refused once the engine has taken the steer, and leaves nothing behind', async () => {
+    const t = await harness();
+    t.h.turn = true;
+    const { messageUuid } = await t.queue.steer('late', { priority: 'next' });
+    t.h.cancelled = false; // folded into the turn at that very moment: the engine had nothing to withdraw
+    await expect(t.queue.hold(messageUuid)).rejects.toThrow('already reached the running turn');
+    expect(t.queue.state.entries).toEqual([]);
+    expect(t.queue.state.withdrawn).toBeUndefined();
+    t.queue.onLifecycle(lifecycle(messageUuid, 'started'));
+    await expect(t.queue.hold(messageUuid)).rejects.toThrow('already reached the running turn');
+    expect(t.cancels).toEqual([messageUuid]); // the second refusal never asked the engine
+  });
+
+  it('pending steers go with the process; a promoted entry steered next is pending too', async () => {
+    const t = await harness();
+    t.h.turn = true;
+    const { entry } = await t.queue.send('queued');
+    const { messageUuid } = await t.queue.promote(entry.queueId, { priority: 'next' });
+    expect(t.queue.state.steers?.map((s) => [s.messageUuid, s.content])).toEqual([[messageUuid, 'queued']]);
+    await t.queue.onProcessExited('quit');
+    expect(t.queue.state.steers).toBeUndefined();
+  });
+});

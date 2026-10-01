@@ -1,12 +1,16 @@
 // The submit control's state (C7 execution document, "Submit control and queue"): one pure table over C3's status, the
-// app queue, the editor and C10's setup intent decides the primary action (Send, Queue, Steer, Stop, Resume), its
+// app queue, the editor and C10's setup intent decides the primary action (Send, Queue, Hold, Stop, Resume), its
 // label, whether it is enabled and why not, whether a Stop sits beside it, and the caret menu. First match wins.
+// W1 (charter §4.2 and §5.4 as amended 2026-10-01): while a turn runs the control reads Queue, and Enter sends the
+// message as a `next` steer, which the engine delivers at the turn's next tool boundary as the terminal does; ⌥ held
+// turns it into Hold, which keeps the message in MAWS's queue until the turn ends; Send now (the caret menu) stops the
+// turn and sends it at once.
 // Busy is C3's predicate as the renderer can read it: a turn is open, or an entry is `submitting` or `released` (C3
 // opens the turn at the engine's `started`, so between a write and its start the entry is what makes the session busy).
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { QueueEntry } from '@shared/engine/session-state-store';
 
-export type SubmitState = 'send' | 'queue' | 'steer' | 'stop' | 'resume';
+export type SubmitState = 'send' | 'queue' | 'hold' | 'stop' | 'resume'; // queue: a `next` steer; hold: MAWS's queue (W1)
 
 export interface SubmitInput {
   status: EngineSessionStatus | null;
@@ -14,12 +18,12 @@ export interface SubmitInput {
   queue: { entries: readonly QueueEntry[]; paused: boolean };
   empty: boolean;
   mode: 'send' | 'bash' | 'memory';
-  steerHeld: boolean; // ⌥ held over the control, or ⌥Enter
+  holdHeld: boolean; // ⌥ held over the control, or ⌥Enter (W1: Hold until the turn ends)
   released: boolean; // C12: the session's digest carries the memory budget's released mark (Send resumes it)
 }
 
 export interface SubmitMenuItem {
-  id: 'queue' | 'steer' | 'interrupt_and_send';
+  id: 'queue' | 'hold' | 'interrupt_and_send';
   label: string;
   detail: string;
   chord: string | null;
@@ -50,11 +54,14 @@ export const RESUME_FIRST = 'Send a message to resume this session first';
 export const isBusy = (status: EngineSessionStatus | null, entries: readonly QueueEntry[]): boolean =>
   (status?.turn ?? null) !== null || entries.some((e) => e.state === 'submitting' || e.state === 'released');
 
-// The caret menu while busy: the three ways a message can join a running session, each saying what it does.
+// The caret menu while busy: the three ways a message can join a running session, each saying what it does (W1).
+export const SENDS_AT_NEXT_STEP = 'Sends at the next step';
+export const SENDS_AT_TURN_END = 'Sends when this turn ends';
+export const SEND_NOW_DETAIL = 'Stops the running turn, then sends this';
 const busyMenu = (enabled: boolean): SubmitMenuItem[] => [
-  { id: 'queue', label: 'Queue', detail: 'Sends when this turn ends', chord: 'Enter', enabled },
-  { id: 'steer', label: 'Steer', detail: 'Adds this to the running turn at its next step', chord: '⌥Enter', enabled },
-  { id: 'interrupt_and_send', label: 'Interrupt and send', detail: 'Stops the running turn, then sends this', chord: null, enabled },
+  { id: 'queue', label: 'Queue', detail: SENDS_AT_NEXT_STEP, chord: 'Enter', enabled },
+  { id: 'hold', label: 'Hold until the turn ends', detail: SENDS_AT_TURN_END, chord: '⌥Enter', enabled },
+  { id: 'interrupt_and_send', label: 'Send now', detail: SEND_NOW_DETAIL, chord: null, enabled },
 ];
 
 const decide = (primary: SubmitState, label: string, enabled: boolean, reason: string | null = null, secondaryStop = false, menu: SubmitMenuItem[] = []): SubmitDecision => ({
@@ -91,16 +98,17 @@ export function submitState(i: SubmitInput): SubmitDecision {
   if (mode === 'memory') return decide('send', 'Save to memory', !empty, null, turnOpen);
   if (isBusy(status, queue.entries)) {
     if (empty) return decide('stop', 'Stop', true, null, false, busyMenu(false)); // the menu stays, each item waiting for text
-    return i.steerHeld ? decide('steer', 'Steer', true, null, true, busyMenu(true)) : decide('queue', 'Queue', true, null, true, busyMenu(true));
+    return i.holdHeld ? { ...decide('hold', 'Hold', true, null, true, busyMenu(true)), detail: SENDS_AT_TURN_END } : { ...decide('queue', 'Queue', true, null, true, busyMenu(true)), detail: SENDS_AT_NEXT_STEP };
   }
-  if (queue.paused) return empty ? decide('resume', 'Resume', queue.entries.length > 0) : decide('queue', 'Queue', true);
-  if (queue.entries.length > 0) return decide('queue', 'Queue', !empty);
+  // Idle with messages waiting in MAWS's queue (paused, or about to be released): a new one joins them there.
+  if (queue.paused) return empty ? decide('resume', 'Resume', queue.entries.length > 0) : decide('hold', 'Queue', true);
+  if (queue.entries.length > 0) return decide('hold', 'Queue', !empty);
   return decide('send', 'Send', !empty);
 }
 
-// The one place the priority of each steer lives: Steer folds into the running turn at its next tool boundary;
-// Interrupt and send ends the turn and runs the message as its own. Always passed explicitly (the command's default is
-// 'now').
-export function steerPriority(action: 'steer' | 'interrupt_and_send'): 'next' | 'now' {
-  return action === 'steer' ? 'next' : 'now';
+// The one place the priority of each steer lives: Queue (Enter while a turn runs) folds into the running turn at its
+// next tool boundary; Send now ends the turn and runs the message as its own. Always passed explicitly (the command's
+// default is 'now').
+export function steerPriority(action: 'queue' | 'interrupt_and_send'): 'next' | 'now' {
+  return action === 'queue' ? 'next' : 'now';
 }

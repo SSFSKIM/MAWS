@@ -13,7 +13,7 @@ const APP = 'app-1' as AppSessionId;
 const entry = (queueId: string, over: Partial<QueueEntry> = {}): QueueEntry => ({
   queueId, appSessionId: APP, content: `message ${queueId}`, createdAt: '2026-09-29T10:00:00.000Z', state: 'queued', messageUuid: null, submittedAt: null, uncertain: false, steer: false, ...over,
 });
-const queue = (entries: QueueEntry[], over: Partial<SessionQueue> = {}): SessionQueue => ({ entries, paused: false, pauseReason: null, loaded: true, ...over });
+const queue = (entries: QueueEntry[], over: Partial<SessionQueue> = {}): SessionQueue => ({ entries, paused: false, pauseReason: null, steers: [], withdrawn: [], loaded: true, ...over });
 
 function bridge(answers: Record<string, unknown> = {}) {
   const invoke = vi.fn(async (name: string) => (name in answers ? answers[name] : { ok: true, value: name === 'session.queue.promote' ? { messageUuid: null } : undefined }));
@@ -32,22 +32,40 @@ afterEach(() => {
 });
 
 describe('queue list renders every entry state', () => {
-  it('lists queued entries with Steer (next), Interrupt and send (now), Edit and Delete; the running turn is not listed', async () => {
+  it('lists held entries with Send now (now), Send at the next step (next), Edit and Delete; the running turn is not listed', async () => {
     const { client, invoke } = bridge();
     render(<QueueList appSessionId={APP} queue={queue([entry('q-0', { state: 'released' }), entry('q-1'), entry('q-2', { content: [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'iVBO' } }, { type: 'text', text: 'look' }] })])} sessionId={null} cwd="/repo" client={client} />);
     const list = screen.getByRole('region', { name: 'Queued messages' });
-    expect(within(list).getByText('2 queued')).toBeTruthy();
+    expect(within(list).getByText('2 held until the turn ends')).toBeTruthy();
     expect(within(list).queryByText('message q-0')).toBeNull();
     expect(within(list).getByText('[Image #1] look')).toBeTruthy();
     const user = userEvent.setup();
     const [row] = within(list).getAllByRole('listitem');
-    await user.click(within(row).getByRole('button', { name: 'Steer' }));
-    expect(invoke).toHaveBeenCalledWith('session.queue.promote', { appSessionId: APP, queueId: 'q-1', priority: 'next' });
-    await user.click(within(row).getByRole('button', { name: 'More ways to send' }));
-    await user.click(await screen.findByRole('menuitem', { name: /Interrupt and send/ }));
+    await user.click(within(row).getByRole('button', { name: 'Send now' }));
     expect(invoke).toHaveBeenCalledWith('session.queue.promote', { appSessionId: APP, queueId: 'q-1', priority: 'now' });
+    await user.click(within(row).getByRole('button', { name: 'More ways to send' }));
+    await user.click(await screen.findByRole('menuitem', { name: /Send at the next step/ }));
+    expect(invoke).toHaveBeenCalledWith('session.queue.promote', { appSessionId: APP, queueId: 'q-1', priority: 'next' });
     await user.click(within(row).getByRole('button', { name: 'Delete' }));
     expect(invoke).toHaveBeenCalledWith('session.queue.remove', { appSessionId: APP, queueId: 'q-1' });
+  });
+
+  // W1: Enter while a turn runs writes a `next` steer; until the engine takes it, it is a row with Send now and Hold.
+  it('lists pending steers first with Send now (an interrupt) and Hold until the turn ends', async () => {
+    const { client, invoke } = bridge({ 'session.queue.hold': { ok: true, value: entry('q-9') }, 'session.interrupt': { ok: true, value: { stillQueued: [], cancelled: [] } } });
+    const steer = { messageUuid: 'm-1' as never, content: 'look at b too', createdAt: '2026-09-29T10:00:00.000Z' };
+    render(<QueueList appSessionId={APP} queue={queue([entry('q-1')], { steers: [steer] })} sessionId={null} cwd="/repo" client={client} />);
+    const list = screen.getByRole('region', { name: 'Queued messages' });
+    expect(within(list).getByRole('banner').textContent).toBe('1 at the next step · 1 held until the turn ends');
+    const [row] = within(list).getAllByRole('listitem');
+    expect(row.getAttribute('data-queue-state')).toBe('steer');
+    expect(row.textContent).toContain('look at b too');
+    expect(row.textContent).toContain('Sends at the next step');
+    const user = userEvent.setup();
+    await user.click(within(row).getByRole('button', { name: 'Hold until the turn ends' }));
+    expect(invoke).toHaveBeenCalledWith('session.queue.hold', { appSessionId: APP, messageUuid: 'm-1' });
+    await user.click(within(row).getByRole('button', { name: 'Send now' }));
+    expect(invoke).toHaveBeenCalledWith('session.interrupt', { appSessionId: APP, cancelEngineQueued: false });
   });
 
   it('edits a queued entry inline and writes the re-serialised content; Escape cancels', async () => {
@@ -112,7 +130,7 @@ describe('queue list renders every entry state', () => {
     ];
     for (const [pauseReason, copy] of cases) {
       const { unmount } = render(<QueueList appSessionId={APP} queue={queue([entry('q-1')], { paused: true, pauseReason })} sessionId={null} cwd="/repo" client={client} />);
-      expect(screen.getByRole('region', { name: 'Queued messages' }).querySelector('header')!.textContent).toBe(`1 queued · ${copy}Resume`);
+      expect(screen.getByRole('region', { name: 'Queued messages' }).querySelector('header')!.textContent).toBe(`1 held until the turn ends · ${copy}Resume`);
       unmount();
     }
   });

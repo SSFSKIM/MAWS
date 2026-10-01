@@ -13,7 +13,7 @@ import { EffortSchema, LaunchSpecSchema } from '../../engine/launch-spec';
 import { OperationEventSchema, OperationReceiptSchema } from '../../engine/operations';
 import { RelayHealthSchema } from '../../engine/relay-health';
 import { RewindFilesOutcomeSchema, RewindOutcomeSchema } from '../../engine/rewind-outcome';
-import { QueueEntrySchema, QueuePauseReasonSchema, QueueStateSchema, SendContentSchema } from '../../engine/session-state-store'; // C7: QueuePauseReasonSchema
+import { PendingSteerSchema, QueueEntrySchema, QueuePauseReasonSchema, QueueStateSchema, SendContentSchema } from '../../engine/session-state-store'; // C7: QueuePauseReasonSchema; W1: PendingSteerSchema
 import { EngineSessionStatusSchema } from '../../engine/status';
 import {
   ExportConversationResponseSchema,
@@ -85,8 +85,10 @@ const c3Commands = {
   'session.catalog': host(input({}), CatalogSchema),
   // the composer: sends, the app queue, steer, interrupt, answers, `!` and `#`
   'session.send': host(input({ content: SendContentSchema }), z.strictObject({ messageUuid: MessageUuidSchema.nullable(), disposition: z.enum(['sent', 'queued']), queueId: z.string() })),
-  // priority on 2.1.283: 'now' (the default; "Interrupt and send") preempts the running turn; 'next' (⌥Enter's Steer) folds into it at its next tool boundary (pass3/steer-next)
+  // priority on 2.1.283: 'now' (the default; "Send now") preempts the running turn; 'next' (Enter while a turn runs, W1) folds into it at its next tool boundary (pass3/steer-next)
   'session.steer': host(input({ content: SendContentSchema, priority: z.enum(['now', 'next']).optional() }), MessageUuidOutput),
+  // W1: "Hold until the turn ends" on a pending `next` steer: withdrawn from the engine (`cancel_async_message`) into the app queue's end; refused once the engine started it (pass3/steer-next-cancelled)
+  'session.queue.hold': host(input({ messageUuid: MessageUuidSchema }), QueueEntrySchema),
   'session.queue.list': host(input({}), QueueStateSchema),
   'session.queue.edit': host(input({ queueId: z.string(), content: SendContentSchema }), QueueEntrySchema),
   'session.queue.remove': host(input({ queueId: z.string() }), z.void()),
@@ -135,7 +137,10 @@ const c3Commands = {
 const c3Events = {
   'session.eventBatch': z.strictObject({ appSessionId: AppSessionIdSchema, events: z.array(SessionEventSchema).max(500) }), // batched per session every 16 ms; C4 emits the same for backfill and replay
   'session.status': z.strictObject({ appSessionId: AppSessionIdSchema, status: EngineSessionStatusSchema }),
-  'session.queue': z.strictObject({ appSessionId: AppSessionIdSchema, entries: z.array(QueueEntrySchema), paused: z.boolean(), pauseReason: QueuePauseReasonSchema.nullable().optional() }), // C7: pauseReason
+  'session.queue': z.strictObject({
+    appSessionId: AppSessionIdSchema, entries: z.array(QueueEntrySchema), paused: z.boolean(), pauseReason: QueuePauseReasonSchema.nullable().optional(), // C7: pauseReason
+    steers: z.array(PendingSteerSchema).optional(), withdrawn: z.array(MessageUuidSchema).optional(), // W1
+  }),
   'session.brokerItems': z.strictObject({ appSessionId: AppSessionIdSchema, items: z.array(AttentionItemSchema) }), // internal: main's attention service
   'session.operation': OperationEventSchema,
   'session.forgotten': z.strictObject({ appSessionId: AppSessionIdSchema }), // internal (M5 review): archived or forgotten, live or exited; main's attention service retires the session

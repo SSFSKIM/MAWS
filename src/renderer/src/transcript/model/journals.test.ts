@@ -177,12 +177,31 @@ describe('fixture gates through the model', () => {
     const state = stateOf('pass3', 'steer-next');
     const RUNNING = 'turn:fe091b0d-b28b-41a8-aed3-39585769623d';
     expect(state.order).toEqual([RUNNING]);
-    const rows = rowsOf(state); // closed and collapsed: the steer stays outside the work area
+    const rows = rowsOf(state); // closed and collapsed: the steer stays in view
     expect(ofKind(rows, 'divider').map((row) => [row.turnId, row.state])).toEqual([[RUNNING, 'completed']]);
     expect(ofKind(rows, 'user').map((row) => [row.id, row.turnId, row.steer, row.dropped])).toEqual([
       ['user:fe091b0d-b28b-41a8-aed3-39585769623d', RUNNING, false, false],
       ['user:42a15931-3c9a-4267-a6b2-09fa5697735d', RUNNING, true, false],
     ]);
+  });
+
+  // W1 (A2): the steer sits where the engine took it, between the 2nd and 3rd Bash calls (seq 69-70), as a persistent
+  // unit that splits the fold; collapsed, the turn reads prompt, divider, steer, answer.
+  it('pass3/steer-next: the steer bubble renders between the 2nd and 3rd Bash calls, and stays when the turn folds', () => {
+    const STEER = 'user:42a15931-3c9a-4267-a6b2-09fa5697735d';
+    const shape = (rows: Row[]) => rows.filter((row) => row.kind !== 'time' && row.kind !== 'error').map((row) =>
+      row.kind === 'group' ? `group:${row.cells.map((cell) => (cell.detail.kind === 'shell' ? cell.detail.command.replace('sleep 1 && echo ', '') : cell.toolName)).join(',')}` : row.kind === 'user' ? (row.id === STEER ? 'steer' : 'prompt') : row.kind === 'assistant_text' ? `${row.phase}:${row.markdown}` : row.kind);
+    expect(shape(rowsFor('pass3', 'steer-next'))).toEqual(['prompt', 'divider', 'group:1,2', 'steer', 'commentary:NEXT_OK', 'group:3,4,5,6,7,8', 'answer:COUNTED']);
+    expect(shape(rowsOf(stateOf('pass3', 'steer-next')))).toEqual(['prompt', 'divider', 'steer', 'answer:COUNTED']);
+  });
+
+  it('pass3/steer-next: written at seq 46 and not yet taken, the steer is a dimmed tail bubble reading Sends at the next step; taken at seq 71, it moves into the turn', () => {
+    const waiting = rowsOf(journalState('pass3', 'steer-next', 60));
+    const tail = waiting.at(-1);
+    expect(tail).toMatchObject({ kind: 'user', id: 'user:42a15931-3c9a-4267-a6b2-09fa5697735d', pending: 'next', steer: false, dropped: false });
+    const taken = ofKind(rowsOf(journalState('pass3', 'steer-next', 75)), 'user').find((row) => row.id === tail!.id);
+    expect(taken).toMatchObject({ steer: true });
+    expect(taken!.pending).toBeUndefined();
   });
 
   it('pass3/steer-next: COUNTED, followed by a MessageDisplay and a Stop hook (seq 230-237), is the answer, visible when the turn collapses (W1)', () => {

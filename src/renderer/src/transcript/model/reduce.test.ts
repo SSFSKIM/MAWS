@@ -713,8 +713,10 @@ describe('child traffic', () => {
     const state = applyEvents(createState(null, 'agent-1' as never), b.events);
     expect(state.order).toHaveLength(1);
     const list = rowsOf(withAllExpanded(state));
-    expect(kinds(list)).toEqual(['time', 'divider', 'group', 'assistant_text']); // the slice never closes its turn, so its group stays active
-    expect(find(list, 'group').cells[0].id).toBe('cell:c1');
+    // the slice never closes its turn; the answer after the read completes the read's group, which unwraps (W1: the
+    // answer is in the turn's event order, after the work it follows)
+    expect(kinds(list)).toEqual(['time', 'divider', 'cell', 'assistant_text']);
+    expect(find(list, 'cell').id).toBe('cell:c1');
   });
 });
 

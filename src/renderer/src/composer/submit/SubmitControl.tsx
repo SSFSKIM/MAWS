@@ -1,9 +1,9 @@
 // The submit control (C7 execution document, "Submit control and queue"): the primary button reads the decision's label
-// (Send, Queue, Steer, Stop, Resume, Run, Save to memory, Starting…) with its reason, or what it does when the label
+// (Send, Queue, Hold, Stop, Resume, Run, Save to memory, Starting…) with its reason, or what it does when the label
 // alone would not say (`!` while busy runs now, inside the turn), as the tooltip and description, a Stop beside it
-// while a turn runs under a message, and a caret menu with Queue, Steer and Interrupt and send while busy, each saying
-// what it does. It sits beside the editor and outside the composer key sink, so it is ordinary pane content for C5's
-// dispatcher. ⌥ held over the control, or while focus is in the box, turns Queue into Steer live.
+// while a turn runs under a message, and a caret menu with Queue, Hold until the turn ends and Send now while busy,
+// each saying what it does (W1). It sits beside the editor and outside the composer key sink, so it is ordinary pane
+// content for C5's dispatcher. ⌥ held over the control, or while focus is in the box, turns Queue into Hold live.
 import { DropdownMenu } from 'radix-ui';
 import type { SubmitDecision, SubmitMenuItem } from './submit-state';
 
@@ -21,7 +21,7 @@ const PRIMARY =
 const TONE: Record<SubmitDecision['primary'], string> = {
   send: 'bg-accent text-bg hover:opacity-90',
   queue: 'bg-accent text-bg hover:opacity-90',
-  steer: 'bg-accent text-bg hover:opacity-90',
+  hold: 'bg-accent text-bg hover:opacity-90',
   stop: 'bg-fg text-bg hover:opacity-90',
   resume: 'bg-accent text-bg hover:opacity-90',
 };
@@ -35,8 +35,8 @@ function tooltip(d: SubmitDecision, multiline: boolean): string {
       return 'Stop the running turn (⌘.)';
     case 'resume':
       return 'Resume the paused queue';
-    case 'steer':
-      return 'Adds this to the running turn at its next step (⌥Enter)';
+    case 'hold': // while a turn runs ⌥ makes it; idle with messages waiting it is what Enter does
+      return d.detail ? `${d.detail} (⌥Enter)` : `${d.label} (${multiline ? '⌘Enter' : 'Enter'})`;
     default:
       return `${d.detail ?? d.label} (${multiline ? '⌘Enter' : 'Enter'})`;
   }

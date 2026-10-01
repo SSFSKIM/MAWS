@@ -2,6 +2,7 @@
 // "Expansion state", "Revisable log", "Requests", "Receipts", "Bash rows", "Time separators"). Rows are derived per
 // turn from its retained events and memoised on (version, ui version); the flat list is the concatenation, with
 // loose rows placed after the turn they followed and time separators inserted by the thresholds in time.ts.
+import type { QueueEntry } from '@shared/engine/session-state-store';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, RequestId, TaskId, ToolUseId } from '@shared/graph/ids';
 import { MCP_TOOL, presentationOf, tableRowOf } from './classify';
@@ -94,6 +95,25 @@ function flatten(state: TranscriptState, before: Map<RowId, Row>, times: Map<Row
   return out;
 }
 
+// The rows of a turn that stay in view when its work area folds, in event order among its work (W1): a prompt the
+// engine took into the turn at its next tool boundary (a steer, at its delivery position, so it splits the work around
+// it, Codex's persistent unit), a hook that got in the way, and the answer. The divider folds everything else.
+export const isPersistentRow = (row: Row): boolean => row.kind === 'user' || (row.kind === 'assistant_text' && row.phase === 'answer') || (row.kind === 'error' && row.scope === 'hook');
+
+// W1: a message held in MAWS's queue until the running turn ends, as the dimmed bubble the transcript's tail shows
+// for it (Claude Desktop's pattern); it becomes its own turn when the queue releases it.
+export function heldRow(entry: Pick<QueueEntry, 'queueId' | 'content' | 'createdAt'>): RowOf<'user'> {
+  const text = userTextOf(entry.content);
+  return { id: rowId.held(entry.queueId), turnId: null, at: entry.createdAt, kind: 'user', messageUuid: null, text: text.text, attachments: text.attachments, placeholders: text.placeholders, lines: text.lines, editable: false, steer: false, dropped: false, pending: 'held' };
+}
+
+// W1: what the session's transcript shows around its derived rows: no bubble for a prompt held back into MAWS's queue
+// (the engine reports it cancelled, and it is not lost: it waits in the queue), and the held messages at the tail.
+export function withQueueTail(rows: Row[], withdrawn: ReadonlySet<string>, tail: readonly Row[]): Row[] {
+  const kept = withdrawn.size === 0 ? rows : rows.filter((row) => !(row.kind === 'user' && row.messageUuid !== null && withdrawn.has(row.messageUuid) && (row.dropped || row.pending !== undefined)));
+  return tail.length === 0 ? kept : [...kept, ...tail];
+}
+
 export function turnSummary(turn: TurnState): TurnSummary {
   return deriveTurn(turn, null).summary;
 }
@@ -155,7 +175,7 @@ type Item =
   | { kind: 'hook'; hookId: string }
   | { kind: 'request'; toolUseId: ToolUseId }
   | { kind: 'subagents'; group: SubagentGroup }
-  | { kind: 'steer'; row: RowOf<'user'> }; // a prompt folded into this turn: outside the work area, in event order with the answer
+  | { kind: 'steer'; row: RowOf<'user'> }; // a prompt folded into this turn: a persistent row at its delivery position (W1)
 
 interface SubagentGroup { id: RowId; at: string; apiMessageId: string | null; refs: SubagentRef[]; statuses: Map<TaskId, SubagentStatus>; lastTool: Map<TaskId, string | null>; phase: string | null }
 interface Pending { kind: 'question' | 'plan'; use: Event<'tool.use'>; answers: Record<string, string> | null; outcome: RowOf<'plan'>['outcome']; feedback: string | null; requestId: RequestId | null }
@@ -208,9 +228,17 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
     if (event.kind === 'command.lifecycle') openerDropped = true;
   }
   const dropped = (messageUuid: string | null) => messageUuid !== null && (retracted.has(messageUuid) || superseded.has(messageUuid));
+  // W1: a prompt waiting for the engine while another turn runs is a `next` steer (Enter while a turn runs); a `now`
+  // one waits only until the engine has stopped that turn. Its bubble sits at the tail, dimmed, until the engine takes
+  // it (the reducer re-derives a waiting turn when the running one closes).
+  const running = state?.current ?? null;
+  const waiting = state !== null && turn.state === 'open' && !turn.accepted && running !== null && running !== turn.id && (state.turns.get(running)?.accepted ?? false) && !openerDropped;
   const userRow = (event: Event<'user.message'>, id: RowId, editable: boolean, steer = false): RowOf<'user'> => {
     const text = userTextOf(event.content);
-    return { id, turnId: turn.id, at: event.at, kind: 'user', messageUuid: event.messageUuid, text: text.text, attachments: text.attachments, placeholders: text.placeholders, lines: text.lines, editable, steer, dropped: !steer && openerDropped };
+    return {
+      id, turnId: turn.id, at: event.at, kind: 'user', messageUuid: event.messageUuid, text: text.text, attachments: text.attachments, placeholders: text.placeholders, lines: text.lines, editable, steer, dropped: !steer && openerDropped,
+      ...(waiting && !steer && { pending: 'next' as const }),
+    };
   };
 
   const blockRow = (block: LiveBlock, at: string): Item | null => {
@@ -495,17 +523,20 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
   const WORK_ROWS = new Set<Row['kind']>(['subagent', 'agent_message', 'question', 'plan', 'request_slot', 'error']);
   const isWork = (item: (typeof resolved)[number]) => item.kind === 'cell' || (item.kind === 'row' && WORK_ROWS.has(item.row.kind) && !(item.row.kind === 'error' && item.row.severity === 'notice'));
   const lastWork = resolved.map(isWork).lastIndexOf(true);
-  const answer: Row[] = [];
-  const workItems: WorkItem[] = [];
+  // W1: one stream in event order. The rows that stay in view when the work area folds (isPersistentRow: a prompt the
+  // engine took into this turn, at its delivery position; a hook that got in the way; the answer) go through the group
+  // machine as rows, so a steer splits the work around it; everything else is the work area.
+  const ordered: WorkItem[] = [];
   resolved.forEach((item, i) => {
-    if (item.kind === 'steer' || item.kind === 'notice') answer.push(item.row); // folded prompts, hook notices and the answer in event order, outside the work area
-    else if (item.kind === 'text' && i > lastWork) answer.push({ ...item.row, phase: 'answer' });
-    else if (item.kind === 'text') workItems.push({ kind: 'text', row: { ...item.row, phase: 'commentary' } });
-    else if (item.kind === 'thinking' && i > lastWork) workItems.push({ kind: 'row', row: item.row }); // after the last tool use: a row, not a cell of the last group
-    else workItems.push(item);
+    if (item.kind === 'steer' || item.kind === 'notice') ordered.push({ kind: 'row', row: item.row });
+    else if (item.kind === 'text' && i > lastWork) ordered.push({ kind: 'row', row: { ...item.row, phase: 'answer' } });
+    else if (item.kind === 'text') ordered.push({ kind: 'text', row: { ...item.row, phase: 'commentary' } });
+    else if (item.kind === 'thinking' && i > lastWork) ordered.push({ kind: 'row', row: item.row }); // after the last tool use: a row, not a cell of the last group
+    else ordered.push(item);
   });
 
-  const workRows = groupItems(workItems, turn, ui, tools);
+  const allRows = groupItems(ordered, turn, ui, tools);
+  const workRows = allRows.filter((row) => !isPersistentRow(row));
   const cells = collectCells(workRows);
   const files = changedFiles(cells, turn);
   const summary = summaryOf(turn, cells, subagents, model);
@@ -523,9 +554,8 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
       id: rowId.divider(turn.id), turnId: turn.id, at: user?.at ?? turn.startedAt, kind: 'divider', state: dividerState, origin: turn.origin, startedAt: turn.startedAt, endedAt: turn.endedAt,
       toolCalls: summary.toolCalls, denied: denied.length, autoDenied: summary.autoDenied, firstDeniedCell: firstDenied, expanded, summary,
     });
-    if (expanded) rows.push(...workRows);
   }
-  rows.push(...answer);
+  rows.push(...(expanded ? allRows : allRows.filter(isPersistentRow))); // with no divider there is no work: every row is persistent
   if (files.length > 0) {
     rows.push({
       id: rowId.receipt(turn.id), turnId: turn.id, at: context.lastAt, kind: 'receipt', files, added: files.reduce((n, f) => n + f.added, 0), removed: files.reduce((n, f) => n + f.removed, 0),

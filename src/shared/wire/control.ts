@@ -141,7 +141,7 @@ export interface RenameSessionRequest { title: string; source?: string }
 export interface GenerateSessionTitleRequest { description: string; persist: boolean }
 export interface StopTaskRequest { task_id: string }
 export interface BackgroundTasksRequest { action?: string; task_id?: string }
-export interface CancelAsyncMessageRequest { uuid: string }
+export interface CancelAsyncMessageRequest { message_uuid: string } // W1: the engine reads `message_uuid` (2.1.283 cli.pretty.js 729935; pass3/steer-next-cancelled seq 32-36)
 export interface SetCwdRequest { path: string; trust_accepted?: boolean; trusted_directory?: string }
 export interface RewindConversationRequest { target_message_uuid: string; last_seen_user_message_uuid?: string; interrupt_if_running?: boolean }
 export interface RewindFilesRequest { user_message_id: string; dry_run?: boolean }

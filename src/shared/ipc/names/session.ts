@@ -3,7 +3,7 @@
 // added there adds its name here.
 export const commands = [
   'session.launch', 'session.status', 'session.events', 'session.stop', 'session.pendingRequest', 'session.catalog',
-  'session.send', 'session.steer', 'session.queue.list', 'session.queue.edit', 'session.queue.remove',
+  'session.send', 'session.steer', 'session.queue.hold' /* W1 */, 'session.queue.list', 'session.queue.edit', 'session.queue.remove',
   'session.queue.promote', 'session.queue.setPaused', 'session.interrupt', 'session.answer', 'session.bash',
   'session.memoryAppend', 'session.setPermissionMode', 'session.setModel', 'session.setEffort', 'session.setThinking',
   'session.applyFlagSettings', 'session.stopTask', 'session.rewind', 'session.rewindFiles', 'session.setCwd',

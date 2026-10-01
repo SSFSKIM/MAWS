@@ -11,10 +11,13 @@
 // `uncertain` head of a paused queue for the human to re-send or remove. Steer bypasses the queue with `priority:
 // 'now'` (or `'next'` on request). Every change is saved through the store before `onChange` fires. Releases and pauses are journaled as
 // `meta queue` rows and the queue's warnings as `meta notice` rows (the normaliser maps those to `notice.posted`).
+// W1: a `next` steer (Enter while a turn runs) is a pending steer until the engine starts it or drops it, published
+// with the queue so the composer can offer "Hold until the turn ends": `hold` withdraws it from the engine
+// (`cancel_async_message`, pass3/steer-next-cancelled) and appends it to the app queue, remembering its uuid.
 import { randomUUID } from 'node:crypto';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
-import { SendContentSchema, type QueueEntry, type QueuePauseReason, type QueueState, type SendContent, type SessionStateStore } from '@shared/engine/session-state-store';
+import { SendContentSchema, WITHDRAWN_MAX, type PendingSteer, type QueueEntry, type QueuePauseReason, type QueueState, type SendContent, type SessionStateStore } from '@shared/engine/session-state-store';
 import type { UserInputFrame } from '@shared/wire/frames';
 
 export const ACK_TIMEOUT_MS = 5_000;
@@ -32,6 +35,7 @@ export interface MessageQueueDeps {
   meta: (frame: Record<string, unknown>) => void; // journals a meta row (queue, notice) through the session's record path
   turnOpen: () => boolean; // the normaliser holds a main-lane turn open
   canWrite: () => boolean; // the process is ready
+  cancel: (messageUuid: MessageUuid) => Promise<boolean>; // W1: `cancel_async_message`; true when the engine withdrew the message from its queue
   onChange: (queue: QueueState) => void;
   log?: (message: string) => void;
   ackTimeoutMs?: number;
@@ -52,6 +56,8 @@ export class MessageQueue {
   private readonly ackTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly started = new Set<string>(); // queue ids whose submission the engine started
   private readonly saving = new Set<Promise<void>>(); // store saves not yet settled
+  private steers: PendingSteer[] = []; // W1: `next` steers written and not yet started or dropped, in write order
+  private withdrawn: MessageUuid[] = []; // W1: the steers held back into the app queue, the last WITHDRAWN_MAX
   private readonly log: (message: string) => void;
 
   constructor(private readonly deps: MessageQueueDeps) {
@@ -59,7 +65,8 @@ export class MessageQueue {
   }
 
   get state(): QueueState {
-    return structuredClone({ entries: this.entries, paused: this.paused, pauseReason: this.pauseReason }); // C7: pauseReason
+    // C7: pauseReason; W1: steers and withdrawn, present only when there are any (absent reads as none)
+    return structuredClone({ entries: this.entries, paused: this.paused, pauseReason: this.pauseReason, ...(this.steers.length > 0 && { steers: this.steers }), ...(this.withdrawn.length > 0 && { withdrawn: this.withdrawn }) });
   }
 
   // A turn is open, or an entry is `submitting`, or a `released` entry's turn has not ended.
@@ -87,6 +94,8 @@ export class MessageQueue {
     this.entries = loaded.entries;
     this.paused = loaded.paused;
     this.pauseReason = loaded.paused ? (loaded.pauseReason ?? null) : null; // C7
+    this.steers = []; // W1: a pending steer lived in the engine process that is gone
+    this.withdrawn = loaded.withdrawn ?? [];
     this.loaded = true;
     if (loaded.corrupt !== null) {
       // the state file was unreadable and kept aside: never a silent empty queue (M4 review)
@@ -178,7 +187,52 @@ export class MessageQueue {
     if (!this.deps.canWrite()) throw new QueueEntryError('the session is not ready');
     const uuid = randomUUID() as MessageUuid;
     await this.deps.write({ type: 'user', uuid, message: { role: 'user', content }, parent_tool_use_id: null, origin: { kind: 'human' }, priority: opts.priority ?? 'now' });
+    if (opts.priority === 'next') await this.pendingSteer(uuid, content);
     return { messageUuid: uuid };
+  }
+
+  // W1: a `next` steer written: pending until the engine starts or drops it (onLifecycle), and published. Its save is
+  // only an announcement (a pending steer is the engine's, so a lost save loses nothing).
+  private async pendingSteer(messageUuid: MessageUuid, content: SendContent): Promise<void> {
+    this.steers = [...this.steers, { messageUuid, content, createdAt: new Date().toISOString() }];
+    await this.persist().catch((error: unknown) => this.log(`pending steer not saved: ${messageOf(error)}`));
+  }
+
+  // W1: "Hold until the turn ends": the pending steer is withdrawn from the engine's queue and appended to the app
+  // queue, which releases it when the turn ends like any held message. Refused when the engine has already taken it
+  // (it was folded into the turn, or started) or answers that it had nothing to withdraw.
+  async hold(messageUuid: MessageUuid): Promise<QueueEntry> {
+    const steer = this.steers.find((s) => s.messageUuid === messageUuid);
+    if (!steer) throw new QueueEntryError('This message has already reached the running turn');
+    if (!this.deps.canWrite()) throw new QueueEntryError('the session is not ready');
+    // Named withdrawn before the cancel, so the engine's `cancelled` for it (which arrives before the answer) never reads
+    // as a message that was not sent; taken back if the engine had nothing to withdraw.
+    const without = () => (this.withdrawn = this.withdrawn.filter((u) => u !== messageUuid));
+    this.withdrawn = [...this.withdrawn, messageUuid].slice(-WITHDRAWN_MAX);
+    await this.persist().catch((error: unknown) => this.log(`hold not announced: ${messageOf(error)}`));
+    let cancelled: boolean;
+    try {
+      cancelled = await this.deps.cancel(messageUuid);
+    } catch (error) {
+      without();
+      await this.persist().catch(() => {});
+      throw error;
+    }
+    if (!cancelled) {
+      without();
+      await this.persist().catch(() => {});
+      throw new QueueEntryError('This message has already reached the running turn');
+    }
+    this.steers = this.steers.filter((s) => s.messageUuid !== messageUuid); // the engine's `cancelled` may have removed it already
+    const entry: QueueEntry = { queueId: randomUUID(), appSessionId: this.deps.appSessionId, content: steer.content, createdAt: new Date().toISOString(), state: 'queued', messageUuid: null, submittedAt: null, uncertain: false, steer: false };
+    this.entries.push(entry);
+    this.journal({ event: 'queue', action: 'hold', queueId: entry.queueId, messageUuid });
+    try {
+      await this.persist();
+    } catch (error) {
+      await this.storeFailed(entry, error); // kept in memory, the queue paused: nothing is lost
+    }
+    return structuredClone(entry);
   }
 
   // A queued entry steered out of the queue, durably (M4 review): persisted as a `submitting` steer before the write
@@ -206,8 +260,9 @@ export class MessageQueue {
       }
       throw error;
     }
-    // flushed: the steer is the engine's now and the entry leaves the app queue
+    // flushed: the steer is the engine's now and the entry leaves the app queue (W1: a `next` one as a pending steer)
     this.entries = this.entries.filter((e) => e !== entry);
+    if (opts.priority === 'next') this.steers = [...this.steers, { messageUuid: uuid, content: entry.content, createdAt: new Date().toISOString() }];
     await this.persist().catch((e: unknown) => this.log(`promoted entry's removal not saved (a restart recovers it as uncertain): ${messageOf(e)}`));
     return { messageUuid: uuid };
   }
@@ -219,6 +274,12 @@ export class MessageQueue {
   // (not paused, idle, ready): no turn.ended will come to release it; a `refused` drop pauses the queue instead. An interrupt pauses the queue first, so the drops it causes release nothing. Once started,
   // its turn.ended retires it.
   onLifecycle(event: Extract<SessionEvent, { kind: 'command.lifecycle' }>): void {
+    // W1: a pending steer ends at any lifecycle past `queued`: started (folded into the turn, or a turn of its own), or
+    // dropped (cancelled, discarded, refused)
+    if (event.state !== 'queued' && this.steers.some((s) => s.messageUuid === event.commandUuid)) {
+      this.steers = this.steers.filter((s) => s.messageUuid !== event.commandUuid);
+      this.persist().catch((error: unknown) => this.log(`pending steer's end not saved: ${messageOf(error)}`));
+    }
     const entry = this.entries.find((e) => e.state !== 'queued' && e.messageUuid === event.commandUuid);
     if (!entry) return; // a steer, the plan sequence's frames, or an entry already retired (a late `cancelled`)
     if (event.state === 'started') this.started.add(entry.queueId);
@@ -315,6 +376,7 @@ export class MessageQueue {
 
   private settleAfterExit(): void {
     this.started.clear(); // whatever the process started went with it
+    this.steers = []; // W1: and so did the engine's queue, pending steers in it
     const uncertain: QueueEntry[] = [];
     const kept: QueueEntry[] = [];
     for (const entry of this.entries) {

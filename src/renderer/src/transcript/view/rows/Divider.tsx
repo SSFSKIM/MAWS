@@ -7,7 +7,7 @@ import { Popover } from 'radix-ui';
 import { useEffect, useState } from 'react';
 import { ticks, useTranscriptStore, workingDurationMs, type TranscriptEntry } from '../../../stores/transcript';
 import { dividerCopy, turnSummaryCopy } from '../../model/copy';
-import { turnPhrases } from '../../model/derive';
+import { isPersistentRow, turnPhrases } from '../../model/derive';
 import type { CellId, Row, TurnId } from '../../model/rows';
 import { rowElementId, useTranscriptContext } from '../context';
 import { Chevron } from './parts';
@@ -31,15 +31,16 @@ function useDuration(row: DividerRowData, storeKey: string): number {
   return working ? (frozen ?? ms) : completedMs(row);
 }
 
-// The rows of an open work area: those after its divider up to the turn's answer (its folded prompts, the answer text,
-// the receipt; derive.ts places them after the work rows), time separators skipped.
+// The rows of an open work area: the turn's rows after its divider up to its receipt, without those that stay in view
+// when it folds (W1: a steer at its delivery position splits the work around it; derive.ts, isPersistentRow), time
+// separators skipped.
 function workAreaRowIds(rows: readonly Row[], divider: DividerRowData): string[] {
   const ids: string[] = [];
   for (let i = rows.findIndex((candidate) => candidate.id === divider.id) + 1; i > 0 && i < rows.length; i += 1) {
     const row = rows[i];
     if (row.kind === 'time') continue;
-    if (row.turnId !== divider.turnId || row.kind === 'user' || row.kind === 'receipt' || (row.kind === 'assistant_text' && row.phase === 'answer')) break;
-    ids.push(row.id);
+    if (row.turnId !== divider.turnId || row.kind === 'receipt') break;
+    if (!isPersistentRow(row)) ids.push(row.id);
   }
   return ids;
 }

@@ -128,7 +128,7 @@ describe("composer DOM under C5's dispatcher", () => {
     for (const outside of [primary(), within(composerOf(0)).getByRole('toolbar', { name: 'Composer tools' }), within(composerOf(0)).getByRole('button', { name: 'Add a directory' })]) expect(sinks[0].contains(outside)).toBe(false);
   });
 
-  it('sends on Enter, steers with priority next on ⌥Enter during a turn, and interrupts and sends with now from the caret menu', async () => {
+  it('sends on Enter; during a turn Enter steers with priority next, ⌥Enter holds in the app queue, and Send now steers with now (W1)', async () => {
     live(A);
     mount([{ index: 0, id: A }]);
     await type('hello');
@@ -150,19 +150,44 @@ describe("composer DOM under C5's dispatcher", () => {
     act(() => editorOf().focus());
     await waitFor(() => expect(primary().textContent).toBe('Queue'));
     await act(async () => void editorOf().dispatchEvent(new KeyboardEvent('keydown', { key: 'Alt', altKey: true, bubbles: true })));
-    await waitFor(() => expect(primary().textContent).toBe('Steer')); // live while ⌥ is down with focus in the box
+    await waitFor(() => expect(primary().textContent).toBe('Hold')); // live while ⌥ is down with focus in the box
     await act(async () => void editorOf().dispatchEvent(new KeyboardEvent('keyup', { key: 'Alt', altKey: false, bubbles: true })));
     await waitFor(() => expect(primary().textContent).toBe('Queue'));
-    await key(editorOf(), { key: 'Enter', altKey: true });
+    await key(editorOf(), { key: 'Enter' });
     await waitFor(() => expect(invoked('session.steer')).toEqual([{ appSessionId: A, content: 'fold this in', priority: 'next' }]));
+
+    await type('after the turn');
+    act(() => editorOf().focus());
+    await key(editorOf(), { key: 'Enter', altKey: true });
+    await waitFor(() => expect(invoked('session.send')).toHaveLength(3)); // the app queue holds it until the turn ends
+    expect(invoked('session.send')[2]).toEqual({ appSessionId: A, content: 'after the turn' });
+    await act(async () => void editorOf().dispatchEvent(new KeyboardEvent('keyup', { key: 'Alt', altKey: false, bubbles: true })));
 
     await type('stop and do this');
     const user = userEvent.setup();
     await user.click(within(composerOf(0)).getByRole('button', { name: 'More ways to send' }));
-    await user.click(await screen.findByRole('menuitem', { name: /Interrupt and send/ }));
+    await user.click(await screen.findByRole('menuitem', { name: /Send now/ }));
     await waitFor(() => expect(invoked('session.steer')).toHaveLength(2));
     expect(invoked('session.steer')[1]).toEqual({ appSessionId: A, content: 'stop and do this', priority: 'now' });
-    expect(invoked('session.history.append').map((i) => (i as { display: string }).display)).toEqual(['hello', 'idle steer', 'fold this in', 'stop and do this']);
+    expect(invoked('session.history.append').map((i) => (i as { display: string }).display)).toEqual(['hello', 'idle steer', 'fold this in', 'after the turn', 'stop and do this']);
+  });
+
+  it('Esc while a turn runs interrupts and sends the held head now, or stops when nothing is held; it leaves Esc alone when idle (W1)', async () => {
+    live(A);
+    mount([{ index: 0, id: A }]);
+    await waitFor(() => expect(fake.pending('session.queue.list')).toBe(0));
+    act(() => editorOf().focus());
+    await key(editorOf(), { key: 'Escape' });
+    expect(invoked('session.interrupt')).toEqual([]); // idle: not the composer's
+    busy(A);
+    await key(editorOf(), { key: 'Escape' });
+    await waitFor(() => expect(invoked('session.interrupt')).toEqual([{ appSessionId: A, cancelEngineQueued: false }]));
+    const uncertain: QueueEntry = { queueId: 'q-0', appSessionId: A, content: 'maybe sent', createdAt: '2026-09-29T10:00:00.000Z', state: 'queued', messageUuid: null, submittedAt: null, uncertain: true, steer: false };
+    const held: QueueEntry = { ...uncertain, queueId: 'q-1', content: 'later', uncertain: false };
+    act(() => fake.event('session.queue', { appSessionId: A, entries: [uncertain, held], paused: false, pauseReason: null }));
+    await key(editorOf(), { key: 'Escape' });
+    await waitFor(() => expect(invoked('session.queue.promote')).toEqual([{ appSessionId: A, queueId: 'q-1', priority: 'now' }])); // the uncertain one waits for the human
+    expect(invoked('session.interrupt')).toHaveLength(1);
   });
 
   it('reads Stop with an empty editor and Queue with text while a first entry is submitting and no turn is open yet', async () => {
