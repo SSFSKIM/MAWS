@@ -67,16 +67,6 @@
     "turnId": "turn:99c0ffdd-c6a6-4e5f-9056-2ed2d88ae05a"
   },
   {
-    "at": "2026-09-30T09:14:03.995Z",
-    "durationMs": 710,
-    "id": "think:msg_011CfZNKgWUWGmCJResAwmW8:0",
-    "kind": "thinking",
-    "live": false,
-    "messageUuid": "30543c39-3f21-477a-9d06-346d987d170b",
-    "text": "",
-    "turnId": "turn:99c0ffdd-c6a6-4e5f-9056-2ed2d88ae05a"
-  },
-  {
     "agents": [
       {
         "agentId": "ab46b2438028eda01",

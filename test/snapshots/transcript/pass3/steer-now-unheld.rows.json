@@ -208,18 +208,6 @@
     "turnId": "turn:55744f27-09fb-4141-89d5-5f0adfddffca"
   },
   {
-    "at": "2026-09-29T01:50:08.602Z",
-    "blockIndex": 0,
-    "id": "text:msg_011CfWtfR7ZrKG5EpxVsauvm:0",
-    "kind": "assistant_text",
-    "live": false,
-    "markdown": "\nto human\n\nSTEERED\n\nSTEERED\n",
-    "messageUuid": "74a52dd2-2657-4c9d-a6bd-815d379392d0",
-    "model": "claude-sonnet-5-5",
-    "phase": "commentary",
-    "turnId": "turn:55744f27-09fb-4141-89d5-5f0adfddffca"
-  },
-  {
     "activeLabel": null,
     "at": "2026-09-29T01:50:08.602Z",
     "cells": [
@@ -297,6 +285,18 @@
     "turnId": "turn:55744f27-09fb-4141-89d5-5f0adfddffca"
   },
   {
+    "at": "2026-09-29T01:50:08.602Z",
+    "blockIndex": 0,
+    "id": "text:msg_011CfWtfR7ZrKG5EpxVsauvm:0",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "\nto human\n\nSTEERED\n\nSTEERED\n",
+    "messageUuid": "74a52dd2-2657-4c9d-a6bd-815d379392d0",
+    "model": "claude-sonnet-5-5",
+    "phase": "answer",
+    "turnId": "turn:55744f27-09fb-4141-89d5-5f0adfddffca"
+  },
+  {
     "at": "2026-09-29T01:50:07.831Z",
     "attachments": [],
     "dropped": false,
@@ -354,18 +354,6 @@
       }
     },
     "toolCalls": 0,
-    "turnId": "turn:6ebd79ba-a46b-4442-ac6a-716532177882"
-  },
-  {
-    "at": "2026-09-29T01:50:09.409Z",
-    "blockIndex": 0,
-    "id": "text:msg_011CfWtfUqnrsQjou7zZCsxx:0",
-    "kind": "assistant_text",
-    "live": false,
-    "markdown": "\nto human\n\nAFTER\n\nAFTER\n",
-    "messageUuid": "16b0fbbd-5639-45a8-98e8-3e4190077dde",
-    "model": "claude-sonnet-5-5",
-    "phase": "commentary",
     "turnId": "turn:6ebd79ba-a46b-4442-ac6a-716532177882"
   },
   {
@@ -443,6 +431,18 @@
     "kind": "group",
     "state": "completed",
     "summary": "Ran 2 hooks",
+    "turnId": "turn:6ebd79ba-a46b-4442-ac6a-716532177882"
+  },
+  {
+    "at": "2026-09-29T01:50:09.409Z",
+    "blockIndex": 0,
+    "id": "text:msg_011CfWtfUqnrsQjou7zZCsxx:0",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "\nto human\n\nAFTER\n\nAFTER\n",
+    "messageUuid": "16b0fbbd-5639-45a8-98e8-3e4190077dde",
+    "model": "claude-sonnet-5-5",
+    "phase": "answer",
     "turnId": "turn:6ebd79ba-a46b-4442-ac6a-716532177882"
   },
   {

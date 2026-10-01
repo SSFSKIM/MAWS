@@ -198,16 +198,6 @@
     "turnId": "turn:e4fd229a-e799-4d3d-88cb-7ffe1dfd542f"
   },
   {
-    "at": "2026-09-29T15:34:00.508Z",
-    "durationMs": 0,
-    "id": "think:msg_011CfXyVBdkvBvCCqkQHqqoF:0",
-    "kind": "thinking",
-    "live": false,
-    "messageUuid": "88a27eca-a460-45d1-a531-788b7fb0fe3a",
-    "text": "",
-    "turnId": "turn:e4fd229a-e799-4d3d-88cb-7ffe1dfd542f"
-  },
-  {
     "at": "2026-09-29T15:34:00.510Z",
     "blockIndex": 1,
     "id": "text:msg_011CfXyVBdkvBvCCqkQHqqoF:1",
@@ -335,16 +325,6 @@
       }
     },
     "toolCalls": 0,
-    "turnId": "turn:1b21fa19-adda-4fd4-9a79-e6cd27f88468"
-  },
-  {
-    "at": "2026-09-29T15:34:11.384Z",
-    "durationMs": 898,
-    "id": "think:msg_011CfXyVztNtRDdwg7fjN2zk:0",
-    "kind": "thinking",
-    "live": false,
-    "messageUuid": "aaf01378-994e-41c0-83ab-d784c7f40c66",
-    "text": "",
     "turnId": "turn:1b21fa19-adda-4fd4-9a79-e6cd27f88468"
   },
   {

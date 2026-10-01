@@ -187,6 +187,14 @@ describe('fixture gates through the model', () => {
     ]);
   });
 
+  it('pass3/steer-next: COUNTED, followed by a MessageDisplay and a Stop hook (seq 230-237), is the answer, visible when the turn collapses (W1)', () => {
+    const state = stateOf('pass3', 'steer-next');
+    const answer = ofKind(rowsOf(state), 'assistant_text');
+    expect(answer.map((row) => [row.markdown, row.phase])).toEqual([['COUNTED', 'answer']]);
+    const expanded = ofKind(rowsFor('pass3', 'steer-next'), 'assistant_text');
+    expect(expanded.find((row) => row.markdown === 'COUNTED')).toMatchObject({ phase: 'answer' });
+  });
+
   it('pass3/steer-now: the now prompt preempts the running turn (stopped) and runs as its own turn', () => {
     const state = stateOf('pass3', 'steer-now');
     expect(state.order).toHaveLength(3);

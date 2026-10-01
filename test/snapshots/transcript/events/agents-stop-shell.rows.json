@@ -62,36 +62,8 @@
   },
   {
     "activeLabel": "Thinking",
-    "at": "2026-09-28T10:02:23.123Z",
+    "at": "2026-09-28T10:02:23.408Z",
     "cells": [
-      {
-        "agent": null,
-        "category": "other",
-        "classification": {
-          "category": "other",
-          "denial": null,
-          "groupable": true,
-          "hidden": true,
-          "humanDecision": false,
-          "safeguard": "not_evaluated",
-          "startsGroup": false,
-          "subagentLifecycle": null
-        },
-        "detail": {
-          "durationMs": 0,
-          "kind": "thinking",
-          "text": ""
-        },
-        "endedAt": "2026-09-28T10:02:23.123Z",
-        "expanded": true,
-        "id": "cell:think:msg_011CfVePVKV4XyvvXPKuSCXi:0",
-        "label": "Thought for 0s",
-        "paths": [],
-        "startedAt": "2026-09-28T10:02:23.123Z",
-        "status": "done",
-        "toolName": "thinking",
-        "toolUseId": null
-      },
       {
         "agent": null,
         "category": "commands",
@@ -131,7 +103,7 @@
     ],
     "expanded": true,
     "icon": "commands",
-    "id": "group:cell:think:msg_011CfVePVKV4XyvvXPKuSCXi:0",
+    "id": "group:cell:toolu_018tRuD61WcQz8FakAbzkFcE",
     "kind": "group",
     "state": "active",
     "summary": "Ran `sleep 30 && echo BG_DONE > bg.txt`",

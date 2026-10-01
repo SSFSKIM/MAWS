@@ -191,6 +191,26 @@ describe('synthetic journals', () => {
     expect(ofKind(rows, 'user')[0]).toMatchObject({ dropped: true, steer: false });
   });
 
+  // W1 (A1): the owner's journal shape for shot 11. MessageDisplay and Stop hooks follow every final text, so a rule that
+  // counted them as work classed the answer as commentary, muted and folded away; and an empty thinking block opened
+  // onto nothing.
+  it('transcript/hooks-after-answer: the final text after a trailing MessageDisplay and Stop hook is the answer, in its display form, visible when collapsed', () => {
+    const state = stateOf(journal('hooks-after-answer'));
+    expect(state.order).toHaveLength(2);
+    const collapsed = rowsOf(state);
+    const answers = ofKind(collapsed, 'assistant_text');
+    expect(answers.map((row) => [row.turnId, row.phase, row.markdown])).toEqual([
+      [state.order[0], 'answer', '\nto human\n\nDoing fine and ready to work.\n\nNothing is in progress.\n'],
+      [state.order[1], 'answer', '\nto human\n\nIt is 10:00.\n'],
+    ]);
+    const expanded = rowsOf(withAllExpanded(state));
+    expect(ofKind(expanded, 'assistant_text').every((row) => row.phase === 'answer')).toBe(true);
+    expect(ofKind(expanded, 'thinking')).toEqual([]); // the signature-only block has nothing to disclose
+    // The answer comes after the turn's work, as the last row of its turn.
+    const second = inTurn(expanded, state.order[1]);
+    expect(second.at(-1)).toMatchObject({ kind: 'assistant_text', phase: 'answer' });
+  });
+
   it('transcript/math-and-diagrams: the answer carries the math and the mermaid fence verbatim', () => {
     const answer = ofKind(rowsFor(journal('math-and-diagrams')), 'assistant_text')[0].markdown;
     expect(answer).toContain('$$\n\\frac{1}{60}');

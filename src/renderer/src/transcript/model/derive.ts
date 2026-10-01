@@ -217,6 +217,8 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
     if (dropped(block.messageUuid)) return null;
     if (block.blockType === 'text') return { kind: 'text', row: { id: block.rowId, turnId: turn.id, at, kind: 'assistant_text', messageUuid: block.messageUuid, blockIndex: block.blockIndex, markdown: block.buffer, live, phase: 'answer', model: block.model } };
     if (block.blockType === 'thinking') {
+      // A completed thinking block with no text (a signature-only block) has nothing to disclose: no row (W1).
+      if (!live && block.buffer.trim() === '') return null;
       const durationMs = block.completedAt !== null && block.markerEventId !== null ? Date.parse(block.completedAt) - Date.parse(at) : null;
       return { kind: 'thinking', row: { id: block.rowId, turnId: turn.id, at, kind: 'thinking', messageUuid: block.messageUuid, text: block.buffer, live, durationMs } };
     }
@@ -480,9 +482,13 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
         resolved.push(item);
     }
   }
-  // Text blocks after the last piece of work are the answer, outside the work area; earlier ones are commentary.
+  // Text blocks after the last piece of work are the answer, outside the work area; earlier ones are commentary. A hook
+  // run and a notice are not the model's work: under MessageDisplay and Stop hooks every final text is followed by hook
+  // events (pass3/steer-next seq 230-237), and counting them would class the answer as commentary (W1).
   const WORK_ROWS = new Set<Row['kind']>(['subagent', 'agent_message', 'question', 'plan', 'request_slot', 'error']);
-  const lastWork = resolved.map((item) => item.kind === 'cell' || (item.kind === 'row' && WORK_ROWS.has(item.row.kind))).lastIndexOf(true);
+  const isWork = (item: (typeof resolved)[number]) =>
+    (item.kind === 'cell' && item.cell.toolName !== 'hook') || (item.kind === 'row' && WORK_ROWS.has(item.row.kind) && !(item.row.kind === 'error' && item.row.severity === 'notice'));
+  const lastWork = resolved.map(isWork).lastIndexOf(true);
   const answer: Row[] = [];
   const workItems: WorkItem[] = [];
   resolved.forEach((item, i) => {

@@ -11,6 +11,7 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionDigest } from '@shared/ipc/schema';
 import type { EngineSessionStatus } from '@shared/engine/status';
+import { stripAnsi } from '@shared/wire/ansi';
 
 export const SEEN_WINDOW = 2_000;
 const LAST_LINE_MAX = 160;
@@ -53,9 +54,11 @@ export function activityForTool(toolName: string, toolInput: unknown): string {
   }
 }
 
+// The first non-blank line of a text block, ANSI stripped (a MessageDisplay hook's display form carries colour codes,
+// which the transcript strips too; W1).
 function firstLine(block: { type: string } & Record<string, unknown>): string | null {
   if (block.type !== 'text') return null;
-  const line = text(block.text).split('\n').find((candidate) => candidate.trim().length > 0);
+  const line = stripAnsi(text(block.text)).split('\n').find((candidate) => candidate.trim().length > 0);
   return line === undefined ? null : line.trim().slice(0, LAST_LINE_MAX);
 }
 

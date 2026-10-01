@@ -393,16 +393,6 @@
     "turnId": "turn:1b740363-a57a-473a-97a1-72a75a272cc8"
   },
   {
-    "at": "2026-09-29T01:44:55.447Z",
-    "durationMs": 823,
-    "id": "think:msg_011CfWtGH5yLt6S5q2pRsfgW:0",
-    "kind": "thinking",
-    "live": false,
-    "messageUuid": "8f148b64-2a32-4f95-b0b2-8709bba784e0",
-    "text": "",
-    "turnId": "turn:1b740363-a57a-473a-97a1-72a75a272cc8"
-  },
-  {
     "at": "2026-09-29T01:44:56.271Z",
     "blockIndex": 1,
     "id": "text:msg_011CfWtGH5yLt6S5q2pRsfgW:1",

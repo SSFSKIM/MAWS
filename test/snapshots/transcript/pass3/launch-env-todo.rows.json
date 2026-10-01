@@ -226,16 +226,6 @@
     "turnId": "turn:1d46edae-31c0-471e-b7b4-9c8b3c93acf1"
   },
   {
-    "at": "2026-09-30T09:14:35.278Z",
-    "durationMs": 0,
-    "id": "think:msg_011CfZNMwwycSXcT8rBtk9tS:0",
-    "kind": "thinking",
-    "live": false,
-    "messageUuid": "5ae6e1cd-f877-4002-a5f0-02a157f94379",
-    "text": "",
-    "turnId": "turn:1d46edae-31c0-471e-b7b4-9c8b3c93acf1"
-  },
-  {
     "at": "2026-09-30T09:14:35.279Z",
     "blockIndex": 1,
     "id": "text:msg_011CfZNMwwycSXcT8rBtk9tS:1",

@@ -183,6 +183,11 @@ describe('digest fold', () => {
     expect(run([ev('turn.ended', { isEchoReceipt: true }), ev('user.message', { origin: 'bash_echo' })], during)).toEqual(during);
   });
 
+  it('takes the summary line from a MessageDisplay hook’s display form with its ANSI colour codes stripped (W1)', () => {
+    const shown = run([ev('turn.started', {}), ev('assistant.block.complete', { block: { type: 'text', text: '\n\u001b[1;36mto human\u001b[0m\n\nDoing fine.\n' } })]);
+    expect(shown.lastAssistantLine).toBe('to human');
+  });
+
   it('counts a child’s request as blocking the session', () => {
     expect(run([ev('permission.requested', CHILD)]).pendingRequests).toBe(1);
     expect(run([ev('subagent.started', CHILD)]).childAgents).toEqual({ active: 0, done: 0 });

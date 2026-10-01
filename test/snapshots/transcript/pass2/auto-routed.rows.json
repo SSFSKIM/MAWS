@@ -67,16 +67,6 @@
     "turnId": "turn:a39f5b3a-bb46-424e-be15-f04a504b8791"
   },
   {
-    "at": "2026-09-28T09:56:30.985Z",
-    "durationMs": -21,
-    "id": "think:msg_011CfVdwWm5uxew5RAFxei1j:0",
-    "kind": "thinking",
-    "live": false,
-    "messageUuid": "77d9b485-f360-46cc-a511-cd9c7a513022",
-    "text": "",
-    "turnId": "turn:a39f5b3a-bb46-424e-be15-f04a504b8791"
-  },
-  {
     "agent": null,
     "at": "2026-09-28T09:56:31.351Z",
     "category": "commands",
@@ -250,62 +240,6 @@
     "placeholders": [],
     "steer": false,
     "text": "Use Bash to run exactly: git push --force origin main. Do not retry or run anything else. If it is blocked or fails, reply BLOCKED.",
-    "turnId": "turn:427ddfed-d47a-43db-81b3-f6f7d6588f1c"
-  },
-  {
-    "at": "2026-09-28T09:56:42.157Z",
-    "autoDenied": 0,
-    "denied": 0,
-    "endedAt": "2026-09-28T09:56:46.853Z",
-    "expanded": true,
-    "firstDeniedCell": null,
-    "id": "divider:turn:427ddfed-d47a-43db-81b3-f6f7d6588f1c",
-    "kind": "divider",
-    "origin": "human",
-    "startedAt": "2026-09-28T09:56:42.158Z",
-    "state": "completed",
-    "summary": {
-      "autoDenied": 0,
-      "byCategory": {
-        "commands": 0,
-        "exploration": 0,
-        "files": 0,
-        "mcp": 0,
-        "other": 0,
-        "skills": 0,
-        "web": 0
-      },
-      "childAgents": 0,
-      "costUsd": 0.148292,
-      "denials": [],
-      "durationMs": 4694,
-      "model": "claude-sonnet-5",
-      "safeguard": {
-        "flagged": 0,
-        "notEvaluated": 0,
-        "reviewed": 0
-      },
-      "terminalReason": "completed",
-      "toolCalls": 0,
-      "usage": {
-        "cacheCreationInputTokens": 56,
-        "cacheReadInputTokens": 29302,
-        "inputTokens": 2,
-        "outputTokens": 321,
-        "thinkingTokens": 198
-      }
-    },
-    "toolCalls": 0,
-    "turnId": "turn:427ddfed-d47a-43db-81b3-f6f7d6588f1c"
-  },
-  {
-    "at": "2026-09-28T09:56:43.942Z",
-    "durationMs": 1441,
-    "id": "think:msg_011CfVdxXVm9F3ZPt81sZJxR:0",
-    "kind": "thinking",
-    "live": false,
-    "messageUuid": "e559f051-ece6-418c-95df-b32de94990a0",
-    "text": "",
     "turnId": "turn:427ddfed-d47a-43db-81b3-f6f7d6588f1c"
   },
   {

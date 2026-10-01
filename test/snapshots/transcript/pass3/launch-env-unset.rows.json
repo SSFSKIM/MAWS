@@ -67,16 +67,6 @@
     "turnId": "turn:b0e98d89-ae86-45e7-b30c-e6e10592bf94"
   },
   {
-    "at": "2026-09-30T09:13:18.008Z",
-    "durationMs": 160,
-    "id": "think:msg_011CfZNG9hFLLp2s545BKkkU:0",
-    "kind": "thinking",
-    "live": false,
-    "messageUuid": "dcbc8487-337f-40de-860b-180443d8a07b",
-    "text": "",
-    "turnId": "turn:b0e98d89-ae86-45e7-b30c-e6e10592bf94"
-  },
-  {
     "agents": [
       {
         "agentId": "a3cdc0225aca8f2dd",
@@ -94,16 +84,6 @@
     "overflow": 0,
     "sentence": "List files in repo finished",
     "status": "finished",
-    "turnId": "turn:b0e98d89-ae86-45e7-b30c-e6e10592bf94"
-  },
-  {
-    "at": "2026-09-30T09:13:28.111Z",
-    "durationMs": 0,
-    "id": "think:msg_011CfZNGweESkzZidouN2Jm8:0",
-    "kind": "thinking",
-    "live": false,
-    "messageUuid": "b00f343d-61f9-4001-9844-e5654f25cd2e",
-    "text": "",
     "turnId": "turn:b0e98d89-ae86-45e7-b30c-e6e10592bf94"
   },
   {

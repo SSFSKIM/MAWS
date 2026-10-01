@@ -208,18 +208,6 @@
     "turnId": "turn:e80149ac-ba3a-486a-8d42-b07a6f987698"
   },
   {
-    "at": "2026-09-29T02:22:40.663Z",
-    "blockIndex": 0,
-    "id": "text:msg_011CfWw9L3y3VVJ5PD4BcXPi:0",
-    "kind": "assistant_text",
-    "live": false,
-    "markdown": "STEERED",
-    "messageUuid": "c33d76b8-24d4-4a84-8060-7965e1f19547",
-    "model": "claude-sonnet-5-5",
-    "phase": "commentary",
-    "turnId": "turn:e80149ac-ba3a-486a-8d42-b07a6f987698"
-  },
-  {
     "activeLabel": null,
     "at": "2026-09-29T02:22:40.663Z",
     "cells": [
@@ -297,6 +285,18 @@
     "turnId": "turn:e80149ac-ba3a-486a-8d42-b07a6f987698"
   },
   {
+    "at": "2026-09-29T02:22:40.663Z",
+    "blockIndex": 0,
+    "id": "text:msg_011CfWw9L3y3VVJ5PD4BcXPi:0",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "STEERED",
+    "messageUuid": "c33d76b8-24d4-4a84-8060-7965e1f19547",
+    "model": "claude-sonnet-5-5",
+    "phase": "answer",
+    "turnId": "turn:e80149ac-ba3a-486a-8d42-b07a6f987698"
+  },
+  {
     "at": "2026-09-29T02:22:40.959Z",
     "attachments": [],
     "dropped": false,
@@ -354,18 +354,6 @@
       }
     },
     "toolCalls": 0,
-    "turnId": "turn:03797d66-6388-4e77-beb2-6f0007014054"
-  },
-  {
-    "at": "2026-09-29T02:22:41.871Z",
-    "blockIndex": 0,
-    "id": "text:msg_011CfWw9QwQLbHsJpHdCPr43:0",
-    "kind": "assistant_text",
-    "live": false,
-    "markdown": "AFTER",
-    "messageUuid": "76ec7093-1c1a-4399-9177-0ab22e15a75c",
-    "model": "claude-sonnet-5-5",
-    "phase": "commentary",
     "turnId": "turn:03797d66-6388-4e77-beb2-6f0007014054"
   },
   {
@@ -443,6 +431,18 @@
     "kind": "group",
     "state": "completed",
     "summary": "Ran 2 hooks",
+    "turnId": "turn:03797d66-6388-4e77-beb2-6f0007014054"
+  },
+  {
+    "at": "2026-09-29T02:22:41.871Z",
+    "blockIndex": 0,
+    "id": "text:msg_011CfWw9QwQLbHsJpHdCPr43:0",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "AFTER",
+    "messageUuid": "76ec7093-1c1a-4399-9177-0ab22e15a75c",
+    "model": "claude-sonnet-5-5",
+    "phase": "answer",
     "turnId": "turn:03797d66-6388-4e77-beb2-6f0007014054"
   },
   {

@@ -8,7 +8,7 @@ import type { AgentId, ApiMessageId, EventId, MessageUuid, RequestId, SessionId,
 import { toolUseOf } from '@shared/graph/ids';
 import { rowId, turnId as turnIdOf } from './keys';
 import type { CellDetail, Row, RowId, Spill, SubagentRef, SubagentStatus, ToolCategory, TurnId } from './rows';
-import { appendStripped, stripAnsi } from './ansi';
+import { appendStripped, stripAnsi } from '@shared/wire/ansi';
 import { isInterruptionMarker, isLocalCommand } from './user-text';
 
 type Event<K extends SessionEvent['kind']> = Extract<SessionEvent, { kind: K }>;
