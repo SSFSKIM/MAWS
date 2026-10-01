@@ -1,7 +1,7 @@
 // The compact frame (C7 execution document, "Composer frame", §5.4 as amended by the owner's ruling and sizing
-// correction, D-20 after Claude Desktop): the chip row above the box; the attachment strip when there are attachments;
-// the box holding only the editor and the submit control at its right (one line at rest, growing to a cap, then the
-// editor scrolls); the toolbar below the box, outside its border. Nothing around it: no heading, no hint line. The
+// correction, D-20 after Claude Desktop, and as amended 2026-10-01 for W2 after Codex): the chip row above the box; the
+// attachment strip when there are attachments; the box holding only the editor and the submit control at its right
+// (44px at rest, growing to a quarter of the window, then the editor scrolls); the toolbar below the box, outside it. Nothing around it: no heading, no hint line. The
 // same component sits centred on an unstarted session and docked under the transcript (C5 places it); it fills the
 // column C5 puts it in, the transcript's own (W2), and caps nothing itself.
 // A docked card (a request, or C10's trust and relay-down cards) takes the place of the draft's parts, the attachment
@@ -35,9 +35,11 @@ export function Frame({ bindings, cwd, dirty, attachments, editorHandle, editor,
       {docked}
       <div data-composer-draft hidden={isDocked} className="flex min-w-0 flex-col gap-1">
         <AttachmentStrip attachments={attachments} onRemove={(id) => editorHandle.current?.removeAttachment(id)} />
-        <div data-composer-box className="flex min-w-0 items-end gap-2 rounded-xl border border-border-strong bg-bg-raised py-1.5 pr-1.5 pl-2.5 focus-within:border-accent">
-          <div className="min-w-0 flex-1 py-0.5">{editor}</div>
-          {submit}
+        {/* W2 (C1, Codex's): 22px corners and the faint shadow, no border; 44px at rest, the editor's 20px line inside
+            12px above and below, the submit control 8px in from the box's foot */}
+        <div data-composer-box className="flex min-h-11 min-w-0 items-end gap-2 rounded-2xl bg-bg-raised pr-2 pl-3 shadow-composer">
+          <div className="min-w-0 flex-1 py-3">{editor}</div>
+          <div className="mb-2 shrink-0">{submit}</div>
         </div>
         <Toolbar bindings={bindings} cwd={cwd} editor={editorHandle} onOpen={() => onOpen?.('models')} />
       </div>

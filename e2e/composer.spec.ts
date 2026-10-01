@@ -741,7 +741,7 @@ const geometry = (locator: ReturnType<Page['locator']>) =>
 // B1 (charter §6 as amended 2026-10-01): the transcript's rows and the composer frame share one column, Codex's. In a pane
 // wider than the column both sit at its 768px cap with 16px inside, so the frame is exactly the 736px of text; the prose
 // is 14px at a 22.75px pitch.
-test('W2: a transcript row and the composer frame share one column, and the prose is 14px', async ({ editor }) => {
+test('W2: the shared column, the 14px prose, Codex’s bubble and Codex’s composer box', async ({ editor }) => {
   const { page } = editor;
   const id = 'w2-column';
   await openComposerPage(page);
@@ -798,5 +798,26 @@ test('W2: a transcript row and the composer frame share one column, and the pros
   const actionsBox = (await overlay.boundingBox())!;
   const bubbleBox = (await bubble.boundingBox())!;
   expect(actionsBox.x + actionsBox.width).toBeLessThanOrEqual(bubbleBox.x); // beside the bubble, not over it
+
+  // C1: Codex's box. 44px at rest with 22px corners and the faint shadow; the editor grows to a quarter of the window,
+  // then scrolls inside it.
+  const box = p.locator('[data-composer-box]');
+  expect((await box.boundingBox())!.height).toBe(44);
+  await expect(box).toHaveCSS('border-top-left-radius', '22px');
+  expect(await box.evaluate((el) => getComputedStyle(el).boxShadow)).not.toBe('none');
+  await messageIn(page, 0).click();
+  for (let i = 0; i < 40; i++) {
+    await page.keyboard.type(`line ${i + 1}`);
+    await page.keyboard.press('Shift+Enter');
+  }
+  const grown = await messageIn(page, 0).evaluate((el) => {
+    const scroller = el.parentElement!;
+    return { height: scroller.getBoundingClientRect().height, quarter: window.innerHeight / 4, scrolls: scroller.scrollHeight > scroller.clientHeight };
+  });
+  expect(grown.height).toBeCloseTo(grown.quarter, 0);
+  expect(grown.scrolls).toBe(true);
+  await page.keyboard.press('Meta+A');
+  await page.keyboard.press('Backspace');
+  await expect.poll(async () => (await box.boundingBox())!.height).toBe(44);
   expect(editor.consoleErrors()).toEqual([]);
 });

@@ -53,7 +53,7 @@ button.transcript-chip:hover { background: var(--bg-hover); }
   box-sizing: border-box;
   max-width: 100%;
   padding: 10px 16px;
-  border-radius: 22px;
+  border-radius: var(--radius-2xl);
   background: var(--bg-user-message);
   line-height: var(--lh-prose);
   overflow-wrap: anywhere;

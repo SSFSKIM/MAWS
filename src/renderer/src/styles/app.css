@@ -54,6 +54,8 @@
   --radius-sm: var(--radius-sm);
   --radius-md: var(--radius);
   --radius-lg: var(--radius-lg);
+  --radius-2xl: var(--radius-2xl); /* W2 */
+  --shadow-composer: var(--shadow-composer); /* W2 */
 
   /* C6: the shadcn names Streamdown's dist paints with, bridged to X7 tokens (--color-border already maps --border). */
   --color-background: var(--bg);
