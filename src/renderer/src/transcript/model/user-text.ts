@@ -1,6 +1,7 @@
 // User-message text handling: the one place the reducer turns a `user.message`'s content into the user row's text
 // and attachments, before anything markdown-shaped sees the text (C6 execution document, *Pasted content* under
-// Derivation, C7's contract verbatim: extraction before sanitisation, because the remark stage deletes raw tags).
+// Derivation, C7's contract verbatim: extraction before the markdown stage, which shows raw tags as written since W1).
+// The engine's record of a slash command folds to the one line the human typed here too.
 import { PASTED_BLOCK, PASTED_PLACEHOLDER, pastedPlaceholder } from '@shared/composer/pasted-content';
 import type { ContentBlock } from '@shared/graph/events';
 import type { Attachment } from './rows';
@@ -77,6 +78,21 @@ function attachmentOf(block: ContentBlock, index: number): Attachment | null {
   return null;
 }
 
+// The engine's record of a slash command (`<command-name>/compact</command-name>`, then `<command-message>` and
+// `<command-args>` in either order; pass3/compact's replay at seq 46 and its disk record): the command and its
+// arguments on one line, as typed. Null for anything else, including a record with text outside its tags.
+const COMMAND_TAG = /<(command-name|command-message|command-args)>([\s\S]*?)<\/\1>/g;
+
+export function slashCommandLine(text: string): string | null {
+  if (!text.includes('<command-name>')) return null;
+  const parts = new Map<string, string>();
+  const rest = text.replace(COMMAND_TAG, (_whole, tag: string, body: string) => (parts.set(tag, body), ''));
+  const name = parts.get('command-name')?.trim();
+  if (!name || rest.trim() !== '') return null;
+  const args = parts.get('command-args')?.trim() ?? '';
+  return args ? `${name} ${args}` : name;
+}
+
 export function userTextOf(content: string | ContentBlock[]): UserText {
   const texts: string[] = [];
   const attachments: Attachment[] = [];
@@ -90,7 +106,8 @@ export function userTextOf(content: string | ContentBlock[]): UserText {
       }
     });
   }
-  const split = splitPastedSegments(texts.join('\n\n'));
+  const joined = texts.join('\n\n');
+  const split = splitPastedSegments(slashCommandLine(joined) ?? joined);
   const text = split.text;
   return { text, attachments: [...split.attachments, ...attachments], placeholders: split.placeholders, lines: text.length === 0 ? 0 : text.split('\n').length };
 }
