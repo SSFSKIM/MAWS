@@ -5,7 +5,7 @@
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { join } from 'node:path';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { MawsBridge } from '@shared/ipc/schema';
+import type { MawsBridge, UsageAction, UsageActionResult, UsageControlsAnswer } from '@shared/ipc/schema';
 import { validateCommandInput } from '@shared/ipc/validate';
 import type { UsageSnapshot } from '@shared/usage/types';
 import { ClaudeUsageReader } from '../../../main/usage/claude-usage-reader';
@@ -13,7 +13,7 @@ import { useGateway } from '../gateway/store';
 import { useNotices } from '../stores/notices';
 import { useUsage } from '../stores/usage';
 import { isActionEnabled, runAction } from '../keymap/actions-runtime';
-import { READ_ONLY_CONTROLS } from './controls';
+import { READ_ONLY_CONTROLS, useUsageControlState } from './controls';
 import { registerUsage } from '.';
 import { UsagePill, useUsagePopover } from './UsagePill';
 
@@ -23,6 +23,8 @@ let fixture: UsageSnapshot;
 let calls: { name: string; input: unknown }[];
 let usageChanged: ((payload: unknown) => void)[];
 let installed: boolean;
+let controls: UsageControlsAnswer; // W6 route executor: what main answers for ClaudeUsage's control route
+let answerAction: (action: UsageAction) => UsageActionResult;
 
 beforeAll(async () => {
   fixture = await new ClaudeUsageReader({ dir: join(__dirname, '../../../../test/fixtures/claude-usage'), emit: () => {}, log: () => {}, now: () => NOW }).snapshot([]);
@@ -33,6 +35,8 @@ beforeEach(() => {
   calls = [];
   usageChanged = [];
   installed = true;
+  controls = { available: false, reason: 'no_route', state: null };
+  answerAction = () => ({ ok: false, reason: 'no_route', message: 'not there' });
   window.maws = {
     invoke: vi.fn(async (name: string, input: unknown) => {
       calls.push({ name, input });
@@ -45,6 +49,10 @@ beforeEach(() => {
           return { ok: true, value: { installed, running: true, bundleId: 'com.haegi.ClaudeUsage', dataDirPresent: true, checkedAt: new Date(NOW).toISOString() } };
         case 'settings.claudeUsage.open':
           return { ok: true, value: { opened: true, reason: null, instruction: 'ClaudeUsage is in the menu bar · click its icon' } };
+        case 'settings.usageControls':
+          return { ok: true, value: controls };
+        case 'settings.usageAction':
+          return { ok: true, value: answerAction(input as UsageAction) };
         default:
           return { ok: true, value: undefined };
       }
@@ -63,6 +71,7 @@ afterEach(() => {
   useGateway.setState({ relay: null, claudeUsage: null });
   useNotices.setState({ notices: [] });
   useUsagePopover.setState({ open: false });
+  useUsageControlState.setState({ answer: null, notice: null, busy: false });
   delete (window as { maws?: MawsBridge }).maws;
 });
 
@@ -159,7 +168,7 @@ describe('the usage popover', () => {
     expect(within(card(panel, '5@example.test')).queryByRole('button', { name: 'Route requests here' })).toBeNull();
     expect(READ_ONLY_CONTROLS.unavailable).toBe(HINT);
     // nothing reached main but the reads the popover makes on open
-    expect([...new Set(calls.map((c) => c.name))].sort()).toEqual(['engine.relayHealth', 'settings.claudeUsage.status']);
+    expect([...new Set(calls.map((c) => c.name))].sort()).toEqual(['engine.relayHealth', 'settings.claudeUsage.status', 'settings.usageControls']);
   });
 
   it("hands off to ClaudeUsage's own panel and waits for its rewrite; Refresh re-checks the relay; Esc closes", async () => {
