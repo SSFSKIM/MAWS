@@ -4,6 +4,7 @@
 // editor's own dispatch (`session.send`, `session.bash`, …) and are recorded for the test beside what the host wrote.
 // Playwright drives it through `window.__maws_editor`, since main blocks navigation within a launch. The frame, the
 // submit control and the strip are M4's; this page shows the "+" menu and the attachments' names beside the editor.
+import { WidgetDialogHost } from '../../composer/WidgetDialog'; // W3 (C6)
 import { useEffect, useRef, useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { ipc } from '../../ipc/client';
@@ -100,6 +101,7 @@ export function EditorHarness() {
           </div>
         </section>
       )}
+      <WidgetDialogHost />
     </main>
   );
 }

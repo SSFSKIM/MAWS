@@ -26,6 +26,9 @@ import { ComposerAppKeys } from './ComposerAppKeys';
 import { DockedCardFrame } from './docked/DockedCardFrame';
 import { dockCard, resetDockedCards } from './docked/registry';
 import { docOf, paragraph, textNode } from './editor/doc';
+import { resetEffectiveEfforts } from './effective-effort'; // W3
+import { registerSlashWidget } from './mentions/widgets'; // W3
+import { closeWidgetDialog, useWidgetDialog } from './WidgetDialog'; // W3
 import { registerSetupIntentHook, type HookResult, type SetupIntentHook, type SetupIntentPatch } from './setup-intent';
 import { registerReleasedResume } from './resume-seam'; // C12
 
@@ -39,6 +42,7 @@ const rules = { state: { rules: [], workspaceDirectories: ['/work/app-a/extra'],
 beforeEach(() => {
   resetShellStores();
   resetComposerStore();
+  resetEffectiveEfforts(); // W3
   resetQueueStore();
   resetCatalogStore();
   resetDockedCards();
@@ -55,8 +59,9 @@ beforeEach(() => {
     'session.listModels': { models: [{ value: 'sonnet', resolvedModel: 'claude-sonnet', displayName: 'Sonnet', description: 'fast' }] },
     'session.listPermissionRules': rules,
     // C10's catalogue per route (`engine.models`): an entry names a resolved id through `resolvedModel`, as initialize's do
+    // (W3: the chip names the row's value, so the two routes' rows differ by value)
     'engine.models': (input: { gateway?: string }) => ({
-      models: [{ value: 'sonnet', resolvedModel: 'claude-sonnet', displayName: input.gateway === 'direct' ? 'Sonnet (Direct)' : 'Sonnet (relay)' }],
+      models: [{ value: input.gateway === 'direct' ? 'sonnet' : 'claude/sonnet-relay', resolvedModel: 'claude-sonnet', displayName: 'Sonnet' }],
       source: 'cached',
       at: '2026-09-29T09:00:00.000Z',
     }),
@@ -108,7 +113,7 @@ function mount(panes: { index: 0 | 1; id: AppSessionId }[], extra: ReactNode = n
   );
 }
 
-type TiptapElement = HTMLElement & { editor: { commands: { insertContent(text: string): boolean; setTextSelection(at: number): boolean; blur(): boolean }; getText(): string; isFocused: boolean } };
+type TiptapElement = HTMLElement & { editor: { commands: { insertContent(text: string): boolean; setTextSelection(at: number): boolean; blur(): boolean; clearContent(): boolean }; getText(): string; isFocused: boolean } };
 const composerOf = (index: 0 | 1) => screen.getByRole('region', { name: `pane ${index}` });
 const editorOf = (index: 0 | 1 = 0) => within(composerOf(index)).getByRole('textbox', { name: 'Message', hidden: true }) as TiptapElement;
 const type = (text: string, index: 0 | 1 = 0) => act(() => void editorOf(index).editor.commands.insertContent(text));
@@ -187,6 +192,35 @@ describe("composer DOM under C5's dispatcher", () => {
     await key(editorOf(), { key: 'Escape' });
     await waitFor(() => expect(invoked('session.queue.promote')).toEqual([{ appSessionId: A, queueId: 'q-1', priority: 'now' }])); // the uncertain one waits for the human
     expect(invoked('session.interrupt')).toHaveLength(1);
+  });
+
+  // W3 (B7, charter §5.4 as amended 2026-10-01): the terminal's Esc Esc, with no turn running, on an empty editor
+  it('Esc Esc on an empty editor with no turn running opens the rewind picker; one Esc, text, or a turn running does not', async () => {
+    const off = registerSlashWidget('rewind', { title: 'Rewind', component: () => <p>picker</p> });
+    try {
+      live(A);
+      mount([{ index: 0, id: A }]);
+      await waitFor(() => expect(fake.pending('session.queue.list')).toBe(0));
+      act(() => editorOf().focus());
+      await key(editorOf(), { key: 'Escape' });
+      expect(useWidgetDialog.getState().open).toBeNull();
+      await key(editorOf(), { key: 'Escape' });
+      expect(useWidgetDialog.getState().open).toMatchObject({ appSessionId: A, name: 'rewind' }); // the app's floating dialog
+      act(() => closeWidgetDialog());
+      await type('a draft');
+      await key(editorOf(), { key: 'Escape' });
+      await key(editorOf(), { key: 'Escape' });
+      expect(useWidgetDialog.getState().open).toBeNull(); // the draft is not empty
+      act(() => editorOf().editor.commands.clearContent());
+      busy(A);
+      await key(editorOf(), { key: 'Escape' });
+      await key(editorOf(), { key: 'Escape' });
+      expect(useWidgetDialog.getState().open).toBeNull(); // a turn running: Esc interrupts (W1)
+      await waitFor(() => expect(invoked('session.interrupt')).toHaveLength(2));
+    } finally {
+      off();
+      closeWidgetDialog();
+    }
   });
 
   it('reads Stop with an empty editor and Queue with text while a first entry is submitting and no turn is open yet', async () => {
@@ -337,15 +371,54 @@ describe("composer DOM under C5's dispatcher", () => {
     live(A, { status: { model: { requested: null, resolved: 'claude-sonnet' }, gateway: direct } });
     const view = mount([{ index: 0, id: A }]);
     const chip = () => within(composerOf(0)).getByRole('button', { name: /^Model / });
-    await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model Sonnet (Direct)'));
+    await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model sonnet'));
     expect(invoked('engine.models')).toContainEqual({ refresh: false, gateway: 'direct', cwd: '/work/app-a' }); // the session's own route and directory
     expect(invoked('session.listModels')).toEqual([]); // the engine is not asked on mount
     view.unmount();
     // an exited session names it from the route its record kept
     useSessions.setState({ engine: new Map(), records: new Map([[A, record(A, { model: { requested: null, resolved: 'claude-sonnet' } })]]) });
     mount([{ index: 0, id: A }]);
-    await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model Sonnet (relay)'));
+    await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model sonnet-relay'));
     expect(invoked('engine.models')).toContainEqual({ refresh: false, gateway: 'gateway', cwd: '/work/app-a' });
+  });
+
+  // W3 (C4): the chip names the effort get_settings applied, and opens the selector C11 registers in its own menu, as
+  // `/model` from the editor does
+  it('the model chip reads `<alias> <effort>` and opens the registered selector, from the chip and from `/model`', async () => {
+    live(A, { status: { model: { requested: null, resolved: 'claude-sonnet' } } });
+    const off = registerSlashWidget('model', { title: 'Model', placement: 'modelChip', component: ({ args }) => <p>selector {args || '(none)'}</p> });
+    const offEffort = registerSlashWidget('effort', { title: 'Effort', placement: 'modelChip', component: () => <p>effort view</p> });
+    try {
+      mount([{ index: 0, id: A }]);
+      const chip = () => within(composerOf(0)).getByRole('button', { name: /^Model / });
+      await waitFor(() => expect(fake.pending('session.getSettings')).toBe(1));
+      await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model sonnet-relay')); // the relay's row names it (the stub catalogue); the effort is not known yet
+      await act(() => fake.reply('session.getSettings', { effective: {}, sources: [], applied: { model: 'claude-sonnet', effort: 'high', advisor: null, ultracode: false } }));
+      await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model sonnet-relay high'));
+      expect(invoked('session.getSettings')).toEqual([{ appSessionId: A }]); // once, at ready
+      await userEvent.click(chip());
+      expect(await screen.findByText('effort view')).toBeTruthy(); // the chip opens on the effort view (Codex's)
+      await userEvent.keyboard('{Escape}');
+      await waitFor(() => expect(screen.queryByText('effort view')).toBeNull());
+      act(() => void useComposerStore.getState().focusTargets.get(A)!.openWidget!('model', 'opus'));
+      expect(await screen.findByText('selector opus')).toBeTruthy(); // `/model opus` opens in the chip's menu, never in the box
+      expect(within(composerOf(0)).queryByText('selector opus')).toBeNull();
+    } finally {
+      off();
+      offEffort();
+    }
+  });
+
+  // W3 (C5): the host fell back from a refused auto (requested auto, the fallback effective, the refusal): the dock says so
+  // in Claude Desktop's words, the chip shows the mode with the refusal, and the note can be put away
+  it('says when auto was refused and the fallback set, and the chip shows the fallback with the refusal', async () => {
+    live(A, { status: { permissionMode: { requested: 'auto', effective: 'acceptEdits', refusal: 'auto_mode_model' } } });
+    mount([{ index: 0, id: A }]);
+    const note = within(composerOf(0)).getByRole('note', { name: 'Permission mode notice' });
+    expect(note.textContent).toContain("Auto mode isn't available for this session. Using acceptEdits instead.");
+    expect(within(composerOf(0)).getByRole('button', { name: /^Permission mode / }).getAttribute('aria-label')).toBe('Permission mode acceptEdits · This model does not support auto mode');
+    await userEvent.click(within(note).getByRole('button', { name: 'Dismiss' }));
+    expect(within(composerOf(0)).queryByRole('note', { name: 'Permission mode notice' })).toBeNull();
   });
 
   it('renews the route’s catalogue when the process becomes ready, not at each mount of a ready session', async () => {
@@ -546,7 +619,7 @@ describe('unstarted send holds a starting state', () => {
     act(() => void vi.advanceTimersByTime(750));
     expect(stub.patch).toHaveBeenCalledTimes(1);
     expect(stub.patch.mock.calls[0][0]).toMatchObject({ draft: { doc: { type: 'doc' } } });
-    act(() => prefillComposer(A, { text: 'handed back', editing: null }));
+    act(() => prefillComposer(A, { text: 'handed back' }));
     act(() => void vi.advanceTimersByTime(800));
     expect(stub.patch).toHaveBeenCalledTimes(2);
     expect(JSON.stringify(stub.patch.mock.calls[1][0])).toContain('handed back');
@@ -554,14 +627,14 @@ describe('unstarted send holds a starting state', () => {
     expect(invoked('session.drafts.get')).toEqual([]);
   });
 
-  it('an intent draft that carries an edit mode restores no edit mode (an unstarted session has nothing to rewind) and is written back without it', async () => {
+  // W3 (B6): the composer has no edit mode; a draft written before W3 may still carry one, which loads as plain text
+  it('a draft that carries the retired edit mode restores its text and nothing of the edit', async () => {
     const doc = { ...docOf([paragraph(textNode('kept in the intent'))]), attrs: { attachments: [], editing: { messageUuid: 'u-1', seenCursor: 'u-1' } } };
-    const stub = stubIntent({ draft: { doc, attachments: [], updatedAt: '2026-09-29T10:00:00.000Z' } });
+    stubIntent({ draft: { doc, attachments: [], updatedAt: '2026-09-29T10:00:00.000Z' } });
     mount([{ index: 0, id: A }]);
     await waitFor(() => expect(editorOf().editor.getText()).toBe('kept in the intent'));
     expect(composerOf(0).querySelector('[data-edit-mode]')).toBeNull();
-    await waitFor(() => expect(stub.patch).toHaveBeenCalledTimes(1), { timeout: 2_000 });
-    expect(stub.patch.mock.calls[0][0]).toMatchObject({ draft: { doc: { attrs: { editing: null } } } });
+    expect(useComposerStore.getState().inlineEdits.size).toBe(0);
     expect(invoked('session.drafts.set')).toEqual([]);
   });
 

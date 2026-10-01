@@ -3,7 +3,6 @@
 // document's own attributes so a draft restores the strip with the text. Pure types and builders, no Tiptap import, so
 // the serialiser and the recall builders stay DOM-free.
 import type { JSONContent } from '@tiptap/core';
-import type { MessageUuid } from '@shared/graph/ids';
 
 // An image or PDF held beside the text and sent as a content block. `data` is base64; `persisted` is false when the
 // draft's byte budget left it out (the strip labels it "not kept in draft").
@@ -35,14 +34,6 @@ export const PASTED = 'pasted';
 export type ComposerDoc = JSONContent;
 
 export const emptyDoc = (attachments: Attachment[] = []): ComposerDoc => ({ type: 'doc', attrs: { attachments }, content: [{ type: 'paragraph' }] });
-
-// M4b: the edit mode the document carries (`doc.attrs.editing`), so a draft restored after a reload is in edit mode
-// again; null when absent or malformed.
-export function editingOfDoc(doc: ComposerDoc): { messageUuid: MessageUuid; seenCursor: MessageUuid | null } | null {
-  const editing = doc.attrs?.editing as { messageUuid?: unknown; seenCursor?: unknown } | null | undefined;
-  if (!editing || typeof editing.messageUuid !== 'string' || (editing.seenCursor !== null && typeof editing.seenCursor !== 'string')) return null;
-  return { messageUuid: editing.messageUuid as MessageUuid, seenCursor: editing.seenCursor as MessageUuid | null };
-}
 
 export const attachmentsOf = (doc: ComposerDoc): Attachment[] => (Array.isArray(doc.attrs?.attachments) ? (doc.attrs.attachments as Attachment[]) : []);
 

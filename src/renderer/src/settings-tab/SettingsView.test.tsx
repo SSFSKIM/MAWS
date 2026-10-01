@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MawsBridge, Settings } from '@shared/ipc/schema';
-import { SETTINGS_DEFAULTS_V5 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V6 } from '@shared/settings/defaults';
 import { useGateway } from '../gateway/store';
 import { useAttention } from '../stores/attention';
 import { useNotices } from '../stores/notices';
@@ -20,7 +20,7 @@ import { useSessions } from '../stores/sessions';
 
 let b: SettingsBridge;
 
-function renderView(initial: Settings = SETTINGS_DEFAULTS_V5, section: Parameters<typeof SettingsView>[0]['section'] = null) {
+function renderView(initial: Settings = SETTINGS_DEFAULTS_V6, section: Parameters<typeof SettingsView>[0]['section'] = null) {
   b = settingsBridge(initial);
   window.maws = b.bridge;
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -63,7 +63,7 @@ describe('settings tab writes one field per row', () => {
     expect(within(row('Config home')).getByText('read-only to MAWS')).toBeTruthy();
 
     const field = within(row('Subagent model')).getByRole('combobox') as HTMLInputElement;
-    expect(field.placeholder).toBe('engine default');
+    expect(field.placeholder).toBe('inherit'); // W3: the engine's word for no override
     await vi.waitFor(() => expect(b.calls).toContainEqual({ name: 'engine.models', input: { refresh: false, gateway: 'gateway' } }));
     // the Claude values of the default route's catalogue, never a gateway alias
     const suggestions = () => [...document.getElementById(field.getAttribute('list')!)!.querySelectorAll('option')].map((o) => o.value);
@@ -219,7 +219,7 @@ describe('settings tab writes one field per row', () => {
     vi.spyOn(HTMLElement.prototype, 'scrollIntoView').mockImplementation(function (this: HTMLElement) {
       scrolled.push(this.getAttribute('aria-labelledby') ?? '');
     });
-    renderView(SETTINGS_DEFAULTS_V5, 'keyboard');
+    renderView(SETTINGS_DEFAULTS_V6, 'keyboard');
     expect(scrolled.at(-1)).toMatch(/keyboard/);
     expect(within(screen.getByRole('navigation', { name: 'Settings sections' })).getByRole('button', { name: 'Keyboard' }).getAttribute('aria-current')).toBe('true');
   });
@@ -254,7 +254,7 @@ describe('settings tab: the memory budget rows', () => {
   });
 
   it('Memory budget: a value below 0.5 GB or not a number is refused in words and the field goes back', async () => {
-    renderView({ ...SETTINGS_DEFAULTS_V5, engine: { ...SETTINGS_DEFAULTS_V5.engine, memoryBudgetMiB: 6144 } });
+    renderView({ ...SETTINGS_DEFAULTS_V6, engine: { ...SETTINGS_DEFAULTS_V6.engine, memoryBudgetMiB: 6144 } });
     const field = within(row('Memory budget')).getByRole('textbox', { name: 'Memory budget' }) as HTMLInputElement;
     expect(field.value).toBe('6.0');
     for (const typed of ['0.4', 'lots']) {

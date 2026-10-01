@@ -1,9 +1,7 @@
-// A user row as the composer's edit-mode prefill (C7 execution document, "Edit-and-resubmit and the fork seam", and
-// the refusal dialog's Edit prompt): the row's text as typed (history recall's and the queue edit's reading: no extra
-// newline before a pasted block, a typed tag un-neutralised) with its pasted placeholders in place, its pasted bodies
-// (C6's `text` attachments, placeholder order) and its images that carry a data URL, and the edit's two anchors, the
-// message it resubmits against and the seen cursor. Both ways into edit mode (a bubble's Edit, the refusal dialog's Edit prompt)
-// build their prefill here, so they land in edit mode the same way. Pure.
+// A user row as editable text (C7 execution document, "Edit-and-resubmit and the fork seam"; W3: the bubble edited in
+// place, and the refusal dialog's Edit prompt): the row's text as typed (history recall's and the queue edit's reading:
+// no extra newline before a pasted block, a typed tag un-neutralised) with its pasted placeholders in place, its pasted
+// bodies (C6's `text` attachments, placeholder order) and its images that carry a data URL. Pure.
 import type { MessageUuid } from '@shared/graph/ids';
 import type { Prefill } from '../stores/composer';
 import type { Row } from '../transcript';
@@ -17,13 +15,13 @@ function dataUrlParts(url: string): { mediaType: string; data: string } | null {
   return match ? { mediaType: match[1], data: match[2] } : null;
 }
 
-export function rowPrefill(row: UserRow & { messageUuid: MessageUuid }, seenCursor: MessageUuid | null): Prefill {
+export function rowPrefill(row: UserRow): Prefill {
   const pasted = row.attachments.filter((a) => a.kind === 'text' && a.text !== null).map((a) => ({ name: a.name, text: a.text! }));
   const images = row.attachments.flatMap((a) => {
     const parts = a.kind === 'image' && a.dataUrl !== null ? dataUrlParts(a.dataUrl) : null;
     return parts ? [{ name: a.name, mediaType: a.mediaType ?? parts.mediaType, data: parts.data }] : [];
   });
-  return { text: typedFromRowText(row.text), pasted, images, editing: { messageUuid: row.messageUuid, seenCursor } };
+  return { text: typedFromRowText(row.text), pasted, images };
 }
 
 // The seen cursor's source: the newest user message the transcript holds (any origin: a queued prompt or an

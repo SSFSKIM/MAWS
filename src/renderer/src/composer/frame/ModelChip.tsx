@@ -1,86 +1,61 @@
-// The toolbar's model with effort (C7 execution document, "Composer frame" Model · effort): the resolved model and the
-// effort, named by the model's display name from the route's catalogue (C10's `engine.models`; the resolved id when
-// no entry names it);
-// the menu lists the models the binding offers (C3's `listModels`, or C10's catalogue for an unstarted
-// session) with their descriptions, and the chosen model's effort levels (every level when it names none). When C11
-// registered the `/model` widget the chip opens it instead.
+// The toolbar's model with effort (C7 execution document, "Composer frame" Model · effort; W3, charter §5.4 as amended
+// 2026-10-01): the chip reads `<alias> <effort>` (the binding's label, model-label.ts) and opens Codex's selector, one
+// 254px menu anchored above the chip in a portal, which C11 registers as the `effort`, `model` and `fast` widgets with
+// the `modelChip` placement. The chip opens it on its effort view; `/effort`, `/model` and `/fast` from the palette or
+// typed open it here too (the editor puts the ask in the composer store). Esc or a choice that closes it hands the
+// keyboard back to the editor. With nothing registered (a harness without C11) the chip only names the model.
 import { Popover } from 'radix-ui';
-import { useState } from 'react';
-import { EffortSchema, type Effort } from '@shared/engine/launch-spec';
-import type { ModelInfo } from '../setup-intent';
-import { modelMatches, type ChipBinding, type ModelChoice } from './bindings';
-import { CHIP, ITEM, NOTE, POPOVER } from './chip-style';
+import { useEffect, useLayoutEffect, useRef } from 'react';
+import type { AppSessionId } from '@shared/graph/ids';
+import { closeChipWidget, requestChipWidget, useComposerStore } from '../../stores/composer';
+import { slashWidget, useRegisteredWidgets } from '../mentions/widgets';
+import type { ModelBinding } from './bindings';
+import { CHIP } from './chip-style';
 
-const EFFORTS = EffortSchema.options;
+const chipWidget = (name: string) => {
+  const widget = slashWidget(name);
+  return widget?.placement === 'modelChip' ? widget : null;
+};
 
-const matches = modelMatches;
-const displayOf = (options: readonly ModelInfo[], model: string | null) => (model === null ? 'Default model' : (options.find((m) => matches(m, model))?.displayName ?? model));
+export function ModelChip({ appSessionId, binding, onOpen, onClosed }: { appSessionId: AppSessionId; binding: ModelBinding; onOpen?(): void; onClosed?(): void }) {
+  useRegisteredWidgets(); // the chip opens once C11's registrations land
+  const open = useComposerStore((s) => s.chipWidgets.get(appSessionId) ?? null);
+  const nonce = open?.nonce ?? null;
+  // an open menu reads the engine's models (the composer's `onOpen`), however it was opened
+  const opened = useRef(onOpen);
+  useLayoutEffect(() => void (opened.current = onOpen));
+  useEffect(() => {
+    if (nonce !== null) opened.current?.();
+  }, [nonce]);
+  useEffect(() => () => closeChipWidget(appSessionId), [appSessionId]); // a menu never outlives its composer
 
-export function ModelChip({ binding, openWidget, onOpen }: { binding: ChipBinding<ModelChoice, ModelInfo> & { names?: readonly ModelInfo[] }; openWidget: (() => boolean) | null; onOpen?(): void }) {
-  const [open, setOpen] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [pending, setPending] = useState(false);
-  const { model, effort } = binding.value;
-  const chosen = binding.options.find((m) => matches(m, model));
-  const efforts = (chosen?.supportedEffortLevels ?? EFFORTS).filter((e): e is Effort => (EFFORTS as readonly string[]).includes(e));
-  const apply = async (next: ModelChoice) => {
-    setPending(true);
-    try {
-      const result = await binding.set(next);
-      setError(result.ok ? null : result.error);
-    } finally {
-      setPending(false);
-    }
-  };
-  // named from the options this mount listed, else the route's catalogue, else the resolved id itself
-  const label = `${displayOf(binding.options.length > 0 ? binding.options : (binding.names ?? []), model)}${effort ? ` · ${effort}` : ''}`;
+  const Widget = open ? chipWidget(open.name)?.component : undefined;
   return (
     <Popover.Root
-      open={open}
+      open={open !== null && Widget !== undefined}
       onOpenChange={(next) => {
-        if (next && openWidget?.()) return; // C11's widget takes the chip
-        if (next) onOpen?.();
-        setOpen(next);
+        if (!next) closeChipWidget(appSessionId);
+        else if (chipWidget('effort')) requestChipWidget(appSessionId, 'effort', '');
       }}
     >
-      <Popover.Trigger aria-label={`Model ${label}`} title={binding.disabled ?? 'Model and effort'} className={CHIP}>
-        {label}
+      <Popover.Trigger aria-label={`Model ${binding.label}`} title={binding.disabled ?? 'Model and effort'} className={CHIP}>
+        {binding.label}
         <span aria-hidden className="shrink-0 text-fg-faint">⌄</span>
       </Popover.Trigger>
       <Popover.Portal>
-        <Popover.Content aria-label="Model" side="top" align="end" sideOffset={6} collisionPadding={8} className={`${POPOVER} flex w-72 flex-col gap-1`}>
-          {binding.disabled && <p className={NOTE}>{binding.disabled}</p>}
-          <div role="menu" aria-label="Models" className="flex flex-col">
-            {binding.options.length === 0 && <p className={NOTE}>Reading the models…</p>}
-            {binding.options.map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                role="menuitemradio"
-                aria-checked={matches(option, model)}
-                disabled={pending || binding.disabled !== null}
-                onClick={() => void apply({ model: option.value, effort })}
-                className={ITEM}
-              >
-                <span>{option.displayName}</span>
-                {option.description && <span className="text-ui-sm text-fg-muted">{option.description}</span>}
-              </button>
-            ))}
-          </div>
-          <div className="my-1 h-px bg-border" />
-          <p className={NOTE}>Effort</p>
-          <div role="menu" aria-label="Effort" className="flex flex-wrap gap-1 px-1 pb-1">
-            {efforts.map((level) => (
-              <button key={level} type="button" role="menuitemradio" aria-checked={level === effort} disabled={pending || binding.disabled !== null} onClick={() => void apply({ model, effort: level })} className={`${CHIP} border border-border`}>
-                {level}
-              </button>
-            ))}
-          </div>
-          {error && (
-            <p role="alert" className="px-2 text-ui-sm text-danger">
-              {error}
-            </p>
-          )}
+        <Popover.Content
+          aria-label="Model and effort"
+          side="top"
+          align="end"
+          sideOffset={8}
+          collisionPadding={8}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            onClosed?.();
+          }}
+          className="z-50 w-[254px] overflow-hidden rounded-lg border border-border-strong bg-bg-overlay text-ui text-fg shadow-composer"
+        >
+          {open && Widget && <Widget key={`${open.name}:${open.nonce}`} appSessionId={appSessionId} args={open.args} close={() => closeChipWidget(appSessionId)} />}
         </Popover.Content>
       </Popover.Portal>
     </Popover.Root>

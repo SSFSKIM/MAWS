@@ -9,6 +9,7 @@
 // strip, the box and the toolbar (architect's ruling on M6, mockup 04): those parts stay mounted and hidden, so the
 // editor keeps its document, and they hide in the same commit the card mounts.
 import type { ReactNode, RefObject } from 'react';
+import type { AppSessionId } from '@shared/graph/ids';
 import type { Attachment } from '../editor/doc';
 import type { EditorHandle } from '../editor/controller';
 import { AttachmentStrip } from './AttachmentStrip';
@@ -16,6 +17,7 @@ import type { FrameBindings } from './bindings';
 import { Toolbar } from './Toolbar';
 
 export interface FrameProps {
+  appSessionId: AppSessionId; // W3: the toolbar's model chip opens the session's selector
   bindings: FrameBindings;
   cwd: string;
   dirty: boolean;
@@ -28,7 +30,7 @@ export interface FrameProps {
   ring?: ReactNode; // W2: the session's context ring, in the toolbar
 }
 
-export function Frame({ bindings, cwd, dirty, attachments, editorHandle, editor, submit, docked = null, onOpen, ring = null }: FrameProps) {
+export function Frame({ appSessionId, bindings, cwd, dirty, attachments, editorHandle, editor, submit, docked = null, onOpen, ring = null }: FrameProps) {
   const isDocked = docked !== null && docked !== undefined;
   return (
     <div data-composer-frame data-docked={isDocked || undefined} className="flex w-full min-w-0 flex-col gap-1">
@@ -41,7 +43,7 @@ export function Frame({ bindings, cwd, dirty, attachments, editorHandle, editor,
           <div className="min-w-0 flex-1 py-3">{editor}</div>
           <div className="mb-2 shrink-0">{submit}</div>
         </div>
-        <Toolbar bindings={bindings} cwd={cwd} dirty={dirty} editor={editorHandle} onOpen={onOpen} ring={ring} />
+        <Toolbar appSessionId={appSessionId} bindings={bindings} cwd={cwd} dirty={dirty} editor={editorHandle} onOpen={onOpen} ring={ring} />
       </div>
     </div>
   );

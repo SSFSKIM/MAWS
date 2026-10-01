@@ -82,7 +82,7 @@ export function SlashPalette(props: PopupProps) {
   }, [active, rows]);
   if (rows.length === 0) return null;
   return (
-    <Listbox label="Commands" activeId={optionId(active)}>
+    <Listbox label="Commands" activeId={optionId(active)} size="slash">
       {groups.map((group) => (
         <div key={group.origin} role="group" aria-label={ORIGIN_LABEL[group.origin]}>
           <GroupLabel>{ORIGIN_LABEL[group.origin]}</GroupLabel>

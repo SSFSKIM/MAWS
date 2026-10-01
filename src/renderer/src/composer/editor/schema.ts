@@ -13,7 +13,7 @@ import { PASTED, type PastedAttrs } from './doc';
 
 export const ComposerDocument = Document.extend({
   addAttributes() {
-    return { attachments: { default: [], rendered: false }, editing: { default: null, rendered: false } };
+    return { attachments: { default: [], rendered: false } };
   },
 });
 

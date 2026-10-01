@@ -26,6 +26,7 @@ export const WIDGET_COMMANDS = [
   { name: 'resume', description: 'Resume another session' },
   { name: 'export', description: 'Export the conversation' },
   { name: 'diff', description: 'Changes in the working tree' },
+  { name: 'rewind', description: 'Rewind the conversation, its files or both to an earlier message' }, // W3 (B7); Esc Esc too
 ] as const satisfies ReadonlyArray<{ name: string; description: string }>;
 
 export type WidgetCommandName = (typeof WIDGET_COMMANDS)[number]['name'];
@@ -33,6 +34,9 @@ export type WidgetCommandName = (typeof WIDGET_COMMANDS)[number]['name'];
 export interface SlashWidget {
   title: string;
   component: ComponentType<{ appSessionId: AppSessionId; args: string; close(): void }>;
+  // W3: where it opens. `modelChip`: in the toolbar model chip's menu (C4's selector: `/model`, `/effort`, `/fast`);
+  // otherwise the widget's own place (charter §5.4 as amended 2026-10-01).
+  placement?: 'modelChip';
   // C11 start: a typed `/<name> <args>` whose argument the widget resolves fully is applied through the widget's own
   // control path with no widget shown (the architect's correction of 2026-09-29); resolves false to open it instead.
   // `tooLate` aborts once the editor stopped waiting and opened the widget: nothing may be applied after it.

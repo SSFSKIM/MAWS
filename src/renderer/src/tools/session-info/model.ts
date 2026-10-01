@@ -94,7 +94,7 @@ function modelSection({ record, status, models }: SessionInfoInput): InfoSection
   const name = pending ? model.requested : (model.resolved ?? model.requested);
   const rows: InfoRow[] = [
     { label: INFO.main, value: name === null ? NONE : effort ? `${name} · ${effort}` : name, note: pending ? MODEL.pending : undefined },
-    status?.subagentModel ? { label: INFO.subagents, value: status.subagentModel, note: INFO.subagentChosen } : { label: INFO.subagents, value: status ? INFO.engineDefault : NONE },
+    status?.subagentModel ? { label: INFO.subagents, value: status.subagentModel, note: INFO.subagentChosen } : { label: INFO.subagents, value: status ? INFO.subagentsInherit : NONE },
   ];
   const overrides = Object.entries(status?.modelOverrides ?? {});
   if (overrides.length > 0) rows.push({ label: INFO.overrides, value: overrides.map(([k, v]) => `${k} → ${v}`).join('; '), note: INFO.passedThrough });

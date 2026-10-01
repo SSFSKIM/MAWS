@@ -1,12 +1,15 @@
 // The Engine section (C11 execution document, Interfaces "Settings tab" Engine; mockup 06 vignette 04): the binary MAWS
 // launches and the version it is pinned to (both reach the engine host through `engine.configure`, which main pushes on
 // every change; C12: main alone, and this section awaits `settings.engineApplied`), the engine's config home (read-only
-// to MAWS), and the subagent model new sessions launch with.
+// to MAWS), the subagent model new sessions launch with, and (W3) the mode a session takes when the engine refuses auto.
 import { useQueryClient } from '@tanstack/react-query';
 import { useId, useState } from 'react';
+import { PERMISSION_MODES } from '@shared/graph/enums';
 import type { Settings } from '@shared/ipc/schema';
+import type { AutoFallback } from '@shared/ipc/schema/settings';
 import type { BinaryInfo } from '@shared/ipc/schema/engine';
 import { isGatewayModel } from '@shared/sessions/models';
+import { DEFAULT_ROW, listName } from '../composer/frame/model-label';
 import { GatewaySheet } from '../gateway/GatewaySheet';
 import { ipc } from '../ipc/client';
 import { useCommand } from '../ipc/query';
@@ -76,6 +79,7 @@ export function EngineSection({ settings }: { settings: Settings }) {
       <CustodySetting settings={settings} /> {/* C12 */}
       <ConfigHome />
       <SubagentModel settings={settings} />
+      <AutoFallback settings={settings} /> {/* W3 */}
       {/* C12 start: the memory budget and the stateful MCP servers (settings v4) */}
       <MemoryBudget settings={settings} />
       <StatefulServers settings={settings} />
@@ -111,6 +115,27 @@ function ConfigHome() {
   );
 }
 
+// W3: the mode MAWS sets when the engine refuses auto for a session (settings version 6), any engine mode but auto.
+const FALLBACKS = PERMISSION_MODES.filter((mode): mode is AutoFallback => mode !== 'auto');
+function AutoFallback({ settings }: { settings: Settings }) {
+  return (
+    <Setting label={ENGINE.autoFallback} note={ENGINE.autoFallbackNote}>
+      <select
+        aria-label={ENGINE.autoFallback}
+        value={settings.permissions.autoFallback}
+        onChange={(e) => void writeSettings({ permissions: { autoFallback: e.target.value as AutoFallback } })}
+        className={`${INPUT} max-w-[200px] font-mono`}
+      >
+        {FALLBACKS.map((mode) => (
+          <option key={mode} value={mode}>
+            {mode}
+          </option>
+        ))}
+      </select>
+    </Setting>
+  );
+}
+
 // A text field, since CLAUDE_CODE_SUBAGENT_MODEL takes any model name the engine resolves; the suggestions are the
 // Claude values of the catalogue new sessions launch against (the default route's).
 function SubagentModel({ settings }: { settings: Settings }) {
@@ -132,7 +157,7 @@ function SubagentModel({ settings }: { settings: Settings }) {
       <datalist id={list}>
         {suggestions.map((m) => (
           <option key={m.value} value={m.value}>
-            {m.displayName}
+            {m.value === DEFAULT_ROW ? `${listName(m, suggestions)} · Default` : m.displayName}
           </option>
         ))}
       </datalist>

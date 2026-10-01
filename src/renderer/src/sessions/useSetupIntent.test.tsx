@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import type { ModelCatalogue } from '@shared/sessions/models';
-import { CANNOT_HOLD_AUTO_NOTE, GATEWAY_AUTO_NOTE } from '@shared/sessions/models';
+import { GATEWAY_AUTO_NOTE } from '@shared/sessions/models';
 import type { StartOutcome } from '@shared/sessions/setup';
 import { record, status } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
@@ -201,7 +201,7 @@ describe('setup intent hook', () => {
     withMain();
     putIntent(intent({ model: 'haiku', permissionMode: 'auto' }));
     const { result } = renderHook(() => useSetupIntent(ID));
-    await waitFor(() => expect(result.current!.options.autoModeNote).toBe(CANNOT_HOLD_AUTO_NOTE));
+    await waitFor(() => expect(result.current!.options.autoModeNote).toBe("Auto mode isn't available for Haiku. This session will use acceptEdits instead.")); // W3: the fallback setting's default
     act(() => putIntent(intent({ model: 'claude/astra', permissionMode: null, updatedAt: '2026-09-29T10:00:01.000Z' })));
     expect(result.current!.options.autoModeNote).toBe(GATEWAY_AUTO_NOTE);
     act(() => putIntent(intent({ model: 'claude/astra', permissionMode: 'default', updatedAt: '2026-09-29T10:00:02.000Z' })));

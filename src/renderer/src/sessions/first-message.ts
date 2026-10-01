@@ -39,7 +39,7 @@ export function messagePrefill(message: FirstMessage): Prefill {
     images.unshift({ name: `Image #${p.n}`, mediaType: blocks[i]!.source.media_type, data: blocks[i]!.source.data });
   }
   const pasted = pastedBodies(wireOf(message.content)).map((body, i) => ({ name: `Pasted text #${i + 1}`, text: body }));
-  return { text, pasted, images, editing: null };
+  return { text, pasted, images };
 }
 
 // A resubmit's content as the first message of the fork it starts (C7's `ResubmitProvider.forkFrom` passes content

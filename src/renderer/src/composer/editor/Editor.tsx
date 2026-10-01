@@ -17,7 +17,7 @@ import { useKeyChord } from '../../keymap/useKeyChord';
 import { useSessionCatalog } from '../../stores/catalog';
 import { useComposerStore, type Prefill } from '../../stores/composer';
 import { useTranscriptStore } from '../../transcript';
-import { slashWidget, useRegisteredWidgets } from '../mentions/widgets';
+import { useRegisteredWidgets } from '../mentions/widgets';
 import { ModeChrome } from '../modes/ModeChrome';
 import { EditorController, ipcDrafts, type ControllerInputs, type DraftPort, type EditorHandle, type SubmitHow } from './controller';
 import { emptyDoc, type ComposerDoc } from './doc';
@@ -63,7 +63,6 @@ export function Editor(props: EditorProps) {
   const followUp = useTranscriptStore((s) => (s.entries[appSessionId]?.rows ?? []).some((r) => r.kind === 'user'));
   const [mode, setMode] = useState<Serialized['mode']>('send');
   const [commandEmpty, setCommandEmpty] = useState(true);
-  const [widget, setWidget] = useState<{ name: string; args: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [dragging, setDragging] = useState(0);
 
@@ -82,7 +81,7 @@ export function Editor(props: EditorProps) {
     onEscape: props.onEscape,
     onRestore: props.onRestore,
   };
-  const [controller] = useState(() => new EditorController(client, props.drafts ?? ipcDrafts(client, appSessionId), { setMode, setCommandEmpty, setWidget, setBusy }, inputs));
+  const [controller] = useState(() => new EditorController(client, props.drafts ?? ipcDrafts(client, appSessionId), { setMode, setCommandEmpty, setBusy }, inputs));
   useLayoutEffect(() => controller.update(inputs));
 
   // Options that never change, so Tiptap's per-render comparison leaves the instance alone (a fresh extension list or
@@ -110,15 +109,9 @@ export function Editor(props: EditorProps) {
   useKeyChord('composer.steer', () => void controller.submit('hold'), { within: rootRef }); // W1: ⌥Enter holds until the turn ends (the action id predates W1; overrides are keyed by it)
   useImperativeHandle(props.handle, () => controller.handle(), [controller]);
 
-  const open = widget ? slashWidget(widget.name) : null;
-  const Widget = open?.component;
+  // W3 (C6): a widget the palette opens is the app's floating dialog (`WidgetDialog.tsx`), never in the box
   return (
     <>
-      {open && Widget && widget ? (
-        <section aria-label={open.title} className="mb-2 rounded-md border border-border bg-bg-raised p-2 text-ui">
-          <Widget appSessionId={appSessionId} args={widget.args} close={() => setWidget(null)} />
-        </section>
-      ) : null}
       <div
         ref={rootRef}
         data-key-sink="composer"

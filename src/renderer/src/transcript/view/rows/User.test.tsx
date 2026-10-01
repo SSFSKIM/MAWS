@@ -26,7 +26,7 @@ describe('user row', () => {
     expect(container.querySelector('[data-streamdown="strong"]')?.textContent).toBe('sidebar');
     fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
     expect(actions.editAndResubmit).toHaveBeenCalledWith(row);
-    expect(screen.getByRole('button', { name: 'Edit' }).getAttribute('title')).toBe('Edit and resubmit forks history');
+    expect(screen.getByRole('button', { name: 'Edit' }).getAttribute('title')).toBe('Edit here · Send rewinds this session to this message');
   });
 
   it('copies the text with pasted blocks restored, untagged', async () => {

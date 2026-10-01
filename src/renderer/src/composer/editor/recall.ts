@@ -4,6 +4,7 @@
 // when its body is known and an unavailable atom otherwise; `[Image #n]` and `[PDF #n]` are always unavailable (history
 // keeps no bytes; a prefill re-attaches its images beside the text). Each line is a paragraph. Pure.
 import type { HistoryEntry } from '@shared/composer/history-entry';
+import { pastedPlaceholder } from '@shared/composer/pasted-content';
 import { parsePlaceholders, restorePastedTags, type Placeholder } from '@shared/composer/pasted-framing';
 import type { JSONContent } from '@tiptap/core';
 import type { Prefill } from '../../stores/composer';
@@ -69,9 +70,26 @@ export function historyEntryToDoc(entry: HistoryEntry): ComposerDoc {
   });
 }
 
-// A prefill's text: the k-th pasted placeholder takes `pasted[k-1]`; a placeholder with no entry is unavailable.
+// The bodies a prefill's pasted placeholders name, keyed by the placeholder (`prefillToDoc`'s reading: the k-th takes
+// `pasted[k-1]`; a placeholder written twice keeps its first). A bubble edited in place keeps these from when the edit
+// began: its text is the human's to change, so a placeholder there resolves by what it says, not where it stands.
+export function bodiesByPlaceholder(prefill: Prefill): Record<string, string> {
+  const bodies: Record<string, string> = {};
+  let k = 0;
+  for (const placeholder of parsePlaceholders(prefill.text)) {
+    if (placeholder.kind !== 'pasted') continue;
+    const body = prefill.pasted?.[k++];
+    const key = pastedPlaceholder(placeholder.n, placeholder.lines);
+    if (body && !(key in bodies)) bodies[key] = body.text;
+  }
+  return bodies;
+}
+
+// A prefill's text: the k-th pasted placeholder takes `pasted[k-1]`, or with `bodies` the body keyed by the placeholder
+// itself; a placeholder with no entry is unavailable.
 export function prefillToDoc(prefill: Prefill): ComposerDoc {
   let k = 0;
+  const { bodies } = prefill;
   const images: Attachment[] = (prefill.images ?? []).map((image) => ({
     id: atomId('attachment'),
     kind: 'image',
@@ -81,16 +99,15 @@ export function prefillToDoc(prefill: Prefill): ComposerDoc {
     data: image.data,
     persisted: true,
   }));
-  const doc = textToDoc(
+  return textToDoc(
     prefill.text,
     (placeholder) => {
       if (placeholder.kind !== 'pasted') return unavailable(placeholder);
-      const body = prefill.pasted?.[k++];
-      return body ? available(placeholder, body.text) : unavailable(placeholder);
+      const body = bodies ? bodies[pastedPlaceholder(placeholder.n, placeholder.lines)] : prefill.pasted?.[k++]?.text;
+      return body !== undefined ? available(placeholder, body) : unavailable(placeholder);
     },
     images,
   );
-  return { ...doc, attrs: { ...doc.attrs, editing: prefill.editing } }; // edit mode rides in the draft (M4b)
 }
 
 // A user row's text as the human typed it: the neutralised `<\pasted_content` restored, and the one newline C6 keeps

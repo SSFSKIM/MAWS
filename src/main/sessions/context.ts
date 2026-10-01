@@ -1,6 +1,7 @@
 // What the session service's parts share (C10 execution document, Interfaces "Session service"): the dependencies the
 // service is built over, the engine host called as a function that throws its refusal, and small path facts. Kept
 // free of Electron: the IPC registration (`service-register.ts`) and the Trash (`shell.trashItem`) come in from main.
+import type { UserEngineDefaults } from '@shared/ipc/schema/settings'; // W3
 import { access, realpath, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { AppSessionId, SessionId } from '@shared/graph/ids';
@@ -39,6 +40,7 @@ export interface SessionServiceDeps {
   reveal: (path: string) => void; // shell.showItemInFolder
   replay?: ReplaySeam | null; // the e2e seam (MAWS_E2E_REPLAY_FIXTURES)
   settings?: () => C10Settings;
+  userDefaults?: () => Promise<UserEngineDefaults>; // W3: the user's own settings.json (read only); absent, none
   launchGate?: LaunchGate; // C12: consulted when a setup or a resume begins; absent, every launch may go
   timing?: { watchdogMs?: number; stopWaitMs?: number };
   now?: () => string;

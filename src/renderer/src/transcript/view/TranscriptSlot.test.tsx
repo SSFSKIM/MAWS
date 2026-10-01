@@ -90,7 +90,7 @@ describe('TranscriptSlot', () => {
       register({ editAndResubmit });
       register({ openFile });
     });
-    fireEvent.click(screen.getByTitle('Edit and resubmit forks history'));
+    fireEvent.click(screen.getByTitle('Edit here · Send rewinds this session to this message'));
     expect(editAndResubmit).toHaveBeenCalledTimes(1);
     fireEvent.click(document.querySelector<HTMLElement>('[data-chip="path"]')!);
     expect(openFile).toHaveBeenCalledWith('src/a.ts', undefined);

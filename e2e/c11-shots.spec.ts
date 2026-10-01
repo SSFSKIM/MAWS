@@ -100,9 +100,9 @@ test('the widgets and Session info on the #widgets harness page', async () => {
     await page.keyboard.press('Enter');
     const model = page.locator('[data-widget="model"]');
     await expect(model).toBeVisible();
-    await model.getByRole('radio', { name: /^astra/ }).click();
-    const note = model.getByText('Auto-mode reviews for this model run locally', { exact: false });
-    await note.scrollIntoViewIfNeeded(); // the body scrolls inside its 420 px cap; the mockup shows the note
+    await model.getByRole('menuitemradio', { name: /^astra/ }).hover(); // W3: the selector's model view, astra in view
+    const note = model.getByRole('menuitemradio', { name: /^astra/ });
+    await note.scrollIntoViewIfNeeded();
     await shoot(page, 'model-widget', true);
     await page.keyboard.press('Escape');
     await page.evaluate((id) => (window as unknown as { __maws_widgets: WidgetsHarnessApi }).__maws_widgets.control('setModel', { appSessionId: id, model: 'claude/astra' }), READY);

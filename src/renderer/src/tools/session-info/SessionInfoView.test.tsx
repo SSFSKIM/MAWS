@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge, Settings } from '@shared/ipc/schema';
-import { SETTINGS_DEFAULTS_V5 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V6 } from '@shared/settings/defaults';
 import type { UsageSnapshot } from '@shared/usage/types';
 import { loadScenario } from '../../../../../test/support/scenario';
 import { createWidgetBackend, fixtureLine, RESPONSES, type WidgetBackend } from '../../../../../test/support/widget-backend';
@@ -81,7 +81,7 @@ describe('session info renders the six sections', () => {
     expect(valueOf('Version')).toBe('2.1.283 · pinned');
     expect(valueOf('Session id')).toBe(record.engineSessionId);
     expect(valueOf('Main')).toBe('claude-sonnet-5[1m]');
-    expect(valueOf('Subagents')).toBe('engine default');
+    expect(valueOf('Subagents')).toBe("each agent's own, else Main"); // W3: no "engine default"
     expect(valueOf('Route')).toBe('Gateway · ClaudeUsage relay · http://127.0.0.1:8641Switch to Direct…'); // W2: the switch
     expect(valueOf('Account')).toBe('1@example.test · pinned for this session');
     expect(valueOf('Tool search')).toBe('on · ENABLE_TOOL_SEARCH, needed behind a base URL');
@@ -176,7 +176,7 @@ describe('session info renders the six sections', () => {
 
 // W2 (C3; §5.5 as amended 2026-10-01): the status line is gone, so what only its usage popover's footer offered lives here.
 describe('the route switch and the Direct poll, re-homed from the status line', () => {
-  const settingsWith = (gateway: Partial<Settings['gateway']>) => useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V5, gateway: { ...SETTINGS_DEFAULTS_V5.gateway, ...gateway } }, resolvedTheme: 'light' } as never });
+  const settingsWith = (gateway: Partial<Settings['gateway']>) => useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V6, gateway: { ...SETTINGS_DEFAULTS_V6.gateway, ...gateway } }, resolvedTheme: 'light' } as never });
   const route = () => screen.getByText('Route', { selector: 'dt' }).nextElementSibling as HTMLElement;
 
   it('a routed session’s Route offers Switch to Direct…, which opens the switch’s confirm', async () => {

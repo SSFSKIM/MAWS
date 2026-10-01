@@ -29,7 +29,7 @@ export const INFO = {
   main: 'Main',
   subagents: 'Subagents',
   subagentChosen: 'CLAUDE_CODE_SUBAGENT_MODEL, chosen at launch',
-  engineDefault: 'engine default',
+  subagentsInherit: "each agent's own, else Main", // W3: no CLAUDE_CODE_SUBAGENT_MODEL (the engine's precedence, SPEC 18)
   overrides: 'Overrides',
   passedThrough: 'passed through from your shell',
   // Gateway

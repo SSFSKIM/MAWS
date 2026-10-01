@@ -216,7 +216,7 @@ test('the harness: the frame centred on an unstarted session, and the slash pale
     await expect(page.getByRole('listbox', { name: 'Commands' })).toBeVisible();
     await page.keyboard.type('del');
     await page.keyboard.press('Enter');
-    await expect(page.getByRole('region', { name: '/model widget' })).toBeVisible();
+    await expect(page.getByRole('dialog', { name: '/model widget' })).toBeVisible(); // W3 (C6): the floating dialog
     await shoot(page, 'palette-widget', true);
     expect(maws.consoleErrors()).toEqual([]);
   } finally {

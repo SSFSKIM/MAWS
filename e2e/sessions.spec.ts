@@ -73,6 +73,10 @@ interface Case {
 async function launchCase(opts: { fixtures: string[]; trusted: string[]; userData?: string; store?: StoreFixture; env?: Record<string, string> }): Promise<Omit<Case, 'repos'>> {
   const store = opts.store ?? (await StoreFixture.create());
   writeFileSync(join(store.configHome, '.claude.json'), `${JSON.stringify({ projects: Object.fromEntries(opts.trusted.map((key) => [key, { hasTrustDialogAccepted: true }])) }, null, 2)}\n`);
+  // W3: the replayed launches were recorded in the default mode (C10's probes; auto-routed's initialize answers auto
+  // either way), so the user's defaultMode says default: an auto seed would have the host send a fallback the
+  // recordings never saw
+  writeFileSync(join(store.configHome, 'settings.json'), `${JSON.stringify({ permissions: { defaultMode: 'default' } })}\n`);
   const trash = join(store.configHome, 'e2e-trash');
   mkdirSync(trash, { recursive: true });
   const maws = await launchMaws({

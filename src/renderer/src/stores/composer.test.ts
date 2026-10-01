@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, MessageUuid, RequestId } from '@shared/graph/ids';
-import { DEFAULT_MEMORY_TARGET, editingOf, IDLE_RESUBMIT, insertComposerText, isDocked, openComposerWidget, isStarting, markDocked, memoryTargetOf, prefillComposer, registerFocusTarget, resetComposerStore, resubmitOf, resubmitRecordOf, setEditing, setMemoryTarget, setResubmit, setStarting, takePrefill, useComposerStore } from './composer';
+import { DEFAULT_MEMORY_TARGET, IDLE_RESUBMIT, inlineEditOf, insertComposerText, isDocked, openComposerWidget, isStarting, markDocked, memoryTargetOf, prefillComposer, registerFocusTarget, resetComposerStore, resubmitOf, resubmitRecordOf, setInlineEdit, setInlineText, setMemoryTarget, setResubmit, setStarting, takePrefill, useComposerStore } from './composer';
 
 const A = 'app-a' as AppSessionId;
 const B = 'app-b' as AppSessionId;
@@ -10,11 +10,11 @@ beforeEach(() => resetComposerStore());
 
 describe('composer store seam', () => {
   it('holds one prefill per session until the composer takes it', () => {
-    prefillComposer(A, { text: 'first', editing: null });
-    prefillComposer(A, { text: 'second', editing: { messageUuid: 'u-1' as MessageUuid, seenCursor: 'u-1' as MessageUuid } });
+    prefillComposer(A, { text: 'first' });
+    prefillComposer(A, { text: 'second' });
     expect(useComposerStore.getState().prefills.get(A)?.text).toBe('second'); // the latest replaces an untaken one
     expect(takePrefill(B)).toBeNull();
-    expect(takePrefill(A)).toMatchObject({ text: 'second', editing: { messageUuid: 'u-1' } });
+    expect(takePrefill(A)).toMatchObject({ text: 'second' });
     expect(takePrefill(A)).toBeNull();
   });
 
@@ -48,19 +48,21 @@ describe('composer store seam', () => {
     expect(memoryTargetOf(useComposerStore.getState(), B)).toEqual({ kind: 'project', path: null });
   });
 
-  it('keeps the M4 state per session: starting, edit mode and the resubmit state', () => {
+  it('keeps the M4 state per session: starting, the bubble edited in place (W3) and the resubmit state', () => {
     setStarting(A, true);
     expect([isStarting(useComposerStore.getState(), A), isStarting(useComposerStore.getState(), B)]).toEqual([true, false]);
     setStarting(A, false);
     expect(isStarting(useComposerStore.getState(), A)).toBe(false);
-    setEditing(A, { messageUuid: 'u-1' as MessageUuid, seenCursor: 'u-2' as MessageUuid });
-    expect(editingOf(useComposerStore.getState(), A)).toEqual({ messageUuid: 'u-1', seenCursor: 'u-2' });
-    setEditing(A, null);
-    expect(editingOf(useComposerStore.getState(), A)).toBeNull();
+    setInlineEdit(A, { messageUuid: 'u-1' as MessageUuid, seenCursor: 'u-2' as MessageUuid, kind: 'edit', text: 'turn two', bodies: {}, images: [] });
+    setInlineText(A, 'turn two edited');
+    expect(inlineEditOf(useComposerStore.getState(), A)).toMatchObject({ messageUuid: 'u-1', seenCursor: 'u-2', text: 'turn two edited' });
+    expect(inlineEditOf(useComposerStore.getState(), B)).toBeNull();
+    setInlineEdit(A, null);
+    expect(inlineEditOf(useComposerStore.getState(), A)).toBeNull();
     expect(resubmitOf(useComposerStore.getState(), A)).toBe('idle');
     setResubmit(A, 'rewound_awaiting_send');
     expect(resubmitOf(useComposerStore.getState(), A)).toBe('rewound_awaiting_send');
-    expect(resubmitRecordOf(useComposerStore.getState(), A)).toEqual({ state: 'rewound_awaiting_send', exited: false, sendFailed: false, autoSend: false });
+    expect(resubmitRecordOf(useComposerStore.getState(), A)).toEqual({ state: 'rewound_awaiting_send', exited: false, sendFailed: false, autoSend: false, sending: false });
     setResubmit(A, { state: 'rewound_awaiting_send', sendFailed: true });
     expect(resubmitRecordOf(useComposerStore.getState(), A)).toMatchObject({ state: 'rewound_awaiting_send', sendFailed: true });
     setResubmit(A, { state: 'idle', exited: true }); // an idle state that still says something is kept

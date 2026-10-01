@@ -22,7 +22,7 @@ import type { ControlRequestFrame } from '@shared/wire/frames';
 import type { JournalDirection, JournalRow } from '@shared/wire/journal';
 import { BashMode } from './bash-mode';
 import { DECLARED_DIALOG_KINDS, PermissionBroker } from './broker';
-import { cancelAsyncMessage, endSession, getContextUsage, getStatus, initialize, interrupt, REQUEST_TIMEOUT_MS, requestClassOf } from './controls';
+import { cancelAsyncMessage, endSession, getContextUsage, getStatus, initialize, interrupt, REQUEST_TIMEOUT_MS, requestClassOf, setPermissionMode } from './controls';
 import { EMPTY_GRANTS, reapply, recordFromResponse, type GrantSnapshot } from './grants';
 import { HostHookRegistry } from './host-hooks';
 import { RELAY_URL, spawnMeta, type LaunchPlan } from './launch';
@@ -35,7 +35,7 @@ import { hardReasons } from './budget';
 import { ControlClient, ControlError } from './rpc';
 import { ClearAndImplementSequence } from './session-clear';
 import { LADDER_MS, TerminationLadder, type ExitReason, type ExitSummary, type StopResult } from './session-ladder';
-import { SessionStatusTracker, type Catalog } from './session-status';
+import { isPermissionMode, SessionStatusTracker, type Catalog } from './session-status';
 import { SESSION_START_HOOK_MS, sessionStartHookMs } from './session-start-hooks';
 import { MemorySessionStateStore } from './store/memory-session-state-store';
 import type { EngineTransport, TransportItem, TransportProblem } from './transport';
@@ -549,6 +549,7 @@ export class EngineSession {
     // C10 end
 
     await this.verifyGateway();
+    await this.fallBackFromAuto(client, init); // W3
     if ((this.spec.resume !== null || this.inheritedGrants /* C10 */) && this.grants.allow.length > 0 && this.processState === 'initializing') {
       try {
         await reapply(client, this.grants);
@@ -567,6 +568,27 @@ export class EngineSession {
     if (this.processState !== 'initializing') return;
     this.setProcess('ready');
     void this.sampleContext(); // `ctx` from the start, a resume's whole context included, not only after the first turn
+  }
+
+  // W3 (charter D-18 and §5.1 as amended 2026-10-01): a spec that asked for auto and an initialize that answered another
+  // mode is the engine refusing auto at launch, which it does without a code (pass2/auto-haiku seq 4). Before the
+  // session is ready the host sets the spec's fallback with `set_permission_mode` (pass3/w3-auto-fallback seq 7-9: it
+  // takes acceptEdits after the refusal) and keeps auto requested with the refusal in words: a model the catalogue does
+  // not mark `supportsAutoMode: true` is `auto_mode_model`, anything else `auto_mode_unavailable`. A fallback the engine
+  // refuses leaves the engine's mode and says so in a notice; the composer says the rest from the status.
+  private async fallBackFromAuto(client: ControlClient, init: { current_permission_mode: string; models?: unknown[] }): Promise<void> {
+    const fallback = this.spec.permissionFallback ?? null;
+    if (this.spec.permissionMode !== 'auto' || fallback === null || fallback === 'auto' || init.current_permission_mode === 'auto' || this.processState !== 'initializing') return;
+    const asked = this.spec.model ?? 'default';
+    const row = (init.models ?? []).find((m): m is { value: string; resolvedModel?: unknown; supportsAutoMode?: unknown } => typeof m === 'object' && m !== null && ((m as { value?: unknown }).value === asked || (m as { resolvedModel?: unknown }).resolvedModel === asked));
+    const refusal: AutoModeRefusalCode = row !== undefined && row.supportsAutoMode !== true ? 'auto_mode_model' : 'auto_mode_unavailable';
+    try {
+      const effective = init.current_permission_mode === fallback ? fallback : (await setPermissionMode(client, { mode: fallback })).mode;
+      this.tracker.fallBack(isPermissionMode(effective) ? effective : fallback, refusal);
+    } catch (error) {
+      this.tracker.fallBack(isPermissionMode(init.current_permission_mode) ? init.current_permission_mode : 'default', refusal);
+      this.notice('permission:fallback_failed', `Auto mode isn't available for this session, and ${fallback} could not be set: ${messageOf(error)}`);
+    }
   }
 
   // The grant snapshot (unless the caller passed one) and the launch spec, from and to the SessionStateStore.

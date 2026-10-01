@@ -25,9 +25,15 @@ export function draftOf(doc: ComposerDoc, updatedAt: string): Draft | null {
   return { doc: { ...doc, attrs: { ...doc.attrs, attachments: kept } }, attachments, updatedAt };
 }
 
+// W3: a draft written before W3 may carry the composer's retired edit mode (`attrs.editing`); only the attachments
+// are the document's own attributes now.
 export function docOfDraft(draft: Draft | null): ComposerDoc | null {
   const doc = draft?.doc as JSONContent | undefined;
-  return doc && typeof doc === 'object' && doc.type === 'doc' ? doc : null;
+  if (!doc || typeof doc !== 'object' || doc.type !== 'doc') return null;
+  if (doc.attrs === undefined || !('editing' in doc.attrs)) return doc;
+  const { editing: _retired, ...attrs } = doc.attrs;
+  void _retired;
+  return { ...doc, attrs };
 }
 
 export interface DraftWriter {

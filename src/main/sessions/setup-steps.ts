@@ -6,6 +6,7 @@ import type { AppSessionId, MessageUuid, SessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { RelayHealth } from '@shared/engine/relay-health';
 import type { SetupEvent, SetupPhase } from '@shared/sessions/setup';
+import type { UserEngineDefaults } from '@shared/ipc/schema/settings'; // W3
 import type { GitRun } from '../git/runner';
 import type { WorktreeService } from '../git/worktrees';
 import type { SessionStore } from '../index/sessions';
@@ -31,6 +32,7 @@ export interface Setup {
   env: NodeJS.ProcessEnv;
   replay: ReplaySeam | null;
   settings: () => C10Settings;
+  userDefaults: () => Promise<UserEngineDefaults>; // W3
   launchGate: LaunchGate; // C12
   now: () => string;
   log: (message: string) => void;

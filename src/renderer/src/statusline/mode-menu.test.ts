@@ -11,7 +11,7 @@ const models = [
 
 describe('mode menu', () => {
   it('lists default, acceptEdits, plan, auto and bypassPermissions, the last behind a confirm', () => {
-    expect(MODE_OPTIONS.map((o) => o.mode)).toEqual(['default', 'acceptEdits', 'plan', 'auto', 'bypassPermissions']);
+    expect(MODE_OPTIONS.map((o) => o.mode)).toEqual(['auto', 'bypassPermissions', 'default', 'acceptEdits', 'plan'] /* W3: auto and bypass first */);
     expect(MODE_OPTIONS.filter((o) => o.confirm).map((o) => o.mode)).toEqual(['bypassPermissions']);
     expect(MODE_REFUSAL_WORDS.auto_mode_model).toBe('This model does not support auto mode');
   });
@@ -31,6 +31,9 @@ describe('mode menu', () => {
     expect(autoUnavailableReason(models, onHaiku.model)).toBe('This model does not support auto mode');
     expect(autoUnavailableReason(models, base.model)).toBeNull(); // claude-opus
     expect(autoUnavailableReason(null, onHaiku.model)).toBeNull(); // not known yet: offered, the engine refuses in words
+    // Haiku asked for, the init frame still naming Opus: the engine already runs Haiku, so auto is unavailable
+    expect(autoUnavailableReason(models, { requested: 'haiku', resolved: 'claude-opus' })).toBe('This model does not support auto mode');
+    expect(autoUnavailableReason(models, { requested: 'opus', resolved: 'claude-haiku' })).toBeNull();
   });
 
   it('the live binding shows the effective mode and sets through session.setPermissionMode, answering the refusal in words', async () => {
@@ -38,7 +41,7 @@ describe('mode menu', () => {
     const fake = fakeClient({ 'session.setPermissionMode': { effective: 'default', refusal: 'auto_mode_model', error: 'Cannot set permission mode to auto: model not supported' } });
     const binding = liveModeBinding(record('a'), status('a'), models, fake.client);
     expect(binding).toMatchObject({ value: 'auto', refusal: null, autoUnavailable: null, disabled: null });
-    expect(binding.options).toEqual(['default', 'acceptEdits', 'plan', 'auto', 'bypassPermissions']);
+    expect(binding.options).toEqual(['auto', 'bypassPermissions', 'default', 'acceptEdits', 'plan'] /* W3: auto and bypass first */);
     expect(await binding.set('auto')).toEqual({ ok: false, error: 'This model does not support auto mode' });
     expect(fake.invoked('session.setPermissionMode')).toEqual([{ appSessionId: 'a' as AppSessionId, mode: 'auto' }]);
   });

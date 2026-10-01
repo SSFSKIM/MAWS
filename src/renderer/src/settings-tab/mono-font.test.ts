@@ -3,7 +3,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { SETTINGS_DEFAULTS_V5 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V6 } from '@shared/settings/defaults';
 import { createSettingsStore } from '../stores/settings';
 import { applyMonoFont, connectMonoFont, monoFontStack, TOKEN_MONO_STACK } from './mono-font';
 
@@ -35,7 +35,7 @@ describe('the monospace font override', () => {
 
   it('follows the settings store', () => {
     const settings = createSettingsStore({ invoke: async () => ({ ok: false }), on: () => () => {} } as never);
-    const state = (monoFont: string | null) => ({ settings: { ...SETTINGS_DEFAULTS_V5, appearance: { ...SETTINGS_DEFAULTS_V5.appearance, monoFont } }, resolvedTheme: 'light' as const });
+    const state = (monoFont: string | null) => ({ settings: { ...SETTINGS_DEFAULTS_V6, appearance: { ...SETTINGS_DEFAULTS_V6.appearance, monoFont } }, resolvedTheme: 'light' as const });
     const off = connectMonoFont(settings, root);
     expect(root.style.getPropertyValue('--font-mono')).toBe('');
     settings.setState({ state: state('Symbols Nerd Font Mono') });

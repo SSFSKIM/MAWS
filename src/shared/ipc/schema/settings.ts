@@ -1,12 +1,16 @@
 // X2 `settings.*`: the persisted app settings and the theme resolved from them (charter §12 C1 *Theme switching*).
 // Version 2 (C5): the keymap overrides and the notification policy. Version 3 (C11): the engine binary, the gateway
 // policy, the near-limit threshold, the monospace font and the per-kind notification switches. Version 4 (C12): the
-// memory budget. Version 5 (W2): the transcript's width. Migrations live in `src/shared/settings/defaults.ts`, run by
-// main's store; the schema never defaults.
+// memory budget. Version 5 (W2): the transcript's width. Version 6 (W3): the mode a session takes when the engine refuses
+// auto. Migrations live in `src/shared/settings/defaults.ts`, run by main's store; the schema never defaults.
 import * as z from 'zod';
 import { ACTION_IDS } from '../../keymap/actions';
 import { CHORD_PATTERN } from '../../keymap/chord';
 import type { CommandSpec } from './common';
+// W3 start
+import { EffortSchema } from '../../engine/launch-spec';
+import { PermissionModeSchema } from '../../graph/enums';
+// W3 end
 // C7 start
 import { UsageSnapshotSchema } from '../../usage/types';
 // C7 end
@@ -53,9 +57,14 @@ const AppearanceSettingsSchema = z.strictObject({
 });
 const NotificationSettingsSchema = z.strictObject({ enabled: z.boolean(), sound: z.boolean(), kinds: NotificationKindsSchema });
 // C11 end
+// W3: charter D-18 and §5.1 as amended 2026-10-01: when the engine refuses auto for a session (a model without auto mode,
+// fast mode, the circuit breaker, settings), MAWS sets this mode explicitly and says so; any engine mode but auto.
+export const AutoFallbackSchema = PermissionModeSchema.exclude(['auto']);
+export type AutoFallback = z.infer<typeof AutoFallbackSchema>;
+const PermissionsSettingsSchema = z.strictObject({ autoFallback: AutoFallbackSchema });
 
 export const SettingsSchema = z.strictObject({
-  version: z.literal(5), // C11: version 3; C12: version 4 (engine.memoryBudgetMiB, engine.statefulMcpServers); W2: version 5 (appearance.transcriptWidth)
+  version: z.literal(6), // C11: version 3; C12: version 4 (engine.memoryBudgetMiB, engine.statefulMcpServers); W2: version 5 (appearance.transcriptWidth); W3: version 6 (permissions.autoFallback)
   theme: ThemeSettingSchema,
   // Overrides only; null unbinds; absent means the default. `partialRecord`, because zod 4's enum-keyed `record` is
   // exhaustive and would reject `{}` and every single override; unknown keys are still rejected.
@@ -67,6 +76,7 @@ export const SettingsSchema = z.strictObject({
   usage: UsageSettingsSchema,
   appearance: AppearanceSettingsSchema,
   // C11 end
+  permissions: PermissionsSettingsSchema, // W3
 });
 export type Settings = z.infer<typeof SettingsSchema>;
 
@@ -81,6 +91,7 @@ export const SettingsPatchSchema = z.strictObject({
   gateway: GatewaySettingsSchema.partial().optional(),
   usage: UsageSettingsSchema.partial().optional(),
   appearance: AppearanceSettingsSchema.partial().optional(),
+  permissions: PermissionsSettingsSchema.partial().optional(), // W3
 });
 export type SettingsPatch = z.infer<typeof SettingsPatchSchema>;
 
@@ -135,6 +146,16 @@ export const CustodySchema = z.discriminatedUnion('state', [
   z.strictObject({ state: z.enum(['missing', 'mismatch', 'version']), path: z.string(), message: z.string() }),
 ]);
 export type Custody = z.infer<typeof CustodySchema>;
+// W3 start: what the engine will use when MAWS passes nothing (charter §5.4 and D-18 as amended 2026-10-01): the user's
+// own `model`, `effortLevel` and `permissions.defaultMode` from `<CLAUDE_CONFIG_DIR or ~/.claude>/settings.json`, read
+// and never written. A key the file does not set, or sets to a value the engine would not take, is null.
+export const UserEngineDefaultsSchema = z.strictObject({ model: z.string().nullable(), effortLevel: EffortSchema.nullable(), defaultMode: PermissionModeSchema.nullable() });
+export type UserEngineDefaults = z.infer<typeof UserEngineDefaultsSchema>;
+const w3Commands = {
+  'settings.userEngineDefaults': { input: z.void(), output: UserEngineDefaultsSchema, owner: 'main' },
+} as const satisfies Record<`settings.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
+// W3 end
+
 const c12Commands = {
   'settings.engineCustody': { input: z.void(), output: CustodySchema.nullable(), owner: 'main' },
   'settings.engineApplied': { input: z.void(), output: z.void(), owner: 'main' },
@@ -147,6 +168,7 @@ export const commands = {
   ...c7Commands, // C7
   ...c11Commands, // C11
   ...c12Commands, // C12
+  ...w3Commands, // W3
 } as const satisfies Record<`settings.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {

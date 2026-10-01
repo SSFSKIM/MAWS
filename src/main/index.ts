@@ -36,6 +36,7 @@ import { FileLister, listableRoots } from './git/ls-files';
 import { onEmitted } from './ipc/events';
 import { createGitRunner } from './git/runner';
 import { claudeConfigDir, PromptHistory } from './history/prompt-history';
+import { readUserEngineDefaults } from './settings/user-engine-defaults'; // W3
 import { ClaudeUsageReader, claudeUsageDir } from './usage/claude-usage-reader';
 // C7 end
 // C8c start (emit comes with C3's imports)
@@ -231,6 +232,7 @@ app.whenReady().then(() => {
     reveal: (path) => shell.showItemInFolder(path),
     replay: ReplaySeam.fromEnv(process.env, process.cwd()), // the e2e seam (MAWS_E2E_REPLAY_FIXTURES)
     settings: () => sessionSettingsOf(settings.state().settings), // C11: the route, the relay policy and the subagent model from settings v3
+    userDefaults: () => readUserEngineDefaults(claudeConfigDir(process.env, home)), // W3: the user's defaultMode seeds a new intent's mode (read only)
     launchGate: () => engineConfigure.launchGate(), // C12: main refuses a launch when MAWS's copy of the engine is gone or altered
   });
   registerSessionServiceHandlers(sessionService);
@@ -271,6 +273,7 @@ app.whenReady().then(() => {
   });
   registerMainHandler('settings.claudeUsage.status', () => claudeUsage.status());
   registerMainHandler('settings.claudeUsage.open', (intent) => claudeUsage.open(intent));
+  registerMainHandler('settings.userEngineDefaults', () => readUserEngineDefaults(claudeConfigDir(process.env, home))); // W3: read only
   const sessionDirectories = () => knownSessionDirectories(sessions.model, index);
   registerMainHandler('settings.reveal', ({ path }) =>
     revealPath(path, { configHome: () => claudeConfigDir(process.env, home), sessionDirectories, showItemInFolder: (p) => shell.showItemInFolder(p) }),

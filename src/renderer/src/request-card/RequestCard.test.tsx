@@ -187,12 +187,14 @@ describe('edit prompt restores the initiating prompt', () => {
     mount(refusal, 'inline');
     fireEvent.click(screen.getByRole('button', { name: 'Edit prompt' }));
     await waitFor(() => expect(answers()).toEqual([{ kind: 'dialog', behavior: 'completed', result: 'edit_prompt' }]));
-    await waitFor(() => expect(useComposerStore.getState().prefills.get(APP)).toBeDefined());
-    const prefill = useComposerStore.getState().prefills.get(APP)!;
-    expect(prefill.text).toMatch(/^fix the <pasted_content> build\[Pasted text #1 \+3 lines\]/); // as typed, as history recall has it
-    expect(prefill.pasted).toEqual([{ name: 'Pasted text #1', text: body }]);
-    expect(prefill.images).toEqual([{ name: expect.any(String), mediaType: 'image/png', data: 'iVBORw0KGgo=' }]);
-    expect(prefill.editing).toEqual({ messageUuid: 'u-1', seenCursor: 'u-1' });
+    // W3 (B6): the prompt's own bubble is edited in place, as a bubble's Edit edits it; nothing goes into the composer
+    await waitFor(() => expect(useComposerStore.getState().inlineEdits.get(APP)).toBeDefined());
+    const edit = useComposerStore.getState().inlineEdits.get(APP)!;
+    expect(edit.text).toMatch(/^fix the <pasted_content> build\[Pasted text #1 \+3 lines\]/); // as typed, as history recall has it
+    expect(edit.bodies).toEqual({ '[Pasted text #1 +3 lines]': body });
+    expect(edit.images).toEqual([{ name: expect.any(String), mediaType: 'image/png', data: 'iVBORw0KGgo=' }]);
+    expect(edit).toMatchObject({ messageUuid: 'u-1', seenCursor: 'u-1', kind: 'edit' });
+    expect(useComposerStore.getState().prefills.get(APP)).toBeUndefined();
   });
 
   it('reads the prompt as the source holds it now, not a view mounted earlier and since closed', async () => {
@@ -206,8 +208,8 @@ describe('edit prompt restores the initiating prompt', () => {
     transcript([...b.events]);
     mount(refusal, 'inline');
     fireEvent.click(screen.getByRole('button', { name: 'Edit prompt' }));
-    await waitFor(() => expect(useComposerStore.getState().prefills.get(APP)).toBeDefined());
-    expect(useComposerStore.getState().prefills.get(APP)).toMatchObject({ text: 'the newer prompt', editing: { messageUuid: 'u-2', seenCursor: 'u-2' } });
+    await waitFor(() => expect(useComposerStore.getState().inlineEdits.get(APP)).toBeDefined());
+    expect(useComposerStore.getState().inlineEdits.get(APP)).toMatchObject({ text: 'the newer prompt', messageUuid: 'u-2', seenCursor: 'u-2' });
   });
 
   it('prefills nothing until the answer is delivered', async () => {

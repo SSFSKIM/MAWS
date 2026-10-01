@@ -6,6 +6,7 @@ import { useState } from 'react';
 import { EffortSchema, type Effort } from '@shared/engine/launch-spec';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { ModelCatalogueEntry } from '@shared/sessions/models';
+import { DEFAULT_ROW, listName } from '../composer/frame/model-label';
 import { useCommand } from '../ipc/query';
 import { useSetup } from '../sessions/store';
 import { settingsDirectoryOf } from '../sessions/useSetupIntent';
@@ -21,6 +22,7 @@ import type { SwitchAnswer } from './switch-route';
 const rowOfEntry = (entry: ModelCatalogueEntry): ModelRow => ({
   value: entry.value,
   displayName: entry.displayName,
+  ...(typeof entry.resolvedModel === 'string' && { resolvedModel: entry.resolvedModel }), // W3: what `default` runs
   ...(entry.supportsAutoMode !== undefined && { supportsAutoMode: entry.supportsAutoMode }),
   ...(entry.supportsFastMode !== undefined && { supportsFastMode: entry.supportsFastMode }),
   supportedEffortLevels: effortsOf({ supportedEffortLevels: entry.supportedEffortLevels }),
@@ -32,7 +34,8 @@ const rowOfEntry = (entry: ModelCatalogueEntry): ModelRow => ({
 export function useClaudeModels(enabled = true, cwd: string | null = null): readonly ModelRow[] | null {
   const read = useCommand('engine.models', cwd === null ? { refresh: false, gateway: 'direct' } : { refresh: false, gateway: 'direct', cwd }, { staleTime: 60_000, enabled });
   if (!read.data) return read.isError ? [] : null;
-  const rows = read.data.models.map(rowOfEntry);
+  const all = read.data.models.map(rowOfEntry);
+  const rows = all.map((m) => (m.value === DEFAULT_ROW ? { ...m, displayName: listName(m, all) } : m)); // W3: `default` named by the model it runs
   const claude = new Set(presentModels(rows).claude.map((m) => m.value));
   return rows.filter((m) => claude.has(m.value));
 }
@@ -83,7 +86,10 @@ export function DirectModelList({ models, chosen, pick }: { models: readonly Mod
           onClick={() => pick(entry.value)}
           className="flex w-full flex-col items-start rounded-sm px-2 py-1 text-left outline-accent hover:bg-bg-hover focus-visible:outline-2 aria-checked:bg-bg-active"
         >
-          <span>{entry.displayName}</span>
+          <span className="flex items-baseline gap-1.5">
+            {entry.displayName}
+            {entry.value === DEFAULT_ROW && <span className="rounded-sm bg-bg-active px-1 text-ui-sm text-fg-muted">{DIRECT_MODEL.defaultBadge}</span>}
+          </span>
           {entry.cannotHoldAuto && <span className="text-ui-sm text-fg-faint">{DIRECT_MODEL.cannotHoldAuto}</span>}
         </button>
       ))}

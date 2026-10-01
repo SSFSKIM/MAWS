@@ -5,19 +5,35 @@
 // the requests a docked placement is showing (the transcript's request slot shows a pointer for those), and the focus
 // targets a mounted composer registers (the docked frame gives focus back through them). M3 adds the `#` target each
 // session remembers; M4 adds the composer's own state beside these: the synchronous `starting` gate of an unstarted
-// session's first send, the edit mode a prefill with `editing` enters, and the resubmit state the edit-and-resubmit
-// flow (M4b) drives, each per session so they outlive a tab switch. The final fixes add the models each session's
-// engine last listed (C11's Session info and widgets read them; the model chip names its model from `engine.models`).
+// session's first send and the resubmit state the edit-and-resubmit flow (M4b) drives, each per session so they outlive
+// a tab switch. The final fixes add the models each session's engine last listed (C11's Session info and widgets read
+// them; the model chip names its model from `engine.models`). W3 (B6): the user bubble a session edits in place, with
+// its text, which outlives the virtualised row it sits in; the composer has no edit mode any more.
 import { create } from 'zustand';
 import type { AppSessionId, MessageUuid, RequestId } from '@shared/graph/ids';
 import type { ListModelsResponse } from '@shared/wire/control';
-import { toast } from './notices';
 
 export interface Prefill {
   text: string; // the row's text with `[Pasted text #n +L lines]` placeholders in place
   pasted?: Array<{ name: string; text: string }>; // placeholder order; each becomes a Pasted atom; a placeholder with no entry becomes an unavailable atom
+  // W3 (B6): instead of `pasted`, an edited text's bodies keyed by the placeholder that named each (`bodiesByPlaceholder`):
+  // a placeholder takes the body it names wherever the edit moved it; one it does not name is unavailable
+  bodies?: Readonly<Record<string, string>>;
   images?: Array<{ name: string; mediaType: string; data: string }>; // base64, re-attached
-  editing: { messageUuid: MessageUuid; seenCursor: MessageUuid | null } | null; // seenCursor: the transcript's newest user uuid when the edit flow started
+}
+
+// W3 (B6; charter line 134 and §5.3 as amended 2026-10-01): a user bubble edited in place. Send rewinds the session to
+// `messageUuid` (with the seen cursor, the transcript's newest user uuid when the edit began) and resends the text; a
+// `blocked` prompt (a hook stopped it, so it never reached the model) is sent as a new message instead. The text keeps
+// the row's pasted placeholders, whose bodies (keyed by the placeholder that named each when the edit began, so one the
+// human deletes or moves takes no other's body) and the row's images go with the send.
+export interface InlineEdit {
+  messageUuid: MessageUuid;
+  seenCursor: MessageUuid | null;
+  kind: 'edit' | 'blocked';
+  text: string;
+  bodies: NonNullable<Prefill['bodies']>;
+  images: NonNullable<Prefill['images']>;
 }
 
 export interface FocusTarget {
@@ -27,27 +43,23 @@ export interface FocusTarget {
   openWidget?(name: string, args: string): boolean; // C11: a registered widget over the composer, with its argument (openComposerWidget)
 }
 
-// Edit mode: the message an edited prefill resubmits against, and the transcript's newest user uuid when the edit began.
-export interface Editing {
-  messageUuid: MessageUuid;
-  seenCursor: MessageUuid | null;
-}
-
 // Where edit-and-resubmit stands (C7 execution document, "Edit-and-resubmit and the fork seam"); M4b drives it from
-// `composer/resubmit-seam.ts`. Every state keeps the draft; only `sent` clears it (and `sent` is left at once: the
-// accepted send clears edit mode and the record returns to `idle`).
+// `composer/resubmit-seam.ts` (W3: over the bubble edited in place). Every state keeps the edited text; only `sent`
+// clears it (and `sent` is left at once: the accepted send ends the edit and the record returns to `idle`).
 export type ResubmitState = 'idle' | 'confirming' | 'rewinding' | 'rewind_uncertain' | 'rewind_unresolved' | 'rewound_awaiting_send' | 'sent';
 
 // The state with what its banner says: `exited` (idle after the engine exited mid-rewind), `sendFailed` (rewound, and
 // the send that followed failed), `autoSend` (rewound by the human's own confirm: the composer sends the edited text
-// as part of that decision; a rewind confirmed only later by the transcript waits for Send).
+// as part of that decision; a rewind confirmed only later by the transcript waits for Send), `sending` (the edit's one
+// send or fork is with the host, in whatever state it left: nothing else is taken until it answers).
 export interface Resubmit {
   state: ResubmitState;
   exited: boolean;
   sendFailed: boolean;
   autoSend: boolean;
+  sending: boolean;
 }
-export const IDLE_RESUBMIT: Resubmit = Object.freeze({ state: 'idle', exited: false, sendFailed: false, autoSend: false }) as Resubmit;
+export const IDLE_RESUBMIT: Resubmit = Object.freeze({ state: 'idle', exited: false, sendFailed: false, autoSend: false, sending: false }) as Resubmit;
 
 // Where `#` appends (C3's `session.memoryAppend` target): the memory dialog's project or user file, or a listed path.
 export interface MemoryTarget {
@@ -62,10 +74,18 @@ export interface ComposerState {
   focusTargets: ReadonlyMap<AppSessionId, FocusTarget>;
   memoryTargets: ReadonlyMap<AppSessionId, MemoryTarget>; // M3: the `#` target chosen per session
   starting: ReadonlySet<AppSessionId>; // M4: an unstarted session's first send is with C10's `start`
-  editing: ReadonlyMap<AppSessionId, Editing>; // M4: edit mode, entered by a prefill with `editing`
+  inlineEdits: ReadonlyMap<AppSessionId, InlineEdit>; // W3 (B6): the bubble each session edits in place
   resubmit: ReadonlyMap<AppSessionId, Resubmit>; // M4b: absent is IDLE_RESUBMIT
-  restoredEdits: ReadonlySet<AppSessionId>; // M4b: edit modes restored from a draft (a reload), until the edit ends
   models: ReadonlyMap<AppSessionId, readonly ListedModel[]>; // the engine's latest `session.listModels` answer per session
+  chipWidgets: ReadonlyMap<AppSessionId, ChipWidgetRequest>; // W3: the model chip's open menu (`/model`, `/effort`, `/fast`, or the chip itself)
+}
+
+// W3: the widget the model chip's menu shows (opened by the chip, the palette, a typed command or `openComposerWidget`),
+// until it closes; `nonce` tells two opens of the same name apart.
+export interface ChipWidgetRequest {
+  name: string;
+  args: string;
+  nonce: number;
 }
 
 export type ListedModel = ListModelsResponse['models'][number];
@@ -76,10 +96,10 @@ const initial = (): ComposerState => ({
   focusTargets: new Map(),
   memoryTargets: new Map(),
   starting: new Set(),
-  editing: new Map(),
+  inlineEdits: new Map(),
   resubmit: new Map(),
-  restoredEdits: new Set(),
   models: new Map(),
+  chipWidgets: new Map(),
 });
 
 export const useComposerStore = create<ComposerState>()(initial);
@@ -88,14 +108,8 @@ export function resetComposerStore(): void {
   useComposerStore.setState(initial());
 }
 
-// Replaces the session's untaken prefill: the latest ask wins. Refused while the session's rewind is in flight or
-// unconfirmed (M4b): the editor holds the text that rewind is to resend, and a new edit would abandon it.
+// Replaces the session's untaken prefill: the latest ask wins.
 export function prefillComposer(appSessionId: AppSessionId, prefill: Prefill): void {
-  const { state } = resubmitRecordOf(useComposerStore.getState(), appSessionId);
-  if (state === 'rewinding' || state === 'rewind_uncertain') {
-    toast({ level: 'info', text: 'A rewind is in progress', actions: [], dismissible: true });
-    return;
-  }
   useComposerStore.setState((s) => ({ prefills: new Map(s.prefills).set(appSessionId, prefill) }));
 }
 
@@ -172,15 +186,22 @@ export function setStarting(appSessionId: AppSessionId, on: boolean): void {
   });
 }
 
-export const editingOf = (state: ComposerState, appSessionId: AppSessionId): Editing | null => state.editing.get(appSessionId) ?? null;
+// ---- W3 (B6): the bubble edited in place --------------------------------------------------------------------------
 
-export function setEditing(appSessionId: AppSessionId, editing: Editing | null): void {
+export const inlineEditOf = (state: ComposerState, appSessionId: AppSessionId): InlineEdit | null => state.inlineEdits.get(appSessionId) ?? null;
+
+export function setInlineEdit(appSessionId: AppSessionId, edit: InlineEdit | null): void {
   useComposerStore.setState((s) => {
-    const next = new Map(s.editing);
-    if (editing) next.set(appSessionId, editing);
-    else next.delete(appSessionId);
-    return { editing: next };
+    const inlineEdits = new Map(s.inlineEdits);
+    if (edit) inlineEdits.set(appSessionId, edit);
+    else inlineEdits.delete(appSessionId);
+    return { inlineEdits };
   });
+}
+
+export function setInlineText(appSessionId: AppSessionId, text: string): void {
+  const edit = inlineEditOf(useComposerStore.getState(), appSessionId);
+  if (edit && edit.text !== text) setInlineEdit(appSessionId, { ...edit, text });
 }
 
 export const resubmitRecordOf = (state: ComposerState, appSessionId: AppSessionId): Resubmit => state.resubmit.get(appSessionId) ?? IDLE_RESUBMIT;
@@ -191,7 +212,7 @@ export function setResubmit(appSessionId: AppSessionId, next: ResubmitState | (P
   const record: Resubmit = { ...IDLE_RESUBMIT, ...(typeof next === 'string' ? { state: next } : next) };
   useComposerStore.setState((s) => {
     const resubmit = new Map(s.resubmit);
-    if (record.state === 'idle' && !record.exited) resubmit.delete(appSessionId);
+    if (record.state === 'idle' && !record.exited && !record.sending) resubmit.delete(appSessionId);
     else resubmit.set(appSessionId, record);
     return { resubmit };
   });
@@ -219,4 +240,21 @@ export const listedModelsOf = (state: ComposerState, appSessionId: AppSessionId)
 
 export function rememberListedModels(appSessionId: AppSessionId, models: readonly ListedModel[]): void {
   useComposerStore.setState((s) => (s.models.get(appSessionId) === models ? s : { models: new Map(s.models).set(appSessionId, models) }));
+}
+
+// ---- W3: the model chip's menu, opened from the editor ----------------------------------------------------------------
+
+let chipNonce = 0;
+export function requestChipWidget(appSessionId: AppSessionId, name: string, args: string): void {
+  chipNonce += 1;
+  useComposerStore.setState((s) => ({ chipWidgets: new Map(s.chipWidgets).set(appSessionId, { name, args, nonce: chipNonce }) }));
+}
+
+export function closeChipWidget(appSessionId: AppSessionId): void {
+  if (!useComposerStore.getState().chipWidgets.has(appSessionId)) return;
+  useComposerStore.setState((s) => {
+    const chipWidgets = new Map(s.chipWidgets);
+    chipWidgets.delete(appSessionId);
+    return { chipWidgets };
+  });
 }

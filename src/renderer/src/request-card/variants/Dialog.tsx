@@ -4,12 +4,14 @@
 // never completes or cancels it, and the engine's dialog timeout retires it.
 //
 // The refusal's Edit prompt captures the prompt the refusal interrupted from the transcript store before it answers,
-// and only once the answer is delivered puts it in the composer in edit mode (the terminal's own recovery: rewind to
-// the last human prompt and restore it as the draft).
+// and only once the answer is delivered edits that bubble in place (W3, B6; the terminal's own recovery: rewind to the
+// last human prompt and restore it), whose Send rewinds to it and resends.
 import { useEffect, useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { ipc } from '../../ipc/client';
-import { prefillComposer, type Prefill } from '../../stores/composer';
+import { startInlineEdit } from '../../composer/resubmit-seam';
+import type { UserRow } from '../../composer/edit-prefill';
+import type { MessageUuid } from '@shared/graph/ids';
 import { toast } from '../../stores/notices';
 import { ipcSource, useTranscriptStore } from '../../transcript';
 import { toAnswer } from '../answers';
@@ -21,7 +23,7 @@ import type { VariantProps } from './types';
 // The session's transcript as the store holds it, attached for the read: `ipcSource` is memoised per key, so a mounted
 // view's attachment is shared (counted, already hydrated), and with no holder the key hydrates again from the source.
 // A kept `live` entry alone is not current: the store keeps it after its last holder detaches, and stops following.
-async function captureInitiatingPrompt(appSessionId: AppSessionId): Promise<Prefill | null> {
+async function captureInitiatingPrompt(appSessionId: AppSessionId): Promise<(UserRow & { messageUuid: MessageUuid }) | null> {
   const read = () => initiatingPrompt(useTranscriptStore.getState().rows(appSessionId), useTranscriptStore.getState().activity(appSessionId));
   await useTranscriptStore.getState().attach(appSessionId, ipcSource(appSessionId));
   try {
@@ -45,7 +47,7 @@ function RefusalFallback({ item, payload, busy: answering, submit, bindKeys }: D
     const prompt = await captureInitiatingPrompt(item.appSessionId);
     setCapturing(false);
     answer('edit_prompt', 'Edit prompt', () => {
-      if (prompt) prefillComposer(item.appSessionId, prompt);
+      if (prompt) startInlineEdit(item.appSessionId, prompt, 'edit');
       else toast({ level: 'info', text: 'No prompt to edit', actions: [], dismissible: true });
     });
   };

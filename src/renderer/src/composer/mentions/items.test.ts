@@ -46,7 +46,7 @@ describe('slash items union the catalogue, the widget catalogue and MAWS actions
     expect(byName(items, 'permissions')).toMatchObject({ origin: 'widget', action: { kind: 'unavailable', hint: 'Not available here' } }); // W2: no host registered the widget
     // every declared widget name is an item, whether or not the engine lists it
     for (const w of WIDGET_COMMANDS) expect(items.some((i) => i.name === w.name)).toBe(true);
-    expect(items.filter((i) => i.origin === 'widget').map((i) => i.name).sort()).toEqual(['diff', 'export', 'hooks', 'memory', 'permissions', 'plugins', 'resume', 'sandbox', 'skills', 'status']);
+    expect(items.filter((i) => i.origin === 'widget').map((i) => i.name).sort()).toEqual(['diff', 'export', 'hooks', 'memory', 'permissions', 'plugins', 'resume', 'rewind' /* W3 */, 'sandbox', 'skills', 'status']);
     expect(items.filter((i) => i.origin === 'maws').length).toBeGreaterThan(5);
     expect(byName(items, 'split')).toMatchObject({ origin: 'maws', action: { kind: 'maws', id: 'pane.split' } });
   });

@@ -15,6 +15,10 @@ export const LaunchSpecSchema = z.strictObject({
   model: z.string().nullable(), // --model; null = engine default
   effort: EffortSchema.nullable(), // via --settings { effortLevel }; null = settings
   permissionMode: PermissionModeSchema.nullable(), // --permission-mode; null = settings (auto for the owner, D-18)
+  // W3 (additive X6; charter D-18 as amended 2026-10-01): the mode the host sets with `set_permission_mode` when the
+  // spec asks for auto and the engine's initialize answers another mode (the engine refuses auto at launch silently,
+  // pass2/auto-haiku.jsonl seq 4); absent or null: the refusal stands as the engine left it.
+  permissionFallback: PermissionModeSchema.nullable().optional(),
   gateway: z.enum(['gateway', 'direct']), // D-19 default is 'gateway'; the caller decides the fallback
   subagentModel: z.string().nullable(), // CLAUDE_CODE_SUBAGENT_MODEL; null = the captured shell/settings value
   resume: z.strictObject({ sessionId: SessionIdSchema, fork: z.boolean() }).nullable(),

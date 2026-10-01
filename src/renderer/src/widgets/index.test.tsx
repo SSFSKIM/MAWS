@@ -9,7 +9,7 @@ import { createWidgetBackend, type WidgetBackend } from '../../../../test/suppor
 import { registeredWidgetNames, slashWidget, WIDGET_COMMANDS } from '../composer/mentions/widgets';
 import { resetCatalogStore } from '../stores/catalog';
 import { useSessions } from '../stores/sessions';
-import { WIDGET_FOOT } from './copy';
+import { WIDGET_FOOT, type FramedWidgetName } from './copy';
 import { registerAllWidgets } from './index';
 
 const ROOT = join(__dirname, '../../../..');
@@ -61,15 +61,15 @@ describe('every widget renders its fixture response', () => {
     context: '30,433 of 200,000 · 15% · autocompact at 167,000',
     export: '2026-09-28-022217-reply-with-exactly-ok.txt',
     diff: '0 files · +0 −0 · working tree',
-    model: 'From gateway',
-    effort: 'Engine default',
-    fast: 'Fast mode is for Opus', // the scenario session is on Sonnet
     compact: '21,508 of 200,000 · 11% · autocompact at 167,000', // the summary corrected as C3 corrects its sample (debt wave 4)
     resume: 'Usage reset countdown',
     rename: 'New title',
   };
 
-  it.each(NAMES)('%s opens with its body and its foot', async (name) => {
+  const SELECTOR = ['model', 'effort', 'fast'];
+  const FRAMED = NAMES.filter((name): name is FramedWidgetName => !SELECTOR.includes(name));
+
+  it.each(FRAMED)('%s opens with its body and its foot', async (name) => {
     const widget = slashWidget(name)!;
     const Component = widget.component;
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -82,6 +82,25 @@ describe('every widget renders its fixture response', () => {
     expect(footer.textContent).toContain(`Read with ${WIDGET_FOOT[name].readWith}`);
     expect(footer.textContent).toContain(WIDGET_FOOT[name].editedWhere!.replaceAll('`', ''));
     if (SHOWS[name]) await waitFor(() => expect(screen.getAllByText((_, el) => el?.textContent?.includes(SHOWS[name]) === true && el.children.length === 0).length).toBeGreaterThan(0));
+  });
+
+  // W3: the three selector names are one menu opened at its view: `/model` on the list, `/effort` and `/fast` on the slider
+  it.each([
+    ['model', 'model', 'From gateway'],
+    ['effort', 'effort', 'Faster'],
+    ['fast', 'effort', 'Faster'],
+  ])('%s opens the model selector on its %s view', async (name, view, shows) => {
+    const Component = slashWidget(name)!.component;
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { container } = render(
+      <QueryClientProvider client={client}>
+        <Component appSessionId={ID} args="" close={() => {}} />
+      </QueryClientProvider>,
+    );
+    expect(slashWidget(name)!.placement).toBe('modelChip');
+    expect(container.querySelector('[data-model-selector]')?.getAttribute('data-model-selector')).toBe(view);
+    expect(container.querySelector('footer')).toBeNull();
+    await waitFor(() => expect(screen.getAllByText((_, el) => el?.textContent?.includes(shows) === true && el.children.length === 0).length).toBeGreaterThan(0));
   });
 
   it("asks each read with the widget's own arguments", async () => {

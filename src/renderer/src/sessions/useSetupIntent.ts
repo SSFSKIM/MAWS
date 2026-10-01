@@ -3,6 +3,7 @@
 // through C7's `registerSetupIntentHook` at module load, so this module's `SetupIntentHook` extends C7's landed type:
 // the intent is C10's whole `SetupIntent` (C7 reads a subset) and `patch` takes C10's patch (C7 writes a subset).
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import type { PermissionMode } from '@shared/graph/enums';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { ModelCatalogue, ModelCatalogueEntry } from '@shared/sessions/models';
 import { autoModeNote, BUILTIN_MODELS } from '@shared/sessions/models';
@@ -12,6 +13,7 @@ import { defaultBranchName, type WorktreeInfo } from '@shared/sessions/worktree'
 import type { ModelInfo, SetupIntentHook as ComposerSetupIntentHook } from '../composer/setup-intent';
 import { ipc } from '../ipc/client';
 import { useSessions } from '../stores/sessions';
+import { useSettings } from '../stores/settings'; // W3
 import { patchIntent, startIntent, type HookResult } from './setup-actions';
 import { useSetup } from './store';
 
@@ -70,10 +72,14 @@ export function locationsOf(input: { projectDirectory: string; intent: SetupInte
 
 // The catalogue's entries as C7's `ModelInfo`. The entry schema is loose, so the engine's other `list_models` fields
 // ride along unchecked: `supportedEffortLevels` is kept when it is a list of strings, so the model widget lowers an
-// effort the chosen model does not list, as it does for a live session.
+// effort the chosen model does not list, as it does for a live session. W3: the resolved model, the description and
+// `supportsEffort` too, each when it has its type (the model selector names `default`'s model and shows "From gateway").
 export function modelsOf(catalogue: ModelCatalogue): ModelInfo[] {
   return catalogue.models.map((entry) => {
     const info: ModelInfo = { value: entry.value, displayName: entry.displayName };
+    if (typeof entry.resolvedModel === 'string') info.resolvedModel = entry.resolvedModel;
+    if (typeof entry.description === 'string') info.description = entry.description;
+    if (typeof entry.supportsEffort === 'boolean') info.supportsEffort = entry.supportsEffort;
     if (entry.supportsAutoMode !== undefined) info.supportsAutoMode = entry.supportsAutoMode;
     if (entry.supportsFastMode !== undefined) info.supportsFastMode = entry.supportsFastMode;
     const levels: unknown = entry.supportedEffortLevels;
@@ -84,10 +90,10 @@ export function modelsOf(catalogue: ModelCatalogue): ModelInfo[] {
 
 // The note beside the mode and model chips for the model the launch would use (`default` when the intent leaves it
 // to the engine).
-export function noteFor(catalogue: ModelCatalogue, intent: Pick<SetupIntent, 'model' | 'permissionMode'>): string | null {
+export function noteFor(catalogue: ModelCatalogue, intent: Pick<SetupIntent, 'model' | 'permissionMode'>, fallback: PermissionMode = 'acceptEdits'): string | null {
   const value = intent.model ?? 'default';
   const entry: ModelCatalogueEntry | null = catalogue.models.find((m) => m.value === value) ?? (intent.model === null ? null : { value: intent.model, displayName: intent.model });
-  return autoModeNote(entry, intent.permissionMode);
+  return autoModeNote(entry, intent.permissionMode, fallback); // W3: the mode MAWS sets when auto is refused
 }
 
 // The running setup's phase as the composer says it (Interfaces, "The unstarted session": `Creating worktree <name>` ·
@@ -149,6 +155,7 @@ function useSetupOptions(
   const [facts, setFacts] = useState<RepositoryFacts | null>(null);
   const [catalogue, setCatalogue] = useState<ModelCatalogue>(BUILTIN_FALLBACK);
   const [worktreeName] = useState(() => defaultWorktreeName());
+  const fallback = useSettings((s) => s.state?.settings.permissions.autoFallback) ?? 'acceptEdits'; // W3
 
   // Only an unstarted session reads it: C7 calls this hook from every composer, and a started session's has no intent.
   const route = intent?.gateway ?? null;
@@ -180,9 +187,9 @@ function useSetupOptions(
       locations: locationsOf({ projectDirectory: projectDirectory ?? facts?.repoRoot ?? baseDirectoryOf(intent.location), intent, repoRoot: facts?.repoRoot ?? null, worktrees: facts?.worktrees ?? [], worktreeName }),
       branches: facts?.branches ?? [],
       models: modelsOf(catalogue),
-      autoModeNote: noteFor(catalogue, intent),
+      autoModeNote: noteFor(catalogue, intent, fallback),
     };
-  }, [intent, projectDirectory, facts, catalogue, worktreeName]);
+  }, [intent, projectDirectory, facts, catalogue, worktreeName, fallback]);
   // A failed trust check is read again at Send (the directory may be readable now): the refusal stands only while the
   // check still fails.
   const recheck = useCallback(async () => {

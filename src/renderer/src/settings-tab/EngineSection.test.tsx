@@ -4,10 +4,10 @@
 // shows MAWS's copy or the refusal in words.
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { MawsBridge, Settings } from '@shared/ipc/schema';
 import type { Custody } from '@shared/ipc/schema/settings';
-import { SETTINGS_DEFAULTS_V5 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V6 } from '@shared/settings/defaults';
 import { useNotices } from '../stores/notices';
 import { useSettings } from '../stores/settings';
 import { BINARY, CUSTODY, settingsBridge, type SettingsBridge } from '../test-support/settings-bridge';
@@ -19,7 +19,7 @@ const settings = () => useSettings.getState().state!.settings;
 const COPY = CUSTODY.state === 'ok' ? CUSTODY.path : '';
 
 // The host as main configures it: the chosen path, else MAWS's copy.
-function renderSection(initial: Settings = SETTINGS_DEFAULTS_V5, answers: SettingsBridge['answers'] = {}) {
+function renderSection(initial: Settings = SETTINGS_DEFAULTS_V6, answers: SettingsBridge['answers'] = {}) {
   b = settingsBridge(initial);
   b.answers['engine.binaryInfo'] = () => ({ ...BINARY, path: settings().engine.binaryPath ?? COPY, expectedVersion: settings().engine.pinnedVersion });
   Object.assign(b.answers, answers);
@@ -60,7 +60,7 @@ describe('Settings › Engine writes settings; main configures the host', () => 
   });
 
   it('"Use default" puts launches back on MAWS’s copy, and the row reads it', async () => {
-    renderSection({ ...SETTINGS_DEFAULTS_V5, engine: { ...SETTINGS_DEFAULTS_V5.engine, binaryPath: '/opt/claude' } });
+    renderSection({ ...SETTINGS_DEFAULTS_V6, engine: { ...SETTINGS_DEFAULTS_V6.engine, binaryPath: '/opt/claude' } });
     expect(await within(row('Binary')).findByText('/opt/claude')).toBeTruthy();
     fireEvent.click(within(row('Binary')).getByRole('button', { name: 'Use default' }));
     expect(await within(row('Binary')).findByText('~/Library/Application Support/MAWS/engine/2.1.283/claude')).toBeTruthy();
@@ -70,7 +70,7 @@ describe('Settings › Engine writes settings; main configures the host', () => 
 
   it('the re-pin confirm writes the pin alone and waits for main (custody for the new version runs there)', async () => {
     renderSection(
-      { ...SETTINGS_DEFAULTS_V5, engine: { ...SETTINGS_DEFAULTS_V5.engine, binaryPath: '/opt/claude/2.1.290/claude' } },
+      { ...SETTINGS_DEFAULTS_V6, engine: { ...SETTINGS_DEFAULTS_V6.engine, binaryPath: '/opt/claude/2.1.290/claude' } },
       { 'engine.binaryInfo': () => ({ ...BINARY, path: '/opt/claude/2.1.290/claude', version: '2.1.290', expectedVersion: settings().engine.pinnedVersion, ok: settings().engine.pinnedVersion === '2.1.290', error: null }) },
     );
     expect(await within(row('Pinned version')).findByText('binary reports 2.1.290')).toBeTruthy();
@@ -101,18 +101,30 @@ describe('the custody row', () => {
   });
 
   it('says the copy is not used while a binary path is chosen', async () => {
-    renderSection({ ...SETTINGS_DEFAULTS_V5, engine: { ...SETTINGS_DEFAULTS_V5.engine, binaryPath: '/opt/claude' } });
+    renderSection({ ...SETTINGS_DEFAULTS_V6, engine: { ...SETTINGS_DEFAULTS_V6.engine, binaryPath: '/opt/claude' } });
     expect(await within(row('Engine copy')).findByText('not used while a binary path is chosen')).toBeTruthy();
   });
 
   it('gives a refusal in words', async () => {
     const refused: Custody = { state: 'mismatch', path: '/u/engine/2.1.283/claude', message: "Claude Code 2.1.283 has been altered in MAWS's copy at /u/engine/2.1.283/claude." };
-    renderSection(SETTINGS_DEFAULTS_V5, { 'settings.engineCustody': () => refused });
+    renderSection(SETTINGS_DEFAULTS_V6, { 'settings.engineCustody': () => refused });
     expect(await within(row('Engine copy')).findByText(refused.message)).toBeTruthy();
   });
 
   it('says when custody does not run (tests and replay)', async () => {
-    renderSection(SETTINGS_DEFAULTS_V5, { 'settings.engineCustody': () => null });
+    renderSection(SETTINGS_DEFAULTS_V6, { 'settings.engineCustody': () => null });
     expect(await within(row('Engine copy')).findByText('not kept in this run · launches use the installed binary')).toBeTruthy();
+  });
+});
+
+// W3 (charter D-18 as amended 2026-10-01): the mode a session takes when the engine refuses auto, settings version 6
+describe('the auto fallback row', () => {
+  it('offers every engine mode but auto, shows acceptEdits by default and writes permissions.autoFallback', async () => {
+    renderSection();
+    const select = screen.getByRole('combobox', { name: 'When auto mode is unavailable' }) as HTMLSelectElement;
+    expect([...select.options].map((o) => o.value)).toEqual(['default', 'acceptEdits', 'plan', 'bypassPermissions', 'dontAsk']);
+    expect(select.value).toBe('acceptEdits');
+    fireEvent.change(select, { target: { value: 'default' } });
+    await vi.waitFor(() => expect(b.sets).toEqual([{ permissions: { autoFallback: 'default' } }]));
   });
 });

@@ -21,11 +21,11 @@ describe('the mode menu on a live session', () => {
     render(<ModeMenu binding={liveModeBinding(record('app-a'), status('app-a'), OPUS, fake.client)} onDone={done} />);
     const menu = screen.getByRole('menu', { name: 'Permission mode' });
     const items = within(menu).getAllByRole('menuitemradio');
-    expect(items.map((i) => i.querySelector('.font-mono')?.textContent)).toEqual(['default', 'acceptEdits', 'plan', 'auto', 'bypassPermissions']);
-    expect(items[3].getAttribute('aria-checked')).toBe('true');
-    expect((items[3] as HTMLButtonElement).disabled).toBe(true);
-    expect(items[3].textContent).toContain('This model does not support auto mode');
-    fireEvent.click(items[2]);
+    expect(items.map((i) => i.querySelector('.font-mono')?.textContent)).toEqual(['auto', 'bypassPermissions', 'default', 'acceptEdits', 'plan'] /* W3: auto and bypass first */);
+    expect(items[0].getAttribute('aria-checked')).toBe('true'); // auto
+    expect((items[0] as HTMLButtonElement).disabled).toBe(true);
+    expect(items[0].textContent).toContain('This model does not support auto mode');
+    fireEvent.click(items[4]); // plan
     await settle();
     expect(fake.invoked('session.setPermissionMode')).toEqual([{ appSessionId: A, mode: 'plan' }]);
     expect(done).toHaveBeenCalledTimes(1); // closed on the engine's answer

@@ -8,6 +8,7 @@
 // streams as `session.setup`. MAWS's own lifecycle operations on one app id are serialised through a per-id lock, so
 // two never interleave on one session. Guards never read `SessionRecord.holder`: "live in MAWS" is C3's process table
 // and "foreign" a fresh registry read (holders.ts), which fails closed.
+import { NO_USER_DEFAULTS } from '../settings/user-engine-defaults'; // W3
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -21,7 +22,7 @@ import type { ArchiveOutcome, DeleteOutcome, StartOptions } from '@shared/ipc/sc
 import { emptyProgress, HostError, hostCall, STOP_WAIT_MS, WATCHDOG_MS, type SessionServiceDeps } from './context';
 import { DeletionManifests, type DeletionManifest } from './delete-manifest';
 import { checkAdditionalDirectories, checkLocation, sessionDirectoryOf, trustDirectoryOf, type RuleVerdict } from './intent-rules';
-import { readSettings } from './launch-mapping';
+import { readSettings, seedPermissionMode } from './launch-mapping';
 import { archiveRecord, deleteRecord, forkIntentOf, previewDeletion, renameRecord, revealablePath } from './record-actions';
 import { markInterrupted, reconcileIntent } from './recovery';
 import { removeCreatedWorktree, retainedWorktree, type Setup } from './setup';
@@ -94,6 +95,7 @@ export class SessionService {
       env,
       replay: this.deps.replay ?? null,
       settings: this.deps.settings ?? readSettings,
+      userDefaults: this.deps.userDefaults ?? (async () => NO_USER_DEFAULTS), // W3
       launchGate: this.deps.launchGate ?? (async () => null), // C12
       now: this.now,
       log: this.log,
@@ -200,7 +202,7 @@ export class SessionService {
       additionalDirectories: [],
       model: null,
       effort: null,
-      permissionMode: null,
+      permissionMode: seedPermissionMode(await s.userDefaults()), // W3: the user's defaultMode, else auto
       gateway: s.settings().gateway.defaultRoute,
       trust: 'unanswered',
       trustKey: null,
