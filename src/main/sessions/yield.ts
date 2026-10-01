@@ -2,12 +2,13 @@
 // process yields when a foreign process that resumed the same session starts writing into it. The engine host reports
 // that first write (`fs.foreignWrite`, once per contest); MAWS posts a notice in the session, pauses its queue while it
 // holds messages so none starts on its own branch (an empty queue is never paused: it would silently hold the resumed
-// session's next send, queue.ts), and stops its process as soon as nothing would be lost by it (no turn, no work in
-// flight, no pending request, no background task: the C12 keep-alive reasons, less the paused queue, which survives the
-// exit, and a stateful MCP server, whose state the other writer has already overtaken). A turn in flight finishes first.
+// session's next send, queue.ts), and stops its process as soon as nothing would be lost by it (`canYield`: no turn, no
+// work in flight, no pending request, no background task). A turn in flight finishes first. The stop is
+// `session.stop { ifIdle }`, which the host decides against the process as it is then: a send or an engine turn that
+// began after the status this read answers `skipped`, and a later status tries again.
 // After the exit the index re-applies the foreign holder and the pane follows the transcript read-only.
 import { randomUUID } from 'node:crypto';
-import type { EngineSessionStatus, HardReason } from '@shared/engine/status';
+import { canYield, type EngineSessionStatus } from '@shared/engine/status';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, SessionId } from '@shared/graph/ids';
 import type { ForeignHolder, SessionRecord } from '@shared/graph/session';
@@ -23,9 +24,7 @@ export interface YieldDeps {
   log?: (message: string) => void;
 }
 
-// What may still hold the process when it yields: the queue it paused itself, and a stateful MCP server.
-const YIELDS_OVER: ReadonlySet<HardReason> = new Set(['queued_messages', 'stateful_mcp']);
-export const canYield = (status: EngineSessionStatus): boolean => status.process === 'ready' && status.keepAlive.every((reason) => YIELDS_OVER.has(reason));
+export { canYield } from '@shared/engine/status';
 
 // The holder as the notice names it (the row's own words: `Terminal · pid N`, `bg · <short>`).
 export function holderPhrase(holder: ForeignHolder): string {
@@ -61,10 +60,13 @@ export function startYield(deps: YieldDeps): () => void {
   const stop = (appSessionId: AppSessionId) => {
     if (stopping.has(appSessionId)) return;
     stopping.add(appSessionId);
-    hostCall(deps.dispatch, 'session.stop', { appSessionId, reason: 'stop' }).catch((error: unknown) => {
-      stopping.delete(appSessionId); // the next status tries again
-      log(`${appSessionId}: could not yield to the other writer: ${error instanceof Error ? error.message : String(error)}`);
-    });
+    hostCall(deps.dispatch, 'session.stop', { appSessionId, reason: 'stop', ifIdle: true }).then(
+      (answer) => void (answer.skipped === true && stopping.delete(appSessionId)), // work began meanwhile: the next status tries again
+      (error: unknown) => {
+        stopping.delete(appSessionId); // the next status tries again
+        log(`${appSessionId}: could not yield to the other writer: ${error instanceof Error ? error.message : String(error)}`);
+      },
+    );
   };
   const offs = [
     deps.onEvent('fs.foreignWrite', ({ sessionId, holder }) => {

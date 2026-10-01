@@ -26,7 +26,7 @@ function harness(holder: SessionRecord['holder'], answers: Partial<Record<Comman
   const stop = startYield({
     dispatch: vi.fn(async (_owner, name: CommandName, input: unknown) => {
       calls.push({ name, input });
-      return { ok: true, value: answers[name] ?? undefined } as CommandResult<CommandName>;
+      return { ok: true, value: answers[name] ?? (name === 'session.stop' ? { exited: true, code: 0, signal: null } : undefined) } as CommandResult<CommandName>;
     }),
     onEvent,
     sessions: { getByEngineId: (id) => (id === S ? current : null) },
@@ -57,7 +57,7 @@ describe('a live MAWS process yields to a foreign writer', () => {
     expect(notice.id.startsWith(`${APP}:`)).toBe(true); // an app-synthesised event: main's read model keeps it
     expect(notice.text).toBe('A terminal (pid 96367) started writing this session. MAWS stops its own process once it is idle and follows the transcript read-only.');
     expect(h.calls.map((c) => c.name)).toEqual(['session.status', 'session.stop']);
-    expect(h.calls[1].input).toEqual({ appSessionId: APP, reason: 'stop' });
+    expect(h.calls[1].input).toEqual({ appSessionId: APP, reason: 'stop', ifIdle: true });
   });
 
   it('lets a turn in flight finish with its queue paused, then stops once, and forgets the session after its exit', async () => {
@@ -75,6 +75,17 @@ describe('a live MAWS process yields to a foreign writer', () => {
     h.fire('session.status', { appSessionId: APP, status: idle({ process: 'exited' }) });
     h.fire('session.status', { appSessionId: APP, status: idle() }); // a later launch of the same id is not yielding
     expect(h.calls.filter((c) => c.name === 'session.stop')).toHaveLength(1);
+  });
+
+  // review finding: work that began after the idle status the yield read is the host's to see; it answers skipped
+  it('tries again at a later status when the host skipped the stop because work began', async () => {
+    const h = harness({ kind: 'self', contestedBy: TERMINAL }, { 'session.status': idle(), 'session.stop': { exited: false, code: null, signal: null, skipped: true } });
+    h.fire('fs.foreignWrite', { sessionId: S, appSessionId: APP, holder: TERMINAL });
+    await h.settle();
+    await h.settle();
+    h.fire('session.status', { appSessionId: APP, status: idle() });
+    await h.settle();
+    expect(h.calls.filter((c) => c.name === 'session.stop')).toHaveLength(2);
   });
 
   it('does nothing for a session MAWS does not run, and yields once per contest', async () => {

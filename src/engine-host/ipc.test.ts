@@ -735,3 +735,36 @@ describe('session.events after an exit reads disk while a foreign process holds 
     expect(disk).toHaveBeenCalledTimes(1);
   });
 });
+
+// W7 review finding: the yield's stop is decided in the host, against the process as it is when the stop arrives.
+describe('session.stop { ifIdle } stops only a process that could end without losing work (W7)', () => {
+  it('answers skipped and sends nothing while a message is in flight, and stops an idle process', async () => {
+    let transport: ScriptedTransport | null = null;
+    const host = engineHost({
+      binaryProbe: async () => OK_BINARY, checkRelay: async () => OK_RELAY, captureEnv: async () => ({ PATH: '/usr/bin' }),
+      spawn: () => (transport = scriptedTransport({ onWrite: autoResponder(handshakeResponder({ end_session: () => null })) })),
+    });
+    const id = 'app-if-idle' as AppSessionId;
+    await host.call('session.launch', { spec: spec({ appSessionId: id }) });
+    await until(() => host.statuses(id).some((s) => s.process === 'ready'), 'ready');
+    await host.call('session.send', { appSessionId: id, content: 'begun after the status the yield read' });
+    expect(await host.call('session.stop', { appSessionId: id, reason: 'stop', ifIdle: true })).toEqual({ exited: false, code: null, signal: null, skipped: true });
+    expect(transport!.requestsOf('end_session')).toHaveLength(0);
+    expect(host.statuses(id).at(-1)?.process).toBe('ready');
+  });
+
+  it('stops at once when nothing holds the process', async () => {
+    let transport: ScriptedTransport | null = null;
+    const host = engineHost({
+      binaryProbe: async () => OK_BINARY, checkRelay: async () => OK_RELAY, captureEnv: async () => ({ PATH: '/usr/bin' }),
+      spawn: () => (transport = scriptedTransport({ onWrite: autoResponder(handshakeResponder({ end_session: () => null })) })),
+    });
+    const id = 'app-if-idle-2' as AppSessionId;
+    await host.call('session.launch', { spec: spec({ appSessionId: id }) });
+    await until(() => host.statuses(id).some((s) => s.process === 'ready'), 'ready');
+    const stopping = host.call('session.stop', { appSessionId: id, reason: 'stop', ifIdle: true });
+    await until(() => transport!.requestsOf('end_session').length === 1, 'end_session');
+    transport!.exit(0);
+    expect((await stopping).skipped).toBeUndefined();
+  });
+});

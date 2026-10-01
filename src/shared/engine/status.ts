@@ -85,3 +85,9 @@ export function toSessionRecordPatch(s: EngineSessionStatus): SessionRecordPatch
   if (s.process !== 'exited') patch.holder = { kind: 'self' };
   return patch;
 }
+
+// W7: whether a live process can end without losing work when a foreign writer has taken its session (the yield, and
+// `session.stop { ifIdle }`): ready, and nothing holds it but its own queue (which survives the exit in the state file)
+// and a stateful MCP server (whose state the other writer has already overtaken).
+const YIELDS_OVER: ReadonlySet<HardReason> = new Set(['queued_messages', 'stateful_mcp']);
+export const canYield = (status: Pick<EngineSessionStatus, 'process' | 'keepAlive'>): boolean => status.process === 'ready' && status.keepAlive.every((reason) => YIELDS_OVER.has(reason));

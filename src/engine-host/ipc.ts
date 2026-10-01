@@ -9,6 +9,7 @@ import type { AppSessionId, MessageUuid, RequestId } from '@shared/graph/ids';
 import { AUTO_MODE_REFUSAL_CODES, type AutoModeRefusalCode } from '@shared/graph/enums';
 import { assertSafeAppSessionId } from '@shared/engine/app-session-id';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
+import { canYield } from '@shared/engine/status'; // W7
 import type { SessionStateStore } from '@shared/engine/session-state-store';
 import type { RelayHealth } from '@shared/engine/relay-health';
 import { HostCommandError, type HostEmit, type HostOn } from '@shared/host/runtime';
@@ -225,9 +226,11 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
     }
     return streamOf(appSessionId).snapshot(afterSeq, limit);
   });
-  handle('session.stop', async ({ appSessionId, reason }) => {
+  handle('session.stop', async ({ appSessionId, reason, ifIdle }) => {
     if (reason === 'archive') assertSafeAppSessionId(appSessionId); // archive deletes a directory named after it (M5 review)
     const session = sessionOf(appSessionId);
+    // W7: the yield's stop, decided against the process as it is now, with no await between the check and the stop
+    if (ifIdle === true && !canYield(session.status())) return { exited: false, code: null, signal: null, skipped: true as const };
     const result = await session.stop(reason);
     if (reason === 'archive') {
       const id = appSessionId as AppSessionId;

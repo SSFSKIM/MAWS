@@ -80,7 +80,9 @@ const c3Commands = {
   'session.launch': host(z.strictObject({ spec: LaunchSpecSchema }), LaunchResultSchema),
   'session.status': host(input({}), EngineSessionStatusSchema),
   'session.events': host(input({ afterSeq: z.number().int().nullable(), limit: z.number().int().positive().nullable() }), EventsSnapshotSchema),
-  'session.stop': host(input({ reason: z.enum(['stop', 'archive']) }), z.strictObject({ exited: z.boolean(), code: z.number().int().nullable(), signal: z.string().nullable() })),
+  // W7: `ifIdle` stops only while the process could end without losing work (`canYield`, decided in the host in the same
+  // step as the stop); otherwise nothing happens and the answer says `skipped`
+  'session.stop': host(input({ reason: z.enum(['stop', 'archive']), ifIdle: z.boolean().optional() }), z.strictObject({ exited: z.boolean(), code: z.number().int().nullable(), signal: z.string().nullable(), skipped: z.literal(true).optional() })),
   'session.pendingRequest': host(input({ requestId: RequestIdSchema }), z.strictObject({ event: SessionEventSchema.nullable() })),
   'session.catalog': host(input({}), CatalogSchema),
   // the composer: sends, the app queue, steer, interrupt, answers, `!` and `#`
