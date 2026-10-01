@@ -21,7 +21,7 @@ describe('the mode menu on a live session', () => {
     render(<ModeMenu binding={liveModeBinding(record('app-a'), status('app-a'), OPUS, fake.client)} onDone={done} />);
     const menu = screen.getByRole('menu', { name: 'Permission mode' });
     const items = within(menu).getAllByRole('menuitemradio');
-    expect(items.map((i) => i.querySelector('.font-mono')?.textContent)).toEqual(['auto', 'bypassPermissions', 'default', 'acceptEdits', 'plan'] /* W3: auto and bypass first */);
+    expect(items.map((i) => i.querySelector('.font-mono')?.textContent)).toEqual(['Auto', 'Bypass permissions', 'Manual', 'Accept edits', 'Plan'] /* W3: auto and bypass first */);
     expect(items[0].getAttribute('aria-checked')).toBe('true'); // auto
     expect((items[0] as HTMLButtonElement).disabled).toBe(true);
     expect(items[0].textContent).toContain('This model does not support auto mode');
@@ -34,11 +34,11 @@ describe('the mode menu on a live session', () => {
   it('bypassPermissions asks first, and a refusal stays in the menu in words', async () => {
     const fake = fakeClient({ 'session.setPermissionMode': { effective: 'default', refusal: 'auto_mode_settings', error: 'Auto mode is disabled in settings.json' } });
     render(<ModeMenu binding={liveModeBinding(record('app-a'), status('app-a'), [], fake.client)} />);
-    fireEvent.click(screen.getByRole('menuitemradio', { name: /bypassPermissions/ }));
+    fireEvent.click(screen.getByRole('menuitemradio', { name: /Bypass permissions/ }));
     expect(fake.invoked('session.setPermissionMode')).toEqual([]);
     expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Cancel' })); // a stray Enter keeps the mode
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
-    fireEvent.click(screen.getByRole('menuitemradio', { name: /^default/ }));
+    fireEvent.click(screen.getByRole('menuitemradio', { name: /^Manual/ }));
     await settle();
     expect(screen.getByRole('alert').textContent).toBe('Auto mode is disabled by settings');
   });
@@ -51,9 +51,9 @@ describe('the mode menu on its own binding', () => {
       set: () => Promise.reject(new Error('the bridge went away')),
     };
     render(<ModeMenu binding={binding} />);
-    fireEvent.click(screen.getByRole('menuitemradio', { name: /^plan/ }));
+    fireEvent.click(screen.getByRole('menuitemradio', { name: /^Plan/ }));
     await settle();
     expect(screen.getByRole('alert').textContent).toBe('the bridge went away');
-    expect((screen.getByRole('menuitemradio', { name: /^plan/ }) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByRole('menuitemradio', { name: /^Plan/ }) as HTMLButtonElement).disabled).toBe(false);
   });
 });

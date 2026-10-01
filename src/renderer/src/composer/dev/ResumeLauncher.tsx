@@ -3,6 +3,7 @@
 // tab lists the resumable records (not archived, with an engine session) and resumes one through `session.launch`,
 // passing its Direct, Permission mode and extraSettings fields through literally. Rendered only under
 // `import.meta.env.DEV` (Diagnostics' C7 block); C10 replaces it.
+import { PERMISSION_MODE_LABELS } from '@shared/sessions/permission-mode-labels';
 import { useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -48,7 +49,7 @@ export function ResumeLauncher({ client = ipc }: { client?: MawsBridge }) {
           <option value="">from settings</option>
           {MODES.map((m) => (
             <option key={m} value={m}>
-              {m}
+              {PERMISSION_MODE_LABELS[m]}
             </option>
           ))}
         </select>

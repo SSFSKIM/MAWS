@@ -378,8 +378,8 @@ test('every widget opens with live engine data; controls take effect and are rea
 
     await step('/permissions → plan is the effective mode in the chip; Implement restores it', async () => {
       const w = await openWidget(live, 'permissions');
-      await w.getByRole('menuitemradio', { name: /^plan/ }).click();
-      await expect(main.getByRole('button', { name: /^Permission mode plan/ })).toBeVisible({ timeout: 15_000 });
+      await w.getByRole('menuitemradio', { name: /^Plan/ }).click();
+      await expect(main.getByRole('button', { name: /^Permission mode Plan/ })).toBeVisible({ timeout: 15_000 });
       await send(page, main, 'Plan adding a file named hello.txt that contains the word hi. Keep the plan to one or two short steps.');
       const card = main.getByRole('group', { name: 'Plan review' });
       await expect(card).toBeVisible({ timeout: 180_000 });
@@ -394,7 +394,7 @@ test('every widget opens with live engine data; controls take effect and are rea
       const s = await status(page, id);
       observe('plan', { mode: s.permissionMode, chip: await main.getByRole('button', { name: /^Permission mode / }).getAttribute('aria-label'), hello: existsSync(join(repo, 'hello.txt')) });
       expect(s.permissionMode.effective).toBe('default');
-      await expect(main.getByRole('button', { name: /^Permission mode default/ })).toBeVisible();
+      await expect(main.getByRole('button', { name: /^Permission mode Manual/ })).toBeVisible();
     });
 
     await step('fast on Opus in auto: the lane warning, then the init frame answers', async () => {
@@ -402,7 +402,7 @@ test('every widget opens with live engine data; controls take effect and are rea
       await w.getByRole('menuitemradio', { name: /^Opus/ }).click(); // W3: applies at once
       await expect.poll(async () => (await status(page, id)).model.requested).toBe('opus');
       w = await openWidget(live, 'permissions');
-      await w.getByRole('menuitemradio', { name: /^auto/ }).click();
+      await w.getByRole('menuitemradio', { name: /^Auto/ }).click();
       await expect.poll(async () => (await status(page, id)).permissionMode.effective).toBe('auto');
       w = await openWidget(live, 'fast');
       await w.getByRole('switch', { name: 'Fast mode' }).click();

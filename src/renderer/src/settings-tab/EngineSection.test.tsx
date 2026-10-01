@@ -123,6 +123,7 @@ describe('the auto fallback row', () => {
     renderSection();
     const select = screen.getByRole('combobox', { name: 'When auto mode is unavailable' }) as HTMLSelectElement;
     expect([...select.options].map((o) => o.value)).toEqual(['default', 'acceptEdits', 'plan', 'bypassPermissions', 'dontAsk']);
+    expect([...select.options].map((o) => o.textContent)).toEqual(['Manual', 'Accept edits', 'Plan', 'Bypass permissions', "Don't ask"]);
     expect(select.value).toBe('acceptEdits');
     fireEvent.change(select, { target: { value: 'default' } });
     await vi.waitFor(() => expect(b.sets).toEqual([{ permissions: { autoFallback: 'default' } }]));

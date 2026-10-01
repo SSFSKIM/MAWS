@@ -344,12 +344,12 @@ test.describe('interactive', () => {
     expect(await inputsOf('session.setModel')).toHaveLength(1);
 
     await typeCommand(page, '/permissions acceptEdits');
-    await expect(page.getByText('Permission mode · acceptEdits', { exact: true })).toBeVisible();
+    await expect(page.getByText('Permission mode · Accept edits', { exact: true })).toBeVisible();
     await noWidget();
     expect(await inputsOf('session.setPermissionMode')).toEqual([{ appSessionId: READY, mode: 'acceptEdits' }]);
 
     await typeCommand(page, '/permissions bypassPermissions'); // asks first, as the chip does
-    await expect(widget(page, 'permissions').getByRole('status').first()).toHaveText('bypassPermissions asks first · choose it below');
+    await expect(widget(page, 'permissions').getByRole('status').first()).toHaveText('Bypass permissions asks first · choose it below');
     await page.keyboard.press('Escape');
     expect(await inputsOf('session.setPermissionMode')).toHaveLength(1);
 
@@ -372,8 +372,8 @@ test.describe('interactive', () => {
     await pick(page, 'permissions');
     const permissions = widget(page, 'permissions');
     const segment = permissions.getByRole('menu', { name: 'Permission mode' });
-    await segment.getByRole('menuitemradio', { name: /^default/ }).click();
-    await expect(segment.getByRole('menuitemradio', { checked: true })).toContainText('default');
+    await segment.getByRole('menuitemradio', { name: /^Manual/ }).click();
+    await expect(segment.getByRole('menuitemradio', { checked: true })).toContainText('Manual');
     // the modal dialog closes and hands the keyboard back to the editor before the chip opens, as in the app, where the
     // chip and the palette are out of reach until then (a menu opened while the editor's focus is still on its way
     // would see that focus land outside it and close)
@@ -387,13 +387,13 @@ test.describe('interactive', () => {
 
     await pick(page, 'permissions');
     // W3 (C5): Haiku's live row omits supportsAutoMode (reads.jsonl seq 3), which the gate reads as no auto: the item says why
-    const auto = widget(page, 'permissions').getByRole('menuitemradio', { name: /^auto/ });
+    const auto = widget(page, 'permissions').getByRole('menuitemradio', { name: /^Auto/ });
     await expect(auto).toBeDisabled();
     await expect(auto).toContainText('This model does not support auto mode');
     // the engine's own refusal, asked for directly (seq 156, as C3 maps it): the mode stays, and the composer says so in
     // Claude Desktop's words
     await page.evaluate((id) => (window as unknown as WidgetsWindow).__maws_widgets.control('setPermissionMode', { appSessionId: id, mode: 'auto' }), READY);
-    await expect(widget(page, 'permissions').getByRole('menuitemradio', { checked: true })).toContainText('default');
+    await expect(widget(page, 'permissions').getByRole('menuitemradio', { checked: true })).toContainText('Manual');
     await page.keyboard.press('Escape'); // the widget's dialog is modal: the composer under it is out of reach until it closes
     await expect(page.getByRole('note', { name: 'Permission mode notice' })).toContainText("Auto mode isn't available for this session. Using default instead.");
     const log = await calls(backend);
@@ -661,17 +661,17 @@ test.describe('replay conformance', () => {
     await expect(valueOf(widget(page, 'status').getByRole('region', { name: 'Environment' }), 'Auto mode server')).toHaveText('Enabled');
 
     await control('setPermissionMode', { mode: 'default' }); // seq 148
-    await expect(checkedMode).toContainText('default');
+    await expect(checkedMode).toContainText('Manual');
     await control('setModel', { model: 'haiku' }); // seq 151
     await expect(model.getByRole('menuitemradio', { name: /^Haiku/ })).toHaveAttribute('aria-checked', 'true');
     await control('setPermissionMode', { mode: 'auto' }); // seq 155: refused
     await expect(permissions).toContainText('This model does not support auto mode');
-    await expect(checkedMode).toContainText('default');
+    await expect(checkedMode).toContainText('Manual');
     await control('setPermissionMode', { mode: 'default' }); // seq 158
     await control('setModel', { model: 'claude/astra' }); // seq 161
     await expect(model.getByRole('menuitemradio', { name: /^astra/ })).toHaveAttribute('aria-checked', 'true');
     await control('setPermissionMode', { mode: 'auto' }); // seq 164
-    await expect(checkedMode).toContainText('auto');
+    await expect(checkedMode).toContainText('Auto');
     await expect(model.getByRole('note')).toContainText('Auto-mode reviews for this model run locally.'); // a gateway model in auto
     await control('setPermissionMode', { mode: 'default' }); // seq 167
     await control('setModel', { model: 'opus' }); // seq 171

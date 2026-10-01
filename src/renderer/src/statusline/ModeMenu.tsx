@@ -3,6 +3,7 @@
 // (arrows move between them, Enter or a click chooses), `bypassPermissions` behind an inline confirm, the refusal in
 // words, and the engine's answer: while the change is in flight nothing else can be chosen, a refusal or error stays in
 // the menu, and success calls `onDone`.
+import { PERMISSION_MODE_LABELS } from '@shared/sessions/permission-mode-labels';
 import { useState, type KeyboardEvent } from 'react';
 import type { PermissionMode } from '@shared/graph/enums';
 import { BYPASS_CONFIRM, MODE_OPTIONS, MODE_REFUSAL_WORDS, type ModeBinding } from './mode-menu';
@@ -48,7 +49,7 @@ export function ModeMenu({ binding, onDone }: { binding: ModeBinding; onDone?: (
 
   if (confirming) {
     return (
-      <div role="group" aria-label={`Switch to ${confirming}`} className="flex flex-col gap-2 p-1">
+      <div role="group" aria-label={`Switch to ${PERMISSION_MODE_LABELS[confirming]}`} className="flex flex-col gap-2 p-1">
         <p>{BYPASS_CONFIRM}</p>
         <div className="flex justify-end gap-1">
           {/* focus starts on the safe choice: an Enter pressed on through the menu never grants bypassPermissions */}
@@ -56,7 +57,7 @@ export function ModeMenu({ binding, onDone }: { binding: ModeBinding; onDone?: (
             Cancel
           </button>
           <button type="button" className={`${BUTTON} text-danger`} onClick={() => void apply(confirming)} disabled={pending}>
-            Switch to {confirming}
+            Switch to {PERMISSION_MODE_LABELS[confirming]}
           </button>
         </div>
       </div>
@@ -87,7 +88,7 @@ export function ModeMenu({ binding, onDone }: { binding: ModeBinding; onDone?: (
               onClick={() => choose(option.mode)}
               className={ITEM}
             >
-              <span className="font-mono">{option.mode}</span>
+              <span className="font-mono">{PERMISSION_MODE_LABELS[option.mode]}</span>
               <span className="text-ui-sm text-fg-muted">{option.mode === 'auto' && reason !== null && binding.disabled === null ? reason : option.description}</span>
             </button>
           );

@@ -416,7 +416,7 @@ describe("composer DOM under C5's dispatcher", () => {
     mount([{ index: 0, id: A }]);
     const note = within(composerOf(0)).getByRole('note', { name: 'Permission mode notice' });
     expect(note.textContent).toContain("Auto mode isn't available for this session. Using acceptEdits instead.");
-    expect(within(composerOf(0)).getByRole('button', { name: /^Permission mode / }).getAttribute('aria-label')).toBe('Permission mode acceptEdits · This model does not support auto mode');
+    expect(within(composerOf(0)).getByRole('button', { name: /^Permission mode / }).getAttribute('aria-label')).toBe('Permission mode Accept edits · This model does not support auto mode');
     await userEvent.click(within(note).getByRole('button', { name: 'Dismiss' }));
     expect(within(composerOf(0)).queryByRole('note', { name: 'Permission mode notice' })).toBeNull();
   });
@@ -446,8 +446,8 @@ describe("composer DOM under C5's dispatcher", () => {
   it('shows the engine’s effective mode with the refusal in words, and + dir adds to the engine’s directories', async () => {
     live(A, { status: { permissionMode: { requested: 'auto', effective: 'default', refusal: 'auto_mode_model' } } });
     mount([{ index: 0, id: A }]);
-    const chip = within(composerOf(0)).getByRole('button', { name: /^Permission mode default/ });
-    expect(chip.getAttribute('aria-label')).toBe('Permission mode default · This model does not support auto mode');
+    const chip = within(composerOf(0)).getByRole('button', { name: /^Permission mode Manual/ });
+    expect(chip.getAttribute('aria-label')).toBe('Permission mode Manual · This model does not support auto mode');
     expect(invoked('session.listPermissionRules')).toEqual([]); // no engine read on mount
     expect(invoked('session.listModels')).toEqual([]);
     const user = userEvent.setup();

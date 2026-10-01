@@ -342,8 +342,8 @@ const PLAN = 'Plan adding a file named hello.txt that contains the word hi. Keep
 
 async function toPlanMode(page: Page, pane: Locator) {
   await pane.getByRole('button', { name: /^Permission mode / }).click();
-  await page.getByRole('menuitemradio', { name: /^plan/ }).click();
-  await expect(pane.getByRole('button', { name: /^Permission mode plan/ })).toBeVisible();
+  await page.getByRole('menuitemradio', { name: /^Plan/ }).click();
+  await expect(pane.getByRole('button', { name: /^Permission mode Plan/ })).toBeVisible();
 }
 
 test('plan mode from the mode chip: Keep planning returns a second plan, Implement restores the pre-plan mode', async () => {
@@ -583,7 +583,7 @@ test('bash, memory, paste, history recall, the palette, the status line and + di
       const chip = pane.getByRole('button', { name: /^Permission mode / });
       const before = await chip.getAttribute('aria-label');
       await chip.click();
-      const autoItem = page.getByRole('menuitemradio', { name: /^auto/ });
+      const autoItem = page.getByRole('menuitemradio', { name: /^Auto/ });
       await expect(autoItem).toBeVisible();
       const autoText = await autoItem.innerText();
       const autoDisabled = await autoItem.isDisabled();
@@ -625,7 +625,7 @@ test('the mode chip after switching the model to Haiku and requesting auto', asy
     await idle(page, h.id);
     const chip = pane.getByRole('button', { name: /^Permission mode / });
     await chip.click();
-    const autoItem = page.getByRole('menuitemradio', { name: /^auto/ });
+    const autoItem = page.getByRole('menuitemradio', { name: /^Auto/ });
     await expect(autoItem).toBeVisible();
     const menu = { text: await autoItem.innerText(), disabled: await autoItem.isDisabled() };
     if (!menu.disabled) await autoItem.click();

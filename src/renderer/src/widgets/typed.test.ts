@@ -112,7 +112,7 @@ describe('effort', () => {
 describe('permissions', () => {
   it('/permissions acceptEdits applies set_permission_mode and toasts the mode', async () => {
     expect(await TYPED_APPLY.permissions!(READY, 'acceptEdits')).toBe(true);
-    await toastSoon().toEqual([['info', 'Permission mode · acceptEdits']]);
+    await toastSoon().toEqual([['info', 'Permission mode · Accept edits']]);
     expect(controls('session.setPermissionMode')).toEqual([{ appSessionId: READY, mode: 'acceptEdits' }]);
   });
 
