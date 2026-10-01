@@ -103,8 +103,8 @@ describe('the effort view: the effort in words over the model, a slider over its
   });
 });
 
-describe('the model view: Select model, Default with its badge, the catalogue with the current row checked', () => {
-  it('lists the Default entry by what it runs, then the catalogue without `default`, gateway aliases from the gateway', async () => {
+describe('the model view: Select model, Default with its recommendation, the catalogue with the current row checked', () => {
+  it('lists Default as a recommended set, then the catalogue without `default`, gateway aliases from the gateway', async () => {
     mount('model');
     expect(view()).toBe('model');
     expect(screen.getByRole('heading', { name: 'Select model' })).toBeTruthy();
@@ -114,7 +114,9 @@ describe('the model view: Select model, Default with its badge, the catalogue wi
     expect(item(/^astra/).textContent).toContain('From gateway');
     expect(item(/^Haiku/).textContent).toContain('Cannot hold auto mode');
     const fallback = item(/Default/);
-    expect(fallback.getAttribute('aria-label') ?? fallback.textContent).toContain('opusDefaultRecommended'); // what the session's default runs, the badge, Recommended
+    expect(fallback.querySelector('.truncate')?.textContent).toBe('Default');
+    expect(within(fallback).getByText('Recommended set of models')).toBeTruthy();
+    expect(within(fallback).getAllByText('Default')).toHaveLength(1); // no second Default badge
     expect(fallback.getAttribute('aria-checked')).toBe('false');
     expect(screen.getAllByRole('menuitemradio', { checked: true }).map((r) => r.querySelector('.truncate')?.textContent)).toEqual(['Sonnet 5']); // the model the session asked for
     expect(screen.queryByText(/Default \(recommended\)|Engine default|Default model/)).toBeNull();
@@ -133,6 +135,9 @@ describe('the model view: Select model, Default with its badge, the catalogue wi
     expect(item(/^Opus/).getAttribute('aria-checked')).toBe('true');
     fireEvent.click(item(/Default/));
     await waitFor(() => expect(calls('set_model').map((c) => c.input)).toEqual([{ appSessionId: ID, model: 'opus' }, { appSessionId: ID, model: null }]));
+    await waitFor(() => expect(view()).toBe('effort'));
+    fireEvent.click(screen.getByRole('button', { name: /Select model/ }));
+    expect(item(/^Default/).getAttribute('aria-checked')).toBe('true');
   });
 
   it('`/model claude/astra` in auto proposes it with the local-lane note and applies nothing until chosen', async () => {

@@ -271,7 +271,7 @@ test.describe('interactive', () => {
     const list = selector.getByRole('menu', { name: 'Models' });
     await expect(list.getByRole('group', { name: 'Claude models' }).getByRole('menuitemradio')).toHaveCount(4); // pass2/auto-routed seq 143, `default` as the entry above
     await expect(list.getByRole('group', { name: 'Gateway models' }).getByRole('menuitemradio')).toHaveCount(7);
-    await expect(list.getByRole('menuitemradio', { name: /Default/ })).toContainText('opusDefaultRecommended');
+    await expect(list.getByRole('menuitemradio', { name: /^Default/ })).toContainText('DefaultRecommended set of models');
     await expect(list.getByRole('menuitemradio', { name: /^Sonnet 5/ })).toHaveAttribute('aria-checked', 'true');
     await expect(list.getByRole('menuitemradio', { name: /^Haiku/ })).toContainText('Cannot hold auto mode');
     await expect(list.getByRole('menuitemradio', { name: /^astra/ })).toContainText('From gateway');

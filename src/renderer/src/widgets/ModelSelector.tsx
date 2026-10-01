@@ -3,8 +3,7 @@
 // `modelChip` placement), with two views on a sliding track. The effort view names the effort in the accent colour over
 // the model's name (a row with a chevron into the model view), a stepped slider over the levels the engine lists for
 // that model, Codex's lightning for fast mode (its auto-lane warning first, inline) and a reset that clears the effort
-// override. The model view reads "Select model": a Default entry (what the session's default runs, with the Default
-// badge and Recommended, or From your settings when the user's settings name it), then the catalogue with the current
+// override. The model view reads "Select model": a Default entry (Recommended set of models, no badge), then the catalogue with the current
 // row checked, gateway aliases with their "From gateway" description. A choice applies at once and returns to the
 // effort view; the engine's answer (C3's status, the next init frame) is what shows afterwards. A live session is C3's
 // (`list_models`, `set_model`, `apply_flag_settings`), always for this session only; an unstarted one writes its setup
@@ -281,7 +280,6 @@ function Track({ view, effort, model }: { view: View; effort: ReactNode; model: 
 
 function SelectorBody({ name, args, binding, state, error, appSessionId }: { name: Name; args: string; binding: Binding; state: string; error: string | null; appSessionId: AppSessionId }) {
   const account = useRoutingAccount(appSessionId);
-  const defaults = useCommand('settings.userEngineDefaults', undefined, { staleTime: 30_000 }).data ?? null;
   const [view, setView] = useState<View>(name === 'model' ? 'model' : 'effort');
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<{ error: string; caption: string | null } | null>(null);
@@ -320,7 +318,6 @@ function SelectorBody({ name, args, binding, state, error, appSessionId }: { nam
   const shownRow = rowFor(binding.models, binding.shown) ?? rowOf(binding.models, binding.shown);
   const levels = effortLevelsOf(shownRow);
   const modelName = shownRow?.displayName ?? aliasOf(binding.shown, binding.models) ?? SELECTOR.model;
-  const defaultName = aliasOf(defaults?.model ?? DEFAULT_ROW, binding.models);
 
   const choose = async (model: string | null) => {
     setProposed(null);
@@ -488,11 +485,8 @@ function SelectorBody({ name, args, binding, state, error, appSessionId }: { nam
         <button type="button" role="menuitemradio" aria-checked={binding.current === null} disabled={locked} onClick={() => void choose(null)} className={ROW}>
           <Check on={binding.current === null} />
           <span className="flex min-w-0 flex-1 flex-col">
-            <span className="flex min-w-0 items-baseline gap-1.5">
-              <span className="truncate">{defaultName ?? SELECTOR.model}</span>
-              <span className="shrink-0 rounded-sm bg-bg-active px-1 text-ui-sm text-fg-muted">{SELECTOR.defaultBadge}</span>
-            </span>
-            <span className="text-ui-sm text-fg-muted">{defaults?.model ? SELECTOR.fromSettings : SELECTOR.recommended}</span>
+            <span className="truncate">{SELECTOR.default}</span>
+            <span className="text-ui-sm text-fg-muted">{SELECTOR.recommended}</span>
           </span>
         </button>
         {binding.models.length === 0 && status === null && <p className="m-0 px-2 py-1 text-ui-sm text-fg-muted">{MODEL.none}</p>}
