@@ -993,6 +993,26 @@ describe('a transcript a terminal and MAWS both write (W7)', () => {
     return { reader, out, follower, marks };
   }
 
+  // review finding: after MAWS's process exits one live holder is left, the terminal; its sibling prompt then has the
+  // shape of a terminal /rewind, which must not outrank the pin (a cold hydration after a yield reads exactly this)
+  it('pinned with one live holder, a foreign sibling prompt is held back, not read as a terminal rewind', async () => {
+    const own = (type: 'user' | 'assistant', uuid: string, parentUuid: string | null, n: number, entrypoint = 'sdk-ts') =>
+      line({ type, uuid, parentUuid, entrypoint, cwd: '/d', timestamp: at(n), message: type === 'user' ? { role: 'user', content: `${uuid} asks` } : { role: 'assistant', content: [{ type: 'text', text: `${uuid} says` }] } });
+    const lines = [own('user', 'u1', null, 0), own('assistant', 'a1', 'u1', 1), own('user', 'u2', 'a1', 2), own('assistant', 'a2', 'u2', 3), own('user', 'c1', 'a1', 4, 'cli')];
+    for (const pinned of [false, true]) {
+      const out = new Collector();
+      const follower = new ChainFollower(new MemoryFileReader(joined(lines)), SESSION, null, out.sink, { holders: () => 1, pinned: () => pinned });
+      await follower.start();
+      if (pinned) {
+        expect(out.of('boundary.rewind')).toEqual([]);
+        expect(out.of('notice.posted').map((e) => e.key)).toEqual(['transcript_branch_held']);
+        expect(follower.snapshot().chain).toEqual(['u1', 'a1', 'u2', 'a2']);
+      } else {
+        expect(out.of('boundary.rewind').map((e) => e.targetMessageUuid)).toEqual(['u2']); // the heuristic, unpinned
+      }
+    }
+  });
+
   it('records the writers it claims: one fork, a terminal branch and a MAWS branch', () => {
     expect(cuts.every((i) => i > 0)).toBe(true);
     expect(records[cuts[0]].entrypoint).toBe('cli');

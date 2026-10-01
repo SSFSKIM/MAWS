@@ -292,13 +292,15 @@ class FollowerCore {
     newChain.reverse();
     const newSet = new Set(newChain);
     const removed = this.chain.filter((member) => !newSet.has(member));
-    const terminal = this.rewind === null ? this.terminalRewind(record, parent) : null;
-    if (terminal === null && this.rewind?.phase !== 'unanchored' && this.holdsBack(record, removed)) {
-      // W7: MAWS's branch stays in view; this record joins the skeletons only, and one notice says why.
+    // W7: decided before any reading of the branch as a rewind: while a foreign process holds the session, its branch
+    // never retracts what MAWS wrote (after MAWS's exit one live holder is left, which the terminal-rewind reading would
+    // otherwise accept). MAWS's branch stays in view; this record joins the skeletons only, and one notice says why.
+    if (this.holdsBack(record, removed)) {
       if (!this.held) this.produce(null, { ...eventBase(this.ctx, `branch:${uuid}:held`), kind: 'notice.posted', level: 'warning', text: HELD_NOTICE, key: 'transcript_branch_held' });
       this.held = true;
       return;
     }
+    const terminal = this.rewind === null ? this.terminalRewind(record, parent) : null;
     for (const member of removed) this.emitted.delete(member);
     if (this.chain.length > 0) {
       if (terminal !== null) {
