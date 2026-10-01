@@ -45,25 +45,24 @@ button.transcript-chip:hover { background: var(--bg-hover); }
 /* Time separator */
 .transcript-time { display: flex; justify-content: center; padding: 24px 0; color: var(--fg-muted); font-size: var(--text-ui-sm); }
 
-/* User bubble */
-.transcript-user { display: flex; flex-direction: column; align-items: flex-end; padding-bottom: 12px; }
+/* User bubble (W2, B2: Codex's): right-aligned, at most 70 percent of the column, 22px corners, 10 by 16px inside, the
+   text colour at 5 percent, the prose's size; past 19 rendered lines it is bounded behind Show more */
+.transcript-user { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; padding-bottom: 16px; }
+.transcript-user-body { position: relative; min-width: 0; max-width: 70%; }
 .transcript-user-bubble {
   box-sizing: border-box;
-  max-width: min(590px, 85%);
-  padding: 12px 16px;
-  border-radius: 16px 16px 4px 16px;
-  background: var(--bg-overlay);
-  border: 1px solid var(--border);
+  max-width: 100%;
+  padding: 10px 16px;
+  border-radius: 22px;
+  background: var(--bg-user-message);
   line-height: var(--lh-prose);
   overflow-wrap: anywhere;
 }
 .transcript-user-bubble p { white-space: pre-wrap; } /* the user's line breaks are theirs */
-.transcript-user-bubble[data-collapsed] {
-  max-height: calc(20 * var(--lh-prose) * var(--text-prose));
-  overflow: hidden;
-  mask-image: linear-gradient(to bottom, var(--fg) 80%, transparent);
-}
-.transcript-user-bubble > * + * { margin-top: 8px; }
+.transcript-user-bubble:not([data-open]) > .transcript-user-content { max-height: calc(19 * var(--lh-prose) * var(--text-prose)); overflow: hidden; }
+.transcript-user-bubble[data-collapsed] > .transcript-user-content { mask-image: linear-gradient(to bottom, var(--fg) 80%, transparent); }
+.transcript-user-content > div > * + * { margin-top: 8px; }
+.transcript-user-bubble > .transcript-quiet-button { display: block; margin-top: 6px; }
 .transcript-attachments { display: flex; flex-wrap: wrap; gap: 6px; }
 .transcript-attachment-image { max-width: 240px; max-height: 180px; border-radius: var(--radius-sm); border: 1px solid var(--border); object-fit: contain; }
 .transcript-pasted-text {
@@ -79,10 +78,26 @@ button.transcript-chip:hover { background: var(--bg-hover); }
 }
 .transcript-quiet-button { margin-top: 4px; color: var(--fg-muted); font-size: var(--text-ui-sm); }
 .transcript-quiet-button:hover { color: var(--fg); }
-.transcript-user-actions { display: flex; align-items: center; gap: 8px; min-height: 26px; color: var(--fg-muted); font-size: var(--text-ui-sm); }
-.transcript-user-actions > :not(.transcript-not-sent, .transcript-user-caption) { opacity: 0; transition: opacity 0.12s; }
-.transcript-user:hover .transcript-user-actions > *, .transcript-user:focus-within .transcript-user-actions > * { opacity: 1; }
+/* Time, Copy and Edit overlay beside the bubble's foot on hover or focus, reserving no line under it (W2) */
+.transcript-user-actions {
+  position: absolute;
+  right: 100%;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 26px;
+  margin-right: 8px;
+  color: var(--fg-muted);
+  font-size: var(--text-ui-sm);
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.transcript-user:hover .transcript-user-actions, .transcript-user:focus-within .transcript-user-actions { opacity: 1; }
 .transcript-user-actions button:hover { color: var(--fg); }
+/* What a message waits for, or that it was not sent: always shown, under the bubble */
+.transcript-user-meta { display: flex; align-items: center; gap: 8px; color: var(--fg-muted); font-size: var(--text-ui-sm); }
 .transcript-not-sent { color: var(--warning); }
 /* W1: a message waiting for the engine (Claude Desktop's dimmed tail bubble), and its caption, always shown */
 .transcript-user[data-pending] .transcript-user-bubble { opacity: 0.55; }

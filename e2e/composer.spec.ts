@@ -766,5 +766,37 @@ test('W2: a transcript row and the composer frame share one column, and the pros
   expect(frame.left).toBe(row.left + row.padLeft);
   expect(row.fontSize).toBe('14px');
   expect(await geometry(userRow.locator('.transcript-user-bubble p').first())).toMatchObject({ fontSize: '14px', lineHeight: '22.75px' });
+
+  // B2: Codex's bubble. At most 70 percent of the column, 22px corners, 10 by 16px inside, the text colour at 5 percent
+  // (the token), the prose's size; Time, Copy and Edit overlay beside it on hover and reserve no line under it.
+  const bubble = userRow.locator('[data-bubble]');
+  const look = await bubble.evaluate((el) => {
+    const style = getComputedStyle(el);
+    const probe = document.createElement('span');
+    probe.style.backgroundColor = 'color-mix(in oklab, var(--fg) 5%, transparent)';
+    document.body.append(probe);
+    const tint = getComputedStyle(probe).backgroundColor;
+    probe.remove();
+    return {
+      radius: style.borderTopLeftRadius,
+      padding: [style.paddingTop, style.paddingRight, style.paddingBottom, style.paddingLeft],
+      fontSize: style.fontSize,
+      border: style.borderTopWidth,
+      tinted: style.backgroundColor === tint,
+      maxWidth: getComputedStyle(el.parentElement!).maxWidth,
+    };
+  });
+  expect(look).toEqual({ radius: '22px', padding: ['10px', '16px', '10px', '16px'], fontSize: '14px', border: '0px', tinted: true, maxWidth: '70%' });
+  const restRow = (await userRow.boundingBox())!.height;
+  const bubbleHeight = (await bubble.boundingBox())!.height;
+  expect(restRow - bubbleHeight).toBe(16); // the row's own gap, nothing reserved for the actions
+  const overlay = userRow.locator('.transcript-user-actions');
+  await expect(overlay).toHaveCSS('opacity', '0');
+  await overlay.getByRole('button', { name: 'Copy' }).focus(); // as a hover does (a hover here scrolls the short harness transcript under the pointer)
+  await expect(overlay).toHaveCSS('opacity', '1');
+  expect((await userRow.boundingBox())!.height).toBe(restRow);
+  const actionsBox = (await overlay.boundingBox())!;
+  const bubbleBox = (await bubble.boundingBox())!;
+  expect(actionsBox.x + actionsBox.width).toBeLessThanOrEqual(bubbleBox.x); // beside the bubble, not over it
   expect(editor.consoleErrors()).toEqual([]);
 });
