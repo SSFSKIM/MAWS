@@ -26,7 +26,7 @@ const ITEM =
 
 function Item({ enabled, onSelect, children }: { enabled: boolean; onSelect(): void; children: ReactNode }) {
   return (
-    <ContextMenu.Item disabled={!enabled} onSelect={onSelect} title={enabled ? undefined : 'Arrives with C10'} className={ITEM}>
+    <ContextMenu.Item disabled={!enabled} onSelect={onSelect} title={enabled ? undefined : 'Not available here'} className={ITEM}>
       {children}
     </ContextMenu.Item>
   );

@@ -3,7 +3,9 @@
 // Skills: a name in `skills`; Plugins: a name with `:`; Custom: the rest), the declared widget catalogue for every
 // name the engine does not list (Widget), and MAWS's own actions (C5's action table: the menu actions and the app-scoped
 // ones, run through `runAction`). One dispatch rule for every item: a registered widget opens for its name; otherwise a
-// catalogue command the engine can run headless is inserted as text; otherwise the item is listed and unavailable.
+// catalogue command the engine can run headless is inserted as text; otherwise the item is listed and unavailable: an
+// engine command the engine runs only in its terminal (`terminalOnly`: /doctor, /color, /focus, /reload-plugins in
+// pass2/real-settings) reads Terminal only, and a declared widget no host registered reads Not available here (W2).
 // The `@` menu's non-file groups come from the catalogue too: agents insert an agent mention, skills their invocation.
 import { fuzzyScore } from '@shared/composer/fuzzy';
 import { ACTIONS, type ActionId } from '@shared/keymap/actions';
@@ -13,7 +15,8 @@ import { WIDGET_COMMANDS } from './widgets';
 export type SlashOrigin = 'engine' | 'skills' | 'plugins' | 'custom' | 'widget' | 'maws';
 export const ORIGIN_ORDER: readonly SlashOrigin[] = ['engine', 'skills', 'plugins', 'custom', 'widget', 'maws'];
 export const ORIGIN_LABEL: Record<SlashOrigin, string> = { engine: 'Engine', skills: 'Skills', plugins: 'Plugins', custom: 'Custom', widget: 'Widget', maws: 'MAWS' };
-export const UNAVAILABLE_HINT = 'Opens a widget · arrives with C11';
+export const UNAVAILABLE_HINT = 'Not available here';
+export const TERMINAL_ONLY_HINT = 'Terminal only'; // W2
 
 export type SlashAction = { kind: 'widget' } | { kind: 'text' } | { kind: 'maws'; id: ActionId } | { kind: 'unavailable'; hint: string };
 
@@ -51,7 +54,7 @@ export function mawsItems(enabled: (id: ActionId) => boolean): SlashItem[] {
     const spec = ACTIONS[id];
     const entry = MAWS_PALETTE[id];
     if (!entry || (spec.sink !== 'menu' && spec.scope !== 'app')) return [];
-    return [{ ...entry, argumentHint: null, origin: 'maws' as const, action: enabled(id) ? { kind: 'maws' as const, id } : { kind: 'unavailable' as const, hint: 'Not available here' } }];
+    return [{ ...entry, argumentHint: null, origin: 'maws' as const, action: enabled(id) ? { kind: 'maws' as const, id } : { kind: 'unavailable' as const, hint: UNAVAILABLE_HINT } }];
   });
 }
 
@@ -66,12 +69,12 @@ export function slashItems(catalog: SessionCatalog, widgets: ReadonlySet<string>
   const skills = new Set(catalog.skills);
   const terminalOnly = new Set(catalog.terminalOnly);
   const listed = new Set(catalog.commands.map((c) => c.name));
-  const dispatch = (name: string, headless: boolean): SlashAction => (widgets.has(name) ? { kind: 'widget' } : headless ? { kind: 'text' } : { kind: 'unavailable', hint: UNAVAILABLE_HINT });
+  const dispatch = (name: string, headless: boolean, hint: string): SlashAction => (widgets.has(name) ? { kind: 'widget' } : headless ? { kind: 'text' } : { kind: 'unavailable', hint });
   const engine = catalog.commands.map(
-    (c): SlashItem => ({ name: c.name, title: `/${c.name}`, description: c.description, argumentHint: c.argumentHint, origin: originOf(c, skills), action: dispatch(c.name, !terminalOnly.has(c.name)) }),
+    (c): SlashItem => ({ name: c.name, title: `/${c.name}`, description: c.description, argumentHint: c.argumentHint, origin: originOf(c, skills), action: dispatch(c.name, !terminalOnly.has(c.name), TERMINAL_ONLY_HINT) }),
   );
   const declared = WIDGET_COMMANDS.filter((w) => !listed.has(w.name)).map(
-    (w): SlashItem => ({ name: w.name, title: `/${w.name}`, description: w.description, argumentHint: null, origin: 'widget', action: dispatch(w.name, false) }),
+    (w): SlashItem => ({ name: w.name, title: `/${w.name}`, description: w.description, argumentHint: null, origin: 'widget', action: dispatch(w.name, false, UNAVAILABLE_HINT) }),
   );
   return [...engine, ...declared, ...maws];
 }

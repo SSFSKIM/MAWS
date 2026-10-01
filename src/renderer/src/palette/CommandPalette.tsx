@@ -47,7 +47,7 @@ export function paletteEntries(
 // What an action without a handler waits for. The request and composer keys belong to the element holding focus
 // (`useKeyChord`), so the palette, which holds focus itself, can never run them.
 const UNAVAILABLE: Partial<Record<ActionId, string>> = {
-  'session.new': 'Arrives with C10',
+  'session.new': 'Not available here',
   'request.accept': 'Keyboard only, in a focused request',
   'request.decline': 'Keyboard only, in a focused request',
   'composer.send': 'Keyboard only, in the composer',

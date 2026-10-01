@@ -248,7 +248,7 @@ async function firstInstance(maws: MawsLaunch): Promise<Saved> {
     const panel = main.getByRole('tabpanel');
     // C6 registers the transcript slot: the session's transcript is mounted in place of C5's fallback.
     await expect(panel.locator('.transcript')).toHaveCount(1);
-    await expect(panel.getByText('Transcript arrives with C6')).toHaveCount(0);
+    await expect(panel.getByText('Transcript unavailable')).toHaveCount(0);
     await expect(panel.getByText('Approval needed')).toBeVisible();
     await expect(panel.getByTestId('request-input')).toHaveText('git log --oneline');
     await expect(panel.locator('[data-composer-frame]')).toBeAttached(); // C7: the composer fills its slot; its frame waits behind the docked card

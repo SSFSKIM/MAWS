@@ -243,7 +243,7 @@ describe('sidebar sections', () => {
     expect(activeTab(useLayout.getState().main)?.kind).toBe('overview'); // the action does not open the row
     const archive = within(charter).getByRole('button', { name: 'Archive Charter + research' }) as HTMLButtonElement;
     expect(archive.disabled).toBe(true);
-    expect(archive.title).toBe('Arrives with C10');
+    expect(archive.title).toBe('Not available here');
   });
 
   it('a session row carries its id for a drag to a tab strip', () => {
@@ -270,11 +270,11 @@ describe('sidebar sections', () => {
 describe('new sessions from the sidebar', () => {
   beforeEach(() => fillStores(nine));
 
-  it('"+" is disabled with "Arrives with C10" while no creator is registered', () => {
+  it('"+" is disabled with "Not available here" while no creator is registered', () => {
     render(<Sidebar />);
     const plus = within(row('MAWS')).getByRole('button', { name: 'New session in MAWS' }) as HTMLButtonElement;
     expect(plus.disabled).toBe(true);
-    expect(plus.title).toBe('Arrives with C10');
+    expect(plus.title).toBe('Not available here');
   });
 
   it('with a creator, "+" opens an unstarted session tab in that project, and the sidebar does not list it', async () => {

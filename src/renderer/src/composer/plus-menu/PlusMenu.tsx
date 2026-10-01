@@ -1,7 +1,7 @@
 // The "+" menu (C7 execution document, "Mentions, palette and the "+" menu"): files and folders or photos through main's
 // picker (images and PDFs attach as bytes, anything else is mentioned by path), the slash palette at `/`, and the
-// Connectors and Plugins widgets (`/mcp`, `/plugins`) once C11 registers them, disabled with the palette's hint until
-// then. The toolbar that holds it is the Composer's (M4); the menu drives the editor through its handle.
+// Connectors and Plugins widgets (`/mcp`, `/plugins`), disabled with the palette's Not available here where a host
+// registers no widgets. The toolbar that holds it is the Composer's (M4); the menu drives the editor through its handle.
 import { DropdownMenu } from 'radix-ui';
 import type { RefObject } from 'react';
 import { ipc } from '../../ipc/client';

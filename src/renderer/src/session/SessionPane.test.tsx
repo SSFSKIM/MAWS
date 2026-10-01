@@ -38,7 +38,7 @@ describe('session pane', () => {
     render(<SessionPane appSessionId={id} paneIndex={1} />);
     expect(screen.getByText(`transcript ${id} null 1`)).toBeTruthy();
     const request = screen.getByText('request permission docked 1');
-    const composer = screen.getByText('Composer arrives with C7'); // C7: the pane docks above C5's fallback composer only
+    const composer = screen.getByText('Composer unavailable'); // C7: the pane docks above C5's fallback composer only
     expect(request.compareDocumentPosition(composer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.queryByRole('group', { name: 'Session status' })).toBeNull();
   });
@@ -59,7 +59,7 @@ describe('session pane', () => {
     registerSlot('requestCard', () => <p>request</p>);
     render(<SessionPane appSessionId={idOf('Charter + research')} paneIndex={0} />);
     expect(screen.queryByText('request')).toBeNull();
-    expect(screen.getByText('Composer arrives with C7')).toBeTruthy();
+    expect(screen.getByText('Composer unavailable')).toBeTruthy();
   });
 
   it('the docked fallback does not offer to open the session it is already in', () => {
@@ -73,7 +73,7 @@ describe('session pane', () => {
     registerSlot('requestCard', () => <p>request</p>);
     render(<SessionPane appSessionId={id} paneIndex={0} />);
     expect(screen.getByText('Live in Terminal · pid 7135 · read-only')).toBeTruthy();
-    expect(screen.queryByText('Composer arrives with C7')).toBeNull();
+    expect(screen.queryByText('Composer unavailable')).toBeNull();
     expect(screen.queryByText('request')).toBeNull();
   });
 
@@ -95,23 +95,23 @@ describe('session pane', () => {
     registerSlot('newSession', ({ appSessionId }) => <h2>setup {appSessionId}</h2>);
     render(<SessionPane appSessionId={NEW} paneIndex={0} />);
     const setup = screen.getByRole('heading', { name: `setup ${NEW}` });
-    const composer = screen.getByText('Composer arrives with C7');
+    const composer = screen.getByText('Composer unavailable');
     expect(setup.compareDocumentPosition(composer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(screen.queryByText('Transcript arrives with C6')).toBeNull();
+    expect(screen.queryByText('Transcript unavailable')).toBeNull();
     expect(screen.queryByRole('group', { name: 'Session status' })).toBeNull();
   });
 
   it('C5’s newSession fallback renders nothing', () => {
     const { container } = render(<SessionPane appSessionId={'app-new-2' as AppSessionId} paneIndex={0} />);
-    expect(container.textContent).toBe('Composer arrives with C7');
+    expect(container.textContent).toBe('Composer unavailable');
   });
 
   it('swaps to the ordinary pane when the record arrives', () => {
     const NEW = 'app-new-3' as AppSessionId;
     render(<SessionPane appSessionId={NEW} paneIndex={0} />);
-    expect(screen.queryByText('Transcript arrives with C6')).toBeNull();
+    expect(screen.queryByText('Transcript unavailable')).toBeNull();
     act(() => void useSessions.getState().applyChanged({ record: record(NEW), cause: 'live', revision: 7 } as never));
-    expect(screen.getByText('Transcript arrives with C6')).toBeTruthy();
+    expect(screen.getByText('Transcript unavailable')).toBeTruthy();
     expect(screen.queryByRole('group', { name: 'Session status' })).toBeNull();
   });
 });

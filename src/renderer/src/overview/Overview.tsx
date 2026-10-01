@@ -103,7 +103,7 @@ function EmptyBoard({ indexing }: { indexing: { scanned: number; total: number }
       <button
         type="button"
         disabled={!canCreate}
-        title={canCreate ? undefined : 'Arrives with C10'}
+        title={canCreate ? undefined : 'Not available here'}
         onClick={() => void createSession(null)}
         className="rounded-sm border border-border-strong px-2.5 py-1 text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2 disabled:text-fg-faint disabled:hover:bg-transparent"
       >

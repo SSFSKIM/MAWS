@@ -176,11 +176,11 @@ describe('tab strip reorders, closes, reopens', () => {
     expect(document.activeElement).toBe(tab('Quota reset recovery · codex_somersault')); // the neighbour that took its place
   });
 
-  it('the strip’s "+" is disabled with "Arrives with C10" while no session creator is registered', () => {
+  it('the strip’s "+" is disabled with "Not available here" while no session creator is registered', () => {
     render(<Shell />);
     const plus = within(strips()[0].parentElement!).getByRole('button', { name: 'New session' }) as HTMLButtonElement;
     expect(plus.disabled).toBe(true);
-    expect(plus.title).toBe('Arrives with C10');
+    expect(plus.title).toBe('Not available here');
   });
 
   it('⌘1…9 select tabs of the focused pane, ⌘0 the Overview', () => {
@@ -350,8 +350,8 @@ describe('unstarted sessions', () => {
     expect(t.getAttribute('aria-selected')).toBe('true');
     expect(within(t).queryByRole('img')).toBeNull();
     const panel = within(main()).getByRole('tabpanel');
-    expect(within(panel).getByText('Composer arrives with C7')).toBeTruthy();
-    expect(within(panel).queryByText('Transcript arrives with C6')).toBeNull();
+    expect(within(panel).getByText('Composer unavailable')).toBeTruthy();
+    expect(within(panel).queryByText('Transcript unavailable')).toBeNull();
     expect(within(panel).queryByRole('group', { name: 'Session status' })).toBeNull();
     expect(within(document.querySelector<HTMLElement>('[data-region="sidebar"]')!).queryByText('New session')).toBeNull();
     expect(within(screen.getByRole('banner')).getByText('New session')).toBeTruthy();
@@ -381,7 +381,7 @@ describe('unstarted sessions', () => {
     const t = tab('Rename the tab strip · MAWS');
     expect(t.getAttribute('aria-selected')).toBe('true');
     expect(within(t).getByRole('img')).toBeTruthy();
-    expect(within(main()).getByRole('tabpanel').textContent).toContain('Transcript arrives with C6');
+    expect(within(main()).getByRole('tabpanel').textContent).toContain('Transcript unavailable');
     expect(useSessions.getState().unstarted.has(NEW)).toBe(false);
   });
 
@@ -541,9 +541,9 @@ describe('accounts and settings tabs (C11)', () => {
     render(<Shell />);
     act(() => useLayout.getState().openTab({ kind: 'accounts' }));
     expect(tabNames()).toEqual(['Overview', 'Accounts']);
-    expect(within(main()).getByText('Accounts arrive with C11')).toBeTruthy();
+    expect(within(main()).getByText('Accounts unavailable')).toBeTruthy();
     act(() => useLayout.getState().openTab({ kind: 'settings', section: null }));
-    expect(within(main()).getByText('Settings arrive with C11')).toBeTruthy();
+    expect(within(main()).getByText('Settings unavailable')).toBeTruthy();
     await user.click(within(tab('Settings')).getByRole('button', { name: 'Close Settings', hidden: true }));
     expect(tabNames()).toEqual(['Overview', 'Accounts']);
   });

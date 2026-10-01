@@ -262,13 +262,15 @@ test('@ and / menus with the widget union', async ({ editor }) => {
     await page.keyboard.type('/');
   }
   // terminal-only and widget-only names are listed, disabled, and Enter leaves them be
-  for (const [name, origin] of [['doctor', 'engine'], ['permissions', 'widget']]) {
+  // W2: the engine's terminal-only command reads Terminal only, a widget this page did not register Not available here
+  for (const [name, origin, hint] of [['doctor', 'engine', 'Terminal only'], ['permissions', 'widget', 'Not available here']]) {
     await page.keyboard.type(name);
     const row = chosen; // C11: the chosen row (a skill may be shown above it)
     await expect(row).toContainText(`/${name}`);
     await expect(row).toHaveAttribute('data-origin', origin);
     await expect(row).toHaveAttribute('aria-disabled', 'true');
-    await expect(row).toContainText('Opens a widget · arrives with C11');
+    await expect(row).toContainText(hint);
+    await expect(row).not.toContainText('arrives with');
     await page.keyboard.press('Enter');
     await expect(commands).toBeVisible();
     await page.keyboard.press('Escape');
@@ -602,7 +604,7 @@ async function confirmResubmit(page: Page, beforeConfirm: () => Promise<unknown>
   await messageIn(page, 0).click();
   await page.keyboard.press('Enter');
   const dialog = page.getByRole('alertdialog');
-  await expect(dialog).toContainText('Forking arrives with C10. Rewind this session to that message and resend instead?');
+  await expect(dialog).toContainText('Forking is not available here. Rewind this session to that message and resend instead?');
   await beforeConfirm();
   await dialog.getByRole('button', { name: 'Rewind and resend' }).click();
 }

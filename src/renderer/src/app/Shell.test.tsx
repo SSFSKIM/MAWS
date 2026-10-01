@@ -254,7 +254,7 @@ describe('shell actions', () => {
 describe('right panel', () => {
   it('renders the panel host fallback and its header controls', () => {
     render(<Shell />);
-    expect(within(region('panel')).getByText('No tools open · Tools arrive with C8')).toBeTruthy();
+    expect(within(region('panel')).getByText('No tools open')).toBeTruthy();
     expect(within(region('panel')).getByRole('button', { name: 'Maximize right panel' })).toBeTruthy();
   });
 
