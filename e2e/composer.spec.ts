@@ -843,3 +843,26 @@ test('W2: the shared column, the 14px prose, Codex’s bubble and Codex’s comp
   await expect(toolbar.getByRole('button', { name: 'Voice input' })).toHaveCount(0);
   expect(editor.consoleErrors()).toEqual([]);
 });
+
+// R5: the light composer elevation follows the window, not the pane; the dark edge stays inset.
+test('R5: composer shadow switches below 640px and keeps the dark edge', async ({ editor }) => {
+  const { page, app } = editor;
+  await openComposerPage(page);
+  await showPanes(page, [{ composer: { appSessionId: 'r5-shadow', location: { kind: 'directory', path: repo } } }, null]);
+  const box = pane(page, 0).locator('[data-composer-box]');
+  await expect(box).toBeVisible();
+  const shadow = (blur: number) => `rgba(0, 0, 0, 0.04) 0px 0px 0px 1px, rgba(0, 0, 0, 0.04) 0px 2px 8px 0px, rgba(0, 0, 0, 0.024) 0px 4px ${blur}px 8px`;
+  for (const width of [640, 639, 960]) {
+    await app.evaluate(({ BrowserWindow }, w) => {
+      const window = BrowserWindow.getAllWindows()[0];
+      window.setMinimumSize(0, 0);
+      window.setContentSize(w, 700);
+    }, width);
+    await expect.poll(() => page.evaluate(() => innerWidth)).toBe(width);
+    await page.evaluate(() => document.documentElement.dataset.theme = 'light');
+    await expect.poll(() => box.evaluate((el, expected) => getComputedStyle(el).boxShadow.endsWith(expected), shadow(width < 640 ? 40 : 80))).toBe(true);
+    await page.evaluate(() => document.documentElement.dataset.theme = 'dark');
+    await expect.poll(() => box.evaluate((el) => getComputedStyle(el).boxShadow.endsWith('rgba(255, 255, 255, 0.2) 0px 0px 1px 0px inset'))).toBe(true);
+  }
+  expect(editor.consoleErrors()).toEqual([]);
+});
