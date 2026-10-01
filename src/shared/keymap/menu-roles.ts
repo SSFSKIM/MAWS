@@ -2,7 +2,8 @@
 // accelerator holds its chord window-wide, so the Settings tab's chord capture refuses these for every action, naming
 // the item. The roles are the ones `src/main/menu.ts` builds (pinned by `src/main/menu-roles.test.ts`); the chords are
 // Electron 44's `getDefaultRoleAccelerator()` for each role on macOS, read from a running Electron on 2026-09-29, written
-// in C5's accelerator vocabulary.
+// in C5's accelerator vocabulary. Select All is the menu's own item since 2026-09-30, standing in for its role with the
+// role's chord (src/main/menu.ts), so ⌘A stays reserved under the role's name.
 
 export interface MenuRoleChord {
   role: string;

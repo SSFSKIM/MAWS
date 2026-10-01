@@ -200,6 +200,7 @@ export class TerminalRegistry {
     bridge.on('pty.data', (event) => this.receive(event));
     bridge.on('pty.exit', (event) => this.receiveExit(event));
     bridge.on('pty.hostState', (state) => this.applyHost(state));
+    bridge.on('layout.selectAll', () => this.selectAllFocused());
     bridge.on('settings.changed', () => this.refreshTheme());
     // C11 start: C11's appearance.monoFont is a `style` override of `--font-mono` on the root, set after settings.changed
     bridge.on('settings.changed', () => this.refreshFont());
@@ -297,6 +298,14 @@ export class TerminalRegistry {
     if (!entry) return;
     if (entry.renderer && entry.parent) entry.renderer.focus();
     else entry.focusPending = true;
+  }
+
+  // Edit ▸ Select All (`layout.selectAll`): the editor command main ran selects nothing in a terminal, whose focused
+  // element is the emulator's empty helper textarea, so the terminal holding focus selects its buffer.
+  private selectAllFocused(): void {
+    const focused = document.activeElement;
+    if (!focused) return;
+    for (const entry of this.entries.values()) if (entry.container.contains(focused)) entry.renderer?.selectAll();
   }
 
   // An exited or lost terminal gets a new pty with the same cwd and label, in the same handle (tab and title stay);

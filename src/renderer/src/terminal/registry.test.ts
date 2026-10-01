@@ -696,6 +696,29 @@ describe('terminal key filter', () => {
   });
 });
 
+// Edit ▸ Select All (sitting finding, 2026-09-30): main runs the editor command in the focused page, which in a terminal
+// reaches only xterm's empty helper textarea, and emits `layout.selectAll`; the terminal holding focus selects its buffer.
+describe('terminal select all from the application menu', () => {
+  it('selects the buffer of the terminal holding focus, and of none when focus is elsewhere', async () => {
+    const registry = makeRegistry();
+    const first = await openRunning(registry, 't1');
+    const second = await openRunning(registry, 't2');
+    const selected = [vi.spyOn(first.renderer, 'selectAll'), vi.spyOn(second.renderer, 'selectAll')];
+    const helper = document.createElement('textarea'); // where xterm puts focus
+    second.renderer.element.append(helper);
+    const input = document.createElement('input');
+    document.body.append(input);
+
+    helper.focus();
+    ipc.emit('layout.selectAll', {});
+    expect(selected.map((spy) => spy.mock.calls.length)).toEqual([0, 1]);
+
+    input.focus();
+    ipc.emit('layout.selectAll', {});
+    expect(selected.map((spy) => spy.mock.calls.length)).toEqual([0, 1]);
+  });
+});
+
 // The marker contract with C5's dispatcher (wave-2 ledger, keymap dispatcher row), isolated from the dispatcher's other
 // refusals: the terminal sits inside the element a pane-scoped binding answers for (a docked card's pane, or a panel
 // that hosts both), and the key comes from a focused element that is neither text entry nor a button, so only the
