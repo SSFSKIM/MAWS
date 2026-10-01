@@ -34,7 +34,6 @@ const DiffTab: Slots['diffTab'] = ({ tab }) => <Placeholder className="font-mono
 // An unstarted session's setup (C10's heading and setup, from its intent store) renders nothing until C10 registers it:
 // the pane shows the composer frame alone (C10's ask of C5, 2026-09-28).
 const NewSession: Slots['newSession'] = () => null;
-const AccountsTab: Slots['accountsTab'] = () => <Placeholder className="h-full">Accounts unavailable</Placeholder>;
 const SettingsTab: Slots['settingsTab'] = () => <Placeholder className="h-full">Settings unavailable</Placeholder>;
 // The top bar's right end holds nothing until W6 registers the usage pill there.
 const TopBarEnd: Slots['topBarEnd'] = () => null;
@@ -47,7 +46,6 @@ export const FALLBACKS: Slots = {
   fileTab: FileTab,
   diffTab: DiffTab,
   newSession: NewSession,
-  accountsTab: AccountsTab,
   settingsTab: SettingsTab,
   topBarEnd: TopBarEnd,
 };

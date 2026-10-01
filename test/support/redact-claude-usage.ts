@@ -5,6 +5,9 @@
 // display names Account <n>, organisation ids a fixed fake per account (n in accounts.json order); each history file
 // keeps its newest 40 rows; pins keep 12 entries, the most recently used one of every account first, then the most
 // recently used others. Account ids, window readings, the drain target and gateway.json are kept as they are.
+// W6: `gateway-requests.jsonl`, `codex-accounts.json` and `codex-pins.*.json` in the fixture are synthetic, written by
+// hand in ClaudeUsage's shapes (the last ten minutes before the fixture's clock, two Codex accounts); this script
+// neither reads nor rewrites them.
 const fs = process.getBuiltinModule('node:fs');
 const os = process.getBuiltinModule('node:os');
 const path = process.getBuiltinModule('node:path');

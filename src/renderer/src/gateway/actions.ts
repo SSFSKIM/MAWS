@@ -1,6 +1,7 @@
-// C11's handlers in C5's action table (C11 execution document, Keymap and action entries): Settings… (⌘,) and Accounts
-// open their singleton tabs, and Open ClaudeUsage hands the user to ClaudeUsage's panel with the instruction as a toast.
-// The ⌘K palette lists all three from the table; C10's relay card runs the hand-off.
+// C11's handlers in C5's action table (C11 execution document, Keymap and action entries): Settings… (⌘,) opens its
+// singleton tab, and Open ClaudeUsage hands the user to ClaudeUsage's panel with the instruction as a toast. The ⌘K
+// palette lists both from the table; C10's relay card runs the hand-off. (W6: the Accounts tab retired; its action,
+// Usage, opens the top bar's usage popover and is registered by `../usage`.)
 import type { ClaudeUsageOpenIntent, ClaudeUsageOpenResult, MawsBridge } from '@shared/ipc/schema';
 import type { TabTarget } from '@shared/ipc/schema/layout';
 import { ACCOUNTS, CLAUDE_USAGE_README_URL } from '../accounts/copy';
@@ -16,7 +17,7 @@ export const SETTINGS_SECTIONS = ['engine', 'gateway', 'keyboard', 'appearance',
 // The instruction names a control in ClaudeUsage's panel, so it stays long enough to read and act on (M4 decisions).
 export const HAND_OFF_TOAST_MS = 8000;
 
-// The one hand-off call (the action here, the Accounts tab's four buttons in M5): activates ClaudeUsage and shows the
+// The one hand-off call (the action here, the usage popover's Open ClaudeUsage): activates ClaudeUsage and shows the
 // instruction naming the control in its panel; when ClaudeUsage is not installed the toast carries `Install ClaudeUsage`,
 // which opens its README (the architect's ruling of 2026-09-29: the relay card's `not_installed` is covered here, and
 // C10's card is left alone). Answers null, with a warning toast, when main refused the call.
@@ -36,7 +37,6 @@ export async function openClaudeUsage(intent: ClaudeUsageOpenIntent, client: Maw
 export function registerGatewayActions(client: MawsBridge = ipc): () => void {
   const offs = [
     registerAction('settings.open', (arg) => useLayout.getState().openTab({ kind: 'settings', section: arg === null ? null : (SETTINGS_SECTIONS[arg] ?? null) })),
-    registerAction('accounts.open', () => useLayout.getState().openTab({ kind: 'accounts' })),
     registerAction('gateway.openClaudeUsage', async () => void (await openClaudeUsage({ intent: 'panel' }, client))),
   ];
   return () => offs.forEach((off) => off());

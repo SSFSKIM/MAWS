@@ -81,7 +81,7 @@ describe('gateway actions pass the command validator', () => {
     expect(refusals[0]).toMatchObject({ kind: 'toast', text: expect.stringMatching(/^ClaudeUsage could not be opened · .*settings\.claudeUsage\.open/) });
   });
 
-  it('opens the singleton Settings tab (at a section by index) and the Accounts tab', () => {
+  it('opens the singleton Settings tab (at a section by index); the retired Accounts tab is not among its actions (W6)', () => {
     const { bridge } = validatingBridge(() => OPENED);
     off = registerGatewayActions(bridge);
     runAction('settings.open');
@@ -89,13 +89,12 @@ describe('gateway actions pass the command validator', () => {
     runAction('settings.open', 2);
     expect(activeTab(useLayout.getState().main)).toEqual({ id: 'settings', kind: 'settings', section: 'keyboard', pinned: false });
     expect(useLayout.getState().main.panes[0].tabs.filter((t) => t.kind === 'settings')).toHaveLength(1);
-    runAction('accounts.open');
-    expect(activeTab(useLayout.getState().main)).toEqual({ id: 'accounts', kind: 'accounts', pinned: false });
+    expect(isActionEnabled('accounts.open')).toBe(false);
   });
 
-  it('unregisters all three', () => {
+  it('unregisters both', () => {
     off = registerGatewayActions(validatingBridge(() => OPENED).bridge);
     off();
-    for (const id of ['settings.open', 'accounts.open', 'gateway.openClaudeUsage'] as const) expect(isActionEnabled(id)).toBe(false);
+    for (const id of ['settings.open', 'gateway.openClaudeUsage'] as const) expect(isActionEnabled(id)).toBe(false);
   });
 });

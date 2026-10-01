@@ -21,7 +21,7 @@ function account(uuid: string, email: string, windows: Partial<AccountUsage['win
 }
 
 function snapshot(accounts: AccountUsage[]): UsageSnapshot {
-  return { available: true, dataDir: '/x', readAt: at(0), error: null, drainTarget: accounts[0]?.uuid ?? null, drainTargetIsManual: false, accounts, pinsFor: {} };
+  return { available: true, dataDir: '/x', readAt: at(0), error: null, drainTarget: accounts[0]?.uuid ?? null, drainTargetIsManual: false, accounts, pinsFor: {}, gateway: null, codex: null, activity: null };
 }
 
 // One 92 % 5-hour window, one 100 % weekly window, one 89 % window, one 80 % scoped window, one past 95 % window.

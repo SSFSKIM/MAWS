@@ -467,7 +467,7 @@ describe('ipc schema validates both directions', () => {
         uuid: 'a1', email: '1@example.test', displayName: 'Account 1', planLabel: 'Max', rateLimitTier: null, needsReauthentication: false, lastSeenActive: null,
         pinnedSessionCount: 3, credentialOwnership: 'appManaged', windows: { fiveHour: window, sevenDay: null, scoped: [{ model: 'Fable', window }] },
       };
-      const snapshot = { available: true, dataDir: '/d', readAt: '2026-09-28T15:11:00.000Z', error: null, drainTarget: 'a1', drainTargetIsManual: false, accounts: [account], pinsFor: { s1: 'a1' } };
+      const snapshot = { available: true, dataDir: '/d', readAt: '2026-09-28T15:11:00.000Z', error: null, drainTarget: 'a1', drainTargetIsManual: false, accounts: [account], pinsFor: { s1: 'a1' }, gateway: null, codex: null, activity: null };
       expect(validateCommandInput('settings.usage', { engineSessionIds: [] }).ok).toBe(true);
       expect(validateCommandInput('settings.usage', { engineSessionIds: Array.from({ length: 65 }, (_, i) => `s${i}`) }).ok).toBe(false);
       expect(validateCommandOutput('settings.usage', snapshot)).toEqual({ ok: true, value: snapshot });

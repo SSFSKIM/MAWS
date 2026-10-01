@@ -1,0 +1,14 @@
+{
+  "drainTarget": "c0de0001-0000-4000-8000-000000000006",
+  "drainTargetIsManual": false,
+  "pins": {
+    "0b7e2d21-5a54-4c55-8f0e-3c3f1d2a9b10": {
+      "accountUUID": "c0de0001-0000-4000-8000-000000000006",
+      "lastUsed": 780816001.0
+    },
+    "a76ad588-e4b4-4a99-bf4e-69287514916f": {
+      "accountUUID": "c0de0001-0000-4000-8000-000000000006",
+      "lastUsed": 780816000.0
+    }
+  }
+}

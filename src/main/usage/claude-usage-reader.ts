@@ -6,11 +6,15 @@
 // recordedAt, resetsAt }` per line; `session` is the 5-hour window, `weekly_all` the week, `weekly_scoped#<Model>` a
 // model's week), of which the newest row per key in the last 64 KiB counts, as ClaudeUsage's own HistoryStore keeps it.
 // The directory and `history/` are watched (non-recursive, 500 ms trailing debounce) with a 60 s re-read floor.
+// W6 (E1): the top bar's copy of ClaudeUsage's panel also reads `gateway.json` (the routing toggle's state and the port),
+// `codex-accounts.json` with the per-model `codex-pins.<model>.json` (the Codex accounts and their drain target), and
+// follows `gateway-requests.jsonl` for the last ten minutes of requests (`request-ledger.ts`). Still read only.
 import { watch, type FSWatcher } from 'node:fs';
-import { readFile, stat } from 'node:fs/promises';
+import { readdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { AccountUsage, UsageSnapshot, UsageWindow } from '@shared/usage/types';
+import type { AccountUsage, UsageActivity, UsageCodex, UsageGateway, UsageSnapshot, UsageWindow } from '@shared/usage/types';
 import { jsonLines, readTail } from '../files/read-tail';
+import { RequestLedger } from './request-ledger';
 
 export const HISTORY_TAIL_BYTES = 64 * 1024;
 export const DEBOUNCE_MS = 500;
@@ -26,6 +30,7 @@ export interface ClaudeUsageReaderOptions {
   log?: (message: string) => void;
   debounceMs?: number;
   floorMs?: number;
+  now?: () => number; // W6: the clock of `readAt` and of the requests' ten-minute window
 }
 
 type Account = Omit<AccountUsage, 'pinnedSessionCount'>;
@@ -38,6 +43,11 @@ interface Read {
   drainTargetIsManual: boolean;
   accounts: Account[];
   pins: Map<string, string>; // engine session id → account uuid
+  // W6 start
+  gateway: UsageGateway | null;
+  codex: UsageCodex | null;
+  activity: UsageActivity | null;
+  // W6 end
 }
 
 const str = (v: unknown): string | null => (typeof v === 'string' ? v : null);
@@ -51,9 +61,13 @@ export class ClaudeUsageReader {
   private debounce: ReturnType<typeof setTimeout> | null = null;
   private floor: ReturnType<typeof setInterval> | null = null;
   private readonly log: (message: string) => void;
+  private readonly now: () => number;
+  private readonly requests: RequestLedger;
 
   constructor(private readonly opts: ClaudeUsageReaderOptions) {
     this.log = opts.log ?? ((message) => console.warn(`[claude-usage] ${message}`));
+    this.now = opts.now ?? Date.now;
+    this.requests = new RequestLedger(join(opts.dir, 'gateway-requests.jsonl'));
   }
 
   // Reads once, then follows the files until `stop`.
@@ -140,6 +154,7 @@ export class ClaudeUsageReader {
     return {
       available: read.available, dataDir: this.opts.dir, readAt: read.readAt, error: read.error, drainTarget: read.drainTarget, drainTargetIsManual: read.drainTargetIsManual,
       accounts: read.accounts.map((account) => ({ ...account, pinnedSessionCount: counts.get(account.uuid) ?? 0 })), pinsFor,
+      gateway: read.gateway, codex: read.codex, activity: read.activity, // W6
     };
   }
 
@@ -150,9 +165,10 @@ export class ClaudeUsageReader {
   }
 
   private async readFiles(): Promise<Read> {
-    const readAt = new Date().toISOString();
+    const now = this.now();
+    const readAt = new Date(now).toISOString();
     const previous = this.last;
-    const absent = (error: string): Read => ({ available: false, error, readAt, drainTarget: null, drainTargetIsManual: false, accounts: [], pins: new Map() });
+    const absent = (error: string): Read => ({ available: false, error, readAt, drainTarget: null, drainTargetIsManual: false, accounts: [], pins: new Map(), gateway: null, codex: null, activity: null });
     try {
       await stat(this.opts.dir);
     } catch {
@@ -163,9 +179,13 @@ export class ClaudeUsageReader {
     try {
       accounts = parseAccounts(JSON.parse(await readFile(join(this.opts.dir, 'accounts.json'), 'utf8')));
     } catch (error) {
-      // a torn write keeps what the last good read said; with nothing before, there is no data yet
-      if (previous?.available) return (this.last = { ...previous, readAt });
-      return (this.last = absent(`ClaudeUsage has no readable accounts.json at ${this.opts.dir}: ${messageOf(error)}`));
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        accounts = []; // an existing directory may have only Codex accounts, as AccountStore.accounts() allows
+      } else {
+        // a torn write keeps what the last good read said; with nothing before, there is no data yet
+        if (previous?.available) return (this.last = { ...previous, readAt });
+        return (this.last = absent(`ClaudeUsage has no readable accounts.json at ${this.opts.dir}: ${messageOf(error)}`));
+      }
     }
 
     let pins: Pick<Read, 'drainTarget' | 'drainTargetIsManual' | 'pins'>;
@@ -178,8 +198,57 @@ export class ClaudeUsageReader {
     }
 
     const withWindows = await Promise.all(accounts.map(async (account) => ({ ...account, windows: await this.windowsOf(account.uuid) })));
-    return (this.last = { available: true, error: null, readAt, ...pins, accounts: withWindows });
+    // W6 start
+    const [gateway, codex, activity] = await Promise.all([
+      this.optional('gateway.json', previous?.gateway ?? null, async () => parseGateway(JSON.parse(await readFile(join(this.opts.dir, 'gateway.json'), 'utf8')))),
+      this.optional('codex-accounts.json', previous?.codex ?? null, () => this.codexOf()),
+      this.optional('gateway-requests.jsonl', previous?.activity ?? null, () => this.requests.read(now)),
+    ]);
+    return (this.last = { available: true, error: null, readAt, ...pins, accounts: withWindows, gateway, codex, activity });
+    // W6 end
   }
+
+  // W6 start: a file the popover shows beside the accounts. Absent is null; unreadable or torn keeps what the last good
+  // read said, as pins.json does.
+  private async optional<T>(name: string, previous: T | null, read: () => Promise<T | null>): Promise<T | null> {
+    try {
+      return await read();
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+      this.log(`${name} unreadable, keeping the previous reading: ${messageOf(error)}`);
+      return previous;
+    }
+  }
+
+  // The Codex accounts, and their drain target as ClaudeUsage's Codex section takes it (NativeCodexGateway.swift
+  // `currentAccount`): every model routes on its own pins file, and the target is the one account they all name.
+  private async codexOf(): Promise<UsageCodex> {
+    const accounts = parseCodexAccounts(JSON.parse(await readFile(join(this.opts.dir, 'codex-accounts.json'), 'utf8')));
+    const names = (await readdir(this.opts.dir)).filter((name) => /^codex-pins(\..+)?\.json$/.test(name)).sort();
+    const files = (
+      await Promise.all(
+        names.map(async (name) => {
+          try {
+            return [parsePins(JSON.parse(await readFile(join(this.opts.dir, name), 'utf8')))];
+          } catch (error) {
+            // Only a file removed since readdir can be left out; a partial model set can invent a common target.
+            if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+            return [];
+          }
+        }),
+      )
+    ).flat();
+    const counts = new Map<string, number>();
+    for (const file of files) for (const account of file.pins.values()) counts.set(account, (counts.get(account) ?? 0) + 1);
+    const targets = new Set(files.flatMap((file) => (file.drainTarget === null ? [] : [file.drainTarget])));
+    const drainTarget = targets.size === 1 ? [...targets][0]! : null;
+    return {
+      accounts: accounts.map((account) => ({ ...account, pinnedSessionCount: counts.get(account.accountId) ?? 0 })),
+      drainTarget,
+      drainTargetIsManual: drainTarget !== null && files.every((file) => file.drainTarget !== drainTarget || file.drainTargetIsManual),
+    };
+  }
+  // W6 end
 
   private async windowsOf(uuid: string): Promise<Account['windows']> {
     const newest = new Map<string, UsageWindow>();
@@ -231,6 +300,21 @@ function parsePins(value: unknown): Pick<Read, 'drainTarget' | 'drainTargetIsMan
   }
   return { drainTarget: str(file.drainTarget), drainTargetIsManual: file.drainTargetIsManual === true, pins };
 }
+
+// W6 start
+function parseGateway(value: unknown): UsageGateway {
+  if (typeof value !== 'object' || value === null) throw new Error('gateway.json is not an object');
+  const file = value as { routingEnabled?: unknown; port?: unknown };
+  return { routingEnabled: file.routingEnabled === true, port: typeof file.port === 'number' && Number.isInteger(file.port) ? file.port : null };
+}
+
+function parseCodexAccounts(value: unknown): Omit<UsageCodex['accounts'][number], 'pinnedSessionCount'>[] {
+  if (!Array.isArray(value)) throw new Error('codex-accounts.json is not an array');
+  return value
+    .filter((a): a is Record<string, unknown> => typeof a === 'object' && a !== null && typeof (a as { accountID?: unknown }).accountID === 'string')
+    .map((a) => ({ accountId: a.accountID as string, email: str(a.email) ?? '', planLabel: str(a.planLabel), needsReauthentication: a.needsReauthentication === true }));
+}
+// W6 end
 
 function signature(snapshot: UsageSnapshot): string {
   return JSON.stringify({ ...snapshot, readAt: null });

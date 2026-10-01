@@ -21,6 +21,43 @@ export const AccountUsageSchema = z.strictObject({
 });
 export type AccountUsage = z.infer<typeof AccountUsageSchema>;
 
+// W6 start: what the top bar's usage popover shows beside the accounts, each from one more of ClaudeUsage's files (E1;
+// the copy of ClaudeUsage's panel, `PanelView.swift`). Each is null when its file is absent or unreadable.
+// gateway.json: the "Route Claude Code through this app" toggle's state, and the relay's port.
+export const UsageGatewaySchema = z.strictObject({ routingEnabled: z.boolean(), port: z.number().int().nullable() });
+export type UsageGateway = z.infer<typeof UsageGatewaySchema>;
+// codex-accounts.json and the per-model codex-pins.<model>.json: the Codex accounts the GPT aliases use. ClaudeUsage
+// keeps their limits in memory only, so none are here.
+export const CodexAccountUsageSchema = z.strictObject({ accountId: z.string(), email: z.string(), planLabel: z.string().nullable(), needsReauthentication: z.boolean(), pinnedSessionCount: z.number().int().nonnegative() });
+export type CodexAccountUsage = z.infer<typeof CodexAccountUsageSchema>;
+export const UsageCodexSchema = z.strictObject({
+  accounts: z.array(CodexAccountUsageSchema),
+  drainTarget: z.string().nullable(), // the account every model's route drains, null when they disagree or none is set
+  drainTargetIsManual: z.boolean(),
+});
+export type UsageCodex = z.infer<typeof UsageCodexSchema>;
+// gateway-requests.jsonl, the relay's one line per request: the last ten minutes as ClaudeUsage's panel shows them
+// (`TelemetryLedger.activity` and `.health`): per account the requests it served, the share of prompt tokens read from
+// the cache and when it last served; and the relay's health line.
+export const ACTIVITY_WINDOW_MS = 10 * 60_000;
+export const AccountActivitySchema = z.strictObject({ account: z.string(), requests: z.number().int().nonnegative(), cacheHitRatio: z.number().nullable(), lastServed: z.string() });
+export type AccountActivity = z.infer<typeof AccountActivitySchema>;
+export const GatewayHealthSchema = z.strictObject({
+  requests: z.number().int().nonnegative(),
+  served: z.number().int().nonnegative(),
+  firstByteP50: z.number().nullable(), // seconds
+  firstByteP95: z.number().nullable(),
+  stalls: z.number().int().nonnegative(), // a silence longer than 10 s
+  transportFailures: z.number().int().nonnegative(),
+  refused: z.number().int().nonnegative(),
+  unreachable: z.number().int().nonnegative(),
+  held: z.number().int().nonnegative(),
+});
+export type GatewayHealth = z.infer<typeof GatewayHealthSchema>;
+export const UsageActivitySchema = z.strictObject({ accounts: z.array(AccountActivitySchema), health: GatewayHealthSchema });
+export type UsageActivity = z.infer<typeof UsageActivitySchema>;
+// W6 end
+
 export const UsageSnapshotSchema = z.strictObject({
   available: z.boolean(),
   dataDir: z.string(),
@@ -30,5 +67,10 @@ export const UsageSnapshotSchema = z.strictObject({
   drainTargetIsManual: z.boolean(), // C11's ask: pins.json's flag; false when an older file omits it
   accounts: z.array(AccountUsageSchema),
   pinsFor: z.record(z.string(), z.string()), // engine session id → account uuid, for the ids the caller named
+  // W6 start
+  gateway: UsageGatewaySchema.nullable(),
+  codex: UsageCodexSchema.nullable(),
+  activity: UsageActivitySchema.nullable(), // as of `readAt`
+  // W6 end
 });
 export type UsageSnapshot = z.infer<typeof UsageSnapshotSchema>;

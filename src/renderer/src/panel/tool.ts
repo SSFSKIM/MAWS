@@ -16,7 +16,7 @@ export interface PanelToolInit<P = void> {
 }
 
 export interface PanelToolContext {
-  appSessionId: AppSessionId | null; // the shown session; changes under a pinned tab; null on Overview, Diagnostics, Accounts, Settings
+  appSessionId: AppSessionId | null; // the shown session; changes under a pinned tab; null on Overview, Diagnostics, Settings
   session: SessionRecord | null;
   status: EngineSessionStatus | null; // C3's status when the shown session is live in this app
   pinned: boolean;

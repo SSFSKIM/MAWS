@@ -56,9 +56,9 @@ describe('keymap: chords unique and single-sink', () => {
   // C7 end
 
   // C11 start: Settings, Accounts and the ClaudeUsage hand-off (C11 execution document, Keymap and action entries)
-  it('carries settings.open in the application menu at ⌘, and accounts.open in View; the hand-off stays out of the menu', () => {
+  it('carries settings.open in the application menu at ⌘, and accounts.open (W6: Usage) in View; the hand-off stays out of the menu', () => {
     expect(ACTIONS['settings.open']).toEqual({ title: 'Settings…', chord: 'Cmd+,', sink: 'menu', menu: 'app', scope: 'app' });
-    expect(ACTIONS['accounts.open']).toEqual({ title: 'Accounts', chord: null, sink: 'menu', menu: 'view', scope: 'app' });
+    expect(ACTIONS['accounts.open']).toEqual({ title: 'Usage', chord: null, sink: 'menu', menu: 'view', scope: 'app' });
     expect(ACTIONS['gateway.openClaudeUsage']).toEqual({ title: 'Open ClaudeUsage', chord: null, sink: 'renderer', menu: null, scope: 'app' });
   });
   // C11 end

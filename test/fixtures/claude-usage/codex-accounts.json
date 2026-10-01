@@ -1,0 +1,14 @@
+[
+  {
+    "accountID": "c0de0001-0000-4000-8000-000000000006",
+    "email": "6@example.test",
+    "needsReauthentication": false,
+    "planLabel": "Pro"
+  },
+  {
+    "accountID": "c0de0002-0000-4000-8000-000000000007",
+    "email": "7@example.test",
+    "needsReauthentication": true,
+    "planLabel": "Plus"
+  }
+]

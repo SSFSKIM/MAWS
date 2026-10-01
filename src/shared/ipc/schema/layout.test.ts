@@ -107,6 +107,15 @@ describe('layout value shapes', () => {
     });
   });
 
+  // W6 (E1): the Accounts tab retired into the top bar's usage popover; a layout that held it reads without it.
+  it('drops the retired Accounts tab from a stored main.tabs, panes and closed-tab history alike', () => {
+    const accounts = { id: 'accounts', kind: 'accounts', pinned: false };
+    const session = { id: 'session:a1', kind: 'session', appSessionId: 'a1', pinned: false };
+    expect(TabRefSchema.safeParse(accounts).success).toBe(false);
+    const main = { version: 1, panes: [{ tabs: [session, accounts], activeTabId: 'accounts' }], focusedPane: 0, splitRatio: 0.5, closedTabs: [accounts, session] };
+    expect(StoredMainSchema.parse(main)).toEqual({ ...main, panes: [{ tabs: [session], activeTabId: 'session:a1' }], closedTabs: [session] });
+  });
+
   it('owns get, set, list, openExternal and setEnabledActions in main', () => {
     expect(Object.fromEntries(Object.entries(commands).map(([name, spec]) => [name, spec.owner]))).toEqual({
       'layout.get': 'main',

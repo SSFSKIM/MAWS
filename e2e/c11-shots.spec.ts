@@ -121,17 +121,18 @@ test('the widgets and Session info on the #widgets harness page', async () => {
   }
 });
 
-test('the Accounts and Settings tabs in the product shell', async () => {
+test('the usage popover (W6: the Accounts tab retired into it) and the Settings tab in the product shell', async () => {
   test.setTimeout(180_000);
   const maws = await launchMaws({ env: { MAWS_HARNESS: '0', MAWS_SESSION_SOURCE: 'stub:test/fixtures/shell/nine-sessions.json', MAWS_SCENARIO_CLOCK: 'manual', MAWS_CLAUDE_USAGE_DIR: usage } });
   const { app, page } = maws;
   try {
     await expect(page.locator('[data-region="main"]')).toBeVisible();
     await page.getByRole('button', { name: 'Hide right panel' }).click(); // the tabs at the mockup's width: the right panel closed
-    await menu(app, 'accounts.open');
-    const panel = page.locator('[data-region="main"]').getByRole('tabpanel');
-    await expect(panel.locator('[data-account]')).toHaveCount(5);
+    await menu(app, 'accounts.open'); // View › Usage: the top bar's usage popover
+    const popover = page.getByRole('dialog', { name: 'Claude Usage' });
+    await expect(popover.locator('[data-account]:not([data-codex] [data-account])')).toHaveCount(5);
     await shoot(page, 'accounts', false);
+    await page.keyboard.press('Escape');
     await menu(app, 'settings.open');
     await expect(page.locator('[data-region="main"]').getByRole('tab', { name: /Settings/ })).toBeVisible();
     const hide = page.getByRole('button', { name: 'Hide right panel' });

@@ -8,14 +8,14 @@ import { ACTION_IDS } from '../../keymap/actions';
 import type { CommandSpec } from './common';
 
 // W5 (§5.2 as amended 2026-10-01): the Overview is no longer a tab; it floats over the main area (`regions.overview`).
-// A stored `main.tabs` that still holds its tab is read through `StoredMainSchema`, which drops it.
+// A stored `main.tabs` that still holds its tab is read through `StoredMainSchema`, which drops it. W6 (E1): the
+// Accounts tab retired the same way; its content is the top bar's usage popover.
 export const TabRefSchema = z.discriminatedUnion('kind', [
   z.strictObject({ id: z.string(), kind: z.literal('session'), appSessionId: AppSessionIdSchema, pinned: z.boolean() }),
   z.strictObject({ id: z.string(), kind: z.literal('agent'),   appSessionId: AppSessionIdSchema, agentId: AgentIdSchema, pinned: z.boolean() }),   // a child's transcript in the main area (C6 child variant); C8's drill-in stays in the panel
   z.strictObject({ id: z.string(), kind: z.literal('file'),    path: z.string(), line: z.number().int().nullable(), appSessionId: AppSessionIdSchema.nullable(), pinned: z.boolean() }),
   z.strictObject({ id: z.string(), kind: z.literal('diff'),    appSessionId: AppSessionIdSchema, ref: z.string(), pinned: z.boolean() }),
   z.strictObject({ id: z.literal('diagnostics'), kind: z.literal('diagnostics'), pinned: z.boolean() }),
-  z.strictObject({ id: z.literal('accounts'), kind: z.literal('accounts'), pinned: z.literal(false) }),   // C11 (eighth ask): singleton, closable, never pinned, titled 'Accounts'
   z.strictObject({ id: z.literal('settings'), kind: z.literal('settings'), section: z.enum(['engine', 'gateway', 'keyboard', 'appearance', 'notifications']).nullable(), pinned: z.literal(false) }),   // C11: singleton; a second openTab activates it and updates `section`; titled 'Settings'
 ]);
 export type TabRef = z.infer<typeof TabRefSchema>;
@@ -35,15 +35,13 @@ export function tabId(tab: TabTarget): string {
       return `diff:${tab.appSessionId}:${tab.ref}`;
     case 'diagnostics':
       return 'diagnostics';
-    case 'accounts':
-      return 'accounts';
     case 'settings':
       return 'settings';
   }
 }
 
-// Tab kinds the pin control never applies to: C11's two singletons.
-export const UNPINNABLE_KINDS: ReadonlySet<TabRef['kind']> = new Set(['accounts', 'settings']);
+// Tab kinds the pin control never applies to: C11's singleton (the Accounts tab, the other, retired with W6).
+export const UNPINNABLE_KINDS: ReadonlySet<TabRef['kind']> = new Set(['settings']);
 
 // A pane holds at least one tab, except that the only pane may be empty (W5: with the Overview out of the strip, closing
 // the last tab leaves an empty main area; `activeTabId` is '' then).
@@ -78,25 +76,27 @@ export const LayoutMainSchema = z.strictObject({ version: z.literal(1),         
   panes: z.tuple([PaneStateSchema]).or(z.tuple([PaneStateSchema, PaneStateSchema])), focusedPane: z.union([z.literal(0), z.literal(1)]), splitRatio: z.number(),
   closedTabs: z.array(TabRefSchema).max(10) });                                                                    // ⌘⇧T history, newest last
 export type LayoutMain = z.infer<typeof LayoutMainSchema>;
-// What hydration reads from `main.tabs`: the Overview's tab, which every layout before W5 held, is dropped from the panes
-// and the closed-tab history (a pane it leaves empty goes; a pane whose active tab it was activates its first tab). The
-// rewrite is total: a pane or tab that is not an object passes through untouched for the schema to reject, because a
-// throw here would fail hydration's reads as a whole instead of falling back to the default.
+// What hydration reads from `main.tabs`: the retired tab kinds, the Overview's (every layout before W5 held it) and the
+// Accounts tab's (W6), are dropped from the panes and the closed-tab history (a pane it leaves empty goes; a pane whose
+// active tab it was activates its first tab). The rewrite is total: a pane or tab that is not an object passes through
+// untouched for the schema to reject, because a throw here would fail hydration's reads as a whole instead of falling
+// back to the default.
 type Entries = { tabs: unknown[]; activeTabId?: unknown };
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
-const isOverviewRef = (tab: unknown) => isRecord(tab) && tab.kind === 'overview';
+const RETIRED_KINDS: ReadonlySet<unknown> = new Set(['overview', 'accounts']);
+const isRetiredRef = (tab: unknown) => isRecord(tab) && RETIRED_KINDS.has(tab.kind);
 const hasTabs = (pane: unknown): pane is Entries => isRecord(pane) && Array.isArray(pane.tabs);
 const idOf = (tab: unknown) => (isRecord(tab) ? tab.id : undefined);
 export const StoredMainSchema = z.preprocess((value) => {
   if (!isRecord(value) || !Array.isArray(value.panes)) return value;
   const panes = (value.panes as unknown[]).map((pane) => {
     if (!hasTabs(pane)) return pane;
-    const tabs = pane.tabs.filter((t) => !isOverviewRef(t));
+    const tabs = pane.tabs.filter((t) => !isRetiredRef(t));
     const active = tabs.some((t) => idOf(t) === pane.activeTabId) ? pane.activeTabId : (idOf(tabs[0]) ?? '');
     return { ...pane, tabs, activeTabId: active };
   });
   const kept = panes.filter((pane) => !hasTabs(pane) || pane.tabs.length > 0);
-  const closedTabs = Array.isArray(value.closedTabs) ? (value.closedTabs as unknown[]).filter((t) => !isOverviewRef(t)) : value.closedTabs;
+  const closedTabs = Array.isArray(value.closedTabs) ? (value.closedTabs as unknown[]).filter((t) => !isRetiredRef(t)) : value.closedTabs;
   return { ...value, panes: kept.length > 0 ? kept : [{ tabs: [], activeTabId: '' }], focusedPane: kept.length < panes.length ? 0 : value.focusedPane, closedTabs };
 }, LayoutMainSchema);
 export const PanelPinnedSchema = z.array(PanelTabRefSchema);                                                      // key `panel.pinned`: the global pins (D-10)
