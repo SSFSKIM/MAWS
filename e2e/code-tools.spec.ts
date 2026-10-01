@@ -128,11 +128,11 @@ test.describe('the #panel harness: Review and its hand-offs', () => {
     await h.panel('loadTranscript', 'A', 'transcript/edit-and-receipt');
     const receipt = h.page.locator('[data-code-harness-transcript] .transcript-receipt');
     await expect(receipt).toBeVisible();
-    // The receipt's own counts, file by file (C6's row: the path as its title, then `+A −R`).
+    // The receipt's own counts, file by file (C6's row: the path as recorded in `data-path`, then `+A −R`).
     const receiptFiles = await receipt.locator('.transcript-receipt-file').evaluateAll((rows) =>
       rows.map((row) => {
         const counts = /\+(\d+) −(\d+)/.exec(row.querySelector('.transcript-counts')?.textContent ?? '');
-        return { path: row.getAttribute('title')!, added: Number(counts?.[1]), removed: Number(counts?.[2]) };
+        return { path: (row as HTMLElement).dataset.path!, added: Number(counts?.[1]), removed: Number(counts?.[2]) };
       }),
     );
     expect(receiptFiles).toHaveLength(3);
@@ -177,6 +177,49 @@ test.describe('the #panel harness: Review and its hand-offs', () => {
     // A file row of the receipt opens Review with that file selected.
     await h.code('clickReceiptReview', receiptFiles[1].path);
     await expect.poll(async () => (await h.review('panel'))?.selected).toBe(receiptFiles[1].path);
+    h.expectQuietConsole();
+  });
+
+  // W4 (B5): Review from the receipt opens a hidden right panel; a file row reads its path relative to the session's
+  // directory, shows the turn's hunks for that file above it after 800 ms of hover (the turn folded),
+  // and a click on the popover opens Review at that file; ⌘-click opens the file itself.
+  test('the receipt opens a hidden panel, shows a file’s hunks on hover, and ⌘-click opens the file', async ({ maws }) => {
+    const h = await Harness.open(maws);
+    await h.panel('loadTranscript', 'A', 'transcript/edit-and-receipt');
+    const receipt = h.page.locator('[data-code-harness-transcript] .transcript-receipt');
+    await expect(receipt).toBeVisible();
+    const root = '/tmp/maws-synth-edit-and-receipt'; // the fixture's cwd
+    expect(await receipt.locator('.transcript-receipt-path').allTextContents()).toEqual(['src/app.ts', 'src/store.ts', 'src/util/rows.ts']);
+    const inert = () => h.region.evaluate((region) => region.hasAttribute('inert'));
+
+    await h.panel('collapse', true);
+    expect(await inert(), 'the panel is hidden').toBe(true);
+    await h.code('clickReceiptReview');
+    await expect.poll(inert, { message: 'Review changes opens the hidden panel' }).toBe(false);
+    await expect.poll(async () => (await h.review('panel'))?.scope).toBe('turn');
+
+    await h.panel('collapse', true);
+    const row = receipt.locator(`.transcript-receipt-file[data-path="${root}/src/app.ts"]`);
+    const hover = h.page.locator(`[data-receipt-hover="${root}/src/app.ts"]`);
+    await row.hover();
+    const hovered = Date.now();
+    await expect(hover).toBeVisible();
+    expect(Date.now() - hovered, 'not before 800 ms').toBeGreaterThanOrEqual(700);
+    const [rowBox, hoverBox] = [(await row.boundingBox())!, (await hover.boundingBox())!];
+    expect(hoverBox.y + hoverBox.height, 'above the row').toBeLessThanOrEqual(rowBox.y + 1);
+    expect(hoverBox.height, 'at most 420 px tall').toBeLessThanOrEqual(420);
+    expect(Math.round(hoverBox.width), 'the row’s width less 64 px').toBe(Math.round(rowBox.width) - 64);
+    await expect(hover.locator('.transcript-receipt-hover-header')).toContainText('src/app.ts');
+    await expect(hover.locator('.transcript-diff-line[data-diff="add"]').first()).toBeVisible(); // the turn's edit of app.ts (its Read adds none)
+    await expect(hover.locator('.transcript-diff-line[data-diff="del"]').first()).toBeVisible();
+    await hover.click();
+    await expect.poll(inert).toBe(false);
+    await expect.poll(async () => (await h.review('panel'))?.selected).toBe(`${root}/src/app.ts`);
+    await h.page.mouse.move(0, 0);
+    await expect(hover).toHaveCount(0);
+
+    await row.click({ modifiers: ['Meta'] });
+    await expect(h.page.locator(`[data-file-viewer][data-path="${root}/src/app.ts"]`)).toBeVisible();
     h.expectQuietConsole();
   });
 

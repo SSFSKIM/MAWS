@@ -311,6 +311,12 @@ button.transcript-chip:hover { background: var(--bg-hover); }
 .transcript-receipt-file:hover { background: var(--bg-hover); }
 .transcript-receipt-path { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--fg-muted); font-family: var(--font-mono); }
 .transcript-receipt-more { margin: 2px 14px 0; }
+/* W4: a file row's hover diff, after Codex's DiffPreviewTooltip: above the row, the row's width less 64 px, at most
+   420 px tall with a 36 px header and a scrolling body of at most 384 px */
+.transcript-receipt-hover { display: flex; flex-direction: column; width: max(240px, calc(var(--radix-hover-card-trigger-width) - 64px)); max-width: none; max-height: min(420px, var(--radix-hover-card-content-available-height)); padding: 0; overflow: hidden; cursor: pointer; }
+.transcript-receipt-hover-header { display: flex; flex: none; align-items: center; justify-content: space-between; gap: 12px; height: 36px; padding: 0 12px; border-bottom: 1px solid var(--border); font-size: var(--text-ui-sm); }
+.transcript-receipt-hover .transcript-diff { flex: 0 1 auto; min-height: 0; max-height: 384px; border: 0; border-radius: 0; background: transparent; }
+.transcript-receipt-hover .transcript-detail-note { padding: 8px 12px; }
 .transcript-receipt-footer { display: flex; align-items: center; justify-content: flex-end; gap: 6px; margin-top: 8px; padding: 7px 10px; border-top: 1px solid var(--border); }
 .transcript-receipt-state { margin-right: auto; color: var(--fg-muted); font-size: var(--text-ui-sm); }
 .transcript-receipt-state[data-error] { color: var(--danger); }

@@ -1,22 +1,30 @@
 // A turn's change receipt, after mockup 02: the file count and line counts, Review changes (C8's Review tool), the
-// first three files (each opening Review at that file) with Show more, and Undo and Reapply over the RewindInterface.
-// Undo asks `canUndo` once per receipt (the answer is kept in the store with the undo state, so a remount neither asks
-// again nor forgets an undo); a refusal disables Undo with the reason as its tooltip; a null `reapply` hides Reapply.
-import { Tooltip } from 'radix-ui';
-import { useEffect } from 'react';
+// first three files with Show more, and Undo and Reapply over the RewindInterface. A file row (W4, Codex's receipt)
+// reads its path relative to the session's directory; after 800 ms of hover a popover above it shows the turn's hunks
+// for that file (every edit of it in the turn, from the turn's activity, so a folded turn has them too), up to 420 px
+// tall with a scrolling body, gone on leave; a click on the row or the popover opens Review at that file, ⌘-click the
+// file itself. Undo asks `canUndo` once per receipt (the answer is kept in the store with the undo state, so a remount
+// neither asks again nor forgets an undo); a refusal disables Undo with the reason as its tooltip; a null `reapply`
+// hides Reapply.
+import { HoverCard, Tooltip } from 'radix-ui';
+import { useEffect, type MouseEvent } from 'react';
 import { RECEIPT_APPLIED, useTranscriptStore, type ReceiptUndo } from '../../../stores/transcript';
-import { RECEIPT } from '../../model/copy';
-import type { Row, RowId, TurnId } from '../../model/rows';
+import { DETAIL, displayPath, RECEIPT } from '../../model/copy';
+import type { ChangedFile, Row, RowId, TurnId } from '../../model/rows';
+import { EditDiff } from '../cells/EditDetail';
 import { useDisclosure, useTranscriptContext, type RewindInterface } from '../context';
 import { FileIcon } from './icons';
 import { LineCounts } from './parts';
 
 type ReceiptRowData = Extract<Row, { kind: 'receipt' }>;
 const SHOWN = 3;
+const HOVER_MS = 800; // Codex's diff preview delay (r1-codex §6)
 
 export function ReceiptRow({ row }: { row: ReceiptRowData }) {
-  const { actions, rewind } = useTranscriptContext();
+  const { actions, rewind, storeKey, sessionDirectory } = useTranscriptContext();
   const [all, toggleAll] = useDisclosure(`files:${row.id}`);
+  // The engine's own working directory first (its latest session.started or init), else the session record's.
+  const directory = useTranscriptStore((s) => s.entries[storeKey]?.state.cwd ?? null) ?? sessionDirectory ?? null;
   const turnId = row.turnId!;
   const files = all ? row.files : row.files.slice(0, SHOWN);
   return (
@@ -33,10 +41,7 @@ export function ReceiptRow({ row }: { row: ReceiptRowData }) {
       <ul className="transcript-receipt-files">
         {files.map((file) => (
           <li key={file.path}>
-            <button type="button" className="transcript-receipt-file" data-change={file.change} title={file.path} onClick={() => actions.reviewChanges(turnId, file.path)}>
-              <span className="transcript-receipt-path">{file.path}</span>
-              <LineCounts added={file.added} removed={file.removed} />
-            </button>
+            <FileRow file={file} turnId={turnId} path={displayPath(file.path, directory)} />
           </li>
         ))}
       </ul>
@@ -47,6 +52,45 @@ export function ReceiptRow({ row }: { row: ReceiptRowData }) {
       )}
       {rewind && <UndoControls rewind={rewind} turnId={turnId} receipt={row.id} />}
     </section>
+  );
+}
+
+function FileRow({ file, turnId, path }: { file: ChangedFile; turnId: TurnId; path: string }) {
+  const { actions } = useTranscriptContext();
+  const review = () => actions.reviewChanges(turnId, file.path);
+  // ⌘-click opens the file itself (not a deleted one, which has nothing to open: Review shows its removal).
+  const open = (event: MouseEvent) => (event.metaKey && file.change !== 'delete' ? actions.openFile(file.path) : review());
+  return (
+    <HoverCard.Root openDelay={HOVER_MS} closeDelay={100}>
+      <HoverCard.Trigger asChild>
+        <button type="button" className="transcript-receipt-file" data-change={file.change} data-path={file.path} onClick={open}>
+          <span className="transcript-receipt-path">{path}</span>
+          <LineCounts added={file.added} removed={file.removed} />
+        </button>
+      </HoverCard.Trigger>
+      <HoverCard.Portal>
+        <HoverCard.Content side="top" align="center" sideOffset={0} collisionPadding={8} className="transcript-popover transcript-receipt-hover" data-receipt-hover={file.path} onClick={review}>
+          <FileDiff file={file} turnId={turnId} path={path} />
+        </HoverCard.Content>
+      </HoverCard.Portal>
+    </HoverCard.Root>
+  );
+}
+
+// The turn's hunks for one file: every completed edit of it in the turn, in order, from the turn's activity (which C6
+// keeps whatever the reader disclosed); read only while the popover is open.
+function FileDiff({ file, turnId, path }: { file: ChangedFile; turnId: TurnId; path: string }) {
+  const { storeKey } = useTranscriptContext();
+  const activity = useTranscriptStore((s) => s.activity(storeKey).find((turn) => turn.turnId === turnId) ?? null);
+  const hunks = (activity?.files ?? []).flatMap((entry) => (entry.use === 'edited' && entry.edit?.filePath === file.path ? entry.edit.hunks : []));
+  return (
+    <>
+      <div className="transcript-receipt-hover-header">
+        <span className="transcript-receipt-path">{path}</span>
+        <LineCounts added={file.added} removed={file.removed} />
+      </div>
+      {hunks.length === 0 ? <p className="transcript-detail-note">{DETAIL.noDiff}</p> : <EditDiff hunks={hunks} cell={null} />}
+    </>
   );
 }
 

@@ -65,27 +65,39 @@ function DiffHunk({ lines }: { lines: DiffLine[] }) {
   );
 }
 
+// The hunks as bounded diff lines: the edit cell's detail draws them, and so does the receipt's hover diff (W4), which
+// has no cell to open a full log of (a turn's work may be folded), so its omitted marker offers no route.
+export function EditDiff({ hunks, cell }: { hunks: Hunk[]; cell: Cell | null }) {
+  const diff = budgeted(hunks);
+  const omitted = DETAIL.linesOmitted(diff.omitted);
+  return (
+    <div className="transcript-diff">
+      {diff.head.map((lines, h) => (
+        <DiffHunk key={h} lines={lines} />
+      ))}
+      {diff.omitted > 0 &&
+        (cell ? (
+          <Omitted cell={cell} text={omitted} />
+        ) : (
+          <div className="transcript-omitted-row" data-omitted="">
+            <span className="transcript-omitted">{omitted}</span>
+          </div>
+        ))}
+      {diff.tail.map((lines, h) => (
+        <DiffHunk key={`tail:${h}`} lines={lines} />
+      ))}
+    </div>
+  );
+}
+
 export function EditDetail({ cell, detail }: { cell: Cell; detail: Edit }) {
   const actions = useActions();
-  const diff = budgeted(detail.hunks);
   return (
     <div className="transcript-edit">
       <button type="button" className="transcript-chip" title={detail.filePath} onClick={() => actions.openFile(detail.filePath, detail.hunks[0]?.newStart)}>
         {baseName(detail.filePath)}
       </button>
-      {detail.hunks.length === 0 ? (
-        <p className="transcript-detail-note">{DETAIL.noDiff}</p>
-      ) : (
-        <div className="transcript-diff">
-          {diff.head.map((lines, h) => (
-            <DiffHunk key={h} lines={lines} />
-          ))}
-          {diff.omitted > 0 && <Omitted cell={cell} text={DETAIL.linesOmitted(diff.omitted)} />}
-          {diff.tail.map((lines, h) => (
-            <DiffHunk key={`tail:${h}`} lines={lines} />
-          ))}
-        </div>
-      )}
+      {detail.hunks.length === 0 ? <p className="transcript-detail-note">{DETAIL.noDiff}</p> : <EditDiff hunks={detail.hunks} cell={cell} />}
     </div>
   );
 }

@@ -237,17 +237,26 @@ function removeRefs(ids: ReadonlySet<string>): void {
   });
 }
 
+// W4: a tool added with `activate` is put on screen, so a hidden right panel (⌘⇧B) opens: the receipt's Review changes
+// otherwise added an invisible tab. Opened after the selection is written, so the collapsed → open focus request
+// (connectPanelHost) lands on the new tab. C10's attach opens it the same way (`sessions/attach.ts`).
+function reveal(): void {
+  if (layout().regions.panel.collapsed) layout().setPanel({ collapsed: false });
+}
+
 // Selects a tab in the target's list: the no-session selection for `null`; a session not on screen is opened in the
 // main area first, so the panel follows.
 function activateIn(target: AppSessionId | null, tabId: string): void {
   if (target === null) {
     writeRefs(null, (refs) => refs, tabId);
     if (shownSession() === null) requestFocus(tabId);
+    reveal();
     return;
   }
   if (shownSession() !== target) layout().openSession(target);
   writeRefs(target, (refs) => refs, tabId);
   requestFocus(tabId);
+  reveal();
 }
 
 // ---- tab ids -----------------------------------------------------------------------------------------------------------
@@ -300,6 +309,7 @@ function applyAdd(add: Add, id?: string, restored?: ReadonlySet<string>): string
   if (activate && target !== null && shownSession() !== target) layout().openSession(target);
   writeRefs(target, (refs) => [...refs, ref], activate ? tabId : undefined);
   if (activate && (target !== null || shownSession() === null)) requestFocus(tabId);
+  if (activate) reveal();
   return tabId;
 }
 
