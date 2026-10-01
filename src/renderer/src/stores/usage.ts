@@ -40,7 +40,7 @@ export interface UsageState {
 // W6 route executor start
 // ClaudeUsage answers a Route before its relay rewrites pins.json, and every snapshot until then (an event for an
 // unrelated file, a reply) still names the old drain target. The answered one is laid over each until a snapshot names
-// it, another Route replaces it, or ROUTE_HOLD_MS pass, after which the reader's word stands even if it disagrees.
+// it or no longer lists it, another Route replaces it, or ROUTE_HOLD_MS pass, after which the reader's word stands even if it disagrees.
 export const ROUTE_HOLD_MS = 30_000;
 
 export interface HeldRoute {
@@ -67,7 +67,8 @@ export function createUsageStore() {
     applySnapshot(read, pins = 'replace') {
       // W6 route executor start: the held Route, while the reader has not named it
       const held = get().routed;
-      const routed = held && read.drainTarget !== held.drainTarget && Date.now() < held.until ? held : null;
+      const gone = read.available && !read.accounts.some((a) => a.uuid === held?.drainTarget); // removed before the reader named it
+      const routed = held && read.drainTarget !== held.drainTarget && Date.now() < held.until && !gone ? held : null;
       const snapshot = routed && read.available ? { ...read, drainTarget: routed.drainTarget, drainTargetIsManual: routed.drainTargetIsManual } : read;
       // W6 route executor end
       const drain = snapshot.available ? snapshot.accounts.find((a) => a.uuid === snapshot.drainTarget) : undefined;

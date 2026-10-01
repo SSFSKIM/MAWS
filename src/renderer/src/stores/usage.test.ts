@@ -98,6 +98,16 @@ describe('usage store: a Route ClaudeUsage answered', () => {
     expect(usage.getState().snapshot).toMatchObject({ drainTarget: 'third', drainTargetIsManual: false });
     expect(usage.getState().windows).toEqual(windows(5, 6));
   });
+
+  it('lets go when the routed account is gone from the next available snapshot', () => {
+    const usage = createUsageStore();
+    usage.getState().applySnapshot(THREE);
+    usage.getState().applyRoute('other', true);
+    usage.getState().applySnapshot({ ...THREE, accounts: THREE.accounts.filter((a) => a.uuid !== 'other'), drainTarget: 'drain' }); // the account was removed before the reader named it
+    expect(usage.getState().snapshot).toMatchObject({ drainTarget: 'drain', drainTargetIsManual: false });
+    expect(usage.getState().routed).toBeNull();
+    expect(usage.getState().windows).toEqual(windows(53, 63));
+  });
 });
 
 describe('usage store: connectUsage', () => {
