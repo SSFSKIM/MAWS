@@ -28,6 +28,7 @@ import { dockCard, resetDockedCards } from './docked/registry';
 import { docOf, paragraph, textNode } from './editor/doc';
 import { resetEffectiveEfforts } from './effective-effort'; // W3
 import { registerSlashWidget } from './mentions/widgets'; // W3
+import { closeWidgetDialog, useWidgetDialog } from './WidgetDialog'; // W3
 import { registerSetupIntentHook, type HookResult, type SetupIntentHook, type SetupIntentPatch } from './setup-intent';
 import { registerReleasedResume } from './resume-seam'; // C12
 
@@ -112,7 +113,7 @@ function mount(panes: { index: 0 | 1; id: AppSessionId }[], extra: ReactNode = n
   );
 }
 
-type TiptapElement = HTMLElement & { editor: { commands: { insertContent(text: string): boolean; setTextSelection(at: number): boolean; blur(): boolean }; getText(): string; isFocused: boolean } };
+type TiptapElement = HTMLElement & { editor: { commands: { insertContent(text: string): boolean; setTextSelection(at: number): boolean; blur(): boolean; clearContent(): boolean }; getText(): string; isFocused: boolean } };
 const composerOf = (index: 0 | 1) => screen.getByRole('region', { name: `pane ${index}` });
 const editorOf = (index: 0 | 1 = 0) => within(composerOf(index)).getByRole('textbox', { name: 'Message', hidden: true }) as TiptapElement;
 const type = (text: string, index: 0 | 1 = 0) => act(() => void editorOf(index).editor.commands.insertContent(text));
@@ -191,6 +192,35 @@ describe("composer DOM under C5's dispatcher", () => {
     await key(editorOf(), { key: 'Escape' });
     await waitFor(() => expect(invoked('session.queue.promote')).toEqual([{ appSessionId: A, queueId: 'q-1', priority: 'now' }])); // the uncertain one waits for the human
     expect(invoked('session.interrupt')).toHaveLength(1);
+  });
+
+  // W3 (B7, charter §5.4 as amended 2026-10-01): the terminal's Esc Esc, with no turn running, on an empty editor
+  it('Esc Esc on an empty editor with no turn running opens the rewind picker; one Esc, text, or a turn running does not', async () => {
+    const off = registerSlashWidget('rewind', { title: 'Rewind', component: () => <p>picker</p> });
+    try {
+      live(A);
+      mount([{ index: 0, id: A }]);
+      await waitFor(() => expect(fake.pending('session.queue.list')).toBe(0));
+      act(() => editorOf().focus());
+      await key(editorOf(), { key: 'Escape' });
+      expect(useWidgetDialog.getState().open).toBeNull();
+      await key(editorOf(), { key: 'Escape' });
+      expect(useWidgetDialog.getState().open).toMatchObject({ appSessionId: A, name: 'rewind' }); // the app's floating dialog
+      act(() => closeWidgetDialog());
+      await type('a draft');
+      await key(editorOf(), { key: 'Escape' });
+      await key(editorOf(), { key: 'Escape' });
+      expect(useWidgetDialog.getState().open).toBeNull(); // the draft is not empty
+      act(() => editorOf().editor.commands.clearContent());
+      busy(A);
+      await key(editorOf(), { key: 'Escape' });
+      await key(editorOf(), { key: 'Escape' });
+      expect(useWidgetDialog.getState().open).toBeNull(); // a turn running: Esc interrupts (W1)
+      await waitFor(() => expect(invoked('session.interrupt')).toHaveLength(2));
+    } finally {
+      off();
+      closeWidgetDialog();
+    }
   });
 
   it('reads Stop with an empty editor and Queue with text while a first entry is submitting and no turn is open yet', async () => {

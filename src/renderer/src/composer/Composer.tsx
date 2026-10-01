@@ -57,6 +57,9 @@ import { locationPath, useSetupIntent, type SetupIntentHook } from './setup-inte
 import { isBusy, steerPriority, submitState, type SubmitDecision } from './submit/submit-state';
 import { SubmitControl } from './submit/SubmitControl';
 
+// W3 (B7): how close two Escs must come to count as the terminal's Esc Esc.
+export const ESC_ESC_MS = 800;
+
 export interface ComposerProps {
   appSessionId: AppSessionId;
   paneIndex: 0 | 1;
@@ -312,7 +315,7 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
   // with nothing held, an interrupt after which a `next` steer still waiting runs, since the engine starts what it holds
   // once the turn is interrupted (pass3/steer-next-interrupted, steer-next-then-now); with nothing waiting either, that
   // is just a stop. Unlike ⌘. it holds nothing back. An uncertain head waits for the human's own decision. Not busy,
-  // Esc is not the composer's.
+  // Esc is not the composer's (W3: but two of them on an empty editor open the rewind picker, below).
   const escapeTurn = (): boolean => {
     const current = useSessions.getState().engine.get(appSessionId) ?? null;
     if (current?.process !== 'ready' || !isBusy(current, queue.entries)) return false;
@@ -325,6 +328,25 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
       if (!result.ok) toast({ level: 'warning', text: result.error.message, actions: [], dismissible: true });
     });
     return true;
+  };
+
+  // W3 (B7, charter §5.4 as amended 2026-10-01): with no turn running, Esc twice within a moment on an empty editor of
+  // a started session opens the rewind picker (`/rewind`), the terminal's Esc Esc; a turn running keeps W1's Esc.
+  const lastEscape = useRef(0);
+  const onEscape = (): boolean => {
+    if (escapeTurn()) return true;
+    const empty = handle.current?.serialize().empty ?? false;
+    if (unstarted || !empty) {
+      lastEscape.current = 0;
+      return false;
+    }
+    const now = Date.now();
+    if (now - lastEscape.current > ESC_ESC_MS) {
+      lastEscape.current = now;
+      return false;
+    }
+    lastEscape.current = 0;
+    return handle.current?.openWidget('rewind') ?? false;
   };
 
   // The editor is read-only while C10 holds the first send (starting, or its message retained behind a card).
@@ -387,7 +409,7 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
               handle={handle}
               client={client}
               onDocChange={setDoc}
-              onEscape={escapeTurn}
+              onEscape={onEscape}
               onSubmit={onSubmit}
             />
           </div>

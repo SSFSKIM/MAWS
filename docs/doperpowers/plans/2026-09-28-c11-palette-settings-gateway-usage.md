@@ -240,6 +240,8 @@ Model widget, the one with the most rules. Groups: **Claude** (entries whose `va
 
 **Amended 2026-10-01 (W3, C6; charter §5.4 as amended that day):** C7 places every other widget in the app's floating dialog (Claude Desktop's /mcp, /plugins and /sandbox dialogs), centred over the window; the widget frame's body now scrolls inside 60% of the window's height instead of the old 420px in-box cap, and its Esc still closes it and returns the keyboard to the composer.
 
+**Amended 2026-10-01 (W3, B7):** a twenty-first name, `/rewind` (`RewindWidget.tsx`, foot `rewind_conversation and rewind_files`): the terminal's Esc Esc picker over the session's own prompts, rewinding the conversation (the composer then holds the engine's `prefillText`), its files when the session checkpoints them, or both.
+
 ### Session info tool (`src/renderer/src/tools/session-info/*`) — X5 as C9 wrote it
 
 ```ts

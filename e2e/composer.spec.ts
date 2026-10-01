@@ -702,6 +702,40 @@ test('edit in place: Cancel and Esc put the bubble back, and nothing is written'
   expect(editor.consoleErrors()).toEqual([]);
 });
 
+// W3 (B7, charter §5.4 as amended 2026-10-01): Esc Esc on an empty composer while no turn runs opens the rewind picker
+// as a floating dialog; a conversation rewind leaves the engine's `prefillText` in the composer.
+test('Esc Esc opens the rewind picker over the session’s messages; a conversation rewind leaves the engine’s text in the composer', async ({ editor }) => {
+  const { page } = editor;
+  const id = 'c7-rewind-picker';
+  await openComposerPage(page);
+  await launchReady(page, id, rewindJournal(scratch, id, 'answered'));
+  await showPanes(page, [{ composer: id, transcript: true }, null]);
+  for (const text of ['turn one', 'turn two']) {
+    await messageIn(page, 0).click();
+    await page.keyboard.type(text);
+    await page.keyboard.press('Enter');
+    await expect.poll(() => sent(page, id)).toContain(text);
+    await expect.poll(async () => (await statusOf(page, id)).turn).toBeNull();
+  }
+  await messageIn(page, 0).click();
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('Escape');
+  const picker = page.getByRole('dialog', { name: 'Rewind' });
+  await expect(picker).toBeVisible();
+  const messages = picker.getByRole('radiogroup', { name: 'Your messages' }).getByRole('radio');
+  await expect(messages).toHaveCount(2);
+  await expect(messages.first()).toContainText('turn two'); // newest first, chosen
+  await expect(messages.first()).toHaveAttribute('aria-checked', 'true');
+  await expect(picker.getByRole('radio', { name: 'Conversation' })).toHaveAttribute('aria-checked', 'true');
+  await picker.getByRole('button', { name: 'Rewind to before it' }).click();
+  await expect(picker).toBeHidden();
+  await expect(messageIn(page, 0)).toHaveText('turn 2'); // the engine's prefillText (the journal's answer)
+  await expect(messageIn(page, 0)).toBeFocused();
+  await expect(pane(page, 0).locator('.transcript-user').filter({ hasText: 'turn two' })).toHaveCount(0); // the rewound turn left the view
+  expect(await written(page, id)).toEqual({ rewinds: 1, cancels: 0, users: 2 });
+  expect(editor.consoleErrors()).toEqual([]);
+});
+
 // ---- W2: proportions -----------------------------------------------------------------------------------------------
 
 // The rendered box of an element, and its padding, read in the page.

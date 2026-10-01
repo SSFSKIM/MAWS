@@ -31,6 +31,7 @@ export const WIDGET_TITLE: Record<WidgetCommandName, string> = {
   resume: 'Resume',
   export: 'Export',
   diff: 'Changes',
+  rewind: 'Rewind', // W3 (B7)
 };
 
 // `/usage` on a direct session: its windows are the engine's own, not ClaudeUsage's (C11 M6, live).
@@ -59,6 +60,7 @@ export const WIDGET_FOOT: Record<FramedWidgetName, WidgetFoot> = {
   resume: { readWith: 'the sessions list', editedWhere: 'There is no resume control on the wire; a resume is a launch (C10)' },
   export: { readWith: 'export_conversation', editedWhere: "The engine's own text export; the JSONL stays where it is" },
   diff: { readWith: 'get_workspace_diff', editedWhere: 'Read-only; staging and commits are P1' },
+  rewind: { readWith: 'rewind_conversation and rewind_files', editedWhere: 'The transcript on disk is never truncated: the next turn branches from the earlier message' }, // W3 (B7)
 };
 
 // The frame.
@@ -304,6 +306,22 @@ export const MODEL = {
     extra_usage_disabled: 'Fast mode requires usage credits',
     network_error: 'Fast mode unavailable due to network connectivity issues',
   } as Record<string, string>,
+};
+
+// W3 (B7): the rewind picker's words (the terminal's Esc Esc picker).
+export const REWIND = {
+  messages: 'Your messages',
+  none: 'No message of yours to rewind to yet',
+  what: 'What to rewind',
+  option: { conversation: 'Conversation', files: 'Files', both: 'Both' } as const,
+  noCheckpoints: 'File checkpointing is off for this session, so its files cannot be rewound',
+  busy: 'Wait for the turn to end, or stop it first',
+  rewind: 'Rewind to before it',
+  refused: (reason: string) => `The rewind was refused · ${reason}`,
+  noReason: 'no reason given',
+  filesRefused: 'The files could not be rewound',
+  filesDone: 'Files rewound to before that message',
+  filesNotRestored: (why: string) => `The conversation was rewound; its files were not · ${why}`,
 };
 
 // W3: the model selector's own words (Codex's two-view menu, r1-codex §5; Claude Desktop's slider ends).

@@ -27,7 +27,7 @@ const SCENARIO = 'stub:test/fixtures/shell/nine-sessions.json';
 const READY = 'app-7412a115'; // ready, idle, routed through the relay
 const READS = 'spikes/protocol-probe/fixtures/reads.jsonl';
 const CONTROLS = 'test/fixtures/engine/auto-routed-controls.jsonl'; // pass2/auto-routed without the unissuable fork_conversation pair
-const NAMES = ['model', 'effort', 'fast', 'permissions', 'usage', 'config', 'plugins', 'mcp', 'sandbox', 'hooks', 'memory', 'skills', 'agents', 'status', 'compact', 'context', 'rename', 'resume', 'export', 'diff'];
+const NAMES = ['model', 'effort', 'fast', 'permissions', 'usage', 'config', 'plugins', 'mcp', 'sandbox', 'hooks', 'memory', 'skills', 'agents', 'status', 'compact', 'context', 'rename', 'resume', 'export', 'diff', 'rewind' /* W3 */];
 
 const test = base.extend<{ backend: MawsLaunch; replay: MawsLaunch }>({
   // eslint-disable-next-line no-empty-pattern -- Playwright requires the fixtures argument to be destructured

@@ -15,7 +15,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
-import { Composer, ComposerAppKeys, connectComposer, connectInlineEdit, DockedCardFrame, dockCard, WidgetDialogHost } from '../../composer';
+import { Composer, ComposerAppKeys, connectComposer, connectInlineEdit, DockedCardFrame, dockCard, registerSlashWidget, WidgetDialogHost } from '../../composer';
 import { setRewindWindow } from '../../composer/resubmit-seam';
 import { ipc } from '../../ipc/client';
 import { connectShell } from '../../ipc/events';
@@ -27,6 +27,7 @@ import { ComposerColumn, SessionPane } from '../../session/SessionPane';
 import { selectPendingOf, useAttention } from '../../stores/attention';
 import { useLayout } from '../../stores/layout';
 import { TranscriptSlot } from '../../transcript';
+import { RewindWidget } from '../../widgets/RewindWidget';
 import type { CardsHarnessApi, HarnessPane, HarnessPlacement } from './api';
 import { setStubIntent, stubLog } from './intent-stub';
 
@@ -125,7 +126,8 @@ export function ComposerHarness() {
     const theme = new URLSearchParams(location.search).get('theme');
     if (theme === 'dark' || theme === 'light') document.documentElement.dataset.theme = theme;
     connectComposer(); // C5's session pane (a `shell` pane) finds the composer in its slot, as in the app
-    const offs = [connectShell(), connectKeys(), connectInlineEdit(composerClient)];
+    // W3: C11's rewind picker, which `/rewind` and Esc Esc open as the app's floating dialog
+    const offs = [connectShell(), connectKeys(), connectInlineEdit(composerClient), registerSlashWidget('rewind', { title: 'Rewind', component: RewindWidget })];
     window.__maws_cards = {
       show: (next) => {
         mirrorLayout(next);

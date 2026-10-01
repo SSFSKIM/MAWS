@@ -17,6 +17,7 @@ import { PermissionsWidget } from './PermissionsWidget';
 import { PluginsWidget } from './PluginsWidget';
 import { RenameWidget } from './RenameWidget';
 import { ResumeWidget } from './ResumeWidget';
+import { RewindWidget } from './RewindWidget'; // W3 (B7)
 import { SandboxWidget } from './SandboxWidget';
 import { SkillsWidget } from './SkillsWidget';
 import { StatusWidget } from './StatusWidget';
@@ -44,6 +45,7 @@ export const WIDGETS: Record<WidgetCommandName, SlashWidget['component']> = {
   resume: ResumeWidget,
   export: ExportWidget,
   diff: DiffWidget,
+  rewind: RewindWidget, // W3 (B7)
 };
 
 // W3: `/model`, `/effort` and `/fast` are the model selector, which opens in the composer's model chip menu.

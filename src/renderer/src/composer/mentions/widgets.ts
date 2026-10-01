@@ -26,6 +26,7 @@ export const WIDGET_COMMANDS = [
   { name: 'resume', description: 'Resume another session' },
   { name: 'export', description: 'Export the conversation' },
   { name: 'diff', description: 'Changes in the working tree' },
+  { name: 'rewind', description: 'Rewind the conversation, its files or both to an earlier message' }, // W3 (B7); Esc Esc too
 ] as const satisfies ReadonlyArray<{ name: string; description: string }>;
 
 export type WidgetCommandName = (typeof WIDGET_COMMANDS)[number]['name'];
