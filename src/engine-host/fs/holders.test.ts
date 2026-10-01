@@ -257,7 +257,7 @@ describe('holders come from live sessions/<pid>.json records', () => {
         expect(emitted.map((e) => e.holder)).toEqual([{ kind: 'terminal', pid }]);
         expect(holders.contestedBy(S1)).toEqual({ kind: 'terminal', pid });
         expect(contests).toEqual([{ sessionId: S1, by: { kind: 'terminal', pid } }]);
-        expect((await holders.liveNow({ sessionIds: [S1], directories: null })).map((h) => h.holder)).toEqual([{ kind: 'terminal', pid }]);
+        expect(await holders.liveNow({ sessionIds: [S1], directories: null })).toEqual([{ sessionId: S1, holder: { kind: 'terminal', pid }, cwd: null, entrypoint: 'cli' }]);
         expect(holders.liveCount(S1)).toBe(2);
 
         // MAWS's process exits (its record goes): the terminal still holds, the contest is over, nothing else is told

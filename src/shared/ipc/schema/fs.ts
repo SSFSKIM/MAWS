@@ -53,7 +53,8 @@ export const FsHoldersQuerySchema = z.strictObject({ sessionIds: z.array(Session
 export type FsHoldersQuery = z.infer<typeof FsHoldersQuerySchema>;
 export const FsHoldersAnswerSchema = z.strictObject({
   refreshedAt: z.string(),
-  holders: z.array(z.strictObject({ sessionId: SessionIdSchema, appSessionId: AppSessionIdSchema.nullable(), holder: HolderSchema, cwd: z.string().nullable() })),
+  // W7: `entrypoint`, the record's (`cli` for a terminal; another app's own name), when it names one
+  holders: z.array(z.strictObject({ sessionId: SessionIdSchema, appSessionId: AppSessionIdSchema.nullable(), holder: HolderSchema, cwd: z.string().nullable(), entrypoint: z.string().optional() })),
 });
 export type FsHoldersAnswer = z.infer<typeof FsHoldersAnswerSchema>;
 

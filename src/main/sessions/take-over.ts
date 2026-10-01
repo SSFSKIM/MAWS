@@ -43,6 +43,13 @@ export async function releaseHolder(deps: TakeOverDeps, q: { engineSessionId: Se
   if (verdict.live === 'none') return { status: 'released' }; // it exited meanwhile: nothing to end
   const holder = verdict.holder as ForeignHolder;
   if (!sameHolder(holder, q.expected)) return refused('changed', `The session is now held by ${holderName(holder)}, not the process you confirmed; nothing was stopped.`);
+  // An interactive holder is signalled only when it is a terminal's (`cli`, or a record too old to say): another app's
+  // engine (Claude Desktop, an IDE, another SDK app) registers as interactive too, and is that app's to end.
+  if (holder.kind === 'terminal') {
+    const rows = (await hostCall(deps.dispatch, 'fs.holders', { sessionIds: [q.engineSessionId!], directories: null })).holders;
+    const entrypoint = rows.find((row) => row.holder.kind === 'terminal' && row.holder.pid === holder.pid)?.entrypoint;
+    if (entrypoint !== undefined && entrypoint !== 'cli') return refused('other_app', `The session is open in another app (${entrypoint}, pid ${holder.pid}); close it there, or fork a copy.`);
+  }
   try {
     if (holder.kind === 'terminal') (deps.signal ?? ((pid) => process.kill(pid, 'SIGTERM')))(holder.pid);
     else {

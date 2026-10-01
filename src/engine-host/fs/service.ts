@@ -285,7 +285,7 @@ export class FsService {
     const live = await this.holders.liveNow(query);
     return {
       refreshedAt: new Date().toISOString(),
-      holders: live.map(({ sessionId, holder, cwd }) => ({ sessionId, appSessionId: this.bindings.appIdOf(sessionId), holder, cwd })),
+      holders: live.map(({ sessionId, holder, cwd, entrypoint }) => ({ sessionId, appSessionId: this.bindings.appIdOf(sessionId), holder, cwd, ...(entrypoint === undefined ? {} : { entrypoint }) })),
     };
   }
 

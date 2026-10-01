@@ -356,7 +356,7 @@ const c7Events = {
 // `session.start`. `refused`: nothing more was done, for the reason in words.
 export const TakeOverOutcomeSchema = z.discriminatedUnion('status', [
   z.strictObject({ status: z.literal('released') }),
-  z.strictObject({ status: z.literal('refused'), reason: z.enum(['unknown_session', 'self', 'changed', 'no_job_id', 'signal_failed', 'stop_failed', 'timeout']), message: z.string() }),
+  z.strictObject({ status: z.literal('refused'), reason: z.enum(['unknown_session', 'self', 'changed', 'no_job_id', 'other_app', 'signal_failed', 'stop_failed', 'timeout']), message: z.string() }),
 ]);
 export type TakeOverOutcome = z.infer<typeof TakeOverOutcomeSchema>;
 

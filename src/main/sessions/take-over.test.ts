@@ -11,14 +11,14 @@ const TERMINAL: ForeignHolder = { kind: 'terminal', pid: 4242 };
 const JOB: ForeignHolder = { kind: 'background_job', pid: 4343, jobId: 'abcd1234' };
 
 // A host whose registry answers `holders` until the test clears it, and whose process table holds `reserved`.
-function host(initial: ForeignHolder[], reserved = false) {
+function host(initial: ForeignHolder[], reserved = false, entrypoint: string | undefined = 'cli') {
   let holders = initial;
   const calls: CommandName[] = [];
   const dispatch = vi.fn(async (_owner: string, name: CommandName) => {
     calls.push(name);
     let value: unknown;
     if (name === 'engine.sessions') value = reserved ? [status(APP)] : [];
-    else if (name === 'fs.holders') value = { refreshedAt: '2026-10-01T18:00:00.000Z', holders: holders.map((holder) => ({ sessionId: S, appSessionId: APP, holder, cwd: '/w' })) };
+    else if (name === 'fs.holders') value = { refreshedAt: '2026-10-01T18:00:00.000Z', holders: holders.map((holder) => ({ sessionId: S, appSessionId: APP, holder, cwd: '/w', ...(entrypoint === undefined ? {} : { entrypoint }) })) };
     else if (name === 'engine.binaryInfo') value = { path: '/pinned/claude', expectedVersion: '2.1.283', version: '2.1.283', ok: true, error: null };
     return { ok: true, value } as CommandResult<CommandName>;
   });
@@ -53,6 +53,15 @@ describe('take over a session another process holds', () => {
     const anonymous: ForeignHolder = { kind: 'background_job', pid: 5, jobId: null };
     expect(await releaseHolder(deps(host([anonymous]), { signal }), { engineSessionId: S, appSessionId: APP, expected: anonymous })).toMatchObject({ status: 'refused', reason: 'no_job_id' });
     expect(signal).not.toHaveBeenCalled();
+  });
+
+  it("signals a terminal's or an unlabelled record's holder, never another app's engine", async () => {
+    const signal = vi.fn();
+    const desktop = await releaseHolder(deps(host([TERMINAL], false, 'claude-desktop'), { signal }), { engineSessionId: S, appSessionId: APP, expected: TERMINAL });
+    expect(desktop).toEqual({ status: 'refused', reason: 'other_app', message: 'The session is open in another app (claude-desktop, pid 4242); close it there, or fork a copy.' });
+    expect(signal).not.toHaveBeenCalled();
+    const h = host([TERMINAL], false, undefined);
+    expect(await releaseHolder(deps(h, { signal: () => h.clear() }), { engineSessionId: S, appSessionId: APP, expected: TERMINAL })).toEqual({ status: 'released' });
   });
 
   it('answers released at once when the holder already exited', async () => {

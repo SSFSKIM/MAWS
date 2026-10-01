@@ -138,17 +138,17 @@ export class HolderRegistry {
   // session with different directories are two rows), whose session id is listed or whose cwd is one of `directories`,
   // both compared as NFC-normalised realpaths. Both filters null: every live foreign record. A registry that could not
   // be read rejects rather than answering from the previous table.
-  async liveNow(filter: { sessionIds: readonly SessionId[] | null; directories: readonly string[] | null }): Promise<{ sessionId: SessionId; holder: Holder; cwd: string | null }[]> {
+  async liveNow(filter: { sessionIds: readonly SessionId[] | null; directories: readonly string[] | null }): Promise<{ sessionId: SessionId; holder: Holder; cwd: string | null; entrypoint?: string }[]> {
     const failure = await this.refreshed();
     if (failure) throw new Error(`holder registry unreadable: ${(failure as NodeJS.ErrnoException).code ?? failure.message}`);
     const ids = filter.sessionIds === null ? null : new Set(filter.sessionIds);
     const directories = filter.directories === null ? null : new Set(await Promise.all(filter.directories.map(canonicalDirectory)));
-    const answer: { sessionId: SessionId; holder: Holder; cwd: string | null }[] = [];
+    const answer: { sessionId: SessionId; holder: Holder; cwd: string | null; entrypoint?: string }[] = [];
     for (const record of this.foreign) {
       const sessionId = record.sessionId as SessionId;
       const cwd = record.cwd === undefined ? null : await canonicalDirectory(record.cwd);
       const matches = (ids === null && directories === null) || ids?.has(sessionId) || (cwd !== null && directories?.has(cwd));
-      if (matches) answer.push({ sessionId, holder: this.holderFor(record, sessionId), cwd });
+      if (matches) answer.push({ sessionId, holder: this.holderFor(record, sessionId), cwd, ...(record.entrypoint === undefined ? {} : { entrypoint: record.entrypoint }) });
     }
     return answer;
   }
