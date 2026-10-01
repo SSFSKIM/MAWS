@@ -27,6 +27,7 @@ import { askToQuit, installQuitGuard, listProcesses } from './lifecycle/quit-gua
 import { registerMenuHandlers, startMenu } from './menu';
 import { registerOpenExternal } from './open-external';
 import { startSessions } from './sessions';
+import { startYield } from './sessions/yield'; // W7
 import { restoreWindowState, trackWindowState } from './window-state';
 // C5 end
 // C7 start
@@ -238,6 +239,9 @@ app.whenReady().then(() => {
   registerSessionServiceHandlers(sessionService);
   sessionService.start().catch((error: unknown) => console.error('[sessions] the session service failed to start:', error));
   // C10 end
+  // W7: a live MAWS process yields when a terminal or job that resumed its session starts writing into it
+  const stopYield = startYield({ dispatch: hosts.dispatch, onEvent: (name, listener) => hosts.onEvent(name, listener), sessions: index.sessions, emit });
+  app.on('will-quit', stopYield);
 
   // C11 start: the plumbing of settings v3 (C11 execution document, M1). The engine host's binary configuration follows
   // settings.engine; ClaudeUsage's hand-off and status; the reveal guard; the export's Save as….

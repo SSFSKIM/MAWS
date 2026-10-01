@@ -706,3 +706,32 @@ describe('exited rows beyond the cap leave the host (C12)', () => {
   });
 });
 // C12 end
+
+// W7 (charter §4.3 as amended 2026-10-01): a process that exited while a foreign one holds the session (it yielded,
+// or it stopped beside a terminal that resumed the id) is not the session's history: `session.events` reads disk then.
+describe('session.events after an exit reads disk while a foreign process holds the session (W7)', () => {
+  it('answers the stream while live and after an exit nobody else holds, the transcript after an exit a foreign holder writes', async () => {
+    const disk = vi.fn(async () => ({ events: [] as SessionEvent[], complete: true }));
+    const held = { now: false };
+    let transport: ScriptedTransport | null = null;
+    const host = engineHost({
+      diskEvents: disk, heldElsewhere: () => held.now, binaryProbe: async () => OK_BINARY, checkRelay: async () => OK_RELAY, captureEnv: async () => ({ PATH: '/usr/bin' }),
+      spawn: () => (transport = scriptedTransport({ onWrite: autoResponder(handshakeResponder({ end_session: () => null })) })),
+    });
+    const id = 'app-yielded' as AppSessionId;
+    await host.call('session.launch', { spec: spec({ appSessionId: id }) });
+    await until(() => host.statuses(id).some((s) => s.process === 'ready'), 'ready');
+    held.now = true; // a terminal joins: the live process is still the session's source
+    await host.call('session.events', { appSessionId: id, afterSeq: null, limit: null });
+    expect(disk).not.toHaveBeenCalled();
+    const stopping = host.call('session.stop', { appSessionId: id, reason: 'stop' });
+    await until(() => transport!.requestsOf('end_session').length === 1, 'end_session');
+    transport!.exit(0);
+    await stopping;
+    expect(await host.call('session.events', { appSessionId: id, afterSeq: null, limit: null })).toEqual({ events: [], complete: true, lastSeq: 0 });
+    expect(disk).toHaveBeenCalledWith(id);
+    held.now = false; // nobody else holds it: the exited stream is the history again
+    await host.call('session.events', { appSessionId: id, afterSeq: null, limit: null });
+    expect(disk).toHaveBeenCalledTimes(1);
+  });
+});

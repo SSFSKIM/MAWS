@@ -112,6 +112,10 @@ function withAppEvents(app: SessionEvent[], events: SessionEvent[]): SessionEven
 // answers are held and passed through that filter once it has, so a follower's copy delivered during the round trip
 // drops too. An event the app synthesises (`seq: null`, its id also under the app session id, as C10's route notice)
 // is neither form's copy of the other and always passes.
+// W7 (charter §4.3 as amended 2026-10-01): once MAWS's process has exited, a foreign process that holds the session
+// writes it; the live stream is not its history any more. When the record turns foreign-live (a terminal or job holds
+// it) after this attachment saw the live form, the source resets, and the hydration reads the transcript from disk,
+// which C3 then answers (src/engine-host/ipc.ts), followed read-only from there.
 function sessionSource(client: MawsBridge, appSessionId: AppSessionId): TranscriptSource {
   const liveForm = (event: SessionEvent) => event.seq !== null;
   const diskForm = (event: SessionEvent) => event.seq === null && !isAppSynthesised(appSessionId, event);
@@ -124,6 +128,7 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
     pass(batch: SessionEvent[]): void;
   }
   let latest: Subscription | null = null;
+  const resets = new Set<() => void>();
   return {
     key: appSessionId,
     subscribe(listener) {
@@ -147,8 +152,17 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
         if (subscription.held) subscription.held.push(batch.events);
         else subscription.pass(batch.events);
       });
+      // W7: the record turned foreign-live after the live form was seen: the key starts over from disk, once
+      const offChanged = client.on('session.changed', ({ record }) => {
+        if (record.appId !== appSessionId || !subscription.live || (record.holder.kind !== 'terminal' && record.holder.kind !== 'background_job')) return;
+        subscription.live = false;
+        queueMicrotask(() => {
+          for (const listener of [...resets]) listener();
+        });
+      });
       return () => {
         off();
+        offChanged();
         subscription.held = null;
         subscription.pass = () => {};
         subscription.ended.abort();
@@ -168,6 +182,10 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
         for (const batch of waiting) subscription.pass(batch);
       }
       return events;
+    },
+    onReset(listener) {
+      resets.add(listener);
+      return () => resets.delete(listener);
     },
   };
 }

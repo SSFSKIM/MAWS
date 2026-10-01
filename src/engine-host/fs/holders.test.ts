@@ -219,4 +219,57 @@ describe('holders come from live sessions/<pid>.json records', () => {
     await expect.poll(() => holders.holderOf(S1), { timeout: 1_000, interval: 20 }).toEqual({ kind: 'none' });
     expect(emitted.at(-1)).toMatchObject({ sessionId: S1, holder: { kind: 'none' } });
   });
+
+  // W7 (charter §4.3 as amended 2026-10-01; pass3/w7-collision: MAWS's own `-p` process registers as `interactive`,
+  // `entrypoint: 'sdk-ts'`, the terminal's as `cli`).
+  describe('MAWS\'s own records', () => {
+    const contests: { sessionId: SessionId; by: Holder | null }[] = [];
+    const own = (pids: number[]) => ({ ownPids: () => new Set(pids), contests: (sessionId: SessionId, by: Holder | null) => void contests.push({ sessionId, by }) });
+    beforeEach(() => void (contests.length = 0));
+
+    it('an sdk-ts record of a process-table pid is never a holder, but counts as a live process', async () => {
+      await fixture.addRegistryRecord(process.pid, { sessionId: S1, kind: 'interactive', entrypoint: 'sdk-ts' });
+      const holders = create(own([process.pid]));
+      await holders.start();
+      expect(emitted).toEqual([]);
+      expect(holders.holderOf(S1)).toEqual({ kind: 'none' });
+      expect(holders.liveCount(S1)).toBe(1);
+      expect(await holders.liveNow({ sessionIds: [S1], directories: null })).toEqual([]);
+      expect(contests).toEqual([]);
+    });
+
+    it('an sdk-ts record of a pid the table does not hold is another app\'s, and holds', async () => {
+      await fixture.addRegistryRecord(process.pid, { sessionId: S1, kind: 'interactive', entrypoint: 'sdk-ts' });
+      const holders = create(own([]));
+      await holders.start();
+      expect(holders.holderOf(S1)).toEqual({ kind: 'terminal', pid: process.pid });
+    });
+
+    it('a terminal that resumes a session MAWS holds is its holder and a contest, which ends with it', async () => {
+      const child = spawn('/bin/sleep', ['30'], { stdio: 'ignore' });
+      const pid = child.pid!;
+      try {
+        await fixture.addRegistryRecord(process.pid, { sessionId: S1, kind: 'interactive', entrypoint: 'sdk-ts', startedAt: 1 });
+        const holders = create(own([process.pid]));
+        await holders.start();
+        await fixture.addRegistryRecord(pid, { sessionId: S1, kind: 'interactive', entrypoint: 'cli', startedAt: 2 });
+        await holders.refresh();
+        expect(emitted.map((e) => e.holder)).toEqual([{ kind: 'terminal', pid }]);
+        expect(holders.contestedBy(S1)).toEqual({ kind: 'terminal', pid });
+        expect(contests).toEqual([{ sessionId: S1, by: { kind: 'terminal', pid } }]);
+        expect((await holders.liveNow({ sessionIds: [S1], directories: null })).map((h) => h.holder)).toEqual([{ kind: 'terminal', pid }]);
+        expect(holders.liveCount(S1)).toBe(2);
+
+        // MAWS's process exits (its record goes): the terminal still holds, the contest is over, nothing else is told
+        await fixture.removeRegistryRecord(process.pid);
+        await holders.refresh();
+        expect(holders.holderOf(S1)).toEqual({ kind: 'terminal', pid });
+        expect(emitted).toHaveLength(1);
+        expect(contests.at(-1)).toEqual({ sessionId: S1, by: null });
+        expect(holders.contestedBy(S1)).toBeNull();
+      } finally {
+        child.kill('SIGKILL');
+      }
+    });
+  });
 });

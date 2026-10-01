@@ -83,6 +83,7 @@ export interface FollowOptions {
   reader: FileReader;
   subagents?: SubagentLookup;
   holders?: () => number; // the session's live holders now, for the terminal-rewind rule
+  pinned?: () => boolean; // W7: a foreign process holds the session now (MAWS's branch stays in view)
   emit: HostEmit;
 }
 
@@ -125,13 +126,18 @@ export class Follow {
             return; // the watcher's re-summary carries head and tail facts to main
         }
       },
-      { subagents: options.subagents, holders: options.holders },
+      { subagents: options.subagents, holders: options.holders, pinned: options.pinned },
     );
     this.started = this.follower.start();
   }
 
   poke(): Promise<void> {
     return this.follower.poke();
+  }
+
+  // W7: the contest ended; a branch held back while it lasted is folded in (ChainFollower.refold).
+  refold(): Promise<void> {
+    return this.follower.refold();
   }
 
   // Events the follow carries beside the transcript's own (a workflow run's progress snapshot), delivered and logged

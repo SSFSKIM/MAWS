@@ -23,6 +23,13 @@ export const INFO = {
   notPinned: (pin: string) => `pinned is ${pin}`,
   binary: 'Binary',
   sessionId: 'Session id',
+  // W7: who holds the session (the glyph's derivation, attention/derive.ts)
+  heldBy: 'Held by',
+  heldByMaws: 'MAWS',
+  heldByNone: 'No process',
+  contested: (other: string) => `MAWS and ${other}`,
+  contestedNote: 'Contested: MAWS yields once the other process writes',
+  readOnly: 'Read-only here',
   processTree: 'Process tree',
   tree: (tree: string, own: string | null) => (own === null ? tree : `${tree} · own ${own}`),
   // Model

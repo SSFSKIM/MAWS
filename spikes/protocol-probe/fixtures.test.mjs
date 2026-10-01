@@ -140,3 +140,31 @@ test('pass3 bg-daemon-binary: the daemon runs the pin only when the pin is not u
  assert.deepEqual(version,{'installed-path':'2.1.285','path-shim':'2.1.285','xdg-data-home':'2.1.283','symlink-outside':'2.1.285','custody-copy':'2.1.283'});
  const exe=Object.fromEntries(notes(r,'daemon_process').map(n=>[n.arm,n.exe]));assert.equal(exe['custody-copy'],notes(r,'arm').find(n=>n.arm==='custody-copy').bin);
  assert.ok(notes(r,'daemon_exit').every(n=>n.alive===false));assert.ok(notes(r,'owner_file_check').every(n=>n.scratchProjects.length===0));});
+// W7 F1 (C4; docs/doperpowers/plans/2026-10-01-ux-fundamentals-waves.md): the owner's collision under a scratch home.
+// MAWS's `-p` process and a terminal `claude --resume` of the same id both register as interactive holders, the engine
+// refuses neither, both write the one JSONL as sibling branches, and a resume afterwards continues from the branch the
+// file ends on. The pre-W7 rules (a registry reading MAWS's own record as a terminal, a follower that flips) beside W7's.
+test('pass3 w7-collision: both writers register, neither is refused, the transcript forks, and a resume loses the other branch',()=>{const r=load3('w7-collision');
+ const at=e=>notes(r,e)[0];const disk=new URL('w7-collision-disk/',dir3);
+ const maws=at('maws_launched'),terminal=at('terminal_spawned');
+ const reg=n=>JSON.parse(readFileSync(new URL(readdirSync(disk).find(f=>f.startsWith('registry-'+n+'-')),disk),'utf8'));
+ assert.deepEqual([reg('maws').pid,reg('maws').kind,reg('maws').entrypoint],[maws.pid,'interactive','sdk-ts']);
+ assert.deepEqual([reg('terminal').pid,reg('terminal').kind,reg('terminal').entrypoint],[terminal.pid,'interactive','cli']);
+ assert.equal(reg('maws').sessionId,maws.sessionId);assert.equal(reg('terminal').sessionId,maws.sessionId);
+ // pre-W7: MAWS's own record is a terminal holder, and MAWS's exit re-emits nothing; W7: only the terminal holds
+ assert.deepEqual(at('registry_maws_only').before.holderEvents.map(e=>e.holder),[{kind:'terminal',pid:maws.pid}]);
+ assert.deepEqual(at('registry_maws_only').after.holderEvents,[]);
+ assert.deepEqual(at('registry_both').fsHolders,[{kind:'terminal',pid:terminal.pid}]);
+ assert.deepEqual(at('maws_exited').before.holderEvents,[]);assert.equal(at('maws_exited').exitRow.reason,'stop');
+ assert.equal(at('terminal_turn_one').after.foreignWrites.length,1);
+ // the transcript: one fork, a terminal prompt and a MAWS prompt on the same parent
+ const fork=at('transcript_branches').forks;assert.equal(fork.length,1);
+ assert.deepEqual(fork[0].children.filter(c=>c.type==='user').map(c=>c.entrypoint).sort(),['cli','sdk-ts']);
+ // pre-W7 the view flips twice (MAWS_TWO vanishes at TERMINAL_TWO); W7 holds the terminal's branch, then re-folds
+ const kinds=list=>list.map(e=>e.key??e.kind);
+ assert.deepEqual(kinds(at('terminal_turn_two').before.follower),['boundary.retraction','transcript_branch']);
+ assert.deepEqual(kinds(at('terminal_turn_two').after.follower),['transcript_branch_held']);
+ assert.ok(kinds(at('terminal_exited').after.follower).includes('boundary.retraction'));
+ assert.equal(at('send_guard').verdict.live,'foreign');
+ // the engine resumes from the branch the file ends on: MAWS_TWO is gone from the model's context
+ const recall=at('maws_resumed_recall').answer;assert.match(recall,/TERMINAL_TWO/);assert.doesNotMatch(recall,/MAWS_TWO/);});

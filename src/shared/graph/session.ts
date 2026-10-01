@@ -13,10 +13,18 @@ export const SessionPermissionModeSchema = z
     message: 'refusal must be null exactly when requested equals effective',
   });
 
+const TerminalHolderSchema = z.strictObject({ kind: z.literal('terminal'), pid: z.number().int() });
+const BackgroundJobHolderSchema = z.strictObject({ kind: z.literal('background_job'), pid: z.number().int().nullable(), jobId: z.string().nullable() });
+// A process other than MAWS's that holds the session (D-12's foreign-live holders).
+export const ForeignHolderSchema = z.discriminatedUnion('kind', [TerminalHolderSchema, BackgroundJobHolderSchema]);
+export type ForeignHolder = z.infer<typeof ForeignHolderSchema>;
+
 export const SessionHolderSchema = z.discriminatedUnion('kind', [
-  z.strictObject({ kind: z.literal('self') }),
-  z.strictObject({ kind: z.literal('terminal'), pid: z.number().int() }),
-  z.strictObject({ kind: z.literal('background_job'), pid: z.number().int().nullable(), jobId: z.string().nullable() }),
+  // W7 (charter §4.3 as amended 2026-10-01): `contestedBy` names a foreign process that holds the session too while
+  // MAWS's own process runs it (the contested state); absent, MAWS alone holds it.
+  z.strictObject({ kind: z.literal('self'), contestedBy: ForeignHolderSchema.optional() }),
+  TerminalHolderSchema,
+  BackgroundJobHolderSchema,
   z.strictObject({ kind: z.literal('none') }),
 ]);
 

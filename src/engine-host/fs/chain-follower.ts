@@ -4,8 +4,11 @@
 // plus the trailing partial line; every poke reads `[offset, size)` once, so the ranges read over a file's life are
 // contiguous, ascending and disjoint. Rewinds arrive as `last-prompt {rewound: true}` anchors that cut the chain at
 // once; the engine then continues from an attachment the cut removed, which the announced `rewind` state recognises.
-// A branch nothing explains is a second writer: retraction plus a warning. Every method is serialised behind one
-// promise chain, so a watcher event, a reconcile tick and a follow request never interleave.
+// A branch nothing explains is a second writer: retraction plus a warning, unless the session is contested (W7: a
+// foreign process holds it now) and the branch would replace records MAWS wrote with another writer's, in which case
+// MAWS's branch stays in view and the other is held back until the holder exits and the follower re-folds. Every
+// method is serialised behind one promise chain, so a watcher event, a reconcile tick and a follow request never
+// interleave.
 import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, EventId, MessageUuid, ParentToolUseId, SessionId } from '@shared/graph/ids';
 import type { TranscriptSummary } from '@shared/wire/store';
@@ -19,6 +22,7 @@ export interface Skeleton {
   isProgress: boolean;
   startsTurn: boolean; // a prompt that opens a turn (backfill's `startsTurn`): what the terminal-rewind rule reads boundaries by
   endsTurn: boolean; // a `system/turn_duration` record, the one disk record that ends a turn (backfill's `turn.ended`)
+  own: boolean; // W7: written by an SDK-entrypoint process, MAWS's (`entrypoint: 'sdk-ts'`, pass3/w7-collision)
   timestamp: string | null;
   offset: number; // byte position of the line (leading NULs included); re-reading [offset, offset + length) yields the record
   length: number;
@@ -62,7 +66,12 @@ export interface ChainFollowerOptions {
   // The live holders of this transcript's session now (the registry's live records naming it). Absent: none, so the
   // terminal-rewind reading is decided by the transcript's shape alone.
   holders?: () => number;
+  // W7: whether a foreign process holds the session now (charter §4.3 as amended 2026-10-01). While it does, a sibling
+  // branch another writer starts does not displace records MAWS wrote; absent, never.
+  pinned?: () => boolean;
 }
+
+const OWN_ENTRYPOINT = 'sdk-ts'; // the holder registry's own-record rule, read off the transcript's records
 
 const PAGE_BYTES = 1024 * 1024;
 const MAX_PARTIAL_BYTES = 8 * 1024 * 1024;
@@ -102,11 +111,13 @@ class FollowerCore {
   facts: FollowerFacts = {};
   private groups = 0;
   interrupted = false; // a by-offset re-read met another file: this core's picture of the file is incomplete
+  held = false; // W7: a sibling branch is being held back while the session is contested (its notice went out once)
 
   constructor(
     private readonly reader: FileReader,
     readonly ctx: BackfillContext,
     private readonly holders: () => number = () => 0,
+    private readonly pinned: () => boolean = () => false,
   ) {}
 
   // One chunk read at the cursor: dispatch every complete line, keep the remainder, advance the cursor.
@@ -149,6 +160,7 @@ class FollowerCore {
       isProgress: record.type === 'progress',
       startsTurn: startsTurn(record),
       endsTurn: record.type === 'system' && record.subtype === 'turn_duration',
+      own: record.entrypoint === OWN_ENTRYPOINT,
       timestamp: typeof record.timestamp === 'string' ? record.timestamp : null,
       offset,
       length: lineBytes.length,
@@ -280,8 +292,14 @@ class FollowerCore {
     newChain.reverse();
     const newSet = new Set(newChain);
     const removed = this.chain.filter((member) => !newSet.has(member));
-    for (const member of removed) this.emitted.delete(member);
     const terminal = this.rewind === null ? this.terminalRewind(record, parent) : null;
+    if (terminal === null && this.rewind?.phase !== 'unanchored' && this.holdsBack(record, removed)) {
+      // W7: MAWS's branch stays in view; this record joins the skeletons only, and one notice says why.
+      if (!this.held) this.produce(null, { ...eventBase(this.ctx, `branch:${uuid}:held`), kind: 'notice.posted', level: 'warning', text: HELD_NOTICE, key: 'transcript_branch_held' });
+      this.held = true;
+      return;
+    }
+    for (const member of removed) this.emitted.delete(member);
     if (this.chain.length > 0) {
       if (terminal !== null) {
         this.produce(null, { ...eventBase(this.ctx, `branch:${uuid}:rewind`), kind: 'boundary.rewind', ...terminal, prefillText: null });
@@ -305,6 +323,14 @@ class FollowerCore {
       if (member === uuid) this.emit(record, uuid);
       else if (!this.emitted.has(member)) await this.reemit(member);
     }
+  }
+
+  // W7: a second writer's branch that would retract records MAWS wrote, while a foreign process holds the session. A
+  // branch MAWS itself writes goes through (its own branch is the one kept in view), and so does any branch that leaves
+  // MAWS's records where they are (two foreign writers flip as before).
+  private holdsBack(record: TranscriptRecord, removed: MessageUuid[]): boolean {
+    if (this.chain.length === 0 || record.entrypoint === OWN_ENTRYPOINT || !this.pinned()) return false;
+    return removed.some((member) => this.skeletons.get(member)?.own === true);
   }
 
   // A terminal `/rewind` (the interactive engine, 2.1.284) writes no anchor: the next prompt simply parents onto the
@@ -408,6 +434,9 @@ class FollowerCore {
   }
 }
 
+export const HELD_NOTICE = 'Another process is writing a sibling branch into this transcript; MAWS keeps its own branch in view until that process exits';
+export const REFOLD_NOTICE = 'The other process exited; this transcript now shows the branch a resume continues from';
+
 // One line's bytes to a record: leading NULs stripped, unparseable lines are null (the engine's own reader rule).
 function parseLine(lineBytes: Buffer): TranscriptRecord | null {
   let start = 0;
@@ -480,6 +509,23 @@ export class ChainFollower {
     });
   }
 
+  // W7: the contest ended (the foreign holder exited). A follower that held a branch back reads the file again as it
+  // stands and reconciles, as a rewrite does: the chain becomes the one the transcript ends on (the branch a resume
+  // continues from, pass3/w7-collision), the records it leaves are one retraction, and a notice says why. A follower
+  // that held nothing back has nothing to re-fold.
+  refold(): Promise<void> {
+    return this.enqueue(async () => {
+      if (this.stopped || !this.core.held) return;
+      try {
+        const stat = await this.reader.stat();
+        if (this.stopped || stat === null) return;
+        if (await this.reload(stat, 'refold')) this.report('following');
+      } catch (error) {
+        this.report('error', messageOf(error));
+      }
+    });
+  }
+
   // Effective across awaits: work in flight finds `stopped` when its read resolves and delivers nothing; the skeleton
   // and the materialised list are discarded.
   stop(): void {
@@ -526,7 +572,7 @@ export class ChainFollower {
   }
 
   private freshCore(): FollowerCore {
-    return new FollowerCore(this.reader, createBackfillContext({ sessionId: this.sessionId, agent: this.agent, subagents: this.options.subagents }), this.options.holders);
+    return new FollowerCore(this.reader, createBackfillContext({ sessionId: this.sessionId, agent: this.agent, subagents: this.options.subagents }), this.options.holders, this.options.pinned);
   }
 
   private enqueue(task: () => Promise<void>): Promise<void> {
@@ -591,7 +637,8 @@ export class ChainFollower {
   // A fresh run whose own read is interrupted (the file replaced again between the reload's stat and its read, or
   // shrunk) describes no file: it is abandoned, never reconciled — an empty fresh chain would retract everything the
   // consumer holds — the old state stands, and `sync` retries from a fresh stat. Answers whether it reconciled.
-  private async reload(stat: { ino: number; size: number }): Promise<boolean> {
+  // W7: a re-fold (`refold`) reconciles the same way, its retraction and a notice naming the contest's end.
+  private async reload(stat: { ino: number; size: number }, cause: 'rewrite' | 'refold' = 'rewrite'): Promise<boolean> {
     this.report('reloading');
     const fresh = this.freshCore();
     fresh.ino = stat.ino;
@@ -602,7 +649,9 @@ export class ChainFollower {
     const retracted = old.chain.filter((uuid) => !freshChain.has(uuid));
     const produced: Produced[] = [];
     if (retracted.length > 0) {
-      produced.push({ source: null, group: 0, event: { ...eventBase(fresh.ctx, `rewrite:${fresh.ino}:${fresh.offset}`), kind: 'boundary.retraction', retractedMessageUuids: retracted, reason: 'transcript_rewritten', fallbackModel: null } });
+      const id = `${cause === 'refold' ? 'refold' : 'rewrite'}:${fresh.ino}:${fresh.offset}`;
+      produced.push({ source: null, group: 0, event: { ...eventBase(fresh.ctx, id), kind: 'boundary.retraction', retractedMessageUuids: retracted, reason: cause === 'refold' ? 'transcript_branch' : 'transcript_rewritten', fallbackModel: null } });
+      if (cause === 'refold') produced.push({ source: null, group: 0, event: { ...eventBase(fresh.ctx, `${id}:notice`), kind: 'notice.posted', level: 'info', text: REFOLD_NOTICE, key: 'transcript_refold' } });
     }
     // One event group per record, its final mapping: the suppressed fresh run may have mapped a record more than once
     // while branching away from it and rejoining; only the last group, the one standing on the final chain, counts.

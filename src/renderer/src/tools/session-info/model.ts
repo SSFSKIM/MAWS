@@ -21,6 +21,7 @@ import { CONTEXT, MODEL } from '../../widgets/copy';
 import { liveModel, type ModelRow } from '../../widgets/model';
 import { num } from '../../widgets/parts';
 import { INFO, LANE } from './copy';
+import { contestLine, holderLine } from '../../attention/derive'; // W7
 import type { Lane } from './lane';
 // C12 start
 import type { BudgetState } from '@shared/ipc/schema/engine';
@@ -69,6 +70,15 @@ export function budgetRows(budget: BudgetState | null, digest: SessionDigest | n
 }
 // C12 end
 
+// W7: who holds the session, read through the same derivation as the glyph and the tab (§5.7).
+export function heldByRow(record: SessionRecord): InfoRow {
+  const contest = contestLine(record);
+  if (contest !== null) return { label: INFO.heldBy, value: INFO.contested(contest), note: INFO.contestedNote };
+  const foreign = holderLine(record);
+  if (foreign !== null) return { label: INFO.heldBy, value: foreign, note: INFO.readOnly };
+  return { label: INFO.heldBy, value: record.holder.kind === 'self' ? INFO.heldByMaws : INFO.heldByNone };
+}
+
 function engineSection({ record, status, digest, binary, pinnedVersion, budget }: SessionInfoInput): InfoSection { // C12: digest, budget
   const version = status?.engineVersion ?? record.engineVersion;
   const tree = status?.memory.treeRssKiB ?? null;
@@ -78,6 +88,7 @@ function engineSection({ record, status, digest, binary, pinnedVersion, budget }
       { label: INFO.version, value: version ?? NONE, note: version === null ? undefined : version === pinnedVersion ? INFO.pinned : INFO.notPinned(pinnedVersion) },
       { label: INFO.binary, value: binary ? homeAbbreviated(binary.path) : NONE },
       { label: INFO.sessionId, value: record.engineSessionId ?? NONE },
+      heldByRow(record), // W7
       { label: INFO.processTree, value: tree === null ? NONE : INFO.tree(mb(tree), status?.memory.rssKiB == null ? null : mb(status.memory.rssKiB)) },
       ...budgetRows(budget, digest), // C12
     ],

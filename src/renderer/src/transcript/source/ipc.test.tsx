@@ -827,3 +827,41 @@ describe('rewind adapter', () => {
     await expect(undo).rejects.toThrow('Rewind failed: file changed on disk');
   });
 });
+
+// W7 (charter §4.3 as amended 2026-10-01): once MAWS's process has exited and a foreign process holds the session, the
+// pane follows the transcript the other process writes, not the stream that stopped.
+describe('ipcSource after MAWS yields to a foreign holder (W7)', () => {
+  it('resets once when the record turns foreign-live after the live form, and the new hydration follows disk', async () => {
+    const b = builder();
+    b.turn('u1');
+    b.text('m1', 0, 'MAWS wrote this.');
+    b.end(['u1']);
+    const mine = b.events.length;
+    const liveForm = b.events.map((event, i) => ({ ...event, id: `${APP}:launch-1:${i + 1}:0` as EventId, seq: i + 1 }));
+    b.turn('t1');
+    b.text('m2', 0, 'The terminal wrote this.');
+    b.end(['t1']);
+    const diskForm = b.events.map((event) => ({ ...event, id: `disk:${event.id}` as EventId, seq: null }));
+    const changed = (holder: unknown) => ({ record: { appId: APP, holder }, cause: 'live', revision: 1 }) as never;
+
+    const fake = fakeClient();
+    const source = ipcSourceOver(fake.client, APP);
+    const store = useTranscriptStore.getState();
+    const hydrated = store.attach(source.key!, source);
+    fake.calls[0].answer({ ok: true, value: { events: liveForm, lastSeq: liveForm.length, complete: true } } as never);
+    await hydrated;
+    fake.emit('session.changed', changed({ kind: 'self', contestedBy: { kind: 'terminal', pid: 7 } })); // contested: still live
+    fake.emit('session.changed', changed({ kind: 'terminal', pid: 7 })); // the process exited; the terminal holds it
+    await vi.waitFor(() => expect(fake.calls).toHaveLength(2));
+    expect(fake.calls[1].name).toBe('session.events');
+    fake.calls[1].answer({ ok: true, value: { events: diskForm.slice(0, mine), lastSeq: 0, complete: true } } as never);
+    await vi.waitFor(() => expect(useTranscriptStore.getState().entries[APP]?.phase).toBe('live'));
+    fake.emit('session.eventBatch', batch(diskForm.slice(mine))); // the terminal's turn, from the follower
+    expect([...useTranscriptStore.getState().entries[APP].state.seen]).toEqual(diskForm.map((event) => event.id));
+    // a later change while following disk is no second reset
+    fake.emit('session.changed', changed({ kind: 'terminal', pid: 7 }));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(fake.calls).toHaveLength(2);
+    store.detach(source.key!);
+  });
+});

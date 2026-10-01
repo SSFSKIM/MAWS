@@ -14,7 +14,7 @@ import type { HostSupervisor } from '../hosts/supervisor';
 import type { ReadModelWriter as ShellReadModelWriter, SessionSource } from '../sessions/read-model';
 import { toSessionRecordPatch } from '@shared/engine/status';
 import type { Index } from './index';
-import type { BindingChange, ChangeCause } from './sessions';
+import { contested, type BindingChange, type ChangeCause } from './sessions';
 
 // C5's read-model port (C5 execution document, "Main modules"), as far as this source writes through it: records,
 // projects and the seed digest of a session with no live fold. The shell's writer also folds event batches, statuses
@@ -91,10 +91,15 @@ export class IndexSessionSource implements SessionSource {
       this.host.onEvent('session.status', ({ appSessionId, status }) => {
         const record = this.index.sessions.get(appSessionId);
         if (record === null) return; // not a record the index holds (yet)
-        // C3's patch leaves the holder out once the process has exited, the index's call: nothing holds it then (a
-        // terminal that resumes it arrives as fs.holderChanged, which a `self` holder would have refused).
+        // C3's patch leaves the holder out once the process has exited, the index's call. W7: the registry's foreign
+        // holder of the session, remembered from fs.holderChanged, holds it then (the registry tells only changes, and
+        // MAWS's own record is never one); none otherwise. While the process runs it is self, contested when a foreign
+        // process holds the session too.
         const patch = toSessionRecordPatch(status);
-        if (status.process === 'exited') patch.holder = { kind: 'none' };
+        const engineId = status.engineSessionId ?? record.engineSessionId;
+        const foreign = (engineId === null ? undefined : this.holders.get(engineId)) ?? { kind: 'none' as const };
+        if (status.process === 'exited') patch.holder = foreign;
+        else patch.holder = contested(foreign);
         this.write('session.status', () => this.index.sessions.applyEngineStatus(appSessionId, patch));
         this.liveStatus(appSessionId, status.process === 'exited', record.engineSessionId !== null);
       }),
@@ -170,7 +175,7 @@ export class IndexSessionSource implements SessionSource {
   }
 
   // The registry as the host sees it now, folded once per sync: live holders applied, and a foreign holder the index
-  // kept from an earlier run whose process is gone cleared.
+  // kept from an earlier run whose process is gone cleared (W7: a contest whose foreign process is gone, too).
   private foldHolders(live: { sessionId: SessionId; holder: Holder }[]): void {
     this.write('fs.state', () =>
       this.index.transaction(() => {
@@ -180,8 +185,9 @@ export class IndexSessionSource implements SessionSource {
           this.index.sessions.setHolder(sessionId, holder);
         }
         for (const record of this.index.sessions.list({ includeArchived: true })) {
-          const kind = record.holder.kind;
-          if ((kind === 'terminal' || kind === 'background_job') && record.engineSessionId !== null && !now.has(record.engineSessionId)) {
+          const { holder } = record;
+          const foreign = holder.kind === 'terminal' || holder.kind === 'background_job' || (holder.kind === 'self' && holder.contestedBy !== undefined); // W7: a contest too
+          if (foreign && record.engineSessionId !== null && !now.has(record.engineSessionId)) {
             this.holders.delete(record.engineSessionId);
             this.index.sessions.setHolder(record.engineSessionId, { kind: 'none' });
           }

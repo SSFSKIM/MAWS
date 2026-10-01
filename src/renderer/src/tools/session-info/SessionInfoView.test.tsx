@@ -77,7 +77,7 @@ describe('session info renders the six sections', () => {
     mount(ctxOf(READY));
     for (const title of ['Engine', 'Model', 'Gateway', 'Permissions', 'Context, usage, cost', 'Hooks and MCP']) expect(screen.getByRole('region', { name: title })).toBeTruthy();
     const labels = screen.getAllByRole('term').map((t) => t.textContent);
-    expect(labels).toEqual(['Version', 'Binary', 'Session id', 'Process tree', 'Memory budget' /* C12 */, 'Main', 'Subagents', 'Route', 'Account', 'Tool search', 'Mode', 'Auto-mode lane', 'Rules', 'Context', 'Usage', 'Cost', 'Hooks', 'MCP']);
+    expect(labels).toEqual(['Version', 'Binary', 'Session id', 'Held by' /* W7 */, 'Process tree', 'Memory budget' /* C12 */, 'Main', 'Subagents', 'Route', 'Account', 'Tool search', 'Mode', 'Auto-mode lane', 'Rules', 'Context', 'Usage', 'Cost', 'Hooks', 'MCP']);
     expect(valueOf('Version')).toBe('2.1.283 · pinned');
     expect(valueOf('Session id')).toBe(record.engineSessionId);
     expect(valueOf('Main')).toBe('claude-sonnet-5[1m]');

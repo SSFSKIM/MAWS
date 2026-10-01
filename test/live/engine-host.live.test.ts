@@ -14,7 +14,13 @@ import type { LaunchSpec } from '@shared/engine/launch-spec';
 import { parseJournalRow, type JournalRow } from '@shared/wire/journal';
 import { getHooksListing } from '../../src/engine-host/controls';
 import { HostHookRegistry } from '../../src/engine-host/host-hooks';
-import { ENGINE_VERSION, RELAY_URL } from '../../src/engine-host/launch';
+import { ENGINE_BIN, ENGINE_VERSION, GATEWAY_AUTH_TOKEN, RELAY_URL } from '../../src/engine-host/launch';
+import * as nodePty from 'node-pty'; // W7: the terminal-style second writer
+import { holderAuthority } from '../../src/main/sessions/holders'; // W7: main's resume guard, over this host
+import { ChainFollower } from '../../src/engine-host/fs/chain-follower'; // W7: the pre-W7 follower, beside the product's
+import { FsFileReader } from '../../src/engine-host/fs/follow';
+import { HolderRegistry } from '../../src/engine-host/fs/holders';
+import { resolveStorePaths } from '../../src/engine-host/fs/paths';
 import { exportFixture, frameInventory, LiveLedger, liveGate, liveSpec, redactJournal, scratchConfigHome, turnAttribution, withRawProcess, type LiveContext } from './support/live';
 import { LiveHost, startDirectSession } from './support/live-host';
 
@@ -1253,6 +1259,192 @@ describe('engine host live', () => {
     expect(String(chain[4]!.message?.content)).toMatch(/^<local-command-stdout>Compacted/);
     expect(records.filter((r) => r.type === 'system' && r.subtype === 'local_command')).toEqual([]);
   }, LONG_CASE_MS);
+
+  // W7 F1 (docs/doperpowers/plans/2026-10-01-ux-fundamentals-waves.md; charter §4.3's resume-while-live line as amended
+  // 2026-10-01): the owner's collision. MAWS's engine host holds a session (C3's launch, Haiku through the relay, a
+  // scratch home that also serves C4's fs.* with a disk follow of the session, as a tailing pane would), and the pinned
+  // binary resumes the same id interactively in a PTY, the way `claude --resume <id>` in a terminal does. A turn in each,
+  // twice, interleaved; then MAWS's process stops; then main's resume guard is asked (the Send); then the terminal exits
+  // and MAWS resumes the id and asks what it remembers. Beside the product (the host's fs.* as W7 wires it) the case runs
+  // the pre-W7 rules over the same files: a registry with no own-record rule and a follower with no pin, so one run
+  // records the collision as it was and as it is now. The notes, the transcript and both registry records are written
+  // under the run's exports for spikes/protocol-probe/fixtures/pass3/.
+  it('W7 a terminal resumes a session MAWS holds', async (ctx) => {
+    const g = live(ctx);
+    const configHome = scratchConfigHome();
+    const repo = realpathSync(g.scratch());
+    writeFileSync(join(configHome, '.claude.json'), `${JSON.stringify({ hasCompletedOnboarding: true, theme: 'light', projects: { [repo]: { hasTrustDialogAccepted: true, hasCompletedProjectOnboarding: true } } }, null, 2)}\n`);
+    const exportsDir = join(g.userData, 'exports');
+    const diskDir = join(exportsDir, 'w7-collision-disk');
+    mkdirSync(diskDir, { recursive: true });
+    const notes: Record<string, unknown>[] = [];
+    const note = (event: string, fields: Record<string, unknown> = {}) => {
+      notes.push({ at: new Date().toISOString(), event, ...fields });
+      console.log(`   ${event} ${JSON.stringify(fields).slice(0, 900)}`);
+    };
+    const sessionsDir = join(configHome, 'sessions');
+    const registry = (): Record<string, unknown>[] =>
+      existsSync(sessionsDir) ? readdirSync(sessionsDir).filter((f) => /^\d+\.json$/.test(f)).map((f) => ({ pid: Number(f.split('.')[0]), ...(JSON.parse(readFileSync(join(sessionsDir, f), 'utf8')) as Record<string, unknown>) })) : [];
+    const keptRecords: Record<string, Record<string, unknown>> = {};
+    let terminalExit: { exitCode: number; signal?: number } | null = null;
+    let mawsJournal = '';
+    let guard: unknown = null;
+    // the pre-W7 rules over the same store: every live record a holder, and a follower that flips on every sibling branch
+    const before = { holders: [] as { holder: unknown; pid: unknown }[], events: [] as SessionEvent[] };
+    const beforeRegistry = new HolderRegistry(resolveStorePaths({ CLAUDE_CONFIG_DIR: configHome }), (_sessionId, holder, record) => void before.holders.push({ holder, pid: record?.pid ?? null }));
+    let beforeFollower: ChainFollower | null = null;
+    await withHost(g, 'W7 collision', async (host) => {
+      const spec = liveSpec(repo, { model: 'haiku', permissionMode: 'default', subagentModel: null });
+      const sessionId = spec.sessionId!;
+      const transcript = join(configHome, 'projects', repo.replace(/[^a-zA-Z0-9]/g, '-'), `${sessionId}.jsonl`);
+      const disk = () => (existsSync(transcript) ? readFileSync(transcript, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l) as TranscriptRecord) : []);
+      const s = sessionView(host, spec);
+      const named = <T,>(name: string) => host.emitted.filter((e) => e.name === name).map((e) => e.payload as T);
+      const afterDisk = () => s.events().filter((e) => e.seq === null && !e.id.startsWith(`${s.id}:`));
+      beforeFollower = new ChainFollower(new FsFileReader(() => transcript), sessionId as never, null, (e) => void (e.t === 'events' && before.events.push(...e.events)), { holders: () => 2 });
+      // what each rule saw since the last mark
+      let mark = { afterDisk: 0, afterHolders: 0, foreignWrites: 0, beforeDisk: 0, beforeHolders: 0 };
+      const since = async () => {
+        await beforeFollower!.poke();
+        await beforeRegistry.refresh();
+        const out = {
+          before: { holderEvents: before.holders.slice(mark.beforeHolders), follower: before.events.slice(mark.beforeDisk).filter(flipOrNotice).map(diskEventNote) },
+          after: {
+            holderEvents: named<{ holder: unknown }>('fs.holderChanged').slice(mark.afterHolders).map((p) => p.holder),
+            foreignWrites: named('fs.foreignWrite').slice(mark.foreignWrites),
+            follower: afterDisk().slice(mark.afterDisk).filter(flipOrNotice).map(diskEventNote),
+          },
+        };
+        mark = { afterDisk: afterDisk().length, afterHolders: named('fs.holderChanged').length, foreignWrites: named('fs.foreignWrite').length, beforeDisk: before.events.length, beforeHolders: before.holders.length };
+        return out;
+      };
+      const { status } = await host.launch(spec);
+      mawsJournal = status.journalPath;
+      note('maws_launched', { appSessionId: s.id, sessionId, pid: status.pid, launchId: status.launchId });
+      await s.send('Reply with exactly the word MAWS_ONE');
+      await s.waitTurns(1);
+      await host.call('fs.bind', { bindings: [{ sessionId: sessionId as never, appSessionId: s.id as never }] });
+      await host.fs!.eventsSnapshot(s.id as AppSessionId, null); // a pane tailing the transcript
+      await beforeRegistry.start();
+      await beforeFollower.start();
+      await delay(2_500); // a registry poll
+      for (const r of registry()) keptRecords[`maws-${String(r.pid)}`] = r;
+      note('registry_maws_only', { records: registry(), ...(await since()) });
+
+      // The second writer: the pinned binary, interactive, resuming the id under the same scratch home; its updater off,
+      // so it touches nothing outside that home.
+      const aliases = Object.fromEntries(Object.entries(process.env).filter(([k, v]) => /^ANTHROPIC_DEFAULT_[A-Z]+_MODEL$/.test(k) && v)) as Record<string, string>;
+      const base = Object.fromEntries(['PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL', 'TMPDIR', 'LANG'].filter((k) => process.env[k]).map((k) => [k, process.env[k]!]));
+      const env = { ...base, TERM: 'xterm-256color', CLAUDE_CONFIG_DIR: configHome, DISABLE_AUTOUPDATER: '1', ...aliases, ANTHROPIC_BASE_URL: RELAY_URL, ANTHROPIC_AUTH_TOKEN: GATEWAY_AUTH_TOKEN };
+      const term = nodePty.spawn(ENGINE_BIN, ['--resume', sessionId, '--model', 'haiku'], { name: 'xterm-256color', cols: 140, rows: 45, cwd: repo, env });
+      let screen = '';
+      term.onData((d) => void (screen += d));
+      const exited = new Promise<{ exitCode: number; signal?: number }>((r) => term.onExit((e) => r(e)));
+      // eslint-disable-next-line no-control-regex -- the terminal's escape sequences are what this strips
+      const plain = () => screen.replace(/\x1b\[[0-9;?<>=]*[ -/]*[@-~]|\x1b\][^\x07]*\x07|\x1b[()][A-Z0-9]/g, '');
+      const typeLine = async (line: string) => {
+        term.write(line);
+        await delay(500);
+        term.write('\r');
+      };
+      const terminalTurn = async (word: string) => {
+        const started = Date.now();
+        await typeLine(`Reply with exactly the word ${word}`);
+        await host.waitFor(() => disk().some((r) => r.type === 'assistant' && JSON.stringify(r.message?.content).includes(word)), `the terminal's ${word} on disk`, TURN_MS);
+        await host.waitFor(() => disk().some((r) => r.type === 'system' && r.subtype === 'turn_duration' && Date.parse(String(r.timestamp)) > started), `the terminal's ${word} turn ended`, 30_000);
+        await delay(1_500);
+      };
+      try {
+        note('terminal_spawned', { pid: term.pid, args: ['--resume', sessionId, '--model', 'haiku'] });
+        await host.waitFor(() => /for shortcuts|❯/.test(plain()) && plain(), 'the terminal prompt', 60_000);
+        await delay(3_000); // its registry record, and a poll
+        for (const r of registry()) keptRecords[r.pid === term.pid ? `terminal-${String(r.pid)}` : `maws-${String(r.pid)}`] = r;
+        note('registry_both', { records: registry(), fsHolders: (await host.call('fs.holders', { sessionIds: [sessionId as never], directories: null })).holders.map((h) => h.holder), ...(await since()) });
+
+        await terminalTurn('TERMINAL_ONE');
+        note('terminal_turn_one', await since());
+
+        await s.send('Reply with exactly the word MAWS_TWO');
+        await s.waitTurns(2);
+        await delay(2_000);
+        note('maws_turn_two', await since());
+
+        await terminalTurn('TERMINAL_TWO');
+        note('terminal_turn_two', await since());
+
+        // MAWS's process exits (Stop, quit, a budget release or W7's yield all end it the same way).
+        await host.call('session.stop', { appSessionId: s.id, reason: 'stop' });
+        await s.wait('process.exited', 'the stop', () => true, 15_000);
+        await delay(3_000); // a registry poll
+        const exitRow = readJournal(mawsJournal).find((r) => r.direction === 'meta' && (r.frame as { event?: string }).event === 'exit');
+        const afterExit = await host.call('session.events', { appSessionId: s.id, afterSeq: null, limit: null });
+        note('maws_exited', { exitRow: exitRow?.frame, registry: registry(), heldElsewhere: host.fs!.heldElsewhere(s.id as AppSessionId), sessionEventsAnswer: { lastSeq: afterExit.lastSeq, events: afterExit.events.length, fromDisk: afterExit.lastSeq === 0 }, ...(await since()) });
+
+        // Send in MAWS: main's resume guard, over this host.
+        const dispatch = (async (_owner: string, name: string, input: unknown) => host.callRaw(name as never, input as never)) as never;
+        const verdict = await holderAuthority({ dispatch, sessions: { list: () => [] } }, { engineSessionId: sessionId as never, appSessionId: s.id as AppSessionId });
+        note('send_guard', { verdict, terminalPid: term.pid });
+        guard = verdict;
+
+        await typeLine('/exit');
+        terminalExit = await Promise.race([exited, delay(20_000).then(() => null)]);
+        await delay(4_000); // the registry's unlink, a poll, the re-fold
+        note('terminal_exited', { exit: terminalExit, registry: registry(), ...(await since()) });
+      } finally {
+        if (terminalExit === null) {
+          term.kill();
+          terminalExit = await Promise.race([exited, delay(5_000).then(() => ({ exitCode: -1, signal: 9 }))]);
+        }
+        beforeRegistry.stop();
+        beforeFollower.stop();
+        writeFileSync(join(exportsDir, 'w7-terminal-screen.txt'), plain());
+      }
+
+      // The transcript's branches: every record with more than one child that is not a progress record.
+      const records = disk();
+      const children = new Map<string, TranscriptRecord[]>();
+      for (const r of records) if (typeof r.uuid === 'string' && typeof r.parentUuid === 'string') children.set(r.parentUuid, [...(children.get(r.parentUuid) ?? []), r]);
+      const forks = [...children]
+        .filter(([, kids]) => kids.filter((k) => k.type !== 'progress').length > 1)
+        .map(([parent, kids]) => ({ parent, children: kids.map((k) => ({ uuid: k.uuid, type: k.type, entrypoint: k.entrypoint, text: JSON.stringify(k.message?.content ?? k.attachment ?? '').slice(0, 120) })) }));
+      const prompts = records.filter((r) => r.type === 'user' && typeof r.message?.content === 'string').map((r) => ({ uuid: r.uuid, parentUuid: r.parentUuid, entrypoint: r.entrypoint, text: String(r.message?.content).slice(0, 80) }));
+      note('transcript_branches', { records: records.length, forks, prompts });
+
+      // Send after the terminal closed: MAWS resumes the id; what does the model remember?
+      await host.call('fs.unfollow', { appSessionId: s.id, agentId: null }); // main unfollows an id that goes live
+      await host.launch({ ...spec, sessionId: null, resume: { sessionId: sessionId as never, fork: false } });
+      const ask = await s.send('List, comma separated, every word you were asked to reply with earlier in this conversation. Nothing else.');
+      const ended = await host.waitFor(() => mainTurnsEnded(s.events()).find((t) => t.userMessageUuids.includes(ask.messageUuid!)), 'the recall turn', TURN_MS);
+      const askRecord = disk().find((r) => r.uuid === ask.messageUuid);
+      note('maws_resumed_recall', { answer: ended.resultText, askParent: askRecord?.parentUuid ?? null });
+
+      // what the run shows, before W7 and with it
+      const at = (event: string) => notes.find((n) => n.event === event) as { before: { holderEvents: { holder: { kind: string; pid?: number } }[]; follower: { kind: string; key?: string }[] }; after: { holderEvents: { kind: string }[]; foreignWrites: unknown[]; follower: { kind: string; key?: string }[] } };
+      expect(at('registry_maws_only').before.holderEvents.map((e) => e.holder)).toEqual([{ kind: 'terminal', pid: status.pid }]); // pre-W7: MAWS's own record read as a terminal
+      expect(at('registry_maws_only').after.holderEvents).toEqual([]);
+      expect(at('registry_both').after.holderEvents).toEqual([{ kind: 'terminal', pid: term.pid }]);
+      expect(at('terminal_turn_one').after.foreignWrites).toHaveLength(1);
+      expect(at('maws_turn_two').before.follower.map((e) => e.kind)).toEqual(['boundary.retraction', 'notice.posted']);
+      expect(at('terminal_turn_two').before.follower.map((e) => e.kind)).toEqual(['boundary.retraction', 'notice.posted']); // MAWS_TWO vanishes
+      expect(at('terminal_turn_two').after.follower.map((e) => e.key ?? e.kind)).toEqual(['transcript_branch_held']); // MAWS_TWO stays
+      expect(at('maws_exited').before.holderEvents).toEqual([]); // pre-W7: nothing re-emitted at MAWS's exit
+      // the terminal's exit re-folds onto its branch (or, when its last records land after the registry cleared, the
+      // follower flips to it as before): either way MAWS_TWO leaves the view once, with the terminal gone
+      expect(at('terminal_exited').after.follower.map((e) => e.kind)).toContain('boundary.retraction');
+      expect((notes.find((n) => n.event === 'maws_exited') as { sessionEventsAnswer: { fromDisk: boolean } }).sessionEventsAnswer.fromDisk).toBe(true);
+      expect(guard).toMatchObject({ live: 'foreign', holder: { kind: 'terminal', pid: term.pid } });
+    }, new LiveHost({ userData: g.userData, configHome, fs: true }));
+
+    // Exports: the notes as a pass-3 record, MAWS's first journal, the transcript and the registry records.
+    const provenance = { event: 'provenance', charter: 'docs/charter.md', child: 'C4', wave: 'W7', item: 'F1', document: 'docs/doperpowers/plans/2026-10-01-ux-fundamentals-waves.md', pin: W7_PIN, engine: ENGINE_VERSION, configHome };
+    const exitCode = (terminalExit as { exitCode: number } | null)?.exitCode ?? null;
+    const rows = [{ at: (notes[0]?.at as string | undefined) ?? new Date().toISOString(), ...provenance }, ...notes, { at: new Date().toISOString(), event: 'exit', code: exitCode, process: 'terminal' }];
+    writeFileSync(join(exportsDir, 'w7-collision.jsonl'), redactJournal(`${rows.map(({ at, ...frame }, i) => JSON.stringify({ seq: i + 1, direction: 'meta', at, frame })).join('\n')}\n`));
+    if (mawsJournal) writeFileSync(join(exportsDir, 'w7-collision-maws.jsonl'), redactJournal(`${JSON.stringify({ seq: 0, direction: 'meta', at: rows[0].at, frame: provenance })}\n${readFileSync(mawsJournal, 'utf8')}`));
+    for (const [name, record] of Object.entries(keptRecords)) writeFileSync(join(diskDir, `registry-${name}.json`), `${redactJournal(JSON.stringify(record, null, 2))}\n`);
+    exportTranscript('w7-collision-disk/transcript', configHome, notes.find((n) => n.event === 'maws_launched')!.sessionId as string, g);
+    console.log(`   exports: ${exportsDir}`);
+  }, 10 * 60_000);
 });
 
 // A live journal as a pass-3 fixture candidate: redacted, provenance first, written under the run's userData for a
@@ -1335,3 +1527,19 @@ function w1Timeline(events: SessionEvent[], names: Record<string, string>): stri
 }
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// W7: the charter's blob at the wave's base (d5a6549e), the pin its fixtures carry.
+const W7_PIN = '560ec98bc0b47b5055e87fb4bf0d4c455a11a0e4';
+
+// W7: the follower events that change what the view shows: a retraction, a notice.
+const flipOrNotice = (e: SessionEvent) => e.kind === 'boundary.retraction' || e.kind === 'notice.posted';
+
+// W7: one disk-follow event, as the notes record it.
+function diskEventNote(e: SessionEvent): Record<string, unknown> {
+  const out: Record<string, unknown> = { id: e.id, kind: e.kind };
+  if (e.kind === 'boundary.retraction') Object.assign(out, { reason: e.reason, retracted: e.retractedMessageUuids });
+  if (e.kind === 'notice.posted') Object.assign(out, { text: e.text, key: e.key });
+  if (e.kind === 'user.message') out.text = text(e.content).slice(0, 60);
+  if (e.kind === 'assistant.block.complete' && e.block.type === 'text') out.text = String((e.block as { text?: string }).text ?? '').slice(0, 60);
+  return out;
+}

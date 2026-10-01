@@ -3,7 +3,7 @@
 // (§5.7); these are its pure readings, testable without React.
 import type { AttentionItem } from '@shared/graph/attention';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { SessionRecord } from '@shared/graph/session';
+import type { ForeignHolder, SessionRecord } from '@shared/graph/session';
 import { isActionable, isOpen } from '@shared/attention/kinds';
 
 // The kinds and the open states are shared with main's notifier and dock badge (`@shared/attention/kinds`).
@@ -54,10 +54,18 @@ export function nextNeedsYou(rows: NeedsYouRow[], currentAppId: AppSessionId | n
 // by the short id `claude --bg` printed (`bg · <short>`, as C10's toasts name it), its pid only when no id is known.
 export function holderLine(record: SessionRecord): string | null {
   const { holder } = record;
+  return holder.kind === 'terminal' || holder.kind === 'background_job' ? foreignLine(holder) : null;
+}
+
+function foreignLine(holder: ForeignHolder): string {
   if (holder.kind === 'terminal') return `Terminal · pid ${holder.pid}`;
-  if (holder.kind === 'background_job') {
-    if (holder.jobId !== null) return `bg · ${holder.jobId}`;
-    return holder.pid === null ? 'Background job' : `bg · pid ${holder.pid}`;
-  }
-  return null;
+  if (holder.jobId !== null) return `bg · ${holder.jobId}`;
+  return holder.pid === null ? 'Background job' : `bg · pid ${holder.pid}`;
+}
+
+// W7 (charter §4.3 as amended 2026-10-01): who else holds a session MAWS runs (the contested state), as the glyph, the
+// tab and Session info name it; null when MAWS alone holds it, or does not hold it.
+export function contestLine(record: SessionRecord): string | null {
+  const { holder } = record;
+  return holder.kind === 'self' && holder.contestedBy !== undefined ? foreignLine(holder.contestedBy) : null;
 }

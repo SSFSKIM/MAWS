@@ -8,5 +8,5 @@ export const commands = [
 
 export const events = [
   'fs.sessionChanged', 'fs.sessionRemoved', 'fs.holderChanged', 'fs.scanProgress', 'fs.followState',
-  'fs.subagentsChanged', 'fs.workflowChanged', 'fs.tasksChanged',
+  'fs.subagentsChanged', 'fs.workflowChanged', 'fs.tasksChanged', 'fs.foreignWrite',
 ] as const;

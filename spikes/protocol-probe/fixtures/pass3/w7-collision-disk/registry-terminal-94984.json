@@ -1,0 +1,24 @@
+{
+  "pid": 94984,
+  "sessionId": "aeb795ff-831b-47ea-b336-08a5790d598c",
+  "cwd": "/private/var/folders/c1/l4z5k02n2779byvnymzxsvth0000gn/T/maws-live-scratch-cmdl4C",
+  "startedAt": 1790880430977,
+  "procStart": "Thu Oct  1 18:47:10 2026",
+  "version": "2.1.283",
+  "peerProtocol": 1,
+  "peerFeatures": [
+    "notify_idle",
+    "reply_across_default_dirs",
+    "artifact_yield"
+  ],
+  "kind": "interactive",
+  "entrypoint": "cli",
+  "pidDomain": "darwin",
+  "messagingSocketPath": "/tmp/cc-socks/94984.sock",
+  "name": "maws-live-scratch-cmdl4c-eb",
+  "nameSource": "derived",
+  "nameSince": 1790880430977,
+  "updatedAt": 1790880431132,
+  "status": "idle",
+  "statusUpdatedAt": 1790880431132
+}

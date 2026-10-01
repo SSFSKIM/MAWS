@@ -6,6 +6,7 @@
 // except `fs.unbind`, for which an unbound id is a no-op.
 import * as z from 'zod';
 import { SessionEventSchema } from '@shared/graph/events';
+import { ForeignHolderSchema } from '@shared/graph/session';
 import { AgentIdSchema, AppSessionIdSchema, MessageUuidSchema, SessionIdSchema } from '@shared/graph/ids';
 import {
   HolderSchema,
@@ -149,4 +150,7 @@ export const events = {
   'fs.subagentsChanged': z.strictObject({ appSessionId: AppSessionIdSchema, agents: z.array(SubagentEntrySchema) }),
   'fs.workflowChanged': z.strictObject({ appSessionId: AppSessionIdSchema, runId: z.string() }),
   'fs.tasksChanged': z.strictObject({ listId: z.string() }),
+  // W7: the first record a foreign process wrote into a session MAWS's own process also holds (a contest), once per
+  // contest; main yields MAWS's process (charter §4.3 as amended 2026-10-01)
+  'fs.foreignWrite': z.strictObject({ sessionId: SessionIdSchema, appSessionId: AppSessionIdSchema.nullable(), holder: ForeignHolderSchema }),
 } as const satisfies Record<`fs.${string}`, z.ZodType>;

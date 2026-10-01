@@ -88,7 +88,7 @@ describe('ipc schema validates both directions', () => {
       ]);
       for (const spec of Object.values(fs.commands)) expect(spec.owner).toBe('engine-host');
       expect(Object.keys(fs.events).sort()).toEqual([
-        'fs.followState', 'fs.holderChanged', 'fs.scanProgress', 'fs.sessionChanged', 'fs.sessionRemoved', 'fs.subagentsChanged', 'fs.tasksChanged', 'fs.workflowChanged',
+        'fs.followState', 'fs.foreignWrite' /* W7 */, 'fs.holderChanged', 'fs.scanProgress', 'fs.sessionChanged', 'fs.sessionRemoved', 'fs.subagentsChanged', 'fs.tasksChanged', 'fs.workflowChanged',
       ]);
     });
 
