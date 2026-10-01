@@ -11,14 +11,19 @@ const TERMINAL: ForeignHolder = { kind: 'terminal', pid: 4242 };
 const JOB: ForeignHolder = { kind: 'background_job', pid: 4343, jobId: 'abcd1234' };
 
 // A host whose registry answers `holders` until the test clears it, and whose process table holds `reserved`.
-function host(initial: ForeignHolder[], reserved = false, entrypoint: string | undefined = 'cli') {
+// `reads`, when given, answers the registry's successive reads in turn (the last one repeating).
+function host(initial: ForeignHolder[], reserved = false, entrypoint: string | undefined = 'cli', reads: ForeignHolder[][] | null = null) {
   let holders = initial;
+  let read = 0;
   const calls: CommandName[] = [];
   const dispatch = vi.fn(async (_owner: string, name: CommandName) => {
     calls.push(name);
     let value: unknown;
     if (name === 'engine.sessions') value = reserved ? [status(APP)] : [];
-    else if (name === 'fs.holders') value = { refreshedAt: '2026-10-01T18:00:00.000Z', holders: holders.map((holder) => ({ sessionId: S, appSessionId: APP, holder, cwd: '/w', ...(entrypoint === undefined ? {} : { entrypoint }) })) };
+    else if (name === 'fs.holders') {
+      const now = reads === null ? holders : reads[Math.min(read++, reads.length - 1)];
+      value = { refreshedAt: '2026-10-01T18:00:00.000Z', holders: now.map((holder) => ({ sessionId: S, appSessionId: APP, holder, cwd: '/w', ...(entrypoint === undefined ? {} : { entrypoint }) })) };
+    }
     else if (name === 'engine.binaryInfo') value = { path: '/pinned/claude', expectedVersion: '2.1.283', version: '2.1.283', ok: true, error: null };
     return { ok: true, value } as CommandResult<CommandName>;
   });
@@ -62,6 +67,23 @@ describe('take over a session another process holds', () => {
     expect(signal).not.toHaveBeenCalled();
     const h = host([TERMINAL], false, undefined);
     expect(await releaseHolder(deps(h, { signal: () => h.clear() }), { engineSessionId: S, appSessionId: APP, expected: TERMINAL })).toEqual({ status: 'released' });
+  });
+
+  // review finding: the confirmed holder gone (or replaced) between the verdict and the fresh read is never acted on
+  it('acts only on a fresh registry row naming the confirmed process', async () => {
+    const signal = vi.fn();
+    const runStop = vi.fn(async () => {});
+    expect(await releaseHolder(deps(host([], false, 'cli', [[TERMINAL], []]), { signal }), { engineSessionId: S, appSessionId: APP, expected: TERMINAL })).toEqual({ status: 'released' });
+    const replaced = await releaseHolder(deps(host([], false, 'cli', [[TERMINAL], [{ kind: 'terminal', pid: 77 }]]), { signal }), { engineSessionId: S, appSessionId: APP, expected: TERMINAL });
+    expect(replaced).toMatchObject({ status: 'refused', reason: 'changed', message: 'The session is now held by the terminal (pid 77), not the process you confirmed; nothing was stopped.' });
+    expect(await releaseHolder(deps(host([], false, 'cli', [[JOB], []]), { runStop }), { engineSessionId: S, appSessionId: APP, expected: JOB })).toEqual({ status: 'released' });
+    expect(signal).not.toHaveBeenCalled();
+    expect(runStop).not.toHaveBeenCalled();
+    // two processes on the session: the confirmed one is acted on, whichever the verdict read first
+    const h = host([], false, 'cli', [[{ kind: 'terminal', pid: 77 }, TERMINAL], [{ kind: 'terminal', pid: 77 }, TERMINAL], [{ kind: 'terminal', pid: 77 }]]);
+    const both = await releaseHolder(deps(h, { signal }), { engineSessionId: S, appSessionId: APP, expected: TERMINAL });
+    expect(signal).toHaveBeenCalledWith(4242);
+    expect(both).toMatchObject({ status: 'refused', reason: 'timeout' }); // the other process still holds the session
   });
 
   it('answers released at once when the holder already exited', async () => {

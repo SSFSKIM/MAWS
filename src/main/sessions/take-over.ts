@@ -40,15 +40,21 @@ export async function releaseHolder(deps: TakeOverDeps, q: { engineSessionId: Se
   const authority = () => holderAuthority(deps, { engineSessionId: q.engineSessionId, appSessionId: q.appSessionId });
   const verdict = await authority();
   if (verdict.live === 'self') return refused('self', 'This session is already running in MAWS.');
-  if (verdict.live === 'none') return { status: 'released' }; // it exited meanwhile: nothing to end
-  const holder = verdict.holder as ForeignHolder;
-  if (!sameHolder(holder, q.expected)) return refused('changed', `The session is now held by ${holderName(holder)}, not the process you confirmed; nothing was stopped.`);
+  if (verdict.live === 'none' || q.engineSessionId === null) return { status: 'released' }; // it exited meanwhile: nothing to end
+  // The registry read again (liveness and the pid's start time checked) right before acting: only a row that names the
+  // confirmed process is acted on. None left: the holder exited; another one: it is not the process confirmed.
+  const rows = (await hostCall(deps.dispatch, 'fs.holders', { sessionIds: [q.engineSessionId], directories: null })).holders.filter((row) => row.sessionId === q.engineSessionId);
+  const row = rows.find((r) => (r.holder.kind === 'terminal' || r.holder.kind === 'background_job') && sameHolder(r.holder, q.expected));
+  if (row === undefined) {
+    const other = rows.find((r) => r.holder.kind === 'terminal' || r.holder.kind === 'background_job')?.holder as ForeignHolder | undefined;
+    if (other === undefined) return { status: 'released' };
+    return refused('changed', `The session is now held by ${holderName(other)}, not the process you confirmed; nothing was stopped.`);
+  }
+  const holder = row.holder as ForeignHolder;
   // An interactive holder is signalled only when it is a terminal's (`cli`, or a record too old to say): another app's
   // engine (Claude Desktop, an IDE, another SDK app) registers as interactive too, and is that app's to end.
-  if (holder.kind === 'terminal') {
-    const rows = (await hostCall(deps.dispatch, 'fs.holders', { sessionIds: [q.engineSessionId!], directories: null })).holders;
-    const entrypoint = rows.find((row) => row.holder.kind === 'terminal' && row.holder.pid === holder.pid)?.entrypoint;
-    if (entrypoint !== undefined && entrypoint !== 'cli') return refused('other_app', `The session is open in another app (${entrypoint}, pid ${holder.pid}); close it there, or fork a copy.`);
+  if (holder.kind === 'terminal' && row.entrypoint !== undefined && row.entrypoint !== 'cli') {
+    return refused('other_app', `The session is open in another app (${row.entrypoint}, pid ${holder.pid}); close it there, or fork a copy.`);
   }
   try {
     if (holder.kind === 'terminal') (deps.signal ?? ((pid) => process.kill(pid, 'SIGTERM')))(holder.pid);
