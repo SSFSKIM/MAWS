@@ -58,6 +58,15 @@ describe('layout and settings migrate', () => {
     expect(warn.mock.calls.map(([line]) => line)).toEqual(['[layout] regions is not a valid value; using the default', '[layout] panel.gone is not a valid value; using the default']);
     warn.mockRestore();
   });
+
+  it('falls back to the default for a malformed main.tabs (a null pane or tab) and still hydrates', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { store } = await hydrate({ 'main.tabs': { ...LAYOUT_DEFAULTS.main, panes: [{ tabs: [null], activeTabId: 'x' }, null] } });
+    expect(store.getState().hydrated).toBe(true);
+    expect(store.getState().main).toEqual(LAYOUT_DEFAULTS.main);
+    expect(warn.mock.calls.map(([line]) => line)).toEqual(['[layout] main.tabs is not a valid value; using the default']);
+    warn.mockRestore();
+  });
 });
 
 describe('layout store actions', () => {

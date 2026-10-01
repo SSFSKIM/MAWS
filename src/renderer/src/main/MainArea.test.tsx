@@ -190,6 +190,17 @@ describe('tab strip reorders, closes, reopens', () => {
     expect(document.activeElement).toBe(tab('Quota reset recovery · codex_somersault')); // the neighbour that took its place
   });
 
+  // With no neighbour to take the closed tab's place, focus would fall to the page and the pane's chords with it.
+  it('Delete on the only tab leaves focus on the empty pane’s Overview button', async () => {
+    const user = userEvent.setup();
+    render(<Shell />);
+    act(() => useLayout.getState().openSession(idOf('Charter + research')));
+    tab('Charter + research · MAWS').focus();
+    await user.keyboard('{Delete}');
+    expect(tabNames()).toEqual([]);
+    expect(document.activeElement).toBe(within(within(main()).getByRole('tabpanel')).getByRole('button', { name: /^Overview/ }));
+  });
+
   it('the strip’s "+" is disabled with "Not available here" while no session creator is registered', () => {
     render(<Shell />);
     const plus = within(strips()[0].parentElement!).getByRole('button', { name: 'New session' }) as HTMLButtonElement;

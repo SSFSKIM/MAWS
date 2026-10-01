@@ -7,7 +7,7 @@ import { ProjectRecordSchema } from '@shared/ipc/schema/session';
 import { runGit } from '../../../test/support/git-fixture';
 import { summary, tempDir } from '../../../test/support/index-fixture';
 import { Index } from './index';
-import { gitDirs, locate } from './projects';
+import { locate, mainWorktree } from './projects';
 
 describe('projects and the membership rule', () => {
   let dir: ReturnType<typeof tempDir>;
@@ -148,11 +148,22 @@ describe('projects and the membership rule', () => {
       await runGit(path, ['commit', '-q', '-m', 'initial']);
       return path;
     };
-    // The real git call, counted per root.
+    // The real git question, counted per root.
     const counted = () => {
       const roots: string[] = [];
-      return { roots, gitDirsOf: (root: string) => (roots.push(root), gitDirs(root)) };
+      return { roots, mainWorktreeOf: (root: string) => (roots.push(root), mainWorktree(root)) };
     };
+    // A checkout like `checkout`, but whose git dir is `gitDir` (git init --separate-git-dir), with a linked worktree.
+    const separated = async (name: string, gitDir: string) => {
+      const path = repo(name);
+      await runGit(path, ['init', '-q', '-b', 'main', `--separate-git-dir=${gitDir}`]);
+      writeFileSync(join(path, 'README.md'), 'hello\n');
+      await runGit(path, ['add', 'README.md']);
+      await runGit(path, ['commit', '-q', '-m', 'initial']);
+      await runGit(path, ['worktree', 'add', '-q', `../${name}-linked`, '-b', 'feature']);
+      return { path, linked: join(tree.path, `${name}-linked`) };
+    };
+    const unfolded = (directory: string) => ({ realpath: directory, projectDirectory: directory, worktreePath: null });
 
     it('a sibling linked worktree (git worktree add ../sibling) belongs to the main checkout, its root the worktree, from any directory inside it', async () => {
       const main = await checkout('main');
@@ -183,36 +194,62 @@ describe('projects and the membership rule', () => {
       const main = await checkout('main');
       mkdirSync(join(main, 'src'));
       const plain = repo('plain');
-      const { roots, gitDirsOf } = counted();
-      expect(locate(main, gitDirsOf)).toEqual({ realpath: main, projectDirectory: main, worktreePath: null });
-      expect(locate(join(main, 'src'), gitDirsOf)).toEqual({ realpath: join(main, 'src'), projectDirectory: join(main, 'src'), worktreePath: null });
-      expect(locate(plain, gitDirsOf)).toEqual({ realpath: plain, projectDirectory: plain, worktreePath: null });
+      const { roots, mainWorktreeOf } = counted();
+      expect(locate(main, mainWorktreeOf)).toEqual({ realpath: main, projectDirectory: main, worktreePath: null });
+      expect(locate(join(main, 'src'), mainWorktreeOf)).toEqual({ realpath: join(main, 'src'), projectDirectory: join(main, 'src'), worktreePath: null });
+      expect(locate(plain, mainWorktreeOf)).toEqual({ realpath: plain, projectDirectory: plain, worktreePath: null });
       expect(roots).toEqual([]);
     });
 
-    it('a .git file of no linked checkout worktree does not fold: a separate git dir (git dir = common dir), a bare repository\'s worktree', async () => {
+    // Git names a repository's main worktree by its common dir (that dir's parent when it is named `.git`), whatever
+    // the checkout really is; none of these may fold under a directory that is not the checkout.
+    it('a .git file of no linked checkout worktree does not fold: a checkout with a separate git dir, a submodule, a bare repository\'s worktrees', async () => {
       const separate = repo('separate');
       await runGit(separate, ['init', '-q', '-b', 'main', `--separate-git-dir=${join(repo('store'), '.git')}`]);
       const main = await checkout('main');
+      const library = await checkout('library');
+      await runGit(main, ['-c', 'protocol.file.allow=always', 'submodule', 'add', '-q', library, 'sub']);
+      const submodule = join(main, 'sub'); // git lists its main worktree as main/.git/modules/sub
+      // A bare repository, and one named `.git` (git names its parent as the main worktree, marked bare).
       await runGit(tree.path, ['clone', '-q', '--bare', main, 'bare.git']);
       await runGit(join(tree.path, 'bare.git'), ['worktree', 'add', '-q', '../bare-wt', '-b', 'feature']);
-      const bareWorktree = join(tree.path, 'bare-wt');
+      await runGit(tree.path, ['clone', '-q', '--bare', main, 'bare-home/.git']);
+      await runGit(join(tree.path, 'bare-home/.git'), ['worktree', 'add', '-q', '../../bare-home-wt', '-b', 'feature']);
+      const bareWorktrees = [join(tree.path, 'bare-wt'), join(tree.path, 'bare-home-wt')];
 
-      const { roots, gitDirsOf } = counted();
-      expect(locate(separate, gitDirsOf)).toEqual({ realpath: separate, projectDirectory: separate, worktreePath: null });
-      expect(locate(bareWorktree, gitDirsOf)).toEqual({ realpath: bareWorktree, projectDirectory: bareWorktree, worktreePath: null });
-      expect(roots).toEqual([separate, bareWorktree]); // each was a candidate: its `.git` is a file
+      const { roots, mainWorktreeOf } = counted();
+      expect(locate(separate, mainWorktreeOf)).toEqual(unfolded(separate));
+      expect(locate(submodule, mainWorktreeOf)).toEqual(unfolded(submodule));
+      for (const worktree of bareWorktrees) expect(locate(worktree, mainWorktreeOf)).toEqual(unfolded(worktree));
+      expect(roots).toEqual([separate, submodule, ...bareWorktrees]); // each was a candidate: its `.git` is a file
+    });
+
+    // A checkout made with `git init --separate-git-dir` is recorded nowhere in its git dir, so git names the git dir
+    // (or, for one named `.git`, its parent) as the main worktree. Its linked worktrees stay directories of their own:
+    // folding them under that directory would file their sessions there, and the start-up refold would hide the project
+    // they had.
+    it('a linked worktree of a checkout with a separate git dir does not fold under the git dir or its parent', async () => {
+      const named = await separated('named', join(tree.path, 'named.git'));
+      const dotted = await separated('dotted', join(repo('elsewhere'), '.git'));
+      expect(locate(named.linked)).toEqual(unfolded(named.linked));
+      expect(locate(dotted.linked)).toEqual(unfolded(dotted.linked));
+      expect(locate(dotted.path)).toEqual(unfolded(dotted.path));
+
+      const inLinked = index.sessions.upsertFromSummary(summary({ directory: dotted.linked })).record;
+      expect(inLinked.worktree).toBeNull();
+      expect(index.projects.list().map((p) => p.directory)).toEqual([dotted.linked]);
+      expect(index.sessions.refoldLinkedWorktrees()).toBe(0);
     });
 
     it('git runs once per directory: a second locate answers from the cache', async () => {
       const main = await checkout('main');
       await runGit(main, ['worktree', 'add', '-q', '../sibling', '-b', 'feature']);
       const sibling = join(tree.path, 'sibling');
-      const { roots, gitDirsOf } = counted();
-      const first = locate(sibling, gitDirsOf);
+      const { roots, mainWorktreeOf } = counted();
+      const first = locate(sibling, mainWorktreeOf);
       expect(first.projectDirectory).toBe(main);
-      expect(locate(sibling, gitDirsOf)).toEqual(first);
-      expect(locate(join(tree.path, 'sibling/.'), gitDirsOf)).toEqual(first); // the same directory by another spelling
+      expect(locate(sibling, mainWorktreeOf)).toEqual(first);
+      expect(locate(join(tree.path, 'sibling/.'), mainWorktreeOf)).toEqual(first); // the same directory by another spelling
       expect(roots).toEqual([sibling]);
     });
   });

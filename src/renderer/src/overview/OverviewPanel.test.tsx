@@ -114,11 +114,42 @@ describe('the floating Overview', () => {
     expect(useLayout.getState().overviewOpen).toBe(false);
   });
 
+  // Opening changes the layout even when the active tab stays the same (the tab is activated again, or moves pane).
+  it('a card of the session already active closes it, by click or Enter', async () => {
+    const user = userEvent.setup();
+    useLayout.getState().openSession(idOf('Charter + research'));
+    render(<World />);
+    act(() => useLayout.getState().setOverviewOpen(true));
+    await user.click(within(panel()).getByText('Charter + research'));
+    expect(useLayout.getState().overviewOpen).toBe(false);
+    act(() => useLayout.getState().setOverviewOpen(true));
+    within(panel()).getByRole('article', { name: 'Charter + research' }).focus();
+    await user.keyboard('{Enter}');
+    expect(useLayout.getState().overviewOpen).toBe(false);
+    expect(activeTab(useLayout.getState().main)).toMatchObject({ kind: 'session', appSessionId: idOf('Charter + research') });
+  });
+
+  it('a ⌘-click on the active session’s card moves it into the split and closes it', () => {
+    useLayout.getState().openSession(idOf('Settings idle probe'));
+    useLayout.getState().openSession(idOf('Charter + research'));
+    render(<World />);
+    act(() => useLayout.getState().setOverviewOpen(true));
+    fireEvent.click(within(panel()).getByText('Charter + research'), { metaKey: true });
+    expect(useLayout.getState().main.panes.map((p) => p.tabs.map((t) => t.id))).toEqual([[`session:${idOf('Settings idle probe')}`], [`session:${idOf('Charter + research')}`]]);
+    expect(useLayout.getState().overviewOpen).toBe(false);
+  });
+
+  // Where focus is does not matter: a change made elsewhere (a sidebar click, ⌘⇧J, a notification, a background
+  // removal) leaves the panel open even while a card holds focus.
   it('a tab opened from outside while it is open leaves it open', () => {
     render(<World />);
     act(() => useLayout.getState().setOverviewOpen(true));
     screen.getByRole('button', { name: 'Somewhere else' }).focus();
     act(() => useLayout.getState().openSession(idOf('Charter + research')));
+    expect(useLayout.getState().overviewOpen).toBe(true);
+    within(panel()).getAllByRole('article')[0].focus();
+    act(() => useLayout.getState().openSession(idOf('Fix sidebar drag')));
+    act(() => useLayout.getState().dropSession(idOf('Fix sidebar drag')));
     expect(useLayout.getState().overviewOpen).toBe(true);
   });
 

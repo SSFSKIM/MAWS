@@ -97,6 +97,14 @@ describe('layout value shapes', () => {
       expect(StoredMainSchema.safeParse(stored({ panes: [pane, pane, pane] })).success).toBe(false);
       expect(StoredMainSchema.safeParse(stored({ panes: [pane], closedTabs: [{ ...session(2), kind: 'nope' }] })).success).toBe(false);
     });
+
+    // A throw would reject hydration's reads as a whole, so the store would never hydrate (nor persist); a malformed
+    // value must fail validation and fall back to the default like any other invalid value.
+    it('rejects a malformed value without throwing', () => {
+      for (const value of [stored({ panes: [null] }), stored({ panes: [{ tabs: [null], activeTabId: 'x' }] }), stored({ panes: [{ tabs: [null, 'x', 3], activeTabId: 'x' }, 'pane'] }), stored({ panes: 'x' }), null]) {
+        expect(StoredMainSchema.safeParse(value).success, JSON.stringify(value)).toBe(false);
+      }
+    });
   });
 
   it('owns get, set, list, openExternal and setEnabledActions in main', () => {

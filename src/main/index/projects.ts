@@ -40,29 +40,60 @@ export interface Location {
 }
 
 const WORKTREE = /^(.+)\/\.claude\/worktrees\/([^/]+)(?:\/.*)?$/;
-const REV_PARSE_TIMEOUT_MS = 2_000;
+const GIT_TIMEOUT_MS = 2_000;
 
-// A repository's git dir and common dir, absolute, as `git rev-parse` names them.
-export interface GitDirs {
-  gitDir: string;
-  commonDir: string;
-}
-
-// The git dirs of the repository at `root`, or null when git cannot say (not a repository, git missing, timed out). The
-// git service's binary and environment, run synchronously: discovery locates inside its database transactions.
-export function gitDirs(root: string): GitDirs | null {
+// One git call with the git service's binary and environment, run synchronously (discovery locates inside its database
+// transactions); null when git cannot answer (not a repository, git missing, timed out).
+function gitOutput(directory: string, args: string[]): string | null {
   try {
-    const out = execFileSync(gitBinary(process.env), ['-C', root, 'rev-parse', '--path-format=absolute', '--git-dir', '--git-common-dir'], {
+    return execFileSync(gitBinary(process.env), ['-C', directory, ...args], {
       env: gitEnv(process.env),
       encoding: 'utf8',
-      timeout: REV_PARSE_TIMEOUT_MS,
+      timeout: GIT_TIMEOUT_MS,
       stdio: ['ignore', 'pipe', 'ignore'],
     });
-    const [gitDir, commonDir] = out.split('\n');
-    return gitDir && commonDir ? { gitDir, commonDir } : null;
   } catch {
     return null;
   }
+}
+
+const canonical = (path: string) => realpathSync.native(path).normalize('NFC');
+const exists = (path: string) => lstatSync(path, { throwIfNoEntry: false }) !== undefined;
+
+// The main checkout of the linked worktree whose root is `root`, or null when `root` is no linked worktree of one. Git
+// lists the main worktree first, but it derives that path from the common dir (the common dir's parent when it is named
+// `.git`, else the common dir itself), so the answer is checked rather than taken. `root` must be one of the linked
+// entries: a submodule or a checkout with a separate git dir is the main worktree of its own repository, which git then
+// names after the git dir. The repository must not be bare. And the directory git names must hold a `.git` and the work
+// tree, at least one top-level entry of its HEAD: a separate git dir named `.git` makes git name that dir's parent, which
+// holds nothing of the work tree, and the real checkout is recorded nowhere git can read, so such a worktree stays a
+// directory of its own rather than folding under the wrong one.
+export function mainWorktree(root: string): string | null {
+  const listed = gitOutput(root, ['worktree', 'list', '--porcelain', '-z']);
+  if (listed === null) return null;
+  const entries: { path: string; bare: boolean }[] = [];
+  for (const line of listed.split('\0')) {
+    if (line.startsWith('worktree ')) entries.push({ path: line.slice('worktree '.length), bare: false });
+    else if (line === 'bare' && entries.length > 0) entries[entries.length - 1].bare = true;
+  }
+  const isRoot = (path: string) => {
+    try {
+      return canonical(path) === root;
+    } catch {
+      return false; // a linked worktree whose directory is gone
+    }
+  };
+  const [first, ...linked] = entries;
+  if (first === undefined || first.bare || !linked.some((entry) => isRoot(entry.path))) return null;
+  let main: string;
+  try {
+    main = canonical(first.path);
+  } catch {
+    return null; // a main checkout that is gone
+  }
+  if (!exists(join(main, '.git'))) return null;
+  const names = gitOutput(main, ['ls-tree', '-z', '--name-only', 'HEAD'])?.split('\0') ?? [];
+  return names.some((name) => name !== '' && exists(join(main, name))) ? main : null;
 }
 
 // Each directory's linked-worktree answer for the life of the process (null: not inside one). Discovery locates once per
@@ -70,12 +101,13 @@ export function gitDirs(root: string): GitDirs | null {
 // failure is remembered too, so a git that hangs costs its timeout once rather than on every summary.
 const linkedWorktrees = new Map<string, { main: string; root: string } | null>();
 
-// `gitDirsOf` is the seam a test counts git calls through; whichever call filled the cache, its answers are the cache's.
-export function locate(directory: string | null, gitDirsOf: (root: string) => GitDirs | null = gitDirs): Location {
+// `mainWorktreeOf` is the seam a test counts git calls through; whichever call filled the cache, its answers are the
+// cache's.
+export function locate(directory: string | null, mainWorktreeOf: (root: string) => string | null = mainWorktree): Location {
   if (directory === null || directory === '') return { realpath: null, projectDirectory: null, worktreePath: null };
   let realpath: string;
   try {
-    realpath = realpathSync.native(directory).normalize('NFC');
+    realpath = canonical(directory);
   } catch {
     return { realpath: null, projectDirectory: null, worktreePath: null };
   }
@@ -83,38 +115,36 @@ export function locate(directory: string | null, gitDirsOf: (root: string) => Gi
   if (worktree) {
     // A managed worktree made inside a linked worktree (the engine makes them under whichever checkout it runs in)
     // belongs to the main checkout too, or it would bring the linked worktree back as a project of its own.
-    const projectDirectory = linkedWorktree(worktree[1], gitDirsOf)?.main ?? worktree[1];
+    const projectDirectory = linkedWorktree(worktree[1], mainWorktreeOf)?.main ?? worktree[1];
     return { realpath, projectDirectory, worktreePath: `${worktree[1]}/.claude/worktrees/${worktree[2]}` };
   }
-  const linked = linkedWorktree(realpath, gitDirsOf);
+  const linked = linkedWorktree(realpath, mainWorktreeOf);
   if (linked) return { realpath, projectDirectory: linked.main, worktreePath: linked.root };
   return { realpath, projectDirectory: realpath, worktreePath: null };
 }
 
-function linkedWorktree(directory: string, gitDirsOf: (root: string) => GitDirs | null): { main: string; root: string } | null {
+function linkedWorktree(directory: string, mainWorktreeOf: (root: string) => string | null): { main: string; root: string } | null {
   let answer = linkedWorktrees.get(directory);
-  if (answer === undefined) linkedWorktrees.set(directory, (answer = findLinkedWorktree(directory, gitDirsOf)));
+  if (answer === undefined) linkedWorktrees.set(directory, (answer = findLinkedWorktree(directory, mainWorktreeOf)));
   return answer;
 }
 
 // The nearest `.git` decides, as it does for git itself: a directory is a main checkout's, which folds nowhere and needs
 // no git call; a file is a linked worktree's or a submodule's (or a checkout's with a separate git dir), which only git
-// tells apart. A linked worktree's git dir is its own, under the common dir, and it folds only when that common dir is a
-// checkout's `.git` (a bare repository's or a submodule's worktrees have no checkout to fold under).
-function findLinkedWorktree(directory: string, gitDirsOf: (root: string) => GitDirs | null): { main: string; root: string } | null {
+// tells apart (`mainWorktree`).
+function findLinkedWorktree(directory: string, mainWorktreeOf: (root: string) => string | null): { main: string; root: string } | null {
   try {
     for (let root = directory; ; root = dirname(root)) {
       const entry = lstatSync(join(root, '.git'), { throwIfNoEntry: false });
       if (entry !== undefined) {
         if (!entry.isFile()) return null;
-        const dirs = gitDirsOf(root);
-        if (dirs === null || dirs.gitDir === dirs.commonDir || basename(dirs.commonDir) !== '.git') return null;
-        return { main: realpathSync.native(dirname(dirs.commonDir)).normalize('NFC'), root };
+        const main = mainWorktreeOf(root);
+        return main === null ? null : { main, root };
       }
       if (dirname(root) === root) return null;
     }
   } catch {
-    return null; // an ancestor that cannot be read, or a main checkout that is gone: no fold
+    return null; // an ancestor that cannot be read: no fold
   }
 }
 

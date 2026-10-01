@@ -79,20 +79,25 @@ export const LayoutMainSchema = z.strictObject({ version: z.literal(1),         
   closedTabs: z.array(TabRefSchema).max(10) });                                                                    // ⌘⇧T history, newest last
 export type LayoutMain = z.infer<typeof LayoutMainSchema>;
 // What hydration reads from `main.tabs`: the Overview's tab, which every layout before W5 held, is dropped from the panes
-// and the closed-tab history (a pane it leaves empty goes; a pane whose active tab it was activates its first tab).
-const isOverviewRef = (tab: unknown) => typeof tab === 'object' && tab !== null && (tab as { kind?: unknown }).kind === 'overview';
+// and the closed-tab history (a pane it leaves empty goes; a pane whose active tab it was activates its first tab). The
+// rewrite is total: a pane or tab that is not an object passes through untouched for the schema to reject, because a
+// throw here would fail hydration's reads as a whole instead of falling back to the default.
+type Entries = { tabs: unknown[]; activeTabId?: unknown };
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
+const isOverviewRef = (tab: unknown) => isRecord(tab) && tab.kind === 'overview';
+const hasTabs = (pane: unknown): pane is Entries => isRecord(pane) && Array.isArray(pane.tabs);
+const idOf = (tab: unknown) => (isRecord(tab) ? tab.id : undefined);
 export const StoredMainSchema = z.preprocess((value) => {
-  if (typeof value !== 'object' || value === null || !Array.isArray((value as { panes?: unknown }).panes)) return value;
-  const main = value as { panes: { tabs?: unknown; activeTabId?: unknown }[]; closedTabs?: unknown; focusedPane?: unknown };
-  const panes = main.panes.map((pane) => {
-    if (typeof pane !== 'object' || pane === null || !Array.isArray(pane.tabs)) return pane;
-    const tabs = (pane.tabs as unknown[]).filter((t) => !isOverviewRef(t));
-    const active = tabs.some((t) => (t as { id?: unknown }).id === pane.activeTabId) ? pane.activeTabId : ((tabs[0] as { id?: string } | undefined)?.id ?? '');
+  if (!isRecord(value) || !Array.isArray(value.panes)) return value;
+  const panes = (value.panes as unknown[]).map((pane) => {
+    if (!hasTabs(pane)) return pane;
+    const tabs = pane.tabs.filter((t) => !isOverviewRef(t));
+    const active = tabs.some((t) => idOf(t) === pane.activeTabId) ? pane.activeTabId : (idOf(tabs[0]) ?? '');
     return { ...pane, tabs, activeTabId: active };
   });
-  const kept = panes.filter((pane) => !Array.isArray((pane as { tabs?: unknown }).tabs) || (pane as { tabs: unknown[] }).tabs.length > 0);
-  const closedTabs = Array.isArray(main.closedTabs) ? main.closedTabs.filter((t) => !isOverviewRef(t)) : main.closedTabs;
-  return { ...main, panes: kept.length > 0 ? kept : [{ tabs: [], activeTabId: '' }], focusedPane: kept.length < panes.length ? 0 : main.focusedPane, closedTabs };
+  const kept = panes.filter((pane) => !hasTabs(pane) || pane.tabs.length > 0);
+  const closedTabs = Array.isArray(value.closedTabs) ? (value.closedTabs as unknown[]).filter((t) => !isOverviewRef(t)) : value.closedTabs;
+  return { ...value, panes: kept.length > 0 ? kept : [{ tabs: [], activeTabId: '' }], focusedPane: kept.length < panes.length ? 0 : value.focusedPane, closedTabs };
 }, LayoutMainSchema);
 export const PanelPinnedSchema = z.array(PanelTabRefSchema);                                                      // key `panel.pinned`: the global pins (D-10)
 export const PanelSessionStateSchema = z.strictObject({ tabs: z.array(PanelTabRefSchema), activeTabId: z.string().nullable() });   // key `panel.<appSessionId>`

@@ -4,13 +4,13 @@
 // header and resized from its corner, kept inside the main area, and its rect persists in `regions.overview`. The
 // session behind it stays mounted and live. Opening moves focus to the panel itself, not to a card: a focused card
 // answers its request with Enter and declines it with Esc, and Esc must first mean "close" (ArrowDown or Tab then
-// reach the cards). Closing returns focus where it was; a session opened from inside the panel (a card, its request's
-// Open session) closes it and leaves focus with the session's pane. The board inside is the Overview unchanged.
+// reach the cards). Closing returns focus where it was; a layout change made from inside the panel (a card opening its
+// session or moving it into the split, its request's Open session) closes it and leaves focus with the focused pane.
+// The board inside is the Overview unchanged.
 import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from 'react';
 import type { OverviewRect } from '@shared/ipc/schema/layout';
 import { focusPaneElement } from '../main/pane-dom';
 import { useLayout } from '../stores/layout';
-import { activeTab } from '../stores/layout-model';
 import { Overview } from './Overview';
 
 const MIN = { width: 360, height: 240 };
@@ -90,12 +90,25 @@ function OverviewPanel({ bounds }: { bounds: { width: number; height: number } }
     };
   }, []);
 
-  // A session opened while focus is inside the panel (a card's click or Enter, its request's Open session) closes it.
+  // Whether a click or a key inside the panel is being dispatched. The panel's capture handlers set it and the next task
+  // clears it: React runs the card's own bubble-phase handler from a separate native listener, and a microtask reset
+  // would clear it before then. Where focus is cannot tell this: a background change can come while a card holds it.
+  const acting = useRef(false);
+  const markAction = () => {
+    acting.current = true;
+    setTimeout(() => {
+      acting.current = false;
+    }, 0);
+  };
+
+  // Any layout change an action inside the panel causes closes it and hands focus to the focused pane: a card's click or
+  // Enter, a ⌘-click or ⌘Enter into the split, its request's Open session, the session already active included (that
+  // reactivates or moves a tab without changing which one is active). A change caused elsewhere (a sidebar click, ⌘⇧J,
+  // a notification, a background removal) leaves it open.
   useEffect(
     () =>
       useLayout.subscribe((state, previous) => {
-        if (!state.overviewOpen || activeTab(state.main)?.id === activeTab(previous.main)?.id) return;
-        if (!panel.current?.contains(document.activeElement)) return;
+        if (!acting.current || !state.overviewOpen || state.main === previous.main) return;
         restoreFocus.current = false;
         state.setOverviewOpen(false);
         requestAnimationFrame(() => focusPaneElement(useLayout.getState().main.focusedPane));
@@ -136,6 +149,8 @@ function OverviewPanel({ bounds }: { bounds: { width: number; height: number } }
       aria-label="Overview"
       data-overview-panel
       tabIndex={-1}
+      onClickCapture={markAction}
+      onKeyDownCapture={markAction}
       onKeyDown={(event) => {
         // From the panel itself, ArrowDown enters the board at its tab stop.
         if (event.key === 'ArrowDown' && event.target === event.currentTarget) {
