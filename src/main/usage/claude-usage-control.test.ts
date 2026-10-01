@@ -6,8 +6,8 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AddressInfo } from 'node:net';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { ClaudeUsageControl, parseState, TOKEN_FILE } from './claude-usage-control';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { baseUrlFrom, ClaudeUsageControl, parseState, TOKEN_FILE } from './claude-usage-control';
 
 const TOKEN = 'c0ffee-token';
 const ROUTED = '477e393c-5c1a-4413-a3e6-7f5d1ed72cc3';
@@ -119,6 +119,31 @@ describe('settings.usageControls', () => {
     const answer = await client({ port: async () => null, baseUrl: `http://127.0.0.1:${port}/` }).controls();
     expect(answer.available).toBe(true);
     expect(seen.map((s) => s.path)).toEqual(['/claudeusage/state']);
+  });
+
+  it('takes the base URL from MAWS_CLAUDE_USAGE_CONTROL_URL under the end-to-end harness only', () => {
+    const url = 'http://127.0.0.1:8650';
+    expect(baseUrlFrom({ MAWS_CLAUDE_USAGE_CONTROL_URL: url })).toBeNull();
+    expect(baseUrlFrom({ MAWS_E2E: 'true', MAWS_CLAUDE_USAGE_CONTROL_URL: url })).toBeNull();
+    expect(baseUrlFrom({ MAWS_E2E: '1', MAWS_CLAUDE_USAGE_CONTROL_URL: url })).toBe(url);
+    expect(baseUrlFrom({ MAWS_E2E: '1', MAWS_CLAUDE_USAGE_CONTROL_URL: '' })).toBeNull();
+    expect(baseUrlFrom({ MAWS_E2E: '1' })).toBeNull();
+  });
+
+  it('sends the token only over plain http to a loopback host: any other base URL is no_route and nothing is sent', async () => {
+    const fetched = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('not sent in a test'));
+    try {
+      const refused = ['https://127.0.0.1:8650', 'http://example.test:8650', 'http://127.0.0.1.example.test:8650', 'http://localhost@example.test:8650', 'http://10.0.0.1:8650', 'http://[::2]:8650', 'file:///tmp/control', 'ws://127.0.0.1:8650', 'not a url'];
+      for (const baseUrl of refused) {
+        expect(await client({ baseUrl }).controls()).toEqual({ available: false, reason: 'no_route', state: null });
+        expect(await client({ baseUrl }).act({ action: 'route', uuid: ROUTED })).toMatchObject({ ok: false, reason: 'no_route' });
+      }
+      expect(fetched).not.toHaveBeenCalled();
+      for (const baseUrl of ['http://127.0.0.1:8650/', 'http://localhost:8650', 'http://[::1]:8650/relay/']) await client({ baseUrl }).controls();
+      expect(fetched.mock.calls.map(([url]) => String(url))).toEqual(['http://127.0.0.1:8650/claudeusage/state', 'http://localhost:8650/claudeusage/state', 'http://[::1]:8650/relay/claudeusage/state']);
+    } finally {
+      fetched.mockRestore();
+    }
   });
 
   it('reads the token on every use', async () => {

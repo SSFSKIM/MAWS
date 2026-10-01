@@ -6,7 +6,9 @@
 // Every way of not reaching ClaudeUsage answers a reason instead of throwing: no token, no port, a 404 or a refused
 // connection is `no_route`; a 401 or an unreadable token `bad_token`; no answer in time `timeout`; a 503 (the relay is up,
 // ClaudeUsage's app is not wired to it yet) `starting`; anything else (a 400, a 405, a 5xx, an answer that is not the
-// state) `failed`. `MAWS_CLAUDE_USAGE_CONTROL_URL` (tests only, through `baseUrl`) replaces `http://127.0.0.1:<port>`.
+// state) `failed`. `MAWS_CLAUDE_USAGE_CONTROL_URL` (the end-to-end harness's stub, through `baseUrl`; honoured only under
+// MAWS_E2E=1) replaces `http://127.0.0.1:<port>`. The token only ever goes over plain http to a loopback host: a base
+// URL that is anything else is `no_route`, and nothing is sent.
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { UsageAction, UsageActionResult, UsageControlReason, UsageControlsAnswer, UsageControlState } from '@shared/ipc/schema';
@@ -18,7 +20,7 @@ export const ACTION_TIMEOUT_MS = 5_000; // an action may persist before it answe
 export interface ClaudeUsageControlOptions {
   dir: string; // ClaudeUsage's data directory (C7's `claudeUsageDir`)
   port: () => Promise<number | null>; // gateway.json's port, null when the file or the field is absent
-  baseUrl?: string | null; // MAWS_CLAUDE_USAGE_CONTROL_URL
+  baseUrl?: string | null; // MAWS_CLAUDE_USAGE_CONTROL_URL, through `baseUrlFrom`
   stateTimeoutMs?: number;
   actionTimeoutMs?: number;
   log?: (message: string) => void;
@@ -34,6 +36,13 @@ const MESSAGES: Record<UsageControlReason, string> = {
   starting: 'ClaudeUsage is still starting',
   failed: "ClaudeUsage's control route failed",
 };
+
+// The base URL override: the end-to-end harness's stub, and nothing outside it, since it would carry the owner's token.
+export function baseUrlFrom(env: NodeJS.ProcessEnv): string | null {
+  return env.MAWS_E2E === '1' ? env.MAWS_CLAUDE_USAGE_CONTROL_URL || null : null;
+}
+
+const LOOPBACK = new Set(['127.0.0.1', 'localhost', '[::1]']);
 
 export class ClaudeUsageControl {
   private checking: Promise<UsageControlsAnswer> | null = null;
@@ -116,7 +125,14 @@ export class ClaudeUsageControl {
   }
 
   private async base(): Promise<string | null> {
-    if (this.opts.baseUrl) return this.opts.baseUrl.replace(/\/+$/, '');
+    if (this.opts.baseUrl) {
+      const url = URL.parse(this.opts.baseUrl);
+      if (url?.protocol !== 'http:' || !LOOPBACK.has(url.hostname)) {
+        this.log('MAWS_CLAUDE_USAGE_CONTROL_URL is not plain http to a loopback host; nothing is sent');
+        return null;
+      }
+      return `${url.origin}${url.pathname.replace(/\/+$/, '')}`;
+    }
     const port = await this.opts.port();
     return port !== null && Number.isInteger(port) && port > 0 && port < 65536 ? `http://127.0.0.1:${port}` : null;
   }
