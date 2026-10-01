@@ -40,7 +40,9 @@ export function UserRow({ row }: { row: UserRowData }) {
   const files = row.attachments.filter((a) => a.kind !== 'text');
   const caption = row.pending ? PENDING_CAPTION[row.pending] : row.steer ? STEERED_CAPTION : null;
 
-  // Measured while folded only: an open bubble has no bound, and Show less must stay until it is folded again.
+  // Measured while folded only: an open bubble has no bound. Open stays in the transcript-wide disclosures while the
+  // measurement is this mount's, so an open bubble always offers Show less (a virtualiser remount resets the
+  // measurement), and folding measures again.
   useLayoutEffect(() => {
     const element = content.current;
     if (!element || open) return;
@@ -80,7 +82,7 @@ export function UserRow({ row }: { row: UserRowData }) {
               )}
             </div>
           </div>
-          {overflows && (
+          {(open || overflows) && (
             <button type="button" className="transcript-quiet-button" aria-expanded={open} onClick={toggle}>
               {open ? 'Show less' : 'Show more'}
             </button>

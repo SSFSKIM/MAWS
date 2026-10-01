@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { applyEvents, createState } from '../../model/reduce';
 import { rowsOf } from '../../model/derive';
 import { builder, uuid } from '../../model/test-events';
+import { Disclosures } from '../context';
 import { renderRow, rowOf } from './test-support';
 
 afterEach(cleanup);
@@ -63,6 +64,23 @@ describe('user row', () => {
     expect(screen.getByRole('button', { name: 'Show less' }).getAttribute('aria-expanded')).toBe('true');
     fireEvent.click(screen.getByRole('button', { name: 'Show less' }));
     expect(bubble.hasAttribute('data-collapsed')).toBe(true);
+  });
+
+  // The open state lives in the transcript's disclosures and outlives the row; the measurement is the mount's own. A
+  // bubble the virtualiser unmounts while open and mounts again keeps its Show less, and folding measures again.
+  it('an open bubble remounted over the same disclosures still offers Show less, and folding it measures again', () => {
+    renderedBubbleHeight(900);
+    const row = userRow('one paragraph that wraps over many lines '.repeat(60));
+    const disclosures = new Disclosures();
+    renderRow(row, { disclosures });
+    fireEvent.click(screen.getByRole('button', { name: 'Show more' }));
+    cleanup();
+    const { container } = renderRow(row, { disclosures });
+    const bubble = container.querySelector('[data-bubble]')!;
+    expect(bubble.hasAttribute('data-open')).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Show less' }));
+    expect(bubble.hasAttribute('data-collapsed')).toBe(true);
+    expect(screen.getByRole('button', { name: 'Show more' }).getAttribute('aria-expanded')).toBe('false');
   });
 
   it('thirty short lines that render within the fold offer no Show more', () => {
