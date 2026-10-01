@@ -1,39 +1,54 @@
 P0 recomposition checklist against charter §10
 ===============================================
 
-C12 of docs/charter.md (docs/doperpowers/plans/2026-09-29-c12-finish.md, M6). The architect completes the Verdict column
-from the evidence pack (prerun.txt, prerun-run.json, prerun-realstore.json, budget-run.json, custody-run.json, the
-screenshots) and owner-results.txt. Verdicts: met, met as restated, gap, waived by the owner. "Pre-run" gives the
-pre-run's own verdict (pass, owner, both) and where its evidence is; paths are under docs/doperpowers/evidence/c12/.
+C12 of docs/charter.md (docs/doperpowers/plans/2026-09-29-c12-finish.md, M6).
+Architect checkpoint: 2026-09-30, after the delegated native GUI sitting. This is NOT a parent closure.
+Evidence: the original prerun.txt and JSON/screenshots, prerun-master.txt and prerun-master-run.json,
+budget-run.json, custody-run.json, and owner-results.txt. Paths below are relative to this directory unless stated.
+Verdicts: met, met as restated, gap, waived by the owner. No remaining item has been silently waived.
 
-| # | Item | Pre-run evidence | Owner step | Verdict | Notes |
+The owner confirmed steps 1, 2, 3 and 6 in chat and delegated the other steps to cua_repl. Native live cases
+used scratch config/profile/repositories; the owner's original long transcript was viewed read-only. The
+original packaged build was ad hoc signed, and its precise source commit was not embedded. The Select All
+retest used an isolated packaged build of ffdfcdb9. The owner's running app was not replaced.
+
+| # | Item | Evidence | Owner step | Verdict | Notes |
 |---|---|---|---|---|---|
-| 1 | §10.1 Overview, foreign-live | both: prerun.txt §10.1; prerun-run.json "10.1"; prerun-10.1-overview-*.png; real store read only: prerun-realstore.json (275 projects, 3,274 sessions, 13 foreign-live; first card 57.9 s cold, 2.4 s warm; engine.sessions [] at the end) | 1 | | cold first open about a minute on the owner's store |
-| 2 | §10.2 new worktree, trust, settings load | both: prerun.txt §10.2; "10.2" and "10.2.run1"; prerun-10.2-trust-card-*.png, prerun-10.2-session-*.png (MCP, 50 commands, agents, plugins identical to a terminal run in the worktree) | 2 | | the terminal half needs the owner's login-shell CLAUDE_* switches to compare |
-| 3 | §10.3 Overview approvals, notification, ⌘⇧J | both: prerun.txt §10.3; "10.3"; prerun-10.3-*.png (fallback notification; the attention.next menu item clicked through Electron's API) | 3 | | native delivery and the key are the owner's |
-| 4 | §10.4 deep session | both: prerun.txt §10.4; "10.4"; prerun-10.4-*.png (relay, Review, Terminal in the worktree, viewer, workflow, G3, Session info) | 4 | | relay reached delivered live (see C8-R) |
-| 5 | §10.5 resume both ways | both: prerun.txt §10.5; "10.5"; prerun-10.5-resumed-in-maws-*.png | 5 | | version skew: the owner's terminal is 2.1.285, the pin 2.1.283 |
-| 6 | §10.6 as restated (budget, release, resume, quit) | both: budget-run.json (M3, nine trees); prerun.txt §10.6; "10.6"; prerun-10.6-*.png (release 0.39 s, Send-to-ready 0.92 s, the three-part quit question, cancel, quit when idle quitting 41.9 s later) | B5, 6, 12 | | the measured figures for §10 item 6 are M3's (Proposed charter lines) |
-| 7 | §10.7 500 turns anchored, streaming | both: prerun.txt §10.7; "10.7" (0 px drift at the expanded turn and above; 0 px while 1,346 px streamed below); prerun-10.7-*.png; the owner's three longest transcripts listed in owner-script.txt step 7 | 7 | | |
-| 8 | §10.8 widgets, `!`, `#` | both: prerun.txt §10.8; "10.8" (twelve widgets, each read on the wire); prerun-10.8-*.png | 8 | | |
-| 9 | §10.9 queue, steer, stop, resume, survives exit, denial, lost | both: prerun.txt §10.9; "10.9"; prerun-10.9-*.png | 9, 12 | | on 2.1.283 ⌘. cancels a pending approval (nothing lost); "1 approval lost" shows for a process that dies with it pending: a restatement candidate |
-| 10 | §10.10 themes | both: prerun.txt §10.10; "10.10"; every prerun-*-{light,dark}.png; tokens-guard 4/4 | 10 | | |
-| D9 | Launch environment mirrors the terminal | M5 probe: spikes/protocol-probe/fixtures/pass3/launch-env-{terminal,fork,unset,todo,state-events,state-events-unset}.jsonl; the X6 lines under the document's Proposed charter lines | 13 | | scratch-home gates against the owner's account |
-| C8-1 | C11's Session info in the panel | pass: prerun.txt "C8's four gaps" 1; "10.4".sessionInfo; prerun-10.4-session-info-*.png | 4 | | |
-| C8-9 | Attach activates its session (restated) | pass: prerun.txt "C8's four gaps" 2; "c8.attach"; prerun-c8-attach-*.png | 14 | | a `claude --bg` job runs on the installed 2.1.285 daemon, not the pin |
-| C8-G3 | This branch in a worktree | pass: "10.4".review.thisBranch; prerun-10.4-review-this-branch-*.png | 14 (the disabled half on master) | | |
-| C8-S | C8's one sitting | owner; the monitor prompt ran in the review re-run and the engine offered no Monitor tool (gate off on the scratch account): prerun-review-run.json "10.4".monitor | 4, 10, 14 | | a monitor may be unavailable on the owner's account too |
-| C8-R | Relay reaching `delivered` for a live child | pass: asserted since the review (delivered, or forwarded with the attachment and the follow); the review re-run saw delivered at 4.7 s (prerun-review-run.json); "10.4".relay: forwarded at 4.3 s, cleared (delivered) at 6.1 s with the child still running; the child's disk transcript holds the queued_command attachment (origin coordinator); fs.followState backfilling → following at the forward; the child's inbox had the text at 10.5 s | 4 | | first live observation of wave 4A's follow; unit-pinned only until now |
-| W4 | Debt wave 4 on master (honest ctx, the title rule, the reasons) | merge commits 2cf00f58, 2b306e66, a5ae05c2, a37d35f1 (the C12 pre-flight) | — | | |
-| S | Scale review of the integrated app (§19 2026-09-28) | — | — | | the architect's |
-| T | Tracker rows closed or narrowed | the document's Tracker rows, with their commits | — | | |
-| §17/§20 | Tracking row closed, retrospective written | — | — | | the architect's |
+| 1 | §10.1 Overview, foreign-live | prerun-master.txt:51-52; owner-results.txt | 1 | met | Owner confirmed. Real-store pre-run: 276 projects, 3,279 sessions, 14 foreign-live; first card 3.5 s cold, 1.4 s warm. No new owner timing supplied. |
+| 2 | §10.2 new worktree, trust, settings load | prerun.txt §10.2; prerun-master.txt:53; owner-results.txt | 2 | met | Owner confirmed actual configuration comparison. Scratch GUI also observed trust naming its scratch config file. |
+| 3 | §10.3 Overview approvals, notification, ⌘⇧J | prerun.txt §10.3; owner-results.txt | 3 | met | Owner confirmed the step. The architect's unsigned bundle is not independent evidence of native notification delivery. |
+| 4 | §10.4 deep session | original and master pre-runs; owner-results.txt step 4 | 4 | met | Native child relay cleared to delivered; exact inbox marker independently checked; parent SendMessage row, Review, Terminal cwd, file viewer and two-agent workflow observed. |
+| 5 | §10.5 resume both ways | pre-runs; owner-results.txt step 5 | 5 | met | Native 2.1.283 → installed 2.1.286 → 2.1.283 round trip recalled the intervening history. Scratch transcripts only; no silent launch observed. |
+| 6 | §10.6 budget, release, resume, quit | budget-run.json; prerun-master.txt:57; owner-results.txt steps 6 and 12 | B5, 6, 12 | met as restated | Owner confirmed budget/release/resume. Native three-category quit, deferred-quit banner, cancel and quit passed; queue remained after reopen. Background and mid-turn work were put in separate sessions because C12 counts each session once. B5 policy was left unchanged. |
+| 7 | §10.7 long transcript anchoring and streaming | pre-runs; owner-results.txt step 7 | 7 | met | Native read of original 809406bb-43f0-4d12-a0eb-4f20d6cc4941, id checked in Session info; old-work expansion held its heading. Scratch long-answer stream did not pull the reader down. |
+| 8 | §10.8 widgets, shell prefix, memory, keyboard | pre-runs; owner-results.txt step 8 | 8 | met | All twelve widgets opened; context resolved; ten original denies present. Shell-prefix git status succeeded, project-only note saved in scratch. Rebind/invoke/reset verified; Cmd+W/K/1 captured as conflicts instead of executing. |
+| 9 | §10.9 queue, steer, stop, resume, persistence, denial and lost approvals | prerun-master.txt:60; owner-results.txt steps 9 and 12 | 9, 12 | met as restated | Native queue/stop/resume and paused persistence passed; denial created no file; interrupt retired pending approval. Crash-only approval-loss case remains supported by pre-run evidence, not re-run natively. |
+| 10 | §10.10 theme switching | prerun-master.txt:61; owner-results.txt step 10 | 10 | met | Light → Dark → Light observed. Full taste/reference comparison is a separate unresolved sitting item below, not implied by theme switching. |
+| D9 | Launch environment mirrors terminal | M5 pass-3 launch-env fixtures; charter X6; owner-results.txt step 13 | 13 | met | Pinned interactive terminal on Sonnet dispatched a background child and produced a textual two-item task list; no TaskCreate/TodoWrite observed. This supplements, not replaces, M5's controlled model/flag probe. |
+| C8-1 | Session info in panel | pre-runs; owner-results.txt steps 4 and 5 | 4 | met | Native session id and engine pin observed. |
+| C8-9 | Attach activates its session | pre-runs; owner-results.txt step 14 | 14 | met as restated | Native menu from another session had Open/Attach only; Attach selected the purpose-made job and opened its terminal. Job ran installed 2.1.286; scratch job stopped and agents --json returned []. |
+| C8-G3 | This branch worktree and disabled-main cases | pre-run review.thisBranch; owner-results.txt steps 4 and 14 | 14 | met | Live worktree diff from pre-run; native main-branch disabled explanation observed. |
+| C8-R | Live child relay reaches delivered | pre-run relay fixtures; owner-results.txt step 4 | 4 | met | Native Asked state then cleared/re-enabled; child inbox contained marker. Intermediate forwarded label was not sampled in this pass; earlier live pre-run records it. |
+| C8-upstream | Open on GitHub and push state against upstream | owner-results.txt step 14 | 11, 14 | met | Fresh public octocat/Hello-World checkout showed up-to-date origin/master and opened its actual branch URL in Chrome. No push or remote mutation. |
+| C8-monitor | Monitor row where engine supports it | pre-runs; owner-results.txt steps 4 and 14 | 14 | met as restated | ToolSearch reported Monitor unavailable on the pin. No gate or deny rule was changed to force availability. |
+| C8-S | Complete panel/reference taste sitting | owner-results.txt steps 10 and 14 | 10, 14 | gap | Themes inspected on session/Files, not every panel against reference apps. CUA denied Codex access; Claude Desktop composer blocked by account state; ClaudeUsage menu-bar panel not accessible. Owner's independent feedback still being collected. |
+| C9-hands | Native terminal selection, IME, modifier-click | owner-results.txt step 11 | 11 | gap | Native menu bug fixed ffdfcdb9 and re-tested successfully, including text-field fallback and terminal Cmd+A. Actual Korean composition not generated by CUA; its exposed API cannot perform modifier-click. Optional sleep/wake skipped during owner's concurrent work. |
+| W4 | Debt wave 4 integrated | charter §19 and merge commits 2cf00f58, 2b306e66, a5ae05c2, a37d35f1 | — | met | Subsequent waves and sitting evidence supersede older residue, without changing the accepted contracts silently. |
+| S | Scale review of integrated app | charter §19 verification call | — | gap | Not dispatched as a closure review while owner feedback and hands verification remain open. Per-fix reviews do not substitute for it. |
+| T | Tracker rows closed or narrowed | docs/tech-debt-tracker.md | — | gap | Cold-paint row closed from real-store pre-run. Native Select All correction integrated on sitting branch; test-isolation/monitor-ordering branch awaiting final shared-launcher gates and merge. Other deferred/watch/owner-ruling rows retain explicit closure criteria. |
+| §17/§20 | Final tracking and retrospective | docs/charter.md | — | gap | Parent remains open. No retrospective claiming completion has been written. |
 
-Open observations from the pre-run for the architect (details in prerun.txt and the M6 executor report):
-- A MAWS resume sat at the engine's `initialize` with no answer for 120 s in two of five launches (no frame in; a
-  standalone reproduction answered in under 0.6 s every time). The host has no initialize timeout, so the owner would see
-  a resume that never becomes ready.
-- §10.9's "interrupted session raises N approvals lost": on 2.1.283 an interrupt and a quit both cancel the pending
-  approval; only a crash loses one.
-- `claude --bg` from the pinned binary runs its job on the installed 2.1.285 daemon.
-- The owner's first open over the real store takes about a minute to the first Overview card (cold index).
+Corrections to the original pre-run observations
+-----------------------------------------------
+- The old statement that the host had no initialize timeout was incorrect: initialize had a 120 s long-class bound.
+  C3's corrective now adds a 30 s first-output bound and one visible no-output relaunch. The early-boot stall's cause
+  remains a watch item, not declared solved by quiet successful resumes.
+- §10.9 was already restated at C12 landing: interrupt/quit cancel pending approvals; a process dying can lose them.
+- The real-store cold-paint regression is no longer open: the master pre-run measured 3.5 s rather than 57.9 s.
+- Background-job version is launch-path dependent (charter X6). Today's intentional installed-CLI fixture ran 2.1.286;
+  it is not evidence that MAWS custody launches silently moved off the pin.
+- The first native quit attempt counted foreground/background work in one session once, as designed. The script now
+  states the distinct-session setup needed to observe all three report categories.
+- Native Edit → Select All was a real product gap despite the keyboard/e2e passes. ffdfcdb9 fixes the native menu route;
+  the actual menu was re-tested through cua_repl. The separate test-isolation fix addresses history and clipboard
+  side effects discovered during acceptance, not an engine or permission-policy change.
