@@ -484,7 +484,7 @@ test.describe('sessions', () => {
     expect(metas.filter((m) => m.event === 'spawn'), 'one retry, never chained').toHaveLength(2);
     expect(metas.filter((m) => m.event === 'init_failed').map((m) => m.code)).toEqual(['no_output', 'no_output']);
     expect(value(await invoke(page, 'session.status', { appSessionId: record.appId }))).toMatchObject({ process: 'exited', exit: { reason: 'crash' } });
-    await row(page, record.appId).click({ button: 'right' });
+    await (await sidebarRow(page, { appSessionId: record.appId })).click({ button: 'right' }); // W5: on its project's page
     await expect(page.getByRole('menuitem', { name: 'Resume', exact: true }), 'the row can be resumed again').toBeEnabled();
     await page.keyboard.press('Escape');
   });
@@ -522,7 +522,7 @@ test.describe('sessions', () => {
     expect(value(await invoke(page, 'session.start', { appSessionId: id, message: null, options: {} })), 'the fresh read, whatever the sidebar shows yet').toEqual({ status: 'held', appSessionId: id, holder: job, attach: { jobId: 'e6dcd828', command } });
     await expect.poll(async () => value(await invoke(page, 'session.get', { appSessionId: id }))!.holder, { timeout: 2_000, message: 'foreign-live in the sidebar within two seconds' }).toEqual(job);
 
-    await row(page, id).click({ button: 'right' });
+    await (await sidebarRow(page, { appSessionId: id })).click({ button: 'right' }); // W5: on its project's page
     await expect(page.getByRole('menuitem')).toHaveText(['Open', 'Attach in a terminal tab']);
     await page.keyboard.press('Escape');
     await row(page, id).click();
@@ -555,7 +555,7 @@ test.describe('sessions', () => {
     await expect(notice).toContainText(`Live in Terminal · pid ${pid} · read-only`, { timeout: 5_000 });
     await expect(notice.getByRole('button', { name: 'Attach in a terminal tab' })).toHaveCount(0);
     await expect(notice.getByRole('button', { name: 'Fork a copy' })).toBeVisible();
-    await row(page, id).click({ button: 'right' });
+    await (await sidebarRow(page, { appSessionId: id })).click({ button: 'right' });
     await expect(page.getByRole('menuitem')).toHaveText(['Open']);
     await page.keyboard.press('Escape');
     await store.removeRegistryRecord(pid);
