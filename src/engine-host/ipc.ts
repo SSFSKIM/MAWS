@@ -87,8 +87,9 @@ export interface EngineIpcDeps {
   // FsService.eventsSnapshot, which starts following it); absent, such a session is unknown here as before.
   diskEvents?: (appSessionId: AppSessionId) => Promise<{ events: SessionEvent[]; complete: boolean }>;
   // C4 end
-  // W7: whether a foreign process holds the app session's engine session now (C4's registry); absent, never
-  heldElsewhere?: (appSessionId: AppSessionId) => boolean;
+  // W7: whether a foreign process holds the app session's engine session now, or held it at or after `since` (C4's
+  // registry); absent, never
+  heldElsewhere?: (appSessionId: AppSessionId, since: string | null) => boolean;
 }
 
 export interface EngineIpc {
@@ -219,9 +220,11 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
     // events carry no seq, so `afterSeq` and `limit` select nothing and `lastSeq` is 0
     if (deps.diskEvents && !streams.has(appSessionId as AppSessionId)) return { ...(await deps.diskEvents(appSessionId as AppSessionId)), lastSeq: 0 };
     // C4 end
-    // W7: a process that exited while a foreign one holds the session (it yielded, or it stopped beside a terminal that
-    // resumed the id) is not the session's history any more: the transcript is, as the other process writes it
-    if (deps.diskEvents && table.get(appSessionId as AppSessionId)?.lifecycle === 'exited' && deps.heldElsewhere?.(appSessionId as AppSessionId)) {
+    // W7: a process that exited while a foreign one held the session, or before one took it (it yielded, or it stopped
+    // beside a terminal that resumed the id), is not the session's history any more: the transcript is, as the other
+    // process wrote it, also after that process exits. A new launch of the id makes its stream the history again.
+    const exited = table.get(appSessionId as AppSessionId);
+    if (deps.diskEvents && exited?.lifecycle === 'exited' && deps.heldElsewhere?.(appSessionId as AppSessionId, exited.status().exit?.at ?? null)) {
       return { ...(await deps.diskEvents(appSessionId as AppSessionId)), lastSeq: 0 };
     }
     return streamOf(appSessionId).snapshot(afterSeq, limit);

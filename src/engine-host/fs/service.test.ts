@@ -589,7 +589,7 @@ describe('filesystem state service: a contested session (W7)', () => {
     // the terminal resumes the id: a holder, a contest; the history it once wrote (h1, h2) is not a write now
     child = spawn('/bin/sleep', ['30'], { stdio: 'ignore' });
     const pid = child.pid!;
-    await fixture.addRegistryRecord(pid, { sessionId: S1, kind: 'interactive', entrypoint: 'cli', cwd: '/work/a', startedAt: 2 });
+    await fixture.addRegistryRecord(pid, { sessionId: S1, kind: 'interactive', entrypoint: 'cli', cwd: '/work/a', startedAt: Date.now() });
     await expect.poll(() => events('fs.holderChanged').length, { timeout: 1_000, interval: 10 }).toBe(1);
     expect(events('fs.holderChanged')[0]).toMatchObject({ sessionId: S1, appSessionId: A1, holder: { kind: 'terminal', pid } });
     expect(service.heldElsewhere(A1)).toBe(true);
@@ -615,5 +615,71 @@ describe('filesystem state service: a contested session (W7)', () => {
     await expect.poll(() => batches().filter((e) => e.kind === 'notice.posted' && e.key === 'transcript_refold').length, { timeout: 3_000, interval: 10 }).toBe(1);
     expect(batches().find((e) => e.kind === 'boundary.retraction')).toMatchObject({ reason: 'transcript_branch', retractedMessageUuids: ['m1'] });
     expect(service.heldElsewhere(A1)).toBe(false);
+  });
+
+  const serviceWithOwnPid = async () => {
+    service = new FsService({
+      paths: fixture.paths,
+      emit: (name, payload) => {
+        const checked = validateEventPayload(name, payload);
+        if (!checked.ok) throw new Error(`invalid ${name}: ${JSON.stringify(checked.issues)}`);
+        emitted.push({ name, payload } as Emitted);
+      },
+      holders: { ownPids: () => new Set([process.pid]) },
+    });
+    await service.start();
+    await service.scan([]);
+    await service.bind([{ sessionId: S1, appSessionId: A1 }]);
+    await settled();
+    await fixture.addRegistryRecord(process.pid, { sessionId: S1, kind: 'interactive', entrypoint: 'sdk-ts', cwd: '/work/a', startedAt: 1 });
+    await service.holdersNow({ sessionIds: [S1], directories: null });
+    return service;
+  };
+
+  // review finding: a write that lands before the registry shows the foreign process (or before a baseline could be
+  // taken) is that process's all the same; what tells it from history is its time, against the process's start
+  it('reports a foreign write that landed before its process was seen in the registry, and none for older history', async () => {
+    const path = await fixture.addTranscript('/work/a', S1, [record('user', 'u1', null, 'sdk-ts', '2026-09-28T10:00:00.000Z'), record('user', 'h1', 'u1', 'cli', '2026-09-28T10:00:01.000Z')]);
+    const fs = await serviceWithOwnPid();
+    child = spawn('/bin/sleep', ['30'], { stdio: 'ignore' });
+    const pid = child.pid!;
+    const startedAt = Date.now() - 1_000;
+    await fixture.appendLines(path, [record('user', 't1', 'u1', 'cli', new Date().toISOString())]); // before its record is read
+    await fixture.addRegistryRecord(pid, { sessionId: S1, kind: 'interactive', entrypoint: 'cli', cwd: '/work/a', startedAt });
+    await fs.holdersNow({ sessionIds: [S1], directories: null });
+    await expect.poll(() => events('fs.foreignWrite').length, { timeout: 1_000, interval: 10 }).toBe(1);
+    expect(events('fs.foreignWrite')[0]).toMatchObject({ sessionId: S1, holder: { kind: 'terminal', pid } });
+  });
+
+  it('counts no history: a contest over a transcript the terminal once wrote reports nothing until it writes again', async () => {
+    const path = await fixture.addTranscript('/work/a', S1, [record('user', 'u1', null, 'sdk-ts', '2026-09-28T10:00:00.000Z'), record('user', 'h1', 'u1', 'cli', '2026-09-28T10:00:01.000Z')]);
+    const fs = await serviceWithOwnPid();
+    child = spawn('/bin/sleep', ['30'], { stdio: 'ignore' });
+    await fixture.addRegistryRecord(child.pid!, { sessionId: S1, kind: 'interactive', entrypoint: 'cli', cwd: '/work/a', startedAt: Date.now() });
+    await fs.holdersNow({ sessionIds: [S1], directories: null });
+    await pause(300);
+    expect(events('fs.foreignWrite')).toEqual([]);
+    await fixture.appendLines(path, [record('user', 't1', 'h1', 'cli', new Date(Date.now() + 5).toISOString())]);
+    await expect.poll(() => events('fs.foreignWrite').length, { timeout: 1_000, interval: 10 }).toBe(1);
+  });
+
+  // review finding: once a foreign process held the session after MAWS's process exited, the transcript stays its
+  // history when that process goes too (a reload must not bring back the old stream)
+  it('remembers that a foreign holder held the session after a given time, past its exit', async () => {
+    await fixture.addTranscript('/work/a', S1, [record('user', 'u1', null, 'sdk-ts', '2026-09-28T10:00:00.000Z')]);
+    const fs = await serviceWithOwnPid();
+    const exitAt = new Date(Date.now() - 1_000).toISOString(); // MAWS's process exited a second ago
+    expect(fs.heldElsewhere(A1, exitAt)).toBe(false);
+    child = spawn('/bin/sleep', ['30'], { stdio: 'ignore' });
+    const pid = child.pid!;
+    await fixture.addRegistryRecord(pid, { sessionId: S1, kind: 'interactive', entrypoint: 'cli', cwd: '/work/a', startedAt: Date.now() });
+    await fs.holdersNow({ sessionIds: [S1], directories: null });
+    expect(fs.heldElsewhere(A1, exitAt)).toBe(true);
+    child.kill('SIGKILL');
+    await fixture.removeRegistryRecord(pid);
+    await fs.holdersNow({ sessionIds: [S1], directories: null });
+    expect(fs.heldElsewhere(A1, null)).toBe(false);
+    expect(fs.heldElsewhere(A1, exitAt)).toBe(true); // it held the session after that exit
+    expect(fs.heldElsewhere(A1, new Date(Date.now() + 60_000).toISOString())).toBe(false); // an exit after it left
   });
 });

@@ -87,8 +87,8 @@ interface FollowEntry {
 // W7: one contested session, watched for the foreign process's first write since the contest began.
 interface Contest {
   by: ForeignHolder;
-  since: string; // when the contest began (ISO): a record written before it is history, whoever wrote it
-  offset: number | null; // where the next check reads from; null until the baseline is taken
+  since: string; // when the foreign process started (ISO; when the contest began, if its record says nothing): a record written before it is history
+  offset: number; // where the next check reads from: the file's start at first, then past the last whole line read
   reported: boolean;
   work: Promise<unknown>; // checks run one at a time, in change order
 }
@@ -135,6 +135,7 @@ export class FsService {
   // C8b end
   private replays: ReplaySnapshots | null = null;
   private readonly contests = new Map<SessionId, Contest>(); // W7
+  private readonly foreignLeftAt = new Map<SessionId, number>(); // W7: when each session's last foreign holder went
 
   constructor(options: FsServiceOptions) {
     this.paths = options.paths;
@@ -149,10 +150,12 @@ export class FsService {
       options.paths,
       (sessionId, holder, registry, job) => {
         this.send('fs.holderChanged', { sessionId, appSessionId: this.bindings.appIdOf(sessionId), holder, registry, job });
+        if (holder.kind === 'none') this.foreignLeftAt.set(sessionId, Date.now()); // W7
+        else this.foreignLeftAt.delete(sessionId);
         // W7: the foreign holder exited; a follower that kept MAWS's branch in view meanwhile folds the other one in
         if (holder.kind === 'none') for (const entry of this.follows.values()) if (entry.sessionId === sessionId && entry.agentId === null) void entry.follow.refold();
       },
-      { ...options.holders, contests: (sessionId, by) => this.contestChanged(sessionId, by) },
+      { ...options.holders, contests: (sessionId, by, startedAt) => this.contestChanged(sessionId, by, startedAt) },
     );
   }
 
@@ -274,10 +277,15 @@ export class FsService {
     this.bindings.unbind(appSessionId);
   }
 
-  // W7: whether a foreign process holds the app session's engine session now (C3's `session.events` reads disk then).
-  heldElsewhere(appSessionId: AppSessionId): boolean {
+  // W7: whether a foreign process holds the app session's engine session now or held it at or after `since` (a MAWS
+  // process's exit): from then on the transcript, as that process wrote it, is the session's history (C3's
+  // `session.events` reads disk), also once the foreign process has gone.
+  heldElsewhere(appSessionId: AppSessionId, since: string | null = null): boolean {
     const sessionId = this.bindings.sessionIdOf(appSessionId);
-    return sessionId !== null && this.holders.holderOf(sessionId).kind !== 'none';
+    if (sessionId === null) return false;
+    if (this.holders.holderOf(sessionId).kind !== 'none') return true;
+    const left = this.foreignLeftAt.get(sessionId);
+    return since !== null && left !== undefined && left >= Date.parse(since);
   }
 
   // `fs.holders`: the registry read now, filtered by session id or directory (HolderRegistry.liveNow).
@@ -651,9 +659,10 @@ export class FsService {
     this.send('fs.sessionChanged', { summary, appSessionId: this.bindings.appIdOf(summary.sessionId) });
   }
 
-  // W7: a contest began, changed holder or ended. At its start the transcript's size is the baseline: what the foreign
-  // process writes from then on is read at each change of the file.
-  private contestChanged(sessionId: SessionId, by: Contest['by'] | null): void {
+  // W7: a contest began, changed holder or ended. What the foreign process wrote is told by time, not by position: any
+  // record written since its registry record's `startedAt`, so a write that lands before the registry is read (or
+  // before this check runs) still counts. The file is read from its start once, at the contest's start, then as it grows.
+  private contestChanged(sessionId: SessionId, by: Contest['by'] | null, startedAt: number | null): void {
     if (by === null) {
       this.contests.delete(sessionId);
       return;
@@ -663,24 +672,21 @@ export class FsService {
       existing.by = by;
       return;
     }
-    const contest: Contest = { by, since: new Date().toISOString(), offset: null, reported: false, work: Promise.resolve() };
-    this.contests.set(sessionId, contest);
+    const since = new Date(startedAt ?? Date.now()).toISOString();
+    this.contests.set(sessionId, { by, since, offset: 0, reported: false, work: Promise.resolve() });
     const path = this.listed.get(sessionId)?.path ?? null;
-    contest.work = (path === null ? Promise.resolve(0) : sizeOf(path)).then(
-      (size) => void (contest.offset ??= size),
-      () => void (contest.offset ??= 0), // a baseline it cannot take reads from the start; `since` still screens history
-    );
+    if (path !== null) this.checkContest(sessionId, path);
   }
 
   // The first record a foreign process writes into a contested transcript (any record with a uuid whose entrypoint is
-  // not MAWS's, written after the contest began) is reported once; main decides what MAWS's process does about it.
+  // not MAWS's, written since that process started) is reported once; main decides what MAWS's process does about it.
   private checkContest(sessionId: SessionId, path: string): void {
     const contest = this.contests.get(sessionId);
     if (!contest || contest.reported) return;
     contest.work = contest.work
       .then(async () => {
         if (contest.reported || this.contests.get(sessionId) !== contest) return;
-        const { records, next } = await readAppended(path, contest.offset ?? 0);
+        const { records, next } = await readAppended(path, contest.offset);
         contest.offset = next;
         const foreign = records.some((r) => typeof r.uuid === 'string' && r.entrypoint !== OWN_ENTRYPOINT && typeof r.timestamp === 'string' && r.timestamp >= contest.since);
         if (!foreign || this.contests.get(sessionId) !== contest) return;
@@ -693,15 +699,6 @@ export class FsService {
   private send: HostEmit = (name, payload) => {
     if (!this.stopped) this.emit(name, payload);
   };
-}
-
-async function sizeOf(path: string): Promise<number> {
-  const file = await open(path, 'r');
-  try {
-    return (await file.stat()).size;
-  } finally {
-    await file.close();
-  }
 }
 
 // The whole lines appended to `path` since `offset` (at most CONTEST_READ_BYTES of them), parsed where they parse, and

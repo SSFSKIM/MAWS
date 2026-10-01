@@ -710,18 +710,20 @@ describe('exited rows beyond the cap leave the host (C12)', () => {
 // W7 (charter §4.3 as amended 2026-10-01): a process that exited while a foreign one holds the session (it yielded,
 // or it stopped beside a terminal that resumed the id) is not the session's history: `session.events` reads disk then.
 describe('session.events after an exit reads disk while a foreign process holds the session (W7)', () => {
-  it('answers the stream while live and after an exit nobody else holds, the transcript after an exit a foreign holder writes', async () => {
+  it('answers the stream while live and after an exit no foreign process took, the transcript after an exit one did, also once it left', async () => {
     const disk = vi.fn(async () => ({ events: [] as SessionEvent[], complete: true }));
-    const held = { now: false };
+    // the fs service's answer: a foreign holder from `from` (ms) on, and gone at `until` (ms), if it went
+    const held = { from: null as number | null, until: null as number | null };
+    const heldElsewhere = (_id: AppSessionId, since: string | null) => held.from !== null && (held.until === null || (since !== null && held.until >= Date.parse(since)));
     let transport: ScriptedTransport | null = null;
     const host = engineHost({
-      diskEvents: disk, heldElsewhere: () => held.now, binaryProbe: async () => OK_BINARY, checkRelay: async () => OK_RELAY, captureEnv: async () => ({ PATH: '/usr/bin' }),
+      diskEvents: disk, heldElsewhere, binaryProbe: async () => OK_BINARY, checkRelay: async () => OK_RELAY, captureEnv: async () => ({ PATH: '/usr/bin' }),
       spawn: () => (transport = scriptedTransport({ onWrite: autoResponder(handshakeResponder({ end_session: () => null })) })),
     });
     const id = 'app-yielded' as AppSessionId;
     await host.call('session.launch', { spec: spec({ appSessionId: id }) });
     await until(() => host.statuses(id).some((s) => s.process === 'ready'), 'ready');
-    held.now = true; // a terminal joins: the live process is still the session's source
+    held.from = Date.now(); // a terminal joins: the live process is still the session's source
     await host.call('session.events', { appSessionId: id, afterSeq: null, limit: null });
     expect(disk).not.toHaveBeenCalled();
     const stopping = host.call('session.stop', { appSessionId: id, reason: 'stop' });
@@ -730,9 +732,12 @@ describe('session.events after an exit reads disk while a foreign process holds 
     await stopping;
     expect(await host.call('session.events', { appSessionId: id, afterSeq: null, limit: null })).toEqual({ events: [], complete: true, lastSeq: 0 });
     expect(disk).toHaveBeenCalledWith(id);
-    held.now = false; // nobody else holds it: the exited stream is the history again
+    held.until = Date.now() + 1; // the terminal exits after MAWS's process did: the transcript stays the history
     await host.call('session.events', { appSessionId: id, afterSeq: null, limit: null });
-    expect(disk).toHaveBeenCalledTimes(1);
+    expect(disk).toHaveBeenCalledTimes(2);
+    held.until = Date.parse(host.statuses(id).at(-1)!.exit!.at) - 1_000; // a foreign holder that left before the exit
+    await host.call('session.events', { appSessionId: id, afterSeq: null, limit: null });
+    expect(disk).toHaveBeenCalledTimes(2); // the exited stream is the history
   });
 });
 

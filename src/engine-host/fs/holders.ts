@@ -18,8 +18,9 @@ import type { StorePaths } from './paths';
 import { isMissing, noteReadable, noteUnreadable, readJsonWithRetry } from './sidecars';
 
 export type HolderSink = (sessionId: SessionId, holder: Holder, registry: LiveSessionRecord | null, job: JobState | null) => void;
-// W7: a session MAWS runs that a foreign process holds too (`by`), or no longer (`null`); called on every change.
-export type ContestSink = (sessionId: SessionId, by: ForeignHolder | null) => void;
+// W7: a session MAWS runs that a foreign process holds too (`by`, with its record's `startedAt`), or no longer
+// (`null`); called on every change.
+export type ContestSink = (sessionId: SessionId, by: ForeignHolder | null, startedAt: number | null) => void;
 
 export interface HolderDeps {
   ps?: string; // the ps binary; tests point it somewhere that cannot spawn
@@ -272,7 +273,7 @@ export class HolderRegistry {
       const before = this.contested.get(sessionId) ?? null;
       if (by === null) this.contested.delete(sessionId);
       else this.contested.set(sessionId, by);
-      if (!sameHolder(before ?? NONE, by ?? NONE)) this.contestSink(sessionId, by);
+      if (!sameHolder(before ?? NONE, by ?? NONE)) this.contestSink(sessionId, by, by === null ? null : (this.held.get(sessionId)?.registry.startedAt ?? null));
     }
 
     if (this.held.size > 0 && !this.poll) {

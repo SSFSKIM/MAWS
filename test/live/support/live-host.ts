@@ -70,7 +70,7 @@ export class LiveHost {
       // as the engine host wires it (src/engine-host/index.ts): own pids from the table, disk reads after a yield
       const ownPids = () => new Set(ipc.table.list().flatMap((s) => (s.pid !== null && s.lifecycle !== 'exited' ? [s.pid] : [])));
       if (withFs) fs = registerFs(on, emit, { ...process.env, CLAUDE_CONFIG_DIR: configHome! }, { ownPids });
-      const diskEvents = fs === null ? {} : { diskEvents: (id: AppSessionId) => fs!.eventsSnapshot(id, null), heldElsewhere: (id: AppSessionId) => fs!.heldElsewhere(id) };
+      const diskEvents = fs === null ? {} : { diskEvents: (id: AppSessionId) => fs!.eventsSnapshot(id, null), heldElsewhere: (id: AppSessionId, since: string | null) => fs!.heldElsewhere(id, since) };
       ipc = registerEngineIpc(on, emit, { replayEnabled: false, appVersion: '0.0.0-live', ...diskEvents, ...ipcDeps, ...(captureEnv ? { captureEnv } : {}) });
     });
     const port: HostPort = {

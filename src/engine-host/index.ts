@@ -35,7 +35,7 @@ runHost(HOST_VERSION, (on, emit) => {
   // C3 start
   ({ table } = registerEngineIpc(on, emit, {
     userData, replayEnabled: process.env.MAWS_ENGINE_REPLAY === '1', appVersion: HOST_VERSION,
-    diskEvents: (id) => fs.eventsSnapshot(id, null) /* C4 */, heldElsewhere: (id) => fs.heldElsewhere(id) /* W7 */,
+    diskEvents: (id) => fs.eventsSnapshot(id, null) /* C4 */, heldElsewhere: (id, since) => fs.heldElsewhere(id, since) /* W7 */,
   }));
   table.startSampling();
   // C3 end
