@@ -24,6 +24,7 @@ import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import { ENGINE_BIN as ENGINE_BIN_PATH } from '../src/engine-host/launch';
+import { writeScratchShellHome } from '../test/support/shell-home';
 import { synthesise } from '../test/support/synth-transcript';
 import { invoke, value } from './support/c7-replay';
 import { collectConsoleErrors, launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
@@ -200,6 +201,7 @@ test('§10.1 real store, read only', async () => {
   env.MAWS_E2E = '1';
   env.MAWS_USER_DATA = scratch.userData;
   env.MAWS_CLAUDE_USAGE_DIR = join(scratch.userData, 'claude-usage');
+  Object.assign(env, writeScratchShellHome(join(scratch.userData, 'shell-home')).env);
   env.MAWS_HARNESS = '0';
   delete env.CLAUDE_CONFIG_DIR;
   const outside = join(scratch.root, 'realstore');
@@ -794,6 +796,9 @@ test('§10.4 one deep session: a relay to a running background child, Review wit
     });
     // C8's sitting item "a monitor started from a live session", run here so the owner's script carries a tested prompt
     await step('a monitor started from the live session shows in Background work and stops', async () => {
+      // the viewer piece before this one leaves its file tab active in the main area, where no composer is, so the
+      // session's own tab is opened again first, whichever pieces ran before
+      await openRow(page, id!);
       const from = log.seq;
       await send(page, MONITOR_PROMPT);
       // the Monitor tool sits behind an engine feature gate (tengu_amber_sentinel, default off on 2.1.283), so the answer is

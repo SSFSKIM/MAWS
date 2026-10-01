@@ -10,6 +10,7 @@ import { join } from 'node:path';
 import { expect, type ElectronApplication, type Locator, type Page } from '@playwright/test';
 import type { PanelChildMetrics, PanelHarnessApi, PanelHarnessTab } from '../src/renderer/src/harness/panel/api';
 import { PANEL_CHILD_TAIL } from '../test/support/panel-child-tail';
+import { withNativeClipboard } from './support/clipboard';
 import { launchMaws, test, type MawsLaunch } from './support/launch';
 import { CHARTER, otherThemeColours, panelScenario, scratchRepository, SIDEBAR_DRAG } from './support/panel-support';
 
@@ -880,16 +881,20 @@ test.describe('the #panel harness: strip, summary, R7 and themes', () => {
       .toBe(true);
 
     // ⌘V at this width: the pasted command runs. The prompt and the command may wrap across rows here (the reason the
-    // terminal e2e maximizes), so the echo is looked for in the rows joined.
+    // terminal e2e maximizes), so the echo is looked for in the rows joined. The paste goes through the Mac's one
+    // pasteboard, which nothing else may write meanwhile; what it held before is written back unless something else has
+    // copied since (support/clipboard.ts).
     const joined = () =>
       page.evaluate((id) => {
         const probe = (window as unknown as TerminalWindow).__maws_harness.terminals.probe(id);
         return probe ? Array.from({ length: probe.lineCount() }, (_, i) => probe.line(i).padEnd(probe.cols)).join('') : '';
       }, id);
-    await app.evaluate(({ clipboard }) => clipboard.writeText('echo PASTED-$((6*7))'));
-    await screen.click();
-    await page.keyboard.press('Meta+KeyV');
-    await expect.poll(async () => (await joined()).includes('echo PASTED-$((6*7))')).toBe(true);
+    await withNativeClipboard(app, ['echo PASTED-$((6*7))'], async () => {
+      await app.evaluate(({ clipboard }) => clipboard.writeText('echo PASTED-$((6*7))'));
+      await screen.click();
+      await page.keyboard.press('Meta+KeyV');
+      await expect.poll(async () => (await joined()).includes('echo PASTED-$((6*7))')).toBe(true);
+    });
     await type('\r');
     await expect.poll(() => hasLine('PASTED-42')).toBe(true);
 

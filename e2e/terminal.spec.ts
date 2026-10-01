@@ -3,8 +3,14 @@
 // Commands are typed into a terminal through `pty.write` (the harness's `terminals.type`), exactly the bytes a
 // keystroke would send; Playwright's keyboard is used only where the key path itself is under test. While a test
 // neither types nor scrolls through Playwright, the page's input guard cancels and counts physical wheel and key events
-// (the owner's trackpad reaches Playwright's window on this Mac), and the count is reported as an annotation.
+// (the owner's trackpad reaches Playwright's window on this Mac), and the count is reported as an annotation. The copy
+// case's clipboard steps drive the Mac's one pasteboard, so a run needs it to itself while they run (they take it
+// through `withNativeClipboard`, which serializes MAWS runs and writes back what it held unless something else has
+// copied since; support/clipboard.ts). The shells start over the launch's scratch shell home (support/launch.ts), so
+// none writes the owner's history.
 import { expect, type ElectronApplication, type Page } from '@playwright/test';
+import { PROFILE_VARIABLE } from '../test/support/shell-home';
+import { withNativeClipboard } from './support/clipboard';
 import { test } from './support/launch';
 import { latencyBudgets, MEASURED_WAIT_MS } from './support/latency';
 
@@ -293,6 +299,10 @@ test('opens a login shell in the session directory with the terminal environment
     if (shell.endsWith('zsh')) {
       await h.run(id, `[[ -o login ]] && echo "LOGIN:yes"`);
       await h.expectLine(id, 'LOGIN:yes');
+      // the login profile it read and the history it keeps are the launch's scratch shell home's
+      await h.run(id, `echo "PROFILE:$${PROFILE_VARIABLE}"; [[ $HISTFILE == '${maws.shellHome}'/* ]] && echo "HISTORY:scratch"`);
+      await h.expectLine(id, 'PROFILE:.zprofile');
+      await h.expectLine(id, 'HISTORY:scratch');
     }
   });
   expect(maws.consoleErrors()).toEqual([]);
@@ -681,19 +691,23 @@ test('copies a selection and opens links externally', async ({ maws }) => {
   // Waited for: under load the renderer may take the drag's last moves after the release has returned.
   await expect.poll(async () => (await h.call<string>('terminals', 'selection', id)).length, { message: 'the selection spans two rows' }).toBeGreaterThan(wrapped.cols);
   const selection = await h.call<string>('terminals', 'selection', id);
-  await page.keyboard.press('Meta+KeyC');
-  await expect.poll(() => app.evaluate(({ clipboard }) => clipboard.readText())).toBe(selection);
-  await page.getByLabel('paste target').click();
-  await page.keyboard.press('Meta+KeyV');
-  await expect(page.getByLabel('paste target')).toHaveValue(selection);
+  // The clipboard steps, on the Mac's one pasteboard: nothing else may copy while they run, and what it held before is
+  // written back after them while it still holds one of their texts.
+  await withNativeClipboard(app, [selection, 'echo PASTED-$((6*7))'], async () => {
+    await page.keyboard.press('Meta+KeyC');
+    await expect.poll(() => app.evaluate(({ clipboard }) => clipboard.readText())).toBe(selection);
+    await page.getByLabel('paste target').click();
+    await page.keyboard.press('Meta+KeyV');
+    await expect(page.getByLabel('paste target')).toHaveValue(selection);
 
-  // ⌘V into the shell pastes (bracketed, as zsh asks), and Enter runs it.
-  await app.evaluate(({ clipboard }) => clipboard.writeText('echo PASTED-$((6*7))'));
-  await page.locator(`[data-terminal-id="${id}"] .xterm-screen`).click();
-  await page.keyboard.press('Meta+KeyV');
-  await expect.poll(async () => (await h.snap(id)).screen.some((line) => line.includes('echo PASTED-$((6*7))'))).toBe(true);
-  await h.type(id, '\r');
-  await h.expectLine(id, 'PASTED-42');
+    // ⌘V into the shell pastes (bracketed, as zsh asks), and Enter runs it.
+    await app.evaluate(({ clipboard }) => clipboard.writeText('echo PASTED-$((6*7))'));
+    await page.locator(`[data-terminal-id="${id}"] .xterm-screen`).click();
+    await page.keyboard.press('Meta+KeyV');
+    await expect.poll(async () => (await h.snap(id)).screen.some((line) => line.includes('echo PASTED-$((6*7))'))).toBe(true);
+    await h.type(id, '\r');
+    await h.expectLine(id, 'PASTED-42');
+  });
 
   // ⌘A selects the terminal's buffer and the shell echoes nothing. xterm selects on the keydown but leaves the event
   // uncancelled (@xterm/xterm 6.0.0, `CoreBrowserTerminal._keyDown`: a select-all result has no key, so it returns

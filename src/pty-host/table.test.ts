@@ -1,6 +1,10 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { EventName, EventPayload, PtyId } from '@shared/ipc/schema';
+import { PROFILE_VARIABLE, writeScratchShellHome } from '../../test/support/shell-home';
 import { terminalEnvironment } from './env';
 import { HIGH_WATERMARK, LOW_WATERMARK } from './flow';
 import { createPtyTable, RING_BYTES, type PtyTable } from './table';
@@ -15,6 +19,11 @@ vi.setConfig({ testTimeout: 20_000 });
 // (a 10 s `exited` failed once at a load average of 130 to 158). The only shorter bound is the spec's pin that a flood
 // is paused within one second of its first byte: that measures the host's own flow control, not a process.
 const WAIT_MS = 18_000;
+// Every shell here starts over a scratch home (test/support/shell-home.ts) with HOME moved there too: its startup files
+// are that home's, and its history is written there, never to the owner's.
+const SHELL_HOME = writeScratchShellHome(mkdtempSync(join(tmpdir(), 'maws-pty-home-')));
+const BASE_ENV: NodeJS.ProcessEnv = { ...process.env, HOME: SHELL_HOME.dir, ...SHELL_HOME.env };
+afterAll(() => rmSync(SHELL_HOME.dir, { recursive: true, force: true }));
 const SESSION = 'app-session-1' as AppSessionId;
 const decoder = new TextDecoder();
 let labels = 0;
@@ -32,7 +41,7 @@ interface Chunk {
   data: Uint8Array;
 }
 
-function harness(environment: Record<string, string> = terminalEnvironment(process.env, { appVersion: '9.9.9' })) {
+function harness(environment: Record<string, string> = terminalEnvironment(BASE_ENV, { appVersion: '9.9.9' })) {
   const chunks = new Map<string, Chunk[]>();
   const exits = new Map<string, EventPayload<'pty.exit'>>();
   const ackers = new Set<string>();
@@ -245,17 +254,27 @@ describe('pty host checkpoint and replay window', () => {
 
 describe('pty host initial command runs under zsh and bash', () => {
   // The marker is assembled by the shell, so the tty's echo of the typed command never contains it: only running it can.
+  // The login line also names the login profile the shell read and the history file it keeps.
   const cases = [
-    { shell: '/bin/zsh', login: '[[ -o login ]]' },
-    { shell: '/bin/bash', login: 'shopt -q login_shell' },
+    { shell: '/bin/zsh', login: '[[ -o login ]]', profile: '.zprofile' },
+    { shell: '/bin/bash', login: 'shopt -q login_shell', profile: '.bash_profile' },
   ];
-  it.each(cases)('$shell starts as a login shell and runs the command it was spawned with', async ({ shell, login }) => {
+  it.each(cases)('$shell starts as a login shell over the scratch home and runs the command it was spawned with', async ({ shell, login, profile }) => {
     const h = harness();
     const { ptyId } = await h.table.spawn(
-      spawnInput({ shell, command: `printf 'MAWS_INIT_%s\\n' OK; ${login} && printf 'MAWS_LOGIN_%s\\n' YES` }),
+      spawnInput({ shell, command: `printf 'MAWS_INIT_%s\\n' OK; ${login} && printf 'MAWS_LOGIN_%s|%s|%s\\n' YES "$${PROFILE_VARIABLE}" "$HISTFILE"` }),
     );
-    await h.until(() => h.text(ptyId).includes('MAWS_INIT_OK') && h.text(ptyId).includes('MAWS_LOGIN_YES'), WAIT_MS, 'the initial command ran');
+    const loginLine = () => /MAWS_INIT_OK\n[\s\S]*MAWS_LOGIN_YES\|([^|\n]*)\|([^\n]*)\n/.exec(asOutput(h.text(ptyId)));
+    await h.until(() => loginLine() !== null, WAIT_MS, 'the initial command ran');
     expect(h.table.list().ptys.find((p) => p.ptyId === ptyId)).toMatchObject({ shell, alive: true });
+    const [, read, history = ''] = loginLine()!;
+    expect(read).toBe(profile);
+    // Checked before the shell is let exit: one on the wrong home ends here, under afterEach's SIGKILL, which saves no
+    // history. An exit saves it, and the command is in the scratch home's file.
+    expect(history.startsWith(`${SHELL_HOME.dir}/`), history).toBe(true);
+    h.table.write({ ptyId, data: 'exit\n' });
+    await h.exited(ptyId);
+    expect(readFileSync(history, 'utf8')).toContain('MAWS_INIT_');
   }, 20_000);
 });
 
@@ -331,7 +350,7 @@ describe('pty host coalesces reads into fewer events', () => {
     const events: string[] = [];
     const table = createPtyTable({
       emit: (name, payload) => void events.push(name === 'pty.data' ? `data:${decoder.decode((payload as EventPayload<'pty.data'>).data)}` : name),
-      environment: Promise.resolve(terminalEnvironment(process.env, { appVersion: '0' })),
+      environment: Promise.resolve(terminalEnvironment(BASE_ENV, { appVersion: '0' })),
     });
     tables.push(table);
     await table.spawn(spawnInput({ shell: '/bin/sh', args: ['-c', "printf 'MAWS_LAST'"] }));
@@ -357,7 +376,7 @@ describe('pty host coalesces reads into fewer events', () => {
 
 describe('pty host environment', () => {
   it('starts a program with the terminal environment it was given, in the requested cwd', async () => {
-    const h = harness(terminalEnvironment({ ...process.env, CLAUDECODE: '1', CLAUDE_CODE_SESSION_ID: 'parent' }, { appVersion: '9.9.9' }));
+    const h = harness(terminalEnvironment({ ...BASE_ENV, CLAUDECODE: '1', CLAUDE_CODE_SESSION_ID: 'parent' }, { appVersion: '9.9.9' }));
     const { ptyId } = await h.table.spawn(
       spawnInput({
         shell: '/bin/sh',
@@ -370,7 +389,7 @@ describe('pty host environment', () => {
   });
 
   it('defaults the shell to the environment’s SHELL, started with -l', async () => {
-    const h = harness({ ...terminalEnvironment(process.env, { appVersion: '0' }), SHELL: '/bin/bash' });
+    const h = harness({ ...terminalEnvironment(BASE_ENV, { appVersion: '0' }), SHELL: '/bin/bash' });
     const { ptyId } = await h.table.spawn(spawnInput({ command: "shopt -q login_shell && printf 'MAWS_%s\\n' BASHLOGIN" }));
     await h.until(() => h.text(ptyId).includes('MAWS_BASHLOGIN'), WAIT_MS, 'a bash login shell');
     expect(h.table.list().ptys.find((p) => p.ptyId === ptyId)?.shell).toBe('/bin/bash');
