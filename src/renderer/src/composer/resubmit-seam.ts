@@ -15,7 +15,8 @@
 //              ╰ an IpcError while ready → rewind_uncertain
 //   rewind_uncertain: nothing is issued; C3's `boundary.rewind` for the target → rewound_awaiting_send (Send is the
 //   human's); a process exit → idle; the window with no boundary → rewind_unresolved: Rewind again (one more rewind),
-//   Send without rewinding, or Keep editing; a boundary still confirms it.
+//   Send without rewinding, or Keep editing; a boundary still confirms it, and a Send without rewinding that fails
+//   reconciles it again (the transcript read, then watched).
 //
 // The gate: `session.rewind` is issued once per human decision (a Send, a confirm, or Rewind again) and never repeated
 // here; a rewind whose outcome the host could not report is reconciled against the transcript's `boundary.rewind`
@@ -186,15 +187,20 @@ function serialized(appSessionId: AppSessionId, edit: InlineEdit) {
 
 // The edit's one send or fork (the old composer controller's guard): `sending` holds Send, Fork, Cancel and another edit
 // until the host answers. It takes the session's flight over, ending whatever the flow was waiting on (Send without
-// rewinding stops watching the transcript), and its answer acts only while that flight is current, so it never ends
-// or alters an edit other than the one it was sent for: accepted, the edit ends; refused, the record is `failed`.
-async function submitOnce(appSessionId: AppSessionId, go: () => Promise<boolean>, failed: Partial<Resubmit> & { state: ResubmitState }): Promise<boolean> {
-  const generation = dispose(appSessionId).generation;
+// rewinding stops watching the transcript while it is with the host), and its answer acts only while that flight is
+// current, so it never ends or alters an edit other than the one it was sent for: accepted, the edit ends; refused, the
+// record is `failed`, and a rewind still unresolved is reconciled again (a boundary that came meanwhile confirms it).
+async function submitOnce(client: MawsBridge, appSessionId: AppSessionId, go: () => Promise<boolean>, failed: Partial<Resubmit> & { state: ResubmitState }): Promise<boolean> {
+  const flight = dispose(appSessionId);
+  const generation = flight.generation;
   setResubmit(appSessionId, { ...record(appSessionId), sending: true });
   const accepted = await go();
   if (flights.get(appSessionId)?.generation !== generation) return accepted;
   if (accepted) end(appSessionId);
-  else setResubmit(appSessionId, failed);
+  else {
+    setResubmit(appSessionId, failed);
+    if (failed.state === 'rewind_unresolved') reconcileRewind(client, appSessionId, flight, editOf(appSessionId)!.messageUuid);
+  }
   return accepted;
 }
 
@@ -210,7 +216,7 @@ function sendEdited(client: MawsBridge, appSessionId: AppSessionId): Promise<boo
     return result.ok ? null : result.error.message;
   };
   const failed = before.state === 'rewound_awaiting_send' ? { state: before.state, sendFailed: true } : before;
-  return submitOnce(appSessionId, () => submitSerialized(client, appSessionId, s, 'send', null, { dispatch }), failed);
+  return submitOnce(client, appSessionId, () => submitSerialized(client, appSessionId, s, 'send', null, { dispatch }), failed);
 }
 
 // Whether a turn began after the edit did: the rewind would discard it too, so the human confirms first.
@@ -279,9 +285,41 @@ export async function forkInlineEdit(client: MawsBridge, appSessionId: AppSessio
       return error instanceof Error ? error.message : String(error);
     }
   };
-  const accepted = await submitOnce(appSessionId, () => submitSerialized(client, appSessionId, s, 'send', null, { dispatch }), record(appSessionId));
+  const accepted = await submitOnce(client, appSessionId, () => submitSerialized(client, appSessionId, s, 'send', null, { dispatch }), record(appSessionId));
   if (accepted && opened) useLayout.getState().openSession(opened);
   return accepted;
+}
+
+// The rewind applied: the record waits for the edit's send, which goes at once when the human's own Send rewound it
+// (`autoSend`) and is the human's when the transcript confirmed it later.
+function rewoundTo(appSessionId: AppSessionId, autoSend: boolean): void {
+  dispose(appSessionId);
+  setResubmit(appSessionId, { state: 'rewound_awaiting_send', autoSend });
+}
+
+// A rewind of `target` whose outcome the host could not report, reconciled without another rewind: the process gone is
+// the exit; a `boundary.rewind` for it that the transcript already shows confirms it; otherwise the session's event
+// batches are watched while `flight` stays current, its boundary confirming it and a `process.exited` the exit.
+function reconcileRewind(client: MawsBridge, appSessionId: AppSessionId, flight: Flight, target: MessageUuid): 'stale' | 'rewound' | 'uncertain' {
+  if (!ready(appSessionId)) {
+    exited(appSessionId);
+    return 'stale';
+  }
+  if (transcriptShowsRewind(appSessionId, target)) {
+    rewoundTo(appSessionId, false);
+    return 'rewound';
+  }
+  const { generation } = flight;
+  flight.offs.push(
+    client.on('session.eventBatch', ({ appSessionId: id, events }) => {
+      if (id !== appSessionId || flights.get(appSessionId)?.generation !== generation) return;
+      for (const event of events) {
+        if (event.kind === 'process.exited') return exited(appSessionId);
+        if (event.kind === 'boundary.rewind' && event.targetMessageUuid === target) return rewoundTo(appSessionId, false);
+      }
+    }),
+  );
+  return 'uncertain';
 }
 
 async function issueRewind(client: MawsBridge, appSessionId: AppSessionId): Promise<RewindOutcome> {
@@ -289,11 +327,6 @@ async function issueRewind(client: MawsBridge, appSessionId: AppSessionId): Prom
   const flight = dispose(appSessionId);
   const generation = flight.generation;
   const current = () => flights.get(appSessionId)?.generation === generation;
-  const rewound = (autoSend: boolean) => {
-    dispose(appSessionId);
-    setResubmit(appSessionId, { state: 'rewound_awaiting_send', autoSend });
-    if (autoSend) void sendEdited(client, appSessionId); // rewound by the human's own Send: the text goes as part of it
-  };
   setResubmit(appSessionId, 'rewinding');
   // The process leaving while the call is in flight: nothing is sent, and a late answer cannot come from a process that is gone.
   flight.offs.push(
@@ -309,7 +342,8 @@ async function issueRewind(client: MawsBridge, appSessionId: AppSessionId): Prom
   });
   if (!current()) return 'stale';
   if (result.ok && result.value.rewound) {
-    rewound(true);
+    rewoundTo(appSessionId, true);
+    void sendEdited(client, appSessionId); // rewound by the human's own Send: the text goes as part of it
     return 'rewound';
   }
   if (result.ok && result.value.reason === 'target_not_found') {
@@ -326,26 +360,11 @@ async function issueRewind(client: MawsBridge, appSessionId: AppSessionId): Prom
     toast({ level: 'warning', text: `The rewind was refused · ${reason}`, actions: [], dismissible: true });
     return 'refused';
   }
-  if (!ready(appSessionId)) {
-    exited(appSessionId);
-    return 'stale';
-  }
   // Neither C3's `timeout` nor C1's nor an `internal` failure proves the rewind unapplied: the transcript decides, and
   // its boundary may already be there (a late answer can arrive before the rejection).
-  if (transcriptShowsRewind(appSessionId, edit.messageUuid)) {
-    rewound(false);
-    return 'rewound';
-  }
+  const reconciled = reconcileRewind(client, appSessionId, flight, edit.messageUuid);
+  if (reconciled !== 'uncertain') return reconciled;
   setResubmit(appSessionId, 'rewind_uncertain');
-  flight.offs.push(
-    client.on('session.eventBatch', ({ appSessionId: id, events }) => {
-      if (id !== appSessionId || !current()) return;
-      for (const event of events) {
-        if (event.kind === 'process.exited') return exited(appSessionId);
-        if (event.kind === 'boundary.rewind' && event.targetMessageUuid === edit.messageUuid) return rewound(false);
-      }
-    }),
-  );
   const timer = setTimeout(() => {
     if (current() && record(appSessionId).state === 'rewind_uncertain') setResubmit(appSessionId, 'rewind_unresolved');
   }, windowMs);

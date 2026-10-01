@@ -94,11 +94,17 @@ const listening = () => fake.calls.filter((c) => c === 'on session.eventBatch').
 // The bubble `u-1` edited in place with `u-2` the newest message seen: its text edited, the transcript showing `u-2`.
 function editing(over: Partial<InlineEdit> = {}): void {
   setInlineEdit(A, { messageUuid: u('u-1'), seenCursor: u('u-2'), kind: 'edit', text: 'turn one edited', bodies: {}, images: [], ...over });
+  showTranscript();
+}
+// The transcript's two turns, then a `boundary.rewind` for each target named (the transcript applies it whether or not
+// the seam is listening).
+function showTranscript(...rewinds: string[]): void {
   const b = builder();
   b.turn('u-1');
   b.end(['u-1']);
   b.turn('u-2');
   b.end(['u-2']);
+  for (const target of rewinds) b.emit('boundary.rewind', { targetMessageUuid: u(target), precedingAssistantUuid: null, prefillText: null });
   useTranscriptStore.setState({ entries: { [A]: { phase: 'live', rows: ROWS, state: applyEvents(createState(null, null), b.events) } as unknown as TranscriptEntry } });
 }
 // The transcript's user rows, u-2 the newest (the seen-cursor reading uses only the user rows' message uuids).
@@ -406,6 +412,54 @@ describe('one submission at a time: the send or fork is with the host until it a
     held[0](true);
     expect([await send, await again]).toEqual(['sent', 'stale']);
     expect(edit()).toBeNull();
+  });
+
+  // The rewind left unresolved (a rejection, then the window with no boundary).
+  async function unresolved(): Promise<void> {
+    vi.useFakeTimers();
+    editing();
+    const outcome = sending();
+    rewinds[0].answer(failed('internal'));
+    await outcome;
+    await vi.advanceTimersByTimeAsync(REWIND_WINDOW_MS);
+    expect(record().state).toBe('rewind_unresolved');
+  }
+
+  it("a Send without rewinding that fails watches for the boundary again: one arriving after it confirms the rewind, the send the human's", async () => {
+    await unresolved();
+    sendFails = true;
+    expect(await sendInlineEdit(client, A, 'without_rewinding')).toBe('stale');
+    expect(record()).toMatchObject({ state: 'rewind_unresolved', sending: false });
+    boundary('u-9'); // another target changes nothing
+    expect(record().state).toBe('rewind_unresolved');
+    boundary('u-1');
+    expect(record()).toMatchObject({ state: 'rewound_awaiting_send', autoSend: false, sendFailed: false, sending: false });
+    expect([sends().length, rewinds.length]).toEqual([1, 1]);
+  });
+
+  it('a boundary the transcript took while that send was with the host confirms the rewind as soon as the send fails', async () => {
+    await unresolved();
+    holdSends = true;
+    const send = sendInlineEdit(client, A, 'without_rewinding');
+    boundary('u-1'); // the seam is not listening while the send is with the host
+    showTranscript('u-1'); // the transcript applies it all the same
+    expect(record()).toMatchObject({ state: 'rewind_unresolved', sending: true });
+    held[0](false);
+    expect(await send).toBe('stale');
+    expect(record()).toMatchObject({ state: 'rewound_awaiting_send', autoSend: false, sendFailed: false, sending: false });
+    expect([sends().length, rewinds.length]).toEqual([1, 1]);
+  });
+
+  it('a Send without rewinding that fails after the process left is the exit: idle with the note, the edit kept', async () => {
+    await unresolved();
+    holdSends = true;
+    const send = sendInlineEdit(client, A, 'without_rewinding');
+    useSessions.setState({ engine: new Map([[A, status(A, { process: 'exited' })]]) });
+    held[0](false);
+    expect(await send).toBe('stale');
+    expect(record()).toMatchObject({ state: 'idle', exited: true, sending: false });
+    expect(edit()).not.toBeNull();
+    expect(rewinds).toHaveLength(1);
   });
 });
 
