@@ -193,6 +193,7 @@ The sitting
       main worktree's branch").
     Record each.
 
-15. After (untimed). Name any split-pane irritations; these become M5.3. Decide whether your settings' ExitPlanMode and
-    EnterPlanMode denies stay (grounding §6 item 10). Optionally, run `pmset sleepnow` with a terminal running and check
-    that it survives the wake (C9).
+15. After (untimed). Name any split-pane irritations; these become M5.3. Settings decision closed by the owner,
+    2026-09-30: all existing settings and tool denials stay, explicitly including EnterPlanMode and ExitPlanMode;
+    do not change them for acceptance. Optionally, run `pmset sleepnow` with a terminal running and check that it
+    survives the wake (C9); the delegated sitting skips this while the owner is using the machine.
