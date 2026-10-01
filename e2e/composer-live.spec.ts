@@ -80,7 +80,7 @@ function readdirJsonl(dir: string): string[] {
 
 const main = (page: Page) => page.locator('[data-region="main"]');
 const paneAt = (page: Page, index: 0 | 1) => main(page).locator(`[data-pane="${index}"]`);
-const messageIn = (pane: Locator) => pane.getByRole('textbox', { name: 'Message' });
+const messageIn = (pane: Locator) => pane.getByRole('textbox', { name: 'Message', exact: true }); // exact: an open inline edit is "Edited message"
 const controlIn = (pane: Locator) => pane.locator('[data-submit-state]');
 const editorText = (pane: Locator) => pane.locator('[contenteditable="true"]').innerText();
 

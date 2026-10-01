@@ -104,7 +104,7 @@ const sent = (page: Page, id: string) =>
         .map((e) => (e as Extract<SessionEvent, { kind: 'user.message' }>).content),
     id,
   );
-const message = (page: Page) => page.getByRole('textbox', { name: 'Message' });
+const message = (page: Page) => page.getByRole('textbox', { name: 'Message', exact: true });
 
 async function launchEditor(page: Page, id: string, journal: string, cwd = repo): Promise<string | null> {
   await openEditor(page);
@@ -383,7 +383,7 @@ const showPanes = (page: Page, panes: [HarnessPane, HarnessPane]) => page.evalua
 const cards = <K extends keyof CardsHarnessApi>(page: Page, name: K, ...args: Parameters<CardsHarnessApi[K]>) =>
   page.evaluate(([n, a]) => ((window as unknown as CardsWindow).__maws_cards[n] as (...x: unknown[]) => unknown)(...(a as unknown[])), [name, args] as const) as Promise<ReturnType<CardsHarnessApi[K]>>;
 const pane = (page: Page, index: 0 | 1) => page.getByRole('region', { name: `pane ${index}` });
-const messageIn = (page: Page, index: 0 | 1) => pane(page, index).getByRole('textbox', { name: 'Message' });
+const messageIn = (page: Page, index: 0 | 1) => pane(page, index).getByRole('textbox', { name: 'Message', exact: true }); // exact: an open inline edit is "Edited message"
 const control = (page: Page, index: 0 | 1) => pane(page, index).locator('[data-submit-state]');
 const statusOf = async (page: Page, id: string) => value(await invoke(page, 'session.status', { appSessionId: id }));
 const COUNT = 'Count to 30 slowly. For each number use a separate Bash call sleep 1; echo NUMBER. Start now.';

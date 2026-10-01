@@ -50,10 +50,12 @@ export function nextMode(current: PermissionMode | null, autoAvailable: boolean)
 
 // Why auto cannot be chosen: `session.listModels` does not mark the session's model `supportsAutoMode: true` (W3: Haiku's
 // live row omits the key, reads.jsonl seq 3, and the engine refuses it). An unknown model (the list not read yet, or the
-// model not in it) is offered; the engine then refuses in words.
+// model not in it) is offered; the engine then refuses in words. The model asked for decides before the one the last
+// init frame named: an accepted `set_model` is the engine's model at once (pass2/auto-routed seq 151 then 155 refused,
+// no turn between).
 export function autoUnavailableReason(models: readonly Pick<ModelOption, 'value' | 'resolvedModel' | 'supportsAutoMode'>[] | null, model: EngineSessionStatus['model']): string | null {
-  const names = [model.resolved, model.requested].filter((n): n is string => n !== null);
-  const option = models?.find((m) => names.includes(m.value) || names.includes(m.resolvedModel));
+  const rowOf = (name: string | null) => (name === null ? undefined : models?.find((m) => m.value === name || m.resolvedModel === name));
+  const option = rowOf(model.requested) ?? rowOf(model.resolved);
   return option !== undefined && option.supportsAutoMode !== true ? MODE_REFUSAL_WORDS.auto_mode_model : null;
 }
 

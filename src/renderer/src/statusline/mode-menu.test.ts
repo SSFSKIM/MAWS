@@ -31,6 +31,9 @@ describe('mode menu', () => {
     expect(autoUnavailableReason(models, onHaiku.model)).toBe('This model does not support auto mode');
     expect(autoUnavailableReason(models, base.model)).toBeNull(); // claude-opus
     expect(autoUnavailableReason(null, onHaiku.model)).toBeNull(); // not known yet: offered, the engine refuses in words
+    // Haiku asked for, the init frame still naming Opus: the engine already runs Haiku, so auto is unavailable
+    expect(autoUnavailableReason(models, { requested: 'haiku', resolved: 'claude-opus' })).toBe('This model does not support auto mode');
+    expect(autoUnavailableReason(models, { requested: 'opus', resolved: 'claude-haiku' })).toBeNull();
   });
 
   it('the live binding shows the effective mode and sets through session.setPermissionMode, answering the refusal in words', async () => {

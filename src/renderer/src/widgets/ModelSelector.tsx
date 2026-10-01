@@ -249,7 +249,10 @@ function ModelItem({ entry, checked, proposed, pending, locked, greyed, choose }
 // The two views on one track: the inactive one is inert and out of the accessibility tree, and the frame's height
 // follows the active one (Codex's 0.32 s track).
 function Track({ view, effort, model }: { view: View; effort: ReactNode; model: ReactNode }) {
-  const panels = { effort: useRef<HTMLDivElement>(null), model: useRef<HTMLDivElement>(null) };
+  // each ref its own statement: the React compiler memoizes an object literal, hook calls inside it included
+  const effortPanel = useRef<HTMLDivElement>(null);
+  const modelPanel = useRef<HTMLDivElement>(null);
+  const panels = { effort: effortPanel, model: modelPanel };
   const [height, setHeight] = useState<number | null>(null);
   useLayoutEffect(() => {
     const panel = panels[view].current;
