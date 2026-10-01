@@ -1,0 +1,406 @@
+R5 - REFERENCE DELTAS: WHAT CHANGED IN THE PARTS MAWS COPIED (Codex 26.924 -> 26.928.40906; Claude Desktop 2.9939.2 -> 2.16120.0)
+Static source reading only; neither app run, no toolchain run. Every "new" value below was read in the new build's code.
+Old values are as r1-codex.txt and r2-claude-desktop.txt state them (cited there into chatgpt-26.924, app-2.9939.2 and
+web-2026-09-25). MAWS's choices are charter D-4, §5.1 to §5.5 and §6 as amended 2026-10-01, plus the renderer where a
+literal value matters. Tags: [same] = unchanged in the new build; [CHANGED] = the reference moved; [MAWS differs] = MAWS's
+choice and the current app disagree, whatever the cause.
+
+================================================================================================
+BOTTOM LINE
+- No value MAWS adopted has been contradicted by anything that changed in the current builds. In Codex 26.928.40906 every
+  measured number r1 gave is still in the code:
+  - the 768px column with 16px inline padding, shared by transcript and composer, and the 896px breakout
+  - 14px/1.625 prose, 12px code, 13px chrome, headings at 1.5/1.25/1.125/1
+  - the user bubble: 70%, 22px radius, 10x16 padding, 5% tint, 20-line collapse, hover actions
+  - the composer: 22px radius, 44px editor growing to 25dvh, same toolbar assembly
+  - the 254px two-view model and effort menu, with "Default" as a list entry
+  - the change receipt: 3 rows, "Show N more files", the 800ms hover diff up to 420px
+  - 30px/13px sidebar rows, 5 projects and 5 threads, the same hover card
+  - the question pager and its receipt, and the usage and status surfaces
+  The installed 26.928.31416 agrees: its relevant chunks differ from 40906 only by import renames. The CHANGES file between
+  the two touches only personalization and "dot" safety strings.
+- Claude Desktop 2.16120.0 also keeps every value MAWS took:
+  - the 768/960/1280 width setting
+  - the 480px question card with its "{position} of {count}" pager, Skip, Next/Submit, and the "Not answered" receipt
+  - the 240-512 x 384px slash popover
+  - the permission labels and the refused-auto wording
+  - the context ring popover
+  - the /rewind picker
+  - 30px sidebar rows
+- What the owner will see differ, from upstream changes:
+  1. Codex renamed Review to "Changes". The side-panel tab is "Changes" and the receipt's hover line and tooltip read "View
+     changes". MAWS still says "Review changes" and calls its tool Review. [MAWS differs: wording only]
+  2. Codex dropped the "Priority" sidebar sort. Last updated is the default, and a stored "priority" sort is migrated to it.
+     MAWS's recency-sorted project list now matches.
+  3. Claude Desktop removed the composer's 0.5rem overhang, so its composer is now exactly the column's width. That is MAWS's
+     rule, so the two now agree.
+  4. Claude Desktop's "Large" transcript text went from 16px to 15px with a 22px leading. MAWS does not copy that setting, so
+     this has no effect.
+- What re-checking found that is not drift: these mismatches existed against the old builds too.
+  a. Composer shadow. In Codex the 40px-blur shadow r1 quoted applies only to windows under 40rem (640px). Every wider
+     window gets "0 4px 80px 8px". MAWS's tokens.css:31 copied the 40px value. [MAWS differs]
+  b. Question card. MAWS's single-select pick advances on its own. Claude Desktop never auto-advances (a click only selects;
+     Next moves on), and r1 records that Codex enables Next only once the question is answered. This is MAWS's own rule.
+  c. Model list. MAWS shows "Default" with a badge. Codex shows "Default" with the sub-text "Recommended set of models" and
+     no badge.
+  d. Refused-auto notice. MAWS says "Auto mode isn't available for this session. Using acceptEdits instead." Claude says
+     "... Asking for permissions instead." or "Auto mode isn’t available for the selected model. Switched to {newMode}.",
+     where {newMode} is a label such as "Accept edits". MAWS shows the mode id and a straight apostrophe.
+- New and worth a probe: Claude Desktop renders engine-driven UI when the init frame advertises capabilities
+  ["ui_surface_v1"] (Claude item 1 under NEW PATTERNS).
+
+================================================================================================
+CITATION KEYS
+Codex, new build (all under readable/chatgpt-26.928.40906/renderer/):
+ P=app/app-primary-fc3cefe64ba8.js  I=app/app-initial-27bc4044d9e8.js  S=app/app-shared-360504a28a87.js
+ SE=app/sites-end-resource-ef2bd7525d8a.js (the conversation-blocks code, r1's C, now lives here)
+ SL=app/thread-scroll-layout-b45c99aa63d3.js  U=app/user-message-2eaf55559eca.js
+ UC=app/collapsible-user-message-content-355399a43ad2.js  LT=app/local-conversation-turn-7f65abe2121b.js
+ DPT=app/diff-preview-tooltip-9bb0250884fa.js  DPC=app/diff-preview-content-330213877d5d.js
+ LCT=app/local-conversation-thread-35b32b5894a6.js
+ CS=css/app-shared-24ce7a84cb1a.css  CI=css/app-initial-2e28cd4bbe72.css (the Markdown CSS module moved here from
+ app-primary.css)  CP=css/app-primary-547a6c7b4fb3.css  CU=css/user-message-f152e09d34c3.css
+ CP and CU are byte-identical in 26.928.31416, the installed build.
+Claude Desktop, new build:
+ N=readable/app-2.16120.0/web/app/v1/  NC=readable/app-2.16120.0/web/css/v1/  M=readable/app-2.16120.0/main-process/
+Claude Desktop, old build (to establish a change):
+ O=readable/web-2026-09-25/renderer/app/  OC=readable/web-2026-09-25/renderer/css/
+
+================================================================================================
+CODEX
+
+X1. THREAD MEASURE
+- Column width: 48rem (768px) -> 48rem, Electron body block, CS:50780 [same]
+  - The column class (mx-auto max-w-(--thread-body-max-width) px-toolbar) is now in I:211738-211743.
+  - The transcript uses it at SL:1532 and the composer footer at SL:1404-1407, so the composer still equals the column.
+- Inline padding: px-toolbar = --padding-toolbar spacing*4 = 16px, CS:51022; --thread-body-inline-padding is set for the
+  browser only, CS:50803; so 768 - 2x16 = 736px of text [same]
+- New prop: transcriptWidth, "constrained" (default) or "full" (w-full px-toolbar), SL:451, SL:1532. No caller in this
+  build sets it: a grep for transcriptWidth across renderer/ finds only SL. The browser-only compact 40rem is at CS:50801.
+- Wide-block breakout: --markdown-wide-block-max-width 56rem (896px), CS:50786 [same cap]
+  - Wide tables changed. They now take width fit-content up to --wide-block-width (CI:9658-9672), where they used to fill
+    it; the 36px reservation for the table action buttons is gone with the buttons (old CP:495-512 in 26.924).
+  - MAWS's "wide blocks allowed to 896px" still holds.
+- Item gap 16px, grouped 4px, CS:51052-51053 [same]
+
+X2. TYPOGRAPHY
+- Prose: 14px at 1.625 (22.75px) [same]
+  - Settings defaults: sansFontSize 14, codeFontSize 12, S:141499-141512.
+  - Runtime: --text-base 14 / --text-sm 13 / --text-xs 12; --text-lg 16; heading-lg 24 / md 20 / sm 18, I:578232-578244.
+  - --leading-relaxed 1.625, CS:3710. The Markdown root sizes its text from --codex-chat-font-size with line-height
+    font * leading-relaxed, CI:9545-9575.
+  - Paragraph + paragraph gap is markdown-space*4 = 14px, CI:9407-9411. List indent is one line height, CI:9392-9396.
+- Code: 12px [same]
+  - "block text-size-code", padding "p-4 md:px-5": S:392005, S:391996. .text-size-code: CS:23391-23393.
+  - Code block margin is markdown-space*5 = 17.5px, CI:9790-9791.
+  - Inline code (0.92em, 1px 6px, radius 6px, ghost-hover mix) moved into the Markdown module, CI:9796-9817. The global
+    .inline-markdown is unchanged, CS:10503.
+  - Diffs 12px x1.8, CS:51055-51056.
+- Chrome: 13px [same]. --text-sm = sans - 1, I:578239. .text-size-chat-sm is chat - 1px, CS:23388-23390. The sidebar row
+  base is text-sm, I:436574.
+- Headings [same], CI:9361-9384. Each is semibold with a 14px top margin.
+  - h1: 1.5x, line-height space*8 (28px)
+  - h2: 1.25x, space*7 (24.5px)
+  - h3: 1.125x, space*7
+  - h4: 1x, space*6 (21px)
+- The Markdown CSS module (r1's CP:80-812 in 26.924, now CI:9235-9967) differs only in the table and code-placeholder rules
+  noted above.
+
+X3. USER BUBBLE
+- Width / radius / padding: 70% / 22px / 16px inline (_bubble_11evq_1, CU:2-6); "py-2.5" (10px), "rounded-2xl", U:1484-1492 [same]
+  - New _leadingBubble_11evq_7 at 100% width (CU:7-9), used for alignment "start" (U:1486, U:1819). The default is "end"
+    (U:1210); no "start" caller was found.
+- Tint: color-mix(in oklab, var(--color-text) 5%, transparent), CS:6531-6535 [same]
+- Collapse: collapsedLineCount defaults to 20 (UC:374, UC:22) with an "ellipsis" indicator, so 19 lines plus "…" (UC:40-41).
+  "Show more" / "Show less" use "mt-1.5 self-start text-size-chat", UC:282-299 [same]
+  - New collapseIndicator "fade" (mask-b-from-80%, UC:202), used only by automations-page-5104af64ca6f.js:3358.
+- Hover actions: action row and timestamp go opacity-0 -> group-hover/focus-within (U:1848, U:2001-2005) [same]
+  - The edit strings are unchanged: "Edit message", "Cancel", "Send" (codex.userMessage.editAriaLabel, cancelEditMessage,
+    sendEditedMessage).
+
+X4. COMPOSER
+- Frame radius: --composer-radius spacing*5.5 = 22px, corner-shape round, CS:6033-6034. The browser value is 28px
+  superellipse, CS:50756 [same]
+- Shadow: --elevation-composer at ≥40rem is "0 0 0 1px #0000000a, 0 2px 8px 0 #0000000a, 0 4px 80px 8px #00000006"
+  (CS:51001-51002). Below 40rem the 4th term blurs 40px (CS:51005-51009). [same; 26.924 had the identical pair at
+  CS:47920-47928]
+  - r1 quoted the narrow variant. MAWS tokens.css:31 uses 40px. [MAWS differs]
+- Rest height (unchanged in CS, I and P) [same]
+  - min-height spacing*11 = 44px; line-height spacing*5 = 20px; padding 0 12px; placeholder opacity .5 (CS:51026-51034)
+  - placeholder "Do anything", P:60725
+- Growth cap: max-h-[min(25dvh,var(--composer-editor-max-height,25dvh))], I:83022. Forms use min(25dvh,7lh), I:83021 [same]
+- Toolbar assembly [same structure] (P:57164-57175 is the AdaptiveFooter)
+  - leadingControls: the inline group (its items were not re-traced one by one)
+  - trailingControls: FooterExpandingControls (P:56778-56795), then FooterActions (P:56832-56836)
+  - FooterExpandingControls renders K2e: context donut if enabled -> model/effort chip BW -> hotkey-window controls ->
+    divider + IDE context (P:57731-57798)
+  - FooterActions: mic, then the round primary button (its "Start voice chat" label is at P:48154; the Send, Stop and
+    Queue states were not re-traced)
+  - Composer button size spacing*7 = 28px, CS:3836
+  - New: the footer is a responsive container (_ComposerFooter_1yvlf_1[data-composer-footer-responsive],
+    CI:9235-9241, I:82604)
+
+X5. MODEL PICKER AND EFFORT
+- Menu geometry [same]
+  - menu width 254 (L0e, P:52122; CSS spacing*63.5 at CP:1129); sideOffset 8 (R0e, P:52123)
+  - enter animation 0.32s cubic-bezier(.23,1,.32,1) 30ms, scale .98->1, CP:1139-1150
+  - New: a 0.5px ring and --shadow-xl-spread on the dropdown, CP:1124-1128
+- Two views [same]
+  - ViewTrack/ViewPanel: P:50686, P:50702, P:50888. ViewControls: P:50125.
+  - The picker CSS module _1d00n_ is unchanged: 26.924 CP:1405-1890 = new CP:442-927.
+  - The list's max-h min(316px, ...) is at CP:569. The accent colours (chart-blue, purple for max/ultra) are at
+    CP:753-886.
+- Effort slider [same]
+  - labels None / Minimal / Light / Medium / High / Extra High / Max / Ultra / Persistent, P:48498-48545
+  - a11y "Power", P:48841
+  - The Fast toggle (P:49959, P:50017) and ResetToDefault (P:50078) are unchanged. The service-tier submenu with an
+    Ultrafast icon (P:49959-49975) already existed in 26.924.
+- "Default" handling [same]
+  - "Select model" heading, P:50723
+  - "Default" is a menuitemradio with the sub-text "Recommended set of models" and a check when selected; it has no badge
+    (P:50759-50789)
+  - The chip shows the model name plus the effort label, never "Default". While the menu is open on an explicit model it
+    reads "Select effort" (P:54744-54760).
+  - MAWS adds a badge to the Default entry. [MAWS differs: minor]
+
+X6. FILE-CHANGE RECEIPT
+- Rows [same]
+  - first 3 (BE = 3, SE:19591), then "{count, plural, one {Show # more file} other {Show # more files}}" / "Collapse files",
+    SE:18995-19025
+  - each row is "flex h-9 ... text-size-chat" (36px), SE:19256, SE:19328, SE:19404; offscreen rows get a 36px intrinsic
+    size, SE:18974
+  - MAWS's button reads "Show 2 more" without "files". [minor]
+- Header [same]
+  - "Edited {filename}" / "Edited # files", SE:18518-18533
+  - Undo/Reapply, SE:18842-18848; toasts "Changes reverted" / "Changes reapplied" / "Failed to revert changes",
+    SE:18619-18638
+  - the receipt is still the last turn section, LT:6319
+- Wording [CHANGED]
+  - The hover subtitle "Review changes" is now "View changes" (codex.unifiedDiff.reviewChangesHover), SE:18802-18806.
+  - The tooltip "Review" is now "View changes" (codex.unifiedDiff.viewDiffTooltip), SE:19602-19605.
+  - The side-panel tab "Review" is now "Changes" (thread.sidePanel.diffTab), I:562605-562609.
+  - Commands now read "Open Changes tab" and "Toggle Changes panel". MAWS keeps "Review changes" and the Review tool name.
+- Hover diff [same]
+  - DiffPreviewTooltip wraps the header (SE:19080) and every row (SE:19445)
+  - delay 800ms (DPT:169 into delayDuration at DPT:81); side "top", sideOffset 0 (DPT:85-86)
+  - height min(420px, available, 100vh-16px); width = row width - 64px (DPT:89, DPT:171)
+  - the card is "rounded-lg border ... shadow-xl" (DPC:123) with an h-9 header (DPC:62) and a max-h-96 body (DPC:88)
+
+X7. SIDEBAR
+- Rows: .sidebar-navigation sets --height-token-nav-row 30px, --padding-row-x 8px and --radius-token-row 10px
+  (CS:27447-27457). The row base is "group relative cursor-interaction text-sm hover:bg-primary-ghost-hover" (I:436574).
+  So rows are 30px at 13px [same].
+- Project cap [same]
+  - projectRowBehavior "expand", hideThreadTimestamps, maxGroups 5, I:547143-547147
+  - 5 threads per project (ncs = 5 at I:546547, used at I:544838 and I:545584)
+  - MAWS: a drill-in with no cap (owner's ruling, W5)
+- Hover card: "w-[min(20rem,calc(100vw-16px))] min-w-56" with the title/status header, project and repository rows,
+  I:443155-443160 [same]
+  - Still no branch. "Runs on your computer" / "Runs in the cloud" are unchanged.
+  - New for cloud chats with a local executor: "Runs on your computer when available" (sidebar.thread.hoverCard.localExecutor).
+- Sort [CHANGED]
+  - The menu is now Last updated / Created / Manual order, I:518132-518145. "Priority" ("Needs input and unread chats
+    first") and the pinned Priority sort are removed.
+  - Stored "priority" and "created_at" sort modes are migrated to "updated_at", I:132028-132045.
+  - The separate "View activity" filter view, with its Priority section, Pinned and Today/Yesterday, is unchanged
+    (sidebarElectron.priorityThreads.*, I:553030-553066).
+  - MAWS's level-one list, sorted by recency, now agrees with Codex's default.
+
+X8. QUESTIONS (request_user_input)
+- Form [same]
+  - The pager is "flex shrink-0 items-center gap-1 text-xs text-codex-description" with Previous/Next icon buttons,
+    P:32850; its aria strings are at P:32814 ff.
+  - Every requestInputPanel.* string is unchanged: Skip, Next, Submit, Continue, "Type here", Recommended, Dismiss, ESC.
+  - None of the 108 question-related string ids changed between the builds.
+- Receipt: "Asking question(s)" -> "<label>Asked</label> # questions" (SE:19666); "No answer provided" (SE:19710) [same]
+
+X9. STATUS / USAGE
+- Context donut: setting show-context-window-usage, default false (S:142085-142091); tooltip "Context window:"
+  (P:48241-48267) [same]
+- /status: "Show chat ID, context usage, and rate limits" (P:74625); rows "{remaining}% left" / "... on {window}"
+  (P:74180-74302) [same]
+- Banners [minor]: rateLimitBanner.loading and loadError were removed, and so was the "use one of your rate limit resets"
+  upsell (codex.upsellBanner.rateLimitReset.*). Of 191 usage, status and rate-limit string ids, 12 changed, all pricing or
+  banner copy.
+
+================================================================================================
+CLAUDE DESKTOP
+
+C1. COLUMN AND MEASURE
+- Width [same]
+  - --max-content-width: 768 default, m 960, l 1280 (N shared-14-CpDka_kY.js:998; NC c6a992d55-C7KEixqs.css:26668,
+    56201-56215; old O shared-7-CQvmPZlR.js:807)
+  - The setting: "Transcript width", "Maximum width of the transcript and composer columns.", s Narrow / m Medium /
+    l Wide, default s (N c7357c32b-g9wrJ3B3.js:644-682; old O cd19fedd2-DyyQWypL.js:592-626)
+  - MAWS's 768/960/1280 matches.
+- Gutters: --chat-gutter 32px each side; 16px inside a tile slot of 560px or less (N shared-14-CpDka_kY.js:992-995) [same]
+- Session rail: 17.5rem (NC c6a992d55-C7KEixqs.css:26839) [same]
+
+C2. TEXT AND CODE SIZE
+- Transcript text [same]
+  - --chat-body .875rem (14px), --chat-leading 1.42857 (20px); turn gap .75 line; item gap .5 line (NC
+    c6a992d55-C7KEixqs.css:63003-63010; old OC c6a992d55-DRT6pRFV.css:60954-60961)
+  - data-chat-text-size s: .8125rem (13px), NC :63011-63013
+- data-chat-text-size l: 1rem at 1.42857 -> .9375rem (15px) with --chat-leading 1.46667 (22px) (NC :63014-63017; old OC
+  :60965-60967) [CHANGED; MAWS uses Codex's 14px and has no text-size setting]
+- Setting "Transcript text size": Small/Medium/Large, default m (N c7357c32b-g9wrJ3B3.js:595-633) [same]
+- Code: --cds-font-size-code 12px base / 13px comfortable (NC c6a992d55-C7KEixqs.css:59466, 60008) [same]
+- User bubble (side note) [same]
+  - "py-md px-lg rounded-card bg-alpha-1", max-w-[85%] (N ccb1c7023-PWOfLwHn.js:13375-13377)
+  - rounded-card = radius + .25rem (NC c6a992d55-C7KEixqs.css:15260-15263)
+  - MAWS follows Codex's bubble.
+
+C3. COMPOSER AND CHIN
+- Box [same]
+  - "relative isolate min-h-11 rounded-[10px]" (44px, 10px radius), N shared-14-CpDka_kY.js:1026-1028
+  - at rest "0 0 0 1px ring, 0 2px 8px" at 4%; on focus a 25% ring and 0 6px 16px (NC shared-styles-BQOK7pa2.css:1830-1848)
+  - editor max min(24rem, 40svh), N c099c328d-5nTn7_08.js:10136
+- Overhang [CHANGED]
+  - old: "[--composer-span-overhang:0.5rem] ... ps-[max(0px,calc(var(--chat-column-gutter-start)-var(--composer-span-overhang)))]
+    pe-0" (O shared-7-CQvmPZlR.js:828)
+  - new: "ps-[var(--chat-column-gutter-start)] pe-[var(--chat-column-gutter-end)]" (N shared-14-CpDka_kY.js:1021), and no
+    overhang token remains in the bundle
+  - The composer now equals the column, which is MAWS's rule (via Codex).
+- Chin, ChatComposerChin [same]
+  - classes "flex min-h-control items-center gap-0 text-footnote font-normal text-secondary"; margin "mt-1.5
+    comfortable:mt-2"; min-h-control is 24px base / 32px comfortable (N shared-13-DG4pYUEQ.js:1744-1781)
+  - leading: [+][mic][Mode][coordinator toggle] (N cc70f2bdf-D647tnQd.js:4179-4205, 4322-4330)
+  - trailing: [footer indicator "Set by Claude Code’s server configuration."][model][effort][accessory][usage ring]
+    (N cc70f2bdf-D647tnQd.js:3703-3732, 4335-4344, 4393)
+  - new child: EngineFooterStrip (N cc70f2bdf-D647tnQd.js:4334), see C7
+  - MAWS keeps Codex's single toolbar row inside the frame rather than a chin.
+
+C4. ASKUSERQUESTION
+The card moved to its own lazy chunk. [same]
+- card: "epitaxy-question-card max-w-[480px] outline-none", role=group (N c2f6611a3-ht6BH43s.js:1420; old O
+  c1c1ec7b9-DVuWiUSs.js:7881)
+- pager: "{position} of {count}" between "Show previous question" / "Show next question", only when there is more than one
+  question (N c2f6611a3-ht6BH43s.js:1376-1410)
+- Other: last row, "Type your own answer here", 4-line autosize, Cmd/Ctrl+Enter (N :1458-1520)
+- footer: "Skip", then "Next" that becomes "Submit" (N :1527-1546)
+- disabled reasons: "Question {n} is unanswered" / "Choose an option or skip this question" (N :1228, :1236)
+- A single-select click only sets the selection; Next advances (selection N :1181-1201; next N :1239-1249). Same in the
+  old build, O c1c1ec7b9-DVuWiUSs.js:7642-7661. MAWS's auto-advance is its own rule. [MAWS differs]
+- receipt: "epitaxy-question-receipt epitaxy-card-outline ... max-w-[480px] ... rounded-lg"; pairs px-lg py-md; "Not
+  answered" (N c1c1ec7b9-CH4jJYbz.js:38069-38074, 38184)
+
+C5. MODEL AND EFFORT PILLS
+- Model pill [same]
+  - triggerVariant "pill"; in the composer it opens side top, align end (N c360a9e1c-CFhoxQug.js:5964-5976)
+  - composer and rail use {shortcuts:true, thinkingStyle:"separate"} (N :5631-5634, 5666-5676)
+- New placements "titlebar" and "chin" drop thinkingStyle, so effort becomes a submenu inside the model menu (N
+  c360a9e1c-CFhoxQug.js:5652-5665; N shared-16-vTpLIF6k.js:3320-3356) [NEW]
+- Menu [same]
+  - popup max-w-[min(26rem,var(--available-width))] (N shared-16-vTpLIF6k.js:2884)
+  - "More models", "Search models", "No matches", "Loading models…"; "Default model" only for an empty catalog (N
+    :3286-3289, 3596, 3604)
+  - badges "Default" / "Preset" (N c360a9e1c-CFhoxQug.js:5850, 5861)
+  - shortcuts Cmd+Shift+I / E / M (N shared-24-Bdy5JIXG.js:18636-18654)
+- Effort popover [same]
+  - "w-[220px]", "About effort", Faster/Smarter, "High usage", and the Max warning text (N c8e04f916-C5CoSFyY.js:286-301, 361)
+  - labels Low / Medium / High / Extra-high / Max (N c1c1ec7b9-CH4jJYbz.js:7690); "Ultracode" (N c360a9e1c-CFhoxQug.js:1644)
+  - "Change effort?" (N cc43287c9-ua-2O55p.js:33298-33301)
+  - MAWS uses Codex's one-menu selector instead.
+
+C6. CONTEXT RING, PERMISSIONS, SLASH, REWIND, SIDEBAR
+- Ring [same]
+  - trigger aria "Usage: {parts}", "{pct}% of 5-hour limit" (N cc70f2bdf-D647tnQd.js:3074-3188)
+  - popover w-[360px], max-h min(available, 640px) (N :3360)
+  - popover contents (N c2d611398-DEjry0GQ.js; MAWS's percent / threshold / Compact are all present):
+    - "Context window", with a per-category breakdown that existed already but r2 did not list (:1004-1016, 198-375)
+    - "{percent} used" :1134
+    - Compact session :1172
+    - See detailed breakdown :957
+    - Extra usage / Usage credits :579 / :583
+    - View usage in Settings :503
+    - "Last updated {time}. Send a message to refresh." :1068
+  - "{tokens} until auto-compact" / "Auto-compacts soon" (N cf6ae6197-NvQqGhz6.js:6686, 6695)
+  - New variant: "Last updated {time}. Refreshes when this turn ends." (N c2d611398-DEjry0GQ.js:1060)
+- Permission labels [same] (N shared-16-vTpLIF6k.js:8087-8287)
+  - Manual "Always ask before making changes" :8281
+  - Accept edits "Automatically accept all file edits" :8121
+  - Plan "Create a plan before making changes" :8109
+  - Auto "Claude handles permission decisions" :8174
+  - Bypass permissions "Accepts all permissions" :8205
+  - Don’t ask "Deny actions that aren’t pre-approved, without prompting" :8225
+- Refused-auto notices [same]
+  - "Auto mode isn’t available for this session. Asking for permissions instead." (N ce401cf8e-BLvGLgTB.js:331-334)
+  - "Auto mode isn’t available for the selected model. Switched to {newMode}." where {newMode} is the mode's label (N
+    cf6ae6197-NvQqGhz6.js:4886-4894)
+  - MAWS has "Auto mode isn't available for this session. Using acceptEdits instead." and "... for Haiku. This session will
+    use acceptEdits instead." (src/renderer/src/composer/Composer.test.tsx:418, src/shared/sessions/models.test.ts:18).
+    These use the mode id and a straight apostrophe. [MAWS differs: wording]
+- Slash list [same]
+  - "flex flex-col min-w-60 max-w-lg max-h-96" (240-512 x 384px), maxHeightCap 384 (N shared-13-DG4pYUEQ.js:8208, 8587)
+  - host commands: the same 44 names (N cc183b3ab-Dhj2eRNS.js:196-500); new alias "side" for /btw (:204)
+- /rewind [same]
+  - "Rewind the session to an earlier message", noArgs, gated on host intercept + session + not remote, not
+    neverReachesCli (N cc183b3ab-Dhj2eRNS.js:28-31, 215-219)
+  - picker "Rewind session", max-w-[32rem], "Nothing to rewind to yet" (N cc43287c9-ua-2O55p.js:35336-35360)
+  - confirm "Rewind to this message?": Code and conversation / Conversation only / Code only (:35143-35169), with "Changes
+    made through shell commands aren’t reverted. Commits stay in place." (:35220)
+  - MAWS's conversation/files/both picker matches.
+- Sidebar rows [same]
+  - desktop comfortable --df-row-h 30px, group padding-top 14px (NC shared-styles-BQOK7pa2.css:2148-2151)
+  - compact 26px / 13px; comfortable 32px / 14px (:888-912, :2132-2137)
+  - hover row menu "More options for {label}" unchanged
+
+C7. VERIFICATION NOTE
+C1 to C6 were read by a second pass over the same Claude trees, run in parallel with the Codex half. The author re-read
+these in the code: the overhang (both builds), the 15px Large size, ui_surface_v1, the question card's selection and Next
+logic, and the refused-auto strings with their {newMode} label. The remaining Claude citations are that pass's readings,
+not re-read line by line.
+
+================================================================================================
+NEW PATTERNS NOT COPIED (reported, not designed)
+Codex 26.928.40906:
+1. Writer-conflict "Fork chat". The banner "This is open in another app" / "Close it there to continue here." with Retry
+   now also offers Fork chat: copy the chat into a new one and continue there (LCT:25832-25870,
+   localConversation.writerConflict.fork). MAWS's equivalent is the terminal-held takeover, which signals the holder after
+   a confirm.
+2. The Review -> Changes rename across tab, commands and receipt (X6). The diff view's Auto mode is now "inline for narrow
+   panes or one-sided changes" (codex.diffView.autoDescription).
+3. Sidebar
+   - the Priority sort is gone (X7)
+   - an "Unread updates" nav-item marker (sidebar.navItem.unread, I:238420, I:425411)
+   - "Failed to mark chat as read" (sidebarElectron.markReadError)
+4. Speed. The command "Toggle Fast mode" became "Cycle speed": Standard, Fast, Ultrafast
+   (codex.commandDescription.composer.toggleFastMode).
+5. The thread footer backdrop is now split into a solid surface part behind the composer and a 32px gradient fade above
+   it (I:211693-211717, used at SL:1439 and SL:1554).
+6. Composer
+   - "Dismiss suggestion" on composer suggestions (I:658398-658402)
+   - "Retry upload" on failed file attachments (composer.fileAttachment.retryHint)
+7. Settings
+   - "Confirm before closing a window": Always / Close shortcut only / Never (settings.general.confirmBeforeClose.*)
+   - "Compress local chat history" (settings.general.rolloutCompression.*)
+Claude Desktop 2.16120.0:
+1. Engine-driven UI surface (unverified wire claim; probe before relying on it)
+   - the main process reads the init frame's capabilities.includes("ui_surface_v1") and handles a "ui_invalidate" event
+     (M index.chunk-Nnw-A1di.js:48906-48910, 83660)
+   - a new EngineSurface IPC service: uiRender, uiPress, uiInput, uiSelect, uiPanes, uiPaneShow, uiClientModule,
+     uiHostAnswer; events uiNotified, uiPanesChanged, uiHostAsked (M index.chunk-kXuYPTnM.js:309451;
+     readable/app-2.16120.0/ipc-services.md:79-101)
+   - the chin mounts EngineFooterStrip (N cc70f2bdf-D647tnQd.js:4334; N c3efc6f9e-DE2CAAdU.js:17-23)
+2. Title-bar session pill, data-testid titlebar-session-pill: h-control, rounded-full, max 18.75rem. It carries the model
+   and mode pickers, which open downward, with effort as a submenu. It is shown by rail mode and fit (N
+   cc43287c9-ua-2O55p.js:10909-10948, 50873-50878; N cc70f2bdf-D647tnQd.js:4086, 4128, 4200-4225).
+3. Repository trust in the composer dock: "Claude needs you to trust this repository before it can work here." with
+   "Trust repository…" (N cf74bc599-BBdmv0CY.js:11478-11486), backed by LocalSessions.reviewRepository
+   (ipc-services.md:545).
+4. A "servers" card in the session rail, with dock rows "Open {name} in Browser" / "Open {name} in Preview" (N
+   cc70f2bdf-D647tnQd.js:3369-3381; N cf74bc599-BBdmv0CY.js:14359-14368).
+5. Actionable OS notifications with Allow and Deny on "Claude needs your input to continue" (N ce8ecfba4-CHLLrlf0.js:3325-3375;
+   DesktopNotifications.showNotificationWithActions). These look scoped to Projects/remote sessions.
+6. Usage
+   - a palette entry "Usage — Show session usage" (N shared-13-DG4pYUEQ.js:9010-9019)
+   - a Settings page "Token usage and estimated cost on this device across Chat, Cowork, and Code." with a time range
+     (N c71860c77-Ddd_t8di.js:395)
+7. Connector approval cards for message drafts can be edited before Allow: "Allowing this uses your edits." (N
+   c1c1ec7b9-CH4jJYbz.js:9407, 15579-15593). This is for connectors only, not Code tools.
+8. The in-app changelog's top entry is still 2.9939.4 (N cb63ed069-BJzbolP4.js:30-50), so there are no release notes to
+   lean on for this build.
+Present in both Claude builds but not in r2, useful when sitting with the app:
+- a user-message menu with "Rewind to here" ("Removes this message and what follows") and "Fork from here" ("Starts a new
+  session, keeps this one") (N ccb1c7023-PWOfLwHn.js:9061-9087)
+- "Undo rewind" / "Redo rewind" rows after a rewind (N c1c1ec7b9-CH4jJYbz.js:53277-53288)
