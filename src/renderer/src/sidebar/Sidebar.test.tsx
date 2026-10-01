@@ -138,11 +138,23 @@ describe('a project’s page', () => {
     expect(label('Sidebar interaction pass')).toBe('Question');
   });
 
-  it('shows the foreign-live holder and offers Open only in its context menu', async () => {
+  // W5 (D2): one line per row; the holder, the activity and the last answer are the hover card's.
+  it('keeps a row to one line: glyph, title, pin mark, unread dot, age', () => {
+    openPage('proj-maws');
+    render(<Sidebar />);
+    const charter = row('Charter + research');
+    expect(within(charter).queryByText('Running bun test')).toBeNull();
+    expect(charter.textContent).toBe('●Charter + researchnow');
+    expect(within(row('Workstation north star')).getByRole('img', { name: 'Pinned' })).toBeTruthy();
+    expect(within(charter).queryByRole('img', { name: 'Pinned' })).toBeNull();
+    expect(within(row('Fix sidebar drag')).getByRole('img', { name: 'Unread' })).toBeTruthy();
+  });
+
+  it('offers a foreign-live session Open only in its context menu, and no hover actions', async () => {
     openPage('proj-codex-somersault');
     render(<Sidebar />);
     const foreign = row('Somersault terminal run');
-    expect(within(foreign).getByText('Terminal · pid 7135')).toBeTruthy();
+    expect(within(foreign).queryByRole('button')).toBeNull();
     fireEvent.contextMenu(foreign);
     const menu = await screen.findByRole('menu');
     expect(within(menu).getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['Open']);

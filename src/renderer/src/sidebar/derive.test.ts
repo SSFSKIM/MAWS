@@ -5,7 +5,7 @@ import type { SessionDigest } from '@shared/ipc/schema';
 import { digest, item, project, record } from '../../../../test/support/builders';
 import { TEST_FIXTURE_DIR } from '../../../../test/support/fixtures';
 import { loadScenario } from '../../../../test/support/scenario';
-import { needsYou } from '../attention/derive';
+import { holderLine, needsYou, waitingItem } from '../attention/derive';
 import { orderProjects } from '../overview/derive';
 import type { WorktreeInfo } from '@shared/sessions/worktree';
 import {
@@ -17,7 +17,6 @@ import {
   projectList,
   projectPage,
   rowBranch,
-  secondaryLine,
   sessionAge,
   sessionMatcher,
   type ProjectListInput,
@@ -154,34 +153,31 @@ describe('a project’s page', () => {
 describe('sidebar row text', () => {
   const at = (iso: string) => Date.parse(iso);
 
-  it('the secondary line: holder for foreign-live, the waiting item, the activity while working, else the last answer', () => {
-    const r = record('r');
-    expect(secondaryLine(record('t', { holder: { kind: 'terminal', pid: 7135 } }), digest('t', { phase: 'foreign', lastAssistantLine: 'x' }), [])).toBe('Terminal · pid 7135');
+  // W5: the row is one line; what its second line said (the holder, the activity) is in the hover card, which reads these.
+  it('the holder of a foreign-live session, a background job by its short id', () => {
+    expect(holderLine(record('t', { holder: { kind: 'terminal', pid: 7135 } }))).toBe('Terminal · pid 7135');
     // debt wave 4: a background job reads by the short id `claude --bg` printed, its pid only without one
-    expect(secondaryLine(record('b', { holder: { kind: 'background_job', pid: 4242, jobId: 'e6dcd828' } }), null, [])).toBe('bg · e6dcd828');
-    expect(secondaryLine(record('b', { holder: { kind: 'background_job', pid: 4242, jobId: null } }), null, [])).toBe('bg · pid 4242');
-    expect(secondaryLine(record('b', { holder: { kind: 'background_job', pid: null, jobId: null } }), null, [])).toBe('Background job');
-    expect(secondaryLine(r, digest('r', { phase: 'waiting', lastAssistantLine: 'old' }), [item('r', 'question', '2026-09-28T10:00:00Z', { summary: 'Which color?' })])).toBe('Which color?');
-    expect(secondaryLine(r, digest('r', { phase: 'working', activity: 'Running bun test', lastAssistantLine: 'old' }), [])).toBe('Running bun test');
-    expect(secondaryLine(r, digest('r', { phase: 'idle', lastAssistantLine: 'Done.' }), [])).toBe('Done.');
-    expect(secondaryLine(r, null, [])).toBeNull();
+    expect(holderLine(record('b', { holder: { kind: 'background_job', pid: 4242, jobId: 'e6dcd828' } }))).toBe('bg · e6dcd828');
+    expect(holderLine(record('b', { holder: { kind: 'background_job', pid: 4242, jobId: null } }))).toBe('bg · pid 4242');
+    expect(holderLine(record('b', { holder: { kind: 'background_job', pid: null, jobId: null } }))).toBe('Background job');
+    expect(holderLine(record('s'))).toBeNull();
   });
 
-  it('the branch chip: a worktree session’s branch, none for a session in the project directory', () => {
+  it('a worktree session’s branch, none for a session in the project directory', () => {
     expect(rowBranch(record('w', { worktree: { path: '/w/.claude/worktrees/a', branch: 'worktree-a' }, branch: 'stale' }))).toBe('worktree-a');
     expect(rowBranch(record('w', { worktree: { path: '/w/.claude/worktrees/a', branch: null }, branch: 'from-index' }))).toBe('from-index');
     expect(rowBranch(record('w', { worktree: { path: '/w/.claude/worktrees/a', branch: null } }))).toBeNull();
     expect(rowBranch(record('p', { branch: 'main' }))).toBeNull();
   });
 
-  it('the waiting item is the one its Needs-you row shows: an actionable item outranks an older held message', () => {
+  it('the waiting item a hover card shows is the one main notifies: an actionable item outranks an older held message', () => {
     const r = record('r');
     const held = item('r', 'held_peer_message', '2026-09-28T09:00:00Z', { summary: 'Message from reviewer' });
     const permission = item('r', 'permission', '2026-09-28T10:00:00Z', { summary: 'Bash: git push' });
     const pending = [held, permission];
     expect(needsYou(new Map([[r.appId, pending]]), new Map([[r.appId, r]]))[0].oldest).toBe(permission);
-    expect(secondaryLine(r, digest('r', { phase: 'waiting' }), pending)).toBe('Bash: git push');
-    expect(secondaryLine(r, digest('r', { phase: 'idle' }), [held])).toBe('Message from reviewer');
+    expect(waitingItem(pending)?.oldest).toBe(permission);
+    expect(waitingItem([held])?.oldest).toBe(held);
   });
 
   it('ages read now, minutes, hours, days, weeks', () => {

@@ -36,16 +36,18 @@ describe('layout persistence', () => {
     vi.useRealTimers();
   });
 
-  it('writes nothing before hydration, and hydration writes only the keys layout.json lacks', async () => {
-    const regions = { ...LAYOUT_DEFAULTS.regions, sidebar: { ...LAYOUT_DEFAULTS.regions.sidebar, width: 410 } };
+  it('writes nothing before hydration, and hydration writes only the keys layout.json lacks and those changed meanwhile', async () => {
+    const regions = { ...LAYOUT_DEFAULTS.regions, sidebar: { ...LAYOUT_DEFAULTS.regions.sidebar, width: 410, sort: 'recency' as const } };
     const { store, hydrate, sets } = setup({ regions, 'main.tabs': undefined });
     store.getState().setSidebar({ width: 260 }); // the persisted value is not known yet: writing now would clobber it
     vi.advanceTimersByTime(1000);
     expect(sets()).toEqual([]);
     await hydrate();
     vi.advanceTimersByTime(1000);
-    expect(sets()).toEqual([{ key: 'main.tabs', value: LAYOUT_DEFAULTS.main }]); // a first launch materialises the default
-    expect(store.getState().regions.sidebar.width).toBe(410);
+    // W5: the change is replayed over the persisted regions (as a tab opened early is over the tabs) and written once
+    const replayed = { ...regions, sidebar: { ...regions.sidebar, width: 260 } };
+    expect(sets()).toEqual([{ key: 'main.tabs', value: LAYOUT_DEFAULTS.main }, { key: 'regions', value: replayed }]); // a first launch materialises the default
+    expect(store.getState().regions).toEqual(replayed);
   });
 
   it('writes tabs opened before hydration over an existing main.tabs, before any later change and on beforeunload', async () => {

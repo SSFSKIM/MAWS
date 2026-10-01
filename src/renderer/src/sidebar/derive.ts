@@ -6,7 +6,7 @@ import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { ProjectRecord, SessionDigest } from '@shared/ipc/schema';
 import type { WorktreeInfo } from '@shared/sessions/worktree';
-import { holderLine, waitingItem, type NeedsYouRow } from '../attention/derive';
+import type { NeedsYouRow } from '../attention/derive';
 import { lastActivity, sortSessions, type SidebarSort } from '../overview/derive';
 
 // "Other sessions": the pseudo-project at the end of the list, for sessions without a (known) project.
@@ -167,20 +167,8 @@ export const hasWorktreeSessions = (sessions: readonly SessionRecord[]) => sessi
 
 // ---- row text ----------------------------------------------------------------------------------------------------------
 
-// What a row says under its title (§5.1: the current activity while working, the last assistant line when idle):
-// the holder for a foreign-live session, the line of the item its Needs-you row shows (`waitingItem`), the activity
-// while working, else the last answer.
-export function secondaryLine(record: SessionRecord, digest: SessionDigest | null | undefined, pending: AttentionItem[]): string | null {
-  const holder = holderLine(record);
-  if (holder) return holder;
-  const waiting = waitingItem(pending);
-  if (waiting) return waiting.oldest.summary;
-  if (isWorking(digest ?? undefined) && digest?.activity) return digest.activity;
-  return digest?.lastAssistantLine ?? null;
-}
-
-// The row's branch chip: a worktree session's branch (C10's record, else the index's), since a session in the project
-// directory is on the project's own branch and a chip on every row would say nothing. Null for a detached worktree.
+// A worktree session's branch (C10's record, else the index's), as its hover card names it; null for a session in the
+// project directory and for a detached worktree.
 export function rowBranch(record: SessionRecord): string | null {
   if (record.worktree === null) return null;
   return record.worktree.branch ?? record.branch ?? null;

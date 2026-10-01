@@ -598,7 +598,7 @@ test.describe('sessions', () => {
     expect(second.maws.consoleErrors()).toEqual([]);
   });
 
-  test("C5's acceptance item 10, replay clause: a replayed read-only request reaches Needs you through a recorded session and the hover card's Approve answers the broker", async () => {
+  test("C5's acceptance item 10, replay clause: a replayed read-only request reaches the session's row through a recorded session and its hover card's Approve answers the broker", async () => {
     const { page, trustedRepos } = await begin({ fixtures: [READ_ONLY] });
     const project = await addProject(page, trustedRepos[0]!.root);
     const id = await plus(page, project.name);
@@ -608,19 +608,19 @@ test.describe('sessions', () => {
     await untilPhase(page, id, 'ready');
     expect((await setupOf(page, id)).at(-1)!.outcome).toMatchObject({ kind: 'ready', firstTurn: 'sent' });
 
-    const needsYou = page.getByRole('list', { name: 'Needs you' });
-    const entry = needsYou.getByRole('listitem').first();
-    await expect(entry).toBeVisible({ timeout: 20_000 });
-    // C7's X4 card in C5's hover placement (registered in C5's requestCard slot): the tool as its heading
+    // W5: the session's row (on its project's page, opened by "+") waits with the approval glyph; its hover card holds
+    // C7's X4 card in C5's hover placement (registered in C5's requestCard slot), the tool as its heading.
+    const entry = row(page, id);
+    await expect(entry.getByRole('img', { name: 'Needs approval' })).toBeVisible({ timeout: 20_000 });
     const card = page.getByRole('dialog').filter({ has: page.getByRole('heading', { name: 'Read' }) });
     await expect(async () => {
       await page.mouse.move(700, 400);
-      await entry.getByRole('button').first().hover();
+      await entry.hover();
       await expect(card).toBeVisible({ timeout: 2_000 });
     }).toPass({ timeout: 10_000 });
     await expect(card.getByText('Approval needed')).toBeVisible();
     await card.getByRole('button', { name: 'Approve' }).click();
-    await expect(needsYou.getByRole('listitem')).toHaveCount(0);
+    await expect(entry.getByRole('img', { name: 'Needs approval' })).toHaveCount(0);
     await turnEnded(page, id);
   });
 });

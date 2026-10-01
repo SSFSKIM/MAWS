@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { AppSessionId } from '@shared/graph/ids';
+import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import { LAYOUT_DEFAULTS, type LayoutMain } from '@shared/ipc/schema/layout';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { createLayoutStore } from './layout';
@@ -109,5 +109,22 @@ describe('tab changes before hydration', () => {
     expect(store.getState().main.panes[0].activeTabId).toBe('session:b');
     store.getState().openSession(A); // after hydration a change applies once, as before
     expect(store.getState().main.panes[0].activeTabId).toBe('session:app-a');
+  });
+});
+
+// W5: a project opened in the sidebar before the persisted regions arrive stays open, and the result is written back.
+describe('region changes before hydration', () => {
+  it('are replayed over the hydrated regions', async () => {
+    const fake = fakeClient({ 'layout.list': { keys: ['regions'] } });
+    const store = createLayoutStore();
+    const hydrating = store.getState().hydrate(fake.client, () => true);
+    store.getState().setSidebar({ openProject: 'proj-a' as ProjectId });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const saved = { ...LAYOUT_DEFAULTS.regions, sidebar: { ...LAYOUT_DEFAULTS.regions.sidebar, width: 260 } };
+    for (const key of ['regions', 'main.tabs', 'panel.pinned']) await fake.reply('layout.get', { value: key === 'regions' ? saved : null });
+    await hydrating;
+    expect(store.getState().regions.sidebar).toEqual({ ...saved.sidebar, openProject: 'proj-a' });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(fake.invoked('layout.set')).toContainEqual({ key: 'regions', value: store.getState().regions });
   });
 });

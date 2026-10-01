@@ -102,6 +102,13 @@ export function createLayoutStore() {
       if (!get().hydrated) early.push(next);
       set({ main: next(get().main) });
     };
+    // The regions likewise (W5: a project opened in the sidebar, or a region toggled, before the persisted value arrives
+    // is kept over it).
+    const earlyRegions: ((r: LayoutRegions) => LayoutRegions)[] = [];
+    const regions = (next: (r: LayoutRegions) => LayoutRegions) => {
+      if (!get().hydrated) earlyRegions.push(next);
+      set({ regions: next(get().regions) });
+    };
     // Every change of the pins goes through here, so the no-session selection is revalidated against them each time;
     // an unchanged list keeps its identity, so nothing is persisted for a selection change alone.
     const pins = (next: PanelTabRef[], requested?: string | null) => {
@@ -142,7 +149,7 @@ export function createLayoutStore() {
               return match && key !== 'panel.pinned' ? [match[1] as AppSessionId] : [];
             })
           : [];
-        const [regions, persistedMain, panelPinned, ...panels] = await Promise.all([
+        const [persistedRegions, persistedMain, panelPinned, ...panels] = await Promise.all([
           read('regions', StoredRegionsSchema, LAYOUT_DEFAULTS.regions), // W5: a version-1 value is migrated
           read('main.tabs', LayoutMainSchema, LAYOUT_DEFAULTS.main),
           read('panel.pinned', PanelPinnedSchema, LAYOUT_DEFAULTS.panelPinned),
@@ -156,6 +163,7 @@ export function createLayoutStore() {
         });
         const replayed = early.splice(0);
         const hydratedMain = replayed.reduce((m, change) => change(m), model.repairMain(persistedMain, known));
+        const regions = earlyRegions.splice(0).reduce((r, change) => change(r), persistedRegions);
         set({ regions, main: hydratedMain, ...pins(panelPinned), panelBySession, hydrated: true });
         // A first launch writes the defaults of the keys it lacks, so layout.json always holds the renderer's three
         // fixed keys (acceptance item 6 lists them). Tabs replayed over the saved ones differ from what layout.json holds,
@@ -163,6 +171,7 @@ export function createLayoutStore() {
         // is written only when it changes.
         const unsaved = new Set(absent);
         if (replayed.length > 0 && JSON.stringify(hydratedMain) !== JSON.stringify(persistedMain)) unsaved.add('main.tabs');
+        if (regions !== persistedRegions) unsaved.add('regions');
         const values: Partial<Record<LayoutKey, unknown>> = { regions, 'main.tabs': get().main, 'panel.pinned': panelPinned };
         for (const key of unsaved) {
           if (!(key in values)) continue;
@@ -207,8 +216,8 @@ export function createLayoutStore() {
         }
       },
 
-      setSidebar: (patch) => set({ regions: { ...get().regions, sidebar: { ...get().regions.sidebar, ...patch } } }),
-      setPanel: (patch) => set({ regions: { ...get().regions, panel: { ...get().regions.panel, ...patch } } }),
+      setSidebar: (patch) => regions((r) => ({ ...r, sidebar: { ...r.sidebar, ...patch } })),
+      setPanel: (patch) => regions((r) => ({ ...r, panel: { ...r.panel, ...patch } })),
       setPanelTabPinned(appSessionId, tabId, pinned) {
         const own = get().panelBySession.get(appSessionId) ?? { tabs: [], activeTabId: null };
         const panelBySession = new Map(get().panelBySession);

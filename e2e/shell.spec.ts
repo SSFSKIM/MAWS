@@ -130,8 +130,11 @@ async function firstInstance(maws: MawsLaunch): Promise<Saved> {
     });
     expect(unread.sort(), 'unread dots on exactly the unread records').toEqual([FIX, QUOTA, 'Terminal workflow notes'].sort());
 
+    const foreignCard = await hoverRow(page, 'Somersault terminal run'); // W5: the row is one line; its holder is in the hover card
+    await expect(foreignCard.getByTestId('hover-activity')).toHaveText('Terminal · pid 7135');
+    await unhover(page, foreignCard);
     const foreign = await sidebarRow(page, 'Somersault terminal run');
-    await expect(foreign).toContainText('Terminal · pid 7135');
+    expect((await foreign.boundingBox())!.height, 'a 30px row').toBe(30);
     await foreign.click({ button: 'right' });
     await expect(page.getByRole('menu')).toBeVisible();
     expect(await page.getByRole('menuitem').allTextContents(), 'a foreign-live session offers Open only').toEqual(['Open']);
@@ -210,19 +213,18 @@ async function firstInstance(maws: MawsLaunch): Promise<Saved> {
   });
 
   await test.step('Item 3: approve the read-only request from its hover card, by pointer only', async () => {
-    // Keyboard first: focus opens the hover card, and neither Enter on the focused row nor Enter on a focused Approve
-    // answers (§5.1: approval from the hover card is an explicit click).
-    const charterRow = page.locator('[aria-label="Needs you"] > li[data-title="Charter + research"] > button');
+    // Keyboard first: arrowing onto the session's row opens its hover card (W5: every session row has one), and Enter
+    // on a focused Approve answers nothing (§5.1: approval from the hover card is an explicit click).
     const charterDialog = page.getByRole('dialog', { name: 'Charter + research' });
-    await charterRow.focus();
+    await (await sidebarRow(page, SIP)).focus();
+    await page.keyboard.press('ArrowDown');
+    await expect(await sidebarRow(page, 'Charter + research')).toBeFocused();
     await expect(charterDialog.getByRole('button', { name: 'Approve' })).toBeVisible();
     await charterDialog.getByRole('button', { name: 'Approve' }).focus();
     await page.keyboard.press('Enter');
-    await charterRow.focus();
-    await page.keyboard.press('Enter'); // the row deep-links to the Overview card
     await page.waitForTimeout(300);
-    expect(await needsYouRows(page), 'Enter answered nothing').toEqual([FIX, SIP, QUOTA, 'Charter + research']);
-    await expect(board.getByRole('article', { name: 'Charter + research' })).toBeFocused();
+    expect(await badge(), 'Enter answered nothing').toBe('4');
+    await (await sidebarRow(page, SIP)).focus();
     await page.locator('[data-region="main"]').hover({ position: { x: 400, y: 300 } });
     await expect(charterDialog).toHaveCount(0);
 
@@ -231,8 +233,9 @@ async function firstInstance(maws: MawsLaunch): Promise<Saved> {
     await expect(charterHover.getByRole('button', { name: 'Deny' })).toBeVisible();
     expect(await noLeftovers(page, tokens.light), 'no light colour in the dark theme (hover card)').toEqual([]);
     await charterHover.getByRole('button', { name: 'Approve' }).click();
-    await expect(sidebar.getByRole('heading', { name: 'Needs you · 3' })).toBeVisible();
-    expect(await needsYouRows(page)).toEqual([FIX, SIP, QUOTA]);
+    await expect(charterHover.getByRole('button', { name: 'Approve' })).toHaveCount(0);
+    await showProjectList(page);
+    await expect(projectRow(page, 'MAWS').getByLabel('2 waiting')).toBeVisible();
     await expect(board.getByRole('article', { name: 'Charter + research' }).getByTestId('card-activity')).toHaveText('Continuing');
     await expect.poll(badge).toBe('3');
   });
@@ -479,7 +482,6 @@ const layoutList = async (page: Page) => {
   return result.value.keys;
 };
 
-const needsYouRows = (page: Page) => page.locator('[aria-label="Needs you"] > li').evaluateAll((els) => els.map((el) => el.getAttribute('data-title')));
 
 const treeRows = (scope: Locator) => scope.locator('[data-kind="session"]').evaluateAll((els) => els.map((el) => el.getAttribute('aria-label')));
 
@@ -520,14 +522,15 @@ const tabLabels = (page: Page, strip: string) =>
 
 const selectedTab = (page: Page, strip: string) => page.getByRole('tablist', { name: strip }).locator('[role="tab"][aria-selected="true"]').getAttribute('aria-label');
 
-// Hovers a Needs-you row with the pointer and returns its open hover card. The hover is retried from a neutral point:
-// now and then, right after a Radix menu has closed, Chromium keeps the synthetic pointer's hover state stale and the
-// row sees no pointerenter although it is the hit target (the card then never opens; a fresh move in fixes it).
+// Hovers a session's row (on its project's page, W5) with the pointer and returns its open hover card. The hover is
+// retried from a neutral point: now and then, right after a Radix menu has closed, Chromium keeps the synthetic pointer's
+// hover state stale and the row sees no pointerenter although it is the hit target (a fresh move in fixes it).
 async function hoverRow(page: Page, title: string): Promise<Locator> {
   const card = page.getByRole('dialog', { name: title });
+  const row = await sidebarRow(page, title);
   await expect(async () => {
     await page.mouse.move(700, 400);
-    await page.locator(`[aria-label="Needs you"] > li[data-title="${title}"] > button`).hover();
+    await row.hover();
     await expect(card).toBeVisible({ timeout: 2_000 });
   }, `the hover card of ${title} opens`).toPass({ timeout: 10_000 });
   return card;
