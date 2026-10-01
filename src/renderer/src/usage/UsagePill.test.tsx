@@ -26,7 +26,7 @@ let calls: { name: string; input: unknown }[];
 let usageChanged: ((payload: unknown) => void)[];
 let installed: boolean;
 let controls: UsageControlsAnswer; // W6 route executor: what main answers for ClaudeUsage's control route
-let answerAction: (action: UsageAction) => UsageActionResult;
+let answerAction: (action: UsageAction) => UsageActionResult | Promise<UsageActionResult>;
 
 beforeAll(async () => {
   fixture = await new ClaudeUsageReader({ dir: join(__dirname, '../../../../test/fixtures/claude-usage'), emit: () => {}, log: () => {}, now: () => NOW }).snapshot([]);
@@ -54,7 +54,7 @@ beforeEach(() => {
         case 'settings.usageControls':
           return { ok: true, value: controls };
         case 'settings.usageAction':
-          return { ok: true, value: answerAction(input as UsageAction) };
+          return { ok: true, value: await answerAction(input as UsageAction) };
         default:
           return { ok: true, value: undefined };
       }
@@ -371,6 +371,7 @@ describe('the usage popover’s actions through ClaudeUsage’s control route', 
     const panel = await openPanel();
     fireEvent.click(within(card(panel, '4@example.test')).getByRole('button', { name: 'Route requests here' }));
     await settle();
+    act(() => useUsagePopover.setState({ open: false })); // the sheet closes the popover; the answer opens it again
     answer(true);
     await settle();
     const again = reopened();
@@ -422,6 +423,25 @@ describe('the usage popover’s actions through ClaudeUsage’s control route', 
     fireEvent.click(pill());
     await settle();
     expect(hintOf(reopened())).toBeNull();
+  });
+
+  it('an action that ends after its popover closed leaves no notice for the next one', async () => {
+    controls = available();
+    let finish!: (result: UsageActionResult) => void;
+    answerAction = () => new Promise((resolve) => (finish = resolve));
+    const panel = await openPanel();
+    fireEvent.click(within(panel).getByRole('button', { name: 'Add account…' }));
+    await settle();
+    expect(hintOf(panel)).toBe("ClaudeUsage's sign-in sheet opens to add an account; finish signing in there");
+    fireEvent.keyDown(panel, { key: 'Escape' });
+    await settle();
+    finish({ ok: false, reason: 'busy', message: 'ClaudeUsage is signing in another account' });
+    await settle();
+    fireEvent.click(pill());
+    await settle();
+    const again = reopened();
+    expect(hintOf(again)).toBeNull();
+    expect((within(again).getByRole('button', { name: 'Add account…' }) as HTMLButtonElement).disabled).toBe(false);
   });
 
   it('asks main again on each usage change while open', async () => {

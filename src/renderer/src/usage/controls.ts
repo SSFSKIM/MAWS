@@ -5,7 +5,8 @@
 // popover renders whatever `useUsageControls` answers and does not change. While the API does not answer, every action
 // is unavailable under one hint, as before the API existed. Route and Remove ask in MAWS first, on the confirm sheet,
 // which takes the focus and so closes the popover; it opens again on either answer. Add and Reconnect open ClaudeUsage's
-// sign-in sheet and say so. A refusal's message is the popover's notice, shown in the hint's place while it is open.
+// sign-in sheet and say so. A refusal's message is the popover's notice, shown in the hint's place while it is open; an
+// action that ends after its popover closed leaves none.
 // After a Route the popover shows the new routing account at once, from ClaudeUsage's answer, until the reader catches up
 // (the usage store holds it over the snapshots until then, `applyRoute`).
 import { useEffect } from 'react';
@@ -46,6 +47,7 @@ export const useUsageControlState = create<ControlState>()(() => ({ answer: null
 
 const NOT_ANSWERED: UsageControlsAnswer = { available: false, reason: 'no_route', state: null };
 let asks = 0;
+let shown = 0; // which popover a notice belongs to: one more each time a popover closes
 
 // Main checks again (`settings.usageControls`) when the popover opens and on each usage change while it is open; the
 // latest ask wins.
@@ -56,13 +58,15 @@ export async function refreshUsageControls(): Promise<void> {
   if (ask === asks) useUsageControlState.setState({ answer: result.ok ? result.value : NOT_ANSWERED });
 }
 
-// `started`: what the action says while it runs and after it succeeds; a refusal's message replaces it.
+// `started`: what the action says while it runs and after it succeeds; a refusal's message replaces it, in the popover
+// the action started from only (a Route or Remove starts from the one its sheet's answer opened).
 async function perform(action: UsageAction, started: string | null): Promise<UsageActionResult> {
+  const from = shown;
   useUsageControlState.setState({ busy: true, notice: started });
   const result = await ipc.invoke('settings.usageAction', action);
   if (!result.ok) console.warn('[usage] settings.usageAction failed', result.error);
   const answer: UsageActionResult = result.ok ? result.value : { ok: false, reason: 'failed', message: result.error.message };
-  useUsageControlState.setState({ busy: false, notice: answer.ok ? started : answer.message });
+  useUsageControlState.setState(from === shown ? { busy: false, notice: answer.ok ? started : answer.message } : { busy: false });
   void refreshUsageControls();
   return answer;
 }
@@ -119,6 +123,7 @@ export function useUsageControls(): UsageControls {
     const off = ipc.on('settings.usageChanged', () => void refreshUsageControls());
     return () => {
       off();
+      shown++;
       useUsageControlState.setState({ notice: null }); // a notice lasts while the popover showing it is open
     };
   }, []);
