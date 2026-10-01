@@ -1,7 +1,8 @@
 // The top bar's usage pill and its popover (W6, E1) over the committed ClaudeUsage fixture as C7's reader answers it at
 // the fixture's clock: the pill's reading and colour, the popover's sections in ClaudeUsage's panel order, the four
 // account actions disabled under the one hint, the hand-off to ClaudeUsage's own panel, and the absent case. The
-// retired Accounts tab's own suite moved here with its content (its order, geometry, states and hand-off).
+// retired Accounts tab's own suite moved here with its content (its order, geometry, states and hand-off). W6 route
+// executor: the same actions through ClaudeUsage's control route, as main answers it.
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { join } from 'node:path';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -10,6 +11,7 @@ import { validateCommandInput } from '@shared/ipc/validate';
 import type { UsageSnapshot } from '@shared/usage/types';
 import { ClaudeUsageReader } from '../../../main/usage/claude-usage-reader';
 import { useGateway } from '../gateway/store';
+import { closeDialog, useDialogs } from '../sessions/dialogs';
 import { useNotices } from '../stores/notices';
 import { useUsage } from '../stores/usage';
 import { isActionEnabled, runAction } from '../keymap/actions-runtime';
@@ -72,6 +74,7 @@ afterEach(() => {
   useNotices.setState({ notices: [] });
   useUsagePopover.setState({ open: false });
   useUsageControlState.setState({ answer: null, notice: null, busy: false });
+  closeDialog();
   delete (window as { maws?: MawsBridge }).maws;
 });
 
@@ -251,5 +254,174 @@ describe('the usage popover', () => {
       off();
     }
     expect(isActionEnabled('accounts.open')).toBe(false);
+  });
+});
+
+// W6 route executor: the actions through ClaudeUsage's control route, as main answers `settings.usageControls`.
+describe('the usage popover’s actions through ClaudeUsage’s control route', () => {
+  const ROUTING = { enabled: true, ready: true, port: 8641, drainTarget: '2aca3c4b-1e77-4091-908b-d183f6b0f092', drainTargetIsManual: false };
+  const available = (ready = true): UsageControlsAnswer => ({ available: true, reason: null, state: { updatedAt: null, routing: { ...ROUTING, ready }, accounts: [], codex: [] } });
+  const uuidOf = (email: string) => fixture.accounts.find((a) => a.email === email)!.uuid;
+  const posted = () => calls.filter((c) => c.name === 'settings.usageAction').map((c) => c.input);
+  const hintOf = (panel: HTMLElement) => panel.querySelector('[data-controls-hint]')?.textContent ?? null;
+  const reopened = () => screen.getByRole('dialog', { name: 'Claude Usage' });
+  const closePanel = () => {
+    cleanup();
+    useUsagePopover.setState({ open: false });
+  };
+  // The confirm sheet C10's dialogs render: its request, then the answer.
+  function answer(yes: boolean) {
+    const open = useDialogs.getState().open;
+    if (open?.kind !== 'confirm') throw new Error('no confirm is open');
+    const request = { title: open.title, body: open.body, confirmLabel: open.confirmLabel, destructive: open.destructive };
+    open.answer(yes);
+    closeDialog();
+    return request;
+  }
+
+  it('enables every action while the route answers, and Route only while ClaudeUsage routes Claude Code', async () => {
+    controls = available();
+    let panel = await openPanel();
+    expect(hintOf(panel)).toBeNull();
+    const disabled = (p: HTMLElement) => ['Route requests here', 'Remove account…', 'Add account…'].flatMap((name) => within(p).getAllByRole('button', { name })).map((b) => (b as HTMLButtonElement).disabled);
+    expect(disabled(panel)).toEqual(Array(4 + 5 + 1).fill(false)); // Route on the four accounts that are not routing
+    closePanel();
+
+    controls = available(false);
+    panel = await openPanel();
+    expect(hintOf(panel)).toBe("Route requests here needs ClaudeUsage's “Route Claude Code through this app”, which its own panel turns on");
+    for (const button of within(panel).getAllByRole('button', { name: 'Route requests here' })) expect((button as HTMLButtonElement).disabled).toBe(true);
+    for (const button of within(panel).getAllByRole('button', { name: 'Remove account…' })) expect((button as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('keeps today’s hint while the route does not answer and names an unreadable token', async () => {
+    controls = { available: false, reason: 'timeout', state: null };
+    let panel = await openPanel();
+    expect(hintOf(panel)).toBe(HINT);
+    closePanel();
+    controls = { available: false, reason: 'bad_token', state: null };
+    panel = await openPanel();
+    expect(hintOf(panel)).toBe("ClaudeUsage's control token could not be read");
+    for (const button of within(panel).getAllByRole('button', { name: 'Remove account…' })) expect((button as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('Route asks first with the panel’s warning, posts, and shows the new routing account at once', async () => {
+    controls = available();
+    answerAction = (action) => ({ ok: true, drainTarget: action.action === 'route' ? action.uuid : null });
+    const panel = await openPanel();
+    fireEvent.click(within(card(panel, '1@example.test')).getByRole('button', { name: 'Route requests here' }));
+    await settle();
+    expect(posted()).toEqual([]);
+    act(() => useUsagePopover.setState({ open: false })); // the sheet takes the focus, which closes the popover
+    expect(answer(true)).toEqual({ title: 'Route requests to 1@example.test?', body: 'Existing sessions move at their next request, which rebuilds their prompt cache.', confirmLabel: 'Route requests here', destructive: false });
+    await settle();
+    expect(posted()).toEqual([{ action: 'route', uuid: uuidOf('1@example.test') }]);
+    expect(useUsagePopover.getState().open).toBe(true);
+    const again = reopened();
+    expect(card(again, '1@example.test').textContent).toContain('Routing here · chosen in ClaudeUsage');
+    expect(card(again, '3@example.test').textContent).not.toContain('Routing here');
+    expect(useUsage.getState().snapshot!.drainTarget).toBe(uuidOf('1@example.test'));
+    expect(pill().getAttribute('aria-label')).toContain('1@example.test');
+  });
+
+  it('a Route cancelled on the sheet posts nothing and reopens the popover', async () => {
+    controls = available();
+    const panel = await openPanel();
+    fireEvent.click(within(card(panel, '4@example.test')).getByRole('button', { name: 'Route requests here' }));
+    await settle();
+    act(() => useUsagePopover.setState({ open: false }));
+    answer(false);
+    await settle();
+    expect(posted()).toEqual([]);
+    expect(useUsagePopover.getState().open).toBe(true);
+    expect(card(reopened(), '3@example.test').textContent).toContain('Routing here');
+  });
+
+  it('a refusal’s message is the popover’s notice, and the routing account stays', async () => {
+    controls = available();
+    answerAction = () => ({ ok: false, reason: 'unusable', message: '4@example.test is at its limit' });
+    const panel = await openPanel();
+    fireEvent.click(within(card(panel, '4@example.test')).getByRole('button', { name: 'Route requests here' }));
+    await settle();
+    answer(true);
+    await settle();
+    const again = reopened();
+    expect(hintOf(again)).toBe('4@example.test is at its limit');
+    expect(card(again, '3@example.test').textContent).toContain('Routing here');
+    expect(useUsage.getState().snapshot!.drainTarget).toBe(ROUTING.drainTarget);
+  });
+
+  it('Remove names the account on a destructive sheet and posts with confirm', async () => {
+    controls = available();
+    answerAction = () => ({ ok: true, drainTarget: null });
+    const panel = await openPanel();
+    fireEvent.click(within(card(panel, '4@example.test')).getByRole('button', { name: 'Remove account…' }));
+    await settle();
+    expect(answer(true)).toEqual({
+      title: 'Remove 4@example.test from this Mac?',
+      body: "Removes ClaudeUsage's saved sign-in and stops routing new requests to this account. Your Claude subscription and other machines are unchanged. To add it again, sign in again.",
+      confirmLabel: 'Remove account',
+      destructive: true,
+    });
+    await settle();
+    expect(posted()).toEqual([{ action: 'remove', uuid: uuidOf('4@example.test'), confirm: true }]);
+  });
+
+  it('Add and Reconnect open ClaudeUsage’s sign-in sheet at once and say so', async () => {
+    controls = available();
+    answerAction = () => ({ ok: true, drainTarget: null });
+    const reauth = { ...fixture, accounts: fixture.accounts.map((a) => (a.email === '5@example.test' ? { ...a, needsReauthentication: true } : a)) };
+    const panel = await openPanel(reauth);
+    fireEvent.click(within(panel).getByRole('button', { name: 'Add account…' }));
+    await settle();
+    expect(hintOf(panel)).toBe("ClaudeUsage's sign-in sheet opens to add an account; finish signing in there");
+    fireEvent.click(within(card(panel, '5@example.test')).getByRole('button', { name: 'Reconnect…' }));
+    await settle();
+    expect(hintOf(panel)).toBe("ClaudeUsage's sign-in sheet opens to reconnect 5@example.test; finish signing in there");
+    expect(posted()).toEqual([{ action: 'add', email: null }, { action: 'reconnect', uuid: uuidOf('5@example.test') }]);
+    expect(useDialogs.getState().open).toBeNull();
+  });
+
+  it('a notice lasts while the popover is open', async () => {
+    controls = available();
+    answerAction = () => ({ ok: false, reason: 'busy', message: 'ClaudeUsage is signing in another account' });
+    const panel = await openPanel();
+    fireEvent.click(within(panel).getByRole('button', { name: 'Add account…' }));
+    await settle();
+    expect(hintOf(panel)).toBe('ClaudeUsage is signing in another account');
+    fireEvent.keyDown(panel, { key: 'Escape' });
+    await settle();
+    fireEvent.click(pill());
+    await settle();
+    expect(hintOf(reopened())).toBeNull();
+  });
+
+  it('asks main again on each usage change while open', async () => {
+    controls = available();
+    await openPanel();
+    const asked = () => calls.filter((c) => c.name === 'settings.usageControls').length;
+    expect(asked()).toBe(1);
+    controls = { available: false, reason: 'no_route', state: null };
+    act(() => usageChanged.forEach((l) => l(fixture)));
+    await settle();
+    expect(asked()).toBe(2);
+    expect(hintOf(reopened())).toBe(HINT);
+  });
+
+  it('Open ClaudeUsage opens ClaudeUsage’s panel through the route, and falls back to the activation when that fails', async () => {
+    controls = available();
+    answerAction = () => ({ ok: true, drainTarget: null });
+    const panel = await openPanel();
+    fireEvent.click(within(panel).getByRole('button', { name: 'Open ClaudeUsage ↗' }));
+    await settle();
+    expect(posted()).toEqual([{ action: 'panel' }]);
+    expect(calls.some((c) => c.name === 'settings.claudeUsage.open')).toBe(false);
+    expect(useNotices.getState().notices).toEqual([]);
+    expect(within(panel).getByRole('status').textContent).toBe('Waiting for ClaudeUsage…');
+
+    answerAction = () => ({ ok: false, reason: 'timeout', message: 'ClaudeUsage did not answer in time' });
+    fireEvent.click(within(panel).getByRole('button', { name: 'Open ClaudeUsage ↗' }));
+    await settle();
+    expect(calls.filter((c) => c.name === 'settings.claudeUsage.open').map((c) => c.input)).toEqual([{ intent: 'panel' }]);
   });
 });
