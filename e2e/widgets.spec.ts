@@ -374,6 +374,12 @@ test.describe('interactive', () => {
     const segment = permissions.getByRole('menu', { name: 'Permission mode' });
     await segment.getByRole('menuitemradio', { name: /^default/ }).click();
     await expect(segment.getByRole('menuitemradio', { checked: true })).toContainText('default');
+    // the modal dialog closes and hands the keyboard back to the editor before the chip opens, as in the app, where the
+    // chip and the palette are out of reach until then (a menu opened while the editor's focus is still on its way
+    // would see that focus land outside it and close)
+    await page.keyboard.press('Escape');
+    await expect(permissions).toBeHidden();
+    await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeFocused();
 
     await pick(page, 'model'); // W3: the selector in the model chip's menu, on its model view
     await widget(page, 'model').getByRole('menuitemradio', { name: /^Haiku/ }).click();
