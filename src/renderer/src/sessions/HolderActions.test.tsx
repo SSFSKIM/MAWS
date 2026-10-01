@@ -394,3 +394,59 @@ describe('held outcomes and the attach command', () => {
     disconnect();
   });
 });
+
+// W7 (charter D-12 as amended 2026-10-01): "Take over here" on the foreign-live notice.
+const { useDialogs } = await import('./dialogs');
+describe('take over a session another process holds', () => {
+  const answerConfirm = async (yes: boolean) => {
+    await waitFor(() => expect(useDialogs.getState().open?.kind).toBe('confirm'));
+    const open = useDialogs.getState().open as { kind: 'confirm'; title: string; body: string; answer(yes: boolean): void };
+    act(() => {
+      open.answer(yes);
+      useDialogs.setState({ open: null });
+    });
+    return open;
+  };
+
+  it('is offered for a terminal and a job with an id, not for a job MAWS cannot name', () => {
+    const { unmount } = renderNotice(held({ kind: 'terminal', pid: 7 }));
+    expect(screen.getByRole('button', { name: 'Take over here' })).toBeTruthy();
+    unmount();
+    const second = renderNotice(held(JOB));
+    expect(screen.getByRole('button', { name: 'Take over here' })).toBeTruthy();
+    second.unmount();
+    renderNotice(held({ kind: 'background_job', pid: 9, jobId: null }));
+    expect(screen.queryByRole('button', { name: 'Take over here' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Fork a copy' })).toBeTruthy();
+  });
+
+  it('confirms naming the holder and the loss, asks main to end it, then resumes the session here', async () => {
+    answerWith({ 'session.takeOver': { status: 'released' }, 'session.start': { status: 'starting', appSessionId: A } });
+    renderNotice(held({ kind: 'terminal', pid: 7 }));
+    await userEvent.click(screen.getByRole('button', { name: 'Take over here' }));
+    const asked = await answerConfirm(true);
+    expect(asked.title).toBe('Take over this session?');
+    expect(asked.body).toBe('MAWS ends the terminal process that holds this session (pid 7) and resumes the session here. A turn in progress there is lost.');
+    await waitFor(() => expect(fake.invoked('session.start')).toEqual([{ appSessionId: A, message: null, options: {} }]));
+    expect(fake.invoked('session.takeOver')).toEqual([{ appSessionId: A, holder: { kind: 'terminal', pid: 7 } }]);
+  });
+
+  it('does nothing when the confirm is cancelled, and says a refusal without resuming', async () => {
+    answerWith({ 'session.takeOver': { status: 'refused', reason: 'timeout', message: 'The terminal (pid 7) has not exited after 10 s.' } });
+    renderNotice(held({ kind: 'terminal', pid: 7 }));
+    await userEvent.click(screen.getByRole('button', { name: 'Take over here' }));
+    await answerConfirm(false);
+    expect(fake.invoked('session.takeOver')).toEqual([]);
+    await userEvent.click(screen.getByRole('button', { name: 'Take over here' }));
+    const asked = await answerConfirm(true);
+    expect(asked.body).toContain('A turn in progress there is lost.');
+    await waitFor(() => expect(toasts().map((n) => n.text)).toEqual(['The terminal (pid 7) has not exited after 10 s.']));
+    expect(fake.invoked('session.start')).toEqual([]);
+  });
+
+  it("names a job by its short id and `claude stop`", () => {
+    renderNotice(held(JOB));
+    void userEvent.click(screen.getByRole('button', { name: 'Take over here' }));
+    return answerConfirm(false).then((asked) => expect(asked.body).toBe('MAWS stops the background job bg · e6dcd828 (claude stop) and resumes the session here. A turn in progress there is lost.'));
+  });
+});

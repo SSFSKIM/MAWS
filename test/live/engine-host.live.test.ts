@@ -17,6 +17,7 @@ import { HostHookRegistry } from '../../src/engine-host/host-hooks';
 import { ENGINE_BIN, ENGINE_VERSION, GATEWAY_AUTH_TOKEN, RELAY_URL } from '../../src/engine-host/launch';
 import * as nodePty from 'node-pty'; // W7: the terminal-style second writer
 import { holderAuthority } from '../../src/main/sessions/holders'; // W7: main's resume guard, over this host
+import { releaseHolder } from '../../src/main/sessions/take-over'; // W7: "Take over here", over this host
 import { ChainFollower } from '../../src/engine-host/fs/chain-follower'; // W7: the pre-W7 follower, beside the product's
 import { FsFileReader } from '../../src/engine-host/fs/follow';
 import { HolderRegistry } from '../../src/engine-host/fs/holders';
@@ -1443,6 +1444,91 @@ describe('engine host live', () => {
     if (mawsJournal) writeFileSync(join(exportsDir, 'w7-collision-maws.jsonl'), redactJournal(`${JSON.stringify({ seq: 0, direction: 'meta', at: rows[0].at, frame: provenance })}\n${readFileSync(mawsJournal, 'utf8')}`));
     for (const [name, record] of Object.entries(keptRecords)) writeFileSync(join(diskDir, `registry-${name}.json`), `${redactJournal(JSON.stringify(record, null, 2))}\n`);
     exportTranscript('w7-collision-disk/transcript', configHome, notes.find((n) => n.event === 'maws_launched')!.sessionId as string, g);
+    console.log(`   exports: ${exportsDir}`);
+  }, 10 * 60_000);
+
+  // W7 F2 (charter D-12 as amended 2026-10-01): "Take over here" on a session a terminal holds, the signal path live. The
+  // holder is a terminal-style process this case starts itself (the pinned binary resuming the id in a PTY under the
+  // scratch home); main's release (`src/main/sessions/take-over.ts`) runs over this host with the real SIGTERM, and
+  // then MAWS resumes the id the usual way and runs a turn on top of the terminal's.
+  it('W7 take over a session a terminal holds', async (ctx) => {
+    const g = live(ctx);
+    const configHome = scratchConfigHome();
+    const repo = realpathSync(g.scratch());
+    writeFileSync(join(configHome, '.claude.json'), `${JSON.stringify({ hasCompletedOnboarding: true, theme: 'light', projects: { [repo]: { hasTrustDialogAccepted: true, hasCompletedProjectOnboarding: true } } }, null, 2)}\n`);
+    const exportsDir = join(g.userData, 'exports');
+    mkdirSync(exportsDir, { recursive: true });
+    const notes: Record<string, unknown>[] = [];
+    const note = (event: string, fields: Record<string, unknown> = {}) => {
+      notes.push({ at: new Date().toISOString(), event, ...fields });
+      console.log(`   ${event} ${JSON.stringify(fields).slice(0, 900)}`);
+    };
+    const sessionsDir = join(configHome, 'sessions');
+    const registry = (): Record<string, unknown>[] =>
+      existsSync(sessionsDir) ? readdirSync(sessionsDir).filter((f) => /^\d+\.json$/.test(f)).map((f) => ({ pid: Number(f.split('.')[0]), ...(JSON.parse(readFileSync(join(sessionsDir, f), 'utf8')) as Record<string, unknown>) })) : [];
+    let terminalExit: { exitCode: number; signal?: number } | null = null;
+    await withHost(g, 'W7 take over', async (host) => {
+      const spec = liveSpec(repo, { model: 'haiku', permissionMode: 'default', subagentModel: null });
+      const sessionId = spec.sessionId!;
+      const transcript = join(configHome, 'projects', repo.replace(/[^a-zA-Z0-9]/g, '-'), `${sessionId}.jsonl`);
+      const disk = () => (existsSync(transcript) ? readFileSync(transcript, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l) as TranscriptRecord) : []);
+      const s = sessionView(host, spec);
+      await host.launch(spec);
+      await s.send('Reply with exactly the word BEFORE');
+      await s.waitTurns(1);
+      await host.call('fs.bind', { bindings: [{ sessionId: sessionId as never, appSessionId: s.id as never }] });
+      await host.call('session.stop', { appSessionId: s.id, reason: 'stop' });
+      await s.wait('process.exited', 'the stop', () => true, 15_000);
+      note('maws_stopped', { appSessionId: s.id, sessionId });
+
+      const aliases = Object.fromEntries(Object.entries(process.env).filter(([k, v]) => /^ANTHROPIC_DEFAULT_[A-Z]+_MODEL$/.test(k) && v)) as Record<string, string>;
+      const base = Object.fromEntries(['PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL', 'TMPDIR', 'LANG'].filter((k) => process.env[k]).map((k) => [k, process.env[k]!]));
+      const env = { ...base, TERM: 'xterm-256color', CLAUDE_CONFIG_DIR: configHome, DISABLE_AUTOUPDATER: '1', ...aliases, ANTHROPIC_BASE_URL: RELAY_URL, ANTHROPIC_AUTH_TOKEN: GATEWAY_AUTH_TOKEN };
+      const term = nodePty.spawn(ENGINE_BIN, ['--resume', sessionId, '--model', 'haiku'], { name: 'xterm-256color', cols: 140, rows: 45, cwd: repo, env });
+      let screen = '';
+      term.onData((d) => void (screen += d));
+      const exited = new Promise<{ exitCode: number; signal?: number }>((r) => term.onExit((e) => r(e)));
+      // eslint-disable-next-line no-control-regex -- the terminal's escape sequences are what this strips
+      const plain = () => screen.replace(/\x1b\[[0-9;?<>=]*[ -/]*[@-~]|\x1b\][^\x07]*\x07|\x1b[()][A-Z0-9]/g, '');
+      try {
+        await host.waitFor(() => /for shortcuts|❯/.test(plain()) && plain(), 'the terminal prompt', 60_000);
+        const started = Date.now();
+        term.write('Reply with exactly the word TERMINAL');
+        await delay(500);
+        term.write('\r');
+        await host.waitFor(() => disk().some((r) => r.type === 'system' && r.subtype === 'turn_duration' && Date.parse(String(r.timestamp)) > started), 'the terminal turn ended', TURN_MS);
+        await delay(2_000);
+        const before = await host.call('fs.holders', { sessionIds: [sessionId as never], directories: null });
+        note('terminal_holds', { pid: term.pid, holders: before.holders.map((h) => h.holder), registry: registry().map((r) => ({ pid: r.pid, kind: r.kind, entrypoint: r.entrypoint })) });
+
+        // "Take over here", confirmed for this terminal: main's release over this host, with the real signal
+        const dispatch = (async (_owner: string, name: string, input: unknown) => host.callRaw(name as never, input as never)) as never;
+        const t0 = Date.now();
+        const outcome = await releaseHolder({ dispatch, sessions: { list: () => [] }, env: process.env }, { engineSessionId: sessionId as never, appSessionId: s.id as AppSessionId, expected: { kind: 'terminal', pid: term.pid } });
+        terminalExit = await Promise.race([exited, delay(5_000).then(() => null)]);
+        note('take_over', { outcome, ms: Date.now() - t0, terminalExit, registry: registry(), screenTail: plain().slice(-300) });
+        expect(outcome).toEqual({ status: 'released' });
+        expect(terminalExit).not.toBeNull();
+        expect(registry()).toEqual([]);
+      } finally {
+        if (terminalExit === null) {
+          term.kill();
+          terminalExit = await Promise.race([exited, delay(5_000).then(() => ({ exitCode: -1, signal: 9 }))]);
+        }
+      }
+
+      // the existing resume, then a turn on top of the terminal's
+      await host.launch({ ...spec, sessionId: null, resume: { sessionId: sessionId as never, fork: false } });
+      const after = await s.send('List, comma separated, every word you were asked to reply with earlier in this conversation. Nothing else.');
+      const ended = await host.waitFor(() => mainTurnsEnded(s.events()).find((t) => t.userMessageUuids.includes(after.messageUuid!)), 'the recall turn', TURN_MS);
+      const record = disk().find((r) => r.uuid === after.messageUuid);
+      const parent = disk().find((r) => r.uuid === record?.parentUuid);
+      note('resumed', { answer: ended.resultText, parentEntrypoint: parent?.entrypoint ?? null });
+      expect(ended.resultText).toMatch(/BEFORE.*TERMINAL/);
+    }, new LiveHost({ userData: g.userData, configHome, fs: true }));
+    const provenance = { event: 'provenance', charter: 'docs/charter.md', child: 'C10', wave: 'W7', item: 'F2', document: 'docs/doperpowers/plans/2026-10-01-ux-fundamentals-waves.md', pin: W7_PIN, engine: ENGINE_VERSION, configHome };
+    const rows = [{ at: (notes[0]?.at as string | undefined) ?? new Date().toISOString(), ...provenance }, ...notes, { at: new Date().toISOString(), event: 'exit', code: 0, process: 'maws' }];
+    writeFileSync(join(exportsDir, 'w7-take-over.jsonl'), redactJournal(`${rows.map(({ at, ...frame }, i) => JSON.stringify({ seq: i + 1, direction: 'meta', at, frame })).join('\n')}\n`));
     console.log(`   exports: ${exportsDir}`);
   }, 10 * 60_000);
 });

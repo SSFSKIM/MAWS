@@ -3,7 +3,7 @@
 // every refusal is in words.
 import { useEffect, useState } from 'react';
 import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
-import type { SessionRecord } from '@shared/graph/session';
+import type { ForeignHolder, SessionRecord } from '@shared/graph/session';
 import type { DeleteOutcome } from '@shared/ipc/schema/session';
 import type { FirstMessage, ForkTarget } from '@shared/sessions/intent';
 import type { ResubmitProvider } from '../composer/resubmit-seam';
@@ -14,6 +14,8 @@ import { useSessions } from '../stores/sessions';
 import { firstMessageOf } from './first-message';
 import { holderWords } from './holder-words';
 import { useSetup } from './store';
+import { confirm } from './dialogs'; // W7
+import { resumeSession } from './setup-actions'; // W7
 
 const fail = (text: string) => toast({ level: 'danger', text, actions: [], dismissible: true });
 
@@ -135,3 +137,35 @@ export const resubmitProvider: ResubmitProvider = {
     return { appSessionId: answer.appSessionId };
   },
 };
+
+// ---- take over (W7) ----------------------------------------------------------------------------------------------
+
+// The holder "Take over here" can end: an interactive terminal (signalled), or a `--bg` job with the id `claude stop`
+// takes. A job MAWS cannot name is left to "Fork a copy".
+export const canTakeOver = (holder: ForeignHolder): boolean => holder.kind === 'terminal' || holder.jobId !== null;
+
+export function takeOverWords(holder: ForeignHolder): { title: string; body: string } {
+  const what =
+    holder.kind === 'terminal'
+      ? `MAWS ends the terminal process that holds this session (pid ${holder.pid}) and resumes the session here.`
+      : `MAWS stops the background job bg · ${holder.jobId ?? '?'} (claude stop) and resumes the session here.`;
+  return { title: 'Take over this session?', body: `${what} A turn in progress there is lost.` };
+}
+
+// "Take over here" (D-12 as amended 2026-10-01): the confirm names the holder and the loss; main ends that holder and
+// waits for the registry to clear (`session.takeOver`), then the session resumes here the usual way. A refusal or a
+// timeout is a notice; nothing else changes.
+export async function takeOverSession(appSessionId: AppSessionId, holder: ForeignHolder): Promise<void> {
+  const words = takeOverWords(holder);
+  if (!(await confirm({ title: words.title, body: words.body, confirmLabel: 'Take over', destructive: true }))) return;
+  const result = await ipc.invoke('session.takeOver', { appSessionId, holder });
+  if (!result.ok) {
+    fail(result.error.message);
+    return;
+  }
+  if (result.value.status === 'refused') {
+    toast({ level: 'warning', text: result.value.message, actions: [], dismissible: true });
+    return;
+  }
+  await resumeSession(appSessionId);
+}

@@ -185,6 +185,8 @@ Design (W7, charter §4.3 as amended 2026-10-01): MAWS tells its own record by e
 
 Not verified: the installed 2.1.285 and later against an `sdk-ts` holder (live runs here use the pin); the yield's stop against a live process (its trigger, `fs.foreignWrite`, is live-verified; the stop is the ordinary `session.stop`, unit-tested in `src/main/sessions/yield.test.ts`).
 
+Take over (F2, `W7 take over a session a terminal holds`, `fixtures/pass3/w7-take-over.jsonl`): with MAWS's process stopped and the terminal holding the session after a turn of its own, main's release (`src/main/sessions/take-over.ts`, over the live host, the real signal) found the terminal as the session's one holder, sent SIGTERM to its verified pid and answered `released` 654 ms later: the interactive engine exits by its own handler (code 143, after printing its "Resume this session with" line) and unlinks its record on the way. MAWS's resume then continued from the terminal's last record and the model recalled both prompts (`BEFORE, TERMINAL`). The `claude stop <short>` path for a `--bg` job is unit-tested only (a live job starts a daemon).
+
 ## Not verified
 
 - Unrouted model turns, the unrouted classifier lane, and the engine's own usage windows (expired login).

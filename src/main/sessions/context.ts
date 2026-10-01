@@ -8,6 +8,7 @@ import type { AppSessionId, SessionId } from '@shared/graph/ids';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { CommandInput, CommandName, CommandOutput, EventName, EventPayload } from '@shared/ipc/schema';
 import type { SetupIntent } from '@shared/sessions/intent';
+import type { TakeOverDeps } from './take-over'; // W7
 import { normalizePath } from '@shared/sessions/trust';
 import { resolveStorePaths, slugOf } from '../../engine-host/fs/paths';
 import type { GitRun } from '../git/runner';
@@ -42,6 +43,7 @@ export interface SessionServiceDeps {
   settings?: () => C10Settings;
   userDefaults?: () => Promise<UserEngineDefaults>; // W3: the user's own settings.json (read only); absent, none
   launchGate?: LaunchGate; // C12: consulted when a setup or a resume begins; absent, every launch may go
+  takeOver?: Pick<TakeOverDeps, 'signal' | 'runStop' | 'waitMs' | 'pollMs'>; // W7: the tests' seams
   timing?: { watchdogMs?: number; stopWaitMs?: number };
   now?: () => string;
   log?: (message: string) => void;

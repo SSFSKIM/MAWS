@@ -28,6 +28,9 @@ import { markInterrupted, reconcileIntent } from './recovery';
 import { removeCreatedWorktree, retainedWorktree, type Setup } from './setup';
 import { forkRefusal, guardIntentStart, guardResumeStart, type GuardContext, type Guarded } from './start-guards';
 import { trustKeyOf, trustStateOf } from './trust';
+import { releaseHolder, type TakeOverDeps } from './take-over'; // W7
+import type { ForeignHolder } from '@shared/graph/session'; // W7
+import type { TakeOverOutcome } from '@shared/ipc/schema/session'; // W7
 
 // A refusal of an intent command, mapped to X2 by the registration: `invalid` is `invalid_input` naming the field;
 // `starting`, `retained_worktree` and the rest are `internal` with this message.
@@ -326,6 +329,19 @@ export class SessionService {
       const next = removed ? await this.putIntent({ ...intent, updatedAt: this.now(), progress: { ...intent.progress, worktree: null } }) : intent;
       return { intent: next, worktree: resource };
     });
+  }
+
+  // ---- take over (W7) ----------------------------------------------------------------------------------------------
+
+  // `session.takeOver`: ends the foreign holder the owner confirmed and waits for the registry to clear (take-over.ts).
+  // Refused while a start of this id is in flight; the resume that follows is the renderer's `session.start`.
+  async takeOver(appSessionId: AppSessionId, expected: ForeignHolder): Promise<TakeOverOutcome> {
+    await this.ready();
+    const record = this.deps.index.sessions.get(appSessionId);
+    if (record === null) return { status: 'refused', reason: 'unknown_session', message: `no session record for ${appSessionId}` };
+    if (this.starting.has(appSessionId)) return { status: 'refused', reason: 'self', message: 'This session is starting in MAWS.' };
+    const deps: TakeOverDeps = { dispatch: this.s.dispatch, sessions: this.s.sessions, env: this.s.env, ...this.deps.takeOver };
+    return releaseHolder(deps, { engineSessionId: record.engineSessionId, appSessionId, expected });
   }
 
   // ---- start ------------------------------------------------------------------------------------------------------

@@ -18,7 +18,7 @@ export const commands = [
   'session.setVisible', 'session.launchMode', 'session.appEvents', 'session.history.list', 'session.history.append', 'session.trust.check',
   'session.forget', 'session.create', 'session.intent.get', 'session.intent.list', 'session.intent.patch',
   'session.intent.release', 'session.intent.discard', 'session.intent.resolveWorktree', 'session.start',
-  'session.fork', 'session.archive', 'session.delete', 'session.rename', 'session.revealPath',
+  'session.fork', 'session.archive', 'session.takeOver' /* W7 */, 'session.delete', 'session.rename', 'session.revealPath',
   'session.deletions.list', 'session.deletions.keep', 'session.deletions.preview',
 ] as const;
 

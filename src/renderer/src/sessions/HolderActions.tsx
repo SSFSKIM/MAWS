@@ -8,7 +8,7 @@ import type { SessionRecord } from '@shared/graph/session';
 import { ipc } from '../ipc/client';
 import { useSessions } from '../stores/sessions';
 import { attachOrSay } from './attach';
-import { forkInPlace } from './record-ops';
+import { canTakeOver, forkInPlace, takeOverSession } from './record-ops';
 
 type ForeignHolder = Extract<SessionRecord['holder'], { kind: 'terminal' | 'background_job' }>;
 
@@ -36,6 +36,7 @@ export function HolderActions({ appSessionId, holder }: { appSessionId: AppSessi
   const jobVersion = useSessions((s) => s.records.get(appSessionId)?.engineVersion ?? null);
   const pinned = usePinnedVersion(attachable);
   const [attaching, setAttaching] = useState(false);
+  const [takingOver, setTakingOver] = useState(false); // W7
 
   const attach = () => {
     setAttaching(true);
@@ -52,6 +53,20 @@ export function HolderActions({ appSessionId, holder }: { appSessionId: AppSessi
       {attachable && (
         <button type="button" className={BUTTON} disabled={attaching} onClick={attach}>
           Attach in a terminal tab
+        </button>
+      )}
+      {/* W7: end the holder after a confirm, then resume here (D-12 as amended 2026-10-01) */}
+      {canTakeOver(holder) && (
+        <button
+          type="button"
+          className={BUTTON}
+          disabled={takingOver}
+          onClick={() => {
+            setTakingOver(true);
+            void takeOverSession(appSessionId, holder).finally(() => setTakingOver(false));
+          }}
+        >
+          Take over here
         </button>
       )}
       <button type="button" className={BUTTON} onClick={() => void forkInPlace(appSessionId)}>

@@ -58,7 +58,7 @@ describe('normaliser replays every probe fixture into the X1 graph', () => {
     const w1 = ['compact', 'hooks-blocking', 'steer-next-cancelled', 'steer-next-disk-live', 'steer-next-interrupted', 'steer-next-then-now'];
     const w3 = ['w3-auto-fallback']; // W3: the host's fallback after a refused auto (set_permission_mode acceptEdits, get_settings on Haiku)
     const w4 = ['w4-question-none', 'w4-question-partial']; // W4: a two-question AskUserQuestion answered with one question, then none, left out (the stepper's Skip)
-    const w7 = ['w7-collision']; // W7: a terminal resuming a session MAWS holds (meta rows only; the transcript and registry records beside it)
+    const w7 = ['w7-collision', 'w7-take-over']; // W7: a terminal resuming a session MAWS holds (the transcript and registry records beside it), and "Take over here" against one (meta rows only)
     expect(listJournals('pass3')).toEqual(['engine-turn-release', 'fork-worktree-fork', 'fork-worktree-resume-in-b', 'fork-worktree-start', 'nested-agents', 'plan-outcomes', 'relay-to-child', 'rewind-files', 'steer-next', 'steer-now', 'steer-now-unheld', 'stop-task', 'workspace-diff-branch', 'workspace-diff-dirty', ...c10, ...wave3, ...wave4, ...c12 /* C12 */, ...wave5, ...w1, ...w3, ...w4, ...w7].sort());
   });
 

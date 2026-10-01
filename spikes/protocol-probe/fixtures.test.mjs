@@ -168,3 +168,10 @@ test('pass3 w7-collision: both writers register, neither is refused, the transcr
  assert.equal(at('send_guard').verdict.live,'foreign');
  // the engine resumes from the branch the file ends on: MAWS_TWO is gone from the model's context
  const recall=at('maws_resumed_recall').answer;assert.match(recall,/TERMINAL_TWO/);assert.doesNotMatch(recall,/MAWS_TWO/);});
+// W7 F2 (C10): "Take over here" against a terminal holding the session: main's release signals the verified pid, the
+// interactive engine exits by its own handler (143) and unlinks its record, and MAWS resumes on top of its branch.
+test('pass3 w7-take-over: SIGTERM ends an interactive holder, the registry clears, and the resume continues its branch',()=>{const r=load3('w7-take-over');
+ const at=e=>notes(r,e)[0];
+ assert.deepEqual(at('terminal_holds').holders,[{kind:'terminal',pid:at('terminal_holds').pid}]);
+ const take=at('take_over');assert.deepEqual(take.outcome,{status:'released'});assert.equal(take.terminalExit.exitCode,143);assert.deepEqual(take.registry,[]);assert.ok(take.ms<10000);
+ assert.match(at('resumed').answer,/BEFORE.*TERMINAL/);assert.equal(at('resumed').parentEntrypoint,'cli');});
