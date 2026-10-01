@@ -206,6 +206,9 @@ describe('synthetic journals', () => {
     const expanded = rowsOf(withAllExpanded(state));
     expect(ofKind(expanded, 'assistant_text').every((row) => row.phase === 'answer')).toBe(true);
     expect(ofKind(expanded, 'thinking')).toEqual([]); // the signature-only block has nothing to disclose
+    // A4: the successful MessageDisplay, PreToolUse and Stop hooks show nothing; the Bash call is the only work.
+    expect(cellsOf(expanded).map((cell) => cell.toolName)).toEqual(['Bash']);
+    expect(ofKind(expanded, 'error').filter((row) => row.scope === 'hook')).toEqual([]);
     // The answer comes after the turn's work, as the last row of its turn.
     const second = inTurn(expanded, state.order[1]);
     expect(second.at(-1)).toMatchObject({ kind: 'assistant_text', phase: 'answer' });

@@ -33,7 +33,7 @@ export async function storeWith(events: SessionEvent[]) {
 
 export function spyActions(): TranscriptActions {
   return {
-    openSubagent: vi.fn(), openFullLog: vi.fn(), reviewChanges: vi.fn(), openFile: vi.fn(), openExternal: vi.fn(), editAndResubmit: vi.fn(),
+    openSubagent: vi.fn(), openFullLog: vi.fn(), reviewChanges: vi.fn(), openFile: vi.fn(), openExternal: vi.fn(), editAndResubmit: vi.fn(), editPrompt: vi.fn(),
     loadSpill: NO_ACTIONS.loadSpill,
   };
 }

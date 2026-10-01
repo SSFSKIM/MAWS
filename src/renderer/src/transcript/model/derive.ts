@@ -5,7 +5,8 @@
 import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, RequestId, TaskId, ToolUseId } from '@shared/graph/ids';
 import { MCP_TOOL, presentationOf, tableRowOf } from './classify';
-import { cellOf, editCounts, filePathOf, hookCell, type HookRecord, type ToolRecord, type TurnContext } from './cells';
+import { cellOf, editCounts, filePathOf, type ToolRecord, type TurnContext } from './cells';
+import { hookNotice, type HookRecord } from './hooks';
 import { agentMessageCopy, boundaryCopy, groupSummary, processExitCopy, reconnectCopy, retryCopy, subagentSentence } from './copy';
 import { RESUMED_COPY, RESUMING_COPY } from './copy'; // C12
 import { glyphFor } from './glyphs';
@@ -443,7 +444,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
         items.push({ kind: 'row', row: { id: rowId.error(event.id), turnId: turn.id, at: event.at, kind: 'error', severity: 'error', text: event.message, attempt: null, scope: event.scope, lostAttentionCount: null } });
         break;
       case 'notice.posted':
-        items.push({ kind: 'row', row: noticeRow(event, event.text, turn.id) });
+        if (!supersededByHookRow(event)) items.push({ kind: 'row', row: noticeRow(event, event.text, turn.id) });
         break;
       default:
         break;
@@ -453,7 +454,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
   // Resolve the placeholders now that every event of the turn has been seen: tool and hook cells, question and plan
   // rows, subagent rows. The retry row updates in place: the last api.retry event's text at the first one's position.
   const retryRow = retry;
-  const resolved: (WorkItem | Extract<Item, { kind: 'steer' }>)[] = [];
+  const resolved: (WorkItem | Extract<Item, { kind: 'steer' }> | { kind: 'notice'; row: RowOf<'error'> })[] = [];
   for (const item of items) {
     switch (item.kind) {
       case 'tool': {
@@ -461,9 +462,15 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
         resolved.push({ kind: 'cell', cell: cellOf(rec, context, ui?.expandedCells.has(cellId.tool(rec.use.toolUseId)) ?? false) });
         break;
       }
-      case 'hook':
-        resolved.push({ kind: 'cell', cell: hookCell(hooks.get(item.hookId)!, ui?.expandedCells.has(cellId.hook(item.hookId)) ?? false) });
+      case 'hook': {
+        // A hook that ran and let things go on, or is still running, shows nothing; one that got in the way is a notice
+        // outside the work area, so it stays in view when the turn folds (model/hooks.ts; W1).
+        const rec = hooks.get(item.hookId)!;
+        const notice = hookNotice(rec);
+        const at = (rec.started ?? rec.finished)!;
+        if (notice) resolved.push({ kind: 'notice', row: { id: rowId.hook(item.hookId), turnId: turn.id, at: at.at, kind: 'error', attempt: null, scope: 'hook', lostAttentionCount: null, ...notice } });
         break;
+      }
       case 'request': {
         const row = requestOrHistoricalRow(pendingRows.get(item.toolUseId)!, turn.id, state);
         if (row) resolved.push({ kind: 'row', row });
@@ -483,16 +490,15 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
     }
   }
   // Text blocks after the last piece of work are the answer, outside the work area; earlier ones are commentary. A hook
-  // run and a notice are not the model's work: under MessageDisplay and Stop hooks every final text is followed by hook
+  // and a notice are not the model's work: under MessageDisplay and Stop hooks every final text is followed by hook
   // events (pass3/steer-next seq 230-237), and counting them would class the answer as commentary (W1).
   const WORK_ROWS = new Set<Row['kind']>(['subagent', 'agent_message', 'question', 'plan', 'request_slot', 'error']);
-  const isWork = (item: (typeof resolved)[number]) =>
-    (item.kind === 'cell' && item.cell.toolName !== 'hook') || (item.kind === 'row' && WORK_ROWS.has(item.row.kind) && !(item.row.kind === 'error' && item.row.severity === 'notice'));
+  const isWork = (item: (typeof resolved)[number]) => item.kind === 'cell' || (item.kind === 'row' && WORK_ROWS.has(item.row.kind) && !(item.row.kind === 'error' && item.row.severity === 'notice'));
   const lastWork = resolved.map(isWork).lastIndexOf(true);
   const answer: Row[] = [];
   const workItems: WorkItem[] = [];
   resolved.forEach((item, i) => {
-    if (item.kind === 'steer') answer.push(item.row); // folded prompts and the answer in event order, outside the work area
+    if (item.kind === 'steer' || item.kind === 'notice') answer.push(item.row); // folded prompts, hook notices and the answer in event order, outside the work area
     else if (item.kind === 'text' && i > lastWork) answer.push({ ...item.row, phase: 'answer' });
     else if (item.kind === 'text') workItems.push({ kind: 'text', row: { ...item.row, phase: 'commentary' } });
     else if (item.kind === 'thinking' && i > lastWork) workItems.push({ kind: 'row', row: item.row }); // after the last tool use: a row, not a cell of the last group
@@ -697,7 +703,7 @@ function summaryOf(turn: TurnState, cells: Cell[], subagents: SubagentGroup[], m
   const safeguard = { reviewed: 0, flagged: 0, notEvaluated: 0 };
   let toolCalls = 0;
   for (const cell of cells) {
-    if (cell.toolName === 'thinking' || cell.toolName === 'hook') continue;
+    if (cell.toolName === 'thinking') continue;
     const count = cell.id.startsWith('cell:reads:') && cell.detail.kind === 'read' ? cell.detail.files.length : 1;
     toolCalls += count;
     byCategory[cell.category] += count;
@@ -766,6 +772,12 @@ function localCommandRow(event: Event<'user.message'>, turnId: TurnId | null): R
   return { id: event.messageUuid === null ? rowId.localOfEvent(event.id) : rowId.local(event.messageUuid), turnId, at: event.at, kind: 'local_command', messageUuid: event.messageUuid, text };
 }
 
+// The engine's own words for a hook that got in the way, written for the terminal, which the hook's notice row says
+// instead (model/hooks.ts; pass3/hooks-blocking seq 32 and 59): the `stop-hook-error` notification ("Stop hook error
+// occurred · ctrl+o to see", also sent when a Stop hook re-prompts) and the informational "UserPromptSubmit operation
+// blocked by hook: …" (2.1.283 cli.pretty.js 807758, 919121).
+const supersededByHookRow = (event: Event<'notice.posted'>) => event.key === 'stop-hook-error' || event.text.startsWith('UserPromptSubmit operation blocked by hook:');
+
 function noticeRow(event: SessionEvent, text: string, turnId: TurnId | null): RowOf<'error'> {
   return { id: rowId.error(event.id), turnId, at: event.at, kind: 'error', severity: 'notice', text, attempt: null, scope: 'notice', lostAttentionCount: null };
 }
@@ -815,7 +827,7 @@ function looseRows(state: TranscriptState, events: SessionEvent[]): Row[] {
         rows.push({ id: rowId.error(event.id), turnId: null, at: event.at, kind: 'error', severity: 'error', text: event.message, attempt: null, scope: event.scope, lostAttentionCount: null });
         break;
       case 'notice.posted':
-        rows.push(noticeRow(event, event.text, null));
+        if (!supersededByHookRow(event)) rows.push(noticeRow(event, event.text, null));
         break;
       case 'session.reconnect': {
         const id: RowId = episode?.id ?? rowId.reconnect(event.id);

@@ -39,7 +39,7 @@ describe('divider and summary copy', () => {
 
 describe('group phrases', () => {
   const input = (partial: Partial<GroupPhraseInput>): GroupPhraseInput => ({
-    mcpServers: [], skills: [], toolsLoaded: 0, editedFiles: [], readFiles: [], searches: [], commands: [], hooks: 0, webQueries: [], fetchedHosts: [], other: 0, ...partial,
+    mcpServers: [], skills: [], toolsLoaded: 0, editedFiles: [], readFiles: [], searches: [], commands: [], webQueries: [], fetchedHosts: [], other: 0, ...partial,
   });
 
   it('phrases in category order, joined by commas, first letter capitalised', () => {
@@ -57,7 +57,6 @@ describe('group phrases', () => {
     expect(groupSummary(input({ skills: ['test-driven-development'] }))).toBe('Loaded test-driven-development skill');
     expect(groupSummary(input({ skills: ['a', 'b'] }))).toBe('Loaded 2 skills');
     expect(groupSummary(input({ toolsLoaded: 3 }))).toBe('Loaded 3 tools');
-    expect(groupSummary(input({ hooks: 2, commands: ['x'] }))).toBe('Ran `x`, ran 2 hooks');
   });
 
   it('names up to three MCP servers, else counts sources', () => {
@@ -120,7 +119,6 @@ describe('cell lines', () => {
     expect(cellLabel({ kind: 'generic', toolName: 'EnterWorktree', category: 'other', detail: '/tmp/wt' })).toBe('Entered worktree /tmp/wt');
     expect(cellLabel({ kind: 'generic', toolName: 'SendUserFile', category: 'other', detail: 'report.pdf' })).toBe('Sent report.pdf');
     expect(cellLabel({ kind: 'generic', toolName: 'TodoWrite', category: 'other' })).toBe('Used TodoWrite');
-    expect(cellLabel({ kind: 'hook', event: 'PostToolUse', name: 'PostToolUse:Bash' })).toBe('Hook PostToolUse · PostToolUse:Bash');
   });
 
   it('thinking', () => {

@@ -134,13 +134,11 @@ describe('fixture gates through the model', () => {
     }
   });
 
-  it('pass2/hooks: a hook cell inside the turn’s group', () => {
+  it('pass2/hooks: the successful PostToolUse hook shows nothing; the lone Bash call stands alone (W1)', () => {
     const rows = rowsFor('pass2', 'hooks');
-    const groups = ofKind(rows, 'group');
-    expect(groups).toHaveLength(1);
-    expect(groups[0].cells.map((cell) => cell.id)).toEqual(['cell:toolu_01Pw5t8WFEWy8m7zrSCNnca1', 'cell:hook:2fb18f8d-6da2-4d27-b7c5-5e55be53e312']);
-    expect(groups[0].cells[1].detail).toMatchObject({ kind: 'hook', outcome: 'success', stdout: 'MAWS_POSTHOOK\n' });
-    expect(groups[0].summary).toBe('Ran `git status --short`, ran 1 hook');
+    expect(ofKind(rows, 'group')).toHaveLength(0);
+    expect(cellsOf(rows).map((cell) => cell.id)).toEqual(['cell:toolu_01Pw5t8WFEWy8m7zrSCNnca1']);
+    expect(rows.some((row) => row.kind === 'error' && row.scope === 'hook')).toBe(false);
   });
 
   it('pass2/auto-routed: four local_command rows and no user row for them; the interrupt markers yield no row', () => {
@@ -198,8 +196,27 @@ describe('fixture gates through the model', () => {
   it('pass3/steer-now: the now prompt preempts the running turn (stopped) and runs as its own turn', () => {
     const state = stateOf('pass3', 'steer-now');
     expect(state.order).toHaveLength(3);
-    expect(ofKind(rowsFor('pass3', 'steer-now'), 'divider').map((row) => row.state)).toEqual(['stopped', 'completed', 'completed']);
+    expect(state.order.map((id) => state.turns.get(id)!.state)).toEqual(['closed', 'closed', 'closed']);
+    // The two answer-only turns did no work (their hook runs show nothing since W1), so only the stopped turn has a divider.
+    expect(ofKind(rowsFor('pass3', 'steer-now'), 'divider').map((row) => [row.turnId, row.state])).toEqual([[state.order[0], 'stopped']]);
+    expect(ofKind(rowsFor('pass3', 'steer-now'), 'assistant_text').filter((row) => row.turnId !== state.order[0]).map((row) => row.phase)).toEqual(['answer', 'answer']);
     expect(ofKind(rowsFor('pass3', 'steer-now'), 'user').every((row) => !row.steer)).toBe(true);
+  });
+
+  // W1 (A4): a Stop hook answering decision: block (seq 30) and a UserPromptSubmit hook exiting 2 (seq 57), recorded live
+  // under a scratch config home. The engine's terminal words for both (seq 32, 59) give way to the hook's notice row.
+  it('pass3/hooks-blocking: Hook re-prompted Claude between the two answers; A hook blocked your prompt with Edit prompt; no divider, no engine notice', () => {
+    const rows = rowsOf(stateOf('pass3', 'hooks-blocking'));
+    expect(rows.filter((row) => row.kind !== 'time').map((row) => (row.kind === 'error' ? `${row.scope}:${row.text}` : row.kind === 'assistant_text' ? `${row.phase}:${row.markdown}` : `${row.kind}:${row.kind === 'user' ? row.text : ''}`))).toEqual([
+      'user:Reply ONE',
+      'answer:ONE',
+      'hook:Hook re-prompted Claude · Say REPROMPTED and stop',
+      'answer:REPROMPTED',
+      'user:BLOCKME please reply TWO',
+      'hook:A hook blocked your prompt · BLOCKED_BY_TEST_HOOK',
+      'exit:Session process exited (quit)',
+    ]);
+    expect(ofKind(rows, 'error').find((row) => row.scope === 'hook' && row.text.startsWith('A hook blocked'))?.action).toBe('edit_prompt');
   });
 
   it('pass3/plan-outcomes: MAWS’s clear-and-implement (a deny with its fixed message) reads as such, beside the other two outcomes', () => {

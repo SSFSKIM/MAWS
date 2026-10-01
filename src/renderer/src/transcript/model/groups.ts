@@ -11,7 +11,7 @@ import { TOOL_CATEGORIES, type Cell, type Row, type ToolCategory, type TurnId } 
 
 type RowOf<K extends Row['kind']> = Extract<Row, { kind: K }>;
 
-// A work-area item once the turn's placeholders are resolved: text and thinking rows, tool and hook cells, and rows
+// A work-area item once the turn's placeholders are resolved: text and thinking rows, tool cells, and rows
 // of other kinds (subagent, agent message, plan, question, slot, boundary, error, bash, local command).
 export type WorkItem =
   | { kind: 'text'; row: RowOf<'assistant_text'> }
@@ -98,12 +98,11 @@ export function groupItems(items: WorkItem[], turn: TurnState, ui: TranscriptUi 
 const standaloneRow = (cell: Cell, turnId: TurnId): Row => ({ ...cell, id: rowId.cell(cell.id), turnId, at: cell.startedAt, kind: 'cell', classification: { ...cell.classification, startsGroup: false } });
 
 export function phrasesOf(cells: Cell[]): GroupPhraseInput {
-  const input: GroupPhraseInput = { mcpServers: [], skills: [], toolsLoaded: 0, editedFiles: [], readFiles: [], searches: [], commands: [], hooks: 0, webQueries: [], fetchedHosts: [], other: 0 };
+  const input: GroupPhraseInput = { mcpServers: [], skills: [], toolsLoaded: 0, editedFiles: [], readFiles: [], searches: [], commands: [], webQueries: [], fetchedHosts: [], other: 0 };
   for (const cell of cells) {
     if (cell.toolName === 'thinking' || cell.classification.hidden) continue;
     const detail = cell.detail;
-    if (cell.toolName === 'hook') input.hooks += 1;
-    else if (detail.kind === 'mcp') input.mcpServers.push(detail.server);
+    if (detail.kind === 'mcp') input.mcpServers.push(detail.server);
     else if (cell.toolName === 'Skill') input.skills.push(cell.label.replace(/^Loaded (.*) skill$/, '$1'));
     else if (cell.toolName === 'ToolSearch') input.toolsLoaded += Number(/(\d+)/.exec(cell.label)?.[1] ?? 0);
     else if (detail.kind === 'edit') input.editedFiles.push(detail.filePath);

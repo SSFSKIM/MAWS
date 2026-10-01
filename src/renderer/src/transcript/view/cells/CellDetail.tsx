@@ -8,7 +8,6 @@ import type { Cell, Row, TurnId } from '../../model/rows';
 import { useTranscriptContext } from '../context';
 import { EditDetail } from './EditDetail';
 import { GenericDetail } from './GenericDetail';
-import { HookDetail } from './HookDetail';
 import { ImageDetail } from './ImageDetail';
 import { McpDetail } from './McpDetail';
 import { ReadDetail } from './ReadDetail';
@@ -28,7 +27,6 @@ function Body({ cell, turnId }: { cell: Cell; turnId: TurnId | null }) {
     case 'mcp': return <McpDetail cell={cell} detail={detail} />;
     case 'image': return <ImageDetail detail={detail} />;
     case 'thinking': return <ThinkingDetail cell={cell} detail={detail} turnId={turnId} />;
-    case 'hook': return <HookDetail detail={detail} />;
     case 'generic': return <GenericDetail cell={cell} detail={detail} />;
   }
 }

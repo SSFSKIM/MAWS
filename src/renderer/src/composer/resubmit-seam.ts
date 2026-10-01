@@ -64,6 +64,15 @@ export function editAndResubmitRow(row: UserRow): void {
   prefillComposer(appSessionId, rowPrefill({ ...row, messageUuid: row.messageUuid }, newestUserUuid(rows)));
 }
 
+// C6's editPrompt (W1): a prompt a hook blocked never reached the model, so there is nothing to fork or rewind; its text
+// goes back into the composer as a new message, not in edit mode. The same session rule as the bubble's Edit.
+export function editPromptRow(row: UserRow): void {
+  const appSessionId = focusedSession();
+  if (appSessionId === null || row.messageUuid === null) return;
+  if (!useTranscriptStore.getState().rows(appSessionId).some((r) => r.kind === 'user' && r.messageUuid === row.messageUuid)) return;
+  prefillComposer(appSessionId, { ...rowPrefill({ ...row, messageUuid: row.messageUuid }, null), editing: null });
+}
+
 // ---- the explicit-rewind state machine ---------------------------------------------------------------------------------
 
 // C3's late window: a `rewind_conversation` response that arrives within it still yields `boundary.rewind`.

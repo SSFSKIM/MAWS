@@ -1,0 +1,95 @@
+[
+  {
+    "at": "2026-10-01T09:23:20.517Z",
+    "id": "time:turn:6f160170-c2a3-4937-a383-c742f2a6b60c",
+    "kind": "time",
+    "label": "Oct 1, 2026 9:23 AM",
+    "turnId": "turn:6f160170-c2a3-4937-a383-c742f2a6b60c"
+  },
+  {
+    "at": "2026-10-01T09:23:20.517Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:6f160170-c2a3-4937-a383-c742f2a6b60c",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "6f160170-c2a3-4937-a383-c742f2a6b60c",
+    "placeholders": [],
+    "steer": false,
+    "text": "Reply ONE",
+    "turnId": "turn:6f160170-c2a3-4937-a383-c742f2a6b60c"
+  },
+  {
+    "at": "2026-10-01T09:23:22.202Z",
+    "blockIndex": 0,
+    "id": "text:msg_011CfbGqmD9E4XzQZsTddnBp:0",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "ONE",
+    "messageUuid": "51eef9ee-d425-4ad2-bef6-fcf73611f194",
+    "model": "claude-sonnet-5-5",
+    "phase": "answer",
+    "turnId": "turn:6f160170-c2a3-4937-a383-c742f2a6b60c"
+  },
+  {
+    "at": "2026-10-01T09:23:22.230Z",
+    "attempt": null,
+    "id": "hook:a5277469-5c36-4359-9917-9f1767af3171",
+    "kind": "error",
+    "lostAttentionCount": null,
+    "scope": "hook",
+    "severity": "notice",
+    "text": "Hook re-prompted Claude · Say REPROMPTED and stop",
+    "turnId": "turn:6f160170-c2a3-4937-a383-c742f2a6b60c"
+  },
+  {
+    "at": "2026-10-01T09:23:23.225Z",
+    "blockIndex": 0,
+    "id": "text:msg_011CfbGqsGHD3R3Lk841hGHr:0",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "REPROMPTED",
+    "messageUuid": "00d323e3-010e-4799-8548-1e95762e28cb",
+    "model": "claude-sonnet-5-5",
+    "phase": "answer",
+    "turnId": "turn:6f160170-c2a3-4937-a383-c742f2a6b60c"
+  },
+  {
+    "at": "2026-10-01T09:23:29.073Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:d09a4b31-9229-4520-b8b4-fb23b7e4803b",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "d09a4b31-9229-4520-b8b4-fb23b7e4803b",
+    "placeholders": [],
+    "steer": false,
+    "text": "BLOCKME please reply TWO",
+    "turnId": "turn:d09a4b31-9229-4520-b8b4-fb23b7e4803b"
+  },
+  {
+    "action": "edit_prompt",
+    "at": "2026-10-01T09:23:29.080Z",
+    "attempt": null,
+    "id": "hook:105c2e25-a0d2-4de3-9d70-9884abeaa3fc",
+    "kind": "error",
+    "lostAttentionCount": null,
+    "scope": "hook",
+    "severity": "notice",
+    "text": "A hook blocked your prompt · BLOCKED_BY_TEST_HOOK",
+    "turnId": "turn:d09a4b31-9229-4520-b8b4-fb23b7e4803b"
+  },
+  {
+    "at": "2026-10-01T09:23:37.496Z",
+    "attempt": null,
+    "id": "error:replay:journal:70:0",
+    "kind": "error",
+    "lostAttentionCount": 0,
+    "scope": "exit",
+    "severity": "notice",
+    "text": "Session process exited (quit)",
+    "turnId": null
+  }
+]

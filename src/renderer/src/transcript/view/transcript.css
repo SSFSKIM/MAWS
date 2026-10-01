@@ -337,6 +337,8 @@ button.transcript-glyph-overflow:hover { color: var(--fg); background: var(--bg-
 .transcript-error[data-severity="transient"] .transcript-error-mark { color: var(--warning); }
 .transcript-error[data-severity="error"] { color: var(--danger); }
 .transcript-error[data-severity="notice"] .transcript-error-mark { color: var(--info); }
+.transcript-error-action { flex-shrink: 0; padding: 0 6px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); color: var(--fg); font-size: var(--text-ui-sm); }
+.transcript-error-action:hover { background: var(--bg-hover); }
 
 /* A spilled result's loader */
 .transcript-spill { display: flex; align-items: center; gap: 8px; padding: 4px 8px; color: var(--fg-muted); font-size: var(--text-ui-sm); }

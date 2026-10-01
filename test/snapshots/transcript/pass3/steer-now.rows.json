@@ -67,84 +67,42 @@
     "turnId": "turn:7aa791e4-4261-41a4-9ef3-e1590591dd3c"
   },
   {
-    "activeLabel": null,
+    "agent": null,
     "at": "2026-09-29T02:22:36.757Z",
-    "cells": [
-      {
-        "agent": null,
-        "category": "commands",
-        "classification": {
-          "category": "commands",
-          "denial": null,
-          "groupable": true,
-          "hidden": false,
-          "humanDecision": false,
-          "safeguard": "not_flagged",
-          "startsGroup": true,
-          "subagentLifecycle": null
-        },
-        "detail": {
-          "backgroundTaskId": null,
-          "command": "sleep 1 && echo 1",
-          "cwd": null,
-          "description": "Sleep one second, print 1",
-          "exitCode": 0,
-          "interrupted": false,
-          "kind": "shell",
-          "spill": null,
-          "stderr": "",
-          "stdout": "1",
-          "truncated": null
-        },
-        "endedAt": "2026-09-29T02:22:38.855Z",
-        "expanded": true,
-        "id": "cell:toolu_01MR7D8GPEi7sNiWWEvS5E9Y",
-        "label": "Ran `sleep 1 && echo 1` in 2s",
-        "paths": [],
-        "startedAt": "2026-09-29T02:22:36.757Z",
-        "status": "done",
-        "toolName": "Bash",
-        "toolUseId": "toolu_01MR7D8GPEi7sNiWWEvS5E9Y"
-      },
-      {
-        "agent": null,
-        "category": "commands",
-        "classification": {
-          "category": "commands",
-          "denial": null,
-          "groupable": true,
-          "hidden": false,
-          "humanDecision": false,
-          "safeguard": "not_evaluated",
-          "startsGroup": false,
-          "subagentLifecycle": null
-        },
-        "detail": {
-          "event": "PreToolUse",
-          "exitCode": 0,
-          "kind": "hook",
-          "name": "PreToolUse:Bash",
-          "outcome": "success",
-          "stderr": "",
-          "stdout": "{\n  \"hookSpecificOutput\": {\n    \"hookEventName\": \"PreToolUse\",\n    \"permissionDecision\": \"allow\",\n    \"permissionDecisionReason\": \"Guardrail allowlist: non-destructive command\"\n  }\n}\n"
-        },
-        "endedAt": "2026-09-29T02:22:36.825Z",
-        "expanded": true,
-        "id": "cell:hook:dd7dc093-43e1-465f-b207-79c505d33bda",
-        "label": "Hook PreToolUse · PreToolUse:Bash",
-        "paths": [],
-        "startedAt": "2026-09-29T02:22:36.762Z",
-        "status": "done",
-        "toolName": "hook",
-        "toolUseId": null
-      }
-    ],
+    "category": "commands",
+    "classification": {
+      "category": "commands",
+      "denial": null,
+      "groupable": true,
+      "hidden": false,
+      "humanDecision": false,
+      "safeguard": "not_flagged",
+      "startsGroup": false,
+      "subagentLifecycle": null
+    },
+    "detail": {
+      "backgroundTaskId": null,
+      "command": "sleep 1 && echo 1",
+      "cwd": null,
+      "description": "Sleep one second, print 1",
+      "exitCode": 0,
+      "interrupted": false,
+      "kind": "shell",
+      "spill": null,
+      "stderr": "",
+      "stdout": "1",
+      "truncated": null
+    },
+    "endedAt": "2026-09-29T02:22:38.855Z",
     "expanded": true,
-    "icon": "commands",
-    "id": "group:cell:toolu_01MR7D8GPEi7sNiWWEvS5E9Y",
-    "kind": "group",
-    "state": "completed",
-    "summary": "Ran `sleep 1 && echo 1`, ran 1 hook",
+    "id": "cell:toolu_01MR7D8GPEi7sNiWWEvS5E9Y",
+    "kind": "cell",
+    "label": "Ran `sleep 1 && echo 1` in 2s",
+    "paths": [],
+    "startedAt": "2026-09-29T02:22:36.757Z",
+    "status": "done",
+    "toolName": "Bash",
+    "toolUseId": "toolu_01MR7D8GPEi7sNiWWEvS5E9Y",
     "turnId": "turn:7aa791e4-4261-41a4-9ef3-e1590591dd3c"
   },
   {
@@ -159,129 +117,6 @@
     "placeholders": [],
     "steer": false,
     "text": "Stop counting and reply STEERED",
-    "turnId": "turn:e80149ac-ba3a-486a-8d42-b07a6f987698"
-  },
-  {
-    "at": "2026-09-29T02:22:38.903Z",
-    "autoDenied": 0,
-    "denied": 0,
-    "endedAt": "2026-09-29T02:22:40.954Z",
-    "expanded": true,
-    "firstDeniedCell": null,
-    "id": "divider:turn:e80149ac-ba3a-486a-8d42-b07a6f987698",
-    "kind": "divider",
-    "origin": "human",
-    "startedAt": "2026-09-29T02:22:38.910Z",
-    "state": "completed",
-    "summary": {
-      "autoDenied": 0,
-      "byCategory": {
-        "commands": 0,
-        "exploration": 0,
-        "files": 0,
-        "mcp": 0,
-        "other": 0,
-        "skills": 0,
-        "web": 0
-      },
-      "childAgents": 0,
-      "costUsd": 0.2846788,
-      "denials": [],
-      "durationMs": 2034,
-      "model": "claude-sonnet-5-5",
-      "safeguard": {
-        "flagged": 0,
-        "notEvaluated": 0,
-        "reviewed": 0
-      },
-      "terminalReason": "completed",
-      "toolCalls": 0,
-      "usage": {
-        "cacheCreationInputTokens": 1453,
-        "cacheReadInputTokens": 32414,
-        "inputTokens": 2,
-        "outputTokens": 6,
-        "thinkingTokens": 0
-      }
-    },
-    "toolCalls": 0,
-    "turnId": "turn:e80149ac-ba3a-486a-8d42-b07a6f987698"
-  },
-  {
-    "activeLabel": null,
-    "at": "2026-09-29T02:22:40.663Z",
-    "cells": [
-      {
-        "agent": null,
-        "category": "commands",
-        "classification": {
-          "category": "commands",
-          "denial": null,
-          "groupable": true,
-          "hidden": false,
-          "humanDecision": false,
-          "safeguard": "not_evaluated",
-          "startsGroup": true,
-          "subagentLifecycle": null
-        },
-        "detail": {
-          "event": "MessageDisplay",
-          "exitCode": 0,
-          "kind": "hook",
-          "name": "MessageDisplay",
-          "outcome": "success",
-          "stderr": "",
-          "stdout": ""
-        },
-        "endedAt": "2026-09-29T02:22:40.678Z",
-        "expanded": true,
-        "id": "cell:hook:5b9d7fd7-de93-4ece-8659-b06af89b5a45",
-        "label": "Hook MessageDisplay · MessageDisplay",
-        "paths": [],
-        "startedAt": "2026-09-29T02:22:40.663Z",
-        "status": "done",
-        "toolName": "hook",
-        "toolUseId": null
-      },
-      {
-        "agent": null,
-        "category": "commands",
-        "classification": {
-          "category": "commands",
-          "denial": null,
-          "groupable": true,
-          "hidden": false,
-          "humanDecision": false,
-          "safeguard": "not_evaluated",
-          "startsGroup": false,
-          "subagentLifecycle": null
-        },
-        "detail": {
-          "event": "Stop",
-          "exitCode": 0,
-          "kind": "hook",
-          "name": "Stop",
-          "outcome": "success",
-          "stderr": "",
-          "stdout": ""
-        },
-        "endedAt": "2026-09-29T02:22:40.940Z",
-        "expanded": true,
-        "id": "cell:hook:c7cbf7a6-4635-434d-b54d-7a573bb1ee07",
-        "label": "Hook Stop · Stop",
-        "paths": [],
-        "startedAt": "2026-09-29T02:22:40.699Z",
-        "status": "done",
-        "toolName": "hook",
-        "toolUseId": null
-      }
-    ],
-    "expanded": true,
-    "icon": "commands",
-    "id": "group:cell:hook:5b9d7fd7-de93-4ece-8659-b06af89b5a45",
-    "kind": "group",
-    "state": "completed",
-    "summary": "Ran 2 hooks",
     "turnId": "turn:e80149ac-ba3a-486a-8d42-b07a6f987698"
   },
   {
@@ -308,129 +143,6 @@
     "placeholders": [],
     "steer": false,
     "text": "Reply with exactly AFTER",
-    "turnId": "turn:03797d66-6388-4e77-beb2-6f0007014054"
-  },
-  {
-    "at": "2026-09-29T02:22:40.959Z",
-    "autoDenied": 0,
-    "denied": 0,
-    "endedAt": "2026-09-29T02:22:41.925Z",
-    "expanded": true,
-    "firstDeniedCell": null,
-    "id": "divider:turn:03797d66-6388-4e77-beb2-6f0007014054",
-    "kind": "divider",
-    "origin": "human",
-    "startedAt": "2026-09-29T02:22:40.960Z",
-    "state": "completed",
-    "summary": {
-      "autoDenied": 0,
-      "byCategory": {
-        "commands": 0,
-        "exploration": 0,
-        "files": 0,
-        "mcp": 0,
-        "other": 0,
-        "skills": 0,
-        "web": 0
-      },
-      "childAgents": 0,
-      "costUsd": 0.3028594,
-      "denials": [],
-      "durationMs": 964,
-      "model": "claude-sonnet-5-5",
-      "safeguard": {
-        "flagged": 0,
-        "notEvaluated": 0,
-        "reviewed": 0
-      },
-      "terminalReason": "completed",
-      "toolCalls": 0,
-      "usage": {
-        "cacheCreationInputTokens": 1444,
-        "cacheReadInputTokens": 32503,
-        "inputTokens": 2,
-        "outputTokens": 6,
-        "thinkingTokens": 0
-      }
-    },
-    "toolCalls": 0,
-    "turnId": "turn:03797d66-6388-4e77-beb2-6f0007014054"
-  },
-  {
-    "activeLabel": null,
-    "at": "2026-09-29T02:22:41.871Z",
-    "cells": [
-      {
-        "agent": null,
-        "category": "commands",
-        "classification": {
-          "category": "commands",
-          "denial": null,
-          "groupable": true,
-          "hidden": false,
-          "humanDecision": false,
-          "safeguard": "not_evaluated",
-          "startsGroup": true,
-          "subagentLifecycle": null
-        },
-        "detail": {
-          "event": "MessageDisplay",
-          "exitCode": 0,
-          "kind": "hook",
-          "name": "MessageDisplay",
-          "outcome": "success",
-          "stderr": "",
-          "stdout": ""
-        },
-        "endedAt": "2026-09-29T02:22:41.884Z",
-        "expanded": true,
-        "id": "cell:hook:d3bf0e81-3d5b-44b7-ad8e-702dbd8318f1",
-        "label": "Hook MessageDisplay · MessageDisplay",
-        "paths": [],
-        "startedAt": "2026-09-29T02:22:41.871Z",
-        "status": "done",
-        "toolName": "hook",
-        "toolUseId": null
-      },
-      {
-        "agent": null,
-        "category": "commands",
-        "classification": {
-          "category": "commands",
-          "denial": null,
-          "groupable": true,
-          "hidden": false,
-          "humanDecision": false,
-          "safeguard": "not_evaluated",
-          "startsGroup": false,
-          "subagentLifecycle": null
-        },
-        "detail": {
-          "event": "Stop",
-          "exitCode": 0,
-          "kind": "hook",
-          "name": "Stop",
-          "outcome": "success",
-          "stderr": "",
-          "stdout": ""
-        },
-        "endedAt": "2026-09-29T02:22:41.923Z",
-        "expanded": true,
-        "id": "cell:hook:9825212e-8169-4fd6-a616-8839661d9831",
-        "label": "Hook Stop · Stop",
-        "paths": [],
-        "startedAt": "2026-09-29T02:22:41.887Z",
-        "status": "done",
-        "toolName": "hook",
-        "toolUseId": null
-      }
-    ],
-    "expanded": true,
-    "icon": "commands",
-    "id": "group:cell:hook:d3bf0e81-3d5b-44b7-ad8e-702dbd8318f1",
-    "kind": "group",
-    "state": "completed",
-    "summary": "Ran 2 hooks",
     "turnId": "turn:03797d66-6388-4e77-beb2-6f0007014054"
   },
   {

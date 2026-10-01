@@ -67,113 +67,39 @@
     "turnId": "turn:f64e9148-f98a-4092-b4d7-178a326216ae"
   },
   {
-    "activeLabel": null,
+    "agent": null,
     "at": "2026-09-29T01:26:31.361Z",
-    "cells": [
-      {
-        "agent": null,
-        "category": "files",
-        "classification": {
-          "category": "files",
-          "denial": null,
-          "groupable": true,
-          "hidden": false,
-          "humanDecision": false,
-          "safeguard": "not_flagged",
-          "startsGroup": true,
-          "subagentLifecycle": null
-        },
-        "detail": {
-          "added": 1,
-          "change": "create",
-          "filePath": "/private/var/folders/c1/l4z5k02n2779byvnymzxsvth0000gn/T/maws-live-scratch-AqsCfi/notes.txt",
-          "hunks": [],
-          "kind": "edit",
-          "removed": 0
-        },
-        "endedAt": "2026-09-29T01:26:31.377Z",
-        "expanded": true,
-        "id": "cell:toolu_01YNg5Q4iVxAXQ5u9gzdDhRe",
-        "label": "Created /private/var/folders/c1/l4z5k02n2779byvnymzxsvth0000gn/T/maws-live-scratch-AqsCfi/notes.txt",
-        "paths": [
-          "/private/var/folders/c1/l4z5k02n2779byvnymzxsvth0000gn/T/maws-live-scratch-AqsCfi/notes.txt"
-        ],
-        "startedAt": "2026-09-29T01:26:31.361Z",
-        "status": "done",
-        "toolName": "Write",
-        "toolUseId": "toolu_01YNg5Q4iVxAXQ5u9gzdDhRe"
-      },
-      {
-        "agent": null,
-        "category": "commands",
-        "classification": {
-          "category": "commands",
-          "denial": null,
-          "groupable": true,
-          "hidden": false,
-          "humanDecision": false,
-          "safeguard": "not_evaluated",
-          "startsGroup": false,
-          "subagentLifecycle": null
-        },
-        "detail": {
-          "event": "MessageDisplay",
-          "exitCode": 0,
-          "kind": "hook",
-          "name": "MessageDisplay",
-          "outcome": "success",
-          "stderr": "",
-          "stdout": "{\n  \"hookSpecificOutput\": {\n    \"hookEventName\": \"MessageDisplay\",\n    \"displayContent\": \"\\n\\u001b[1;36mto human\\u001b[0m\\n\\nI created `notes.txt` in the working directory containing exactly `ALPHA`, with no trailing newline. I didn't commit it.\\n\"\n  }\n}\n"
-        },
-        "endedAt": "2026-09-29T01:26:34.879Z",
-        "expanded": true,
-        "id": "cell:hook:d614fcaf-c1ab-4eaf-9d15-0fc9d5904acc",
-        "label": "Hook MessageDisplay · MessageDisplay",
-        "paths": [],
-        "startedAt": "2026-09-29T01:26:34.844Z",
-        "status": "done",
-        "toolName": "hook",
-        "toolUseId": null
-      },
-      {
-        "agent": null,
-        "category": "commands",
-        "classification": {
-          "category": "commands",
-          "denial": null,
-          "groupable": true,
-          "hidden": false,
-          "humanDecision": false,
-          "safeguard": "not_evaluated",
-          "startsGroup": false,
-          "subagentLifecycle": null
-        },
-        "detail": {
-          "event": "Stop",
-          "exitCode": 0,
-          "kind": "hook",
-          "name": "Stop",
-          "outcome": "success",
-          "stderr": "",
-          "stdout": ""
-        },
-        "endedAt": "2026-09-29T01:26:35.080Z",
-        "expanded": true,
-        "id": "cell:hook:60df9713-2a5a-4eb1-8af5-956e0c585a35",
-        "label": "Hook Stop · Stop",
-        "paths": [],
-        "startedAt": "2026-09-29T01:26:34.899Z",
-        "status": "done",
-        "toolName": "hook",
-        "toolUseId": null
-      }
-    ],
+    "category": "files",
+    "classification": {
+      "category": "files",
+      "denial": null,
+      "groupable": true,
+      "hidden": false,
+      "humanDecision": false,
+      "safeguard": "not_flagged",
+      "startsGroup": false,
+      "subagentLifecycle": null
+    },
+    "detail": {
+      "added": 1,
+      "change": "create",
+      "filePath": "/private/var/folders/c1/l4z5k02n2779byvnymzxsvth0000gn/T/maws-live-scratch-AqsCfi/notes.txt",
+      "hunks": [],
+      "kind": "edit",
+      "removed": 0
+    },
+    "endedAt": "2026-09-29T01:26:31.377Z",
     "expanded": true,
-    "icon": "files",
-    "id": "group:cell:toolu_01YNg5Q4iVxAXQ5u9gzdDhRe",
-    "kind": "group",
-    "state": "completed",
-    "summary": "Edited notes.txt, ran 2 hooks",
+    "id": "cell:toolu_01YNg5Q4iVxAXQ5u9gzdDhRe",
+    "kind": "cell",
+    "label": "Created /private/var/folders/c1/l4z5k02n2779byvnymzxsvth0000gn/T/maws-live-scratch-AqsCfi/notes.txt",
+    "paths": [
+      "/private/var/folders/c1/l4z5k02n2779byvnymzxsvth0000gn/T/maws-live-scratch-AqsCfi/notes.txt"
+    ],
+    "startedAt": "2026-09-29T01:26:31.361Z",
+    "status": "done",
+    "toolName": "Write",
+    "toolUseId": "toolu_01YNg5Q4iVxAXQ5u9gzdDhRe",
     "turnId": "turn:f64e9148-f98a-4092-b4d7-178a326216ae"
   },
   {
@@ -280,126 +206,52 @@
     "turnId": "turn:2af844ef-3dd0-4830-abe3-1f2a0e6baf36"
   },
   {
-    "activeLabel": null,
+    "agent": null,
     "at": "2026-09-29T01:26:37.630Z",
-    "cells": [
-      {
-        "agent": null,
-        "category": "files",
-        "classification": {
-          "category": "files",
-          "denial": null,
-          "groupable": true,
-          "hidden": false,
-          "humanDecision": false,
-          "safeguard": "not_flagged",
-          "startsGroup": true,
-          "subagentLifecycle": null
-        },
-        "detail": {
-          "added": 1,
-          "change": "update",
-          "filePath": "/private/var/folders/c1/l4z5k02n2779byvnymzxsvth0000gn/T/maws-live-scratch-AqsCfi/notes.txt",
-          "hunks": [
-            {
-              "lines": [
-                "-ALPHA",
-                "\\ No newline at end of file",
-                "+BETA",
-                "\\ No newline at end of file"
-              ],
-              "newLines": 1,
-              "newStart": 1,
-              "oldLines": 1,
-              "oldStart": 1
-            }
+    "category": "files",
+    "classification": {
+      "category": "files",
+      "denial": null,
+      "groupable": true,
+      "hidden": false,
+      "humanDecision": false,
+      "safeguard": "not_flagged",
+      "startsGroup": false,
+      "subagentLifecycle": null
+    },
+    "detail": {
+      "added": 1,
+      "change": "update",
+      "filePath": "/private/var/folders/c1/l4z5k02n2779byvnymzxsvth0000gn/T/maws-live-scratch-AqsCfi/notes.txt",
+      "hunks": [
+        {
+          "lines": [
+            "-ALPHA",
+            "\\ No newline at end of file",
+            "+BETA",
+            "\\ No newline at end of file"
           ],
-          "kind": "edit",
-          "removed": 1
-        },
-        "endedAt": "2026-09-29T01:26:37.641Z",
-        "expanded": false,
-        "id": "cell:toolu_01DP37egM8LuxdG4hQ3zgjnh",
-        "label": "Edited /private/var/folders/c1/l4z5k02n2779byvnymzxsvth0000gn/T/maws-live-scratch-AqsCfi/notes.txt +1 −1",
-        "paths": [
-          "/private/var/folders/c1/l4z5k02n2779byvnymzxsvth0000gn/T/maws-live-scratch-AqsCfi/notes.txt"
-        ],
-        "startedAt": "2026-09-29T01:26:37.630Z",
-        "status": "done",
-        "toolName": "Edit",
-        "toolUseId": "toolu_01DP37egM8LuxdG4hQ3zgjnh"
-      },
-      {
-        "agent": null,
-        "category": "commands",
-        "classification": {
-          "category": "commands",
-          "denial": null,
-          "groupable": true,
-          "hidden": false,
-          "humanDecision": false,
-          "safeguard": "not_evaluated",
-          "startsGroup": false,
-          "subagentLifecycle": null
-        },
-        "detail": {
-          "event": "MessageDisplay",
-          "exitCode": 0,
-          "kind": "hook",
-          "name": "MessageDisplay",
-          "outcome": "success",
-          "stderr": "",
-          "stdout": "{\n  \"hookSpecificOutput\": {\n    \"hookEventName\": \"MessageDisplay\",\n    \"displayContent\": \"\\n\\u001b[1;36mto human\\u001b[0m\\n\\n`notes.txt` now contains `BETA` instead of `ALPHA`. It's still uncommitted.\\n\"\n  }\n}\n"
-        },
-        "endedAt": "2026-09-29T01:26:40.126Z",
-        "expanded": false,
-        "id": "cell:hook:f6acb7c5-eee1-4f6e-8ad5-ffe17a68a31d",
-        "label": "Hook MessageDisplay · MessageDisplay",
-        "paths": [],
-        "startedAt": "2026-09-29T01:26:40.092Z",
-        "status": "done",
-        "toolName": "hook",
-        "toolUseId": null
-      },
-      {
-        "agent": null,
-        "category": "commands",
-        "classification": {
-          "category": "commands",
-          "denial": null,
-          "groupable": true,
-          "hidden": false,
-          "humanDecision": false,
-          "safeguard": "not_evaluated",
-          "startsGroup": false,
-          "subagentLifecycle": null
-        },
-        "detail": {
-          "event": "Stop",
-          "exitCode": 0,
-          "kind": "hook",
-          "name": "Stop",
-          "outcome": "success",
-          "stderr": "",
-          "stdout": ""
-        },
-        "endedAt": "2026-09-29T01:26:40.304Z",
-        "expanded": false,
-        "id": "cell:hook:47365d3a-e25d-401c-9c1e-eeb7d037c001",
-        "label": "Hook Stop · Stop",
-        "paths": [],
-        "startedAt": "2026-09-29T01:26:40.129Z",
-        "status": "done",
-        "toolName": "hook",
-        "toolUseId": null
-      }
-    ],
+          "newLines": 1,
+          "newStart": 1,
+          "oldLines": 1,
+          "oldStart": 1
+        }
+      ],
+      "kind": "edit",
+      "removed": 1
+    },
+    "endedAt": "2026-09-29T01:26:37.641Z",
     "expanded": false,
-    "icon": "files",
-    "id": "group:cell:toolu_01DP37egM8LuxdG4hQ3zgjnh",
-    "kind": "group",
-    "state": "completed",
-    "summary": "Edited notes.txt, ran 2 hooks",
+    "id": "cell:toolu_01DP37egM8LuxdG4hQ3zgjnh",
+    "kind": "cell",
+    "label": "Edited /private/var/folders/c1/l4z5k02n2779byvnymzxsvth0000gn/T/maws-live-scratch-AqsCfi/notes.txt +1 −1",
+    "paths": [
+      "/private/var/folders/c1/l4z5k02n2779byvnymzxsvth0000gn/T/maws-live-scratch-AqsCfi/notes.txt"
+    ],
+    "startedAt": "2026-09-29T01:26:37.630Z",
+    "status": "done",
+    "toolName": "Edit",
+    "toolUseId": "toolu_01DP37egM8LuxdG4hQ3zgjnh",
     "turnId": "turn:2af844ef-3dd0-4830-abe3-1f2a0e6baf36"
   },
   {

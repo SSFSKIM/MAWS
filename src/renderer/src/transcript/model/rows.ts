@@ -8,7 +8,7 @@ import type { AgentId, MessageUuid, RequestId, TaskId, ToolUseId } from '@shared
 
 export type TurnId = string & z.$brand<'TurnId'>; // `turn:<userMessageUuid>`; `turn:e<eventId>` for engine-initiated turns or a user message without uuid
 export type RowId = string & z.$brand<'RowId'>; // formats in keys.ts
-export type CellId = string & z.$brand<'CellId'>; // `cell:<toolUseId>`; `cell:think:<apiMessageId>:<blockIndex>`; `cell:hook:<hookId>`; `cell:reads:<firstToolUseId>` for a merged read cell
+export type CellId = string & z.$brand<'CellId'>; // `cell:<toolUseId>`; `cell:think:<apiMessageId>:<blockIndex>`; `cell:reads:<firstToolUseId>` for a merged read cell
 
 export const TOOL_CATEGORIES = ['mcp', 'skills', 'files', 'exploration', 'commands', 'web', 'other'] as const; // fixed summary order (X3); `other` is phrased only when it is the sole category
 export type ToolCategory = (typeof TOOL_CATEGORIES)[number];
@@ -54,7 +54,8 @@ export type Row = RowBase &
       }
     | {
         kind: 'error'; severity: 'transient' | 'error' | 'notice'; text: string; attempt: { n: number; max: number | null } | null;
-        scope: 'turn' | 'task' | 'process' | 'transport' | 'request' | 'api' | 'reconnect' | 'notice' | 'exit'; lostAttentionCount: number | null;
+        scope: 'turn' | 'task' | 'process' | 'transport' | 'request' | 'api' | 'reconnect' | 'notice' | 'exit' | 'hook'; lostAttentionCount: number | null;
+        action?: 'edit_prompt'; // W1: a hook blocked the turn's own prompt; the row offers Edit prompt (that prompt back into the composer)
       }
     | { kind: 'boundary'; boundaryKind: 'compaction' | 'reset' | 'retraction' | 'rewind'; text: string; detail: string | null; hiddenRows: number; revealed: boolean }
     | { kind: 'bash'; command: string; stdout: string; stderr: string; exitCode: number | null; cwd: string | null }
@@ -117,7 +118,6 @@ export type CellDetail =
   | { kind: 'mcp'; server: string; tool: string; input: unknown; result: string | ContentBlock[]; structured: unknown; spill: Spill | null }
   | { kind: 'image'; images: { dataUrl: string; mediaType: string; alt: string | null }[]; caption: string | null }
   | { kind: 'thinking'; text: string; durationMs: number | null }
-  | { kind: 'hook'; event: string; name: string; outcome: 'success' | 'error' | 'cancelled' | 'running'; exitCode: number | null; stdout: string; stderr: string }
   | { kind: 'generic'; input: unknown; result: string | ContentBlock[]; structured: unknown; isError: boolean; spill: Spill | null; truncated: Truncation | null };
 
 export interface Hunk {
