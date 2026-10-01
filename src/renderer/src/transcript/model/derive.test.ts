@@ -245,6 +245,24 @@ describe('group state machine', () => {
     expect(kinds(list)).toEqual(['time', 'user', 'divider', 'assistant_text']);
     expect(find(list, 'divider').expanded).toBe(false);
   });
+
+  // W4 (owner's ruling): what the human answered stays in view when the turn folds, at its place among the work; the
+  // text before the question is still commentary, the text after it the answer.
+  it('an answered question stays in view when its turn folds, and still marks where the answer starts', () => {
+    const b = builder();
+    b.turn('u1');
+    b.text('m1', 0, 'Two things first.');
+    b.toolUse('t1', 'Bash', { command: 'a' });
+    b.result('t1', 'ok');
+    b.toolUse('q1', 'AskUserQuestion', { questions: [{ question: 'Which colour?', header: 'Colour', multiSelect: false, options: [{ label: 'Red' }, { label: 'Blue' }] }] });
+    b.result('q1', 'answered', { structured: { answers: { 'Which colour?': 'Red' } } });
+    b.text('m2', 0, 'Red it is.');
+    b.end(['u1']);
+    const list = rowsOf(reduce(b.events));
+    expect(kinds(list)).toEqual(['time', 'user', 'divider', 'question', 'assistant_text']);
+    expect(find(list, 'assistant_text')).toMatchObject({ id: 'text:m2:0', phase: 'answer' }); // 'Red it is.'
+    expect(kinds(rows(b.events))).toEqual(['time', 'user', 'divider', 'assistant_text', 'cell', 'question', 'assistant_text']);
+  });
 });
 
 describe('receipt counts', () => {

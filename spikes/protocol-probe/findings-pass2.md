@@ -157,6 +157,17 @@ Design: Enter while a turn runs is a `next` steer; MAWS publishes waiting steers
 
 Not verified here: what the engine's memory of a stale `cancel_async_message` does to a later frame with the same uuid; a blocked prompt and a Stop hook's re-prompt after a reload (no hook events on disk, and the blocked prompt has no user record).
 
+## W4 probes (2026-10-01): skipped questions
+
+Recorded live on the pinned 2.1.283 under a scratch `CLAUDE_CONFIG_DIR` through the relay, Haiku, by `scenarios/pass3/w4-question-skip.mjs` (about US$0.13 in all, a first take included that was re-recorded to name C7 in its provenance). Each run asks one two-question AskUserQuestion ("Which color do you prefer?" single-select, "Which fruits do you like?" multi-select) and answers it the way C3's broker writes a question answer, `{ behavior: 'allow', updatedInput: { ...input, answers } }`, with the second question, or both, left out of `answers` (the W4 stepper's Skip).
+
+Observed:
+- A partial map (`w4-question-partial`, reply seq 163 with `answers: { "Which color do you prefer?": "Red" }`) is accepted: the tool result (seq 167) is not an error and reads `Your questions have been answered: "Which color do you prefer?"="Red". You can now continue with these answers in mind.`; the skipped question is simply absent from it, and `tool_use_result.answers` echoes the partial map. The model went on and wrote `Fruits: NOT ANSWERED`; the turn ended `success`, `terminal_reason: completed`, no permission denials, no error frame.
+- An empty map (`w4-question-none`, reply seq 156 with `answers: {}`) is accepted too: the tool result (seq 159) is not an error and reads `The user did not answer the questions.`; `tool_use_result.answers` is `{}`. The turn ended `success`, `completed`, no error frame.
+- Both match the pinned bundle's AskUserQuestion `call` and tool-result builder (`cli.pretty.js` 163990-164045): an absent answer is unanswered and adds nothing to the summary; no answer at all is the fixed sentence.
+
+Design: the stepper's Skip stays as built (a skipped question left out of the one reply, an empty map when every one is skipped); Esc keeps the plain deny of `pass3/question-deny`. The receipt reads `Not answered` for a question absent from a partial map and `Skipped` for every question of an empty one (the same map a plain deny leaves).
+
 ## Not verified
 
 - Unrouted model turns, the unrouted classifier lane, and the engine's own usage windows (expired login).

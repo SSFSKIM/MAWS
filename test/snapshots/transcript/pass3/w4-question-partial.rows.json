@@ -1,0 +1,158 @@
+[
+  {
+    "at": "2026-10-01T18:05:00.716Z",
+    "id": "time:turn:78e671fe-59de-4ec0-8105-fdac0e486d77",
+    "kind": "time",
+    "label": "Oct 1, 2026 6:05 PM",
+    "turnId": "turn:78e671fe-59de-4ec0-8105-fdac0e486d77"
+  },
+  {
+    "at": "2026-10-01T18:05:00.716Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:78e671fe-59de-4ec0-8105-fdac0e486d77",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "78e671fe-59de-4ec0-8105-fdac0e486d77",
+    "placeholders": [],
+    "steer": false,
+    "text": "Call the AskUserQuestion tool exactly once, with both questions in the one call: \"Which color do you prefer?\" (header \"Color\", options Red and Blue, single choice) and \"Which fruits do you like?\" (header \"Fruits\", options Apple and Pear, multiSelect true). Do not ask again. Then reply with exactly one line per question in the form \"<header>: <answer>\", writing NOT ANSWERED for a question you got no answer to.",
+    "turnId": "turn:78e671fe-59de-4ec0-8105-fdac0e486d77"
+  },
+  {
+    "at": "2026-10-01T18:05:00.716Z",
+    "autoDenied": 0,
+    "denied": 0,
+    "endedAt": "2026-10-01T18:05:05.644Z",
+    "expanded": true,
+    "firstDeniedCell": null,
+    "id": "divider:turn:78e671fe-59de-4ec0-8105-fdac0e486d77",
+    "kind": "divider",
+    "origin": "human",
+    "startedAt": "2026-10-01T18:05:00.748Z",
+    "state": "completed",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 0,
+        "exploration": 0,
+        "files": 0,
+        "mcp": 0,
+        "other": 0,
+        "skills": 0,
+        "web": 0
+      },
+      "childAgents": 0,
+      "costUsd": 0.026169500000000002,
+      "denials": [],
+      "durationMs": 4885,
+      "model": "claude-haiku-4-5-20251001",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 0,
+        "reviewed": 0
+      },
+      "terminalReason": "completed",
+      "toolCalls": 0,
+      "usage": {
+        "cacheCreationInputTokens": 9750,
+        "cacheReadInputTokens": 33845,
+        "inputTokens": 18,
+        "outputTokens": 441,
+        "thinkingTokens": 179
+      }
+    },
+    "toolCalls": 0,
+    "turnId": "turn:78e671fe-59de-4ec0-8105-fdac0e486d77"
+  },
+  {
+    "at": "2026-10-01T18:05:01.563Z",
+    "durationMs": 1184,
+    "id": "think:msg_011Cfbxd1Cop9rMMsqiYbc9G:0",
+    "kind": "thinking",
+    "live": false,
+    "messageUuid": "11ae790d-e0f3-44e7-80b0-1ae9ea65ffc6",
+    "text": "The user is asking me to call the AskUserQuestion tool with two specific questions:\n1. \"Which color do you prefer?\" with header \"Color\", options Red and Blue, single choice\n2. \"Which fruits do you like?\" with header \"Fruits\", options Apple and Pear, multiSelect true\n\nThen I need to reply with one line per question in the format \"<header>: <answer>\", using \"NOT ANSWERED\" if no answer was provided.\n\nLet me construct this call carefully with the exact parameters requested.",
+    "turnId": "turn:78e671fe-59de-4ec0-8105-fdac0e486d77"
+  },
+  {
+    "answers": {
+      "Which color do you prefer?": "Red"
+    },
+    "at": "2026-10-01T18:05:04.403Z",
+    "id": "question:toolu_01ExNwmPYBW5464JGK1FYw1m",
+    "kind": "question",
+    "questions": [
+      {
+        "header": "Color",
+        "multiSelect": false,
+        "options": [
+          {
+            "description": "The color red",
+            "label": "Red",
+            "preview": null
+          },
+          {
+            "description": "The color blue",
+            "label": "Blue",
+            "preview": null
+          }
+        ],
+        "question": "Which color do you prefer?"
+      },
+      {
+        "header": "Fruits",
+        "multiSelect": true,
+        "options": [
+          {
+            "description": "A round fruit",
+            "label": "Apple",
+            "preview": null
+          },
+          {
+            "description": "A pear-shaped fruit",
+            "label": "Pear",
+            "preview": null
+          }
+        ],
+        "question": "Which fruits do you like?"
+      }
+    ],
+    "toolUseId": "toolu_01ExNwmPYBW5464JGK1FYw1m",
+    "turnId": "turn:78e671fe-59de-4ec0-8105-fdac0e486d77"
+  },
+  {
+    "at": "2026-10-01T18:05:05.109Z",
+    "durationMs": 507,
+    "id": "think:msg_011CfbxdGoRfTfBYbWDSbbqT:0",
+    "kind": "thinking",
+    "live": false,
+    "messageUuid": "684bb694-a2db-409c-bf68-9edbc75579e8",
+    "text": "The user answered the first question with \"Red\" but didn't answer the second question about fruits. The system result shows that only the first question was answered. I need to format my response as one line per question:\n\nColor: Red\nFruits: NOT ANSWERED",
+    "turnId": "turn:78e671fe-59de-4ec0-8105-fdac0e486d77"
+  },
+  {
+    "at": "2026-10-01T18:05:05.644Z",
+    "blockIndex": 1,
+    "id": "text:msg_011CfbxdGoRfTfBYbWDSbbqT:1",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "Color: Red\nFruits: NOT ANSWERED",
+    "messageUuid": "db0316a7-7882-4d3a-8d34-8f591582ea99",
+    "model": "claude-haiku-4-5-20251001",
+    "phase": "answer",
+    "turnId": "turn:78e671fe-59de-4ec0-8105-fdac0e486d77"
+  },
+  {
+    "at": "2026-10-01T18:05:06.044Z",
+    "attempt": null,
+    "id": "error:replay:journal:232:0",
+    "kind": "error",
+    "lostAttentionCount": 0,
+    "scope": "exit",
+    "severity": "notice",
+    "text": "Session process exited (unknown)",
+    "turnId": null
+  }
+]

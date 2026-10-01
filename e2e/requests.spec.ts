@@ -123,22 +123,57 @@ test('a replayed permission renders in the docked frame on the card page, Enter 
   expect(cards.consoleErrors()).toEqual([]);
 });
 
-test('a question form submits every answer as the fixture recorded', async ({ cards }) => {
+// W4: one question at a time under a pager; the picks live beside the request, so the same item moved from the docked
+// frame to the transcript's inline slot resumes at its question; every answer leaves as the one reply (seq 138).
+test('a question card steps one question at a time, keeps its picks across placements, and submits every answer as the fixture recorded', async ({ cards }) => {
   const { page } = cards;
   await openCards(page);
   await launchReady(page, 'c7-question', QUESTION);
   await show(page, [{ appSessionId: 'c7-question', placement: 'docked' }, null]);
   await sendFirstPrompt(page, 'c7-question', QUESTION);
   const frame = page.getByRole('group', { name: 'Question' });
+  await expect(frame).toContainText('1 of 2');
+  await expect(frame.getByText('Which fruits do you like?')).toHaveCount(0);
   await frame.getByRole('radio', { name: 'Red' }).click();
   // The option's preview renders inside the sandboxed srcdoc frame under the app's CSP (no `<pre>` fallback needed).
   await expect(page.frameLocator('iframe[title="Preview of Red"]').locator('body')).toContainText('This is a red preview');
+  await frame.getByRole('button', { name: 'Next', exact: true }).click();
+  await expect(frame).toContainText('2 of 2');
   await frame.getByRole('checkbox', { name: 'Apple' }).click();
-  await frame.getByRole('checkbox', { name: 'Pear' }).click();
-  await frame.getByRole('button', { name: 'Submit' }).click();
+
+  await show(page, [{ appSessionId: 'c7-question', placement: 'inline' }, null]);
+  const card = page.locator('[data-request-card]');
+  await expect(card).toContainText('2 of 2');
+  await expect(card.getByRole('checkbox', { name: 'Apple' })).toHaveAttribute('aria-checked', 'true');
+  expect((await card.boundingBox())!.width, 'inline, the card is 480 px wide at most').toBeLessThanOrEqual(480);
+  await card.getByRole('checkbox', { name: 'Pear' }).click();
+  expect(await resolved(page, 'c7-question', 'question.answered'), 'nothing leaves before Submit').toEqual([]);
+  await card.getByRole('button', { name: 'Submit' }).click();
   await expect.poll(async () => (await resolved(page, 'c7-question', 'question.answered')).map((e) => e.answers)).toEqual([
     { 'Which color do you prefer?': 'Red', 'Which fruits do you like?': 'Apple, Pear' }, // seq 138
   ]);
+  expect(cards.consoleErrors()).toEqual([]);
+});
+
+// W4: the Overview card answers a question from its article: a digit picks, Enter moves on, and Skip on the last
+// question sends the reply without it (the replay matches the response by request id and behavior, so the recorded
+// question round trip carries the partial reply; the engine reads an absent answer as unanswered).
+test('the Overview card steps a question with digits and Enter, and Skip leaves the last question out of the reply', async ({ cards }) => {
+  const { page } = cards;
+  await openCards(page);
+  await launchReady(page, 'c7-question-card', QUESTION);
+  await show(page, [{ appSessionId: 'c7-question-card', placement: 'card' }, null]);
+  await sendFirstPrompt(page, 'c7-question-card', QUESTION);
+  const article = page.getByRole('article', { name: 'card c7-question-card' });
+  await expect(article).toContainText('1 of 2');
+  await article.focus();
+  await page.keyboard.press('2');
+  await expect(article.getByRole('radio', { name: 'Blue' })).toHaveAttribute('aria-checked', 'true');
+  await page.keyboard.press('Enter');
+  await expect(article).toContainText('2 of 2');
+  await expect(article).toBeFocused();
+  await article.getByRole('button', { name: 'Skip' }).click();
+  await expect.poll(async () => (await resolved(page, 'c7-question-card', 'question.answered')).map((e) => e.answers)).toEqual([{ 'Which color do you prefer?': 'Blue' }]);
   expect(cards.consoleErrors()).toEqual([]);
 });
 

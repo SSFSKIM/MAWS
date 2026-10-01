@@ -1,7 +1,8 @@
 // A variant's state → the `RequestAnswer` `session.answer` carries (C3's answer contract, C7 execution document,
 // Request card). Every answer is parsed by `RequestAnswerSchema` before it leaves, so a shape C3 would refuse throws
-// here instead. A question form answers only when complete; a dialog answers only with a result its declared kind has
-// (an undeclared kind has none). Pure.
+// here instead. A question form answers the questions it has answers for (W4: a question the stepper skipped is left
+// out, which the engine reads as unanswered); a dialog answers only with a result its declared kind has (an undeclared
+// kind has none). Pure.
 import { RequestAnswerSchema, type RequestAnswer } from '@shared/engine/answers';
 import type { Question } from '@shared/graph/events';
 import { DIALOG_RESULTS, isDeclaredDialogKind } from './variants/dialog-kinds';
@@ -19,14 +20,15 @@ export type VariantState =
 
 const blank = (text: string | undefined) => text === undefined || text.trim() === '';
 
-// Per question: the chosen options, then the Other text verbatim, joined `', '` (the terminal's multi-select join);
-// null while any question has neither.
-export function questionAnswers(state: Extract<VariantState, { kind: 'question' }>): Record<string, string> | null {
+// Per question: the chosen options, then the Other text verbatim, joined `', '` (the terminal's multi-select join); a
+// question with neither has no entry. The pinned engine takes such a partial map as its own dialog sends one when the
+// operator submits past a blank question: an absent answer is unanswered, and no answer at all reads "The user did not
+// answer the questions." (2.1.283 `cli.pretty.js` 163990-164045, AskUserQuestion's `call` and its tool result).
+export function questionAnswers(state: Extract<VariantState, { kind: 'question' }>): Record<string, string> {
   const answers: Record<string, string> = {};
   for (const { question } of state.questions) {
     const parts = [...(state.selected[question] ?? []), ...(blank(state.other[question]) ? [] : [state.other[question]])];
-    if (parts.length === 0) return null;
-    answers[question] = parts.join(', ');
+    if (parts.length > 0) answers[question] = parts.join(', ');
   }
   return answers;
 }
@@ -36,14 +38,8 @@ function build(state: VariantState): RequestAnswer {
     case 'permission':
       if (state.decision === 'allow') return { kind: 'permission', decision: 'allow', scope: state.scope };
       return blank(state.message) ? { kind: 'permission', decision: state.decision } : { kind: 'permission', decision: state.decision, message: state.message };
-    case 'question': {
-      const answers = questionAnswers(state);
-      if (!answers) {
-        const missing = state.questions.find(({ question }) => (state.selected[question] ?? []).length === 0 && blank(state.other[question]));
-        throw new Error(`unanswered question: ${missing?.question ?? '?'}`);
-      }
-      return { kind: 'question', answers };
-    }
+    case 'question':
+      return { kind: 'question', answers: questionAnswers(state) };
     case 'plan':
       return state.outcome === 'keep_planning' ? { kind: 'plan', outcome: 'keep_planning', feedback: blank(state.feedback) ? null : state.feedback } : { kind: 'plan', outcome: state.outcome, feedback: null };
     case 'dialog': {

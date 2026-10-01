@@ -13,7 +13,7 @@ describe('scope options follow the downgrade rule', () => {
     expect(options[1]).toMatchObject({ label: 'Allow for this session', detail: 'Matching touch granted.txt commands' });
     // what C3's broker writes for the scope: the suggestion rewritten to the session, the localSettings one as sent
     expect(options[1].updatedPermissions).toEqual([{ type: 'addRules', rules: [{ toolName: 'Bash', ruleContent: 'touch granted.txt' }], behavior: 'allow', destination: 'session' }]);
-    expect(options[2]).toMatchObject({ label: 'Always allow touch granted.txt in probe', detail: 'Project rule' });
+    expect(options[2]).toMatchObject({ label: 'Always allow touch granted.txt in probe', detail: 'Saved to .claude/settings.local.json in the project' });
     expect(options[2].updatedPermissions).toEqual([{ type: 'addRules', rules: [{ toolName: 'Bash', ruleContent: 'touch granted.txt' }], behavior: 'allow', destination: 'localSettings' }]);
   });
 
@@ -22,7 +22,7 @@ describe('scope options follow the downgrade rule', () => {
     expect(scopeOptions(edit, { name: 'repo' }).map((o) => [o.scope, o.label, o.detail])).toEqual([
       ['once', 'Allow once', 'This 1 file'],
       ['session', 'Allow for this session', 'Until this session ends'],
-      ['local_settings', 'Always allow Edit in repo', 'Project rule'],
+      ['local_settings', 'Always allow Edit in repo', 'Saved to .claude/settings.local.json in the project'],
     ]);
   });
 

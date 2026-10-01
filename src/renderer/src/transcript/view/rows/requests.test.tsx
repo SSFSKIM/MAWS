@@ -98,55 +98,54 @@ describe('plan row', () => {
   });
 });
 
+// W4: one compact widget, a line per question reading "header (or question) → answer".
+const lines = (container: HTMLElement) => [...container.querySelectorAll<HTMLElement>('[data-question]')].map((line) => line.textContent);
+
 describe('question row', () => {
-  it('pass1/question-roundtrip: both questions with their options, the chosen ones marked, no previews and no controls', async () => {
+  it('pass1/question-roundtrip: one line per question, header → answer, no options, previews or controls', async () => {
     const store = await expanded(journalToEvents(loadJournal('pass1', 'question-roundtrip')));
     const question = rowOf(store.rows(), 'question');
     const view = renderRow(question, { storeKey: store.key });
     const region = screen.getByRole('region', { name: 'Question' });
-    const items = [...region.querySelectorAll<HTMLElement>('[data-question]')];
-    expect(items.map((item) => item.querySelector('[data-question-header]')?.textContent)).toEqual(['Color', 'Fruits']);
-    const chosen = items.map((item) => [...item.querySelectorAll('[data-chosen] [data-option-label]')].map((label) => label.textContent));
-    expect(chosen).toEqual([['Red'], ['Apple', 'Pear']]);
-    expect(items[0].querySelector('[data-chosen]')?.textContent).toContain('Chosen');
-    expect(region.textContent).toContain('A warm, bold color'); // option descriptions render
-    expect(region.textContent).not.toContain('This is a red preview'); // previews are C7's live form concern
+    expect(lines(region)).toEqual(['Color→Red', 'Fruits→Apple, Pear']);
+    expect([...region.querySelectorAll('[data-question]')].map((line) => line.getAttribute('title'))).toEqual(['Which color do you prefer?', 'Which fruits do you like?']);
+    expect(region.textContent).not.toContain('Blue'); // the options not chosen are not listed
+    expect(region.textContent).not.toContain('A warm, bold color'); // nor their descriptions
+    expect(region.textContent).not.toContain('This is a red preview');
+    expect(region.textContent).not.toContain('Chosen');
     expect(view.container.querySelectorAll('button, input, textarea, select')).toHaveLength(0);
   });
 
-  it('an answer that is no option reads as the answer; an unanswered question says so', async () => {
+  it('an answer that is no option reads as written; with no header the question names the line; an unanswered question says so', async () => {
     const questions = (answered: boolean) => {
       const b = builder();
       b.turn('u1');
-      b.toolUse('q1', 'AskUserQuestion', { questions: [{ question: 'Which colour?', header: 'Colour', multiSelect: false, options: [{ label: 'Red' }, { label: 'Blue' }] }] });
+      b.toolUse('q1', 'AskUserQuestion', { questions: [{ question: 'Which colour?', header: '', multiSelect: false, options: [{ label: 'Red' }, { label: 'Blue' }] }] });
       if (answered) b.result('q1', 'answered', { structured: { answers: { 'Which colour?': 'Teal, actually' } } });
       b.end(['u1']);
       return b.events;
     };
     const answered = await expanded(questions(true));
     let view = renderRow(rowOf(answered.rows(), 'question'), { storeKey: answered.key });
-    expect(view.container.querySelectorAll('[data-chosen]')).toHaveLength(0);
-    expect(view.container.textContent).toContain('Answer: Teal, actually');
+    expect(lines(view.container)).toEqual(['Which colour?→Teal, actually']);
     view.unmount();
     const unanswered = await expanded(questions(false));
     view = renderRow(rowOf(unanswered.rows(), 'question'), { storeKey: unanswered.key });
-    expect(view.container.textContent).toContain('Not answered');
+    expect(lines(view.container)).toEqual(['Which colour?→Not answered']);
   });
 
-  // Debt wave 4: the card's Skip answers a question with a plain permission deny, which C3 reports as `question.answered`
-  // with no answers (recorded: pass3/question-deny). The row reads the question as skipped, not unanswered.
-  it('a question skipped through a plain deny reads Skipped, in the row and its export (pass3/question-deny)', async () => {
+  // Debt wave 4: Esc on the card answers a question with a plain permission deny, which C3 reports as
+  // `question.answered` with no answers (recorded: pass3/question-deny). The row reads the question as skipped.
+  it('a question declined through a plain deny reads Skipped, in the row and its export (pass3/question-deny)', async () => {
     const store = await expanded(journalToEvents(loadJournal('pass3', 'question-deny')));
     const row = rowOf(store.rows(), 'question');
     expect(row.answers).toEqual({});
     const view = renderRow(row, { storeKey: store.key });
-    expect(view.container.querySelector('[data-question]')!.textContent).toContain('Skipped');
-    expect(view.container.textContent).not.toContain('Not answered');
-    expect(view.container.querySelectorAll('[data-chosen]')).toHaveLength(0);
+    expect(lines(view.container)).toEqual(['Color→Skipped']);
     expect(serializeRows([row])).toBe('**Color** Red or Blue?: Skipped');
   });
 
-  it('a partially answered row says Not answered for each question without an answer, and only for those', async () => {
+  it('a partially answered row (the stepper skipped one) says Not answered for each question without an answer, and only for those', async () => {
     const b = builder();
     b.turn('u1');
     b.toolUse('q1', 'AskUserQuestion', {
@@ -159,11 +158,7 @@ describe('question row', () => {
     b.end(['u1']);
     const store = await expanded(b.events);
     const view = renderRow(rowOf(store.rows(), 'question'), { storeKey: store.key });
-    const [colour, fruits] = [...view.container.querySelectorAll<HTMLElement>('[data-question]')];
-    expect([...colour.querySelectorAll('[data-chosen] [data-option-label]')].map((label) => label.textContent)).toEqual(['Blue']);
-    expect(colour.textContent).not.toContain('Not answered');
-    expect(fruits.querySelectorAll('[data-chosen]')).toHaveLength(0);
-    expect(fruits.textContent).toContain('Not answered');
+    expect(lines(view.container)).toEqual(['Colour→Blue', 'Fruits→Not answered']);
   });
 });
 

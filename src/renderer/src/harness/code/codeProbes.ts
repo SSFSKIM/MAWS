@@ -228,7 +228,7 @@ export const codeProbes: CodeHarnessApi = {
     if (tab?.kind === 'file') useViewer.getState().toggleSource(tab.id);
   },
   async clickReceiptReview(path) {
-    const selector = path ? `.transcript-receipt-file[title="${CSS.escape(path)}"]` : '.transcript-receipt-review';
+    const selector = path ? `.transcript-receipt-file[data-path="${CSS.escape(path)}"]` : '.transcript-receipt-review';
     const button = await until(() => document.querySelector<HTMLElement>(`[data-code-harness-transcript] ${selector}`), path ? `receipt row ${path}` : 'Review changes');
     button.click();
   },

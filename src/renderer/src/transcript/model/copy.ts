@@ -8,6 +8,13 @@ import { duration } from './time';
 export const plural = (n: number, noun: string, nouns = `${noun}s`) => `${n} ${n === 1 ? noun : nouns}`;
 const capitalise = (text: string) => (text.length === 0 ? text : text[0].toUpperCase() + text.slice(1));
 export const baseName = (path: string) => path.split('/').filter((part) => part.length > 0).at(-1) ?? path;
+// A path as the session reads it (W4, the receipt): relative to the session's directory when it lies inside it, else as
+// recorded.
+export function displayPath(path: string, directory: string | null): string {
+  if (!directory) return path;
+  const base = directory.endsWith('/') ? directory : `${directory}/`;
+  return path.startsWith(base) ? path.slice(base.length) : path;
+}
 export const hostOf = (url: string) => {
   try {
     return new URL(url).host;
@@ -235,7 +242,7 @@ export const planBadge = (outcome: keyof typeof PLAN_OUTCOME_BADGE | null, feedb
   outcome === null ? 'Pending' : outcome === 'keep_planning' && feedback ? `${PLAN_OUTCOME_BADGE.keep_planning}: ${feedback}` : PLAN_OUTCOME_BADGE[outcome];
 
 export const PLAN = { heading: 'Plan', showMore: 'Show more', showLess: 'Show less' } as const;
-export const QUESTION = { heading: 'Question', chosen: 'Chosen', notAnswered: 'Not answered', skipped: 'Skipped', answer: (text: string) => `Answer: ${text}` } as const;
+export const QUESTION = { heading: 'Question', notAnswered: 'Not answered', skipped: 'Skipped' } as const;
 
 export const requestSlotPlaceholder = (subject: string) => `Waiting for you · ${subject} · answer in the composer`;
 

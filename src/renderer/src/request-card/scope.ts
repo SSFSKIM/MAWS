@@ -42,6 +42,11 @@ function ruleFromRequest(ev: PermissionEvent, destination: string): AddRules {
 
 const ruleText = (rules: AddRules['rules']) => rules.map((r) => r.ruleContent ?? r.toolName).join(', ');
 
+// F5 (owner's ruling, W4): the project scope names the file the engine writes the rule to (`updatedPermissions`
+// destination `localSettings`, the project's `.claude/settings.local.json`), since that is the one control on the card
+// that persists into the user's own files.
+export const LOCAL_SETTINGS_DETAIL = 'Saved to .claude/settings.local.json in the project';
+
 export function scopeOptions(ev: PermissionEvent, project: { name: string } | null): ScopeOption[] {
   const files = toolClass(ev.toolName) === 'edit' ? Math.max(1, filePaths(ev.input).length) : 0; // the preview's file rows
   const once: ScopeOption = { scope: 'once', label: 'Allow once', detail: files === 0 ? 'Only this invocation' : files === 1 ? 'This 1 file' : `These ${files} files`, updatedPermissions: null };
@@ -60,6 +65,6 @@ export function scopeOptions(ev: PermissionEvent, project: { name: string } | nu
   return [
     once,
     session,
-    { scope: 'local_settings', label: `Always allow ${ruleText(local.rules)} in ${project?.name ?? 'this project'}`, detail: 'Project rule', updatedPermissions: [local] },
+    { scope: 'local_settings', label: `Always allow ${ruleText(local.rules)} in ${project?.name ?? 'this project'}`, detail: LOCAL_SETTINGS_DETAIL, updatedPermissions: [local] },
   ];
 }

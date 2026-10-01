@@ -186,6 +186,22 @@ describe('panel host registry and instances', () => {
     expect(screen.getByTestId(`body:${first}`).textContent).toMatch(/visible · focus 3$/);
   });
 
+  // W4: the receipt's Review changes added an invisible tab while the panel was hidden (⌘⇧B).
+  it('a tool added with activate opens a hidden panel, focused on the new tab; one added without it leaves the panel hidden', () => {
+    connect();
+    register(probeTool('t', { multiInstance: true }).tool);
+    render(<TestHost />);
+    act(() => useLayout.getState().setPanel({ collapsed: true }));
+    let quiet = '';
+    act(() => void (quiet = panelHost.addTool('t', { appSessionId: A, activate: false })));
+    expect(useLayout.getState().regions.panel.collapsed).toBe(true);
+    let shown = '';
+    act(() => void (shown = panelHost.addTool('t', { appSessionId: A })));
+    expect(useLayout.getState().regions.panel.collapsed).toBe(false);
+    expect(screen.getByTestId(`body:${shown}`).textContent).toMatch(/visible · focus \d+$/);
+    expect(screen.queryByTestId(`body:${quiet}`)).toBeNull();
+  });
+
   it('connected after hydration (an HMR reload of the module), captures the restored Log set, once', () => {
     register(probeTool('log', { pinnable: false }).tool, probeTool('t').tool);
     useLayout.setState({ panelBySession: new Map([[A, { tabs: [ref('log:aaaaaaaa'), ref('t:aaaaaaaa')], activeTabId: null }]]) });

@@ -59,10 +59,16 @@ describe('toAnswer validates against RequestAnswerSchema for every variant', () 
     expect(toAnswer(state)).toEqual({ kind: 'question', answers: { [color.question]: 'Teal, mostly', [fruits.question]: 'Apple, Fig' } });
   });
 
-  it('an incomplete question form has no answers and cannot become an answer', () => {
+  // W4: the stepper's Skip leaves a question out, the shape the live probes recorded the engine accepting
+  // (pass3/w4-question-partial seq 163 → tool result seq 167; pass3/w4-question-none seq 156 → "The user did not answer
+  // the questions." seq 159; both without error).
+  it('a question with no answer (a blank Other is none) is left out of the reply, and none at all is an empty map, as the W4 probes sent', () => {
+    const sent = (name: string, seq: number) =>
+      (loadJournal('pass3', name).find((r) => r.seq === seq)!.frame as { response: { response: { updatedInput: { answers: Record<string, string> } } } }).response.response.updatedInput.answers;
     const state: VariantState = { kind: 'question', questions: question.questions, selected: { [color.question]: ['Red'] }, other: { [fruits.question]: '   ' } };
-    expect(questionAnswers(state)).toBeNull();
-    expect(() => toAnswer(state)).toThrow(/Which fruits do you like\?/);
+    expect(questionAnswers(state)).toEqual({ [color.question]: 'Red' });
+    expect(toAnswer(state)).toEqual({ kind: 'question', answers: sent('w4-question-partial', 163) });
+    expect(toAnswer({ kind: 'question', questions: question.questions, selected: {}, other: {} })).toEqual({ kind: 'question', answers: sent('w4-question-none', 156) });
   });
 
   it('refuses a dialog result the kind does not have, cancelled for the auto-mode fallback, and any undeclared kind', () => {

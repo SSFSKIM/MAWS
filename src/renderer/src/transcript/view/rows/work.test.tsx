@@ -157,6 +157,65 @@ describe('receipt row', () => {
     expect(actions.reviewChanges).toHaveBeenLastCalledWith(receipt.turnId, '/p/f2.ts');
   });
 
+  // W4: paths read relative to the session's directory (the engine's cwd first, else the record's); ⌘-click opens the
+  // file itself; after 800 ms of hover a popover above the row shows the turn's hunks for that file, every edit of it.
+  it('reads paths relative to the session directory, the engine cwd first; ⌘-click opens the file, a click opens Review at it', async () => {
+    const store = await storeWith(edits(2));
+    const view = renderRow(rowOf(store.rows(), 'receipt'), { storeKey: store.key, sessionDirectory: '/p' });
+    const region = () => screen.getByRole('region', { name: 'Change receipt' });
+    expect(within(region()).getAllByRole('button', { name: /f\d\.ts/ }).map((b) => b.querySelector('.transcript-receipt-path')!.textContent)).toEqual(['f1.ts', 'f2.ts']);
+    const [first] = within(region()).getAllByRole('button', { name: /f\d\.ts/ });
+    expect(first.dataset.path).toBe('/p/f1.ts'); // the row still names the file as recorded
+    fireEvent.click(first, { metaKey: true });
+    expect(view.actions.openFile).toHaveBeenCalledWith('/p/f1.ts');
+    expect(view.actions.reviewChanges).not.toHaveBeenCalled();
+    fireEvent.click(first);
+    expect(view.actions.reviewChanges).toHaveBeenCalledWith(rowOf(store.rows(), 'receipt').turnId, '/p/f1.ts');
+    view.unmount();
+
+    const b = builder();
+    b.emit('session.started', { cwd: '/elsewhere', engineVersion: null, resumedFrom: null, forked: false });
+    const cwd = await storeWith([...b.events, ...edits(1)]);
+    renderRow(rowOf(cwd.rows(), 'receipt'), { storeKey: cwd.key, sessionDirectory: '/p' });
+    expect(region().querySelector('.transcript-receipt-path')!.textContent).toBe('/p/f1.ts'); // outside the engine's cwd: as recorded
+  });
+
+  it('a file row shows the turn’s hunks for that file in a popover after 800 ms of hover, and a click on it opens Review', async () => {
+    const b = builder();
+    b.turn('u1');
+    const patch = (lines: string[], start: number) => ({ filePath: '/p/a.ts', structuredPatch: [{ oldStart: start, oldLines: 1, newStart: start, newLines: 1, lines }], userModified: false });
+    b.toolUse('t1', 'Edit', { file_path: '/p/a.ts', old_string: 'one', new_string: 'uno' });
+    b.result('t1', 'ok', { structured: patch(['-one', '+uno'], 1) });
+    b.toolUse('t2', 'Edit', { file_path: '/p/b.ts', old_string: 'x', new_string: 'y' });
+    b.result('t2', 'ok');
+    b.toolUse('t3', 'Edit', { file_path: '/p/a.ts', old_string: 'two', new_string: 'dos' });
+    b.result('t3', 'ok', { structured: patch(['-two', '+dos'], 9) });
+    b.text('m9', 0, 'Done.');
+    b.end(['u1']);
+    const store = await storeWith(b.events); // a closed turn, folded: its edit cells are not rows
+    const receipt = rowOf(store.rows(), 'receipt');
+    vi.useFakeTimers();
+    try {
+      const { actions } = renderRow(receipt, { storeKey: store.key });
+      const row = within(screen.getByRole('region', { name: 'Change receipt' })).getAllByRole('button', { name: /a\.ts/ })[0];
+      fireEvent.pointerEnter(row, { pointerType: 'mouse' });
+      act(() => vi.advanceTimersByTime(700));
+      expect(document.querySelector('[data-receipt-hover]')).toBeNull();
+      act(() => vi.advanceTimersByTime(150));
+      const hover = document.querySelector<HTMLElement>('[data-receipt-hover="/p/a.ts"]')!;
+      expect(hover).not.toBeNull();
+      const lines = [...hover.querySelectorAll('.transcript-diff-line')].map((line) => line.textContent);
+      expect(lines).toEqual(['1−one', '1+uno', '9−two', '9+dos']); // both edits of the file, none of b.ts
+      fireEvent.click(hover);
+      expect(actions.reviewChanges).toHaveBeenCalledWith(receipt.turnId, '/p/a.ts');
+      fireEvent.pointerLeave(row, { pointerType: 'mouse' });
+      act(() => vi.advanceTimersByTime(300));
+      expect(document.querySelector('[data-receipt-hover]')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('Undo calls undo(turnId) after canUndo resolved ok, then reads Changes undone and enables Reapply', async () => {
     const store = await storeWith(edits(1));
     const receipt = rowOf(store.rows(), 'receipt');

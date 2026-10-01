@@ -319,7 +319,8 @@ test('auto mode: a two-question AskUserQuestion form submits both answers and th
     );
     const frame = pane.getByRole('group', { name: 'Question' });
     await expect(frame).toBeVisible({ timeout: 90_000 });
-    await frame.getByRole('radio', { name: 'Red' }).click();
+    await frame.getByRole('radio', { name: 'Red' }).click(); // W4: a single-select pick moves on to the next question
+    await expect(frame).toContainText('2 of 2');
     await frame.getByRole('checkbox', { name: 'Apple' }).click();
     await frame.getByRole('checkbox', { name: 'Pear' }).click();
     await frame.getByRole('button', { name: 'Submit' }).click();
