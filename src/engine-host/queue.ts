@@ -23,7 +23,7 @@ import type { UserInputFrame } from '@shared/wire/frames';
 export const ACK_TIMEOUT_MS = 5_000;
 const DROPPED_BEFORE_START: ReadonlySet<string> = new Set(['cancelled', 'discarded', 'refused']);
 
-export type ReleaseTrigger = 'send' | 'turn_ended' | 'resume' | 'dropped';
+export type ReleaseTrigger = 'send' | 'turn_ended' | 'resume' | 'dropped' | 'hold'; // W1: `hold`, a held steer whose turn ended during the withdrawal
 export type SteerPriority = 'now' | 'next';
 export type PauseReason = QueuePauseReason; // C7: the whole closed set the queue journals (QUEUE_PAUSE_REASONS)
 export type ExitKind = 'quit' | 'stop' | 'archive' | 'crash' | 'unknown' | 'budget'; // C12: a release pauses nothing, like `stop`
@@ -186,21 +186,37 @@ export class MessageQueue {
     this.checkContent(content);
     if (!this.deps.canWrite()) throw new QueueEntryError('the session is not ready');
     const uuid = randomUUID() as MessageUuid;
-    await this.deps.write({ type: 'user', uuid, message: { role: 'user', content }, parent_tool_use_id: null, origin: { kind: 'human' }, priority: opts.priority ?? 'now' });
-    if (opts.priority === 'next') await this.pendingSteer(uuid, content);
+    const next = opts.priority === 'next';
+    if (next) this.registerSteer(uuid, content);
+    try {
+      await this.deps.write({ type: 'user', uuid, message: { role: 'user', content }, parent_tool_use_id: null, origin: { kind: 'human' }, priority: opts.priority ?? 'now' });
+    } catch (error) {
+      if (next) {
+        this.steers = this.steers.filter((s) => s.messageUuid !== uuid);
+        await this.announceSteers(); // a save during the write may have published it
+      }
+      throw error;
+    }
+    if (next) await this.announceSteers();
     return { messageUuid: uuid };
   }
 
-  // W1: a `next` steer written: pending until the engine starts or drops it (onLifecycle), and published. Its save is
-  // only an announcement (a pending steer is the engine's, so a lost save loses nothing).
-  private async pendingSteer(messageUuid: MessageUuid, content: SendContent): Promise<void> {
+  // W1: a `next` steer is pending until the engine starts or drops it (onLifecycle). It is registered before its write,
+  // since the writer's settle drains the inbound frames it held (the engine's lifecycle for this uuid among them) before
+  // the write's promise resolves; taken back if the write fails. Its saves are only announcements (a pending steer is
+  // the engine's, so a lost save loses nothing).
+  private registerSteer(messageUuid: MessageUuid, content: SendContent): void {
     this.steers = [...this.steers, { messageUuid, content, createdAt: new Date().toISOString() }];
-    await this.persist().catch((error: unknown) => this.log(`pending steer not saved: ${messageOf(error)}`));
+  }
+
+  private async announceSteers(): Promise<void> {
+    await this.persist().catch((error: unknown) => this.log(`pending steers not saved: ${messageOf(error)}`));
   }
 
   // W1: "Hold until the turn ends": the pending steer is withdrawn from the engine's queue and appended to the app
-  // queue, which releases it when the turn ends like any held message. Refused when the engine has already taken it
-  // (it was folded into the turn, or started) or answers that it had nothing to withdraw.
+  // queue, which releases it when the turn ends like any held message (at once if the turn ended while it was being
+  // withdrawn). Refused when the engine has already taken it (it was folded into the turn, or started) or answers that
+  // it had nothing to withdraw.
   async hold(messageUuid: MessageUuid): Promise<QueueEntry> {
     const steer = this.steers.find((s) => s.messageUuid === messageUuid);
     if (!steer) throw new QueueEntryError('This message has already reached the running turn');
@@ -232,6 +248,9 @@ export class MessageQueue {
     } catch (error) {
       await this.storeFailed(entry, error); // kept in memory, the queue paused: nothing is lost
     }
+    // The turn may have ended during the cancel's round trip, finding nothing to release: the usual gates (not paused,
+    // idle, ready) decide whether the head goes now.
+    await this.releaseHead('hold');
     return structuredClone(entry);
   }
 
@@ -251,18 +270,20 @@ export class MessageQueue {
       throw error;
     }
     if (!current()) throw new QueueEntryError('the session ended before the steer was written');
+    const next = opts.priority === 'next';
+    if (next) this.registerSteer(uuid, entry.content); // W1: a pending steer from before its write, as in steer()
     try {
       await this.deps.write({ type: 'user', uuid, message: { role: 'user', content: entry.content }, parent_tool_use_id: null, origin: { kind: 'human' }, priority: opts.priority ?? 'now' });
     } catch (error) {
+      if (next) this.steers = this.steers.filter((s) => s.messageUuid !== uuid); // taken back, published with the revert
       if (current()) {
         this.revert(entry);
         await this.persist().catch((e: unknown) => this.log(`promote revert not saved: ${messageOf(e)}`));
       }
       throw error;
     }
-    // flushed: the steer is the engine's now and the entry leaves the app queue (W1: a `next` one as a pending steer)
+    // flushed: the steer is the engine's now and the entry leaves the app queue
     this.entries = this.entries.filter((e) => e !== entry);
-    if (opts.priority === 'next') this.steers = [...this.steers, { messageUuid: uuid, content: entry.content, createdAt: new Date().toISOString() }];
     await this.persist().catch((e: unknown) => this.log(`promoted entry's removal not saved (a restart recovers it as uncertain): ${messageOf(e)}`));
     return { messageUuid: uuid };
   }

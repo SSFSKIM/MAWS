@@ -14,7 +14,7 @@ import { glyphFor } from './glyphs';
 import { collectCells, groupItems, phrasesOf, type WorkItem } from './groups';
 import { cellId, rowId, turnId as turnIdOf } from './keys';
 import type { LiveBlock, TranscriptState, TranscriptUi, TurnState, TurnWork } from './reduce';
-import { isEngineOrigin, originOf, RECEIPT_APPLIED, type ReceiptUndo } from './reduce';
+import { isEngineOrigin, originOf, RECEIPT_APPLIED, runningTurn, type ReceiptUndo } from './reduce';
 import { TOOL_CATEGORIES, type Cell, type ChangedFile, type Row, type RowId, type SubagentRef, type SubagentStatus, type ToolCategory, type TurnId, type TurnSummary } from './rows';
 import { needsSeparator, separatorLabel } from './time';
 import { isInterruptionMarker, isLocalCommand, localCommandOutput, userTextOf } from './user-text';
@@ -234,9 +234,8 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
   const dropped = (messageUuid: string | null) => messageUuid !== null && (retracted.has(messageUuid) || superseded.has(messageUuid));
   // W1: a prompt waiting for the engine while another turn runs is a `next` steer (Enter while a turn runs); a `now`
   // one waits only until the engine has stopped that turn. Its bubble sits at the tail, dimmed, until the engine takes
-  // it (the reducer re-derives a waiting turn when the running one closes).
-  const running = state?.current ?? null;
-  const waiting = state !== null && turn.state === 'open' && !turn.accepted && running !== null && running !== turn.id && (state.turns.get(running)?.accepted ?? false) && !openerDropped;
+  // it (the reducer re-derives every waiting turn when the running turn changes).
+  const waiting = state !== null && turn.state === 'open' && !turn.accepted && runningTurn(state) !== null && !openerDropped;
   const userRow = (event: Event<'user.message'>, id: RowId, editable: boolean, steer = false): RowOf<'user'> => {
     const text = userTextOf(event.content);
     return {
@@ -528,8 +527,9 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
   const isWork = (item: (typeof resolved)[number]) => item.kind === 'cell' || (item.kind === 'row' && WORK_ROWS.has(item.row.kind) && !(item.row.kind === 'error' && item.row.severity === 'notice'));
   const lastWork = resolved.map(isWork).lastIndexOf(true);
   // W1: one stream in event order. The rows that stay in view when the work area folds (isPersistentRow: a prompt the
-  // engine took into this turn, at its delivery position; a hook that got in the way; the answer) go through the group
-  // machine as rows, so a steer splits the work around it; everything else is the work area.
+  // engine took into this turn, at its delivery position; a hook that got in the way; the answer; a boundary; a slash
+  // command's output) go through the group machine as rows, so a steer splits the work around it; everything else is
+  // the work area.
   const ordered: WorkItem[] = [];
   resolved.forEach((item, i) => {
     if (item.kind === 'steer' || item.kind === 'notice') ordered.push({ kind: 'row', row: item.row });

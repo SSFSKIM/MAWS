@@ -204,6 +204,25 @@ describe('fixture gates through the model', () => {
     expect(taken!.pending).toBeUndefined();
   });
 
+  // W1 review: a waiting prompt's caption depends on the running turn, so one evolving state must re-derive it whenever
+  // the running turn changes (STEER_B's turn starting at seq 42 leaves STEER_A waiting behind it), not only when one closes.
+  it('pass3/steer-next-then-now: applied row by row, every user row’s pending mark is the one a fresh derivation gives', () => {
+    const all = events('pass3', 'steer-next-then-now');
+    const pendingOf = (state: ReturnType<typeof createState>) => ofKind(rowsOf(state), 'user').map((row) => [row.id, row.pending ?? null]);
+    let state = createState(null, null);
+    let waited = 0;
+    for (let i = 0; i < all.length; ) {
+      let end = i + 1;
+      while (end < all.length && all[end].seq === all[i].seq) end += 1; // one journal row's events are one batch
+      state = applyEvents(state, all.slice(i, end));
+      const fresh = pendingOf(applyEvents(createState(null, null), all.slice(0, end)));
+      expect([all[i].seq, pendingOf(state)]).toEqual([all[i].seq, fresh]);
+      if (fresh.some(([, pending]) => pending === 'next')) waited += 1;
+      i = end;
+    }
+    expect(waited).toBeGreaterThan(0); // the replay passed through a waiting prompt
+  });
+
   it('pass3/steer-next: COUNTED, followed by a MessageDisplay and a Stop hook (seq 230-237), is the answer, visible when the turn collapses (W1)', () => {
     const state = stateOf('pass3', 'steer-next');
     const answer = ofKind(rowsOf(state), 'assistant_text');

@@ -320,24 +320,33 @@ class Batch {
     const from = this.state.order.indexOf(closed) + 1;
     const next = this.state.order.slice(from).find((id) => this.state.turns.get(id)!.state === 'open' && this.state.turns.get(id)!.accepted);
     this.state.current = next ?? null;
-    // W1: a prompt waiting for its turn reads as waiting at the next step only while another turn runs (derive.ts), so
-    // each waiting turn is derived again now that the running one has closed.
-    for (const id of this.state.order.slice(from)) {
-      const turn = this.state.turns.get(id)!;
-      if (turn.state === 'open' && !turn.accepted) this.touch(id).version += 1;
-    }
   }
+
+  // W1: every prompt waiting for its turn (open and not accepted, a hidden one too: rowsOf derives it) is derived again.
+  rederiveWaiting(): void {
+    for (const [id, turn] of [...this.state.turns]) if (turn.state === 'open' && !turn.accepted) this.touch(id).version += 1;
+  }
+}
+
+// W1: the turn the engine is running: the current turn while it is open and accepted. A prompt waiting for its turn
+// reads as waiting at the next step only while one runs (derive.ts), so a batch that changes it (a turn starting or
+// closing) re-derives every waiting turn.
+export function runningTurn(state: TranscriptState): TurnId | null {
+  const turn = state.current === null ? undefined : state.turns.get(state.current);
+  return turn !== undefined && turn.state === 'open' && turn.accepted ? turn.id : null;
 }
 
 export function applyEvents(previous: TranscriptState, events: SessionEvent[]): TranscriptState {
   const batch = new Batch(previous);
   const { state } = batch;
+  const running = runningTurn(state);
   for (const event of events) {
     if (state.seen.has(event.id)) continue;
     state.seen.add(event.id);
     if (event.parentToolUseId !== null && state.agentId === null) applyChild(batch, event);
     else apply(batch, event);
   }
+  if (runningTurn(state) !== running) batch.rederiveWaiting();
   return state;
 }
 

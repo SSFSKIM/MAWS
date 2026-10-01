@@ -20,7 +20,9 @@ const lifecycle = (commandUuid: MessageUuid | null, state: Lifecycle['state'] = 
 const flush = () => new Promise((r) => setImmediate(r));
 
 // A queue over fake session deps: `writes` are the user frames that reached the pipe, `rows` the meta rows journaled,
-// `turn` stands in for the normaliser's open turn (a write opens one, as the out row does).
+// `turn` stands in for the normaliser's open turn (a write opens one, as the out row does). `onWrite` runs when a frame
+// reached the pipe, before the write resolves (where the real writer's settle drains the inbound frames it held);
+// `cancelAnswer`, when set, is what the engine's answer to a cancel waits on.
 async function harness(opts: { store?: MemorySessionStateStore; failWrite?: (frame: UserInputFrame) => boolean; holdWrites?: boolean; recovered?: boolean } = {}) {
   const store = opts.store ?? new MemorySessionStateStore();
   const writes: UserInputFrame[] = [];
@@ -28,7 +30,7 @@ async function harness(opts: { store?: MemorySessionStateStore; failWrite?: (fra
   const changes: QueueState[] = [];
   const held: (() => void)[] = [];
   const cancels: MessageUuid[] = [];
-  const h = { turn: false, ready: true, cancelled: true, store, writes, rows, changes, held, cancels, storeAtWrite: [] as QueueState[] };
+  const h = { turn: false, ready: true, cancelled: true, store, writes, rows, changes, held, cancels, storeAtWrite: [] as QueueState[], onWrite: null as ((frame: UserInputFrame) => void) | null, cancelAnswer: null as Promise<void> | null };
   const queue = new MessageQueue({
     appSessionId: ID,
     store,
@@ -38,11 +40,16 @@ async function harness(opts: { store?: MemorySessionStateStore; failWrite?: (fra
       if (opts.failWrite?.(frame)) throw new Error('EPIPE');
       writes.push(frame);
       if (frame.shouldQuery !== false) h.turn = true;
+      h.onWrite?.(frame);
     },
     meta: (frame) => rows.push(frame),
     turnOpen: () => h.turn,
     canWrite: () => h.ready,
-    cancel: async (uuid) => (cancels.push(uuid), h.cancelled), // W1: `cancel_async_message`
+    cancel: async (uuid) => {
+      cancels.push(uuid); // W1: `cancel_async_message`
+      await h.cancelAnswer;
+      return h.cancelled;
+    },
     onChange: (q) => changes.push(q),
     log: () => {},
   });
@@ -773,6 +780,65 @@ describe('pending steers and hold (W1)', () => {
     t.queue.onLifecycle(lifecycle(messageUuid, 'started'));
     await expect(t.queue.hold(messageUuid)).rejects.toThrow('already reached the running turn');
     expect(t.cancels).toEqual([messageUuid]); // the second refusal never asked the engine
+  });
+
+  it('a hold whose running turn ends during the withdrawal releases the held message at once: that turn end had nothing to release (W1 review)', async () => {
+    const t = await harness();
+    t.h.turn = true;
+    const { messageUuid } = await t.queue.steer('then this', { priority: 'next' });
+    let answer!: () => void;
+    t.h.cancelAnswer = new Promise<void>((resolve) => (answer = resolve));
+    const holding = t.queue.hold(messageUuid);
+    await flush();
+    expect(t.cancels).toEqual([messageUuid]);
+    t.queue.onLifecycle(lifecycle(messageUuid, 'cancelled')); // withdrawn; the running turn then ends before the answer arrives
+    t.h.turn = false;
+    await t.queue.onTurnEnded(turnEnded({ origin: 'human' }));
+    expect(t.writes).toHaveLength(1); // the steer only: nothing was queued yet
+    answer();
+    const entry = await holding;
+    expect(t.writes.at(-1)).toEqual({ type: 'user', uuid: entry.messageUuid, message: { role: 'user', content: 'then this' }, parent_tool_use_id: null, origin: { kind: 'human' } });
+    expect(t.queue.state.entries).toMatchObject([{ queueId: entry.queueId, state: 'submitting' }]);
+    expect(queueRows(t.rows)).toEqual(['hold:undefined', 'release:hold']);
+  });
+
+  it('a next steer is pending from before its write, so a lifecycle the writer\'s settle drains before the write resolves ends it (steer and promote; W1 review)', async () => {
+    for (const state of ['started', 'completed', 'cancelled', 'refused'] as const) {
+      const t = await harness();
+      t.h.turn = true;
+      const { entry } = await t.queue.send('queued');
+      const atWrite: (MessageUuid[] | undefined)[] = [];
+      t.h.onWrite = (frame) => {
+        atWrite.push(t.queue.state.steers?.map((s) => s.messageUuid));
+        t.queue.onLifecycle(lifecycle(frame.uuid as MessageUuid, state));
+      };
+      const steered = await t.queue.steer('look at b too', { priority: 'next' });
+      const promoted = await t.queue.promote(entry.queueId, { priority: 'next' });
+      await flush();
+      expect(atWrite).toEqual([[steered.messageUuid], [promoted.messageUuid]]);
+      expect(t.queue.state.steers).toBeUndefined();
+      expect(t.changes.at(-1)?.steers).toBeUndefined();
+    }
+  });
+
+  it('a next steer whose write fails is taken back (steer and promote; W1 review)', async () => {
+    const t = await harness({ holdWrites: true, failWrite: () => true });
+    t.h.turn = true;
+    const { entry } = await t.queue.send('queued');
+    const steering = t.queue.steer('look at b too', { priority: 'next' });
+    await flush();
+    expect(t.queue.state.steers).toHaveLength(1); // registered while the write is in flight
+    t.held.shift()!();
+    await expect(steering).rejects.toThrow('EPIPE');
+    expect(t.queue.state.steers).toBeUndefined();
+    const promoting = t.queue.promote(entry.queueId, { priority: 'next' });
+    await flush();
+    expect(t.queue.state.steers).toHaveLength(1);
+    t.held.shift()!();
+    await expect(promoting).rejects.toThrow('EPIPE');
+    expect(t.queue.state).toMatchObject({ entries: [{ queueId: entry.queueId, state: 'queued' }] });
+    expect(t.queue.state.steers).toBeUndefined();
+    expect(t.changes.at(-1)?.steers).toBeUndefined();
   });
 
   it('pending steers go with the process; a promoted entry steered next is pending too', async () => {
