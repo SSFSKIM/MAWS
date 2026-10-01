@@ -45,7 +45,7 @@ export const ACTIONS = {
   // is the `next` steer, and Esc in the editor interrupts and sends the held head now); the id stays `composer.steer`
   // because the settings' keymap overrides are keyed by it.
   'composer.steer':       { title: 'Hold until the turn ends',    chord: 'Alt+Enter',    sink: 'renderer', menu: null, scope: 'composer' },
-  'composer.stop':        { title: 'Stop the running turn',       chord: 'Cmd+.',        sink: 'renderer', menu: null, scope: 'app' },
+  'composer.stop':        { title: 'Stop, holding waiting messages', chord: 'Cmd+.',     sink: 'renderer', menu: null, scope: 'app' }, // W1: nothing runs after it
   'composer.focus':       { title: 'Focus the composer',          chord: 'Cmd+L',        sink: 'renderer', menu: null, scope: 'app' },
   // C7 end
   // C11 start: the Settings and Accounts tabs and the ClaudeUsage hand-off (C11 execution document, Keymap and action

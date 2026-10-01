@@ -142,6 +142,33 @@ describe('queue release never follows an engine-initiated turn', () => {
     expect(userOuts(s.journal.rows).map((f) => f.message.content)).toEqual(['Count to 30 slowly.', 'After counting, reply exactly QUEUED.']);
   });
 
+  // W1: the plain stop (`holdEngineQueued`): the engine would start a waiting `next` steer as its own turn once the
+  // running one is interrupted (pass3/steer-next-interrupted), so the stop first withdraws each (cancel_async_message,
+  // pass3/steer-next-cancelled) into the paused queue, in order, and only then writes the interrupt.
+  it('interrupt with holdEngineQueued pauses, cancels each waiting next steer in order, then interrupts; the steers wait as held entries', async () => {
+    const interrupted = loadJournal('pass1', 'queue-and-interrupt').find((r) => r.seq === 192)!.frame as { response: { response: unknown } };
+    const s = scriptedSession({
+      responder: handshakeResponder({ interrupt: () => ({ response: interrupted.response.response }), cancel_async_message: () => ({ response: { cancelled: true } }) }),
+    });
+    await s.session.start();
+    await s.session.send('Count to 30 slowly.');
+    const a = (await s.session.steer('look at a too', { priority: 'next' })).messageUuid;
+    const b = (await s.session.steer('and b', { priority: 'next' })).messageUuid;
+    expect(s.session.queue.state.steers?.map((steer) => steer.messageUuid)).toEqual([a, b]);
+    await s.session.interrupt({ cancelEngineQueued: false, holdEngineQueued: true });
+    expect(s.transport.requestsOf('cancel_async_message').map((r) => r.request)).toEqual([
+      { subtype: 'cancel_async_message', message_uuid: a },
+      { subtype: 'cancel_async_message', message_uuid: b },
+    ]);
+    const order = (subtype: string) => s.journal.rows.findIndex((r) => (r.frame as { request?: { subtype: string } }).request?.subtype === subtype);
+    const pauseRow = s.journal.rows.findIndex((r) => (r.frame as { action?: string }).action === 'pause');
+    expect(pauseRow).toBeLessThan(order('cancel_async_message'));
+    expect(s.journal.rows.findLastIndex((r) => (r.frame as { request?: { subtype: string } }).request?.subtype === 'cancel_async_message')).toBeLessThan(order('interrupt'));
+    expect(s.session.queue.state.entries.filter((e) => e.state === 'queued').map((e) => e.content)).toEqual(['look at a too', 'and b']);
+    expect(s.session.queue.state).toMatchObject({ paused: true, pauseReason: 'interrupt', withdrawn: [a, b] });
+    expect(s.session.queue.state.steers).toBeUndefined();
+  });
+
   it('pass1/queue-and-interrupt cut to the queued prompt (seq 146, 150) and the interrupt (190-192), plus one recorded send: the submission the engine cancels before it started (seq 191) retires there with its own notice, so the next send goes at once', async () => {
     const againRow = { seq: 9_002, direction: 'out' as const, at: '2026-09-28T10:00:00.000Z', frame: { type: 'user', uuid: 'recorded-again', message: { role: 'user', content: 'again' }, parent_tool_use_id: null, origin: { kind: 'human' } } };
     const cut = (rows: JournalRow[]) => [...rows.filter((r) => r.seq <= 3 || [146, 150, 190, 191, 192].includes(r.seq)), againRow];

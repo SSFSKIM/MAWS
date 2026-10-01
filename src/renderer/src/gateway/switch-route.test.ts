@@ -110,6 +110,8 @@ describe('switchRoute names background work, requires a Direct model for a gatew
     s.switcher.answer(READY, CONFIRM);
     expect(await run).toBe('done');
     expect(s.log).toEqual(['session.status', 'session.queue.list', 'session.interrupt', 'session.status', 'session.stop', 'session.start', 'session.queue.list', 'session.queue.setPaused']);
+    // W1: the switch stops everything, so a waiting `next` steer is held with the queue across the restart
+    expect(s.backend.calls.filter((c) => c.command === 'session.interrupt').map((c) => c.input)).toEqual([{ appSessionId: READY, cancelEngineQueued: false, holdEngineQueued: true }]);
     expect(s.starts).toEqual([{ appSessionId: READY, options: { gateway: 'direct' } }]);
     expect(stateOf(s)).toMatchObject({ phase: 'done', error: null });
     expect(s.toasts).toEqual(['Settings idle probe restarted direct']);

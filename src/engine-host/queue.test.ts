@@ -30,7 +30,7 @@ async function harness(opts: { store?: MemorySessionStateStore; failWrite?: (fra
   const changes: QueueState[] = [];
   const held: (() => void)[] = [];
   const cancels: MessageUuid[] = [];
-  const h = { turn: false, ready: true, cancelled: true, store, writes, rows, changes, held, cancels, storeAtWrite: [] as QueueState[], onWrite: null as ((frame: UserInputFrame) => void) | null, cancelAnswer: null as Promise<void> | null };
+  const h = { turn: false, ready: true, cancelled: true, store, writes, rows, changes, held, cancels, storeAtWrite: [] as QueueState[], onWrite: null as ((frame: UserInputFrame) => void) | null, cancelAnswer: null as Promise<void> | null, cancelFor: null as ((uuid: MessageUuid) => boolean) | null };
   const queue = new MessageQueue({
     appSessionId: ID,
     store,
@@ -48,7 +48,7 @@ async function harness(opts: { store?: MemorySessionStateStore; failWrite?: (fra
     cancel: async (uuid) => {
       cancels.push(uuid); // W1: `cancel_async_message`
       await h.cancelAnswer;
-      return h.cancelled;
+      return h.cancelFor ? h.cancelFor(uuid) : h.cancelled;
     },
     onChange: (q) => changes.push(q),
     log: () => {},
@@ -849,5 +849,62 @@ describe('pending steers and hold (W1)', () => {
     expect(t.queue.state.steers?.map((s) => [s.messageUuid, s.content])).toEqual([[messageUuid, 'queued']]);
     await t.queue.onProcessExited('quit');
     expect(t.queue.state.steers).toBeUndefined();
+  });
+});
+
+// W1: the plain stop (⌘., the Stop button, a route switch) holds every waiting `next` steer before the interrupt, so
+// nothing runs after it; the session pauses the queue first (conformance/queue.test.ts pins the order on the wire).
+describe('holdAll, the plain stop’s hold (W1)', () => {
+  it('withdraws every waiting steer in write order into the paused queue’s end; the interrupted turn’s end releases nothing', async () => {
+    const t = await harness();
+    t.h.turn = true;
+    await t.queue.send('held first');
+    const a = (await t.queue.steer('steer a', { priority: 'next' })).messageUuid;
+    const b = (await t.queue.steer('steer b', { priority: 'next' })).messageUuid;
+    await t.queue.pause('interrupt');
+    const held = await t.queue.holdAll();
+    expect(t.cancels).toEqual([a, b]);
+    expect(held.map((e) => e.content)).toEqual(['steer a', 'steer b']);
+    expect(t.queue.state).toMatchObject({ paused: true, pauseReason: 'interrupt', withdrawn: [a, b] });
+    expect(t.queue.state.entries.map((e) => [e.content, e.state])).toEqual([['held first', 'queued'], ['steer a', 'queued'], ['steer b', 'queued']]);
+    expect(t.queue.state.steers).toBeUndefined();
+    expect((await t.store.loadQueue(ID)).entries.map((e) => e.content)).toEqual(['held first', 'steer a', 'steer b']);
+    const written = t.writes.length;
+    t.h.turn = false;
+    await t.queue.onTurnEnded(turnEnded({ origin: 'human' }));
+    expect(t.writes).toHaveLength(written); // paused: nothing runs until Resume or Send now
+    await t.queue.setPaused(false);
+    expect(t.writes.at(-1)).toMatchObject({ message: { content: 'held first' } });
+  });
+
+  it('a steer the engine starts between the list and its cancel stays the engine’s, never duplicated; a failed cancel leaves its steer too', async () => {
+    const t = await harness();
+    t.h.turn = true;
+    const a = (await t.queue.steer('steer a', { priority: 'next' })).messageUuid;
+    const b = (await t.queue.steer('steer b', { priority: 'next' })).messageUuid;
+    const c = (await t.queue.steer('steer c', { priority: 'next' })).messageUuid;
+    t.h.cancelFor = (uuid) => {
+      if (uuid === a) {
+        t.queue.onLifecycle(lifecycle(a, 'started')); // folded into the turn at that very moment
+        return false;
+      }
+      if (uuid === c) throw new Error('control timeout');
+      return true;
+    };
+    await t.queue.pause('interrupt');
+    const held = await t.queue.holdAll();
+    expect(t.cancels).toEqual([a, b, c]);
+    expect(held.map((e) => e.content)).toEqual(['steer b']);
+    expect(t.queue.state.entries.map((e) => e.content)).toEqual(['steer b']);
+    expect(t.queue.state.withdrawn).toEqual([b]);
+    expect(t.queue.state.steers?.map((s) => s.messageUuid)).toEqual([c]); // still the engine's
+  });
+
+  it('with nothing waiting it asks the engine nothing and saves nothing', async () => {
+    const t = await harness();
+    const saves = t.changes.length;
+    expect(await t.queue.holdAll()).toEqual([]);
+    expect(t.cancels).toEqual([]);
+    expect(t.changes).toHaveLength(saves);
   });
 });

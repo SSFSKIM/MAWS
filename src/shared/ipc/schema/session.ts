@@ -95,7 +95,8 @@ const c3Commands = {
   // steers a queued entry out of the app queue with steer's priority ('now' when absent; C7's composer picks 'next' to fold it in)
   'session.queue.promote': host(input({ queueId: z.string(), priority: z.enum(['now', 'next']).optional() }), MessageUuidOutput),
   'session.queue.setPaused': host(input({ paused: z.boolean() }), z.void()),
-  'session.interrupt': host(input({ cancelEngineQueued: z.boolean() }), z.strictObject({ stillQueued: z.array(z.string()), cancelled: z.array(z.string()) })),
+  // W1: `holdEngineQueued` (the plain stop: ⌘., the Stop button, a route switch) first holds every waiting `next` steer in the app queue, so nothing runs after the interrupt
+  'session.interrupt': host(input({ cancelEngineQueued: z.boolean(), holdEngineQueued: z.boolean().optional() }), z.strictObject({ stillQueued: z.array(z.string()), cancelled: z.array(z.string()) })),
   'session.answer': host(input({ requestId: RequestIdSchema, answer: RequestAnswerSchema }), z.strictObject({ outcome: z.enum(['delivered', 'not_pending', 'write_failed']) })),
   'session.bash': host(input({ command: z.string().min(1) }), z.strictObject({ commandUuid: MessageUuidSchema })),
   'session.memoryAppend': host(input({ text: z.string().min(1).max(65_536) /* 64 KiB: the synchronous commit stays bounded (M5 re-review) */, target: MemoryTargetSchema }), z.strictObject({ path: z.string(), created: z.boolean() })),

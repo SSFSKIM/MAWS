@@ -181,7 +181,7 @@ describe("composer DOM under C5's dispatcher", () => {
     expect(invoked('session.interrupt')).toEqual([]); // idle: not the composer's
     busy(A);
     await key(editorOf(), { key: 'Escape' });
-    await waitFor(() => expect(invoked('session.interrupt')).toEqual([{ appSessionId: A, cancelEngineQueued: false }]));
+    await waitFor(() => expect(invoked('session.interrupt')).toEqual([{ appSessionId: A, cancelEngineQueued: false }])); // Esc holds nothing back: a waiting steer runs now
     const uncertain: QueueEntry = { queueId: 'q-0', appSessionId: A, content: 'maybe sent', createdAt: '2026-09-29T10:00:00.000Z', state: 'queued', messageUuid: null, submittedAt: null, uncertain: true, steer: false };
     const held: QueueEntry = { ...uncertain, queueId: 'q-1', content: 'later', uncertain: false };
     act(() => fake.event('session.queue', { appSessionId: A, entries: [uncertain, held], paused: false, pauseReason: null }));
@@ -415,13 +415,13 @@ describe('one Stop handler for every pane', () => {
     expect(bindingsOf('composer.stop')).toHaveLength(1);
     act(() => editorOf(1).focus());
     await key(editorOf(1), { key: '.', code: 'Period', metaKey: true });
-    expect(invoked('session.interrupt')).toEqual([{ appSessionId: B, cancelEngineQueued: false }]);
+    expect(invoked('session.interrupt')).toEqual([{ appSessionId: B, cancelEngineQueued: false, holdEngineQueued: true }]); // the plain stop holds waiting steers (W1)
     act(() => editorOf(0).focus()); // focus moves to pane 0: C5's pane corrects focusedPane on focusin
     expect(useLayout.getState().main.focusedPane).toBe(0);
     await key(editorOf(0), { key: '.', code: 'Period', metaKey: true });
     expect(invoked('session.interrupt')).toEqual([
-      { appSessionId: B, cancelEngineQueued: false },
-      { appSessionId: A, cancelEngineQueued: false },
+      { appSessionId: B, cancelEngineQueued: false, holdEngineQueued: true },
+      { appSessionId: A, cancelEngineQueued: false, holdEngineQueued: true },
     ]);
 
     live(A); // idle

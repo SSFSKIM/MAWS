@@ -278,10 +278,14 @@ export class EngineSession {
 
   // Pauses the app queue first ("queue paused because you interrupted"), so the turn.ended the interrupt causes
   // releases nothing, then interrupts the engine; `cancelEngineQueued` maps to the engine queue's `cancel_queued`.
-  async interrupt(opts: { cancelEngineQueued: boolean }): Promise<{ stillQueued: string[]; cancelled: string[] }> {
+  // W1: `holdEngineQueued` is the plain stop's: between the pause and the interrupt, every waiting `next` steer is held
+  // in the app queue (MessageQueue.holdAll), so nothing runs after the stop; without it (Esc, Send now) the engine
+  // starts a waiting steer as its own turn once the running one ends.
+  async interrupt(opts: { cancelEngineQueued: boolean; holdEngineQueued?: boolean }): Promise<{ stillQueued: string[]; cancelled: string[] }> {
     const client = this.readyClient();
     this.markUsed(); // C12
     await this.queue.pause('interrupt');
+    if (opts.holdEngineQueued) await this.queue.holdAll();
     const response: InterruptResponse = await interrupt(client, { reason: 'user-cancel', cancel_queued: opts.cancelEngineQueued });
     return { stillQueued: [...response.still_queued], cancelled: [...(response.cancelled ?? [])] };
   }

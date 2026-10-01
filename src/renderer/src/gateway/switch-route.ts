@@ -190,7 +190,8 @@ export function createRouteSwitcher(deps: SwitchDeps, store: GatewayStore) {
         if (deps.status(id)?.turn) {
           state = { ...state, phase: 'interrupting', error: null };
           put(id, state);
-          await invoke(() => deps.client.invoke('session.interrupt', { appSessionId: id, cancelEngineQueued: false }), SWITCH.interruptFailed);
+          // W1: a stop of everything (the process is about to go): a waiting `next` steer is held in the app queue, kept with the queue across the restart, rather than starting a turn the stop would kill
+          await invoke(() => deps.client.invoke('session.interrupt', { appSessionId: id, cancelEngineQueued: false, holdEngineQueued: true }), SWITCH.interruptFailed);
           if ((await awaitStatus(id, (s) => (s.turn === null ? true : undefined), timeouts.turnMs)) === null) return fail(SWITCH.turnDidNotStop);
         }
 

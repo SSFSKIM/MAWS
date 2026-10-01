@@ -11,9 +11,11 @@
 // while a turn runs (W1, charter §4.2 as amended 2026-10-01) Enter is Queue, a steer with priority `next` the engine
 // delivers at the turn's next tool boundary, ⌥Enter is Hold, MAWS's own queue released when the turn ends, and the
 // caret menu's Send now steers with `now`; `!` and `#` run through their modes. Esc in the editor interrupts and sends
-// the held head now (a `now` promote), or is a plain stop when nothing is held; it first leaves edit mode, and an open
-// `@` or `/` list takes it before the composer does. ⌘. and ⌘L are not registered here: `ComposerAppKeys` holds the one
-// app-level handler (⌘. stays a plain stop that pauses the queue).
+// now: the held head (a `now` promote), else whatever `next` steer waits (the engine starts it once the turn is
+// interrupted), else it just stops; it first leaves edit mode, and an open `@` or `/` list takes it before the
+// composer does. The Stop button and ⌘. are the plain stop: `session.interrupt` with `holdEngineQueued`, which first
+// holds every waiting `next` steer in MAWS's queue, so nothing runs until Resume or Send now and the queue reads
+// paused because you interrupted. ⌘. and ⌘L are not registered here: `ComposerAppKeys` holds the one app-level handler.
 //
 // Edit mode (M4b): a prefill with `editing` (a bubble's Edit, the refusal dialog's Edit prompt) shows the state line
 // above the frame; Send then forks through C10's provider, or asks to rewind this session and resend, and the state
@@ -354,12 +356,18 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
   };
   // C12 end
 
+  // The plain stop (the Stop button, a primary Stop): nothing runs after it (W1)
+  const stop = () =>
+    void client.invoke('session.interrupt', { appSessionId, cancelEngineQueued: false, holdEngineQueued: true }).then((result) => {
+      if (!result.ok) console.warn('[composer] session.interrupt failed', result.error);
+    });
+  // Esc's interrupt: a waiting `next` steer runs right after it (W1)
   const interrupt = () =>
     void client.invoke('session.interrupt', { appSessionId, cancelEngineQueued: false }).then((result) => {
       if (!result.ok) console.warn('[composer] session.interrupt failed', result.error);
     });
   const onPrimary = () => {
-    if (shown.primary === 'stop') return interrupt();
+    if (shown.primary === 'stop') return stop();
     if (shown.primary === 'resume')
       return void client.invoke('session.queue.setPaused', { appSessionId, paused: false }).then((result) => {
         if (!result.ok) toast({ level: 'warning', text: result.error.message, actions: [], dismissible: true }); // as the queued list does
@@ -367,10 +375,11 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
     handle.current?.submit(shown.primary === 'hold' ? 'hold' : 'send');
   };
 
-  // W1: Esc while a turn runs interrupts and sends the held head now (a `now` promote, which preempts the turn), or is
-  // a plain stop when nothing is held; a `next` steer still waiting runs right after either way, since the engine starts
-  // what it holds once the turn ends (pass3/steer-next-interrupted, steer-next-then-now). An uncertain head waits for the
-  // human's own decision. Not busy, Esc is not the composer's.
+  // W1: Esc while a turn runs interrupts and sends now: the held head (a `now` promote, which preempts the turn), or,
+  // with nothing held, an interrupt after which a `next` steer still waiting runs, since the engine starts what it holds
+  // once the turn is interrupted (pass3/steer-next-interrupted, steer-next-then-now); with nothing waiting either, that
+  // is just a stop. Unlike ⌘. it holds nothing back. An uncertain head waits for the human's own decision. Not busy,
+  // Esc is not the composer's.
   const escapeTurn = (): boolean => {
     const current = useSessions.getState().engine.get(appSessionId) ?? null;
     if (current?.process !== 'ready' || !isBusy(current, queue.entries)) return false;
@@ -466,7 +475,7 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
             />
           </div>
         }
-        submit={<SubmitControl decision={shown} multiline={isMultiline(doc)} onPrimary={onPrimary} onStop={interrupt} onMenu={(id) => handle.current?.submit(id)} onHover={setHover} />}
+        submit={<SubmitControl decision={shown} multiline={isMultiline(doc)} onPrimary={onPrimary} onStop={stop} onMenu={(id) => handle.current?.submit(id)} onHover={setHover} />}
       />
       {/* a tab with no record has no status line yet: the setup's phase shows here, and only while it runs */}
       {record === null && phase !== null && <SetupStatusLine phase={phase} />}
