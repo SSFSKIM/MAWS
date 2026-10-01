@@ -4,8 +4,9 @@
 // `layout.action` for the renderer to run. An action is enabled only while the page has a handler registered for it
 // (`layout.setEnabledActions`), so an action whose child has not landed shows disabled, as it does everywhere else.
 // The menu is rebuilt on every `settings.changed` (overrides, the checked appearance) and every change of that set.
-// Items carry `id` (the action id; `tab.select:<n>` for the nine tab items) so the smoke can click them by id.
-import { Menu, type MenuItemConstructorOptions } from 'electron';
+// Items carry `id` (the action id; `tab.select:<n>` for the nine tab items; `edit.selectAll` for the Edit menu's own
+// Select All) so the smoke can click them by id.
+import { BrowserWindow, Menu, webContents, type MenuItemConstructorOptions } from 'electron';
 import type { Settings, ThemeSetting } from '@shared/ipc/schema';
 import { ACTIONS, ACTION_IDS, type ActionId, type ActionSpec, type KeymapOverrides } from '@shared/keymap/actions';
 import type { emit as emitEvent } from './ipc/events';
@@ -24,6 +25,21 @@ const APPEARANCE: Partial<Record<ActionId, { label: string; theme: ThemeSetting 
 };
 // Consecutive actions of one group sit together; a separator goes between groups.
 const group = (id: ActionId) => (id.startsWith('sidebar.') || id.startsWith('panel.') ? 'regions' : id.split('.')[0]);
+
+// Edit ▸ Select All is the app's own item, not the `selectAll` role (sitting finding, 2026-09-30). On macOS the role sends
+// AppKit's `selectAll:` to the focused element, which in a terminal is xterm's empty helper textarea, so the buffer was
+// never selected; and a role item ignores `click` (electron.d.ts, `MenuItemConstructorOptions.role`). This item runs the
+// same editor command in the focused contents, so inputs, editors and DevTools behave as under the role, and when that
+// is the app's page it emits `layout.selectAll`, on which the terminal holding focus selects its buffer. It keeps the
+// role's ⌘A, which a page leaves to it when unhandled; xterm selects on that keydown already, so a second select is a no-op.
+// With no window key nothing is focused (an end-to-end run shows its window inactive), and the one window's page stands in.
+function selectAll(emit: Emit): void {
+  const pages = BrowserWindow.getAllWindows().map((win) => win.webContents);
+  const target = webContents.getFocusedWebContents() ?? pages[0];
+  if (!target) return;
+  target.selectAll();
+  if (pages.some((page) => page.id === target.id)) void emit('layout.selectAll', {});
+}
 
 export function menuTemplate(
   actions: ActionTable,
@@ -98,7 +114,8 @@ export function menuTemplate(
       label: 'Edit',
       submenu: [
         { role: 'undo' }, { role: 'redo' }, { type: 'separator' },
-        { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'pasteAndMatchStyle' }, { role: 'delete' }, { role: 'selectAll' },
+        { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'pasteAndMatchStyle' }, { role: 'delete' },
+        { id: 'edit.selectAll', label: 'Select All', accelerator: 'Cmd+A', click: () => selectAll(emit) },
       ],
     },
     {

@@ -695,16 +695,36 @@ test('copies a selection and opens links externally', async ({ maws }) => {
   await h.type(id, '\r');
   await h.expectLine(id, 'PASTED-42');
 
-  // ⌘A selects the terminal's buffer and the shell echoes nothing. xterm answers ⌘A in its keydown handler and cancels
-  // the event, and on macOS Chromium gives the page a ⌘ chord before the application menu, which sees only what the
-  // page leaves unhandled, so the Edit menu's selectAll role does not take it (Playwright's keys do not pass the
-  // native menu; that half is read from Chromium's and Electron's source, C9 rebase pass).
+  // ⌘A selects the terminal's buffer and the shell echoes nothing. xterm selects on the keydown but leaves the event
+  // uncancelled (@xterm/xterm 6.0.0, `CoreBrowserTerminal._keyDown`: a select-all result has no key, so it returns
+  // before its cancel), so on macOS the unhandled ⌘A reaches the application menu's Select All too, whose click below
+  // selects the same buffer again. Playwright's keys do not pass the native menu.
   await h.idle(id);
   const quiet = await h.counters(id);
   await page.keyboard.press('Meta+KeyA');
   await expect.poll(() => h.call<string>('terminals', 'selection', id)).toContain('PASTED-42');
   await sleep(300);
   expect((await h.counters(id)).bytes, 'the shell echoed nothing').toBe(quiet.bytes);
+
+  // Edit ▸ Select All (the menu's own item, sitting finding 2026-09-30), clicked in main as the native menu calls it:
+  // with the terminal focused it selects the buffer, which the `selectAll` role it replaced never did, and the shell
+  // echoes nothing; with a text field focused it selects the field's text, as the role did.
+  const selectAllFromMenu = () =>
+    app.evaluate(({ Menu }) => {
+      const item = Menu.getApplicationMenu()?.getMenuItemById('edit.selectAll');
+      item?.click();
+      return item != null;
+    });
+  await page.locator(`[data-terminal-id="${id}"] .xterm-screen`).click();
+  await expect.poll(() => h.call<string>('terminals', 'selection', id), { message: 'a click clears the selection' }).toBe('');
+  expect(await selectAllFromMenu(), 'the menu has Edit ▸ Select All').toBe(true);
+  await expect.poll(() => h.call<string>('terminals', 'selection', id)).toContain('PASTED-42');
+  await sleep(300);
+  expect((await h.counters(id)).bytes, 'the shell echoed nothing').toBe(quiet.bytes);
+  const field = page.getByLabel('paste target');
+  await field.click();
+  await selectAllFromMenu();
+  await expect.poll(() => field.evaluate((el: HTMLInputElement) => [el.selectionStart, el.selectionEnd])).toEqual([0, selection.length]);
 
   // An OSC 8 link and a bare URL: a plain click opens nothing, a ⌘-click opens each through main.
   await h.run(id, `clear; printf '\\e]8;;https://example.com\\e\\\\example\\e]8;;\\e\\\\\\n'; printf 'https://example.org\\n'`);

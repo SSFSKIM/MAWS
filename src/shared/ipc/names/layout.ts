@@ -10,4 +10,5 @@ export const commands = [
 export const events = [
   'layout.action',
   'layout.quitWait', // C12
+  'layout.selectAll', // Edit ▸ Select All (sitting finding, 2026-09-30)
 ] as const;

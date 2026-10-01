@@ -167,4 +167,7 @@ export const commands = {
 export const events = {
   'layout.action': z.strictObject({ action: z.enum(ACTION_IDS), arg: z.number().int().nullable() }),   // an application-menu click or accelerator; the renderer runs the action
   'layout.quitWait': QuitWaitSchema, // C12: the report main waits on to quit, or null
+  // Edit ▸ Select All, the menu's own item (src/main/menu.ts; sitting finding, 2026-09-30): main has run the editor
+  // command in the focused page, and the terminal holding focus, if any, selects its buffer, which that command misses
+  'layout.selectAll': z.strictObject({}),
 } as const satisfies Record<`layout.${string}`, z.ZodType>;

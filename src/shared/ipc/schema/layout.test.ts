@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { commands, LAYOUT_DEFAULTS, LayoutKeySchema, LayoutMainSchema, LayoutRegionsSchema, PanelPinnedSchema, TabRefSchema, tabId, UsageBannersSchema, QuitWaitSchema } from './layout'; // C7: UsageBannersSchema; C12: QuitWaitSchema
+import { commands, events, LAYOUT_DEFAULTS, LayoutKeySchema, LayoutMainSchema, LayoutRegionsSchema, PanelPinnedSchema, TabRefSchema, tabId, UsageBannersSchema, QuitWaitSchema } from './layout'; // C7: UsageBannersSchema; C12: QuitWaitSchema
 
 describe('layout value shapes', () => {
   it('validates its own defaults', () => {
@@ -52,6 +52,12 @@ describe('layout value shapes', () => {
       'layout.quitWait': 'main', // C12: Quit when idle's wait
       'layout.quitWaitAnswer': 'main', // C12: its banner's Quit now and Cancel
     });
+  });
+
+  // Edit ▸ Select All (sitting finding, 2026-09-30): the application menu's own item tells the page, with nothing to add
+  it('carries the menu’s Select All to the page with an empty payload', () => {
+    expect(events['layout.selectAll'].safeParse({}).success).toBe(true);
+    expect(events['layout.selectAll'].safeParse({ target: 'terminal' }).success).toBe(false);
   });
 
   // C12 start: Quit when idle (C12 execution document, Interfaces "The quit question")
