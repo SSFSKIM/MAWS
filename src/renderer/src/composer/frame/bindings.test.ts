@@ -106,3 +106,33 @@ describe('the frame binds its chips to the setup intent or to the live session',
     expect(workspaceDirectoriesOf(['/a', { path: '/b' }, 7, { nope: true }])).toEqual(['/a', '/b']);
   });
 });
+
+// W3 (charter §5.4 as amended 2026-10-01): the chip reads `<alias> <effort>`, never "Default"
+describe('the model chip names the model and the effort the engine uses', () => {
+  const catalogue = [
+    { value: 'default', resolvedModel: 'claude-opus-5-5[1m]', displayName: 'Default (recommended)' },
+    { value: 'opus', resolvedModel: 'claude-opus-5-5[1m]', displayName: 'Opus 5.5 (1M context)' },
+    { value: 'fable', resolvedModel: 'claude-fable-5-1[1m]', displayName: 'Fable 5.1' },
+    { value: 'claude/sol', resolvedModel: 'claude/sol', displayName: 'sol', description: 'From gateway' },
+  ];
+
+  it('an unstarted tab: the intent first, then the user’s settings, then what `default` runs', () => {
+    const h = hook();
+    h.options.models = catalogue;
+    expect(intentBindings(h, { starting: false }).model.label).toBe('opus');
+    expect(intentBindings(h, { starting: false }, { model: null, effortLevel: 'xhigh', defaultMode: null }).model.label).toBe('opus xhigh');
+    expect(intentBindings(h, { starting: false }, { model: 'fable', effortLevel: 'xhigh', defaultMode: 'auto' }).model.label).toBe('fable xhigh');
+    const chosen = hook({ model: 'claude/sol', effort: 'high' });
+    chosen.options.models = catalogue;
+    expect(intentBindings(chosen, { starting: false }, { model: 'fable', effortLevel: 'xhigh', defaultMode: null }).model.label).toBe('sol high');
+  });
+
+  it('a live session: the resolved model by its named row, with the effort get_settings applied, else the requested one', () => {
+    const s = { ...status(APP), model: { requested: null, resolved: 'claude-opus-5-5[1m]' }, effort: null };
+    expect(liveBindings(s, record(APP), { modelNames: catalogue, effort: 'high' }).model.label).toBe('opus high');
+    expect(liveBindings(s, record(APP), { modelNames: catalogue }).model.label).toBe('opus');
+    expect(liveBindings({ ...s, effort: 'max' }, record(APP), { modelNames: catalogue }).model.label).toBe('opus max');
+    expect(liveBindings({ ...s, model: { requested: 'claude/sol', resolved: 'claude/sol' } }, record(APP), { modelNames: catalogue, effort: 'xhigh' }).model.label).toBe('sol xhigh');
+    expect(liveBindings({ ...s, model: { requested: 'haiku', resolved: 'claude-haiku-4-5-20251001' } }, record(APP), { modelNames: catalogue, effort: null }).model.label).toBe('haiku');
+  });
+});

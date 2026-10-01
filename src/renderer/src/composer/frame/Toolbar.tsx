@@ -2,9 +2,10 @@
 // controls outside the box's border and inside the frame, and nothing else around the box. At the left "+" (files,
 // photos, the palette, connectors and plugins), the location (its popover carries the project directory, the worktrees,
 // the branch picker and the additional directories), `+ dir` and the permission mode; at the right the session's
-// context ring (C3: a started session's, the composer passes it) and the model with its effort. No `@` button (typing
-// `@` opens the same menu) and no mic until dictation exists.
+// context ring (C3: a started session's, the composer passes it) and the model with its effort, whose chip opens the
+// model selector (W3). No `@` button (typing `@` opens the same menu) and no mic until dictation exists.
 import type { ReactNode, RefObject } from 'react';
+import type { AppSessionId } from '@shared/graph/ids';
 import type { EditorHandle } from '../editor/controller';
 import { PlusMenu } from '../plus-menu/PlusMenu';
 import { AddDirChip } from './AddDirChip';
@@ -14,6 +15,7 @@ import { ModeChip } from './ModeChip';
 import { ModelChip } from './ModelChip';
 
 export interface ToolbarProps {
+  appSessionId: AppSessionId; // W3: the model chip's menu is the session's
   bindings: FrameBindings;
   cwd: string;
   dirty: boolean;
@@ -24,7 +26,7 @@ export interface ToolbarProps {
   ring?: ReactNode; // the session's context ring, before the model
 }
 
-export function Toolbar({ bindings, cwd, dirty, editor, onOpen, ring = null }: ToolbarProps) {
+export function Toolbar({ appSessionId, bindings, cwd, dirty, editor, onOpen, ring = null }: ToolbarProps) {
   return (
     <div role="toolbar" aria-label="Composer tools" className="flex min-w-0 items-center gap-0.5">
       <PlusMenu cwd={cwd} editor={editor} />
@@ -33,7 +35,7 @@ export function Toolbar({ bindings, cwd, dirty, editor, onOpen, ring = null }: T
       <ModeChip binding={bindings.mode} onOpen={() => onOpen?.('models')} />
       <span className="min-w-2 flex-1" />
       {ring}
-      <ModelChip binding={bindings.model} onOpen={() => onOpen?.('models')} openWidget={() => editor.current?.openWidget('model') ?? false} />
+      <ModelChip appSessionId={appSessionId} binding={bindings.model} onOpen={() => onOpen?.('models')} onClosed={() => editor.current?.focus()} />
     </div>
   );
 }

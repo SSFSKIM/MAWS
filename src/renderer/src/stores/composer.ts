@@ -66,6 +66,15 @@ export interface ComposerState {
   resubmit: ReadonlyMap<AppSessionId, Resubmit>; // M4b: absent is IDLE_RESUBMIT
   restoredEdits: ReadonlySet<AppSessionId>; // M4b: edit modes restored from a draft (a reload), until the edit ends
   models: ReadonlyMap<AppSessionId, readonly ListedModel[]>; // the engine's latest `session.listModels` answer per session
+  chipWidgets: ReadonlyMap<AppSessionId, ChipWidgetRequest>; // W3: the model chip's open menu (`/model`, `/effort`, `/fast`, or the chip itself)
+}
+
+// W3: the widget the model chip's menu shows (opened by the chip, the palette, a typed command or `openComposerWidget`),
+// until it closes; `nonce` tells two opens of the same name apart.
+export interface ChipWidgetRequest {
+  name: string;
+  args: string;
+  nonce: number;
 }
 
 export type ListedModel = ListModelsResponse['models'][number];
@@ -80,6 +89,7 @@ const initial = (): ComposerState => ({
   resubmit: new Map(),
   restoredEdits: new Set(),
   models: new Map(),
+  chipWidgets: new Map(),
 });
 
 export const useComposerStore = create<ComposerState>()(initial);
@@ -219,4 +229,21 @@ export const listedModelsOf = (state: ComposerState, appSessionId: AppSessionId)
 
 export function rememberListedModels(appSessionId: AppSessionId, models: readonly ListedModel[]): void {
   useComposerStore.setState((s) => (s.models.get(appSessionId) === models ? s : { models: new Map(s.models).set(appSessionId, models) }));
+}
+
+// ---- W3: the model chip's menu, opened from the editor ----------------------------------------------------------------
+
+let chipNonce = 0;
+export function requestChipWidget(appSessionId: AppSessionId, name: string, args: string): void {
+  chipNonce += 1;
+  useComposerStore.setState((s) => ({ chipWidgets: new Map(s.chipWidgets).set(appSessionId, { name, args, nonce: chipNonce }) }));
+}
+
+export function closeChipWidget(appSessionId: AppSessionId): void {
+  if (!useComposerStore.getState().chipWidgets.has(appSessionId)) return;
+  useComposerStore.setState((s) => {
+    const chipWidgets = new Map(s.chipWidgets);
+    chipWidgets.delete(appSessionId);
+    return { chipWidgets };
+  });
 }

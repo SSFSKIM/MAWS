@@ -91,7 +91,7 @@ describe('effort', () => {
     expect(await TYPED_APPLY.effort!(READY, 'auto')).toBe(true);
     await toastSoon().toEqual([
       ['info', 'Effort · high · set · the next init frame confirms it'],
-      ['info', 'Effort · Engine default · set · the next init frame confirms it'],
+      ['info', "Effort · the model's default · set · the next init frame confirms it"],
     ]);
     expect(controls('session.setEffort')).toEqual([{ appSessionId: READY, effort: 'high' }, { appSessionId: READY, effort: null }]);
   });

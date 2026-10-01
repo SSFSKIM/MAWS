@@ -78,6 +78,7 @@ export const DIRECT_MODEL = {
   why: 'The direct route cannot serve a gateway model · choose one from the Claude group',
   list: 'Claude models',
   cannotHoldAuto: 'Cannot hold auto mode · runs in default',
+  defaultBadge: 'Default', // W3: the `default` row, named by the model it runs
   choose: 'Use this model',
   cancel: 'Cancel',
   loading: 'Reading the catalogue…',

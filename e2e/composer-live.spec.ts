@@ -550,9 +550,9 @@ test('bash, memory, paste, history recall, the palette, the status line and + di
       await expect(chosen).toContainText('/model');
       const modelRow = await chosen.innerText();
       await page.keyboard.press('Enter');
-      const modelWidget = page.locator('[data-widget="model"]');
-      await modelWidget.getByRole('radio', { name: /^Haiku/ }).click();
-      await modelWidget.getByRole('button', { name: 'Apply' }).click();
+      const modelWidget = page.locator('[data-widget="model"]'); // W3: the selector in the model chip's menu; a pick applies at once
+      await modelWidget.getByRole('menuitemradio', { name: /^Haiku/ }).click();
+      await page.keyboard.press('Escape');
       // C11 end
       await page.waitForTimeout(5_000);
       await idle(page, m.id);

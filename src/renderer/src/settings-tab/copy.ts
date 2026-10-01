@@ -38,7 +38,7 @@ export const ENGINE = {
   readOnly: 'read-only to MAWS',
   configHomeNote: 'The engine owns transcripts, settings and trust. MAWS reads them and keeps its own index elsewhere.',
   subagent: 'Subagent model',
-  subagentPlaceholder: 'engine default',
+  subagentPlaceholder: 'inherit', // W3: the engine's own word for no override (each agent's model, else the session's)
   subagentNote: 'Sets CLAUDE_CODE_SUBAGENT_MODEL per launch for new sessions; Session info shows what a session actually got.',
 };
 

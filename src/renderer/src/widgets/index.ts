@@ -1,5 +1,5 @@
 // C11's widgets for C7's slash palette (C11 execution document, Interfaces "Widgets"): one `registerSlashWidget` call
-// per name of `WIDGET_COMMANDS`, so every palette name opens a widget over the transcript. Called from App.tsx's C11
+// per name of `WIDGET_COMMANDS`, so every palette name opens a widget (W3: the model selector's three in the model chip). Called from App.tsx's C11
 // block and the `#widgets` harness; the answer removes every registration it made.
 import { registerSlashWidget, WIDGET_COMMANDS, type SlashWidget, type WidgetCommandName } from '../composer';
 import { AgentsWidget } from './AgentsWidget';
@@ -12,7 +12,7 @@ import { ExportWidget } from './ExportWidget';
 import { HooksWidget } from './HooksWidget';
 import { McpWidget } from './McpWidget';
 import { MemoryWidget } from './MemoryWidget';
-import { modelWidget } from './ModelWidget';
+import { modelSelector } from './ModelSelector';
 import { PermissionsWidget } from './PermissionsWidget';
 import { PluginsWidget } from './PluginsWidget';
 import { RenameWidget } from './RenameWidget';
@@ -24,9 +24,9 @@ import { TYPED_APPLY } from './typed';
 import { UsageWidget } from './UsageWidget';
 
 export const WIDGETS: Record<WidgetCommandName, SlashWidget['component']> = {
-  model: modelWidget('model'),
-  effort: modelWidget('effort'),
-  fast: modelWidget('fast'),
+  model: modelSelector('model'),
+  effort: modelSelector('effort'),
+  fast: modelSelector('fast'),
   permissions: PermissionsWidget,
   usage: UsageWidget,
   config: ConfigWidget,
@@ -46,8 +46,13 @@ export const WIDGETS: Record<WidgetCommandName, SlashWidget['component']> = {
   diff: DiffWidget,
 };
 
+// W3: `/model`, `/effort` and `/fast` are the model selector, which opens in the composer's model chip menu.
+const IN_MODEL_CHIP: ReadonlySet<WidgetCommandName> = new Set(['model', 'effort', 'fast']);
+
 export function registerAllWidgets(): () => void {
-  const offs = WIDGET_COMMANDS.map((w) => w.name).map((name) => registerSlashWidget(name, { title: WIDGET_TITLE[name], component: WIDGETS[name], apply: TYPED_APPLY[name] }));
+  const offs = WIDGET_COMMANDS.map((w) => w.name).map((name) =>
+    registerSlashWidget(name, { title: WIDGET_TITLE[name], component: WIDGETS[name], apply: TYPED_APPLY[name], ...(IN_MODEL_CHIP.has(name) && { placement: 'modelChip' as const }) }),
+  );
   return () => offs.forEach((off) => off());
 }
 

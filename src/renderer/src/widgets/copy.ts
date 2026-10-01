@@ -33,15 +33,12 @@ export const WIDGET_TITLE: Record<WidgetCommandName, string> = {
   diff: 'Changes',
 };
 
-const SESSION_ONLY_MODEL = "Sets with `set_model` and `apply_flag_settings` for this session only · your default model and effort are set in settings or the terminal's `/model`";
-
 // `/usage` on a direct session: its windows are the engine's own, not ClaudeUsage's (C11 M6, live).
 export const USAGE_DIRECT_FOOT: WidgetFoot = { readWith: 'get_usage', editedWhere: 'A direct session’s windows come from the engine’s own login' };
 
-export const WIDGET_FOOT: Record<WidgetCommandName, WidgetFoot> = {
-  model: { readWith: 'list_models', editedWhere: SESSION_ONLY_MODEL },
-  effort: { readWith: 'list_models', editedWhere: SESSION_ONLY_MODEL },
-  fast: { readWith: 'list_models', editedWhere: SESSION_ONLY_MODEL },
+// W3: the model selector (`model`, `effort`, `fast`) is a menu, not a framed widget, and has no foot.
+export type FramedWidgetName = Exclude<WidgetCommandName, 'model' | 'effort' | 'fast'>;
+export const WIDGET_FOOT: Record<FramedWidgetName, WidgetFoot> = {
   permissions: { readWith: 'list_permission_rules', editedWhere: 'Sets the mode with `set_permission_mode` for this session only · rules are edited in their settings files; session grants come from approval cards' },
   usage: { readWith: 'get_usage', editedWhere: 'Windows come from ClaudeUsage; the engine reports none through the relay' },
   config: { readWith: 'get_settings and get_memory_dialog', editedWhere: "Settings are edited in their files or the terminal's `/config`; MAWS's own settings are in the Settings tab" },
@@ -257,7 +254,6 @@ export const MODEL = {
   pending: 'set · the next init frame confirms it',
   none: 'The engine listed no models',
   unknownArg: (name: string) => `No model named ${name} in the engine's catalogue`,
-  apply: 'Apply',
   // set_model's refusal codes (SPEC 45 §45.16:3860–3880) in words; `error` follows as the caption
   code: {
     catalog_unknown: "Not in the engine's catalogue",
@@ -286,8 +282,6 @@ export const MODEL = {
     body: (account: string) => `A GPT route carries no Anthropic verdict, so the engine reviews each tool call itself on Sonnet 5 through ${account}. Those requests count against usage.`,
   },
   effort: 'Effort',
-  effortList: 'Effort levels',
-  engineDefault: 'Engine default',
   unstarted: 'Applies when the session starts',
   fast: 'Fast mode',
   fastForOpus: 'Fast mode is for Opus',
@@ -312,11 +306,36 @@ export const MODEL = {
   } as Record<string, string>,
 };
 
+// W3: the model selector's own words (Codex's two-view menu, r1-codex §5; Claude Desktop's slider ends).
+export const SELECTOR = {
+  effortView: 'Effort',
+  modelView: 'Select model',
+  selectModel: 'Select model',
+  models: 'Models',
+  effort: 'Effort',
+  effortUnknown: 'Not known yet',
+  noEffort: 'No effort setting',
+  position: (word: string, at: number, of: number) => `${word}, ${at} of ${of}`,
+  faster: 'Faster',
+  smarter: 'Smarter',
+  openModels: (model: string) => `${model} · Select model`,
+  back: 'Back to effort',
+  reset: "Reset effort to the model's default",
+  defaultBadge: 'Default',
+  recommended: 'Recommended',
+  fromSettings: 'From your settings',
+  model: 'Model',
+  setting: 'setting…',
+  reading: 'Reading the models…',
+  sessionOnly: 'For this session only',
+  unknownEffort: (word: string) => `No effort level named ${word}`,
+};
+
 // A typed `/<widget> <args>` applied at Enter (the architect's correction of 2026-09-29): the toast after the control
 // answered, in the widget's words; a refusal or the transport branch toasts the widget's error words instead.
 export const TYPED = {
   model: (name: string, cannotHoldAuto = false) => `Model · ${name} · ${MODEL.pending}${cannotHoldAuto ? ` · ${MODEL.cannotHoldAuto}` : ''}`,
-  effort: (level: string | null) => `Effort · ${level ?? MODEL.engineDefault} · ${MODEL.pending}`,
+  effort: (level: string | null) => `Effort · ${level ?? "the model's default"} · ${MODEL.pending}`,
   fastOff: `Fast mode · off · ${MODEL.pending}`,
   mode: (mode: string) => `Permission mode · ${mode}`,
   // the permissions widget opened with an argument it did not apply

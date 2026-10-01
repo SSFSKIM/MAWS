@@ -22,6 +22,7 @@
 // line follows the resubmit (`resubmit-seam.ts`) until the edited text is sent. The edit rides in the draft document,
 // so a reload restores edit mode, which the session's hydrated transcript then confirms or ends.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import type { Draft } from '@shared/ipc/schema/session';
@@ -45,6 +46,7 @@ import { Editor } from './editor/Editor';
 import { serializeDraft, type Serialized } from './editor/serialize';
 import { afterAccepted, dispatchByMode, precheck, submitSerialized, type Dispatch } from './editor/submit'; // C12: afterAccepted, precheck
 import { newestUserUuid } from './edit-prefill';
+import { useEffectiveEffort } from './effective-effort'; // W3
 import { EditModeLine, RewindConfirm } from './EditMode';
 import { endedBindings, intentBindings, liveBindings, workspaceDirectoriesOf, type FrameBindings } from './frame/bindings';
 import { ContextRing } from './frame/ContextRing';
@@ -149,14 +151,25 @@ function useDraftPort(appSessionId: AppSessionId, hook: SetupIntentHook | null, 
 // The live chips' reads: C3's models and permission rules, each a control request to the engine, read once a chip that
 // shows it has opened (never per mount), the route's model catalogue for the model chip's name (a host read, from the
 // first render), and the branch list for the location popover.
-function useLiveReads(appSessionId: AppSessionId, want: { models: boolean; rules: boolean }, directory: string | null, git: { branch: string | null } | null, route: Route | null, ready: boolean) {
+function useLiveReads(
+  appSessionId: AppSessionId,
+  want: { models: boolean; rules: boolean },
+  directory: string | null,
+  git: { branch: string | null } | null,
+  route: Route | null,
+  status: EngineSessionStatus | null,
+  client: MawsBridge,
+) {
+  const ready = status?.process === 'ready';
   const models = useListModels(appSessionId, want.models);
   const modelNames = useModelCatalogue(route, ready, directory);
+  const effort = useEffectiveEffort(appSessionId, status, client); // W3: get_settings once per ready and per change
   const rules = useCommand('session.listPermissionRules', { appSessionId }, { enabled: want.rules, staleTime: 10_000 });
   const branches = useCommand('git.branches', { directory: directory ?? '' }, { enabled: want.rules && directory !== null && git !== null, staleTime: 30_000 });
   return {
     models,
     modelNames,
+    ...(effort !== undefined && { effort }),
     directories: rules.data ? workspaceDirectoriesOf(rules.data.state.workspaceDirectories) : null,
     branch: git?.branch ?? null,
     branches: branches.data?.branches.map((b) => b.name) ?? [],
@@ -199,8 +212,10 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
   const repo = useGitWatch(setup ? null : cwd || null, client);
   const [opened, setOpened] = useState({ models: false, rules: false });
   const ready = status?.process === 'ready';
-  const reads = useLiveReads(appSessionId, { models: ready && opened.models, rules: ready && opened.rules }, setup ? null : cwd || null, repo, routeOf(status, record), ready);
-  const bindings: FrameBindings = setup ? intentBindings(setup, { starting }) : status || record ? liveBindings(status, record, reads, client) : endedBindings();
+  const reads = useLiveReads(appSessionId, { models: ready && opened.models, rules: ready && opened.rules }, setup ? null : cwd || null, repo, routeOf(status, record), status, client);
+  // W3: an unstarted tab names what the engine will use, the user's own settings included (read only)
+  const userDefaults = useCommand('settings.userEngineDefaults', undefined, { enabled: unstarted, staleTime: 30_000 }).data ?? null;
+  const bindings: FrameBindings = setup ? intentBindings(setup, { starting }, userDefaults) : status || record ? liveBindings(status, record, reads, client) : endedBindings();
 
   // ---- the submit control's state ------------------------------------------------------------------------------
   const draft = useMemo(() => serializeDraft(doc, { sessionId: null, cwd: '' }), [doc]);
@@ -435,6 +450,7 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
       )}
       {swap.notice && <RequestCard key={swap.notice.id} item={swap.notice} request={null} placement="docked" paneIndex={paneIndex} />}
       <Frame
+        appSessionId={appSessionId}
         docked={
           docked ? (
             <>

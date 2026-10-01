@@ -81,7 +81,7 @@ describe('session info renders the six sections', () => {
     expect(valueOf('Version')).toBe('2.1.283 · pinned');
     expect(valueOf('Session id')).toBe(record.engineSessionId);
     expect(valueOf('Main')).toBe('claude-sonnet-5[1m]');
-    expect(valueOf('Subagents')).toBe('engine default');
+    expect(valueOf('Subagents')).toBe("each agent's own, else Main"); // W3: no "engine default"
     expect(valueOf('Route')).toBe('Gateway · ClaudeUsage relay · http://127.0.0.1:8641Switch to Direct…'); // W2: the switch
     expect(valueOf('Account')).toBe('1@example.test · pinned for this session');
     expect(valueOf('Tool search')).toBe('on · ENABLE_TOOL_SEARCH, needed behind a base URL');

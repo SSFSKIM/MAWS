@@ -41,6 +41,17 @@ export const effortsOf = (row: { supportedEffortLevels?: unknown } | undefined):
   return levels.success && levels.data ? EFFORTS.filter((e) => levels.data!.includes(e)) : [...EFFORTS];
 };
 
+// W3: the levels the model selector's slider offers. An entry that lists levels admits those; one that says it supports
+// effort and lists none, the whole vocabulary; one that says neither has none (Haiku: `supportsEffort` and the levels are
+// absent on the live row, reads.jsonl seq 3, and `get_settings` applies no effort for it, seq 60). An unknown entry (the
+// catalogue not read yet, or a model it does not list) offers the whole vocabulary, and the engine answers.
+export const effortLevelsOf = (row: { supportedEffortLevels?: unknown; supportsEffort?: unknown } | undefined): Effort[] => {
+  if (row === undefined) return [...EFFORTS];
+  const levels = LevelsSchema.safeParse(row.supportedEffortLevels);
+  if (levels.success && levels.data) return EFFORTS.filter((e) => levels.data!.includes(e));
+  return row.supportsEffort === true ? [...EFFORTS] : [];
+};
+
 export function presentModels(models: readonly ModelRow[]): { claude: ModelEntryView[]; gateway: ModelEntryView[] } {
   const view = (m: ModelRow): ModelEntryView => ({
     value: m.value,

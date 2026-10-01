@@ -63,7 +63,7 @@ describe('settings tab writes one field per row', () => {
     expect(within(row('Config home')).getByText('read-only to MAWS')).toBeTruthy();
 
     const field = within(row('Subagent model')).getByRole('combobox') as HTMLInputElement;
-    expect(field.placeholder).toBe('engine default');
+    expect(field.placeholder).toBe('inherit'); // W3: the engine's word for no override
     await vi.waitFor(() => expect(b.calls).toContainEqual({ name: 'engine.models', input: { refresh: false, gateway: 'gateway' } }));
     // the Claude values of the default route's catalogue, never a gateway alias
     const suggestions = () => [...document.getElementById(field.getAttribute('list')!)!.querySelectorAll('option')].map((o) => o.value);

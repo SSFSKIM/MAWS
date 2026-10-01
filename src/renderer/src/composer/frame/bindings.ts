@@ -8,7 +8,9 @@
 // location and branch are read-only under a live engine: where a session runs is fixed once it starts (§19, the C8
 // recomposition entry).
 import type { Effort } from '@shared/engine/launch-spec';
+import { EffortSchema } from '@shared/engine/launch-spec';
 import type { EngineSessionStatus } from '@shared/engine/status';
+import type { UserEngineDefaults } from '@shared/ipc/schema/settings';
 import type { SessionRecord } from '@shared/graph/session';
 import type { MawsBridge } from '@shared/ipc/schema';
 import type { ListModelsResponse } from '@shared/wire/control';
@@ -16,6 +18,7 @@ import { ipc } from '../../ipc/client';
 import { liveModeBinding, MODE_OPTIONS, MODE_REFUSAL_WORDS, NOT_RUNNING, type ModeBinding } from '../../statusline';
 import type { HookResult, Location, ModelInfo, SetupIntentHook } from '../setup-intent';
 import { ENDED, MESSAGE_HELD, STARTING } from '../submit/submit-state';
+import { aliasOf, chipLabel, DEFAULT_ROW } from './model-label';
 
 export interface ChipBinding<V, O = never> {
   value: V;
@@ -29,10 +32,14 @@ export interface ModelChoice {
   effort: Effort | null;
 }
 
+// W3: the model chip's binding carries its words, `<alias> <effort>` (model-label.ts), worked out here from the
+// session's source: the intent with the user's own settings while unstarted, the engine's status and effective effort once live.
+export type ModelBinding = ChipBinding<ModelChoice, ModelInfo> & { label: string };
+
 export interface FrameBindings {
   location: ChipBinding<Location, Location>; // the toolbar's LocationChip (W2)
   branch: ChipBinding<string | null, string>; // inside the location chip's popover
-  model: ChipBinding<ModelChoice, ModelInfo> & { names?: readonly ModelInfo[] }; // the toolbar's ModelChip (effort inside); names: the route's catalogue, for the chip's label before this mount has listed the models
+  model: ModelBinding; // the toolbar's ModelChip; the selector C11 registers opens from it (W3)
   mode: ModeBinding; // the toolbar's ModeChip, on the shared mode menu (M5)
   directories: ChipBinding<string[]>; // AddDirChip
 }
@@ -49,7 +56,13 @@ export const modelMatches = (option: ModelInfo, model: string | null): boolean =
 
 // ---- unstarted: C10's setup intent ------------------------------------------------------------------------------
 
-export function intentBindings(hook: SetupIntentHook, gate: { starting: boolean }): FrameBindings {
+// What an unstarted tab's chip names (W3): what the engine will use, the intent's own choice first, then the user's
+// settings (`model`, `effortLevel`; read only), then the catalogue's `default` row resolved to its model.
+export function intentModelLabel(intent: Pick<SetupIntentHook['intent'], 'model' | 'effort'>, models: readonly ModelInfo[], defaults: UserEngineDefaults | null): string {
+  return chipLabel(aliasOf(intent.model ?? defaults?.model ?? DEFAULT_ROW, models), intent.effort ?? defaults?.effortLevel ?? null);
+}
+
+export function intentBindings(hook: SetupIntentHook, gate: { starting: boolean }, defaults: UserEngineDefaults | null = null): FrameBindings {
   const { intent, options } = hook;
   const gated = gate.starting ? STARTING : intent.message !== null ? MESSAGE_HELD : null;
   const through = <V>(write: (v: V) => Parameters<SetupIntentHook['patch']>[0]) => (gated === null ? (v: V) => hook.patch(write(v)) : refused(gated));
@@ -70,7 +83,13 @@ export function intentBindings(hook: SetupIntentHook, gate: { starting: boolean 
             }
           : refused(gated ?? NEW_WORKTREE_BRANCH),
     },
-    model: { value: { model: intent.model, effort: intent.effort }, options: options.models, disabled: gated, set: through((m: ModelChoice) => ({ model: m.model, effort: m.effort })) },
+    model: {
+      value: { model: intent.model, effort: intent.effort },
+      label: intentModelLabel(intent, options.models, defaults),
+      options: options.models,
+      disabled: gated,
+      set: through((m: ModelChoice) => ({ model: m.model, effort: m.effort })),
+    },
     mode: {
       value: intent.permissionMode,
       options: MODE_OPTIONS.map((o) => o.mode),
@@ -94,6 +113,7 @@ type ModelOption = ListModelsResponse['models'][number];
 export interface LiveReads {
   models?: readonly ModelOption[] | null;
   modelNames?: readonly ModelInfo[] | null; // the route's model catalogue (`engine.models`), naming the model before any list is read
+  effort?: Effort | null; // W3: the effort the engine runs at (`get_settings.applied.effort`), when known
   directories?: readonly string[] | null;
   branch?: string | null;
   branches?: readonly string[];
@@ -110,6 +130,9 @@ export function liveBindings(status: EngineSessionStatus | null, record: Session
   const ready = status?.process === 'ready';
   const writable = ready ? null : NOT_RUNNING;
   const current: ModelChoice = { model: status?.model.resolved ?? status?.model.requested ?? record?.model.resolved ?? record?.model.requested ?? null, effort: status?.effort ?? null };
+  // W3: named from the options this mount listed, else the route's catalogue; the effort the engine runs at, else the requested one
+  const names = reads.models && reads.models.length > 0 ? reads.models : (reads.modelNames ?? []);
+  const shownEffort = reads.effort !== undefined ? reads.effort : status ? status.effort : (EffortSchema.safeParse(record?.effort).data ?? null);
   const directories = [...(reads.directories ?? record?.additionalDirectories ?? [])];
   const location: Location = { kind: 'directory', path: status?.cwd ?? record?.directory ?? '' };
   return {
@@ -117,8 +140,8 @@ export function liveBindings(status: EngineSessionStatus | null, record: Session
     branch: { value: reads.branch ?? record?.worktree?.branch ?? record?.branch ?? null, options: [...(reads.branches ?? [])], disabled: BRANCH_FIXED, set: refused(BRANCH_FIXED) },
     model: {
       value: current,
+      label: chipLabel(aliasOf(current.model, names), shownEffort),
       options: [...(reads.models ?? [])],
-      names: reads.modelNames ?? undefined,
       disabled: writable,
       set: async (next) => {
         if (!ready) return { ok: false, error: NOT_RUNNING };
@@ -165,7 +188,7 @@ export function endedBindings(reason: string = ENDED): FrameBindings {
   return {
     location: { value: location, options: [], disabled: reason, set: none },
     branch: { value: null, options: [], disabled: reason, set: none },
-    model: { value: { model: null, effort: null }, options: [], disabled: reason, set: none },
+    model: { value: { model: null, effort: null }, label: chipLabel(null, null), options: [], disabled: reason, set: none },
     mode: { value: null, options: MODE_OPTIONS.map((o) => o.mode), disabled: reason, refusal: null, autoUnavailable: null, set: none },
     directories: { value: [], options: [], disabled: reason, set: none },
   };

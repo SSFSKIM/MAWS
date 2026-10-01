@@ -20,8 +20,10 @@ export type Location =
 
 type ModelOption = ListModelsResponse['models'][number]; // C3's landed `session.listModels` entry
 // A model the chip offers: C10 fills value, displayName, supportsAutoMode, supportsFastMode and supportedEffortLevels
-// from `engine.models` (each as the catalogue entry carries it); an absent supportedEffortLevels offers every effort level.
-export type ModelInfo = Pick<ModelOption, 'value' | 'displayName'> & Partial<Pick<ModelOption, 'description' | 'supportedEffortLevels' | 'supportsAutoMode' | 'supportsFastMode'>>;
+// from `engine.models` (each as the catalogue entry carries it); W3 adds the resolved model (what `default` runs, and
+// how a live session's resolved id finds its alias), the description and `supportsEffort`.
+export type ModelInfo = Pick<ModelOption, 'value' | 'displayName'> &
+  Partial<Pick<ModelOption, 'resolvedModel' | 'description' | 'supportsEffort' | 'supportedEffortLevels' | 'supportsAutoMode' | 'supportsFastMode'>>;
 
 export interface FirstMessage {
   content: string | ContentBlock[];

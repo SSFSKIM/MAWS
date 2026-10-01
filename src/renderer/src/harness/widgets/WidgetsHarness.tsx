@@ -16,6 +16,7 @@ import { connectDirectLogin } from '../../gateway/direct-login';
 import { GatewayDialogs } from '../../gateway/SwitchSheet';
 import { registerSessionActions } from '../../sessions/actions';
 import { SessionDialogs } from '../../sessions/SessionDialogs';
+import { requestChipWidget } from '../../stores/composer';
 import { useSessions } from '../../stores/sessions';
 import { sessionInfoTool } from '../../tools/session-info';
 import { panelHost } from '../../panel/host';
@@ -41,8 +42,9 @@ declare global {
 }
 
 // The widgets mounted together in passive mode: M2's fourteen engine-read widgets, and the model and compact widgets
-// (M3), whose reads (`list_models`, the summary `get_context_usage`) the replay-conformance driver issues.
-const PASSIVE: readonly WidgetCommandName[] = ['model', 'permissions', 'usage', 'context', 'compact', 'config', 'plugins', 'mcp', 'sandbox', 'hooks', 'memory', 'skills', 'agents', 'status', 'diff', 'export'];
+// (M3), whose reads (`list_models`, the summary `get_context_usage`) the replay-conformance driver issues. W3: the model
+// selector twice, on its model view (`model`) and on its effort view (`effort`, with the fast switch).
+const PASSIVE: readonly WidgetCommandName[] = ['model', 'effort', 'permissions', 'usage', 'context', 'compact', 'config', 'plugins', 'mcp', 'sandbox', 'hooks', 'memory', 'skills', 'agents', 'status', 'diff', 'export'];
 
 // M4: C11's Session info tool as C8a's host renders it for the shown session, beside the composer (W2: with the route and
 // its switch, which the status line's usage popover carried before).
@@ -85,11 +87,19 @@ function mirrorLayout(pane: WidgetsPane) {
   useLayout.setState((s) => ({ main: { ...s.main, panes: [tabs, overview], focusedPane: 0 } }));
 }
 
-// A widget opened from the picker, placed as C7's editor places one opened from the palette.
+// A widget opened from the picker, placed as C7's editor places one opened from the palette (W3: the model selector's
+// names open the composer's model chip menu).
 function OpenedWidget({ appSessionId, name, args, close }: { appSessionId: AppSessionId; name: string; args: string; close(): void }) {
   useRegisteredWidgets(); // re-render once the registrations land
   const widget = slashWidget(name);
+  const inChip = widget?.placement === 'modelChip';
+  useEffect(() => {
+    if (!inChip) return;
+    requestChipWidget(appSessionId, name, args);
+    close();
+  }, [inChip, appSessionId, name, args, close]);
   if (!widget) return <p className="m-0 text-fg-muted">No widget is registered for /{name}</p>;
+  if (inChip) return null;
   const Widget = widget.component;
   return (
     <section aria-label={widget.title} className="mb-2 rounded-md border border-border bg-bg-raised p-2 text-ui">

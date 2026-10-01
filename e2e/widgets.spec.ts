@@ -100,6 +100,15 @@ test.describe('interactive', () => {
       await expect(chosen, name).toContainText(`/${name}`);
       await expect(chosen, name).not.toHaveAttribute('aria-disabled', 'true');
       await page.keyboard.press('Enter');
+      if (name === 'model' || name === 'effort' || name === 'fast') {
+        // W3: the model selector, in the toolbar model chip's menu, on the view its name opens; a menu, so no frame or foot
+        await expect(widget(page, name)).toBeVisible();
+        await expect(widget(page, name)).toHaveAttribute('data-model-selector', name === 'model' ? 'model' : 'effort');
+        await expect(page.getByRole('dialog', { name: 'Model and effort' })).toBeVisible();
+        await page.keyboard.press('Escape');
+        await expect(widget(page, name)).toBeHidden();
+        continue;
+      }
       if (name === 'rename') {
         // no title: C10's rename dialog (the session action C10 registers), not a widget of C11's
         const dialog = page.getByRole('dialog', { name: 'Rename' });
@@ -230,28 +239,56 @@ test.describe('interactive', () => {
 
   // ---- M3: the mutating half ----------------------------------------------------------------------------------------
 
-  test('model widget groups and warns; the chip opens it; the fast switch writes apply_flag_settings after its warning', async ({ backend }) => {
+  // W3 (C4, charter §5.4 as amended 2026-10-01): the chip reads `<alias> <effort>` with the effort get_settings applied
+  // (pass2/dialogs seq 58: high), and opens Codex's selector above itself: the effort view first, then the model list
+  test('the model chip says sonnet high and opens the selector: effort first, the list with Default, a pick applies at once, fast after its warning', async ({ backend }) => {
     const { page } = backend;
     await openPage(page, { appSessionId: READY, mode: 'interactive' });
-    await page.getByRole('button', { name: /^Model / }).click(); // C7's chip opens the registered widget
-    const model = widget(page, 'model');
-    await expect(model.getByRole('radiogroup', { name: 'Claude models' }).getByRole('radio')).toHaveCount(5); // pass2/auto-routed seq 143
-    await expect(model.getByRole('radiogroup', { name: 'Gateway models' }).getByRole('radio')).toHaveCount(7);
-    await expect(model.getByRole('radio', { name: /^Haiku/ })).toContainText('Cannot hold auto mode · runs in default');
-    await model.getByRole('radio', { name: /^astra/ }).click(); // the session is in auto
-    await expect(model.getByRole('note')).toContainText('Auto-mode reviews for this model run locally. A GPT route carries no Anthropic verdict');
+    const chip = page.getByRole('button', { name: /^Model / });
+    await expect(chip).toHaveAttribute('aria-label', 'Model sonnet high');
+    await chip.click();
+    const menu = page.getByRole('dialog', { name: 'Model and effort' });
+    const selector = menu.locator('[data-model-selector]');
+    await expect(selector).toHaveAttribute('data-model-selector', 'effort');
+    await expect(selector.locator('[data-effort-title]')).toHaveText('High');
+    const box = await menu.boundingBox();
+    expect(box?.width).toBe(254); // Codex's menu
+    const chipBox = await chip.boundingBox();
+    expect(box!.y + box!.height).toBeLessThanOrEqual(chipBox!.y); // anchored above the chip
 
-    await model.getByRole('radio', { name: /^Opus/ }).click();
-    await model.getByRole('button', { name: 'Apply' }).click();
-    const fast = model.getByRole('switch', { name: 'Fast mode' });
+    await selector.getByRole('button', { name: 'Sonnet 5 · Select model' }).click();
+    await expect(selector).toHaveAttribute('data-model-selector', 'model');
+    const list = selector.getByRole('menu', { name: 'Models' });
+    await expect(list.getByRole('group', { name: 'Claude models' }).getByRole('menuitemradio')).toHaveCount(4); // pass2/auto-routed seq 143, `default` as the entry above
+    await expect(list.getByRole('group', { name: 'Gateway models' }).getByRole('menuitemradio')).toHaveCount(7);
+    await expect(list.getByRole('menuitemradio', { name: /Default/ })).toContainText('opusDefaultRecommended');
+    await expect(list.getByRole('menuitemradio', { name: /^Sonnet 5/ })).toHaveAttribute('aria-checked', 'true');
+    await expect(list.getByRole('menuitemradio', { name: /^Haiku/ })).toContainText('Cannot hold auto mode');
+    await expect(list.getByRole('menuitemradio', { name: /^astra/ })).toContainText('From gateway');
+    await expect(menu).not.toContainText(/Default model|Default \(recommended\)|Engine default/);
+
+    await list.getByRole('menuitemradio', { name: /^Opus/ }).click(); // applies at once and returns to the effort view
+    await expect(selector).toHaveAttribute('data-model-selector', 'effort');
+    await expect.poll(async () => (await calls(backend)).filter((c) => c.subtype === 'set_model')).toEqual([{ subtype: 'set_model', input: { appSessionId: READY, model: 'opus' } }]);
+    const fast = selector.getByRole('switch', { name: 'Fast mode' });
     await expect(fast).toBeEnabled(); // opus has fast mode
     await fast.click();
-    await expect(model).toContainText('Fast mode disables the auto-mode server lane: reviews then run locally on Sonnet 5 and count against usage');
+    await expect(selector).toContainText('Fast mode disables the auto-mode server lane: reviews then run locally on Sonnet 5 and count against usage');
     expect((await calls(backend)).filter((c) => c.subtype === 'apply_flag_settings')).toEqual([]); // nothing before the answer
-    await model.getByRole('button', { name: 'Turn on fast mode' }).click();
+    await selector.getByRole('button', { name: 'Turn on fast mode' }).click();
     await expect.poll(async () => (await calls(backend)).filter((c) => c.subtype === 'apply_flag_settings')).toEqual([{ subtype: 'apply_flag_settings', input: { appSessionId: READY, settings: { fastMode: true } } }]);
+
+    await expect(selector.locator('[data-effort-title]')).toHaveText('High'); // get_settings read again after the model changed
+    await selector.getByRole('slider', { name: 'Effort' }).press('ArrowRight'); // the slider writes the effort for this session
+    await expect.poll(async () => (await commandsOf(backend)).filter((c) => c.command === 'session.setEffort').map((c) => c.input)).toEqual([{ appSessionId: READY, effort: 'xhigh' }]);
+
+    await selector.getByRole('button', { name: /Select model$/ }).click();
+    await list.getByRole('menuitemradio', { name: /^astra/ }).click(); // the session is in auto
+    await expect(selector.getByRole('note')).toContainText('Auto-mode reviews for this model run locally. A GPT route carries no Anthropic verdict');
+    await page.keyboard.press('Escape');
+    await expect(menu).toBeHidden();
+    await expect(page.getByRole('textbox', { name: 'Message' })).toBeFocused(); // the keyboard goes back to the editor
     const log = await calls(backend);
-    expect(log).toContainEqual({ subtype: 'set_model', input: { appSessionId: READY, model: 'opus' } });
     expect(log.filter((c) => c.subtype === 'list_models')).toHaveLength(1);
     expect(backend.consoleErrors()).toEqual([]);
   });
@@ -289,9 +326,9 @@ test.describe('interactive', () => {
     await expect(widget(page, 'effort')).toBeVisible();
     await page.keyboard.press('Escape');
 
-    await typeCommand(page, '/model claude/astra'); // a gateway model in auto: the local-lane note first
+    await typeCommand(page, '/model claude/astra'); // a gateway model in auto: the local-lane note first, proposed, not applied
     const model = widget(page, 'model');
-    await expect(model.getByRole('radio', { name: /^astra/ })).toHaveAttribute('aria-checked', 'true');
+    await expect(model.getByRole('menuitemradio', { name: /^astra/ })).toHaveAttribute('data-proposed', 'true');
     await expect(model.getByRole('note')).toContainText('Auto-mode reviews for this model run locally.');
     await page.keyboard.press('Escape');
     expect(await inputsOf('session.setModel')).toHaveLength(1);
@@ -328,10 +365,9 @@ test.describe('interactive', () => {
     await segment.getByRole('menuitemradio', { name: /^default/ }).click();
     await expect(segment.getByRole('menuitemradio', { checked: true })).toContainText('default');
 
-    await pick(page, 'model');
-    await widget(page, 'model').getByRole('radio', { name: /^Haiku/ }).click();
-    await widget(page, 'model').getByRole('button', { name: 'Apply' }).click();
-    await expect(widget(page, 'model').getByRole('radio', { name: /^Haiku/ })).toHaveAttribute('aria-checked', 'true');
+    await pick(page, 'model'); // W3: the selector in the model chip's menu, on its model view
+    await widget(page, 'model').getByRole('menuitemradio', { name: /^Haiku/ }).click();
+    await expect(widget(page, 'model').getByRole('button', { name: 'Haiku · Select model' })).toBeVisible(); // applied, back on the effort view
 
     await pick(page, 'permissions');
     await widget(page, 'permissions').getByRole('menuitemradio', { name: /^auto/ }).click();
@@ -594,29 +630,31 @@ test.describe('replay conformance', () => {
     const checkedMode = permissions.getByRole('menuitemradio', { checked: true });
     await read('session.getUsage'); // seq 139
     await expect(widget(page, 'usage')).toContainText('rate_limits_available: false');
+    const effort = widget(page, 'effort'); // W3: the selector's effort view, beside its model view
     await read('session.listModels'); // seq 142
-    await expect(model.getByRole('radiogroup', { name: 'Claude models' }).getByRole('radio')).toHaveCount(5);
-    await expect(model.getByRole('radiogroup', { name: 'Gateway models' }).getByRole('radio')).toHaveCount(7);
+    await expect(model.getByRole('group', { name: 'Claude models' }).getByRole('menuitemradio')).toHaveCount(4);
+    await expect(model.getByRole('group', { name: 'Gateway models' }).getByRole('menuitemradio')).toHaveCount(7);
     await read('session.getStatus'); // seq 144
     await expect(valueOf(widget(page, 'status').getByRole('region', { name: 'Environment' }), 'Auto mode server')).toHaveText('Enabled');
 
     await control('setPermissionMode', { mode: 'default' }); // seq 148
     await expect(checkedMode).toContainText('default');
     await control('setModel', { model: 'haiku' }); // seq 151
-    await expect(model.getByRole('radio', { name: /^Haiku/ })).toHaveAttribute('aria-checked', 'true');
+    await expect(model.getByRole('menuitemradio', { name: /^Haiku/ })).toHaveAttribute('aria-checked', 'true');
     await control('setPermissionMode', { mode: 'auto' }); // seq 155: refused
     await expect(permissions).toContainText('This model does not support auto mode');
     await expect(checkedMode).toContainText('default');
     await control('setPermissionMode', { mode: 'default' }); // seq 158
     await control('setModel', { model: 'claude/astra' }); // seq 161
-    await expect(model.getByRole('radio', { name: /^astra/ })).toHaveAttribute('aria-checked', 'true');
+    await expect(model.getByRole('menuitemradio', { name: /^astra/ })).toHaveAttribute('aria-checked', 'true');
     await control('setPermissionMode', { mode: 'auto' }); // seq 164
     await expect(checkedMode).toContainText('auto');
     await expect(model.getByRole('note')).toContainText('Auto-mode reviews for this model run locally.'); // a gateway model in auto
     await control('setPermissionMode', { mode: 'default' }); // seq 167
     await control('setModel', { model: 'opus' }); // seq 171
     await control('applyFlagSettings', { settings: { fastMode: true } }); // seq 175
-    await expect(model.getByRole('switch', { name: 'Fast mode' }).locator('xpath=following-sibling::span[1]')).toHaveText('set · the next init frame confirms it');
+    await expect(effort.getByRole('switch', { name: 'Fast mode' })).toBeEnabled(); // opus has fast mode
+    await expect(effort.getByText('Fast mode · set · the next init frame confirms it', { exact: true })).toBeVisible();
     await read('session.getStatus'); // seq 177
     await expect(valueOf(widget(page, 'status').getByRole('region', { name: 'Environment' }), 'Auto mode server')).toHaveText('Disabled');
     await control('setPermissionMode', { mode: 'auto' }); // seq 179

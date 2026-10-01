@@ -7,6 +7,7 @@ import { useId, useState } from 'react';
 import type { Settings } from '@shared/ipc/schema';
 import type { BinaryInfo } from '@shared/ipc/schema/engine';
 import { isGatewayModel } from '@shared/sessions/models';
+import { DEFAULT_ROW, listName } from '../composer/frame/model-label';
 import { GatewaySheet } from '../gateway/GatewaySheet';
 import { ipc } from '../ipc/client';
 import { useCommand } from '../ipc/query';
@@ -132,7 +133,7 @@ function SubagentModel({ settings }: { settings: Settings }) {
       <datalist id={list}>
         {suggestions.map((m) => (
           <option key={m.value} value={m.value}>
-            {m.displayName}
+            {m.value === DEFAULT_ROW ? `${listName(m, suggestions)} · Default` : m.displayName}
           </option>
         ))}
       </datalist>

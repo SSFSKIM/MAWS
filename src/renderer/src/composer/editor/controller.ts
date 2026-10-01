@@ -11,7 +11,7 @@ import type { MawsBridge } from '@shared/ipc/schema';
 import type { PickedFile } from '@shared/ipc/schema/layout';
 import type { Draft } from '@shared/ipc/schema/session';
 import { EMPTY_CATALOG, type SessionCatalog } from '../../stores/catalog';
-import { memoryTargetOf, takePrefill, useComposerStore, type Editing, type Prefill } from '../../stores/composer';
+import { memoryTargetOf, requestChipWidget, takePrefill, useComposerStore, type Editing, type Prefill } from '../../stores/composer';
 import { toast } from '../../stores/notices';
 import { useTranscriptStore } from '../../transcript';
 import { popupTakesKeys } from '../mentions/popup';
@@ -145,10 +145,17 @@ export class EditorController {
       placeholder: followUp ? 'Ask a follow-up…' : 'Do anything',
       files: (files, at) => void this.addFiles(files, at),
       pasteText: (text) => this.pasteText(text),
-      openWidget: (name, args) => {
-        if (slashWidget(name)) this.view.setWidget({ name, args });
-      },
+      openWidget: (name, args) => void this.openWidget(name, args),
     };
+  }
+
+  // A registered widget opened where it belongs (W3: the selector's names in the model chip's menu); false when none is.
+  private openWidget(name: string, args: string): boolean {
+    const widget = slashWidget(name);
+    if (!widget) return false;
+    if (widget.placement === 'modelChip') requestChipWidget(this.inputs.appSessionId, name, args);
+    else this.view.setWidget({ name, args });
+    return true;
   }
 
   // ---- Tiptap's callbacks ---------------------------------------------------------------------------------------
@@ -237,7 +244,7 @@ export class EditorController {
       this.drafts.save(null);
       this.setDoc(emptyDoc(), { silently: true, caret: null });
       const args = typed[2] ?? '';
-      const open = () => this.view.setWidget({ name: typed[1], args });
+      const open = () => void this.openWidget(typed[1], args);
       if (!widget.apply || args.trim() === '') {
         open();
         return;
@@ -430,11 +437,7 @@ export class EditorController {
         }
       },
       openSlash: () => void editor().chain().focus().insertContentAt(1, '/').run(),
-      openWidget: (name, args = '' /* C11: the argument a widget opens with */) => {
-        if (!slashWidget(name)) return false;
-        this.view.setWidget({ name, args });
-        return true;
-      },
+      openWidget: (name, args = '' /* C11: the argument a widget opens with */) => this.openWidget(name, args),
       setEditing: (editing) => this.setEditing(editing),
     };
   }

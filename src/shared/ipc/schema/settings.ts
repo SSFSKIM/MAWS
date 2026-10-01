@@ -7,6 +7,10 @@ import * as z from 'zod';
 import { ACTION_IDS } from '../../keymap/actions';
 import { CHORD_PATTERN } from '../../keymap/chord';
 import type { CommandSpec } from './common';
+// W3 start
+import { EffortSchema } from '../../engine/launch-spec';
+import { PermissionModeSchema } from '../../graph/enums';
+// W3 end
 // C7 start
 import { UsageSnapshotSchema } from '../../usage/types';
 // C7 end
@@ -135,6 +139,16 @@ export const CustodySchema = z.discriminatedUnion('state', [
   z.strictObject({ state: z.enum(['missing', 'mismatch', 'version']), path: z.string(), message: z.string() }),
 ]);
 export type Custody = z.infer<typeof CustodySchema>;
+// W3 start: what the engine will use when MAWS passes nothing (charter §5.4 and D-18 as amended 2026-10-01): the user's
+// own `model`, `effortLevel` and `permissions.defaultMode` from `<CLAUDE_CONFIG_DIR or ~/.claude>/settings.json`, read
+// and never written. A key the file does not set, or sets to a value the engine would not take, is null.
+export const UserEngineDefaultsSchema = z.strictObject({ model: z.string().nullable(), effortLevel: EffortSchema.nullable(), defaultMode: PermissionModeSchema.nullable() });
+export type UserEngineDefaults = z.infer<typeof UserEngineDefaultsSchema>;
+const w3Commands = {
+  'settings.userEngineDefaults': { input: z.void(), output: UserEngineDefaultsSchema, owner: 'main' },
+} as const satisfies Record<`settings.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
+// W3 end
+
 const c12Commands = {
   'settings.engineCustody': { input: z.void(), output: CustodySchema.nullable(), owner: 'main' },
   'settings.engineApplied': { input: z.void(), output: z.void(), owner: 'main' },
@@ -147,6 +161,7 @@ export const commands = {
   ...c7Commands, // C7
   ...c11Commands, // C11
   ...c12Commands, // C12
+  ...w3Commands, // W3
 } as const satisfies Record<`settings.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {

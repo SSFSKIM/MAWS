@@ -150,9 +150,8 @@ async function plusSession(live: Live, repo: string, first: string, opts: { mode
   await page.getByRole('button', { name: `New session in ${name}`, exact: true }).click();
   await expect(page.getByRole('heading', { name: `New session in ${name}` })).toBeVisible();
   const id = value(await invoke(page, 'session.intent.list', undefined)).intents.at(-1)!.appSessionId;
-  const w = await openWidget(live, 'model');
-  await w.getByRole('radio', { name: SONNET }).click();
-  await w.getByRole('button', { name: 'Apply' }).click();
+  const w = await openWidget(live, 'model'); // W3: the model selector, a pick applies at once
+  await w.getByRole('menuitemradio', { name: SONNET }).click();
   await expect.poll(async () => value(await invoke(page, 'session.intent.list', undefined)).intents.find((i) => i.appSessionId === id)?.model).toBe('sonnet');
   await closeWidgets(page);
   if (opts.mode) value(await invoke(page, 'session.intent.patch', { appSessionId: id, patch: { permissionMode: opts.mode } }));
@@ -161,6 +160,7 @@ async function plusSession(live: Live, repo: string, first: string, opts: { mode
 }
 
 async function closeWidgets(page: Page): Promise<void> {
+  if (await page.getByRole('dialog', { name: 'Model and effort' }).isVisible()) await page.keyboard.press('Escape'); // W3: the model selector's menu
   for (const w of await page.locator('[data-widget]').all()) await w.getByRole('button', { name: /^Close / }).first().click().catch(() => undefined);
 }
 async function send(page: Page, main: Locator, text: string): Promise<void> {
@@ -181,7 +181,7 @@ async function openWidget(live: Pick<Live, 'page' | 'main'>, name: string): Prom
   await page.keyboard.press('Enter');
   const w = page.locator(`[data-widget="${name}"]`);
   await expect(w).toBeVisible();
-  await expect(w.locator('footer')).toContainText('Read with');
+  if (!['model', 'effort', 'fast'].includes(name)) await expect(w.locator('footer')).toContainText('Read with'); // W3: the selector is a menu, with no foot
   return w;
 }
 // A typed line `/name args`, which runs the widget's control with its argument (M3).
@@ -396,8 +396,7 @@ test('every widget opens with live engine data; controls take effect and are rea
 
     await step('fast on Opus in auto: the lane warning, then the init frame answers', async () => {
       let w = await openWidget(live, 'model');
-      await w.getByRole('radio', { name: /^Opus/ }).click();
-      await w.getByRole('button', { name: 'Apply' }).click();
+      await w.getByRole('menuitemradio', { name: /^Opus/ }).click(); // W3: applies at once
       await expect.poll(async () => (await status(page, id)).model.requested).toBe('opus');
       w = await openWidget(live, 'permissions');
       await w.getByRole('menuitemradio', { name: /^auto/ }).click();
@@ -410,7 +409,7 @@ test('every widget opens with live engine data; controls take effect and are rea
       await idle(page, id);
       const statusText = await settled(await openWidget(live, 'status'));
       w = await openWidget(live, 'fast');
-      const caption = (await w.innerText()).split('FAST MODE')[1]?.split('Read with')[0]?.trim();
+      const caption = (await w.innerText()).match(/Fast mode · [^\n]+/)?.[0] ?? null; // W3: the selector's fast caption
       const s = await status(page, id);
       observe('fast', { warning, inits: inits(maws, id).slice(-2), fastMode: s.fastMode, autoModeServer: statusText.match(/Auto mode server\n[^\n]+/)?.[0], caption });
       expect(caption).not.toContain('the next init frame confirms it');
@@ -460,9 +459,8 @@ test('a relay alias takes the local lane; the session switches to Direct and bac
 
     await step(`/model claude/${GPT}: the note, then Local (expected) and the observed lane in the turn`, async () => {
       const w = await openWidget(live, 'model');
-      await w.getByRole('radio', { name: new RegExp(`^${GPT}`) }).click();
+      await w.getByRole('menuitemradio', { name: new RegExp(`^${GPT}`) }).click(); // W3: applies at once; the note follows in auto
       const note = (await w.innerText()).match(/Auto-mode reviews[^\n]+/)?.[0] ?? null;
-      await w.getByRole('button', { name: 'Apply' }).click();
       await expect.poll(async () => (await status(page, id)).model.requested, { timeout: 20_000 }).toBe(`claude/${GPT}`);
       await closeWidgets(page);
       const expected = await infoRow(page, id, 'Auto-mode lane');

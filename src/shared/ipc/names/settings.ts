@@ -5,6 +5,7 @@ export const commands = [
   'settings.get', 'settings.set', 'settings.usage', 'settings.claudeUsage.status', 'settings.claudeUsage.open',
   'settings.reveal',
   'settings.engineCustody', 'settings.engineApplied', // C12
+  'settings.userEngineDefaults', // W3
 ] as const;
 
 export const events = [

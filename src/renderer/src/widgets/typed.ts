@@ -17,7 +17,7 @@ import { toast } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
 import { isGatewayModel } from '@shared/sessions/models';
 import { TYPED } from './copy';
-import { applyFlagSettings, effortsOf, rowNamed, rowOf, setEffort, setModel, type ControlAnswer } from './model';
+import { applyFlagSettings, effortLevelsOf, rowNamed, rowOf, setEffort, setModel, type ControlAnswer } from './model';
 import { setPermissionMode } from './PermissionsWidget';
 
 export type TypedApply = (appSessionId: AppSessionId, args: string, tooLate?: AbortSignal) => Promise<boolean>;
@@ -64,13 +64,13 @@ const EFFORTS: readonly string[] = EffortSchema.options;
 const applyEffort: TypedApply = async (id, args, tooLate) => {
   const status = ready(id);
   const word = args.toLowerCase();
-  // the terminal's `/effort auto` clears the override (the widget's `Engine default`)
+  // the terminal's `/effort auto` clears the override (the selector's Reset)
   const level: Effort | null | undefined = word === 'auto' || word === 'default' ? null : EFFORTS.includes(word) ? (word as Effort) : undefined;
   if (!status || level === undefined) return false;
   if (level !== null) {
     const models = await catalogue(id);
     const row = models ? rowOf(models, status.model.requested ?? status.model.resolved) : undefined;
-    if (!effortsOf(row).includes(level)) return false; // the model does not admit it: the widget lists what it does
+    if (!effortLevelsOf(row).includes(level)) return false; // the model does not admit it: the selector shows what it does
   }
   if (tooLate?.aborted) return false;
   report(setEffort({ appSessionId: id, effort: level }), TYPED.effort(level));

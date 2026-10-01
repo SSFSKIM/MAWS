@@ -65,7 +65,7 @@ describe('the switch sheet', () => {
     const models = await within(sheet).findByRole('radiogroup', { name: 'Claude models' });
     const names = within(models).getAllByRole('radio').map((r) => r.firstChild?.textContent);
     // pass2/auto-routed seq 143: the five Claude rows, none of the seven claude/… rows
-    expect(names).toEqual(['Default (recommended)', 'Opus 5.5 (1M context)', 'Fable 5.1', 'Sonnet 5', 'Haiku']);
+    expect(names).toEqual(['Opus 5.5 (1M context)Default', 'Opus 5.5 (1M context)', 'Fable 5.1', 'Sonnet 5', 'Haiku']); // W3: `default` named by what it runs, with its badge
     const button = within(sheet).getByRole('button', { name: 'Stop them and switch' }) as HTMLButtonElement;
     expect(button.disabled, 'no model picked yet').toBe(true);
     fireEvent.click(within(models).getByRole('radio', { name: /^Sonnet/ }));
@@ -108,8 +108,8 @@ describe('pickDirectModel', () => {
     wrap(<GatewayDialogs />);
     const picked = pickDirectModel(READY);
     const dialog = await screen.findByRole('dialog', { name: 'Choose a Claude model' });
-    await waitFor(() => expect(within(dialog).getByRole('radio', { checked: true }).firstChild?.textContent).toMatch(/^Default/));
-    fireEvent.click(within(dialog).getByRole('radio', { name: /^Opus/ }));
+    await waitFor(() => expect(within(dialog).getByRole('radio', { checked: true }).firstChild?.textContent).toBe('Opus 5.5 (1M context)Default')); // `default`, preselected
+    fireEvent.click(within(dialog).getByRole('radio', { name: /^Opus 5.5 \(1M context\)$/ }));
     fireEvent.click(within(dialog).getByRole('button', { name: 'Use this model' }));
     expect(await picked).toEqual({ model: 'opus', effort: null });
 

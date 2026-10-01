@@ -45,7 +45,7 @@ export function ResumeLauncher({ client = ipc }: { client?: MawsBridge }) {
           Direct
         </label>
         <select aria-label="Permission mode" className={control} value={mode ?? ''} onChange={(e) => setMode(e.target.value === '' ? null : (e.target.value as PermissionMode))}>
-          <option value="">engine default</option>
+          <option value="">from settings</option>
           {MODES.map((m) => (
             <option key={m} value={m}>
               {m}

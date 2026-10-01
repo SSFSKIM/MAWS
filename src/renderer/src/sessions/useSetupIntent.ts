@@ -70,10 +70,14 @@ export function locationsOf(input: { projectDirectory: string; intent: SetupInte
 
 // The catalogue's entries as C7's `ModelInfo`. The entry schema is loose, so the engine's other `list_models` fields
 // ride along unchecked: `supportedEffortLevels` is kept when it is a list of strings, so the model widget lowers an
-// effort the chosen model does not list, as it does for a live session.
+// effort the chosen model does not list, as it does for a live session. W3: the resolved model, the description and
+// `supportsEffort` too, each when it has its type (the model selector names `default`'s model and shows "From gateway").
 export function modelsOf(catalogue: ModelCatalogue): ModelInfo[] {
   return catalogue.models.map((entry) => {
     const info: ModelInfo = { value: entry.value, displayName: entry.displayName };
+    if (typeof entry.resolvedModel === 'string') info.resolvedModel = entry.resolvedModel;
+    if (typeof entry.description === 'string') info.description = entry.description;
+    if (typeof entry.supportsEffort === 'boolean') info.supportsEffort = entry.supportsEffort;
     if (entry.supportsAutoMode !== undefined) info.supportsAutoMode = entry.supportsAutoMode;
     if (entry.supportsFastMode !== undefined) info.supportsFastMode = entry.supportsFastMode;
     const levels: unknown = entry.supportedEffortLevels;
