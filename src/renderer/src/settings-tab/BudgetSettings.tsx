@@ -1,14 +1,15 @@
 // Settings › Engine's memory budget rows (C12 execution document, Interfaces "Settings, version 4" and "Surfaces of the
 // budget"; charter §4.4 as amended by D1): the budget in GB with one decimal (stored in MiB; empty is the default, 25%
 // of physical memory), and the MCP servers whose state dies with their process, by name as system/init reports them.
-// Each writes its one field through `settings.set`; main pushes the policy to the engine host.
+// Each writes its one field through `settings.set`; main pushes the policy to the engine host. W7: a switch above them
+// (settings version 7, on by default); off, the two rows hide and no session is released for memory.
 import { useId, useState, type KeyboardEvent } from 'react';
 import type { Settings } from '@shared/ipc/schema';
 import { useBudget } from '../budget/store';
 import { gb } from '../budget/copy';
 import { toast } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
-import { Chip, INPUT, Setting, TEXT_ACTION, useCommittedDraft, writeSettings } from './parts';
+import { Chip, INPUT, Setting, Switch, TEXT_ACTION, useCommittedDraft, writeSettings } from './parts';
 import { BUDGET_SETTINGS } from './copy';
 
 const MIN_GB = 0.5; // the schema's 512 MiB
@@ -21,6 +22,17 @@ export function mibOfGb(text: string): number | null {
 }
 
 export const gbOfMib = (mib: number): string => (mib / 1024).toFixed(1);
+
+// W7: the budget's switch; the object is written whole (a patch replaces it).
+export function BudgetSwitch({ settings }: { settings: Settings }) {
+  const { enabled } = settings.engine.memoryBudget;
+  return (
+    <Setting label={BUDGET_SETTINGS.enabled} note={enabled ? undefined : BUDGET_SETTINGS.offNote}>
+      <Switch checked={enabled} label={BUDGET_SETTINGS.enabledLabel} onChange={(next) => void writeSettings({ engine: { memoryBudget: { enabled: next } } })} />
+      <span>{BUDGET_SETTINGS.enabledLabel}</span>
+    </Setting>
+  );
+}
 
 export function MemoryBudget({ settings }: { settings: Settings }) {
   const saved = settings.engine.memoryBudgetMiB;
@@ -37,7 +49,7 @@ export function MemoryBudget({ settings }: { settings: Settings }) {
   // While the setting is the default, the host's limit is that default (main pushes it); once set, it is the setting.
   const fallback = saved === null && limitKiB !== null ? gb(limitKiB) : null;
   return (
-    <Setting label={BUDGET_SETTINGS.budget} note={saved === null ? BUDGET_SETTINGS.defaultNote(fallback) : BUDGET_SETTINGS.setNote}>
+    <Setting label={BUDGET_SETTINGS.limit} note={saved === null ? BUDGET_SETTINGS.defaultNote(fallback) : BUDGET_SETTINGS.setNote}>
       <input aria-label={BUDGET_SETTINGS.budget} inputMode="decimal" placeholder={fallback === null ? BUDGET_SETTINGS.placeholder : fallback.replace(' GB', '')} {...field} className={`${INPUT} max-w-[90px] tabular-nums`} />
       <span className="text-ui-sm text-fg-muted">GB</span>
       {saved !== null && (

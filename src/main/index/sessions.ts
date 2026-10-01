@@ -272,14 +272,15 @@ export class SessionStore {
     });
   }
 
-  // A foreign holder from the registry. A record MAWS itself holds (`self`, C3's) is left alone.
+  // A foreign holder from the registry. A record MAWS itself holds (`self`, C3's) stays self: a foreign holder makes it
+  // contested (W7, `contestedBy`) and its end makes it plain self again.
   setHolder(sessionId: SessionId, holder: Holder): SessionRecord | null {
     return this.db.transaction(() => {
       const existing = this.db.get<SessionRow>('SELECT * FROM sessions WHERE engine_session_id = ?', sessionId);
       if (!existing) return null;
       const appId = existing.app_id as AppSessionId;
-      if ((JSON.parse(existing.holder) as Holder).kind === 'self') return this.require(appId);
-      if (this.write(existing, { holder: JSON.stringify(holder) })) this.changed(appId, 'holder');
+      const next = (JSON.parse(existing.holder) as Holder).kind === 'self' ? contested(holder) : holder;
+      if (this.write(existing, { holder: JSON.stringify(next) })) this.changed(appId, 'holder');
       return this.require(appId);
     });
   }
@@ -593,4 +594,9 @@ export class SessionStore {
       for (const listener of this.bindingListeners) listener(change);
     });
   }
+}
+
+// W7: MAWS's own holder with the foreign one it shares the session with, if any (charter §4.3 as amended 2026-10-01).
+export function contested(foreign: Holder): Holder {
+  return foreign.kind === 'terminal' || foreign.kind === 'background_job' ? { kind: 'self', contestedBy: foreign } : { kind: 'self' };
 }

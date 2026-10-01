@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { SessionEventSchema, type SessionEvent } from '@shared/graph/events';
 import type { AgentId, MessageUuid, SessionId } from '@shared/graph/ids';
 import { currentChain } from '@shared/wire/transcript';
-import { loadSyntheticTranscript, loadTranscriptFixture, TEST_FIXTURE_DIR, TRANSCRIPT_FIXTURE_DIR } from '../../../test/support/fixtures';
+import { FIXTURE_DIR, loadSyntheticTranscript, loadTranscriptFixture, TEST_FIXTURE_DIR, TRANSCRIPT_FIXTURE_DIR } from '../../../test/support/fixtures';
 import { MemoryFileReader } from '../../../test/support/memory-reader';
 import { ChainFollower, type FollowerEvent } from './chain-follower';
 
@@ -957,5 +957,107 @@ describe('retract-then-rejoin converges for a consumer that deduplicates by id a
     expect(first.out.events().map((e) => e.id).filter((id) => id.includes('@'))).toEqual([
       `${fullUuid('36a2aa44')}@2`, `${fullUuid('36a2aa44')}@2#1`, `${fullUuid('57525d04')}@2`,
     ]);
+  });
+});
+
+// W7 (charter §4.3 as amended 2026-10-01): the owner's collision, recorded live (spikes/protocol-probe/fixtures/pass3/
+// w7-collision-disk/transcript.jsonl): MAWS writes MAWS_ONE, a terminal resumes the id and writes TERMINAL_ONE on top
+// of it, MAWS (its in-memory chain unchanged) writes MAWS_TWO as a sibling of TERMINAL_ONE, the terminal writes
+// TERMINAL_TWO on its own branch, then exits. The file is fed in those steps, as the writers appended it.
+describe('a transcript a terminal and MAWS both write (W7)', () => {
+  const W7 = linesOf(join(FIXTURE_DIR, 'pass3', 'w7-collision-disk', 'transcript.jsonl'));
+  const records = W7.map((l) => JSON.parse(l) as { type: string; uuid?: string; entrypoint?: string; message?: { content?: unknown } });
+  const prompt = (text: string) => records.findIndex((r) => r.type === 'user' && typeof r.message?.content === 'string' && r.message.content.startsWith(text));
+  const cuts = [prompt('Reply with exactly the word TERMINAL_ONE'), prompt('Reply with exactly the word MAWS_TWO'), prompt('Reply with exactly the word TERMINAL_TWO'), prompt('<local-command-caveat>')];
+  const steps = [W7.slice(0, cuts[0]), W7.slice(cuts[0], cuts[1]), W7.slice(cuts[1], cuts[2]), W7.slice(cuts[2], cuts[3]), W7.slice(cuts[3], prompt('List, comma separated'))];
+  const turnOf = (step: number) => steps[step].map((l) => JSON.parse(l) as { uuid?: string; type: string }).filter((r) => typeof r.uuid === 'string').map((r) => r.uuid!);
+  // the words the prompts on the chain asked for, in chain order
+  const wordsOnChain = (follower: ChainFollower) =>
+    follower.snapshot().chain.flatMap((uuid) => {
+      const content = records.find((r) => r.uuid === uuid)?.message?.content;
+      const word = typeof content === 'string' ? /^Reply with exactly the word (\w+)$/.exec(content)?.[1] : undefined;
+      return word === undefined ? [] : [word];
+    });
+
+  async function feed(pinned: { on: boolean }) {
+    const reader = new MemoryFileReader(joined(steps[0]));
+    const out = new Collector();
+    const follower = new ChainFollower(reader, SESSION, null, out.sink, { holders: () => 2, pinned: () => pinned.on });
+    await follower.start();
+    const marks: number[] = [];
+    for (const step of steps.slice(1)) {
+      marks.push(out.events().length);
+      reader.append(joined(step));
+      await follower.poke();
+    }
+    return { reader, out, follower, marks };
+  }
+
+  // review finding: after MAWS's process exits one live holder is left, the terminal; its sibling prompt then has the
+  // shape of a terminal /rewind, which must not outrank the pin (a cold hydration after a yield reads exactly this)
+  it('pinned with one live holder, a foreign sibling prompt is held back, not read as a terminal rewind', async () => {
+    const own = (type: 'user' | 'assistant', uuid: string, parentUuid: string | null, n: number, entrypoint = 'sdk-ts') =>
+      line({ type, uuid, parentUuid, entrypoint, cwd: '/d', timestamp: at(n), message: type === 'user' ? { role: 'user', content: `${uuid} asks` } : { role: 'assistant', content: [{ type: 'text', text: `${uuid} says` }] } });
+    const lines = [own('user', 'u1', null, 0), own('assistant', 'a1', 'u1', 1), own('user', 'u2', 'a1', 2), own('assistant', 'a2', 'u2', 3), own('user', 'c1', 'a1', 4, 'cli')];
+    for (const pinned of [false, true]) {
+      const out = new Collector();
+      const follower = new ChainFollower(new MemoryFileReader(joined(lines)), SESSION, null, out.sink, { holders: () => 1, pinned: () => pinned });
+      await follower.start();
+      if (pinned) {
+        expect(out.of('boundary.rewind')).toEqual([]);
+        expect(out.of('notice.posted').map((e) => e.key)).toEqual(['transcript_branch_held']);
+        expect(follower.snapshot().chain).toEqual(['u1', 'a1', 'u2', 'a2']);
+      } else {
+        expect(out.of('boundary.rewind').map((e) => e.targetMessageUuid)).toEqual(['u2']); // the heuristic, unpinned
+      }
+    }
+  });
+
+  it('records the writers it claims: one fork, a terminal branch and a MAWS branch', () => {
+    expect(cuts.every((i) => i > 0)).toBe(true);
+    expect(records[cuts[0]].entrypoint).toBe('cli');
+    expect(records[cuts[1]].entrypoint).toBe('sdk-ts');
+    expect(records[cuts[2]].entrypoint).toBe('cli');
+  });
+
+  it('without the pin (before W7) each writer flips the view: MAWS_TWO vanishes when the terminal writes again', async () => {
+    const { out, follower, marks } = await feed({ on: false });
+    const between = (from: number, to?: number) => out.events().slice(marks[from], to === undefined ? undefined : marks[to]);
+    expect(between(0, 1).filter((e) => e.kind === 'boundary.retraction')).toEqual([]); // TERMINAL_ONE extends MAWS_ONE
+    const flipToMaws = between(1, 2).filter((e) => e.kind === 'boundary.retraction' || e.kind === 'notice.posted');
+    expect(flipToMaws.map((e) => e.kind)).toEqual(['boundary.retraction', 'notice.posted']);
+    expect((flipToMaws[0] as Extract<SessionEvent, { kind: 'boundary.retraction' }>).retractedMessageUuids).toEqual(turnOf(1));
+    const flipBack = between(2, 3).filter((e) => e.kind === 'boundary.retraction');
+    expect(flipBack.map((e) => e.retractedMessageUuids)).toEqual([turnOf(2)]); // MAWS_TWO's turn leaves the view
+    expect(out.of('notice.posted').map((e) => e.text)).toEqual(['Another process wrote a sibling branch into this transcript', 'Another process wrote a sibling branch into this transcript']);
+    expect(wordsOnChain(follower)).toEqual(['MAWS_ONE', 'TERMINAL_ONE', 'TERMINAL_TWO']);
+  });
+
+  it('pinned while a foreign process holds the session, MAWS_TWO stays in view and the other branch waits; the re-fold shows what a resume continues from', async () => {
+    const pinned = { on: true };
+    const { out, follower, marks } = await feed(pinned);
+    // MAWS's own record still moves the view to its branch (its branch is the one kept)
+    expect(out.events().slice(marks[1], marks[2]).filter((e) => e.kind === 'boundary.retraction').map((e) => e.retractedMessageUuids)).toEqual([turnOf(1)]);
+    // the terminal's second turn and its exit are held back: no retraction, one notice
+    const held = out.events().slice(marks[2]);
+    expect(held.filter((e) => e.kind === 'boundary.retraction')).toEqual([]);
+    expect(held.filter((e) => e.kind === 'notice.posted').map((e) => e.key)).toEqual(['transcript_branch_held']);
+    expect(follower.snapshot().leaf).toBe(turnOf(2).at(-1));
+    expect(wordsOnChain(follower)).toEqual(['MAWS_ONE', 'MAWS_TWO']);
+
+    // the terminal exits: the follower reads the file again and reconciles once
+    pinned.on = false;
+    const before = out.events().length;
+    await follower.refold();
+    const refold = out.events().slice(before);
+    expect(refold.filter((e) => e.kind === 'boundary.retraction').map((e) => [e.reason, e.retractedMessageUuids])).toEqual([['transcript_branch', turnOf(2)]]);
+    expect(refold.filter((e) => e.kind === 'notice.posted').map((e) => e.key)).toEqual(['transcript_refold']);
+    expect(follower.snapshot().leaf).toBe(turnOf(4).at(-1));
+    expect(wordsOnChain(follower)).toEqual(['MAWS_ONE', 'TERMINAL_ONE', 'TERMINAL_TWO']);
+    expectWellFormed(out.events());
+    // a second re-fold has nothing held back
+    const settled = out.events().length;
+    await follower.refold();
+    expect(out.events().length).toBe(settled);
   });
 });

@@ -25,7 +25,7 @@ const NONE: ReadonlySet<string> = new Set();
 
 function input(rows: EngineSessionStatus[], over: Partial<BudgetInput> = {}): BudgetInput {
   return {
-    rows, policy: { limitKiB: 1, statefulMcpServers: [] }, quiet: new Set(rows.map((r) => r.appSessionId)), releasing: null, previousOverWithoutCandidate: false, ...over,
+    rows, policy: { enabled: true, limitKiB: 1, statefulMcpServers: [] }, quiet: new Set(rows.map((r) => r.appSessionId)), releasing: null, previousOverWithoutCandidate: false, ...over,
   };
 }
 
@@ -88,7 +88,7 @@ describe('evaluate', () => {
       row('d', { process: 'exiting', memory: { rssKiB: 1, treeRssKiB: 5_000, sampledAt: 'x' } }),
       row('e', { process: 'exited', memory: { rssKiB: 1, treeRssKiB: 7_000, sampledAt: 'x' } }),
     ];
-    const v = evaluate(input(rows, { policy: { limitKiB: 200, statefulMcpServers: [] } }));
+    const v = evaluate(input(rows, { policy: { enabled: true, limitKiB: 200, statefulMcpServers: [] } }));
     expect(v).toMatchObject({ totalKiB: 123, limitKiB: 200, over: false, release: null });
   });
 
@@ -100,8 +100,8 @@ describe('evaluate', () => {
 
   it('is over only when the sum exceeds the budget, and releases nothing when not over', () => {
     const rows = [row('a', { memory: { rssKiB: 1, treeRssKiB: 600, sampledAt: 'x' } }), row('b', { memory: { rssKiB: 1, treeRssKiB: 400, sampledAt: 'x' } })];
-    expect(evaluate(input(rows, { policy: { limitKiB: 1_000, statefulMcpServers: [] } }))).toMatchObject({ over: false, release: null, candidates: 2 });
-    expect(evaluate(input(rows, { policy: { limitKiB: 999, statefulMcpServers: [] } }))).toMatchObject({ over: true, candidates: 2 });
+    expect(evaluate(input(rows, { policy: { enabled: true, limitKiB: 1_000, statefulMcpServers: [] } }))).toMatchObject({ over: false, release: null, candidates: 2 });
+    expect(evaluate(input(rows, { policy: { enabled: true, limitKiB: 999, statefulMcpServers: [] } }))).toMatchObject({ over: true, candidates: 2 });
   });
 
   it('releases the least recently used candidate, ties broken by appSessionId, one per evaluation', () => {
@@ -160,7 +160,7 @@ describe('evaluate', () => {
       row('free', { lastUsedAt: '2026-09-29T11:00:00.000Z' }),
       row('leaving', { process: 'exiting', turn: TURN }),
     ];
-    const v = evaluate(input(rows, { policy: { limitKiB: 1, statefulMcpServers: ['c12-kernel'] } }));
+    const v = evaluate(input(rows, { policy: { enabled: true, limitKiB: 1, statefulMcpServers: ['c12-kernel'] } }));
     expect(v.blocked).toEqual([{ appSessionId: 'turn', reasons: ['turn'] }, { appSessionId: 'kernel', reasons: ['stateful_mcp'] }]);
     expect(v).toMatchObject({ candidates: 1, settling: 0, release: 'free' });
   });
@@ -172,7 +172,15 @@ describe('evaluate', () => {
     expect(evaluate(input(blocked, { previousOverWithoutCandidate: true }))).toMatchObject({ overWithoutCandidate: true });
     // a candidate, or being under budget, clears it whatever the previous sample said
     expect(evaluate(input([row('a')], { previousOverWithoutCandidate: true }))).toMatchObject({ overWithoutCandidate: false, release: 'a' });
-    expect(evaluate(input(blocked, { previousOverWithoutCandidate: true, policy: { limitKiB: 10_000_000, statefulMcpServers: [] } }))).toMatchObject({ over: false, overWithoutCandidate: false });
+    expect(evaluate(input(blocked, { previousOverWithoutCandidate: true, policy: { enabled: true, limitKiB: 10_000_000, statefulMcpServers: [] } }))).toMatchObject({ over: false, overWithoutCandidate: false });
+  });
+
+  // W7: settings' switch off (charter §4.4 as amended 2026-10-01): the sum and the classification stand, nothing is over
+  it('with the budget off, sums and classifies as ever but is never over: no release and no flag', () => {
+    const off = { enabled: false, limitKiB: 1, statefulMcpServers: [] };
+    const free = evaluate(input([row('a'), row('b', { turn: TURN })], { policy: off }));
+    expect(free).toMatchObject({ totalKiB: 800_000, over: false, release: null, candidates: 1, blocked: [{ appSessionId: 'b', reasons: ['turn'] }] });
+    expect(evaluate(input([row('b', { turn: TURN })], { policy: off, previousOverWithoutCandidate: true }))).toMatchObject({ over: false, overWithoutCandidate: false });
   });
 
   it('answers the same verdict for the same input (pure: no clock, no state)', () => {

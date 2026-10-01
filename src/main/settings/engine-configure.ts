@@ -49,12 +49,14 @@ export const CONFIGURE_WAIT_MS = 30_000;
 
 export type BudgetPolicy = CommandInput<'engine.policy.set'>;
 
-// settings.engine's budget as the host takes it: the setting in KiB, or 25% of physical memory while it is null.
+// settings.engine's budget as the host takes it: the setting in KiB, or 25% of physical memory while it is null. W7:
+// whether it is on; the limit goes either way, so the host's state names it and turning the budget on needs no more.
 export const budgetPolicyOf = ({ engine }: Settings, totalMemBytes: number): BudgetPolicy => ({
+  enabled: engine.memoryBudget.enabled, // W7
   limitKiB: engine.memoryBudgetMiB !== null ? engine.memoryBudgetMiB * 1024 : defaultBudgetKiB(totalMemBytes),
   statefulMcpServers: [...engine.statefulMcpServers],
 });
-const samePolicy = (a: BudgetPolicy, b: BudgetPolicy) => a.limitKiB === b.limitKiB && a.statefulMcpServers.join('\n') === b.statefulMcpServers.join('\n');
+const samePolicy = (a: BudgetPolicy, b: BudgetPolicy) => a.enabled === b.enabled /* W7 */ && a.limitKiB === b.limitKiB && a.statefulMcpServers.join('\n') === b.statefulMcpServers.join('\n');
 
 // The settings a configure push stands for (C11's `configOf` and `same` gave way to it).
 const settingsKey = ({ engine }: Settings) => `${engine.binaryPath ?? ''}\0${engine.pinnedVersion}`;

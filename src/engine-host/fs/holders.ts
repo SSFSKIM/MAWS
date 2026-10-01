@@ -1,23 +1,36 @@
 // Who else holds a session right now (C4 execution document, Interfaces "Holder rule"; charter residue *Holder
-// detection*; SPEC 35.27.1, pass-2 item 10). Interactive `claude` and `claude --bg` write `sessions/<pid>.json` at
-// startup and unlink it at exit; `-p` processes write none. A record is a holder when it names a session, its pid is
-// alive, and its `procStart`, when present, equals `ps -o lstart=` rendered exactly as the engine renders it
-// (`LC_ALL=C TZ=UTC`, never the host's zone). `jobs/<short>/state.json` adds the job's facts, never liveness.
+// detection*; SPEC 35.27.1, pass-2 item 10). Interactive `claude`, `claude --bg` and MAWS's own `-p` processes write
+// `sessions/<pid>.json` at startup and unlink it at exit (W7 probe, pass3/w7-collision: MAWS's reads `kind:
+// 'interactive'`, `entrypoint: 'sdk-ts'`). A record is live when it names a session, its pid is alive, and its
+// `procStart`, when present, equals `ps -o lstart=` rendered exactly as the engine renders it (`LC_ALL=C TZ=UTC`, never
+// the host's zone). A live record is MAWS's own when its entrypoint is `sdk-ts` and its pid is one of the process
+// table's (charter §4.3 as amended 2026-10-01); every other live record is a foreign holder. Own records are never
+// holders, but they count as live processes (`liveCount`) and they make a foreign holder of the same session a
+// contest. `jobs/<short>/state.json` adds the job's facts, never liveness.
 // Read-only: registry and job files are read, never written or removed.
 import { execFile } from 'node:child_process';
 import { readdir, realpath, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { SessionId } from '@shared/graph/ids';
+import type { ForeignHolder } from '@shared/graph/session';
 import { JobStateSchema, LiveSessionRecordSchema, type Holder, type JobState, type LiveSessionRecord } from '@shared/wire/store';
 import type { StorePaths } from './paths';
 import { isMissing, noteReadable, noteUnreadable, readJsonWithRetry } from './sidecars';
 
 export type HolderSink = (sessionId: SessionId, holder: Holder, registry: LiveSessionRecord | null, job: JobState | null) => void;
+// W7: a session MAWS runs that a foreign process holds too (`by`, with its record's `startedAt`), or no longer
+// (`null`); called on every change.
+export type ContestSink = (sessionId: SessionId, by: ForeignHolder | null, startedAt: number | null) => void;
 
 export interface HolderDeps {
   ps?: string; // the ps binary; tests point it somewhere that cannot spawn
   pollMs?: number; // liveness poll while at least one holder is known
+  // W7: the pids of MAWS's own live engine processes (the engine host's process table); absent, none
+  ownPids?: () => ReadonlySet<number>;
+  contests?: ContestSink;
 }
+
+export const OWN_ENTRYPOINT = 'sdk-ts'; // what X6 launches with (CLAUDE_CODE_ENTRYPOINT); the transcript's records carry it too
 
 export const POLL_MS = 2_000;
 export const JOB_STATE_MAX_BYTES = 8 * 1024 * 1024; // the engine's own cap; a larger state.json is treated as absent
@@ -33,11 +46,15 @@ interface Held {
 export class HolderRegistry {
   private readonly ps: string;
   private readonly pollMs: number;
+  private readonly ownPids: () => ReadonlySet<number>;
+  private readonly contestSink: ContestSink;
+  private readonly contested = new Map<SessionId, ForeignHolder>(); // W7: sessions with an own record and a foreign holder
   private readonly records = new Map<number, LiveSessionRecord>();
   private readonly jobs = new Map<string, JobState>();
   private readonly held = new Map<SessionId, Held>();
   private readonly unknownKinds = new Set<string>(); // logged once each
-  private live: LiveSessionRecord[] = []; // every live record as last checked, one per pid: what fs.holders filters
+  private live: LiveSessionRecord[] = []; // every live record as last checked, one per pid, MAWS's own included
+  private foreign: LiveSessionRecord[] = []; // the live records that are not MAWS's own: what fs.holders filters (W7)
   private chain: Promise<unknown> = Promise.resolve();
   private queuedRefresh: Promise<Error | null> | null = null;
   private poll: ReturnType<typeof setInterval> | null = null;
@@ -50,6 +67,8 @@ export class HolderRegistry {
   ) {
     this.ps = deps.ps ?? '/bin/ps';
     this.pollMs = deps.pollMs ?? POLL_MS;
+    this.ownPids = deps.ownPids ?? (() => new Set());
+    this.contestSink = deps.contests ?? (() => {});
   }
 
   async start(): Promise<void> {
@@ -98,33 +117,39 @@ export class HolderRegistry {
     return this.held.get(sessionId)?.holder ?? NONE;
   }
 
+  // W7: the foreign holder of a session MAWS's own process also holds, or null.
+  contestedBy(sessionId: SessionId): ForeignHolder | null {
+    return this.contested.get(sessionId) ?? null;
+  }
+
   // How many live processes hold this session, as last checked (one per pid, not the badge's newest-wins projection):
   // the chain follower's terminal-rewind rule reads a terminal rewind only while at most one process holds it.
   liveCount(sessionId: SessionId): number {
     return this.live.filter((record) => record.sessionId === sessionId).length;
   }
 
-  // Every session with a live holder.
+  // Every session with a live foreign holder.
   holders(): { sessionId: SessionId; holder: Holder }[] {
     return [...this.held].map(([sessionId, { holder }]) => ({ sessionId, holder }));
   }
 
   // The live holders as they are now, for a guard that must not trust an asynchronous projection: a registry read that
-  // starts after this call (the poll's liveness rule, unchanged), then every live record, one row per live pid (not the
-  // newest-per-session badge: two processes on one session with different directories are two rows), whose session id
-  // is listed or whose cwd is one of `directories`, both compared as NFC-normalised realpaths. Both filters null: every
-  // live record. A registry that could not be read rejects rather than answering from the previous table.
-  async liveNow(filter: { sessionIds: readonly SessionId[] | null; directories: readonly string[] | null }): Promise<{ sessionId: SessionId; holder: Holder; cwd: string | null }[]> {
+  // starts after this call (the poll's liveness rule, unchanged), then every live foreign record (MAWS's own are the
+  // process table's to answer, W7), one row per live pid (not the newest-per-session badge: two processes on one
+  // session with different directories are two rows), whose session id is listed or whose cwd is one of `directories`,
+  // both compared as NFC-normalised realpaths. Both filters null: every live foreign record. A registry that could not
+  // be read rejects rather than answering from the previous table.
+  async liveNow(filter: { sessionIds: readonly SessionId[] | null; directories: readonly string[] | null }): Promise<{ sessionId: SessionId; holder: Holder; cwd: string | null; entrypoint?: string }[]> {
     const failure = await this.refreshed();
     if (failure) throw new Error(`holder registry unreadable: ${(failure as NodeJS.ErrnoException).code ?? failure.message}`);
     const ids = filter.sessionIds === null ? null : new Set(filter.sessionIds);
     const directories = filter.directories === null ? null : new Set(await Promise.all(filter.directories.map(canonicalDirectory)));
-    const answer: { sessionId: SessionId; holder: Holder; cwd: string | null }[] = [];
-    for (const record of this.live) {
+    const answer: { sessionId: SessionId; holder: Holder; cwd: string | null; entrypoint?: string }[] = [];
+    for (const record of this.foreign) {
       const sessionId = record.sessionId as SessionId;
       const cwd = record.cwd === undefined ? null : await canonicalDirectory(record.cwd);
       const matches = (ids === null && directories === null) || ids?.has(sessionId) || (cwd !== null && directories?.has(cwd));
-      if (matches) answer.push({ sessionId, holder: this.holderFor(record, sessionId), cwd });
+      if (matches) answer.push({ sessionId, holder: this.holderFor(record, sessionId), cwd, ...(record.entrypoint === undefined ? {} : { entrypoint: record.entrypoint }) });
     }
     return answer;
   }
@@ -219,9 +244,13 @@ export class HolderRegistry {
     // carries no token (the engine's own probe treats a missing expected token the same way).
     const live = alive.filter((record) => record.procStart === undefined || tokens === null || tokens.get(record.pid) === record.procStart);
     this.live = live;
+    const own = this.ownPids();
+    const isOwn = (record: LiveSessionRecord) => record.entrypoint === OWN_ENTRYPOINT && own.has(record.pid);
+    this.foreign = live.filter((record) => !isOwn(record));
+    const ownSessions = new Set(live.filter(isOwn).map((record) => record.sessionId as SessionId));
 
     const bySession = new Map<SessionId, LiveSessionRecord>();
-    for (const record of live) {
+    for (const record of this.foreign) {
       const sessionId = record.sessionId as SessionId;
       const previous = bySession.get(sessionId);
       if (!previous || (record.startedAt ?? 0) > (previous.startedAt ?? 0)) bySession.set(sessionId, record);
@@ -235,6 +264,16 @@ export class HolderRegistry {
       if (record) this.held.set(sessionId, { holder, registry: record, job: job?.state ?? null });
       else this.held.delete(sessionId);
       if (!sameHolder(before, holder)) this.sink(sessionId, holder, record, job?.state ?? null);
+    }
+
+    // W7: a contest is a session with MAWS's own live record and a foreign holder; each start, change and end is told.
+    for (const sessionId of new Set([...this.contested.keys(), ...ownSessions])) {
+      const holder = ownSessions.has(sessionId) ? this.holderOf(sessionId) : NONE;
+      const by = holder.kind === 'terminal' || holder.kind === 'background_job' ? holder : null;
+      const before = this.contested.get(sessionId) ?? null;
+      if (by === null) this.contested.delete(sessionId);
+      else this.contested.set(sessionId, by);
+      if (!sameHolder(before ?? NONE, by ?? NONE)) this.contestSink(sessionId, by, by === null ? null : (this.held.get(sessionId)?.registry.startedAt ?? null));
     }
 
     if (this.held.size > 0 && !this.poll) {

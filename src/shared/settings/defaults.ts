@@ -1,16 +1,17 @@
-// The values of MAWS's own settings file (C11 execution document, Interfaces "Settings, version 3"): the version 3
-// defaults, the one migration from every earlier version, and the one patch merge `settings.set` applies. Pure; main's
-// store (src/main/settings/store.ts) reads, migrates, merges and writes with these, and nothing else does.
+// The values of MAWS's own settings file (C11 execution document, Interfaces "Settings, version 3"): the current
+// version's defaults (W7: version 7), the one migration from every earlier version, and the one patch merge
+// `settings.set` applies. Pure; main's store (src/main/settings/store.ts) reads, migrates, merges and writes with these,
+// and nothing else does.
 import * as z from 'zod';
 import { ACTION_IDS } from '../keymap/actions';
 import { ChordSchema, SettingsSchema, ThemeSettingSchema, type Settings, type SettingsPatch } from '../ipc/schema/settings';
 
-export const SETTINGS_DEFAULTS_V6: Settings = {
-  version: 6, // C12: 4; W2: 5; W3: 6
+export const SETTINGS_DEFAULTS_V7: Settings = {
+  version: 7, // C12: 4; W2: 5; W3: 6; W7: 7
   theme: 'light', // light-first (D-4, charter §10 item 10)
   keymap: {},
   notifications: { enabled: true, sound: false, kinds: { approvals: true, questions: true, planReviews: true, errors: true, heldPeerMessages: false } },
-  engine: { binaryPath: null, pinnedVersion: '2.1.283', subagentModel: null, memoryBudgetMiB: null, statefulMcpServers: [] /* C12 */ }, // C3's ENGINE_VERSION
+  engine: { binaryPath: null, pinnedVersion: '2.1.283', subagentModel: null, memoryBudgetMiB: null, statefulMcpServers: [] /* C12 */, memoryBudget: { enabled: true } /* W7 */ }, // C3's ENGINE_VERSION
   gateway: { defaultRoute: 'gateway', relayUnreachable: 'ask', offerDirect: true }, // D-19
   usage: { nearLimitPercent: 90 },
   appearance: { monoFont: null, transcriptWidth: 768 /* W2 */ },
@@ -26,8 +27,13 @@ const SettingsV2Schema = z.strictObject({
   notifications: z.strictObject({ enabled: z.boolean(), sound: z.boolean() }),
 });
 
+// W7 start: W3's version 6, as it wrote it: version 7's sections less the budget's switch
+const SettingsV6Schema = SettingsSchema.extend({ version: z.literal(6), engine: SettingsSchema.shape.engine.omit({ memoryBudget: true }) });
+type SettingsV6 = z.infer<typeof SettingsV6Schema>;
+// W7 end
+
 // W3 start: W2's version 5, as it wrote it: version 6's sections less the permissions
-const SettingsV5Schema = SettingsSchema.omit({ permissions: true }).extend({ version: z.literal(5) });
+const SettingsV5Schema = SettingsV6Schema.omit({ permissions: true }).extend({ version: z.literal(5) });
 type SettingsV5 = z.infer<typeof SettingsV5Schema>;
 // W3 end
 
@@ -42,20 +48,22 @@ type SettingsV4 = z.infer<typeof SettingsV4Schema>;
 // C12 start: C11's version 3, as it wrote it: version 4's sections less the budget's two engine fields
 const SettingsV3Schema = SettingsV4Schema.extend({
   version: z.literal(3),
-  engine: SettingsSchema.shape.engine.omit({ memoryBudgetMiB: true, statefulMcpServers: true }),
+  engine: SettingsV4Schema.shape.engine.omit({ memoryBudgetMiB: true, statefulMcpServers: true }), // W7: version 4's engine, without the switch
 });
 // C12 end
 
-const defaults = (): Settings => structuredClone(SETTINGS_DEFAULTS_V6);
+const defaults = (): Settings => structuredClone(SETTINGS_DEFAULTS_V7);
 
-// W3: v5 → v6, the auto fallback's default
-const fromV5 = (v5: SettingsV5): Settings => ({ ...v5, version: 6, permissions: defaults().permissions });
+// W7: v6 → v7, the budget's switch on (the architect's default, charter §4.4 as amended 2026-10-01)
+const fromV6 = (v6: SettingsV6): Settings => ({ ...v6, version: 7, engine: { ...v6.engine, memoryBudget: defaults().engine.memoryBudget } });
+// W3: v5 → v6, the auto fallback's default (W7: then v6 → v7)
+const fromV5 = (v5: SettingsV5): Settings => fromV6({ ...v5, version: 6, permissions: defaults().permissions });
 // W2: v4 → v5, the transcript's default width (W3: then v5 → v6)
 const fromV4 = (v4: SettingsV4): Settings => fromV5({ ...v4, version: 5, appearance: { ...v4.appearance, transcriptWidth: defaults().appearance.transcriptWidth } });
 
 // v1 → v2 (C5's step: no keymap overrides, the notification defaults) → v3 (the sections C11 adds, with their
-// defaults) → v4 (C12's budget) → v5 (W2's transcript width) → v6 (W3's auto fallback). A version 6 object is validated
-// and returned as it is;
+// defaults) → v4 (C12's budget) → v5 (W2's transcript width) → v6 (W3's auto fallback) → v7 (W7's budget switch). A
+// version 7 object is validated and returned as it is;
 // anything else (another version, an invalid file of a known version) throws the schema's error, which the store turns
 // into the defaults with a warning.
 export function migrateSettings(raw: unknown): Settings {
@@ -81,6 +89,8 @@ export function migrateSettings(raw: unknown): Settings {
       return fromV4(SettingsV4Schema.parse(raw)); // W2
     case 5:
       return fromV5(SettingsV5Schema.parse(raw)); // W3
+    case 6:
+      return fromV6(SettingsV6Schema.parse(raw)); // W7
     default:
       return SettingsSchema.parse(raw);
   }

@@ -2,6 +2,7 @@
 // launches and the version it is pinned to (both reach the engine host through `engine.configure`, which main pushes on
 // every change; C12: main alone, and this section awaits `settings.engineApplied`), the engine's config home (read-only
 // to MAWS), the subagent model new sessions launch with, and (W3) the mode a session takes when the engine refuses auto.
+// W7: the memory budget's switch, whose rows show only while it is on.
 import { useQueryClient } from '@tanstack/react-query';
 import { useId, useState } from 'react';
 import { PERMISSION_MODES } from '@shared/graph/enums';
@@ -17,7 +18,7 @@ import { toast } from '../stores/notices';
 import { homeAbbreviated } from '../tools/session-info/model';
 import { ENGINE } from './copy';
 import { Chip, INPUT, Setting, TEXT_ACTION, useCommittedDraft, writeSettings } from './parts';
-import { MemoryBudget, StatefulServers } from './BudgetSettings'; // C12
+import { BudgetSwitch, MemoryBudget, StatefulServers } from './BudgetSettings'; // C12; W7: the switch
 import { CUSTODY_KEY, CustodySetting } from './CustodySetting'; // C12
 
 const BINARY_INFO_KEY = ['maws', 'engine.binaryInfo', undefined];
@@ -80,9 +81,14 @@ export function EngineSection({ settings }: { settings: Settings }) {
       <ConfigHome />
       <SubagentModel settings={settings} />
       <AutoFallback settings={settings} /> {/* W3 */}
-      {/* C12 start: the memory budget and the stateful MCP servers (settings v4) */}
-      <MemoryBudget settings={settings} />
-      <StatefulServers settings={settings} />
+      {/* C12 start: the memory budget and the stateful MCP servers (settings v4); W7: behind its switch (settings v7) */}
+      <BudgetSwitch settings={settings} />
+      {settings.engine.memoryBudget.enabled && (
+        <>
+          <MemoryBudget settings={settings} />
+          <StatefulServers settings={settings} />
+        </>
+      )}
       {/* C12 end */}
       {repinning !== null && (
         <GatewaySheet

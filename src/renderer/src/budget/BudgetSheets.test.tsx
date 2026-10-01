@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId, TaskId } from '@shared/graph/ids';
 import type { BudgetState } from '@shared/ipc/schema/engine';
-import { SETTINGS_DEFAULTS_V6 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V7 } from '@shared/settings/defaults';
 import { humanTurn, record, status } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
 import { useSessions } from '../stores/sessions';
@@ -17,7 +17,7 @@ const SLEEP = 'app-sleep' as AppSessionId;
 const KERNEL = 'app-kernel' as AppSessionId;
 const GiB = 1024 * 1024;
 const state: BudgetState = {
-  limitKiB: 2 * GiB, totalKiB: 3 * GiB, sampledAt: '2026-09-29T14:02:00.000Z', over: true, overWithoutCandidate: true, candidates: 0, settling: 0, releasing: null,
+  enabled: true, limitKiB: 2 * GiB, totalKiB: 3 * GiB, sampledAt: '2026-09-29T14:02:00.000Z', over: true, overWithoutCandidate: true, candidates: 0, settling: 0, releasing: null,
   blocked: [
     { appSessionId: TURN, reasons: ['turn'] },
     { appSessionId: SLEEP, reasons: ['background_tasks'] },
@@ -40,7 +40,7 @@ beforeEach(() => {
     records: new Map([TURN, SLEEP, KERNEL].map((id) => [id, record(id, { title: { text: `Session ${id.slice(4)}`, source: 'user' } })])),
     engine: new Map(statuses.map((s) => [s.appSessionId, s])),
   });
-  useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V6, engine: { ...SETTINGS_DEFAULTS_V6.engine, statefulMcpServers: ['c12-kernel'] } }, resolvedTheme: 'light' } });
+  useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V7, engine: { ...SETTINGS_DEFAULTS_V7.engine, statefulMcpServers: ['c12-kernel'] } }, resolvedTheme: 'light' } });
   useBudget.getState().apply(state);
 });
 afterEach(() => {
@@ -83,6 +83,18 @@ describe('the blocked sessions sheet and the stop sheet', () => {
     await user.click(screen.getByRole('button', { name: 'Stop' }));
     await waitFor(() => expect(fake.invoked('session.stop')).toEqual([{ appSessionId: SLEEP, reason: 'stop' }]));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  });
+
+  // W7: the budget switched off in settings
+  it('shows neither sheet while the host reports the budget off, and the switch going off closes an open one', () => {
+    mount();
+    act(() => useBudget.getState().open({ kind: 'blocked' }));
+    expect(screen.getByRole('dialog', { name: 'Sessions holding work' })).toBeTruthy();
+    act(() => useBudget.getState().apply({ ...state, enabled: false, over: false, overWithoutCandidate: false }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(useBudget.getState().sheet).toBeNull();
+    act(() => useBudget.getState().open({ kind: 'stop', appSessionId: SLEEP }));
+    expect(screen.queryByRole('dialog')).toBeNull();
   });
 
   it('a refused stop says why and keeps the sheet', async () => {

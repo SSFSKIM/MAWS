@@ -21,6 +21,7 @@ import { CONTEXT, MODEL } from '../../widgets/copy';
 import { liveModel, type ModelRow } from '../../widgets/model';
 import { num } from '../../widgets/parts';
 import { INFO, LANE } from './copy';
+import { contestLine, holderLine } from '../../attention/derive'; // W7
 import type { Lane } from './lane';
 // C12 start
 import type { BudgetState } from '@shared/ipc/schema/engine';
@@ -60,14 +61,25 @@ const mb = (kib: number) => `${Math.round(kib / 1024)} MB`;
 const usd = (n: number) => `$${n.toFixed(2)}`;
 
 // C12 start: the memory budget beside the process tree (§4.4: "visible in Session info"): the sum of the live trees
-// against the limit with the live sessions counted, and for a released session when and why.
+// against the limit with the live sessions counted, and for a released session when and why. W7: with the budget off,
+// the sum and the count without a limit.
 export function budgetRows(budget: BudgetState | null, digest: SessionDigest | null): InfoRow[] {
   const sessions = budget === null ? 0 : budget.blocked.length + budget.settling + budget.candidates;
-  const rows: InfoRow[] = [{ label: BUDGET.budgetLabel, value: budget === null ? NONE : BUDGET.budgetLine(budget.totalKiB, budget.limitKiB, sessions) }];
+  const line = (b: BudgetState) => (b.enabled ? BUDGET.budgetLine(b.totalKiB, b.limitKiB, sessions) : BUDGET.budgetOffLine(b.totalKiB, sessions));
+  const rows: InfoRow[] = [{ label: BUDGET.budgetLabel, value: budget === null ? NONE : line(budget) }];
   if (digest?.released) rows.push({ label: BUDGET.releasedLabel, value: BUDGET.releasedLine(digest.released) });
   return rows;
 }
 // C12 end
+
+// W7: who holds the session, read through the same derivation as the glyph and the tab (§5.7).
+export function heldByRow(record: SessionRecord): InfoRow {
+  const contest = contestLine(record);
+  if (contest !== null) return { label: INFO.heldBy, value: INFO.contested(contest), note: INFO.contestedNote };
+  const foreign = holderLine(record);
+  if (foreign !== null) return { label: INFO.heldBy, value: foreign, note: INFO.readOnly };
+  return { label: INFO.heldBy, value: record.holder.kind === 'self' ? INFO.heldByMaws : INFO.heldByNone };
+}
 
 function engineSection({ record, status, digest, binary, pinnedVersion, budget }: SessionInfoInput): InfoSection { // C12: digest, budget
   const version = status?.engineVersion ?? record.engineVersion;
@@ -78,6 +90,7 @@ function engineSection({ record, status, digest, binary, pinnedVersion, budget }
       { label: INFO.version, value: version ?? NONE, note: version === null ? undefined : version === pinnedVersion ? INFO.pinned : INFO.notPinned(pinnedVersion) },
       { label: INFO.binary, value: binary ? homeAbbreviated(binary.path) : NONE },
       { label: INFO.sessionId, value: record.engineSessionId ?? NONE },
+      heldByRow(record), // W7
       { label: INFO.processTree, value: tree === null ? NONE : INFO.tree(mb(tree), status?.memory.rssKiB == null ? null : mb(status.memory.rssKiB)) },
       ...budgetRows(budget, digest), // C12
     ],

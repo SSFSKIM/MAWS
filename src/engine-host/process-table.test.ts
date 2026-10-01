@@ -206,7 +206,7 @@ describe('process table (C12): the memory budget', () => {
     await flush();
     const states: BudgetState[] = [];
     table.onBudget((state) => states.push(state));
-    if (opts.limitKiB !== undefined) table.configure({ limitKiB: opts.limitKiB, statefulMcpServers: opts.stateful ?? [] });
+    if (opts.limitKiB !== undefined) table.configure({ enabled: true, limitKiB: opts.limitKiB, statefulMcpServers: opts.stateful ?? [] });
     return { table, s, states, rss };
   }
   const reasons = (x: Scripted) => x.session.status().exit?.reason ?? null;
@@ -248,9 +248,35 @@ describe('process table (C12): the memory budget', () => {
     await table.sampleMemory(); // records each row's lastEventSeq; the default budget is far above 700 KiB
     await table.sampleMemory(); // classifies each row quiet
     expect(table.budgetState()).toMatchObject({ over: false, releasing: null });
-    const state = table.configure({ limitKiB: 500, statefulMcpServers: [] });
+    const state = table.configure({ enabled: true, limitKiB: 500, statefulMcpServers: [] });
     expect(state).toMatchObject({ limitKiB: 500, over: true, releasing: 'a' }); // a launched first, so it is the least recently used
     expect(s.a!.session.lifecycle).toBe('exiting');
+  });
+
+  // W7: the budget switched off in settings (charter §4.4 as amended 2026-10-01): the pre-C12 rule, with the totals kept
+  it('with the budget off, keeps sampling and publishing the totals but never releases nor flags; on again, releases at the policy change', async () => {
+    const { table, s, states } = await budgetTable({ a: 400, b: 300 }, { limitKiB: 10_000 });
+    expect(table.configure({ enabled: false, limitKiB: 100, statefulMcpServers: [] })).toMatchObject({ enabled: false, limitKiB: 100, over: false });
+    for (let i = 0; i < 3; i += 1) await table.sampleMemory();
+    expect(table.budgetState()).toMatchObject({ enabled: false, totalKiB: 700, over: false, overWithoutCandidate: false, candidates: 2, releasing: null, lastRelease: null });
+    expect(states.at(-1)).toMatchObject({ enabled: false, totalKiB: 700 }); // Session info's line follows the event
+    expect([s.a, s.b].map((x) => x!.session.lifecycle)).toEqual(['ready', 'ready']);
+    expect(table.configure({ enabled: true, limitKiB: 100, statefulMcpServers: [] })).toMatchObject({ enabled: true, over: true, releasing: 'a' });
+    expect(s.a!.session.lifecycle).toBe('exiting');
+  });
+
+  it('with the budget off, a session holding work raises no over-budget flag however many samples pass', async () => {
+    const { table, s } = await budgetTable({ a: 400 }, { limitKiB: 100 });
+    s.a!.transport.push({ type: 'system', subtype: 'background_tasks_changed', tasks: [{ task_id: 't1', task_type: 'local_bash', description: 'sleep 900' }], uuid: 'bg', session_id: 's' });
+    await flush();
+    await table.sampleMemory();
+    await table.sampleMemory();
+    expect(table.budgetState().overWithoutCandidate).toBe(true);
+    table.configure({ enabled: false, limitKiB: 100, statefulMcpServers: [] }); // off clears it at once
+    expect(table.budgetState()).toMatchObject({ over: false, overWithoutCandidate: false, blocked: [{ appSessionId: 'a', reasons: ['background_tasks'] }] });
+    await table.sampleMemory();
+    await table.sampleMemory();
+    expect(table.budgetState().overWithoutCandidate).toBe(false);
   });
 
   // pass1/subagent.jsonl seq 424-425: a task-notification turn's `result`, then the engine's own follow-up `system/init`
@@ -266,12 +292,12 @@ describe('process table (C12): the memory budget', () => {
     expect(s.a!.session.status().lastEventSeq).toBeGreaterThan(seq);
     expect(s.a!.session.status().turn).toBeNull();
     await table.sampleMemory(); // sees the result: not quiet, and records the new lastEventSeq
-    expect(table.configure({ limitKiB: 100, statefulMcpServers: [] })).toMatchObject({ over: true, candidates: 0, releasing: null });
+    expect(table.configure({ enabled: true, limitKiB: 100, statefulMcpServers: [] })).toMatchObject({ over: true, candidates: 0, releasing: null });
     expect(s.a!.session.lifecycle).toBe('ready');
     s.a!.transport.push({ ...FOLLOW_UP_INIT, session_id: 's' });
     await flush();
     expect(s.a!.session.status().turn).toMatchObject({ origin: 'engine' });
-    expect(table.configure({ limitKiB: 100, statefulMcpServers: [] })).toMatchObject({ candidates: 0, releasing: null, blocked: [{ appSessionId: 'a', reasons: ['turn'] }] });
+    expect(table.configure({ enabled: true, limitKiB: 100, statefulMcpServers: [] })).toMatchObject({ candidates: 0, releasing: null, blocked: [{ appSessionId: 'a', reasons: ['turn'] }] });
     await table.sampleMemory();
     await table.sampleMemory();
     expect(s.a!.session.lifecycle).toBe('ready');
@@ -419,7 +445,7 @@ describe('process table (C12): the memory budget', () => {
     await table.sampleMemory();
     expect(table.budgetState().overWithoutCandidate).toBe(true);
     expect(states.at(-1)!.overWithoutCandidate).toBe(true);
-    table.configure({ limitKiB: 1_000, statefulMcpServers: [] }); // under budget again: cleared at once
+    table.configure({ enabled: true, limitKiB: 1_000, statefulMcpServers: [] }); // under budget again: cleared at once
     expect(table.budgetState()).toMatchObject({ over: false, overWithoutCandidate: false });
   });
 
@@ -432,7 +458,7 @@ describe('process table (C12): the memory budget', () => {
     await table.sampleMemory(); // a turns quiet: candidates 0 → 1
     await table.sampleMemory(); // nothing but sampledAt moved
     expect(states.length).toBe(afterFirst + 1);
-    table.configure({ limitKiB: 100, statefulMcpServers: [] });
+    table.configure({ enabled: true, limitKiB: 100, statefulMcpServers: [] });
     expect(states.at(-1)).toMatchObject({ releasing: 'a', lastRelease: { appSessionId: 'a' } });
   });
 
@@ -471,14 +497,14 @@ describe('process table (C12): the memory budget', () => {
     await flush();
     const seen: EngineSessionStatus[] = [];
     table.onChange((st) => seen.push(st));
-    table.configure({ limitKiB: 10_000, statefulMcpServers: ['c12-kernel'] });
+    table.configure({ enabled: true, limitKiB: 10_000, statefulMcpServers: ['c12-kernel'] });
     expect(seen.at(-1)!.keepAlive).toEqual(['stateful_mcp']);
   });
 
   it('defaults the budget to a quarter of physical memory until a policy arrives', () => {
     const table = new ProcessTable({ ps: async () => '', totalMemBytes: 32 * 1024 ** 3 });
     expect(table.budgetState()).toEqual({
-      limitKiB: 8 * 1024 ** 2, totalKiB: 0, sampledAt: null, over: false, overWithoutCandidate: false, candidates: 0, settling: 0, releasing: null, blocked: [], lastRelease: null,
+      enabled: true, limitKiB: 8 * 1024 ** 2, totalKiB: 0, sampledAt: null, over: false, overWithoutCandidate: false, candidates: 0, settling: 0, releasing: null, blocked: [], lastRelease: null,
     });
   });
 });
@@ -529,7 +555,7 @@ describe('process table (C12): exited rows beyond the cap', () => {
     a.transport.push({ type: 'system', subtype: 'session_state_changed', state: 'idle', uuid: 'idle-a', session_id: 's' });
     b.transport.push({ type: 'system', subtype: 'session_state_changed', state: 'idle', uuid: 'idle-b', session_id: 's' });
     await flush();
-    table.configure({ limitKiB: 100, statefulMcpServers: [] });
+    table.configure({ enabled: true, limitKiB: 100, statefulMcpServers: [] });
     await table.sampleMemory();
     await table.sampleMemory();
     expect(table.budgetState().releasing).toBe('a');

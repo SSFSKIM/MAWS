@@ -30,6 +30,7 @@ export const BUDGET = {
   // Session info
   budgetLabel: 'Memory budget',
   budgetLine: (totalKiB: number, limitKiB: number, sessions: number) => `${gb(totalKiB)} of ${gb(limitKiB)} · ${plural(sessions, 'session')}`,
+  budgetOffLine: (totalKiB: number, sessions: number) => `Off · ${gb(totalKiB)} · ${plural(sessions, 'session')}`, // W7: the totals, no limit
   releasedLabel: 'Process',
   releasedLine: (r: Released) => `Released at ${clockTime(r.at)} to stay under ${gb(r.limitKiB)}`,
   // The banner (one per crossing of the host's two-sample flag)

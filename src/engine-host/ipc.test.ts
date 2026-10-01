@@ -590,7 +590,7 @@ describe('engine.policy.set and engine.budget (C12)', () => {
     await table.sampleMemory(); // finds it unmoved: quiet from here
     expect(await host.call('engine.budget', undefined)).toMatchObject({ totalKiB: 400, over: false, releasing: null });
 
-    const state = await host.call('engine.policy.set', { limitKiB: 100, statefulMcpServers: ['c12-kernel'] });
+    const state = await host.call('engine.policy.set', { enabled: true, limitKiB: 100, statefulMcpServers: ['c12-kernel'] });
     expect(state).toMatchObject({ limitKiB: 100, totalKiB: 400, over: true, candidates: 1, releasing: id, lastRelease: { appSessionId: id, totalKiB: 400 } });
     expect(budgetEvents().at(-1)).toMatchObject({ limitKiB: 100, releasing: id });
     expect(transports[0]!.requestsOf('end_session').map((r) => r.request.reason)).toEqual(['stop']);
@@ -602,7 +602,7 @@ describe('engine.policy.set and engine.budget (C12)', () => {
 
     // the resume after the release: its reconnect rows name process_exit; the launch after that one is the owner's again
     const resume = spec({ resume: { sessionId: '33333333-3333-4333-8333-333333333333' as never, fork: false } });
-    await host.call('engine.policy.set', { limitKiB: 1_000_000, statefulMcpServers: [] }); // no further release
+    await host.call('engine.policy.set', { enabled: true, limitKiB: 1_000_000, statefulMcpServers: [] }); // no further release
     await host.call('session.launch', { spec: resume });
     await until(() => host.statuses(id).at(-1)?.process === 'ready', 'resumed');
     expect(reconnectTriggers(table.get(id)!.status().journalPath)).toEqual(['process_exit', 'process_exit']);
@@ -636,13 +636,13 @@ describe('engine.policy.set and engine.budget (C12)', () => {
     transports[0]!.push(idle);
     await until(() => table.get(id)!.status().engineState === 'idle', 'idle');
     await table.sampleMemory();
-    await host.call('engine.policy.set', { limitKiB: 100, statefulMcpServers: [] });
+    await host.call('engine.policy.set', { enabled: true, limitKiB: 100, statefulMcpServers: [] });
     transports[0]!.exit(0);
     await until(() => host.statuses(id).some((s) => s.process === 'exited'), 'released');
     expect(await host.call('session.stop', { appSessionId: id, reason: 'archive' })).toMatchObject({ exited: true });
     expect(table.get(id)).toBeUndefined(); // the archive released the row
     expect(table.takeReleased(id)).toBe(false);
-    await host.call('engine.policy.set', { limitKiB: 1_000_000, statefulMcpServers: [] });
+    await host.call('engine.policy.set', { enabled: true, limitKiB: 1_000_000, statefulMcpServers: [] });
     await host.call('session.launch', { spec: spec({ resume: { sessionId: '33333333-3333-4333-8333-333333333333' as never, fork: false } }) });
     await until(() => host.statuses(id).at(-1)?.process === 'ready', 'resumed');
     expect(reconnectTriggers(table.get(id)!.status().journalPath)).toEqual(['user', 'user']);
@@ -663,7 +663,7 @@ describe('engine.policy.set and engine.budget (C12)', () => {
     transport.push({ type: 'result', subtype: 'success', session_id: 's', is_error: false, duration_ms: 1, num_turns: 0, total_cost_usd: 0, usage: {}, permission_denials: [], terminal_reason: 'completed' });
     await until(() => table.get(id)!.status().mcpServers.length === 1 && table.get(id)!.status().turn === null, 'init');
     expect(table.get(id)!.status().keepAlive).toEqual([]);
-    await host.call('engine.policy.set', { limitKiB: 1_000_000, statefulMcpServers: ['c12-kernel'] });
+    await host.call('engine.policy.set', { enabled: true, limitKiB: 1_000_000, statefulMcpServers: ['c12-kernel'] });
     expect(host.statuses(id).at(-1)!.keepAlive).toEqual(['stateful_mcp']);
     const stopping = host.call('session.stop', { appSessionId: id, reason: 'stop' });
     await until(() => transport.requestsOf('end_session').length === 1, 'end_session');
@@ -706,3 +706,70 @@ describe('exited rows beyond the cap leave the host (C12)', () => {
   });
 });
 // C12 end
+
+// W7 (charter §4.3 as amended 2026-10-01): a process that exited while a foreign one holds the session (it yielded,
+// or it stopped beside a terminal that resumed the id) is not the session's history: `session.events` reads disk then.
+describe('session.events after an exit reads disk while a foreign process holds the session (W7)', () => {
+  it('answers the stream while live and after an exit no foreign process took, the transcript after an exit one did, also once it left', async () => {
+    const disk = vi.fn(async () => ({ events: [] as SessionEvent[], complete: true }));
+    // the fs service's answer: a foreign holder from `from` (ms) on, and gone at `until` (ms), if it went
+    const held = { from: null as number | null, until: null as number | null };
+    const heldElsewhere = (_id: AppSessionId, since: string | null) => held.from !== null && (held.until === null || (since !== null && held.until >= Date.parse(since)));
+    let transport: ScriptedTransport | null = null;
+    const host = engineHost({
+      diskEvents: disk, heldElsewhere, binaryProbe: async () => OK_BINARY, checkRelay: async () => OK_RELAY, captureEnv: async () => ({ PATH: '/usr/bin' }),
+      spawn: () => (transport = scriptedTransport({ onWrite: autoResponder(handshakeResponder({ end_session: () => null })) })),
+    });
+    const id = 'app-yielded' as AppSessionId;
+    await host.call('session.launch', { spec: spec({ appSessionId: id }) });
+    await until(() => host.statuses(id).some((s) => s.process === 'ready'), 'ready');
+    held.from = Date.now(); // a terminal joins: the live process is still the session's source
+    await host.call('session.events', { appSessionId: id, afterSeq: null, limit: null });
+    expect(disk).not.toHaveBeenCalled();
+    const stopping = host.call('session.stop', { appSessionId: id, reason: 'stop' });
+    await until(() => transport!.requestsOf('end_session').length === 1, 'end_session');
+    transport!.exit(0);
+    await stopping;
+    expect(await host.call('session.events', { appSessionId: id, afterSeq: null, limit: null })).toEqual({ events: [], complete: true, lastSeq: 0 });
+    expect(disk).toHaveBeenCalledWith(id);
+    held.until = Date.now() + 1; // the terminal exits after MAWS's process did: the transcript stays the history
+    await host.call('session.events', { appSessionId: id, afterSeq: null, limit: null });
+    expect(disk).toHaveBeenCalledTimes(2);
+    held.until = Date.parse(host.statuses(id).at(-1)!.exit!.at) - 1_000; // a foreign holder that left before the exit
+    await host.call('session.events', { appSessionId: id, afterSeq: null, limit: null });
+    expect(disk).toHaveBeenCalledTimes(2); // the exited stream is the history
+  });
+});
+
+// W7 review finding: the yield's stop is decided in the host, against the process as it is when the stop arrives.
+describe('session.stop { ifIdle } stops only a process that could end without losing work (W7)', () => {
+  it('answers skipped and sends nothing while a message is in flight, and stops an idle process', async () => {
+    let transport: ScriptedTransport | null = null;
+    const host = engineHost({
+      binaryProbe: async () => OK_BINARY, checkRelay: async () => OK_RELAY, captureEnv: async () => ({ PATH: '/usr/bin' }),
+      spawn: () => (transport = scriptedTransport({ onWrite: autoResponder(handshakeResponder({ end_session: () => null })) })),
+    });
+    const id = 'app-if-idle' as AppSessionId;
+    await host.call('session.launch', { spec: spec({ appSessionId: id }) });
+    await until(() => host.statuses(id).some((s) => s.process === 'ready'), 'ready');
+    await host.call('session.send', { appSessionId: id, content: 'begun after the status the yield read' });
+    expect(await host.call('session.stop', { appSessionId: id, reason: 'stop', ifIdle: true })).toEqual({ exited: false, code: null, signal: null, skipped: true });
+    expect(transport!.requestsOf('end_session')).toHaveLength(0);
+    expect(host.statuses(id).at(-1)?.process).toBe('ready');
+  });
+
+  it('stops at once when nothing holds the process', async () => {
+    let transport: ScriptedTransport | null = null;
+    const host = engineHost({
+      binaryProbe: async () => OK_BINARY, checkRelay: async () => OK_RELAY, captureEnv: async () => ({ PATH: '/usr/bin' }),
+      spawn: () => (transport = scriptedTransport({ onWrite: autoResponder(handshakeResponder({ end_session: () => null })) })),
+    });
+    const id = 'app-if-idle-2' as AppSessionId;
+    await host.call('session.launch', { spec: spec({ appSessionId: id }) });
+    await until(() => host.statuses(id).some((s) => s.process === 'ready'), 'ready');
+    const stopping = host.call('session.stop', { appSessionId: id, reason: 'stop', ifIdle: true });
+    await until(() => transport!.requestsOf('end_session').length === 1, 'end_session');
+    transport!.exit(0);
+    expect((await stopping).skipped).toBeUndefined();
+  });
+});

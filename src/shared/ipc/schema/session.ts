@@ -37,7 +37,7 @@ import {
 // C4 start: the record side, projects, drafts and replay (C4 execution document, Interfaces "X2 additions")
 // (AppSessionIdSchema and MessageUuidSchema come with C3's imports above.)
 import { ProjectIdSchema, SessionIdSchema } from '@shared/graph/ids';
-import { SessionRecordSchema } from '@shared/graph/session';
+import { ForeignHolderSchema, SessionRecordSchema } from '@shared/graph/session';
 // C4 end
 // C7 start: the composer's prompt history shapes (C7 execution document, Interfaces "X2 additions")
 import { HistoryEntrySchema, PastedContentSchema } from '../../composer/history-entry';
@@ -80,7 +80,9 @@ const c3Commands = {
   'session.launch': host(z.strictObject({ spec: LaunchSpecSchema }), LaunchResultSchema),
   'session.status': host(input({}), EngineSessionStatusSchema),
   'session.events': host(input({ afterSeq: z.number().int().nullable(), limit: z.number().int().positive().nullable() }), EventsSnapshotSchema),
-  'session.stop': host(input({ reason: z.enum(['stop', 'archive']) }), z.strictObject({ exited: z.boolean(), code: z.number().int().nullable(), signal: z.string().nullable() })),
+  // W7: `ifIdle` stops only while the process could end without losing work (`canYield`, decided in the host in the same
+  // step as the stop); otherwise nothing happens and the answer says `skipped`
+  'session.stop': host(input({ reason: z.enum(['stop', 'archive']), ifIdle: z.boolean().optional() }), z.strictObject({ exited: z.boolean(), code: z.number().int().nullable(), signal: z.string().nullable(), skipped: z.literal(true).optional() })),
   'session.pendingRequest': host(input({ requestId: RequestIdSchema }), z.strictObject({ event: SessionEventSchema.nullable() })),
   'session.catalog': host(input({}), CatalogSchema),
   // the composer: sends, the app queue, steer, interrupt, answers, `!` and `#`
@@ -352,6 +354,14 @@ const c7Events = {
 
 // What `session.archive` answers: archived, refused for a foreign holder, or (`onlyIfIdle`, the cleanup dialog's step)
 // skipped for a session live at the recheck, nothing stopped.
+// W7: `session.takeOver`'s answer. `released`: the holder exited (or already had); the resume is the renderer's next
+// `session.start`. `refused`: nothing more was done, for the reason in words.
+export const TakeOverOutcomeSchema = z.discriminatedUnion('status', [
+  z.strictObject({ status: z.literal('released') }),
+  z.strictObject({ status: z.literal('refused'), reason: z.enum(['unknown_session', 'self', 'changed', 'no_job_id', 'other_app', 'signal_failed', 'stop_failed', 'timeout']), message: z.string() }),
+]);
+export type TakeOverOutcome = z.infer<typeof TakeOverOutcomeSchema>;
+
 export const ArchiveOutcomeSchema = z.union([
   z.strictObject({ archived: z.literal(true) }),
   z.strictObject({ status: z.literal('held'), holder: SessionHolderSchema }),
@@ -433,6 +443,10 @@ const c10Commands = {
     owner: 'main',
   },
   'session.archive': { input: z.strictObject({ appSessionId: AppSessionIdSchema, onlyIfIdle: z.boolean().optional() }), output: ArchiveOutcomeSchema, owner: 'main' },
+  // W7 (D-12 as amended 2026-10-01): "Take over here": ends the holder the owner confirmed (`claude stop` for a `--bg`
+  // job, SIGTERM to an interactive holder's verified pid) and waits for the registry to clear; on `released` the
+  // renderer resumes the record with `session.start`
+  'session.takeOver': { input: z.strictObject({ appSessionId: AppSessionIdSchema, holder: ForeignHolderSchema }), output: TakeOverOutcomeSchema, owner: 'main' },
   'session.delete': { input: z.strictObject({ appSessionId: AppSessionIdSchema, stopIfLive: z.boolean() }), output: DeleteOutcomeSchema, owner: 'main' },
   // validators never transform: the service trims; a title that is only whitespace is refused here
   'session.rename': {

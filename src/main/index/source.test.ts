@@ -285,7 +285,7 @@ describe('IndexSessionSource folds the host\'s events into the index and feeds t
     expect(recorded.of('setDigest').filter((d) => d.appSessionId === record.appId).at(-1)).toMatchObject({ phase: 'exited', turnStartedAt: null, lastTurnEndedAt: '2026-09-20T08:30:00.000Z' });
   });
 
-  it('holders: applied to the record, remembered for a record that does not exist yet, and never over a self-held one', async () => {
+  it('holders: applied to the record, remembered for a record that does not exist yet, and over a self-held one only as its contest', async () => {
     const fake = scriptedHost();
     const recorded = recordingWriter();
     begin(fake.host, recorded.writer);
@@ -304,6 +304,9 @@ describe('IndexSessionSource folds the host\'s events into the index and feeds t
 
     index.sessions.applyEngineStatus(record.appId, { holder: { kind: 'self' } });
     fake.fire('fs.holderChanged', { sessionId: later.sessionId, appSessionId: record.appId, holder: { kind: 'terminal', pid: 5 }, registry: null, job: null });
+    // W7: MAWS's own holder stays, contested by the terminal; the terminal's exit makes it plain self again
+    expect(index.sessions.get(record.appId)?.holder).toEqual({ kind: 'self', contestedBy: { kind: 'terminal', pid: 5 } });
+    fake.fire('fs.holderChanged', { sessionId: later.sessionId, appSessionId: record.appId, holder: { kind: 'none' }, registry: null, job: null });
     expect(index.sessions.get(record.appId)?.holder).toEqual({ kind: 'self' });
   });
 
@@ -348,6 +351,32 @@ describe('IndexSessionSource folds the host\'s events into the index and feeds t
     expect(index.sessions.get(record.appId)?.holder).toEqual({ kind: 'none' });
     // A status for an app session the index has no row for is ignored, not a crash.
     expect(() => fake.fire('session.status', { appSessionId: randomUUID() as AppSessionId, status: status(randomUUID() as AppSessionId) })).not.toThrow();
+  });
+
+  // W7 (charter §4.3 as amended 2026-10-01; pass3/w7-collision): a terminal resumes the session MAWS runs, the record
+  // reads contested while MAWS's process runs, and when the process exits the terminal, which the registry reported
+  // once and never again, holds the record; when the terminal exits too, nothing does.
+  it('a foreign holder that joins a session MAWS runs makes it contested, and holds it once the process exits', async () => {
+    const fake = scriptedHost();
+    begin(fake.host);
+    const { record } = index.sessions.createForLaunch({ directory: '/x', additionalDirectories: [], worktree: null, model: { requested: null, resolved: null }, effort: null, permissionMode: { requested: 'default', effective: 'default', refusal: null } });
+    const engineId = sessionIdFor(33);
+    fake.fire('session.status', { appSessionId: record.appId, status: status(record.appId, { engineSessionId: engineId }) });
+    fake.fire('fs.holderChanged', { sessionId: engineId, appSessionId: record.appId, holder: { kind: 'terminal', pid: 96367 }, registry: null, job: null });
+    expect(index.sessions.get(record.appId)?.holder).toEqual({ kind: 'self', contestedBy: { kind: 'terminal', pid: 96367 } });
+    // a later status of the live process keeps the contest (C3's patch says only `self`)
+    fake.fire('session.status', { appSessionId: record.appId, status: status(record.appId, { engineSessionId: engineId }) });
+    expect(index.sessions.get(record.appId)?.holder).toEqual({ kind: 'self', contestedBy: { kind: 'terminal', pid: 96367 } });
+    fake.fire('session.status', { appSessionId: record.appId, status: status(record.appId, { engineSessionId: engineId, process: 'exited' }) });
+    expect(index.sessions.get(record.appId)?.holder).toEqual({ kind: 'terminal', pid: 96367 });
+    fake.fire('fs.holderChanged', { sessionId: engineId, appSessionId: record.appId, holder: { kind: 'none' }, registry: null, job: null });
+    expect(index.sessions.get(record.appId)?.holder).toEqual({ kind: 'none' });
+    // and a sync after a host restart clears a contest whose foreign process is gone
+    index.sessions.applyEngineStatus(record.appId, { holder: { kind: 'self', contestedBy: { kind: 'terminal', pid: 1 } } });
+    fake.setState('starting');
+    fake.setState('ready');
+    await settle();
+    expect(index.sessions.get(record.appId)?.holder).toEqual({ kind: 'self' });
   });
 
   it('a host restart forgets which ids were live: a relaunch after it stops the disk follow again, with no exit seen', async () => {

@@ -3,11 +3,16 @@
 // sessions exist, what their heads and tails say, and who else holds them, and tells main through validated `fs.*`
 // events. A followed session (`eventsSnapshot`, `agentEvents`) is backfilled and tailed by a chain follower whose events
 // leave as `session.eventBatch`; subagent, workflow and task sidecars are listed and read on change or on request.
+// W7: it also watches a contested session (MAWS's own process and a foreign one both hold it) for the foreign process's
+// first write, which it reports as `fs.foreignWrite` (main yields MAWS's process), and re-folds a follower that held a
+// branch back once the foreign holder exits.
 // Read-only: it never writes under the config home.
+import { open } from 'node:fs/promises';
 import { join } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, AppSessionId, ParentToolUseId, SessionId } from '@shared/graph/ids';
+import type { ForeignHolder } from '@shared/graph/session';
 import type { HostEmit } from '@shared/host/runtime';
 import type {
   FsHoldersAnswer,
@@ -26,7 +31,8 @@ import { Bindings } from './bindings';
 import type { FileReader } from './chain-follower';
 import { Discovery, mapConcurrent, matchesKnown, SUMMARY_CONCURRENCY, type ListedTranscript } from './discovery';
 import { Follow, FsFileReader, SNAPSHOT_WAIT_MS } from './follow';
-import { HolderRegistry, type HolderDeps } from './holders';
+import { HolderRegistry, OWN_ENTRYPOINT, type HolderDeps } from './holders';
+import { isMissing } from './sidecars';
 import type { StorePaths } from './paths';
 import { SubagentReader, subagentLookup } from './subagents';
 import { sanitizeListId, TaskReader } from './tasks';
@@ -40,6 +46,8 @@ export const PROGRESS_EVERY = 100;
 export const START_SCAN_FALLBACK_MS = 3_000;
 // The floor under coalesced or dropped FSEvents for followed files (residue *Watcher mechanism*): each is stat'ed.
 export const RECONCILE_MS = 30_000;
+// W7: the most a contest's check reads of what was appended since it last looked; the rest is skipped, not misread.
+export const CONTEST_READ_BYTES = 16 * 1024 * 1024;
 // The task lists a rescan of tasks/ announces again: the most recently read, so the set is bounded over the host's
 // lifetime (debt wave 4). A list read longer ago than this misses only a rescan's announcement; reading it again
 // re-admits it, and a watched change to it is announced either way.
@@ -74,6 +82,15 @@ interface FollowEntry {
   workflows: Map<string, string>; // per run: the progress key last delivered (session follows)
   workflowIds: Map<string, number>; // deliveries per workflow.progress id in this follow, for the occurrence suffix
   workflowWork: Promise<unknown>; // workflow deliveries run one at a time, in change order
+}
+
+// W7: one contested session, watched for the foreign process's first write since the contest began.
+interface Contest {
+  by: ForeignHolder;
+  since: string; // when the foreign process started (ISO; when the contest began, if its record says nothing): a record written before it is history
+  offset: number; // where the next check reads from: the file's start at first, then past the last whole line read
+  reported: boolean;
+  work: Promise<unknown>; // checks run one at a time, in change order
 }
 
 export class FsService {
@@ -117,6 +134,8 @@ export class FsService {
   private readonly readLists = new Set<string>();
   // C8b end
   private replays: ReplaySnapshots | null = null;
+  private readonly contests = new Map<SessionId, Contest>(); // W7
+  private readonly foreignLeftAt = new Map<SessionId, number>(); // W7: when each session's last foreign holder went
 
   constructor(options: FsServiceOptions) {
     this.paths = options.paths;
@@ -129,8 +148,14 @@ export class FsService {
     this.watcher = new StoreWatcher(options.paths, (change) => this.onChange(change), { watch: options.watch });
     this.holders = new HolderRegistry(
       options.paths,
-      (sessionId, holder, registry, job) => this.send('fs.holderChanged', { sessionId, appSessionId: this.bindings.appIdOf(sessionId), holder, registry, job }),
-      options.holders,
+      (sessionId, holder, registry, job) => {
+        this.send('fs.holderChanged', { sessionId, appSessionId: this.bindings.appIdOf(sessionId), holder, registry, job });
+        if (holder.kind === 'none') this.foreignLeftAt.set(sessionId, Date.now()); // W7
+        else this.foreignLeftAt.delete(sessionId);
+        // W7: the foreign holder exited; a follower that kept MAWS's branch in view meanwhile folds the other one in
+        if (holder.kind === 'none') for (const entry of this.follows.values()) if (entry.sessionId === sessionId && entry.agentId === null) void entry.follow.refold();
+      },
+      { ...options.holders, contests: (sessionId, by, startedAt) => this.contestChanged(sessionId, by, startedAt) },
     );
   }
 
@@ -252,12 +277,23 @@ export class FsService {
     this.bindings.unbind(appSessionId);
   }
 
+  // W7: whether a foreign process holds the app session's engine session now or held it at or after `since` (a MAWS
+  // process's exit): from then on the transcript, as that process wrote it, is the session's history (C3's
+  // `session.events` reads disk), also once the foreign process has gone.
+  heldElsewhere(appSessionId: AppSessionId, since: string | null = null): boolean {
+    const sessionId = this.bindings.sessionIdOf(appSessionId);
+    if (sessionId === null) return false;
+    if (this.holders.holderOf(sessionId).kind !== 'none') return true;
+    const left = this.foreignLeftAt.get(sessionId);
+    return since !== null && left !== undefined && left >= Date.parse(since);
+  }
+
   // `fs.holders`: the registry read now, filtered by session id or directory (HolderRegistry.liveNow).
   async holdersNow(query: FsHoldersQuery): Promise<FsHoldersAnswer> {
     const live = await this.holders.liveNow(query);
     return {
       refreshedAt: new Date().toISOString(),
-      holders: live.map(({ sessionId, holder, cwd }) => ({ sessionId, appSessionId: this.bindings.appIdOf(sessionId), holder, cwd })),
+      holders: live.map(({ sessionId, holder, cwd, entrypoint }) => ({ sessionId, appSessionId: this.bindings.appIdOf(sessionId), holder, cwd, ...(entrypoint === undefined ? {} : { entrypoint }) })),
     };
   }
 
@@ -383,6 +419,7 @@ export class FsService {
       reader: this.openReader(() => location.path),
       subagents: subagentLookup(() => this.agents.get(sessionId) ?? [], this.subagentReader),
       holders: () => this.holders.liveCount(sessionId),
+      pinned: () => this.holders.holderOf(sessionId).kind !== 'none', // W7
       emit: this.send,
     });
     return { follow, sessionId, agentId: agent?.agentId ?? null, location, workflows: new Map(), workflowIds: new Map(), workflowWork: Promise.resolve() };
@@ -474,6 +511,7 @@ export class FsService {
         // other way round, must leave the follower on the surviving file, not on whichever path was notified last.
         this.pokeFollows((entry) => entry.sessionId === change.sessionId && entry.agentId === null);
         void this.summarizePath(change.path, change.sessionId, 'changed').then(() => this.locateFollows(change.sessionId));
+        this.checkContest(change.sessionId, change.path); // W7
         return;
       case 'sidecar':
         this.onSidecarChange(change);
@@ -621,9 +659,85 @@ export class FsService {
     this.send('fs.sessionChanged', { summary, appSessionId: this.bindings.appIdOf(summary.sessionId) });
   }
 
+  // W7: a contest began, changed holder or ended. What the foreign process wrote is told by time, not by position: any
+  // record written since its registry record's `startedAt`, so a write that lands before the registry is read (or
+  // before this check runs) still counts. The file is read from its start once, at the contest's start, then as it grows.
+  private contestChanged(sessionId: SessionId, by: Contest['by'] | null, startedAt: number | null): void {
+    if (by === null) {
+      this.contests.delete(sessionId);
+      return;
+    }
+    const existing = this.contests.get(sessionId);
+    if (existing) {
+      existing.by = by;
+      return;
+    }
+    const since = new Date(startedAt ?? Date.now()).toISOString();
+    this.contests.set(sessionId, { by, since, offset: 0, reported: false, work: Promise.resolve() });
+    const path = this.listed.get(sessionId)?.path ?? null;
+    if (path !== null) this.checkContest(sessionId, path);
+  }
+
+  // The first record a foreign process writes into a contested transcript (any record with a uuid whose entrypoint is
+  // not MAWS's, written since that process started) is reported once; main decides what MAWS's process does about it.
+  private checkContest(sessionId: SessionId, path: string): void {
+    const contest = this.contests.get(sessionId);
+    if (!contest || contest.reported) return;
+    contest.work = contest.work
+      .then(async () => {
+        if (contest.reported || this.contests.get(sessionId) !== contest) return;
+        const { records, next } = await readAppended(path, contest.offset);
+        contest.offset = next;
+        const foreign = records.some((r) => typeof r.uuid === 'string' && r.entrypoint !== OWN_ENTRYPOINT && typeof r.timestamp === 'string' && r.timestamp >= contest.since);
+        if (!foreign || this.contests.get(sessionId) !== contest) return;
+        contest.reported = true;
+        this.send('fs.foreignWrite', { sessionId, appSessionId: this.bindings.appIdOf(sessionId), holder: contest.by });
+      })
+      .catch((error: unknown) => console.error(`[fs] cannot check the contested transcript ${path}:`, error instanceof Error ? error.message : error));
+  }
+
   private send: HostEmit = (name, payload) => {
     if (!this.stopped) this.emit(name, payload);
   };
+}
+
+// The whole lines appended to `path` since `offset` (at most CONTEST_READ_BYTES of them), parsed where they parse, and
+// the offset after the last whole line. A file that shrank was rewritten: nothing is read and the offset restarts at
+// its size; a file that is gone reads nothing.
+async function readAppended(path: string, offset: number): Promise<{ records: Record<string, unknown>[]; next: number }> {
+  let file;
+  try {
+    file = await open(path, 'r');
+  } catch (error) {
+    if (isMissing(error)) return { records: [], next: offset };
+    throw error;
+  }
+  try {
+    const size = (await file.stat()).size;
+    if (size < offset) return { records: [], next: size };
+    const from = Math.max(offset, size - CONTEST_READ_BYTES);
+    const buffer = Buffer.alloc(size - from);
+    let filled = 0;
+    while (filled < buffer.length) {
+      const { bytesRead } = await file.read(buffer, filled, buffer.length - filled, from + filled);
+      if (bytesRead === 0) break;
+      filled += bytesRead;
+    }
+    const end = buffer.subarray(0, filled).lastIndexOf(0x0a);
+    if (end < 0) return { records: [], next: from === offset ? offset : from };
+    const records: Record<string, unknown>[] = [];
+    for (const line of buffer.subarray(0, end).toString('utf8').split('\n')) {
+      try {
+        const parsed: unknown = JSON.parse(line.replace(/^\0+/, ''));
+        if (parsed !== null && typeof parsed === 'object') records.push(parsed as Record<string, unknown>);
+      } catch {
+        // a torn or foreign line says nothing about who wrote it
+      }
+    }
+    return { records, next: from + end + 1 };
+  } finally {
+    await file.close();
+  }
 }
 
 // Relative paths under `<sessionId>/` (the watcher's `sidecar` change).

@@ -11,7 +11,7 @@ const A = 'app-a' as AppSessionId;
 const B = 'app-b' as AppSessionId;
 const GiB = 1024 * 1024;
 const state = (over: Partial<BudgetState> = {}): BudgetState => ({
-  limitKiB: 8 * GiB, totalKiB: 3.1 * GiB, sampledAt: '2026-09-29T14:02:00.000Z', over: false, overWithoutCandidate: false, candidates: 0, settling: 0,
+  enabled: true, limitKiB: 8 * GiB, totalKiB: 3.1 * GiB, sampledAt: '2026-09-29T14:02:00.000Z', over: false, overWithoutCandidate: false, candidates: 0, settling: 0,
   releasing: null, blocked: [], lastRelease: null, ...over,
 });
 const over = (blocked: AppSessionId[]) => state({ totalKiB: 9 * GiB, over: true, overWithoutCandidate: true, blocked: blocked.map((appSessionId) => ({ appSessionId, reasons: ['turn' as const] })) });
@@ -91,6 +91,18 @@ describe('the budget store and its banner', () => {
     fake.event('engine.budget', over([A]));
     expect(banners()).toHaveLength(1); // the next crossing
     fake.event('engine.budget', state());
+    expect(banners()).toEqual([]);
+  });
+
+  // W7: the budget switched off in settings; the host's state says so
+  it('withdraws the banner and closes a sheet when the budget is switched off, and raises none while it stays off', async () => {
+    await fake.reply('engine.budget', over([A]));
+    useBudget.getState().open({ kind: 'blocked' });
+    expect(banners()).toHaveLength(1);
+    fake.event('engine.budget', state({ enabled: false, totalKiB: 9 * GiB }));
+    expect(banners()).toEqual([]);
+    expect(useBudget.getState()).toMatchObject({ sheet: null, state: { enabled: false, totalKiB: 9 * GiB } });
+    fake.event('engine.budget', { ...over([A]), enabled: false }); // not a state the host sends; the page holds the line anyway
     expect(banners()).toEqual([]);
   });
 

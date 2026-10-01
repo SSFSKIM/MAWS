@@ -14,6 +14,11 @@
 // launch, whose reconnect rows then read `process_exit`. Exited rows beyond EXITED_ROWS_MAX leave the table, the oldest
 // exit first, at each exit; the host then answers such a session from disk, as it does for any it never launched. A
 // released row is exempt, so a released id never outlives its row and an archive (which main finds by the row) clears it.
+//
+// W7: the budget can be off (settings' `engine.memoryBudget.enabled`, in the policy). Off, sampling and evaluation go on,
+// so the state keeps the totals Session info shows, but nothing is over, so nothing is released and no banner flag rises:
+// engine processes never exit on their own (charter §4.4's pre-C12 rule). On again, a policy change evaluates at once.
+// The exited-row cap is hygiene and holds either way.
 import { execFile } from 'node:child_process';
 import { totalmem } from 'node:os';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -67,7 +72,7 @@ export class ProcessTable {
   private readonly sampleMs: number;
   private sampler: ReturnType<typeof setInterval> | null = null;
   private sampling = false;
-  // C12 start: the budget's policy (25% of physical memory until main's first engine.policy.set) and its state
+  // C12 start: the budget's policy (on at 25% of physical memory until main's first engine.policy.set) and its state
   private policy: BudgetPolicy;
   private stateful: ReadonlySet<string> = new Set();
   private readonly sampledSeqs = new WeakMap<EngineSession, number>(); // each process's lastEventSeq at the previous sample
@@ -90,8 +95,8 @@ export class ProcessTable {
     this.sampleMs = opts.sampleMs ?? MEMORY_SAMPLE_MS;
     this.log = opts.log ?? ((message) => console.warn(`[engine-host process table] ${message}`));
     // C12 start
-    this.policy = { limitKiB: defaultBudgetKiB(opts.totalMemBytes ?? totalmem()), statefulMcpServers: [] };
-    this.budget = { limitKiB: this.policy.limitKiB, totalKiB: 0, sampledAt: null, over: false, overWithoutCandidate: false, candidates: 0, settling: 0, releasing: null, blocked: [], lastRelease: null };
+    this.policy = { enabled: true /* W7 */, limitKiB: defaultBudgetKiB(opts.totalMemBytes ?? totalmem()), statefulMcpServers: [] };
+    this.budget = { enabled: this.policy.enabled /* W7 */, limitKiB: this.policy.limitKiB, totalKiB: 0, sampledAt: null, over: false, overWithoutCandidate: false, candidates: 0, settling: 0, releasing: null, blocked: [], lastRelease: null };
     this.budgetSignature = signatureOf(this.budget);
     this.exitedRowsMax = opts.exitedRowsMax ?? EXITED_ROWS_MAX;
     // C12 end
@@ -177,7 +182,7 @@ export class ProcessTable {
   // The budget's policy (engine.policy.set): every live status is re-read (keepAlive names the stateful servers), and
   // the policy is evaluated at once against the previous sample.
   configure(policy: BudgetPolicy): BudgetState {
-    this.policy = { limitKiB: policy.limitKiB, statefulMcpServers: [...policy.statefulMcpServers] };
+    this.policy = { enabled: policy.enabled /* W7 */, limitKiB: policy.limitKiB, statefulMcpServers: [...policy.statefulMcpServers] };
     this.stateful = new Set(policy.statefulMcpServers);
     for (const session of this.list()) session.policyChanged();
     this.evaluateBudget(false);
@@ -236,6 +241,7 @@ export class ProcessTable {
 
   private publishBudget(verdict: BudgetVerdict, force: boolean): void {
     this.budget = {
+      enabled: this.policy.enabled, // W7
       limitKiB: verdict.limitKiB, totalKiB: verdict.totalKiB, sampledAt: this.sampledAt, over: verdict.over, overWithoutCandidate: verdict.overWithoutCandidate,
       candidates: verdict.candidates, settling: verdict.settling, releasing: this.releasing?.status().appSessionId ?? null, blocked: verdict.blocked, lastRelease: this.lastRelease,
     };

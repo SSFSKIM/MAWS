@@ -23,6 +23,8 @@ import { journalDir } from '../../../src/engine-host/launcher';
 import { EngineSession } from '../../../src/engine-host/session';
 import { FileSessionStateStore } from '../../../src/engine-host/store/file-session-state-store';
 import { MAX_LINE_CHARS, spawnEngine } from '../../../src/engine-host/transport';
+import { registerFs } from '../../../src/engine-host/fs/register';
+import type { FsService } from '../../../src/engine-host/fs/service';
 
 export interface Emitted {
   name: EventName;
@@ -43,6 +45,7 @@ const POLL_MS = 25;
 export class LiveHost {
   readonly emitted: Emitted[] = [];
   readonly ipc: EngineIpc;
+  readonly fs: FsService | null = null; // W7: C4's filesystem service over the same home, when the case asks for it
   private deliver!: (data: unknown) => void;
   private readonly pending = new Map<string, (message: { ok: boolean; value?: unknown; error?: IpcError }) => void>();
   private counter = 0;
@@ -51,15 +54,25 @@ export class LiveHost {
   private readonly configHome: string; // the home the guard checks `#` path targets against
 
   // `configHome`: a scratch CLAUDE_CONFIG_DIR every process of this host runs under (null: the owner's own home);
-  // `controls`: the persisting controls the case will issue, checked against the home before anything spawns.
-  constructor(deps: Pick<EngineIpcDeps, 'userData'> & Partial<EngineIpcDeps> & { configHome?: string | null; controls?: PersistingControl[] }) {
-    const { configHome = null, controls = [], ...ipcDeps } = deps;
+  // `controls`: the persisting controls the case will issue, checked against the home before anything spawns;
+  // `fs` (W7): also serve C4's `fs.*` over that scratch home, as the engine host does, `session.events` answering a
+  // session with no stream from it.
+  constructor(deps: Pick<EngineIpcDeps, 'userData'> & Partial<EngineIpcDeps> & { configHome?: string | null; controls?: PersistingControl[]; fs?: boolean }) {
+    const { configHome = null, controls = [], fs: withFs = false, ...ipcDeps } = deps;
+    if (withFs && configHome === null) throw new Error('a live host serves fs.* only over a scratch config home');
     assertConfigHomeSafe({ configHome, controls });
     this.controls = new Set(controls);
     this.configHome = configHome ?? ownerConfigHome();
     const captureEnv = configHome === null ? ipcDeps.captureEnv : async () => ({ ...(await (ipcDeps.captureEnv ?? (() => captureShellEnvironment()))()), CLAUDE_CONFIG_DIR: configHome });
     let ipc!: EngineIpc;
-    const runtime = createHostRuntime((on, emit) => (ipc = registerEngineIpc(on, emit, { replayEnabled: false, appVersion: '0.0.0-live', ...ipcDeps, ...(captureEnv ? { captureEnv } : {}) })));
+    let fs: FsService | null = null;
+    const runtime = createHostRuntime((on, emit) => {
+      // as the engine host wires it (src/engine-host/index.ts): own pids from the table, disk reads after a yield
+      const ownPids = () => new Set(ipc.table.list().flatMap((s) => (s.pid !== null && s.lifecycle !== 'exited' ? [s.pid] : [])));
+      if (withFs) fs = registerFs(on, emit, { ...process.env, CLAUDE_CONFIG_DIR: configHome! }, { ownPids });
+      const diskEvents = fs === null ? {} : { diskEvents: (id: AppSessionId) => fs!.eventsSnapshot(id, null), heldElsewhere: (id: AppSessionId, since: string | null) => fs!.heldElsewhere(id, since) };
+      ipc = registerEngineIpc(on, emit, { replayEnabled: false, appVersion: '0.0.0-live', ...diskEvents, ...ipcDeps, ...(captureEnv ? { captureEnv } : {}) });
+    });
     const port: HostPort = {
       postMessage: (message: unknown) => this.posted(message),
       start: () => {},
@@ -67,6 +80,7 @@ export class LiveHost {
     };
     runtime.serve(port);
     this.ipc = ipc;
+    this.fs = fs;
   }
 
   private posted(message: unknown): void {
@@ -156,6 +170,7 @@ export class LiveHost {
   // Ends whatever is still live (the quit path); safe to call twice.
   async shutdown(): Promise<void> {
     if (this.ipc.table.list().some((s) => s.lifecycle !== 'exited')) await this.call('engine.shutdown', { graceMs: 3_000 });
+    this.fs?.stop();
   }
 
   launchIdOf(appSessionId: AppSessionId | string): string | null {

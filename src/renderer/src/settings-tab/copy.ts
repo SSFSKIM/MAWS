@@ -47,7 +47,13 @@ export const ENGINE = {
 
 // C12 start: the memory budget's rows in Settings › Engine (C12 execution document, "Surfaces of the budget")
 export const BUDGET_SETTINGS = {
-  budget: 'Memory budget',
+  // W7 start: the switch (settings version 7); off hides the rows below it
+  enabled: 'Memory budget',
+  enabledLabel: 'Release idle sessions to stay under a memory limit',
+  offNote: 'Off · engine processes never exit on their own; only archive, quit or a stop ends one. Session info still shows the memory they use.',
+  limit: 'Limit',
+  // W7 end
+  budget: 'Memory budget', // the limit's field
   placeholder: 'default',
   defaultNote: (limit: string | null) => `Default · 25% of physical memory${limit === null ? '' : ` (${limit})`}. Past it, MAWS releases the least recently used idle session; Send resumes it.`,
   setNote: 'Default · 25% of physical memory. Past it, MAWS releases the least recently used idle session; Send resumes it.',

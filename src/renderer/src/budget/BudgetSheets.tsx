@@ -2,7 +2,8 @@
 // banner's Review… lists every live session holding work, with why, and each one's Stop…; Stop… confirms in the pattern
 // of C10's archive sheet (title, what stop does, C10's disclosure of the background work it would end, Stop and
 // Cancel) and calls `session.stop { reason: 'stop' }`. C10 ships no standalone stop, so this sheet is the per-session
-// stop D1 names. Nothing is stopped unasked; Cancel goes back to the list. Built on C10's `Sheet`, tokens only.
+// stop D1 names. Nothing is stopped unasked; Cancel goes back to the list. Built on C10's `Sheet`, tokens only. W7: never
+// while the host reports the budget off.
 import { useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
@@ -17,7 +18,8 @@ import { useBudget } from './store';
 
 export function BudgetSheets({ client = ipc }: { client?: MawsBridge }) {
   const sheet = useBudget((s) => s.sheet);
-  if (sheet === null) return null;
+  const off = useBudget((s) => s.state?.enabled === false); // W7
+  if (sheet === null || off) return null;
   return sheet.kind === 'blocked' ? <BlockedSessionsSheet /> : <StopSessionSheet key={sheet.appSessionId} appSessionId={sheet.appSessionId} client={client} />;
 }
 

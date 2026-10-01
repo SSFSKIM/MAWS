@@ -10,6 +10,9 @@ describe('session glyphs', () => {
     const cases: [Parameters<typeof glyphFor>, { char: string; tone: string; label: string; pulse: boolean }][] = [
       [[record('s', { holder: { kind: 'terminal', pid: 7 } }), digest('s'), []], { char: '⌁', tone: 'info', label: 'Live in terminal', pulse: false }],
       [[record('s', { holder: { kind: 'background_job', pid: null, jobId: 'j' } }), null, []], { char: '⌁', tone: 'info', label: 'Live as background job', pulse: false }],
+      // W7: contested (MAWS runs it, a foreign process resumed it too), above any pending item
+      [[record('s', { holder: { kind: 'self', contestedBy: { kind: 'terminal', pid: 7 } } }), digest('s', { phase: 'working' }), [item('s', 'question', at)]], { char: '⇄', tone: 'warning', label: 'Contested: also live in terminal', pulse: false }],
+      [[record('s', { holder: { kind: 'self', contestedBy: { kind: 'background_job', pid: 8, jobId: 'abcd1234' } } }), digest('s'), []], { char: '⇄', tone: 'warning', label: 'Contested: also live as background job', pulse: false }],
       [[r, digest('s'), [item('s', 'question', at), item('s', 'permission', at)]], { char: '?', tone: 'warning', label: 'Question', pulse: false }],
       [[r, digest('s'), [item('s', 'plan', at), item('s', 'permission', at)]], { char: '◇', tone: 'info', label: 'Plan review', pulse: false }],
       [[r, digest('s'), [item('s', 'error', at)]], { char: '!', tone: 'danger', label: 'Needs you: error', pulse: false }],

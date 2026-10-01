@@ -20,6 +20,8 @@ export function glyphFor(record: SessionRecord, digest: SessionDigest | null, pe
   const { holder } = record;
   if (holder.kind === 'terminal') return glyph('⌁', 'info', 'Live in terminal');
   if (holder.kind === 'background_job') return glyph('⌁', 'info', 'Live as background job');
+  // W7: MAWS runs it and a foreign process resumed it too (contested); MAWS yields once that process writes
+  if (holder.kind === 'self' && holder.contestedBy !== undefined) return glyph('⇄', 'warning', holder.contestedBy.kind === 'terminal' ? 'Contested: also live in terminal' : 'Contested: also live as background job');
 
   const open = pending.filter((i) => isOpen(i) && isActionable(i));
   if (open.some((i) => i.kind === 'question')) return glyph('?', 'warning', 'Question');

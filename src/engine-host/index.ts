@@ -5,6 +5,7 @@ import { hostPing, runHost } from '@shared/host/runtime';
 // C3 start
 import { join } from 'node:path';
 import { registerEngineIpc } from './ipc';
+import type { ProcessTable } from './process-table'; // W7
 import { JOURNAL_KEEP_PER_SESSION, JOURNAL_MAX_AGE_DAYS, pruneJournals } from './journal';
 // C3 end
 // C4 start
@@ -27,10 +28,15 @@ runHost(HOST_VERSION, (on, emit) => {
   on('engine.ping', async () => hostPing(HOST_VERSION));
   // C4 start: the filesystem state service (fs.*) over the engine's store, read-only; C3's `session.events` answers an
   // app session with no process here from it (`diskEvents` below).
-  const fs = registerFs(on, emit);
+  // W7: a registry record of one of the process table's live pids is MAWS's own, never a holder
+  let table: ProcessTable | null = null;
+  const fs = registerFs(on, emit, process.env, { ownPids: () => new Set(table?.list().flatMap((s) => (s.pid !== null && s.lifecycle !== 'exited' ? [s.pid] : [])) ?? []) });
   // C4 end
   // C3 start
-  const { table } = registerEngineIpc(on, emit, { userData, replayEnabled: process.env.MAWS_ENGINE_REPLAY === '1', appVersion: HOST_VERSION, diskEvents: (id) => fs.eventsSnapshot(id, null) /* C4 */ });
+  ({ table } = registerEngineIpc(on, emit, {
+    userData, replayEnabled: process.env.MAWS_ENGINE_REPLAY === '1', appVersion: HOST_VERSION,
+    diskEvents: (id) => fs.eventsSnapshot(id, null) /* C4 */, heldElsewhere: (id, since) => fs.heldElsewhere(id, since) /* W7 */,
+  }));
   table.startSampling();
   // C3 end
 });

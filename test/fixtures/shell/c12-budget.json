@@ -314,6 +314,7 @@
       "at": 0,
       "op": "budget",
       "state": {
+        "enabled": true,
         "limitKiB": 8388608,
         "totalKiB": 3040870,
         "sampledAt": "2026-09-29T14:00:00.000Z",
@@ -426,6 +427,7 @@
       "at": 1000,
       "op": "budget",
       "state": {
+        "enabled": true,
         "limitKiB": 2097152,
         "totalKiB": 3040870,
         "sampledAt": "2026-09-29T14:00:00.000Z",
@@ -486,6 +488,7 @@
       "at": 2000,
       "op": "budget",
       "state": {
+        "enabled": true,
         "limitKiB": 2097152,
         "totalKiB": 2726297,
         "sampledAt": "2026-09-29T14:00:00.000Z",
@@ -527,6 +530,7 @@
       "at": 3000,
       "op": "budget",
       "state": {
+        "enabled": true,
         "limitKiB": 2097152,
         "totalKiB": 2726297,
         "sampledAt": "2026-09-29T14:00:00.000Z",
@@ -568,6 +572,7 @@
       "at": 4000,
       "op": "budget",
       "state": {
+        "enabled": true,
         "limitKiB": 8388608,
         "totalKiB": 2726297,
         "sampledAt": "2026-09-29T14:00:00.000Z",
